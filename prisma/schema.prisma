@@ -1,0 +1,90 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum AuditSeverity {
+  INFO
+  WARN
+  ERROR
+}
+
+enum IntegrationStatusKind {
+  UNKNOWN
+  OK
+  DEGRADED
+  DOWN
+}
+
+model WebUser {
+  id                String       @id @default(cuid())
+  remnashopUserId   String       @unique
+  email             String       @unique
+  emailVerified     Boolean      @default(false)
+  displayName       String?
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
+  sessions          WebSession[]
+  auditLogs         AuditLog[]
+
+  @@index([email])
+}
+
+model WebSession {
+  id                 String    @id @default(cuid())
+  userId             String
+  refreshTokenHash   String    @unique
+  userAgent          String?
+  ipHash             String?
+  expiresAt          DateTime
+  revokedAt          DateTime?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+  user               WebUser   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+model AuditLog {
+  id          String        @id @default(cuid())
+  userId      String?
+  action      String
+  severity    AuditSeverity @default(INFO)
+  ipHash      String?
+  metadata    Json?
+  createdAt   DateTime      @default(now())
+  user        WebUser?      @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([action])
+  @@index([createdAt])
+}
+
+model RateLimitEvent {
+  id          String   @id @default(cuid())
+  key         String
+  action      String
+  occurredAt  DateTime @default(now())
+  metadata    Json?
+
+  @@index([key, action, occurredAt])
+}
+
+model AppSetting {
+  key        String   @id
+  value      Json
+  updatedAt  DateTime @updatedAt
+}
+
+model IntegrationStatus {
+  id          String                @id @default(cuid())
+  service     String                @unique
+  status      IntegrationStatusKind @default(UNKNOWN)
+  message     String?
+  checkedAt   DateTime              @default(now())
+  updatedAt   DateTime              @updatedAt
+}

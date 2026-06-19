@@ -1,0 +1,62 @@
+volumes:
+  postgres-data:
+  node-modules:
+
+services:
+  app:
+    build: 
+      context: .
+      dockerfile: Dockerfile
+
+    volumes:
+      - ../..:/workspaces:cached
+      - node-modules:/workspaces/clean-pay/node_modules
+      
+    # Overrides default command so things don't shut down after the process ends.
+    command: sleep infinity
+
+    # Use proper Docker networking instead of network_mode: service:db
+    # to ensure reliable DNS resolution in all environments
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - app-network
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@db:5432/postgres?schema=public
+      APP_URL: http://localhost:3000
+      NEXT_PUBLIC_APP_URL: http://localhost:3000
+      REMNASHOP_API_BASE_URL: http://remnashop:8000/api/v1/public
+      COOKIE_SECURE: "false"
+      COOKIE_SAMESITE: lax
+
+    # Use "forwardPorts" in **devcontainer.json** to forward an app port locally. 
+    # (Adding the "ports" property to this file will not forward from a Codespace.)
+    ports:
+      - "3000:3000"
+      - "5555:5555"
+
+  db:
+    image: postgres:latest
+    restart: unless-stopped
+    networks:
+      - app-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    volumes:
+      - postgres-data:/var/lib/postgresql
+    environment:
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_USER: postgres
+      POSTGRES_DB: postgres
+
+    # Add "forwardPorts": ["5432"] to **devcontainer.json** to forward PostgreSQL locally.
+    # (Adding the "ports" property to this file will not forward from a Codespace.)
+
+networks:
+  app-network:
+    driver: bridge

@@ -1,0 +1,41 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Clean Pay: dev server",
+      "type": "node-terminal",
+      "request": "launch",
+      "command": "npm run dev -- --hostname 0.0.0.0",
+      "cwd": "${workspaceFolder}",
+      "serverReadyAction": {
+        "pattern": "Local:\\s+(https?://\\S+)",
+        "uriFormat": "http://localhost:3000",
+        "action": "openExternally"
+      }
+    },
+    {
+      "name": "Clean Pay: production start",
+      "type": "node-terminal",
+      "request": "launch",
+      "command": "npm run build && npm run start -- --hostname 0.0.0.0",
+      "cwd": "${workspaceFolder}",
+      "serverReadyAction": {
+        "pattern": "Local:\\s+(https?://\\S+)",
+        "uriFormat": "http://localhost:3000",
+        "action": "openExternally"
+      }
+    },
+    {
+      "name": "Clean Pay: Prisma Studio",
+      "type": "node-terminal",
+      "request": "launch",
+      "command": "npm run prisma:studio -- --hostname 0.0.0.0",
+      "cwd": "${workspaceFolder}",
+      "serverReadyAction": {
+        "pattern": "Prisma Studio is up on (https?://\\S+)",
+        "uriFormat": "http://localhost:5555",
+        "action": "openExternally"
+      }
+    }
+  ]
+}
