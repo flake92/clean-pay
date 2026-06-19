@@ -77,6 +77,12 @@ export function CabinetPanel() {
         </div>
       </dl>
       <div className="flex flex-wrap gap-3">
+        <a className="border border-zinc-300 px-4 py-2" href="/extend">
+          Продлить
+        </a>
+        <a className="border border-zinc-300 px-4 py-2" href="/tariffs">
+          Тарифы
+        </a>
         <a className="border border-zinc-300 px-4 py-2" href="/verify-email">
           Подтвердить e-mail
         </a>

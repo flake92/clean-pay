@@ -45,6 +45,12 @@ If target e-mail or Telegram ID is already linked to another local user, BFF ret
 - `/cabinet`
 - `/link-account`
 - `/verify-email`
+- `/tariffs`
+- `/payment`
+- `/payment/success`
+- `/payment/fail`
+- `/payment/pending`
+- `/extend`
 
 ## E-mail Verification
 

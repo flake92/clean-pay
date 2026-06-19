@@ -55,3 +55,53 @@ export type ExtendRequest = {
   duration_days: number;
   gateway_type: string;
 };
+
+export type PaymentInitResponse = {
+  payment_id: string;
+  payment_url: string | null;
+  purchase_type: string;
+  status: string;
+  is_free: boolean;
+  final_amount: string;
+  currency: string;
+};
+
+export type GatewayOffer = {
+  gateway_type: string;
+  currency: string;
+  currency_symbol: string;
+};
+
+export type DurationGatewayPrice = {
+  gateway_type: string;
+  currency: string;
+  currency_symbol: string;
+  original_amount: string;
+  discount_percent: number;
+  final_amount: string;
+  is_free: boolean;
+};
+
+export type DurationOffer = {
+  days: number;
+  prices: DurationGatewayPrice[];
+};
+
+export type PlanOffer = {
+  id: number;
+  public_code: string;
+  name: string;
+  description: string | null;
+  traffic_limit: number;
+  device_limit: number;
+  type: string;
+  recommended_purchase_type: string;
+  durations: DurationOffer[];
+};
+
+export type SubscriptionOffersResponse = {
+  gateways: GatewayOffer[];
+  plans: PlanOffer[];
+  has_current_subscription: boolean;
+  current_subscription_status: string | null;
+};

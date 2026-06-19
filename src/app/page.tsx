@@ -34,6 +34,9 @@ export default function Home() {
           <a className="border border-zinc-300 px-4 py-2" href="/cabinet">
             Кабинет
           </a>
+          <a className="border border-zinc-300 px-4 py-2" href="/tariffs">
+            Тарифы
+          </a>
           <a className="border border-zinc-300 px-4 py-2" href="/verify-email">
             E-mail
           </a>

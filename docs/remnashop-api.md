@@ -89,3 +89,37 @@ Initial normalized errors:
 ## E-mail Verification
 
 Remnashop sends the code. Clean Pay adds a local 60-second cooldown before proxying the request.
+
+## Tariffs
+
+The tariff page uses authenticated offers:
+
+```text
+GET /api/bff/subscription/offers
+```
+
+It displays available plans, device limits, traffic limits, durations, prices, and payment gateways.
+
+## Purchase
+
+Clean Pay creates payments through:
+
+```text
+POST /api/bff/subscription/purchase
+```
+
+The frontend confirms selected plan, duration, and gateway on `/payment`.
+If Remnashop returns `payment_url`, the browser redirects to it immediately.
+If Remnashop returns `is_free: true`, the browser redirects to `/cabinet`.
+
+## Extend
+
+Clean Pay extends current subscriptions through:
+
+```text
+POST /api/bff/subscription/extend
+```
+
+The frontend uses authenticated offers from `/api/bff/subscription/offers` and selects the plan marked by Remnashop as `recommended_purchase_type = renew`.
+
+If there is no current subscription, the user goes back to `/tariffs`.
