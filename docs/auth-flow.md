@@ -70,3 +70,9 @@ The user-facing page is `/verify-email`.
 ## Cabinet
 
 `/cabinet` shows the Clean Pay profile plus Remnashop subscription data through the BFF: status, expiry, traffic, devices, technical details, and subscription URL actions.
+
+It also supports device deletion, full device reset, subscription URL reissue with warning, and promocode activation.
+
+The cabinet shows local payment history for payments created through Clean Pay.
+
+Payment return pages check local payment records and current Remnashop subscription through the BFF.

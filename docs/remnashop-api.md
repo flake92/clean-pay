@@ -70,8 +70,14 @@ Response is the same as register.
 - `GET /api/bff/subscription/offers`
 - `POST /api/bff/subscription/purchase`
 - `POST /api/bff/subscription/extend`
+- `POST /api/bff/subscription/reissue`
+- `POST /api/bff/subscription/promocode`
 - `GET /api/bff/subscription/devices`
+- `DELETE /api/bff/subscription/devices`
 - `DELETE /api/bff/subscription/devices/{hwid}`
+- `GET /api/bff/payments/history`
+- `GET /api/bff/payments/status`
+- `GET /api/bff/support`
 
 ## Error Normalization
 
@@ -140,3 +146,29 @@ Current subscription fields shown when present:
 - `url`, `online_at`, `user_remna_id`
 
 The subscription URL is shown as two actions: connect and copy.
+
+Cabinet management actions:
+
+- delete one device through `DELETE /api/bff/subscription/devices/{hwid}`
+- delete all devices through `DELETE /api/bff/subscription/devices`
+- reissue subscription URL through `POST /api/bff/subscription/reissue`
+- activate promocode through `POST /api/bff/subscription/promocode`
+
+Reissue must show a warning because it disconnects existing devices.
+
+## Payments
+
+Remnashop public API creates payments through purchase/extend responses, but no public payment history endpoint was found in the current Remnashop source.
+
+Clean Pay stores local `PaymentRecord` rows for payments initiated through the web cabinet. Return pages call `GET /api/bff/payments/status`, which combines the local payment record with current subscription data from Remnashop public API.
+
+This is not direct Remnashop DB access.
+
+## Support
+
+The cabinet support block is controlled by env:
+
+- `SUPPORT_ENABLED`
+- `SUPPORT_EMAIL`
+- `SUPPORT_TELEGRAM_USERNAME`
+- `SUPPORT_FAQ_URL`

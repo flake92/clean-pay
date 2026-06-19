@@ -143,6 +143,7 @@ export function ExtendConfirmation() {
     }
 
     const body = (await response.json()) as { data: PaymentInitResponse };
+    window.localStorage.setItem("cleanPayLastPaymentId", body.data.payment_id);
 
     if (body.data.is_free) {
       window.location.assign("/cabinet");
@@ -154,7 +155,9 @@ export function ExtendConfirmation() {
       return;
     }
 
-    window.location.assign("/payment/pending");
+    window.location.assign(
+      `/payment/pending?payment_id=${encodeURIComponent(body.data.payment_id)}`,
+    );
   }
 
   return (

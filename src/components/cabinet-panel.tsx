@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
+import type { FormEvent } from "react";
 
 type CabinetUser = {
   email: string | null;
@@ -41,6 +42,26 @@ type DevicesResponse = {
   devices: SubscriptionDevice[];
   current_count: number;
   max_count: number;
+};
+
+type PaymentRecord = {
+  payment_id: string;
+  purchase_type: string;
+  status: string;
+  final_amount: string;
+  currency: string;
+  gateway_type: string;
+  plan_name: string | null;
+  duration_days: number | null;
+  is_free: boolean;
+  created_at: string;
+};
+
+type SupportSettings = {
+  enabled: boolean;
+  email: string | null;
+  telegramUsername: string | null;
+  faqUrl: string | null;
 };
 
 function formatDate(value?: string | null) {
@@ -87,6 +108,19 @@ function statusLabel(status: string) {
   return labels[status] ?? status;
 }
 
+function paymentStatusLabel(status: string) {
+  const labels: Record<string, string> = {
+    pending: "Ожидает",
+    completed: "Оплачен",
+    failed: "Ошибка",
+    canceled: "Отменён",
+    refunded: "Возврат",
+    unknown: "Неизвестно",
+  };
+
+  return labels[status] ?? status;
+}
+
 function detailValue(value?: string | number | boolean | null) {
   if (value === null || value === undefined || value === "") {
     return "-";
@@ -99,13 +133,68 @@ function detailValue(value?: string | number | boolean | null) {
   return String(value);
 }
 
+async function getBffMessage(response: Response, fallback: string) {
+  const body = await response.json().catch(() => null);
+
+  return body?.error?.message ?? fallback;
+}
+
 export function CabinetPanel() {
   const [user, setUser] = useState<CabinetUser | null>(null);
   const [subscription, setSubscription] = useState<CurrentSubscription | null>(null);
   const [devices, setDevices] = useState<DevicesResponse | null>(null);
+  const [payments, setPayments] = useState<PaymentRecord[]>([]);
+  const [support, setSupport] = useState<SupportSettings | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [subscriptionError, setSubscriptionError] = useState<string | null>(null);
   const [copyStatus, setCopyStatus] = useState<string | null>(null);
+  const [actionMessage, setActionMessage] = useState<string | null>(null);
+  const [pendingAction, setPendingAction] = useState<string | null>(null);
+  const [promocode, setPromocode] = useState("");
+
+  const loadSubscription = useCallback(async () => {
+    const subscriptionResponse = await fetch("/api/bff/subscription/current");
+
+    if (subscriptionResponse.ok) {
+      const subscriptionBody = await subscriptionResponse.json();
+      setSubscription(subscriptionBody.data);
+      setSubscriptionError(null);
+    } else if (subscriptionResponse.status === 404) {
+      setSubscription(null);
+      setSubscriptionError(null);
+    } else {
+      setSubscriptionError(
+        await getBffMessage(subscriptionResponse, "Не удалось загрузить подписку."),
+      );
+    }
+  }, []);
+
+  const loadDevices = useCallback(async () => {
+    const devicesResponse = await fetch("/api/bff/subscription/devices");
+
+    if (devicesResponse.ok) {
+      const devicesBody = await devicesResponse.json();
+      setDevices(devicesBody.data);
+    }
+  }, []);
+
+  const loadPayments = useCallback(async () => {
+    const paymentsResponse = await fetch("/api/bff/payments/history");
+
+    if (paymentsResponse.ok) {
+      const paymentsBody = await paymentsResponse.json();
+      setPayments(paymentsBody.data);
+    }
+  }, []);
+
+  const loadSupport = useCallback(async () => {
+    const supportResponse = await fetch("/api/bff/support");
+
+    if (supportResponse.ok) {
+      const supportBody = await supportResponse.json();
+      setSupport(supportBody.data);
+    }
+  }, []);
 
   useEffect(() => {
     async function loadCabinet() {
@@ -119,29 +208,17 @@ export function CabinetPanel() {
         const profileBody = await profileResponse.json();
         setUser(profileBody.data.user);
 
-        const subscriptionResponse = await fetch("/api/bff/subscription/current");
-
-        if (subscriptionResponse.ok) {
-          const subscriptionBody = await subscriptionResponse.json();
-          setSubscription(subscriptionBody.data);
-        } else if (subscriptionResponse.status !== 404) {
-          const body = await subscriptionResponse.json().catch(() => null);
-          setSubscriptionError(body?.error?.message ?? "Не удалось загрузить подписку.");
-        }
-
-        const devicesResponse = await fetch("/api/bff/subscription/devices");
-
-        if (devicesResponse.ok) {
-          const devicesBody = await devicesResponse.json();
-          setDevices(devicesBody.data);
-        }
+        await loadSubscription();
+        await loadDevices();
+        await loadPayments();
+        await loadSupport();
       } catch (err) {
         setError(err instanceof Error ? err.message : "Не удалось загрузить кабинет.");
       }
     }
 
     loadCabinet();
-  }, []);
+  }, [loadDevices, loadPayments, loadSubscription, loadSupport]);
 
   async function logout() {
     await fetch("/api/bff/auth/logout", { method: "POST" });
@@ -158,6 +235,128 @@ export function CabinetPanel() {
       setCopyStatus("Ссылка скопирована");
     } catch {
       setCopyStatus("Не удалось скопировать");
+    }
+  }
+
+  async function deleteDevice(hwid: string) {
+    const confirmed = window.confirm("Удалить это устройство из подписки?");
+
+    if (!confirmed) {
+      return;
+    }
+
+    setPendingAction(`delete-device-${hwid}`);
+    setActionMessage(null);
+
+    try {
+      const response = await fetch(
+        `/api/bff/subscription/devices/${encodeURIComponent(hwid)}`,
+        { method: "DELETE" },
+      );
+
+      if (!response.ok) {
+        throw new Error(await getBffMessage(response, "Не удалось удалить устройство."));
+      }
+
+      setActionMessage("Устройство удалено.");
+      await loadDevices();
+    } catch (err) {
+      setActionMessage(err instanceof Error ? err.message : "Не удалось удалить устройство.");
+    } finally {
+      setPendingAction(null);
+    }
+  }
+
+  async function deleteAllDevices() {
+    const confirmed = window.confirm("Удалить все устройства из подписки?");
+
+    if (!confirmed) {
+      return;
+    }
+
+    setPendingAction("delete-all-devices");
+    setActionMessage(null);
+
+    try {
+      const response = await fetch("/api/bff/subscription/devices", {
+        method: "DELETE",
+      });
+
+      if (!response.ok) {
+        throw new Error(await getBffMessage(response, "Не удалось удалить устройства."));
+      }
+
+      setActionMessage("Все устройства удалены.");
+      await loadDevices();
+    } catch (err) {
+      setActionMessage(err instanceof Error ? err.message : "Не удалось удалить устройства.");
+    } finally {
+      setPendingAction(null);
+    }
+  }
+
+  async function reissueSubscription() {
+    const confirmed = window.confirm(
+      "Перевыпуск подписки отключит все текущие устройства. Продолжить?",
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    setPendingAction("reissue");
+    setActionMessage(null);
+
+    try {
+      const response = await fetch("/api/bff/subscription/reissue", {
+        method: "POST",
+      });
+
+      if (!response.ok) {
+        throw new Error(await getBffMessage(response, "Не удалось перевыпустить подписку."));
+      }
+
+      setActionMessage("Подписка перевыпущена. Ссылка обновлена.");
+      await loadSubscription();
+      await loadDevices();
+    } catch (err) {
+      setActionMessage(err instanceof Error ? err.message : "Не удалось перевыпустить подписку.");
+    } finally {
+      setPendingAction(null);
+    }
+  }
+
+  async function activatePromocode(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    const code = promocode.trim();
+
+    if (!code) {
+      setActionMessage("Введите промокод.");
+      return;
+    }
+
+    setPendingAction("promocode");
+    setActionMessage(null);
+
+    try {
+      const response = await fetch("/api/bff/subscription/promocode", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ code }),
+      });
+
+      if (!response.ok) {
+        throw new Error(await getBffMessage(response, "Не удалось активировать промокод."));
+      }
+
+      setPromocode("");
+      setActionMessage("Промокод активирован.");
+      await loadSubscription();
+    } catch (err) {
+      setActionMessage(err instanceof Error ? err.message : "Не удалось активировать промокод.");
+    } finally {
+      setPendingAction(null);
     }
   }
 
@@ -263,6 +462,32 @@ export function CabinetPanel() {
                 <span className="text-sm text-zinc-600">{copyStatus}</span>
               ) : null}
             </div>
+
+            <div className="grid gap-3 border-t border-zinc-200 pt-4">
+              <div className="flex flex-wrap gap-3">
+                <button
+                  className="border border-red-300 bg-white px-4 py-2 text-red-700 disabled:opacity-60"
+                  disabled={pendingAction === "reissue"}
+                  onClick={reissueSubscription}
+                  type="button"
+                >
+                  Перевыпустить подписку
+                </button>
+                {devices && devices.devices.length > 0 ? (
+                  <button
+                    className="border border-red-300 bg-white px-4 py-2 text-red-700 disabled:opacity-60"
+                    disabled={pendingAction === "delete-all-devices"}
+                    onClick={deleteAllDevices}
+                    type="button"
+                  >
+                    Удалить все устройства
+                  </button>
+                ) : null}
+              </div>
+              <p className="text-sm text-zinc-600">
+                Перевыпуск подписки отключит все текущие устройства.
+              </p>
+            </div>
           </>
         ) : (
           <div className="flex flex-wrap gap-3">
@@ -306,6 +531,34 @@ export function CabinetPanel() {
 
       {subscription ? (
         <section className="grid gap-4">
+          {actionMessage ? (
+            <p className="border border-zinc-200 bg-zinc-50 p-3 text-sm text-zinc-700">
+              {actionMessage}
+            </p>
+          ) : null}
+
+          <form
+            className="grid gap-3 border border-zinc-200 bg-white p-4 sm:grid-cols-[1fr_auto]"
+            onSubmit={activatePromocode}
+          >
+            <label className="grid gap-2 text-sm">
+              <span className="font-medium text-zinc-700">Промокод</span>
+              <input
+                className="border border-zinc-300 px-3 py-2 outline-none focus:border-cyan-600"
+                onChange={(event) => setPromocode(event.target.value)}
+                placeholder="Введите код"
+                value={promocode}
+              />
+            </label>
+            <button
+              className="self-end bg-zinc-950 px-4 py-2 text-white disabled:opacity-60"
+              disabled={pendingAction === "promocode"}
+              type="submit"
+            >
+              Активировать
+            </button>
+          </form>
+
           <h2 className="text-xl font-semibold">Детали подписки</h2>
           <dl className="grid gap-3 text-sm sm:grid-cols-2">
             <div className="border border-zinc-200 p-3">
@@ -361,12 +614,96 @@ export function CabinetPanel() {
                       {device.user_agent}
                     </p>
                   ) : null}
+                  <div className="mt-3">
+                    <button
+                      className="border border-zinc-300 px-3 py-2 text-sm text-zinc-700 disabled:opacity-60"
+                      disabled={pendingAction === `delete-device-${device.hwid}`}
+                      onClick={() => deleteDevice(device.hwid)}
+                      type="button"
+                    >
+                      Удалить устройство
+                    </button>
+                  </div>
                 </div>
               ))}
             </div>
           ) : (
             <p className="text-sm text-zinc-600">Подключенных устройств пока нет.</p>
           )}
+        </section>
+      ) : null}
+
+      <section className="grid gap-4">
+        <h2 className="text-xl font-semibold">История платежей</h2>
+        {payments.length > 0 ? (
+          <div className="grid gap-3">
+            {payments.map((payment) => (
+              <div
+                className="grid gap-3 border border-zinc-200 p-4 sm:grid-cols-[1fr_auto]"
+                key={payment.payment_id}
+              >
+                <div>
+                  <p className="font-medium">
+                    {payment.plan_name ?? payment.purchase_type}
+                  </p>
+                  <p className="mt-1 text-sm text-zinc-500">
+                    {formatDate(payment.created_at)} · {payment.gateway_type}
+                    {payment.duration_days ? ` · ${payment.duration_days} дней` : ""}
+                  </p>
+                  <p className="mt-1 break-all text-xs text-zinc-500">
+                    {payment.payment_id}
+                  </p>
+                </div>
+                <div className="sm:text-right">
+                  <p className="font-semibold">
+                    {payment.final_amount} {payment.currency}
+                  </p>
+                  <p className="mt-1 text-sm text-zinc-500">
+                    {payment.is_free ? "Бесплатно" : paymentStatusLabel(payment.status)}
+                  </p>
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="text-sm text-zinc-600">Платежей через web-кабинет пока нет.</p>
+        )}
+      </section>
+
+      {support?.enabled &&
+      (support.email || support.telegramUsername || support.faqUrl) ? (
+        <section className="grid gap-4 border border-zinc-200 bg-zinc-50 p-5">
+          <h2 className="text-xl font-semibold">Поддержка</h2>
+          <div className="flex flex-wrap gap-3">
+            {support.email ? (
+              <a
+                className="border border-zinc-300 bg-white px-4 py-2"
+                href={`mailto:${support.email}`}
+              >
+                Написать на почту
+              </a>
+            ) : null}
+            {support.telegramUsername ? (
+              <a
+                className="border border-zinc-300 bg-white px-4 py-2"
+                href={`https://t.me/${support.telegramUsername.replace(/^@/, "")}`}
+                rel="noreferrer"
+                target="_blank"
+              >
+                Telegram
+              </a>
+            ) : null}
+            {support.faqUrl ? (
+              <a
+                className="border border-zinc-300 bg-white px-4 py-2"
+                href={support.faqUrl}
+                rel="noreferrer"
+                target="_blank"
+              >
+                FAQ
+              </a>
+            ) : null}
+          </div>
         </section>
       ) : null}
 

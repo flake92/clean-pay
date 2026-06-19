@@ -94,3 +94,15 @@ https://oplata.clear-vpn.org/payment/success
 https://oplata.clear-vpn.org/payment/fail
 https://oplata.clear-vpn.org/payment/pending
 ```
+## Support Block
+
+Optional support links:
+
+```env
+SUPPORT_ENABLED="false"
+SUPPORT_EMAIL=""
+SUPPORT_TELEGRAM_USERNAME=""
+SUPPORT_FAQ_URL=""
+```
+
+If `SUPPORT_ENABLED=false`, the cabinet support block is hidden.

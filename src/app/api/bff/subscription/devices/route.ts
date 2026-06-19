@@ -1,6 +1,6 @@
 import { bffError, bffJson } from "@/lib/bff-response";
 import { getAuthorizedRemnashopTokens, remnashopRequest } from "@/lib/remnashop/client";
-import type { DevicesResponse } from "@/lib/remnashop/types";
+import type { DevicesDeleteAllResponse, DevicesResponse } from "@/lib/remnashop/types";
 
 export const runtime = "nodejs";
 
@@ -10,6 +10,21 @@ export async function GET() {
 
     return bffJson(
       await remnashopRequest<DevicesResponse>("/subscription/devices", { accessToken }),
+    );
+  } catch (error) {
+    return bffError(error);
+  }
+}
+
+export async function DELETE() {
+  try {
+    const { accessToken } = await getAuthorizedRemnashopTokens();
+
+    return bffJson(
+      await remnashopRequest<DevicesDeleteAllResponse>("/subscription/devices", {
+        method: "DELETE",
+        accessToken,
+      }),
     );
   } catch (error) {
     return bffError(error);

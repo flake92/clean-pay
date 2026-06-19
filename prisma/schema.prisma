@@ -19,6 +19,15 @@ enum IntegrationStatusKind {
   DOWN
 }
 
+enum PaymentRecordStatus {
+  PENDING
+  COMPLETED
+  FAILED
+  CANCELED
+  REFUNDED
+  UNKNOWN
+}
+
 model WebUser {
   id                      String                   @id @default(cuid())
   remnashopUserId         String?                  @unique
@@ -35,10 +44,37 @@ model WebUser {
   sessions                WebSession[]
   auditLogs               AuditLog[]
   emailVerificationCodes  EmailVerificationCode[]
+  paymentRecords          PaymentRecord[]
   telegramAuthStates      TelegramAuthState[]
 
   @@index([email])
   @@index([telegramId])
+}
+
+model PaymentRecord {
+  id             String              @id @default(cuid())
+  userId         String
+  paymentId      String              @unique
+  purchaseType   String
+  status         PaymentRecordStatus @default(PENDING)
+  finalAmount    Decimal             @db.Decimal(12, 2)
+  currency       String
+  gatewayType    String
+  planCode       String?
+  planName       String?
+  durationDays   Int?
+  deviceLimit    Int?
+  trafficLimit   Int?
+  paymentUrl     String?
+  isFree         Boolean             @default(false)
+  raw            Json?
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
+  user           WebUser             @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@index([paymentId])
+  @@index([status])
 }
 
 model TelegramAuthState {

@@ -56,6 +56,14 @@ Audit events for auth and sensitive flows.
 
 Initial events should include registration, login, logout, code request, code confirmation, payment creation, extension attempt, and device deletion.
 
+### PaymentRecord
+
+Local history for payments created through the Clean Pay web cabinet.
+
+- Stores `paymentId`, status, amount, currency, gateway, purchase type, selected plan/duration when known, and raw Remnashop init response.
+- Used by `/cabinet` payment history and payment return pages.
+- Does not read from Remnashop database.
+
 ### RateLimitEvent
 
 Raw event records for rate limiting sensitive actions.

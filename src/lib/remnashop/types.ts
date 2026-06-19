@@ -135,3 +135,24 @@ export type DevicesResponse = {
   current_count: number;
   max_count: number;
 };
+
+export type DeviceDeleteResponse = {
+  deleted: boolean;
+};
+
+export type DevicesDeleteAllResponse = {
+  success: boolean;
+};
+
+export type ReissueResponse = {
+  success: boolean;
+};
+
+export type PromocodeActivateRequest = {
+  code: string;
+};
+
+export type PromocodeActivateResponse = {
+  success: boolean;
+  reward_type: string;
+};

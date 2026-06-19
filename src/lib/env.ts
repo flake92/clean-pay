@@ -30,6 +30,12 @@ type AppEnv = {
     fail: string;
     pending: string;
   };
+  support: {
+    enabled: boolean;
+    email: string | null;
+    telegramUsername: string | null;
+    faqUrl: string | null;
+  };
 };
 
 function required(name: string) {
@@ -104,6 +110,24 @@ function joinUrl(baseUrl: string, path: string) {
   return new URL(path, `${baseUrl}/`).toString();
 }
 
+function optional(name: string) {
+  return process.env[name]?.trim() || null;
+}
+
+function optionalUrl(name: string) {
+  const value = optional(name);
+
+  if (!value) {
+    return null;
+  }
+
+  try {
+    return new URL(value).toString();
+  } catch {
+    throw new Error(`${name} must be a valid URL`);
+  }
+}
+
 export function getEnv(): AppEnv {
   const appUrl = url("APP_URL");
 
@@ -136,6 +160,12 @@ export function getEnv(): AppEnv {
       success: joinUrl(appUrl, "/payment/success"),
       fail: joinUrl(appUrl, "/payment/fail"),
       pending: joinUrl(appUrl, "/payment/pending"),
+    },
+    support: {
+      enabled: bool("SUPPORT_ENABLED", false),
+      email: optional("SUPPORT_EMAIL"),
+      telegramUsername: optional("SUPPORT_TELEGRAM_USERNAME"),
+      faqUrl: optionalUrl("SUPPORT_FAQ_URL"),
     },
   };
 }
