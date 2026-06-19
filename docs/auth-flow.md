@@ -43,6 +43,7 @@ If target e-mail or Telegram ID is already linked to another local user, BFF ret
 - `/login`
 - `/register`
 - `/cabinet`
+- `/profile`
 - `/link-account`
 - `/verify-email`
 - `/tariffs`
@@ -66,6 +67,12 @@ The web cabinet adds its own click protection before calling Remnashop:
 - code format: 6 digits.
 
 The user-facing page is `/verify-email`.
+
+## Profile
+
+`/profile` lets the user view Remnashop profile data, change e-mail, request/confirm e-mail verification, and change password.
+
+Name editing is not implemented because the current Remnashop public API has no endpoint for it.
 
 ## Cabinet
 

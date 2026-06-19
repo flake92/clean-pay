@@ -64,7 +64,9 @@ Response is the same as register.
 - `GET /api/bff/auth/me`
 - `POST /api/bff/auth/logout`
 - `POST /api/bff/auth/email/request-verification`
+- `POST /api/bff/auth/email/change`
 - `POST /api/bff/auth/email/confirm`
+- `POST /api/bff/auth/change-password`
 - `GET /api/bff/plans/public`
 - `GET /api/bff/subscription/current`
 - `GET /api/bff/subscription/offers`
@@ -95,6 +97,20 @@ Initial normalized errors:
 ## E-mail Verification
 
 Remnashop sends the code. Clean Pay adds a local 60-second cooldown before proxying the request.
+
+## Profile
+
+`/profile` uses Remnashop public auth endpoints:
+
+- `GET /auth/me`
+- `POST /auth/email/change`
+- `POST /auth/email/request-verification`
+- `POST /auth/email/confirm`
+- `POST /auth/change-password`
+
+Current Remnashop public API does not expose user-name editing, so the name is read-only.
+
+After password change, Remnashop rotates auth cookies; Clean Pay updates the encrypted Remnashop tokens stored in the current web session.
 
 ## Tariffs
 

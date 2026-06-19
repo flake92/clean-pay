@@ -717,6 +717,9 @@ export function CabinetPanel() {
         <a className="border border-zinc-300 px-4 py-2" href="/verify-email">
           Подтвердить e-mail
         </a>
+        <a className="border border-zinc-300 px-4 py-2" href="/profile">
+          Профиль
+        </a>
         <a className="border border-zinc-300 px-4 py-2" href="/link-account">
           Привязать аккаунт
         </a>

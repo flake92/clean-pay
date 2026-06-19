@@ -3,6 +3,8 @@ import { getEnv } from "@/lib/env";
 import { prisma } from "@/lib/prisma";
 import { normalizeRemnashopError } from "@/lib/remnashop/errors";
 import type {
+  ChangePasswordRequest,
+  ChangePasswordResponse,
   LoginRequest,
   RegisterRequest,
   RemnashopAuthResponse,
@@ -83,7 +85,14 @@ function decodeJwtPayload(token: string) {
 
   return JSON.parse(Buffer.from(payload, "base64url").toString("utf8")) as {
     sub?: string | number;
+    exp?: number;
   };
+}
+
+export function getJwtExpiresAt(token: string) {
+  const payload = decodeJwtPayload(token);
+
+  return payload.exp ? new Date(payload.exp * 1000) : null;
 }
 
 export function getRemnashopUserIdFromAccessToken(accessToken: string) {
@@ -158,6 +167,26 @@ export async function remnashopRefresh(refreshToken: string) {
     cache: "no-store",
   });
   const data = await parseResponse<RemnashopAuthResponse>(response);
+  const cookies = extractAuthCookies(response);
+
+  return { data, cookies };
+}
+
+export async function remnashopChangePassword(
+  accessToken: string,
+  body: ChangePasswordRequest,
+) {
+  const response = await fetch(endpoint("/auth/change-password"), {
+    method: "POST",
+    headers: {
+      accept: "application/json",
+      "content-type": "application/json",
+      cookie: `access_token=${accessToken}`,
+    },
+    body: JSON.stringify(body),
+    cache: "no-store",
+  });
+  const data = await parseResponse<ChangePasswordResponse>(response);
   const cookies = extractAuthCookies(response);
 
   return { data, cookies };

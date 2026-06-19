@@ -26,6 +26,24 @@ export type LoginRequest = {
   password: string;
 };
 
+export type ChangePasswordRequest = {
+  current_password: string;
+  new_password: string;
+};
+
+export type ChangePasswordResponse = {
+  success: boolean;
+};
+
+export type ChangeEmailRequest = {
+  email: string;
+};
+
+export type ChangeEmailResponse = {
+  success: boolean;
+  pending_email: string;
+};
+
 export type RequestEmailVerificationRequest = {
   email?: string;
 };
