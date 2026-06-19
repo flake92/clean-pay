@@ -105,3 +105,33 @@ export type SubscriptionOffersResponse = {
   has_current_subscription: boolean;
   current_subscription_status: string | null;
 };
+
+export type CurrentSubscriptionResponse = {
+  user_remna_id: string;
+  status: string;
+  is_trial: boolean;
+  traffic_limit: number;
+  device_limit: number;
+  traffic_limit_strategy: string;
+  expire_at: string;
+  url: string;
+  plan_name: string;
+  plan_duration_days: number;
+  used_traffic_bytes: number | null;
+  lifetime_used_traffic_bytes: number | null;
+  online_at: string | null;
+};
+
+export type SubscriptionDevice = {
+  hwid: string;
+  platform: string | null;
+  device_model: string | null;
+  os_version: string | null;
+  user_agent: string | null;
+};
+
+export type DevicesResponse = {
+  devices: SubscriptionDevice[];
+  current_count: number;
+  max_count: number;
+};

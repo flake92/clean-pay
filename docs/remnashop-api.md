@@ -123,3 +123,20 @@ POST /api/bff/subscription/extend
 The frontend uses authenticated offers from `/api/bff/subscription/offers` and selects the plan marked by Remnashop as `recommended_purchase_type = renew`.
 
 If there is no current subscription, the user goes back to `/tariffs`.
+
+## Cabinet Subscription Data
+
+`/cabinet` uses:
+
+- `GET /api/bff/subscription/current`
+- `GET /api/bff/subscription/devices`
+
+Current subscription fields shown when present:
+
+- `status`, `is_trial`, `expire_at`
+- `plan_name`, `plan_duration_days`
+- `traffic_limit`, `used_traffic_bytes`, `lifetime_used_traffic_bytes`
+- `device_limit`, `traffic_limit_strategy`
+- `url`, `online_at`, `user_remna_id`
+
+The subscription URL is shown as two actions: connect and copy.

@@ -66,3 +66,7 @@ The web cabinet adds its own click protection before calling Remnashop:
 - code format: 6 digits.
 
 The user-facing page is `/verify-email`.
+
+## Cabinet
+
+`/cabinet` shows the Clean Pay profile plus Remnashop subscription data through the BFF: status, expiry, traffic, devices, technical details, and subscription URL actions.
