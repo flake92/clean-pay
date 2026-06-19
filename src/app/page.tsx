@@ -24,6 +24,20 @@ export default function Home() {
             BFF без доступа к БД Remnashop
           </div>
         </div>
+        <div className="mt-8 flex flex-wrap gap-3">
+          <a className="bg-zinc-950 px-4 py-2 text-white" href="/login">
+            Войти
+          </a>
+          <a className="border border-zinc-300 px-4 py-2" href="/register">
+            Регистрация
+          </a>
+          <a className="border border-zinc-300 px-4 py-2" href="/cabinet">
+            Кабинет
+          </a>
+          <a className="border border-zinc-300 px-4 py-2" href="/verify-email">
+            E-mail
+          </a>
+        </div>
       </section>
     </main>
   );

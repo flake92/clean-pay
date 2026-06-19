@@ -59,6 +59,9 @@ The web cabinet sends e-mail verification codes.
 - `SMTP_PASSWORD` - SMTP password.
 - `SMTP_FROM` - sender address.
 
+Production SMTP values are supplied through env. Secrets must not be committed.
+The expected production sender is `code@clear-vpn.org`; password stays only in deployment secrets.
+
 ### Telegram OIDC
 
 Telegram login uses authorization code flow with PKCE S256.

@@ -31,7 +31,10 @@ function temporaryCookieOptions() {
   } as const;
 }
 
-export async function createTelegramAuthorizationResponse(redirectTo?: string) {
+export async function createTelegramAuthorizationResponse(
+  redirectTo?: string,
+  userId?: string,
+) {
   const env = getEnv();
   const state = randomToken();
   const nonce = randomToken();
@@ -44,6 +47,7 @@ export async function createTelegramAuthorizationResponse(redirectTo?: string) {
       nonceHash: sha256(nonce),
       codeVerifierHash: sha256(codeVerifier),
       redirectTo,
+      userId,
       expiresAt: addSeconds(new Date(), telegramAuthTtlSeconds),
     },
   });
@@ -187,24 +191,48 @@ export async function consumeTelegramCallback(code: string, state: string) {
   const fullName = getFullName(payload);
   const photoUrl = typeof payload.picture === "string" ? payload.picture : null;
 
-  const user = await prisma.webUser.upsert({
+  const existingTelegramUser = await prisma.webUser.findUnique({
     where: { telegramId },
-    create: {
-      telegramId,
-      telegramUsername,
-      fullName,
-      photoUrl,
-      displayName: fullName ?? telegramUsername,
-      lastLoginAt: new Date(),
-    },
-    update: {
-      telegramUsername,
-      fullName,
-      photoUrl,
-      displayName: fullName ?? telegramUsername,
-      lastLoginAt: new Date(),
-    },
   });
+
+  if (
+    authState.userId &&
+    existingTelegramUser &&
+    existingTelegramUser.id !== authState.userId
+  ) {
+    throw new Error("Telegram account is already linked to another user");
+  }
+
+  const user = authState.userId
+    ? await prisma.webUser.update({
+        where: { id: authState.userId },
+        data: {
+          telegramId,
+          telegramUsername,
+          fullName,
+          photoUrl,
+          displayName: fullName ?? telegramUsername,
+          lastLoginAt: new Date(),
+        },
+      })
+    : await prisma.webUser.upsert({
+        where: { telegramId },
+        create: {
+          telegramId,
+          telegramUsername,
+          fullName,
+          photoUrl,
+          displayName: fullName ?? telegramUsername,
+          lastLoginAt: new Date(),
+        },
+        update: {
+          telegramUsername,
+          fullName,
+          photoUrl,
+          displayName: fullName ?? telegramUsername,
+          lastLoginAt: new Date(),
+        },
+      });
 
   await prisma.telegramAuthState.update({
     where: { id: authState.id },

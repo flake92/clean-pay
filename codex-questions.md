@@ -50,6 +50,18 @@
 - Ошибки Remnashop нормализуем по первому практичному набору.
 
 ## Перед шагом 5
-- Нужен ли auto-refresh Remnashop access token при истечении?
-- Как связывать Telegram OIDC пользователя с Remnashop email-user?
-- Какие frontend формы делаем первыми: register/login/me или сразу весь auth сценарий?
+- Auto-refresh Remnashop access token нужен.
+- Привязка e-mail <-> tg_id через отдельный экран, в обе стороны.
+- Сразу делаем минимальные формы `/login`, `/register`, `/cabinet`, `/link-account`.
+
+## Перед шагом 6
+- SMTP prod должен настраиваться через env; тестовая почта есть, пароль не коммитим.
+- Код отправляет Remnashop через `/auth/email/request-verification`.
+- Наша защита: не чаще 1 раза в минуту.
+- Текст письма нужен RU+EN, если будем отправлять сами.
+- Код: 6 цифр.
+
+## Перед шагом 7
+- Тарифы показываем с `/api/bff/plans/public` или сразу с `/api/bff/subscription/offers` для авторизованных?
+- Какой gateway_type по умолчанию для покупки?
+- Нужен ли выбор длительности на странице тарифов уже сейчас?

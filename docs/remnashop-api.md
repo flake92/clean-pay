@@ -63,6 +63,8 @@ Response is the same as register.
 - `POST /api/bff/auth/login`
 - `GET /api/bff/auth/me`
 - `POST /api/bff/auth/logout`
+- `POST /api/bff/auth/email/request-verification`
+- `POST /api/bff/auth/email/confirm`
 - `GET /api/bff/plans/public`
 - `GET /api/bff/subscription/current`
 - `GET /api/bff/subscription/offers`
@@ -83,3 +85,7 @@ Initial normalized errors:
 - too many attempts/cooldown -> `RATE_LIMITED`
 - conflict -> `CONFLICT`
 - 5xx upstream errors -> `UPSTREAM_UNAVAILABLE`
+
+## E-mail Verification
+
+Remnashop sends the code. Clean Pay adds a local 60-second cooldown before proxying the request.

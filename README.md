@@ -44,4 +44,5 @@ npm run prisma:migrate -- --name init
 - Database schema: `docs/database.md`
 - Telegram OIDC login: `docs/telegram-oidc.md`
 - Remnashop API integration: `docs/remnashop-api.md`
+- Auth flow: `docs/auth-flow.md`
 - Source plan: `clean-pay-plan.md`

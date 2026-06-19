@@ -24,6 +24,7 @@ Clean Pay - отдельный web-кабинет CleanVPN для пользов
 - Database documentation: `docs/database.md`
 - Telegram OIDC documentation: `docs/telegram-oidc.md`
 - Remnashop API integration: `docs/remnashop-api.md`
+- Auth flow: `docs/auth-flow.md`
 
 ## Локальная среда
 

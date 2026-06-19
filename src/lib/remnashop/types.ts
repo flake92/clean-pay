@@ -30,8 +30,19 @@ export type RequestEmailVerificationRequest = {
   email?: string;
 };
 
+export type RequestEmailVerificationResponse = {
+  success: boolean;
+  target_email: string;
+  expires_at: string;
+};
+
 export type ConfirmEmailVerificationRequest = {
   code: string;
+};
+
+export type ConfirmEmailVerificationResponse = {
+  success: boolean;
+  email: string;
 };
 
 export type PurchaseRequest = {

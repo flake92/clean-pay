@@ -1,5 +1,6 @@
 import { decryptSecret, encryptSecret } from "@/lib/crypto";
 import { getEnv } from "@/lib/env";
+import { prisma } from "@/lib/prisma";
 import { normalizeRemnashopError } from "@/lib/remnashop/errors";
 import type {
   LoginRequest,
@@ -147,6 +148,21 @@ export async function remnashopAuth(path: "/auth/register" | "/auth/login", body
   return { data, cookies };
 }
 
+export async function remnashopRefresh(refreshToken: string) {
+  const response = await fetch(endpoint("/auth/refresh"), {
+    method: "POST",
+    headers: {
+      accept: "application/json",
+      cookie: `refresh_token=${refreshToken}`,
+    },
+    cache: "no-store",
+  });
+  const data = await parseResponse<RemnashopAuthResponse>(response);
+  const cookies = extractAuthCookies(response);
+
+  return { data, cookies };
+}
+
 export async function getRemnashopMe(accessToken: string) {
   return remnashopRequest<RemnashopMe>("/auth/me", {
     accessToken,
@@ -163,9 +179,39 @@ export async function getAuthorizedRemnashopTokens() {
     throw normalizeRemnashopError(401, "Not authenticated");
   }
 
+  const refreshToken = revealRemnashopToken(session.remnashopRefreshTokenEncrypted);
+  const refreshThreshold = new Date(Date.now() + 60_000);
+
+  if (
+    session.remnashopAccessExpiresAt &&
+    session.remnashopAccessExpiresAt <= refreshThreshold
+  ) {
+    const refreshed = await remnashopRefresh(refreshToken);
+
+    await prisma.webSession.update({
+      where: { id: session.id },
+      data: {
+        remnashopAccessTokenEncrypted: protectRemnashopToken(
+          refreshed.cookies.accessToken,
+        ),
+        remnashopRefreshTokenEncrypted: protectRemnashopToken(
+          refreshed.cookies.refreshToken,
+        ),
+        remnashopAccessExpiresAt: new Date(refreshed.data.expires_at),
+        remnashopRefreshExpiresAt: new Date(refreshed.data.refresh_expires_at),
+      },
+    });
+
+    return {
+      accessToken: refreshed.cookies.accessToken,
+      refreshToken: refreshed.cookies.refreshToken,
+      session,
+    };
+  }
+
   return {
     accessToken: revealRemnashopToken(session.remnashopAccessTokenEncrypted),
-    refreshToken: revealRemnashopToken(session.remnashopRefreshTokenEncrypted),
+    refreshToken,
     session,
   };
 }
