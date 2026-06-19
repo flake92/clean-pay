@@ -21,6 +21,7 @@ Clean Pay - отдельный web-кабинет CleanVPN для пользов
 - Remnashop repository: https://github.com/snoups/remnashop
 - Remnashop public docs: https://remnashop.mintlify.app
 - Environment documentation: `docs/environment.md`
+- Database documentation: `docs/database.md`
 
 ## Локальная среда
 

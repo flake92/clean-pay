@@ -20,33 +20,58 @@ enum IntegrationStatusKind {
 }
 
 model WebUser {
-  id                String       @id @default(cuid())
-  remnashopUserId   String       @unique
-  email             String       @unique
-  emailVerified     Boolean      @default(false)
-  displayName       String?
-  createdAt         DateTime     @default(now())
-  updatedAt         DateTime     @updatedAt
-  sessions          WebSession[]
-  auditLogs         AuditLog[]
+  id                      String                   @id @default(cuid())
+  remnashopUserId         String                   @unique
+  email                   String                   @unique
+  telegramId              String?                  @unique
+  emailVerified           Boolean                  @default(false)
+  displayName             String?
+  createdAt               DateTime                 @default(now())
+  updatedAt               DateTime                 @updatedAt
+  sessions                WebSession[]
+  auditLogs               AuditLog[]
+  emailVerificationCodes  EmailVerificationCode[]
 
   @@index([email])
+  @@index([telegramId])
 }
 
 model WebSession {
-  id                 String    @id @default(cuid())
-  userId             String
-  refreshTokenHash   String    @unique
-  userAgent          String?
-  ipHash             String?
-  expiresAt          DateTime
-  revokedAt          DateTime?
-  createdAt          DateTime  @default(now())
-  updatedAt          DateTime  @updatedAt
-  user               WebUser   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id                   String    @id @default(cuid())
+  userId               String
+  refreshTokenHash     String    @unique
+  userAgent            String?
+  ipHash               String?
+  accessTokenExpiresAt DateTime
+  refreshExpiresAt     DateTime
+  revokedAt            DateTime?
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+  user                 WebUser   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([accessTokenExpiresAt])
+  @@index([refreshExpiresAt])
+  @@index([revokedAt])
+}
+
+model EmailVerificationCode {
+  id           String    @id @default(cuid())
+  userId       String
+  codeHash     String
+  attempts     Int       @default(0)
+  maxAttempts  Int       @default(5)
+  sentAt       DateTime  @default(now())
+  expiresAt    DateTime
+  consumedAt   DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  user         WebUser   @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
   @@index([expiresAt])
+  @@index([sentAt])
+  @@index([consumedAt])
 }
 
 model AuditLog {

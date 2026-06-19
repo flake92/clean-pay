@@ -33,7 +33,17 @@
 - Payment return URLs собираем от `APP_URL`.
 
 ## Перед шагом 3
-- Какие локальные сущности точно нужны в первой Prisma-схеме?
-- Нужно ли хранить e-mail verification codes в нашей БД?
-- Сколько живут web access/refresh sessions?
-- Нужны ли audit logs уже с первого auth-сценария?
+- E-mail verification codes храним в нашей БД.
+- Code TTL: 15 минут.
+- Max attempts: 5.
+- Храним дату отправки.
+- Web access session: 15 минут.
+- Web refresh session: 30 дней.
+- Audit logs нужны сразу с auth-сценариев.
+- Вход возможен по e-mail или Telegram ID.
+
+## Перед шагом 4
+- Какой формат auth/register и auth/login в Remnashop API?
+- Что Remnashop возвращает после login: access token, refresh token, user object?
+- Нужно ли web-кабинету хранить Remnashop refresh token или каждый раз работать только через web session?
+- Какие ошибки Remnashop нормализуем первыми?
