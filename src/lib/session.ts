@@ -102,6 +102,69 @@ export async function createWebSession(userId: string) {
   return session;
 }
 
+export async function createWebSessionForRemnashopUser({
+  userId,
+  remnashopAccessTokenEncrypted,
+  remnashopRefreshTokenEncrypted,
+  remnashopAccessExpiresAt,
+  remnashopRefreshExpiresAt,
+}: {
+  userId: string;
+  remnashopAccessTokenEncrypted: string;
+  remnashopRefreshTokenEncrypted: string;
+  remnashopAccessExpiresAt: Date;
+  remnashopRefreshExpiresAt: Date;
+}) {
+  const env = getEnv();
+  const cookieStore = await cookies();
+  const requestHeaders = await headers();
+  const now = new Date();
+  const accessTokenExpiresAt = addMinutes(
+    now,
+    securityPolicy.accessSessionTtlMinutes,
+  );
+  const refreshExpiresAt = addDays(now, securityPolicy.refreshSessionTtlDays);
+  const refreshToken = randomToken(48);
+
+  const session = await prisma.webSession.create({
+    data: {
+      userId,
+      refreshTokenHash: sha256(refreshToken),
+      remnashopAccessTokenEncrypted,
+      remnashopRefreshTokenEncrypted,
+      remnashopAccessExpiresAt,
+      remnashopRefreshExpiresAt,
+      userAgent: requestHeaders.get("user-agent"),
+      accessTokenExpiresAt,
+      refreshExpiresAt,
+    },
+  });
+
+  const accessToken = signAccessToken({
+    sid: session.id,
+    uid: userId,
+    exp: Math.floor(accessTokenExpiresAt.getTime() / 1000),
+  });
+
+  cookieStore.set(sessionCookieNames.access, accessToken, {
+    httpOnly: true,
+    secure: env.cookieSecure,
+    sameSite: env.cookieSameSite,
+    path: "/",
+    expires: accessTokenExpiresAt,
+  });
+
+  cookieStore.set(sessionCookieNames.refresh, refreshToken, {
+    httpOnly: true,
+    secure: env.cookieSecure,
+    sameSite: env.cookieSameSite,
+    path: "/",
+    expires: refreshExpiresAt,
+  });
+
+  return session;
+}
+
 export async function getCurrentUser() {
   const cookieStore = await cookies();
   const accessToken = cookieStore.get(sessionCookieNames.access)?.value;
@@ -127,6 +190,31 @@ export async function getCurrentUser() {
   });
 
   return session?.user ?? null;
+}
+
+export async function getCurrentSession() {
+  const cookieStore = await cookies();
+  const accessToken = cookieStore.get(sessionCookieNames.access)?.value;
+
+  if (!accessToken) {
+    return null;
+  }
+
+  const payload = verifyAccessToken(accessToken);
+
+  if (!payload) {
+    return null;
+  }
+
+  return prisma.webSession.findFirst({
+    where: {
+      id: payload.sid,
+      userId: payload.uid,
+      revokedAt: null,
+      accessTokenExpiresAt: { gt: new Date() },
+    },
+    include: { user: true },
+  });
 }
 
 export async function clearWebSession() {

@@ -29,6 +29,7 @@ Web session controlled by Clean Pay.
 - Access session lifetime: 15 minutes.
 - Refresh session lifetime: 30 days.
 - Refresh tokens are stored only as hashes.
+- Remnashop tokens are stored encrypted when the session was created through Remnashop auth.
 - Sessions can be revoked.
 
 ### EmailVerificationCode

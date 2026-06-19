@@ -63,6 +63,10 @@ model WebSession {
   id                   String    @id @default(cuid())
   userId               String
   refreshTokenHash     String    @unique
+  remnashopAccessTokenEncrypted   String?
+  remnashopRefreshTokenEncrypted  String?
+  remnashopAccessExpiresAt        DateTime?
+  remnashopRefreshExpiresAt       DateTime?
   userAgent            String?
   ipHash               String?
   accessTokenExpiresAt DateTime
@@ -75,6 +79,8 @@ model WebSession {
   @@index([userId])
   @@index([accessTokenExpiresAt])
   @@index([refreshExpiresAt])
+  @@index([remnashopAccessExpiresAt])
+  @@index([remnashopRefreshExpiresAt])
   @@index([revokedAt])
 }
 
