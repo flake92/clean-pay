@@ -27,7 +27,13 @@
 - MVP не фиксируем заранее, идем по шагам.
 
 ## Перед шагом 2
-- Какие env нужны для SMTP: реальный SMTP уже есть или оставляем placeholders?
-- Какой публичный `APP_URL` использовать локально и в production?
-- Какой внутренний адрес Remnashop API будет доступен web-кабинету?
-- Нужны ли отдельные env для payment success/fail/pending URLs?
+- SMTP есть.
+- Production `APP_URL`: `https://oplata.clear-vpn.org`.
+- Remnashop public API: `https://bot2.clear-vpn.org/api/v1/public`.
+- Payment return URLs собираем от `APP_URL`.
+
+## Перед шагом 3
+- Какие локальные сущности точно нужны в первой Prisma-схеме?
+- Нужно ли хранить e-mail verification codes в нашей БД?
+- Сколько живут web access/refresh sessions?
+- Нужны ли audit logs уже с первого auth-сценария?

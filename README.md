@@ -40,4 +40,5 @@ npm run prisma:migrate -- --name init
 ## Docs
 
 - Project architecture: `docs/architecture.md`
+- Environment configuration: `docs/environment.md`
 - Source plan: `clean-pay-plan.md`
