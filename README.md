@@ -42,4 +42,5 @@ npm run prisma:migrate -- --name init
 - Project architecture: `docs/architecture.md`
 - Environment configuration: `docs/environment.md`
 - Database schema: `docs/database.md`
+- Telegram OIDC login: `docs/telegram-oidc.md`
 - Source plan: `clean-pay-plan.md`

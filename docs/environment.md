@@ -59,6 +59,23 @@ The web cabinet sends e-mail verification codes.
 - `SMTP_PASSWORD` - SMTP password.
 - `SMTP_FROM` - sender address.
 
+### Telegram OIDC
+
+Telegram login uses authorization code flow with PKCE S256.
+
+- `TELEGRAM_OIDC_ISSUER` - expected token issuer.
+- `TELEGRAM_OIDC_AUTHORIZATION_ENDPOINT` - authorization endpoint.
+- `TELEGRAM_OIDC_TOKEN_ENDPOINT` - token endpoint.
+- `TELEGRAM_OIDC_JWKS_URI` - JWKS endpoint for id_token signature validation.
+- `TELEGRAM_OIDC_CLIENT_ID` - Telegram Bot ID / Client ID used as id_token audience.
+- `TELEGRAM_OIDC_CLIENT_SECRET` - Telegram OIDC client secret.
+
+The callback URL is derived from `APP_URL`:
+
+```text
+https://oplata.clear-vpn.org/auth/telegram/callback
+```
+
 ### Payment Return URLs
 
 Return URLs are not separate env variables. They are built from `APP_URL`:

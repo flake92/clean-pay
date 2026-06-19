@@ -43,6 +43,7 @@
 - Вход возможен по e-mail или Telegram ID.
 
 ## Перед шагом 4
+- Перед шагом 4 добавлен Telegram OIDC flow.
 - Какой формат auth/register и auth/login в Remnashop API?
 - Что Remnashop возвращает после login: access token, refresh token, user object?
 - Нужно ли web-кабинету хранить Remnashop refresh token или каждый раз работать только через web session?

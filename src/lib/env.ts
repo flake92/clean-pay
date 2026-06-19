@@ -16,6 +16,15 @@ type AppEnv = {
     password: string;
     from: string;
   };
+  telegramOidc: {
+    issuer: string;
+    authorizationEndpoint: string;
+    tokenEndpoint: string;
+    jwksUri: string;
+    clientId: string;
+    clientSecret: string;
+    redirectUri: string;
+  };
   paymentReturnUrls: {
     success: string;
     fail: string;
@@ -113,6 +122,15 @@ export function getEnv(): AppEnv {
       user: required("SMTP_USER"),
       password: required("SMTP_PASSWORD"),
       from: required("SMTP_FROM"),
+    },
+    telegramOidc: {
+      issuer: url("TELEGRAM_OIDC_ISSUER"),
+      authorizationEndpoint: url("TELEGRAM_OIDC_AUTHORIZATION_ENDPOINT"),
+      tokenEndpoint: url("TELEGRAM_OIDC_TOKEN_ENDPOINT"),
+      jwksUri: url("TELEGRAM_OIDC_JWKS_URI"),
+      clientId: required("TELEGRAM_OIDC_CLIENT_ID"),
+      clientSecret: required("TELEGRAM_OIDC_CLIENT_SECRET"),
+      redirectUri: joinUrl(appUrl, "/auth/telegram/callback"),
     },
     paymentReturnUrls: {
       success: joinUrl(appUrl, "/payment/success"),

@@ -36,6 +36,12 @@ services:
       SMTP_USER: clean-pay@example.com
       SMTP_PASSWORD: dev-smtp-password-change-me
       SMTP_FROM: CleanVPN <clean-pay@example.com>
+      TELEGRAM_OIDC_ISSUER: https://oauth.telegram.org
+      TELEGRAM_OIDC_AUTHORIZATION_ENDPOINT: https://oauth.telegram.org/auth
+      TELEGRAM_OIDC_TOKEN_ENDPOINT: https://oauth.telegram.org/token
+      TELEGRAM_OIDC_JWKS_URI: https://oauth.telegram.org/.well-known/jwks.json
+      TELEGRAM_OIDC_CLIENT_ID: dev-telegram-client-id
+      TELEGRAM_OIDC_CLIENT_SECRET: dev-telegram-client-secret
 
     # Use "forwardPorts" in **devcontainer.json** to forward an app port locally. 
     # (Adding the "ports" property to this file will not forward from a Codespace.)

@@ -21,9 +21,13 @@ enum IntegrationStatusKind {
 
 model WebUser {
   id                      String                   @id @default(cuid())
-  remnashopUserId         String                   @unique
-  email                   String                   @unique
-  telegramId              String?                  @unique
+  remnashopUserId         String?                  @unique
+  email                   String?                  @unique
+  telegramId              BigInt?                  @unique
+  telegramUsername        String?
+  fullName                String?
+  photoUrl                String?
+  lastLoginAt             DateTime?
   emailVerified           Boolean                  @default(false)
   displayName             String?
   createdAt               DateTime                 @default(now())
@@ -31,9 +35,28 @@ model WebUser {
   sessions                WebSession[]
   auditLogs               AuditLog[]
   emailVerificationCodes  EmailVerificationCode[]
+  telegramAuthStates      TelegramAuthState[]
 
   @@index([email])
   @@index([telegramId])
+}
+
+model TelegramAuthState {
+  id                 String    @id @default(cuid())
+  stateHash          String    @unique
+  nonceHash          String    @unique
+  codeVerifierHash   String    @unique
+  redirectTo         String?
+  userId             String?
+  expiresAt          DateTime
+  consumedAt         DateTime?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+  user               WebUser?  @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([expiresAt])
+  @@index([consumedAt])
+  @@index([userId])
 }
 
 model WebSession {
