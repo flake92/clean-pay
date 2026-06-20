@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 
+import { logTechnicalError } from '@/lib/audit';
 import { BffError } from '@/lib/remnashop/errors';
 
 function isDevelopment() {
@@ -22,6 +23,7 @@ export function bffJson<T>(data: T, init?: ResponseInit) {
 }
 
 export function bffError(error: unknown) {
+  logTechnicalError('bff_error', error);
   if (error instanceof BffError) {
     const debug = debugPayload(error);
 

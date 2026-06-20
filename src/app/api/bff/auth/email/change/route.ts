@@ -1,3 +1,4 @@
+import { auditLog } from "@/lib/audit";
 import { bffError, bffJson } from "@/lib/bff-response";
 import { isMockMode, mockChangeEmail } from "@/lib/mock-bff";
 import { prisma } from "@/lib/prisma";
@@ -13,6 +14,8 @@ export async function POST(request: Request) {
   try {
     const body = (await request.json()) as ChangeEmailRequest;
     if (isMockMode()) {
+      await auditLog({ action: "email_change_requested", metadata: { email: body.email, mode: "mock" } });
+
       return bffJson(mockChangeEmail());
     }
 
@@ -31,12 +34,10 @@ export async function POST(request: Request) {
       data: { emailVerified: false },
     });
 
-    await prisma.auditLog.create({
-      data: {
-        userId: session.userId,
-        action: "email_change_requested",
-        metadata: { pendingEmail: result.pending_email },
-      },
+    await auditLog({
+      action: "email_change_requested",
+      userId: session.userId,
+      metadata: { pendingEmail: result.pending_email },
     });
 
     return bffJson(result);

@@ -1,3 +1,4 @@
+import { auditLog } from "@/lib/audit";
 import { bffError, bffJson } from "@/lib/bff-response";
 import { isMockMode, mockUser } from "@/lib/mock-bff";
 import { assertRateLimit } from "@/lib/rate-limit";
@@ -19,14 +20,22 @@ export async function POST(request: Request) {
     });
 
     if (isMockMode()) {
+      await auditLog({ action: "remnashop_account_linked", metadata: { email: body.email, mode: "mock" } });
+
       return bffJson({ user: mockUser, linked: true });
     }
 
     const auth = await remnashopAuth("/auth/login", body);
-    const { profile } = await linkCurrentUserToRemnashopAuth({
+    const { user, profile } = await linkCurrentUserToRemnashopAuth({
       accessToken: auth.cookies.accessToken,
       refreshToken: auth.cookies.refreshToken,
       auth: auth.data,
+    });
+
+    await auditLog({
+      action: "remnashop_account_linked",
+      userId: user.id,
+      metadata: { email: profile.email, telegramId: profile.telegram_id },
     });
 
     return bffJson({

@@ -5,15 +5,18 @@
   "scripts": {
     "dev": "WATCHPACK_POLLING=true next dev --webpack -p 4000",
     "dev:mock": "CLEAN_PAY_MOCK_MODE=1 WATCHPACK_POLLING=true next dev --webpack -p 4001",
-    "build": "next build",
-    "build:mock": "CLEAN_PAY_MOCK_MODE=1 next build",
-    "start": "next start",
-    "start:normal": "next start -p 4000",
-    "start:mock": "CLEAN_PAY_MOCK_MODE=1 next start -p 4001",
+    "build": "next build && sh scripts/copy-standalone-assets.sh .next",
+    "build:mock": "CLEAN_PAY_MOCK_MODE=1 next build && sh scripts/copy-standalone-assets.sh .next-mock",
+    "start": "PORT=4000 HOSTNAME=0.0.0.0 node .next/standalone/server.js",
+    "start:normal": "PORT=4000 HOSTNAME=0.0.0.0 node .next/standalone/server.js",
+    "start:mock": "CLEAN_PAY_MOCK_MODE=1 PORT=4001 HOSTNAME=0.0.0.0 node .next-mock/standalone/server.js",
     "lint": "eslint",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
-    "prisma:studio": "prisma studio"
+    "prisma:studio": "prisma studio",
+    "smoke": "sh scripts/smoke.sh",
+    "smoke:mock": "BASE_URL=http://127.0.0.1:4001 sh scripts/smoke.sh",
+    "smoke:normal": "BASE_URL=http://127.0.0.1:4000 sh scripts/smoke.sh"
   },
   "dependencies": {
     "@prisma/adapter-pg": "^7.8.0",

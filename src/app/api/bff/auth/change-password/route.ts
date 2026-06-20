@@ -1,3 +1,4 @@
+import { auditLog } from "@/lib/audit";
 import { bffError, bffJson } from "@/lib/bff-response";
 import { isMockMode, mockChangePassword } from "@/lib/mock-bff";
 import { prisma } from "@/lib/prisma";
@@ -19,6 +20,8 @@ export async function POST(request: Request) {
   try {
     const body = (await request.json()) as ChangePasswordRequest;
     if (isMockMode()) {
+      await auditLog({ action: "password_changed", metadata: { mode: "mock" } });
+
       return bffJson(mockChangePassword());
     }
 
@@ -40,12 +43,7 @@ export async function POST(request: Request) {
       },
     });
 
-    await prisma.auditLog.create({
-      data: {
-        userId: session.userId,
-        action: "password_changed",
-      },
-    });
+    await auditLog({ action: "password_changed", userId: session.userId });
 
     return bffJson(result.data);
   } catch (error) {

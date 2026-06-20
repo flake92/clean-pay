@@ -1,3 +1,4 @@
+import { auditLog } from "@/lib/audit";
 import { bffError, bffJson } from "@/lib/bff-response";
 import { isMockMode, mockDeleteDevice } from "@/lib/mock-bff";
 import { getAuthorizedRemnashopTokens, remnashopRequest } from "@/lib/remnashop/client";
@@ -12,10 +13,14 @@ export async function DELETE(
   try {
     const { hwid } = await params;
     if (isMockMode()) {
+      await auditLog({ action: "device_deleted", metadata: { mode: "mock", hwid } });
+
       return bffJson(mockDeleteDevice());
     }
 
-    const { accessToken } = await getAuthorizedRemnashopTokens();
+    const { accessToken, session } = await getAuthorizedRemnashopTokens();
+
+    await auditLog({ action: "device_deleted", userId: session.userId, metadata: { hwid } });
 
     return bffJson(
       await remnashopRequest<DeviceDeleteResponse>(

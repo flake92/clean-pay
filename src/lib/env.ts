@@ -7,6 +7,7 @@ type AppEnv = {
   remnashopApiBaseUrl: string;
   webJwtSecret: string;
   webRefreshSecret: string;
+  auditIpHashSecret: string;
   cookieSecure: boolean;
   cookieSameSite: SameSite;
   smtp: {
@@ -29,6 +30,12 @@ type AppEnv = {
     success: string;
     fail: string;
     pending: string;
+  };
+  turnstile: {
+    enabled: boolean;
+    siteKey: string | null;
+    secretKey: string | null;
+    verifyUrl: string;
   };
   support: {
     enabled: boolean;
@@ -138,6 +145,7 @@ export function getEnv(): AppEnv {
     remnashopApiBaseUrl: url("REMNASHOP_API_BASE_URL"),
     webJwtSecret: required("WEB_JWT_SECRET"),
     webRefreshSecret: required("WEB_REFRESH_SECRET"),
+    auditIpHashSecret: optional("AUDIT_IP_HASH_SECRET") ?? required("WEB_JWT_SECRET"),
     cookieSecure: bool("COOKIE_SECURE", true),
     cookieSameSite: sameSite("COOKIE_SAMESITE", "lax"),
     smtp: {
@@ -160,6 +168,12 @@ export function getEnv(): AppEnv {
       success: joinUrl(appUrl, "/payment/success"),
       fail: joinUrl(appUrl, "/payment/fail"),
       pending: joinUrl(appUrl, "/payment/pending"),
+    },
+    turnstile: {
+      enabled: bool("TURNSTILE_ENABLED", false),
+      siteKey: optional("NEXT_PUBLIC_TURNSTILE_SITE_KEY"),
+      secretKey: optional("TURNSTILE_SECRET_KEY"),
+      verifyUrl: optionalUrl("TURNSTILE_VERIFY_URL") ?? "https://challenges.cloudflare.com/turnstile/v0/siteverify",
     },
     support: {
       enabled: bool("SUPPORT_ENABLED", false),

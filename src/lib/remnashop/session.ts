@@ -1,3 +1,4 @@
+import { auditLog } from "@/lib/audit";
 import { prisma } from "@/lib/prisma";
 import { BffError } from "@/lib/remnashop/errors";
 import {
@@ -123,14 +124,10 @@ export async function linkCurrentUserToRemnashopAuth({
     },
   });
 
-  await prisma.auditLog.create({
-    data: {
-      userId: user.id,
-      action: "remnashop_account_linked",
-      metadata: {
-        remnashopUserId,
-      },
-    },
+  await auditLog({
+    action: "remnashop_account_linked",
+    userId: user.id,
+    metadata: { remnashopUserId },
   });
 
   return { user, profile };

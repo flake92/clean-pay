@@ -1,3 +1,4 @@
+import { auditLog } from "@/lib/audit";
 import { bffError, bffJson } from "@/lib/bff-response";
 import { isMockMode, mockPayment } from "@/lib/mock-bff";
 import { recordPayment } from "@/lib/payment-records";
@@ -19,6 +20,11 @@ export async function POST(request: Request) {
         action: "subscription_purchase",
         limit: 10,
         windowSeconds: 15 * 60,
+      });
+
+      await auditLog({
+        action: "subscription_purchase_created",
+        metadata: { mode: "mock", gatewayType: body.gateway_type, durationDays: body.duration_days },
       });
 
       return bffJson(mockPayment(body));
@@ -46,6 +52,12 @@ export async function POST(request: Request) {
         body,
       },
     );
+
+    await auditLog({
+      action: "subscription_purchase_created",
+      userId: session.userId,
+      metadata: { gatewayType: body.gateway_type, durationDays: body.duration_days },
+    });
 
     await recordPayment({
       userId: session.userId,

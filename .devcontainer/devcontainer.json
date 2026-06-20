@@ -8,7 +8,7 @@
 	"features": {
 		"ghcr.io/devcontainers/features/sshd:1": {}
 	},
-	"forwardPorts": [4000, 4001, 5555, 6379],
+	"forwardPorts": [4000, 4001, 5555, 6379, 8025],
 	"remoteUser": "node",
 	"postStartCommand": "git config --global --add safe.directory /workspaces/clean-pay && sh /workspaces/clean-pay/scripts/ensure-node-modules-owner.sh /workspaces/clean-pay/node_modules node:node"
 

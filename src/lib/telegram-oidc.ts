@@ -5,6 +5,7 @@ import { NextResponse } from "next/server";
 
 import { randomToken, sha256 } from "@/lib/crypto";
 import { getEnv } from "@/lib/env";
+import { auditLog } from "@/lib/audit";
 import { prisma } from "@/lib/prisma";
 import { assertRateLimit } from "@/lib/rate-limit";
 
@@ -250,14 +251,10 @@ export async function consumeTelegramCallback(code: string, state: string) {
     },
   });
 
-  await prisma.auditLog.create({
-    data: {
-      userId: user.id,
-      action: "telegram_login",
-      metadata: {
-        telegramId: telegramId.toString(),
-      },
-    },
+  await auditLog({
+    action: authState.userId ? "telegram_link_success" : "telegram_login",
+    userId: user.id,
+    metadata: { telegramId: telegramId.toString() },
   });
 
   cookieStore.delete(telegramOidcCookieNames.state);

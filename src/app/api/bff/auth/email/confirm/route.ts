@@ -1,3 +1,4 @@
+import { auditLog } from "@/lib/audit";
 import { bffError, bffJson } from "@/lib/bff-response";
 import { isMockMode, mockConfirmEmail } from "@/lib/mock-bff";
 import { prisma } from "@/lib/prisma";
@@ -6,6 +7,7 @@ import {
   getAuthorizedRemnashopTokens,
   remnashopRequest,
 } from "@/lib/remnashop/client";
+import { verifyTurnstileToken } from "@/lib/turnstile";
 import type {
   ConfirmEmailVerificationRequest,
   ConfirmEmailVerificationResponse,
@@ -15,7 +17,10 @@ export const runtime = "nodejs";
 
 export async function POST(request: Request) {
   try {
-    const body = (await request.json()) as ConfirmEmailVerificationRequest;
+    const rawBody = (await request.json()) as ConfirmEmailVerificationRequest & { turnstileToken?: string };
+    const { turnstileToken, ...body } = rawBody;
+
+    await verifyTurnstileToken(turnstileToken);
 
     if (isMockMode()) {
       await assertRateLimit({
@@ -23,6 +28,8 @@ export async function POST(request: Request) {
         limit: 5,
         windowSeconds: 15 * 60,
       });
+
+      await auditLog({ action: "email_verified", metadata: { mode: "mock" } });
 
       return bffJson(mockConfirmEmail());
     }
@@ -53,14 +60,10 @@ export async function POST(request: Request) {
       },
     });
 
-    await prisma.auditLog.create({
-      data: {
-        userId: session.userId,
-        action: "email_verified",
-        metadata: {
-          email: result.email,
-        },
-      },
+    await auditLog({
+      action: "email_verified",
+      userId: session.userId,
+      metadata: { email: result.email },
     });
 
     return bffJson(result);
