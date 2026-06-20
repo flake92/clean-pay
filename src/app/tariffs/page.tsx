@@ -4,7 +4,7 @@ import { TariffsPanel } from "@/components/tariffs-panel";
 export default function TariffsPage() {
   return (
     <AppShell>
-      <div className="grid gap-6">
+      <div className="flex flex-column gap-6">
         <PageHeader
           description="Доступные тарифы, длительности и способы оплаты загружаются из Remnashop через BFF."
           title="Тарифы"

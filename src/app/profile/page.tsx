@@ -8,7 +8,7 @@ import { ProfilePanel } from "@/components/profile-panel";
 export default function ProfilePage() {
   return (
     <AppShell>
-      <div className="grid max-w-3xl gap-6">
+      <div className="flex flex-column gap-6">
         <PageHeader
           description="Данные аккаунта, e-mail и пароль управляются через Remnashop API."
           title="Профиль"

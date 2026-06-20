@@ -8,7 +8,7 @@ import { LinkAccountPanel } from "@/components/link-account-panel";
 export default function LinkAccountPage() {
   return (
     <AppShell>
-      <div className="grid max-w-3xl gap-6">
+      <div className="flex flex-column gap-6">
         <PageHeader
           description="Свяжите e-mail и Telegram-профиль, чтобы сохранить доступ из обоих сценариев."
           title="Привязка аккаунта"

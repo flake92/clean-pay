@@ -85,7 +85,7 @@ export const mockOffers: SubscriptionOffersResponse = {
       traffic_limit: 0,
       device_limit: 8,
       type: "family",
-      recommended_purchase_type: "new",
+      recommended_purchase_type: "renew",
       durations: [
         {
           days: 30,

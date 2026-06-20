@@ -45,7 +45,7 @@ export function SupportPanel() {
   const hasContacts = support.email || support.telegramUsername || support.faqUrl;
 
   return (
-    <div className="grid gap-6">
+    <div className="flex flex-column gap-4">
       <Card title="Контакты CleanVPN">
         {support.enabled && hasContacts ? (
           <div className="flex flex-wrap gap-3">
@@ -86,7 +86,7 @@ export function SupportPanel() {
       </Card>
 
       <Card title="Как подключиться">
-        <ol className="m-0 grid gap-3 line-height-3 text-700">
+        <ol className="m-0 flex flex-column gap-3 line-height-3 text-700">
           <li>1. Войдите в web-кабинет и откройте раздел подписки.</li>
           <li>2. Купите или продлите тариф, если активной подписки нет.</li>
           <li>3. Нажмите кнопку подключения или скопируйте ссылку подписки.</li>

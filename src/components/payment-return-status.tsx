@@ -132,16 +132,19 @@ export function PaymentReturnStatus({ kind }: Props) {
 
   return (
     <AppShell>
-      <div className="grid max-w-3xl gap-6">
+      <div className="flex flex-column gap-6">
         <PageHeader description={intro(kind)} title={heading(kind)} />
       <Card>
-        <div className="grid gap-4">
+        <div className="flex flex-column gap-4">
         {error ? <Message severity="error" text={error} /> : null}
         {!error && !data ? <Message severity="info" text="Проверка..." /> : null}
         {data?.payment ? (
-          <div className="grid gap-3 md:grid-cols-2">
-            <Metric label="Платёж" value={data.payment.payment_id} />
-            <div className="surface-50 border-1 border-200 border-round-lg p-3">
+          <div className="grid">
+            <div className="col-12 md:col-6">
+              <Metric label="Платёж" value={data.payment.payment_id} />
+            </div>
+            <div className="col-12 md:col-6">
+            <div className="surface-50 border-1 border-200 border-round-lg p-3 h-full">
               <div className="text-xs uppercase text-500">Статус</div>
               <div className="mt-2">
                 <Tag
@@ -150,11 +153,16 @@ export function PaymentReturnStatus({ kind }: Props) {
                 />
               </div>
             </div>
+            </div>
+            <div className="col-12 md:col-6">
             <Metric
               label="Сумма"
               value={`${data.payment.final_amount} ${data.payment.currency}`}
             />
-            <Metric label="Дата" value={formatDate(data.payment.created_at)} />
+            </div>
+            <div className="col-12 md:col-6">
+              <Metric label="Дата" value={formatDate(data.payment.created_at)} />
+            </div>
           </div>
         ) : null}
         {data && !data.payment ? (

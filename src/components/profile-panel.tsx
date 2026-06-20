@@ -144,7 +144,7 @@ export function ProfilePanel() {
 
   if (error) {
     return (
-      <div className="grid gap-4">
+      <div className="flex flex-column gap-4">
         <Message severity="error" text={error} />
         <LinkButton className="w-fit" href="/login" label="Войти" />
       </div>
@@ -156,25 +156,28 @@ export function ProfilePanel() {
   }
 
   return (
-    <div className="grid gap-6">
+    <div className="flex flex-column gap-4">
       {message ? (
         <Message severity="info" text={message} />
       ) : null}
 
       <Card title="Данные аккаунта">
-        <div className="grid gap-3 md:grid-cols-2">
+        <div className="grid">
           {[
             ["Имя", user.name],
             ["E-mail", user.email ?? "Не указан"],
             ["Ожидает подтверждения", user.pending_email ?? "-"],
             ["Тип входа", user.auth_type],
           ].map(([label, value]) => (
-            <div className="surface-50 border-1 border-200 border-round-lg p-3" key={label}>
+            <div className="col-12 md:col-6" key={label}>
+            <div className="surface-50 border-1 border-200 border-round-lg p-3 h-full">
               <div className="text-xs uppercase text-500">{label}</div>
               <div className="mt-1 font-medium text-900">{value}</div>
             </div>
+            </div>
           ))}
-          <div className="surface-50 border-1 border-200 border-round-lg p-3">
+          <div className="col-12 md:col-6">
+          <div className="surface-50 border-1 border-200 border-round-lg p-3 h-full">
             <div className="text-xs uppercase text-500">E-mail подтверждён</div>
             <div className="mt-2">
               <Tag
@@ -182,6 +185,7 @@ export function ProfilePanel() {
                 value={user.is_email_verified ? "Да" : "Нет"}
               />
             </div>
+          </div>
           </div>
         </div>
       </Card>

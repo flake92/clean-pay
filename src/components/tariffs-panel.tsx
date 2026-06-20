@@ -83,7 +83,7 @@ export function TariffsPanel() {
 
   if (state.status === "error") {
     return (
-      <div className="grid gap-4">
+      <div className="flex flex-column gap-4">
         <Message severity="error" text={state.message} />
         {state.unauthorized ? (
           <LinkButton className="w-fit" href="/login" label="Войти" />
@@ -97,7 +97,7 @@ export function TariffsPanel() {
   }
 
   return (
-    <div className="grid gap-5 xl:grid-cols-2">
+    <div className="grid">
       {state.offers.plans.map((plan) => {
         const firstDuration = plan.durations[0];
         const firstPrice = firstDuration?.prices[0];
@@ -128,8 +128,9 @@ export function TariffsPanel() {
         );
 
         return (
-          <Card className="shadow-1" key={plan.public_code}>
-            <div className="grid gap-4">
+          <div className="col-12 xl:col-6" key={plan.public_code}>
+          <Card className="shadow-1 h-full">
+            <div className="flex flex-column gap-4">
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div>
                   <div className="flex flex-wrap items-center gap-2">
@@ -153,15 +154,17 @@ export function TariffsPanel() {
                   </div>
                 ) : null}
               </div>
-              <div className="grid gap-3 md:grid-cols-3">
+              <div className="grid">
                 {[
                   ["Устройства", plan.device_limit],
                   ["Трафик", formatTraffic(plan.traffic_limit)],
                   ["Тип", plan.type],
                 ].map(([label, value]) => (
-                  <div className="surface-50 border-1 border-200 border-round-lg p-3" key={label}>
+                  <div className="col-12 md:col-4" key={label}>
+                  <div className="surface-50 border-1 border-200 border-round-lg p-3 h-full">
                     <div className="text-xs uppercase text-500">{label}</div>
                     <div className="mt-1 font-semibold text-900">{value}</div>
+                  </div>
                   </div>
                 ))}
               </div>
@@ -187,6 +190,7 @@ export function TariffsPanel() {
               />
             </div>
           </Card>
+          </div>
         );
       })}
     </div>

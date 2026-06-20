@@ -71,7 +71,7 @@ export function VerifyEmailPanel() {
   }
 
   return (
-    <div className="grid gap-8">
+    <div className="flex flex-column gap-4">
       <Card title="Получить код">
         <p className="mt-0 line-height-3 text-600">
           Код можно запросить не чаще одного раза в минуту. You can request the code once per minute.

@@ -91,7 +91,7 @@ export function ExtendConfirmation() {
 
   if (state.status === "error") {
     return (
-      <div className="grid gap-4">
+      <div className="flex flex-column gap-4">
         <Message severity="error" text={state.message} />
         {state.unauthorized ? (
           <LinkButton className="w-fit" href="/login" label="Войти" />
@@ -104,7 +104,7 @@ export function ExtendConfirmation() {
 
   if (!state.offers.has_current_subscription || !plan) {
     return (
-      <div className="grid gap-4">
+      <div className="flex flex-column gap-4">
         <Message severity="info" text="Действующая подписка не найдена." />
         <LinkButton className="w-fit" href="/tariffs" label="Выбрать тариф" />
       </div>
@@ -168,8 +168,8 @@ export function ExtendConfirmation() {
   }
 
   return (
-    <div className="grid gap-6">
-      <Card>
+    <div className="flex flex-column gap-4">
+      <Card className="w-full md:w-30rem">
         <h2 className="text-xl font-semibold">{plan.name}</h2>
         <p className="text-sm text-600">
           Текущий статус: {state.offers.current_subscription_status ?? "—"}

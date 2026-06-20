@@ -156,7 +156,7 @@ export function PaymentConfirmation() {
 
   if (state.status === "error") {
     return (
-      <div className="grid gap-4">
+      <div className="flex flex-column gap-4">
         <Message severity="error" text={state.message} />
         {state.unauthorized ? (
           <LinkButton className="w-fit" href="/login" label="Войти" />
@@ -167,7 +167,7 @@ export function PaymentConfirmation() {
 
   if (!selection) {
     return (
-      <div className="grid gap-4">
+      <div className="flex flex-column gap-4">
         <Message severity="error" text="Выбранный тариф недоступен." />
         <LinkButton className="w-fit" href="/tariffs" label="Вернуться к тарифам" outlined />
       </div>
@@ -175,7 +175,7 @@ export function PaymentConfirmation() {
   }
 
   return (
-    <div className="grid gap-6">
+    <div className="flex flex-column gap-4">
       <Card>
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
@@ -193,10 +193,16 @@ export function PaymentConfirmation() {
             </p>
           </div>
         </div>
-        <div className="mt-4 grid gap-3 md:grid-cols-3">
-          <Metric label="Длительность" value={formatDuration(selection.duration.days)} />
-          <Metric label="Устройства" value={selection.plan.device_limit} />
-          <Metric label="Трафик" value={formatTraffic(selection.plan.traffic_limit)} />
+        <div className="mt-4 grid">
+          <div className="col-12 md:col-4">
+            <Metric label="Длительность" value={formatDuration(selection.duration.days)} />
+          </div>
+          <div className="col-12 md:col-4">
+            <Metric label="Устройства" value={selection.plan.device_limit} />
+          </div>
+          <div className="col-12 md:col-4">
+            <Metric label="Трафик" value={formatTraffic(selection.plan.traffic_limit)} />
+          </div>
         </div>
       </Card>
       {submitError ? <Message severity="error" text={submitError} /> : null}

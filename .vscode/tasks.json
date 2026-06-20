@@ -4,7 +4,7 @@
     {
       "label": "Clean Pay: install dependencies",
       "type": "shell",
-      "command": "sh scripts/ensure-node-modules-owner.sh ${workspaceFolder}/node_modules node:node && npm install",
+      "command": "sh scripts/ensure-node-modules-owner.sh ${workspaceFolder}/node_modules node:node && npm install && npm run prisma:generate",
       "options": {
         "cwd": "${workspaceFolder}"
       },

@@ -47,7 +47,7 @@ export function LinkAccountPanel() {
   }
 
   return (
-    <div className="grid gap-8">
+    <div className="flex flex-column gap-4">
       <Card title="Привязать Telegram">
         <p className="line-height-3 text-600">
           Если вы вошли по e-mail, можно привязать Telegram ID через OIDC.

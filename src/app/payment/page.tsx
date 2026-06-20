@@ -9,7 +9,7 @@ import { PaymentConfirmation } from "@/components/payment-confirmation";
 export default function PaymentPage() {
   return (
     <AppShell>
-      <div className="grid max-w-3xl gap-6">
+      <div className="flex flex-column gap-6">
         <PageHeader
           description="Проверьте выбранный тариф перед переходом к платёжной странице."
           title="Подтверждение оплаты"

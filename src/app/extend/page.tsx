@@ -8,7 +8,7 @@ import { AppShell, PageHeader } from "@/components/layout";
 export default function ExtendPage() {
   return (
     <AppShell>
-      <div className="grid max-w-3xl gap-6">
+      <div className="flex flex-column gap-6">
         <PageHeader
           description="Выберите доступное предложение продления и способ оплаты."
           title="Продление подписки"
