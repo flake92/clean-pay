@@ -15,6 +15,7 @@ node_modules/
 
 # next
 .next/
+.next-mock/
 out/
 
 # build/cache

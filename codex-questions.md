@@ -119,8 +119,8 @@
 - В плане и в реальности текущая активная работа: полная PrimeReact Sakai-переделка frontend.
 
 ## Mock режим
-- Normal server: `npm run start:normal` на порту 3000.
-- Mock server: `npm run start:mock` на порту 3001.
+- Normal server: `npm run start:normal` на порту 4000.
+- Mock server: `npm run start:mock` на порту 4001.
 - Mock BFF включается флагом `CLEAN_PAY_MOCK_MODE=1`.
 - Mock режим нужен для frontend-preview без Remnashop/DB-сессии; normal режим должен оставаться без mock-данных.
 

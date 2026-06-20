@@ -2,54 +2,54 @@
   "version": "0.2.0",
   "configurations": [
     {
-      "name": "Clean Pay: Dev Normal (3000)",
+      "name": "Clean Pay: Dev Normal (4000)",
       "type": "node-terminal",
       "request": "launch",
       "preLaunchTask": "Clean Pay: install dependencies",
       "command": "npm run dev -- --hostname 0.0.0.0",
       "cwd": "${workspaceFolder}",
       "serverReadyAction": {
-        "pattern": "Local:\\s+(https?://\\S+)",
-        "uriFormat": "http://localhost:3000",
+        "pattern": "Local:\\s+http://localhost:(\\d+)",
+        "uriFormat": "http://localhost:%s",
         "action": "openExternally"
       }
     },
     {
-      "name": "Clean Pay: Dev Mock (3001)",
+      "name": "Clean Pay: Dev Mock (4001)",
       "type": "node-terminal",
       "request": "launch",
       "preLaunchTask": "Clean Pay: install dependencies",
       "command": "npm run dev:mock -- --hostname 0.0.0.0",
       "cwd": "${workspaceFolder}",
       "serverReadyAction": {
-        "pattern": "Local:\\s+(https?://\\S+)",
-        "uriFormat": "http://localhost:3001",
+        "pattern": "Local:\\s+http://localhost:(\\d+)",
+        "uriFormat": "http://localhost:%s",
         "action": "openExternally"
       }
     },
     {
-      "name": "Clean Pay: Start Normal (3000)",
+      "name": "Clean Pay: Start Normal (4000)",
       "type": "node-terminal",
       "request": "launch",
       "preLaunchTask": "Clean Pay: install dependencies",
       "command": "npm run build && npm run start:normal -- --hostname 0.0.0.0",
       "cwd": "${workspaceFolder}",
       "serverReadyAction": {
-        "pattern": "Local:\\s+(https?://\\S+)",
-        "uriFormat": "http://localhost:3000",
+        "pattern": "Local:\\s+http://localhost:(\\d+)",
+        "uriFormat": "http://localhost:%s",
         "action": "openExternally"
       }
     },
     {
-      "name": "Clean Pay: Start Mock (3001)",
+      "name": "Clean Pay: Start Mock (4001)",
       "type": "node-terminal",
       "request": "launch",
       "preLaunchTask": "Clean Pay: install dependencies",
-      "command": "npm run build && npm run start:mock -- --hostname 0.0.0.0",
+      "command": "npm run build:mock && npm run start:mock -- --hostname 0.0.0.0",
       "cwd": "${workspaceFolder}",
       "serverReadyAction": {
-        "pattern": "Local:\\s+(https?://\\S+)",
-        "uriFormat": "http://localhost:3001",
+        "pattern": "Local:\\s+http://localhost:(\\d+)",
+        "uriFormat": "http://localhost:%s",
         "action": "openExternally"
       }
     },
@@ -61,21 +61,21 @@
       "command": "npm run prisma:studio -- --hostname 0.0.0.0",
       "cwd": "${workspaceFolder}",
       "serverReadyAction": {
-        "pattern": "Prisma Studio is up on (https?://\\S+)",
-        "uriFormat": "http://localhost:5555",
+        "pattern": "Prisma Studio is up on http://localhost:(\\d+)",
+        "uriFormat": "http://localhost:%s",
         "action": "openExternally"
       }
     },
     {
-      "name": "Clean Pay: Start Normal + Mock (3000/3001)",
+      "name": "Clean Pay: Start Normal + Mock (4000/4001)",
       "type": "node-terminal",
       "request": "launch",
       "preLaunchTask": "Clean Pay: install dependencies",
-      "command": "npm run build && (npm run start:normal -- --hostname 0.0.0.0 & npm run start:mock -- --hostname 0.0.0.0)",
+      "command": "npm run build && npm run build:mock && (npm run start:normal -- --hostname 0.0.0.0 & npm run start:mock -- --hostname 0.0.0.0)",
       "cwd": "${workspaceFolder}",
       "serverReadyAction": {
-        "pattern": "Local:\\s+(https?://\\S+)",
-        "uriFormat": "http://localhost:3000",
+        "pattern": "Local:\\s+http://localhost:(\\d+)",
+        "uriFormat": "http://localhost:%s",
         "action": "openExternally"
       }
     }
