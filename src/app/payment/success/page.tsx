@@ -4,7 +4,7 @@ import { PaymentReturnStatus } from "@/components/payment-return-status";
 
 export default function PaymentSuccessPage() {
   return (
-    <Suspense fallback={<p className="p-6 text-zinc-600">Загрузка...</p>}>
+    <Suspense fallback={<p className="p-6 text-600">Загрузка...</p>}>
       <PaymentReturnStatus kind="success" />
     </Suspense>
   );

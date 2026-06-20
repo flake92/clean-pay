@@ -7,6 +7,7 @@ Clean Pay - отдельный web-кабинет CleanVPN для пользов
 ## Текущие решения
 
 - Frontend/BFF: Next.js App Router.
+- UI library: PrimeReact with PrimeIcons and PrimeFlex.
 - Язык: TypeScript.
 - Package manager: npm.
 - ORM: Prisma.

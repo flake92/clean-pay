@@ -1,6 +1,11 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
+import "primereact/resources/primereact.css";
+import "primeicons/primeicons.css";
+import "primeflex/primeflex.css";
+import "../styles/layout/layout.scss";
 import "./globals.css";
+import { Providers } from "./providers";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -25,9 +30,19 @@ export default function RootLayout({
   return (
     <html
       lang="ru"
-      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
+      className={`${geistSans.variable} ${geistMono.variable}`}
+      suppressHydrationWarning
     >
-      <body className="min-h-full flex flex-col">{children}</body>
+      <head>
+        <link
+          href="/themes/lara-light-indigo/theme.css"
+          id="theme-css"
+          rel="stylesheet"
+        />
+      </head>
+      <body>
+        <Providers>{children}</Providers>
+      </body>
     </html>
   );
 }

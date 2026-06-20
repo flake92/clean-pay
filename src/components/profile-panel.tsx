@@ -3,6 +3,14 @@
 import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
 
+import { Button } from "primereact/button";
+import { Card } from "primereact/card";
+import { InputText } from "primereact/inputtext";
+import { Message } from "primereact/message";
+import { Password } from "primereact/password";
+import { Tag } from "primereact/tag";
+import { LinkButton } from "@/components/prime/link-button";
+
 type ProfileUser = {
   telegram_id: number | null;
   auth_type: string;
@@ -137,117 +145,104 @@ export function ProfilePanel() {
   if (error) {
     return (
       <div className="grid gap-4">
-        <p className="text-red-700">{error}</p>
-        <a className="text-cyan-700" href="/login">
-          Войти
-        </a>
+        <Message severity="error" text={error} />
+        <LinkButton className="w-fit" href="/login" label="Войти" />
       </div>
     );
   }
 
   if (!user) {
-    return <p className="text-zinc-600">Загрузка профиля...</p>;
+    return <Message severity="info" text="Загрузка профиля..." />;
   }
 
   return (
     <div className="grid gap-6">
       {message ? (
-        <p className="border border-zinc-200 bg-zinc-50 p-3 text-sm text-zinc-700">
-          {message}
-        </p>
+        <Message severity="info" text={message} />
       ) : null}
 
-      <section className="grid gap-4">
-        <h2 className="text-xl font-semibold">Данные аккаунта</h2>
-        <dl className="grid gap-3 text-sm">
-          <div className="flex justify-between gap-4 border-b border-zinc-200 pb-2">
-            <dt className="text-zinc-500">Имя</dt>
-            <dd>{user.name}</dd>
+      <Card title="Данные аккаунта">
+        <div className="grid gap-3 md:grid-cols-2">
+          {[
+            ["Имя", user.name],
+            ["E-mail", user.email ?? "Не указан"],
+            ["Ожидает подтверждения", user.pending_email ?? "-"],
+            ["Тип входа", user.auth_type],
+          ].map(([label, value]) => (
+            <div className="surface-50 border-1 border-200 border-round-lg p-3" key={label}>
+              <div className="text-xs uppercase text-500">{label}</div>
+              <div className="mt-1 font-medium text-900">{value}</div>
+            </div>
+          ))}
+          <div className="surface-50 border-1 border-200 border-round-lg p-3">
+            <div className="text-xs uppercase text-500">E-mail подтверждён</div>
+            <div className="mt-2">
+              <Tag
+                severity={user.is_email_verified ? "success" : "warning"}
+                value={user.is_email_verified ? "Да" : "Нет"}
+              />
+            </div>
           </div>
-          <div className="flex justify-between gap-4 border-b border-zinc-200 pb-2">
-            <dt className="text-zinc-500">E-mail</dt>
-            <dd>{user.email ?? "Не указан"}</dd>
-          </div>
-          <div className="flex justify-between gap-4 border-b border-zinc-200 pb-2">
-            <dt className="text-zinc-500">Ожидает подтверждения</dt>
-            <dd>{user.pending_email ?? "-"}</dd>
-          </div>
-          <div className="flex justify-between gap-4 border-b border-zinc-200 pb-2">
-            <dt className="text-zinc-500">E-mail подтверждён</dt>
-            <dd>{user.is_email_verified ? "Да" : "Нет"}</dd>
-          </div>
-          <div className="flex justify-between gap-4 border-b border-zinc-200 pb-2">
-            <dt className="text-zinc-500">Тип входа</dt>
-            <dd>{user.auth_type}</dd>
-          </div>
-        </dl>
-      </section>
+        </div>
+      </Card>
 
-      <form className="grid gap-4 border border-zinc-200 p-5" onSubmit={changeEmail}>
-        <h2 className="text-xl font-semibold">Смена e-mail</h2>
-        <label className="grid gap-2 text-sm">
-          <span className="font-medium text-zinc-700">Новый e-mail</span>
-          <input
-            className="h-11 border border-zinc-300 px-3 outline-none focus:border-cyan-600"
-            onChange={(event) => setEmail(event.target.value)}
-            type="email"
-            value={email}
-          />
+      <Card title="Смена e-mail">
+      <form className="flex flex-column gap-3" onSubmit={changeEmail}>
+        <label className="flex flex-column gap-2">
+          <span className="text-sm font-medium text-700">Новый e-mail</span>
+          <InputText onChange={(event) => setEmail(event.target.value)} type="email" value={email} />
         </label>
         <div className="flex flex-wrap gap-3">
-          <button
-            className="h-11 bg-zinc-950 px-4 text-white disabled:opacity-60"
+          <Button
             disabled={pendingAction === "email"}
+            label="Сохранить e-mail"
+            loading={pendingAction === "email"}
             type="submit"
-          >
-            Сохранить e-mail
-          </button>
-          <button
-            className="h-11 border border-zinc-300 px-4 disabled:opacity-60"
+          />
+          <Button
             disabled={pendingAction === "verification"}
+            label="Отправить код"
+            loading={pendingAction === "verification"}
             onClick={requestVerification}
+            outlined
             type="button"
-          >
-            Отправить код
-          </button>
-          <a
-            className="inline-flex h-11 items-center border border-zinc-300 px-4"
-            href="/verify-email"
-          >
-            Ввести код
-          </a>
+          />
+          <LinkButton href="/verify-email" label="Ввести код" outlined />
         </div>
       </form>
+      </Card>
 
-      <form className="grid gap-4 border border-zinc-200 p-5" onSubmit={changePassword}>
-        <h2 className="text-xl font-semibold">Смена пароля</h2>
-        <label className="grid gap-2 text-sm">
-          <span className="font-medium text-zinc-700">Текущий пароль</span>
-          <input
-            className="h-11 border border-zinc-300 px-3 outline-none focus:border-cyan-600"
+      <Card title="Смена пароля">
+      <form className="flex flex-column gap-3" onSubmit={changePassword}>
+        <label className="flex flex-column gap-2">
+          <span className="text-sm font-medium text-700">Текущий пароль</span>
+          <Password
+            feedback={false}
+            inputClassName="w-full"
             onChange={(event) => setCurrentPassword(event.target.value)}
-            type="password"
+            toggleMask
             value={currentPassword}
           />
         </label>
-        <label className="grid gap-2 text-sm">
-          <span className="font-medium text-zinc-700">Новый пароль</span>
-          <input
-            className="h-11 border border-zinc-300 px-3 outline-none focus:border-cyan-600"
+        <label className="flex flex-column gap-2">
+          <span className="text-sm font-medium text-700">Новый пароль</span>
+          <Password
+            inputClassName="w-full"
             minLength={8}
             onChange={(event) => setNewPassword(event.target.value)}
-            type="password"
+            toggleMask
             value={newPassword}
           />
         </label>
-        <button
-          className="h-11 w-fit bg-zinc-950 px-4 text-white disabled:opacity-60"
+        <Button
+          className="w-fit"
           disabled={pendingAction === "password"}
+          label="Изменить пароль"
+          loading={pendingAction === "password"}
           type="submit"
-        >
-          Изменить пароль
-        </button>
+        />
       </form>
+      </Card>
     </div>
   );
 }

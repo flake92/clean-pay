@@ -2,6 +2,11 @@
 
 import { useState } from "react";
 
+import { Button } from "primereact/button";
+import { Card } from "primereact/card";
+import { InputText } from "primereact/inputtext";
+import { Message } from "primereact/message";
+
 async function readError(response: Response) {
   const body = await response.json().catch(() => null);
 
@@ -67,55 +72,51 @@ export function VerifyEmailPanel() {
 
   return (
     <div className="grid gap-8">
-      <section className="grid gap-4">
-        <h2 className="text-xl font-semibold">Получить код</h2>
-        <p className="text-sm leading-6 text-zinc-600">
-          Код можно запросить не чаще одного раза в минуту. You can request the
-          code once per minute.
+      <Card title="Получить код">
+        <p className="mt-0 line-height-3 text-600">
+          Код можно запросить не чаще одного раза в минуту. You can request the code once per minute.
         </p>
-        <form className="grid gap-4" onSubmit={requestCode}>
-          <input
-            className="h-11 border border-zinc-300 bg-white px-3"
-            name="email"
-            placeholder="E-mail"
-            type="email"
-          />
-          <button
-            className="h-11 bg-cyan-700 px-4 text-white disabled:opacity-60"
+        <form className="flex flex-column gap-3" onSubmit={requestCode}>
+          <label className="flex flex-column gap-2">
+            <span className="text-sm font-medium text-700">E-mail</span>
+            <InputText name="email" placeholder="user@example.com" type="email" />
+          </label>
+          <Button
             disabled={loading === "request"}
+            label="Отправить код"
+            loading={loading === "request"}
+            severity="info"
             type="submit"
-          >
-            Отправить код
-          </button>
+          />
         </form>
-      </section>
-      <section className="grid gap-4">
-        <h2 className="text-xl font-semibold">Подтвердить код</h2>
-        <p className="text-sm leading-6 text-zinc-600">
+      </Card>
+      <Card title="Подтвердить код">
+        <p className="mt-0 line-height-3 text-600">
           Введите 6 цифр из письма. Enter the 6 digits from the e-mail.
         </p>
-        <form className="grid gap-4" onSubmit={confirmCode}>
-          <input
-            className="h-11 border border-zinc-300 bg-white px-3"
-            inputMode="numeric"
-            maxLength={6}
-            minLength={6}
-            name="code"
-            pattern="[0-9]{6}"
-            placeholder="000000"
-            required
-          />
-          <button
-            className="h-11 bg-zinc-950 px-4 text-white disabled:opacity-60"
+        <form className="flex flex-column gap-3" onSubmit={confirmCode}>
+          <label className="flex flex-column gap-2">
+            <span className="text-sm font-medium text-700">Код</span>
+            <InputText
+              inputMode="numeric"
+              maxLength={6}
+              minLength={6}
+              name="code"
+              pattern="[0-9]{6}"
+              placeholder="000000"
+              required
+            />
+          </label>
+          <Button
             disabled={loading === "confirm"}
+            label="Подтвердить"
+            loading={loading === "confirm"}
             type="submit"
-          >
-            Подтвердить
-          </button>
+          />
         </form>
-      </section>
-      {error ? <p className="text-sm text-red-700">{error}</p> : null}
-      {message ? <p className="text-sm text-green-700">{message}</p> : null}
+      </Card>
+      {error ? <Message severity="error" text={error} /> : null}
+      {message ? <Message severity="success" text={message} /> : null}
     </div>
   );
 }

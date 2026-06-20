@@ -8,6 +8,10 @@ import type {
   PlanOffer,
   SubscriptionOffersResponse,
 } from "@/lib/remnashop/types";
+import { Button } from "primereact/button";
+import { Card } from "primereact/card";
+import { Message } from "primereact/message";
+import { LinkButton } from "@/components/prime/link-button";
 
 type LoadState =
   | { status: "loading" }
@@ -147,17 +151,15 @@ export function PaymentConfirmation() {
   }
 
   if (state.status === "loading") {
-    return <p className="text-zinc-600">Загрузка данных оплаты...</p>;
+    return <Message severity="info" text="Загрузка данных оплаты..." />;
   }
 
   if (state.status === "error") {
     return (
       <div className="grid gap-4">
-        <p className="text-red-700">{state.message}</p>
+        <Message severity="error" text={state.message} />
         {state.unauthorized ? (
-          <a className="text-cyan-700" href="/login">
-            Войти
-          </a>
+          <LinkButton className="w-fit" href="/login" label="Войти" />
         ) : null}
       </div>
     );
@@ -166,66 +168,57 @@ export function PaymentConfirmation() {
   if (!selection) {
     return (
       <div className="grid gap-4">
-        <p className="text-red-700">Выбранный тариф недоступен.</p>
-        <a className="text-cyan-700" href="/tariffs">
-          Вернуться к тарифам
-        </a>
+        <Message severity="error" text="Выбранный тариф недоступен." />
+        <LinkButton className="w-fit" href="/tariffs" label="Вернуться к тарифам" outlined />
       </div>
     );
   }
 
   return (
     <div className="grid gap-6">
-      <div className="grid gap-3 border border-zinc-200 bg-white p-5">
+      <Card>
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
             <h2 className="text-xl font-semibold">{selection.plan.name}</h2>
-            <p className="mt-1 text-sm text-zinc-600">
+            <p className="mt-1 line-height-3 text-600">
               {describePlan(selection.plan)}
             </p>
           </div>
           <div className="text-right">
-            <p className="text-2xl font-semibold">
+            <p className="m-0 text-3xl font-semibold text-900">
               {selection.price.final_amount} {selection.price.currency_symbol}
             </p>
-            <p className="text-xs text-zinc-500">
+            <p className="m-0 mt-1 text-sm text-500">
               {selection.price.gateway_type}
             </p>
           </div>
         </div>
-        <dl className="grid gap-2 text-sm sm:grid-cols-3">
-          <div className="border border-zinc-200 p-3">
-            <dt className="text-zinc-500">Длительность</dt>
-            <dd className="mt-1 font-medium">
-              {formatDuration(selection.duration.days)}
-            </dd>
-          </div>
-          <div className="border border-zinc-200 p-3">
-            <dt className="text-zinc-500">Устройства</dt>
-            <dd className="mt-1 font-medium">{selection.plan.device_limit}</dd>
-          </div>
-          <div className="border border-zinc-200 p-3">
-            <dt className="text-zinc-500">Трафик</dt>
-            <dd className="mt-1 font-medium">
-              {formatTraffic(selection.plan.traffic_limit)}
-            </dd>
-          </div>
-        </dl>
-      </div>
-      {submitError ? <p className="text-sm text-red-700">{submitError}</p> : null}
+        <div className="mt-4 grid gap-3 md:grid-cols-3">
+          <Metric label="Длительность" value={formatDuration(selection.duration.days)} />
+          <Metric label="Устройства" value={selection.plan.device_limit} />
+          <Metric label="Трафик" value={formatTraffic(selection.plan.traffic_limit)} />
+        </div>
+      </Card>
+      {submitError ? <Message severity="error" text={submitError} /> : null}
       <div className="flex flex-wrap gap-3">
-        <button
-          className="h-11 bg-zinc-950 px-4 text-white disabled:opacity-60"
+        <Button
           disabled={submitting}
+          label="Перейти к оплате"
+          loading={submitting}
           onClick={createPayment}
           type="button"
-        >
-          Перейти к оплате
-        </button>
-        <a className="inline-flex h-11 items-center border border-zinc-300 px-4" href="/tariffs">
-          Изменить выбор
-        </a>
+        />
+        <LinkButton href="/tariffs" label="Изменить выбор" outlined />
       </div>
+    </div>
+  );
+}
+
+function Metric({ label, value }: { label: string; value: React.ReactNode }) {
+  return (
+    <div className="surface-50 border-1 border-200 border-round-lg p-3">
+      <div className="text-xs uppercase text-500">{label}</div>
+      <div className="mt-1 font-medium text-900">{value}</div>
     </div>
   );
 }

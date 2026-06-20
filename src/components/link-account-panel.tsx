@@ -2,6 +2,13 @@
 
 import { useState } from "react";
 
+import { Button } from "primereact/button";
+import { Card } from "primereact/card";
+import { InputText } from "primereact/inputtext";
+import { Message } from "primereact/message";
+import { Password } from "primereact/password";
+import { LinkButton } from "@/components/prime/link-button";
+
 async function readError(response: Response) {
   const body = await response.json().catch(() => null);
 
@@ -41,49 +48,42 @@ export function LinkAccountPanel() {
 
   return (
     <div className="grid gap-8">
-      <section className="grid gap-4">
-        <h2 className="text-xl font-semibold">Привязать Telegram</h2>
-        <p className="text-sm text-zinc-600">
+      <Card title="Привязать Telegram">
+        <p className="line-height-3 text-600">
           Если вы вошли по e-mail, можно привязать Telegram ID через OIDC.
         </p>
-        <a
-          className="inline-flex h-11 items-center justify-center bg-cyan-700 px-4 text-white"
+        <LinkButton
           href="/auth/telegram/start?redirect_to=/link-account"
-        >
-          Привязать Telegram
-        </a>
-      </section>
-      <section className="grid gap-4">
-        <h2 className="text-xl font-semibold">Привязать e-mail</h2>
-        <p className="text-sm text-zinc-600">
+          icon="pi pi-send"
+          label="Привязать Telegram"
+          severity="info"
+        />
+      </Card>
+      <Card title="Привязать e-mail">
+        <p className="line-height-3 text-600">
           Если вы вошли через Telegram, подтвердите e-mail аккаунт Remnashop.
         </p>
-        <form className="grid gap-4" onSubmit={onSubmit}>
-          <input
-            className="h-11 border border-zinc-300 bg-white px-3"
-            name="email"
-            placeholder="E-mail"
-            type="email"
-            required
-          />
-          <input
-            className="h-11 border border-zinc-300 bg-white px-3"
-            name="password"
-            placeholder="Пароль"
-            type="password"
-            required
-          />
-          {error ? <p className="text-sm text-red-700">{error}</p> : null}
-          {message ? <p className="text-sm text-green-700">{message}</p> : null}
-          <button
-            className="h-11 bg-zinc-950 px-4 text-white disabled:opacity-60"
-            disabled={loading}
-            type="submit"
-          >
-            Привязать e-mail
-          </button>
+        <form className="flex flex-column gap-3" onSubmit={onSubmit}>
+          <label className="flex flex-column gap-2">
+            <span className="text-sm font-medium text-700">E-mail</span>
+            <InputText name="email" placeholder="user@example.com" required type="email" />
+          </label>
+          <label className="flex flex-column gap-2">
+            <span className="text-sm font-medium text-700">Пароль</span>
+            <Password
+              feedback={false}
+              inputClassName="w-full"
+              name="password"
+              placeholder="Пароль"
+              required
+              toggleMask
+            />
+          </label>
+          {error ? <Message severity="error" text={error} /> : null}
+          {message ? <Message severity="success" text={message} /> : null}
+          <Button disabled={loading} label="Привязать e-mail" loading={loading} type="submit" />
         </form>
-      </section>
+      </Card>
     </div>
   );
 }

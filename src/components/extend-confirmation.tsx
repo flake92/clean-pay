@@ -8,6 +8,11 @@ import type {
   PlanOffer,
   SubscriptionOffersResponse,
 } from "@/lib/remnashop/types";
+import { Button } from "primereact/button";
+import { Card } from "primereact/card";
+import { Dropdown } from "primereact/dropdown";
+import { Message } from "primereact/message";
+import { LinkButton } from "@/components/prime/link-button";
 
 type LoadState =
   | { status: "loading" }
@@ -81,17 +86,15 @@ export function ExtendConfirmation() {
   }, []);
 
   if (state.status === "loading") {
-    return <p className="text-zinc-600">Загрузка предложений...</p>;
+    return <Message severity="info" text="Загрузка предложений..." />;
   }
 
   if (state.status === "error") {
     return (
       <div className="grid gap-4">
-        <p className="text-red-700">{state.message}</p>
+        <Message severity="error" text={state.message} />
         {state.unauthorized ? (
-          <a className="text-cyan-700" href="/login">
-            Войти
-          </a>
+          <LinkButton className="w-fit" href="/login" label="Войти" />
         ) : null}
       </div>
     );
@@ -102,10 +105,8 @@ export function ExtendConfirmation() {
   if (!state.offers.has_current_subscription || !plan) {
     return (
       <div className="grid gap-4">
-        <p className="text-zinc-700">Действующая подписка не найдена.</p>
-        <a className="text-cyan-700" href="/tariffs">
-          Выбрать тариф
-        </a>
+        <Message severity="info" text="Действующая подписка не найдена." />
+        <LinkButton className="w-fit" href="/tariffs" label="Выбрать тариф" />
       </div>
     );
   }
@@ -117,6 +118,12 @@ export function ExtendConfirmation() {
   const selectedPrice = selectedDuration?.prices.find(
     (price): price is DurationGatewayPrice =>
       price.gateway_type === selectedGateway,
+  );
+  const priceOptions = plan.durations.flatMap((duration) =>
+    duration.prices.map((price) => ({
+      label: `${formatDuration(duration.days)} - ${price.final_amount} ${price.currency_symbol} - ${price.gateway_type}`,
+      value: `${duration.days}:${price.gateway_type}`,
+    })),
   );
 
   async function extendSubscription() {
@@ -162,51 +169,36 @@ export function ExtendConfirmation() {
 
   return (
     <div className="grid gap-6">
-      <div className="grid gap-3 border border-zinc-200 bg-white p-5">
+      <Card>
         <h2 className="text-xl font-semibold">{plan.name}</h2>
-        <p className="text-sm text-zinc-600">
+        <p className="text-sm text-600">
           Текущий статус: {state.offers.current_subscription_status ?? "—"}
         </p>
-        <label className="text-sm font-medium" htmlFor="extend-offer">
+        <label className="flex flex-column gap-2 text-sm font-medium text-700" htmlFor="extend-offer">
           Длительность и способ оплаты
+          <Dropdown
+            id="extend-offer"
+            onChange={(event) => setSelection(event.value)}
+            options={priceOptions}
+            value={selection}
+          />
         </label>
-        <select
-          className="h-11 border border-zinc-300 bg-white px-3"
-          id="extend-offer"
-          onChange={(event) => setSelection(event.target.value)}
-          value={selection}
-        >
-          {plan.durations.flatMap((duration) =>
-            duration.prices.map((price) => (
-              <option
-                key={`${duration.days}:${price.gateway_type}`}
-                value={`${duration.days}:${price.gateway_type}`}
-              >
-                {formatDuration(duration.days)} — {price.final_amount}{" "}
-                {price.currency_symbol} — {price.gateway_type}
-              </option>
-            )),
-          )}
-        </select>
         {selectedPrice ? (
           <p className="text-2xl font-semibold">
             {selectedPrice.final_amount} {selectedPrice.currency_symbol}
           </p>
         ) : null}
-      </div>
-      {submitError ? <p className="text-sm text-red-700">{submitError}</p> : null}
+      </Card>
+      {submitError ? <Message severity="error" text={submitError} /> : null}
       <div className="flex flex-wrap gap-3">
-        <button
-          className="h-11 bg-zinc-950 px-4 text-white disabled:opacity-60"
+        <Button
           disabled={submitting || !selectedPrice}
+          label="Продлить"
+          loading={submitting}
           onClick={extendSubscription}
           type="button"
-        >
-          Продлить
-        </button>
-        <a className="inline-flex h-11 items-center border border-zinc-300 px-4" href="/cabinet">
-          Вернуться в кабинет
-        </a>
+        />
+        <LinkButton href="/cabinet" label="Вернуться в кабинет" outlined />
       </div>
     </div>
   );

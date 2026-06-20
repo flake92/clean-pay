@@ -2,6 +2,15 @@
 
 import { useCallback, useEffect, useState } from "react";
 import type { FormEvent } from "react";
+import { Button } from "primereact/button";
+import { Column } from "primereact/column";
+import { DataTable } from "primereact/datatable";
+import { InputText } from "primereact/inputtext";
+import { Message } from "primereact/message";
+import { ProgressBar } from "primereact/progressbar";
+import { Tag } from "primereact/tag";
+
+import { LinkButton } from "@/components/prime/link-button";
 
 type CabinetUser = {
   email: string | null;
@@ -119,6 +128,22 @@ function paymentStatusLabel(status: string) {
   };
 
   return labels[status] ?? status;
+}
+
+function statusSeverity(status?: string): "success" | "warning" | "danger" | "info" {
+  if (status === "active" || status === "completed") {
+    return "success";
+  }
+
+  if (status === "pending" || status === "limited") {
+    return "warning";
+  }
+
+  if (status === "failed" || status === "canceled" || status === "expired" || status === "disabled") {
+    return "danger";
+  }
+
+  return "info";
 }
 
 function detailValue(value?: string | number | boolean | null) {
@@ -362,17 +387,17 @@ export function CabinetPanel() {
 
   if (error) {
     return (
-      <div className="grid gap-4">
-        <p className="text-red-700">{error}</p>
-        <a className="text-cyan-700" href="/login">
-          Войти
-        </a>
+      <div className="card">
+        <Message severity="error" text={error} />
+        <div className="mt-3">
+          <LinkButton href="/login" label="Войти" />
+        </div>
       </div>
     );
   }
 
   if (!user) {
-    return <p className="text-zinc-600">Загрузка...</p>;
+    return <Message severity="info" text="Загрузка кабинета..." />;
   }
 
   const usedTraffic = subscription?.used_traffic_bytes ?? null;
@@ -385,348 +410,360 @@ export function CabinetPanel() {
   const maxDevices = devices?.max_count ?? subscription?.device_limit ?? null;
 
   return (
-    <div className="grid gap-6">
-      <section className="grid gap-4 border border-zinc-200 bg-zinc-50 p-5">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-          <div>
-            <p className="text-sm font-medium text-zinc-500">Текущая подписка</p>
-            <h2 className="mt-1 text-2xl font-semibold">
-              {subscription?.plan_name ?? "Подписка не активна"}
-            </h2>
+    <div className="grid">
+      <div className="col-12 lg:col-6 xl:col-3">
+        <Metric icon="pi pi-shield" label="Подписка" tone="blue" value={subscription?.plan_name ?? "Не активна"} />
+      </div>
+      <div className="col-12 lg:col-6 xl:col-3">
+        <Metric icon="pi pi-calendar" label="Действует до" tone="orange" value={subscription ? formatDate(subscription.expire_at) : "-"} />
+      </div>
+      <div className="col-12 lg:col-6 xl:col-3">
+        <Metric
+          icon="pi pi-mobile"
+          label="Устройства"
+          tone="cyan"
+          value={
+            deviceCount !== null && maxDevices !== null
+              ? `${deviceCount} из ${maxDevices}`
+              : maxDevices !== null
+                ? `До ${maxDevices}`
+                : "-"
+          }
+        />
+      </div>
+      <div className="col-12 lg:col-6 xl:col-3">
+        <Metric icon="pi pi-database" label="Трафик" tone="purple" value={`${formatBytes(usedTraffic)} / ${subscription ? formatTrafficLimit(subscription.traffic_limit) : "-"}`} />
+      </div>
+
+      <div className="col-12 xl:col-8">
+      <div className="card">
+        <div className="flex flex-column gap-4">
+          <div className="flex flex-column gap-3 md:flex-row md:align-items-start md:justify-content-between">
+            <div>
+              <span className="text-sm font-medium text-500">Текущая подписка</span>
+              <h2 className="mt-2 mb-0 text-3xl font-semibold text-900">
+                {subscription?.plan_name ?? "Подписка не активна"}
+              </h2>
+            </div>
+            <Tag
+              severity={subscription ? statusSeverity(subscription.status) : "warning"}
+              value={subscription ? statusLabel(subscription.status) : "Нет подписки"}
+            />
           </div>
-          <span className="w-fit border border-cyan-200 bg-cyan-50 px-3 py-1 text-sm font-medium text-cyan-800">
-            {subscription ? statusLabel(subscription.status) : "Нет подписки"}
-          </span>
-        </div>
 
-        {subscriptionError ? (
-          <p className="text-sm text-red-700">{subscriptionError}</p>
-        ) : null}
+          {subscriptionError ? <Message severity="error" text={subscriptionError} /> : null}
 
-        {subscription ? (
-          <>
-            <div className="grid gap-3 sm:grid-cols-3">
-              <div className="border border-zinc-200 bg-white p-4">
-                <p className="text-xs uppercase text-zinc-500">Действует до</p>
-                <p className="mt-2 font-medium">{formatDate(subscription.expire_at)}</p>
-              </div>
-              <div className="border border-zinc-200 bg-white p-4">
-                <p className="text-xs uppercase text-zinc-500">Устройства</p>
-                <p className="mt-2 font-medium">
-                  {deviceCount !== null && maxDevices !== null
-                    ? `${deviceCount} из ${maxDevices}`
-                    : maxDevices !== null
-                      ? `До ${maxDevices}`
-                      : "-"}
-                </p>
-              </div>
-              <div className="border border-zinc-200 bg-white p-4">
-                <p className="text-xs uppercase text-zinc-500">Трафик</p>
-                <p className="mt-2 font-medium">
-                  {formatBytes(usedTraffic)} / {formatTrafficLimit(subscription.traffic_limit)}
-                </p>
-              </div>
-            </div>
-
-            {usagePercent !== null ? (
-              <div>
-                <div className="h-2 w-full overflow-hidden bg-zinc-200">
-                  <div
-                    className="h-full bg-cyan-600"
-                    style={{ width: `${usagePercent}%` }}
-                  />
+          {subscription ? (
+            <>
+              {usagePercent !== null ? (
+                <div>
+                  <ProgressBar value={usagePercent} />
+                  <p className="mt-2 mb-0 text-sm text-600">
+                    Использовано {usagePercent}% текущего лимита
+                  </p>
                 </div>
-                <p className="mt-2 text-sm text-zinc-600">
-                  Использовано {usagePercent}% текущего лимита
-                </p>
-              </div>
-            ) : null}
-
-            <div className="flex flex-wrap items-center gap-3">
-              <a
-                className="bg-zinc-950 px-4 py-2 text-white"
-                href={subscription.url}
-                rel="noreferrer"
-                target="_blank"
-              >
-                Подключиться
-              </a>
-              <button
-                className="border border-zinc-300 bg-white px-4 py-2"
-                onClick={copySubscriptionUrl}
-                type="button"
-              >
-                Скопировать ссылку подписки
-              </button>
-              {copyStatus ? (
-                <span className="text-sm text-zinc-600">{copyStatus}</span>
               ) : null}
-            </div>
 
-            <div className="grid gap-3 border-t border-zinc-200 pt-4">
-              <div className="flex flex-wrap gap-3">
-                <button
-                  className="border border-red-300 bg-white px-4 py-2 text-red-700 disabled:opacity-60"
-                  disabled={pendingAction === "reissue"}
-                  onClick={reissueSubscription}
+              <div className="flex flex-wrap align-items-center gap-2">
+                <LinkButton
+                  external
+                  href={subscription.url}
+                  icon="pi pi-external-link"
+                  label="Подключиться"
+                />
+                <Button
+                  icon="pi pi-copy"
+                  label="Скопировать ссылку"
+                  onClick={copySubscriptionUrl}
+                  outlined
                   type="button"
-                >
-                  Перевыпустить подписку
-                </button>
+                />
+                {copyStatus ? <Message severity="info" text={copyStatus} /> : null}
+              </div>
+
+              <Message
+                severity="warn"
+                text="Перевыпуск подписки отключит все текущие устройства."
+              />
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  disabled={pendingAction === "reissue"}
+                  label="Перевыпустить подписку"
+                  loading={pendingAction === "reissue"}
+                  onClick={reissueSubscription}
+                  outlined
+                  severity="danger"
+                  type="button"
+                />
                 {devices && devices.devices.length > 0 ? (
-                  <button
-                    className="border border-red-300 bg-white px-4 py-2 text-red-700 disabled:opacity-60"
+                  <Button
                     disabled={pendingAction === "delete-all-devices"}
+                    label="Удалить все устройства"
+                    loading={pendingAction === "delete-all-devices"}
                     onClick={deleteAllDevices}
+                    outlined
+                    severity="danger"
                     type="button"
-                  >
-                    Удалить все устройства
-                  </button>
+                  />
                 ) : null}
               </div>
-              <p className="text-sm text-zinc-600">
-                Перевыпуск подписки отключит все текущие устройства.
-              </p>
+            </>
+          ) : (
+            <div className="flex flex-wrap gap-2">
+              <LinkButton href="/tariffs" label="Выбрать тариф" />
+              <LinkButton href="/link-account" label="Привязать аккаунт" outlined />
             </div>
-          </>
-        ) : (
-          <div className="flex flex-wrap gap-3">
-            <a className="bg-zinc-950 px-4 py-2 text-white" href="/tariffs">
-              Выбрать тариф
-            </a>
-            <a className="border border-zinc-300 bg-white px-4 py-2" href="/link-account">
-              Привязать аккаунт
-            </a>
-          </div>
-        )}
-      </section>
+          )}
+        </div>
+      </div>
+      </div>
 
-      <section className="grid gap-4">
-        <h2 className="text-xl font-semibold">Профиль</h2>
-        <dl className="grid gap-3 text-sm">
-          <div className="flex justify-between gap-4 border-b border-zinc-200 pb-2">
-            <dt className="text-zinc-500">Имя</dt>
-            <dd>{user.name ?? user.fullName ?? user.displayName ?? "-"}</dd>
+      <div className="col-12 xl:col-4">
+        <div className="card">
+          <h5>Профиль</h5>
+          <div className="grid">
+            <div className="col-12">
+              <DetailLine label="Имя" value={user.name ?? user.fullName ?? user.displayName ?? "-"} />
+            </div>
+            <div className="col-12">
+              <DetailLine label="E-mail" value={user.email ?? "Не привязан"} />
+            </div>
+            <div className="col-12">
+              <DetailLine
+              label="Telegram"
+              value={
+                user.telegramUsername
+                  ? `@${user.telegramUsername}`
+                  : user.telegramId
+                    ? user.telegramId
+                    : "Не привязан"
+              }
+            />
+            </div>
+            <div>
+              <span className="text-xs uppercase text-500">E-mail подтверждён</span>
+              <div className="mt-2">
+                <Tag
+                  severity={user.is_email_verified ?? user.emailVerified ? "success" : "warning"}
+                  value={user.is_email_verified ?? user.emailVerified ? "Да" : "Нет"}
+                />
+              </div>
+            </div>
           </div>
-          <div className="flex justify-between gap-4 border-b border-zinc-200 pb-2">
-            <dt className="text-zinc-500">E-mail</dt>
-            <dd>{user.email ?? "Не привязан"}</dd>
-          </div>
-          <div className="flex justify-between gap-4 border-b border-zinc-200 pb-2">
-            <dt className="text-zinc-500">Telegram</dt>
-            <dd>
-              {user.telegramUsername
-                ? `@${user.telegramUsername}`
-                : user.telegramId
-                  ? user.telegramId
-                  : "Не привязан"}
-            </dd>
-          </div>
-          <div className="flex justify-between gap-4 border-b border-zinc-200 pb-2">
-            <dt className="text-zinc-500">E-mail подтверждён</dt>
-            <dd>{user.is_email_verified ?? user.emailVerified ? "Да" : "Нет"}</dd>
-          </div>
-        </dl>
-      </section>
+        </div>
+      </div>
 
-      {subscription ? (
-        <section className="grid gap-4">
-          {actionMessage ? (
-            <p className="border border-zinc-200 bg-zinc-50 p-3 text-sm text-zinc-700">
-              {actionMessage}
-            </p>
-          ) : null}
-
-          <form
-            className="grid gap-3 border border-zinc-200 bg-white p-4 sm:grid-cols-[1fr_auto]"
-            onSubmit={activatePromocode}
-          >
-            <label className="grid gap-2 text-sm">
-              <span className="font-medium text-zinc-700">Промокод</span>
-              <input
-                className="border border-zinc-300 px-3 py-2 outline-none focus:border-cyan-600"
-                onChange={(event) => setPromocode(event.target.value)}
-                placeholder="Введите код"
-                value={promocode}
-              />
-            </label>
-            <button
-              className="self-end bg-zinc-950 px-4 py-2 text-white disabled:opacity-60"
-              disabled={pendingAction === "promocode"}
-              type="submit"
-            >
-              Активировать
-            </button>
-          </form>
-
-          <h2 className="text-xl font-semibold">Детали подписки</h2>
-          <dl className="grid gap-3 text-sm sm:grid-cols-2">
-            <div className="border border-zinc-200 p-3">
-              <dt className="text-zinc-500">Remnawave ID</dt>
-              <dd className="mt-1 break-all">{subscription.user_remna_id}</dd>
+        {subscription ? (
+      <div className="col-12 xl:col-6">
+          <div className="card">
+            <h5>Детали подписки</h5>
+            {actionMessage ? <Message severity="info" text={actionMessage} /> : null}
+            <form className="mt-3 mb-4 flex flex-column gap-2" onSubmit={activatePromocode}>
+              <label className="text-sm font-medium text-700" htmlFor="promocode">
+                Промокод
+              </label>
+              <div className="p-inputgroup">
+                <InputText
+                  id="promocode"
+                  onChange={(event) => setPromocode(event.target.value)}
+                  placeholder="Введите код"
+                  value={promocode}
+                />
+                <Button
+                  disabled={pendingAction === "promocode"}
+                  label="Активировать"
+                  loading={pendingAction === "promocode"}
+                  type="submit"
+                />
+              </div>
+            </form>
+            <div className="grid">
+              <div className="col-12 md:col-6">
+                <DetailLine label="Remnawave ID" value={subscription.user_remna_id} />
+              </div>
+              <div className="col-12 md:col-6">
+                <DetailLine label="Пробная" value={detailValue(subscription.is_trial)} />
+              </div>
+              <div className="col-12 md:col-6">
+                <DetailLine label="Длительность тарифа" value={`${subscription.plan_duration_days} дней`} />
+              </div>
+              <div className="col-12 md:col-6">
+                <DetailLine label="Стратегия лимита" value={detailValue(subscription.traffic_limit_strategy)} />
+              </div>
+              <div className="col-12 md:col-6">
+                <DetailLine label="Использовано всего" value={formatBytes(subscription.lifetime_used_traffic_bytes)} />
+              </div>
+              <div className="col-12 md:col-6">
+                <DetailLine label="Онлайн" value={formatDate(subscription.online_at)} />
+              </div>
             </div>
-            <div className="border border-zinc-200 p-3">
-              <dt className="text-zinc-500">Пробная</dt>
-              <dd className="mt-1">{detailValue(subscription.is_trial)}</dd>
-            </div>
-            <div className="border border-zinc-200 p-3">
-              <dt className="text-zinc-500">Длительность тарифа</dt>
-              <dd className="mt-1">{subscription.plan_duration_days} дней</dd>
-            </div>
-            <div className="border border-zinc-200 p-3">
-              <dt className="text-zinc-500">Стратегия лимита</dt>
-              <dd className="mt-1">{detailValue(subscription.traffic_limit_strategy)}</dd>
-            </div>
-            <div className="border border-zinc-200 p-3">
-              <dt className="text-zinc-500">Использовано всего</dt>
-              <dd className="mt-1">
-                {formatBytes(subscription.lifetime_used_traffic_bytes)}
-              </dd>
-            </div>
-            <div className="border border-zinc-200 p-3">
-              <dt className="text-zinc-500">Онлайн</dt>
-              <dd className="mt-1">{formatDate(subscription.online_at)}</dd>
-            </div>
-          </dl>
-        </section>
-      ) : null}
+          </div>
+      </div>
+        ) : null}
 
       {devices ? (
-        <section className="grid gap-4">
-          <h2 className="text-xl font-semibold">Устройства</h2>
-          {devices.devices.length > 0 ? (
-            <div className="grid gap-3">
-              {devices.devices.map((device) => (
-                <div className="border border-zinc-200 p-4" key={device.hwid}>
-                  <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-                    <div>
-                      <p className="font-medium">
-                        {device.device_model ?? device.platform ?? "Устройство"}
-                      </p>
-                      <p className="mt-1 break-all text-sm text-zinc-500">{device.hwid}</p>
-                    </div>
-                    <p className="text-sm text-zinc-500">
-                      {detailValue(device.os_version)}
-                    </p>
+      <div className="col-12 xl:col-6">
+        <div className="card">
+          <h5>Устройства</h5>
+          <DataTable
+            emptyMessage="Подключенных устройств пока нет."
+            responsiveLayout="scroll"
+            value={devices.devices}
+          >
+            <Column
+              body={(device: SubscriptionDevice) => (
+                <div>
+                  <div className="font-medium">
+                    {device.device_model ?? device.platform ?? "Устройство"}
                   </div>
-                  {device.user_agent ? (
-                    <p className="mt-3 break-all text-xs text-zinc-500">
-                      {device.user_agent}
-                    </p>
-                  ) : null}
-                  <div className="mt-3">
-                    <button
-                      className="border border-zinc-300 px-3 py-2 text-sm text-zinc-700 disabled:opacity-60"
-                      disabled={pendingAction === `delete-device-${device.hwid}`}
-                      onClick={() => deleteDevice(device.hwid)}
-                      type="button"
-                    >
-                      Удалить устройство
-                    </button>
-                  </div>
+                  <div className="mt-1 text-xs text-500 break-all">{device.hwid}</div>
                 </div>
-              ))}
-            </div>
-          ) : (
-            <p className="text-sm text-zinc-600">Подключенных устройств пока нет.</p>
-          )}
-        </section>
+              )}
+              header="Устройство"
+            />
+            <Column
+              body={(device: SubscriptionDevice) => detailValue(device.os_version)}
+              header="OS"
+            />
+            <Column
+              body={(device: SubscriptionDevice) => (
+                <span className="text-xs text-500 break-all">{device.user_agent ?? "-"}</span>
+              )}
+              header="User agent"
+            />
+            <Column
+              body={(device: SubscriptionDevice) => (
+                <Button
+                  disabled={pendingAction === `delete-device-${device.hwid}`}
+                  icon="pi pi-trash"
+                  label="Удалить"
+                  loading={pendingAction === `delete-device-${device.hwid}`}
+                  onClick={() => deleteDevice(device.hwid)}
+                  outlined
+                  severity="danger"
+                  size="small"
+                  type="button"
+                />
+              )}
+              header=""
+            />
+          </DataTable>
+        </div>
+      </div>
       ) : null}
 
-      <section className="grid gap-4">
-        <h2 className="text-xl font-semibold">История платежей</h2>
-        {payments.length > 0 ? (
-          <div className="grid gap-3">
-            {payments.map((payment) => (
-              <div
-                className="grid gap-3 border border-zinc-200 p-4 sm:grid-cols-[1fr_auto]"
-                key={payment.payment_id}
-              >
-                <div>
-                  <p className="font-medium">
-                    {payment.plan_name ?? payment.purchase_type}
-                  </p>
-                  <p className="mt-1 text-sm text-zinc-500">
-                    {formatDate(payment.created_at)} · {payment.gateway_type}
-                    {payment.duration_days ? ` · ${payment.duration_days} дней` : ""}
-                  </p>
-                  <p className="mt-1 break-all text-xs text-zinc-500">
-                    {payment.payment_id}
-                  </p>
-                </div>
-                <div className="sm:text-right">
-                  <p className="font-semibold">
-                    {payment.final_amount} {payment.currency}
-                  </p>
-                  <p className="mt-1 text-sm text-zinc-500">
-                    {payment.is_free ? "Бесплатно" : paymentStatusLabel(payment.status)}
-                  </p>
-                </div>
+      <div className="col-12">
+      <div className="card">
+        <h5>История платежей</h5>
+        <DataTable
+          emptyMessage="Платежей через web-кабинет пока нет."
+          responsiveLayout="scroll"
+          value={payments}
+        >
+          <Column
+            body={(payment: PaymentRecord) => (
+              <div>
+                <div className="font-medium">{payment.plan_name ?? payment.purchase_type}</div>
+                <div className="mt-1 text-xs text-500 break-all">{payment.payment_id}</div>
               </div>
-            ))}
-          </div>
-        ) : (
-          <p className="text-sm text-zinc-600">Платежей через web-кабинет пока нет.</p>
-        )}
-      </section>
+            )}
+            header="Платёж"
+          />
+          <Column body={(payment: PaymentRecord) => formatDate(payment.created_at)} header="Дата" />
+          <Column field="gateway_type" header="Gateway" />
+          <Column
+            body={(payment: PaymentRecord) => (
+              <span>
+                {payment.final_amount} {payment.currency}
+              </span>
+            )}
+            header="Сумма"
+          />
+          <Column
+            body={(payment: PaymentRecord) => (
+              <Tag
+                severity={payment.is_free ? "info" : statusSeverity(payment.status)}
+                value={payment.is_free ? "Бесплатно" : paymentStatusLabel(payment.status)}
+              />
+            )}
+            header="Статус"
+          />
+        </DataTable>
+      </div>
+      </div>
 
       {support?.enabled &&
       (support.email || support.telegramUsername || support.faqUrl) ? (
-        <section className="grid gap-4 border border-zinc-200 bg-zinc-50 p-5">
-          <h2 className="text-xl font-semibold">Поддержка</h2>
-          <div className="flex flex-wrap gap-3">
+      <div className="col-12">
+        <div className="card">
+          <h5>Поддержка</h5>
+          <div className="flex flex-wrap gap-2">
             {support.email ? (
-              <a
-                className="border border-zinc-300 bg-white px-4 py-2"
-                href={`mailto:${support.email}`}
-              >
-                Написать на почту
-              </a>
+              <LinkButton href={`mailto:${support.email}`} label="Написать на почту" outlined />
             ) : null}
             {support.telegramUsername ? (
-              <a
-                className="border border-zinc-300 bg-white px-4 py-2"
+              <LinkButton
+                external
                 href={`https://t.me/${support.telegramUsername.replace(/^@/, "")}`}
-                rel="noreferrer"
-                target="_blank"
-              >
-                Telegram
-              </a>
+                label="Telegram"
+                outlined
+              />
             ) : null}
             {support.faqUrl ? (
-              <a
-                className="border border-zinc-300 bg-white px-4 py-2"
-                href={support.faqUrl}
-                rel="noreferrer"
-                target="_blank"
-              >
-                FAQ
-              </a>
+              <LinkButton external href={support.faqUrl} label="FAQ" outlined />
             ) : null}
           </div>
-        </section>
+        </div>
+      </div>
       ) : null}
 
-      <div className="flex flex-wrap gap-3">
-        <a className="border border-zinc-300 px-4 py-2" href="/extend">
-          Продлить
-        </a>
-        <a className="border border-zinc-300 px-4 py-2" href="/tariffs">
-          Тарифы
-        </a>
-        <a className="border border-zinc-300 px-4 py-2" href="/verify-email">
-          Подтвердить e-mail
-        </a>
-        <a className="border border-zinc-300 px-4 py-2" href="/profile">
-          Профиль
-        </a>
-        <a className="border border-zinc-300 px-4 py-2" href="/link-account">
-          Привязать аккаунт
-        </a>
-        <button className="bg-zinc-950 px-4 py-2 text-white" onClick={logout}>
-          Выйти
-        </button>
+      <div className="col-12 flex flex-wrap gap-2">
+        <LinkButton href="/extend" label="Продлить" outlined />
+        <LinkButton href="/tariffs" label="Тарифы" outlined />
+        <LinkButton href="/verify-email" label="Подтвердить e-mail" outlined />
+        <LinkButton href="/profile" label="Профиль" outlined />
+        <LinkButton href="/support" label="Поддержка" outlined />
+        <LinkButton href="/link-account" label="Привязать аккаунт" outlined />
+        <Button icon="pi pi-sign-out" label="Выйти" onClick={logout} severity="secondary" />
       </div>
+    </div>
+  );
+}
+
+function Metric({
+  icon,
+  label,
+  tone,
+  value,
+}: {
+  icon: string;
+  label: string;
+  tone: "blue" | "orange" | "cyan" | "purple";
+  value: React.ReactNode;
+}) {
+  return (
+    <div className="card mb-0">
+      <div className="flex justify-content-between mb-3">
+        <div>
+          <span className="block text-500 font-medium mb-3">{label}</span>
+          <div className="text-900 font-medium text-xl break-words">{value}</div>
+        </div>
+        <div
+          className={`flex align-items-center justify-content-center bg-${tone}-100 border-round`}
+          style={{ width: "2.5rem", height: "2.5rem" }}
+        >
+          <i className={`${icon} text-${tone}-500 text-xl`} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function DetailLine({ label, value }: { label: string; value: React.ReactNode }) {
+  return (
+    <div className="py-2 border-bottom-1 surface-border">
+      <div className="text-xs uppercase text-500">{label}</div>
+      <div className="mt-1 font-medium text-900 break-words">{value}</div>
     </div>
   );
 }

@@ -2,6 +2,11 @@
 
 import { useState } from "react";
 
+import { Button } from "primereact/button";
+import { InputText } from "primereact/inputtext";
+import { Message } from "primereact/message";
+import { Password } from "primereact/password";
+
 type ApiState = {
   loading: boolean;
   error: string | null;
@@ -39,29 +44,24 @@ export function LoginForm() {
   }
 
   return (
-    <form className="grid gap-4" onSubmit={onSubmit}>
-      <input
-        className="h-11 border border-zinc-300 bg-white px-3"
-        name="email"
-        placeholder="E-mail"
-        type="email"
-        required
-      />
-      <input
-        className="h-11 border border-zinc-300 bg-white px-3"
-        name="password"
-        placeholder="Пароль"
-        type="password"
-        required
-      />
-      {state.error ? <p className="text-sm text-red-700">{state.error}</p> : null}
-      <button
-        className="h-11 bg-zinc-950 px-4 text-white disabled:opacity-60"
-        disabled={state.loading}
-        type="submit"
-      >
-        Войти
-      </button>
+    <form className="flex flex-column gap-3" onSubmit={onSubmit}>
+      <label className="flex flex-column gap-2">
+        <span className="text-sm font-medium text-700">E-mail</span>
+        <InputText name="email" placeholder="user@example.com" required type="email" />
+      </label>
+      <label className="flex flex-column gap-2">
+        <span className="text-sm font-medium text-700">Пароль</span>
+        <Password
+          feedback={false}
+          inputClassName="w-full"
+          name="password"
+          placeholder="Введите пароль"
+          required
+          toggleMask
+        />
+      </label>
+      {state.error ? <Message severity="error" text={state.error} /> : null}
+      <Button disabled={state.loading} label="Войти" loading={state.loading} type="submit" />
     </form>
   );
 }
@@ -93,36 +93,34 @@ export function RegisterForm() {
   }
 
   return (
-    <form className="grid gap-4" onSubmit={onSubmit}>
-      <input
-        className="h-11 border border-zinc-300 bg-white px-3"
-        name="name"
-        placeholder="Имя"
-        type="text"
-      />
-      <input
-        className="h-11 border border-zinc-300 bg-white px-3"
-        name="email"
-        placeholder="E-mail"
-        type="email"
-        required
-      />
-      <input
-        className="h-11 border border-zinc-300 bg-white px-3"
-        name="password"
-        placeholder="Пароль"
-        type="password"
-        minLength={8}
-        required
-      />
-      {state.error ? <p className="text-sm text-red-700">{state.error}</p> : null}
-      <button
-        className="h-11 bg-zinc-950 px-4 text-white disabled:opacity-60"
+    <form className="flex flex-column gap-3" onSubmit={onSubmit}>
+      <label className="flex flex-column gap-2">
+        <span className="text-sm font-medium text-700">Имя</span>
+        <InputText name="name" placeholder="Как к вам обращаться" type="text" />
+      </label>
+      <label className="flex flex-column gap-2">
+        <span className="text-sm font-medium text-700">E-mail</span>
+        <InputText name="email" placeholder="user@example.com" required type="email" />
+      </label>
+      <label className="flex flex-column gap-2">
+        <span className="text-sm font-medium text-700">Пароль</span>
+        <Password
+          inputClassName="w-full"
+          minLength={8}
+          name="password"
+          placeholder="Придумайте пароль"
+          required
+          toggleMask
+        />
+        <span className="text-xs text-500">Минимум 8 символов.</span>
+      </label>
+      {state.error ? <Message severity="error" text={state.error} /> : null}
+      <Button
         disabled={state.loading}
+        label="Зарегистрироваться"
+        loading={state.loading}
         type="submit"
-      >
-        Зарегистрироваться
-      </button>
+      />
     </form>
   );
 }

@@ -182,7 +182,7 @@ This is not direct Remnashop DB access.
 
 ## Support
 
-The cabinet support block is controlled by env:
+The `/support` page and cabinet support block are controlled by env:
 
 - `SUPPORT_ENABLED`
 - `SUPPORT_EMAIL`

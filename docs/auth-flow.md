@@ -52,6 +52,7 @@ If target e-mail or Telegram ID is already linked to another local user, BFF ret
 - `/payment/fail`
 - `/payment/pending`
 - `/extend`
+- `/support`
 
 ## E-mail Verification
 
@@ -83,3 +84,9 @@ It also supports device deletion, full device reset, subscription URL reissue wi
 The cabinet shows local payment history for payments created through Clean Pay.
 
 Payment return pages check local payment records and current Remnashop subscription through the BFF.
+
+## Support
+
+`/support` shows CleanVPN support contacts, a short connection checklist, and
+the note that the site is intended for users who manage subscriptions without
+the Telegram bot.

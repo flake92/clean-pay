@@ -97,3 +97,22 @@
 - Шаг 13 по плану — отдельная страница поддержки.
 - Блок/страница поддержки должны быть отключаемыми.
 - Контакты: support e-mail, Telegram username, FAQ URL.
+
+## После шага 13
+- Отдельная страница `/support` нужна и должна считаться частью шага 13.
+- Текущий frontend признан неправильным по UI/UX: это временный Tailwind-макет, не production dashboard.
+- Frontend нужно полностью переделать: общая навигация, layout, формы, состояния, dashboard/cabinet, responsive UX, единые компоненты реальной UI-библиотеки.
+- Направление shadcn/ui отменено, итоговый UI-kit для этой переделки — PrimeReact.
+
+## Текущее решение по frontend
+- Работаем не по shadcn/ui: это направление отменено.
+- Полностью переделываем UI/UX на PrimeReact как реальной UI-библиотеке: https://primereact.org/
+- PrimeReact уже выбран как основной frontend UI-kit для проекта.
+- Источник общего дизайна и layout-паттернов — локальный шаблон PrimeReact Sakai: `primereact-sakai-template`.
+- UI Clean Pay нужно конструировать в стиле Sakai строго из физически перенесенных Sakai layout/styles/types/assets и реальных компонентов PrimeReact.
+- Никаких самодельных UI-kit блоков, кастомного shell/sidebar/topbar/cards как дизайн-системы быть не должно.
+- Допустимы только тонкие архитектурные адаптеры для подключения бизнес-логики; визуальная структура должна оставаться Sakai/PrimeReact.
+- Нужно использовать реальные компоненты PrimeReact, а не самописные аналоги: Button, InputText, Password, Dropdown, Message, Tag, DataTable, ProgressBar, Menu/PanelMenu, Toast/Dialog/ConfirmDialog по необходимости.
+- Dashboard/cabinet нужно конструировать по Sakai dashboard/admin template-подходу, не собирать всё с нуля на div/className.
+- Шаг 14 не начинаем, пока frontend не приведён к PrimeReact UI/UX.
+- В плане и в реальности текущая активная работа: полная PrimeReact Sakai-переделка frontend.

@@ -2,6 +2,12 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
+import { Card } from "primereact/card";
+import { Message } from "primereact/message";
+import { Tag } from "primereact/tag";
+
+import { AppShell, PageHeader } from "@/components/layout";
+import { LinkButton } from "@/components/prime/link-button";
 
 type PaymentStatus = {
   payment_id: string;
@@ -73,6 +79,22 @@ function paymentStatusLabel(status: string) {
   return labels[status] ?? status;
 }
 
+function paymentSeverity(status: string): "success" | "warning" | "danger" | "info" {
+  if (status === "completed") {
+    return "success";
+  }
+
+  if (status === "pending") {
+    return "warning";
+  }
+
+  if (status === "failed" || status === "canceled") {
+    return "danger";
+  }
+
+  return "info";
+}
+
 export function PaymentReturnStatus({ kind }: Props) {
   const searchParams = useSearchParams();
   const [data, setData] = useState<StatusResponse | null>(null);
@@ -109,61 +131,60 @@ export function PaymentReturnStatus({ kind }: Props) {
   }, [paymentId]);
 
   return (
-    <main className="mx-auto grid min-h-screen w-full max-w-xl content-center px-6 py-16">
-      <p className="text-sm font-medium uppercase tracking-[0.18em] text-cyan-700">
-        CleanVPN
-      </p>
-      <h1 className="mt-4 text-3xl font-semibold">{heading(kind)}</h1>
-      <p className="mt-4 text-zinc-600">{intro(kind)}</p>
-
-      <section className="mt-8 grid gap-4 border border-zinc-200 bg-white p-5">
-        {error ? <p className="text-sm text-red-700">{error}</p> : null}
-        {!error && !data ? <p className="text-sm text-zinc-600">Проверка...</p> : null}
+    <AppShell>
+      <div className="grid max-w-3xl gap-6">
+        <PageHeader description={intro(kind)} title={heading(kind)} />
+      <Card>
+        <div className="grid gap-4">
+        {error ? <Message severity="error" text={error} /> : null}
+        {!error && !data ? <Message severity="info" text="Проверка..." /> : null}
         {data?.payment ? (
-          <dl className="grid gap-3 text-sm">
-            <div className="flex justify-between gap-4">
-              <dt className="text-zinc-500">Платёж</dt>
-              <dd className="break-all text-right">{data.payment.payment_id}</dd>
+          <div className="grid gap-3 md:grid-cols-2">
+            <Metric label="Платёж" value={data.payment.payment_id} />
+            <div className="surface-50 border-1 border-200 border-round-lg p-3">
+              <div className="text-xs uppercase text-500">Статус</div>
+              <div className="mt-2">
+                <Tag
+                  severity={paymentSeverity(data.payment.status)}
+                  value={paymentStatusLabel(data.payment.status)}
+                />
+              </div>
             </div>
-            <div className="flex justify-between gap-4">
-              <dt className="text-zinc-500">Статус</dt>
-              <dd>{paymentStatusLabel(data.payment.status)}</dd>
-            </div>
-            <div className="flex justify-between gap-4">
-              <dt className="text-zinc-500">Сумма</dt>
-              <dd>
-                {data.payment.final_amount} {data.payment.currency}
-              </dd>
-            </div>
-            <div className="flex justify-between gap-4">
-              <dt className="text-zinc-500">Дата</dt>
-              <dd>{formatDate(data.payment.created_at)}</dd>
-            </div>
-          </dl>
+            <Metric
+              label="Сумма"
+              value={`${data.payment.final_amount} ${data.payment.currency}`}
+            />
+            <Metric label="Дата" value={formatDate(data.payment.created_at)} />
+          </div>
         ) : null}
         {data && !data.payment ? (
-          <p className="text-sm text-zinc-600">
-            Локальная запись платежа не найдена. Проверьте кабинет позже.
-          </p>
+          <Message severity="warn" text="Локальная запись платежа не найдена. Проверьте кабинет позже." />
         ) : null}
         {data?.subscription ? (
-          <p className="text-sm text-zinc-700">
-            Текущая подписка: {data.subscription.plan_name}, до{" "}
-            {formatDate(data.subscription.expire_at)}.
-          </p>
+          <Message
+            severity="success"
+            text={`Текущая подписка: ${data.subscription.plan_name}, до ${formatDate(data.subscription.expire_at)}.`}
+          />
         ) : null}
-      </section>
+        </div>
+      </Card>
 
-      <div className="mt-8 flex flex-wrap gap-3">
-        <a className="inline-flex h-11 items-center bg-zinc-950 px-4 text-white" href="/cabinet">
-          Открыть кабинет
-        </a>
+      <div className="flex flex-wrap gap-2">
+        <LinkButton href="/cabinet" label="Открыть кабинет" />
         {kind === "fail" ? (
-          <a className="inline-flex h-11 items-center border border-zinc-300 px-4" href="/tariffs">
-            Вернуться к тарифам
-          </a>
+          <LinkButton href="/tariffs" label="Вернуться к тарифам" outlined />
         ) : null}
       </div>
-    </main>
+      </div>
+    </AppShell>
+  );
+}
+
+function Metric({ label, value }: { label: string; value: React.ReactNode }) {
+  return (
+    <div className="surface-50 border-1 border-200 border-round-lg p-3">
+      <div className="text-xs uppercase text-500">{label}</div>
+      <div className="mt-1 break-all font-medium text-900">{value}</div>
+    </div>
   );
 }
