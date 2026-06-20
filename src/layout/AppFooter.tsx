@@ -4,9 +4,20 @@ import React from 'react';
 
 const AppFooter = () => {
     return (
-        <div className="layout-footer">
-            <img src="/clean_vpn_logo.jpg" alt="CleanVPN logo" height="24" className="mr-2" />
-            <span className="font-medium ml-2">Clean Pay</span>
+        <div className="layout-footer flex align-items-center">
+            <img
+                src="/clean_vpn_logo.jpg"
+                alt="CleanVPN logo"
+                width="14"
+                height="14"
+                className="mr-2"
+                style={{
+                    objectFit: 'contain',
+                    borderRadius: '4px'
+                }}
+            />
+
+            <span className="font-medium ml-1">Clean Pay</span>
         </div>
     );
 };
