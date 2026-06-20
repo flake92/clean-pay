@@ -1,6 +1,7 @@
 import { bffError, bffJson } from "@/lib/bff-response";
 import { isMockMode, mockConfirmEmail } from "@/lib/mock-bff";
 import { prisma } from "@/lib/prisma";
+import { assertRateLimit } from "@/lib/rate-limit";
 import {
   getAuthorizedRemnashopTokens,
   remnashopRequest,
@@ -15,11 +16,26 @@ export const runtime = "nodejs";
 export async function POST(request: Request) {
   try {
     const body = (await request.json()) as ConfirmEmailVerificationRequest;
+
     if (isMockMode()) {
+      await assertRateLimit({
+        action: "email_verification_confirm",
+        limit: 5,
+        windowSeconds: 15 * 60,
+      });
+
       return bffJson(mockConfirmEmail());
     }
 
     const { accessToken, session } = await getAuthorizedRemnashopTokens();
+
+    await assertRateLimit({
+      action: "email_verification_confirm",
+      email: session.user.email,
+      tgId: session.user.telegramId,
+      limit: 5,
+      windowSeconds: 15 * 60,
+    });
     const result = await remnashopRequest<ConfirmEmailVerificationResponse>(
       "/auth/email/confirm",
       {

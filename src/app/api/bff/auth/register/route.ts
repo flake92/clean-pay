@@ -1,6 +1,7 @@
 import { bffError, bffJson } from "@/lib/bff-response";
 import { getEnv } from "@/lib/env";
 import { isMockMode, mockAuthPayload } from "@/lib/mock-bff";
+import { assertRateLimit } from "@/lib/rate-limit";
 import { remnashopAuth } from "@/lib/remnashop/client";
 import { createSessionFromRemnashopAuth } from "@/lib/remnashop/session";
 import type { RegisterRequest } from "@/lib/remnashop/types";
@@ -32,6 +33,14 @@ function mockAuthResponse(status = 200) {
 export async function POST(request: Request) {
   try {
     const body = (await request.json()) as RegisterRequest;
+
+    await assertRateLimit({
+      action: "auth_register",
+      email: body.email,
+      limit: 5,
+      windowSeconds: 15 * 60,
+    });
+
     if (isMockMode()) {
       return mockAuthResponse(201);
     }

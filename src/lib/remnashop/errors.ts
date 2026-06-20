@@ -22,6 +22,7 @@ type BffErrorDebug = {
   upstreamStatus?: number;
   upstreamPath?: string;
   upstreamDetail?: unknown;
+  retryAfterSeconds?: number;
   cause?: unknown;
 };
 

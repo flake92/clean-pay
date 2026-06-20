@@ -6,6 +6,7 @@ import { NextResponse } from "next/server";
 import { randomToken, sha256 } from "@/lib/crypto";
 import { getEnv } from "@/lib/env";
 import { prisma } from "@/lib/prisma";
+import { assertRateLimit } from "@/lib/rate-limit";
 
 const telegramAuthTtlSeconds = 10 * 60;
 
@@ -190,6 +191,13 @@ export async function consumeTelegramCallback(code: string, state: string) {
       : null;
   const fullName = getFullName(payload);
   const photoUrl = typeof payload.picture === "string" ? payload.picture : null;
+
+  await assertRateLimit({
+    action: authState.userId ? "telegram_link_confirm" : "telegram_login_confirm",
+    tgId: telegramId,
+    limit: 10,
+    windowSeconds: 15 * 60,
+  });
 
   const existingTelegramUser = await prisma.webUser.findUnique({
     where: { telegramId },

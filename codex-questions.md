@@ -153,5 +153,23 @@
 - Добавлена единая серверная модель BFF-ошибок с production-сообщениями и development-debug.
 - BFF в production отдаёт нейтральные пользовательские сообщения без упоминания Remnashop.
 - BFF в development отдаёт error.debug с raw upstream detail/status/path.
-- Клиентские компоненты читают BFF-ошибки через общий helper eadBffError.
+- Клиентские компоненты читают BFF-ошибки через общий helper `readBffError`.
 - Пользовательские тексты больше не упоминают Remnashop.
+
+
+## Answers before step 15
+- Storage: Redis.
+- Rate-limit key dimensions: action + email + tgid.
+- Limits are identical in normal and mock modes.
+- Limits: login/register 5 per 15 min; e-mail code request 1 per 60 sec and 5 per 15 min; e-mail code confirm 5 per 15 min; purchase/extend 10 per 15 min; Telegram login/link 10 per 15 min; tg_id/account binding 5 per 15 min where applicable.
+- On exceed: neutral production error; development debug includes retryAfterSeconds.
+
+## After step 15
+- Redis-backed rate-limit helper added.
+- Auth login/register, e-mail verification request/confirm, subscription purchase/extend, Remnashop account link, and Telegram login/link flow are rate-limited.
+- `.env.example` contains `REDIS_URL`; runtime rate-limit calls require a real Redis endpoint; build does not.
+- Verified: `npm run lint`; `npm run build`; `npm run build:mock`.
+- Devcontainer now includes a test Redis service and passes `REDIS_URL=redis://redis:6379/0` to the app by default.
+- `REDIS_URL` can be overridden to connect a real Redis.
+- Mock mode uses the same Redis-backed rate-limit path as normal mode; no in-memory fallback is used.
+- Runtime smoke passed against Redis: mock login created `auth_login` keys, normal Telegram start created `telegram_login_start` keys.
