@@ -1,7 +1,4 @@
-import React, { ReactElement, Dispatch, SetStateAction, HTMLAttributeAnchorTarget, MutableRefObject, ReactNode } from 'react';
-import { NextPage } from 'next';
-import { Demo } from './demo';
-import { Toast } from 'primereact/toast';
+import React, { Dispatch, SetStateAction, HTMLAttributeAnchorTarget, MutableRefObject, ReactNode } from 'react';
 
 /* Breadcrumb Types */
 export interface AppBreadcrumbProps {

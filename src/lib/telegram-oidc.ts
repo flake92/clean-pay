@@ -9,7 +9,7 @@ import { prisma } from "@/lib/prisma";
 
 const telegramAuthTtlSeconds = 10 * 60;
 
-export const telegramOidcCookieNames = {
+const telegramOidcCookieNames = {
   state: "clean_pay_tg_state",
   nonce: "clean_pay_tg_nonce",
   codeVerifier: "clean_pay_tg_code_verifier",

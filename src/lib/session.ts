@@ -5,7 +5,7 @@ import { getEnv } from "@/lib/env";
 import { prisma } from "@/lib/prisma";
 import { securityPolicy } from "@/lib/security-policy";
 
-export const sessionCookieNames = {
+const sessionCookieNames = {
   access: "clean_pay_access",
   refresh: "clean_pay_refresh",
 } as const;

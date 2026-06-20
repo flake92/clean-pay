@@ -3,8 +3,8 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev -p 3000",
-    "dev:mock": "CLEAN_PAY_MOCK_MODE=1 next dev -p 3001",
+    "dev": "WATCHPACK_POLLING=true next dev --webpack -p 3000",
+    "dev:mock": "CLEAN_PAY_MOCK_MODE=1 WATCHPACK_POLLING=true next dev --webpack -p 3001",
     "build": "next build",
     "start": "next start",
     "start:normal": "next start -p 3000",
@@ -17,6 +17,7 @@
   "dependencies": {
     "@prisma/adapter-pg": "^7.8.0",
     "@prisma/client": "^7.8.0",
+    "@types/react-transition-group": "^4.4.12",
     "dotenv": "^17.4.2",
     "jose": "^6.2.3",
     "next": "16.2.9",
@@ -24,7 +25,8 @@
     "primeicons": "^7.0.0",
     "primereact": "^10.9.8",
     "react": "19.2.4",
-    "react-dom": "19.2.4"
+    "react-dom": "19.2.4",
+    "react-transition-group": "^4.4.5"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",

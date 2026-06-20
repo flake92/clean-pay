@@ -84,7 +84,7 @@ export type PaymentInitResponse = {
   currency: string;
 };
 
-export type GatewayOffer = {
+type GatewayOffer = {
   gateway_type: string;
   currency: string;
   currency_symbol: string;
@@ -100,7 +100,7 @@ export type DurationGatewayPrice = {
   is_free: boolean;
 };
 
-export type DurationOffer = {
+type DurationOffer = {
   days: number;
   prices: DurationGatewayPrice[];
 };
@@ -140,7 +140,7 @@ export type CurrentSubscriptionResponse = {
   online_at: string | null;
 };
 
-export type SubscriptionDevice = {
+type SubscriptionDevice = {
   hwid: string;
   platform: string | null;
   device_model: string | null;

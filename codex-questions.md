@@ -123,3 +123,8 @@
 - Mock server: `npm run start:mock` на порту 3001.
 - Mock BFF включается флагом `CLEAN_PAY_MOCK_MODE=1`.
 - Mock режим нужен для frontend-preview без Remnashop/DB-сессии; normal режим должен оставаться без mock-данных.
+
+## Cloudflare Turnstile
+- В план добавлена Cloudflare Turnstile защита для регистрации, входа, запроса/подтверждения e-mail-кода, Telegram login/link и привязки `tg_id`.
+- Реальные Site key и Secret key не коммитим; используем env: `NEXT_PUBLIC_TURNSTILE_SITE_KEY`, `TURNSTILE_SECRET_KEY`, `TURNSTILE_ENABLED`.
+- BFF должен валидировать Turnstile token на сервере до обращения к Remnashop или создания web-сессии.

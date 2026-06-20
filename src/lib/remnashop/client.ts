@@ -109,7 +109,7 @@ export function protectRemnashopToken(token: string) {
   return encryptSecret(token, getEnv().webRefreshSecret);
 }
 
-export function revealRemnashopToken(token: string) {
+function revealRemnashopToken(token: string) {
   return decryptSecret(token, getEnv().webRefreshSecret);
 }
 
@@ -157,7 +157,7 @@ export async function remnashopAuth(path: "/auth/register" | "/auth/login", body
   return { data, cookies };
 }
 
-export async function remnashopRefresh(refreshToken: string) {
+async function remnashopRefresh(refreshToken: string) {
   const response = await fetch(endpoint("/auth/refresh"), {
     method: "POST",
     headers: {

@@ -8,6 +8,7 @@
 	"features": {
 		"ghcr.io/devcontainers/features/sshd:1": {}
 	},
+	"forwardPorts": [3000, 3001, 5555],
 	"remoteUser": "node",
 	"postStartCommand": "git config --global --add safe.directory /workspaces/clean-pay"
 

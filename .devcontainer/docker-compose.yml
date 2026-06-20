@@ -47,6 +47,7 @@ services:
     # (Adding the "ports" property to this file will not forward from a Codespace.)
     ports:
       - "3000:3000"
+      - "3001:3001"
       - "5555:5555"
 
   db:

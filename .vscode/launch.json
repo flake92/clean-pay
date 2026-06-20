@@ -2,9 +2,10 @@
   "version": "0.2.0",
   "configurations": [
     {
-      "name": "Clean Pay: dev server",
+      "name": "Clean Pay: Dev Normal (3000)",
       "type": "node-terminal",
       "request": "launch",
+      "preLaunchTask": "Clean Pay: install dependencies",
       "command": "npm run dev -- --hostname 0.0.0.0",
       "cwd": "${workspaceFolder}",
       "serverReadyAction": {
@@ -14,10 +15,24 @@
       }
     },
     {
-      "name": "Clean Pay: production start",
+      "name": "Clean Pay: Dev Mock (3001)",
       "type": "node-terminal",
       "request": "launch",
-      "command": "npm run build && npm run start -- --hostname 0.0.0.0",
+      "preLaunchTask": "Clean Pay: install dependencies",
+      "command": "npm run dev:mock -- --hostname 0.0.0.0",
+      "cwd": "${workspaceFolder}",
+      "serverReadyAction": {
+        "pattern": "Local:\\s+(https?://\\S+)",
+        "uriFormat": "http://localhost:3001",
+        "action": "openExternally"
+      }
+    },
+    {
+      "name": "Clean Pay: Start Normal (3000)",
+      "type": "node-terminal",
+      "request": "launch",
+      "preLaunchTask": "Clean Pay: install dependencies",
+      "command": "npm run build && npm run start:normal -- --hostname 0.0.0.0",
       "cwd": "${workspaceFolder}",
       "serverReadyAction": {
         "pattern": "Local:\\s+(https?://\\S+)",
@@ -26,14 +41,41 @@
       }
     },
     {
+      "name": "Clean Pay: Start Mock (3001)",
+      "type": "node-terminal",
+      "request": "launch",
+      "preLaunchTask": "Clean Pay: install dependencies",
+      "command": "npm run build && npm run start:mock -- --hostname 0.0.0.0",
+      "cwd": "${workspaceFolder}",
+      "serverReadyAction": {
+        "pattern": "Local:\\s+(https?://\\S+)",
+        "uriFormat": "http://localhost:3001",
+        "action": "openExternally"
+      }
+    },
+    {
       "name": "Clean Pay: Prisma Studio",
       "type": "node-terminal",
       "request": "launch",
+      "preLaunchTask": "Clean Pay: install dependencies",
       "command": "npm run prisma:studio -- --hostname 0.0.0.0",
       "cwd": "${workspaceFolder}",
       "serverReadyAction": {
         "pattern": "Prisma Studio is up on (https?://\\S+)",
         "uriFormat": "http://localhost:5555",
+        "action": "openExternally"
+      }
+    },
+    {
+      "name": "Clean Pay: Start Normal + Mock (3000/3001)",
+      "type": "node-terminal",
+      "request": "launch",
+      "preLaunchTask": "Clean Pay: install dependencies",
+      "command": "npm run build && (npm run start:normal -- --hostname 0.0.0.0 & npm run start:mock -- --hostname 0.0.0.0)",
+      "cwd": "${workspaceFolder}",
+      "serverReadyAction": {
+        "pattern": "Local:\\s+(https?://\\S+)",
+        "uriFormat": "http://localhost:3000",
         "action": "openExternally"
       }
     }
