@@ -1,4 +1,5 @@
 import { bffError, bffJson } from "@/lib/bff-response";
+import { isMockMode, mockRequestVerification } from "@/lib/mock-bff";
 import { assertCooldown, recordRateLimitEvent } from "@/lib/rate-limit";
 import {
   getAuthorizedRemnashopTokens,
@@ -14,6 +15,10 @@ export const runtime = "nodejs";
 export async function POST(request: Request) {
   try {
     const body = (await request.json()) as RequestEmailVerificationRequest;
+    if (isMockMode()) {
+      return bffJson(mockRequestVerification());
+    }
+
     const { accessToken, session } = await getAuthorizedRemnashopTokens();
     const key = `email-verification:${session.userId}`;
 

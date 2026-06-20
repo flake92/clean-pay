@@ -1,4 +1,5 @@
 import { bffError, bffJson } from "@/lib/bff-response";
+import { isMockMode, mockAuthPayload } from "@/lib/mock-bff";
 import { remnashopAuth } from "@/lib/remnashop/client";
 import { createSessionFromRemnashopAuth } from "@/lib/remnashop/session";
 import type { RegisterRequest } from "@/lib/remnashop/types";
@@ -8,6 +9,10 @@ export const runtime = "nodejs";
 export async function POST(request: Request) {
   try {
     const body = (await request.json()) as RegisterRequest;
+    if (isMockMode()) {
+      return bffJson(mockAuthPayload(), { status: 201 });
+    }
+
     const auth = await remnashopAuth("/auth/register", body);
     const { profile } = await createSessionFromRemnashopAuth({
       accessToken: auth.cookies.accessToken,

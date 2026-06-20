@@ -1,4 +1,5 @@
 import { bffError, bffJson } from "@/lib/bff-response";
+import { isMockMode, mockPayment } from "@/lib/mock-bff";
 import { recordPayment } from "@/lib/payment-records";
 import { getAuthorizedRemnashopTokens, remnashopRequest } from "@/lib/remnashop/client";
 import type {
@@ -12,6 +13,10 @@ export const runtime = "nodejs";
 export async function POST(request: Request) {
   try {
     const body = (await request.json()) as ExtendRequest;
+    if (isMockMode()) {
+      return bffJson(mockPayment(body));
+    }
+
     const { accessToken, session } = await getAuthorizedRemnashopTokens();
     const offers = await remnashopRequest<SubscriptionOffersResponse>(
       "/subscription/offers",

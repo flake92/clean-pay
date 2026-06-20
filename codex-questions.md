@@ -110,9 +110,16 @@
 - PrimeReact уже выбран как основной frontend UI-kit для проекта.
 - Источник общего дизайна и layout-паттернов — локальный шаблон PrimeReact Sakai: `primereact-sakai-template`.
 - UI Clean Pay нужно конструировать в стиле Sakai строго из физически перенесенных Sakai layout/styles/types/assets и реальных компонентов PrimeReact.
+- Исходная папка `primereact-sakai-template` удалена после физического переноса; runtime должен зависеть только от `src/layout`, `src/styles/layout`, `src/types`, `public/layout`, `public/themes`.
 - Никаких самодельных UI-kit блоков, кастомного shell/sidebar/topbar/cards как дизайн-системы быть не должно.
 - Допустимы только тонкие архитектурные адаптеры для подключения бизнес-логики; визуальная структура должна оставаться Sakai/PrimeReact.
 - Нужно использовать реальные компоненты PrimeReact, а не самописные аналоги: Button, InputText, Password, Dropdown, Message, Tag, DataTable, ProgressBar, Menu/PanelMenu, Toast/Dialog/ConfirmDialog по необходимости.
 - Dashboard/cabinet нужно конструировать по Sakai dashboard/admin template-подходу, не собирать всё с нуля на div/className.
 - Шаг 14 не начинаем, пока frontend не приведён к PrimeReact UI/UX.
 - В плане и в реальности текущая активная работа: полная PrimeReact Sakai-переделка frontend.
+
+## Mock режим
+- Normal server: `npm run start:normal` на порту 3000.
+- Mock server: `npm run start:mock` на порту 3001.
+- Mock BFF включается флагом `CLEAN_PAY_MOCK_MODE=1`.
+- Mock режим нужен для frontend-preview без Remnashop/DB-сессии; normal режим должен оставаться без mock-данных.

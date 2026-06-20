@@ -1,4 +1,5 @@
 import { bffError, bffJson } from "@/lib/bff-response";
+import { isMockMode, mockPromocode } from "@/lib/mock-bff";
 import { getAuthorizedRemnashopTokens, remnashopRequest } from "@/lib/remnashop/client";
 import type {
   PromocodeActivateRequest,
@@ -10,6 +11,10 @@ export const runtime = "nodejs";
 export async function POST(request: Request) {
   try {
     const body = (await request.json()) as PromocodeActivateRequest;
+    if (isMockMode()) {
+      return bffJson(mockPromocode());
+    }
+
     const { accessToken } = await getAuthorizedRemnashopTokens();
 
     return bffJson(

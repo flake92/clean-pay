@@ -18,6 +18,33 @@ body {
   color: var(--foreground);
 }
 
+.layout-topbar-logo img,
+.layout-footer img,
+.clean-auth-logo {
+  border-radius: 10px;
+  object-fit: cover;
+}
+
+.clean-auth-logo {
+  height: 5rem;
+  width: 5rem;
+}
+
+.p-button:not(.p-button-outlined):not(.p-button-text):not(.p-button-link) {
+  color: #ffffff;
+}
+
+.p-button:not(.p-button-outlined):not(.p-button-text):not(.p-button-link)
+  .p-button-label,
+.p-button:not(.p-button-outlined):not(.p-button-text):not(.p-button-link)
+  .p-button-icon {
+  color: #ffffff;
+}
+
+a.p-button:not(.p-button-outlined):not(.p-button-text):not(.p-button-link) {
+  color: #ffffff;
+}
+
 * {
   box-sizing: border-box;
 }

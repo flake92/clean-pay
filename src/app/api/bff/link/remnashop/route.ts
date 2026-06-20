@@ -1,4 +1,5 @@
 import { bffError, bffJson } from "@/lib/bff-response";
+import { isMockMode, mockUser } from "@/lib/mock-bff";
 import { remnashopAuth } from "@/lib/remnashop/client";
 import { linkCurrentUserToRemnashopAuth } from "@/lib/remnashop/session";
 import type { LoginRequest } from "@/lib/remnashop/types";
@@ -8,6 +9,10 @@ export const runtime = "nodejs";
 export async function POST(request: Request) {
   try {
     const body = (await request.json()) as LoginRequest;
+    if (isMockMode()) {
+      return bffJson({ user: mockUser, linked: true });
+    }
+
     const auth = await remnashopAuth("/auth/login", body);
     const { profile } = await linkCurrentUserToRemnashopAuth({
       accessToken: auth.cookies.accessToken,

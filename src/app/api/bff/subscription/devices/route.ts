@@ -1,4 +1,5 @@
 import { bffError, bffJson } from "@/lib/bff-response";
+import { isMockMode, mockDeleteDevices, mockDevices } from "@/lib/mock-bff";
 import { getAuthorizedRemnashopTokens, remnashopRequest } from "@/lib/remnashop/client";
 import type { DevicesDeleteAllResponse, DevicesResponse } from "@/lib/remnashop/types";
 
@@ -6,6 +7,10 @@ export const runtime = "nodejs";
 
 export async function GET() {
   try {
+    if (isMockMode()) {
+      return bffJson(mockDevices);
+    }
+
     const { accessToken } = await getAuthorizedRemnashopTokens();
 
     return bffJson(
@@ -18,6 +23,10 @@ export async function GET() {
 
 export async function DELETE() {
   try {
+    if (isMockMode()) {
+      return bffJson(mockDeleteDevices());
+    }
+
     const { accessToken } = await getAuthorizedRemnashopTokens();
 
     return bffJson(

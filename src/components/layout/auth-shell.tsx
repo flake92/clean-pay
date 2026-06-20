@@ -27,20 +27,20 @@ export function AuthShell({
       <div className="flex flex-column align-items-center justify-content-center">
         <img
           alt="Clean Pay"
-          className="mb-5 w-6rem flex-shrink-0"
-          src={`/layout/images/logo-${layoutConfig.colorScheme === "light" ? "dark" : "white"}.svg`}
+          className="mb-5 flex-shrink-0 clean-auth-logo"
+          src="/clean_vpn_logo.jpg"
         />
         <div
           style={{
-            borderRadius: "56px",
-            padding: "0.3rem",
-            background:
-              "linear-gradient(180deg, var(--primary-color) 10%, rgba(33, 150, 243, 0) 30%)",
+            border: "1px solid var(--surface-border)",
+            borderRadius: "32px",
+            padding: "0.25rem",
+            background: "var(--surface-card)",
           }}
         >
           <div
             className="w-full surface-card py-8 px-5 sm:px-8"
-            style={{ borderRadius: "53px" }}
+            style={{ borderRadius: "28px" }}
           >
             <div className="text-center mb-5">
               <div className="text-900 text-3xl font-medium mb-3">{title}</div>

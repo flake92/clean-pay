@@ -1,4 +1,5 @@
 import { bffError, bffJson } from "@/lib/bff-response";
+import { isMockMode, mockChangePassword } from "@/lib/mock-bff";
 import { prisma } from "@/lib/prisma";
 import {
   getAuthorizedRemnashopTokens,
@@ -17,6 +18,10 @@ function addDays(date: Date, days: number) {
 export async function POST(request: Request) {
   try {
     const body = (await request.json()) as ChangePasswordRequest;
+    if (isMockMode()) {
+      return bffJson(mockChangePassword());
+    }
+
     const { accessToken, session } = await getAuthorizedRemnashopTokens();
     const result = await remnashopChangePassword(accessToken, body);
 

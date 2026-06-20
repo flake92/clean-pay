@@ -1,4 +1,5 @@
 import { bffError, bffJson } from "@/lib/bff-response";
+import { isMockMode, mockConfirmEmail } from "@/lib/mock-bff";
 import { prisma } from "@/lib/prisma";
 import {
   getAuthorizedRemnashopTokens,
@@ -14,6 +15,10 @@ export const runtime = "nodejs";
 export async function POST(request: Request) {
   try {
     const body = (await request.json()) as ConfirmEmailVerificationRequest;
+    if (isMockMode()) {
+      return bffJson(mockConfirmEmail());
+    }
+
     const { accessToken, session } = await getAuthorizedRemnashopTokens();
     const result = await remnashopRequest<ConfirmEmailVerificationResponse>(
       "/auth/email/confirm",

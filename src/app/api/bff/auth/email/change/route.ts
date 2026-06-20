@@ -1,4 +1,5 @@
 import { bffError, bffJson } from "@/lib/bff-response";
+import { isMockMode, mockChangeEmail } from "@/lib/mock-bff";
 import { prisma } from "@/lib/prisma";
 import { getAuthorizedRemnashopTokens, remnashopRequest } from "@/lib/remnashop/client";
 import type {
@@ -11,6 +12,10 @@ export const runtime = "nodejs";
 export async function POST(request: Request) {
   try {
     const body = (await request.json()) as ChangeEmailRequest;
+    if (isMockMode()) {
+      return bffJson(mockChangeEmail());
+    }
+
     const { accessToken, session } = await getAuthorizedRemnashopTokens();
     const result = await remnashopRequest<ChangeEmailResponse>(
       "/auth/email/change",
