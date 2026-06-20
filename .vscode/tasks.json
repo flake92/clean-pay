@@ -4,7 +4,7 @@
     {
       "label": "Clean Pay: install dependencies",
       "type": "shell",
-      "command": "npm install",
+      "command": "sh scripts/ensure-node-modules-owner.sh ${workspaceFolder}/node_modules node:node && npm install",
       "options": {
         "cwd": "${workspaceFolder}"
       },

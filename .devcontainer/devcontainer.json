@@ -10,7 +10,7 @@
 	},
 	"forwardPorts": [3000, 3001, 5555],
 	"remoteUser": "node",
-	"postStartCommand": "git config --global --add safe.directory /workspaces/clean-pay"
+	"postStartCommand": "git config --global --add safe.directory /workspaces/clean-pay && sh /workspaces/clean-pay/scripts/ensure-node-modules-owner.sh /workspaces/clean-pay/node_modules node:node"
 
 	// Features to add to the dev container. More info: https://containers.dev/features.
 	// "features": {},
