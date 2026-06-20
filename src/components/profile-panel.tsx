@@ -221,6 +221,7 @@ export function ProfilePanel() {
         <label className="flex flex-column gap-2">
           <span className="text-sm font-medium text-700">Текущий пароль</span>
           <Password
+            className="w-full"
             feedback={false}
             inputClassName="w-full"
             onChange={(event) => setCurrentPassword(event.target.value)}
@@ -231,6 +232,7 @@ export function ProfilePanel() {
         <label className="flex flex-column gap-2">
           <span className="text-sm font-medium text-700">Новый пароль</span>
           <Password
+            className="w-full"
             inputClassName="w-full"
             minLength={8}
             onChange={(event) => setNewPassword(event.target.value)}

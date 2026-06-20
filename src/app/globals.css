@@ -26,8 +26,59 @@ body {
 }
 
 .clean-auth-logo {
-  height: 5rem;
-  width: 5rem;
+  display: block;
+  height: 4.25rem;
+  margin-left: auto;
+  margin-right: auto;
+  width: 4.25rem;
+}
+
+.auth-card-frame {
+  max-width: 42rem;
+}
+
+.auth-card {
+  padding: 2.25rem 3rem;
+}
+
+.auth-card-content {
+  max-width: 34rem;
+  margin: 0 auto;
+}
+
+.p-password {
+  display: block;
+  width: 100%;
+}
+
+.p-password .p-icon-field {
+  display: block;
+  position: relative;
+  width: 100%;
+}
+
+.p-password .p-password-input,
+.p-password .p-inputtext {
+  width: 100%;
+  padding-right: 2.75rem;
+}
+
+.p-password .p-input-icon {
+  margin-top: 0;
+  position: absolute;
+  right: 1rem;
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+.auth-card .p-button {
+  width: 100%;
+}
+
+@media (max-width: 480px) {
+  .auth-card {
+    padding: 1.5rem;
+  }
 }
 
 .p-button:not(.p-button-outlined):not(.p-button-text):not(.p-button-link) {

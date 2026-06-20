@@ -47,12 +47,22 @@ export function LoginForm() {
     <form className="flex flex-column gap-3" onSubmit={onSubmit}>
       <label className="flex flex-column gap-2">
         <span className="text-sm font-medium text-700">E-mail</span>
-        <InputText name="email" placeholder="user@example.com" required type="email" />
+        <InputText
+          autoComplete="username"
+          id="login-email"
+          name="email"
+          placeholder="user@example.com"
+          required
+          type="email"
+        />
       </label>
       <label className="flex flex-column gap-2">
         <span className="text-sm font-medium text-700">Пароль</span>
         <Password
+          autoComplete="current-password"
+          className="w-full"
           feedback={false}
+          inputId="login-password"
           inputClassName="w-full"
           name="password"
           placeholder="Введите пароль"
@@ -96,15 +106,25 @@ export function RegisterForm() {
     <form className="flex flex-column gap-3" onSubmit={onSubmit}>
       <label className="flex flex-column gap-2">
         <span className="text-sm font-medium text-700">Имя</span>
-        <InputText name="name" placeholder="Как к вам обращаться" type="text" />
+        <InputText autoComplete="name" id="register-name" name="name" placeholder="Как к вам обращаться" type="text" />
       </label>
       <label className="flex flex-column gap-2">
         <span className="text-sm font-medium text-700">E-mail</span>
-        <InputText name="email" placeholder="user@example.com" required type="email" />
+        <InputText
+          autoComplete="username"
+          id="register-email"
+          name="email"
+          placeholder="user@example.com"
+          required
+          type="email"
+        />
       </label>
       <label className="flex flex-column gap-2">
         <span className="text-sm font-medium text-700">Пароль</span>
         <Password
+          autoComplete="new-password"
+          className="w-full"
+          inputId="register-password"
           inputClassName="w-full"
           minLength={8}
           name="password"

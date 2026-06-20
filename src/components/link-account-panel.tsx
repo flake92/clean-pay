@@ -71,6 +71,7 @@ export function LinkAccountPanel() {
           <label className="flex flex-column gap-2">
             <span className="text-sm font-medium text-700">Пароль</span>
             <Password
+              className="w-full"
               feedback={false}
               inputClassName="w-full"
               name="password"

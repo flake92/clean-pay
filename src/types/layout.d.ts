@@ -21,23 +21,11 @@ export type LayoutState = {
     staticMenuDesktopInactive: boolean;
     overlayMenuActive: boolean;
     profileSidebarVisible: boolean;
-    configSidebarVisible: boolean;
     staticMenuMobileActive: boolean;
     menuHoverActive: boolean;
 };
 
-export type LayoutConfig = {
-    ripple: boolean;
-    inputStyle: string;
-    menuMode: string;
-    colorScheme: string;
-    theme: string;
-    scale: number;
-};
-
 export interface LayoutContextProps {
-    layoutConfig: LayoutConfig;
-    setLayoutConfig: Dispatch<SetStateAction<LayoutConfig>>;
     layoutState: LayoutState;
     setLayoutState: Dispatch<SetStateAction<LayoutState>>;
     onMenuToggle: () => void;
@@ -47,11 +35,6 @@ export interface LayoutContextProps {
 export interface MenuContextProps {
     activeMenu: string;
     setActiveMenu: Dispatch<SetStateAction<string>>;
-}
-
-/* AppConfig Types */
-export interface AppConfigProps {
-    simple?: boolean;
 }
 
 /* AppTopbar Types */

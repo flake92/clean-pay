@@ -7,13 +7,12 @@ import { classNames } from 'primereact/utils';
 import AppFooter from './AppFooter';
 import AppSidebar from './AppSidebar';
 import AppTopbar from './AppTopbar';
-import AppConfig from './AppConfig';
 import { LayoutContext } from './context/layoutcontext';
 import { ChildContainerProps, LayoutState, AppTopbarRef } from '@/types';
 import { usePathname } from 'next/navigation';
 
 const Layout = ({ children }: ChildContainerProps) => {
-    const { layoutConfig, layoutState, setLayoutState } = useContext(LayoutContext);
+    const { layoutState, setLayoutState } = useContext(LayoutContext);
     const topbarRef = useRef<AppTopbarRef>(null);
     const sidebarRef = useRef<HTMLDivElement>(null);
 
@@ -111,13 +110,11 @@ const Layout = ({ children }: ChildContainerProps) => {
     });
 
     const containerClass = classNames('layout-wrapper', {
-        'layout-overlay': layoutConfig.menuMode === 'overlay',
-        'layout-static': layoutConfig.menuMode === 'static',
-        'layout-static-inactive': layoutState.staticMenuDesktopInactive && layoutConfig.menuMode === 'static',
+        'layout-static': true,
+        'layout-static-inactive': layoutState.staticMenuDesktopInactive,
         'layout-overlay-active': layoutState.overlayMenuActive,
         'layout-mobile-active': layoutState.staticMenuMobileActive,
-        'p-input-filled': layoutConfig.inputStyle === 'filled',
-        'p-ripple-disabled': !layoutConfig.ripple
+        'p-ripple-disabled': true
     });
 
     return (
@@ -131,7 +128,6 @@ const Layout = ({ children }: ChildContainerProps) => {
                     <div className="layout-main">{children}</div>
                     <AppFooter />
                 </div>
-                <AppConfig />
                 <div className="layout-mask"></div>
             </div>
         </React.Fragment>
