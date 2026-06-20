@@ -6,11 +6,10 @@ import { Button } from "primereact/button";
 import { Card } from "primereact/card";
 import { InputText } from "primereact/inputtext";
 import { Message } from "primereact/message";
+import { readBffError } from "@/lib/client-api";
 
 async function readError(response: Response) {
-  const body = await response.json().catch(() => null);
-
-  return body?.error?.message ?? "Не удалось выполнить действие.";
+  return (await readBffError(response, 'Не удалось выполнить действие.')).message;
 }
 
 export function VerifyEmailPanel() {

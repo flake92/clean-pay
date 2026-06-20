@@ -12,6 +12,7 @@ import { Button } from "primereact/button";
 import { Card } from "primereact/card";
 import { Dropdown } from "primereact/dropdown";
 import { Message } from "primereact/message";
+import { readBffError } from "@/lib/client-api";
 import { LinkButton } from "@/components/prime/link-button";
 
 type LoadState =
@@ -45,9 +46,7 @@ function firstSelection(plan: PlanOffer | undefined) {
 }
 
 async function readError(response: Response) {
-  const body = await response.json().catch(() => null);
-
-  return body?.error?.message ?? "Не удалось создать платёж.";
+  return (await readBffError(response, 'Не удалось выполнить действие.')).message;
 }
 
 export function ExtendConfirmation() {
@@ -59,16 +58,11 @@ export function ExtendConfirmation() {
   useEffect(() => {
     fetch("/api/bff/subscription/offers")
       .then(async (response) => {
-        const body = await response.json().catch(() => null);
-
         if (!response.ok) {
-          throw new Error(
-            body?.error?.message ??
-              (response.status === 401
-                ? "Нужно войти в аккаунт."
-                : "Не удалось загрузить предложения продления."),
-          );
+          throw await readBffError(response, response.status === 401 ? 'Нужно войти в аккаунт.' : 'Не удалось загрузить предложения продления.');
         }
+
+        const body = await response.json().catch(() => null);
 
         return body.data as SubscriptionOffersResponse;
       })

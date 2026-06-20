@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 
 import { Card } from "primereact/card";
 import { Message } from "primereact/message";
+import { readBffError } from "@/lib/client-api";
 import { LinkButton } from "@/components/prime/link-button";
 
 type SupportSettings = {
@@ -15,11 +16,12 @@ type SupportSettings = {
 
 async function readSupportSettings() {
   const response = await fetch("/api/bff/support");
-  const body = await response.json().catch(() => null);
 
   if (!response.ok) {
-    throw new Error(body?.error?.message ?? "Не удалось загрузить контакты поддержки.");
+    throw await readBffError(response, 'Не удалось загрузить контакты поддержки.');
   }
+
+  const body = await response.json().catch(() => null);
 
   return body.data as SupportSettings;
 }

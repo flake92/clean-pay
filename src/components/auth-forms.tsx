@@ -5,6 +5,7 @@ import { useState } from "react";
 import { Button } from "primereact/button";
 import { InputText } from "primereact/inputtext";
 import { Message } from "primereact/message";
+import { readBffError } from "@/lib/client-api";
 import { Password } from "primereact/password";
 
 type ApiState = {
@@ -13,9 +14,20 @@ type ApiState = {
 };
 
 async function readError(response: Response) {
-  const body = await response.json().catch(() => null);
+  return (await readBffError(response, 'Не удалось выполнить действие.')).message;
+}
 
-  return body?.error?.message ?? "Не удалось выполнить действие.";
+
+function redirectAfterAuth() {
+  const params = new URLSearchParams(window.location.search);
+  const redirectTo = params.get("redirect_to");
+
+  if (redirectTo?.startsWith("/") && !redirectTo.startsWith("//")) {
+    window.location.assign(redirectTo);
+    return;
+  }
+
+  window.location.assign("/cabinet");
 }
 
 export function LoginForm() {
@@ -40,7 +52,7 @@ export function LoginForm() {
       return;
     }
 
-    window.location.href = "/cabinet";
+    redirectAfterAuth();
   }
 
   return (
@@ -99,7 +111,7 @@ export function RegisterForm() {
       return;
     }
 
-    window.location.href = "/cabinet";
+    redirectAfterAuth();
   }
 
   return (

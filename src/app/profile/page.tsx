@@ -10,7 +10,7 @@ export default function ProfilePage() {
     <AppShell>
       <div className="flex flex-column gap-6">
         <PageHeader
-          description="Данные аккаунта, e-mail и пароль управляются через Remnashop API."
+          description="Данные аккаунта, e-mail и пароль управляются через CleanVPN."
           title="Профиль"
         />
         <Card>

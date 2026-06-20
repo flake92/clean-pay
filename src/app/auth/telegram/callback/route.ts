@@ -11,7 +11,7 @@ export async function GET(request: Request) {
   const state = url.searchParams.get("state");
 
   if (!code || !state) {
-    return NextResponse.redirect(new URL("/?auth=telegram_failed", url));
+    return NextResponse.redirect(new URL("/login?auth=telegram_failed", url));
   }
 
   try {
@@ -19,8 +19,8 @@ export async function GET(request: Request) {
 
     await createWebSession(user.id);
 
-    return NextResponse.redirect(new URL(redirectTo ?? "/", url));
+    return NextResponse.redirect(new URL(redirectTo ?? "/cabinet", url));
   } catch {
-    return NextResponse.redirect(new URL("/?auth=telegram_failed", url));
+    return NextResponse.redirect(new URL("/login?auth=telegram_failed", url));
   }
 }

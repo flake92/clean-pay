@@ -10,6 +10,7 @@ import type {
 import { Card } from "primereact/card";
 import { Dropdown } from "primereact/dropdown";
 import { Message } from "primereact/message";
+import { readBffError } from "@/lib/client-api";
 import { Tag } from "primereact/tag";
 import { LinkButton } from "@/components/prime/link-button";
 
@@ -54,16 +55,11 @@ export function TariffsPanel() {
   useEffect(() => {
     fetch("/api/bff/subscription/offers")
       .then(async (response) => {
-        const body = await response.json().catch(() => null);
-
         if (!response.ok) {
-          throw new Error(
-            body?.error?.message ??
-              (response.status === 401
-                ? "Нужно войти в аккаунт."
-                : "Не удалось загрузить тарифы."),
-          );
+          throw await readBffError(response, response.status === 401 ? 'Нужно войти в аккаунт.' : 'Не удалось загрузить тарифы.');
         }
+
+        const body = await response.json().catch(() => null);
 
         return body.data as SubscriptionOffersResponse;
       })

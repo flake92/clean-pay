@@ -6,7 +6,7 @@ export default function TariffsPage() {
     <AppShell>
       <div className="flex flex-column gap-6">
         <PageHeader
-          description="Доступные тарифы, длительности и способы оплаты загружаются из Remnashop через BFF."
+          description="Доступные тарифы, длительности и способы оплаты загружаются из CleanVPN."
           title="Тарифы"
         />
         <TariffsPanel />

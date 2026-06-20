@@ -17,7 +17,7 @@ export default function Home() {
                   Web-кабинет для оплаты и управления подпиской
                 </div>
                 <p className="m-0 text-600 line-height-3 max-w-40rem">
-                  Frontend работает через BFF, а подписки, платежи и VPN-доступы остаются в Remnashop.
+                  Кабинет помогает оплачивать, продлевать подписку и управлять VPN-доступом.
                 </p>
               </div>
               <div className="flex flex-wrap gap-2">
@@ -67,8 +67,8 @@ export default function Home() {
           <div className="card mb-0">
             <div className="flex justify-content-between mb-3">
               <div>
-                <span className="block text-500 font-medium mb-3">Источник</span>
-                <div className="text-900 font-medium text-xl">Remnashop</div>
+                <span className="block text-500 font-medium mb-3">Подписка</span>
+                <div className="text-900 font-medium text-xl">CleanVPN</div>
               </div>
               <div className="flex align-items-center justify-content-center bg-cyan-100 border-round" style={{ width: "2.5rem", height: "2.5rem" }}>
                 <i className="pi pi-database text-cyan-500 text-xl" />

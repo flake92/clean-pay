@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { Card } from "primereact/card";
 import { Message } from "primereact/message";
+import { readBffError } from "@/lib/client-api";
 import { Tag } from "primereact/tag";
 
 import { AppShell, PageHeader } from "@/components/layout";
@@ -63,7 +64,7 @@ function intro(kind: Props["kind"]) {
     return "Если платёж был отменён, можно выбрать тариф заново.";
   }
 
-  return "Статус может обновиться после webhook-обработки на стороне Remnashop.";
+  return "Статус может обновиться после обработки платежа.";
 }
 
 function paymentStatusLabel(status: string) {
@@ -118,11 +119,11 @@ export function PaymentReturnStatus({ kind }: Props) {
 
     fetch(`/api/bff/payments/status${query}`)
       .then(async (response) => {
-        const body = await response.json().catch(() => null);
-
         if (!response.ok) {
-          throw new Error(body?.error?.message ?? "Не удалось проверить статус.");
+          throw await readBffError(response, 'Не удалось проверить статус.');
         }
+
+        const body = await response.json().catch(() => null);
 
         return body.data as StatusResponse;
       })

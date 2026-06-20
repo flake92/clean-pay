@@ -1,7 +1,12 @@
 import { decryptSecret, encryptSecret } from "@/lib/crypto";
 import { getEnv } from "@/lib/env";
 import { prisma } from "@/lib/prisma";
-import { normalizeRemnashopError } from "@/lib/remnashop/errors";
+import {
+  BffError,
+  normalizeRemnashopError,
+  remnashopInvalidJsonError,
+  remnashopUnavailableError,
+} from "@/lib/remnashop/errors";
 import type {
   ChangePasswordRequest,
   ChangePasswordResponse,
@@ -28,15 +33,36 @@ function endpoint(path: string) {
   return `${getEnv().remnashopApiBaseUrl}${path}`;
 }
 
-async function parseResponse<T>(response: Response) {
+async function parseResponse<T>(response: Response, path: string) {
   const text = await response.text();
-  const data = text ? JSON.parse(text) : null;
+  let data: unknown = null;
+
+  if (text) {
+    try {
+      data = JSON.parse(text);
+    } catch {
+      throw remnashopInvalidJsonError(path, text);
+    }
+  }
 
   if (!response.ok) {
-    throw normalizeRemnashopError(response.status, data?.detail ?? data);
+    const detail =
+      data && typeof data === 'object' && 'detail' in data
+        ? (data as { detail: unknown }).detail
+        : data;
+
+    throw normalizeRemnashopError(response.status, detail, { path });
   }
 
   return data as T;
+}
+
+async function fetchRemnashop(path: string, init: RequestInit) {
+  try {
+    return await fetch(endpoint(path), init);
+  } catch (error) {
+    throw remnashopUnavailableError(path, error);
+  }
 }
 
 function getSetCookieHeaders(response: Response) {
@@ -70,7 +96,7 @@ function extractAuthCookies(response: Response): AuthCookies {
   const refreshToken = getCookieValue(setCookieHeaders, "refresh_token");
 
   if (!accessToken || !refreshToken) {
-    throw new Error("Remnashop auth response did not include auth cookies");
+    throw new BffError('UPSTREAM_ERROR', 502, 'Auth response did not include auth cookies', { upstreamPath: '/auth' });
   }
 
   return { accessToken, refreshToken };
@@ -131,18 +157,18 @@ export async function remnashopRequest<T>(path: string, options: RequestOptions 
     headers.cookie = cookieParts.join("; ");
   }
 
-  const response = await fetch(endpoint(path), {
+  const response = await fetchRemnashop(path, {
     method: options.method ?? "GET",
     headers,
     body: options.body === undefined ? undefined : JSON.stringify(options.body),
     cache: "no-store",
   });
 
-  return parseResponse<T>(response);
+  return parseResponse<T>(response, path);
 }
 
 export async function remnashopAuth(path: "/auth/register" | "/auth/login", body: RegisterRequest | LoginRequest) {
-  const response = await fetch(endpoint(path), {
+  const response = await fetchRemnashop(path, {
     method: "POST",
     headers: {
       accept: "application/json",
@@ -151,14 +177,14 @@ export async function remnashopAuth(path: "/auth/register" | "/auth/login", body
     body: JSON.stringify(body),
     cache: "no-store",
   });
-  const data = await parseResponse<RemnashopAuthResponse>(response);
+  const data = await parseResponse<RemnashopAuthResponse>(response, path);
   const cookies = extractAuthCookies(response);
 
   return { data, cookies };
 }
 
 async function remnashopRefresh(refreshToken: string) {
-  const response = await fetch(endpoint("/auth/refresh"), {
+  const response = await fetchRemnashop("/auth/refresh", {
     method: "POST",
     headers: {
       accept: "application/json",
@@ -166,7 +192,7 @@ async function remnashopRefresh(refreshToken: string) {
     },
     cache: "no-store",
   });
-  const data = await parseResponse<RemnashopAuthResponse>(response);
+  const data = await parseResponse<RemnashopAuthResponse>(response, "/auth/refresh");
   const cookies = extractAuthCookies(response);
 
   return { data, cookies };
@@ -176,7 +202,7 @@ export async function remnashopChangePassword(
   accessToken: string,
   body: ChangePasswordRequest,
 ) {
-  const response = await fetch(endpoint("/auth/change-password"), {
+  const response = await fetchRemnashop("/auth/change-password", {
     method: "POST",
     headers: {
       accept: "application/json",
@@ -186,7 +212,7 @@ export async function remnashopChangePassword(
     body: JSON.stringify(body),
     cache: "no-store",
   });
-  const data = await parseResponse<ChangePasswordResponse>(response);
+  const data = await parseResponse<ChangePasswordResponse>(response, "/auth/change-password");
   const cookies = extractAuthCookies(response);
 
   return { data, cookies };
@@ -205,7 +231,7 @@ export async function getAuthorizedRemnashopTokens() {
     !session?.remnashopAccessTokenEncrypted ||
     !session.remnashopRefreshTokenEncrypted
   ) {
-    throw normalizeRemnashopError(401, "Not authenticated");
+    throw normalizeRemnashopError(401, "Not authenticated", { path: "/auth/session" });
   }
 
   const refreshToken = revealRemnashopToken(session.remnashopRefreshTokenEncrypted);

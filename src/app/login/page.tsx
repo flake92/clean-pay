@@ -7,7 +7,7 @@ import { LinkButton } from "@/components/prime/link-button";
 export default function LoginPage() {
   return (
     <AuthShell
-      description="Используйте e-mail и пароль Remnashop или Telegram-вход."
+      description="Используйте e-mail и пароль или Telegram-вход."
       footer={
         <>
           <LinkButton

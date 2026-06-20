@@ -7,6 +7,7 @@ import { Column } from "primereact/column";
 import { DataTable } from "primereact/datatable";
 import { InputText } from "primereact/inputtext";
 import { Message } from "primereact/message";
+import { readBffError } from "@/lib/client-api";
 import { ProgressBar } from "primereact/progressbar";
 import { Tag } from "primereact/tag";
 
@@ -159,9 +160,7 @@ function detailValue(value?: string | number | boolean | null) {
 }
 
 async function getBffMessage(response: Response, fallback: string) {
-  const body = await response.json().catch(() => null);
-
-  return body?.error?.message ?? fallback;
+  return (await readBffError(response, fallback)).message;
 }
 
 export function CabinetPanel() {

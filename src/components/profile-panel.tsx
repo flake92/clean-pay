@@ -7,6 +7,7 @@ import { Button } from "primereact/button";
 import { Card } from "primereact/card";
 import { InputText } from "primereact/inputtext";
 import { Message } from "primereact/message";
+import { readBffError } from "@/lib/client-api";
 import { Password } from "primereact/password";
 import { Tag } from "primereact/tag";
 import { LinkButton } from "@/components/prime/link-button";
@@ -23,9 +24,7 @@ type ProfileUser = {
 };
 
 async function readError(response: Response, fallback: string) {
-  const body = await response.json().catch(() => null);
-
-  return body?.error?.message ?? fallback;
+  return (await readBffError(response, fallback)).message;
 }
 
 export function ProfilePanel() {
@@ -39,11 +38,12 @@ export function ProfilePanel() {
 
   async function fetchProfile() {
     const response = await fetch("/api/bff/auth/me");
-    const body = await response.json().catch(() => null);
 
     if (!response.ok) {
-      throw new Error(body?.error?.message ?? "Не удалось загрузить профиль.");
+      throw await readBffError(response, 'Не удалось загрузить профиль.');
     }
+
+    const body = await response.json().catch(() => null);
 
     return body.data.user as ProfileUser;
   }

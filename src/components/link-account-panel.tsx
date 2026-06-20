@@ -6,13 +6,12 @@ import { Button } from "primereact/button";
 import { Card } from "primereact/card";
 import { InputText } from "primereact/inputtext";
 import { Message } from "primereact/message";
+import { readBffError } from "@/lib/client-api";
 import { Password } from "primereact/password";
 import { LinkButton } from "@/components/prime/link-button";
 
 async function readError(response: Response) {
-  const body = await response.json().catch(() => null);
-
-  return body?.error?.message ?? "Не удалось выполнить действие.";
+  return (await readBffError(response, 'Не удалось выполнить действие.')).message;
 }
 
 export function LinkAccountPanel() {
@@ -61,7 +60,7 @@ export function LinkAccountPanel() {
       </Card>
       <Card title="Привязать e-mail">
         <p className="line-height-3 text-600">
-          Если вы вошли через Telegram, подтвердите e-mail аккаунт Remnashop.
+          Если вы вошли через Telegram, подтвердите e-mail аккаунт CleanVPN.
         </p>
         <form className="flex flex-column gap-3" onSubmit={onSubmit}>
           <label className="flex flex-column gap-2">
