@@ -1,9 +1,16 @@
+"use client";
+
 import React from 'react';
 import AppMenuitem from './AppMenuitem';
 import { MenuProvider } from './context/menucontext';
 import { AppMenuItem } from '@/types';
 
 const AppMenu = () => {
+    async function logout() {
+        await fetch('/api/bff/auth/logout', { method: 'POST' });
+        window.location.assign('/login');
+    }
+
     const model: AppMenuItem[] = [
         {
             label: 'Clean Pay',
@@ -26,7 +33,14 @@ const AppMenu = () => {
             label: 'Помощь',
             items: [
                 { label: 'Поддержка', icon: 'pi pi-fw pi-question-circle', to: '/support' },
-                { label: 'Войти', icon: 'pi pi-fw pi-sign-in', to: '/login' },
+                {
+                    label: 'Выйти',
+                    icon: 'pi pi-fw pi-sign-out',
+                    command: ({ originalEvent }) => {
+                        originalEvent.preventDefault();
+                        void logout();
+                    }
+                },
                 { label: 'Регистрация', icon: 'pi pi-fw pi-user-plus', to: '/register' }
             ]
         }

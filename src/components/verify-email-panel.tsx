@@ -7,21 +7,46 @@ import { Card } from "primereact/card";
 import { InputText } from "primereact/inputtext";
 import { Message } from "primereact/message";
 import { readBffError } from "@/lib/client-api";
+import { TurnstileWidget, type TurnstileHandle, hasPublicTurnstileKey } from "@/components/turnstile-widget";
 
 async function readError(response: Response) {
   return (await readBffError(response, 'Не удалось выполнить действие.')).message;
 }
 
-export function VerifyEmailPanel() {
+function missingTurnstileTokenMessage() {
+  return hasPublicTurnstileKey()
+    ? "РџСЂРѕР№РґРёС‚Рµ РїСЂРѕРІРµСЂРєСѓ Cloudflare Turnstile."
+    : "Cloudflare Turnstile site key is not configured.";
+}
+
+function turnstilePayload(token: string | null) {
+  return token
+    ? {
+        turnstileToken: token,
+        "cf-turnstile-response": token,
+      }
+    : {};
+}
+
+export function VerifyEmailPanel({ turnstileEnabled = false }: { turnstileEnabled?: boolean }) {
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState<string | null>(null);
+  const [targetEmail, setTargetEmail] = useState<string | null>(null);
+  const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
+  const [turnstile, setTurnstile] = useState<TurnstileHandle | null>(null);
 
   async function requestCode(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setMessage(null);
     setError(null);
     setLoading("request");
+
+    if (turnstileEnabled && !turnstileToken) {
+      setLoading(null);
+      setError(missingTurnstileTokenMessage());
+      return;
+    }
 
     const formData = new FormData(event.currentTarget);
     const email = formData.get("email");
@@ -30,17 +55,20 @@ export function VerifyEmailPanel() {
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
         email: email ? String(email) : undefined,
+        ...turnstilePayload(turnstileToken),
       }),
     });
 
     setLoading(null);
 
     if (!response.ok) {
+      turnstile?.reset();
       setError(await readError(response));
       return;
     }
 
     const body = await response.json();
+    setTargetEmail(body.data.target_email);
     setMessage(`Код отправлен на ${body.data.target_email}.`);
   }
 
@@ -50,18 +78,27 @@ export function VerifyEmailPanel() {
     setError(null);
     setLoading("confirm");
 
+    if (turnstileEnabled && !turnstileToken) {
+      setLoading(null);
+      setError(missingTurnstileTokenMessage());
+      return;
+    }
+
     const formData = new FormData(event.currentTarget);
     const response = await fetch("/api/bff/auth/email/confirm", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
+        email: targetEmail ?? undefined,
         code: formData.get("code"),
+        ...turnstilePayload(turnstileToken),
       }),
     });
 
     setLoading(null);
 
     if (!response.ok) {
+      turnstile?.reset();
       setError(await readError(response));
       return;
     }
@@ -71,6 +108,7 @@ export function VerifyEmailPanel() {
 
   return (
     <div className="flex flex-column gap-4">
+      {turnstileEnabled ? <TurnstileWidget onReady={setTurnstile} onToken={setTurnstileToken} /> : null}
       <Card title="Получить код">
         <p className="mt-0 line-height-3 text-600">
           Код можно запросить не чаще одного раза в минуту. You can request the code once per minute.

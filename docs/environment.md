@@ -51,7 +51,9 @@ DATABASE_URL="postgresql://postgres:postgres@db:5432/postgres?schema=public"
 
 ### SMTP
 
-The web cabinet sends e-mail verification codes.
+Clean Pay keeps `SMTP_*` variables for deployment health checks and compatibility, but e-mail verification is delegated to Remnashop through the public auth API. For production, configure both sides intentionally.
+
+Clean Pay `.env`:
 
 - `SMTP_HOST` - SMTP host.
 - `SMTP_PORT` - SMTP port, usually `587`.
@@ -59,8 +61,22 @@ The web cabinet sends e-mail verification codes.
 - `SMTP_PASSWORD` - SMTP password.
 - `SMTP_FROM` - sender address.
 
-Production SMTP values are supplied through env. Secrets must not be committed.
-The expected production sender is `code@clear-vpn.org`; password stays only in deployment secrets.
+Remnashop `/opt/remnashop/.env` for verification codes:
+
+```env
+EMAIL_ENABLED=true
+EMAIL_HOST=clear-vpn.org
+EMAIL_PORT=587
+EMAIL_USE_TLS=true
+EMAIL_USE_SSL=false
+EMAIL_USERNAME=code@clear-vpn.org
+EMAIL_PASSWORD=<smtp-password>
+EMAIL_FROM_EMAIL=code@clear-vpn.org
+EMAIL_FROM_NAME=CleanVPN
+EMAIL_VERIFICATION_CODE_TTL_MINUTES=15
+```
+
+If `EMAIL_*` is missing in Remnashop, Clean Pay registration/login can return `Email delivery is not configured` and no confirmation code will be sent.
 
 ### Telegram OIDC
 

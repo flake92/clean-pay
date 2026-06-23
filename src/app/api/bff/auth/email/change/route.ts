@@ -6,6 +6,7 @@ import { getAuthorizedRemnashopTokens, remnashopRequest } from "@/lib/remnashop/
 import type {
   ChangeEmailRequest,
   ChangeEmailResponse,
+  RequestEmailVerificationResponse,
 } from "@/lib/remnashop/types";
 
 export const runtime = "nodejs";
@@ -28,6 +29,14 @@ export async function POST(request: Request) {
         body,
       },
     );
+    const verification = await remnashopRequest<RequestEmailVerificationResponse>(
+      "/auth/email/request-verification",
+      {
+        method: "POST",
+        accessToken,
+        body: { email: result.pending_email },
+      },
+    );
 
     await prisma.webUser.update({
       where: { id: session.userId },
@@ -37,10 +46,10 @@ export async function POST(request: Request) {
     await auditLog({
       action: "email_change_requested",
       userId: session.userId,
-      metadata: { pendingEmail: result.pending_email },
+      metadata: { pendingEmail: result.pending_email, verificationTargetEmail: verification.target_email },
     });
 
-    return bffJson(result);
+    return bffJson({ ...result, emailVerification: verification });
   } catch (error) {
     return bffError(error);
   }

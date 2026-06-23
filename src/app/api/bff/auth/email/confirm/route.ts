@@ -5,6 +5,7 @@ import { prisma } from "@/lib/prisma";
 import { assertRateLimit } from "@/lib/rate-limit";
 import {
   getAuthorizedRemnashopTokens,
+  getRemnashopMe,
   remnashopRequest,
 } from "@/lib/remnashop/client";
 import { getRequestIp, getTurnstileToken, verifyTurnstileToken } from "@/lib/turnstile";
@@ -38,10 +39,13 @@ export async function POST(request: Request) {
     }
 
     const { accessToken, session } = await getAuthorizedRemnashopTokens();
+    const profile = await getRemnashopMe(accessToken);
+    const targetEmail = body.email ?? profile.pending_email ?? profile.email ?? session.user.email ?? undefined;
+    const confirmBody = targetEmail ? { ...body, email: targetEmail } : body;
 
     await assertRateLimit({
       action: "email_verification_confirm",
-      email: session.user.email,
+      email: targetEmail,
       tgId: session.user.telegramId,
       limit: 5,
       windowSeconds: 15 * 60,
@@ -51,7 +55,7 @@ export async function POST(request: Request) {
       {
         method: "POST",
         accessToken,
-        body,
+        body: confirmBody,
       },
     );
 

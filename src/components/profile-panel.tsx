@@ -81,7 +81,7 @@ export function ProfilePanel() {
       }
 
       await loadProfile();
-      setMessage("Новый e-mail сохранён как ожидающий подтверждения.");
+      setMessage("Новый e-mail сохранён, код подтверждения отправлен.");
     } catch (err) {
       setMessage(err instanceof Error ? err.message : "Не удалось изменить e-mail.");
     } finally {

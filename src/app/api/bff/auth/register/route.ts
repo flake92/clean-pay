@@ -3,10 +3,10 @@ import { bffError, bffJson } from "@/lib/bff-response";
 import { getEnv } from "@/lib/env";
 import { isMockMode, mockAuthPayload } from "@/lib/mock-bff";
 import { assertRateLimit } from "@/lib/rate-limit";
-import { remnashopAuth } from "@/lib/remnashop/client";
+import { remnashopAuth, remnashopRequest } from "@/lib/remnashop/client";
 import { getRequestIp, getTurnstileToken, verifyTurnstileToken } from "@/lib/turnstile";
 import { createSessionFromRemnashopAuth } from "@/lib/remnashop/session";
-import type { RegisterRequest } from "@/lib/remnashop/types";
+import type { RegisterRequest, RequestEmailVerificationResponse } from "@/lib/remnashop/types";
 
 export const runtime = "nodejs";
 
@@ -64,11 +64,19 @@ export async function POST(request: Request) {
       refreshToken: auth.cookies.refreshToken,
       auth: auth.data,
     });
+    const verification = await remnashopRequest<RequestEmailVerificationResponse>(
+      "/auth/email/request-verification",
+      {
+        method: "POST",
+        accessToken: auth.cookies.accessToken,
+        body: { email: body.email },
+      },
+    );
 
     await auditLog({
       action: "auth_register_success",
       userId: user.id,
-      metadata: { email: user.email, telegramId: user.telegramId },
+      metadata: { email: user.email, telegramId: user.telegramId, verificationTargetEmail: verification.target_email },
     });
 
     return bffJson(
@@ -76,6 +84,7 @@ export async function POST(request: Request) {
         user: profile,
         expiresAt: auth.data.expires_at,
         refreshExpiresAt: auth.data.refresh_expires_at,
+        emailVerification: verification,
       },
       { status: 201 },
     );
