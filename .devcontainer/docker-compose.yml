@@ -42,11 +42,6 @@ services:
       WEB_REFRESH_SECRET: dev-web-refresh-secret-change-me
       COOKIE_SECURE: "false"
       COOKIE_SAMESITE: lax
-      SMTP_HOST: ${SMTP_HOST:-mailpit}
-      SMTP_PORT: ${SMTP_PORT:-1025}
-      SMTP_USER: ${SMTP_USER:-clean-pay}
-      SMTP_PASSWORD: ${SMTP_PASSWORD:-dev-smtp-password-change-me}
-      SMTP_FROM: CleanVPN <clean-pay@example.com>
       TELEGRAM_OIDC_ISSUER: https://oauth.telegram.org
       TELEGRAM_OIDC_AUTHORIZATION_ENDPOINT: https://oauth.telegram.org/auth
       TELEGRAM_OIDC_TOKEN_ENDPOINT: https://oauth.telegram.org/token

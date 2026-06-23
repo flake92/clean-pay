@@ -196,7 +196,7 @@ export function RegisterForm() {
       return;
     }
 
-    redirectAfterAuth();
+    window.location.assign("/register/verify-email");
   }
 
   return (

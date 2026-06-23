@@ -204,25 +204,65 @@ export async function consumeTelegramCallback(code: string, state: string) {
     where: { telegramId },
   });
 
-  if (
-    authState.userId &&
-    existingTelegramUser &&
-    existingTelegramUser.id !== authState.userId
-  ) {
-    throw new Error("Telegram account is already linked to another user");
-  }
+  const targetUserId = authState.userId;
+  const user = targetUserId
+    ? await prisma.$transaction(async (tx) => {
+        const targetUser = await tx.webUser.findUniqueOrThrow({
+          where: { id: targetUserId },
+        });
+        const sourceUser =
+          existingTelegramUser && existingTelegramUser.id !== targetUserId
+            ? existingTelegramUser
+            : null;
 
-  const user = authState.userId
-    ? await prisma.webUser.update({
-        where: { id: authState.userId },
-        data: {
-          telegramId,
-          telegramUsername,
-          fullName,
-          photoUrl,
-          displayName: fullName ?? telegramUsername,
-          lastLoginAt: new Date(),
-        },
+        if (sourceUser) {
+          await tx.webUser.update({
+            where: { id: sourceUser.id },
+            data: {
+              remnashopUserId: null,
+              email: null,
+              telegramId: null,
+            },
+          });
+          await tx.webSession.updateMany({
+            where: { userId: sourceUser.id },
+            data: { userId: targetUserId },
+          });
+          await tx.auditLog.updateMany({
+            where: { userId: sourceUser.id },
+            data: { userId: targetUserId },
+          });
+          await tx.paymentRecord.updateMany({
+            where: { userId: sourceUser.id },
+            data: { userId: targetUserId },
+          });
+          await tx.emailVerificationCode.updateMany({
+            where: { userId: sourceUser.id },
+            data: { userId: targetUserId },
+          });
+          await tx.telegramAuthState.updateMany({
+            where: { userId: sourceUser.id },
+            data: { userId: targetUserId },
+          });
+          await tx.webUser.delete({
+            where: { id: sourceUser.id },
+          });
+        }
+
+        return tx.webUser.update({
+          where: { id: targetUserId },
+          data: {
+            remnashopUserId: targetUser.remnashopUserId ?? sourceUser?.remnashopUserId,
+            email: targetUser.email ?? sourceUser?.email,
+            emailVerified: targetUser.emailVerified || Boolean(sourceUser?.emailVerified),
+            telegramId,
+            telegramUsername,
+            fullName,
+            photoUrl,
+            displayName: fullName ?? telegramUsername,
+            lastLoginAt: new Date(),
+          },
+        });
       })
     : await prisma.webUser.upsert({
         where: { telegramId },

@@ -1,6 +1,3 @@
-import net from "node:net";
-
-import { logTechnicalWarning } from "@/lib/audit";
 import { getEnv } from "@/lib/env";
 import { prisma } from "@/lib/prisma";
 import { redisCommand } from "@/lib/redis";
@@ -55,43 +52,6 @@ export async function checkRemnashop() {
       throw new Error(`Remnashop returned ${response.status}`);
     }
   });
-}
-
-function smtpConnect(host: string, port: number) {
-  return new Promise<void>((resolve, reject) => {
-    const socket = net.connect({ host, port });
-    const timeout = setTimeout(() => {
-      socket.destroy();
-      reject(new Error("SMTP connection timed out"));
-    }, 3000);
-
-    socket.once("connect", () => {
-      clearTimeout(timeout);
-      socket.end();
-      resolve();
-    });
-    socket.once("error", (error) => {
-      clearTimeout(timeout);
-      reject(error);
-    });
-  });
-}
-
-export async function checkSmtp() {
-  const env = getEnv();
-  const result = await measure(async () => {
-    await smtpConnect(env.smtp.host, env.smtp.port);
-  });
-
-  if (result.status === "down") {
-    logTechnicalWarning("smtp_readiness_failed", {
-      host: env.smtp.host,
-      port: env.smtp.port,
-      message: result.message,
-    });
-  }
-
-  return result;
 }
 
 export function aggregateStatus(results: Record<string, CheckResult>) {

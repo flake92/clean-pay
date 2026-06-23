@@ -104,6 +104,10 @@ export default function Home() {
               <Link href="/profile" className="p-button p-component p-button-outlined no-underline">
                 <span className="p-button-label">Профиль</span>
               </Link>
+              <Link href="/link-account" className="p-button p-component p-button-outlined no-underline">
+                <span className="p-button-icon p-c pi pi-send" />
+                <span className="p-button-label">Привязать Telegram</span>
+              </Link>
               <Link href="/support" className="p-button p-component p-button-outlined no-underline">
                 <span className="p-button-label">Поддержка</span>
               </Link>

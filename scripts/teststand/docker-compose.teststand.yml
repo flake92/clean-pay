@@ -4,6 +4,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      target: runner
       args:
         NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL:-https://oplata.clear-vpn.org}
         NEXT_PUBLIC_TURNSTILE_SITE_KEY: ${NEXT_PUBLIC_TURNSTILE_SITE_KEY:?Set NEXT_PUBLIC_TURNSTILE_SITE_KEY}
@@ -14,6 +15,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     environment:
       DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-clean_pay}?schema=public
       HOSTNAME: 0.0.0.0
@@ -26,11 +29,6 @@ services:
       AUDIT_IP_HASH_SECRET: ${AUDIT_IP_HASH_SECRET:?Set AUDIT_IP_HASH_SECRET}
       COOKIE_SECURE: "true"
       COOKIE_SAMESITE: lax
-      SMTP_HOST: ${SMTP_HOST:?Set SMTP_HOST}
-      SMTP_PORT: ${SMTP_PORT:-587}
-      SMTP_USER: ${SMTP_USER:?Set SMTP_USER}
-      SMTP_PASSWORD: ${SMTP_PASSWORD:?Set SMTP_PASSWORD}
-      SMTP_FROM: ${SMTP_FROM:?Set SMTP_FROM}
       TELEGRAM_OIDC_ISSUER: ${TELEGRAM_OIDC_ISSUER:?Set TELEGRAM_OIDC_ISSUER}
       TELEGRAM_OIDC_AUTHORIZATION_ENDPOINT: ${TELEGRAM_OIDC_AUTHORIZATION_ENDPOINT:?Set TELEGRAM_OIDC_AUTHORIZATION_ENDPOINT}
       TELEGRAM_OIDC_TOKEN_ENDPOINT: ${TELEGRAM_OIDC_TOKEN_ENDPOINT:?Set TELEGRAM_OIDC_TOKEN_ENDPOINT}
@@ -60,6 +58,21 @@ services:
       timeout: 5s
       retries: 3
       start_period: 20s
+
+  migrate:
+    container_name: clean-pay-migrate
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: migrate
+    restart: "no"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-clean_pay}?schema=public
+    networks:
+      - clean-pay-internal
 
   postgres:
     container_name: clean-pay-postgres

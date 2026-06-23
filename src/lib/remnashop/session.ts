@@ -71,21 +71,18 @@ export async function linkCurrentUserToRemnashopAuth({
   const session = await getCurrentSession();
 
   if (!session) {
-    throw new BffError("UNAUTHORIZED", 401, "Нужно войти в аккаунт.");
+    throw new BffError("UNAUTHORIZED", 401, "Login is required.");
   }
 
   const remnashopUserId = getRemnashopUserIdFromAccessToken(accessToken);
   const profile = await getRemnashopMe(accessToken);
+  const mergeSourceIds = new Set<string>();
   const linkedByRemnashopId = await prisma.webUser.findUnique({
     where: { remnashopUserId },
   });
 
   if (linkedByRemnashopId && linkedByRemnashopId.id !== session.userId) {
-    throw new BffError(
-      "CONFLICT",
-      409,
-      "Этот e-mail уже привязан к другому web-аккаунту.",
-    );
+    mergeSourceIds.add(linkedByRemnashopId.id);
   }
 
   if (profile.email) {
@@ -94,40 +91,77 @@ export async function linkCurrentUserToRemnashopAuth({
     });
 
     if (linkedByEmail && linkedByEmail.id !== session.userId) {
-      throw new BffError(
-        "CONFLICT",
-        409,
-        "Этот e-mail уже привязан к другому web-аккаунту.",
-      );
+      mergeSourceIds.add(linkedByEmail.id);
     }
   }
 
-  const user = await prisma.webUser.update({
-    where: { id: session.userId },
-    data: {
-      remnashopUserId,
-      email: profile.email,
-      emailVerified: profile.is_email_verified,
-      fullName: profile.name,
-      displayName: profile.name,
-      lastLoginAt: new Date(),
-    },
-  });
+  const sourceUserIds = [...mergeSourceIds];
+  const protectedAccessToken = protectRemnashopToken(accessToken);
+  const protectedRefreshToken = protectRemnashopToken(refreshToken);
+  const user = await prisma.$transaction(async (tx) => {
+    if (sourceUserIds.length > 0) {
+      await tx.webUser.updateMany({
+        where: { id: { in: sourceUserIds } },
+        data: {
+          remnashopUserId: null,
+          email: null,
+          telegramId: null,
+        },
+      });
+      await tx.webSession.updateMany({
+        where: { userId: { in: sourceUserIds } },
+        data: { userId: session.userId },
+      });
+      await tx.auditLog.updateMany({
+        where: { userId: { in: sourceUserIds } },
+        data: { userId: session.userId },
+      });
+      await tx.paymentRecord.updateMany({
+        where: { userId: { in: sourceUserIds } },
+        data: { userId: session.userId },
+      });
+      await tx.emailVerificationCode.updateMany({
+        where: { userId: { in: sourceUserIds } },
+        data: { userId: session.userId },
+      });
+      await tx.telegramAuthState.updateMany({
+        where: { userId: { in: sourceUserIds } },
+        data: { userId: session.userId },
+      });
+      await tx.webUser.deleteMany({
+        where: { id: { in: sourceUserIds } },
+      });
+    }
 
-  await prisma.webSession.update({
-    where: { id: session.id },
-    data: {
-      remnashopAccessTokenEncrypted: protectRemnashopToken(accessToken),
-      remnashopRefreshTokenEncrypted: protectRemnashopToken(refreshToken),
-      remnashopAccessExpiresAt: new Date(auth.expires_at),
-      remnashopRefreshExpiresAt: new Date(auth.refresh_expires_at),
-    },
+    const updatedUser = await tx.webUser.update({
+      where: { id: session.userId },
+      data: {
+        remnashopUserId,
+        email: profile.email,
+        emailVerified: profile.is_email_verified,
+        fullName: profile.name,
+        displayName: profile.name,
+        lastLoginAt: new Date(),
+      },
+    });
+
+    await tx.webSession.update({
+      where: { id: session.id },
+      data: {
+        remnashopAccessTokenEncrypted: protectedAccessToken,
+        remnashopRefreshTokenEncrypted: protectedRefreshToken,
+        remnashopAccessExpiresAt: new Date(auth.expires_at),
+        remnashopRefreshExpiresAt: new Date(auth.refresh_expires_at),
+      },
+    });
+
+    return updatedUser;
   });
 
   await auditLog({
     action: "remnashop_account_linked",
     userId: user.id,
-    metadata: { remnashopUserId },
+    metadata: { remnashopUserId, mergedUserIds: sourceUserIds },
   });
 
   return { user, profile };

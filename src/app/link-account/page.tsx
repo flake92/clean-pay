@@ -1,11 +1,13 @@
-"use client";
-
 import { Card } from "primereact/card";
 
 import { AppShell, PageHeader } from "@/components/layout";
 import { LinkAccountPanel } from "@/components/link-account-panel";
 
+export const dynamic = "force-dynamic";
+
 export default function LinkAccountPage() {
+  const turnstileEnabled = process.env.TURNSTILE_ENABLED === "true";
+
   return (
     <AppShell>
       <div className="flex flex-column gap-6">
@@ -14,7 +16,7 @@ export default function LinkAccountPage() {
           title="Привязка аккаунта"
         />
         <Card>
-          <LinkAccountPanel />
+          <LinkAccountPanel turnstileEnabled={turnstileEnabled} />
         </Card>
       </div>
     </AppShell>

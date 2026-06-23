@@ -2,9 +2,10 @@ import { auditLog } from "@/lib/audit";
 import { bffError, bffJson } from "@/lib/bff-response";
 import { isMockMode, mockUser } from "@/lib/mock-bff";
 import { assertRateLimit } from "@/lib/rate-limit";
-import { remnashopAuth } from "@/lib/remnashop/client";
+import { remnashopAuth, remnashopRequest } from "@/lib/remnashop/client";
+import { BffError } from "@/lib/remnashop/errors";
 import { linkCurrentUserToRemnashopAuth } from "@/lib/remnashop/session";
-import type { LoginRequest } from "@/lib/remnashop/types";
+import type { LoginRequest, RequestEmailVerificationResponse } from "@/lib/remnashop/types";
 
 export const runtime = "nodejs";
 
@@ -25,21 +26,41 @@ export async function POST(request: Request) {
       return bffJson({ user: mockUser, linked: true });
     }
 
-    const auth = await remnashopAuth("/auth/login", body);
+    let auth: Awaited<ReturnType<typeof remnashopAuth>>;
+
+    try {
+      auth = await remnashopAuth("/auth/login", body);
+    } catch (error) {
+      if (!(error instanceof BffError) || error.code !== "AUTH_FAILED") {
+        throw error;
+      }
+
+      auth = await remnashopAuth("/auth/register", body);
+    }
+
     const { user, profile } = await linkCurrentUserToRemnashopAuth({
       accessToken: auth.cookies.accessToken,
       refreshToken: auth.cookies.refreshToken,
       auth: auth.data,
     });
+    const verification = await remnashopRequest<RequestEmailVerificationResponse>(
+      "/auth/email/request-verification",
+      {
+        method: "POST",
+        accessToken: auth.cookies.accessToken,
+        body: { email: body.email },
+      },
+    );
 
     await auditLog({
       action: "remnashop_account_linked",
       userId: user.id,
-      metadata: { email: profile.email, telegramId: profile.telegram_id },
+      metadata: { email: profile.email, telegramId: profile.telegram_id, verificationTargetEmail: verification.target_email },
     });
 
     return bffJson({
       user: profile,
+      emailVerification: verification,
       linked: true,
     });
   } catch (error) {

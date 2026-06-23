@@ -1,7 +1,13 @@
-import type { PaymentRecordStatus } from "@prisma/client";
-
 import { prisma } from "@/lib/prisma";
 import type { PaymentInitResponse, PlanOffer } from "@/lib/remnashop/types";
+
+type PaymentRecordStatus =
+  | "PENDING"
+  | "COMPLETED"
+  | "FAILED"
+  | "CANCELED"
+  | "REFUNDED"
+  | "UNKNOWN";
 
 type RecordPaymentInput = {
   userId: string;

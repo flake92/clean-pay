@@ -17,6 +17,20 @@ const publicApiPaths = new Set([
   '/api/logout',
 ]);
 
+const emailVerificationPagePaths = new Set([
+  '/verify-email',
+  '/register/verify-email',
+]);
+
+const emailVerificationApiPrefixes = [
+  '/api/bff/auth/email/',
+];
+
+const emailVerificationApiPaths = new Set([
+  '/api/bff/auth/logout',
+  '/api/logout',
+]);
+
 function decodeBase64Url(value: string) {
   const normalized = value.replace(/-/g, '+').replace(/_/g, '/');
   const padded = normalized.padEnd(Math.ceil(normalized.length / 4) * 4, '=');
@@ -58,44 +72,64 @@ function safeEqual(left: string, right: string) {
   return mismatch === 0;
 }
 
-async function hasUsableAccessCookie(request: NextRequest) {
+type AccessState = {
+  authenticated: boolean;
+  emailVerificationRequired: boolean;
+};
+
+async function getAccessState(request: NextRequest): Promise<AccessState> {
   const token = request.cookies.get(accessCookieName)?.value;
 
   if (!token) {
-    return false;
+    return { authenticated: false, emailVerificationRequired: false };
   }
 
   const [payload, signature] = token.split('.');
 
   if (!payload || !signature) {
-    return false;
+    return { authenticated: false, emailVerificationRequired: false };
   }
 
   try {
-    const parsed = JSON.parse(decodeBase64Url(payload)) as { exp?: unknown };
+    const parsed = JSON.parse(decodeBase64Url(payload)) as { exp?: unknown; ev?: unknown; tg?: unknown };
 
     if (typeof parsed.exp !== 'number' || parsed.exp <= Math.floor(Date.now() / 1000)) {
-      return false;
+      return { authenticated: false, emailVerificationRequired: false };
     }
 
     if (signature === 'mock') {
-      return process.env.CLEAN_PAY_MOCK_MODE === '1';
+      const authenticated = process.env.CLEAN_PAY_MOCK_MODE === '1';
+
+      return { authenticated, emailVerificationRequired: false };
     }
 
     const secret = process.env.WEB_JWT_SECRET;
 
     if (!secret) {
-      return false;
+      return { authenticated: false, emailVerificationRequired: false };
     }
 
-    return safeEqual(signature, await hmacSha256(payload, secret));
+    const authenticated = safeEqual(signature, await hmacSha256(payload, secret));
+
+    return {
+      authenticated,
+      emailVerificationRequired: authenticated && parsed.ev === false && parsed.tg !== true,
+    };
   } catch {
-    return false;
+    return { authenticated: false, emailVerificationRequired: false };
   }
 }
 
 function isPublicPath(pathname: string) {
   return publicPagePaths.has(pathname) || publicApiPaths.has(pathname);
+}
+
+function isEmailVerificationAllowedPath(pathname: string) {
+  return (
+    emailVerificationPagePaths.has(pathname) ||
+    emailVerificationApiPaths.has(pathname) ||
+    emailVerificationApiPrefixes.some((prefix) => pathname.startsWith(prefix))
+  );
 }
 
 function safeRedirectTarget(request: NextRequest) {
@@ -117,11 +151,13 @@ function loginRedirect(request: NextRequest) {
   return NextResponse.redirect(url);
 }
 
-function authenticatedRedirect(request: NextRequest) {
+function authenticatedRedirect(request: NextRequest, emailVerificationRequired: boolean) {
   const redirectTo = request.nextUrl.searchParams.get('redirect_to');
   const url = request.nextUrl.clone();
 
-  url.pathname = redirectTo?.startsWith('/') && !redirectTo.startsWith('//')
+  url.pathname = emailVerificationRequired
+    ? '/register/verify-email'
+    : redirectTo?.startsWith('/') && !redirectTo.startsWith('//')
     ? redirectTo
     : '/cabinet';
   url.search = '';
@@ -131,17 +167,33 @@ function authenticatedRedirect(request: NextRequest) {
 
 export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
-  const isAuthenticated = await hasUsableAccessCookie(request);
+  const accessState = await getAccessState(request);
+  const isAuthenticated = accessState.authenticated;
 
   if (isPublicPath(pathname)) {
     if (isAuthenticated && (pathname === '/login' || pathname === '/register')) {
-      return authenticatedRedirect(request);
+      return authenticatedRedirect(request, accessState.emailVerificationRequired);
     }
 
     return NextResponse.next();
   }
 
   if (isAuthenticated) {
+    if (accessState.emailVerificationRequired && !isEmailVerificationAllowedPath(pathname)) {
+      if (pathname.startsWith('/api/')) {
+        return NextResponse.json(
+          { error: { code: 'EMAIL_NOT_VERIFIED', message: 'Подтвердите e-mail, чтобы продолжить.' } },
+          { status: 403 },
+        );
+      }
+
+      const url = request.nextUrl.clone();
+      url.pathname = '/register/verify-email';
+      url.search = '';
+
+      return NextResponse.redirect(url);
+    }
+
     return NextResponse.next();
   }
 

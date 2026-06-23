@@ -10,13 +10,6 @@ type AppEnv = {
   auditIpHashSecret: string;
   cookieSecure: boolean;
   cookieSameSite: SameSite;
-  smtp: {
-    host: string;
-    port: number;
-    user: string;
-    password: string;
-    from: string;
-  };
   telegramOidc: {
     issuer: string;
     authorizationEndpoint: string;
@@ -83,22 +76,6 @@ function bool(name: string, defaultValue: boolean) {
   throw new Error(`${name} must be "true" or "false"`);
 }
 
-function number(name: string, defaultValue: number) {
-  const value = process.env[name];
-
-  if (!value) {
-    return defaultValue;
-  }
-
-  const parsed = Number(value);
-
-  if (!Number.isInteger(parsed) || parsed <= 0) {
-    throw new Error(`${name} must be a positive integer`);
-  }
-
-  return parsed;
-}
-
 function sameSite(name: string, defaultValue: SameSite) {
   const value = process.env[name]?.toLowerCase();
 
@@ -148,13 +125,6 @@ export function getEnv(): AppEnv {
     auditIpHashSecret: optional("AUDIT_IP_HASH_SECRET") ?? required("WEB_JWT_SECRET"),
     cookieSecure: bool("COOKIE_SECURE", true),
     cookieSameSite: sameSite("COOKIE_SAMESITE", "lax"),
-    smtp: {
-      host: required("SMTP_HOST"),
-      port: number("SMTP_PORT", 587),
-      user: required("SMTP_USER"),
-      password: required("SMTP_PASSWORD"),
-      from: required("SMTP_FROM"),
-    },
     telegramOidc: {
       issuer: url("TELEGRAM_OIDC_ISSUER"),
       authorizationEndpoint: url("TELEGRAM_OIDC_AUTHORIZATION_ENDPOINT"),

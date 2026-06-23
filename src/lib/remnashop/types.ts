@@ -57,6 +57,7 @@ export type RequestEmailVerificationResponse = {
 export type ConfirmEmailVerificationRequest = {
   email?: string;
   code: string;
+  registrationFlow?: boolean;
 };
 
 export type ConfirmEmailVerificationResponse = {

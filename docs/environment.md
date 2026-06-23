@@ -49,19 +49,11 @@ DATABASE_URL="postgresql://postgres:postgres@db:5432/postgres?schema=public"
 - `COOKIE_SECURE` - `true` in production, `false` in local development.
 - `COOKIE_SAMESITE` - `lax`, `strict`, or `none`.
 
-### SMTP
+### E-mail Verification
 
-Clean Pay keeps `SMTP_*` variables for deployment health checks and compatibility, but e-mail verification is delegated to Remnashop through the public auth API. For production, configure both sides intentionally.
+Clean Pay does not send e-mail directly. Verification codes are requested through the Remnashop public auth API, so mail delivery must be configured in Remnashop, not in Clean Pay.
 
-Clean Pay `.env`:
-
-- `SMTP_HOST` - SMTP host.
-- `SMTP_PORT` - SMTP port, usually `587`.
-- `SMTP_USER` - SMTP username.
-- `SMTP_PASSWORD` - SMTP password.
-- `SMTP_FROM` - sender address.
-
-Remnashop `/opt/remnashop/.env` for verification codes:
+Remnashop `/opt/remnashop/.env`:
 
 ```env
 EMAIL_ENABLED=true
@@ -70,7 +62,7 @@ EMAIL_PORT=587
 EMAIL_USE_TLS=true
 EMAIL_USE_SSL=false
 EMAIL_USERNAME=code@clear-vpn.org
-EMAIL_PASSWORD=<smtp-password>
+EMAIL_PASSWORD=<password>
 EMAIL_FROM_EMAIL=code@clear-vpn.org
 EMAIL_FROM_NAME=CleanVPN
 EMAIL_VERIFICATION_CODE_TTL_MINUTES=15

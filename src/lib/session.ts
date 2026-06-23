@@ -14,6 +14,8 @@ type AccessPayload = {
   sid: string;
   uid: string;
   exp: number;
+  ev?: boolean;
+  tg?: boolean;
 };
 
 function addMinutes(date: Date, minutes: number) {
@@ -30,6 +32,38 @@ function signAccessToken(payload: AccessPayload) {
   const signature = hmacSha256(encodedPayload, env.webJwtSecret);
 
   return `${encodedPayload}.${signature}`;
+}
+
+async function setAccessCookie({
+  sessionId,
+  userId,
+  expiresAt,
+  emailVerified,
+  telegramId,
+}: {
+  sessionId: string;
+  userId: string;
+  expiresAt: Date;
+  emailVerified?: boolean | null;
+  telegramId?: bigint | number | string | null;
+}) {
+  const env = getEnv();
+  const cookieStore = await cookies();
+  const accessToken = signAccessToken({
+    sid: sessionId,
+    uid: userId,
+    exp: Math.floor(expiresAt.getTime() / 1000),
+    ev: Boolean(emailVerified),
+    tg: Boolean(telegramId),
+  });
+
+  cookieStore.set(sessionCookieNames.access, accessToken, {
+    httpOnly: true,
+    secure: env.cookieSecure,
+    sameSite: env.cookieSameSite,
+    path: "/",
+    expires: expiresAt,
+  });
 }
 
 function verifyAccessToken(token: string) {
@@ -76,19 +110,17 @@ export async function createWebSession(userId: string) {
       refreshExpiresAt,
     },
   });
-
-  const accessToken = signAccessToken({
-    sid: session.id,
-    uid: userId,
-    exp: Math.floor(accessTokenExpiresAt.getTime() / 1000),
+  const user = await prisma.webUser.findUnique({
+    where: { id: userId },
+    select: { emailVerified: true, telegramId: true },
   });
 
-  cookieStore.set(sessionCookieNames.access, accessToken, {
-    httpOnly: true,
-    secure: env.cookieSecure,
-    sameSite: env.cookieSameSite,
-    path: "/",
-    expires: accessTokenExpiresAt,
+  await setAccessCookie({
+    sessionId: session.id,
+    userId,
+    expiresAt: accessTokenExpiresAt,
+    emailVerified: user?.emailVerified,
+    telegramId: user?.telegramId,
   });
 
   cookieStore.set(sessionCookieNames.refresh, refreshToken, {
@@ -139,19 +171,17 @@ export async function createWebSessionForRemnashopUser({
       refreshExpiresAt,
     },
   });
-
-  const accessToken = signAccessToken({
-    sid: session.id,
-    uid: userId,
-    exp: Math.floor(accessTokenExpiresAt.getTime() / 1000),
+  const user = await prisma.webUser.findUnique({
+    where: { id: userId },
+    select: { emailVerified: true, telegramId: true },
   });
 
-  cookieStore.set(sessionCookieNames.access, accessToken, {
-    httpOnly: true,
-    secure: env.cookieSecure,
-    sameSite: env.cookieSameSite,
-    path: "/",
-    expires: accessTokenExpiresAt,
+  await setAccessCookie({
+    sessionId: session.id,
+    userId,
+    expiresAt: accessTokenExpiresAt,
+    emailVerified: user?.emailVerified,
+    telegramId: user?.telegramId,
   });
 
   cookieStore.set(sessionCookieNames.refresh, refreshToken, {
@@ -215,6 +245,29 @@ export async function getCurrentSession() {
     },
     include: { user: true },
   });
+}
+
+export async function refreshCurrentAccessCookie() {
+  const session = await getCurrentSession();
+
+  if (!session) {
+    return null;
+  }
+
+  const user = await prisma.webUser.findUnique({
+    where: { id: session.userId },
+    select: { emailVerified: true, telegramId: true },
+  });
+
+  await setAccessCookie({
+    sessionId: session.id,
+    userId: session.userId,
+    expiresAt: session.accessTokenExpiresAt,
+    emailVerified: user?.emailVerified,
+    telegramId: user?.telegramId,
+  });
+
+  return session;
 }
 
 export async function clearWebSession() {

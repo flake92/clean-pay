@@ -3,6 +3,7 @@ import { bffError, bffJson } from "@/lib/bff-response";
 import { isMockMode, mockConfirmEmail } from "@/lib/mock-bff";
 import { prisma } from "@/lib/prisma";
 import { assertRateLimit } from "@/lib/rate-limit";
+import { refreshCurrentAccessCookie } from "@/lib/session";
 import {
   getAuthorizedRemnashopTokens,
   getRemnashopMe,
@@ -23,8 +24,12 @@ export async function POST(request: Request) {
     const body = { ...rawBody };
     delete body.turnstileToken;
     delete body["cf-turnstile-response"];
+    const skipTurnstile = body.registrationFlow === true;
+    delete body.registrationFlow;
 
-    await verifyTurnstileToken(turnstileToken, getRequestIp(request));
+    if (!skipTurnstile) {
+      await verifyTurnstileToken(turnstileToken, getRequestIp(request));
+    }
 
     if (isMockMode()) {
       await assertRateLimit({
@@ -66,6 +71,7 @@ export async function POST(request: Request) {
         emailVerified: true,
       },
     });
+    await refreshCurrentAccessCookie();
 
     await auditLog({
       action: "email_verified",

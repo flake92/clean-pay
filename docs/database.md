@@ -74,4 +74,4 @@ Small service settings that are safe to keep in the web-cabinet database.
 
 ### IntegrationStatus
 
-Health/status records for dependencies such as Remnashop, SMTP, and the local database.
+Health/status records for dependencies such as Remnashop, Redis, and the local database.

@@ -5,7 +5,6 @@ import {
   checkDatabase,
   checkRedis,
   checkRemnashop,
-  checkSmtp,
 } from "@/lib/health-checks";
 
 export const runtime = "nodejs";
@@ -15,7 +14,6 @@ export async function GET() {
     database: await checkDatabase(),
     redis: await checkRedis(),
     remnashop: await checkRemnashop(),
-    smtp: await checkSmtp(),
   };
   const status = aggregateStatus(checks);
 
