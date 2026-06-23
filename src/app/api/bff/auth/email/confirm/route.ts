@@ -7,7 +7,7 @@ import {
   getAuthorizedRemnashopTokens,
   remnashopRequest,
 } from "@/lib/remnashop/client";
-import { verifyTurnstileToken } from "@/lib/turnstile";
+import { getRequestIp, getTurnstileToken, verifyTurnstileToken } from "@/lib/turnstile";
 import type {
   ConfirmEmailVerificationRequest,
   ConfirmEmailVerificationResponse,
@@ -17,10 +17,13 @@ export const runtime = "nodejs";
 
 export async function POST(request: Request) {
   try {
-    const rawBody = (await request.json()) as ConfirmEmailVerificationRequest & { turnstileToken?: string };
-    const { turnstileToken, ...body } = rawBody;
+    const rawBody = (await request.json()) as ConfirmEmailVerificationRequest & { turnstileToken?: string; "cf-turnstile-response"?: string };
+    const turnstileToken = getTurnstileToken(rawBody);
+    const body = { ...rawBody };
+    delete body.turnstileToken;
+    delete body["cf-turnstile-response"];
 
-    await verifyTurnstileToken(turnstileToken);
+    await verifyTurnstileToken(turnstileToken, getRequestIp(request));
 
     if (isMockMode()) {
       await assertRateLimit({

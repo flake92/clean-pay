@@ -4,7 +4,7 @@ import { getEnv } from "@/lib/env";
 import { isMockMode, mockAuthPayload } from "@/lib/mock-bff";
 import { assertRateLimit } from "@/lib/rate-limit";
 import { remnashopAuth } from "@/lib/remnashop/client";
-import { verifyTurnstileToken } from "@/lib/turnstile";
+import { getRequestIp, getTurnstileToken, verifyTurnstileToken } from "@/lib/turnstile";
 import { createSessionFromRemnashopAuth } from "@/lib/remnashop/session";
 import type { LoginRequest } from "@/lib/remnashop/types";
 
@@ -36,11 +36,14 @@ export async function POST(request: Request) {
   let email: string | null = null;
 
   try {
-    const rawBody = (await request.json()) as LoginRequest & { turnstileToken?: string };
-    const { turnstileToken, ...body } = rawBody;
+    const rawBody = (await request.json()) as LoginRequest & { turnstileToken?: string; "cf-turnstile-response"?: string };
+    const turnstileToken = getTurnstileToken(rawBody);
+    const body = { ...rawBody };
+    delete body.turnstileToken;
+    delete body["cf-turnstile-response"];
     email = body.email;
 
-    await verifyTurnstileToken(turnstileToken);
+    await verifyTurnstileToken(turnstileToken, getRequestIp(request));
 
     await assertRateLimit({
       action: "auth_login",

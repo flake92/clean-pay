@@ -6,6 +6,24 @@ type TurnstileResponse = {
   "error-codes"?: string[];
 };
 
+type TurnstileBody = {
+  turnstileToken?: string | null;
+  "cf-turnstile-response"?: string | null;
+};
+
+export function getTurnstileToken(body: TurnstileBody) {
+  return body.turnstileToken ?? body["cf-turnstile-response"] ?? null;
+}
+
+export function getRequestIp(request: Request) {
+  return (
+    request.headers.get("cf-connecting-ip") ??
+    request.headers.get("x-real-ip") ??
+    request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ??
+    null
+  );
+}
+
 export async function verifyTurnstileToken(token: string | null | undefined, remoteIp?: string | null) {
   const env = getEnv();
 
@@ -56,3 +74,4 @@ export async function verifyTurnstileToken(token: string | null | undefined, rem
     });
   }
 }
+

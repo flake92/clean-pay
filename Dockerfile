@@ -5,7 +5,29 @@ RUN npm ci
 
 FROM node:24-bookworm-slim AS builder
 WORKDIR /app
+ARG NEXT_PUBLIC_APP_URL=https://oplata.clear-vpn.org
+ARG NEXT_PUBLIC_TURNSTILE_SITE_KEY=
 ENV NEXT_TELEMETRY_DISABLED=1
+ENV DATABASE_URL=postgresql://postgres:postgres@localhost:5432/postgres?schema=public
+ENV APP_URL=https://oplata.clear-vpn.org
+ENV NEXT_PUBLIC_APP_URL=$NEXT_PUBLIC_APP_URL
+ENV REMNASHOP_API_BASE_URL=https://example.com/api/v1/public
+ENV WEB_JWT_SECRET=build-time-secret
+ENV WEB_REFRESH_SECRET=build-time-secret
+ENV AUDIT_IP_HASH_SECRET=build-time-secret
+ENV SMTP_HOST=localhost
+ENV SMTP_PORT=587
+ENV SMTP_USER=build@example.com
+ENV SMTP_PASSWORD=build-time-secret
+ENV SMTP_FROM=build@example.com
+ENV TELEGRAM_OIDC_ISSUER=https://oauth.telegram.org
+ENV TELEGRAM_OIDC_AUTHORIZATION_ENDPOINT=https://oauth.telegram.org/auth
+ENV TELEGRAM_OIDC_TOKEN_ENDPOINT=https://oauth.telegram.org/token
+ENV TELEGRAM_OIDC_JWKS_URI=https://oauth.telegram.org/.well-known/jwks.json
+ENV TELEGRAM_OIDC_CLIENT_ID=build-client-id
+ENV TELEGRAM_OIDC_CLIENT_SECRET=build-time-secret
+ENV TURNSTILE_ENABLED=false
+ENV NEXT_PUBLIC_TURNSTILE_SITE_KEY=$NEXT_PUBLIC_TURNSTILE_SITE_KEY
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 RUN npx prisma generate

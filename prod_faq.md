@@ -136,6 +136,35 @@ CLEAN_PAY_MOCK_MODE=1 PORT=4001 HOSTNAME=0.0.0.0 node .next-mock/standalone/serv
 
 В production mock-режим не включать.
 
+## Внешний Caddy или reverse proxy из другого compose
+
+Если Caddy уже запущен в другом проекте, как на тестовом стенде Remnawave, не используй `127.0.0.1` из Caddy-контейнера для доступа к Clean Pay. Внутри контейнера `127.0.0.1` указывает на сам контейнер Caddy.
+
+Правильная схема:
+
+```bash
+docker network connect clean-pay_default caddy
+docker restart caddy
+```
+
+А в Caddyfile внешнего проекта upstream должен идти в контейнер Clean Pay по docker-сети:
+
+```caddyfile
+oplata.clear-vpn.org {
+    encode gzip zstd
+    reverse_proxy clean-pay-web-1:3000
+}
+```
+
+Если используется другое имя compose project, сеть будет называться иначе. Проверь ее командой:
+
+```bash
+docker network ls
+docker inspect clean-pay-web-1 --format '{{json .NetworkSettings.Networks}}'
+```
+
+Симптом неправильной настройки: `https://oplata.clear-vpn.org` отдает `502`, а в логах Caddy есть `dial tcp 127.0.0.1:4010: connect: connection refused`.
+
 ## DNS, Cloudflare и TLS
 
 Рекомендуемый путь:
