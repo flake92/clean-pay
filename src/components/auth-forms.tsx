@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { createContext, useContext, useMemo, useState, type FormEvent, type ReactNode } from "react";
 
 import { Button } from "primereact/button";
 import { InputText } from "primereact/inputtext";
@@ -14,6 +14,22 @@ type ApiState = {
   loading: boolean;
   error: string | null;
 };
+
+type AuthTurnstileContextValue = {
+  enabled: boolean;
+  token: string | null;
+  reset: () => void;
+  setHandle: (handle: TurnstileHandle) => void;
+  setToken: (token: string | null) => void;
+};
+
+const AuthTurnstileContext = createContext<AuthTurnstileContextValue>({
+  enabled: false,
+  token: null,
+  reset: () => {},
+  setHandle: () => {},
+  setToken: () => {},
+});
 
 async function readError(response: Response) {
   return (await readBffError(response, "Не удалось выполнить действие.")).message;
@@ -37,15 +53,64 @@ function missingTurnstileTokenMessage() {
     : "Cloudflare Turnstile site key is not configured.";
 }
 
-export function LoginForm() {
-  const [state, setState] = useState<ApiState>({ loading: false, error: null });
+function turnstilePayload(token: string | null) {
+  return token
+    ? {
+        turnstileToken: token,
+        "cf-turnstile-response": token,
+      }
+    : {};
+}
+
+function useAuthTurnstile() {
+  return useContext(AuthTurnstileContext);
+}
+
+export function AuthTurnstileProvider({
+  enabled,
+  children,
+}: {
+  enabled: boolean;
+  children: ReactNode;
+}) {
   const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
   const [turnstile, setTurnstile] = useState<TurnstileHandle | null>(null);
 
-  async function onSubmit(event: React.FormEvent<HTMLFormElement>) {
+  const value = useMemo<AuthTurnstileContextValue>(
+    () => ({
+      enabled,
+      token: enabled ? turnstileToken : null,
+      reset: () => {
+        turnstile?.reset();
+        setTurnstileToken(null);
+      },
+      setHandle: setTurnstile,
+      setToken: setTurnstileToken,
+    }),
+    [enabled, turnstile, turnstileToken],
+  );
+
+  return <AuthTurnstileContext.Provider value={value}>{children}</AuthTurnstileContext.Provider>;
+}
+
+function AuthTurnstileChallenge() {
+  const turnstile = useAuthTurnstile();
+
+  if (!turnstile.enabled) {
+    return null;
+  }
+
+  return <TurnstileWidget onReady={turnstile.setHandle} onToken={turnstile.setToken} />;
+}
+
+export function LoginForm() {
+  const [state, setState] = useState<ApiState>({ loading: false, error: null });
+  const turnstile = useAuthTurnstile();
+
+  async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
-    if (!turnstileToken) {
+    if (turnstile.enabled && !turnstile.token) {
       setState({ loading: false, error: missingTurnstileTokenMessage() });
       return;
     }
@@ -59,13 +124,12 @@ export function LoginForm() {
       body: JSON.stringify({
         email: formData.get("email"),
         password: formData.get("password"),
-        turnstileToken,
-        "cf-turnstile-response": turnstileToken,
+        ...turnstilePayload(turnstile.token),
       }),
     });
 
     if (!response.ok) {
-      turnstile?.reset();
+      turnstile.reset();
       setState({ loading: false, error: await readError(response) });
       return;
     }
@@ -93,7 +157,7 @@ export function LoginForm() {
           toggleMask
         />
       </label>
-      <TurnstileWidget onReady={setTurnstile} onToken={setTurnstileToken} />
+      <AuthTurnstileChallenge />
       {state.error ? <Message severity="error" text={state.error} /> : null}
       <Button disabled={state.loading} label="Войти" loading={state.loading} type="submit" />
     </form>
@@ -102,13 +166,12 @@ export function LoginForm() {
 
 export function RegisterForm() {
   const [state, setState] = useState<ApiState>({ loading: false, error: null });
-  const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
-  const [turnstile, setTurnstile] = useState<TurnstileHandle | null>(null);
+  const turnstile = useAuthTurnstile();
 
-  async function onSubmit(event: React.FormEvent<HTMLFormElement>) {
+  async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
-    if (!turnstileToken) {
+    if (turnstile.enabled && !turnstile.token) {
       setState({ loading: false, error: missingTurnstileTokenMessage() });
       return;
     }
@@ -123,13 +186,12 @@ export function RegisterForm() {
         email: formData.get("email"),
         password: formData.get("password"),
         name: formData.get("name") || undefined,
-        turnstileToken,
-        "cf-turnstile-response": turnstileToken,
+        ...turnstilePayload(turnstile.token),
       }),
     });
 
     if (!response.ok) {
-      turnstile?.reset();
+      turnstile.reset();
       setState({ loading: false, error: await readError(response) });
       return;
     }
@@ -162,7 +224,7 @@ export function RegisterForm() {
         />
         <span className="text-xs text-500">Минимум 8 символов.</span>
       </label>
-      <TurnstileWidget onReady={setTurnstile} onToken={setTurnstileToken} />
+      <AuthTurnstileChallenge />
       {state.error ? <Message severity="error" text={state.error} /> : null}
       <Button disabled={state.loading} label="Зарегистрироваться" loading={state.loading} type="submit" />
     </form>
@@ -171,10 +233,10 @@ export function RegisterForm() {
 
 export function TelegramLoginButton({ redirectTo = "/cabinet" }: { redirectTo?: string }) {
   const [state, setState] = useState<ApiState>({ loading: false, error: null });
-  const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
+  const turnstile = useAuthTurnstile();
 
   function onClick() {
-    if (!turnstileToken) {
+    if (turnstile.enabled && !turnstile.token) {
       setState({ loading: false, error: missingTurnstileTokenMessage() });
       return;
     }
@@ -182,14 +244,15 @@ export function TelegramLoginButton({ redirectTo = "/cabinet" }: { redirectTo?: 
     setState({ loading: true, error: null });
     const url = new URL("/auth/telegram/start", window.location.origin);
     url.searchParams.set("redirect_to", redirectTo);
-    url.searchParams.set("turnstile_token", turnstileToken);
-    url.searchParams.set("cf-turnstile-response", turnstileToken);
+    if (turnstile.token) {
+      url.searchParams.set("turnstile_token", turnstile.token);
+      url.searchParams.set("cf-turnstile-response", turnstile.token);
+    }
     window.location.assign(url.toString());
   }
 
   return (
     <div className="flex flex-column gap-2">
-      <TurnstileWidget onToken={setTurnstileToken} />
       {state.error ? <Message severity="error" text={state.error} /> : null}
       <Button
         disabled={state.loading}

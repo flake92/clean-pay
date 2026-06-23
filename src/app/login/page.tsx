@@ -1,12 +1,15 @@
-"use client";
-
-import { LoginForm, TelegramLoginButton } from "@/components/auth-forms";
+import { AuthTurnstileProvider, LoginForm, TelegramLoginButton } from "@/components/auth-forms";
 import { AuthShell } from "@/components/layout";
 import { LinkButton } from "@/components/prime/link-button";
 
+export const dynamic = "force-dynamic";
+
 export default function LoginPage() {
+  const turnstileEnabled = process.env.TURNSTILE_ENABLED === "true";
+
   return (
-    <AuthShell
+    <AuthTurnstileProvider enabled={turnstileEnabled}>
+      <AuthShell
       description="Используйте e-mail и пароль или Telegram-вход."
       footer={
         <>
@@ -16,7 +19,8 @@ export default function LoginPage() {
       }
       title="Вход"
     >
-      <LoginForm />
-    </AuthShell>
+        <LoginForm />
+      </AuthShell>
+    </AuthTurnstileProvider>
   );
 }
