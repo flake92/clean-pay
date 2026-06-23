@@ -231,6 +231,14 @@ export async function getAuthorizedRemnashopTokens() {
     !session?.remnashopAccessTokenEncrypted ||
     !session.remnashopRefreshTokenEncrypted
   ) {
+    if (session && !session.user.email) {
+      throw new BffError(
+        "EMAIL_REQUIRED",
+        401,
+        "Telegram account must be linked to an e-mail before using Remnashop actions",
+      );
+    }
+
     throw normalizeRemnashopError(401, "Not authenticated", { path: "/auth/session" });
   }
 

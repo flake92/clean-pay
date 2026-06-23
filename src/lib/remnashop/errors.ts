@@ -4,6 +4,7 @@ export type BffErrorCode =
   | 'FORBIDDEN'
   | 'NOT_FOUND'
   | 'VALIDATION_ERROR'
+  | 'EMAIL_REQUIRED'
   | 'EMAIL_NOT_VERIFIED'
   | 'EMAIL_CODE_INVALID'
   | 'EMAIL_CODE_EXPIRED'
@@ -32,6 +33,7 @@ const PROD_MESSAGES: Record<BffErrorCode, string> = {
   FORBIDDEN: 'Действие недоступно.',
   NOT_FOUND: 'Данные не найдены.',
   VALIDATION_ERROR: 'Проверьте введённые данные.',
+  EMAIL_REQUIRED: 'Привяжите e-mail к Telegram-аккаунту, чтобы продолжить.',
   EMAIL_NOT_VERIFIED: 'Подтвердите e-mail, чтобы продолжить.',
   EMAIL_CODE_INVALID: 'Код не подошёл. Проверьте его и попробуйте снова.',
   EMAIL_CODE_EXPIRED: 'Код истёк. Запросите новый.',

@@ -11,12 +11,13 @@ import type {
 import { Button } from "primereact/button";
 import { Card } from "primereact/card";
 import { Message } from "primereact/message";
-import { readBffError } from "@/lib/client-api";
+import { BffClientError, readBffError } from "@/lib/client-api";
+import { AccountActionRequired } from "@/components/account-action-required";
 import { LinkButton } from "@/components/prime/link-button";
 
 type LoadState =
   | { status: "loading" }
-  | { status: "error"; message: string; unauthorized?: boolean }
+  | { status: "error"; message: string; action?: "login" | "linkEmail" }
   | { status: "ready"; offers: SubscriptionOffersResponse };
 
 function formatDuration(days: number) {
@@ -89,7 +90,12 @@ export function PaymentConfirmation() {
         setState({
           status: "error",
           message: error.message,
-          unauthorized: error.message.includes("войти"),
+          action:
+            error instanceof BffClientError && error.code === "EMAIL_REQUIRED"
+              ? "linkEmail"
+              : error instanceof BffClientError && error.status === 401
+                ? "login"
+                : undefined,
         }),
       );
   }, []);
@@ -149,12 +155,13 @@ export function PaymentConfirmation() {
   }
 
   if (state.status === "error") {
+    if (state.action) {
+      return <AccountActionRequired action={state.action} message={state.message} />;
+    }
+
     return (
       <div className="flex flex-column gap-4">
         <Message severity="error" text={state.message} />
-        {state.unauthorized ? (
-          <LinkButton className="w-fit" href="/login" label="Войти" />
-        ) : null}
       </div>
     );
   }
