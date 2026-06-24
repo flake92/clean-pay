@@ -140,7 +140,7 @@ Web-кабинет должен позволять пользователю:
 - Направление shadcn/ui отменено и не используется.
 - Страница `/support` реализована и считается частью закрытого шага 13.
 - Управление устройствами реализовано внутри `/cabinet`; отдельная страница `/devices` пока не является обязательной частью текущей базы.
-- Mock-режим остаётся отдельным режимом preview: `npm run dev:mock` / `npm run start:mock` на порту 4001, нормальный режим не должен отдавать mock-данные.
+- Preview-режим без реальных BFF-зависимостей удалён; web-кабинет всегда работает через реальные API/БД, заданные env.
 - Шаг 14 завершён: единая модель BFF-ошибок отдаёт нейтральные production-сообщения и development debug payload.
 - Шаг 15 завершён: Redis rate-limit подключён к auth, e-mail code, payment/extend, Telegram login/link и account link flow.
 - Runtime-вызовы rate-limit требуют `REDIS_URL` и доступный Redis endpoint; Next build Redis не требует.
@@ -524,7 +524,7 @@ BFF должен покрывать группы API:
 ---
 
 
-Фактическая реализация: Redis-счётчики используют ключи `action+email+tgid`; лимиты одинаковые в normal и mock режимах; production возвращает нейтральный `RATE_LIMITED`, development debug включает `retryAfterSeconds`.
+Фактическая реализация: Redis-счётчики используют ключи `action+email+tgid`; production возвращает нейтральный `RATE_LIMITED`, development debug включает `retryAfterSeconds`.
 
 ## Шаг 16. Реализовать логирование и audit
 

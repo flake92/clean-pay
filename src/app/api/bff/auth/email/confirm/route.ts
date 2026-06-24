@@ -1,87 +1,23 @@
-import { auditLog } from "@/lib/audit";
 import { bffError, bffJson } from "@/lib/bff-response";
-import { isMockMode, mockConfirmEmail } from "@/lib/mock-bff";
-import { prisma } from "@/lib/prisma";
-import { assertRateLimit } from "@/lib/rate-limit";
-import { refreshCurrentAccessCookie } from "@/lib/session";
-import {
-  getAuthorizedRemnashopTokens,
-  getRemnashopMe,
-  remnashopRequest,
-} from "@/lib/remnashop/client";
-import { getRequestIp, getTurnstileToken, verifyTurnstileToken } from "@/lib/turnstile";
-import type {
-  ConfirmEmailVerificationRequest,
-  ConfirmEmailVerificationResponse,
-} from "@/lib/remnashop/types";
+import type { ConfirmEmailVerificationRequest } from "@/lib/remnashop/types";
+import { getRequestIp, getTurnstileToken } from "@/lib/turnstile";
+import { confirmEmailVerification } from "@/server/auth/use-cases";
 
 export const runtime = "nodejs";
 
 export async function POST(request: Request) {
   try {
-    const rawBody = (await request.json()) as ConfirmEmailVerificationRequest & { turnstileToken?: string; "cf-turnstile-response"?: string };
-    const turnstileToken = getTurnstileToken(rawBody);
-    const body = { ...rawBody };
-    delete body.turnstileToken;
-    delete body["cf-turnstile-response"];
-    const skipTurnstile = body.registrationFlow === true;
-    delete body.registrationFlow;
+    const rawBody = (await request.json()) as ConfirmEmailVerificationRequest & {
+      turnstileToken?: string;
+      "cf-turnstile-response"?: string;
+    };
 
-    if (!skipTurnstile) {
-      await verifyTurnstileToken(turnstileToken, getRequestIp(request));
-    }
-
-    if (isMockMode()) {
-      await assertRateLimit({
-        action: "email_verification_confirm",
-        limit: 5,
-        windowSeconds: 15 * 60,
-      });
-
-      await auditLog({ action: "email_verified", metadata: { mode: "mock" } });
-
-      return bffJson(mockConfirmEmail());
-    }
-
-    const { accessToken, session } = await getAuthorizedRemnashopTokens({
-      allowUnverifiedEmail: true,
-    });
-    const profile = await getRemnashopMe(accessToken);
-    const targetEmail = body.email ?? profile.pending_email ?? profile.email ?? session.user.email ?? undefined;
-    const confirmBody = targetEmail ? { ...body, email: targetEmail } : body;
-
-    await assertRateLimit({
-      action: "email_verification_confirm",
-      email: targetEmail,
-      tgId: session.user.telegramId,
-      limit: 5,
-      windowSeconds: 15 * 60,
-    });
-    const result = await remnashopRequest<ConfirmEmailVerificationResponse>(
-      "/auth/email/confirm",
-      {
-        method: "POST",
-        accessToken,
-        body: confirmBody,
-      },
+    return bffJson(
+      await confirmEmailVerification(rawBody, {
+        token: getTurnstileToken(rawBody),
+        remoteIp: getRequestIp(request),
+      }),
     );
-
-    await prisma.webUser.update({
-      where: { id: session.userId },
-      data: {
-        email: result.email,
-        emailVerified: true,
-      },
-    });
-    await refreshCurrentAccessCookie();
-
-    await auditLog({
-      action: "email_verified",
-      userId: session.userId,
-      metadata: { email: result.email },
-    });
-
-    return bffJson(result);
   } catch (error) {
     return bffError(error);
   }

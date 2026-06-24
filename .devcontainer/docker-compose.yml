@@ -23,11 +23,7 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-      remnashop-mock:
-        condition: service_healthy
       mailpit:
-        condition: service_healthy
-      turnstile-mock:
         condition: service_healthy
     networks:
       - app-network
@@ -35,7 +31,7 @@ services:
       DATABASE_URL: postgresql://postgres:postgres@db:5432/postgres?schema=public
       APP_URL: http://localhost:4000
       NEXT_PUBLIC_APP_URL: http://localhost:4000
-      REMNASHOP_API_BASE_URL: ${REMNASHOP_API_BASE_URL:-http://remnashop-mock:8080/api/v1/public}
+      REMNASHOP_API_BASE_URL: ${REMNASHOP_API_BASE_URL:-https://bot2.clear-vpn.org/api/v1/public}
       # Uses the dev Redis service by default. Override REDIS_URL to connect a real external Redis.
       REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
       WEB_JWT_SECRET: dev-web-jwt-secret-change-me
@@ -51,13 +47,12 @@ services:
       TURNSTILE_ENABLED: ${TURNSTILE_ENABLED:-false}
       NEXT_PUBLIC_TURNSTILE_SITE_KEY: ${NEXT_PUBLIC_TURNSTILE_SITE_KEY:-dev-turnstile-site-key}
       TURNSTILE_SECRET_KEY: ${TURNSTILE_SECRET_KEY:-dev-turnstile-secret}
-      TURNSTILE_VERIFY_URL: ${TURNSTILE_VERIFY_URL:-http://turnstile-mock:8787/turnstile/v0/siteverify}
+      TURNSTILE_VERIFY_URL: ${TURNSTILE_VERIFY_URL:-https://challenges.cloudflare.com/turnstile/v0/siteverify}
 
     # Use "forwardPorts" in **devcontainer.json** to forward an app port locally. 
     # (Adding the "ports" property to this file will not forward from a Codespace.)
     ports:
       - "4000:4000"
-      - "4001:4001"
       - "5555:5555"
 
   db:
@@ -81,22 +76,6 @@ services:
     # Add "forwardPorts": ["5432"] to **devcontainer.json** to forward PostgreSQL locally.
     # (Adding the "ports" property to this file will not forward from a Codespace.)
 
-  remnashop-mock:
-    image: node:24-bookworm
-    restart: unless-stopped
-    working_dir: /workspaces/clean-pay
-    command: node scripts/dev/remnashop-mock.mjs
-    networks:
-      - app-network
-    volumes:
-      - ../..:/workspaces:cached
-    healthcheck:
-      test: ["CMD-SHELL", "node -e 'fetch(\"http://127.0.0.1:8080/health\").then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))'"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 5s
-
   mailpit:
     image: axllent/mailpit:latest
     restart: unless-stopped
@@ -106,22 +85,6 @@ services:
       - "8025:8025"
     healthcheck:
       test: ["CMD", "/mailpit", "readyz"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 5s
-
-  turnstile-mock:
-    image: node:24-bookworm
-    restart: unless-stopped
-    working_dir: /workspaces/clean-pay
-    command: node scripts/dev/turnstile-mock.mjs
-    networks:
-      - app-network
-    volumes:
-      - ../..:/workspaces:cached
-    healthcheck:
-      test: ["CMD-SHELL", "node -e 'fetch(\"http://127.0.0.1:8787/health\").then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))'"]
       interval: 10s
       timeout: 5s
       retries: 5

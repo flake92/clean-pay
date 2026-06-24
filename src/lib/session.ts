@@ -1,6 +1,8 @@
 import { cookies, headers } from "next/headers";
 import type { NextResponse } from "next/server";
+import type { Prisma } from "@prisma/client";
 
+import { authDebugLog } from "@/lib/auth-debug-log";
 import { sha256, hmacSha256, jsonBase64Url, parseJsonBase64Url, randomToken, safeEqual } from "@/lib/crypto";
 import { getEnv } from "@/lib/env";
 import { prisma } from "@/lib/prisma";
@@ -65,6 +67,13 @@ async function setAccessCookie({
     path: "/",
     expires: expiresAt,
   });
+  authDebugLog("session_access_cookie_set", {
+    sessionId,
+    userId,
+    expiresAt,
+    emailVerified: Boolean(emailVerified),
+    hasTelegramId: Boolean(telegramId),
+  });
 }
 
 function verifyAccessToken(token: string) {
@@ -95,9 +104,11 @@ async function getSessionByRefreshToken() {
   const refreshToken = cookieStore.get(sessionCookieNames.refresh)?.value;
 
   if (!refreshToken) {
+    authDebugLog("session_refresh_lookup_skipped", { reason: "missing_refresh_cookie" });
     return null;
   }
 
+  authDebugLog("session_refresh_lookup_started", { hasRefreshCookie: true });
   const session = await prisma.webSession.findFirst({
     where: {
       refreshTokenHash: sha256(refreshToken),
@@ -108,6 +119,7 @@ async function getSessionByRefreshToken() {
   });
 
   if (!session) {
+    authDebugLog("session_refresh_lookup_miss", { reason: "not_found_revoked_or_expired" });
     return null;
   }
 
@@ -130,6 +142,15 @@ async function getSessionByRefreshToken() {
     telegramId: updatedSession.user.telegramId,
   });
 
+  authDebugLog("session_refresh_lookup_success", {
+    sessionId: updatedSession.id,
+    userId: updatedSession.userId,
+    authMethod: updatedSession.authMethod,
+    accessTokenExpiresAt,
+    refreshExpiresAt: updatedSession.refreshExpiresAt,
+    hasRemnashopTokens: Boolean(updatedSession.remnashopAccessTokenEncrypted && updatedSession.remnashopRefreshTokenEncrypted),
+  });
+
   return updatedSession;
 }
 
@@ -145,6 +166,14 @@ export async function createWebSession(userId: string) {
   const refreshExpiresAt = addDays(now, securityPolicy.refreshSessionTtlDays);
   const refreshToken = randomToken(48);
 
+  authDebugLog("session_create_started", {
+    userId,
+    authMethod: "EMAIL",
+    accessTokenExpiresAt,
+    refreshExpiresAt,
+    hasRemnashopTokens: false,
+  });
+
   const session = await prisma.webSession.create({
     data: {
       userId,
@@ -176,6 +205,15 @@ export async function createWebSession(userId: string) {
     expires: refreshExpiresAt,
   });
 
+  authDebugLog("session_create_success", {
+    sessionId: session.id,
+    userId,
+    authMethod: session.authMethod,
+    accessTokenExpiresAt,
+    refreshExpiresAt,
+    hasRemnashopTokens: false,
+  });
+
   return session;
 }
 
@@ -185,16 +223,19 @@ export async function createWebSessionForRemnashopUser({
   remnashopRefreshTokenEncrypted,
   remnashopAccessExpiresAt,
   remnashopRefreshExpiresAt,
+  tx,
 }: {
   userId: string;
   remnashopAccessTokenEncrypted: string;
   remnashopRefreshTokenEncrypted: string;
   remnashopAccessExpiresAt: Date;
   remnashopRefreshExpiresAt: Date;
+  tx?: Prisma.TransactionClient;
 }) {
   const env = getEnv();
   const cookieStore = await cookies();
   const requestHeaders = await headers();
+  const db = tx ?? prisma;
   const now = new Date();
   const accessTokenExpiresAt = addMinutes(
     now,
@@ -203,7 +244,17 @@ export async function createWebSessionForRemnashopUser({
   const refreshExpiresAt = addDays(now, securityPolicy.refreshSessionTtlDays);
   const refreshToken = randomToken(48);
 
-  const session = await prisma.webSession.create({
+  authDebugLog("session_create_started", {
+    userId,
+    authMethod: "EMAIL",
+    accessTokenExpiresAt,
+    refreshExpiresAt,
+    hasRemnashopTokens: true,
+    remnashopAccessExpiresAt,
+    remnashopRefreshExpiresAt,
+  });
+
+  const session = await db.webSession.create({
     data: {
       userId,
       refreshTokenHash: sha256(refreshToken),
@@ -217,7 +268,7 @@ export async function createWebSessionForRemnashopUser({
       refreshExpiresAt,
     },
   });
-  const user = await prisma.webUser.findUnique({
+  const user = await db.webUser.findUnique({
     where: { id: userId },
     select: { emailVerified: true, telegramId: true },
   });
@@ -238,6 +289,15 @@ export async function createWebSessionForRemnashopUser({
     expires: refreshExpiresAt,
   });
 
+  authDebugLog("session_create_success", {
+    sessionId: session.id,
+    userId,
+    authMethod: session.authMethod,
+    accessTokenExpiresAt,
+    refreshExpiresAt,
+    hasRemnashopTokens: true,
+  });
+
   return session;
 }
 
@@ -246,15 +306,40 @@ export async function getCurrentUser() {
   const accessToken = cookieStore.get(sessionCookieNames.access)?.value;
 
   if (!accessToken) {
-    return (await getSessionByRefreshToken())?.user ?? null;
+    authDebugLog("session_current_user_access_missing", {});
+    const session = await getSessionByRefreshToken();
+
+    authDebugLog("session_current_user_result", {
+      source: "refresh",
+      found: Boolean(session),
+      sessionId: session?.id,
+      userId: session?.userId,
+    });
+
+    return session?.user ?? null;
   }
 
   const payload = verifyAccessToken(accessToken);
 
   if (!payload) {
-    return (await getSessionByRefreshToken())?.user ?? null;
+    authDebugLog("session_current_user_access_invalid", {});
+    const session = await getSessionByRefreshToken();
+
+    authDebugLog("session_current_user_result", {
+      source: "refresh_after_invalid_access",
+      found: Boolean(session),
+      sessionId: session?.id,
+      userId: session?.userId,
+    });
+
+    return session?.user ?? null;
   }
 
+  authDebugLog("session_current_user_access_valid", {
+    sessionId: payload.sid,
+    userId: payload.uid,
+    expiresAtEpochSeconds: payload.exp,
+  });
   const session = await prisma.webSession.findFirst({
     where: {
       id: payload.sid,
@@ -265,7 +350,31 @@ export async function getCurrentUser() {
     include: { user: true },
   });
 
-  return session?.user ?? (await getSessionByRefreshToken())?.user ?? null;
+  if (session) {
+    authDebugLog("session_current_user_result", {
+      source: "access",
+      found: true,
+      sessionId: session.id,
+      userId: session.userId,
+    });
+
+    return session.user;
+  }
+
+  authDebugLog("session_current_user_access_db_miss", {
+    sessionId: payload.sid,
+    userId: payload.uid,
+  });
+  const refreshedSession = await getSessionByRefreshToken();
+
+  authDebugLog("session_current_user_result", {
+    source: "refresh_after_access_db_miss",
+    found: Boolean(refreshedSession),
+    sessionId: refreshedSession?.id,
+    userId: refreshedSession?.userId,
+  });
+
+  return refreshedSession?.user ?? null;
 }
 
 export async function getCurrentSession() {
@@ -273,15 +382,22 @@ export async function getCurrentSession() {
   const accessToken = cookieStore.get(sessionCookieNames.access)?.value;
 
   if (!accessToken) {
+    authDebugLog("session_current_access_missing", {});
     return getSessionByRefreshToken();
   }
 
   const payload = verifyAccessToken(accessToken);
 
   if (!payload) {
+    authDebugLog("session_current_access_invalid", {});
     return getSessionByRefreshToken();
   }
 
+  authDebugLog("session_current_access_valid", {
+    sessionId: payload.sid,
+    userId: payload.uid,
+    expiresAtEpochSeconds: payload.exp,
+  });
   const session = await prisma.webSession.findFirst({
     where: {
       id: payload.sid,
@@ -292,13 +408,33 @@ export async function getCurrentSession() {
     include: { user: true },
   });
 
-  return session ?? getSessionByRefreshToken();
+  if (session) {
+    authDebugLog("session_current_result", {
+      source: "access",
+      found: true,
+      sessionId: session.id,
+      userId: session.userId,
+      authMethod: session.authMethod,
+      hasRemnashopTokens: Boolean(session.remnashopAccessTokenEncrypted && session.remnashopRefreshTokenEncrypted),
+    });
+
+    return session;
+  }
+
+  authDebugLog("session_current_access_db_miss", {
+    sessionId: payload.sid,
+    userId: payload.uid,
+  });
+
+  return getSessionByRefreshToken();
 }
 
 export async function refreshCurrentAccessCookie() {
+  authDebugLog("session_access_cookie_refresh_started", {});
   const session = await getCurrentSession();
 
   if (!session) {
+    authDebugLog("session_access_cookie_refresh_skipped", { reason: "missing_session" });
     return null;
   }
 
@@ -315,6 +451,12 @@ export async function refreshCurrentAccessCookie() {
     telegramId: user?.telegramId,
   });
 
+  authDebugLog("session_access_cookie_refresh_success", {
+    sessionId: session.id,
+    userId: session.userId,
+    accessTokenExpiresAt: session.accessTokenExpiresAt,
+  });
+
   return session;
 }
 
@@ -322,6 +464,12 @@ export async function createWebSessionOnResponse(response: NextResponse, userId:
   const env = getEnv();
   const requestHeaders = await headers();
   const currentSession = await getCurrentSession();
+  authDebugLog("session_response_create_started", {
+    userId,
+    hasCurrentSession: Boolean(currentSession),
+    currentSessionId: currentSession?.id,
+    currentSessionUserId: currentSession?.userId,
+  });
   const reusableSession =
     currentSession?.userId === userId && currentSession.remnashopAccessTokenEncrypted && currentSession.remnashopRefreshTokenEncrypted
       ? currentSession
@@ -342,6 +490,15 @@ export async function createWebSessionOnResponse(response: NextResponse, userId:
   );
   const refreshExpiresAt = addDays(now, securityPolicy.refreshSessionTtlDays);
   const refreshToken = randomToken(48);
+
+  authDebugLog("session_response_create_persist_started", {
+    userId,
+    authMethod: "TELEGRAM",
+    accessTokenExpiresAt,
+    refreshExpiresAt,
+    reusableSessionId: reusableSession?.id,
+    reusedRemnashopTokens: Boolean(reusableSession),
+  });
 
   const session = await prisma.webSession.create({
     data: {
@@ -384,6 +541,15 @@ export async function createWebSessionOnResponse(response: NextResponse, userId:
     expires: refreshExpiresAt,
   });
 
+  authDebugLog("session_response_create_success", {
+    sessionId: session.id,
+    userId,
+    authMethod: session.authMethod,
+    reusedRemnashopTokens: Boolean(reusableSession),
+    accessTokenExpiresAt,
+    refreshExpiresAt,
+  });
+
   return session;
 }
 
@@ -392,6 +558,14 @@ export async function clearWebSession() {
   const accessToken = cookieStore.get(sessionCookieNames.access)?.value;
   const refreshToken = cookieStore.get(sessionCookieNames.refresh)?.value;
   const payload = accessToken ? verifyAccessToken(accessToken) : null;
+
+  authDebugLog("session_clear_started", {
+    hasAccessCookie: Boolean(accessToken),
+    hasRefreshCookie: Boolean(refreshToken),
+    accessPayloadValid: Boolean(payload),
+    sessionId: payload?.sid,
+    userId: payload?.uid,
+  });
 
   if (payload) {
     await prisma.webSession.updateMany({
@@ -407,4 +581,8 @@ export async function clearWebSession() {
 
   cookieStore.delete(sessionCookieNames.access);
   cookieStore.delete(sessionCookieNames.refresh);
+  authDebugLog("session_clear_success", {
+    revokedBy: payload ? "access" : refreshToken ? "refresh" : "cookies_only",
+    sessionId: payload?.sid,
+  });
 }

@@ -1,6 +1,5 @@
 import { auditLog } from "@/lib/audit";
 import { bffError, bffJson } from "@/lib/bff-response";
-import { isMockMode, mockPayment } from "@/lib/mock-bff";
 import { recordPayment } from "@/lib/payment-records";
 import { assertRateLimit } from "@/lib/rate-limit";
 import { getAuthorizedRemnashopTokens, remnashopRequest } from "@/lib/remnashop/client";
@@ -15,21 +14,6 @@ export const runtime = "nodejs";
 export async function POST(request: Request) {
   try {
     const body = (await request.json()) as ExtendRequest;
-    if (isMockMode()) {
-      await assertRateLimit({
-        action: "subscription_extend",
-        limit: 10,
-        windowSeconds: 15 * 60,
-      });
-
-      await auditLog({
-        action: "subscription_extend_created",
-        metadata: { mode: "mock", gatewayType: body.gateway_type, durationDays: body.duration_days },
-      });
-
-      return bffJson(mockPayment(body));
-    }
-
     const { accessToken, session } = await getAuthorizedRemnashopTokens();
 
     await assertRateLimit({

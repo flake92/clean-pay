@@ -14,12 +14,14 @@
 
 - `APP_URL` - server-side canonical web cabinet URL.
 - `NEXT_PUBLIC_APP_URL` - browser-visible public web cabinet URL.
+- `LOG_LEVEL` - console JSON log threshold: `debug`, `info`, `warn`, or `error`. Use `info` on the test stand.
 
 Production:
 
 ```bash
 APP_URL="https://oplata.clear-vpn.org"
 NEXT_PUBLIC_APP_URL="https://oplata.clear-vpn.org"
+LOG_LEVEL="info"
 ```
 
 ### Remnashop

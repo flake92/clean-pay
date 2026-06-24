@@ -1,6 +1,8 @@
 import { auditLog } from "@/lib/audit";
+import { authDebugLog } from "@/lib/auth-debug-log";
 import { prisma } from "@/lib/prisma";
 import { BffError } from "@/lib/remnashop/errors";
+import type { Prisma } from "@prisma/client";
 import {
   getRemnashopMe,
   getRemnashopUserIdFromAccessToken,
@@ -12,6 +14,175 @@ import {
   getCurrentSession,
 } from "@/lib/session";
 
+type RemnashopProfileIdentity = {
+  remnashopUserId: string;
+  email: string | null;
+  emailVerified: boolean;
+  telegramId: string | null;
+  telegramUsername: string | null;
+  fullName: string | null;
+};
+
+function profileIdentity({
+  remnashopUserId,
+  profile,
+}: {
+  remnashopUserId: string;
+  profile: Awaited<ReturnType<typeof getRemnashopMe>>;
+}): RemnashopProfileIdentity {
+  return {
+    remnashopUserId,
+    email: profile.email,
+    emailVerified: profile.is_email_verified,
+    telegramId:
+      profile.telegram_id === null ? null : String(profile.telegram_id),
+    telegramUsername: profile.username,
+    fullName: profile.name,
+  };
+}
+
+async function mergeUsersIntoTarget(
+  tx: Prisma.TransactionClient,
+  targetUserId: string,
+  sourceUserIds: string[],
+) {
+  if (sourceUserIds.length === 0) {
+    return;
+  }
+
+  await tx.webUser.updateMany({
+    where: { id: { in: sourceUserIds } },
+    data: {
+      remnashopUserId: null,
+      email: null,
+      telegramId: null,
+    },
+  });
+  await tx.webSession.updateMany({
+    where: { userId: { in: sourceUserIds } },
+    data: { userId: targetUserId },
+  });
+  await tx.auditLog.updateMany({
+    where: { userId: { in: sourceUserIds } },
+    data: { userId: targetUserId },
+  });
+  await tx.paymentRecord.updateMany({
+    where: { userId: { in: sourceUserIds } },
+    data: { userId: targetUserId },
+  });
+  await tx.emailVerificationCode.updateMany({
+    where: { userId: { in: sourceUserIds } },
+    data: { userId: targetUserId },
+  });
+  await tx.telegramAuthState.updateMany({
+    where: { userId: { in: sourceUserIds } },
+    data: { userId: targetUserId },
+  });
+  await tx.webUser.deleteMany({
+    where: { id: { in: sourceUserIds } },
+  });
+}
+
+async function reconcileRemnashopUser(
+  tx: Prisma.TransactionClient,
+  identity: RemnashopProfileIdentity,
+) {
+  const [linkedByRemnashopId, linkedByEmail, linkedByTelegramId] =
+    await Promise.all([
+      tx.webUser.findUnique({
+        where: { remnashopUserId: identity.remnashopUserId },
+      }),
+      identity.email
+        ? tx.webUser.findUnique({ where: { email: identity.email } })
+        : Promise.resolve(null),
+      identity.telegramId
+        ? tx.webUser.findUnique({
+            where: { telegramId: identity.telegramId },
+          })
+        : Promise.resolve(null),
+    ]);
+
+  const targetCandidate =
+    linkedByEmail ?? linkedByRemnashopId ?? linkedByTelegramId;
+  const sourceUserIds = [
+    linkedByRemnashopId,
+    linkedByEmail,
+    linkedByTelegramId,
+  ]
+    .filter((user): user is NonNullable<typeof user> => Boolean(user))
+    .map((user) => user.id)
+    .filter((userId, index, userIds) => {
+      return userId !== targetCandidate?.id && userIds.indexOf(userId) === index;
+    });
+
+  authDebugLog("remnashop_user_reconcile_plan", {
+    remnashopUserId: identity.remnashopUserId,
+    hasEmailMatch: Boolean(linkedByEmail),
+    hasRemnashopIdMatch: Boolean(linkedByRemnashopId),
+    hasTelegramIdMatch: Boolean(linkedByTelegramId),
+    targetUserId: targetCandidate?.id,
+    sourceUserIds,
+    mergeCount: sourceUserIds.length,
+  });
+
+  if (!targetCandidate) {
+    const user = await tx.webUser.create({
+      data: {
+        remnashopUserId: identity.remnashopUserId,
+        email: identity.email,
+        telegramId: identity.telegramId ?? undefined,
+        telegramUsername: identity.telegramUsername,
+        fullName: identity.fullName,
+        displayName: identity.fullName,
+        emailVerified: identity.emailVerified,
+        lastLoginAt: new Date(),
+      },
+    });
+    authDebugLog("remnashop_user_reconcile_created", {
+      userId: user.id,
+      remnashopUserId: identity.remnashopUserId,
+      hasEmail: Boolean(user.email),
+      hasTelegramId: Boolean(user.telegramId),
+    });
+
+    return user;
+  }
+
+  if (sourceUserIds.length > 0) {
+    authDebugLog("remnashop_user_reconcile_merge_started", {
+      targetUserId: targetCandidate.id,
+      sourceUserIds,
+    });
+    await mergeUsersIntoTarget(tx, targetCandidate.id, sourceUserIds);
+    authDebugLog("remnashop_user_reconcile_merge_completed", {
+      targetUserId: targetCandidate.id,
+      sourceUserIds,
+    });
+  }
+
+  const user = await tx.webUser.update({
+    where: { id: targetCandidate.id },
+    data: {
+      remnashopUserId: identity.remnashopUserId,
+      email: identity.email,
+      telegramId: identity.telegramId ?? undefined,
+      telegramUsername: identity.telegramUsername,
+      fullName: identity.fullName,
+      displayName: identity.fullName,
+      emailVerified: identity.emailVerified,
+      lastLoginAt: new Date(),
+    },
+  });
+  authDebugLog("remnashop_user_reconcile_updated", {
+    userId: user.id,
+    remnashopUserId: identity.remnashopUserId,
+    hasEmail: Boolean(user.email),
+    hasTelegramId: Boolean(user.telegramId),
+  });
+
+  return user;
+}
+
 export async function createSessionFromRemnashopAuth({
   accessToken,
   refreshToken,
@@ -22,38 +193,43 @@ export async function createSessionFromRemnashopAuth({
   auth: RemnashopAuthResponse;
 }) {
   const remnashopUserId = getRemnashopUserIdFromAccessToken(accessToken);
+  authDebugLog("remnashop_session_create_started", {
+    remnashopUserId,
+    remnashopAccessExpiresAt: auth.expires_at,
+    remnashopRefreshExpiresAt: auth.refresh_expires_at,
+  });
   const profile = await getRemnashopMe(accessToken);
-  const user = await prisma.webUser.upsert({
-    where: { remnashopUserId },
-    create: {
-      remnashopUserId,
-      email: profile.email,
-      telegramId:
-        profile.telegram_id === null ? undefined : String(profile.telegram_id),
-      telegramUsername: profile.username,
-      fullName: profile.name,
-      displayName: profile.name,
-      emailVerified: profile.is_email_verified,
-      lastLoginAt: new Date(),
-    },
-    update: {
-      email: profile.email,
-      telegramId:
-        profile.telegram_id === null ? undefined : String(profile.telegram_id),
-      telegramUsername: profile.username,
-      fullName: profile.name,
-      displayName: profile.name,
-      emailVerified: profile.is_email_verified,
-      lastLoginAt: new Date(),
-    },
+  authDebugLog("remnashop_profile_loaded", {
+    remnashopUserId,
+    hasEmail: Boolean(profile.email),
+    emailVerified: profile.is_email_verified,
+    hasTelegramId: profile.telegram_id !== null,
+    authType: profile.auth_type,
+  });
+  const user = await prisma.$transaction(async (tx) => {
+    const reconciledUser = await reconcileRemnashopUser(
+      tx,
+      profileIdentity({ remnashopUserId, profile }),
+    );
+
+    await createWebSessionForRemnashopUser({
+      userId: reconciledUser.id,
+      remnashopAccessTokenEncrypted: protectRemnashopToken(accessToken),
+      remnashopRefreshTokenEncrypted: protectRemnashopToken(refreshToken),
+      remnashopAccessExpiresAt: new Date(auth.expires_at),
+      remnashopRefreshExpiresAt: new Date(auth.refresh_expires_at),
+      tx,
+    });
+
+    return reconciledUser;
   });
 
-  await createWebSessionForRemnashopUser({
+  authDebugLog("remnashop_session_create_success", {
     userId: user.id,
-    remnashopAccessTokenEncrypted: protectRemnashopToken(accessToken),
-    remnashopRefreshTokenEncrypted: protectRemnashopToken(refreshToken),
-    remnashopAccessExpiresAt: new Date(auth.expires_at),
-    remnashopRefreshExpiresAt: new Date(auth.refresh_expires_at),
+    remnashopUserId,
+    hasEmail: Boolean(user.email),
+    emailVerified: user.emailVerified,
+    hasTelegramId: Boolean(user.telegramId),
   });
 
   return { user, profile };
@@ -69,6 +245,11 @@ export async function linkCurrentUserToRemnashopAuth({
   auth: RemnashopAuthResponse;
 }) {
   const session = await getCurrentSession();
+  authDebugLog("remnashop_link_started", {
+    hasSession: Boolean(session),
+    sessionId: session?.id,
+    currentUserId: session?.userId,
+  });
 
   if (!session) {
     throw new BffError("UNAUTHORIZED", 401, "Login is required.");
@@ -76,6 +257,14 @@ export async function linkCurrentUserToRemnashopAuth({
 
   const remnashopUserId = getRemnashopUserIdFromAccessToken(accessToken);
   const profile = await getRemnashopMe(accessToken);
+  authDebugLog("remnashop_link_profile_loaded", {
+    sessionId: session.id,
+    currentUserId: session.userId,
+    remnashopUserId,
+    hasEmail: Boolean(profile.email),
+    emailVerified: profile.is_email_verified,
+    hasTelegramId: profile.telegram_id !== null,
+  });
   const mergeSourceIds = new Set<string>();
   const linkedByRemnashopId = await prisma.webUser.findUnique({
     where: { remnashopUserId },
@@ -96,40 +285,25 @@ export async function linkCurrentUserToRemnashopAuth({
   }
 
   const sourceUserIds = [...mergeSourceIds];
+  authDebugLog("remnashop_link_merge_plan", {
+    sessionId: session.id,
+    targetUserId: session.userId,
+    remnashopUserId,
+    sourceUserIds,
+    mergeCount: sourceUserIds.length,
+  });
   const protectedAccessToken = protectRemnashopToken(accessToken);
   const protectedRefreshToken = protectRemnashopToken(refreshToken);
   const user = await prisma.$transaction(async (tx) => {
     if (sourceUserIds.length > 0) {
-      await tx.webUser.updateMany({
-        where: { id: { in: sourceUserIds } },
-        data: {
-          remnashopUserId: null,
-          email: null,
-          telegramId: null,
-        },
+      authDebugLog("remnashop_link_merge_started", {
+        targetUserId: session.userId,
+        sourceUserIds,
       });
-      await tx.webSession.updateMany({
-        where: { userId: { in: sourceUserIds } },
-        data: { userId: session.userId },
-      });
-      await tx.auditLog.updateMany({
-        where: { userId: { in: sourceUserIds } },
-        data: { userId: session.userId },
-      });
-      await tx.paymentRecord.updateMany({
-        where: { userId: { in: sourceUserIds } },
-        data: { userId: session.userId },
-      });
-      await tx.emailVerificationCode.updateMany({
-        where: { userId: { in: sourceUserIds } },
-        data: { userId: session.userId },
-      });
-      await tx.telegramAuthState.updateMany({
-        where: { userId: { in: sourceUserIds } },
-        data: { userId: session.userId },
-      });
-      await tx.webUser.deleteMany({
-        where: { id: { in: sourceUserIds } },
+      await mergeUsersIntoTarget(tx, session.userId, sourceUserIds);
+      authDebugLog("remnashop_link_merge_completed", {
+        targetUserId: session.userId,
+        sourceUserIds,
       });
     }
 
@@ -162,6 +336,15 @@ export async function linkCurrentUserToRemnashopAuth({
     action: "remnashop_account_linked",
     userId: user.id,
     metadata: { remnashopUserId, mergedUserIds: sourceUserIds },
+  });
+
+  authDebugLog("remnashop_link_success", {
+    userId: user.id,
+    sessionId: session.id,
+    remnashopUserId,
+    mergedUserIds: sourceUserIds,
+    hasEmail: Boolean(user.email),
+    emailVerified: user.emailVerified,
   });
 
   return { user, profile };

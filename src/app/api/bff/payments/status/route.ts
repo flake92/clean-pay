@@ -1,5 +1,4 @@
 import { bffError, bffJson } from "@/lib/bff-response";
-import { isMockMode, mockPayments, mockSubscription } from "@/lib/mock-bff";
 import { serializePaymentRecord } from "@/lib/payment-records";
 import { prisma } from "@/lib/prisma";
 import { getAuthorizedRemnashopTokens, remnashopRequest } from "@/lib/remnashop/client";
@@ -11,14 +10,6 @@ export const runtime = "nodejs";
 
 export async function GET(request: Request) {
   try {
-    if (isMockMode()) {
-      return bffJson({
-        payment: mockPayments[0],
-        subscription: mockSubscription,
-        source: "mock",
-      });
-    }
-
     const user = await getCurrentUser();
 
     if (!user) {

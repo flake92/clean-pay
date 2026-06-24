@@ -5,6 +5,7 @@ import { createTelegramAuthorizationResponse } from "@/lib/telegram-oidc";
 import { assertRateLimit } from "@/lib/rate-limit";
 import { getCurrentUser } from "@/lib/session";
 import { getRequestIp, verifyTurnstileToken } from "@/lib/turnstile";
+import { safeRedirectPath } from "@/server/auth/redirect-policy";
 
 export const runtime = "nodejs";
 
@@ -14,7 +15,7 @@ function loginFailedRedirect() {
 
 export async function GET(request: Request) {
   const url = new URL(request.url);
-  const redirectTo = url.searchParams.get("redirect_to") ?? undefined;
+  const redirectTo = safeRedirectPath(url.searchParams.get("redirect_to"));
 
   try {
     const currentUser = await getCurrentUser();

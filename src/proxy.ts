@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
+import { logger } from "@/lib/logger";
+
 const accessCookieName = 'clean_pay_access';
 const refreshCookieName = 'clean_pay_refresh';
 
@@ -102,12 +104,6 @@ async function getAccessState(request: NextRequest): Promise<AccessState> {
       return { authenticated: false, emailVerificationRequired: false, hasRefreshToken };
     }
 
-    if (signature === 'mock') {
-      const authenticated = process.env.CLEAN_PAY_MOCK_MODE === '1';
-
-      return { authenticated, emailVerificationRequired: false, hasRefreshToken };
-    }
-
     const secret = process.env.WEB_JWT_SECRET;
 
     if (!secret) {
@@ -171,22 +167,72 @@ function authenticatedRedirect(request: NextRequest, emailVerificationRequired: 
   return NextResponse.redirect(url);
 }
 
+function requestMetadata(request: NextRequest, accessState: AccessState) {
+  const { pathname } = request.nextUrl;
+
+  return {
+    method: request.method,
+    pathname,
+    isApi: pathname.startsWith('/api/'),
+    authenticated: accessState.authenticated || accessState.hasRefreshToken,
+    accessAuthenticated: accessState.authenticated,
+    hasRefreshToken: accessState.hasRefreshToken,
+    emailVerificationRequired: accessState.emailVerificationRequired,
+  };
+}
+
 export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
   const accessState = await getAccessState(request);
   const isAuthenticated = accessState.authenticated || accessState.hasRefreshToken;
+  const metadata = requestMetadata(request, accessState);
+
+  logger.info("http_request_received", metadata, {
+    category: "http",
+    source: "http.access",
+    message: `${request.method} ${pathname} received`,
+  });
 
   if (isPublicPath(pathname)) {
     if (isAuthenticated && (pathname === '/login' || pathname === '/register')) {
+      logger.info("http_request_decision", {
+        ...metadata,
+        action: "redirect_authenticated_user",
+        status: 307,
+        redirectTo: accessState.emailVerificationRequired ? "/register/verify-email" : "/cabinet",
+        emailVerificationRequired: accessState.emailVerificationRequired,
+      }, {
+        category: "http",
+        source: "http.access",
+        message: `${request.method} ${pathname} -> 307 redirect authenticated user`,
+      });
       return authenticatedRedirect(request, accessState.emailVerificationRequired);
     }
 
+    logger.info("http_request_decision", {
+      ...metadata,
+      action: "allow_public",
+      status: 200,
+    }, {
+      category: "http",
+      source: "http.access",
+      message: `${request.method} ${pathname} -> allow public`,
+    });
     return NextResponse.next();
   }
 
   if (isAuthenticated) {
     if (accessState.emailVerificationRequired && !isEmailVerificationAllowedPath(pathname)) {
       if (pathname.startsWith('/api/')) {
+        logger.warn("http_request_decision", {
+          ...metadata,
+          action: "block_email_unverified",
+          status: 403,
+        }, {
+          category: "http",
+          source: "http.access",
+          message: `${request.method} ${pathname} -> 403 email not verified`,
+        });
         return NextResponse.json(
           { error: { code: 'EMAIL_NOT_VERIFIED', message: 'Подтвердите e-mail, чтобы продолжить.' } },
           { status: 403 },
@@ -197,19 +243,57 @@ export async function proxy(request: NextRequest) {
       url.pathname = '/register/verify-email';
       url.search = '';
 
+      logger.info("http_request_decision", {
+        ...metadata,
+        action: "redirect_email_unverified",
+        status: 307,
+        redirectTo: "/register/verify-email",
+      }, {
+        category: "http",
+        source: "http.access",
+        message: `${request.method} ${pathname} -> 307 email verification required`,
+      });
       return NextResponse.redirect(url);
     }
 
+    logger.info("http_request_decision", {
+      ...metadata,
+      action: "allow_authenticated",
+      status: 200,
+    }, {
+      category: "http",
+      source: "http.access",
+      message: `${request.method} ${pathname} -> allow authenticated`,
+    });
     return NextResponse.next();
   }
 
   if (pathname.startsWith('/api/')) {
+    logger.warn("http_request_decision", {
+      ...metadata,
+      action: "block_unauthorized",
+      status: 401,
+    }, {
+      category: "http",
+      source: "http.access",
+      message: `${request.method} ${pathname} -> 401 unauthorized`,
+    });
     return NextResponse.json(
       { error: { code: 'UNAUTHORIZED', message: 'Войдите в аккаунт, чтобы продолжить.' } },
       { status: 401 },
     );
   }
 
+  logger.info("http_request_decision", {
+    ...metadata,
+    action: "redirect_login",
+    status: 307,
+    redirectTo: "/login",
+  }, {
+    category: "http",
+    source: "http.access",
+    message: `${request.method} ${pathname} -> 307 login`,
+  });
   return loginRedirect(request);
 }
 

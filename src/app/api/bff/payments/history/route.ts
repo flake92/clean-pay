@@ -1,5 +1,4 @@
 import { bffError, bffJson } from "@/lib/bff-response";
-import { isMockMode, mockPayments } from "@/lib/mock-bff";
 import { serializePaymentRecord } from "@/lib/payment-records";
 import { prisma } from "@/lib/prisma";
 import { BffError } from "@/lib/remnashop/errors";
@@ -9,10 +8,6 @@ export const runtime = "nodejs";
 
 export async function GET() {
   try {
-    if (isMockMode()) {
-      return bffJson(mockPayments);
-    }
-
     const user = await getCurrentUser();
 
     if (!user) {

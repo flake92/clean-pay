@@ -28,9 +28,7 @@
     "**/*.tsx",
     ".next/types/**/*.ts",
     ".next/dev/types/**/*.ts",
-    "**/*.mts",
-    ".next-mock/types/**/*.ts",
-    ".next-mock/dev/types/**/*.ts"
+    "**/*.mts"
   ],
   "exclude": ["node_modules", "primereact-sakai-template"]
 }

@@ -105,7 +105,6 @@ tar -czf work\clean-pay-teststand.tar.gz `
   --exclude .git `
   --exclude node_modules `
   --exclude .next `
-  --exclude .next-mock `
   --exclude .env `
   --exclude .env.local `
   .

@@ -1,4 +1,5 @@
 import { getEnv } from "@/lib/env";
+import { logger } from "@/lib/logger";
 import { BffError } from "@/lib/remnashop/errors";
 
 type TurnstileResponse = {
@@ -51,6 +52,17 @@ export async function verifyTurnstileToken(token: string | null | undefined, rem
   }
 
   let response: Response;
+  const startedAt = Date.now();
+
+  logger.info("turnstile_request_sent", {
+    method: "POST",
+    url: env.turnstile.verifyUrl,
+    body: Object.fromEntries(body.entries()),
+  }, {
+    category: "upstream",
+    source: "turnstile.client",
+    message: "HTTP Request: POST Turnstile siteverify",
+  });
 
   try {
     response = await fetch(env.turnstile.verifyUrl, {
@@ -59,12 +71,34 @@ export async function verifyTurnstileToken(token: string | null | undefined, rem
       cache: "no-store",
     });
   } catch (error) {
+    logger.error("turnstile_request_failed", {
+      method: "POST",
+      url: env.turnstile.verifyUrl,
+      durationMs: Date.now() - startedAt,
+      error: error instanceof Error ? error.message : String(error),
+    }, {
+      category: "upstream",
+      source: "turnstile.client",
+      message: "HTTP Request failed: POST Turnstile siteverify",
+    });
     throw new BffError("UPSTREAM_UNAVAILABLE", 503, "Turnstile verification unavailable", {
       message: error instanceof Error ? error.message : String(error),
     });
   }
 
   const result = (await response.json().catch(() => null)) as TurnstileResponse | null;
+  logger.info("turnstile_response_received", {
+    method: "POST",
+    url: env.turnstile.verifyUrl,
+    status: response.status,
+    ok: response.ok,
+    durationMs: Date.now() - startedAt,
+    body: result,
+  }, {
+    category: "upstream",
+    source: "turnstile.client",
+    message: `HTTP Response: POST Turnstile siteverify -> ${response.status}`,
+  });
 
   if (!response.ok || !result?.success) {
     throw new BffError("FORBIDDEN", 403, "Turnstile verification failed", {

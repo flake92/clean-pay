@@ -4,8 +4,10 @@ import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 
 import { auditLog, logTechnicalError, logTechnicalWarning } from "@/lib/audit";
+import { authDebugLog } from "@/lib/auth-debug-log";
 import { randomToken, sha256 } from "@/lib/crypto";
 import { getEnv } from "@/lib/env";
+import { logger } from "@/lib/logger";
 import { prisma } from "@/lib/prisma";
 import { assertRateLimit } from "@/lib/rate-limit";
 
@@ -38,6 +40,10 @@ export async function createTelegramAuthorizationResponse(
   userId?: string,
 ) {
   const env = getEnv();
+  authDebugLog("telegram_oidc_start_started", {
+    hasRedirectTo: Boolean(redirectTo),
+    linkUserId: userId,
+  });
   const state = randomToken();
   const nonce = randomToken();
   const codeVerifier = randomToken(64);
@@ -52,6 +58,11 @@ export async function createTelegramAuthorizationResponse(
       userId,
       expiresAt: addSeconds(new Date(), telegramAuthTtlSeconds),
     },
+  });
+  authDebugLog("telegram_oidc_state_created", {
+    linkUserId: userId,
+    expiresInSeconds: telegramAuthTtlSeconds,
+    hasRedirectTo: Boolean(redirectTo),
   });
 
   const authorizationUrl = new URL(env.telegramOidc.authorizationEndpoint);
@@ -75,11 +86,25 @@ export async function createTelegramAuthorizationResponse(
     cookieOptions,
   );
 
+  authDebugLog("telegram_oidc_redirect_created", {
+    authorizationEndpoint: env.telegramOidc.authorizationEndpoint,
+    clientId: env.telegramOidc.clientId,
+    redirectUri: env.telegramOidc.redirectUri,
+    hasRedirectTo: Boolean(redirectTo),
+    linkUserId: userId,
+  });
+
   return response;
 }
 
 async function exchangeCodeForIdToken(code: string, codeVerifier: string) {
   const env = getEnv();
+  authDebugLog("telegram_oidc_token_exchange_started", {
+    tokenEndpoint: env.telegramOidc.tokenEndpoint,
+    redirectUri: env.telegramOidc.redirectUri,
+    hasCode: Boolean(code),
+    hasVerifier: Boolean(codeVerifier),
+  });
   const body = new URLSearchParams({
     grant_type: "authorization_code",
     code,
@@ -87,6 +112,18 @@ async function exchangeCodeForIdToken(code: string, codeVerifier: string) {
     client_id: env.telegramOidc.clientId,
     client_secret: env.telegramOidc.clientSecret,
     code_verifier: codeVerifier,
+  });
+  const startedAt = Date.now();
+
+  logger.info("telegram_token_request_sent", {
+    method: "POST",
+    url: env.telegramOidc.tokenEndpoint,
+    headers: { "content-type": "application/x-www-form-urlencoded" },
+    body: Object.fromEntries(body.entries()),
+  }, {
+    category: "upstream",
+    source: "telegram.oidc",
+    message: "HTTP Request: POST Telegram OIDC token",
   });
 
   const response = await fetch(env.telegramOidc.tokenEndpoint, {
@@ -97,9 +134,23 @@ async function exchangeCodeForIdToken(code: string, codeVerifier: string) {
     body,
     cache: "no-store",
   });
+  const responseText = await response.clone().text().catch(() => "");
+
+  logger.info("telegram_token_response_received", {
+    method: "POST",
+    url: env.telegramOidc.tokenEndpoint,
+    status: response.status,
+    ok: response.ok,
+    durationMs: Date.now() - startedAt,
+    body: parseTelegramTokenLogBody(responseText),
+  }, {
+    category: "upstream",
+    source: "telegram.oidc",
+    message: `HTTP Response: POST Telegram OIDC token -> ${response.status}`,
+  });
 
   if (!response.ok) {
-    const errorBody = await response.text().catch(() => null);
+    const errorBody = responseText || null;
 
     logTechnicalWarning("telegram_token_exchange_failed", {
       status: response.status,
@@ -116,11 +167,30 @@ async function exchangeCodeForIdToken(code: string, codeVerifier: string) {
     throw new Error("Telegram token response does not contain id_token");
   }
 
+  authDebugLog("telegram_oidc_token_exchange_success", { hasIdToken: true });
+
   return tokenSet.id_token;
+}
+
+function parseTelegramTokenLogBody(text: string) {
+  if (!text) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(text);
+  } catch {
+    return text.slice(0, 500);
+  }
 }
 
 async function verifyTelegramIdToken(idToken: string, nonce: string) {
   const env = getEnv();
+  authDebugLog("telegram_oidc_id_token_verify_started", {
+    issuer: env.telegramOidc.issuer,
+    audience: env.telegramOidc.clientId,
+    jwksUri: env.telegramOidc.jwksUri,
+  });
   const jwks = createRemoteJWKSet(new URL(env.telegramOidc.jwksUri));
   const result = await jwtVerify(idToken, jwks, {
     issuer: env.telegramOidc.issuer,
@@ -130,6 +200,13 @@ async function verifyTelegramIdToken(idToken: string, nonce: string) {
   if (result.payload.nonce !== nonce) {
     throw new Error("Telegram id_token nonce mismatch");
   }
+
+  authDebugLog("telegram_oidc_id_token_verify_success", {
+    issuer: result.payload.iss,
+    audience: result.payload.aud,
+    expiresAtEpochSeconds: result.payload.exp,
+    hasNonce: Boolean(result.payload.nonce),
+  });
 
   return result.payload;
 }
@@ -173,6 +250,14 @@ export async function consumeTelegramCallback(code: string, state: string) {
     telegramOidcCookieNames.codeVerifier,
   )?.value;
 
+  authDebugLog("telegram_oidc_callback_consume_started", {
+    hasCode: Boolean(code),
+    hasStateParam: Boolean(state),
+    hasStateCookie: Boolean(cookieState),
+    hasNonceCookie: Boolean(nonce),
+    hasCodeVerifierCookie: Boolean(codeVerifier),
+  });
+
   if (!cookieState || cookieState !== state || !nonce || !codeVerifier) {
     logTechnicalWarning("telegram_oidc_state_cookie_invalid", {
       storedStatePresent: Boolean(cookieState),
@@ -183,6 +268,11 @@ export async function consumeTelegramCallback(code: string, state: string) {
 
     throw new Error("Telegram OIDC state is invalid");
   }
+  authDebugLog("telegram_oidc_callback_cookies_valid", {
+    stateMatches: true,
+    hasNonceCookie: true,
+    hasCodeVerifierCookie: true,
+  });
 
   const authState = await prisma.telegramAuthState.findFirst({
     where: {
@@ -203,6 +293,12 @@ export async function consumeTelegramCallback(code: string, state: string) {
 
     throw new Error("Telegram OIDC state was not found or has expired");
   }
+  authDebugLog("telegram_oidc_state_loaded", {
+    authStateId: authState.id,
+    linkUserId: authState.userId,
+    hasRedirectTo: Boolean(authState.redirectTo),
+    expiresAt: authState.expiresAt,
+  });
 
   const idToken = await exchangeCodeForIdToken(code, codeVerifier);
   const payload = await verifyTelegramIdToken(idToken, nonce).catch((error) => {
@@ -221,11 +317,24 @@ export async function consumeTelegramCallback(code: string, state: string) {
   const fullName = getFullName(payload);
   const photoUrl = typeof payload.picture === "string" ? payload.picture : null;
 
+  authDebugLog("telegram_oidc_identity_resolved", {
+    authStateId: authState.id,
+    telegramId,
+    hasUsername: Boolean(telegramUsername),
+    hasFullName: Boolean(fullName),
+    hasPhotoUrl: Boolean(photoUrl),
+    linkUserId: authState.userId,
+  });
+
   await assertRateLimit({
     action: authState.userId ? "telegram_link_confirm" : "telegram_login_confirm",
     tgId: telegramId,
     limit: 10,
     windowSeconds: 15 * 60,
+  });
+  authDebugLog("telegram_oidc_rate_limit_passed", {
+    action: authState.userId ? "telegram_link_confirm" : "telegram_login_confirm",
+    telegramId,
   });
 
   const existingTelegramUser = await prisma.webUser.findUnique({
@@ -233,6 +342,11 @@ export async function consumeTelegramCallback(code: string, state: string) {
   });
 
   const targetUserId = authState.userId;
+  authDebugLog("telegram_oidc_user_resolution_started", {
+    targetUserId,
+    existingTelegramUserId: existingTelegramUser?.id,
+    mergeRequired: Boolean(targetUserId && existingTelegramUser && existingTelegramUser.id !== targetUserId),
+  });
   const user = targetUserId
     ? await prisma.$transaction(async (tx) => {
         const targetUser = await tx.webUser.findUniqueOrThrow({
@@ -244,6 +358,10 @@ export async function consumeTelegramCallback(code: string, state: string) {
             : null;
 
         if (sourceUser) {
+          authDebugLog("telegram_oidc_link_merge_started", {
+            targetUserId,
+            sourceUserId: sourceUser.id,
+          });
           await tx.webUser.update({
             where: { id: sourceUser.id },
             data: {
@@ -274,6 +392,10 @@ export async function consumeTelegramCallback(code: string, state: string) {
           });
           await tx.webUser.delete({
             where: { id: sourceUser.id },
+          });
+          authDebugLog("telegram_oidc_link_merge_completed", {
+            targetUserId,
+            sourceUserId: sourceUser.id,
           });
         }
 
@@ -318,6 +440,10 @@ export async function consumeTelegramCallback(code: string, state: string) {
       consumedAt: new Date(),
     },
   });
+  authDebugLog("telegram_oidc_state_consumed", {
+    authStateId: authState.id,
+    userId: user.id,
+  });
 
   await auditLog({
     action: authState.userId ? "telegram_link_success" : "telegram_login",
@@ -328,6 +454,14 @@ export async function consumeTelegramCallback(code: string, state: string) {
   cookieStore.delete(telegramOidcCookieNames.state);
   cookieStore.delete(telegramOidcCookieNames.nonce);
   cookieStore.delete(telegramOidcCookieNames.codeVerifier);
+
+  authDebugLog("telegram_oidc_callback_success", {
+    authStateId: authState.id,
+    userId: user.id,
+    telegramId,
+    redirectTo: authState.redirectTo,
+    linked: Boolean(authState.userId),
+  });
 
   return {
     user,

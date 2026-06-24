@@ -1,5 +1,7 @@
 import { decryptSecret, encryptSecret } from "@/lib/crypto";
+import { authDebugLog } from "@/lib/auth-debug-log";
 import { getEnv } from "@/lib/env";
+import { logger } from "@/lib/logger";
 import { prisma } from "@/lib/prisma";
 import {
   BffError,
@@ -58,10 +60,68 @@ async function parseResponse<T>(response: Response, path: string) {
 }
 
 async function fetchRemnashop(path: string, init: RequestInit) {
+  const method = init.method ?? "GET";
+  const startedAt = Date.now();
+
+  logger.info("remnashop_request_sent", {
+    method,
+    path,
+    url: endpoint(path),
+    headers: init.headers,
+    body: init.body ? parseLogBody(init.body) : undefined,
+  }, {
+    category: "upstream",
+    source: "remnashop.client",
+    message: `HTTP Request: ${method} ${path}`,
+  });
+
   try {
-    return await fetch(endpoint(path), init);
+    const response = await fetch(endpoint(path), init);
+    const responseText = await response.clone().text().catch(() => "");
+
+    logger.info("remnashop_response_received", {
+      method,
+      path,
+      status: response.status,
+      ok: response.ok,
+      durationMs: Date.now() - startedAt,
+      headers: Object.fromEntries(response.headers.entries()),
+      body: parseLogBody(responseText),
+    }, {
+      category: "upstream",
+      source: "remnashop.client",
+      message: `HTTP Response: ${method} ${path} -> ${response.status}`,
+    });
+
+    return response;
   } catch (error) {
+    logger.error("remnashop_request_failed", {
+      method,
+      path,
+      durationMs: Date.now() - startedAt,
+      error: error instanceof Error ? error.message : String(error),
+    }, {
+      category: "upstream",
+      source: "remnashop.client",
+      message: `HTTP Request failed: ${method} ${path}`,
+    });
     throw remnashopUnavailableError(path, error);
+  }
+}
+
+function parseLogBody(body: BodyInit | string) {
+  if (typeof body !== "string") {
+    return "[non-string body]";
+  }
+
+  if (!body) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(body);
+  } catch {
+    return body;
   }
 }
 
@@ -184,6 +244,7 @@ export async function remnashopAuth(path: "/auth/register" | "/auth/login", body
 }
 
 async function remnashopRefresh(refreshToken: string) {
+  authDebugLog("remnashop_token_refresh_started", {});
   const response = await fetchRemnashop("/auth/refresh", {
     method: "POST",
     headers: {
@@ -194,6 +255,11 @@ async function remnashopRefresh(refreshToken: string) {
   });
   const data = await parseResponse<RemnashopAuthResponse>(response, "/auth/refresh");
   const cookies = extractAuthCookies(response);
+
+  authDebugLog("remnashop_token_refresh_success", {
+    accessExpiresAt: data.expires_at,
+    refreshExpiresAt: data.refresh_expires_at,
+  });
 
   return { data, cookies };
 }
@@ -227,6 +293,7 @@ export async function getRemnashopMe(accessToken: string) {
 export async function getAuthorizedRemnashopTokens({
   allowUnverifiedEmail = false,
 }: { allowUnverifiedEmail?: boolean } = {}) {
+  authDebugLog("remnashop_tokens_authorize_started", { allowUnverifiedEmail });
   const session = await getCurrentSession();
 
   if (
@@ -234,6 +301,12 @@ export async function getAuthorizedRemnashopTokens({
     !session.remnashopRefreshTokenEncrypted
   ) {
     if (session) {
+      authDebugLog("remnashop_tokens_authorize_failed", {
+        reason: "session_not_linked_to_remnashop",
+        sessionId: session.id,
+        userId: session.userId,
+        authMethod: session.authMethod,
+      });
       throw new BffError(
         "EMAIL_REQUIRED",
         401,
@@ -241,10 +314,17 @@ export async function getAuthorizedRemnashopTokens({
       );
     }
 
+    authDebugLog("remnashop_tokens_authorize_failed", { reason: "missing_session" });
     throw normalizeRemnashopError(401, "Not authenticated", { path: "/auth/session" });
   }
 
   if (session.user.email && !session.user.emailVerified && !allowUnverifiedEmail) {
+    authDebugLog("remnashop_tokens_authorize_failed", {
+      reason: "email_not_verified",
+      sessionId: session.id,
+      userId: session.userId,
+      hasEmail: true,
+    });
     throw new BffError(
       "EMAIL_NOT_VERIFIED",
       403,
@@ -255,10 +335,25 @@ export async function getAuthorizedRemnashopTokens({
   const refreshToken = revealRemnashopToken(session.remnashopRefreshTokenEncrypted);
   const refreshThreshold = new Date(Date.now() + 60_000);
 
+  authDebugLog("remnashop_tokens_authorize_session_loaded", {
+    sessionId: session.id,
+    userId: session.userId,
+    authMethod: session.authMethod,
+    remnashopAccessExpiresAt: session.remnashopAccessExpiresAt,
+    remnashopRefreshExpiresAt: session.remnashopRefreshExpiresAt,
+    allowUnverifiedEmail,
+  });
+
   if (
     session.remnashopAccessExpiresAt &&
     session.remnashopAccessExpiresAt <= refreshThreshold
   ) {
+    authDebugLog("remnashop_tokens_refresh_required", {
+      sessionId: session.id,
+      userId: session.userId,
+      remnashopAccessExpiresAt: session.remnashopAccessExpiresAt,
+      threshold: refreshThreshold,
+    });
     const refreshed = await remnashopRefresh(refreshToken);
 
     await prisma.webSession.update({
@@ -275,12 +370,28 @@ export async function getAuthorizedRemnashopTokens({
       },
     });
 
+    authDebugLog("remnashop_tokens_authorize_success", {
+      source: "refresh",
+      sessionId: session.id,
+      userId: session.userId,
+      remnashopAccessExpiresAt: refreshed.data.expires_at,
+      remnashopRefreshExpiresAt: refreshed.data.refresh_expires_at,
+    });
+
     return {
       accessToken: refreshed.cookies.accessToken,
       refreshToken: refreshed.cookies.refreshToken,
       session,
     };
   }
+
+  authDebugLog("remnashop_tokens_authorize_success", {
+    source: "stored",
+    sessionId: session.id,
+    userId: session.userId,
+    remnashopAccessExpiresAt: session.remnashopAccessExpiresAt,
+    remnashopRefreshExpiresAt: session.remnashopRefreshExpiresAt,
+  });
 
   return {
     accessToken: revealRemnashopToken(session.remnashopAccessTokenEncrypted),

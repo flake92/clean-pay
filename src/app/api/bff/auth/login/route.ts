@@ -1,81 +1,26 @@
 import { auditLog } from "@/lib/audit";
 import { bffError, bffJson } from "@/lib/bff-response";
-import { getEnv } from "@/lib/env";
-import { isMockMode, mockAuthPayload } from "@/lib/mock-bff";
-import { assertRateLimit } from "@/lib/rate-limit";
-import { remnashopAuth } from "@/lib/remnashop/client";
-import { getRequestIp, getTurnstileToken, verifyTurnstileToken } from "@/lib/turnstile";
-import { createSessionFromRemnashopAuth } from "@/lib/remnashop/session";
 import type { LoginRequest } from "@/lib/remnashop/types";
+import { getRequestIp, getTurnstileToken } from "@/lib/turnstile";
+import { loginWithEmail } from "@/server/auth/use-cases";
 
 export const runtime = "nodejs";
-
-function mockAuthResponse(status = 200) {
-  const payload = Buffer.from(
-    JSON.stringify({
-      sid: "mock-session",
-      uid: "mock-user",
-      exp: Math.floor(Date.now() / 1000) + 15 * 60,
-    }),
-  ).toString("base64url");
-  const env = getEnv();
-  const response = bffJson(mockAuthPayload(), { status });
-
-  response.cookies.set("clean_pay_access", `${payload}.mock`, {
-    httpOnly: true,
-    secure: env.cookieSecure,
-    sameSite: env.cookieSameSite,
-    path: "/",
-    expires: new Date(Date.now() + 15 * 60 * 1000),
-  });
-
-  return response;
-}
 
 export async function POST(request: Request) {
   let email: string | null = null;
 
   try {
-    const rawBody = (await request.json()) as LoginRequest & { turnstileToken?: string; "cf-turnstile-response"?: string };
-    const turnstileToken = getTurnstileToken(rawBody);
-    const body = { ...rawBody };
-    delete body.turnstileToken;
-    delete body["cf-turnstile-response"];
-    email = body.email;
-
-    await verifyTurnstileToken(turnstileToken, getRequestIp(request));
-
-    await assertRateLimit({
-      action: "auth_login",
-      email: body.email,
-      limit: 5,
-      windowSeconds: 15 * 60,
-    });
-
-    if (isMockMode()) {
-      await auditLog({ action: "auth_login_success", metadata: { email, mode: "mock" } });
-
-      return mockAuthResponse();
-    }
-
-    const auth = await remnashopAuth("/auth/login", body);
-    const { user, profile } = await createSessionFromRemnashopAuth({
-      accessToken: auth.cookies.accessToken,
-      refreshToken: auth.cookies.refreshToken,
-      auth: auth.data,
-    });
-
-    await auditLog({
-      action: "auth_login_success",
-      userId: user.id,
-      metadata: { email: user.email, telegramId: user.telegramId },
-    });
-
-    return bffJson({
-      user: profile,
-      expiresAt: auth.data.expires_at,
-      refreshExpiresAt: auth.data.refresh_expires_at,
-    });
+    const rawBody = (await request.json()) as LoginRequest & {
+      turnstileToken?: string;
+      "cf-turnstile-response"?: string;
+    };
+    email = rawBody.email;
+    return bffJson(
+      await loginWithEmail(rawBody, {
+        token: getTurnstileToken(rawBody),
+        remoteIp: getRequestIp(request),
+      }),
+    );
   } catch (error) {
     await auditLog({ action: "auth_login_failed", severity: "WARN", metadata: { email } });
 

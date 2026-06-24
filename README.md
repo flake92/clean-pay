@@ -17,8 +17,8 @@ Run project commands inside the existing devcontainer `clean-pay_devcontainer-ap
 
 - PostgreSQL: `db:5432`
 - Redis: `redis:6379`
-- Remnashop mock: `http://remnashop-mock:8080/api/v1/public`
-- Turnstile mock: `http://turnstile-mock:8787/turnstile/v0/siteverify`
+- Remnashop API: configured by `REMNASHOP_API_BASE_URL`
+- Turnstile verification: Cloudflare endpoint when `TURNSTILE_ENABLED=true`
 
 ```bash
 cd /workspaces/clean-pay
@@ -33,11 +33,8 @@ npm run dev
 ```bash
 npm run lint
 npm run build
-npm run build:mock
 npm run start:normal -- --hostname 0.0.0.0
-npm run start:mock -- --hostname 0.0.0.0
 npm run smoke:normal
-npm run smoke:mock
 ```
 
 ## Environment
@@ -92,7 +89,6 @@ User actions are stored in `AuditLog`; technical failures are emitted as JSON co
 ## Smoke And Acceptance
 
 ```bash
-npm run smoke:mock
 npm run smoke:normal
 ```
 

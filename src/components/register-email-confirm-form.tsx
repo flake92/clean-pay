@@ -29,7 +29,7 @@ function turnstilePayload(token: string | null) {
 }
 
 export function RegisterEmailConfirmForm({ turnstileEnabled = false }: { turnstileEnabled?: boolean }) {
-  const [loading, setLoading] = useState<"confirm" | "resend" | null>(null);
+  const [loading, setLoading] = useState<"confirm" | "resend" | "back" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
@@ -42,6 +42,12 @@ export function RegisterEmailConfirmForm({ turnstileEnabled = false }: { turnsti
 
     setError(missingTurnstileTokenMessage());
     return false;
+  }
+
+  async function goBackToRegister() {
+    setLoading("back");
+    await fetch("/api/bff/auth/logout", { method: "POST" }).catch(() => null);
+    window.location.assign("/register");
   }
 
   async function resendCode() {
@@ -143,6 +149,16 @@ export function RegisterEmailConfirmForm({ turnstileEnabled = false }: { turnsti
             loading={loading === "resend"}
             onClick={resendCode}
             outlined
+            type="button"
+          />
+          <Button
+            className="flex-1"
+            disabled={loading !== null}
+            label="Назад"
+            loading={loading === "back"}
+            onClick={goBackToRegister}
+            outlined
+            severity="secondary"
             type="button"
           />
         </div>

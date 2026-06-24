@@ -26,7 +26,7 @@ tar -czf $archive `
   --exclude ".git" `
   --exclude "node_modules" `
   --exclude ".next" `
-  --exclude ".next-mock" `
+  --exclude "work" `
   --exclude ".env" `
   --exclude ".env.local" `
   --exclude ".env.production" `

@@ -1,7 +1,7 @@
 #!/usr/bin/env sh
 set -eu
 
-BASE_URL="${BASE_URL:-http://127.0.0.1:4001}"
+BASE_URL="${BASE_URL:-http://127.0.0.1:4000}"
 EMAIL="${SMOKE_EMAIL:-smoke-$(date +%s)@example.com}"
 PASSWORD="${SMOKE_PASSWORD:-password}"
 TMP_DIR="${TMPDIR:-/tmp}/clean-pay-smoke"

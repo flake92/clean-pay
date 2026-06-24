@@ -23,6 +23,7 @@ services:
       PORT: "3000"
       APP_URL: ${APP_URL:-https://oplata.clear-vpn.org}
       NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL:-https://oplata.clear-vpn.org}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
       REMNASHOP_API_BASE_URL: ${REMNASHOP_API_BASE_URL:?Set REMNASHOP_API_BASE_URL}
       WEB_JWT_SECRET: ${WEB_JWT_SECRET:?Set WEB_JWT_SECRET}
       WEB_REFRESH_SECRET: ${WEB_REFRESH_SECRET:?Set WEB_REFRESH_SECRET}
