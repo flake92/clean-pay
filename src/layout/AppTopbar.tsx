@@ -1,13 +1,15 @@
 /* eslint-disable @next/next/no-img-element */
 
-import Link from 'next/link';
-import { classNames } from 'primereact/utils';
-import React, { forwardRef, useContext, useImperativeHandle, useRef } from 'react';
-import { AppTopbarRef } from '@/types';
-import { LayoutContext } from './context/layoutcontext';
+import Link from "next/link";
+import { classNames } from "primereact/utils";
+import React, { forwardRef, useContext, useImperativeHandle, useRef } from "react";
+import { AppTopbarRef } from "@/types";
+import { LayoutContext } from "./context/layoutcontext";
+import { useCleanPayMenu } from "./useCleanPayMenu";
 
 const AppTopbar = forwardRef<AppTopbarRef>((props, ref) => {
     const { layoutState, onMenuToggle, showProfileSidebar } = useContext(LayoutContext);
+    const { flatItems } = useCleanPayMenu();
     const menubuttonRef = useRef(null);
     const topbarmenuRef = useRef(null);
     const topbarmenubuttonRef = useRef(null);
@@ -15,7 +17,7 @@ const AppTopbar = forwardRef<AppTopbarRef>((props, ref) => {
     useImperativeHandle(ref, () => ({
         menubutton: menubuttonRef.current,
         topbarmenu: topbarmenuRef.current,
-        topbarmenubutton: topbarmenubuttonRef.current
+        topbarmenubutton: topbarmenubuttonRef.current,
     }));
 
     return (
@@ -33,26 +35,39 @@ const AppTopbar = forwardRef<AppTopbarRef>((props, ref) => {
                 <i className="pi pi-ellipsis-v" />
             </button>
 
-            <div ref={topbarmenuRef} className={classNames('layout-topbar-menu', { 'layout-topbar-menu-mobile-active': layoutState.profileSidebarVisible })}>
-                <button type="button" className="p-link layout-topbar-button">
-                    <i className="pi pi-credit-card"></i>
-                    <span>Оплата</span>
-                </button>
-                <button type="button" className="p-link layout-topbar-button">
-                    <i className="pi pi-user"></i>
-                    <span>Профиль</span>
-                </button>
-                <Link href="/support">
-                    <button type="button" className="p-link layout-topbar-button">
-                        <i className="pi pi-question-circle"></i>
-                        <span>Помощь</span>
-                    </button>
-                </Link>
+            <div ref={topbarmenuRef} className={classNames("layout-topbar-menu", { "layout-topbar-menu-mobile-active": layoutState.profileSidebarVisible })}>
+                {flatItems.map((item) => {
+                    if (item.to) {
+                        return (
+                            <Link key={`${item.label}-${item.to}`} href={item.to} className="p-link layout-topbar-button" title={item.label}>
+                                <i className={item.icon}></i>
+                                <span>{item.label}</span>
+                            </Link>
+                        );
+                    }
+
+                    if (item.command) {
+                        return (
+                            <button
+                                key={item.label}
+                                type="button"
+                                className="p-link layout-topbar-button"
+                                title={item.label}
+                                onClick={(event) => item.command?.({ originalEvent: event, item })}
+                            >
+                                <i className={item.icon}></i>
+                                <span>{item.label}</span>
+                            </button>
+                        );
+                    }
+
+                    return null;
+                })}
             </div>
         </div>
     );
 });
 
-AppTopbar.displayName = 'AppTopbar';
+AppTopbar.displayName = "AppTopbar";
 
 export default AppTopbar;

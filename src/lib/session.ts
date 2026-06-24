@@ -1,4 +1,5 @@
 import { cookies, headers } from "next/headers";
+import type { NextResponse } from "next/server";
 
 import { sha256, hmacSha256, jsonBase64Url, parseJsonBase64Url, randomToken, safeEqual } from "@/lib/crypto";
 import { getEnv } from "@/lib/env";
@@ -45,7 +46,7 @@ async function setAccessCookie({
   userId: string;
   expiresAt: Date;
   emailVerified?: boolean | null;
-  telegramId?: bigint | number | string | null;
+  telegramId?: number | string | null;
 }) {
   const env = getEnv();
   const cookieStore = await cookies();
@@ -106,6 +107,7 @@ export async function createWebSession(userId: string) {
       userId,
       refreshTokenHash: sha256(refreshToken),
       userAgent: requestHeaders.get("user-agent"),
+      authMethod: "EMAIL",
       accessTokenExpiresAt,
       refreshExpiresAt,
     },
@@ -166,6 +168,7 @@ export async function createWebSessionForRemnashopUser({
       remnashopRefreshTokenEncrypted,
       remnashopAccessExpiresAt,
       remnashopRefreshExpiresAt,
+      authMethod: "EMAIL",
       userAgent: requestHeaders.get("user-agent"),
       accessTokenExpiresAt,
       refreshExpiresAt,
@@ -265,6 +268,75 @@ export async function refreshCurrentAccessCookie() {
     expiresAt: session.accessTokenExpiresAt,
     emailVerified: user?.emailVerified,
     telegramId: user?.telegramId,
+  });
+
+  return session;
+}
+
+export async function createWebSessionOnResponse(response: NextResponse, userId: string) {
+  const env = getEnv();
+  const requestHeaders = await headers();
+  const currentSession = await getCurrentSession();
+  const reusableSession =
+    currentSession?.userId === userId && currentSession.remnashopAccessTokenEncrypted && currentSession.remnashopRefreshTokenEncrypted
+      ? currentSession
+      : await prisma.webSession.findFirst({
+          where: {
+            userId,
+            revokedAt: null,
+            remnashopAccessTokenEncrypted: { not: null },
+            remnashopRefreshTokenEncrypted: { not: null },
+            refreshExpiresAt: { gt: new Date() },
+          },
+          orderBy: { updatedAt: "desc" },
+        });
+  const now = new Date();
+  const accessTokenExpiresAt = addMinutes(
+    now,
+    securityPolicy.accessSessionTtlMinutes,
+  );
+  const refreshExpiresAt = addDays(now, securityPolicy.refreshSessionTtlDays);
+  const refreshToken = randomToken(48);
+
+  const session = await prisma.webSession.create({
+    data: {
+      userId,
+      refreshTokenHash: sha256(refreshToken),
+      remnashopAccessTokenEncrypted: reusableSession?.remnashopAccessTokenEncrypted,
+      remnashopRefreshTokenEncrypted: reusableSession?.remnashopRefreshTokenEncrypted,
+      remnashopAccessExpiresAt: reusableSession?.remnashopAccessExpiresAt,
+      remnashopRefreshExpiresAt: reusableSession?.remnashopRefreshExpiresAt,
+      authMethod: "TELEGRAM",
+      userAgent: requestHeaders.get("user-agent"),
+      accessTokenExpiresAt,
+      refreshExpiresAt,
+    },
+  });
+  const user = await prisma.webUser.findUnique({
+    where: { id: userId },
+    select: { emailVerified: true, telegramId: true },
+  });
+  const accessToken = signAccessToken({
+    sid: session.id,
+    uid: userId,
+    exp: Math.floor(accessTokenExpiresAt.getTime() / 1000),
+    ev: Boolean(user?.emailVerified),
+    tg: Boolean(user?.telegramId),
+  });
+
+  response.cookies.set(sessionCookieNames.access, accessToken, {
+    httpOnly: true,
+    secure: env.cookieSecure,
+    sameSite: env.cookieSameSite,
+    path: "/",
+    expires: accessTokenExpiresAt,
+  });
+  response.cookies.set(sessionCookieNames.refresh, refreshToken, {
+    httpOnly: true,
+    secure: env.cookieSecure,
+    sameSite: env.cookieSameSite,
+    path: "/",
+    expires: refreshExpiresAt,
   });
 
   return session;

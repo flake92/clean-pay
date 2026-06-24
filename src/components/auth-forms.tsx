@@ -166,10 +166,30 @@ export function LoginForm() {
 
 export function RegisterForm() {
   const [state, setState] = useState<ApiState>({ loading: false, error: null });
+  const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [confirmTouched, setConfirmTouched] = useState(false);
   const turnstile = useAuthTurnstile();
+  const passwordsDoNotMatch = confirmTouched && confirmPassword.length > 0 && password !== confirmPassword;
+
+  const passwordFooter = (
+    <div className="mt-2 text-sm text-600 line-height-3">
+      Используйте минимум 8 символов. Надежнее: буквы в разных регистрах, цифры и спецсимвол.
+    </div>
+  );
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+
+    const formData = new FormData(event.currentTarget);
+    const nextPassword = String(formData.get("password") ?? "");
+    const nextConfirmPassword = String(formData.get("confirmPassword") ?? "");
+
+    if (nextPassword !== nextConfirmPassword) {
+      setConfirmTouched(true);
+      setState({ loading: false, error: "Пароли не совпадают." });
+      return;
+    }
 
     if (turnstile.enabled && !turnstile.token) {
       setState({ loading: false, error: missingTurnstileTokenMessage() });
@@ -178,7 +198,6 @@ export function RegisterForm() {
 
     setState({ loading: true, error: null });
 
-    const formData = new FormData(event.currentTarget);
     const response = await fetch("/api/bff/auth/register", {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -212,17 +231,46 @@ export function RegisterForm() {
       <label className="flex flex-column gap-2">
         <span className="text-sm font-medium text-700">Пароль</span>
         <Password
+          appendTo="self"
           autoComplete="new-password"
           className="w-full"
+          footer={passwordFooter}
+          header={<div className="font-medium mb-2">Надежность пароля</div>}
           inputId="register-password"
           inputClassName="w-full"
+          mediumLabel="Средний"
           minLength={8}
           name="password"
+          panelClassName="auth-password-panel"
           placeholder="Придумайте пароль"
+          promptLabel="Введите пароль"
           required
+          strongLabel="Надежный"
           toggleMask
+          value={password}
+          weakLabel="Слабый"
+          onChange={(event) => setPassword(event.target.value)}
         />
         <span className="text-xs text-500">Минимум 8 символов.</span>
+      </label>
+      <label className="flex flex-column gap-2">
+        <span className="text-sm font-medium text-700">Повторите пароль</span>
+        <Password
+          autoComplete="new-password"
+          className="w-full"
+          feedback={false}
+          inputId="register-password-confirm"
+          inputClassName={`w-full${passwordsDoNotMatch ? " p-invalid" : ""}`}
+          minLength={8}
+          name="confirmPassword"
+          placeholder="Введите пароль еще раз"
+          required
+          toggleMask
+          value={confirmPassword}
+          onBlur={() => setConfirmTouched(true)}
+          onChange={(event) => setConfirmPassword(event.target.value)}
+        />
+        {passwordsDoNotMatch ? <span className="text-xs text-red-500">Пароли не совпадают.</span> : null}
       </label>
       <AuthTurnstileChallenge />
       {state.error ? <Message severity="error" text={state.error} /> : null}

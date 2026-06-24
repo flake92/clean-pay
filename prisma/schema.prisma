@@ -28,11 +28,16 @@ enum PaymentRecordStatus {
   UNKNOWN
 }
 
+enum WebSessionAuthMethod {
+  EMAIL
+  TELEGRAM
+}
+
 model WebUser {
   id                      String                   @id @default(cuid())
   remnashopUserId         String?                  @unique
   email                   String?                  @unique
-  telegramId              BigInt?                  @unique
+  telegramId              String?                  @unique
   telegramUsername        String?
   fullName                String?
   photoUrl                String?
@@ -103,6 +108,7 @@ model WebSession {
   remnashopRefreshTokenEncrypted  String?
   remnashopAccessExpiresAt        DateTime?
   remnashopRefreshExpiresAt       DateTime?
+  authMethod           WebSessionAuthMethod @default(EMAIL)
   userAgent            String?
   ipHash               String?
   accessTokenExpiresAt DateTime

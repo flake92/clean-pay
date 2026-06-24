@@ -3,47 +3,10 @@
 import React from "react";
 import AppMenuitem from "./AppMenuitem";
 import { MenuProvider } from "./context/menucontext";
-import { AppMenuItem } from "@/types";
+import { useCleanPayMenu } from "./useCleanPayMenu";
 
 const AppMenu = () => {
-    async function logout() {
-        await fetch("/api/bff/auth/logout", { method: "POST" });
-        window.location.assign("/login");
-    }
-
-    const model: AppMenuItem[] = [
-        {
-            label: "Clean Pay",
-            items: [
-                { label: "Кабинет", icon: "pi pi-fw pi-home", to: "/cabinet" },
-                { label: "Тарифы", icon: "pi pi-fw pi-tags", to: "/tariffs" },
-                { label: "Оплата", icon: "pi pi-fw pi-credit-card", to: "/payment" },
-                { label: "Продление", icon: "pi pi-fw pi-refresh", to: "/extend" },
-            ],
-        },
-        {
-            label: "Аккаунт",
-            items: [
-                { label: "Профиль", icon: "pi pi-fw pi-user", to: "/profile" },
-                { label: "Подтвердить e-mail", icon: "pi pi-fw pi-envelope", to: "/verify-email" },
-                { label: "Связать аккаунт", icon: "pi pi-fw pi-link", to: "/link-account" },
-            ],
-        },
-        {
-            label: "Помощь",
-            items: [
-                { label: "Поддержка", icon: "pi pi-fw pi-question-circle", to: "/support" },
-                {
-                    label: "Выйти",
-                    icon: "pi pi-fw pi-sign-out",
-                    command: ({ originalEvent }) => {
-                        originalEvent.preventDefault();
-                        void logout();
-                    },
-                },
-            ],
-        },
-    ];
+    const { model } = useCleanPayMenu();
 
     return (
         <MenuProvider>

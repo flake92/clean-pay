@@ -47,7 +47,7 @@ export interface AppTopbarRef {
 
 /* AppMenu Types */
 type CommandProps = {
-    originalEvent: React.MouseEvent<HTMLAnchorElement, MouseEvent>;
+    originalEvent: React.MouseEvent<HTMLElement, MouseEvent>;
     item: MenuModelItem;
 };
 

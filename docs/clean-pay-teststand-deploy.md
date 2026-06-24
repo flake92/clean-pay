@@ -171,7 +171,7 @@ oplata.clear-vpn.org {
     header_up Host {host}
     header_up X-Forwarded-Host {host}
     header_up X-Forwarded-Proto {scheme}
-    header_up X-Forwarded-Port {server_port}
+    header_up X-Forwarded-Port 443
     header_up X-Real-IP {remote_host}
     header_up X-Forwarded-For {remote_host}
   }

@@ -12,6 +12,7 @@ declare global {
         container: HTMLElement,
         options: {
           sitekey: string;
+          size?: "normal" | "flexible" | "compact";
           callback: (token: string) => void;
           "expired-callback": () => void;
           "error-callback": () => void;
@@ -95,6 +96,7 @@ export function TurnstileWidget({
 
         widgetIdRef.current = window.turnstile.render(containerRef.current, {
           sitekey: siteKey,
+          size: "flexible",
           callback: (token) => {
             setError(null);
             onToken(token);
@@ -130,8 +132,8 @@ export function TurnstileWidget({
   }
 
   return (
-    <div className="flex flex-column gap-2">
-      <div ref={containerRef} />
+    <div className="flex flex-column gap-2 turnstile-widget">
+      <div ref={containerRef} className="turnstile-widget-container" />
       {loading ? (
         <div className="flex align-items-center gap-2 text-600">
           <ProgressSpinner style={{ height: "1.25rem", width: "1.25rem" }} strokeWidth="6" />

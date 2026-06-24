@@ -3,9 +3,9 @@ import { createRemoteJWKSet, jwtVerify } from "jose";
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 
+import { auditLog, logTechnicalError, logTechnicalWarning } from "@/lib/audit";
 import { randomToken, sha256 } from "@/lib/crypto";
 import { getEnv } from "@/lib/env";
-import { auditLog } from "@/lib/audit";
 import { prisma } from "@/lib/prisma";
 import { assertRateLimit } from "@/lib/rate-limit";
 
@@ -99,6 +99,14 @@ async function exchangeCodeForIdToken(code: string, codeVerifier: string) {
   });
 
   if (!response.ok) {
+    const errorBody = await response.text().catch(() => null);
+
+    logTechnicalWarning("telegram_token_exchange_failed", {
+      status: response.status,
+      statusText: response.statusText,
+      body: errorBody?.slice(0, 500),
+    });
+
     throw new Error("Telegram token exchange failed");
   }
 
@@ -127,13 +135,13 @@ async function verifyTelegramIdToken(idToken: string, nonce: string) {
 }
 
 function getTelegramId(payload: JWTPayload) {
-  const rawTelegramId = payload.telegram_id ?? payload.sub;
+  const rawTelegramId = payload.id ?? payload.telegram_id;
 
   if (
     typeof rawTelegramId !== "string" &&
     typeof rawTelegramId !== "number"
   ) {
-    throw new Error("Telegram id_token does not contain telegram_id");
+    throw new Error("Telegram id_token does not contain Telegram user id");
   }
 
   const telegramId = BigInt(rawTelegramId);
@@ -142,7 +150,7 @@ function getTelegramId(payload: JWTPayload) {
     throw new Error("Telegram id_token contains invalid telegram_id");
   }
 
-  return telegramId;
+  return telegramId.toString();
 }
 
 function getFullName(payload: JWTPayload) {
@@ -166,6 +174,13 @@ export async function consumeTelegramCallback(code: string, state: string) {
   )?.value;
 
   if (!cookieState || cookieState !== state || !nonce || !codeVerifier) {
+    logTechnicalWarning("telegram_oidc_state_cookie_invalid", {
+      storedStatePresent: Boolean(cookieState),
+      stateMatches: Boolean(cookieState && cookieState === state),
+      hasNonce: Boolean(nonce),
+      verifierPresent: Boolean(codeVerifier),
+    });
+
     throw new Error("Telegram OIDC state is invalid");
   }
 
@@ -180,11 +195,24 @@ export async function consumeTelegramCallback(code: string, state: string) {
   });
 
   if (!authState) {
+    logTechnicalWarning("telegram_oidc_state_not_found", {
+      stateParamPresent: Boolean(state),
+      hasNonce: Boolean(nonce),
+      verifierPresent: Boolean(codeVerifier),
+    });
+
     throw new Error("Telegram OIDC state was not found or has expired");
   }
 
   const idToken = await exchangeCodeForIdToken(code, codeVerifier);
-  const payload = await verifyTelegramIdToken(idToken, nonce);
+  const payload = await verifyTelegramIdToken(idToken, nonce).catch((error) => {
+    logTechnicalError("telegram_id_token_verification_failed", error, {
+      authStateId: authState.id,
+      hasUserId: Boolean(authState.userId),
+    });
+
+    throw error;
+  });
   const telegramId = getTelegramId(payload);
   const telegramUsername =
     typeof payload.preferred_username === "string"

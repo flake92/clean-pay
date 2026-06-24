@@ -4,6 +4,41 @@ import Link from "next/link";
 
 import { AppShell } from "@/components/layout";
 
+const actions = [
+  {
+    href: "/cabinet",
+    icon: "pi pi-home",
+    title: "Кабинет",
+    value: "Подписка",
+    description: "Статус, устройства и ссылка доступа",
+    tone: "blue",
+  },
+  {
+    href: "/profile",
+    icon: "pi pi-user",
+    title: "Профиль",
+    value: "Аккаунт",
+    description: "E-mail, пароль и Telegram ID",
+    tone: "green",
+  },
+  {
+    href: "/link-account",
+    icon: "pi pi-link",
+    title: "Привязать Telegram",
+    value: "Связь аккаунта",
+    description: "Добавить Telegram ID к текущему профилю",
+    tone: "cyan",
+  },
+  {
+    href: "/support",
+    icon: "pi pi-question-circle",
+    title: "Поддержка",
+    value: "Помощь",
+    description: "Контакты и ответы по оплате",
+    tone: "purple",
+  },
+];
+
 export default function Home() {
   return (
     <AppShell>
@@ -33,87 +68,25 @@ export default function Home() {
           </div>
         </div>
 
-        <div className="col-12 lg:col-6 xl:col-3">
-          <div className="card mb-0">
-            <div className="flex justify-content-between mb-3">
-              <div>
-                <span className="block text-500 font-medium mb-3">Слой доступа</span>
-                <div className="text-900 font-medium text-xl">BFF</div>
+        {actions.map((action) => (
+          <div className="col-12 lg:col-6 xl:col-3" key={action.href}>
+            <Link href={action.href} className="card mb-0 no-underline block h-full">
+              <div className="flex justify-content-between mb-3">
+                <div>
+                  <span className="block text-500 font-medium mb-3">{action.title}</span>
+                  <div className="text-900 font-medium text-xl">{action.value}</div>
+                </div>
+                <div
+                  className={`flex align-items-center justify-content-center bg-${action.tone}-100 border-round`}
+                  style={{ width: "2.5rem", height: "2.5rem" }}
+                >
+                  <i className={`${action.icon} text-${action.tone}-500 text-xl`} />
+                </div>
               </div>
-              <div className="flex align-items-center justify-content-center bg-blue-100 border-round" style={{ width: "2.5rem", height: "2.5rem" }}>
-                <i className="pi pi-server text-blue-500 text-xl" />
-              </div>
-            </div>
-            <span className="text-green-500 font-medium">API </span>
-            <span className="text-500">скрыт от браузера</span>
+              <span className="text-500">{action.description}</span>
+            </Link>
           </div>
-        </div>
-        <div className="col-12 lg:col-6 xl:col-3">
-          <div className="card mb-0">
-            <div className="flex justify-content-between mb-3">
-              <div>
-                <span className="block text-500 font-medium mb-3">Сессии</span>
-                <div className="text-900 font-medium text-xl">HttpOnly</div>
-              </div>
-              <div className="flex align-items-center justify-content-center bg-orange-100 border-round" style={{ width: "2.5rem", height: "2.5rem" }}>
-                <i className="pi pi-lock text-orange-500 text-xl" />
-              </div>
-            </div>
-            <span className="text-green-500 font-medium">Cookies </span>
-            <span className="text-500">для web-кабинета</span>
-          </div>
-        </div>
-        <div className="col-12 lg:col-6 xl:col-3">
-          <div className="card mb-0">
-            <div className="flex justify-content-between mb-3">
-              <div>
-                <span className="block text-500 font-medium mb-3">Подписка</span>
-                <div className="text-900 font-medium text-xl">CleanVPN</div>
-              </div>
-              <div className="flex align-items-center justify-content-center bg-cyan-100 border-round" style={{ width: "2.5rem", height: "2.5rem" }}>
-                <i className="pi pi-database text-cyan-500 text-xl" />
-              </div>
-            </div>
-            <span className="text-green-500 font-medium">Тарифы </span>
-            <span className="text-500">и платежи</span>
-          </div>
-        </div>
-        <div className="col-12 lg:col-6 xl:col-3">
-          <div className="card mb-0">
-            <div className="flex justify-content-between mb-3">
-              <div>
-                <span className="block text-500 font-medium mb-3">Кабинет</span>
-                <div className="text-900 font-medium text-xl">Clean Pay</div>
-              </div>
-              <div className="flex align-items-center justify-content-center bg-purple-100 border-round" style={{ width: "2.5rem", height: "2.5rem" }}>
-                <i className="pi pi-wallet text-purple-500 text-xl" />
-              </div>
-            </div>
-            <span className="text-green-500 font-medium">Оплата </span>
-            <span className="text-500">и продление</span>
-          </div>
-        </div>
-
-        <div className="col-12">
-          <div className="card">
-            <h5>Быстрые действия</h5>
-            <div className="flex flex-wrap gap-2">
-              <Link href="/cabinet" className="p-button p-component p-button-outlined no-underline">
-                <span className="p-button-label">Кабинет</span>
-              </Link>
-              <Link href="/profile" className="p-button p-component p-button-outlined no-underline">
-                <span className="p-button-label">Профиль</span>
-              </Link>
-              <Link href="/link-account" className="p-button p-component p-button-outlined no-underline">
-                <span className="p-button-icon p-c pi pi-send" />
-                <span className="p-button-label">Привязать Telegram</span>
-              </Link>
-              <Link href="/support" className="p-button p-component p-button-outlined no-underline">
-                <span className="p-button-label">Поддержка</span>
-              </Link>
-            </div>
-          </div>
-        </div>
+        ))}
       </div>
     </AppShell>
   );

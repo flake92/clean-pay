@@ -407,6 +407,9 @@ export function CabinetPanel() {
       : null;
   const deviceCount = devices?.current_count ?? null;
   const maxDevices = devices?.max_count ?? subscription?.device_limit ?? null;
+  const isEmailVerified = user.emailVerified ?? user.is_email_verified ?? false;
+  const shouldShowVerifyEmail = !isEmailVerified;
+  const shouldShowLinkAccount = !user.email || !user.telegramId;
 
   return (
     <div className="grid">
@@ -531,11 +534,9 @@ export function CabinetPanel() {
               <DetailLine
               label="Telegram"
               value={
-                user.telegramUsername
-                  ? `@${user.telegramUsername}`
-                  : user.telegramId
-                    ? user.telegramId
-                    : "Не привязан"
+                user.telegramId
+                  ? user.telegramId
+                  : "Не привязан"
               }
             />
             </div>
@@ -719,10 +720,14 @@ export function CabinetPanel() {
       <div className="col-12 flex flex-wrap gap-2">
         <LinkButton href="/extend" label="Продлить" outlined />
         <LinkButton href="/tariffs" label="Тарифы" outlined />
-        <LinkButton href="/verify-email" label="Подтвердить e-mail" outlined />
+        {shouldShowVerifyEmail ? (
+          <LinkButton href="/verify-email" label="Подтвердить e-mail" outlined />
+        ) : null}
         <LinkButton href="/profile" label="Профиль" outlined />
         <LinkButton href="/support" label="Поддержка" outlined />
-        <LinkButton href="/link-account" label="Привязать аккаунт" outlined />
+        {shouldShowLinkAccount ? (
+          <LinkButton href="/link-account" label="Привязать аккаунт" outlined />
+        ) : null}
         <Button icon="pi pi-sign-out" label="Выйти" onClick={logout} severity="secondary" />
       </div>
     </div>

@@ -13,7 +13,9 @@ import { Tag } from "primereact/tag";
 import { LinkButton } from "@/components/prime/link-button";
 
 type ProfileUser = {
-  telegram_id: number | null;
+  telegram_id: string | number | null;
+  telegramId?: string | null;
+  telegramUsername?: string | null;
   auth_type: string;
   email: string | null;
   is_email_verified: boolean;
@@ -166,8 +168,11 @@ export function ProfilePanel() {
           {[
             ["Имя", user.name],
             ["E-mail", user.email ?? "Не указан"],
-            ["Ожидает подтверждения", user.pending_email ?? "-"],
             ["Тип входа", user.auth_type],
+            [
+              "Telegram",
+              user.telegramId ?? user.telegram_id ?? "Не привязан",
+            ],
           ].map(([label, value]) => (
             <div className="col-12 md:col-6" key={label}>
             <div className="surface-50 border-1 border-200 border-round-lg p-3 h-full">

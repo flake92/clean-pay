@@ -14,7 +14,7 @@ export function AuthShell({
   footer?: React.ReactNode;
 }) {
   return (
-    <div className="surface-ground flex align-items-center justify-content-center min-h-screen min-w-screen overflow-hidden p-4">
+    <div className="surface-ground auth-page flex align-items-center justify-content-center w-full overflow-x-hidden">
       <div className="w-full flex justify-content-center">
         <div
           className="w-full auth-card-frame"
@@ -36,8 +36,8 @@ export function AuthShell({
                   className="mb-3 flex-shrink-0 clean-auth-logo"
                   src="/clean_vpn_logo.jpg"
                 />
-                <div className="text-900 text-3xl font-medium mb-2">{title}</div>
-                <span className="text-600 font-medium line-height-3">{description}</span>
+                <div className="text-900 text-3xl font-medium mb-2 auth-title">{title}</div>
+                <span className="text-600 font-medium line-height-3 auth-description">{description}</span>
               </div>
               {children}
               {footer ? <div className="mt-4 flex flex-column gap-2">{footer}</div> : null}

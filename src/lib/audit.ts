@@ -142,3 +142,7 @@ export function logTechnicalError(event: string, error: unknown, metadata: Recor
 export function logTechnicalWarning(event: string, metadata: Record<string, unknown> = {}) {
   writeJsonLog("warn", { event, metadata: sanitizeValue(metadata) });
 }
+
+export function logTechnicalInfo(event: string, metadata: Record<string, unknown> = {}) {
+  writeJsonLog("info", { event, metadata: sanitizeValue(metadata) });
+}

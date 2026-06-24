@@ -29,7 +29,7 @@ export async function createSessionFromRemnashopAuth({
       remnashopUserId,
       email: profile.email,
       telegramId:
-        profile.telegram_id === null ? undefined : BigInt(profile.telegram_id),
+        profile.telegram_id === null ? undefined : String(profile.telegram_id),
       telegramUsername: profile.username,
       fullName: profile.name,
       displayName: profile.name,
@@ -39,7 +39,7 @@ export async function createSessionFromRemnashopAuth({
     update: {
       email: profile.email,
       telegramId:
-        profile.telegram_id === null ? undefined : BigInt(profile.telegram_id),
+        profile.telegram_id === null ? undefined : String(profile.telegram_id),
       telegramUsername: profile.username,
       fullName: profile.name,
       displayName: profile.name,

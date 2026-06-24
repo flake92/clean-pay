@@ -11,6 +11,7 @@ const publicPagePaths = new Set([
 
 const publicApiPaths = new Set([
   '/api/health',
+  '/api/health/readiness',
   '/api/bff/auth/login',
   '/api/bff/auth/register',
   '/api/bff/auth/logout',
