@@ -43,7 +43,9 @@ export async function POST(request: Request) {
       return bffJson(mockConfirmEmail());
     }
 
-    const { accessToken, session } = await getAuthorizedRemnashopTokens();
+    const { accessToken, session } = await getAuthorizedRemnashopTokens({
+      allowUnverifiedEmail: true,
+    });
     const profile = await getRemnashopMe(accessToken);
     const targetEmail = body.email ?? profile.pending_email ?? profile.email ?? session.user.email ?? undefined;
     const confirmBody = targetEmail ? { ...body, email: targetEmail } : body;

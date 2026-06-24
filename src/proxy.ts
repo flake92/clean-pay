@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 const accessCookieName = 'clean_pay_access';
+const refreshCookieName = 'clean_pay_refresh';
 
 const publicPagePaths = new Set([
   '/login',
@@ -15,6 +16,7 @@ const publicApiPaths = new Set([
   '/api/bff/auth/login',
   '/api/bff/auth/register',
   '/api/bff/auth/logout',
+  '/api/bff/plans/public',
   '/api/logout',
 ]);
 
@@ -76,38 +78,40 @@ function safeEqual(left: string, right: string) {
 type AccessState = {
   authenticated: boolean;
   emailVerificationRequired: boolean;
+  hasRefreshToken: boolean;
 };
 
 async function getAccessState(request: NextRequest): Promise<AccessState> {
   const token = request.cookies.get(accessCookieName)?.value;
+  const hasRefreshToken = Boolean(request.cookies.get(refreshCookieName)?.value);
 
   if (!token) {
-    return { authenticated: false, emailVerificationRequired: false };
+    return { authenticated: false, emailVerificationRequired: false, hasRefreshToken };
   }
 
   const [payload, signature] = token.split('.');
 
   if (!payload || !signature) {
-    return { authenticated: false, emailVerificationRequired: false };
+    return { authenticated: false, emailVerificationRequired: false, hasRefreshToken };
   }
 
   try {
     const parsed = JSON.parse(decodeBase64Url(payload)) as { exp?: unknown; ev?: unknown; tg?: unknown };
 
     if (typeof parsed.exp !== 'number' || parsed.exp <= Math.floor(Date.now() / 1000)) {
-      return { authenticated: false, emailVerificationRequired: false };
+      return { authenticated: false, emailVerificationRequired: false, hasRefreshToken };
     }
 
     if (signature === 'mock') {
       const authenticated = process.env.CLEAN_PAY_MOCK_MODE === '1';
 
-      return { authenticated, emailVerificationRequired: false };
+      return { authenticated, emailVerificationRequired: false, hasRefreshToken };
     }
 
     const secret = process.env.WEB_JWT_SECRET;
 
     if (!secret) {
-      return { authenticated: false, emailVerificationRequired: false };
+      return { authenticated: false, emailVerificationRequired: false, hasRefreshToken };
     }
 
     const authenticated = safeEqual(signature, await hmacSha256(payload, secret));
@@ -115,9 +119,10 @@ async function getAccessState(request: NextRequest): Promise<AccessState> {
     return {
       authenticated,
       emailVerificationRequired: authenticated && parsed.ev === false && parsed.tg !== true,
+      hasRefreshToken,
     };
   } catch {
-    return { authenticated: false, emailVerificationRequired: false };
+    return { authenticated: false, emailVerificationRequired: false, hasRefreshToken };
   }
 }
 
@@ -169,7 +174,7 @@ function authenticatedRedirect(request: NextRequest, emailVerificationRequired: 
 export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
   const accessState = await getAccessState(request);
-  const isAuthenticated = accessState.authenticated;
+  const isAuthenticated = accessState.authenticated || accessState.hasRefreshToken;
 
   if (isPublicPath(pathname)) {
     if (isAuthenticated && (pathname === '/login' || pathname === '/register')) {

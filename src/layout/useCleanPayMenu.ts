@@ -50,7 +50,7 @@ export function useCleanPayMenu() {
         window.location.assign("/login");
     }
 
-    const shouldShowVerifyEmail = profileLoaded && user !== null && !user.emailVerified;
+    const shouldShowVerifyEmail = profileLoaded && user !== null && Boolean(user.email) && !user.emailVerified;
     const shouldShowLinkAccount = profileLoaded && user !== null && (!user.email || !user.telegramId);
     const accountItems: AppMenuItem[] = [
         { label: "Профиль", icon: "pi pi-fw pi-user", to: "/profile" },

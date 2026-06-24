@@ -42,7 +42,9 @@ export async function POST(request: Request) {
       return bffJson(mockRequestVerification());
     }
 
-    const { accessToken, session } = await getAuthorizedRemnashopTokens();
+    const { accessToken, session } = await getAuthorizedRemnashopTokens({
+      allowUnverifiedEmail: true,
+    });
     const key = `email-verification:${session.userId}`;
 
     await assertCooldown({

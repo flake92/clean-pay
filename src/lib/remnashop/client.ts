@@ -224,22 +224,32 @@ export async function getRemnashopMe(accessToken: string) {
   });
 }
 
-export async function getAuthorizedRemnashopTokens() {
+export async function getAuthorizedRemnashopTokens({
+  allowUnverifiedEmail = false,
+}: { allowUnverifiedEmail?: boolean } = {}) {
   const session = await getCurrentSession();
 
   if (
     !session?.remnashopAccessTokenEncrypted ||
     !session.remnashopRefreshTokenEncrypted
   ) {
-    if (session && !session.user.email) {
+    if (session) {
       throw new BffError(
         "EMAIL_REQUIRED",
         401,
-        "Telegram account must be linked to an e-mail before using Remnashop actions",
+        "Clean Pay session must be linked to Remnashop before using Remnashop actions",
       );
     }
 
     throw normalizeRemnashopError(401, "Not authenticated", { path: "/auth/session" });
+  }
+
+  if (session.user.email && !session.user.emailVerified && !allowUnverifiedEmail) {
+    throw new BffError(
+      "EMAIL_NOT_VERIFIED",
+      403,
+      "E-mail must be verified before using Remnashop actions",
+    );
   }
 
   const refreshToken = revealRemnashopToken(session.remnashopRefreshTokenEncrypted);

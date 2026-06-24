@@ -90,6 +90,49 @@ function verifyAccessToken(token: string) {
   return payload;
 }
 
+async function getSessionByRefreshToken() {
+  const cookieStore = await cookies();
+  const refreshToken = cookieStore.get(sessionCookieNames.refresh)?.value;
+
+  if (!refreshToken) {
+    return null;
+  }
+
+  const session = await prisma.webSession.findFirst({
+    where: {
+      refreshTokenHash: sha256(refreshToken),
+      revokedAt: null,
+      refreshExpiresAt: { gt: new Date() },
+    },
+    include: { user: true },
+  });
+
+  if (!session) {
+    return null;
+  }
+
+  const accessTokenExpiresAt = addMinutes(
+    new Date(),
+    securityPolicy.accessSessionTtlMinutes,
+  );
+
+  const updatedSession = await prisma.webSession.update({
+    where: { id: session.id },
+    data: { accessTokenExpiresAt },
+    include: { user: true },
+  });
+
+  await setAccessCookie({
+    sessionId: updatedSession.id,
+    userId: updatedSession.userId,
+    expiresAt: accessTokenExpiresAt,
+    emailVerified: updatedSession.user.emailVerified,
+    telegramId: updatedSession.user.telegramId,
+  });
+
+  return updatedSession;
+}
+
 export async function createWebSession(userId: string) {
   const env = getEnv();
   const cookieStore = await cookies();
@@ -203,13 +246,13 @@ export async function getCurrentUser() {
   const accessToken = cookieStore.get(sessionCookieNames.access)?.value;
 
   if (!accessToken) {
-    return null;
+    return (await getSessionByRefreshToken())?.user ?? null;
   }
 
   const payload = verifyAccessToken(accessToken);
 
   if (!payload) {
-    return null;
+    return (await getSessionByRefreshToken())?.user ?? null;
   }
 
   const session = await prisma.webSession.findFirst({
@@ -222,7 +265,7 @@ export async function getCurrentUser() {
     include: { user: true },
   });
 
-  return session?.user ?? null;
+  return session?.user ?? (await getSessionByRefreshToken())?.user ?? null;
 }
 
 export async function getCurrentSession() {
@@ -230,16 +273,16 @@ export async function getCurrentSession() {
   const accessToken = cookieStore.get(sessionCookieNames.access)?.value;
 
   if (!accessToken) {
-    return null;
+    return getSessionByRefreshToken();
   }
 
   const payload = verifyAccessToken(accessToken);
 
   if (!payload) {
-    return null;
+    return getSessionByRefreshToken();
   }
 
-  return prisma.webSession.findFirst({
+  const session = await prisma.webSession.findFirst({
     where: {
       id: payload.sid,
       userId: payload.uid,
@@ -248,6 +291,8 @@ export async function getCurrentSession() {
     },
     include: { user: true },
   });
+
+  return session ?? getSessionByRefreshToken();
 }
 
 export async function refreshCurrentAccessCookie() {

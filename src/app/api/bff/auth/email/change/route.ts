@@ -2,6 +2,7 @@ import { auditLog } from "@/lib/audit";
 import { bffError, bffJson } from "@/lib/bff-response";
 import { isMockMode, mockChangeEmail } from "@/lib/mock-bff";
 import { prisma } from "@/lib/prisma";
+import { assertCooldown, assertRateLimit } from "@/lib/rate-limit";
 import { getAuthorizedRemnashopTokens, remnashopRequest } from "@/lib/remnashop/client";
 import type {
   ChangeEmailRequest,
@@ -21,6 +22,20 @@ export async function POST(request: Request) {
     }
 
     const { accessToken, session } = await getAuthorizedRemnashopTokens();
+
+    await assertCooldown({
+      key: `email-change:${session.userId}`,
+      action: "email_change_request",
+      windowSeconds: 60,
+    });
+    await assertRateLimit({
+      action: "email_change_request",
+      email: body.email,
+      tgId: session.user.telegramId,
+      limit: 5,
+      windowSeconds: 15 * 60,
+    });
+
     const result = await remnashopRequest<ChangeEmailResponse>(
       "/auth/email/change",
       {

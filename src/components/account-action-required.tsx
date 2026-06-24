@@ -15,7 +15,7 @@ export function AccountActionRequired({ action, message }: AccountActionRequired
       <div className="flex flex-column gap-4">
         <Message
           severity="warn"
-          text={message ?? "Для оплаты и управления подпиской нужно привязать e-mail к Telegram-аккаунту."}
+          text="Для оплаты и управления подпиской нужно привязать e-mail к Telegram-аккаунту."
         />
         <LinkButton
           className="w-fit"

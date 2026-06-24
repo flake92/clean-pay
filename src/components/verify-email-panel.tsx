@@ -6,17 +6,14 @@ import { Button } from "primereact/button";
 import { Card } from "primereact/card";
 import { InputText } from "primereact/inputtext";
 import { Message } from "primereact/message";
-import { readBffError } from "@/lib/client-api";
-import { TurnstileWidget, type TurnstileHandle, hasPublicTurnstileKey } from "@/components/turnstile-widget";
 
-async function readError(response: Response) {
-  return (await readBffError(response, 'Не удалось выполнить действие.')).message;
-}
+import { TurnstileWidget, type TurnstileHandle, hasPublicTurnstileKey } from "@/components/turnstile-widget";
+import { BffClientError, readBffError } from "@/lib/client-api";
 
 function missingTurnstileTokenMessage() {
   return hasPublicTurnstileKey()
-    ? "РџСЂРѕР№РґРёС‚Рµ РїСЂРѕРІРµСЂРєСѓ Cloudflare Turnstile."
-    : "Cloudflare Turnstile site key is not configured.";
+    ? "Пройдите проверку Cloudflare Turnstile."
+    : "Ключ сайта Cloudflare Turnstile не настроен.";
 }
 
 function turnstilePayload(token: string | null) {
@@ -63,13 +60,22 @@ export function VerifyEmailPanel({ turnstileEnabled = false }: { turnstileEnable
 
     if (!response.ok) {
       turnstile?.reset();
-      setError(await readError(response));
+      setTurnstileToken(null);
+      setTargetEmail(null);
+      const error = await readBffError(response, "Не удалось отправить код.");
+      if (error instanceof BffClientError && error.code === "EMAIL_REQUIRED") {
+        setError(null);
+      } else {
+        setError(error.message);
+      }
       return;
     }
 
     const body = await response.json();
     setTargetEmail(body.data.target_email);
     setMessage(`Код отправлен на ${body.data.target_email}.`);
+    turnstile?.reset();
+    setTurnstileToken(null);
   }
 
   async function confirmCode(event: React.FormEvent<HTMLFormElement>) {
@@ -77,6 +83,12 @@ export function VerifyEmailPanel({ turnstileEnabled = false }: { turnstileEnable
     setMessage(null);
     setError(null);
     setLoading("confirm");
+
+    if (!targetEmail) {
+      setLoading(null);
+      setError("Сначала запросите код подтверждения.");
+      return;
+    }
 
     if (turnstileEnabled && !turnstileToken) {
       setLoading(null);
@@ -89,7 +101,7 @@ export function VerifyEmailPanel({ turnstileEnabled = false }: { turnstileEnable
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
-        email: targetEmail ?? undefined,
+        email: targetEmail,
         code: formData.get("code"),
         ...turnstilePayload(turnstileToken),
       }),
@@ -99,11 +111,19 @@ export function VerifyEmailPanel({ turnstileEnabled = false }: { turnstileEnable
 
     if (!response.ok) {
       turnstile?.reset();
-      setError(await readError(response));
+      setTurnstileToken(null);
+      const error = await readBffError(response, "Не удалось подтвердить e-mail.");
+      if (error instanceof BffClientError && error.code === "EMAIL_REQUIRED") {
+        setError(null);
+      } else {
+        setError(error.message);
+      }
       return;
     }
 
-    setMessage("E-mail подтверждён.");
+    setMessage("E-mail подтвержден.");
+    turnstile?.reset();
+    setTurnstileToken(null);
   }
 
   return (
@@ -111,7 +131,7 @@ export function VerifyEmailPanel({ turnstileEnabled = false }: { turnstileEnable
       {turnstileEnabled ? <TurnstileWidget onReady={setTurnstile} onToken={setTurnstileToken} /> : null}
       <Card title="Получить код">
         <p className="mt-0 line-height-3 text-600">
-          Код можно запросить не чаще одного раза в минуту. You can request the code once per minute.
+          Код можно запросить не чаще одного раза в минуту.
         </p>
         <form className="flex flex-column gap-3" onSubmit={requestCode}>
           <label className="flex flex-column gap-2">
@@ -120,38 +140,38 @@ export function VerifyEmailPanel({ turnstileEnabled = false }: { turnstileEnable
           </label>
           <Button
             disabled={loading === "request"}
-            label="Отправить код"
+            label={targetEmail ? "Отправить код повторно" : "Отправить код"}
             loading={loading === "request"}
             severity="info"
             type="submit"
           />
         </form>
       </Card>
-      <Card title="Подтвердить код">
-        <p className="mt-0 line-height-3 text-600">
-          Введите 6 цифр из письма. Enter the 6 digits from the e-mail.
-        </p>
-        <form className="flex flex-column gap-3" onSubmit={confirmCode}>
-          <label className="flex flex-column gap-2">
-            <span className="text-sm font-medium text-700">Код</span>
-            <InputText
-              inputMode="numeric"
-              maxLength={6}
-              minLength={6}
-              name="code"
-              pattern="[0-9]{6}"
-              placeholder="000000"
-              required
+      {targetEmail ? (
+        <Card title="Подтвердить код">
+          <p className="mt-0 line-height-3 text-600">Введите 6 цифр из письма.</p>
+          <form className="flex flex-column gap-3" onSubmit={confirmCode}>
+            <label className="flex flex-column gap-2">
+              <span className="text-sm font-medium text-700">Код</span>
+              <InputText
+                inputMode="numeric"
+                maxLength={6}
+                minLength={6}
+                name="code"
+                pattern="[0-9]{6}"
+                placeholder="000000"
+                required
+              />
+            </label>
+            <Button
+              disabled={loading === "confirm"}
+              label="Подтвердить"
+              loading={loading === "confirm"}
+              type="submit"
             />
-          </label>
-          <Button
-            disabled={loading === "confirm"}
-            label="Подтвердить"
-            loading={loading === "confirm"}
-            type="submit"
-          />
-        </form>
-      </Card>
+          </form>
+        </Card>
+      ) : null}
       {error ? <Message severity="error" text={error} /> : null}
       {message ? <Message severity="success" text={message} /> : null}
     </div>

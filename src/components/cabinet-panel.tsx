@@ -11,6 +11,7 @@ import { readBffError } from "@/lib/client-api";
 import { ProgressBar } from "primereact/progressbar";
 import { Tag } from "primereact/tag";
 
+import { AccountActionRequired } from "@/components/account-action-required";
 import { LinkButton } from "@/components/prime/link-button";
 
 type CabinetUser = {
@@ -408,11 +409,18 @@ export function CabinetPanel() {
   const deviceCount = devices?.current_count ?? null;
   const maxDevices = devices?.max_count ?? subscription?.device_limit ?? null;
   const isEmailVerified = user.emailVerified ?? user.is_email_verified ?? false;
-  const shouldShowVerifyEmail = !isEmailVerified;
+  const shouldShowVerifyEmail = Boolean(user.email) && !isEmailVerified;
   const shouldShowLinkAccount = !user.email || !user.telegramId;
+  const shouldRequireEmailLink = !user.email && Boolean(user.telegramId);
 
   return (
     <div className="grid">
+      {shouldRequireEmailLink ? (
+        <div className="col-12">
+          <AccountActionRequired action="linkEmail" />
+        </div>
+      ) : null}
+
       <div className="col-12 lg:col-6 xl:col-3">
         <Metric icon="pi pi-shield" label="Подписка" tone="blue" value={subscription?.plan_name ?? "Не активна"} />
       </div>

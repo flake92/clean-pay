@@ -69,6 +69,27 @@ The web cabinet adds its own click protection before calling Remnashop:
 
 The user-facing page is `/verify-email`.
 
+## Password Recovery
+
+Current Remnashop integration exposes password change only for an authenticated
+user through `POST /auth/change-password`. A public password recovery flow by
+e-mail code is not available in the currently used Clean Pay BFF contract.
+
+Recommended target flow:
+
+1. User opens `/forgot-password` and enters e-mail.
+2. BFF applies the same Turnstile, cooldown, and rate limits as e-mail
+   verification.
+3. BFF requests a one-time recovery code from Remnashop, or from a dedicated
+   local recovery-code table if Remnashop adds no such endpoint.
+4. User enters the code and a new password.
+5. BFF validates the code server-side, changes the password, revokes old web
+   sessions for that user, and redirects to login.
+
+Implementation should not reuse the authenticated `/auth/change-password`
+endpoint for anonymous recovery, because it requires the current password and
+valid Remnashop tokens.
+
 ## Profile
 
 `/profile` lets the user view Remnashop profile data, change e-mail, request/confirm e-mail verification, and change password.
