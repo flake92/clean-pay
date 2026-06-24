@@ -1,4 +1,5 @@
 import { decryptSecret, encryptSecret } from "@/lib/crypto";
+import { createHash, createHmac } from "node:crypto";
 import { authDebugLog } from "@/lib/auth-debug-log";
 import { getEnv } from "@/lib/env";
 import { logger } from "@/lib/logger";
@@ -16,6 +17,7 @@ import type {
   RegisterRequest,
   RemnashopAuthResponse,
   RemnashopMe,
+  TelegramAuthRequest,
 } from "@/lib/remnashop/types";
 import { getCurrentSession } from "@/lib/session";
 
@@ -227,7 +229,10 @@ export async function remnashopRequest<T>(path: string, options: RequestOptions 
   return parseResponse<T>(response, path);
 }
 
-export async function remnashopAuth(path: "/auth/register" | "/auth/login", body: RegisterRequest | LoginRequest) {
+export async function remnashopAuth(
+  path: "/auth/register" | "/auth/login" | "/auth/telegram",
+  body: RegisterRequest | LoginRequest | TelegramAuthRequest,
+) {
   const response = await fetchRemnashop(path, {
     method: "POST",
     headers: {
@@ -290,32 +295,117 @@ export async function getRemnashopMe(accessToken: string) {
   });
 }
 
+function signTelegramAuthPayload(body: Omit<TelegramAuthRequest, "hash">, botToken: string) {
+  const dataCheckString = Object.entries(body)
+    .filter(([, value]) => value !== undefined && value !== null && value !== "")
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([key, value]) => `${key}=${value}`)
+    .join("\n");
+  const secret = createHash("sha256").update(botToken).digest();
+
+  return createHmac("sha256", secret).update(dataCheckString).digest("hex");
+}
+
+async function attachRemnashopTokensForTelegramSession(
+  session: NonNullable<Awaited<ReturnType<typeof getCurrentSession>>>,
+) {
+  const env = getEnv();
+  const telegramId = session.user.telegramId;
+
+  if (!telegramId || !env.telegramBotToken) {
+    return null;
+  }
+
+  authDebugLog("remnashop_telegram_token_restore_started", {
+    sessionId: session.id,
+    userId: session.userId,
+    telegramId: telegramId.toString(),
+    hasTelegramUsername: Boolean(session.user.telegramUsername),
+  });
+
+  const bodyWithoutHash: Omit<TelegramAuthRequest, "hash"> = {
+    id: Number(telegramId),
+    first_name: session.user.telegramUsername || "Telegram",
+    username: session.user.telegramUsername ?? undefined,
+    auth_date: Math.floor(Date.now() / 1000),
+  };
+  const auth = await remnashopAuth("/auth/telegram", {
+    ...bodyWithoutHash,
+    hash: signTelegramAuthPayload(bodyWithoutHash, env.telegramBotToken),
+  });
+  const remnashopUserId = getRemnashopUserIdFromAccessToken(auth.cookies.accessToken);
+  const accessExpiresAt = new Date(auth.data.expires_at);
+  const refreshExpiresAt = new Date(auth.data.refresh_expires_at);
+
+  await prisma.$transaction(async (tx) => {
+    await tx.webUser.update({
+      where: { id: session.userId },
+      data: { remnashopUserId },
+    });
+    await tx.webSession.update({
+      where: { id: session.id },
+      data: {
+        remnashopAccessTokenEncrypted: protectRemnashopToken(auth.cookies.accessToken),
+        remnashopRefreshTokenEncrypted: protectRemnashopToken(auth.cookies.refreshToken),
+        remnashopAccessExpiresAt: accessExpiresAt,
+        remnashopRefreshExpiresAt: refreshExpiresAt,
+      },
+    });
+  });
+
+  authDebugLog("remnashop_telegram_token_restore_success", {
+    sessionId: session.id,
+    userId: session.userId,
+    remnashopUserId,
+    accessExpiresAt,
+    refreshExpiresAt,
+  });
+
+  return {
+    accessToken: auth.cookies.accessToken,
+    refreshToken: auth.cookies.refreshToken,
+    session: {
+      ...session,
+      remnashopAccessTokenEncrypted: protectRemnashopToken(auth.cookies.accessToken),
+      remnashopRefreshTokenEncrypted: protectRemnashopToken(auth.cookies.refreshToken),
+      remnashopAccessExpiresAt: accessExpiresAt,
+      remnashopRefreshExpiresAt: refreshExpiresAt,
+    },
+  };
+}
+
 export async function getAuthorizedRemnashopTokens({
   allowUnverifiedEmail = false,
 }: { allowUnverifiedEmail?: boolean } = {}) {
   authDebugLog("remnashop_tokens_authorize_started", { allowUnverifiedEmail });
   const session = await getCurrentSession();
 
-  if (
-    !session?.remnashopAccessTokenEncrypted ||
-    !session.remnashopRefreshTokenEncrypted
-  ) {
-    if (session) {
-      authDebugLog("remnashop_tokens_authorize_failed", {
-        reason: "session_not_linked_to_remnashop",
-        sessionId: session.id,
-        userId: session.userId,
-        authMethod: session.authMethod,
-      });
-      throw new BffError(
-        "EMAIL_REQUIRED",
-        401,
-        "Clean Pay session must be linked to Remnashop before using Remnashop actions",
-      );
-    }
-
+  if (!session) {
     authDebugLog("remnashop_tokens_authorize_failed", { reason: "missing_session" });
     throw normalizeRemnashopError(401, "Not authenticated", { path: "/auth/session" });
+  }
+
+  if (
+    !session.remnashopAccessTokenEncrypted ||
+    !session.remnashopRefreshTokenEncrypted
+  ) {
+    const restoredTelegramSession = await attachRemnashopTokensForTelegramSession(session);
+
+    if (restoredTelegramSession) {
+      return restoredTelegramSession;
+    }
+
+    authDebugLog("remnashop_tokens_authorize_failed", {
+      reason: "session_not_linked_to_remnashop",
+      sessionId: session.id,
+      userId: session.userId,
+      authMethod: session.authMethod,
+    });
+    throw new BffError(
+      "EMAIL_REQUIRED",
+      401,
+      "Clean Pay session must be linked to Remnashop before using Remnashop actions",
+    );
   }
 
   if (session.user.email && !session.user.emailVerified && !allowUnverifiedEmail) {
@@ -332,7 +422,14 @@ export async function getAuthorizedRemnashopTokens({
     );
   }
 
-  const refreshToken = revealRemnashopToken(session.remnashopRefreshTokenEncrypted);
+  const encryptedAccessToken = session.remnashopAccessTokenEncrypted;
+  const encryptedRefreshToken = session.remnashopRefreshTokenEncrypted;
+
+  if (!encryptedAccessToken || !encryptedRefreshToken) {
+    throw new BffError("EMAIL_REQUIRED", 401, "Clean Pay session must be linked to Remnashop before using Remnashop actions");
+  }
+
+  const refreshToken = revealRemnashopToken(encryptedRefreshToken);
   const refreshThreshold = new Date(Date.now() + 60_000);
 
   authDebugLog("remnashop_tokens_authorize_session_loaded", {
@@ -394,7 +491,7 @@ export async function getAuthorizedRemnashopTokens({
   });
 
   return {
-    accessToken: revealRemnashopToken(session.remnashopAccessTokenEncrypted),
+    accessToken: revealRemnashopToken(encryptedAccessToken),
     refreshToken,
     session,
   };

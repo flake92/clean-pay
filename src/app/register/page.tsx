@@ -1,6 +1,5 @@
 import { AuthTurnstileProvider, RegisterForm } from "@/components/auth-forms";
 import { AuthShell } from "@/components/layout";
-import { LinkButton } from "@/components/prime/link-button";
 
 export const dynamic = "force-dynamic";
 
@@ -10,12 +9,9 @@ export default function RegisterPage() {
   return (
     <AuthTurnstileProvider enabled={turnstileEnabled}>
       <AuthShell
-      description="Создайте e-mail аккаунт для оплаты и управления подпиской."
-      footer={
-        <LinkButton href="/login" label="Уже есть аккаунт" text />
-      }
-      title="Регистрация"
-    >
+        description="Создайте e-mail аккаунт для оплаты и управления подпиской."
+        title="Регистрация"
+      >
         <RegisterForm />
       </AuthShell>
     </AuthTurnstileProvider>

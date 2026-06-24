@@ -2,7 +2,7 @@ import { auditLog } from "@/lib/audit";
 import { authDebugLog } from "@/lib/auth-debug-log";
 import { prisma } from "@/lib/prisma";
 import { BffError } from "@/lib/remnashop/errors";
-import type { Prisma } from "@prisma/client";
+import { WebSessionAssuranceLevel, type Prisma } from "@prisma/client";
 import {
   getRemnashopMe,
   getRemnashopUserIdFromAccessToken,
@@ -135,6 +135,7 @@ async function reconcileRemnashopUser(
         fullName: identity.fullName,
         displayName: identity.fullName,
         emailVerified: identity.emailVerified,
+        authPending: false,
         lastLoginAt: new Date(),
       },
     });
@@ -218,6 +219,7 @@ export async function createSessionFromRemnashopAuth({
       remnashopRefreshTokenEncrypted: protectRemnashopToken(refreshToken),
       remnashopAccessExpiresAt: new Date(auth.expires_at),
       remnashopRefreshExpiresAt: new Date(auth.refresh_expires_at),
+      assuranceLevel: WebSessionAssuranceLevel.FULL,
       tx,
     });
 
@@ -233,6 +235,42 @@ export async function createSessionFromRemnashopAuth({
   });
 
   return { user, profile };
+}
+
+export async function reconcileUserFromRemnashopAuth({
+  accessToken,
+  refreshToken,
+  auth,
+}: {
+  accessToken: string;
+  refreshToken: string;
+  auth: RemnashopAuthResponse;
+}) {
+  const remnashopUserId = getRemnashopUserIdFromAccessToken(accessToken);
+  const profile = await getRemnashopMe(accessToken);
+  const user = await prisma.$transaction(async (tx) => {
+    return reconcileRemnashopUser(
+      tx,
+      profileIdentity({ remnashopUserId, profile }),
+    );
+  });
+
+  await auditLog({
+    action: "remnashop_account_linked",
+    userId: user.id,
+    metadata: { remnashopUserId, source: "telegram" },
+  });
+
+  return {
+    user,
+    profile,
+    remnashopSession: {
+      accessTokenEncrypted: protectRemnashopToken(accessToken),
+      refreshTokenEncrypted: protectRemnashopToken(refreshToken),
+      accessExpiresAt: new Date(auth.expires_at),
+      refreshExpiresAt: new Date(auth.refresh_expires_at),
+    },
+  };
 }
 
 export async function linkCurrentUserToRemnashopAuth({

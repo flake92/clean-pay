@@ -1,3 +1,4 @@
+import { createHash, createHmac } from "node:crypto";
 import type { JWTPayload } from "jose";
 import { createRemoteJWKSet, jwtVerify } from "jose";
 import { cookies } from "next/headers";
@@ -10,6 +11,8 @@ import { getEnv } from "@/lib/env";
 import { logger } from "@/lib/logger";
 import { prisma } from "@/lib/prisma";
 import { assertRateLimit } from "@/lib/rate-limit";
+import { remnashopAuth } from "@/lib/remnashop/client";
+import type { TelegramAuthRequest } from "@/lib/remnashop/types";
 
 const telegramAuthTtlSeconds = 10 * 60;
 
@@ -242,6 +245,67 @@ function getFullName(payload: JWTPayload) {
   return parts.length > 0 ? parts.join(" ") : null;
 }
 
+function getTelegramNameParts(payload: JWTPayload, fallbackUsername: string | null) {
+  const firstName =
+    typeof payload.given_name === "string" && payload.given_name.trim()
+      ? payload.given_name.trim()
+      : typeof payload.name === "string" && payload.name.trim()
+        ? payload.name.trim().split(/\s+/)[0] ?? "Telegram"
+        : fallbackUsername ?? "Telegram";
+  const lastName =
+    typeof payload.family_name === "string" && payload.family_name.trim()
+      ? payload.family_name.trim()
+      : undefined;
+
+  return { firstName, lastName };
+}
+
+function signTelegramAuthPayload(body: Omit<TelegramAuthRequest, "hash">, botToken: string) {
+  const dataCheckString = Object.entries(body)
+    .filter(([, value]) => value !== undefined && value !== null && value !== "")
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([key, value]) => `${key}=${value}`)
+    .join("\n");
+  const secret = createHash("sha256").update(botToken).digest();
+
+  return createHmac("sha256", secret).update(dataCheckString).digest("hex");
+}
+
+async function authenticateRemnashopWithTelegram(payload: JWTPayload, telegramId: string, telegramUsername: string | null) {
+  const env = getEnv();
+
+  if (!env.telegramBotToken) {
+    logTechnicalWarning("telegram_remnashop_auth_skipped", {
+      reason: "missing_telegram_bot_token",
+      telegramId,
+    });
+    return null;
+  }
+
+  const { firstName, lastName } = getTelegramNameParts(payload, telegramUsername);
+  const bodyWithoutHash: Omit<TelegramAuthRequest, "hash"> = {
+    id: Number(telegramId),
+    first_name: firstName,
+    last_name: lastName,
+    username: telegramUsername ?? undefined,
+    photo_url: typeof payload.picture === "string" ? payload.picture : undefined,
+    auth_date: Math.floor(Date.now() / 1000),
+  };
+
+  try {
+    return await remnashopAuth("/auth/telegram", {
+      ...bodyWithoutHash,
+      hash: signTelegramAuthPayload(bodyWithoutHash, env.telegramBotToken),
+    });
+  } catch (error) {
+    logTechnicalError("telegram_remnashop_auth_failed", error, {
+      telegramId,
+      hasUsername: Boolean(telegramUsername),
+    });
+    return null;
+  }
+}
+
 export async function consumeTelegramCallback(code: string, state: string) {
   const cookieStore = await cookies();
   const cookieState = cookieStore.get(telegramOidcCookieNames.state)?.value;
@@ -408,10 +472,11 @@ export async function consumeTelegramCallback(code: string, state: string) {
             telegramId,
             telegramUsername,
             fullName,
-            photoUrl,
-            displayName: fullName ?? telegramUsername,
-            lastLoginAt: new Date(),
-          },
+        photoUrl,
+        displayName: fullName ?? telegramUsername,
+        authPending: false,
+        lastLoginAt: new Date(),
+      },
         });
       })
     : await prisma.webUser.upsert({
@@ -451,6 +516,12 @@ export async function consumeTelegramCallback(code: string, state: string) {
     metadata: { telegramId: telegramId.toString() },
   });
 
+  const remnashopAuthResult = await authenticateRemnashopWithTelegram(
+    payload,
+    telegramId,
+    telegramUsername,
+  );
+
   cookieStore.delete(telegramOidcCookieNames.state);
   cookieStore.delete(telegramOidcCookieNames.nonce);
   cookieStore.delete(telegramOidcCookieNames.codeVerifier);
@@ -466,5 +537,6 @@ export async function consumeTelegramCallback(code: string, state: string) {
   return {
     user,
     redirectTo: authState.redirectTo,
+    remnashopAuth: remnashopAuthResult,
   };
 }

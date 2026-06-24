@@ -1,6 +1,6 @@
 import { cookies, headers } from "next/headers";
 import type { NextResponse } from "next/server";
-import type { Prisma } from "@prisma/client";
+import { WebSessionAssuranceLevel, WebSessionAuthMethod, type Prisma } from "@prisma/client";
 
 import { authDebugLog } from "@/lib/auth-debug-log";
 import { sha256, hmacSha256, jsonBase64Url, parseJsonBase64Url, randomToken, safeEqual } from "@/lib/crypto";
@@ -17,6 +17,7 @@ type AccessPayload = {
   sid: string;
   uid: string;
   exp: number;
+  al?: WebSessionAssuranceLevel;
   ev?: boolean;
   tg?: boolean;
 };
@@ -41,12 +42,14 @@ async function setAccessCookie({
   sessionId,
   userId,
   expiresAt,
+  assuranceLevel,
   emailVerified,
   telegramId,
 }: {
   sessionId: string;
   userId: string;
   expiresAt: Date;
+  assuranceLevel: WebSessionAssuranceLevel;
   emailVerified?: boolean | null;
   telegramId?: number | string | null;
 }) {
@@ -56,6 +59,7 @@ async function setAccessCookie({
     sid: sessionId,
     uid: userId,
     exp: Math.floor(expiresAt.getTime() / 1000),
+    al: assuranceLevel,
     ev: Boolean(emailVerified),
     tg: Boolean(telegramId),
   });
@@ -71,6 +75,7 @@ async function setAccessCookie({
     sessionId,
     userId,
     expiresAt,
+    assuranceLevel,
     emailVerified: Boolean(emailVerified),
     hasTelegramId: Boolean(telegramId),
   });
@@ -138,6 +143,7 @@ async function getSessionByRefreshToken() {
     sessionId: updatedSession.id,
     userId: updatedSession.userId,
     expiresAt: accessTokenExpiresAt,
+    assuranceLevel: updatedSession.assuranceLevel,
     emailVerified: updatedSession.user.emailVerified,
     telegramId: updatedSession.user.telegramId,
   });
@@ -146,6 +152,7 @@ async function getSessionByRefreshToken() {
     sessionId: updatedSession.id,
     userId: updatedSession.userId,
     authMethod: updatedSession.authMethod,
+    assuranceLevel: updatedSession.assuranceLevel,
     accessTokenExpiresAt,
     refreshExpiresAt: updatedSession.refreshExpiresAt,
     hasRemnashopTokens: Boolean(updatedSession.remnashopAccessTokenEncrypted && updatedSession.remnashopRefreshTokenEncrypted),
@@ -154,10 +161,29 @@ async function getSessionByRefreshToken() {
   return updatedSession;
 }
 
-export async function createWebSession(userId: string) {
+export async function createWebSession(
+  userId: string,
+  {
+    authMethod = WebSessionAuthMethod.EMAIL,
+    assuranceLevel = WebSessionAssuranceLevel.FULL,
+  }: {
+    authMethod?: WebSessionAuthMethod;
+    assuranceLevel?: WebSessionAssuranceLevel;
+  } = {},
+) {
   const env = getEnv();
   const cookieStore = await cookies();
   const requestHeaders = await headers();
+  const reusableSession = await prisma.webSession.findFirst({
+    where: {
+      userId,
+      revokedAt: null,
+      remnashopAccessTokenEncrypted: { not: null },
+      remnashopRefreshTokenEncrypted: { not: null },
+      refreshExpiresAt: { gt: new Date() },
+    },
+    orderBy: { updatedAt: "desc" },
+  });
   const now = new Date();
   const accessTokenExpiresAt = addMinutes(
     now,
@@ -168,18 +194,25 @@ export async function createWebSession(userId: string) {
 
   authDebugLog("session_create_started", {
     userId,
-    authMethod: "EMAIL",
+    authMethod,
+    assuranceLevel,
     accessTokenExpiresAt,
     refreshExpiresAt,
-    hasRemnashopTokens: false,
+    reusableSessionId: reusableSession?.id,
+    hasRemnashopTokens: Boolean(reusableSession),
   });
 
   const session = await prisma.webSession.create({
     data: {
       userId,
       refreshTokenHash: sha256(refreshToken),
+      remnashopAccessTokenEncrypted: reusableSession?.remnashopAccessTokenEncrypted,
+      remnashopRefreshTokenEncrypted: reusableSession?.remnashopRefreshTokenEncrypted,
+      remnashopAccessExpiresAt: reusableSession?.remnashopAccessExpiresAt,
+      remnashopRefreshExpiresAt: reusableSession?.remnashopRefreshExpiresAt,
       userAgent: requestHeaders.get("user-agent"),
-      authMethod: "EMAIL",
+      authMethod,
+      assuranceLevel,
       accessTokenExpiresAt,
       refreshExpiresAt,
     },
@@ -193,6 +226,7 @@ export async function createWebSession(userId: string) {
     sessionId: session.id,
     userId,
     expiresAt: accessTokenExpiresAt,
+    assuranceLevel,
     emailVerified: user?.emailVerified,
     telegramId: user?.telegramId,
   });
@@ -209,9 +243,11 @@ export async function createWebSession(userId: string) {
     sessionId: session.id,
     userId,
     authMethod: session.authMethod,
+    assuranceLevel: session.assuranceLevel,
     accessTokenExpiresAt,
     refreshExpiresAt,
-    hasRemnashopTokens: false,
+    reusedRemnashopTokens: Boolean(reusableSession),
+    hasRemnashopTokens: Boolean(session.remnashopAccessTokenEncrypted && session.remnashopRefreshTokenEncrypted),
   });
 
   return session;
@@ -224,6 +260,7 @@ export async function createWebSessionForRemnashopUser({
   remnashopAccessExpiresAt,
   remnashopRefreshExpiresAt,
   tx,
+  assuranceLevel = WebSessionAssuranceLevel.FULL,
 }: {
   userId: string;
   remnashopAccessTokenEncrypted: string;
@@ -231,6 +268,7 @@ export async function createWebSessionForRemnashopUser({
   remnashopAccessExpiresAt: Date;
   remnashopRefreshExpiresAt: Date;
   tx?: Prisma.TransactionClient;
+  assuranceLevel?: WebSessionAssuranceLevel;
 }) {
   const env = getEnv();
   const cookieStore = await cookies();
@@ -247,6 +285,7 @@ export async function createWebSessionForRemnashopUser({
   authDebugLog("session_create_started", {
     userId,
     authMethod: "EMAIL",
+    assuranceLevel,
     accessTokenExpiresAt,
     refreshExpiresAt,
     hasRemnashopTokens: true,
@@ -262,7 +301,8 @@ export async function createWebSessionForRemnashopUser({
       remnashopRefreshTokenEncrypted,
       remnashopAccessExpiresAt,
       remnashopRefreshExpiresAt,
-      authMethod: "EMAIL",
+      authMethod: WebSessionAuthMethod.EMAIL,
+      assuranceLevel,
       userAgent: requestHeaders.get("user-agent"),
       accessTokenExpiresAt,
       refreshExpiresAt,
@@ -277,6 +317,7 @@ export async function createWebSessionForRemnashopUser({
     sessionId: session.id,
     userId,
     expiresAt: accessTokenExpiresAt,
+    assuranceLevel,
     emailVerified: user?.emailVerified,
     telegramId: user?.telegramId,
   });
@@ -293,6 +334,7 @@ export async function createWebSessionForRemnashopUser({
     sessionId: session.id,
     userId,
     authMethod: session.authMethod,
+    assuranceLevel: session.assuranceLevel,
     accessTokenExpiresAt,
     refreshExpiresAt,
     hasRemnashopTokens: true,
@@ -447,6 +489,7 @@ export async function refreshCurrentAccessCookie() {
     sessionId: session.id,
     userId: session.userId,
     expiresAt: session.accessTokenExpiresAt,
+    assuranceLevel: session.assuranceLevel,
     emailVerified: user?.emailVerified,
     telegramId: user?.telegramId,
   });
@@ -460,7 +503,19 @@ export async function refreshCurrentAccessCookie() {
   return session;
 }
 
-export async function createWebSessionOnResponse(response: NextResponse, userId: string) {
+export async function createWebSessionOnResponse(
+  response: NextResponse,
+  userId: string,
+  options: {
+    authMethod?: WebSessionAuthMethod;
+    remnashopSession?: {
+      accessTokenEncrypted: string;
+      refreshTokenEncrypted: string;
+      accessExpiresAt: Date;
+      refreshExpiresAt: Date;
+    };
+  } = {},
+) {
   const env = getEnv();
   const requestHeaders = await headers();
   const currentSession = await getCurrentSession();
@@ -493,7 +548,8 @@ export async function createWebSessionOnResponse(response: NextResponse, userId:
 
   authDebugLog("session_response_create_persist_started", {
     userId,
-    authMethod: "TELEGRAM",
+    authMethod: options.authMethod ?? WebSessionAuthMethod.TELEGRAM,
+    assuranceLevel: WebSessionAssuranceLevel.FULL,
     accessTokenExpiresAt,
     refreshExpiresAt,
     reusableSessionId: reusableSession?.id,
@@ -504,11 +560,12 @@ export async function createWebSessionOnResponse(response: NextResponse, userId:
     data: {
       userId,
       refreshTokenHash: sha256(refreshToken),
-      remnashopAccessTokenEncrypted: reusableSession?.remnashopAccessTokenEncrypted,
-      remnashopRefreshTokenEncrypted: reusableSession?.remnashopRefreshTokenEncrypted,
-      remnashopAccessExpiresAt: reusableSession?.remnashopAccessExpiresAt,
-      remnashopRefreshExpiresAt: reusableSession?.remnashopRefreshExpiresAt,
-      authMethod: "TELEGRAM",
+      remnashopAccessTokenEncrypted: options.remnashopSession?.accessTokenEncrypted ?? reusableSession?.remnashopAccessTokenEncrypted,
+      remnashopRefreshTokenEncrypted: options.remnashopSession?.refreshTokenEncrypted ?? reusableSession?.remnashopRefreshTokenEncrypted,
+      remnashopAccessExpiresAt: options.remnashopSession?.accessExpiresAt ?? reusableSession?.remnashopAccessExpiresAt,
+      remnashopRefreshExpiresAt: options.remnashopSession?.refreshExpiresAt ?? reusableSession?.remnashopRefreshExpiresAt,
+      authMethod: options.authMethod ?? WebSessionAuthMethod.TELEGRAM,
+      assuranceLevel: WebSessionAssuranceLevel.FULL,
       userAgent: requestHeaders.get("user-agent"),
       accessTokenExpiresAt,
       refreshExpiresAt,
@@ -522,6 +579,7 @@ export async function createWebSessionOnResponse(response: NextResponse, userId:
     sid: session.id,
     uid: userId,
     exp: Math.floor(accessTokenExpiresAt.getTime() / 1000),
+    al: WebSessionAssuranceLevel.FULL,
     ev: Boolean(user?.emailVerified),
     tg: Boolean(user?.telegramId),
   });
@@ -545,12 +603,47 @@ export async function createWebSessionOnResponse(response: NextResponse, userId:
     sessionId: session.id,
     userId,
     authMethod: session.authMethod,
+    assuranceLevel: session.assuranceLevel,
     reusedRemnashopTokens: Boolean(reusableSession),
     accessTokenExpiresAt,
     refreshExpiresAt,
   });
 
   return session;
+}
+
+export async function upgradeCurrentSessionToFull() {
+  const session = await getCurrentSession();
+
+  if (!session) {
+    return null;
+  }
+
+  const updatedSession = await prisma.webSession.update({
+    where: { id: session.id },
+    data: {
+      authMethod: WebSessionAuthMethod.PASSKEY,
+      assuranceLevel: WebSessionAssuranceLevel.FULL,
+      accessTokenExpiresAt: addMinutes(new Date(), securityPolicy.accessSessionTtlMinutes),
+    },
+    include: { user: true },
+  });
+
+  await setAccessCookie({
+    sessionId: updatedSession.id,
+    userId: updatedSession.userId,
+    expiresAt: updatedSession.accessTokenExpiresAt,
+    assuranceLevel: updatedSession.assuranceLevel,
+    emailVerified: updatedSession.user.emailVerified,
+    telegramId: updatedSession.user.telegramId,
+  });
+
+  authDebugLog("session_upgraded_to_full", {
+    sessionId: updatedSession.id,
+    userId: updatedSession.userId,
+  });
+
+  return updatedSession;
 }
 
 export async function clearWebSession() {
@@ -568,8 +661,13 @@ export async function clearWebSession() {
   });
 
   if (payload) {
-    await prisma.webSession.updateMany({
+    const session = await prisma.webSession.findUnique({
       where: { id: payload.sid },
+      select: { id: true, userId: true },
+    });
+
+    await prisma.webSession.updateMany({
+      where: session?.userId ? { userId: session.userId, revokedAt: null } : { id: payload.sid },
       data: { revokedAt: new Date() },
     });
   } else if (refreshToken) {

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 
 import { logTechnicalError, logTechnicalInfo, logTechnicalWarning } from "@/lib/audit";
 import { getEnv } from "@/lib/env";
+import { reconcileUserFromRemnashopAuth } from "@/lib/remnashop/session";
 import { createWebSessionOnResponse } from "@/lib/session";
 import { consumeTelegramCallback } from "@/lib/telegram-oidc";
 
@@ -41,14 +42,27 @@ export async function GET(request: Request) {
   }
 
   try {
-    const { user, redirectTo: nextPath } = await consumeTelegramCallback(code, state);
+    const { user, redirectTo: nextPath, remnashopAuth } = await consumeTelegramCallback(code, state);
     const response = redirectTo(nextPath ?? "/cabinet");
 
-    await createWebSessionOnResponse(response, user.id);
+    if (remnashopAuth) {
+      const reconciled = await reconcileUserFromRemnashopAuth({
+        accessToken: remnashopAuth.cookies.accessToken,
+        refreshToken: remnashopAuth.cookies.refreshToken,
+        auth: remnashopAuth.data,
+      });
+
+      await createWebSessionOnResponse(response, reconciled.user.id, {
+        remnashopSession: reconciled.remnashopSession,
+      });
+    } else {
+      await createWebSessionOnResponse(response, user.id);
+    }
 
     logTechnicalInfo("telegram_callback_success", {
       ...metadata,
       userId: user.id,
+      remnashopLinked: Boolean(remnashopAuth),
       redirectTo: nextPath ?? "/cabinet",
     });
 

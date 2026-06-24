@@ -22,8 +22,6 @@ type ProfileUser = {
   is_email_verified: boolean;
   emailVerified?: boolean;
   pending_email: string | null;
-  name: string;
-  username: string | null;
   language: string;
 };
 
@@ -231,7 +229,6 @@ export function ProfilePanel() {
       <Card title="Данные аккаунта">
         <div className="grid">
           {[
-            ["Имя", user.name || user.username || "-"],
             ["E-mail", user.email ?? "Не привязан"],
             ["Тип входа", authTypeLabel(user.auth_type)],
             ["Telegram", telegramId ?? "Не привязан"],

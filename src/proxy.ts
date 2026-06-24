@@ -15,9 +15,12 @@ const publicPagePaths = new Set([
 const publicApiPaths = new Set([
   '/api/health',
   '/api/health/readiness',
+  '/api/bff/auth/identify',
   '/api/bff/auth/login',
   '/api/bff/auth/register',
   '/api/bff/auth/logout',
+  '/api/bff/auth/passkey/login/options',
+  '/api/bff/auth/passkey/login/verify',
   '/api/bff/plans/public',
   '/api/logout',
 ]);
@@ -79,6 +82,8 @@ function safeEqual(left: string, right: string) {
 
 type AccessState = {
   authenticated: boolean;
+  fullAuthenticated: boolean;
+  bootstrapAuthenticated: boolean;
   emailVerificationRequired: boolean;
   hasRefreshToken: boolean;
 };
@@ -88,37 +93,40 @@ async function getAccessState(request: NextRequest): Promise<AccessState> {
   const hasRefreshToken = Boolean(request.cookies.get(refreshCookieName)?.value);
 
   if (!token) {
-    return { authenticated: false, emailVerificationRequired: false, hasRefreshToken };
+    return { authenticated: false, fullAuthenticated: false, bootstrapAuthenticated: false, emailVerificationRequired: false, hasRefreshToken };
   }
 
   const [payload, signature] = token.split('.');
 
   if (!payload || !signature) {
-    return { authenticated: false, emailVerificationRequired: false, hasRefreshToken };
+    return { authenticated: false, fullAuthenticated: false, bootstrapAuthenticated: false, emailVerificationRequired: false, hasRefreshToken };
   }
 
   try {
-    const parsed = JSON.parse(decodeBase64Url(payload)) as { exp?: unknown; ev?: unknown; tg?: unknown };
+    const parsed = JSON.parse(decodeBase64Url(payload)) as { exp?: unknown; ev?: unknown; tg?: unknown; al?: unknown };
 
     if (typeof parsed.exp !== 'number' || parsed.exp <= Math.floor(Date.now() / 1000)) {
-      return { authenticated: false, emailVerificationRequired: false, hasRefreshToken };
+      return { authenticated: false, fullAuthenticated: false, bootstrapAuthenticated: false, emailVerificationRequired: false, hasRefreshToken };
     }
 
     const secret = process.env.WEB_JWT_SECRET;
 
     if (!secret) {
-      return { authenticated: false, emailVerificationRequired: false, hasRefreshToken };
+      return { authenticated: false, fullAuthenticated: false, bootstrapAuthenticated: false, emailVerificationRequired: false, hasRefreshToken };
     }
 
     const authenticated = safeEqual(signature, await hmacSha256(payload, secret));
+    const assuranceLevel = parsed.al === "BOOTSTRAP" ? "BOOTSTRAP" : "FULL";
 
     return {
       authenticated,
+      fullAuthenticated: authenticated && assuranceLevel === "FULL",
+      bootstrapAuthenticated: authenticated && assuranceLevel === "BOOTSTRAP",
       emailVerificationRequired: authenticated && parsed.ev === false && parsed.tg !== true,
       hasRefreshToken,
     };
   } catch {
-    return { authenticated: false, emailVerificationRequired: false, hasRefreshToken };
+    return { authenticated: false, fullAuthenticated: false, bootstrapAuthenticated: false, emailVerificationRequired: false, hasRefreshToken };
   }
 }
 
@@ -131,6 +139,15 @@ function isEmailVerificationAllowedPath(pathname: string) {
     emailVerificationPagePaths.has(pathname) ||
     emailVerificationApiPaths.has(pathname) ||
     emailVerificationApiPrefixes.some((prefix) => pathname.startsWith(prefix))
+  );
+}
+
+function isBootstrapAllowedPath(pathname: string) {
+  return (
+    pathname === '/passkey/setup' ||
+    pathname === '/api/bff/auth/logout' ||
+    pathname === '/api/logout' ||
+    pathname.startsWith('/api/bff/auth/passkey/')
   );
 }
 
@@ -176,6 +193,8 @@ function requestMetadata(request: NextRequest, accessState: AccessState) {
     isApi: pathname.startsWith('/api/'),
     authenticated: accessState.authenticated || accessState.hasRefreshToken,
     accessAuthenticated: accessState.authenticated,
+    fullAuthenticated: accessState.fullAuthenticated,
+    bootstrapAuthenticated: accessState.bootstrapAuthenticated,
     hasRefreshToken: accessState.hasRefreshToken,
     emailVerificationRequired: accessState.emailVerificationRequired,
   };
@@ -185,6 +204,7 @@ export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
   const accessState = await getAccessState(request);
   const isAuthenticated = accessState.authenticated || accessState.hasRefreshToken;
+  const isBootstrapAuthenticated = accessState.bootstrapAuthenticated && !accessState.fullAuthenticated;
   const metadata = requestMetadata(request, accessState);
 
   logger.info("http_request_received", metadata, {
@@ -194,18 +214,30 @@ export async function proxy(request: NextRequest) {
   });
 
   if (isPublicPath(pathname)) {
-    if (isAuthenticated && (pathname === '/login' || pathname === '/register')) {
+    if ((isAuthenticated || isBootstrapAuthenticated) && (pathname === '/login' || pathname === '/register')) {
+      const redirectTo = isBootstrapAuthenticated
+        ? "/passkey/setup"
+        : accessState.emailVerificationRequired
+          ? "/register/verify-email"
+          : "/cabinet";
       logger.info("http_request_decision", {
         ...metadata,
         action: "redirect_authenticated_user",
         status: 307,
-        redirectTo: accessState.emailVerificationRequired ? "/register/verify-email" : "/cabinet",
+        redirectTo,
         emailVerificationRequired: accessState.emailVerificationRequired,
       }, {
         category: "http",
         source: "http.access",
         message: `${request.method} ${pathname} -> 307 redirect authenticated user`,
       });
+      if (isBootstrapAuthenticated) {
+        const url = request.nextUrl.clone();
+        url.pathname = "/passkey/setup";
+        url.search = "";
+        return NextResponse.redirect(url);
+      }
+
       return authenticatedRedirect(request, accessState.emailVerificationRequired);
     }
 
@@ -266,6 +298,53 @@ export async function proxy(request: NextRequest) {
       message: `${request.method} ${pathname} -> allow authenticated`,
     });
     return NextResponse.next();
+  }
+
+  if (isBootstrapAuthenticated) {
+    if (isBootstrapAllowedPath(pathname)) {
+      logger.info("http_request_decision", {
+        ...metadata,
+        action: "allow_bootstrap",
+        status: 200,
+      }, {
+        category: "http",
+        source: "http.access",
+        message: `${request.method} ${pathname} -> allow bootstrap`,
+      });
+      return NextResponse.next();
+    }
+
+    if (pathname.startsWith('/api/')) {
+      logger.warn("http_request_decision", {
+        ...metadata,
+        action: "block_bootstrap",
+        status: 403,
+      }, {
+        category: "http",
+        source: "http.access",
+        message: `${request.method} ${pathname} -> 403 passkey required`,
+      });
+      return NextResponse.json(
+        { error: { code: 'PASSKEY_REQUIRED', message: 'Создайте ключ доступа, чтобы продолжить.' } },
+        { status: 403 },
+      );
+    }
+
+    const url = request.nextUrl.clone();
+    url.pathname = '/passkey/setup';
+    url.search = '';
+
+    logger.info("http_request_decision", {
+      ...metadata,
+      action: "redirect_passkey_setup",
+      status: 307,
+      redirectTo: "/passkey/setup",
+    }, {
+      category: "http",
+      source: "http.access",
+      message: `${request.method} ${pathname} -> 307 passkey setup`,
+    });
+    return NextResponse.redirect(url);
   }
 
   if (pathname.startsWith('/api/')) {

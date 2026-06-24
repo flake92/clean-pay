@@ -7,6 +7,7 @@ import { InputText } from "primereact/inputtext";
 import { Message } from "primereact/message";
 import { Password } from "primereact/password";
 
+import { PasskeyLoginButton } from "@/components/passkey-actions";
 import { TurnstileWidget, type TurnstileHandle, hasPublicTurnstileKey } from "@/components/turnstile-widget";
 import { readBffError } from "@/lib/client-api";
 
@@ -14,6 +15,8 @@ type ApiState = {
   loading: boolean;
   error: string | null;
 };
+
+type LoginMode = "identify" | "password" | "register";
 
 type AuthTurnstileContextValue = {
   enabled: boolean;
@@ -36,14 +39,6 @@ async function readError(response: Response) {
 }
 
 function redirectAfterAuth() {
-  const params = new URLSearchParams(window.location.search);
-  const redirectTo = params.get("redirect_to");
-
-  if (redirectTo?.startsWith("/") && !redirectTo.startsWith("//")) {
-    window.location.assign(redirectTo);
-    return;
-  }
-
   window.location.assign("/cabinet");
 }
 
@@ -105,9 +100,56 @@ function AuthTurnstileChallenge() {
 
 export function LoginForm() {
   const [state, setState] = useState<ApiState>({ loading: false, error: null });
+  const [email, setEmail] = useState("");
+  const [mode, setMode] = useState<LoginMode>("identify");
+  const [knownLocalUser, setKnownLocalUser] = useState(false);
+  const [hasPasskey, setHasPasskey] = useState(false);
+  const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [confirmTouched, setConfirmTouched] = useState(false);
   const turnstile = useAuthTurnstile();
+  const passwordsDoNotMatch = confirmTouched && confirmPassword.length > 0 && password !== confirmPassword;
 
-  async function onSubmit(event: FormEvent<HTMLFormElement>) {
+  async function identifyEmail(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    if (!email.trim()) {
+      setState({ loading: false, error: "Введите e-mail." });
+      return;
+    }
+
+    setState({ loading: true, error: null });
+
+    const response = await fetch("/api/bff/auth/identify", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ email }),
+    });
+
+    if (!response.ok) {
+      setState({ loading: false, error: await readError(response) });
+      return;
+    }
+
+    const body = (await response.json()) as { data?: { exists?: boolean; hasPasskey?: boolean } };
+
+    setHasPasskey(Boolean(body.data?.hasPasskey));
+    setKnownLocalUser(Boolean(body.data?.exists));
+    setMode("password");
+    setState({ loading: false, error: null });
+  }
+
+  function changeEmail() {
+    setState({ loading: false, error: null });
+    setMode("identify");
+    setKnownLocalUser(false);
+    setHasPasskey(false);
+    setPassword("");
+    setConfirmPassword("");
+    setConfirmTouched(false);
+  }
+
+  async function continueWithPassword(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
     if (turnstile.enabled && !turnstile.token) {
@@ -118,11 +160,11 @@ export function LoginForm() {
     setState({ loading: true, error: null });
 
     const formData = new FormData(event.currentTarget);
-    const response = await fetch("/api/bff/auth/login", {
+    const response = await fetch(knownLocalUser ? "/api/bff/auth/login" : "/api/bff/auth/register", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
-        email: formData.get("email"),
+        email,
         password: formData.get("password"),
         ...turnstilePayload(turnstile.token),
       }),
@@ -134,23 +176,168 @@ export function LoginForm() {
       return;
     }
 
-    redirectAfterAuth();
+    if (knownLocalUser) {
+      redirectAfterAuth();
+      return;
+    }
+
+    window.location.assign("/register/verify-email");
+  }
+
+  async function register(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    const formData = new FormData(event.currentTarget);
+    const nextPassword = String(formData.get("password") ?? "");
+    const nextConfirmPassword = String(formData.get("confirmPassword") ?? "");
+
+    if (nextPassword !== nextConfirmPassword) {
+      setConfirmTouched(true);
+      setState({ loading: false, error: "Пароли не совпадают." });
+      return;
+    }
+
+    if (turnstile.enabled && !turnstile.token) {
+      setState({ loading: false, error: missingTurnstileTokenMessage() });
+      return;
+    }
+
+    setState({ loading: true, error: null });
+
+    const response = await fetch("/api/bff/auth/register", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        email,
+        password: formData.get("password"),
+        ...turnstilePayload(turnstile.token),
+      }),
+    });
+
+    if (!response.ok) {
+      turnstile.reset();
+      setState({ loading: false, error: await readError(response) });
+      return;
+    }
+
+    window.location.assign("/register/verify-email");
+  }
+
+  const accountHeader =
+    mode === "identify" ? null : (
+      <div
+        className="auth-account-summary"
+        style={{
+          alignItems: "center",
+          display: "flex",
+          gap: "12px",
+          justifyContent: "space-between",
+          minWidth: 0,
+        }}
+      >
+        <div className="auth-account-identity" style={{ minWidth: 0 }}>
+          <i className="pi pi-envelope auth-account-icon" />
+          <div className="auth-account-text" style={{ minWidth: 0 }}>
+            <div className="auth-account-label">E-mail</div>
+            <div className="auth-account-email" title={email}>{email}</div>
+          </div>
+        </div>
+        <Button className="auth-account-change" label="Изменить" onClick={changeEmail} size="small" text type="button" />
+      </div>
+    );
+
+  if (mode === "identify") {
+    return (
+      <form className="flex flex-column gap-3" onSubmit={identifyEmail}>
+        <label className="flex flex-column gap-2">
+          <span className="text-sm font-medium text-700">E-mail</span>
+          <InputText
+            autoComplete="username"
+            id="login-email"
+            name="email"
+            placeholder="user@example.com"
+            required
+            type="email"
+            value={email}
+            onChange={(event) => setEmail(event.target.value)}
+          />
+        </label>
+        <AuthTurnstileChallenge />
+        {state.error ? <Message severity="error" text={state.error} /> : null}
+        <Button disabled={state.loading} label="Продолжить" loading={state.loading} type="submit" />
+      </form>
+    );
+  }
+
+  if (mode === "register") {
+    return (
+      <form className="flex flex-column gap-3" onSubmit={register}>
+        {accountHeader}
+        <Message severity="info" text="Аккаунт не найден. Создайте пароль, и мы отправим код подтверждения на e-mail." />
+        <label className="flex flex-column gap-2">
+          <span className="text-sm font-medium text-700">Пароль</span>
+          <Password
+            appendTo="self"
+            autoComplete="new-password"
+            className="w-full"
+            feedback={false}
+            inputId="register-password-inline"
+            inputClassName="w-full"
+            minLength={8}
+            name="password"
+            placeholder="Придумайте пароль"
+            required
+            toggleMask
+            value={password}
+            onChange={(event) => setPassword(event.target.value)}
+          />
+          <span className="text-xs text-500">Минимум 8 символов.</span>
+        </label>
+        <label className="flex flex-column gap-2">
+          <span className="text-sm font-medium text-700">Повторите пароль</span>
+          <Password
+            autoComplete="new-password"
+            className="w-full"
+            feedback={false}
+            inputId="register-password-confirm-inline"
+            inputClassName={`w-full${passwordsDoNotMatch ? " p-invalid" : ""}`}
+            minLength={8}
+            name="confirmPassword"
+            placeholder="Введите пароль еще раз"
+            required
+            toggleMask
+            value={confirmPassword}
+            onBlur={() => setConfirmTouched(true)}
+            onChange={(event) => setConfirmPassword(event.target.value)}
+          />
+          {passwordsDoNotMatch ? <span className="text-xs text-red-500">Пароли не совпадают.</span> : null}
+        </label>
+        <AuthTurnstileChallenge />
+        {state.error ? <Message severity="error" text={state.error} /> : null}
+        <Button disabled={state.loading} label="Создать аккаунт" loading={state.loading} type="submit" />
+      </form>
+    );
   }
 
   return (
-    <form className="flex flex-column gap-3" onSubmit={onSubmit}>
-      <label className="flex flex-column gap-2">
-        <span className="text-sm font-medium text-700">E-mail</span>
-        <InputText autoComplete="username" id="login-email" name="email" placeholder="user@example.com" required type="email" />
-      </label>
+    <form className="flex flex-column gap-3" onSubmit={continueWithPassword}>
+      {accountHeader}
+      {hasPasskey ? <PasskeyLoginButton /> : null}
+      {!knownLocalUser ? (
+        <Message
+          severity="info"
+          text="Введите пароль. Если аккаунт уже есть, мы войдем в него. Если аккаунта нет, создадим и отправим код на e-mail."
+        />
+      ) : null}
       <label className="flex flex-column gap-2">
         <span className="text-sm font-medium text-700">Пароль</span>
         <Password
-          autoComplete="current-password"
+          autoComplete={knownLocalUser ? "current-password" : "new-password"}
           className="w-full"
           feedback={false}
           inputId="login-password"
           inputClassName="w-full"
+          minLength={knownLocalUser ? undefined : 8}
           name="password"
           placeholder="Введите пароль"
           required
@@ -159,7 +346,7 @@ export function LoginForm() {
       </label>
       <AuthTurnstileChallenge />
       {state.error ? <Message severity="error" text={state.error} /> : null}
-      <Button disabled={state.loading} label="Войти" loading={state.loading} type="submit" />
+      <Button disabled={state.loading} label="Продолжить" loading={state.loading} type="submit" />
     </form>
   );
 }
@@ -204,7 +391,6 @@ export function RegisterForm() {
       body: JSON.stringify({
         email: formData.get("email"),
         password: formData.get("password"),
-        name: formData.get("name") || undefined,
         ...turnstilePayload(turnstile.token),
       }),
     });
@@ -220,10 +406,6 @@ export function RegisterForm() {
 
   return (
     <form className="flex flex-column gap-3" onSubmit={onSubmit}>
-      <label className="flex flex-column gap-2">
-        <span className="text-sm font-medium text-700">Имя</span>
-        <InputText autoComplete="name" id="register-name" name="name" placeholder="Как к вам обращаться" type="text" />
-      </label>
       <label className="flex flex-column gap-2">
         <span className="text-sm font-medium text-700">E-mail</span>
         <InputText autoComplete="username" id="register-email" name="email" placeholder="user@example.com" required type="email" />

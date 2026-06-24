@@ -46,8 +46,8 @@ export function useCleanPayMenu() {
     }, []);
 
     async function logout() {
-        await fetch("/api/bff/auth/logout", { method: "POST" });
-        window.location.assign("/login");
+        await fetch("/api/bff/auth/logout", { method: "POST", cache: "no-store" }).catch(() => null);
+        window.location.replace("/login");
     }
 
     const shouldShowVerifyEmail = profileLoaded && user !== null && Boolean(user.email) && !user.emailVerified;

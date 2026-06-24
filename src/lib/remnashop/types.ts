@@ -26,6 +26,16 @@ export type LoginRequest = {
   password: string;
 };
 
+export type TelegramAuthRequest = {
+  id: number;
+  first_name: string;
+  last_name?: string;
+  username?: string;
+  photo_url?: string;
+  auth_date: number;
+  hash: string;
+};
+
 export type ChangePasswordRequest = {
   current_password: string;
   new_password: string;

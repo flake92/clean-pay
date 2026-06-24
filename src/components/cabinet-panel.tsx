@@ -11,16 +11,12 @@ import { readBffError } from "@/lib/client-api";
 import { ProgressBar } from "primereact/progressbar";
 import { Tag } from "primereact/tag";
 
-import { AccountActionRequired } from "@/components/account-action-required";
 import { LinkButton } from "@/components/prime/link-button";
 
 type CabinetUser = {
   email: string | null;
   telegramId?: string | null;
   telegramUsername?: string | null;
-  name?: string;
-  fullName?: string | null;
-  displayName?: string | null;
   is_email_verified?: boolean;
   emailVerified?: boolean;
 };
@@ -246,8 +242,8 @@ export function CabinetPanel() {
   }, [loadDevices, loadPayments, loadSubscription, loadSupport]);
 
   async function logout() {
-    await fetch("/api/bff/auth/logout", { method: "POST" });
-    window.location.assign("/login");
+    await fetch("/api/bff/auth/logout", { method: "POST", cache: "no-store" }).catch(() => null);
+    window.location.replace("/login");
   }
 
   async function copySubscriptionUrl() {
@@ -411,16 +407,9 @@ export function CabinetPanel() {
   const isEmailVerified = user.emailVerified ?? user.is_email_verified ?? false;
   const shouldShowVerifyEmail = Boolean(user.email) && !isEmailVerified;
   const shouldShowLinkAccount = !user.email || !user.telegramId;
-  const shouldRequireEmailLink = !user.email && Boolean(user.telegramId);
 
   return (
     <div className="grid">
-      {shouldRequireEmailLink ? (
-        <div className="col-12">
-          <AccountActionRequired action="linkEmail" />
-        </div>
-      ) : null}
-
       <div className="col-12 lg:col-6 xl:col-3">
         <Metric icon="pi pi-shield" label="Подписка" tone="blue" value={subscription?.plan_name ?? "Не активна"} />
       </div>
@@ -532,9 +521,6 @@ export function CabinetPanel() {
         <div className="card">
           <h5>Профиль</h5>
           <div className="grid">
-            <div className="col-12">
-              <DetailLine label="Имя" value={user.name ?? user.fullName ?? user.displayName ?? "-"} />
-            </div>
             <div className="col-12">
               <DetailLine label="E-mail" value={user.email ?? "Не привязан"} />
             </div>

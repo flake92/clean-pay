@@ -19,6 +19,7 @@ type AppEnv = {
     clientSecret: string;
     redirectUri: string;
   };
+  telegramBotToken: string | null;
   paymentReturnUrls: {
     success: string;
     fail: string;
@@ -134,6 +135,7 @@ export function getEnv(): AppEnv {
       clientSecret: required("TELEGRAM_OIDC_CLIENT_SECRET"),
       redirectUri: joinUrl(appUrl, "/auth/telegram/callback"),
     },
+    telegramBotToken: optional("TELEGRAM_BOT_TOKEN"),
     paymentReturnUrls: {
       success: joinUrl(appUrl, "/payment/success"),
       fail: joinUrl(appUrl, "/payment/fail"),

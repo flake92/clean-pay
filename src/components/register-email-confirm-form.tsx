@@ -113,7 +113,7 @@ export function RegisterEmailConfirmForm({ turnstileEnabled = false }: { turnsti
       return;
     }
 
-    window.location.assign("/cabinet");
+    window.location.assign("/passkey/setup");
   }
 
   return (

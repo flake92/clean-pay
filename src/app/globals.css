@@ -114,6 +114,59 @@ body {
   width: 100%;
 }
 
+.auth-account-summary {
+  align-items: center;
+  background: #f8fafc;
+  border: 1px solid #d7dee8;
+  border-radius: 8px;
+  display: flex;
+  gap: 0.75rem;
+  justify-content: space-between;
+  min-width: 0;
+  padding: 0.85rem 0.95rem;
+}
+
+.auth-account-identity {
+  align-items: center;
+  display: flex;
+  gap: 0.65rem;
+  min-width: 0;
+}
+
+.auth-account-icon {
+  color: #2563eb;
+  flex: 0 0 auto;
+  font-size: 1rem;
+}
+
+.auth-account-text {
+  min-width: 0;
+}
+
+.auth-account-label {
+  color: #64748b;
+  font-size: 0.78rem;
+  line-height: 1.2;
+}
+
+.auth-account-email {
+  color: #0f172a;
+  font-size: 0.98rem;
+  font-weight: 600;
+  line-height: 1.35;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.auth-card .auth-account-change.p-button {
+  flex: 0 0 auto;
+  min-height: 2.25rem;
+  padding-left: 0.75rem;
+  padding-right: 0.75rem;
+  width: auto;
+}
+
 .turnstile-widget {
   max-width: 100%;
   overflow: hidden;
@@ -127,6 +180,124 @@ body {
 
 .turnstile-widget-container iframe {
   max-width: 100%;
+}
+
+.link-account-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.account-method-grid {
+  align-items: stretch;
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.account-method-card {
+  background: #ffffff;
+  border: 1px solid #dce3ec;
+  border-radius: 8px;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08);
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  min-height: 18rem;
+  padding: 1.25rem;
+}
+
+.account-method-card__header {
+  align-items: flex-start;
+  display: grid;
+  gap: 0.875rem;
+  grid-template-columns: 2.5rem minmax(0, 1fr) auto;
+}
+
+.account-method-icon {
+  align-items: center;
+  background: #eef4ff;
+  border: 1px solid #dbe7ff;
+  border-radius: 8px;
+  color: #2563eb;
+  display: inline-flex;
+  flex: 0 0 auto;
+  font-size: 1.15rem;
+  height: 2.5rem;
+  justify-content: center;
+  width: 2.5rem;
+}
+
+.account-method-heading {
+  min-width: 0;
+}
+
+.account-method-title {
+  color: #1f2937;
+  font-size: 1.15rem;
+  font-weight: 700;
+  line-height: 1.25;
+  margin: 0;
+}
+
+.account-method-description {
+  color: #526071;
+  font-size: 0.95rem;
+  line-height: 1.45;
+  margin: 0.35rem 0 0;
+}
+
+.account-method-status {
+  justify-self: end;
+  line-height: 1.25;
+  max-width: 9rem;
+  text-align: center;
+  white-space: normal;
+}
+
+.account-method-meta {
+  align-items: center;
+  background: #f8fafc;
+  border: 1px solid #e5ebf2;
+  border-radius: 8px;
+  color: #334155;
+  display: flex;
+  font-size: 0.95rem;
+  line-height: 1.35;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  padding: 0.75rem 0.875rem;
+}
+
+.account-method-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  margin-top: auto;
+}
+
+.account-method-actions .p-button,
+.account-method-form .p-button {
+  width: 100%;
+}
+
+.account-method-actions-stack,
+.account-method-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.account-method-form .p-inputtext,
+.account-method-form .p-password,
+.account-method-form .p-password-input {
+  width: 100%;
+}
+
+.account-method-action-row {
+  display: grid;
+  gap: 0.75rem;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
 }
 
 @media (max-width: 480px) {
@@ -182,6 +353,16 @@ body {
     min-height: 3rem;
   }
 
+  .auth-account-summary {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .auth-card .auth-account-change.p-button {
+    align-self: flex-start;
+    min-height: 2.5rem;
+  }
+
   .auth-password-panel.p-password-panel,
   .auth-card .p-password-panel {
     font-size: 0.875rem;
@@ -212,6 +393,41 @@ body {
   .turnstile-widget-container > div {
     transform: scale(0.88);
     transform-origin: left top;
+  }
+}
+
+@media (max-width: 1199px) {
+  .account-method-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .account-method-card {
+    min-height: 0;
+  }
+}
+
+@media (max-width: 640px) {
+  .account-method-card {
+    padding: 1rem;
+  }
+
+  .account-method-card__header {
+    grid-template-columns: 2.25rem minmax(0, 1fr);
+  }
+
+  .account-method-icon {
+    font-size: 1rem;
+    height: 2.25rem;
+    width: 2.25rem;
+  }
+
+  .account-method-status {
+    grid-column: 2;
+    justify-self: start;
+  }
+
+  .account-method-action-row {
+    grid-template-columns: 1fr;
   }
 }
 

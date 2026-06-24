@@ -31,6 +31,17 @@ enum PaymentRecordStatus {
 enum WebSessionAuthMethod {
   EMAIL
   TELEGRAM
+  PASSKEY
+}
+
+enum WebSessionAssuranceLevel {
+  BOOTSTRAP
+  FULL
+}
+
+enum WebAuthnChallengeType {
+  REGISTRATION
+  AUTHENTICATION
 }
 
 model WebUser {
@@ -43,6 +54,7 @@ model WebUser {
   photoUrl                String?
   lastLoginAt             DateTime?
   emailVerified           Boolean                  @default(false)
+  authPending             Boolean                  @default(false)
   displayName             String?
   createdAt               DateTime                 @default(now())
   updatedAt               DateTime                 @updatedAt
@@ -51,6 +63,8 @@ model WebUser {
   emailVerificationCodes  EmailVerificationCode[]
   paymentRecords          PaymentRecord[]
   telegramAuthStates      TelegramAuthState[]
+  webAuthnCredentials     WebAuthnCredential[]
+  webAuthnChallenges      WebAuthnChallenge[]
 
   @@index([email])
   @@index([telegramId])
@@ -109,6 +123,7 @@ model WebSession {
   remnashopAccessExpiresAt        DateTime?
   remnashopRefreshExpiresAt       DateTime?
   authMethod           WebSessionAuthMethod @default(EMAIL)
+  assuranceLevel       WebSessionAssuranceLevel @default(FULL)
   userAgent            String?
   ipHash               String?
   accessTokenExpiresAt DateTime
@@ -124,6 +139,43 @@ model WebSession {
   @@index([remnashopAccessExpiresAt])
   @@index([remnashopRefreshExpiresAt])
   @@index([revokedAt])
+  @@index([assuranceLevel])
+}
+
+model WebAuthnCredential {
+  id             String   @id @default(cuid())
+  userId         String
+  credentialId   String   @unique
+  publicKey      Bytes
+  counter        BigInt   @default(0)
+  transports     String[]
+  aaguid         String?
+  deviceType     String?
+  backedUp       Boolean  @default(false)
+  name           String?
+  lastUsedAt     DateTime?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  user           WebUser  @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([lastUsedAt])
+}
+
+model WebAuthnChallenge {
+  id          String                @id @default(cuid())
+  challenge   String                @unique
+  type        WebAuthnChallengeType
+  userId      String?
+  expiresAt   DateTime
+  consumedAt  DateTime?
+  createdAt   DateTime              @default(now())
+  user        WebUser?              @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([type])
+  @@index([expiresAt])
+  @@index([consumedAt])
 }
 
 model EmailVerificationCode {
