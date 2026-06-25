@@ -15,7 +15,7 @@ async function setup() {
 
   checkDocker();
 
-  if (process.env.RESET_INTEGRATION === "1") {
+  if (process.env.KEEP_INTEGRATION_STACK !== "1") {
     integrationCompose.run(["down", "--remove-orphans", "--volumes"]);
   }
 

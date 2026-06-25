@@ -58,6 +58,26 @@ async function consumeChallenge(challenge: string, type: WebAuthnChallengeType) 
   return record;
 }
 
+function challengeFromClientDataJSON(clientDataJSON: unknown) {
+  if (typeof clientDataJSON !== "string") {
+    throw new BffError("VALIDATION_ERROR", 400, "WebAuthn client data is required");
+  }
+
+  try {
+    const data = JSON.parse(Buffer.from(clientDataJSON, "base64url").toString("utf8")) as {
+      challenge?: unknown;
+    };
+
+    if (typeof data.challenge !== "string" || !data.challenge) {
+      throw new Error("Missing challenge");
+    }
+
+    return data.challenge;
+  } catch {
+    throw new BffError("VALIDATION_ERROR", 400, "WebAuthn client data is invalid");
+  }
+}
+
 function toSimpleCredential(credential: {
   credentialId: string;
   publicKey: Uint8Array;
@@ -122,7 +142,10 @@ export async function finishPasskeyRegistration(response: RegistrationResponseJS
     throw new BffError("UNAUTHORIZED", 401, "Session is required");
   }
 
-  const challenge = await consumeChallenge(response.response.clientDataJSON ? JSON.parse(Buffer.from(response.response.clientDataJSON, "base64url").toString("utf8")).challenge : "", WebAuthnChallengeType.REGISTRATION);
+  const challenge = await consumeChallenge(
+    challengeFromClientDataJSON(response.response.clientDataJSON),
+    WebAuthnChallengeType.REGISTRATION,
+  );
 
   if (challenge.userId !== session.userId) {
     throw new BffError("FORBIDDEN", 403, "WebAuthn challenge belongs to another user");
@@ -135,6 +158,8 @@ export async function finishPasskeyRegistration(response: RegistrationResponseJS
     expectedOrigin: origin,
     expectedRPID: rpID,
     requireUserVerification: true,
+  }).catch(() => {
+    throw new BffError("VALIDATION_ERROR", 400, "Passkey registration failed");
   });
 
   if (!result.verified) {
@@ -209,7 +234,7 @@ export async function beginPasskeyLogin() {
 
 export async function finishPasskeyLogin(response: AuthenticationResponseJSON) {
   const challenge = await consumeChallenge(
-    JSON.parse(Buffer.from(response.response.clientDataJSON, "base64url").toString("utf8")).challenge,
+    challengeFromClientDataJSON(response.response.clientDataJSON),
     WebAuthnChallengeType.AUTHENTICATION,
   );
   const credential = await prisma.webAuthnCredential.findUnique({
@@ -229,6 +254,8 @@ export async function finishPasskeyLogin(response: AuthenticationResponseJSON) {
     expectedRPID: rpID,
     credential: toSimpleCredential(credential),
     requireUserVerification: true,
+  }).catch(() => {
+    throw new BffError("UNAUTHORIZED", 401, "Passkey verification failed");
   });
 
   if (!result.verified) {

@@ -36,7 +36,7 @@ describe("Remnashop BFF errors", () => {
     expect(normalizeRemnashopError(400, "no", { path: "/subscription/devices/abc" }).code).toBe(
       "DEVICE_DELETE_UNAVAILABLE",
     );
-    expect(normalizeRemnashopError(503, "no", { path: "/subscription/devices/abc" }).status).toBe(502);
+    expect(normalizeRemnashopError(503, "no", { path: "/subscription/devices/abc" }).status).toBe(409);
   });
 
   it("wraps network and invalid-json failures", () => {

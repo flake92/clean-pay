@@ -45,6 +45,10 @@ async function parseResponse<T>(response: Response, path: string) {
     try {
       data = JSON.parse(text);
     } catch {
+      if (!response.ok) {
+        throw normalizeRemnashopError(response.status, text, { path });
+      }
+
       throw remnashopInvalidJsonError(path, text);
     }
   }

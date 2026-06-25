@@ -166,7 +166,7 @@ export function normalizeRemnashopError(
   }
 
   if (lowerPath.includes('/subscription/devices') && status >= 400) {
-    return new BffError('DEVICE_DELETE_UNAVAILABLE', status >= 500 ? 502 : status, message, debug);
+    return new BffError('DEVICE_DELETE_UNAVAILABLE', status >= 500 ? 409 : status, message, debug);
   }
 
   if (status === 409) {

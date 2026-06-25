@@ -6,6 +6,7 @@ import { assertRateLimit } from "@/backend/limits/rate-limit";
 import { getCurrentUser } from "@/backend/sessions/web-session";
 import { getRequestIp, verifyTurnstileToken } from "@/backend/security/turnstile";
 import { safeRedirectPath } from "@/backend/auth/redirect-policy";
+import { logTechnicalError } from "@/backend/observability/audit";
 
 export const runtime = "nodejs";
 
@@ -34,7 +35,9 @@ export async function GET(request: Request) {
     });
 
     return createTelegramAuthorizationResponse(redirectTo, currentUser?.id);
-  } catch {
+  } catch (error) {
+    logTechnicalError("telegram_oidc_start_failed", error, { redirectTo });
+
     return loginFailedRedirect();
   }
 }
