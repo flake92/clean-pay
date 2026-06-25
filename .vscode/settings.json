@@ -1,8 +1,5 @@
 {
   "vitest.enable": true,
   "vitest.rootConfig": "./vitest.workspace.ts",
-  "vitest.vitestPackagePath": "./node_modules/vitest/package.json",
-  "vitest.nodeEnv": {
-    "SKIP_INTEGRATION_COMPOSE": "1"
-  }
+  "vitest.vitestPackagePath": "./node_modules/vitest/package.json"
 }

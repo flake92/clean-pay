@@ -121,6 +121,7 @@ services:
     command: >
       sh -c "sudo mkdir -p /workspace/clean-pay/node_modules /home/node/.npm
       && sudo chown -R node:node /workspace/clean-pay/node_modules /home/node/.npm
+      && sudo chmod 666 /var/run/docker.sock
       && sleep infinity"
     working_dir: /workspace/clean-pay
     environment:
