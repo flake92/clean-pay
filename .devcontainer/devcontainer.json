@@ -16,7 +16,8 @@
     8080,
     8081,
     8025,
-    8026
+    8026,
+    8090
   ],
   "portsAttributes": {
     "4000": {
@@ -39,6 +40,9 @@
     },
     "8026": {
       "label": "Mailpit via Caddy"
+    },
+    "8090": {
+      "label": "Telegram OIDC mock"
     }
   },
   "postCreateCommand": "npm ci && npm run prisma:generate",

@@ -5,8 +5,8 @@ x-clean-pay-env: &clean-pay-env
   NEXT_TELEMETRY_DISABLED: "1"
   WATCHPACK_POLLING: "true"
   DATABASE_URL: postgresql://clean_pay:clean_pay@postgres:5432/clean_pay?schema=public
-  APP_URL: http://localhost:8080
-  NEXT_PUBLIC_APP_URL: http://localhost:8080
+  APP_URL: http://localhost:4000
+  NEXT_PUBLIC_APP_URL: http://localhost:4000
   LOG_LEVEL: debug
   REMNASHOP_API_BASE_URL: http://remnashop:5000/api/v1/public
   REDIS_URL: redis://redis:6379/0
@@ -15,20 +15,22 @@ x-clean-pay-env: &clean-pay-env
   AUDIT_IP_HASH_SECRET: dev-audit-ip-hash-secret-change-me
   COOKIE_SECURE: "false"
   COOKIE_SAMESITE: lax
-  TELEGRAM_OIDC_ISSUER: https://oauth.telegram.org
-  TELEGRAM_OIDC_AUTHORIZATION_ENDPOINT: https://oauth.telegram.org/auth
-  TELEGRAM_OIDC_TOKEN_ENDPOINT: https://oauth.telegram.org/token
-  TELEGRAM_OIDC_JWKS_URI: https://oauth.telegram.org/.well-known/jwks.json
+
+  TELEGRAM_OIDC_ISSUER: http://telegram-oidc-mock:8090
+  TELEGRAM_OIDC_AUTHORIZATION_ENDPOINT: http://localhost:8090/auth
+  TELEGRAM_OIDC_TOKEN_ENDPOINT: http://telegram-oidc-mock:8090/token
+  TELEGRAM_OIDC_JWKS_URI: http://telegram-oidc-mock:8090/.well-known/jwks.json
   TELEGRAM_OIDC_CLIENT_ID: dev-telegram-client-id
   TELEGRAM_OIDC_CLIENT_SECRET: dev-telegram-client-secret
+
   TURNSTILE_ENABLED: "false"
   NEXT_PUBLIC_TURNSTILE_SITE_KEY: ""
   TURNSTILE_SECRET_KEY: ""
   TURNSTILE_VERIFY_URL: https://challenges.cloudflare.com/turnstile/v0/siteverify
   SUPPORT_ENABLED: "true"
-  SUPPORT_EMAIL: support@clean-pay.localhost
+  SUPPORT_EMAIL: support@example.com
   SUPPORT_TELEGRAM_USERNAME: cleanpay_support
-  SUPPORT_FAQ_URL: http://localhost:8080/support
+  SUPPORT_FAQ_URL: http://localhost:4000/support
 
 x-remnashop-env: &remnashop-env
   APP_DOMAIN: remnashop.localhost
@@ -37,10 +39,11 @@ x-remnashop-env: &remnashop-env
   APP_CRYPT_KEY: cdLLqAspR/IqBkkOKM5qvCKE9LluVyRxTe2SMKd/9vs=
   APP_SWAGGER_ENABLED: "true"
   WEB_ENABLED: "true"
-  WEB_CABINET_URL: http://localhost:8080
+  WEB_CABINET_URL: http://localhost:4000
   APP_API_KEY: dev-remnashop-api-key-change-me
   APP_JWT_SECRET: dev-remnashop-jwt-secret-change-me
-  BOT_TOKEN: "1234567890:devtoken"
+
+  BOT_TOKEN: "0000000000:dev-telegram-bot-token-placeholder"
   BOT_SECRET_TOKEN: dev-bot-secret-token
   BOT_OWNER_ID: "1"
   BOT_SUPPORT_USERNAME: cleanpay_support
@@ -49,18 +52,25 @@ x-remnashop-env: &remnashop-env
   BOT_RESET_WEBHOOK: "false"
   BOT_DROP_PENDING_UPDATES: "false"
   BOT_SETUP_COMMANDS: "false"
+
   REMNAWAVE_HOST: http://remnawave-mock:3000
   REMNAWAVE_TOKEN: dev-remnawave-token
   REMNAWAVE_WEBHOOK_SECRET: dev-remnawave-webhook-secret
+
   DATABASE_HOST: remnashop-postgres
   DATABASE_PORT: "5432"
   DATABASE_NAME: remnashop
   DATABASE_USER: remnashop
   DATABASE_PASSWORD: remnashop
+
   REDIS_HOST: remnashop-cache
   REDIS_PORT: "6379"
   REDIS_NAME: "0"
   REDIS_PASSWORD: ""
+
+  # Dev-only email delivery through local Mailpit.
+  # These variables are intentionally duplicated with EMAIL/SMTP/MAIL names
+  # because the upstream Remnashop image may use different config aliases.
   EMAIL_ENABLED: "true"
   EMAIL_HOST: smtp
   EMAIL_PORT: "1025"
@@ -68,9 +78,38 @@ x-remnashop-env: &remnashop-env
   EMAIL_USE_SSL: "false"
   EMAIL_USERNAME: ""
   EMAIL_PASSWORD: ""
-  EMAIL_FROM_EMAIL: no-reply@clean-pay.localhost
+  EMAIL_FROM_EMAIL: no-reply@example.com
   EMAIL_FROM_NAME: Clean Pay Dev
   EMAIL_VERIFICATION_CODE_TTL_MINUTES: "15"
+
+  SMTP_ENABLED: "true"
+  SMTP_HOST: smtp
+  SMTP_PORT: "1025"
+  SMTP_TLS: "false"
+  SMTP_SSL: "false"
+  SMTP_USE_TLS: "false"
+  SMTP_USE_SSL: "false"
+  SMTP_USERNAME: ""
+  SMTP_PASSWORD: ""
+  SMTP_USER: ""
+  SMTP_PASS: ""
+  SMTP_FROM_EMAIL: no-reply@example.com
+  SMTP_FROM_NAME: Clean Pay Dev
+
+  MAIL_ENABLED: "true"
+  MAIL_HOST: smtp
+  MAIL_PORT: "1025"
+  MAIL_TLS: "false"
+  MAIL_SSL: "false"
+  MAIL_USE_TLS: "false"
+  MAIL_USE_SSL: "false"
+  MAIL_USERNAME: ""
+  MAIL_PASSWORD: ""
+  MAIL_USER: ""
+  MAIL_PASS: ""
+  MAIL_FROM_EMAIL: no-reply@example.com
+  MAIL_FROM_NAME: Clean Pay Dev
+
   LOG_TO_FILE: "false"
   LOG_LEVEL: DEBUG
 
@@ -95,6 +134,8 @@ services:
       redis:
         condition: service_healthy
       remnashop:
+        condition: service_started
+      telegram-oidc-mock:
         condition: service_started
     ports:
       - "4000:4000"
@@ -223,6 +264,21 @@ services:
     command: node server.js
     volumes:
       - ./telegram-mock:/mock:ro
+
+  telegram-oidc-mock:
+    image: node:24-alpine
+    restart: unless-stopped
+    working_dir: /mock
+    command: node server.js
+    environment:
+      PORT: "8090"
+      OIDC_ISSUER: http://telegram-oidc-mock:8090
+      OIDC_PUBLIC_ISSUER: http://localhost:8090
+      OIDC_CLIENT_ID: dev-telegram-client-id
+    volumes:
+      - ./telegram-oidc-mock:/mock:ro
+    ports:
+      - "8090:8090"
 
   smtp:
     image: axllent/mailpit:latest
