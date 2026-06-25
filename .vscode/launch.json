@@ -6,7 +6,7 @@
       "type": "node-terminal",
       "request": "launch",
       "preLaunchTask": "Clean Pay: migrate",
-      "command": "npm run dev -- --hostname 0.0.0.0",
+      "command": "npm run dev -- --hostname 0.0.0.0 --port 4000",
       "cwd": "${workspaceFolder}",
       "serverReadyAction": {
         "pattern": "Local:\\s+http://localhost:(\\d+)",
@@ -19,7 +19,7 @@
       "type": "node-terminal",
       "request": "launch",
       "preLaunchTask": "Clean Pay: build",
-      "command": "npm start",
+      "command": "npm start -- --hostname 0.0.0.0 --port 4000",
       "cwd": "${workspaceFolder}",
       "serverReadyAction": {
         "pattern": "Local:\\s+http://localhost:(\\d+)",
@@ -32,7 +32,7 @@
       "type": "node-terminal",
       "request": "launch",
       "preLaunchTask": "Clean Pay: prepare",
-      "command": "npm run prisma:studio -- --hostname 0.0.0.0",
+      "command": "npm run prisma:studio -- --hostname 0.0.0.0 --port 5555",
       "cwd": "${workspaceFolder}",
       "serverReadyAction": {
         "pattern": "Prisma Studio is up on http://localhost:(\\d+)",

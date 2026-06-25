@@ -79,7 +79,10 @@ services:
     build:
       context: ..
       dockerfile: .devcontainer/Dockerfile
-    command: sleep infinity
+    command: >
+      sh -c "sudo mkdir -p /workspace/clean-pay/node_modules /home/node/.npm
+      && sudo chown -R node:node /workspace/clean-pay/node_modules /home/node/.npm
+      && sleep infinity"
     working_dir: /workspace/clean-pay
     environment:
       <<: *clean-pay-env
@@ -94,8 +97,8 @@ services:
       remnashop:
         condition: service_started
     ports:
-      - "4002:4000"
-      - "5556:5555"
+      - "4000:4000"
+      - "5555:5555"
 
   postgres:
     image: postgres:17-alpine

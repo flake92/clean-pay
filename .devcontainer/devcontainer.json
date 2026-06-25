@@ -4,13 +4,25 @@
   "service": "app",
   "workspaceFolder": "/workspace/clean-pay",
   "remoteUser": "node",
+  "updateRemoteUserUID": true,
   "shutdownAction": "stopCompose",
-  "forwardPorts": [4002, 5556, 5432, 6379, 5001, 6767, 8080, 8081, 8025, 8026],
+  "forwardPorts": [
+    4000,
+    5555,
+    5432,
+    6379,
+    5001,
+    6767,
+    8080,
+    8081,
+    8025,
+    8026
+  ],
   "portsAttributes": {
-    "4002": {
+    "4000": {
       "label": "Clean Pay direct"
     },
-    "5556": {
+    "5555": {
       "label": "Prisma Studio"
     },
     "5001": {
@@ -29,7 +41,7 @@
       "label": "Mailpit via Caddy"
     }
   },
-  "postCreateCommand": "npm install && npm run prisma:generate",
+  "postCreateCommand": "npm ci && npm run prisma:generate",
   "postStartCommand": "git config --global --add safe.directory /workspace/clean-pay",
   "customizations": {
     "vscode": {
