@@ -1,5 +1,8 @@
 {
-  "vitest.commandLine": "npx vitest --config vitest.workspace.ts",
-  "vitest.workspaceConfig": "./vitest.workspace.ts",
-  "vitest.ignoreWorkspace": false
+  "vitest.enable": true,
+  "vitest.rootConfig": "./vitest.workspace.ts",
+  "vitest.vitestPackagePath": "./node_modules/vitest/package.json",
+  "vitest.nodeEnv": {
+    "SKIP_INTEGRATION_COMPOSE": "1"
+  }
 }
