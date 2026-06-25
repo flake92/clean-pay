@@ -125,9 +125,15 @@ services:
     working_dir: /workspace/clean-pay
     environment:
       <<: *clean-pay-env
+      CLEAN_PAY_DOCKER_HOST_ROOT: ${CLEAN_PAY_DOCKER_HOST_ROOT:-/Users/alex/code/clean-pay}
+      CLEAN_PAY_INTEGRATION_BASE_URL: http://host.docker.internal:4100
+      CLEAN_PAY_INTEGRATION_MAILPIT_URL: http://host.docker.internal:8125
+      CLEAN_PAY_INTEGRATION_OIDC_URL: http://host.docker.internal:8190
     volumes:
       - ..:/workspace/clean-pay:cached
+      - ..:${CLEAN_PAY_DOCKER_HOST_ROOT:-/Users/alex/code/clean-pay}:cached
       - node-modules:/workspace/clean-pay/node_modules
+      - /var/run/docker.sock:/var/run/docker.sock
     depends_on:
       postgres:
         condition: service_healthy

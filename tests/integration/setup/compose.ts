@@ -2,12 +2,13 @@ import { execFileSync } from "node:child_process";
 import path from "node:path";
 
 const rootDir = path.resolve(__dirname, "../../..");
-const composeFile = path.join(rootDir, "tests/integration/docker-compose.yml");
+const dockerHostRootDir = process.env.CLEAN_PAY_DOCKER_HOST_ROOT ?? rootDir;
+const composeFile = path.join(dockerHostRootDir, "tests/integration/docker-compose.yml");
 const projectName = process.env.CLEAN_PAY_INTEGRATION_PROJECT ?? "clean-pay-integration";
 
 function dockerCompose(args: string[], options: { stdio?: "inherit" | "pipe" } = {}) {
   return execFileSync("docker", ["compose", "-p", projectName, "-f", composeFile, ...args], {
-    cwd: rootDir,
+    cwd: dockerHostRootDir,
     stdio: options.stdio ?? "inherit",
     encoding: "utf8",
   });
