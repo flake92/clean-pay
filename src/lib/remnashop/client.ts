@@ -313,9 +313,29 @@ async function attachRemnashopTokensForTelegramSession(
   const telegramId = session.user.telegramId;
 
   if (!telegramId || !env.telegramBotToken) {
+    logger.warn("remnashop_telegram_token_restore_skipped", {
+      sessionId: session.id,
+      userId: session.userId,
+      hasTelegramId: Boolean(telegramId),
+      hasTelegramBotToken: Boolean(env.telegramBotToken),
+    }, {
+      category: "auth",
+      source: "remnashop.session",
+      message: "Skipped Telegram Remnashop token restore",
+    });
     return null;
   }
 
+  logger.info("remnashop_telegram_token_restore_started", {
+    sessionId: session.id,
+    userId: session.userId,
+    telegramId: telegramId.toString(),
+    hasTelegramUsername: Boolean(session.user.telegramUsername),
+  }, {
+    category: "auth",
+    source: "remnashop.session",
+    message: "Restoring Remnashop session via Telegram",
+  });
   authDebugLog("remnashop_telegram_token_restore_started", {
     sessionId: session.id,
     userId: session.userId,
@@ -359,6 +379,17 @@ async function attachRemnashopTokensForTelegramSession(
     remnashopUserId,
     accessExpiresAt,
     refreshExpiresAt,
+  });
+  logger.info("remnashop_telegram_token_restore_success", {
+    sessionId: session.id,
+    userId: session.userId,
+    remnashopUserId,
+    accessExpiresAt,
+    refreshExpiresAt,
+  }, {
+    category: "auth",
+    source: "remnashop.session",
+    message: "Restored Remnashop session via Telegram",
   });
 
   return {

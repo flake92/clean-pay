@@ -95,6 +95,8 @@ const Layout = ({ children }: ChildContainerProps) => {
 
         if (layoutState.staticMenuMobileActive) {
             blockBodyScroll();
+        } else {
+            unblockBodyScroll();
         }
     }, [layoutState.overlayMenuActive, layoutState.staticMenuMobileActive]);
 
@@ -107,6 +109,7 @@ const Layout = ({ children }: ChildContainerProps) => {
     useUnmountEffect(() => {
         unbindMenuOutsideClickListener();
         unbindProfileMenuOutsideClickListener();
+        unblockBodyScroll();
     });
 
     const containerClass = classNames('layout-wrapper', {

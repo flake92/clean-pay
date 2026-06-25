@@ -84,12 +84,6 @@ export function VerifyEmailPanel({ turnstileEnabled = false }: { turnstileEnable
     setError(null);
     setLoading("confirm");
 
-    if (!targetEmail) {
-      setLoading(null);
-      setError("Сначала запросите код подтверждения.");
-      return;
-    }
-
     if (turnstileEnabled && !turnstileToken) {
       setLoading(null);
       setError(missingTurnstileTokenMessage());
@@ -101,7 +95,7 @@ export function VerifyEmailPanel({ turnstileEnabled = false }: { turnstileEnable
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
-        email: targetEmail,
+        email: targetEmail ?? undefined,
         code: formData.get("code"),
         ...turnstilePayload(turnstileToken),
       }),
@@ -129,7 +123,32 @@ export function VerifyEmailPanel({ turnstileEnabled = false }: { turnstileEnable
   return (
     <div className="flex flex-column gap-4">
       {turnstileEnabled ? <TurnstileWidget onReady={setTurnstile} onToken={setTurnstileToken} /> : null}
-      <Card title="Получить код">
+      <Card title="Введите код из письма">
+        <p className="mt-0 line-height-3 text-600">
+          Если код уже отправлен, просто введите 6 цифр из письма. Повторная отправка доступна ниже.
+        </p>
+        <form className="flex flex-column gap-3" onSubmit={confirmCode}>
+          <label className="flex flex-column gap-2">
+            <span className="text-sm font-medium text-700">Код подтверждения</span>
+            <InputText
+              inputMode="numeric"
+              maxLength={6}
+              minLength={6}
+              name="code"
+              pattern="[0-9]{6}"
+              placeholder="000000"
+              required
+            />
+          </label>
+          <Button
+            disabled={loading === "confirm"}
+            label="Подтвердить e-mail"
+            loading={loading === "confirm"}
+            type="submit"
+          />
+        </form>
+      </Card>
+      <Card title="Отправить код повторно">
         <p className="mt-0 line-height-3 text-600">
           Код можно запросить не чаще одного раза в минуту.
         </p>
@@ -140,38 +159,13 @@ export function VerifyEmailPanel({ turnstileEnabled = false }: { turnstileEnable
           </label>
           <Button
             disabled={loading === "request"}
-            label={targetEmail ? "Отправить код повторно" : "Отправить код"}
+            label="Отправить код повторно"
             loading={loading === "request"}
             severity="info"
             type="submit"
           />
         </form>
       </Card>
-      {targetEmail ? (
-        <Card title="Подтвердить код">
-          <p className="mt-0 line-height-3 text-600">Введите 6 цифр из письма.</p>
-          <form className="flex flex-column gap-3" onSubmit={confirmCode}>
-            <label className="flex flex-column gap-2">
-              <span className="text-sm font-medium text-700">Код</span>
-              <InputText
-                inputMode="numeric"
-                maxLength={6}
-                minLength={6}
-                name="code"
-                pattern="[0-9]{6}"
-                placeholder="000000"
-                required
-              />
-            </label>
-            <Button
-              disabled={loading === "confirm"}
-              label="Подтвердить"
-              loading={loading === "confirm"}
-              type="submit"
-            />
-          </form>
-        </Card>
-      ) : null}
       {error ? <Message severity="error" text={error} /> : null}
       {message ? <Message severity="success" text={message} /> : null}
     </div>

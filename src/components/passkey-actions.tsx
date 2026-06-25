@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import {
   browserSupportsWebAuthn,
@@ -17,9 +17,15 @@ async function readError(response: Response, fallback: string) {
 }
 
 function useWebAuthnSupport() {
-  const [supported] = useState<boolean | null>(() =>
-    typeof window === "undefined" ? null : browserSupportsWebAuthn(),
-  );
+  const [supported, setSupported] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setSupported(browserSupportsWebAuthn());
+    }, 0);
+
+    return () => window.clearTimeout(timer);
+  }, []);
 
   return supported;
 }
@@ -128,6 +134,11 @@ export function PasskeySetupPanel() {
     setError(null);
 
     try {
+      if (!browserSupportsWebAuthn()) {
+        setError("Это устройство не поддерживает быстрый вход. Продолжите в кабинете или используйте другое устройство.");
+        return;
+      }
+
       const optionsResponse = await fetch("/api/bff/auth/passkey/register/options", { method: "POST" });
 
       if (!optionsResponse.ok) {
@@ -189,7 +200,7 @@ export function PasskeySetupPanel() {
       {error ? <Message severity="warn" text={error} /> : null}
       <div className="flex flex-column sm:flex-row gap-2">
         <Button
-          disabled={loading || supported !== true}
+          disabled={loading}
           icon="pi pi-lock"
           label="Настроить быстрый вход"
           loading={loading}

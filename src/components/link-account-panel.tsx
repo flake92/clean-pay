@@ -97,9 +97,7 @@ export function LinkAccountPanel({ turnstileEnabled = false }: { turnstileEnable
   const [error, setError] = useState<string | null>(null);
   const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
   const [turnstile, setTurnstile] = useState<TurnstileHandle | null>(null);
-  const [webAuthnSupported] = useState<boolean | null>(() =>
-    typeof window === "undefined" ? null : browserSupportsWebAuthn(),
-  );
+  const [webAuthnSupported, setWebAuthnSupported] = useState<boolean | null>(null);
 
   const emailVerified = Boolean(profile?.emailVerified ?? profile?.is_email_verified);
   const telegramId = profile?.telegramId ?? profile?.telegram_id ?? null;
@@ -145,6 +143,14 @@ export function LinkAccountPanel({ turnstileEnabled = false }: { turnstileEnable
       setLoading(false);
     }
   }
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setWebAuthnSupported(browserSupportsWebAuthn());
+    }, 0);
+
+    return () => window.clearTimeout(timer);
+  }, []);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -270,7 +276,7 @@ export function LinkAccountPanel({ turnstileEnabled = false }: { turnstileEnable
           meta={hasPasskey ? <span>Сохранено ключей: {passkeys.length}</span> : null}
           title="Быстрый вход"
         >
-          {webAuthnSupported === true && !hasPasskey ? (
+          {webAuthnSupported !== false && !hasPasskey ? (
             <div className="account-method-action-row">
               <Button
                 icon="pi pi-lock"
