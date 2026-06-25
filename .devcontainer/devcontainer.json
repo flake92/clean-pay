@@ -51,7 +51,8 @@
     "vscode": {
       "extensions": [
         "dbaeumer.vscode-eslint",
-        "Prisma.prisma"
+        "Prisma.prisma",
+        "vitest.explorer"
       ]
     }
   }

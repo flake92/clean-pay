@@ -86,4 +86,20 @@ src/backend/sessions      Web session cookies and session lifecycle.
 ```bash
 npm run lint
 npm run build
+npm run test:unit
+npm run test:route-handlers
+npm run test:integration
 ```
+
+## Test Layers
+
+Unit tests live in `tests/unit` and do not start Docker.
+
+Route-handler contract tests live in `tests/route-handlers`. They may import
+route handlers and use explicit mocks, so they are not full integration tests.
+
+Real integration tests live in `tests/integration`. They start an isolated
+Docker Compose stack from `tests/integration/docker-compose.yml` and call the
+running Clean Pay server through HTTP at `http://localhost:4100`. That stack has
+its own PostgreSQL, Redis, Remnashop, Remnashop database/cache, Mailpit,
+Telegram mocks, and Remnawave mock.

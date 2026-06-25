@@ -1,0 +1,8 @@
+{
+  "vitest.commandLine": "npm exec -- vitest --workspace vitest.workspace.ts",
+  "vitest.include": [
+    "tests/unit/**/*.test.ts",
+    "tests/route-handlers/**/*.test.ts",
+    "tests/integration/**/*.test.ts"
+  ]
+}

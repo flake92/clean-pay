@@ -6,7 +6,7 @@ export default defineConfig({
     environment: "node",
     globals: true,
     setupFiles: ["./tests/setup/env.ts"],
-    include: ["tests/**/*.test.ts"],
+    include: ["tests/unit/**/*.test.ts", "tests/route-handlers/**/*.test.ts"],
     pool: "forks",
     coverage: {
       provider: "v8",

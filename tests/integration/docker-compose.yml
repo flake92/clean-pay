@@ -1,0 +1,297 @@
+name: clean-pay-integration
+
+x-clean-pay-env: &clean-pay-env
+  NODE_ENV: development
+  NEXT_TELEMETRY_DISABLED: "1"
+  WATCHPACK_POLLING: "true"
+  DATABASE_URL: postgresql://clean_pay:clean_pay@postgres:5432/clean_pay?schema=public
+  APP_URL: http://localhost:4100
+  NEXT_PUBLIC_APP_URL: http://localhost:4100
+  LOG_LEVEL: debug
+  REMNASHOP_API_BASE_URL: http://remnashop:5000/api/v1/public
+  REDIS_URL: redis://redis:6379/0
+  WEB_JWT_SECRET: integration-web-jwt-secret
+  WEB_REFRESH_SECRET: integration-web-refresh-secret
+  AUDIT_IP_HASH_SECRET: integration-audit-ip-hash-secret
+  COOKIE_SECURE: "false"
+  COOKIE_SAMESITE: lax
+  TELEGRAM_BOT_TOKEN: "0000000000:integration-telegram-bot-token"
+
+  TELEGRAM_OIDC_ISSUER: http://telegram-oidc-mock:8090
+  TELEGRAM_OIDC_AUTHORIZATION_ENDPOINT: http://localhost:8190/auth
+  TELEGRAM_OIDC_TOKEN_ENDPOINT: http://telegram-oidc-mock:8090/token
+  TELEGRAM_OIDC_JWKS_URI: http://telegram-oidc-mock:8090/.well-known/jwks.json
+  TELEGRAM_OIDC_CLIENT_ID: integration-telegram-client-id
+  TELEGRAM_OIDC_CLIENT_SECRET: integration-telegram-client-secret
+
+  TURNSTILE_ENABLED: "false"
+  NEXT_PUBLIC_TURNSTILE_SITE_KEY: ""
+  TURNSTILE_SECRET_KEY: ""
+  TURNSTILE_VERIFY_URL: https://challenges.cloudflare.com/turnstile/v0/siteverify
+  SUPPORT_ENABLED: "true"
+  SUPPORT_EMAIL: support@clean-pay.integration.localhost
+  SUPPORT_TELEGRAM_USERNAME: cleanpay_support
+  SUPPORT_FAQ_URL: http://localhost:4100/support
+
+x-remnashop-env: &remnashop-env
+  APP_DOMAIN: remnashop.integration.localhost
+  APP_HOST: 0.0.0.0
+  APP_PORT: "5000"
+  APP_CRYPT_KEY: cdLLqAspR/IqBkkOKM5qvCKE9LluVyRxTe2SMKd/9vs=
+  APP_SWAGGER_ENABLED: "true"
+  WEB_ENABLED: "true"
+  WEB_CABINET_URL: http://localhost:4100
+  APP_API_KEY: integration-remnashop-api-key
+  APP_JWT_SECRET: integration-remnashop-jwt-secret
+
+  BOT_TOKEN: "0000000000:integration-telegram-bot-token"
+  BOT_SECRET_TOKEN: integration-bot-secret-token
+  BOT_OWNER_ID: "1"
+  BOT_SUPPORT_USERNAME: cleanpay_support
+  BOT_API_BASE_URL: http://telegram-mock:8080
+  BOT_MINI_APP: "false"
+  BOT_RESET_WEBHOOK: "false"
+  BOT_DROP_PENDING_UPDATES: "false"
+  BOT_SETUP_COMMANDS: "false"
+
+  REMNAWAVE_HOST: http://remnawave-mock:3000
+  REMNAWAVE_TOKEN: integration-remnawave-token
+  REMNAWAVE_WEBHOOK_SECRET: integration-remnawave-webhook-secret
+
+  DATABASE_HOST: remnashop-postgres
+  DATABASE_PORT: "5432"
+  DATABASE_NAME: remnashop
+  DATABASE_USER: remnashop
+  DATABASE_PASSWORD: remnashop
+
+  REDIS_HOST: remnashop-cache
+  REDIS_PORT: "6379"
+  REDIS_NAME: "0"
+  REDIS_PASSWORD: ""
+
+  EMAIL_ENABLED: "true"
+  EMAIL_HOST: smtp
+  EMAIL_PORT: "1025"
+  EMAIL_USE_TLS: "false"
+  EMAIL_USE_SSL: "false"
+  EMAIL_USERNAME: integration-smtp-user
+  EMAIL_PASSWORD: integration-smtp-password
+  EMAIL_FROM_EMAIL: no-reply@clean-pay.integration.localhost
+  EMAIL_FROM_NAME: Clean Pay Integration
+  EMAIL_VERIFICATION_CODE_TTL_MINUTES: "15"
+
+  SMTP_ENABLED: "true"
+  SMTP_HOST: smtp
+  SMTP_PORT: "1025"
+  SMTP_TLS: "false"
+  SMTP_SSL: "false"
+  SMTP_USE_TLS: "false"
+  SMTP_USE_SSL: "false"
+  SMTP_USERNAME: integration-smtp-user
+  SMTP_PASSWORD: integration-smtp-password
+  SMTP_USER: integration-smtp-user
+  SMTP_PASS: integration-smtp-password
+  SMTP_FROM_EMAIL: no-reply@clean-pay.integration.localhost
+  SMTP_FROM_NAME: Clean Pay Integration
+
+  MAIL_ENABLED: "true"
+  MAIL_HOST: smtp
+  MAIL_PORT: "1025"
+  MAIL_TLS: "false"
+  MAIL_SSL: "false"
+  MAIL_USE_TLS: "false"
+  MAIL_USE_SSL: "false"
+  MAIL_USERNAME: integration-smtp-user
+  MAIL_PASSWORD: integration-smtp-password
+  MAIL_USER: integration-smtp-user
+  MAIL_PASS: integration-smtp-password
+  MAIL_FROM_EMAIL: no-reply@clean-pay.integration.localhost
+  MAIL_FROM_NAME: Clean Pay Integration
+
+  LOG_TO_FILE: "false"
+  LOG_LEVEL: DEBUG
+
+services:
+  app:
+    build:
+      context: ../..
+      dockerfile: .devcontainer/Dockerfile
+    command: >
+      sh -lc "sudo mkdir -p /workspace/clean-pay/node_modules /home/node/.npm
+      && sudo chown -R node:node /workspace/clean-pay/node_modules /home/node/.npm
+      && npm ci
+      && npm run prisma:generate
+      && npx prisma migrate deploy
+      && npm run dev -- --hostname 0.0.0.0 --port 4000"
+    working_dir: /workspace/clean-pay
+    environment:
+      <<: *clean-pay-env
+    volumes:
+      - ../..:/workspace/clean-pay:cached
+      - node-modules:/workspace/clean-pay/node_modules
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      remnashop:
+        condition: service_started
+      telegram-oidc-mock:
+        condition: service_started
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:4000/api/health >/dev/null"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+    ports:
+      - "4100:4000"
+
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: clean_pay
+      POSTGRES_USER: clean_pay
+      POSTGRES_PASSWORD: clean_pay
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U clean_pay -d clean_pay"]
+      interval: 3s
+      timeout: 5s
+      retries: 40
+
+  redis:
+    image: redis:7-alpine
+    command: redis-server --appendonly yes
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      timeout: 5s
+      retries: 40
+
+  remnashop:
+    build:
+      context: ../../.devcontainer
+      dockerfile: remnashop-dev.Dockerfile
+    image: clean-pay-integration-remnashop:latest
+    environment:
+      <<: *remnashop-env
+    depends_on:
+      remnashop-postgres:
+        condition: service_healthy
+      remnashop-cache:
+        condition: service_healthy
+      smtp:
+        condition: service_started
+      telegram-mock:
+        condition: service_started
+      remnawave-mock:
+        condition: service_started
+    volumes:
+      - remnashop-assets:/opt/remnashop/assets
+      - remnashop-logs:/opt/remnashop/logs
+    ports:
+      - "5101:5000"
+
+  remnashop-worker:
+    image: clean-pay-integration-remnashop:latest
+    pull_policy: never
+    command: taskiq worker src.infrastructure.taskiq.worker:worker --workers 1 --ack-type when_received --tasks-pattern src/infrastructure/taskiq/tasks/*.py -fsd
+    environment:
+      <<: *remnashop-env
+    depends_on:
+      remnashop-postgres:
+        condition: service_healthy
+      remnashop-cache:
+        condition: service_healthy
+
+  remnashop-scheduler:
+    image: clean-pay-integration-remnashop:latest
+    pull_policy: never
+    command: taskiq scheduler src.infrastructure.taskiq.scheduler:scheduler --tasks-pattern src/infrastructure/taskiq/tasks/*.py -fsd
+    environment:
+      <<: *remnashop-env
+    depends_on:
+      remnashop-postgres:
+        condition: service_healthy
+      remnashop-cache:
+        condition: service_healthy
+
+  remnashop-postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: remnashop
+      POSTGRES_USER: remnashop
+      POSTGRES_PASSWORD: remnashop
+      TZ: UTC
+    volumes:
+      - remnashop-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U remnashop -d remnashop"]
+      interval: 3s
+      timeout: 5s
+      retries: 40
+
+  remnashop-cache:
+    image: valkey/valkey:9-alpine
+    command: valkey-server --save "" --appendonly yes --maxmemory 512mb --maxmemory-policy volatile-lru --loglevel warning
+    volumes:
+      - remnashop-cache-data:/data
+    healthcheck:
+      test: ["CMD", "valkey-cli", "ping"]
+      interval: 3s
+      timeout: 5s
+      retries: 40
+
+  remnawave-mock:
+    image: node:24-alpine
+    working_dir: /mock
+    command: node server.js
+    volumes:
+      - ../../.devcontainer/remnawave-mock:/mock:ro
+
+  telegram-mock:
+    image: node:24-alpine
+    working_dir: /mock
+    command: node server.js
+    volumes:
+      - ../../.devcontainer/telegram-mock:/mock:ro
+
+  telegram-oidc-mock:
+    image: node:24-alpine
+    working_dir: /mock
+    command: node server.js
+    environment:
+      PORT: "8090"
+      OIDC_ISSUER: http://telegram-oidc-mock:8090
+      OIDC_PUBLIC_ISSUER: http://localhost:8190
+      OIDC_CLIENT_ID: integration-telegram-client-id
+    volumes:
+      - ../../.devcontainer/telegram-oidc-mock:/mock:ro
+    ports:
+      - "8190:8090"
+
+  smtp:
+    image: axllent/mailpit:latest
+    environment:
+      MP_SMTP_AUTH_ACCEPT_ANY: "true"
+      MP_SMTP_AUTH_ALLOW_INSECURE: "true"
+    ports:
+      - "8125:8025"
+      - "1125:1025"
+    healthcheck:
+      test: ["CMD", "/mailpit", "readyz"]
+      interval: 3s
+      timeout: 5s
+      retries: 40
+
+volumes:
+  node-modules:
+  postgres-data:
+  redis-data:
+  remnashop-postgres-data:
+  remnashop-cache-data:
+  remnashop-assets:
+  remnashop-logs:
