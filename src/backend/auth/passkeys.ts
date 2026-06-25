@@ -78,6 +78,20 @@ function challengeFromClientDataJSON(clientDataJSON: unknown) {
   }
 }
 
+function clientDataJSONFromCredentialResponse(response: unknown) {
+  if (!response || typeof response !== "object" || !("response" in response)) {
+    throw new BffError("VALIDATION_ERROR", 400, "WebAuthn response is required");
+  }
+
+  const credentialResponse = (response as { response?: unknown }).response;
+
+  if (!credentialResponse || typeof credentialResponse !== "object" || !("clientDataJSON" in credentialResponse)) {
+    throw new BffError("VALIDATION_ERROR", 400, "WebAuthn client data is required");
+  }
+
+  return (credentialResponse as { clientDataJSON?: unknown }).clientDataJSON;
+}
+
 function toSimpleCredential(credential: {
   credentialId: string;
   publicKey: Uint8Array;
@@ -143,7 +157,7 @@ export async function finishPasskeyRegistration(response: RegistrationResponseJS
   }
 
   const challenge = await consumeChallenge(
-    challengeFromClientDataJSON(response.response.clientDataJSON),
+    challengeFromClientDataJSON(clientDataJSONFromCredentialResponse(response)),
     WebAuthnChallengeType.REGISTRATION,
   );
 
@@ -234,7 +248,7 @@ export async function beginPasskeyLogin() {
 
 export async function finishPasskeyLogin(response: AuthenticationResponseJSON) {
   const challenge = await consumeChallenge(
-    challengeFromClientDataJSON(response.response.clientDataJSON),
+    challengeFromClientDataJSON(clientDataJSONFromCredentialResponse(response)),
     WebAuthnChallengeType.AUTHENTICATION,
   );
   const credential = await prisma.webAuthnCredential.findUnique({

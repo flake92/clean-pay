@@ -76,8 +76,8 @@ x-remnashop-env: &remnashop-env
   EMAIL_PORT: "1025"
   EMAIL_USE_TLS: "false"
   EMAIL_USE_SSL: "false"
-  EMAIL_USERNAME: ""
-  EMAIL_PASSWORD: ""
+  EMAIL_USERNAME: dev-smtp-user
+  EMAIL_PASSWORD: dev-smtp-password
   EMAIL_FROM_EMAIL: no-reply@example.com
   EMAIL_FROM_NAME: Clean Pay Dev
   EMAIL_VERIFICATION_CODE_TTL_MINUTES: "15"
@@ -89,10 +89,10 @@ x-remnashop-env: &remnashop-env
   SMTP_SSL: "false"
   SMTP_USE_TLS: "false"
   SMTP_USE_SSL: "false"
-  SMTP_USERNAME: ""
-  SMTP_PASSWORD: ""
-  SMTP_USER: ""
-  SMTP_PASS: ""
+  SMTP_USERNAME: dev-smtp-user
+  SMTP_PASSWORD: dev-smtp-password
+  SMTP_USER: dev-smtp-user
+  SMTP_PASS: dev-smtp-password
   SMTP_FROM_EMAIL: no-reply@example.com
   SMTP_FROM_NAME: Clean Pay Dev
 
@@ -103,10 +103,10 @@ x-remnashop-env: &remnashop-env
   MAIL_SSL: "false"
   MAIL_USE_TLS: "false"
   MAIL_USE_SSL: "false"
-  MAIL_USERNAME: ""
-  MAIL_PASSWORD: ""
-  MAIL_USER: ""
-  MAIL_PASS: ""
+  MAIL_USERNAME: dev-smtp-user
+  MAIL_PASSWORD: dev-smtp-password
+  MAIL_USER: dev-smtp-user
+  MAIL_PASS: dev-smtp-password
   MAIL_FROM_EMAIL: no-reply@example.com
   MAIL_FROM_NAME: Clean Pay Dev
 
@@ -290,6 +290,9 @@ services:
   smtp:
     image: axllent/mailpit:latest
     restart: unless-stopped
+    environment:
+      MP_SMTP_AUTH_ACCEPT_ANY: "true"
+      MP_SMTP_AUTH_ALLOW_INSECURE: "true"
     ports:
       - "8025:8025"
       - "1025:1025"

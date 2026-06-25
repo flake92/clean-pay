@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeAll, describe, expect, it } from "vitest";
 
 import { integrationCompose } from "./setup/compose";
 
@@ -191,6 +191,20 @@ async function postJson(path: string, body: unknown, jar?: CookieJar) {
   return http(path, { method: "POST", body: JSON.stringify(body) }, jar);
 }
 
+function cloneJar(jar: CookieJar) {
+  return { ...jar };
+}
+
+async function requestCase(
+  testCase: { method: string; path: string; body?: unknown },
+  jar?: CookieJar,
+) {
+  return http(testCase.path, {
+    method: testCase.method,
+    body: testCase.body === undefined ? undefined : JSON.stringify(testCase.body),
+  }, jar);
+}
+
 function findPurchasableOffer(offers: SubscriptionOffers) {
   for (const plan of offers.plans ?? []) {
     for (const duration of plan.durations ?? []) {
@@ -329,6 +343,88 @@ const protectedEndpoints: Array<{ method: string; path: string; body?: unknown }
   { method: "GET", path: "/api/bff/support" },
 ];
 
+const anonymousPublicCases: Array<{ method: string; path: string; body?: unknown; statuses: number[] }> = [
+  { method: "GET", path: "/api/health", statuses: [200] },
+  { method: "GET", path: "/api/health/readiness", statuses: [200] },
+  { method: "GET", path: "/api/bff/plans/public", statuses: [200] },
+  { method: "POST", path: "/api/bff/auth/identify", body: { email: "nobody@example.com" }, statuses: [200] },
+  { method: "POST", path: "/api/bff/auth/identify", body: { email: "" }, statuses: [400] },
+  { method: "POST", path: "/api/bff/auth/login", body: { email: "nobody@example.com", password: "bad-password" }, statuses: [400, 401, 404] },
+  { method: "POST", path: "/api/bff/auth/register", body: { email: "", password: "" }, statuses: [400] },
+  { method: "POST", path: "/api/bff/auth/passkey/login/options", body: {}, statuses: [200] },
+  { method: "POST", path: "/api/bff/auth/passkey/login/verify", body: { id: "missing", response: {} }, statuses: [400, 401] },
+  { method: "POST", path: "/api/bff/auth/logout", statuses: [200] },
+  { method: "POST", path: "/api/logout", statuses: [200] },
+  { method: "GET", path: "/login", statuses: [200] },
+  { method: "GET", path: "/register", statuses: [200] },
+  { method: "GET", path: "/auth/telegram/callback?code=bad-code&state=bad-state", statuses: [307] },
+  { method: "GET", path: "/cabinet", statuses: [307] },
+];
+
+const unverifiedAllowedCases: Array<{ method: string; path: string; body?: unknown; statuses: number[] }> = [
+  { method: "GET", path: "/api/me", statuses: [403] },
+  { method: "GET", path: "/api/bff/auth/me", statuses: [403] },
+  { method: "POST", path: "/api/bff/auth/email/request-verification", body: { email: undefined }, statuses: [200, 201, 202, 400, 429] },
+  { method: "POST", path: "/api/bff/auth/email/confirm", body: { code: "000000", registrationFlow: true }, statuses: [400, 429] },
+  { method: "POST", path: "/api/bff/auth/email/change", body: { email: "bad-email" }, statuses: [400, 403, 409, 422, 429] },
+  { method: "GET", path: "/register/verify-email", statuses: [200] },
+];
+
+const unverifiedBlockedCases: Array<{ method: string; path: string; body?: unknown }> = [
+  { method: "POST", path: "/api/bff/auth/change-password", body: { current_password: "old", new_password: "new" } },
+  { method: "POST", path: "/api/bff/auth/passkey/register/options" },
+  { method: "POST", path: "/api/bff/auth/passkey/register/verify", body: { id: "missing" } },
+  { method: "GET", path: "/api/bff/auth/passkey/credentials" },
+  { method: "DELETE", path: "/api/bff/auth/passkey/credentials/missing" },
+  { method: "POST", path: "/api/bff/link/remnashop", body: { email: "blocked@example.com", password: "CleanPay123!a" } },
+  { method: "GET", path: "/api/bff/subscription/current" },
+  { method: "GET", path: "/api/bff/subscription/offers" },
+  { method: "GET", path: "/api/bff/subscription/devices" },
+  { method: "DELETE", path: "/api/bff/subscription/devices" },
+  { method: "DELETE", path: "/api/bff/subscription/devices/missing-device" },
+  { method: "POST", path: "/api/bff/subscription/promocode", body: { code: "NOPE" } },
+  { method: "POST", path: "/api/bff/subscription/reissue" },
+  { method: "POST", path: "/api/bff/subscription/purchase", body: { plan_code: "missing", duration_days: 30, gateway_type: "TEST" } },
+  { method: "POST", path: "/api/bff/subscription/extend", body: { duration_days: 30, gateway_type: "TEST" } },
+  { method: "GET", path: "/api/bff/payments/history" },
+  { method: "GET", path: "/api/bff/payments/status" },
+  { method: "GET", path: "/api/bff/support" },
+];
+
+const telegramBusinessCases: Array<{ method: string; path: string; body?: unknown; statuses: number[] }> = [
+  { method: "GET", path: "/api/me", statuses: [200] },
+  { method: "GET", path: "/api/bff/auth/me", statuses: [200] },
+  { method: "GET", path: "/api/bff/support", statuses: [200] },
+  { method: "POST", path: "/api/bff/auth/passkey/register/options", body: {}, statuses: [200] },
+  { method: "POST", path: "/api/bff/auth/passkey/register/verify", body: { id: "missing", response: {} }, statuses: [400] },
+  { method: "GET", path: "/api/bff/auth/passkey/credentials", statuses: [200] },
+  { method: "DELETE", path: "/api/bff/auth/passkey/credentials/missing", statuses: [403, 404] },
+  { method: "GET", path: "/api/bff/subscription/current", statuses: [200, 404, 409] },
+  { method: "GET", path: "/api/bff/subscription/offers", statuses: [200, 400, 403, 404, 409, 422] },
+  { method: "GET", path: "/api/bff/subscription/devices", statuses: [200, 400, 404, 409] },
+  { method: "DELETE", path: "/api/bff/subscription/devices", statuses: [200, 400, 404, 409] },
+  { method: "DELETE", path: "/api/bff/subscription/devices/missing-device", statuses: [200, 400, 404, 409] },
+  { method: "POST", path: "/api/bff/subscription/promocode", body: { code: "NOPE" }, statuses: [200, 400, 404, 409, 422] },
+  { method: "POST", path: "/api/bff/subscription/reissue", statuses: [200, 400, 404, 409] },
+  { method: "POST", path: "/api/bff/subscription/purchase", body: { plan_code: "missing", duration_days: 30, gateway_type: "TEST" }, statuses: [400, 404, 409, 422] },
+  { method: "POST", path: "/api/bff/subscription/extend", body: { duration_days: 30, gateway_type: "TEST" }, statuses: [400, 404, 409, 422] },
+  { method: "GET", path: "/api/bff/payments/history", statuses: [200] },
+  { method: "GET", path: "/api/bff/payments/status", statuses: [200] },
+  { method: "GET", path: "/cabinet", statuses: [200] },
+  { method: "GET", path: "/login", statuses: [307] },
+];
+
+const malformedPayloadCases: Array<{ method: string; path: string; body?: unknown; statuses: number[] }> = [
+  { method: "POST", path: "/api/bff/auth/identify", body: {}, statuses: [400] },
+  { method: "POST", path: "/api/bff/auth/login", body: {}, statuses: [400, 401, 422] },
+  { method: "POST", path: "/api/bff/auth/register", body: {}, statuses: [400, 422] },
+  { method: "POST", path: "/api/bff/auth/passkey/login/verify", body: {}, statuses: [400, 401] },
+  { method: "POST", path: "/api/bff/auth/passkey/login/verify", body: { response: { clientDataJSON: "bad" } }, statuses: [400, 401] },
+  { method: "POST", path: "/api/bff/auth/logout", body: { ignored: true }, statuses: [200] },
+  { method: "GET", path: "/api/bff/plans/public?unexpected=1", statuses: [200] },
+  { method: "GET", path: "/auth/telegram/start?redirect_to=https://evil.example.test", statuses: [307] },
+];
+
 afterEach((context) => {
   if (context.task.result?.state === "fail") {
     integrationCompose.logs([
@@ -344,6 +440,89 @@ afterEach((context) => {
 });
 
 describe("real Docker integration stack", () => {
+  let matrixTelegramJar: CookieJar;
+  let matrixUnverified: { jar: CookieJar; email: string; password: string };
+
+  beforeAll(async () => {
+    matrixTelegramJar = await loginWithTelegramOidc();
+    const registered = await registerWithEmail();
+
+    matrixUnverified = {
+      jar: registered.jar,
+      email: registered.email,
+      password: registered.password,
+    };
+  }, 60_000);
+
+  describe("100+ integration endpoint matrix", () => {
+    it.each(anonymousPublicCases)(
+      "anonymous/public $method $path",
+      async (testCase) => {
+        // Проверяем: публичный endpoint доступен без сессии и не превращается в 5xx.
+        const response = await requestCase(testCase);
+
+        await expectNot5xx(response, `${testCase.method} ${testCase.path}`);
+        expect(testCase.statuses, JSON.stringify(await debugResponse(response))).toContain(response.status);
+      },
+    );
+
+    it.each(protectedEndpoints)(
+      "anonymous/protected $method $path",
+      async (testCase) => {
+        // Проверяем: защищенный endpoint без сессии отсекается middleware как UNAUTHORIZED.
+        const response = await requestCase(testCase);
+
+        await expectBffError(response, 401, "UNAUTHORIZED");
+      },
+    );
+
+    it.each(unverifiedAllowedCases)(
+      "unverified-email/allowed $method $path",
+      async (testCase) => {
+        // Проверяем: endpoint из email-verification контура доступен пользователю до подтверждения email.
+        const body = testCase.body && "email" in testCase.body && testCase.body.email === undefined
+          ? { ...testCase.body, email: matrixUnverified.email }
+          : testCase.body;
+        const response = await requestCase({ ...testCase, body }, cloneJar(matrixUnverified.jar));
+
+        await expectNot5xx(response, `${testCase.method} ${testCase.path}`);
+        expect(testCase.statuses, JSON.stringify(await debugResponse(response))).toContain(response.status);
+      },
+    );
+
+    it.each(unverifiedBlockedCases)(
+      "unverified-email/blocked $method $path",
+      async (testCase) => {
+        // Проверяем: бизнесовые endpoint-ы кабинета не доступны до подтверждения email.
+        const response = await requestCase(testCase, cloneJar(matrixUnverified.jar));
+
+        await expectBffError(response, 403, "EMAIL_NOT_VERIFIED");
+      },
+    );
+
+    it.each(telegramBusinessCases)(
+      "telegram/business $method $path",
+      async (testCase) => {
+        // Проверяем: Telegram-пользователь проходит реальные бизнес endpoint-ы без случайных 5xx.
+        const response = await requestCase(testCase, cloneJar(matrixTelegramJar));
+
+        await expectNot5xx(response, `${testCase.method} ${testCase.path}`);
+        expect(testCase.statuses, JSON.stringify(await debugResponse(response))).toContain(response.status);
+      },
+    );
+
+    it.each(malformedPayloadCases)(
+      "malformed/public $method $path",
+      async (testCase) => {
+        // Проверяем: плохой payload/параметры возвращают контролируемые ответы, а не внутренние ошибки.
+        const response = await requestCase(testCase);
+
+        await expectNot5xx(response, `${testCase.method} ${testCase.path}`);
+        expect(testCase.statuses, JSON.stringify(await debugResponse(response))).toContain(response.status);
+      },
+    );
+  });
+
   it("serves Clean Pay health and checks real database, Redis and Remnashop readiness", async () => {
     // Проверяем: публичный health показывает, что Clean Pay жив.
     const health = await http("/api/health");
