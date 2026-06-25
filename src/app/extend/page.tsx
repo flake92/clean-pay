@@ -2,8 +2,8 @@
 
 import { Card } from "primereact/card";
 
-import { ExtendConfirmation } from "@/components/extend-confirmation";
-import { AppShell, PageHeader } from "@/components/layout";
+import { ExtendConfirmation } from "@/frontend/components/extend-confirmation";
+import { AppShell, PageHeader } from "@/frontend/components/layout";
 
 export default function ExtendPage() {
   return (

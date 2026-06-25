@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 
-import { auditLog } from "@/lib/audit";
-import { clearWebSession } from "@/lib/session";
+import { auditLog } from "@/backend/observability/audit";
+import { clearWebSession } from "@/backend/sessions/web-session";
 
 export const runtime = "nodejs";
 

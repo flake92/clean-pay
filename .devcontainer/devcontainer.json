@@ -1,29 +1,42 @@
-// For format details, see https://aka.ms/devcontainer.json. For config options, see the
-// README at: https://github.com/devcontainers/templates/tree/main/src/javascript-node-postgres
 {
-	"name": "Node.js & PostgreSQL",
-	"dockerComposeFile": "docker-compose.yml",
-	"service": "app",
-	"workspaceFolder": "/workspaces/${localWorkspaceFolderBasename}",
-	"features": {
-		"ghcr.io/devcontainers/features/sshd:1": {}
-	},
-	"forwardPorts": [4000, 4001, 5555, 6379, 8025],
-	"remoteUser": "node",
-	"postStartCommand": "git config --global --add safe.directory /workspaces/clean-pay && sh /workspaces/clean-pay/scripts/ensure-node-modules-owner.sh /workspaces/clean-pay/node_modules node:node"
-
-	// Features to add to the dev container. More info: https://containers.dev/features.
-	// "features": {},
-
-	// Use 'forwardPorts' to make a list of ports inside the container available locally.
-	// This can be used to network with other containers or with the host.
-	// "forwardPorts": [4000, 5432],
-
-	// Use 'postCreateCommand' to run commands after the container is created.
-	// "postCreateCommand": "yarn install",
-
-	// Configure tool-specific properties.
-	// "customizations": {},
-
-	// Connect as the non-root Node.js user.
+  "name": "Clean Pay Dev",
+  "dockerComposeFile": "docker-compose.yml",
+  "service": "app",
+  "workspaceFolder": "/workspace/clean-pay",
+  "remoteUser": "node",
+  "shutdownAction": "stopCompose",
+  "forwardPorts": [4002, 5556, 5432, 6379, 5001, 6767, 8080, 8081, 8025, 8026],
+  "portsAttributes": {
+    "4002": {
+      "label": "Clean Pay direct"
+    },
+    "5556": {
+      "label": "Prisma Studio"
+    },
+    "5001": {
+      "label": "Remnashop direct"
+    },
+    "8080": {
+      "label": "Clean Pay via Caddy"
+    },
+    "8081": {
+      "label": "Remnashop via Caddy"
+    },
+    "8025": {
+      "label": "Mailpit direct"
+    },
+    "8026": {
+      "label": "Mailpit via Caddy"
+    }
+  },
+  "postCreateCommand": "npm install && npm run prisma:generate",
+  "postStartCommand": "git config --global --add safe.directory /workspace/clean-pay",
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "dbaeumer.vscode-eslint",
+        "Prisma.prisma"
+      ]
+    }
+  }
 }

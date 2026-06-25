@@ -2,9 +2,29 @@
   "version": "2.0.0",
   "tasks": [
     {
-      "label": "Clean Pay: install dependencies",
+      "label": "Clean Pay: prepare",
       "type": "shell",
-      "command": "sh scripts/ensure-node-modules-owner.sh ${workspaceFolder}/node_modules node:node && npm install && npm run prisma:generate",
+      "command": "npm install && npm run prisma:generate",
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "Clean Pay: migrate",
+      "type": "shell",
+      "dependsOn": "Clean Pay: prepare",
+      "command": "npm run prisma:migrate",
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "Clean Pay: build",
+      "type": "shell",
+      "dependsOn": "Clean Pay: prepare",
+      "command": "npm run build",
       "options": {
         "cwd": "${workspaceFolder}"
       },

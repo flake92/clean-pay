@@ -1,5 +1,5 @@
-import { bffError, bffJson } from "@/lib/bff-response";
-import { getAuthorizedRemnashopTokens, remnashopRequest } from "@/lib/remnashop/client";
+import { bffError, bffJson } from "@/backend/http/bff-response";
+import { getAuthorizedRemnashopTokens, remnashopRequest } from "@/backend/integrations/remnashop/client";
 
 export const runtime = "nodejs";
 

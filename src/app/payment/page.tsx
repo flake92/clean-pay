@@ -3,8 +3,8 @@
 import { Suspense } from "react";
 import { Card } from "primereact/card";
 
-import { AppShell, PageHeader } from "@/components/layout";
-import { PaymentConfirmation } from "@/components/payment-confirmation";
+import { AppShell, PageHeader } from "@/frontend/components/layout";
+import { PaymentConfirmation } from "@/frontend/components/payment-confirmation";
 
 export default function PaymentPage() {
   return (

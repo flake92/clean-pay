@@ -1,8 +1,8 @@
-import { bffError, bffJson } from "@/lib/bff-response";
-import { serializePaymentRecord } from "@/lib/payment-records";
-import { prisma } from "@/lib/prisma";
-import { BffError } from "@/lib/remnashop/errors";
-import { getCurrentUser } from "@/lib/session";
+import { bffError, bffJson } from "@/backend/http/bff-response";
+import { serializePaymentRecord } from "@/backend/payments/records";
+import { prisma } from "@/backend/database/prisma";
+import { BffError } from "@/backend/integrations/remnashop/errors";
+import { getCurrentUser } from "@/backend/sessions/web-session";
 
 export const runtime = "nodejs";
 

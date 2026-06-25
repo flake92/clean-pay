@@ -10,5 +10,3 @@ coverage
 .env.*
 !.env.example
 npm-debug.log*
-Dockerfile
-docker-compose*.yml

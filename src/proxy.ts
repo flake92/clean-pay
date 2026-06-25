@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-import { logger } from "@/lib/logger";
+import { logger } from "@/backend/observability/logger";
 
 const accessCookieName = 'clean_pay_access';
 const refreshCookieName = 'clean_pay_refresh';

@@ -1,110 +1,264 @@
-volumes:
-  postgres-data:
-  redis-data:
-  node-modules:
+name: clean-pay-dev
+
+x-clean-pay-env: &clean-pay-env
+  NODE_ENV: development
+  NEXT_TELEMETRY_DISABLED: "1"
+  WATCHPACK_POLLING: "true"
+  DATABASE_URL: postgresql://clean_pay:clean_pay@postgres:5432/clean_pay?schema=public
+  APP_URL: http://localhost:8080
+  NEXT_PUBLIC_APP_URL: http://localhost:8080
+  LOG_LEVEL: debug
+  REMNASHOP_API_BASE_URL: http://remnashop:5000/api/v1/public
+  REDIS_URL: redis://redis:6379/0
+  WEB_JWT_SECRET: dev-web-jwt-secret-change-me
+  WEB_REFRESH_SECRET: dev-web-refresh-secret-change-me
+  AUDIT_IP_HASH_SECRET: dev-audit-ip-hash-secret-change-me
+  COOKIE_SECURE: "false"
+  COOKIE_SAMESITE: lax
+  TELEGRAM_OIDC_ISSUER: https://oauth.telegram.org
+  TELEGRAM_OIDC_AUTHORIZATION_ENDPOINT: https://oauth.telegram.org/auth
+  TELEGRAM_OIDC_TOKEN_ENDPOINT: https://oauth.telegram.org/token
+  TELEGRAM_OIDC_JWKS_URI: https://oauth.telegram.org/.well-known/jwks.json
+  TELEGRAM_OIDC_CLIENT_ID: dev-telegram-client-id
+  TELEGRAM_OIDC_CLIENT_SECRET: dev-telegram-client-secret
+  TURNSTILE_ENABLED: "false"
+  NEXT_PUBLIC_TURNSTILE_SITE_KEY: ""
+  TURNSTILE_SECRET_KEY: ""
+  TURNSTILE_VERIFY_URL: https://challenges.cloudflare.com/turnstile/v0/siteverify
+  SUPPORT_ENABLED: "true"
+  SUPPORT_EMAIL: support@clean-pay.localhost
+  SUPPORT_TELEGRAM_USERNAME: cleanpay_support
+  SUPPORT_FAQ_URL: http://localhost:8080/support
+
+x-remnashop-env: &remnashop-env
+  APP_DOMAIN: remnashop.localhost
+  APP_HOST: 0.0.0.0
+  APP_PORT: "5000"
+  APP_CRYPT_KEY: cdLLqAspR/IqBkkOKM5qvCKE9LluVyRxTe2SMKd/9vs=
+  APP_SWAGGER_ENABLED: "true"
+  WEB_ENABLED: "true"
+  WEB_CABINET_URL: http://localhost:8080
+  APP_API_KEY: dev-remnashop-api-key-change-me
+  APP_JWT_SECRET: dev-remnashop-jwt-secret-change-me
+  BOT_TOKEN: "1234567890:devtoken"
+  BOT_SECRET_TOKEN: dev-bot-secret-token
+  BOT_OWNER_ID: "1"
+  BOT_SUPPORT_USERNAME: cleanpay_support
+  BOT_API_BASE_URL: http://telegram-mock:8080
+  BOT_MINI_APP: "false"
+  BOT_RESET_WEBHOOK: "false"
+  BOT_DROP_PENDING_UPDATES: "false"
+  BOT_SETUP_COMMANDS: "false"
+  REMNAWAVE_HOST: http://remnawave-mock:3000
+  REMNAWAVE_TOKEN: dev-remnawave-token
+  REMNAWAVE_WEBHOOK_SECRET: dev-remnawave-webhook-secret
+  DATABASE_HOST: remnashop-postgres
+  DATABASE_PORT: "5432"
+  DATABASE_NAME: remnashop
+  DATABASE_USER: remnashop
+  DATABASE_PASSWORD: remnashop
+  REDIS_HOST: remnashop-cache
+  REDIS_PORT: "6379"
+  REDIS_NAME: "0"
+  REDIS_PASSWORD: ""
+  EMAIL_ENABLED: "true"
+  EMAIL_HOST: smtp
+  EMAIL_PORT: "1025"
+  EMAIL_USE_TLS: "false"
+  EMAIL_USE_SSL: "false"
+  EMAIL_USERNAME: ""
+  EMAIL_PASSWORD: ""
+  EMAIL_FROM_EMAIL: no-reply@clean-pay.localhost
+  EMAIL_FROM_NAME: Clean Pay Dev
+  EMAIL_VERIFICATION_CODE_TTL_MINUTES: "15"
+  LOG_TO_FILE: "false"
+  LOG_LEVEL: DEBUG
 
 services:
   app:
-    build: 
-      context: .
-      dockerfile: Dockerfile
-
-    volumes:
-      - ../..:/workspaces:cached
-      - node-modules:/workspaces/clean-pay/node_modules
-      
-    # Overrides default command so things don't shut down after the process ends.
+    build:
+      context: ..
+      dockerfile: .devcontainer/Dockerfile
     command: sleep infinity
-
-    # Use proper Docker networking instead of network_mode: service:db
-    # to ensure reliable DNS resolution in all environments
+    working_dir: /workspace/clean-pay
+    environment:
+      <<: *clean-pay-env
+    volumes:
+      - ..:/workspace/clean-pay:cached
+      - node-modules:/workspace/clean-pay/node_modules
     depends_on:
-      db:
+      postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
-      mailpit:
-        condition: service_healthy
-    networks:
-      - app-network
-    environment:
-      DATABASE_URL: postgresql://postgres:postgres@db:5432/postgres?schema=public
-      APP_URL: http://localhost:4000
-      NEXT_PUBLIC_APP_URL: http://localhost:4000
-      REMNASHOP_API_BASE_URL: ${REMNASHOP_API_BASE_URL:-https://bot2.clear-vpn.org/api/v1/public}
-      # Uses the dev Redis service by default. Override REDIS_URL to connect a real external Redis.
-      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
-      WEB_JWT_SECRET: dev-web-jwt-secret-change-me
-      WEB_REFRESH_SECRET: dev-web-refresh-secret-change-me
-      COOKIE_SECURE: "false"
-      COOKIE_SAMESITE: lax
-      TELEGRAM_OIDC_ISSUER: https://oauth.telegram.org
-      TELEGRAM_OIDC_AUTHORIZATION_ENDPOINT: https://oauth.telegram.org/auth
-      TELEGRAM_OIDC_TOKEN_ENDPOINT: https://oauth.telegram.org/token
-      TELEGRAM_OIDC_JWKS_URI: https://oauth.telegram.org/.well-known/jwks.json
-      TELEGRAM_OIDC_CLIENT_ID: dev-telegram-client-id
-      TELEGRAM_OIDC_CLIENT_SECRET: dev-telegram-client-secret
-      TURNSTILE_ENABLED: ${TURNSTILE_ENABLED:-false}
-      NEXT_PUBLIC_TURNSTILE_SITE_KEY: ${NEXT_PUBLIC_TURNSTILE_SITE_KEY:-dev-turnstile-site-key}
-      TURNSTILE_SECRET_KEY: ${TURNSTILE_SECRET_KEY:-dev-turnstile-secret}
-      TURNSTILE_VERIFY_URL: ${TURNSTILE_VERIFY_URL:-https://challenges.cloudflare.com/turnstile/v0/siteverify}
-
-    # Use "forwardPorts" in **devcontainer.json** to forward an app port locally. 
-    # (Adding the "ports" property to this file will not forward from a Codespace.)
+      remnashop:
+        condition: service_started
     ports:
-      - "4000:4000"
-      - "5555:5555"
+      - "4002:4000"
+      - "5556:5555"
 
-  db:
-    image: postgres:latest
+  postgres:
+    image: postgres:17-alpine
     restart: unless-stopped
-    networks:
-      - app-network
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 30s
+    environment:
+      POSTGRES_DB: clean_pay
+      POSTGRES_USER: clean_pay
+      POSTGRES_PASSWORD: clean_pay
     volumes:
-      - postgres-data:/var/lib/postgresql
-    environment:
-      POSTGRES_PASSWORD: postgres
-      POSTGRES_USER: postgres
-      POSTGRES_DB: postgres
-
-    # Add "forwardPorts": ["5432"] to **devcontainer.json** to forward PostgreSQL locally.
-    # (Adding the "ports" property to this file will not forward from a Codespace.)
-
-  mailpit:
-    image: axllent/mailpit:latest
-    restart: unless-stopped
-    networks:
-      - app-network
-    ports:
-      - "8025:8025"
+      - postgres-data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD", "/mailpit", "readyz"]
-      interval: 10s
+      test: ["CMD-SHELL", "pg_isready -U clean_pay -d clean_pay"]
+      interval: 5s
       timeout: 5s
-      retries: 5
-      start_period: 5s
+      retries: 20
+    ports:
+      - "5432:5432"
 
   redis:
     image: redis:7-alpine
     restart: unless-stopped
-    networks:
-      - app-network
     command: redis-server --appendonly yes
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 5s
     volumes:
       - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    ports:
+      - "6379:6379"
 
-networks:
-  app-network:
-    driver: bridge
+  remnashop:
+    build:
+      context: .
+      dockerfile: remnashop-dev.Dockerfile
+    image: clean-pay-dev-remnashop:latest
+    restart: unless-stopped
+    environment:
+      <<: *remnashop-env
+    depends_on:
+      remnashop-postgres:
+        condition: service_healthy
+      remnashop-cache:
+        condition: service_healthy
+      smtp:
+        condition: service_started
+      telegram-mock:
+        condition: service_started
+    volumes:
+      - remnashop-assets:/opt/remnashop/assets
+      - remnashop-logs:/opt/remnashop/logs
+    ports:
+      - "5001:5000"
+
+  remnashop-worker:
+    image: clean-pay-dev-remnashop:latest
+    restart: unless-stopped
+    command: taskiq worker src.infrastructure.taskiq.worker:worker --workers 1 --ack-type when_received --tasks-pattern src/infrastructure/taskiq/tasks/*.py -fsd
+    environment:
+      <<: *remnashop-env
+    depends_on:
+      remnashop-postgres:
+        condition: service_healthy
+      remnashop-cache:
+        condition: service_healthy
+
+  remnashop-scheduler:
+    image: clean-pay-dev-remnashop:latest
+    restart: unless-stopped
+    command: taskiq scheduler src.infrastructure.taskiq.scheduler:scheduler --tasks-pattern src/infrastructure/taskiq/tasks/*.py -fsd
+    environment:
+      <<: *remnashop-env
+    depends_on:
+      remnashop-postgres:
+        condition: service_healthy
+      remnashop-cache:
+        condition: service_healthy
+
+  remnashop-postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: remnashop
+      POSTGRES_USER: remnashop
+      POSTGRES_PASSWORD: remnashop
+      TZ: UTC
+    volumes:
+      - remnashop-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U remnashop -d remnashop"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    ports:
+      - "6767:5432"
+
+  remnashop-cache:
+    image: valkey/valkey:9-alpine
+    restart: unless-stopped
+    command: valkey-server --save "" --appendonly yes --maxmemory 512mb --maxmemory-policy volatile-lru --loglevel warning
+    volumes:
+      - remnashop-cache-data:/data
+    healthcheck:
+      test: ["CMD", "valkey-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  remnawave-mock:
+    image: node:24-alpine
+    restart: unless-stopped
+    working_dir: /mock
+    command: node server.js
+    volumes:
+      - ./remnawave-mock:/mock:ro
+
+  telegram-mock:
+    image: node:24-alpine
+    restart: unless-stopped
+    working_dir: /mock
+    command: node server.js
+    volumes:
+      - ./telegram-mock:/mock:ro
+
+  smtp:
+    image: axllent/mailpit:latest
+    restart: unless-stopped
+    ports:
+      - "8025:8025"
+      - "1025:1025"
+    healthcheck:
+      test: ["CMD", "/mailpit", "readyz"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      app:
+        condition: service_started
+      remnashop:
+        condition: service_started
+      smtp:
+        condition: service_started
+    ports:
+      - "8080:8080"
+      - "8081:8081"
+      - "8026:8026"
+
+volumes:
+  node-modules:
+  postgres-data:
+  redis-data:
+  remnashop-postgres-data:
+  remnashop-cache-data:
+  remnashop-assets:
+  remnashop-logs:
+  caddy-data:
+  caddy-config:

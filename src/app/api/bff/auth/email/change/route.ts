@@ -1,6 +1,6 @@
-import { bffError, bffJson } from "@/lib/bff-response";
-import type { ChangeEmailRequest } from "@/lib/remnashop/types";
-import { changeEmail } from "@/server/auth/use-cases";
+import { bffError, bffJson } from "@/backend/http/bff-response";
+import type { ChangeEmailRequest } from "@/shared/remnashop/types";
+import { changeEmail } from "@/backend/auth/email-verification";
 
 export const runtime = "nodejs";
 

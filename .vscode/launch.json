@@ -1,245 +1,44 @@
-﻿{
-    "version":  "0.2.0",
-    "configurations":  [
-                           {
-                               "name":  "Clean Pay: Dev Normal (4000)",
-                               "type":  "node-terminal",
-                               "request":  "launch",
-                               "preLaunchTask":  "Clean Pay: install dependencies",
-                               "command":  "npm run dev -- --hostname 0.0.0.0",
-                               "cwd":  "${workspaceFolder}",
-                               "env":  {
-                                           "DATABASE_URL":  "postgresql://postgres:postgres@db:5432/postgres?schema=public",
-                                           "APP_URL":  "http://localhost:4000",
-                                           "NEXT_PUBLIC_APP_URL":  "http://localhost:4000",
-                                           "REMNASHOP_API_BASE_URL":  "http://remnashop-mock:8080/api/v1/public",
-                                           "REDIS_URL":  "redis://redis:6379/0",
-                                           "WEB_JWT_SECRET":  "dev-web-jwt-secret-change-me",
-                                           "WEB_REFRESH_SECRET":  "dev-web-refresh-secret-change-me",
-                                           "AUDIT_IP_HASH_SECRET":  "dev-audit-ip-hash-secret-change-me",
-                                           "COOKIE_SECURE":  "false",
-                                           "COOKIE_SAMESITE":  "lax",
-                                           "TELEGRAM_OIDC_ISSUER":  "https://oauth.telegram.org",
-                                           "TELEGRAM_OIDC_AUTHORIZATION_ENDPOINT":  "https://oauth.telegram.org/auth",
-                                           "TELEGRAM_OIDC_TOKEN_ENDPOINT":  "https://oauth.telegram.org/token",
-                                           "TELEGRAM_OIDC_JWKS_URI":  "https://oauth.telegram.org/.well-known/jwks.json",
-                                           "TELEGRAM_OIDC_CLIENT_ID":  "dev-telegram-client-id",
-                                           "TELEGRAM_OIDC_CLIENT_SECRET":  "dev-telegram-client-secret",
-                                           "TURNSTILE_ENABLED":  "true",
-                                           "NEXT_PUBLIC_TURNSTILE_SITE_KEY":  "1x00000000000000000000AA",
-                                           "TURNSTILE_SECRET_KEY":  "1x0000000000000000000000000000000AA",
-                                           "TURNSTILE_VERIFY_URL":  "http://turnstile-mock:8787/turnstile/v0/siteverify",
-                                           "SUPPORT_ENABLED":  "false",
-                                           "SUPPORT_EMAIL":  "",
-                                           "SUPPORT_TELEGRAM_USERNAME":  "",
-                                           "SUPPORT_FAQ_URL":  "",
-                                           "CLEAN_PAY_MOCK_MODE":  "0"
-                                       },
-                               "serverReadyAction":  {
-                                                         "pattern":  "Local:\\s+http://localhost:(\\d+)",
-                                                         "uriFormat":  "http://localhost:%s",
-                                                         "action":  "openExternally"
-                                                     }
-                           },
-                           {
-                               "name":  "Clean Pay: Dev Mock (4001)",
-                               "type":  "node-terminal",
-                               "request":  "launch",
-                               "preLaunchTask":  "Clean Pay: install dependencies",
-                               "command":  "npm run dev:mock -- --hostname 0.0.0.0",
-                               "cwd":  "${workspaceFolder}",
-                               "env":  {
-                                           "DATABASE_URL":  "postgresql://postgres:postgres@db:5432/postgres?schema=public",
-                                           "APP_URL":  "http://localhost:4001",
-                                           "NEXT_PUBLIC_APP_URL":  "http://localhost:4001",
-                                           "REMNASHOP_API_BASE_URL":  "http://remnashop-mock:8080/api/v1/public",
-                                           "REDIS_URL":  "redis://redis:6379/0",
-                                           "WEB_JWT_SECRET":  "dev-web-jwt-secret-change-me",
-                                           "WEB_REFRESH_SECRET":  "dev-web-refresh-secret-change-me",
-                                           "AUDIT_IP_HASH_SECRET":  "dev-audit-ip-hash-secret-change-me",
-                                           "COOKIE_SECURE":  "false",
-                                           "COOKIE_SAMESITE":  "lax",
-                                           "TELEGRAM_OIDC_ISSUER":  "https://oauth.telegram.org",
-                                           "TELEGRAM_OIDC_AUTHORIZATION_ENDPOINT":  "https://oauth.telegram.org/auth",
-                                           "TELEGRAM_OIDC_TOKEN_ENDPOINT":  "https://oauth.telegram.org/token",
-                                           "TELEGRAM_OIDC_JWKS_URI":  "https://oauth.telegram.org/.well-known/jwks.json",
-                                           "TELEGRAM_OIDC_CLIENT_ID":  "dev-telegram-client-id",
-                                           "TELEGRAM_OIDC_CLIENT_SECRET":  "dev-telegram-client-secret",
-                                           "TURNSTILE_ENABLED":  "false",
-                                           "NEXT_PUBLIC_TURNSTILE_SITE_KEY":  "dev-turnstile-site-key",
-                                           "TURNSTILE_SECRET_KEY":  "dev-turnstile-secret",
-                                           "TURNSTILE_VERIFY_URL":  "http://turnstile-mock:8787/turnstile/v0/siteverify",
-                                           "SUPPORT_ENABLED":  "false",
-                                           "SUPPORT_EMAIL":  "",
-                                           "SUPPORT_TELEGRAM_USERNAME":  "",
-                                           "SUPPORT_FAQ_URL":  "",
-                                           "CLEAN_PAY_MOCK_MODE":  "1"
-                                       },
-                               "serverReadyAction":  {
-                                                         "pattern":  "Local:\\s+http://localhost:(\\d+)",
-                                                         "uriFormat":  "http://localhost:%s",
-                                                         "action":  "openExternally"
-                                                     }
-                           },
-                           {
-                               "name":  "Clean Pay: Start Normal (4000)",
-                               "type":  "node-terminal",
-                               "request":  "launch",
-                               "preLaunchTask":  "Clean Pay: install dependencies",
-                               "command":  "npm run build \u0026\u0026 npm run start:normal",
-                               "cwd":  "${workspaceFolder}",
-                               "env":  {
-                                           "DATABASE_URL":  "postgresql://postgres:postgres@db:5432/postgres?schema=public",
-                                           "APP_URL":  "http://localhost:4000",
-                                           "NEXT_PUBLIC_APP_URL":  "http://localhost:4000",
-                                           "REMNASHOP_API_BASE_URL":  "http://remnashop-mock:8080/api/v1/public",
-                                           "REDIS_URL":  "redis://redis:6379/0",
-                                           "WEB_JWT_SECRET":  "dev-web-jwt-secret-change-me",
-                                           "WEB_REFRESH_SECRET":  "dev-web-refresh-secret-change-me",
-                                           "AUDIT_IP_HASH_SECRET":  "dev-audit-ip-hash-secret-change-me",
-                                           "COOKIE_SECURE":  "false",
-                                           "COOKIE_SAMESITE":  "lax",
-                                           "TELEGRAM_OIDC_ISSUER":  "https://oauth.telegram.org",
-                                           "TELEGRAM_OIDC_AUTHORIZATION_ENDPOINT":  "https://oauth.telegram.org/auth",
-                                           "TELEGRAM_OIDC_TOKEN_ENDPOINT":  "https://oauth.telegram.org/token",
-                                           "TELEGRAM_OIDC_JWKS_URI":  "https://oauth.telegram.org/.well-known/jwks.json",
-                                           "TELEGRAM_OIDC_CLIENT_ID":  "dev-telegram-client-id",
-                                           "TELEGRAM_OIDC_CLIENT_SECRET":  "dev-telegram-client-secret",
-                                           "TURNSTILE_ENABLED":  "false",
-                                           "NEXT_PUBLIC_TURNSTILE_SITE_KEY":  "dev-turnstile-site-key",
-                                           "TURNSTILE_SECRET_KEY":  "dev-turnstile-secret",
-                                           "TURNSTILE_VERIFY_URL":  "http://turnstile-mock:8787/turnstile/v0/siteverify",
-                                           "SUPPORT_ENABLED":  "false",
-                                           "SUPPORT_EMAIL":  "",
-                                           "SUPPORT_TELEGRAM_USERNAME":  "",
-                                           "SUPPORT_FAQ_URL":  "",
-                                           "CLEAN_PAY_MOCK_MODE":  "0"
-                                       },
-                               "serverReadyAction":  {
-                                                         "pattern":  "Local:\\s+http://localhost:(\\d+)",
-                                                         "uriFormat":  "http://localhost:%s",
-                                                         "action":  "openExternally"
-                                                     }
-                           },
-                           {
-                               "name":  "Clean Pay: Start Mock (4001)",
-                               "type":  "node-terminal",
-                               "request":  "launch",
-                               "preLaunchTask":  "Clean Pay: install dependencies",
-                               "command":  "npm run build:mock \u0026\u0026 npm run start:mock",
-                               "cwd":  "${workspaceFolder}",
-                               "env":  {
-                                           "DATABASE_URL":  "postgresql://postgres:postgres@db:5432/postgres?schema=public",
-                                           "APP_URL":  "http://localhost:4001",
-                                           "NEXT_PUBLIC_APP_URL":  "http://localhost:4001",
-                                           "REMNASHOP_API_BASE_URL":  "http://remnashop-mock:8080/api/v1/public",
-                                           "REDIS_URL":  "redis://redis:6379/0",
-                                           "WEB_JWT_SECRET":  "dev-web-jwt-secret-change-me",
-                                           "WEB_REFRESH_SECRET":  "dev-web-refresh-secret-change-me",
-                                           "AUDIT_IP_HASH_SECRET":  "dev-audit-ip-hash-secret-change-me",
-                                           "COOKIE_SECURE":  "false",
-                                           "COOKIE_SAMESITE":  "lax",
-                                           "TELEGRAM_OIDC_ISSUER":  "https://oauth.telegram.org",
-                                           "TELEGRAM_OIDC_AUTHORIZATION_ENDPOINT":  "https://oauth.telegram.org/auth",
-                                           "TELEGRAM_OIDC_TOKEN_ENDPOINT":  "https://oauth.telegram.org/token",
-                                           "TELEGRAM_OIDC_JWKS_URI":  "https://oauth.telegram.org/.well-known/jwks.json",
-                                           "TELEGRAM_OIDC_CLIENT_ID":  "dev-telegram-client-id",
-                                           "TELEGRAM_OIDC_CLIENT_SECRET":  "dev-telegram-client-secret",
-                                           "TURNSTILE_ENABLED":  "false",
-                                           "NEXT_PUBLIC_TURNSTILE_SITE_KEY":  "dev-turnstile-site-key",
-                                           "TURNSTILE_SECRET_KEY":  "dev-turnstile-secret",
-                                           "TURNSTILE_VERIFY_URL":  "http://turnstile-mock:8787/turnstile/v0/siteverify",
-                                           "SUPPORT_ENABLED":  "false",
-                                           "SUPPORT_EMAIL":  "",
-                                           "SUPPORT_TELEGRAM_USERNAME":  "",
-                                           "SUPPORT_FAQ_URL":  "",
-                                           "CLEAN_PAY_MOCK_MODE":  "1"
-                                       },
-                               "serverReadyAction":  {
-                                                         "pattern":  "Local:\\s+http://localhost:(\\d+)",
-                                                         "uriFormat":  "http://localhost:%s",
-                                                         "action":  "openExternally"
-                                                     }
-                           },
-                           {
-                               "name":  "Clean Pay: Prisma Studio",
-                               "type":  "node-terminal",
-                               "request":  "launch",
-                               "preLaunchTask":  "Clean Pay: install dependencies",
-                               "command":  "npm run prisma:studio -- --hostname 0.0.0.0",
-                               "cwd":  "${workspaceFolder}",
-                               "env":  {
-                                           "DATABASE_URL":  "postgresql://postgres:postgres@db:5432/postgres?schema=public",
-                                           "APP_URL":  "http://localhost:4000",
-                                           "NEXT_PUBLIC_APP_URL":  "http://localhost:4000",
-                                           "REMNASHOP_API_BASE_URL":  "http://remnashop-mock:8080/api/v1/public",
-                                           "REDIS_URL":  "redis://redis:6379/0",
-                                           "WEB_JWT_SECRET":  "dev-web-jwt-secret-change-me",
-                                           "WEB_REFRESH_SECRET":  "dev-web-refresh-secret-change-me",
-                                           "AUDIT_IP_HASH_SECRET":  "dev-audit-ip-hash-secret-change-me",
-                                           "COOKIE_SECURE":  "false",
-                                           "COOKIE_SAMESITE":  "lax",
-                                           "TELEGRAM_OIDC_ISSUER":  "https://oauth.telegram.org",
-                                           "TELEGRAM_OIDC_AUTHORIZATION_ENDPOINT":  "https://oauth.telegram.org/auth",
-                                           "TELEGRAM_OIDC_TOKEN_ENDPOINT":  "https://oauth.telegram.org/token",
-                                           "TELEGRAM_OIDC_JWKS_URI":  "https://oauth.telegram.org/.well-known/jwks.json",
-                                           "TELEGRAM_OIDC_CLIENT_ID":  "dev-telegram-client-id",
-                                           "TELEGRAM_OIDC_CLIENT_SECRET":  "dev-telegram-client-secret",
-                                           "TURNSTILE_ENABLED":  "false",
-                                           "NEXT_PUBLIC_TURNSTILE_SITE_KEY":  "dev-turnstile-site-key",
-                                           "TURNSTILE_SECRET_KEY":  "dev-turnstile-secret",
-                                           "TURNSTILE_VERIFY_URL":  "http://turnstile-mock:8787/turnstile/v0/siteverify",
-                                           "SUPPORT_ENABLED":  "false",
-                                           "SUPPORT_EMAIL":  "",
-                                           "SUPPORT_TELEGRAM_USERNAME":  "",
-                                           "SUPPORT_FAQ_URL":  "",
-                                           "CLEAN_PAY_MOCK_MODE":  "0"
-                                       },
-                               "serverReadyAction":  {
-                                                         "pattern":  "Prisma Studio is up on http://localhost:(\\d+)",
-                                                         "uriFormat":  "http://localhost:%s",
-                                                         "action":  "openExternally"
-                                                     }
-                           },
-                           {
-                               "name":  "Clean Pay: Start Normal + Mock (4000/4001)",
-                               "type":  "node-terminal",
-                               "request":  "launch",
-                               "preLaunchTask":  "Clean Pay: install dependencies",
-                               "command":  "npm run build \u0026\u0026 npm run build:mock \u0026\u0026 (npm run start:normal \u0026 npm run start:mock)",
-                               "cwd":  "${workspaceFolder}",
-                               "env":  {
-                                           "DATABASE_URL":  "postgresql://postgres:postgres@db:5432/postgres?schema=public",
-                                           "APP_URL":  "http://localhost:4000",
-                                           "NEXT_PUBLIC_APP_URL":  "http://localhost:4000",
-                                           "REMNASHOP_API_BASE_URL":  "http://remnashop-mock:8080/api/v1/public",
-                                           "REDIS_URL":  "redis://redis:6379/0",
-                                           "WEB_JWT_SECRET":  "dev-web-jwt-secret-change-me",
-                                           "WEB_REFRESH_SECRET":  "dev-web-refresh-secret-change-me",
-                                           "AUDIT_IP_HASH_SECRET":  "dev-audit-ip-hash-secret-change-me",
-                                           "COOKIE_SECURE":  "false",
-                                           "COOKIE_SAMESITE":  "lax",
-                                           "TELEGRAM_OIDC_ISSUER":  "https://oauth.telegram.org",
-                                           "TELEGRAM_OIDC_AUTHORIZATION_ENDPOINT":  "https://oauth.telegram.org/auth",
-                                           "TELEGRAM_OIDC_TOKEN_ENDPOINT":  "https://oauth.telegram.org/token",
-                                           "TELEGRAM_OIDC_JWKS_URI":  "https://oauth.telegram.org/.well-known/jwks.json",
-                                           "TELEGRAM_OIDC_CLIENT_ID":  "dev-telegram-client-id",
-                                           "TELEGRAM_OIDC_CLIENT_SECRET":  "dev-telegram-client-secret",
-                                           "TURNSTILE_ENABLED":  "false",
-                                           "NEXT_PUBLIC_TURNSTILE_SITE_KEY":  "dev-turnstile-site-key",
-                                           "TURNSTILE_SECRET_KEY":  "dev-turnstile-secret",
-                                           "TURNSTILE_VERIFY_URL":  "http://turnstile-mock:8787/turnstile/v0/siteverify",
-                                           "SUPPORT_ENABLED":  "false",
-                                           "SUPPORT_EMAIL":  "",
-                                           "SUPPORT_TELEGRAM_USERNAME":  "",
-                                           "SUPPORT_FAQ_URL":  "",
-                                           "CLEAN_PAY_MOCK_MODE":  "0"
-                                       },
-                               "serverReadyAction":  {
-                                                         "pattern":  "Local:\\s+http://localhost:(\\d+)",
-                                                         "uriFormat":  "http://localhost:%s",
-                                                         "action":  "openExternally"
-                                                     }
-                           }
-                       ]
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Clean Pay: Debug Next.js",
+      "type": "node-terminal",
+      "request": "launch",
+      "preLaunchTask": "Clean Pay: migrate",
+      "command": "npm run dev -- --hostname 0.0.0.0",
+      "cwd": "${workspaceFolder}",
+      "serverReadyAction": {
+        "pattern": "Local:\\s+http://localhost:(\\d+)",
+        "uriFormat": "http://localhost:%s",
+        "action": "openExternally"
+      }
+    },
+    {
+      "name": "Clean Pay: Start Built App",
+      "type": "node-terminal",
+      "request": "launch",
+      "preLaunchTask": "Clean Pay: build",
+      "command": "npm start",
+      "cwd": "${workspaceFolder}",
+      "serverReadyAction": {
+        "pattern": "Local:\\s+http://localhost:(\\d+)",
+        "uriFormat": "http://localhost:%s",
+        "action": "openExternally"
+      }
+    },
+    {
+      "name": "Clean Pay: Prisma Studio",
+      "type": "node-terminal",
+      "request": "launch",
+      "preLaunchTask": "Clean Pay: prepare",
+      "command": "npm run prisma:studio -- --hostname 0.0.0.0",
+      "cwd": "${workspaceFolder}",
+      "serverReadyAction": {
+        "pattern": "Prisma Studio is up on http://localhost:(\\d+)",
+        "uriFormat": "http://localhost:%s",
+        "action": "openExternally"
+      }
+    }
+  ]
 }

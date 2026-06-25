@@ -1,5 +1,5 @@
-import { AppShell, PageHeader } from "@/components/layout";
-import { TariffsPanel } from "@/components/tariffs-panel";
+import { AppShell, PageHeader } from "@/frontend/components/layout";
+import { TariffsPanel } from "@/frontend/components/tariffs-panel";
 
 export default function TariffsPage() {
   return (

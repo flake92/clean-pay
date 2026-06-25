@@ -1,6 +1,6 @@
 import { Suspense } from "react";
 
-import { PaymentReturnStatus } from "@/components/payment-return-status";
+import { PaymentReturnStatus } from "@/frontend/components/payment-return-status";
 
 export default function PaymentFailPage() {
   return (

@@ -1,5 +1,5 @@
-import { AuthShell } from "@/components/layout";
-import { PasskeySetupPanel } from "@/components/passkey-actions";
+import { AuthShell } from "@/frontend/components/layout";
+import { PasskeySetupPanel } from "@/frontend/components/passkey-actions";
 
 export const dynamic = "force-dynamic";
 

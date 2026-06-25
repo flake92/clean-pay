@@ -1,5 +1,5 @@
-import { AppShell, PageHeader } from "@/components/layout";
-import { SupportPanel } from "@/components/support-panel";
+import { AppShell, PageHeader } from "@/frontend/components/layout";
+import { SupportPanel } from "@/frontend/components/support-panel";
 
 export default function SupportPage() {
   return (

@@ -1,6 +1,6 @@
-import { auditLog } from "@/lib/audit";
-import { bffError, bffJson } from "@/lib/bff-response";
-import { clearWebSession } from "@/lib/session";
+import { auditLog } from "@/backend/observability/audit";
+import { bffError, bffJson } from "@/backend/http/bff-response";
+import { clearWebSession } from "@/backend/sessions/web-session";
 
 export const runtime = "nodejs";
 

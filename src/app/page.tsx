@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 
-import { AppShell } from "@/components/layout";
+import { AppShell } from "@/frontend/components/layout";
 
 const actions = [
   {

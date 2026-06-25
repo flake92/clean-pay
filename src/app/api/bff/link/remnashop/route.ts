@@ -1,6 +1,6 @@
-import { bffError, bffJson } from "@/lib/bff-response";
-import type { LoginRequest } from "@/lib/remnashop/types";
-import { linkRemnashopAccount } from "@/server/auth/use-cases";
+import { bffError, bffJson } from "@/backend/http/bff-response";
+import type { LoginRequest } from "@/shared/remnashop/types";
+import { linkRemnashopAccount } from "@/backend/auth/remnashop-link";
 
 export const runtime = "nodejs";
 

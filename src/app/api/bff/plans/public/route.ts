@@ -1,5 +1,5 @@
-import { bffError, bffJson } from "@/lib/bff-response";
-import { remnashopRequest } from "@/lib/remnashop/client";
+import { bffError, bffJson } from "@/backend/http/bff-response";
+import { remnashopRequest } from "@/backend/integrations/remnashop/client";
 
 export const runtime = "nodejs";
 

@@ -1,6 +1,6 @@
-import { bffError, bffJson } from "@/lib/bff-response";
-import { getAuthorizedRemnashopTokens, remnashopRequest } from "@/lib/remnashop/client";
-import type { CurrentSubscriptionResponse } from "@/lib/remnashop/types";
+import { bffError, bffJson } from "@/backend/http/bff-response";
+import { getAuthorizedRemnashopTokens, remnashopRequest } from "@/backend/integrations/remnashop/client";
+import type { CurrentSubscriptionResponse } from "@/shared/remnashop/types";
 
 export const runtime = "nodejs";
 

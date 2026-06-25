@@ -1,7 +1,7 @@
 import { Card } from "primereact/card";
 
-import { AppShell, PageHeader } from "@/components/layout";
-import { VerifyEmailPanel } from "@/components/verify-email-panel";
+import { AppShell, PageHeader } from "@/frontend/components/layout";
+import { VerifyEmailPanel } from "@/frontend/components/verify-email-panel";
 
 export const dynamic = "force-dynamic";
 

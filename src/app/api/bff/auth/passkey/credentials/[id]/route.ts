@@ -1,5 +1,5 @@
-import { bffError, bffJson } from "@/lib/bff-response";
-import { deletePasskey } from "@/server/auth/passkeys";
+import { bffError, bffJson } from "@/backend/http/bff-response";
+import { deletePasskey } from "@/backend/auth/passkeys";
 
 export const runtime = "nodejs";
 

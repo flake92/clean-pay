@@ -1,5 +1,5 @@
-import { AuthShell } from "@/components/layout";
-import { RegisterEmailConfirmForm } from "@/components/register-email-confirm-form";
+import { AuthShell } from "@/frontend/components/layout";
+import { RegisterEmailConfirmForm } from "@/frontend/components/register-email-confirm-form";
 
 export const dynamic = "force-dynamic";
 

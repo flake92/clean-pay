@@ -1,6 +1,6 @@
-import { CabinetPanel } from "@/components/cabinet-panel";
-import { AppShell, PageHeader } from "@/components/layout";
-import { LinkButton } from "@/components/prime/link-button";
+import { CabinetPanel } from "@/frontend/components/cabinet-panel";
+import { AppShell, PageHeader } from "@/frontend/components/layout";
+import { LinkButton } from "@/frontend/components/prime/link-button";
 
 export default function CabinetPage() {
   return (

@@ -1,6 +1,6 @@
-import { bffError, bffJson } from "@/lib/bff-response";
-import type { ChangePasswordRequest } from "@/lib/remnashop/types";
-import { changePassword } from "@/server/auth/use-cases";
+import { bffError, bffJson } from "@/backend/http/bff-response";
+import type { ChangePasswordRequest } from "@/shared/remnashop/types";
+import { changePassword } from "@/backend/auth/password";
 
 export const runtime = "nodejs";
 

@@ -1,7 +1,7 @@
-import { bffError, bffJson } from "@/lib/bff-response";
-import type { RequestEmailVerificationRequest } from "@/lib/remnashop/types";
-import { getRequestIp, getTurnstileToken } from "@/lib/turnstile";
-import { requestEmailVerification } from "@/server/auth/use-cases";
+import { bffError, bffJson } from "@/backend/http/bff-response";
+import type { RequestEmailVerificationRequest } from "@/shared/remnashop/types";
+import { getRequestIp, getTurnstileToken } from "@/backend/security/turnstile";
+import { requestEmailVerification } from "@/backend/auth/email-verification";
 
 export const runtime = "nodejs";
 

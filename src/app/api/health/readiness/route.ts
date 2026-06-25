@@ -5,7 +5,7 @@ import {
   checkDatabase,
   checkRedis,
   checkRemnashop,
-} from "@/lib/health-checks";
+} from "@/backend/health/checks";
 
 export const runtime = "nodejs";
 

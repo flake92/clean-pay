@@ -1,11 +1,11 @@
 import { NextResponse } from "next/server";
 
-import { getEnv } from "@/lib/env";
-import { createTelegramAuthorizationResponse } from "@/lib/telegram-oidc";
-import { assertRateLimit } from "@/lib/rate-limit";
-import { getCurrentUser } from "@/lib/session";
-import { getRequestIp, verifyTurnstileToken } from "@/lib/turnstile";
-import { safeRedirectPath } from "@/server/auth/redirect-policy";
+import { getEnv } from "@/backend/config/env";
+import { createTelegramAuthorizationResponse } from "@/backend/integrations/telegram/oidc";
+import { assertRateLimit } from "@/backend/limits/rate-limit";
+import { getCurrentUser } from "@/backend/sessions/web-session";
+import { getRequestIp, verifyTurnstileToken } from "@/backend/security/turnstile";
+import { safeRedirectPath } from "@/backend/auth/redirect-policy";
 
 export const runtime = "nodejs";
 

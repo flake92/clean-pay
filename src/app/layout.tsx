@@ -3,7 +3,7 @@ import { Geist, Geist_Mono } from "next/font/google";
 import "primereact/resources/primereact.css";
 import "primeicons/primeicons.css";
 import "primeflex/primeflex.css";
-import "../styles/layout/layout.scss";
+import "../frontend/styles/layout/layout.scss";
 import "./globals.css";
 import { Providers } from "./providers";
 

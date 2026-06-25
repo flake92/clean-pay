@@ -1,5 +1,5 @@
-import { bffError, bffJson } from "@/lib/bff-response";
-import { getCurrentAuthProfile } from "@/server/auth/use-cases";
+import { bffError, bffJson } from "@/backend/http/bff-response";
+import { getCurrentAuthProfile } from "@/backend/auth/profile";
 
 export const runtime = "nodejs";
 

@@ -2,8 +2,8 @@
 
 import { Card } from "primereact/card";
 
-import { AppShell, PageHeader } from "@/components/layout";
-import { ProfilePanel } from "@/components/profile-panel";
+import { AppShell, PageHeader } from "@/frontend/components/layout";
+import { ProfilePanel } from "@/frontend/components/profile-panel";
 
 export default function ProfilePage() {
   return (

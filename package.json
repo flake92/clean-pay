@@ -4,15 +4,16 @@
   "private": true,
   "scripts": {
     "dev": "WATCHPACK_POLLING=true next dev --webpack -p 4000",
-    "build": "next build && sh scripts/copy-standalone-assets.sh .next",
-    "start": "PORT=4000 HOSTNAME=0.0.0.0 node .next/standalone/server.js",
-    "start:normal": "PORT=4000 HOSTNAME=0.0.0.0 node .next/standalone/server.js",
+    "build": "NODE_ENV=production next build",
+    "start": "next start -H 0.0.0.0 -p 4000",
     "lint": "eslint",
+    "test": "vitest run",
+    "test:unit": "vitest run tests/unit",
+    "test:integration": "vitest run tests/integration",
+    "test:coverage": "vitest run --coverage",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
-    "prisma:studio": "prisma studio",
-    "smoke": "sh scripts/smoke.sh",
-    "smoke:normal": "BASE_URL=http://127.0.0.1:4000 sh scripts/smoke.sh"
+    "prisma:studio": "prisma studio"
   },
   "dependencies": {
     "@prisma/adapter-pg": "^7.8.0",
@@ -35,11 +36,15 @@
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "@vitejs/plugin-react": "^6.0.3",
+    "@vitest/coverage-v8": "^4.1.9",
     "eslint": "^9",
     "eslint-config-next": "16.2.9",
+    "jsdom": "^29.1.1",
     "prisma": "^7.8.0",
     "sass": "^1.101.0",
     "tailwindcss": "^4",
-    "typescript": "^5"
+    "typescript": "^5",
+    "vitest": "^4.1.9"
   }
 }

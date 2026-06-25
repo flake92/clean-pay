@@ -1,8 +1,8 @@
-import { auditLog } from "@/lib/audit";
-import { bffError, bffJson } from "@/lib/bff-response";
-import type { RegisterRequest } from "@/lib/remnashop/types";
-import { getRequestIp, getTurnstileToken } from "@/lib/turnstile";
-import { registerWithEmail } from "@/server/auth/use-cases";
+import { auditLog } from "@/backend/observability/audit";
+import { bffError, bffJson } from "@/backend/http/bff-response";
+import type { RegisterRequest } from "@/shared/remnashop/types";
+import { getRequestIp, getTurnstileToken } from "@/backend/security/turnstile";
+import { registerWithEmail } from "@/backend/auth/email-register";
 
 export const runtime = "nodejs";
 

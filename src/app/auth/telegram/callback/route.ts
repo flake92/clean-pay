@@ -1,10 +1,10 @@
 import { NextResponse } from "next/server";
 
-import { logTechnicalError, logTechnicalInfo, logTechnicalWarning } from "@/lib/audit";
-import { getEnv } from "@/lib/env";
-import { reconcileUserFromRemnashopAuth } from "@/lib/remnashop/session";
-import { createWebSessionOnResponse } from "@/lib/session";
-import { consumeTelegramCallback } from "@/lib/telegram-oidc";
+import { logTechnicalError, logTechnicalInfo, logTechnicalWarning } from "@/backend/observability/audit";
+import { getEnv } from "@/backend/config/env";
+import { reconcileUserFromRemnashopAuth } from "@/backend/integrations/remnashop/session";
+import { createWebSessionOnResponse } from "@/backend/sessions/web-session";
+import { consumeTelegramCallback } from "@/backend/integrations/telegram/oidc";
 
 export const runtime = "nodejs";
 

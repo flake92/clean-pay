@@ -1,13 +1,13 @@
-import { auditLog } from "@/lib/audit";
-import { bffError, bffJson } from "@/lib/bff-response";
-import { recordPayment } from "@/lib/payment-records";
-import { assertRateLimit } from "@/lib/rate-limit";
-import { getAuthorizedRemnashopTokens, remnashopRequest } from "@/lib/remnashop/client";
+import { auditLog } from "@/backend/observability/audit";
+import { bffError, bffJson } from "@/backend/http/bff-response";
+import { recordPayment } from "@/backend/payments/records";
+import { assertRateLimit } from "@/backend/limits/rate-limit";
+import { getAuthorizedRemnashopTokens, remnashopRequest } from "@/backend/integrations/remnashop/client";
 import type {
   ExtendRequest,
   PaymentInitResponse,
   SubscriptionOffersResponse,
-} from "@/lib/remnashop/types";
+} from "@/shared/remnashop/types";
 
 export const runtime = "nodejs";
 

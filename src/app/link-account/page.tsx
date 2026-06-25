@@ -1,5 +1,5 @@
-import { AppShell, PageHeader } from "@/components/layout";
-import { LinkAccountPanel } from "@/components/link-account-panel";
+import { AppShell, PageHeader } from "@/frontend/components/layout";
+import { LinkAccountPanel } from "@/frontend/components/link-account-panel";
 
 export const dynamic = "force-dynamic";
 

@@ -1,8 +1,8 @@
-import { bffError, bffJson } from "@/lib/bff-response";
-import { logger } from "@/lib/logger";
-import { prisma } from "@/lib/prisma";
-import { assertRateLimit } from "@/lib/rate-limit";
-import { BffError } from "@/lib/remnashop/errors";
+import { bffError, bffJson } from "@/backend/http/bff-response";
+import { logger } from "@/backend/observability/logger";
+import { prisma } from "@/backend/database/prisma";
+import { assertRateLimit } from "@/backend/limits/rate-limit";
+import { BffError } from "@/backend/integrations/remnashop/errors";
 
 export const runtime = "nodejs";
 

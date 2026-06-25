@@ -1,7 +1,7 @@
-import { auditLog } from "@/lib/audit";
-import { bffError, bffJson } from "@/lib/bff-response";
-import { getAuthorizedRemnashopTokens, remnashopRequest } from "@/lib/remnashop/client";
-import type { DeviceDeleteResponse } from "@/lib/remnashop/types";
+import { auditLog } from "@/backend/observability/audit";
+import { bffError, bffJson } from "@/backend/http/bff-response";
+import { getAuthorizedRemnashopTokens, remnashopRequest } from "@/backend/integrations/remnashop/client";
+import type { DeviceDeleteResponse } from "@/shared/remnashop/types";
 
 export const runtime = "nodejs";
 

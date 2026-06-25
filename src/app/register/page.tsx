@@ -1,5 +1,5 @@
-import { AuthTurnstileProvider, RegisterForm } from "@/components/auth-forms";
-import { AuthShell } from "@/components/layout";
+import { AuthTurnstileProvider, RegisterForm } from "@/frontend/components/auth-forms";
+import { AuthShell } from "@/frontend/components/layout";
 
 export const dynamic = "force-dynamic";
 
