@@ -9,7 +9,7 @@ function checkDocker() {
 }
 
 async function setup() {
-  if (process.env.SKIP_INTEGRATION_COMPOSE === "1") {
+  if (process.env.SKIP_INTEGRATION_COMPOSE === "1" || process.argv.includes("list")) {
     return async () => undefined;
   }
 

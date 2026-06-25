@@ -6,6 +6,9 @@
   "remoteUser": "node",
   "updateRemoteUserUID": true,
   "shutdownAction": "stopCompose",
+  "features": {
+    "ghcr.io/devcontainers/features/docker-outside-of-docker:1": {}
+  },
   "forwardPorts": [
     4000,
     5555,
