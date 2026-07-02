@@ -8,13 +8,14 @@ import type {
   PlanOffer,
   SubscriptionOffersResponse,
 } from "@/shared/remnashop/types";
+import { AccountActionRequired } from "@/frontend/components/account-action-required";
+import { LinkButton } from "@/frontend/components/prime/link-button";
+import { BffClientError, readBffError } from "@/frontend/lib/client-api";
+import { findRenewPlan } from "@/frontend/lib/subscription-offers";
 import { Button } from "primereact/button";
 import { Card } from "primereact/card";
 import { Dropdown } from "primereact/dropdown";
 import { Message } from "primereact/message";
-import { BffClientError, readBffError } from "@/frontend/lib/client-api";
-import { AccountActionRequired } from "@/frontend/components/account-action-required";
-import { LinkButton } from "@/frontend/components/prime/link-button";
 
 type LoadState =
   | { status: "loading" }
@@ -29,12 +30,6 @@ function formatDuration(days: number) {
   return `${days} дн.`;
 }
 
-function findRenewPlan(offers: SubscriptionOffersResponse) {
-  return offers.plans.find(
-    (plan) => plan.recommended_purchase_type.toUpperCase() === "RENEW",
-  );
-}
-
 function firstSelection(plan: PlanOffer | undefined) {
   const duration = plan?.durations[0];
   const price = duration?.prices[0];
@@ -47,7 +42,7 @@ function firstSelection(plan: PlanOffer | undefined) {
 }
 
 async function readError(response: Response) {
-  return (await readBffError(response, 'Не удалось выполнить действие.')).message;
+  return (await readBffError(response, "Не удалось выполнить действие.")).message;
 }
 
 export function ExtendConfirmation() {
@@ -60,7 +55,12 @@ export function ExtendConfirmation() {
     fetch("/api/bff/subscription/offers")
       .then(async (response) => {
         if (!response.ok) {
-          throw await readBffError(response, response.status === 401 ? 'Нужно войти в аккаунт.' : 'Не удалось загрузить предложения продления.');
+          throw await readBffError(
+            response,
+            response.status === 401
+              ? "Нужно войти в аккаунт."
+              : "Не удалось загрузить предложения продления.",
+          );
         }
 
         const body = await response.json().catch(() => null);
@@ -106,7 +106,7 @@ export function ExtendConfirmation() {
   if (!state.offers.has_current_subscription) {
     return (
       <div className="flex flex-column gap-4">
-        <Message severity="info" text="Действующая подписка не найдена." />
+        <Message severity="info" text="Действующая подписка не найдена. Сначала выберите тариф." />
         <LinkButton className="w-fit" href="/tariffs" label="Выбрать тариф" />
       </div>
     );
@@ -115,8 +115,11 @@ export function ExtendConfirmation() {
   if (!plan) {
     return (
       <div className="flex flex-column gap-4">
-        <Message severity="info" text="Для продления выберите доступный тариф." />
-        <LinkButton className="w-fit" href="/tariffs" label="Выбрать тариф" />
+        <Message
+          severity="info"
+          text="Продление текущего тарифа недоступно. Можно изменить тариф, но Remnashop применит новый тариф как замену текущего без перерасчета."
+        />
+        <LinkButton className="w-fit" href="/tariffs" label="Изменить тариф" />
       </div>
     );
   }
@@ -126,8 +129,7 @@ export function ExtendConfirmation() {
     (duration) => String(duration.days) === selectedDays,
   );
   const selectedPrice = selectedDuration?.prices.find(
-    (price): price is DurationGatewayPrice =>
-      price.gateway_type === selectedGateway,
+    (price): price is DurationGatewayPrice => price.gateway_type === selectedGateway,
   );
   const priceOptions = plan.durations.flatMap((duration) =>
     duration.prices.map((price) => ({
@@ -182,7 +184,7 @@ export function ExtendConfirmation() {
       <Card className="w-full md:w-30rem">
         <h2 className="text-xl font-semibold">{plan.name}</h2>
         <p className="text-sm text-600">
-          Текущий статус: {state.offers.current_subscription_status ?? "—"}
+          Текущий статус: {state.offers.current_subscription_status ?? "-"}
         </p>
         <label className="flex flex-column gap-2 text-sm font-medium text-700" htmlFor="extend-offer">
           Длительность и способ оплаты

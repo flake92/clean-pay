@@ -45,6 +45,8 @@ If a route needs more than request parsing, a small audit call, and one backend 
 | `POST /api/bff/link/remnashop` | `src/app/api/bff/link/remnashop/route.ts` | `src/backend/auth/remnashop-link.ts` |
 | `GET /auth/telegram/start` | `src/app/auth/telegram/start/route.ts` | `src/backend/integrations/telegram/oidc.ts` |
 | `GET /auth/telegram/callback` | `src/app/auth/telegram/callback/route.ts` | `src/backend/integrations/telegram/oidc.ts`, `src/backend/integrations/remnashop/session.ts` |
+| `GET /auth/telegram/webapp` | `src/app/auth/telegram/webapp/page.tsx` | `src/frontend/components/telegram-webapp-login.tsx` |
+| `POST /api/bff/auth/telegram/webapp` | `src/app/api/bff/auth/telegram/webapp/route.ts` | `src/backend/integrations/remnashop/client.ts`, `src/backend/integrations/remnashop/session.ts` |
 
 ## Plans, Subscription, Payments
 

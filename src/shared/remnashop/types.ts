@@ -36,6 +36,10 @@ export type TelegramAuthRequest = {
   hash: string;
 };
 
+export type TelegramWebAppAuthRequest = {
+  init_data: string;
+};
+
 export type ChangePasswordRequest = {
   current_password: string;
   new_password: string;

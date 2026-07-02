@@ -18,6 +18,7 @@ const coreReadiness = ["clean-pay", "postgres", "redis", "remnashop", "mailpit",
 const remnashopFlow = ["clean-pay", "postgres", "redis", "remnashop"] satisfies MatrixUpstream[];
 const emailFlow = ["clean-pay", "postgres", "redis", "remnashop", "mailpit"] satisfies MatrixUpstream[];
 const telegramFlow = ["clean-pay", "postgres", "redis", "telegram-oidc"] satisfies MatrixUpstream[];
+const telegramWebAppFlow = ["clean-pay", "postgres", "redis", "remnashop"] satisfies MatrixUpstream[];
 
 export const protectedEndpoints: EndpointMatrixCase[] = [
   { method: "GET", path: "/api/me", session: "none", verifiedEmail: "required", upstream: cleanPayOnly, unexpected5xx: "bug" },
@@ -54,6 +55,7 @@ export const anonymousPublicCases: EndpointMatrixCase[] = [
   { method: "POST", path: "/api/bff/auth/identify", body: { email: "" }, statuses: [400], session: "none", verifiedEmail: "not-required", upstream: cleanPayOnly, unexpected5xx: "bug" },
   { method: "POST", path: "/api/bff/auth/login", body: { email: "nobody@example.com", password: "bad-password" }, statuses: [400, 401, 404], session: "none", verifiedEmail: "not-required", upstream: remnashopFlow, unexpected5xx: "bug" },
   { method: "POST", path: "/api/bff/auth/register", body: { email: "", password: "" }, statuses: [400], session: "none", verifiedEmail: "not-required", upstream: cleanPayOnly, unexpected5xx: "bug" },
+  { method: "POST", path: "/api/bff/auth/telegram/webapp", body: {}, statuses: [400, 429], session: "none", verifiedEmail: "not-required", upstream: telegramWebAppFlow, unexpected5xx: "bug" },
   { method: "POST", path: "/api/bff/auth/passkey/login/options", body: {}, statuses: [200], session: "none", verifiedEmail: "not-required", upstream: cleanPayOnly, unexpected5xx: "bug" },
   { method: "POST", path: "/api/bff/auth/passkey/login/verify", body: { id: "missing", response: {} }, statuses: [400, 401], session: "none", verifiedEmail: "not-required", upstream: cleanPayOnly, unexpected5xx: "bug" },
   { method: "POST", path: "/api/bff/auth/logout", statuses: [200], session: "none", verifiedEmail: "not-required", upstream: cleanPayOnly, unexpected5xx: "bug" },
@@ -61,6 +63,7 @@ export const anonymousPublicCases: EndpointMatrixCase[] = [
   { method: "GET", path: "/login", statuses: [200], session: "none", verifiedEmail: "not-required", upstream: cleanPayOnly, unexpected5xx: "bug" },
   { method: "GET", path: "/register", statuses: [200], session: "none", verifiedEmail: "not-required", upstream: cleanPayOnly, unexpected5xx: "bug" },
   { method: "GET", path: "/auth/telegram/callback?code=bad-code&state=bad-state", statuses: [307], session: "none", verifiedEmail: "not-required", upstream: telegramFlow, unexpected5xx: "bug" },
+  { method: "GET", path: "/auth/telegram/webapp", statuses: [200], session: "none", verifiedEmail: "not-required", upstream: cleanPayOnly, unexpected5xx: "bug" },
   { method: "GET", path: "/cabinet", statuses: [307], session: "none", verifiedEmail: "required", upstream: cleanPayOnly, unexpected5xx: "bug" },
 ];
 

@@ -1,6 +1,6 @@
+import { CabinetHeaderActions } from "@/frontend/components/cabinet-header-actions";
 import { CabinetPanel } from "@/frontend/components/cabinet-panel";
 import { AppShell, PageHeader } from "@/frontend/components/layout";
-import { LinkButton } from "@/frontend/components/prime/link-button";
 
 export default function CabinetPage() {
   return (
@@ -8,12 +8,7 @@ export default function CabinetPage() {
       <div className="grid">
         <div className="col-12">
           <PageHeader
-            actions={
-              <>
-                <LinkButton href="/tariffs" label="Тарифы" outlined />
-                <LinkButton href="/extend" label="Продлить" />
-              </>
-            }
+            actions={<CabinetHeaderActions />}
             description="Статус подписки, подключение, устройства и платежи в одном рабочем экране."
             title="Личный кабинет"
           />

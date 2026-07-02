@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from "react";
 import type { AppMenuItem } from "@/frontend/types";
+import { hasRenewOffer } from "@/frontend/lib/subscription-offers";
+import type { SubscriptionOffersResponse } from "@/shared/remnashop/types";
 
 type MenuUser = {
     email: string | null;
@@ -11,34 +13,42 @@ type MenuUser = {
 
 export function useCleanPayMenu() {
     const [user, setUser] = useState<MenuUser | null>(null);
+    const [offers, setOffers] = useState<SubscriptionOffersResponse | null>(null);
     const [profileLoaded, setProfileLoaded] = useState(false);
 
     useEffect(() => {
         let alive = true;
 
-        fetch("/api/me")
-            .then(async (response) => {
-                if (!response.ok) {
-                    return null;
+        async function loadMenuState() {
+            try {
+                const profileResponse = await fetch("/api/me");
+                const nextUser = profileResponse.ok
+                    ? ((await profileResponse.json().catch(() => null))?.user as MenuUser | null)
+                    : null;
+
+                let nextOffers: SubscriptionOffersResponse | null = null;
+                if (nextUser) {
+                    const offersResponse = await fetch("/api/bff/subscription/offers");
+                    nextOffers = offersResponse.ok
+                        ? ((await offersResponse.json().catch(() => null))?.data as SubscriptionOffersResponse | null)
+                        : null;
                 }
 
-                const body = await response.json().catch(() => null);
-
-                return body?.user as MenuUser | null;
-            })
-            .then((nextUser) => {
                 if (!alive) {
                     return;
                 }
 
                 setUser(nextUser);
+                setOffers(nextOffers);
                 setProfileLoaded(true);
-            })
-            .catch(() => {
+            } catch {
                 if (alive) {
                     setProfileLoaded(true);
                 }
-            });
+            }
+        }
+
+        void loadMenuState();
 
         return () => {
             alive = false;
@@ -52,6 +62,8 @@ export function useCleanPayMenu() {
 
     const shouldShowVerifyEmail = profileLoaded && user !== null && Boolean(user.email) && !user.emailVerified;
     const shouldShowLinkAccount = profileLoaded && user !== null;
+    const canRenewSubscription = hasRenewOffer(offers);
+    const hasSubscription = Boolean(offers?.has_current_subscription);
     const accountItems: AppMenuItem[] = [
         { label: "Профиль", icon: "pi pi-fw pi-user", to: "/profile" },
         ...(shouldShowVerifyEmail
@@ -62,14 +74,22 @@ export function useCleanPayMenu() {
             : []),
     ];
 
+    const cleanPayItems: AppMenuItem[] = [
+        { label: "Кабинет", icon: "pi pi-fw pi-home", to: "/cabinet" },
+        {
+            label: hasSubscription ? "Изменить тариф" : "Тарифы",
+            icon: "pi pi-fw pi-tags",
+            to: "/tariffs",
+        },
+        ...(canRenewSubscription
+            ? [{ label: "Продление", icon: "pi pi-fw pi-refresh", to: "/extend" }]
+            : []),
+    ];
+
     const model: AppMenuItem[] = [
         {
             label: "Clean Pay",
-            items: [
-                { label: "Кабинет", icon: "pi pi-fw pi-home", to: "/cabinet" },
-                { label: "Тарифы", icon: "pi pi-fw pi-tags", to: "/tariffs" },
-                { label: "Продление", icon: "pi pi-fw pi-refresh", to: "/extend" },
-            ],
+            items: cleanPayItems,
         },
         {
             label: "Аккаунт",

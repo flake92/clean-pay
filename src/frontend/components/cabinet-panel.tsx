@@ -12,6 +12,8 @@ import { ProgressBar } from "primereact/progressbar";
 import { Tag } from "primereact/tag";
 
 import { LinkButton } from "@/frontend/components/prime/link-button";
+import { hasRenewOffer } from "@/frontend/lib/subscription-offers";
+import type { SubscriptionOffersResponse } from "@/shared/remnashop/types";
 
 type CabinetUser = {
   email: string | null;
@@ -177,6 +179,7 @@ async function getBffMessage(response: Response, fallback: string) {
 export function CabinetPanel() {
   const [user, setUser] = useState<CabinetUser | null>(null);
   const [subscription, setSubscription] = useState<CurrentSubscription | null>(null);
+  const [offers, setOffers] = useState<SubscriptionOffersResponse | null>(null);
   const [devices, setDevices] = useState<DevicesResponse | null>(null);
   const [payments, setPayments] = useState<PaymentRecord[]>([]);
   const [support, setSupport] = useState<SupportSettings | null>(null);
@@ -213,6 +216,17 @@ export function CabinetPanel() {
     }
   }, []);
 
+  const loadOffers = useCallback(async () => {
+    const offersResponse = await fetch("/api/bff/subscription/offers");
+
+    if (offersResponse.ok) {
+      const offersBody = await offersResponse.json();
+      setOffers(offersBody.data);
+    } else {
+      setOffers(null);
+    }
+  }, []);
+
   const loadPayments = useCallback(async () => {
     const paymentsResponse = await fetch("/api/bff/payments/history");
 
@@ -244,6 +258,7 @@ export function CabinetPanel() {
         setUser(profileBody.data.user);
 
         await loadSubscription();
+        await loadOffers();
         await loadDevices();
         await loadPayments();
         await loadSupport();
@@ -253,7 +268,7 @@ export function CabinetPanel() {
     }
 
     loadCabinet();
-  }, [loadDevices, loadPayments, loadSubscription, loadSupport]);
+  }, [loadDevices, loadOffers, loadPayments, loadSubscription, loadSupport]);
 
   async function logout() {
     await fetch("/api/bff/auth/logout", { method: "POST", cache: "no-store" }).catch(() => null);
@@ -726,8 +741,10 @@ export function CabinetPanel() {
       ) : null}
 
       <div className="col-12 flex flex-wrap gap-2">
-        <LinkButton href="/extend" label="Продлить" outlined />
-        <LinkButton href="/tariffs" label="Тарифы" outlined />
+        {hasRenewOffer(offers) ? (
+          <LinkButton href="/extend" label="Продлить" outlined />
+        ) : null}
+        <LinkButton href="/tariffs" label={subscription ? "Изменить тариф" : "Выбрать тариф"} outlined />
         {shouldShowVerifyEmail ? (
           <LinkButton href="/verify-email" label="Подтвердить e-mail" outlined />
         ) : null}

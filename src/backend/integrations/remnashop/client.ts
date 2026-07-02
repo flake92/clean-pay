@@ -18,6 +18,7 @@ import type {
   RemnashopAuthResponse,
   RemnashopMe,
   TelegramAuthRequest,
+  TelegramWebAppAuthRequest,
 } from "@/shared/remnashop/types";
 import { getCurrentSession } from "@/backend/sessions/web-session";
 
@@ -234,8 +235,8 @@ export async function remnashopRequest<T>(path: string, options: RequestOptions 
 }
 
 export async function remnashopAuth(
-  path: "/auth/register" | "/auth/login" | "/auth/telegram",
-  body: RegisterRequest | LoginRequest | TelegramAuthRequest,
+  path: "/auth/register" | "/auth/login" | "/auth/telegram" | "/auth/telegram/webapp",
+  body: RegisterRequest | LoginRequest | TelegramAuthRequest | TelegramWebAppAuthRequest,
 ) {
   const response = await fetchRemnashop(path, {
     method: "POST",

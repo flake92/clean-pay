@@ -10,6 +10,7 @@ const publicPagePaths = new Set([
   '/register',
   '/auth/telegram/start',
   '/auth/telegram/callback',
+  '/auth/telegram/webapp',
 ]);
 
 const publicApiPaths = new Set([
@@ -19,6 +20,7 @@ const publicApiPaths = new Set([
   '/api/bff/auth/identify',
   '/api/bff/auth/login',
   '/api/bff/auth/register',
+  '/api/bff/auth/telegram/webapp',
   '/api/bff/auth/logout',
   '/api/bff/auth/passkey/login/options',
   '/api/bff/auth/passkey/login/verify',

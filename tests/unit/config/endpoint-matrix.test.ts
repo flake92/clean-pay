@@ -15,6 +15,7 @@ const requiredEndpoints = [
   "POST /api/bff/auth/email/confirm",
   "POST /api/bff/auth/email/change",
   "POST /api/bff/auth/change-password",
+  "POST /api/bff/auth/telegram/webapp",
   "GET /auth/telegram/callback?code=bad-code&state=bad-state",
   "POST /api/bff/auth/passkey/register/options",
   "POST /api/bff/auth/passkey/register/verify",
