@@ -54,6 +54,64 @@ export async function checkRemnashop() {
   });
 }
 
+export async function checkMailpit() {
+  const env = getEnv();
+  const mailpitUrl = env.readiness.mailpitUrl;
+
+  if (!mailpitUrl) {
+    return null;
+  }
+
+  return measure(async () => {
+    const response = await fetch(new URL("/api/v1/messages", mailpitUrl), {
+      cache: "no-store",
+    });
+
+    if (!response.ok) {
+      throw new Error(`Mailpit returned ${response.status}`);
+    }
+  });
+}
+
+export async function checkTelegramOidc() {
+  const env = getEnv();
+
+  return measure(async () => {
+    const response = await fetch(env.telegramOidc.jwksUri, {
+      cache: "no-store",
+    });
+
+    if (!response.ok) {
+      throw new Error(`Telegram OIDC returned ${response.status}`);
+    }
+
+    const body = await response.json() as { keys?: unknown[] };
+
+    if (!Array.isArray(body.keys) || body.keys.length === 0) {
+      throw new Error("Telegram OIDC JWKS did not include keys");
+    }
+  });
+}
+
+export async function checkRemnawave() {
+  const env = getEnv();
+  const remnawaveUrl = env.readiness.remnawaveUrl;
+
+  if (!remnawaveUrl) {
+    return null;
+  }
+
+  return measure(async () => {
+    const response = await fetch(new URL("/api/system/metadata", remnawaveUrl), {
+      cache: "no-store",
+    });
+
+    if (!response.ok) {
+      throw new Error(`Remnawave returned ${response.status}`);
+    }
+  });
+}
+
 export function aggregateStatus(results: Record<string, CheckResult>) {
   return Object.values(results).every((result) => result.status === "ok") ? "ok" : "degraded";
 }

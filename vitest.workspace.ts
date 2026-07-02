@@ -21,22 +21,8 @@ export default defineConfig({
           },
         },
       },
-      {
-        test: {
-          name: "route-handlers",
-          environment: "node",
-          globals: true,
-          setupFiles: ["./tests/setup/env.ts"],
-          include: ["tests/route-handlers/**/*.test.ts"],
-          pool: "forks",
-        },
-        resolve: {
-          alias: {
-            "@": srcPath,
-          },
-        },
-      },
       "./vitest.integration.config.ts",
+      "./vitest.e2e.config.ts",
     ],
   },
   resolve: {

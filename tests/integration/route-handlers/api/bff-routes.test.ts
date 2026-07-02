@@ -23,6 +23,9 @@ const mocks = vi.hoisted(() => ({
   checkDatabase: vi.fn(),
   checkRedis: vi.fn(),
   checkRemnashop: vi.fn(),
+  checkMailpit: vi.fn(),
+  checkTelegramOidc: vi.fn(),
+  checkRemnawave: vi.fn(),
 }));
 
 vi.mock("@/backend/observability/audit", () => ({
@@ -55,6 +58,9 @@ vi.mock("@/backend/health/checks", async (importOriginal) => ({
   checkDatabase: mocks.checkDatabase,
   checkRedis: mocks.checkRedis,
   checkRemnashop: mocks.checkRemnashop,
+  checkMailpit: mocks.checkMailpit,
+  checkTelegramOidc: mocks.checkTelegramOidc,
+  checkRemnawave: mocks.checkRemnawave,
 }));
 
 import * as loginRoute from "@/app/api/bff/auth/login/route";
@@ -145,6 +151,9 @@ describe("BFF route integration contracts", () => {
     mocks.checkDatabase.mockResolvedValue({ status: "ok", latencyMs: 1 });
     mocks.checkRedis.mockResolvedValue({ status: "ok", latencyMs: 1 });
     mocks.checkRemnashop.mockResolvedValue({ status: "ok", latencyMs: 1 });
+    mocks.checkMailpit.mockResolvedValue({ status: "ok", latencyMs: 1 });
+    mocks.checkTelegramOidc.mockResolvedValue({ status: "ok", latencyMs: 1 });
+    mocks.checkRemnawave.mockResolvedValue({ status: "ok", latencyMs: 1 });
   });
 
   it("runs auth endpoints through their backend use cases", async () => {
@@ -263,7 +272,12 @@ describe("BFF route integration contracts", () => {
     expect(readiness.status).toBe(503);
     await expect(body(readiness)).resolves.toMatchObject({
       status: "degraded",
-      checks: { redis: { status: "down" } },
+      checks: {
+        redis: { status: "down" },
+        mailpit: { status: "ok" },
+        telegramOidc: { status: "ok" },
+        remnawave: { status: "ok" },
+      },
     });
   });
 });

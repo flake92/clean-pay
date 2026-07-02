@@ -3,14 +3,13 @@ import path from "node:path";
 
 export default defineConfig({
   test: {
-    name: "integration",
+    name: "e2e-full-stack",
     environment: "node",
     globals: true,
-    setupFiles: ["./tests/setup/env.ts"],
-    include: ["tests/integration/**/*.test.ts"],
+    include: ["tests/e2e/full-stack/**/*.test.ts"],
     pool: "forks",
     testTimeout: 60_000,
-    hookTimeout: 360_000,
+    hookTimeout: 120_000,
   },
   resolve: {
     alias: {

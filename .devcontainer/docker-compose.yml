@@ -31,6 +31,8 @@ x-clean-pay-env: &clean-pay-env
   SUPPORT_EMAIL: support@example.com
   SUPPORT_TELEGRAM_USERNAME: cleanpay_support
   SUPPORT_FAQ_URL: http://localhost:4000/support
+  CLEAN_PAY_READINESS_MAILPIT_URL: http://smtp:8025
+  CLEAN_PAY_READINESS_REMNAWAVE_URL: http://remnawave-mock:3000
 
 x-remnashop-env: &remnashop-env
   APP_DOMAIN: remnashop.localhost
@@ -121,18 +123,24 @@ services:
     command: >
       sh -c "sudo mkdir -p /workspace/clean-pay/node_modules /home/node/.npm
       && sudo chown -R node:node /workspace/clean-pay/node_modules /home/node/.npm
-      && sudo chmod 666 /var/run/docker.sock
+      && if [ -d /workspace/clean-pay/.next ]; then sudo chown -R node:node /workspace/clean-pay/.next; fi
+      && if [ -S /var/run/docker.sock ]; then
+        docker_gid=$$(stat -c '%g' /var/run/docker.sock);
+        if [ "$$docker_gid" != "0" ]; then
+          if ! getent group "$$docker_gid" >/dev/null; then sudo groupadd --gid "$$docker_gid" docker-host; fi;
+          docker_group=$$(getent group "$$docker_gid" | cut -d: -f1);
+          sudo usermod -aG "$$docker_group" node;
+        fi;
+      fi
       && sleep infinity"
     working_dir: /workspace/clean-pay
     environment:
       <<: *clean-pay-env
-      CLEAN_PAY_DOCKER_HOST_ROOT: ${CLEAN_PAY_DOCKER_HOST_ROOT:-/Users/alex/code/clean-pay}
-      CLEAN_PAY_INTEGRATION_BASE_URL: http://host.docker.internal:4100
-      CLEAN_PAY_INTEGRATION_MAILPIT_URL: http://host.docker.internal:8125
-      CLEAN_PAY_INTEGRATION_OIDC_URL: http://host.docker.internal:8190
+      CLEAN_PAY_E2E_BASE_URL: http://localhost:4000
+      CLEAN_PAY_E2E_MAILPIT_URL: http://smtp:8025
+      CLEAN_PAY_E2E_OIDC_URL: http://telegram-oidc-mock:8090
     volumes:
       - ..:/workspace/clean-pay:cached
-      - ..:${CLEAN_PAY_DOCKER_HOST_ROOT:-/Users/alex/code/clean-pay}:cached
       - node-modules:/workspace/clean-pay/node_modules
       - /var/run/docker.sock:/var/run/docker.sock
     depends_on:
@@ -262,7 +270,7 @@ services:
     working_dir: /mock
     command: node server.js
     volumes:
-      - ./remnawave-mock:/mock:ro
+      - ${CLEAN_PAY_HOST_DEVCONTAINER_DIR:-.}/remnawave-mock:/mock:ro
 
   telegram-mock:
     image: node:24-alpine
@@ -270,7 +278,7 @@ services:
     working_dir: /mock
     command: node server.js
     volumes:
-      - ./telegram-mock:/mock:ro
+      - ${CLEAN_PAY_HOST_DEVCONTAINER_DIR:-.}/telegram-mock:/mock:ro
 
   telegram-oidc-mock:
     image: node:24-alpine
@@ -283,7 +291,7 @@ services:
       OIDC_PUBLIC_ISSUER: http://localhost:8090
       OIDC_CLIENT_ID: dev-telegram-client-id
     volumes:
-      - ./telegram-oidc-mock:/mock:ro
+      - ${CLEAN_PAY_HOST_DEVCONTAINER_DIR:-.}/telegram-oidc-mock:/mock:ro
     ports:
       - "8090:8090"
 
@@ -293,14 +301,30 @@ services:
     environment:
       MP_SMTP_AUTH_ACCEPT_ANY: "true"
       MP_SMTP_AUTH_ALLOW_INSECURE: "true"
+      MP_WEBHOOK_URL: http://smtp-log:8126/
+      MP_WEBHOOK_LIMIT: "0"
     ports:
       - "8025:8025"
       - "1025:1025"
+    depends_on:
+      smtp-log:
+        condition: service_started
     healthcheck:
       test: ["CMD", "/mailpit", "readyz"]
       interval: 5s
       timeout: 5s
       retries: 20
+
+  smtp-log:
+    image: node:24-alpine
+    restart: unless-stopped
+    working_dir: /logger
+    command: node server.js
+    environment:
+      MAILPIT_API_URL: http://smtp:8025
+      SMTP_LOG_MAX_BODY_CHARS: "12000"
+    volumes:
+      - ./mailpit-logger:/logger:ro
 
   caddy:
     image: caddy:2-alpine

@@ -37,6 +37,10 @@ type AppEnv = {
     telegramUsername: string | null;
     faqUrl: string | null;
   };
+  readiness: {
+    mailpitUrl: string | null;
+    remnawaveUrl: string | null;
+  };
 };
 
 function required(name: string) {
@@ -152,6 +156,10 @@ export function getEnv(): AppEnv {
       email: optional("SUPPORT_EMAIL"),
       telegramUsername: optional("SUPPORT_TELEGRAM_USERNAME"),
       faqUrl: optionalUrl("SUPPORT_FAQ_URL"),
+    },
+    readiness: {
+      mailpitUrl: optionalUrl("CLEAN_PAY_READINESS_MAILPIT_URL"),
+      remnawaveUrl: optionalUrl("CLEAN_PAY_READINESS_REMNAWAVE_URL"),
     },
   };
 }

@@ -69,6 +69,7 @@ If a route needs more than request parsing, a small audit call, and one backend 
 | --- | --- | --- |
 | `GET /api/bff/support` | `src/app/api/bff/support/route.ts` | `src/backend/config/env.ts` |
 | `GET /api/health` | `src/app/api/health/route.ts` | Inline route response |
+| `GET /api/health/liveness` | `src/app/api/health/liveness/route.ts` | Inline route response |
 | `GET /api/health/readiness` | `src/app/api/health/readiness/route.ts` | `src/backend/health/checks.ts` |
 | `GET /api/me` | `src/app/api/me/route.ts` | `src/backend/sessions/web-session.ts` |
 | `POST /api/logout` | `src/app/api/logout/route.ts` | `src/backend/sessions/web-session.ts` |

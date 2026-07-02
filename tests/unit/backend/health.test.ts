@@ -13,7 +13,15 @@ vi.mock("@/backend/cache/redis", () => ({
   redisCommand: mocks.redisCommand,
 }));
 
-import { aggregateStatus, checkDatabase, checkRedis, checkRemnashop } from "@/backend/health/checks";
+import {
+  aggregateStatus,
+  checkDatabase,
+  checkMailpit,
+  checkRedis,
+  checkRemnawave,
+  checkRemnashop,
+  checkTelegramOidc,
+} from "@/backend/health/checks";
 
 describe("health checks", () => {
   beforeEach(() => {
@@ -49,5 +57,37 @@ describe("health checks", () => {
 
     vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(new Response("{}", { status: 503 }));
     await expect(checkRemnashop()).resolves.toMatchObject({ status: "down", message: "Remnashop returned 503" });
+  });
+
+  it("checks optional Mailpit, Telegram OIDC and Remnawave readiness dependencies", async () => {
+    vi.stubEnv("CLEAN_PAY_READINESS_MAILPIT_URL", "http://mailpit.test:8025");
+    vi.stubEnv("CLEAN_PAY_READINESS_REMNAWAVE_URL", "http://remnawave.test:3000");
+
+    const fetch = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response("{}", { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ keys: [{ kid: "dev" }] }), { status: 200 }))
+      .mockResolvedValueOnce(new Response("{}", { status: 200 }));
+
+    await expect(checkMailpit()).resolves.toMatchObject({ status: "ok" });
+    await expect(checkTelegramOidc()).resolves.toMatchObject({ status: "ok" });
+    await expect(checkRemnawave()).resolves.toMatchObject({ status: "ok" });
+
+    expect(fetch).toHaveBeenNthCalledWith(1, new URL("http://mailpit.test:8025/api/v1/messages"), {
+      cache: "no-store",
+    });
+    expect(fetch).toHaveBeenNthCalledWith(2, "https://oauth.telegram.org/.well-known/jwks.json", {
+      cache: "no-store",
+    });
+    expect(fetch).toHaveBeenNthCalledWith(3, new URL("http://remnawave.test:3000/api/system/metadata"), {
+      cache: "no-store",
+    });
+  });
+
+  it("skips optional readiness checks when URLs are not configured", async () => {
+    vi.stubEnv("CLEAN_PAY_READINESS_MAILPIT_URL", "");
+    vi.stubEnv("CLEAN_PAY_READINESS_REMNAWAVE_URL", "");
+
+    await expect(checkMailpit()).resolves.toBeNull();
+    await expect(checkRemnawave()).resolves.toBeNull();
   });
 });

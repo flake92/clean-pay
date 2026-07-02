@@ -23,22 +23,29 @@ remnashop-worker     Remnashop taskiq worker
 remnashop-scheduler  Remnashop taskiq scheduler
 remnawave-mock       Lightweight HTTP placeholder for Remnashop Remnawave calls
 smtp                 Mailpit SMTP catcher
+smtp-log             Logs incoming Mailpit messages to Docker logs
 caddy                Local reverse proxy
 ```
 
 Local URLs:
 
 ```text
-http://localhost:4002  Clean Pay direct Next.js dev server
+http://localhost:4000  Clean Pay direct Next.js dev server
 http://localhost:8080  Clean Pay through Caddy
 http://localhost:5001  Remnashop direct
 http://localhost:8081  Remnashop through Caddy
 http://localhost:8025  Mailpit direct
 http://localhost:8026  Mailpit through Caddy
-http://localhost:5556  Prisma Studio
+http://localhost:5555  Prisma Studio
 ```
 
 Clean Pay talks to Remnashop through compose DNS: `http://remnashop:5000/api/v1/public`.
+
+Incoming dev emails are also printed to the `smtp-log` container:
+
+```bash
+docker compose -p clean-pay-dev -f .devcontainer/docker-compose.yml logs -f smtp-log
+```
 
 Remnashop is a real service container. Its database starts empty, so tariff/payment flows need Remnashop seed/configuration data before they can behave like a populated production bot.
 
@@ -89,17 +96,43 @@ npm run build
 npm run test:unit
 npm run test:route-handlers
 npm run test:integration
+npm run test:e2e:devcontainer
 ```
 
 ## Test Layers
 
 Unit tests live in `tests/unit` and do not start Docker.
 
-Route-handler contract tests live in `tests/route-handlers`. They may import
-route handlers and use explicit mocks, so they are not full integration tests.
+Route-handler contract tests live in `tests/integration/route-handlers`. They
+may import route handlers and use explicit mocks, so they are not full-stack
+tests.
 
-Real integration tests live in `tests/integration`. They start an isolated
-Docker Compose stack from `tests/integration/docker-compose.yml` and call the
-running Clean Pay server through HTTP at `http://localhost:4100`. That stack has
-its own PostgreSQL, Redis, Remnashop, Remnashop database/cache, Mailpit,
-Telegram mocks, and Remnawave mock.
+Service-level integration tests live in `tests/integration/services`.
+
+Full-stack e2e tests live in `tests/e2e/full-stack`. Run them from the host or
+from inside the devcontainer:
+
+```bash
+npm run test:e2e:devcontainer
+```
+
+The e2e command uses `.devcontainer/docker-compose.yml`, starts the local
+dependencies, runs Clean Pay on `http://localhost:4000`, calls the running app
+through HTTP, and checks the real Remnashop service, PostgreSQL, Redis, Mailpit
+at `http://localhost:8025`, Telegram OIDC mock at `http://localhost:8090`, and
+the Remnawave mock. On failure it prints compose status and service logs.
+
+The command stops the devcontainer services after the test run and keeps
+volumes by default. Use a clean reset only when explicitly needed:
+
+```bash
+RESET_E2E=1 npm run test:e2e:devcontainer
+```
+
+PowerShell:
+
+```powershell
+$env:RESET_E2E = "1"
+npm run test:e2e:devcontainer
+Remove-Item Env:RESET_E2E
+```
