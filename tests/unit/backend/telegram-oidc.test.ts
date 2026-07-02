@@ -117,6 +117,8 @@ describe("Telegram OIDC integration", () => {
 
     expect(location).toContain("https://oauth.telegram.org/auth");
     expect(location).toContain("response_type=code");
+    expect(location).toContain("client_id=");
+    expect(location).not.toContain("bot_id=");
     expect(location).toContain("redirect_uri=http%3A%2F%2Flocalhost%3A8080%2Fauth%2Ftelegram%2Fcallback");
     expect(mocks.prisma.telegramAuthState.create).toHaveBeenCalledWith({
       data: expect.objectContaining({
@@ -128,6 +130,16 @@ describe("Telegram OIDC integration", () => {
     expect(response.cookies.get("clean_pay_tg_state")?.value).toBeTruthy();
     expect(response.cookies.get("clean_pay_tg_nonce")?.value).toBeTruthy();
     expect(response.cookies.get("clean_pay_tg_code_verifier")?.value).toBeTruthy();
+  });
+
+  it("keeps client_id for non-Telegram OAuth-compatible mocks", async () => {
+    vi.stubEnv("TELEGRAM_OIDC_AUTHORIZATION_ENDPOINT", "http://localhost:8090/auth");
+    const response = await createTelegramAuthorizationResponse("/cabinet");
+    const location = response.headers.get("location");
+
+    expect(location).toContain("http://localhost:8090/auth");
+    expect(location).toContain("client_id=");
+    expect(location).not.toContain("bot_id=");
   });
 
   it("consumes callback, creates/updates local user and authenticates in Remnashop", async () => {
@@ -143,7 +155,13 @@ describe("Telegram OIDC integration", () => {
 
     expect(globalThis.fetch).toHaveBeenCalledWith(
       "https://oauth.telegram.org/token",
-      expect.objectContaining({ method: "POST", cache: "no-store" }),
+      expect.objectContaining({
+        method: "POST",
+        cache: "no-store",
+        headers: expect.objectContaining({
+          authorization: expect.stringMatching(/^Basic /),
+        }),
+      }),
     );
     expect(mocks.jwtVerify).toHaveBeenCalledWith("id-token", "jwks", {
       issuer: "https://oauth.telegram.org",

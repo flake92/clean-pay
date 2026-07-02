@@ -113,15 +113,20 @@ async function exchangeCodeForIdToken(code: string, codeVerifier: string) {
     code,
     redirect_uri: env.telegramOidc.redirectUri,
     client_id: env.telegramOidc.clientId,
-    client_secret: env.telegramOidc.clientSecret,
     code_verifier: codeVerifier,
   });
+  const basicAuth = Buffer
+    .from(`${env.telegramOidc.clientId}:${env.telegramOidc.clientSecret}`)
+    .toString("base64");
   const startedAt = Date.now();
 
   logger.info("telegram_token_request_sent", {
     method: "POST",
     url: env.telegramOidc.tokenEndpoint,
-    headers: { "content-type": "application/x-www-form-urlencoded" },
+    headers: {
+      "content-type": "application/x-www-form-urlencoded",
+      authorization: "[redacted]",
+    },
     body: Object.fromEntries(body.entries()),
   }, {
     category: "upstream",
@@ -133,6 +138,7 @@ async function exchangeCodeForIdToken(code: string, codeVerifier: string) {
     method: "POST",
     headers: {
       "content-type": "application/x-www-form-urlencoded",
+      authorization: `Basic ${basicAuth}`,
     },
     body,
     cache: "no-store",

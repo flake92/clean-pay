@@ -1,0 +1,12 @@
+services:
+  app:
+    networks:
+      default:
+      public-proxy:
+        aliases:
+          - clean-pay
+
+networks:
+  public-proxy:
+    name: remnawave-network
+    external: true

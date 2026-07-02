@@ -12,6 +12,8 @@ node_modules/
 .env
 .env.*
 !.env.example
+deploy/prod/.env
+deploy/prod/remnashop.env
 
 # next
 .next/

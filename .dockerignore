@@ -8,5 +8,7 @@ coverage
 .git
 .env
 .env.*
+deploy/prod/.env
+deploy/prod/remnashop.env
 !.env.example
 npm-debug.log*
