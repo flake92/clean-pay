@@ -5,6 +5,10 @@ type AppEnv = {
   appUrl: string;
   publicAppUrl: string;
   remnashopApiBaseUrl: string;
+  remnawave: {
+    apiBaseUrl: string | null;
+    token: string | null;
+  };
   webJwtSecret: string;
   webRefreshSecret: string;
   auditIpHashSecret: string;
@@ -125,6 +129,10 @@ export function getEnv(): AppEnv {
     appUrl,
     publicAppUrl: url("NEXT_PUBLIC_APP_URL"),
     remnashopApiBaseUrl: url("REMNASHOP_API_BASE_URL"),
+    remnawave: {
+      apiBaseUrl: optionalUrl("REMNAWAVE_API_BASE_URL"),
+      token: optional("REMNAWAVE_TOKEN"),
+    },
     webJwtSecret: required("WEB_JWT_SECRET"),
     webRefreshSecret: required("WEB_REFRESH_SECRET"),
     auditIpHashSecret: optional("AUDIT_IP_HASH_SECRET") ?? required("WEB_JWT_SECRET"),

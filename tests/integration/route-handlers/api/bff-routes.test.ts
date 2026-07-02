@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({
   linkRemnashopAccount: vi.fn(),
   getAuthorizedRemnashopTokens: vi.fn(),
   remnashopRequest: vi.fn(),
+  getLiveRemnawaveSubscriptionUrl: vi.fn(),
   assertRateLimit: vi.fn(),
   recordPayment: vi.fn(),
   getCurrentUser: vi.fn(),
@@ -45,6 +46,9 @@ vi.mock("@/backend/auth/remnashop-link", () => ({ linkRemnashopAccount: mocks.li
 vi.mock("@/backend/integrations/remnashop/client", () => ({
   getAuthorizedRemnashopTokens: mocks.getAuthorizedRemnashopTokens,
   remnashopRequest: mocks.remnashopRequest,
+}));
+vi.mock("@/backend/integrations/remnawave/client", () => ({
+  getLiveRemnawaveSubscriptionUrl: mocks.getLiveRemnawaveSubscriptionUrl,
 }));
 vi.mock("@/backend/limits/rate-limit", () => ({ assertRateLimit: mocks.assertRateLimit }));
 vi.mock("@/backend/payments/records", async (importOriginal) => ({
@@ -145,6 +149,7 @@ describe("BFF route integration contracts", () => {
     mocks.linkRemnashopAccount.mockResolvedValue({ linked: true });
     mocks.getAuthorizedRemnashopTokens.mockResolvedValue({ accessToken: "access-token", session });
     mocks.remnashopRequest.mockResolvedValue({ ok: true });
+    mocks.getLiveRemnawaveSubscriptionUrl.mockResolvedValue(null);
     mocks.getCurrentUser.mockResolvedValue({ id: "user-1" });
     mocks.prisma.paymentRecord.findMany.mockResolvedValue([record]);
     mocks.prisma.paymentRecord.findFirst.mockResolvedValue(record);
@@ -181,13 +186,27 @@ describe("BFF route integration contracts", () => {
   });
 
   it("proxies public plans and authenticated subscription reads", async () => {
-    mocks.remnashopRequest.mockResolvedValueOnce({ plans: [] }).mockResolvedValueOnce({ uuid: "sub-1" });
+    mocks.remnashopRequest.mockResolvedValueOnce({ plans: [] }).mockResolvedValueOnce({
+      user_remna_id: "rw-1",
+      url: "https://db-sub.example/old",
+    });
+    mocks.getLiveRemnawaveSubscriptionUrl.mockResolvedValueOnce("https://live-sub.example/fresh");
 
     await expect(body(await plansRoute.GET())).resolves.toEqual({ data: { plans: [] } });
-    await expect(body(await currentRoute.GET())).resolves.toEqual({ data: { uuid: "sub-1" } });
+    await expect(body(await currentRoute.GET())).resolves.toEqual({
+      data: {
+        user_remna_id: "rw-1",
+        url: "https://live-sub.example/fresh",
+      },
+    });
 
     expect(mocks.remnashopRequest).toHaveBeenNthCalledWith(1, "/plans/public");
     expect(mocks.remnashopRequest).toHaveBeenNthCalledWith(2, "/subscription/current", { accessToken: "access-token" });
+    expect(mocks.getLiveRemnawaveSubscriptionUrl).toHaveBeenCalledWith({
+      userRemnaId: "rw-1",
+      email: "user@example.com",
+      telegramId: "123",
+    });
   });
 
   it("covers subscription devices, promocode and reissue flows", async () => {
