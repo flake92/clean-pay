@@ -115,8 +115,12 @@ async function exchangeCodeForIdToken(code: string, codeVerifier: string) {
     client_id: env.telegramOidc.clientId,
     code_verifier: codeVerifier,
   });
+  const clientSecret = normalizeTelegramOidcClientSecret(
+    env.telegramOidc.clientId,
+    env.telegramOidc.clientSecret,
+  );
   const basicAuth = Buffer
-    .from(`${env.telegramOidc.clientId}:${env.telegramOidc.clientSecret}`)
+    .from(`${env.telegramOidc.clientId}:${clientSecret}`)
     .toString("base64");
   const startedAt = Date.now();
 
@@ -170,7 +174,16 @@ async function exchangeCodeForIdToken(code: string, codeVerifier: string) {
     throw new Error("Telegram token exchange failed");
   }
 
-  const tokenSet = (await response.json()) as { id_token?: string };
+  const tokenSet = (await response.json()) as { id_token?: string; error?: string; error_description?: string };
+
+  if (tokenSet.error) {
+    logTechnicalWarning("telegram_token_exchange_error_response", {
+      error: tokenSet.error,
+      errorDescription: tokenSet.error_description ?? null,
+    });
+
+    throw new Error(`Telegram token exchange failed: ${tokenSet.error}`);
+  }
 
   if (!tokenSet.id_token) {
     throw new Error("Telegram token response does not contain id_token");
@@ -179,6 +192,16 @@ async function exchangeCodeForIdToken(code: string, codeVerifier: string) {
   authDebugLog("telegram_oidc_token_exchange_success", { hasIdToken: true });
 
   return tokenSet.id_token;
+}
+
+function normalizeTelegramOidcClientSecret(clientId: string, clientSecret: string) {
+  const tokenPrefix = `${clientId}:`;
+
+  if (clientSecret.startsWith(tokenPrefix)) {
+    return clientSecret.slice(tokenPrefix.length);
+  }
+
+  return clientSecret;
 }
 
 function parseTelegramTokenLogBody(text: string) {

@@ -188,6 +188,23 @@ describe("Telegram OIDC integration", () => {
     ]);
   });
 
+  it("uses the bot token secret part when full bot token is configured as OIDC client secret", async () => {
+    vi.stubEnv("TELEGRAM_OIDC_CLIENT_ID", "123456");
+    vi.stubEnv("TELEGRAM_OIDC_CLIENT_SECRET", "123456:secret-part");
+    state.cookies.set("clean_pay_tg_state", "state");
+    state.cookies.set("clean_pay_tg_nonce", "nonce");
+    state.cookies.set("clean_pay_tg_code_verifier", "verifier");
+
+    await consumeTelegramCallback("code", "state");
+
+    const [, options] = vi.mocked(globalThis.fetch).mock.calls[0] ?? [];
+    const authorization = (options as RequestInit | undefined)?.headers
+      ? ((options as RequestInit).headers as Record<string, string>).authorization
+      : "";
+
+    expect(Buffer.from(authorization.replace(/^Basic /, ""), "base64").toString("utf8")).toBe("123456:secret-part");
+  });
+
   it("rejects invalid state cookies and failed token exchange", async () => {
     await expect(consumeTelegramCallback("code", "state")).rejects.toThrow("Telegram OIDC state is invalid");
     expect(mocks.logTechnicalWarning).toHaveBeenCalledWith("telegram_oidc_state_cookie_invalid", expect.any(Object));
@@ -199,6 +216,14 @@ describe("Telegram OIDC integration", () => {
 
     await expect(consumeTelegramCallback("code", "state")).rejects.toThrow("Telegram token exchange failed");
     expect(mocks.logTechnicalWarning).toHaveBeenCalledWith("telegram_token_exchange_failed", expect.any(Object));
+
+    state.cookies.set("clean_pay_tg_state", "state");
+    state.cookies.set("clean_pay_tg_nonce", "nonce");
+    state.cookies.set("clean_pay_tg_code_verifier", "verifier");
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(new Response(JSON.stringify({ error: "invalid_client" }), { status: 200 }));
+
+    await expect(consumeTelegramCallback("code", "state")).rejects.toThrow("Telegram token exchange failed: invalid_client");
+    expect(mocks.logTechnicalWarning).toHaveBeenCalledWith("telegram_token_exchange_error_response", expect.any(Object));
   });
 
   it("rejects invalid id token payloads", async () => {
