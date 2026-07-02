@@ -1,4 +1,4 @@
-import { remnashopAuth } from "@/backend/integrations/remnashop/client";
+import { remnashopAuth, remnashopLinkTelegram } from "@/backend/integrations/remnashop/client";
 import { BffError } from "@/backend/integrations/remnashop/errors";
 import { linkCurrentUserToRemnashopAuth } from "@/backend/integrations/remnashop/session";
 import { assertRateLimit } from "@/backend/limits/rate-limit";
@@ -6,6 +6,7 @@ import { auditLog } from "@/backend/observability/audit";
 import { authDebugLog } from "@/backend/observability/auth-debug-log";
 import type { LoginRequest } from "@/shared/remnashop/types";
 import { requestRemnashopEmailVerification } from "@/backend/auth/email-verification";
+import { getCurrentSession } from "@/backend/sessions/web-session";
 
 export async function linkRemnashopAccount(body: LoginRequest) {
   authDebugLog("remnashop_account_link_started", { hasEmail: Boolean(body.email) });
@@ -34,6 +35,20 @@ export async function linkRemnashopAccount(body: LoginRequest) {
     authDebugLog("remnashop_account_link_register_fallback_success", {
       accessExpiresAt: auth.data.expires_at,
       refreshExpiresAt: auth.data.refresh_expires_at,
+    });
+  }
+
+  const session = await getCurrentSession();
+
+  if (session?.user.telegramId) {
+    await remnashopLinkTelegram({
+      accessToken: auth.cookies.accessToken,
+      telegramId: session.user.telegramId,
+      telegramUsername: session.user.telegramUsername,
+    });
+    authDebugLog("remnashop_account_link_telegram_attached", {
+      telegramId: session.user.telegramId,
+      hasTelegramUsername: Boolean(session.user.telegramUsername),
     });
   }
 

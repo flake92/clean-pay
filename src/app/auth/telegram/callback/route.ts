@@ -4,7 +4,11 @@ import { logTechnicalError, logTechnicalInfo, logTechnicalWarning } from "@/back
 import { getEnv } from "@/backend/config/env";
 import { reconcileUserFromRemnashopAuth } from "@/backend/integrations/remnashop/session";
 import { createWebSessionOnResponse } from "@/backend/sessions/web-session";
-import { consumeTelegramCallback } from "@/backend/integrations/telegram/oidc";
+import {
+  consumeTelegramCallback,
+  consumeTelegramLoginWidgetPayload,
+  consumeTelegramPopupToken,
+} from "@/backend/integrations/telegram/oidc";
 
 export const runtime = "nodejs";
 
@@ -70,5 +74,51 @@ export async function GET(request: Request) {
   } catch (error) {
     logTechnicalError("telegram_callback_failed", error, metadata);
     return redirectTo("/login?auth=telegram_failed");
+  }
+}
+
+export async function POST(request: Request) {
+  try {
+    const body = await request.json().catch(() => null) as {
+      authData?: unknown;
+      idToken?: unknown;
+    } | null;
+    const idToken = typeof body?.idToken === "string" ? body.idToken : null;
+    const authData = body?.authData;
+
+    if (!idToken && (!authData || typeof authData !== "object")) {
+      logTechnicalWarning("telegram_popup_callback_missing_token", {});
+      return NextResponse.json({ error: "telegram_failed" }, { status: 400 });
+    }
+
+    const { user, redirectTo: nextPath, remnashopAuth } = idToken
+      ? await consumeTelegramPopupToken(idToken)
+      : await consumeTelegramLoginWidgetPayload(authData as Parameters<typeof consumeTelegramLoginWidgetPayload>[0]);
+    const response = NextResponse.json({ redirectTo: nextPath ?? "/cabinet" });
+
+    if (remnashopAuth) {
+      const reconciled = await reconcileUserFromRemnashopAuth({
+        accessToken: remnashopAuth.cookies.accessToken,
+        refreshToken: remnashopAuth.cookies.refreshToken,
+        auth: remnashopAuth.data,
+      });
+
+      await createWebSessionOnResponse(response, reconciled.user.id, {
+        remnashopSession: reconciled.remnashopSession,
+      });
+    } else {
+      await createWebSessionOnResponse(response, user.id);
+    }
+
+    logTechnicalInfo("telegram_popup_callback_success", {
+      userId: user.id,
+      remnashopLinked: Boolean(remnashopAuth),
+      redirectTo: nextPath ?? "/cabinet",
+    });
+
+    return response;
+  } catch (error) {
+    logTechnicalError("telegram_popup_callback_failed", error, {});
+    return NextResponse.json({ error: "telegram_failed" }, { status: 400 });
   }
 }

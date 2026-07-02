@@ -103,7 +103,7 @@ async function reconcileRemnashopUser(
     ]);
 
   const targetCandidate =
-    linkedByEmail ?? linkedByRemnashopId ?? linkedByTelegramId;
+    linkedByEmail ?? linkedByTelegramId ?? linkedByRemnashopId;
   const sourceUserIds = [
     linkedByRemnashopId,
     linkedByEmail,
@@ -165,12 +165,12 @@ async function reconcileRemnashopUser(
     where: { id: targetCandidate.id },
     data: {
       remnashopUserId: identity.remnashopUserId,
-      email: identity.email,
-      telegramId: identity.telegramId ?? undefined,
-      telegramUsername: identity.telegramUsername,
-      fullName: identity.fullName,
-      displayName: identity.fullName,
-      emailVerified: identity.emailVerified,
+      email: identity.email ?? targetCandidate.email,
+      telegramId: identity.telegramId ?? targetCandidate.telegramId ?? undefined,
+      telegramUsername: identity.telegramUsername ?? targetCandidate.telegramUsername,
+      fullName: identity.fullName ?? targetCandidate.fullName,
+      displayName: identity.fullName ?? targetCandidate.displayName ?? identity.telegramUsername ?? targetCandidate.telegramUsername,
+      emailVerified: identity.email ? identity.emailVerified : targetCandidate.emailVerified,
       lastLoginAt: new Date(),
     },
   });
@@ -322,6 +322,16 @@ export async function linkCurrentUserToRemnashopAuth({
     }
   }
 
+  if (profile.telegram_id !== null) {
+    const linkedByTelegramId = await prisma.webUser.findUnique({
+      where: { telegramId: String(profile.telegram_id) },
+    });
+
+    if (linkedByTelegramId && linkedByTelegramId.id !== session.userId) {
+      mergeSourceIds.add(linkedByTelegramId.id);
+    }
+  }
+
   const sourceUserIds = [...mergeSourceIds];
   authDebugLog("remnashop_link_merge_plan", {
     sessionId: session.id,
@@ -349,10 +359,12 @@ export async function linkCurrentUserToRemnashopAuth({
       where: { id: session.userId },
       data: {
         remnashopUserId,
-        email: profile.email,
-        emailVerified: profile.is_email_verified,
-        fullName: profile.name,
-        displayName: profile.name,
+        email: profile.email ?? session.user.email,
+        emailVerified: profile.email ? profile.is_email_verified : session.user.emailVerified,
+        telegramId: profile.telegram_id === null ? session.user.telegramId : String(profile.telegram_id),
+        telegramUsername: profile.username ?? session.user.telegramUsername,
+        fullName: profile.name ?? session.user.fullName,
+        displayName: profile.name ?? session.user.displayName ?? profile.username ?? session.user.telegramUsername,
         lastLoginAt: new Date(),
       },
     });

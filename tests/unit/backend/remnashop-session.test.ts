@@ -143,6 +143,38 @@ describe("Remnashop session reconciliation", () => {
     expect(mocks.auditLog).toHaveBeenCalledWith(expect.objectContaining({ action: "remnashop_account_linked" }));
   });
 
+  it("keeps a known email when a Telegram-only Remnashop profile is reconciled", async () => {
+    mocks.getRemnashopMe.mockResolvedValueOnce({
+      ...profile,
+      email: null,
+      is_email_verified: false,
+      telegram_id: 123,
+    });
+    tx.webUser.findUnique
+      .mockResolvedValueOnce({ id: "telegram-remna-user", email: null, emailVerified: false, telegramId: "123" })
+      .mockResolvedValueOnce({
+        id: "local-email-user",
+        email: "user@example.com",
+        emailVerified: true,
+        telegramId: "123",
+        telegramUsername: "clean_user",
+        fullName: "Clean User",
+        displayName: "Clean User",
+      });
+
+    await reconcileUserFromRemnashopAuth({ accessToken: "access", refreshToken: "refresh", auth });
+
+    expect(tx.webUser.update).toHaveBeenCalledWith({
+      where: { id: "local-email-user" },
+      data: expect.objectContaining({
+        remnashopUserId: "remna-1",
+        email: "user@example.com",
+        emailVerified: true,
+        telegramId: "123",
+      }),
+    });
+  });
+
   it("links current user, merges other matched identities and updates session tokens", async () => {
     mocks.prisma.webUser.findUnique
       .mockResolvedValueOnce({ id: "other-remna" })
@@ -163,6 +195,39 @@ describe("Remnashop session reconciliation", () => {
       data: expect.objectContaining({
         remnashopAccessTokenEncrypted: "protected:access",
         remnashopRefreshTokenEncrypted: "protected:refresh",
+      }),
+    });
+  });
+
+  it("keeps a known Telegram id when an email-only Remnashop profile is linked", async () => {
+    mocks.getRemnashopMe.mockResolvedValueOnce({
+      ...profile,
+      telegram_id: null,
+      username: null,
+    });
+    mocks.getCurrentSession.mockResolvedValueOnce({
+      id: "session-1",
+      userId: "user-1",
+      user: {
+        email: "user@example.com",
+        emailVerified: true,
+        telegramId: "123",
+        telegramUsername: "clean_user",
+        fullName: "Clean User",
+        displayName: "Clean User",
+      },
+    });
+
+    await linkCurrentUserToRemnashopAuth({ accessToken: "access", refreshToken: "refresh", auth });
+
+    expect(tx.webUser.update).toHaveBeenCalledWith({
+      where: { id: "user-1" },
+      data: expect.objectContaining({
+        remnashopUserId: "remna-1",
+        email: "user@example.com",
+        emailVerified: true,
+        telegramId: "123",
+        telegramUsername: "clean_user",
       }),
     });
   });

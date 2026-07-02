@@ -1,7 +1,10 @@
 import { NextResponse } from "next/server";
 
 import { getEnv } from "@/backend/config/env";
-import { createTelegramAuthorizationResponse } from "@/backend/integrations/telegram/oidc";
+import {
+  createTelegramAuthorizationResponse,
+  createTelegramPopupStartResponse,
+} from "@/backend/integrations/telegram/oidc";
 import { assertRateLimit } from "@/backend/limits/rate-limit";
 import { getCurrentUser } from "@/backend/sessions/web-session";
 import { getRequestIp, verifyTurnstileToken } from "@/backend/security/turnstile";
@@ -33,6 +36,10 @@ export async function GET(request: Request) {
       limit: 10,
       windowSeconds: 15 * 60,
     });
+
+    if (url.searchParams.get("mode") === "popup") {
+      return createTelegramPopupStartResponse(redirectTo, currentUser?.id);
+    }
 
     return createTelegramAuthorizationResponse(redirectTo, currentUser?.id);
   } catch (error) {

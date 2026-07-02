@@ -51,7 +51,7 @@ export function useCleanPayMenu() {
     }
 
     const shouldShowVerifyEmail = profileLoaded && user !== null && Boolean(user.email) && !user.emailVerified;
-    const shouldShowLinkAccount = profileLoaded && user !== null && (!user.email || !user.telegramId);
+    const shouldShowLinkAccount = profileLoaded && user !== null;
     const accountItems: AppMenuItem[] = [
         { label: "Профиль", icon: "pi pi-fw pi-user", to: "/profile" },
         ...(shouldShowVerifyEmail
@@ -68,7 +68,6 @@ export function useCleanPayMenu() {
             items: [
                 { label: "Кабинет", icon: "pi pi-fw pi-home", to: "/cabinet" },
                 { label: "Тарифы", icon: "pi pi-fw pi-tags", to: "/tariffs" },
-                { label: "Оплата", icon: "pi pi-fw pi-credit-card", to: "/payment" },
                 { label: "Продление", icon: "pi pi-fw pi-refresh", to: "/extend" },
             ],
         },

@@ -169,8 +169,8 @@ export function PaymentConfirmation() {
   if (!selection) {
     return (
       <div className="flex flex-column gap-4">
-        <Message severity="error" text="Выбранный тариф недоступен." />
-        <LinkButton className="w-fit" href="/tariffs" label="Вернуться к тарифам" outlined />
+        <Message severity="info" text="Для оплаты сначала выберите тариф, срок и способ оплаты." />
+        <LinkButton className="w-fit" href="/tariffs" label="Выбрать тариф" />
       </div>
     );
   }

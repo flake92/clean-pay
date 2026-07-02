@@ -26,32 +26,68 @@ declare global {
 
 const scriptId = "cloudflare-turnstile-script";
 const siteKey = process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY;
+let turnstileScriptPromise: Promise<void> | null = null;
+
+function waitForTurnstileApi() {
+  return new Promise<void>((resolve, reject) => {
+    const startedAt = Date.now();
+    const interval = window.setInterval(() => {
+      if (window.turnstile?.render) {
+        window.clearInterval(interval);
+        resolve();
+        return;
+      }
+
+      if (Date.now() - startedAt > 5000) {
+        window.clearInterval(interval);
+        reject(new Error("Turnstile API is unavailable"));
+      }
+    }, 50);
+  });
+}
 
 function loadTurnstileScript() {
   if (typeof window === "undefined" || window.turnstile) {
     return Promise.resolve();
   }
 
+  if (turnstileScriptPromise) {
+    return turnstileScriptPromise;
+  }
+
   const existing = document.getElementById(scriptId) as HTMLScriptElement | null;
 
   if (existing) {
-    return new Promise<void>((resolve, reject) => {
-      existing.addEventListener("load", () => resolve(), { once: true });
+    turnstileScriptPromise = new Promise<void>((resolve, reject) => {
+      if (window.turnstile) {
+        resolve();
+        return;
+      }
+
+      existing.addEventListener("load", () => {
+        waitForTurnstileApi().then(resolve).catch(reject);
+      }, { once: true });
       existing.addEventListener("error", () => reject(new Error("Turnstile script failed to load")), { once: true });
     });
+
+    return turnstileScriptPromise;
   }
 
-  return new Promise<void>((resolve, reject) => {
+  turnstileScriptPromise = new Promise<void>((resolve, reject) => {
     const script = document.createElement("script");
 
     script.id = scriptId;
     script.async = true;
     script.defer = true;
     script.src = "https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit";
-    script.addEventListener("load", () => resolve(), { once: true });
+    script.addEventListener("load", () => {
+      waitForTurnstileApi().then(resolve).catch(reject);
+    }, { once: true });
     script.addEventListener("error", () => reject(new Error("Turnstile script failed to load")), { once: true });
     document.head.appendChild(script);
   });
+
+  return turnstileScriptPromise;
 }
 
 export type TurnstileHandle = {
@@ -96,7 +132,7 @@ export function TurnstileWidget({
 
         widgetIdRef.current = window.turnstile.render(containerRef.current, {
           sitekey: siteKey,
-          size: "flexible",
+          size: "normal",
           callback: (token) => {
             setError(null);
             onToken(token);

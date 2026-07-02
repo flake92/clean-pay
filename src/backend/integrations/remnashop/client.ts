@@ -299,6 +299,38 @@ export async function getRemnashopMe(accessToken: string) {
   });
 }
 
+export async function remnashopLinkTelegram({
+  accessToken,
+  telegramId,
+  telegramUsername,
+}: {
+  accessToken: string;
+  telegramId: number | string;
+  telegramUsername?: string | null;
+}) {
+  const botToken = getEnv().telegramBotToken;
+
+  if (!botToken) {
+    throw new BffError("INTERNAL_ERROR", 500, "TELEGRAM_BOT_TOKEN is required to link Telegram in Remnashop.");
+  }
+
+  const bodyWithoutHash: Omit<TelegramAuthRequest, "hash"> = {
+    id: Number(telegramId),
+    first_name: telegramUsername || "Telegram",
+    username: telegramUsername ?? undefined,
+    auth_date: Math.floor(Date.now() / 1000),
+  };
+
+  return remnashopRequest<RemnashopMe>("/auth/telegram/link", {
+    method: "POST",
+    accessToken,
+    body: {
+      ...bodyWithoutHash,
+      hash: signTelegramAuthPayload(bodyWithoutHash, botToken),
+    },
+  });
+}
+
 function signTelegramAuthPayload(body: Omit<TelegramAuthRequest, "hash">, botToken: string) {
   const dataCheckString = Object.entries(body)
     .filter(([, value]) => value !== undefined && value !== null && value !== "")

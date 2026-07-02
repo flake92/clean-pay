@@ -15,6 +15,7 @@ import { remnashopAuth } from "@/backend/integrations/remnashop/client";
 import type { TelegramAuthRequest } from "@/shared/remnashop/types";
 
 const telegramAuthTtlSeconds = 10 * 60;
+const telegramLoginAuthMaxAgeSeconds = 24 * 60 * 60;
 
 const telegramOidcCookieNames = {
   state: "clean_pay_tg_state",
@@ -96,6 +97,43 @@ export async function createTelegramAuthorizationResponse(
     hasRedirectTo: Boolean(redirectTo),
     linkUserId: userId,
   });
+
+  return response;
+}
+
+export async function createTelegramPopupStartResponse(
+  redirectTo?: string,
+  userId?: string,
+) {
+  const env = getEnv();
+  const state = randomToken();
+  const nonce = randomToken();
+  const codeVerifier = randomToken(64);
+
+  await prisma.telegramAuthState.create({
+    data: {
+      stateHash: sha256(state),
+      nonceHash: sha256(nonce),
+      codeVerifierHash: sha256(codeVerifier),
+      redirectTo,
+      userId,
+      expiresAt: addSeconds(new Date(), telegramAuthTtlSeconds),
+    },
+  });
+
+  const response = NextResponse.json({
+    clientId: env.telegramOidc.clientId,
+    nonce,
+  });
+  const cookieOptions = temporaryCookieOptions();
+
+  response.cookies.set(telegramOidcCookieNames.state, state, cookieOptions);
+  response.cookies.set(telegramOidcCookieNames.nonce, nonce, cookieOptions);
+  response.cookies.set(
+    telegramOidcCookieNames.codeVerifier,
+    codeVerifier,
+    cookieOptions,
+  );
 
   return response;
 }
@@ -300,6 +338,57 @@ function signTelegramAuthPayload(body: Omit<TelegramAuthRequest, "hash">, botTok
   return createHmac("sha256", secret).update(dataCheckString).digest("hex");
 }
 
+type TelegramLoginWidgetPayload = Partial<TelegramAuthRequest> & {
+  hash?: string | null;
+};
+
+function verifyTelegramLoginWidgetPayload(payload: TelegramLoginWidgetPayload) {
+  const env = getEnv();
+
+  if (!env.telegramBotToken) {
+    throw new Error("TELEGRAM_BOT_TOKEN is required for Telegram Login widget");
+  }
+
+  if (!payload.hash) {
+    throw new Error("Telegram Login payload does not contain hash");
+  }
+
+  if (!payload.id || !payload.auth_date) {
+    throw new Error("Telegram Login payload is incomplete");
+  }
+
+  const authDate = Number(payload.auth_date);
+
+  if (!Number.isFinite(authDate) || authDate <= 0) {
+    throw new Error("Telegram Login payload contains invalid auth_date");
+  }
+
+  const now = Math.floor(Date.now() / 1000);
+
+  if (now - authDate > telegramLoginAuthMaxAgeSeconds) {
+    throw new Error("Telegram Login payload is expired");
+  }
+
+  const bodyWithoutHash: Omit<TelegramAuthRequest, "hash"> = {
+    id: Number(payload.id),
+    first_name: payload.first_name ?? "Telegram",
+    last_name: payload.last_name,
+    username: payload.username,
+    photo_url: payload.photo_url,
+    auth_date: authDate,
+  };
+  const expectedHash = signTelegramAuthPayload(bodyWithoutHash, env.telegramBotToken);
+
+  if (expectedHash !== payload.hash) {
+    throw new Error("Telegram Login payload hash is invalid");
+  }
+
+  return {
+    ...bodyWithoutHash,
+    hash: payload.hash,
+  };
+}
+
 async function authenticateRemnashopWithTelegram(payload: JWTPayload, telegramId: string, telegramUsername: string | null) {
   const env = getEnv();
 
@@ -330,6 +419,18 @@ async function authenticateRemnashopWithTelegram(payload: JWTPayload, telegramId
     logTechnicalError("telegram_remnashop_auth_failed", error, {
       telegramId,
       hasUsername: Boolean(telegramUsername),
+    });
+    return null;
+  }
+}
+
+async function authenticateRemnashopWithTelegramPayload(payload: TelegramAuthRequest) {
+  try {
+    return await remnashopAuth("/auth/telegram", payload);
+  } catch (error) {
+    logTechnicalError("telegram_remnashop_auth_failed", error, {
+      telegramId: payload.id.toString(),
+      hasUsername: Boolean(payload.username),
     });
     return null;
   }
@@ -394,6 +495,116 @@ export async function consumeTelegramCallback(code: string, state: string) {
   });
 
   const idToken = await exchangeCodeForIdToken(code, codeVerifier);
+
+  return consumeTelegramIdToken(idToken, {
+    authState,
+    nonce,
+  });
+}
+
+export async function consumeTelegramPopupToken(idToken: string) {
+  const cookieStore = await cookies();
+  const nonce = cookieStore.get(telegramOidcCookieNames.nonce)?.value;
+
+  authDebugLog("telegram_popup_callback_consume_started", {
+    hasIdToken: Boolean(idToken),
+    hasNonceCookie: Boolean(nonce),
+  });
+
+  if (!nonce) {
+    logTechnicalWarning("telegram_popup_nonce_cookie_invalid", {
+      hasNonce: false,
+    });
+
+    throw new Error("Telegram popup nonce is invalid");
+  }
+
+  const authState = await prisma.telegramAuthState.findFirst({
+    where: {
+      nonceHash: sha256(nonce),
+      consumedAt: null,
+      expiresAt: { gt: new Date() },
+    },
+  });
+
+  if (!authState) {
+    logTechnicalWarning("telegram_popup_state_not_found", {
+      hasNonce: true,
+    });
+
+    throw new Error("Telegram popup state was not found or has expired");
+  }
+
+  return consumeTelegramIdToken(idToken, {
+    authState,
+    nonce,
+  });
+}
+
+export async function consumeTelegramLoginWidgetPayload(payload: TelegramLoginWidgetPayload) {
+  const cookieStore = await cookies();
+  const nonce = cookieStore.get(telegramOidcCookieNames.nonce)?.value;
+
+  authDebugLog("telegram_widget_callback_consume_started", {
+    hasHash: Boolean(payload.hash),
+    hasNonceCookie: Boolean(nonce),
+  });
+
+  if (!nonce) {
+    logTechnicalWarning("telegram_widget_nonce_cookie_invalid", {
+      hasNonce: false,
+    });
+
+    throw new Error("Telegram widget nonce is invalid");
+  }
+
+  const authState = await prisma.telegramAuthState.findFirst({
+    where: {
+      nonceHash: sha256(nonce),
+      consumedAt: null,
+      expiresAt: { gt: new Date() },
+    },
+  });
+
+  if (!authState) {
+    logTechnicalWarning("telegram_widget_state_not_found", {
+      hasNonce: true,
+    });
+
+    throw new Error("Telegram widget state was not found or has expired");
+  }
+
+  const verifiedPayload = verifyTelegramLoginWidgetPayload(payload);
+  const fullName = [
+    verifiedPayload.first_name,
+    verifiedPayload.last_name,
+  ].filter(Boolean).join(" ") || null;
+
+  return completeTelegramAuth(authState, {
+    telegramId: verifiedPayload.id.toString(),
+    telegramUsername: verifiedPayload.username ?? null,
+    fullName,
+    photoUrl: verifiedPayload.photo_url ?? null,
+    remnashopPayload: verifiedPayload,
+    source: "widget",
+  });
+}
+
+async function consumeTelegramIdToken(
+  idToken: string,
+  {
+    authState,
+    nonce,
+  }: {
+    authState: {
+      id: string;
+      userId: string | null;
+      redirectTo: string | null;
+      expiresAt: Date;
+    };
+    nonce: string;
+  },
+) {
   const payload = await verifyTelegramIdToken(idToken, nonce).catch((error) => {
     logTechnicalError("telegram_id_token_verification_failed", error, {
       authStateId: authState.id,
@@ -402,6 +613,7 @@ export async function consumeTelegramCallback(code: string, state: string) {
 
     throw error;
   });
+
   const telegramId = getTelegramId(payload);
   const telegramUsername =
     typeof payload.preferred_username === "string"
@@ -409,6 +621,46 @@ export async function consumeTelegramCallback(code: string, state: string) {
       : null;
   const fullName = getFullName(payload);
   const photoUrl = typeof payload.picture === "string" ? payload.picture : null;
+  const remnashopAuthResult = await authenticateRemnashopWithTelegram(
+    payload,
+    telegramId,
+    telegramUsername,
+  );
+
+  return completeTelegramAuth(authState, {
+    telegramId,
+    telegramUsername,
+    fullName,
+    photoUrl,
+    remnashopAuthResult,
+    source: "oidc",
+  });
+}
+
+async function completeTelegramAuth(
+  authState: {
+    id: string;
+    userId: string | null;
+    redirectTo: string | null;
+    expiresAt: Date;
+  },
+  identity: {
+    telegramId: string;
+    telegramUsername: string | null;
+    fullName: string | null;
+    photoUrl: string | null;
+    remnashopAuthResult?: Awaited<ReturnType<typeof remnashopAuth>> | null;
+    remnashopPayload?: TelegramAuthRequest;
+    source: "oidc" | "widget";
+  },
+) {
+  const cookieStore = await cookies();
+  const {
+    telegramId,
+    telegramUsername,
+    fullName,
+    photoUrl,
+  } = identity;
 
   authDebugLog("telegram_oidc_identity_resolved", {
     authStateId: authState.id,
@@ -417,6 +669,7 @@ export async function consumeTelegramCallback(code: string, state: string) {
     hasFullName: Boolean(fullName),
     hasPhotoUrl: Boolean(photoUrl),
     linkUserId: authState.userId,
+    source: identity.source,
   });
 
   await assertRateLimit({
@@ -545,11 +798,10 @@ export async function consumeTelegramCallback(code: string, state: string) {
     metadata: { telegramId: telegramId.toString() },
   });
 
-  const remnashopAuthResult = await authenticateRemnashopWithTelegram(
-    payload,
-    telegramId,
-    telegramUsername,
-  );
+  const remnashopAuthResult = identity.remnashopAuthResult
+    ?? (identity.remnashopPayload
+      ? await authenticateRemnashopWithTelegramPayload(identity.remnashopPayload)
+      : null);
 
   cookieStore.delete(telegramOidcCookieNames.state);
   cookieStore.delete(telegramOidcCookieNames.nonce);

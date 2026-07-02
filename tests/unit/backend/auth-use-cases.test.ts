@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   remnashopAuth: vi.fn(),
   remnashopRequest: vi.fn(),
+  remnashopLinkTelegram: vi.fn(),
   getAuthorizedRemnashopTokens: vi.fn(),
   getRemnashopMe: vi.fn(),
   remnashopChangePassword: vi.fn(),
@@ -26,6 +27,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock("@/backend/integrations/remnashop/client", () => ({
   remnashopAuth: mocks.remnashopAuth,
   remnashopRequest: mocks.remnashopRequest,
+  remnashopLinkTelegram: mocks.remnashopLinkTelegram,
   getAuthorizedRemnashopTokens: mocks.getAuthorizedRemnashopTokens,
   getRemnashopMe: mocks.getRemnashopMe,
   remnashopChangePassword: mocks.remnashopChangePassword,
@@ -116,6 +118,7 @@ describe("auth use cases", () => {
     vi.clearAllMocks();
     mocks.remnashopAuth.mockResolvedValue(authResult);
     mocks.remnashopRequest.mockResolvedValue({ target_email: "user@example.com", expires_at: "2026-06-25T10:15:00.000Z" });
+    mocks.remnashopLinkTelegram.mockResolvedValue({ ...profile, telegram_id: 123456 });
     mocks.createSessionFromRemnashopAuth.mockResolvedValue({ user, profile });
     mocks.linkCurrentUserToRemnashopAuth.mockResolvedValue({ user, profile });
     mocks.getAuthorizedRemnashopTokens.mockResolvedValue({ accessToken: "access-token", refreshToken: "refresh-token", session });
@@ -305,5 +308,25 @@ describe("auth use cases", () => {
       password: "secret",
     });
     expect(mocks.linkCurrentUserToRemnashopAuth).toHaveBeenCalledOnce();
+  });
+
+  it("links current Telegram identity in Remnashop before reconciling an email account", async () => {
+    mocks.getCurrentSession.mockResolvedValueOnce({
+      ...session,
+      user: { ...user, telegramId: "123456", telegramUsername: "clean_user" },
+    });
+
+    await expect(linkRemnashopAccount({ email: "user@example.com", password: "secret" })).resolves.toMatchObject({
+      linked: true,
+    });
+
+    expect(mocks.remnashopLinkTelegram).toHaveBeenCalledWith({
+      accessToken: "access-token",
+      telegramId: "123456",
+      telegramUsername: "clean_user",
+    });
+    expect(mocks.remnashopLinkTelegram.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.linkCurrentUserToRemnashopAuth.mock.invocationCallOrder[0],
+    );
   });
 });

@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { createHash, createHmac } from "node:crypto";
 
 const state = vi.hoisted(() => ({
   cookies: new Map<string, string>(),
@@ -29,6 +30,17 @@ const mocks = vi.hoisted(() => ({
     $transaction: vi.fn(),
   },
 }));
+
+function signTelegramAuthPayload(body: Record<string, string | number | undefined>) {
+  const dataCheckString = Object.entries(body)
+    .filter(([, value]) => value !== undefined && value !== null && value !== "")
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([key, value]) => `${key}=${value}`)
+    .join("\n");
+  const secret = createHash("sha256").update(process.env.TELEGRAM_BOT_TOKEN ?? "123456:test-token").digest();
+
+  return createHmac("sha256", secret).update(dataCheckString).digest("hex");
+}
 
 vi.mock("jose", () => ({
   createRemoteJWKSet: mocks.createRemoteJWKSet,
@@ -76,7 +88,10 @@ vi.mock("@/backend/database/prisma", () => ({
 
 import {
   consumeTelegramCallback,
+  consumeTelegramLoginWidgetPayload,
+  consumeTelegramPopupToken,
   createTelegramAuthorizationResponse,
+  createTelegramPopupStartResponse,
 } from "@/backend/integrations/telegram/oidc";
 
 describe("Telegram OIDC integration", () => {
@@ -132,6 +147,22 @@ describe("Telegram OIDC integration", () => {
     expect(response.cookies.get("clean_pay_tg_code_verifier")?.value).toBeTruthy();
   });
 
+  it("creates Telegram popup start response with client id and nonce", async () => {
+    const response = await createTelegramPopupStartResponse("/cabinet", "user-1");
+    const body = await response.json() as { clientId?: string; nonce?: string };
+
+    expect(body.clientId).toBeTruthy();
+    expect(body.nonce).toBeTruthy();
+    expect(mocks.prisma.telegramAuthState.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        redirectTo: "/cabinet",
+        userId: "user-1",
+      }),
+    });
+    expect(response.cookies.get("clean_pay_tg_state")?.value).toBeTruthy();
+    expect(response.cookies.get("clean_pay_tg_nonce")?.value).toBeTruthy();
+  });
+
   it("keeps client_id for non-Telegram OAuth-compatible mocks", async () => {
     vi.stubEnv("TELEGRAM_OIDC_AUTHORIZATION_ENDPOINT", "http://localhost:8090/auth");
     const response = await createTelegramAuthorizationResponse("/cabinet");
@@ -175,6 +206,64 @@ describe("Telegram OIDC integration", () => {
       create: expect.objectContaining({ telegramId: "123456", telegramUsername: "clean_user" }),
       update: expect.objectContaining({ telegramUsername: "clean_user" }),
     });
+    expect(mocks.remnashopAuth).toHaveBeenCalledWith("/auth/telegram", expect.objectContaining({
+      id: 123456,
+      first_name: "Clean",
+      username: "clean_user",
+      hash: expect.any(String),
+    }));
+    expect(state.deleted).toEqual([
+      "clean_pay_tg_state",
+      "clean_pay_tg_nonce",
+      "clean_pay_tg_code_verifier",
+    ]);
+  });
+
+  it("consumes popup id token without exchanging authorization code", async () => {
+    state.cookies.set("clean_pay_tg_state", "state");
+    state.cookies.set("clean_pay_tg_nonce", "nonce");
+    state.cookies.set("clean_pay_tg_code_verifier", "verifier");
+
+    await expect(consumeTelegramPopupToken("id-token")).resolves.toMatchObject({
+      user: { id: "user-1" },
+      redirectTo: "/cabinet",
+      remnashopAuth: { cookies: { accessToken: "access" } },
+    });
+
+    expect(globalThis.fetch).not.toHaveBeenCalled();
+    expect(mocks.jwtVerify).toHaveBeenCalledWith("id-token", "jwks", {
+      issuer: "https://oauth.telegram.org",
+      audience: process.env.TELEGRAM_OIDC_CLIENT_ID ?? "test-telegram-client-id",
+    });
+    expect(state.deleted).toEqual([
+      "clean_pay_tg_state",
+      "clean_pay_tg_nonce",
+      "clean_pay_tg_code_verifier",
+    ]);
+  });
+
+  it("consumes Telegram Login widget payload and verifies hash without token exchange", async () => {
+    state.cookies.set("clean_pay_tg_state", "state");
+    state.cookies.set("clean_pay_tg_nonce", "nonce");
+    state.cookies.set("clean_pay_tg_code_verifier", "verifier");
+    const authData = {
+      id: 123456,
+      first_name: "Clean",
+      username: "clean_user",
+      auth_date: Math.floor(Date.now() / 1000),
+    };
+
+    await expect(consumeTelegramLoginWidgetPayload({
+      ...authData,
+      hash: signTelegramAuthPayload(authData),
+    })).resolves.toMatchObject({
+      user: { id: "user-1" },
+      redirectTo: "/cabinet",
+      remnashopAuth: { cookies: { accessToken: "access" } },
+    });
+
+    expect(globalThis.fetch).not.toHaveBeenCalled();
+    expect(mocks.jwtVerify).not.toHaveBeenCalled();
     expect(mocks.remnashopAuth).toHaveBeenCalledWith("/auth/telegram", expect.objectContaining({
       id: 123456,
       first_name: "Clean",

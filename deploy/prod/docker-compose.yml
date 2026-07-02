@@ -6,6 +6,10 @@ services:
     build:
       context: ../..
       dockerfile: deploy/prod/Dockerfile
+      args:
+        TURNSTILE_ENABLED: ${TURNSTILE_ENABLED:-false}
+        NEXT_PUBLIC_TURNSTILE_SITE_KEY: ${NEXT_PUBLIC_TURNSTILE_SITE_KEY:-}
+        TURNSTILE_SITE_KEY: ${TURNSTILE_SITE_KEY:-}
     restart: unless-stopped
     env_file:
       - .env
@@ -20,6 +24,11 @@ services:
         condition: service_healthy
     ports:
       - "${CLEAN_PAY_BIND:-127.0.0.1}:${CLEAN_PAY_PORT:-4000}:4000"
+    networks:
+      default:
+      edge:
+        aliases:
+          - clean-pay
     logging:
       driver: json-file
       options:
@@ -66,3 +75,8 @@ services:
 volumes:
   postgres-data:
   redis-data:
+
+networks:
+  edge:
+    external: true
+    name: ${CLEAN_PAY_EDGE_NETWORK:-remnawave-network}

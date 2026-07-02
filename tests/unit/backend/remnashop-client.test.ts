@@ -31,6 +31,7 @@ import {
   getRemnashopUserIdFromAccessToken,
   protectRemnashopToken,
   remnashopAuth,
+  remnashopLinkTelegram,
   remnashopRequest,
 } from "@/backend/integrations/remnashop/client";
 import { BffError } from "@/backend/integrations/remnashop/errors";
@@ -87,6 +88,49 @@ describe("remnashop client", () => {
         }),
       }),
     );
+  });
+
+  it("links Telegram to the authenticated Remnashop email account", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      response({
+        body: {
+          telegram_id: 123456,
+          auth_type: "email",
+          email: "u@e.test",
+          is_email_verified: true,
+          pending_email: null,
+          name: "User",
+          username: "clean_user",
+          language: "ru",
+        },
+      }),
+    );
+
+    await expect(
+      remnashopLinkTelegram({
+        accessToken: "access.jwt",
+        telegramId: "123456",
+        telegramUsername: "clean_user",
+      }),
+    ).resolves.toMatchObject({ telegram_id: 123456 });
+
+    const [, init] = fetchMock.mock.calls[0] ?? [];
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://remnashop:5000/api/v1/public/auth/telegram/link",
+      expect.objectContaining({
+        method: "POST",
+        headers: expect.objectContaining({
+          cookie: "access_token=access.jwt",
+        }),
+      }),
+    );
+    const body = JSON.parse(String((init as RequestInit).body));
+    expect(body).toMatchObject({
+      id: 123456,
+      first_name: "clean_user",
+      username: "clean_user",
+      hash: expect.any(String),
+    });
   });
 
   it("passes Remnashop auth cookies when tokens are provided", async () => {

@@ -31,7 +31,7 @@ function formatDuration(days: number) {
 
 function findRenewPlan(offers: SubscriptionOffersResponse) {
   return offers.plans.find(
-    (plan) => plan.recommended_purchase_type === "renew",
+    (plan) => plan.recommended_purchase_type.toUpperCase() === "RENEW",
   );
 }
 
@@ -103,10 +103,19 @@ export function ExtendConfirmation() {
 
   const plan = findRenewPlan(state.offers);
 
-  if (!state.offers.has_current_subscription || !plan) {
+  if (!state.offers.has_current_subscription) {
     return (
       <div className="flex flex-column gap-4">
         <Message severity="info" text="Действующая подписка не найдена." />
+        <LinkButton className="w-fit" href="/tariffs" label="Выбрать тариф" />
+      </div>
+    );
+  }
+
+  if (!plan) {
+    return (
+      <div className="flex flex-column gap-4">
+        <Message severity="info" text="Для продления выберите доступный тариф." />
         <LinkButton className="w-fit" href="/tariffs" label="Выбрать тариф" />
       </div>
     );

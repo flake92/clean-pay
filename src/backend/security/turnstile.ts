@@ -57,7 +57,11 @@ export async function verifyTurnstileToken(token: string | null | undefined, rem
   logger.info("turnstile_request_sent", {
     method: "POST",
     url: env.turnstile.verifyUrl,
-    body: Object.fromEntries(body.entries()),
+    body: {
+      response: token ? "[redacted]" : null,
+      remoteip: remoteIp ? "[present]" : null,
+      secret: "[redacted]",
+    },
   }, {
     category: "upstream",
     source: "turnstile.client",

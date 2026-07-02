@@ -147,7 +147,7 @@ export function getEnv(): AppEnv {
     },
     turnstile: {
       enabled: bool("TURNSTILE_ENABLED", false),
-      siteKey: optional("NEXT_PUBLIC_TURNSTILE_SITE_KEY"),
+      siteKey: optional("NEXT_PUBLIC_TURNSTILE_SITE_KEY") ?? optional("TURNSTILE_SITE_KEY"),
       secretKey: optional("TURNSTILE_SECRET_KEY"),
       verifyUrl: optionalUrl("TURNSTILE_VERIFY_URL") ?? "https://challenges.cloudflare.com/turnstile/v0/siteverify",
     },

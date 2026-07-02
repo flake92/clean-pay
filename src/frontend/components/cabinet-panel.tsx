@@ -156,6 +156,20 @@ function detailValue(value?: string | number | boolean | null) {
   return String(value);
 }
 
+function trafficLimitStrategyLabel(strategy?: string | null) {
+  const normalized = strategy?.toUpperCase();
+
+  if (normalized === "NO_RESET") {
+    return "Не сбрасывать";
+  }
+
+  if (normalized === "RESET") {
+    return "Сбрасывать";
+  }
+
+  return detailValue(strategy);
+}
+
 async function getBffMessage(response: Response, fallback: string) {
   return (await readBffError(response, fallback)).message;
 }
@@ -573,7 +587,7 @@ export function CabinetPanel() {
             </form>
             <div className="grid">
               <div className="col-12 md:col-6">
-                <DetailLine label="Remnawave ID" value={subscription.user_remna_id} />
+                <DetailLine label="RW_ID" value={subscription.user_remna_id} />
               </div>
               <div className="col-12 md:col-6">
                 <DetailLine label="Пробная" value={detailValue(subscription.is_trial)} />
@@ -582,7 +596,7 @@ export function CabinetPanel() {
                 <DetailLine label="Длительность тарифа" value={`${subscription.plan_duration_days} дней`} />
               </div>
               <div className="col-12 md:col-6">
-                <DetailLine label="Стратегия лимита" value={detailValue(subscription.traffic_limit_strategy)} />
+                <DetailLine label="Стратегия лимита" value={trafficLimitStrategyLabel(subscription.traffic_limit_strategy)} />
               </div>
               <div className="col-12 md:col-6">
                 <DetailLine label="Использовано всего" value={formatBytes(subscription.lifetime_used_traffic_bytes)} />
