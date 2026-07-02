@@ -4,8 +4,8 @@ import { useEffect, useState } from "react";
 
 import { LinkButton } from "@/frontend/components/prime/link-button";
 import { readBffError } from "@/frontend/lib/client-api";
-import { ProgressSpinner } from "primereact/progressspinner";
 import { Message } from "primereact/message";
+import { ProgressSpinner } from "primereact/progressspinner";
 
 type TelegramWebApp = {
   ready?: () => void;
@@ -41,12 +41,19 @@ function loadTelegramWebAppScript() {
   });
 }
 
+function redirectToTelegramLogin() {
+  const url = new URL("/auth/telegram/start", window.location.origin);
+  url.searchParams.set("redirect_to", "/cabinet");
+  window.location.replace(url.toString());
+}
+
 async function readError(response: Response) {
   return (await readBffError(response, "Не удалось войти через Telegram.")).message;
 }
 
 export function TelegramWebAppLogin() {
   const [error, setError] = useState<string | null>(null);
+  const [fallbackStarted, setFallbackStarted] = useState(false);
 
   useEffect(() => {
     let alive = true;
@@ -59,12 +66,12 @@ export function TelegramWebAppLogin() {
         webApp?.ready?.();
         webApp?.expand?.();
 
-        const initData = webApp?.initData;
+        const initData = webApp?.initData?.trim();
 
         if (!initData) {
-          throw new Error(
-            "Telegram не передал данные входа. Откройте кабинет через кнопку Mini App/Web App в боте, а не через обычную ссылку.",
-          );
+          setFallbackStarted(true);
+          redirectToTelegramLogin();
+          return;
         }
 
         const response = await fetch("/api/bff/auth/telegram/webapp", {
@@ -99,14 +106,17 @@ export function TelegramWebAppLogin() {
         <>
           <Message severity="error" text={error} />
           <div className="flex flex-wrap justify-content-center gap-2">
+            <LinkButton href="/auth/telegram/start?redirect_to=/cabinet" label="Повторить вход через Telegram" />
             <LinkButton href="/login" label="Открыть обычный вход" outlined />
-            <LinkButton href="/cabinet" label="Перейти в кабинет" />
           </div>
         </>
       ) : (
         <>
           <ProgressSpinner aria-label="Вход через Telegram" style={{ width: "48px", height: "48px" }} />
-          <Message severity="info" text="Входим через Telegram..." />
+          <Message
+            severity="info"
+            text={fallbackStarted ? "Открываем вход Telegram..." : "Входим через Telegram..."}
+          />
         </>
       )}
     </div>

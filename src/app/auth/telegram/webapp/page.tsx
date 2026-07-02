@@ -5,7 +5,7 @@ export default function TelegramWebAppLoginPage() {
   return (
     <AuthShell
       title="Вход через Telegram"
-      description="Открываем личный кабинет из Telegram Mini App."
+      description="Открываем личный кабинет из Telegram."
     >
       <TelegramWebAppLogin />
     </AuthShell>
