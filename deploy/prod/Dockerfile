@@ -55,7 +55,8 @@ COPY --from=builder --chown=cleanpay:nodejs /app/prisma ./prisma
 COPY --from=builder --chown=cleanpay:nodejs /app/prisma.config.ts ./prisma.config.ts
 COPY --chown=cleanpay:nodejs deploy/prod/start.sh ./deploy/prod/start.sh
 
-RUN chmod +x ./deploy/prod/start.sh
+RUN sed -i 's/\r$//' ./deploy/prod/start.sh \
+  && chmod +x ./deploy/prod/start.sh
 
 USER cleanpay
 
