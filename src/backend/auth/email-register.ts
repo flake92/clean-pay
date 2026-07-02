@@ -72,27 +72,43 @@ export async function registerWithEmail(rawBody: AuthPayload<RegisterRequest>, t
   authDebugLog("auth_register_rate_limit_passed", { action: "auth_register" });
 
   const { auth, flow } = await createOrResumeEmailRegistration(body);
-  const verification = await requestRemnashopEmailVerification({
-    accessToken: auth.cookies.accessToken,
-    body: { email: body.email },
-    source: "register",
-  });
   const { user, profile } = await createSessionFromRemnashopAuth({
     accessToken: auth.cookies.accessToken,
     refreshToken: auth.cookies.refreshToken,
     auth: auth.data,
   });
-  authDebugLog("auth_register_verification_requested", {
-    flow,
-    userId: user.id,
-    targetEmail: verification.target_email,
-    expiresAt: verification.expires_at,
-  });
+  const verification = profile.is_email_verified
+    ? null
+    : await requestRemnashopEmailVerification({
+        accessToken: auth.cookies.accessToken,
+        body: { email: body.email },
+        source: "register",
+      });
+
+  if (verification) {
+    authDebugLog("auth_register_verification_requested", {
+      flow,
+      userId: user.id,
+      targetEmail: verification.target_email,
+      expiresAt: verification.expires_at,
+    });
+  } else {
+    authDebugLog("auth_register_verification_skipped", {
+      flow,
+      userId: user.id,
+      reason: "email_already_verified",
+    });
+  }
 
   await auditLog({
     action: "auth_register_success",
     userId: user.id,
-    metadata: { email: user.email, telegramId: user.telegramId, verificationTargetEmail: verification.target_email, flow },
+    metadata: {
+      email: user.email,
+      telegramId: user.telegramId,
+      verificationTargetEmail: verification?.target_email,
+      flow,
+    },
   });
 
   authDebugLog("auth_register_success", {
@@ -108,6 +124,6 @@ export async function registerWithEmail(rawBody: AuthPayload<RegisterRequest>, t
     user: profile,
     expiresAt: auth.data.expires_at,
     refreshExpiresAt: auth.data.refresh_expires_at,
-    emailVerification: verification,
+    ...(verification ? { emailVerification: verification } : {}),
   };
 }

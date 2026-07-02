@@ -42,6 +42,10 @@ function redirectAfterAuth() {
   window.location.assign("/cabinet");
 }
 
+function shouldRedirectAfterRegisterFallback(body: { data?: { user?: { is_email_verified?: boolean }; emailVerification?: unknown } }) {
+  return body.data?.user?.is_email_verified === true || !body.data?.emailVerification;
+}
+
 function missingTurnstileTokenMessage() {
   return hasPublicTurnstileKey()
     ? "Пройдите проверку Cloudflare Turnstile."
@@ -181,6 +185,12 @@ export function LoginForm() {
       return;
     }
 
+    const body = (await response.json()) as { data?: { user?: { is_email_verified?: boolean }; emailVerification?: unknown } };
+    if (shouldRedirectAfterRegisterFallback(body)) {
+      redirectAfterAuth();
+      return;
+    }
+
     window.location.assign("/register/verify-email");
   }
 
@@ -217,6 +227,12 @@ export function LoginForm() {
     if (!response.ok) {
       turnstile.reset();
       setState({ loading: false, error: await readError(response) });
+      return;
+    }
+
+    const body = (await response.json()) as { data?: { user?: { is_email_verified?: boolean }; emailVerification?: unknown } };
+    if (shouldRedirectAfterRegisterFallback(body)) {
+      redirectAfterAuth();
       return;
     }
 
@@ -398,6 +414,12 @@ export function RegisterForm() {
     if (!response.ok) {
       turnstile.reset();
       setState({ loading: false, error: await readError(response) });
+      return;
+    }
+
+    const body = (await response.json()) as { data?: { user?: { is_email_verified?: boolean }; emailVerification?: unknown } };
+    if (shouldRedirectAfterRegisterFallback(body)) {
+      redirectAfterAuth();
       return;
     }
 

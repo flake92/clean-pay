@@ -183,6 +183,22 @@ describe("auth use cases", () => {
     });
   });
 
+  it("does not request email verification when resumed registration is already verified", async () => {
+    mocks.remnashopAuth
+      .mockRejectedValueOnce(new BffError("CONFLICT", 409, "email already exists"))
+      .mockResolvedValueOnce(authResult);
+    mocks.createSessionFromRemnashopAuth.mockResolvedValueOnce({
+      user: { ...user, emailVerified: true },
+      profile: { ...profile, is_email_verified: true },
+    });
+
+    await expect(registerWithEmail({ email: "user@example.com", password: "secret" }, {})).resolves.toMatchObject({
+      user: expect.objectContaining({ is_email_verified: true }),
+    });
+
+    expect(mocks.remnashopRequest).not.toHaveBeenCalledWith("/auth/email/request-verification", expect.any(Object));
+  });
+
   it("requests and confirms email verification for the current session", async () => {
     await requestEmailVerification({ email: "user@example.com" }, {});
 
