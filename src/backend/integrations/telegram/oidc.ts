@@ -602,11 +602,13 @@ async function consumeTelegramIdToken(
       : null;
   const fullName = getFullName(payload);
   const photoUrl = typeof payload.picture === "string" ? payload.picture : null;
-  const remnashopAuthResult = await authenticateRemnashopWithTelegram(
-    payload,
-    telegramId,
-    telegramUsername,
-  );
+  const remnashopAuthResult = authState.userId
+    ? null
+    : await authenticateRemnashopWithTelegram(
+        payload,
+        telegramId,
+        telegramUsername,
+      );
 
   return completeTelegramAuth(authState, {
     telegramId,
@@ -780,7 +782,7 @@ async function completeTelegramAuth(
   });
 
   const remnashopAuthResult = identity.remnashopAuthResult
-    ?? (identity.remnashopPayload
+    ?? (!authState.userId && identity.remnashopPayload
       ? await authenticateRemnashopWithTelegramPayload(identity.remnashopPayload)
       : null);
 
@@ -800,5 +802,8 @@ async function completeTelegramAuth(
     user,
     redirectTo: authState.redirectTo,
     remnashopAuth: remnashopAuthResult,
+    linked: Boolean(authState.userId),
+    telegramId,
+    telegramUsername,
   };
 }

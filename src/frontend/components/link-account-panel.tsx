@@ -210,7 +210,8 @@ export function LinkAccountPanel({
       return;
     }
 
-    setMessage("E-mail сохранён, код подтверждения отправлен.");
+    const body = (await response.json()) as { data?: { emailVerification?: unknown } };
+    setMessage(body.data?.emailVerification ? "E-mail сохранён, код подтверждения отправлен." : "E-mail привязан.");
     await loadState();
   }
 

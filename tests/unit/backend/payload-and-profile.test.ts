@@ -56,6 +56,38 @@ describe("auth payload helpers and profile presenters", () => {
     expect(profile.emailVerified).toBe(true);
   });
 
+  it("does not report email as verified when no email is linked", () => {
+    const sessionWithoutEmail = {
+      ...baseSession,
+      user: {
+        ...baseSession.user,
+        email: null,
+        emailVerified: true,
+      },
+    } as never;
+
+    expect(localUserProfile(sessionWithoutEmail)).toMatchObject({
+      email: null,
+      is_email_verified: false,
+      emailVerified: false,
+    });
+
+    expect(remnashopUserProfile(sessionWithoutEmail, {
+      telegram_id: 999,
+      auth_type: "telegram",
+      email: null,
+      is_email_verified: true,
+      pending_email: null,
+      name: "Remote User",
+      username: "remote",
+      language: "ru",
+    })).toMatchObject({
+      email: null,
+      is_email_verified: false,
+      emailVerified: false,
+    });
+  });
+
   it("accepts only same-origin relative redirect paths", () => {
     expect(safeRedirectPath("/cabinet?tab=1#top")).toBe("/cabinet?tab=1#top");
     expect(safeRedirectPath(null)).toBeUndefined();

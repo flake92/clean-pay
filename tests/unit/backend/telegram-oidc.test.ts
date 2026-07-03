@@ -31,6 +31,18 @@ const mocks = vi.hoisted(() => ({
   },
 }));
 
+const tx = vi.hoisted(() => ({
+  webUser: {
+    findUniqueOrThrow: vi.fn(),
+    update: vi.fn(),
+  },
+  webSession: { updateMany: vi.fn() },
+  auditLog: { updateMany: vi.fn() },
+  paymentRecord: { updateMany: vi.fn() },
+  emailVerificationCode: { updateMany: vi.fn() },
+  telegramAuthState: { updateMany: vi.fn() },
+}));
+
 function signTelegramAuthPayload(body: Record<string, string | number | undefined>) {
   const dataCheckString = Object.entries(body)
     .filter(([, value]) => value !== undefined && value !== null && value !== "")
@@ -121,6 +133,25 @@ describe("Telegram OIDC integration", () => {
     mocks.prisma.webUser.findUnique.mockResolvedValue(null);
     mocks.prisma.webUser.upsert.mockResolvedValue({ id: "user-1", telegramId: "123456" });
     mocks.prisma.telegramAuthState.update.mockResolvedValue({});
+    mocks.prisma.$transaction.mockImplementation(async (callback) => callback(tx));
+    tx.webUser.findUniqueOrThrow.mockResolvedValue({
+      id: "target-user",
+      remnashopUserId: "remna-email",
+      email: "email@example.com",
+      emailVerified: true,
+      telegramId: null,
+      telegramUsername: null,
+      fullName: null,
+      photoUrl: null,
+      displayName: null,
+    });
+    tx.webUser.update.mockResolvedValue({
+      id: "target-user",
+      remnashopUserId: "remna-email",
+      email: "email@example.com",
+      emailVerified: true,
+      telegramId: "123456",
+    });
     mocks.remnashopAuth.mockResolvedValue({
       data: {},
       cookies: { accessToken: "access", refreshToken: "refresh" },
@@ -236,6 +267,42 @@ describe("Telegram OIDC integration", () => {
     expect(logMetadata.some((metadata) => hasLogKey(metadata, "headers"))).toBe(false);
     expect(logMetadata.some((metadata) => hasLogKey(metadata, "body"))).toBe(false);
     expect(logMetadata.some((metadata) => hasLogKey(metadata, "url"))).toBe(false);
+  });
+
+  it("links Telegram to the current user without logging in through Remnashop Telegram auth", async () => {
+    state.cookies.set("clean_pay_tg_state", "state");
+    state.cookies.set("clean_pay_tg_nonce", "nonce");
+    state.cookies.set("clean_pay_tg_code_verifier", "verifier");
+    mocks.prisma.telegramAuthState.findFirst.mockResolvedValueOnce({
+      id: "auth-state-1",
+      userId: "target-user",
+      redirectTo: "/link-account",
+      expiresAt: new Date("2099-01-01T00:00:00.000Z"),
+    });
+
+    await expect(consumeTelegramCallback("code", "state")).resolves.toMatchObject({
+      user: { id: "target-user", telegramId: "123456" },
+      redirectTo: "/link-account",
+      linked: true,
+      telegramId: "123456",
+      remnashopAuth: null,
+    });
+
+    expect(mocks.remnashopAuth).not.toHaveBeenCalled();
+    expect(mocks.assertRateLimit).toHaveBeenCalledWith(
+      expect.objectContaining({ action: "telegram_link_confirm", tgId: "123456" }),
+    );
+    expect(tx.webUser.update).toHaveBeenCalledWith({
+      where: { id: "target-user" },
+      data: expect.objectContaining({
+        remnashopUserId: "remna-email",
+        email: "email@example.com",
+        emailVerified: true,
+        telegramId: "123456",
+        telegramUsername: "clean_user",
+        authPending: false,
+      }),
+    });
   });
 
   it("consumes popup id token without exchanging authorization code", async () => {

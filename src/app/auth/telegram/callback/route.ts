@@ -2,7 +2,15 @@ import { NextResponse } from "next/server";
 
 import { logTechnicalError, logTechnicalInfo, logTechnicalWarning } from "@/backend/observability/audit";
 import { getEnv } from "@/backend/config/env";
-import { reconcileUserFromRemnashopAuth } from "@/backend/integrations/remnashop/session";
+import {
+  linkCurrentUserToRemnashopAuth,
+  reconcileUserFromRemnashopAuth,
+} from "@/backend/integrations/remnashop/session";
+import {
+  getAuthorizedRemnashopTokens,
+  getJwtExpiresAt,
+  remnashopLinkTelegram,
+} from "@/backend/integrations/remnashop/client";
 import { createWebSessionOnResponse } from "@/backend/sessions/web-session";
 import {
   consumeTelegramCallback,
@@ -32,6 +40,91 @@ function callbackRequestMetadata(request: Request, url: URL) {
   };
 }
 
+async function linkTelegramToCurrentRemnashopAccount({
+  telegramId,
+  telegramUsername,
+}: {
+  telegramId: string;
+  telegramUsername: string | null;
+}) {
+  const tokens = await getAuthorizedRemnashopTokens({ allowUnverifiedEmail: true });
+
+  await remnashopLinkTelegram({
+    accessToken: tokens.accessToken,
+    telegramId,
+    telegramUsername,
+  });
+
+  return linkCurrentUserToRemnashopAuth({
+    accessToken: tokens.accessToken,
+    refreshToken: tokens.refreshToken,
+    auth: {
+      expires_at:
+        getJwtExpiresAt(tokens.accessToken)?.toISOString()
+        ?? tokens.session.remnashopAccessExpiresAt?.toISOString()
+        ?? new Date(Date.now() + 60_000).toISOString(),
+      refresh_expires_at:
+        getJwtExpiresAt(tokens.refreshToken)?.toISOString()
+        ?? tokens.session.remnashopRefreshExpiresAt?.toISOString()
+        ?? new Date(Date.now() + 60_000).toISOString(),
+    },
+  });
+}
+
+async function reconcileTelegramCallbackResult({
+  linked,
+  userId,
+  telegramId,
+  telegramUsername,
+  remnashopAuth,
+}: {
+  linked: boolean;
+  userId: string;
+  telegramId: string;
+  telegramUsername: string | null;
+  remnashopAuth: Awaited<ReturnType<typeof consumeTelegramCallback>>["remnashopAuth"];
+}) {
+  if (linked) {
+    try {
+      await linkTelegramToCurrentRemnashopAccount({ telegramId, telegramUsername });
+
+      return { userId, remnashopSession: undefined };
+    } catch (error) {
+      logTechnicalWarning("telegram_link_remnashop_attach_failed", {
+        errorName: error instanceof Error ? error.name : "UnknownError",
+        telegramId,
+      });
+
+      if (!remnashopAuth) {
+        return { userId, remnashopSession: undefined };
+      }
+
+      const linkedUser = await linkCurrentUserToRemnashopAuth({
+        accessToken: remnashopAuth.cookies.accessToken,
+        refreshToken: remnashopAuth.cookies.refreshToken,
+        auth: remnashopAuth.data,
+      });
+
+      return { userId: linkedUser.user.id, remnashopSession: undefined };
+    }
+  }
+
+  if (!remnashopAuth) {
+    return { userId, remnashopSession: undefined };
+  }
+
+  const reconciled = await reconcileUserFromRemnashopAuth({
+    accessToken: remnashopAuth.cookies.accessToken,
+    refreshToken: remnashopAuth.cookies.refreshToken,
+    auth: remnashopAuth.data,
+  });
+
+  return {
+    userId: reconciled.user.id,
+    remnashopSession: reconciled.remnashopSession,
+  };
+}
+
 export async function GET(request: Request) {
   const url = new URL(request.url);
   const code = url.searchParams.get("code");
@@ -46,27 +139,35 @@ export async function GET(request: Request) {
   }
 
   try {
-    const { user, redirectTo: nextPath, remnashopAuth } = await consumeTelegramCallback(code, state);
+    const {
+      user,
+      redirectTo: nextPath,
+      remnashopAuth,
+      linked,
+      telegramId,
+      telegramUsername,
+    } = await consumeTelegramCallback(code, state);
     const response = redirectTo(nextPath ?? "/cabinet");
+    const reconciled = await reconcileTelegramCallbackResult({
+      linked,
+      userId: user.id,
+      telegramId,
+      telegramUsername,
+      remnashopAuth,
+    });
 
-    if (remnashopAuth) {
-      const reconciled = await reconcileUserFromRemnashopAuth({
-        accessToken: remnashopAuth.cookies.accessToken,
-        refreshToken: remnashopAuth.cookies.refreshToken,
-        auth: remnashopAuth.data,
-      });
-
-      await createWebSessionOnResponse(response, reconciled.user.id, {
+    if (reconciled.remnashopSession) {
+      await createWebSessionOnResponse(response, reconciled.userId, {
         remnashopSession: reconciled.remnashopSession,
       });
     } else {
-      await createWebSessionOnResponse(response, user.id);
+      await createWebSessionOnResponse(response, reconciled.userId);
     }
 
     logTechnicalInfo("telegram_callback_success", {
       ...metadata,
       userId: user.id,
-      remnashopLinked: Boolean(remnashopAuth),
+      remnashopLinked: linked || Boolean(remnashopAuth),
       redirectTo: nextPath ?? "/cabinet",
     });
 
@@ -91,28 +192,36 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "telegram_failed" }, { status: 400 });
     }
 
-    const { user, redirectTo: nextPath, remnashopAuth } = idToken
+    const {
+      user,
+      redirectTo: nextPath,
+      remnashopAuth,
+      linked,
+      telegramId,
+      telegramUsername,
+    } = idToken
       ? await consumeTelegramPopupToken(idToken)
       : await consumeTelegramLoginWidgetPayload(authData as Parameters<typeof consumeTelegramLoginWidgetPayload>[0]);
     const response = NextResponse.json({ redirectTo: nextPath ?? "/cabinet" });
+    const reconciled = await reconcileTelegramCallbackResult({
+      linked,
+      userId: user.id,
+      telegramId,
+      telegramUsername,
+      remnashopAuth,
+    });
 
-    if (remnashopAuth) {
-      const reconciled = await reconcileUserFromRemnashopAuth({
-        accessToken: remnashopAuth.cookies.accessToken,
-        refreshToken: remnashopAuth.cookies.refreshToken,
-        auth: remnashopAuth.data,
-      });
-
-      await createWebSessionOnResponse(response, reconciled.user.id, {
+    if (reconciled.remnashopSession) {
+      await createWebSessionOnResponse(response, reconciled.userId, {
         remnashopSession: reconciled.remnashopSession,
       });
     } else {
-      await createWebSessionOnResponse(response, user.id);
+      await createWebSessionOnResponse(response, reconciled.userId);
     }
 
     logTechnicalInfo("telegram_popup_callback_success", {
       userId: user.id,
-      remnashopLinked: Boolean(remnashopAuth),
+      remnashopLinked: linked || Boolean(remnashopAuth),
       redirectTo: nextPath ?? "/cabinet",
     });
 

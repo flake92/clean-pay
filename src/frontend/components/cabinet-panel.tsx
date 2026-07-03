@@ -434,8 +434,9 @@ export function CabinetPanel() {
       : null;
   const deviceCount = devices?.current_count ?? null;
   const maxDevices = devices?.max_count ?? subscription?.device_limit ?? null;
-  const isEmailVerified = user.emailVerified ?? user.is_email_verified ?? false;
-  const shouldShowVerifyEmail = Boolean(user.email) && !isEmailVerified;
+  const hasEmail = Boolean(user.email);
+  const isEmailVerified = hasEmail && Boolean(user.emailVerified ?? user.is_email_verified);
+  const shouldShowVerifyEmail = hasEmail && !isEmailVerified;
   const shouldShowLinkAccount = !user.email || !user.telegramId;
 
   return (
@@ -568,8 +569,8 @@ export function CabinetPanel() {
               <span className="text-xs uppercase text-500">E-mail подтверждён</span>
               <div className="mt-2">
                 <Tag
-                  severity={user.is_email_verified ?? user.emailVerified ? "success" : "warning"}
-                  value={user.is_email_verified ?? user.emailVerified ? "Да" : "Нет"}
+                  severity={hasEmail ? (isEmailVerified ? "success" : "warning") : "secondary"}
+                  value={hasEmail ? (isEmailVerified ? "Да" : "Нет") : "Не привязан"}
                 />
               </div>
             </div>

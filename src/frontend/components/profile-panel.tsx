@@ -216,7 +216,8 @@ export function ProfilePanel() {
   }
 
   const telegramId = user.telegramId ?? user.telegram_id;
-  const isEmailVerified = user.emailVerified ?? user.is_email_verified;
+  const hasEmail = Boolean(user.email);
+  const isEmailVerified = hasEmail && Boolean(user.emailVerified ?? user.is_email_verified);
   const isTelegramOnly = Boolean(telegramId) && !user.email;
   const canManageRemnashopEmail = Boolean(user.email);
   const canChangePassword = user.auth_type === "email" && Boolean(user.email);
@@ -244,7 +245,10 @@ export function ProfilePanel() {
             <div className="surface-50 border-1 border-200 border-round-lg p-3 h-full">
               <div className="text-xs uppercase text-500">E-mail подтвержден</div>
               <div className="mt-2">
-                <Tag severity={isEmailVerified ? "success" : "warning"} value={isEmailVerified ? "Да" : "Нет"} />
+                <Tag
+                  severity={hasEmail ? (isEmailVerified ? "success" : "warning") : "secondary"}
+                  value={hasEmail ? (isEmailVerified ? "Да" : "Нет") : "Не привязан"}
+                />
               </div>
             </div>
           </div>
