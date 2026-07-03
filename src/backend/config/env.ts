@@ -51,6 +51,13 @@ type AppEnv = {
   };
 };
 
+const telegramOidcDefaults = {
+  issuer: "https://oauth.telegram.org",
+  authorizationEndpoint: "https://oauth.telegram.org/auth",
+  tokenEndpoint: "https://oauth.telegram.org/token",
+  jwksUri: "https://oauth.telegram.org/.well-known/jwks.json",
+} as const;
+
 function required(name: string) {
   const value = process.env[name];
 
@@ -64,6 +71,10 @@ function required(name: string) {
 function url(name: string) {
   const value = required(name);
 
+  return httpUrlValue(name, value).replace(/\/$/, "");
+}
+
+function httpUrlValue(name: string, value: string) {
   try {
     const parsed = new URL(value);
 
@@ -71,7 +82,7 @@ function url(name: string) {
       throw new Error();
     }
 
-    return parsed.toString().replace(/\/$/, "");
+    return parsed.toString();
   } catch {
     throw new Error(`${name} must be a valid http(s) URL`);
   }
@@ -151,12 +162,29 @@ function optionalPublicPath(name: string, fallback: string) {
   return value;
 }
 
+function telegramOidcUrl(
+  name:
+    | "TELEGRAM_OIDC_ISSUER"
+    | "TELEGRAM_OIDC_AUTHORIZATION_ENDPOINT"
+    | "TELEGRAM_OIDC_TOKEN_ENDPOINT"
+    | "TELEGRAM_OIDC_JWKS_URI",
+  fallback: string,
+) {
+  const value = optional(name);
+
+  if (process.env.NODE_ENV !== "production" && value) {
+    return httpUrlValue(name, value).replace(/\/$/, "");
+  }
+
+  return fallback;
+}
+
 function validateEnv(env: AppEnv) {
   const isProduction = process.env.NODE_ENV === "production";
 
   if (env.turnstile.enabled) {
     if (!env.turnstile.siteKey) {
-      throw new Error("NEXT_PUBLIC_TURNSTILE_SITE_KEY is required when TURNSTILE_ENABLED=true");
+      throw new Error("TURNSTILE_SITE_KEY is required when TURNSTILE_ENABLED=true");
     }
 
     if (!env.turnstile.secretKey) {
@@ -217,10 +245,13 @@ export function getEnv(): AppEnv {
     cookieSecure: bool("COOKIE_SECURE", true),
     cookieSameSite: sameSite("COOKIE_SAMESITE", "lax"),
     telegramOidc: {
-      issuer: url("TELEGRAM_OIDC_ISSUER"),
-      authorizationEndpoint: url("TELEGRAM_OIDC_AUTHORIZATION_ENDPOINT"),
-      tokenEndpoint: url("TELEGRAM_OIDC_TOKEN_ENDPOINT"),
-      jwksUri: url("TELEGRAM_OIDC_JWKS_URI"),
+      issuer: telegramOidcUrl("TELEGRAM_OIDC_ISSUER", telegramOidcDefaults.issuer),
+      authorizationEndpoint: telegramOidcUrl(
+        "TELEGRAM_OIDC_AUTHORIZATION_ENDPOINT",
+        telegramOidcDefaults.authorizationEndpoint,
+      ),
+      tokenEndpoint: telegramOidcUrl("TELEGRAM_OIDC_TOKEN_ENDPOINT", telegramOidcDefaults.tokenEndpoint),
+      jwksUri: telegramOidcUrl("TELEGRAM_OIDC_JWKS_URI", telegramOidcDefaults.jwksUri),
       clientId: required("TELEGRAM_OIDC_CLIENT_ID"),
       clientSecret: required("TELEGRAM_OIDC_CLIENT_SECRET"),
       redirectUri: joinUrl(appUrl, "/auth/telegram/callback"),
@@ -233,7 +264,7 @@ export function getEnv(): AppEnv {
     },
     turnstile: {
       enabled: bool("TURNSTILE_ENABLED", false),
-      siteKey: optional("NEXT_PUBLIC_TURNSTILE_SITE_KEY") ?? optional("TURNSTILE_SITE_KEY"),
+      siteKey: optional("TURNSTILE_SITE_KEY"),
       secretKey: optional("TURNSTILE_SECRET_KEY"),
       verifyUrl: optionalUrl("TURNSTILE_VERIFY_URL") ?? "https://challenges.cloudflare.com/turnstile/v0/siteverify",
     },

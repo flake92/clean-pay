@@ -51,21 +51,16 @@ sh start.sh
 | `REMNASHOP_API_BASE_URL` | Да | `https://bot.example.com/api/v1/public` | Public API Remnashop. |
 | `REMNAWAVE_API_BASE_URL` | Да | `https://panel.example.com` | URL панели/API Remnawave без `/api`. |
 | `REMNAWAVE_TOKEN` | Да | `change-me` | API-токен Remnawave для получения ссылки подключения. |
-| `WEB_JWT_SECRET` | Да | `change-me-long-random-web-jwt-secret` | Секрет web access/session tokens. |
-| `WEB_REFRESH_SECRET` | Да | `change-me-long-random-web-refresh-secret` | Секрет refresh/session tokens. |
-| `AUDIT_IP_HASH_SECRET` | Нет | `change-me-long-random-audit-secret` | Секрет для хеширования IP в audit logs. |
+| `WEB_JWT_SECRET` | Да | генерируется `start.sh` | Секрет web access/session tokens. |
+| `WEB_REFRESH_SECRET` | Да | генерируется `start.sh` | Секрет refresh/session tokens. |
+| `AUDIT_IP_HASH_SECRET` | Нет | генерируется `start.sh` | Секрет для хеширования IP в audit logs. |
 | `COOKIE_SECURE` | Нет | `true` | `true` для HTTPS. |
 | `COOKIE_SAMESITE` | Нет | `lax` | SameSite policy: `lax`, `strict`, `none`. |
-| `TELEGRAM_OIDC_ISSUER` | Да | `https://oauth.telegram.org` | Telegram OAuth/OIDC issuer. |
-| `TELEGRAM_OIDC_AUTHORIZATION_ENDPOINT` | Да | `https://oauth.telegram.org/auth` | Telegram authorization endpoint. |
-| `TELEGRAM_OIDC_TOKEN_ENDPOINT` | Да | `https://oauth.telegram.org/token` | Telegram token endpoint. |
-| `TELEGRAM_OIDC_JWKS_URI` | Да | `https://oauth.telegram.org/.well-known/jwks.json` | Telegram JWKS endpoint. |
 | `TELEGRAM_OIDC_CLIENT_ID` | Да | `1234567890` | ID Telegram-бота для OAuth. |
 | `TELEGRAM_OIDC_CLIENT_SECRET` | Да | `change-me` | Telegram OAuth client secret. |
 | `TELEGRAM_BOT_TOKEN` | Нет | `1234567890:change-me` | Токен Telegram-бота для Telegram flows. |
 | `TURNSTILE_ENABLED` | Нет | `false` | Включает Cloudflare Turnstile. |
-| `TURNSTILE_SITE_KEY` | Нет | пусто | Build-time fallback для public Turnstile key. |
-| `NEXT_PUBLIC_TURNSTILE_SITE_KEY` | Если Turnstile включён | `1x00000000000000000000AA` | Public Turnstile key во frontend. После изменения нужна пересборка. |
+| `TURNSTILE_SITE_KEY` | Если Turnstile включён | `1x00000000000000000000AA` | Public site key Turnstile, который передаётся во frontend. |
 | `TURNSTILE_SECRET_KEY` | Если Turnstile включён | `1x0000000000000000000000000000000AA` | Secret key для Cloudflare verification API. |
 | `TURNSTILE_VERIFY_URL` | Нет | `https://challenges.cloudflare.com/turnstile/v0/siteverify` | Endpoint проверки Turnstile. |
 | `SUPPORT_ENABLED` | Нет | `false` | Включает блок поддержки. |

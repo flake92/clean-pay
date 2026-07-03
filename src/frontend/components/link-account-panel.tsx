@@ -9,7 +9,7 @@ import { Message } from "primereact/message";
 import { Password } from "primereact/password";
 import { Tag } from "primereact/tag";
 
-import { TurnstileWidget, type TurnstileHandle, hasPublicTurnstileKey } from "@/frontend/components/turnstile-widget";
+import { TurnstileWidget, type TurnstileHandle, hasTurnstileSiteKey } from "@/frontend/components/turnstile-widget";
 import { readBffError } from "@/frontend/lib/client-api";
 
 type ProfileUser = {
@@ -31,8 +31,8 @@ async function readError(response: Response) {
   return (await readBffError(response, "Не удалось выполнить действие.")).message;
 }
 
-function missingTurnstileTokenMessage() {
-  return hasPublicTurnstileKey()
+function missingTurnstileTokenMessage(siteKey?: string | null) {
+  return hasTurnstileSiteKey(siteKey)
     ? "Пройдите проверку Cloudflare Turnstile."
     : "Cloudflare Turnstile site key is not configured.";
 }
@@ -88,7 +88,13 @@ function AuthMethodTile({
   );
 }
 
-export function LinkAccountPanel({ turnstileEnabled = false }: { turnstileEnabled?: boolean }) {
+export function LinkAccountPanel({
+  turnstileEnabled = false,
+  turnstileSiteKey,
+}: {
+  turnstileEnabled?: boolean;
+  turnstileSiteKey?: string | null;
+}) {
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [profile, setProfile] = useState<ProfileUser | null>(null);
@@ -165,7 +171,7 @@ export function LinkAccountPanel({ turnstileEnabled = false }: { turnstileEnable
     setError(null);
 
     if (turnstileEnabled && !turnstileToken) {
-      setError(missingTurnstileTokenMessage());
+      setError(missingTurnstileTokenMessage(turnstileSiteKey));
       return;
     }
 
@@ -255,7 +261,9 @@ export function LinkAccountPanel({ turnstileEnabled = false }: { turnstileEnable
         >
           {!hasTelegram ? (
             <div className="account-method-actions-stack">
-              {turnstileEnabled ? <TurnstileWidget onReady={setTurnstile} onToken={setTurnstileToken} /> : null}
+              {turnstileEnabled ? (
+                <TurnstileWidget onReady={setTurnstile} onToken={setTurnstileToken} siteKey={turnstileSiteKey} />
+              ) : null}
               <Button
                 disabled={actionLoading === "telegram"}
                 icon="pi pi-send"

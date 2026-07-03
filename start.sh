@@ -73,8 +73,77 @@ optional_http_url_env() {
   [ -z "$value" ] || http_url_env "$1"
 }
 
+generate_secret() {
+  if command -v openssl >/dev/null 2>&1; then
+    openssl rand -hex 32
+    return
+  fi
+
+  if [ -r /dev/urandom ] && command -v od >/dev/null 2>&1; then
+    od -An -N32 -tx1 /dev/urandom | tr -d ' \n'
+    printf '\n'
+    return
+  fi
+
+  fail "openssl or /dev/urandom with od is required to generate secrets"
+}
+
+is_placeholder_secret() {
+  case "$1" in
+    ""|change-me|change-me-*|build-time-placeholder) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+write_env_value() {
+  name="$1"
+  value="$2"
+  tmp_file="${ENV_FILE}.tmp.$$"
+
+  awk -v name="$name" -v value="$value" '
+    index($0, name "=") == 1 {
+      if (!done) {
+        print name "=" value
+        done = 1
+      }
+      next
+    }
+    { print }
+    END {
+      if (!done) {
+        print name "=" value
+      }
+    }
+  ' "$ENV_FILE" > "$tmp_file" \
+    && mv "$tmp_file" "$ENV_FILE" \
+    || {
+      rm -f "$tmp_file"
+      fail "failed to update $name in deploy/prod/.env"
+    }
+}
+
+ensure_generated_secret() {
+  name="$1"
+  value=$(env_value "$name")
+
+  if ! is_placeholder_secret "$value"; then
+    return
+  fi
+
+  write_env_value "$name" "$(generate_secret)"
+  info "generated $name in deploy/prod/.env"
+}
+
+ensure_generated_secrets() {
+  require_env_file
+  ensure_generated_secret WEB_JWT_SECRET
+  ensure_generated_secret WEB_REFRESH_SECRET
+  ensure_generated_secret AUDIT_IP_HASH_SECRET
+}
+
 validate_env() {
   require_env_file
+  ensure_generated_secrets
 
   required_env DATABASE_URL
   required_env REDIS_URL
@@ -85,10 +154,6 @@ validate_env() {
   required_env REMNAWAVE_TOKEN
   required_env WEB_JWT_SECRET
   required_env WEB_REFRESH_SECRET
-  required_env TELEGRAM_OIDC_ISSUER
-  required_env TELEGRAM_OIDC_AUTHORIZATION_ENDPOINT
-  required_env TELEGRAM_OIDC_TOKEN_ENDPOINT
-  required_env TELEGRAM_OIDC_JWKS_URI
   required_env TELEGRAM_OIDC_CLIENT_ID
   required_env TELEGRAM_OIDC_CLIENT_SECRET
 
@@ -96,10 +161,6 @@ validate_env() {
   http_url_env NEXT_PUBLIC_APP_URL
   http_url_env REMNASHOP_API_BASE_URL
   http_url_env REMNAWAVE_API_BASE_URL
-  http_url_env TELEGRAM_OIDC_ISSUER
-  http_url_env TELEGRAM_OIDC_AUTHORIZATION_ENDPOINT
-  http_url_env TELEGRAM_OIDC_TOKEN_ENDPOINT
-  http_url_env TELEGRAM_OIDC_JWKS_URI
   optional_http_url_env TURNSTILE_VERIFY_URL
   optional_http_url_env SUPPORT_FAQ_URL
   optional_http_url_env CLEAN_PAY_READINESS_MAILPIT_URL

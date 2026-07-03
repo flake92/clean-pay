@@ -25,7 +25,6 @@ declare global {
 }
 
 const scriptId = "cloudflare-turnstile-script";
-const siteKey = process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY;
 let turnstileScriptPromise: Promise<void> | null = null;
 
 function waitForTurnstileApi() {
@@ -94,16 +93,18 @@ export type TurnstileHandle = {
   reset: () => void;
 };
 
-export function hasPublicTurnstileKey() {
+export function hasTurnstileSiteKey(siteKey?: string | null) {
   return Boolean(siteKey);
 }
 
 export function TurnstileWidget({
   onToken,
   onReady,
+  siteKey,
 }: {
   onToken: (token: string | null) => void;
   onReady?: (handle: TurnstileHandle) => void;
+  siteKey?: string | null;
 }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const widgetIdRef = useRef<string | null>(null);
@@ -161,7 +162,7 @@ export function TurnstileWidget({
         window.turnstile.remove(widgetIdRef.current);
       }
     };
-  }, [onReady, onToken, reset]);
+  }, [onReady, onToken, reset, siteKey]);
 
   if (!siteKey) {
     return <Message severity="error" text="Cloudflare Turnstile site key is not configured." />;

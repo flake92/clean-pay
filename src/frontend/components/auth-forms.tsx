@@ -8,7 +8,7 @@ import { Message } from "primereact/message";
 import { Password } from "primereact/password";
 
 import { PasskeyLoginButton } from "@/frontend/components/passkey-actions";
-import { TurnstileWidget, type TurnstileHandle, hasPublicTurnstileKey } from "@/frontend/components/turnstile-widget";
+import { TurnstileWidget, type TurnstileHandle, hasTurnstileSiteKey } from "@/frontend/components/turnstile-widget";
 import { readBffError } from "@/frontend/lib/client-api";
 
 type ApiState = {
@@ -51,6 +51,7 @@ type LoginMode = "identify" | "password" | "register";
 
 type AuthTurnstileContextValue = {
   enabled: boolean;
+  siteKey: string | null;
   token: string | null;
   reset: () => void;
   setHandle: (handle: TurnstileHandle) => void;
@@ -59,6 +60,7 @@ type AuthTurnstileContextValue = {
 
 const AuthTurnstileContext = createContext<AuthTurnstileContextValue>({
   enabled: false,
+  siteKey: null,
   token: null,
   reset: () => {},
   setHandle: () => {},
@@ -77,8 +79,8 @@ function shouldRedirectAfterRegisterFallback(body: { data?: { user?: { is_email_
   return body.data?.user?.is_email_verified === true || !body.data?.emailVerification;
 }
 
-function missingTurnstileTokenMessage() {
-  return hasPublicTurnstileKey()
+function missingTurnstileTokenMessage(siteKey?: string | null) {
+  return hasTurnstileSiteKey(siteKey)
     ? "Пройдите проверку Cloudflare Turnstile."
     : "Cloudflare Turnstile site key is not configured.";
 }
@@ -150,9 +152,11 @@ function useAuthTurnstile() {
 export function AuthTurnstileProvider({
   enabled,
   children,
+  siteKey,
 }: {
   enabled: boolean;
   children: ReactNode;
+  siteKey?: string | null;
 }) {
   const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
   const [turnstile, setTurnstile] = useState<TurnstileHandle | null>(null);
@@ -160,6 +164,7 @@ export function AuthTurnstileProvider({
   const value = useMemo<AuthTurnstileContextValue>(
     () => ({
       enabled,
+      siteKey: siteKey ?? null,
       token: enabled ? turnstileToken : null,
       reset: () => {
         turnstile?.reset();
@@ -168,7 +173,7 @@ export function AuthTurnstileProvider({
       setHandle: setTurnstile,
       setToken: setTurnstileToken,
     }),
-    [enabled, turnstile, turnstileToken],
+    [enabled, siteKey, turnstile, turnstileToken],
   );
 
   return <AuthTurnstileContext.Provider value={value}>{children}</AuthTurnstileContext.Provider>;
@@ -181,7 +186,7 @@ function AuthTurnstileChallenge() {
     return null;
   }
 
-  return <TurnstileWidget onReady={turnstile.setHandle} onToken={turnstile.setToken} />;
+  return <TurnstileWidget onReady={turnstile.setHandle} onToken={turnstile.setToken} siteKey={turnstile.siteKey} />;
 }
 
 export function LoginForm() {
@@ -239,7 +244,7 @@ export function LoginForm() {
     event.preventDefault();
 
     if (turnstile.enabled && !turnstile.token) {
-      setState({ loading: false, error: missingTurnstileTokenMessage() });
+      setState({ loading: false, error: missingTurnstileTokenMessage(turnstile.siteKey) });
       return;
     }
 
@@ -290,7 +295,7 @@ export function LoginForm() {
     }
 
     if (turnstile.enabled && !turnstile.token) {
-      setState({ loading: false, error: missingTurnstileTokenMessage() });
+      setState({ loading: false, error: missingTurnstileTokenMessage(turnstile.siteKey) });
       return;
     }
 
@@ -477,7 +482,7 @@ export function RegisterForm() {
     }
 
     if (turnstile.enabled && !turnstile.token) {
-      setState({ loading: false, error: missingTurnstileTokenMessage() });
+      setState({ loading: false, error: missingTurnstileTokenMessage(turnstile.siteKey) });
       return;
     }
 
@@ -571,7 +576,7 @@ export function TelegramLoginButton({ redirectTo = "/cabinet" }: { redirectTo?: 
 
   async function onClick() {
     if (turnstile.enabled && !turnstile.token) {
-      setState({ loading: false, error: missingTurnstileTokenMessage() });
+      setState({ loading: false, error: missingTurnstileTokenMessage(turnstile.siteKey) });
       return;
     }
 

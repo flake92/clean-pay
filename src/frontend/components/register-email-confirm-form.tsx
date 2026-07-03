@@ -6,15 +6,15 @@ import { Button } from "primereact/button";
 import { InputText } from "primereact/inputtext";
 import { Message } from "primereact/message";
 
-import { TurnstileWidget, type TurnstileHandle, hasPublicTurnstileKey } from "@/frontend/components/turnstile-widget";
+import { TurnstileWidget, type TurnstileHandle, hasTurnstileSiteKey } from "@/frontend/components/turnstile-widget";
 import { readBffError } from "@/frontend/lib/client-api";
 
 async function readError(response: Response, fallback: string) {
   return (await readBffError(response, fallback)).message;
 }
 
-function missingTurnstileTokenMessage() {
-  return hasPublicTurnstileKey()
+function missingTurnstileTokenMessage(siteKey?: string | null) {
+  return hasTurnstileSiteKey(siteKey)
     ? "Пройдите проверку Cloudflare Turnstile."
     : "Ключ сайта Cloudflare Turnstile не настроен.";
 }
@@ -28,7 +28,13 @@ function turnstilePayload(token: string | null) {
     : {};
 }
 
-export function RegisterEmailConfirmForm({ turnstileEnabled = false }: { turnstileEnabled?: boolean }) {
+export function RegisterEmailConfirmForm({
+  turnstileEnabled = false,
+  turnstileSiteKey,
+}: {
+  turnstileEnabled?: boolean;
+  turnstileSiteKey?: string | null;
+}) {
   const [loading, setLoading] = useState<"confirm" | "resend" | "back" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
@@ -40,7 +46,7 @@ export function RegisterEmailConfirmForm({ turnstileEnabled = false }: { turnsti
       return true;
     }
 
-    setError(missingTurnstileTokenMessage());
+    setError(missingTurnstileTokenMessage(turnstileSiteKey));
     return false;
   }
 
@@ -118,7 +124,9 @@ export function RegisterEmailConfirmForm({ turnstileEnabled = false }: { turnsti
 
   return (
     <div className="flex flex-column gap-3">
-      {turnstileEnabled ? <TurnstileWidget onReady={setTurnstile} onToken={setTurnstileToken} /> : null}
+      {turnstileEnabled ? (
+        <TurnstileWidget onReady={setTurnstile} onToken={setTurnstileToken} siteKey={turnstileSiteKey} />
+      ) : null}
       <form className="flex flex-column gap-3" onSubmit={onSubmit}>
         <label className="flex flex-column gap-2">
           <span className="text-sm font-medium text-700">Код подтверждения</span>

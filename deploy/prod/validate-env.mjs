@@ -22,10 +22,6 @@ const requiredNames = [
   "REMNASHOP_API_BASE_URL",
   "WEB_JWT_SECRET",
   "WEB_REFRESH_SECRET",
-  "TELEGRAM_OIDC_ISSUER",
-  "TELEGRAM_OIDC_AUTHORIZATION_ENDPOINT",
-  "TELEGRAM_OIDC_TOKEN_ENDPOINT",
-  "TELEGRAM_OIDC_JWKS_URI",
   "TELEGRAM_OIDC_CLIENT_ID",
   "TELEGRAM_OIDC_CLIENT_SECRET",
 ];
@@ -37,10 +33,6 @@ for (const name of requiredNames) {
 httpUrl("APP_URL");
 httpUrl("NEXT_PUBLIC_APP_URL");
 httpUrl("REMNASHOP_API_BASE_URL");
-httpUrl("TELEGRAM_OIDC_ISSUER");
-httpUrl("TELEGRAM_OIDC_AUTHORIZATION_ENDPOINT");
-httpUrl("TELEGRAM_OIDC_TOKEN_ENDPOINT");
-httpUrl("TELEGRAM_OIDC_JWKS_URI");
 optionalHttpUrl("REMNAWAVE_API_BASE_URL");
 optionalHttpUrl("TURNSTILE_VERIFY_URL");
 optionalHttpUrl("SUPPORT_FAQ_URL");
@@ -61,8 +53,8 @@ if (optional("NEXT_PUBLIC_BRAND_NAME") && optional("NEXT_PUBLIC_BRAND_NAME").len
 }
 
 if (turnstileEnabled) {
-  if (!optional("NEXT_PUBLIC_TURNSTILE_SITE_KEY") && !optional("TURNSTILE_SITE_KEY")) {
-    fail("NEXT_PUBLIC_TURNSTILE_SITE_KEY is required when TURNSTILE_ENABLED=true");
+  if (!optional("TURNSTILE_SITE_KEY")) {
+    fail("TURNSTILE_SITE_KEY is required when TURNSTILE_ENABLED=true");
   }
 
   if (!optional("TURNSTILE_SECRET_KEY")) {

@@ -7,6 +7,7 @@ export const dynamic = "force-dynamic";
 
 export default function VerifyEmailPage() {
   const turnstileEnabled = process.env.TURNSTILE_ENABLED === "true";
+  const turnstileSiteKey = process.env.TURNSTILE_SITE_KEY;
 
   return (
     <AppShell>
@@ -16,7 +17,7 @@ export default function VerifyEmailPage() {
           title="Подтверждение e-mail"
         />
         <Card>
-          <VerifyEmailPanel turnstileEnabled={turnstileEnabled} />
+          <VerifyEmailPanel turnstileEnabled={turnstileEnabled} turnstileSiteKey={turnstileSiteKey} />
         </Card>
       </div>
     </AppShell>

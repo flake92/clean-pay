@@ -234,6 +234,47 @@ body {
   white-space: nowrap;
 }
 
+.p-card {
+  background: #ffffff;
+  border: 1px solid #dce3ec;
+  border-radius: 8px;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.12);
+  color: #334155;
+  min-width: 0;
+}
+
+.p-card .p-card-body {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  padding: 1.5rem;
+}
+
+.p-card .p-card-title {
+  color: #334155;
+  font-size: 1.5rem;
+  font-weight: 700;
+  line-height: 1.25;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.p-card .p-card-subtitle {
+  color: #64748b;
+  font-weight: 400;
+  line-height: 1.4;
+  margin: -0.5rem 0 0;
+}
+
+.p-card .p-card-content {
+  min-width: 0;
+  padding: 0;
+}
+
+.p-card .p-card-footer {
+  padding: 0;
+}
+
 .auth-account-summary {
   align-items: center;
   background: #f8fafc;

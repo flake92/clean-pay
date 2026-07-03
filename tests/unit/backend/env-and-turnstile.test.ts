@@ -41,11 +41,10 @@ describe("backend env", () => {
 
   it("fails fast for invalid production configuration combinations", () => {
     vi.stubEnv("TURNSTILE_ENABLED", "true");
-    vi.stubEnv("NEXT_PUBLIC_TURNSTILE_SITE_KEY", "");
     vi.stubEnv("TURNSTILE_SITE_KEY", "");
-    expect(() => getEnv()).toThrow("NEXT_PUBLIC_TURNSTILE_SITE_KEY is required when TURNSTILE_ENABLED=true");
+    expect(() => getEnv()).toThrow("TURNSTILE_SITE_KEY is required when TURNSTILE_ENABLED=true");
 
-    vi.stubEnv("NEXT_PUBLIC_TURNSTILE_SITE_KEY", "site-key");
+    vi.stubEnv("TURNSTILE_SITE_KEY", "site-key");
     vi.stubEnv("TURNSTILE_SECRET_KEY", "");
     expect(() => getEnv()).toThrow("TURNSTILE_SECRET_KEY is required when TURNSTILE_ENABLED=true");
 
@@ -121,7 +120,7 @@ describe("Turnstile helpers", () => {
 
   it("validates token through Cloudflare when enabled", async () => {
     vi.stubEnv("TURNSTILE_ENABLED", "true");
-    vi.stubEnv("NEXT_PUBLIC_TURNSTILE_SITE_KEY", "site-key");
+    vi.stubEnv("TURNSTILE_SITE_KEY", "site-key");
     vi.stubEnv("TURNSTILE_SECRET_KEY", "secret");
     vi.stubEnv("TURNSTILE_VERIFY_URL", "https://turnstile.test/siteverify");
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
@@ -139,7 +138,7 @@ describe("Turnstile helpers", () => {
 
   it("returns BFF errors for invalid Turnstile states", async () => {
     vi.stubEnv("TURNSTILE_ENABLED", "true");
-    vi.stubEnv("NEXT_PUBLIC_TURNSTILE_SITE_KEY", "site-key");
+    vi.stubEnv("TURNSTILE_SITE_KEY", "site-key");
     vi.stubEnv("TURNSTILE_SECRET_KEY", "");
     await expect(verifyTurnstileToken("token")).rejects.toThrow(
       "TURNSTILE_SECRET_KEY is required when TURNSTILE_ENABLED=true",

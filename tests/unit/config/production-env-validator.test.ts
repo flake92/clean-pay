@@ -24,10 +24,6 @@ const validEnv = {
   REMNAWAVE_TOKEN: "token",
   WEB_JWT_SECRET: "jwt-secret",
   WEB_REFRESH_SECRET: "refresh-secret",
-  TELEGRAM_OIDC_ISSUER: "https://oauth.telegram.org",
-  TELEGRAM_OIDC_AUTHORIZATION_ENDPOINT: "https://oauth.telegram.org/auth",
-  TELEGRAM_OIDC_TOKEN_ENDPOINT: "https://oauth.telegram.org/token",
-  TELEGRAM_OIDC_JWKS_URI: "https://oauth.telegram.org/.well-known/jwks.json",
   TELEGRAM_OIDC_CLIENT_ID: "123456",
   TELEGRAM_OIDC_CLIENT_SECRET: "secret",
   TELEGRAM_BOT_TOKEN: "123456:test-token",
@@ -99,9 +95,9 @@ describe("production env validator", () => {
   it("fails with clear reasons for invalid env combinations", () => {
     expect(runValidator({
       TURNSTILE_ENABLED: "true",
-      NEXT_PUBLIC_TURNSTILE_SITE_KEY: "",
+      TURNSTILE_SITE_KEY: "",
       TURNSTILE_SECRET_KEY: "",
-    }).stderr).toContain("NEXT_PUBLIC_TURNSTILE_SITE_KEY is required when TURNSTILE_ENABLED=true");
+    }).stderr).toContain("TURNSTILE_SITE_KEY is required when TURNSTILE_ENABLED=true");
 
     expect(runValidator({
       COOKIE_SAMESITE: "none",

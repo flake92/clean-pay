@@ -7,11 +7,11 @@ import { Card } from "primereact/card";
 import { InputText } from "primereact/inputtext";
 import { Message } from "primereact/message";
 
-import { TurnstileWidget, type TurnstileHandle, hasPublicTurnstileKey } from "@/frontend/components/turnstile-widget";
+import { TurnstileWidget, type TurnstileHandle, hasTurnstileSiteKey } from "@/frontend/components/turnstile-widget";
 import { BffClientError, readBffError } from "@/frontend/lib/client-api";
 
-function missingTurnstileTokenMessage() {
-  return hasPublicTurnstileKey()
+function missingTurnstileTokenMessage(siteKey?: string | null) {
+  return hasTurnstileSiteKey(siteKey)
     ? "Пройдите проверку Cloudflare Turnstile."
     : "Ключ сайта Cloudflare Turnstile не настроен.";
 }
@@ -25,7 +25,13 @@ function turnstilePayload(token: string | null) {
     : {};
 }
 
-export function VerifyEmailPanel({ turnstileEnabled = false }: { turnstileEnabled?: boolean }) {
+export function VerifyEmailPanel({
+  turnstileEnabled = false,
+  turnstileSiteKey,
+}: {
+  turnstileEnabled?: boolean;
+  turnstileSiteKey?: string | null;
+}) {
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState<string | null>(null);
@@ -41,7 +47,7 @@ export function VerifyEmailPanel({ turnstileEnabled = false }: { turnstileEnable
 
     if (turnstileEnabled && !turnstileToken) {
       setLoading(null);
-      setError(missingTurnstileTokenMessage());
+      setError(missingTurnstileTokenMessage(turnstileSiteKey));
       return;
     }
 
@@ -86,7 +92,7 @@ export function VerifyEmailPanel({ turnstileEnabled = false }: { turnstileEnable
 
     if (turnstileEnabled && !turnstileToken) {
       setLoading(null);
-      setError(missingTurnstileTokenMessage());
+      setError(missingTurnstileTokenMessage(turnstileSiteKey));
       return;
     }
 
@@ -122,7 +128,9 @@ export function VerifyEmailPanel({ turnstileEnabled = false }: { turnstileEnable
 
   return (
     <div className="flex flex-column gap-4">
-      {turnstileEnabled ? <TurnstileWidget onReady={setTurnstile} onToken={setTurnstileToken} /> : null}
+      {turnstileEnabled ? (
+        <TurnstileWidget onReady={setTurnstile} onToken={setTurnstileToken} siteKey={turnstileSiteKey} />
+      ) : null}
       <Card title="Введите код из письма">
         <p className="mt-0 line-height-3 text-600">
           Если код уже отправлен, просто введите 6 цифр из письма. Повторная отправка доступна ниже.

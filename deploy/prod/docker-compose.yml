@@ -8,7 +8,6 @@ services:
       dockerfile: deploy/prod/Dockerfile
       args:
         TURNSTILE_ENABLED: ${TURNSTILE_ENABLED:-false}
-        NEXT_PUBLIC_TURNSTILE_SITE_KEY: ${NEXT_PUBLIC_TURNSTILE_SITE_KEY:-}
         TURNSTILE_SITE_KEY: ${TURNSTILE_SITE_KEY:-}
         NEXT_PUBLIC_BRAND_NAME: ${NEXT_PUBLIC_BRAND_NAME:-Clean Pay}
         NEXT_PUBLIC_BRAND_LOGO_URL: ${NEXT_PUBLIC_BRAND_LOGO_URL:-/clean_vpn_logo.jpg}
