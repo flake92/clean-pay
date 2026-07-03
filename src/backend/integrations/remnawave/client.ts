@@ -114,7 +114,7 @@ async function remnawaveRequest<T>(path: string) {
   } catch (error) {
     logger.warn("remnawave_live_subscription_unavailable", {
       path,
-      error: error instanceof Error ? error.message : String(error),
+      errorName: error instanceof Error ? error.name : "UnknownError",
     }, {
       category: "upstream",
       source: "remnawave.client",

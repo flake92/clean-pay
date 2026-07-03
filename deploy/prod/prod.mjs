@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 const prodDir = path.dirname(fileURLToPath(import.meta.url));
 const rootDir = path.resolve(prodDir, "../..");
 const envFile = path.join(prodDir, ".env");
+const validateEnvScript = path.join(prodDir, "validate-env.mjs");
 const composeFiles = [
   path.join(prodDir, "docker-compose.yml"),
 ];
@@ -28,7 +29,9 @@ function readEnvValue(name, fallback) {
     .split(/\r?\n/)
     .find((entry) => entry.startsWith(`${name}=`));
 
-  return line ? line.slice(name.length + 1).replace(/^"|"$/g, "") : fallback;
+  const value = line ? line.slice(name.length + 1).replace(/^"|"$/g, "").trim() : "";
+
+  return value || fallback;
 }
 
 function composeArgs(...extra) {
@@ -57,10 +60,62 @@ function run(commandName, commandArgs) {
   process.exit(result.status ?? 1);
 }
 
+function runDocker(args, options = {}) {
+  const result = spawnSync("docker", args, {
+    cwd: rootDir,
+    env: process.env,
+    stdio: options.stdio ?? "inherit",
+    shell: false,
+  });
+
+  if (result.error) {
+    console.error(result.error.message);
+    process.exit(1);
+  }
+
+  return result.status ?? 1;
+}
+
+function ensureEdgeNetwork() {
+  const networkName = readEnvValue("CLEAN_PAY_EDGE_NETWORK", "remnawave-network");
+  const inspectStatus = runDocker(["network", "inspect", networkName], { stdio: "ignore" });
+
+  if (inspectStatus === 0) {
+    console.log(`Docker network ${networkName} already exists.`);
+    return;
+  }
+
+  console.log(`Docker network ${networkName} not found. Creating it...`);
+  const createStatus = runDocker(["network", "create", networkName]);
+
+  if (createStatus !== 0) {
+    console.error(`Failed to create Docker network ${networkName}.`);
+    process.exit(createStatus);
+  }
+}
+
 function requireEnvFile() {
   if (!existsSync(envFile)) {
     console.error(`Missing ${envFile}. Copy deploy/prod/.env.example and fill real values.`);
     process.exit(1);
+  }
+}
+
+function validateProductionEnvFile() {
+  const result = spawnSync(process.execPath, [validateEnvScript, "--env-file", envFile], {
+    cwd: rootDir,
+    env: process.env,
+    stdio: "inherit",
+    shell: false,
+  });
+
+  if (result.error) {
+    console.error(result.error.message);
+    process.exit(1);
+  }
+
+  if (result.status !== 0) {
+    process.exit(result.status ?? 1);
   }
 }
 
@@ -118,10 +173,13 @@ requireEnvFile();
 
 switch (command) {
   case "build":
+    validateProductionEnvFile();
     run("docker", composeArgs("build"));
     break;
   case "up":
-    run("docker", composeArgs("up", "-d"));
+    validateProductionEnvFile();
+    ensureEdgeNetwork();
+    run("docker", composeArgs("up", "-d", "--build"));
     break;
   case "down":
     run("docker", composeArgs("down"));

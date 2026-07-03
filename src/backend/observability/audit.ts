@@ -20,6 +20,18 @@ function sanitizeValue(value: unknown): unknown {
   return sanitizeLogValue(value);
 }
 
+function isProductionLog() {
+  return process.env.NODE_ENV === "production";
+}
+
+function technicalMetadata(metadata: Record<string, unknown>) {
+  if (isProductionLog()) {
+    return undefined;
+  }
+
+  return sanitizeValue(metadata) as Prisma.InputJsonValue;
+}
+
 function getIpFromHeaders(requestHeaders: Headers) {
   const forwardedFor = requestHeaders.get("x-forwarded-for")?.split(",")[0]?.trim();
 
@@ -65,20 +77,24 @@ export async function auditLog({
 
 export function logTechnicalError(event: string, error: unknown, metadata: Record<string, unknown> = {}) {
   const bffError = error as Partial<BffError>;
-  const sanitized = sanitizeValue(metadata);
+  const safeMetadata = technicalMetadata(metadata);
 
   logger.error(event, {
     code: typeof bffError.code === "string" ? bffError.code : undefined,
     status: typeof bffError.status === "number" ? bffError.status : undefined,
-    message: error instanceof Error ? error.message : String(error),
-    metadata: sanitized as Prisma.InputJsonValue,
+    message: isProductionLog() ? undefined : error instanceof Error ? error.message : String(error),
+    ...(safeMetadata === undefined ? {} : { metadata: safeMetadata }),
   }, { category: "technical" });
 }
 
 export function logTechnicalWarning(event: string, metadata: Record<string, unknown> = {}) {
-  logger.warn(event, { metadata: sanitizeValue(metadata) as Prisma.InputJsonValue }, { category: "technical" });
+  const safeMetadata = technicalMetadata(metadata);
+
+  logger.warn(event, safeMetadata === undefined ? {} : { metadata: safeMetadata }, { category: "technical" });
 }
 
 export function logTechnicalInfo(event: string, metadata: Record<string, unknown> = {}) {
-  logger.info(event, { metadata: sanitizeValue(metadata) as Prisma.InputJsonValue }, { category: "technical" });
+  const safeMetadata = technicalMetadata(metadata);
+
+  logger.info(event, safeMetadata === undefined ? {} : { metadata: safeMetadata }, { category: "technical" });
 }

@@ -8,6 +8,10 @@ import { getCurrentUser } from "@/backend/sessions/web-session";
 
 export const runtime = "nodejs";
 
+function isSubscriptionNotFound(error: unknown) {
+  return error instanceof BffError && error.code === "SUBSCRIPTION_NOT_FOUND";
+}
+
 export async function GET(request: Request) {
   try {
     const user = await getCurrentUser();
@@ -34,8 +38,10 @@ export async function GET(request: Request) {
         "/subscription/current",
         { accessToken },
       );
-    } catch {
-      subscription = null;
+    } catch (error) {
+      if (!isSubscriptionNotFound(error)) {
+        throw error;
+      }
     }
 
     return bffJson({

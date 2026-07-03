@@ -107,4 +107,42 @@ describe("Remnawave live subscription client", () => {
     await expect(getLiveRemnawaveSubscriptionUrl({ email: "user@example.com" }))
       .resolves.toBe("https://sub3.example.com/active");
   });
+
+  it("returns null when Remnawave does not provide a valid subscription URL", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({
+        response: {
+          uuid: "rw-1",
+          status: "ACTIVE",
+          subscriptionUrl: "",
+        },
+      }))
+      .mockResolvedValueOnce(jsonResponse({
+        response: [{
+          uuid: "rw-2",
+          status: "ACTIVE",
+          subscriptionUrl: "not-a-url",
+        }],
+      }));
+    global.fetch = fetchMock;
+
+    await expect(getLiveRemnawaveSubscriptionUrl({
+      userRemnaId: "rw-1",
+      email: "user@example.com",
+    })).resolves.toBeNull();
+  });
+
+  it("returns null when Remnawave is unavailable", async () => {
+    const fetchMock = vi.fn().mockRejectedValue(new Error("network token secret"));
+    global.fetch = fetchMock;
+
+    await expect(getLiveRemnawaveSubscriptionUrl({ userRemnaId: "rw-1" })).resolves.toBeNull();
+
+    expect(mocks.logger.warn).toHaveBeenCalledWith(
+      "remnawave_live_subscription_unavailable",
+      expect.objectContaining({ path: "/users/rw-1", errorName: "Error" }),
+      expect.objectContaining({ category: "upstream" }),
+    );
+    expect(JSON.stringify(mocks.logger.warn.mock.calls)).not.toContain("network token secret");
+  });
 });

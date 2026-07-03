@@ -56,12 +56,8 @@ export async function verifyTurnstileToken(token: string | null | undefined, rem
 
   logger.info("turnstile_request_sent", {
     method: "POST",
-    url: env.turnstile.verifyUrl,
-    body: {
-      response: token ? "[redacted]" : null,
-      remoteip: remoteIp ? "[present]" : null,
-      secret: "[redacted]",
-    },
+    hasToken: Boolean(token),
+    hasRemoteIp: Boolean(remoteIp),
   }, {
     category: "upstream",
     source: "turnstile.client",
@@ -77,9 +73,8 @@ export async function verifyTurnstileToken(token: string | null | undefined, rem
   } catch (error) {
     logger.error("turnstile_request_failed", {
       method: "POST",
-      url: env.turnstile.verifyUrl,
       durationMs: Date.now() - startedAt,
-      error: error instanceof Error ? error.message : String(error),
+      errorName: error instanceof Error ? error.name : "UnknownError",
     }, {
       category: "upstream",
       source: "turnstile.client",
@@ -93,11 +88,10 @@ export async function verifyTurnstileToken(token: string | null | undefined, rem
   const result = (await response.json().catch(() => null)) as TurnstileResponse | null;
   logger.info("turnstile_response_received", {
     method: "POST",
-    url: env.turnstile.verifyUrl,
     status: response.status,
     ok: response.ok,
     durationMs: Date.now() - startedAt,
-    body: result,
+    hasResponse: Boolean(result),
   }, {
     category: "upstream",
     source: "turnstile.client",

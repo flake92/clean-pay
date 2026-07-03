@@ -4,6 +4,10 @@ type AppEnv = {
   databaseUrl: string;
   appUrl: string;
   publicAppUrl: string;
+  branding: {
+    name: string;
+    logoUrl: string;
+  };
   remnashopApiBaseUrl: string;
   remnawave: {
     apiBaseUrl: string | null;
@@ -61,9 +65,15 @@ function url(name: string) {
   const value = required(name);
 
   try {
-    return new URL(value).toString().replace(/\/$/, "");
+    const parsed = new URL(value);
+
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+      throw new Error();
+    }
+
+    return parsed.toString().replace(/\/$/, "");
   } catch {
-    throw new Error(`${name} must be a valid URL`);
+    throw new Error(`${name} must be a valid http(s) URL`);
   }
 }
 
@@ -115,19 +125,87 @@ function optionalUrl(name: string) {
   }
 
   try {
-    return new URL(value).toString();
+    const parsed = new URL(value);
+
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+      throw new Error();
+    }
+
+    return parsed.toString();
   } catch {
-    throw new Error(`${name} must be a valid URL`);
+    throw new Error(`${name} must be a valid http(s) URL`);
+  }
+}
+
+function optionalPublicPath(name: string, fallback: string) {
+  const value = optional(name);
+
+  if (!value) {
+    return fallback;
+  }
+
+  if (!value.startsWith("/") || value.startsWith("//") || value.includes("\\") || value.includes("\0")) {
+    throw new Error(`${name} must be a root-relative public path like /brand/logo.png`);
+  }
+
+  return value;
+}
+
+function validateEnv(env: AppEnv) {
+  const isProduction = process.env.NODE_ENV === "production";
+
+  if (env.turnstile.enabled) {
+    if (!env.turnstile.siteKey) {
+      throw new Error("NEXT_PUBLIC_TURNSTILE_SITE_KEY is required when TURNSTILE_ENABLED=true");
+    }
+
+    if (!env.turnstile.secretKey) {
+      throw new Error("TURNSTILE_SECRET_KEY is required when TURNSTILE_ENABLED=true");
+    }
+  }
+
+  if (env.cookieSameSite === "none" && !env.cookieSecure) {
+    throw new Error('COOKIE_SECURE must be "true" when COOKIE_SAMESITE="none"');
+  }
+
+  if (env.branding.name.length > 80) {
+    throw new Error("NEXT_PUBLIC_BRAND_NAME must be 80 characters or less");
+  }
+
+  if (isProduction && (!env.remnawave.apiBaseUrl || !env.remnawave.token)) {
+    throw new Error("REMNAWAVE_API_BASE_URL and REMNAWAVE_TOKEN are required in production");
+  }
+
+  if (Boolean(env.remnawave.apiBaseUrl) !== Boolean(env.remnawave.token)) {
+    throw new Error("REMNAWAVE_API_BASE_URL and REMNAWAVE_TOKEN must be configured together");
+  }
+
+  if (env.telegramOidc.clientSecret.startsWith(`${env.telegramOidc.clientId}:`)) {
+    return;
+  }
+
+  if (!env.telegramBotToken) {
+    return;
+  }
+
+  const botId = env.telegramBotToken.split(":")[0];
+
+  if (botId && botId !== env.telegramOidc.clientId) {
+    throw new Error("TELEGRAM_OIDC_CLIENT_ID must match the bot id in TELEGRAM_BOT_TOKEN");
   }
 }
 
 export function getEnv(): AppEnv {
   const appUrl = url("APP_URL");
 
-  return {
+  const env = {
     databaseUrl: required("DATABASE_URL"),
     appUrl,
     publicAppUrl: url("NEXT_PUBLIC_APP_URL"),
+    branding: {
+      name: optional("NEXT_PUBLIC_BRAND_NAME") ?? "Clean Pay",
+      logoUrl: optionalPublicPath("NEXT_PUBLIC_BRAND_LOGO_URL", "/clean_vpn_logo.jpg"),
+    },
     remnashopApiBaseUrl: url("REMNASHOP_API_BASE_URL"),
     remnawave: {
       apiBaseUrl: optionalUrl("REMNAWAVE_API_BASE_URL"),
@@ -170,4 +248,8 @@ export function getEnv(): AppEnv {
       remnawaveUrl: optionalUrl("CLEAN_PAY_READINESS_REMNAWAVE_URL"),
     },
   };
+
+  validateEnv(env);
+
+  return env;
 }

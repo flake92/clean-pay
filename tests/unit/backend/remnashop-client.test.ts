@@ -1,11 +1,13 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+const loggerMock = vi.hoisted(() => ({
+  info: vi.fn(),
+  warn: vi.fn(),
+  error: vi.fn(),
+}));
+
 vi.mock("@/backend/observability/logger", () => ({
-  logger: {
-    info: vi.fn(),
-    warn: vi.fn(),
-    error: vi.fn(),
-  },
+  logger: loggerMock,
 }));
 
 vi.mock("@/backend/observability/auth-debug-log", () => ({
@@ -64,8 +66,15 @@ function response({
   return result;
 }
 
+function hasLogKey(metadata: unknown, key: string) {
+  return Boolean(metadata && typeof metadata === "object" && key in metadata);
+}
+
 describe("remnashop client", () => {
   afterEach(() => {
+    loggerMock.info.mockClear();
+    loggerMock.warn.mockClear();
+    loggerMock.error.mockClear();
     vi.restoreAllMocks();
   });
 
@@ -144,6 +153,41 @@ describe("remnashop client", () => {
     expect(fetchMock.mock.calls[0]?.[1]?.headers).toMatchObject({
       cookie: "access_token=access; refresh_token=refresh",
     });
+  });
+
+  it("does not log Remnashop request or response payloads", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(response({
+      body: { email: "user@example.com", access_token: "response-token" },
+      setCookie: ["access_token=response-token; Path=/"],
+    }));
+
+    await remnashopRequest("/subscription/purchase", {
+      method: "POST",
+      accessToken: "access-token",
+      refreshToken: "refresh-token",
+      body: {
+        email: "user@example.com",
+        password: "secret",
+        plan_code: "premium",
+      },
+    });
+
+    const logMetadata = loggerMock.info.mock.calls.map(([, metadata]) => metadata);
+
+    expect(logMetadata).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ method: "POST", path: "/subscription/purchase", hasBody: true }),
+        expect.objectContaining({ method: "POST", path: "/subscription/purchase", status: 200, ok: true }),
+      ]),
+    );
+    expect(JSON.stringify(logMetadata)).not.toContain("access-token");
+    expect(JSON.stringify(logMetadata)).not.toContain("refresh-token");
+    expect(JSON.stringify(logMetadata)).not.toContain("response-token");
+    expect(JSON.stringify(logMetadata)).not.toContain("user@example.com");
+    expect(JSON.stringify(logMetadata)).not.toContain("secret");
+    expect(logMetadata.some((metadata) => hasLogKey(metadata, "headers"))).toBe(false);
+    expect(logMetadata.some((metadata) => hasLogKey(metadata, "body"))).toBe(false);
+    expect(logMetadata.some((metadata) => hasLogKey(metadata, "url"))).toBe(false);
   });
 
   it("extracts auth cookies from login/register responses", async () => {

@@ -38,7 +38,7 @@ x-remnashop-env: &remnashop-env
   APP_DOMAIN: remnashop.localhost
   APP_HOST: 0.0.0.0
   APP_PORT: "5000"
-  APP_CRYPT_KEY: cdLLqAspR/IqBkkOKM5qvCKE9LluVyRxTe2SMKd/9vs=
+  APP_CRYPT_KEY: change-me-base64-32-byte-key
   APP_SWAGGER_ENABLED: "true"
   WEB_ENABLED: "true"
   WEB_CABINET_URL: http://localhost:4000

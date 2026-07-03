@@ -142,6 +142,7 @@ const record = {
 describe("BFF route integration contracts", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.unstubAllEnvs();
     mocks.loginWithEmail.mockResolvedValue({ user: { email: "user@example.com" } });
     mocks.registerWithEmail.mockResolvedValue({ user: { email: "user@example.com" } });
     mocks.getCurrentAuthProfile.mockResolvedValue({ user: { email: "user@example.com" } });
@@ -207,6 +208,27 @@ describe("BFF route integration contracts", () => {
       email: "user@example.com",
       telegramId: "123",
     });
+  });
+
+  it("does not fall back to the Remnashop subscription URL when Remnawave has no live URL", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    mocks.remnashopRequest.mockResolvedValueOnce({
+      user_remna_id: "rw-1",
+      url: "https://db-sub.example/old",
+    });
+    mocks.getLiveRemnawaveSubscriptionUrl.mockResolvedValueOnce(null);
+
+    const response = await currentRoute.GET();
+    const responseBody = await body(response);
+
+    expect(response.status).toBe(409);
+    expect(responseBody).toMatchObject({
+      error: {
+        code: "SUBSCRIPTION_URL_UNAVAILABLE",
+        message: expect.stringContaining("Ссылка подключения недоступна"),
+      },
+    });
+    expect(JSON.stringify(responseBody)).not.toContain("db-sub.example");
   });
 
   it("covers subscription devices, promocode and reissue flows", async () => {
@@ -275,6 +297,42 @@ describe("BFF route integration contracts", () => {
     });
     await expect(body(await supportRoute.GET())).resolves.toMatchObject({
       data: { enabled: true, email: "support@clean-pay.localhost" },
+    });
+  });
+
+  it("keeps missing subscription explicit but non-fatal in payment status", async () => {
+    mocks.remnashopRequest.mockRejectedValueOnce(
+      new BffError("SUBSCRIPTION_NOT_FOUND", 404, "missing subscription"),
+    );
+
+    const response = await paymentsStatusRoute.GET(
+      new Request("http://clean-pay.local/api/bff/payments/status?payment_id=payment-1"),
+    );
+
+    expect(response.status).toBe(200);
+    expect(await body(response)).toMatchObject({
+      data: {
+        payment: { payment_id: "payment-1" },
+        subscription: null,
+        source: "local_payment_record_and_current_subscription",
+      },
+    });
+  });
+
+  it("returns an explicit error when payment status cannot verify subscription", async () => {
+    mocks.remnashopRequest.mockRejectedValueOnce(
+      new BffError("UPSTREAM_UNAVAILABLE", 502, "Remnashop unavailable"),
+    );
+
+    const response = await paymentsStatusRoute.GET(
+      new Request("http://clean-pay.local/api/bff/payments/status?payment_id=payment-1"),
+    );
+
+    expect(response.status).toBe(502);
+    expect(await body(response)).toMatchObject({
+      error: {
+        code: "UPSTREAM_UNAVAILABLE",
+      },
     });
   });
 

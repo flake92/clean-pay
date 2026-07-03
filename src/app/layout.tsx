@@ -3,9 +3,11 @@ import { Geist, Geist_Mono } from "next/font/google";
 import "primereact/resources/primereact.css";
 import "primeicons/primeicons.css";
 import "primeflex/primeflex.css";
+import "../../public/themes/lara-light-indigo/theme.css";
 import "../frontend/styles/layout/layout.scss";
 import "./globals.css";
 import { Providers } from "./providers";
+import { getBranding } from "@/shared/branding";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -17,9 +19,11 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
+const branding = getBranding();
+
 export const metadata: Metadata = {
-  title: "Clean Pay",
-  description: "Web cabinet for CleanVPN payments and subscriptions",
+  title: branding.name,
+  description: `${branding.name} payment and subscription cabinet`,
 };
 
 export default function RootLayout({
@@ -33,13 +37,6 @@ export default function RootLayout({
       className={`${geistSans.variable} ${geistMono.variable}`}
       suppressHydrationWarning
     >
-      <head>
-        <link
-          href="/themes/lara-light-indigo/theme.css"
-          id="theme-css"
-          rel="stylesheet"
-        />
-      </head>
       <body>
         <Providers>{children}</Providers>
       </body>

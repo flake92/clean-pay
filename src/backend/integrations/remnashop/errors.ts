@@ -13,6 +13,7 @@ export type BffErrorCode =
   | 'PLAN_UNAVAILABLE'
   | 'PAYMENT_GATEWAY_UNAVAILABLE'
   | 'SUBSCRIPTION_NOT_FOUND'
+  | 'SUBSCRIPTION_URL_UNAVAILABLE'
   | 'DEVICE_DELETE_UNAVAILABLE'
   | 'UPSTREAM_UNAVAILABLE'
   | 'UPSTREAM_ERROR'
@@ -42,6 +43,7 @@ const PROD_MESSAGES: Record<BffErrorCode, string> = {
   PLAN_UNAVAILABLE: 'Этот тариф сейчас недоступен.',
   PAYMENT_GATEWAY_UNAVAILABLE: 'Этот способ оплаты сейчас недоступен.',
   SUBSCRIPTION_NOT_FOUND: 'Активная подписка не найдена.',
+  SUBSCRIPTION_URL_UNAVAILABLE: 'Ссылка подключения недоступна. Попробуйте позже или обратитесь в поддержку.',
   DEVICE_DELETE_UNAVAILABLE: 'Не удалось удалить устройство.',
   UPSTREAM_UNAVAILABLE: 'Сервис временно недоступен. Попробуйте позже.',
   UPSTREAM_ERROR: 'Не удалось выполнить действие. Попробуйте позже.',

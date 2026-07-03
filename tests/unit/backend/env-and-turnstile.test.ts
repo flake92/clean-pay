@@ -38,6 +38,55 @@ describe("backend env", () => {
     vi.stubEnv("COOKIE_SECURE", "maybe");
     expect(() => getEnv()).toThrow('COOKIE_SECURE must be "true" or "false"');
   });
+
+  it("fails fast for invalid production configuration combinations", () => {
+    vi.stubEnv("TURNSTILE_ENABLED", "true");
+    vi.stubEnv("NEXT_PUBLIC_TURNSTILE_SITE_KEY", "");
+    vi.stubEnv("TURNSTILE_SITE_KEY", "");
+    expect(() => getEnv()).toThrow("NEXT_PUBLIC_TURNSTILE_SITE_KEY is required when TURNSTILE_ENABLED=true");
+
+    vi.stubEnv("NEXT_PUBLIC_TURNSTILE_SITE_KEY", "site-key");
+    vi.stubEnv("TURNSTILE_SECRET_KEY", "");
+    expect(() => getEnv()).toThrow("TURNSTILE_SECRET_KEY is required when TURNSTILE_ENABLED=true");
+
+    vi.stubEnv("TURNSTILE_ENABLED", "false");
+    vi.stubEnv("COOKIE_SAMESITE", "none");
+    vi.stubEnv("COOKIE_SECURE", "false");
+    expect(() => getEnv()).toThrow('COOKIE_SECURE must be "true" when COOKIE_SAMESITE="none"');
+
+    vi.stubEnv("COOKIE_SAMESITE", "lax");
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("REMNAWAVE_API_BASE_URL", "");
+    vi.stubEnv("REMNAWAVE_TOKEN", "");
+    expect(() => getEnv()).toThrow("REMNAWAVE_API_BASE_URL and REMNAWAVE_TOKEN are required in production");
+
+    vi.stubEnv("NODE_ENV", "test");
+    vi.stubEnv("REMNAWAVE_API_BASE_URL", "https://panel.example.com");
+    vi.stubEnv("REMNAWAVE_TOKEN", "");
+    expect(() => getEnv()).toThrow("REMNAWAVE_API_BASE_URL and REMNAWAVE_TOKEN must be configured together");
+
+    vi.stubEnv("REMNAWAVE_API_BASE_URL", "");
+    vi.stubEnv("REMNAWAVE_TOKEN", "token");
+    expect(() => getEnv()).toThrow("REMNAWAVE_API_BASE_URL and REMNAWAVE_TOKEN must be configured together");
+
+    vi.stubEnv("REMNAWAVE_TOKEN", "");
+    vi.stubEnv("NEXT_PUBLIC_BRAND_NAME", "x".repeat(81));
+    expect(() => getEnv()).toThrow("NEXT_PUBLIC_BRAND_NAME must be 80 characters or less");
+
+    vi.stubEnv("NEXT_PUBLIC_BRAND_NAME", "Partner Cabinet");
+    vi.stubEnv("NEXT_PUBLIC_BRAND_LOGO_URL", "https://cdn.example.com/logo.png");
+    expect(() => getEnv()).toThrow("NEXT_PUBLIC_BRAND_LOGO_URL must be a root-relative public path");
+  });
+
+  it("fails fast for invalid URLs and inconsistent Telegram settings", () => {
+    vi.stubEnv("APP_URL", "ftp://clean-pay.local");
+    expect(() => getEnv()).toThrow("APP_URL must be a valid http(s) URL");
+
+    vi.stubEnv("APP_URL", "http://localhost:8080");
+    vi.stubEnv("TELEGRAM_OIDC_CLIENT_ID", "111111");
+    vi.stubEnv("TELEGRAM_BOT_TOKEN", "222222:test-token");
+    expect(() => getEnv()).toThrow("TELEGRAM_OIDC_CLIENT_ID must match the bot id in TELEGRAM_BOT_TOKEN");
+  });
 });
 
 describe("Turnstile helpers", () => {
@@ -72,6 +121,7 @@ describe("Turnstile helpers", () => {
 
   it("validates token through Cloudflare when enabled", async () => {
     vi.stubEnv("TURNSTILE_ENABLED", "true");
+    vi.stubEnv("NEXT_PUBLIC_TURNSTILE_SITE_KEY", "site-key");
     vi.stubEnv("TURNSTILE_SECRET_KEY", "secret");
     vi.stubEnv("TURNSTILE_VERIFY_URL", "https://turnstile.test/siteverify");
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
@@ -89,8 +139,11 @@ describe("Turnstile helpers", () => {
 
   it("returns BFF errors for invalid Turnstile states", async () => {
     vi.stubEnv("TURNSTILE_ENABLED", "true");
+    vi.stubEnv("NEXT_PUBLIC_TURNSTILE_SITE_KEY", "site-key");
     vi.stubEnv("TURNSTILE_SECRET_KEY", "");
-    await expect(verifyTurnstileToken("token")).rejects.toMatchObject<BffError>({ code: "UPSTREAM_UNAVAILABLE" });
+    await expect(verifyTurnstileToken("token")).rejects.toThrow(
+      "TURNSTILE_SECRET_KEY is required when TURNSTILE_ENABLED=true",
+    );
 
     vi.stubEnv("TURNSTILE_SECRET_KEY", "secret");
     await expect(verifyTurnstileToken(null)).rejects.toMatchObject<BffError>({ code: "VALIDATION_ERROR" });

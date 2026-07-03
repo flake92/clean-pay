@@ -136,6 +136,20 @@ describe("passkey use cases", () => {
     });
   });
 
+  it("uses custom cabinet brand as WebAuthn relying party name", async () => {
+    vi.stubEnv("NEXT_PUBLIC_BRAND_NAME", "Partner Cabinet");
+
+    await beginPasskeyRegistration();
+
+    expect(mocks.generateRegistrationOptions).toHaveBeenCalledWith(
+      expect.objectContaining({
+        rpName: "Partner Cabinet",
+      }),
+    );
+
+    vi.unstubAllEnvs();
+  });
+
   it("finishes registration, persists credential and upgrades partial session", async () => {
     mocks.getCurrentSession.mockResolvedValueOnce({ ...session, assuranceLevel: "PARTIAL" });
 

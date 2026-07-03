@@ -1,23 +1,25 @@
-/* eslint-disable @next/next/no-img-element */
-
-import React from 'react';
+import Image from "next/image";
+import React from "react";
+import { getBranding } from "@/shared/branding";
 
 const AppFooter = () => {
+    const branding = getBranding();
+
     return (
         <div className="layout-footer flex align-items-center">
-            <img
-                src="/clean_vpn_logo.jpg"
-                alt="CleanVPN logo"
-                width="14"
-                height="14"
+            <Image
+                src={branding.logoUrl}
+                alt={`${branding.name} logo`}
+                width={14}
+                height={14}
                 className="mr-2"
                 style={{
-                    objectFit: 'contain',
-                    borderRadius: '4px'
+                    objectFit: "contain",
+                    borderRadius: "4px"
                 }}
             />
 
-            <span className="font-medium ml-1">Clean Pay</span>
+            <span className="font-medium ml-1">{branding.name}</span>
         </div>
     );
 };

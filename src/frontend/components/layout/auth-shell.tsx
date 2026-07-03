@@ -1,6 +1,8 @@
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
+import { getBranding } from "@/shared/branding";
 
 export function AuthShell({
   title,
@@ -13,6 +15,8 @@ export function AuthShell({
   children: React.ReactNode;
   footer?: React.ReactNode;
 }) {
+  const branding = getBranding();
+
   return (
     <div className="surface-ground auth-page flex align-items-center justify-content-center w-full overflow-x-hidden">
       <div className="w-full flex justify-content-center">
@@ -31,10 +35,12 @@ export function AuthShell({
           >
             <div className="auth-card-content">
               <div className="text-center mb-4">
-                <img
-                  alt="Clean Pay"
+                <Image
+                  alt={branding.name}
                   className="mb-3 flex-shrink-0 clean-auth-logo"
-                  src="/clean_vpn_logo.jpg"
+                  height={68}
+                  src={branding.logoUrl}
+                  width={68}
                 />
                 <div className="text-900 text-3xl font-medium mb-2 auth-title">{title}</div>
                 <span className="text-600 font-medium line-height-3 auth-description">{description}</span>
@@ -43,7 +49,7 @@ export function AuthShell({
               {footer ? <div className="mt-4 flex flex-column gap-2">{footer}</div> : null}
               <div className="text-center mt-3">
                 <Link className="font-medium no-underline" href="/" style={{ color: "var(--primary-color)" }}>
-                  Clean Pay
+                  {branding.name}
                 </Link>
               </div>
             </div>

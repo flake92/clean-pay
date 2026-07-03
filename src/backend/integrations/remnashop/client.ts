@@ -73,9 +73,7 @@ async function fetchRemnashop(path: string, init: RequestInit) {
   logger.info("remnashop_request_sent", {
     method,
     path,
-    url: endpoint(path),
-    headers: init.headers,
-    body: init.body ? parseLogBody(init.body) : undefined,
+    hasBody: Boolean(init.body),
   }, {
     category: "upstream",
     source: "remnashop.client",
@@ -84,7 +82,6 @@ async function fetchRemnashop(path: string, init: RequestInit) {
 
   try {
     const response = await fetch(endpoint(path), init);
-    const responseText = await response.clone().text().catch(() => "");
 
     logger.info("remnashop_response_received", {
       method,
@@ -92,8 +89,6 @@ async function fetchRemnashop(path: string, init: RequestInit) {
       status: response.status,
       ok: response.ok,
       durationMs: Date.now() - startedAt,
-      headers: Object.fromEntries(response.headers.entries()),
-      body: parseLogBody(responseText),
     }, {
       category: "upstream",
       source: "remnashop.client",
@@ -106,29 +101,13 @@ async function fetchRemnashop(path: string, init: RequestInit) {
       method,
       path,
       durationMs: Date.now() - startedAt,
-      error: error instanceof Error ? error.message : String(error),
+      errorName: error instanceof Error ? error.name : "UnknownError",
     }, {
       category: "upstream",
       source: "remnashop.client",
       message: `HTTP Request failed: ${method} ${path}`,
     });
     throw remnashopUnavailableError(path, error);
-  }
-}
-
-function parseLogBody(body: BodyInit | string) {
-  if (typeof body !== "string") {
-    return "[non-string body]";
-  }
-
-  if (!body) {
-    return null;
-  }
-
-  try {
-    return JSON.parse(body);
-  } catch {
-    return body;
   }
 }
 

@@ -22,12 +22,13 @@ function addMs(date: Date, ms: number) {
 }
 
 function webAuthnRelyingParty() {
-  const origin = getEnv().publicAppUrl;
+  const env = getEnv();
+  const origin = env.publicAppUrl;
   const rpID = new URL(origin).hostname;
 
   return {
     rpID,
-    rpName: "Clean Pay",
+    rpName: env.branding.name,
     origin,
   };
 }

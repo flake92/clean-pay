@@ -16,6 +16,7 @@ export type EndpointMatrixCase = {
 const cleanPayOnly = ["clean-pay"] satisfies MatrixUpstream[];
 const coreReadiness = ["clean-pay", "postgres", "redis", "remnashop", "mailpit", "telegram-oidc", "remnawave"] satisfies MatrixUpstream[];
 const remnashopFlow = ["clean-pay", "postgres", "redis", "remnashop"] satisfies MatrixUpstream[];
+const subscriptionReadFlow = ["clean-pay", "postgres", "redis", "remnashop", "remnawave"] satisfies MatrixUpstream[];
 const emailFlow = ["clean-pay", "postgres", "redis", "remnashop", "mailpit"] satisfies MatrixUpstream[];
 const telegramFlow = ["clean-pay", "postgres", "redis", "telegram-oidc"] satisfies MatrixUpstream[];
 const telegramWebAppFlow = ["clean-pay", "postgres", "redis", "remnashop"] satisfies MatrixUpstream[];
@@ -92,7 +93,7 @@ export const telegramBusinessCases: EndpointMatrixCase[] = [
   { method: "POST", path: "/api/bff/auth/passkey/register/verify", body: { id: "missing", response: {} }, statuses: [400], session: "telegram", verifiedEmail: "not-required", upstream: cleanPayOnly, unexpected5xx: "bug" },
   { method: "GET", path: "/api/bff/auth/passkey/credentials", statuses: [200], session: "telegram", verifiedEmail: "not-required", upstream: cleanPayOnly, unexpected5xx: "bug" },
   { method: "DELETE", path: "/api/bff/auth/passkey/credentials/missing", statuses: [403, 404], session: "telegram", verifiedEmail: "not-required", upstream: cleanPayOnly, unexpected5xx: "bug" },
-  { method: "GET", path: "/api/bff/subscription/current", statuses: [200, 403, 404, 409], session: "telegram", verifiedEmail: "not-required", upstream: remnashopFlow, unexpected5xx: "bug" },
+  { method: "GET", path: "/api/bff/subscription/current", statuses: [200, 403, 404, 409], session: "telegram", verifiedEmail: "not-required", upstream: subscriptionReadFlow, unexpected5xx: "bug" },
   { method: "GET", path: "/api/bff/subscription/offers", statuses: [200, 400, 403, 404, 409, 422], session: "telegram", verifiedEmail: "not-required", upstream: remnashopFlow, unexpected5xx: "bug" },
   { method: "GET", path: "/api/bff/subscription/devices", statuses: [200, 400, 403, 404, 409], session: "telegram", verifiedEmail: "not-required", upstream: remnashopFlow, unexpected5xx: "bug" },
   { method: "DELETE", path: "/api/bff/subscription/devices", statuses: [200, 400, 403, 404, 409], session: "telegram", verifiedEmail: "not-required", upstream: remnashopFlow, unexpected5xx: "bug" },

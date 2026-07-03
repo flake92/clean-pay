@@ -22,7 +22,7 @@ function debugPayload(error: BffError) {
 export function bffJson<T>(data: T, init?: ResponseInit) {
   logger.info("bff_response_sent", {
     status: init?.status ?? 200,
-    body: { data },
+    hasData: data !== undefined,
   }, {
     category: "bff",
     source: "bff.response",
@@ -46,7 +46,7 @@ export function bffError(error: unknown) {
 
     logger.warn("bff_error_response_sent", {
       status: error.status,
-      body,
+      code: error.code,
     }, {
       category: "bff",
       source: "bff.response",
@@ -74,7 +74,7 @@ export function bffError(error: unknown) {
 
   logger.error("bff_error_response_sent", {
     status: 500,
-    body,
+    code: "INTERNAL_ERROR",
   }, {
     category: "bff",
     source: "bff.response",

@@ -3,8 +3,8 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "WATCHPACK_POLLING=true next dev --webpack -p 4000",
-    "build": "NODE_ENV=production next build",
+    "dev": "node scripts/next-command.mjs dev",
+    "build": "node scripts/next-command.mjs build",
     "start": "next start -H 0.0.0.0 -p 4000",
     "lint": "eslint",
     "test": "node node_modules/vitest/vitest.mjs run --config vitest.config.ts",

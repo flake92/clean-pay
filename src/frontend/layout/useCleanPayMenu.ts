@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import type { AppMenuItem } from "@/frontend/types";
 import { hasRenewOffer } from "@/frontend/lib/subscription-offers";
+import { getBranding } from "@/shared/branding";
 import type { SubscriptionOffersResponse } from "@/shared/remnashop/types";
 
 type MenuUser = {
@@ -12,6 +13,7 @@ type MenuUser = {
 };
 
 export function useCleanPayMenu() {
+    const branding = getBranding();
     const [user, setUser] = useState<MenuUser | null>(null);
     const [offers, setOffers] = useState<SubscriptionOffersResponse | null>(null);
     const [profileLoaded, setProfileLoaded] = useState(false);
@@ -88,7 +90,7 @@ export function useCleanPayMenu() {
 
     const model: AppMenuItem[] = [
         {
-            label: "Clean Pay",
+            label: branding.name,
             items: cleanPayItems,
         },
         {

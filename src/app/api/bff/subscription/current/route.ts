@@ -1,5 +1,6 @@
 import { bffError, bffJson } from "@/backend/http/bff-response";
 import { getAuthorizedRemnashopTokens, remnashopRequest } from "@/backend/integrations/remnashop/client";
+import { BffError } from "@/backend/integrations/remnashop/errors";
 import { getLiveRemnawaveSubscriptionUrl } from "@/backend/integrations/remnawave/client";
 import type { CurrentSubscriptionResponse } from "@/shared/remnashop/types";
 
@@ -23,9 +24,20 @@ export async function GET() {
       telegramId: session.user.telegramId,
     });
 
+    if (!liveUrl) {
+      throw new BffError(
+        "SUBSCRIPTION_URL_UNAVAILABLE",
+        409,
+        "Remnawave did not provide an available subscription URL",
+        {
+          upstreamPath: "/api/users",
+        },
+      );
+    }
+
     return bffJson({
       ...subscription,
-      url: liveUrl ?? subscription.url,
+      url: liveUrl,
     });
   } catch (error) {
     return bffError(error);

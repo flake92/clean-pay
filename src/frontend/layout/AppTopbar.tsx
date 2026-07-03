@@ -1,9 +1,9 @@
-/* eslint-disable @next/next/no-img-element */
-
+import Image from "next/image";
 import Link from "next/link";
 import { classNames } from "primereact/utils";
 import React, { forwardRef, useContext, useImperativeHandle, useRef } from "react";
 import { AppTopbarRef } from "@/frontend/types";
+import { getBranding } from "@/shared/branding";
 import { LayoutContext } from "./context/layoutcontext";
 import { useCleanPayMenu } from "./useCleanPayMenu";
 
@@ -13,6 +13,7 @@ const AppTopbar = forwardRef<AppTopbarRef>((props, ref) => {
     const menubuttonRef = useRef(null);
     const topbarmenuRef = useRef(null);
     const topbarmenubuttonRef = useRef(null);
+    const branding = getBranding();
 
     useImperativeHandle(ref, () => ({
         menubutton: menubuttonRef.current,
@@ -23,8 +24,8 @@ const AppTopbar = forwardRef<AppTopbarRef>((props, ref) => {
     return (
         <div className="layout-topbar">
             <Link href="/" className="layout-topbar-logo">
-                <img src="/clean_vpn_logo.jpg" width="40" height="40" alt="CleanVPN logo" />
-                <span>Clean Pay</span>
+                <Image src={branding.logoUrl} width={40} height={40} alt={`${branding.name} logo`} />
+                <span>{branding.name}</span>
             </Link>
 
             <button ref={menubuttonRef} type="button" className="p-link layout-menu-button layout-topbar-button" onClick={onMenuToggle}>

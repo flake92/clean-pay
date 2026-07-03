@@ -164,12 +164,7 @@ async function exchangeCodeForIdToken(code: string, codeVerifier: string) {
 
   logger.info("telegram_token_request_sent", {
     method: "POST",
-    url: env.telegramOidc.tokenEndpoint,
-    headers: {
-      "content-type": "application/x-www-form-urlencoded",
-      authorization: "[redacted]",
-    },
-    body: Object.fromEntries(body.entries()),
+    hasBody: true,
   }, {
     category: "upstream",
     source: "telegram.oidc",
@@ -189,11 +184,9 @@ async function exchangeCodeForIdToken(code: string, codeVerifier: string) {
 
   logger.info("telegram_token_response_received", {
     method: "POST",
-    url: env.telegramOidc.tokenEndpoint,
     status: response.status,
     ok: response.ok,
     durationMs: Date.now() - startedAt,
-    body: parseTelegramTokenLogBody(responseText),
   }, {
     category: "upstream",
     source: "telegram.oidc",
@@ -206,7 +199,7 @@ async function exchangeCodeForIdToken(code: string, codeVerifier: string) {
     logTechnicalWarning("telegram_token_exchange_failed", {
       status: response.status,
       statusText: response.statusText,
-      body: errorBody?.slice(0, 500),
+      hasBody: Boolean(errorBody),
     });
 
     throw new Error("Telegram token exchange failed");
@@ -240,18 +233,6 @@ function normalizeTelegramOidcClientSecret(clientId: string, clientSecret: strin
   }
 
   return clientSecret;
-}
-
-function parseTelegramTokenLogBody(text: string) {
-  if (!text) {
-    return null;
-  }
-
-  try {
-    return JSON.parse(text);
-  } catch {
-    return text.slice(0, 500);
-  }
 }
 
 async function verifyTelegramIdToken(idToken: string, nonce: string) {

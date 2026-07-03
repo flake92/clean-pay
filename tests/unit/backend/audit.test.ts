@@ -40,6 +40,7 @@ import { BffError } from "@/backend/integrations/remnashop/errors";
 describe("audit logging", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.unstubAllEnvs();
     state.headers = new Headers({ "x-forwarded-for": "10.0.0.1, 10.0.0.2" });
   });
 
@@ -83,5 +84,35 @@ describe("audit logging", () => {
     );
     expect(mocks.logger.warn).toHaveBeenCalledWith("warn_event", { metadata: { ok: true } }, { category: "technical" });
     expect(mocks.logger.info).toHaveBeenCalledWith("info_event", { metadata: { ok: true } }, { category: "technical" });
+  });
+
+  it("keeps production technical logs metadata-only and payload-free", () => {
+    vi.stubEnv("NODE_ENV", "production");
+
+    logTechnicalError(
+      "bff_error",
+      new BffError("VALIDATION_ERROR", 400, "email user@example.com token secret"),
+      {
+        email: "user@example.com",
+        token: "secret-token",
+        body: { password: "secret" },
+      },
+    );
+    logTechnicalWarning("warn_event", { body: { token: "secret-token" } });
+    logTechnicalInfo("info_event", { response: { idToken: "id-token" } });
+
+    expect(mocks.logger.error).toHaveBeenCalledWith(
+      "bff_error",
+      {
+        code: "VALIDATION_ERROR",
+        status: 400,
+        message: undefined,
+      },
+      { category: "technical" },
+    );
+    expect(mocks.logger.warn).toHaveBeenCalledWith("warn_event", {}, { category: "technical" });
+    expect(mocks.logger.info).toHaveBeenCalledWith("info_event", {}, { category: "technical" });
+    expect(JSON.stringify(mocks.logger.error.mock.calls)).not.toContain("user@example.com");
+    expect(JSON.stringify(mocks.logger.error.mock.calls)).not.toContain("secret-token");
   });
 });

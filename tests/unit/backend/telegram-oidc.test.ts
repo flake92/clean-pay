@@ -42,6 +42,10 @@ function signTelegramAuthPayload(body: Record<string, string | number | undefine
   return createHmac("sha256", secret).update(dataCheckString).digest("hex");
 }
 
+function hasLogKey(metadata: unknown, key: string) {
+  return Boolean(metadata && typeof metadata === "object" && key in metadata);
+}
+
 vi.mock("jose", () => ({
   createRemoteJWKSet: mocks.createRemoteJWKSet,
   jwtVerify: mocks.jwtVerify,
@@ -217,6 +221,21 @@ describe("Telegram OIDC integration", () => {
       "clean_pay_tg_nonce",
       "clean_pay_tg_code_verifier",
     ]);
+
+    const logMetadata = mocks.logger.info.mock.calls.map(([, metadata]) => metadata);
+
+    expect(logMetadata).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ method: "POST", hasBody: true }),
+        expect.objectContaining({ method: "POST", status: 200, ok: true }),
+      ]),
+    );
+    expect(JSON.stringify(logMetadata)).not.toContain("verifier");
+    expect(JSON.stringify(logMetadata)).not.toContain("code");
+    expect(JSON.stringify(logMetadata)).not.toContain("id-token");
+    expect(logMetadata.some((metadata) => hasLogKey(metadata, "headers"))).toBe(false);
+    expect(logMetadata.some((metadata) => hasLogKey(metadata, "body"))).toBe(false);
+    expect(logMetadata.some((metadata) => hasLogKey(metadata, "url"))).toBe(false);
   });
 
   it("consumes popup id token without exchanging authorization code", async () => {

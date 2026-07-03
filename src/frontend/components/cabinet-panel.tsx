@@ -201,6 +201,7 @@ export function CabinetPanel() {
       setSubscription(null);
       setSubscriptionError(null);
     } else {
+      setSubscription(null);
       setSubscriptionError(
         await getBffMessage(subscriptionResponse, "Не удалось загрузить подписку."),
       );

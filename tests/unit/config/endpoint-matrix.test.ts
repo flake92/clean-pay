@@ -81,7 +81,7 @@ describe("e2e endpoint matrix artifact", () => {
         method: "GET",
         path: "/api/bff/subscription/current",
         session: "telegram",
-        upstream: expect.arrayContaining(["remnashop"]),
+        upstream: expect.arrayContaining(["remnashop", "remnawave"]),
       }),
     ]));
   });

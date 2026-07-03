@@ -22,8 +22,12 @@ ENV TELEGRAM_OIDC_CLIENT_SECRET=build-time-placeholder
 ARG TURNSTILE_ENABLED=false
 ARG NEXT_PUBLIC_TURNSTILE_SITE_KEY=
 ARG TURNSTILE_SITE_KEY=
+ARG NEXT_PUBLIC_BRAND_NAME=Clean Pay
+ARG NEXT_PUBLIC_BRAND_LOGO_URL=/clean_vpn_logo.jpg
 ENV TURNSTILE_ENABLED=${TURNSTILE_ENABLED}
 ENV NEXT_PUBLIC_TURNSTILE_SITE_KEY=${NEXT_PUBLIC_TURNSTILE_SITE_KEY:-${TURNSTILE_SITE_KEY}}
+ENV NEXT_PUBLIC_BRAND_NAME=${NEXT_PUBLIC_BRAND_NAME}
+ENV NEXT_PUBLIC_BRAND_LOGO_URL=${NEXT_PUBLIC_BRAND_LOGO_URL}
 ENV TURNSTILE_VERIFY_URL=https://challenges.cloudflare.com/turnstile/v0/siteverify
 ENV SUPPORT_ENABLED=false
 
@@ -58,6 +62,7 @@ COPY --from=builder --chown=cleanpay:nodejs /app/public ./public
 COPY --from=builder --chown=cleanpay:nodejs /app/prisma ./prisma
 COPY --from=builder --chown=cleanpay:nodejs /app/prisma.config.ts ./prisma.config.ts
 COPY --chown=cleanpay:nodejs deploy/prod/start.sh ./deploy/prod/start.sh
+COPY --chown=cleanpay:nodejs deploy/prod/validate-env.mjs ./deploy/prod/validate-env.mjs
 
 RUN sed -i 's/\r$//' ./deploy/prod/start.sh \
   && chmod +x ./deploy/prod/start.sh
