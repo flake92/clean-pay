@@ -4,26 +4,16 @@ import { describe, expect, it } from "vitest";
 
 describe("production Docker network startup", () => {
   it("checks and creates the configured Remnawave edge network before compose up", () => {
-    const source = readFileSync("deploy/prod/prod.mjs", "utf8");
-    const upCase = source.slice(source.indexOf('case "up":'), source.indexOf('case "down":'));
+    const source = readFileSync("start.sh", "utf8");
+    const startFunction = source.slice(source.indexOf("start() {"), source.indexOf("verify() {"));
 
-    expect(source).toContain("validateProductionEnvFile");
-    expect(source).toContain('readEnvValue("CLEAN_PAY_EDGE_NETWORK", "remnawave-network")');
-    expect(source).toContain('"network", "inspect", networkName');
-    expect(source).toContain('"network", "create", networkName');
-    expect(upCase.indexOf("ensureEdgeNetwork();")).toBeGreaterThanOrEqual(0);
-    expect(upCase.indexOf("composeArgs(\"up\", \"-d\", \"--build\")")).toBeGreaterThan(
-      upCase.indexOf("ensureEdgeNetwork();"),
+    expect(source).toContain("validate_env");
+    expect(source).toContain("env_value CLEAN_PAY_EDGE_NETWORK remnawave-network");
+    expect(source).toContain('docker network inspect "$network_name"');
+    expect(source).toContain('docker network create "$network_name"');
+    expect(startFunction.indexOf("ensure_network")).toBeGreaterThanOrEqual(0);
+    expect(startFunction.indexOf("compose up -d --build")).toBeGreaterThan(
+      startFunction.indexOf("ensure_network"),
     );
-  });
-
-  it("documents a single production startup command without manual network creation", () => {
-    const english = readFileSync("README.md", "utf8");
-    const russian = readFileSync("README.ru_RU.md", "utf8");
-
-    expect(english).toContain("node deploy/prod/prod.mjs up");
-    expect(russian).toContain("node deploy/prod/prod.mjs up");
-    expect(english).not.toContain("docker network create remnawave-network");
-    expect(russian).not.toContain("docker network create remnawave-network");
   });
 });

@@ -10,7 +10,7 @@ export default function TariffsPage() {
       <div className="flex flex-column gap-6">
         <PageHeader
           description={`Доступные тарифы, длительности и способы оплаты загружаются для ${branding.name}.`}
-          title="РўР°СЂРёС„С‹"
+          title="Тарифы"
         />
         <TariffsPanel />
       </div>

@@ -14,7 +14,7 @@ export default function ProfilePage() {
       <div className="flex flex-column gap-6">
         <PageHeader
           description={`Данные аккаунта, e-mail и пароль управляются через ${branding.name}.`}
-          title="РџСЂРѕС„РёР»СЊ"
+          title="Профиль"
         />
         <Card>
           <ProfilePanel />

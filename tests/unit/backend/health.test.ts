@@ -57,6 +57,12 @@ describe("health checks", () => {
 
     vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(new Response("{}", { status: 503 }));
     await expect(checkRemnashop()).resolves.toMatchObject({ status: "down", message: "Remnashop returned 503" });
+
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(new Response("{}", { status: 404 }));
+    await expect(checkRemnashop()).resolves.toMatchObject({
+      status: "down",
+      message: "Remnashop public API returned 404; enable WEB_ENABLED=true with APP_API_KEY and APP_JWT_SECRET in Remnashop",
+    });
   });
 
   it("checks optional Mailpit, Telegram OIDC and Remnawave readiness dependencies", async () => {

@@ -9,33 +9,33 @@ const actions = [
   {
     href: "/cabinet",
     icon: "pi pi-home",
-    title: "РљР°Р±РёРЅРµС‚",
-    value: "РџРѕРґРїРёСЃРєР°",
-    description: "РЎС‚Р°С‚СѓСЃ, СѓСЃС‚СЂРѕР№СЃС‚РІР° Рё СЃСЃС‹Р»РєР° РґРѕСЃС‚СѓРїР°",
+    title: "Кабинет",
+    value: "Подписка",
+    description: "Статус, устройства и ссылка доступа",
     tone: "blue",
   },
   {
     href: "/profile",
     icon: "pi pi-user",
-    title: "РџСЂРѕС„РёР»СЊ",
-    value: "РђРєРєР°СѓРЅС‚",
-    description: "E-mail, РїР°СЂРѕР»СЊ Рё Telegram ID",
+    title: "Профиль",
+    value: "Аккаунт",
+    description: "E-mail, пароль и Telegram ID",
     tone: "green",
   },
   {
     href: "/link-account",
     icon: "pi pi-link",
-    title: "РџСЂРёРІСЏР·Р°С‚СЊ Telegram",
-    value: "РЎРІСЏР·СЊ Р°РєРєР°СѓРЅС‚Р°",
-    description: "Р”РѕР±Р°РІРёС‚СЊ Telegram ID Рє С‚РµРєСѓС‰РµРјСѓ РїСЂРѕС„РёР»СЋ",
+    title: "Привязать Telegram",
+    value: "Связь аккаунта",
+    description: "Добавить Telegram ID к текущему профилю",
     tone: "cyan",
   },
   {
     href: "/support",
     icon: "pi pi-question-circle",
-    title: "РџРѕРґРґРµСЂР¶РєР°",
-    value: "РџРѕРјРѕС‰СЊ",
-    description: "РљРѕРЅС‚Р°РєС‚С‹ Рё РѕС‚РІРµС‚С‹ РїРѕ РѕРїР»Р°С‚Рµ",
+    title: "Поддержка",
+    value: "Помощь",
+    description: "Контакты и ответы по оплате",
     tone: "purple",
   },
 ];
@@ -52,19 +52,19 @@ export default function Home() {
               <div>
                 <span className="block text-600 font-medium mb-3">{branding.name}</span>
                 <div className="text-900 font-medium text-4xl mb-3">
-                  Web-РєР°Р±РёРЅРµС‚ РґР»СЏ РѕРїР»Р°С‚С‹ Рё СѓРїСЂР°РІР»РµРЅРёСЏ РїРѕРґРїРёСЃРєРѕР№
+                  Web-кабинет для оплаты и управления подпиской
                 </div>
                 <p className="m-0 text-600 line-height-3 max-w-40rem">
-                  РљР°Р±РёРЅРµС‚ РїРѕРјРѕРіР°РµС‚ РѕРїР»Р°С‡РёРІР°С‚СЊ, РїСЂРѕРґР»РµРІР°С‚СЊ РїРѕРґРїРёСЃРєСѓ Рё СѓРїСЂР°РІР»СЏС‚СЊ VPN-РґРѕСЃС‚СѓРїРѕРј.
+                  Кабинет помогает оплачивать, продлевать подписку и управлять VPN-доступом.
                 </p>
               </div>
               <div className="flex flex-wrap gap-2">
                 <Link href="/login" className="p-button p-component no-underline">
                   <span className="p-button-icon p-c pi pi-sign-in" />
-                  <span className="p-button-label">Р’РѕР№С‚Рё</span>
+                  <span className="p-button-label">Войти</span>
                 </Link>
                 <Link href="/tariffs" className="p-button p-component p-button-outlined no-underline">
-                  <span className="p-button-label">РўР°СЂРёС„С‹</span>
+                  <span className="p-button-label">Тарифы</span>
                 </Link>
               </div>
             </div>

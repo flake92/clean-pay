@@ -48,6 +48,10 @@ export async function checkRemnashop() {
       cache: "no-store",
     });
 
+    if (response.status === 404) {
+      throw new Error("Remnashop public API returned 404; enable WEB_ENABLED=true with APP_API_KEY and APP_JWT_SECRET in Remnashop");
+    }
+
     if (!response.ok) {
       throw new Error(`Remnashop returned ${response.status}`);
     }

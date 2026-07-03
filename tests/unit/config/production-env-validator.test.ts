@@ -1,9 +1,18 @@
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 
 import { describe, expect, it } from "vitest";
+
+function envExampleKeys() {
+  return readFileSync("deploy/prod/.env.example", "utf8")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line && !line.startsWith("#"))
+    .map((line) => line.split("=")[0])
+    .filter(Boolean);
+}
 
 const validEnv = {
   DATABASE_URL: "postgresql://clean_pay:secret@postgres:5432/clean_pay?schema=public",
@@ -49,6 +58,22 @@ function runValidator(overrides: Record<string, string>) {
 }
 
 describe("production env validator", () => {
+  it("keeps the production env example limited to variables used by production code", () => {
+    const source = [
+      "deploy/prod/docker-compose.yml",
+      "deploy/prod/validate-env.mjs",
+      "start.sh",
+      "src/backend/config/env.ts",
+      "deploy/prod/Dockerfile",
+    ]
+      .map((file) => readFileSync(file, "utf8"))
+      .join("\n");
+
+    for (const key of envExampleKeys()) {
+      expect(source, `${key} from .env.example must be used by production code, compose, or startup`).toContain(key);
+    }
+  });
+
   it("accepts the production env example", () => {
     const result = spawnSync(process.execPath, [
       "deploy/prod/validate-env.mjs",
@@ -61,6 +86,14 @@ describe("production env validator", () => {
 
     expect(result.status).toBe(0);
     expect(result.stdout).toContain("Production environment validation passed.");
+  });
+
+  it("keeps Docker build-time placeholders aligned with production env requirements", () => {
+    const dockerfile = readFileSync("deploy/prod/Dockerfile", "utf8");
+
+    expect(dockerfile).toContain("ENV REMNAWAVE_API_BASE_URL=https://remnawave.example.com");
+    expect(dockerfile).toContain("ENV REMNAWAVE_TOKEN=build-time-placeholder");
+    expect(dockerfile).toContain("ENV TURNSTILE_SECRET_KEY=build-time-placeholder");
   });
 
   it("fails with clear reasons for invalid env combinations", () => {

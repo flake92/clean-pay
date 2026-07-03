@@ -1,4 +1,4 @@
-name: clean-pay-prod
+name: ${COMPOSE_PROJECT_NAME:-clean-pay-prod}
 
 services:
   app:

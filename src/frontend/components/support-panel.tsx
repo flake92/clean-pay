@@ -4,8 +4,9 @@ import { useEffect, useState } from "react";
 
 import { Card } from "primereact/card";
 import { Message } from "primereact/message";
-import { readBffError } from "@/frontend/lib/client-api";
+
 import { LinkButton } from "@/frontend/components/prime/link-button";
+import { readBffError } from "@/frontend/lib/client-api";
 import { getBranding } from "@/shared/branding";
 
 type SupportSettings = {
@@ -19,7 +20,7 @@ async function readSupportSettings() {
   const response = await fetch("/api/bff/support");
 
   if (!response.ok) {
-    throw await readBffError(response, 'РќРµ СѓРґР°Р»РѕСЃСЊ Р·Р°РіСЂСѓР·РёС‚СЊ РєРѕРЅС‚Р°РєС‚С‹ РїРѕРґРґРµСЂР¶РєРё.');
+    throw await readBffError(response, "Не удалось загрузить контакты поддержки.");
   }
 
   const body = await response.json().catch(() => null);
@@ -43,7 +44,7 @@ export function SupportPanel() {
   }
 
   if (!support) {
-    return <Message severity="info" text="Р—Р°РіСЂСѓР·РєР° РєРѕРЅС‚Р°РєС‚РѕРІ РїРѕРґРґРµСЂР¶РєРё..." />;
+    return <Message severity="info" text="Загрузка контактов поддержки..." />;
   }
 
   const hasContacts = support.email || support.telegramUsername || support.faqUrl;
@@ -54,12 +55,7 @@ export function SupportPanel() {
         {support.enabled && hasContacts ? (
           <div className="flex flex-wrap gap-3">
             {support.email ? (
-              <LinkButton
-                href={`mailto:${support.email}`}
-                icon="pi pi-envelope"
-                label="РќР°РїРёСЃР°С‚СЊ РЅР° РїРѕС‡С‚Сѓ"
-                outlined
-              />
+              <LinkButton href={`mailto:${support.email}`} icon="pi pi-envelope" label="Написать на почту" outlined />
             ) : null}
             {support.telegramUsername ? (
               <LinkButton
@@ -71,36 +67,30 @@ export function SupportPanel() {
               />
             ) : null}
             {support.faqUrl ? (
-              <LinkButton
-                external
-                href={support.faqUrl}
-                icon="pi pi-book"
-                label="FAQ Рё РёРЅСЃС‚СЂСѓРєС†РёРё"
-                outlined
-              />
+              <LinkButton external href={support.faqUrl} icon="pi pi-book" label="FAQ и инструкции" outlined />
             ) : null}
           </div>
         ) : (
           <p className="m-0 line-height-3 text-600">
-            РљРѕРЅС‚Р°РєС‚С‹ РїРѕРґРґРµСЂР¶РєРё РїРѕРєР° РЅРµ РѕРїСѓР±Р»РёРєРѕРІР°РЅС‹. РС… РјРѕР¶РЅРѕ РІРєР»СЋС‡РёС‚СЊ С‡РµСЂРµР·
-            РїРµСЂРµРјРµРЅРЅС‹Рµ РѕРєСЂСѓР¶РµРЅРёСЏ `SUPPORT_ENABLED`, `SUPPORT_EMAIL`,
-            `SUPPORT_TELEGRAM_USERNAME` Рё `SUPPORT_FAQ_URL`.
+            Контакты поддержки пока не опубликованы. Их можно включить через переменные окружения `SUPPORT_ENABLED`,
+            `SUPPORT_EMAIL`, `SUPPORT_TELEGRAM_USERNAME` и `SUPPORT_FAQ_URL`.
           </p>
         )}
       </Card>
 
-      <Card title="РљР°Рє РїРѕРґРєР»СЋС‡РёС‚СЊСЃСЏ">
+      <Card title="Как подключиться">
         <ol className="m-0 flex flex-column gap-3 line-height-3 text-700">
-          <li>1. Р’РѕР№РґРёС‚Рµ РІ web-РєР°Р±РёРЅРµС‚ Рё РѕС‚РєСЂРѕР№С‚Рµ СЂР°Р·РґРµР» РїРѕРґРїРёСЃРєРё.</li>
-          <li>2. РљСѓРїРёС‚Рµ РёР»Рё РїСЂРѕРґР»РёС‚Рµ С‚Р°СЂРёС„, РµСЃР»Рё Р°РєС‚РёРІРЅРѕР№ РїРѕРґРїРёСЃРєРё РЅРµС‚.</li>
-          <li>3. РќР°Р¶РјРёС‚Рµ РєРЅРѕРїРєСѓ РїРѕРґРєР»СЋС‡РµРЅРёСЏ РёР»Рё СЃРєРѕРїРёСЂСѓР№С‚Рµ СЃСЃС‹Р»РєСѓ РїРѕРґРїРёСЃРєРё.</li>
-          <li>4. Р•СЃР»Рё СѓСЃС‚СЂРѕР№СЃС‚РІРѕ РїРѕС‚РµСЂСЏР»Рѕ РґРѕСЃС‚СѓРї, СѓРґР°Р»РёС‚Рµ РµРіРѕ РІ РєР°Р±РёРЅРµС‚Рµ РёР»Рё РїРµСЂРµРІС‹РїСѓСЃС‚РёС‚Рµ СЃСЃС‹Р»РєСѓ.</li>
+          <li>1. Войдите в web-кабинет и откройте раздел подписки.</li>
+          <li>2. Купите или продлите тариф, если активной подписки нет.</li>
+          <li>3. Нажмите кнопку подключения или скопируйте ссылку подписки.</li>
+          <li>4. Если устройство потеряло доступ, удалите его в кабинете или перевыпустите ссылку.</li>
         </ol>
       </Card>
 
-      <Card title="Р”Р»СЏ РєРѕРіРѕ СЌС‚РѕС‚ СЃР°Р№С‚">
+      <Card title="Для кого этот сайт">
         <p className="m-0 line-height-3 text-700">
-          Web-кабинет {branding.name} предназначен для пользователей, которые хотят оплачивать и управлять подпиской без Telegram-бота.
+          Web-кабинет {branding.name} предназначен для пользователей, которые хотят оплачивать и управлять подпиской
+          без Telegram-бота.
         </p>
       </Card>
     </div>

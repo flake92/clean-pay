@@ -1,106 +1,105 @@
 # Clean Pay
 
-[English](README.md) | Р СѓСЃСЃРєРёР№
+[English](README.md) | Русский
 
-Clean Pay вЂ” Docker Compose РїСЂРёР»РѕР¶РµРЅРёРµ РґР»СЏ Р»РёС‡РЅРѕРіРѕ РєР°Р±РёРЅРµС‚Р° РѕРїР»Р°С‚С‹ Рё СѓРїСЂР°РІР»РµРЅРёСЏ РїРѕРґРїРёСЃРєРѕР№ CleanVPN.
+Clean Pay - веб-кабинет оплаты и управления подпиской CleanVPN. Пользователь входит в кабинет, видит статус подписки, продлевает доступ, управляет профилем и получает ссылку подключения. Данные кабинета хранятся в PostgreSQL и Redis. Тарифы, платежи и аккаунты берутся из Remnashop, ссылка подключения берётся только из Remnawave.
 
-Р’ РєР°Р±РёРЅРµС‚Рµ РїРѕР»СЊР·РѕРІР°С‚РµР»СЊ РјРѕР¶РµС‚ РІРѕР№С‚Рё, РїРѕСЃРјРѕС‚СЂРµС‚СЊ СЃС‚Р°С‚СѓСЃ РїРѕРґРїРёСЃРєРё, РѕС‚РєСЂС‹С‚СЊ СЃСЃС‹Р»РєСѓ РїРѕРґРєР»СЋС‡РµРЅРёСЏ, СѓРїСЂР°РІР»СЏС‚СЊ СѓСЃС‚СЂРѕР№СЃС‚РІР°РјРё, РїСЂРѕРґР»РёС‚СЊ РїРѕРґРїРёСЃРєСѓ Рё РїРµСЂРµР№С‚Рё РІ РїРѕРґРґРµСЂР¶РєСѓ. Clean Pay С…СЂР°РЅРёС‚ СЃРѕР±СЃС‚РІРµРЅРЅС‹Рµ СЃРµСЃСЃРёРё Рё СЃР»СѓР¶РµР±РЅС‹Рµ РґР°РЅРЅС‹Рµ РІ PostgreSQL Рё Redis, Р° СЃ Remnashop Рё Remnawave СЂР°Р±РѕС‚Р°РµС‚ С‡РµСЂРµР· РїСѓР±Р»РёС‡РЅС‹Рµ API.
+> **Важно:** Clean Pay разворачивается на Linux-сервере и должен стоять за reverse proxy с HTTPS. Настройте внешний reverse proxy на домен кабинета и проксируйте его на `CLEAN_PAY_BIND:CLEAN_PAY_PORT`. По умолчанию это `127.0.0.1:4000`.
 
-Р¦РµР»РµРІР°СЏ runtime-РїР»Р°С‚С„РѕСЂРјР°: Linux-СЃРµСЂРІРµСЂ СЃ Docker Рё Docker Compose.
+## Запуск В 3 Шага
 
-## Р—Р°РїСѓСЃРє Р’ 3 РЁР°РіР°
-
-### 1. РЎРєР»РѕРЅРёСЂРѕРІР°С‚СЊ РџСЂРѕРµРєС‚
-
-РџСѓР±Р»РёС‡РЅС‹Р№ URL СЂРµРїРѕР·РёС‚РѕСЂРёСЏ Р±СѓРґРµС‚ РґРѕР±Р°РІР»РµРЅ РїРѕСЃР»Рµ РїСѓР±Р»РёРєР°С†РёРё.
+### 1. Склонировать Проект
 
 ```bash
 git clone <clean-pay-repository-url>
 cd clean-pay
 ```
 
-### 2. РЎРѕР·РґР°С‚СЊ Р Р—Р°РїРѕР»РЅРёС‚СЊ `.env`
+### 2. Заполнить `.env`
 
 ```bash
 cp deploy/prod/.env.example deploy/prod/.env
 ```
 
-РћС‚РєСЂРѕР№С‚Рµ `deploy/prod/.env` Рё Р·Р°РјРµРЅРёС‚Рµ РїСЂРёРјРµСЂРЅС‹Рµ Р·РЅР°С‡РµРЅРёСЏ РЅР° СЂРµР°Р»СЊРЅС‹Рµ Р·РЅР°С‡РµРЅРёСЏ РІР°С€РµРіРѕ СЃС‚РµРЅРґР°.
+Заполните `deploy/prod/.env` реальными значениями из таблицы ниже.
 
-### 3. Р—Р°РїСѓСЃС‚РёС‚СЊ Docker Compose
+### 3. Запустить
 
 ```bash
-node deploy/prod/prod.mjs up
+sh start.sh
 ```
 
-Р›РѕРєР°Р»СЊРЅС‹Р№ URL РїРѕ СѓРјРѕР»С‡Р°РЅРёСЋ:
+## Переменные Clean Pay
 
-```text
-http://127.0.0.1:4000
+| Переменная | Обязательна | Пример | Назначение |
+| --- | --- | --- | --- |
+| `COMPOSE_PROJECT_NAME` | Нет | `clean-pay-prod` | Имя проекта Docker Compose. |
+| `CLEAN_PAY_IMAGE` | Нет | `clean-pay-prod-app:local` | Имя Docker image приложения. |
+| `CLEAN_PAY_BIND` | Нет | `127.0.0.1` | IP хоста, на котором слушает приложение. Для reverse proxy используйте `127.0.0.1`. |
+| `CLEAN_PAY_PORT` | Нет | `4000` | Порт хоста для приложения. |
+| `CLEAN_PAY_EDGE_NETWORK` | Нет | `remnawave-network` | Внешняя Docker-сеть. `start.sh` создаёт её, если сети нет. |
+| `POSTGRES_DB` | Нет | `clean_pay` | Имя встроенной PostgreSQL базы. |
+| `POSTGRES_USER` | Нет | `clean_pay` | Пользователь встроенной PostgreSQL базы. |
+| `POSTGRES_PASSWORD` | Да | `change-me-postgres-password` | Пароль встроенной PostgreSQL базы. |
+| `DATABASE_URL` | Да | `postgresql://clean_pay:change-me-postgres-password@postgres:5432/clean_pay?schema=public` | Подключение Clean Pay к PostgreSQL. |
+| `REDIS_URL` | Да | `redis://redis:6379/0` | Подключение Clean Pay к Redis. |
+| `APP_URL` | Да | `https://oplata.example.com` | Публичный серверный URL кабинета. |
+| `NEXT_PUBLIC_APP_URL` | Да | `https://oplata.example.com` | Публичный URL кабинета во frontend. Обычно совпадает с `APP_URL`. |
+| `NEXT_PUBLIC_BRAND_NAME` | Нет | `Clean Pay` | Название кабинета. После изменения нужна пересборка. |
+| `NEXT_PUBLIC_BRAND_LOGO_URL` | Нет | `/clean_vpn_logo.jpg` | Логотип кабинета. После изменения нужна пересборка. |
+| `LOG_LEVEL` | Нет | `info` | Уровень логирования: `debug`, `info`, `warn`, `error`. |
+| `REMNASHOP_API_BASE_URL` | Да | `https://bot.example.com/api/v1/public` | Public API Remnashop. |
+| `REMNAWAVE_API_BASE_URL` | Да | `https://panel.example.com` | URL панели/API Remnawave без `/api`. |
+| `REMNAWAVE_TOKEN` | Да | `change-me` | API-токен Remnawave для получения ссылки подключения. |
+| `WEB_JWT_SECRET` | Да | `change-me-long-random-web-jwt-secret` | Секрет web access/session tokens. |
+| `WEB_REFRESH_SECRET` | Да | `change-me-long-random-web-refresh-secret` | Секрет refresh/session tokens. |
+| `AUDIT_IP_HASH_SECRET` | Нет | `change-me-long-random-audit-secret` | Секрет для хеширования IP в audit logs. |
+| `COOKIE_SECURE` | Нет | `true` | `true` для HTTPS. |
+| `COOKIE_SAMESITE` | Нет | `lax` | SameSite policy: `lax`, `strict`, `none`. |
+| `TELEGRAM_OIDC_ISSUER` | Да | `https://oauth.telegram.org` | Telegram OAuth/OIDC issuer. |
+| `TELEGRAM_OIDC_AUTHORIZATION_ENDPOINT` | Да | `https://oauth.telegram.org/auth` | Telegram authorization endpoint. |
+| `TELEGRAM_OIDC_TOKEN_ENDPOINT` | Да | `https://oauth.telegram.org/token` | Telegram token endpoint. |
+| `TELEGRAM_OIDC_JWKS_URI` | Да | `https://oauth.telegram.org/.well-known/jwks.json` | Telegram JWKS endpoint. |
+| `TELEGRAM_OIDC_CLIENT_ID` | Да | `1234567890` | ID Telegram-бота для OAuth. |
+| `TELEGRAM_OIDC_CLIENT_SECRET` | Да | `change-me` | Telegram OAuth client secret. |
+| `TELEGRAM_BOT_TOKEN` | Нет | `1234567890:change-me` | Токен Telegram-бота для Telegram flows. |
+| `TURNSTILE_ENABLED` | Нет | `false` | Включает Cloudflare Turnstile. |
+| `TURNSTILE_SITE_KEY` | Нет | пусто | Build-time fallback для public Turnstile key. |
+| `NEXT_PUBLIC_TURNSTILE_SITE_KEY` | Если Turnstile включён | `1x00000000000000000000AA` | Public Turnstile key во frontend. После изменения нужна пересборка. |
+| `TURNSTILE_SECRET_KEY` | Если Turnstile включён | `1x0000000000000000000000000000000AA` | Secret key для Cloudflare verification API. |
+| `TURNSTILE_VERIFY_URL` | Нет | `https://challenges.cloudflare.com/turnstile/v0/siteverify` | Endpoint проверки Turnstile. |
+| `SUPPORT_ENABLED` | Нет | `false` | Включает блок поддержки. |
+| `SUPPORT_EMAIL` | Нет | `support@example.com` | Email поддержки. |
+| `SUPPORT_TELEGRAM_USERNAME` | Нет | `cleanpay_support` | Telegram username поддержки без `@`. |
+| `SUPPORT_FAQ_URL` | Нет | `https://oplata.example.com/support` | URL FAQ/поддержки. |
+| `CLEAN_PAY_READINESS_MAILPIT_URL` | Нет | пусто | Опциональная readiness-проверка Mailpit. |
+| `CLEAN_PAY_READINESS_REMNAWAVE_URL` | Нет | пусто | Опциональная readiness-проверка Remnawave. |
+
+## Необходимые Переменные Remnashop
+
+Эти переменные добавляются во внешний Remnashop `.env`, не в Clean Pay.
+
+| Переменная Remnashop | Обязательна | Пример | Назначение |
+| --- | --- | --- | --- |
+| `WEB_ENABLED` | Да | `true` | Включает public API Remnashop для Clean Pay. |
+| `WEB_CABINET_URL` | Да | `https://oplata.example.com/auth/telegram/webapp` | URL кабинета Clean Pay для web/Telegram flows. |
+| `APP_API_KEY` | Да | `change-me-long-random-api-key` | Секрет Remnashop web API при `WEB_ENABLED=true`. |
+| `APP_JWT_SECRET` | Да | `change-me-long-random-jwt-secret` | JWT secret Remnashop web API при `WEB_ENABLED=true`. |
+| `EMAIL_ENABLED` | Да | `true` | Включает отправку кодов подтверждения e-mail. |
+| `EMAIL_HOST` | Да | `smtp.example.com` | SMTP host. |
+| `EMAIL_PORT` | Да | `587` | SMTP port. |
+| `EMAIL_USE_TLS` | Да | `true` | STARTTLS для SMTP. Обычно `true` для порта `587`. |
+| `EMAIL_USE_SSL` | Да | `false` | SMTP over SSL. Обычно `true` для порта `465`. |
+| `EMAIL_USERNAME` | Да | `code@example.com` | SMTP username. |
+| `EMAIL_PASSWORD` | Да | `change-me-smtp-password` | SMTP password. |
+| `EMAIL_FROM_EMAIL` | Да | `code@example.com` | From address для писем. |
+| `EMAIL_FROM_NAME` | Нет | `Clean Pay` | Имя отправителя. |
+| `EMAIL_VERIFICATION_CODE_TTL_MINUTES` | Нет | `15` | Срок жизни кода подтверждения. |
+
+Проверка Remnashop public API:
+
+```bash
+curl https://bot.example.com/api/v1/public/plans/public
 ```
 
-## Р§С‚Рѕ Р—Р°РїСѓСЃРєР°РµС‚СЃСЏ
-
-```text
-app       РІРµР±-РєР°Р±РёРЅРµС‚ Clean Pay
-postgres  Р±Р°Р·Р° РґР°РЅРЅС‹С… Clean Pay
-redis     РєСЌС€ Рё С…СЂР°РЅРёР»РёС‰Рµ СЃРµСЃСЃРёР№ Clean Pay
-```
-
-## РџРµСЂРµРјРµРЅРЅС‹Рµ РћРєСЂСѓР¶РµРЅРёСЏ
-
-РСЃРїРѕР»СЊР·СѓР№С‚Рµ `deploy/prod/.env.example` РєР°Рє С€Р°Р±Р»РѕРЅ.
-
-| РџРµСЂРµРјРµРЅРЅР°СЏ | РћР±СЏР·Р°С‚РµР»СЊРЅР° | Р—РЅР°С‡РµРЅРёСЏ / Р¤РѕСЂРјР°С‚ | РћРїРёСЃР°РЅРёРµ | РџСЂРёРјРµСЂ |
-| --- | --- | --- | --- | --- |
-| `COMPOSE_PROJECT_NAME` | РќРµС‚ | РРјСЏ РїСЂРѕРµРєС‚Р° Docker Compose. Р‘СѓРєРІС‹, С†РёС„СЂС‹, РґРµС„РёСЃ, РїРѕРґС‡РµСЂРєРёРІР°РЅРёРµ. | Р—Р°РґР°РµС‚ РёРјРµРЅР° РєРѕРЅС‚РµР№РЅРµСЂРѕРІ, СЃРµС‚РµР№ Рё volumes, РєРѕС‚РѕСЂС‹Рµ СЃРѕР·РґР°РµС‚ Compose. | `clean-pay-prod` |
-| `CLEAN_PAY_IMAGE` | РќРµС‚ | РРјСЏ Docker image РёР»Рё СЃСЃС‹Р»РєР° РЅР° image РІ registry. | РРјСЏ РѕР±СЂР°Р·Р° РґР»СЏ СЃРµСЂРІРёСЃР° app. РћСЃС‚Р°РІСЊС‚Рµ Р»РѕРєР°Р»СЊРЅРѕРµ Р·РЅР°С‡РµРЅРёРµ РґР»СЏ Р»РѕРєР°Р»СЊРЅРѕР№ СЃР±РѕСЂРєРё РёР»Рё РїРѕР·Р¶Рµ СѓРєР°Р¶РёС‚Рµ registry image. | `clean-pay-prod-app:local` |
-| `CLEAN_PAY_BIND` | РќРµС‚ | IP-Р°РґСЂРµСЃ. Р§Р°СЃС‚С‹Рµ Р·РЅР°С‡РµРЅРёСЏ: `127.0.0.1`, `0.0.0.0`. | РРЅС‚РµСЂС„РµР№СЃ С…РѕСЃС‚Р° РґР»СЏ РїРѕСЂС‚Р° РїСЂРёР»РѕР¶РµРЅРёСЏ. РСЃРїРѕР»СЊР·СѓР№С‚Рµ `127.0.0.1` Р·Р° reverse proxy. РСЃРїРѕР»СЊР·СѓР№С‚Рµ `0.0.0.0` С‚РѕР»СЊРєРѕ РґР»СЏ РїСЂСЏРјРѕРіРѕ РІРЅРµС€РЅРµРіРѕ РґРѕСЃС‚СѓРїР°. | `127.0.0.1` |
-| `CLEAN_PAY_PORT` | РќРµС‚ | TCP-РїРѕСЂС‚, `1-65535`. | РџРѕСЂС‚ С…РѕСЃС‚Р°, РєРѕС‚РѕСЂС‹Р№ РїСЂРѕР±СЂР°СЃС‹РІР°РµС‚СЃСЏ РЅР° РїРѕСЂС‚ РєРѕРЅС‚РµР№РЅРµСЂР° `4000`. | `4000` |
-| `CLEAN_PAY_EDGE_NETWORK` | РќРµС‚ | РРјСЏ Docker-СЃРµС‚Рё. | Р’РЅРµС€РЅСЏСЏ Docker-СЃРµС‚СЊ РґР»СЏ РїРѕРґРєР»СЋС‡РµРЅРёСЏ Clean Pay Рє reverse proxy/network. Production startup helper РїСЂРѕРІРµСЂСЏРµС‚ РµРµ Рё СЃРѕР·РґР°РµС‚, РµСЃР»Рё РѕРЅР° РѕС‚СЃСѓС‚СЃС‚РІСѓРµС‚. | `remnawave-network` |
-| `POSTGRES_DB` | РќРµС‚ | РРјСЏ Р±Р°Р·С‹ РґР°РЅРЅС‹С… PostgreSQL. | Р‘Р°Р·Р° РґР°РЅРЅС‹С…, РєРѕС‚РѕСЂСѓСЋ СЃРѕР·РґР°РµС‚ РІСЃС‚СЂРѕРµРЅРЅС‹Р№ РєРѕРЅС‚РµР№РЅРµСЂ PostgreSQL. Р”РѕР»Р¶РЅР° СЃРѕРІРїР°РґР°С‚СЊ СЃ РёРјРµРЅРµРј Р±Р°Р·С‹ РІ `DATABASE_URL`. | `clean_pay` |
-| `POSTGRES_USER` | РќРµС‚ | РРјСЏ РїРѕР»СЊР·РѕРІР°С‚РµР»СЏ PostgreSQL. | РџРѕР»СЊР·РѕРІР°С‚РµР»СЊ, РєРѕС‚РѕСЂРѕРіРѕ СЃРѕР·РґР°РµС‚ РІСЃС‚СЂРѕРµРЅРЅС‹Р№ РєРѕРЅС‚РµР№РЅРµСЂ PostgreSQL. Р”РѕР»Р¶РµРЅ СЃРѕРІРїР°РґР°С‚СЊ СЃ РїРѕР»СЊР·РѕРІР°С‚РµР»РµРј РІ `DATABASE_URL`. | `clean_pay` |
-| `POSTGRES_PASSWORD` | Р”Р° | РќРµРїСѓСЃС‚Р°СЏ СЃС‚СЂРѕРєР°. РСЃРїРѕР»СЊР·СѓР№С‚Рµ СЃРёР»СЊРЅС‹Р№ СЃРµРєСЂРµС‚. | РџР°СЂРѕР»СЊ РїРѕР»СЊР·РѕРІР°С‚РµР»СЏ PostgreSQL. Р”РѕР»Р¶РµРЅ СЃРѕРІРїР°РґР°С‚СЊ СЃ РїР°СЂРѕР»РµРј РІ `DATABASE_URL`. | `change-me-postgres-password` |
-| `DATABASE_URL` | Р”Р° | PostgreSQL URL: `postgresql://USER:PASSWORD@HOST:PORT/DB?schema=public`. | РЎС‚СЂРѕРєР° РїРѕРґРєР»СЋС‡РµРЅРёСЏ Рє Р±Р°Р·Рµ РґР»СЏ Prisma/Clean Pay. РЎРѕ РІСЃС‚СЂРѕРµРЅРЅС‹Рј PostgreSQL host РґРѕР»Р¶РµРЅ Р±С‹С‚СЊ `postgres`. | `postgresql://clean_pay:change-me-postgres-password@postgres:5432/clean_pay?schema=public` |
-| `REDIS_URL` | Р”Р° | Redis URL: `redis://HOST:PORT/DB`. | РЎС‚СЂРѕРєР° РїРѕРґРєР»СЋС‡РµРЅРёСЏ Redis РґР»СЏ rate limit, РєСЌС€Р° Рё session-related СЃС†РµРЅР°СЂРёРµРІ. РЎРѕ РІСЃС‚СЂРѕРµРЅРЅС‹Рј Redis РёСЃРїРѕР»СЊР·СѓР№С‚Рµ host `redis`. | `redis://redis:6379/0` |
-| `APP_URL` | Р”Р° | РђР±СЃРѕР»СЋС‚РЅС‹Р№ URL, `http://...` РёР»Рё `https://...`, trailing slash РЅРµ РѕР±СЏР·Р°С‚РµР»РµРЅ. | РџСѓР±Р»РёС‡РЅС‹Р№ СЃРµСЂРІРµСЂРЅС‹Р№ URL РґР»СЏ callback Рё payment return URL. Р’ production СЌС‚Рѕ РґРѕР»Р¶РµРЅ Р±С‹С‚СЊ СЂРµР°Р»СЊРЅС‹Р№ HTTPS URL РєР°Р±РёРЅРµС‚Р°. | `https://oplata.example.com` |
-| `NEXT_PUBLIC_APP_URL` | Р”Р° | РђР±СЃРѕР»СЋС‚РЅС‹Р№ URL, `http://...` РёР»Рё `https://...`. | РџСѓР±Р»РёС‡РЅС‹Р№ Р±СЂР°СѓР·РµСЂРЅС‹Р№ URL, РєРѕС‚РѕСЂС‹Р№ РїРѕРїР°РґР°РµС‚ РІРѕ frontend. РћР±С‹С‡РЅРѕ СЃРѕРІРїР°РґР°РµС‚ СЃ `APP_URL`. | `https://oplata.example.com` |
-| `NEXT_PUBLIC_BRAND_NAME` | Нет | Отображаемое имя, 1-80 символов. Пустое значение использует `Clean Pay`. | Название бренда кабинета в metadata, login/register shell, header/sidebar/footer, секции меню и passkey relying party name. После изменения нужно пересобрать приложение. | `Clean Pay` |
-| `NEXT_PUBLIC_BRAND_LOGO_URL` | Нет | Root-relative public path, начинается с `/`, но не с `//`. Пустое значение использует `/clean_vpn_logo.jpg`. | Логотип кабинета в login/register shell, header и footer. Разместите asset в public assets приложения или отдавайте его с того же deployment path. После изменения нужно пересобрать приложение. | `/clean_vpn_logo.jpg` |
-| `LOG_LEVEL` | РќРµС‚ | `debug`, `info`, `warn`, `error`. | РњРёРЅРёРјР°Р»СЊРЅС‹Р№ СѓСЂРѕРІРµРЅСЊ Р»РѕРіРѕРІ, РєРѕС‚РѕСЂС‹Рµ РїРµС‡Р°С‚Р°РµС‚ РїСЂРёР»РѕР¶РµРЅРёРµ. РќРµРёР·РІРµСЃС‚РЅС‹Рµ Р·РЅР°С‡РµРЅРёСЏ РїСЂРёРІРѕРґСЏС‚СЃСЏ Рє `info`. | `info` |
-| `REMNASHOP_API_BASE_URL` | Р”Р° | РђР±СЃРѕР»СЋС‚РЅС‹Р№ URL РїСѓР±Р»РёС‡РЅРѕРіРѕ API Remnashop, РѕР±С‹С‡РЅРѕ Р·Р°РєР°РЅС‡РёРІР°РµС‚СЃСЏ РЅР° `/api/v1/public`. | Clean Pay РёСЃРїРѕР»СЊР·СѓРµС‚ РµРіРѕ РґР»СЏ auth, plans, subscriptions, payments, devices Рё account linking. | `https://bot.example.com/api/v1/public` |
-| `REMNAWAVE_API_BASE_URL` | Р”Р° | РђР±СЃРѕР»СЋС‚РЅС‹Р№ URL API РїР°РЅРµР»Рё Remnawave, Р±РµР· `/api`. | РћР±СЏР·Р°С‚РµР»РµРЅ РІ production. Clean Pay РёСЃРїРѕР»СЊР·СѓРµС‚ Remnawave РєР°Рє РµРґРёРЅСЃС‚РІРµРЅРЅС‹Р№ РёСЃС‚РѕС‡РЅРёРє СЃСЃС‹Р»РєРё РїРѕРґРєР»СЋС‡РµРЅРёСЏ РїРѕРґРїРёСЃРєРё. | `https://panel.example.com` |
-| `REMNAWAVE_TOKEN` | Р”Р° | API-С‚РѕРєРµРЅ Remnawave. РњРѕР¶РЅРѕ raw token РёР»Рё `Bearer ...`. | РћР±СЏР·Р°С‚РµР»РµРЅ РІ production РІРјРµСЃС‚Рµ СЃ `REMNAWAVE_API_BASE_URL`. РҐСЂР°РЅРёС‚Рµ РІ СЃРµРєСЂРµС‚Рµ. | `change-me` |
-| `WEB_JWT_SECRET` | Р”Р° | Р”Р»РёРЅРЅР°СЏ СЃР»СѓС‡Р°Р№РЅР°СЏ СЃС‚СЂРѕРєР°. Р РµРєРѕРјРµРЅРґСѓРµС‚СЃСЏ 32+ Р±Р°Р№С‚Р°. | РЎРµРєСЂРµС‚ РґР»СЏ web access/session tokens. Р РѕС‚Р°С†РёСЏ РјРѕР¶РµС‚ РёРЅРІР°Р»РёРґРёСЂРѕРІР°С‚СЊ Р°РєС‚РёРІРЅС‹Рµ СЃРµСЃСЃРёРё. | `change-me-long-random-web-jwt-secret` |
-| `WEB_REFRESH_SECRET` | Р”Р° | Р”Р»РёРЅРЅР°СЏ СЃР»СѓС‡Р°Р№РЅР°СЏ СЃС‚СЂРѕРєР°. Р РµРєРѕРјРµРЅРґСѓРµС‚СЃСЏ 32+ Р±Р°Р№С‚Р°. | РЎРµРєСЂРµС‚ РґР»СЏ refresh/session lifecycle tokens. Р РѕС‚Р°С†РёСЏ РјРѕР¶РµС‚ РёРЅРІР°Р»РёРґРёСЂРѕРІР°С‚СЊ Р°РєС‚РёРІРЅС‹Рµ СЃРµСЃСЃРёРё. | `change-me-long-random-web-refresh-secret` |
-| `AUDIT_IP_HASH_SECRET` | РќРµС‚ | Р”Р»РёРЅРЅР°СЏ СЃР»СѓС‡Р°Р№РЅР°СЏ СЃС‚СЂРѕРєР°. Р•СЃР»Рё РїСѓСЃС‚Рѕ, РёСЃРїРѕР»СЊР·СѓРµС‚СЃСЏ `WEB_JWT_SECRET`. | РЎРµРєСЂРµС‚ РґР»СЏ С…РµС€РёСЂРѕРІР°РЅРёСЏ IP-Р°РґСЂРµСЃРѕРІ РІ audit logs. Р’ production Р»СѓС‡С€Рµ РёСЃРїРѕР»СЊР·РѕРІР°С‚СЊ РѕС‚РґРµР»СЊРЅРѕРµ Р·РЅР°С‡РµРЅРёРµ. | `change-me-long-random-audit-secret` |
-| `COOKIE_SECURE` | РќРµС‚ | `true` РёР»Рё `false`. | РЈСЃС‚Р°РЅРѕРІРёС‚Рµ `true`, РµСЃР»Рё РїСѓР±Р»РёС‡РЅС‹Р№ РєР°Р±РёРЅРµС‚ СЂР°Р±РѕС‚Р°РµС‚ С‡РµСЂРµР· HTTPS. РСЃРїРѕР»СЊР·СѓР№С‚Рµ `false` С‚РѕР»СЊРєРѕ РґР»СЏ plain HTTP local РёР»Рё staging СЃС‚РµРЅРґРѕРІ. | `true` |
-| `COOKIE_SAMESITE` | РќРµС‚ | `lax`, `strict` РёР»Рё `none`. | РџРѕР»РёС‚РёРєР° SameSite РґР»СЏ cookies. `lax` вЂ” РѕР±С‹С‡РЅС‹Р№ РІС‹Р±РѕСЂ. `none` С‚СЂРµР±СѓРµС‚ `COOKIE_SECURE=true`. | `lax` |
-| `TELEGRAM_OIDC_ISSUER` | Р”Р° | РђР±СЃРѕР»СЋС‚РЅС‹Р№ URL. | Telegram OAuth/OIDC issuer, РєРѕС‚РѕСЂС‹Р№ РѕР¶РёРґР°РµС‚ Clean Pay. | `https://oauth.telegram.org` |
-| `TELEGRAM_OIDC_AUTHORIZATION_ENDPOINT` | Р”Р° | РђР±СЃРѕР»СЋС‚РЅС‹Р№ URL. | Telegram authorization endpoint, РєСѓРґР° РїРµСЂРµРЅР°РїСЂР°РІР»СЏРµС‚СЃСЏ РїРѕР»СЊР·РѕРІР°С‚РµР»СЊ. | `https://oauth.telegram.org/auth` |
-| `TELEGRAM_OIDC_TOKEN_ENDPOINT` | Р”Р° | РђР±СЃРѕР»СЋС‚РЅС‹Р№ URL. | Telegram token endpoint, РєРѕС‚РѕСЂС‹Р№ РёСЃРїРѕР»СЊР·СѓРµС‚СЃСЏ callback flow. | `https://oauth.telegram.org/token` |
-| `TELEGRAM_OIDC_JWKS_URI` | Р”Р° | РђР±СЃРѕР»СЋС‚РЅС‹Р№ URL. | Telegram JWKS endpoint РґР»СЏ РїСЂРѕРІРµСЂРєРё РїРѕРґРїРёСЃР°РЅРЅС‹С… С‚РѕРєРµРЅРѕРІ. | `https://oauth.telegram.org/.well-known/jwks.json` |
-| `TELEGRAM_OIDC_CLIENT_ID` | Р”Р° | Р§РёСЃР»РѕРІРѕР№ id Telegram-Р±РѕС‚Р°, РѕР±С‹С‡РЅРѕ С‡Р°СЃС‚СЊ РґРѕ `:` РІ `TELEGRAM_BOT_TOKEN`. | OAuth client ID РґР»СЏ Telegram login. | `1234567890` |
-| `TELEGRAM_OIDC_CLIENT_SECRET` | Р”Р° | Telegram OAuth client secret. | РЎРµРєСЂРµС‚ РґР»СЏ Telegram OAuth token exchange. РҐСЂР°РЅРёС‚Рµ РІ СЃРµРєСЂРµС‚Рµ. | `change-me` |
-| `TELEGRAM_BOT_TOKEN` | РќРµС‚ | Bot token РІ С„РѕСЂРјР°С‚Рµ `1234567890:secret`. РўСЂРµР±СѓРµС‚СЃСЏ РґР»СЏ Telegram widget/link flows. | РўРѕРєРµРЅ Telegram-Р±РѕС‚Р° РґР»СЏ СЃС†РµРЅР°СЂРёРµРІ, РіРґРµ РЅСѓР¶РµРЅ Bot API access РёР»Рё Telegram login widget validation. РҐСЂР°РЅРёС‚Рµ РІ СЃРµРєСЂРµС‚Рµ. | `1234567890:change-me` |
-| `TURNSTILE_ENABLED` | РќРµС‚ | `true` РёР»Рё `false`. | Р’РєР»СЋС‡Р°РµС‚ РїСЂРѕРІРµСЂРєСѓ Cloudflare Turnstile РЅР° Р·Р°С‰РёС‰РµРЅРЅС‹С… С„РѕСЂРјР°С…. | `false` |
-| `TURNSTILE_SITE_KEY` | РќРµС‚ | Cloudflare Turnstile site key. РџСѓСЃС‚Рѕ, РµСЃР»Рё РѕС‚РєР»СЋС‡РµРЅРѕ. | Build-time fallback РґР»СЏ `NEXT_PUBLIC_TURNSTILE_SITE_KEY`. | `1x00000000000000000000AA` |
-| `NEXT_PUBLIC_TURNSTILE_SITE_KEY` | РћР±СЏР·Р°С‚РµР»СЊРЅР°, РµСЃР»Рё Turnstile РІРєР»СЋС‡РµРЅ | Cloudflare Turnstile site key. РџСѓСЃС‚Рѕ, РµСЃР»Рё РѕС‚РєР»СЋС‡РµРЅРѕ. | РџСѓР±Р»РёС‡РЅС‹Р№ РєР»СЋС‡, РєРѕС‚РѕСЂС‹Р№ РїРѕРїР°РґР°РµС‚ РІРѕ frontend. РџРѕСЃР»Рµ РёР·РјРµРЅРµРЅРёСЏ РїРµСЂРµСЃРѕР±РµСЂРёС‚Рµ РїСЂРёР»РѕР¶РµРЅРёРµ. | `1x00000000000000000000AA` |
-| `TURNSTILE_SECRET_KEY` | РћР±СЏР·Р°С‚РµР»СЊРЅР°, РµСЃР»Рё Turnstile РІРєР»СЋС‡РµРЅ | Cloudflare Turnstile secret key. РџСѓСЃС‚Рѕ, РµСЃР»Рё РѕС‚РєР»СЋС‡РµРЅРѕ. | Secret key, РєРѕС‚РѕСЂС‹Р№ РѕС‚РїСЂР°РІР»СЏРµС‚СЃСЏ РІ Cloudflare verification API. РҐСЂР°РЅРёС‚Рµ РІ СЃРµРєСЂРµС‚Рµ. | `1x0000000000000000000000000000000AA` |
-| `TURNSTILE_VERIFY_URL` | РќРµС‚ | РђР±СЃРѕР»СЋС‚РЅС‹Р№ URL. | Endpoint РїСЂРѕРІРµСЂРєРё Cloudflare Turnstile. РћСЃС‚Р°РІСЊС‚Рµ default, РµСЃР»Рё РЅРµ РёСЃРїРѕР»СЊР·СѓРµС‚Рµ СЃРѕРІРјРµСЃС‚РёРјС‹Р№ verification endpoint. | `https://challenges.cloudflare.com/turnstile/v0/siteverify` |
-| `SUPPORT_ENABLED` | РќРµС‚ | `true` РёР»Рё `false`. | Р’РєР»СЋС‡Р°РµС‚ Р±Р»РѕРє РїРѕРґРґРµСЂР¶РєРё РІ РєР°Р±РёРЅРµС‚Рµ. | `true` |
-| `SUPPORT_EMAIL` | РќРµС‚ | Email-Р°РґСЂРµСЃ РёР»Рё РїСѓСЃС‚Рѕ. | Email РїРѕРґРґРµСЂР¶РєРё, РєРѕС‚РѕСЂС‹Р№ РїРѕРєР°Р·С‹РІР°РµС‚СЃСЏ РїРѕР»СЊР·РѕРІР°С‚РµР»СЏРј, РµСЃР»Рё РїРѕРґРґРµСЂР¶РєР° РІРєР»СЋС‡РµРЅР°. | `support@example.com` |
-| `SUPPORT_TELEGRAM_USERNAME` | РќРµС‚ | Telegram username Р±РµР· `@` РёР»Рё РїСѓСЃС‚Рѕ. | Telegram username РїРѕРґРґРµСЂР¶РєРё, РєРѕС‚РѕСЂС‹Р№ РїРѕРєР°Р·С‹РІР°РµС‚СЃСЏ РїРѕР»СЊР·РѕРІР°С‚РµР»СЏРј, РµСЃР»Рё РїРѕРґРґРµСЂР¶РєР° РІРєР»СЋС‡РµРЅР°. | `cleanpay_support` |
-| `SUPPORT_FAQ_URL` | РќРµС‚ | РђР±СЃРѕР»СЋС‚РЅС‹Р№ URL РёР»Рё РїСѓСЃС‚Рѕ. | URL СЃС‚СЂР°РЅРёС†С‹ FAQ/РїРѕРґРґРµСЂР¶РєРё, РєРѕС‚РѕСЂС‹Р№ РїРѕРєР°Р·С‹РІР°РµС‚СЃСЏ РїРѕР»СЊР·РѕРІР°С‚РµР»СЏРј. | `https://oplata.example.com/support` |
-| `CLEAN_PAY_READINESS_MAILPIT_URL` | РќРµС‚ | РђР±СЃРѕР»СЋС‚РЅС‹Р№ URL РёР»Рё РїСѓСЃС‚Рѕ. | РћРїС†РёРѕРЅР°Р»СЊРЅР°СЏ readiness-РїСЂРѕРІРµСЂРєР° Mailpit. Р’ production РѕСЃС‚Р°РІСЊС‚Рµ РїСѓСЃС‚С‹Рј. | РїСѓСЃС‚Рѕ |
-| `CLEAN_PAY_READINESS_REMNAWAVE_URL` | РќРµС‚ | РђР±СЃРѕР»СЋС‚РЅС‹Р№ URL РёР»Рё РїСѓСЃС‚Рѕ. | РћРїС†РёРѕРЅР°Р»СЊРЅР°СЏ readiness-РїСЂРѕРІРµСЂРєР° Remnawave. Р•СЃР»Рё Р·Р°РґР°РЅРѕ, readiness РІС‹Р·С‹РІР°РµС‚ `/api/system/metadata` РЅР° СЌС‚РѕРј URL. | `https://panel.example.com` |
-
-## РџСЂРёРјРµС‡Р°РЅРёСЏ
-
-- РќРµ РєРѕРјРјРёС‚СЊС‚Рµ `deploy/prod/.env` Рё СЂРµР°Р»СЊРЅС‹Рµ СЃРµРєСЂРµС‚С‹.
-- `node deploy/prod/prod.mjs up` РІР°Р»РёРґРёСЂСѓРµС‚ `deploy/prod/.env`, СЃРѕР·РґР°РµС‚ `CLEAN_PAY_EDGE_NETWORK`, РµСЃР»Рё СЃРµС‚СЊ РѕС‚СЃСѓС‚СЃС‚РІСѓРµС‚, СЃРѕР±РёСЂР°РµС‚ image РїСЂРёР»РѕР¶РµРЅРёСЏ Рё Р·Р°РїСѓСЃРєР°РµС‚ Docker Compose.
-- Р•СЃР»Рё РјРµРЅСЏРµС‚СЃСЏ `NEXT_PUBLIC_TURNSTILE_SITE_KEY`, РїРµСЂРµСЃРѕР±РµСЂРёС‚Рµ РїСЂРёР»РѕР¶РµРЅРёРµ С‡РµСЂРµР· Docker Compose.
-- Clean Pay РЅРµ РёР·РјРµРЅСЏРµС‚ РёСЃС…РѕРґРЅС‹Р№ РєРѕРґ Remnashop.
-- Ссылки подключения подписок берутся только из Remnawave. Если Remnawave не может предоставить ссылку, Clean Pay показывает явную ошибку.
-- РЎСЃС‹Р»РєРё РїРѕРґРєР»СЋС‡РµРЅРёСЏ РїРѕРґРїРёСЃРѕРє Р±РµСЂСѓС‚СЃСЏ С‚РѕР»СЊРєРѕ РёР· Remnawave. Р•СЃР»Рё Remnawave РЅРµ РјРѕР¶РµС‚ РїСЂРµРґРѕСЃС‚Р°РІРёС‚СЊ СЃСЃС‹Р»РєСѓ, Clean Pay РїРѕРєР°Р·С‹РІР°РµС‚ СЏРІРЅСѓСЋ РѕС€РёР±РєСѓ РІРјРµСЃС‚Рѕ fallback РЅР° cached URL РёР· Remnashop.
-- РџРѕР»РЅС‹Р№ Telegram WebApp auto-login СЂР°Р±РѕС‚Р°РµС‚ С‚РѕР»СЊРєРѕ РєРѕРіРґР° Telegram РѕС‚РєСЂС‹РІР°РµС‚ Clean Pay РєР°Рє РЅР°СЃС‚РѕСЏС‰РёР№ WebApp Рё РїРµСЂРµРґР°РµС‚ РїРѕРґРїРёСЃР°РЅРЅС‹Р№ `initData`. Р•СЃР»Рё Telegram РѕС‚РєСЂС‹РІР°РµС‚ РѕР±С‹С‡РЅС‹Р№ URL, Clean Pay РёСЃРїРѕР»СЊР·СѓРµС‚ fallback С‡РµСЂРµР· Telegram OAuth.
+Ожидаемый результат: HTTP `200` и JSON `{"plans":[...]}` или `{"plans":[]}`.
