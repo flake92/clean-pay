@@ -1,6 +1,7 @@
 import { prisma } from "@/backend/database/prisma";
-import { getAuthorizedRemnashopTokens, getRemnashopMe, remnashopRequest } from "@/backend/integrations/remnashop/client";
+import { getAuthorizedRemnashopTokens, getRemnashopMe, remnashopLinkTelegram, remnashopRequest } from "@/backend/integrations/remnashop/client";
 import { BffError } from "@/backend/integrations/remnashop/errors";
+import { linkCurrentUserToRemnashopAuth } from "@/backend/integrations/remnashop/session";
 import { assertCooldown, assertRateLimit } from "@/backend/limits/rate-limit";
 import { auditLog } from "@/backend/observability/audit";
 import { authDebugLog } from "@/backend/observability/auth-debug-log";
@@ -27,6 +28,10 @@ function isTransientEmailSendError(error: unknown) {
     error.code === "UPSTREAM_UNAVAILABLE" &&
     String(error.debug?.message ?? error.message).toLowerCase().includes("failed to send verification email")
   );
+}
+
+function isTelegramAlreadyLinkedConflict(error: unknown) {
+  return error instanceof BffError && error.code === "CONFLICT";
 }
 
 export async function requestRemnashopEmailVerification({
@@ -139,7 +144,7 @@ export async function confirmEmailVerification(rawBody: AuthPayload<ConfirmEmail
     authDebugLog("email_verification_confirm_turnstile_passed", {});
   }
 
-  const { accessToken, session } = await getAuthorizedRemnashopTokens({
+  const { accessToken, refreshToken, session } = await getAuthorizedRemnashopTokens({
     allowUnverifiedEmail: true,
   });
   const profile = await getRemnashopMe(accessToken);
@@ -178,11 +183,45 @@ export async function confirmEmailVerification(rawBody: AuthPayload<ConfirmEmail
     email: result.email,
   });
 
+  if (session.user.telegramId) {
+    try {
+      await remnashopLinkTelegram({
+        accessToken,
+        telegramId: session.user.telegramId,
+        telegramUsername: session.user.telegramUsername,
+      });
+      authDebugLog("email_verification_confirm_telegram_attached", {
+        sessionId: session.id,
+        userId: session.userId,
+        telegramId: session.user.telegramId,
+      });
+    } catch (error) {
+      if (!isTelegramAlreadyLinkedConflict(error)) {
+        throw error;
+      }
+
+      authDebugLog("email_verification_confirm_telegram_conflict_ignored", {
+        sessionId: session.id,
+        userId: session.userId,
+        telegramId: session.user.telegramId,
+      });
+    }
+  }
+
+  await linkCurrentUserToRemnashopAuth({
+    accessToken,
+    refreshToken,
+    auth: {
+      expires_at: session.remnashopAccessExpiresAt?.toISOString() ?? new Date(Date.now() + 60_000).toISOString(),
+      refresh_expires_at: session.remnashopRefreshExpiresAt?.toISOString() ?? new Date(Date.now() + 86_400_000).toISOString(),
+    },
+  });
   await prisma.webUser.update({
     where: { id: session.userId },
     data: {
       email: result.email,
       emailVerified: true,
+      authPending: false,
     },
   });
   await refreshCurrentAccessCookie();

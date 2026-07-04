@@ -19,7 +19,8 @@ const mocks = vi.hoisted(() => ({
   getCurrentSession: vi.fn(),
   refreshCurrentAccessCookie: vi.fn(),
   prisma: {
-    webUser: { update: vi.fn() },
+    $transaction: vi.fn(),
+    webUser: { findUnique: vi.fn(), update: vi.fn() },
     webSession: { update: vi.fn() },
   },
 }));
@@ -124,6 +125,8 @@ describe("auth use cases", () => {
     mocks.getAuthorizedRemnashopTokens.mockResolvedValue({ accessToken: "access-token", refreshToken: "refresh-token", session });
     mocks.getCurrentSession.mockResolvedValue({ ...session, remnashopAccessTokenEncrypted: null, remnashopRefreshTokenEncrypted: null });
     mocks.getRemnashopMe.mockResolvedValue(profile);
+    mocks.prisma.webUser.findUnique.mockResolvedValue(null);
+    mocks.prisma.$transaction.mockImplementation(async (callback: (tx: typeof mocks.prisma) => unknown) => callback(mocks.prisma));
     mocks.remnashopChangePassword.mockResolvedValue({
       data: { success: true },
       cookies: { accessToken: "new-access", refreshToken: "new-refresh" },
@@ -215,6 +218,8 @@ describe("auth use cases", () => {
 
     await confirmEmailVerification({ code: "123456", registrationFlow: true }, {});
 
+    expect(mocks.remnashopLinkTelegram).not.toHaveBeenCalled();
+    expect(mocks.linkCurrentUserToRemnashopAuth).toHaveBeenCalledOnce();
     expect(mocks.verifyTurnstileToken).not.toHaveBeenCalled();
     expect(mocks.remnashopRequest).toHaveBeenLastCalledWith("/auth/email/confirm", {
       method: "POST",
@@ -223,7 +228,7 @@ describe("auth use cases", () => {
     });
     expect(mocks.prisma.webUser.update).toHaveBeenCalledWith({
       where: { id: "user-1" },
-      data: { email: "verified@example.com", emailVerified: true },
+      data: { email: "verified@example.com", emailVerified: true, authPending: false },
     });
     expect(mocks.refreshCurrentAccessCookie).toHaveBeenCalledOnce();
   });
@@ -290,13 +295,14 @@ describe("auth use cases", () => {
     expect(mocks.getAuthorizedRemnashopTokens).toHaveBeenCalledWith({ allowUnverifiedEmail: true });
   });
 
-  it("links Remnashop account and falls back to registration after auth failure", async () => {
+  it("stages Remnashop account and falls back to registration after auth failure", async () => {
     mocks.remnashopAuth
       .mockRejectedValueOnce(new BffError("AUTH_FAILED", 401, "bad credentials"))
       .mockResolvedValueOnce(authResult);
 
     await expect(linkRemnashopAccount({ email: "user@example.com", password: "secret" })).resolves.toMatchObject({
-      linked: true,
+      linked: false,
+      pendingVerification: true,
       emailVerification: { target_email: "user@example.com" },
     });
 
@@ -308,27 +314,30 @@ describe("auth use cases", () => {
       email: "user@example.com",
       password: "secret",
     });
-    expect(mocks.linkCurrentUserToRemnashopAuth).toHaveBeenCalledOnce();
+    expect(mocks.linkCurrentUserToRemnashopAuth).not.toHaveBeenCalled();
+    expect(mocks.remnashopLinkTelegram).not.toHaveBeenCalled();
+    expect(mocks.prisma.webSession.update).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: "session-1" },
+      data: expect.objectContaining({
+        remnashopAccessTokenEncrypted: "protected:access-token",
+        remnashopRefreshTokenEncrypted: "protected:refresh-token",
+      }),
+    }));
   });
 
-  it("links current Telegram identity in Remnashop before reconciling an email account", async () => {
+  it("does not link current Telegram identity in Remnashop before email code confirmation", async () => {
     mocks.getCurrentSession.mockResolvedValueOnce({
       ...session,
       user: { ...user, telegramId: "123456", telegramUsername: "clean_user" },
     });
 
     await expect(linkRemnashopAccount({ email: "user@example.com", password: "secret" })).resolves.toMatchObject({
-      linked: true,
+      linked: false,
+      pendingVerification: true,
     });
 
-    expect(mocks.remnashopLinkTelegram).toHaveBeenCalledWith({
-      accessToken: "access-token",
-      telegramId: "123456",
-      telegramUsername: "clean_user",
-    });
-    expect(mocks.remnashopLinkTelegram.mock.invocationCallOrder[0]).toBeLessThan(
-      mocks.linkCurrentUserToRemnashopAuth.mock.invocationCallOrder[0],
-    );
+    expect(mocks.remnashopLinkTelegram).not.toHaveBeenCalled();
+    expect(mocks.linkCurrentUserToRemnashopAuth).not.toHaveBeenCalled();
   });
 
   it("continues email linking when Telegram already exists in Remnashop", async () => {
@@ -336,25 +345,22 @@ describe("auth use cases", () => {
       ...session,
       user: { ...user, telegramId: "123456", telegramUsername: "clean_user" },
     });
-    mocks.remnashopLinkTelegram.mockRejectedValueOnce(
-      new BffError("CONFLICT", 409, "Telegram account is already linked"),
-    );
-
     await expect(linkRemnashopAccount({ email: "user@example.com", password: "secret" })).resolves.toMatchObject({
-      linked: true,
+      linked: false,
+      pendingVerification: true,
       emailVerification: { target_email: "user@example.com" },
     });
 
-    expect(mocks.remnashopLinkTelegram).toHaveBeenCalledOnce();
+    expect(mocks.remnashopLinkTelegram).not.toHaveBeenCalled();
     expect(mocks.remnashopRequest).toHaveBeenCalledWith("/auth/email/request-verification", {
       method: "POST",
       accessToken: "access-token",
       body: { email: "user@example.com" },
     });
-    expect(mocks.linkCurrentUserToRemnashopAuth).toHaveBeenCalledOnce();
+    expect(mocks.linkCurrentUserToRemnashopAuth).not.toHaveBeenCalled();
   });
 
-  it("merges an existing unverified email account before sending the verification code", async () => {
+  it("does not merge an existing unverified email account before sending the verification code", async () => {
     mocks.getCurrentSession.mockResolvedValueOnce({
       ...session,
       user: { ...user, email: null, telegramId: "123456", telegramUsername: "clean_user" },
@@ -365,22 +371,20 @@ describe("auth use cases", () => {
     });
 
     await expect(linkRemnashopAccount({ email: "user@example.com", password: "secret" })).resolves.toMatchObject({
-      linked: true,
+      linked: false,
+      pendingVerification: true,
       emailVerification: { target_email: "user@example.com" },
     });
 
-    expect(mocks.linkCurrentUserToRemnashopAuth).toHaveBeenCalledOnce();
+    expect(mocks.linkCurrentUserToRemnashopAuth).not.toHaveBeenCalled();
     expect(mocks.remnashopRequest).toHaveBeenCalledWith("/auth/email/request-verification", {
       method: "POST",
       accessToken: "access-token",
       body: { email: "user@example.com" },
     });
-    expect(mocks.linkCurrentUserToRemnashopAuth.mock.invocationCallOrder[0]).toBeLessThan(
-      mocks.remnashopRequest.mock.invocationCallOrder[0],
-    );
   });
 
-  it("links an already verified existing email account without requesting another code", async () => {
+  it("requires code confirmation even for an already verified existing email account", async () => {
     mocks.getCurrentSession.mockResolvedValueOnce({
       ...session,
       user: { ...user, email: null, telegramId: "123456", telegramUsername: "clean_user" },
@@ -391,11 +395,16 @@ describe("auth use cases", () => {
     });
 
     await expect(linkRemnashopAccount({ email: "user@example.com", password: "secret" })).resolves.toMatchObject({
-      linked: true,
-      user: expect.objectContaining({ is_email_verified: true }),
+      linked: false,
+      pendingVerification: true,
+      emailVerification: { target_email: "user@example.com" },
     });
 
-    expect(mocks.linkCurrentUserToRemnashopAuth).toHaveBeenCalledOnce();
-    expect(mocks.remnashopRequest).not.toHaveBeenCalledWith("/auth/email/request-verification", expect.any(Object));
+    expect(mocks.linkCurrentUserToRemnashopAuth).not.toHaveBeenCalled();
+    expect(mocks.remnashopRequest).toHaveBeenCalledWith("/auth/email/request-verification", {
+      method: "POST",
+      accessToken: "access-token",
+      body: { email: "user@example.com" },
+    });
   });
 });
