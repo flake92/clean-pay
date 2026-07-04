@@ -253,7 +253,7 @@ export function ProfilePanel({
   const canManageRemnashopEmail = Boolean(user.email);
   const canChangePassword = hasEmail;
   return (
-    <div className="flex flex-column gap-4">
+    <div className="clean-profile-panel flex flex-column gap-4">
       {message ? <Message severity={messageSeverity} text={message} /> : null}
 
       <Card title="Данные аккаунта">

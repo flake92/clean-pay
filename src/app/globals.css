@@ -343,6 +343,23 @@ body {
   max-width: 100%;
 }
 
+.clean-profile-panel,
+.clean-profile-panel form,
+.clean-profile-panel label {
+  min-width: 0;
+}
+
+.clean-profile-panel .p-inputtext,
+.clean-profile-panel .p-password,
+.clean-profile-panel .p-password-input,
+.clean-profile-panel .p-button {
+  max-width: 100%;
+}
+
+.clean-profile-panel .p-button {
+  white-space: normal;
+}
+
 .link-account-panel {
   display: flex;
   flex-direction: column;
@@ -608,6 +625,14 @@ body {
 }
 
 @media (max-width: 640px) {
+  .clean-profile-panel .p-card .p-card-body {
+    padding: 1.25rem;
+  }
+
+  .clean-profile-panel .p-button {
+    width: 100%;
+  }
+
   .account-method-card {
     padding: 1rem;
   }

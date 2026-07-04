@@ -133,7 +133,7 @@ export function TurnstileWidget({
 
         widgetIdRef.current = window.turnstile.render(containerRef.current, {
           sitekey: siteKey,
-          size: "normal",
+          size: "flexible",
           callback: (token) => {
             setError(null);
             onToken(token);
