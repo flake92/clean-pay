@@ -590,6 +590,26 @@ body {
   .account-method-action-row {
     grid-template-columns: 1fr;
   }
+
+  .p-datatable .p-datatable-wrapper {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .p-datatable .p-datatable-table {
+    min-width: 44rem;
+    table-layout: auto;
+  }
+
+  .p-datatable .p-datatable-thead > tr > th,
+  .p-datatable .p-datatable-tbody > tr > td {
+    white-space: nowrap;
+  }
+
+  .p-datatable .p-datatable-tbody > tr > td:first-child {
+    min-width: 13rem;
+    white-space: normal;
+  }
 }
 
 .p-button:not(.p-button-outlined):not(.p-button-text):not(.p-button-link) {
