@@ -234,11 +234,12 @@ describe("auth use cases", () => {
       expires_at: "2026-06-25T10:15:00.000Z",
     });
 
-    await expect(changeEmail({ email: "next@example.com" })).resolves.toMatchObject({
+    await expect(changeEmail({ email: "next@example.com", turnstileToken: "ts-change" }, { remoteIp: "127.0.0.1" })).resolves.toMatchObject({
       pending_email: "next@example.com",
       emailVerification: { target_email: "next@example.com" },
     });
 
+    expect(mocks.verifyTurnstileToken).toHaveBeenCalledWith("ts-change", "127.0.0.1");
     expect(mocks.prisma.webUser.update).toHaveBeenCalledWith({
       where: { id: "user-1" },
       data: { emailVerified: false },

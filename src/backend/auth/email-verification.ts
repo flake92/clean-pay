@@ -203,8 +203,11 @@ export async function confirmEmailVerification(rawBody: AuthPayload<ConfirmEmail
   return result;
 }
 
-export async function changeEmail(body: ChangeEmailRequest) {
+export async function changeEmail(rawBody: AuthPayload<ChangeEmailRequest>, turnstile: TurnstileContext) {
+  const { body, turnstileToken } = stripTurnstile(rawBody);
   authDebugLog("email_change_started", { hasEmail: Boolean(body.email) });
+  await verifyTurnstileToken(turnstileToken ?? turnstile.token, turnstile.remoteIp);
+  authDebugLog("email_change_turnstile_passed", { hasRemoteIp: Boolean(turnstile.remoteIp) });
   const { accessToken, session } = await getAuthorizedRemnashopTokens();
   authDebugLog("email_change_session_authorized", {
     sessionId: session.id,
