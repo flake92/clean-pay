@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useContext, useMemo, useState, type FormEvent, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
 
 import { Button } from "primereact/button";
 import { InputText } from "primereact/inputtext";
@@ -9,7 +9,7 @@ import { Password } from "primereact/password";
 
 import { PasskeyLoginButton } from "@/frontend/components/passkey-actions";
 import { TurnstileWidget, type TurnstileHandle, hasTurnstileSiteKey } from "@/frontend/components/turnstile-widget";
-import { readBffError } from "@/frontend/lib/client-api";
+import { BffClientError, readBffError } from "@/frontend/lib/client-api";
 
 type ApiState = {
   loading: boolean;
@@ -68,7 +68,17 @@ const AuthTurnstileContext = createContext<AuthTurnstileContextValue>({
 });
 
 async function readError(response: Response) {
-  return (await readBffError(response, "Не удалось выполнить действие.")).message;
+  const error = await readBffError(response, "Не удалось выполнить действие.");
+
+  if (error instanceof BffClientError && error.code === "AUTH_FAILED") {
+    return "Неверный e-mail или пароль.";
+  }
+
+  if (error instanceof BffClientError && error.code === "RATE_LIMITED") {
+    return "Слишком много попыток. Попробуйте позже.";
+  }
+
+  return error.message;
 }
 
 function redirectAfterAuth() {
@@ -573,10 +583,15 @@ export function RegisterForm() {
 export function TelegramLoginButton({ redirectTo = "/cabinet" }: { redirectTo?: string }) {
   const [state, setState] = useState<ApiState>({ loading: false, error: null });
   const turnstile = useAuthTurnstile();
+  const missingTurnstileMessage = missingTurnstileTokenMessage(turnstile.siteKey);
+
+  useEffect(() => {
+    setState((current) => (current.error === missingTurnstileMessage ? { loading: false, error: null } : current));
+  }, [missingTurnstileMessage, turnstile.token]);
 
   async function onClick() {
     if (turnstile.enabled && !turnstile.token) {
-      setState({ loading: false, error: missingTurnstileTokenMessage(turnstile.siteKey) });
+      setState({ loading: false, error: missingTurnstileMessage });
       return;
     }
 
