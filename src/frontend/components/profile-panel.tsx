@@ -59,7 +59,6 @@ export function ProfilePanel({
   const [user, setUser] = useState<ProfileUser | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [email, setEmail] = useState("");
-  const [targetEmail, setTargetEmail] = useState<string | null>(null);
   const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
   const [turnstile, setTurnstile] = useState<TurnstileHandle | null>(null);
   const [currentPassword, setCurrentPassword] = useState("");
@@ -85,7 +84,6 @@ export function ProfilePanel({
 
     setUser(profile);
     setEmail(profile.pending_email ?? profile.email ?? "");
-    setTargetEmail(profile.pending_email);
   }, []);
 
   useEffect(() => {
@@ -174,8 +172,8 @@ export function ProfilePanel({
 
       if (isSameEmail) {
         const sentTo = await requestVerificationFor(nextEmail);
-        setTargetEmail(sentTo);
         showMessage(`E-mail уже указан. Код подтверждения отправлен на ${sentTo}.`, "success");
+        window.location.assign("/verify-email");
         return;
       }
 
@@ -195,32 +193,11 @@ export function ProfilePanel({
       const body = await response.json().catch(() => null);
       const nextTargetEmail =
         body?.data?.emailVerification?.target_email ?? body?.data?.pending_email ?? nextEmail;
-      setTargetEmail(nextTargetEmail);
       await loadProfile();
       showMessage(`Новый e-mail сохранен. Код подтверждения отправлен на ${nextTargetEmail}.`, "success");
+      window.location.assign("/verify-email");
     } catch (err) {
       showMessage(messageFromError(err, "Не удалось изменить e-mail."), "warn");
-    } finally {
-      resetTurnstile();
-      setPendingAction(null);
-    }
-  }
-
-  async function requestVerification() {
-    setPendingAction("verification");
-    setMessage(null);
-
-    try {
-      if (!ensureTurnstileToken()) {
-        return;
-      }
-
-      const nextTargetEmail = user?.pending_email ?? targetEmail ?? user?.email ?? email;
-      const sentTo = await requestVerificationFor(nextTargetEmail);
-      setTargetEmail(sentTo);
-      showMessage(`Код подтверждения отправлен на ${sentTo}.`, "success");
-    } catch (err) {
-      showMessage(messageFromError(err, "Не удалось отправить код."), "warn");
     } finally {
       resetTurnstile();
       setPendingAction(null);
@@ -275,8 +252,6 @@ export function ProfilePanel({
   const isTelegramOnly = Boolean(telegramId) && !user.email;
   const canManageRemnashopEmail = Boolean(user.email);
   const canChangePassword = user.auth_type === "email" && Boolean(user.email);
-  const canEnterCode = Boolean(targetEmail || user.pending_email);
-
   return (
     <div className="flex flex-column gap-4">
       {message ? <Message severity={messageSeverity} text={message} /> : null}
@@ -338,19 +313,10 @@ export function ProfilePanel({
             <div className="flex flex-wrap gap-3">
               <Button
                 disabled={pendingAction === "email"}
-                label="Сохранить e-mail"
+                label="Сохранить и отправить код"
                 loading={pendingAction === "email"}
                 type="submit"
               />
-              <Button
-                disabled={pendingAction === "verification"}
-                label="Отправить код"
-                loading={pendingAction === "verification"}
-                onClick={requestVerification}
-                outlined
-                type="button"
-              />
-              {canEnterCode ? <LinkButton href="/verify-email" label="Ввести код" outlined /> : null}
             </div>
           </form>
         </Card>
