@@ -55,4 +55,26 @@ describe("BFF response logging", () => {
     );
     expect(JSON.stringify(mocks.logger.warn.mock.calls)).not.toContain("user@example.com");
   });
+
+  it("handles serialized BFF-like errors without converting them to internal errors", async () => {
+    const response = bffError({
+      code: "VALIDATION_ERROR",
+      status: 400,
+      message: "Turnstile token is required",
+      prodMessage: "Проверьте введённые данные.",
+    });
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toMatchObject({
+      error: {
+        code: "VALIDATION_ERROR",
+        message: expect.any(String),
+      },
+    });
+    expect(mocks.logger.warn).toHaveBeenCalledWith(
+      "bff_error_response_sent",
+      { status: 400, code: "VALIDATION_ERROR" },
+      expect.objectContaining({ category: "bff" }),
+    );
+  });
 });

@@ -8,15 +8,37 @@ function isDevelopment() {
   return process.env.NODE_ENV !== 'production';
 }
 
-function debugPayload(error: BffError) {
+type BffErrorLike = {
+  code: string;
+  status: number;
+  message?: string;
+  prodMessage?: string;
+  debug?: BffError["debug"];
+};
+
+function debugPayload(error: BffErrorLike) {
   if (!isDevelopment()) {
     return undefined;
   }
 
   return {
-    message: error.message,
-    ...error.debug,
-  };
+        message: error.message,
+        ...error.debug,
+      };
+}
+
+function isBffErrorLike(error: unknown): error is BffError | BffErrorLike {
+  return (
+    error instanceof BffError ||
+    Boolean(
+      error &&
+        typeof error === "object" &&
+        "code" in error &&
+        typeof (error as { code?: unknown }).code === "string" &&
+        "status" in error &&
+        typeof (error as { status?: unknown }).status === "number",
+    )
+  );
 }
 
 export function bffJson<T>(data: T, init?: ResponseInit) {
@@ -34,12 +56,17 @@ export function bffJson<T>(data: T, init?: ResponseInit) {
 
 export function bffError(error: unknown) {
   logTechnicalError('bff_error', error);
-  if (error instanceof BffError) {
+  if (isBffErrorLike(error)) {
     const debug = debugPayload(error);
+    const message = error instanceof BffError || typeof error.prodMessage === "string"
+      ? error.prodMessage
+      : error instanceof Error
+        ? error.message
+        : "Request failed";
     const body = {
       error: {
         code: error.code,
-        message: isDevelopment() ? error.message : error.prodMessage,
+        message: isDevelopment() ? error.message : message,
         ...(debug ? { debug } : {}),
       },
     };
