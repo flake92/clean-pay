@@ -35,6 +35,41 @@ function formatDebug(debug: unknown) {
   }
 }
 
+function isAuthPage(pathname: string) {
+  return (
+    pathname === '/login' ||
+    pathname === '/register' ||
+    pathname === '/auth/telegram/webapp' ||
+    pathname.startsWith('/auth/telegram/')
+  );
+}
+
+function loginUrl() {
+  const redirectTo = `${window.location.pathname}${window.location.search}`;
+  const url = new URL('/login', window.location.origin);
+
+  if (!isAuthPage(window.location.pathname)) {
+    url.searchParams.set('redirect_to', redirectTo);
+  }
+
+  return url.toString();
+}
+
+export function redirectToLoginOnUnauthorized(error: unknown) {
+  if (
+    typeof window === 'undefined' ||
+    !(error instanceof BffClientError) ||
+    error.status !== 401 ||
+    isAuthPage(window.location.pathname)
+  ) {
+    return false;
+  }
+
+  window.location.replace(loginUrl());
+
+  return true;
+}
+
 export async function readBffError(
   response: Response,
   fallback = 'Не удалось выполнить действие.',
@@ -43,12 +78,16 @@ export async function readBffError(
   const error = body?.error;
   const message = error?.message ?? fallback;
 
-  return new BffClientError(
+  const clientError = new BffClientError(
     message + formatDebug(error?.debug),
     response.status,
     error?.code,
     error?.debug,
   );
+
+  redirectToLoginOnUnauthorized(clientError);
+
+  return clientError;
 }
 
 export async function apiFetch<T>(url: string, init?: RequestInit, fallback?: string) {

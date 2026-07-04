@@ -170,7 +170,11 @@ function loginRedirect(request: NextRequest) {
   url.search = '';
   url.searchParams.set('redirect_to', safeRedirectTarget(request));
 
-  return NextResponse.redirect(url);
+  const response = NextResponse.redirect(url);
+  response.cookies.delete(accessCookieName);
+  response.cookies.delete(refreshCookieName);
+
+  return response;
 }
 
 function authenticatedRedirect(request: NextRequest, emailVerificationRequired: boolean) {
@@ -194,7 +198,7 @@ function requestMetadata(request: NextRequest, accessState: AccessState) {
     method: request.method,
     pathname,
     isApi: pathname.startsWith('/api/'),
-    authenticated: accessState.authenticated || accessState.hasRefreshToken,
+    authenticated: accessState.authenticated,
     accessAuthenticated: accessState.authenticated,
     fullAuthenticated: accessState.fullAuthenticated,
     bootstrapAuthenticated: accessState.bootstrapAuthenticated,
@@ -206,7 +210,8 @@ function requestMetadata(request: NextRequest, accessState: AccessState) {
 export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
   const accessState = await getAccessState(request);
-  const isAuthenticated = accessState.authenticated || accessState.hasRefreshToken;
+  const isApi = pathname.startsWith('/api/');
+  const isAuthenticated = accessState.authenticated || (isApi && accessState.hasRefreshToken);
   const isBootstrapAuthenticated = accessState.bootstrapAuthenticated && !accessState.fullAuthenticated;
   const metadata = requestMetadata(request, accessState);
 
@@ -217,7 +222,7 @@ export async function proxy(request: NextRequest) {
   });
 
   if (isPublicPath(pathname)) {
-    if ((isAuthenticated || isBootstrapAuthenticated) && (pathname === '/login' || pathname === '/register')) {
+    if ((accessState.authenticated || isBootstrapAuthenticated) && (pathname === '/login' || pathname === '/register')) {
       const redirectTo = isBootstrapAuthenticated
         ? "/passkey/setup"
         : accessState.emailVerificationRequired
@@ -360,10 +365,14 @@ export async function proxy(request: NextRequest) {
       source: "http.access",
       message: `${request.method} ${pathname} -> 401 unauthorized`,
     });
-    return NextResponse.json(
+    const response = NextResponse.json(
       { error: { code: 'UNAUTHORIZED', message: 'Войдите в аккаунт, чтобы продолжить.' } },
       { status: 401 },
     );
+    response.cookies.delete(accessCookieName);
+    response.cookies.delete(refreshCookieName);
+
+    return response;
   }
 
   logger.info("http_request_decision", {
