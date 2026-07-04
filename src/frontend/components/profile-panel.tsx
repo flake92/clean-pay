@@ -251,7 +251,7 @@ export function ProfilePanel({
   const isEmailVerified = hasEmail && Boolean(user.emailVerified ?? user.is_email_verified);
   const isTelegramOnly = Boolean(telegramId) && !user.email;
   const canManageRemnashopEmail = Boolean(user.email);
-  const canChangePassword = user.auth_type === "email" && Boolean(user.email);
+  const canChangePassword = hasEmail;
   return (
     <div className="flex flex-column gap-4">
       {message ? <Message severity={messageSeverity} text={message} /> : null}
