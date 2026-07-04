@@ -155,10 +155,6 @@ export async function beginPasskeyRegistration() {
   }
 
   const { rpID, rpName } = webAuthnRelyingParty();
-  const credentials = await prisma.webAuthnCredential.findMany({
-    where: { userId: session.userId },
-    select: { credentialId: true, transports: true },
-  });
   const userName = session.user.email ?? session.user.telegramUsername ?? session.user.telegramId ?? session.userId;
   const options = await generateRegistrationOptions({
     rpID,
@@ -166,14 +162,13 @@ export async function beginPasskeyRegistration() {
     userID: userHandle(session.userId),
     userName,
     userDisplayName: session.user.displayName ?? session.user.fullName ?? userName,
-    timeout: 60_000,
+    timeout: 120_000,
     attestationType: "none",
-    excludeCredentials: credentials.map((credential) => ({
-      id: credential.credentialId,
-      transports: credential.transports as SimpleWebAuthnCredential["transports"],
-    })),
+    // Cross-device passkeys can fail in Windows/Chrome before verification when
+    // synced credentials are excluded. Duplicate IDs are handled by the upsert below.
     authenticatorSelection: {
-      residentKey: "preferred",
+      residentKey: "required",
+      requireResidentKey: true,
       userVerification: "required",
     },
   });

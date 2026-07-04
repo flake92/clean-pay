@@ -118,7 +118,7 @@ describe("passkey use cases", () => {
     mocks.createWebSession.mockResolvedValue({ id: "new-session" });
   });
 
-  it("begins registration with excluded credentials and stores challenge", async () => {
+  it("begins registration with cross-device friendly options and stores challenge", async () => {
     mocks.prisma.webAuthnCredential.findMany.mockResolvedValue([{ credentialId: "existing", transports: ["internal"] }]);
 
     await expect(beginPasskeyRegistration()).resolves.toMatchObject({ challenge: "reg-challenge" });
@@ -128,9 +128,15 @@ describe("passkey use cases", () => {
         rpID: "localhost",
         rpName: "Clean Pay",
         userName: "user@example.com",
-        excludeCredentials: [{ id: "existing", transports: ["internal"] }],
+        timeout: 120_000,
+        authenticatorSelection: {
+          residentKey: "required",
+          requireResidentKey: true,
+          userVerification: "required",
+        },
       }),
     );
+    expect(mocks.generateRegistrationOptions.mock.calls[0]?.[0]).not.toHaveProperty("excludeCredentials");
     expect(mocks.prisma.webAuthnChallenge.create).toHaveBeenCalledWith({
       data: expect.objectContaining({
         challenge: "reg-challenge",
