@@ -8,6 +8,7 @@ import {
   type WebAuthnCredential as SimpleWebAuthnCredential,
 } from "@simplewebauthn/server";
 import { WebAuthnChallengeType, WebSessionAssuranceLevel, WebSessionAuthMethod } from "@prisma/client";
+import { headers } from "next/headers";
 
 import { auditLog } from "@/backend/observability/audit";
 import { getEnv } from "@/backend/config/env";
@@ -16,6 +17,7 @@ import { BffError } from "@/backend/integrations/remnashop/errors";
 import { createWebSession, getCurrentSession, upgradeCurrentSessionToFull } from "@/backend/sessions/web-session";
 
 const challengeTtlMs = 5 * 60 * 1000;
+const maxPasskeyNameLength = 80;
 
 function addMs(date: Date, ms: number) {
   return new Date(date.getTime() + ms);
@@ -107,6 +109,44 @@ function toSimpleCredential(credential: {
   };
 }
 
+function normalizePasskeyName(value: unknown) {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const normalized = value.trim().replace(/\s+/g, " ").slice(0, maxPasskeyNameLength);
+
+  return normalized.length > 0 ? normalized : null;
+}
+
+function passkeyNameFromUserAgent(userAgent: string | null) {
+  const value = userAgent ?? "";
+  const platform = /iphone/i.test(value)
+    ? "iPhone"
+    : /ipad/i.test(value)
+      ? "iPad"
+      : /android/i.test(value)
+        ? "Android"
+        : /windows/i.test(value)
+          ? "Windows"
+          : /mac os|macintosh/i.test(value)
+            ? "macOS"
+            : /linux/i.test(value)
+              ? "Linux"
+              : "Устройство";
+  const browser = /edg\//i.test(value)
+    ? "Edge"
+    : /firefox\//i.test(value)
+      ? "Firefox"
+      : /chrome\//i.test(value) || /crios\//i.test(value)
+        ? "Chrome"
+        : /safari\//i.test(value)
+          ? "Safari"
+          : "браузер";
+
+  return `${platform} ${browser}`;
+}
+
 export async function beginPasskeyRegistration() {
   const session = await getCurrentSession();
 
@@ -150,7 +190,7 @@ export async function beginPasskeyRegistration() {
   return options;
 }
 
-export async function finishPasskeyRegistration(response: RegistrationResponseJSON) {
+export async function finishPasskeyRegistration(response: RegistrationResponseJSON & { name?: string }) {
   const session = await getCurrentSession();
 
   if (!session) {
@@ -182,6 +222,8 @@ export async function finishPasskeyRegistration(response: RegistrationResponseJS
   }
 
   const { credential, aaguid, credentialBackedUp, credentialDeviceType } = result.registrationInfo;
+  const requestHeaders = await headers();
+  const passkeyName = normalizePasskeyName(response.name) ?? passkeyNameFromUserAgent(requestHeaders.get("user-agent"));
 
   await prisma.webAuthnCredential.upsert({
     where: { credentialId: credential.id },
@@ -194,7 +236,7 @@ export async function finishPasskeyRegistration(response: RegistrationResponseJS
       aaguid,
       deviceType: credentialDeviceType,
       backedUp: credentialBackedUp,
-      name: "Ключ доступа",
+      name: passkeyName,
       lastUsedAt: new Date(),
     },
     update: {
@@ -204,6 +246,7 @@ export async function finishPasskeyRegistration(response: RegistrationResponseJS
       aaguid,
       deviceType: credentialDeviceType,
       backedUp: credentialBackedUp,
+      name: passkeyName,
       lastUsedAt: new Date(),
     },
   });

@@ -8,6 +8,7 @@ import {
   startRegistration,
 } from "@simplewebauthn/browser";
 import { Button } from "primereact/button";
+import { InputText } from "primereact/inputtext";
 import { Message } from "primereact/message";
 
 import { readBffError } from "@/frontend/lib/client-api";
@@ -124,6 +125,7 @@ export function PasskeySetupPanel() {
   const supported = useWebAuthnSupport();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [name, setName] = useState("");
 
   function continueToCabinet() {
     window.location.assign("/cabinet");
@@ -151,7 +153,7 @@ export function PasskeySetupPanel() {
       const verifyResponse = await fetch("/api/bff/auth/passkey/register/verify", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify(attestation),
+        body: JSON.stringify({ ...attestation, name: name.trim() || undefined }),
       });
 
       if (!verifyResponse.ok) {
@@ -198,6 +200,15 @@ export function PasskeySetupPanel() {
         </div>
       </div>
       {error ? <Message severity="warn" text={error} /> : null}
+      <label className="flex flex-column gap-2">
+        <span className="text-sm font-medium text-700">Название ключа</span>
+        <InputText
+          maxLength={80}
+          onChange={(event) => setName(event.target.value)}
+          placeholder="Например: Android Chrome или ноутбук"
+          value={name}
+        />
+      </label>
       <div className="flex flex-column sm:flex-row gap-2">
         <Button
           disabled={loading}

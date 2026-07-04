@@ -185,6 +185,28 @@ export function LinkAccountPanel({
     window.location.assign(url.toString());
   }
 
+  async function deletePasskey(id: string) {
+    setActionLoading(`passkey-${id}`);
+    setMessage(null);
+    setError(null);
+
+    try {
+      const response = await fetch(`/api/bff/auth/passkey/credentials/${encodeURIComponent(id)}`, {
+        method: "DELETE",
+      });
+
+      if (!response.ok) {
+        setError(await readError(response));
+        return;
+      }
+
+      setMessage("Ключ быстрого входа удалён.");
+      await loadState();
+    } finally {
+      setActionLoading(null);
+    }
+  }
+
   async function onSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setActionLoading("email");
@@ -286,6 +308,7 @@ export function LinkAccountPanel({
           title="Быстрый вход"
         >
           {webAuthnSupported !== false ? (
+            <>
             <div className="account-method-action-row">
               <Button
                 icon="pi pi-lock"
@@ -301,6 +324,31 @@ export function LinkAccountPanel({
                 type="button"
               />
             </div>
+            {passkeys.length > 0 ? (
+              <div className="passkey-list">
+                {passkeys.map((credential) => (
+                  <div className="passkey-list-item" key={credential.id}>
+                    <div className="passkey-list-item__body">
+                      <span className="passkey-list-item__name">{credential.name ?? "Ключ доступа"}</span>
+                      <span className="passkey-list-item__meta">
+                        {credential.lastUsedAt ? `Последний вход: ${new Date(credential.lastUsedAt).toLocaleDateString("ru-RU")}` : "Ещё не использовался"}
+                      </span>
+                    </div>
+                    <Button
+                      aria-label="Удалить ключ"
+                      disabled={passkeys.length <= 1 || actionLoading === `passkey-${credential.id}`}
+                      icon="pi pi-trash"
+                      loading={actionLoading === `passkey-${credential.id}`}
+                      onClick={() => deletePasskey(credential.id)}
+                      outlined
+                      severity="danger"
+                      type="button"
+                    />
+                  </div>
+                ))}
+              </div>
+            ) : null}
+            </>
           ) : webAuthnSupported === false ? (
             <Message severity="info" text="Этот способ скрывается на устройствах без поддержки WebAuthn." />
           ) : null}

@@ -461,6 +461,46 @@ body {
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
 }
 
+.passkey-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.passkey-list-item {
+  align-items: center;
+  background: #f8fafc;
+  border: 1px solid #e5ebf2;
+  border-radius: 8px;
+  display: grid;
+  gap: 0.75rem;
+  grid-template-columns: minmax(0, 1fr) auto;
+  padding: 0.75rem;
+}
+
+.passkey-list-item__body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  min-width: 0;
+}
+
+.passkey-list-item__name {
+  color: #1f2937;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.passkey-list-item__meta {
+  color: #64748b;
+  font-size: 0.85rem;
+}
+
+.passkey-list-item .p-button {
+  height: 2.5rem;
+  width: 2.5rem;
+}
+
 @media (max-width: 480px) {
   .auth-page {
     align-items: flex-start;

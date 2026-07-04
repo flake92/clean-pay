@@ -50,6 +50,10 @@ vi.mock("@/backend/sessions/web-session", () => ({
   upgradeCurrentSessionToFull: mocks.upgradeCurrentSessionToFull,
 }));
 
+vi.mock("next/headers", () => ({
+  headers: vi.fn(async () => new Headers({ "user-agent": "Mozilla/5.0 (Windows NT 10.0) Chrome/120.0" })),
+}));
+
 import {
   beginPasskeyLogin,
   beginPasskeyRegistration,
@@ -164,6 +168,7 @@ describe("passkey use cases", () => {
           transports: ["internal"],
         },
         clientExtensionResults: {},
+        name: "Рабочий ноутбук",
       }),
     ).resolves.toEqual({ success: true });
 
@@ -173,8 +178,8 @@ describe("passkey use cases", () => {
     });
     expect(mocks.prisma.webAuthnCredential.upsert).toHaveBeenCalledWith({
       where: { credentialId: "credential-1" },
-      create: expect.objectContaining({ userId: "user-1", credentialId: "credential-1" }),
-      update: expect.objectContaining({ counter: 0n }),
+      create: expect.objectContaining({ userId: "user-1", credentialId: "credential-1", name: "Рабочий ноутбук" }),
+      update: expect.objectContaining({ counter: 0n, name: "Рабочий ноутбук" }),
     });
     expect(mocks.upgradeCurrentSessionToFull).toHaveBeenCalledOnce();
   });
