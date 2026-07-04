@@ -8,8 +8,6 @@ export const dynamic = "force-dynamic";
 
 export default function ProfilePage() {
   const branding = getBranding();
-  const turnstileEnabled = process.env.TURNSTILE_ENABLED === "true";
-  const turnstileSiteKey = process.env.TURNSTILE_SITE_KEY;
 
   return (
     <AppShell>
@@ -19,7 +17,7 @@ export default function ProfilePage() {
           title="Профиль"
         />
         <Card>
-          <ProfilePanel turnstileEnabled={turnstileEnabled} turnstileSiteKey={turnstileSiteKey} />
+          <ProfilePanel />
         </Card>
       </div>
     </AppShell>

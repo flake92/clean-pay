@@ -75,8 +75,6 @@ export async function requestEmailVerification(rawBody: AuthPayload<RequestEmail
     hasEmail: Boolean(body.email),
     hasTurnstileToken: Boolean(turnstileToken ?? turnstile.token),
   });
-  await verifyTurnstileToken(turnstileToken ?? turnstile.token, turnstile.remoteIp);
-  authDebugLog("email_verification_request_turnstile_passed", {});
 
   const { accessToken, session } = await getAuthorizedRemnashopTokens({
     allowUnverifiedEmail: true,
@@ -205,9 +203,10 @@ export async function confirmEmailVerification(rawBody: AuthPayload<ConfirmEmail
 
 export async function changeEmail(rawBody: AuthPayload<ChangeEmailRequest>, turnstile: TurnstileContext) {
   const { body, turnstileToken } = stripTurnstile(rawBody);
-  authDebugLog("email_change_started", { hasEmail: Boolean(body.email) });
-  await verifyTurnstileToken(turnstileToken ?? turnstile.token, turnstile.remoteIp);
-  authDebugLog("email_change_turnstile_passed", { hasRemoteIp: Boolean(turnstile.remoteIp) });
+  authDebugLog("email_change_started", {
+    hasEmail: Boolean(body.email),
+    hasTurnstileToken: Boolean(turnstileToken ?? turnstile.token),
+  });
   const { accessToken, session } = await getAuthorizedRemnashopTokens();
   authDebugLog("email_change_session_authorized", {
     sessionId: session.id,

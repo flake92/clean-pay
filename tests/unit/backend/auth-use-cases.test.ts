@@ -215,7 +215,7 @@ describe("auth use cases", () => {
 
     await confirmEmailVerification({ code: "123456", registrationFlow: true }, {});
 
-    expect(mocks.verifyTurnstileToken).toHaveBeenCalledTimes(1);
+    expect(mocks.verifyTurnstileToken).not.toHaveBeenCalled();
     expect(mocks.remnashopRequest).toHaveBeenLastCalledWith("/auth/email/confirm", {
       method: "POST",
       accessToken: "access-token",
@@ -239,7 +239,7 @@ describe("auth use cases", () => {
       emailVerification: { target_email: "next@example.com" },
     });
 
-    expect(mocks.verifyTurnstileToken).toHaveBeenCalledWith("ts-change", "127.0.0.1");
+    expect(mocks.verifyTurnstileToken).not.toHaveBeenCalled();
     expect(mocks.prisma.webUser.update).toHaveBeenCalledWith({
       where: { id: "user-1" },
       data: { emailVerified: false },
