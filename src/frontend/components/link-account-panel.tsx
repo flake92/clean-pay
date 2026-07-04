@@ -285,7 +285,7 @@ export function LinkAccountPanel({
           meta={hasPasskey ? <span>Сохранено ключей: {passkeys.length}</span> : null}
           title="Быстрый вход"
         >
-          {webAuthnSupported !== false && !hasPasskey ? (
+          {webAuthnSupported !== false ? (
             <div className="account-method-action-row">
               <Button
                 icon="pi pi-lock"
