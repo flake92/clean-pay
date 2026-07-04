@@ -232,7 +232,19 @@ export function LinkAccountPanel({
       return;
     }
 
-    setMessage("Код подтверждения отправлен на e-mail.");
+    const body = (await response.json()) as {
+      data?: {
+        linked?: boolean;
+        pendingVerification?: boolean;
+      };
+    };
+
+    if (body.data?.linked) {
+      setMessage("E-mail привязан.");
+      window.location.assign("/cabinet");
+      return;
+    }
+
     window.location.assign("/verify-email");
   }
 

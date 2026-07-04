@@ -1,12 +1,75 @@
 import { prisma } from "@/backend/database/prisma";
-import { getRemnashopMe, protectRemnashopToken, remnashopAuth } from "@/backend/integrations/remnashop/client";
+import { getRemnashopMe, protectRemnashopToken, remnashopAuth, remnashopLinkTelegram } from "@/backend/integrations/remnashop/client";
 import { BffError } from "@/backend/integrations/remnashop/errors";
+import { linkCurrentUserToRemnashopAuth } from "@/backend/integrations/remnashop/session";
 import { assertRateLimit } from "@/backend/limits/rate-limit";
 import { auditLog } from "@/backend/observability/audit";
 import { authDebugLog } from "@/backend/observability/auth-debug-log";
 import type { LoginRequest } from "@/shared/remnashop/types";
 import { requestRemnashopEmailVerification } from "@/backend/auth/email-verification";
 import { getCurrentSession, refreshCurrentAccessCookie } from "@/backend/sessions/web-session";
+
+function isEmailAlreadyExistsConflict(error: unknown) {
+  return (
+    error instanceof BffError &&
+    error.code === "CONFLICT" &&
+    String(error.debug?.message ?? error.message).toLowerCase().includes("email already exists")
+  );
+}
+
+function isEmailAlreadyVerifiedConflict(error: unknown) {
+  return (
+    error instanceof BffError &&
+    error.code === "CONFLICT" &&
+    String(error.debug?.message ?? error.message).toLowerCase().includes("email is already verified")
+  );
+}
+
+function isTelegramAlreadyLinkedConflict(error: unknown) {
+  return error instanceof BffError && error.code === "CONFLICT";
+}
+
+async function attachTelegramToVerifiedRemnashopAccount({
+  auth,
+  session,
+}: {
+  auth: Awaited<ReturnType<typeof remnashopAuth>>;
+  session: NonNullable<Awaited<ReturnType<typeof getCurrentSession>>>;
+}) {
+  if (session.user.telegramId) {
+    try {
+      await remnashopLinkTelegram({
+        accessToken: auth.cookies.accessToken,
+        telegramId: session.user.telegramId,
+        telegramUsername: session.user.telegramUsername,
+      });
+      authDebugLog("remnashop_account_link_telegram_attached", {
+        sessionId: session.id,
+        userId: session.userId,
+        telegramId: session.user.telegramId,
+      });
+    } catch (error) {
+      if (!isTelegramAlreadyLinkedConflict(error)) {
+        throw error;
+      }
+
+      authDebugLog("remnashop_account_link_telegram_conflict_ignored", {
+        sessionId: session.id,
+        userId: session.userId,
+        telegramId: session.user.telegramId,
+      });
+    }
+  }
+
+  const linked = await linkCurrentUserToRemnashopAuth({
+    accessToken: auth.cookies.accessToken,
+    refreshToken: auth.cookies.refreshToken,
+    auth: auth.data,
+  });
+  await refreshCurrentAccessCookie();
+
+  return linked;
+}
 
 export async function linkRemnashopAccount(body: LoginRequest) {
   authDebugLog("remnashop_account_link_started", { hasEmail: Boolean(body.email) });
@@ -20,6 +83,8 @@ export async function linkRemnashopAccount(body: LoginRequest) {
 
   let auth: Awaited<ReturnType<typeof remnashopAuth>>;
 
+  let loginFailed: BffError | null = null;
+
   try {
     auth = await remnashopAuth("/auth/login", body);
     authDebugLog("remnashop_account_link_login_success", {
@@ -31,7 +96,17 @@ export async function linkRemnashopAccount(body: LoginRequest) {
       throw error;
     }
 
-    auth = await remnashopAuth("/auth/register", body);
+    loginFailed = error;
+
+    try {
+      auth = await remnashopAuth("/auth/register", body);
+    } catch (registerError) {
+      if (isEmailAlreadyExistsConflict(registerError)) {
+        throw loginFailed;
+      }
+
+      throw registerError;
+    }
     authDebugLog("remnashop_account_link_register_fallback_success", {
       accessExpiresAt: auth.data.expires_at,
       refreshExpiresAt: auth.data.refresh_expires_at,
@@ -45,6 +120,36 @@ export async function linkRemnashopAccount(body: LoginRequest) {
   }
 
   const profile = await getRemnashopMe(auth.cookies.accessToken);
+
+  if (profile.email && profile.is_email_verified) {
+    const linked = await attachTelegramToVerifiedRemnashopAccount({ auth, session });
+    authDebugLog("remnashop_account_link_verified_email_linked", {
+      sessionId: session.id,
+      userId: linked.user.id,
+      targetEmail: profile.email,
+    });
+
+    await auditLog({
+      action: "remnashop_account_linked_verified_email",
+      userId: linked.user.id,
+      metadata: {
+        email: profile.email,
+        telegramId: session.user.telegramId,
+      },
+    });
+
+    return {
+      user: {
+        ...linked.profile,
+        telegram_id: linked.user.telegramId ?? linked.profile.telegram_id,
+        telegramId: linked.user.telegramId,
+      },
+      linked: true,
+      pendingVerification: false,
+      alreadyVerified: true,
+    };
+  }
+
   const existingEmailOwner = body.email
     ? await prisma.webUser.findUnique({ where: { email: body.email } })
     : null;
@@ -79,11 +184,47 @@ export async function linkRemnashopAccount(body: LoginRequest) {
     await refreshCurrentAccessCookie();
   }
 
-  const verification = await requestRemnashopEmailVerification({
-    accessToken: auth.cookies.accessToken,
-    body: { email: body.email },
-    source: "link_remnashop",
-  });
+  let verification: Awaited<ReturnType<typeof requestRemnashopEmailVerification>>;
+
+  try {
+    verification = await requestRemnashopEmailVerification({
+      accessToken: auth.cookies.accessToken,
+      body: { email: body.email },
+      source: "link_remnashop",
+    });
+  } catch (error) {
+    if (!isEmailAlreadyVerifiedConflict(error)) {
+      throw error;
+    }
+
+    const linked = await attachTelegramToVerifiedRemnashopAccount({ auth, session });
+    authDebugLog("remnashop_account_link_verified_email_linked_after_conflict", {
+      sessionId: session.id,
+      userId: linked.user.id,
+      targetEmail: linked.profile.email,
+    });
+
+    await auditLog({
+      action: "remnashop_account_linked_verified_email",
+      userId: linked.user.id,
+      metadata: {
+        email: linked.profile.email,
+        telegramId: session.user.telegramId,
+        source: "request_verification_conflict",
+      },
+    });
+
+    return {
+      user: {
+        ...linked.profile,
+        telegram_id: linked.user.telegramId ?? linked.profile.telegram_id,
+        telegramId: linked.user.telegramId,
+      },
+      linked: true,
+      pendingVerification: false,
+      alreadyVerified: true,
+    };
+  }
 
   authDebugLog("remnashop_account_link_verification_requested", {
     userId: session.userId,

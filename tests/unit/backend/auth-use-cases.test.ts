@@ -360,6 +360,49 @@ describe("auth use cases", () => {
     expect(mocks.linkCurrentUserToRemnashopAuth).not.toHaveBeenCalled();
   });
 
+  it("links an already verified Remnashop email account after password proof", async () => {
+    mocks.getCurrentSession.mockResolvedValueOnce({
+      ...session,
+      user: { ...user, email: null, telegramId: "123456", telegramUsername: "clean_user" },
+    });
+    mocks.getRemnashopMe.mockResolvedValueOnce({ ...profile, is_email_verified: true });
+
+    await expect(linkRemnashopAccount({ email: "user@example.com", password: "secret" })).resolves.toMatchObject({
+      linked: true,
+      pendingVerification: false,
+      alreadyVerified: true,
+    });
+
+    expect(mocks.remnashopRequest).not.toHaveBeenCalledWith("/auth/email/request-verification", expect.any(Object));
+    expect(mocks.remnashopLinkTelegram).toHaveBeenCalledWith({
+      accessToken: "access-token",
+      telegramId: "123456",
+      telegramUsername: "clean_user",
+    });
+    expect(mocks.linkCurrentUserToRemnashopAuth).toHaveBeenCalledOnce();
+    expect(mocks.refreshCurrentAccessCookie).toHaveBeenCalledOnce();
+  });
+
+  it("returns auth failure when the target email exists but the password is wrong", async () => {
+    mocks.remnashopAuth
+      .mockRejectedValueOnce(new BffError("AUTH_FAILED", 401, "bad credentials"))
+      .mockRejectedValueOnce(new BffError("CONFLICT", 409, "email already exists"));
+
+    await expect(linkRemnashopAccount({ email: "user@example.com", password: "wrong" })).rejects.toMatchObject({
+      code: "AUTH_FAILED",
+      status: 401,
+    });
+
+    expect(mocks.remnashopAuth).toHaveBeenNthCalledWith(1, "/auth/login", {
+      email: "user@example.com",
+      password: "wrong",
+    });
+    expect(mocks.remnashopAuth).toHaveBeenNthCalledWith(2, "/auth/register", {
+      email: "user@example.com",
+      password: "wrong",
+    });
+  });
+
   it("does not merge an existing unverified email account before sending the verification code", async () => {
     mocks.getCurrentSession.mockResolvedValueOnce({
       ...session,
@@ -384,7 +427,7 @@ describe("auth use cases", () => {
     });
   });
 
-  it("requires code confirmation even for an already verified existing email account", async () => {
+  it("does not merge an existing local email owner before code confirmation", async () => {
     mocks.getCurrentSession.mockResolvedValueOnce({
       ...session,
       user: { ...user, email: null, telegramId: "123456", telegramUsername: "clean_user" },
