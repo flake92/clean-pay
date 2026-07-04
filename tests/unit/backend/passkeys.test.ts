@@ -130,8 +130,7 @@ describe("passkey use cases", () => {
         userName: "user@example.com",
         timeout: 120_000,
         authenticatorSelection: {
-          residentKey: "required",
-          requireResidentKey: true,
+          residentKey: "preferred",
           userVerification: "required",
         },
       }),

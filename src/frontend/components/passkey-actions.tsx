@@ -48,6 +48,21 @@ function isUserCancelled(error: unknown) {
   );
 }
 
+function isWebAuthnTransportError(error: unknown) {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+
+  const name = error.name.toLowerCase();
+  const message = error.message.toLowerCase();
+
+  return (
+    (name.includes("typeerror") && message.includes("failed to fetch")) ||
+    message.includes("bluetooth") ||
+    message.includes("networkerror")
+  );
+}
+
 export function PasskeyLoginButton() {
   const supported = useWebAuthnSupport();
   const [loading, setLoading] = useState(false);
@@ -83,7 +98,9 @@ export function PasskeyLoginButton() {
       setError(
         isUserCancelled(error)
           ? "Окно быстрого входа закрыто. Можно войти по паролю."
-          : error instanceof Error
+          : isWebAuthnTransportError(error)
+            ? "Браузер не смог связаться с ключом. Для входа через телефон включите Bluetooth на компьютере и телефоне, затем повторите попытку."
+            : error instanceof Error
             ? error.message
             : "Не удалось войти быстрым способом.",
       );
@@ -166,7 +183,9 @@ export function PasskeySetupPanel() {
       setError(
         isUserCancelled(error)
           ? "Окно быстрого входа закрыто. Это не проблема, можно продолжить без него."
-          : error instanceof Error
+          : isWebAuthnTransportError(error)
+            ? "Браузер не смог связаться с ключом. Для ключа на телефоне включите Bluetooth на компьютере и телефоне, держите телефон рядом и повторите попытку."
+            : error instanceof Error
             ? error.message
             : "Не удалось создать быстрый вход.",
       );

@@ -167,8 +167,7 @@ export async function beginPasskeyRegistration() {
     // Cross-device passkeys can fail in Windows/Chrome before verification when
     // synced credentials are excluded. Duplicate IDs are handled by the upsert below.
     authenticatorSelection: {
-      residentKey: "required",
-      requireResidentKey: true,
+      residentKey: "preferred",
       userVerification: "required",
     },
   });
