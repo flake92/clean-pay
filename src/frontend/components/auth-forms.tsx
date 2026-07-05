@@ -16,39 +16,6 @@ type ApiState = {
   error: string | null;
 };
 
-type TelegramLoginPayload = {
-  auth_date?: number;
-  id_token?: string;
-  first_name?: string;
-  hash?: string;
-  id?: number;
-  last_name?: string;
-  photo_url?: string;
-  username?: string;
-  error?: string;
-};
-
-type TelegramLoginApi = {
-  Login?: {
-    auth: (
-      options: {
-        client_id: number;
-        redirect_uri: string;
-        redirect_url: string;
-        scope?: string[];
-        nonce: string;
-      },
-      callback: (payload: TelegramLoginPayload) => void,
-    ) => void;
-  };
-};
-
-declare global {
-  interface Window {
-    Telegram?: TelegramLoginApi;
-  }
-}
-
 type LoginMode = "identify" | "password" | "register";
 
 type AuthTurnstileContextValue = {
@@ -104,59 +71,6 @@ function turnstilePayload(token: string | null) {
         "cf-turnstile-response": token,
       }
     : {};
-}
-
-function loadTelegramLoginScript() {
-  if (window.Telegram?.Login?.auth) {
-    return Promise.resolve();
-  }
-
-  return new Promise<void>((resolve, reject) => {
-    const existing = document.querySelector<HTMLScriptElement>("script[data-clean-pay-telegram-login]");
-
-    if (existing) {
-      existing.addEventListener("load", () => resolve(), { once: true });
-      existing.addEventListener("error", () => reject(new Error("Telegram Login script failed to load")), { once: true });
-      return;
-    }
-
-    const script = document.createElement("script");
-    script.async = true;
-    script.dataset.cleanPayTelegramLogin = "true";
-    script.src = "https://telegram.org/js/telegram-login.js";
-    script.onload = () => resolve();
-    script.onerror = () => reject(new Error("Telegram Login script failed to load"));
-    document.head.appendChild(script);
-  });
-}
-
-function openTelegramPopup(clientId: string, nonce: string, redirectUri: string) {
-  return new Promise<TelegramLoginPayload>((resolve, reject) => {
-    const telegramLogin = window.Telegram?.Login;
-
-    if (!telegramLogin?.auth) {
-      reject(new Error("Telegram Login is unavailable"));
-      return;
-    }
-
-    telegramLogin.auth(
-      {
-        client_id: Number(clientId),
-        redirect_uri: redirectUri,
-        redirect_url: redirectUri,
-        scope: ["profile"],
-        nonce,
-      },
-      (payload) => {
-        if (payload.id_token || payload.hash) {
-          resolve(payload);
-          return;
-        }
-
-        reject(new Error(payload.error ?? "Telegram login was cancelled"));
-      },
-    );
-  });
 }
 
 function useAuthTurnstile() {
@@ -603,43 +517,13 @@ export function TelegramLoginButton({ redirectTo = "/cabinet" }: { redirectTo?: 
 
     try {
       const url = new URL("/auth/telegram/start", window.location.origin);
-      url.searchParams.set("mode", "popup");
       url.searchParams.set("redirect_to", redirectTo);
       if (turnstile.token) {
         url.searchParams.set("turnstile_token", turnstile.token);
         url.searchParams.set("cf-turnstile-response", turnstile.token);
       }
 
-      const startResponse = await fetch(url.toString(), {
-        cache: "no-store",
-      });
-
-      if (!startResponse.ok) {
-        throw new Error(await readError(startResponse));
-      }
-
-      const startBody = await startResponse.json() as { clientId?: string; nonce?: string; redirectUri?: string };
-
-      if (!startBody.clientId || !startBody.nonce || !startBody.redirectUri) {
-        throw new Error("Telegram login configuration is invalid.");
-      }
-
-      await loadTelegramLoginScript();
-      const telegramPayload = await openTelegramPopup(startBody.clientId, startBody.nonce, startBody.redirectUri);
-      const callbackResponse = await fetch("/auth/telegram/callback", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(telegramPayload.id_token
-          ? { idToken: telegramPayload.id_token }
-          : { authData: telegramPayload }),
-      });
-
-      if (!callbackResponse.ok) {
-        throw new Error(await readError(callbackResponse));
-      }
-
-      const callbackBody = await callbackResponse.json() as { redirectTo?: string };
-      window.location.assign(callbackBody.redirectTo ?? redirectTo);
+      window.location.assign(url.toString());
     } catch (error) {
       setState({
         loading: false,
