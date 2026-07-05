@@ -124,6 +124,7 @@ export async function createTelegramPopupStartResponse(
   const response = NextResponse.json({
     clientId: env.telegramOidc.clientId,
     nonce,
+    redirectUri: env.telegramOidc.redirectUri,
   });
   const cookieOptions = temporaryCookieOptions();
 

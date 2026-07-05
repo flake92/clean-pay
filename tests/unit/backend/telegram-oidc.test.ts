@@ -182,12 +182,13 @@ describe("Telegram OIDC integration", () => {
     expect(response.cookies.get("clean_pay_tg_code_verifier")?.value).toBeTruthy();
   });
 
-  it("creates Telegram popup start response with client id and nonce", async () => {
+  it("creates Telegram popup start response with client id, redirect uri and nonce", async () => {
     const response = await createTelegramPopupStartResponse("/cabinet", "user-1");
-    const body = await response.json() as { clientId?: string; nonce?: string };
+    const body = await response.json() as { clientId?: string; nonce?: string; redirectUri?: string };
 
     expect(body.clientId).toBeTruthy();
     expect(body.nonce).toBeTruthy();
+    expect(body.redirectUri).toBe("http://localhost:8080/auth/telegram/callback");
     expect(mocks.prisma.telegramAuthState.create).toHaveBeenCalledWith({
       data: expect.objectContaining({
         redirectTo: "/cabinet",

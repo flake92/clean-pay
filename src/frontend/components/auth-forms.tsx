@@ -33,6 +33,8 @@ type TelegramLoginApi = {
     auth: (
       options: {
         client_id: number;
+        redirect_uri: string;
+        redirect_url: string;
         scope?: string[];
         nonce: string;
       },
@@ -128,7 +130,7 @@ function loadTelegramLoginScript() {
   });
 }
 
-function openTelegramPopup(clientId: string, nonce: string) {
+function openTelegramPopup(clientId: string, nonce: string, redirectUri: string) {
   return new Promise<TelegramLoginPayload>((resolve, reject) => {
     const telegramLogin = window.Telegram?.Login;
 
@@ -140,6 +142,8 @@ function openTelegramPopup(clientId: string, nonce: string) {
     telegramLogin.auth(
       {
         client_id: Number(clientId),
+        redirect_uri: redirectUri,
+        redirect_url: redirectUri,
         scope: ["profile"],
         nonce,
       },
@@ -614,14 +618,14 @@ export function TelegramLoginButton({ redirectTo = "/cabinet" }: { redirectTo?: 
         throw new Error(await readError(startResponse));
       }
 
-      const startBody = await startResponse.json() as { clientId?: string; nonce?: string };
+      const startBody = await startResponse.json() as { clientId?: string; nonce?: string; redirectUri?: string };
 
-      if (!startBody.clientId || !startBody.nonce) {
+      if (!startBody.clientId || !startBody.nonce || !startBody.redirectUri) {
         throw new Error("Telegram login configuration is invalid.");
       }
 
       await loadTelegramLoginScript();
-      const telegramPayload = await openTelegramPopup(startBody.clientId, startBody.nonce);
+      const telegramPayload = await openTelegramPopup(startBody.clientId, startBody.nonce, startBody.redirectUri);
       const callbackResponse = await fetch("/auth/telegram/callback", {
         method: "POST",
         headers: { "content-type": "application/json" },
