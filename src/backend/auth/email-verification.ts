@@ -1,13 +1,5 @@
 import { prisma } from "@/backend/database/prisma";
-import {
-  createRemnashopTelegramAuthForSession,
-  getAuthorizedRemnashopTokens,
-  getRemnashopMe,
-  getRemnashopUserIdFromAccessToken,
-  remnashopLinkTelegram,
-  remnashopRequest,
-} from "@/backend/integrations/remnashop/client";
-import { mergeVerifiedEmailRemnashopUserIntoTelegramUser } from "@/backend/integrations/remnashop/admin-merge";
+import { getAuthorizedRemnashopTokens, getRemnashopMe, remnashopLinkTelegram, remnashopRequest } from "@/backend/integrations/remnashop/client";
 import { BffError } from "@/backend/integrations/remnashop/errors";
 import { linkCurrentUserToRemnashopAuth } from "@/backend/integrations/remnashop/session";
 import { assertCooldown, assertRateLimit } from "@/backend/limits/rate-limit";
@@ -152,10 +144,9 @@ export async function confirmEmailVerification(rawBody: AuthPayload<ConfirmEmail
     authDebugLog("email_verification_confirm_turnstile_passed", {});
   }
 
-  const tokens = await getAuthorizedRemnashopTokens({
+  const { accessToken, refreshToken, session } = await getAuthorizedRemnashopTokens({
     allowUnverifiedEmail: true,
   });
-  let { accessToken, refreshToken, session } = tokens;
   const profile = await getRemnashopMe(accessToken);
   const targetEmail = body.email ?? profile.pending_email ?? profile.email ?? session.user.email ?? undefined;
   const confirmBody = targetEmail ? { ...body, email: targetEmail } : body;
@@ -210,30 +201,6 @@ export async function confirmEmailVerification(rawBody: AuthPayload<ConfirmEmail
       }
 
       authDebugLog("email_verification_confirm_telegram_conflict_ignored", {
-        sessionId: session.id,
-        userId: session.userId,
-        telegramId: session.user.telegramId,
-      });
-
-      await mergeVerifiedEmailRemnashopUserIntoTelegramUser({
-        emailRemnashopUserId: getRemnashopUserIdFromAccessToken(accessToken),
-        telegramId: session.user.telegramId,
-      });
-
-      const telegramAuth = await createRemnashopTelegramAuthForSession(session);
-
-      if (!telegramAuth) {
-        throw new BffError("INTERNAL_ERROR", 500, "Unable to restore Remnashop Telegram session after merge.");
-      }
-
-      accessToken = telegramAuth.cookies.accessToken;
-      refreshToken = telegramAuth.cookies.refreshToken;
-      session = {
-        ...session,
-        remnashopAccessExpiresAt: new Date(telegramAuth.data.expires_at),
-        remnashopRefreshExpiresAt: new Date(telegramAuth.data.refresh_expires_at),
-      };
-      authDebugLog("email_verification_confirm_telegram_conflict_merge_completed", {
         sessionId: session.id,
         userId: session.userId,
         telegramId: session.user.telegramId,

@@ -9,7 +9,6 @@ type AppEnv = {
     logoUrl: string;
   };
   remnashopApiBaseUrl: string;
-  remnashopDatabaseUrl: string | null;
   remnawave: {
     apiBaseUrl: string | null;
     token: string | null;
@@ -149,26 +148,6 @@ function optionalUrl(name: string) {
   }
 }
 
-function optionalDatabaseUrl(name: string) {
-  const value = optional(name);
-
-  if (!value) {
-    return null;
-  }
-
-  try {
-    const parsed = new URL(value);
-
-    if (parsed.protocol !== "postgresql:" && parsed.protocol !== "postgres:") {
-      throw new Error();
-    }
-
-    return parsed.toString();
-  } catch {
-    throw new Error(`${name} must be a valid postgres URL`);
-  }
-}
-
 function optionalPublicPath(name: string, fallback: string) {
   const value = optional(name);
 
@@ -256,7 +235,6 @@ export function getEnv(): AppEnv {
       logoUrl: optionalPublicPath("NEXT_PUBLIC_BRAND_LOGO_URL", "/clean_vpn_logo.jpg"),
     },
     remnashopApiBaseUrl: url("REMNASHOP_API_BASE_URL"),
-    remnashopDatabaseUrl: optionalDatabaseUrl("REMNASHOP_DATABASE_URL"),
     remnawave: {
       apiBaseUrl: optionalUrl("REMNAWAVE_API_BASE_URL"),
       token: optional("REMNAWAVE_TOKEN"),

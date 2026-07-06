@@ -4,7 +4,6 @@ import { authDebugLog } from "@/backend/observability/auth-debug-log";
 import { getEnv } from "@/backend/config/env";
 import { logger } from "@/backend/observability/logger";
 import { prisma } from "@/backend/database/prisma";
-import { mergeVerifiedEmailRemnashopEmailIntoTelegramUser } from "@/backend/integrations/remnashop/admin-merge";
 import {
   BffError,
   normalizeRemnashopError,
@@ -323,7 +322,7 @@ function signTelegramAuthPayload(body: Omit<TelegramAuthRequest, "hash">, botTok
   return createHmac("sha256", secret).update(dataCheckString).digest("hex");
 }
 
-export async function createRemnashopTelegramAuthForSession(
+async function attachRemnashopTokensForTelegramSession(
   session: NonNullable<Awaited<ReturnType<typeof getCurrentSession>>>,
 ) {
   const env = getEnv();
@@ -370,19 +369,6 @@ export async function createRemnashopTelegramAuthForSession(
     ...bodyWithoutHash,
     hash: signTelegramAuthPayload(bodyWithoutHash, env.telegramBotToken),
   });
-
-  return auth;
-}
-
-async function attachRemnashopTokensForTelegramSession(
-  session: NonNullable<Awaited<ReturnType<typeof getCurrentSession>>>,
-) {
-  const auth = await createRemnashopTelegramAuthForSession(session);
-
-  if (!auth) {
-    return null;
-  }
-
   const remnashopUserId = getRemnashopUserIdFromAccessToken(auth.cookies.accessToken);
   const accessExpiresAt = new Date(auth.data.expires_at);
   const refreshExpiresAt = new Date(auth.data.refresh_expires_at);
@@ -476,53 +462,8 @@ export async function getAuthorizedRemnashopTokens({
     throw new BffError("EMAIL_REQUIRED", 401, "Clean Pay session must be linked to Remnashop before using Remnashop actions");
   }
 
-  let refreshToken = revealRemnashopToken(encryptedRefreshToken);
-  let accessToken = revealRemnashopToken(encryptedAccessToken);
-
-  if (session.user.email && session.user.emailVerified && session.user.telegramId) {
-    const profile = await getRemnashopMe(accessToken);
-
-    if (profile.email !== session.user.email || !profile.is_email_verified) {
-      const merge = await mergeVerifiedEmailRemnashopEmailIntoTelegramUser({
-        email: session.user.email,
-        telegramId: session.user.telegramId,
-      });
-
-      authDebugLog("remnashop_tokens_split_account_repaired", {
-        sessionId: session.id,
-        userId: session.userId,
-        email: session.user.email,
-        telegramId: session.user.telegramId,
-        remnashopSourceUserId: merge.sourceUserId,
-        remnashopTargetUserId: merge.targetUserId,
-        merged: merge.merged,
-      });
-
-      if (getRemnashopUserIdFromAccessToken(accessToken) !== merge.targetUserId) {
-        const telegramAuth = await createRemnashopTelegramAuthForSession(session);
-
-        if (!telegramAuth) {
-          throw new BffError("INTERNAL_ERROR", 500, "Unable to restore Remnashop Telegram session after merge.");
-        }
-
-        accessToken = telegramAuth.cookies.accessToken;
-        refreshToken = telegramAuth.cookies.refreshToken;
-
-        await prisma.webSession.update({
-          where: { id: session.id },
-          data: {
-            remnashopAccessTokenEncrypted: protectRemnashopToken(accessToken),
-            remnashopRefreshTokenEncrypted: protectRemnashopToken(refreshToken),
-            remnashopAccessExpiresAt: new Date(telegramAuth.data.expires_at),
-            remnashopRefreshExpiresAt: new Date(telegramAuth.data.refresh_expires_at),
-          },
-        });
-
-        session.remnashopAccessExpiresAt = new Date(telegramAuth.data.expires_at);
-        session.remnashopRefreshExpiresAt = new Date(telegramAuth.data.refresh_expires_at);
-      }
-    }
-  }
+  const refreshToken = revealRemnashopToken(encryptedRefreshToken);
+  const accessToken = revealRemnashopToken(encryptedAccessToken);
 
   if (session.user.email && !session.user.emailVerified && !allowUnverifiedEmail) {
     const profile = await getRemnashopMe(accessToken);
