@@ -19,12 +19,16 @@ vi.mock("@/backend/database/prisma", () => ({
     webSession: {
       update: vi.fn(),
     },
+    webUser: {
+      update: vi.fn(),
+    },
     $transaction: vi.fn(),
   },
 }));
 
 vi.mock("@/backend/sessions/web-session", () => ({
   getCurrentSession: vi.fn(),
+  refreshCurrentAccessCookie: vi.fn(),
 }));
 
 import {
@@ -38,7 +42,7 @@ import {
 } from "@/backend/integrations/remnashop/client";
 import { BffError } from "@/backend/integrations/remnashop/errors";
 import { decryptSecret } from "@/backend/security/crypto";
-import { getCurrentSession } from "@/backend/sessions/web-session";
+import { getCurrentSession, refreshCurrentAccessCookie } from "@/backend/sessions/web-session";
 import { prisma } from "@/backend/database/prisma";
 
 function jwt(payload: object) {
@@ -273,7 +277,53 @@ describe("remnashop client", () => {
       remnashopRefreshExpiresAt: new Date(Date.now() + 60 * 60_000),
       user: { email: "user@example.com", emailVerified: false, telegramId: null },
     } as never);
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(response({
+      body: {
+        email: "user@example.com",
+        is_email_verified: false,
+        telegram_id: null,
+        auth_type: "email",
+        pending_email: null,
+        name: "User",
+        username: null,
+        language: "ru",
+      },
+    }));
     await expect(getAuthorizedRemnashopTokens()).rejects.toMatchObject<BffError>({ code: "EMAIL_NOT_VERIFIED" });
+
+    vi.mocked(getCurrentSession).mockResolvedValueOnce({
+      id: "session-1",
+      userId: "user-1",
+      authMethod: "EMAIL",
+      remnashopAccessTokenEncrypted: protectRemnashopToken("access"),
+      remnashopRefreshTokenEncrypted: protectRemnashopToken("refresh"),
+      remnashopAccessExpiresAt: new Date(Date.now() + 10 * 60_000),
+      remnashopRefreshExpiresAt: new Date(Date.now() + 60 * 60_000),
+      user: { email: "user@example.com", emailVerified: false, telegramId: null },
+    } as never);
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(response({
+      body: {
+        email: "user@example.com",
+        is_email_verified: true,
+        telegram_id: null,
+        auth_type: "email",
+        pending_email: null,
+        name: "User",
+        username: null,
+        language: "ru",
+      },
+    }));
+
+    await expect(getAuthorizedRemnashopTokens()).resolves.toMatchObject({
+      accessToken: "access",
+      refreshToken: "refresh",
+      session: { id: "session-1" },
+    });
+    expect(prisma.webUser.update).toHaveBeenCalledWith({
+      where: { id: "user-1" },
+      data: { emailVerified: true },
+    });
+    expect(refreshCurrentAccessCookie).toHaveBeenCalled();
 
     vi.mocked(getCurrentSession).mockResolvedValueOnce({
       id: "session-1",

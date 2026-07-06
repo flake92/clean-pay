@@ -28,7 +28,14 @@ export function localUserProfile(session: SessionWithUser) {
 export function remnashopUserProfile(session: SessionWithUser, profile: RemnashopMe) {
   const localUser = session.user;
   const email = localUser.email ?? profile.email;
-  const emailVerified = Boolean(email && (localUser.email ? localUser.emailVerified : profile.is_email_verified));
+  const emailVerified = Boolean(
+    email &&
+    (
+      localUser.email
+        ? localUser.emailVerified || (profile.email === localUser.email && profile.is_email_verified)
+        : profile.is_email_verified
+    ),
+  );
 
   return {
     ...profile,

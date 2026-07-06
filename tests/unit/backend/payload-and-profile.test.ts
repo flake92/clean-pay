@@ -56,6 +56,31 @@ describe("auth payload helpers and profile presenters", () => {
     expect(profile.emailVerified).toBe(true);
   });
 
+  it("uses Remnashop verification when the linked local email matches", () => {
+    const staleLocalSession = {
+      ...baseSession,
+      user: {
+        ...baseSession.user,
+        emailVerified: false,
+      },
+    } as never;
+
+    expect(remnashopUserProfile(staleLocalSession, {
+      telegram_id: 999,
+      auth_type: "email",
+      email: "user@example.com",
+      is_email_verified: true,
+      pending_email: null,
+      name: "Remote User",
+      username: "remote",
+      language: "ru",
+    })).toMatchObject({
+      email: "user@example.com",
+      is_email_verified: true,
+      emailVerified: true,
+    });
+  });
+
   it("does not report email as verified when no email is linked", () => {
     const sessionWithoutEmail = {
       ...baseSession,

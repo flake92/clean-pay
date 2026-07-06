@@ -20,7 +20,7 @@ import type {
   TelegramAuthRequest,
   TelegramWebAppAuthRequest,
 } from "@/shared/remnashop/types";
-import { getCurrentSession } from "@/backend/sessions/web-session";
+import { getCurrentSession, refreshCurrentAccessCookie } from "@/backend/sessions/web-session";
 
 type RequestOptions = {
   method?: "GET" | "POST" | "DELETE";
@@ -455,20 +455,6 @@ export async function getAuthorizedRemnashopTokens({
     );
   }
 
-  if (session.user.email && !session.user.emailVerified && !allowUnverifiedEmail) {
-    authDebugLog("remnashop_tokens_authorize_failed", {
-      reason: "email_not_verified",
-      sessionId: session.id,
-      userId: session.userId,
-      hasEmail: true,
-    });
-    throw new BffError(
-      "EMAIL_NOT_VERIFIED",
-      403,
-      "E-mail must be verified before using Remnashop actions",
-    );
-  }
-
   const encryptedAccessToken = session.remnashopAccessTokenEncrypted;
   const encryptedRefreshToken = session.remnashopRefreshTokenEncrypted;
 
@@ -477,6 +463,41 @@ export async function getAuthorizedRemnashopTokens({
   }
 
   const refreshToken = revealRemnashopToken(encryptedRefreshToken);
+  const accessToken = revealRemnashopToken(encryptedAccessToken);
+
+  if (session.user.email && !session.user.emailVerified && !allowUnverifiedEmail) {
+    const profile = await getRemnashopMe(accessToken);
+    const remnashopEmailMatches = profile.email === session.user.email;
+
+    if (remnashopEmailMatches && profile.is_email_verified) {
+      await prisma.webUser.update({
+        where: { id: session.userId },
+        data: { emailVerified: true },
+      });
+      await refreshCurrentAccessCookie();
+      session.user.emailVerified = true;
+      authDebugLog("remnashop_tokens_authorize_email_verified_synced", {
+        sessionId: session.id,
+        userId: session.userId,
+        email: session.user.email,
+      });
+    } else {
+      authDebugLog("remnashop_tokens_authorize_failed", {
+        reason: "email_not_verified",
+        sessionId: session.id,
+        userId: session.userId,
+        hasEmail: true,
+        remnashopEmailMatches,
+        remnashopEmailVerified: profile.is_email_verified,
+      });
+      throw new BffError(
+        "EMAIL_NOT_VERIFIED",
+        403,
+        "E-mail must be verified before using Remnashop actions",
+      );
+    }
+  }
+
   const refreshThreshold = new Date(Date.now() + 60_000);
 
   authDebugLog("remnashop_tokens_authorize_session_loaded", {
@@ -538,7 +559,7 @@ export async function getAuthorizedRemnashopTokens({
   });
 
   return {
-    accessToken: revealRemnashopToken(encryptedAccessToken),
+    accessToken,
     refreshToken,
     session,
   };
