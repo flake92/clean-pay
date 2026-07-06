@@ -335,6 +335,18 @@ describe("remnashop client", () => {
       remnashopRefreshExpiresAt: new Date(Date.now() + 60 * 60_000),
       user: { email: "user@example.com", emailVerified: true, telegramId: null },
     } as never);
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(response({
+      body: {
+        email: "user@example.com",
+        is_email_verified: true,
+        telegram_id: null,
+        auth_type: "email",
+        pending_email: null,
+        name: "User",
+        username: null,
+        language: "ru",
+      },
+    }));
 
     await expect(getAuthorizedRemnashopTokens()).resolves.toMatchObject({
       accessToken: "access",
@@ -354,6 +366,20 @@ describe("remnashop client", () => {
       remnashopRefreshExpiresAt: new Date(Date.now() + 60 * 60_000),
       user: { email: "user@example.com", emailVerified: true, telegramId: null },
     } as never);
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      response({
+        body: {
+          email: "user@example.com",
+          is_email_verified: true,
+          telegram_id: null,
+          auth_type: "email",
+          pending_email: null,
+          name: "User",
+          username: null,
+          language: "ru",
+        },
+      }),
+    );
     vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
       response({
         body: {

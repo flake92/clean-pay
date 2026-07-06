@@ -465,6 +465,28 @@ export async function getAuthorizedRemnashopTokens({
   const refreshToken = revealRemnashopToken(encryptedRefreshToken);
   const accessToken = revealRemnashopToken(encryptedAccessToken);
 
+  if (session.user.email && session.user.emailVerified && !allowUnverifiedEmail) {
+    const profile = await getRemnashopMe(accessToken);
+    const remnashopEmailMatches = profile.email === session.user.email;
+
+    if (!remnashopEmailMatches || !profile.is_email_verified) {
+      authDebugLog("remnashop_tokens_authorize_failed", {
+        reason: "account_merge_required",
+        sessionId: session.id,
+        userId: session.userId,
+        localEmail: session.user.email,
+        remnashopEmail: profile.email,
+        remnashopEmailVerified: profile.is_email_verified,
+        hasTelegramId: Boolean(session.user.telegramId),
+      });
+      throw new BffError(
+        "CONFLICT",
+        409,
+        "Telegram and e-mail accounts must be merged in Remnashop before payment.",
+      );
+    }
+  }
+
   if (session.user.email && !session.user.emailVerified && !allowUnverifiedEmail) {
     const profile = await getRemnashopMe(accessToken);
     const remnashopEmailMatches = profile.email === session.user.email;

@@ -53,7 +53,7 @@ describe("auth payload helpers and profile presenters", () => {
     expect(profile.auth_type).toBe("telegram");
     expect(profile.telegram_id).toBe("12345");
     expect(profile.fullName).toBe("Clean User");
-    expect(profile.emailVerified).toBe(true);
+    expect(profile.emailVerified).toBe(false);
   });
 
   it("uses Remnashop verification when the linked local email matches", () => {
@@ -78,6 +78,31 @@ describe("auth payload helpers and profile presenters", () => {
       email: "user@example.com",
       is_email_verified: true,
       emailVerified: true,
+    });
+  });
+
+  it("does not report a locally verified email when the Remnashop profile is split", () => {
+    const splitSession = {
+      ...baseSession,
+      user: {
+        ...baseSession.user,
+        emailVerified: true,
+      },
+    } as never;
+
+    expect(remnashopUserProfile(splitSession, {
+      telegram_id: 999,
+      auth_type: "telegram",
+      email: null,
+      is_email_verified: false,
+      pending_email: null,
+      name: "Remote User",
+      username: "remote",
+      language: "ru",
+    })).toMatchObject({
+      email: "user@example.com",
+      is_email_verified: false,
+      emailVerified: false,
     });
   });
 

@@ -27,13 +27,24 @@ export function localUserProfile(session: SessionWithUser) {
 
 export function remnashopUserProfile(session: SessionWithUser, profile: RemnashopMe) {
   const localUser = session.user;
-  const email = localUser.email ?? profile.email;
+  const remnashopEmailMatchesLocalEmail = Boolean(
+    localUser.email && profile.email === localUser.email,
+  );
+  const email = profile.email ?? localUser.email;
   const emailVerified = Boolean(
     email &&
     (
-      localUser.email
-        ? localUser.emailVerified || (profile.email === localUser.email && profile.is_email_verified)
-        : profile.is_email_verified
+      profile.email
+        ? profile.is_email_verified
+        : false
+    ),
+  );
+  const localEmailVerified = Boolean(
+    localUser.email &&
+    (
+      remnashopEmailMatchesLocalEmail
+        ? localUser.emailVerified || profile.is_email_verified
+        : false
     ),
   );
 
@@ -47,6 +58,6 @@ export function remnashopUserProfile(session: SessionWithUser, profile: Remnasho
     telegramUsername: localUser.telegramUsername ?? null,
     fullName: localUser.fullName ?? profile.name,
     displayName: localUser.displayName ?? profile.name,
-    emailVerified,
+    emailVerified: localEmailVerified,
   };
 }
