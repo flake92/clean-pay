@@ -1,6 +1,14 @@
 import { prisma } from "@/backend/database/prisma";
-import { getRemnashopMe, protectRemnashopToken, remnashopAuth, remnashopLinkTelegram } from "@/backend/integrations/remnashop/client";
+import {
+  createRemnashopTelegramAuthForSession,
+  getRemnashopMe,
+  getRemnashopUserIdFromAccessToken,
+  protectRemnashopToken,
+  remnashopAuth,
+  remnashopLinkTelegram,
+} from "@/backend/integrations/remnashop/client";
 import { BffError } from "@/backend/integrations/remnashop/errors";
+import { mergeVerifiedEmailRemnashopUserIntoTelegramUser } from "@/backend/integrations/remnashop/admin-merge";
 import { linkCurrentUserToRemnashopAuth } from "@/backend/integrations/remnashop/session";
 import { assertRateLimit } from "@/backend/limits/rate-limit";
 import { auditLog } from "@/backend/observability/audit";
@@ -36,10 +44,12 @@ async function attachTelegramToVerifiedRemnashopAccount({
   auth: Awaited<ReturnType<typeof remnashopAuth>>;
   session: NonNullable<Awaited<ReturnType<typeof getCurrentSession>>>;
 }) {
+  let activeAuth = auth;
+
   if (session.user.telegramId) {
     try {
       await remnashopLinkTelegram({
-        accessToken: auth.cookies.accessToken,
+        accessToken: activeAuth.cookies.accessToken,
         telegramId: session.user.telegramId,
         telegramUsername: session.user.telegramUsername,
       });
@@ -53,7 +63,25 @@ async function attachTelegramToVerifiedRemnashopAccount({
         throw error;
       }
 
-      authDebugLog("remnashop_account_link_telegram_conflict_ignored", {
+      authDebugLog("remnashop_account_link_telegram_conflict_merge_started", {
+        sessionId: session.id,
+        userId: session.userId,
+        telegramId: session.user.telegramId,
+      });
+
+      await mergeVerifiedEmailRemnashopUserIntoTelegramUser({
+        emailRemnashopUserId: getRemnashopUserIdFromAccessToken(activeAuth.cookies.accessToken),
+        telegramId: session.user.telegramId,
+      });
+
+      const telegramAuth = await createRemnashopTelegramAuthForSession(session);
+
+      if (!telegramAuth) {
+        throw new BffError("INTERNAL_ERROR", 500, "Unable to restore Remnashop Telegram session after merge.");
+      }
+
+      activeAuth = telegramAuth;
+      authDebugLog("remnashop_account_link_telegram_conflict_merge_completed", {
         sessionId: session.id,
         userId: session.userId,
         telegramId: session.user.telegramId,
@@ -62,9 +90,9 @@ async function attachTelegramToVerifiedRemnashopAccount({
   }
 
   const linked = await linkCurrentUserToRemnashopAuth({
-    accessToken: auth.cookies.accessToken,
-    refreshToken: auth.cookies.refreshToken,
-    auth: auth.data,
+    accessToken: activeAuth.cookies.accessToken,
+    refreshToken: activeAuth.cookies.refreshToken,
+    auth: activeAuth.data,
   });
   await refreshCurrentAccessCookie();
 
