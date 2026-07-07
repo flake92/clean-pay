@@ -1,5 +1,3 @@
-import { Card } from "primereact/card";
-
 import { AppShell, PageHeader } from "@/frontend/components/layout";
 import { VerifyEmailPanel } from "@/frontend/components/verify-email-panel";
 
@@ -16,9 +14,7 @@ export default function VerifyEmailPage() {
           description="Запросите код и подтвердите e-mail, чтобы разблокировать покупку."
           title="Подтверждение e-mail"
         />
-        <Card>
-          <VerifyEmailPanel turnstileEnabled={turnstileEnabled} turnstileSiteKey={turnstileSiteKey} />
-        </Card>
+        <VerifyEmailPanel turnstileEnabled={turnstileEnabled} turnstileSiteKey={turnstileSiteKey} />
       </div>
     </AppShell>
   );

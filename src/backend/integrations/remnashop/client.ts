@@ -480,7 +480,7 @@ export async function getAuthorizedRemnashopTokens({
         hasTelegramId: Boolean(session.user.telegramId),
       });
       throw new BffError(
-        "CONFLICT",
+        "ACCOUNT_MERGE_REQUIRED",
         409,
         "Telegram and e-mail accounts must be merged in Remnashop before payment.",
       );

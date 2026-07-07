@@ -299,6 +299,30 @@ describe("remnashop client", () => {
       remnashopRefreshTokenEncrypted: protectRemnashopToken("refresh"),
       remnashopAccessExpiresAt: new Date(Date.now() + 10 * 60_000),
       remnashopRefreshExpiresAt: new Date(Date.now() + 60 * 60_000),
+      user: { email: "user@example.com", emailVerified: true, telegramId: "123456" },
+    } as never);
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(response({
+      body: {
+        email: "other@example.com",
+        is_email_verified: true,
+        telegram_id: 123456,
+        auth_type: "telegram",
+        pending_email: null,
+        name: "User",
+        username: "clean_user",
+        language: "ru",
+      },
+    }));
+    await expect(getAuthorizedRemnashopTokens()).rejects.toMatchObject<BffError>({ code: "ACCOUNT_MERGE_REQUIRED" });
+
+    vi.mocked(getCurrentSession).mockResolvedValueOnce({
+      id: "session-1",
+      userId: "user-1",
+      authMethod: "EMAIL",
+      remnashopAccessTokenEncrypted: protectRemnashopToken("access"),
+      remnashopRefreshTokenEncrypted: protectRemnashopToken("refresh"),
+      remnashopAccessExpiresAt: new Date(Date.now() + 10 * 60_000),
+      remnashopRefreshExpiresAt: new Date(Date.now() + 60 * 60_000),
       user: { email: "user@example.com", emailVerified: false, telegramId: null },
     } as never);
     vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(response({
