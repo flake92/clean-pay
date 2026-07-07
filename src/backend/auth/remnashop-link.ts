@@ -82,6 +82,7 @@ export async function linkRemnashopAccount(body: LoginRequest) {
   authDebugLog("remnashop_account_link_rate_limit_passed", {});
 
   let auth: Awaited<ReturnType<typeof remnashopAuth>>;
+  let authSource: "login" | "register" = "login";
 
   let loginFailed: BffError | null = null;
 
@@ -100,6 +101,7 @@ export async function linkRemnashopAccount(body: LoginRequest) {
 
     try {
       auth = await remnashopAuth("/auth/register", body);
+      authSource = "register";
     } catch (registerError) {
       if (isEmailAlreadyExistsConflict(registerError)) {
         throw loginFailed;
@@ -121,7 +123,7 @@ export async function linkRemnashopAccount(body: LoginRequest) {
 
   const profile = await getRemnashopMe(auth.cookies.accessToken);
 
-  if (profile.email && profile.is_email_verified) {
+  if (authSource === "login" && profile.email && profile.is_email_verified) {
     const linked = await attachTelegramToVerifiedRemnashopAccount({ auth, session });
     authDebugLog("remnashop_account_link_verified_email_linked", {
       sessionId: session.id,
@@ -197,33 +199,53 @@ export async function linkRemnashopAccount(body: LoginRequest) {
       throw error;
     }
 
-    const linked = await attachTelegramToVerifiedRemnashopAccount({ auth, session });
-    authDebugLog("remnashop_account_link_verified_email_linked_after_conflict", {
+    authDebugLog("remnashop_account_link_verified_email_requires_fresh_confirmation", {
       sessionId: session.id,
-      userId: linked.user.id,
-      targetEmail: linked.profile.email,
+      userId: session.userId,
+      targetEmail: profile.email ?? body.email,
     });
 
     await auditLog({
-      action: "remnashop_account_linked_verified_email",
-      userId: linked.user.id,
+      action: "remnashop_account_link_verified_email_blocked",
+      userId: session.userId,
       metadata: {
-        email: linked.profile.email,
+        email: profile.email ?? body.email,
         telegramId: session.user.telegramId,
         source: "request_verification_conflict",
       },
     });
 
-    return {
-      user: {
-        ...linked.profile,
-        telegram_id: linked.user.telegramId ?? linked.profile.telegram_id,
-        telegramId: linked.user.telegramId,
-      },
-      linked: true,
-      pendingVerification: false,
-      alreadyVerified: true,
-    };
+    if (authSource === "login") {
+      const linked = await attachTelegramToVerifiedRemnashopAccount({ auth, session });
+      authDebugLog("remnashop_account_link_verified_email_linked_after_conflict", {
+        sessionId: session.id,
+        userId: linked.user.id,
+        targetEmail: linked.profile.email,
+      });
+
+      await auditLog({
+        action: "remnashop_account_linked_verified_email",
+        userId: linked.user.id,
+        metadata: {
+          email: linked.profile.email,
+          telegramId: session.user.telegramId,
+          source: "request_verification_conflict",
+        },
+      });
+
+      return {
+        user: {
+          ...linked.profile,
+          telegram_id: linked.user.telegramId ?? linked.profile.telegram_id,
+          telegramId: linked.user.telegramId,
+        },
+        linked: true,
+        pendingVerification: false,
+        alreadyVerified: true,
+      };
+    }
+
+    throw new BffError("EMAIL_LINK_REQUIRES_VERIFICATION", 409, "New email account must be confirmed before linking.");
   }
 
   authDebugLog("remnashop_account_link_verification_requested", {

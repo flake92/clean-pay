@@ -35,6 +35,7 @@ const tx = vi.hoisted(() => ({
   webUser: {
     findUniqueOrThrow: vi.fn(),
     update: vi.fn(),
+    delete: vi.fn(),
   },
   webSession: { updateMany: vi.fn() },
   auditLog: { updateMany: vi.fn() },
@@ -304,6 +305,38 @@ describe("Telegram OIDC integration", () => {
         authPending: false,
       }),
     });
+  });
+
+  it("rejects linking a Telegram account that already belongs to another verified e-mail", async () => {
+    state.cookies.set("clean_pay_tg_state", "state");
+    state.cookies.set("clean_pay_tg_nonce", "nonce");
+    state.cookies.set("clean_pay_tg_code_verifier", "verifier");
+    mocks.prisma.telegramAuthState.findFirst.mockResolvedValueOnce({
+      id: "auth-state-1",
+      userId: "target-user",
+      redirectTo: "/link-account",
+      expiresAt: new Date("2099-01-01T00:00:00.000Z"),
+    });
+    mocks.prisma.webUser.findUnique.mockResolvedValueOnce({
+      id: "source-user",
+      remnashopUserId: "remna-telegram",
+      email: "telegram@example.com",
+      emailVerified: true,
+      telegramId: "123456",
+      telegramUsername: "clean_user",
+      fullName: "Clean User",
+      photoUrl: null,
+      displayName: "Clean User",
+    });
+
+    await expect(consumeTelegramCallback("code", "state")).rejects.toMatchObject({
+      code: "ACCOUNT_MERGE_REQUIRED",
+      status: 409,
+    });
+
+    expect(tx.webSession.updateMany).not.toHaveBeenCalled();
+    expect(tx.webUser.delete).not.toHaveBeenCalled();
+    expect(mocks.prisma.telegramAuthState.update).not.toHaveBeenCalled();
   });
 
   it("consumes popup id token without exchanging authorization code", async () => {

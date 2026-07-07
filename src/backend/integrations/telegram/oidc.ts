@@ -12,6 +12,7 @@ import { logger } from "@/backend/observability/logger";
 import { prisma } from "@/backend/database/prisma";
 import { assertRateLimit } from "@/backend/limits/rate-limit";
 import { remnashopAuth } from "@/backend/integrations/remnashop/client";
+import { BffError } from "@/backend/integrations/remnashop/errors";
 import type { TelegramAuthRequest } from "@/shared/remnashop/types";
 
 const telegramAuthTtlSeconds = 10 * 60;
@@ -318,6 +319,25 @@ function signTelegramAuthPayload(body: Omit<TelegramAuthRequest, "hash">, botTok
   const secret = createHash("sha256").update(botToken).digest();
 
   return createHmac("sha256", secret).update(dataCheckString).digest("hex");
+}
+
+function normalizeEmail(email: string | null | undefined) {
+  return email?.trim().toLowerCase() ?? null;
+}
+
+function hasConflictingVerifiedEmails(
+  targetUser: { email: string | null; emailVerified: boolean },
+  sourceUser: { email: string | null; emailVerified: boolean },
+) {
+  const targetEmail = normalizeEmail(targetUser.email);
+  const sourceEmail = normalizeEmail(sourceUser.email);
+
+  return Boolean(
+    targetEmail &&
+      sourceEmail &&
+      targetEmail !== sourceEmail &&
+      (targetUser.emailVerified || sourceUser.emailVerified),
+  );
 }
 
 type TelegramLoginWidgetPayload = Partial<TelegramAuthRequest> & {
@@ -692,6 +712,25 @@ async function completeTelegramAuth(
             targetUserId,
             sourceUserId: sourceUser.id,
           });
+
+          if (hasConflictingVerifiedEmails(targetUser, sourceUser)) {
+            authDebugLog("telegram_oidc_link_merge_email_conflict", {
+              targetUserId,
+              sourceUserId: sourceUser.id,
+              targetEmail: targetUser.email,
+              sourceEmail: sourceUser.email,
+            });
+
+            throw new BffError(
+              "ACCOUNT_MERGE_REQUIRED",
+              409,
+              "Telegram account is already attached to a different verified email.",
+              {
+                message: "Telegram account is already attached to a different verified email.",
+              },
+            );
+          }
+
           await tx.webUser.update({
             where: { id: sourceUser.id },
             data: {
@@ -702,7 +741,13 @@ async function completeTelegramAuth(
           });
           await tx.webSession.updateMany({
             where: { userId: sourceUser.id },
-            data: { userId: targetUserId },
+            data: {
+              userId: targetUserId,
+              remnashopAccessTokenEncrypted: null,
+              remnashopRefreshTokenEncrypted: null,
+              remnashopAccessExpiresAt: null,
+              remnashopRefreshExpiresAt: null,
+            },
           });
           await tx.auditLog.updateMany({
             where: { userId: sourceUser.id },

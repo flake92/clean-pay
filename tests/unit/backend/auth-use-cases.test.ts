@@ -360,7 +360,7 @@ describe("auth use cases", () => {
     expect(mocks.linkCurrentUserToRemnashopAuth).not.toHaveBeenCalled();
   });
 
-  it("links an already verified Remnashop email account after password proof", async () => {
+  it("links an existing verified Remnashop email account after password proof", async () => {
     mocks.getCurrentSession.mockResolvedValueOnce({
       ...session,
       user: { ...user, email: null, telegramId: "123456", telegramUsername: "clean_user" },
@@ -381,6 +381,26 @@ describe("auth use cases", () => {
     });
     expect(mocks.linkCurrentUserToRemnashopAuth).toHaveBeenCalledOnce();
     expect(mocks.refreshCurrentAccessCookie).toHaveBeenCalledOnce();
+  });
+
+  it("requires code confirmation when a new e-mail registration cannot be linked as already verified", async () => {
+    mocks.getCurrentSession.mockResolvedValueOnce({
+      ...session,
+      user: { ...user, email: null, telegramId: "123456", telegramUsername: "clean_user" },
+    });
+    mocks.remnashopAuth
+      .mockRejectedValueOnce(new BffError("AUTH_FAILED", 401, "bad credentials"))
+      .mockResolvedValueOnce(authResult);
+    mocks.getRemnashopMe.mockResolvedValueOnce({ ...profile, is_email_verified: true });
+    mocks.remnashopRequest.mockRejectedValueOnce(new BffError("CONFLICT", 409, "email is already verified"));
+
+    await expect(linkRemnashopAccount({ email: "user@example.com", password: "secret" })).rejects.toMatchObject({
+      code: "EMAIL_LINK_REQUIRES_VERIFICATION",
+      status: 409,
+    });
+
+    expect(mocks.remnashopLinkTelegram).not.toHaveBeenCalled();
+    expect(mocks.linkCurrentUserToRemnashopAuth).not.toHaveBeenCalled();
   });
 
   it("returns auth failure when the target email exists but the password is wrong", async () => {

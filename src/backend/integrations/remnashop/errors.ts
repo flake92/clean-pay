@@ -6,10 +6,12 @@ export type BffErrorCode =
   | 'VALIDATION_ERROR'
   | 'EMAIL_REQUIRED'
   | 'EMAIL_NOT_VERIFIED'
+  | 'EMAIL_LINK_REQUIRES_VERIFICATION'
   | 'EMAIL_CODE_INVALID'
   | 'EMAIL_CODE_EXPIRED'
   | 'RATE_LIMITED'
   | 'CONFLICT'
+  | 'ACCOUNT_MERGE_REQUIRED'
   | 'PLAN_UNAVAILABLE'
   | 'PAYMENT_GATEWAY_UNAVAILABLE'
   | 'SUBSCRIPTION_NOT_FOUND'
@@ -36,10 +38,12 @@ const PROD_MESSAGES: Record<BffErrorCode, string> = {
   VALIDATION_ERROR: 'Проверьте введённые данные.',
   EMAIL_REQUIRED: 'Привяжите e-mail к Telegram-аккаунту, чтобы продолжить.',
   EMAIL_NOT_VERIFIED: 'Подтвердите e-mail, чтобы продолжить.',
+  EMAIL_LINK_REQUIRES_VERIFICATION: '\u0414\u043b\u044f \u043f\u0440\u0438\u0432\u044f\u0437\u043a\u0438 e-mail \u043d\u0443\u0436\u043d\u043e \u043f\u043e\u0434\u0442\u0432\u0435\u0440\u0434\u0438\u0442\u044c \u0434\u043e\u0441\u0442\u0443\u043f \u043a \u043f\u043e\u0447\u0442\u0435. \u0415\u0441\u043b\u0438 \u043a\u043e\u0434 \u043d\u0435 \u043f\u0440\u0438\u0445\u043e\u0434\u0438\u0442, \u043e\u0431\u0440\u0430\u0442\u0438\u0442\u0435\u0441\u044c \u0432 \u043f\u043e\u0434\u0434\u0435\u0440\u0436\u043a\u0443.',
   EMAIL_CODE_INVALID: 'Код не подошёл. Проверьте его и попробуйте снова.',
   EMAIL_CODE_EXPIRED: 'Код истёк. Запросите новый.',
   RATE_LIMITED: 'Слишком много попыток. Попробуйте позже.',
   CONFLICT: 'Не удалось выполнить действие. Проверьте данные и попробуйте снова.',
+  ACCOUNT_MERGE_REQUIRED: '\u042d\u0442\u043e\u0442 Telegram \u0443\u0436\u0435 \u043f\u0440\u0438\u0432\u044f\u0437\u0430\u043d \u043a \u0434\u0440\u0443\u0433\u043e\u0439 \u043f\u043e\u0447\u0442\u0435. \u0421\u043d\u0430\u0447\u0430\u043b\u0430 \u043e\u0431\u044a\u0435\u0434\u0438\u043d\u0438\u0442\u0435 \u0430\u043a\u043a\u0430\u0443\u043d\u0442\u044b \u0447\u0435\u0440\u0435\u0437 \u043f\u043e\u0434\u0434\u0435\u0440\u0436\u043a\u0443.',
   PLAN_UNAVAILABLE: 'Этот тариф сейчас недоступен.',
   PAYMENT_GATEWAY_UNAVAILABLE: 'Этот способ оплаты сейчас недоступен.',
   SUBSCRIPTION_NOT_FOUND: 'Активная подписка не найдена.',
