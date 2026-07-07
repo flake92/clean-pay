@@ -2,6 +2,7 @@ process.env.DATABASE_URL = "postgresql://clean_pay:clean_pay@postgres:5432/clean
 process.env.APP_URL = "http://localhost:8080";
 process.env.NEXT_PUBLIC_APP_URL = "http://localhost:8080";
 process.env.REMNASHOP_API_BASE_URL = "http://remnashop:5000/api/v1/public";
+process.env.REMNASHOP_API_KEY = "test-remnashop-api-key";
 process.env.WEB_JWT_SECRET = "test-web-jwt-secret";
 process.env.WEB_REFRESH_SECRET = "test-web-refresh-secret";
 process.env.AUDIT_IP_HASH_SECRET = "test-audit-secret";

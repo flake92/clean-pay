@@ -37,7 +37,9 @@ import {
   getRemnashopUserIdFromAccessToken,
   protectRemnashopToken,
   remnashopAuth,
+  remnashopAuthTelegramIdentity,
   remnashopLinkTelegram,
+  remnashopMergeUsers,
   remnashopRequest,
 } from "@/backend/integrations/remnashop/client";
 import { BffError } from "@/backend/integrations/remnashop/errors";
@@ -142,6 +144,84 @@ describe("remnashop client", () => {
       id: 123456,
       first_name: "clean_user",
       username: "clean_user",
+      hash: expect.any(String),
+    });
+  });
+
+  it("merges Remnashop users through the admin API", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      response({
+        body: {
+          dry_run: false,
+          source_user_id: 18367,
+          target_user_id: 1,
+          target: {
+            id: 1,
+            email: "flake92@live.com",
+            telegram_id: 7295815705,
+            is_email_verified: true,
+            current_subscription_id: 9738,
+          },
+          moved: { subscriptions: 0 },
+          conflicts: [],
+          requires_relogin: true,
+        },
+      }),
+    );
+
+    await expect(remnashopMergeUsers({
+      sourceUserId: "18367",
+      targetUserId: "1",
+      reason: "test merge",
+    })).resolves.toMatchObject({
+      source_user_id: 18367,
+      target_user_id: 1,
+      conflicts: [],
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://remnashop:5000/api/v1/admin/users/merge?dry_run=false",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          source_user_id: 18367,
+          target_user_id: 1,
+          reason: "test merge",
+        }),
+        headers: expect.objectContaining({
+          accept: "application/json",
+          "content-type": "application/json",
+          "x-api-key": "test-remnashop-api-key",
+        }),
+      }),
+    );
+  });
+
+  it("authenticates in Remnashop with the current Telegram identity", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      response({
+        body: {
+          expires_at: "2026-06-25T10:00:00.000Z",
+          refresh_expires_at: "2026-07-25T10:00:00.000Z",
+        },
+        setCookie: ["access_token=access.jwt; Path=/; HttpOnly", "refresh_token=refresh.jwt; Path=/; HttpOnly"],
+      }),
+    );
+
+    await expect(remnashopAuthTelegramIdentity({
+      telegramId: "7295815705",
+      telegramUsername: "clean_vpn_support",
+    })).resolves.toMatchObject({ cookies: { accessToken: "access.jwt" } });
+
+    const [, init] = fetchMock.mock.calls[0] ?? [];
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://remnashop:5000/api/v1/public/auth/telegram",
+      expect.objectContaining({ method: "POST" }),
+    );
+    expect(JSON.parse(String((init as RequestInit).body))).toMatchObject({
+      id: 7295815705,
+      first_name: "clean_vpn_support",
+      username: "clean_vpn_support",
       hash: expect.any(String),
     });
   });

@@ -4,11 +4,14 @@ const mocks = vi.hoisted(() => ({
   remnashopAuth: vi.fn(),
   remnashopRequest: vi.fn(),
   remnashopLinkTelegram: vi.fn(),
+  remnashopMergeUsers: vi.fn(),
+  remnashopAuthTelegramIdentity: vi.fn(),
   getAuthorizedRemnashopTokens: vi.fn(),
   getRemnashopMe: vi.fn(),
   remnashopChangePassword: vi.fn(),
   protectRemnashopToken: vi.fn((token: string) => `protected:${token}`),
   getJwtExpiresAt: vi.fn(() => new Date("2026-06-26T00:00:00.000Z")),
+  getRemnashopUserIdFromAccessToken: vi.fn((token: string) => token.includes("merged") ? "1" : "18367"),
   createSessionFromRemnashopAuth: vi.fn(),
   linkCurrentUserToRemnashopAuth: vi.fn(),
   assertRateLimit: vi.fn(),
@@ -29,11 +32,14 @@ vi.mock("@/backend/integrations/remnashop/client", () => ({
   remnashopAuth: mocks.remnashopAuth,
   remnashopRequest: mocks.remnashopRequest,
   remnashopLinkTelegram: mocks.remnashopLinkTelegram,
+  remnashopMergeUsers: mocks.remnashopMergeUsers,
+  remnashopAuthTelegramIdentity: mocks.remnashopAuthTelegramIdentity,
   getAuthorizedRemnashopTokens: mocks.getAuthorizedRemnashopTokens,
   getRemnashopMe: mocks.getRemnashopMe,
   remnashopChangePassword: mocks.remnashopChangePassword,
   protectRemnashopToken: mocks.protectRemnashopToken,
   getJwtExpiresAt: mocks.getJwtExpiresAt,
+  getRemnashopUserIdFromAccessToken: mocks.getRemnashopUserIdFromAccessToken,
 }));
 
 vi.mock("@/backend/integrations/remnashop/session", () => ({
@@ -104,6 +110,7 @@ const user = {
   email: "user@example.com",
   emailVerified: false,
   telegramId: null,
+  remnashopUserId: "1",
 };
 
 const session = {
@@ -118,6 +125,13 @@ describe("auth use cases", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.remnashopAuth.mockResolvedValue(authResult);
+    mocks.remnashopAuthTelegramIdentity.mockResolvedValue({
+      data: authData,
+      cookies: {
+        accessToken: "merged-access-token",
+        refreshToken: "merged-refresh-token",
+      },
+    });
     mocks.remnashopRequest.mockResolvedValue({ target_email: "user@example.com", expires_at: "2026-06-25T10:15:00.000Z" });
     mocks.remnashopLinkTelegram.mockResolvedValue({ ...profile, telegram_id: 123456 });
     mocks.createSessionFromRemnashopAuth.mockResolvedValue({ user, profile });
@@ -233,7 +247,7 @@ describe("auth use cases", () => {
     expect(mocks.refreshCurrentAccessCookie).toHaveBeenCalledOnce();
   });
 
-  it("does not confirm local e-mail when Telegram is already linked to another Remnashop account", async () => {
+  it("merges Remnashop users after email code confirmation when Telegram belongs to another Remnashop account", async () => {
     mocks.getAuthorizedRemnashopTokens.mockResolvedValueOnce({
       accessToken: "access-token",
       refreshToken: "refresh-token",
@@ -246,15 +260,23 @@ describe("auth use cases", () => {
     mocks.getRemnashopMe.mockResolvedValueOnce({ ...profile, pending_email: "verified@example.com" });
     mocks.remnashopLinkTelegram.mockRejectedValueOnce(new BffError("CONFLICT", 409, "telegram already linked"));
 
-    await expect(confirmEmailVerification({ code: "123456", registrationFlow: true }, {})).rejects.toMatchObject({
-      code: "ACCOUNT_MERGE_REQUIRED",
-      status: 409,
+    await expect(confirmEmailVerification({ code: "123456", registrationFlow: true }, {})).resolves.toMatchObject({
+      email: "verified@example.com",
     });
 
-    expect(mocks.linkCurrentUserToRemnashopAuth).not.toHaveBeenCalled();
-    expect(mocks.prisma.webUser.update).not.toHaveBeenCalledWith({
-      where: { id: "user-1" },
-      data: { email: "verified@example.com", emailVerified: true, authPending: false },
+    expect(mocks.remnashopMergeUsers).toHaveBeenCalledWith({
+      sourceUserId: "18367",
+      targetUserId: "1",
+      reason: "Clean Pay account link: verified e-mail code and Telegram ownership",
+    });
+    expect(mocks.remnashopAuthTelegramIdentity).toHaveBeenCalledWith({
+      telegramId: "123456",
+      telegramUsername: "clean_user",
+    });
+    expect(mocks.linkCurrentUserToRemnashopAuth).toHaveBeenCalledWith({
+      accessToken: "merged-access-token",
+      refreshToken: "merged-refresh-token",
+      auth: authData,
     });
   });
 
@@ -408,7 +430,7 @@ describe("auth use cases", () => {
     expect(mocks.refreshCurrentAccessCookie).toHaveBeenCalledOnce();
   });
 
-  it("does not link an existing e-mail when Telegram belongs to another Remnashop account", async () => {
+  it("merges Remnashop users for an existing e-mail when Telegram belongs to another Remnashop account", async () => {
     mocks.getCurrentSession.mockResolvedValueOnce({
       ...session,
       user: { ...user, email: null, telegramId: "123456", telegramUsername: "clean_user" },
@@ -416,12 +438,25 @@ describe("auth use cases", () => {
     mocks.getRemnashopMe.mockResolvedValueOnce({ ...profile, is_email_verified: true });
     mocks.remnashopLinkTelegram.mockRejectedValueOnce(new BffError("CONFLICT", 409, "telegram already linked"));
 
-    await expect(linkRemnashopAccount({ email: "user@example.com", password: "secret" })).rejects.toMatchObject({
-      code: "ACCOUNT_MERGE_REQUIRED",
-      status: 409,
+    await expect(linkRemnashopAccount({ email: "user@example.com", password: "secret" })).resolves.toMatchObject({
+      linked: true,
+      pendingVerification: false,
     });
 
-    expect(mocks.linkCurrentUserToRemnashopAuth).not.toHaveBeenCalled();
+    expect(mocks.remnashopMergeUsers).toHaveBeenCalledWith({
+      sourceUserId: "18367",
+      targetUserId: "1",
+      reason: "Clean Pay account link: verified e-mail password and Telegram ownership",
+    });
+    expect(mocks.remnashopAuthTelegramIdentity).toHaveBeenCalledWith({
+      telegramId: "123456",
+      telegramUsername: "clean_user",
+    });
+    expect(mocks.linkCurrentUserToRemnashopAuth).toHaveBeenCalledWith({
+      accessToken: "merged-access-token",
+      refreshToken: "merged-refresh-token",
+      auth: authData,
+    });
   });
 
   it("requires code confirmation when a new e-mail registration cannot be linked as already verified", async () => {

@@ -1,5 +1,13 @@
 import { prisma } from "@/backend/database/prisma";
-import { getRemnashopMe, protectRemnashopToken, remnashopAuth, remnashopLinkTelegram } from "@/backend/integrations/remnashop/client";
+import {
+  getRemnashopMe,
+  getRemnashopUserIdFromAccessToken,
+  protectRemnashopToken,
+  remnashopAuth,
+  remnashopAuthTelegramIdentity,
+  remnashopLinkTelegram,
+  remnashopMergeUsers,
+} from "@/backend/integrations/remnashop/client";
 import { BffError } from "@/backend/integrations/remnashop/errors";
 import { linkCurrentUserToRemnashopAuth } from "@/backend/integrations/remnashop/session";
 import { assertRateLimit } from "@/backend/limits/rate-limit";
@@ -29,13 +37,13 @@ function isTelegramAlreadyLinkedConflict(error: unknown) {
   return error instanceof BffError && error.code === "CONFLICT";
 }
 
-function accountMergeRequiredError() {
+function accountMergeRequiredError(message = "Telegram account is already attached to a different Remnashop account.") {
   return new BffError(
     "ACCOUNT_MERGE_REQUIRED",
     409,
-    "Telegram account is already attached to a different Remnashop account.",
+    message,
     {
-      message: "Telegram account is already attached to a different Remnashop account.",
+      message,
     },
   );
 }
@@ -47,6 +55,8 @@ async function attachTelegramToVerifiedRemnashopAccount({
   auth: Awaited<ReturnType<typeof remnashopAuth>>;
   session: NonNullable<Awaited<ReturnType<typeof getCurrentSession>>>;
 }) {
+  let authForLink = auth;
+
   if (session.user.telegramId) {
     try {
       await remnashopLinkTelegram({
@@ -64,19 +74,45 @@ async function attachTelegramToVerifiedRemnashopAccount({
         throw error;
       }
 
-      authDebugLog("remnashop_account_link_telegram_conflict_ignored", {
+      const sourceUserId = getRemnashopUserIdFromAccessToken(auth.cookies.accessToken);
+      const targetUserId = session.user.remnashopUserId;
+
+      if (!targetUserId || sourceUserId === targetUserId) {
+        throw accountMergeRequiredError();
+      }
+
+      authDebugLog("remnashop_account_link_telegram_conflict_merge_started", {
         sessionId: session.id,
         userId: session.userId,
         telegramId: session.user.telegramId,
+        sourceRemnashopUserId: sourceUserId,
+        targetRemnashopUserId: targetUserId,
       });
-      throw accountMergeRequiredError();
+
+      await remnashopMergeUsers({
+        sourceUserId,
+        targetUserId,
+        reason: "Clean Pay account link: verified e-mail password and Telegram ownership",
+      });
+      authForLink = await remnashopAuthTelegramIdentity({
+        telegramId: session.user.telegramId,
+        telegramUsername: session.user.telegramUsername,
+      });
+
+      authDebugLog("remnashop_account_link_telegram_conflict_merge_completed", {
+        sessionId: session.id,
+        userId: session.userId,
+        telegramId: session.user.telegramId,
+        sourceRemnashopUserId: sourceUserId,
+        targetRemnashopUserId: targetUserId,
+      });
     }
   }
 
   const linked = await linkCurrentUserToRemnashopAuth({
-    accessToken: auth.cookies.accessToken,
-    refreshToken: auth.cookies.refreshToken,
-    auth: auth.data,
+    accessToken: authForLink.cookies.accessToken,
+    refreshToken: authForLink.cookies.refreshToken,
+    auth: authForLink.data,
   });
   await refreshCurrentAccessCookie();
 

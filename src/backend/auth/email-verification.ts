@@ -1,5 +1,13 @@
 import { prisma } from "@/backend/database/prisma";
-import { getAuthorizedRemnashopTokens, getRemnashopMe, remnashopLinkTelegram, remnashopRequest } from "@/backend/integrations/remnashop/client";
+import {
+  getAuthorizedRemnashopTokens,
+  getRemnashopMe,
+  getRemnashopUserIdFromAccessToken,
+  remnashopAuthTelegramIdentity,
+  remnashopLinkTelegram,
+  remnashopMergeUsers,
+  remnashopRequest,
+} from "@/backend/integrations/remnashop/client";
 import { BffError } from "@/backend/integrations/remnashop/errors";
 import { linkCurrentUserToRemnashopAuth } from "@/backend/integrations/remnashop/session";
 import { assertCooldown, assertRateLimit } from "@/backend/limits/rate-limit";
@@ -34,13 +42,13 @@ function isTelegramAlreadyLinkedConflict(error: unknown) {
   return error instanceof BffError && error.code === "CONFLICT";
 }
 
-function accountMergeRequiredError() {
+function accountMergeRequiredError(message = "Telegram account is already attached to a different Remnashop account.") {
   return new BffError(
     "ACCOUNT_MERGE_REQUIRED",
     409,
-    "Telegram account is already attached to a different Remnashop account.",
+    message,
     {
-      message: "Telegram account is already attached to a different Remnashop account.",
+      message,
     },
   );
 }
@@ -194,6 +202,15 @@ export async function confirmEmailVerification(rawBody: AuthPayload<ConfirmEmail
     email: result.email,
   });
 
+  let authForLink = {
+    accessToken,
+    refreshToken,
+    auth: {
+      expires_at: session.remnashopAccessExpiresAt?.toISOString() ?? new Date(Date.now() + 60_000).toISOString(),
+      refresh_expires_at: session.remnashopRefreshExpiresAt?.toISOString() ?? new Date(Date.now() + 86_400_000).toISOString(),
+    },
+  };
+
   if (session.user.telegramId) {
     try {
       await remnashopLinkTelegram({
@@ -211,22 +228,50 @@ export async function confirmEmailVerification(rawBody: AuthPayload<ConfirmEmail
         throw error;
       }
 
-      authDebugLog("email_verification_confirm_telegram_conflict_ignored", {
+      const sourceUserId = getRemnashopUserIdFromAccessToken(accessToken);
+      const targetUserId = session.user.remnashopUserId;
+
+      if (!targetUserId || sourceUserId === targetUserId) {
+        throw accountMergeRequiredError();
+      }
+
+      authDebugLog("email_verification_confirm_telegram_conflict_merge_started", {
         sessionId: session.id,
         userId: session.userId,
         telegramId: session.user.telegramId,
+        sourceRemnashopUserId: sourceUserId,
+        targetRemnashopUserId: targetUserId,
       });
-      throw accountMergeRequiredError();
+
+      await remnashopMergeUsers({
+        sourceUserId,
+        targetUserId,
+        reason: "Clean Pay account link: verified e-mail code and Telegram ownership",
+      });
+      const mergedAuth = await remnashopAuthTelegramIdentity({
+        telegramId: session.user.telegramId,
+        telegramUsername: session.user.telegramUsername,
+      });
+      authForLink = {
+        accessToken: mergedAuth.cookies.accessToken,
+        refreshToken: mergedAuth.cookies.refreshToken,
+        auth: mergedAuth.data,
+      };
+
+      authDebugLog("email_verification_confirm_telegram_conflict_merge_completed", {
+        sessionId: session.id,
+        userId: session.userId,
+        telegramId: session.user.telegramId,
+        sourceRemnashopUserId: sourceUserId,
+        targetRemnashopUserId: targetUserId,
+      });
     }
   }
 
   await linkCurrentUserToRemnashopAuth({
-    accessToken,
-    refreshToken,
-    auth: {
-      expires_at: session.remnashopAccessExpiresAt?.toISOString() ?? new Date(Date.now() + 60_000).toISOString(),
-      refresh_expires_at: session.remnashopRefreshExpiresAt?.toISOString() ?? new Date(Date.now() + 86_400_000).toISOString(),
-    },
+    accessToken: authForLink.accessToken,
+    refreshToken: authForLink.refreshToken,
+    auth: authForLink.auth,
   });
   await prisma.webUser.update({
     where: { id: session.userId },

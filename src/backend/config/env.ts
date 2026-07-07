@@ -9,6 +9,7 @@ type AppEnv = {
     logoUrl: string;
   };
   remnashopApiBaseUrl: string;
+  remnashopApiKey: string | null;
   remnawave: {
     apiBaseUrl: string | null;
     token: string | null;
@@ -235,6 +236,7 @@ export function getEnv(): AppEnv {
       logoUrl: optionalPublicPath("NEXT_PUBLIC_BRAND_LOGO_URL", "/clean_vpn_logo.jpg"),
     },
     remnashopApiBaseUrl: url("REMNASHOP_API_BASE_URL"),
+    remnashopApiKey: optional("REMNASHOP_API_KEY"),
     remnawave: {
       apiBaseUrl: optionalUrl("REMNAWAVE_API_BASE_URL"),
       token: optional("REMNAWAVE_TOKEN"),

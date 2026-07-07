@@ -38,6 +38,13 @@ function endpoint(path: string) {
   return `${getEnv().remnashopApiBaseUrl}${path}`;
 }
 
+function adminEndpoint(path: string) {
+  const env = getEnv();
+  const baseUrl = env.remnashopApiBaseUrl.replace(/\/public$/, "/admin");
+
+  return `${baseUrl}${path}`;
+}
+
 async function parseResponse<T>(response: Response, path: string) {
   const text = await response.text();
   let data: unknown = null;
@@ -106,6 +113,51 @@ async function fetchRemnashop(path: string, init: RequestInit) {
       category: "upstream",
       source: "remnashop.client",
       message: `HTTP Request failed: ${method} ${path}`,
+    });
+    throw remnashopUnavailableError(path, error);
+  }
+}
+
+async function fetchRemnashopAdmin(path: string, init: RequestInit) {
+  const method = init.method ?? "GET";
+  const startedAt = Date.now();
+
+  logger.info("remnashop_admin_request_sent", {
+    method,
+    path,
+    hasBody: Boolean(init.body),
+  }, {
+    category: "upstream",
+    source: "remnashop.client",
+    message: `HTTP Request: ${method} admin ${path}`,
+  });
+
+  try {
+    const response = await fetch(adminEndpoint(path), init);
+
+    logger.info("remnashop_admin_response_received", {
+      method,
+      path,
+      status: response.status,
+      ok: response.ok,
+      durationMs: Date.now() - startedAt,
+    }, {
+      category: "upstream",
+      source: "remnashop.client",
+      message: `HTTP Response: ${method} admin ${path} -> ${response.status}`,
+    });
+
+    return response;
+  } catch (error) {
+    logger.error("remnashop_admin_request_failed", {
+      method,
+      path,
+      durationMs: Date.now() - startedAt,
+      errorName: error instanceof Error ? error.name : "UnknownError",
+    }, {
+      category: "upstream",
+      source: "remnashop.client",
+      message: `HTTP Admin request failed: ${method} ${path}`,
     });
     throw remnashopUnavailableError(path, error);
   }
@@ -230,6 +282,84 @@ export async function remnashopAuth(
   const cookies = extractAuthCookies(response);
 
   return { data, cookies };
+}
+
+export async function remnashopAuthTelegramIdentity({
+  telegramId,
+  telegramUsername,
+}: {
+  telegramId: number | string;
+  telegramUsername?: string | null;
+}) {
+  const botToken = getEnv().telegramBotToken;
+
+  if (!botToken) {
+    throw new BffError("INTERNAL_ERROR", 500, "TELEGRAM_BOT_TOKEN is required to authenticate Telegram in Remnashop.");
+  }
+
+  const bodyWithoutHash: Omit<TelegramAuthRequest, "hash"> = {
+    id: Number(telegramId),
+    first_name: telegramUsername || "Telegram",
+    username: telegramUsername ?? undefined,
+    auth_date: Math.floor(Date.now() / 1000),
+  };
+
+  return remnashopAuth("/auth/telegram", {
+    ...bodyWithoutHash,
+    hash: signTelegramAuthPayload(bodyWithoutHash, botToken),
+  });
+}
+
+type RemnashopMergeUsersResponse = {
+  dry_run: boolean;
+  source_user_id: number;
+  target_user_id: number;
+  target: {
+    id: number;
+    email: string | null;
+    telegram_id: number | null;
+    is_email_verified: boolean;
+    current_subscription_id: number | null;
+  };
+  moved: Record<string, number>;
+  conflicts: string[];
+  requires_relogin: boolean;
+};
+
+export async function remnashopMergeUsers({
+  sourceUserId,
+  targetUserId,
+  reason,
+  dryRun = false,
+}: {
+  sourceUserId: number | string;
+  targetUserId: number | string;
+  reason: string;
+  dryRun?: boolean;
+}) {
+  const apiKey = getEnv().remnashopApiKey;
+
+  if (!apiKey) {
+    throw new BffError("INTERNAL_ERROR", 500, "REMNASHOP_API_KEY is required to merge Remnashop users.");
+  }
+
+  const path = `/users/merge?dry_run=${dryRun ? "true" : "false"}`;
+  const response = await fetchRemnashopAdmin(path, {
+    method: "POST",
+    headers: {
+      accept: "application/json",
+      "content-type": "application/json",
+      "x-api-key": apiKey,
+    },
+    body: JSON.stringify({
+      source_user_id: Number(sourceUserId),
+      target_user_id: Number(targetUserId),
+      reason,
+    }),
+    cache: "no-store",
+  });
+
+  return parseResponse<RemnashopMergeUsersResponse>(response, path);
 }
 
 async function remnashopRefresh(refreshToken: string) {
