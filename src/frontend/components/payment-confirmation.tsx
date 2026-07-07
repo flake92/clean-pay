@@ -21,6 +21,10 @@ type LoadState =
   | { status: "ready"; offers: SubscriptionOffersResponse };
 
 function formatDuration(days: number) {
+  if (days <= 0) {
+    return "∞";
+  }
+
   if (days % 30 === 0) {
     return `${days / 30} мес.`;
   }
