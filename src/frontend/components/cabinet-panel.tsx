@@ -106,6 +106,10 @@ function formatTrafficLimit(value: number) {
   return value > 0 ? formatBytes(value) : "Без лимита";
 }
 
+function formatDeviceLimit(value: number) {
+  return value > 0 ? String(value) : "∞";
+}
+
 function statusLabel(status: string) {
   const labels: Record<string, string> = {
     active: "Активна",
@@ -454,9 +458,9 @@ export function CabinetPanel() {
           tone="cyan"
           value={
             deviceCount !== null && maxDevices !== null
-              ? `${deviceCount} из ${maxDevices}`
+              ? `${deviceCount} из ${formatDeviceLimit(maxDevices)}`
               : maxDevices !== null
-                ? `До ${maxDevices}`
+                ? `До ${formatDeviceLimit(maxDevices)}`
                 : "-"
           }
         />

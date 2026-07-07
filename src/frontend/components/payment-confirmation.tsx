@@ -32,6 +32,10 @@ function formatTraffic(limit: number) {
   return limit <= 0 ? "Без лимита" : `${limit} ГБ`;
 }
 
+function formatDeviceLimit(limit: number) {
+  return limit > 0 ? String(limit) : "∞";
+}
+
 function findSelection(
   offers: SubscriptionOffersResponse,
   planCode: string | null,
@@ -55,7 +59,7 @@ function findSelection(
 
 function describePlan(plan: PlanOffer) {
   return [
-    `${plan.device_limit} устройств`,
+    `${formatDeviceLimit(plan.device_limit)} устройств`,
     formatTraffic(plan.traffic_limit),
     plan.type,
   ].join(" · ");
@@ -199,7 +203,7 @@ export function PaymentConfirmation() {
             <Metric label="Длительность" value={formatDuration(selection.duration.days)} />
           </div>
           <div className="col-12 md:col-4">
-            <Metric label="Устройства" value={selection.plan.device_limit} />
+            <Metric label="Устройства" value={formatDeviceLimit(selection.plan.device_limit)} />
           </div>
           <div className="col-12 md:col-4">
             <Metric label="Трафик" value={formatTraffic(selection.plan.traffic_limit)} />

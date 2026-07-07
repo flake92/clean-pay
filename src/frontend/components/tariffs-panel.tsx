@@ -37,6 +37,10 @@ function formatTraffic(limit: number) {
   return `${limit} ГБ`;
 }
 
+function formatDeviceLimit(limit: number) {
+  return limit > 0 ? String(limit) : "∞";
+}
+
 function bestPrice(plan: PlanOffer) {
   const prices = plan.durations.flatMap((duration) => duration.prices);
 
@@ -171,7 +175,7 @@ export function TariffsPanel() {
                   </div>
                   <div className="grid">
                     {[
-                      ["Устройства", plan.device_limit],
+                      ["Устройства", formatDeviceLimit(plan.device_limit)],
                       ["Трафик", formatTraffic(plan.traffic_limit)],
                       ["Тип", plan.type],
                     ].map(([label, value]) => (
