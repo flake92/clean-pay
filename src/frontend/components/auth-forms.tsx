@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useContext, useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
+import { createContext, useContext, useMemo, useState, type FormEvent, type ReactNode } from "react";
 
 import { Button } from "primereact/button";
 import { InputText } from "primereact/inputtext";
@@ -502,10 +502,6 @@ export function TelegramLoginButton({ redirectTo = "/cabinet" }: { redirectTo?: 
   const [state, setState] = useState<ApiState>({ loading: false, error: null });
   const turnstile = useAuthTurnstile();
   const missingTurnstileMessage = missingTurnstileTokenMessage(turnstile.siteKey);
-
-  useEffect(() => {
-    setState((current) => (current.error === missingTurnstileMessage ? { loading: false, error: null } : current));
-  }, [missingTurnstileMessage, turnstile.token]);
 
   async function onClick() {
     if (turnstile.enabled && !turnstile.token) {

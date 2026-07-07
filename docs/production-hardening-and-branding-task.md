@@ -205,7 +205,7 @@ Scope:
 
 - Production app падает с понятной ошибкой при неверной required configuration.
 - Валидируются связанные настройки:
-  - `TURNSTILE_ENABLED=true` требует `NEXT_PUBLIC_TURNSTILE_SITE_KEY` и `TURNSTILE_SECRET_KEY`;
+  - `TURNSTILE_ENABLED=true` требует `TURNSTILE_SITE_KEY` и `TURNSTILE_SECRET_KEY`;
   - `COOKIE_SAMESITE=none` требует `COOKIE_SECURE=true`;
   - так как subscription URL должен приходить из Remnawave, production требует одновременно `REMNAWAVE_API_BASE_URL` и `REMNAWAVE_TOKEN`;
   - Telegram settings должны быть внутренне согласованы;

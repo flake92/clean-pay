@@ -206,8 +206,7 @@ validate_env() {
   esac
 
   if [ "$(env_value TURNSTILE_ENABLED false)" = "true" ]; then
-    site_key=$(env_value NEXT_PUBLIC_TURNSTILE_SITE_KEY "$(env_value TURNSTILE_SITE_KEY)")
-    [ -n "$site_key" ] || fail "NEXT_PUBLIC_TURNSTILE_SITE_KEY is required when TURNSTILE_ENABLED=true"
+    required_env TURNSTILE_SITE_KEY
     required_env TURNSTILE_SECRET_KEY
   fi
 
