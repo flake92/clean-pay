@@ -34,6 +34,17 @@ function isTelegramAlreadyLinkedConflict(error: unknown) {
   return error instanceof BffError && error.code === "CONFLICT";
 }
 
+function accountMergeRequiredError() {
+  return new BffError(
+    "ACCOUNT_MERGE_REQUIRED",
+    409,
+    "Telegram account is already attached to a different Remnashop account.",
+    {
+      message: "Telegram account is already attached to a different Remnashop account.",
+    },
+  );
+}
+
 export async function requestRemnashopEmailVerification({
   accessToken,
   body,
@@ -205,6 +216,7 @@ export async function confirmEmailVerification(rawBody: AuthPayload<ConfirmEmail
         userId: session.userId,
         telegramId: session.user.telegramId,
       });
+      throw accountMergeRequiredError();
     }
   }
 

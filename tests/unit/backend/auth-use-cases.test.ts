@@ -233,6 +233,31 @@ describe("auth use cases", () => {
     expect(mocks.refreshCurrentAccessCookie).toHaveBeenCalledOnce();
   });
 
+  it("does not confirm local e-mail when Telegram is already linked to another Remnashop account", async () => {
+    mocks.getAuthorizedRemnashopTokens.mockResolvedValueOnce({
+      accessToken: "access-token",
+      refreshToken: "refresh-token",
+      session: {
+        ...session,
+        user: { ...user, telegramId: "123456", telegramUsername: "clean_user" },
+      },
+    });
+    mocks.remnashopRequest.mockResolvedValueOnce({ email: "verified@example.com" });
+    mocks.getRemnashopMe.mockResolvedValueOnce({ ...profile, pending_email: "verified@example.com" });
+    mocks.remnashopLinkTelegram.mockRejectedValueOnce(new BffError("CONFLICT", 409, "telegram already linked"));
+
+    await expect(confirmEmailVerification({ code: "123456", registrationFlow: true }, {})).rejects.toMatchObject({
+      code: "ACCOUNT_MERGE_REQUIRED",
+      status: 409,
+    });
+
+    expect(mocks.linkCurrentUserToRemnashopAuth).not.toHaveBeenCalled();
+    expect(mocks.prisma.webUser.update).not.toHaveBeenCalledWith({
+      where: { id: "user-1" },
+      data: { email: "verified@example.com", emailVerified: true, authPending: false },
+    });
+  });
+
   it("changes email and marks local user as unverified", async () => {
     mocks.remnashopRequest.mockResolvedValueOnce({ pending_email: "next@example.com" }).mockResolvedValueOnce({
       target_email: "next@example.com",
@@ -381,6 +406,22 @@ describe("auth use cases", () => {
     });
     expect(mocks.linkCurrentUserToRemnashopAuth).toHaveBeenCalledOnce();
     expect(mocks.refreshCurrentAccessCookie).toHaveBeenCalledOnce();
+  });
+
+  it("does not link an existing e-mail when Telegram belongs to another Remnashop account", async () => {
+    mocks.getCurrentSession.mockResolvedValueOnce({
+      ...session,
+      user: { ...user, email: null, telegramId: "123456", telegramUsername: "clean_user" },
+    });
+    mocks.getRemnashopMe.mockResolvedValueOnce({ ...profile, is_email_verified: true });
+    mocks.remnashopLinkTelegram.mockRejectedValueOnce(new BffError("CONFLICT", 409, "telegram already linked"));
+
+    await expect(linkRemnashopAccount({ email: "user@example.com", password: "secret" })).rejects.toMatchObject({
+      code: "ACCOUNT_MERGE_REQUIRED",
+      status: 409,
+    });
+
+    expect(mocks.linkCurrentUserToRemnashopAuth).not.toHaveBeenCalled();
   });
 
   it("requires code confirmation when a new e-mail registration cannot be linked as already verified", async () => {
