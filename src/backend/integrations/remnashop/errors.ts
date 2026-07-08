@@ -1,6 +1,7 @@
 export type BffErrorCode =
   | 'UNAUTHORIZED'
   | 'AUTH_FAILED'
+  | 'CURRENT_PASSWORD_INVALID'
   | 'FORBIDDEN'
   | 'NOT_FOUND'
   | 'VALIDATION_ERROR'
@@ -33,6 +34,7 @@ type BffErrorDebug = {
 const PROD_MESSAGES: Record<BffErrorCode, string> = {
   UNAUTHORIZED: 'Войдите в аккаунт, чтобы продолжить.',
   AUTH_FAILED: 'Не удалось войти. Проверьте данные.',
+  CURRENT_PASSWORD_INVALID: 'Текущий пароль неверный.',
   FORBIDDEN: 'Действие недоступно.',
   NOT_FOUND: 'Данные не найдены.',
   VALIDATION_ERROR: 'Проверьте введённые данные.',
@@ -133,6 +135,10 @@ export function normalizeRemnashopError(
 
   if (status === 401 && lowerPath.includes('/auth/login')) {
     return new BffError('AUTH_FAILED', 401, message, debug);
+  }
+
+  if (status === 401 && lowerPath.includes('/auth/change-password')) {
+    return new BffError('CURRENT_PASSWORD_INVALID', 401, message, debug);
   }
 
   if (status === 401) {

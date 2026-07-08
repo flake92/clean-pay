@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   getAuthorizedRemnashopTokens: vi.fn(),
   getRemnashopMe: vi.fn(),
   remnashopChangePassword: vi.fn(),
+  remnashopRefreshTokens: vi.fn(),
   protectRemnashopToken: vi.fn((token: string) => `protected:${token}`),
   getJwtExpiresAt: vi.fn(() => new Date("2026-06-26T00:00:00.000Z")),
   getRemnashopUserIdFromAccessToken: vi.fn((token: string) => token.includes("merged") ? "1" : "18367"),
@@ -37,6 +38,7 @@ vi.mock("@/backend/integrations/remnashop/client", () => ({
   getAuthorizedRemnashopTokens: mocks.getAuthorizedRemnashopTokens,
   getRemnashopMe: mocks.getRemnashopMe,
   remnashopChangePassword: mocks.remnashopChangePassword,
+  remnashopRefreshTokens: mocks.remnashopRefreshTokens,
   protectRemnashopToken: mocks.protectRemnashopToken,
   getJwtExpiresAt: mocks.getJwtExpiresAt,
   getRemnashopUserIdFromAccessToken: mocks.getRemnashopUserIdFromAccessToken,
@@ -144,6 +146,13 @@ describe("auth use cases", () => {
     mocks.remnashopChangePassword.mockResolvedValue({
       data: { success: true },
       cookies: { accessToken: "new-access", refreshToken: "new-refresh" },
+    });
+    mocks.remnashopRefreshTokens.mockResolvedValue({
+      data: {
+        expires_at: "2026-06-25T10:00:00.000Z",
+        refresh_expires_at: "2026-07-25T10:00:00.000Z",
+      },
+      cookies: { accessToken: "refreshed-access", refreshToken: "refreshed-refresh" },
     });
   });
 
@@ -311,6 +320,34 @@ describe("auth use cases", () => {
       data: expect.objectContaining({
         remnashopAccessTokenEncrypted: "protected:new-access",
         remnashopRefreshTokenEncrypted: "protected:new-refresh",
+      }),
+    });
+  });
+
+  it("refreshes stale Remnashop tokens and retries password change once", async () => {
+    mocks.remnashopChangePassword
+      .mockRejectedValueOnce(new BffError("CURRENT_PASSWORD_INVALID", 401, "Current password is invalid"))
+      .mockResolvedValueOnce({
+        data: { success: true },
+        cookies: { accessToken: "retry-access", refreshToken: "retry-refresh" },
+      });
+
+    await expect(changePassword({ current_password: "old", new_password: "new" })).resolves.toEqual({ success: true });
+
+    expect(mocks.remnashopRefreshTokens).toHaveBeenCalledWith("refresh-token");
+    expect(mocks.remnashopChangePassword).toHaveBeenNthCalledWith(1, "access-token", {
+      current_password: "old",
+      new_password: "new",
+    });
+    expect(mocks.remnashopChangePassword).toHaveBeenNthCalledWith(2, "refreshed-access", {
+      current_password: "old",
+      new_password: "new",
+    });
+    expect(mocks.prisma.webSession.update).toHaveBeenCalledWith({
+      where: { id: "session-1" },
+      data: expect.objectContaining({
+        remnashopAccessTokenEncrypted: "protected:retry-access",
+        remnashopRefreshTokenEncrypted: "protected:retry-refresh",
       }),
     });
   });

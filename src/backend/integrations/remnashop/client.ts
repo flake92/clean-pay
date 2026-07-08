@@ -362,7 +362,7 @@ export async function remnashopMergeUsers({
   return parseResponse<RemnashopMergeUsersResponse>(response, path);
 }
 
-async function remnashopRefresh(refreshToken: string) {
+export async function remnashopRefreshTokens(refreshToken: string) {
   authDebugLog("remnashop_token_refresh_started", {});
   const response = await fetchRemnashop("/auth/refresh", {
     method: "POST",
@@ -671,7 +671,7 @@ export async function getAuthorizedRemnashopTokens({
       remnashopAccessExpiresAt: session.remnashopAccessExpiresAt,
       threshold: refreshThreshold,
     });
-    const refreshed = await remnashopRefresh(refreshToken);
+    const refreshed = await remnashopRefreshTokens(refreshToken);
 
     await prisma.webSession.update({
       where: { id: session.id },
