@@ -6,7 +6,7 @@ export default function SupportPage() {
     <AppShell>
       <div className="grid max-w-4xl gap-6">
         <PageHeader
-          description="Контакты, быстрые действия и краткая инструкция для подключения VPN через web-кабинет."
+          description="Контакты поддержки пока не опубликованы."
           title="Поддержка"
         />
         <SupportPanel />

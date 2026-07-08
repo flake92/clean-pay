@@ -71,27 +71,8 @@ export function SupportPanel() {
             ) : null}
           </div>
         ) : (
-          <p className="m-0 line-height-3 text-600">
-            Контакты поддержки пока не опубликованы. Их можно включить через переменные окружения `SUPPORT_ENABLED`,
-            `SUPPORT_EMAIL`, `SUPPORT_TELEGRAM_USERNAME` и `SUPPORT_FAQ_URL`.
-          </p>
+          <p className="m-0 line-height-3 text-600">Контакты поддержки пока не опубликованы.</p>
         )}
-      </Card>
-
-      <Card title="Как подключиться">
-        <ol className="m-0 flex flex-column gap-3 line-height-3 text-700">
-          <li>1. Войдите в web-кабинет и откройте раздел подписки.</li>
-          <li>2. Купите или продлите тариф, если активной подписки нет.</li>
-          <li>3. Нажмите кнопку подключения или скопируйте ссылку подписки.</li>
-          <li>4. Если устройство потеряло доступ, удалите его в кабинете или перевыпустите ссылку.</li>
-        </ol>
-      </Card>
-
-      <Card title="Для кого этот сайт">
-        <p className="m-0 line-height-3 text-700">
-          Web-кабинет {branding.name} предназначен для пользователей, которые хотят оплачивать и управлять подпиской
-          без Telegram-бота.
-        </p>
       </Card>
     </div>
   );
