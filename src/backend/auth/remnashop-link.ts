@@ -48,6 +48,72 @@ function accountMergeRequiredError(message = "Telegram account is already attach
   );
 }
 
+function mergeSubscriptionsConflictError() {
+  return accountMergeRequiredError(
+    "У обеих учетных записей есть активные подписки. Объединение нужно выполнить через поддержку.",
+  );
+}
+
+function isBothSubscriptionsMergeConflict(error: unknown) {
+  return (
+    error instanceof BffError &&
+    error.code === "CONFLICT" &&
+    String(error.debug?.message ?? error.message).toLowerCase().includes("both users have current subscriptions")
+  );
+}
+
+async function mergeEmailAccountIntoTelegramAccount({
+  emailAccessToken,
+  telegramId,
+  telegramUsername,
+  reason,
+}: {
+  emailAccessToken: string;
+  telegramId: string | number;
+  telegramUsername?: string | null;
+  reason: string;
+}) {
+  const sourceUserId = getRemnashopUserIdFromAccessToken(emailAccessToken);
+  const telegramAuth = await remnashopAuthTelegramIdentity({
+    telegramId,
+    telegramUsername,
+  });
+  const targetUserId = getRemnashopUserIdFromAccessToken(telegramAuth.cookies.accessToken);
+
+  if (sourceUserId === targetUserId) {
+    return {
+      auth: telegramAuth,
+      merged: false,
+      sourceUserId,
+      targetUserId,
+    };
+  }
+
+  try {
+    await remnashopMergeUsers({
+      sourceUserId,
+      targetUserId,
+      reason,
+    });
+  } catch (error) {
+    if (isBothSubscriptionsMergeConflict(error)) {
+      throw mergeSubscriptionsConflictError();
+    }
+
+    throw error;
+  }
+
+  return {
+    auth: await remnashopAuthTelegramIdentity({
+      telegramId,
+      telegramUsername,
+    }),
+    merged: true,
+    sourceUserId,
+    targetUserId,
+  };
+}
+
 async function attachTelegramToVerifiedRemnashopAccount({
   auth,
   session,
@@ -74,38 +140,44 @@ async function attachTelegramToVerifiedRemnashopAccount({
         throw error;
       }
 
-      const sourceUserId = getRemnashopUserIdFromAccessToken(auth.cookies.accessToken);
-      const targetUserId = session.user.remnashopUserId;
-
-      if (!targetUserId || sourceUserId === targetUserId) {
-        throw accountMergeRequiredError();
-      }
-
       authDebugLog("remnashop_account_link_telegram_conflict_merge_started", {
         sessionId: session.id,
         userId: session.userId,
         telegramId: session.user.telegramId,
-        sourceRemnashopUserId: sourceUserId,
-        targetRemnashopUserId: targetUserId,
       });
 
-      await remnashopMergeUsers({
-        sourceUserId,
-        targetUserId,
-        reason: "Clean Pay account link: verified e-mail password and Telegram ownership",
-      });
-      authForLink = await remnashopAuthTelegramIdentity({
+      const merged = await mergeEmailAccountIntoTelegramAccount({
+        emailAccessToken: auth.cookies.accessToken,
         telegramId: session.user.telegramId,
         telegramUsername: session.user.telegramUsername,
+        reason: "Clean Pay account link: verified e-mail password and Telegram ownership",
       });
+      authForLink = merged.auth;
 
       authDebugLog("remnashop_account_link_telegram_conflict_merge_completed", {
         sessionId: session.id,
         userId: session.userId,
         telegramId: session.user.telegramId,
-        sourceRemnashopUserId: sourceUserId,
-        targetRemnashopUserId: targetUserId,
+        sourceRemnashopUserId: merged.sourceUserId,
+        targetRemnashopUserId: merged.targetUserId,
       });
+    }
+
+    const linkedRemnashopUserId = getRemnashopUserIdFromAccessToken(authForLink.cookies.accessToken);
+    const telegramAuth = await remnashopAuthTelegramIdentity({
+      telegramId: session.user.telegramId,
+      telegramUsername: session.user.telegramUsername,
+    });
+    const telegramRemnashopUserId = getRemnashopUserIdFromAccessToken(telegramAuth.cookies.accessToken);
+
+    if (linkedRemnashopUserId !== telegramRemnashopUserId) {
+      const merged = await mergeEmailAccountIntoTelegramAccount({
+        emailAccessToken: auth.cookies.accessToken,
+        telegramId: session.user.telegramId,
+        telegramUsername: session.user.telegramUsername,
+        reason: "Clean Pay account link: verified e-mail password and Telegram ownership",
+      });
+      authForLink = merged.auth;
     }
   }
 
