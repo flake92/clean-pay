@@ -1,9 +1,15 @@
 import { bffError, bffJson } from "@/backend/http/bff-response";
-import { serializePaymentRecord } from "@/backend/payments/records";
+import {
+  serializePaymentRecord,
+  syncPaymentRecordsFromRemnashopTransactions,
+} from "@/backend/payments/records";
 import { prisma } from "@/backend/database/prisma";
 import { getAuthorizedRemnashopTokens, remnashopRequest } from "@/backend/integrations/remnashop/client";
 import { BffError } from "@/backend/integrations/remnashop/errors";
-import type { CurrentSubscriptionResponse } from "@/shared/remnashop/types";
+import type {
+  CurrentSubscriptionResponse,
+  PaymentTransactionResponse,
+} from "@/shared/remnashop/types";
 import { getCurrentUser } from "@/backend/sessions/web-session";
 
 export const runtime = "nodejs";
@@ -21,19 +27,19 @@ export async function GET(request: Request) {
     }
 
     const paymentId = new URL(request.url).searchParams.get("payment_id");
-    const record = paymentId
-      ? await prisma.paymentRecord.findFirst({
-          where: { userId: user.id, paymentId },
-        })
-      : await prisma.paymentRecord.findFirst({
-          where: { userId: user.id },
-          orderBy: { createdAt: "desc" },
-        });
 
     let subscription: CurrentSubscriptionResponse | null = null;
 
     try {
       const { accessToken } = await getAuthorizedRemnashopTokens();
+      const transactions = await remnashopRequest<PaymentTransactionResponse[]>(
+        "/subscription/transactions",
+        { accessToken },
+      );
+      await syncPaymentRecordsFromRemnashopTransactions({
+        userId: user.id,
+        transactions,
+      });
       subscription = await remnashopRequest<CurrentSubscriptionResponse | null>(
         "/subscription/current",
         { accessToken },
@@ -43,6 +49,15 @@ export async function GET(request: Request) {
         throw error;
       }
     }
+
+    const record = paymentId
+      ? await prisma.paymentRecord.findFirst({
+          where: { userId: user.id, paymentId },
+        })
+      : await prisma.paymentRecord.findFirst({
+          where: { userId: user.id },
+          orderBy: { createdAt: "desc" },
+        });
 
     return bffJson({
       payment: record ? serializePaymentRecord(record) : null,

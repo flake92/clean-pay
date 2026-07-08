@@ -19,6 +19,7 @@ const mocks = vi.hoisted(() => ({
     paymentRecord: {
       findMany: vi.fn(),
       findFirst: vi.fn(),
+      updateMany: vi.fn(),
     },
   },
   checkDatabase: vi.fn(),
@@ -154,6 +155,7 @@ describe("BFF route integration contracts", () => {
     mocks.getCurrentUser.mockResolvedValue({ id: "user-1" });
     mocks.prisma.paymentRecord.findMany.mockResolvedValue([record]);
     mocks.prisma.paymentRecord.findFirst.mockResolvedValue(record);
+    mocks.prisma.paymentRecord.updateMany.mockResolvedValue({ count: 1 });
     mocks.checkDatabase.mockResolvedValue({ status: "ok", latencyMs: 1 });
     mocks.checkRedis.mockResolvedValue({ status: "ok", latencyMs: 1 });
     mocks.checkRemnashop.mockResolvedValue({ status: "ok", latencyMs: 1 });
@@ -280,12 +282,35 @@ describe("BFF route integration contracts", () => {
   });
 
   it("returns offers, payment history, payment status and support data", async () => {
-    mocks.remnashopRequest.mockResolvedValueOnce({ offers: [] }).mockResolvedValueOnce({ uuid: "sub-1" });
+    mocks.remnashopRequest
+      .mockResolvedValueOnce({ offers: [] })
+      .mockResolvedValueOnce([
+        {
+          payment_id: "payment-1",
+          purchase_type: "subscription",
+          status: "completed",
+          final_amount: "100.00",
+          currency: "RUB",
+          gateway_type: "YOOKASSA",
+          plan_name: "Basic",
+          duration_days: 30,
+          device_limit: 3,
+          traffic_limit: null,
+          created_at: "2026-06-25T00:00:00.000Z",
+          updated_at: "2026-06-25T01:00:00.000Z",
+        },
+      ])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce({ uuid: "sub-1" });
 
     await expect(body(await offersRoute.GET())).resolves.toEqual({ data: { offers: [] } });
     await expect(body(await paymentsHistoryRoute.GET())).resolves.toMatchObject({
       data: [{ payment_id: "payment-1", status: "pending" }],
     });
+    expect(mocks.prisma.paymentRecord.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: { userId: "user-1", paymentId: "payment-1" },
+      data: expect.objectContaining({ status: "COMPLETED" }),
+    }));
     await expect(
       body(await paymentsStatusRoute.GET(new Request("http://clean-pay.local/api/bff/payments/status?payment_id=payment-1"))),
     ).resolves.toMatchObject({
@@ -301,9 +326,9 @@ describe("BFF route integration contracts", () => {
   });
 
   it("keeps missing subscription explicit but non-fatal in payment status", async () => {
-    mocks.remnashopRequest.mockRejectedValueOnce(
-      new BffError("SUBSCRIPTION_NOT_FOUND", 404, "missing subscription"),
-    );
+    mocks.remnashopRequest
+      .mockResolvedValueOnce([])
+      .mockRejectedValueOnce(new BffError("SUBSCRIPTION_NOT_FOUND", 404, "missing subscription"));
 
     const response = await paymentsStatusRoute.GET(
       new Request("http://clean-pay.local/api/bff/payments/status?payment_id=payment-1"),
@@ -320,9 +345,9 @@ describe("BFF route integration contracts", () => {
   });
 
   it("returns an explicit error when payment status cannot verify subscription", async () => {
-    mocks.remnashopRequest.mockRejectedValueOnce(
-      new BffError("UPSTREAM_UNAVAILABLE", 502, "Remnashop unavailable"),
-    );
+    mocks.remnashopRequest
+      .mockResolvedValueOnce([])
+      .mockRejectedValueOnce(new BffError("UPSTREAM_UNAVAILABLE", 502, "Remnashop unavailable"));
 
     const response = await paymentsStatusRoute.GET(
       new Request("http://clean-pay.local/api/bff/payments/status?payment_id=payment-1"),

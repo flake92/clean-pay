@@ -100,6 +100,21 @@ export type PaymentInitResponse = {
   currency: string;
 };
 
+export type PaymentTransactionResponse = {
+  payment_id: string;
+  purchase_type: string;
+  status: string;
+  gateway_type: string;
+  final_amount: string;
+  currency: string;
+  plan_name: string | null;
+  duration_days: number | null;
+  device_limit: number | null;
+  traffic_limit: number | null;
+  created_at: string;
+  updated_at: string;
+};
+
 type GatewayOffer = {
   gateway_type: string;
   currency: string;

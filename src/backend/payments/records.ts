@@ -1,5 +1,9 @@
 import { prisma } from "@/backend/database/prisma";
-import type { PaymentInitResponse, PlanOffer } from "@/shared/remnashop/types";
+import type {
+  PaymentInitResponse,
+  PaymentTransactionResponse,
+  PlanOffer,
+} from "@/shared/remnashop/types";
 
 type PaymentRecordStatus =
   | "PENDING"
@@ -17,7 +21,7 @@ type RecordPaymentInput = {
   payment: PaymentInitResponse;
 };
 
-function toPaymentStatus(status: string): PaymentRecordStatus {
+export function toPaymentStatus(status: string): PaymentRecordStatus {
   const normalized = status.toUpperCase();
 
   if (
@@ -31,6 +35,39 @@ function toPaymentStatus(status: string): PaymentRecordStatus {
   }
 
   return "UNKNOWN";
+}
+
+export async function syncPaymentRecordsFromRemnashopTransactions({
+  userId,
+  transactions,
+}: {
+  userId: string;
+  transactions: PaymentTransactionResponse[];
+}) {
+  await Promise.all(
+    transactions.map((transaction) =>
+      prisma.paymentRecord.updateMany({
+        where: {
+          userId,
+          paymentId: transaction.payment_id,
+        },
+        data: {
+          purchaseType: transaction.purchase_type,
+          status: toPaymentStatus(transaction.status),
+          finalAmount: transaction.final_amount,
+          currency: transaction.currency,
+          gatewayType: transaction.gateway_type,
+          planName: transaction.plan_name,
+          durationDays: transaction.duration_days,
+          deviceLimit: transaction.device_limit,
+          trafficLimit: transaction.traffic_limit,
+          raw: {
+            remnashopTransaction: transaction,
+          },
+        },
+      }),
+    ),
+  );
 }
 
 export async function recordPayment(input: RecordPaymentInput) {
