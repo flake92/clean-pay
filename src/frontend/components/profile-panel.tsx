@@ -41,6 +41,8 @@ export function ProfilePanel() {
   const [newPassword, setNewPassword] = useState("");
   const [message, setMessage] = useState<string | null>(null);
   const [messageSeverity, setMessageSeverity] = useState<"success" | "info" | "warn">("info");
+  const [passwordMessage, setPasswordMessage] = useState<string | null>(null);
+  const [passwordMessageSeverity, setPasswordMessageSeverity] = useState<"success" | "warn">("success");
   const [pendingAction, setPendingAction] = useState<string | null>(null);
 
   async function fetchProfile() {
@@ -85,6 +87,11 @@ export function ProfilePanel() {
   function showMessage(text: string, severity: "success" | "info" | "warn" = "info") {
     setMessage(text);
     setMessageSeverity(severity);
+  }
+
+  function showPasswordMessage(text: string, severity: "success" | "warn") {
+    setPasswordMessage(text);
+    setPasswordMessageSeverity(severity);
   }
 
   async function requestVerificationFor(nextTargetEmail: string) {
@@ -163,6 +170,7 @@ export function ProfilePanel() {
     event.preventDefault();
     setPendingAction("password");
     setMessage(null);
+    setPasswordMessage(null);
 
     try {
       const response = await fetch("/api/bff/auth/change-password", {
@@ -180,9 +188,9 @@ export function ProfilePanel() {
 
       setCurrentPassword("");
       setNewPassword("");
-      showMessage("Пароль изменен.", "success");
+      showPasswordMessage("Пароль изменен.", "success");
     } catch (err) {
-      showMessage(err instanceof Error ? err.message : "Не удалось изменить пароль.", "warn");
+      showPasswordMessage(err instanceof Error ? err.message : "Не удалось изменить пароль.", "warn");
     } finally {
       setPendingAction(null);
     }
@@ -277,6 +285,7 @@ export function ProfilePanel() {
       {canChangePassword ? (
         <Card title="Смена пароля">
           <form className="flex flex-column gap-3" onSubmit={changePassword}>
+            {passwordMessage ? <Message severity={passwordMessageSeverity} text={passwordMessage} /> : null}
             <label className="flex flex-column gap-2">
               <span className="text-sm font-medium text-700">Текущий пароль</span>
               <Password

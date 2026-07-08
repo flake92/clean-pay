@@ -41,4 +41,18 @@ describe("client API auth handling", () => {
 
     expect(replace).not.toHaveBeenCalled();
   });
+
+  it("does not redirect profile when the current password is invalid", async () => {
+    const replace = stubLocation("/profile");
+
+    const error = await readBffError(
+      Response.json(
+        { error: { code: "CURRENT_PASSWORD_INVALID", message: "Текущий пароль неверный." } },
+        { status: 401 },
+      ),
+    );
+
+    expect(error.message).toBe("Текущий пароль неверный.");
+    expect(replace).not.toHaveBeenCalled();
+  });
 });

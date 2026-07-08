@@ -60,6 +60,7 @@ export function redirectToLoginOnUnauthorized(error: unknown) {
     typeof window === 'undefined' ||
     !(error instanceof BffClientError) ||
     error.status !== 401 ||
+    (error.code !== undefined && error.code !== 'UNAUTHORIZED') ||
     isAuthPage(window.location.pathname)
   ) {
     return false;
