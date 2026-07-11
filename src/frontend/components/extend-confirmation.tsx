@@ -25,6 +25,7 @@ type LoadState =
 type PriceOption = {
   amount: string;
   currency: string;
+  days: number;
   duration: string;
   gateway: string;
   label: string;
@@ -43,17 +44,6 @@ function formatDuration(days: number) {
   return `${days} дн.`;
 }
 
-function firstSelection(plan: PlanOffer | undefined) {
-  const duration = plan?.durations[0];
-  const price = duration?.prices[0];
-
-  if (!duration || !price) {
-    return "";
-  }
-
-  return `${duration.days}:${price.gateway_type}`;
-}
-
 function priceOptionTemplate(option?: PriceOption) {
   if (!option) {
     return <span>Выберите срок и способ оплаты</span>;
@@ -68,6 +58,60 @@ function priceOptionTemplate(option?: PriceOption) {
         </span>
       </div>
       <span className="clean-pay-price-option__gateway">{option.gateway}</span>
+    </div>
+  );
+}
+
+function buildPriceOptions(plan: PlanOffer | undefined) {
+  if (!plan) {
+    return [];
+  }
+
+  return plan.durations
+    .flatMap((duration) =>
+      duration.prices.map((price) => ({
+        amount: String(price.final_amount),
+        currency: price.currency_symbol,
+        days: duration.days,
+        duration: formatDuration(duration.days),
+        gateway: price.gateway_type,
+        label: `${formatDuration(duration.days)} - ${price.final_amount} ${price.currency_symbol} - ${price.gateway_type}`,
+        value: `${duration.days}:${price.gateway_type}`,
+      })),
+    )
+    .sort(
+      (left, right) =>
+        Number(left.amount) - Number(right.amount) ||
+        left.days - right.days ||
+        left.gateway.localeCompare(right.gateway),
+    );
+}
+
+function firstSelection(plan: PlanOffer | undefined) {
+  return buildPriceOptions(plan)[0]?.value ?? "";
+}
+
+function priceChoiceList(
+  options: PriceOption[],
+  selected: string,
+  onSelect: (value: string) => void,
+) {
+  return (
+    <div className="clean-pay-price-choice-list">
+      {options.map((option) => (
+        <button
+          className={
+            option.value === selected
+              ? "clean-pay-price-choice clean-pay-price-choice--selected"
+              : "clean-pay-price-choice"
+          }
+          key={option.value}
+          onClick={() => onSelect(option.value)}
+          type="button"
+        >
+          {priceOptionTemplate(option)}
+        </button>
+      ))}
     </div>
   );
 }
@@ -162,16 +206,7 @@ export function ExtendConfirmation() {
   const selectedPrice = selectedDuration?.prices.find(
     (price): price is DurationGatewayPrice => price.gateway_type === selectedGateway,
   );
-  const priceOptions = plan.durations.flatMap((duration) =>
-    duration.prices.map((price) => ({
-      amount: String(price.final_amount),
-      currency: price.currency_symbol,
-      duration: formatDuration(duration.days),
-      gateway: price.gateway_type,
-      label: `${formatDuration(duration.days)} - ${price.final_amount} ${price.currency_symbol} - ${price.gateway_type}`,
-      value: `${duration.days}:${price.gateway_type}`,
-    })),
-  );
+  const priceOptions = buildPriceOptions(plan);
 
   async function extendSubscription() {
     if (!selectedDuration || !selectedPrice) {
@@ -221,9 +256,10 @@ export function ExtendConfirmation() {
         <p className="text-sm text-600">
           Текущий статус: {state.offers.current_subscription_status ?? "-"}
         </p>
-        <label className="flex flex-column gap-2 text-sm font-medium text-700" htmlFor="extend-offer">
-          Длительность и способ оплаты
+        <div className="flex flex-column gap-2 text-sm font-medium text-700">
+          <span>Длительность и способ оплаты</span>
           <Dropdown
+            aria-label="Длительность и способ оплаты"
             className="clean-pay-price-dropdown"
             id="extend-offer"
             onChange={(event) => setSelection(event.value)}
@@ -235,7 +271,8 @@ export function ExtendConfirmation() {
             value={selection}
             valueTemplate={priceOptionTemplate}
           />
-        </label>
+          {priceChoiceList(priceOptions, selection, setSelection)}
+        </div>
         {selectedPrice ? (
           <p className="text-2xl font-semibold">
             {selectedPrice.final_amount} {selectedPrice.currency_symbol}

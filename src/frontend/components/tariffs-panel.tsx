@@ -23,6 +23,7 @@ type LoadState =
 type PriceOption = {
   amount: string;
   currency: string;
+  days: number;
   duration: string;
   gateway: string;
   label: string;
@@ -68,6 +69,52 @@ function priceOptionTemplate(option?: PriceOption) {
         </span>
       </div>
       <span className="clean-pay-price-option__gateway">{option.gateway}</span>
+    </div>
+  );
+}
+
+function buildPriceOptions(plan: PlanOffer) {
+  return plan.durations
+    .flatMap((duration) =>
+      duration.prices.map((price) => ({
+        amount: String(price.final_amount),
+        currency: price.currency_symbol,
+        days: duration.days,
+        duration: formatDuration(duration.days),
+        gateway: price.gateway_type,
+        label: `${formatDuration(duration.days)} - ${price.final_amount} ${price.currency_symbol} - ${price.gateway_type}`,
+        value: `${duration.days}:${price.gateway_type}`,
+      })),
+    )
+    .sort(
+      (left, right) =>
+        Number(left.amount) - Number(right.amount) ||
+        left.days - right.days ||
+        left.gateway.localeCompare(right.gateway),
+    );
+}
+
+function priceChoiceList(
+  options: PriceOption[],
+  selected: string,
+  onSelect: (value: string) => void,
+) {
+  return (
+    <div className="clean-pay-price-choice-list">
+      {options.map((option) => (
+        <button
+          className={
+            option.value === selected
+              ? "clean-pay-price-choice clean-pay-price-choice--selected"
+              : "clean-pay-price-choice"
+          }
+          key={option.value}
+          onClick={() => onSelect(option.value)}
+          type="button"
+        >
+          {priceOptionTemplate(option)}
+        </button>
+      ))}
     </div>
   );
 }
@@ -149,12 +196,8 @@ export function TariffsPanel() {
       ) : null}
       <div className="grid">
         {state.offers.plans.map((plan) => {
-          const firstDuration = plan.durations[0];
-          const firstPrice = firstDuration?.prices[0];
-          const defaultSelected =
-            firstDuration && firstPrice
-              ? `${firstDuration.days}:${firstPrice.gateway_type}`
-              : "";
+          const priceOptions = buildPriceOptions(plan);
+          const defaultSelected = priceOptions[0]?.value ?? "";
           const selected = selection[plan.public_code] ?? defaultSelected;
           const [selectedDays, selectedGateway] = selected.split(":");
           const selectedDuration = plan.durations.find(
@@ -167,19 +210,9 @@ export function TariffsPanel() {
           const currentPrice = selectedPrice ?? fallbackPrice;
           const paymentHref = currentPrice
             ? `/payment?plan=${encodeURIComponent(plan.public_code)}&duration=${encodeURIComponent(
-                selectedDuration?.days ?? plan.durations[0]?.days ?? "",
+                selectedDuration?.days ?? priceOptions[0]?.days ?? plan.durations[0]?.days ?? "",
               )}&gateway=${encodeURIComponent(currentPrice.gateway_type)}`
             : "#";
-          const priceOptions = plan.durations.flatMap((duration) =>
-            duration.prices.map((price) => ({
-              amount: String(price.final_amount),
-              currency: price.currency_symbol,
-              duration: formatDuration(duration.days),
-              gateway: price.gateway_type,
-              label: `${formatDuration(duration.days)} - ${price.final_amount} ${price.currency_symbol} - ${price.gateway_type}`,
-              value: `${duration.days}:${price.gateway_type}`,
-            })),
-          );
 
           return (
             <div className="col-12 xl:col-6" key={plan.public_code}>
@@ -222,9 +255,10 @@ export function TariffsPanel() {
                       </div>
                     ))}
                   </div>
-                  <label className="flex flex-column gap-2 text-sm font-medium text-700">
-                    Длительность и способ оплаты
+                  <div className="flex flex-column gap-2 text-sm font-medium text-700">
+                    <span>Длительность и способ оплаты</span>
                     <Dropdown
+                      aria-label="Длительность и способ оплаты"
                       className="clean-pay-price-dropdown"
                       id={plan.public_code}
                       onChange={(event) =>
@@ -241,7 +275,13 @@ export function TariffsPanel() {
                       value={selected}
                       valueTemplate={priceOptionTemplate}
                     />
-                  </label>
+                    {priceChoiceList(priceOptions, selected, (value) =>
+                      setSelection((current) => ({
+                        ...current,
+                        [plan.public_code]: value,
+                      })),
+                    )}
+                  </div>
                   <LinkButton
                     className="w-fit"
                     href={paymentHref}
