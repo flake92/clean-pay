@@ -410,8 +410,8 @@ export function CabinetPanel() {
       }
 
       setPromocode("");
-      setActionMessage("Промокод активирован.");
-      await loadSubscription();
+      setActionMessage("Промокод активирован. Данные кабинета обновлены.");
+      await Promise.all([loadSubscription(), loadOffers(), loadDevices(), loadPayments()]);
     } catch (err) {
       setActionMessage(err instanceof Error ? err.message : "Не удалось активировать промокод.");
     } finally {

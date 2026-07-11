@@ -15,6 +15,12 @@ export type BffErrorCode =
   | 'ACCOUNT_MERGE_REQUIRED'
   | 'PLAN_UNAVAILABLE'
   | 'PAYMENT_GATEWAY_UNAVAILABLE'
+  | 'PROMOCODE_ACTIVE_SUBSCRIPTION_REQUIRED'
+  | 'PROMOCODE_ALREADY_ACTIVATED'
+  | 'PROMOCODE_EXPIRED'
+  | 'PROMOCODE_NOT_AVAILABLE'
+  | 'PROMOCODE_NOT_FOUND'
+  | 'PROMOCODE_RESOURCE_UNLIMITED'
   | 'SUBSCRIPTION_NOT_FOUND'
   | 'SUBSCRIPTION_URL_UNAVAILABLE'
   | 'DEVICE_DELETE_UNAVAILABLE'
@@ -48,6 +54,12 @@ const PROD_MESSAGES: Record<BffErrorCode, string> = {
   ACCOUNT_MERGE_REQUIRED: '\u042d\u0442\u043e\u0442 Telegram \u0443\u0436\u0435 \u043f\u0440\u0438\u0432\u044f\u0437\u0430\u043d \u043a \u0434\u0440\u0443\u0433\u043e\u0439 \u043f\u043e\u0447\u0442\u0435. \u0421\u043d\u0430\u0447\u0430\u043b\u0430 \u043e\u0431\u044a\u0435\u0434\u0438\u043d\u0438\u0442\u0435 \u0430\u043a\u043a\u0430\u0443\u043d\u0442\u044b \u0447\u0435\u0440\u0435\u0437 \u043f\u043e\u0434\u0434\u0435\u0440\u0436\u043a\u0443.',
   PLAN_UNAVAILABLE: 'Этот тариф сейчас недоступен.',
   PAYMENT_GATEWAY_UNAVAILABLE: 'Этот способ оплаты сейчас недоступен.',
+  PROMOCODE_ACTIVE_SUBSCRIPTION_REQUIRED: 'Для этого промокода нужна активная подписка.',
+  PROMOCODE_ALREADY_ACTIVATED: 'Этот промокод уже был активирован.',
+  PROMOCODE_EXPIRED: 'Срок действия промокода истёк.',
+  PROMOCODE_NOT_AVAILABLE: 'Этот промокод недоступен для текущего аккаунта.',
+  PROMOCODE_NOT_FOUND: 'Промокод не найден или уже отключён.',
+  PROMOCODE_RESOURCE_UNLIMITED: 'Промокод не применён: соответствующий лимит уже безлимитный.',
   SUBSCRIPTION_NOT_FOUND: 'Активная подписка не найдена.',
   SUBSCRIPTION_URL_UNAVAILABLE: 'Ссылка подключения недоступна. Попробуйте позже или обратитесь в поддержку.',
   DEVICE_DELETE_UNAVAILABLE: 'Не удалось удалить устройство.',
@@ -151,6 +163,40 @@ export function normalizeRemnashopError(
 
   if (status === 404 && lowerPath.includes('/subscription/current')) {
     return new BffError('SUBSCRIPTION_NOT_FOUND', 404, message, debug);
+  }
+
+  if (lowerPath.includes('/subscription/promocode')) {
+    if (status === 404) {
+      return new BffError('PROMOCODE_NOT_FOUND', 404, message, debug);
+    }
+
+    if (includesAny(lowerMessage, ['already activated', 'already used'])) {
+      return new BffError('PROMOCODE_ALREADY_ACTIVATED', 409, message, debug);
+    }
+
+    if (includesAny(lowerMessage, ['expired'])) {
+      return new BffError('PROMOCODE_EXPIRED', 409, message, debug);
+    }
+
+    if (includesAny(lowerMessage, ['active subscription required'])) {
+      return new BffError('PROMOCODE_ACTIVE_SUBSCRIPTION_REQUIRED', 409, message, debug);
+    }
+
+    if (includesAny(lowerMessage, ['resource is already unlimited', 'already unlimited'])) {
+      return new BffError('PROMOCODE_RESOURCE_UNLIMITED', 409, message, debug);
+    }
+
+    if (
+      includesAny(lowerMessage, [
+        'activation limit',
+        'for new users only',
+        'for existing users only',
+        'for invited users only',
+        'not available',
+      ])
+    ) {
+      return new BffError('PROMOCODE_NOT_AVAILABLE', 409, message, debug);
+    }
   }
 
   if (status === 404) {
