@@ -20,6 +20,15 @@ type LoadState =
   | { status: "error"; message: string; action?: "login" | "linkEmail" }
   | { status: "ready"; offers: SubscriptionOffersResponse };
 
+type PriceOption = {
+  amount: string;
+  currency: string;
+  duration: string;
+  gateway: string;
+  label: string;
+  value: string;
+};
+
 function formatDuration(days: number) {
   if (days <= 0) {
     return "∞";
@@ -43,6 +52,24 @@ function formatTraffic(limit: number) {
 
 function formatDeviceLimit(limit: number) {
   return limit > 0 ? String(limit) : "∞";
+}
+
+function priceOptionTemplate(option?: PriceOption) {
+  if (!option) {
+    return <span>Выберите срок и способ оплаты</span>;
+  }
+
+  return (
+    <div className="clean-pay-price-option">
+      <div className="clean-pay-price-option__main">
+        <span className="clean-pay-price-option__duration">{option.duration}</span>
+        <span className="clean-pay-price-option__price">
+          {option.amount} {option.currency}
+        </span>
+      </div>
+      <span className="clean-pay-price-option__gateway">{option.gateway}</span>
+    </div>
+  );
 }
 
 function bestPrice(plan: PlanOffer) {
@@ -145,6 +172,10 @@ export function TariffsPanel() {
             : "#";
           const priceOptions = plan.durations.flatMap((duration) =>
             duration.prices.map((price) => ({
+              amount: String(price.final_amount),
+              currency: price.currency_symbol,
+              duration: formatDuration(duration.days),
+              gateway: price.gateway_type,
               label: `${formatDuration(duration.days)} - ${price.final_amount} ${price.currency_symbol} - ${price.gateway_type}`,
               value: `${duration.days}:${price.gateway_type}`,
             })),
@@ -194,6 +225,7 @@ export function TariffsPanel() {
                   <label className="flex flex-column gap-2 text-sm font-medium text-700">
                     Длительность и способ оплаты
                     <Dropdown
+                      className="clean-pay-price-dropdown"
                       id={plan.public_code}
                       onChange={(event) =>
                         setSelection((current) => ({
@@ -201,8 +233,13 @@ export function TariffsPanel() {
                           [plan.public_code]: event.value,
                         }))
                       }
+                      optionLabel="label"
+                      optionValue="value"
+                      itemTemplate={priceOptionTemplate}
                       options={priceOptions}
+                      panelClassName="clean-pay-price-dropdown-panel"
                       value={selected}
+                      valueTemplate={priceOptionTemplate}
                     />
                   </label>
                   <LinkButton
