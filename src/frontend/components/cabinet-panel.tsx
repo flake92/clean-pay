@@ -162,6 +162,10 @@ function detailValue(value?: string | number | boolean | null) {
   return String(value);
 }
 
+function deviceTitle(device: SubscriptionDevice) {
+  return device.device_model ?? device.platform ?? "Устройство";
+}
+
 function trafficLimitStrategyLabel(strategy?: string | null) {
   const normalized = strategy?.toUpperCase();
 
@@ -634,7 +638,44 @@ export function CabinetPanel() {
       <div className="col-12 xl:col-6">
         <div className="card">
           <h5>Устройства</h5>
+          {devices.devices.length > 0 ? (
+            <div className="cabinet-mobile-list">
+              {devices.devices.map((device) => (
+                <article className="cabinet-mobile-record" key={device.hwid}>
+                  <div className="cabinet-mobile-record__header">
+                    <div>
+                      <div className="cabinet-mobile-record__title">{deviceTitle(device)}</div>
+                      <div className="cabinet-mobile-record__id">{device.hwid}</div>
+                    </div>
+                    <Button
+                      aria-label="Удалить устройство"
+                      disabled={pendingAction === `delete-device-${device.hwid}`}
+                      icon="pi pi-trash"
+                      loading={pendingAction === `delete-device-${device.hwid}`}
+                      onClick={() => deleteDevice(device.hwid)}
+                      outlined
+                      severity="danger"
+                      type="button"
+                    />
+                  </div>
+                  <dl className="cabinet-mobile-record__details">
+                    <div>
+                      <dt>OS</dt>
+                      <dd>{detailValue(device.os_version)}</dd>
+                    </div>
+                    <div>
+                      <dt>User agent</dt>
+                      <dd>{detailValue(device.user_agent)}</dd>
+                    </div>
+                  </dl>
+                </article>
+              ))}
+            </div>
+          ) : (
+            <Message severity="info" text="Подключенных устройств пока нет." />
+          )}
           <DataTable
+            className="cabinet-desktop-table"
             emptyMessage="Подключенных устройств пока нет."
             responsiveLayout="scroll"
             value={devices.devices}
@@ -642,9 +683,7 @@ export function CabinetPanel() {
             <Column
               body={(device: SubscriptionDevice) => (
                 <div>
-                  <div className="font-medium">
-                    {device.device_model ?? device.platform ?? "Устройство"}
-                  </div>
+                  <div className="font-medium">{deviceTitle(device)}</div>
                   <div className="mt-1 text-xs text-500 break-all">{device.hwid}</div>
                 </div>
               )}
@@ -684,7 +723,44 @@ export function CabinetPanel() {
       <div className="col-12">
       <div className="card">
         <h5>История платежей</h5>
+        {payments.length > 0 ? (
+          <div className="cabinet-mobile-list">
+            {payments.map((payment) => (
+              <article className="cabinet-mobile-record" key={payment.payment_id}>
+                <div className="cabinet-mobile-record__header">
+                  <div>
+                    <div className="cabinet-mobile-record__title">{payment.plan_name ?? payment.purchase_type}</div>
+                    <div className="cabinet-mobile-record__id">{payment.payment_id}</div>
+                  </div>
+                  <Tag
+                    severity={payment.is_free ? "info" : statusSeverity(payment.status)}
+                    value={payment.is_free ? "Бесплатно" : paymentStatusLabel(payment.status)}
+                  />
+                </div>
+                <dl className="cabinet-mobile-record__details">
+                  <div>
+                    <dt>Дата</dt>
+                    <dd>{formatDate(payment.created_at)}</dd>
+                  </div>
+                  <div>
+                    <dt>Gateway</dt>
+                    <dd>{payment.gateway_type}</dd>
+                  </div>
+                  <div>
+                    <dt>Сумма</dt>
+                    <dd>
+                      {payment.final_amount} {payment.currency}
+                    </dd>
+                  </div>
+                </dl>
+              </article>
+            ))}
+          </div>
+        ) : (
+          <Message severity="info" text="Платежей через web-кабинет пока нет." />
+        )}
         <DataTable
+          className="cabinet-desktop-table"
           emptyMessage="Платежей через web-кабинет пока нет."
           responsiveLayout="scroll"
           value={payments}

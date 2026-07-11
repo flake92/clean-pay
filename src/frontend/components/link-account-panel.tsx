@@ -319,7 +319,6 @@ export function LinkAccountPanel({
           title="Быстрый вход"
         >
           {webAuthnSupported !== false ? (
-            <>
             <div className="account-method-action-row">
               <Button
                 icon="pi pi-lock"
@@ -335,6 +334,10 @@ export function LinkAccountPanel({
                 type="button"
               />
             </div>
+          ) : webAuthnSupported === false ? (
+            <Message severity="info" text="На этом устройстве нельзя добавить новый ключ. Сохранённые ключи можно удалить ниже." />
+          ) : null}
+
             {passkeys.length > 0 ? (
               <div className="passkey-list">
                 {passkeys.map((credential) => (
@@ -359,10 +362,6 @@ export function LinkAccountPanel({
                 ))}
               </div>
             ) : null}
-            </>
-          ) : webAuthnSupported === false ? (
-            <Message severity="info" text="Этот способ скрывается на устройствах без поддержки WebAuthn." />
-          ) : null}
         </AuthMethodTile>
       </div>
     </div>

@@ -362,6 +362,70 @@ body {
   white-space: normal;
 }
 
+.cabinet-mobile-list {
+  display: none;
+}
+
+.cabinet-mobile-record {
+  background: #f8fafc;
+  border: 1px solid #e5ebf2;
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 0.875rem;
+  padding: 0.875rem;
+}
+
+.cabinet-mobile-record__header {
+  align-items: flex-start;
+  display: grid;
+  gap: 0.75rem;
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.cabinet-mobile-record__title {
+  color: #1f2937;
+  font-weight: 800;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
+.cabinet-mobile-record__id {
+  color: #64748b;
+  font-size: 0.85rem;
+  margin-top: 0.25rem;
+  overflow-wrap: anywhere;
+}
+
+.cabinet-mobile-record__details {
+  display: grid;
+  gap: 0.75rem;
+  margin: 0;
+}
+
+.cabinet-mobile-record__details > div {
+  border-top: 1px solid #e5ebf2;
+  min-width: 0;
+  padding-top: 0.75rem;
+}
+
+.cabinet-mobile-record__details dt {
+  color: #64748b;
+  font-size: 0.75rem;
+  font-weight: 800;
+  letter-spacing: 0;
+  margin: 0 0 0.25rem;
+  text-transform: uppercase;
+}
+
+.cabinet-mobile-record__details dd {
+  color: #1f2937;
+  font-weight: 600;
+  line-height: 1.35;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
 .link-account-panel {
   display: flex;
   flex-direction: column;
@@ -484,6 +548,7 @@ body {
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
+  min-width: 0;
 }
 
 .passkey-list-item {
@@ -517,6 +582,7 @@ body {
 
 .passkey-list-item .p-button {
   height: 2.5rem;
+  min-width: 2.5rem;
   width: 2.5rem;
 }
 
@@ -658,24 +724,24 @@ body {
     grid-template-columns: 1fr;
   }
 
-  .p-datatable .p-datatable-wrapper {
-    overflow-x: auto;
-    -webkit-overflow-scrolling: touch;
+  .cabinet-desktop-table {
+    display: none;
   }
 
-  .p-datatable .p-datatable-table {
-    min-width: 44rem;
-    table-layout: auto;
+  .cabinet-mobile-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
   }
 
-  .p-datatable .p-datatable-thead > tr > th,
-  .p-datatable .p-datatable-tbody > tr > td {
-    white-space: nowrap;
+  .passkey-list {
+    gap: 0.75rem;
   }
 
-  .p-datatable .p-datatable-tbody > tr > td:first-child {
-    min-width: 13rem;
-    white-space: normal;
+  .passkey-list-item {
+    align-items: stretch;
+    grid-template-columns: minmax(0, 1fr) auto;
+    padding: 0.875rem;
   }
 }
 
