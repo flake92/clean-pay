@@ -271,7 +271,7 @@ describe("Telegram OIDC integration", () => {
     expect(logMetadata.some((metadata) => hasLogKey(metadata, "url"))).toBe(false);
   });
 
-  it("links Telegram to the current user without logging in through Remnashop Telegram auth", async () => {
+  it("links Telegram to the current user and prepares Remnashop Telegram auth for conflict fallback", async () => {
     state.cookies.set("clean_pay_tg_state", "state");
     state.cookies.set("clean_pay_tg_nonce", "nonce");
     state.cookies.set("clean_pay_tg_code_verifier", "verifier");
@@ -287,10 +287,15 @@ describe("Telegram OIDC integration", () => {
       redirectTo: "/link-account",
       linked: true,
       telegramId: "123456",
-      remnashopAuth: null,
+      remnashopAuth: { cookies: { accessToken: "access" } },
     });
 
-    expect(mocks.remnashopAuth).not.toHaveBeenCalled();
+    expect(mocks.remnashopAuth).toHaveBeenCalledWith("/auth/telegram", expect.objectContaining({
+      id: 123456,
+      first_name: "Clean",
+      username: "clean_user",
+      hash: expect.any(String),
+    }));
     expect(mocks.assertRateLimit).toHaveBeenCalledWith(
       expect.objectContaining({ action: "telegram_link_confirm", tgId: "123456" }),
     );
@@ -307,7 +312,7 @@ describe("Telegram OIDC integration", () => {
     });
   });
 
-  it("rejects linking a Telegram account that already belongs to another verified e-mail", async () => {
+  it("merges local users even when the Telegram account has another verified e-mail", async () => {
     state.cookies.set("clean_pay_tg_state", "state");
     state.cookies.set("clean_pay_tg_nonce", "nonce");
     state.cookies.set("clean_pay_tg_code_verifier", "verifier");
@@ -329,14 +334,31 @@ describe("Telegram OIDC integration", () => {
       displayName: "Clean User",
     });
 
-    await expect(consumeTelegramCallback("code", "state")).rejects.toMatchObject({
-      code: "ACCOUNT_MERGE_REQUIRED",
-      status: 409,
+    await expect(consumeTelegramCallback("code", "state")).resolves.toMatchObject({
+      user: { id: "target-user", telegramId: "123456" },
+      redirectTo: "/link-account",
+      linked: true,
+      remnashopAuth: { cookies: { accessToken: "access" } },
     });
 
-    expect(tx.webSession.updateMany).not.toHaveBeenCalled();
-    expect(tx.webUser.delete).not.toHaveBeenCalled();
-    expect(mocks.prisma.telegramAuthState.update).not.toHaveBeenCalled();
+    expect(tx.webSession.updateMany).toHaveBeenCalledWith({
+      where: { userId: "source-user" },
+      data: {
+        userId: "target-user",
+        remnashopAccessTokenEncrypted: null,
+        remnashopRefreshTokenEncrypted: null,
+        remnashopAccessExpiresAt: null,
+        remnashopRefreshExpiresAt: null,
+      },
+    });
+    expect(tx.webUser.delete).toHaveBeenCalledWith({ where: { id: "source-user" } });
+    expect(mocks.prisma.telegramAuthState.update).toHaveBeenCalledWith({
+      where: { id: "auth-state-1" },
+      data: {
+        userId: "target-user",
+        consumedAt: expect.any(Date),
+      },
+    });
   });
 
   it("consumes popup id token without exchanging authorization code", async () => {

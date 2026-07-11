@@ -8,9 +8,12 @@ import {
 } from "@/backend/integrations/remnashop/session";
 import {
   getAuthorizedRemnashopTokens,
+  getRemnashopUserIdFromAccessToken,
   getJwtExpiresAt,
   remnashopLinkTelegram,
+  remnashopMergeUsers,
 } from "@/backend/integrations/remnashop/client";
+import { BffError } from "@/backend/integrations/remnashop/errors";
 import { createWebSessionOnResponse } from "@/backend/sessions/web-session";
 import {
   consumeTelegramCallback,
@@ -71,6 +74,49 @@ async function linkTelegramToCurrentRemnashopAccount({
   });
 }
 
+function isBothSubscriptionsMergeConflict(error: unknown) {
+  return (
+    error instanceof BffError &&
+    error.code === "CONFLICT" &&
+    String(error.debug?.message ?? error.message).toLowerCase().includes("both users have current subscriptions")
+  );
+}
+
+async function mergeCurrentRemnashopAccountIntoTelegramAccount({
+  remnashopAuth,
+}: {
+  remnashopAuth: NonNullable<Awaited<ReturnType<typeof consumeTelegramCallback>>["remnashopAuth"]>;
+}) {
+  const currentTokens = await getAuthorizedRemnashopTokens({ allowUnverifiedEmail: true });
+  const sourceUserId = getRemnashopUserIdFromAccessToken(currentTokens.accessToken);
+  const targetUserId = getRemnashopUserIdFromAccessToken(remnashopAuth.cookies.accessToken);
+
+  if (sourceUserId === targetUserId) {
+    return;
+  }
+
+  try {
+    await remnashopMergeUsers({
+      sourceUserId,
+      targetUserId,
+      reason: "Clean Pay Telegram link: merge current e-mail account into owned Telegram account",
+    });
+  } catch (error) {
+    if (isBothSubscriptionsMergeConflict(error)) {
+      throw new BffError(
+        "ACCOUNT_MERGE_REQUIRED",
+        409,
+        "У обеих учетных записей есть активные подписки. Объединение нужно выполнить через поддержку.",
+        {
+          message: "У обеих учетных записей есть активные подписки. Объединение нужно выполнить через поддержку.",
+        },
+      );
+    }
+
+    throw error;
+  }
+}
+
 async function reconcileTelegramCallbackResult({
   linked,
   userId,
@@ -98,6 +144,8 @@ async function reconcileTelegramCallbackResult({
       if (!remnashopAuth) {
         return { userId, remnashopSession: undefined };
       }
+
+      await mergeCurrentRemnashopAccountIntoTelegramAccount({ remnashopAuth });
 
       const linkedUser = await linkCurrentUserToRemnashopAuth({
         accessToken: remnashopAuth.cookies.accessToken,
