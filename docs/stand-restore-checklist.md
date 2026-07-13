@@ -51,7 +51,7 @@ deploy/prod/stand-restore.clean-pay.env
 | `COOKIE_SECURE` | `true` для HTTPS production |
 | `COOKIE_SAMESITE` | Обычно `lax` |
 | `NEXT_PUBLIC_BRAND_NAME` | Название кабинета, если нужно заменить `Clean Pay` |
-| `NEXT_PUBLIC_BRAND_LOGO_URL` | Root-relative path логотипа, например `/logo.svg` |
+| `NEXT_PUBLIC_BRAND_LOGO_URL` | Root-relative path логотипа, по умолчанию `/clean-pay-logo.png` |
 
 ## 3. Remnashop
 

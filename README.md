@@ -131,7 +131,7 @@ pay.example.com {
 
 ## Настройки интерфейса
 
-`NEXT_PUBLIC_BRAND_NAME` и `NEXT_PUBLIC_BRAND_LOGO_URL` в `deploy/prod/.env` задаются на этапе сборки. Логотип положите в `public/`, укажите root-relative путь, например `/clean_vpn_logo.jpg`, и выполните `node deploy/prod/prod.mjs up` для пересборки.
+`NEXT_PUBLIC_BRAND_NAME` и `NEXT_PUBLIC_BRAND_LOGO_URL` в `deploy/prod/.env` задаются на этапе сборки. По умолчанию используется `/clean-pay-logo.png`. Чтобы переопределить его, положите файл в `public/`, укажите root-relative путь и выполните `node deploy/prod/prod.mjs up` для пересборки.
 
 Turnstile включается параметром `TURNSTILE_ENABLED=true`; при этом обязательны `TURNSTILE_SITE_KEY` и `TURNSTILE_SECRET_KEY`. Контакты поддержки включаются через `SUPPORT_ENABLED=true`.
 

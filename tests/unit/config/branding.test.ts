@@ -8,7 +8,7 @@ describe("cabinet branding", () => {
   it("uses Clean Pay defaults when branding env is empty", () => {
     expect(resolveBranding({})).toEqual({
       name: "Clean Pay",
-      logoUrl: "/logo.svg",
+      logoUrl: "/clean-pay-logo.png",
     });
   });
 

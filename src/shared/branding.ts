@@ -1,6 +1,6 @@
 const defaultBranding = {
   name: "Clean Pay",
-  logoUrl: "/logo.svg",
+  logoUrl: "/clean-pay-logo.png",
 };
 
 type BrandingEnv = Record<string, string | undefined>;

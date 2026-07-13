@@ -233,7 +233,7 @@ export function getEnv(): AppEnv {
     publicAppUrl: url("NEXT_PUBLIC_APP_URL"),
     branding: {
       name: optional("NEXT_PUBLIC_BRAND_NAME") ?? "Clean Pay",
-      logoUrl: optionalPublicPath("NEXT_PUBLIC_BRAND_LOGO_URL", "/logo.svg"),
+      logoUrl: optionalPublicPath("NEXT_PUBLIC_BRAND_LOGO_URL", "/clean-pay-logo.png"),
     },
     remnashopApiBaseUrl: url("REMNASHOP_API_BASE_URL"),
     remnashopApiKey: optional("REMNASHOP_API_KEY"),
