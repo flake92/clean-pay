@@ -2,8 +2,9 @@
 set -eu
 
 ROOT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-ENV_FILE="$ROOT_DIR/deploy/prod/.env"
-COMPOSE_FILE="$ROOT_DIR/deploy/prod/docker-compose.yml"
+ENV_FILE="$ROOT_DIR/.env"
+COMPOSE_FILE="$ROOT_DIR/docker-compose.yml"
+MODE="${CLEAN_PAY_MODE:-standalone}"
 COMMAND="${1:-start}"
 
 fail() {
@@ -42,12 +43,12 @@ env_value() {
 }
 
 require_env_file() {
-  [ -f "$ENV_FILE" ] || fail "missing deploy/prod/.env. Create it from deploy/prod/.env.example and fill real values"
+  [ -f "$ENV_FILE" ] || fail "missing .env. Create it from .env.example and fill real values"
 }
 
 required_env() {
   value=$(env_value "$1")
-  [ -n "$value" ] || fail "$1 is required in deploy/prod/.env"
+  [ -n "$value" ] || fail "$1 is required in .env"
 }
 
 bool_env() {
@@ -118,7 +119,7 @@ write_env_value() {
     && mv "$tmp_file" "$ENV_FILE" \
     || {
       rm -f "$tmp_file"
-      fail "failed to update $name in deploy/prod/.env"
+      fail "failed to update $name in .env"
     }
 }
 
@@ -131,7 +132,7 @@ ensure_generated_secret() {
   fi
 
   write_env_value "$name" "$(generate_secret)"
-  info "generated $name in deploy/prod/.env"
+  info "generated $name in .env"
 }
 
 ensure_generated_secrets() {
@@ -221,7 +222,8 @@ validate_env() {
 }
 
 ensure_network() {
-  network_name=$(env_value CLEAN_PAY_EDGE_NETWORK remnawave-network)
+  [ "$MODE" = "remnashop" ] || return 0
+  network_name=$(env_value REMNASHOP_DOCKER_NETWORK remnawave-network)
 
   if docker network inspect "$network_name" >/dev/null 2>&1; then
     info "Docker network $network_name already exists"
@@ -234,7 +236,11 @@ ensure_network() {
 }
 
 compose() {
-  docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" "$@"
+  if [ "$MODE" = "remnashop" ]; then
+    docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" -f "$ROOT_DIR/docker-compose.remnashop.yml" "$@"
+  else
+    docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" "$@"
+  fi
 }
 
 start() {
@@ -276,8 +282,6 @@ case "$COMMAND" in
     compose down
     ;;
   restart)
-    require_env_file
-    compose down
     start
     ;;
   logs)
@@ -300,7 +304,8 @@ case "$COMMAND" in
   *)
     cat <<'EOF'
 Usage:
-  sh start.sh          Start Clean Pay
+  sh start.sh          Start Clean Pay (standalone/external API mode)
+  CLEAN_PAY_MODE=remnashop sh start.sh  Start beside Remnashop on its Docker network
   sh start.sh stop     Stop containers
   sh start.sh restart  Restart containers
   sh start.sh logs     Show app logs

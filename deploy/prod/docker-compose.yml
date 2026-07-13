@@ -10,7 +10,7 @@ services:
         TURNSTILE_ENABLED: ${TURNSTILE_ENABLED:-false}
         TURNSTILE_SITE_KEY: ${TURNSTILE_SITE_KEY:-}
         NEXT_PUBLIC_BRAND_NAME: ${NEXT_PUBLIC_BRAND_NAME:-Clean Pay}
-        NEXT_PUBLIC_BRAND_LOGO_URL: ${NEXT_PUBLIC_BRAND_LOGO_URL:-/clean_vpn_logo.jpg}
+        NEXT_PUBLIC_BRAND_LOGO_URL: ${NEXT_PUBLIC_BRAND_LOGO_URL:-/logo.svg}
     restart: unless-stopped
     env_file:
       - .env

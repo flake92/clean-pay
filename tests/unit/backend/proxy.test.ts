@@ -27,7 +27,7 @@ function accessToken(payload: Record<string, unknown>, secret = process.env.WEB_
 }
 
 function request(pathname: string, cookie?: string) {
-  return new NextRequest(new Request(`https://oplata.clear-vpn.org${pathname}`, {
+  return new NextRequest(new Request(`https://pay.example.com${pathname}`, {
     headers: cookie ? { cookie } : undefined,
   }));
 }
@@ -43,7 +43,7 @@ describe("proxy auth redirects", () => {
       const response = await proxy(request(pathname));
 
       expect(response.status).toBe(307);
-      expect(response.headers.get("location")).toBe(`https://oplata.clear-vpn.org/login?redirect_to=${encodeURIComponent(pathname)}`);
+      expect(response.headers.get("location")).toBe(`https://pay.example.com/login?redirect_to=${encodeURIComponent(pathname)}`);
     },
   );
 
@@ -61,7 +61,7 @@ describe("proxy auth redirects", () => {
     const response = await proxy(request("/cabinet", cookie));
 
     expect(response.status).toBe(307);
-    expect(response.headers.get("location")).toBe("https://oplata.clear-vpn.org/login?redirect_to=%2Fcabinet");
+    expect(response.headers.get("location")).toBe("https://pay.example.com/login?redirect_to=%2Fcabinet");
     expect(response.cookies.get("clean_pay_access")?.value).toBe("");
     expect(response.cookies.get("clean_pay_refresh")?.value).toBe("");
   });

@@ -12,8 +12,8 @@ node_modules/
 .env
 .env.*
 !.env.example
-!.env.production.example
 deploy/prod/.env
+.env
 deploy/prod/remnashop.env
 deploy/prod/*.env
 !deploy/prod/*.env.example

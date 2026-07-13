@@ -51,7 +51,7 @@ deploy/prod/stand-restore.clean-pay.env
 | `COOKIE_SECURE` | `true` для HTTPS production |
 | `COOKIE_SAMESITE` | Обычно `lax` |
 | `NEXT_PUBLIC_BRAND_NAME` | Название кабинета, если нужно заменить `Clean Pay` |
-| `NEXT_PUBLIC_BRAND_LOGO_URL` | Root-relative path логотипа, например `/clean_vpn_logo.jpg` |
+| `NEXT_PUBLIC_BRAND_LOGO_URL` | Root-relative path логотипа, например `/logo.svg` |
 
 ## 3. Remnashop
 
@@ -64,7 +64,7 @@ deploy/prod/stand-restore.clean-pay.env
 | `APP_LOCALES` | Должен содержать `ru` |
 | `APP_DEFAULT_LOCALE` | Сейчас `ru` |
 | `WEB_ENABLED` | Должно быть `true`, иначе Remnashop не подключит `/api/v1/public/*` |
-| `WEB_CABINET_URL` | URL Clean Pay Telegram WebApp, например `https://oplata.clear-vpn.org/auth/telegram/webapp` |
+| `WEB_CABINET_URL` | URL Clean Pay Telegram WebApp, например `https://pay.example.com/auth/telegram/webapp` |
 | `APP_API_KEY` | Длинный random secret, обязателен при `WEB_ENABLED=true` |
 | `APP_JWT_SECRET` | Длинный random secret, обязателен при `WEB_ENABLED=true` |
 | `BOT_TOKEN` | Токен Telegram-бота |

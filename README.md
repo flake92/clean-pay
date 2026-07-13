@@ -1,100 +1,256 @@
 # Clean Pay
 
-English | [Русский](README.ru_RU.md)
+Clean Pay — самостоятельный веб-кабинет оплаты и управления подписками Remnashop/Remnawave. Он хранит собственные сессии в PostgreSQL и Redis, получает пользователей, тарифы и платежи из Remnashop, а ссылку подключения — из Remnawave.
 
-Clean Pay is a web cabinet for CleanVPN payments and subscription management. A user signs in, sees subscription status, extends access, manages the profile, and receives the connection link. Cabinet data is stored in PostgreSQL and Redis. Plans, payments, and accounts come from Remnashop; the connection link comes only from Remnawave.
+Лицензия: `AGPL-3.0-only`. Для установки нужны Linux, Docker Engine с Compose v2, домен с HTTPS, установленный Remnashop с включённым Web API и API-токен Remnawave. PostgreSQL и Redis наружу не публикуются; приложение по умолчанию доступно только на `127.0.0.1:4000`.
 
-> **Important:** Clean Pay is deployed on a Linux server and must run behind an HTTPS reverse proxy. Configure the external reverse proxy for the cabinet domain and proxy it to `CLEAN_PAY_BIND:CLEAN_PAY_PORT`. The default is `127.0.0.1:4000`.
+Все необходимые для установки файлы находятся в корне проекта:
 
-## Run In 3 Steps
+- `.env.example` — полный пример настроек;
+- `docker-compose.yml` — Clean Pay, PostgreSQL и Redis;
+- `docker-compose.remnashop.yml` — подключение к общей сети Remnashop;
+- `Dockerfile` — production-сборка;
+- `start.sh` — проверка настроек, сборка, запуск и диагностика.
 
-### 1. Clone The Project
-
-```bash
-git clone <clean-pay-repository-url>
-cd clean-pay
-```
-
-### 2. Fill `.env`
+## 1. Установка
 
 ```bash
-cp deploy/prod/.env.example deploy/prod/.env
+sudo curl -fsSL https://get.docker.com | sh
+sudo mkdir -p /opt/clean-pay
+sudo git clone https://github.com/flake92/clean-pay.git /opt/clean-pay
+cd /opt/clean-pay
+cp .env.example .env
 ```
 
-Fill `deploy/prod/.env` with real values from the table below.
+Сгенерируйте пароль PostgreSQL и одинаково запишите его в `POSTGRES_PASSWORD` и `DATABASE_URL`:
 
-### 3. Start
+```bash
+password=$(openssl rand -hex 24)
+sed -i "s/^POSTGRES_PASSWORD=.*/POSTGRES_PASSWORD=$password/" .env
+sed -i "s|change-me-postgres-password|$password|" .env
+```
+
+Откройте `.env` и заполните как минимум:
+
+```dotenv
+APP_URL=https://pay.example.com
+NEXT_PUBLIC_APP_URL=https://pay.example.com
+
+REMNASHOP_API_BASE_URL=https://shop.example.com/api/v1/public
+REMNASHOP_API_KEY=<APP_API_KEY из Remnashop>
+REMNAWAVE_API_BASE_URL=https://panel.example.com
+REMNAWAVE_TOKEN=<API-токен Remnawave>
+
+TELEGRAM_OIDC_CLIENT_ID=<числовой ID Telegram-бота>
+TELEGRAM_OIDC_CLIENT_SECRET=<OIDC client secret Telegram>
+TELEGRAM_BOT_TOKEN=<токен того же бота>
+
+COOKIE_SECURE=true
+```
+
+`TELEGRAM_OIDC_CLIENT_SECRET` и `TELEGRAM_BOT_TOKEN` — разные значения. Число до `:` в токене бота должно совпадать с `TELEGRAM_OIDC_CLIENT_ID`.
+
+`start.sh` автоматически заменит демонстрационные значения `WEB_JWT_SECRET`, `WEB_REFRESH_SECRET` и `AUDIT_IP_HASH_SECRET` криптографически стойкими секретами. Остальные значения `change-me` необходимо заменить вручную.
+
+## 2. Выбор схемы размещения
+
+### Вариант A: Clean Pay отдельно от Remnashop
+
+Укажите публичные HTTPS API:
+
+```dotenv
+REMNASHOP_API_BASE_URL=https://shop.example.com/api/v1/public
+REMNAWAVE_API_BASE_URL=https://panel.example.com
+```
+
+Запуск:
 
 ```bash
 sh start.sh
+sh start.sh verify
 ```
 
-## Clean Pay Variables
+### Вариант B: Clean Pay рядом с Remnashop
 
-| Variable | Required | Example | Purpose |
-| --- | --- | --- | --- |
-| `COMPOSE_PROJECT_NAME` | No | `clean-pay-prod` | Docker Compose project name. |
-| `CLEAN_PAY_IMAGE` | No | `clean-pay-prod-app:local` | Application Docker image name. |
-| `CLEAN_PAY_BIND` | No | `127.0.0.1` | Host IP where the app listens. Use `127.0.0.1` behind a reverse proxy. |
-| `CLEAN_PAY_PORT` | No | `4000` | Host port for the app. |
-| `CLEAN_PAY_EDGE_NETWORK` | No | `remnawave-network` | External Docker network. `start.sh` creates it when missing. |
-| `POSTGRES_DB` | No | `clean_pay` | Bundled PostgreSQL database name. |
-| `POSTGRES_USER` | No | `clean_pay` | Bundled PostgreSQL username. |
-| `POSTGRES_PASSWORD` | Yes | `change-me-postgres-password` | Bundled PostgreSQL password. |
-| `DATABASE_URL` | Yes | `postgresql://clean_pay:change-me-postgres-password@postgres:5432/clean_pay?schema=public` | Clean Pay PostgreSQL connection. |
-| `REDIS_URL` | Yes | `redis://redis:6379/0` | Clean Pay Redis connection. |
-| `APP_URL` | Yes | `https://oplata.example.com` | Public server URL of the cabinet. |
-| `NEXT_PUBLIC_APP_URL` | Yes | `https://oplata.example.com` | Public frontend URL of the cabinet. Usually equals `APP_URL`. |
-| `NEXT_PUBLIC_BRAND_NAME` | No | `Clean Pay` | Cabinet brand name. Rebuild after changing it. |
-| `NEXT_PUBLIC_BRAND_LOGO_URL` | No | `/clean_vpn_logo.jpg` | Cabinet logo. Rebuild after changing it. |
-| `LOG_LEVEL` | No | `info` | Log level: `debug`, `info`, `warn`, `error`. |
-| `REMNASHOP_API_BASE_URL` | Yes | `https://bot.example.com/api/v1/public` | Remnashop public API. |
-| `REMNAWAVE_API_BASE_URL` | Yes | `https://panel.example.com` | Remnawave panel/API URL without `/api`. |
-| `REMNAWAVE_TOKEN` | Yes | `change-me` | Remnawave API token for connection links. |
-| `WEB_JWT_SECRET` | Yes | auto-generated by `start.sh` | Secret for web access/session tokens. |
-| `WEB_REFRESH_SECRET` | Yes | auto-generated by `start.sh` | Secret for refresh/session tokens. |
-| `AUDIT_IP_HASH_SECRET` | No | auto-generated by `start.sh` | Secret for hashing IPs in audit logs. |
-| `COOKIE_SECURE` | No | `true` | Use `true` for HTTPS. |
-| `COOKIE_SAMESITE` | No | `lax` | SameSite policy: `lax`, `strict`, `none`. |
-| `TELEGRAM_OIDC_CLIENT_ID` | Yes | `1234567890` | Telegram bot ID for OAuth. |
-| `TELEGRAM_OIDC_CLIENT_SECRET` | Yes | `change-me` | Telegram OAuth client secret. |
-| `TELEGRAM_BOT_TOKEN` | No | `1234567890:change-me` | Telegram bot token for Telegram flows. |
-| `TURNSTILE_ENABLED` | No | `false` | Enables Cloudflare Turnstile. |
-| `TURNSTILE_SITE_KEY` | When Turnstile is enabled | `1x00000000000000000000AA` | Public Turnstile site key passed to the frontend. |
-| `TURNSTILE_SECRET_KEY` | When Turnstile is enabled | `1x0000000000000000000000000000000AA` | Secret key for Cloudflare verification API. |
-| `TURNSTILE_VERIFY_URL` | No | `https://challenges.cloudflare.com/turnstile/v0/siteverify` | Turnstile verification endpoint. |
-| `SUPPORT_ENABLED` | No | `false` | Enables support block. |
-| `SUPPORT_EMAIL` | No | `support@example.com` | Support e-mail. |
-| `SUPPORT_TELEGRAM_USERNAME` | No | `cleanpay_support` | Support Telegram username without `@`. |
-| `SUPPORT_FAQ_URL` | No | `https://oplata.example.com/support` | FAQ/support URL. |
-| `CLEAN_PAY_READINESS_MAILPIT_URL` | No | empty | Optional Mailpit readiness check. |
-| `CLEAN_PAY_READINESS_REMNAWAVE_URL` | No | empty | Optional Remnawave readiness check. |
+При стандартной совместной установке Remnashop и Remnawave используют сеть `remnawave-network`. Укажите внутренние адреса:
 
-## Required Remnashop Variables
+```dotenv
+REMNASHOP_DOCKER_NETWORK=remnawave-network
+REMNASHOP_API_BASE_URL=http://remnashop:5000/api/v1/public
+REMNAWAVE_API_BASE_URL=http://remnawave:3000
+```
 
-Add these variables to the external Remnashop `.env`, not to Clean Pay.
-
-| Remnashop Variable | Required | Example | Purpose |
-| --- | --- | --- | --- |
-| `WEB_ENABLED` | Yes | `true` | Enables Remnashop public API for Clean Pay. |
-| `WEB_CABINET_URL` | Yes | `https://oplata.example.com/auth/telegram/webapp` | Clean Pay cabinet URL for web/Telegram flows. |
-| `APP_API_KEY` | Yes | `change-me-long-random-api-key` | Remnashop web API secret when `WEB_ENABLED=true`. |
-| `APP_JWT_SECRET` | Yes | `change-me-long-random-jwt-secret` | Remnashop web API JWT secret when `WEB_ENABLED=true`. |
-| `EMAIL_ENABLED` | Yes | `true` | Enables e-mail verification code delivery. |
-| `EMAIL_HOST` | Yes | `smtp.example.com` | SMTP host. |
-| `EMAIL_PORT` | Yes | `587` | SMTP port. |
-| `EMAIL_USE_TLS` | Yes | `true` | SMTP STARTTLS. Usually `true` for port `587`. |
-| `EMAIL_USE_SSL` | Yes | `false` | SMTP over SSL. Usually `true` for port `465`. |
-| `EMAIL_USERNAME` | Yes | `code@example.com` | SMTP username. |
-| `EMAIL_PASSWORD` | Yes | `change-me-smtp-password` | SMTP password. |
-| `EMAIL_FROM_EMAIL` | Yes | `code@example.com` | E-mail From address. |
-| `EMAIL_FROM_NAME` | No | `Clean Pay` | E-mail sender name. |
-| `EMAIL_VERIFICATION_CODE_TTL_MINUTES` | No | `15` | Verification code lifetime. |
-
-Remnashop public API check:
+Запуск:
 
 ```bash
-curl https://bot.example.com/api/v1/public/plans/public
+CLEAN_PAY_MODE=remnashop sh start.sh
+CLEAN_PAY_MODE=remnashop sh start.sh verify
 ```
 
-Expected result: HTTP `200` and JSON `{"plans":[...]}` or `{"plans":[]}`.
+В этом режиме приложение получает сетевой alias `clean-pay`. Для последующих команд `status`, `logs`, `restart` и `stop` передавайте тот же `CLEAN_PAY_MODE=remnashop`.
+
+## 3. Настройка Remnashop
+
+Добавьте в существующий `/opt/remnashop/.env`:
+
+```dotenv
+WEB_ENABLED=true
+WEB_CABINET_URL=https://pay.example.com/auth/telegram/webapp
+APP_API_KEY=<openssl rand -hex 32>
+APP_JWT_SECRET=<openssl rand -hex 32>
+```
+
+Значение `APP_API_KEY` должно совпадать с `REMNASHOP_API_KEY` в `.env` Clean Pay.
+
+Указывайте полный маршрут `/auth/telegram/webapp`. `BOT_MINI_APP` и `WEB_CABINET_URL` — разные настройки: первая управляет отдельной кнопкой подключения/подписки, а вторая формирует кнопку «Личный кабинет» в боте Remnashop. Нельзя подставлять URL mini-app подключения в `WEB_CABINET_URL` — такой адрес приведёт к `404`.
+
+Для регистрации и входа по e-mail также настройте SMTP:
+
+```dotenv
+EMAIL_ENABLED=true
+EMAIL_HOST=smtp.example.com
+EMAIL_PORT=587
+EMAIL_USE_TLS=true
+EMAIL_USE_SSL=false
+EMAIL_USERNAME=mail@example.com
+EMAIL_PASSWORD=<пароль SMTP>
+EMAIL_FROM_EMAIL=mail@example.com
+EMAIL_FROM_NAME=Clean Pay
+```
+
+Для SMTP over SSL обычно используют порт `465`, `EMAIL_USE_TLS=false` и `EMAIL_USE_SSL=true`. Не включайте TLS и SSL одновременно.
+
+Примените настройки Remnashop без удаления его volumes:
+
+```bash
+cd /opt/remnashop
+docker compose up -d --no-deps --force-recreate \
+  remnashop remnashop-taskiq-worker remnashop-taskiq-scheduler
+curl -f http://127.0.0.1:5000/api/v1/public/plans/public
+curl -f https://pay.example.com/auth/telegram/webapp
+```
+
+Ожидается HTTP `200`. Уже отправленная Telegram-клавиатура хранит старый URL: после изменения пользователь должен снова отправить `/start` или заново открыть главное меню бота. Не используйте `docker compose down -v`.
+
+## 4. Reverse proxy и HTTPS
+
+DNS-запись домена должна указывать на сервер с reverse proxy.
+
+Если перед Caddy/Nginx расположен отдельный TCP/SNI-прокси или балансировщик, добавьте домен Clean Pay и в его таблицу маршрутизации. Одной DNS-записи и блока Caddy недостаточно: внешний прокси должен передавать TCP/443 на сервер Clean Pay, а режим PROXY protocol на обеих сторонах должен совпадать.
+
+Если Caddy установлен непосредственно на хосте или Clean Pay размещён отдельно:
+
+```caddyfile
+pay.example.com {
+    encode gzip zstd
+    reverse_proxy 127.0.0.1:4000
+}
+```
+
+Если Caddy работает в Docker и подключён к той же `remnawave-network`, используйте alias контейнера:
+
+```caddyfile
+pay.example.com {
+    encode gzip zstd
+    reverse_proxy clean-pay:4000
+}
+```
+
+Пример для Nginx на хосте внутри HTTPS `server`:
+
+```nginx
+location / {
+    proxy_pass http://127.0.0.1:4000;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+}
+```
+
+Проверка после выпуска сертификата:
+
+```bash
+curl -f https://pay.example.com/api/health/liveness
+curl -f https://pay.example.com/api/health/readiness
+```
+
+## 5. Необязательные настройки
+
+Cloudflare Turnstile:
+
+```dotenv
+TURNSTILE_ENABLED=true
+TURNSTILE_SITE_KEY=<site-key для домена Clean Pay>
+TURNSTILE_SECRET_KEY=<secret-key>
+```
+
+Контакты поддержки включаются через `SUPPORT_ENABLED=true` и переменные `SUPPORT_EMAIL`, `SUPPORT_TELEGRAM_USERNAME`, `SUPPORT_FAQ_URL`. Полный список поддерживаемых значений и безопасные примеры находятся в `.env.example`.
+
+## 6. Ребрендинг
+
+1. Поместите логотип в `public/`, например `public/my-logo.svg`.
+2. Укажите `NEXT_PUBLIC_BRAND_NAME` и root-relative путь `NEXT_PUBLIC_BRAND_LOGO_URL=/my-logo.svg`.
+3. Измените `EMAIL_FROM_NAME` в Remnashop и имя/аватар бота через BotFather.
+4. Пересоберите приложение: `sh start.sh restart` либо `CLEAN_PAY_MODE=remnashop sh start.sh restart`.
+
+По умолчанию используются название `Clean Pay` и логотип `/logo.svg`.
+
+## 7. Управление и обновление
+
+Отдельная установка:
+
+```bash
+sh start.sh status
+sh start.sh logs
+sh start.sh restart
+sh start.sh stop
+```
+
+Установка рядом с Remnashop:
+
+```bash
+CLEAN_PAY_MODE=remnashop sh start.sh status
+CLEAN_PAY_MODE=remnashop sh start.sh logs
+CLEAN_PAY_MODE=remnashop sh start.sh restart
+CLEAN_PAY_MODE=remnashop sh start.sh stop
+```
+
+Обновление:
+
+```bash
+cd /opt/clean-pay
+git pull --ff-only
+sh start.sh restart
+```
+
+Для совместной установки добавьте `CLEAN_PAY_MODE=remnashop` перед последней командой.
+
+## 8. Резервная копия
+
+Перед обновлением скопируйте `.env` и создайте дамп PostgreSQL:
+
+```bash
+cp -p .env ".env.backup-$(date +%Y%m%d-%H%M%S)"
+docker compose exec -T postgres pg_dump -U clean_pay -Fc clean_pay > clean-pay.dump
+docker compose exec -T postgres pg_restore -l < clean-pay.dump >/dev/null
+```
+
+Именованные volumes `postgres-data` и `redis-data` сохраняются при обычном `stop`/`restart`. Никогда не запускайте `docker compose down -v`, `docker volume prune` или `docker system prune --volumes`, если данные не должны быть удалены.
+
+## 9. Диагностика
+
+```bash
+docker compose --env-file .env config
+docker compose ps
+docker compose logs --tail=200 app
+curl -f http://127.0.0.1:4000/api/health/liveness
+curl -f http://127.0.0.1:4000/api/health/readiness
+```
+
+- `502`: приложение не запущено либо reverse proxy использует неверный upstream;
+- Remnashop `404`: проверьте `WEB_ENABLED=true` и пересоздание контейнера Remnashop;
+- ошибки защищённых операций Remnashop: проверьте совпадение `APP_API_KEY` и `REMNASHOP_API_KEY`;
+- ошибки Remnawave: проверьте URL, API-токен и Docker-сеть;
+- Telegram/OIDC: проверьте домен, callback `APP_URL/auth/telegram/callback`, client ID и client secret;
+- e-mail: проверьте SMTP host/port, режим TLS/SSL и учётные данные.

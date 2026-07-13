@@ -8,7 +8,7 @@ describe("production Docker network startup", () => {
     const startFunction = source.slice(source.indexOf("start() {"), source.indexOf("verify() {"));
 
     expect(source).toContain("validate_env");
-    expect(source).toContain("env_value CLEAN_PAY_EDGE_NETWORK remnawave-network");
+    expect(source).toContain("env_value REMNASHOP_DOCKER_NETWORK remnawave-network");
     expect(source).toContain('docker network inspect "$network_name"');
     expect(source).toContain('docker network create "$network_name"');
     expect(startFunction.indexOf("ensure_network")).toBeGreaterThanOrEqual(0);

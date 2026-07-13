@@ -210,7 +210,7 @@ describe("remnashop client", () => {
 
     await expect(remnashopAuthTelegramIdentity({
       telegramId: "7295815705",
-      telegramUsername: "clean_vpn_support",
+      telegramUsername: "clean_pay_support",
     })).resolves.toMatchObject({ cookies: { accessToken: "access.jwt" } });
 
     const [, init] = fetchMock.mock.calls[0] ?? [];
@@ -220,8 +220,8 @@ describe("remnashop client", () => {
     );
     expect(JSON.parse(String((init as RequestInit).body))).toMatchObject({
       id: 7295815705,
-      first_name: "clean_vpn_support",
-      username: "clean_vpn_support",
+      first_name: "clean_pay_support",
+      username: "clean_pay_support",
       hash: expect.any(String),
     });
   });
