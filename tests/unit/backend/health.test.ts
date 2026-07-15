@@ -68,6 +68,8 @@ describe("health checks", () => {
   it("checks optional Mailpit, Telegram OIDC and Remnawave readiness dependencies", async () => {
     vi.stubEnv("CLEAN_PAY_READINESS_MAILPIT_URL", "http://mailpit.test:8025");
     vi.stubEnv("CLEAN_PAY_READINESS_REMNAWAVE_URL", "http://remnawave.test:3000");
+    vi.stubEnv("REMNAWAVE_API_BASE_URL", "http://remnawave.test:3000");
+    vi.stubEnv("REMNAWAVE_TOKEN", "test-remnawave-token");
 
     const fetch = vi.spyOn(globalThis, "fetch")
       .mockResolvedValueOnce(new Response("{}", { status: 200 }))
@@ -85,6 +87,39 @@ describe("health checks", () => {
       cache: "no-store",
     });
     expect(fetch).toHaveBeenNthCalledWith(3, new URL("http://remnawave.test:3000/api/system/metadata"), {
+      headers: {
+        accept: "application/json",
+        authorization: "Bearer test-remnawave-token",
+      },
+      cache: "no-store",
+    });
+  });
+
+  it("reports a missing Remnawave readiness token without making a request", async () => {
+    vi.stubEnv("CLEAN_PAY_READINESS_REMNAWAVE_URL", "http://remnawave.test:3000");
+    vi.stubEnv("REMNAWAVE_API_BASE_URL", "");
+    vi.stubEnv("REMNAWAVE_TOKEN", "");
+    const fetch = vi.spyOn(globalThis, "fetch");
+
+    await expect(checkRemnawave()).resolves.toMatchObject({
+      status: "down",
+      message: "Remnawave token is not configured",
+    });
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("keeps an existing Bearer prefix in the Remnawave readiness token", async () => {
+    vi.stubEnv("CLEAN_PAY_READINESS_REMNAWAVE_URL", "http://remnawave.test:3000");
+    vi.stubEnv("REMNAWAVE_API_BASE_URL", "http://remnawave.test:3000");
+    vi.stubEnv("REMNAWAVE_TOKEN", "Bearer ready-token");
+    const fetch = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(new Response("{}", { status: 200 }));
+
+    await expect(checkRemnawave()).resolves.toMatchObject({ status: "ok" });
+    expect(fetch).toHaveBeenCalledWith(new URL("http://remnawave.test:3000/api/system/metadata"), {
+      headers: {
+        accept: "application/json",
+        authorization: "Bearer ready-token",
+      },
       cache: "no-store",
     });
   });

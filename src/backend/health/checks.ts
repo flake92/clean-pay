@@ -100,13 +100,22 @@ export async function checkTelegramOidc() {
 export async function checkRemnawave() {
   const env = getEnv();
   const remnawaveUrl = env.readiness.remnawaveUrl;
+  const token = env.remnawave.token;
 
   if (!remnawaveUrl) {
     return null;
   }
 
   return measure(async () => {
+    if (!token) {
+      throw new Error("Remnawave token is not configured");
+    }
+
     const response = await fetch(new URL("/api/system/metadata", remnawaveUrl), {
+      headers: {
+        accept: "application/json",
+        authorization: token.startsWith("Bearer ") ? token : `Bearer ${token}`,
+      },
       cache: "no-store",
     });
 
