@@ -93,6 +93,24 @@ curl -f https://pay.example.com/api/health/readiness
 
 ## Remnashop
 
+### Обязательная совместимая версия
+
+Clean Pay рассчитан на изменения из открытого upstream PR
+[`snoups/remnashop#129`](https://github.com/snoups/remnashop/pull/129) и на
+дополняющий его stacked PR
+[`flake92/remnashop#2`](https://github.com/flake92/remnashop/pull/2). PR #129
+добавляет базовые password-reset/WebApp изменения, а stacked PR — необходимый
+для Clean Pay API безопасного объединения e-mail и Telegram аккаунтов.
+
+Пока эти изменения не приняты upstream и не вошли в официальный образ,
+тестовый стенд Remnashop нужно собирать из ветки
+`flake92/remnashop:codex/clean-pay-integration-pr` (она уже включает базу PR
+#129) либо фиксировать на совместимом commit `0f0fb45`. Обычный
+`ghcr.io/snoups/remnashop:latest`/v0.8.2 не содержит endpoint
+`POST /api/v1/admin/users/merge`, поэтому полный сценарий привязки e-mail к
+Telegram аккаунту с ним не работает. После принятия PR следует перейти на
+первый официальный релиз Remnashop, содержащий обе группы изменений.
+
 В `/opt/remnashop/.env` включите веб-кабинет и укажите тот же ключ, что в `REMNASHOP_API_KEY` Clean Pay:
 
 ```dotenv
