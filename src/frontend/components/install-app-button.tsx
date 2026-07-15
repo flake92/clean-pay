@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useState } from "react";
 
 import {
@@ -94,7 +95,25 @@ export function InstallAppButton({ alwaysVisible = false }: { alwaysVisible?: bo
     if (choice.outcome === "dismissed") setMessage("Установка отменена. Вы сможете вернуться к ней в любой момент.");
   }
 
-  if (installed || (!alwaysVisible && mobilePlatform !== "android" && mobilePlatform !== "ios" && !installEvent)) return null;
+  if (installed) {
+    if (!alwaysVisible) return null;
+
+    return (
+      <div className="flex flex-column align-items-center gap-3 text-center" role="status">
+        <i className="pi pi-check-circle text-green-500" style={{ fontSize: "2rem" }} />
+        <strong className="text-900 text-xl">Clean Pay уже установлен</strong>
+        <span className="text-600 line-height-3">
+          Ярлык уже находится на главном экране. Если хотите установить его заново, сначала удалите существующее приложение Clean Pay.
+        </span>
+        <Link className="p-button p-component no-underline" href="/cabinet">
+          <span className="p-button-icon p-c pi pi-home" />
+          <span className="p-button-label">Открыть кабинет</span>
+        </Link>
+      </div>
+    );
+  }
+
+  if (!alwaysVisible && mobilePlatform !== "android" && mobilePlatform !== "ios" && !installEvent) return null;
 
   return (
     <>
