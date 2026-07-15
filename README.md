@@ -64,6 +64,15 @@ node deploy/prod/prod.mjs verify
 node deploy/prod/prod.mjs ps
 ```
 
+Если на хосте нет Node.js, используйте эквивалентный Docker Compose запуск. Он не требует установки Node.js на хост и всё равно запускает проверку production-конфигурации внутри контейнера:
+
+```bash
+docker network inspect "$(grep '^CLEAN_PAY_EDGE_NETWORK=' deploy/prod/.env | cut -d= -f2)" >/dev/null 2>&1 \
+  || docker network create "$(grep '^CLEAN_PAY_EDGE_NETWORK=' deploy/prod/.env | cut -d= -f2)"
+docker compose --env-file deploy/prod/.env -f deploy/prod/docker-compose.yml up -d --build
+curl -f http://127.0.0.1:4000/api/health
+```
+
 Команда `up` не удаляет существующие volumes. Не используйте `docker compose down -v`, `docker volume prune` или `docker system prune --volumes`, если данные стенда нужно сохранить.
 
 Управление:
@@ -106,6 +115,8 @@ EMAIL_PASSWORD=<пароль>
 EMAIL_FROM_EMAIL=mail@example.com
 EMAIL_FROM_NAME=Clean Pay
 ```
+
+`REMNASHOP_API_KEY` в `deploy/prod/.env` должен совпадать с `APP_API_KEY` Remnashop. Он обязателен для безопасного объединения e-mail и Telegram аккаунтов.
 
 Применяйте изменение без удаления данных:
 
