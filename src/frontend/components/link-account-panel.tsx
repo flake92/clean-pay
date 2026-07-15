@@ -226,9 +226,11 @@ export function LinkAccountPanel({
     setActionLoading(null);
 
     if (!response.ok) {
+      const responseError = await readError(response);
       turnstile?.reset();
       setTurnstileToken(null);
-      setError(await readError(response));
+      await loadState();
+      setError(responseError);
       return;
     }
 
