@@ -47,6 +47,13 @@ describe("proxy auth redirects", () => {
     },
   );
 
+  it.each(["/install", "/offline"])("allows public PWA page %s without cookies", async (pathname) => {
+    const response = await proxy(request(pathname));
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("location")).toBeNull();
+  });
+
   it.each([
     ["refresh only", "clean_pay_refresh=refresh-token"],
     [

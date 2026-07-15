@@ -7,6 +7,8 @@ const refreshCookieName = 'clean_pay_refresh';
 
 const publicPagePaths = new Set([
   '/manifest.webmanifest',
+  '/install',
+  '/offline',
   '/login',
   '/register',
   '/auth/telegram/start',

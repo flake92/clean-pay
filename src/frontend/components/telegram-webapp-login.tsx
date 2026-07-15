@@ -4,42 +4,13 @@ import { useEffect, useState } from "react";
 
 import { LinkButton } from "@/frontend/components/prime/link-button";
 import { readBffError } from "@/frontend/lib/client-api";
+import {
+  getTelegramWebApp,
+  loadTelegramWebAppScript,
+  markTelegramWebAppSession,
+} from "@/frontend/lib/telegram-webapp";
 import { Message } from "primereact/message";
 import { ProgressSpinner } from "primereact/progressspinner";
-
-type TelegramWebApp = {
-  ready?: () => void;
-  expand?: () => void;
-  initData?: string;
-};
-
-function getTelegramWebApp() {
-  return (window as Window & { Telegram?: { WebApp?: TelegramWebApp } }).Telegram?.WebApp;
-}
-
-function loadTelegramWebAppScript() {
-  if (getTelegramWebApp()) {
-    return Promise.resolve();
-  }
-
-  return new Promise<void>((resolve, reject) => {
-    const existing = document.querySelector<HTMLScriptElement>("script[data-clean-pay-telegram-webapp]");
-
-    if (existing) {
-      existing.addEventListener("load", () => resolve(), { once: true });
-      existing.addEventListener("error", () => reject(new Error("Telegram WebApp script failed to load")), { once: true });
-      return;
-    }
-
-    const script = document.createElement("script");
-    script.async = true;
-    script.dataset.cleanPayTelegramWebapp = "true";
-    script.src = "https://telegram.org/js/telegram-web-app.js";
-    script.onload = () => resolve();
-    script.onerror = () => reject(new Error("Telegram WebApp script failed to load"));
-    document.head.appendChild(script);
-  });
-}
 
 function redirectToTelegramLogin() {
   const url = new URL("/auth/telegram/start", window.location.origin);
@@ -73,6 +44,8 @@ export function TelegramWebAppLogin() {
           redirectToTelegramLogin();
           return;
         }
+
+        markTelegramWebAppSession();
 
         const response = await fetch("/api/bff/auth/telegram/webapp", {
           method: "POST",
