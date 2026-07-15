@@ -6,6 +6,7 @@ const accessCookieName = 'clean_pay_access';
 const refreshCookieName = 'clean_pay_refresh';
 
 const publicPagePaths = new Set([
+  '/manifest.webmanifest',
   '/login',
   '/register',
   '/auth/telegram/start',
