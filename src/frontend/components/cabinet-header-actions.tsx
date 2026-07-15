@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 
+import { InstallAppButton } from "@/frontend/components/install-app-button";
 import { LinkButton } from "@/frontend/components/prime/link-button";
 import { hasRenewOffer } from "@/frontend/lib/subscription-offers";
 import type { SubscriptionOffersResponse } from "@/shared/remnashop/types";
@@ -42,6 +43,7 @@ export function CabinetHeaderActions() {
 
   return (
     <>
+      <InstallAppButton />
       <LinkButton href="/tariffs" label={hasSubscription ? "Изменить тариф" : "Тарифы"} outlined />
       {hasRenewOffer(offers) ? <LinkButton href="/extend" label="Продлить" /> : null}
     </>
