@@ -24,6 +24,9 @@ const branding = getBranding();
 export const metadata: Metadata = {
   title: branding.name,
   description: `${branding.name} payment and subscription cabinet`,
+  icons: {
+    apple: [{ url: "/clean-pay-icon-192.png?v=3", sizes: "192x192", type: "image/png" }],
+  },
 };
 
 export default function RootLayout({

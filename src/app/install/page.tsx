@@ -9,7 +9,7 @@ export default function InstallPage() {
     >
       <div className="flex flex-column gap-3 align-items-center text-center">
         <p className="m-0 text-600 line-height-3">
-          На Android нажмите кнопку ниже и подтвердите установку. На iPhone откройте меню «Поделиться» и выберите «На экран Домой».
+          На Android нажмите кнопку ниже и подтвердите установку. На iPhone подробная инструкция откроется автоматически и покажет все действия в Safari.
         </p>
         <InstallAppButton alwaysVisible />
       </div>

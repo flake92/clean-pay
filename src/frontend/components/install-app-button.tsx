@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 
+import { IosInstallGuide } from "@/frontend/components/ios-install-guide";
 import {
   loadTelegramWebAppScript,
   openTelegramExternalLink,
@@ -54,9 +55,15 @@ export function InstallAppButton({ alwaysVisible = false }: { alwaysVisible?: bo
 
   useEffect(() => {
     const platformTimer = window.setTimeout(() => {
-      setMobilePlatform(isAppleMobileDevice() ? "ios" : isAndroidDevice() ? "android" : "other");
+      const isIos = isAppleMobileDevice();
+      const requestedPlatform = new URLSearchParams(window.location.search).get("platform");
+      setMobilePlatform(isIos ? "ios" : isAndroidDevice() ? "android" : "other");
       const embedded = isEmbeddedMobileBrowser();
       setEmbeddedBrowser(embedded);
+
+      if (alwaysVisible && (isIos || requestedPlatform === "ios") && !embedded && !isStandalone()) {
+        setShowIosGuide(true);
+      }
 
       if (embedded) {
         void loadTelegramWebAppScript().catch(() => undefined);
@@ -72,10 +79,14 @@ export function InstallAppButton({ alwaysVisible = false }: { alwaysVisible?: bo
     }
 
     return () => { window.clearTimeout(platformTimer); window.removeEventListener("beforeinstallprompt", onBeforeInstallPrompt); window.removeEventListener("appinstalled", onInstalled); };
-  }, []);
+  }, [alwaysVisible]);
 
   function openExternalInstallPage() {
-    if (!openTelegramExternalLink(new URL("/install", window.location.origin).toString())) {
+    const installUrl = new URL("/install", window.location.origin);
+    installUrl.searchParams.set("source", "telegram");
+    installUrl.searchParams.set("platform", isAppleMobileDevice() ? "ios" : isAndroidDevice() ? "android" : "other");
+
+    if (!openTelegramExternalLink(installUrl.toString())) {
       setShowEmbeddedGuide(true);
     }
   }
@@ -131,15 +142,7 @@ export function InstallAppButton({ alwaysVisible = false }: { alwaysVisible?: bo
           </div>
         </div>
       ) : null}
-      {showIosGuide ? (
-        <div role="dialog" aria-modal="true" aria-labelledby="install-ios-title" style={{ background: "rgba(0, 0, 0, 0.45)", inset: 0, padding: "1rem", position: "fixed", zIndex: 1100 }}>
-          <div style={{ background: "white", borderRadius: "12px", margin: "20vh auto", maxWidth: "28rem", padding: "1.5rem" }}>
-            <h2 id="install-ios-title" className="mt-0">Добавить на экран «Домой»</h2>
-            <p>В Safari нажмите «Поделиться», затем выберите «На экран “Домой”» и подтвердите добавление.</p>
-            <button type="button" className="p-button p-component" onClick={() => setShowIosGuide(false)}><span className="p-button-label">Понятно</span></button>
-          </div>
-        </div>
-      ) : null}
+      {showIosGuide ? <IosInstallGuide onClose={() => setShowIosGuide(false)} /> : null}
       {showAndroidGuide ? (
         <div role="dialog" aria-modal="true" aria-labelledby="install-android-title" style={{ background: "rgba(0, 0, 0, 0.45)", inset: 0, padding: "1rem", position: "fixed", zIndex: 1100 }}>
           <div style={{ background: "white", borderRadius: "12px", margin: "20vh auto", maxWidth: "28rem", padding: "1.5rem" }}>
