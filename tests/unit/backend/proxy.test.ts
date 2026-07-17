@@ -95,6 +95,35 @@ describe("proxy auth redirects", () => {
     expect(response.headers.get("location")).toBeNull();
   });
 
+  it("allows only the exact reconciliation service POST through to its secret-protected handler", async () => {
+    const response = await proxy(request(
+      "/api/internal/payments/reconcile",
+      undefined,
+      {
+        method: "POST",
+        headers: {
+          "x-clean-pay-reconciliation-secret": "handler-validates-this",
+        },
+      },
+    ));
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("location")).toBeNull();
+  });
+
+  it.each([
+    ["GET on the exact path", "GET", "/api/internal/payments/reconcile"],
+    ["a nested path", "POST", "/api/internal/payments/reconcile/extra"],
+    ["a sibling prefix", "POST", "/api/internal/payments/reconcile-other"],
+  ])("does not broaden the internal allowlist for %s", async (_label, method, pathname) => {
+    const response = await proxy(request(pathname, undefined, { method }));
+
+    expect(response.status).toBe(401);
+    expect(await response.json()).toMatchObject({
+      error: { code: "UNAUTHORIZED" },
+    });
+  });
+
   it("allows a same-origin cookie-auth JSON mutation", async () => {
     const response = await proxy(request(
       "/api/bff/auth/email/change",

@@ -9,6 +9,7 @@ type AppEnv = {
     logoUrl: string;
   };
   remnashopApiBaseUrl: string;
+  remnashopAdminApiBaseUrl: string | null;
   remnashopApiKey: string | null;
   remnawave: {
     apiBaseUrl: string | null;
@@ -33,6 +34,12 @@ type AppEnv = {
     success: string;
     fail: string;
     pending: string;
+  };
+  paymentReconciliation: {
+    enabled: boolean;
+    secret: string | null;
+    batchSize: number;
+    intervalSeconds: number;
   };
   turnstile: {
     enabled: boolean;
@@ -121,6 +128,22 @@ function sameSite(name: string, defaultValue: SameSite) {
   throw new Error(`${name} must be "lax", "strict", or "none"`);
 }
 
+function integer(name: string, defaultValue: number, min: number, max: number) {
+  const value = process.env[name]?.trim();
+
+  if (!value) {
+    return defaultValue;
+  }
+
+  const parsed = Number(value);
+
+  if (!Number.isSafeInteger(parsed) || parsed < min || parsed > max) {
+    throw new Error(`${name} must be an integer between ${min} and ${max}`);
+  }
+
+  return parsed;
+}
+
 function joinUrl(baseUrl: string, path: string) {
   return new URL(path, `${baseUrl}/`).toString();
 }
@@ -201,6 +224,25 @@ function validateEnv(env: AppEnv) {
     throw new Error("NEXT_PUBLIC_BRAND_NAME must be 80 characters or less");
   }
 
+  if (
+    env.paymentReconciliation.enabled &&
+    (!env.paymentReconciliation.secret ||
+      env.paymentReconciliation.secret.length < 32)
+  ) {
+    throw new Error(
+      "PAYMENT_RECONCILIATION_SECRET must be at least 32 characters when PAYMENT_RECONCILIATION_ENABLED=true",
+    );
+  }
+
+  if (
+    env.paymentReconciliation.enabled &&
+    !env.remnashopAdminApiBaseUrl
+  ) {
+    throw new Error(
+      "REMNASHOP_ADMIN_API_BASE_URL is required when PAYMENT_RECONCILIATION_ENABLED=true",
+    );
+  }
+
   if (isProduction && (!env.remnawave.apiBaseUrl || !env.remnawave.token)) {
     throw new Error("REMNAWAVE_API_BASE_URL and REMNAWAVE_TOKEN are required in production");
   }
@@ -236,6 +278,8 @@ export function getEnv(): AppEnv {
       logoUrl: optionalPublicPath("NEXT_PUBLIC_BRAND_LOGO_URL", "/clean-pay-logo.png"),
     },
     remnashopApiBaseUrl: url("REMNASHOP_API_BASE_URL"),
+    remnashopAdminApiBaseUrl:
+      optionalUrl("REMNASHOP_ADMIN_API_BASE_URL")?.replace(/\/$/, "") ?? null,
     remnashopApiKey: optional("REMNASHOP_API_KEY"),
     remnawave: {
       apiBaseUrl: optionalUrl("REMNAWAVE_API_BASE_URL"),
@@ -263,6 +307,17 @@ export function getEnv(): AppEnv {
       success: joinUrl(appUrl, "/payment/success"),
       fail: joinUrl(appUrl, "/payment/fail"),
       pending: joinUrl(appUrl, "/payment/pending"),
+    },
+    paymentReconciliation: {
+      enabled: bool("PAYMENT_RECONCILIATION_ENABLED", false),
+      secret: optional("PAYMENT_RECONCILIATION_SECRET"),
+      batchSize: integer("PAYMENT_RECONCILIATION_BATCH_SIZE", 10, 1, 100),
+      intervalSeconds: integer(
+        "PAYMENT_RECONCILIATION_INTERVAL_SECONDS",
+        30,
+        5,
+        3_600,
+      ),
     },
     turnstile: {
       enabled: bool("TURNSTILE_ENABLED", false),

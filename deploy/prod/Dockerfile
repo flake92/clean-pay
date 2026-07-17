@@ -7,6 +7,7 @@ ENV DATABASE_URL=postgresql://clean_pay:clean_pay@localhost:5432/clean_pay?schem
 ENV APP_URL=http://localhost:4000
 ENV NEXT_PUBLIC_APP_URL=http://localhost:4000
 ENV REMNASHOP_API_BASE_URL=https://remnashop.example.com/api/v1/public
+ENV REMNASHOP_ADMIN_API_BASE_URL=https://remnashop.example.com/api/v1/admin
 ENV REMNAWAVE_API_BASE_URL=https://remnawave.example.com
 ENV REMNAWAVE_TOKEN=build-time-placeholder
 ENV REDIS_URL=redis://localhost:6379/0
@@ -61,6 +62,8 @@ COPY --from=builder --chown=cleanpay:nodejs /app/prisma ./prisma
 COPY --from=builder --chown=cleanpay:nodejs /app/prisma.config.ts ./prisma.config.ts
 COPY --chown=cleanpay:nodejs deploy/prod/start.sh ./deploy/prod/start.sh
 COPY --chown=cleanpay:nodejs deploy/prod/validate-env.mjs ./deploy/prod/validate-env.mjs
+COPY --chown=cleanpay:nodejs deploy/prod/reconcile-loop.mjs ./deploy/prod/reconcile-loop.mjs
+COPY --chown=cleanpay:nodejs deploy/prod/reconciliation-batch.mjs ./deploy/prod/reconciliation-batch.mjs
 
 RUN sed -i 's/\r$//' ./deploy/prod/start.sh \
   && chmod +x ./deploy/prod/start.sh

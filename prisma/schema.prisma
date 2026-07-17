@@ -58,56 +58,61 @@ enum WebAuthnChallengeType {
 }
 
 model WebUser {
-  id                     String                  @id @default(cuid())
-  remnashopUserId        String?                 @unique
-  email                  String?                 @unique
-  telegramId             String?                 @unique
-  telegramUsername       String?
-  fullName               String?
-  photoUrl               String?
-  lastLoginAt            DateTime?
-  emailVerified          Boolean                 @default(false)
-  authPending            Boolean                 @default(false)
-  displayName            String?
-  createdAt              DateTime                @default(now())
-  updatedAt              DateTime                @updatedAt
-  sessions               WebSession[]
-  auditLogs              AuditLog[]
-  emailVerificationCodes EmailVerificationCode[]
-  paymentOperations      PaymentOperation[]
-  paymentRecords         PaymentRecord[]
-  telegramAuthStates     TelegramAuthState[]
-  webAuthnCredentials    WebAuthnCredential[]
-  webAuthnChallenges     WebAuthnChallenge[]
+  id                      String                   @id @default(cuid())
+  remnashopUserId         String?                  @unique
+  email                   String?                  @unique
+  telegramId              String?                  @unique
+  telegramUsername        String?
+  fullName                String?
+  photoUrl                String?
+  lastLoginAt             DateTime?
+  emailVerified           Boolean                  @default(false)
+  authPending             Boolean                  @default(false)
+  displayName             String?
+  createdAt               DateTime                 @default(now())
+  updatedAt               DateTime                 @updatedAt
+  sessions                WebSession[]
+  auditLogs               AuditLog[]
+  emailVerificationCodes  EmailVerificationCode[]
+  paymentOperations       PaymentOperation[]
+  paymentRecords          PaymentRecord[]
+  paymentHistorySyncState PaymentHistorySyncState?
+  telegramAuthStates      TelegramAuthState[]
+  webAuthnCredentials     WebAuthnCredential[]
+  webAuthnChallenges      WebAuthnChallenge[]
 
   @@index([email])
   @@index([telegramId])
 }
 
 model PaymentRecord {
-  id           String              @id @default(cuid())
-  userId       String
-  paymentId    String              @unique
-  purchaseType String
-  status       PaymentRecordStatus @default(PENDING)
-  finalAmount  Decimal             @db.Decimal(12, 2)
-  currency     String
-  gatewayType  String
-  planCode     String?
-  planName     String?
-  durationDays Int?
-  deviceLimit  Int?
-  trafficLimit Int?
-  paymentUrl   String?
-  isFree       Boolean             @default(false)
-  raw          Json?
-  operationId  String?             @unique
-  createdAt    DateTime            @default(now())
-  updatedAt    DateTime            @updatedAt
-  user         WebUser             @relation(fields: [userId], references: [id], onDelete: Cascade)
-  operation    PaymentOperation?   @relation(fields: [operationId], references: [id], onDelete: SetNull)
+  id                String              @id @default(cuid())
+  userId            String
+  paymentId         String              @unique
+  purchaseType      String
+  status            PaymentRecordStatus @default(PENDING)
+  finalAmount       Decimal             @db.Decimal(12, 2)
+  currency          String
+  gatewayType       String
+  planCode          String?
+  planName          String?
+  durationDays      Int?
+  deviceLimit       Int?
+  trafficLimit      Int?
+  paymentUrl        String?
+  isFree            Boolean             @default(false)
+  raw               Json?
+  operationId       String?             @unique
+  upstreamCreatedAt DateTime            @default(now())
+  upstreamUpdatedAt DateTime            @default(now())
+  lastSyncedAt      DateTime?
+  createdAt         DateTime            @default(now())
+  updatedAt         DateTime            @updatedAt
+  user              WebUser             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  operation         PaymentOperation?   @relation(fields: [operationId], references: [id], onDelete: SetNull)
 
   @@index([userId, createdAt])
+  @@index([userId, upstreamCreatedAt, paymentId])
   @@index([paymentId])
   @@index([status])
 }
@@ -159,32 +164,62 @@ model WebSession {
 }
 
 model PaymentOperation {
-  id                 String                 @id @default(cuid())
-  userId             String
-  kind               PaymentOperationKind
-  idempotencyKeyHash String
-  upstreamOwnerHash  String?
-  requestFingerprint String
-  requestPayload     Json
-  upstreamKey        String                 @unique
-  status             PaymentOperationStatus @default(READY)
-  attemptCount       Int                    @default(0)
-  claimTokenHash     String?
-  leaseExpiresAt     DateTime?
-  dispatchedAt       DateTime?
-  outcomeUnknownAt   DateTime?
-  completedAt        DateTime?
-  responseStatus     Int?
-  responseSnapshot   Json?
-  errorSnapshot      Json?
-  createdAt          DateTime               @default(now())
-  updatedAt          DateTime               @updatedAt
-  user               WebUser                @relation(fields: [userId], references: [id], onDelete: Restrict)
-  paymentRecord      PaymentRecord?
+  id                      String                 @id @default(cuid())
+  userId                  String
+  kind                    PaymentOperationKind
+  idempotencyKeyHash      String
+  upstreamOwnerHash       String?
+  requestFingerprint      String
+  requestPayload          Json
+  upstreamKey             String                 @unique
+  status                  PaymentOperationStatus @default(READY)
+  attemptCount            Int                    @default(0)
+  claimTokenHash          String?
+  leaseExpiresAt          DateTime?
+  dispatchedAt            DateTime?
+  outcomeUnknownAt        DateTime?
+  completedAt             DateTime?
+  responseStatus          Int?
+  responseSnapshot        Json?
+  errorSnapshot           Json?
+  reconcileAttemptCount   Int                    @default(0)
+  reconcileFailureCount   Int                    @default(0)
+  reconcileClaimTokenHash String?
+  reconcileLeaseExpiresAt DateTime?
+  reconcileNextAttemptAt  DateTime?
+  reconcileLastAttemptAt  DateTime?
+  reconcileErrorSnapshot  Json?
+  reconciledAt            DateTime?
+  createdAt               DateTime               @default(now())
+  updatedAt               DateTime               @updatedAt
+  user                    WebUser                @relation(fields: [userId], references: [id], onDelete: Restrict)
+  paymentRecord           PaymentRecord?
 
   @@unique([userId, idempotencyKeyHash])
   @@index([status, leaseExpiresAt])
+  @@index([status, reconcileNextAttemptAt, reconcileLeaseExpiresAt])
   @@index([userId, createdAt])
+}
+
+model PaymentHistorySyncState {
+  userId              String    @id
+  upstreamOwnerHash   String
+  cursor              String?
+  generation          Int       @default(0)
+  attemptCount        Int       @default(0)
+  failureCount        Int       @default(0)
+  claimTokenHash      String?
+  leaseExpiresAt      DateTime?
+  nextAttemptAt       DateTime?
+  lastAttemptAt       DateTime?
+  lastSyncedAt        DateTime?
+  backfillCompletedAt DateTime?
+  errorSnapshot       Json?
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+  user                WebUser   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([nextAttemptAt, leaseExpiresAt])
 }
 
 model WebAuthnCredential {

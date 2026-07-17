@@ -49,3 +49,23 @@ export function paymentOperationPendingResponse({
     },
   );
 }
+
+export function paymentOperationManualRequiredResponse({
+  operationId,
+}: {
+  operationId: string;
+}) {
+  return bffJson(
+    {
+      operation_id: operationId,
+      status: "manual_required",
+      retry_after_seconds: null,
+      requires_support: true,
+      operator_action: "review_payment_operation",
+    },
+    {
+      status: 409,
+      headers: operationHeaders(operationId, true),
+    },
+  );
+}

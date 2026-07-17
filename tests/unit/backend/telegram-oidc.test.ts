@@ -40,9 +40,15 @@ const tx = vi.hoisted(() => ({
   webSession: { updateMany: vi.fn() },
   auditLog: { updateMany: vi.fn() },
   paymentOperation: { updateMany: vi.fn() },
+  paymentHistorySyncState: {
+    deleteMany: vi.fn(),
+    updateMany: vi.fn(),
+  },
   paymentRecord: { updateMany: vi.fn() },
   emailVerificationCode: { updateMany: vi.fn() },
   telegramAuthState: { updateMany: vi.fn() },
+  $executeRaw: vi.fn(),
+  $queryRaw: vi.fn().mockResolvedValue([{ id: "target-user" }]),
 }));
 
 function signTelegramAuthPayload(body: Record<string, string | number | undefined>) {
@@ -352,9 +358,14 @@ describe("Telegram OIDC integration", () => {
         remnashopRefreshExpiresAt: null,
       },
     });
-    expect(tx.paymentOperation.updateMany).toHaveBeenCalledWith({
+    expect(tx.paymentOperation.updateMany).toHaveBeenNthCalledWith(1, {
       where: { userId: { in: ["source-user"] } },
-      data: { userId: "target-user" },
+      data: {
+        userId: "target-user",
+        upstreamOwnerHash: expect.any(String),
+        reconcileClaimTokenHash: null,
+        reconcileLeaseExpiresAt: null,
+      },
     });
     expect(tx.webUser.delete).toHaveBeenCalledWith({ where: { id: "source-user" } });
     expect(mocks.prisma.telegramAuthState.update).toHaveBeenCalledWith({

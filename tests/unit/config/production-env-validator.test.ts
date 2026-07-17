@@ -20,6 +20,7 @@ const validEnv = {
   APP_URL: "https://pay.example.com",
   NEXT_PUBLIC_APP_URL: "https://pay.example.com",
   REMNASHOP_API_BASE_URL: "https://bot.example.com/api/v1/public",
+  REMNASHOP_ADMIN_API_BASE_URL: "https://bot.example.com/api/v1/admin",
   REMNAWAVE_API_BASE_URL: "https://panel.example.com",
   REMNAWAVE_TOKEN: "token",
   WEB_JWT_SECRET: "jwt-secret",
@@ -31,6 +32,9 @@ const validEnv = {
   COOKIE_SAMESITE: "lax",
   TURNSTILE_ENABLED: "false",
   SUPPORT_ENABLED: "false",
+  PAYMENT_RECONCILIATION_ENABLED: "false",
+  PAYMENT_RECONCILIATION_BATCH_SIZE: "10",
+  PAYMENT_RECONCILIATION_INTERVAL_SECONDS: "30",
 };
 
 function runValidator(overrides: Record<string, string>) {
@@ -92,6 +96,15 @@ describe("production env validator", () => {
     expect(dockerfile).toContain("ENV TURNSTILE_SECRET_KEY=build-time-placeholder");
   });
 
+  it("keeps the admin URL optional for legacy installations with reconciliation disabled", () => {
+    const result = runValidator({
+      REMNASHOP_ADMIN_API_BASE_URL: "",
+      PAYMENT_RECONCILIATION_ENABLED: "false",
+    });
+
+    expect(result.status).toBe(0);
+  });
+
   it("fails with clear reasons for invalid env combinations", () => {
     expect(runValidator({
       TURNSTILE_ENABLED: "true",
@@ -121,5 +134,18 @@ describe("production env validator", () => {
     expect(runValidator({
       NEXT_PUBLIC_BRAND_LOGO_URL: "https://cdn.example.com/logo.png",
     }).stderr).toContain("NEXT_PUBLIC_BRAND_LOGO_URL must be a root-relative public path");
+
+    expect(runValidator({
+      PAYMENT_RECONCILIATION_ENABLED: "true",
+      PAYMENT_RECONCILIATION_SECRET: "short",
+    }).stderr).toContain("PAYMENT_RECONCILIATION_SECRET must be at least 32 characters");
+
+    expect(runValidator({
+      PAYMENT_RECONCILIATION_ENABLED: "true",
+      PAYMENT_RECONCILIATION_SECRET: "x".repeat(48),
+      REMNASHOP_ADMIN_API_BASE_URL: "",
+    }).stderr).toContain(
+      "REMNASHOP_ADMIN_API_BASE_URL is required when PAYMENT_RECONCILIATION_ENABLED=true",
+    );
   });
 });

@@ -34,6 +34,7 @@ for (const name of requiredNames) {
 httpUrl("APP_URL");
 httpUrl("NEXT_PUBLIC_APP_URL");
 httpUrl("REMNASHOP_API_BASE_URL");
+optionalHttpUrl("REMNASHOP_ADMIN_API_BASE_URL");
 optionalHttpUrl("REMNAWAVE_API_BASE_URL");
 optionalHttpUrl("TURNSTILE_VERIFY_URL");
 optionalHttpUrl("SUPPORT_FAQ_URL");
@@ -47,7 +48,26 @@ urlWithProtocols("REDIS_URL", ["redis:", "rediss:"]);
 const cookieSecure = bool("COOKIE_SECURE", true);
 const cookieSameSite = sameSite("COOKIE_SAMESITE", "lax");
 const turnstileEnabled = bool("TURNSTILE_ENABLED", false);
+const paymentReconciliationEnabled = bool("PAYMENT_RECONCILIATION_ENABLED", false);
+boundedInteger("PAYMENT_RECONCILIATION_BATCH_SIZE", 10, 1, 100);
+boundedInteger("PAYMENT_RECONCILIATION_INTERVAL_SECONDS", 30, 5, 3600);
+optionalHttpUrl("PAYMENT_RECONCILIATION_INTERNAL_URL");
 bool("SUPPORT_ENABLED", false);
+
+if (
+  paymentReconciliationEnabled &&
+  (!optional("PAYMENT_RECONCILIATION_SECRET") ||
+    optional("PAYMENT_RECONCILIATION_SECRET").length < 32)
+) {
+  fail("PAYMENT_RECONCILIATION_SECRET must be at least 32 characters when PAYMENT_RECONCILIATION_ENABLED=true");
+}
+
+if (
+  paymentReconciliationEnabled &&
+  !optional("REMNASHOP_ADMIN_API_BASE_URL")
+) {
+  fail("REMNASHOP_ADMIN_API_BASE_URL is required when PAYMENT_RECONCILIATION_ENABLED=true");
+}
 
 if (optional("NEXT_PUBLIC_BRAND_NAME") && optional("NEXT_PUBLIC_BRAND_NAME").length > 80) {
   fail("NEXT_PUBLIC_BRAND_NAME must be 80 characters or less");
@@ -165,6 +185,22 @@ function sameSite(name, defaultValue) {
   }
 
   fail(`${name} must be "lax", "strict", or "none"`);
+}
+
+function boundedInteger(name, defaultValue, min, max) {
+  const raw = optional(name);
+
+  if (!raw) {
+    return defaultValue;
+  }
+
+  const value = Number(raw);
+
+  if (!Number.isSafeInteger(value) || value < min || value > max) {
+    fail(`${name} must be an integer between ${min} and ${max}`);
+  }
+
+  return value;
 }
 
 function httpUrl(name) {

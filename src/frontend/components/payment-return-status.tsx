@@ -9,6 +9,7 @@ import { Tag } from "primereact/tag";
 
 import { AppShell, PageHeader } from "@/frontend/components/layout";
 import { LinkButton } from "@/frontend/components/prime/link-button";
+import { shouldPollPaymentOperation } from "@/frontend/lib/payment-idempotency";
 
 type PaymentStatus = {
   payment_id: string;
@@ -29,6 +30,19 @@ type CurrentSubscription = {
 
 type StatusResponse = {
   payment: PaymentStatus;
+  operation: {
+    operation_id: string;
+    status:
+      | "processing"
+      | "outcome_unknown"
+      | "manual_required"
+      | "succeeded"
+      | "failed"
+      | "retry_ready";
+    retry_after_seconds: number | null;
+    requires_support: boolean;
+    operator_action: string | null;
+  } | null;
   subscription: CurrentSubscription;
 };
 
@@ -110,26 +124,83 @@ export function PaymentReturnStatus({ kind }: Props) {
     );
   }, [searchParams]);
 
-  useEffect(() => {
-    const fallbackPaymentId = window.localStorage.getItem("cleanPayLastPaymentId");
-    const resolvedPaymentId = paymentId ?? fallbackPaymentId;
-    const query = resolvedPaymentId
-      ? `?payment_id=${encodeURIComponent(resolvedPaymentId)}`
-      : "";
+  const operationId = useMemo(() => {
+    return (
+      searchParams.get("operation_id") ?? searchParams.get("operationId")
+    );
+  }, [searchParams]);
 
-    fetch(`/api/bff/payments/status${query}`)
-      .then(async (response) => {
+  useEffect(() => {
+    let fallbackPaymentId: string | null = null;
+    let fallbackOperationId: string | null = null;
+
+    try {
+      fallbackPaymentId = window.localStorage.getItem("cleanPayLastPaymentId");
+      fallbackOperationId = window.localStorage.getItem(
+        "cleanPayLastPaymentOperationId",
+      );
+    } catch {
+      // Explicit URL identifiers continue to work without browser storage.
+    }
+
+    const resolvedPaymentId = paymentId ?? fallbackPaymentId;
+    const resolvedOperationId = operationId ?? fallbackOperationId;
+    const query = new URLSearchParams();
+
+    if (resolvedPaymentId) query.set("payment_id", resolvedPaymentId);
+    if (resolvedOperationId) query.set("operation_id", resolvedOperationId);
+
+    let cancelled = false;
+    let pollTimer: ReturnType<typeof setTimeout> | undefined;
+
+    const loadStatus = async () => {
+      try {
+        const response = await fetch(
+          `/api/bff/payments/status${query.size > 0 ? `?${query.toString()}` : ""}`,
+        );
+
         if (!response.ok) {
-          throw await readBffError(response, 'Не удалось проверить статус.');
+          throw await readBffError(response, "Не удалось проверить статус.");
         }
 
         const body = await response.json().catch(() => null);
+        const nextData = body?.data as StatusResponse | undefined;
 
-        return body.data as StatusResponse;
-      })
-      .then(setData)
-      .catch((err: Error) => setError(err.message));
-  }, [paymentId]);
+        if (!cancelled && nextData) {
+          setData(nextData);
+          setError(null);
+
+          if (
+            resolvedOperationId &&
+            shouldPollPaymentOperation(nextData.operation?.status)
+          ) {
+            pollTimer = setTimeout(loadStatus, 5_000);
+          }
+        }
+      } catch (loadError) {
+        if (!cancelled) {
+          setError(
+            loadError instanceof Error
+              ? loadError.message
+              : "Не удалось проверить статус.",
+          );
+
+          // An operation id is durable, so a transient BFF/Remnashop outage
+          // must not permanently stop the callback page from observing it.
+          if (resolvedOperationId) {
+            pollTimer = setTimeout(loadStatus, 5_000);
+          }
+        }
+      }
+    };
+
+    void loadStatus();
+
+    return () => {
+      cancelled = true;
+      if (pollTimer) clearTimeout(pollTimer);
+    };
+  }, [operationId, paymentId]);
 
   return (
     <AppShell>
@@ -139,6 +210,24 @@ export function PaymentReturnStatus({ kind }: Props) {
         <div className="flex flex-column gap-4">
         {error ? <Message severity="error" text={error} /> : null}
         {!error && !data ? <Message severity="info" text="Проверка..." /> : null}
+        {data?.operation?.status === "manual_required" ? (
+          <Message
+            severity="error"
+            text={`Статус оплаты не удалось определить автоматически. Не повторяйте оплату; обратитесь в поддержку и сообщите номер операции ${data.operation.operation_id}.`}
+          />
+        ) : null}
+        {data?.operation && shouldPollPaymentOperation(data.operation.status) ? (
+          <Message
+            severity="info"
+            text={`Операция ${data.operation.operation_id} ещё проверяется. Новую оплату создавать не нужно.`}
+          />
+        ) : null}
+        {data?.operation?.status === "retry_ready" ? (
+          <Message
+            severity="warn"
+            text={`Операция ${data.operation.operation_id} не дошла до платёжного провайдера. Вернитесь к исходному действию и повторите его — сохранённый ключ не создаст дубликат.`}
+          />
+        ) : null}
         {data?.payment ? (
           <div className="grid">
             <div className="col-12 md:col-6">
@@ -166,7 +255,7 @@ export function PaymentReturnStatus({ kind }: Props) {
             </div>
           </div>
         ) : null}
-        {data && !data.payment ? (
+        {data && !data.payment && !data.operation ? (
           <Message severity="warn" text="Локальная запись платежа не найдена. Проверьте кабинет позже." />
         ) : null}
         {data?.subscription ? (

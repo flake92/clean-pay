@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { Prisma } from "@prisma/client";
 
 const mocks = vi.hoisted(() => ({
   redisCommand: vi.fn(),
@@ -21,7 +22,26 @@ vi.mock("@/backend/database/prisma", () => ({
 
 import { assertCooldown, assertRateLimit, rateLimitKey, recordRateLimitEvent } from "@/backend/limits/rate-limit";
 import { BffError } from "@/backend/integrations/remnashop/errors";
-import { recordPayment, serializePaymentRecord } from "@/backend/payments/records";
+import {
+  applyRemnashopTransaction,
+  recordPayment,
+  serializePaymentRecord,
+} from "@/backend/payments/records";
+
+const upstreamTransaction = {
+  payment_id: "11111111-1111-4111-8111-111111111111",
+  purchase_type: "subscription",
+  status: "completed",
+  gateway_type: "YOOKASSA",
+  final_amount: "0.00",
+  currency: "RUB",
+  plan_name: "Basic",
+  duration_days: 30,
+  device_limit: 3,
+  traffic_limit: null,
+  created_at: "2026-07-17T10:00:00.000Z",
+  updated_at: "2026-07-17T10:01:00.000Z",
+};
 
 describe("rate limiting", () => {
   beforeEach(() => {
@@ -154,6 +174,314 @@ describe("payment records", () => {
     expect(mocks.prisma.paymentRecord.create).not.toHaveBeenCalled();
   });
 
+  it("rereads after a CAS loss and never overwrites an authoritative sync with stale foreground PENDING", async () => {
+    const base = {
+      id: "record-race",
+      userId: "user-1",
+      operationId: null,
+      purchaseType: "NEW",
+      status: "PENDING",
+      finalAmount: "100.00",
+      currency: "\u20BD",
+      gatewayType: "YOOKASSA",
+      planCode: "basic",
+      planName: "Basic",
+      durationDays: 30,
+      deviceLimit: 3,
+      trafficLimit: null,
+      paymentUrl: "https://pay.test/pending",
+      isFree: false,
+      raw: null,
+      upstreamCreatedAt: new Date("2026-07-18T10:00:00.000Z"),
+      upstreamUpdatedAt: new Date("2026-07-18T10:00:00.000Z"),
+      lastSyncedAt: null,
+    };
+    const authoritative = {
+      ...base,
+      status: "COMPLETED",
+      paymentUrl: null,
+      upstreamUpdatedAt: new Date("2026-07-18T10:01:00.000Z"),
+      lastSyncedAt: new Date("2026-07-18T10:01:01.000Z"),
+      raw: { remnashopTransaction: { status: "completed" } },
+    };
+    mocks.prisma.paymentRecord.findUnique
+      .mockResolvedValueOnce(base)
+      .mockResolvedValueOnce(authoritative)
+      .mockResolvedValueOnce(authoritative);
+    mocks.prisma.paymentRecord.updateMany
+      .mockResolvedValueOnce({ count: 0 })
+      .mockResolvedValueOnce({ count: 1 });
+
+    await recordPayment({
+      userId: "user-1",
+      gatewayType: "YOOKASSA",
+      payment: {
+        payment_id: "payment-race",
+        payment_url: "https://pay.test/stale",
+        purchase_type: "NEW",
+        status: "pending",
+        is_free: false,
+        final_amount: "100.00",
+        currency: "\u20BD",
+      },
+    });
+
+    expect(mocks.prisma.paymentRecord.updateMany).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        where: expect.objectContaining({ lastSyncedAt: null }),
+      }),
+    );
+    expect(mocks.prisma.paymentRecord.updateMany).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        where: expect.objectContaining({
+          lastSyncedAt: authoritative.lastSyncedAt,
+        }),
+        data: expect.objectContaining({
+          status: "COMPLETED",
+          upstreamUpdatedAt: authoritative.upstreamUpdatedAt,
+        }),
+      }),
+    );
+  });
+
+  it("bounds foreground payment CAS retries under sustained contention", async () => {
+    const stale = {
+      id: "record-contended",
+      userId: "user-1",
+      operationId: null,
+      purchaseType: "NEW",
+      status: "PENDING",
+      finalAmount: "100.00",
+      currency: "\u20BD",
+      gatewayType: "YOOKASSA",
+      planCode: null,
+      planName: null,
+      durationDays: null,
+      deviceLimit: null,
+      trafficLimit: null,
+      paymentUrl: null,
+      isFree: false,
+      raw: null,
+      upstreamCreatedAt: new Date("2026-07-18T10:00:00.000Z"),
+      upstreamUpdatedAt: new Date("2026-07-18T10:00:00.000Z"),
+      lastSyncedAt: null,
+    };
+    mocks.prisma.paymentRecord.findUnique.mockResolvedValue(stale);
+    mocks.prisma.paymentRecord.updateMany.mockResolvedValue({ count: 0 });
+
+    await expect(
+      recordPayment({
+        userId: "user-1",
+        gatewayType: "YOOKASSA",
+        payment: {
+          payment_id: "payment-contended",
+          payment_url: null,
+          purchase_type: "NEW",
+          status: "pending",
+          is_free: false,
+          final_amount: "100.00",
+          currency: "\u20BD",
+        },
+      }),
+    ).rejects.toMatchObject({ code: "CONFLICT" });
+    expect(mocks.prisma.paymentRecord.updateMany).toHaveBeenCalledTimes(3);
+  });
+
+  it("creates a missing history record and derives free payment from its strict amount", async () => {
+    mocks.prisma.paymentRecord.findUnique.mockResolvedValue(null);
+    mocks.prisma.paymentRecord.create.mockResolvedValue({ id: "record-history" });
+
+    await applyRemnashopTransaction(mocks.prisma as never, {
+      userId: "user-1",
+      transaction: upstreamTransaction,
+    });
+
+    expect(mocks.prisma.paymentRecord.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        userId: "user-1",
+        paymentId: upstreamTransaction.payment_id,
+        isFree: true,
+        upstreamCreatedAt: new Date(upstreamTransaction.created_at),
+        upstreamUpdatedAt: new Date(upstreamTransaction.updated_at),
+      }),
+    });
+  });
+
+  it("rejects a foreign history collision before mutating it", async () => {
+    mocks.prisma.paymentRecord.findUnique.mockResolvedValue({
+      id: "foreign-record",
+      userId: "user-2",
+    });
+
+    await expect(
+      applyRemnashopTransaction(mocks.prisma as never, {
+        userId: "user-1",
+        transaction: upstreamTransaction,
+      }),
+    ).rejects.toMatchObject({ code: "CONFLICT" });
+    expect(mocks.prisma.paymentRecord.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("does not regress richer data on a stale upstream update", async () => {
+    mocks.prisma.paymentRecord.findUnique
+      .mockResolvedValueOnce({
+        id: "record-1",
+        userId: "user-1",
+        operationId: null,
+        upstreamCreatedAt: new Date("2026-07-17T09:00:00.000Z"),
+        upstreamUpdatedAt: new Date("2026-07-17T11:00:00.000Z"),
+        lastSyncedAt: new Date("2026-07-17T11:00:01.000Z"),
+        planCode: "premium",
+        planName: "Premium",
+        durationDays: 365,
+        deviceLimit: 10,
+        trafficLimit: 1000,
+        paymentUrl: "https://pay.test/rich",
+        isFree: false,
+        raw: { preserved: true },
+      })
+      .mockResolvedValueOnce({ id: "record-1" });
+    mocks.prisma.paymentRecord.updateMany.mockResolvedValue({ count: 1 });
+
+    await applyRemnashopTransaction(mocks.prisma as never, {
+      userId: "user-1",
+      transaction: upstreamTransaction,
+    });
+
+    expect(mocks.prisma.paymentRecord.updateMany).toHaveBeenCalledWith({
+      where: { id: "record-1", userId: "user-1" },
+      data: { lastSyncedAt: expect.any(Date) },
+    });
+  });
+
+  it("corrects migration fallback timestamps and free flag on first authoritative sync", async () => {
+    mocks.prisma.paymentRecord.findUnique
+      .mockResolvedValueOnce({
+        id: "legacy-record",
+        userId: "user-1",
+        operationId: null,
+        upstreamCreatedAt: new Date("2026-07-18T12:00:00.000Z"),
+        upstreamUpdatedAt: new Date("2026-07-18T12:00:00.000Z"),
+        lastSyncedAt: null,
+        planCode: null,
+        planName: null,
+        durationDays: null,
+        deviceLimit: null,
+        trafficLimit: null,
+        paymentUrl: null,
+        isFree: false,
+        raw: null,
+      })
+      .mockResolvedValueOnce({ id: "legacy-record" });
+    mocks.prisma.paymentRecord.updateMany.mockResolvedValue({ count: 1 });
+
+    await applyRemnashopTransaction(mocks.prisma as never, {
+      userId: "user-1",
+      transaction: upstreamTransaction,
+    });
+
+    expect(mocks.prisma.paymentRecord.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.not.objectContaining({ upstreamUpdatedAt: expect.anything() }),
+        data: expect.objectContaining({
+          isFree: true,
+          upstreamCreatedAt: new Date(upstreamTransaction.created_at),
+          upstreamUpdatedAt: new Date(upstreamTransaction.updated_at),
+        }),
+      }),
+    );
+  });
+
+  it("cannot let an older concurrent first sync overwrite the newer winner", async () => {
+    const migrated = {
+      id: "legacy-race",
+      userId: "user-1",
+      operationId: null,
+      upstreamCreatedAt: new Date("2026-07-18T12:00:00.000Z"),
+      upstreamUpdatedAt: new Date("2026-07-18T12:00:00.000Z"),
+      lastSyncedAt: null,
+      planCode: null,
+      planName: null,
+      durationDays: null,
+      deviceLimit: null,
+      trafficLimit: null,
+      paymentUrl: null,
+      isFree: false,
+      raw: null,
+    };
+    const newerWinner = {
+      ...migrated,
+      upstreamCreatedAt: new Date("2026-07-17T09:00:00.000Z"),
+      upstreamUpdatedAt: new Date("2026-07-17T11:00:00.000Z"),
+      lastSyncedAt: new Date("2026-07-17T11:00:01.000Z"),
+      planName: "Newer",
+    };
+    mocks.prisma.paymentRecord.findUnique
+      .mockResolvedValueOnce(migrated)
+      .mockResolvedValueOnce(newerWinner)
+      .mockResolvedValueOnce({ id: "legacy-race", planName: "Newer" });
+    mocks.prisma.paymentRecord.updateMany
+      .mockResolvedValueOnce({ count: 0 })
+      .mockResolvedValueOnce({ count: 1 });
+
+    await applyRemnashopTransaction(mocks.prisma as never, {
+      userId: "user-1",
+      transaction: upstreamTransaction,
+    });
+
+    expect(mocks.prisma.paymentRecord.updateMany).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        where: expect.objectContaining({ lastSyncedAt: null }),
+      }),
+    );
+    expect(mocks.prisma.paymentRecord.updateMany).toHaveBeenNthCalledWith(2, {
+      where: { id: "legacy-race", userId: "user-1" },
+      data: { lastSyncedAt: expect.any(Date) },
+    });
+  });
+
+  it("rereads a same-owner P2002 winner and applies the row", async () => {
+    const existing = {
+      id: "record-winner",
+      userId: "user-1",
+      operationId: null,
+      upstreamCreatedAt: new Date(upstreamTransaction.created_at),
+      upstreamUpdatedAt: new Date(upstreamTransaction.created_at),
+      lastSyncedAt: null,
+      planCode: null,
+      planName: null,
+      durationDays: null,
+      deviceLimit: null,
+      trafficLimit: null,
+      paymentUrl: null,
+      isFree: false,
+      raw: null,
+    };
+    mocks.prisma.paymentRecord.findUnique
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({ userId: "user-1" })
+      .mockResolvedValueOnce(existing)
+      .mockResolvedValueOnce({ id: existing.id });
+    mocks.prisma.paymentRecord.create.mockRejectedValueOnce(
+      new Prisma.PrismaClientKnownRequestError("unique", {
+        code: "P2002",
+        clientVersion: "7.8.0",
+      }),
+    );
+    mocks.prisma.paymentRecord.updateMany.mockResolvedValue({ count: 1 });
+
+    await expect(
+      applyRemnashopTransaction(mocks.prisma as never, {
+        userId: "user-1",
+        transaction: upstreamTransaction,
+      }),
+    ).resolves.toEqual({ id: existing.id });
+    expect(mocks.prisma.paymentRecord.updateMany).toHaveBeenCalledOnce();
+  });
+
   it("serializes DB records back to Remnashop-shaped payloads", () => {
     expect(
       serializePaymentRecord({
@@ -170,8 +498,8 @@ describe("payment records", () => {
         deviceLimit: null,
         trafficLimit: null,
         isFree: true,
-        createdAt: new Date("2026-06-25T00:00:00.000Z"),
-        updatedAt: new Date("2026-06-25T01:00:00.000Z"),
+        upstreamCreatedAt: new Date("2026-06-25T00:00:00.000Z"),
+        upstreamUpdatedAt: new Date("2026-06-25T01:00:00.000Z"),
       }),
     ).toEqual({
       id: "record-1",

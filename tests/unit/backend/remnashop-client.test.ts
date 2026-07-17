@@ -38,6 +38,7 @@ import {
   protectRemnashopToken,
   remnashopAuth,
   remnashopAuthTelegramIdentity,
+  remnashopAdminRequest,
   remnashopLinkTelegram,
   remnashopMergeUsers,
   remnashopRequest,
@@ -81,6 +82,7 @@ describe("remnashop client", () => {
     loggerMock.info.mockClear();
     loggerMock.warn.mockClear();
     loggerMock.error.mockClear();
+    vi.unstubAllEnvs();
     vi.restoreAllMocks();
   });
 
@@ -252,6 +254,39 @@ describe("remnashop client", () => {
       "idempotency-key": "server-operation-key",
     });
     expect(JSON.stringify(loggerMock.info.mock.calls)).not.toContain("server-operation-key");
+  });
+
+  it("removes query identities from admin errors and logs", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      response({ status: 400, body: { detail: "invalid request" } }),
+    );
+
+    await expect(
+      remnashopAdminRequest(
+        "/payment-operations/PURCHASE?user_id=sensitive-user",
+        {
+          idempotencyKey: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+          timeoutMs: 1_000,
+        },
+      ),
+    ).rejects.toMatchObject({
+      debug: {
+        upstreamPath: "/payment-operations/PURCHASE",
+      },
+    });
+    expect(JSON.stringify(loggerMock.info.mock.calls)).not.toContain(
+      "sensitive-user",
+    );
+  });
+
+  it("fails closed on admin requests when the explicit admin base URL is absent", async () => {
+    vi.stubEnv("REMNASHOP_ADMIN_API_BASE_URL", "");
+    const fetchMock = vi.spyOn(globalThis, "fetch");
+
+    await expect(
+      remnashopAdminRequest("/payment-operations/PURCHASE"),
+    ).rejects.toMatchObject({ code: "INTERNAL_ERROR", status: 500 });
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("does not log Remnashop request or response payloads", async () => {

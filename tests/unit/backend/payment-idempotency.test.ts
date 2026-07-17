@@ -19,11 +19,22 @@ const mocks = vi.hoisted(() => {
     $transaction: vi.fn(),
   };
 
-  return { paymentOperation, paymentRecord, transaction, prisma };
+  const lockPaymentUpstreamOwner = vi.fn();
+
+  return {
+    paymentOperation,
+    paymentRecord,
+    transaction,
+    prisma,
+    lockPaymentUpstreamOwner,
+  };
 });
 
 vi.mock("@/backend/database/prisma", () => ({
   prisma: mocks.prisma,
+}));
+vi.mock("@/backend/payments/owner", () => ({
+  lockPaymentUpstreamOwner: mocks.lockPaymentUpstreamOwner,
 }));
 
 import { BffError } from "@/backend/integrations/remnashop/errors";
@@ -55,6 +66,8 @@ function storedOperation(
     dispatchedAt: null,
     outcomeUnknownAt: null,
     completedAt: null,
+    reconciledAt: null,
+    reconcileErrorSnapshot: null,
     responseStatus: null,
     responseSnapshot: null,
     errorSnapshot: null,
@@ -121,6 +134,7 @@ describe("payment operation idempotency", () => {
     mocks.paymentRecord.findUnique.mockResolvedValue(null);
     mocks.paymentRecord.create.mockResolvedValue({ id: "record-1" });
     mocks.paymentRecord.updateMany.mockResolvedValue({ count: 1 });
+    mocks.lockPaymentUpstreamOwner.mockResolvedValue(undefined);
     mocks.prisma.$transaction.mockImplementation(
       async (callback: (transaction: typeof mocks.transaction) => unknown) =>
         callback(mocks.transaction),
@@ -443,6 +457,7 @@ describe("payment operation idempotency", () => {
       storedOperation(operation ?? {}, {
         status: "OUTCOME_UNKNOWN",
         claimTokenHash: ownerHash,
+        upstreamOwnerHash: "upstream-owner-hash",
       }),
     );
     mocks.paymentOperation.updateMany.mockResolvedValue({ count: 1 });
@@ -475,6 +490,31 @@ describe("payment operation idempotency", () => {
         paymentId: "payment-1",
       }),
     });
+    expect(mocks.lockPaymentUpstreamOwner).toHaveBeenCalledWith(
+      mocks.transaction,
+      "user-1",
+      "upstream-owner-hash",
+    );
+  });
+
+  it("returns a terminal manual-review result for a reconciled unknown outcome", async () => {
+    mocks.paymentOperation.create.mockImplementation(
+      async ({ data }: { data: Record<string, unknown> }) =>
+        storedOperation(data, {
+        status: "OUTCOME_UNKNOWN",
+        reconciledAt: new Date("2026-07-17T12:00:00.000Z"),
+        reconcileErrorSnapshot: {
+          code: "MANUAL_REQUIRED",
+          reason: "UPSTREAM_OPERATION_NOT_FOUND",
+        },
+        }),
+    );
+
+    await expect(beginPaymentOperation(beginInput() as never)).resolves.toEqual({
+      state: "manual_required",
+      operationId: "operation-1",
+    });
+    expect(mocks.paymentOperation.updateMany).not.toHaveBeenCalled();
   });
 
   it("returns pending while another non-stale dispatch owns the operation", async () => {
@@ -657,6 +697,46 @@ describe("payment operation idempotency", () => {
     ).rejects.toMatchObject({ code: "CONFLICT", status: 409 });
     expect(mocks.paymentOperation.updateMany).not.toHaveBeenCalled();
     expect(mocks.paymentRecord.updateMany).not.toHaveBeenCalled();
+    expect(mocks.paymentRecord.create).not.toHaveBeenCalled();
+  });
+
+  it("revalidates the current upstream owner before committing foreground success", async () => {
+    const claimToken = "claim-owner-race";
+    mocks.paymentOperation.findUnique.mockResolvedValue(
+      storedOperation(
+        {
+          userId: "user-1",
+          kind: "PURCHASE",
+          idempotencyKeyHash: "key-hash",
+          upstreamOwnerHash: "owner-hash",
+          requestFingerprint: "request-hash",
+          requestPayload: {},
+          upstreamKey: "upstream-key",
+        },
+        {
+          status: "DISPATCHING",
+          claimTokenHash: sha256(
+            `clean-pay:payment-operation:claim:v1:${claimToken}`,
+          ),
+        },
+      ),
+    );
+    mocks.lockPaymentUpstreamOwner.mockRejectedValue(
+      new BffError(
+        "ACCOUNT_MERGE_REQUIRED",
+        409,
+        "owner changed during payment",
+      ),
+    );
+
+    await expect(
+      completePaymentOperationSuccess({
+        operationId: "operation-1",
+        claimToken,
+        payment: paymentInput(),
+      }),
+    ).rejects.toMatchObject({ code: "ACCOUNT_MERGE_REQUIRED" });
+    expect(mocks.paymentOperation.updateMany).not.toHaveBeenCalled();
     expect(mocks.paymentRecord.create).not.toHaveBeenCalled();
   });
 

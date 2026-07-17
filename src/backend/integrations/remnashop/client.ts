@@ -28,6 +28,8 @@ type RequestOptions = {
   accessToken?: string;
   refreshToken?: string;
   idempotencyKey?: string;
+  timeoutMs?: number;
+  allowNotFound?: boolean;
 };
 
 type AuthCookies = {
@@ -39,9 +41,20 @@ function endpoint(path: string) {
   return `${getEnv().remnashopApiBaseUrl}${path}`;
 }
 
+function safeRequestPath(path: string) {
+  return path.split("?", 1)[0] ?? path;
+}
+
 function adminEndpoint(path: string) {
-  const env = getEnv();
-  const baseUrl = env.remnashopApiBaseUrl.replace(/\/public$/, "/admin");
+  const baseUrl = getEnv().remnashopAdminApiBaseUrl;
+
+  if (!baseUrl) {
+    throw new BffError(
+      "INTERNAL_ERROR",
+      500,
+      "REMNASHOP_ADMIN_API_BASE_URL is required for an admin Remnashop request.",
+    );
+  }
 
   return `${baseUrl}${path}`;
 }
@@ -77,15 +90,16 @@ async function parseResponse<T>(response: Response, path: string) {
 async function fetchRemnashop(path: string, init: RequestInit) {
   const method = init.method ?? "GET";
   const startedAt = Date.now();
+  const safePath = safeRequestPath(path);
 
   logger.info("remnashop_request_sent", {
     method,
-    path,
+    path: safePath,
     hasBody: Boolean(init.body),
   }, {
     category: "upstream",
     source: "remnashop.client",
-    message: `HTTP Request: ${method} ${path}`,
+    message: `HTTP Request: ${method} ${safePath}`,
   });
 
   try {
@@ -93,74 +107,76 @@ async function fetchRemnashop(path: string, init: RequestInit) {
 
     logger.info("remnashop_response_received", {
       method,
-      path,
+      path: safePath,
       status: response.status,
       ok: response.ok,
       durationMs: Date.now() - startedAt,
     }, {
       category: "upstream",
       source: "remnashop.client",
-      message: `HTTP Response: ${method} ${path} -> ${response.status}`,
+      message: `HTTP Response: ${method} ${safePath} -> ${response.status}`,
     });
 
     return response;
   } catch (error) {
     logger.error("remnashop_request_failed", {
       method,
-      path,
+      path: safePath,
       durationMs: Date.now() - startedAt,
       errorName: error instanceof Error ? error.name : "UnknownError",
     }, {
       category: "upstream",
       source: "remnashop.client",
-      message: `HTTP Request failed: ${method} ${path}`,
+      message: `HTTP Request failed: ${method} ${safePath}`,
     });
-    throw remnashopUnavailableError(path, error);
+    throw remnashopUnavailableError(safePath, error);
   }
 }
 
 async function fetchRemnashopAdmin(path: string, init: RequestInit) {
   const method = init.method ?? "GET";
   const startedAt = Date.now();
+  const safePath = safeRequestPath(path);
+  const requestUrl = adminEndpoint(path);
 
   logger.info("remnashop_admin_request_sent", {
     method,
-    path,
+    path: safePath,
     hasBody: Boolean(init.body),
   }, {
     category: "upstream",
     source: "remnashop.client",
-    message: `HTTP Request: ${method} admin ${path}`,
+    message: `HTTP Request: ${method} admin ${safePath}`,
   });
 
   try {
-    const response = await fetch(adminEndpoint(path), init);
+    const response = await fetch(requestUrl, init);
 
     logger.info("remnashop_admin_response_received", {
       method,
-      path,
+      path: safePath,
       status: response.status,
       ok: response.ok,
       durationMs: Date.now() - startedAt,
     }, {
       category: "upstream",
       source: "remnashop.client",
-      message: `HTTP Response: ${method} admin ${path} -> ${response.status}`,
+      message: `HTTP Response: ${method} admin ${safePath} -> ${response.status}`,
     });
 
     return response;
   } catch (error) {
     logger.error("remnashop_admin_request_failed", {
       method,
-      path,
+      path: safePath,
       durationMs: Date.now() - startedAt,
       errorName: error instanceof Error ? error.name : "UnknownError",
     }, {
       category: "upstream",
       source: "remnashop.client",
-      message: `HTTP Admin request failed: ${method} ${path}`,
+      message: `HTTP Admin request failed: ${method} ${safePath}`,
     });
-    throw remnashopUnavailableError(path, error);
+    throw remnashopUnavailableError(safePath, error);
   }
 }
 
@@ -234,11 +250,14 @@ export function protectRemnashopToken(token: string) {
   return encryptSecret(token, getEnv().webRefreshSecret);
 }
 
-function revealRemnashopToken(token: string) {
+export function revealRemnashopToken(token: string) {
   return decryptSecret(token, getEnv().webRefreshSecret);
 }
 
-export async function remnashopRequest<T>(path: string, options: RequestOptions = {}) {
+export async function remnashopRequestResult<T>(
+  path: string,
+  options: RequestOptions = {},
+) {
   const headers: Record<string, string> = {
     accept: "application/json",
   };
@@ -265,9 +284,82 @@ export async function remnashopRequest<T>(path: string, options: RequestOptions 
     headers,
     body: options.body === undefined ? undefined : JSON.stringify(options.body),
     cache: "no-store",
+    signal: AbortSignal.timeout(options.timeoutMs ?? 15_000),
   });
 
-  return parseResponse<T>(response, path);
+  if (options.allowNotFound && response.status === 404) {
+    await response.body?.cancel();
+    return { status: response.status, data: null as T | null };
+  }
+
+  return {
+    status: response.status,
+    data: await parseResponse<T>(response, safeRequestPath(path)),
+  };
+}
+
+export async function remnashopRequest<T>(
+  path: string,
+  options: RequestOptions = {},
+) {
+  const result = await remnashopRequestResult<T>(path, options);
+
+  return result.data as T;
+}
+
+export async function remnashopAdminRequestResult<T>(
+  path: string,
+  options: Omit<RequestOptions, "accessToken" | "refreshToken"> = {},
+) {
+  const apiKey = getEnv().remnashopApiKey;
+
+  if (!apiKey) {
+    throw new BffError(
+      "INTERNAL_ERROR",
+      500,
+      "REMNASHOP_API_KEY is required for an admin Remnashop request.",
+    );
+  }
+
+  const headers: Record<string, string> = {
+    accept: "application/json",
+    "x-api-key": apiKey,
+  };
+
+  if (options.body !== undefined) {
+    headers["content-type"] = "application/json";
+  }
+
+  if (options.idempotencyKey) {
+    headers["idempotency-key"] = options.idempotencyKey;
+  }
+
+  const response = await fetchRemnashopAdmin(path, {
+    method: options.method ?? "GET",
+    headers,
+    body: options.body === undefined ? undefined : JSON.stringify(options.body),
+    cache: "no-store",
+    signal: AbortSignal.timeout(options.timeoutMs ?? 15_000),
+  });
+
+  if (options.allowNotFound && response.status === 404) {
+    await response.body?.cancel();
+    return { status: response.status, data: null as T | null };
+  }
+
+  return {
+    status: response.status,
+    data: await parseResponse<T>(response, safeRequestPath(path)),
+  };
+}
+
+export async function remnashopAdminRequest<T>(
+  path: string,
+  options: Omit<RequestOptions, "accessToken" | "refreshToken"> = {},
+) {
+  const result = await remnashopAdminRequestResult<T>(path, options);
+
+  return result.data as T;
 }
 
 export async function remnashopAuth(
@@ -283,7 +375,10 @@ export async function remnashopAuth(
     body: JSON.stringify(body),
     cache: "no-store",
   });
-  const data = await parseResponse<RemnashopAuthResponse>(response, path);
+  const data = await parseResponse<RemnashopAuthResponse>(
+    response,
+    safeRequestPath(path),
+  );
   const cookies = extractAuthCookies(response);
 
   return { data, cookies };
@@ -364,7 +459,10 @@ export async function remnashopMergeUsers({
     cache: "no-store",
   });
 
-  return parseResponse<RemnashopMergeUsersResponse>(response, path);
+  return parseResponse<RemnashopMergeUsersResponse>(
+    response,
+    safeRequestPath(path),
+  );
 }
 
 export async function remnashopRefreshTokens(refreshToken: string) {

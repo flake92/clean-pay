@@ -16,6 +16,7 @@ const bodylessPostMutationPaths = new Set([
 
 const passkeyCredentialPathPrefix = '/api/bff/auth/passkey/credentials/';
 const subscriptionDevicePathPrefix = '/api/bff/subscription/devices/';
+const paymentReconciliationInternalPath = '/api/internal/payments/reconcile';
 
 function isSingleSegmentPath(pathname: string, prefix: string) {
   const suffix = pathname.startsWith(prefix) ? pathname.slice(prefix.length) : '';
@@ -279,6 +280,22 @@ export async function proxy(request: NextRequest) {
     source: "http.access",
     message: `${request.method} ${pathname} received`,
   });
+
+  if (
+    pathname === paymentReconciliationInternalPath &&
+    request.method === 'POST'
+  ) {
+    logger.info("http_request_decision", {
+      ...metadata,
+      action: "allow_internal_service",
+      status: 200,
+    }, {
+      category: "http",
+      source: "http.access",
+      message: `${request.method} ${pathname} -> allow internal service`,
+    });
+    return NextResponse.next();
+  }
 
   const csrfResult = browserMutationGuard(request);
 

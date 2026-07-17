@@ -28,9 +28,15 @@ const tx = vi.hoisted(() => ({
   webSession: { update: vi.fn(), updateMany: vi.fn() },
   auditLog: { updateMany: vi.fn() },
   paymentOperation: { updateMany: vi.fn() },
+  paymentHistorySyncState: {
+    deleteMany: vi.fn(),
+    updateMany: vi.fn(),
+  },
   paymentRecord: { updateMany: vi.fn() },
   emailVerificationCode: { updateMany: vi.fn() },
   telegramAuthState: { updateMany: vi.fn() },
+  $executeRaw: vi.fn(),
+  $queryRaw: vi.fn().mockResolvedValue([{ id: "user-1" }]),
 }));
 
 vi.mock("@/backend/integrations/remnashop/client", () => ({
@@ -83,6 +89,11 @@ describe("Remnashop session reconciliation", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     Object.values(tx).forEach((model) => {
+      if (typeof model === "function") {
+        model.mockReset();
+        return;
+      }
+
       Object.values(model).forEach((fn) => {
         if (typeof fn === "function") fn.mockReset();
       });
@@ -90,6 +101,7 @@ describe("Remnashop session reconciliation", () => {
     mocks.getRemnashopUserIdFromAccessToken.mockReturnValue("remna-1");
     mocks.getRemnashopMe.mockResolvedValue(profile);
     mocks.prisma.$transaction.mockImplementation(async (callback) => callback(tx));
+    tx.$queryRaw.mockResolvedValue([{ id: "user-1" }]);
     tx.webUser.findUnique.mockResolvedValue(null);
     tx.webUser.create.mockResolvedValue({ id: "user-1", email: "user@example.com", emailVerified: true, telegramId: "123" });
     tx.webUser.update.mockResolvedValue({ id: "user-1", email: "user@example.com", emailVerified: true, telegramId: "123" });
@@ -191,9 +203,14 @@ describe("Remnashop session reconciliation", () => {
       where: { id: { in: ["other-remna", "other-email"] } },
       data: { remnashopUserId: null, email: null, telegramId: null },
     });
-    expect(tx.paymentOperation.updateMany).toHaveBeenCalledWith({
+    expect(tx.paymentOperation.updateMany).toHaveBeenNthCalledWith(1, {
       where: { userId: { in: ["other-remna", "other-email"] } },
-      data: { userId: "user-1" },
+      data: {
+        userId: "user-1",
+        upstreamOwnerHash: "1l7jN368QqpfnbtgthYi9hXdl2Ho_-kvmgmVbzOfb4g",
+        reconcileClaimTokenHash: null,
+        reconcileLeaseExpiresAt: null,
+      },
     });
     expect(tx.webSession.update).toHaveBeenCalledWith({
       where: { id: "session-1" },

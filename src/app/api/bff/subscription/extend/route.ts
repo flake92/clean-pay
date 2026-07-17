@@ -11,6 +11,7 @@ import {
   settlePaymentOperationBeforeDispatchFailure,
 } from "@/backend/payments/idempotency";
 import {
+  paymentOperationManualRequiredResponse,
   paymentOperationPendingResponse,
   paymentOperationSuccessResponse,
 } from "@/backend/payments/operation-response";
@@ -114,6 +115,12 @@ export async function POST(request: Request) {
         operationId: operation.operationId,
         reason: operation.reason,
         retryAfterSeconds: operation.retryAfterSeconds,
+      });
+    }
+
+    if (operation.state === "manual_required") {
+      return paymentOperationManualRequiredResponse({
+        operationId: operation.operationId,
       });
     }
 

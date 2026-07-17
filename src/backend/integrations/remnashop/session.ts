@@ -45,6 +45,7 @@ function profileIdentity({
 async function mergeUsersIntoTarget(
   tx: Prisma.TransactionClient,
   targetUserId: string,
+  targetUpstreamAccountId: string,
   sourceUserIds: string[],
 ) {
   if (sourceUserIds.length === 0) {
@@ -70,6 +71,7 @@ async function mergeUsersIntoTarget(
   await transferPaymentOperationsForUserMerge(
     tx,
     targetUserId,
+    targetUpstreamAccountId,
     sourceUserIds,
   );
   await tx.paymentRecord.updateMany({
@@ -160,7 +162,12 @@ async function reconcileRemnashopUser(
       targetUserId: targetCandidate.id,
       sourceUserIds,
     });
-    await mergeUsersIntoTarget(tx, targetCandidate.id, sourceUserIds);
+    await mergeUsersIntoTarget(
+      tx,
+      targetCandidate.id,
+      identity.remnashopUserId,
+      sourceUserIds,
+    );
     authDebugLog("remnashop_user_reconcile_merge_completed", {
       targetUserId: targetCandidate.id,
       sourceUserIds,
@@ -354,7 +361,12 @@ export async function linkCurrentUserToRemnashopAuth({
         targetUserId: session.userId,
         sourceUserIds,
       });
-      await mergeUsersIntoTarget(tx, session.userId, sourceUserIds);
+      await mergeUsersIntoTarget(
+        tx,
+        session.userId,
+        remnashopUserId,
+        sourceUserIds,
+      );
       authDebugLog("remnashop_link_merge_completed", {
         targetUserId: session.userId,
         sourceUserIds,

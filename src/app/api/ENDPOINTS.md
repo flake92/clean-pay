@@ -62,10 +62,14 @@ If a route needs more than request parsing, a small audit call, and one backend 
 | `GET /api/bff/subscription/devices` | `src/app/api/bff/subscription/devices/route.ts` | `src/backend/integrations/remnashop/client.ts` |
 | `DELETE /api/bff/subscription/devices` | `src/app/api/bff/subscription/devices/route.ts` | `src/backend/integrations/remnashop/client.ts` |
 | `DELETE /api/bff/subscription/devices/[hwid]` | `src/app/api/bff/subscription/devices/[hwid]/route.ts` | `src/backend/integrations/remnashop/client.ts` |
-| `GET /api/bff/payments/history` | `src/app/api/bff/payments/history/route.ts` | `src/backend/payments/records.ts` |
-| `GET /api/bff/payments/status` | `src/app/api/bff/payments/status/route.ts` | `src/backend/payments/records.ts`, `src/backend/integrations/remnashop/client.ts` |
+| `GET /api/bff/payments/history` | `src/app/api/bff/payments/history/route.ts` | `src/backend/payments/history-sync.ts`, `src/backend/payments/records.ts`, `src/backend/integrations/remnashop/payment-recovery.ts` |
+| `GET /api/bff/payments/status` | `src/app/api/bff/payments/status/route.ts` | `src/backend/payments/reconciliation.ts`, `src/backend/payments/records.ts`, `src/backend/integrations/remnashop/payment-recovery.ts` |
 
 `purchase` and `extend` require a UUID `Idempotency-Key`. The same key is bound to one user, operation kind, and normalized request payload. A completed replay returns the original `200` payload with `Idempotency-Replayed: true`; an active or fail-closed unknown outcome returns `202` with `operation_id`, `status`, and `retry_after_seconds`. Clients must retain the same key after transport errors, `202`, `408`, `429`, and `5xx` responses.
+
+Payment history negotiates Remnashop recovery contract v1. With v1 it applies one keyset page and its owner-bound cursor atomically, creates missing local records, preserves upstream timestamps, and rejects cross-user `payment_id` collisions. A legacy Remnashop falls back to its validated 20-row response without guessing unknown outcomes. Payment status uses the v1 exact lookup for a requested UUID, so old payments are not limited to the first history page.
+
+`OUTCOME_UNKNOWN` operations use a separate fenced reconciliation lease. A successful recovery atomically settles the operation and its `PaymentRecord`; `MANUAL_REQUIRED` remains fail-closed. A durable upstream `404` proves that the operation never crossed the dispatch boundary and safely resets the local operation to `READY` with the same upstream key.
 
 ## Support And Health
 
@@ -77,3 +81,11 @@ If a route needs more than request parsing, a small audit call, and one backend 
 | `GET /api/health/readiness` | `src/app/api/health/readiness/route.ts` | `src/backend/health/checks.ts` |
 | `GET /api/me` | `src/app/api/me/route.ts` | `src/backend/sessions/web-session.ts` |
 | `POST /api/logout` | `src/app/api/logout/route.ts` | `src/backend/sessions/web-session.ts` |
+
+## Internal Operations
+
+| Endpoint | Route file | Backend flow |
+| --- | --- | --- |
+| `POST /api/internal/payments/reconcile` | `src/app/api/internal/payments/reconcile/route.ts` | `src/backend/payments/reconciliation.ts`, `src/backend/payments/history-sync.ts` |
+
+The internal reconciliation endpoint is disabled by default and returns `404` unless `PAYMENT_RECONCILIATION_ENABLED=true`. It requires the fixed-length timing-safe `X-Clean-Pay-Reconciliation-Secret`, enforces a bounded batch/deadline, and is called by the Compose `reconciliation` profile. The supported launchers enable that profile automatically when the flag is true and verify that its worker is running. History work uses complete bounded cursor generations; payment recovery resets an exact missing claim only with the same locked owner, while owner ambiguity becomes terminal `manual_required`. Never expose this route or secret to a browser.

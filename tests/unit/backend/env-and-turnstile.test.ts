@@ -16,6 +16,7 @@ describe("backend env", () => {
     vi.stubEnv("APP_URL", "http://localhost:8080/");
     vi.stubEnv("NEXT_PUBLIC_APP_URL", "http://localhost:8080/");
     vi.stubEnv("REMNASHOP_API_BASE_URL", "http://remnashop:5000/api/v1/public/");
+    vi.stubEnv("REMNASHOP_ADMIN_API_BASE_URL", "http://remnashop:5000/api/v1/admin/");
     vi.stubEnv("COOKIE_SECURE", "true");
     vi.stubEnv("COOKIE_SAMESITE", "strict");
     vi.stubEnv("SUPPORT_ENABLED", "true");
@@ -24,6 +25,7 @@ describe("backend env", () => {
 
     expect(env.appUrl).toBe("http://localhost:8080");
     expect(env.remnashopApiBaseUrl).toBe("http://remnashop:5000/api/v1/public");
+    expect(env.remnashopAdminApiBaseUrl).toBe("http://remnashop:5000/api/v1/admin");
     expect(env.cookieSecure).toBe(true);
     expect(env.cookieSameSite).toBe("strict");
     expect(env.telegramOidc.redirectUri).toBe("http://localhost:8080/auth/telegram/callback");
@@ -85,6 +87,33 @@ describe("backend env", () => {
     vi.stubEnv("TELEGRAM_OIDC_CLIENT_ID", "111111");
     vi.stubEnv("TELEGRAM_BOT_TOKEN", "222222:test-token");
     expect(() => getEnv()).toThrow("TELEGRAM_OIDC_CLIENT_ID must match the bot id in TELEGRAM_BOT_TOKEN");
+  });
+
+  it("requires strong bounded reconciliation configuration when enabled", () => {
+    vi.stubEnv("PAYMENT_RECONCILIATION_ENABLED", "false");
+    vi.stubEnv("REMNASHOP_ADMIN_API_BASE_URL", "");
+    expect(getEnv().remnashopAdminApiBaseUrl).toBeNull();
+
+    vi.stubEnv("PAYMENT_RECONCILIATION_ENABLED", "true");
+    vi.stubEnv("PAYMENT_RECONCILIATION_SECRET", "x".repeat(48));
+    expect(() => getEnv()).toThrow(
+      "REMNASHOP_ADMIN_API_BASE_URL is required when PAYMENT_RECONCILIATION_ENABLED=true",
+    );
+
+    vi.stubEnv(
+      "REMNASHOP_ADMIN_API_BASE_URL",
+      "http://remnashop:5000/api/v1/admin",
+    );
+    vi.stubEnv("PAYMENT_RECONCILIATION_SECRET", "short");
+    expect(() => getEnv()).toThrow(
+      "PAYMENT_RECONCILIATION_SECRET must be at least 32 characters",
+    );
+
+    vi.stubEnv("PAYMENT_RECONCILIATION_SECRET", "x".repeat(48));
+    vi.stubEnv("PAYMENT_RECONCILIATION_BATCH_SIZE", "101");
+    expect(() => getEnv()).toThrow(
+      "PAYMENT_RECONCILIATION_BATCH_SIZE must be an integer between 1 and 100",
+    );
   });
 });
 

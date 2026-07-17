@@ -15,6 +15,40 @@ const storagePrefix = "cleanPayPaymentIdempotency:v1";
 const fallbackKeys = new Map<string, string>();
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
+export type PaymentOperationStatus =
+  | "processing"
+  | "outcome_unknown"
+  | "manual_required";
+
+export function shouldPollPaymentOperation(status: unknown) {
+  return status === "processing" || status === "outcome_unknown";
+}
+
+export function parsePaymentOperationStatusEnvelope(value: unknown) {
+  if (
+    typeof value !== "object" ||
+    value === null ||
+    !("data" in value) ||
+    typeof value.data !== "object" ||
+    value.data === null ||
+    !("operation_id" in value.data) ||
+    typeof value.data.operation_id !== "string" ||
+    value.data.operation_id.length < 1 ||
+    value.data.operation_id.length > 191 ||
+    !("status" in value.data) ||
+    (value.data.status !== "processing" &&
+      value.data.status !== "outcome_unknown" &&
+      value.data.status !== "manual_required")
+  ) {
+    return null;
+  }
+
+  return {
+    operationId: value.data.operation_id,
+    status: value.data.status as PaymentOperationStatus,
+  };
+}
+
 export function canonicalPaymentPayload(payload: PaymentOperationPayload) {
   return JSON.stringify(
     Object.fromEntries(
@@ -32,8 +66,12 @@ export function paymentIdempotencyStorageKey(
   return `${storagePrefix}:${operation}:${canonicalPaymentPayload(payload)}`;
 }
 
-export function shouldRetainPaymentIdempotencyKey(responseStatus: number) {
+export function shouldRetainPaymentIdempotencyKey(
+  responseStatus: number,
+  operationStatus?: PaymentOperationStatus,
+) {
   return (
+    operationStatus === "manual_required" ||
     responseStatus === 202 ||
     responseStatus === 408 ||
     responseStatus === 429 ||

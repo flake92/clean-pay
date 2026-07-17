@@ -7,6 +7,8 @@ import {
   clearPaymentIdempotencyKey,
   getOrCreatePaymentIdempotencyKey,
   paymentIdempotencyStorageKey,
+  parsePaymentOperationStatusEnvelope,
+  shouldPollPaymentOperation,
   shouldRetainPaymentIdempotencyKey,
 } from "@/frontend/lib/payment-idempotency";
 
@@ -94,6 +96,35 @@ describe("payment idempotency keys", () => {
     expect(shouldRetainPaymentIdempotencyKey(429)).toBe(true);
     expect(shouldRetainPaymentIdempotencyKey(500)).toBe(true);
     expect(shouldRetainPaymentIdempotencyKey(409)).toBe(false);
+    expect(shouldRetainPaymentIdempotencyKey(409, "manual_required")).toBe(true);
+  });
+
+  it("accepts only bounded operation status envelopes used by the payment UI", () => {
+    expect(
+      parsePaymentOperationStatusEnvelope({
+        data: {
+          operation_id: "operation-1",
+          status: "manual_required",
+        },
+      }),
+    ).toEqual({
+      operationId: "operation-1",
+      status: "manual_required",
+    });
+    expect(
+      parsePaymentOperationStatusEnvelope({
+        data: { operation_id: "operation-1", status: "ready" },
+      }),
+    ).toBeNull();
+    expect(
+      parsePaymentOperationStatusEnvelope({
+        data: { operation_id: "x".repeat(192), status: "processing" },
+      }),
+    ).toBeNull();
+    expect(shouldPollPaymentOperation("processing")).toBe(true);
+    expect(shouldPollPaymentOperation("outcome_unknown")).toBe(true);
+    expect(shouldPollPaymentOperation("manual_required")).toBe(false);
+    expect(shouldPollPaymentOperation("succeeded")).toBe(false);
   });
 
   it("clears only the matching key after a terminal outcome", () => {

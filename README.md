@@ -29,6 +29,7 @@ APP_URL=https://pay.example.com
 NEXT_PUBLIC_APP_URL=https://pay.example.com
 
 REMNASHOP_API_BASE_URL=https://shop.example.com/api/v1/public
+REMNASHOP_ADMIN_API_BASE_URL=https://shop.example.com/api/v1/admin
 REMNASHOP_API_KEY=<APP_API_KEY из Remnashop>
 REMNAWAVE_API_BASE_URL=https://panel.example.com
 REMNAWAVE_TOKEN=<API-токен Remnawave>
@@ -64,6 +65,10 @@ node deploy/prod/prod.mjs verify
 node deploy/prod/prod.mjs ps
 ```
 
+Payment outcome reconciliation is disabled by default. After Remnashop recovery contract v1 is deployed, set `PAYMENT_RECONCILIATION_ENABLED=true`, configure the explicit `REMNASHOP_ADMIN_API_BASE_URL`, and generate a unique `PAYMENT_RECONCILIATION_SECRET` of at least 32 characters. `deploy/prod/prod.mjs` and `start.sh` then activate the `reconciliation` Compose profile automatically; their `verify`/`ps` commands fail if the enabled worker is not running. Existing installations that keep reconciliation disabled do not need the admin URL. Raw `docker compose` invocations still need `--profile reconciliation`. The worker calls only the protected internal endpoint and advances bounded payment/history generations through every cursor page.
+
+An exact recovery `404` returns an expired claimed operation to `READY` only while the locked Remnashop owner is unchanged, preserving the same upstream key. An owner mismatch or ambiguous owner rebind is terminal `manual_required`: the UI keeps the idempotency key, stops polling, and shows the operation id for support instead of creating another payment.
+
 Если на хосте нет Node.js, используйте эквивалентный Docker Compose запуск. Он не требует установки Node.js на хост и всё равно запускает проверку production-конфигурации внутри контейнера:
 
 ```bash
@@ -95,21 +100,24 @@ curl -f https://pay.example.com/api/health/readiness
 
 ### Обязательная совместимая версия
 
-Clean Pay рассчитан на изменения из открытого upstream PR
-[`snoups/remnashop#129`](https://github.com/snoups/remnashop/pull/129) и на
-дополняющий его stacked PR
-[`flake92/remnashop#2`](https://github.com/flake92/remnashop/pull/2). PR #129
-добавляет базовые password-reset/WebApp изменения, а stacked PR — необходимый
-для Clean Pay API безопасного объединения e-mail и Telegram аккаунтов.
+Базовые password-reset/WebApp изменения уже приняты в upstream через
+[`snoups/remnashop#129`](https://github.com/snoups/remnashop/pull/129).
+Оставшийся совместимый API, идемпотентные платежи и recovery/reconciliation
+направлены напрямую в `snoups/remnashop:dev` как
+[`snoups/remnashop#135`](https://github.com/snoups/remnashop/pull/135).
+Исторический stacked PR
+[`flake92/remnashop#2`](https://github.com/flake92/remnashop/pull/2) сохранён
+только для трассировки более ранней ветки.
 
-Пока эти изменения не приняты upstream и не вошли в официальный образ,
-тестовый стенд Remnashop нужно собирать из ветки
-`flake92/remnashop:codex/clean-pay-integration-pr` (она уже включает базу PR
-#129) либо фиксировать на совместимом commit `0f0fb45`. Обычный
-`ghcr.io/snoups/remnashop:latest`/v0.8.2 не содержит endpoint
-`POST /api/v1/admin/users/merge`, поэтому полный сценарий привязки e-mail к
-Telegram аккаунту с ним не работает. После принятия PR следует перейти на
-первый официальный релиз Remnashop, содержащий обе группы изменений.
+Пока PR #135 не принят и не вошёл в официальный образ, тестовый стенд
+Remnashop нужно собирать из ветки
+`flake92/remnashop:codex/clean-pay-integration-upstream-dev` и фиксировать на
+проверенном commit `d1b30ea`. Обычный `ghcr.io/snoups/remnashop:latest`/v0.8.2
+не содержит полного recovery contract v1 и endpoint
+`POST /api/v1/admin/users/merge`, поэтому с ним нельзя включать
+`PAYMENT_RECONCILIATION_ENABLED` и не работает полный сценарий привязки e-mail
+к Telegram аккаунту. После принятия PR следует перейти на первый официальный
+релиз Remnashop, содержащий эти изменения.
 
 В `/opt/remnashop/.env` включите веб-кабинет и укажите тот же ключ, что в `REMNASHOP_API_KEY` Clean Pay:
 

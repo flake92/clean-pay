@@ -14,6 +14,7 @@ import { BffClientError, readBffError } from "@/frontend/lib/client-api";
 import {
   clearPaymentIdempotencyKey,
   getOrCreatePaymentIdempotencyKey,
+  parsePaymentOperationStatusEnvelope,
   shouldRetainPaymentIdempotencyKey,
 } from "@/frontend/lib/payment-idempotency";
 import { findRenewPlan } from "@/frontend/lib/subscription-offers";
@@ -257,7 +258,26 @@ export function ExtendConfirmation() {
         return;
       }
 
+      const operationStatus = parsePaymentOperationStatusEnvelope(
+        await response.clone().json().catch(() => null),
+      );
+
       if (response.status === 202) {
+        if (operationStatus) {
+          try {
+            window.localStorage.setItem(
+              "cleanPayLastPaymentOperationId",
+              operationStatus.operationId,
+            );
+          } catch {
+            // The operation remains recoverable through the current URL.
+          }
+          paymentConfirmed = true;
+          window.location.assign(
+            `/payment/pending?operation_id=${encodeURIComponent(operationStatus.operationId)}`,
+          );
+          return;
+        }
         setSubmitError(
           "Результат продления уточняется. Не создавайте новую оплату; повторите проверку через несколько секунд.",
         );
@@ -265,10 +285,24 @@ export function ExtendConfirmation() {
       }
 
       if (!response.ok) {
-        const message = await readError(response);
+        const manualReview = operationStatus?.status === "manual_required";
+        const message = manualReview
+          ? `Статус продления не удалось определить автоматически. Не повторяйте оплату; обратитесь в поддержку и сообщите номер операции ${operationStatus.operationId}.`
+          : await readError(response);
+
+        if (manualReview) {
+          try {
+            window.localStorage.setItem(
+              "cleanPayLastPaymentOperationId",
+              operationStatus.operationId,
+            );
+          } catch {
+            // The visible operation number is still available to the user.
+          }
+        }
 
         if (response.status < 500) {
-          if (!shouldRetainPaymentIdempotencyKey(response.status)) {
+          if (!shouldRetainPaymentIdempotencyKey(response.status, operationStatus?.status)) {
             clearPaymentIdempotencyKey("extend", payload, idempotencyKey);
           }
           setSubmitError(message);

@@ -717,6 +717,7 @@ async function completeTelegramAuth(
           await transferPaymentOperationsForUserMerge(
             tx,
             targetUserId,
+            targetUser.remnashopUserId ?? sourceUser.remnashopUserId,
             [sourceUser.id],
           );
           await tx.paymentRecord.updateMany({

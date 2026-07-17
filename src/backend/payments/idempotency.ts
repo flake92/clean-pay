@@ -17,6 +17,9 @@ import {
   safeEqual,
   sha256,
 } from "@/backend/security/crypto";
+import { paymentUpstreamOwnerHash } from "@/backend/payments/hashes";
+import { lockPaymentUpstreamOwner } from "@/backend/payments/owner";
+import { isPaymentManualRequired } from "@/backend/payments/manual-review";
 import type {
   ExtendRequest,
   PaymentInitResponse,
@@ -83,6 +86,10 @@ export type PaymentOperationBeginResult =
       operationId: string;
       reason: "IN_PROGRESS" | "OUTCOME_UNKNOWN";
       retryAfterSeconds?: number;
+    }
+  | {
+      state: "manual_required";
+      operationId: string;
     };
 
 type NormalizedOperation = {
@@ -418,6 +425,13 @@ export async function beginPaymentOperation(input: {
     }
 
     if (operation.status === "OUTCOME_UNKNOWN") {
+      if (isPaymentManualRequired(operation)) {
+        return {
+          state: "manual_required",
+          operationId: operation.id,
+        };
+      }
+
       return {
         state: "pending",
         operationId: operation.id,
@@ -445,6 +459,7 @@ export async function beginPaymentOperation(input: {
             status: "OUTCOME_UNKNOWN",
             outcomeUnknownAt: now,
             leaseExpiresAt: null,
+            reconcileNextAttemptAt: now,
           },
         });
 
@@ -535,7 +550,7 @@ export async function bindPaymentOperationUpstreamOwner(input: {
     "upstreamAccountId",
     512,
   );
-  const ownerHash = paymentHash(upstreamAccountId, "upstream-owner");
+  const ownerHash = paymentUpstreamOwnerHash(upstreamAccountId);
   const claimHash = claimTokenHash(input.claimToken);
   const bound = await prisma.paymentOperation.updateMany({
     where: {
@@ -618,7 +633,7 @@ export async function markPaymentOperationDispatched(input: {
   }
 }
 
-function responseSnapshot(
+export function paymentResponseSnapshot(
   response: PaymentInitResponse,
 ): Prisma.InputJsonObject {
   return {
@@ -710,6 +725,18 @@ export async function completePaymentOperationSuccess(input: {
         );
       }
 
+      if (!operation.upstreamOwnerHash) {
+        throw paymentOperationConflict(
+          "Payment operation is missing its upstream owner",
+        );
+      }
+
+      await lockPaymentUpstreamOwner(
+        transaction,
+        operation.userId,
+        operation.upstreamOwnerHash,
+      );
+
       const [recordForPayment, recordForOperation] = await Promise.all([
         transaction.paymentRecord.findUnique({
           where: { paymentId },
@@ -750,7 +777,11 @@ export async function completePaymentOperationSuccess(input: {
         data: {
           status: "SUCCEEDED",
           responseStatus,
-          responseSnapshot: responseSnapshot(input.payment.payment),
+          responseSnapshot: paymentResponseSnapshot(input.payment.payment),
+          reconcileClaimTokenHash: null,
+          reconcileLeaseExpiresAt: null,
+          reconcileNextAttemptAt: null,
+          reconcileErrorSnapshot: Prisma.DbNull,
           errorSnapshot: Prisma.DbNull,
           completedAt: now,
           claimTokenHash: null,
@@ -885,6 +916,7 @@ export async function settlePaymentOperationAfterDispatchFailure(input: {
             status: "OUTCOME_UNKNOWN" as const,
             errorSnapshot: errorSnapshotJson(snapshot),
             outcomeUnknownAt: now,
+            reconcileNextAttemptAt: now,
             claimTokenHash: null,
             leaseExpiresAt: null,
           };

@@ -41,6 +41,10 @@ function composeArgs(...extra) {
     base.push("-f", file);
   }
 
+  if (readEnvValue("PAYMENT_RECONCILIATION_ENABLED", "false") === "true") {
+    base.push("--profile", "reconciliation");
+  }
+
   return [...base, ...extra];
 }
 
@@ -74,6 +78,84 @@ function runDocker(args, options = {}) {
   }
 
   return result.status ?? 1;
+}
+
+function sleepSync(milliseconds) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, milliseconds);
+}
+
+function assertReconciliationWorkerHealthy() {
+  if (readEnvValue("PAYMENT_RECONCILIATION_ENABLED", "false") !== "true") {
+    return;
+  }
+
+  const deadline = Date.now() + 120_000;
+  let lastStatus = "container not found";
+
+  while (Date.now() < deadline) {
+    const container = spawnSync(
+      "docker",
+      composeArgs("ps", "-q", "reconciliation-worker"),
+      {
+        cwd: rootDir,
+        env: process.env,
+        encoding: "utf8",
+        stdio: "pipe",
+        shell: false,
+      },
+    );
+
+    if (container.error) {
+      console.error(container.error.message);
+      process.exit(1);
+    }
+
+    if (container.status !== 0) {
+      process.stderr.write(
+        container.stderr || "Failed to inspect reconciliation-worker.\n",
+      );
+      process.exit(container.status ?? 1);
+    }
+
+    const containerId = container.stdout.trim();
+
+    if (containerId) {
+      const health = spawnSync(
+        "docker",
+        [
+          "inspect",
+          "--format",
+          "{{if .State.Health}}{{.State.Health.Status}}{{else}}missing{{end}}",
+          containerId,
+        ],
+        {
+          cwd: rootDir,
+          env: process.env,
+          encoding: "utf8",
+          stdio: "pipe",
+          shell: false,
+        },
+      );
+
+      if (!health.error && health.status === 0) {
+        lastStatus = health.stdout.trim() || "unknown";
+
+        if (lastStatus === "healthy") {
+          console.log("OK reconciliation-worker is healthy");
+          return;
+        }
+      } else {
+        lastStatus = health.error?.message || health.stderr.trim() || "inspect failed";
+      }
+    }
+
+    sleepSync(2_000);
+  }
+
+  console.error(
+    `PAYMENT_RECONCILIATION_ENABLED=true, but reconciliation-worker is not healthy (${lastStatus}).`,
+  );
+  process.exit(1);
 }
 
 function ensureEdgeNetwork() {
@@ -153,6 +235,7 @@ async function verify() {
       if (response.status === 200) {
         console.log(`OK ${url}`);
         console.log(response.body);
+        assertReconciliationWorkerHealthy();
         return;
       }
 
@@ -188,7 +271,15 @@ switch (command) {
     run("docker", composeArgs("logs", "-f", "app"));
     break;
   case "ps":
-    run("docker", composeArgs("ps"));
+    {
+      const status = runDocker(composeArgs("ps"));
+
+      if (status !== 0) {
+        process.exit(status);
+      }
+
+      assertReconciliationWorkerHealthy();
+    }
     break;
   case "verify":
     await verify();

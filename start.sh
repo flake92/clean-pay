@@ -161,6 +161,7 @@ validate_env() {
   http_url_env APP_URL
   http_url_env NEXT_PUBLIC_APP_URL
   http_url_env REMNASHOP_API_BASE_URL
+  optional_http_url_env REMNASHOP_ADMIN_API_BASE_URL
   http_url_env REMNAWAVE_API_BASE_URL
   optional_http_url_env TURNSTILE_VERIFY_URL
   optional_http_url_env SUPPORT_FAQ_URL
@@ -180,6 +181,15 @@ validate_env() {
   bool_env COOKIE_SECURE true
   bool_env TURNSTILE_ENABLED false
   bool_env SUPPORT_ENABLED false
+  bool_env PAYMENT_RECONCILIATION_ENABLED false
+
+  reconcile_enabled=$(env_value PAYMENT_RECONCILIATION_ENABLED false)
+  if [ "$reconcile_enabled" = "true" ]; then
+    required_env PAYMENT_RECONCILIATION_SECRET
+    required_env REMNASHOP_ADMIN_API_BASE_URL
+  fi
+
+  optional_http_url_env PAYMENT_RECONCILIATION_INTERNAL_URL
 
   cookie_samesite=$(env_value COOKIE_SAMESITE lax)
   case "$cookie_samesite" in
@@ -237,10 +247,44 @@ ensure_network() {
 
 compose() {
   if [ "$MODE" = "remnashop" ]; then
-    docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" -f "$ROOT_DIR/docker-compose.remnashop.yml" "$@"
+    if [ "$(env_value PAYMENT_RECONCILIATION_ENABLED false)" = "true" ]; then
+      docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" -f "$ROOT_DIR/docker-compose.remnashop.yml" --profile reconciliation "$@"
+    else
+      docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" -f "$ROOT_DIR/docker-compose.remnashop.yml" "$@"
+    fi
   else
-    docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" "$@"
+    if [ "$(env_value PAYMENT_RECONCILIATION_ENABLED false)" = "true" ]; then
+      docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" --profile reconciliation "$@"
+    else
+      docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" "$@"
+    fi
   fi
+}
+
+assert_reconciliation_worker() {
+  [ "$(env_value PAYMENT_RECONCILIATION_ENABLED false)" = "true" ] || return 0
+
+  attempts=0
+  last_status="container not found"
+
+  while [ "$attempts" -lt 60 ]; do
+    container_id=$(compose ps -q reconciliation-worker) \
+      || fail "failed to inspect reconciliation-worker"
+
+    if [ -n "$container_id" ]; then
+      last_status=$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}missing{{end}}' "$container_id" 2>/dev/null || printf '%s' "inspect failed")
+
+      if [ "$last_status" = "healthy" ]; then
+        info "reconciliation-worker is healthy"
+        return 0
+      fi
+    fi
+
+    attempts=$((attempts + 1))
+    sleep 2
+  done
+
+  fail "PAYMENT_RECONCILIATION_ENABLED=true, but reconciliation-worker is not healthy ($last_status)"
 }
 
 start() {
@@ -250,6 +294,7 @@ start() {
   ensure_network
   info "building and starting containers"
   compose up -d --build
+  assert_reconciliation_worker
   info "started. Use 'sh start.sh logs' to follow app logs"
 }
 
@@ -261,16 +306,14 @@ verify() {
   if command -v curl >/dev/null 2>&1; then
     curl --fail --show-error --silent "$url"
     printf '\n'
-    return
-  fi
-
-  if command -v wget >/dev/null 2>&1; then
+  elif command -v wget >/dev/null 2>&1; then
     wget -qO- "$url"
     printf '\n'
-    return
+  else
+    fail "curl or wget is required to verify ${url}"
   fi
 
-  fail "curl or wget is required to verify ${url}"
+  assert_reconciliation_worker
 }
 
 case "$COMMAND" in
@@ -291,6 +334,7 @@ case "$COMMAND" in
   status|ps)
     require_env_file
     compose ps
+    assert_reconciliation_worker
     ;;
   verify|health)
     verify
