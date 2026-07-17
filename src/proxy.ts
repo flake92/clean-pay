@@ -1,9 +1,36 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { logger } from "@/backend/observability/logger";
+import { validateMutationRequest, validateRequestSource } from "@/backend/security/csrf";
 
 const accessCookieName = 'clean_pay_access';
 const refreshCookieName = 'clean_pay_refresh';
+
+const bodylessPostMutationPaths = new Set([
+  '/api/logout',
+  '/api/bff/auth/logout',
+  '/api/bff/auth/passkey/login/options',
+  '/api/bff/auth/passkey/register/options',
+  '/api/bff/subscription/reissue',
+]);
+
+const passkeyCredentialPathPrefix = '/api/bff/auth/passkey/credentials/';
+const subscriptionDevicePathPrefix = '/api/bff/subscription/devices/';
+
+function isSingleSegmentPath(pathname: string, prefix: string) {
+  const suffix = pathname.startsWith(prefix) ? pathname.slice(prefix.length) : '';
+
+  return suffix.length > 0 && !suffix.includes('/');
+}
+
+function isBodylessMutation(method: string, pathname: string) {
+  return (
+    (method === 'POST' && bodylessPostMutationPaths.has(pathname)) ||
+    (method === 'DELETE' && pathname === '/api/bff/subscription/devices') ||
+    (method === 'DELETE' && isSingleSegmentPath(pathname, passkeyCredentialPathPrefix)) ||
+    (method === 'DELETE' && isSingleSegmentPath(pathname, subscriptionDevicePathPrefix))
+  );
+}
 
 const publicPagePaths = new Set([
   '/manifest.webmanifest',
@@ -210,6 +237,35 @@ function requestMetadata(request: NextRequest, accessState: AccessState) {
   };
 }
 
+function browserMutationGuard(request: NextRequest) {
+  if (request.nextUrl.pathname === '/auth/telegram/start') {
+    if (!request.cookies.has(accessCookieName) && !request.cookies.has(refreshCookieName)) {
+      return { ok: true } as const;
+    }
+
+    return validateRequestSource({
+      headers: request.headers,
+      trustedAppUrl: process.env.NEXT_PUBLIC_APP_URL,
+    });
+  }
+
+  const isProtectedMutationPath =
+    request.nextUrl.pathname.startsWith('/api/bff/') ||
+    request.nextUrl.pathname === '/api/logout' ||
+    request.nextUrl.pathname === '/auth/telegram/callback';
+
+  if (!isProtectedMutationPath) {
+    return { ok: true } as const;
+  }
+
+  return validateMutationRequest({
+    method: request.method,
+    headers: request.headers,
+    trustedAppUrl: process.env.NEXT_PUBLIC_APP_URL,
+    requireJson: !isBodylessMutation(request.method.toUpperCase(), request.nextUrl.pathname),
+  });
+}
+
 export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
   const accessState = await getAccessState(request);
@@ -223,6 +279,28 @@ export async function proxy(request: NextRequest) {
     source: "http.access",
     message: `${request.method} ${pathname} received`,
   });
+
+  const csrfResult = browserMutationGuard(request);
+
+  if (!csrfResult.ok) {
+    logger.warn("http_request_decision", {
+      ...metadata,
+      action: "block_csrf",
+      reason: csrfResult.reason,
+      status: csrfResult.status,
+    }, {
+      category: "http",
+      source: "http.access",
+      message: `${request.method} ${pathname} -> ${csrfResult.status} ${csrfResult.reason}`,
+    });
+
+    return NextResponse.json(
+      csrfResult.reason === "unsupported_media_type"
+        ? { error: { code: 'VALIDATION_ERROR', message: 'Для этого запроса требуется application/json.' } }
+        : { error: { code: 'FORBIDDEN', message: 'Источник запроса не разрешён.' } },
+      { status: csrfResult.status },
+    );
+  }
 
   if (isPublicPath(pathname)) {
     if ((accessState.authenticated || isBootstrapAuthenticated) && (pathname === '/login' || pathname === '/register')) {

@@ -26,15 +26,23 @@ function accessToken(payload: Record<string, unknown>, secret = process.env.WEB_
   return `${encoded}.${signature}`;
 }
 
-function request(pathname: string, cookie?: string) {
+function request(pathname: string, cookie?: string, init: RequestInit = {}) {
+  const headers = new Headers(init.headers);
+
+  if (cookie) {
+    headers.set("cookie", cookie);
+  }
+
   return new NextRequest(new Request(`https://pay.example.com${pathname}`, {
-    headers: cookie ? { cookie } : undefined,
+    ...init,
+    headers,
   }));
 }
 
 describe("proxy auth redirects", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.stubEnv("NEXT_PUBLIC_APP_URL", "https://pay.example.com");
   });
 
   it.each(["/cabinet", "/profile", "/tariffs", "/link-account"])(
@@ -85,6 +93,211 @@ describe("proxy auth redirects", () => {
 
     expect(response.status).toBe(200);
     expect(response.headers.get("location")).toBeNull();
+  });
+
+  it("allows a same-origin cookie-auth JSON mutation", async () => {
+    const response = await proxy(request(
+      "/api/bff/auth/email/change",
+      "clean_pay_refresh=refresh-token",
+      {
+        method: "POST",
+        headers: {
+          origin: "https://pay.example.com",
+          "content-type": "application/json; charset=utf-8",
+        },
+        body: JSON.stringify({ email: "next@example.com" }),
+      },
+    ));
+
+    expect(response.status).toBe(200);
+  });
+
+  it("allows Referer as a fallback when Origin is absent", async () => {
+    const response = await proxy(request(
+      "/api/bff/auth/email/confirm",
+      "clean_pay_refresh=refresh-token",
+      {
+        method: "POST",
+        headers: {
+          referer: "https://pay.example.com/register/verify-email",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ code: "123456" }),
+      },
+    ));
+
+    expect(response.status).toBe(200);
+  });
+
+  it.each([
+    ["a cross-origin request", { origin: "https://evil.example" }],
+    ["a same-site sibling origin", { origin: "https://other.pay.example.com" }],
+    ["an opaque origin", { origin: "null" }],
+    [
+      "an untrusted Origin even with a trusted Referer",
+      { origin: "https://evil.example", referer: "https://pay.example.com/profile" },
+    ],
+    ["a request without source headers", {}],
+  ])("rejects %s for a cookie-auth mutation", async (_label, sourceHeaders) => {
+    const response = await proxy(request(
+      "/api/bff/auth/email/change",
+      "clean_pay_refresh=refresh-token",
+      {
+        method: "POST",
+        headers: {
+          ...sourceHeaders,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ email: "next@example.com" }),
+      },
+    ));
+
+    expect(response.status).toBe(403);
+    expect(await response.json()).toMatchObject({ error: { code: "FORBIDDEN" } });
+  });
+
+  it.each([
+    ["email confirmation", "/api/bff/auth/email/confirm", "clean_pay_refresh=refresh-token"],
+    ["Telegram popup callback", "/auth/telegram/callback", undefined],
+  ])("rejects non-JSON %s even from the trusted origin", async (_label, pathname, cookie) => {
+    const response = await proxy(request(
+      pathname,
+      cookie,
+      {
+        method: "POST",
+        headers: {
+          origin: "https://pay.example.com",
+          "content-type": "text/plain",
+        },
+        body: JSON.stringify({ code: "123456" }),
+      },
+    ));
+
+    expect(response.status).toBe(415);
+    expect(await response.json()).toMatchObject({ error: { code: "VALIDATION_ERROR" } });
+  });
+
+  it("allows a same-origin no-body cookie-auth mutation without Content-Type", async () => {
+    const response = await proxy(request(
+      "/api/bff/auth/logout",
+      "clean_pay_refresh=refresh-token",
+      {
+        method: "POST",
+        headers: { origin: "https://pay.example.com" },
+      },
+    ));
+
+    expect(response.status).toBe(200);
+  });
+
+  it("requires JSON by default for future unsafe BFF routes", async () => {
+    const response = await proxy(request(
+      "/api/bff/future/mutation",
+      undefined,
+      {
+        method: "POST",
+        headers: { origin: "https://pay.example.com" },
+      },
+    ));
+
+    expect(response.status).toBe(415);
+    expect(await response.json()).toMatchObject({ error: { code: "VALIDATION_ERROR" } });
+  });
+
+  it.each([
+    ["a future POST on an existing DELETE path", "POST", "/api/bff/subscription/devices"],
+    ["a nested future DELETE route", "DELETE", "/api/bff/subscription/devices/device/metadata"],
+  ])("does not overmatch bodyless exceptions for %s", async (_label, method, pathname) => {
+    const response = await proxy(request(pathname, undefined, {
+      method,
+      headers: { origin: "https://pay.example.com" },
+    }));
+
+    expect(response.status).toBe(415);
+  });
+
+  it("allows the known single-segment bodyless DELETE route", async () => {
+    const response = await proxy(request(
+      "/api/bff/subscription/devices/device-1",
+      "clean_pay_refresh=refresh-token",
+      {
+        method: "DELETE",
+        headers: { origin: "https://pay.example.com" },
+      },
+    ));
+
+    expect(response.status).toBe(200);
+  });
+
+  it.each([
+    ["public login", "/api/bff/auth/login", { email: "user@example.com", password: "secret" }],
+    ["Telegram WebApp login", "/api/bff/auth/telegram/webapp", { initData: "signed-telegram-payload" }],
+    ["Telegram popup callback", "/auth/telegram/callback", { idToken: "signed-telegram-token" }],
+  ])("allows same-origin %s without existing cookies", async (_label, pathname, body) => {
+    const response = await proxy(request(pathname, undefined, {
+      method: "POST",
+      headers: {
+        origin: "https://pay.example.com",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify(body),
+    }));
+
+    expect(response.status).toBe(200);
+  });
+
+  it.each([
+    ["public login", "/api/bff/auth/login", { email: "user@example.com", password: "secret" }],
+    ["Telegram WebApp login", "/api/bff/auth/telegram/webapp", { initData: "signed-telegram-payload" }],
+    ["Telegram popup callback", "/auth/telegram/callback", { idToken: "signed-telegram-token" }],
+  ])("rejects cross-origin %s without existing cookies", async (_label, pathname, body) => {
+    const response = await proxy(request(pathname, undefined, {
+      method: "POST",
+      headers: {
+        origin: "https://evil.example",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify(body),
+    }));
+
+    expect(response.status).toBe(403);
+    expect(await response.json()).toMatchObject({ error: { code: "FORBIDDEN" } });
+  });
+
+  it("allows the external Telegram OIDC GET callback without source headers", async () => {
+    const response = await proxy(request("/auth/telegram/callback?code=code&state=state"));
+
+    expect(response.status).toBe(200);
+  });
+
+  it("allows an authenticated Telegram link start from the trusted page", async () => {
+    const response = await proxy(request(
+      "/auth/telegram/start?redirect_to=/link-account",
+      "clean_pay_refresh=refresh-token",
+      { headers: { referer: "https://pay.example.com/link-account" } },
+    ));
+
+    expect(response.status).toBe(200);
+  });
+
+  it.each([
+    ["an untrusted page", { referer: "https://evil.example/attack" }],
+    ["a request without source headers", {}],
+  ])("rejects authenticated Telegram link start from %s", async (_label, headers) => {
+    const response = await proxy(request(
+      "/auth/telegram/start?redirect_to=/link-account",
+      "clean_pay_refresh=refresh-token",
+      { headers },
+    ));
+
+    expect(response.status).toBe(403);
+    expect(await response.json()).toMatchObject({ error: { code: "FORBIDDEN" } });
+  });
+
+  it("keeps anonymous Telegram login start available without source headers", async () => {
+    const response = await proxy(request("/auth/telegram/start?redirect_to=/cabinet"));
+
+    expect(response.status).toBe(200);
   });
 
   it("blocks API requests without cookies and clears stale session cookies on the response", async () => {

@@ -239,11 +239,14 @@ describe("auth use cases", () => {
     mocks.remnashopRequest.mockResolvedValueOnce({ email: "verified@example.com" });
     mocks.getRemnashopMe.mockResolvedValueOnce({ ...profile, pending_email: "verified@example.com" });
 
-    await confirmEmailVerification({ code: "123456", registrationFlow: true }, {});
+    await confirmEmailVerification(
+      { code: "123456", registrationFlow: true, turnstileToken: "ts-confirm" },
+      { remoteIp: "127.0.0.1" },
+    );
 
     expect(mocks.remnashopLinkTelegram).not.toHaveBeenCalled();
     expect(mocks.linkCurrentUserToRemnashopAuth).toHaveBeenCalledOnce();
-    expect(mocks.verifyTurnstileToken).not.toHaveBeenCalled();
+    expect(mocks.verifyTurnstileToken).toHaveBeenCalledWith("ts-confirm", "127.0.0.1");
     expect(mocks.remnashopRequest).toHaveBeenLastCalledWith("/auth/email/confirm", {
       method: "POST",
       accessToken: "access-token",
@@ -254,6 +257,20 @@ describe("auth use cases", () => {
       data: { email: "verified@example.com", emailVerified: true, authPending: false },
     });
     expect(mocks.refreshCurrentAccessCookie).toHaveBeenCalledOnce();
+  });
+
+  it("does not let the legacy registrationFlow flag bypass Turnstile", async () => {
+    mocks.verifyTurnstileToken.mockRejectedValueOnce(
+      new BffError("VALIDATION_ERROR", 400, "Turnstile token is required"),
+    );
+
+    await expect(
+      confirmEmailVerification({ code: "123456", registrationFlow: true }, {}),
+    ).rejects.toMatchObject({ code: "VALIDATION_ERROR", status: 400 });
+
+    expect(mocks.verifyTurnstileToken).toHaveBeenCalledWith(undefined, undefined);
+    expect(mocks.getAuthorizedRemnashopTokens).not.toHaveBeenCalled();
+    expect(mocks.remnashopRequest).not.toHaveBeenCalled();
   });
 
   it("merges Remnashop users after email code confirmation when Telegram belongs to another Remnashop account", async () => {

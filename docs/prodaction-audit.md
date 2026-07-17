@@ -42,9 +42,19 @@
 
 ## P1 — высокий приоритет
 
-### 2. [ ] Закрыть CSRF в изменении e-mail и других cookie-auth мутациях
+### 2. [x] Закрыть CSRF в изменении e-mail и других cookie-auth мутациях
 
 Проверять доверенный `Origin`/`Referer`, допустимый `Content-Type` и серверное состояние registration flow. Не доверять клиентскому `registrationFlow` для отключения Turnstile. Добавить негативные тесты для cross-site и sibling-subdomain запросов.
+
+Результат:
+
+- все unsafe `/api/bff/**`, `/api/logout` и `POST /auth/telegram/callback` требуют точный public `Origin` либо доверенный `Referer`;
+- `GET /auth/telegram/callback` сохранён для внешнего OIDC redirect; authenticated Telegram link start разрешён только с доверенной страницы;
+- JSON обязателен по умолчанию для browser mutations, известные bodyless endpoints перечислены явно;
+- cross-origin, sibling-subdomain, opaque/missing origin и `text/plain` запросы отклоняются до use case;
+- client-controlled `registrationFlow` игнорируется, а email confirmation всегда проходит серверную Turnstile-проверку; текущий registration UI уже отправляет token;
+- same-origin login, Telegram WebApp/popup, password, passkey, payment и subscription flows сохранены;
+- production rollout не выполнялся.
 
 ### 3. [ ] Сделать purchase/extend идемпотентными
 
@@ -161,3 +171,4 @@ Fallback по Telegram/e-mail должен подтверждать UUID и вл
 
 - 2026-07-17: аудит зафиксирован; начата работа над пунктом 1.
 - 2026-07-17: пункт 1 исправлен и локально проверен: passkey suite 10/10, полный suite 183/183, ESLint без ошибок, production build успешен. Добавлены проверки нового, собственного, чужого, изменённого и конкурентно созданного credential.
+- 2026-07-17: пункт 2 исправлен и локально проверен: профильный suite 58/58, полный suite 209/209, ESLint без ошибок в исходниках, production build успешен. Прямой `tsc --noEmit` сохранил базовые 29 ошибок тестовой типизации, новых ошибок не добавлено. Devcontainer E2E локально не запущен: Docker Desktop daemon недоступен; проверка перенесена на тестовый стенд перед production rollout.

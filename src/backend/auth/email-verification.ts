@@ -222,18 +222,14 @@ export async function requestEmailVerification(rawBody: AuthPayload<RequestEmail
 
 export async function confirmEmailVerification(rawBody: AuthPayload<ConfirmEmailVerificationRequest>, turnstile: TurnstileContext) {
   const { body, turnstileToken } = stripTurnstile(rawBody);
-  const skipTurnstile = body.registrationFlow === true;
   delete body.registrationFlow;
 
   authDebugLog("email_verification_confirm_started", {
     hasEmail: Boolean(body.email),
-    skipTurnstile,
     hasTurnstileToken: Boolean(turnstileToken ?? turnstile.token),
   });
-  if (!skipTurnstile) {
-    await verifyTurnstileToken(turnstileToken ?? turnstile.token, turnstile.remoteIp);
-    authDebugLog("email_verification_confirm_turnstile_passed", {});
-  }
+  await verifyTurnstileToken(turnstileToken ?? turnstile.token, turnstile.remoteIp);
+  authDebugLog("email_verification_confirm_turnstile_passed", {});
 
   const { accessToken, refreshToken, session } = await getAuthorizedRemnashopTokens({
     allowUnverifiedEmail: true,

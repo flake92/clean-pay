@@ -65,6 +65,7 @@ function cookieHeader(jar: CookieJar) {
 async function http(pathOrUrl: string, init: RequestInit = {}, jar?: CookieJar) {
   const url = normalizeUrl(pathOrUrl);
   const headers = new Headers(init.headers);
+  const method = (init.method ?? "GET").toUpperCase();
 
   if (jar && Object.keys(jar).length > 0) {
     headers.set("cookie", cookieHeader(jar));
@@ -72,6 +73,14 @@ async function http(pathOrUrl: string, init: RequestInit = {}, jar?: CookieJar) 
 
   if (init.body && !headers.has("content-type")) {
     headers.set("content-type", "application/json");
+  }
+
+  if (
+    !["GET", "HEAD", "OPTIONS"].includes(method) &&
+    new URL(url).origin === new URL(baseUrl).origin &&
+    !headers.has("origin")
+  ) {
+    headers.set("origin", new URL(baseUrl).origin);
   }
 
   const response = await fetch(url, {

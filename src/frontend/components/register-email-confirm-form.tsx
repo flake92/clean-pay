@@ -105,7 +105,6 @@ export function RegisterEmailConfirmForm({
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
         code: formData.get("code"),
-        registrationFlow: true,
         ...turnstilePayload(turnstileToken),
       }),
     });
