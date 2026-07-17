@@ -17,9 +17,10 @@ const mocks = vi.hoisted(() => ({
     },
     webAuthnCredential: {
       findMany: vi.fn(),
-      upsert: vi.fn(),
+      create: vi.fn(),
       findUnique: vi.fn(),
       update: vi.fn(),
+      updateMany: vi.fn(),
       findFirst: vi.fn(),
       delete: vi.fn(),
     },
@@ -68,6 +69,21 @@ function clientData(challenge: string) {
   return Buffer.from(JSON.stringify({ challenge })).toString("base64url");
 }
 
+function registrationResponse(name = "Рабочий ноутбук"): Parameters<typeof finishPasskeyRegistration>[0] {
+  return {
+    id: "credential-1",
+    rawId: "credential-1",
+    type: "public-key",
+    response: {
+      clientDataJSON: clientData("reg-challenge"),
+      attestationObject: "attestation",
+      transports: ["internal"],
+    },
+    clientExtensionResults: {},
+    name,
+  };
+}
+
 const session = {
   id: "session-1",
   userId: "user-1",
@@ -88,6 +104,8 @@ describe("passkey use cases", () => {
     mocks.generateRegistrationOptions.mockResolvedValue({ challenge: "reg-challenge", rp: { id: "localhost" } });
     mocks.generateAuthenticationOptions.mockResolvedValue({ challenge: "auth-challenge" });
     mocks.prisma.webAuthnCredential.findMany.mockResolvedValue([]);
+    mocks.prisma.webAuthnCredential.create.mockResolvedValue(undefined);
+    mocks.prisma.webAuthnCredential.updateMany.mockResolvedValue({ count: 0 });
     mocks.prisma.webAuthnChallenge.findFirst.mockResolvedValue({ id: "challenge-1", userId: "user-1", challenge: "reg-challenge" });
     mocks.verifyRegistrationResponse.mockResolvedValue({
       verified: true,
@@ -163,30 +181,112 @@ describe("passkey use cases", () => {
     mocks.getCurrentSession.mockResolvedValueOnce({ ...session, assuranceLevel: "PARTIAL" });
 
     await expect(
-      finishPasskeyRegistration({
-        id: "credential-1",
-        rawId: "credential-1",
-        type: "public-key",
-        response: {
-          clientDataJSON: clientData("reg-challenge"),
-          attestationObject: "attestation",
-          transports: ["internal"],
-        },
-        clientExtensionResults: {},
-        name: "Рабочий ноутбук",
-      }),
+      finishPasskeyRegistration(registrationResponse()),
     ).resolves.toEqual({ success: true });
 
     expect(mocks.prisma.webAuthnChallenge.update).toHaveBeenCalledWith({
       where: { id: "challenge-1" },
       data: { consumedAt: expect.any(Date) },
     });
-    expect(mocks.prisma.webAuthnCredential.upsert).toHaveBeenCalledWith({
-      where: { credentialId: "credential-1" },
-      create: expect.objectContaining({ userId: "user-1", credentialId: "credential-1", name: "Рабочий ноутбук" }),
-      update: expect.objectContaining({ counter: 0n, name: "Рабочий ноутбук" }),
+    expect(mocks.prisma.webAuthnCredential.updateMany).toHaveBeenCalledWith({
+      where: {
+        credentialId: "credential-1",
+        userId: "user-1",
+        publicKey: { equals: Buffer.from([1, 2, 3]) },
+      },
+      data: expect.objectContaining({ name: "Рабочий ноутбук" }),
+    });
+    expect(mocks.prisma.webAuthnCredential.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        userId: "user-1",
+        credentialId: "credential-1",
+        publicKey: Buffer.from([1, 2, 3]),
+        counter: 0n,
+        name: "Рабочий ноутбук",
+      }),
     });
     expect(mocks.upgradeCurrentSessionToFull).toHaveBeenCalledOnce();
+  });
+
+  it("updates a credential already owned by the current user", async () => {
+    mocks.prisma.webAuthnCredential.updateMany.mockResolvedValueOnce({ count: 1 });
+
+    await expect(finishPasskeyRegistration(registrationResponse("Синхронизированный ключ"))).resolves.toEqual({ success: true });
+
+    expect(mocks.prisma.webAuthnCredential.updateMany).toHaveBeenCalledWith({
+      where: {
+        credentialId: "credential-1",
+        userId: "user-1",
+        publicKey: { equals: Buffer.from([1, 2, 3]) },
+      },
+      data: expect.objectContaining({ name: "Синхронизированный ключ" }),
+    });
+    expect(mocks.prisma.webAuthnCredential.updateMany.mock.calls[0]?.[0].data).not.toHaveProperty("publicKey");
+    expect(mocks.prisma.webAuthnCredential.updateMany.mock.calls[0]?.[0].data).not.toHaveProperty("counter");
+    expect(mocks.prisma.webAuthnCredential.create).not.toHaveBeenCalled();
+  });
+
+  it("rejects a credential that is already owned by another user", async () => {
+    mocks.prisma.webAuthnCredential.updateMany
+      .mockResolvedValueOnce({ count: 0 })
+      .mockResolvedValueOnce({ count: 0 });
+    mocks.prisma.webAuthnCredential.create.mockRejectedValueOnce({ code: "P2002" });
+
+    await expect(finishPasskeyRegistration(registrationResponse())).rejects.toMatchObject({
+      code: "CONFLICT",
+      status: 409,
+    });
+
+    expect(mocks.prisma.webAuthnCredential.updateMany).toHaveBeenCalledTimes(2);
+    expect(mocks.prisma.webUser.update).not.toHaveBeenCalled();
+    expect(mocks.auditLog).not.toHaveBeenCalled();
+  });
+
+  it("rejects the same credential id when its verified public key changed", async () => {
+    mocks.verifyRegistrationResponse.mockResolvedValueOnce({
+      verified: true,
+      registrationInfo: {
+        credential: {
+          id: "credential-1",
+          publicKey: new Uint8Array([9, 9, 9]),
+          counter: 0,
+        },
+        aaguid: "aaguid",
+        credentialBackedUp: true,
+        credentialDeviceType: "multiDevice",
+      },
+    });
+    mocks.prisma.webAuthnCredential.updateMany
+      .mockResolvedValueOnce({ count: 0 })
+      .mockResolvedValueOnce({ count: 0 });
+    mocks.prisma.webAuthnCredential.create.mockRejectedValueOnce({ code: "P2002" });
+
+    await expect(finishPasskeyRegistration(registrationResponse())).rejects.toMatchObject({
+      code: "CONFLICT",
+      status: 409,
+    });
+
+    expect(mocks.prisma.webAuthnCredential.updateMany).toHaveBeenNthCalledWith(1, {
+      where: {
+        credentialId: "credential-1",
+        userId: "user-1",
+        publicKey: { equals: Buffer.from([9, 9, 9]) },
+      },
+      data: expect.any(Object),
+    });
+  });
+
+  it("finishes a concurrent registration when the credential was created by the same user", async () => {
+    mocks.prisma.webAuthnCredential.updateMany
+      .mockResolvedValueOnce({ count: 0 })
+      .mockResolvedValueOnce({ count: 1 });
+    mocks.prisma.webAuthnCredential.create.mockRejectedValueOnce({ code: "P2002" });
+
+    await expect(finishPasskeyRegistration(registrationResponse())).resolves.toEqual({ success: true });
+
+    expect(mocks.prisma.webAuthnCredential.updateMany).toHaveBeenCalledTimes(2);
+    expect(mocks.prisma.webUser.update).toHaveBeenCalledOnce();
+    expect(mocks.auditLog).toHaveBeenCalledWith(expect.objectContaining({ action: "passkey_registered", userId: "user-1" }));
   });
 
   it("begins and finishes passkey login", async () => {

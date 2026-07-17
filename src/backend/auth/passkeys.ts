@@ -119,6 +119,10 @@ function normalizePasskeyName(value: unknown) {
   return normalized.length > 0 ? normalized : null;
 }
 
+function isUniqueConstraintError(error: unknown) {
+  return Boolean(error && typeof error === "object" && "code" in error && error.code === "P2002");
+}
+
 function passkeyNameFromUserAgent(userAgent: string | null) {
   const value = userAgent ?? "";
   const platform = /iphone/i.test(value)
@@ -165,7 +169,8 @@ export async function beginPasskeyRegistration() {
     timeout: 120_000,
     attestationType: "none",
     // Cross-device passkeys can fail in Windows/Chrome before verification when
-    // synced credentials are excluded. Duplicate IDs are handled by the upsert below.
+    // synced credentials are excluded. Verified duplicates are handled with an
+    // owner-and-key scoped update in finishPasskeyRegistration.
     authenticatorSelection: {
       residentKey: "preferred",
       userVerification: "required",
@@ -218,32 +223,50 @@ export async function finishPasskeyRegistration(response: RegistrationResponseJS
   const { credential, aaguid, credentialBackedUp, credentialDeviceType } = result.registrationInfo;
   const requestHeaders = await headers();
   const passkeyName = normalizePasskeyName(response.name) ?? passkeyNameFromUserAgent(requestHeaders.get("user-agent"));
-
-  await prisma.webAuthnCredential.upsert({
-    where: { credentialId: credential.id },
-    create: {
-      userId: session.userId,
+  const publicKey = Buffer.from(credential.publicKey);
+  const credentialData = {
+    transports: response.response.transports ?? [],
+    aaguid,
+    deviceType: credentialDeviceType,
+    backedUp: credentialBackedUp,
+    name: passkeyName,
+    lastUsedAt: new Date(),
+  };
+  const updateOwnedCredential = () => prisma.webAuthnCredential.updateMany({
+    where: {
       credentialId: credential.id,
-      publicKey: Buffer.from(credential.publicKey),
-      counter: BigInt(credential.counter),
-      transports: response.response.transports ?? [],
-      aaguid,
-      deviceType: credentialDeviceType,
-      backedUp: credentialBackedUp,
-      name: passkeyName,
-      lastUsedAt: new Date(),
+      userId: session.userId,
+      publicKey: { equals: publicKey },
     },
-    update: {
-      publicKey: Buffer.from(credential.publicKey),
-      counter: BigInt(credential.counter),
-      transports: response.response.transports ?? [],
-      aaguid,
-      deviceType: credentialDeviceType,
-      backedUp: credentialBackedUp,
-      name: passkeyName,
-      lastUsedAt: new Date(),
-    },
+    data: credentialData,
   });
+  const ownedCredential = await updateOwnedCredential();
+
+  if (ownedCredential.count === 0) {
+    try {
+      await prisma.webAuthnCredential.create({
+        data: {
+          userId: session.userId,
+          credentialId: credential.id,
+          publicKey,
+          counter: BigInt(credential.counter),
+          ...credentialData,
+        },
+      });
+    } catch (error) {
+      if (!isUniqueConstraintError(error)) {
+        throw error;
+      }
+
+      // A concurrent registration may have inserted the same globally unique
+      // credential. Only the current owner is allowed to complete the update.
+      const concurrentlyCreatedCredential = await updateOwnedCredential();
+
+      if (concurrentlyCreatedCredential.count === 0) {
+        throw new BffError("CONFLICT", 409, "Passkey credential belongs to another user");
+      }
+    }
+  }
   await prisma.webUser.update({
     where: { id: session.userId },
     data: {
