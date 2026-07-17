@@ -12,6 +12,11 @@ export type BffErrorCode =
   | 'EMAIL_CODE_EXPIRED'
   | 'RATE_LIMITED'
   | 'CONFLICT'
+  | 'IDEMPOTENCY_KEY_REQUIRED'
+  | 'IDEMPOTENCY_KEY_INVALID'
+  | 'IDEMPOTENCY_KEY_REUSED'
+  | 'PAYMENT_OPERATION_IN_PROGRESS'
+  | 'PAYMENT_OUTCOME_UNKNOWN'
   | 'ACCOUNT_MERGE_REQUIRED'
   | 'PLAN_UNAVAILABLE'
   | 'PAYMENT_GATEWAY_UNAVAILABLE'
@@ -51,6 +56,11 @@ const PROD_MESSAGES: Record<BffErrorCode, string> = {
   EMAIL_CODE_EXPIRED: 'Код истёк. Запросите новый.',
   RATE_LIMITED: 'Слишком много попыток. Попробуйте позже.',
   CONFLICT: 'Не удалось выполнить действие. Проверьте данные и попробуйте снова.',
+  IDEMPOTENCY_KEY_REQUIRED: 'Не удалось безопасно начать оплату. Обновите страницу и попробуйте снова.',
+  IDEMPOTENCY_KEY_INVALID: 'Не удалось безопасно начать оплату. Обновите страницу и попробуйте снова.',
+  IDEMPOTENCY_KEY_REUSED: 'Эта попытка оплаты уже относится к другому запросу. Обновите страницу и повторите выбор.',
+  PAYMENT_OPERATION_IN_PROGRESS: 'Платёж уже создаётся. Повторите проверку через несколько секунд.',
+  PAYMENT_OUTCOME_UNKNOWN: 'Результат оплаты уточняется. Не создавайте новую оплату.',
   ACCOUNT_MERGE_REQUIRED: '\u042d\u0442\u043e\u0442 Telegram \u0443\u0436\u0435 \u043f\u0440\u0438\u0432\u044f\u0437\u0430\u043d \u043a \u0434\u0440\u0443\u0433\u043e\u0439 \u043f\u043e\u0447\u0442\u0435. \u0421\u043d\u0430\u0447\u0430\u043b\u0430 \u043e\u0431\u044a\u0435\u0434\u0438\u043d\u0438\u0442\u0435 \u0430\u043a\u043a\u0430\u0443\u043d\u0442\u044b \u0447\u0435\u0440\u0435\u0437 \u043f\u043e\u0434\u0434\u0435\u0440\u0436\u043a\u0443.',
   PLAN_UNAVAILABLE: 'Этот тариф сейчас недоступен.',
   PAYMENT_GATEWAY_UNAVAILABLE: 'Этот способ оплаты сейчас недоступен.',
@@ -67,6 +77,13 @@ const PROD_MESSAGES: Record<BffErrorCode, string> = {
   UPSTREAM_ERROR: 'Не удалось выполнить действие. Попробуйте позже.',
   INTERNAL_ERROR: 'Внутренняя ошибка сервиса.',
 };
+
+export function isBffErrorCode(value: unknown): value is BffErrorCode {
+  return (
+    typeof value === "string" &&
+    Object.prototype.hasOwnProperty.call(PROD_MESSAGES, value)
+  );
+}
 
 export class BffError extends Error {
   public readonly prodMessage: string;
@@ -205,6 +222,27 @@ export function normalizeRemnashopError(
 
   if (status === 409 && includesAny(lowerMessage, ['email must be verified', 'email not verified'])) {
     return new BffError('EMAIL_NOT_VERIFIED', 409, message, debug);
+  }
+
+  if (
+    status === 409 &&
+    includesAny(lowerPath, ['/subscription/purchase', '/subscription/extend'])
+  ) {
+    if (includesAny(lowerMessage, ['idempotency-key is already in progress'])) {
+      return new BffError('PAYMENT_OPERATION_IN_PROGRESS', 409, message, debug);
+    }
+
+    if (includesAny(lowerMessage, ['payment outcome is unknown'])) {
+      return new BffError('PAYMENT_OUTCOME_UNKNOWN', 409, message, debug);
+    }
+
+    if (includesAny(lowerMessage, ['stored payment result cannot be replayed safely'])) {
+      return new BffError('PAYMENT_OUTCOME_UNKNOWN', 409, message, debug);
+    }
+
+    if (includesAny(lowerMessage, ['idempotency-key was already used with a different request'])) {
+      return new BffError('IDEMPOTENCY_KEY_REUSED', 409, message, debug);
+    }
   }
 
   if (includesAny(lowerMessage, ['code expired', 'expired code', 'verification code expired'])) {

@@ -39,6 +39,7 @@ const tx = vi.hoisted(() => ({
   },
   webSession: { updateMany: vi.fn() },
   auditLog: { updateMany: vi.fn() },
+  paymentOperation: { updateMany: vi.fn() },
   paymentRecord: { updateMany: vi.fn() },
   emailVerificationCode: { updateMany: vi.fn() },
   telegramAuthState: { updateMany: vi.fn() },
@@ -350,6 +351,10 @@ describe("Telegram OIDC integration", () => {
         remnashopAccessExpiresAt: null,
         remnashopRefreshExpiresAt: null,
       },
+    });
+    expect(tx.paymentOperation.updateMany).toHaveBeenCalledWith({
+      where: { userId: { in: ["source-user"] } },
+      data: { userId: "target-user" },
     });
     expect(tx.webUser.delete).toHaveBeenCalledWith({ where: { id: "source-user" } });
     expect(mocks.prisma.telegramAuthState.update).toHaveBeenCalledWith({

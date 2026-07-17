@@ -55,8 +55,8 @@ If a route needs more than request parsing, a small audit call, and one backend 
 | `GET /api/bff/plans/public` | `src/app/api/bff/plans/public/route.ts` | `src/backend/integrations/remnashop/client.ts` |
 | `GET /api/bff/subscription/current` | `src/app/api/bff/subscription/current/route.ts` | `src/backend/integrations/remnashop/client.ts` |
 | `GET /api/bff/subscription/offers` | `src/app/api/bff/subscription/offers/route.ts` | `src/backend/integrations/remnashop/client.ts` |
-| `POST /api/bff/subscription/purchase` | `src/app/api/bff/subscription/purchase/route.ts` | `src/backend/payments/records.ts`, `src/backend/integrations/remnashop/client.ts` |
-| `POST /api/bff/subscription/extend` | `src/app/api/bff/subscription/extend/route.ts` | `src/backend/payments/records.ts`, `src/backend/integrations/remnashop/client.ts` |
+| `POST /api/bff/subscription/purchase` | `src/app/api/bff/subscription/purchase/route.ts` | `src/backend/payments/idempotency.ts`, `src/backend/payments/operation-response.ts`, `src/backend/payments/records.ts`, `src/backend/integrations/remnashop/client.ts` |
+| `POST /api/bff/subscription/extend` | `src/app/api/bff/subscription/extend/route.ts` | `src/backend/payments/idempotency.ts`, `src/backend/payments/operation-response.ts`, `src/backend/payments/records.ts`, `src/backend/integrations/remnashop/client.ts` |
 | `POST /api/bff/subscription/reissue` | `src/app/api/bff/subscription/reissue/route.ts` | `src/backend/integrations/remnashop/client.ts` |
 | `POST /api/bff/subscription/promocode` | `src/app/api/bff/subscription/promocode/route.ts` | `src/backend/integrations/remnashop/client.ts` |
 | `GET /api/bff/subscription/devices` | `src/app/api/bff/subscription/devices/route.ts` | `src/backend/integrations/remnashop/client.ts` |
@@ -64,6 +64,8 @@ If a route needs more than request parsing, a small audit call, and one backend 
 | `DELETE /api/bff/subscription/devices/[hwid]` | `src/app/api/bff/subscription/devices/[hwid]/route.ts` | `src/backend/integrations/remnashop/client.ts` |
 | `GET /api/bff/payments/history` | `src/app/api/bff/payments/history/route.ts` | `src/backend/payments/records.ts` |
 | `GET /api/bff/payments/status` | `src/app/api/bff/payments/status/route.ts` | `src/backend/payments/records.ts`, `src/backend/integrations/remnashop/client.ts` |
+
+`purchase` and `extend` require a UUID `Idempotency-Key`. The same key is bound to one user, operation kind, and normalized request payload. A completed replay returns the original `200` payload with `Idempotency-Replayed: true`; an active or fail-closed unknown outcome returns `202` with `operation_id`, `status`, and `retry_after_seconds`. Clients must retain the same key after transport errors, `202`, `408`, `429`, and `5xx` responses.
 
 ## Support And Health
 

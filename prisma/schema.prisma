@@ -28,6 +28,19 @@ enum PaymentRecordStatus {
   UNKNOWN
 }
 
+enum PaymentOperationKind {
+  PURCHASE
+  EXTEND
+}
+
+enum PaymentOperationStatus {
+  READY
+  DISPATCHING
+  OUTCOME_UNKNOWN
+  SUCCEEDED
+  FAILED_FINAL
+}
+
 enum WebSessionAuthMethod {
   EMAIL
   TELEGRAM
@@ -45,51 +58,54 @@ enum WebAuthnChallengeType {
 }
 
 model WebUser {
-  id                      String                   @id @default(cuid())
-  remnashopUserId         String?                  @unique
-  email                   String?                  @unique
-  telegramId              String?                  @unique
-  telegramUsername        String?
-  fullName                String?
-  photoUrl                String?
-  lastLoginAt             DateTime?
-  emailVerified           Boolean                  @default(false)
-  authPending             Boolean                  @default(false)
-  displayName             String?
-  createdAt               DateTime                 @default(now())
-  updatedAt               DateTime                 @updatedAt
-  sessions                WebSession[]
-  auditLogs               AuditLog[]
-  emailVerificationCodes  EmailVerificationCode[]
-  paymentRecords          PaymentRecord[]
-  telegramAuthStates      TelegramAuthState[]
-  webAuthnCredentials     WebAuthnCredential[]
-  webAuthnChallenges      WebAuthnChallenge[]
+  id                     String                  @id @default(cuid())
+  remnashopUserId        String?                 @unique
+  email                  String?                 @unique
+  telegramId             String?                 @unique
+  telegramUsername       String?
+  fullName               String?
+  photoUrl               String?
+  lastLoginAt            DateTime?
+  emailVerified          Boolean                 @default(false)
+  authPending            Boolean                 @default(false)
+  displayName            String?
+  createdAt              DateTime                @default(now())
+  updatedAt              DateTime                @updatedAt
+  sessions               WebSession[]
+  auditLogs              AuditLog[]
+  emailVerificationCodes EmailVerificationCode[]
+  paymentOperations      PaymentOperation[]
+  paymentRecords         PaymentRecord[]
+  telegramAuthStates     TelegramAuthState[]
+  webAuthnCredentials    WebAuthnCredential[]
+  webAuthnChallenges     WebAuthnChallenge[]
 
   @@index([email])
   @@index([telegramId])
 }
 
 model PaymentRecord {
-  id             String              @id @default(cuid())
-  userId         String
-  paymentId      String              @unique
-  purchaseType   String
-  status         PaymentRecordStatus @default(PENDING)
-  finalAmount    Decimal             @db.Decimal(12, 2)
-  currency       String
-  gatewayType    String
-  planCode       String?
-  planName       String?
-  durationDays   Int?
-  deviceLimit    Int?
-  trafficLimit   Int?
-  paymentUrl     String?
-  isFree         Boolean             @default(false)
-  raw            Json?
-  createdAt      DateTime            @default(now())
-  updatedAt      DateTime            @updatedAt
-  user           WebUser             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id           String              @id @default(cuid())
+  userId       String
+  paymentId    String              @unique
+  purchaseType String
+  status       PaymentRecordStatus @default(PENDING)
+  finalAmount  Decimal             @db.Decimal(12, 2)
+  currency     String
+  gatewayType  String
+  planCode     String?
+  planName     String?
+  durationDays Int?
+  deviceLimit  Int?
+  trafficLimit Int?
+  paymentUrl   String?
+  isFree       Boolean             @default(false)
+  raw          Json?
+  operationId  String?             @unique
+  createdAt    DateTime            @default(now())
+  updatedAt    DateTime            @updatedAt
+  user         WebUser             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  operation    PaymentOperation?   @relation(fields: [operationId], references: [id], onDelete: SetNull)
 
   @@index([userId, createdAt])
   @@index([paymentId])
@@ -97,17 +113,17 @@ model PaymentRecord {
 }
 
 model TelegramAuthState {
-  id                 String    @id @default(cuid())
-  stateHash          String    @unique
-  nonceHash          String    @unique
-  codeVerifierHash   String    @unique
-  redirectTo         String?
-  userId             String?
-  expiresAt          DateTime
-  consumedAt         DateTime?
-  createdAt          DateTime  @default(now())
-  updatedAt          DateTime  @updatedAt
-  user               WebUser?  @relation(fields: [userId], references: [id], onDelete: SetNull)
+  id               String    @id @default(cuid())
+  stateHash        String    @unique
+  nonceHash        String    @unique
+  codeVerifierHash String    @unique
+  redirectTo       String?
+  userId           String?
+  expiresAt        DateTime
+  consumedAt       DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+  user             WebUser?  @relation(fields: [userId], references: [id], onDelete: SetNull)
 
   @@index([expiresAt])
   @@index([consumedAt])
@@ -115,23 +131,23 @@ model TelegramAuthState {
 }
 
 model WebSession {
-  id                   String    @id @default(cuid())
-  userId               String
-  refreshTokenHash     String    @unique
-  remnashopAccessTokenEncrypted   String?
-  remnashopRefreshTokenEncrypted  String?
-  remnashopAccessExpiresAt        DateTime?
-  remnashopRefreshExpiresAt       DateTime?
-  authMethod           WebSessionAuthMethod @default(EMAIL)
-  assuranceLevel       WebSessionAssuranceLevel @default(FULL)
-  userAgent            String?
-  ipHash               String?
-  accessTokenExpiresAt DateTime
-  refreshExpiresAt     DateTime
-  revokedAt            DateTime?
-  createdAt            DateTime  @default(now())
-  updatedAt            DateTime  @updatedAt
-  user                 WebUser   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id                             String                   @id @default(cuid())
+  userId                         String
+  refreshTokenHash               String                   @unique
+  remnashopAccessTokenEncrypted  String?
+  remnashopRefreshTokenEncrypted String?
+  remnashopAccessExpiresAt       DateTime?
+  remnashopRefreshExpiresAt      DateTime?
+  authMethod                     WebSessionAuthMethod     @default(EMAIL)
+  assuranceLevel                 WebSessionAssuranceLevel @default(FULL)
+  userAgent                      String?
+  ipHash                         String?
+  accessTokenExpiresAt           DateTime
+  refreshExpiresAt               DateTime
+  revokedAt                      DateTime?
+  createdAt                      DateTime                 @default(now())
+  updatedAt                      DateTime                 @updatedAt
+  user                           WebUser                  @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
   @@index([accessTokenExpiresAt])
@@ -142,35 +158,64 @@ model WebSession {
   @@index([assuranceLevel])
 }
 
+model PaymentOperation {
+  id                 String                 @id @default(cuid())
+  userId             String
+  kind               PaymentOperationKind
+  idempotencyKeyHash String
+  upstreamOwnerHash  String?
+  requestFingerprint String
+  requestPayload     Json
+  upstreamKey        String                 @unique
+  status             PaymentOperationStatus @default(READY)
+  attemptCount       Int                    @default(0)
+  claimTokenHash     String?
+  leaseExpiresAt     DateTime?
+  dispatchedAt       DateTime?
+  outcomeUnknownAt   DateTime?
+  completedAt        DateTime?
+  responseStatus     Int?
+  responseSnapshot   Json?
+  errorSnapshot      Json?
+  createdAt          DateTime               @default(now())
+  updatedAt          DateTime               @updatedAt
+  user               WebUser                @relation(fields: [userId], references: [id], onDelete: Restrict)
+  paymentRecord      PaymentRecord?
+
+  @@unique([userId, idempotencyKeyHash])
+  @@index([status, leaseExpiresAt])
+  @@index([userId, createdAt])
+}
+
 model WebAuthnCredential {
-  id             String   @id @default(cuid())
-  userId         String
-  credentialId   String   @unique
-  publicKey      Bytes
-  counter        BigInt   @default(0)
-  transports     String[]
-  aaguid         String?
-  deviceType     String?
-  backedUp       Boolean  @default(false)
-  name           String?
-  lastUsedAt     DateTime?
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
-  user           WebUser  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id           String    @id @default(cuid())
+  userId       String
+  credentialId String    @unique
+  publicKey    Bytes
+  counter      BigInt    @default(0)
+  transports   String[]
+  aaguid       String?
+  deviceType   String?
+  backedUp     Boolean   @default(false)
+  name         String?
+  lastUsedAt   DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  user         WebUser   @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
   @@index([lastUsedAt])
 }
 
 model WebAuthnChallenge {
-  id          String                @id @default(cuid())
-  challenge   String                @unique
-  type        WebAuthnChallengeType
-  userId      String?
-  expiresAt   DateTime
-  consumedAt  DateTime?
-  createdAt   DateTime              @default(now())
-  user        WebUser?              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id         String                @id @default(cuid())
+  challenge  String                @unique
+  type       WebAuthnChallengeType
+  userId     String?
+  expiresAt  DateTime
+  consumedAt DateTime?
+  createdAt  DateTime              @default(now())
+  user       WebUser?              @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
   @@index([type])
@@ -179,17 +224,17 @@ model WebAuthnChallenge {
 }
 
 model EmailVerificationCode {
-  id           String    @id @default(cuid())
-  userId       String
-  codeHash     String
-  attempts     Int       @default(0)
-  maxAttempts  Int       @default(5)
-  sentAt       DateTime  @default(now())
-  expiresAt    DateTime
-  consumedAt   DateTime?
-  createdAt    DateTime  @default(now())
-  updatedAt    DateTime  @updatedAt
-  user         WebUser   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id          String    @id @default(cuid())
+  userId      String
+  codeHash    String
+  attempts    Int       @default(0)
+  maxAttempts Int       @default(5)
+  sentAt      DateTime  @default(now())
+  expiresAt   DateTime
+  consumedAt  DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  user        WebUser   @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
   @@index([expiresAt])
@@ -198,14 +243,14 @@ model EmailVerificationCode {
 }
 
 model AuditLog {
-  id          String        @id @default(cuid())
-  userId      String?
-  action      String
-  severity    AuditSeverity @default(INFO)
-  ipHash      String?
-  metadata    Json?
-  createdAt   DateTime      @default(now())
-  user        WebUser?      @relation(fields: [userId], references: [id], onDelete: SetNull)
+  id        String        @id @default(cuid())
+  userId    String?
+  action    String
+  severity  AuditSeverity @default(INFO)
+  ipHash    String?
+  metadata  Json?
+  createdAt DateTime      @default(now())
+  user      WebUser?      @relation(fields: [userId], references: [id], onDelete: SetNull)
 
   @@index([userId])
   @@index([action])
@@ -213,26 +258,26 @@ model AuditLog {
 }
 
 model RateLimitEvent {
-  id          String   @id @default(cuid())
-  key         String
-  action      String
-  occurredAt  DateTime @default(now())
-  metadata    Json?
+  id         String   @id @default(cuid())
+  key        String
+  action     String
+  occurredAt DateTime @default(now())
+  metadata   Json?
 
   @@index([key, action, occurredAt])
 }
 
 model AppSetting {
-  key        String   @id
-  value      Json
-  updatedAt  DateTime @updatedAt
+  key       String   @id
+  value     Json
+  updatedAt DateTime @updatedAt
 }
 
 model IntegrationStatus {
-  id          String                @id @default(cuid())
-  service     String                @unique
-  status      IntegrationStatusKind @default(UNKNOWN)
-  message     String?
-  checkedAt   DateTime              @default(now())
-  updatedAt   DateTime              @updatedAt
+  id        String                @id @default(cuid())
+  service   String                @unique
+  status    IntegrationStatusKind @default(UNKNOWN)
+  message   String?
+  checkedAt DateTime              @default(now())
+  updatedAt DateTime              @updatedAt
 }

@@ -12,6 +12,7 @@ import { logger } from "@/backend/observability/logger";
 import { prisma } from "@/backend/database/prisma";
 import { assertRateLimit } from "@/backend/limits/rate-limit";
 import { remnashopAuth } from "@/backend/integrations/remnashop/client";
+import { transferPaymentOperationsForUserMerge } from "@/backend/payments/user-merge";
 import type { TelegramAuthRequest } from "@/shared/remnashop/types";
 
 const telegramAuthTtlSeconds = 10 * 60;
@@ -713,6 +714,11 @@ async function completeTelegramAuth(
             where: { userId: sourceUser.id },
             data: { userId: targetUserId },
           });
+          await transferPaymentOperationsForUserMerge(
+            tx,
+            targetUserId,
+            [sourceUser.id],
+          );
           await tx.paymentRecord.updateMany({
             where: { userId: sourceUser.id },
             data: { userId: targetUserId },

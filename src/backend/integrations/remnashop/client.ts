@@ -27,6 +27,7 @@ type RequestOptions = {
   body?: unknown;
   accessToken?: string;
   refreshToken?: string;
+  idempotencyKey?: string;
 };
 
 type AuthCookies = {
@@ -244,6 +245,10 @@ export async function remnashopRequest<T>(path: string, options: RequestOptions 
 
   if (options.body !== undefined) {
     headers["content-type"] = "application/json";
+  }
+
+  if (options.idempotencyKey) {
+    headers["idempotency-key"] = options.idempotencyKey;
   }
 
   if (options.accessToken || options.refreshToken) {

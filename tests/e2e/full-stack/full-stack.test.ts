@@ -1,4 +1,5 @@
 import { afterEach, beforeAll, describe, expect, it } from "vitest";
+import { randomUUID } from "node:crypto";
 
 import { e2eCompose } from "../setup/compose";
 import {
@@ -839,27 +840,70 @@ describe("real devcontainer full-stack e2e", () => {
 
     if (purchasable) {
       // Проверяем: purchase использует реальный доступный offer/gateway и создает локальную запись платежа.
-      const purchase = await postJson(
-        "/api/bff/subscription/purchase",
-        {
-          plan_code: purchasable.planCode,
-          duration_days: purchasable.durationDays,
-          gateway_type: purchasable.gatewayType,
-        },
-        jar,
-      );
+      const purchasePayload = {
+        plan_code: purchasable.planCode,
+        duration_days: purchasable.durationDays,
+        gateway_type: purchasable.gatewayType,
+      };
+      const purchaseIdempotencyKey = randomUUID();
+      const sendPurchase = () =>
+        http(
+          "/api/bff/subscription/purchase",
+          {
+            method: "POST",
+            headers: { "idempotency-key": purchaseIdempotencyKey },
+            body: JSON.stringify(purchasePayload),
+          },
+          jar,
+        );
+      const concurrentPurchases = await Promise.all([sendPurchase(), sendPurchase()]);
 
-      await expectNot5xx(purchase, "POST /api/bff/subscription/purchase");
+      for (const [index, response] of concurrentPurchases.entries()) {
+        await expectNot5xx(response, `concurrent POST /api/bff/subscription/purchase #${index + 1}`);
+      }
 
-      if (purchase.status === 200) {
-        const payment = await expectBffData<{ payment_id: string }>(purchase);
+      const successfulPurchases = concurrentPurchases.filter((response) => response.status === 200);
+
+      if (successfulPurchases.length > 0) {
+        const payments = await Promise.all(
+          successfulPurchases.map((response) =>
+            expectBffData<{ payment_id: string }>(response),
+          ),
+        );
+        const payment = payments[0];
+
+        if (!payment) {
+          throw new Error("Concurrent purchase did not return a payment payload");
+        }
+
+        expect(new Set(payments.map((item) => item.payment_id)).size).toBe(1);
+
+        const replay = await http(
+          "/api/bff/subscription/purchase",
+          {
+            method: "POST",
+            headers: { "idempotency-key": purchaseIdempotencyKey },
+            body: JSON.stringify(purchasePayload),
+          },
+          jar,
+        );
+        const replayedPayment = await expectBffData<{ payment_id: string }>(replay);
+
+        expect(replay.headers.get("idempotency-replayed")).toBe("true");
+        expect(replayedPayment.payment_id).toBe(payment.payment_id);
+
         const status = await expectBffData<{ payment: { payment_id: string } | null }>(
           await http(`/api/bff/payments/status?payment_id=${encodeURIComponent(payment.payment_id)}`, {}, jar),
         );
 
         expect(status.payment).toMatchObject({ payment_id: payment.payment_id });
       } else {
-        expect([400, 403, 404, 409, 422], JSON.stringify(await debugResponse(purchase))).toContain(purchase.status);
+        for (const response of concurrentPurchases) {
+          expect(
+            [202, 400, 403, 404, 409, 422],
+            JSON.stringify(await debugResponse(response)),
+          ).toContain(response.status);
+        }
       }
     }
 
@@ -867,17 +911,21 @@ describe("real devcontainer full-stack e2e", () => {
 
     if (renewable) {
       // Проверяем: extend использует renew offer, если он доступен в текущем бизнес-состоянии.
-      const extend = await postJson(
+      const extend = await http(
         "/api/bff/subscription/extend",
         {
-          duration_days: renewable.durationDays,
-          gateway_type: renewable.gatewayType,
+          method: "POST",
+          headers: { "idempotency-key": randomUUID() },
+          body: JSON.stringify({
+            duration_days: renewable.durationDays,
+            gateway_type: renewable.gatewayType,
+          }),
         },
         jar,
       );
 
       await expectNot5xx(extend, "POST /api/bff/subscription/extend");
-      expect([200, 400, 403, 404, 409, 422], JSON.stringify(await debugResponse(extend))).toContain(extend.status);
+      expect([200, 202, 400, 403, 404, 409, 422], JSON.stringify(await debugResponse(extend))).toContain(extend.status);
     }
   });
 

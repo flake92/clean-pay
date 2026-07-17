@@ -27,6 +27,7 @@ const tx = vi.hoisted(() => ({
   },
   webSession: { update: vi.fn(), updateMany: vi.fn() },
   auditLog: { updateMany: vi.fn() },
+  paymentOperation: { updateMany: vi.fn() },
   paymentRecord: { updateMany: vi.fn() },
   emailVerificationCode: { updateMany: vi.fn() },
   telegramAuthState: { updateMany: vi.fn() },
@@ -189,6 +190,10 @@ describe("Remnashop session reconciliation", () => {
     expect(tx.webUser.updateMany).toHaveBeenCalledWith({
       where: { id: { in: ["other-remna", "other-email"] } },
       data: { remnashopUserId: null, email: null, telegramId: null },
+    });
+    expect(tx.paymentOperation.updateMany).toHaveBeenCalledWith({
+      where: { userId: { in: ["other-remna", "other-email"] } },
+      data: { userId: "user-1" },
     });
     expect(tx.webSession.update).toHaveBeenCalledWith({
       where: { id: "session-1" },

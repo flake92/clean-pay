@@ -10,10 +10,20 @@ const mocks = vi.hoisted(() => ({
   changePassword: vi.fn(),
   linkRemnashopAccount: vi.fn(),
   getAuthorizedRemnashopTokens: vi.fn(),
+  getRemnashopUserIdFromAccessToken: vi.fn(),
   remnashopRequest: vi.fn(),
   getLiveRemnawaveSubscriptionUrl: vi.fn(),
   assertRateLimit: vi.fn(),
   recordPayment: vi.fn(),
+  beginPaymentOperation: vi.fn(),
+  bindPaymentOperationUpstreamOwner: vi.fn(),
+  markPaymentOperationDispatched: vi.fn(),
+  completePaymentOperationSuccess: vi.fn(),
+  paymentOperationDispatchFailureOutcome: vi.fn(),
+  paymentOperationErrorFromSnapshot: vi.fn(),
+  settlePaymentOperationAfterDispatchFailure: vi.fn(),
+  settlePaymentOperationBeforeDispatchFailure: vi.fn(),
+  getCurrentSession: vi.fn(),
   getCurrentUser: vi.fn(),
   prisma: {
     paymentRecord: {
@@ -46,6 +56,7 @@ vi.mock("@/backend/auth/password", () => ({ changePassword: mocks.changePassword
 vi.mock("@/backend/auth/remnashop-link", () => ({ linkRemnashopAccount: mocks.linkRemnashopAccount }));
 vi.mock("@/backend/integrations/remnashop/client", () => ({
   getAuthorizedRemnashopTokens: mocks.getAuthorizedRemnashopTokens,
+  getRemnashopUserIdFromAccessToken: mocks.getRemnashopUserIdFromAccessToken,
   remnashopRequest: mocks.remnashopRequest,
 }));
 vi.mock("@/backend/integrations/remnawave/client", () => ({
@@ -56,7 +67,20 @@ vi.mock("@/backend/payments/records", async (importOriginal) => ({
   ...await importOriginal<typeof import("@/backend/payments/records")>(),
   recordPayment: mocks.recordPayment,
 }));
-vi.mock("@/backend/sessions/web-session", () => ({ getCurrentUser: mocks.getCurrentUser }));
+vi.mock("@/backend/payments/idempotency", () => ({
+  beginPaymentOperation: mocks.beginPaymentOperation,
+  bindPaymentOperationUpstreamOwner: mocks.bindPaymentOperationUpstreamOwner,
+  markPaymentOperationDispatched: mocks.markPaymentOperationDispatched,
+  completePaymentOperationSuccess: mocks.completePaymentOperationSuccess,
+  paymentOperationDispatchFailureOutcome: mocks.paymentOperationDispatchFailureOutcome,
+  paymentOperationErrorFromSnapshot: mocks.paymentOperationErrorFromSnapshot,
+  settlePaymentOperationAfterDispatchFailure: mocks.settlePaymentOperationAfterDispatchFailure,
+  settlePaymentOperationBeforeDispatchFailure: mocks.settlePaymentOperationBeforeDispatchFailure,
+}));
+vi.mock("@/backend/sessions/web-session", () => ({
+  getCurrentSession: mocks.getCurrentSession,
+  getCurrentUser: mocks.getCurrentUser,
+}));
 vi.mock("@/backend/database/prisma", () => ({ prisma: mocks.prisma }));
 vi.mock("@/backend/health/checks", async (importOriginal) => ({
   ...await importOriginal<typeof import("@/backend/health/checks")>(),
@@ -150,8 +174,44 @@ describe("BFF route integration contracts", () => {
     mocks.changePassword.mockResolvedValue({ success: true });
     mocks.linkRemnashopAccount.mockResolvedValue({ linked: true });
     mocks.getAuthorizedRemnashopTokens.mockResolvedValue({ accessToken: "access-token", session });
+    mocks.getRemnashopUserIdFromAccessToken.mockReturnValue("remnashop-user-1");
     mocks.remnashopRequest.mockResolvedValue({ ok: true });
+    mocks.beginPaymentOperation.mockResolvedValue({
+      state: "execute",
+      operationId: "operation-1",
+      claimToken: "claim-1",
+      upstreamKey: "upstream-operation-1",
+    });
+    mocks.completePaymentOperationSuccess.mockResolvedValue(payment);
+    mocks.paymentOperationDispatchFailureOutcome.mockImplementation((error: unknown) => {
+      if (
+        error instanceof BffError &&
+        typeof error.debug?.upstreamStatus !== "number"
+      ) {
+        return "UNKNOWN";
+      }
+
+      if (error instanceof BffError && error.status === 429) {
+        return "RETRYABLE";
+      }
+
+      if (
+        error instanceof BffError &&
+        error.status >= 400 &&
+        error.status < 500 &&
+        error.status !== 408 &&
+        error.code !== "PAYMENT_OPERATION_IN_PROGRESS" &&
+        error.code !== "PAYMENT_OUTCOME_UNKNOWN" &&
+        error.code !== "IDEMPOTENCY_KEY_REUSED"
+      ) {
+        return "FINAL";
+      }
+
+      return "UNKNOWN";
+    });
+    mocks.paymentOperationErrorFromSnapshot.mockReturnValue(new BffError("CONFLICT", 409));
     mocks.getLiveRemnawaveSubscriptionUrl.mockResolvedValue(null);
+    mocks.getCurrentSession.mockResolvedValue(session);
     mocks.getCurrentUser.mockResolvedValue({ id: "user-1" });
     mocks.prisma.paymentRecord.findMany.mockResolvedValue([record]);
     mocks.prisma.paymentRecord.findFirst.mockResolvedValue(record);
@@ -265,20 +325,311 @@ describe("BFF route integration contracts", () => {
       })
       .mockResolvedValueOnce(payment);
 
-    await purchaseRoute.POST(jsonRequest("/api/bff/subscription/purchase", {
+    const purchaseResponse = await purchaseRoute.POST(jsonRequest("/api/bff/subscription/purchase", {
       plan_code: "basic",
       gateway_type: "YOOKASSA",
       duration_days: 30,
-    }));
-    await extendRoute.POST(jsonRequest("/api/bff/subscription/extend", {
+      ignored_client_field: "must-not-reach-upstream",
+    }, { "idempotency-key": "11111111-1111-4111-8111-111111111111" }));
+    const extendResponse = await extendRoute.POST(jsonRequest("/api/bff/subscription/extend", {
       gateway_type: "YOOKASSA",
       duration_days: 30,
-    }));
+    }, { "idempotency-key": "22222222-2222-4222-8222-222222222222" }));
 
+    expect(purchaseResponse.status).toBe(200);
+    expect(extendResponse.status).toBe(200);
     expect(mocks.assertRateLimit).toHaveBeenCalledWith(expect.objectContaining({ action: "subscription_purchase" }));
     expect(mocks.assertRateLimit).toHaveBeenCalledWith(expect.objectContaining({ action: "subscription_extend" }));
-    expect(mocks.recordPayment).toHaveBeenCalledWith(expect.objectContaining({ userId: "user-1", plan: expect.objectContaining({ name: "Basic" }) }));
-    expect(mocks.recordPayment).toHaveBeenCalledWith(expect.objectContaining({ userId: "user-1", plan: expect.objectContaining({ name: "Renew" }) }));
+    expect(mocks.completePaymentOperationSuccess).toHaveBeenCalledWith(expect.objectContaining({
+      operationId: "operation-1",
+      payment: expect.objectContaining({ userId: "user-1", plan: expect.objectContaining({ name: "Basic" }) }),
+    }));
+    expect(mocks.completePaymentOperationSuccess).toHaveBeenCalledWith(expect.objectContaining({
+      operationId: "operation-1",
+      payment: expect.objectContaining({ userId: "user-1", plan: expect.objectContaining({ name: "Renew" }) }),
+    }));
+    expect(mocks.remnashopRequest).toHaveBeenCalledWith("/subscription/purchase", expect.objectContaining({
+      idempotencyKey: "upstream-operation-1",
+      body: {
+        plan_code: "basic",
+        gateway_type: "YOOKASSA",
+        duration_days: 30,
+      },
+    }));
+    expect(mocks.remnashopRequest).toHaveBeenCalledWith("/subscription/extend", expect.objectContaining({
+      idempotencyKey: "upstream-operation-1",
+      body: {
+        gateway_type: "YOOKASSA",
+        duration_days: 30,
+      },
+    }));
+  });
+
+  it("replays a completed payment without rate limiting or another upstream call", async () => {
+    mocks.beginPaymentOperation.mockResolvedValueOnce({
+      state: "replay",
+      outcome: "success",
+      operationId: "operation-replay",
+      response: payment,
+    });
+
+    const response = await purchaseRoute.POST(jsonRequest("/api/bff/subscription/purchase", {
+      plan_code: "basic",
+      gateway_type: "YOOKASSA",
+      duration_days: 30,
+    }, { "idempotency-key": "33333333-3333-4333-8333-333333333333" }));
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("idempotency-replayed")).toBe("true");
+    await expect(body(response)).resolves.toEqual({ data: payment });
+    expect(mocks.assertRateLimit).not.toHaveBeenCalled();
+    expect(mocks.getAuthorizedRemnashopTokens).not.toHaveBeenCalled();
+    expect(mocks.remnashopRequest).not.toHaveBeenCalled();
+    expect(mocks.completePaymentOperationSuccess).not.toHaveBeenCalled();
+  });
+
+  it("returns a controlled 202 while the original payment outcome is unknown", async () => {
+    mocks.beginPaymentOperation.mockResolvedValueOnce({
+      state: "pending",
+      reason: "OUTCOME_UNKNOWN",
+      operationId: "operation-unknown",
+      retryAfterSeconds: 15,
+    });
+
+    const response = await extendRoute.POST(jsonRequest("/api/bff/subscription/extend", {
+      gateway_type: "YOOKASSA",
+      duration_days: 30,
+    }, { "idempotency-key": "44444444-4444-4444-8444-444444444444" }));
+
+    expect(response.status).toBe(202);
+    expect(response.headers.get("retry-after")).toBe("15");
+    await expect(body(response)).resolves.toEqual({
+      data: {
+        operation_id: "operation-unknown",
+        status: "outcome_unknown",
+        retry_after_seconds: 15,
+      },
+    });
+    expect(mocks.remnashopRequest).not.toHaveBeenCalled();
+  });
+
+  it("releases a pre-dispatch operation after rate limiting so the same key can retry later", async () => {
+    mocks.assertRateLimit.mockRejectedValueOnce(new BffError("RATE_LIMITED", 429));
+
+    const response = await purchaseRoute.POST(jsonRequest("/api/bff/subscription/purchase", {
+      plan_code: "basic",
+      gateway_type: "YOOKASSA",
+      duration_days: 30,
+    }, { "idempotency-key": "77777777-7777-4777-8777-777777777777" }));
+
+    expect(response.status).toBe(429);
+    expect(mocks.settlePaymentOperationBeforeDispatchFailure).toHaveBeenCalledWith(
+      expect.objectContaining({ final: false }),
+    );
+    expect(mocks.markPaymentOperationDispatched).not.toHaveBeenCalled();
+  });
+
+  it("does not create an operation for a new key rejected by the anti-abuse gate", async () => {
+    mocks.beginPaymentOperation.mockResolvedValueOnce({ state: "missing" });
+    mocks.assertRateLimit.mockRejectedValueOnce(new BffError("RATE_LIMITED", 429));
+
+    const response = await purchaseRoute.POST(jsonRequest("/api/bff/subscription/purchase", {
+      plan_code: "basic",
+      gateway_type: "YOOKASSA",
+      duration_days: 30,
+    }, { "idempotency-key": "99999999-9999-4999-8999-999999999999" }));
+
+    expect(response.status).toBe(429);
+    expect(mocks.beginPaymentOperation).toHaveBeenCalledTimes(1);
+    expect(mocks.beginPaymentOperation).toHaveBeenCalledWith(
+      expect.objectContaining({ createIfMissing: false }),
+    );
+    expect(mocks.getAuthorizedRemnashopTokens).not.toHaveBeenCalled();
+    expect(mocks.settlePaymentOperationBeforeDispatchFailure).not.toHaveBeenCalled();
+  });
+
+  it("creates a new operation only after local limiting and upstream authentication", async () => {
+    mocks.beginPaymentOperation
+      .mockResolvedValueOnce({ state: "missing" })
+      .mockResolvedValueOnce({
+        state: "execute",
+        operationId: "operation-new",
+        claimToken: "claim-new",
+        upstreamKey: "upstream-new",
+      });
+    mocks.remnashopRequest
+      .mockResolvedValueOnce({ plans: [{ public_code: "basic", name: "Basic" }] })
+      .mockResolvedValueOnce(payment);
+
+    const response = await purchaseRoute.POST(jsonRequest("/api/bff/subscription/purchase", {
+      plan_code: "basic",
+      gateway_type: "YOOKASSA",
+      duration_days: 30,
+    }, { "idempotency-key": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" }));
+
+    expect(response.status).toBe(200);
+    expect(mocks.beginPaymentOperation).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({ createIfMissing: false }),
+    );
+    expect(mocks.beginPaymentOperation).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ createIfMissing: true }),
+    );
+    expect(mocks.assertRateLimit.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.getAuthorizedRemnashopTokens.mock.invocationCallOrder[0],
+    );
+    expect(mocks.getAuthorizedRemnashopTokens.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.beginPaymentOperation.mock.invocationCallOrder[1],
+    );
+  });
+
+  it("keeps the same operation pending after an ambiguous upstream failure", async () => {
+    mocks.remnashopRequest
+      .mockResolvedValueOnce({ plans: [{ public_code: "basic", name: "Basic" }] })
+      .mockRejectedValueOnce(
+        new BffError("UPSTREAM_UNAVAILABLE", 502, "connection reset", {
+          upstreamPath: "/subscription/purchase",
+        }),
+      );
+
+    const response = await purchaseRoute.POST(jsonRequest("/api/bff/subscription/purchase", {
+      plan_code: "basic",
+      gateway_type: "YOOKASSA",
+      duration_days: 30,
+    }, { "idempotency-key": "55555555-5555-4555-8555-555555555555" }));
+
+    expect(response.status).toBe(202);
+    expect(mocks.markPaymentOperationDispatched).toHaveBeenCalledTimes(1);
+    expect(mocks.settlePaymentOperationAfterDispatchFailure).toHaveBeenCalledWith(
+      expect.objectContaining({ outcome: "UNKNOWN" }),
+    );
+    expect(mocks.completePaymentOperationSuccess).not.toHaveBeenCalled();
+    await expect(body(response)).resolves.toMatchObject({
+      data: { operation_id: "operation-1", status: "outcome_unknown" },
+    });
+  });
+
+  it("does not finalize a key while Remnashop reports the same operation in progress", async () => {
+    mocks.remnashopRequest
+      .mockResolvedValueOnce({ plans: [{ public_code: "basic", name: "Basic" }] })
+      .mockRejectedValueOnce(
+        new BffError("PAYMENT_OPERATION_IN_PROGRESS", 409, "already in progress", {
+          upstreamStatus: 409,
+          upstreamPath: "/subscription/purchase",
+        }),
+      );
+
+    const response = await purchaseRoute.POST(jsonRequest("/api/bff/subscription/purchase", {
+      plan_code: "basic",
+      gateway_type: "YOOKASSA",
+      duration_days: 30,
+    }, { "idempotency-key": "88888888-8888-4888-8888-888888888888" }));
+
+    expect(response.status).toBe(202);
+    expect(mocks.settlePaymentOperationAfterDispatchFailure).toHaveBeenCalledWith(
+      expect.objectContaining({ outcome: "UNKNOWN" }),
+    );
+  });
+
+  it.each([
+    {
+      name: "request timeout",
+      error: new BffError("UPSTREAM_ERROR", 502, "request timeout", {
+        upstreamStatus: 408,
+        upstreamPath: "/subscription/purchase",
+      }),
+    },
+    {
+      name: "unmapped upstream 4xx",
+      error: new BffError("UPSTREAM_ERROR", 502, "method not allowed", {
+        upstreamStatus: 405,
+        upstreamPath: "/subscription/purchase",
+      }),
+    },
+    {
+      name: "upstream idempotency conflict",
+      error: new BffError("IDEMPOTENCY_KEY_REUSED", 409, "different request", {
+        upstreamStatus: 409,
+        upstreamPath: "/subscription/purchase",
+      }),
+    },
+  ])("keeps the operation unknown after $name", async ({ error }) => {
+    mocks.remnashopRequest
+      .mockResolvedValueOnce({ plans: [{ public_code: "basic", name: "Basic" }] })
+      .mockRejectedValueOnce(error);
+
+    const response = await purchaseRoute.POST(jsonRequest("/api/bff/subscription/purchase", {
+      plan_code: "basic",
+      gateway_type: "YOOKASSA",
+      duration_days: 30,
+    }, { "idempotency-key": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb" }));
+
+    expect(response.status).toBe(202);
+    expect(mocks.settlePaymentOperationAfterDispatchFailure).toHaveBeenCalledWith(
+      expect.objectContaining({ outcome: "UNKNOWN" }),
+    );
+  });
+
+  it("releases a post-dispatch upstream 429 for retry with the same key", async () => {
+    mocks.remnashopRequest
+      .mockResolvedValueOnce({ plans: [{ public_code: "basic", name: "Basic" }] })
+      .mockRejectedValueOnce(
+        new BffError("RATE_LIMITED", 429, "slow down", {
+          upstreamStatus: 429,
+          upstreamPath: "/subscription/purchase",
+        }),
+      );
+
+    const response = await purchaseRoute.POST(jsonRequest("/api/bff/subscription/purchase", {
+      plan_code: "basic",
+      gateway_type: "YOOKASSA",
+      duration_days: 30,
+    }, { "idempotency-key": "cccccccc-cccc-4ccc-8ccc-cccccccccccc" }));
+
+    expect(response.status).toBe(429);
+    expect(mocks.settlePaymentOperationAfterDispatchFailure).toHaveBeenCalledWith(
+      expect.objectContaining({ outcome: "RETRYABLE" }),
+    );
+  });
+
+  it("returns 202 instead of enabling a new key when local persistence fails after upstream success", async () => {
+    mocks.remnashopRequest
+      .mockResolvedValueOnce({ plans: [{ public_code: "basic", name: "Basic" }] })
+      .mockResolvedValueOnce(payment);
+    mocks.completePaymentOperationSuccess.mockRejectedValueOnce(new Error("database unavailable"));
+
+    const response = await purchaseRoute.POST(jsonRequest("/api/bff/subscription/purchase", {
+      plan_code: "basic",
+      gateway_type: "YOOKASSA",
+      duration_days: 30,
+    }, { "idempotency-key": "66666666-6666-4666-8666-666666666666" }));
+
+    expect(response.status).toBe(202);
+    expect(mocks.settlePaymentOperationAfterDispatchFailure).toHaveBeenCalledWith(
+      expect.objectContaining({ outcome: "UNKNOWN" }),
+    );
+    expect(mocks.auditLog).not.toHaveBeenCalled();
+  });
+
+  it("keeps the outcome unknown after a local payment-record conflict", async () => {
+    mocks.remnashopRequest
+      .mockResolvedValueOnce({ plans: [{ public_code: "basic", name: "Basic" }] })
+      .mockResolvedValueOnce(payment);
+    mocks.completePaymentOperationSuccess.mockRejectedValueOnce(
+      new BffError("CONFLICT", 409, "local payment id collision"),
+    );
+
+    const response = await purchaseRoute.POST(jsonRequest("/api/bff/subscription/purchase", {
+      plan_code: "basic",
+      gateway_type: "YOOKASSA",
+      duration_days: 30,
+    }, { "idempotency-key": "dddddddd-dddd-4ddd-8ddd-dddddddddddd" }));
+
+    expect(response.status).toBe(202);
+    expect(mocks.settlePaymentOperationAfterDispatchFailure).toHaveBeenCalledWith(
+      expect.objectContaining({ outcome: "UNKNOWN" }),
+    );
   });
 
   it("returns offers, payment history, payment status and support data", async () => {

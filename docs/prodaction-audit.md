@@ -56,9 +56,24 @@
 - same-origin login, Telegram WebApp/popup, password, passkey, payment и subscription flows сохранены;
 - production rollout не выполнялся.
 
-### 3. [ ] Сделать purchase/extend идемпотентными
+### 3. [x] Сделать purchase/extend идемпотентными
 
 Добавить server-generated idempotency key/operation record и повторно возвращать исходный результат. Проверить повтор запроса, timeout после upstream-успеха и бесплатный тариф.
+
+Результат:
+
+- браузер создаёт UUID один раз на нормализованный purchase/extend-запрос, повторно использует его после сетевой ошибки, `202`, `408`, `429` и `5xx` и очищает только после подтверждённого успеха либо окончательной клиентской ошибки;
+- Clean Pay хранит только hash клиентского ключа и отдельный server-generated upstream UUID; операция имеет lease/CAS-состояния `READY`, `DISPATCHING`, `OUTCOME_UNKNOWN`, `SUCCEEDED`, `FAILED_FINAL`;
+- replay завершённой операции возвращает исходный `200`, активная или неоднозначная операция — контролируемый `202`; post-dispatch ошибки явно разделены на `FINAL`, `RETRYABLE` и `UNKNOWN`, причём локальная ошибка записи после upstream-успеха всегда fail-closed;
+- новый operation record создаётся только после локального rate limit и успешной upstream-аутентификации; lookup/replay существующего ключа не требует повторной Remnashop-аутентификации;
+- fingerprint строится по тому же нормализованному payload, который отправляется upstream; неизвестные клиентские поля не пересылаются;
+- результат операции и `PaymentRecord` фиксируются одной транзакцией, а чужой `payment_id`, другой пользователь, другой вид операции или другой payload не могут присвоить существующий результат;
+- при merge пользователей операции атомарно переносятся на target-user; конфликт одинаковых ключей отменяет весь merge, а `ON DELETE RESTRICT` не позволяет каскадно потерять новый или активный ключ;
+- повреждённый upstream replay и неожиданный upstream-конфликт idempotency считаются `UNKNOWN`, поэтому клиент не очищает ключ и не создаёт потенциальный дубль;
+- Remnashop commit `b08549e` добавляет обратно совместимый optional `Idempotency-Key`, durable operation/lease/CAS, стабильный replay и fail-closed `409`; YooKassa получает тот же provider idempotency key, бесплатный flow не выполняет fulfillment повторно;
+- Remnashop follow-up `9e543bc` переносит операции до фиксации merge, заменяет каскадный FK на `RESTRICT` и добавляет DB-триггеры, которые сериализуют конкурентный claim и запрещают старой версии приложения оставить операции у merged-user; миграция `0044` fail-closed останавливается при уже нарушенном инварианте;
+- порядок rollout: сначала миграции и версия Remnashop с `b08549e` и `9e543bc`, затем additive-миграция Clean Pay и приложение; rollback приложения безопасен без удаления новых таблицы/nullable-колонки;
+- reconciliation для `UNKNOWN`, provider lookup и реальный PostgreSQL crash/concurrency rehearsal остаются обязательной частью пункта 4; production rollout не выполнялся.
 
 ### 4. [ ] Восстанавливать локальные платежи после частичного сбоя
 
@@ -172,3 +187,4 @@ Fallback по Telegram/e-mail должен подтверждать UUID и вл
 - 2026-07-17: аудит зафиксирован; начата работа над пунктом 1.
 - 2026-07-17: пункт 1 исправлен и локально проверен: passkey suite 10/10, полный suite 183/183, ESLint без ошибок, production build успешен. Добавлены проверки нового, собственного, чужого, изменённого и конкурентно созданного credential.
 - 2026-07-17: пункт 2 исправлен и локально проверен: профильный suite 58/58, полный suite 209/209, ESLint без ошибок в исходниках, production build успешен. Прямой `tsc --noEmit` сохранил базовые 29 ошибок тестовой типизации, новых ошибок не добавлено. Devcontainer E2E локально не запущен: Docker Desktop daemon недоступен; проверка перенесена на тестовый стенд перед production rollout.
+- 2026-07-17: пункт 3 исправлен и локально проверен: расширенный профильный suite 92/92, полный suite 253/253, Prisma validate/generate, ESLint без ошибок в исходниках и production build успешны. Прямой `tsc --noEmit` сохранил базовые 29 ошибок тестовой типизации, новых ошибок в изменённых файлах нет. Companion Remnashop commits `b08549e` и `9e543bc` запушены в `fork/codex/clean-pay-integration-pr`: полный suite 19/19, Ruff, strict mypy по 521 файлу, compileall, Alembic head `0044`, migration SQL/diff-check прошли; опубликованная миграция `0043` не изменялась. Devcontainer/PostgreSQL E2E локально не запущен из-за недоступного Docker Desktop и остаётся release gate тестового стенда.

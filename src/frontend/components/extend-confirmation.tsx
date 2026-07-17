@@ -11,6 +11,11 @@ import type {
 import { AccountActionRequired } from "@/frontend/components/account-action-required";
 import { LinkButton } from "@/frontend/components/prime/link-button";
 import { BffClientError, readBffError } from "@/frontend/lib/client-api";
+import {
+  clearPaymentIdempotencyKey,
+  getOrCreatePaymentIdempotencyKey,
+  shouldRetainPaymentIdempotencyKey,
+} from "@/frontend/lib/payment-idempotency";
 import { findRenewPlan } from "@/frontend/lib/subscription-offers";
 import { Button } from "primereact/button";
 import { Card } from "primereact/card";
@@ -215,38 +220,104 @@ export function ExtendConfirmation() {
 
     setSubmitting(true);
     setSubmitError(null);
+    const payload = {
+      duration_days: selectedDuration.days,
+      gateway_type: selectedPrice.gateway_type,
+    };
+    let idempotencyKey: string;
 
-    const response = await fetch("/api/bff/subscription/extend", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        duration_days: selectedDuration.days,
-        gateway_type: selectedPrice.gateway_type,
-      }),
-    });
-
-    if (!response.ok) {
+    try {
+      idempotencyKey = getOrCreatePaymentIdempotencyKey("extend", payload);
+    } catch {
       setSubmitting(false);
-      setSubmitError(await readError(response));
+      setSubmitError(
+        "Браузер не смог безопасно подготовить продление. Обновите страницу или используйте другой браузер.",
+      );
       return;
     }
 
-    const body = (await response.json()) as { data: PaymentInitResponse };
-    window.localStorage.setItem("cleanPayLastPaymentId", body.data.payment_id);
+    let paymentConfirmed = false;
 
-    if (body.data.is_free) {
-      window.location.assign("/cabinet");
-      return;
+    try {
+      let response: Response;
+
+      try {
+        response = await fetch("/api/bff/subscription/extend", {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            "Idempotency-Key": idempotencyKey,
+          },
+          body: JSON.stringify(payload),
+        });
+      } catch {
+        setSubmitError(
+          "Не удалось получить результат продления. Повторите попытку — новая оплата не будет создана.",
+        );
+        return;
+      }
+
+      if (response.status === 202) {
+        setSubmitError(
+          "Результат продления уточняется. Не создавайте новую оплату; повторите проверку через несколько секунд.",
+        );
+        return;
+      }
+
+      if (!response.ok) {
+        const message = await readError(response);
+
+        if (response.status < 500) {
+          if (!shouldRetainPaymentIdempotencyKey(response.status)) {
+            clearPaymentIdempotencyKey("extend", payload, idempotencyKey);
+          }
+          setSubmitError(message);
+        } else {
+          setSubmitError(
+            "Не удалось подтвердить результат продления. Повторите попытку — новая оплата не будет создана.",
+          );
+        }
+        return;
+      }
+
+      const body = (await response.json().catch(() => null)) as {
+        data?: PaymentInitResponse;
+      } | null;
+
+      if (!body?.data || typeof body.data.payment_id !== "string") {
+        setSubmitError(
+          "Не удалось подтвердить результат продления. Повторите попытку — новая оплата не будет создана.",
+        );
+        return;
+      }
+
+      clearPaymentIdempotencyKey("extend", payload, idempotencyKey);
+      paymentConfirmed = true;
+
+      try {
+        window.localStorage.setItem("cleanPayLastPaymentId", body.data.payment_id);
+      } catch {
+        // The payment is confirmed even when local browser storage is unavailable.
+      }
+
+      if (body.data.is_free) {
+        window.location.assign("/cabinet");
+        return;
+      }
+
+      if (body.data.payment_url) {
+        window.location.assign(body.data.payment_url);
+        return;
+      }
+
+      window.location.assign(
+        `/payment/pending?payment_id=${encodeURIComponent(body.data.payment_id)}`,
+      );
+    } finally {
+      if (!paymentConfirmed) {
+        setSubmitting(false);
+      }
     }
-
-    if (body.data.payment_url) {
-      window.location.assign(body.data.payment_url);
-      return;
-    }
-
-    window.location.assign(
-      `/payment/pending?payment_id=${encodeURIComponent(body.data.payment_id)}`,
-    );
   }
 
   return (

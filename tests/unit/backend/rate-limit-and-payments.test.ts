@@ -3,7 +3,11 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   redisCommand: vi.fn(),
   prisma: {
-    paymentRecord: { upsert: vi.fn() },
+    paymentRecord: {
+      findUnique: vi.fn(),
+      create: vi.fn(),
+      updateMany: vi.fn(),
+    },
   },
 }));
 
@@ -85,8 +89,9 @@ describe("payment records", () => {
     vi.clearAllMocks();
   });
 
-  it("upserts normalized payment records", async () => {
-    mocks.prisma.paymentRecord.upsert.mockResolvedValue({ id: "record-1" });
+  it("creates normalized payment records", async () => {
+    mocks.prisma.paymentRecord.findUnique.mockResolvedValue(null);
+    mocks.prisma.paymentRecord.create.mockResolvedValue({ id: "record-1" });
 
     await recordPayment({
       userId: "user-1",
@@ -109,19 +114,44 @@ describe("payment records", () => {
       } as never,
     });
 
-    expect(mocks.prisma.paymentRecord.upsert).toHaveBeenCalledWith({
-      where: { paymentId: "payment-1" },
-      create: expect.objectContaining({
+    expect(mocks.prisma.paymentRecord.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
         userId: "user-1",
         paymentId: "payment-1",
         status: "COMPLETED",
         planCode: "basic",
       }),
-      update: expect.objectContaining({
-        status: "COMPLETED",
-        gatewayType: "YOOKASSA",
-      }),
     });
+  });
+
+  it("never updates a payment id owned by another user", async () => {
+    mocks.prisma.paymentRecord.findUnique.mockResolvedValue({
+      id: "record-foreign",
+      userId: "user-foreign",
+      operationId: null,
+    });
+
+    await expect(
+      recordPayment({
+        userId: "user-1",
+        gatewayType: "YOOKASSA",
+        payment: {
+          payment_id: "payment-shared",
+          purchase_type: "subscription",
+          status: "pending",
+          final_amount: "100.00",
+          currency: "RUB",
+          payment_url: "https://pay.test",
+          is_free: false,
+        },
+      }),
+    ).rejects.toMatchObject({
+      code: "CONFLICT",
+      status: 409,
+    });
+
+    expect(mocks.prisma.paymentRecord.updateMany).not.toHaveBeenCalled();
+    expect(mocks.prisma.paymentRecord.create).not.toHaveBeenCalled();
   });
 
   it("serializes DB records back to Remnashop-shaped payloads", () => {

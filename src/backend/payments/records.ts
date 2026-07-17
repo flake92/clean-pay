@@ -1,4 +1,6 @@
 import { prisma } from "@/backend/database/prisma";
+import { BffError } from "@/backend/integrations/remnashop/errors";
+import type { Prisma } from "@prisma/client";
 import type {
   PaymentInitResponse,
   PaymentTransactionResponse,
@@ -13,13 +15,15 @@ type PaymentRecordStatus =
   | "REFUNDED"
   | "UNKNOWN";
 
-type RecordPaymentInput = {
+export type RecordPaymentInput = {
   userId: string;
   gatewayType: string;
   durationDays?: number;
   plan?: PlanOffer;
   payment: PaymentInitResponse;
 };
+
+type PaymentRecordClient = Pick<Prisma.TransactionClient, "paymentRecord">;
 
 export function toPaymentStatus(status: string): PaymentRecordStatus {
   const normalized = status.toUpperCase();
@@ -70,40 +74,90 @@ export async function syncPaymentRecordsFromRemnashopTransactions({
   );
 }
 
-export async function recordPayment(input: RecordPaymentInput) {
-  return prisma.paymentRecord.upsert({
+export async function recordPayment(
+  input: RecordPaymentInput,
+  options: {
+    client?: PaymentRecordClient;
+    operationId?: string;
+  } = {},
+) {
+  const client = options.client ?? prisma;
+  const operationLink = options.operationId
+    ? { operationId: options.operationId }
+    : {};
+  const existing = await client.paymentRecord.findUnique({
     where: { paymentId: input.payment.payment_id },
-    create: {
+    select: {
+      id: true,
+      userId: true,
+      operationId: true,
+    },
+  });
+  const mutableData = {
+    purchaseType: input.payment.purchase_type,
+    status: toPaymentStatus(input.payment.status),
+    finalAmount: input.payment.final_amount,
+    currency: input.payment.currency,
+    gatewayType: input.gatewayType,
+    planCode: input.plan?.public_code,
+    planName: input.plan?.name,
+    durationDays: input.durationDays,
+    deviceLimit: input.plan?.device_limit,
+    trafficLimit: input.plan?.traffic_limit,
+    paymentUrl: input.payment.payment_url,
+    isFree: input.payment.is_free,
+    raw: input.payment,
+    ...operationLink,
+  };
+
+  if (existing) {
+    if (
+      existing.userId !== input.userId ||
+      (options.operationId &&
+        existing.operationId !== null &&
+        existing.operationId !== options.operationId)
+    ) {
+      throw new BffError(
+        "CONFLICT",
+        409,
+        "Payment record is owned by another user or operation",
+      );
+    }
+
+    const updated = await client.paymentRecord.updateMany({
+      where: {
+        id: existing.id,
+        userId: input.userId,
+        ...(options.operationId
+          ? {
+              OR: [
+                { operationId: null },
+                { operationId: options.operationId },
+              ],
+            }
+          : {}),
+      },
+      data: mutableData,
+    });
+
+    if (updated.count !== 1) {
+      throw new BffError(
+        "CONFLICT",
+        409,
+        "Payment record ownership changed during update",
+      );
+    }
+
+    return client.paymentRecord.findUnique({
+      where: { id: existing.id },
+    });
+  }
+
+  return client.paymentRecord.create({
+    data: {
       userId: input.userId,
       paymentId: input.payment.payment_id,
-      purchaseType: input.payment.purchase_type,
-      status: toPaymentStatus(input.payment.status),
-      finalAmount: input.payment.final_amount,
-      currency: input.payment.currency,
-      gatewayType: input.gatewayType,
-      planCode: input.plan?.public_code,
-      planName: input.plan?.name,
-      durationDays: input.durationDays,
-      deviceLimit: input.plan?.device_limit,
-      trafficLimit: input.plan?.traffic_limit,
-      paymentUrl: input.payment.payment_url,
-      isFree: input.payment.is_free,
-      raw: input.payment,
-    },
-    update: {
-      purchaseType: input.payment.purchase_type,
-      status: toPaymentStatus(input.payment.status),
-      finalAmount: input.payment.final_amount,
-      currency: input.payment.currency,
-      gatewayType: input.gatewayType,
-      planCode: input.plan?.public_code,
-      planName: input.plan?.name,
-      durationDays: input.durationDays,
-      deviceLimit: input.plan?.device_limit,
-      trafficLimit: input.plan?.traffic_limit,
-      paymentUrl: input.payment.payment_url,
-      isFree: input.payment.is_free,
-      raw: input.payment,
+      ...mutableData,
     },
   });
 }

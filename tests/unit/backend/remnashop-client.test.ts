@@ -239,6 +239,21 @@ describe("remnashop client", () => {
     });
   });
 
+  it("passes a stable payment idempotency key without logging it", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(response({ body: { ok: true } }));
+
+    await remnashopRequest("/subscription/purchase", {
+      method: "POST",
+      body: { plan_code: "basic" },
+      idempotencyKey: "server-operation-key",
+    });
+
+    expect(fetchMock.mock.calls[0]?.[1]?.headers).toMatchObject({
+      "idempotency-key": "server-operation-key",
+    });
+    expect(JSON.stringify(loggerMock.info.mock.calls)).not.toContain("server-operation-key");
+  });
+
   it("does not log Remnashop request or response payloads", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(response({
       body: { email: "user@example.com", access_token: "response-token" },

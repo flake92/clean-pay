@@ -13,6 +13,7 @@ import {
   createWebSessionForRemnashopUser,
   getCurrentSession,
 } from "@/backend/sessions/web-session";
+import { transferPaymentOperationsForUserMerge } from "@/backend/payments/user-merge";
 
 type RemnashopProfileIdentity = {
   remnashopUserId: string;
@@ -66,6 +67,11 @@ async function mergeUsersIntoTarget(
     where: { userId: { in: sourceUserIds } },
     data: { userId: targetUserId },
   });
+  await transferPaymentOperationsForUserMerge(
+    tx,
+    targetUserId,
+    sourceUserIds,
+  );
   await tx.paymentRecord.updateMany({
     where: { userId: { in: sourceUserIds } },
     data: { userId: targetUserId },
