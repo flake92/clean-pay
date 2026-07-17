@@ -1,11 +1,12 @@
 import { cookies, headers } from "next/headers";
 import type { NextResponse } from "next/server";
-import { WebSessionAssuranceLevel, WebSessionAuthMethod, type Prisma } from "@prisma/client";
+import { Prisma, WebSessionAssuranceLevel, WebSessionAuthMethod } from "@prisma/client";
 
 import { authDebugLog } from "@/backend/observability/auth-debug-log";
 import { sha256, hmacSha256, jsonBase64Url, parseJsonBase64Url, randomToken, safeEqual } from "@/backend/security/crypto";
 import { getEnv } from "@/backend/config/env";
 import { prisma } from "@/backend/database/prisma";
+import { BffError } from "@/backend/integrations/remnashop/errors";
 import { securityPolicy } from "@/backend/security/policy";
 
 const sessionCookieNames = {
@@ -114,11 +115,13 @@ async function getSessionByRefreshToken() {
   }
 
   authDebugLog("session_refresh_lookup_started", { hasRefreshCookie: true });
+  const refreshTokenHash = sha256(refreshToken);
+  const now = new Date();
   const session = await prisma.webSession.findFirst({
     where: {
-      refreshTokenHash: sha256(refreshToken),
+      refreshTokenHash,
       revokedAt: null,
-      refreshExpiresAt: { gt: new Date() },
+      refreshExpiresAt: { gt: now },
     },
     include: { user: true },
   });
@@ -129,15 +132,46 @@ async function getSessionByRefreshToken() {
   }
 
   const accessTokenExpiresAt = addMinutes(
-    new Date(),
+    now,
     securityPolicy.accessSessionTtlMinutes,
   );
 
-  const updatedSession = await prisma.webSession.update({
-    where: { id: session.id },
+  const refreshed = await prisma.webSession.updateMany({
+    where: {
+      id: session.id,
+      refreshTokenHash,
+      revokedAt: null,
+      refreshExpiresAt: { gt: now },
+    },
     data: { accessTokenExpiresAt },
+  });
+
+  if (refreshed.count !== 1) {
+    authDebugLog("session_refresh_lookup_lost_race", {
+      sessionId: session.id,
+      userId: session.userId,
+    });
+    return null;
+  }
+
+  const updatedSession = await prisma.webSession.findFirst({
+    where: {
+      id: session.id,
+      userId: session.userId,
+      refreshTokenHash,
+      revokedAt: null,
+      refreshExpiresAt: { gt: now },
+    },
     include: { user: true },
   });
+
+  if (!updatedSession) {
+    authDebugLog("session_refresh_lookup_lost_race", {
+      sessionId: session.id,
+      userId: session.userId,
+    });
+    return null;
+  }
 
   await setAccessCookie({
     sessionId: updatedSession.id,
@@ -644,6 +678,155 @@ export async function upgradeCurrentSessionToFull() {
   });
 
   return updatedSession;
+}
+
+export async function replaceWebSessionAfterPasswordChange({
+  sessionId,
+  userId,
+  remnashopAccessTokenEncrypted,
+  remnashopRefreshTokenEncrypted,
+  remnashopAccessExpiresAt,
+  remnashopRefreshExpiresAt,
+}: {
+  sessionId: string;
+  userId: string;
+  remnashopAccessTokenEncrypted: string;
+  remnashopRefreshTokenEncrypted: string;
+  remnashopAccessExpiresAt: Date;
+  remnashopRefreshExpiresAt: Date;
+}) {
+  const env = getEnv();
+  const cookieStore = await cookies();
+  const now = new Date();
+  const accessTokenExpiresAt = addMinutes(
+    now,
+    securityPolicy.accessSessionTtlMinutes,
+  );
+  const refreshExpiresAt = addDays(now, securityPolicy.refreshSessionTtlDays);
+  const refreshToken = randomToken(48);
+  const revokedSessionData = {
+    revokedAt: now,
+    accessTokenExpiresAt: now,
+    refreshExpiresAt: now,
+    remnashopAccessTokenEncrypted: null,
+    remnashopRefreshTokenEncrypted: null,
+    remnashopAccessExpiresAt: null,
+    remnashopRefreshExpiresAt: null,
+  };
+
+  const replaceSession = () => prisma.$transaction(async (tx) => {
+    const lockedSession = await tx.$queryRaw<Array<{ id: string }>>(
+      Prisma.sql`
+        SELECT session."id"
+        FROM "WebUser" AS app_user
+        JOIN "WebSession" AS session
+          ON session."userId" = app_user."id"
+        WHERE app_user."id" = ${userId}
+          AND session."id" = ${sessionId}
+        FOR UPDATE OF app_user, session
+      `,
+    );
+
+    if (lockedSession.length !== 1 || lockedSession[0]?.id !== sessionId) {
+      throw new BffError("UNAUTHORIZED", 401, "Current session is no longer active");
+    }
+
+    const currentSession = await tx.webSession.findUnique({
+      where: { id: sessionId },
+      include: { user: true },
+    });
+
+    if (
+      !currentSession ||
+      currentSession.userId !== userId ||
+      currentSession.revokedAt
+    ) {
+      throw new BffError("UNAUTHORIZED", 401, "Current session is no longer active");
+    }
+
+    const revokedSessions = await tx.webSession.updateMany({
+      where: { userId, revokedAt: null },
+      data: revokedSessionData,
+    });
+
+    if (revokedSessions.count < 1) {
+      throw new BffError("UNAUTHORIZED", 401, "Current session is no longer active");
+    }
+
+    const newSession = await tx.webSession.create({
+      data: {
+        userId,
+        refreshTokenHash: sha256(refreshToken),
+        remnashopAccessTokenEncrypted,
+        remnashopRefreshTokenEncrypted,
+        remnashopAccessExpiresAt,
+        remnashopRefreshExpiresAt,
+        authMethod: currentSession.authMethod,
+        assuranceLevel: currentSession.assuranceLevel,
+        userAgent: currentSession.userAgent,
+        ipHash: currentSession.ipHash,
+        accessTokenExpiresAt,
+        refreshExpiresAt,
+      },
+    });
+
+    return {
+      newSession,
+      user: currentSession.user,
+      revokedSessionCount: revokedSessions.count,
+    };
+  });
+
+  let replacement: Awaited<ReturnType<typeof replaceSession>>;
+
+  try {
+    replacement = await replaceSession();
+  } catch (error) {
+    // The upstream password is already changed at this point. If creating the
+    // replacement fails, fail closed by revoking every still-active local
+    // session and clearing this browser's credentials.
+    try {
+      await prisma.webSession.updateMany({
+        where: { userId, revokedAt: null },
+        data: revokedSessionData,
+      });
+    } finally {
+      cookieStore.delete(sessionCookieNames.access);
+      cookieStore.delete(sessionCookieNames.refresh);
+    }
+
+    throw error;
+  }
+
+  await setAccessCookie({
+    sessionId: replacement.newSession.id,
+    userId,
+    expiresAt: accessTokenExpiresAt,
+    assuranceLevel: replacement.newSession.assuranceLevel,
+    emailVerified: replacement.user.emailVerified,
+    telegramId: replacement.user.telegramId,
+  });
+  cookieStore.set(sessionCookieNames.refresh, refreshToken, {
+    httpOnly: true,
+    secure: env.cookieSecure,
+    sameSite: env.cookieSameSite,
+    path: "/",
+    expires: refreshExpiresAt,
+  });
+
+  authDebugLog("session_replaced_after_password_change", {
+    oldSessionId: sessionId,
+    newSessionId: replacement.newSession.id,
+    userId,
+    revokedSessionCount: replacement.revokedSessionCount,
+    accessTokenExpiresAt,
+    refreshExpiresAt,
+  });
+
+  return {
+    session: replacement.newSession,
+    revokedSessionCount: replacement.revokedSessionCount,
+  };
 }
 
 export async function clearWebSession() {

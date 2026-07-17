@@ -121,9 +121,18 @@
 - после назначения проверенных identity полей отдельно проверяются итоговый target-владелец и отсутствие source-пользователей;
 - целевой suite 27/27, полный suite 329/329, ESLint без ошибок (один посторонний warning в сгенерированном coverage-файле) и Next.js production build прошли; production rollout не выполнялся.
 
-### 7. [ ] Отзывать скомпрометированные сессии при смене пароля
+### 7. [x] Отзывать скомпрометированные сессии при смене пароля
 
 Отзывать остальные локальные сессии пользователя, ротировать текущий refresh token и определить политику для passkeys. Добавить тест, что старый refresh больше не выдаёт access token.
+
+Результат:
+
+- после успешной смены пароля все прежние локальные сессии пользователя, включая текущую, атомарно отзываются, их сроки принудительно завершаются, а сохранённые Remnashop access/refresh tokens очищаются;
+- вместо переиспользования прежнего `sid` создаётся новая сессия с новым криптографическим local refresh token/hash и новой access cookie, поэтому ранее выданные access cookies также перестают проходить DB-проверку;
+- пользователь и текущая сессия блокируются на время замены; refresh-path использует CAS по исходному hash/revocation/expiry и не выдаёт access cookie, если проиграл гонку с отзывом;
+- если upstream-пароль уже изменён, но replacement-транзакция не завершилась, выполняется fail-closed отзыв всех оставшихся активных сессий и cookies браузера очищаются;
+- passkey credentials сохраняются как независимый фактор входа, однако все существующие сессии, в том числе созданные через passkey, отзываются и требуют нового входа;
+- целевой suite 29/29, полный suite 332/332, ESLint без ошибок (один посторонний warning в сгенерированном coverage-файле) и Next.js production build прошли; на одноразовой реальной PostgreSQL-БД подтверждены отзыв двух сессий, новый hash, отказ старого refresh и сохранение passkey. Production rollout не выполнялся.
 
 ### 8. [ ] Исправить жизненный цикл access/refresh Remnashop и web-сессий
 
@@ -223,3 +232,4 @@ Fallback по Telegram/e-mail должен подтверждать UUID и вл
 - 2026-07-18: пункт 4 исправлен и полностью проверен локально. Clean Pay: 39 файлов/320 тестов, Prisma validate/generate, ESLint без ошибок, production build, Compose/shell checks и реальная PostgreSQL crash/concurrency matrix. Remnashop: 131 тест, Ruff, strict mypy по 540 файлам, Alembic head `0049`, непустой и чистый upgrade/downgrade/re-upgrade, legacy writer, DB-clock lease fencing, webhook/fulfillment/manual-queue matrix и production Docker build. Companion fork обновлён, актуальный PR [`snoups/remnashop#135`](https://github.com/snoups/remnashop/pull/135) направлен в `dev`; код Remnawave не менялся. Production rollout не выполнялся.
 - 2026-07-18: пункт 5 исправлен и проверен: опасные historical Prisma migrations стали атомарными и lossless, добавлен migration runbook и regression-suite. Полный suite 323/323, Prisma validate/generate, ESLint и production build прошли. На отдельной непустой PostgreSQL-БД проверены legacy backfill, точное сохранение Telegram IDs, fail-closed/rollback на malformed ID, полная migration chain, Prisma deploy/status и восстановление pre-migration custom dump. Production rollout не выполнялся.
 - 2026-07-18: пункт 6 исправлен и проверен: оба merge-пути отзывают source-сессии, сохраняют passkeys, инвалидируют временные auth-состояния и fail-closed проверяют конечного владельца. Целевой suite 27/27, полный suite 329/329, ESLint без ошибок и Next.js production build прошли. Код Remnashop и Remnawave в этом пункте не изменялся; production rollout не выполнялся.
+- 2026-07-18: пункт 7 исправлен и проверен: смена пароля заменяет текущую сессию и отзывает все прежние, refresh/revoke защищён CAS, failure после upstream success закрывается полным отзывом, passkeys сохраняются. Целевой suite 29/29, полный suite 332/332, ESLint без ошибок, production build и отдельный реальный PostgreSQL rehearsal прошли. Код Remnashop и Remnawave не изменялся; production rollout не выполнялся.

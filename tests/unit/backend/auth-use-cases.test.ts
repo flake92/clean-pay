@@ -22,6 +22,7 @@ const mocks = vi.hoisted(() => ({
   verifyTurnstileToken: vi.fn(),
   getCurrentSession: vi.fn(),
   refreshCurrentAccessCookie: vi.fn(),
+  replaceWebSessionAfterPasswordChange: vi.fn(),
   prisma: {
     $transaction: vi.fn(),
     webUser: { findUnique: vi.fn(), update: vi.fn() },
@@ -73,6 +74,8 @@ vi.mock("@/backend/database/prisma", () => ({
 vi.mock("@/backend/sessions/web-session", () => ({
   getCurrentSession: mocks.getCurrentSession,
   refreshCurrentAccessCookie: mocks.refreshCurrentAccessCookie,
+  replaceWebSessionAfterPasswordChange:
+    mocks.replaceWebSessionAfterPasswordChange,
 }));
 
 import { loginWithEmail } from "@/backend/auth/email-login";
@@ -153,6 +156,10 @@ describe("auth use cases", () => {
         refresh_expires_at: "2026-07-25T10:00:00.000Z",
       },
       cookies: { accessToken: "refreshed-access", refreshToken: "refreshed-refresh" },
+    });
+    mocks.replaceWebSessionAfterPasswordChange.mockResolvedValue({
+      session: { id: "session-2" },
+      revokedSessionCount: 2,
     });
   });
 
@@ -325,20 +332,22 @@ describe("auth use cases", () => {
     expect(mocks.auditLog).toHaveBeenCalledWith(expect.objectContaining({ action: "email_change_requested" }));
   });
 
-  it("rotates local Remnashop session tokens after password change", async () => {
+  it("replaces the local session and rotates both token families after password change", async () => {
     await expect(changePassword({ current_password: "old", new_password: "new" })).resolves.toEqual({ success: true });
 
     expect(mocks.remnashopChangePassword).toHaveBeenCalledWith("access-token", {
       current_password: "old",
       new_password: "new",
     });
-    expect(mocks.prisma.webSession.update).toHaveBeenCalledWith({
-      where: { id: "session-1" },
-      data: expect.objectContaining({
-        remnashopAccessTokenEncrypted: "protected:new-access",
-        remnashopRefreshTokenEncrypted: "protected:new-refresh",
-      }),
+    expect(mocks.replaceWebSessionAfterPasswordChange).toHaveBeenCalledWith({
+      sessionId: "session-1",
+      userId: "user-1",
+      remnashopAccessTokenEncrypted: "protected:new-access",
+      remnashopRefreshTokenEncrypted: "protected:new-refresh",
+      remnashopAccessExpiresAt: new Date("2026-06-26T00:00:00.000Z"),
+      remnashopRefreshExpiresAt: expect.any(Date),
     });
+    expect(mocks.prisma.webSession.update).not.toHaveBeenCalled();
   });
 
   it("refreshes stale Remnashop tokens and retries password change once", async () => {
@@ -363,10 +372,17 @@ describe("auth use cases", () => {
     expect(mocks.prisma.webSession.update).toHaveBeenCalledWith({
       where: { id: "session-1" },
       data: expect.objectContaining({
+        remnashopAccessTokenEncrypted: "protected:refreshed-access",
+        remnashopRefreshTokenEncrypted: "protected:refreshed-refresh",
+      }),
+    });
+    expect(mocks.replaceWebSessionAfterPasswordChange).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionId: "session-1",
         remnashopAccessTokenEncrypted: "protected:retry-access",
         remnashopRefreshTokenEncrypted: "protected:retry-refresh",
       }),
-    });
+    );
   });
 
   it("returns local profile when the current session is not linked to Remnashop", async () => {

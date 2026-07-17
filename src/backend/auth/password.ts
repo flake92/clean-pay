@@ -9,6 +9,7 @@ import {
 } from "@/backend/integrations/remnashop/client";
 import { auditLog } from "@/backend/observability/audit";
 import { authDebugLog } from "@/backend/observability/auth-debug-log";
+import { replaceWebSessionAfterPasswordChange } from "@/backend/sessions/web-session";
 import type { ChangePasswordRequest } from "@/shared/remnashop/types";
 import { addDays } from "@/backend/auth/payload";
 
@@ -74,13 +75,25 @@ export async function changePassword(body: ChangePasswordRequest) {
     success: result.data.success,
   });
 
-  await rotateRemnashopSessionTokens(session, {
-    accessToken: result.cookies.accessToken,
-    refreshToken: result.cookies.refreshToken,
-  });
-  authDebugLog("password_change_session_tokens_rotated", {
+  const now = new Date();
+  const replacement = await replaceWebSessionAfterPasswordChange({
     sessionId: session.id,
     userId: session.userId,
+    remnashopAccessTokenEncrypted: protectRemnashopToken(
+      result.cookies.accessToken,
+    ),
+    remnashopRefreshTokenEncrypted: protectRemnashopToken(
+      result.cookies.refreshToken,
+    ),
+    remnashopAccessExpiresAt:
+      getJwtExpiresAt(result.cookies.accessToken) ?? addDays(now, 1),
+    remnashopRefreshExpiresAt: addDays(now, 30),
+  });
+  authDebugLog("password_change_session_replaced", {
+    oldSessionId: session.id,
+    newSessionId: replacement.session.id,
+    userId: session.userId,
+    revokedSessionCount: replacement.revokedSessionCount,
   });
 
   await auditLog({ action: "password_changed", userId: session.userId });
