@@ -16,6 +16,8 @@ const mocks = vi.hoisted(() => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
   assertRateLimit: vi.fn(),
   remnashopAuth: vi.fn(),
+  mergeLocalUsersIntoTarget: vi.fn(),
+  assertUserMergeFinalOwner: vi.fn(),
   prisma: {
     telegramAuthState: {
       create: vi.fn(),
@@ -110,6 +112,11 @@ vi.mock("@/backend/database/prisma", () => ({
   prisma: mocks.prisma,
 }));
 
+vi.mock("@/backend/auth/user-merge", () => ({
+  mergeLocalUsersIntoTarget: mocks.mergeLocalUsersIntoTarget,
+  assertUserMergeFinalOwner: mocks.assertUserMergeFinalOwner,
+}));
+
 import {
   consumeTelegramCallback,
   consumeTelegramLoginWidgetPayload,
@@ -142,6 +149,8 @@ describe("Telegram OIDC integration", () => {
     mocks.prisma.webUser.upsert.mockResolvedValue({ id: "user-1", telegramId: "123456" });
     mocks.prisma.telegramAuthState.update.mockResolvedValue({});
     mocks.prisma.$transaction.mockImplementation(async (callback) => callback(tx));
+    mocks.mergeLocalUsersIntoTarget.mockResolvedValue({});
+    mocks.assertUserMergeFinalOwner.mockResolvedValue({ id: "target-user" });
     tx.webUser.findUniqueOrThrow.mockResolvedValue({
       id: "target-user",
       remnashopUserId: "remna-email",
@@ -348,26 +357,20 @@ describe("Telegram OIDC integration", () => {
       remnashopAuth: { cookies: { accessToken: "access" } },
     });
 
-    expect(tx.webSession.updateMany).toHaveBeenCalledWith({
-      where: { userId: "source-user" },
-      data: {
-        userId: "target-user",
-        remnashopAccessTokenEncrypted: null,
-        remnashopRefreshTokenEncrypted: null,
-        remnashopAccessExpiresAt: null,
-        remnashopRefreshExpiresAt: null,
+    expect(mocks.mergeLocalUsersIntoTarget).toHaveBeenCalledWith(tx, {
+      targetUserId: "target-user",
+      targetUpstreamAccountId: "remna-email",
+      sourceUserIds: ["source-user"],
+    });
+    expect(mocks.assertUserMergeFinalOwner).toHaveBeenCalledWith(tx, {
+      targetUserId: "target-user",
+      sourceUserIds: ["source-user"],
+      expected: {
+        telegramId: "123456",
+        remnashopUserId: "remna-email",
+        email: "email@example.com",
       },
     });
-    expect(tx.paymentOperation.updateMany).toHaveBeenNthCalledWith(1, {
-      where: { userId: { in: ["source-user"] } },
-      data: {
-        userId: "target-user",
-        upstreamOwnerHash: expect.any(String),
-        reconcileClaimTokenHash: null,
-        reconcileLeaseExpiresAt: null,
-      },
-    });
-    expect(tx.webUser.delete).toHaveBeenCalledWith({ where: { id: "source-user" } });
     expect(mocks.prisma.telegramAuthState.update).toHaveBeenCalledWith({
       where: { id: "auth-state-1" },
       data: {

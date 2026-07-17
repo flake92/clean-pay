@@ -8,6 +8,8 @@ const mocks = vi.hoisted(() => ({
   authDebugLog: vi.fn(),
   createWebSessionForRemnashopUser: vi.fn(),
   getCurrentSession: vi.fn(),
+  mergeLocalUsersIntoTarget: vi.fn(),
+  assertUserMergeFinalOwner: vi.fn(),
   prisma: {
     $transaction: vi.fn(),
     webUser: {
@@ -62,6 +64,11 @@ vi.mock("@/backend/database/prisma", () => ({
   prisma: mocks.prisma,
 }));
 
+vi.mock("@/backend/auth/user-merge", () => ({
+  mergeLocalUsersIntoTarget: mocks.mergeLocalUsersIntoTarget,
+  assertUserMergeFinalOwner: mocks.assertUserMergeFinalOwner,
+}));
+
 import {
   createSessionFromRemnashopAuth,
   linkCurrentUserToRemnashopAuth,
@@ -100,6 +107,8 @@ describe("Remnashop session reconciliation", () => {
     });
     mocks.getRemnashopUserIdFromAccessToken.mockReturnValue("remna-1");
     mocks.getRemnashopMe.mockResolvedValue(profile);
+    mocks.mergeLocalUsersIntoTarget.mockResolvedValue({});
+    mocks.assertUserMergeFinalOwner.mockResolvedValue({ id: "user-1" });
     mocks.prisma.$transaction.mockImplementation(async (callback) => callback(tx));
     tx.$queryRaw.mockResolvedValue([{ id: "user-1" }]);
     tx.webUser.findUnique.mockResolvedValue(null);
@@ -199,17 +208,18 @@ describe("Remnashop session reconciliation", () => {
       profile,
     });
 
-    expect(tx.webUser.updateMany).toHaveBeenCalledWith({
-      where: { id: { in: ["other-remna", "other-email"] } },
-      data: { remnashopUserId: null, email: null, telegramId: null },
+    expect(mocks.mergeLocalUsersIntoTarget).toHaveBeenCalledWith(tx, {
+      targetUserId: "user-1",
+      targetUpstreamAccountId: "remna-1",
+      sourceUserIds: ["other-remna", "other-email"],
     });
-    expect(tx.paymentOperation.updateMany).toHaveBeenNthCalledWith(1, {
-      where: { userId: { in: ["other-remna", "other-email"] } },
-      data: {
-        userId: "user-1",
-        upstreamOwnerHash: "1l7jN368QqpfnbtgthYi9hXdl2Ho_-kvmgmVbzOfb4g",
-        reconcileClaimTokenHash: null,
-        reconcileLeaseExpiresAt: null,
+    expect(mocks.assertUserMergeFinalOwner).toHaveBeenCalledWith(tx, {
+      targetUserId: "user-1",
+      sourceUserIds: ["other-remna", "other-email"],
+      expected: {
+        remnashopUserId: "remna-1",
+        email: "user@example.com",
+        telegramId: "123",
       },
     });
     expect(tx.webSession.update).toHaveBeenCalledWith({

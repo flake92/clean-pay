@@ -13,7 +13,10 @@ import {
   createWebSessionForRemnashopUser,
   getCurrentSession,
 } from "@/backend/sessions/web-session";
-import { transferPaymentOperationsForUserMerge } from "@/backend/payments/user-merge";
+import {
+  assertUserMergeFinalOwner,
+  mergeLocalUsersIntoTarget,
+} from "@/backend/auth/user-merge";
 
 type RemnashopProfileIdentity = {
   remnashopUserId: string;
@@ -40,55 +43,6 @@ function profileIdentity({
     telegramUsername: profile.username,
     fullName: profile.name,
   };
-}
-
-async function mergeUsersIntoTarget(
-  tx: Prisma.TransactionClient,
-  targetUserId: string,
-  targetUpstreamAccountId: string,
-  sourceUserIds: string[],
-) {
-  if (sourceUserIds.length === 0) {
-    return;
-  }
-
-  await tx.webUser.updateMany({
-    where: { id: { in: sourceUserIds } },
-    data: {
-      remnashopUserId: null,
-      email: null,
-      telegramId: null,
-    },
-  });
-  await tx.webSession.updateMany({
-    where: { userId: { in: sourceUserIds } },
-    data: { userId: targetUserId },
-  });
-  await tx.auditLog.updateMany({
-    where: { userId: { in: sourceUserIds } },
-    data: { userId: targetUserId },
-  });
-  await transferPaymentOperationsForUserMerge(
-    tx,
-    targetUserId,
-    targetUpstreamAccountId,
-    sourceUserIds,
-  );
-  await tx.paymentRecord.updateMany({
-    where: { userId: { in: sourceUserIds } },
-    data: { userId: targetUserId },
-  });
-  await tx.emailVerificationCode.updateMany({
-    where: { userId: { in: sourceUserIds } },
-    data: { userId: targetUserId },
-  });
-  await tx.telegramAuthState.updateMany({
-    where: { userId: { in: sourceUserIds } },
-    data: { userId: targetUserId },
-  });
-  await tx.webUser.deleteMany({
-    where: { id: { in: sourceUserIds } },
-  });
 }
 
 async function reconcileRemnashopUser(
@@ -162,12 +116,11 @@ async function reconcileRemnashopUser(
       targetUserId: targetCandidate.id,
       sourceUserIds,
     });
-    await mergeUsersIntoTarget(
-      tx,
-      targetCandidate.id,
-      identity.remnashopUserId,
+    await mergeLocalUsersIntoTarget(tx, {
+      targetUserId: targetCandidate.id,
+      targetUpstreamAccountId: identity.remnashopUserId,
       sourceUserIds,
-    );
+    });
     authDebugLog("remnashop_user_reconcile_merge_completed", {
       targetUserId: targetCandidate.id,
       sourceUserIds,
@@ -187,6 +140,18 @@ async function reconcileRemnashopUser(
       lastLoginAt: new Date(),
     },
   });
+
+  if (sourceUserIds.length > 0) {
+    await assertUserMergeFinalOwner(tx, {
+      targetUserId: user.id,
+      sourceUserIds,
+      expected: {
+        remnashopUserId: identity.remnashopUserId,
+        ...(identity.email ? { email: identity.email } : {}),
+        ...(identity.telegramId ? { telegramId: identity.telegramId } : {}),
+      },
+    });
+  }
   authDebugLog("remnashop_user_reconcile_updated", {
     userId: user.id,
     remnashopUserId: identity.remnashopUserId,
@@ -361,12 +326,11 @@ export async function linkCurrentUserToRemnashopAuth({
         targetUserId: session.userId,
         sourceUserIds,
       });
-      await mergeUsersIntoTarget(
-        tx,
-        session.userId,
-        remnashopUserId,
+      await mergeLocalUsersIntoTarget(tx, {
+        targetUserId: session.userId,
+        targetUpstreamAccountId: remnashopUserId,
         sourceUserIds,
-      );
+      });
       authDebugLog("remnashop_link_merge_completed", {
         targetUserId: session.userId,
         sourceUserIds,
@@ -396,6 +360,20 @@ export async function linkCurrentUserToRemnashopAuth({
         remnashopRefreshExpiresAt: new Date(auth.refresh_expires_at),
       },
     });
+
+    if (sourceUserIds.length > 0) {
+      await assertUserMergeFinalOwner(tx, {
+        targetUserId: updatedUser.id,
+        sourceUserIds,
+        expected: {
+          remnashopUserId,
+          ...(profile.email ? { email: profile.email } : {}),
+          ...(profile.telegram_id === null
+            ? {}
+            : { telegramId: String(profile.telegram_id) }),
+        },
+      });
+    }
 
     return updatedUser;
   });

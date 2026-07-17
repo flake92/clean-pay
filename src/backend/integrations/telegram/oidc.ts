@@ -12,7 +12,10 @@ import { logger } from "@/backend/observability/logger";
 import { prisma } from "@/backend/database/prisma";
 import { assertRateLimit } from "@/backend/limits/rate-limit";
 import { remnashopAuth } from "@/backend/integrations/remnashop/client";
-import { transferPaymentOperationsForUserMerge } from "@/backend/payments/user-merge";
+import {
+  assertUserMergeFinalOwner,
+  mergeLocalUsersIntoTarget,
+} from "@/backend/auth/user-merge";
 import type { TelegramAuthRequest } from "@/shared/remnashop/types";
 
 const telegramAuthTtlSeconds = 10 * 60;
@@ -692,48 +695,11 @@ async function completeTelegramAuth(
             sourceUserId: sourceUser.id,
           });
 
-          await tx.webUser.update({
-            where: { id: sourceUser.id },
-            data: {
-              remnashopUserId: null,
-              email: null,
-              telegramId: null,
-            },
-          });
-          await tx.webSession.updateMany({
-            where: { userId: sourceUser.id },
-            data: {
-              userId: targetUserId,
-              remnashopAccessTokenEncrypted: null,
-              remnashopRefreshTokenEncrypted: null,
-              remnashopAccessExpiresAt: null,
-              remnashopRefreshExpiresAt: null,
-            },
-          });
-          await tx.auditLog.updateMany({
-            where: { userId: sourceUser.id },
-            data: { userId: targetUserId },
-          });
-          await transferPaymentOperationsForUserMerge(
-            tx,
+          await mergeLocalUsersIntoTarget(tx, {
             targetUserId,
-            targetUser.remnashopUserId ?? sourceUser.remnashopUserId,
-            [sourceUser.id],
-          );
-          await tx.paymentRecord.updateMany({
-            where: { userId: sourceUser.id },
-            data: { userId: targetUserId },
-          });
-          await tx.emailVerificationCode.updateMany({
-            where: { userId: sourceUser.id },
-            data: { userId: targetUserId },
-          });
-          await tx.telegramAuthState.updateMany({
-            where: { userId: sourceUser.id },
-            data: { userId: targetUserId },
-          });
-          await tx.webUser.delete({
-            where: { id: sourceUser.id },
+            targetUpstreamAccountId:
+              targetUser.remnashopUserId ?? sourceUser.remnashopUserId,
+            sourceUserIds: [sourceUser.id],
           });
           authDebugLog("telegram_oidc_link_merge_completed", {
             targetUserId,
@@ -741,7 +707,7 @@ async function completeTelegramAuth(
           });
         }
 
-        return tx.webUser.update({
+        const updatedUser = await tx.webUser.update({
           where: { id: targetUserId },
           data: {
             remnashopUserId: targetUser.remnashopUserId ?? sourceUser?.remnashopUserId,
@@ -750,12 +716,28 @@ async function completeTelegramAuth(
             telegramId,
             telegramUsername,
             fullName,
-        photoUrl,
-        displayName: fullName ?? telegramUsername,
-        authPending: false,
-        lastLoginAt: new Date(),
-      },
+            photoUrl,
+            displayName: fullName ?? telegramUsername,
+            authPending: false,
+            lastLoginAt: new Date(),
+          },
         });
+
+        if (sourceUser) {
+          await assertUserMergeFinalOwner(tx, {
+            targetUserId: updatedUser.id,
+            sourceUserIds: [sourceUser.id],
+            expected: {
+              telegramId,
+              ...(updatedUser.remnashopUserId
+                ? { remnashopUserId: updatedUser.remnashopUserId }
+                : {}),
+              ...(updatedUser.email ? { email: updatedUser.email } : {}),
+            },
+          });
+        }
+
+        return updatedUser;
       })
     : await prisma.webUser.upsert({
         where: { telegramId },

@@ -108,9 +108,18 @@
 - pre-migration custom dump восстановлен в отдельную БД с исходными `WebUser`, `WebSession` и legacy `expiresAt`; свежий Prisma `migrate deploy/status` применил все 11 миграций, а повторный production deploy не переиграл уже завершённую миграцию даже при отличающемся сохранённом checksum;
 - полный suite 323/323, Prisma validate/generate, ESLint без ошибок и Next.js production build прошли; production rollout не выполнялся.
 
-### 6. [ ] Безопасно объединять аккаунты
+### 6. [x] Безопасно объединять аккаунты
 
 При merge отзывать или ротировать source-сессии, не переносить действующие refresh tokens как есть, переносить passkeys/challenges с явной политикой конфликтов и проверять итогового владельца.
+
+Результат:
+
+- оба локальных merge-пути (Remnashop reconciliation/link и Telegram OIDC link) используют единую транзакционную политику с детерминированной блокировкой target/source пользователей;
+- source `WebSession` удаляются целиком, поэтому локальные refresh hashes и зашифрованные Remnashop access/refresh tokens не переживают merge и не перепривязываются к target;
+- passkeys переносятся target-пользователю по глобально уникальному `credentialId`; незавершённые WebAuthn challenges, e-mail verification codes и Telegram auth states удаляются как привязанные к прежнему владельцу/контексту;
+- перенос audit/payment данных и удаление source выполняются в той же транзакции; несоответствие заблокированных/обновлённых/удалённых строк завершает операцию `ACCOUNT_MERGE_REQUIRED` (409);
+- после назначения проверенных identity полей отдельно проверяются итоговый target-владелец и отсутствие source-пользователей;
+- целевой suite 27/27, полный suite 329/329, ESLint без ошибок (один посторонний warning в сгенерированном coverage-файле) и Next.js production build прошли; production rollout не выполнялся.
 
 ### 7. [ ] Отзывать скомпрометированные сессии при смене пароля
 
@@ -213,3 +222,4 @@ Fallback по Telegram/e-mail должен подтверждать UUID и вл
 - 2026-07-17: пункт 3 исправлен и локально проверен: расширенный профильный suite 92/92, полный suite 253/253, Prisma validate/generate, ESLint без ошибок в исходниках и production build успешны. Прямой `tsc --noEmit` сохранил базовые 29 ошибок тестовой типизации, новых ошибок в изменённых файлах нет. Companion Remnashop commits `b08549e` и `9e543bc` запушены в `fork/codex/clean-pay-integration-pr`: полный suite 19/19, Ruff, strict mypy по 521 файлу, compileall, Alembic head `0044`, migration SQL/diff-check прошли; опубликованная миграция `0043` не изменялась. Devcontainer/PostgreSQL E2E локально не запущен из-за недоступного Docker Desktop и остаётся release gate тестового стенда.
 - 2026-07-18: пункт 4 исправлен и полностью проверен локально. Clean Pay: 39 файлов/320 тестов, Prisma validate/generate, ESLint без ошибок, production build, Compose/shell checks и реальная PostgreSQL crash/concurrency matrix. Remnashop: 131 тест, Ruff, strict mypy по 540 файлам, Alembic head `0049`, непустой и чистый upgrade/downgrade/re-upgrade, legacy writer, DB-clock lease fencing, webhook/fulfillment/manual-queue matrix и production Docker build. Companion fork обновлён, актуальный PR [`snoups/remnashop#135`](https://github.com/snoups/remnashop/pull/135) направлен в `dev`; код Remnawave не менялся. Production rollout не выполнялся.
 - 2026-07-18: пункт 5 исправлен и проверен: опасные historical Prisma migrations стали атомарными и lossless, добавлен migration runbook и regression-suite. Полный suite 323/323, Prisma validate/generate, ESLint и production build прошли. На отдельной непустой PostgreSQL-БД проверены legacy backfill, точное сохранение Telegram IDs, fail-closed/rollback на malformed ID, полная migration chain, Prisma deploy/status и восстановление pre-migration custom dump. Production rollout не выполнялся.
+- 2026-07-18: пункт 6 исправлен и проверен: оба merge-пути отзывают source-сессии, сохраняют passkeys, инвалидируют временные auth-состояния и fail-closed проверяют конечного владельца. Целевой suite 27/27, полный suite 329/329, ESLint без ошибок и Next.js production build прошли. Код Remnashop и Remnawave в этом пункте не изменялся; production rollout не выполнялся.
