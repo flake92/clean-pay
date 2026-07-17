@@ -1,10 +1,26 @@
--- DropIndex
-DROP INDEX "WebSession_expiresAt_idx";
+BEGIN;
 
--- AlterTable
-ALTER TABLE "WebSession" DROP COLUMN "expiresAt",
-ADD COLUMN     "accessTokenExpiresAt" TIMESTAMP(3) NOT NULL,
-ADD COLUMN     "refreshExpiresAt" TIMESTAMP(3) NOT NULL;
+-- Keep legacy writers from inserting a row between the backfill and SET NOT NULL.
+LOCK TABLE "WebSession" IN ACCESS EXCLUSIVE MODE;
+
+-- Add the replacement fields as nullable first so this migration works on a
+-- non-empty production table. The legacy expiry represented the only session
+-- lifetime available, so copying it to both fields preserves existing sessions.
+ALTER TABLE "WebSession"
+ADD COLUMN     "accessTokenExpiresAt" TIMESTAMP(3),
+ADD COLUMN     "refreshExpiresAt" TIMESTAMP(3);
+
+UPDATE "WebSession"
+SET "accessTokenExpiresAt" = "expiresAt",
+    "refreshExpiresAt" = "expiresAt";
+
+ALTER TABLE "WebSession"
+ALTER COLUMN "accessTokenExpiresAt" SET NOT NULL,
+ALTER COLUMN "refreshExpiresAt" SET NOT NULL;
+
+-- Remove the legacy field only after every row has a durable replacement.
+DROP INDEX "WebSession_expiresAt_idx";
+ALTER TABLE "WebSession" DROP COLUMN "expiresAt";
 
 -- AlterTable
 ALTER TABLE "WebUser" ADD COLUMN     "telegramId" TEXT;
@@ -54,4 +70,6 @@ CREATE INDEX "WebUser_telegramId_idx" ON "WebUser"("telegramId");
 
 -- AddForeignKey
 ALTER TABLE "EmailVerificationCode" ADD CONSTRAINT "EmailVerificationCode_userId_fkey" FOREIGN KEY ("userId") REFERENCES "WebUser"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+COMMIT;
 

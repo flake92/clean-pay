@@ -1,3 +1,36 @@
+BEGIN;
+
+-- The previous schema stored Telegram IDs as text. Fail closed on malformed
+-- legacy values instead of dropping the column (and therefore user identity).
+LOCK TABLE "WebUser" IN ACCESS EXCLUSIVE MODE;
+
+DO $$
+DECLARE
+    invalid_telegram_id_count BIGINT;
+BEGIN
+    SELECT COUNT(*)
+      INTO invalid_telegram_id_count
+      FROM "WebUser"
+     WHERE "telegramId" IS NOT NULL
+       AND CASE
+             WHEN "telegramId" ~ '^[1-9][0-9]{0,18}$'
+             THEN "telegramId"::numeric > 9223372036854775807
+             ELSE TRUE
+           END;
+
+    IF invalid_telegram_id_count > 0 THEN
+        RAISE EXCEPTION
+            'Telegram ID migration blocked: % malformed or out-of-range rows',
+            invalid_telegram_id_count;
+    END IF;
+END
+$$;
+
+-- PostgreSQL cannot reuse the existing text indexes after the in-place type
+-- conversion. Recreate the same constraints below inside this transaction.
+DROP INDEX "WebUser_telegramId_key";
+DROP INDEX "WebUser_telegramId_idx";
+
 -- AlterTable
 ALTER TABLE "WebUser" ADD COLUMN     "fullName" TEXT,
 ADD COLUMN     "lastLoginAt" TIMESTAMP(3),
@@ -5,8 +38,7 @@ ADD COLUMN     "photoUrl" TEXT,
 ADD COLUMN     "telegramUsername" TEXT,
 ALTER COLUMN "remnashopUserId" DROP NOT NULL,
 ALTER COLUMN "email" DROP NOT NULL,
-DROP COLUMN "telegramId",
-ADD COLUMN     "telegramId" BIGINT;
+ALTER COLUMN "telegramId" TYPE BIGINT USING "telegramId"::bigint;
 
 -- CreateTable
 CREATE TABLE "TelegramAuthState" (
@@ -50,4 +82,6 @@ CREATE INDEX "WebUser_telegramId_idx" ON "WebUser"("telegramId");
 
 -- AddForeignKey
 ALTER TABLE "TelegramAuthState" ADD CONSTRAINT "TelegramAuthState_userId_fkey" FOREIGN KEY ("userId") REFERENCES "WebUser"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+COMMIT;
 

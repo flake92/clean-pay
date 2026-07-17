@@ -80,6 +80,11 @@ curl -f http://127.0.0.1:4000/api/health
 
 Команда `up` не удаляет существующие volumes. Не используйте `docker compose down -v`, `docker volume prune` или `docker system prune --volumes`, если данные стенда нужно сохранить.
 
+Перед обновлением существующей непустой БД выполните backup, maintenance-stop и
+проверки из [production migration runbook](docs/production-migration-runbook.md).
+Для production используется только `prisma migrate deploy`; `migrate dev` и
+`db push` на production-БД запрещены.
+
 Управление:
 
 ```bash

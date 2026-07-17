@@ -1,6 +1,6 @@
 # Production audit
 
-Обновлено: 2026-07-17
+Обновлено: 2026-07-18
 
 Этот документ — живой план устранения проблем, найденных при аудите Clean Pay. Главный инвариант: каждое исправление должно сохранять текущие рабочие пользовательские сценарии и публичные контракты, кроме поведения, которое само является уязвимостью или ошибкой.
 
@@ -92,11 +92,21 @@
 - Remnashop: 131/131 тест, Ruff, strict mypy по 540 source-файлам, единственная Alembic head `0049`, production Docker build и реальные PostgreSQL rehearsal `0045 → 0049 → 0045 → 0049`, operation/webhook/fulfillment concurrency и crash-recovery matrix прошли;
 - production rollout ещё не выполнялся; включать worker можно только после развёртывания проверенного Remnashop commit и выполнения runbook.
 
-### 5. [ ] Исправить опасные production-миграции
+### 5. [x] Исправить опасные production-миграции
 
 - `WebSession`: добавить новые обязательные поля через nullable/default, backfill, затем `NOT NULL`;
 - Telegram ID: мигрировать тип без удаления данных;
 - прогнать upgrade на копии непустой БД и подготовить rollback/backup-инструкцию.
+
+Результат:
+
+- `20260619153000_add_auth_cache_models` теперь выполняется одной транзакцией под `ACCESS EXCLUSIVE` lock: новые expiry-поля сначала nullable, затем обе даты backfill’ятся из обязательного legacy `expiresAt`, после чего включается `NOT NULL` и только в конце удаляется старый столбец;
+- `20260619154500_add_telegram_oidc` больше не выполняет `DROP COLUMN telegramId`: значения проверяются без вывода PII, некорректная или выходящая за signed `BIGINT` строка атомарно блокирует миграцию, валидные IDs преобразуются in-place, а индексы пересоздаются внутри той же транзакции; последующая миграция возвращает тип в `TEXT` через lossless cast;
+- добавлен regression-test порядка nullable → backfill → `NOT NULL` → drop, обязательных lock/transaction и запрета drop/add Telegram ID;
+- [production migration runbook](production-migration-runbook.md) фиксирует maintenance-stop всех writers, preflight, custom-format `pg_dump`, проверку каталога dump, `prisma migrate deploy/status`, post-checks и восстановление предыдущего образа через отдельную БД без перезаписи повреждённой;
+- на реальном PostgreSQL пройдена вся цепочка от seeded legacy schema: expiry сохранены с миллисекундами, оба Telegram ID сохранены через `TEXT → BIGINT → TEXT`, намеренно испорченное значение завершило migration ошибкой и оставило прежнюю схему/данные, после исправления upgrade завершился;
+- pre-migration custom dump восстановлен в отдельную БД с исходными `WebUser`, `WebSession` и legacy `expiresAt`; свежий Prisma `migrate deploy/status` применил все 11 миграций, а повторный production deploy не переиграл уже завершённую миграцию даже при отличающемся сохранённом checksum;
+- полный suite 323/323, Prisma validate/generate, ESLint без ошибок и Next.js production build прошли; production rollout не выполнялся.
 
 ### 6. [ ] Безопасно объединять аккаунты
 
@@ -202,3 +212,4 @@ Fallback по Telegram/e-mail должен подтверждать UUID и вл
 - 2026-07-17: пункт 2 исправлен и локально проверен: профильный suite 58/58, полный suite 209/209, ESLint без ошибок в исходниках, production build успешен. Прямой `tsc --noEmit` сохранил базовые 29 ошибок тестовой типизации, новых ошибок не добавлено. Devcontainer E2E локально не запущен: Docker Desktop daemon недоступен; проверка перенесена на тестовый стенд перед production rollout.
 - 2026-07-17: пункт 3 исправлен и локально проверен: расширенный профильный suite 92/92, полный suite 253/253, Prisma validate/generate, ESLint без ошибок в исходниках и production build успешны. Прямой `tsc --noEmit` сохранил базовые 29 ошибок тестовой типизации, новых ошибок в изменённых файлах нет. Companion Remnashop commits `b08549e` и `9e543bc` запушены в `fork/codex/clean-pay-integration-pr`: полный suite 19/19, Ruff, strict mypy по 521 файлу, compileall, Alembic head `0044`, migration SQL/diff-check прошли; опубликованная миграция `0043` не изменялась. Devcontainer/PostgreSQL E2E локально не запущен из-за недоступного Docker Desktop и остаётся release gate тестового стенда.
 - 2026-07-18: пункт 4 исправлен и полностью проверен локально. Clean Pay: 39 файлов/320 тестов, Prisma validate/generate, ESLint без ошибок, production build, Compose/shell checks и реальная PostgreSQL crash/concurrency matrix. Remnashop: 131 тест, Ruff, strict mypy по 540 файлам, Alembic head `0049`, непустой и чистый upgrade/downgrade/re-upgrade, legacy writer, DB-clock lease fencing, webhook/fulfillment/manual-queue matrix и production Docker build. Companion fork обновлён, актуальный PR [`snoups/remnashop#135`](https://github.com/snoups/remnashop/pull/135) направлен в `dev`; код Remnawave не менялся. Production rollout не выполнялся.
+- 2026-07-18: пункт 5 исправлен и проверен: опасные historical Prisma migrations стали атомарными и lossless, добавлен migration runbook и regression-suite. Полный suite 323/323, Prisma validate/generate, ESLint и production build прошли. На отдельной непустой PostgreSQL-БД проверены legacy backfill, точное сохранение Telegram IDs, fail-closed/rollback на malformed ID, полная migration chain, Prisma deploy/status и восстановление pre-migration custom dump. Production rollout не выполнялся.
