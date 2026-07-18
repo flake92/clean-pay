@@ -227,9 +227,17 @@ Fallback по Telegram/e-mail должен подтверждать UUID и вл
 - fetch получает объединённый cancellation signal, а результат различает локальный timeout, отмену общим readiness deadline, HTTP status, malformed response и dependency-specific failure; DB/Redis также не удерживают readiness response сверх deadline;
 - профильные тесты 92/92, полный unit suite 339/339, integration 36/36, ESLint без ошибок (один известный warning generated coverage) и production build 50/50 прошли. Тест с общей незавершённой gate подтвердил одновременный старт всех шести checks. Код Remnashop и Remnawave не менялся; production rollout не выполнялся.
 
-### 15. [ ] Сделать production verify реальной проверкой готовности
+### 15. [x] Сделать production verify реальной проверкой готовности
 
 Проверять `/api/health/readiness`, добавить healthcheck app-сервису и не считать deploy успешным при недоступных критичных зависимостях.
+
+Результат:
+
+- production и legacy `verify` проверяют `/api/health/readiness` до 120 секунд вместо liveness; ответ принимается только при HTTP 200, `status=ok`, непустом `checks` и `ok` у каждой критической/настроенной зависимости;
+- `prod.mjs up` и `start.sh up/restart` после Compose автоматически ждут readiness и завершаются ненулевым кодом, если приложение или dependency не готовы; reconciliation worker проверяется только после app readiness;
+- app healthcheck в обоих Compose-файлах имеет собственный 4-секундный abort и валидирует JSON/status каждого check, поэтому Docker `healthy` не возникает на malformed/degraded ответе;
+- parser readiness ответа отдельно протестирован на malformed JSON, degraded dependency и полностью healthy payload; Compose config и Alpine shell syntax прошли;
+- профильные тесты 39/39, полный unit suite 343/343, integration 36/36, ESLint без ошибок (один известный warning generated coverage) и production build 50/50 прошли. Код Remnashop и Remnawave не менялся; production rollout не выполнялся.
 
 ### 16. [ ] Довести payment return flow до конечного состояния
 
@@ -295,3 +303,4 @@ Fallback по Telegram/e-mail должен подтверждать UUID и вл
 - 2026-07-18: пункт 12 исправлен и проверен: `RATE_LIMITED` в identify возвращается как `429`, Redis counter атомарно получает TTL, Telegram limiter применяется только к подтверждённой identity, общий anonymous Telegram key удалён, а WebAuthn login challenge ограничен до DB-write. Отдельный IP/device limiter не добавлялся согласно reverse-proxy topology из плана. Профильные тесты 36/36, unit 336/336, integration 32/32, ESLint и production build 50/50 прошли. Remnashop и Remnawave не менялись; production rollout не выполнялся.
 - 2026-07-18: пункт 13 исправлен и проверен: WebAuthn challenge и Telegram state потребляются условным update с проверкой единственного изменённого ряда до внешних/локальных mutations. Профильные тесты 23/23, unit 338/338, integration 35/35, ESLint и production build 50/50 прошли; реальная PostgreSQL-конкуренция с 16 claim подтвердила ровно одного победителя для каждого state type и отказ для expired challenge. Remnashop и Remnawave не менялись; production rollout не выполнялся.
 - 2026-07-18: пункт 14 исправлен и проверен: внешние HTTP paths получили abort timeout, readiness запускает шесть dependencies параллельно с общим 8-секундным deadline и 5-секундными per-check limits, причины timeout/deadline/HTTP/response ошибок различимы. Профильные тесты 92/92, unit 339/339, integration 36/36, ESLint и production build 50/50 прошли. Remnashop и Remnawave не менялись; production rollout не выполнялся.
+- 2026-07-18: пункт 15 исправлен и проверен: app healthcheck и оба deployment entrypoint принимают только полный healthy `/api/health/readiness`, `up` ждёт readiness до 120 секунд и fail-closed завершает deploy при malformed/degraded ответе либо недоступной dependency. Профильные тесты 39/39, unit 343/343, integration 36/36, ESLint, production build 50/50, Compose config и Alpine shell syntax прошли. Remnashop и Remnawave не менялись; production rollout ещё не выполнялся.

@@ -202,24 +202,36 @@ start() {
   ensure_network
   info "building and starting containers"
   compose up -d --build
-  assert_reconciliation_worker
+  verify
   info "started. Use 'sh start.sh logs' to follow app logs"
 }
 
 verify() {
   require_env_file
   port=$(env_value CLEAN_PAY_PORT 4000)
-  url="http://127.0.0.1:${port}/api/health"
+  url="http://127.0.0.1:${port}/api/health/readiness"
+  attempts=0
+  response=""
 
-  if command -v curl >/dev/null 2>&1; then
-    curl --fail --show-error --silent "$url"
-    printf '\n'
-  elif command -v wget >/dev/null 2>&1; then
-    wget -qO- "$url"
-    printf '\n'
-  else
-    fail "curl or wget is required to verify ${url}"
-  fi
+  while [ "$attempts" -lt 60 ]; do
+    if command -v curl >/dev/null 2>&1; then
+      if response=$(curl --fail --show-error --silent --max-time 10 "$url" 2>/dev/null); then
+        break
+      fi
+    elif command -v wget >/dev/null 2>&1; then
+      if response=$(wget -qO- -T 10 "$url" 2>/dev/null); then
+        break
+      fi
+    else
+      fail "curl or wget is required to verify ${url}"
+    fi
+
+    attempts=$((attempts + 1))
+    sleep 2
+  done
+
+  [ -n "$response" ] || fail "readiness did not become healthy within 120 seconds: ${url}"
+  printf '%s\n' "$response"
 
   assert_reconciliation_worker
 }

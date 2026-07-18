@@ -27,7 +27,7 @@ services:
     ports:
       - "${CLEAN_PAY_BIND:-127.0.0.1}:${CLEAN_PAY_PORT:-4000}:4000"
     healthcheck:
-      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:4000/api/health/readiness').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))\""]
+      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:4000/api/health/readiness',{signal:AbortSignal.timeout(4000)}).then(async r=>{const b=await r.json();if(!r.ok||b.status!=='ok'||!b.checks||Object.values(b.checks).some(c=>c.status!=='ok'))process.exit(1)}).catch(()=>process.exit(1))\""]
       interval: 15s
       timeout: 5s
       retries: 20

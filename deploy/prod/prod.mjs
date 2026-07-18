@@ -9,6 +9,7 @@ import {
   ProductionEnvironmentError,
   parseProductionEnvironmentFile,
 } from "./production-env-rules.mjs";
+import { assessReadinessResponse } from "./readiness.mjs";
 
 const prodDir = path.dirname(fileURLToPath(import.meta.url));
 const rootDir = path.resolve(prodDir, "../..");
@@ -258,7 +259,7 @@ async function verify() {
   requireEnvFile();
 
   const port = readEnvValue("CLEAN_PAY_PORT", "4000");
-  const url = `http://127.0.0.1:${port}/api/health`;
+  const url = `http://127.0.0.1:${port}/api/health/readiness`;
   const deadline = Date.now() + 120_000;
   let lastError = null;
 
@@ -266,14 +267,16 @@ async function verify() {
     try {
       const response = await get(url);
 
-      if (response.status === 200) {
+      const assessment = assessReadinessResponse(response);
+
+      if (assessment.ready) {
         console.log(`OK ${url}`);
         console.log(response.body);
         assertReconciliationWorkerHealthy();
         return;
       }
 
-      lastError = new Error(`HTTP ${response.status}: ${response.body}`);
+      lastError = new Error(`${assessment.reason}: ${response.body}`);
     } catch (error) {
       lastError = error;
     }
@@ -296,7 +299,10 @@ switch (command) {
   case "up":
     validateProductionEnvFile();
     ensureEdgeNetwork();
-    run("docker", composeArgs("up", "-d", "--build"));
+    if (runDocker(composeArgs("up", "-d", "--build")) !== 0) {
+      process.exit(1);
+    }
+    await verify();
     break;
   case "down":
     run("docker", composeArgs("down"));
