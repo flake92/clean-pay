@@ -18,6 +18,10 @@ import {
   shouldRetainPaymentIdempotencyKey,
 } from "@/frontend/lib/payment-idempotency";
 import { findRenewPlan } from "@/frontend/lib/subscription-offers";
+import {
+  confirmedPaymentOffer,
+  paymentOfferMatches,
+} from "@/shared/payments/offer-confirmation";
 import { Button } from "primereact/button";
 import { Card } from "primereact/card";
 import { Dropdown } from "primereact/dropdown";
@@ -215,7 +219,7 @@ export function ExtendConfirmation() {
   const priceOptions = buildPriceOptions(plan);
 
   async function extendSubscription() {
-    if (!selectedDuration || !selectedPrice) {
+    if (!plan || !selectedDuration || !selectedPrice) {
       return;
     }
 
@@ -224,7 +228,54 @@ export function ExtendConfirmation() {
     const payload = {
       duration_days: selectedDuration.days,
       gateway_type: selectedPrice.gateway_type,
+      ...confirmedPaymentOffer(plan, selectedDuration.days, selectedPrice),
     };
+
+    try {
+      const offersResponse = await fetch("/api/bff/subscription/offers", {
+        cache: "no-store",
+      });
+
+      if (!offersResponse.ok) {
+        throw await readBffError(
+          offersResponse,
+          "Не удалось перепроверить цену. Продление не создано.",
+        );
+      }
+
+      const offersBody = await offersResponse.json().catch(() => null) as {
+        data?: SubscriptionOffersResponse;
+      } | null;
+      const freshOffers = offersBody?.data;
+      const freshPlan = freshOffers ? findRenewPlan(freshOffers) : undefined;
+      const freshDuration = freshPlan?.durations.find(
+        (duration) => duration.days === selectedDuration.days,
+      );
+      const freshPrice = freshDuration?.prices.find(
+        (price) => price.gateway_type === selectedPrice.gateway_type,
+      );
+
+      if (!freshOffers || !freshPlan || !freshDuration || !freshPrice) {
+        setSubmitting(false);
+        setSubmitError("Выбранное предложение продления больше недоступно. Оплата не создана.");
+        return;
+      }
+
+      if (!paymentOfferMatches(payload, freshPlan, freshDuration.days, freshPrice)) {
+        setState({ status: "ready", offers: freshOffers });
+        setSelection(`${freshDuration.days}:${freshPrice.gateway_type}`);
+        setSubmitting(false);
+        setSubmitError(
+          `Цена изменилась: было ${selectedPrice.final_amount} ${selectedPrice.currency_symbol}, стало ${freshPrice.final_amount} ${freshPrice.currency_symbol}. Проверьте новую цену перед оплатой.`,
+        );
+        return;
+      }
+    } catch {
+      setSubmitting(false);
+      setSubmitError("Не удалось перепроверить цену. Продление не создано; повторите попытку позже.");
+      return;
+    }
+
     let idempotencyKey: string;
 
     try {

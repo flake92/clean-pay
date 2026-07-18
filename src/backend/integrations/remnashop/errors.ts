@@ -17,6 +17,7 @@ export type BffErrorCode =
   | 'IDEMPOTENCY_KEY_REUSED'
   | 'PAYMENT_OPERATION_IN_PROGRESS'
   | 'PAYMENT_OUTCOME_UNKNOWN'
+  | 'OFFER_CHANGED'
   | 'ACCOUNT_MERGE_REQUIRED'
   | 'PLAN_UNAVAILABLE'
   | 'PAYMENT_GATEWAY_UNAVAILABLE'
@@ -61,6 +62,7 @@ const PROD_MESSAGES: Record<BffErrorCode, string> = {
   IDEMPOTENCY_KEY_REUSED: 'Эта попытка оплаты уже относится к другому запросу. Обновите страницу и повторите выбор.',
   PAYMENT_OPERATION_IN_PROGRESS: 'Платёж уже создаётся. Повторите проверку через несколько секунд.',
   PAYMENT_OUTCOME_UNKNOWN: 'Результат оплаты уточняется. Не создавайте новую оплату.',
+  OFFER_CHANGED: 'Цена или условия предложения изменились. Проверьте новую цену перед оплатой.',
   ACCOUNT_MERGE_REQUIRED: '\u042d\u0442\u043e\u0442 Telegram \u0443\u0436\u0435 \u043f\u0440\u0438\u0432\u044f\u0437\u0430\u043d \u043a \u0434\u0440\u0443\u0433\u043e\u0439 \u043f\u043e\u0447\u0442\u0435. \u0421\u043d\u0430\u0447\u0430\u043b\u0430 \u043e\u0431\u044a\u0435\u0434\u0438\u043d\u0438\u0442\u0435 \u0430\u043a\u043a\u0430\u0443\u043d\u0442\u044b \u0447\u0435\u0440\u0435\u0437 \u043f\u043e\u0434\u0434\u0435\u0440\u0436\u043a\u0443.',
   PLAN_UNAVAILABLE: 'Этот тариф сейчас недоступен.',
   PAYMENT_GATEWAY_UNAVAILABLE: 'Этот способ оплаты сейчас недоступен.',

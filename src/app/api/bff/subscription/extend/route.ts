@@ -24,8 +24,9 @@ import {
 import { BffError } from "@/backend/integrations/remnashop/errors";
 import { getCurrentSession } from "@/backend/sessions/web-session";
 import { assertPaymentReturnUrl, paymentReturnUrl } from "@/backend/payments/return-url";
+import { readExtendRequest } from "@/backend/payments/request-validation";
+import { paymentOfferMatches } from "@/shared/payments/offer-confirmation";
 import type {
-  ExtendRequest,
   PaymentInitResponse,
   SubscriptionOffersResponse,
 } from "@/shared/remnashop/types";
@@ -43,11 +44,7 @@ function isFinalBeforeDispatch(error: unknown) {
 
 export async function POST(request: Request) {
   try {
-    const body = (await request.json()) as ExtendRequest;
-    const paymentRequest: ExtendRequest = {
-      duration_days: body.duration_days,
-      gateway_type: body.gateway_type,
-    };
+    const paymentRequest = await readExtendRequest(request);
     const currentSession = await getCurrentSession();
 
     if (!currentSession) {
@@ -158,6 +155,24 @@ export async function POST(request: Request) {
       const plan = offers.plans.find(
         (item) => item.recommended_purchase_type === "renew",
       );
+      const duration = plan?.durations.find(
+        (item) => item.days === paymentRequest.duration_days,
+      );
+      const price = duration?.prices.find(
+        (item) => item.gateway_type === paymentRequest.gateway_type,
+      );
+
+      if (!plan || !duration) {
+        throw new BffError("PLAN_UNAVAILABLE", 400, "Selected renewal duration is unavailable");
+      }
+
+      if (!price) {
+        throw new BffError("PAYMENT_GATEWAY_UNAVAILABLE", 400, "Selected gateway is unavailable");
+      }
+
+      if (!paymentOfferMatches(paymentRequest, plan, duration.days, price)) {
+        throw new BffError("OFFER_CHANGED", 409, "Confirmed offer no longer matches current price");
+      }
 
       await markPaymentOperationDispatched({
         operationId: operation.operationId,
@@ -172,7 +187,8 @@ export async function POST(request: Request) {
           accessToken,
           idempotencyKey: operation.upstreamKey,
           body: {
-            ...paymentRequest,
+            duration_days: paymentRequest.duration_days,
+            gateway_type: paymentRequest.gateway_type,
             return_url: paymentReturnUrl(operation.operationId),
           },
         },

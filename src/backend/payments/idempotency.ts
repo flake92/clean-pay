@@ -26,7 +26,7 @@ import type {
   PurchaseRequest,
 } from "@/shared/remnashop/types";
 
-const PAYMENT_OPERATION_CONTRACT_VERSION = 1;
+const PAYMENT_OPERATION_CONTRACT_VERSION = 2;
 const READY_LEASE_MS = 30_000;
 const DISPATCH_LEASE_MS = 120_000;
 const MAX_BEGIN_STATE_READS = 5;
@@ -38,12 +38,24 @@ export type PaymentOperationRequest =
       kind: "PURCHASE";
       payload: Pick<
         PurchaseRequest,
-        "plan_code" | "duration_days" | "gateway_type"
+        | "plan_code"
+        | "duration_days"
+        | "gateway_type"
+        | "confirmed_amount"
+        | "confirmed_currency"
+        | "offer_version"
       >;
     }
   | {
       kind: "EXTEND";
-      payload: Pick<ExtendRequest, "duration_days" | "gateway_type">;
+      payload: Pick<
+        ExtendRequest,
+        | "duration_days"
+        | "gateway_type"
+        | "confirmed_amount"
+        | "confirmed_currency"
+        | "offer_version"
+      >;
     };
 
 export type PaymentOperationErrorSnapshot = {
@@ -165,6 +177,21 @@ function normalizeOperation(
     "gateway_type",
     100,
   );
+  const confirmedAmount = normalizedString(
+    operation.payload.confirmed_amount,
+    "confirmed_amount",
+    64,
+  );
+  const confirmedCurrency = normalizedString(
+    operation.payload.confirmed_currency,
+    "confirmed_currency",
+    12,
+  );
+  const offerVersion = normalizedString(
+    operation.payload.offer_version,
+    "offer_version",
+    2_048,
+  );
 
   if (operation.kind === "PURCHASE") {
     const payload: Prisma.InputJsonObject = {
@@ -175,6 +202,9 @@ function normalizeOperation(
       ),
       duration_days: durationDays,
       gateway_type: gatewayType,
+      confirmed_amount: confirmedAmount,
+      confirmed_currency: confirmedCurrency,
+      offer_version: offerVersion,
     };
     const canonicalRequest = JSON.stringify([
       "clean-pay.payment-operation",
@@ -183,6 +213,9 @@ function normalizeOperation(
       payload.plan_code,
       payload.duration_days,
       payload.gateway_type,
+      payload.confirmed_amount,
+      payload.confirmed_currency,
+      payload.offer_version,
     ]);
 
     return {
@@ -195,6 +228,9 @@ function normalizeOperation(
   const payload: Prisma.InputJsonObject = {
     duration_days: durationDays,
     gateway_type: gatewayType,
+    confirmed_amount: confirmedAmount,
+    confirmed_currency: confirmedCurrency,
+    offer_version: offerVersion,
   };
   const canonicalRequest = JSON.stringify([
     "clean-pay.payment-operation",
@@ -202,6 +238,9 @@ function normalizeOperation(
     operation.kind,
     payload.duration_days,
     payload.gateway_type,
+    payload.confirmed_amount,
+    payload.confirmed_currency,
+    payload.offer_version,
   ]);
 
   return {

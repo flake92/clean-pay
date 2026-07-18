@@ -87,6 +87,9 @@ function purchaseOperation(durationDays = 30) {
       plan_code: "basic",
       duration_days: durationDays,
       gateway_type: "YOOKASSA",
+      confirmed_amount: "100.00",
+      confirmed_currency: "RUB",
+      offer_version: "v1:test-offer",
     },
   };
 }
@@ -229,6 +232,9 @@ describe("payment operation idempotency", () => {
       plan_code: "basic",
       duration_days: 30,
       gateway_type: "YOOKASSA",
+      confirmed_amount: "100.00",
+      confirmed_currency: "RUB",
+      offer_version: "v1:test-offer",
     });
     expect(createdData?.idempotencyKeyHash).not.toBe(CLIENT_KEY);
     expect(createdData?.upstreamOwnerHash).toBeUndefined();
@@ -281,7 +287,13 @@ describe("payment operation idempotency", () => {
         beginInput({
           operation: {
             kind: "EXTEND",
-            payload: { duration_days: 30, gateway_type: "YOOKASSA" },
+            payload: {
+              duration_days: 30,
+              gateway_type: "YOOKASSA",
+              confirmed_amount: "100.00",
+              confirmed_currency: "RUB",
+              offer_version: "v1:test-offer",
+            },
           },
         }) as never,
       ),

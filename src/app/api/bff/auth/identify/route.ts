@@ -3,6 +3,7 @@ import { logger } from "@/backend/observability/logger";
 import { prisma } from "@/backend/database/prisma";
 import { assertRateLimit } from "@/backend/limits/rate-limit";
 import { BffError } from "@/backend/integrations/remnashop/errors";
+import { readBffJsonObject } from "@/backend/http/request-body";
 
 export const runtime = "nodejs";
 
@@ -12,7 +13,7 @@ function normalizeEmail(value: unknown) {
 
 export async function POST(request: Request) {
   try {
-    const rawBody = (await request.json()) as { email?: unknown };
+    const rawBody = await readBffJsonObject(request);
     const email = normalizeEmail(rawBody.email);
 
     if (!email) {

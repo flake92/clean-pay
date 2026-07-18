@@ -3,6 +3,7 @@ import { bffError, bffJson } from "@/backend/http/bff-response";
 import type { RegisterRequest } from "@/shared/remnashop/types";
 import { getRequestIp, getTurnstileToken } from "@/backend/security/turnstile";
 import { registerWithEmail } from "@/backend/auth/email-register";
+import { readBffJsonObject } from "@/backend/http/request-body";
 
 export const runtime = "nodejs";
 
@@ -10,7 +11,7 @@ export async function POST(request: Request) {
   let email: string | null = null;
 
   try {
-    const rawBody = (await request.json()) as RegisterRequest & {
+    const rawBody = (await readBffJsonObject(request)) as RegisterRequest & {
       turnstileToken?: string;
       "cf-turnstile-response"?: string;
     };

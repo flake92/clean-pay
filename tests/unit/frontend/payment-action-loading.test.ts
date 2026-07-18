@@ -43,8 +43,10 @@ const offers = {
   current_subscription_status: "ACTIVE",
   plans: [
     {
+      id: 1,
       public_code: "pro",
       name: "Pro",
+      description: null,
       type: "regular",
       device_limit: 5,
       traffic_limit: 100,
@@ -55,8 +57,12 @@ const offers = {
           prices: [
             {
               gateway_type: "card",
+              currency: "RUB",
               final_amount: "100",
               currency_symbol: "₽",
+              original_amount: "100",
+              discount_percent: 0,
+              is_free: false,
             },
           ],
         },
@@ -105,7 +111,9 @@ describe("payment action loading recovery", () => {
   it("stops purchase loading and reuses the same key after a lost response", async () => {
     vi.mocked(fetch)
       .mockResolvedValueOnce(Response.json({ data: offers }))
+      .mockResolvedValueOnce(Response.json({ data: offers }))
       .mockRejectedValueOnce(new TypeError("response lost"))
+      .mockResolvedValueOnce(Response.json({ data: offers }))
       .mockRejectedValueOnce(new TypeError("response lost again"));
     await act(async () => root.render(createElement(PaymentConfirmation)));
     await settle();
@@ -118,15 +126,17 @@ describe("payment action loading recovery", () => {
     expect(container.textContent).toContain("новая оплата не будет создана");
 
     await click(paymentButton);
-    expect(idempotencyKey(vi.mocked(fetch).mock.calls[1])).toBe(
-      idempotencyKey(vi.mocked(fetch).mock.calls[2]),
+    expect(idempotencyKey(vi.mocked(fetch).mock.calls[2])).toBe(
+      idempotencyKey(vi.mocked(fetch).mock.calls[4]),
     );
   });
 
   it("stops extend loading and reuses the same key after a lost response", async () => {
     vi.mocked(fetch)
       .mockResolvedValueOnce(Response.json({ data: offers }))
+      .mockResolvedValueOnce(Response.json({ data: offers }))
       .mockRejectedValueOnce(new TypeError("response lost"))
+      .mockResolvedValueOnce(Response.json({ data: offers }))
       .mockRejectedValueOnce(new TypeError("response lost again"));
     await act(async () => root.render(createElement(ExtendConfirmation)));
     await settle();
@@ -140,8 +150,8 @@ describe("payment action loading recovery", () => {
     expect(container.textContent).toContain("новая оплата не будет создана");
 
     await click(extendButton);
-    expect(idempotencyKey(vi.mocked(fetch).mock.calls[1])).toBe(
-      idempotencyKey(vi.mocked(fetch).mock.calls[2]),
+    expect(idempotencyKey(vi.mocked(fetch).mock.calls[2])).toBe(
+      idempotencyKey(vi.mocked(fetch).mock.calls[4]),
     );
   });
 
@@ -152,6 +162,7 @@ describe("payment action loading recovery", () => {
     "handles a non-JSON successful %s response as unknown and stops loading",
     async (_operation, Component, buttonLabel) => {
       vi.mocked(fetch)
+        .mockResolvedValueOnce(Response.json({ data: offers }))
         .mockResolvedValueOnce(Response.json({ data: offers }))
         .mockResolvedValueOnce(
           new Response("upstream proxy returned HTML", {
@@ -172,4 +183,31 @@ describe("payment action loading recovery", () => {
       expect(window.sessionStorage.length).toBe(1);
     },
   );
+
+  it.each([
+    ["purchase", PaymentConfirmation, "Перейти к оплате"],
+    ["extend", ExtendConfirmation, "Продлить"],
+  ] as const)("shows the changed %s price before creating an invoice", async (
+    _operation,
+    Component,
+    buttonLabel,
+  ) => {
+    const changedOffers = structuredClone(offers);
+    changedOffers.plans[0]!.durations[0]!.prices[0]!.final_amount = "150";
+    vi.mocked(fetch)
+      .mockResolvedValueOnce(Response.json({ data: offers }))
+      .mockResolvedValueOnce(Response.json({ data: changedOffers }));
+    await act(async () => root.render(createElement(Component)));
+    await settle();
+
+    const actionButton = Array.from(container.querySelectorAll("button")).find(
+      (button) => button.textContent === buttonLabel,
+    )!;
+    await click(actionButton);
+
+    expect(actionButton.disabled).toBe(false);
+    expect(container.textContent).toContain("было 100 ₽, стало 150 ₽");
+    expect(fetch).toHaveBeenCalledTimes(2);
+    expect(window.sessionStorage.length).toBe(0);
+  });
 });

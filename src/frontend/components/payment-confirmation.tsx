@@ -20,6 +20,10 @@ import {
 } from "@/frontend/lib/payment-idempotency";
 import { AccountActionRequired } from "@/frontend/components/account-action-required";
 import { LinkButton } from "@/frontend/components/prime/link-button";
+import {
+  confirmedPaymentOffer,
+  paymentOfferMatches,
+} from "@/shared/payments/offer-confirmation";
 
 type LoadState =
   | { status: "loading" }
@@ -133,7 +137,60 @@ export function PaymentConfirmation() {
       plan_code: selection.plan.public_code,
       duration_days: selection.duration.days,
       gateway_type: selection.price.gateway_type,
+      ...confirmedPaymentOffer(
+        selection.plan,
+        selection.duration.days,
+        selection.price,
+      ),
     };
+
+    try {
+      const offersResponse = await fetch("/api/bff/subscription/offers", {
+        cache: "no-store",
+      });
+
+      if (!offersResponse.ok) {
+        throw await readBffError(
+          offersResponse,
+          "Не удалось перепроверить цену. Оплата не создана.",
+        );
+      }
+
+      const offersBody = await offersResponse.json().catch(() => null) as {
+        data?: SubscriptionOffersResponse;
+      } | null;
+      const freshOffers = offersBody?.data;
+      const freshSelection = freshOffers
+        ? findSelection(freshOffers, planCode, durationDays, gatewayType)
+        : null;
+
+      if (!freshOffers || !freshSelection) {
+        setSubmitting(false);
+        setSubmitError("Выбранное предложение больше недоступно. Оплата не создана.");
+        return;
+      }
+
+      if (
+        !paymentOfferMatches(
+          payload,
+          freshSelection.plan,
+          freshSelection.duration.days,
+          freshSelection.price,
+        )
+      ) {
+        setState({ status: "ready", offers: freshOffers });
+        setSubmitting(false);
+        setSubmitError(
+          `Цена изменилась: было ${selection.price.final_amount} ${selection.price.currency_symbol}, стало ${freshSelection.price.final_amount} ${freshSelection.price.currency_symbol}. Проверьте новую цену перед оплатой.`,
+        );
+        return;
+      }
+    } catch {
+      setSubmitting(false);
+      setSubmitError("Не удалось перепроверить цену. Оплата не создана; повторите попытку позже.");
+      return;
+    }
+
     let idempotencyKey: string;
 
     try {

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { bffError } from "@/backend/http/bff-response";
+import { readBffJsonObject } from "@/backend/http/request-body";
 import { getRemnashopMe, remnashopAuth } from "@/backend/integrations/remnashop/client";
 import { reconcileUserFromRemnashopAuth } from "@/backend/integrations/remnashop/session";
 import { assertRateLimit } from "@/backend/limits/rate-limit";
@@ -11,8 +12,8 @@ export const runtime = "nodejs";
 
 export async function POST(request: Request) {
   try {
-    const body = await request.json().catch(() => null) as { initData?: unknown } | null;
-    const initData = typeof body?.initData === "string" ? body.initData.trim() : "";
+    const body = await readBffJsonObject(request);
+    const initData = typeof body.initData === "string" ? body.initData.trim() : "";
     if (!initData) {
       logTechnicalWarning("telegram_webapp_auth_missing_init_data", {});
       return NextResponse.json(

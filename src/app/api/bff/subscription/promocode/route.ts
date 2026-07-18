@@ -1,5 +1,6 @@
 import { auditLog } from "@/backend/observability/audit";
 import { bffError, bffJson } from "@/backend/http/bff-response";
+import { readBffJsonObject } from "@/backend/http/request-body";
 import { getAuthorizedRemnashopTokens, remnashopRequest } from "@/backend/integrations/remnashop/client";
 import type {
   PromocodeActivateRequest,
@@ -10,7 +11,7 @@ export const runtime = "nodejs";
 
 export async function POST(request: Request) {
   try {
-    const body = (await request.json()) as PromocodeActivateRequest;
+    const body = (await readBffJsonObject(request)) as PromocodeActivateRequest;
     const { accessToken, session } = await getAuthorizedRemnashopTokens();
 
     await auditLog({ action: "promocode_activated", userId: session.userId });
