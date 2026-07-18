@@ -45,7 +45,6 @@ vi.mock("node:tls", () => ({
 }));
 
 import { redisCommand } from "@/backend/cache/redis";
-import { BffError } from "@/backend/integrations/remnashop/errors";
 
 describe("raw Redis command adapter", () => {
   beforeEach(() => {
@@ -58,7 +57,7 @@ describe("raw Redis command adapter", () => {
   it("requires REDIS_URL", async () => {
     delete process.env.REDIS_URL;
 
-    await expect(redisCommand(["PING"])).rejects.toMatchObject<BffError>({
+    await expect(redisCommand(["PING"])).rejects.toMatchObject({
       code: "UPSTREAM_UNAVAILABLE",
       status: 503,
     });
@@ -108,7 +107,7 @@ describe("raw Redis command adapter", () => {
     state.tcpSocket = null;
     promise = redisCommand(["PING"]);
     await vi.waitFor(() => expect(state.tcpSocket).toBeTruthy());
-    state.tcpSocket?.responses.push(Buffer.from("?wat\r\n"));
+    (state.tcpSocket as FakeSocket | null)?.responses.push(Buffer.from("?wat\r\n"));
     await expect(promise).rejects.toThrow("Unsupported Redis response");
   });
 });

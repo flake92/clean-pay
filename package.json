@@ -8,6 +8,7 @@
     "build": "node scripts/next-command.mjs build",
     "start": "node deploy/prod/validate-env.mjs && next start -H 0.0.0.0 -p 4000",
     "lint": "eslint",
+    "typecheck": "node scripts/typecheck.mjs",
     "test": "node node_modules/vitest/vitest.mjs run --config vitest.config.ts",
     "test:unit": "node node_modules/vitest/vitest.mjs run tests/unit",
     "test:route-handlers": "node node_modules/vitest/vitest.mjs run tests/integration/route-handlers",

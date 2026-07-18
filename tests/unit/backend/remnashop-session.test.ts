@@ -74,7 +74,6 @@ import {
   linkCurrentUserToRemnashopAuth,
   reconcileUserFromRemnashopAuth,
 } from "@/backend/integrations/remnashop/session";
-import { BffError } from "@/backend/integrations/remnashop/errors";
 
 const auth = {
   expires_at: "2026-06-25T10:00:00.000Z",
@@ -267,7 +266,7 @@ describe("Remnashop session reconciliation", () => {
   it("requires a current session for explicit account linking", async () => {
     mocks.getCurrentSession.mockResolvedValueOnce(null);
 
-    await expect(linkCurrentUserToRemnashopAuth({ accessToken: "access", refreshToken: "refresh", auth })).rejects.toMatchObject<BffError>({
+    await expect(linkCurrentUserToRemnashopAuth({ accessToken: "access", refreshToken: "refresh", auth })).rejects.toMatchObject({
       code: "UNAUTHORIZED",
     });
   });

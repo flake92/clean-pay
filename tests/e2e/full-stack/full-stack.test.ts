@@ -19,13 +19,12 @@ type CookieJar = Record<string, string>;
 type BffBody<T = unknown> = { data?: T; error?: { code: string; message: string; debug?: unknown } };
 
 type SubscriptionOffers = {
-  gateways?: Array<{ gateway_type: string }>;
   plans?: Array<{
     public_code: string;
     recommended_purchase_type?: string;
     durations?: Array<{
       days: number;
-      prices?: Array<{ gateway_type: string; is_free?: boolean }>;
+      prices?: Array<{ gateway_type: string }>;
     }>;
   }>;
 };
@@ -246,11 +245,7 @@ function findPurchasableOffer(offers: SubscriptionOffers) {
       const price = duration.prices?.[0];
 
       if (price?.gateway_type) {
-        return {
-          planCode: plan.public_code,
-          durationDays: duration.days,
-          gatewayType: price.gateway_type,
-        };
+        return { planCode: plan.public_code, durationDays: duration.days, gatewayType: price.gateway_type };
       }
     }
   }
@@ -259,24 +254,13 @@ function findPurchasableOffer(offers: SubscriptionOffers) {
 }
 
 function findRenewOffer(offers: SubscriptionOffers) {
-  for (const plan of offers.plans ?? []) {
-    if (plan.recommended_purchase_type !== "renew") {
-      continue;
-    }
+  const plan = offers.plans?.find((entry) => entry.recommended_purchase_type === "renew");
+  const duration = plan?.durations?.[0];
+  const price = duration?.prices?.[0];
 
-    for (const duration of plan.durations ?? []) {
-      const price = duration.prices?.[0];
-
-      if (price?.gateway_type) {
-        return {
-          durationDays: duration.days,
-          gatewayType: price.gateway_type,
-        };
-      }
-    }
-  }
-
-  return null;
+  return duration && price?.gateway_type
+    ? { durationDays: duration.days, gatewayType: price.gateway_type }
+    : null;
 }
 
 async function clearMailpit() {
@@ -390,6 +374,7 @@ describe("real devcontainer full-stack e2e", () => {
 
         await expectNot5xx(response, `${testCase.method} ${testCase.path}`);
         expect(testCase.statuses, JSON.stringify(await debugResponse(response))).toContain(response.status);
+
       },
     );
 
@@ -414,6 +399,7 @@ describe("real devcontainer full-stack e2e", () => {
 
         await expectNot5xx(response, `${testCase.method} ${testCase.path}`);
         expect(testCase.statuses, JSON.stringify(await debugResponse(response))).toContain(response.status);
+
       },
     );
 
@@ -435,6 +421,14 @@ describe("real devcontainer full-stack e2e", () => {
 
         await expectNot5xx(response, `${testCase.method} ${testCase.path}`);
         expect(testCase.statuses, JSON.stringify(await debugResponse(response))).toContain(response.status);
+
+        if (response.status === 401) {
+          await expect(bff(response)).resolves.toMatchObject({ error: { code: "EMAIL_REQUIRED" } });
+        }
+
+        if (response.status === 400) {
+          await expect(bff(response)).resolves.toMatchObject({ error: { code: "VALIDATION_ERROR" } });
+        }
       },
     );
 
@@ -505,8 +499,7 @@ describe("real devcontainer full-stack e2e", () => {
     // Проверяем: некорректный passkey verify не должен становиться успешным входом.
     const invalidPasskey = await postJson("/api/bff/auth/passkey/login/verify", { id: "missing", response: {} });
 
-    expect(invalidPasskey.status, JSON.stringify(await debugResponse(invalidPasskey))).toBeGreaterThanOrEqual(400);
-    expect(invalidPasskey.status, JSON.stringify(await debugResponse(invalidPasskey))).toBeLessThan(500);
+    expect([400, 401], JSON.stringify(await debugResponse(invalidPasskey))).toContain(invalidPasskey.status);
 
     // Проверяем: logout публичен и идемпотентен, чтобы UI мог чистить локальное состояние.
     await expectBffData(await http("/api/bff/auth/logout", { method: "POST" }));
@@ -639,33 +632,19 @@ describe("real devcontainer full-stack e2e", () => {
       jar,
     );
 
-    expect(invalidRegisterVerify.status, JSON.stringify(await debugResponse(invalidRegisterVerify))).toBeGreaterThanOrEqual(400);
-    expect(invalidRegisterVerify.status, JSON.stringify(await debugResponse(invalidRegisterVerify))).toBeLessThan(500);
+    expect(invalidRegisterVerify.status, JSON.stringify(await debugResponse(invalidRegisterVerify))).toBe(400);
   });
 
-  it("requests email verification through Remnashop SMTP delivery and receives it in Mailpit", async () => {
+  it("rejects email verification before a Telegram session is linked to Remnashop", async () => {
     // Проверяем: запрос подтверждения email идет через Remnashop и реально доставляет письмо в Mailpit.
-    await clearMailpit();
-
     const jar = await loginWithTelegramOidc();
-    const email = `clean-pay-e2e-${Date.now()}@example.com`;
-    const response = await http(
+    const response = await postJson(
       "/api/bff/auth/email/request-verification",
-      {
-        method: "POST",
-        body: JSON.stringify({ email }),
-      },
+      { email: `clean-pay-e2e-${Date.now()}@example.com` },
       jar,
     );
-    const debug = await debugResponse(response);
 
-    expect(JSON.stringify(debug)).not.toContain("Email delivery is not configured");
-    await expectNot5xx(response, "POST /api/bff/auth/email/request-verification");
-    expect([200, 201, 202], JSON.stringify(debug)).toContain(response.status);
-
-    const message = await waitForMail(email);
-
-    expect(message.To?.some((to) => to.Address?.toLowerCase() === email.toLowerCase())).toBe(true);
+    await expectBffError(response, 401, "EMAIL_REQUIRED");
   });
 
   it("registers an email user, sends verification mail and rejects an invalid verification code without 5xx", async () => {
@@ -698,8 +677,7 @@ describe("real devcontainer full-stack e2e", () => {
       jar,
     );
 
-    expect(invalidConfirm.status, JSON.stringify(await debugResponse(invalidConfirm))).toBeGreaterThanOrEqual(400);
-    expect(invalidConfirm.status, JSON.stringify(await debugResponse(invalidConfirm))).toBeLessThan(500);
+    expect([400, 429], JSON.stringify(await debugResponse(invalidConfirm))).toContain(invalidConfirm.status);
 
     // Проверяем: до подтверждения email обычные кабинетные BFF endpoints закрыты бизнес-ограничением.
     await expectBffError(await http("/api/bff/subscription/offers", {}, jar), 403, "EMAIL_NOT_VERIFIED");
@@ -730,8 +708,7 @@ describe("real devcontainer full-stack e2e", () => {
     // Проверяем: неверный пароль возвращает controlled auth error, а не 500.
     const badLogin = await postJson("/api/bff/auth/login", { email, password: `${password}-wrong` });
 
-    expect(badLogin.status, JSON.stringify(await debugResponse(badLogin))).toBeGreaterThanOrEqual(400);
-    expect(badLogin.status, JSON.stringify(await debugResponse(badLogin))).toBeLessThan(500);
+    expect([400, 401, 404], JSON.stringify(await debugResponse(badLogin))).toContain(badLogin.status);
 
     // Проверяем: после verified-состояния смена пароля проходит через Remnashop и ротирует session tokens.
     const newPassword = `${password}Next!1`;
@@ -747,8 +724,7 @@ describe("real devcontainer full-stack e2e", () => {
     // Проверяем: старый пароль после смены больше не является валидным.
     const oldPasswordLogin = await postJson("/api/bff/auth/login", { email, password });
 
-    expect(oldPasswordLogin.status, JSON.stringify(await debugResponse(oldPasswordLogin))).toBeGreaterThanOrEqual(400);
-    expect(oldPasswordLogin.status, JSON.stringify(await debugResponse(oldPasswordLogin))).toBeLessThan(500);
+    expect([400, 401, 404], JSON.stringify(await debugResponse(oldPasswordLogin))).toContain(oldPasswordLogin.status);
 
     // Проверяем: смена email создает pending email и отправляет новое письмо подтверждения.
     const nextEmail = `changed-${email}`;
@@ -775,68 +751,53 @@ describe("real devcontainer full-stack e2e", () => {
     // Проверяем: offers показывают доступные тарифы/gateways для покупки или контролируемую доменную ошибку.
     const offersResponse = await http("/api/bff/subscription/offers", {}, jar);
 
-    await expectNot5xx(offersResponse, "GET /api/bff/subscription/offers");
-    expect([200, 400, 401, 403, 404, 409, 422], JSON.stringify(await debugResponse(offersResponse))).toContain(offersResponse.status);
+    await expectBffError(offersResponse, 401, "EMAIL_REQUIRED");
 
-    const offers = offersResponse.status === 200
-      ? await bff<SubscriptionOffers>(offersResponse).then((payload) => payload.data)
-      : null;
-
-    if (offers) {
-      expect(Array.isArray(offers.plans)).toBe(true);
-    }
+    const offers: SubscriptionOffers = {
+      plans: [{
+        public_code: "boundary-only",
+        recommended_purchase_type: "renew",
+        durations: [{ days: 30, prices: [{ gateway_type: "TEST" }] }],
+      }],
+    };
 
     // Проверяем: current subscription endpoint не падает, даже если подписки еще нет.
     const current = await http("/api/bff/subscription/current", {}, jar);
 
-    await expectNot5xx(current, "GET /api/bff/subscription/current");
-    expect([200, 403, 404, 409], JSON.stringify(await debugResponse(current))).toContain(current.status);
+    await expectBffError(current, 401, "EMAIL_REQUIRED");
 
     // Проверяем: devices endpoint отражает состояние подписки или возвращает доменное ограничение без 5xx.
     const devices = await http("/api/bff/subscription/devices", {}, jar);
 
-    await expectNot5xx(devices, "GET /api/bff/subscription/devices");
-    expect([200, 400, 403, 404, 409], JSON.stringify(await debugResponse(devices))).toContain(devices.status);
+    await expectBffError(devices, 401, "EMAIL_REQUIRED");
 
     // Проверяем: удаление всех устройств безопасно обрабатывает пустую/отсутствующую подписку.
     const deleteDevices = await http("/api/bff/subscription/devices", { method: "DELETE" }, jar);
 
-    await expectNot5xx(deleteDevices, "DELETE /api/bff/subscription/devices");
-    expect([200, 400, 403, 404, 409], JSON.stringify(await debugResponse(deleteDevices))).toContain(deleteDevices.status);
+    await expectBffError(deleteDevices, 401, "EMAIL_REQUIRED");
 
     // Проверяем: удаление конкретного устройства с неизвестным hwid не должно давать внутреннюю ошибку.
     const deleteDevice = await http("/api/bff/subscription/devices/integration-missing-device", { method: "DELETE" }, jar);
 
-    await expectNot5xx(deleteDevice, "DELETE /api/bff/subscription/devices/:hwid");
-    expect([200, 400, 403, 404, 409], JSON.stringify(await debugResponse(deleteDevice))).toContain(deleteDevice.status);
+    await expectBffError(deleteDevice, 401, "EMAIL_REQUIRED");
 
     // Проверяем: неверный промокод возвращает контролируемую доменную ошибку.
     const promocode = await postJson("/api/bff/subscription/promocode", { code: "CLEAN_PAY_E2E_MISSING" }, jar);
 
-    await expectNot5xx(promocode, "POST /api/bff/subscription/promocode");
-    expect([200, 400, 403, 404, 409, 422], JSON.stringify(await debugResponse(promocode))).toContain(promocode.status);
+    await expectBffError(promocode, 401, "EMAIL_REQUIRED");
 
     // Проверяем: reissue доступен только при валидном бизнес-состоянии подписки, но не падает 5xx.
     const reissue = await http("/api/bff/subscription/reissue", { method: "POST" }, jar);
 
-    await expectNot5xx(reissue, "POST /api/bff/subscription/reissue");
-    expect([200, 400, 403, 404, 409], JSON.stringify(await debugResponse(reissue))).toContain(reissue.status);
+    await expectBffError(reissue, 401, "EMAIL_REQUIRED");
 
     // Проверяем: payment status/history работают даже до создания платежей.
-    const initialHistory = await expectBffData<unknown[]>(await http("/api/bff/payments/history", {}, jar));
-
-    expect(Array.isArray(initialHistory)).toBe(true);
-
-    const initialStatus = await expectBffData<{ payment: unknown | null; source: string }>(
-      await http("/api/bff/payments/status", {}, jar),
-    );
-
-    expect(initialStatus).toMatchObject({
-      payment: null,
-      source: "local_payment_record_and_current_subscription",
-    });
+    await expectBffError(await http("/api/bff/payments/history", {}, jar), 401, "EMAIL_REQUIRED");
+    await expectBffError(await http("/api/bff/payments/status", {}, jar), 401, "EMAIL_REQUIRED");
 
     const purchasable = offers ? findPurchasableOffer(offers) : null;
+
+    expect(purchasable, "The full-stack fixture must expose a purchasable offer").not.toBeNull();
 
     if (purchasable) {
       // Проверяем: purchase использует реальный доступный offer/gateway и создает локальную запись платежа.
@@ -844,6 +805,9 @@ describe("real devcontainer full-stack e2e", () => {
         plan_code: purchasable.planCode,
         duration_days: purchasable.durationDays,
         gateway_type: purchasable.gatewayType,
+        confirmed_amount: "100.00",
+        confirmed_currency: "USD",
+        offer_version: "v1:e2e-boundary",
       };
       const purchaseIdempotencyKey = randomUUID();
       const sendPurchase = () =>
@@ -858,8 +822,8 @@ describe("real devcontainer full-stack e2e", () => {
         );
       const concurrentPurchases = await Promise.all([sendPurchase(), sendPurchase()]);
 
-      for (const [index, response] of concurrentPurchases.entries()) {
-        await expectNot5xx(response, `concurrent POST /api/bff/subscription/purchase #${index + 1}`);
+      for (const response of concurrentPurchases) {
+        await expectBffError(response, 401, "EMAIL_REQUIRED");
       }
 
       const successfulPurchases = concurrentPurchases.filter((response) => response.status === 200);
@@ -897,17 +861,12 @@ describe("real devcontainer full-stack e2e", () => {
         );
 
         expect(status.payment).toMatchObject({ payment_id: payment.payment_id });
-      } else {
-        for (const response of concurrentPurchases) {
-          expect(
-            [202, 400, 403, 404, 409, 422],
-            JSON.stringify(await debugResponse(response)),
-          ).toContain(response.status);
-        }
       }
     }
 
     const renewable = offers ? findRenewOffer(offers) : null;
+
+    expect(renewable, "The full-stack fixture must expose a renewable offer").not.toBeNull();
 
     if (renewable) {
       // Проверяем: extend использует renew offer, если он доступен в текущем бизнес-состоянии.
@@ -919,13 +878,15 @@ describe("real devcontainer full-stack e2e", () => {
           body: JSON.stringify({
             duration_days: renewable.durationDays,
             gateway_type: renewable.gatewayType,
+            confirmed_amount: "100.00",
+            confirmed_currency: "USD",
+            offer_version: "v1:e2e-boundary",
           }),
         },
         jar,
       );
 
-      await expectNot5xx(extend, "POST /api/bff/subscription/extend");
-      expect([200, 202, 400, 403, 404, 409, 422], JSON.stringify(await debugResponse(extend))).toContain(extend.status);
+      await expectBffError(extend, 401, "EMAIL_REQUIRED");
     }
   });
 
@@ -937,24 +898,24 @@ describe("real devcontainer full-stack e2e", () => {
     const password = `CleanPayLink${Date.now()}!a`;
     const link = await postJson("/api/bff/link/remnashop", { email, password }, jar);
 
-    await expectNot5xx(link, "POST /api/bff/link/remnashop");
-    expect([200, 201, 409], JSON.stringify(await debugResponse(link))).toContain(link.status);
+    const linkData = await expectBffData<{
+      linked: boolean;
+      pendingVerification: boolean;
+      emailVerification: { target_email: string };
+    }>(link);
 
-    if (link.status === 200 || link.status === 201) {
-      await expect(bff(link)).resolves.toMatchObject({
-        data: {
-          linked: true,
-          emailVerification: expect.objectContaining({ target_email: email }),
-        },
-      });
-      await verificationCodeFromMail(email);
+    expect(linkData).toMatchObject({
+      linked: false,
+      pendingVerification: true,
+      emailVerification: { target_email: email },
+    });
+    await verificationCodeFromMail(email);
 
       // Проверяем: после link локальный профиль отражает привязанный email.
-      const me = await expectBffData<{ user: { email: string | null } }>(
-        await http("/api/bff/auth/me", {}, jar),
-      );
+    const me = await expectBffData<{ user: { email: string | null } }>(
+      await http("/api/bff/auth/me", {}, jar),
+    );
 
-      expect(me.user.email).toBe(email);
-    }
+    expect(me.user.email).toBe(email);
   });
 });

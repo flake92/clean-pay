@@ -191,7 +191,7 @@ describe("auth use cases", () => {
       { token: "ctx-token", remoteIp: null },
     );
 
-    expect(result.emailVerification.target_email).toBe("user@example.com");
+    expect(result.emailVerification?.target_email).toBe("user@example.com");
     expect(mocks.remnashopAuth).toHaveBeenCalledWith("/auth/register", {
       email: "user@example.com",
       password: "secret",

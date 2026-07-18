@@ -13,17 +13,18 @@ function model(count: number) {
 
 describe("production data retention", () => {
   it("uses conservative bounded defaults and rejects unsafe policy values", () => {
-    expect(retentionPolicy({})).toEqual({
+    expect(retentionPolicy({ NODE_ENV: "test" })).toEqual({
       authStateDays: 7,
       sessionDays: 90,
       auditInfoDays: 180,
       auditSecurityDays: 365,
       rateLimitDays: 30,
     });
-    expect(() => retentionPolicy({ AUTH_STATE_RETENTION_DAYS: "0" })).toThrow(
+    expect(() => retentionPolicy({ NODE_ENV: "test", AUTH_STATE_RETENTION_DAYS: "0" })).toThrow(
       "AUTH_STATE_RETENTION_DAYS",
     );
     expect(() => retentionPolicy({
+      NODE_ENV: "test",
       AUDIT_INFO_RETENTION_DAYS: "400",
       AUDIT_SECURITY_RETENTION_DAYS: "365",
     })).toThrow("must be at least");
@@ -41,7 +42,7 @@ describe("production data retention", () => {
     const now = new Date("2026-07-18T00:00:00.000Z");
 
     await expect(
-      runRetentionCleanup(prisma, retentionPolicy({}), now),
+      runRetentionCleanup(prisma, retentionPolicy({ NODE_ENV: "test" }), now),
     ).resolves.toEqual({
       webAuthnChallenges: 1,
       telegramAuthStates: 2,

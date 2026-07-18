@@ -545,19 +545,19 @@ describe("remnashop client", () => {
   it("turns invalid JSON and upstream errors into BFF errors", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(new Response("<html>", { status: 200 }));
 
-    await expect(remnashopRequest("/plans/public")).rejects.toMatchObject<BffError>({
+    await expect(remnashopRequest("/plans/public")).rejects.toMatchObject({
       code: "UPSTREAM_ERROR",
       status: 502,
     });
 
     vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(response({ status: 401, body: { detail: "bad login" } }));
-    await expect(remnashopAuth("/auth/login", { email: "u@e.test", password: "bad" })).rejects.toMatchObject<BffError>({
+    await expect(remnashopAuth("/auth/login", { email: "u@e.test", password: "bad" })).rejects.toMatchObject({
       code: "AUTH_FAILED",
       status: 401,
     });
 
     vi.spyOn(globalThis, "fetch").mockRejectedValueOnce(new Error("network down"));
-    await expect(remnashopRequest("/plans/public")).rejects.toMatchObject<BffError>({
+    await expect(remnashopRequest("/plans/public")).rejects.toMatchObject({
       code: "UPSTREAM_UNAVAILABLE",
       status: 502,
     });
@@ -580,7 +580,7 @@ describe("remnashop client", () => {
 
   it("authorizes stored Remnashop tokens and rejects missing session states", async () => {
     vi.mocked(getCurrentSession).mockResolvedValueOnce(null);
-    await expect(getAuthorizedRemnashopTokens()).rejects.toMatchObject<BffError>({ code: "UNAUTHORIZED" });
+    await expect(getAuthorizedRemnashopTokens()).rejects.toMatchObject({ code: "UNAUTHORIZED" });
 
     vi.mocked(getCurrentSession).mockResolvedValueOnce({
       id: "session-1",
@@ -590,7 +590,7 @@ describe("remnashop client", () => {
       remnashopRefreshTokenEncrypted: null,
       user: { email: "user@example.com", emailVerified: true, telegramId: null },
     } as never);
-    await expect(getAuthorizedRemnashopTokens()).rejects.toMatchObject<BffError>({ code: "EMAIL_REQUIRED" });
+    await expect(getAuthorizedRemnashopTokens()).rejects.toMatchObject({ code: "EMAIL_REQUIRED" });
 
     vi.mocked(getCurrentSession).mockResolvedValueOnce({
       id: "session-1",
@@ -614,7 +614,7 @@ describe("remnashop client", () => {
         language: "ru",
       },
     }));
-    await expect(getAuthorizedRemnashopTokens()).rejects.toMatchObject<BffError>({ code: "EMAIL_NOT_VERIFIED" });
+    await expect(getAuthorizedRemnashopTokens()).rejects.toMatchObject({ code: "EMAIL_NOT_VERIFIED" });
 
     vi.mocked(getCurrentSession).mockResolvedValueOnce({
       id: "session-1",
@@ -638,7 +638,7 @@ describe("remnashop client", () => {
         language: "ru",
       },
     }));
-    await expect(getAuthorizedRemnashopTokens()).rejects.toMatchObject<BffError>({ code: "ACCOUNT_MERGE_REQUIRED" });
+    await expect(getAuthorizedRemnashopTokens()).rejects.toMatchObject({ code: "ACCOUNT_MERGE_REQUIRED" });
 
     vi.mocked(getCurrentSession).mockResolvedValueOnce({
       id: "session-1",

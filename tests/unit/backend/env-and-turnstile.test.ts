@@ -1,7 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { getEnv } from "@/backend/config/env";
-import { BffError } from "@/backend/integrations/remnashop/errors";
 import { getRequestIp, getTurnstileToken, verifyTurnstileToken } from "@/backend/security/turnstile";
 
 function stubValidProductionEnv() {
@@ -248,9 +247,9 @@ describe("Turnstile helpers", () => {
     );
 
     vi.stubEnv("TURNSTILE_SECRET_KEY", "secret");
-    await expect(verifyTurnstileToken(null)).rejects.toMatchObject<BffError>({ code: "VALIDATION_ERROR" });
+    await expect(verifyTurnstileToken(null)).rejects.toMatchObject({ code: "VALIDATION_ERROR" });
 
     vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({ success: false }), { status: 200 }));
-    await expect(verifyTurnstileToken("bad")).rejects.toMatchObject<BffError>({ code: "FORBIDDEN" });
+    await expect(verifyTurnstileToken("bad")).rejects.toMatchObject({ code: "FORBIDDEN" });
   });
 });

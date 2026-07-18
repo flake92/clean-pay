@@ -33,12 +33,14 @@ x-clean-pay-env: &clean-pay-env
   SUPPORT_FAQ_URL: http://localhost:4000/support
   CLEAN_PAY_READINESS_MAILPIT_URL: http://smtp:8025
   CLEAN_PAY_READINESS_REMNAWAVE_URL: http://remnawave-mock:3000
+  REMNAWAVE_API_BASE_URL: http://remnawave-mock:3000
+  REMNAWAVE_TOKEN: dev-remnawave-token
 
 x-remnashop-env: &remnashop-env
   APP_DOMAIN: remnashop.localhost
   APP_HOST: 0.0.0.0
   APP_PORT: "5000"
-  APP_CRYPT_KEY: change-me-base64-32-byte-key
+  APP_CRYPT_KEY: MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=
   APP_SWAGGER_ENABLED: "true"
   WEB_ENABLED: "true"
   WEB_CABINET_URL: http://localhost:4000
@@ -126,12 +128,15 @@ services:
       && if [ -d /workspace/clean-pay/.next ]; then sudo chown -R node:node /workspace/clean-pay/.next; fi
       && if [ -S /var/run/docker.sock ]; then
         docker_gid=$$(stat -c '%g' /var/run/docker.sock);
-        if [ "$$docker_gid" != "0" ]; then
+        if [ "$$docker_gid" = "0" ]; then
+          sudo usermod -aG root node;
+        else
           if ! getent group "$$docker_gid" >/dev/null; then sudo groupadd --gid "$$docker_gid" docker-host; fi;
           docker_group=$$(getent group "$$docker_gid" | cut -d: -f1);
           sudo usermod -aG "$$docker_group" node;
         fi;
       fi
+      && touch /tmp/clean-pay-dev-ready
       && sleep infinity"
     working_dir: /workspace/clean-pay
     environment:
@@ -324,7 +329,7 @@ services:
       MAILPIT_API_URL: http://smtp:8025
       SMTP_LOG_MAX_BODY_CHARS: "12000"
     volumes:
-      - ./mailpit-logger:/logger:ro
+      - ${CLEAN_PAY_HOST_DEVCONTAINER_DIR:-.}/mailpit-logger:/logger:ro
 
   caddy:
     image: caddy:2-alpine

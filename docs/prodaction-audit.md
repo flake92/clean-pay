@@ -307,9 +307,16 @@ Fallback по Telegram/e-mail должен подтверждать UUID и вл
 - Telegram OIDC продолжает хранить путь в одноразовом state, но теперь получает исходный путь от login page. Telegram WebApp page также валидирует параметр на сервере, передаёт его BFF, а BFF независимо валидирует снова перед ответом/redirect; fallback-ссылки сохраняют тот же путь;
 - профильные тесты 28/28 покрывают safe/unsafe matrix, server/client wiring, Telegram state/WebApp и frontend error flows. Полный unit suite 373/373, integration 42/42, ESLint без ошибок (один известный warning generated coverage) и production build 50/50 прошли. Remnashop и Remnawave не менялись; production rollout не выполнялся.
 
-### 22. [ ] Вернуть TypeScript-проверку тестов в обязательный pipeline
+### 22. [x] Вернуть TypeScript-проверку тестов в обязательный pipeline
 
 Исправить текущие type errors, добавить `typecheck` script и CI gate. Усилить full-stack assertions: ключевые routes не должны считаться успешными при произвольном non-5xx или условном пропуске сценария.
+
+Результат:
+
+- исправлены все ошибки полного `tsc --noEmit`, включая test sources; кроссплатформенный `npm run typecheck` сам генерирует Prisma Client с безопасным локальным placeholder URL и затем проверяет весь проект. Новый GitHub Actions gate на Node.js 24 последовательно запускает clean install, lint, typecheck, unit tests и production build;
+- full-stack matrix больше не принимает произвольный non-5xx для ключевых auth/payment границ: passkey, invalid verification/login, Telegram-only business routes, purchase/extend validation и Remnashop link проверяют точные HTTP status и BFF error/data contract. Условные purchase/extend пропуски заменены детерминированным выполнением обоих маршрутов;
+- devcontainer E2E стал герметичным по умолчанию и переносимым на Docker Desktop: тестовые volumes очищаются перед прогоном, bootstrap ждёт готовности пользователя/сокета, Windows host paths нормализуются для всех mock mounts, shell helpers вызываются независимо от executable bit, а Remnashop/readiness fixtures получают валидную конфигурацию;
+- `typecheck`, ESLint без ошибок (один известный warning generated coverage), unit 373/373, integration 42/42, production build 50/50 и чистый real devcontainer full-stack suite 104/104 прошли. Remnashop и Remnawave не менялись; production rollout ещё не выполнялся.
 
 ### 23. [ ] Сделать PWA cache версионируемым и тестируемым
 
@@ -352,3 +359,4 @@ Fallback по Telegram/e-mail должен подтверждать UUID и вл
 - 2026-07-18: пункт 19 исправлен и проверен: promocode, reissue и обе device mutations используют attempted/succeeded/failed audit lifecycle; success пишется строго после upstream mutation, failure содержит только безопасную классификацию и никогда не сопровождается ложным success. Профильные тесты 36/36, unit 367/367, integration 42/42, ESLint и production build 50/50 прошли. Remnashop и Remnawave не менялись; production rollout ещё не выполнялся.
 - 2026-07-18: пункт 20 исправлен и проверен: always-on retention-worker применяет документированную bounded policy к auth states, verification codes, sessions, audit и rate-limit rows, heartbeat включён в deployment gate; raw identity/PII централизованно редактируется из log/audit metadata. Профильные тесты 28/28, unit 371/371, integration 42/42, ESLint, production build 50/50, Compose/syntax, production Docker build/smoke и реальная PostgreSQL boundary matrix прошли. Remnashop и Remnawave не менялись; production rollout ещё не выполнялся.
 - 2026-07-18: пункт 21 исправлен и проверен: единая local redirect policy валидирует исходный `redirect_to` и сохраняет его через password, passkey, Telegram OIDC и Telegram WebApp login; external/auth-loop destinations дают безопасный `/cabinet` fallback. Профильные тесты 28/28, unit 373/373, integration 42/42, ESLint и production build 50/50 прошли. Remnashop и Remnawave не менялись; production rollout ещё не выполнялся.
+- 2026-07-18: пункт 22 исправлен и проверен: полный TypeScript check тестов стал обязательным локальным/CI gate, все type errors устранены, а full-stack contracts и devcontainer runner стали точными, герметичными и воспроизводимыми на Windows Docker Desktop. Typecheck, unit 373/373, integration 42/42, ESLint, production build 50/50 и чистый full-stack E2E 104/104 прошли. Remnashop и Remnawave не менялись; production rollout ещё не выполнялся.

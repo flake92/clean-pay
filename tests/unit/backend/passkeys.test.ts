@@ -69,7 +69,6 @@ import {
   finishPasskeyRegistration,
   listPasskeys,
 } from "@/backend/auth/passkeys";
-import { BffError } from "@/backend/integrations/remnashop/errors";
 
 function clientData(challenge: string) {
   return Buffer.from(JSON.stringify({ challenge })).toString("base64url");
@@ -331,7 +330,7 @@ describe("passkey use cases", () => {
           clientDataJSON: clientData("auth-challenge"),
           authenticatorData: "authenticator",
           signature: "signature",
-          userHandle: null,
+          userHandle: undefined,
         },
         clientExtensionResults: {},
       }),
@@ -364,7 +363,7 @@ describe("passkey use cases", () => {
 
   it("throws BFF errors for missing sessions, invalid challenges and last passkey delete", async () => {
     mocks.getCurrentSession.mockResolvedValueOnce(null);
-    await expect(beginPasskeyRegistration()).rejects.toMatchObject<BffError>({ code: "UNAUTHORIZED" });
+    await expect(beginPasskeyRegistration()).rejects.toMatchObject({ code: "UNAUTHORIZED" });
 
     mocks.getCurrentSession.mockResolvedValueOnce(session);
     mocks.prisma.webAuthnChallenge.findFirst.mockResolvedValueOnce(null);
@@ -376,9 +375,9 @@ describe("passkey use cases", () => {
         response: { clientDataJSON: clientData("missing"), attestationObject: "attestation" },
         clientExtensionResults: {},
       }),
-    ).rejects.toMatchObject<BffError>({ code: "VALIDATION_ERROR" });
+    ).rejects.toMatchObject({ code: "VALIDATION_ERROR" });
 
     mocks.prisma.webAuthnCredential.findMany.mockResolvedValueOnce([{ id: "only" }]);
-    await expect(deletePasskey("only")).rejects.toMatchObject<BffError>({ code: "FORBIDDEN" });
+    await expect(deletePasskey("only")).rejects.toMatchObject({ code: "FORBIDDEN" });
   });
 });

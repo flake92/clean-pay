@@ -21,7 +21,6 @@ vi.mock("@/backend/database/prisma", () => ({
 }));
 
 import { assertCooldown, assertRateLimit, rateLimitKey, recordRateLimitEvent } from "@/backend/limits/rate-limit";
-import { BffError } from "@/backend/integrations/remnashop/errors";
 import {
   applyRemnashopTransaction,
   recordPayment,
@@ -74,7 +73,7 @@ describe("rate limiting", () => {
   it("throws rate limited error with retry ttl", async () => {
     mocks.redisCommand.mockResolvedValueOnce(6).mockResolvedValueOnce(42);
 
-    await expect(assertRateLimit({ action: "login", email: "u@e.test", limit: 5, windowSeconds: 60 })).rejects.toMatchObject<BffError>({
+    await expect(assertRateLimit({ action: "login", email: "u@e.test", limit: 5, windowSeconds: 60 })).rejects.toMatchObject({
       code: "RATE_LIMITED",
       status: 429,
       debug: { retryAfterSeconds: 42 },
@@ -99,7 +98,7 @@ describe("rate limiting", () => {
   it("rejects invalid Redis counter values", async () => {
     mocks.redisCommand.mockResolvedValueOnce("not-a-number");
 
-    await expect(assertRateLimit({ action: "login", limit: 1, windowSeconds: 60 })).rejects.toMatchObject<BffError>({
+    await expect(assertRateLimit({ action: "login", limit: 1, windowSeconds: 60 })).rejects.toMatchObject({
       code: "UPSTREAM_ERROR",
     });
   });

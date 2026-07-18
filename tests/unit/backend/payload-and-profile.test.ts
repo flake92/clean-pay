@@ -4,6 +4,8 @@ import { addDays, stripTurnstile } from "@/backend/auth/payload";
 import { localUserProfile, remnashopUserProfile } from "@/backend/auth/profile-presenter";
 import { safeRedirectPath } from "@/backend/auth/redirect-policy";
 
+type ProfileSession = Parameters<typeof localUserProfile>[0];
+
 const baseSession = {
   authMethod: "TELEGRAM",
   user: {
@@ -14,7 +16,7 @@ const baseSession = {
     fullName: "Clean User",
     displayName: "Clean",
   },
-} as never;
+} as unknown as ProfileSession;
 
 describe("auth payload helpers and profile presenters", () => {
   it("strips both supported Turnstile fields", () => {
@@ -63,7 +65,7 @@ describe("auth payload helpers and profile presenters", () => {
         ...baseSession.user,
         emailVerified: false,
       },
-    } as never;
+    } as ProfileSession;
 
     expect(remnashopUserProfile(staleLocalSession, {
       telegram_id: 999,
@@ -88,7 +90,7 @@ describe("auth payload helpers and profile presenters", () => {
         ...baseSession.user,
         emailVerified: true,
       },
-    } as never;
+    } as ProfileSession;
 
     expect(remnashopUserProfile(splitSession, {
       telegram_id: 999,
@@ -114,7 +116,7 @@ describe("auth payload helpers and profile presenters", () => {
         email: null,
         emailVerified: true,
       },
-    } as never;
+    } as ProfileSession;
 
     expect(localUserProfile(sessionWithoutEmail)).toMatchObject({
       email: null,

@@ -165,7 +165,7 @@ fi
 
 log_step "Starting devcontainer compose stack"
 compose up -d --build "${services[@]}"
-"$root_dir/scripts/wait-for-compose.sh" "$project" "$compose_file" 300 "${services[@]}"
+bash "$root_dir/scripts/wait-for-compose.sh" "$project" "$compose_file" 300 "${services[@]}"
 
 log_step "Preparing Clean Pay application"
 npm ci
@@ -185,9 +185,9 @@ CLEAN_PAY_E2E_OIDC_URL="$oidc_url" \
 npm run dev -- --hostname 0.0.0.0 --port 4000 &
 next_pid="$!"
 
-"$root_dir/scripts/wait-for-http.sh" "$base_url/api/health" 180 "Wait for Clean Pay health" "GET"
-"$root_dir/scripts/wait-for-http.sh" "$mailpit_url/api/v1/messages" 60 "Wait for Mailpit API" "GET"
-"$root_dir/scripts/wait-for-http.sh" "$oidc_url/.well-known/jwks.json" 60 "Wait for Telegram OIDC JWKS" "GET"
+bash "$root_dir/scripts/wait-for-http.sh" "$base_url/api/health" 180 "Wait for Clean Pay health" "GET"
+bash "$root_dir/scripts/wait-for-http.sh" "$mailpit_url/api/v1/messages" 60 "Wait for Mailpit API" "GET"
+bash "$root_dir/scripts/wait-for-http.sh" "$oidc_url/.well-known/jwks.json" 60 "Wait for Telegram OIDC JWKS" "GET"
 
 log_step "Running full-stack e2e tests"
 CLEAN_PAY_E2E_BASE_URL="$base_url" \
