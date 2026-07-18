@@ -24,6 +24,26 @@ const exactRedactedKeys = new Set([
   "response",
   "turnstileToken",
 ]);
+const identityRedactedKeys = new Set([
+  "email",
+  "targetemail",
+  "pendingemail",
+  "verificationtargetemail",
+  "telegramid",
+  "telegram_id",
+  "tgid",
+  "userid",
+  "currentuserid",
+  "sourceuserids",
+  "mergeduserids",
+  "sessionid",
+  "credentialid",
+  "operationid",
+  "paymentid",
+  "remnashopuserid",
+  "upstreamaccountid",
+  "hwid",
+]);
 const subscribers = new Set<LogSubscriber>();
 
 function configuredLevel(): LogLevel {
@@ -67,7 +87,14 @@ export function sanitizeLogValue(value: unknown): unknown {
     const output: Record<string, unknown> = {};
 
     for (const [key, item] of Object.entries(value)) {
-      if ((exactRedactedKeys.has(key) || redactedKeyPattern.test(key)) && typeof item !== "boolean") {
+      const normalizedKey = key.toLowerCase();
+
+      if (
+        (exactRedactedKeys.has(key) ||
+          identityRedactedKeys.has(normalizedKey) ||
+          redactedKeyPattern.test(key)) &&
+        typeof item !== "boolean"
+      ) {
         output[key] = "[redacted]";
         continue;
       }

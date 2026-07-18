@@ -336,6 +336,52 @@ export function validateProductionEnvironment(environment) {
     5,
     3_600,
   );
+  boundedInteger(
+    "AUTH_STATE_RETENTION_DAYS",
+    optional("AUTH_STATE_RETENTION_DAYS"),
+    7,
+    1,
+    30,
+  );
+  boundedInteger(
+    "SESSION_RETENTION_DAYS",
+    optional("SESSION_RETENTION_DAYS"),
+    90,
+    30,
+    365,
+  );
+  const auditInfoRetentionDays = boundedInteger(
+    "AUDIT_INFO_RETENTION_DAYS",
+    optional("AUDIT_INFO_RETENTION_DAYS"),
+    180,
+    30,
+    730,
+  );
+  const auditSecurityRetentionDays = boundedInteger(
+    "AUDIT_SECURITY_RETENTION_DAYS",
+    optional("AUDIT_SECURITY_RETENTION_DAYS"),
+    365,
+    90,
+    2_555,
+  );
+  boundedInteger(
+    "RATE_LIMIT_RETENTION_DAYS",
+    optional("RATE_LIMIT_RETENTION_DAYS"),
+    30,
+    1,
+    180,
+  );
+  boundedInteger(
+    "DATA_RETENTION_INTERVAL_SECONDS",
+    optional("DATA_RETENTION_INTERVAL_SECONDS"),
+    21_600,
+    300,
+    86_400,
+  );
+
+  if (auditSecurityRetentionDays < auditInfoRetentionDays) {
+    fail("AUDIT_SECURITY_RETENTION_DAYS must be at least AUDIT_INFO_RETENTION_DAYS");
+  }
 
   const paymentSecretValue = optional("PAYMENT_RECONCILIATION_SECRET");
   const paymentSecret = paymentSecretValue

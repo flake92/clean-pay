@@ -786,7 +786,6 @@ async function completeTelegramAuth(
   await auditLog({
     action: authState.userId ? "telegram_link_success" : "telegram_login",
     userId: user.id,
-    metadata: { telegramId: telegramId.toString() },
   });
 
   const remnashopAuthResult = identity.remnashopAuthResult

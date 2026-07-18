@@ -40,7 +40,6 @@ export async function loginWithEmail(rawBody: AuthPayload<LoginRequest>, turnsti
   await auditLog({
     action: "auth_login_success",
     userId: user.id,
-    metadata: { email: user.email, telegramId: user.telegramId },
   });
 
   authDebugLog("auth_login_success", {

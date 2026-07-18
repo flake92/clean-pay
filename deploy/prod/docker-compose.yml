@@ -73,6 +73,34 @@ services:
         max-size: "5m"
         max-file: "2"
 
+  retention-worker:
+    image: ${CLEAN_PAY_IMAGE:-clean-pay-prod-app:local}
+    restart: unless-stopped
+    command: ["node", "deploy/prod/retention-loop.mjs"]
+    env_file:
+      - .env
+    environment:
+      NODE_ENV: production
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          node -e "const fs=require('node:fs');const value=Number(fs.readFileSync('/tmp/clean-pay-retention-heartbeat','utf8'));const interval=Number(process.env.DATA_RETENTION_INTERVAL_SECONDS||21600);const maxAge=(interval+600)*1000;if(!Number.isFinite(value)||Date.now()-value>maxAge)process.exit(1)"
+      interval: 60s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
+    networks:
+      default:
+    logging:
+      driver: json-file
+      options:
+        max-size: "5m"
+        max-file: "2"
+
   postgres:
     image: postgres:17-alpine
     restart: unless-stopped

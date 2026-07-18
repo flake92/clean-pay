@@ -245,7 +245,7 @@ describe("production env validator", () => {
     expect(prodCommand).toContain("COMPOSE_INTERPOLATION_ENVIRONMENT_NAMES");
     expect(prodCommand).toContain("delete environment[name]");
     expect(prodCommand).toContain("...productionFileEnvironment()");
-    expect(prodCommand.match(/env: productionChildEnvironment\(\)/g)).toHaveLength(4);
+    expect(prodCommand.match(/env: productionChildEnvironment\(\)/g)).toHaveLength(6);
     expect(runValidator({ CLEAN_PAY_BUILD_PHASE: "true" }).stderr).toContain(
       "CLEAN_PAY_BUILD_PHASE is build-only",
     );
@@ -384,6 +384,18 @@ describe("production env validator", () => {
     );
     expect(runValidator({ PAYMENT_RECONCILIATION_BATCH_SIZE: "+10" }).stderr).toContain(
       "PAYMENT_RECONCILIATION_BATCH_SIZE must be a canonical decimal integer",
+    );
+    expect(runValidator({ AUTH_STATE_RETENTION_DAYS: "0" }).stderr).toContain(
+      "AUTH_STATE_RETENTION_DAYS must be an integer between 1 and 30",
+    );
+    expect(runValidator({
+      AUDIT_INFO_RETENTION_DAYS: "400",
+      AUDIT_SECURITY_RETENTION_DAYS: "365",
+    }).stderr).toContain(
+      "AUDIT_SECURITY_RETENTION_DAYS must be at least AUDIT_INFO_RETENTION_DAYS",
+    );
+    expect(runValidator({ DATA_RETENTION_INTERVAL_SECONDS: "299" }).stderr).toContain(
+      "DATA_RETENTION_INTERVAL_SECONDS must be an integer between 300 and 86400",
     );
     expect(runValidator({ RUN_MIGRATIONS: "treu" }).stderr).toContain(
       'RUN_MIGRATIONS must be "true" or "false"',

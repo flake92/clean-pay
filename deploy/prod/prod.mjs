@@ -193,6 +193,74 @@ function assertReconciliationWorkerHealthy() {
   process.exit(1);
 }
 
+function assertRetentionWorkerHealthy() {
+  const deadline = Date.now() + 120_000;
+  let lastStatus = "container not found";
+
+  while (Date.now() < deadline) {
+    const container = spawnSync(
+      "docker",
+      composeArgs("ps", "-q", "retention-worker"),
+      {
+        cwd: rootDir,
+        env: productionChildEnvironment(),
+        encoding: "utf8",
+        stdio: "pipe",
+        shell: false,
+      },
+    );
+
+    if (container.error) {
+      console.error(container.error.message);
+      process.exit(1);
+    }
+
+    if (container.status !== 0) {
+      process.stderr.write(
+        container.stderr || "Failed to inspect retention-worker.\n",
+      );
+      process.exit(container.status ?? 1);
+    }
+
+    const containerId = container.stdout.trim();
+
+    if (containerId) {
+      const health = spawnSync(
+        "docker",
+        [
+          "inspect",
+          "--format",
+          "{{if .State.Health}}{{.State.Health.Status}}{{else}}missing{{end}}",
+          containerId,
+        ],
+        {
+          cwd: rootDir,
+          env: productionChildEnvironment(),
+          encoding: "utf8",
+          stdio: "pipe",
+          shell: false,
+        },
+      );
+
+      if (!health.error && health.status === 0) {
+        lastStatus = health.stdout.trim() || "unknown";
+
+        if (lastStatus === "healthy") {
+          console.log("OK retention-worker is healthy");
+          return;
+        }
+      } else {
+        lastStatus = health.error?.message || health.stderr.trim() || "inspect failed";
+      }
+    }
+
+    sleepSync(2_000);
+  }
+
+  console.error(`retention-worker is not healthy (${lastStatus}).`);
+  process.exit(1);
+}
+
 function ensureEdgeNetwork() {
   const networkName = readEnvValue("CLEAN_PAY_EDGE_NETWORK", "remnawave-network");
   const inspectStatus = runDocker(["network", "inspect", networkName], { stdio: "ignore" });
@@ -273,6 +341,7 @@ async function verify() {
         console.log(`OK ${url}`);
         console.log(response.body);
         assertReconciliationWorkerHealthy();
+        assertRetentionWorkerHealthy();
         return;
       }
 
@@ -319,6 +388,7 @@ switch (command) {
       }
 
       assertReconciliationWorkerHealthy();
+      assertRetentionWorkerHealthy();
     }
     break;
   case "verify":

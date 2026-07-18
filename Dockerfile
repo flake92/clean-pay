@@ -29,7 +29,7 @@ COPY --from=builder --chown=cleanpay:nodejs /app/.next ./.next
 COPY --from=builder --chown=cleanpay:nodejs /app/public ./public
 COPY --from=builder --chown=cleanpay:nodejs /app/prisma ./prisma
 COPY --from=builder --chown=cleanpay:nodejs /app/prisma.config.ts ./
-COPY --from=builder --chown=cleanpay:nodejs /app/deploy/prod/start.sh /app/deploy/prod/validate-env.mjs /app/deploy/prod/production-env-rules.mjs /app/deploy/prod/reconcile-loop.mjs /app/deploy/prod/reconciliation-batch.mjs ./deploy/prod/
+COPY --from=builder --chown=cleanpay:nodejs /app/deploy/prod/start.sh /app/deploy/prod/validate-env.mjs /app/deploy/prod/production-env-rules.mjs /app/deploy/prod/reconcile-loop.mjs /app/deploy/prod/reconciliation-batch.mjs /app/deploy/prod/retention-cleanup.mjs /app/deploy/prod/retention-loop.mjs ./deploy/prod/
 RUN chmod +x ./deploy/prod/start.sh
 USER cleanpay
 EXPOSE 4000

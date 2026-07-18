@@ -195,6 +195,30 @@ assert_reconciliation_worker() {
   fail "PAYMENT_RECONCILIATION_ENABLED=true, but reconciliation-worker is not healthy ($last_status)"
 }
 
+assert_retention_worker() {
+  attempts=0
+  last_status="container not found"
+
+  while [ "$attempts" -lt 60 ]; do
+    container_id=$(compose ps -q retention-worker) \
+      || fail "failed to inspect retention-worker"
+
+    if [ -n "$container_id" ]; then
+      last_status=$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}missing{{end}}' "$container_id" 2>/dev/null || printf '%s' "inspect failed")
+
+      if [ "$last_status" = "healthy" ]; then
+        info "retention-worker is healthy"
+        return 0
+      fi
+    fi
+
+    attempts=$((attempts + 1))
+    sleep 2
+  done
+
+  fail "retention-worker is not healthy ($last_status)"
+}
+
 start() {
   require_command docker
   docker compose version >/dev/null 2>&1 || fail "Docker Compose plugin is not available"
@@ -234,6 +258,7 @@ verify() {
   printf '%s\n' "$response"
 
   assert_reconciliation_worker
+  assert_retention_worker
 }
 
 case "$COMMAND" in
@@ -255,6 +280,7 @@ case "$COMMAND" in
     require_env_file
     compose ps
     assert_reconciliation_worker
+    assert_retention_worker
     ;;
   verify|health)
     verify

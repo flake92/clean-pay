@@ -68,6 +68,8 @@ COPY --chown=cleanpay:nodejs deploy/prod/validate-env.mjs ./deploy/prod/validate
 COPY --chown=cleanpay:nodejs deploy/prod/production-env-rules.mjs ./deploy/prod/production-env-rules.mjs
 COPY --chown=cleanpay:nodejs deploy/prod/reconcile-loop.mjs ./deploy/prod/reconcile-loop.mjs
 COPY --chown=cleanpay:nodejs deploy/prod/reconciliation-batch.mjs ./deploy/prod/reconciliation-batch.mjs
+COPY --chown=cleanpay:nodejs deploy/prod/retention-cleanup.mjs ./deploy/prod/retention-cleanup.mjs
+COPY --chown=cleanpay:nodejs deploy/prod/retention-loop.mjs ./deploy/prod/retention-loop.mjs
 
 RUN sed -i 's/\r$//' ./deploy/prod/start.sh \
   && chmod +x ./deploy/prod/start.sh
