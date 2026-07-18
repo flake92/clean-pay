@@ -90,19 +90,3 @@ export async function readBffError(
 
   return clientError;
 }
-
-export async function apiFetch<T>(url: string, init?: RequestInit, fallback?: string) {
-  const response = await fetch(url, init);
-
-  if (!response.ok) {
-    throw await readBffError(response, fallback);
-  }
-
-  const body = await response.json().catch(() => null);
-
-  return body?.data as T;
-}
-
-export function isUnauthorizedError(error: unknown) {
-  return error instanceof BffClientError && error.status === 401;
-}

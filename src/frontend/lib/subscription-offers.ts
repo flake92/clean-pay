@@ -11,7 +11,3 @@ export function findRenewPlan(offers: SubscriptionOffersResponse) {
 export function hasRenewOffer(offers: SubscriptionOffersResponse | null | undefined) {
   return Boolean(offers && findRenewPlan(offers));
 }
-
-export function hasCurrentSubscription(offers: SubscriptionOffersResponse | null | undefined) {
-  return Boolean(offers?.has_current_subscription);
-}
