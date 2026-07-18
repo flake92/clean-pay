@@ -83,11 +83,13 @@ export type PurchaseRequest = {
   plan_code: string;
   duration_days: number;
   gateway_type: string;
+  return_url?: string;
 };
 
 export type ExtendRequest = {
   duration_days: number;
   gateway_type: string;
+  return_url?: string;
 };
 
 export type PaymentInitResponse = {
@@ -98,6 +100,7 @@ export type PaymentInitResponse = {
   is_free: boolean;
   final_amount: string;
   currency: string;
+  return_url?: string | null;
 };
 
 export type PaymentTransactionResponse = {

@@ -117,7 +117,7 @@ curl -f https://pay.example.com/api/health/readiness
 Пока PR #135 не принят и не вошёл в официальный образ, тестовый стенд
 Remnashop нужно собирать из ветки
 `flake92/remnashop:codex/clean-pay-integration-upstream-dev` и фиксировать на
-проверенном commit `9cc68fb`. Обычный `ghcr.io/snoups/remnashop:latest`/v0.8.2
+проверенном commit `a08c4c8`. Обычный `ghcr.io/snoups/remnashop:latest`/v0.8.2
 не содержит полного recovery contract v1 и endpoint
 `POST /api/v1/admin/users/merge`, поэтому с ним нельзя включать
 `PAYMENT_RECONCILIATION_ENABLED` и не работает полный сценарий привязки e-mail

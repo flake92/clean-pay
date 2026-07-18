@@ -176,6 +176,7 @@ const payment = {
   gateway_type: "YOOKASSA",
   payment_url: "https://pay.test",
   is_free: false,
+  return_url: "http://localhost:8080/payment/pending?operation_id=operation-1",
 };
 
 const record = {
@@ -400,6 +401,7 @@ describe("BFF route integration contracts", () => {
         plan_code: "basic",
         gateway_type: "YOOKASSA",
         duration_days: 30,
+        return_url: "http://localhost:8080/payment/pending?operation_id=operation-1",
       },
     }));
     expect(mocks.remnashopRequest).toHaveBeenCalledWith("/subscription/extend", expect.objectContaining({
@@ -407,6 +409,7 @@ describe("BFF route integration contracts", () => {
       body: {
         gateway_type: "YOOKASSA",
         duration_days: 30,
+        return_url: "http://localhost:8080/payment/pending?operation_id=operation-1",
       },
     }));
   });
@@ -534,7 +537,10 @@ describe("BFF route integration contracts", () => {
       });
     mocks.remnashopRequest
       .mockResolvedValueOnce({ plans: [{ public_code: "basic", name: "Basic" }] })
-      .mockResolvedValueOnce(payment);
+      .mockResolvedValueOnce({
+        ...payment,
+        return_url: "http://localhost:8080/payment/pending?operation_id=operation-new",
+      });
 
     const response = await purchaseRoute.POST(jsonRequest("/api/bff/subscription/purchase", {
       plan_code: "basic",

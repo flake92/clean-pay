@@ -6,10 +6,16 @@ import { Card } from "primereact/card";
 import { Message } from "primereact/message";
 import { readBffError } from "@/frontend/lib/client-api";
 import { Tag } from "primereact/tag";
+import { Button } from "primereact/button";
 
 import { AppShell, PageHeader } from "@/frontend/components/layout";
 import { LinkButton } from "@/frontend/components/prime/link-button";
 import { shouldPollPaymentOperation } from "@/frontend/lib/payment-idempotency";
+import {
+  paymentPollDelayMs,
+  paymentReturnOutcome,
+  shouldPollPaymentReturn,
+} from "@/frontend/lib/payment-return";
 
 type PaymentStatus = {
   payment_id: string;
@@ -57,28 +63,23 @@ function formatDate(value: string) {
   }).format(new Date(value));
 }
 
-function heading(kind: Props["kind"]) {
-  if (kind === "success") {
-    return "Оплата принята";
-  }
+function heading(data: StatusResponse | null) {
+  const outcome = paymentReturnOutcome(data);
 
-  if (kind === "fail") {
-    return "Оплата не завершена";
-  }
+  if (outcome === "success") return "Оплата подтверждена";
+  if (outcome === "failed") return "Оплата не завершена";
+  if (outcome === "pending") return "Платёж обрабатывается";
+  if (outcome === "unknown") return "Статус платежа требует проверки";
 
-  return "Платёж обрабатывается";
+  return "Проверяем статус платежа";
 }
 
 function intro(kind: Props["kind"]) {
-  if (kind === "success") {
-    return "Проверяем локальную запись платежа и актуальную подписку.";
-  }
-
   if (kind === "fail") {
-    return "Если платёж был отменён, можно выбрать тариф заново.";
+    return "Возврат от провайдера не является подтверждением результата — сверяем серверный статус.";
   }
 
-  return "Статус может обновиться после обработки платежа.";
+  return "Результат определяется по локальной операции, провайдеру и актуальной подписке.";
 }
 
 function paymentStatusLabel(status: string) {
@@ -114,6 +115,8 @@ export function PaymentReturnStatus({ kind }: Props) {
   const searchParams = useSearchParams();
   const [data, setData] = useState<StatusResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [refreshKey, setRefreshKey] = useState(0);
+  const [loading, setLoading] = useState(true);
 
   const paymentId = useMemo(() => {
     return (
@@ -152,8 +155,11 @@ export function PaymentReturnStatus({ kind }: Props) {
 
     let cancelled = false;
     let pollTimer: ReturnType<typeof setTimeout> | undefined;
+    let pollAttempt = 0;
 
     const loadStatus = async () => {
+      if (!cancelled) setLoading(true);
+
       try {
         const response = await fetch(
           `/api/bff/payments/status${query.size > 0 ? `?${query.toString()}` : ""}`,
@@ -166,15 +172,22 @@ export function PaymentReturnStatus({ kind }: Props) {
         const body = await response.json().catch(() => null);
         const nextData = body?.data as StatusResponse | undefined;
 
-        if (!cancelled && nextData) {
+        if (!nextData) {
+          throw new Error("Сервер вернул некорректный статус платежа.");
+        }
+
+        if (!cancelled) {
           setData(nextData);
           setError(null);
+          setLoading(false);
 
-          if (
-            resolvedOperationId &&
-            shouldPollPaymentOperation(nextData.operation?.status)
-          ) {
-            pollTimer = setTimeout(loadStatus, 5_000);
+          if (shouldPollPaymentReturn(nextData)) {
+            const delay = paymentPollDelayMs(
+              pollAttempt,
+              nextData.operation?.retry_after_seconds,
+            );
+            pollAttempt += 1;
+            pollTimer = setTimeout(loadStatus, delay);
           }
         }
       } catch (loadError) {
@@ -184,11 +197,14 @@ export function PaymentReturnStatus({ kind }: Props) {
               ? loadError.message
               : "Не удалось проверить статус.",
           );
+          setLoading(false);
 
           // An operation id is durable, so a transient BFF/Remnashop outage
           // must not permanently stop the callback page from observing it.
-          if (resolvedOperationId) {
-            pollTimer = setTimeout(loadStatus, 5_000);
+          if (resolvedOperationId || resolvedPaymentId) {
+            const delay = paymentPollDelayMs(pollAttempt);
+            pollAttempt += 1;
+            pollTimer = setTimeout(loadStatus, delay);
           }
         }
       }
@@ -200,16 +216,16 @@ export function PaymentReturnStatus({ kind }: Props) {
       cancelled = true;
       if (pollTimer) clearTimeout(pollTimer);
     };
-  }, [operationId, paymentId]);
+  }, [operationId, paymentId, refreshKey]);
 
   return (
     <AppShell>
       <div className="flex flex-column gap-6">
-        <PageHeader description={intro(kind)} title={heading(kind)} />
+        <PageHeader description={intro(kind)} title={heading(data)} />
       <Card>
         <div className="flex flex-column gap-4">
-        {error ? <Message severity="error" text={error} /> : null}
-        {!error && !data ? <Message severity="info" text="Проверка..." /> : null}
+        {error ? <Message severity="warn" text={`Результат пока неизвестен. ${error}`} /> : null}
+        {loading && !data ? <Message severity="info" text="Проверка..." /> : null}
         {data?.operation?.status === "manual_required" ? (
           <Message
             severity="error"
@@ -268,6 +284,14 @@ export function PaymentReturnStatus({ kind }: Props) {
       </Card>
 
       <div className="flex flex-wrap gap-2">
+        <Button
+          icon="pi pi-refresh"
+          label="Обновить статус"
+          loading={loading}
+          onClick={() => setRefreshKey((value) => value + 1)}
+          outlined
+          type="button"
+        />
         <LinkButton href="/cabinet" label="Открыть кабинет" />
         {kind === "fail" ? (
           <LinkButton href="/tariffs" label="Вернуться к тарифам" outlined />

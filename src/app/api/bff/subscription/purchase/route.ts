@@ -23,6 +23,7 @@ import {
 } from "@/backend/integrations/remnashop/client";
 import { BffError } from "@/backend/integrations/remnashop/errors";
 import { getCurrentSession } from "@/backend/sessions/web-session";
+import { assertPaymentReturnUrl, paymentReturnUrl } from "@/backend/payments/return-url";
 import type {
   PaymentInitResponse,
   PurchaseRequest,
@@ -171,8 +172,15 @@ export async function POST(request: Request) {
           method: "POST",
           accessToken,
           idempotencyKey: operation.upstreamKey,
-          body: paymentRequest,
+          body: {
+            ...paymentRequest,
+            return_url: paymentReturnUrl(operation.operationId),
+          },
         },
+      );
+      assertPaymentReturnUrl(
+        paymentReturnUrl(operation.operationId),
+        payment.return_url,
       );
       const persistedPayment = await completePaymentOperationSuccess({
         operationId: operation.operationId,

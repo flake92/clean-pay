@@ -239,9 +239,16 @@ Fallback по Telegram/e-mail должен подтверждать UUID и вл
 - parser readiness ответа отдельно протестирован на malformed JSON, degraded dependency и полностью healthy payload; Compose config и Alpine shell syntax прошли;
 - профильные тесты 39/39, полный unit suite 343/343, integration 36/36, ESLint без ошибок (один известный warning generated coverage) и production build 50/50 прошли. Код Remnashop и Remnawave не менялся; production rollout не выполнялся.
 
-### 16. [ ] Довести payment return flow до конечного состояния
+### 16. [x] Довести payment return flow до конечного состояния
 
 Передавать/проверять return URL в платёжном контракте, добавить polling с backoff и ручное обновление, а заголовок страницы строить по подтверждённому сервером статусу.
+
+Результат:
+
+- Clean Pay формирует return URL только на сервере и привязывает его к `operation_id`; purchase/extend передают URL в Remnashop и принимают платёжный ответ только при точном совпадении возвращённого URL, поэтому браузер не может подменить origin или конечный маршрут;
+- companion Remnashop commit `a08c4c8` принимает return URL в публичном платёжном контракте, разрешает только настроенный origin и маршруты `/payment/success`, `/payment/fail`, `/payment/pending`, отклоняет fragment и передаёт проверенный URL в YooKassa. Для старых bot-клиентов без URL сохранён прежний redirect;
+- страницы возврата строят заголовок только по подтверждённому сервером состоянию: route `/success` сам по себе больше не означает успех. Неопределённый результат отображается безопасно, незавершённые операции опрашиваются с exponential backoff 2–30 секунд и `retry_after`, доступно ручное обновление;
+- профильные тесты Clean Pay 51/51, полный unit suite 347/347, integration 36/36, ESLint без ошибок (один известный warning generated coverage) и production build 50/50 прошли. Remnashop: unit 140/140 и Ruff прошли; fork commit `a08c4c8` запушен, PR [`snoups/remnashop#135`](https://github.com/snoups/remnashop/pull/135) обновлён. Remnawave не изменялся; production rollout не выполнялся.
 
 ### 17. [ ] Гарантированно снимать loading после frontend-ошибок
 
@@ -304,3 +311,4 @@ Fallback по Telegram/e-mail должен подтверждать UUID и вл
 - 2026-07-18: пункт 13 исправлен и проверен: WebAuthn challenge и Telegram state потребляются условным update с проверкой единственного изменённого ряда до внешних/локальных mutations. Профильные тесты 23/23, unit 338/338, integration 35/35, ESLint и production build 50/50 прошли; реальная PostgreSQL-конкуренция с 16 claim подтвердила ровно одного победителя для каждого state type и отказ для expired challenge. Remnashop и Remnawave не менялись; production rollout не выполнялся.
 - 2026-07-18: пункт 14 исправлен и проверен: внешние HTTP paths получили abort timeout, readiness запускает шесть dependencies параллельно с общим 8-секундным deadline и 5-секундными per-check limits, причины timeout/deadline/HTTP/response ошибок различимы. Профильные тесты 92/92, unit 339/339, integration 36/36, ESLint и production build 50/50 прошли. Remnashop и Remnawave не менялись; production rollout не выполнялся.
 - 2026-07-18: пункт 15 исправлен и проверен: app healthcheck и оба deployment entrypoint принимают только полный healthy `/api/health/readiness`, `up` ждёт readiness до 120 секунд и fail-closed завершает deploy при malformed/degraded ответе либо недоступной dependency. Профильные тесты 39/39, unit 343/343, integration 36/36, ESLint, production build 50/50, Compose config и Alpine shell syntax прошли. Remnashop и Remnawave не менялись; production rollout ещё не выполнялся.
+- 2026-07-18: пункт 16 исправлен и проверен: server-owned return URL привязан к платёжной операции и проверяется end-to-end, route не может объявить неподтверждённый успех, polling использует bounded exponential backoff и допускает ручное обновление. Clean Pay: профильные тесты 51/51, unit 347/347, integration 36/36, ESLint и production build 50/50 прошли. Companion Remnashop commit `a08c4c8` прошёл 140/140 unit-тестов и Ruff, запушен в fork и обновил PR [`snoups/remnashop#135`](https://github.com/snoups/remnashop/pull/135); Remnawave не изменялся, production rollout ещё не выполнялся.
