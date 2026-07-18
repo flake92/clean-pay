@@ -12,9 +12,9 @@ import {
 import { Message } from "primereact/message";
 import { ProgressSpinner } from "primereact/progressspinner";
 
-function redirectToTelegramLogin() {
+function redirectToTelegramLogin(redirectTo: string) {
   const url = new URL("/auth/telegram/start", window.location.origin);
-  url.searchParams.set("redirect_to", "/cabinet");
+  url.searchParams.set("redirect_to", redirectTo);
   window.location.replace(url.toString());
 }
 
@@ -22,7 +22,7 @@ async function readError(response: Response) {
   return (await readBffError(response, "Не удалось войти через Telegram.")).message;
 }
 
-export function TelegramWebAppLogin() {
+export function TelegramWebAppLogin({ redirectTo = "/cabinet" }: { redirectTo?: string }) {
   const [error, setError] = useState<string | null>(null);
   const [fallbackStarted, setFallbackStarted] = useState(false);
 
@@ -41,7 +41,7 @@ export function TelegramWebAppLogin() {
 
         if (!initData) {
           setFallbackStarted(true);
-          redirectToTelegramLogin();
+          redirectToTelegramLogin(redirectTo);
           return;
         }
 
@@ -50,7 +50,7 @@ export function TelegramWebAppLogin() {
         const response = await fetch("/api/bff/auth/telegram/webapp", {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ initData }),
+          body: JSON.stringify({ initData, redirectTo }),
         });
 
         if (!response.ok) {
@@ -71,7 +71,7 @@ export function TelegramWebAppLogin() {
     return () => {
       alive = false;
     };
-  }, []);
+  }, [redirectTo]);
 
   return (
     <div className="flex flex-column align-items-center gap-4 text-center">
@@ -79,8 +79,8 @@ export function TelegramWebAppLogin() {
         <>
           <Message severity="error" text={error} />
           <div className="flex flex-wrap justify-content-center gap-2">
-            <LinkButton href="/auth/telegram/start?redirect_to=/cabinet" label="Повторить вход через Telegram" />
-            <LinkButton href="/login" label="Открыть обычный вход" outlined />
+            <LinkButton href={`/auth/telegram/start?redirect_to=${encodeURIComponent(redirectTo)}`} label="Повторить вход через Telegram" />
+            <LinkButton href={`/login?redirect_to=${encodeURIComponent(redirectTo)}`} label="Открыть обычный вход" outlined />
           </div>
         </>
       ) : (

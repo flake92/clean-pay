@@ -63,7 +63,7 @@ function isWebAuthnTransportError(error: unknown) {
   );
 }
 
-export function PasskeyLoginButton() {
+export function PasskeyLoginButton({ redirectTo = "/cabinet" }: { redirectTo?: string }) {
   const supported = useWebAuthnSupport();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -93,7 +93,7 @@ export function PasskeyLoginButton() {
         return;
       }
 
-      window.location.assign("/cabinet");
+      window.location.assign(redirectTo);
     } catch (error) {
       setError(
         isUserCancelled(error)

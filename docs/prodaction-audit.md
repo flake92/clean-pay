@@ -296,9 +296,16 @@ Fallback по Telegram/e-mail должен подтверждать UUID и вл
 
 ## P3 — качество и эксплуатация
 
-### 21. [ ] Сохранять исходный `redirect_to` после всех способов входа
+### 21. [x] Сохранять исходный `redirect_to` после всех способов входа
 
 Провалидировать локальный путь и передавать его через password, passkey и Telegram login вместо жёсткого `/cabinet`.
+
+Результат:
+
+- единая shared policy принимает только локальный absolute path текущего origin, отклоняет protocol-relative/external/backslash URL, credentials и auth/login/register destinations, исключая open redirect и циклы входа;
+- server login page один раз валидирует `redirect_to` и передаёт результат password/register fallback, passkey и Telegram OIDC button. Password и passkey после подтверждённого входа используют этот путь вместо жёсткого `/cabinet`; fallback остаётся `/cabinet`;
+- Telegram OIDC продолжает хранить путь в одноразовом state, но теперь получает исходный путь от login page. Telegram WebApp page также валидирует параметр на сервере, передаёт его BFF, а BFF независимо валидирует снова перед ответом/redirect; fallback-ссылки сохраняют тот же путь;
+- профильные тесты 28/28 покрывают safe/unsafe matrix, server/client wiring, Telegram state/WebApp и frontend error flows. Полный unit suite 373/373, integration 42/42, ESLint без ошибок (один известный warning generated coverage) и production build 50/50 прошли. Remnashop и Remnawave не менялись; production rollout не выполнялся.
 
 ### 22. [ ] Вернуть TypeScript-проверку тестов в обязательный pipeline
 
@@ -344,3 +351,4 @@ Fallback по Telegram/e-mail должен подтверждать UUID и вл
 - 2026-07-18: пункт 18 исправлен и проверен: все JSON BFF routes fail-closed возвращают `400` на malformed/non-object body, payment fields проходят строгую runtime-валидацию, а подтверждённые amount/currency/version входят в idempotency contract и повторно сверяются перед dispatch. Клиент показывает изменение цены «было → стало» до invoice. Профильные тесты 72/72, unit 365/365, integration 38/38, ESLint и production build 50/50 прошли. Remnashop и Remnawave не менялись; production rollout ещё не выполнялся.
 - 2026-07-18: пункт 19 исправлен и проверен: promocode, reissue и обе device mutations используют attempted/succeeded/failed audit lifecycle; success пишется строго после upstream mutation, failure содержит только безопасную классификацию и никогда не сопровождается ложным success. Профильные тесты 36/36, unit 367/367, integration 42/42, ESLint и production build 50/50 прошли. Remnashop и Remnawave не менялись; production rollout ещё не выполнялся.
 - 2026-07-18: пункт 20 исправлен и проверен: always-on retention-worker применяет документированную bounded policy к auth states, verification codes, sessions, audit и rate-limit rows, heartbeat включён в deployment gate; raw identity/PII централизованно редактируется из log/audit metadata. Профильные тесты 28/28, unit 371/371, integration 42/42, ESLint, production build 50/50, Compose/syntax, production Docker build/smoke и реальная PostgreSQL boundary matrix прошли. Remnashop и Remnawave не менялись; production rollout ещё не выполнялся.
+- 2026-07-18: пункт 21 исправлен и проверен: единая local redirect policy валидирует исходный `redirect_to` и сохраняет его через password, passkey, Telegram OIDC и Telegram WebApp login; external/auth-loop destinations дают безопасный `/cabinet` fallback. Профильные тесты 28/28, unit 373/373, integration 42/42, ESLint и production build 50/50 прошли. Remnashop и Remnawave не менялись; production rollout ещё не выполнялся.

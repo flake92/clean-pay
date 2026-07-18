@@ -57,8 +57,8 @@ async function readJsonBody(response: Response) {
 const unknownLoginResultMessage =
   "Не удалось определить результат входа. Обновите страницу, чтобы проверить состояние сессии.";
 
-function redirectAfterAuth() {
-  window.location.assign("/cabinet");
+function redirectAfterAuth(redirectTo: string) {
+  window.location.assign(redirectTo);
 }
 
 function shouldRedirectAfterRegisterFallback(body: { data?: { user?: { is_email_verified?: boolean }; emailVerification?: unknown } }) {
@@ -124,7 +124,7 @@ function AuthTurnstileChallenge() {
   return <TurnstileWidget onReady={turnstile.setHandle} onToken={turnstile.setToken} siteKey={turnstile.siteKey} />;
 }
 
-export function LoginForm() {
+export function LoginForm({ redirectTo = "/cabinet" }: { redirectTo?: string }) {
   const [state, setState] = useState<ApiState>({ loading: false, error: null });
   const [email, setEmail] = useState("");
   const [mode, setMode] = useState<LoginMode>("identify");
@@ -220,7 +220,7 @@ export function LoginForm() {
 
       if (knownLocalUser) {
         navigating = true;
-        redirectAfterAuth();
+        redirectAfterAuth(redirectTo);
         return;
       }
 
@@ -234,7 +234,7 @@ export function LoginForm() {
 
       navigating = true;
       if (shouldRedirectAfterRegisterFallback(body)) {
-        redirectAfterAuth();
+        redirectAfterAuth(redirectTo);
         return;
       }
 
@@ -298,7 +298,7 @@ export function LoginForm() {
 
       navigating = true;
       if (shouldRedirectAfterRegisterFallback(body)) {
-        redirectAfterAuth();
+        redirectAfterAuth(redirectTo);
         return;
       }
 
@@ -412,7 +412,7 @@ export function LoginForm() {
   return (
     <form className="flex flex-column gap-3" onSubmit={continueWithPassword}>
       {accountHeader}
-      {hasPasskey ? <PasskeyLoginButton /> : null}
+      {hasPasskey ? <PasskeyLoginButton redirectTo={redirectTo} /> : null}
       {!knownLocalUser ? (
         <Message
           severity="info"
@@ -493,7 +493,7 @@ export function RegisterForm() {
 
     const body = (await response.json()) as { data?: { user?: { is_email_verified?: boolean }; emailVerification?: unknown } };
     if (shouldRedirectAfterRegisterFallback(body)) {
-      redirectAfterAuth();
+      redirectAfterAuth("/cabinet");
       return;
     }
 

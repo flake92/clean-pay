@@ -143,5 +143,7 @@ describe("auth payload helpers and profile presenters", () => {
     expect(safeRedirectPath(null)).toBeUndefined();
     expect(safeRedirectPath("https://evil.test")).toBeUndefined();
     expect(safeRedirectPath("//evil.test/path")).toBeUndefined();
+    expect(safeRedirectPath("/login")).toBeUndefined();
+    expect(safeRedirectPath("/auth/telegram/start")).toBeUndefined();
   });
 });

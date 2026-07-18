@@ -111,6 +111,7 @@ describe("public auth anti-abuse routes", () => {
 
     const response = await telegramWebApp(post("http://localhost/api/bff/auth/telegram/webapp", {
       initData: `user=${encodeURIComponent(JSON.stringify({ id: 123 }))}&hash=signed`,
+      redirectTo: "/tariffs?source=telegram",
     }));
 
     expect(response.status).toBe(200);
@@ -119,7 +120,7 @@ describe("public auth anti-abuse routes", () => {
       tgId: 777,
     }));
     expect(mocks.reconcileUser).toHaveBeenCalledWith(expect.objectContaining({ verifiedProfile }));
-    expect(await response.json()).toEqual({ redirectTo: "/cabinet" });
+    expect(await response.json()).toEqual({ redirectTo: "/tariffs?source=telegram" });
   });
 
   it("rejects Telegram WebApp auth without a verified Telegram identity", async () => {

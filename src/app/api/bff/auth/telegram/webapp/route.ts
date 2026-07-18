@@ -7,6 +7,7 @@ import { reconcileUserFromRemnashopAuth } from "@/backend/integrations/remnashop
 import { assertRateLimit } from "@/backend/limits/rate-limit";
 import { logTechnicalInfo, logTechnicalWarning } from "@/backend/observability/audit";
 import { createWebSessionOnResponse } from "@/backend/sessions/web-session";
+import { safeRedirectPath } from "@/shared/auth/redirect-policy";
 
 export const runtime = "nodejs";
 
@@ -14,6 +15,9 @@ export async function POST(request: Request) {
   try {
     const body = await readBffJsonObject(request);
     const initData = typeof body.initData === "string" ? body.initData.trim() : "";
+    const redirectTo = safeRedirectPath(
+      typeof body.redirectTo === "string" ? body.redirectTo : undefined,
+    ) ?? "/cabinet";
     if (!initData) {
       logTechnicalWarning("telegram_webapp_auth_missing_init_data", {});
       return NextResponse.json(
@@ -46,7 +50,7 @@ export async function POST(request: Request) {
       auth: auth.data,
       verifiedProfile,
     });
-    const response = NextResponse.json({ redirectTo: "/cabinet" });
+    const response = NextResponse.json({ redirectTo });
 
     await createWebSessionOnResponse(response, reconciled.user.id, {
       remnashopSession: reconciled.remnashopSession,
