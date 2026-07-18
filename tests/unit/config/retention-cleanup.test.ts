@@ -105,6 +105,13 @@ describe("production data retention", () => {
       expect(compose).toMatch(
         /retention-worker:[\s\S]*retention-loop\.mjs[\s\S]*clean-pay-retention-heartbeat/,
       );
+      const retentionSection =
+        compose.split(/\n  retention-worker:\n/)[1]?.split(/\n  postgres:\n/)[0] ?? "";
+      expect(retentionSection).toContain("depends_on:");
+      expect(retentionSection).toMatch(
+        /\n\s+app:\n\s+condition: service_healthy/,
+      );
+      expect(retentionSection).not.toMatch(/\n\s+postgres:/);
     }
     expect(prodCommand).toContain('composeArgs("ps", "-q", "retention-worker")');
     expect(startScript).toContain("compose ps -q retention-worker");

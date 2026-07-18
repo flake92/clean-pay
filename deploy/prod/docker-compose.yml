@@ -82,7 +82,7 @@ services:
     environment:
       NODE_ENV: production
     depends_on:
-      postgres:
+      app:
         condition: service_healthy
     healthcheck:
       test:
