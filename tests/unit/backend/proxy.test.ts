@@ -94,6 +94,50 @@ describe("proxy auth redirects", () => {
     expect(response.headers.get("location")).toBeNull();
   });
 
+  it("does not promote a bootstrap session through its refresh cookie", async () => {
+    const cookie = `clean_pay_access=${accessToken({
+      sid: "session-1",
+      uid: "user-1",
+      exp: Math.floor(Date.now() / 1000) + 60,
+      al: "BOOTSTRAP",
+      ev: true,
+    })}; clean_pay_refresh=refresh-token`;
+    const response = await proxy(request("/api/bff/subscription/current", cookie));
+
+    expect(response.status).toBe(403);
+    expect(await response.json()).toMatchObject({
+      error: { code: "PASSKEY_REQUIRED" },
+    });
+  });
+
+  it("redirects a bootstrap session to passkey setup", async () => {
+    const cookie = `clean_pay_access=${accessToken({
+      sid: "session-1",
+      uid: "user-1",
+      exp: Math.floor(Date.now() / 1000) + 60,
+      al: "BOOTSTRAP",
+      ev: true,
+    })}; clean_pay_refresh=refresh-token`;
+    const response = await proxy(request("/cabinet", cookie));
+
+    expect(response.status).toBe(307);
+    expect(response.headers.get("location")).toBe("https://pay.example.com/passkey/setup");
+  });
+
+  it("allows a bootstrap session to finish passkey setup", async () => {
+    const cookie = `clean_pay_access=${accessToken({
+      sid: "session-1",
+      uid: "user-1",
+      exp: Math.floor(Date.now() / 1000) + 60,
+      al: "BOOTSTRAP",
+      ev: true,
+    })}; clean_pay_refresh=refresh-token`;
+    const response = await proxy(request("/passkey/setup", cookie));
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("location")).toBeNull();
+  });
+
   it("allows only the exact reconciliation service POST through to its secret-protected handler", async () => {
     const response = await proxy(request(
       "/api/internal/payments/reconcile",

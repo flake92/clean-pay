@@ -362,7 +362,10 @@ export async function proxy(request: NextRequest) {
     return NextResponse.next();
   }
 
-  if (isAuthenticated) {
+  // A BOOTSTRAP access token represents a deliberately restricted session.
+  // Its refresh cookie is only a session candidate and must not promote it to
+  // the general authenticated path before the passkey setup is completed.
+  if (isAuthenticated && !isBootstrapAuthenticated) {
     if (accessState.emailVerificationRequired && !isEmailVerificationAllowedPath(pathname)) {
       if (pathname.startsWith('/api/')) {
         logger.warn("http_request_decision", {
