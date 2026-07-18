@@ -126,6 +126,10 @@ describe("web session lifecycle", () => {
         userAgent: "vitest",
       }),
     });
+    const localSessionData = mocks.prisma.webSession.create.mock.calls[0]?.[0]
+      ?.data as Record<string, unknown>;
+    expect(localSessionData).not.toHaveProperty("remnashopAccessTokenEncrypted");
+    expect(localSessionData).not.toHaveProperty("remnashopRefreshTokenEncrypted");
     expect(state.setCalls.map((call) => call.name)).toEqual(["clean_pay_access", "clean_pay_refresh"]);
 
     await createWebSessionForRemnashopUser({
@@ -214,6 +218,10 @@ describe("web session lifecycle", () => {
     await createWebSessionOnResponse(response, "user-1");
     expect(response.cookies.get("clean_pay_access")?.value).toBeTruthy();
     expect(response.cookies.get("clean_pay_refresh")?.value).toBeTruthy();
+    const responseSessionData = mocks.prisma.webSession.create.mock.calls.at(-1)?.[0]
+      ?.data as Record<string, unknown>;
+    expect(responseSessionData.remnashopAccessTokenEncrypted).toBeUndefined();
+    expect(responseSessionData.remnashopRefreshTokenEncrypted).toBeUndefined();
 
     state.cookies.set(
       "clean_pay_access",

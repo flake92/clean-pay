@@ -208,16 +208,6 @@ export async function createWebSession(
   const env = getEnv();
   const cookieStore = await cookies();
   const requestHeaders = await headers();
-  const reusableSession = await prisma.webSession.findFirst({
-    where: {
-      userId,
-      revokedAt: null,
-      remnashopAccessTokenEncrypted: { not: null },
-      remnashopRefreshTokenEncrypted: { not: null },
-      refreshExpiresAt: { gt: new Date() },
-    },
-    orderBy: { updatedAt: "desc" },
-  });
   const now = new Date();
   const accessTokenExpiresAt = addMinutes(
     now,
@@ -232,18 +222,13 @@ export async function createWebSession(
     assuranceLevel,
     accessTokenExpiresAt,
     refreshExpiresAt,
-    reusableSessionId: reusableSession?.id,
-    hasRemnashopTokens: Boolean(reusableSession),
+    hasRemnashopTokens: false,
   });
 
   const session = await prisma.webSession.create({
     data: {
       userId,
       refreshTokenHash: sha256(refreshToken),
-      remnashopAccessTokenEncrypted: reusableSession?.remnashopAccessTokenEncrypted,
-      remnashopRefreshTokenEncrypted: reusableSession?.remnashopRefreshTokenEncrypted,
-      remnashopAccessExpiresAt: reusableSession?.remnashopAccessExpiresAt,
-      remnashopRefreshExpiresAt: reusableSession?.remnashopRefreshExpiresAt,
       userAgent: requestHeaders.get("user-agent"),
       authMethod,
       assuranceLevel,
@@ -280,7 +265,6 @@ export async function createWebSession(
     assuranceLevel: session.assuranceLevel,
     accessTokenExpiresAt,
     refreshExpiresAt,
-    reusedRemnashopTokens: Boolean(reusableSession),
     hasRemnashopTokens: Boolean(session.remnashopAccessTokenEncrypted && session.remnashopRefreshTokenEncrypted),
   });
 
@@ -552,26 +536,10 @@ export async function createWebSessionOnResponse(
 ) {
   const env = getEnv();
   const requestHeaders = await headers();
-  const currentSession = await getCurrentSession();
   authDebugLog("session_response_create_started", {
     userId,
-    hasCurrentSession: Boolean(currentSession),
-    currentSessionId: currentSession?.id,
-    currentSessionUserId: currentSession?.userId,
+    hasProvidedRemnashopSession: Boolean(options.remnashopSession),
   });
-  const reusableSession =
-    currentSession?.userId === userId && currentSession.remnashopAccessTokenEncrypted && currentSession.remnashopRefreshTokenEncrypted
-      ? currentSession
-      : await prisma.webSession.findFirst({
-          where: {
-            userId,
-            revokedAt: null,
-            remnashopAccessTokenEncrypted: { not: null },
-            remnashopRefreshTokenEncrypted: { not: null },
-            refreshExpiresAt: { gt: new Date() },
-          },
-          orderBy: { updatedAt: "desc" },
-        });
   const now = new Date();
   const accessTokenExpiresAt = addMinutes(
     now,
@@ -586,18 +554,17 @@ export async function createWebSessionOnResponse(
     assuranceLevel: WebSessionAssuranceLevel.FULL,
     accessTokenExpiresAt,
     refreshExpiresAt,
-    reusableSessionId: reusableSession?.id,
-    reusedRemnashopTokens: Boolean(reusableSession),
+    hasProvidedRemnashopSession: Boolean(options.remnashopSession),
   });
 
   const session = await prisma.webSession.create({
     data: {
       userId,
       refreshTokenHash: sha256(refreshToken),
-      remnashopAccessTokenEncrypted: options.remnashopSession?.accessTokenEncrypted ?? reusableSession?.remnashopAccessTokenEncrypted,
-      remnashopRefreshTokenEncrypted: options.remnashopSession?.refreshTokenEncrypted ?? reusableSession?.remnashopRefreshTokenEncrypted,
-      remnashopAccessExpiresAt: options.remnashopSession?.accessExpiresAt ?? reusableSession?.remnashopAccessExpiresAt,
-      remnashopRefreshExpiresAt: options.remnashopSession?.refreshExpiresAt ?? reusableSession?.remnashopRefreshExpiresAt,
+      remnashopAccessTokenEncrypted: options.remnashopSession?.accessTokenEncrypted,
+      remnashopRefreshTokenEncrypted: options.remnashopSession?.refreshTokenEncrypted,
+      remnashopAccessExpiresAt: options.remnashopSession?.accessExpiresAt,
+      remnashopRefreshExpiresAt: options.remnashopSession?.refreshExpiresAt,
       authMethod: options.authMethod ?? WebSessionAuthMethod.TELEGRAM,
       assuranceLevel: WebSessionAssuranceLevel.FULL,
       userAgent: requestHeaders.get("user-agent"),
@@ -638,7 +605,7 @@ export async function createWebSessionOnResponse(
     userId,
     authMethod: session.authMethod,
     assuranceLevel: session.assuranceLevel,
-    reusedRemnashopTokens: Boolean(reusableSession),
+    hasProvidedRemnashopSession: Boolean(options.remnashopSession),
     accessTokenExpiresAt,
     refreshExpiresAt,
   });

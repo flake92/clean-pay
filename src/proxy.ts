@@ -270,8 +270,11 @@ function browserMutationGuard(request: NextRequest) {
 export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
   const accessState = await getAccessState(request);
-  const isApi = pathname.startsWith('/api/');
-  const isAuthenticated = accessState.authenticated || (isApi && accessState.hasRefreshToken);
+  // Edge middleware cannot validate the opaque database-backed refresh token.
+  // Treat it as a session candidate for both pages and APIs and let the first
+  // server handler validate it. Deleting it here on ordinary navigation would
+  // destroy a valid session whenever the short-lived access cookie expires.
+  const isAuthenticated = accessState.authenticated || accessState.hasRefreshToken;
   const isBootstrapAuthenticated = accessState.bootstrapAuthenticated && !accessState.fullAuthenticated;
   const metadata = requestMetadata(request, accessState);
 

@@ -386,6 +386,13 @@ describe("auth use cases", () => {
   });
 
   it("returns local profile when the current session is not linked to Remnashop", async () => {
+    mocks.getCurrentSession.mockResolvedValueOnce({
+      ...session,
+      remnashopAccessTokenEncrypted: null,
+      remnashopRefreshTokenEncrypted: null,
+      user: { ...user, remnashopUserId: null },
+    });
+
     await expect(getCurrentAuthProfile()).resolves.toMatchObject({
       user: {
         email: "user@example.com",
@@ -395,11 +402,11 @@ describe("auth use cases", () => {
     expect(mocks.getRemnashopMe).not.toHaveBeenCalled();
   });
 
-  it("returns Remnashop profile when current session has Remnashop tokens", async () => {
+  it("claims a Remnashop bundle for a linked user even when this session has no copy", async () => {
     mocks.getCurrentSession.mockResolvedValueOnce({
       ...session,
-      remnashopAccessTokenEncrypted: "protected-access",
-      remnashopRefreshTokenEncrypted: "protected-refresh",
+      remnashopAccessTokenEncrypted: null,
+      remnashopRefreshTokenEncrypted: null,
     });
 
     await expect(getCurrentAuthProfile()).resolves.toMatchObject({

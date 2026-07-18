@@ -1,9 +1,13 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const loggerMock = vi.hoisted(() => ({
   info: vi.fn(),
   warn: vi.fn(),
   error: vi.fn(),
+}));
+
+const lifecycleMock = vi.hoisted(() => ({
+  acquireRemnashopTokensForSession: vi.fn(),
 }));
 
 vi.mock("@/backend/observability/logger", () => ({
@@ -31,11 +35,17 @@ vi.mock("@/backend/sessions/web-session", () => ({
   refreshCurrentAccessCookie: vi.fn(),
 }));
 
+vi.mock("@/backend/integrations/remnashop/session-token-lifecycle", () => ({
+  acquireRemnashopTokensForSession:
+    lifecycleMock.acquireRemnashopTokensForSession,
+}));
+
 import {
   getJwtExpiresAt,
   getAuthorizedRemnashopTokens,
   getRemnashopUserIdFromAccessToken,
   protectRemnashopToken,
+  revealRemnashopToken,
   remnashopAuth,
   remnashopAuthTelegramIdentity,
   remnashopAdminRequest,
@@ -78,6 +88,27 @@ function hasLogKey(metadata: unknown, key: string) {
 }
 
 describe("remnashop client", () => {
+  beforeEach(() => {
+    lifecycleMock.acquireRemnashopTokensForSession.mockReset();
+    lifecycleMock.acquireRemnashopTokensForSession.mockImplementation(
+      async ({ session }: { session: Record<string, unknown> }) => {
+        const access = session.remnashopAccessTokenEncrypted;
+        const refresh = session.remnashopRefreshTokenEncrypted;
+
+        if (typeof access !== "string" || typeof refresh !== "string") {
+          return null;
+        }
+
+        return {
+          accessToken: revealRemnashopToken(access),
+          refreshToken: revealRemnashopToken(refresh),
+          session,
+          source: "stored",
+        };
+      },
+    );
+  });
+
   afterEach(() => {
     loggerMock.info.mockClear();
     loggerMock.warn.mockClear();
@@ -509,8 +540,8 @@ describe("remnashop client", () => {
     });
   });
 
-  it("refreshes Remnashop tokens when stored access token is about to expire", async () => {
-    vi.mocked(getCurrentSession).mockResolvedValueOnce({
+  it("uses lifecycle-refreshed tokens before requesting /auth/me", async () => {
+    const expiredSession = {
       id: "session-1",
       userId: "user-1",
       authMethod: "EMAIL",
@@ -519,8 +550,21 @@ describe("remnashop client", () => {
       remnashopAccessExpiresAt: new Date(Date.now() - 1_000),
       remnashopRefreshExpiresAt: new Date(Date.now() + 60 * 60_000),
       user: { email: "user@example.com", emailVerified: true, telegramId: null },
-    } as never);
-    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+    };
+    vi.mocked(getCurrentSession).mockResolvedValueOnce(expiredSession as never);
+    lifecycleMock.acquireRemnashopTokensForSession.mockResolvedValueOnce({
+      accessToken: "new-access",
+      refreshToken: "new-refresh",
+      session: {
+        ...expiredSession,
+        remnashopAccessTokenEncrypted: protectRemnashopToken("new-access"),
+        remnashopRefreshTokenEncrypted: protectRemnashopToken("new-refresh"),
+        remnashopAccessExpiresAt: new Date("2026-06-25T10:00:00.000Z"),
+        remnashopRefreshExpiresAt: new Date("2026-07-25T10:00:00.000Z"),
+      },
+      source: "refresh",
+    });
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
       response({
         body: {
           email: "user@example.com",
@@ -534,29 +578,18 @@ describe("remnashop client", () => {
         },
       }),
     );
-    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
-      response({
-        body: {
-          expires_at: "2026-06-25T10:00:00.000Z",
-          refresh_expires_at: "2026-07-25T10:00:00.000Z",
-        },
-        setCookie: ["access_token=new-access; Path=/", "refresh_token=new-refresh; Path=/"],
-      }),
-    );
 
     await expect(getAuthorizedRemnashopTokens()).resolves.toMatchObject({
       accessToken: "new-access",
       refreshToken: "new-refresh",
     });
 
-    expect(prisma.webSession.update).toHaveBeenCalledWith({
-      where: { id: "session-1" },
-      data: expect.objectContaining({
-        remnashopAccessTokenEncrypted: expect.any(String),
-        remnashopRefreshTokenEncrypted: expect.any(String),
-        remnashopAccessExpiresAt: new Date("2026-06-25T10:00:00.000Z"),
-        remnashopRefreshExpiresAt: new Date("2026-07-25T10:00:00.000Z"),
-      }),
+    expect(lifecycleMock.acquireRemnashopTokensForSession).toHaveBeenCalledWith({
+      session: expiredSession,
+      refresh: expect.any(Function),
     });
+    expect(
+      lifecycleMock.acquireRemnashopTokensForSession.mock.invocationCallOrder[0],
+    ).toBeLessThan(fetchMock.mock.invocationCallOrder[0] ?? Number.MAX_SAFE_INTEGER);
   });
 });

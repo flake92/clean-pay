@@ -72,13 +72,12 @@ describe("proxy auth redirects", () => {
       "invalid access with refresh",
       `clean_pay_access=${accessToken({ sid: "session-1", uid: "user-1", exp: Math.floor(Date.now() / 1000) + 60 }, "wrong-secret")}; clean_pay_refresh=refresh-token`,
     ],
-  ])("redirects protected pages to login for %s", async (_label, cookie) => {
+  ])("preserves the refresh candidate on protected-page navigation for %s", async (_label, cookie) => {
     const response = await proxy(request("/cabinet", cookie));
 
-    expect(response.status).toBe(307);
-    expect(response.headers.get("location")).toBe("https://pay.example.com/login?redirect_to=%2Fcabinet");
-    expect(response.cookies.get("clean_pay_access")?.value).toBe("");
-    expect(response.cookies.get("clean_pay_refresh")?.value).toBe("");
+    expect(response.status).toBe(200);
+    expect(response.headers.get("location")).toBeNull();
+    expect(response.headers.get("set-cookie")).toBeNull();
   });
 
   it("does not redirect login to cabinet when only refresh cookie remains", async () => {

@@ -1,4 +1,3 @@
-import { decryptSecret, encryptSecret } from "@/backend/security/crypto";
 import { createHash, createHmac } from "node:crypto";
 import { authDebugLog } from "@/backend/observability/auth-debug-log";
 import { getEnv } from "@/backend/config/env";
@@ -21,6 +20,10 @@ import type {
   TelegramWebAppAuthRequest,
 } from "@/shared/remnashop/types";
 import { getCurrentSession, refreshCurrentAccessCookie } from "@/backend/sessions/web-session";
+import { acquireRemnashopTokensForSession } from "@/backend/integrations/remnashop/session-token-lifecycle";
+import { protectRemnashopToken } from "@/backend/integrations/remnashop/token-protection";
+
+export { protectRemnashopToken, revealRemnashopToken } from "@/backend/integrations/remnashop/token-protection";
 
 type RequestOptions = {
   method?: "GET" | "POST" | "DELETE";
@@ -244,14 +247,6 @@ export function getRemnashopUserIdFromAccessToken(accessToken: string) {
   }
 
   return String(payload.sub);
-}
-
-export function protectRemnashopToken(token: string) {
-  return encryptSecret(token, getEnv().webRefreshSecret);
-}
-
-export function revealRemnashopToken(token: string) {
-  return decryptSecret(token, getEnv().webRefreshSecret);
 }
 
 export async function remnashopRequestResult<T>(
@@ -658,28 +653,39 @@ export async function getAuthorizedRemnashopTokens({
   allowUnverifiedEmail = false,
 }: { allowUnverifiedEmail?: boolean } = {}) {
   authDebugLog("remnashop_tokens_authorize_started", { allowUnverifiedEmail });
-  const session = await getCurrentSession();
+  const localSession = await getCurrentSession();
 
-  if (!session) {
+  if (!localSession) {
     authDebugLog("remnashop_tokens_authorize_failed", { reason: "missing_session" });
     throw normalizeRemnashopError(401, "Not authenticated", { path: "/auth/session" });
   }
 
-  if (
-    !session.remnashopAccessTokenEncrypted ||
-    !session.remnashopRefreshTokenEncrypted
-  ) {
-    const restoredTelegramSession = await attachRemnashopTokensForTelegramSession(session);
+  let authorized = await acquireRemnashopTokensForSession({
+    session: localSession,
+    refresh: remnashopRefreshTokens,
+  });
+  let authorizationSource: "stored" | "refresh" | "telegram_restore" | null =
+    authorized?.source ?? null;
+
+  if (!authorized) {
+    const restoredTelegramSession =
+      await attachRemnashopTokensForTelegramSession(localSession);
 
     if (restoredTelegramSession) {
-      return restoredTelegramSession;
+      authorized = {
+        ...restoredTelegramSession,
+        source: "stored" as const,
+      };
+      authorizationSource = "telegram_restore";
     }
+  }
 
+  if (!authorized) {
     authDebugLog("remnashop_tokens_authorize_failed", {
       reason: "session_not_linked_to_remnashop",
-      sessionId: session.id,
-      userId: session.userId,
-      authMethod: session.authMethod,
+      sessionId: localSession.id,
+      userId: localSession.userId,
+      authMethod: localSession.authMethod,
     });
     throw new BffError(
       "EMAIL_REQUIRED",
@@ -688,16 +694,21 @@ export async function getAuthorizedRemnashopTokens({
     );
   }
 
-  const encryptedAccessToken = session.remnashopAccessTokenEncrypted;
-  const encryptedRefreshToken = session.remnashopRefreshTokenEncrypted;
+  const { accessToken, refreshToken, session } = authorized;
 
-  if (!encryptedAccessToken || !encryptedRefreshToken) {
-    throw new BffError("EMAIL_REQUIRED", 401, "Clean Pay session must be linked to Remnashop before using Remnashop actions");
-  }
+  authDebugLog("remnashop_tokens_authorize_session_loaded", {
+    source: authorizationSource,
+    sessionId: session.id,
+    userId: session.userId,
+    authMethod: session.authMethod,
+    remnashopAccessExpiresAt: session.remnashopAccessExpiresAt,
+    remnashopRefreshExpiresAt: session.remnashopRefreshExpiresAt,
+    allowUnverifiedEmail,
+  });
 
-  const refreshToken = revealRemnashopToken(encryptedRefreshToken);
-  const accessToken = revealRemnashopToken(encryptedAccessToken);
-
+  // Token acquisition (including a required refresh) is deliberately complete
+  // before the first /auth/me request, so an expired access token is never used
+  // for identity verification.
   if (session.user.email && session.user.emailVerified && !allowUnverifiedEmail) {
     const profile = await getRemnashopMe(accessToken);
     const remnashopEmailMatches = profile.email === session.user.email;
@@ -753,60 +764,8 @@ export async function getAuthorizedRemnashopTokens({
     }
   }
 
-  const refreshThreshold = new Date(Date.now() + 60_000);
-
-  authDebugLog("remnashop_tokens_authorize_session_loaded", {
-    sessionId: session.id,
-    userId: session.userId,
-    authMethod: session.authMethod,
-    remnashopAccessExpiresAt: session.remnashopAccessExpiresAt,
-    remnashopRefreshExpiresAt: session.remnashopRefreshExpiresAt,
-    allowUnverifiedEmail,
-  });
-
-  if (
-    session.remnashopAccessExpiresAt &&
-    session.remnashopAccessExpiresAt <= refreshThreshold
-  ) {
-    authDebugLog("remnashop_tokens_refresh_required", {
-      sessionId: session.id,
-      userId: session.userId,
-      remnashopAccessExpiresAt: session.remnashopAccessExpiresAt,
-      threshold: refreshThreshold,
-    });
-    const refreshed = await remnashopRefreshTokens(refreshToken);
-
-    await prisma.webSession.update({
-      where: { id: session.id },
-      data: {
-        remnashopAccessTokenEncrypted: protectRemnashopToken(
-          refreshed.cookies.accessToken,
-        ),
-        remnashopRefreshTokenEncrypted: protectRemnashopToken(
-          refreshed.cookies.refreshToken,
-        ),
-        remnashopAccessExpiresAt: new Date(refreshed.data.expires_at),
-        remnashopRefreshExpiresAt: new Date(refreshed.data.refresh_expires_at),
-      },
-    });
-
-    authDebugLog("remnashop_tokens_authorize_success", {
-      source: "refresh",
-      sessionId: session.id,
-      userId: session.userId,
-      remnashopAccessExpiresAt: refreshed.data.expires_at,
-      remnashopRefreshExpiresAt: refreshed.data.refresh_expires_at,
-    });
-
-    return {
-      accessToken: refreshed.cookies.accessToken,
-      refreshToken: refreshed.cookies.refreshToken,
-      session,
-    };
-  }
-
   authDebugLog("remnashop_tokens_authorize_success", {
-    source: "stored",
+    source: authorizationSource,
     sessionId: session.id,
     userId: session.userId,
     remnashopAccessExpiresAt: session.remnashopAccessExpiresAt,

@@ -134,12 +134,22 @@
 - passkey credentials сохраняются как независимый фактор входа, однако все существующие сессии, в том числе созданные через passkey, отзываются и требуют нового входа;
 - целевой suite 29/29, полный suite 332/332, ESLint без ошибок (один посторонний warning в сгенерированном coverage-файле) и Next.js production build прошли; на одноразовой реальной PostgreSQL-БД подтверждены отзыв двух сессий, новый hash, отказ старого refresh и сохранение passkey. Production rollout не выполнялся.
 
-### 8. [ ] Исправить жизненный цикл access/refresh Remnashop и web-сессий
+### 8. [x] Исправить жизненный цикл access/refresh Remnashop и web-сессий
 
 - refresh Remnashop выполнять до `/auth/me`, если access истёк;
 - не клонировать одноразовый upstream refresh token между сессиями;
 - защитить refresh от гонок mutex/CAS;
 - не удалять валидный web refresh cookie при обычной навигации после истечения access cookie.
+
+Результат:
+
+- получение/атомарный перенос token bundle и обязательный Remnashop refresh выполняются до первого `/auth/me`, поэтому identity-проверка больше не отправляет заведомо истёкший access token;
+- passkey и Telegram session-create пути больше не копируют токены из другой строки; свежие upstream credentials сохраняются только из фактического upstream auth response, а существующий bundle при необходимости переносится target-сессии с одновременной очисткой прежнего владельца;
+- legacy-дубли одного plaintext refresh token обнаруживаются после безопасной расшифровки и дедуплицируются, при этом независимые token pairs других логинов не удаляются;
+- user и все активные web-сессии блокируются в стабильном порядке на время ownership/refresh-транзакции; refresh выполняется одним владельцем, а сохранение новой пары дополнительно защищено CAS по прежнему encrypted refresh token;
+- profile flow умеет забрать bundle для новой локальной сессии и сохраняет local-only fallback, если доступного bundle/Telegram recovery нет;
+- proxy рассматривает opaque web refresh cookie как кандидата на серверное восстановление и больше не удаляет его при обычной page-навигации с отсутствующим, истёкшим или неверным access cookie; защищённые API по-прежнему валидируют refresh по hash/revocation/expiry в БД;
+- целевой suite 89/89, полный suite 336/336, ESLint без ошибок (один посторонний warning в сгенерированном coverage-файле), Next.js production build прошли; прямой `tsc` сохранил базовые 29 test-only ошибок без новых. На реальном PostgreSQL два параллельных запроса дали ровно один upstream refresh, а второй получил сохранённую winner-пару. Production rollout не выполнялся.
 
 ### 9. [ ] Проверять владельца при Telegram-восстановлении Remnashop-сессии
 
@@ -233,3 +243,4 @@ Fallback по Telegram/e-mail должен подтверждать UUID и вл
 - 2026-07-18: пункт 5 исправлен и проверен: опасные historical Prisma migrations стали атомарными и lossless, добавлен migration runbook и regression-suite. Полный suite 323/323, Prisma validate/generate, ESLint и production build прошли. На отдельной непустой PostgreSQL-БД проверены legacy backfill, точное сохранение Telegram IDs, fail-closed/rollback на malformed ID, полная migration chain, Prisma deploy/status и восстановление pre-migration custom dump. Production rollout не выполнялся.
 - 2026-07-18: пункт 6 исправлен и проверен: оба merge-пути отзывают source-сессии, сохраняют passkeys, инвалидируют временные auth-состояния и fail-closed проверяют конечного владельца. Целевой suite 27/27, полный suite 329/329, ESLint без ошибок и Next.js production build прошли. Код Remnashop и Remnawave в этом пункте не изменялся; production rollout не выполнялся.
 - 2026-07-18: пункт 7 исправлен и проверен: смена пароля заменяет текущую сессию и отзывает все прежние, refresh/revoke защищён CAS, failure после upstream success закрывается полным отзывом, passkeys сохраняются. Целевой suite 29/29, полный suite 332/332, ESLint без ошибок, production build и отдельный реальный PostgreSQL rehearsal прошли. Код Remnashop и Remnawave не изменялся; production rollout не выполнялся.
+- 2026-07-18: пункт 8 исправлен и проверен: upstream refresh предшествует `/auth/me`, token bundle имеет одного владельца без клонирования, refresh сериализован DB-lock/CAS, а валидный web refresh сохраняется при page-навигации. Целевой suite 89/89, полный suite 336/336, ESLint без ошибок, production build и реальный PostgreSQL concurrency rehearsal прошли; два конкурента вызвали upstream refresh один раз. Код Remnashop и Remnawave не изменялся; production rollout не выполнялся.
