@@ -50,6 +50,13 @@ async function readError(response: Response) {
   return error.message;
 }
 
+async function readJsonBody(response: Response) {
+  return await response.json().catch(() => null) as Record<string, unknown> | null;
+}
+
+const unknownLoginResultMessage =
+  "Не удалось определить результат входа. Обновите страницу, чтобы проверить состояние сессии.";
+
 function redirectAfterAuth() {
   window.location.assign("/cabinet");
 }
@@ -139,23 +146,36 @@ export function LoginForm() {
 
     setState({ loading: true, error: null });
 
-    const response = await fetch("/api/bff/auth/identify", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ email }),
-    });
+    try {
+      const response = await fetch("/api/bff/auth/identify", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ email }),
+      });
 
-    if (!response.ok) {
-      setState({ loading: false, error: await readError(response) });
-      return;
+      if (!response.ok) {
+        setState({ loading: true, error: await readError(response) });
+        return;
+      }
+
+      const body = await readJsonBody(response) as {
+        data?: { exists?: boolean; hasPasskey?: boolean };
+      } | null;
+
+      if (!body?.data || typeof body.data.exists !== "boolean") {
+        setState({ loading: true, error: "Сервер вернул некорректный ответ. Повторите попытку." });
+        return;
+      }
+
+      setHasPasskey(Boolean(body.data.hasPasskey));
+      setKnownLocalUser(body.data.exists);
+      setMode("password");
+      setState({ loading: true, error: null });
+    } catch {
+      setState({ loading: true, error: "Не удалось проверить e-mail. Проверьте соединение и повторите попытку." });
+    } finally {
+      setState((current) => ({ ...current, loading: false }));
     }
-
-    const body = (await response.json()) as { data?: { exists?: boolean; hasPasskey?: boolean } };
-
-    setHasPasskey(Boolean(body.data?.hasPasskey));
-    setKnownLocalUser(Boolean(body.data?.exists));
-    setMode("password");
-    setState({ loading: false, error: null });
   }
 
   function changeEmail() {
@@ -179,34 +199,54 @@ export function LoginForm() {
     setState({ loading: true, error: null });
 
     const formData = new FormData(event.currentTarget);
-    const response = await fetch(knownLocalUser ? "/api/bff/auth/login" : "/api/bff/auth/register", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        email,
-        password: formData.get("password"),
-        ...turnstilePayload(turnstile.token),
-      }),
-    });
+    let navigating = false;
 
-    if (!response.ok) {
-      turnstile.reset();
-      setState({ loading: false, error: await readError(response) });
-      return;
+    try {
+      const response = await fetch(knownLocalUser ? "/api/bff/auth/login" : "/api/bff/auth/register", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          email,
+          password: formData.get("password"),
+          ...turnstilePayload(turnstile.token),
+        }),
+      });
+
+      if (!response.ok) {
+        turnstile.reset();
+        setState({ loading: true, error: await readError(response) });
+        return;
+      }
+
+      if (knownLocalUser) {
+        navigating = true;
+        redirectAfterAuth();
+        return;
+      }
+
+      const body = await readJsonBody(response) as {
+        data?: { user?: { is_email_verified?: boolean }; emailVerification?: unknown };
+      } | null;
+      if (!body?.data?.user) {
+        setState({ loading: true, error: unknownLoginResultMessage });
+        return;
+      }
+
+      navigating = true;
+      if (shouldRedirectAfterRegisterFallback(body)) {
+        redirectAfterAuth();
+        return;
+      }
+
+      window.location.assign("/register/verify-email");
+    } catch {
+      navigating = false;
+      setState({ loading: true, error: unknownLoginResultMessage });
+    } finally {
+      if (!navigating) {
+        setState((current) => ({ ...current, loading: false }));
+      }
     }
-
-    if (knownLocalUser) {
-      redirectAfterAuth();
-      return;
-    }
-
-    const body = (await response.json()) as { data?: { user?: { is_email_verified?: boolean }; emailVerification?: unknown } };
-    if (shouldRedirectAfterRegisterFallback(body)) {
-      redirectAfterAuth();
-      return;
-    }
-
-    window.location.assign("/register/verify-email");
   }
 
   async function register(event: FormEvent<HTMLFormElement>) {
@@ -229,29 +269,48 @@ export function LoginForm() {
 
     setState({ loading: true, error: null });
 
-    const response = await fetch("/api/bff/auth/register", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        email,
-        password: formData.get("password"),
-        ...turnstilePayload(turnstile.token),
-      }),
-    });
+    let navigating = false;
 
-    if (!response.ok) {
-      turnstile.reset();
-      setState({ loading: false, error: await readError(response) });
-      return;
+    try {
+      const response = await fetch("/api/bff/auth/register", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          email,
+          password: formData.get("password"),
+          ...turnstilePayload(turnstile.token),
+        }),
+      });
+
+      if (!response.ok) {
+        turnstile.reset();
+        setState({ loading: true, error: await readError(response) });
+        return;
+      }
+
+      const body = await readJsonBody(response) as {
+        data?: { user?: { is_email_verified?: boolean }; emailVerification?: unknown };
+      } | null;
+      if (!body?.data?.user) {
+        setState({ loading: true, error: unknownLoginResultMessage });
+        return;
+      }
+
+      navigating = true;
+      if (shouldRedirectAfterRegisterFallback(body)) {
+        redirectAfterAuth();
+        return;
+      }
+
+      window.location.assign("/register/verify-email");
+    } catch {
+      navigating = false;
+      setState({ loading: true, error: unknownLoginResultMessage });
+    } finally {
+      if (!navigating) {
+        setState((current) => ({ ...current, loading: false }));
+      }
     }
-
-    const body = (await response.json()) as { data?: { user?: { is_email_verified?: boolean }; emailVerification?: unknown } };
-    if (shouldRedirectAfterRegisterFallback(body)) {
-      redirectAfterAuth();
-      return;
-    }
-
-    window.location.assign("/register/verify-email");
   }
 
   const accountHeader =

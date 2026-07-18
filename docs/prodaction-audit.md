@@ -250,9 +250,16 @@ Fallback по Telegram/e-mail должен подтверждать UUID и вл
 - страницы возврата строят заголовок только по подтверждённому сервером состоянию: route `/success` сам по себе больше не означает успех. Неопределённый результат отображается безопасно, незавершённые операции опрашиваются с exponential backoff 2–30 секунд и `retry_after`, доступно ручное обновление;
 - профильные тесты Clean Pay 51/51, полный unit suite 347/347, integration 36/36, ESLint без ошибок (один известный warning generated coverage) и production build 50/50 прошли. Remnashop: unit 140/140 и Ruff прошли; fork commit `a08c4c8` запушен, PR [`snoups/remnashop#135`](https://github.com/snoups/remnashop/pull/135) обновлён. Remnawave не изменялся; production rollout не выполнялся.
 
-### 17. [ ] Гарантированно снимать loading после frontend-ошибок
+### 17. [x] Гарантированно снимать loading после frontend-ошибок
 
 Добавить `try/catch/finally`, безопасный разбор не-JSON ответов и понятное состояние «результат неизвестен» для login, purchase и extend. Повтор платежа должен идти через тот же idempotency key.
+
+Результат:
+
+- identify/password/register login-потоки теперь ограничены общим `try/catch/finally`: transport error, исключение обработки и успешный non-JSON/malformed ответ переводят интерфейс в понятное состояние, а loading гарантированно снимается, если навигация не началась;
+- purchase/extend перехватывают не только сетевую ошибку, но и любое исключение разбора/обработки ответа; non-JSON `2xx` не считается подтверждённой оплатой и отображается как неопределённый результат без зависшей кнопки;
+- idempotency key удаляется только после валидного подтверждённого платёжного ответа либо однозначной клиентской ошибки. При потере ответа, malformed/non-JSON, `202`, `408`, `429` и `5xx` повтор использует тот же сохранённый ключ;
+- новые browser-level component tests воспроизводят потерю ответа login/purchase/extend, malformed identity и non-JSON payment responses, проверяют снятие loading и одинаковый ключ при повторе. Профильные тесты 15/15, полный unit suite 354/354, integration 36/36, ESLint без ошибок (один известный warning generated coverage) и production build 50/50 прошли. Remnashop и Remnawave не менялись; production rollout не выполнялся.
 
 ### 18. [ ] Добавить runtime-валидацию BFF request body и защиту цены
 
@@ -312,3 +319,4 @@ Fallback по Telegram/e-mail должен подтверждать UUID и вл
 - 2026-07-18: пункт 14 исправлен и проверен: внешние HTTP paths получили abort timeout, readiness запускает шесть dependencies параллельно с общим 8-секундным deadline и 5-секундными per-check limits, причины timeout/deadline/HTTP/response ошибок различимы. Профильные тесты 92/92, unit 339/339, integration 36/36, ESLint и production build 50/50 прошли. Remnashop и Remnawave не менялись; production rollout не выполнялся.
 - 2026-07-18: пункт 15 исправлен и проверен: app healthcheck и оба deployment entrypoint принимают только полный healthy `/api/health/readiness`, `up` ждёт readiness до 120 секунд и fail-closed завершает deploy при malformed/degraded ответе либо недоступной dependency. Профильные тесты 39/39, unit 343/343, integration 36/36, ESLint, production build 50/50, Compose config и Alpine shell syntax прошли. Remnashop и Remnawave не менялись; production rollout ещё не выполнялся.
 - 2026-07-18: пункт 16 исправлен и проверен: server-owned return URL привязан к платёжной операции и проверяется end-to-end, route не может объявить неподтверждённый успех, polling использует bounded exponential backoff и допускает ручное обновление. Clean Pay: профильные тесты 51/51, unit 347/347, integration 36/36, ESLint и production build 50/50 прошли. Companion Remnashop commit `a08c4c8` прошёл 140/140 unit-тестов и Ruff, запушен в fork и обновил PR [`snoups/remnashop#135`](https://github.com/snoups/remnashop/pull/135); Remnawave не изменялся, production rollout ещё не выполнялся.
+- 2026-07-18: пункт 17 исправлен и проверен: login, purchase и extend гарантированно снимают loading после transport/parse/processing ошибок, non-JSON success не принимается за подтверждённый результат, а неопределённый платёж повторяется с тем же idempotency key. Browser-level профильные тесты 15/15, unit 354/354, integration 36/36, ESLint и production build 50/50 прошли. Remnashop и Remnawave не менялись; production rollout ещё не выполнялся.

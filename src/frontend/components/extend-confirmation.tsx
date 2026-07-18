@@ -347,6 +347,10 @@ export function ExtendConfirmation() {
       window.location.assign(
         `/payment/pending?payment_id=${encodeURIComponent(body.data.payment_id)}`,
       );
+    } catch {
+      setSubmitError(
+        "Не удалось определить результат продления. Повторите попытку — будет использован тот же запрос и новая оплата не будет создана.",
+      );
     } finally {
       if (!paymentConfirmed) {
         setSubmitting(false);
