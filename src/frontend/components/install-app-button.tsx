@@ -75,7 +75,10 @@ export function InstallAppButton({ alwaysVisible = false }: { alwaysVisible?: bo
     window.addEventListener("appinstalled", onInstalled);
 
     if ("serviceWorker" in navigator) {
-      void navigator.serviceWorker.register("/sw.js").catch(() => undefined);
+      void navigator.serviceWorker
+        .register("/sw.js", { scope: "/", updateViaCache: "none" })
+        .then((registration) => registration.update())
+        .catch(() => undefined);
     }
 
     return () => { window.clearTimeout(platformTimer); window.removeEventListener("beforeinstallprompt", onBeforeInstallPrompt); window.removeEventListener("appinstalled", onInstalled); };

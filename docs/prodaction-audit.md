@@ -318,9 +318,16 @@ Fallback по Telegram/e-mail должен подтверждать UUID и вл
 - devcontainer E2E стал герметичным по умолчанию и переносимым на Docker Desktop: тестовые volumes очищаются перед прогоном, bootstrap ждёт готовности пользователя/сокета, Windows host paths нормализуются для всех mock mounts, shell helpers вызываются независимо от executable bit, а Remnashop/readiness fixtures получают валидную конфигурацию;
 - `typecheck`, ESLint без ошибок (один известный warning generated coverage), unit 373/373, integration 42/42, production build 50/50 и чистый real devcontainer full-stack suite 104/104 прошли. Remnashop и Remnawave не менялись; production rollout ещё не выполнялся.
 
-### 23. [ ] Сделать PWA cache версионируемым и тестируемым
+### 23. [x] Сделать PWA cache версионируемым и тестируемым
 
 Связать cache name/precache со сборкой, корректно обновлять offline shell и добавить browser-тест обновления service worker.
+
+Результат:
+
+- каждая Next.js сборка получает единый build ID (`CLEAN_PAY_BUILD_ID`, GitHub SHA или случайный fallback), который одновременно используется как Next build ID и в имени `clean-pay-shell-<build>`; статический вечный `clean-pay-shell-v1` удалён;
+- `/sw.js` теперь отдаётся динамическим route с `no-cache, no-store`, root scope и build-specific source. Регистрация использует `updateViaCache: none` и явно вызывает update; install перезагружает каждый shell asset с `cache: reload`, fail-closed не активирует неполный cache, activate удаляет только устаревшие Clean Pay caches и сохраняет caches других приложений;
+- browser-contract тест исполняет worker через ServiceWorker/Cache API harness: устанавливает первую сборку, проверяет offline navigation, активирует вторую, доказывает удаление старого cache, сохранение постороннего cache и выдачу обновлённого offline shell. Отдельно проверяются HTTP cache headers и build-specific worker source;
+- стабильный `tsconfig.typecheck.json` изолировал обязательный typecheck от автоматически меняемого `next-env.d.ts` и прерванных `.next/dev` артефактов. Профильные тесты 2/2, полный unit suite 375/375, integration 42/42, typecheck, ESLint без ошибок (один известный warning generated coverage) и production build 50/50 с `/sw.js` route прошли. Remnashop и Remnawave не менялись; production rollout ещё не выполнялся.
 
 ### 24. [ ] Устранить эксплуатационные расхождения
 
@@ -360,3 +367,4 @@ Fallback по Telegram/e-mail должен подтверждать UUID и вл
 - 2026-07-18: пункт 20 исправлен и проверен: always-on retention-worker применяет документированную bounded policy к auth states, verification codes, sessions, audit и rate-limit rows, heartbeat включён в deployment gate; raw identity/PII централизованно редактируется из log/audit metadata. Профильные тесты 28/28, unit 371/371, integration 42/42, ESLint, production build 50/50, Compose/syntax, production Docker build/smoke и реальная PostgreSQL boundary matrix прошли. Remnashop и Remnawave не менялись; production rollout ещё не выполнялся.
 - 2026-07-18: пункт 21 исправлен и проверен: единая local redirect policy валидирует исходный `redirect_to` и сохраняет его через password, passkey, Telegram OIDC и Telegram WebApp login; external/auth-loop destinations дают безопасный `/cabinet` fallback. Профильные тесты 28/28, unit 373/373, integration 42/42, ESLint и production build 50/50 прошли. Remnashop и Remnawave не менялись; production rollout ещё не выполнялся.
 - 2026-07-18: пункт 22 исправлен и проверен: полный TypeScript check тестов стал обязательным локальным/CI gate, все type errors устранены, а full-stack contracts и devcontainer runner стали точными, герметичными и воспроизводимыми на Windows Docker Desktop. Typecheck, unit 373/373, integration 42/42, ESLint, production build 50/50 и чистый full-stack E2E 104/104 прошли. Remnashop и Remnawave не менялись; production rollout ещё не выполнялся.
+- 2026-07-18: пункт 23 исправлен и проверен: cache/service worker связан с ID конкретной сборки, offline shell обновляется fail-closed без удаления чужих caches, а браузерная Cache API matrix доказывает переход build-one → build-two. Typecheck, профильные тесты 2/2, unit 375/375, integration 42/42, ESLint и production build 50/50 прошли. Remnashop и Remnawave не менялись; production rollout ещё не выполнялся.
