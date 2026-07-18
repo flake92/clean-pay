@@ -23,9 +23,9 @@ export function useCleanPayMenu() {
 
         async function loadMenuState() {
             try {
-                const profileResponse = await fetch("/api/me");
+                const profileResponse = await fetch("/api/bff/auth/me");
                 const nextUser = profileResponse.ok
-                    ? ((await profileResponse.json().catch(() => null))?.user as MenuUser | null)
+                    ? ((await profileResponse.json().catch(() => null))?.data?.user as MenuUser | null)
                     : null;
 
                 let nextOffers: SubscriptionOffersResponse | null = null;

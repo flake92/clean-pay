@@ -77,6 +77,8 @@ export type ConfirmEmailVerificationRequest = {
 export type ConfirmEmailVerificationResponse = {
   success: boolean;
   email: string;
+  already_verified?: boolean;
+  account_sync_pending?: boolean;
 };
 
 export type PurchaseRequest = {

@@ -13,6 +13,7 @@ import { linkCurrentUserToRemnashopAuth } from "@/backend/integrations/remnashop
 import { assertCooldown, assertRateLimit } from "@/backend/limits/rate-limit";
 import { auditLog } from "@/backend/observability/audit";
 import { authDebugLog } from "@/backend/observability/auth-debug-log";
+import { logger } from "@/backend/observability/logger";
 import { verifyTurnstileToken } from "@/backend/security/turnstile";
 import { refreshCurrentAccessCookie } from "@/backend/sessions/web-session";
 import type {
@@ -256,101 +257,38 @@ export async function confirmEmailVerification(rawBody: AuthPayload<ConfirmEmail
     userId: session.userId,
   });
 
-  const result = await remnashopRequest<ConfirmEmailVerificationResponse>(
-    "/auth/email/confirm",
-    {
-      method: "POST",
-      accessToken,
-      body: confirmBody,
-    },
+  const alreadyVerified = Boolean(
+    profile.email &&
+    profile.is_email_verified &&
+    (!targetEmail || profile.email.toLowerCase() === targetEmail.toLowerCase()),
   );
+  const result = alreadyVerified
+    ? {
+        success: true,
+        email: profile.email!,
+        already_verified: true,
+      }
+    : await remnashopRequest<ConfirmEmailVerificationResponse>(
+        "/auth/email/confirm",
+        {
+          method: "POST",
+          accessToken,
+          body: confirmBody,
+        },
+      );
   authDebugLog("email_verification_confirm_remnashop_success", {
     sessionId: session.id,
     userId: session.userId,
     email: result.email,
+    alreadyVerified,
   });
 
-  let authForLink = {
-    accessToken,
-    refreshToken,
-    auth: {
-      expires_at: session.remnashopAccessExpiresAt?.toISOString() ?? new Date(Date.now() + 60_000).toISOString(),
-      refresh_expires_at: session.remnashopRefreshExpiresAt?.toISOString() ?? new Date(Date.now() + 86_400_000).toISOString(),
-    },
-  };
-
-  if (session.user.telegramId) {
-    try {
-      await remnashopLinkTelegram({
-        accessToken,
-        telegramId: session.user.telegramId,
-        telegramUsername: session.user.telegramUsername,
-      });
-      authDebugLog("email_verification_confirm_telegram_attached", {
-        sessionId: session.id,
-        userId: session.userId,
-        telegramId: session.user.telegramId,
-      });
-    } catch (error) {
-      if (!isTelegramAlreadyLinkedConflict(error)) {
-        throw error;
-      }
-
-      authDebugLog("email_verification_confirm_telegram_conflict_merge_started", {
-        sessionId: session.id,
-        userId: session.userId,
-        telegramId: session.user.telegramId,
-      });
-
-      const mergedAuth = await mergeEmailAccountIntoTelegramAccount({
-        emailAccessToken: accessToken,
-        telegramId: session.user.telegramId,
-        telegramUsername: session.user.telegramUsername,
-        reason: "Clean Pay account link: verified e-mail code and Telegram ownership",
-      });
-      authForLink = {
-        accessToken: mergedAuth.accessToken,
-        refreshToken: mergedAuth.refreshToken,
-        auth: mergedAuth.auth,
-      };
-
-      authDebugLog("email_verification_confirm_telegram_conflict_merge_completed", {
-        sessionId: session.id,
-        userId: session.userId,
-        telegramId: session.user.telegramId,
-        sourceRemnashopUserId: mergedAuth.sourceUserId,
-        targetRemnashopUserId: mergedAuth.targetUserId,
-      });
-    }
-
-    const sourceUserId = getRemnashopUserIdFromAccessToken(authForLink.accessToken);
-    const telegramAuthUserId = getRemnashopUserIdFromAccessToken(
-      (await remnashopAuthTelegramIdentity({
-        telegramId: session.user.telegramId,
-        telegramUsername: session.user.telegramUsername,
-      })).cookies.accessToken,
-    );
-
-    if (sourceUserId !== telegramAuthUserId) {
-      const mergedAuth = await mergeEmailAccountIntoTelegramAccount({
-        emailAccessToken: accessToken,
-        telegramId: session.user.telegramId,
-        telegramUsername: session.user.telegramUsername,
-        reason: "Clean Pay account link: verified e-mail code and Telegram ownership",
-      });
-      authForLink = {
-        accessToken: mergedAuth.accessToken,
-        refreshToken: mergedAuth.refreshToken,
-        auth: mergedAuth.auth,
-      };
-    }
-  }
-
-  await linkCurrentUserToRemnashopAuth({
-    accessToken: authForLink.accessToken,
-    refreshToken: authForLink.refreshToken,
-    auth: authForLink.auth,
-  });
+  // Remnashop consumes the one-time code and commits verification before any
+  // optional Telegram merge. Persist that irreversible success immediately so
+  // a later synchronization error cannot leave Clean Pay reporting a false
+  // failure or invite the user to submit an already-consumed code again.
+  const localVerificationChanged =
+    !session.user.emailVerified || session.user.email !== result.email;
   await prisma.webUser.update({
     where: { id: session.userId },
     data: {
@@ -364,15 +302,120 @@ export async function confirmEmailVerification(rawBody: AuthPayload<ConfirmEmail
     sessionId: session.id,
     userId: session.userId,
     emailVerified: true,
+    alreadyVerified,
   });
 
-  await auditLog({
-    action: "email_verified",
-    userId: session.userId,
-    metadata: { email: result.email },
-  });
+  if (localVerificationChanged) {
+    await auditLog({
+      action: "email_verified",
+      userId: session.userId,
+      metadata: { email: result.email },
+    });
+  }
 
-  return result;
+  let authForLink = {
+    accessToken,
+    refreshToken,
+    auth: {
+      expires_at: session.remnashopAccessExpiresAt?.toISOString() ?? new Date(Date.now() + 60_000).toISOString(),
+      refresh_expires_at: session.remnashopRefreshExpiresAt?.toISOString() ?? new Date(Date.now() + 86_400_000).toISOString(),
+    },
+  };
+
+  let accountSyncPending = false;
+
+  try {
+    if (session.user.telegramId) {
+      try {
+        await remnashopLinkTelegram({
+          accessToken,
+          telegramId: session.user.telegramId,
+          telegramUsername: session.user.telegramUsername,
+        });
+        authDebugLog("email_verification_confirm_telegram_attached", {
+          sessionId: session.id,
+          userId: session.userId,
+          telegramId: session.user.telegramId,
+        });
+      } catch (error) {
+        if (!isTelegramAlreadyLinkedConflict(error)) {
+          throw error;
+        }
+
+        authDebugLog("email_verification_confirm_telegram_conflict_merge_started", {
+          sessionId: session.id,
+          userId: session.userId,
+          telegramId: session.user.telegramId,
+        });
+
+        const mergedAuth = await mergeEmailAccountIntoTelegramAccount({
+          emailAccessToken: accessToken,
+          telegramId: session.user.telegramId,
+          telegramUsername: session.user.telegramUsername,
+          reason: "Clean Pay account link: verified e-mail code and Telegram ownership",
+        });
+        authForLink = {
+          accessToken: mergedAuth.accessToken,
+          refreshToken: mergedAuth.refreshToken,
+          auth: mergedAuth.auth,
+        };
+
+        authDebugLog("email_verification_confirm_telegram_conflict_merge_completed", {
+          sessionId: session.id,
+          userId: session.userId,
+          telegramId: session.user.telegramId,
+          sourceRemnashopUserId: mergedAuth.sourceUserId,
+          targetRemnashopUserId: mergedAuth.targetUserId,
+        });
+      }
+
+      const sourceUserId = getRemnashopUserIdFromAccessToken(authForLink.accessToken);
+      const telegramAuthUserId = getRemnashopUserIdFromAccessToken(
+        (await remnashopAuthTelegramIdentity({
+          telegramId: session.user.telegramId,
+          telegramUsername: session.user.telegramUsername,
+        })).cookies.accessToken,
+      );
+
+      if (sourceUserId !== telegramAuthUserId) {
+        const mergedAuth = await mergeEmailAccountIntoTelegramAccount({
+          emailAccessToken: accessToken,
+          telegramId: session.user.telegramId,
+          telegramUsername: session.user.telegramUsername,
+          reason: "Clean Pay account link: verified e-mail code and Telegram ownership",
+        });
+        authForLink = {
+          accessToken: mergedAuth.accessToken,
+          refreshToken: mergedAuth.refreshToken,
+          auth: mergedAuth.auth,
+        };
+      }
+    }
+
+    await linkCurrentUserToRemnashopAuth({
+      accessToken: authForLink.accessToken,
+      refreshToken: authForLink.refreshToken,
+      auth: authForLink.auth,
+    });
+    await refreshCurrentAccessCookie();
+  } catch (error) {
+    accountSyncPending = true;
+    logger.warn("email_verification_post_confirm_sync_failed", {
+      sessionId: session.id,
+      userId: session.userId,
+      errorCode: error instanceof BffError ? error.code : "INTERNAL_ERROR",
+    }, {
+      category: "auth",
+      source: "email.verification",
+      message: "E-mail was verified but post-confirm account synchronization is pending",
+    });
+  }
+
+  return {
+    ...result,
+    already_verified: alreadyVerified,
+    account_sync_pending: accountSyncPending,
+  };
 }
 
 export async function changeEmail(rawBody: AuthPayload<ChangeEmailRequest>, turnstile: TurnstileContext) {

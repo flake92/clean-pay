@@ -1,7 +1,8 @@
+import { prisma } from "@/backend/database/prisma";
 import { getAuthorizedRemnashopTokens, getRemnashopMe } from "@/backend/integrations/remnashop/client";
 import { BffError } from "@/backend/integrations/remnashop/errors";
 import { authDebugLog } from "@/backend/observability/auth-debug-log";
-import { getCurrentSession } from "@/backend/sessions/web-session";
+import { getCurrentSession, refreshCurrentAccessCookie } from "@/backend/sessions/web-session";
 import { localUserProfile, remnashopUserProfile } from "@/backend/auth/profile-presenter";
 
 export async function getCurrentAuthProfile() {
@@ -53,6 +54,30 @@ export async function getCurrentAuthProfile() {
   }
 
   const profile = await getRemnashopMe(accessToken);
+  const shouldSyncVerifiedEmail = Boolean(
+    profile.email &&
+    profile.is_email_verified &&
+    authorizedSession.user.email === profile.email &&
+    !authorizedSession.user.emailVerified,
+  );
+
+  let reconciledSession = authorizedSession;
+
+  if (shouldSyncVerifiedEmail) {
+    await prisma.webUser.update({
+      where: { id: authorizedSession.userId },
+      data: { emailVerified: true, authPending: false },
+    });
+    reconciledSession = {
+      ...authorizedSession,
+      user: { ...authorizedSession.user, emailVerified: true },
+    };
+    await refreshCurrentAccessCookie();
+    authDebugLog("auth_me_verified_email_reconciled", {
+      sessionId: authorizedSession.id,
+      userId: authorizedSession.userId,
+    });
+  }
   authDebugLog("auth_me_remnashop_profile_returned", {
     sessionId: session.id,
     userId: session.userId,
@@ -61,5 +86,5 @@ export async function getCurrentAuthProfile() {
     emailVerified: profile.is_email_verified,
   });
 
-  return { user: remnashopUserProfile(authorizedSession, profile) };
+  return { user: remnashopUserProfile(reconciledSession, profile) };
 }
