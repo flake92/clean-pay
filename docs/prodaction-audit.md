@@ -205,9 +205,16 @@ Fallback по Telegram/e-mail должен подтверждать UUID и вл
 - Redis `INCR + EXPIRE` выполняется одной Lua-командой `EVAL`, исключая вечные ключи при сбое между командами; публичная выдача WebAuthn authentication challenge защищена отдельным limiter до записи в БД;
 - профильные тесты 36/36, полный unit suite 336/336, integration 32/32 с PostgreSQL/Redis, ESLint без ошибок (один известный warning generated coverage) и production build 50/50 прошли. Код Remnashop и Remnawave не менялся; production rollout не выполнялся.
 
-### 13. [ ] Атомарно потреблять WebAuthn challenge и Telegram state
+### 13. [x] Атомарно потреблять WebAuthn challenge и Telegram state
 
 Использовать условный update (`consumedAt IS NULL`, срок не истёк) и проверять число изменённых строк. Добавить конкурентные тесты, допускающие ровно одного победителя.
+
+Результат:
+
+- WebAuthn challenge после чтения захватывается условным `updateMany` по `id`, `consumedAt IS NULL` и `expiresAt > now`; проверяется `count === 1`, проигравший конкурент получает controlled validation error до проверки credential и mutation;
+- Telegram OIDC/popup/widget после криптографической проверки identity атомарно захватывают state до Remnashop/local mutation; повторный или истёкший state отклоняется, а финальная запись только привязывает уже потреблённый state к пользователю;
+- общие claim-функции покрыты unit concurrency-тестами и реальным PostgreSQL rehearsal: по 16 параллельных claim для WebAuthn и Telegram дали ровно одного победителя, expired challenge остался непотреблённым;
+- профильные тесты 23/23, полный unit suite 338/338, integration 35/35, ESLint без ошибок (один известный warning generated coverage) и production build 50/50 прошли. Код Remnashop и Remnawave не менялся; production rollout не выполнялся.
 
 ### 14. [ ] Добавить timeout/cancellation внешним запросам
 
@@ -279,3 +286,4 @@ Fallback по Telegram/e-mail должен подтверждать UUID и вл
 - 2026-07-18: пункт 10 исправлен и проверен: единый production validator и изолированный `.env` parser применяются до Compose, в `start.sh`, `npm start` и runtime; закрыты unsafe origins/cookies, секреты, URL и Compose/DB/Redis consistency, environment interpolation и baked/runtime public origin drift. Целевые тесты 27/27, unit 329/329, integration 32/32, ESLint, production build 50/50, Docker build/runtime validation, Compose config и Alpine shell syntax прошли; прямой `tsc` сохранил 29 базовых test-only ошибок. Локальный deployment `.env` корректно fail-closed на `COOKIE_SECURE=false`; Remnashop и Remnawave не менялись, production rollout не выполнялся.
 - 2026-07-18: пункт 11 исправлен и проверен: Remnawave subscription URL возвращается только для точного UUID и доказанного владельца с активной неистёкшей записью; identity fallback однозначно агрегирует дубли и отказывает на конфликтующих URL/кандидатах. Профильные тесты 36/36, unit 332/332, ESLint и production build 50/50 прошли. Remnashop и Remnawave не менялись; production rollout не выполнялся.
 - 2026-07-18: пункт 12 исправлен и проверен: `RATE_LIMITED` в identify возвращается как `429`, Redis counter атомарно получает TTL, Telegram limiter применяется только к подтверждённой identity, общий anonymous Telegram key удалён, а WebAuthn login challenge ограничен до DB-write. Отдельный IP/device limiter не добавлялся согласно reverse-proxy topology из плана. Профильные тесты 36/36, unit 336/336, integration 32/32, ESLint и production build 50/50 прошли. Remnashop и Remnawave не менялись; production rollout не выполнялся.
+- 2026-07-18: пункт 13 исправлен и проверен: WebAuthn challenge и Telegram state потребляются условным update с проверкой единственного изменённого ряда до внешних/локальных mutations. Профильные тесты 23/23, unit 338/338, integration 35/35, ESLint и production build 50/50 прошли; реальная PostgreSQL-конкуренция с 16 claim подтвердила ровно одного победителя для каждого state type и отказ для expired challenge. Remnashop и Remnawave не менялись; production rollout не выполнялся.

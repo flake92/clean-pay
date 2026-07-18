@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => ({
       create: vi.fn(),
       findFirst: vi.fn(),
       update: vi.fn(),
+      updateMany: vi.fn(),
     },
     webAuthnCredential: {
       findMany: vi.fn(),
@@ -112,6 +113,7 @@ describe("passkey use cases", () => {
     mocks.prisma.webAuthnCredential.create.mockResolvedValue(undefined);
     mocks.prisma.webAuthnCredential.updateMany.mockResolvedValue({ count: 0 });
     mocks.prisma.webAuthnChallenge.findFirst.mockResolvedValue({ id: "challenge-1", userId: "user-1", challenge: "reg-challenge" });
+    mocks.prisma.webAuthnChallenge.updateMany.mockResolvedValue({ count: 1 });
     mocks.verifyRegistrationResponse.mockResolvedValue({
       verified: true,
       registrationInfo: {
@@ -189,8 +191,8 @@ describe("passkey use cases", () => {
       finishPasskeyRegistration(registrationResponse()),
     ).resolves.toEqual({ success: true });
 
-    expect(mocks.prisma.webAuthnChallenge.update).toHaveBeenCalledWith({
-      where: { id: "challenge-1" },
+    expect(mocks.prisma.webAuthnChallenge.updateMany).toHaveBeenCalledWith({
+      where: expect.objectContaining({ id: "challenge-1", consumedAt: null }),
       data: { consumedAt: expect.any(Date) },
     });
     expect(mocks.prisma.webAuthnCredential.updateMany).toHaveBeenCalledWith({
@@ -211,6 +213,21 @@ describe("passkey use cases", () => {
       }),
     });
     expect(mocks.upgradeCurrentSessionToFull).toHaveBeenCalledOnce();
+  });
+
+  it("allows exactly one concurrent consumer of a WebAuthn challenge", async () => {
+    mocks.prisma.webAuthnChallenge.updateMany
+      .mockResolvedValueOnce({ count: 1 })
+      .mockResolvedValueOnce({ count: 0 });
+
+    const results = await Promise.allSettled([
+      finishPasskeyRegistration(registrationResponse()),
+      finishPasskeyRegistration(registrationResponse()),
+    ]);
+
+    expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+    expect(results.filter((result) => result.status === "rejected")).toHaveLength(1);
+    expect(mocks.prisma.webAuthnCredential.create).toHaveBeenCalledOnce();
   });
 
   it("updates a credential already owned by the current user", async () => {

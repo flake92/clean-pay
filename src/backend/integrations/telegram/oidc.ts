@@ -11,6 +11,7 @@ import { getEnv } from "@/backend/config/env";
 import { logger } from "@/backend/observability/logger";
 import { prisma } from "@/backend/database/prisma";
 import { assertRateLimit } from "@/backend/limits/rate-limit";
+import { claimTelegramAuthState as claimTelegramAuthStateRecord } from "@/backend/auth/one-time-state";
 import { remnashopAuth } from "@/backend/integrations/remnashop/client";
 import {
   assertUserMergeFinalOwner,
@@ -566,6 +567,8 @@ export async function consumeTelegramLoginWidgetPayload(payload: TelegramLoginWi
     verifiedPayload.last_name,
   ].filter(Boolean).join(" ") || null;
 
+  await claimTelegramAuthState(authState);
+
   return completeTelegramAuth(authState, {
     telegramId: verifiedPayload.id.toString(),
     telegramUsername: verifiedPayload.username ?? null,
@@ -607,6 +610,7 @@ async function consumeTelegramIdToken(
       : null;
   const fullName = getFullName(payload);
   const photoUrl = typeof payload.picture === "string" ? payload.picture : null;
+  await claimTelegramAuthState(authState);
   const remnashopAuthResult = await authenticateRemnashopWithTelegram(
     payload,
     telegramId,
@@ -621,6 +625,15 @@ async function consumeTelegramIdToken(
     remnashopAuthResult,
     source: "oidc",
   });
+}
+
+async function claimTelegramAuthState(authState: { id: string }) {
+  if (!await claimTelegramAuthStateRecord(authState.id)) {
+    logTechnicalWarning("telegram_oidc_state_already_consumed", {
+      authStateId: authState.id,
+    });
+    throw new Error("Telegram auth state was already consumed or has expired");
+  }
 }
 
 async function completeTelegramAuth(
@@ -762,7 +775,6 @@ async function completeTelegramAuth(
     where: { id: authState.id },
     data: {
       userId: user.id,
-      consumedAt: new Date(),
     },
   });
   authDebugLog("telegram_oidc_state_consumed", {

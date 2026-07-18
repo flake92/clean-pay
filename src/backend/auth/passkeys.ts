@@ -11,6 +11,7 @@ import { WebAuthnChallengeType, WebSessionAssuranceLevel, WebSessionAuthMethod }
 import { headers } from "next/headers";
 
 import { auditLog } from "@/backend/observability/audit";
+import { claimWebAuthnChallenge } from "@/backend/auth/one-time-state";
 import { getEnv } from "@/backend/config/env";
 import { prisma } from "@/backend/database/prisma";
 import { BffError } from "@/backend/integrations/remnashop/errors";
@@ -41,12 +42,13 @@ function userHandle(userId: string) {
 }
 
 async function consumeChallenge(challenge: string, type: WebAuthnChallengeType) {
+  const now = new Date();
   const record = await prisma.webAuthnChallenge.findFirst({
     where: {
       challenge,
       type,
       consumedAt: null,
-      expiresAt: { gt: new Date() },
+      expiresAt: { gt: now },
     },
   });
 
@@ -54,10 +56,9 @@ async function consumeChallenge(challenge: string, type: WebAuthnChallengeType) 
     throw new BffError("VALIDATION_ERROR", 400, "WebAuthn challenge is invalid or expired");
   }
 
-  await prisma.webAuthnChallenge.update({
-    where: { id: record.id },
-    data: { consumedAt: new Date() },
-  });
+  if (!await claimWebAuthnChallenge(record.id, now)) {
+    throw new BffError("VALIDATION_ERROR", 400, "WebAuthn challenge is invalid or expired");
+  }
 
   return record;
 }

@@ -148,6 +148,7 @@ describe("Telegram OIDC integration", () => {
     mocks.prisma.webUser.findUnique.mockResolvedValue(null);
     mocks.prisma.webUser.upsert.mockResolvedValue({ id: "user-1", telegramId: "123456" });
     mocks.prisma.telegramAuthState.update.mockResolvedValue({});
+    mocks.prisma.telegramAuthState.updateMany.mockResolvedValue({ count: 1 });
     mocks.prisma.$transaction.mockImplementation(async (callback) => callback(tx));
     mocks.mergeLocalUsersIntoTarget.mockResolvedValue({});
     mocks.assertUserMergeFinalOwner.mockResolvedValue({ id: "target-user" });
@@ -375,7 +376,6 @@ describe("Telegram OIDC integration", () => {
       where: { id: "auth-state-1" },
       data: {
         userId: "target-user",
-        consumedAt: expect.any(Date),
       },
     });
   });
@@ -401,6 +401,22 @@ describe("Telegram OIDC integration", () => {
       "clean_pay_tg_nonce",
       "clean_pay_tg_code_verifier",
     ]);
+  });
+
+  it("allows exactly one concurrent consumer of a Telegram auth state", async () => {
+    state.cookies.set("clean_pay_tg_nonce", "nonce");
+    mocks.prisma.telegramAuthState.updateMany
+      .mockResolvedValueOnce({ count: 1 })
+      .mockResolvedValueOnce({ count: 0 });
+
+    const results = await Promise.allSettled([
+      consumeTelegramPopupToken("id-token"),
+      consumeTelegramPopupToken("id-token"),
+    ]);
+
+    expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+    expect(results.filter((result) => result.status === "rejected")).toHaveLength(1);
+    expect(mocks.prisma.webUser.upsert).toHaveBeenCalledOnce();
   });
 
   it("consumes Telegram Login widget payload and verifies hash without token exchange", async () => {
