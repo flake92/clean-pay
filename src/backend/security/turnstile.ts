@@ -69,6 +69,7 @@ export async function verifyTurnstileToken(token: string | null | undefined, rem
       method: "POST",
       body,
       cache: "no-store",
+      signal: AbortSignal.timeout(10_000),
     });
   } catch (error) {
     logger.error("turnstile_request_failed", {

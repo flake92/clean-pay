@@ -185,6 +185,7 @@ async function exchangeCodeForIdToken(code: string, codeVerifier: string) {
     },
     body,
     cache: "no-store",
+    signal: AbortSignal.timeout(10_000),
   });
   const responseText = await response.clone().text().catch(() => "");
 

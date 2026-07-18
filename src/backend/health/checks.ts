@@ -8,44 +8,71 @@ type CheckResult = {
   message?: string;
 };
 
-async function measure(check: () => Promise<void>): Promise<CheckResult> {
+const readinessCheckTimeoutMs = 5_000;
+
+async function measure(
+  label: string,
+  check: (signal: AbortSignal) => Promise<void>,
+  deadlineSignal?: AbortSignal,
+): Promise<CheckResult> {
   const startedAt = Date.now();
+  const timeoutSignal = AbortSignal.timeout(readinessCheckTimeoutMs);
+  const signal = deadlineSignal
+    ? AbortSignal.any([deadlineSignal, timeoutSignal])
+    : timeoutSignal;
 
   try {
-    await check();
+    await Promise.race([
+      check(signal),
+      new Promise<never>((_, reject) => {
+        if (signal.aborted) {
+          reject(signal.reason);
+          return;
+        }
+
+        signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+      }),
+    ]);
 
     return { status: "ok", latencyMs: Date.now() - startedAt };
   } catch (error) {
+    const message = deadlineSignal?.aborted
+      ? `${label} cancelled: readiness deadline exceeded`
+      : timeoutSignal.aborted
+        ? `${label} timed out after ${readinessCheckTimeoutMs}ms`
+        : error instanceof Error ? error.message : String(error);
+
     return {
       status: "down",
       latencyMs: Date.now() - startedAt,
-      message: error instanceof Error ? error.message : String(error),
+      message,
     };
   }
 }
 
-export async function checkDatabase() {
-  return measure(async () => {
+export async function checkDatabase(deadlineSignal?: AbortSignal) {
+  return measure("Database", async () => {
     await prisma.$queryRaw`SELECT 1`;
-  });
+  }, deadlineSignal);
 }
 
-export async function checkRedis() {
-  return measure(async () => {
+export async function checkRedis(deadlineSignal?: AbortSignal) {
+  return measure("Redis", async () => {
     const pong = await redisCommand(["PING"]);
 
     if (pong !== "PONG") {
       throw new Error("Redis did not return PONG");
     }
-  });
+  }, deadlineSignal);
 }
 
-export async function checkRemnashop() {
+export async function checkRemnashop(deadlineSignal?: AbortSignal) {
   const env = getEnv();
 
-  return measure(async () => {
+  return measure("Remnashop", async (signal) => {
     const response = await fetch(`${env.remnashopApiBaseUrl}/plans/public`, {
       cache: "no-store",
+      signal,
     });
 
     if (response.status === 404) {
@@ -55,10 +82,10 @@ export async function checkRemnashop() {
     if (!response.ok) {
       throw new Error(`Remnashop returned ${response.status}`);
     }
-  });
+  }, deadlineSignal);
 }
 
-export async function checkMailpit() {
+export async function checkMailpit(deadlineSignal?: AbortSignal) {
   const env = getEnv();
   const mailpitUrl = env.readiness.mailpitUrl;
 
@@ -66,23 +93,25 @@ export async function checkMailpit() {
     return null;
   }
 
-  return measure(async () => {
+  return measure("Mailpit", async (signal) => {
     const response = await fetch(new URL("/api/v1/messages", mailpitUrl), {
       cache: "no-store",
+      signal,
     });
 
     if (!response.ok) {
       throw new Error(`Mailpit returned ${response.status}`);
     }
-  });
+  }, deadlineSignal);
 }
 
-export async function checkTelegramOidc() {
+export async function checkTelegramOidc(deadlineSignal?: AbortSignal) {
   const env = getEnv();
 
-  return measure(async () => {
+  return measure("Telegram OIDC", async (signal) => {
     const response = await fetch(env.telegramOidc.jwksUri, {
       cache: "no-store",
+      signal,
     });
 
     if (!response.ok) {
@@ -94,10 +123,10 @@ export async function checkTelegramOidc() {
     if (!Array.isArray(body.keys) || body.keys.length === 0) {
       throw new Error("Telegram OIDC JWKS did not include keys");
     }
-  });
+  }, deadlineSignal);
 }
 
-export async function checkRemnawave() {
+export async function checkRemnawave(deadlineSignal?: AbortSignal) {
   const env = getEnv();
   const remnawaveUrl = env.readiness.remnawaveUrl;
   const token = env.remnawave.token;
@@ -106,7 +135,7 @@ export async function checkRemnawave() {
     return null;
   }
 
-  return measure(async () => {
+  return measure("Remnawave", async (signal) => {
     if (!token) {
       throw new Error("Remnawave token is not configured");
     }
@@ -117,12 +146,13 @@ export async function checkRemnawave() {
         authorization: token.startsWith("Bearer ") ? token : `Bearer ${token}`,
       },
       cache: "no-store",
+      signal,
     });
 
     if (!response.ok) {
       throw new Error(`Remnawave returned ${response.status}`);
     }
-  });
+  }, deadlineSignal);
 }
 
 export function aggregateStatus(results: Record<string, CheckResult>) {

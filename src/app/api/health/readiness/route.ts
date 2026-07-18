@@ -11,16 +11,24 @@ import {
 } from "@/backend/health/checks";
 
 export const runtime = "nodejs";
+const readinessDeadlineMs = 8_000;
 
 export async function GET() {
+  const deadlineSignal = AbortSignal.timeout(readinessDeadlineMs);
+  const [database, redis, remnashop, telegramOidc, mailpit, remnawave] = await Promise.all([
+    checkDatabase(deadlineSignal),
+    checkRedis(deadlineSignal),
+    checkRemnashop(deadlineSignal),
+    checkTelegramOidc(deadlineSignal),
+    checkMailpit(deadlineSignal),
+    checkRemnawave(deadlineSignal),
+  ]);
   const checks: Record<string, Awaited<ReturnType<typeof checkDatabase>>> = {
-    database: await checkDatabase(),
-    redis: await checkRedis(),
-    remnashop: await checkRemnashop(),
-    telegramOidc: await checkTelegramOidc(),
+    database,
+    redis,
+    remnashop,
+    telegramOidc,
   };
-  const mailpit = await checkMailpit();
-  const remnawave = await checkRemnawave();
 
   if (mailpit) {
     checks.mailpit = mailpit;

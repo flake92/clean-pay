@@ -216,9 +216,16 @@ Fallback по Telegram/e-mail должен подтверждать UUID и вл
 - общие claim-функции покрыты unit concurrency-тестами и реальным PostgreSQL rehearsal: по 16 параллельных claim для WebAuthn и Telegram дали ровно одного победителя, expired challenge остался непотреблённым;
 - профильные тесты 23/23, полный unit suite 338/338, integration 35/35, ESLint без ошибок (один известный warning generated coverage) и production build 50/50 прошли. Код Remnashop и Remnawave не менялся; production rollout не выполнялся.
 
-### 14. [ ] Добавить timeout/cancellation внешним запросам
+### 14. [x] Добавить timeout/cancellation внешним запросам
 
 Ограничить по времени Remnashop, Remnawave и readiness fetch-вызовы; readiness выполнять параллельно с общим deadline и различимыми причинами ошибок.
+
+Результат:
+
+- все Remnashop public/admin/auth/refresh/password HTTP paths имеют abort timeout; Remnawave live lookup, Telegram token exchange и Turnstile verification также ограничены и отменяют зависший fetch;
+- каждая readiness dependency имеет 5-секундный per-check timeout, все обязательные и optional checks стартуют одним `Promise.all` с общим 8-секундным AbortSignal; общий deadline передаётся тем же объектом каждому check;
+- fetch получает объединённый cancellation signal, а результат различает локальный timeout, отмену общим readiness deadline, HTTP status, malformed response и dependency-specific failure; DB/Redis также не удерживают readiness response сверх deadline;
+- профильные тесты 92/92, полный unit suite 339/339, integration 36/36, ESLint без ошибок (один известный warning generated coverage) и production build 50/50 прошли. Тест с общей незавершённой gate подтвердил одновременный старт всех шести checks. Код Remnashop и Remnawave не менялся; production rollout не выполнялся.
 
 ### 15. [ ] Сделать production verify реальной проверкой готовности
 
@@ -287,3 +294,4 @@ Fallback по Telegram/e-mail должен подтверждать UUID и вл
 - 2026-07-18: пункт 11 исправлен и проверен: Remnawave subscription URL возвращается только для точного UUID и доказанного владельца с активной неистёкшей записью; identity fallback однозначно агрегирует дубли и отказывает на конфликтующих URL/кандидатах. Профильные тесты 36/36, unit 332/332, ESLint и production build 50/50 прошли. Remnashop и Remnawave не менялись; production rollout не выполнялся.
 - 2026-07-18: пункт 12 исправлен и проверен: `RATE_LIMITED` в identify возвращается как `429`, Redis counter атомарно получает TTL, Telegram limiter применяется только к подтверждённой identity, общий anonymous Telegram key удалён, а WebAuthn login challenge ограничен до DB-write. Отдельный IP/device limiter не добавлялся согласно reverse-proxy topology из плана. Профильные тесты 36/36, unit 336/336, integration 32/32, ESLint и production build 50/50 прошли. Remnashop и Remnawave не менялись; production rollout не выполнялся.
 - 2026-07-18: пункт 13 исправлен и проверен: WebAuthn challenge и Telegram state потребляются условным update с проверкой единственного изменённого ряда до внешних/локальных mutations. Профильные тесты 23/23, unit 338/338, integration 35/35, ESLint и production build 50/50 прошли; реальная PostgreSQL-конкуренция с 16 claim подтвердила ровно одного победителя для каждого state type и отказ для expired challenge. Remnashop и Remnawave не менялись; production rollout не выполнялся.
+- 2026-07-18: пункт 14 исправлен и проверен: внешние HTTP paths получили abort timeout, readiness запускает шесть dependencies параллельно с общим 8-секундным deadline и 5-секундными per-check limits, причины timeout/deadline/HTTP/response ошибок различимы. Профильные тесты 92/92, unit 339/339, integration 36/36, ESLint и production build 50/50 прошли. Remnashop и Remnawave не менялись; production rollout не выполнялся.

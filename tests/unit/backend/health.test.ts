@@ -47,13 +47,27 @@ describe("health checks", () => {
     await expect(checkRedis()).resolves.toMatchObject({ status: "down", message: "Redis did not return PONG" });
   });
 
+  it("cancels a hanging check with a distinct shared-deadline reason", async () => {
+    const controller = new AbortController();
+    mocks.prisma.$queryRaw.mockReturnValue(new Promise(() => undefined));
+
+    const result = checkDatabase(controller.signal);
+    controller.abort(new Error("readiness deadline"));
+
+    await expect(result).resolves.toMatchObject({
+      status: "down",
+      message: "Database cancelled: readiness deadline exceeded",
+    });
+  });
+
   it("checks Remnashop availability", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(new Response("{}", { status: 200 }));
 
     await expect(checkRemnashop()).resolves.toMatchObject({ status: "ok" });
-    expect(globalThis.fetch).toHaveBeenCalledWith("http://remnashop:5000/api/v1/public/plans/public", {
+    expect(globalThis.fetch).toHaveBeenCalledWith("http://remnashop:5000/api/v1/public/plans/public", expect.objectContaining({
       cache: "no-store",
-    });
+      signal: expect.any(Object),
+    }));
 
     vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(new Response("{}", { status: 503 }));
     await expect(checkRemnashop()).resolves.toMatchObject({ status: "down", message: "Remnashop returned 503" });
@@ -80,19 +94,22 @@ describe("health checks", () => {
     await expect(checkTelegramOidc()).resolves.toMatchObject({ status: "ok" });
     await expect(checkRemnawave()).resolves.toMatchObject({ status: "ok" });
 
-    expect(fetch).toHaveBeenNthCalledWith(1, new URL("http://mailpit.test:8025/api/v1/messages"), {
+    expect(fetch).toHaveBeenNthCalledWith(1, new URL("http://mailpit.test:8025/api/v1/messages"), expect.objectContaining({
       cache: "no-store",
-    });
-    expect(fetch).toHaveBeenNthCalledWith(2, "https://oauth.telegram.org/.well-known/jwks.json", {
+      signal: expect.any(Object),
+    }));
+    expect(fetch).toHaveBeenNthCalledWith(2, "https://oauth.telegram.org/.well-known/jwks.json", expect.objectContaining({
       cache: "no-store",
-    });
-    expect(fetch).toHaveBeenNthCalledWith(3, new URL("http://remnawave.test:3000/api/system/metadata"), {
+      signal: expect.any(Object),
+    }));
+    expect(fetch).toHaveBeenNthCalledWith(3, new URL("http://remnawave.test:3000/api/system/metadata"), expect.objectContaining({
       headers: {
         accept: "application/json",
         authorization: "Bearer test-remnawave-token",
       },
       cache: "no-store",
-    });
+      signal: expect.any(Object),
+    }));
   });
 
   it("reports a missing Remnawave readiness token without making a request", async () => {
@@ -115,13 +132,14 @@ describe("health checks", () => {
     const fetch = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(new Response("{}", { status: 200 }));
 
     await expect(checkRemnawave()).resolves.toMatchObject({ status: "ok" });
-    expect(fetch).toHaveBeenCalledWith(new URL("http://remnawave.test:3000/api/system/metadata"), {
+    expect(fetch).toHaveBeenCalledWith(new URL("http://remnawave.test:3000/api/system/metadata"), expect.objectContaining({
       headers: {
         accept: "application/json",
         authorization: "Bearer ready-token",
       },
       cache: "no-store",
-    });
+      signal: expect.any(Object),
+    }));
   });
 
   it("skips optional readiness checks when URLs are not configured", async () => {

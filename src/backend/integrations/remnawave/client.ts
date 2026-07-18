@@ -144,6 +144,7 @@ async function remnawaveRequest<T>(path: string) {
         authorization: token.startsWith("Bearer ") ? token : `Bearer ${token}`,
       },
       cache: "no-store",
+      signal: AbortSignal.timeout(10_000),
     });
 
     if (response.status === 404) {

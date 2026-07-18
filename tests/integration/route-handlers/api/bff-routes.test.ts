@@ -908,4 +908,37 @@ describe("BFF route integration contracts", () => {
       },
     });
   });
+
+  it("starts every readiness dependency in parallel with one deadline signal", async () => {
+    let release!: (value: { status: "ok"; latencyMs: number }) => void;
+    const gate = new Promise<{ status: "ok"; latencyMs: number }>((resolve) => {
+      release = resolve;
+    });
+    const checks = [
+      mocks.checkDatabase,
+      mocks.checkRedis,
+      mocks.checkRemnashop,
+      mocks.checkTelegramOidc,
+      mocks.checkMailpit,
+      mocks.checkRemnawave,
+    ];
+
+    for (const check of checks) {
+      check.mockImplementationOnce(() => gate);
+    }
+
+    const responsePromise = readinessRoute.GET();
+    await Promise.resolve();
+
+    for (const check of checks) {
+      expect(check).toHaveBeenCalledOnce();
+      expect(check).toHaveBeenCalledWith(expect.any(Object));
+    }
+
+    const signals = checks.map((check) => check.mock.calls[0]?.[0]);
+    expect(new Set(signals).size).toBe(1);
+    release({ status: "ok", latencyMs: 1 });
+
+    await expect(responsePromise).resolves.toMatchObject({ status: 200 });
+  });
 });

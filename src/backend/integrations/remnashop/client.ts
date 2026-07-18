@@ -489,6 +489,7 @@ export async function remnashopRefreshTokens(refreshToken: string) {
       cookie: `refresh_token=${refreshToken}`,
     },
     cache: "no-store",
+    signal: AbortSignal.timeout(15_000),
   });
   const data = await parseResponse<RemnashopAuthResponse>(response, "/auth/refresh");
   const cookies = extractAuthCookies(response);
@@ -514,6 +515,7 @@ export async function remnashopChangePassword(
     },
     body: JSON.stringify(body),
     cache: "no-store",
+    signal: AbortSignal.timeout(15_000),
   });
   const data = await parseResponse<ChangePasswordResponse>(response, "/auth/change-password");
   const cookies = extractAuthCookies(response);
