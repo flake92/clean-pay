@@ -493,7 +493,7 @@ describe("auth use cases", () => {
   it("reconciles a locally stale verification flag from the matching Remnashop profile", async () => {
     const staleSession = {
       ...session,
-      user: { ...user, emailVerified: false },
+      user: { ...user, emailVerified: true, authPending: true },
     };
     mocks.getCurrentSession.mockResolvedValueOnce(staleSession);
     mocks.getAuthorizedRemnashopTokens.mockResolvedValueOnce({

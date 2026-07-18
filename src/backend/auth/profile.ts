@@ -54,16 +54,16 @@ export async function getCurrentAuthProfile() {
   }
 
   const profile = await getRemnashopMe(accessToken);
-  const shouldSyncVerifiedEmail = Boolean(
+  const shouldReconcileVerifiedEmail = Boolean(
     profile.email &&
     profile.is_email_verified &&
     authorizedSession.user.email === profile.email &&
-    !authorizedSession.user.emailVerified,
+    (!authorizedSession.user.emailVerified || authorizedSession.user.authPending),
   );
 
   let reconciledSession = authorizedSession;
 
-  if (shouldSyncVerifiedEmail) {
+  if (shouldReconcileVerifiedEmail) {
     await prisma.webUser.update({
       where: { id: authorizedSession.userId },
       data: { emailVerified: true, authPending: false },
