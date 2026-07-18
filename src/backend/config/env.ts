@@ -1,3 +1,5 @@
+import { validateProductionEnvironment } from "../../../deploy/prod/production-env-rules.mjs";
+
 type SameSite = "lax" | "strict" | "none";
 
 type AppEnv = {
@@ -251,18 +253,16 @@ function validateEnv(env: AppEnv) {
     throw new Error("REMNAWAVE_API_BASE_URL and REMNAWAVE_TOKEN must be configured together");
   }
 
-  if (env.telegramOidc.clientSecret.startsWith(`${env.telegramOidc.clientId}:`)) {
-    return;
+  if (env.telegramBotToken) {
+    const botId = env.telegramBotToken.split(":")[0];
+
+    if (botId && botId !== env.telegramOidc.clientId) {
+      throw new Error("TELEGRAM_OIDC_CLIENT_ID must match the bot id in TELEGRAM_BOT_TOKEN");
+    }
   }
 
-  if (!env.telegramBotToken) {
-    return;
-  }
-
-  const botId = env.telegramBotToken.split(":")[0];
-
-  if (botId && botId !== env.telegramOidc.clientId) {
-    throw new Error("TELEGRAM_OIDC_CLIENT_ID must match the bot id in TELEGRAM_BOT_TOKEN");
+  if (isProduction && process.env.CLEAN_PAY_BUILD_PHASE !== "true") {
+    validateProductionEnvironment(process.env);
   }
 }
 

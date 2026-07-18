@@ -1,251 +1,54 @@
 #!/usr/bin/env node
 import { existsSync, readFileSync } from "node:fs";
 
-const args = process.argv.slice(2);
-const envFileIndex = args.indexOf("--env-file");
+import {
+  ProductionEnvironmentError,
+  parseProductionEnvironmentFile,
+  validateProductionEnvironment,
+} from "./production-env-rules.mjs";
 
-if (envFileIndex >= 0) {
-  const envFile = args[envFileIndex + 1];
+try {
+  const envFile = parseArguments(process.argv.slice(2));
+  const environment = envFile
+    ? readIsolatedEnvironmentFile(envFile)
+    : process.env;
 
-  if (!envFile) {
-    fail("--env-file requires a path");
+  if (envFile && Object.hasOwn(environment, "CLEAN_PAY_BAKED_PUBLIC_APP_URL")) {
+    throw new ProductionEnvironmentError(
+      "CLEAN_PAY_BAKED_PUBLIC_APP_URL is image metadata and must not be set in an env file",
+    );
   }
 
-  loadEnvFile(envFile);
-}
+  validateProductionEnvironment(environment);
+  console.log("Production environment validation passed.");
+} catch (error) {
+  const message =
+    error instanceof ProductionEnvironmentError || error instanceof Error
+      ? error.message
+      : String(error);
 
-const requiredNames = [
-  "DATABASE_URL",
-  "REDIS_URL",
-  "APP_URL",
-  "NEXT_PUBLIC_APP_URL",
-  "REMNASHOP_API_BASE_URL",
-  "REMNASHOP_API_KEY",
-  "WEB_JWT_SECRET",
-  "WEB_REFRESH_SECRET",
-  "TELEGRAM_OIDC_CLIENT_ID",
-  "TELEGRAM_OIDC_CLIENT_SECRET",
-];
-
-for (const name of requiredNames) {
-  required(name);
-}
-
-httpUrl("APP_URL");
-httpUrl("NEXT_PUBLIC_APP_URL");
-httpUrl("REMNASHOP_API_BASE_URL");
-optionalHttpUrl("REMNASHOP_ADMIN_API_BASE_URL");
-optionalHttpUrl("REMNAWAVE_API_BASE_URL");
-optionalHttpUrl("TURNSTILE_VERIFY_URL");
-optionalHttpUrl("SUPPORT_FAQ_URL");
-optionalHttpUrl("CLEAN_PAY_READINESS_MAILPIT_URL");
-optionalHttpUrl("CLEAN_PAY_READINESS_REMNAWAVE_URL");
-optionalPublicPath("NEXT_PUBLIC_BRAND_LOGO_URL");
-
-urlWithProtocols("DATABASE_URL", ["postgresql:", "postgres:"]);
-urlWithProtocols("REDIS_URL", ["redis:", "rediss:"]);
-
-const cookieSecure = bool("COOKIE_SECURE", true);
-const cookieSameSite = sameSite("COOKIE_SAMESITE", "lax");
-const turnstileEnabled = bool("TURNSTILE_ENABLED", false);
-const paymentReconciliationEnabled = bool("PAYMENT_RECONCILIATION_ENABLED", false);
-boundedInteger("PAYMENT_RECONCILIATION_BATCH_SIZE", 10, 1, 100);
-boundedInteger("PAYMENT_RECONCILIATION_INTERVAL_SECONDS", 30, 5, 3600);
-optionalHttpUrl("PAYMENT_RECONCILIATION_INTERNAL_URL");
-bool("SUPPORT_ENABLED", false);
-
-if (
-  paymentReconciliationEnabled &&
-  (!optional("PAYMENT_RECONCILIATION_SECRET") ||
-    optional("PAYMENT_RECONCILIATION_SECRET").length < 32)
-) {
-  fail("PAYMENT_RECONCILIATION_SECRET must be at least 32 characters when PAYMENT_RECONCILIATION_ENABLED=true");
-}
-
-if (
-  paymentReconciliationEnabled &&
-  !optional("REMNASHOP_ADMIN_API_BASE_URL")
-) {
-  fail("REMNASHOP_ADMIN_API_BASE_URL is required when PAYMENT_RECONCILIATION_ENABLED=true");
-}
-
-if (optional("NEXT_PUBLIC_BRAND_NAME") && optional("NEXT_PUBLIC_BRAND_NAME").length > 80) {
-  fail("NEXT_PUBLIC_BRAND_NAME must be 80 characters or less");
-}
-
-if (turnstileEnabled) {
-  if (!optional("TURNSTILE_SITE_KEY")) {
-    fail("TURNSTILE_SITE_KEY is required when TURNSTILE_ENABLED=true");
-  }
-
-  if (!optional("TURNSTILE_SECRET_KEY")) {
-    fail("TURNSTILE_SECRET_KEY is required when TURNSTILE_ENABLED=true");
-  }
-}
-
-if (cookieSameSite === "none" && !cookieSecure) {
-  fail('COOKIE_SECURE must be "true" when COOKIE_SAMESITE="none"');
-}
-
-if (!optional("REMNAWAVE_API_BASE_URL") || !optional("REMNAWAVE_TOKEN")) {
-  fail("REMNAWAVE_API_BASE_URL and REMNAWAVE_TOKEN are required in production");
-}
-
-if (Boolean(optional("REMNAWAVE_API_BASE_URL")) !== Boolean(optional("REMNAWAVE_TOKEN"))) {
-  fail("REMNAWAVE_API_BASE_URL and REMNAWAVE_TOKEN must be configured together");
-}
-
-if (optional("TELEGRAM_BOT_TOKEN")) {
-  const botId = optional("TELEGRAM_BOT_TOKEN").split(":")[0];
-
-  if (botId && botId !== required("TELEGRAM_OIDC_CLIENT_ID")) {
-    fail("TELEGRAM_OIDC_CLIENT_ID must match the bot id in TELEGRAM_BOT_TOKEN");
-  }
-}
-
-console.log("Production environment validation passed.");
-
-function loadEnvFile(file) {
-  if (!existsSync(file)) {
-    fail(`Missing env file: ${file}`);
-  }
-
-  for (const rawLine of readFileSync(file, "utf8").split(/\r?\n/)) {
-    const line = rawLine.trim();
-
-    if (!line || line.startsWith("#")) {
-      continue;
-    }
-
-    const separator = line.indexOf("=");
-
-    if (separator < 0) {
-      continue;
-    }
-
-    const name = line.slice(0, separator).trim();
-    const value = unquote(line.slice(separator + 1).trim());
-
-    process.env[name] = value;
-  }
-}
-
-function unquote(value) {
-  if (
-    (value.startsWith('"') && value.endsWith('"')) ||
-    (value.startsWith("'") && value.endsWith("'"))
-  ) {
-    return value.slice(1, -1);
-  }
-
-  return value;
-}
-
-function optional(name) {
-  return process.env[name]?.trim() || null;
-}
-
-function required(name) {
-  const value = optional(name);
-
-  if (!value) {
-    fail(`${name} is required`);
-  }
-
-  return value;
-}
-
-function bool(name, defaultValue) {
-  const value = optional(name);
-
-  if (!value) {
-    return defaultValue;
-  }
-
-  if (value === "true") {
-    return true;
-  }
-
-  if (value === "false") {
-    return false;
-  }
-
-  fail(`${name} must be "true" or "false"`);
-}
-
-function sameSite(name, defaultValue) {
-  const value = optional(name)?.toLowerCase();
-
-  if (!value) {
-    return defaultValue;
-  }
-
-  if (value === "lax" || value === "strict" || value === "none") {
-    return value;
-  }
-
-  fail(`${name} must be "lax", "strict", or "none"`);
-}
-
-function boundedInteger(name, defaultValue, min, max) {
-  const raw = optional(name);
-
-  if (!raw) {
-    return defaultValue;
-  }
-
-  const value = Number(raw);
-
-  if (!Number.isSafeInteger(value) || value < min || value > max) {
-    fail(`${name} must be an integer between ${min} and ${max}`);
-  }
-
-  return value;
-}
-
-function httpUrl(name) {
-  return urlWithProtocols(name, ["http:", "https:"]);
-}
-
-function optionalHttpUrl(name) {
-  if (!optional(name)) {
-    return null;
-  }
-
-  return httpUrl(name);
-}
-
-function optionalPublicPath(name) {
-  const value = optional(name);
-
-  if (!value) {
-    return null;
-  }
-
-  if (!value.startsWith("/") || value.startsWith("//") || value.includes("\\") || value.includes("\0")) {
-    fail(`${name} must be a root-relative public path like /brand/logo.png`);
-  }
-
-  return value;
-}
-
-function urlWithProtocols(name, protocols) {
-  const value = required(name);
-
-  try {
-    const parsed = new URL(value);
-
-    if (!protocols.includes(parsed.protocol)) {
-      throw new Error();
-    }
-
-    return parsed;
-  } catch {
-    fail(`${name} must be a valid ${protocols.join(" or ")} URL`);
-  }
-}
-
-function fail(message) {
   console.error(`Production environment validation failed: ${message}`);
   process.exit(1);
+}
+
+function parseArguments(args) {
+  if (args.length === 0) {
+    return null;
+  }
+
+  if (args.length !== 2 || args[0] !== "--env-file" || !args[1]) {
+    throw new ProductionEnvironmentError(
+      "usage: validate-env.mjs [--env-file PATH]",
+    );
+  }
+
+  return args[1];
+}
+
+function readIsolatedEnvironmentFile(file) {
+  if (!existsSync(file)) {
+    throw new ProductionEnvironmentError(`Missing env file: ${file}`);
+  }
+
+  return parseProductionEnvironmentFile(readFileSync(file, "utf8"), file);
 }

@@ -46,34 +46,6 @@ require_env_file() {
   [ -f "$ENV_FILE" ] || fail "missing .env. Create it from .env.example and fill real values"
 }
 
-required_env() {
-  value=$(env_value "$1")
-  [ -n "$value" ] || fail "$1 is required in .env"
-}
-
-bool_env() {
-  value=$(env_value "$1" "$2")
-
-  case "$value" in
-    true|false) ;;
-    *) fail "$1 must be true or false" ;;
-  esac
-}
-
-http_url_env() {
-  value=$(env_value "$1")
-
-  case "$value" in
-    http://*|https://*) ;;
-    *) fail "$1 must be a valid http:// or https:// URL" ;;
-  esac
-}
-
-optional_http_url_env() {
-  value=$(env_value "$1")
-  [ -z "$value" ] || http_url_env "$1"
-}
-
 generate_secret() {
   if command -v openssl >/dev/null 2>&1; then
     openssl rand -hex 32
@@ -145,90 +117,9 @@ ensure_generated_secrets() {
 validate_env() {
   require_env_file
   ensure_generated_secrets
-
-  required_env DATABASE_URL
-  required_env REDIS_URL
-  required_env APP_URL
-  required_env NEXT_PUBLIC_APP_URL
-  required_env REMNASHOP_API_BASE_URL
-  required_env REMNAWAVE_API_BASE_URL
-  required_env REMNAWAVE_TOKEN
-  required_env WEB_JWT_SECRET
-  required_env WEB_REFRESH_SECRET
-  required_env TELEGRAM_OIDC_CLIENT_ID
-  required_env TELEGRAM_OIDC_CLIENT_SECRET
-
-  http_url_env APP_URL
-  http_url_env NEXT_PUBLIC_APP_URL
-  http_url_env REMNASHOP_API_BASE_URL
-  optional_http_url_env REMNASHOP_ADMIN_API_BASE_URL
-  http_url_env REMNAWAVE_API_BASE_URL
-  optional_http_url_env TURNSTILE_VERIFY_URL
-  optional_http_url_env SUPPORT_FAQ_URL
-  optional_http_url_env CLEAN_PAY_READINESS_MAILPIT_URL
-  optional_http_url_env CLEAN_PAY_READINESS_REMNAWAVE_URL
-
-  case "$(env_value DATABASE_URL)" in
-    postgresql://*|postgres://*) ;;
-    *) fail "DATABASE_URL must be a valid PostgreSQL URL" ;;
-  esac
-
-  case "$(env_value REDIS_URL)" in
-    redis://*|rediss://*) ;;
-    *) fail "REDIS_URL must be a valid Redis URL" ;;
-  esac
-
-  bool_env COOKIE_SECURE true
-  bool_env TURNSTILE_ENABLED false
-  bool_env SUPPORT_ENABLED false
-  bool_env PAYMENT_RECONCILIATION_ENABLED false
-
-  reconcile_enabled=$(env_value PAYMENT_RECONCILIATION_ENABLED false)
-  if [ "$reconcile_enabled" = "true" ]; then
-    required_env PAYMENT_RECONCILIATION_SECRET
-    required_env REMNASHOP_ADMIN_API_BASE_URL
-  fi
-
-  optional_http_url_env PAYMENT_RECONCILIATION_INTERNAL_URL
-
-  cookie_samesite=$(env_value COOKIE_SAMESITE lax)
-  case "$cookie_samesite" in
-    lax|strict|none) ;;
-    *) fail "COOKIE_SAMESITE must be lax, strict, or none" ;;
-  esac
-
-  if [ "$cookie_samesite" = "none" ] && [ "$(env_value COOKIE_SECURE true)" != "true" ]; then
-    fail "COOKIE_SECURE must be true when COOKIE_SAMESITE=none"
-  fi
-
-  brand_name=$(env_value NEXT_PUBLIC_BRAND_NAME)
-  if [ ${#brand_name} -gt 80 ]; then
-    fail "NEXT_PUBLIC_BRAND_NAME must be 80 characters or less"
-  fi
-
-  logo_path=$(env_value NEXT_PUBLIC_BRAND_LOGO_URL)
-  case "$logo_path" in
-    ""|/*) ;;
-    *) fail "NEXT_PUBLIC_BRAND_LOGO_URL must be a root-relative path like /brand/logo.png" ;;
-  esac
-
-  case "$logo_path" in
-    //*|*\\*) fail "NEXT_PUBLIC_BRAND_LOGO_URL must not start with // or contain backslashes" ;;
-  esac
-
-  if [ "$(env_value TURNSTILE_ENABLED false)" = "true" ]; then
-    required_env TURNSTILE_SITE_KEY
-    required_env TURNSTILE_SECRET_KEY
-  fi
-
-  bot_token=$(env_value TELEGRAM_BOT_TOKEN)
-  if [ -n "$bot_token" ]; then
-    bot_id=${bot_token%%:*}
-    [ "$bot_id" = "$(env_value TELEGRAM_OIDC_CLIENT_ID)" ] \
-      || fail "TELEGRAM_OIDC_CLIENT_ID must match the bot id in TELEGRAM_BOT_TOKEN"
-  fi
-
-  info "environment file is valid"
+  require_command node
+  node "$ROOT_DIR/deploy/prod/validate-env.mjs" --env-file "$ENV_FILE"
+  info "production environment file is valid"
 }
 
 ensure_network() {
@@ -245,7 +136,24 @@ ensure_network() {
     || fail "failed to create Docker network $network_name"
 }
 
-compose() {
+compose() (
+  unset \
+    CLEAN_PAY_BIND \
+    CLEAN_PAY_IMAGE \
+    CLEAN_PAY_PORT \
+    COMPOSE_ENV_FILES \
+    COMPOSE_PROFILES \
+    COMPOSE_PROJECT_NAME \
+    NEXT_PUBLIC_APP_URL \
+    NEXT_PUBLIC_BRAND_LOGO_URL \
+    NEXT_PUBLIC_BRAND_NAME \
+    POSTGRES_DB \
+    POSTGRES_PASSWORD \
+    POSTGRES_USER \
+    REMNASHOP_DOCKER_NETWORK \
+    TURNSTILE_ENABLED \
+    TURNSTILE_SITE_KEY
+
   if [ "$MODE" = "remnashop" ]; then
     if [ "$(env_value PAYMENT_RECONCILIATION_ENABLED false)" = "true" ]; then
       docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" -f "$ROOT_DIR/docker-compose.remnashop.yml" --profile reconciliation "$@"
@@ -259,7 +167,7 @@ compose() {
       docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" "$@"
     fi
   fi
-}
+)
 
 assert_reconciliation_worker() {
   [ "$(env_value PAYMENT_RECONCILIATION_ENABLED false)" = "true" ] || return 0

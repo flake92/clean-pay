@@ -6,6 +6,7 @@ const commands = {
   build: {
     args: ["build"],
     env: {
+      CLEAN_PAY_BUILD_PHASE: "true",
       NODE_ENV: "production",
     },
   },

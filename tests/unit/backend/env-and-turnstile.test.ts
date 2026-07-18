@@ -4,6 +4,52 @@ import { getEnv } from "@/backend/config/env";
 import { BffError } from "@/backend/integrations/remnashop/errors";
 import { getRequestIp, getTurnstileToken, verifyTurnstileToken } from "@/backend/security/turnstile";
 
+function stubValidProductionEnv() {
+  const postgresPassword = "pg-runtime-9QvL2xR8mT4pK7sN6cWd";
+  const values = {
+    NODE_ENV: "production",
+    CLEAN_PAY_BUILD_PHASE: "",
+    CLEAN_PAY_BAKED_PUBLIC_APP_URL: "",
+    POSTGRES_DB: "clean_pay",
+    POSTGRES_USER: "clean_pay",
+    POSTGRES_PASSWORD: postgresPassword,
+    DATABASE_URL: `postgresql://clean_pay:${postgresPassword}@postgres:5432/clean_pay?schema=public`,
+    REDIS_URL: "redis://redis:6379/0",
+    APP_URL: "https://pay.runtime-clean.dev",
+    NEXT_PUBLIC_APP_URL: "https://pay.runtime-clean.dev",
+    REMNASHOP_API_BASE_URL: "http://remnashop:5000/api/v1/public",
+    REMNASHOP_ADMIN_API_BASE_URL: "http://remnashop:5000/api/v1/admin",
+    REMNASHOP_API_KEY: "shop-runtime-8Wp4Jz7Lc2Nq9Vr5Ks3M",
+    REMNAWAVE_API_BASE_URL: "https://panel.runtime-clean.dev",
+    REMNAWAVE_TOKEN: "wave-runtime-7Nq3Kp9Xs4Vm2Lc8Wr6J",
+    WEB_JWT_SECRET: "jwt-runtime-6Vr2Kp8Wm4Xq9Lc3Ns7D5Hz1",
+    WEB_REFRESH_SECRET: "refresh-runtime-5Kq8Vr2Nm7Wp4Lc9Xs3D6Hz1",
+    AUDIT_IP_HASH_SECRET: "audit-runtime-4Wp7Kq2Vr9Nm5Xs8Lc3D6Hz1",
+    COOKIE_SECURE: "true",
+    COOKIE_SAMESITE: "lax",
+    TELEGRAM_OIDC_CLIENT_ID: "7654321098",
+    TELEGRAM_OIDC_CLIENT_SECRET: "oidc-runtime-3Nm8Wp5Kq2Vr7Xs9Lc4D6Hz1",
+    TELEGRAM_BOT_TOKEN: "7654321098:RuntimeBotToken_9QvL2xR8mT4pK",
+    PAYMENT_RECONCILIATION_ENABLED: "false",
+    PAYMENT_RECONCILIATION_SECRET: "",
+    PAYMENT_RECONCILIATION_INTERNAL_URL: "http://app:4000/api/internal/payments/reconcile",
+    TURNSTILE_ENABLED: "false",
+    TURNSTILE_SITE_KEY: "",
+    TURNSTILE_SECRET_KEY: "",
+    TURNSTILE_VERIFY_URL: "https://challenges.cloudflare.com/turnstile/v0/siteverify",
+    SUPPORT_ENABLED: "false",
+    SUPPORT_EMAIL: "",
+    SUPPORT_TELEGRAM_USERNAME: "",
+    SUPPORT_FAQ_URL: "",
+    CLEAN_PAY_READINESS_MAILPIT_URL: "",
+    CLEAN_PAY_READINESS_REMNAWAVE_URL: "https://panel.runtime-clean.dev",
+  } as const;
+
+  for (const [name, value] of Object.entries(values)) {
+    vi.stubEnv(name, value);
+  }
+}
+
 describe("backend env", () => {
   const restoreEnv = { ...process.env };
 
@@ -79,12 +125,40 @@ describe("backend env", () => {
     expect(() => getEnv()).toThrow("NEXT_PUBLIC_BRAND_LOGO_URL must be a root-relative public path");
   });
 
+  it("enforces the production preflight at runtime and confines its escape hatch to builds", () => {
+    stubValidProductionEnv();
+    expect(getEnv().appUrl).toBe("https://pay.runtime-clean.dev");
+
+    vi.stubEnv("CLEAN_PAY_BAKED_PUBLIC_APP_URL", "https://old.runtime-clean.dev");
+    expect(() => getEnv()).toThrow("rebuild the image");
+
+    stubValidProductionEnv();
+    vi.stubEnv("APP_URL", "http://pay.runtime-clean.dev");
+    expect(() => getEnv()).toThrow("APP_URL must be a valid https: URL");
+
+    stubValidProductionEnv();
+    vi.stubEnv("COOKIE_SECURE", "false");
+    expect(() => getEnv()).toThrow('COOKIE_SECURE must be "true" in production');
+
+    stubValidProductionEnv();
+    vi.stubEnv("WEB_JWT_SECRET", "change-me-runtime-web-jwt-secret-value");
+    expect(() => getEnv()).toThrow("WEB_JWT_SECRET must not use a placeholder");
+
+    stubValidProductionEnv();
+    vi.stubEnv("CLEAN_PAY_BUILD_PHASE", "true");
+    vi.stubEnv("APP_URL", "http://localhost:4000");
+    vi.stubEnv("NEXT_PUBLIC_APP_URL", "http://localhost:4000");
+    vi.stubEnv("COOKIE_SECURE", "false");
+    expect(getEnv().appUrl).toBe("http://localhost:4000");
+  });
+
   it("fails fast for invalid URLs and inconsistent Telegram settings", () => {
     vi.stubEnv("APP_URL", "ftp://clean-pay.local");
     expect(() => getEnv()).toThrow("APP_URL must be a valid http(s) URL");
 
     vi.stubEnv("APP_URL", "http://localhost:8080");
     vi.stubEnv("TELEGRAM_OIDC_CLIENT_ID", "111111");
+    vi.stubEnv("TELEGRAM_OIDC_CLIENT_SECRET", "111111:legacy-oidc-secret");
     vi.stubEnv("TELEGRAM_BOT_TOKEN", "222222:test-token");
     expect(() => getEnv()).toThrow("TELEGRAM_OIDC_CLIENT_ID must match the bot id in TELEGRAM_BOT_TOKEN");
   });

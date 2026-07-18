@@ -4,6 +4,12 @@ import http from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import {
+  COMPOSE_INTERPOLATION_ENVIRONMENT_NAMES,
+  ProductionEnvironmentError,
+  parseProductionEnvironmentFile,
+} from "./production-env-rules.mjs";
+
 const prodDir = path.dirname(fileURLToPath(import.meta.url));
 const rootDir = path.resolve(prodDir, "../..");
 const envFile = path.join(prodDir, ".env");
@@ -15,6 +21,7 @@ const composeFiles = [
 const args = process.argv.slice(2);
 const debug = args.includes("-debug") || args.includes("--debug");
 const command = args.find((arg) => !arg.startsWith("-")) || "help";
+let parsedEnvironment = null;
 
 if (debug) {
   composeFiles.push(path.join(prodDir, "docker-compose.debug.yml"));
@@ -25,13 +32,40 @@ function readEnvValue(name, fallback) {
     return fallback;
   }
 
-  const line = readFileSync(envFile, "utf8")
-    .split(/\r?\n/)
-    .find((entry) => entry.startsWith(`${name}=`));
-
-  const value = line ? line.slice(name.length + 1).replace(/^"|"$/g, "").trim() : "";
+  const value = productionFileEnvironment()[name]?.trim() || "";
 
   return value || fallback;
+}
+
+function productionFileEnvironment() {
+  if (!parsedEnvironment) {
+    try {
+      parsedEnvironment = parseProductionEnvironmentFile(
+        readFileSync(envFile, "utf8"),
+        envFile,
+      );
+    } catch (error) {
+      const message =
+        error instanceof ProductionEnvironmentError || error instanceof Error
+          ? error.message
+          : String(error);
+
+      console.error(`Invalid production environment: ${message}`);
+      process.exit(1);
+    }
+  }
+
+  return parsedEnvironment;
+}
+
+function productionChildEnvironment() {
+  const environment = { ...process.env };
+
+  for (const name of COMPOSE_INTERPOLATION_ENVIRONMENT_NAMES) {
+    delete environment[name];
+  }
+
+  return { ...environment, ...productionFileEnvironment() };
 }
 
 function composeArgs(...extra) {
@@ -51,7 +85,7 @@ function composeArgs(...extra) {
 function run(commandName, commandArgs) {
   const result = spawnSync(commandName, commandArgs, {
     cwd: rootDir,
-    env: process.env,
+    env: productionChildEnvironment(),
     stdio: "inherit",
     shell: false,
   });
@@ -67,7 +101,7 @@ function run(commandName, commandArgs) {
 function runDocker(args, options = {}) {
   const result = spawnSync("docker", args, {
     cwd: rootDir,
-    env: process.env,
+    env: productionChildEnvironment(),
     stdio: options.stdio ?? "inherit",
     shell: false,
   });
@@ -98,7 +132,7 @@ function assertReconciliationWorkerHealthy() {
       composeArgs("ps", "-q", "reconciliation-worker"),
       {
         cwd: rootDir,
-        env: process.env,
+        env: productionChildEnvironment(),
         encoding: "utf8",
         stdio: "pipe",
         shell: false,
@@ -130,7 +164,7 @@ function assertReconciliationWorkerHealthy() {
         ],
         {
           cwd: rootDir,
-          env: process.env,
+          env: productionChildEnvironment(),
           encoding: "utf8",
           stdio: "pipe",
           shell: false,

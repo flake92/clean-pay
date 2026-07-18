@@ -5,7 +5,8 @@ WORKDIR /app
 ENV NEXT_TELEMETRY_DISABLED=1
 ENV DATABASE_URL=postgresql://clean_pay:clean_pay@localhost:5432/clean_pay?schema=public
 ENV APP_URL=http://localhost:4000
-ENV NEXT_PUBLIC_APP_URL=http://localhost:4000
+ARG NEXT_PUBLIC_APP_URL
+ENV NEXT_PUBLIC_APP_URL=${NEXT_PUBLIC_APP_URL}
 ENV REMNASHOP_API_BASE_URL=https://remnashop.example.com/api/v1/public
 ENV REMNASHOP_ADMIN_API_BASE_URL=https://remnashop.example.com/api/v1/admin
 ENV REMNAWAVE_API_BASE_URL=https://remnawave.example.com
@@ -45,8 +46,10 @@ FROM node:24-bookworm-slim AS runner
 
 WORKDIR /app
 
+ARG NEXT_PUBLIC_APP_URL
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
+ENV CLEAN_PAY_BAKED_PUBLIC_APP_URL=${NEXT_PUBLIC_APP_URL}
 
 RUN apt-get update \
   && apt-get install -y --no-install-recommends ca-certificates openssl \
@@ -62,6 +65,7 @@ COPY --from=builder --chown=cleanpay:nodejs /app/prisma ./prisma
 COPY --from=builder --chown=cleanpay:nodejs /app/prisma.config.ts ./prisma.config.ts
 COPY --chown=cleanpay:nodejs deploy/prod/start.sh ./deploy/prod/start.sh
 COPY --chown=cleanpay:nodejs deploy/prod/validate-env.mjs ./deploy/prod/validate-env.mjs
+COPY --chown=cleanpay:nodejs deploy/prod/production-env-rules.mjs ./deploy/prod/production-env-rules.mjs
 COPY --chown=cleanpay:nodejs deploy/prod/reconcile-loop.mjs ./deploy/prod/reconcile-loop.mjs
 COPY --chown=cleanpay:nodejs deploy/prod/reconciliation-batch.mjs ./deploy/prod/reconciliation-batch.mjs
 
