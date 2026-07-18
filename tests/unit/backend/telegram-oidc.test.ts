@@ -16,6 +16,7 @@ const mocks = vi.hoisted(() => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
   assertRateLimit: vi.fn(),
   remnashopAuth: vi.fn(),
+  stageTelegramAccountMerge: vi.fn(),
   mergeLocalUsersIntoTarget: vi.fn(),
   assertUserMergeFinalOwner: vi.fn(),
   prisma: {
@@ -108,6 +109,10 @@ vi.mock("@/backend/integrations/remnashop/client", () => ({
   remnashopAuth: mocks.remnashopAuth,
 }));
 
+vi.mock("@/backend/auth/telegram-account-merge", () => ({
+  stageTelegramAccountMerge: mocks.stageTelegramAccountMerge,
+}));
+
 vi.mock("@/backend/database/prisma", () => ({
   prisma: mocks.prisma,
 }));
@@ -123,6 +128,7 @@ import {
   consumeTelegramPopupToken,
   createTelegramAuthorizationResponse,
   createTelegramPopupStartResponse,
+  TelegramAuthStateAlreadyConsumedError,
 } from "@/backend/integrations/telegram/oidc";
 
 describe("Telegram OIDC integration", () => {
@@ -174,6 +180,7 @@ describe("Telegram OIDC integration", () => {
       data: {},
       cookies: { accessToken: "access", refreshToken: "refresh" },
     });
+    mocks.stageTelegramAccountMerge.mockResolvedValue({ required: false });
     vi.spyOn(globalThis, "fetch").mockImplementation(async () =>
       new Response(JSON.stringify({ id_token: "id-token" }), { status: 200 }),
     );
@@ -327,6 +334,78 @@ describe("Telegram OIDC integration", () => {
         authPending: false,
       }),
     });
+  });
+
+  it("does not mutate a linked account when Remnashop Telegram verification is unavailable", async () => {
+    state.cookies.set("clean_pay_tg_state", "state");
+    state.cookies.set("clean_pay_tg_nonce", "nonce");
+    state.cookies.set("clean_pay_tg_code_verifier", "verifier");
+    mocks.prisma.telegramAuthState.findFirst.mockResolvedValueOnce({
+      id: "auth-state-1",
+      userId: "target-user",
+      redirectTo: "/link-account",
+      expiresAt: new Date("2099-01-01T00:00:00.000Z"),
+    });
+    mocks.prisma.webUser.findUnique
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({
+        id: "target-user",
+        remnashopUserId: "remna-email",
+        email: "email@example.com",
+        emailVerified: true,
+      });
+    mocks.remnashopAuth.mockRejectedValueOnce(new Error("Remnashop unavailable"));
+
+    await expect(consumeTelegramCallback("code", "state"))
+      .rejects.toMatchObject({ code: "UPSTREAM_UNAVAILABLE", status: 503 });
+    expect(mocks.stageTelegramAccountMerge).not.toHaveBeenCalled();
+    expect(mocks.prisma.$transaction).not.toHaveBeenCalled();
+    expect(mocks.prisma.webUser.upsert).not.toHaveBeenCalled();
+  });
+
+  it("stages confirmation before mutating the local account", async () => {
+    state.cookies.set("clean_pay_tg_state", "state");
+    state.cookies.set("clean_pay_tg_nonce", "nonce");
+    state.cookies.set("clean_pay_tg_code_verifier", "verifier");
+    mocks.prisma.telegramAuthState.findFirst.mockResolvedValueOnce({
+      id: "auth-state-1",
+      userId: "target-user",
+      redirectTo: "/link-account",
+      expiresAt: new Date("2099-01-01T00:00:00.000Z"),
+    });
+    mocks.prisma.webUser.findUnique
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({
+        id: "target-user",
+        remnashopUserId: "remna-email",
+        email: "email@example.com",
+        emailVerified: true,
+      });
+    mocks.stageTelegramAccountMerge.mockResolvedValueOnce({
+      required: true,
+      token: "confirmation-token",
+      sourceEmailMasked: "ot***@example.com",
+      targetEmail: "email@example.com",
+    });
+
+    await expect(consumeTelegramCallback("code", "state")).resolves.toMatchObject({
+      user: { id: "target-user" },
+      mergeConfirmation: {
+        required: true,
+        token: "confirmation-token",
+      },
+    });
+
+    expect(mocks.stageTelegramAccountMerge).toHaveBeenCalledWith({
+      userId: "target-user",
+      telegramId: "123456",
+      telegramUsername: "clean_user",
+      telegramAuth: expect.objectContaining({
+        cookies: { accessToken: "access", refreshToken: "refresh" },
+      }),
+    });
+    expect(mocks.prisma.$transaction).not.toHaveBeenCalled();
+    expect(tx.webUser.update).not.toHaveBeenCalled();
   });
 
   it("merges local users even when the Telegram account has another verified e-mail", async () => {
@@ -490,6 +569,17 @@ describe("Telegram OIDC integration", () => {
 
     await expect(consumeTelegramCallback("code", "state")).rejects.toThrow("Telegram token exchange failed: invalid_client");
     expect(mocks.logTechnicalWarning).toHaveBeenCalledWith("telegram_token_exchange_error_response", expect.any(Object));
+  });
+
+  it("classifies a duplicate callback so the route can wait for the winner", async () => {
+    state.cookies.set("clean_pay_tg_state", "state");
+    state.cookies.set("clean_pay_tg_nonce", "nonce");
+    state.cookies.set("clean_pay_tg_code_verifier", "verifier");
+    mocks.prisma.telegramAuthState.updateMany.mockResolvedValueOnce({ count: 0 });
+
+    await expect(consumeTelegramCallback("code", "state"))
+      .rejects.toBeInstanceOf(TelegramAuthStateAlreadyConsumedError);
+    expect(mocks.stageTelegramAccountMerge).not.toHaveBeenCalled();
   });
 
   it("rejects invalid id token payloads", async () => {

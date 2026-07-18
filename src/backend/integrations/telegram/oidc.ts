@@ -12,7 +12,9 @@ import { logger } from "@/backend/observability/logger";
 import { prisma } from "@/backend/database/prisma";
 import { assertRateLimit } from "@/backend/limits/rate-limit";
 import { claimTelegramAuthState as claimTelegramAuthStateRecord } from "@/backend/auth/one-time-state";
+import { stageTelegramAccountMerge } from "@/backend/auth/telegram-account-merge";
 import { remnashopAuth } from "@/backend/integrations/remnashop/client";
+import { BffError } from "@/backend/integrations/remnashop/errors";
 import {
   assertUserMergeFinalOwner,
   mergeLocalUsersIntoTarget,
@@ -21,6 +23,13 @@ import type { TelegramAuthRequest } from "@/shared/remnashop/types";
 
 const telegramAuthTtlSeconds = 10 * 60;
 const telegramLoginAuthMaxAgeSeconds = 24 * 60 * 60;
+
+export class TelegramAuthStateAlreadyConsumedError extends Error {
+  constructor() {
+    super("Telegram auth state was already consumed or has expired");
+    this.name = "TelegramAuthStateAlreadyConsumedError";
+  }
+}
 
 const telegramOidcCookieNames = {
   state: "clean_pay_tg_state",
@@ -633,7 +642,7 @@ async function claimTelegramAuthState(authState: { id: string }) {
     logTechnicalWarning("telegram_oidc_state_already_consumed", {
       authStateId: authState.id,
     });
-    throw new Error("Telegram auth state was already consumed or has expired");
+    throw new TelegramAuthStateAlreadyConsumedError();
   }
 }
 
@@ -661,6 +670,10 @@ async function completeTelegramAuth(
     fullName,
     photoUrl,
   } = identity;
+  const remnashopAuthResult = identity.remnashopAuthResult
+    ?? (identity.remnashopPayload
+      ? await authenticateRemnashopWithTelegramPayload(identity.remnashopPayload)
+      : null);
 
   authDebugLog("telegram_oidc_identity_resolved", {
     authStateId: authState.id,
@@ -688,6 +701,48 @@ async function completeTelegramAuth(
   });
 
   const targetUserId = authState.userId;
+  const targetLinkUser = targetUserId
+    ? await prisma.webUser.findUnique({
+        where: { id: targetUserId },
+      })
+    : null;
+
+  if (targetUserId && targetLinkUser && !remnashopAuthResult) {
+    throw new BffError(
+      "UPSTREAM_UNAVAILABLE",
+      503,
+      "Remnashop Telegram verification is unavailable; no account data was changed.",
+    );
+  }
+
+  if (targetUserId && targetLinkUser && remnashopAuthResult) {
+    const mergeConfirmation = await stageTelegramAccountMerge({
+      userId: targetUserId,
+      telegramId,
+      telegramUsername,
+      telegramAuth: remnashopAuthResult,
+    });
+
+    if (mergeConfirmation.required) {
+      cookieStore.delete(telegramOidcCookieNames.state);
+      cookieStore.delete(telegramOidcCookieNames.nonce);
+      cookieStore.delete(telegramOidcCookieNames.codeVerifier);
+      await auditLog({
+        action: "telegram_merge_confirmation_required",
+        userId: targetUserId,
+      });
+
+      return {
+        user: targetLinkUser,
+        redirectTo: authState.redirectTo,
+        remnashopAuth: remnashopAuthResult,
+        linked: true,
+        telegramId,
+        telegramUsername,
+        mergeConfirmation,
+      };
+    }
+  }
   authDebugLog("telegram_oidc_user_resolution_started", {
     targetUserId,
     existingTelegramUserId: existingTelegramUser?.id,
@@ -788,11 +843,6 @@ async function completeTelegramAuth(
     userId: user.id,
   });
 
-  const remnashopAuthResult = identity.remnashopAuthResult
-    ?? (!authState.userId && identity.remnashopPayload
-      ? await authenticateRemnashopWithTelegramPayload(identity.remnashopPayload)
-      : null);
-
   cookieStore.delete(telegramOidcCookieNames.state);
   cookieStore.delete(telegramOidcCookieNames.nonce);
   cookieStore.delete(telegramOidcCookieNames.codeVerifier);
@@ -812,5 +862,6 @@ async function completeTelegramAuth(
     linked: Boolean(authState.userId),
     telegramId,
     telegramUsername,
+    mergeConfirmation: null,
   };
 }

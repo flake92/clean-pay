@@ -262,6 +262,32 @@ describe("proxy auth redirects", () => {
     expect(response.status).toBe(200);
   });
 
+  it.each(["POST", "DELETE"])(
+    "allows the exact same-origin bodyless merge-confirmation %s",
+    async (method) => {
+      const response = await proxy(request(
+        "/api/bff/auth/telegram/merge-confirmation",
+        "clean_pay_refresh=refresh-token",
+        { method, headers: { origin: "https://pay.example.com" } },
+      ));
+
+      expect(response.status).toBe(200);
+    },
+  );
+
+  it.each(["POST", "DELETE"])(
+    "rejects sibling-origin merge-confirmation %s",
+    async (method) => {
+      const response = await proxy(request(
+        "/api/bff/auth/telegram/merge-confirmation",
+        "clean_pay_refresh=refresh-token",
+        { method, headers: { origin: "https://other.pay.example.com" } },
+      ));
+
+      expect(response.status).toBe(403);
+    },
+  );
+
   it("requires JSON by default for future unsafe BFF routes", async () => {
     const response = await proxy(request(
       "/api/bff/future/mutation",

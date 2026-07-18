@@ -384,6 +384,9 @@ describe("remnashop client", () => {
           source_user_id: 18367,
           target_user_id: 1,
           reason: "test merge",
+          email_resolution: "REJECT",
+          telegram_resolution: "REJECT",
+          payment_resolution: "REJECT",
         }),
         headers: expect.objectContaining({
           accept: "application/json",

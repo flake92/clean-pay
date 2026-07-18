@@ -444,12 +444,18 @@ export async function remnashopMergeUsers({
   reason,
   dryRun = false,
   timeoutMs = 15_000,
+  emailResolution = "REJECT",
+  telegramResolution = "REJECT",
+  paymentResolution = "REJECT",
 }: {
   sourceUserId: number | string;
   targetUserId: number | string;
   reason: string;
   dryRun?: boolean;
   timeoutMs?: number;
+  emailResolution?: "REJECT" | "KEEP_TARGET";
+  telegramResolution?: "REJECT" | "KEEP_SOURCE";
+  paymentResolution?: "REJECT" | "REKEY_SOURCE";
 }) {
   const apiKey = getEnv().remnashopApiKey;
 
@@ -469,6 +475,9 @@ export async function remnashopMergeUsers({
       source_user_id: Number(sourceUserId),
       target_user_id: Number(targetUserId),
       reason,
+      email_resolution: emailResolution,
+      telegram_resolution: telegramResolution,
+      payment_resolution: paymentResolution,
     }),
     cache: "no-store",
     signal: AbortSignal.timeout(timeoutMs),

@@ -2,6 +2,7 @@ import { Prisma } from "@prisma/client";
 
 import { BffError } from "@/backend/integrations/remnashop/errors";
 import { paymentUpstreamOwnerHash } from "@/backend/payments/hashes";
+import { sha256 } from "@/backend/security/crypto";
 
 type LockedPaymentMergeUser = {
   id: string;
@@ -12,6 +13,7 @@ type LockedPaymentMergeOperation = {
   id: string;
   userId: string;
   idempotencyKeyHash: string;
+  upstreamKey: string;
 };
 
 function normalizedMergeUserIds(
@@ -60,7 +62,7 @@ export async function preflightPaymentOperationsForUserMerge(
 
   const lockedOperations = await tx.$queryRaw<LockedPaymentMergeOperation[]>(
     Prisma.sql`
-      SELECT "id", "userId", "idempotencyKeyHash"
+      SELECT "id", "userId", "idempotencyKeyHash", "upstreamKey"
       FROM "PaymentOperation"
       WHERE "userId" IN (${Prisma.join(userIds)})
       ORDER BY "id"
@@ -78,25 +80,61 @@ export async function preflightPaymentOperationsForUserMerge(
     `,
   );
 
-  const operationByKey = new Map<string, LockedPaymentMergeOperation>();
-
-  for (const operation of lockedOperations) {
-    const existing = operationByKey.get(operation.idempotencyKeyHash);
-
-    if (existing && existing.id !== operation.id) {
-      paymentMergeRequired(
-        "Payment operation keys conflict during account merge",
-      );
-    }
-
-    operationByKey.set(operation.idempotencyKeyHash, operation);
-  }
-
   return {
     targetUpstreamAccountId:
       lockedUsers.find(({ id }) => id === targetUserId)?.remnashopUserId ??
       null,
+    lockedOperations,
   };
+}
+
+async function rekeyCollidingSourcePaymentOperations(
+  tx: Prisma.TransactionClient,
+  targetUserId: string,
+  lockedOperations: LockedPaymentMergeOperation[],
+) {
+  const retainedKeys = new Set(
+    lockedOperations
+      .filter(({ userId }) => userId === targetUserId)
+      .map(({ idempotencyKeyHash }) => idempotencyKeyHash),
+  );
+  const occupiedKeys = new Set(
+    lockedOperations.map(({ idempotencyKeyHash }) => idempotencyKeyHash),
+  );
+
+  for (const operation of lockedOperations) {
+    if (operation.userId === targetUserId) {
+      continue;
+    }
+
+    if (!retainedKeys.has(operation.idempotencyKeyHash)) {
+      retainedKeys.add(operation.idempotencyKeyHash);
+      continue;
+    }
+
+    let counter = 0;
+    let replacement: string;
+    do {
+      replacement = sha256(
+        `merged-payment-operation:${operation.id}:${operation.upstreamKey}:${counter}`,
+      );
+      counter += 1;
+    } while (occupiedKeys.has(replacement));
+
+    const updated = await tx.paymentOperation.updateMany({
+      where: {
+        id: operation.id,
+        userId: operation.userId,
+        idempotencyKeyHash: operation.idempotencyKeyHash,
+      },
+      data: { idempotencyKeyHash: replacement },
+    });
+    if (updated.count !== 1) {
+      paymentMergeRequired("Payment operation changed during account merge");
+    }
+    retainedKeys.add(replacement);
+    occupiedKeys.add(replacement);
+  }
 }
 
 export async function transferPaymentOperationsForUserMerge(
@@ -119,6 +157,11 @@ export async function transferPaymentOperationsForUserMerge(
     );
     const targetOwnerChanged =
       preflight.targetUpstreamAccountId !== targetUpstreamAccountId;
+    await rekeyCollidingSourcePaymentOperations(
+      tx,
+      targetUserId,
+      preflight.lockedOperations,
+    );
     const operationUserIds = [
       ...(targetOwnerChanged ? [targetUserId] : []),
       ...sourceUserIds,

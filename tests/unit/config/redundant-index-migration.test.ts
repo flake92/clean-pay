@@ -22,9 +22,9 @@ describe("redundant index cleanup migration", () => {
   });
 
   it("keeps unique fields without recreating non-unique copies", () => {
-    expect(schema).toContain("email                   String?                  @unique");
-    expect(schema).toContain("telegramId              String?                  @unique");
-    expect(schema).toContain("paymentId         String              @unique");
+    expect(schema).toMatch(/^\s*email\s+String\?\s+@unique\s*$/m);
+    expect(schema).toMatch(/^\s*telegramId\s+String\?\s+@unique\s*$/m);
+    expect(schema).toMatch(/^\s*paymentId\s+String\s+@unique\s*$/m);
     expect(schema).not.toContain("@@index([email])");
     expect(schema).not.toContain("@@index([telegramId])");
     expect(schema).not.toContain("@@index([paymentId])");

@@ -11,6 +11,7 @@ const bodylessPostMutationPaths = new Set([
   '/api/bff/auth/logout',
   '/api/bff/auth/passkey/login/options',
   '/api/bff/auth/passkey/register/options',
+  '/api/bff/auth/telegram/merge-confirmation',
   '/api/bff/subscription/reissue',
 ]);
 
@@ -27,6 +28,7 @@ function isSingleSegmentPath(pathname: string, prefix: string) {
 function isBodylessMutation(method: string, pathname: string) {
   return (
     (method === 'POST' && bodylessPostMutationPaths.has(pathname)) ||
+    (method === 'DELETE' && pathname === '/api/bff/auth/telegram/merge-confirmation') ||
     (method === 'DELETE' && pathname === '/api/bff/subscription/devices') ||
     (method === 'DELETE' && isSingleSegmentPath(pathname, passkeyCredentialPathPrefix)) ||
     (method === 'DELETE' && isSingleSegmentPath(pathname, subscriptionDevicePathPrefix))

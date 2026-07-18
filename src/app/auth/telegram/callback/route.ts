@@ -14,17 +14,60 @@ import {
   remnashopMergeUsers,
 } from "@/backend/integrations/remnashop/client";
 import { BffError } from "@/backend/integrations/remnashop/errors";
-import { createWebSessionOnResponse } from "@/backend/sessions/web-session";
+import {
+  createWebSessionOnResponse,
+  getCurrentSession,
+} from "@/backend/sessions/web-session";
 import {
   consumeTelegramCallback,
   consumeTelegramLoginWidgetPayload,
   consumeTelegramPopupToken,
+  TelegramAuthStateAlreadyConsumedError,
 } from "@/backend/integrations/telegram/oidc";
+import {
+  telegramAccountMergeCookieMaxAgeSeconds,
+  telegramAccountMergeCookieName,
+} from "@/backend/auth/telegram-account-merge";
 
 export const runtime = "nodejs";
 
 function redirectTo(path: string) {
   return NextResponse.redirect(new URL(path, getEnv().publicAppUrl));
+}
+
+function setMergeConfirmationCookie(response: NextResponse, token: string) {
+  const env = getEnv();
+  response.cookies.set(telegramAccountMergeCookieName, token, {
+    httpOnly: true,
+    secure: env.cookieSecure,
+    sameSite: env.cookieSameSite,
+    path: "/",
+    maxAge: telegramAccountMergeCookieMaxAgeSeconds,
+  });
+}
+
+async function redirectAfterTelegramFailure(error?: unknown) {
+  const session = await getCurrentSession().catch(() => null);
+
+  if (!session) {
+    return redirectTo("/login?auth=telegram_failed");
+  }
+
+  const reason =
+    error instanceof BffError && error.code === "ACCOUNT_MERGE_SUBSCRIPTIONS_CONFLICT"
+      ? "telegram_merge_subscriptions"
+      : error instanceof BffError && error.code === "ACCOUNT_MERGE_REQUIRED"
+        ? "telegram_merge_required"
+      : "telegram_failed";
+
+  return redirectTo(`/link-account?auth=${reason}`);
+}
+
+async function redirectAfterConsumedTelegramState() {
+  const session = await getCurrentSession().catch(() => null);
+  return session
+    ? redirectTo("/link-account?auth=telegram_processing")
+    : redirectTo("/login?auth=telegram_failed");
 }
 
 function callbackRequestMetadata(request: Request, url: URL) {
@@ -84,11 +127,20 @@ function isBothSubscriptionsMergeConflict(error: unknown) {
 
 async function mergeCurrentRemnashopAccountIntoTelegramAccount({
   remnashopAuth,
+  currentRemnashopUserId,
 }: {
   remnashopAuth: NonNullable<Awaited<ReturnType<typeof consumeTelegramCallback>>["remnashopAuth"]>;
+  currentRemnashopUserId: string | null;
 }) {
-  const currentTokens = await getAuthorizedRemnashopTokens({ allowUnverifiedEmail: true });
-  const sourceUserId = getRemnashopUserIdFromAccessToken(currentTokens.accessToken);
+  if (!currentRemnashopUserId) {
+    throw new BffError(
+      "ACCOUNT_MERGE_REQUIRED",
+      409,
+      "Current Clean Pay account is not linked to Remnashop.",
+    );
+  }
+
+  const sourceUserId = currentRemnashopUserId;
   const targetUserId = getRemnashopUserIdFromAccessToken(remnashopAuth.cookies.accessToken);
 
   if (sourceUserId === targetUserId) {
@@ -120,12 +172,14 @@ async function mergeCurrentRemnashopAccountIntoTelegramAccount({
 async function reconcileTelegramCallbackResult({
   linked,
   userId,
+  currentRemnashopUserId,
   telegramId,
   telegramUsername,
   remnashopAuth,
 }: {
   linked: boolean;
   userId: string;
+  currentRemnashopUserId: string | null;
   telegramId: string;
   telegramUsername: string | null;
   remnashopAuth: Awaited<ReturnType<typeof consumeTelegramCallback>>["remnashopAuth"];
@@ -145,7 +199,10 @@ async function reconcileTelegramCallbackResult({
         return { userId, remnashopSession: undefined };
       }
 
-      await mergeCurrentRemnashopAccountIntoTelegramAccount({ remnashopAuth });
+      await mergeCurrentRemnashopAccountIntoTelegramAccount({
+        remnashopAuth,
+        currentRemnashopUserId,
+      });
 
       const linkedUser = await linkCurrentUserToRemnashopAuth({
         accessToken: remnashopAuth.cookies.accessToken,
@@ -183,7 +240,7 @@ export async function GET(request: Request) {
 
   if (!code || !state) {
     logTechnicalWarning("telegram_callback_missing_params", metadata);
-    return redirectTo("/login?auth=telegram_failed");
+    return redirectAfterTelegramFailure();
   }
 
   try {
@@ -194,11 +251,23 @@ export async function GET(request: Request) {
       linked,
       telegramId,
       telegramUsername,
+      mergeConfirmation,
     } = await consumeTelegramCallback(code, state);
-    const response = redirectTo(nextPath ?? "/cabinet");
+    const response = redirectTo(
+      mergeConfirmation?.required
+        ? "/link-account?auth=telegram_email_replace"
+        : nextPath ?? "/cabinet",
+    );
+
+    if (mergeConfirmation?.required) {
+      setMergeConfirmationCookie(response, mergeConfirmation.token);
+      return response;
+    }
+
     const reconciled = await reconcileTelegramCallbackResult({
       linked,
       userId: user.id,
+      currentRemnashopUserId: user.remnashopUserId,
       telegramId,
       telegramUsername,
       remnashopAuth,
@@ -222,7 +291,10 @@ export async function GET(request: Request) {
     return response;
   } catch (error) {
     logTechnicalError("telegram_callback_failed", error, metadata);
-    return redirectTo("/login?auth=telegram_failed");
+    if (error instanceof TelegramAuthStateAlreadyConsumedError) {
+      return redirectAfterConsumedTelegramState();
+    }
+    return redirectAfterTelegramFailure(error);
   }
 }
 
@@ -247,13 +319,23 @@ export async function POST(request: Request) {
       linked,
       telegramId,
       telegramUsername,
+      mergeConfirmation,
     } = idToken
       ? await consumeTelegramPopupToken(idToken)
       : await consumeTelegramLoginWidgetPayload(authData as Parameters<typeof consumeTelegramLoginWidgetPayload>[0]);
-    const response = NextResponse.json({ redirectTo: nextPath ?? "/cabinet" });
+    const redirectPath = mergeConfirmation?.required
+      ? "/link-account?auth=telegram_email_replace"
+      : nextPath ?? "/cabinet";
+    const response = NextResponse.json({ redirectTo: redirectPath });
+
+    if (mergeConfirmation?.required) {
+      setMergeConfirmationCookie(response, mergeConfirmation.token);
+      return response;
+    }
     const reconciled = await reconcileTelegramCallbackResult({
       linked,
       userId: user.id,
+      currentRemnashopUserId: user.remnashopUserId,
       telegramId,
       telegramUsername,
       remnashopAuth,
@@ -276,6 +358,14 @@ export async function POST(request: Request) {
     return response;
   } catch (error) {
     logTechnicalError("telegram_popup_callback_failed", error, {});
+    if (error instanceof TelegramAuthStateAlreadyConsumedError) {
+      const session = await getCurrentSession().catch(() => null);
+      if (session) {
+        return NextResponse.json({
+          redirectTo: "/link-account?auth=telegram_processing",
+        });
+      }
+    }
     return NextResponse.json({ error: "telegram_failed" }, { status: 400 });
   }
 }

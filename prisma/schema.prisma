@@ -52,35 +52,67 @@ enum WebSessionAssuranceLevel {
   FULL
 }
 
+enum AccountMergeConfirmationStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
 enum WebAuthnChallengeType {
   REGISTRATION
   AUTHENTICATION
 }
 
 model WebUser {
-  id                      String                   @id @default(cuid())
-  remnashopUserId         String?                  @unique
-  email                   String?                  @unique
-  telegramId              String?                  @unique
-  telegramUsername        String?
-  fullName                String?
-  photoUrl                String?
-  lastLoginAt             DateTime?
-  emailVerified           Boolean                  @default(false)
-  authPending             Boolean                  @default(false)
-  displayName             String?
-  createdAt               DateTime                 @default(now())
-  updatedAt               DateTime                 @updatedAt
-  sessions                WebSession[]
-  auditLogs               AuditLog[]
-  emailVerificationCodes  EmailVerificationCode[]
-  paymentOperations       PaymentOperation[]
-  paymentRecords          PaymentRecord[]
-  paymentHistorySyncState PaymentHistorySyncState?
-  telegramAuthStates      TelegramAuthState[]
-  webAuthnCredentials     WebAuthnCredential[]
-  webAuthnChallenges      WebAuthnChallenge[]
+  id                        String                     @id @default(cuid())
+  remnashopUserId           String?                    @unique
+  email                     String?                    @unique
+  telegramId                String?                    @unique
+  telegramUsername          String?
+  fullName                  String?
+  photoUrl                  String?
+  lastLoginAt               DateTime?
+  emailVerified             Boolean                    @default(false)
+  authPending               Boolean                    @default(false)
+  displayName               String?
+  createdAt                 DateTime                   @default(now())
+  updatedAt                 DateTime                   @updatedAt
+  sessions                  WebSession[]
+  auditLogs                 AuditLog[]
+  emailVerificationCodes    EmailVerificationCode[]
+  paymentOperations         PaymentOperation[]
+  paymentRecords            PaymentRecord[]
+  paymentHistorySyncState   PaymentHistorySyncState?
+  telegramAuthStates        TelegramAuthState[]
+  webAuthnCredentials       WebAuthnCredential[]
+  webAuthnChallenges        WebAuthnChallenge[]
+  accountMergeConfirmations AccountMergeConfirmation[]
+}
 
+model AccountMergeConfirmation {
+  id                    String                         @id @default(cuid())
+  userId                String
+  tokenHash             String                         @unique
+  telegramId            String
+  telegramUsername      String?
+  sourceEmail           String?
+  targetEmail           String
+  sourceRemnashopUserId String
+  targetRemnashopUserId String
+  status                AccountMergeConfirmationStatus @default(PENDING)
+  attemptCount          Int                            @default(0)
+  leaseExpiresAt        DateTime?
+  lastErrorCode         String?
+  expiresAt             DateTime
+  completedAt           DateTime?
+  createdAt             DateTime                       @default(now())
+  updatedAt             DateTime                       @updatedAt
+  user                  WebUser                        @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, status])
+  @@index([expiresAt])
+  @@index([status, leaseExpiresAt])
 }
 
 model PaymentRecord {

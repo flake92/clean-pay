@@ -47,6 +47,9 @@ If a route needs more than request parsing, a small audit call, and one backend 
 | `GET /auth/telegram/callback` | `src/app/auth/telegram/callback/route.ts` | `src/backend/integrations/telegram/oidc.ts`, `src/backend/integrations/remnashop/session.ts` |
 | `GET /auth/telegram/webapp` | `src/app/auth/telegram/webapp/page.tsx` | `src/frontend/components/telegram-webapp-login.tsx` |
 | `POST /api/bff/auth/telegram/webapp` | `src/app/api/bff/auth/telegram/webapp/route.ts` | `src/backend/integrations/remnashop/client.ts`, `src/backend/integrations/remnashop/session.ts` |
+| `GET /api/bff/auth/telegram/merge-confirmation` | `src/app/api/bff/auth/telegram/merge-confirmation/route.ts` | `src/backend/auth/telegram-account-merge.ts` |
+| `POST /api/bff/auth/telegram/merge-confirmation` | `src/app/api/bff/auth/telegram/merge-confirmation/route.ts` | `src/backend/auth/telegram-account-merge.ts` |
+| `DELETE /api/bff/auth/telegram/merge-confirmation` | `src/app/api/bff/auth/telegram/merge-confirmation/route.ts` | `src/backend/auth/telegram-account-merge.ts` |
 
 ## Plans, Subscription, Payments
 

@@ -66,6 +66,9 @@ export async function runRetentionCleanup(prisma, policy, now = new Date()) {
       ],
     },
   })).count;
+  results.accountMergeConfirmations = (await prisma.accountMergeConfirmation.deleteMany({
+    where: { expiresAt: { lt: authCutoff } },
+  })).count;
   results.webSessions = (await prisma.webSession.deleteMany({
     where: {
       OR: [

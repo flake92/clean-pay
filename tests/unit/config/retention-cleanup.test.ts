@@ -35,6 +35,7 @@ describe("production data retention", () => {
       webAuthnChallenge: model(1),
       telegramAuthState: model(2),
       emailVerificationCode: model(3),
+      accountMergeConfirmation: model(7),
       webSession: model(4),
       auditLog: model(5),
       rateLimitEvent: model(6),
@@ -47,6 +48,7 @@ describe("production data retention", () => {
       webAuthnChallenges: 1,
       telegramAuthStates: 2,
       emailVerificationCodes: 3,
+      accountMergeConfirmations: 7,
       webSessions: 4,
       auditInfo: 5,
       auditSecurity: 5,
@@ -78,6 +80,9 @@ describe("production data retention", () => {
           { refreshExpiresAt: { lt: new Date("2026-04-19T00:00:00.000Z") } },
         ],
       },
+    });
+    expect(prisma.accountMergeConfirmation.deleteMany).toHaveBeenCalledWith({
+      where: { expiresAt: { lt: new Date("2026-07-11T00:00:00.000Z") } },
     });
     expect(prisma.auditLog.deleteMany).toHaveBeenNthCalledWith(1, {
       where: {

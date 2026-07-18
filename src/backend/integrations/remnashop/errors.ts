@@ -19,6 +19,8 @@ export type BffErrorCode =
   | 'PAYMENT_OUTCOME_UNKNOWN'
   | 'OFFER_CHANGED'
   | 'ACCOUNT_MERGE_REQUIRED'
+  | 'ACCOUNT_MERGE_SUBSCRIPTIONS_CONFLICT'
+  | 'ACCOUNT_MERGE_IN_PROGRESS'
   | 'PLAN_UNAVAILABLE'
   | 'PAYMENT_GATEWAY_UNAVAILABLE'
   | 'PROMOCODE_ACTIVE_SUBSCRIPTION_REQUIRED'
@@ -64,6 +66,8 @@ const PROD_MESSAGES: Record<BffErrorCode, string> = {
   PAYMENT_OUTCOME_UNKNOWN: 'Результат оплаты уточняется. Не создавайте новую оплату.',
   OFFER_CHANGED: 'Цена или условия предложения изменились. Проверьте новую цену перед оплатой.',
   ACCOUNT_MERGE_REQUIRED: '\u042d\u0442\u043e\u0442 Telegram \u0443\u0436\u0435 \u043f\u0440\u0438\u0432\u044f\u0437\u0430\u043d \u043a \u0434\u0440\u0443\u0433\u043e\u0439 \u043f\u043e\u0447\u0442\u0435. \u0421\u043d\u0430\u0447\u0430\u043b\u0430 \u043e\u0431\u044a\u0435\u0434\u0438\u043d\u0438\u0442\u0435 \u0430\u043a\u043a\u0430\u0443\u043d\u0442\u044b \u0447\u0435\u0440\u0435\u0437 \u043f\u043e\u0434\u0434\u0435\u0440\u0436\u043a\u0443.',
+  ACCOUNT_MERGE_SUBSCRIPTIONS_CONFLICT: 'В обеих учётных записях есть подписки. Данные не изменены — обратитесь в службу поддержки.',
+  ACCOUNT_MERGE_IN_PROGRESS: 'Платёж ещё обрабатывается. Дождитесь завершения и повторите объединение — данные не изменены.',
   PLAN_UNAVAILABLE: 'Этот тариф сейчас недоступен.',
   PAYMENT_GATEWAY_UNAVAILABLE: 'Этот способ оплаты сейчас недоступен.',
   PROMOCODE_ACTIVE_SUBSCRIPTION_REQUIRED: 'Для этого промокода нужна активная подписка.',

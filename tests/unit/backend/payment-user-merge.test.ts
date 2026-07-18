@@ -13,6 +13,7 @@ type TransactionOptions = {
     id: string;
     userId: string;
     idempotencyKeyHash: string;
+    upstreamKey: string;
   }>;
 };
 
@@ -65,18 +66,20 @@ function transaction(
 }
 
 describe("payment operations during user merge", () => {
-  it("locks users, operations and history and rejects a post-merge key collision", async () => {
+  it("locks users, operations and history while preserving a colliding source operation", async () => {
     const tx = transaction(undefined, {
       lockedOperations: [
         {
           id: "operation-target",
           userId: "target-user",
           idempotencyKeyHash: "same-key",
+          upstreamKey: "target-upstream-key",
         },
         {
           id: "operation-source",
           userId: "source-user",
           idempotencyKeyHash: "same-key",
+          upstreamKey: "source-upstream-key",
         },
       ],
     }) as unknown as {
@@ -85,16 +88,13 @@ describe("payment operations during user merge", () => {
       paymentOperation: { updateMany: ReturnType<typeof vi.fn> };
     };
 
-    await expect(
-      preflightPaymentOperationsForUserMerge(
-        tx as unknown as Prisma.TransactionClient,
-        "target-user",
-        ["source-user"],
-      ),
-    ).rejects.toMatchObject({
-      code: "ACCOUNT_MERGE_REQUIRED",
-      status: 409,
-    });
+    await expect(preflightPaymentOperationsForUserMerge(
+      tx as unknown as Prisma.TransactionClient,
+      "target-user",
+      ["source-user"],
+    )).resolves.toMatchObject({ lockedOperations: expect.arrayContaining([
+      expect.objectContaining({ id: "operation-source" }),
+    ]) });
 
     expect(tx.$queryRaw).toHaveBeenCalledTimes(3);
     expect(sqlText(tx.$queryRaw.mock.calls[0]?.[0])).toContain(
@@ -113,6 +113,48 @@ describe("payment operations during user merge", () => {
     ).toBe(true);
     expect(tx.$executeRaw).not.toHaveBeenCalled();
     expect(tx.paymentOperation.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("deterministically rekeys a collision before moving every operation", async () => {
+    const updateMany = vi.fn().mockResolvedValue({ count: 1 });
+    const tx = transaction(updateMany, {
+      lockedOperations: [
+        {
+          id: "operation-target",
+          userId: "target-user",
+          idempotencyKeyHash: "same-key",
+          upstreamKey: "target-upstream-key",
+        },
+        {
+          id: "operation-source",
+          userId: "source-user",
+          idempotencyKeyHash: "same-key",
+          upstreamKey: "source-upstream-key",
+        },
+      ],
+    }) as unknown as {
+      paymentOperation: { updateMany: ReturnType<typeof vi.fn> };
+    };
+
+    await transferPaymentOperationsForUserMerge(
+      tx as unknown as Prisma.TransactionClient,
+      "target-user",
+      "target-owner",
+      ["source-user"],
+    );
+
+    expect(tx.paymentOperation.updateMany).toHaveBeenNthCalledWith(1, {
+      where: {
+        id: "operation-source",
+        userId: "source-user",
+        idempotencyKeyHash: "same-key",
+      },
+      data: { idempotencyKeyHash: expect.stringMatching(/^[A-Za-z0-9_-]{43}$/) },
+    });
+    expect(tx.paymentOperation.updateMany).toHaveBeenLastCalledWith({
+      where: { userId: { in: ["source-user"] } },
+      data: expect.objectContaining({ userId: "target-user" }),
+    });
   });
 
   it("moves every source operation and clears stale foreground and reconciliation claims", async () => {
