@@ -59,6 +59,8 @@ describe("Remnawave live subscription client", () => {
         response: [{
           uuid: "rw-2",
           status: "ACTIVE",
+          email: "user@example.com",
+          telegramId: 123,
           expireAt: "2026-08-01T00:00:00.000Z",
           subscriptionUrl: "https://sub3.example.com/from-telegram",
         }],
@@ -67,7 +69,7 @@ describe("Remnawave live subscription client", () => {
     global.fetch = fetchMock;
 
     await expect(getLiveRemnawaveSubscriptionUrl({
-      userRemnaId: "missing-rw",
+      userRemnaId: "rw-2",
       email: "user@example.com",
       telegramId: "123",
     })).resolves.toBe("https://sub3.example.com/from-telegram");
@@ -91,12 +93,14 @@ describe("Remnawave live subscription client", () => {
           {
             uuid: "rw-disabled",
             status: "DISABLED",
+            email: "user@example.com",
             expireAt: "2027-01-01T00:00:00.000Z",
             subscriptionUrl: "https://sub3.example.com/disabled",
           },
           {
             uuid: "rw-active",
             status: "ACTIVE",
+            email: "user@example.com",
             expireAt: "2026-08-01T00:00:00.000Z",
             subscriptionUrl: "https://sub3.example.com/active",
           },
@@ -130,6 +134,70 @@ describe("Remnawave live subscription client", () => {
       userRemnaId: "rw-1",
       email: "user@example.com",
     })).resolves.toBeNull();
+  });
+
+  it("rejects a UUID response that belongs to a different or expired user", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({
+        response: {
+          uuid: "another-user",
+          status: "ACTIVE",
+          subscriptionUrl: "https://sub3.example.com/other-user",
+        },
+      }))
+      .mockResolvedValueOnce(jsonResponse({
+        response: {
+          uuid: "rw-1",
+          status: "ACTIVE",
+          expireAt: "2020-01-01T00:00:00.000Z",
+          subscriptionUrl: "https://sub3.example.com/expired",
+        },
+      }));
+    global.fetch = fetchMock;
+
+    await expect(getLiveRemnawaveSubscriptionUrl({ userRemnaId: "rw-1" })).resolves.toBeNull();
+    await expect(getLiveRemnawaveSubscriptionUrl({ userRemnaId: "rw-1" })).resolves.toBeNull();
+  });
+
+  it("requires every supplied fallback identity and the stored UUID to match", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ message: "not found" }, { status: 404 }))
+      .mockResolvedValueOnce(jsonResponse({
+        response: [{
+          uuid: "rw-1",
+          status: "ACTIVE",
+          email: "victim@example.com",
+          telegramId: "123",
+          subscriptionUrl: "https://sub3.example.com/victim",
+        }],
+      }))
+      .mockResolvedValueOnce(jsonResponse({ response: [] }));
+    global.fetch = fetchMock;
+
+    await expect(getLiveRemnawaveSubscriptionUrl({
+      userRemnaId: "rw-1",
+      email: "owner@example.com",
+      telegramId: "123",
+    })).resolves.toBeNull();
+  });
+
+  it("accepts only one URL for duplicate identity records and never chooses among conflicts", async () => {
+    const duplicate = {
+      uuid: "rw-1",
+      status: "ACTIVE",
+      email: "user@example.com",
+      subscriptionUrl: "https://sub3.example.com/same",
+    };
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ response: [duplicate, duplicate] }))
+      .mockResolvedValueOnce(jsonResponse({
+        response: [duplicate, { ...duplicate, subscriptionUrl: "https://sub3.example.com/conflict" }],
+      }));
+    global.fetch = fetchMock;
+
+    await expect(getLiveRemnawaveSubscriptionUrl({ email: "user@example.com" }))
+      .resolves.toBe("https://sub3.example.com/same");
+    await expect(getLiveRemnawaveSubscriptionUrl({ email: "user@example.com" })).resolves.toBeNull();
   });
 
   it("returns null when Remnawave is unavailable", async () => {

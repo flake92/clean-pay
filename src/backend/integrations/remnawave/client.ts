@@ -55,17 +55,69 @@ function subscriptionUrl(user: RemnawaveUser | null | undefined) {
   return isValidSubscriptionUrl(value) ? value : null;
 }
 
-function preferActiveUsers(users: RemnawaveUser[]) {
-  return [...users].sort((left, right) => {
-    const leftActive = left.status === "ACTIVE" ? 1 : 0;
-    const rightActive = right.status === "ACTIVE" ? 1 : 0;
+function normalizedIdentity(value: string | number | null | undefined) {
+  if (value === null || value === undefined) {
+    return null;
+  }
 
-    if (leftActive !== rightActive) {
-      return rightActive - leftActive;
+  const normalized = String(value).trim();
+
+  return normalized || null;
+}
+
+function normalizedEmail(value: string | null | undefined) {
+  return normalizedIdentity(value)?.toLowerCase() ?? null;
+}
+
+function isLiveUser(user: RemnawaveUser) {
+  if (user.status !== "ACTIVE") {
+    return false;
+  }
+
+  if (!user.expireAt) {
+    return true;
+  }
+
+  const expiresAt = Date.parse(user.expireAt);
+
+  return Number.isFinite(expiresAt) && expiresAt > Date.now();
+}
+
+function hasExpectedIdentity(users: RemnawaveUser[], input: LiveSubscriptionUrlInput) {
+  const expectedEmail = normalizedEmail(input.email);
+  const expectedTelegramId = normalizedIdentity(input.telegramId);
+
+  return (!expectedEmail || users.some((user) => normalizedEmail(user.email) === expectedEmail))
+    && (!expectedTelegramId || users.some((user) => normalizedIdentity(user.telegramId) === expectedTelegramId));
+}
+
+function unambiguousSubscriptionUrl(users: RemnawaveUser[], input: LiveSubscriptionUrlInput) {
+  const expectedUuid = normalizedIdentity(input.userRemnaId);
+  const matchingUsers = users.filter((user) => {
+    const uuid = normalizedIdentity(user.uuid);
+
+    return Boolean(uuid)
+      && (!expectedUuid || uuid === expectedUuid)
+      && isLiveUser(user);
+  });
+  const usersByUuid = new Map<string, RemnawaveUser[]>();
+
+  for (const user of matchingUsers) {
+    const uuid = normalizedIdentity(user.uuid)!;
+    usersByUuid.set(uuid, [...(usersByUuid.get(uuid) ?? []), user]);
+  }
+
+  const urls = [...usersByUuid.values()].flatMap((sameUserRecords) => {
+    if (!hasExpectedIdentity(sameUserRecords, input)) {
+      return [];
     }
 
-    return Date.parse(right.expireAt ?? "") - Date.parse(left.expireAt ?? "");
+    const uniqueUrls = [...new Set(sameUserRecords.map(subscriptionUrl).filter((url): url is string => Boolean(url)))];
+
+    return uniqueUrls.length === 1 ? uniqueUrls : [];
   });
+
+  return urls.length === 1 ? urls[0] : null;
 }
 
 async function remnawaveRequest<T>(path: string) {
@@ -145,7 +197,8 @@ async function getUsersByTelegramId(telegramId: string | number) {
 export async function getLiveRemnawaveSubscriptionUrl(input: LiveSubscriptionUrlInput) {
   if (input.userRemnaId) {
     const user = await getUserByUuid(input.userRemnaId);
-    const url = subscriptionUrl(user);
+    const isExpectedUser = normalizedIdentity(user?.uuid) === normalizedIdentity(input.userRemnaId);
+    const url = isExpectedUser && user && isLiveUser(user) ? subscriptionUrl(user) : null;
 
     if (url) {
       return url;
@@ -156,25 +209,6 @@ export async function getLiveRemnawaveSubscriptionUrl(input: LiveSubscriptionUrl
     ...(input.telegramId ? await getUsersByTelegramId(input.telegramId) : []),
     ...(input.email ? await getUsersByEmail(input.email) : []),
   ];
-  const seen = new Set<string>();
-  const uniqueUsers = users.filter((user) => {
-    const key = user.uuid ?? `${user.email ?? ""}:${user.telegramId ?? ""}:${user.subscriptionUrl ?? ""}`;
 
-    if (seen.has(key)) {
-      return false;
-    }
-
-    seen.add(key);
-    return true;
-  });
-
-  for (const user of preferActiveUsers(uniqueUsers)) {
-    const url = subscriptionUrl(user);
-
-    if (url) {
-      return url;
-    }
-  }
-
-  return null;
+  return unambiguousSubscriptionUrl(users, input);
 }

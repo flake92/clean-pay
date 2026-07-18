@@ -175,9 +175,16 @@
 - adversarial matrix закрыла обходы через query overrides PostgreSQL, shell-unsafe DB identities, переменные host environment, baked/runtime origin mismatch, слабые/повторные secrets и `$VAR` interpolation. Целевые тесты 27/27, полный unit suite 329/329, integration 32/32 с PostgreSQL/Redis, ESLint без ошибок (один известный warning generated coverage), production build 50/50, Docker image build/runtime validation, Compose config и Alpine shell syntax прошли; прямой `tsc` сохранил ровно 29 базовых test-only ошибок;
 - текущий локальный deployment `.env` fail-closed отклонён из-за `COOKIE_SECURE=false` и не изменялся. Код Remnashop и Remnawave в этом пункте не менялся; production rollout не выполнялся.
 
-### 11. [ ] Исключить выдачу чужого subscription URL в fallback Remnawave
+### 11. [x] Исключить выдачу чужого subscription URL в fallback Remnawave
 
 Fallback по Telegram/e-mail должен подтверждать UUID и владельца, обрабатывать дубли однозначно и не выбирать произвольную отключённую/истёкшую запись.
+
+Результат:
+
+- UUID endpoint принимается только при точном совпадении с `user_remna_id`, активном статусе и неистёкшем `expireAt`; некорректная дата, disabled и expired user fail-closed;
+- fallback требует UUID (если он известен) и подтверждения каждого переданного identity: e-mail сравнивается нормализованно, Telegram ID — как нормализованная строка. Несколько записей одного UUID агрегируют доказательства владельца;
+- дубликаты с одним URL допускаются, а конфликтующие URLs либо несколько подходящих UUID возвращают `null`, поэтому URL чужой или произвольно выбранной записи не выдаётся;
+- профильные тесты 36/36, полный unit suite 332/332, ESLint без ошибок (один известный warning generated coverage) и production build 50/50 с изолированными безопасными значениями прошли. Код Remnashop и Remnawave не менялся; production rollout не выполнялся.
 
 ## P2 — средний приоритет
 
@@ -262,3 +269,4 @@ Fallback по Telegram/e-mail должен подтверждать UUID и вл
 - 2026-07-18: пункт 8 исправлен и проверен: upstream refresh предшествует `/auth/me`, token bundle имеет одного владельца без клонирования, refresh сериализован DB-lock/CAS, а валидный web refresh сохраняется при page-навигации. Целевой suite 89/89, полный suite 336/336, ESLint без ошибок, production build и реальный PostgreSQL concurrency rehearsal прошли; два конкурента вызвали upstream refresh один раз. Код Remnashop и Remnawave не изменялся; production rollout не выполнялся.
 - 2026-07-18: пункт 9 исправлен и проверен: Telegram recovery доказывает Telegram/account/e-mail владельца до возврата токенов, согласованно объединяет локальные и upstream-аккаунты, защищает платёжные операции и sibling-сессии, а потеря ответа допускает безопасный повтор. Clean Pay: 80/80 целевых, 321/321 unit и 32/32 integration-теста, ESLint и production build; PostgreSQL concurrency/rebind matrix прошла. Remnashop: 137/137 unit-тестов, Ruff и реальная reversible migration `0050`; fork commit `9cc68fb` запушен и PR [`snoups/remnashop#135`](https://github.com/snoups/remnashop/pull/135) обновлён. Remnawave не изменялся; production rollout не выполнялся.
 - 2026-07-18: пункт 10 исправлен и проверен: единый production validator и изолированный `.env` parser применяются до Compose, в `start.sh`, `npm start` и runtime; закрыты unsafe origins/cookies, секреты, URL и Compose/DB/Redis consistency, environment interpolation и baked/runtime public origin drift. Целевые тесты 27/27, unit 329/329, integration 32/32, ESLint, production build 50/50, Docker build/runtime validation, Compose config и Alpine shell syntax прошли; прямой `tsc` сохранил 29 базовых test-only ошибок. Локальный deployment `.env` корректно fail-closed на `COOKIE_SECURE=false`; Remnashop и Remnawave не менялись, production rollout не выполнялся.
+- 2026-07-18: пункт 11 исправлен и проверен: Remnawave subscription URL возвращается только для точного UUID и доказанного владельца с активной неистёкшей записью; identity fallback однозначно агрегирует дубли и отказывает на конфликтующих URL/кандидатах. Профильные тесты 36/36, unit 332/332, ESLint и production build 50/50 прошли. Remnashop и Remnawave не менялись; production rollout не выполнялся.
