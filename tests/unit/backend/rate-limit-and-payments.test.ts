@@ -57,17 +57,15 @@ describe("rate limiting", () => {
     );
   });
 
-  it("increments counter and expires new keys", async () => {
-    mocks.redisCommand.mockResolvedValueOnce(1).mockResolvedValueOnce("OK");
+  it("increments counter and expires new keys atomically", async () => {
+    mocks.redisCommand.mockResolvedValueOnce(1);
 
     await assertRateLimit({ action: "login", email: "u@e.test", limit: 5, windowSeconds: 60 });
 
-    expect(mocks.redisCommand).toHaveBeenNthCalledWith(1, [
-      "INCR",
-      "clean-pay:rate-limit:action:login:email:u@e.test:tgid:none",
-    ]);
-    expect(mocks.redisCommand).toHaveBeenNthCalledWith(2, [
-      "EXPIRE",
+    expect(mocks.redisCommand).toHaveBeenCalledWith([
+      "EVAL",
+      expect.stringContaining("redis.call('INCR'"),
+      1,
       "clean-pay:rate-limit:action:login:email:u@e.test:tgid:none",
       60,
     ]);
@@ -84,14 +82,17 @@ describe("rate limiting", () => {
   });
 
   it("uses rate-limit for cooldown compatibility helpers", async () => {
-    mocks.redisCommand.mockResolvedValueOnce(1).mockResolvedValueOnce("OK");
+    mocks.redisCommand.mockResolvedValueOnce(1);
 
     await assertCooldown({ key: "email:user-1", action: "email_verification", windowSeconds: 60 });
     await expect(recordRateLimitEvent()).resolves.toBeUndefined();
 
     expect(mocks.redisCommand).toHaveBeenCalledWith([
-      "INCR",
+      "EVAL",
+      expect.any(String),
+      1,
       "clean-pay:rate-limit:action:email_verification:email:email:user-1:tgid:none",
+      60,
     ]);
   });
 

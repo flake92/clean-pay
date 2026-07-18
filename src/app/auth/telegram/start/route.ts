@@ -29,13 +29,15 @@ export async function GET(request: Request) {
       getRequestIp(request),
     );
 
-    await assertRateLimit({
-      action: currentUser ? "telegram_link_start" : "telegram_login_start",
-      email: currentUser?.email,
-      tgId: currentUser?.telegramId,
-      limit: 10,
-      windowSeconds: 15 * 60,
-    });
+    if (currentUser) {
+      await assertRateLimit({
+        action: "telegram_link_start",
+        email: currentUser.email,
+        tgId: currentUser.telegramId,
+        limit: 10,
+        windowSeconds: 15 * 60,
+      });
+    }
 
     if (url.searchParams.get("mode") === "popup") {
       return createTelegramPopupStartResponse(redirectTo, currentUser?.id);

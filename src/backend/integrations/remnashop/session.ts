@@ -8,7 +8,7 @@ import {
   getRemnashopUserIdFromAccessToken,
   protectRemnashopToken,
 } from "@/backend/integrations/remnashop/client";
-import type { RemnashopAuthResponse } from "@/shared/remnashop/types";
+import type { RemnashopAuthResponse, RemnashopMe } from "@/shared/remnashop/types";
 import {
   createWebSessionForRemnashopUser,
   getCurrentSession,
@@ -219,13 +219,15 @@ export async function reconcileUserFromRemnashopAuth({
   accessToken,
   refreshToken,
   auth,
+  verifiedProfile,
 }: {
   accessToken: string;
   refreshToken: string;
   auth: RemnashopAuthResponse;
+  verifiedProfile?: RemnashopMe;
 }) {
   const remnashopUserId = getRemnashopUserIdFromAccessToken(accessToken);
-  const profile = await getRemnashopMe(accessToken);
+  const profile = verifiedProfile ?? await getRemnashopMe(accessToken);
   const user = await prisma.$transaction(async (tx) => {
     return reconcileRemnashopUser(
       tx,

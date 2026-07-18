@@ -27,6 +27,10 @@ export async function POST(request: Request) {
         windowSeconds: 15 * 60,
       });
     } catch (error) {
+      if (error instanceof BffError && error.code === "RATE_LIMITED") {
+        throw error;
+      }
+
       logger.warn("auth_identify_rate_limit_unavailable", {
         emailDomain: email.split("@")[1] ?? null,
         message: error instanceof Error ? error.message : String(error),

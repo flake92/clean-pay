@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   createWebSession: vi.fn(),
   getCurrentSession: vi.fn(),
   upgradeCurrentSessionToFull: vi.fn(),
+  assertRateLimit: vi.fn(),
   prisma: {
     webAuthnChallenge: {
       create: vi.fn(),
@@ -49,6 +50,10 @@ vi.mock("@/backend/sessions/web-session", () => ({
   createWebSession: mocks.createWebSession,
   getCurrentSession: mocks.getCurrentSession,
   upgradeCurrentSessionToFull: mocks.upgradeCurrentSessionToFull,
+}));
+
+vi.mock("@/backend/limits/rate-limit", () => ({
+  assertRateLimit: mocks.assertRateLimit,
 }));
 
 vi.mock("next/headers", () => ({
@@ -291,6 +296,9 @@ describe("passkey use cases", () => {
 
   it("begins and finishes passkey login", async () => {
     await expect(beginPasskeyLogin()).resolves.toEqual({ challenge: "auth-challenge" });
+    expect(mocks.assertRateLimit).toHaveBeenCalledWith(expect.objectContaining({
+      action: "passkey_login_options",
+    }));
     expect(mocks.prisma.webAuthnChallenge.create).toHaveBeenCalledWith({
       data: expect.objectContaining({ challenge: "auth-challenge", type: "AUTHENTICATION" }),
     });

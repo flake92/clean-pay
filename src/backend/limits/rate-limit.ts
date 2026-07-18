@@ -38,16 +38,18 @@ async function getRetryAfterSeconds(key: string, windowSeconds: number) {
 }
 
 async function incrementRateLimit(key: string, windowSeconds: number) {
-  const count = await redisCommand(['INCR', key]);
+  const count = await redisCommand([
+    'EVAL',
+    "local count = redis.call('INCR', KEYS[1]); if count == 1 then redis.call('EXPIRE', KEYS[1], ARGV[1]); end; return count",
+    1,
+    key,
+    windowSeconds,
+  ]);
 
   if (typeof count !== 'number') {
     throw new BffError('UPSTREAM_ERROR', 502, 'Redis returned invalid rate-limit counter', {
       message: 'Invalid Redis INCR response',
     });
-  }
-
-  if (count === 1) {
-    await redisCommand(['EXPIRE', key, windowSeconds]);
   }
 
   return count;

@@ -14,6 +14,7 @@ import { auditLog } from "@/backend/observability/audit";
 import { getEnv } from "@/backend/config/env";
 import { prisma } from "@/backend/database/prisma";
 import { BffError } from "@/backend/integrations/remnashop/errors";
+import { assertRateLimit } from "@/backend/limits/rate-limit";
 import { createWebSession, getCurrentSession, upgradeCurrentSessionToFull } from "@/backend/sessions/web-session";
 
 const challengeTtlMs = 5 * 60 * 1000;
@@ -289,6 +290,12 @@ export async function finishPasskeyRegistration(response: RegistrationResponseJS
 }
 
 export async function beginPasskeyLogin() {
+  await assertRateLimit({
+    action: "passkey_login_options",
+    limit: 20,
+    windowSeconds: 15 * 60,
+  });
+
   const { rpID } = webAuthnRelyingParty();
   const options = await generateAuthenticationOptions({
     rpID,
