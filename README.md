@@ -71,13 +71,15 @@ Payment outcome reconciliation is disabled by default. After Remnashop recovery 
 
 An exact recovery `404` returns an expired claimed operation to `READY` only while the locked Remnashop owner is unchanged, preserving the same upstream key. An owner mismatch or ambiguous owner rebind is terminal `manual_required`: the UI keeps the idempotency key, stops polling, and shows the operation id for support instead of creating another payment.
 
-Если на хосте нет Node.js, используйте эквивалентный Docker Compose запуск. Он не требует установки Node.js на хост и всё равно запускает проверку production-конфигурации внутри контейнера:
+Если на хосте нет Node.js, используйте Docker Compose напрямую. Он не требует установки Node.js на хост и всё равно запускает проверку production-конфигурации внутри контейнера. После запуска отдельно проверьте полный readiness приложения и состояние обязательного `retention-worker`:
 
 ```bash
 docker network inspect "$(grep '^CLEAN_PAY_EDGE_NETWORK=' deploy/prod/.env | cut -d= -f2)" >/dev/null 2>&1 \
   || docker network create "$(grep '^CLEAN_PAY_EDGE_NETWORK=' deploy/prod/.env | cut -d= -f2)"
 docker compose --env-file deploy/prod/.env -f deploy/prod/docker-compose.yml up -d --build
-curl -f http://127.0.0.1:4000/api/health
+curl -fsS http://127.0.0.1:4000/api/health/readiness
+test "$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}missing{{end}}' \
+  "$(docker compose --env-file deploy/prod/.env -f deploy/prod/docker-compose.yml ps -q retention-worker)")" = healthy
 ```
 
 Команда `up` не удаляет существующие volumes. Не используйте `docker compose down -v`, `docker volume prune` или `docker system prune --volumes`, если данные стенда нужно сохранить.
@@ -96,7 +98,7 @@ node deploy/prod/prod.mjs down
 node deploy/prod/prod.mjs up --debug
 ```
 
-`verify` ожидает HTTP 200 от `http://127.0.0.1:$CLEAN_PAY_PORT/api/health`. После настройки proxy также проверьте:
+`verify` ожидает HTTP 200 и полный статус `ok` всех зависимостей от `http://127.0.0.1:$CLEAN_PAY_PORT/api/health/readiness`, а также healthy heartbeat обязательного `retention-worker` и включённого `reconciliation-worker`. После настройки proxy также проверьте:
 
 ```bash
 curl -f https://pay.example.com/api/health/liveness
@@ -217,4 +219,4 @@ curl -f http://127.0.0.1:4000/api/health/readiness
 - Ошибка защищённых операций Remnashop: сверить `REMNASHOP_API_KEY` и `APP_API_KEY`.
 - Ошибки Remnawave: проверить URL, токен и доступность сети.
 - Telegram/OIDC: проверить публичный домен, callback `APP_URL/auth/telegram/callback`, client ID и secret.
-- E-mail: проверить SMTP host/port, TLS/SSL и учётные данные.
+- E-mail: проверить SMTP host/port, TLS/SSL и учётные данные в `/opt/remnashop/.env`, затем перезапустить HTTP/Taskiq/scheduler роли Remnashop одной версией образа.
