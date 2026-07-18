@@ -272,9 +272,16 @@ Fallback по Telegram/e-mail должен подтверждать UUID и вл
 - непосредственно перед созданием invoice клиент заново получает offers. При изменении показывает «было → стало», обновляет отображаемый оффер, не создаёт idempotency key и не вызывает payment mutation. BFF независимо повторяет ту же проверку после авторизации и до `markPaymentOperationDispatched`, возвращая `409 OFFER_CHANGED` без invoice при гонке или подмене клиента;
 - профильная матрица 72/72 проверяет malformed/invalid body, привязку версии ко всем ценовым полям, отсутствие dispatch при изменении цены, browser UX и прежние idempotency/recovery сценарии. Полный unit suite 365/365, integration 38/38, ESLint без ошибок (один известный warning generated coverage) и production build 50/50 прошли. Remnashop и Remnawave не менялись; production rollout не выполнялся.
 
-### 19. [ ] Писать success audit только после успешной мутации
+### 19. [x] Писать success audit только после успешной мутации
 
 Для promocode, reissue и device mutations разделить attempted/failed/succeeded события; не оставлять ложный success при upstream-ошибке.
+
+Результат:
+
+- общий `auditedMutation` lifecycle сначала пишет `<action>_attempted`, выполняет upstream mutation и только после её успешного ответа пишет `<action>_succeeded`; исключение даёт `<action>_failed` с `WARN` и повторно выбрасывается в обычный BFF error path;
+- promocode activation, subscription reissue, delete-all devices и delete-one device переведены на единый lifecycle. Старые `promocode_activated`, `subscription_reissued`, `devices_deleted_all`, `device_deleted`, записывавшиеся до mutation, удалены;
+- failed audit содержит только bounded `errorCode/errorStatus`, без текста upstream-ошибки и без raw device HWID. Тесты проверяют порядок mutation → success, отсутствие success для всех четырёх upstream failures и неизменный HTTP error response;
+- профильные тесты 36/36, полный unit suite 367/367, integration 42/42, ESLint без ошибок (один известный warning generated coverage) и production build 50/50 прошли. Remnashop и Remnawave не менялись; production rollout не выполнялся.
 
 ### 20. [ ] Ввести retention и минимизацию PII
 
@@ -328,3 +335,4 @@ Fallback по Telegram/e-mail должен подтверждать UUID и вл
 - 2026-07-18: пункт 16 исправлен и проверен: server-owned return URL привязан к платёжной операции и проверяется end-to-end, route не может объявить неподтверждённый успех, polling использует bounded exponential backoff и допускает ручное обновление. Clean Pay: профильные тесты 51/51, unit 347/347, integration 36/36, ESLint и production build 50/50 прошли. Companion Remnashop commit `a08c4c8` прошёл 140/140 unit-тестов и Ruff, запушен в fork и обновил PR [`snoups/remnashop#135`](https://github.com/snoups/remnashop/pull/135); Remnawave не изменялся, production rollout ещё не выполнялся.
 - 2026-07-18: пункт 17 исправлен и проверен: login, purchase и extend гарантированно снимают loading после transport/parse/processing ошибок, non-JSON success не принимается за подтверждённый результат, а неопределённый платёж повторяется с тем же idempotency key. Browser-level профильные тесты 15/15, unit 354/354, integration 36/36, ESLint и production build 50/50 прошли. Remnashop и Remnawave не менялись; production rollout ещё не выполнялся.
 - 2026-07-18: пункт 18 исправлен и проверен: все JSON BFF routes fail-closed возвращают `400` на malformed/non-object body, payment fields проходят строгую runtime-валидацию, а подтверждённые amount/currency/version входят в idempotency contract и повторно сверяются перед dispatch. Клиент показывает изменение цены «было → стало» до invoice. Профильные тесты 72/72, unit 365/365, integration 38/38, ESLint и production build 50/50 прошли. Remnashop и Remnawave не менялись; production rollout ещё не выполнялся.
+- 2026-07-18: пункт 19 исправлен и проверен: promocode, reissue и обе device mutations используют attempted/succeeded/failed audit lifecycle; success пишется строго после upstream mutation, failure содержит только безопасную классификацию и никогда не сопровождается ложным success. Профильные тесты 36/36, unit 367/367, integration 42/42, ESLint и production build 50/50 прошли. Remnashop и Remnawave не менялись; production rollout ещё не выполнялся.

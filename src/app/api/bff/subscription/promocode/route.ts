@@ -1,7 +1,7 @@
-import { auditLog } from "@/backend/observability/audit";
 import { bffError, bffJson } from "@/backend/http/bff-response";
 import { readBffJsonObject } from "@/backend/http/request-body";
 import { getAuthorizedRemnashopTokens, remnashopRequest } from "@/backend/integrations/remnashop/client";
+import { auditedMutation } from "@/backend/observability/mutation-audit";
 import type {
   PromocodeActivateRequest,
   PromocodeActivateResponse,
@@ -14,13 +14,15 @@ export async function POST(request: Request) {
     const body = (await readBffJsonObject(request)) as PromocodeActivateRequest;
     const { accessToken, session } = await getAuthorizedRemnashopTokens();
 
-    await auditLog({ action: "promocode_activated", userId: session.userId });
-
     return bffJson(
-      await remnashopRequest<PromocodeActivateResponse>("/subscription/promocode", {
-        method: "POST",
-        accessToken,
-        body,
+      await auditedMutation({
+        action: "promocode_activation",
+        userId: session.userId,
+        mutate: () => remnashopRequest<PromocodeActivateResponse>("/subscription/promocode", {
+          method: "POST",
+          accessToken,
+          body,
+        }),
       }),
     );
   } catch (error) {

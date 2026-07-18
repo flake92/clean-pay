@@ -1,6 +1,6 @@
-import { auditLog } from "@/backend/observability/audit";
 import { bffError, bffJson } from "@/backend/http/bff-response";
 import { getAuthorizedRemnashopTokens, remnashopRequest } from "@/backend/integrations/remnashop/client";
+import { auditedMutation } from "@/backend/observability/mutation-audit";
 import type { DevicesDeleteAllResponse, DevicesResponse } from "@/shared/remnashop/types";
 
 export const runtime = "nodejs";
@@ -21,12 +21,14 @@ export async function DELETE() {
   try {
     const { accessToken, session } = await getAuthorizedRemnashopTokens();
 
-    await auditLog({ action: "devices_deleted_all", userId: session.userId });
-
     return bffJson(
-      await remnashopRequest<DevicesDeleteAllResponse>("/subscription/devices", {
-        method: "DELETE",
-        accessToken,
+      await auditedMutation({
+        action: "devices_delete_all",
+        userId: session.userId,
+        mutate: () => remnashopRequest<DevicesDeleteAllResponse>("/subscription/devices", {
+          method: "DELETE",
+          accessToken,
+        }),
       }),
     );
   } catch (error) {

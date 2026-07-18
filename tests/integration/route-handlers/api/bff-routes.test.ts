@@ -409,6 +409,58 @@ describe("BFF route integration contracts", () => {
       body: { code: "PROMO" },
     });
     expect(mocks.remnashopRequest).toHaveBeenCalledWith("/subscription/reissue", { method: "POST", accessToken: "access-token" });
+    expect(mocks.auditLog.mock.calls.map(([entry]) => entry.action)).toEqual([
+      "devices_delete_all_attempted",
+      "devices_delete_all_succeeded",
+      "device_delete_attempted",
+      "device_delete_succeeded",
+      "promocode_activation_attempted",
+      "promocode_activation_succeeded",
+      "subscription_reissue_attempted",
+      "subscription_reissue_succeeded",
+    ]);
+  });
+
+  it.each([
+    [
+      "promocode_activation",
+      () => promocodeRoute.POST(jsonRequest("/api/bff/subscription/promocode", { code: "PROMO" })),
+    ],
+    ["subscription_reissue", () => reissueRoute.POST()],
+    ["devices_delete_all", () => devicesRoute.DELETE()],
+    [
+      "device_delete",
+      () => deviceRoute.DELETE(new Request("http://clean-pay.local"), {
+        params: Promise.resolve({ hwid: "device-1" }),
+      }),
+    ],
+  ])("records attempted/failed but not succeeded for %s upstream failure", async (
+    action,
+    invoke,
+  ) => {
+    mocks.remnashopRequest.mockRejectedValueOnce(
+      new BffError("UPSTREAM_UNAVAILABLE", 502, "connection failed"),
+    );
+
+    const response = await invoke();
+
+    expect(response.status).toBe(502);
+    expect(mocks.auditLog).toHaveBeenCalledWith(
+      expect.objectContaining({ action: `${action}_attempted` }),
+    );
+    expect(mocks.auditLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: `${action}_failed`,
+        severity: "WARN",
+        metadata: expect.objectContaining({
+          errorCode: "UPSTREAM_UNAVAILABLE",
+          errorStatus: 502,
+        }),
+      }),
+    );
+    expect(mocks.auditLog).not.toHaveBeenCalledWith(
+      expect.objectContaining({ action: `${action}_succeeded` }),
+    );
   });
 
   it("records purchase and extension payments with matched offers", async () => {
