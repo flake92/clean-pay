@@ -250,16 +250,38 @@ async function createOrFindOperation({
 }) {
   for (let attempt = 0; attempt < 3; attempt += 1) {
     try {
-      return await prisma.paymentOperation.create({
-        data: {
-          userId,
-          kind: identity.kind,
-          idempotencyKeyHash: identity.idempotencyKeyHash,
-          requestFingerprint: identity.fingerprint,
-          requestPayload: identity.payload,
-          upstreamKey: randomUUID(),
+      return await prisma.$transaction(
+        async (tx) => {
+          const lockedUsers = await tx.$queryRaw<Array<{ id: string }>>(
+            Prisma.sql`
+              SELECT "id"
+              FROM "WebUser"
+              WHERE "id" = ${userId}
+              FOR KEY SHARE
+            `,
+          );
+
+          if (lockedUsers.length !== 1 || lockedUsers[0]?.id !== userId) {
+            throw new BffError(
+              "ACCOUNT_MERGE_REQUIRED",
+              409,
+              "Payment owner changed before operation creation",
+            );
+          }
+
+          return tx.paymentOperation.create({
+            data: {
+              userId,
+              kind: identity.kind,
+              idempotencyKeyHash: identity.idempotencyKeyHash,
+              requestFingerprint: identity.fingerprint,
+              requestPayload: identity.payload,
+              upstreamKey: randomUUID(),
+            },
+          });
         },
-      });
+        { maxWait: 5_000, timeout: 30_000 },
+      );
     } catch (error) {
       if (!isUniqueConstraintError(error)) {
         throw error;

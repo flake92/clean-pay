@@ -27,3 +27,7 @@ npm run test:route-handlers
 npm run test:integration
 npm run test:e2e:devcontainer
 ```
+
+Database serialization rehearsals under `tests/integration/services` are
+opt-in. Point `REAL_DATABASE_URL` at an already migrated disposable PostgreSQL
+database; without it, those tests are skipped. Never use a production database.

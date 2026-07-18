@@ -10,6 +10,30 @@ const lifecycleMock = vi.hoisted(() => ({
   acquireRemnashopTokensForSession: vi.fn(),
 }));
 
+const prismaMock = vi.hoisted(() => ({
+  $queryRaw: vi.fn(),
+  $transaction: vi.fn(),
+  webSession: {
+    findFirst: vi.fn(),
+    update: vi.fn(),
+    updateMany: vi.fn(),
+  },
+  webUser: {
+    findUnique: vi.fn(),
+    update: vi.fn(),
+  },
+}));
+
+const userMergeMock = vi.hoisted(() => ({
+  assertUserMergeFinalOwner: vi.fn(),
+  mergeLocalUsersIntoTarget: vi.fn(),
+}));
+
+const paymentMergeMock = vi.hoisted(() => ({
+  preflightPaymentOperationsForUserMerge: vi.fn(),
+  transferPaymentOperationsForUserMerge: vi.fn(),
+}));
+
 vi.mock("@/backend/observability/logger", () => ({
   logger: loggerMock,
 }));
@@ -18,17 +42,11 @@ vi.mock("@/backend/observability/auth-debug-log", () => ({
   authDebugLog: vi.fn(),
 }));
 
-vi.mock("@/backend/database/prisma", () => ({
-  prisma: {
-    webSession: {
-      update: vi.fn(),
-    },
-    webUser: {
-      update: vi.fn(),
-    },
-    $transaction: vi.fn(),
-  },
-}));
+vi.mock("@/backend/database/prisma", () => ({ prisma: prismaMock }));
+
+vi.mock("@/backend/auth/user-merge", () => userMergeMock);
+
+vi.mock("@/backend/payments/user-merge", () => paymentMergeMock);
 
 vi.mock("@/backend/sessions/web-session", () => ({
   getCurrentSession: vi.fn(),
@@ -87,8 +105,154 @@ function hasLogKey(metadata: unknown, key: string) {
   return Boolean(metadata && typeof metadata === "object" && key in metadata);
 }
 
+function telegramAuthResponse({
+  userId,
+  accessToken,
+  refreshToken = `refresh-${userId}`,
+}: {
+  userId: string;
+  accessToken?: string;
+  refreshToken?: string;
+}) {
+  const accessJwt = jwt({
+    sub: userId,
+    exp: Math.floor(Date.now() / 1000) + 600,
+  });
+  const issuedAccessToken = accessToken ?? accessJwt;
+
+  return response({
+    body: {
+      expires_at: new Date(Date.now() + 10 * 60_000).toISOString(),
+      refresh_expires_at: new Date(Date.now() + 60 * 60_000).toISOString(),
+    },
+    setCookie: [
+      `access_token=${issuedAccessToken}; Path=/; HttpOnly`,
+      `refresh_token=${refreshToken}; Path=/; HttpOnly`,
+    ],
+  });
+}
+
+function remnashopProfile({
+  email = "owner@example.com",
+  emailVerified = true,
+  telegramId = 123456,
+}: {
+  email?: string | null;
+  emailVerified?: boolean;
+  telegramId?: number | null;
+} = {}) {
+  return response({
+    body: {
+      email,
+      is_email_verified: emailVerified,
+      telegram_id: telegramId,
+      auth_type: "telegram",
+      pending_email: null,
+      name: "Owner",
+      username: "clean_user",
+      language: "ru",
+    },
+  });
+}
+
+function telegramSession({
+  remnashopUserId = "2",
+  email = "owner@example.com",
+  emailVerified = true,
+}: {
+  remnashopUserId?: string | null;
+  email?: string | null;
+  emailVerified?: boolean;
+} = {}) {
+  return {
+    id: "session-1",
+    userId: "user-1",
+    authMethod: "TELEGRAM",
+    remnashopAccessTokenEncrypted: null,
+    remnashopRefreshTokenEncrypted: null,
+    remnashopAccessExpiresAt: null,
+    remnashopRefreshExpiresAt: null,
+    revokedAt: null,
+    user: {
+      id: "user-1",
+      remnashopUserId,
+      email,
+      emailVerified,
+      telegramId: "123456",
+      telegramUsername: "clean_user",
+    },
+  };
+}
+
+function mergeResponse({
+  sourceUserId = 1,
+  targetUserId = 2,
+  conflicts = [],
+}: {
+  sourceUserId?: number;
+  targetUserId?: number;
+  conflicts?: string[];
+} = {}) {
+  return response({
+    body: {
+      dry_run: false,
+      source_user_id: sourceUserId,
+      target_user_id: targetUserId,
+      target: {
+        id: targetUserId,
+        email: "owner@example.com",
+        telegram_id: 123456,
+        is_email_verified: true,
+        current_subscription_id: null,
+      },
+      moved: {},
+      conflicts,
+      requires_relogin: true,
+    },
+  });
+}
+
 describe("remnashop client", () => {
   beforeEach(() => {
+    vi.clearAllMocks();
+    prismaMock.$queryRaw.mockReset();
+    prismaMock.$transaction.mockReset();
+    prismaMock.webSession.findFirst.mockReset();
+    prismaMock.webSession.update.mockReset();
+    prismaMock.webSession.updateMany.mockReset();
+    prismaMock.webUser.findUnique.mockReset();
+    prismaMock.webUser.update.mockReset();
+    userMergeMock.assertUserMergeFinalOwner.mockReset();
+    userMergeMock.mergeLocalUsersIntoTarget.mockReset();
+    paymentMergeMock.preflightPaymentOperationsForUserMerge.mockReset();
+    paymentMergeMock.transferPaymentOperationsForUserMerge.mockReset();
+    prismaMock.$transaction.mockImplementation(
+      async (callback: (tx: typeof prismaMock) => unknown) => callback(prismaMock),
+    );
+    prismaMock.webSession.findFirst.mockResolvedValue({
+      id: "session-1",
+      userId: "user-1",
+      revokedAt: null,
+      remnashopAccessTokenEncrypted: null,
+      remnashopRefreshTokenEncrypted: null,
+      remnashopAccessExpiresAt: null,
+      remnashopRefreshExpiresAt: null,
+    });
+    prismaMock.webSession.updateMany.mockResolvedValue({ count: 1 });
+    userMergeMock.assertUserMergeFinalOwner.mockResolvedValue(undefined);
+    userMergeMock.mergeLocalUsersIntoTarget.mockResolvedValue({
+      revokedSessionCount: 0,
+      transferredPasskeyCount: 0,
+      invalidatedWebAuthnChallengeCount: 0,
+      invalidatedEmailCodeCount: 0,
+      invalidatedTelegramStateCount: 0,
+    });
+    paymentMergeMock.preflightPaymentOperationsForUserMerge.mockResolvedValue({
+      targetUpstreamAccountId: "1",
+    });
+    paymentMergeMock.transferPaymentOperationsForUserMerge.mockResolvedValue(
+      undefined,
+    );
     lifecycleMock.acquireRemnashopTokensForSession.mockReset();
     lifecycleMock.acquireRemnashopTokensForSession.mockImplementation(
       async ({ session }: { session: Record<string, unknown> }) => {
@@ -538,6 +702,564 @@ describe("remnashop client", () => {
       refreshToken: "refresh",
       session: { id: "session-1" },
     });
+  });
+
+  it("never stores Telegram recovery tokens when the verified owner differs", async () => {
+    const session = telegramSession({ remnashopUserId: "1" });
+    vi.mocked(getCurrentSession).mockResolvedValue(session as never);
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(telegramAuthResponse({ userId: "2" }))
+      .mockResolvedValueOnce(
+        remnashopProfile({
+          email: "another-owner@example.com",
+          emailVerified: true,
+        }),
+      );
+
+    await expect(
+      getAuthorizedRemnashopTokens({ allowUnverifiedEmail: true }),
+    ).rejects.toMatchObject({
+      code: "ACCOUNT_MERGE_REQUIRED",
+      status: 409,
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(prismaMock.$transaction).not.toHaveBeenCalled();
+    expect(prismaMock.webSession.updateMany).not.toHaveBeenCalled();
+    expect(userMergeMock.mergeLocalUsersIntoTarget).not.toHaveBeenCalled();
+  });
+
+  it("rejects a Telegram profile that does not confirm the local Telegram ID", async () => {
+    const session = telegramSession({ remnashopUserId: "2" });
+    vi.mocked(getCurrentSession).mockResolvedValue(session as never);
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(telegramAuthResponse({ userId: "2" }))
+      .mockResolvedValueOnce(remnashopProfile({ telegramId: 999999 }));
+
+    await expect(
+      getAuthorizedRemnashopTokens({ allowUnverifiedEmail: true }),
+    ).rejects.toMatchObject({
+      code: "ACCOUNT_MERGE_REQUIRED",
+      status: 409,
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(prismaMock.$transaction).not.toHaveBeenCalled();
+    expect(prismaMock.webSession.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("reloads a bundle cleared by lifecycle before Telegram recovery", async () => {
+    const cleanedSession = telegramSession({ remnashopUserId: "2" });
+    const staleSession = {
+      ...cleanedSession,
+      remnashopAccessTokenEncrypted: "corrupt-access",
+      remnashopRefreshTokenEncrypted: "corrupt-refresh",
+      remnashopAccessExpiresAt: new Date(Date.now() - 60_000),
+      remnashopRefreshExpiresAt: new Date(Date.now() - 30_000),
+    };
+    const currentUser = { ...cleanedSession.user };
+    vi.mocked(getCurrentSession)
+      .mockResolvedValueOnce(staleSession as never)
+      .mockResolvedValue(cleanedSession as never);
+    lifecycleMock.acquireRemnashopTokensForSession.mockResolvedValueOnce(null);
+    prismaMock.webUser.findUnique
+      .mockResolvedValueOnce(currentUser)
+      .mockResolvedValueOnce(currentUser)
+      .mockResolvedValueOnce(currentUser);
+    prismaMock.$queryRaw
+      .mockResolvedValueOnce([{ id: "user-1" }])
+      .mockResolvedValueOnce([{ id: "session-1" }]);
+    prismaMock.webUser.update.mockResolvedValue(currentUser);
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(telegramAuthResponse({ userId: "2" }))
+      .mockResolvedValueOnce(remnashopProfile());
+
+    await expect(
+      getAuthorizedRemnashopTokens({ allowUnverifiedEmail: true }),
+    ).resolves.toMatchObject({
+      session: {
+        id: "session-1",
+        user: { remnashopUserId: "2" },
+      },
+    });
+
+    expect(getCurrentSession).toHaveBeenCalledTimes(2);
+    expect(prismaMock.webSession.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ id: "session-1" }),
+      }),
+    );
+  });
+
+  it("detects a conflicting local owner before dispatching an upstream merge", async () => {
+    const session = telegramSession({ remnashopUserId: "1" });
+    const sourceUser = {
+      id: "source-user",
+      remnashopUserId: "2",
+      email: "another-owner@example.com",
+      emailVerified: true,
+      telegramId: null,
+    };
+    const currentUser = { ...session.user };
+    vi.mocked(getCurrentSession).mockResolvedValue(session as never);
+    prismaMock.webUser.findUnique
+      .mockResolvedValueOnce(sourceUser)
+      .mockResolvedValueOnce(currentUser)
+      .mockResolvedValueOnce(sourceUser);
+    prismaMock.$queryRaw
+      .mockResolvedValueOnce([{ id: "source-user" }, { id: "user-1" }])
+      .mockResolvedValueOnce([{ id: "session-1" }]);
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(telegramAuthResponse({ userId: "2" }))
+      .mockResolvedValueOnce(
+        remnashopProfile({ email: null, emailVerified: false }),
+      );
+
+    await expect(
+      getAuthorizedRemnashopTokens({ allowUnverifiedEmail: true }),
+    ).rejects.toMatchObject({ code: "ACCOUNT_MERGE_REQUIRED", status: 409 });
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(prismaMock.$transaction).toHaveBeenCalledTimes(1);
+    expect(prismaMock.webSession.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("rejects a semantically inconsistent upstream merge response", async () => {
+    const session = telegramSession({ remnashopUserId: "1" });
+    const currentUser = { ...session.user };
+    vi.mocked(getCurrentSession).mockResolvedValue(session as never);
+    prismaMock.webUser.findUnique
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(currentUser)
+      .mockResolvedValueOnce(null);
+    prismaMock.$queryRaw
+      .mockResolvedValueOnce([{ id: "user-1" }])
+      .mockResolvedValueOnce([{ id: "session-1" }]);
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(telegramAuthResponse({ userId: "2" }))
+      .mockResolvedValueOnce(
+        remnashopProfile({ email: null, emailVerified: false }),
+      )
+      .mockResolvedValueOnce(mergeResponse({ targetUserId: 3 }));
+
+    await expect(
+      getAuthorizedRemnashopTokens({ allowUnverifiedEmail: true }),
+    ).rejects.toMatchObject({ code: "ACCOUNT_MERGE_REQUIRED", status: 409 });
+
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(prismaMock.webSession.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("blocks a deterministic payment collision before the upstream merge", async () => {
+    const session = telegramSession({ remnashopUserId: "1" });
+    const currentUser = { ...session.user };
+    vi.mocked(getCurrentSession).mockResolvedValue(session as never);
+    prismaMock.webUser.findUnique
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(currentUser)
+      .mockResolvedValueOnce(null);
+    prismaMock.$queryRaw
+      .mockResolvedValueOnce([{ id: "user-1" }])
+      .mockResolvedValueOnce([{ id: "session-1" }]);
+    paymentMergeMock.preflightPaymentOperationsForUserMerge.mockRejectedValueOnce(
+      new BffError(
+        "ACCOUNT_MERGE_REQUIRED",
+        409,
+        "Payment operation keys conflict during account merge",
+      ),
+    );
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(telegramAuthResponse({ userId: "2" }))
+      .mockResolvedValueOnce(
+        remnashopProfile({ email: null, emailVerified: false }),
+      );
+
+    await expect(
+      getAuthorizedRemnashopTokens({ allowUnverifiedEmail: true }),
+    ).rejects.toMatchObject({ code: "ACCOUNT_MERGE_REQUIRED", status: 409 });
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(paymentMergeMock.preflightPaymentOperationsForUserMerge).toHaveBeenCalledWith(
+      prismaMock,
+      "user-1",
+      [],
+    );
+    expect(paymentMergeMock.transferPaymentOperationsForUserMerge).not.toHaveBeenCalled();
+    expect(prismaMock.webSession.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("persists direct-owner Telegram tokens only after /auth/me verification", async () => {
+    const session = telegramSession({ remnashopUserId: "2" });
+    const accessToken = jwt({ sub: "2", exp: 1_900_000_000 });
+    const refreshToken = "verified-refresh-2";
+    const currentUser = {
+      ...session.user,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+    vi.mocked(getCurrentSession).mockResolvedValue(session as never);
+    prismaMock.webUser.findUnique
+      .mockResolvedValueOnce(currentUser)
+      .mockResolvedValueOnce(currentUser)
+      .mockResolvedValueOnce(currentUser);
+    prismaMock.$queryRaw
+      .mockResolvedValueOnce([{ id: "user-1" }])
+      .mockResolvedValueOnce([{ id: "session-1" }]);
+    prismaMock.webUser.update.mockResolvedValue(currentUser);
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(
+        telegramAuthResponse({ userId: "2", accessToken, refreshToken }),
+      )
+      .mockResolvedValueOnce(remnashopProfile());
+
+    await expect(
+      getAuthorizedRemnashopTokens({ allowUnverifiedEmail: true }),
+    ).resolves.toMatchObject({
+      accessToken,
+      refreshToken,
+      session: {
+        id: "session-1",
+        user: { remnashopUserId: "2", email: "owner@example.com" },
+      },
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls[1]?.[0]).toBe(
+      "http://remnashop:5000/api/v1/public/auth/me",
+    );
+    expect(
+      fetchMock.mock.invocationCallOrder[1] ?? Number.MAX_SAFE_INTEGER,
+    ).toBeLessThan(
+      prismaMock.webSession.updateMany.mock.invocationCallOrder[0] ?? 0,
+    );
+    const storedTokens = prismaMock.webSession.updateMany.mock.calls[0]?.[0]
+      ?.data;
+    expect(revealRemnashopToken(storedTokens.remnashopAccessTokenEncrypted)).toBe(
+      accessToken,
+    );
+    expect(
+      revealRemnashopToken(storedTokens.remnashopRefreshTokenEncrypted),
+    ).toBe(refreshToken);
+    expect(userMergeMock.mergeLocalUsersIntoTarget).not.toHaveBeenCalled();
+  });
+
+  it("returns only reauthenticated tokens after a coordinated upstream merge", async () => {
+    const session = telegramSession({ remnashopUserId: "1" });
+    const preMergeAccess = jwt({ sub: "2", exp: 1_900_000_000 });
+    const postMergeAccess = jwt({ sub: "2", exp: 1_900_000_100 });
+    const currentUser = {
+      ...session.user,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+    vi.mocked(getCurrentSession).mockResolvedValue(session as never);
+    prismaMock.webUser.findUnique
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(currentUser)
+      .mockResolvedValueOnce(null);
+    prismaMock.$queryRaw
+      .mockResolvedValueOnce([{ id: "user-1" }])
+      .mockResolvedValueOnce([{ id: "session-1" }]);
+    prismaMock.webUser.update.mockResolvedValue({
+      ...currentUser,
+      remnashopUserId: "2",
+    });
+    const timeoutSpy = vi.spyOn(AbortSignal, "timeout");
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(
+        telegramAuthResponse({
+          userId: "2",
+          accessToken: preMergeAccess,
+          refreshToken: "pre-merge-refresh",
+        }),
+      )
+      .mockResolvedValueOnce(
+        remnashopProfile({ email: null, emailVerified: false }),
+      )
+      .mockResolvedValueOnce(
+        response({
+          body: {
+            dry_run: false,
+            source_user_id: 1,
+            target_user_id: 2,
+            target: {
+              id: 2,
+              email: "owner@example.com",
+              telegram_id: 123456,
+              is_email_verified: true,
+              current_subscription_id: null,
+            },
+            moved: {},
+            conflicts: [],
+            requires_relogin: true,
+          },
+        }),
+      )
+      .mockResolvedValueOnce(
+        telegramAuthResponse({
+          userId: "2",
+          accessToken: postMergeAccess,
+          refreshToken: "post-merge-refresh",
+        }),
+      )
+      .mockResolvedValueOnce(remnashopProfile());
+
+    await expect(
+      getAuthorizedRemnashopTokens({ allowUnverifiedEmail: true }),
+    ).resolves.toMatchObject({
+      accessToken: postMergeAccess,
+      refreshToken: "post-merge-refresh",
+      session: { user: { remnashopUserId: "2" } },
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(5);
+    const [mergeUrl, mergeInit] = fetchMock.mock.calls[2] ?? [];
+    expect(mergeUrl).toBe(
+      "http://remnashop:5000/api/v1/admin/users/merge?dry_run=false",
+    );
+    expect(JSON.parse(String((mergeInit as RequestInit).body))).toMatchObject({
+      source_user_id: 1,
+      target_user_id: 2,
+    });
+    expect(
+      prismaMock.$transaction.mock.invocationCallOrder[0] ??
+        Number.MAX_SAFE_INTEGER,
+    ).toBeLessThan(fetchMock.mock.invocationCallOrder[2] ?? 0);
+    expect(
+      paymentMergeMock.preflightPaymentOperationsForUserMerge.mock
+        .invocationCallOrder[0] ?? Number.MAX_SAFE_INTEGER,
+    ).toBeLessThan(fetchMock.mock.invocationCallOrder[2] ?? 0);
+    expect(
+      fetchMock.mock.invocationCallOrder[4] ?? Number.MAX_SAFE_INTEGER,
+    ).toBeLessThan(
+      prismaMock.webSession.updateMany.mock.invocationCallOrder[0] ?? 0,
+    );
+    expect(paymentMergeMock.transferPaymentOperationsForUserMerge).toHaveBeenCalledWith(
+      prismaMock,
+      "user-1",
+      "2",
+      [],
+    );
+    const timeoutBudgets = timeoutSpy.mock.calls.map(([timeoutMs]) => timeoutMs);
+    expect(timeoutBudgets.slice(0, 2)).toEqual([15_000, 15_000]);
+    expect(timeoutBudgets.slice(2)).toHaveLength(3);
+    expect(
+      timeoutBudgets.slice(2).every(
+        (timeoutMs) => timeoutMs > 0 && timeoutMs <= 8_000,
+      ),
+    ).toBe(true);
+    expect(prismaMock.$transaction.mock.calls[0]?.[1]).toEqual({
+      maxWait: 5_000,
+      timeout: 30_000,
+    });
+    const storedTokens = prismaMock.webSession.updateMany.mock.calls[0]?.[0]
+      ?.data;
+    expect(revealRemnashopToken(storedTokens.remnashopAccessTokenEncrypted)).toBe(
+      postMergeAccess,
+    );
+    expect(
+      revealRemnashopToken(storedTokens.remnashopRefreshTokenEncrypted),
+    ).toBe("post-merge-refresh");
+  });
+
+  it("clears invalidated Remnashop bundles from every other active session", async () => {
+    const session = telegramSession({ remnashopUserId: "1" });
+    const currentUser = { ...session.user };
+    const postMergeAccess = jwt({ sub: "2", exp: 1_900_000_100 });
+    vi.mocked(getCurrentSession).mockResolvedValue(session as never);
+    prismaMock.webUser.findUnique
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(currentUser)
+      .mockResolvedValueOnce(null);
+    prismaMock.$queryRaw
+      .mockResolvedValueOnce([{ id: "user-1" }])
+      .mockResolvedValueOnce([{ id: "session-1" }, { id: "session-2" }]);
+    prismaMock.webUser.update.mockResolvedValue({
+      ...currentUser,
+      remnashopUserId: "2",
+    });
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(telegramAuthResponse({ userId: "2" }))
+      .mockResolvedValueOnce(
+        remnashopProfile({ email: null, emailVerified: false }),
+      )
+      .mockResolvedValueOnce(mergeResponse())
+      .mockResolvedValueOnce(
+        telegramAuthResponse({
+          userId: "2",
+          accessToken: postMergeAccess,
+          refreshToken: "post-merge-refresh",
+        }),
+      )
+      .mockResolvedValueOnce(remnashopProfile());
+
+    await expect(
+      getAuthorizedRemnashopTokens({ allowUnverifiedEmail: true }),
+    ).resolves.toMatchObject({ accessToken: postMergeAccess });
+
+    expect(prismaMock.webSession.updateMany).toHaveBeenNthCalledWith(1, {
+      where: {
+        userId: "user-1",
+        id: { not: "session-1" },
+        revokedAt: null,
+      },
+      data: {
+        remnashopAccessTokenEncrypted: null,
+        remnashopRefreshTokenEncrypted: null,
+        remnashopAccessExpiresAt: null,
+        remnashopRefreshExpiresAt: null,
+      },
+    });
+    expect(prismaMock.webSession.updateMany).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        where: expect.objectContaining({ id: "session-1" }),
+      }),
+    );
+  });
+
+  it("retries the same upstream merge after a local commit failure", async () => {
+    const session = telegramSession({ remnashopUserId: "1" });
+    const currentUser = { ...session.user };
+    const firstPostMergeAccess = jwt({ sub: "2", exp: 1_900_000_100 });
+    const retryPostMergeAccess = jwt({ sub: "2", exp: 1_900_000_200 });
+    vi.mocked(getCurrentSession).mockResolvedValue(session as never);
+    prismaMock.webUser.findUnique
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(currentUser)
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(currentUser)
+      .mockResolvedValueOnce(null);
+    prismaMock.$queryRaw
+      .mockResolvedValueOnce([{ id: "user-1" }])
+      .mockResolvedValueOnce([{ id: "session-1" }])
+      .mockResolvedValueOnce([{ id: "user-1" }])
+      .mockResolvedValueOnce([{ id: "session-1" }]);
+    prismaMock.webUser.update
+      .mockRejectedValueOnce(new Error("database write failed"))
+      .mockResolvedValueOnce({ ...currentUser, remnashopUserId: "2" });
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(telegramAuthResponse({ userId: "2" }))
+      .mockResolvedValueOnce(
+        remnashopProfile({ email: null, emailVerified: false }),
+      )
+      .mockResolvedValueOnce(mergeResponse())
+      .mockResolvedValueOnce(
+        telegramAuthResponse({
+          userId: "2",
+          accessToken: firstPostMergeAccess,
+          refreshToken: "first-post-merge-refresh",
+        }),
+      )
+      .mockResolvedValueOnce(remnashopProfile())
+      .mockResolvedValueOnce(telegramAuthResponse({ userId: "2" }))
+      .mockResolvedValueOnce(remnashopProfile())
+      .mockResolvedValueOnce(mergeResponse())
+      .mockResolvedValueOnce(
+        telegramAuthResponse({
+          userId: "2",
+          accessToken: retryPostMergeAccess,
+          refreshToken: "retry-post-merge-refresh",
+        }),
+      )
+      .mockResolvedValueOnce(remnashopProfile());
+
+    await expect(
+      getAuthorizedRemnashopTokens({ allowUnverifiedEmail: true }),
+    ).rejects.toThrow("database write failed");
+    expect(prismaMock.webSession.updateMany).not.toHaveBeenCalled();
+
+    await expect(
+      getAuthorizedRemnashopTokens({ allowUnverifiedEmail: true }),
+    ).resolves.toMatchObject({
+      accessToken: retryPostMergeAccess,
+      refreshToken: "retry-post-merge-refresh",
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(10);
+    expect(fetchMock.mock.calls[2]?.[0]).toContain("/users/merge");
+    expect(fetchMock.mock.calls[7]?.[0]).toContain("/users/merge");
+    expect(prismaMock.webSession.updateMany).toHaveBeenCalledTimes(1);
+  });
+
+  it("merges a compatible local owner before claiming its Remnashop identity", async () => {
+    const session = telegramSession({ remnashopUserId: null });
+    const accessToken = jwt({ sub: "2", exp: 1_900_000_000 });
+    const sourceUser = {
+      id: "source-user",
+      remnashopUserId: "2",
+      email: "owner@example.com",
+      emailVerified: true,
+      telegramId: null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+    const currentUser = {
+      ...session.user,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+    vi.mocked(getCurrentSession).mockResolvedValue(session as never);
+    prismaMock.webUser.findUnique
+      .mockResolvedValueOnce(sourceUser)
+      .mockResolvedValueOnce(currentUser)
+      .mockResolvedValueOnce(sourceUser);
+    prismaMock.$queryRaw
+      .mockResolvedValueOnce([{ id: "source-user" }, { id: "user-1" }])
+      .mockResolvedValueOnce([{ id: "session-1" }]);
+    prismaMock.webUser.update.mockResolvedValue({
+      ...currentUser,
+      remnashopUserId: "2",
+    });
+    paymentMergeMock.preflightPaymentOperationsForUserMerge.mockResolvedValueOnce({
+      targetUpstreamAccountId: null,
+    });
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(
+        telegramAuthResponse({
+          userId: "2",
+          accessToken,
+          refreshToken: "refresh-2",
+        }),
+      )
+      .mockResolvedValueOnce(remnashopProfile());
+
+    await expect(
+      getAuthorizedRemnashopTokens({ allowUnverifiedEmail: true }),
+    ).resolves.toMatchObject({
+      accessToken,
+      session: { user: { remnashopUserId: "2" } },
+    });
+
+    expect(userMergeMock.mergeLocalUsersIntoTarget).toHaveBeenCalledWith(
+      prismaMock,
+      {
+        targetUserId: "user-1",
+        targetUpstreamAccountId: "2",
+        sourceUserIds: ["source-user"],
+      },
+    );
+    expect(userMergeMock.assertUserMergeFinalOwner).toHaveBeenCalledWith(
+      prismaMock,
+      expect.objectContaining({
+        targetUserId: "user-1",
+        sourceUserIds: ["source-user"],
+        expected: expect.objectContaining({
+          remnashopUserId: "2",
+          email: "owner@example.com",
+          telegramId: "123456",
+        }),
+      }),
+    );
   });
 
   it("uses lifecycle-refreshed tokens before requesting /auth/me", async () => {

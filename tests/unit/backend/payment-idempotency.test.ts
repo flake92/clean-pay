@@ -12,7 +12,8 @@ const mocks = vi.hoisted(() => {
     create: vi.fn(),
     updateMany: vi.fn(),
   };
-  const transaction = { paymentOperation, paymentRecord };
+  const queryRaw = vi.fn();
+  const transaction = { paymentOperation, paymentRecord, $queryRaw: queryRaw };
   const prisma = {
     paymentOperation,
     paymentRecord,
@@ -26,6 +27,7 @@ const mocks = vi.hoisted(() => {
     paymentRecord,
     transaction,
     prisma,
+    queryRaw,
     lockPaymentUpstreamOwner,
   };
 });
@@ -134,6 +136,7 @@ describe("payment operation idempotency", () => {
     mocks.paymentRecord.findUnique.mockResolvedValue(null);
     mocks.paymentRecord.create.mockResolvedValue({ id: "record-1" });
     mocks.paymentRecord.updateMany.mockResolvedValue({ count: 1 });
+    mocks.queryRaw.mockResolvedValue([{ id: "user-1" }]);
     mocks.lockPaymentUpstreamOwner.mockResolvedValue(undefined);
     mocks.prisma.$transaction.mockImplementation(
       async (callback: (transaction: typeof mocks.transaction) => unknown) =>
@@ -171,6 +174,28 @@ describe("payment operation idempotency", () => {
 
     expect(mocks.paymentOperation.create).not.toHaveBeenCalled();
     expect(mocks.paymentOperation.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("locks and revalidates the local owner before inserting a new operation", async () => {
+    mocks.queryRaw.mockResolvedValueOnce([]);
+
+    await expect(beginPaymentOperation(beginInput() as never)).rejects.toMatchObject({
+      code: "ACCOUNT_MERGE_REQUIRED",
+      status: 409,
+    });
+
+    expect(mocks.paymentOperation.create).not.toHaveBeenCalled();
+    const lockSql = mocks.queryRaw.mock.calls[0]?.[0] as {
+      strings?: string[];
+      values?: unknown[];
+    };
+    expect(lockSql.strings?.join(" ")).toContain('FROM "WebUser"');
+    expect(lockSql.strings?.join(" ")).toContain("FOR KEY SHARE");
+    expect(lockSql.values).toContain("user-1");
+    expect(mocks.prisma.$transaction).toHaveBeenCalledWith(
+      expect.any(Function),
+      { maxWait: 5_000, timeout: 30_000 },
+    );
   });
 
   it("stores only hashed identities and a canonical known-field request", async () => {

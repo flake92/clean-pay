@@ -31,9 +31,10 @@ export async function getCurrentAuthProfile() {
   }
 
   let accessToken: string;
+  let authorizedSession = session;
 
   try {
-    ({ accessToken } = await getAuthorizedRemnashopTokens({
+    ({ accessToken, session: authorizedSession } = await getAuthorizedRemnashopTokens({
       allowUnverifiedEmail: true,
     }));
   } catch (error) {
@@ -60,5 +61,5 @@ export async function getCurrentAuthProfile() {
     emailVerified: profile.is_email_verified,
   });
 
-  return { user: remnashopUserProfile(session, profile) };
+  return { user: remnashopUserProfile(authorizedSession, profile) };
 }

@@ -419,6 +419,52 @@ describe("auth use cases", () => {
     expect(mocks.getAuthorizedRemnashopTokens).toHaveBeenCalledWith({ allowUnverifiedEmail: true });
   });
 
+  it("presents the session identity committed by Telegram recovery", async () => {
+    const initialSession = {
+      ...session,
+      authMethod: "TELEGRAM",
+      remnashopAccessTokenEncrypted: null,
+      remnashopRefreshTokenEncrypted: null,
+      user: {
+        ...user,
+        email: null,
+        emailVerified: false,
+        telegramId: "123456",
+      },
+    };
+    const recoveredSession = {
+      ...initialSession,
+      user: {
+        ...initialSession.user,
+        email: "owner@example.com",
+        emailVerified: true,
+        remnashopUserId: "2",
+      },
+    };
+    mocks.getCurrentSession.mockResolvedValueOnce(initialSession);
+    mocks.getAuthorizedRemnashopTokens.mockResolvedValueOnce({
+      accessToken: "recovered-access",
+      refreshToken: "recovered-refresh",
+      session: recoveredSession,
+    });
+    mocks.getRemnashopMe.mockResolvedValueOnce({
+      ...profile,
+      email: "owner@example.com",
+      is_email_verified: true,
+      telegram_id: 123456,
+      auth_type: "telegram",
+    });
+
+    await expect(getCurrentAuthProfile()).resolves.toMatchObject({
+      user: {
+        email: "owner@example.com",
+        emailVerified: true,
+        telegramId: "123456",
+        auth_type: "telegram",
+      },
+    });
+  });
+
   it("stages Remnashop account and falls back to registration after auth failure", async () => {
     mocks.remnashopAuth
       .mockRejectedValueOnce(new BffError("AUTH_FAILED", 401, "bad credentials"))
