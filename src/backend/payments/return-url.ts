@@ -9,6 +9,14 @@ export function paymentReturnUrl(operationId: string) {
 }
 
 export function assertPaymentReturnUrl(expected: string, actual: unknown) {
+  // Older Remnashop releases accept the optional return_url request field but
+  // omit it from PaymentInitResponse. In that contract there is nothing to
+  // compare; the provider payment URL is still server-created and trusted.
+  // Newer releases echo the value, and any echoed mismatch remains fatal.
+  if (actual === null || actual === undefined) {
+    return;
+  }
+
   if (actual !== expected) {
     throw new BffError(
       "UPSTREAM_ERROR",

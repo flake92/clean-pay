@@ -510,6 +510,44 @@ describe("BFF route integration contracts", () => {
     }));
   });
 
+  it("returns provider payment URLs when legacy Remnashop omits return_url", async () => {
+    const legacyPayment = { ...payment, return_url: undefined };
+    mocks.remnashopRequest
+      .mockResolvedValueOnce({ plans: [purchasePlan] })
+      .mockResolvedValueOnce(legacyPayment)
+      .mockResolvedValueOnce({ plans: [renewPlan] })
+      .mockResolvedValueOnce(legacyPayment);
+    mocks.completePaymentOperationSuccess
+      .mockResolvedValueOnce(legacyPayment)
+      .mockResolvedValueOnce(legacyPayment);
+
+    const purchaseResponse = await purchaseRoute.POST(
+      jsonRequest(
+        "/api/bff/subscription/purchase",
+        purchaseRequestBody(),
+        { "idempotency-key": "abababab-abab-4bab-8bab-abababababab" },
+      ),
+    );
+    const extendResponse = await extendRoute.POST(
+      jsonRequest(
+        "/api/bff/subscription/extend",
+        extendRequestBody(),
+        { "idempotency-key": "cdcdcdcd-cdcd-4dcd-8dcd-cdcdcdcdcdcd" },
+      ),
+    );
+
+    expect(purchaseResponse.status).toBe(200);
+    expect(extendResponse.status).toBe(200);
+    await expect(body(purchaseResponse)).resolves.toMatchObject({
+      data: { payment_url: "https://pay.test" },
+    });
+    await expect(body(extendResponse)).resolves.toMatchObject({
+      data: { payment_url: "https://pay.test" },
+    });
+    expect(mocks.completePaymentOperationSuccess).toHaveBeenCalledTimes(2);
+    expect(mocks.settlePaymentOperationAfterDispatchFailure).not.toHaveBeenCalled();
+  });
+
   it("rejects malformed payment JSON with a controlled 400 before side effects", async () => {
     const response = await purchaseRoute.POST(
       new Request("http://clean-pay.local/api/bff/subscription/purchase", {

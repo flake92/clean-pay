@@ -14,13 +14,12 @@ describe("payment return URL contract", () => {
     );
   });
 
-  it("rejects a missing or changed upstream return URL", () => {
+  it("accepts an omitted legacy return URL but rejects a changed echoed URL", () => {
     const expected = paymentReturnUrl("operation-1");
 
     expect(() => assertPaymentReturnUrl(expected, expected)).not.toThrow();
-    expect(() => assertPaymentReturnUrl(expected, null)).toThrowError(
-      expect.objectContaining({ code: "UPSTREAM_ERROR", status: 502 }),
-    );
+    expect(() => assertPaymentReturnUrl(expected, null)).not.toThrow();
+    expect(() => assertPaymentReturnUrl(expected, undefined)).not.toThrow();
     expect(() => assertPaymentReturnUrl(expected, "https://attacker.example/payment/success"))
       .toThrowError(expect.objectContaining({ code: "UPSTREAM_ERROR", status: 502 }));
   });
