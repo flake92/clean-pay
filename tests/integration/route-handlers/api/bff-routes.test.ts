@@ -515,7 +515,9 @@ describe("BFF route integration contracts", () => {
     mocks.remnashopRequest
       .mockResolvedValueOnce({ plans: [purchasePlan] })
       .mockResolvedValueOnce(legacyPayment)
-      .mockResolvedValueOnce({ plans: [renewPlan] })
+      .mockResolvedValueOnce({
+        plans: [{ ...renewPlan, recommended_purchase_type: "RENEW" }],
+      })
       .mockResolvedValueOnce(legacyPayment);
     mocks.completePaymentOperationSuccess
       .mockResolvedValueOnce(legacyPayment)

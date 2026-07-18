@@ -153,7 +153,7 @@ export async function POST(request: Request) {
         { accessToken },
       );
       const plan = offers.plans.find(
-        (item) => item.recommended_purchase_type === "renew",
+        (item) => item.recommended_purchase_type.toLowerCase() === "renew",
       );
       const duration = plan?.durations.find(
         (item) => item.days === paymentRequest.duration_days,
