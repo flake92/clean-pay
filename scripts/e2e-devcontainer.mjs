@@ -86,7 +86,7 @@ function runInsideDevcontainer() {
     "app",
     "sh",
     "-lc",
-    "for attempt in $(seq 1 100); do [ -f /tmp/clean-pay-dev-ready ] && exit 0; sleep 0.1; done; exit 1",
+    "for attempt in $(seq 1 120); do [ -f /tmp/clean-pay-dev-ready ] && exit 0; sleep 1; done; echo 'Timed out waiting 120 seconds for the Clean Pay devcontainer bootstrap' >&2; exit 1",
   ]);
 
   if (readyStatus !== 0) {

@@ -1,6 +1,6 @@
 # API Endpoint Flow Map
 
-Every endpoint starts in `src/app/api/**/route.ts`. Route files should stay thin:
+Every API endpoint starts in `src/app/api/**/route.ts`. This table is checked against every exported HTTP method in that tree, so adding or removing a route requires updating this map in the same change. Route files should keep parsing and response translation near the edge while delegating reusable state transitions to backend modules:
 
 1. Parse request.
 2. Call one backend flow/use case.
@@ -53,17 +53,17 @@ If a route needs more than request parsing, a small audit call, and one backend 
 | Endpoint | Route file | Backend flow |
 | --- | --- | --- |
 | `GET /api/bff/plans/public` | `src/app/api/bff/plans/public/route.ts` | `src/backend/integrations/remnashop/client.ts` |
-| `GET /api/bff/subscription/current` | `src/app/api/bff/subscription/current/route.ts` | `src/backend/integrations/remnashop/client.ts` |
+| `GET /api/bff/subscription/current` | `src/app/api/bff/subscription/current/route.ts` | `src/backend/integrations/remnashop/client.ts`, `src/backend/integrations/remnawave/client.ts` |
 | `GET /api/bff/subscription/offers` | `src/app/api/bff/subscription/offers/route.ts` | `src/backend/integrations/remnashop/client.ts` |
-| `POST /api/bff/subscription/purchase` | `src/app/api/bff/subscription/purchase/route.ts` | `src/backend/payments/idempotency.ts`, `src/backend/payments/operation-response.ts`, `src/backend/payments/records.ts`, `src/backend/integrations/remnashop/client.ts` |
-| `POST /api/bff/subscription/extend` | `src/app/api/bff/subscription/extend/route.ts` | `src/backend/payments/idempotency.ts`, `src/backend/payments/operation-response.ts`, `src/backend/payments/records.ts`, `src/backend/integrations/remnashop/client.ts` |
-| `POST /api/bff/subscription/reissue` | `src/app/api/bff/subscription/reissue/route.ts` | `src/backend/integrations/remnashop/client.ts` |
-| `POST /api/bff/subscription/promocode` | `src/app/api/bff/subscription/promocode/route.ts` | `src/backend/integrations/remnashop/client.ts` |
+| `POST /api/bff/subscription/purchase` | `src/app/api/bff/subscription/purchase/route.ts` | `src/backend/payments/request-validation.ts`, `src/backend/payments/return-url.ts`, `src/backend/payments/idempotency.ts`, `src/backend/payments/operation-response.ts`, `src/backend/payments/records.ts`, `src/backend/integrations/remnashop/client.ts` |
+| `POST /api/bff/subscription/extend` | `src/app/api/bff/subscription/extend/route.ts` | `src/backend/payments/request-validation.ts`, `src/backend/payments/return-url.ts`, `src/backend/payments/idempotency.ts`, `src/backend/payments/operation-response.ts`, `src/backend/payments/records.ts`, `src/backend/integrations/remnashop/client.ts` |
+| `POST /api/bff/subscription/reissue` | `src/app/api/bff/subscription/reissue/route.ts` | `src/backend/integrations/remnashop/client.ts`, `src/backend/observability/mutation-audit.ts` |
+| `POST /api/bff/subscription/promocode` | `src/app/api/bff/subscription/promocode/route.ts` | `src/backend/integrations/remnashop/client.ts`, `src/backend/observability/mutation-audit.ts` |
 | `GET /api/bff/subscription/devices` | `src/app/api/bff/subscription/devices/route.ts` | `src/backend/integrations/remnashop/client.ts` |
-| `DELETE /api/bff/subscription/devices` | `src/app/api/bff/subscription/devices/route.ts` | `src/backend/integrations/remnashop/client.ts` |
-| `DELETE /api/bff/subscription/devices/[hwid]` | `src/app/api/bff/subscription/devices/[hwid]/route.ts` | `src/backend/integrations/remnashop/client.ts` |
-| `GET /api/bff/payments/history` | `src/app/api/bff/payments/history/route.ts` | `src/backend/payments/history-sync.ts`, `src/backend/payments/records.ts`, `src/backend/integrations/remnashop/payment-recovery.ts` |
-| `GET /api/bff/payments/status` | `src/app/api/bff/payments/status/route.ts` | `src/backend/payments/reconciliation.ts`, `src/backend/payments/records.ts`, `src/backend/integrations/remnashop/payment-recovery.ts` |
+| `DELETE /api/bff/subscription/devices` | `src/app/api/bff/subscription/devices/route.ts` | `src/backend/integrations/remnashop/client.ts`, `src/backend/observability/mutation-audit.ts` |
+| `DELETE /api/bff/subscription/devices/[hwid]` | `src/app/api/bff/subscription/devices/[hwid]/route.ts` | `src/backend/integrations/remnashop/client.ts`, `src/backend/observability/mutation-audit.ts` |
+| `GET /api/bff/payments/history` | `src/app/api/bff/payments/history/route.ts` | `src/backend/payments/history-sync.ts`, `src/backend/payments/owner.ts`, `src/backend/payments/records.ts` |
+| `GET /api/bff/payments/status` | `src/app/api/bff/payments/status/route.ts` | `src/backend/payments/history-sync.ts`, `src/backend/payments/reconciliation.ts`, `src/backend/payments/manual-review.ts`, `src/backend/payments/owner.ts`, `src/backend/payments/records.ts` |
 
 `purchase` and `extend` require a UUID `Idempotency-Key` plus the offer snapshot fields `confirmed_amount`, `confirmed_currency`, and `offer_version` returned/derived from the selected `/subscription/offers` entry. Clean Pay rechecks that snapshot immediately before dispatch; a changed offer returns `409 OFFER_CHANGED` and no invoice is created. The same key is bound to one user, operation kind, normalized request payload, and offer snapshot. A completed replay returns the original `200` payload with `Idempotency-Replayed: true`; an active or fail-closed unknown outcome returns `202` with `operation_id`, `status`, and `retry_after_seconds`. Clients must retain the same key after transport errors, malformed success responses, `202`, `408`, `429`, and `5xx` responses.
 

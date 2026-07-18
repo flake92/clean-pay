@@ -81,8 +81,6 @@ model WebUser {
   webAuthnCredentials     WebAuthnCredential[]
   webAuthnChallenges      WebAuthnChallenge[]
 
-  @@index([email])
-  @@index([telegramId])
 }
 
 model PaymentRecord {
@@ -113,7 +111,6 @@ model PaymentRecord {
 
   @@index([userId, createdAt])
   @@index([userId, upstreamCreatedAt, paymentId])
-  @@index([paymentId])
   @@index([status])
 }
 

@@ -119,12 +119,18 @@ curl -f https://pay.example.com/api/health/readiness
 Пока PR #135 не принят и не вошёл в официальный образ, тестовый стенд
 Remnashop нужно собирать из ветки
 `flake92/remnashop:codex/clean-pay-integration-upstream-dev` и фиксировать на
-проверенном commit `a08c4c8`. Обычный `ghcr.io/snoups/remnashop:latest`/v0.8.2
+проверенном commit `da5dd1d`. Обычный `ghcr.io/snoups/remnashop:latest`/v0.8.2
 не содержит полного recovery contract v1 и endpoint
 `POST /api/v1/admin/users/merge`, поэтому с ним нельзя включать
 `PAYMENT_RECONCILIATION_ENABLED` и не работает полный сценарий привязки e-mail
 к Telegram аккаунту. После принятия PR следует перейти на первый официальный
 релиз Remnashop, содержащий эти изменения.
+
+Devcontainer уже следует этому правилу: Compose использует immutable Git
+commit `da5dd1d9210b1ddb0cfdc7a7a01316bd9457e336` как remote build context и
+собирает штатный Dockerfile самого Remnashop. Локальных подмен файлов
+Remnashop в Clean Pay нет. Смену commit допускается делать только на другой
+проверенный commit PR #135 либо на официальный release, в который PR принят.
 
 В `/opt/remnashop/.env` включите веб-кабинет и укажите тот же ключ, что в `REMNASHOP_API_KEY` Clean Pay:
 

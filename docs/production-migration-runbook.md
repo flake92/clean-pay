@@ -15,6 +15,9 @@ row between backfill and constraint enforcement.
   outside the signed 64-bit range. The later migration converts it back to text
   in place.
 - A failed migration leaves the previous schema and data intact.
+- Redundant non-unique indexes on unique identity/payment columns are removed
+  in one transaction with a five-second `lock_timeout`. A busy table aborts the
+  migration quickly instead of extending the maintenance outage.
 - Rollback means restoring a verified pre-migration backup with the previous
   application image. There is no destructive automatic down migration.
 
@@ -84,7 +87,30 @@ row between backfill and constraint enforcement.
    ```
 
    The final Telegram type must be `text`; `incomplete_sessions` must be zero.
-3. Re-run the recorded row counts. Start every application role from the same
+3. Verify that the redundant indexes are gone while the three unique indexes
+   remain:
+
+   ```sql
+   SELECT indexname
+     FROM pg_indexes
+    WHERE schemaname = current_schema()
+      AND indexname IN (
+        'WebUser_email_idx',
+        'WebUser_telegramId_idx',
+        'PaymentRecord_paymentId_idx',
+        'WebUser_email_key',
+        'WebUser_telegramId_key',
+        'PaymentRecord_paymentId_key'
+      )
+    ORDER BY indexname;
+   ```
+
+   The result must contain only the three names ending in `_key`. If migration
+   `20260718141000_drop_redundant_indexes` fails with lock timeout, keep writers
+   stopped, mark that failed attempt rolled back only after confirming the
+   transaction did roll back, and retry `prisma migrate deploy`; never drop the
+   unique `_key` indexes manually.
+4. Re-run the recorded row counts. Start every application role from the same
    new image, then check liveness, readiness, login/refresh and Telegram-linking
    smoke tests before reopening traffic.
 
