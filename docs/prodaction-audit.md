@@ -351,6 +351,8 @@ Fallback по Telegram/e-mail должен подтверждать UUID и вл
 
 ## Журнал выполнения
 
+- 2026-07-19: production incident после rollout устранён без создания повторного платежа. Remnashop recovery нормализует legacy string enum в snapshot/response (`6b64a87`), исходная операция `cmrr2legx00111kulm84rum7q` восстановлена в `SUCCEEDED` с сохранённым payment URL, а отдельный reconciliation worker включён и healthy. Clean Pay развернут на `c676c20`, production branding указывает на существующий `/clean-pay-logo.png` (public `200 image/png`). После проверки fleet временный `payment_runtime_control.legacy_rollout_gate_active` транзакционно снят с backup; постоянные guards активной платёжной работы сохранены. PR #135 обновлён до `745d629`, 161/161 тест, Ruff и mypy затронутых config-модулей прошли; #136–#138 закрыты без merge, необходимые dev/test изменения #137/#138 находятся только в #135. Remnawave не изменялся.
+
 - 2026-07-17: аудит зафиксирован; начата работа над пунктом 1.
 - 2026-07-17: пункт 1 исправлен и локально проверен: passkey suite 10/10, полный suite 183/183, ESLint без ошибок, production build успешен. Добавлены проверки нового, собственного, чужого, изменённого и конкурентно созданного credential.
 - 2026-07-17: пункт 2 исправлен и локально проверен: профильный suite 58/58, полный suite 209/209, ESLint без ошибок в исходниках, production build успешен. Прямой `tsc --noEmit` сохранил базовые 29 ошибок тестовой типизации, новых ошибок не добавлено. Devcontainer E2E локально не запущен: Docker Desktop daemon недоступен; проверка перенесена на тестовый стенд перед production rollout.
