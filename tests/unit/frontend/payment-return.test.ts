@@ -11,6 +11,10 @@ describe("payment return state", () => {
     expect(paymentReturnOutcome(null)).toBe("checking");
     expect(paymentReturnOutcome({ payment: { status: "completed" } })).toBe("success");
     expect(paymentReturnOutcome({ operation: { status: "succeeded" } })).toBe("success");
+    expect(paymentReturnOutcome({
+      operation: { status: "succeeded" },
+      payment: { status: "pending" },
+    })).toBe("pending");
     expect(paymentReturnOutcome({ payment: { status: "canceled" } })).toBe("failed");
     expect(paymentReturnOutcome({ operation: { status: "manual_required" } })).toBe("unknown");
     expect(paymentReturnOutcome({ operation: { status: "processing" } })).toBe("pending");

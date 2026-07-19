@@ -118,12 +118,18 @@ export async function GET(request: Request) {
     const operationStatus = operation
       ? serializePaymentOperationStatus(operation)
       : null;
+    const operationPaymentId = operation?.paymentRecord?.paymentId ?? null;
+    const resolvedPaymentId = paymentId ?? operationPaymentId;
+    const localPaymentStatus = operation?.paymentRecord?.status ?? null;
+    const localPaymentIsUnsettled =
+      localPaymentStatus === "PENDING" || localPaymentStatus === "UNKNOWN";
 
     if (
       operation &&
       (operationStatus?.status === "manual_required" ||
-        operation.status === "SUCCEEDED" ||
-        operation.status === "FAILED_FINAL")
+        operation.status === "FAILED_FINAL" ||
+        (operation.status === "SUCCEEDED" &&
+          (!operation.paymentRecord || !localPaymentIsUnsettled)))
     ) {
       return bffJson({
         payment: operation.paymentRecord
@@ -145,8 +151,11 @@ export async function GET(request: Request) {
       const capabilities = await getPaymentCapabilities(accessToken);
 
       if (capabilities) {
-        if (paymentId) {
-          const exact = await getExactTransaction({ accessToken, paymentId });
+        if (resolvedPaymentId) {
+          const exact = await getExactTransaction({
+            accessToken,
+            paymentId: resolvedPaymentId,
+          });
 
           if (exact) {
             await syncExactPaymentRecordFromRemnashop({
@@ -186,15 +195,26 @@ export async function GET(request: Request) {
       );
     } catch (error) {
       if (!isSubscriptionNotFound(error)) {
+        if (operation?.status === "SUCCEEDED") {
+          return bffJson({
+            payment: operation.paymentRecord
+              ? serializePaymentRecord(operation.paymentRecord)
+              : null,
+            operation: operationStatus,
+            subscription: null,
+            source: "local_terminal_payment_operation",
+          });
+        }
+
         throw error;
       }
     }
 
     let record = null;
 
-    if (paymentId) {
+    if (resolvedPaymentId) {
       record = await prisma.paymentRecord.findFirst({
-        where: { userId: user.id, paymentId },
+        where: { userId: user.id, paymentId: resolvedPaymentId },
       });
     } else if (operationId) {
       record = operation?.paymentRecord ?? null;

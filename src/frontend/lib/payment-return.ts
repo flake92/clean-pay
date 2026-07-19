@@ -11,7 +11,7 @@ export function paymentReturnOutcome(snapshot: PaymentReturnSnapshot | null): Pa
   const operationStatus = snapshot.operation?.status;
   const paymentStatus = snapshot.payment?.status;
 
-  if (operationStatus === "succeeded" || paymentStatus === "completed") return "success";
+  if (paymentStatus === "completed") return "success";
   if (
     operationStatus === "failed"
     || paymentStatus === "failed"
@@ -24,6 +24,8 @@ export function paymentReturnOutcome(snapshot: PaymentReturnSnapshot | null): Pa
     || operationStatus === "retry_ready"
     || paymentStatus === "pending"
   ) return "pending";
+
+  if (operationStatus === "succeeded") return "success";
 
   return "unknown";
 }

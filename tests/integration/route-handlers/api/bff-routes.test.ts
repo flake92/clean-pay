@@ -942,6 +942,9 @@ describe("BFF route integration contracts", () => {
       reconcileErrorSnapshot: null,
       paymentRecord: record,
     });
+    mocks.getPaymentCapabilities.mockRejectedValueOnce(
+      new BffError("UPSTREAM_UNAVAILABLE", 502, "Remnashop unavailable"),
+    );
     const response = await paymentsStatusRoute.GET(
       new Request(
         "http://clean-pay.local/api/bff/payments/status?operation_id=operation-succeeded",
@@ -949,7 +952,7 @@ describe("BFF route integration contracts", () => {
     );
 
     expect(response.status).toBe(200);
-    expect(mocks.getAuthorizedRemnashopTokens).not.toHaveBeenCalled();
+    expect(mocks.getAuthorizedRemnashopTokens).toHaveBeenCalledOnce();
     await expect(body(response)).resolves.toMatchObject({
       data: {
         payment: { payment_id: paymentId },
@@ -960,6 +963,63 @@ describe("BFF route integration contracts", () => {
         },
         subscription: null,
         source: "local_terminal_payment_operation",
+      },
+    });
+  });
+
+  it("refreshes a pending payment linked to a succeeded creation operation", async () => {
+    const completedRecord = { ...record, status: "COMPLETED" };
+    const completedTransaction = {
+      payment_id: paymentId,
+      purchase_type: "NEW",
+      status: "completed",
+      gateway_type: "YOOKASSA",
+      final_amount: "100.00",
+      currency: "RUB",
+      plan_name: "Basic",
+      duration_days: 30,
+      device_limit: 3,
+      traffic_limit: null,
+      created_at: "2026-06-25T00:00:00.000Z",
+      updated_at: "2026-06-25T01:05:00.000Z",
+    };
+    mocks.prisma.paymentOperation.findFirst.mockResolvedValueOnce({
+      id: "operation-succeeded-pending",
+      status: "SUCCEEDED",
+      reconciledAt: null,
+      reconcileErrorSnapshot: null,
+      paymentRecord: record,
+    });
+    mocks.prisma.paymentRecord.findFirst.mockResolvedValueOnce(completedRecord);
+    mocks.getPaymentCapabilities.mockResolvedValueOnce({
+      contract_version: 1,
+      transactions: { max_page_size: 100 },
+    });
+    mocks.getExactTransaction.mockResolvedValueOnce(completedTransaction);
+    mocks.remnashopRequest.mockResolvedValueOnce({ uuid: "sub-1" });
+
+    const response = await paymentsStatusRoute.GET(
+      new Request(
+        "http://clean-pay.local/api/bff/payments/status?operation_id=operation-succeeded-pending",
+      ),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.getExactTransaction).toHaveBeenCalledWith({
+      accessToken: "access-token",
+      paymentId,
+    });
+    expect(mocks.syncExactPaymentRecordFromRemnashop).toHaveBeenCalledWith({
+      userId: "user-1",
+      upstreamAccountId: "remnashop-user-1",
+      transaction: completedTransaction,
+    });
+    await expect(body(response)).resolves.toMatchObject({
+      data: {
+        payment: { payment_id: paymentId, status: "completed" },
+        operation: { status: "succeeded" },
+        subscription: { uuid: "sub-1" },
+        source: "local_payment_record_and_current_subscription",
       },
     });
   });
