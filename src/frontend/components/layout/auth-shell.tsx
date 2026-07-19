@@ -40,6 +40,7 @@ export function AuthShell({
                   className="mb-3 flex-shrink-0 clean-auth-logo"
                   height={68}
                   src={branding.logoUrl}
+                  unoptimized
                   width={68}
                 />
                 <div className="text-900 text-3xl font-medium mb-2 auth-title">{title}</div>

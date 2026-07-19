@@ -12,6 +12,7 @@ const AppFooter = () => {
                 alt={`${branding.name} logo`}
                 width={14}
                 height={14}
+                unoptimized
                 className="mr-2"
                 style={{
                     objectFit: "contain",

@@ -38,6 +38,7 @@ describe("Next lint warning guardrails", () => {
 
       expect(source, `${file} should import next/image`).toContain('from "next/image"');
       expect(source, `${file} should not render raw img tags`).not.toMatch(/<img\b/);
+      expect(source, `${file} should load the precached local logo directly`).toContain("unoptimized");
       expect(source, `${file} should not disable Next image lint`).not.toContain(
         "@next/next/no-img-element",
       );
