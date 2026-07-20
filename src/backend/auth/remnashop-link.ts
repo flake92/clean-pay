@@ -122,6 +122,7 @@ async function attachTelegramToVerifiedRemnashopAccount({
   session: NonNullable<Awaited<ReturnType<typeof getCurrentSession>>>;
 }) {
   let authForLink = auth;
+  let upstreamMerged = false;
 
   if (session.user.telegramId) {
     try {
@@ -153,6 +154,7 @@ async function attachTelegramToVerifiedRemnashopAccount({
         reason: "Clean Pay account link: verified e-mail password and Telegram ownership",
       });
       authForLink = merged.auth;
+      upstreamMerged = merged.merged;
 
       authDebugLog("remnashop_account_link_telegram_conflict_merge_completed", {
         sessionId: session.id,
@@ -178,6 +180,7 @@ async function attachTelegramToVerifiedRemnashopAccount({
         reason: "Clean Pay account link: verified e-mail password and Telegram ownership",
       });
       authForLink = merged.auth;
+      upstreamMerged = upstreamMerged || merged.merged;
     }
   }
 
@@ -185,6 +188,7 @@ async function attachTelegramToVerifiedRemnashopAccount({
     accessToken: authForLink.cookies.accessToken,
     refreshToken: authForLink.cookies.refreshToken,
     auth: authForLink.data,
+    ...(upstreamMerged ? { invalidateSiblingRemnashopTokens: true } : {}),
   });
   await refreshCurrentAccessCookie();
 

@@ -304,9 +304,9 @@ function validateProductionEnvFile() {
   }
 }
 
-function get(url) {
+function get(url, headers = {}) {
   return new Promise((resolve, reject) => {
-    const request = http.get(url, (response) => {
+    const request = http.get(url, { headers }, (response) => {
       let body = "";
 
       response.setEncoding("utf8");
@@ -317,7 +317,7 @@ function get(url) {
     });
 
     request.on("error", reject);
-    request.setTimeout(5000, () => {
+    request.setTimeout(10_000, () => {
       request.destroy(new Error(`Timed out waiting for ${url}`));
     });
   });
@@ -327,13 +327,16 @@ async function verify() {
   requireEnvFile();
 
   const port = readEnvValue("CLEAN_PAY_PORT", "4000");
-  const url = `http://127.0.0.1:${port}/api/health/readiness`;
+  const url = `http://127.0.0.1:${port}/api/internal/health/readiness`;
+  const readinessSecret = readEnvValue("READINESS_INTERNAL_SECRET", "");
   const deadline = Date.now() + 120_000;
   let lastError = null;
 
   while (Date.now() < deadline) {
     try {
-      const response = await get(url);
+      const response = await get(url, {
+        "x-clean-pay-readiness-secret": readinessSecret,
+      });
 
       const assessment = assessReadinessResponse(response);
 

@@ -49,6 +49,8 @@ const mocks = vi.hoisted(() => ({
   checkMailpit: vi.fn(),
   checkTelegramOidc: vi.fn(),
   checkRemnawave: vi.fn(),
+  redisCommand: vi.fn(),
+  readinessCacheValue: null as string | null,
 }));
 
 vi.mock("@/backend/observability/audit", () => ({
@@ -112,6 +114,7 @@ vi.mock("@/backend/sessions/web-session", () => ({
   getCurrentUser: mocks.getCurrentUser,
 }));
 vi.mock("@/backend/database/prisma", () => ({ prisma: mocks.prisma }));
+vi.mock("@/backend/cache/redis", () => ({ redisCommand: mocks.redisCommand }));
 vi.mock("@/backend/health/checks", async (importOriginal) => ({
   ...await importOriginal<typeof import("@/backend/health/checks")>(),
   checkDatabase: mocks.checkDatabase,
@@ -140,6 +143,8 @@ import * as paymentsHistoryRoute from "@/app/api/bff/payments/history/route";
 import * as paymentsStatusRoute from "@/app/api/bff/payments/status/route";
 import * as supportRoute from "@/app/api/bff/support/route";
 import * as readinessRoute from "@/app/api/health/readiness/route";
+import * as internalReadinessRoute from "@/app/api/internal/health/readiness/route";
+import { resetReadinessStateForTests } from "@/backend/health/readiness";
 import { BffError } from "@/backend/integrations/remnashop/errors";
 import { confirmedPaymentOffer } from "@/shared/payments/offer-confirmation";
 
@@ -251,6 +256,17 @@ describe("BFF route integration contracts", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.unstubAllEnvs();
+    resetReadinessStateForTests();
+    mocks.readinessCacheValue = null;
+    mocks.redisCommand.mockImplementation(async (parts: Array<string | number | null>) => {
+      if (parts[0] === "SET") {
+        mocks.readinessCacheValue = String(parts[2]);
+        return "OK";
+      }
+
+      if (parts[0] === "GET") return mocks.readinessCacheValue;
+      return null;
+    });
     mocks.loginWithEmail.mockResolvedValue({ user: { email: "user@example.com" } });
     mocks.registerWithEmail.mockResolvedValue({ user: { email: "user@example.com" } });
     mocks.getCurrentAuthProfile.mockResolvedValue({ user: { email: "user@example.com" } });
@@ -934,6 +950,40 @@ describe("BFF route integration contracts", () => {
     });
   });
 
+  it("recovers the latest active operation without browser-local identifiers", async () => {
+    mocks.prisma.paymentOperation.findFirst.mockResolvedValueOnce({
+      id: "operation-active",
+      status: "OUTCOME_UNKNOWN",
+      reconciledAt: null,
+      reconcileErrorSnapshot: null,
+      paymentRecord: null,
+    });
+    mocks.remnashopRequest.mockResolvedValueOnce(null);
+
+    const response = await paymentsStatusRoute.GET(
+      new Request("http://clean-pay.local/api/bff/payments/status"),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.prisma.paymentOperation.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          userId: "user-1",
+          status: { in: ["DISPATCHING", "OUTCOME_UNKNOWN"] },
+        },
+        orderBy: { createdAt: "desc" },
+      }),
+    );
+    await expect(body(response)).resolves.toMatchObject({
+      data: {
+        operation: {
+          operation_id: "operation-active",
+          status: "outcome_unknown",
+        },
+      },
+    });
+  });
+
   it("returns a locally succeeded operation while Remnashop is unavailable", async () => {
     mocks.prisma.paymentOperation.findFirst.mockResolvedValueOnce({
       id: "operation-succeeded",
@@ -1103,18 +1153,56 @@ describe("BFF route integration contracts", () => {
     await expect(body(authError)).resolves.toMatchObject({ error: { code: "UNAUTHORIZED" } });
 
     mocks.checkRedis.mockResolvedValueOnce({ status: "down", latencyMs: 1, message: "Redis did not return PONG" });
+    const detailed = await internalReadinessRoute.GET(new Request(
+      "http://clean-pay.local/api/internal/health/readiness",
+      { headers: { "x-clean-pay-readiness-secret": "test-readiness-internal-secret" } },
+    ));
     const readiness = await readinessRoute.GET();
 
+    expect(detailed.status).toBe(503);
+    await expect(body(detailed)).resolves.toMatchObject({
+      status: "degraded",
+      checks: { redis: { status: "down" } },
+    });
     expect(readiness.status).toBe(503);
     await expect(body(readiness)).resolves.toMatchObject({
       status: "degraded",
-      checks: {
-        redis: { status: "down" },
-        mailpit: { status: "ok" },
-        telegramOidc: { status: "ok" },
-        remnawave: { status: "ok" },
-      },
+      stale: false,
+      checkedAt: expect.any(String),
     });
+  });
+
+  it("hides detailed readiness behind a timing-safe internal secret", async () => {
+    const response = await internalReadinessRoute.GET(new Request(
+      "http://clean-pay.local/api/internal/health/readiness",
+      { headers: { "x-clean-pay-readiness-secret": "wrong-secret" } },
+    ));
+
+    expect(response.status).toBe(404);
+    expect(mocks.checkDatabase).not.toHaveBeenCalled();
+  });
+
+  it("shares the aggregated readiness cache outside process-local module state", async () => {
+    const detailed = await internalReadinessRoute.GET(new Request(
+      "http://clean-pay.local/api/internal/health/readiness",
+      { headers: { "x-clean-pay-readiness-secret": "test-readiness-internal-secret" } },
+    ));
+
+    expect(detailed.status).toBe(200);
+    resetReadinessStateForTests();
+
+    const readiness = await readinessRoute.GET();
+
+    expect(readiness.status).toBe(200);
+    await expect(body(readiness)).resolves.toMatchObject({
+      status: "ok",
+      stale: false,
+      checkedAt: expect.any(String),
+    });
+    expect(mocks.redisCommand).toHaveBeenCalledWith([
+      "GET",
+      "clean-pay:health:readiness:v1",
+    ]);
   });
 
   it("starts every readiness dependency in parallel with one deadline signal", async () => {
@@ -1135,7 +1223,13 @@ describe("BFF route integration contracts", () => {
       check.mockImplementationOnce(() => gate);
     }
 
-    const responsePromise = readinessRoute.GET();
+    const request = () => new Request("http://clean-pay.local/api/internal/health/readiness", {
+      headers: { "x-clean-pay-readiness-secret": "test-readiness-internal-secret" },
+    });
+    const responsePromises = [
+      internalReadinessRoute.GET(request()),
+      internalReadinessRoute.GET(request()),
+    ];
     await Promise.resolve();
 
     for (const check of checks) {
@@ -1147,6 +1241,9 @@ describe("BFF route integration contracts", () => {
     expect(new Set(signals).size).toBe(1);
     release({ status: "ok", latencyMs: 1 });
 
-    await expect(responsePromise).resolves.toMatchObject({ status: 200 });
+    await expect(Promise.all(responsePromises)).resolves.toEqual([
+      expect.objectContaining({ status: 200 }),
+      expect.objectContaining({ status: 200 }),
+    ]);
   });
 });

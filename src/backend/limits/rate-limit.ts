@@ -1,4 +1,7 @@
+import { createHmac } from 'node:crypto';
+
 import { redisCommand } from '@/backend/cache/redis';
+import { getEnv } from '@/backend/config/env';
 import { BffError } from '@/backend/integrations/remnashop/errors';
 
 type RateLimitIdentity = {
@@ -22,13 +25,16 @@ function normalizePart(value: string | number | bigint | null | undefined) {
 }
 
 export function rateLimitKey({ action, email, tgId }: RateLimitIdentity) {
-  const parts = [
-    `action:${normalizePart(action) ?? 'unknown'}`,
-    `email:${normalizePart(email) ?? 'none'}`,
-    `tgid:${normalizePart(tgId) ?? 'none'}`,
-  ];
+  const normalizedAction = normalizePart(action) ?? 'unknown';
+  const digest = (kind: 'email' | 'tgid', value: string | null) => value === null
+    ? 'none'
+    : createHmac('sha256', getEnv().rateLimitIdentitySecret)
+      .update(`clean-pay:rate-limit:v2:${kind}:${value}`)
+      .digest('hex');
+  const emailDigest = digest('email', normalizePart(email));
+  const telegramDigest = digest('tgid', normalizePart(tgId));
 
-  return `clean-pay:rate-limit:${parts.join(':')}`;
+  return `clean-pay:rate-limit:v2:${normalizedAction}:email:${emailDigest}:tgid:${telegramDigest}`;
 }
 
 async function getRetryAfterSeconds(key: string, windowSeconds: number) {

@@ -205,28 +205,29 @@ export function validateProductionEnvironment(environment) {
     "public",
   );
   const remnashopAdminValue = optional("REMNASHOP_ADMIN_API_BASE_URL");
+  const expectedAdminPath = remnashopPublicUrl.pathname.replace(
+    /\/api\/v1\/public\/?$/,
+    "/api/v1/admin",
+  );
   const remnashopAdminUrl = remnashopAdminValue
     ? remnashopBaseUrl(
         "REMNASHOP_ADMIN_API_BASE_URL",
         remnashopAdminValue,
         "admin",
       )
-    : null;
+    : new URL(remnashopPublicUrl);
 
-  if (remnashopAdminUrl) {
-    const expectedAdminPath = remnashopPublicUrl.pathname.replace(
-      /\/api\/v1\/public\/?$/,
-      "/api/v1/admin",
+  if (!remnashopAdminValue) {
+    remnashopAdminUrl.pathname = expectedAdminPath;
+  }
+
+  if (
+    remnashopAdminUrl.origin !== remnashopPublicUrl.origin ||
+    normalizedPath(remnashopAdminUrl.pathname) !== expectedAdminPath
+  ) {
+    fail(
+      "REMNASHOP_ADMIN_API_BASE_URL must use the same origin and API prefix as REMNASHOP_API_BASE_URL",
     );
-
-    if (
-      remnashopAdminUrl.origin !== remnashopPublicUrl.origin ||
-      normalizedPath(remnashopAdminUrl.pathname) !== expectedAdminPath
-    ) {
-      fail(
-        "REMNASHOP_ADMIN_API_BASE_URL must use the same origin and API prefix as REMNASHOP_API_BASE_URL",
-      );
-    }
   }
 
   const remnawaveUrl = publicHttpsOrigin(
@@ -271,6 +272,16 @@ export function validateProductionEnvironment(environment) {
   const auditIpHashSecret = strongSecret(
     "AUDIT_IP_HASH_SECRET",
     required("AUDIT_IP_HASH_SECRET"),
+    32,
+  );
+  const rateLimitIdentitySecret = strongSecret(
+    "RATE_LIMIT_IDENTITY_SECRET",
+    required("RATE_LIMIT_IDENTITY_SECRET"),
+    32,
+  );
+  const readinessInternalSecret = strongSecret(
+    "READINESS_INTERNAL_SECRET",
+    required("READINESS_INTERNAL_SECRET"),
     32,
   );
 
@@ -400,12 +411,6 @@ export function validateProductionEnvironment(environment) {
       );
     }
 
-    if (!remnashopAdminUrl) {
-      fail(
-        "REMNASHOP_ADMIN_API_BASE_URL is required when PAYMENT_RECONCILIATION_ENABLED=true",
-      );
-    }
-
     if (!internalUrlValue) {
       fail(
         "PAYMENT_RECONCILIATION_INTERNAL_URL is required when PAYMENT_RECONCILIATION_ENABLED=true",
@@ -524,6 +529,8 @@ export function validateProductionEnvironment(environment) {
     ["WEB_JWT_SECRET", webJwtSecret],
     ["WEB_REFRESH_SECRET", webRefreshSecret],
     ["AUDIT_IP_HASH_SECRET", auditIpHashSecret],
+    ["RATE_LIMIT_IDENTITY_SECRET", rateLimitIdentitySecret],
+    ["READINESS_INTERNAL_SECRET", readinessInternalSecret],
     ["TELEGRAM_OIDC_CLIENT_SECRET", telegramClientSecret],
   ];
 

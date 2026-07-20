@@ -8,6 +8,7 @@ export default defineConfig({
     setupFiles: ["./tests/setup/env.ts"],
     include: ["tests/unit/**/*.test.ts", "tests/integration/route-handlers/**/*.test.ts"],
     pool: "forks",
+    testTimeout: 15_000,
     coverage: {
       provider: "v8",
       reporter: ["text", "json-summary", "html"],

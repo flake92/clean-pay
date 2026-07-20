@@ -172,6 +172,8 @@ export async function requestEmailVerification(rawBody: AuthPayload<RequestEmail
     hasEmail: Boolean(body.email),
     hasTurnstileToken: Boolean(turnstileToken ?? turnstile.token),
   });
+  await verifyTurnstileToken(turnstileToken ?? turnstile.token, turnstile.remoteIp);
+  authDebugLog("email_verification_request_turnstile_passed", {});
 
   const { accessToken, session } = await getAuthorizedRemnashopTokens({
     allowUnverifiedEmail: true,
@@ -287,21 +289,45 @@ export async function confirmEmailVerification(rawBody: AuthPayload<ConfirmEmail
   // optional Telegram merge. Persist that irreversible success immediately so
   // a later synchronization error cannot leave Clean Pay reporting a false
   // failure or invite the user to submit an already-consumed code again.
+  const confirmedRemnashopUserId =
+    getRemnashopUserIdFromAccessToken(accessToken);
+  const existingEmailOwner = await prisma.webUser.findUnique({
+    where: { email: result.email },
+  });
+  const currentUserOwnsEmail =
+    !existingEmailOwner || existingEmailOwner.id === session.userId;
   const localVerificationChanged =
-    !session.user.emailVerified || session.user.email !== result.email;
-  await prisma.webUser.update({
-    where: { id: session.userId },
-    data: {
-      email: result.email,
-      emailVerified: true,
-      authPending: false,
-    },
+    !currentUserOwnsEmail ||
+    !session.user.emailVerified ||
+    session.user.email !== result.email;
+
+  await prisma.$transaction(async (tx) => {
+    if (existingEmailOwner && existingEmailOwner.id !== session.userId) {
+      await tx.webUser.update({
+        where: { id: existingEmailOwner.id },
+        data: { emailVerified: true },
+      });
+    }
+
+    await tx.webUser.update({
+      where: { id: session.userId },
+      data: {
+        ...(currentUserOwnsEmail
+          ? { email: result.email, emailVerified: true }
+          : {}),
+        authPending: true,
+        pendingRemnashopUserId: confirmedRemnashopUserId,
+        pendingRemnashopEmail: result.email,
+      },
+    });
   });
   await refreshCurrentAccessCookie();
   authDebugLog("email_verification_confirm_local_user_updated", {
     sessionId: session.id,
     userId: session.userId,
-    emailVerified: true,
+    emailVerified: currentUserOwnsEmail,
+    pendingRemnashopUserId: confirmedRemnashopUserId,
+    existingEmailOwnerId: existingEmailOwner?.id,
     alreadyVerified,
   });
 
@@ -316,6 +342,7 @@ export async function confirmEmailVerification(rawBody: AuthPayload<ConfirmEmail
   let authForLink = {
     accessToken,
     refreshToken,
+    upstreamMerged: false,
     auth: {
       expires_at: session.remnashopAccessExpiresAt?.toISOString() ?? new Date(Date.now() + 60_000).toISOString(),
       refresh_expires_at: session.remnashopRefreshExpiresAt?.toISOString() ?? new Date(Date.now() + 86_400_000).toISOString(),
@@ -358,6 +385,7 @@ export async function confirmEmailVerification(rawBody: AuthPayload<ConfirmEmail
           accessToken: mergedAuth.accessToken,
           refreshToken: mergedAuth.refreshToken,
           auth: mergedAuth.auth,
+          upstreamMerged: mergedAuth.merged,
         };
 
         authDebugLog("email_verification_confirm_telegram_conflict_merge_completed", {
@@ -388,6 +416,7 @@ export async function confirmEmailVerification(rawBody: AuthPayload<ConfirmEmail
           accessToken: mergedAuth.accessToken,
           refreshToken: mergedAuth.refreshToken,
           auth: mergedAuth.auth,
+          upstreamMerged: mergedAuth.merged,
         };
       }
     }
@@ -396,10 +425,17 @@ export async function confirmEmailVerification(rawBody: AuthPayload<ConfirmEmail
       accessToken: authForLink.accessToken,
       refreshToken: authForLink.refreshToken,
       auth: authForLink.auth,
+      ...(authForLink.upstreamMerged
+        ? { invalidateSiblingRemnashopTokens: true }
+        : {}),
     });
     await refreshCurrentAccessCookie();
   } catch (error) {
     accountSyncPending = true;
+    await prisma.webUser.update({
+      where: { id: session.userId },
+      data: { authPending: true },
+    });
     logger.warn("email_verification_post_confirm_sync_failed", {
       sessionId: session.id,
       userId: session.userId,
@@ -424,6 +460,8 @@ export async function changeEmail(rawBody: AuthPayload<ChangeEmailRequest>, turn
     hasEmail: Boolean(body.email),
     hasTurnstileToken: Boolean(turnstileToken ?? turnstile.token),
   });
+  await verifyTurnstileToken(turnstileToken ?? turnstile.token, turnstile.remoteIp);
+  authDebugLog("email_change_turnstile_passed", {});
   const { accessToken, session } = await getAuthorizedRemnashopTokens();
   authDebugLog("email_change_session_authorized", {
     sessionId: session.id,

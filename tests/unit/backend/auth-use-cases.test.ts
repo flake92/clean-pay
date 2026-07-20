@@ -236,8 +236,12 @@ describe("auth use cases", () => {
   });
 
   it("requests and confirms email verification for the current session", async () => {
-    await requestEmailVerification({ email: "user@example.com" }, {});
+    await requestEmailVerification(
+      { email: "user@example.com", turnstileToken: "ts-resend" },
+      { remoteIp: "127.0.0.1" },
+    );
 
+    expect(mocks.verifyTurnstileToken).toHaveBeenCalledWith("ts-resend", "127.0.0.1");
     expect(mocks.getAuthorizedRemnashopTokens).toHaveBeenCalledWith({ allowUnverifiedEmail: true });
     expect(mocks.assertCooldown).toHaveBeenCalledWith(
       expect.objectContaining({ key: "email-verification:user-1", action: "email_verification_request" }),
@@ -261,19 +265,25 @@ describe("auth use cases", () => {
     });
     expect(mocks.prisma.webUser.update).toHaveBeenCalledWith({
       where: { id: "user-1" },
-      data: { email: "verified@example.com", emailVerified: true, authPending: false },
+      data: {
+        email: "verified@example.com",
+        emailVerified: true,
+        authPending: true,
+        pendingRemnashopUserId: "18367",
+        pendingRemnashopEmail: "verified@example.com",
+      },
     });
     expect(mocks.refreshCurrentAccessCookie).toHaveBeenCalledTimes(2);
   });
 
   it("does not let the legacy registrationFlow flag bypass Turnstile", async () => {
     mocks.verifyTurnstileToken.mockRejectedValueOnce(
-      new BffError("VALIDATION_ERROR", 400, "Turnstile token is required"),
+      new BffError("FORBIDDEN", 403, "Turnstile token is required"),
     );
 
     await expect(
       confirmEmailVerification({ code: "123456", registrationFlow: true }, {}),
-    ).rejects.toMatchObject({ code: "VALIDATION_ERROR", status: 400 });
+    ).rejects.toMatchObject({ code: "FORBIDDEN", status: 403 });
 
     expect(mocks.verifyTurnstileToken).toHaveBeenCalledWith(undefined, undefined);
     expect(mocks.getAuthorizedRemnashopTokens).not.toHaveBeenCalled();
@@ -310,6 +320,75 @@ describe("auth use cases", () => {
       accessToken: "merged-access-token",
       refreshToken: "merged-refresh-token",
       auth: authData,
+      invalidateSiblingRemnashopTokens: true,
+    });
+  });
+
+  it("does not claim an e-mail owned by another local user before the upstream merge succeeds", async () => {
+    const existingEmailOwner = {
+      id: "email-owner",
+      email: "verified@example.com",
+      emailVerified: false,
+      remnashopUserId: "18367",
+    };
+    mocks.getAuthorizedRemnashopTokens.mockResolvedValueOnce({
+      accessToken: "access-token",
+      refreshToken: "refresh-token",
+      session: {
+        ...session,
+        user: {
+          ...user,
+          email: null,
+          emailVerified: false,
+          remnashopUserId: "1",
+          telegramId: "123456",
+          telegramUsername: "clean_user",
+        },
+      },
+    });
+    mocks.getRemnashopMe.mockResolvedValueOnce({
+      ...profile,
+      pending_email: "verified@example.com",
+    });
+    mocks.remnashopRequest.mockResolvedValueOnce({
+      success: true,
+      email: "verified@example.com",
+    });
+    mocks.prisma.webUser.findUnique.mockResolvedValueOnce(existingEmailOwner);
+    mocks.remnashopLinkTelegram.mockRejectedValueOnce(
+      new BffError("CONFLICT", 409, "telegram already linked"),
+    );
+
+    await expect(
+      confirmEmailVerification({ code: "123456" }, {}),
+    ).resolves.toMatchObject({
+      success: true,
+      email: "verified@example.com",
+      account_sync_pending: false,
+    });
+
+    expect(mocks.prisma.webUser.update).toHaveBeenNthCalledWith(1, {
+      where: { id: "email-owner" },
+      data: { emailVerified: true },
+    });
+    expect(mocks.prisma.webUser.update).toHaveBeenNthCalledWith(2, {
+      where: { id: "user-1" },
+      data: {
+        authPending: true,
+        pendingRemnashopUserId: "18367",
+        pendingRemnashopEmail: "verified@example.com",
+      },
+    });
+    expect(mocks.remnashopMergeUsers).toHaveBeenCalledWith({
+      sourceUserId: "18367",
+      targetUserId: "1",
+      reason: "Clean Pay account link: verified e-mail code and Telegram ownership",
+    });
+    expect(mocks.linkCurrentUserToRemnashopAuth).toHaveBeenCalledWith({
+      accessToken: "merged-access-token",
+      refreshToken: "merged-refresh-token",
+      auth: authData,
+      invalidateSiblingRemnashopTokens: true,
     });
   });
 
@@ -339,7 +418,9 @@ describe("auth use cases", () => {
       data: {
         email: "verified@example.com",
         emailVerified: true,
-        authPending: false,
+        authPending: true,
+        pendingRemnashopUserId: "18367",
+        pendingRemnashopEmail: "verified@example.com",
       },
     });
   });
@@ -378,8 +459,14 @@ describe("auth use cases", () => {
       data: {
         email: "verified@example.com",
         emailVerified: true,
-        authPending: false,
+        authPending: true,
+        pendingRemnashopUserId: "18367",
+        pendingRemnashopEmail: "verified@example.com",
       },
+    });
+    expect(mocks.prisma.webUser.update).toHaveBeenLastCalledWith({
+      where: { id: "user-1" },
+      data: { authPending: true },
     });
     expect(mocks.linkCurrentUserToRemnashopAuth).not.toHaveBeenCalled();
   });
@@ -395,7 +482,7 @@ describe("auth use cases", () => {
       emailVerification: { target_email: "next@example.com" },
     });
 
-    expect(mocks.verifyTurnstileToken).not.toHaveBeenCalled();
+    expect(mocks.verifyTurnstileToken).toHaveBeenCalledWith("ts-change", "127.0.0.1");
     expect(mocks.prisma.webUser.update).toHaveBeenCalledWith({
       where: { id: "user-1" },
       data: { emailVerified: false },
@@ -512,7 +599,12 @@ describe("auth use cases", () => {
     });
     expect(mocks.prisma.webUser.update).toHaveBeenCalledWith({
       where: { id: "user-1" },
-      data: { emailVerified: true, authPending: false },
+      data: {
+        emailVerified: true,
+        authPending: false,
+        pendingRemnashopUserId: null,
+        pendingRemnashopEmail: null,
+      },
     });
     expect(mocks.refreshCurrentAccessCookie).toHaveBeenCalledOnce();
   });
@@ -677,6 +769,7 @@ describe("auth use cases", () => {
       accessToken: "merged-access-token",
       refreshToken: "merged-refresh-token",
       auth: authData,
+      invalidateSiblingRemnashopTokens: true,
     });
   });
 

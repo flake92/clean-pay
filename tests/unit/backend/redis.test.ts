@@ -2,6 +2,7 @@ import { EventEmitter } from "node:events";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 class FakeSocket extends EventEmitter {
+  destroyed = false;
   writes: string[] = [];
   responses: Buffer[] = [];
 
@@ -16,6 +17,13 @@ class FakeSocket extends EventEmitter {
 
   end() {
     this.emit("end");
+  }
+
+  destroy(error?: Error) {
+    this.destroyed = true;
+    if (error) queueMicrotask(() => this.emit("error", error));
+    this.emit("close");
+    return this;
   }
 }
 
@@ -38,7 +46,7 @@ vi.mock("node:tls", () => ({
   default: {
     connect: vi.fn(() => {
       state.tlsSocket = new FakeSocket();
-      queueMicrotask(() => state.tlsSocket?.emit("connect"));
+      queueMicrotask(() => state.tlsSocket?.emit("secureConnect"));
       return state.tlsSocket;
     }),
   },
@@ -102,12 +110,51 @@ describe("raw Redis command adapter", () => {
     let promise = redisCommand(["PING"]);
     await vi.waitFor(() => expect(state.tcpSocket).toBeTruthy());
     state.tcpSocket?.responses.push(Buffer.from("-ERR nope\r\n"));
-    await expect(promise).rejects.toThrow("ERR nope");
+    await expect(promise).rejects.toMatchObject({
+      code: "UPSTREAM_UNAVAILABLE",
+      status: 503,
+      debug: { message: "ERR nope" },
+    });
 
     state.tcpSocket = null;
     promise = redisCommand(["PING"]);
     await vi.waitFor(() => expect(state.tcpSocket).toBeTruthy());
     (state.tcpSocket as FakeSocket | null)?.responses.push(Buffer.from("?wat\r\n"));
-    await expect(promise).rejects.toThrow("Unsupported Redis response");
+    await expect(promise).rejects.toMatchObject({
+      code: "UPSTREAM_UNAVAILABLE",
+      status: 503,
+      debug: { message: "Unsupported Redis response" },
+    });
+  });
+
+  it("bounds connection wait, destroys the socket and returns 503", async () => {
+    vi.useFakeTimers();
+    vi.mocked((await import("node:net")).default.connect).mockImplementationOnce(() => {
+      state.tcpSocket = new FakeSocket();
+      return state.tcpSocket as never;
+    });
+
+    const promise = redisCommand(["PING"]);
+    const rejection = expect(promise).rejects.toMatchObject({
+      code: "UPSTREAM_UNAVAILABLE",
+      status: 503,
+    });
+    await vi.advanceTimersByTimeAsync(2_000);
+    await rejection;
+    expect(state.tcpSocket?.destroyed).toBe(true);
+    expect(state.tcpSocket?.listenerCount("connect")).toBe(0);
+    vi.useRealTimers();
+  });
+
+  it("rejects oversized RESP before unbounded buffering", async () => {
+    const promise = redisCommand(["PING"]);
+    await vi.waitFor(() => expect(state.tcpSocket).toBeTruthy());
+    state.tcpSocket?.responses.push(Buffer.alloc(1024 * 1024 + 1, 65));
+
+    await expect(promise).rejects.toMatchObject({
+      code: "UPSTREAM_UNAVAILABLE",
+      status: 503,
+    });
+    expect(state.tcpSocket?.destroyed).toBe(true);
   });
 });

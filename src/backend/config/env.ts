@@ -11,7 +11,7 @@ type AppEnv = {
     logoUrl: string;
   };
   remnashopApiBaseUrl: string;
-  remnashopAdminApiBaseUrl: string | null;
+  remnashopAdminApiBaseUrl: string;
   remnashopApiKey: string | null;
   remnawave: {
     apiBaseUrl: string | null;
@@ -20,6 +20,7 @@ type AppEnv = {
   webJwtSecret: string;
   webRefreshSecret: string;
   auditIpHashSecret: string;
+  rateLimitIdentitySecret: string;
   cookieSecure: boolean;
   cookieSameSite: SameSite;
   telegramOidc: {
@@ -56,6 +57,7 @@ type AppEnv = {
     faqUrl: string | null;
   };
   readiness: {
+    internalSecret: string;
     mailpitUrl: string | null;
     remnawaveUrl: string | null;
   };
@@ -174,6 +176,20 @@ function optionalUrl(name: string) {
   }
 }
 
+function deriveRemnashopAdminApiBaseUrl(publicApiBaseUrl: string) {
+  const parsed = new URL(publicApiBaseUrl);
+  const publicSuffix = "/api/v1/public";
+
+  if (!parsed.pathname.endsWith(publicSuffix)) {
+    throw new Error(
+      "REMNASHOP_API_BASE_URL must end with /api/v1/public to derive the admin API URL",
+    );
+  }
+
+  parsed.pathname = `${parsed.pathname.slice(0, -publicSuffix.length)}/api/v1/admin`;
+  return parsed.toString().replace(/\/$/, "");
+}
+
 function optionalPublicPath(name: string, fallback: string) {
   const value = optional(name);
 
@@ -236,15 +252,6 @@ function validateEnv(env: AppEnv) {
     );
   }
 
-  if (
-    env.paymentReconciliation.enabled &&
-    !env.remnashopAdminApiBaseUrl
-  ) {
-    throw new Error(
-      "REMNASHOP_ADMIN_API_BASE_URL is required when PAYMENT_RECONCILIATION_ENABLED=true",
-    );
-  }
-
   if (isProduction && (!env.remnawave.apiBaseUrl || !env.remnawave.token)) {
     throw new Error("REMNAWAVE_API_BASE_URL and REMNAWAVE_TOKEN are required in production");
   }
@@ -268,6 +275,10 @@ function validateEnv(env: AppEnv) {
 
 export function getEnv(): AppEnv {
   const appUrl = url("APP_URL");
+  const remnashopApiBaseUrl = url("REMNASHOP_API_BASE_URL");
+  const remnashopAdminApiBaseUrl =
+    optionalUrl("REMNASHOP_ADMIN_API_BASE_URL")?.replace(/\/$/, "")
+    ?? deriveRemnashopAdminApiBaseUrl(remnashopApiBaseUrl);
 
   const env = {
     databaseUrl: required("DATABASE_URL"),
@@ -277,9 +288,8 @@ export function getEnv(): AppEnv {
       name: optional("NEXT_PUBLIC_BRAND_NAME") ?? "Clean Pay",
       logoUrl: optionalPublicPath("NEXT_PUBLIC_BRAND_LOGO_URL", "/clean-pay-logo.png"),
     },
-    remnashopApiBaseUrl: url("REMNASHOP_API_BASE_URL"),
-    remnashopAdminApiBaseUrl:
-      optionalUrl("REMNASHOP_ADMIN_API_BASE_URL")?.replace(/\/$/, "") ?? null,
+    remnashopApiBaseUrl,
+    remnashopAdminApiBaseUrl,
     remnashopApiKey: optional("REMNASHOP_API_KEY"),
     remnawave: {
       apiBaseUrl: optionalUrl("REMNAWAVE_API_BASE_URL"),
@@ -288,6 +298,7 @@ export function getEnv(): AppEnv {
     webJwtSecret: required("WEB_JWT_SECRET"),
     webRefreshSecret: required("WEB_REFRESH_SECRET"),
     auditIpHashSecret: optional("AUDIT_IP_HASH_SECRET") ?? required("WEB_JWT_SECRET"),
+    rateLimitIdentitySecret: required("RATE_LIMIT_IDENTITY_SECRET"),
     cookieSecure: bool("COOKIE_SECURE", true),
     cookieSameSite: sameSite("COOKIE_SAMESITE", "lax"),
     telegramOidc: {
@@ -332,6 +343,7 @@ export function getEnv(): AppEnv {
       faqUrl: optionalUrl("SUPPORT_FAQ_URL"),
     },
     readiness: {
+      internalSecret: required("READINESS_INTERNAL_SECRET"),
       mailpitUrl: optionalUrl("CLEAN_PAY_READINESS_MAILPIT_URL"),
       remnawaveUrl: optionalUrl("CLEAN_PAY_READINESS_REMNAWAVE_URL"),
     },

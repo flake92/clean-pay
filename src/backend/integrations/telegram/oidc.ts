@@ -769,6 +769,12 @@ async function completeTelegramAuth(
             targetUpstreamAccountId:
               targetUser.remnashopUserId ?? sourceUser.remnashopUserId,
             sourceUserIds: [sourceUser.id],
+            ownerExpectations: [targetUser, sourceUser].map((owner) => ({
+              id: owner.id,
+              remnashopUserId: owner.remnashopUserId,
+              email: owner.email,
+              telegramId: owner.telegramId,
+            })),
           });
           authDebugLog("telegram_oidc_link_merge_completed", {
             targetUserId,
@@ -788,6 +794,8 @@ async function completeTelegramAuth(
             photoUrl,
             displayName: fullName ?? telegramUsername,
             authPending: false,
+            pendingRemnashopUserId: null,
+            pendingRemnashopEmail: null,
             lastLoginAt: new Date(),
           },
         });

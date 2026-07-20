@@ -173,6 +173,7 @@ describeWithPostgres("Telegram recovery PostgreSQL serialization", () => {
         remnashopUserId: sourceUpstreamId,
         email: `merge-owner-${suffix}@example.com`,
         emailVerified: true,
+        authPending: true,
         telegramId: `654321${Date.now().toString().slice(-5)}`,
         telegramUsername: "merge_user",
       },
@@ -322,6 +323,7 @@ describeWithPostgres("Telegram recovery PostgreSQL serialization", () => {
         }),
       ]);
     expect(storedUser.remnashopUserId).toBe(targetUpstreamId);
+    expect(storedUser.authPending).toBe(false);
     expect(storedOperation.upstreamOwnerHash).toBe(
       paymentUpstreamOwnerHash(targetUpstreamId),
     );
@@ -338,5 +340,143 @@ describeWithPostgres("Telegram recovery PostgreSQL serialization", () => {
     expect(storedHistory.generation).toBe(8);
     expect(storedSibling.remnashopAccessTokenEncrypted).toBeNull();
     expect(storedSibling.remnashopRefreshTokenEncrypted).toBeNull();
+  }, 60_000);
+
+  it("merges a durable pending e-mail owner when the current local owner already points to Telegram", async () => {
+    const suffix = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    const sourceUpstreamId = "301";
+    const targetUpstreamId = "302";
+    const email = `pending-owner-${suffix}@example.com`;
+    const telegramId = `765432${Date.now().toString().slice(-5)}`;
+    const [currentUser, emailOwner] = await Promise.all([
+      prisma.webUser.create({
+        data: {
+          remnashopUserId: targetUpstreamId,
+          emailVerified: false,
+          authPending: true,
+          pendingRemnashopUserId: sourceUpstreamId,
+          pendingRemnashopEmail: email,
+          telegramId,
+          telegramUsername: "pending_merge_user",
+        },
+      }),
+      prisma.webUser.create({
+        data: {
+          remnashopUserId: sourceUpstreamId,
+          email,
+          emailVerified: true,
+        },
+      }),
+    ]);
+    userIds.push(currentUser.id, emailOwner.id);
+    const currentSession = await prisma.webSession.create({
+      data: {
+        userId: currentUser.id,
+        refreshTokenHash: `pending-merge-${suffix}`,
+        authMethod: "TELEGRAM",
+        assuranceLevel: "FULL",
+        accessTokenExpiresAt: new Date(Date.now() + 10 * 60_000),
+        refreshExpiresAt: new Date(Date.now() + 60 * 60_000),
+      },
+      include: { user: true },
+    });
+    sessionMock.getCurrentSession.mockReset();
+    sessionMock.getCurrentSession.mockResolvedValue(currentSession);
+
+    let mergeCommitted = false;
+    let issued = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL | Request) => {
+        const url = String(input);
+
+        if (url.endsWith("/auth/telegram")) {
+          issued += 1;
+          const accessToken = jwt({
+            sub: targetUpstreamId,
+            exp: 1_900_002_000 + issued,
+          });
+
+          return jsonResponse(
+            {
+              expires_at: new Date(Date.now() + 10 * 60_000).toISOString(),
+              refresh_expires_at: new Date(
+                Date.now() + 60 * 60_000,
+              ).toISOString(),
+            },
+            [
+              `access_token=${accessToken}; Path=/; HttpOnly`,
+              `refresh_token=pending-refresh-${issued}; Path=/; HttpOnly`,
+            ],
+          );
+        }
+
+        if (url.endsWith("/auth/me")) {
+          return jsonResponse({
+            email: mergeCommitted ? email : null,
+            is_email_verified: mergeCommitted,
+            telegram_id: Number(telegramId),
+            auth_type: "telegram",
+            pending_email: null,
+            name: "Pending Merge Owner",
+            username: "pending_merge_user",
+            language: "ru",
+          });
+        }
+
+        if (url.endsWith("/users/merge?dry_run=false")) {
+          mergeCommitted = true;
+
+          return jsonResponse({
+            dry_run: false,
+            source_user_id: Number(sourceUpstreamId),
+            target_user_id: Number(targetUpstreamId),
+            target: {
+              id: Number(targetUpstreamId),
+              email,
+              telegram_id: Number(telegramId),
+              is_email_verified: true,
+              current_subscription_id: null,
+            },
+            moved: {},
+            conflicts: [],
+            requires_relogin: true,
+          });
+        }
+
+        throw new Error(`Unexpected request: ${url}`);
+      }),
+    );
+
+    await expect(
+      getAuthorizedRemnashopTokens({ allowUnverifiedEmail: true }),
+    ).resolves.toMatchObject({
+      session: {
+        user: {
+          id: currentUser.id,
+          remnashopUserId: targetUpstreamId,
+          email,
+          emailVerified: true,
+          authPending: false,
+          pendingRemnashopUserId: null,
+          pendingRemnashopEmail: null,
+        },
+      },
+    });
+
+    const [storedCurrent, deletedSource] = await Promise.all([
+      prisma.webUser.findUniqueOrThrow({ where: { id: currentUser.id } }),
+      prisma.webUser.count({ where: { id: emailOwner.id } }),
+    ]);
+    expect(deletedSource).toBe(0);
+    expect(storedCurrent).toMatchObject({
+      remnashopUserId: targetUpstreamId,
+      email,
+      emailVerified: true,
+      authPending: false,
+      pendingRemnashopUserId: null,
+      pendingRemnashopEmail: null,
+      telegramId,
+    });
   }, 60_000);
 });

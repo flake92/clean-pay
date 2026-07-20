@@ -103,9 +103,15 @@ export async function GET(request: Request) {
     // Terminal operation state is authoritative local data. Reading it before
     // Remnashop keeps success/manual-review callbacks usable during an upstream
     // outage and avoids turning a settled payment into a transient 5xx page.
-    const operation = operationId
+    const operation = operationId || !paymentId
       ? await prisma.paymentOperation.findFirst({
-          where: { id: operationId, userId: user.id },
+          where: operationId
+            ? { id: operationId, userId: user.id }
+            : {
+                userId: user.id,
+                status: { in: ["DISPATCHING", "OUTCOME_UNKNOWN"] },
+              },
+          orderBy: operationId ? undefined : { createdAt: "desc" },
           select: {
             id: true,
             status: true,

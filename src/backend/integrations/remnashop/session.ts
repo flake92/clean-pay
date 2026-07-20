@@ -27,6 +27,20 @@ type RemnashopProfileIdentity = {
   fullName: string | null;
 };
 
+function ownerExpectation(user: {
+  id: string;
+  remnashopUserId: string | null;
+  email: string | null;
+  telegramId: string | null;
+}) {
+  return {
+    id: user.id,
+    remnashopUserId: user.remnashopUserId,
+    email: user.email,
+    telegramId: user.telegramId,
+  };
+}
+
 function profileIdentity({
   remnashopUserId,
   profile,
@@ -66,6 +80,18 @@ async function reconcileRemnashopUser(
 
   const targetCandidate =
     linkedByEmail ?? linkedByTelegramId ?? linkedByRemnashopId;
+
+  if (
+    targetCandidate?.remnashopUserId &&
+    targetCandidate.remnashopUserId !== identity.remnashopUserId
+  ) {
+    throw new BffError(
+      "ACCOUNT_MERGE_REQUIRED",
+      409,
+      "The linked Clean Pay identity belongs to a different Remnashop account.",
+      { message: "remnashop_owner_mismatch" },
+    );
+  }
   const sourceUserIds = [
     linkedByRemnashopId,
     linkedByEmail,
@@ -120,6 +146,16 @@ async function reconcileRemnashopUser(
       targetUserId: targetCandidate.id,
       targetUpstreamAccountId: identity.remnashopUserId,
       sourceUserIds,
+      ownerExpectations: [
+        ownerExpectation(targetCandidate),
+        ...[linkedByRemnashopId, linkedByEmail, linkedByTelegramId]
+          .filter((matched): matched is NonNullable<typeof matched> => Boolean(matched))
+          .filter((matched, index, matches) =>
+            matched.id !== targetCandidate.id &&
+            matches.findIndex(({ id }) => id === matched.id) === index
+          )
+          .map(ownerExpectation),
+      ],
     });
     authDebugLog("remnashop_user_reconcile_merge_completed", {
       targetUserId: targetCandidate.id,
@@ -137,6 +173,13 @@ async function reconcileRemnashopUser(
       fullName: identity.fullName ?? targetCandidate.fullName,
       displayName: identity.fullName ?? targetCandidate.displayName ?? identity.telegramUsername ?? targetCandidate.telegramUsername,
       emailVerified: identity.email ? identity.emailVerified : targetCandidate.emailVerified,
+      ...(identity.email && identity.emailVerified
+        ? {
+            authPending: false,
+            pendingRemnashopUserId: null,
+            pendingRemnashopEmail: null,
+          }
+        : {}),
       lastLoginAt: new Date(),
     },
   });
@@ -228,6 +271,62 @@ export async function reconcileUserFromRemnashopAuth({
 }) {
   const remnashopUserId = getRemnashopUserIdFromAccessToken(accessToken);
   const profile = verifiedProfile ?? await getRemnashopMe(accessToken);
+  const telegramId =
+    profile.telegram_id === null ? null : String(profile.telegram_id);
+  const linkedTelegramUser = telegramId
+    ? await prisma.webUser.findUnique({ where: { telegramId } })
+    : null;
+
+  const hasPendingMergeEvidence = Boolean(
+    linkedTelegramUser?.authPending &&
+    linkedTelegramUser.pendingRemnashopUserId &&
+    linkedTelegramUser.pendingRemnashopEmail,
+  );
+  const establishedOwnerMismatch = Boolean(
+    linkedTelegramUser?.remnashopUserId &&
+    linkedTelegramUser.remnashopUserId !== remnashopUserId,
+  );
+
+  if (linkedTelegramUser && (establishedOwnerMismatch || hasPendingMergeEvidence)) {
+    const recoveryEmail = hasPendingMergeEvidence
+      ? linkedTelegramUser.pendingRemnashopEmail
+      : linkedTelegramUser.emailVerified
+        ? linkedTelegramUser.email
+        : null;
+    const normalizedLocalEmail = recoveryEmail?.trim().toLowerCase();
+    const normalizedProfileEmail = profile.email?.trim().toLowerCase();
+    const recoveryIsProven = Boolean(
+      normalizedLocalEmail &&
+      (hasPendingMergeEvidence || linkedTelegramUser.emailVerified) &&
+      (!normalizedProfileEmail || normalizedProfileEmail === normalizedLocalEmail),
+    );
+
+    if (!recoveryIsProven) {
+      throw new BffError(
+        "ACCOUNT_MERGE_REQUIRED",
+        409,
+        "Telegram login resolved to a different Remnashop owner.",
+        { message: "telegram_recovery_owner_not_proven" },
+      );
+    }
+
+    authDebugLog("remnashop_telegram_reconcile_recovery_required", {
+      userId: linkedTelegramUser.id,
+      currentRemnashopUserId: linkedTelegramUser.remnashopUserId,
+      incomingRemnashopUserId: remnashopUserId,
+      pendingRemnashopUserId: linkedTelegramUser.pendingRemnashopUserId,
+      hasVerifiedEmail: Boolean(normalizedLocalEmail),
+      hasPendingMergeEvidence,
+    });
+
+    return {
+      user: linkedTelegramUser,
+      profile,
+      remnashopSession: undefined,
+      requiresTelegramRecovery: true as const,
+    };
+  }
+
   const user = await prisma.$transaction(async (tx) => {
     return reconcileRemnashopUser(
       tx,
@@ -250,6 +349,7 @@ export async function reconcileUserFromRemnashopAuth({
       accessExpiresAt: new Date(auth.expires_at),
       refreshExpiresAt: new Date(auth.refresh_expires_at),
     },
+    requiresTelegramRecovery: false as const,
   };
 }
 
@@ -257,10 +357,12 @@ export async function linkCurrentUserToRemnashopAuth({
   accessToken,
   refreshToken,
   auth,
+  invalidateSiblingRemnashopTokens = false,
 }: {
   accessToken: string;
   refreshToken: string;
   auth: RemnashopAuthResponse;
+  invalidateSiblingRemnashopTokens?: boolean;
 }) {
   const session = await getCurrentSession();
   authDebugLog("remnashop_link_started", {
@@ -287,29 +389,25 @@ export async function linkCurrentUserToRemnashopAuth({
   const linkedByRemnashopId = await prisma.webUser.findUnique({
     where: { remnashopUserId },
   });
+  const linkedByEmail = profile.email
+    ? await prisma.webUser.findUnique({ where: { email: profile.email } })
+    : null;
+  const linkedByTelegramId = profile.telegram_id !== null
+    ? await prisma.webUser.findUnique({
+        where: { telegramId: String(profile.telegram_id) },
+      })
+    : null;
 
   if (linkedByRemnashopId && linkedByRemnashopId.id !== session.userId) {
     mergeSourceIds.add(linkedByRemnashopId.id);
   }
 
-  if (profile.email) {
-    const linkedByEmail = await prisma.webUser.findUnique({
-      where: { email: profile.email },
-    });
-
-    if (linkedByEmail && linkedByEmail.id !== session.userId) {
-      mergeSourceIds.add(linkedByEmail.id);
-    }
+  if (linkedByEmail && linkedByEmail.id !== session.userId) {
+    mergeSourceIds.add(linkedByEmail.id);
   }
 
-  if (profile.telegram_id !== null) {
-    const linkedByTelegramId = await prisma.webUser.findUnique({
-      where: { telegramId: String(profile.telegram_id) },
-    });
-
-    if (linkedByTelegramId && linkedByTelegramId.id !== session.userId) {
-      mergeSourceIds.add(linkedByTelegramId.id);
-    }
+  if (linkedByTelegramId && linkedByTelegramId.id !== session.userId) {
+    mergeSourceIds.add(linkedByTelegramId.id);
   }
 
   const sourceUserIds = [...mergeSourceIds];
@@ -323,6 +421,33 @@ export async function linkCurrentUserToRemnashopAuth({
   const protectedAccessToken = protectRemnashopToken(accessToken);
   const protectedRefreshToken = protectRemnashopToken(refreshToken);
   const user = await prisma.$transaction(async (tx) => {
+    const [lockedCurrentUser] = await tx.$queryRaw<Array<{
+      id: string;
+      remnashopUserId: string | null;
+      email: string | null;
+      telegramId: string | null;
+    }>>`
+      SELECT "id", "remnashopUserId", "email", "telegramId"
+      FROM "WebUser"
+      WHERE "id" = ${session.userId}
+      FOR UPDATE
+    `;
+    const expectedCurrentOwner = ownerExpectation(session.user);
+
+    if (
+      !lockedCurrentUser ||
+      lockedCurrentUser.id !== expectedCurrentOwner.id ||
+      lockedCurrentUser.remnashopUserId !== expectedCurrentOwner.remnashopUserId ||
+      lockedCurrentUser.email !== expectedCurrentOwner.email ||
+      lockedCurrentUser.telegramId !== expectedCurrentOwner.telegramId
+    ) {
+      throw new BffError(
+        "ACCOUNT_MERGE_REQUIRED",
+        409,
+        "Current account ownership changed before linking.",
+      );
+    }
+
     if (sourceUserIds.length > 0) {
       authDebugLog("remnashop_link_merge_started", {
         targetUserId: session.userId,
@@ -332,6 +457,16 @@ export async function linkCurrentUserToRemnashopAuth({
         targetUserId: session.userId,
         targetUpstreamAccountId: remnashopUserId,
         sourceUserIds,
+        ownerExpectations: [
+          ownerExpectation(session.user),
+          ...[linkedByRemnashopId, linkedByEmail, linkedByTelegramId]
+            .filter((matched): matched is NonNullable<typeof matched> => Boolean(matched))
+            .filter((matched, index, matches) =>
+              matched.id !== session.userId &&
+              matches.findIndex(({ id }) => id === matched.id) === index
+            )
+            .map(ownerExpectation),
+        ],
       });
       authDebugLog("remnashop_link_merge_completed", {
         targetUserId: session.userId,
@@ -349,6 +484,9 @@ export async function linkCurrentUserToRemnashopAuth({
         telegramUsername: profile.username ?? session.user.telegramUsername,
         fullName: profile.name ?? session.user.fullName,
         displayName: profile.name ?? session.user.displayName ?? profile.username ?? session.user.telegramUsername,
+        authPending: false,
+        pendingRemnashopUserId: null,
+        pendingRemnashopEmail: null,
         lastLoginAt: new Date(),
       },
     });
@@ -362,6 +500,22 @@ export async function linkCurrentUserToRemnashopAuth({
         remnashopRefreshExpiresAt: new Date(auth.refresh_expires_at),
       },
     });
+
+    if (invalidateSiblingRemnashopTokens) {
+      await tx.webSession.updateMany({
+        where: {
+          userId: session.userId,
+          id: { not: session.id },
+          revokedAt: null,
+        },
+        data: {
+          remnashopAccessTokenEncrypted: null,
+          remnashopRefreshTokenEncrypted: null,
+          remnashopAccessExpiresAt: null,
+          remnashopRefreshExpiresAt: null,
+        },
+      });
+    }
 
     if (sourceUserIds.length > 0) {
       await assertUserMergeFinalOwner(tx, {

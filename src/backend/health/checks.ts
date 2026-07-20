@@ -2,7 +2,7 @@ import { getEnv } from "@/backend/config/env";
 import { prisma } from "@/backend/database/prisma";
 import { redisCommand } from "@/backend/cache/redis";
 
-type CheckResult = {
+export type CheckResult = {
   status: "ok" | "down";
   latencyMs: number;
   message?: string;

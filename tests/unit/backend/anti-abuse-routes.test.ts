@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
   remnashopAuth: vi.fn(),
   getRemnashopMe: vi.fn(),
+  recoverTelegramSession: vi.fn(),
   reconcileUser: vi.fn(),
   createWebSession: vi.fn(),
   logTechnicalInfo: vi.fn(),
@@ -30,6 +31,7 @@ vi.mock("@/backend/observability/logger", () => ({
 vi.mock("@/backend/integrations/remnashop/client", () => ({
   remnashopAuth: mocks.remnashopAuth,
   getRemnashopMe: mocks.getRemnashopMe,
+  recoverRemnashopTelegramSession: mocks.recoverTelegramSession,
 }));
 
 vi.mock("@/backend/integrations/remnashop/session", () => ({
@@ -62,7 +64,7 @@ describe("public auth anti-abuse routes", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.findUser.mockResolvedValue(null);
-    mocks.createWebSession.mockResolvedValue(undefined);
+    mocks.createWebSession.mockResolvedValue({ id: "session-1" });
   });
 
   it("preserves RATE_LIMITED from auth identify", async () => {
@@ -137,5 +139,39 @@ describe("public auth anti-abuse routes", () => {
     expect(response.status).toBe(401);
     expect(mocks.assertRateLimit).not.toHaveBeenCalled();
     expect(mocks.reconcileUser).not.toHaveBeenCalled();
+  });
+
+  it("runs coordinated recovery before returning a split Telegram login session", async () => {
+    mocks.remnashopAuth.mockResolvedValue({
+      data: { expires_at: "2026-08-01T00:00:00.000Z", refresh_expires_at: "2026-09-01T00:00:00.000Z" },
+      cookies: { accessToken: "access", refreshToken: "refresh" },
+    });
+    mocks.getRemnashopMe.mockResolvedValue({
+      telegram_id: 777,
+      auth_type: "telegram",
+      email: null,
+      is_email_verified: false,
+      pending_email: null,
+      name: "Telegram User",
+      username: null,
+      language: "ru",
+    });
+    mocks.reconcileUser.mockResolvedValue({
+      user: { id: "user-1" },
+      remnashopSession: undefined,
+      requiresTelegramRecovery: true,
+    });
+
+    const response = await telegramWebApp(post("http://localhost/api/bff/auth/telegram/webapp", {
+      initData: "signed",
+    }));
+
+    expect(response.status).toBe(200);
+    expect(mocks.createWebSession).toHaveBeenCalledWith(
+      expect.anything(),
+      "user-1",
+      undefined,
+    );
+    expect(mocks.recoverTelegramSession).toHaveBeenCalledWith("session-1", "user-1");
   });
 });

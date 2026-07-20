@@ -6,13 +6,15 @@ const prodCommand = readFileSync("deploy/prod/prod.mjs", "utf8");
 const rootStart = readFileSync("start.sh", "utf8");
 const prodCompose = readFileSync("deploy/prod/docker-compose.yml", "utf8");
 const rootCompose = readFileSync("docker-compose.yml", "utf8");
+const devcontainerCompose = readFileSync(".devcontainer/docker-compose.yml", "utf8");
 
 describe("production readiness startup gate", () => {
   it("verifies the readiness endpoint and its dependency payload", () => {
-    expect(prodCommand).toContain("/api/health/readiness");
+    expect(prodCommand).toContain("/api/internal/health/readiness");
     expect(prodCommand).not.toContain("const url = `http://127.0.0.1:${port}/api/health`");
     expect(prodCommand).toContain("assessReadinessResponse(response)");
-    expect(rootStart).toContain('/api/health/readiness');
+    expect(rootStart).toContain('/api/internal/health/readiness');
+    expect(rootStart).toContain('x-clean-pay-readiness-secret');
   });
 
   it("fails closed for malformed or degraded readiness payloads", () => {
@@ -44,11 +46,14 @@ describe("production readiness startup gate", () => {
   });
 
   it("marks the app healthy only for a fully healthy readiness response", () => {
-    for (const compose of [prodCompose, rootCompose]) {
-      expect(compose).toContain("/api/health/readiness");
-      expect(compose).toContain("AbortSignal.timeout(4000)");
+    for (const compose of [prodCompose, rootCompose, devcontainerCompose]) {
+      expect(compose).toContain("/api/internal/health/readiness");
+      expect(compose).toContain("AbortSignal.timeout(10000)");
+      expect(compose).toContain("x-clean-pay-readiness-secret");
       expect(compose).toContain("b.status!=='ok'");
       expect(compose).toContain("Object.values(b.checks).some(c=>c.status!=='ok')");
+      expect(compose).toContain("interval: 15s");
+      expect(compose).toContain("timeout: 12s");
     }
   });
 });

@@ -112,6 +112,8 @@ ensure_generated_secrets() {
   ensure_generated_secret WEB_JWT_SECRET
   ensure_generated_secret WEB_REFRESH_SECRET
   ensure_generated_secret AUDIT_IP_HASH_SECRET
+  ensure_generated_secret RATE_LIMIT_IDENTITY_SECRET
+  ensure_generated_secret READINESS_INTERNAL_SECRET
 }
 
 validate_env() {
@@ -233,17 +235,18 @@ start() {
 verify() {
   require_env_file
   port=$(env_value CLEAN_PAY_PORT 4000)
-  url="http://127.0.0.1:${port}/api/health/readiness"
+  url="http://127.0.0.1:${port}/api/internal/health/readiness"
+  readiness_secret=$(env_value READINESS_INTERNAL_SECRET)
   attempts=0
   response=""
 
   while [ "$attempts" -lt 60 ]; do
     if command -v curl >/dev/null 2>&1; then
-      if response=$(curl --fail --show-error --silent --max-time 10 "$url" 2>/dev/null); then
+      if response=$(curl --fail --show-error --silent --max-time 10 -H "x-clean-pay-readiness-secret: ${readiness_secret}" "$url" 2>/dev/null); then
         break
       fi
     elif command -v wget >/dev/null 2>&1; then
-      if response=$(wget -qO- -T 10 "$url" 2>/dev/null); then
+      if response=$(wget -qO- -T 10 --header="x-clean-pay-readiness-secret: ${readiness_secret}" "$url" 2>/dev/null); then
         break
       fi
     else

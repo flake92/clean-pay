@@ -22,6 +22,8 @@ const secrets = {
   webJwt: "jwt-unit-6Vr2Kp8Wm4Xq9Lc3Ns7D5Hz1",
   webRefresh: "refresh-unit-5Kq8Vr2Nm7Wp4Lc9Xs3D6Hz1",
   audit: "audit-unit-4Wp7Kq2Vr9Nm5Xs8Lc3D6Hz1",
+  rateLimit: "rate-limit-unit-7Xs2Lc8Nm4Wp9Kq5Vr3D6Hz1",
+  readiness: "readiness-unit-5Vr8Xs3Lc7Nm4Wp9Kq2D6Hz1",
   telegramOidc: "oidc-unit-3Nm8Wp5Kq2Vr7Xs9Lc4D6Hz1",
   telegramBot: "7654321098:BotTokenUnitOnly_9QvL2xR8mT4p",
   reconciliation: "reconcile-unit-2Lc7Nm4Wp9Kq5Vr8Xs3D6Hz1",
@@ -44,6 +46,8 @@ const validEnv: Record<string, string> = {
   WEB_JWT_SECRET: secrets.webJwt,
   WEB_REFRESH_SECRET: secrets.webRefresh,
   AUDIT_IP_HASH_SECRET: secrets.audit,
+  RATE_LIMIT_IDENTITY_SECRET: secrets.rateLimit,
+  READINESS_INTERNAL_SECRET: secrets.readiness,
   TELEGRAM_OIDC_ISSUER: "https://oauth.telegram.org",
   TELEGRAM_OIDC_AUTHORIZATION_ENDPOINT: "https://oauth.telegram.org/auth",
   TELEGRAM_OIDC_TOKEN_ENDPOINT: "https://oauth.telegram.org/token",
@@ -423,15 +427,13 @@ describe("production env validator", () => {
     }).stderr).toContain("must use the REMNAWAVE_API_BASE_URL origin");
   });
 
-  it("keeps the admin URL optional only while reconciliation is disabled", () => {
+  it("derives the admin URL when it is omitted, including for reconciliation", () => {
     expect(runValidator({ REMNASHOP_ADMIN_API_BASE_URL: null }).status).toBe(0);
     expect(runValidator({
       REMNASHOP_ADMIN_API_BASE_URL: null,
       PAYMENT_RECONCILIATION_ENABLED: "true",
       PAYMENT_RECONCILIATION_SECRET: secrets.reconciliation,
-    }).stderr).toContain(
-      "REMNASHOP_ADMIN_API_BASE_URL is required when PAYMENT_RECONCILIATION_ENABLED=true",
-    );
+    }).status).toBe(0);
     expect(runValidator({
       PAYMENT_RECONCILIATION_ENABLED: "true",
       PAYMENT_RECONCILIATION_SECRET: secrets.reconciliation,

@@ -355,6 +355,18 @@ describe("real devcontainer full-stack e2e", () => {
   let matrixUnverified: { jar: CookieJar; email: string; password: string };
 
   beforeAll(async () => {
+    const readinessSecret = process.env.READINESS_INTERNAL_SECRET;
+
+    expect(readinessSecret, "READINESS_INTERNAL_SECRET must be present in the e2e container").toBeTruthy();
+    const detailedReadiness = await http("/api/internal/health/readiness", {
+      headers: { "x-clean-pay-readiness-secret": readinessSecret! },
+    });
+
+    expect(
+      detailedReadiness.status,
+      JSON.stringify(await debugResponse(detailedReadiness)),
+    ).toBe(200);
+
     matrixTelegramJar = await loginWithTelegramOidc();
     const registered = await registerWithEmail();
 
@@ -468,14 +480,8 @@ describe("real devcontainer full-stack e2e", () => {
     expect(readiness.status, JSON.stringify(await debugResponse(readiness))).toBe(200);
     await expect(readiness.json()).resolves.toMatchObject({
       status: "ok",
-      checks: {
-        database: expect.objectContaining({ status: "ok" }),
-        redis: expect.objectContaining({ status: "ok" }),
-        remnashop: expect.objectContaining({ status: "ok" }),
-        mailpit: expect.objectContaining({ status: "ok" }),
-        telegramOidc: expect.objectContaining({ status: "ok" }),
-        remnawave: expect.objectContaining({ status: "ok" }),
-      },
+      stale: false,
+      checkedAt: expect.any(String),
     });
   });
 

@@ -5,6 +5,17 @@ import { BffError } from '@/backend/integrations/remnashop/errors';
 
 type RedisValue = string | number | null;
 
+export const REDIS_CONNECT_TIMEOUT_MS = 2_000;
+export const REDIS_COMMAND_DEADLINE_MS = 3_000;
+export const REDIS_MAX_RESPONSE_BYTES = 1024 * 1024;
+
+class RedisAdapterError extends Error {
+  constructor(message: string, options?: ErrorOptions) {
+    super(message, options);
+    this.name = 'RedisAdapterError';
+  }
+}
+
 function getRedisUrl() {
   const value = process.env.REDIS_URL;
 
@@ -113,11 +124,79 @@ function connectRedis(url: URL) {
     : net.connect({ host, port });
 }
 
-async function readResponse(socket: net.Socket | tls.TLSSocket) {
+function remainingMs(deadlineAt: number) {
+  return Math.max(0, deadlineAt - Date.now());
+}
+
+function destroySocket(socket: net.Socket | tls.TLSSocket, error: Error) {
+  // destroy(error) emits an asynchronous error event. Keep a one-shot sink
+  // after operation listeners are removed so timeout cleanup cannot surface an
+  // uncaught process-level error.
+  if (socket.listenerCount('error') === 0) {
+    socket.once('error', () => undefined);
+  }
+  socket.destroy(error);
+}
+
+async function waitForConnection(
+  socket: net.Socket | tls.TLSSocket,
+  event: 'connect' | 'secureConnect',
+  deadlineAt: number,
+) {
+  const timeoutMs = Math.min(REDIS_CONNECT_TIMEOUT_MS, remainingMs(deadlineAt));
+
+  if (timeoutMs <= 0) {
+    throw new RedisAdapterError('Redis connection deadline exceeded');
+  }
+
+  await new Promise<void>((resolve, reject) => {
+    function cleanup() {
+      clearTimeout(timer);
+      socket.off(event, onConnect);
+      socket.off('error', onError);
+      socket.off('close', onClose);
+    }
+
+    function finish(error?: Error) {
+      cleanup();
+      if (error) reject(error);
+      else resolve();
+    }
+
+    function onConnect() {
+      finish();
+    }
+
+    function onError(error: Error) {
+      finish(error);
+    }
+
+    function onClose() {
+      finish(new RedisAdapterError('Redis connection closed before it was ready'));
+    }
+
+    socket.once(event, onConnect);
+    socket.once('error', onError);
+    socket.once('close', onClose);
+    const timer = setTimeout(
+      () => finish(new RedisAdapterError(`Redis connection timed out after ${timeoutMs}ms`)),
+      timeoutMs,
+    );
+  });
+}
+
+async function readResponse(socket: net.Socket | tls.TLSSocket, deadlineAt: number) {
   const chunks: Buffer[] = [];
+  let receivedBytes = 0;
+  const timeoutMs = remainingMs(deadlineAt);
+
+  if (timeoutMs <= 0) {
+    throw new RedisAdapterError('Redis command deadline exceeded');
+  }
 
   return new Promise<unknown>((resolve, reject) => {
     function cleanup() {
+      clearTimeout(timer);
       socket.off('data', onData);
       socket.off('error', onError);
       socket.off('close', onClose);
@@ -134,6 +213,14 @@ async function readResponse(socket: net.Socket | tls.TLSSocket) {
     }
 
     function onData(chunk: Buffer) {
+      receivedBytes += chunk.length;
+
+      if (receivedBytes > REDIS_MAX_RESPONSE_BYTES) {
+        cleanup();
+        reject(new RedisAdapterError(`Redis response exceeded ${REDIS_MAX_RESPONSE_BYTES} bytes`));
+        return;
+      }
+
       chunks.push(chunk);
 
       try {
@@ -153,41 +240,68 @@ async function readResponse(socket: net.Socket | tls.TLSSocket) {
     socket.on('data', onData);
     socket.on('error', onError);
     socket.on('close', onClose);
+    const timer = setTimeout(
+      () => {
+        cleanup();
+        reject(new RedisAdapterError(`Redis command timed out after ${timeoutMs}ms`));
+      },
+      timeoutMs,
+    );
   });
 }
 
-async function sendCommand(socket: net.Socket | tls.TLSSocket, parts: RedisValue[]) {
+async function sendCommand(
+  socket: net.Socket | tls.TLSSocket,
+  parts: RedisValue[],
+  deadlineAt: number,
+) {
   socket.write(encodeCommand(parts));
 
-  return readResponse(socket);
+  return readResponse(socket, deadlineAt);
 }
 
 export async function redisCommand(parts: RedisValue[]) {
-  const url = new URL(getRedisUrl());
-  const socket = connectRedis(url);
-
-  await new Promise<void>((resolve, reject) => {
-    socket.once('connect', resolve);
-    socket.once('error', reject);
-  });
+  let socket: net.Socket | tls.TLSSocket | undefined;
 
   try {
+    const url = new URL(getRedisUrl());
+    const deadlineAt = Date.now() + REDIS_COMMAND_DEADLINE_MS;
+    socket = connectRedis(url);
+    await waitForConnection(
+      socket,
+      url.protocol === 'rediss:' ? 'secureConnect' : 'connect',
+      deadlineAt,
+    );
+
     if (url.username || url.password) {
       if (url.username) {
-        await sendCommand(socket, ['AUTH', decodeURIComponent(url.username), decodeURIComponent(url.password)]);
+        await sendCommand(socket, ['AUTH', decodeURIComponent(url.username), decodeURIComponent(url.password)], deadlineAt);
       } else {
-        await sendCommand(socket, ['AUTH', decodeURIComponent(url.password)]);
+        await sendCommand(socket, ['AUTH', decodeURIComponent(url.password)], deadlineAt);
       }
     }
 
     const db = url.pathname.replace(/^\//, '');
 
     if (db) {
-      await sendCommand(socket, ['SELECT', db]);
+      await sendCommand(socket, ['SELECT', db], deadlineAt);
     }
 
-    return await sendCommand(socket, parts);
+    return await sendCommand(socket, parts, deadlineAt);
+  } catch (error) {
+    if (socket && !socket.destroyed) {
+      destroySocket(socket, error instanceof Error ? error : new RedisAdapterError(String(error)));
+    }
+
+    if (error instanceof BffError) {
+      throw error;
+    }
+
+    throw new BffError('UPSTREAM_UNAVAILABLE', 503, 'Redis is unavailable', {
+      message: error instanceof Error ? error.message : String(error),
+      cause: error,
+    });
   } finally {
-    socket.end();
+    if (socket && !socket.destroyed) socket.end();
   }
 }

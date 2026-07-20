@@ -58,17 +58,7 @@ function safeRequestPath(path: string) {
 }
 
 function adminEndpoint(path: string) {
-  const baseUrl = getEnv().remnashopAdminApiBaseUrl;
-
-  if (!baseUrl) {
-    throw new BffError(
-      "INTERNAL_ERROR",
-      500,
-      "REMNASHOP_ADMIN_API_BASE_URL is required for an admin Remnashop request.",
-    );
-  }
-
-  return `${baseUrl}${path}`;
+  return `${getEnv().remnashopAdminApiBaseUrl}${path}`;
 }
 
 async function parseResponse<T>(response: Response, path: string) {
@@ -585,7 +575,7 @@ function signTelegramAuthPayload(body: Omit<TelegramAuthRequest, "hash">, botTok
   return createHmac("sha256", secret).update(dataCheckString).digest("hex");
 }
 
-async function attachRemnashopTokensForTelegramSession(
+export async function attachRemnashopTokensForTelegramSession(
   session: NonNullable<Awaited<ReturnType<typeof getCurrentSession>>>,
 ) {
   const env = getEnv();
@@ -627,8 +617,24 @@ async function attachRemnashopTokensForTelegramSession(
     email: session.user.email,
     emailVerified: session.user.emailVerified,
     telegramId: session.user.telegramId,
+    authPending: session.user.authPending,
+    pendingRemnashopUserId: session.user.pendingRemnashopUserId,
+    pendingRemnashopEmail: session.user.pendingRemnashopEmail,
   };
-  const normalizedExpectedEmail = expectedIdentity.email?.trim().toLowerCase() ?? null;
+  const pendingMergeIsProven = Boolean(
+    expectedIdentity.authPending &&
+    expectedIdentity.pendingRemnashopUserId &&
+    expectedIdentity.pendingRemnashopEmail,
+  );
+  const recoverySourceRemnashopUserId = pendingMergeIsProven
+    ? expectedIdentity.pendingRemnashopUserId
+    : expectedIdentity.remnashopUserId;
+  const recoveryEmail = pendingMergeIsProven
+    ? expectedIdentity.pendingRemnashopEmail
+    : expectedIdentity.emailVerified
+      ? expectedIdentity.email
+      : null;
+  const normalizedExpectedEmail = recoveryEmail?.trim().toLowerCase() ?? null;
   const ownershipError = (reason: string) =>
     new BffError(
       "ACCOUNT_MERGE_REQUIRED",
@@ -702,12 +708,17 @@ async function attachRemnashopTokensForTelegramSession(
   );
   const initialProfile = await getRemnashopMe(initialAuth.cookies.accessToken);
   assertExpectedTelegramProfile(initialProfile, "before_merge");
+  const verifiedRecoveryEmail = recoveryEmail ?? (
+    initialProfile.is_email_verified ? initialProfile.email : null
+  );
+  const normalizedVerifiedRecoveryEmail =
+    verifiedRecoveryEmail?.trim().toLowerCase() ?? null;
 
   if (
-    expectedIdentity.remnashopUserId &&
-    expectedIdentity.remnashopUserId !== initialRemnashopUserId
+    recoverySourceRemnashopUserId &&
+    recoverySourceRemnashopUserId !== initialRemnashopUserId
   ) {
-    if (!expectedIdentity.emailVerified || !normalizedExpectedEmail) {
+    if (!normalizedExpectedEmail) {
       throw ownershipError("upstream_id_mismatch_without_verified_email");
     }
 
@@ -726,16 +737,41 @@ async function attachRemnashopTokensForTelegramSession(
       emailVerified: true,
       telegramId: true,
     } as const;
-    const preflightOwner = await tx.webUser.findUnique({
+    const preflightTargetOwner = await tx.webUser.findUnique({
       where: { remnashopUserId: initialRemnashopUserId },
       select: ownerSelect,
     });
+    const preflightSourceOwner =
+      recoverySourceRemnashopUserId &&
+      recoverySourceRemnashopUserId !== initialRemnashopUserId &&
+      recoverySourceRemnashopUserId !== expectedIdentity.remnashopUserId
+        ? await tx.webUser.findUnique({
+            where: { remnashopUserId: recoverySourceRemnashopUserId },
+            select: ownerSelect,
+          })
+        : null;
+    const lookupSeparateEmailOwner = Boolean(
+      verifiedRecoveryEmail &&
+      verifiedRecoveryEmail.trim().toLowerCase() !==
+        (expectedIdentity.email?.trim().toLowerCase() ?? null),
+    );
+    const preflightEmailOwner = lookupSeparateEmailOwner && verifiedRecoveryEmail
+      ? await tx.webUser.findUnique({
+          where: { email: verifiedRecoveryEmail },
+          select: ownerSelect,
+        })
+      : null;
     const mergeUserIds = [
       ...new Set([
         session.userId,
-        ...(preflightOwner && preflightOwner.id !== session.userId
-          ? [preflightOwner.id]
-          : []),
+        ...[
+          preflightTargetOwner,
+          preflightSourceOwner,
+          preflightEmailOwner,
+        ]
+          .filter((owner): owner is NonNullable<typeof owner> => Boolean(owner))
+          .map(({ id }) => id)
+          .filter((id) => id !== session.userId),
       ]),
     ].sort();
     const lockedUsers = await tx.$queryRaw<Array<{ id: string }>>(
@@ -759,12 +795,31 @@ async function attachRemnashopTokensForTelegramSession(
     const currentUser = await tx.webUser.findUnique({
       where: { id: session.userId },
     });
-    const currentOwner = await tx.webUser.findUnique({
+    const currentTargetOwner = await tx.webUser.findUnique({
       where: { remnashopUserId: initialRemnashopUserId },
       select: ownerSelect,
     });
+    const currentSourceOwner =
+      recoverySourceRemnashopUserId &&
+      recoverySourceRemnashopUserId !== initialRemnashopUserId &&
+      recoverySourceRemnashopUserId !== expectedIdentity.remnashopUserId
+        ? await tx.webUser.findUnique({
+            where: { remnashopUserId: recoverySourceRemnashopUserId },
+            select: ownerSelect,
+          })
+        : null;
+    const currentEmailOwner = lookupSeparateEmailOwner && verifiedRecoveryEmail
+      ? await tx.webUser.findUnique({
+          where: { email: verifiedRecoveryEmail },
+          select: ownerSelect,
+        })
+      : null;
 
-    if (!sameOwnerSnapshot(preflightOwner, currentOwner)) {
+    if (
+      !sameOwnerSnapshot(preflightTargetOwner, currentTargetOwner) ||
+      !sameOwnerSnapshot(preflightSourceOwner, currentSourceOwner) ||
+      !sameOwnerSnapshot(preflightEmailOwner, currentEmailOwner)
+    ) {
       throw ownershipError("local_merge_owner_changed_before_recovery");
     }
 
@@ -795,6 +850,11 @@ async function attachRemnashopTokensForTelegramSession(
       currentUser.email !== expectedIdentity.email ||
       currentUser.emailVerified !== expectedIdentity.emailVerified ||
       currentUser.telegramId !== expectedIdentity.telegramId ||
+      currentUser.authPending !== expectedIdentity.authPending ||
+      currentUser.pendingRemnashopUserId !==
+        expectedIdentity.pendingRemnashopUserId ||
+      currentUser.pendingRemnashopEmail !==
+        expectedIdentity.pendingRemnashopEmail ||
       currentSession.remnashopAccessTokenEncrypted !==
         session.remnashopAccessTokenEncrypted ||
       currentSession.remnashopRefreshTokenEncrypted !==
@@ -811,45 +871,50 @@ async function attachRemnashopTokensForTelegramSession(
       throw ownershipError("local_identity_changed_before_recovery");
     }
 
-    const sourceUserIds =
-      currentOwner && currentOwner.id !== session.userId
-        ? [currentOwner.id]
-        : [];
-    const expectedEmailNormalized =
-      expectedIdentity.email?.trim().toLowerCase() ?? null;
-    const existingEmailNormalized =
-      currentOwner?.email?.trim().toLowerCase() ?? null;
+    const localMergeOwners = [
+      currentTargetOwner,
+      currentSourceOwner,
+      currentEmailOwner,
+    ]
+      .filter((owner): owner is NonNullable<typeof owner> => Boolean(owner))
+      .filter((owner, index, owners) =>
+        owner.id !== session.userId &&
+        owners.findIndex(({ id }) => id === owner.id) === index
+      );
+    const sourceUserIds = localMergeOwners.map(({ id }) => id);
 
-    if (
-      sourceUserIds.length > 0 &&
-      currentOwner?.telegramId &&
-      currentOwner.telegramId !== expectedIdentity.telegramId
-    ) {
-      throw ownershipError("local_owner_has_another_telegram_identity");
+    for (const owner of localMergeOwners) {
+      if (
+        owner.telegramId &&
+        owner.telegramId !== expectedIdentity.telegramId
+      ) {
+        throw ownershipError("local_owner_has_another_telegram_identity");
+      }
+
+      if (
+        owner.emailVerified &&
+        owner.email &&
+        normalizedVerifiedRecoveryEmail &&
+        owner.email.trim().toLowerCase() !== normalizedVerifiedRecoveryEmail
+      ) {
+        throw ownershipError("local_verified_email_conflict");
+      }
     }
 
-    if (
-      sourceUserIds.length > 0 &&
-      expectedIdentity.emailVerified &&
-      currentOwner?.emailVerified &&
-      expectedEmailNormalized !== existingEmailNormalized
-    ) {
-      throw ownershipError("local_verified_email_conflict");
-    }
-
-    const finalEmail = expectedIdentity.emailVerified
-      ? expectedIdentity.email
-      : currentOwner?.emailVerified
-        ? currentOwner.email
-        : expectedIdentity.email;
-    const finalEmailVerified = Boolean(
-      (expectedIdentity.emailVerified && expectedIdentity.email) ||
-        (currentOwner?.emailVerified && currentOwner.email),
-    );
+    const finalEmail = verifiedRecoveryEmail ?? expectedIdentity.email;
+    const finalEmailVerified = Boolean(verifiedRecoveryEmail);
     const upstreamOwnerChanging =
       expectedIdentity.remnashopUserId !== initialRemnashopUserId;
+    const upstreamMergeRequired = Boolean(
+      recoverySourceRemnashopUserId &&
+      recoverySourceRemnashopUserId !== initialRemnashopUserId,
+    );
 
-    if (sourceUserIds.length > 0 || upstreamOwnerChanging) {
+    if (
+      sourceUserIds.length > 0 ||
+      upstreamOwnerChanging ||
+      upstreamMergeRequired
+    ) {
       const paymentPreflight =
         await preflightPaymentOperationsForUserMerge(
           tx,
@@ -871,10 +936,10 @@ async function attachRemnashopTokensForTelegramSession(
     let upstreamMerged = false;
 
     if (
-      expectedIdentity.remnashopUserId &&
-      expectedIdentity.remnashopUserId !== remnashopUserId
+      recoverySourceRemnashopUserId &&
+      recoverySourceRemnashopUserId !== remnashopUserId
     ) {
-      if (!expectedIdentity.emailVerified || !normalizedExpectedEmail) {
+      if (!normalizedExpectedEmail) {
         throw ownershipError("upstream_id_mismatch_without_verified_email");
       }
 
@@ -885,7 +950,7 @@ async function attachRemnashopTokensForTelegramSession(
       }
 
       const sourceUserId = numericRemnashopUserId(
-        expectedIdentity.remnashopUserId,
+        recoverySourceRemnashopUserId,
         "source",
       );
       const targetUserId = numericRemnashopUserId(
@@ -967,15 +1032,15 @@ async function attachRemnashopTokensForTelegramSession(
     }
 
     if (
-      expectedIdentity.remnashopUserId &&
+      recoverySourceRemnashopUserId &&
       !upstreamMerged &&
-      expectedIdentity.remnashopUserId !== remnashopUserId
+      recoverySourceRemnashopUserId !== remnashopUserId
     ) {
       throw ownershipError("upstream_id_mismatch");
     }
 
     if (
-      expectedIdentity.emailVerified &&
+      normalizedExpectedEmail &&
       !profileMatchesExpectedEmail(profile)
     ) {
       throw ownershipError("verified_email_mismatch");
@@ -1004,6 +1069,20 @@ async function attachRemnashopTokensForTelegramSession(
         targetUserId: session.userId,
         targetUpstreamAccountId: remnashopUserId,
         sourceUserIds,
+        ownerExpectations: [
+          {
+            id: currentUser.id,
+            remnashopUserId: currentUser.remnashopUserId,
+            email: currentUser.email,
+            telegramId: currentUser.telegramId,
+          },
+          ...localMergeOwners.map((owner) => ({
+            id: owner.id,
+            remnashopUserId: owner.remnashopUserId,
+            email: owner.email,
+            telegramId: owner.telegramId,
+          })),
+        ],
       });
     } else if (upstreamOwnerChanging) {
       await transferPaymentOperationsForUserMerge(
@@ -1039,6 +1118,10 @@ async function attachRemnashopTokensForTelegramSession(
         remnashopUserId,
         email: finalEmail,
         emailVerified: finalEmailVerified,
+        authPending: false,
+        pendingRemnashopUserId: null,
+        pendingRemnashopEmail: null,
+        lastLoginAt: new Date(),
       },
     });
     const stored = await tx.webSession.updateMany({
@@ -1127,6 +1210,9 @@ async function attachRemnashopTokensForTelegramSession(
         remnashopUserId,
         email: finalEmail,
         emailVerified: finalEmailVerified,
+        authPending: false,
+        pendingRemnashopUserId: null,
+        pendingRemnashopEmail: null,
       },
       remnashopAccessTokenEncrypted: protectRemnashopToken(auth.cookies.accessToken),
       remnashopRefreshTokenEncrypted: protectRemnashopToken(auth.cookies.refreshToken),
@@ -1134,6 +1220,47 @@ async function attachRemnashopTokensForTelegramSession(
       remnashopRefreshExpiresAt: refreshExpiresAt,
     },
   };
+}
+
+export async function recoverRemnashopTelegramSession(
+  sessionId: string,
+  userId: string,
+) {
+  const session = await prisma.webSession.findFirst({
+    where: {
+      id: sessionId,
+      userId,
+      revokedAt: null,
+    },
+    include: { user: true },
+  });
+
+  if (!session) {
+    throw new BffError(
+      "UNAUTHORIZED",
+      401,
+      "Telegram recovery session is no longer active.",
+    );
+  }
+
+  try {
+    const recovered = await attachRemnashopTokensForTelegramSession(session);
+
+    if (!recovered) {
+      throw new BffError(
+        "UPSTREAM_UNAVAILABLE",
+        503,
+        "Telegram recovery could not obtain a verified Remnashop session.",
+      );
+    }
+
+    return recovered;
+  } catch (error) {
+    await prisma.webSession.deleteMany({
+      where: { id: sessionId, userId },
+    });
+    throw error;
+  }
 }
 
 export async function getAuthorizedRemnashopTokens({
@@ -1147,12 +1274,39 @@ export async function getAuthorizedRemnashopTokens({
     throw normalizeRemnashopError(401, "Not authenticated", { path: "/auth/session" });
   }
 
-  let authorized = await acquireRemnashopTokensForSession({
-    session: localSession,
-    refresh: remnashopRefreshTokens,
-  });
-  let authorizationSource: "stored" | "refresh" | "telegram_restore" | null =
-    authorized?.source ?? null;
+  let authorized: Awaited<ReturnType<typeof acquireRemnashopTokensForSession>> = null;
+  let authorizationSource: "stored" | "refresh" | "telegram_restore" | null = null;
+
+  if (
+    localSession.user.authPending &&
+    localSession.user.telegramId &&
+    (
+      localSession.user.emailVerified ||
+      Boolean(
+        localSession.user.pendingRemnashopUserId &&
+        localSession.user.pendingRemnashopEmail
+      )
+    )
+  ) {
+    const restoredTelegramSession =
+      await attachRemnashopTokensForTelegramSession(localSession);
+
+    if (restoredTelegramSession) {
+      authorized = {
+        ...restoredTelegramSession,
+        source: "stored" as const,
+      };
+      authorizationSource = "telegram_restore";
+    }
+  }
+
+  if (!authorized) {
+    authorized = await acquireRemnashopTokensForSession({
+      session: localSession,
+      refresh: remnashopRefreshTokens,
+    });
+    authorizationSource = authorized?.source ?? null;
+  }
 
   if (!authorized && localSession.user.telegramId) {
     // Token acquisition can atomically clear an expired/corrupt legacy bundle.

@@ -7,7 +7,7 @@ export const runtime = "nodejs";
 
 export async function POST(request: Request) {
   try {
-    const body = await readBffJsonObject(request) as unknown as RegistrationResponseJSON & { name?: string };
+    const body = await readBffJsonObject(request, { maxBytes: 128 * 1024 }) as unknown as RegistrationResponseJSON & { name?: string };
     return bffJson(await finishPasskeyRegistration(body));
   } catch (error) {
     return bffError(error);

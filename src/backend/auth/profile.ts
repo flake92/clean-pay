@@ -1,5 +1,9 @@
 import { prisma } from "@/backend/database/prisma";
-import { getAuthorizedRemnashopTokens, getRemnashopMe } from "@/backend/integrations/remnashop/client";
+import {
+  getAuthorizedRemnashopTokens,
+  getRemnashopMe,
+  getRemnashopUserIdFromAccessToken,
+} from "@/backend/integrations/remnashop/client";
 import { BffError } from "@/backend/integrations/remnashop/errors";
 import { authDebugLog } from "@/backend/observability/auth-debug-log";
 import { getCurrentSession, refreshCurrentAccessCookie } from "@/backend/sessions/web-session";
@@ -54,11 +58,18 @@ export async function getCurrentAuthProfile() {
   }
 
   const profile = await getRemnashopMe(accessToken);
+  const authorizedRemnashopUserId =
+    getRemnashopUserIdFromAccessToken(accessToken);
+  const pendingOwnerMatches =
+    !authorizedSession.user.pendingRemnashopUserId ||
+    authorizedSession.user.pendingRemnashopUserId ===
+      authorizedRemnashopUserId;
   const shouldReconcileVerifiedEmail = Boolean(
     profile.email &&
     profile.is_email_verified &&
     authorizedSession.user.email === profile.email &&
-    (!authorizedSession.user.emailVerified || authorizedSession.user.authPending),
+    (!authorizedSession.user.emailVerified || authorizedSession.user.authPending) &&
+    pendingOwnerMatches,
   );
 
   let reconciledSession = authorizedSession;
@@ -66,11 +77,22 @@ export async function getCurrentAuthProfile() {
   if (shouldReconcileVerifiedEmail) {
     await prisma.webUser.update({
       where: { id: authorizedSession.userId },
-      data: { emailVerified: true, authPending: false },
+      data: {
+        emailVerified: true,
+        authPending: false,
+        pendingRemnashopUserId: null,
+        pendingRemnashopEmail: null,
+      },
     });
     reconciledSession = {
       ...authorizedSession,
-      user: { ...authorizedSession.user, emailVerified: true },
+      user: {
+        ...authorizedSession.user,
+        emailVerified: true,
+        authPending: false,
+        pendingRemnashopUserId: null,
+        pendingRemnashopEmail: null,
+      },
     };
     await refreshCurrentAccessCookie();
     authDebugLog("auth_me_verified_email_reconciled", {

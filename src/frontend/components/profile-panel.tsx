@@ -11,6 +11,7 @@ import { Password } from "primereact/password";
 import { Tag } from "primereact/tag";
 
 import { LinkButton } from "@/frontend/components/prime/link-button";
+import { TurnstileWidget, type TurnstileHandle, hasTurnstileSiteKey } from "@/frontend/components/turnstile-widget";
 import { BffClientError, readBffError } from "@/frontend/lib/client-api";
 
 type ProfileUser = {
@@ -33,7 +34,19 @@ function authTypeLabel(value: string) {
   return value === "telegram" ? "Telegram" : "E-mail";
 }
 
-export function ProfilePanel() {
+function missingTurnstileTokenMessage(siteKey?: string | null) {
+  return hasTurnstileSiteKey(siteKey)
+    ? "Пройдите проверку Cloudflare Turnstile."
+    : "Ключ сайта Cloudflare Turnstile не настроен.";
+}
+
+export function ProfilePanel({
+  turnstileEnabled = false,
+  turnstileSiteKey,
+}: {
+  turnstileEnabled?: boolean;
+  turnstileSiteKey?: string | null;
+}) {
   const [user, setUser] = useState<ProfileUser | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [email, setEmail] = useState("");
@@ -44,6 +57,8 @@ export function ProfilePanel() {
   const [passwordMessage, setPasswordMessage] = useState<string | null>(null);
   const [passwordMessageSeverity, setPasswordMessageSeverity] = useState<"success" | "warn">("success");
   const [pendingAction, setPendingAction] = useState<string | null>(null);
+  const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
+  const [turnstile, setTurnstile] = useState<TurnstileHandle | null>(null);
 
   async function fetchProfile() {
     const response = await fetch("/api/bff/auth/me");
@@ -94,12 +109,24 @@ export function ProfilePanel() {
     setPasswordMessageSeverity(severity);
   }
 
+  function resetTurnstile() {
+    turnstile?.reset();
+    setTurnstileToken(null);
+  }
+
+  function turnstilePayload() {
+    return turnstileToken
+      ? { turnstileToken, "cf-turnstile-response": turnstileToken }
+      : {};
+  }
+
   async function requestVerificationFor(nextTargetEmail: string) {
     const response = await fetch("/api/bff/auth/email/request-verification", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
         ...(nextTargetEmail ? { email: nextTargetEmail } : {}),
+        ...turnstilePayload(),
       }),
     });
 
@@ -133,6 +160,12 @@ export function ProfilePanel() {
     const currentTarget = user?.pending_email ?? user?.email ?? "";
     const isSameEmail = nextEmail.toLowerCase() === currentTarget.toLowerCase();
 
+    if (turnstileEnabled && !turnstileToken) {
+      setPendingAction(null);
+      showMessage(missingTurnstileTokenMessage(turnstileSiteKey), "warn");
+      return;
+    }
+
     try {
       if (isSameEmail) {
         const sentTo = await requestVerificationFor(nextEmail);
@@ -146,6 +179,7 @@ export function ProfilePanel() {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           email: nextEmail,
+          ...turnstilePayload(),
         }),
       });
 
@@ -162,6 +196,7 @@ export function ProfilePanel() {
     } catch (err) {
       showMessage(messageFromError(err, "Не удалось изменить e-mail."), "warn");
     } finally {
+      resetTurnstile();
       setPendingAction(null);
     }
   }
@@ -261,6 +296,13 @@ export function ProfilePanel() {
       {canManageRemnashopEmail ? (
         <Card title="Смена e-mail">
           <form className="flex flex-column gap-3" onSubmit={changeEmail}>
+            {turnstileEnabled ? (
+              <TurnstileWidget
+                onReady={setTurnstile}
+                onToken={setTurnstileToken}
+                siteKey={turnstileSiteKey}
+              />
+            ) : null}
             <label className="flex flex-column gap-2">
               <span className="text-sm font-medium text-700">Новый e-mail</span>
               <InputText

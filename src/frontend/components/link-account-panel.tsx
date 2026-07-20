@@ -267,7 +267,11 @@ export function LinkAccountPanel({
       });
 
       if (!response.ok) {
-        setError(await readError(response));
+        const deleteError = await readError(response);
+        if (response.status === 403 || response.status === 409) {
+          await loadState();
+        }
+        setError(deleteError);
         return;
       }
 

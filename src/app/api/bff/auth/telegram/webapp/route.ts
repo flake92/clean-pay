@@ -2,7 +2,11 @@ import { NextResponse } from "next/server";
 
 import { bffError } from "@/backend/http/bff-response";
 import { readBffJsonObject } from "@/backend/http/request-body";
-import { getRemnashopMe, remnashopAuth } from "@/backend/integrations/remnashop/client";
+import {
+  getRemnashopMe,
+  recoverRemnashopTelegramSession,
+  remnashopAuth,
+} from "@/backend/integrations/remnashop/client";
 import { reconcileUserFromRemnashopAuth } from "@/backend/integrations/remnashop/session";
 import { assertRateLimit } from "@/backend/limits/rate-limit";
 import { logTechnicalInfo, logTechnicalWarning } from "@/backend/observability/audit";
@@ -52,9 +56,17 @@ export async function POST(request: Request) {
     });
     const response = NextResponse.json({ redirectTo });
 
-    await createWebSessionOnResponse(response, reconciled.user.id, {
-      remnashopSession: reconciled.remnashopSession,
-    });
+    const session = await createWebSessionOnResponse(
+      response,
+      reconciled.user.id,
+      reconciled.remnashopSession
+        ? { remnashopSession: reconciled.remnashopSession }
+        : undefined,
+    );
+
+    if (reconciled.requiresTelegramRecovery) {
+      await recoverRemnashopTelegramSession(session.id, reconciled.user.id);
+    }
 
     logTechnicalInfo("telegram_webapp_auth_success", {
       userId: reconciled.user.id,

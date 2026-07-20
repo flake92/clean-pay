@@ -7,7 +7,7 @@ import {
   type RegistrationResponseJSON,
   type WebAuthnCredential as SimpleWebAuthnCredential,
 } from "@simplewebauthn/server";
-import { WebAuthnChallengeType, WebSessionAssuranceLevel, WebSessionAuthMethod } from "@prisma/client";
+import { Prisma, WebAuthnChallengeType, WebSessionAssuranceLevel, WebSessionAuthMethod } from "@prisma/client";
 import { headers } from "next/headers";
 
 import { auditLog } from "@/backend/observability/audit";
@@ -272,7 +272,12 @@ export async function finishPasskeyRegistration(response: RegistrationResponseJS
   await prisma.webUser.update({
     where: { id: session.userId },
     data: {
-      authPending: false,
+      ...(
+        session.user.pendingRemnashopUserId &&
+        session.user.pendingRemnashopEmail
+          ? {}
+          : { authPending: false }
+      ),
       lastLoginAt: new Date(),
     },
   });
@@ -315,6 +320,45 @@ export async function beginPasskeyLogin() {
   return options;
 }
 
+export async function recordPasskeyUse({
+  id,
+  userId,
+  credentialId,
+  oldCounter,
+  newCounter,
+}: {
+  id: string;
+  userId: string;
+  credentialId: string;
+  oldCounter: bigint;
+  newCounter: bigint;
+}) {
+  const lastUsedAt = new Date();
+
+  if (oldCounter === 0n && newCounter === 0n) {
+    await prisma.webAuthnCredential.update({
+      where: { id },
+      data: { lastUsedAt },
+    });
+    return;
+  }
+
+  const updated = await prisma.webAuthnCredential.updateMany({
+    where: { id, counter: oldCounter },
+    data: { counter: newCounter, lastUsedAt },
+  });
+
+  if (updated.count !== 1) {
+    await auditLog({
+      action: "passkey_counter_conflict",
+      severity: "WARN",
+      userId,
+      metadata: { credentialId },
+    });
+    throw new BffError("UNAUTHORIZED", 401, "Passkey counter state changed");
+  }
+}
+
 export async function finishPasskeyLogin(response: AuthenticationResponseJSON) {
   const challenge = await consumeChallenge(
     challengeFromClientDataJSON(clientDataJSONFromCredentialResponse(response)),
@@ -345,12 +389,14 @@ export async function finishPasskeyLogin(response: AuthenticationResponseJSON) {
     throw new BffError("UNAUTHORIZED", 401, "Passkey verification failed");
   }
 
-  await prisma.webAuthnCredential.update({
-    where: { id: credential.id },
-    data: {
-      counter: BigInt(result.authenticationInfo.newCounter),
-      lastUsedAt: new Date(),
-    },
+  const oldCounter = credential.counter;
+  const newCounter = BigInt(result.authenticationInfo.newCounter);
+  await recordPasskeyUse({
+    id: credential.id,
+    userId: credential.userId,
+    credentialId: credential.credentialId,
+    oldCounter,
+    newCounter,
   });
   const session = await createWebSession(credential.userId, {
     authMethod: WebSessionAuthMethod.PASSKEY,
@@ -391,6 +437,45 @@ export async function listPasskeys() {
   return { credentials };
 }
 
+export async function deleteOwnedPasskey(userId: string, credentialId: string) {
+  return prisma.$transaction(async (tx) => {
+    const lockedUsers = await tx.$queryRaw<Array<{ id: string }>>(
+      Prisma.sql`
+        SELECT "id"
+        FROM "WebUser"
+        WHERE "id" = ${userId}
+        FOR UPDATE
+      `,
+    );
+
+    if (lockedUsers.length !== 1) {
+      throw new BffError("UNAUTHORIZED", 401, "Current user no longer exists");
+    }
+
+    const credential = await tx.webAuthnCredential.findFirst({
+      where: { id: credentialId, userId },
+    });
+
+    if (!credential) {
+      throw new BffError("NOT_FOUND", 404, "Passkey was not found");
+    }
+
+    const credentialCount = await tx.webAuthnCredential.count({
+      where: { userId },
+    });
+
+    if (credentialCount <= 1) {
+      throw new BffError("FORBIDDEN", 403, "Last passkey cannot be deleted");
+    }
+
+    await tx.webAuthnCredential.delete({
+      where: { id: credential.id },
+    });
+
+    return credential;
+  }, { maxWait: 5_000, timeout: 15_000 });
+}
+
 export async function deletePasskey(credentialId: string) {
   const session = await getCurrentSession();
 
@@ -398,29 +483,7 @@ export async function deletePasskey(credentialId: string) {
     throw new BffError("UNAUTHORIZED", 401, "Full session is required");
   }
 
-  const credentials = await prisma.webAuthnCredential.findMany({
-    where: { userId: session.userId },
-    select: { id: true },
-  });
-
-  if (credentials.length <= 1) {
-    throw new BffError("FORBIDDEN", 403, "Last passkey cannot be deleted");
-  }
-
-  const credential = await prisma.webAuthnCredential.findFirst({
-    where: {
-      id: credentialId,
-      userId: session.userId,
-    },
-  });
-
-  if (!credential) {
-    throw new BffError("NOT_FOUND", 404, "Passkey was not found");
-  }
-
-  await prisma.webAuthnCredential.delete({
-    where: { id: credential.id },
-  });
+  const credential = await deleteOwnedPasskey(session.userId, credentialId);
   await auditLog({
     action: "passkey_deleted",
     userId: session.userId,

@@ -249,6 +249,20 @@ describe("payment operation idempotency", () => {
     );
   });
 
+  it("documents that a lost client key permits a second operation for the same payload", async () => {
+    const secondKey = "dc5083b1-b866-4a5b-b45b-a73f47ce4b10";
+
+    await beginPaymentOperation(beginInput({ idempotencyKey: CLIENT_KEY }) as never);
+    await beginPaymentOperation(beginInput({ idempotencyKey: secondKey }) as never);
+
+    expect(mocks.paymentOperation.create).toHaveBeenCalledTimes(2);
+    const [first, second] = mocks.paymentOperation.create.mock.calls.map(
+      (call) => call[0].data as Record<string, unknown>,
+    );
+    expect(first.requestFingerprint).toBe(second.requestFingerprint);
+    expect(first.idempotencyKeyHash).not.toBe(second.idempotencyKeyHash);
+  });
+
   it("rejects reuse for another payload", async () => {
     let operation: ReturnType<typeof storedOperation> | undefined;
     mocks.paymentOperation.create.mockImplementation(

@@ -75,6 +75,8 @@ model WebUser {
   lastLoginAt               DateTime?
   emailVerified             Boolean                    @default(false)
   authPending               Boolean                    @default(false)
+  pendingRemnashopUserId    String?
+  pendingRemnashopEmail     String?
   displayName               String?
   createdAt                 DateTime                   @default(now())
   updatedAt                 DateTime                   @updatedAt
@@ -88,6 +90,8 @@ model WebUser {
   webAuthnCredentials       WebAuthnCredential[]
   webAuthnChallenges        WebAuthnChallenge[]
   accountMergeConfirmations AccountMergeConfirmation[]
+
+  @@index([pendingRemnashopUserId])
 }
 
 model AccountMergeConfirmation {
@@ -168,6 +172,7 @@ model WebSession {
   id                             String                   @id @default(cuid())
   userId                         String
   refreshTokenHash               String                   @unique
+  refreshRotatedAt               DateTime?
   remnashopAccessTokenEncrypted  String?
   remnashopRefreshTokenEncrypted String?
   remnashopAccessExpiresAt       DateTime?
@@ -182,6 +187,7 @@ model WebSession {
   createdAt                      DateTime                 @default(now())
   updatedAt                      DateTime                 @updatedAt
   user                           WebUser                  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  refreshTokenHistory            WebRefreshToken[]
 
   @@index([userId])
   @@index([accessTokenExpiresAt])
@@ -190,6 +196,20 @@ model WebSession {
   @@index([remnashopRefreshExpiresAt])
   @@index([revokedAt])
   @@index([assuranceLevel])
+}
+
+model WebRefreshToken {
+  id                        String     @id @default(cuid())
+  sessionId                 String
+  tokenHash                 String     @unique
+  successorTokenEncrypted   String
+  graceExpiresAt            DateTime
+  consumedAt                DateTime   @default(now())
+  createdAt                 DateTime   @default(now())
+  session                   WebSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([sessionId, consumedAt])
+  @@index([graceExpiresAt])
 }
 
 model PaymentOperation {

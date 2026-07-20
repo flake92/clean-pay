@@ -441,6 +441,20 @@ describe("Telegram OIDC integration", () => {
       targetUserId: "target-user",
       targetUpstreamAccountId: "remna-email",
       sourceUserIds: ["source-user"],
+      ownerExpectations: [
+        {
+          id: "target-user",
+          remnashopUserId: "remna-email",
+          email: "email@example.com",
+          telegramId: null,
+        },
+        {
+          id: "source-user",
+          remnashopUserId: "remna-telegram",
+          email: "telegram@example.com",
+          telegramId: "123456",
+        },
+      ],
     });
     expect(mocks.assertUserMergeFinalOwner).toHaveBeenCalledWith(tx, {
       targetUserId: "target-user",

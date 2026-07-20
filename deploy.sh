@@ -42,6 +42,8 @@ init() {
   replace_env WEB_JWT_SECRET "$(openssl rand -hex 32)"
   replace_env WEB_REFRESH_SECRET "$(openssl rand -hex 32)"
   replace_env AUDIT_IP_HASH_SECRET "$(openssl rand -hex 32)"
+  replace_env RATE_LIMIT_IDENTITY_SECRET "$(openssl rand -hex 32)"
+  replace_env READINESS_INTERNAL_SECRET "$(openssl rand -hex 32)"
   printf '\nCreated %s and generated local secrets.\n' "$ENV_FILE"
   printf 'Now run: nano deploy/prod/.env\nThen run: ./deploy.sh up\n'
 }

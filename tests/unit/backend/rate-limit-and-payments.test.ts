@@ -48,11 +48,13 @@ describe("rate limiting", () => {
   });
 
   it("builds normalized Redis keys", () => {
-    expect(rateLimitKey({ action: "Auth_Login", email: " USER@Example.COM ", tgId: 123n })).toBe(
-      "clean-pay:rate-limit:action:auth_login:email:user@example.com:tgid:123",
-    );
+    const key = rateLimitKey({ action: "Auth_Login", email: " USER@Example.COM ", tgId: 123n });
+    expect(key).toMatch(/^clean-pay:rate-limit:v2:auth_login:email:[a-f0-9]{64}:tgid:[a-f0-9]{64}$/);
+    expect(key).not.toContain("user@example.com");
+    expect(key).not.toContain(":123");
+    expect(rateLimitKey({ action: "Auth_Login", email: " user@example.com ", tgId: "123" })).toBe(key);
     expect(rateLimitKey({ action: "", email: null, tgId: undefined })).toBe(
-      "clean-pay:rate-limit:action:unknown:email:none:tgid:none",
+      "clean-pay:rate-limit:v2:unknown:email:none:tgid:none",
     );
   });
 
@@ -65,7 +67,7 @@ describe("rate limiting", () => {
       "EVAL",
       expect.stringContaining("redis.call('INCR'"),
       1,
-      "clean-pay:rate-limit:action:login:email:u@e.test:tgid:none",
+      expect.stringMatching(/^clean-pay:rate-limit:v2:login:email:[a-f0-9]{64}:tgid:none$/),
       60,
     ]);
   });
@@ -90,7 +92,7 @@ describe("rate limiting", () => {
       "EVAL",
       expect.any(String),
       1,
-      "clean-pay:rate-limit:action:email_verification:email:email:user-1:tgid:none",
+      expect.stringMatching(/^clean-pay:rate-limit:v2:email_verification:email:[a-f0-9]{64}:tgid:none$/),
       60,
     ]);
   });

@@ -13,6 +13,8 @@ x-clean-pay-env: &clean-pay-env
   WEB_JWT_SECRET: dev-web-jwt-secret-change-me
   WEB_REFRESH_SECRET: dev-web-refresh-secret-change-me
   AUDIT_IP_HASH_SECRET: dev-audit-ip-hash-secret-change-me
+  RATE_LIMIT_IDENTITY_SECRET: dev-rate-limit-identity-secret-change-me
+  READINESS_INTERNAL_SECRET: dev-readiness-internal-secret-change-me
   COOKIE_SECURE: "false"
   COOKIE_SAMESITE: lax
 
@@ -160,6 +162,12 @@ services:
     ports:
       - "4000:4000"
       - "5555:5555"
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:4000/api/internal/health/readiness',{headers:{'x-clean-pay-readiness-secret':process.env.READINESS_INTERNAL_SECRET},signal:AbortSignal.timeout(10000)}).then(async r=>{const b=await r.json();if(!r.ok||b.status!=='ok'||!b.checks||Object.values(b.checks).some(c=>c.status!=='ok'))process.exit(1)}).catch(()=>process.exit(1))\""]
+      interval: 15s
+      timeout: 12s
+      retries: 20
+      start_period: 180s
 
   postgres:
     image: postgres:17-alpine

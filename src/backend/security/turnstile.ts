@@ -4,6 +4,7 @@ import { BffError } from "@/backend/integrations/remnashop/errors";
 
 type TurnstileResponse = {
   success?: boolean;
+  hostname?: string;
   "error-codes"?: string[];
 };
 
@@ -39,7 +40,7 @@ export async function verifyTurnstileToken(token: string | null | undefined, rem
   }
 
   if (!token) {
-    throw new BffError("VALIDATION_ERROR", 400, "Turnstile token is required");
+    throw new BffError("FORBIDDEN", 403, "Turnstile token is required");
   }
 
   const body = new URLSearchParams({
@@ -86,7 +87,17 @@ export async function verifyTurnstileToken(token: string | null | undefined, rem
     });
   }
 
-  const result = (await response.json().catch(() => null)) as TurnstileResponse | null;
+  let result: TurnstileResponse | null;
+
+  try {
+    result = await response.json() as TurnstileResponse;
+  } catch (error) {
+    throw new BffError("UPSTREAM_UNAVAILABLE", 503, "Turnstile returned an invalid response", {
+      upstreamStatus: response.status,
+      upstreamPath: env.turnstile.verifyUrl,
+      message: error instanceof Error ? error.message : String(error),
+    });
+  }
   logger.info("turnstile_response_received", {
     method: "POST",
     status: response.status,
@@ -99,11 +110,27 @@ export async function verifyTurnstileToken(token: string | null | undefined, rem
     message: `HTTP Response: POST Turnstile siteverify -> ${response.status}`,
   });
 
-  if (!response.ok || !result?.success) {
+  const expectedHostname = new URL(env.appUrl).hostname.toLowerCase();
+  const responseHostname = result?.hostname?.toLowerCase();
+
+  if (!response.ok) {
+    throw new BffError("UPSTREAM_UNAVAILABLE", 503, "Turnstile verification unavailable", {
+      upstreamStatus: response.status,
+      upstreamPath: env.turnstile.verifyUrl,
+    });
+  }
+
+  if (!result?.success || responseHostname !== expectedHostname) {
     throw new BffError("FORBIDDEN", 403, "Turnstile verification failed", {
       upstreamStatus: response.status,
       upstreamPath: env.turnstile.verifyUrl,
-      upstreamDetail: result,
+      upstreamDetail: result
+        ? {
+            success: result.success,
+            hostnameMatches: responseHostname === expectedHostname,
+            errorCodes: result["error-codes"],
+          }
+        : null,
     });
   }
 }

@@ -18,6 +18,7 @@ const bodylessPostMutationPaths = new Set([
 const passkeyCredentialPathPrefix = '/api/bff/auth/passkey/credentials/';
 const subscriptionDevicePathPrefix = '/api/bff/subscription/devices/';
 const paymentReconciliationInternalPath = '/api/internal/payments/reconcile';
+const readinessInternalPath = '/api/internal/health/readiness';
 
 function isSingleSegmentPath(pathname: string, prefix: string) {
   const suffix = pathname.startsWith(prefix) ? pathname.slice(prefix.length) : '';
@@ -287,8 +288,8 @@ export async function proxy(request: NextRequest) {
   });
 
   if (
-    pathname === paymentReconciliationInternalPath &&
-    request.method === 'POST'
+    (pathname === paymentReconciliationInternalPath && request.method === 'POST') ||
+    (pathname === readinessInternalPath && request.method === 'GET')
   ) {
     logger.info("http_request_decision", {
       ...metadata,

@@ -124,6 +124,43 @@ describe("local user merge policy", () => {
     expect(tx.webSession.deleteMany).not.toHaveBeenCalled();
   });
 
+  it("fails closed when a locked source changed identity after merge planning", async () => {
+    const tx = mergeTransaction();
+    tx.$queryRaw.mockResolvedValueOnce([
+      {
+        id: "source-a",
+        remnashopUserId: "another-owner",
+        email: "another@example.com",
+        telegramId: null,
+      },
+      {
+        id: "target-user",
+        remnashopUserId: "remna-target",
+        email: "target@example.com",
+        telegramId: "123",
+      },
+    ]);
+
+    await expect(
+      mergeLocalUsersIntoTarget(tx as unknown as Prisma.TransactionClient, {
+        targetUserId: "target-user",
+        targetUpstreamAccountId: "remna-target",
+        sourceUserIds: ["source-a"],
+        ownerExpectations: [
+          {
+            id: "source-a",
+            remnashopUserId: "remna-source",
+            email: "source@example.com",
+            telegramId: null,
+          },
+        ],
+      }),
+    ).rejects.toMatchObject({ code: "ACCOUNT_MERGE_REQUIRED", status: 409 });
+
+    expect(tx.webUser.updateMany).not.toHaveBeenCalled();
+    expect(tx.webSession.deleteMany).not.toHaveBeenCalled();
+  });
+
   it("rolls the transaction back when a locked source no longer releases exactly once", async () => {
     const tx = mergeTransaction();
     tx.$queryRaw.mockResolvedValueOnce([

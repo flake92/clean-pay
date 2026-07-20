@@ -111,7 +111,7 @@ describe("production reconciliation startup", () => {
   });
 
   it("starts the worker only after the production app readiness healthcheck", () => {
-    expect(prodCompose).toContain("/api/health/readiness");
+    expect(prodCompose).toContain("/api/internal/health/readiness");
     expect(prodCompose).toMatch(
       /reconciliation-worker:[\s\S]*depends_on:[\s\S]*app:[\s\S]*condition: service_healthy/,
     );

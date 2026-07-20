@@ -7,7 +7,7 @@ export const runtime = "nodejs";
 
 export async function POST(request: Request) {
   try {
-    const body = await readBffJsonObject(request) as unknown as AuthenticationResponseJSON;
+    const body = await readBffJsonObject(request, { maxBytes: 128 * 1024 }) as unknown as AuthenticationResponseJSON;
     return bffJson(await finishPasskeyLogin(body));
   } catch (error) {
     return bffError(error);

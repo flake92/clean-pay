@@ -17,6 +17,13 @@ type FinalOwnerExpectation = {
   telegramId?: string | null;
 };
 
+export type LocalUserOwnerExpectation = {
+  id: string;
+  remnashopUserId: string | null;
+  email: string | null;
+  telegramId: string | null;
+};
+
 function mergeStateChangedError() {
   return new BffError(
     "ACCOUNT_MERGE_REQUIRED",
@@ -35,10 +42,12 @@ export async function mergeLocalUsersIntoTarget(
     targetUserId,
     targetUpstreamAccountId,
     sourceUserIds: rawSourceUserIds,
+    ownerExpectations = [],
   }: {
     targetUserId: string;
     targetUpstreamAccountId: string | null;
     sourceUserIds: string[];
+    ownerExpectations?: LocalUserOwnerExpectation[];
   },
 ): Promise<LocalUserMergeResult> {
   const sourceUserIds = normalizedSourceIds(targetUserId, rawSourceUserIds);
@@ -55,9 +64,9 @@ export async function mergeLocalUsersIntoTarget(
   }
 
   const userIds = [targetUserId, ...sourceUserIds].sort();
-  const lockedUsers = await tx.$queryRaw<Array<{ id: string }>>(
+  const lockedUsers = await tx.$queryRaw<LocalUserOwnerExpectation[]>(
     Prisma.sql`
-      SELECT "id"
+      SELECT "id", "remnashopUserId", "email", "telegramId"
       FROM "WebUser"
       WHERE "id" IN (${Prisma.join(userIds)})
       ORDER BY "id"
@@ -68,6 +77,21 @@ export async function mergeLocalUsersIntoTarget(
 
   if (lockedIds.size !== userIds.length || userIds.some((id) => !lockedIds.has(id))) {
     throw mergeStateChangedError();
+  }
+
+  const lockedById = new Map(lockedUsers.map((user) => [user.id, user]));
+
+  for (const expected of ownerExpectations) {
+    const locked = lockedById.get(expected.id);
+
+    if (
+      !locked ||
+      locked.remnashopUserId !== expected.remnashopUserId ||
+      locked.email !== expected.email ||
+      locked.telegramId !== expected.telegramId
+    ) {
+      throw mergeStateChangedError();
+    }
   }
 
   const releasedIdentities = await tx.webUser.updateMany({

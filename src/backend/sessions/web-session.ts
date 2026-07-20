@@ -3,16 +3,19 @@ import type { NextResponse } from "next/server";
 import { Prisma, WebSessionAssuranceLevel, WebSessionAuthMethod } from "@prisma/client";
 
 import { authDebugLog } from "@/backend/observability/auth-debug-log";
-import { sha256, hmacSha256, jsonBase64Url, parseJsonBase64Url, randomToken, safeEqual } from "@/backend/security/crypto";
+import { decryptSecret, encryptSecret, sha256, hmacSha256, jsonBase64Url, parseJsonBase64Url, randomToken, safeEqual } from "@/backend/security/crypto";
 import { getEnv } from "@/backend/config/env";
 import { prisma } from "@/backend/database/prisma";
 import { BffError } from "@/backend/integrations/remnashop/errors";
 import { securityPolicy } from "@/backend/security/policy";
+import { auditLog } from "@/backend/observability/audit";
 
 const sessionCookieNames = {
   access: "clean_pay_access",
   refresh: "clean_pay_refresh",
 } as const;
+
+export const refreshTokenGraceMs = 10_000;
 
 type AccessPayload = {
   sid: string;
@@ -105,6 +108,82 @@ function verifyAccessToken(token: string) {
   return payload;
 }
 
+export async function rotateRefreshTokenFamily(refreshToken: string, now = new Date()) {
+  const tokenHash = sha256(refreshToken);
+  const accessTokenExpiresAt = addMinutes(now, securityPolicy.accessSessionTtlMinutes);
+
+  const rotateOnce = () => prisma.$transaction(async (tx) => {
+    const locked = await tx.$queryRaw<Array<{ id: string }>>(
+      Prisma.sql`
+        SELECT session."id"
+        FROM "WebSession" AS session
+        LEFT JOIN "WebRefreshToken" AS consumed
+          ON consumed."sessionId" = session."id"
+          AND consumed."tokenHash" = ${tokenHash}
+        WHERE session."refreshTokenHash" = ${tokenHash}
+          OR consumed."tokenHash" = ${tokenHash}
+        FOR UPDATE OF session
+      `,
+    );
+
+    if (locked.length !== 1) return null;
+    const session = await tx.webSession.findUnique({
+      where: { id: locked[0].id },
+      include: { user: true },
+    });
+
+    if (!session || session.revokedAt || session.refreshExpiresAt <= now) return null;
+
+    if (session.refreshTokenHash === tokenHash) {
+      const successorToken = randomToken(48);
+      await tx.webRefreshToken.create({
+        data: {
+          sessionId: session.id,
+          tokenHash,
+          successorTokenEncrypted: encryptSecret(successorToken, getEnv().webRefreshSecret),
+          graceExpiresAt: new Date(now.getTime() + refreshTokenGraceMs),
+          consumedAt: now,
+        },
+      });
+      const updatedSession = await tx.webSession.update({
+        where: { id: session.id },
+        data: {
+          refreshTokenHash: sha256(successorToken),
+          refreshRotatedAt: now,
+          accessTokenExpiresAt,
+        },
+        include: { user: true },
+      });
+
+      return { status: "ok" as const, session: updatedSession, successorToken, reusedPrevious: false };
+    }
+
+    const consumed = await tx.webRefreshToken.findUnique({ where: { tokenHash } });
+
+    if (consumed && consumed.sessionId === session.id && consumed.graceExpiresAt >= now) {
+      const successorToken = decryptSecret(consumed.successorTokenEncrypted, getEnv().webRefreshSecret);
+      const updatedSession = await tx.webSession.update({
+        where: { id: session.id },
+        data: { accessTokenExpiresAt },
+        include: { user: true },
+      });
+      return { status: "ok" as const, session: updatedSession, successorToken, reusedPrevious: true };
+    }
+
+    await tx.webSession.update({
+      where: { id: session.id },
+      data: { revokedAt: now, accessTokenExpiresAt: now, refreshExpiresAt: now },
+    });
+    return { status: "reuse" as const, sessionId: session.id, userId: session.userId };
+  }, { maxWait: 5_000, timeout: 15_000 });
+
+  // At READ COMMITTED a statement that began before another rotation commits
+  // can lose the WHERE recheck after waiting for the row lock. A second
+  // transaction observes the newly-created consumed-token row and returns the
+  // same successor; it never creates a second branch.
+  return await rotateOnce() ?? await rotateOnce();
+}
+
 async function getSessionByRefreshToken() {
   const cookieStore = await cookies();
   const refreshToken = cookieStore.get(sessionCookieNames.refresh)?.value;
@@ -115,71 +194,44 @@ async function getSessionByRefreshToken() {
   }
 
   authDebugLog("session_refresh_lookup_started", { hasRefreshCookie: true });
-  const refreshTokenHash = sha256(refreshToken);
-  const now = new Date();
-  const session = await prisma.webSession.findFirst({
-    where: {
-      refreshTokenHash,
-      revokedAt: null,
-      refreshExpiresAt: { gt: now },
-    },
-    include: { user: true },
-  });
+  const rotated = await rotateRefreshTokenFamily(refreshToken);
 
-  if (!session) {
+  if (!rotated) {
     authDebugLog("session_refresh_lookup_miss", { reason: "not_found_revoked_or_expired" });
     return null;
   }
 
-  const accessTokenExpiresAt = addMinutes(
-    now,
-    securityPolicy.accessSessionTtlMinutes,
-  );
-
-  const refreshed = await prisma.webSession.updateMany({
-    where: {
-      id: session.id,
-      refreshTokenHash,
-      revokedAt: null,
-      refreshExpiresAt: { gt: now },
-    },
-    data: { accessTokenExpiresAt },
-  });
-
-  if (refreshed.count !== 1) {
-    authDebugLog("session_refresh_lookup_lost_race", {
-      sessionId: session.id,
-      userId: session.userId,
+  if (rotated.status === "reuse") {
+    cookieStore.delete(sessionCookieNames.access);
+    cookieStore.delete(sessionCookieNames.refresh);
+    await auditLog({
+      action: "refresh_token_reuse_detected",
+      severity: "WARN",
+      userId: rotated.userId,
+      metadata: { sessionId: rotated.sessionId },
+    });
+    authDebugLog("session_refresh_reuse_detected", {
+      sessionId: rotated.sessionId,
+      userId: rotated.userId,
     });
     return null;
   }
 
-  const updatedSession = await prisma.webSession.findFirst({
-    where: {
-      id: session.id,
-      userId: session.userId,
-      refreshTokenHash,
-      revokedAt: null,
-      refreshExpiresAt: { gt: now },
-    },
-    include: { user: true },
-  });
-
-  if (!updatedSession) {
-    authDebugLog("session_refresh_lookup_lost_race", {
-      sessionId: session.id,
-      userId: session.userId,
-    });
-    return null;
-  }
-
+  const updatedSession = rotated.session;
   await setAccessCookie({
     sessionId: updatedSession.id,
     userId: updatedSession.userId,
-    expiresAt: accessTokenExpiresAt,
+    expiresAt: updatedSession.accessTokenExpiresAt,
     assuranceLevel: updatedSession.assuranceLevel,
     emailVerified: updatedSession.user.emailVerified,
     telegramId: updatedSession.user.telegramId,
+  });
+  cookieStore.set(sessionCookieNames.refresh, rotated.successorToken, {
+    httpOnly: true,
+    secure: getEnv().cookieSecure,
+    sameSite: getEnv().cookieSameSite,
+    path: "/",
+    expires: updatedSession.refreshExpiresAt,
   });
 
   authDebugLog("session_refresh_lookup_success", {
@@ -187,8 +239,9 @@ async function getSessionByRefreshToken() {
     userId: updatedSession.userId,
     authMethod: updatedSession.authMethod,
     assuranceLevel: updatedSession.assuranceLevel,
-    accessTokenExpiresAt,
+    accessTokenExpiresAt: updatedSession.accessTokenExpiresAt,
     refreshExpiresAt: updatedSession.refreshExpiresAt,
+    reusedPrevious: rotated.reusedPrevious,
     hasRemnashopTokens: Boolean(updatedSession.remnashopAccessTokenEncrypted && updatedSession.remnashopRefreshTokenEncrypted),
   });
 

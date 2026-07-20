@@ -116,6 +116,32 @@ async function mergePreflight({
   return result;
 }
 
+function assertMergePreflightTarget({
+  result,
+  sourceRemnashopUserId,
+  targetRemnashopUserId,
+  targetEmail,
+}: {
+  result: Awaited<ReturnType<typeof mergePreflight>>;
+  sourceRemnashopUserId: string;
+  targetRemnashopUserId: string;
+  targetEmail: string;
+}) {
+  if (
+    result.dry_run !== true ||
+    String(result.source_user_id) !== sourceRemnashopUserId ||
+    String(result.target_user_id) !== targetRemnashopUserId ||
+    String(result.target.id) !== targetRemnashopUserId ||
+    normalizedEmail(result.target.email) !== normalizedEmail(targetEmail) ||
+    !result.target.is_email_verified ||
+    result.requires_relogin !== true
+  ) {
+    throw mergeRequired(
+      "Remnashop target ownership changed. Start the account link again.",
+    );
+  }
+}
+
 export async function stageTelegramAccountMerge({
   userId,
   telegramId,
@@ -156,19 +182,55 @@ export async function stageTelegramAccountMerge({
     return { required: false as const };
   }
 
-  await mergePreflight({
+  const preflight = await mergePreflight({
     sourceRemnashopUserId,
     targetRemnashopUserId,
     allowTransientPaymentWork: true,
+  });
+  assertMergePreflightTarget({
+    result: preflight,
+    sourceRemnashopUserId,
+    targetRemnashopUserId,
+    targetEmail: targetUser.email,
   });
 
   const token = randomToken();
   const now = new Date();
   await prisma.$transaction(async (tx) => {
+    await tx.$queryRaw<Array<{ id: string }>>`
+      SELECT "id"
+      FROM "WebUser"
+      WHERE "id" = ${userId}
+      FOR UPDATE
+    `;
+    const activeProcessing = await tx.$queryRaw<Array<{ id: string }>>`
+      SELECT "id"
+      FROM "AccountMergeConfirmation"
+      WHERE "userId" = ${userId}
+        AND "status" = 'PROCESSING'
+        AND "leaseExpiresAt" > clock_timestamp()
+      LIMIT 1
+      FOR UPDATE
+    `;
+
+    if (activeProcessing.length > 0) {
+      throw new BffError(
+        "CONFLICT",
+        409,
+        "Another account merge is already being processed.",
+      );
+    }
+
     await tx.accountMergeConfirmation.updateMany({
       where: {
         userId,
-        status: AccountMergeConfirmationStatus.PENDING,
+        OR: [
+          { status: AccountMergeConfirmationStatus.PENDING },
+          {
+            status: AccountMergeConfirmationStatus.PROCESSING,
+            leaseExpiresAt: { lte: now },
+          },
+        ],
       },
       data: {
         status: AccountMergeConfirmationStatus.FAILED,
@@ -239,7 +301,7 @@ export async function getTelegramAccountMergeConfirmation(token: string) {
 
 export async function cancelTelegramAccountMerge(token: string) {
   const { confirmation, session } = await confirmationForCurrentSession(token);
-  await prisma.accountMergeConfirmation.updateMany({
+  const cancelled = await prisma.accountMergeConfirmation.updateMany({
     where: {
       id: confirmation.id,
       userId: session.userId,
@@ -250,6 +312,14 @@ export async function cancelTelegramAccountMerge(token: string) {
       lastErrorCode: "USER_CANCELLED",
     },
   });
+
+  if (cancelled.count !== 1) {
+    throw new BffError(
+      "CONFLICT",
+      409,
+      "Account merge can no longer be cancelled.",
+    );
+  }
 
   return { cancelled: true };
 }
@@ -279,25 +349,34 @@ export async function confirmTelegramAccountMerge(token: string) {
     return { merged: true, userId: session.userId };
   }
 
-  const claimed = await prisma.accountMergeConfirmation.updateMany({
-    where: {
-      id: confirmation.id,
-      userId: session.userId,
-      expiresAt: { gt: now },
-      OR: [
-        { status: AccountMergeConfirmationStatus.PENDING },
-        {
-          status: AccountMergeConfirmationStatus.PROCESSING,
-          leaseExpiresAt: { lte: now },
-        },
-      ],
-    },
-    data: {
-      status: AccountMergeConfirmationStatus.PROCESSING,
-      leaseExpiresAt: new Date(now.getTime() + processingLeaseMs),
-      attemptCount: { increment: 1 },
-      lastErrorCode: null,
-    },
+  const claimed = await prisma.$transaction(async (tx) => {
+    await tx.$queryRaw<Array<{ id: string }>>`
+      SELECT "id"
+      FROM "WebUser"
+      WHERE "id" = ${session.userId}
+      FOR UPDATE
+    `;
+
+    return tx.accountMergeConfirmation.updateMany({
+      where: {
+        id: confirmation.id,
+        userId: session.userId,
+        expiresAt: { gt: now },
+        OR: [
+          { status: AccountMergeConfirmationStatus.PENDING },
+          {
+            status: AccountMergeConfirmationStatus.PROCESSING,
+            leaseExpiresAt: { lte: now },
+          },
+        ],
+      },
+      data: {
+        status: AccountMergeConfirmationStatus.PROCESSING,
+        leaseExpiresAt: new Date(now.getTime() + processingLeaseMs),
+        attemptCount: { increment: 1 },
+        lastErrorCode: null,
+      },
+    });
   });
 
   if (claimed.count !== 1) {
@@ -345,9 +424,15 @@ export async function confirmTelegramAccountMerge(token: string) {
     // again; prove the final upstream owner and finish the local transaction.
     let expectedHasSubscription: boolean | null = null;
     if (authenticatedUserId === confirmation.sourceRemnashopUserId) {
-      await mergePreflight({
+      const preflight = await mergePreflight({
         sourceRemnashopUserId: confirmation.sourceRemnashopUserId,
         targetRemnashopUserId: confirmation.targetRemnashopUserId,
+      });
+      assertMergePreflightTarget({
+        result: preflight,
+        sourceRemnashopUserId: confirmation.sourceRemnashopUserId,
+        targetRemnashopUserId: confirmation.targetRemnashopUserId,
+        targetEmail: confirmation.targetEmail,
       });
       const merged = await remnashopMergeUsers({
         sourceUserId: confirmation.sourceRemnashopUserId,
@@ -389,6 +474,7 @@ export async function confirmTelegramAccountMerge(token: string) {
       accessToken: telegramAuth.cookies.accessToken,
       refreshToken: telegramAuth.cookies.refreshToken,
       auth: telegramAuth.data,
+      invalidateSiblingRemnashopTokens: true,
     });
 
     const completed = await prisma.accountMergeConfirmation.updateMany({

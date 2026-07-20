@@ -24,6 +24,8 @@ function stubValidProductionEnv() {
     WEB_JWT_SECRET: "jwt-runtime-6Vr2Kp8Wm4Xq9Lc3Ns7D5Hz1",
     WEB_REFRESH_SECRET: "refresh-runtime-5Kq8Vr2Nm7Wp4Lc9Xs3D6Hz1",
     AUDIT_IP_HASH_SECRET: "audit-runtime-4Wp7Kq2Vr9Nm5Xs8Lc3D6Hz1",
+    RATE_LIMIT_IDENTITY_SECRET: "rate-limit-runtime-4Lc8Kq2Vr9Nm5Xs7Wp3D6Hz1",
+    READINESS_INTERNAL_SECRET: "readiness-runtime-9Wp2Kq7Vr4Nm5Xs8Lc3D6Hz1",
     COOKIE_SECURE: "true",
     COOKIE_SAMESITE: "lax",
     TELEGRAM_OIDC_CLIENT_ID: "7654321098",
@@ -162,21 +164,19 @@ describe("backend env", () => {
     expect(() => getEnv()).toThrow("TELEGRAM_OIDC_CLIENT_ID must match the bot id in TELEGRAM_BOT_TOKEN");
   });
 
-  it("requires strong bounded reconciliation configuration when enabled", () => {
+  it("derives the Remnashop admin URL and requires strong bounded reconciliation configuration", () => {
     vi.stubEnv("PAYMENT_RECONCILIATION_ENABLED", "false");
     vi.stubEnv("REMNASHOP_ADMIN_API_BASE_URL", "");
-    expect(getEnv().remnashopAdminApiBaseUrl).toBeNull();
+    expect(getEnv().remnashopAdminApiBaseUrl).toBe(
+      "http://remnashop:5000/api/v1/admin",
+    );
 
     vi.stubEnv("PAYMENT_RECONCILIATION_ENABLED", "true");
     vi.stubEnv("PAYMENT_RECONCILIATION_SECRET", "x".repeat(48));
-    expect(() => getEnv()).toThrow(
-      "REMNASHOP_ADMIN_API_BASE_URL is required when PAYMENT_RECONCILIATION_ENABLED=true",
-    );
-
-    vi.stubEnv(
-      "REMNASHOP_ADMIN_API_BASE_URL",
+    expect(getEnv().remnashopAdminApiBaseUrl).toBe(
       "http://remnashop:5000/api/v1/admin",
     );
+
     vi.stubEnv("PAYMENT_RECONCILIATION_SECRET", "short");
     expect(() => getEnv()).toThrow(
       "PAYMENT_RECONCILIATION_SECRET must be at least 32 characters",
@@ -226,7 +226,7 @@ describe("Turnstile helpers", () => {
     vi.stubEnv("TURNSTILE_SECRET_KEY", "secret");
     vi.stubEnv("TURNSTILE_VERIFY_URL", "https://turnstile.test/siteverify");
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
-      new Response(JSON.stringify({ success: true }), { status: 200 }),
+      new Response(JSON.stringify({ success: true, hostname: "localhost" }), { status: 200 }),
     );
 
     await verifyTurnstileToken("token", "127.0.0.1");
@@ -247,9 +247,37 @@ describe("Turnstile helpers", () => {
     );
 
     vi.stubEnv("TURNSTILE_SECRET_KEY", "secret");
-    await expect(verifyTurnstileToken(null)).rejects.toMatchObject({ code: "VALIDATION_ERROR" });
+    await expect(verifyTurnstileToken(null)).rejects.toMatchObject({ code: "FORBIDDEN", status: 403 });
 
     vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({ success: false }), { status: 200 }));
     await expect(verifyTurnstileToken("bad")).rejects.toMatchObject({ code: "FORBIDDEN" });
+  });
+
+  it("rejects a successful Turnstile response issued for another hostname", async () => {
+    vi.stubEnv("TURNSTILE_ENABLED", "true");
+    vi.stubEnv("TURNSTILE_SITE_KEY", "site-key");
+    vi.stubEnv("TURNSTILE_SECRET_KEY", "secret");
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ success: true, hostname: "attacker.example" }), { status: 200 }),
+    );
+
+    await expect(verifyTurnstileToken("token")).rejects.toMatchObject({ code: "FORBIDDEN", status: 403 });
+  });
+
+  it("returns 503 for an unavailable or malformed Turnstile response", async () => {
+    vi.stubEnv("TURNSTILE_ENABLED", "true");
+    vi.stubEnv("TURNSTILE_SITE_KEY", "site-key");
+    vi.stubEnv("TURNSTILE_SECRET_KEY", "secret");
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(new Response("not-json", { status: 200 }));
+    await expect(verifyTurnstileToken("token")).rejects.toMatchObject({
+      code: "UPSTREAM_UNAVAILABLE",
+      status: 503,
+    });
+
+    vi.mocked(fetch).mockRejectedValueOnce(new Error("network unavailable"));
+    await expect(verifyTurnstileToken("token")).rejects.toMatchObject({
+      code: "UPSTREAM_UNAVAILABLE",
+      status: 503,
+    });
   });
 });

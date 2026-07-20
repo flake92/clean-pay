@@ -11,6 +11,8 @@ const mocks = vi.hoisted(() => ({
   upgradeCurrentSessionToFull: vi.fn(),
   assertRateLimit: vi.fn(),
   prisma: {
+    $queryRaw: vi.fn(),
+    $transaction: vi.fn(),
     webAuthnChallenge: {
       create: vi.fn(),
       findFirst: vi.fn(),
@@ -25,6 +27,7 @@ const mocks = vi.hoisted(() => ({
       updateMany: vi.fn(),
       findFirst: vi.fn(),
       delete: vi.fn(),
+      count: vi.fn(),
     },
     webUser: {
       update: vi.fn(),
@@ -105,12 +108,15 @@ const session = {
 describe("passkey use cases", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.prisma.$transaction.mockImplementation(async (callback: (tx: typeof mocks.prisma) => unknown) => callback(mocks.prisma));
+    mocks.prisma.$queryRaw.mockResolvedValue([{ id: "user-1" }]);
     mocks.getCurrentSession.mockResolvedValue(session);
     mocks.generateRegistrationOptions.mockResolvedValue({ challenge: "reg-challenge", rp: { id: "localhost" } });
     mocks.generateAuthenticationOptions.mockResolvedValue({ challenge: "auth-challenge" });
     mocks.prisma.webAuthnCredential.findMany.mockResolvedValue([]);
     mocks.prisma.webAuthnCredential.create.mockResolvedValue(undefined);
     mocks.prisma.webAuthnCredential.updateMany.mockResolvedValue({ count: 0 });
+    mocks.prisma.webAuthnCredential.count.mockResolvedValue(2);
     mocks.prisma.webAuthnChallenge.findFirst.mockResolvedValue({ id: "challenge-1", userId: "user-1", challenge: "reg-challenge" });
     mocks.prisma.webAuthnChallenge.updateMany.mockResolvedValue({ count: 1 });
     mocks.verifyRegistrationResponse.mockResolvedValue({
@@ -310,6 +316,26 @@ describe("passkey use cases", () => {
     expect(mocks.auditLog).toHaveBeenCalledWith(expect.objectContaining({ action: "passkey_registered", userId: "user-1" }));
   });
 
+  it("does not clear a pending upstream merge when registering a passkey", async () => {
+    mocks.getCurrentSession.mockResolvedValueOnce({
+      ...session,
+      user: {
+        ...session.user,
+        pendingRemnashopUserId: "101",
+        pendingRemnashopEmail: "user@example.com",
+      },
+    });
+
+    await expect(
+      finishPasskeyRegistration(registrationResponse()),
+    ).resolves.toEqual({ success: true });
+
+    expect(mocks.prisma.webUser.update).toHaveBeenCalledWith({
+      where: { id: "user-1" },
+      data: { lastLoginAt: expect.any(Date) },
+    });
+  });
+
   it("begins and finishes passkey login", async () => {
     await expect(beginPasskeyLogin()).resolves.toEqual({ challenge: "auth-challenge" });
     expect(mocks.assertRateLimit).toHaveBeenCalledWith(expect.objectContaining({
@@ -320,6 +346,7 @@ describe("passkey use cases", () => {
     });
 
     mocks.prisma.webAuthnChallenge.findFirst.mockResolvedValueOnce({ id: "challenge-2", challenge: "auth-challenge" });
+    mocks.prisma.webAuthnCredential.updateMany.mockResolvedValueOnce({ count: 1 });
 
     await expect(
       finishPasskeyLogin({
@@ -336,14 +363,76 @@ describe("passkey use cases", () => {
       }),
     ).resolves.toEqual({ success: true });
 
-    expect(mocks.prisma.webAuthnCredential.update).toHaveBeenCalledWith({
-      where: { id: "db-credential-1" },
+    expect(mocks.prisma.webAuthnCredential.updateMany).toHaveBeenCalledWith({
+      where: { id: "db-credential-1", counter: 1n },
       data: { counter: 2n, lastUsedAt: expect.any(Date) },
     });
     expect(mocks.createWebSession).toHaveBeenCalledWith("user-1", {
       authMethod: "PASSKEY",
       assuranceLevel: "FULL",
     });
+  });
+
+  it("rejects a non-zero counter CAS conflict before creating a session", async () => {
+    mocks.prisma.webAuthnChallenge.findFirst.mockResolvedValueOnce({ id: "challenge-2", challenge: "auth-challenge" });
+    mocks.prisma.webAuthnCredential.updateMany.mockResolvedValueOnce({ count: 0 });
+
+    await expect(finishPasskeyLogin({
+      id: "credential-1",
+      rawId: "credential-1",
+      type: "public-key",
+      response: {
+        clientDataJSON: clientData("auth-challenge"),
+        authenticatorData: "authenticator",
+        signature: "signature",
+        userHandle: undefined,
+      },
+      clientExtensionResults: {},
+    })).rejects.toMatchObject({ code: "UNAUTHORIZED", status: 401 });
+
+    expect(mocks.createWebSession).not.toHaveBeenCalled();
+    expect(mocks.auditLog).toHaveBeenCalledWith(expect.objectContaining({
+      action: "passkey_counter_conflict",
+      severity: "WARN",
+      userId: "user-1",
+    }));
+  });
+
+  it("allows authenticators without counters to use the 0 to 0 branch", async () => {
+    mocks.prisma.webAuthnChallenge.findFirst.mockResolvedValueOnce({ id: "challenge-2", challenge: "auth-challenge" });
+    mocks.prisma.webAuthnCredential.findUnique.mockResolvedValueOnce({
+      id: "db-credential-1",
+      userId: "user-1",
+      credentialId: "credential-1",
+      publicKey: new Uint8Array([1, 2, 3]),
+      counter: 0n,
+      transports: ["internal"],
+      user: session.user,
+    });
+    mocks.verifyAuthenticationResponse.mockResolvedValueOnce({
+      verified: true,
+      authenticationInfo: { newCounter: 0 },
+    });
+
+    await expect(finishPasskeyLogin({
+      id: "credential-1",
+      rawId: "credential-1",
+      type: "public-key",
+      response: {
+        clientDataJSON: clientData("auth-challenge"),
+        authenticatorData: "authenticator",
+        signature: "signature",
+        userHandle: undefined,
+      },
+      clientExtensionResults: {},
+    })).resolves.toEqual({ success: true });
+
+    expect(mocks.prisma.webAuthnCredential.update).toHaveBeenCalledWith({
+      where: { id: "db-credential-1" },
+      data: { lastUsedAt: expect.any(Date) },
+    });
+    expect(mocks.prisma.webAuthnCredential.updateMany).not.toHaveBeenCalled();
+    expect(mocks.createWebSession).toHaveBeenCalledOnce();
   });
 
   it("lists and deletes passkeys with full-session guard", async () => {
@@ -377,7 +466,8 @@ describe("passkey use cases", () => {
       }),
     ).rejects.toMatchObject({ code: "VALIDATION_ERROR" });
 
-    mocks.prisma.webAuthnCredential.findMany.mockResolvedValueOnce([{ id: "only" }]);
+    mocks.prisma.webAuthnCredential.findFirst.mockResolvedValueOnce({ id: "only", credentialId: "cred-only" });
+    mocks.prisma.webAuthnCredential.count.mockResolvedValueOnce(1);
     await expect(deletePasskey("only")).rejects.toMatchObject({ code: "FORBIDDEN" });
   });
 });

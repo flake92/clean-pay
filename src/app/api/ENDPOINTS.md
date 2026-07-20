@@ -81,7 +81,7 @@ Payment history negotiates Remnashop recovery contract v1. With v1 it applies on
 | `GET /api/bff/support` | `src/app/api/bff/support/route.ts` | `src/backend/config/env.ts` |
 | `GET /api/health` | `src/app/api/health/route.ts` | Inline route response |
 | `GET /api/health/liveness` | `src/app/api/health/liveness/route.ts` | Inline route response |
-| `GET /api/health/readiness` | `src/app/api/health/readiness/route.ts` | `src/backend/health/checks.ts` |
+| `GET /api/health/readiness` | `src/app/api/health/readiness/route.ts` | `src/backend/health/readiness.ts` cached aggregate |
 | `GET /api/me` | `src/app/api/me/route.ts` | `src/backend/sessions/web-session.ts` |
 | `POST /api/logout` | `src/app/api/logout/route.ts` | `src/backend/sessions/web-session.ts` |
 
@@ -89,6 +89,7 @@ Payment history negotiates Remnashop recovery contract v1. With v1 it applies on
 
 | Endpoint | Route file | Backend flow |
 | --- | --- | --- |
+| `GET /api/internal/health/readiness` | `src/app/api/internal/health/readiness/route.ts` | `src/backend/health/readiness.ts`, `src/backend/health/checks.ts` |
 | `POST /api/internal/payments/reconcile` | `src/app/api/internal/payments/reconcile/route.ts` | `src/backend/payments/reconciliation.ts`, `src/backend/payments/history-sync.ts` |
 
-The internal reconciliation endpoint is disabled by default and returns `404` unless `PAYMENT_RECONCILIATION_ENABLED=true`. It requires the fixed-length timing-safe `X-Clean-Pay-Reconciliation-Secret`, enforces a bounded batch/deadline, and is called by the Compose `reconciliation` profile. The supported launchers enable that profile automatically when the flag is true and verify that its worker is running. History work uses complete bounded cursor generations; payment recovery resets an exact missing claim only with the same locked owner, while owner ambiguity becomes terminal `manual_required`. Never expose this route or secret to a browser.
+The internal detailed readiness endpoint requires the timing-safe `X-Clean-Pay-Readiness-Secret`, performs a single-flight bounded dependency fan-out and refreshes the process-local public cache. Invalid secrets return `404`. The internal reconciliation endpoint is disabled by default and returns `404` unless `PAYMENT_RECONCILIATION_ENABLED=true`. It requires the fixed-length timing-safe `X-Clean-Pay-Reconciliation-Secret`, enforces a bounded batch/deadline, and is called by the Compose `reconciliation` profile. The supported launchers enable that profile automatically when the flag is true and verify that its worker is running. History work uses complete bounded cursor generations; payment recovery resets an exact missing claim only with the same locked owner, while owner ambiguity becomes terminal `manual_required`. Never expose internal routes or secrets to a browser.
