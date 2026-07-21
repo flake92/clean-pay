@@ -46,7 +46,7 @@ async function flush() {
   });
 }
 
-describe("Telegram e-mail replacement confirmation", () => {
+describe("Telegram account merge confirmation", () => {
   let container: HTMLDivElement;
   let root: Root;
 
@@ -62,6 +62,7 @@ describe("Telegram e-mail replacement confirmation", () => {
         data: {
           targetEmail: "owner@example.com",
           sourceEmailMasked: "ol***@example.net",
+          emailWillBeReplaced: true,
           telegramId: "777",
         },
       }))
@@ -82,11 +83,40 @@ describe("Telegram e-mail replacement confirmation", () => {
     const warning = container.querySelector<HTMLElement>('[data-severity="warn"]')!;
     const controls = container.querySelector<HTMLElement>(".account-method-grid")!;
     expect(warning.textContent).toContain("ol***@example.net");
-    expect(warning.textContent).toContain("owner@example.com");
-    expect(warning.textContent).toContain("подписка, платежи и остальные данные");
+    expect(warning.textContent).toContain("owner@example.com останется основным e-mail");
+    expect(warning.textContent).toContain("больше нельзя будет использовать для входа");
+    expect(warning.textContent).toContain("Подписки, платежи и остальные данные");
     expect(warning.compareDocumentPosition(controls) & Node.DOCUMENT_POSITION_FOLLOWING)
       .toBeTruthy();
-    expect(container.textContent).toContain("Да, заменить e-mail и объединить");
+    expect(container.textContent).toContain("Объединить аккаунты");
+  });
+
+  it("does not claim an e-mail replacement when the source account has none", async () => {
+    vi.mocked(fetch).mockReset();
+    vi.mocked(fetch)
+      .mockResolvedValueOnce(Response.json({
+        data: { user: { email: "owner@example.com", emailVerified: true } },
+      }))
+      .mockResolvedValueOnce(Response.json({
+        data: {
+          targetEmail: "owner@example.com",
+          sourceEmailMasked: null,
+          emailWillBeReplaced: false,
+          telegramId: "777",
+        },
+      }))
+      .mockResolvedValueOnce(Response.json({ data: { credentials: [] } }));
+
+    await act(async () => root.render(createElement(LinkAccountPanel)));
+    await flush();
+
+    const warning = container.querySelector<HTMLElement>('[data-severity="warn"]')!;
+    expect(warning.textContent).toContain("Telegram принадлежит отдельной учётной записи");
+    expect(warning.textContent).toContain("текущий e-mail owner@example.com останется без изменений");
+    expect(warning.textContent).toContain("данные из Telegram-учётной записи будут перенесены");
+    expect(warning.textContent).not.toContain("другой e-mail");
+    expect(warning.textContent).not.toContain("больше нельзя будет использовать");
+    expect(container.textContent).toContain("Объединить аккаунты");
   });
 
   it("renders a merge failure above the confirmation card", async () => {
@@ -100,7 +130,7 @@ describe("Telegram e-mail replacement confirmation", () => {
     await act(async () => root.render(createElement(LinkAccountPanel)));
     await flush();
     const confirmButton = [...container.querySelectorAll("button")].find((button) =>
-      button.textContent?.includes("Да, заменить"),
+      button.textContent?.includes("Объединить аккаунты"),
     )!;
     await act(async () => {
       confirmButton.click();
@@ -132,6 +162,7 @@ describe("Telegram e-mail replacement confirmation", () => {
         data: {
           targetEmail: "owner@example.com",
           sourceEmailMasked: "ol***@example.net",
+          emailWillBeReplaced: true,
           telegramId: "777",
         },
       }))

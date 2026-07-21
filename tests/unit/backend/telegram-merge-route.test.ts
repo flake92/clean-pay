@@ -31,7 +31,11 @@ describe("Telegram merge confirmation route", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.cookieValue = "confirmation-token";
-    mocks.get.mockResolvedValue({ targetEmail: "owner@example.com" });
+    mocks.get.mockResolvedValue({
+      targetEmail: "owner@example.com",
+      sourceEmailMasked: null,
+      emailWillBeReplaced: false,
+    });
     mocks.confirm.mockResolvedValue({ merged: true, userId: "user-1" });
     mocks.cancel.mockResolvedValue({ cancelled: true });
   });
@@ -42,7 +46,11 @@ describe("Telegram merge confirmation route", () => {
     expect(response.status).toBe(200);
     expect(mocks.get).toHaveBeenCalledWith("confirmation-token");
     await expect(response.json()).resolves.toMatchObject({
-      data: { targetEmail: "owner@example.com" },
+      data: {
+        targetEmail: "owner@example.com",
+        sourceEmailMasked: null,
+        emailWillBeReplaced: false,
+      },
     });
   });
 

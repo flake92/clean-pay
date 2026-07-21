@@ -35,6 +35,24 @@ function normalizedEmail(email: string | null | undefined) {
   return email?.trim().toLowerCase() || null;
 }
 
+function emailWillBeReplaced(
+  sourceEmail: string | null | undefined,
+  targetEmail: string | null | undefined,
+) {
+  const source = normalizedEmail(sourceEmail);
+  return source !== null && source !== normalizedEmail(targetEmail);
+}
+
+function assertNoPendingEmailChange(
+  profile: Awaited<ReturnType<typeof getRemnashopMe>>,
+) {
+  if (normalizedEmail(profile.pending_email)) {
+    throw mergeRequired(
+      "Сначала завершите или отмените начатую смену e-mail, затем повторите объединение аккаунтов.",
+    );
+  }
+}
+
 function maskEmail(email: string | null) {
   if (!email) {
     return null;
@@ -121,12 +139,17 @@ function assertMergePreflightTarget({
   sourceRemnashopUserId,
   targetRemnashopUserId,
   targetEmail,
+  selectedTelegramId,
 }: {
   result: Awaited<ReturnType<typeof mergePreflight>>;
   sourceRemnashopUserId: string;
   targetRemnashopUserId: string;
   targetEmail: string;
+  selectedTelegramId: string;
 }) {
+  const targetTelegramId = result.target.telegram_id === null
+    ? null
+    : String(result.target.telegram_id);
   if (
     result.dry_run !== true ||
     String(result.source_user_id) !== sourceRemnashopUserId ||
@@ -134,6 +157,7 @@ function assertMergePreflightTarget({
     String(result.target.id) !== targetRemnashopUserId ||
     normalizedEmail(result.target.email) !== normalizedEmail(targetEmail) ||
     !result.target.is_email_verified ||
+    (targetTelegramId !== null && targetTelegramId !== selectedTelegramId) ||
     result.requires_relogin !== true
   ) {
     throw mergeRequired(
@@ -182,6 +206,14 @@ export async function stageTelegramAccountMerge({
     return { required: false as const };
   }
 
+  if (targetUser.telegramId && targetUser.telegramId !== telegramId) {
+    throw mergeRequired(
+      "В текущей учётной записи уже привязан другой Telegram. Автоматическая замена остановлена; обратитесь в поддержку.",
+    );
+  }
+
+  assertNoPendingEmailChange(sourceProfile);
+
   const preflight = await mergePreflight({
     sourceRemnashopUserId,
     targetRemnashopUserId,
@@ -192,6 +224,7 @@ export async function stageTelegramAccountMerge({
     sourceRemnashopUserId,
     targetRemnashopUserId,
     targetEmail: targetUser.email,
+    selectedTelegramId: telegramId,
   });
 
   const token = randomToken();
@@ -257,6 +290,10 @@ export async function stageTelegramAccountMerge({
     token,
     sourceEmailMasked: maskEmail(normalizedEmail(sourceProfile.email)),
     targetEmail: normalizedEmail(targetUser.email)!,
+    emailWillBeReplaced: emailWillBeReplaced(
+      sourceProfile.email,
+      targetUser.email,
+    ),
   };
 }
 
@@ -294,6 +331,10 @@ export async function getTelegramAccountMergeConfirmation(token: string) {
   return {
     targetEmail: confirmation.targetEmail,
     sourceEmailMasked: maskEmail(confirmation.sourceEmail),
+    emailWillBeReplaced: emailWillBeReplaced(
+      confirmation.sourceEmail,
+      confirmation.targetEmail,
+    ),
     telegramId: confirmation.telegramId,
     status: confirmation.status,
   };
@@ -399,7 +440,11 @@ export async function confirmTelegramAccountMerge(token: string) {
       !current ||
       !current.emailVerified ||
       normalizedEmail(current.email) !== confirmation.targetEmail ||
-      current.remnashopUserId !== confirmation.targetRemnashopUserId
+      current.remnashopUserId !== confirmation.targetRemnashopUserId ||
+      (
+        current.telegramId !== null &&
+        current.telegramId !== confirmation.telegramId
+      )
     ) {
       throw mergeRequired("Владелец текущей учётной записи изменился. Начните привязку заново.");
     }
@@ -424,6 +469,19 @@ export async function confirmTelegramAccountMerge(token: string) {
     // again; prove the final upstream owner and finish the local transaction.
     let expectedHasSubscription: boolean | null = null;
     if (authenticatedUserId === confirmation.sourceRemnashopUserId) {
+      const sourceProfile = await getRemnashopMe(
+        telegramAuth.cookies.accessToken,
+      );
+      if (
+        String(sourceProfile.telegram_id) !== confirmation.telegramId ||
+        normalizedEmail(sourceProfile.email) !== confirmation.sourceEmail
+      ) {
+        throw mergeRequired(
+          "Данные Telegram-учётной записи изменились. Начните объединение заново.",
+        );
+      }
+      assertNoPendingEmailChange(sourceProfile);
+
       const preflight = await mergePreflight({
         sourceRemnashopUserId: confirmation.sourceRemnashopUserId,
         targetRemnashopUserId: confirmation.targetRemnashopUserId,
@@ -433,6 +491,7 @@ export async function confirmTelegramAccountMerge(token: string) {
         sourceRemnashopUserId: confirmation.sourceRemnashopUserId,
         targetRemnashopUserId: confirmation.targetRemnashopUserId,
         targetEmail: confirmation.targetEmail,
+        selectedTelegramId: confirmation.telegramId,
       });
       const merged = await remnashopMergeUsers({
         sourceUserId: confirmation.sourceRemnashopUserId,
@@ -464,6 +523,7 @@ export async function confirmTelegramAccountMerge(token: string) {
       String(finalProfile.telegram_id) !== confirmation.telegramId ||
       normalizedEmail(finalProfile.email) !== confirmation.targetEmail ||
       !finalProfile.is_email_verified ||
+      normalizedEmail(finalProfile.pending_email) !== null ||
       (expectedHasSubscription !== null &&
         expectedHasSubscription !== Boolean(finalSubscription))
     ) {

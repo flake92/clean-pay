@@ -31,8 +31,23 @@ type PasskeyCredential = {
 type MergeConfirmation = {
   targetEmail: string;
   sourceEmailMasked: string | null;
+  emailWillBeReplaced?: boolean;
   telegramId: string;
 };
+
+function telegramMergeConfirmationMessage(confirmation: MergeConfirmation) {
+  // Keep the old payload compatible during a rolling deployment: previously
+  // sourceEmailMasked was only returned when the source account had an e-mail.
+  const emailWillBeReplaced = confirmation.emailWillBeReplaced
+    ?? Boolean(confirmation.sourceEmailMasked);
+
+  if (emailWillBeReplaced) {
+    const sourceEmail = confirmation.sourceEmailMasked ?? "другой e-mail";
+    return `Этот Telegram принадлежит отдельной учётной записи с e-mail ${sourceEmail}. После объединения ${confirmation.targetEmail} останется основным e-mail для входа, а ${sourceEmail} больше нельзя будет использовать для входа в объединённый аккаунт. Подписки, платежи и остальные данные будут перенесены. Продолжить?`;
+  }
+
+  return `Этот Telegram принадлежит отдельной учётной записи. После объединения текущий e-mail ${confirmation.targetEmail} останется без изменений, а подписки, платежи и остальные данные из Telegram-учётной записи будут перенесены. Продолжить?`;
+}
 
 async function readError(response: Response) {
   return (await readBffError(response, "Не удалось выполнить действие.")).message;
@@ -66,7 +81,7 @@ function telegramCallbackError(status: string | null) {
   }
 
   if (status === "telegram_merge_required") {
-    return "Telegram уже связан с другой учётной записью и подпиской. Автоматическое объединение остановлено: существующие данные не изменены. Обратитесь в поддержку для безопасного объединения.";
+    return "Автоматическое объединение остановлено из-за конфликта данных учётных записей. Ничего не изменено. Обновите страницу и повторите привязку; если ошибка сохраняется, обратитесь в поддержку.";
   }
 
   if (status === "telegram_failed") {
@@ -380,11 +395,11 @@ export function LinkAccountPanel({
         <section className="account-method-card border-orange-400">
           <Message
             severity="warn"
-            text={`В выбранной учётной записи Telegram уже указан e-mail ${mergeConfirmation.sourceEmailMasked ?? "другой e-mail"}. После объединения он будет заменён на ${mergeConfirmation.targetEmail}, а подписка, платежи и остальные данные будут перенесены. Вы точно хотите продолжить?`}
+            text={telegramMergeConfirmationMessage(mergeConfirmation)}
           />
           <div className="account-method-actions mt-3">
             <Button
-              label="Да, заменить e-mail и объединить"
+              label="Объединить аккаунты"
               loading={actionLoading === "telegram-merge-confirm"}
               disabled={actionLoading !== null}
               onClick={() => void confirmTelegramMerge()}

@@ -61,6 +61,7 @@ vi.mock("@/backend/sessions/web-session", () => ({
 import {
   cancelTelegramAccountMerge,
   confirmTelegramAccountMerge,
+  getTelegramAccountMergeConfirmation,
   stageTelegramAccountMerge,
 } from "@/backend/auth/telegram-account-merge";
 import { BffError } from "@/backend/integrations/remnashop/errors";
@@ -69,6 +70,7 @@ const targetUser = {
   id: "target-local",
   email: "owner@example.com",
   emailVerified: true,
+  telegramId: null,
   remnashopUserId: "22",
 };
 
@@ -76,6 +78,14 @@ const sourceProfile = {
   telegram_id: 777,
   email: "old@example.com",
   is_email_verified: true,
+  pending_email: null,
+};
+
+const finalTargetProfile = {
+  telegram_id: 777,
+  email: "owner@example.com",
+  is_email_verified: true,
+  pending_email: null,
 };
 
 const confirmation = {
@@ -105,6 +115,7 @@ function mergeResult(
   conflicts: string[] = [],
   subscriptionId: number | null = 101,
   targetEmail = "owner@example.com",
+  targetTelegramId: number | null = null,
 ) {
   return {
     dry_run: true,
@@ -113,7 +124,7 @@ function mergeResult(
     target: {
       id: 22,
       email: targetEmail,
-      telegram_id: 777,
+      telegram_id: targetTelegramId,
       is_email_verified: true,
       current_subscription_id: subscriptionId,
     },
@@ -140,7 +151,9 @@ describe("confirmed Telegram account merge", () => {
     mocks.getRemnashopUserId.mockImplementation((token: string) =>
       token.startsWith("source") ? "11" : "22",
     );
-    mocks.getRemnashopMe.mockResolvedValue(sourceProfile);
+    mocks.getRemnashopMe.mockImplementation((accessToken: string) =>
+      accessToken.startsWith("source") ? sourceProfile : finalTargetProfile,
+    );
     mocks.remnashopMergeUsers.mockResolvedValue(mergeResult());
     mocks.accountCreate.mockResolvedValue({ id: "confirmation-1" });
     mocks.accountFindFirst.mockResolvedValue(confirmation);
@@ -164,6 +177,7 @@ describe("confirmed Telegram account merge", () => {
       required: true,
       targetEmail: "owner@example.com",
       sourceEmailMasked: "ol***@example.com",
+      emailWillBeReplaced: true,
     });
     expect(mocks.remnashopMergeUsers).toHaveBeenCalledOnce();
     expect(mocks.remnashopMergeUsers).toHaveBeenCalledWith(expect.objectContaining({
@@ -174,6 +188,88 @@ describe("confirmed Telegram account merge", () => {
     }));
     expect(mocks.accountCreate).toHaveBeenCalledOnce();
     expect(mocks.linkCurrentUser).not.toHaveBeenCalled();
+  });
+
+  it("stages a separate Telegram account without claiming an e-mail replacement", async () => {
+    mocks.getRemnashopMe.mockImplementation((accessToken: string) =>
+      accessToken.startsWith("source")
+        ? { ...sourceProfile, email: null }
+        : finalTargetProfile,
+    );
+
+    await expect(stageTelegramAccountMerge({
+      userId: "target-local",
+      telegramId: "777",
+      telegramUsername: "owner",
+      telegramAuth: auth("source-access"),
+    })).resolves.toMatchObject({
+      required: true,
+      sourceEmailMasked: null,
+      targetEmail: "owner@example.com",
+      emailWillBeReplaced: false,
+    });
+    expect(mocks.accountCreate).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ sourceEmail: null }),
+    }));
+  });
+
+  it("returns the persisted e-mail consequence from the confirmation endpoint", async () => {
+    mocks.accountFindFirst.mockResolvedValueOnce({
+      ...confirmation,
+      sourceEmail: null,
+    });
+
+    await expect(getTelegramAccountMergeConfirmation("raw-confirmation-token"))
+      .resolves.toMatchObject({
+        sourceEmailMasked: null,
+        emailWillBeReplaced: false,
+      });
+  });
+
+  it("does not stage while the source account has a pending e-mail change", async () => {
+    mocks.getRemnashopMe.mockResolvedValueOnce({
+      ...sourceProfile,
+      pending_email: "next@example.com",
+    });
+
+    await expect(stageTelegramAccountMerge({
+      userId: "target-local",
+      telegramId: "777",
+      telegramUsername: "owner",
+      telegramAuth: auth("source-access"),
+    })).rejects.toMatchObject({ code: "ACCOUNT_MERGE_REQUIRED", status: 409 });
+    expect(mocks.remnashopMergeUsers).not.toHaveBeenCalled();
+    expect(mocks.accountCreate).not.toHaveBeenCalled();
+  });
+
+  it("does not replace a different Telegram already linked to the target", async () => {
+    mocks.findUser.mockResolvedValueOnce({
+      ...targetUser,
+      telegramId: "888",
+    });
+
+    await expect(stageTelegramAccountMerge({
+      userId: "target-local",
+      telegramId: "777",
+      telegramUsername: "owner",
+      telegramAuth: auth("source-access"),
+    })).rejects.toMatchObject({ code: "ACCOUNT_MERGE_REQUIRED", status: 409 });
+    expect(mocks.remnashopMergeUsers).not.toHaveBeenCalled();
+    expect(mocks.accountCreate).not.toHaveBeenCalled();
+  });
+
+  it("does not stage when the upstream target has a different Telegram", async () => {
+    mocks.remnashopMergeUsers.mockResolvedValueOnce(
+      mergeResult([], null, "owner@example.com", 888),
+    );
+
+    await expect(stageTelegramAccountMerge({
+      userId: "target-local",
+      telegramId: "777",
+      telegramUsername: "owner",
+      telegramAuth: auth("source-access"),
+    })).rejects.toMatchObject({ code: "ACCOUNT_MERGE_REQUIRED", status: 409 });
+    expect(mocks.accountCreate).not.toHaveBeenCalled();
   });
 
   it("blocks two subscriptions before creating a confirmation", async () => {
@@ -252,11 +348,6 @@ describe("confirmed Telegram account merge", () => {
   });
 
   it("merges once, verifies the shared identity and subscription, then links locally", async () => {
-    mocks.getRemnashopMe.mockResolvedValueOnce({
-      ...sourceProfile,
-      email: "owner@example.com",
-    });
-
     await expect(confirmTelegramAccountMerge("raw-confirmation-token"))
       .resolves.toEqual({ merged: true, userId: "target-local" });
 
@@ -300,6 +391,44 @@ describe("confirmed Telegram account merge", () => {
     }));
   });
 
+  it("fails before preflight when the source e-mail changed after confirmation", async () => {
+    mocks.getRemnashopMe.mockImplementation((accessToken: string) =>
+      accessToken.startsWith("source")
+        ? { ...sourceProfile, email: "changed@example.com" }
+        : finalTargetProfile,
+    );
+
+    await expect(confirmTelegramAccountMerge("raw-confirmation-token"))
+      .rejects.toMatchObject({ code: "ACCOUNT_MERGE_REQUIRED", status: 409 });
+    expect(mocks.remnashopMergeUsers).not.toHaveBeenCalled();
+    expect(mocks.linkCurrentUser).not.toHaveBeenCalled();
+  });
+
+  it("fails before preflight when a source e-mail change started after confirmation", async () => {
+    mocks.getRemnashopMe.mockResolvedValueOnce({
+      ...sourceProfile,
+      pending_email: "next@example.com",
+    });
+
+    await expect(confirmTelegramAccountMerge("raw-confirmation-token"))
+      .rejects.toMatchObject({ code: "ACCOUNT_MERGE_REQUIRED", status: 409 });
+    expect(mocks.remnashopMergeUsers).not.toHaveBeenCalled();
+    expect(mocks.linkCurrentUser).not.toHaveBeenCalled();
+  });
+
+  it("fails if the target linked a different Telegram after confirmation", async () => {
+    mocks.findUser.mockResolvedValueOnce({
+      ...targetUser,
+      telegramId: "888",
+    });
+
+    await expect(confirmTelegramAccountMerge("raw-confirmation-token"))
+      .rejects.toMatchObject({ code: "ACCOUNT_MERGE_REQUIRED", status: 409 });
+    expect(mocks.remnashopAuthTelegram).not.toHaveBeenCalled();
+    expect(mocks.remnashopMergeUsers).not.toHaveBeenCalled();
+    expect(mocks.linkCurrentUser).not.toHaveBeenCalled();
+  });
+
   it("fails before the real merge when upstream target ownership changed after staging", async () => {
     mocks.remnashopMergeUsers.mockResolvedValueOnce(
       mergeResult([], null, "another-owner@example.com"),
@@ -319,6 +448,17 @@ describe("confirmed Telegram account merge", () => {
     );
   });
 
+  it("fails before the real merge when the upstream target Telegram changed", async () => {
+    mocks.remnashopMergeUsers.mockResolvedValueOnce(
+      mergeResult([], null, "owner@example.com", 888),
+    );
+
+    await expect(confirmTelegramAccountMerge("raw-confirmation-token"))
+      .rejects.toMatchObject({ code: "ACCOUNT_MERGE_REQUIRED", status: 409 });
+    expect(mocks.remnashopMergeUsers).toHaveBeenCalledOnce();
+    expect(mocks.linkCurrentUser).not.toHaveBeenCalled();
+  });
+
   it("lets only one concurrent request claim the confirmation", async () => {
     mocks.accountUpdateMany.mockResolvedValueOnce({ count: 0 });
 
@@ -329,10 +469,6 @@ describe("confirmed Telegram account merge", () => {
   });
 
   it("retries safely after a lost upstream response and mutates local state only after proof", async () => {
-    mocks.getRemnashopMe.mockResolvedValue({
-      ...sourceProfile,
-      email: "owner@example.com",
-    });
     mocks.remnashopMergeUsers
       .mockResolvedValueOnce(mergeResult())
       .mockRejectedValueOnce(new BffError("UPSTREAM_UNAVAILABLE", 503, "lost response"));
@@ -357,7 +493,9 @@ describe("confirmed Telegram account merge", () => {
       .mockResolvedValueOnce(auth("source-access"))
       .mockResolvedValueOnce(auth("target-access"));
     mocks.remnashopMergeUsers.mockResolvedValue(mergeResult());
-    mocks.getRemnashopMe.mockResolvedValue({ ...sourceProfile, email: "owner@example.com" });
+    mocks.getRemnashopMe.mockImplementation((accessToken: string) =>
+      accessToken.startsWith("source") ? sourceProfile : finalTargetProfile,
+    );
     mocks.remnashopRequest.mockResolvedValue({ user_remna_id: "remna-user-1" });
     mocks.linkCurrentUser.mockResolvedValue({ user: { id: "target-local" } });
 
@@ -371,10 +509,6 @@ describe("confirmed Telegram account merge", () => {
     mocks.remnashopAuthTelegram
       .mockResolvedValueOnce(auth("target-access"))
       .mockResolvedValueOnce(auth("target-access"));
-    mocks.getRemnashopMe.mockResolvedValue({
-      ...sourceProfile,
-      email: "owner@example.com",
-    });
 
     await expect(confirmTelegramAccountMerge("raw-confirmation-token"))
       .resolves.toEqual({ merged: true, userId: "target-local" });
@@ -388,10 +522,6 @@ describe("confirmed Telegram account merge", () => {
   });
 
   it("fails closed when the final subscription visibility disagrees", async () => {
-    mocks.getRemnashopMe.mockResolvedValueOnce({
-      ...sourceProfile,
-      email: "owner@example.com",
-    });
     mocks.remnashopRequest.mockResolvedValueOnce(null);
 
     await expect(confirmTelegramAccountMerge("raw-confirmation-token"))
