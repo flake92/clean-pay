@@ -3,9 +3,17 @@
 Дата проверки: 2026-07-21
 Репозиторий: `C:\code\clean-pay`
 Ветка: `new-dev`
-Commit: `522c5736da83cbbee3e45997c4b108ab29c31fa0`
+Базовый commit проверки: `522c5736da83cbbee3e45997c4b108ab29c31fa0`
+Commit реализации и тестового runtime: `b2832f4e1f95612af4369ab2b72c8da11824d77b`
 Node.js: `24.18.0`
 Prisma / Prisma Client: `7.8.0`
+
+> Разделы с «Итоговой переоценки» по исторический план исправления описывают
+> состояние базового commit `522c573...`, а не оставшиеся дефекты после
+> реализации, если прямо не помечено обратное. Абсолютные локальные ссылки и
+> номера строк в этих разделах относятся к checkout baseline; после исправлений
+> строки сдвинулись, а часть исходного кода удалена. Актуальный статус, новые
+> проверки и фактический rollout зафиксированы в разделе «Выполнение отчёта».
 
 ## Цель и методика
 
@@ -28,6 +36,9 @@ Prisma / Prisma Client: `7.8.0`
   запускался против живого Remnashop, Redis или платёжного провайдера.
 
 ## Итоговая переоценка
+
+Эта таблица классифицирует 20 исходных тезисов на baseline. Она не означает,
+что после выполнения отчёта в коде осталось 20 дефектов.
 
 | № | Исходный тезис | Повторный вердикт | Итоговый приоритет |
 |---:|---|---|---|
@@ -720,7 +731,7 @@ vitest@^4.1.9
 
 ---
 
-## Дополнительная проверка зависимостей
+## Дополнительная проверка зависимостей на baseline
 
 Повторный `npm audit --omit=dev --json`:
 
@@ -738,7 +749,20 @@ vitest@^4.1.9
 образом к tooling; PostCSS advisory через Next требует отдельной проверки наличия
 обработки недоверенного CSS. High/critical advisory нет.
 
-## Выполненные проверки
+После реализации и публикации commit повторный audit по текущему
+`package-lock.json` (`npm audit --omit=dev --json`, 21 июля 2026 года) уже
+возвращает 8 advisory:
+6 moderate, 2 high, 0 critical. Два high относятся к транзитивным `fast-uri`
+(цепочка Prisma/AJV) и `immutable` (Sass); прямых импортов этих библиотек кодом
+Clean Pay нет, и удалённо достижимый сценарий в приложении не подтверждён.
+Однако production image содержит общий `node_modules`, поэтому этот результат
+нельзя скрывать формулировкой «только dev dependency». Это отдельный остаточный
+dependency/image-hardening риск: перед production rollout следует обновить
+исправляемые транзитивные версии либо отделить build/tooling dependencies от
+runtime и повторить audit. Для текущего тестового rollout это не было признано
+блокером, но audit не является чистым.
+
+## Выполненные проверки baseline (до изменений)
 
 - auth/security: 5 test files, 113 tests passed;
 - payments: 5 профильных unit files, 43 tests passed;
@@ -750,7 +774,11 @@ vitest@^4.1.9
 - pnpm frozen-lockfile probe: воспроизводимый failure;
 - исходные файлы приложения во время повторной проверки не изменялись.
 
-## Рекомендуемый порядок исправления
+## Исторический рекомендуемый порядок исправления
+
+Этот порядок был составлен до реализации. Он выполнен в commit `b2832f4...`,
+кроме осознанно оставленного пункта №13; пункты №17 и №20 были отозваны, а не
+«исправлены».
 
 1. №1 — связать `payment_id` с `operation_id` и хранить одну атомарную пару.
 2. №5 — добавить per-client/IP/WAF identity для public passkey options.
@@ -768,9 +796,10 @@ vitest@^4.1.9
 
 ---
 
-## Независимая проверка логики и поиск неиспользуемого кода (дополнение)
+## Независимая проверка логики и поиск неиспользуемого кода на baseline
 
-Проверка выполнена 2026-07-21 по текущему рабочему дереву. Запущены
+Проверка выполнена 2026-07-21 по рабочему дереву базового commit до реализации.
+Запущены
 `npm.cmd run typecheck`, `npm.cmd run lint`, `npm.cmd run test:unit`,
 `npm.cmd run test:route-handlers` и `npm.cmd run test:integration`.
 Результаты: typecheck успешно; 454 unit-теста успешно; 42 route-handler-теста
@@ -794,9 +823,9 @@ vitest@^4.1.9
 - В отчёте корректно отозваны как функциональные дефекты пункты №17 и №20;
   оставлять их можно только как исторические/ergonomics notes.
 
-### Подтверждённый неиспользуемый код
+### Подтверждённый на baseline неиспользуемый код
 
-В `src/frontend/types/layout.d.ts` обнаружены экспортируемые объявления,
+В `src/frontend/types/layout.d.ts` были обнаружены экспортируемые объявления,
 которые не импортируются и не используются ни в `src`, ни в `tests`:
 
 - `AppBreadcrumbProps`;
@@ -805,10 +834,9 @@ vitest@^4.1.9
 - `NodeRef`;
 - `MenuProps`.
 
-Это небольшие остатки шаблонного layout-кода: на runtime они не влияют, но
-увеличивают неактуальную поверхность типов. Их можно удалить вместе с
-неиспользуемым импортом `ReactNode`, относящимся только к `NodeRef`, после
-обычного typecheck.
+Это были небольшие остатки шаблонного layout-кода: на runtime они не влияли, но
+увеличивали неактуальную поверхность типов. В commit реализации они удалены
+вместе с неиспользуемым импортом `ReactNode`, относившимся только к `NodeRef`.
 
 ### Проверка кандидатов на удаление
 
@@ -821,7 +849,7 @@ vitest@^4.1.9
 
 ### Генерируемые и рабочие артефакты вне Git
 
-В корне найдены неотслеживаемые рабочие артефакты:
+На момент поиска в корне были найдены неотслеживаемые рабочие артефакты:
 
 - `.codex-clean-pay-9c5c819.tar`;
 - `.codex-clean-pay-9c5c819.tar.gz`;
@@ -833,11 +861,11 @@ vitest@^4.1.9
 аудит показал, что это уникальные операционные rebuild/rollback-рецепты, а не
 безусловный мусор.
 
-Также присутствуют игнорируемые результаты локальной работы: `coverage/`,
+Также на момент поиска присутствовали игнорируемые результаты локальной работы: `coverage/`,
 `.next/`, `tsconfig.tsbuildinfo` и `tsconfig.typecheck.tsbuildinfo`. Из них
-только `coverage/` сейчас заметен инструментам: корневой ESLint обходит его и
-выдаёт предупреждение. Практичное исправление — добавить `coverage/` в
-`globalIgnores` ESLint либо ограничить lint исходными каталогами. `coverage/`,
+только `coverage/` был заметен инструментам: корневой ESLint обходил его и
+выдавал предупреждение. Исправление добавило `coverage/` в `globalIgnores`
+ESLint. `coverage/`,
 `.next/` и пустой migration probe удалены через корзину; `*.tsbuildinfo`
 удалены как воспроизводимые артефакты (typecheck при необходимости создаёт их
 снова). Все эти удаления восстановимы либо полностью воспроизводимы.
@@ -888,8 +916,9 @@ vitest@^4.1.9
 Два исторических migration-файла действительно неатомарны. Они не изменены:
 их редактирование после возможного применения на существующих базах меняет
 checksum и без отдельного production rollout/resolve-плана опаснее исходного
-дефекта. Для первого тестового развёртывания migration status и фактическое
-применение проверяются отдельно. Любое исправление исторических SQL должно идти
+дефекта. На первом тестовом развёртывании migration status и фактическое
+применение уже проверены отдельно: 15 migrations завершены, незавершённых нет.
+Любое исправление исторических SQL должно идти
 отдельным изменением с инвентаризацией `_prisma_migrations`, backup и проверенным
 rollback/resolve runbook.
 
@@ -905,7 +934,7 @@ rollback/resolve runbook.
   `.codex-prod-compat-hotfix/` сохранены как используемая настройка и уникальные
   операционные материалы соответственно.
 
-### Проверки реализации до commit/deploy
+### Проверки реализации после изменений
 
 - `npm.cmd run lint` — 0 ошибок, 0 предупреждений;
 - `npm.cmd run typecheck` — успешно;
@@ -915,3 +944,80 @@ rollback/resolve runbook.
 - PostgreSQL owner-fence/account-merge: 4 теста успешно на PostgreSQL 17;
 - production build с CI-набором фиктивных env — успешно;
 - `corepack pnpm install --frozen-lockfile` — успешно.
+
+### Commit и push реализации
+
+- реализация зафиксирована commit
+  `b2832f4e1f95612af4369ab2b72c8da11824d77b` с сообщением
+  `fix: harden payment and authentication flows`;
+- перед commit проверены diff, whitespace и staged secret scan;
+- ветка `new-dev` отправлена в origin; remote SHA после push совпал с локальным;
+- последующие изменения README и этого отчёта являются documentation-only и не
+  меняют SHA фактически развёрнутого runtime.
+
+### Фактическое тестовое развёртывание 21 июля 2026 года
+
+- исходники Clean Pay доставлены в `/opt/clean-pay` как проверенный `git archive`
+  ровно commit `b2832f4...`; размер и SHA-256 локального и удалённого архива
+  совпали. На сервере намеренно нет `.git`;
+- собран `clean-pay-prod-app:b2832f4e1f95`, Docker image ID
+  `sha256:6f5979e160f73b4f5bca0973a929bcc028c01f76bce8284eb6f2fc9343bc44d7`;
+- Compose project `clean-pay-prod-restore` публикует приложение только на
+  `127.0.0.1:4000` и подключает alias `clean-pay` к `remnawave-network`;
+- app, PostgreSQL, Redis и retention worker healthy. Все 15 Prisma migrations
+  завершены, незавершённых нет; public и authenticated internal readiness
+  успешны, включая Remnashop, Redis, Telegram OIDC и Remnawave;
+- `PAYMENT_RECONCILIATION_ENABLED=false` сохранён намеренно: совместимость
+  upstream проверена, но платёжный fault-injection/end-to-end сценарий на
+  disposable provider не выполнялся.
+
+Remnashop обновлён отдельным согласованным maintenance rollout:
+
+- точный commit `b9da68a651e9ab0b7ed52d030e13754311614759`, tag
+  `clean-pay-remnashop:b9da68a651e9`, Docker image ID
+  `sha256:304191d9e27eee1a92a3ae7ffe3bb23586f4adbb80808d2759ee4bf9ec2926c6`;
+- preflight dump восстановлен в отдельную rehearsal-БД; цепочка Alembic
+  `0040` → `0050` прошла до единственного head `0050`;
+- во время live cutover остановлены только HTTP/Taskiq worker/scheduler.
+  Remnashop PostgreSQL и Redis не пересоздавались и сохранили container IDs;
+- после cutover все три роли работают из одного target image с нулевым числом
+  рестартов; capability contract v1 и безопасный admin merge dry-run вернули
+  ожидаемый результат, а строки пользователей до/после dry-run совпали;
+- SMTP прошёл TLS и authentication без отправки письма;
+- `payment_runtime_control.legacy_rollout_gate_active` очищен в `false` только
+  после прохождения всех gates;
+- preflight/cutover dump и архив assets проверены и находятся в
+  `/opt/deployment-backups/clean-pay-first-20260721T183616Z`, режим каталога
+  `0700`. Rollback не запускался, потому что forward rollout завершился успешно.
+
+Caddy route `oplata.clear-vpn.org` применён, временный maintenance для смежных
+маршрутов снят после валидации и smoke checks, а исходный
+`fallback_policy reject` не менялся. С внешней машины подтверждены:
+
+- валидный сертификат Let’s Encrypt с SAN `oplata.clear-vpn.org`, срок
+  `2026-07-21 17:51:23 UTC` — `2026-10-19 17:51:22 UTC`;
+- `/api/health/liveness` и `/api/health/readiness` — `200`, readiness не stale;
+- `/` — `307` на login, конечная login-страница — `200`;
+- HSTS `max-age=31536000` и enforcing CSP.
+
+### Остаточные ограничения и наблюдения
+
+- пункт №13 остаётся реальным, но осознанно не исправленным историческим риском;
+- реальный merge пользователей, отправка SMTP-письма и платёжный end-to-end не
+  выполнялись: проверены только dry-run, SMTP TLS/auth и health/contracts;
+- публичный TLS `panel2.clear-vpn.org` завершает handshake до выдачи сертификата.
+  Это наблюдалось до и после rollout; внутренний Caddy route возвращает `200`,
+  поэтому проблема локализована во внешнем SNI/TLS слое и не вызвана Clean Pay;
+- `/login` раскрывает стандартный `X-Powered-By: Next.js`. Это информационный
+  fingerprinting note, не исходный finding и не блокер тестового rollout;
+- после очистки в рабочем дереве намеренно сохранены два untracked каталога
+  `.codex-clean-pay-deploy/` и `.codex-prod-compat-hotfix/` с уникальными
+  операционными материалами. В Git они не добавляются;
+- актуальный dependency audit содержит описанные выше 2 high и 6 moderate
+  advisory; это отдельный незакрытый dependency/image-hardening долг.
+
+Итог: подтверждённые и подлежащие безопасному исправлению пункты отчёта
+реализованы и проверены на тестовом стенде. Нельзя формулировать результат как
+«исправлены все 20 дефектов»: два исходных тезиса были отозваны, один
+исторический migration-риск №13 оставлен по checksum/rollout причинам, а
+dependency advisories и внешний TLS `panel2` зафиксированы как отдельные риски.
