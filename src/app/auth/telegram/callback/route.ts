@@ -30,6 +30,7 @@ import {
   telegramAccountMergeCookieMaxAgeSeconds,
   telegramAccountMergeCookieName,
 } from "@/backend/auth/telegram-account-merge";
+import { withPaymentOwnerChangeFence } from "@/backend/payments/user-merge";
 
 export const runtime = "nodejs";
 
@@ -91,9 +92,11 @@ function callbackRequestMetadata(request: Request, url: URL) {
 async function linkTelegramToCurrentRemnashopAccount({
   telegramId,
   telegramUsername,
+  paymentOwnerFenceHeld = false,
 }: {
   telegramId: string;
   telegramUsername: string | null;
+  paymentOwnerFenceHeld?: boolean;
 }) {
   const tokens = await getAuthorizedRemnashopTokens({ allowUnverifiedEmail: true });
 
@@ -116,6 +119,7 @@ async function linkTelegramToCurrentRemnashopAccount({
         ?? tokens.session.remnashopRefreshExpiresAt?.toISOString()
         ?? new Date(Date.now() + 60_000).toISOString(),
     },
+    paymentOwnerFenceHeld,
   });
 }
 
@@ -189,48 +193,67 @@ async function reconcileTelegramCallbackResult({
   remnashopAuth: Awaited<ReturnType<typeof consumeTelegramCallback>>["remnashopAuth"];
 }) {
   if (linked) {
-    try {
-      await linkTelegramToCurrentRemnashopAccount({ telegramId, telegramUsername });
+    const incomingRemnashopUserId = remnashopAuth
+      ? getRemnashopUserIdFromAccessToken(remnashopAuth.cookies.accessToken)
+      : null;
 
-      return {
-        userId,
-        remnashopSession: undefined,
-        requiresTelegramRecovery: false,
-      };
-    } catch (error) {
-      logTechnicalWarning("telegram_link_remnashop_attach_failed", {
-        errorName: error instanceof Error ? error.name : "UnknownError",
-        telegramId,
-      });
-
-      if (!remnashopAuth) {
-        return {
-          userId,
-          remnashopSession: undefined,
-          requiresTelegramRecovery: false,
-        };
-      }
-
-      const upstreamMerged = await mergeCurrentRemnashopAccountIntoTelegramAccount({
-        remnashopAuth,
+    return withPaymentOwnerChangeFence({
+      userIds: [userId],
+      upstreamAccountIds: [
         currentRemnashopUserId,
-      });
+        incomingRemnashopUserId,
+      ].filter((ownerId): ownerId is string => Boolean(ownerId)),
+      telegramIds: [telegramId],
+      work: async () => {
+        try {
+          await linkTelegramToCurrentRemnashopAccount({
+            telegramId,
+            telegramUsername,
+            paymentOwnerFenceHeld: true,
+          });
 
-      const linkedUser = await linkCurrentUserToRemnashopAuth({
-        accessToken: remnashopAuth.cookies.accessToken,
-        refreshToken: remnashopAuth.cookies.refreshToken,
-        auth: remnashopAuth.data,
-        ...(upstreamMerged
-          ? { invalidateSiblingRemnashopTokens: true }
-          : {}),
-      });
+          return {
+            userId,
+            remnashopSession: undefined,
+            requiresTelegramRecovery: false,
+          };
+        } catch (error) {
+          logTechnicalWarning("telegram_link_remnashop_attach_failed", {
+            errorName: error instanceof Error ? error.name : "UnknownError",
+            telegramId,
+          });
 
-      return {
-        userId: linkedUser.user.id,
-        remnashopSession: undefined,
-        requiresTelegramRecovery: false,
-      };
-    }
+          if (!remnashopAuth) {
+            return {
+              userId,
+              remnashopSession: undefined,
+              requiresTelegramRecovery: false,
+            };
+          }
+
+          const upstreamMerged = await mergeCurrentRemnashopAccountIntoTelegramAccount({
+            remnashopAuth,
+            currentRemnashopUserId,
+          });
+
+          const linkedUser = await linkCurrentUserToRemnashopAuth({
+            accessToken: remnashopAuth.cookies.accessToken,
+            refreshToken: remnashopAuth.cookies.refreshToken,
+            auth: remnashopAuth.data,
+            paymentOwnerFenceHeld: true,
+            ...(upstreamMerged
+              ? { invalidateSiblingRemnashopTokens: true }
+              : {}),
+          });
+
+          return {
+            userId: linkedUser.user.id,
+            remnashopSession: undefined,
+            requiresTelegramRecovery: false,
+          };
+        }
+      },
+    });
   }
 
   if (!remnashopAuth) {

@@ -1,3 +1,5 @@
+import { isIP } from "node:net";
+
 import { getEnv } from "@/backend/config/env";
 import { logger } from "@/backend/observability/logger";
 import { BffError } from "@/backend/integrations/remnashop/errors";
@@ -18,12 +20,16 @@ export function getTurnstileToken(body: TurnstileBody) {
 }
 
 export function getRequestIp(request: Request) {
-  return (
-    request.headers.get("cf-connecting-ip") ??
-    request.headers.get("x-real-ip") ??
-    request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ??
-    null
-  );
+  // Production exposes the app only through the local reverse proxy. Use the
+  // right-most X-Forwarded-For hop set/appended by that proxy and ignore
+  // vendor-specific headers that an Internet client can supply directly.
+  const candidate = request.headers
+    .get("x-forwarded-for")
+    ?.split(",")
+    .at(-1)
+    ?.trim();
+
+  return candidate && isIP(candidate) ? candidate : null;
 }
 
 export async function verifyTurnstileToken(token: string | null | undefined, remoteIp?: string | null) {

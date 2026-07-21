@@ -1,5 +1,6 @@
 import { Prisma } from "@prisma/client";
 
+import { prisma } from "@/backend/database/prisma";
 import { BffError } from "@/backend/integrations/remnashop/errors";
 import { paymentUpstreamOwnerHash } from "@/backend/payments/hashes";
 import { sha256 } from "@/backend/security/crypto";
@@ -14,7 +15,150 @@ type LockedPaymentMergeOperation = {
   userId: string;
   idempotencyKeyHash: string;
   upstreamKey: string;
+  status: string;
+  leaseExpiresAt: Date | null;
 };
+
+// The longest owner-changing flow performs up to eight independently bounded
+// 15-second Remnashop requests while the lock is held. Leave headroom for its
+// database work without allowing an unbounded interactive transaction.
+const paymentOwnerFenceTimeoutMs = 180_000;
+
+function normalizedOwnerFenceUserIds(userIds: string[]) {
+  return [...new Set(userIds.filter(Boolean))].sort();
+}
+
+export async function lockPaymentOwnerFence(
+  tx: Prisma.TransactionClient,
+  rawUserIds: string[],
+) {
+  const userIds = normalizedOwnerFenceUserIds(rawUserIds);
+
+  for (const userId of userIds) {
+    const lockIdentity = `clean-pay:payment-owner:v1:${userId}`;
+    await tx.$queryRaw<Array<{ locked: number }>>(
+      Prisma.sql`
+        SELECT 1 AS "locked"
+        FROM (
+          SELECT pg_advisory_xact_lock(hashtextextended(${lockIdentity}, 0))
+        ) AS "paymentOwnerLock"
+      `,
+    );
+  }
+
+  return userIds;
+}
+
+export async function assertNoActivePaymentDispatches(
+  tx: Prisma.TransactionClient,
+  rawUserIds: string[],
+) {
+  const userIds = normalizedOwnerFenceUserIds(rawUserIds);
+
+  if (userIds.length === 0) {
+    return;
+  }
+
+  const now = new Date();
+  const active = await tx.paymentOperation.findFirst({
+    where: {
+      userId: { in: userIds },
+      OR: [
+        { status: "DISPATCHING" },
+        {
+          status: "READY",
+          leaseExpiresAt: { gt: now },
+        },
+      ],
+    },
+    select: { id: true },
+  });
+
+  if (active) {
+    paymentMergeRequired(
+      "Upstream account cannot change while a payment dispatch is in progress",
+    );
+  }
+}
+
+export async function withPaymentOwnerChangeFence<T>({
+  userIds = [],
+  upstreamAccountIds = [],
+  emails = [],
+  telegramIds = [],
+  work,
+}: {
+  userIds?: string[];
+  upstreamAccountIds?: string[];
+  emails?: Array<string | null | undefined>;
+  telegramIds?: Array<string | number | null | undefined>;
+  work: () => Promise<T>;
+}) {
+  const normalizedUpstreamIds = [...new Set(upstreamAccountIds.filter(Boolean))];
+  const normalizedEmails = [
+    ...new Set(
+      emails
+        .map((email) => email?.trim().toLowerCase())
+        .filter((email): email is string => Boolean(email)),
+    ),
+  ];
+  const normalizedTelegramIds = [
+    ...new Set(
+      telegramIds
+        .filter((telegramId) => telegramId !== null && telegramId !== undefined)
+        .map(String),
+    ),
+  ];
+  const explicitUserIds = normalizedOwnerFenceUserIds(userIds);
+
+  return prisma.$transaction(async (tx) => {
+    const ownerSelectors: Prisma.WebUserWhereInput[] = [];
+    if (explicitUserIds.length > 0) {
+      ownerSelectors.push({ id: { in: explicitUserIds } });
+    }
+    if (normalizedUpstreamIds.length > 0) {
+      ownerSelectors.push({ remnashopUserId: { in: normalizedUpstreamIds } });
+    }
+    if (normalizedEmails.length > 0) {
+      ownerSelectors.push({ email: { in: normalizedEmails } });
+    }
+    if (normalizedTelegramIds.length > 0) {
+      ownerSelectors.push({ telegramId: { in: normalizedTelegramIds } });
+    }
+
+    const mappedUsers = ownerSelectors.length > 0
+      ? await tx.webUser.findMany({
+          where: { OR: ownerSelectors },
+          select: { id: true },
+        })
+      : [];
+    const fencedUserIds = await lockPaymentOwnerFence(tx, [
+      ...explicitUserIds,
+      ...mappedUsers.map(({ id }) => id),
+    ]);
+
+    if (fencedUserIds.length === 0) {
+      paymentMergeRequired("Payment owner fence has no proven local owner");
+    }
+
+    // Owner-changing paths use the same advisory key. Re-read after acquiring
+    // all locks and fail closed if the mapping changed while the plan formed.
+    const currentMappedUsers = ownerSelectors.length > 0
+      ? await tx.webUser.findMany({
+          where: { OR: ownerSelectors },
+          select: { id: true },
+        })
+      : [];
+    if (
+      currentMappedUsers.some(({ id }) => !fencedUserIds.includes(id))
+    ) {
+      paymentMergeRequired("Payment merge owner changed before fencing");
+    }
+
+    await assertNoActivePaymentDispatches(tx, fencedUserIds);
+    return work();
+  }, { maxWait: 5_000, timeout: paymentOwnerFenceTimeoutMs });
+}
 
 function normalizedMergeUserIds(
   targetUserId: string,
@@ -62,7 +206,7 @@ export async function preflightPaymentOperationsForUserMerge(
 
   const lockedOperations = await tx.$queryRaw<LockedPaymentMergeOperation[]>(
     Prisma.sql`
-      SELECT "id", "userId", "idempotencyKeyHash", "upstreamKey"
+      SELECT "id", "userId", "idempotencyKeyHash", "upstreamKey", "status", "leaseExpiresAt"
       FROM "PaymentOperation"
       WHERE "userId" IN (${Prisma.join(userIds)})
       ORDER BY "id"
@@ -157,6 +301,21 @@ export async function transferPaymentOperationsForUserMerge(
     );
     const targetOwnerChanged =
       preflight.targetUpstreamAccountId !== targetUpstreamAccountId;
+    const now = new Date();
+    const inFlightOperation = preflight.lockedOperations.find(
+      (operation) =>
+        (operation.status === "DISPATCHING" ||
+          (operation.status === "READY" &&
+            operation.leaseExpiresAt !== null &&
+            operation.leaseExpiresAt > now)),
+    );
+
+    if ((targetOwnerChanged || sourceUserIds.length > 0) && inFlightOperation) {
+      paymentMergeRequired(
+        "Upstream account cannot change while a payment dispatch is in progress",
+      );
+    }
+
     await rekeyCollidingSourcePaymentOperations(
       tx,
       targetUserId,

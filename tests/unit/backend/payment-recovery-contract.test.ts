@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   parsePaymentCapabilities,
+  parsePaymentInit,
   parsePaymentRecovery,
   parsePaymentTransaction,
   parseTransactionPage,
@@ -33,6 +34,32 @@ const payment = {
 };
 
 describe("Remnashop payment recovery v1 contract", () => {
+  it("validates foreground payment URLs and preserves the echoed return URL", () => {
+    const returnUrl =
+      "https://pay.example.test/payment/pending?operation_id=operation-1";
+
+    expect(parsePaymentInit({ ...payment, return_url: returnUrl }, "/purchase"))
+      .toEqual({ ...payment, return_url: returnUrl });
+    expect(() =>
+      parsePaymentInit(
+        { ...payment, payment_url: "javascript:alert(1)" },
+        "/purchase",
+      ),
+    ).toThrow(/http\(s\) URL/i);
+    expect(() =>
+      parsePaymentInit(
+        { ...payment, payment_id: "not-a-uuid" },
+        "/purchase",
+      ),
+    ).toThrow(/UUID/i);
+    expect(() =>
+      parsePaymentInit(
+        { ...payment, return_url: { unexpected: true } },
+        "/purchase",
+      ),
+    ).toThrow(/return_url/i);
+  });
+
   it("accepts the canonical capabilities and rejects unknown state extensions", () => {
     const capabilities = {
       contract_version: 1,

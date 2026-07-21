@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => ({
   getPaymentCapabilities: vi.fn(),
   getLegacyTransactions: vi.fn(),
   getExactTransaction: vi.fn(),
+  parsePaymentInit: vi.fn(),
   syncOnePaymentHistoryPage: vi.fn(),
   reconcileUnknownPayments: vi.fn(),
   assertPaymentUpstreamIdentity: vi.fn(),
@@ -34,6 +35,7 @@ const mocks = vi.hoisted(() => ({
   settlePaymentOperationBeforeDispatchFailure: vi.fn(),
   getCurrentSession: vi.fn(),
   getCurrentUser: vi.fn(),
+  assertEmailVerificationPolicy: vi.fn(),
   prisma: {
     paymentRecord: {
       findMany: vi.fn(),
@@ -76,6 +78,7 @@ vi.mock("@/backend/integrations/remnashop/payment-recovery", () => ({
   getPaymentCapabilities: mocks.getPaymentCapabilities,
   getLegacyTransactions: mocks.getLegacyTransactions,
   getExactTransaction: mocks.getExactTransaction,
+  parsePaymentInit: mocks.parsePaymentInit,
 }));
 vi.mock("@/backend/integrations/remnawave/client", () => ({
   getLiveRemnawaveSubscriptionUrl: mocks.getLiveRemnawaveSubscriptionUrl,
@@ -112,6 +115,7 @@ vi.mock("@/backend/payments/idempotency", () => ({
 vi.mock("@/backend/sessions/web-session", () => ({
   getCurrentSession: mocks.getCurrentSession,
   getCurrentUser: mocks.getCurrentUser,
+  assertEmailVerificationPolicy: mocks.assertEmailVerificationPolicy,
 }));
 vi.mock("@/backend/database/prisma", () => ({ prisma: mocks.prisma }));
 vi.mock("@/backend/cache/redis", () => ({ redisCommand: mocks.redisCommand }));
@@ -278,6 +282,7 @@ describe("BFF route integration contracts", () => {
     mocks.getPaymentCapabilities.mockResolvedValue(null);
     mocks.getLegacyTransactions.mockResolvedValue([]);
     mocks.getExactTransaction.mockResolvedValue(null);
+    mocks.parsePaymentInit.mockImplementation((value: unknown) => value);
     mocks.syncOnePaymentHistoryPage.mockResolvedValue({
       claimed: true,
       applied: 0,
@@ -325,6 +330,7 @@ describe("BFF route integration contracts", () => {
     mocks.getLiveRemnawaveSubscriptionUrl.mockResolvedValue(null);
     mocks.getCurrentSession.mockResolvedValue(session);
     mocks.getCurrentUser.mockResolvedValue({ id: "user-1" });
+    mocks.assertEmailVerificationPolicy.mockResolvedValue(undefined);
     mocks.prisma.paymentRecord.findMany.mockResolvedValue([record]);
     mocks.prisma.paymentRecord.findFirst.mockResolvedValue(record);
     mocks.prisma.paymentRecord.updateMany.mockResolvedValue({ count: 1 });
@@ -950,14 +956,42 @@ describe("BFF route integration contracts", () => {
     });
   });
 
-  it("recovers the latest active operation without browser-local identifiers", async () => {
+  it("rejects payment and operation identifiers that belong to different payments", async () => {
     mocks.prisma.paymentOperation.findFirst.mockResolvedValueOnce({
+      id: "operation-mismatch",
+      status: "SUCCEEDED",
+      reconciledAt: new Date("2026-07-17T12:00:00.000Z"),
+      reconcileErrorSnapshot: null,
+      paymentRecord: {
+        ...record,
+        paymentId: "22222222-2222-4222-8222-222222222222",
+      },
+    });
+
+    const response = await paymentsStatusRoute.GET(
+      new Request(
+        `http://clean-pay.local/api/bff/payments/status?payment_id=${paymentId}&operation_id=operation-mismatch`,
+      ),
+    );
+
+    expect(response.status).toBe(409);
+    expect(mocks.getAuthorizedRemnashopTokens).not.toHaveBeenCalled();
+    await expect(body(response)).resolves.toMatchObject({
+      error: { code: "CONFLICT" },
+    });
+  });
+
+  it("recovers the latest active operation without browser-local identifiers", async () => {
+    const activeOperation = {
       id: "operation-active",
       status: "OUTCOME_UNKNOWN",
       reconciledAt: null,
       reconcileErrorSnapshot: null,
       paymentRecord: null,
-    });
+    };
+    mocks.prisma.paymentOperation.findFirst
+      .mockResolvedValueOnce(activeOperation)
+      .mockResolvedValueOnce(activeOperation);
     mocks.remnashopRequest.mockResolvedValueOnce(null);
 
     const response = await paymentsStatusRoute.GET(
@@ -1039,6 +1073,12 @@ describe("BFF route integration contracts", () => {
       reconciledAt: null,
       reconcileErrorSnapshot: null,
       paymentRecord: record,
+    }).mockResolvedValueOnce({
+      id: "operation-succeeded-pending",
+      status: "SUCCEEDED",
+      reconciledAt: null,
+      reconcileErrorSnapshot: null,
+      paymentRecord: completedRecord,
     });
     mocks.prisma.paymentRecord.findFirst.mockResolvedValueOnce(completedRecord);
     mocks.getPaymentCapabilities.mockResolvedValueOnce({
@@ -1070,6 +1110,63 @@ describe("BFF route integration contracts", () => {
         operation: { status: "succeeded" },
         subscription: { uuid: "sub-1" },
         source: "local_payment_record_and_current_subscription",
+      },
+    });
+  });
+
+  it("uses a newly reconciled terminal operation when subscription lookup fails", async () => {
+    const completedRecord = { ...record, status: "COMPLETED" };
+    const completedTransaction = {
+      payment_id: paymentId,
+      purchase_type: "NEW",
+      status: "completed",
+      gateway_type: "YOOKASSA",
+      final_amount: "100.00",
+      currency: "RUB",
+      plan_name: "Basic",
+      duration_days: 30,
+      device_limit: 3,
+      traffic_limit: null,
+      created_at: "2026-06-25T00:00:00.000Z",
+      updated_at: "2026-06-25T01:05:00.000Z",
+    };
+    mocks.prisma.paymentOperation.findFirst
+      .mockResolvedValueOnce({
+        id: "operation-reconciled",
+        status: "OUTCOME_UNKNOWN",
+        reconciledAt: null,
+        reconcileErrorSnapshot: null,
+        paymentRecord: record,
+      })
+      .mockResolvedValueOnce({
+        id: "operation-reconciled",
+        status: "SUCCEEDED",
+        reconciledAt: new Date("2026-07-17T12:00:00.000Z"),
+        reconcileErrorSnapshot: null,
+        paymentRecord: completedRecord,
+      });
+    mocks.getPaymentCapabilities.mockResolvedValueOnce({
+      contract_version: 1,
+      transactions: { max_page_size: 100 },
+    });
+    mocks.getExactTransaction.mockResolvedValueOnce(completedTransaction);
+    mocks.remnashopRequest.mockRejectedValueOnce(
+      new BffError("UPSTREAM_UNAVAILABLE", 502, "subscription unavailable"),
+    );
+
+    const response = await paymentsStatusRoute.GET(
+      new Request(
+        "http://clean-pay.local/api/bff/payments/status?operation_id=operation-reconciled",
+      ),
+    );
+
+    expect(response.status).toBe(200);
+    await expect(body(response)).resolves.toMatchObject({
+      data: {
+        payment: { payment_id: paymentId, status: "completed" },
+        operation: { status: "succeeded" },
+        subscription: null,
+        source: "local_terminal_payment_operation",
       },
     });
   });

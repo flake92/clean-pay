@@ -18,6 +18,7 @@ import {
   refreshCurrentAccessCookie,
 } from "@/backend/sessions/web-session";
 import type { CurrentSubscriptionResponse } from "@/shared/remnashop/types";
+import { withPaymentOwnerChangeFence } from "@/backend/payments/user-merge";
 
 const confirmationTtlMs = 10 * 60 * 1000;
 const processingLeaseMs = 2 * 60 * 1000;
@@ -435,6 +436,15 @@ export async function confirmTelegramAccountMerge(token: string) {
   }
 
   try {
+    return await withPaymentOwnerChangeFence({
+      userIds: [session.userId],
+      upstreamAccountIds: [
+        confirmation.sourceRemnashopUserId,
+        confirmation.targetRemnashopUserId,
+      ],
+      emails: [confirmation.sourceEmail, confirmation.targetEmail],
+      telegramIds: [confirmation.telegramId],
+      work: async () => {
     const current = await prisma.webUser.findUnique({ where: { id: session.userId } });
     if (
       !current ||
@@ -535,6 +545,7 @@ export async function confirmTelegramAccountMerge(token: string) {
       refreshToken: telegramAuth.cookies.refreshToken,
       auth: telegramAuth.data,
       invalidateSiblingRemnashopTokens: true,
+      paymentOwnerFenceHeld: true,
     });
 
     const completed = await prisma.accountMergeConfirmation.updateMany({
@@ -564,7 +575,9 @@ export async function confirmTelegramAccountMerge(token: string) {
       metadata: { confirmationId: confirmation.id },
     });
 
-    return { merged: true, userId: linked.user.id };
+        return { merged: true, userId: linked.user.id };
+      },
+    });
   } catch (error) {
     const terminal = error instanceof BffError && (
       error.code === "ACCOUNT_MERGE_REQUIRED" ||

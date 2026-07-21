@@ -1,20 +1,4 @@
-import React, { Dispatch, SetStateAction, HTMLAttributeAnchorTarget, MutableRefObject, ReactNode } from 'react';
-
-/* Breadcrumb Types */
-export interface AppBreadcrumbProps {
-    className?: string;
-}
-
-export interface Breadcrumb {
-    labels?: string[];
-    to?: string;
-}
-
-export interface BreadcrumbItem {
-    label: string;
-    to?: string;
-    items?: BreadcrumbItem[];
-}
+import React, { Dispatch, SetStateAction, HTMLAttributeAnchorTarget } from 'react';
 
 /* Context Types */
 export type LayoutState = {
@@ -38,7 +22,6 @@ export interface MenuContextProps {
 }
 
 /* AppTopbar Types */
-export type NodeRef = MutableRefObject<ReactNode>;
 export interface AppTopbarRef {
     menubutton?: HTMLButtonElement | null;
     topbarmenu?: HTMLDivElement | null;
@@ -50,10 +33,6 @@ type CommandProps = {
     originalEvent: React.MouseEvent<HTMLElement, MouseEvent>;
     item: MenuModelItem;
 };
-
-export interface MenuProps {
-    model: MenuModel[];
-}
 
 export interface MenuModel {
     label: string;

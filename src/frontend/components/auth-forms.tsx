@@ -475,29 +475,39 @@ export function RegisterForm() {
 
     setState({ loading: true, error: null });
 
-    const response = await fetch("/api/bff/auth/register", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        email: formData.get("email"),
-        password: formData.get("password"),
-        ...turnstilePayload(turnstile.token),
-      }),
-    });
+    try {
+      const response = await fetch("/api/bff/auth/register", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          email: formData.get("email"),
+          password: formData.get("password"),
+          ...turnstilePayload(turnstile.token),
+        }),
+      });
 
-    if (!response.ok) {
+      if (!response.ok) {
+        turnstile.reset();
+        setState({ loading: false, error: await readError(response) });
+        return;
+      }
+
+      const body = (await response.json()) as { data?: { user?: { is_email_verified?: boolean }; emailVerification?: unknown } };
+      if (shouldRedirectAfterRegisterFallback(body)) {
+        redirectAfterAuth("/cabinet");
+        return;
+      }
+
+      window.location.assign("/register/verify-email");
+    } catch {
       turnstile.reset();
-      setState({ loading: false, error: await readError(response) });
-      return;
+      setState({
+        loading: false,
+        error: "Не удалось определить результат регистрации. Проверьте соединение и повторите попытку.",
+      });
+    } finally {
+      setState((current) => ({ ...current, loading: false }));
     }
-
-    const body = (await response.json()) as { data?: { user?: { is_email_verified?: boolean }; emailVerification?: unknown } };
-    if (shouldRedirectAfterRegisterFallback(body)) {
-      redirectAfterAuth("/cabinet");
-      return;
-    }
-
-    window.location.assign("/register/verify-email");
   }
 
   return (

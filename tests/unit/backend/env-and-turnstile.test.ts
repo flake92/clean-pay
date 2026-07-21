@@ -202,14 +202,17 @@ describe("Turnstile helpers", () => {
 
     const request = new Request("http://clean-pay.local", {
       headers: {
+        "cf-connecting-ip": "1.1.1.1",
+        "x-real-ip": "2.2.2.2",
         "x-forwarded-for": "10.0.0.1, 10.0.0.2",
       },
     });
 
-    expect(getRequestIp(request)).toBe("10.0.0.1");
+    expect(getRequestIp(request)).toBe("10.0.0.2");
     expect(getRequestIp(new Request("http://clean-pay.local", { headers: { "cf-connecting-ip": "1.1.1.1" } }))).toBe(
-      "1.1.1.1",
+      null,
     );
+    expect(getRequestIp(new Request("http://clean-pay.local", { headers: { "x-forwarded-for": "spoofed" } }))).toBeNull();
   });
 
   it("skips verification when disabled", async () => {

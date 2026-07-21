@@ -66,26 +66,32 @@ export function RegisterEmailConfirmForm({
 
     setLoading("resend");
 
-    const response = await fetch("/api/bff/auth/email/request-verification", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(turnstilePayload(turnstileToken)),
-    });
+    try {
+      const response = await fetch("/api/bff/auth/email/request-verification", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(turnstilePayload(turnstileToken)),
+      });
 
-    setLoading(null);
+      if (!response.ok) {
+        turnstile?.reset();
+        setTurnstileToken(null);
+        setError(await readError(response, "Не удалось повторно отправить код."));
+        return;
+      }
 
-    if (!response.ok) {
+      const body = await response.json().catch(() => null);
+      const targetEmail = body?.data?.target_email;
+      setMessage(targetEmail ? `Код повторно отправлен на ${targetEmail}.` : "Код повторно отправлен.");
       turnstile?.reset();
       setTurnstileToken(null);
-      setError(await readError(response, "Не удалось повторно отправить код."));
-      return;
+    } catch {
+      turnstile?.reset();
+      setTurnstileToken(null);
+      setError("Сеть недоступна. Не удалось повторно отправить код.");
+    } finally {
+      setLoading(null);
     }
-
-    const body = await response.json().catch(() => null);
-    const targetEmail = body?.data?.target_email;
-    setMessage(targetEmail ? `Код повторно отправлен на ${targetEmail}.` : "Код повторно отправлен.");
-    turnstile?.reset();
-    setTurnstileToken(null);
   }
 
   async function onSubmit(event: React.FormEvent<HTMLFormElement>) {
@@ -100,25 +106,31 @@ export function RegisterEmailConfirmForm({
     setLoading("confirm");
 
     const formData = new FormData(event.currentTarget);
-    const response = await fetch("/api/bff/auth/email/confirm", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        code: formData.get("code"),
-        ...turnstilePayload(turnstileToken),
-      }),
-    });
+    try {
+      const response = await fetch("/api/bff/auth/email/confirm", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          code: formData.get("code"),
+          ...turnstilePayload(turnstileToken),
+        }),
+      });
 
-    setLoading(null);
+      if (!response.ok) {
+        turnstile?.reset();
+        setTurnstileToken(null);
+        setError(await readError(response, "Не удалось подтвердить e-mail."));
+        return;
+      }
 
-    if (!response.ok) {
+      window.location.assign("/passkey/setup");
+    } catch {
       turnstile?.reset();
       setTurnstileToken(null);
-      setError(await readError(response, "Не удалось подтвердить e-mail."));
-      return;
+      setError("Сеть недоступна. Не удалось подтвердить e-mail.");
+    } finally {
+      setLoading(null);
     }
-
-    window.location.assign("/passkey/setup");
   }
 
   return (

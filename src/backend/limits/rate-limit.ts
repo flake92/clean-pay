@@ -8,6 +8,7 @@ type RateLimitIdentity = {
   action: string;
   email?: string | null;
   tgId?: string | number | bigint | null;
+  clientIp?: string | null;
 };
 
 type RateLimitOptions = RateLimitIdentity & {
@@ -24,17 +25,18 @@ function normalizePart(value: string | number | bigint | null | undefined) {
   return String(value).trim().toLowerCase();
 }
 
-export function rateLimitKey({ action, email, tgId }: RateLimitIdentity) {
+export function rateLimitKey({ action, email, tgId, clientIp }: RateLimitIdentity) {
   const normalizedAction = normalizePart(action) ?? 'unknown';
-  const digest = (kind: 'email' | 'tgid', value: string | null) => value === null
+  const digest = (kind: 'email' | 'tgid' | 'ip', value: string | null) => value === null
     ? 'none'
     : createHmac('sha256', getEnv().rateLimitIdentitySecret)
-      .update(`clean-pay:rate-limit:v2:${kind}:${value}`)
+      .update(`clean-pay:rate-limit:v3:${kind}:${value}`)
       .digest('hex');
   const emailDigest = digest('email', normalizePart(email));
   const telegramDigest = digest('tgid', normalizePart(tgId));
+  const clientIpDigest = digest('ip', normalizePart(clientIp));
 
-  return `clean-pay:rate-limit:v2:${normalizedAction}:email:${emailDigest}:tgid:${telegramDigest}`;
+  return `clean-pay:rate-limit:v3:${normalizedAction}:email:${emailDigest}:tgid:${telegramDigest}:ip:${clientIpDigest}`;
 }
 
 async function getRetryAfterSeconds(key: string, windowSeconds: number) {

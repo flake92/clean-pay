@@ -4,7 +4,7 @@ set -eu
 ROOT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 ENV_FILE="$ROOT_DIR/deploy/prod/.env"
 ENV_EXAMPLE="$ROOT_DIR/deploy/prod/.env.example"
-COMPOSE_FILE="$ROOT_DIR/deploy/prod/docker-compose.yml"
+COMPOSE_PATH="$ROOT_DIR/deploy/prod/docker-compose.yml"
 
 die() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
 
@@ -13,14 +13,51 @@ need_docker() {
   docker compose version >/dev/null 2>&1 || die "Docker Compose v2 plugin is not installed."
 }
 
-env_value() { sed -n "s/^$1=//p" "$ENV_FILE" | tail -n 1; }
+env_value() {
+  name="$1"
+  fallback="${2:-}"
+  value=$(
+    grep -E "^${name}=" "$ENV_FILE" 2>/dev/null \
+      | tail -n 1 \
+      | sed -e "s/^${name}=//" -e 's/\r$//' -e 's/^"//' -e 's/"$//' -e "s/^'//" -e "s/'$//"
+  )
 
-compose() {
-  profiles=""
-  if [ "$(env_value PAYMENT_RECONCILIATION_ENABLED)" = "true" ]; then profiles="--profile reconciliation"; fi
-  # shellcheck disable=SC2086
-  docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" $profiles "$@"
+  if [ -n "$value" ]; then
+    printf '%s' "$value"
+  else
+    printf '%s' "$fallback"
+  fi
 }
+
+compose() (
+  # Compose gives the parent shell precedence over --env-file. Remove every
+  # variable used for interpolation so deploy/prod/.env remains authoritative.
+  unset \
+    CLEAN_PAY_BIND \
+    CLEAN_PAY_EDGE_NETWORK \
+    CLEAN_PAY_IMAGE \
+    CLEAN_PAY_PORT \
+    COMPOSE_ENV_FILES \
+    COMPOSE_FILE \
+    COMPOSE_PROFILES \
+    COMPOSE_PROJECT_NAME \
+    LOG_LEVEL \
+    NEXT_PUBLIC_APP_URL \
+    NEXT_PUBLIC_BRAND_LOGO_URL \
+    NEXT_PUBLIC_BRAND_NAME \
+    POSTGRES_DB \
+    POSTGRES_PASSWORD \
+    POSTGRES_USER \
+    REMNASHOP_DOCKER_NETWORK \
+    TURNSTILE_ENABLED \
+    TURNSTILE_SITE_KEY
+
+  if [ "$(env_value PAYMENT_RECONCILIATION_ENABLED false)" = "true" ]; then
+    docker compose --env-file "$ENV_FILE" -f "$COMPOSE_PATH" --profile reconciliation "$@"
+  else
+    docker compose --env-file "$ENV_FILE" -f "$COMPOSE_PATH" "$@"
+  fi
+)
 
 replace_env() {
   name=$1

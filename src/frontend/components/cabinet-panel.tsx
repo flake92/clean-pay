@@ -8,6 +8,7 @@ import { DataTable } from "primereact/datatable";
 import { InputText } from "primereact/inputtext";
 import { Message } from "primereact/message";
 import { readBffError } from "@/frontend/lib/client-api";
+import { getCachedBffJson } from "@/frontend/lib/bff-cache";
 import { ProgressBar } from "primereact/progressbar";
 import { Tag } from "primereact/tag";
 
@@ -225,7 +226,15 @@ export function CabinetPanel() {
     }
   }, []);
 
-  const loadOffers = useCallback(async () => {
+  const loadOffers = useCallback(async (cached = false) => {
+    if (cached) {
+      const offersResponse = await getCachedBffJson<SubscriptionOffersResponse>(
+        "/api/bff/subscription/offers",
+      );
+      setOffers(offersResponse.ok ? offersResponse.data : null);
+      return;
+    }
+
     const offersResponse = await fetch("/api/bff/subscription/offers");
 
     if (offersResponse.ok) {
@@ -257,20 +266,23 @@ export function CabinetPanel() {
   useEffect(() => {
     async function loadCabinet() {
       try {
-        const profileResponse = await fetch("/api/bff/auth/me");
+        const profileResponse = await getCachedBffJson<{ user: CabinetUser }>(
+          "/api/bff/auth/me",
+        );
 
         if (!profileResponse.ok) {
           throw new Error("Нужно войти в аккаунт.");
         }
 
-        const profileBody = await profileResponse.json();
-        setUser(profileBody.data.user);
+        setUser(profileResponse.data?.user ?? null);
 
-        await loadSubscription();
-        await loadOffers();
-        await loadDevices();
-        await loadPayments();
-        await loadSupport();
+        await Promise.all([
+          loadSubscription(),
+          loadOffers(true),
+          loadDevices(),
+          loadPayments(),
+          loadSupport(),
+        ]);
       } catch (err) {
         setError(err instanceof Error ? err.message : "Не удалось загрузить кабинет.");
       }

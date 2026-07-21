@@ -31,6 +31,7 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "dist/**",
+    "coverage/**",
     "apps/**",
     "next-env.d.ts",
     "primereact-sakai-template/**",

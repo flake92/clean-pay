@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
   getCurrentSession: vi.fn(),
   mergeLocalUsersIntoTarget: vi.fn(),
   assertUserMergeFinalOwner: vi.fn(),
+  lockPaymentOwnerFence: vi.fn(),
   prisma: {
     $transaction: vi.fn(),
     webUser: {
@@ -69,6 +70,10 @@ vi.mock("@/backend/auth/user-merge", () => ({
   assertUserMergeFinalOwner: mocks.assertUserMergeFinalOwner,
 }));
 
+vi.mock("@/backend/payments/user-merge", () => ({
+  lockPaymentOwnerFence: mocks.lockPaymentOwnerFence,
+}));
+
 import {
   createSessionFromRemnashopAuth,
   linkCurrentUserToRemnashopAuth,
@@ -108,6 +113,9 @@ describe("Remnashop session reconciliation", () => {
     mocks.getRemnashopMe.mockResolvedValue(profile);
     mocks.mergeLocalUsersIntoTarget.mockResolvedValue({});
     mocks.assertUserMergeFinalOwner.mockResolvedValue({ id: "user-1" });
+    mocks.lockPaymentOwnerFence.mockImplementation(
+      async (_tx: unknown, userIds: string[]) => userIds,
+    );
     mocks.prisma.$transaction.mockImplementation(async (callback) => callback(tx));
     tx.$queryRaw.mockResolvedValue([{
       id: "user-1",
@@ -279,6 +287,7 @@ describe("Remnashop session reconciliation", () => {
       targetUserId: "user-1",
       targetUpstreamAccountId: "remna-1",
       sourceUserIds: ["other-remna", "other-email"],
+      paymentOwnerFenceHeld: true,
       ownerExpectations: [
         {
           id: "user-1",

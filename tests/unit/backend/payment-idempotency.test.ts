@@ -13,7 +13,13 @@ const mocks = vi.hoisted(() => {
     updateMany: vi.fn(),
   };
   const queryRaw = vi.fn();
-  const transaction = { paymentOperation, paymentRecord, $queryRaw: queryRaw };
+  const webUser = { findUnique: vi.fn() };
+  const transaction = {
+    paymentOperation,
+    paymentRecord,
+    webUser,
+    $queryRaw: queryRaw,
+  };
   const prisma = {
     paymentOperation,
     paymentRecord,
@@ -21,6 +27,7 @@ const mocks = vi.hoisted(() => {
   };
 
   const lockPaymentUpstreamOwner = vi.fn();
+  const lockPaymentOwnerFence = vi.fn();
 
   return {
     paymentOperation,
@@ -29,6 +36,8 @@ const mocks = vi.hoisted(() => {
     prisma,
     queryRaw,
     lockPaymentUpstreamOwner,
+    lockPaymentOwnerFence,
+    webUser,
   };
 });
 
@@ -37,6 +46,9 @@ vi.mock("@/backend/database/prisma", () => ({
 }));
 vi.mock("@/backend/payments/owner", () => ({
   lockPaymentUpstreamOwner: mocks.lockPaymentUpstreamOwner,
+}));
+vi.mock("@/backend/payments/user-merge", () => ({
+  lockPaymentOwnerFence: mocks.lockPaymentOwnerFence,
 }));
 
 import { BffError } from "@/backend/integrations/remnashop/errors";
@@ -141,6 +153,12 @@ describe("payment operation idempotency", () => {
     mocks.paymentRecord.updateMany.mockResolvedValue({ count: 1 });
     mocks.queryRaw.mockResolvedValue([{ id: "user-1" }]);
     mocks.lockPaymentUpstreamOwner.mockResolvedValue(undefined);
+    mocks.lockPaymentOwnerFence.mockImplementation(
+      async (_tx: unknown, userIds: string[]) => userIds,
+    );
+    mocks.webUser.findUnique.mockResolvedValue({
+      remnashopUserId: "remnashop-user-1",
+    });
     mocks.prisma.$transaction.mockImplementation(
       async (callback: (transaction: typeof mocks.transaction) => unknown) =>
         callback(mocks.transaction),
@@ -193,7 +211,7 @@ describe("payment operation idempotency", () => {
       values?: unknown[];
     };
     expect(lockSql.strings?.join(" ")).toContain('FROM "WebUser"');
-    expect(lockSql.strings?.join(" ")).toContain("FOR KEY SHARE");
+    expect(lockSql.strings?.join(" ")).toContain("FOR UPDATE");
     expect(lockSql.values).toContain("user-1");
     expect(mocks.prisma.$transaction).toHaveBeenCalledWith(
       expect.any(Function),

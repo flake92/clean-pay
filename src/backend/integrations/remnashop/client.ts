@@ -24,10 +24,16 @@ import type {
   TelegramAuthRequest,
   TelegramWebAppAuthRequest,
 } from "@/shared/remnashop/types";
-import { getCurrentSession, refreshCurrentAccessCookie } from "@/backend/sessions/web-session";
+import {
+  assertEmailVerificationPolicy,
+  getCurrentSession,
+  refreshCurrentAccessCookie,
+} from "@/backend/sessions/web-session";
 import { acquireRemnashopTokensForSession } from "@/backend/integrations/remnashop/session-token-lifecycle";
 import { protectRemnashopToken } from "@/backend/integrations/remnashop/token-protection";
 import {
+  assertNoActivePaymentDispatches,
+  lockPaymentOwnerFence,
   preflightPaymentOperationsForUserMerge,
   transferPaymentOperationsForUserMerge,
 } from "@/backend/payments/user-merge";
@@ -774,6 +780,8 @@ export async function attachRemnashopTokensForTelegramSession(
           .filter((id) => id !== session.userId),
       ]),
     ].sort();
+    await lockPaymentOwnerFence(tx, mergeUserIds);
+    await assertNoActivePaymentDispatches(tx, mergeUserIds);
     const lockedUsers = await tx.$queryRaw<Array<{ id: string }>>(
       Prisma.sql`
         SELECT "id"
@@ -1272,6 +1280,13 @@ export async function getAuthorizedRemnashopTokens({
   if (!localSession) {
     authDebugLog("remnashop_tokens_authorize_failed", { reason: "missing_session" });
     throw normalizeRemnashopError(401, "Not authenticated", { path: "/auth/session" });
+  }
+
+  // Mirror the proxy policy from current database state before token refresh,
+  // Telegram recovery or any other upstream side effect. Verification flows
+  // opt out explicitly while they are completing that state transition.
+  if (!allowUnverifiedEmail) {
+    assertEmailVerificationPolicy(localSession.user);
   }
 
   let authorized: Awaited<ReturnType<typeof acquireRemnashopTokensForSession>> = null;

@@ -17,6 +17,7 @@ const mocks = vi.hoisted(() => ({
   remnashopRequest: vi.fn(),
   assertRateLimit: vi.fn(),
   queryRaw: vi.fn(),
+  withPaymentOwnerChangeFence: vi.fn(),
 }));
 
 vi.mock("@/backend/database/prisma", () => {
@@ -56,6 +57,10 @@ vi.mock("@/backend/observability/audit", () => ({
 vi.mock("@/backend/sessions/web-session", () => ({
   getCurrentSession: mocks.getCurrentSession,
   refreshCurrentAccessCookie: mocks.refreshCurrentAccessCookie,
+}));
+
+vi.mock("@/backend/payments/user-merge", () => ({
+  withPaymentOwnerChangeFence: mocks.withPaymentOwnerChangeFence,
 }));
 
 import {
@@ -142,6 +147,9 @@ describe("confirmed Telegram account merge", () => {
     mocks.remnashopMergeUsers.mockReset();
     mocks.remnashopRequest.mockReset();
     mocks.queryRaw.mockReset();
+    mocks.withPaymentOwnerChangeFence.mockImplementation(
+      ({ work }: { work: () => Promise<unknown> }) => work(),
+    );
     mocks.queryRaw.mockResolvedValue([]);
     mocks.findUser.mockResolvedValue(targetUser);
     mocks.getCurrentSession.mockResolvedValue({

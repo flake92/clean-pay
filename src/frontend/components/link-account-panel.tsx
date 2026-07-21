@@ -347,41 +347,47 @@ export function LinkAccountPanel({
     setMessage(null);
     setError(null);
 
-    const formData = new FormData(event.currentTarget);
-    const response = await fetch("/api/bff/link/remnashop", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        email: formData.get("email"),
-        password: formData.get("password"),
-      }),
-    });
+    try {
+      const formData = new FormData(event.currentTarget);
+      const response = await fetch("/api/bff/link/remnashop", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          email: formData.get("email"),
+          password: formData.get("password"),
+        }),
+      });
 
-    setActionLoading(null);
+      if (!response.ok) {
+        const responseError = await readError(response);
+        turnstile?.reset();
+        setTurnstileToken(null);
+        await loadState();
+        setError(responseError);
+        return;
+      }
 
-    if (!response.ok) {
-      const responseError = await readError(response);
+      const body = (await response.json()) as {
+        data?: {
+          linked?: boolean;
+          pendingVerification?: boolean;
+        };
+      };
+
+      if (body.data?.linked) {
+        setMessage("E-mail привязан.");
+        window.location.assign("/cabinet");
+        return;
+      }
+
+      window.location.assign("/verify-email");
+    } catch {
       turnstile?.reset();
       setTurnstileToken(null);
-      await loadState();
-      setError(responseError);
-      return;
+      setError("Сеть недоступна. Не удалось связать e-mail с аккаунтом.");
+    } finally {
+      setActionLoading(null);
     }
-
-    const body = (await response.json()) as {
-      data?: {
-        linked?: boolean;
-        pendingVerification?: boolean;
-      };
-    };
-
-    if (body.data?.linked) {
-      setMessage("E-mail привязан.");
-      window.location.assign("/cabinet");
-      return;
-    }
-
-    window.location.assign("/verify-email");
   }
 
   if (loading) {

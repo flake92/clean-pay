@@ -2,10 +2,12 @@ import { type Prisma } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
+  lockPaymentOwnerFence: vi.fn(),
   transferPaymentOperationsForUserMerge: vi.fn(),
 }));
 
 vi.mock("@/backend/payments/user-merge", () => ({
+  lockPaymentOwnerFence: mocks.lockPaymentOwnerFence,
   transferPaymentOperationsForUserMerge:
     mocks.transferPaymentOperationsForUserMerge,
 }));
@@ -56,6 +58,11 @@ function mergeTransaction() {
 describe("local user merge policy", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.lockPaymentOwnerFence.mockResolvedValue([
+      "source-a",
+      "source-b",
+      "target-user",
+    ]);
     mocks.transferPaymentOperationsForUserMerge.mockResolvedValue(undefined);
   });
 
@@ -75,6 +82,12 @@ describe("local user merge policy", () => {
       invalidatedEmailCodeCount: 5,
       invalidatedTelegramStateCount: 6,
     });
+
+    expect(mocks.lockPaymentOwnerFence).toHaveBeenCalledWith(tx, [
+      "source-a",
+      "source-b",
+      "target-user",
+    ]);
 
     expect(tx.webUser.updateMany).toHaveBeenCalledWith({
       where: { id: { in: ["source-b", "source-a"] } },

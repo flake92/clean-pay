@@ -16,10 +16,23 @@ import { getEnv } from "@/backend/config/env";
 import { prisma } from "@/backend/database/prisma";
 import { BffError } from "@/backend/integrations/remnashop/errors";
 import { assertRateLimit } from "@/backend/limits/rate-limit";
-import { createWebSession, getCurrentSession, upgradeCurrentSessionToFull } from "@/backend/sessions/web-session";
+import {
+  assertEmailVerificationPolicy,
+  createWebSession,
+  getCurrentSession,
+  upgradeCurrentSessionToFull,
+} from "@/backend/sessions/web-session";
 
 const challengeTtlMs = 5 * 60 * 1000;
 const maxPasskeyNameLength = 80;
+
+function assertPasskeySessionPolicy(
+  session: NonNullable<Awaited<ReturnType<typeof getCurrentSession>>>,
+) {
+  if (session.assuranceLevel === WebSessionAssuranceLevel.FULL) {
+    assertEmailVerificationPolicy(session.user);
+  }
+}
 
 function addMs(date: Date, ms: number) {
   return new Date(date.getTime() + ms);
@@ -159,6 +172,7 @@ export async function beginPasskeyRegistration() {
   if (!session) {
     throw new BffError("UNAUTHORIZED", 401, "Session is required");
   }
+  assertPasskeySessionPolicy(session);
 
   const { rpID, rpName } = webAuthnRelyingParty();
   const userName = session.user.email ?? session.user.telegramUsername ?? session.user.telegramId ?? session.userId;
@@ -197,6 +211,7 @@ export async function finishPasskeyRegistration(response: RegistrationResponseJS
   if (!session) {
     throw new BffError("UNAUTHORIZED", 401, "Session is required");
   }
+  assertPasskeySessionPolicy(session);
 
   const challenge = await consumeChallenge(
     challengeFromClientDataJSON(clientDataJSONFromCredentialResponse(response)),
@@ -295,9 +310,10 @@ export async function finishPasskeyRegistration(response: RegistrationResponseJS
   return { success: true };
 }
 
-export async function beginPasskeyLogin() {
+export async function beginPasskeyLogin(clientIp?: string | null) {
   await assertRateLimit({
     action: "passkey_login_options",
+    clientIp,
     limit: 20,
     windowSeconds: 15 * 60,
   });
@@ -418,6 +434,7 @@ export async function listPasskeys() {
   if (!session || session.assuranceLevel !== WebSessionAssuranceLevel.FULL) {
     throw new BffError("UNAUTHORIZED", 401, "Full session is required");
   }
+  assertPasskeySessionPolicy(session);
 
   const credentials = await prisma.webAuthnCredential.findMany({
     where: { userId: session.userId },
@@ -482,6 +499,7 @@ export async function deletePasskey(credentialId: string) {
   if (!session || session.assuranceLevel !== WebSessionAssuranceLevel.FULL) {
     throw new BffError("UNAUTHORIZED", 401, "Full session is required");
   }
+  assertPasskeySessionPolicy(session);
 
   const credential = await deleteOwnedPasskey(session.userId, credentialId);
   await auditLog({

@@ -20,6 +20,7 @@ import {
 import { paymentUpstreamOwnerHash } from "@/backend/payments/hashes";
 import { lockPaymentUpstreamOwner } from "@/backend/payments/owner";
 import { isPaymentManualRequired } from "@/backend/payments/manual-review";
+import { lockPaymentOwnerFence } from "@/backend/payments/user-merge";
 import type {
   ExtendRequest,
   PaymentInitResponse,
@@ -283,20 +284,26 @@ async function findOperation(userId: string, idempotencyKeyHash: string) {
 async function createOrFindOperation({
   userId,
   identity,
+  expectedUpstreamAccountId,
 }: {
   userId: string;
   identity: OperationIdentity;
+  expectedUpstreamAccountId?: string;
 }) {
   for (let attempt = 0; attempt < 3; attempt += 1) {
     try {
       return await prisma.$transaction(
         async (tx) => {
-          const lockedUsers = await tx.$queryRaw<Array<{ id: string }>>(
+          await lockPaymentOwnerFence(tx, [userId]);
+          const lockedUsers = await tx.$queryRaw<Array<{
+            id: string;
+            remnashopUserId: string | null;
+          }>>(
             Prisma.sql`
-              SELECT "id"
+              SELECT "id", "remnashopUserId"
               FROM "WebUser"
               WHERE "id" = ${userId}
-              FOR KEY SHARE
+              FOR UPDATE
             `,
           );
 
@@ -305,6 +312,17 @@ async function createOrFindOperation({
               "ACCOUNT_MERGE_REQUIRED",
               409,
               "Payment owner changed before operation creation",
+            );
+          }
+
+          if (
+            expectedUpstreamAccountId !== undefined &&
+            lockedUsers[0]?.remnashopUserId !== expectedUpstreamAccountId
+          ) {
+            throw new BffError(
+              "ACCOUNT_MERGE_REQUIRED",
+              409,
+              "Payment upstream owner changed before operation creation",
             );
           }
 
@@ -442,6 +460,7 @@ export async function beginPaymentOperation(input: {
   idempotencyKey: string | null;
   operation: PaymentOperationRequest;
   createIfMissing?: boolean;
+  expectedUpstreamAccountId?: string;
 }): Promise<PaymentOperationBeginResult> {
   const identity = operationIdentity(input);
   let operation = await findOperation(
@@ -457,6 +476,7 @@ export async function beginPaymentOperation(input: {
     operation = await createOrFindOperation({
       userId: input.userId,
       identity,
+      expectedUpstreamAccountId: input.expectedUpstreamAccountId,
     });
   }
 
@@ -542,20 +562,43 @@ export async function beginPaymentOperation(input: {
     } else {
       const claimToken = randomToken(32);
       const leaseExpiresAt = new Date(now.getTime() + READY_LEASE_MS);
-      const claimed = await prisma.paymentOperation.updateMany({
-        where: {
-          id: operation.id,
-          status: "READY",
-          OR: [
-            { leaseExpiresAt: null },
-            { leaseExpiresAt: { lte: now } },
-          ],
-        },
-        data: {
-          attemptCount: { increment: 1 },
-          claimTokenHash: claimTokenHash(claimToken),
-          leaseExpiresAt,
-        },
+      const operationId = operation.id;
+      const claimed = await prisma.$transaction(async (tx) => {
+        await lockPaymentOwnerFence(tx, [input.userId]);
+
+        if (input.expectedUpstreamAccountId !== undefined) {
+          const currentOwner = await tx.webUser.findUnique({
+            where: { id: input.userId },
+            select: { remnashopUserId: true },
+          });
+
+          if (
+            !currentOwner ||
+            currentOwner.remnashopUserId !== input.expectedUpstreamAccountId
+          ) {
+            throw new BffError(
+              "ACCOUNT_MERGE_REQUIRED",
+              409,
+              "Payment upstream owner changed before operation claim",
+            );
+          }
+        }
+
+        return tx.paymentOperation.updateMany({
+          where: {
+            id: operationId,
+            status: "READY",
+            OR: [
+              { leaseExpiresAt: null },
+              { leaseExpiresAt: { lte: now } },
+            ],
+          },
+          data: {
+            attemptCount: { increment: 1 },
+            claimTokenHash: claimTokenHash(claimToken),
+            leaseExpiresAt,
+          },
+        });
       });
 
       if (claimed.count === 1) {

@@ -11,6 +11,7 @@ describe("application security headers", () => {
 
     expect(headers["content-security-policy"]).toContain("frame-ancestors 'none'");
     expect(headers["content-security-policy"]).toContain("https://challenges.cloudflare.com");
+    expect(headers["content-security-policy"]).toContain("https://telegram.org");
     expect(headers["content-security-policy"]).toContain("worker-src 'self' blob:");
     expect(headers["x-content-type-options"]).toBe("nosniff");
     expect(headers["referrer-policy"]).toBe("strict-origin-when-cross-origin");

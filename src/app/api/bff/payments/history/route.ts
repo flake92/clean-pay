@@ -13,7 +13,7 @@ import {
   getPaymentCapabilities,
 } from "@/backend/integrations/remnashop/payment-recovery";
 import { BffError } from "@/backend/integrations/remnashop/errors";
-import { getCurrentUser } from "@/backend/sessions/web-session";
+import { assertEmailVerificationPolicy, getCurrentUser } from "@/backend/sessions/web-session";
 import { syncOnePaymentHistoryPage } from "@/backend/payments/history-sync";
 import { assertPaymentUpstreamIdentity } from "@/backend/payments/owner";
 
@@ -26,6 +26,7 @@ export async function GET() {
     if (!user) {
       return bffError(new BffError("UNAUTHORIZED", 401, "Нужно войти в аккаунт."));
     }
+    assertEmailVerificationPolicy(user);
 
     const { accessToken } = await getAuthorizedRemnashopTokens();
     const upstreamAccountId = getRemnashopUserIdFromAccessToken(accessToken);

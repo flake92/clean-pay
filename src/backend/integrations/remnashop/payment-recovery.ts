@@ -271,6 +271,14 @@ export function parsePaymentInit(
     "payment.payment_url",
     true,
   );
+  const returnUrl = payment.return_url === undefined
+    ? undefined
+    : textValue(
+        payment.return_url,
+        path,
+        "payment.return_url",
+        true,
+      );
 
   if (!UUID_PATTERN.test(paymentId)) {
     return invalidContract(path, "payment.payment_id must be a UUID");
@@ -326,6 +334,7 @@ export function parsePaymentInit(
     is_free: payment.is_free,
     final_amount: finalAmount,
     currency,
+    ...(returnUrl === undefined ? {} : { return_url: returnUrl }),
   };
 }
 

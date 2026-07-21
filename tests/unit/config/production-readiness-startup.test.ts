@@ -7,6 +7,11 @@ const rootStart = readFileSync("start.sh", "utf8");
 const prodCompose = readFileSync("deploy/prod/docker-compose.yml", "utf8");
 const rootCompose = readFileSync("docker-compose.yml", "utf8");
 const devcontainerCompose = readFileSync(".devcontainer/docker-compose.yml", "utf8");
+const prismaClient = readFileSync("src/backend/database/prisma.ts", "utf8");
+const readinessPrismaClient = readFileSync(
+  "src/backend/database/readiness-prisma.ts",
+  "utf8",
+);
 
 describe("production readiness startup gate", () => {
   it("verifies the readiness endpoint and its dependency payload", () => {
@@ -55,5 +60,22 @@ describe("production readiness startup gate", () => {
       expect(compose).toContain("interval: 15s");
       expect(compose).toContain("timeout: 12s");
     }
+  });
+
+  it("bounds database connection, client-query and server-statement waits", () => {
+    expect(readinessPrismaClient).toContain(
+      "connectionTimeoutMillis: readinessDatabaseTimeoutMs",
+    );
+    expect(readinessPrismaClient).toContain(
+      "query_timeout: readinessDatabaseTimeoutMs",
+    );
+    expect(readinessPrismaClient).toContain(
+      "statement_timeout: readinessDatabaseTimeoutMs",
+    );
+    expect(readinessPrismaClient).toContain("max: 1");
+    expect(readinessPrismaClient).toContain(
+      "export const readinessDatabaseTimeoutMs = 4_000",
+    );
+    expect(prismaClient).not.toContain("query_timeout");
   });
 });

@@ -29,4 +29,22 @@ describe("payment return state", () => {
     expect(paymentPollDelayMs(20)).toBe(30_000);
     expect(paymentPollDelayMs(0, 9)).toBe(9_000);
   });
+
+  it("documents why identifiers from separate attempts must never be mixed", () => {
+    const processingWithStalePayment = {
+      operation: { status: "processing" },
+      payment: { status: "completed" },
+    };
+    const retryReadyWithStalePayment = {
+      operation: { status: "retry_ready" },
+      payment: { status: "completed" },
+    };
+
+    // The UI would otherwise show success for both mixed snapshots. Processing
+    // still polls, while retry_ready is terminal until the user retries.
+    expect(paymentReturnOutcome(processingWithStalePayment)).toBe("success");
+    expect(shouldPollPaymentReturn(processingWithStalePayment)).toBe(true);
+    expect(paymentReturnOutcome(retryReadyWithStalePayment)).toBe("success");
+    expect(shouldPollPaymentReturn(retryReadyWithStalePayment)).toBe(false);
+  });
 });

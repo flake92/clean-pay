@@ -22,12 +22,12 @@ import {
   remnashopRequest,
 } from "@/backend/integrations/remnashop/client";
 import { BffError } from "@/backend/integrations/remnashop/errors";
-import { getCurrentSession } from "@/backend/sessions/web-session";
+import { assertEmailVerificationPolicy, getCurrentSession } from "@/backend/sessions/web-session";
 import { assertPaymentReturnUrl, paymentReturnUrl } from "@/backend/payments/return-url";
+import { parsePaymentInit } from "@/backend/integrations/remnashop/payment-recovery";
 import { readExtendRequest } from "@/backend/payments/request-validation";
 import { paymentOfferMatches } from "@/shared/payments/offer-confirmation";
 import type {
-  PaymentInitResponse,
   SubscriptionOffersResponse,
 } from "@/shared/remnashop/types";
 
@@ -50,6 +50,7 @@ export async function POST(request: Request) {
     if (!currentSession) {
       throw new BffError("UNAUTHORIZED", 401);
     }
+    assertEmailVerificationPolicy(currentSession.user);
 
     const operationInput = {
       userId: currentSession.userId,
@@ -85,6 +86,9 @@ export async function POST(request: Request) {
       operation = await beginPaymentOperation({
         ...operationInput,
         createIfMissing: true,
+        expectedUpstreamAccountId: getRemnashopUserIdFromAccessToken(
+          authorizedRemnashop.accessToken,
+        ),
       });
     }
 
@@ -180,9 +184,8 @@ export async function POST(request: Request) {
       });
       dispatched = true;
 
-      const payment = await remnashopRequest<PaymentInitResponse>(
-        "/subscription/extend",
-        {
+      const payment = parsePaymentInit(
+        await remnashopRequest<unknown>("/subscription/extend", {
           method: "POST",
           accessToken,
           idempotencyKey: operation.upstreamKey,
@@ -191,7 +194,8 @@ export async function POST(request: Request) {
             gateway_type: paymentRequest.gateway_type,
             return_url: paymentReturnUrl(operation.operationId),
           },
-        },
+        }),
+        "/subscription/extend",
       );
       assertPaymentReturnUrl(
         paymentReturnUrl(operation.operationId),

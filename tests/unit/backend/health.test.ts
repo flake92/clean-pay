@@ -1,12 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
-  prisma: { $queryRaw: vi.fn() },
+  readinessPrisma: { $queryRaw: vi.fn() },
   redisCommand: vi.fn(),
 }));
 
-vi.mock("@/backend/database/prisma", () => ({
-  prisma: mocks.prisma,
+vi.mock("@/backend/database/readiness-prisma", () => ({
+  readinessPrisma: mocks.readinessPrisma,
 }));
 
 vi.mock("@/backend/cache/redis", () => ({
@@ -37,7 +37,7 @@ describe("health checks", () => {
   });
 
   it("checks database and redis", async () => {
-    mocks.prisma.$queryRaw.mockResolvedValue([{ "?column?": 1 }]);
+    mocks.readinessPrisma.$queryRaw.mockResolvedValue([{ "?column?": 1 }]);
     mocks.redisCommand.mockResolvedValue("PONG");
 
     await expect(checkDatabase()).resolves.toMatchObject({ status: "ok" });
@@ -47,9 +47,9 @@ describe("health checks", () => {
     await expect(checkRedis()).resolves.toMatchObject({ status: "down", message: "Redis did not return PONG" });
   });
 
-  it("cancels a hanging check with a distinct shared-deadline reason", async () => {
+  it("stops waiting for a hanging check with a distinct shared-deadline reason", async () => {
     const controller = new AbortController();
-    mocks.prisma.$queryRaw.mockReturnValue(new Promise(() => undefined));
+    mocks.readinessPrisma.$queryRaw.mockReturnValue(new Promise(() => undefined));
 
     const result = checkDatabase(controller.signal);
     controller.abort(new Error("readiness deadline"));

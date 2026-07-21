@@ -1,7 +1,10 @@
 import { Prisma } from "@prisma/client";
 
 import { BffError } from "@/backend/integrations/remnashop/errors";
-import { transferPaymentOperationsForUserMerge } from "@/backend/payments/user-merge";
+import {
+  lockPaymentOwnerFence,
+  transferPaymentOperationsForUserMerge,
+} from "@/backend/payments/user-merge";
 
 export type LocalUserMergeResult = {
   revokedSessionCount: number;
@@ -43,14 +46,25 @@ export async function mergeLocalUsersIntoTarget(
     targetUpstreamAccountId,
     sourceUserIds: rawSourceUserIds,
     ownerExpectations = [],
+    paymentOwnerFenceHeld = false,
   }: {
     targetUserId: string;
     targetUpstreamAccountId: string | null;
     sourceUserIds: string[];
     ownerExpectations?: LocalUserOwnerExpectation[];
+    paymentOwnerFenceHeld?: boolean;
   },
 ): Promise<LocalUserMergeResult> {
   const sourceUserIds = normalizedSourceIds(targetUserId, rawSourceUserIds);
+  const userIds = [targetUserId, ...sourceUserIds].sort();
+
+  // Keep the invariant local to the merge primitive so login/reconciliation
+  // paths cannot transfer a payment owner without joining the same advisory
+  // fence used by foreground payment creation and claiming.
+  if (!paymentOwnerFenceHeld) {
+    await lockPaymentOwnerFence(tx, userIds);
+  }
+
   const emptyResult: LocalUserMergeResult = {
     revokedSessionCount: 0,
     transferredPasskeyCount: 0,
@@ -60,10 +74,15 @@ export async function mergeLocalUsersIntoTarget(
   };
 
   if (sourceUserIds.length === 0) {
+    await transferPaymentOperationsForUserMerge(
+      tx,
+      targetUserId,
+      targetUpstreamAccountId,
+      [],
+    );
     return emptyResult;
   }
 
-  const userIds = [targetUserId, ...sourceUserIds].sort();
   const lockedUsers = await tx.$queryRaw<LocalUserOwnerExpectation[]>(
     Prisma.sql`
       SELECT "id", "remnashopUserId", "email", "telegramId"

@@ -16,6 +16,7 @@ import {
   paymentReturnOutcome,
   shouldPollPaymentReturn,
 } from "@/frontend/lib/payment-return";
+import { readPaymentReturnReference } from "@/frontend/lib/payment-return-storage";
 
 type PaymentStatus = {
   payment_id: string;
@@ -134,20 +135,11 @@ export function PaymentReturnStatus({ kind }: Props) {
   }, [searchParams]);
 
   useEffect(() => {
-    let fallbackPaymentId: string | null = null;
-    let fallbackOperationId: string | null = null;
-
-    try {
-      fallbackPaymentId = window.localStorage.getItem("cleanPayLastPaymentId");
-      fallbackOperationId = window.localStorage.getItem(
-        "cleanPayLastPaymentOperationId",
-      );
-    } catch {
-      // Explicit URL identifiers continue to work without browser storage.
-    }
-
-    const resolvedPaymentId = paymentId ?? fallbackPaymentId;
-    const resolvedOperationId = operationId ?? fallbackOperationId;
+    const fallback = paymentId || operationId
+      ? null
+      : readPaymentReturnReference();
+    const resolvedPaymentId = paymentId ?? fallback?.paymentId ?? null;
+    const resolvedOperationId = operationId ?? fallback?.operationId ?? null;
     const query = new URLSearchParams();
 
     if (resolvedPaymentId) query.set("payment_id", resolvedPaymentId);

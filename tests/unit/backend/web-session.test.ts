@@ -423,10 +423,68 @@ describe("web session lifecycle", () => {
     expect(state.deleteCalls).toEqual(["clean_pay_access", "clean_pay_refresh"]);
 
     state.cookies.set("clean_pay_refresh", "refresh-only");
+    mocks.prisma.webSession.findFirst.mockResolvedValueOnce({ id: "refresh-session" });
     await clearWebSession();
     expect(mocks.prisma.webSession.updateMany).toHaveBeenLastCalledWith({
-      where: { refreshTokenHash: sha256("refresh-only") },
+      where: { id: "refresh-session", revokedAt: null },
       data: { revokedAt: expect.any(Date) },
     });
+    expect(mocks.prisma.webSession.findFirst).toHaveBeenLastCalledWith({
+      where: {
+        revokedAt: null,
+        OR: [
+          { refreshTokenHash: sha256("refresh-only") },
+          {
+            refreshTokenHistory: {
+              some: {
+                tokenHash: sha256("refresh-only"),
+                graceExpiresAt: { gte: expect.any(Date) },
+              },
+            },
+          },
+        ],
+      },
+      select: { id: true },
+    });
+  });
+
+  it("does not let a revoked or mismatched access token revoke replacement sessions", async () => {
+    state.cookies.set(
+      "clean_pay_access",
+      accessToken({
+        sid: "revoked-session-1",
+        uid: "user-1",
+        exp: Math.floor(Date.now() / 1000) + 60,
+      }),
+    );
+    mocks.prisma.webSession.findFirst.mockResolvedValueOnce(null);
+
+    await clearWebSession();
+
+    expect(mocks.prisma.webSession.findFirst).toHaveBeenCalledWith({
+      where: {
+        id: "revoked-session-1",
+        userId: "user-1",
+        revokedAt: null,
+        accessTokenExpiresAt: { gt: expect.any(Date) },
+      },
+      select: { id: true, userId: true },
+    });
+    expect(mocks.prisma.webSession.updateMany).not.toHaveBeenCalled();
+
+    vi.clearAllMocks();
+    state.cookies.set(
+      "clean_pay_access",
+      accessToken({
+        sid: "session-2",
+        uid: "wrong-user",
+        exp: Math.floor(Date.now() / 1000) + 60,
+      }),
+    );
+    mocks.prisma.webSession.findFirst.mockResolvedValueOnce(null);
+
+    await clearWebSession();
+
+    expect(mocks.prisma.webSession.updateMany).not.toHaveBeenCalled();
   });
 });

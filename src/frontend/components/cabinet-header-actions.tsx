@@ -6,6 +6,7 @@ import { InstallAppButton } from "@/frontend/components/install-app-button";
 import { LinkButton } from "@/frontend/components/prime/link-button";
 import { hasRenewOffer } from "@/frontend/lib/subscription-offers";
 import type { SubscriptionOffersResponse } from "@/shared/remnashop/types";
+import { getCachedBffJson } from "@/frontend/lib/bff-cache";
 
 export function CabinetHeaderActions() {
   const [offers, setOffers] = useState<SubscriptionOffersResponse | null>(null);
@@ -13,19 +14,10 @@ export function CabinetHeaderActions() {
   useEffect(() => {
     let alive = true;
 
-    fetch("/api/bff/subscription/offers")
-      .then(async (response) => {
-        if (!response.ok) {
-          return null;
-        }
-
-        const body = await response.json().catch(() => null);
-
-        return body?.data as SubscriptionOffersResponse | null;
-      })
-      .then((nextOffers) => {
+    getCachedBffJson<SubscriptionOffersResponse>("/api/bff/subscription/offers")
+      .then((response) => {
         if (alive) {
-          setOffers(nextOffers);
+          setOffers(response.ok ? response.data : null);
         }
       })
       .catch(() => {

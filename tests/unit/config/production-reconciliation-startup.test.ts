@@ -6,6 +6,7 @@ import { parseReconciliationBatch } from "../../../deploy/prod/reconciliation-ba
 
 const prodCommand = readFileSync("deploy/prod/prod.mjs", "utf8");
 const startScript = readFileSync("start.sh", "utf8");
+const deployScript = readFileSync("deploy.sh", "utf8");
 const prodCompose = readFileSync("deploy/prod/docker-compose.yml", "utf8");
 const rootCompose = readFileSync("docker-compose.yml", "utf8");
 const reconcileLoop = readFileSync("deploy/prod/reconcile-loop.mjs", "utf8");
@@ -22,6 +23,13 @@ describe("production reconciliation startup", () => {
       'env_value PAYMENT_RECONCILIATION_ENABLED false',
     );
     expect(startScript).toContain("--profile reconciliation");
+    expect(deployScript).toContain(
+      "env_value PAYMENT_RECONCILIATION_ENABLED false",
+    );
+    expect(deployScript).toContain("--profile reconciliation");
+    expect(deployScript).toContain("COMPOSE_PROJECT_NAME");
+    expect(deployScript).toContain("CLEAN_PAY_EDGE_NETWORK");
+    expect(deployScript).toContain("COMPOSE_FILE");
   });
 
   it("fails verify and ps unless the enabled worker heartbeat is healthy", () => {

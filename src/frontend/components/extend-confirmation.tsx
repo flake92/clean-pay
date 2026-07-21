@@ -17,6 +17,7 @@ import {
   parsePaymentOperationStatusEnvelope,
   shouldRetainPaymentIdempotencyKey,
 } from "@/frontend/lib/payment-idempotency";
+import { storePaymentReturnReference } from "@/frontend/lib/payment-return-storage";
 import { findRenewPlan } from "@/frontend/lib/subscription-offers";
 import {
   confirmedPaymentOffer,
@@ -315,14 +316,9 @@ export function ExtendConfirmation() {
 
       if (response.status === 202) {
         if (operationStatus) {
-          try {
-            window.localStorage.setItem(
-              "cleanPayLastPaymentOperationId",
-              operationStatus.operationId,
-            );
-          } catch {
-            // The operation remains recoverable through the current URL.
-          }
+          storePaymentReturnReference({
+            operationId: operationStatus.operationId,
+          });
           paymentConfirmed = true;
           window.location.assign(
             `/payment/pending?operation_id=${encodeURIComponent(operationStatus.operationId)}`,
@@ -342,14 +338,9 @@ export function ExtendConfirmation() {
           : await readError(response);
 
         if (manualReview) {
-          try {
-            window.localStorage.setItem(
-              "cleanPayLastPaymentOperationId",
-              operationStatus.operationId,
-            );
-          } catch {
-            // The visible operation number is still available to the user.
-          }
+          storePaymentReturnReference({
+            operationId: operationStatus.operationId,
+          });
         }
 
         if (response.status < 500) {
@@ -379,11 +370,7 @@ export function ExtendConfirmation() {
       clearPaymentIdempotencyKey("extend", payload, idempotencyKey);
       paymentConfirmed = true;
 
-      try {
-        window.localStorage.setItem("cleanPayLastPaymentId", body.data.payment_id);
-      } catch {
-        // The payment is confirmed even when local browser storage is unavailable.
-      }
+      storePaymentReturnReference({ paymentId: body.data.payment_id });
 
       if (body.data.is_free) {
         window.location.assign("/cabinet");

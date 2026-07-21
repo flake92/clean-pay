@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   createWebSession: vi.fn(),
   getCurrentSession: vi.fn(),
   upgradeCurrentSessionToFull: vi.fn(),
+  assertEmailVerificationPolicy: vi.fn(),
   assertRateLimit: vi.fn(),
   prisma: {
     $queryRaw: vi.fn(),
@@ -51,6 +52,7 @@ vi.mock("@/backend/database/prisma", () => ({
 }));
 
 vi.mock("@/backend/sessions/web-session", () => ({
+  assertEmailVerificationPolicy: mocks.assertEmailVerificationPolicy,
   createWebSession: mocks.createWebSession,
   getCurrentSession: mocks.getCurrentSession,
   upgradeCurrentSessionToFull: mocks.upgradeCurrentSessionToFull,
@@ -98,6 +100,7 @@ const session = {
   assuranceLevel: "FULL",
   user: {
     email: "user@example.com",
+    emailVerified: true,
     telegramUsername: null,
     telegramId: null,
     displayName: "User",
@@ -108,6 +111,7 @@ const session = {
 describe("passkey use cases", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.assertEmailVerificationPolicy.mockImplementation(() => undefined);
     mocks.prisma.$transaction.mockImplementation(async (callback: (tx: typeof mocks.prisma) => unknown) => callback(mocks.prisma));
     mocks.prisma.$queryRaw.mockResolvedValue([{ id: "user-1" }]);
     mocks.getCurrentSession.mockResolvedValue(session);
@@ -190,7 +194,7 @@ describe("passkey use cases", () => {
   });
 
   it("finishes registration, persists credential and upgrades partial session", async () => {
-    mocks.getCurrentSession.mockResolvedValueOnce({ ...session, assuranceLevel: "PARTIAL" });
+    mocks.getCurrentSession.mockResolvedValueOnce({ ...session, assuranceLevel: "BOOTSTRAP" });
 
     await expect(
       finishPasskeyRegistration(registrationResponse()),
@@ -448,6 +452,64 @@ describe("passkey use cases", () => {
 
     expect(mocks.prisma.webAuthnCredential.delete).toHaveBeenCalledWith({ where: { id: "second" } });
     expect(mocks.auditLog).toHaveBeenCalledWith(expect.objectContaining({ action: "passkey_deleted", userId: "user-1" }));
+  });
+
+  it("applies the database e-mail policy before every FULL-session passkey action", async () => {
+    const blocked = Object.assign(new Error("E-mail must be verified"), {
+      code: "EMAIL_NOT_VERIFIED",
+      status: 403,
+    });
+    mocks.getCurrentSession.mockResolvedValue({
+      ...session,
+      user: { ...session.user, emailVerified: false, telegramId: null },
+    });
+    mocks.assertEmailVerificationPolicy.mockImplementation(() => {
+      throw blocked;
+    });
+
+    await expect(beginPasskeyRegistration()).rejects.toMatchObject({
+      code: "EMAIL_NOT_VERIFIED",
+      status: 403,
+    });
+    await expect(finishPasskeyRegistration(registrationResponse())).rejects.toMatchObject({
+      code: "EMAIL_NOT_VERIFIED",
+      status: 403,
+    });
+    await expect(listPasskeys()).rejects.toMatchObject({
+      code: "EMAIL_NOT_VERIFIED",
+      status: 403,
+    });
+    await expect(deletePasskey("credential-1")).rejects.toMatchObject({
+      code: "EMAIL_NOT_VERIFIED",
+      status: 403,
+    });
+
+    expect(mocks.assertEmailVerificationPolicy).toHaveBeenCalledTimes(4);
+    expect(mocks.generateRegistrationOptions).not.toHaveBeenCalled();
+    expect(mocks.prisma.webAuthnChallenge.findFirst).not.toHaveBeenCalled();
+    expect(mocks.prisma.webAuthnCredential.findMany).not.toHaveBeenCalled();
+    expect(mocks.prisma.webAuthnCredential.findFirst).not.toHaveBeenCalled();
+  });
+
+  it("keeps BOOTSTRAP registration exempt and allows Telegram-backed FULL sessions", async () => {
+    mocks.getCurrentSession.mockResolvedValueOnce({
+      ...session,
+      assuranceLevel: "BOOTSTRAP",
+      user: { ...session.user, emailVerified: false, telegramId: null },
+    });
+    await expect(beginPasskeyRegistration()).resolves.toMatchObject({
+      challenge: "reg-challenge",
+    });
+    expect(mocks.assertEmailVerificationPolicy).not.toHaveBeenCalled();
+
+    mocks.getCurrentSession.mockResolvedValueOnce({
+      ...session,
+      user: { ...session.user, emailVerified: false, telegramId: "123" },
+    });
+    await expect(listPasskeys()).resolves.toEqual({ credentials: [] });
+    expect(mocks.assertEmailVerificationPolicy).toHaveBeenCalledWith(
+      expect.objectContaining({ emailVerified: false, telegramId: "123" }),
+    );
   });
 
   it("throws BFF errors for missing sessions, invalid challenges and last passkey delete", async () => {

@@ -16,6 +16,7 @@ import { authDebugLog } from "@/backend/observability/auth-debug-log";
 import type { LoginRequest } from "@/shared/remnashop/types";
 import { requestRemnashopEmailVerification } from "@/backend/auth/email-verification";
 import { getCurrentSession, refreshCurrentAccessCookie } from "@/backend/sessions/web-session";
+import { withPaymentOwnerChangeFence } from "@/backend/payments/user-merge";
 
 function isEmailAlreadyExistsConflict(error: unknown) {
   return (
@@ -114,7 +115,7 @@ async function mergeEmailAccountIntoTelegramAccount({
   };
 }
 
-async function attachTelegramToVerifiedRemnashopAccount({
+async function attachTelegramToVerifiedRemnashopAccountWithinFence({
   auth,
   session,
 }: {
@@ -189,14 +190,48 @@ async function attachTelegramToVerifiedRemnashopAccount({
     refreshToken: authForLink.cookies.refreshToken,
     auth: authForLink.data,
     ...(upstreamMerged ? { invalidateSiblingRemnashopTokens: true } : {}),
+    paymentOwnerFenceHeld: true,
   });
   await refreshCurrentAccessCookie();
 
   return linked;
 }
 
+async function attachTelegramToVerifiedRemnashopAccount({
+  auth,
+  session,
+}: {
+  auth: Awaited<ReturnType<typeof remnashopAuth>>;
+  session: NonNullable<Awaited<ReturnType<typeof getCurrentSession>>>;
+}) {
+  const sourceRemnashopUserId = getRemnashopUserIdFromAccessToken(
+    auth.cookies.accessToken,
+  );
+  const profile = await getRemnashopMe(auth.cookies.accessToken);
+
+  return withPaymentOwnerChangeFence({
+    userIds: [session.userId],
+    upstreamAccountIds: [
+      sourceRemnashopUserId,
+      session.user.remnashopUserId ?? "",
+    ],
+    emails: [profile.email, session.user.email],
+    telegramIds: [session.user.telegramId],
+    work: () => attachTelegramToVerifiedRemnashopAccountWithinFence({
+      auth,
+      session,
+    }),
+  });
+}
+
 export async function linkRemnashopAccount(body: LoginRequest) {
   authDebugLog("remnashop_account_link_started", { hasEmail: Boolean(body.email) });
+  const session = await getCurrentSession();
+
+  if (!session) {
+    throw new BffError("UNAUTHORIZED", 401, "Login is required.");
+  }
+
   await assertRateLimit({
     action: "remnashop_link",
     email: body.email,
@@ -239,10 +274,23 @@ export async function linkRemnashopAccount(body: LoginRequest) {
     });
   }
 
-  const session = await getCurrentSession();
+  const activeSession = await getCurrentSession();
 
-  if (!session) {
-    throw new BffError("UNAUTHORIZED", 401, "Login is required.");
+  if (
+    !activeSession ||
+    activeSession.id !== session.id ||
+    activeSession.userId !== session.userId ||
+    activeSession.user.remnashopUserId !== session.user.remnashopUserId ||
+    activeSession.user.email !== session.user.email ||
+    activeSession.user.emailVerified !== session.user.emailVerified ||
+    activeSession.user.telegramId !== session.user.telegramId ||
+    activeSession.user.telegramUsername !== session.user.telegramUsername
+  ) {
+    throw new BffError(
+      "UNAUTHORIZED",
+      401,
+      "Current session changed while linking the account",
+    );
   }
 
   const profile = await getRemnashopMe(auth.cookies.accessToken);

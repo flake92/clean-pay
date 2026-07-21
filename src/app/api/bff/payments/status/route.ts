@@ -17,7 +17,7 @@ import {
 } from "@/backend/integrations/remnashop/payment-recovery";
 import { BffError } from "@/backend/integrations/remnashop/errors";
 import type { CurrentSubscriptionResponse } from "@/shared/remnashop/types";
-import { getCurrentUser } from "@/backend/sessions/web-session";
+import { assertEmailVerificationPolicy, getCurrentUser } from "@/backend/sessions/web-session";
 import { syncOnePaymentHistoryPage } from "@/backend/payments/history-sync";
 import { reconcileUnknownPayments } from "@/backend/payments/reconciliation";
 import { assertPaymentUpstreamIdentity } from "@/backend/payments/owner";
@@ -73,6 +73,7 @@ export async function GET(request: Request) {
     if (!user) {
       return bffError(new BffError("UNAUTHORIZED", 401, "Нужно войти в аккаунт."));
     }
+    assertEmailVerificationPolicy(user);
 
     const searchParams = new URL(request.url).searchParams;
     const paymentId = searchParams.get("payment_id");
@@ -103,7 +104,7 @@ export async function GET(request: Request) {
     // Terminal operation state is authoritative local data. Reading it before
     // Remnashop keeps success/manual-review callbacks usable during an upstream
     // outage and avoids turning a settled payment into a transient 5xx page.
-    const operation = operationId || !paymentId
+    let operation = operationId || !paymentId
       ? await prisma.paymentOperation.findFirst({
           where: operationId
             ? { id: operationId, userId: user.id }
@@ -121,11 +122,27 @@ export async function GET(request: Request) {
           },
         })
       : null;
-    const operationStatus = operation
+    let operationStatus = operation
       ? serializePaymentOperationStatus(operation)
       : null;
-    const operationPaymentId = operation?.paymentRecord?.paymentId ?? null;
-    const resolvedPaymentId = paymentId ?? operationPaymentId;
+    let operationPaymentId = operation?.paymentRecord?.paymentId ?? null;
+
+    if (
+      paymentId &&
+      operationId &&
+      operationPaymentId &&
+      paymentId !== operationPaymentId
+    ) {
+      throw new BffError(
+        "CONFLICT",
+        409,
+        "Payment id does not belong to the requested operation",
+      );
+    }
+
+    // When an operation id is present, its relation is authoritative. Never
+    // combine it with an unrelated browser-stored payment id.
+    let resolvedPaymentId = operationId ? operationPaymentId : paymentId;
     const localPaymentStatus = operation?.paymentRecord?.status ?? null;
     const localPaymentIsUnsettled =
       localPaymentStatus === "PENDING" || localPaymentStatus === "UNKNOWN";
@@ -195,6 +212,42 @@ export async function GET(request: Request) {
           transactions,
         });
       }
+
+      // Reconciliation may have changed both the operation status and its
+      // payment relation. Refresh before the optional subscription call so a
+      // later upstream outage can still fall back to the new terminal state.
+      if (operation) {
+        operation = await prisma.paymentOperation.findFirst({
+          where: { id: operation.id, userId: user.id },
+          select: {
+            id: true,
+            status: true,
+            reconciledAt: true,
+            reconcileErrorSnapshot: true,
+            paymentRecord: true,
+          },
+        });
+        operationStatus = operation
+          ? serializePaymentOperationStatus(operation)
+          : null;
+        operationPaymentId = operation?.paymentRecord?.paymentId ?? null;
+
+        if (
+          paymentId &&
+          operationId &&
+          operationPaymentId &&
+          paymentId !== operationPaymentId
+        ) {
+          throw new BffError(
+            "CONFLICT",
+            409,
+            "Payment id does not belong to the requested operation",
+          );
+        }
+
+        resolvedPaymentId = operationId ? operationPaymentId : paymentId;
+      }
+
       subscription = await remnashopRequest<CurrentSubscriptionResponse | null>(
         "/subscription/current",
         { accessToken },

@@ -1,5 +1,5 @@
 import { getEnv } from "@/backend/config/env";
-import { prisma } from "@/backend/database/prisma";
+import { readinessPrisma } from "@/backend/database/readiness-prisma";
 import { redisCommand } from "@/backend/cache/redis";
 
 export type CheckResult = {
@@ -52,7 +52,7 @@ async function measure(
 
 export async function checkDatabase(deadlineSignal?: AbortSignal) {
   return measure("Database", async () => {
-    await prisma.$queryRaw`SELECT 1`;
+    await readinessPrisma.$queryRaw`SELECT 1`;
   }, deadlineSignal);
 }
 

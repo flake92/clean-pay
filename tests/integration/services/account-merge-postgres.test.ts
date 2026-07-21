@@ -6,6 +6,8 @@ const describeWithPostgres = realDatabaseUrl ? describe : describe.skip;
 describeWithPostgres("account merge PostgreSQL invariants", () => {
   let prisma: typeof import("@/backend/database/prisma")["prisma"];
   let mergeLocalUsersIntoTarget: typeof import("@/backend/auth/user-merge")["mergeLocalUsersIntoTarget"];
+  let withPaymentOwnerChangeFence: typeof import("@/backend/payments/user-merge")["withPaymentOwnerChangeFence"];
+  let lockPaymentOwnerFence: typeof import("@/backend/payments/user-merge")["lockPaymentOwnerFence"];
   const userIds: string[] = [];
 
   beforeAll(async () => {
@@ -13,6 +15,8 @@ describeWithPostgres("account merge PostgreSQL invariants", () => {
     delete (globalThis as typeof globalThis & { prisma?: unknown }).prisma;
     ({ prisma } = await import("@/backend/database/prisma"));
     ({ mergeLocalUsersIntoTarget } = await import("@/backend/auth/user-merge"));
+    ({ withPaymentOwnerChangeFence, lockPaymentOwnerFence } =
+      await import("@/backend/payments/user-merge"));
   });
 
   afterAll(async () => {
@@ -201,5 +205,82 @@ describeWithPostgres("account merge PostgreSQL invariants", () => {
       .toBe(2);
     expect(records).toHaveLength(2);
     expect(confirmations).toBe(1);
+  });
+
+  it("rejects owner work before dispatch when a claimed payment is active", async () => {
+    const suffix = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    const user = await prisma.webUser.create({
+      data: {
+        email: `fenced-${suffix}@example.com`,
+        emailVerified: true,
+        remnashopUserId: `fenced-${suffix}`,
+      },
+    });
+    userIds.push(user.id);
+    await prisma.paymentOperation.create({
+      data: {
+        userId: user.id,
+        kind: "PURCHASE",
+        idempotencyKeyHash: `fenced-key-${suffix}`,
+        requestFingerprint: `fenced-fingerprint-${suffix}`,
+        requestPayload: { plan: "fenced" },
+        upstreamKey: `fenced-upstream-${suffix}`,
+        status: "READY",
+        leaseExpiresAt: new Date(Date.now() + 60_000),
+      },
+    });
+    let workStarted = false;
+
+    await expect(withPaymentOwnerChangeFence({
+      userIds: [user.id],
+      work: async () => {
+        workStarted = true;
+      },
+    })).rejects.toMatchObject({
+      code: "ACCOUNT_MERGE_REQUIRED",
+      status: 409,
+    });
+    expect(workStarted).toBe(false);
+  });
+
+  it("holds the owner advisory lock until upstream and local work completes", async () => {
+    const suffix = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    const user = await prisma.webUser.create({
+      data: {
+        email: `serialized-${suffix}@example.com`,
+        emailVerified: true,
+        remnashopUserId: `serialized-${suffix}`,
+      },
+    });
+    userIds.push(user.id);
+    let releaseWork!: () => void;
+    let signalEntered!: () => void;
+    const entered = new Promise<void>((resolve) => {
+      signalEntered = resolve;
+    });
+    const release = new Promise<void>((resolve) => {
+      releaseWork = resolve;
+    });
+    const ownerWork = withPaymentOwnerChangeFence({
+      userIds: [user.id],
+      work: async () => {
+        signalEntered();
+        await release;
+      },
+    });
+    await entered;
+
+    let claimantEntered = false;
+    const claimant = prisma.$transaction(async (tx) => {
+      await lockPaymentOwnerFence(tx, [user.id]);
+      claimantEntered = true;
+    }, { maxWait: 5_000, timeout: 15_000 });
+    await new Promise((resolve) => setTimeout(resolve, 75));
+    expect(claimantEntered).toBe(false);
+
+    releaseWork();
+    await ownerWork;
+    await claimant;
+    expect(claimantEntered).toBe(true);
   });
 });

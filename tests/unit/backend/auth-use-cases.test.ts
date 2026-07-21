@@ -23,6 +23,7 @@ const mocks = vi.hoisted(() => ({
   getCurrentSession: vi.fn(),
   refreshCurrentAccessCookie: vi.fn(),
   replaceWebSessionAfterPasswordChange: vi.fn(),
+  withPaymentOwnerChangeFence: vi.fn(),
   prisma: {
     $transaction: vi.fn(),
     webUser: { findUnique: vi.fn(), update: vi.fn() },
@@ -76,6 +77,10 @@ vi.mock("@/backend/sessions/web-session", () => ({
   refreshCurrentAccessCookie: mocks.refreshCurrentAccessCookie,
   replaceWebSessionAfterPasswordChange:
     mocks.replaceWebSessionAfterPasswordChange,
+}));
+
+vi.mock("@/backend/payments/user-merge", () => ({
+  withPaymentOwnerChangeFence: mocks.withPaymentOwnerChangeFence,
 }));
 
 import { loginWithEmail } from "@/backend/auth/email-login";
@@ -161,6 +166,9 @@ describe("auth use cases", () => {
       session: { id: "session-2" },
       revokedSessionCount: 2,
     });
+    mocks.withPaymentOwnerChangeFence.mockImplementation(
+      ({ work }: { work: () => Promise<unknown> }) => work(),
+    );
   });
 
   it("logs in with email through Turnstile, rate-limit and Remnashop session creation", async () => {
@@ -321,6 +329,7 @@ describe("auth use cases", () => {
       refreshToken: "merged-refresh-token",
       auth: authData,
       invalidateSiblingRemnashopTokens: true,
+      paymentOwnerFenceHeld: true,
     });
   });
 
@@ -389,6 +398,7 @@ describe("auth use cases", () => {
       refreshToken: "merged-refresh-token",
       auth: authData,
       invalidateSiblingRemnashopTokens: true,
+      paymentOwnerFenceHeld: true,
     });
   });
 
@@ -685,11 +695,41 @@ describe("auth use cases", () => {
     }));
   });
 
-  it("does not link current Telegram identity in Remnashop before email code confirmation", async () => {
-    mocks.getCurrentSession.mockResolvedValueOnce({
+  it("stops before owner-changing side effects when the same session changes identity", async () => {
+    const initialSession = {
       ...session,
       user: { ...user, telegramId: "123456", telegramUsername: "clean_user" },
-    });
+    };
+    const changedSession = {
+      ...initialSession,
+      user: {
+        ...initialSession.user,
+        remnashopUserId: "different-owner",
+        telegramId: "999999",
+      },
+    };
+    mocks.getCurrentSession
+      .mockResolvedValueOnce(initialSession)
+      .mockResolvedValueOnce(changedSession);
+
+    await expect(
+      linkRemnashopAccount({ email: "user@example.com", password: "secret" }),
+    ).rejects.toMatchObject({ code: "UNAUTHORIZED", status: 401 });
+
+    expect(mocks.getRemnashopMe).not.toHaveBeenCalled();
+    expect(mocks.remnashopLinkTelegram).not.toHaveBeenCalled();
+    expect(mocks.remnashopMergeUsers).not.toHaveBeenCalled();
+    expect(mocks.linkCurrentUserToRemnashopAuth).not.toHaveBeenCalled();
+  });
+
+  it("does not link current Telegram identity in Remnashop before email code confirmation", async () => {
+    const stableSession = {
+      ...session,
+      user: { ...user, telegramId: "123456", telegramUsername: "clean_user" },
+    };
+    mocks.getCurrentSession
+      .mockResolvedValueOnce(stableSession)
+      .mockResolvedValueOnce(stableSession);
 
     await expect(linkRemnashopAccount({ email: "user@example.com", password: "secret" })).resolves.toMatchObject({
       linked: false,
@@ -701,10 +741,13 @@ describe("auth use cases", () => {
   });
 
   it("continues email linking when Telegram already exists in Remnashop", async () => {
-    mocks.getCurrentSession.mockResolvedValueOnce({
+    const stableSession = {
       ...session,
       user: { ...user, telegramId: "123456", telegramUsername: "clean_user" },
-    });
+    };
+    mocks.getCurrentSession
+      .mockResolvedValueOnce(stableSession)
+      .mockResolvedValueOnce(stableSession);
     await expect(linkRemnashopAccount({ email: "user@example.com", password: "secret" })).resolves.toMatchObject({
       linked: false,
       pendingVerification: true,
@@ -721,10 +764,13 @@ describe("auth use cases", () => {
   });
 
   it("links an existing verified Remnashop email account after password proof", async () => {
-    mocks.getCurrentSession.mockResolvedValueOnce({
+    const stableSession = {
       ...session,
       user: { ...user, email: null, telegramId: "123456", telegramUsername: "clean_user" },
-    });
+    };
+    mocks.getCurrentSession
+      .mockResolvedValueOnce(stableSession)
+      .mockResolvedValueOnce(stableSession);
     mocks.getRemnashopMe.mockResolvedValueOnce({ ...profile, is_email_verified: true });
 
     await expect(linkRemnashopAccount({ email: "user@example.com", password: "secret" })).resolves.toMatchObject({
@@ -743,11 +789,51 @@ describe("auth use cases", () => {
     expect(mocks.refreshCurrentAccessCookie).toHaveBeenCalledOnce();
   });
 
+  it("blocks a verified-account merge before any owner-changing upstream call", async () => {
+    const stableSession = {
+      ...session,
+      user: {
+        ...user,
+        email: null,
+        telegramId: "123456",
+        telegramUsername: "clean_user",
+      },
+    };
+    mocks.getCurrentSession
+      .mockResolvedValueOnce(stableSession)
+      .mockResolvedValueOnce(stableSession);
+    mocks.getRemnashopMe.mockResolvedValue({
+      ...profile,
+      is_email_verified: true,
+    });
+    mocks.withPaymentOwnerChangeFence.mockRejectedValueOnce(
+      new BffError(
+        "ACCOUNT_MERGE_REQUIRED",
+        409,
+        "Payment dispatch is in progress",
+      ),
+    );
+
+    await expect(
+      linkRemnashopAccount({ email: "user@example.com", password: "secret" }),
+    ).rejects.toMatchObject({
+      code: "ACCOUNT_MERGE_REQUIRED",
+      status: 409,
+    });
+
+    expect(mocks.remnashopLinkTelegram).not.toHaveBeenCalled();
+    expect(mocks.remnashopMergeUsers).not.toHaveBeenCalled();
+    expect(mocks.linkCurrentUserToRemnashopAuth).not.toHaveBeenCalled();
+  });
+
   it("merges Remnashop users for an existing e-mail when Telegram belongs to another Remnashop account", async () => {
-    mocks.getCurrentSession.mockResolvedValueOnce({
+    const stableSession = {
       ...session,
       user: { ...user, email: null, telegramId: "123456", telegramUsername: "clean_user" },
-    });
+    };
+    mocks.getCurrentSession
+      .mockResolvedValueOnce(stableSession)
+      .mockResolvedValueOnce(stableSession);
     mocks.getRemnashopMe.mockResolvedValueOnce({ ...profile, is_email_verified: true });
     mocks.remnashopLinkTelegram.mockRejectedValueOnce(new BffError("CONFLICT", 409, "telegram already linked"));
 
@@ -770,14 +856,18 @@ describe("auth use cases", () => {
       refreshToken: "merged-refresh-token",
       auth: authData,
       invalidateSiblingRemnashopTokens: true,
+      paymentOwnerFenceHeld: true,
     });
   });
 
   it("requires code confirmation when a new e-mail registration cannot be linked as already verified", async () => {
-    mocks.getCurrentSession.mockResolvedValueOnce({
+    const stableSession = {
       ...session,
       user: { ...user, email: null, telegramId: "123456", telegramUsername: "clean_user" },
-    });
+    };
+    mocks.getCurrentSession
+      .mockResolvedValueOnce(stableSession)
+      .mockResolvedValueOnce(stableSession);
     mocks.remnashopAuth
       .mockRejectedValueOnce(new BffError("AUTH_FAILED", 401, "bad credentials"))
       .mockResolvedValueOnce(authResult);
@@ -814,10 +904,13 @@ describe("auth use cases", () => {
   });
 
   it("does not merge an existing unverified email account before sending the verification code", async () => {
-    mocks.getCurrentSession.mockResolvedValueOnce({
+    const stableSession = {
       ...session,
       user: { ...user, email: null, telegramId: "123456", telegramUsername: "clean_user" },
-    });
+    };
+    mocks.getCurrentSession
+      .mockResolvedValueOnce(stableSession)
+      .mockResolvedValueOnce(stableSession);
     mocks.linkCurrentUserToRemnashopAuth.mockResolvedValueOnce({
       user: { ...user, email: "user@example.com", telegramId: "123456" },
       profile: { ...profile, is_email_verified: false, telegram_id: 123456 },
@@ -838,10 +931,13 @@ describe("auth use cases", () => {
   });
 
   it("does not merge an existing local email owner before code confirmation", async () => {
-    mocks.getCurrentSession.mockResolvedValueOnce({
+    const stableSession = {
       ...session,
       user: { ...user, email: null, telegramId: "123456", telegramUsername: "clean_user" },
-    });
+    };
+    mocks.getCurrentSession
+      .mockResolvedValueOnce(stableSession)
+      .mockResolvedValueOnce(stableSession);
     mocks.linkCurrentUserToRemnashopAuth.mockResolvedValueOnce({
       user: { ...user, emailVerified: true, telegramId: "123456" },
       profile: { ...profile, is_email_verified: true, telegram_id: 123456 },

@@ -17,6 +17,7 @@ import {
   assertUserMergeFinalOwner,
   mergeLocalUsersIntoTarget,
 } from "@/backend/auth/user-merge";
+import { lockPaymentOwnerFence } from "@/backend/payments/user-merge";
 
 type RemnashopProfileIdentity = {
   remnashopUserId: string;
@@ -358,11 +359,13 @@ export async function linkCurrentUserToRemnashopAuth({
   refreshToken,
   auth,
   invalidateSiblingRemnashopTokens = false,
+  paymentOwnerFenceHeld = false,
 }: {
   accessToken: string;
   refreshToken: string;
   auth: RemnashopAuthResponse;
   invalidateSiblingRemnashopTokens?: boolean;
+  paymentOwnerFenceHeld?: boolean;
 }) {
   const session = await getCurrentSession();
   authDebugLog("remnashop_link_started", {
@@ -421,6 +424,9 @@ export async function linkCurrentUserToRemnashopAuth({
   const protectedAccessToken = protectRemnashopToken(accessToken);
   const protectedRefreshToken = protectRemnashopToken(refreshToken);
   const user = await prisma.$transaction(async (tx) => {
+    if (!paymentOwnerFenceHeld) {
+      await lockPaymentOwnerFence(tx, [session.userId, ...sourceUserIds]);
+    }
     const [lockedCurrentUser] = await tx.$queryRaw<Array<{
       id: string;
       remnashopUserId: string | null;
@@ -453,21 +459,24 @@ export async function linkCurrentUserToRemnashopAuth({
         targetUserId: session.userId,
         sourceUserIds,
       });
-      await mergeLocalUsersIntoTarget(tx, {
-        targetUserId: session.userId,
-        targetUpstreamAccountId: remnashopUserId,
-        sourceUserIds,
-        ownerExpectations: [
-          ownerExpectation(session.user),
-          ...[linkedByRemnashopId, linkedByEmail, linkedByTelegramId]
-            .filter((matched): matched is NonNullable<typeof matched> => Boolean(matched))
-            .filter((matched, index, matches) =>
-              matched.id !== session.userId &&
-              matches.findIndex(({ id }) => id === matched.id) === index
-            )
-            .map(ownerExpectation),
-        ],
-      });
+    }
+    await mergeLocalUsersIntoTarget(tx, {
+      targetUserId: session.userId,
+      targetUpstreamAccountId: remnashopUserId,
+      sourceUserIds,
+      paymentOwnerFenceHeld: true,
+      ownerExpectations: [
+        ownerExpectation(session.user),
+        ...[linkedByRemnashopId, linkedByEmail, linkedByTelegramId]
+          .filter((matched): matched is NonNullable<typeof matched> => Boolean(matched))
+          .filter((matched, index, matches) =>
+            matched.id !== session.userId &&
+            matches.findIndex(({ id }) => id === matched.id) === index
+          )
+          .map(ownerExpectation),
+      ],
+    });
+    if (sourceUserIds.length > 0) {
       authDebugLog("remnashop_link_merge_completed", {
         targetUserId: session.userId,
         sourceUserIds,

@@ -5,6 +5,7 @@ import type { AppMenuItem } from "@/frontend/types";
 import { hasRenewOffer } from "@/frontend/lib/subscription-offers";
 import { getBranding } from "@/shared/branding";
 import type { SubscriptionOffersResponse } from "@/shared/remnashop/types";
+import { getCachedBffJson } from "@/frontend/lib/bff-cache";
 
 type MenuUser = {
     email: string | null;
@@ -23,16 +24,16 @@ export function useCleanPayMenu() {
 
         async function loadMenuState() {
             try {
-                const profileResponse = await fetch("/api/bff/auth/me");
+                const profileResponse = await getCachedBffJson<{ user: MenuUser }>("/api/bff/auth/me");
                 const nextUser = profileResponse.ok
-                    ? ((await profileResponse.json().catch(() => null))?.data?.user as MenuUser | null)
+                    ? profileResponse.data?.user ?? null
                     : null;
 
                 let nextOffers: SubscriptionOffersResponse | null = null;
                 if (nextUser) {
-                    const offersResponse = await fetch("/api/bff/subscription/offers");
+                    const offersResponse = await getCachedBffJson<SubscriptionOffersResponse>("/api/bff/subscription/offers");
                     nextOffers = offersResponse.ok
-                        ? ((await offersResponse.json().catch(() => null))?.data as SubscriptionOffersResponse | null)
+                        ? offersResponse.data
                         : null;
                 }
 

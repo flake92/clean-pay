@@ -35,7 +35,7 @@ vi.mock("@/frontend/components/turnstile-widget", () => ({
   hasTurnstileSiteKey: () => false,
 }));
 
-import { LoginForm } from "@/frontend/components/auth-forms";
+import { LoginForm, RegisterForm } from "@/frontend/components/auth-forms";
 
 function setInputValue(input: HTMLInputElement, value: string) {
   const setter = Object.getOwnPropertyDescriptor(
@@ -114,5 +114,44 @@ describe("login loading recovery", () => {
 
     expect(container.querySelector("button")?.disabled).toBe(false);
     expect(container.textContent).toContain("Сервер вернул некорректный ответ");
+  });
+});
+
+describe("registration loading recovery", () => {
+  let container: HTMLDivElement;
+  let root: Root;
+
+  beforeEach(async () => {
+    vi.stubGlobal("fetch", vi.fn());
+    container = document.createElement("div");
+    document.body.append(container);
+    root = createRoot(container);
+    await act(async () => root.render(createElement(RegisterForm)));
+  });
+
+  afterEach(async () => {
+    await act(async () => root.unmount());
+    container.remove();
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it("stops loading after an ambiguous registration transport failure", async () => {
+    vi.mocked(fetch).mockRejectedValueOnce(new TypeError("response lost"));
+    const values: Record<string, string> = {
+      email: "user@example.com",
+      password: "valid-password",
+      confirmPassword: "valid-password",
+    };
+
+    for (const [name, value] of Object.entries(values)) {
+      const input = container.querySelector<HTMLInputElement>(`[name="${name}"]`);
+      expect(input).not.toBeNull();
+      await act(async () => setInputValue(input!, value));
+    }
+    await submit(container.querySelector("form")!);
+
+    expect(container.querySelector("button")?.disabled).toBe(false);
+    expect(container.textContent).toContain("Не удалось определить результат регистрации");
   });
 });

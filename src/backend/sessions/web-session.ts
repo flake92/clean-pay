@@ -17,6 +17,50 @@ const sessionCookieNames = {
 
 export const refreshTokenGraceMs = 10_000;
 
+export function assertEmailVerificationPolicy(user: {
+  emailVerified: boolean;
+  telegramId: string | null;
+}) {
+  if (!user.emailVerified && !user.telegramId) {
+    throw new BffError(
+      "EMAIL_NOT_VERIFIED",
+      403,
+      "E-mail must be verified before continuing",
+    );
+  }
+}
+
+async function revokeSessionByRefreshToken(refreshToken: string) {
+  const tokenHash = sha256(refreshToken);
+  const now = new Date();
+  const session = await prisma.webSession.findFirst({
+    where: {
+      revokedAt: null,
+      OR: [
+        { refreshTokenHash: tokenHash },
+        {
+          refreshTokenHistory: {
+            some: {
+              tokenHash,
+              graceExpiresAt: { gte: now },
+            },
+          },
+        },
+      ],
+    },
+    select: { id: true },
+  });
+
+  if (!session) {
+    return;
+  }
+
+  await prisma.webSession.updateMany({
+    where: { id: session.id, revokedAt: null },
+    data: { revokedAt: now },
+  });
+}
+
 type AccessPayload = {
   sid: string;
   uid: string;
@@ -864,20 +908,26 @@ export async function clearWebSession() {
   });
 
   if (payload) {
-    const session = await prisma.webSession.findUnique({
-      where: { id: payload.sid },
+    const session = await prisma.webSession.findFirst({
+      where: {
+        id: payload.sid,
+        userId: payload.uid,
+        revokedAt: null,
+        accessTokenExpiresAt: { gt: new Date() },
+      },
       select: { id: true, userId: true },
     });
 
-    await prisma.webSession.updateMany({
-      where: session?.userId ? { userId: session.userId, revokedAt: null } : { id: payload.sid },
-      data: { revokedAt: new Date() },
-    });
+    if (session) {
+      await prisma.webSession.updateMany({
+        where: { userId: session.userId, revokedAt: null },
+        data: { revokedAt: new Date() },
+      });
+    } else if (refreshToken) {
+      await revokeSessionByRefreshToken(refreshToken);
+    }
   } else if (refreshToken) {
-    await prisma.webSession.updateMany({
-      where: { refreshTokenHash: sha256(refreshToken) },
-      data: { revokedAt: new Date() },
-    });
+    await revokeSessionByRefreshToken(refreshToken);
   }
 
   cookieStore.delete(sessionCookieNames.access);
