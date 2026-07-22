@@ -1,51 +1,22 @@
-# dependencies
-node_modules/
-/.pnp
-.pnp.*
-.yarn/*
-!.yarn/patches
-!.yarn/plugins
-!.yarn/releases
-!.yarn/versions
-
-# env
+# Локальная конфигурация и секреты
 .env
 .env.*
 !.env.example
-deploy/prod/.env
-.env
-deploy/prod/remnashop.env
-deploy/prod/*.env
-!deploy/prod/*.env.example
 
-# next
-.next/
-.next-mock/
-out/
-
-# build/cache
-dist/
-build/
-.turbo/
-.cache/
+# Ruby — применяется после создания приложения
+.bundle/
+vendor/bundle/
 coverage/
-.vercel/
-*.tsbuildinfo
-next-env.d.ts
+tmp/
+log/*.log
+*.gem
 
-# logs
-*.log
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-pnpm-debug.log*
-.pnpm-debug.log*
-
-# local tooling
+# Общие артефакты
 .DS_Store
 Thumbs.db
+*.log
 *.pem
 
-# prisma/local data
-*.db
-*.db-journal
+# IDE пользователя не удаляется, но не коммитится
+.idea/
+.vscode/

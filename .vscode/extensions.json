@@ -1,7 +1,0 @@
-{
-  "recommendations": [
-    "dbaeumer.vscode-eslint",
-    "Prisma.prisma",
-    "vitest.explorer"
-  ]
-}
