@@ -1,0 +1,15 @@
+{
+	auto_https off
+}
+
+:8080 {
+	reverse_proxy app:4000
+}
+
+:8081 {
+	reverse_proxy remnashop:5000
+}
+
+:8026 {
+	reverse_proxy smtp:8025
+}
