@@ -1,25 +1,19 @@
-.PHONY: build prod-up prod-up-debug prod-down prod-logs prod-logs-debug prod-verify prod-verify-debug
+.PHONY: infra-config infra-up infra-up-edge infra-down infra-status infra-logs
 
-build:
-	node deploy/prod/prod.mjs build
+infra-config:
+	docker compose config --quiet
 
-prod-up:
-	node deploy/prod/prod.mjs up
+infra-up:
+	docker compose up -d
 
-prod-up-debug:
-	node deploy/prod/prod.mjs up -debug
+infra-up-edge:
+	docker compose --profile edge up -d
 
-prod-down:
-	node deploy/prod/prod.mjs down
+infra-down:
+	docker compose down --remove-orphans
 
-prod-logs:
-	node deploy/prod/prod.mjs logs
+infra-status:
+	docker compose ps
 
-prod-logs-debug:
-	node deploy/prod/prod.mjs logs -debug
-
-prod-verify:
-	node deploy/prod/prod.mjs verify
-
-prod-verify-debug:
-	node deploy/prod/prod.mjs verify -debug
+infra-logs:
+	docker compose logs -f
