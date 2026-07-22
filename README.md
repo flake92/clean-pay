@@ -242,6 +242,31 @@ docker compose --env-file deploy/prod/.env -f deploy/prod/docker-compose.yml exe
 Clean Pay к Remnawave успешен; значит это отдельный дефект внешнего SNI/TLS
 маршрута, не отказ Clean Pay и не изменение, внесённое rollout.
 
+## Проверенный production rollout 22 июля 2026 года
+
+Ниже зафиксировано фактическое состояние работающего production после
+cutover и независимой итоговой проверки. Это аудиторский снимок конкретного
+развёртывания, а не универсальная конфигурация для нового сервера.
+
+| Область | Проверенное состояние |
+| --- | --- |
+| Исходный код | В `/opt/clean-pay` развёрнут Git commit `b2832f4e1f95612af4369ab2b72c8da11824d77b`, tree `4a525178b541662e43920565fca2bf3a24b09497`. Миграции при обычном старте отключены: `RUN_MIGRATIONS=false`. |
+| Образ и топология Clean Pay | Tag `clean-pay-prod-app:b2832f4e1f95612af4369ab2b72c8da11824d77b`, image ID `sha256:d00436c55ddc034e8c3626f0784d237083fed59cfa07b08281677d56b256f4c0`. Compose project `clean-pay-prod`; app, retention worker и reconciliation worker используют один образ, имеют `healthy`, `RestartCount=0`. App опубликован только на `127.0.0.1:4000`. |
+| База и миграции Clean Pay | PostgreSQL container ID `c2c23bfb8bd8b2088a92481e072543d40dcbfd39a8e451b25bdab138bbf90150` и Redis container ID `198cdee341da9df55db9f611cb4e09afb1f64e7870392685f901d4acf137118a` сохранены без пересоздания. Завершены 15 Prisma migrations; незавершённых и rolled-back migrations — `0`. |
+| Сверка платежей | `PAYMENT_RECONCILIATION_ENABLED=true` во всех трёх ролях; отдельный reconciliation worker запущен и healthy. Capability contract Remnashop подтверждает lookup/reconcile и auto-replay только для `YOOKASSA`. |
+| Публичный адрес | `https://cleanvpn.edge-connect.uk`: liveness/readiness возвращают `200`, readiness содержит `status=ok` и `stale=false`, корень возвращает `307`, `/clean-pay-logo.png` — `200`; TLS hostname проверен. |
+| Reverse proxy | Рабочий Caddyfile на host и в контейнере имеет SHA-256 `af173084e3518d6d501376e9826593706a42601b16a044cd171248fd7595d11f`; временная конфигурация cutover не оставлена. |
+| Резервные копии | Набор `/opt/deployment-backups/clean-pay-prod-b2832f4e1f95-20260721T211526Z` прошёл manifest-проверки. SHA-256 cutover PostgreSQL dump: `3235ae6249b6c362ecd594ca20076af61438d298f7da72996e0c11609e315a99`; Redis snapshot: `8d371e8ddbbb78352a731034594e0ea0bde13da3bfefc5406d7425c379f940a9`; свежий pre-patch dump Remnashop: `e44f5578e2d6e39a68b41caf1a24c24b8b49f9556e9f892803cfef12f6cfe92b`. Архивы полностью прочитаны средствами `pg_restore` без восстановления в live-БД. |
+| Rollback | Сохранены предыдущий image `clean-pay-prod-app:rollback-pre-b2832f4-20260721T211526Z` (`sha256:f49569eca913080b18285acb4fc13b9a3f905d1a3bac5efa66b394448eb3ad00`) и source tree `/opt/clean-pay.rollback-pre-b2832f4-20260721T211526Z`. |
+| Remnashop | Tag `remnashop:clean-pay-prod-c43f9aec-platega-webhook-20260719`, image ID `sha256:bd4df82053aa93bec655225a8816b71f6ed3826f72880efab9b3d032af850440` во всех HTTP/Taskiq-ролях. DB/Redis не перезапускались и не восстанавливались; Alembic — `0050`, runtime rollout gate — `false`. Local/public health и capabilities возвращают `200`. |
+| Compatibility-проверки Remnashop | Последовательно выполнены `patch-remnashop-hwid-useruuid.sh`, `patch-remnashop-expiration-meta.sh`, `patch-remnashop-hosts-optional.sh`. Зафиксированы девять изменений `StartedAt` ролей; runtime-валидация покрыла новый `userId`, legacy `userUuid`, optional `xHttpExtraParams` и `user.expiration` metadata. Fatal-паттернов в логах после начала работ не найдено. |
+| Итоговая аттестация | После третьего скрипта orchestration wrapper сохранил исходный `FAILED_RECOVERED` из-за не локализованного transient post-gate `rc=1`; все роли уже были running, и recovery не выполнял дополнительных стартов. Отдельный read-only verifier выполнил три стабильных раунда и записал `DESIRED_STATE_VERIFIED_AFTER_FAILED_RECOVERED`. SHA-256 аттестации: `58316609c80b569c802de7eab839ed4c436a7d2bd7442d731a82df17a62b0c5f`; исходные failure/evidence-файлы сохранены. |
+
+Автоматический smoke-test не инициировал реальное списание средств. Проверены
+health, capability contract, схема, миграции и работа reconciliation worker;
+реальный платёж остаётся отдельной ручной операторской проверкой с заранее
+выбранными аккаунтом, суммой и платёжным методом.
+
 ## Remnashop
 
 ### Обязательная совместимая версия
