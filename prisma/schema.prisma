@@ -1,0 +1,367 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum AuditSeverity {
+  INFO
+  WARN
+  ERROR
+}
+
+enum IntegrationStatusKind {
+  UNKNOWN
+  OK
+  DEGRADED
+  DOWN
+}
+
+enum PaymentRecordStatus {
+  PENDING
+  COMPLETED
+  FAILED
+  CANCELED
+  REFUNDED
+  UNKNOWN
+}
+
+enum PaymentOperationKind {
+  PURCHASE
+  EXTEND
+}
+
+enum PaymentOperationStatus {
+  READY
+  DISPATCHING
+  OUTCOME_UNKNOWN
+  SUCCEEDED
+  FAILED_FINAL
+}
+
+enum WebSessionAuthMethod {
+  EMAIL
+  TELEGRAM
+  PASSKEY
+}
+
+enum WebSessionAssuranceLevel {
+  BOOTSTRAP
+  FULL
+}
+
+enum AccountMergeConfirmationStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
+enum WebAuthnChallengeType {
+  REGISTRATION
+  AUTHENTICATION
+}
+
+model WebUser {
+  id                        String                     @id @default(cuid())
+  remnashopUserId           String?                    @unique
+  email                     String?                    @unique
+  telegramId                String?                    @unique
+  telegramUsername          String?
+  fullName                  String?
+  photoUrl                  String?
+  lastLoginAt               DateTime?
+  emailVerified             Boolean                    @default(false)
+  authPending               Boolean                    @default(false)
+  pendingRemnashopUserId    String?
+  pendingRemnashopEmail     String?
+  displayName               String?
+  createdAt                 DateTime                   @default(now())
+  updatedAt                 DateTime                   @updatedAt
+  sessions                  WebSession[]
+  auditLogs                 AuditLog[]
+  emailVerificationCodes    EmailVerificationCode[]
+  paymentOperations         PaymentOperation[]
+  paymentRecords            PaymentRecord[]
+  paymentHistorySyncState   PaymentHistorySyncState?
+  telegramAuthStates        TelegramAuthState[]
+  webAuthnCredentials       WebAuthnCredential[]
+  webAuthnChallenges        WebAuthnChallenge[]
+  accountMergeConfirmations AccountMergeConfirmation[]
+
+  @@index([pendingRemnashopUserId])
+}
+
+model AccountMergeConfirmation {
+  id                    String                         @id @default(cuid())
+  userId                String
+  tokenHash             String                         @unique
+  telegramId            String
+  telegramUsername      String?
+  sourceEmail           String?
+  targetEmail           String
+  sourceRemnashopUserId String
+  targetRemnashopUserId String
+  status                AccountMergeConfirmationStatus @default(PENDING)
+  attemptCount          Int                            @default(0)
+  leaseExpiresAt        DateTime?
+  lastErrorCode         String?
+  expiresAt             DateTime
+  completedAt           DateTime?
+  createdAt             DateTime                       @default(now())
+  updatedAt             DateTime                       @updatedAt
+  user                  WebUser                        @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, status])
+  @@index([expiresAt])
+  @@index([status, leaseExpiresAt])
+}
+
+model PaymentRecord {
+  id                String              @id @default(cuid())
+  userId            String
+  paymentId         String              @unique
+  purchaseType      String
+  status            PaymentRecordStatus @default(PENDING)
+  finalAmount       Decimal             @db.Decimal(12, 2)
+  currency          String
+  gatewayType       String
+  planCode          String?
+  planName          String?
+  durationDays      Int?
+  deviceLimit       Int?
+  trafficLimit      Int?
+  paymentUrl        String?
+  isFree            Boolean             @default(false)
+  raw               Json?
+  operationId       String?             @unique
+  upstreamCreatedAt DateTime            @default(now())
+  upstreamUpdatedAt DateTime            @default(now())
+  lastSyncedAt      DateTime?
+  createdAt         DateTime            @default(now())
+  updatedAt         DateTime            @updatedAt
+  user              WebUser             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  operation         PaymentOperation?   @relation(fields: [operationId], references: [id], onDelete: SetNull)
+
+  @@index([userId, createdAt])
+  @@index([userId, upstreamCreatedAt, paymentId])
+  @@index([status])
+}
+
+model TelegramAuthState {
+  id               String    @id @default(cuid())
+  stateHash        String    @unique
+  nonceHash        String    @unique
+  codeVerifierHash String    @unique
+  redirectTo       String?
+  userId           String?
+  expiresAt        DateTime
+  consumedAt       DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+  user             WebUser?  @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([expiresAt])
+  @@index([consumedAt])
+  @@index([userId])
+}
+
+model WebSession {
+  id                             String                   @id @default(cuid())
+  userId                         String
+  refreshTokenHash               String                   @unique
+  refreshRotatedAt               DateTime?
+  remnashopAccessTokenEncrypted  String?
+  remnashopRefreshTokenEncrypted String?
+  remnashopAccessExpiresAt       DateTime?
+  remnashopRefreshExpiresAt      DateTime?
+  authMethod                     WebSessionAuthMethod     @default(EMAIL)
+  assuranceLevel                 WebSessionAssuranceLevel @default(FULL)
+  userAgent                      String?
+  ipHash                         String?
+  accessTokenExpiresAt           DateTime
+  refreshExpiresAt               DateTime
+  revokedAt                      DateTime?
+  createdAt                      DateTime                 @default(now())
+  updatedAt                      DateTime                 @updatedAt
+  user                           WebUser                  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  refreshTokenHistory            WebRefreshToken[]
+
+  @@index([userId])
+  @@index([accessTokenExpiresAt])
+  @@index([refreshExpiresAt])
+  @@index([remnashopAccessExpiresAt])
+  @@index([remnashopRefreshExpiresAt])
+  @@index([revokedAt])
+  @@index([assuranceLevel])
+}
+
+model WebRefreshToken {
+  id                        String     @id @default(cuid())
+  sessionId                 String
+  tokenHash                 String     @unique
+  successorTokenEncrypted   String
+  graceExpiresAt            DateTime
+  consumedAt                DateTime   @default(now())
+  createdAt                 DateTime   @default(now())
+  session                   WebSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([sessionId, consumedAt])
+  @@index([graceExpiresAt])
+}
+
+model PaymentOperation {
+  id                      String                 @id @default(cuid())
+  userId                  String
+  kind                    PaymentOperationKind
+  idempotencyKeyHash      String
+  upstreamOwnerHash       String?
+  requestFingerprint      String
+  requestPayload          Json
+  upstreamKey             String                 @unique
+  status                  PaymentOperationStatus @default(READY)
+  attemptCount            Int                    @default(0)
+  claimTokenHash          String?
+  leaseExpiresAt          DateTime?
+  dispatchedAt            DateTime?
+  outcomeUnknownAt        DateTime?
+  completedAt             DateTime?
+  responseStatus          Int?
+  responseSnapshot        Json?
+  errorSnapshot           Json?
+  reconcileAttemptCount   Int                    @default(0)
+  reconcileFailureCount   Int                    @default(0)
+  reconcileClaimTokenHash String?
+  reconcileLeaseExpiresAt DateTime?
+  reconcileNextAttemptAt  DateTime?
+  reconcileLastAttemptAt  DateTime?
+  reconcileErrorSnapshot  Json?
+  reconciledAt            DateTime?
+  createdAt               DateTime               @default(now())
+  updatedAt               DateTime               @updatedAt
+  user                    WebUser                @relation(fields: [userId], references: [id], onDelete: Restrict)
+  paymentRecord           PaymentRecord?
+
+  @@unique([userId, idempotencyKeyHash])
+  @@index([status, leaseExpiresAt])
+  @@index([status, reconcileNextAttemptAt, reconcileLeaseExpiresAt])
+  @@index([userId, createdAt])
+}
+
+model PaymentHistorySyncState {
+  userId              String    @id
+  upstreamOwnerHash   String
+  cursor              String?
+  generation          Int       @default(0)
+  attemptCount        Int       @default(0)
+  failureCount        Int       @default(0)
+  claimTokenHash      String?
+  leaseExpiresAt      DateTime?
+  nextAttemptAt       DateTime?
+  lastAttemptAt       DateTime?
+  lastSyncedAt        DateTime?
+  backfillCompletedAt DateTime?
+  errorSnapshot       Json?
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+  user                WebUser   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([nextAttemptAt, leaseExpiresAt])
+}
+
+model WebAuthnCredential {
+  id           String    @id @default(cuid())
+  userId       String
+  credentialId String    @unique
+  publicKey    Bytes
+  counter      BigInt    @default(0)
+  transports   String[]
+  aaguid       String?
+  deviceType   String?
+  backedUp     Boolean   @default(false)
+  name         String?
+  lastUsedAt   DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  user         WebUser   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([lastUsedAt])
+}
+
+model WebAuthnChallenge {
+  id         String                @id @default(cuid())
+  challenge  String                @unique
+  type       WebAuthnChallengeType
+  userId     String?
+  expiresAt  DateTime
+  consumedAt DateTime?
+  createdAt  DateTime              @default(now())
+  user       WebUser?              @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([type])
+  @@index([expiresAt])
+  @@index([consumedAt])
+}
+
+model EmailVerificationCode {
+  id          String    @id @default(cuid())
+  userId      String
+  codeHash    String
+  attempts    Int       @default(0)
+  maxAttempts Int       @default(5)
+  sentAt      DateTime  @default(now())
+  expiresAt   DateTime
+  consumedAt  DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  user        WebUser   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@index([sentAt])
+  @@index([consumedAt])
+}
+
+model AuditLog {
+  id        String        @id @default(cuid())
+  userId    String?
+  action    String
+  severity  AuditSeverity @default(INFO)
+  ipHash    String?
+  metadata  Json?
+  createdAt DateTime      @default(now())
+  user      WebUser?      @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([action])
+  @@index([createdAt])
+}
+
+model RateLimitEvent {
+  id         String   @id @default(cuid())
+  key        String
+  action     String
+  occurredAt DateTime @default(now())
+  metadata   Json?
+
+  @@index([key, action, occurredAt])
+}
+
+model AppSetting {
+  key       String   @id
+  value     Json
+  updatedAt DateTime @updatedAt
+}
+
+model IntegrationStatus {
+  id        String                @id @default(cuid())
+  service   String                @unique
+  status    IntegrationStatusKind @default(UNKNOWN)
+  message   String?
+  checkedAt DateTime              @default(now())
+  updatedAt DateTime              @updatedAt
+}
