@@ -1,0 +1,25 @@
+services:
+  app:
+    environment:
+      LOG_LEVEL: debug
+      NODE_OPTIONS: --trace-warnings
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "5"
+
+  postgres:
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"
+
+  redis:
+    command: redis-server --appendonly yes --loglevel verbose
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"
