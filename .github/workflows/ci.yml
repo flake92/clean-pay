@@ -1,0 +1,103 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      DATABASE_URL: postgresql://clean_pay:clean_pay@localhost:5432/clean_pay?schema=public
+      APP_URL: https://app.example.com
+      NEXT_PUBLIC_APP_URL: https://app.example.com
+      REMNASHOP_API_BASE_URL: https://shop.example.com/api/v1/public
+      REMNASHOP_ADMIN_API_BASE_URL: https://shop.example.com/api/v1/admin
+      REMNASHOP_API_KEY: ci-remnashop-admin-token
+      REMNAWAVE_API_BASE_URL: https://wave.example.com/api
+      REMNAWAVE_TOKEN: ci-remnawave-api-token
+      REDIS_URL: redis://localhost:6379/0
+      WEB_JWT_SECRET: ci-web-session-jwt-secret-must-be-long-and-distinct
+      WEB_REFRESH_SECRET: ci-web-session-refresh-secret-must-be-long-distinct
+      AUDIT_IP_HASH_SECRET: ci-audit-log-secret-must-be-long-and-distinct-value
+      RATE_LIMIT_IDENTITY_SECRET: ci-rate-limit-secret-must-be-long-and-distinct
+      READINESS_INTERNAL_SECRET: ci-readiness-secret-must-be-long-and-distinct
+      COOKIE_SECURE: "true"
+      COOKIE_SAMESITE: lax
+      TELEGRAM_BOT_TOKEN: 100000001:ci-telegram-bot-token
+      TELEGRAM_OIDC_CLIENT_ID: "100000001"
+      TELEGRAM_OIDC_CLIENT_SECRET: ci-telegram-oidc-client-secret
+      TELEGRAM_OIDC_ISSUER: https://oauth.telegram.org
+      SUPPORT_ENABLED: "false"
+      TURNSTILE_ENABLED: "false"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm run test:unit
+      - run: npm run build
+
+  postgres-concurrency:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_DB: clean_pay
+          POSTGRES_USER: clean_pay
+          POSTGRES_PASSWORD: clean_pay_ci_password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U clean_pay -d clean_pay"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      DATABASE_URL: postgresql://clean_pay:clean_pay_ci_password@localhost:5432/clean_pay?schema=public
+      REAL_DATABASE_URL: postgresql://clean_pay:clean_pay_ci_password@localhost:5432/clean_pay?schema=public
+      APP_URL: http://localhost:8080
+      NEXT_PUBLIC_APP_URL: http://localhost:8080
+      REMNASHOP_API_BASE_URL: http://localhost:5000/api/v1/public
+      REMNASHOP_ADMIN_API_BASE_URL: http://localhost:5000/api/v1/admin
+      REMNASHOP_API_KEY: ci-remnashop-admin-token
+      REDIS_URL: redis://localhost:6379/0
+      WEB_JWT_SECRET: ci-web-session-jwt-secret-must-be-long-and-distinct
+      WEB_REFRESH_SECRET: ci-web-session-refresh-secret-must-be-long-distinct
+      AUDIT_IP_HASH_SECRET: ci-audit-log-secret-must-be-long-and-distinct-value
+      RATE_LIMIT_IDENTITY_SECRET: ci-rate-limit-secret-must-be-long-and-distinct
+      READINESS_INTERNAL_SECRET: ci-readiness-secret-must-be-long-and-distinct
+      COOKIE_SECURE: "false"
+      COOKIE_SAMESITE: lax
+      TELEGRAM_OIDC_CLIENT_ID: "100000001"
+      TELEGRAM_OIDC_CLIENT_SECRET: ci-telegram-oidc-client-secret
+      TELEGRAM_BOT_TOKEN: 100000001:ci-telegram-bot-token
+      TURNSTILE_ENABLED: "false"
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run prisma:generate
+      - run: node node_modules/prisma/build/index.js migrate deploy
+      - run: npm run test:postgres-concurrency

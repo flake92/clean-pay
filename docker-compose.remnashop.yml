@@ -1,0 +1,12 @@
+# Use this override only when Clean Pay and Remnashop run on the same server.
+services:
+  app:
+    networks:
+      default:
+      remnashop:
+        aliases: [clean-pay]
+
+networks:
+  remnashop:
+    external: true
+    name: ${REMNASHOP_DOCKER_NETWORK:-remnawave-network}
