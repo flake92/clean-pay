@@ -1,0 +1,113 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: ${CLEAN_PAY_IMAGE:-clean-pay:prestage}
+    restart: unless-stopped
+    stop_signal: SIGINT
+    stop_grace_period: 30s
+    env_file:
+      - ${CLEAN_PAY_ENV_FILE:-.env.example}
+    environment:
+      RAILS_ENV: ${RAILS_ENV:-development}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-clean_pay}:${POSTGRES_PASSWORD:-clean_pay}@postgres:5432/${POSTGRES_DB:-clean_pay}
+      REDIS_URL: redis://redis:6379/0
+      REMNASHOP_API_BASE_URL: http://remnashop:5000/api/v1/public
+      REMNASHOP_ADMIN_API_BASE_URL: http://remnashop:5000/api/v1/admin
+      REMNAWAVE_API_BASE_URL: http://remnawave-mock:3000
+      TELEGRAM_OIDC_ISSUER: http://telegram-oidc-mock:8090
+      TELEGRAM_OIDC_AUTHORIZATION_ENDPOINT: http://localhost:${TELEGRAM_OIDC_MOCK_PORT:-8090}/auth
+      TELEGRAM_OIDC_TOKEN_ENDPOINT: http://telegram-oidc-mock:8090/token
+      TELEGRAM_OIDC_JWKS_URI: http://telegram-oidc-mock:8090/.well-known/jwks.json
+      CLEAN_PAY_BIND: 0.0.0.0
+      CLEAN_PAY_PORT: "4000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - curl
+        - --fail
+        - --silent
+        - --show-error
+        - --header
+        - "X-Forwarded-Proto: https"
+        - http://127.0.0.1:4000/health/liveness
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+    ports:
+      - "127.0.0.1:${CLEAN_PAY_PORT:-4000}:4000"
+    networks:
+      - default
+      - clean_pay_edge
+
+  retention:
+    image: ${CLEAN_PAY_IMAGE:-clean-pay:prestage}
+    restart: unless-stopped
+    stop_signal: SIGINT
+    stop_grace_period: 30s
+    command: ["bin/retention"]
+    env_file:
+      - ${CLEAN_PAY_ENV_FILE:-.env.example}
+    environment:
+      RAILS_ENV: ${RAILS_ENV:-development}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-clean_pay}:${POSTGRES_PASSWORD:-clean_pay}@postgres:5432/${POSTGRES_DB:-clean_pay}
+      REDIS_URL: redis://redis:6379/0
+      RUN_MIGRATIONS: "false"
+    depends_on:
+      app:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - ruby
+        - -e
+        - "path='/tmp/clean-pay-retention-heartbeat'; exit 1 unless File.file?(path) && Time.now.to_i-Integer(File.read(path)) <= 90000"
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - default
+
+  reconciliation:
+    profiles: ["reconciliation"]
+    image: ${CLEAN_PAY_IMAGE:-clean-pay:prestage}
+    restart: on-failure:5
+    stop_signal: SIGINT
+    stop_grace_period: 30s
+    command: ["bin/reconciliation"]
+    env_file:
+      - ${CLEAN_PAY_ENV_FILE:-.env.example}
+    environment:
+      RAILS_ENV: ${RAILS_ENV:-development}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-clean_pay}:${POSTGRES_PASSWORD:-clean_pay}@postgres:5432/${POSTGRES_DB:-clean_pay}
+      REDIS_URL: redis://redis:6379/0
+      RUN_MIGRATIONS: "false"
+      PAYMENT_RECONCILIATION_INTERNAL_URL: http://app:4000/internal/payment_reconciliations
+    depends_on:
+      app:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - ruby
+        - -e
+        - "path='/tmp/clean-pay-reconciliation-heartbeat'; exit 1 unless File.file?(path) && Time.now.to_i-Integer(File.read(path)) <= 7200"
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - default
+
+networks:
+  clean_pay_edge:
+    external: true
+    name: ${CLEAN_PAY_EDGE_NETWORK:-clean-pay-prestage}

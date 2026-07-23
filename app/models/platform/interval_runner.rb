@@ -21,7 +21,7 @@ module Platform
           )
         ensure
           wait = interval - (monotonic_now - started)
-          sleeper.call(wait) if !stopping && wait.positive?
+          interruptible_sleep(wait)
         end
       end
     ensure
@@ -33,6 +33,16 @@ module Platform
     private
 
     attr_reader :interval, :task, :heartbeat, :sleeper
+
+    def interruptible_sleep(duration)
+      deadline = monotonic_now + duration
+      until stopping
+        remaining = deadline - monotonic_now
+        break unless remaining.positive?
+
+        sleeper.call([ remaining, 1.0 ].min)
+      end
+    end
 
     def stopping = @stopping
     def monotonic_now = Process.clock_gettime(Process::CLOCK_MONOTONIC)

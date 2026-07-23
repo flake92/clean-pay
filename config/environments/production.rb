@@ -50,4 +50,6 @@ Rails.application.configure do
 
   # Enable DNS rebinding protection and other `Host` header attacks.
   config.hosts = [ config.x.clean_pay.urls.app.host ]
+  reconciliation = config.x.clean_pay.reconciliation
+  config.hosts << reconciliation.internal_url.host if reconciliation.enabled
 end

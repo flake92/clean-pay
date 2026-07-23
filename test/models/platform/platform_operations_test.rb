@@ -45,6 +45,23 @@ class Platform::PlatformOperationsTest < ActiveSupport::TestCase
     assert_not redis.snapshot.key?("checks")
   end
 
+  test "default readiness includes every configured external probe" do
+    original = Rails.application.config.x.clean_pay
+    readiness = original.readiness.with(
+      mailpit_url: URI("http://127.0.0.1:8025"),
+      remnawave_url: URI("http://127.0.0.1:3001")
+    )
+    config = delegating_config(original, readiness:)
+    checker = Platform::ReadinessCheck.new(redis: MemoryRedis.new)
+
+    Rails.application.config.x.stub(:clean_pay, config) do
+      probes = checker.send(:default_probes)
+
+      assert_equal %w[mailpit postgresql redis remnashop remnawave telegram],
+        probes.keys.sort
+    end
+  end
+
   test "rate limiter stores only a digest and exposes retry after" do
     redis = MemoryRedis.new
     limiter = Platform::RateLimiter.new(redis:)
@@ -137,6 +154,29 @@ class Platform::PlatformOperationsTest < ActiveSupport::TestCase
     heartbeat.verify
   end
 
+  test "interval wait observes stop within one second" do
+    waits = []
+    runner = nil
+    runner = Platform::IntervalRunner.new(
+      interval: 60,
+      task: -> { },
+      heartbeat: Platform::Heartbeat.new(
+        Rails.root.join("tmp/test-interval-heartbeat")
+      ),
+      sleeper: ->(duration) {
+        waits << duration
+        runner.stop
+      }
+    )
+
+    runner.run
+
+    assert_equal 1, waits.length
+    assert_operator waits.first, :<=, 1.0
+  ensure
+    FileUtils.rm_f(Rails.root.join("tmp/test-interval-heartbeat"))
+  end
+
   test "reconciliation runner validates machine counters" do
     response = Integrations::HttpClient::Response.new(
       status: 200,
@@ -169,6 +209,10 @@ class Platform::PlatformOperationsTest < ActiveSupport::TestCase
     http.verify
   end
 
+  test "migration runner acquires the lock and accepts the current schema" do
+    assert_nothing_raised { Platform::MigrationRunner.new.call }
+  end
+
   private
 
   def reconciliation_config
@@ -178,8 +222,14 @@ class Platform::PlatformOperationsTest < ActiveSupport::TestCase
       secret: CleanPay::AppConfig::Secret.new("r" * 32),
       internal_url: URI("http://app:4000/internal/payment_reconciliations")
     )
+    delegating_config(original, reconciliation:)
+  end
+
+  def delegating_config(original, **overrides)
     Object.new.tap do |wrapper|
-      wrapper.define_singleton_method(:reconciliation) { reconciliation }
+      overrides.each do |name, value|
+        wrapper.define_singleton_method(name) { value }
+      end
       wrapper.define_singleton_method(:method_missing) do |name, *args, **kwargs,
         &block|
         original.public_send(name, *args, **kwargs, &block)

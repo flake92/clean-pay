@@ -12,8 +12,7 @@ module Platform
       ActiveRecord::Tasks::DatabaseTasks.migrate
       raise "pending migrations remain" if
         ActiveRecord::MigrationContext.new(
-          ActiveRecord::Tasks::DatabaseTasks.migrations_paths,
-          ActiveRecord::SchemaMigration
+          ActiveRecord::Tasks::DatabaseTasks.migrations_paths
         ).needs_migration?
     ensure
       connection&.execute("SELECT pg_advisory_unlock(#{LOCK_ID})") if acquired

@@ -29,7 +29,7 @@ class Account::RemnashopLinksController < ApplicationController
   end
 
   def link_verified!(auth, profile)
-    email = EmailAddress.parse(profile.fetch("email")).to_s
+    email = Identity::EmailAddress.parse(profile.fetch("email")).to_s
     if Current.web_user.remnashop_user_id.blank? ||
         Current.web_user.remnashop_user_id == auth.remnashop_user_id
       adopt_owner!(auth, email)
@@ -45,7 +45,7 @@ class Account::RemnashopLinksController < ApplicationController
   end
 
   def stage_verification!(auth, profile)
-    email = EmailAddress.parse(profile.fetch("email")).to_s
+    email = Identity::EmailAddress.parse(profile.fetch("email")).to_s
     Current.web_user.update!(
       pending_remnashop_user_id: auth.remnashop_user_id,
       pending_remnashop_email: email,

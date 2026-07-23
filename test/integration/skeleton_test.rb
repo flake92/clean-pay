@@ -11,8 +11,21 @@ class SkeletonTest < ActiveSupport::TestCase
   test "exposes resourceful Rails inputs and 19 server-rendered pages" do
     routes = Rails.application.routes.routes
 
-    assert_equal 67, routes.size
-    assert_equal 18, routes.count { _1.defaults[:controller] == "pages" }
+    assert_equal 69, routes.size
+    page_controllers = %w[
+      pages
+      identity/pages
+      subscriptions/pages
+      payments/pages
+      platform/pages
+    ]
+    domain_page_routes = routes.count {
+      page_controllers.include?(_1.defaults[:controller])
+    }
+    support_routes = routes.count { _1.defaults[:controller] == "supports" }
+
+    assert_equal 18, domain_page_routes
+    assert_equal 19, domain_page_routes + support_routes
     assert_equal 1, routes.count { _1.defaults[:controller] == "supports" }
     assert_equal 2, routes.count { _1.defaults[:controller] == "pwa" }
     assert routes.any? {

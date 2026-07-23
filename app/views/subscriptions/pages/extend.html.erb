@@ -1,0 +1,47 @@
+<header class="page-header"><div><p class="eyebrow">Подписка</p><h1>Продление подписки</h1>
+  <p>Выберите срок и способ оплаты.</p></div></header>
+<% if @subscription_error %>
+  <section class="card">
+    <p class="state state--error" role="alert">Не удалось проверить текущую подписку. Попробуйте позже.</p>
+    <%= link_to "Вернуться в кабинет", cabinet_path, class: "button button--outline" %>
+  </section>
+<% elsif @subscription.nil? %>
+  <section class="card">
+    <h2>Подписка не активна</h2>
+    <p class="state" role="status">Для продления нужна действующая подписка.</p>
+    <%= link_to "Выбрать тариф", tariffs_path, class: "button" %>
+  </section>
+<% elsif @renewal_offers.empty? %>
+  <section class="card">
+    <p class="state" role="status">Предложения для продления сейчас недоступны.</p>
+    <%= link_to "Вернуться в кабинет", cabinet_path, class: "button button--outline" %>
+  </section>
+<% else %>
+  <section class="card">
+    <h2>Текущая подписка</h2>
+    <p><strong><%= @subscription["plan_name"] || "Активная подписка" %></strong></p>
+    <p>Действует до <%= @subscription["expire_at"] || @subscription["expires_at"] || "—" %></p>
+  </section>
+  <section class="plan-grid">
+    <% @renewal_offers.each do |entry| %>
+      <% plan = entry.fetch(:plan) %>
+      <% duration = entry.fetch(:duration) %>
+      <% price = entry.fetch(:price) %>
+      <article class="card plan-card"><h2><%= plan["name"] %></h2>
+        <p><%= format_duration(duration["days"]) %> · <%= price["gateway_type"] %></p>
+        <p><strong><%= price["final_amount"] %> <%= price["currency"] %></strong></p>
+        <%= form_with scope: :extension, url: extensions_path,
+          data: { controller: "payment", action: "submit->payment#submit" } do |form| %>
+          <%= form.hidden_field :duration_days, value: duration["days"] %>
+          <%= form.hidden_field :gateway_type, value: price["gateway_type"] %>
+          <%= form.hidden_field :confirmed_amount, value: price["final_amount"] %>
+          <%= form.hidden_field :confirmed_currency, value: price["currency"] %>
+          <%= form.hidden_field :offer_version, value: @offer_version %>
+          <%= form.hidden_field :submission_token, value: @submission_token %>
+          <%= form.submit "Продлить", class: "button",
+            data: { payment_target: "submit" } %>
+        <% end %>
+      </article>
+    <% end %>
+  </section>
+<% end %>

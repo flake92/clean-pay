@@ -1,4 +1,5 @@
-class EmailAddress
+module Identity
+  class EmailAddress
   include ActiveModel::Validations
 
   attr_reader :value
@@ -17,5 +18,6 @@ class EmailAddress
   def to_s = value
   def ==(other) = other.is_a?(self.class) && other.value == value
   alias eql? ==
-  def hash = value.hash
+    def hash = value.hash
+  end
 end

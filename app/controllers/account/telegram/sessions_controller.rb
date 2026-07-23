@@ -11,7 +11,7 @@ class Account::Telegram::SessionsController < ApplicationController
 
     result = Identity::TelegramAuthentication.new.webapp!(init_data:)
     write_session_cookies(result.tokens)
-    destination = SafeReturnPath.parse(
+    destination = Identity::SafeReturnPath.parse(
       body[:redirect_to],
       default: cabinet_path
     )

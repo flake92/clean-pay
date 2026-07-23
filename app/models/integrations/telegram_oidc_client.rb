@@ -58,7 +58,7 @@ module Integrations
         true,
         algorithms: %w[RS256],
         jwks: jwks,
-        iss: telegram.issuer.to_s,
+        iss: telegram.issuer.to_s.delete_suffix("/"),
         verify_iss: true,
         aud: telegram.client_id,
         verify_aud: true

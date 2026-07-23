@@ -10,9 +10,21 @@
       <h2><%= plan["name"] %></h2>
       <p><%= plan["description"] %></p>
       <p><strong>от <%= plan["monthly_from_rub"] %> ₽/мес.</strong></p>
-      <%= link_to "Выбрать",
-        Current.web_user ? purchase_page_path(plan_code: plan["public_code"]) : login_path,
-        class: "button" %>
+      <% Array(plan["durations"]).each do |duration| %>
+        <% Array(duration["prices"]).each do |price| %>
+          <div class="state">
+            <p><%= format_duration(duration["days"]) %> · <%= price["gateway_type"] %></p>
+            <p><strong><%= price["final_amount"] %> <%= price["currency"] %></strong></p>
+            <%= link_to "Выбрать",
+              Current.web_user ? purchase_page_path(
+                plan_code: plan["public_code"],
+                duration_days: duration["days"],
+                gateway_type: price["gateway_type"]
+              ) : login_path,
+              class: "button" %>
+          </div>
+        <% end %>
+      <% end %>
     </article><% end %>
   <% end %>
 </section>

@@ -57,3 +57,48 @@ Production provider charge намеренно не выполнялся; он п
 ## Чистая проверка самодостаточности
 
 Каталог `software-spec/` скопирован отдельно от репозитория в временную clean-room директорию. В этой копии успешно проверены все относительные Markdown-ссылки, наличие 44 карточек HTTP и 19 PAGE-карточек, обе группы SHA-256 визуальных эталонов и отсутствие ссылок из нормативных разделов `01`—`08`, `99-llm` на исходные каталоги/файлы старого приложения. Автономный макет, изображения и контекст реализации входят в сам каталог спецификации.
+
+## Финальная проверка Rails-монолита — cycle 3, 2026-07-23
+
+Результаты старого приложения выше являются историческим доказательством
+исходного контракта. Текущая Ruby on Rails реализация проверена отдельным единым
+cycle 3 после всех исправлений исполняемого кода.
+
+| Уровень | Команда/среда | Результат |
+|---|---|---|
+| Единый CI | `mise exec -- bin/ci` | 173 runs, 842 assertions, 0 failures/errors/skips; RuboCop 251 files; Brakeman 0 warnings; dependency audits и Zeitwerk PASS |
+| HTTP | `bin/rails test test/requests` | 53 runs, 281 assertions |
+| Внешние интеграции | `bin/rails test test/integration` | 30 runs, 135 assertions |
+| Конкурентность | `bin/rails test test/integration/concurrency_test.rb` | 5 runs, 23 assertions |
+| System/E2E | `bin/rails test:system` | 26 runs, 184 assertions |
+| Visual | `visual_comparison_test.rb` | 38/38 PASS: 19 экранов × 1440×1000 и 390×844; minimum 89,27% при gate 88% |
+| Структура/реестр | `quality:plan`, `quality:structure` | 581 unique rows, 322/322 source files, 19 pages, 15 tables |
+| Пользовательский паритет | `main-user-capability-parity.md` | MCU-001…033 — `ДА`, сравнивались возможности и бизнес-результаты, а не технологии |
+
+### Внешние интерфейсы
+
+В работающем prestage защищённый readiness вернул `ok` отдельно для PostgreSQL,
+Redis, Remnashop, Telegram OIDC, Remnawave и Mailpit. Контрактные тесты охватили
+RS-001…030, RW-001…004, TG-001…006, TS-000/001, MAIL-001…003, SMTP-001,
+MP-001…003, REDIS-001…005 и reverse proxy. Реальное списание у
+production-провайдера не выполнялось: необратимый эффект ограничен
+mock/contract boundary.
+
+### Образ, процессы и recovery
+
+Финальный `clean-pay:prestage` собран без cache; manifest image —
+`sha256:1f1007e70472ea96ba38f90c74c79ee7a2d3c6c3f074b905a1122956d4c133c8`.
+Web, retention и reconciliation работали от одного образа и пользователя
+`rails:rails`. Heartbeat-файлы retention/reconciliation имели mode `0600`;
+оба worker и web завершились по сигналу с exit code 0 и после этого успешно
+перезапустились.
+
+Backup финального образа получил SHA-256
+`a205475f8e30f4d0c70c1e232d445d5ed8263033510aac2365ab82f09f1e5d2c`.
+Он восстановлен в отдельную пустую БД
+`clean_pay_restore_rehearsal_cycle3`; checksum, schema version и row counts 15
+таблиц совпали. Read-only Rails smoke подтвердил отсутствие pending migrations.
+Временная БД и backup удалены; рабочие volumes и данные не изменялись.
+
+Cycle 1 и 2 в корневом плане сохранены как недействительные с обнаруженными
+причинами. Они не используются как доказательство готовности cycle 3.

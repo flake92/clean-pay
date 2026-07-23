@@ -1,4 +1,5 @@
-class SafeReturnPath
+module Identity
+  class SafeReturnPath
   include ActiveModel::Validations
 
   attr_reader :value
@@ -26,5 +27,6 @@ class SafeReturnPath
       !value.match?(/[\\\0]/)
 
     errors.add(:value, :invalid)
+    end
   end
 end

@@ -1,4 +1,5 @@
-class ConfirmedOffer
+module Payments
+  class ConfirmedOffer
   include ActiveModel::Validations
 
   CURRENCY_PATTERN = /\A[A-Z0-9]{2,12}\z/
@@ -36,5 +37,6 @@ class ConfirmedOffer
     Digest::SHA256.hexdigest(
       [ plan_id, amount, currency, version, duration_days ].to_json
     )
+    end
   end
 end

@@ -1,7 +1,7 @@
 class Account::IdentitiesController < ApplicationController
   def create
     email = params.expect(identity: [ :email ]).fetch(:email)
-    normalized = EmailAddress.parse(email).to_s
+    normalized = Identity::EmailAddress.parse(email).to_s
     user = WebUser.find_by(email: normalized)
     redirect_to(
       user ? login_path(email: normalized) : register_path(email: normalized),

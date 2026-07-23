@@ -1,4 +1,5 @@
-class MoneyAmount
+module Payments
+  class MoneyAmount
   include ActiveModel::Validations
 
   MAXIMUM = BigDecimal("9999999999.99")
@@ -32,5 +33,6 @@ class MoneyAmount
     return if value == value.round(SCALE)
 
     errors.add(:value, :invalid)
+    end
   end
 end

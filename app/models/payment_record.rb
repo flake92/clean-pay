@@ -29,7 +29,7 @@ class PaymentRecord < ApplicationRecord
   def self.upsert_upstream!(web_user:, attributes:, payment_operation: nil)
     values = attributes.to_h.stringify_keys
     payment_id = values.fetch("payment_id").to_s
-    IdempotencyKey.parse(payment_id)
+    Payments::IdempotencyKey.parse(payment_id)
     validate_gateway!(values.fetch("gateway_type"))
     validate_currency!(values.fetch("currency"))
     record = find_or_initialize_by(payment_id:)
@@ -47,7 +47,8 @@ class PaymentRecord < ApplicationRecord
       payment_operation: payment_operation || record.payment_operation,
       purchase_type: normalize_purchase_type(values.fetch("purchase_type")),
       status: normalize_status(values.fetch("status")),
-      final_amount: MoneyAmount.parse(values.fetch("final_amount")).to_d,
+      final_amount:
+        Payments::MoneyAmount.parse(values.fetch("final_amount")).to_d,
       currency: values.fetch("currency"),
       gateway_type: values.fetch("gateway_type"),
       payment_url: safe_payment_url(values["payment_url"]),
@@ -68,13 +69,13 @@ class PaymentRecord < ApplicationRecord
 
   def self.validate_transaction!(attributes)
     values = attributes.to_h.stringify_keys
-    IdempotencyKey.parse(values.fetch("payment_id"))
+    Payments::IdempotencyKey.parse(values.fetch("payment_id"))
     normalize_purchase_type(values.fetch("purchase_type"))
     raise KeyError unless statuses.value?(values.fetch("status").to_s.upcase)
 
     validate_gateway!(values.fetch("gateway_type"))
     validate_currency!(values.fetch("currency"))
-    MoneyAmount.parse(values.fetch("final_amount"))
+    Payments::MoneyAmount.parse(values.fetch("final_amount"))
     %w[duration_days device_limit traffic_limit traffic_limit_bytes].each do |key|
       next if values[key].nil?
 
