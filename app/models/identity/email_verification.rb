@@ -19,7 +19,7 @@ module Identity
       web_session.web_user.update!(
         email: result.fetch("email"),
         email_verified: true,
-        auth_pending: false
+        auth_pending: web_session.bootstrap?
       )
       result.merge(
         "already_verified" => false,

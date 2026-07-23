@@ -19,10 +19,15 @@ class Http008Test < ActionDispatch::IntegrationTest
 
     Identity::EmailVerification.stub(:new, operation) do
       patch "/account/email_verification",
-        params: { email_verification: { code: "123456" } }
+        params: {
+          email_verification: {
+            code: "123456",
+            registration_flow: "true"
+          }
+        }
     end
 
-    assert_redirected_to cabinet_path
+    assert_redirected_to passkey_setup_path
   end
 
   test "rejects a code that is not six ASCII digits" do

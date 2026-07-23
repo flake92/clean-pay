@@ -23,6 +23,7 @@ class Account::EmailVerificationsController < ApplicationController
     body = params.expect(
       email_verification: [
         :code,
+        :registration_flow,
         :turnstile_token,
         :"cf-turnstile-response"
       ]
@@ -34,9 +35,20 @@ class Account::EmailVerificationsController < ApplicationController
       status: :bad_request
     ) unless code.match?(/\A\d{6}\z/)
 
+    registration_flow = ActiveModel::Type::Boolean.new.cast(
+      body.delete(:registration_flow)
+    )
     result = operation.confirm!(web_session: Current.web_session, code:)
+    destination =
+      if registration_flow
+        passkey_setup_path
+      elsif result.fetch("account_sync_pending")
+        link_account_path
+      else
+        cabinet_path
+      end
     redirect_to(
-      result.fetch("account_sync_pending") ? link_account_path : cabinet_path,
+      destination,
       notice: "E-mail подтверждён.",
       status: :see_other
     )

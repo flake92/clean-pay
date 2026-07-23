@@ -1,26 +1,72 @@
 <% content_for :title, "Вход — Clean Pay" %>
 <section class="auth-content">
-  <p class="eyebrow">Clean Pay</p>
-  <h1>Вход в кабинет</h1>
-  <% if params[:email].present? %>
-    <p>Продолжить как <strong><%= params[:email] %></strong></p>
+  <header class="auth-heading">
+    <h1>Вход</h1>
+    <p>Введите e-mail. Если аккаунт уже есть, покажем вход по паролю
+      или быстрый вход. Если аккаунта нет, создадим его здесь же.</p>
+  </header>
+  <% if params[:email].present? && params[:mode].in?(%w[password register]) %>
+    <div class="auth-account-summary">
+      <div>
+        <span>E-mail</span>
+        <strong><%= params[:email] %></strong>
+      </div>
+      <%= link_to "Изменить", login_path, class: "text-link" %>
+    </div>
+  <% end %>
+  <% if params[:mode] == "register" && params[:email].present? %>
+    <p class="state state--info">Аккаунт не найден. Создайте пароль,
+      и мы отправим код подтверждения на e-mail.</p>
+    <%= form_with scope: :registration, url: account_registration_path,
+      class: "form-stack",
+      data: {
+        controller: "form-lock password-visibility",
+        action: "input->password-visibility#validate"
+      } do |form| %>
+      <%= form.hidden_field :email, value: params[:email] %>
+      <%= form.label :password, "Пароль" %>
+      <%= form.password_field :password, required: true,
+        autocomplete: "new-password", minlength: 8,
+        placeholder: "Придумайте пароль",
+        data: { password_visibility_target: "input" } %>
+      <span class="form-hint">Минимум 8 символов.</span>
+      <button type="button" class="text-link password-toggle"
+        data-action="password-visibility#toggle"
+        data-password-visibility-target="toggle"
+        aria-pressed="false">Показать пароль</button>
+      <%= form.label :password_confirmation, "Повторите пароль" %>
+      <%= form.password_field :password_confirmation, required: true,
+        autocomplete: "new-password", minlength: 8,
+        placeholder: "Введите пароль ещё раз",
+        data: { password_visibility_target: "confirmation" } %>
+      <%= render "shared/turnstile" %>
+      <%= form.submit "Создать аккаунт", class: "button",
+        data: { form_lock_target: "submit" } %>
+    <% end %>
+  <% elsif params[:mode] == "password" && params[:email].present? %>
+    <% if params[:passkey] == "1" %>
+      <div data-controller="passkey">
+        <button type="button" class="button button--outline button--full"
+          data-action="passkey#authenticate">Войти с Passkey</button>
+        <p data-passkey-target="status" aria-live="polite"></p>
+      </div>
+    <% end %>
     <%= form_with scope: :session, url: account_session_path,
       class: "form-stack", data: { controller: "form-lock" } do |form| %>
       <%= form.hidden_field :email, value: params[:email] %>
       <%= form.label :password, "Пароль" %>
       <%= form.password_field :password, required: true,
-        autocomplete: "current-password" %>
+        autocomplete: "current-password", placeholder: "Введите пароль" %>
       <%= render "shared/turnstile" %>
       <%= form.submit "Продолжить", class: "button",
         data: { form_lock_target: "submit" } %>
     <% end %>
-    <%= link_to "Изменить e-mail", login_path, class: "text-link" %>
   <% else %>
     <%= form_with scope: :identity, url: account_identity_path,
       class: "form-stack", data: { controller: "form-lock" } do |form| %>
       <%= form.label :email, "E-mail" %>
       <%= form.email_field :email, required: true, autofocus: true,
-        autocomplete: "email" %>
+        autocomplete: "username", placeholder: "user@example.com" %>
       <%= form.submit "Продолжить", class: "button",
         data: { form_lock_target: "submit" } %>
     <% end %>
@@ -29,14 +75,9 @@
     <%= form_with url: new_account_telegram_authorization_path, method: :get,
       data: { controller: "form-lock" } do |form| %>
       <%= render "shared/turnstile" %>
-      <%= form.submit "Войти через Telegram", class: "button button--outline",
+      <%= form.submit "Войти через Telegram",
+        class: "button button--info button--full",
         data: { form_lock_target: "submit" } %>
     <% end %>
-    <div data-controller="passkey">
-      <button type="button" class="button button--outline"
-        data-action="passkey#authenticate">Войти с Passkey</button>
-      <p data-passkey-target="status" aria-live="polite"></p>
-    </div>
-    <%= link_to "Создать аккаунт", register_path, class: "text-link" %>
   </div>
 </section>

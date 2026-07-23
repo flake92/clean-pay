@@ -10,11 +10,13 @@ class EmailPurchaseJourneyTest < ApplicationSystemTestCase
 
     with_empty_subscription do
       Identity::EmailAuthentication.stub(:new, authentication) do
-        visit register_path
-        fill_in "E-mail", with: user.email
-        fill_in "Пароль", with: "transient-secret"
-        fill_in "Повторите пароль", with: "transient-secret"
-        click_button "Создать аккаунт"
+        Identity::EmailVerification.stub(:new, verification) do
+          visit register_path
+          fill_in "E-mail", with: user.email
+          fill_in "Пароль", with: "transient-secret"
+          fill_in "Повторите пароль", with: "transient-secret"
+          click_button "Создать аккаунт"
+        end
       end
 
       assert_current_path register_verify_email_path
@@ -22,9 +24,12 @@ class EmailPurchaseJourneyTest < ApplicationSystemTestCase
 
       Identity::EmailVerification.stub(:new, verification) do
         fill_in "Код подтверждения", with: "123456"
-        click_button "Подтвердить"
+        click_button "Подтвердить e-mail"
       end
 
+      assert_current_path passkey_setup_path
+      assert_text "Быстрый вход"
+      click_button "Продолжить без него"
       assert_current_path cabinet_path
       assert_text "E-mail подтверждён."
 
@@ -70,6 +75,12 @@ class EmailPurchaseJourneyTest < ApplicationSystemTestCase
 
   def verification_for(user)
     Object.new.tap do |operation|
+      operation.define_singleton_method(:request!) do |web_session:, email:|
+        raise "wrong owner" unless web_session.web_user_id == user.id
+        raise "wrong email" unless email == user.email
+
+        { "target_email" => email }
+      end
       operation.define_singleton_method(:confirm!) do |web_session:, code:|
         raise "wrong owner" unless web_session.web_user_id == user.id
         raise "wrong code" unless code == "123456"

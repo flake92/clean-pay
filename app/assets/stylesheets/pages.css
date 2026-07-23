@@ -38,6 +38,10 @@
   gap: 0.75rem;
 }
 
+.auth-alternatives form {
+  width: 100%;
+}
+
 .action-grid,
 .metric-grid,
 .plan-grid,

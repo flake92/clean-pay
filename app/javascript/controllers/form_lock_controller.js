@@ -26,7 +26,8 @@ export default class extends Controller {
     if (!this.hasSubmitTarget) return
 
     this.submitTarget.disabled = false
-    this.setLabel(this.originalLabel)
+    if (this.originalLabel) this.setLabel(this.originalLabel)
+    this.originalLabel = null
   }
 
   setLabel(value) {

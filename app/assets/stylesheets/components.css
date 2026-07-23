@@ -52,6 +52,20 @@ textarea:focus-visible {
   padding: 0.625rem 1rem;
 }
 
+.button--full {
+  width: 100%;
+}
+
+.button--info {
+  border-color: #229ed9;
+  background: #229ed9;
+}
+
+.button--info:hover {
+  border-color: #168ac0;
+  background: #168ac0;
+}
+
 .card {
   display: flex;
   flex-direction: column;
@@ -191,6 +205,12 @@ input:invalid:not(:placeholder-shown) {
   padding: 1rem;
   border-radius: 6px;
   background: var(--surface-hover);
+}
+
+.state--info {
+  border: 1px solid #bae6fd;
+  background: #f0f9ff;
+  color: var(--info);
 }
 
 .clean-list {
