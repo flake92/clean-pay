@@ -17,11 +17,17 @@ module Integrations
       :refresh_token,
       :remnashop_user_id
     )
+    EMAIL_DELIVERY_TIMEOUT = 30
 
-    def initialize(public_http: nil, admin_http: nil, config: nil)
+    def initialize(public_http: nil, admin_http: nil, email_http: nil,
+      config: nil)
       @config = config || Rails.application.config.x.clean_pay
       @public_http = public_http || HttpClient.new(
         base_url: @config.remnashop.public_api
+      )
+      @email_http = email_http || public_http || HttpClient.new(
+        base_url: @config.remnashop.public_api,
+        timeout: EMAIL_DELIVERY_TIMEOUT
       )
       @admin_http = admin_http || HttpClient.new(
         base_url: @config.remnashop.admin_api
@@ -42,7 +48,7 @@ module Integrations
       public_request(:post, "auth/telegram/link", access_token:, json: payload).body
     def request_email_verification(access_token:, email: nil) =
       public_request(:post, "auth/email/request-verification",
-        access_token:, json: { email: }.compact).body
+        access_token:, json: { email: }.compact, connection: email_http).body
     def confirm_email(access_token:, code:) =
       public_request(:post, "auth/email/confirm", access_token:, json: { code: }).body
     def change_email(access_token:, email:) =
@@ -105,7 +111,7 @@ module Integrations
 
     private
 
-    attr_reader :public_http, :admin_http, :config
+    attr_reader :public_http, :admin_http, :email_http, :config
 
     def auth_request(method, path, access_token: nil, refresh_token: nil, json: nil)
       response = public_request(method, path,
@@ -130,9 +136,9 @@ module Integrations
     end
 
     def public_request(method, path, access_token: nil, refresh_token: nil,
-      idempotency_key: nil, json: nil)
+      idempotency_key: nil, json: nil, connection: public_http)
       headers = auth_headers(access_token:, refresh_token:, idempotency_key:)
-      response = public_http.request(method, path, json:, headers:)
+      response = connection.request(method, path, json:, headers:)
       raise normalized_error(response.status, detail(response.body), path) unless
         response.success?
 

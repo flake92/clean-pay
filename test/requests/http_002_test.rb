@@ -5,16 +5,25 @@ class Http002Test < ActionDispatch::IntegrationTest
     result = stubbed_authentication_result
     operation = Object.new
     operation.define_singleton_method(:login!) { |_payload| result }
+    turnstile = Minitest::Mock.new
+    turnstile.expect(
+      :verify!,
+      true,
+      token: "browser-proof",
+      remote_ip: "127.0.0.1"
+    )
 
-    Identity::EmailAuthentication.stub(:new, operation) do
-      post "/account/session",
-        params: {
-          session: {
-            email: result.web_user.email,
-            password: "transient-secret",
-            turnstile_token: "token"
+    Integrations::TurnstileClient.stub(:new, turnstile) do
+      Identity::EmailAuthentication.stub(:new, operation) do
+        post "/account/session",
+          params: {
+            session: {
+              email: result.web_user.email,
+              password: "transient-secret"
+            },
+            "cf-turnstile-response": "browser-proof"
           }
-        }
+      end
     end
 
     assert_redirected_to cabinet_path
@@ -22,5 +31,6 @@ class Http002Test < ActionDispatch::IntegrationTest
     assert_includes set_cookie, "clean_pay_access="
     assert_includes set_cookie, "clean_pay_refresh="
     assert_not WebUser.column_names.any? { _1.include?("password") }
+    turnstile.verify
   end
 end

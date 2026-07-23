@@ -72,8 +72,8 @@
     <% end %>
   <% end %>
   <div class="auth-alternatives">
-    <%= form_with url: new_account_telegram_authorization_path, method: :get,
-      data: { controller: "form-lock" } do |form| %>
+    <%= form_with url: account_telegram_authorization_path, method: :post,
+      data: { controller: "form-lock", turbo: false } do |form| %>
       <%= render "shared/turnstile" %>
       <%= form.submit "Войти через Telegram",
         class: "button button--info button--full",

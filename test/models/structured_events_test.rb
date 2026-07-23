@@ -12,7 +12,11 @@ class StructuredEventsTest < ActiveSupport::TestCase
       timestamp: Time.utc(2026, 7, 23).to_f * 1_000_000_000,
       payload: {
         outcome: "accepted",
-        nested: { password: "open-password", token: "open-token" }
+        nested: {
+          password: "open-password",
+          token: "open-token",
+          "cf-turnstile-response": "open-turnstile-proof"
+        }
       },
       context: { request_id: "request-1" },
       tags: {}
@@ -27,7 +31,10 @@ class StructuredEventsTest < ActiveSupport::TestCase
     assert_equal "request-1", event.dig("context", "request_id")
     assert_equal "[FILTERED]", event.dig("payload", "nested", "password")
     assert_equal "[FILTERED]", event.dig("payload", "nested", "token")
+    assert_equal "[FILTERED]",
+      event.dig("payload", "nested", "cf-turnstile-response")
     refute_includes output.string, "open-password"
     refute_includes output.string, "open-token"
+    refute_includes output.string, "open-turnstile-proof"
   end
 end

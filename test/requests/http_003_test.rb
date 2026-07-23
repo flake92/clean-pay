@@ -20,8 +20,10 @@ class Http003Test < ActionDispatch::IntegrationTest
           params: {
             registration: {
               email: result.web_user.email,
-              password: "transient-secret"
-            }
+              password: "transient-secret",
+              password_confirmation: "transient-secret"
+            },
+            "cf-turnstile-response": "browser-proof"
           }
       end
     end
@@ -30,5 +32,19 @@ class Http003Test < ActionDispatch::IntegrationTest
     assert_includes response.headers["Set-Cookie"].join("\n"), "httponly"
     assert_equal result.tokens.web_session, requested.fetch(:web_session)
     assert_equal result.web_user.email, requested.fetch(:email)
+  end
+
+  test "rejects a registration when password confirmation differs" do
+    post "/account/registration",
+      params: {
+        registration: {
+          email: "new-person@example.test",
+          password: "transient-secret",
+          password_confirmation: "different-secret"
+        }
+      }
+
+    assert_redirected_to root_path
+    assert_equal "Проверьте введённые данные.", flash[:alert]
   end
 end

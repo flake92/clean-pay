@@ -15,7 +15,13 @@
     <% end %>
   </article>
   <article class="card"><h2>Telegram</h2><p><%= Current.web_user.telegram_id ? "Привязан" : "Не привязан" %></p>
-    <%= link_to "Привязать Telegram", new_account_telegram_authorization_path, class: "button" %></article>
+    <%= form_with url: account_telegram_authorization_path, method: :post,
+      data: { controller: "form-lock", turbo: false } do |form| %>
+      <%= render "shared/turnstile" %>
+      <%= form.submit "Привязать Telegram", class: "button",
+        data: { form_lock_target: "submit" } %>
+    <% end %>
+  </article>
   <article class="card" data-controller="passkey"><h2>Passkey</h2>
     <label for="linked-passkey-name">Название ключа</label>
     <input id="linked-passkey-name" type="text" maxlength="80"

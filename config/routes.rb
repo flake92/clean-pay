@@ -20,7 +20,10 @@ Rails.application.routes.draw do
     resource :telegram_session, only: :create, controller: "telegram/sessions"
     resource :merge_confirmation, only: %i[show update destroy]
     resource :remnashop_link, only: :create
-    resource :telegram_authorization, only: :new do
+    post "telegram_authorization",
+      to: "telegram_authorizations#new",
+      as: :telegram_authorization
+    resource :telegram_authorization, only: [] do
       get :callback
       post :callback
     end
