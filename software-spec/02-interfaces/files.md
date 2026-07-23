@@ -19,7 +19,7 @@
 ## Динамические файлы
 
 - `/manifest.webmanifest` формируется динамически по контракту PWA и branding-конфигурации.
-- `/sw.js` формируется HTTP-обработчиком из build ID; JavaScript UTF-8, `no-cache/no-store/must-revalidate`, `Service-Worker-Allowed: /`.
+- `/service-worker.js` формируется HTTP-обработчиком из build ID; JavaScript UTF-8, `no-cache/no-store/must-revalidate`, `Service-Worker-Allowed: /`.
 - Offline fallback кэшируется по `/offline`.
 
 ## Эксплуатационные файлы

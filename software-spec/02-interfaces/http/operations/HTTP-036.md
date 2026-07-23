@@ -26,7 +26,7 @@
 
 ## Текущий транспорт
 
-Публичный dynamic `GET /api/health/readiness`.
+`GET /health/readiness`; публичная машинная JSON readiness-проверка зависимостей.
 
 ## Правила валидации
 
@@ -58,7 +58,7 @@
 
 ## Логический результат
 
-`{status:"ok"|"degraded",checkedAt:string|null,stale:boolean,service:"clean-pay",version:string}` без BFF-оболочки; 200 только ok, иначе 503; `cache-control:no-store`.
+`200` при готовности или `503` при деградации; `application/json`, без секретов.
 
 ## Побочные эффекты
 
@@ -78,4 +78,4 @@ Redis GET и access log.
 
 ## Статус уверенности
 
-`подтверждено`
+`требует повторной проверки после ADR-003`

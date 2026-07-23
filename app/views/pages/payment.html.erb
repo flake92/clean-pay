@@ -1,0 +1,28 @@
+<header class="page-header"><div><p class="eyebrow">Покупка</p><h1>Подтвердите тариф</h1>
+  <p>Цена будет повторно проверена сервером перед созданием платежа.</p></div></header>
+<section class="plan-grid">
+  <% Array(@offers["plans"]).each do |plan| %>
+    <% next if params[:plan_code].present? && plan["public_code"] != params[:plan_code] %>
+    <% Array(plan["durations"]).each do |duration| %>
+      <% Array(duration["prices"]).each do |price| %>
+        <article class="card plan-card">
+          <h2><%= plan["name"] %></h2>
+          <p><%= format_duration(duration["days"]) %></p>
+          <p><strong><%= price["final_amount"] %> <%= price["currency"] %></strong></p>
+          <%= form_with scope: :purchase, url: purchases_path,
+            data: { controller: "payment", action: "submit->payment#submit" } do |form| %>
+            <%= form.hidden_field :plan_code, value: plan["public_code"] %>
+            <%= form.hidden_field :duration_days, value: duration["days"] %>
+            <%= form.hidden_field :gateway_type, value: price["gateway_type"] %>
+            <%= form.hidden_field :confirmed_amount, value: price["final_amount"] %>
+            <%= form.hidden_field :confirmed_currency, value: price["currency"] %>
+            <%= form.hidden_field :offer_version, value: @offer_version %>
+            <%= form.hidden_field :submission_token, value: @submission_token %>
+            <%= form.submit "Перейти к оплате", class: "button",
+              data: { payment_target: "submit" } %>
+          <% end %>
+        </article>
+      <% end %>
+    <% end %>
+  <% end %>
+</section>

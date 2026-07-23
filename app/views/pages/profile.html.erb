@@ -1,0 +1,28 @@
+<header class="page-header"><div><p class="eyebrow">Аккаунт</p><h1>Профиль</h1>
+  <p>Контакты и параметры безопасности.</p></div></header>
+<section class="two-column">
+  <article class="card"><h2>Идентичность</h2>
+    <dl><dt>E-mail</dt><dd class="break-all"><%= Current.web_user.email || "Не привязан" %></dd>
+      <dt>Telegram</dt><dd><%= Current.web_user.telegram_id ? "Привязан" : "Не привязан" %></dd></dl>
+    <%= form_with scope: :email, url: account_email_path, method: :patch,
+      class: "form-stack", data: { controller: "form-lock" } do |form| %>
+      <%= form.label :value, "Новый e-mail" %>
+      <%= form.email_field :value, required: true, autocomplete: "email" %>
+      <%= render "shared/turnstile" %>
+      <%= form.submit "Сохранить e-mail", class: "button",
+        data: { form_lock_target: "submit" } %>
+    <% end %>
+  </article>
+  <article class="card"><h2>Сменить пароль</h2>
+    <%= form_with scope: :password, url: account_password_path, method: :patch,
+      class: "form-stack",
+      data: { controller: "form-lock password-visibility" } do |form| %>
+      <%= form.label :current_password, "Текущий пароль" %>
+      <%= form.password_field :current_password, required: true, autocomplete: "current-password" %>
+      <%= form.label :new_password, "Новый пароль" %>
+      <%= form.password_field :new_password, required: true, autocomplete: "new-password" %>
+      <%= form.submit "Изменить пароль", class: "button",
+        data: { form_lock_target: "submit" } %>
+    <% end %>
+  </article>
+</section>

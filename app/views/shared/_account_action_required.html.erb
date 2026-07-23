@@ -1,0 +1,9 @@
+<aside class="card state" role="note">
+  <h2><%= local_assigns.fetch(:title, "Завершите настройку аккаунта") %></h2>
+  <p><%= local_assigns.fetch(
+    :message,
+    "Привяжите способ входа, чтобы использовать все возможности кабинета."
+  ) %></p>
+  <%= link_to "Способы входа", link_account_path,
+    class: "button button--outline" %>
+</aside>

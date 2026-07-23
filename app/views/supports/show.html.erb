@@ -1,0 +1,43 @@
+<header class="page-header">
+  <div>
+    <p class="eyebrow">Помощь</p>
+    <h1>Поддержка</h1>
+    <p>Выберите опубликованный канал связи.</p>
+  </div>
+</header>
+<main class="three-column">
+  <% unless @support.enabled %>
+    <div class="card state">
+      <h2>Каналы пока не опубликованы</h2>
+      <p>Каналы поддержки сейчас недоступны.</p>
+    </div>
+  <% else %>
+    <% if @support.email %>
+      <article class="card">
+        <h2>E-mail</h2>
+        <p class="break-all"><%= @support.email %></p>
+        <%= mail_to @support.email, "Написать по e-mail",
+          class: "button button--outline" %>
+      </article>
+    <% end %>
+    <% if @support.telegram_username %>
+      <article class="card">
+        <h2>Telegram</h2>
+        <p><%= @support.telegram_username %></p>
+        <%= link_to "Открыть Telegram",
+          "https://t.me/#{@support.telegram_username.delete_prefix("@")}",
+          class: "button button--outline",
+          target: "_blank", rel: "noopener noreferrer" %>
+      </article>
+    <% end %>
+    <% if @support.faq_url %>
+      <article class="card">
+        <h2>Частые вопросы</h2>
+        <p>Инструкции по оплате, доступу и устройствам.</p>
+        <%= link_to "Открыть FAQ", @support.faq_url,
+          class: "button button--outline",
+          target: "_blank", rel: "noopener noreferrer" %>
+      </article>
+    <% end %>
+  <% end %>
+</main>

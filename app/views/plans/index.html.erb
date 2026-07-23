@@ -1,0 +1,18 @@
+<main>
+  <h1>Тарифы</h1>
+  <% plans = @plans.is_a?(Hash) ? @plans["plans"] : @plans %>
+  <% if Array(plans).empty? %>
+    <p>Сейчас нет доступных тарифов.</p>
+  <% else %>
+    <ul>
+      <% Array(plans).each do |plan| %>
+        <li>
+          <strong><%= plan["name"] || plan["public_code"] %></strong>
+          <% if plan["description"].present? %>
+            <p><%= plan["description"] %></p>
+          <% end %>
+        </li>
+      <% end %>
+    </ul>
+  <% end %>
+</main>

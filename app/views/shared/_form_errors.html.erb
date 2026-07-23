@@ -1,0 +1,10 @@
+<% if local_assigns[:object]&.errors&.any? %>
+  <div class="flash flash--alert" role="alert">
+    <p>Проверьте введённые данные:</p>
+    <ul>
+      <% object.errors.full_messages.each do |message| %>
+        <li><%= message %></li>
+      <% end %>
+    </ul>
+  </div>
+<% end %>

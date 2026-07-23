@@ -1,0 +1,18 @@
+<main>
+  <h1>История платежей</h1>
+  <% if @payments.empty? %>
+    <p>Платежей пока нет.</p>
+  <% else %>
+    <ol>
+      <% @payments.each do |payment| %>
+        <li>
+          <strong><%= payment.final_amount.to_s("F") %> <%= payment.currency %></strong>
+          — <%= payment.status %>
+          <% if payment.payment_operation %>
+            <%= link_to "Подробнее", payment_path(payment.payment_operation) %>
+          <% end %>
+        </li>
+      <% end %>
+    </ol>
+  <% end %>
+</main>

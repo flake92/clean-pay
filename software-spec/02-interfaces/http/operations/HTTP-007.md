@@ -32,8 +32,11 @@
 
 ## Текущий транспорт
 
-`POST /api/bff/auth/email/request-verification`; доверенный origin; `application/json`/`application/*+json`; JSON-объект UTF-8 до 65 536 байт; cookie сессии. Query/path-параметров нет.
+`POST /account/email_verification`. Rails form scope `email_verification[email,turnstile_token]`; CSRF; unverified session allowed.
 
+ADR-003 заменяет исторический BFF/JSON transport этой операции.
+
+Коды ошибок в нижележащем историческом анализе теперь являются доменными классификациями: браузеру Rails рендерит form errors/flash либо выполняет безопасный redirect; BFF envelope не возвращается.
 ## Правила валидации
 
 Общее тело проверяет Clean Pay; `email` проверяет Remnashop. Turnstile выполняется первым. Правый крайний валидный IP из `X-Forwarded-For` передаётся Turnstile как `remoteip`; остальные IP headers игнорируются.
@@ -44,7 +47,7 @@ Rate-limit нормализует идентичность trim/lower-case и HM
 
 ## Авторизация
 
-Proxy специально разрешает `/api/bff/auth/email/*` неподтверждённой e-mail-сессии. Сервер получает внешние токены с `allowUnverifiedEmail=true`.
+Rails policy специально разрешает email verification resource неподтверждённой e-mail-сессии. Сервер получает внешние токены с `allowUnverifiedEmail=true`.
 
 ## Идемпотентность
 
@@ -70,8 +73,6 @@ Proxy специально разрешает `/api/bff/auth/email/*` непод
 | 400 | `VALIDATION_ERROR` | тело/e-mail недопустимы |
 | 401 | `UNAUTHORIZED`/`EMAIL_REQUIRED` | нет сессии или внешней связи |
 | 403 | `FORBIDDEN` | origin/Turnstile |
-| 413 | `VALIDATION_ERROR` | слишком большое тело |
-| 415 | `VALIDATION_ERROR` | media type |
 | 429 | `RATE_LIMITED` | cooldown, общий или внешний предел |
 | 502 | `UPSTREAM_UNAVAILABLE`/`UPSTREAM_ERROR` | Remnashop/SMTP после разрешённых повторов |
 | 503 | `UPSTREAM_UNAVAILABLE` | Turnstile недоступен |
@@ -81,14 +82,7 @@ Proxy специально разрешает `/api/bff/auth/email/*` непод
 
 ## Логический результат
 
-`200`:
-
-```json
-{"data":{"success":true,"target_email":"user@example.com","expires_at":"2026-07-22T12:15:00Z"}}
-```
-
-Все три поля обязательны по внешнему контракту; cookie специально не меняются, кроме возможной общей refresh rotation.
-
+`303 See Other` to `/verify-email` with a safe flash notice.
 ## Побочные эффекты
 
 Счётчики Redis, письмо SMTP через Remnashop, состояние хэша кода/срока во внешней системе, audit и технические журналы.
@@ -107,4 +101,4 @@ Proxy специально разрешает `/api/bff/auth/email/*` непод
 
 ## Статус уверенности
 
-`подтверждено`
+`требует повторной проверки после ADR-003`

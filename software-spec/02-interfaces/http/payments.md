@@ -1,64 +1,81 @@
-# HTTP-контракты платежей
+# HTTP-контракты платежей Rails-монолита
 
-Доказательства: TRACE-HTTP-024, 025, 031, 032, 038.
+Доказательства: TRACE-HTTP-024, 025, 031, 032, 038 и ADR-003.
 
-## Общий контракт покупок
+## Общий контракт отправки платежа
 
-HTTP-024 и HTTP-025 требуют `Content-Type: application/json`, доверенный источник, полную разрешённую сессию и заголовок `Idempotency-Key` в формате UUID. Неизвестные поля и входной `return_url` отбрасываются.
+HTTP-024 и HTTP-025 — обычные Rails form submissions с CSRF, полной
+подтверждённой сессией и последующим `303 See Other`. Браузер не создаёт
+idempotency key: Rails выдаёт подписанный ограниченный по времени
+`submission_token`, а форма только возвращает его без изменений. Неизвестные
+поля и входной `return_url` отбрасываются strong parameters.
 
 Поля подтверждения:
 
 - `duration_days`: безопасное целое 0…365000;
 - `gateway_type`: непустая строка до 100 символов;
-- `confirmed_amount`: строка до 64 символов, целая неотрицательная сумма либо сумма с 1…8 десятичными знаками;
+- `confirmed_amount`: каноническая неотрицательная decimal-строка до 64
+  символов;
 - `confirmed_currency`: 2…12 заглавных латинских букв или цифр;
-- `offer_version`: непустая строка до 2048 символов.
+- `offer_version`: SHA-256 канонического свежего предложения;
+- `submission_token`: серверно подписанное одноразовое состояние формы.
 
-Пробелы не удаляются. Отсутствие, `null`, неверный тип, пустая строка и выход за границу дают 400.
+Перед внешним dispatch Rails повторно читает RS-014 и точно сверяет план,
+длительность, способ, сумму, валюту и версию. Новый submission ограничен десятью
+операциями за 15 минут. Replay того же токена с тем же payload не выполняет
+второй изменяющий вызов; другой payload даёт конфликт. Durable dispatch marker
+всегда фиксируется до RS-015/016.
 
-Общие заголовки ответа операции: `cache-control:no-store`, `idempotency-replayed:true|false`, `x-payment-operation-id:<идентификатор>`.
+Ответ `303` ведёт на `GET /payments/:operation_id`. Диагностические заголовки:
+`cache-control:no-store`, `idempotency-replayed:true|false`,
+`x-payment-operation-id`. Страница состояния показывает успешный, ожидающий,
+неопределённый, финально ошибочный либо требующий оператора результат. Проверенный
+HTTP(S) payment URL доступен только как внешний переход с `noopener`,
+`noreferrer` и запретом referrer.
 
-## HTTP-024 — Покупка
+## HTTP-024 — покупка
 
-- Транспорт: `POST /api/bff/subscription/purchase`.
-- Дополнительное поле: `plan_code` — непустая строка до 200 символов.
-- Перед отправкой проверяются существование тарифа/длительности/способа и точное совпадение суммы, валюты и версии.
-- 200: `{"data":{"payment_id":string,"payment_url":string|null,"purchase_type":string,"status":string,"is_free":boolean,"final_amount":string,"currency":string,"return_url":string|null?}}`.
-- 202: `{"data":{"operation_id":string,"status":"processing"|"outcome_unknown","retry_after_seconds":5}}`, также `retry-after:5`.
-- 409 ручной проверки: `{"data":{"operation_id":string,"status":"manual_required","retry_after_seconds":null,"requires_support":true,"operator_action":"review_payment_operation"}}`.
-- Остальные ошибки: 400 `PLAN_UNAVAILABLE`/`PAYMENT_GATEWAY_UNAVAILABLE`; 401; 403; 409 `OFFER_CHANGED`/ошибка ключа; 429; 502/503/504; 500.
-- Новый запрос ограничен 10 попытками за 15 минут. Повтор известного результата не выполняет внешний изменяющий вызов.
+- `POST /purchases`, scope формы `purchase`.
+- Дополнительное поле `plan_code` — 1…200 символов.
+- Rails сам формирует return URL с локальным operation ID.
+- Успех, неизвестный исход и сохранённая ошибка одинаково переходят на
+  авторитетный member resource; повторная оплата при неизвестном исходе не
+  предлагается.
 
-## HTTP-025 — Продление
+## HTTP-025 — продление
 
-- Транспорт: `POST /api/bff/subscription/extend`.
-- Использует общий набор полей без `plan_code`; доступный план продления определяется актуальным предложением.
-- Форматы 200, 202, 409, заголовки, ограничение частоты и правила повтора совпадают с HTTP-024, но операция имеет вид продления.
+- `POST /extensions`, scope формы `extension`.
+- `plan_code` от браузера не принимается: renewal-план выбирается из свежего
+  RS-014 по `recommended_purchase_type=renew`.
+- Остальные правила полностью совпадают с HTTP-024.
 
-## HTTP-031 — История платежей
+## HTTP-031 — история
 
-- Транспорт: `GET /api/bff/payments/history`; параметров нет.
-- Система проверяет внешнего владельца, синхронизирует не более 100 свежих записей за страницу либо использует совместимый старый список.
-- Результат: 200 `{"data":[<запись платежа>]}`; выдаются 20 последних записей по внешнему времени создания и идентификатору, обе сортировки по убыванию.
-- Пустой массив допустим. Чтение может обновлять локальные записи и курсор истории.
-- Ошибки: 401, 403, 409 владельца, 502/503/504, 500.
+- `GET /payments`, server-rendered collection resource.
+- Rails owner-fence синхронизирует одну capability/keyset-страницу размером не
+  более 100 либо legacy-список и атомарно upsert-ит записи.
+- Рендерятся 20 последних записей по внешнему времени и payment ID в убывающем
+  порядке; чужой owner никогда не перезаписывается, более старый snapshot не
+  откатывает новый.
 
-## HTTP-032 — Состояние платежа
+## HTTP-032 — состояние
 
-- Транспорт: `GET /api/bff/payments/status`.
-- Необязательный `payment_id`: UUID версий 1…8 с корректным вариантом.
-- Необязательный `operation_id`: 1…191 символов `[A-Za-z0-9_-]`.
-- Пустое или неверное переданное значение даёт 400. Неизвестные параметры игнорируются.
-- Если передан `operation_id`, связанный с ним платёж имеет приоритет; несовпадающий одновременно переданный `payment_id` даёт 409.
-- Результат 200: `{"data":{"payment":object|null,"operation":object|null,"subscription":object|null,"source":"local_terminal_payment_operation"|"local_payment_record_and_current_subscription"}}`.
-- Состояние операции: `operation_id`, `status` из `processing|succeeded|failed|retry_ready|outcome_unknown|manual_required`, `retry_after_seconds:number|null`, `requires_support:boolean`, `operator_action:string|null`.
-- Окончательная локальная операция может быть возвращена без внешнего запроса; успешная локальная операция остаётся доступной при внешней ошибке.
-- Ошибки: 400, 401, 403, 409, 502/503/504, 500. Чтение может выполнить одну сверку и обновить историю.
+- `GET /payments/:id`, где `id` — локальный durable operation ID текущего
+  пользователя.
+- Рендерятся operation и связанный payment record; чужой ID не раскрывается.
+- Terminal operation читается локально. Для `dispatching`/`outcome_unknown`
+  reconciliation выполняется внутренним ограниченным worker, а страница
+  предлагает безопасное обновление без нового dispatch.
+- Ответ `text/html`, `cache-control:no-store`.
 
-## HTTP-038 — Внутренняя сверка
+## HTTP-038 — внутренняя сверка
 
-- Транспорт: `POST /api/internal/payments/reconcile`; тело и пользовательская сессия не требуются.
-- Заголовок: `x-clean-pay-reconciliation-secret`. Операция должна быть включена настройкой; отсутствие/ошибка настройки или секрета возвращает 404 `NOT_FOUND`.
-- Выполняется ограниченная пачка сверки с пределом 12 секунд и один шаг продолжения истории с отдельным пределом 12 секунд.
-- Результат: 200 `{"data":{<счётчики сверки>,"history":<счётчики истории>}}`, `cache-control:no-store`.
-- Повтор безопасен благодаря исключительным захватам и расписанию; каждый вызов может продвинуть состояние.
+- `POST /internal/payment_reconciliations` — единственная машинная JSON-команда
+  платежного модуля; cookie, browser CSRF и HTML здесь не применяются.
+- Требуется `x-clean-pay-reconciliation-secret`; disabled, пустой или неверный
+  secret одинаково дают пустой `404`.
+- В пределах 12 секунд обрабатывается настроенная пачка expired
+  dispatch/outcome claims, затем один history backfill. Сетевые вызовы находятся
+  вне SQL-транзакций, а settlement защищён claim token и lease.
+- JSON содержит `claimed,succeeded,deferred,manual_required,failed` и вложенные
+  history-счётчики; `cache-control:no-store`.

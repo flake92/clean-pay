@@ -1,0 +1,42 @@
+<% content_for :title, "Вход — Clean Pay" %>
+<section class="auth-content">
+  <p class="eyebrow">Clean Pay</p>
+  <h1>Вход в кабинет</h1>
+  <% if params[:email].present? %>
+    <p>Продолжить как <strong><%= params[:email] %></strong></p>
+    <%= form_with scope: :session, url: account_session_path,
+      class: "form-stack", data: { controller: "form-lock" } do |form| %>
+      <%= form.hidden_field :email, value: params[:email] %>
+      <%= form.label :password, "Пароль" %>
+      <%= form.password_field :password, required: true,
+        autocomplete: "current-password" %>
+      <%= render "shared/turnstile" %>
+      <%= form.submit "Продолжить", class: "button",
+        data: { form_lock_target: "submit" } %>
+    <% end %>
+    <%= link_to "Изменить e-mail", login_path, class: "text-link" %>
+  <% else %>
+    <%= form_with scope: :identity, url: account_identity_path,
+      class: "form-stack", data: { controller: "form-lock" } do |form| %>
+      <%= form.label :email, "E-mail" %>
+      <%= form.email_field :email, required: true, autofocus: true,
+        autocomplete: "email" %>
+      <%= form.submit "Продолжить", class: "button",
+        data: { form_lock_target: "submit" } %>
+    <% end %>
+  <% end %>
+  <div class="auth-alternatives">
+    <%= form_with url: new_account_telegram_authorization_path, method: :get,
+      data: { controller: "form-lock" } do |form| %>
+      <%= render "shared/turnstile" %>
+      <%= form.submit "Войти через Telegram", class: "button button--outline",
+        data: { form_lock_target: "submit" } %>
+    <% end %>
+    <div data-controller="passkey">
+      <button type="button" class="button button--outline"
+        data-action="passkey#authenticate">Войти с Passkey</button>
+      <p data-passkey-target="status" aria-live="polite"></p>
+    </div>
+    <%= link_to "Создать аккаунт", register_path, class: "text-link" %>
+  </div>
+</section>

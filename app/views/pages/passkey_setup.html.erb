@@ -1,0 +1,14 @@
+<% content_for :title, "Быстрый вход — Clean Pay" %>
+<section class="auth-content" data-controller="passkey">
+  <p class="eyebrow">Необязательный шаг</p>
+  <h1>Настройте быстрый вход</h1>
+  <p>Passkey использует Face ID, Touch ID или защиту устройства. Пароль не передаётся сайту.</p>
+  <label for="passkey-name">Название ключа</label>
+  <input id="passkey-name" type="text" maxlength="80"
+    placeholder="Например: ноутбук" data-passkey-target="name">
+  <button type="button" class="button"
+    data-action="passkey#register">Настроить Passkey</button>
+  <%= button_to "Продолжить без него", account_session_path,
+    method: :patch, class: "button button--outline" %>
+  <p class="form-hint" data-passkey-target="status" aria-live="polite"></p>
+</section>

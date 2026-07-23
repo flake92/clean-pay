@@ -26,7 +26,7 @@
 
 ## Текущий транспорт
 
-`GET /api/bff/payments/history`; session cookie.
+`GET /payments`; server-rendered collection resource с полной сессией.
 
 ## Правила валидации
 
@@ -58,7 +58,7 @@ Upstream user ID извлекается из access token и сверяется 
 
 ## Логический результат
 
-`200 {"data":[{"id","payment_id","purchase_type","status","final_amount","currency","gateway_type","plan_code","plan_name","duration_days","device_limit","traffic_limit","is_free","created_at","updated_at"}]}`; nullable поля определены моделью платежа.
+`200 text/html`; Rails рендерит локально синхронизированную историю платежей.
 
 ## Побочные эффекты
 
@@ -78,4 +78,4 @@ Upstream user ID извлекается из access token и сверяется 
 
 ## Статус уверенности
 
-`подтверждено`
+`требует повторной проверки после ADR-003`

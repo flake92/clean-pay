@@ -26,8 +26,9 @@
 
 ## Текущий транспорт
 
-`POST /api/bff/auth/passkey/register/options`; bodyless; доверенный origin; `Content-Type` не требуется; query игнорируется.
+`POST /account/passkey_registration`. Bodyless WebAuthn protocol endpoint; Rails session and CSRF token; response format is JSON.
 
+ADR-003 заменяет исторический BFF/JSON transport этой операции.
 ## Правила валидации
 
 Сессия восстанавливается с обычной refresh rotation. RP origin берётся из точного публичного URL, RP ID — его hostname, RP name — текущее имя бренда.
@@ -61,8 +62,7 @@
 
 ## Логический результат
 
-`200 {"data":<PublicKeyCredentialCreationOptionsJSON>}`. Неизменяемые параметры: `rp.id=<public hostname>`, `rp.name=<brand>`, user handle — UTF-8 локального user ID в base64url, `timeout=120000`, `attestation="none"`, `authenticatorSelection.residentKey="preferred"`, `userVerification="required"`. `excludeCredentials` намеренно не задаётся. Алгоритмы и дополнительные стандартные поля формирует совместимая WebAuthn-библиотека.
-
+`200 {"data":<PublicKeyCredentialCreationOptionsJSON>}`. This is a browser-protocol exception to HTML rendering.
 ## Побочные эффекты
 
 Новая строка одноразового challenge; возможно обновление cookie при refresh rotation.
@@ -81,4 +81,4 @@
 
 ## Статус уверенности
 
-`подтверждено`
+`требует повторной проверки после ADR-003`

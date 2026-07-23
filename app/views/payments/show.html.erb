@@ -1,0 +1,24 @@
+<main data-payment-status="<%= @operation.status %>">
+  <h1>Состояние платежа</h1>
+  <dl>
+    <dt>Операция</dt>
+    <dd><%= @operation.kind %></dd>
+    <dt>Состояние</dt>
+    <dd><%= @operation.status %></dd>
+    <% if @payment %>
+      <dt>Сумма</dt>
+      <dd><%= @payment.final_amount.to_s("F") %> <%= @payment.currency %></dd>
+      <dt>Платёж</dt>
+      <dd><%= @payment.status %></dd>
+    <% end %>
+  </dl>
+  <% if @payment&.payment_url.present? && @payment.pending? %>
+    <p><%= link_to "Перейти к оплате", @payment.payment_url,
+      rel: "noopener noreferrer", referrerpolicy: "no-referrer" %></p>
+  <% elsif @operation.outcome_unknown? || @operation.dispatching? %>
+    <p>Проверяем результат. Обновите страницу через несколько секунд.</p>
+  <% elsif @operation.manual_required? %>
+    <p>Нужна проверка службы поддержки. Повторно оплачивать не нужно.</p>
+  <% end %>
+  <p><%= link_to "К истории платежей", payments_path %></p>
+</main>

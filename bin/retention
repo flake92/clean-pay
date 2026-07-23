@@ -1,0 +1,8 @@
+#!/usr/bin/env ruby
+
+require_relative "../config/environment"
+
+runner = Platform::RetentionRunner.new
+Signal.trap("TERM") { runner.stop }
+Signal.trap("INT") { runner.stop }
+runner.run

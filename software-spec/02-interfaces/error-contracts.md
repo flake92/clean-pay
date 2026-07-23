@@ -85,8 +85,8 @@ Invalid upstream JSON on success or failure maps to `UPSTREAM_ERROR` 502; fetch 
 
 ## Исключительные контракты вне BFF
 
-- `POST /auth/telegram/callback`: flat `{error:"telegram_failed"}` 400 or `{error:"payload_too_large"}` 413.
-- `GET /auth/telegram/callback`: failures are 307 redirects, not JSON.
-- `GET /api/internal/health/readiness`: invalid secret returns literal NOT_FOUND envelope; unexpected execution error returns degraded body 503.
-- `GET /sw.js`: missing build ID returns plain text 503.
+- `POST /account/telegram_authorization/callback`: flat `{error:"telegram_failed"}` 400 or `{error:"payload_too_large"}` 413.
+- `GET /account/telegram_authorization/callback`: failures are 307 redirects, not JSON.
+- `GET /internal/health/readiness`: invalid secret returns literal NOT_FOUND envelope; unexpected execution error returns degraded body 503.
+- `GET /service-worker.js`: missing build ID returns plain text 503.
 - UI/network-ошибки отображаются по правилам карточек экранов и frontend-раздела; текст внутреннего исключения не показывается пользователю.

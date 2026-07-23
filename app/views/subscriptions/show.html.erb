@@ -1,0 +1,21 @@
+<main>
+  <h1>Подписка</h1>
+  <% if @subscription %>
+    <p>Статус: <%= @subscription["status"] %></p>
+    <p>Тариф: <%= @subscription["plan_name"] %></p>
+    <p><%= link_to "Открыть ссылку подключения",
+      @subscription["url"],
+      rel: "noopener noreferrer" %></p>
+    <%= button_to "Перевыпустить ссылку",
+      reissue_subscription_path,
+      method: :post %>
+    <%= form_with url: promocode_subscription_path,
+      scope: :promocode do |form| %>
+      <%= form.label :code, "Промокод" %>
+      <%= form.text_field :code, required: true, autocomplete: "off" %>
+      <%= form.submit "Применить" %>
+    <% end %>
+  <% else %>
+    <p>Активной подписки пока нет.</p>
+  <% end %>
+</main>

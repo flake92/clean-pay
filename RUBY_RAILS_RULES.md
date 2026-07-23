@@ -87,22 +87,38 @@
 
 ### 4.5. Controllers и HTTP
 
-- `config/routes.rb` использует `resource`, `resources`, namespaces и стандартные actions настолько, насколько это позволяет неизменяемый внешний path/method.
+- Браузер обращается непосредственно к одному Rails-монолиту. Внутреннего
+  JSON BFF, client router и отдельного API-приложения нет.
+- `config/routes.rb` использует `resource`, `resources`, доменные namespaces и
+  стандартные actions. Технические префиксы `/api/bff` и compatibility aliases
+  старого приложения не сохраняются.
 - Controller отвечает за transport: распознать вход, вызвать model/operation, отобразить результат. Бизнес-транзакция в controller не пишется.
-- Вход обрабатывается `ActionController::Parameters#expect`/strong parameters и Active Model form object. Поведение неизвестных полей берётся из конкретной HTTP-карточки.
-- JSON строится Jbuilder templates либо коротким Rails `render json:` для точной простой оболочки. Общий error renderer централизован, исключения сопоставляются через `rescue_from`.
-- Cookies создаются Rails cookie API. Формат access JWT реализуется gem `jwt`; refresh остаётся случайным одноразово ротируемым секретом с digest в БД.
-- Для browser mutations используются Rails CSRF/origin facilities и точная дополнительная проверка origin из спецификации.
+- Обычный пользовательский вход обрабатывается `form_with`,
+  `ActionController::Parameters#expect`/strong parameters и при необходимости
+  Active Model form object. Успех завершается Rails redirect или Turbo response,
+  ошибка рендерит Rails view с I18n-сообщениями.
+- JSON допустим только там, где его требует browser/platform protocol:
+  WebAuthn, health/internal machine interfaces и service worker metadata.
+- Cookies создаются Rails cookie API. Короткий локальный access-token подписывает
+  `ActiveSupport::MessageVerifier`; refresh остаётся случайным одноразово
+  ротируемым секретом с HMAC digest в БД.
+- Для browser mutations используются штатные Rails CSRF и
+  `forgery_protection_origin_check`; Stimulus передаёт Rails CSRF token.
 - `request_id`, content type, body limit, security headers, redirect и cache headers проверяются на уровне Rack/Rails, а не копируются по actions.
 - N+1 запрещён; associations загружаются через `includes`, `preload` или точный query.
 
 ### 4.6. Аутентификация и авторизация
 
-- Пароли — `has_secure_password`/bcrypt.
+- Пароли принадлежат Remnashop и только транзитно передаются Ruby-клиенту.
+  Rails не создаёт `password_digest` и не дублирует внешний источник истины.
+- Локальная аутентификация браузера — Active Record sessions, Rails cookies,
+  `ActiveSupport::MessageVerifier`, Active Record Encryption и row locks.
 - Авторизация — Pundit policies; видимость UI не считается проверкой доступа.
 - Текущий request-контекст — `ActiveSupport::CurrentAttributes`, обязательно очищаемый Rails executor.
 - WebAuthn — gem `webauthn`; собственная реализация криптографии протокола запрещена.
-- OIDC — gem `openid_connect`, JWT/JWKS — поддерживаемые gems; PKCE, state, nonce и одноразовость дополнительно фиксируются локальными моделями.
+- Внешний Telegram OIDC проверяется поддерживаемым JWT/JWKS gem; PKCE, state,
+  nonce и одноразовость дополнительно фиксируются локальными моделями. JWT не
+  используется как формат локальной Rails-сессии.
 - Сравнение secret digests выполняется constant-time средствами Rails/Rack/OpenSSL.
 - Шифрование Remnashop tokens — Active Record Encryption с раздельными ключами/контекстом. Секреты не попадают в inspect, logs, errors и JSON.
 
@@ -124,7 +140,7 @@
 - Существующие изображения, тема и Inter fonts сохраняются. Их URL, MIME, checksum и визуальный результат меняются только после сравнения.
 - Все 19 routes, desktop/mobile layouts, loading/empty/error/success/disabled/focus states и русские строки являются контрактом.
 - WebAuthn, Clipboard, storage, Telegram WebApp, install prompt, service worker и dialog behavior находятся в малых Stimulus controllers.
-- Персональные HTML/API responses не попадают в общий service-worker cache.
+- Персональные HTML и protocol responses не попадают в общий service-worker cache.
 - Accessibility: semantic HTML, labels, keyboard order, visible focus, `aria-live`, dialog focus management и reduced motion проверяются system tests.
 
 ### 4.9. Jobs и процессы
@@ -204,6 +220,11 @@ Mocks внутреннего Ruby class не доказывают HTTP или in
 - `ИМПЛЕМЕНТИРОВАНО = ДА` — файл существует, feature завершена, нет placeholder/TODO;
 - `СООТВЕТСТВУЕТ RUBY-ДОКУМЕНТУ = ДА` — выполнен review именно по этому документу;
 - `РАБОТАЕТ = ДА (цикл N, доказательство)` — проверка реально выполнена в текущем полном цикле.
+
+Во время разработки используется промежуточное значение
+`ПРОВЕРЕНО В БЛОКЕ N: доказательство; ТРЕБУЕТ ФИНАЛЬНОГО ЦИКЛА`.
+Оно обязательно после завершения каждого блока, подтверждает локальную проверку
+изменения, но не является положительным release-статусом `РАБОТАЕТ = ДА`.
 
 Запрещены пустые cells, подразумеваемые статусы и «готово примерно». Неприменимость должна быть записана как `Н/П: причина` и подтверждена отдельным решением.
 

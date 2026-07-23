@@ -1,0 +1,13 @@
+ru:
+  activerecord:
+    errors:
+      messages:
+        record_invalid: "Проверка не пройдена: %{errors}"
+        record_not_destroyed: "Запись нельзя удалить"
+    attributes:
+      web_user:
+        email: "E-mail"
+      web_authn_credential:
+        name: "Название ключа"
+      email_verification_code:
+        code_hash: "Код подтверждения"

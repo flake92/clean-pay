@@ -26,8 +26,11 @@ Path-поле `id:string`: внутренний локальный ID запис
 
 ## Текущий транспорт
 
-`DELETE /api/bff/auth/passkey/credentials/{id}`; bodyless; доверенный origin; `Content-Type` не требуется. Путь с пустым/дополнительным сегментом не соответствует bodyless matcher/route и не является этой операцией.
+`DELETE /account/passkeys/{id}`. Bodyless Rails resource mutation protected by CSRF; credential is owner-scoped.
 
+ADR-003 заменяет исторический BFF/JSON transport этой операции.
+
+Коды ошибок в нижележащем историческом анализе теперь являются доменными классификациями: браузеру Rails рендерит form errors/flash либо выполняет безопасный redirect; BFF envelope не возвращается.
 ## Правила валидации
 
 Сегмент передаётся route decoder как строка. Явных length/charset ограничений нет; поиск точный.
@@ -62,8 +65,7 @@ FULL-сессия; credential обязан принадлежать текуще
 
 ## Логический результат
 
-`200 {"data":{"success":true}}`. Cookie не меняются, кроме возможной refresh rotation.
-
+`303 See Other` to `/link-account` with flash after deletion; last-key failure is rendered by Rails.
 ## Побочные эффекты
 
 Удаление credential и audit. Если audit падает после commit, HTTP может быть 500, хотя ключ уже удалён; повтор вернёт 404.
@@ -82,4 +84,4 @@ Audit содержит credential ID, не public key.
 
 ## Статус уверенности
 
-`подтверждено`
+`требует повторной проверки после ADR-003`

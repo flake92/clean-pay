@@ -1,0 +1,15 @@
+<main>
+  <h1>Подтвердите объединение аккаунтов</h1>
+  <p>
+    Telegram-аккаунт будет связан с e-mail
+    <strong><%= @confirmation.masked_target_email %></strong>.
+  </p>
+  <p>Подписки и платежи будут проверены перед объединением.</p>
+
+  <%= button_to "Объединить аккаунты",
+    account_merge_confirmation_path,
+    method: :patch %>
+  <%= button_to "Отмена",
+    account_merge_confirmation_path,
+    method: :delete %>
+</main>

@@ -26,7 +26,7 @@
 
 ## Текущий транспорт
 
-Внутренний dynamic `GET /api/internal/health/readiness`, минует пользовательскую session policy.
+`GET /internal/readiness`; внутренний машинный JSON resource, защищённый shared secret и proxy boundary.
 
 ## Правила валидации
 
@@ -58,7 +58,7 @@ Mailpit/Remnawave отсутствуют в `checks`, если их readiness UR
 
 ## Логический результат
 
-`200|503 {status,checkedAt,checks,service:"clean-pay",version}`; `cache-control:no-store` для авторизованного результата.
+`200`/`503 application/json`; неверный secret скрывается стандартным `404`.
 
 ## Побочные эффекты
 
@@ -78,4 +78,4 @@ Endpoint внутренний, потому что messages раскрывают
 
 ## Статус уверенности
 
-`подтверждено`
+`требует повторной проверки после ADR-003`

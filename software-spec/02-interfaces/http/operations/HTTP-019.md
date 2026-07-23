@@ -26,8 +26,11 @@
 
 ## Текущий транспорт
 
-`DELETE /api/bff/auth/telegram/merge-confirmation`; bodyless; доверенный origin.
+`DELETE /account/merge_confirmation`. Bodyless Rails resource mutation with CSRF and owner-bound confirmation.
 
+ADR-003 заменяет исторический BFF/JSON transport этой операции.
+
+Коды ошибок в нижележащем историческом анализе теперь являются доменными классификациями: браузеру Rails рендерит form errors/flash либо выполняет безопасный redirect; BFF envelope не возвращается.
 ## Правила валидации
 
 Поиск привязан к владельцу. Изменение выполняется только при состоянии `PENDING`.
@@ -58,8 +61,7 @@ Session + confirmation token.
 
 ## Логический результат
 
-`200 {"data":{"cancelled":true}}` и удаление merge-cookie. Поля `success` нет.
-
+`303 See Other` to `/link-account`; merge cookie is cleared after cancellation.
 ## Побочные эффекты
 
 Только состояние confirmation и cookie; внешние/локальные owners не изменяются. Специального audit cancel операция не создаёт.
@@ -78,4 +80,4 @@ Conditional update-many обеспечивает compare-and-set PENDING.
 
 ## Статус уверенности
 
-`подтверждено`
+`требует повторной проверки после ADR-003`

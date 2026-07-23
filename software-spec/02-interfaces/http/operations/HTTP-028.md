@@ -26,7 +26,7 @@
 
 ## Текущий транспорт
 
-`GET /api/bff/subscription/devices`; session cookie.
+`GET /subscription/devices`; server-rendered nested collection resource с полной сессией.
 
 ## Правила валидации
 
@@ -58,7 +58,7 @@
 
 ## Логический результат
 
-`200 {"data":{"devices":[...],"current_count":number,"max_count":number}}`.
+`200 text/html`; Rails рендерит список устройств, счётчики и формы удаления.
 
 ## Побочные эффекты
 
@@ -78,4 +78,4 @@ HWID и user-agent не журналируются целиком.
 
 ## Статус уверенности
 
-`подтверждено`
+`требует повторной проверки после ADR-003`

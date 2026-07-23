@@ -23,9 +23,9 @@ Proxy пересылает HTTP-запрос без переименования
 
 ## Интерфейсы здоровья для прокси и оператора
 
-- `GET /api/health/liveness` — жив ли процесс;
-- `GET /api/health/readiness` — безопасная публичная готовность;
-- подробный `GET /api/internal/health/readiness` доступен только внутри доверенной сети и требует `x-clean-pay-readiness-secret`.
+- `GET /health/liveness` — жив ли процесс;
+- `GET /health/readiness` — безопасная публичная готовность;
+- подробный `GET /internal/health/readiness` доступен только внутри доверенной сети и требует `x-clean-pay-readiness-secret`.
 
 ## Прокси разработки и тестов
 

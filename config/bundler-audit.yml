@@ -1,0 +1,3 @@
+# Audit all locked gems. Any future ignore must name a reviewed advisory and
+# include its justification in the same change.
+ignore: []

@@ -1,0 +1,12 @@
+<main>
+  <h1>Доступные предложения</h1>
+  <% if Array(@offers["plans"]).empty? %>
+    <p>Сейчас нет доступных предложений.</p>
+  <% else %>
+    <ul>
+      <% @offers["plans"].each do |plan| %>
+        <li><strong><%= plan["name"] || plan["public_code"] %></strong></li>
+      <% end %>
+    </ul>
+  <% end %>
+</main>
