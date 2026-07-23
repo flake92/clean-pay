@@ -62,6 +62,30 @@ class Platform::PlatformOperationsTest < ActiveSupport::TestCase
     end
   end
 
+  test "postgres readiness returns its background-thread connection to the pool" do
+    connection = Object.new
+    connection.define_singleton_method(:select_value) do |sql|
+      raise "unexpected query" unless sql == "SELECT 1"
+
+      1
+    end
+    pool = Object.new
+    checked_out = false
+    pool.define_singleton_method(:with_connection) do |&block|
+      checked_out = true
+      block.call(connection)
+    ensure
+      checked_out = false
+    end
+    checker = Platform::ReadinessCheck.new(redis: MemoryRedis.new)
+
+    ActiveRecord::Base.stub(:connection_pool, pool) do
+      checker.send(:default_probes).fetch("postgresql").call
+    end
+
+    assert_not checked_out
+  end
+
   test "rate limiter stores only a digest and exposes retry after" do
     redis = MemoryRedis.new
     limiter = Platform::RateLimiter.new(redis:)

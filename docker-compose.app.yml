@@ -30,15 +30,10 @@ services:
     healthcheck:
       test:
         - CMD
-        - curl
-        - --fail
-        - --silent
-        - --show-error
-        - --header
-        - "X-Forwarded-Proto: https"
-        - http://127.0.0.1:4000/health/liveness
-      interval: 10s
-      timeout: 5s
+        - ruby
+        - scripts/readiness-healthcheck.rb
+      interval: 30s
+      timeout: 15s
       retries: 20
       start_period: 30s
     ports:

@@ -11,7 +11,7 @@
     <link rel="icon" href="/clean-pay-icon-192.png" type="image/png">
     <link rel="apple-touch-icon" href="/clean-pay-icon-192.png">
     <% if Rails.application.config.x.clean_pay.turnstile.enabled %>
-      <%= javascript_include_tag "https://challenges.cloudflare.com/turnstile/v0/api.js",
+      <%= javascript_include_tag "https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit",
         async: true, defer: true, nonce: true %>
     <% end %>
     <%= stylesheet_link_tag "/themes/lara-light-indigo/theme.css",

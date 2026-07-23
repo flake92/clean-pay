@@ -18,5 +18,7 @@ Rails.application.config.filter_parameters += [
   :secret,
   :ssn,
   :token,
+  :turnstile,
+  :"cf-turnstile-response",
   :_key
 ]

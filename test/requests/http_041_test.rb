@@ -12,7 +12,7 @@ class Http041Test < ActionDispatch::IntegrationTest
     )
 
     Integrations::TelegramOidcClient.stub(:new, oidc) do
-      get new_account_telegram_authorization_path,
+      post account_telegram_authorization_path,
         params: { redirect_to: "/cabinet" }
     end
 

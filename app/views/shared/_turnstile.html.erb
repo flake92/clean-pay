@@ -1,4 +1,6 @@
 <% turnstile = Rails.application.config.x.clean_pay.turnstile %>
 <% if turnstile.enabled %>
-  <div class="cf-turnstile" data-sitekey="<%= turnstile.site_key %>"></div>
+  <div class="cf-turnstile"
+    data-controller="turnstile"
+    data-turnstile-site-key-value="<%= turnstile.site_key %>"></div>
 <% end %>

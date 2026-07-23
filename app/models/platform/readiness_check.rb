@@ -57,7 +57,11 @@ module Platform
 
     def default_probes
       values = {
-        "postgresql" => -> { ActiveRecord::Base.connection.select_value("SELECT 1") },
+        "postgresql" => lambda {
+          ActiveRecord::Base.connection_pool.with_connection do |connection|
+            connection.select_value("SELECT 1")
+          end
+        },
         "redis" => -> { redis.ping },
         "remnashop" => -> { Integrations::RemnashopClient.new.public_plans },
         "telegram" => -> { Integrations::TelegramOidcClient.new.jwks }

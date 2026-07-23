@@ -32,7 +32,8 @@ class ApplicationController < ActionController::Base
   def verify_turnstile!(body)
     Integrations::TurnstileClient.new.verify!(
       token: body[:turnstile_token] || body["turnstileToken"] ||
-        body[:"cf-turnstile-response"],
+        body[:"cf-turnstile-response"] || params[:turnstile_token] ||
+        params[:"cf-turnstile-response"],
       remote_ip: request.remote_ip
     )
   end

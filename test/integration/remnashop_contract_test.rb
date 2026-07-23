@@ -37,6 +37,26 @@ class RemnashopContractTest < ActiveSupport::TestCase
     assert_kind_of Array, result.fetch("plans")
   end
 
+  test "mail delivery uses its dedicated long-running connection" do
+    public_http = RecordingHttp.new
+    email_http = RecordingHttp.new
+    client = Integrations::RemnashopClient.new(
+      public_http:,
+      email_http:,
+      admin_http: RecordingHttp.new,
+      config: configured
+    )
+
+    client.request_email_verification(
+      access_token: "access-token",
+      email: "user@example.test"
+    )
+
+    assert_empty public_http.calls
+    assert_equal [ [ :post, "auth/email/request-verification" ] ],
+      email_http.calls.map { |method, path, _| [ method, path ] }
+  end
+
   test "RS-001 through RS-011 preserve every identity and mail operation" do
     public_http = RecordingHttp.new(auth: true)
     client = Integrations::RemnashopClient.new(
