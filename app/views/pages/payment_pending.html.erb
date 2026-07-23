@@ -1,0 +1,13 @@
+<section class="status-card card"
+  <% if @operation %>
+    data-controller="payment-return"
+    data-payment-return-status-url-value="<%= payment_path(@operation) %>"
+  <% end %>>
+  <span class="status-icon">…</span>
+  <p class="eyebrow">Платёж</p><h1>Операция обрабатывается</h1>
+  <p>Обычно это занимает несколько секунд. Безопасно обновить страницу состояния.</p>
+  <p data-payment-return-target="status" aria-live="polite"></p>
+  <%= link_to "Обновить состояние", @operation ? payment_path(@operation) : payments_path, class: "button" %>
+  <%= link_to "В кабинет", cabinet_path, class: "text-link" %>
+  <%= link_to "К тарифам", tariffs_path, class: "text-link" %>
+</section>

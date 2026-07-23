@@ -26,8 +26,11 @@
 
 ## Текущий транспорт
 
-`GET /api/bff/auth/telegram/merge-confirmation`.
+`GET /account/merge_confirmation`. Bodyless Rails HTML resource read; session plus owner-bound confirmation cookie.
 
+ADR-003 заменяет исторический BFF/JSON transport этой операции.
+
+Коды ошибок в нижележащем историческом анализе теперь являются доменными классификациями: браузеру Rails рендерит form errors/flash либо выполняет безопасный redirect; BFF envelope не возвращается.
 ## Правила валидации
 
 По хэшу token и user ID ищется confirmation. `expiresAt<=now` либо status `FAILED` трактуются как 404. `PENDING`, `PROCESSING` и `COMPLETED` могут быть прочитаны, пока не истекли.
@@ -58,22 +61,7 @@ Source e-mail маскируется: сохраняются первые мак
 
 ## Логический результат
 
-`200`:
-
-```json
-{
-  "data": {
-    "targetEmail": "target@example.com",
-    "sourceEmailMasked": "so***@example.org",
-    "emailWillBeReplaced": true,
-    "telegramId": "123456789",
-    "status": "PENDING"
-  }
-}
-```
-
-Поля `telegramUsername`, полный `sourceEmail` и `expiresAt` **не возвращаются**.
-
+`200 text/html`; Rails renders only the masked merge evidence.
 ## Побочные эффекты
 
 Только возможная refresh rotation и журналы.
@@ -92,4 +80,4 @@ Source e-mail маскируется: сохраняются первые мак
 
 ## Статус уверенности
 
-`подтверждено`
+`требует повторной проверки после ADR-003`

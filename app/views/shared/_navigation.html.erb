@@ -1,0 +1,17 @@
+<nav id="main-navigation" class="sidebar" aria-label="Основная навигация"
+  data-navigation-target="menu">
+  <p class="nav-label">Сервис</p>
+  <%= navigation_link "Кабинет", cabinet_path %>
+  <%= navigation_link "Тарифы", tariffs_path %>
+  <% if Current.web_user %>
+    <%= navigation_link "Продление", extend_path %>
+    <%= navigation_link "Профиль", profile_path %>
+    <%= navigation_link "Способы входа", link_account_path %>
+  <% end %>
+  <%= navigation_link "Поддержка", support_path if Current.web_session %>
+  <%= navigation_link "Установить приложение", install_path %>
+  <% if Current.web_session %>
+    <%= button_to "Выйти", account_session_path,
+      method: :delete, class: "nav-link nav-button" %>
+  <% end %>
+</nav>

@@ -1,0 +1,13 @@
+<section class="status-card card"
+  <% if @operation %>
+    data-controller="payment-return"
+    data-payment-return-status-url-value="<%= payment_path(@operation) %>"
+  <% end %>>
+  <span class="status-icon status-icon--warn">!</span>
+  <p class="eyebrow">Возврат из платёжной системы</p><h1>Результат уточняется</h1>
+  <p>Не создавайте повторный платёж, пока Clean Pay не подтвердит итог операции.</p>
+  <p data-payment-return-target="status" aria-live="polite"></p>
+  <%= link_to "Проверить состояние", @operation ? payment_path(@operation) : payments_path, class: "button" %>
+  <%= link_to "В кабинет", cabinet_path, class: "text-link" %>
+  <%= link_to "К тарифам", tariffs_path, class: "text-link" %>
+</section>

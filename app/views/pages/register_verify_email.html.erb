@@ -1,0 +1,27 @@
+<% content_for :title, "Подтверждение регистрации — Clean Pay" %>
+<section class="auth-content">
+  <p class="eyebrow">Безопасность</p>
+  <h1>Подтвердите e-mail</h1>
+  <p>Введите шестизначный код из письма.</p>
+  <%= form_with scope: :email_verification,
+    url: account_email_verification_path, method: :patch,
+    class: "form-stack", data: { controller: "form-lock" } do |form| %>
+    <%= form.label :code, "Код подтверждения" %>
+    <%= form.text_field :code, required: true, inputmode: "numeric",
+      autocomplete: "one-time-code", pattern: "\\d{6}", maxlength: 6 %>
+    <%= render "shared/turnstile" %>
+    <%= form.submit "Подтвердить", class: "button",
+      data: { form_lock_target: "submit" } %>
+  <% end %>
+  <%= form_with scope: :email_verification,
+    url: account_email_verification_path,
+    data: { controller: "form-lock" } do |form| %>
+    <%= form.hidden_field :email, value: Current.web_user&.email %>
+    <%= render "shared/turnstile" %>
+    <%= form.submit "Отправить код повторно",
+      class: "button button--outline",
+      data: { form_lock_target: "submit" } %>
+  <% end %>
+  <%= button_to "Назад ко входу", account_session_path, method: :delete,
+    class: "text-link" %>
+</section>

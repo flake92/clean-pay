@@ -22,11 +22,11 @@ Trusted origin, JSON body, nonce cookie и непросроченная непо
 
 ## Логический входной контракт
 
-JSON UTF-8 до 65 536 байт: либо `idToken:string`, либо `authData:object`. При наличии обоих приоритет имеет непустой строковый `idToken`. Widget object поддерживает `id,first_name,last_name?,username?,photo_url?,auth_date,hash`.
+Rails form принимает либо `id_token:string`, либо подписанные поля Telegram Login Widget: `id,first_name,last_name?,username?,photo_url?,auth_date,hash`. При наличии обоих доказательств приоритет имеет непустой `id_token`.
 
 ## Текущий транспорт
 
-`POST /auth/telegram/callback`; application/json; Origin/Referer policy; временные cookies.
+`POST /account/telegram_authorization/callback`; Rails form callback для подписанного Telegram Login Widget payload, с CSRF/origin policy и одноразовым state.
 
 ## Правила валидации
 
@@ -46,19 +46,19 @@ State одноразовая. Повтор при существующей sessi
 
 ## Основной сценарий
 
-Проверить один из двух proofs, claim state, reconcile/merge/link, создать session, вернуть `200 {"redirectTo":safePath}` без BFF envelope.
+Проверить одно из двух доказательств, claim state, reconcile/merge/link, создать session и выполнить Rails redirect на сохранённый safe path.
 
 ## Альтернативные сценарии
 
-Требуется подтверждение e-mail replace — тот же 200 redirectTo link-account плюс merge cookie, без создания новой session на этой ветви. Already consumed + session — 200 redirectTo processing.
+Требуется подтверждение замены e-mail — redirect на `/link-account` плюс merge cookie, без создания новой session на этой ветви. Уже поглощённый state при существующей сессии ведёт на страницу processing.
 
 ## Ошибочные сценарии
 
-Нет обоих proofs или любая обычная ошибка — `400 {"error":"telegram_failed"}`. Body > limit — `413 {"error":"payload_too_large"}`. Malformed JSON/array также скрываются как telegram_failed 400. Edge может раньше вернуть стандартные `403`/`415` envelope.
+Нет обоих доказательств или обычная ошибка проверки — redirect на безопасную страницу входа с нейтральным flash `telegram_failed`. Неподходящий media type и лишние поля обрабатываются штатным Rails form parsing/strong parameters.
 
 ## Логический результат
 
-200 `{redirectTo:string}` и возможные session/merge cookies; ошибки — плоская `{error:string}`.
+`303 See Other` на безопасную server-rendered Rails страницу; BFF JSON envelope отсутствует.
 
 ## Побочные эффекты
 
@@ -78,4 +78,4 @@ State claim, Remnashop auth/link/merge, local merge/session/cookies/audit как
 
 ## Статус уверенности
 
-`подтверждено`
+`требует повторной проверки после ADR-003`

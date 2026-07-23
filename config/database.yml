@@ -1,0 +1,22 @@
+default: &default
+  adapter: postgresql
+  encoding: unicode
+  pool: <%= ENV.fetch("RAILS_MAX_THREADS", 5) %>
+  variables:
+    timezone: UTC
+
+development:
+  <<: *default
+  url: <%= ENV.fetch("DATABASE_URL", "postgresql://clean_pay:clean_pay@127.0.0.1:5432/clean_pay") %>
+
+# Tests always use a distinct database. They must never point at the preserved
+# development volume's clean_pay database.
+test:
+  <<: *default
+  url: <%= ENV.fetch("TEST_DATABASE_URL", "postgresql://clean_pay:clean_pay@127.0.0.1:5432/clean_pay_test") %>
+
+production:
+  <<: *default
+  # Обязательность DATABASE_URL в production проверяет CleanPay::AppConfig.
+  # ENV[] здесь намеренно: ERB читает все секции файла при любом окружении.
+  url: <%= ENV["DATABASE_URL"] %>

@@ -26,8 +26,9 @@ WebAuthn поддерживается браузером; сессия не ну
 
 ## Текущий транспорт
 
-`POST /api/bff/auth/passkey/login/options`; public bodyless mutation, поэтому нужен доверенный origin, но `Content-Type` не нужен.
+`POST /account/passkey_session`. Public bodyless WebAuthn protocol endpoint with Rails CSRF/origin protection.
 
+ADR-003 заменяет исторический BFF/JSON transport этой операции.
 ## Правила валидации
 
 Лимит 20 запросов/900 секунд по HMAC IP identity; технический отказ Redis — fail-closed. RP ID — hostname публичного origin.
@@ -58,8 +59,7 @@ Rate-limit → генерация options (`timeout=60000`, `userVerification="r
 
 ## Логический результат
 
-`200 {"data":<PublicKeyCredentialRequestOptionsJSON>}` с challenge, `rpId`, `timeout:60000`, `userVerification:"required"`; список ключей не ограничен.
-
+`200 {"data":<PublicKeyCredentialRequestOptionsJSON>}`; browser-protocol JSON exception.
 ## Побочные эффекты
 
 Redis counter и новый challenge.
@@ -78,4 +78,4 @@ Redis counter и новый challenge.
 
 ## Статус уверенности
 
-`подтверждено`
+`требует повторной проверки после ADR-003`

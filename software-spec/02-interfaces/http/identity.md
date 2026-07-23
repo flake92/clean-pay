@@ -13,7 +13,7 @@
 
 ## HTTP-001 — Определить адрес
 
-- `POST /api/bff/auth/identify`; публично.
+- `POST /account/identity`; публично.
 - Тело: `email` должен быть строкой; очищается от внешних пробелов и приводится к нижнему регистру. Отсутствие, `null`, другой тип или пустой результат — 400. Дополнительные поля игнорируются.
 - Ограничение: 20 запросов за 15 минут по нормализованному адресу; недоступность счётчика пропускает запрос, достигнутый предел даёт 429.
 - 200 `{"data":{"exists":boolean,"hasPasskey":boolean}}`.
@@ -21,7 +21,7 @@
 
 ## HTTP-002 — Вход по почте
 
-- `POST /api/bff/auth/login`; публично.
+- `POST /account/session`; публично.
 - Тело: `email:string`, `password:string`; необязательный `turnstileToken` или `cf-turnstile-response`. После удаления полей Turnstile остальные дополнительные поля передаются внешней системе.
 - Последовательность: Turnstile → предел 5 за 15 минут по адресу → внешняя проверка → согласование единого пользователя → создание сессии.
 - 200 `{"data":{"user":<внешний профиль>,"expiresAt":string,"refreshExpiresAt":string}}`; устанавливаются обе основные cookie.
@@ -29,7 +29,7 @@
 
 ## HTTP-003 — Регистрация
 
-- `POST /api/bff/auth/register`; публично.
+- `POST /account/registration`; публично.
 - Тело: `email:string`, `password:string`; необязательные `name:string`, `referral_code:string`, два варианта Turnstile. После удаления Turnstile дополнительные поля передаются наружу.
 - Предел 5 за 15 минут. Если внешний ответ означает, что адрес уже существует, выполняется вход с тем же адресом и паролем; остальные конфликты не скрываются.
 - 201 `{"data":{"user":object,"expiresAt":string,"refreshExpiresAt":string,"emailVerification"?:{"success":boolean,"target_email":string,"expires_at":string}}}`; устанавливаются cookie. Для неподтверждённого адреса сразу запрашивается код.
@@ -37,27 +37,27 @@
 
 ## HTTP-004 — Текущий профиль
 
-- `GET /api/bff/auth/me`; требуется сессия; тела и параметров нет.
+- `GET /account/session`; требуется сессия; тела и параметров нет.
 - 200 `{"data":{"user":{...}}}`. Обязательное совместимое ядро: `telegram_id:string|null`, `auth_type:string`, `email:string|null`, `is_email_verified:boolean`, `pending_email:string|null`, `name:string`, `username:string|null`, `language:string`, `telegramId:string|null`, `telegramUsername:string|null`, `fullName:string|null`, `displayName:string|null`, `emailVerified:boolean`. Внешний профиль может добавлять свои поля.
 - Локальный профиль используется, если внешнюю сессию получить нельзя по причине отсутствующей внешней связи. Подтверждённый внешний адрес может обновить локальный признак и cookie.
 - Ошибки: 401, 502/503/504, 500. Чтение может обновить сессию и согласовать профиль.
 
 ## HTTP-005 — Выход
 
-- `POST /api/bff/auth/logout`; без тела, доверенный источник; доступен даже без действующей сессии.
+- `DELETE /account/session`; без тела, доверенный источник; доступен даже без действующей сессии.
 - 200 `{"data":{"success":true}}`; если пользователь определяется, отзываются все его активные локальные сессии; обе cookie удаляются; действие журналируется.
 - Повтор безопасен. Возможная ошибка хранилища — 500.
 
 ## HTTP-006 — Смена пароля
 
-- `POST /api/bff/auth/change-password`; `current_password:string`, `new_password:string`; дополнительные поля передаются внешней системе.
+- `PATCH /account/password`; `current_password:string`, `new_password:string`; дополнительные поля передаются внешней системе.
 - Требуется полная разрешённая сессия. Если первая внешняя попытка возвращает `CURRENT_PASSWORD_INVALID`, внешние токены обновляются и запрос повторяется ровно один раз.
 - 200 `{"data":{"success":boolean}}`. После успеха все прежние сессии отзываются, текущему браузеру выдаётся новая с тем же способом и уровнем входа.
 - Ошибки: 400, 401, 403, 502/503/504, 500. Если пароль уже изменён, но локальное создание новой сессии не удалось, система закрывает все сессии и удаляет cookie.
 
 ## HTTP-007 — Запросить код почты
 
-- `POST /api/bff/auth/email/request-verification`; требуется сессия, неподтверждённая почта разрешена.
+- `POST /account/email_verification`; требуется сессия, неподтверждённая почта разрешена.
 - Тело: необязательный `email:string`, варианты Turnstile. Целевой адрес выбирается: входной → ожидающий внешний → текущий внешний → локальный.
 - Turnstile; не чаще одного запроса за 60 секунд и 5 за 15 минут. Определённая временная ошибка отправки повторяется до трёх попыток с задержками 300 и 600 мс.
 - 200 `{"data":{"success":boolean,"target_email":string,"expires_at":string}}`.
@@ -65,7 +65,7 @@
 
 ## HTTP-008 — Подтвердить почту
 
-- `POST /api/bff/auth/email/confirm`; требуется сессия, неподтверждённая почта разрешена.
+- `PATCH /account/email_verification`; требуется сессия, неподтверждённая почта разрешена.
 - Тело: `code:string`, необязательные `email:string`, `registrationFlow:boolean`, варианты Turnstile. `registrationFlow` и Turnstile наружу не передаются.
 - Предел 5 за 15 минут. Уже подтверждённый адрес даёт успешный повтор без изменения.
 - 200 `{"data":{"success":boolean,"email":string,"already_verified":boolean,"account_sync_pending":boolean}}`.
@@ -74,7 +74,7 @@
 
 ## HTTP-009 — Изменить почту
 
-- `POST /api/bff/auth/email/change`; полная разрешённая сессия.
+- `PATCH /account/email`; полная разрешённая сессия.
 - Тело: `email:string`, варианты Turnstile. Действуют Turnstile, минутный интервал и предел попыток.
 - 200 `{"data":{"success":boolean,"pending_email":string,"emailVerification":{"success":boolean,"target_email":string,"expires_at":string}}}`.
 - Локальная почта становится неподтверждённой, cookie обновляется и сразу запрашивается новый код.
@@ -82,13 +82,13 @@
 
 ## HTTP-010 — Начать регистрацию ключа доступа
 
-- `POST /api/bff/auth/passkey/register/options`; без тела, доверенный источник; полная либо ограниченная сессия. Полная сессия проходит правило почты.
+- `POST /account/passkey_registration`; без тела, доверенный источник; полная либо ограниченная сессия. Полная сессия проходит правило почты.
 - 200 с объектом параметров создания ключа: идентификатор и имя стороны приложения, пользователь, вызов, таймаут 120 000 мс, подтверждение пользователя обязательно, постоянный ключ предпочтителен, внешняя аттестация не требуется.
 - Создаётся одноразовый вызов на 5 минут. Ошибки: 401, 403, 500. Повтор создаёт новый независимый вызов.
 
 ## HTTP-011 — Завершить регистрацию ключа
 
-- `POST /api/bff/auth/passkey/register/verify`; тело до 131 072 байт: стандартный ответ WebAuthn `id`, `rawId`, `type`, `response.clientDataJSON`, `response.attestationObject`, необязательные `transports`, `authenticatorAttachment`, `clientExtensionResults`; необязательное `name`.
+- `PATCH /account/passkey_registration`; тело до 131 072 байт: стандартный ответ WebAuthn `id`, `rawId`, `type`, `response.clientDataJSON`, `response.attestationObject`, необязательные `transports`, `authenticatorAttachment`, `clientExtensionResults`; необязательное `name`.
 - Проверяются одноразовость, срок, принадлежность пользователю, источник приложения, идентификатор стороны и подтверждение пользователя.
 - `name`: если строка — внешние/повторные пробелы очищаются, значение обрезается до 80 символов; пустое и нестроковое значение заменяется названием из браузера/устройства.
 - 200 `{"data":{"success":true}}`; ключ сохраняется, ограниченная сессия становится полной, cookie обновляется, действие журналируется.
@@ -96,33 +96,33 @@
 
 ## HTTP-012 — Начать вход по ключу
 
-- `POST /api/bff/auth/passkey/login/options`; без тела, публично, доверенный источник.
+- `POST /account/passkey_session`; без тела, публично, доверенный источник.
 - Предел 20 за 15 минут по последнему доверенному адресу в `X-Forwarded-For`.
 - 200 с параметрами запроса ключа: одноразовый вызов, идентификатор стороны, таймаут 60 000 мс, подтверждение пользователя обязательно; список разрешённых ключей не ограничивается.
 - Вызов действует 5 минут. Ошибки: 429, 500.
 
 ## HTTP-013 — Завершить вход по ключу
 
-- `POST /api/bff/auth/passkey/login/verify`; стандартный ответ WebAuthn до 131 072 байт: `id`, `rawId`, `type`, `response.authenticatorData`, `clientDataJSON`, `signature`, необязательный `userHandle` и расширения.
+- `PATCH /account/passkey_session`; стандартный ответ WebAuthn до 131 072 байт: `id`, `rawId`, `type`, `response.authenticatorData`, `clientDataJSON`, `signature`, необязательный `userHandle` и расширения.
 - Вызов поглощается атомарно; проверяются ключ, подпись, источник, сторона и подтверждение пользователя. Ненулевой счётчик изменяется только при совпадении предыдущего значения; нулевой счётчик допускается и обновляет время использования.
 - 200 `{"data":{"success":true}}`; создаются полная сессия и cookie.
 - Ошибки: 400 вызова, 401 ключа/подписи/счётчика, 500. Повтор или конкурентный конфликт не создаёт сессию.
 
 ## HTTP-014 — Список ключей
 
-- `GET /api/bff/auth/passkey/credentials`; полная разрешённая сессия.
+- `GET /account/passkeys`; полная разрешённая сессия.
 - 200 `{"data":{"credentials":[{"id":string,"credentialId":string,"name":string|null,"transports":string[],"deviceType":string|null,"backedUp":boolean,"lastUsedAt":string|null,"createdAt":string}]}}`.
 - Сортировка по времени создания по возрастанию; пустой массив допустим. Ошибки: 401, 403, 500.
 
 ## HTTP-015 — Удалить ключ
 
-- `DELETE /api/bff/auth/passkey/credentials/{id}`; один непустой сегмент, без тела, доверенный источник; полная разрешённая сессия.
+- `DELETE /account/passkeys/{id}`; один непустой сегмент, без тела, доверенный источник; полная разрешённая сессия.
 - В транзакции блокируется пользователь, проверяется принадлежность и количество ключей.
 - 200 `{"data":{"success":true}}`; 404 отсутствующего/чужого ключа; 403 последнего ключа; 401/500. Параллельные удаления выполняются последовательно; повтор успешного удаления — 404.
 
 ## HTTP-016 — Вход из Telegram WebApp
 
-- `POST /api/bff/auth/telegram/webapp`; публично.
+- `POST /account/telegram_session`; публично.
 - Тело: `initData:string` очищается от внешних пробелов и обязательно непустое; `redirectTo?:string`; дополнительные поля игнорируются. Безопасное перенаправление — только корневой относительный путь, иначе `/cabinet`.
 - Внешний профиль обязан содержать Telegram ID; предел 20 за 15 минут.
 - 200 **без оболочки `data`**: `{"redirectTo":string}`; создаются cookie сессии.
@@ -130,40 +130,34 @@
 
 ## HTTP-017 — Получить подтверждение объединения
 
-- `GET /api/bff/auth/telegram/merge-confirmation`; требуются сессия и cookie подтверждения.
+- `GET /account/merge_confirmation`; требуются сессия и cookie подтверждения.
 - 200 `{"data":{"targetEmail":string,"sourceEmailMasked":string|null,"emailWillBeReplaced":boolean,"telegramId":string,"status":string}}` для принадлежащего пользователю действующего подтверждения. Полный source e-mail, username и expiresAt не выдаются.
 - Ошибки: 401, 404 отсутствующего/истёкшего токена, 409 состояния, 500. Чтение повторяемо.
 
 ## HTTP-018 — Подтвердить объединение
 
-- `POST /api/bff/auth/telegram/merge-confirmation`; без тела, доверенный источник; сессия и cookie подтверждения.
+- `PATCH /account/merge_confirmation`; без тела, доверенный источник; сессия и cookie подтверждения.
 - Ожидающая запись захватывается с временной арендой; владельцы и платежи блокируются на время изменения.
 - 200 `{"data":{"merged":true,"userId":string}}`; cookie подтверждения очищается, данные переносятся к одному владельцу, создаётся аудит.
 - Ошибки: 401, 404 истёкшего/чужого подтверждения, 409 выполняемого или небезопасного объединения, 500. Повтор не запускает второе объединение.
 
 ## HTTP-019 — Отменить объединение
 
-- `DELETE /api/bff/auth/telegram/merge-confirmation`; без тела, доверенный источник; сессия и cookie.
+- `DELETE /account/merge_confirmation`; без тела, доверенный источник; сессия и cookie.
 - 200 `{"data":{"cancelled":true}}`; ожидание отменяется и cookie очищается.
 - Ошибки: 401, 404, 409 выполняемой операции, 500. После успеха активного подтверждения нет.
 
 ## HTTP-020 — Связать внешнюю учётную запись
 
-- `POST /api/bff/link/remnashop`; полная разрешённая сессия.
+- `POST /account/remnashop_link`; полная разрешённая сессия.
 - Тело: `email:string`, `password:string`; дополнительные поля передаются при внешней проверке. Turnstile и собственный предел частоты на этом интерфейсе отсутствуют.
 - После успешной проверки блокируется владелец платежей, совпадающие локальные пользователи объединяются, внешние токены связываются с текущей сессией.
 - 200 с результатом связывания и профилем в основной оболочке.
 - Ошибки: 400, 401, 403, 409 `ACCOUNT_MERGE_REQUIRED`/конфликт подписок/выполняемый платёж, 502/503/504, 500. Повтор снова проверяет пароль и обновляет связь.
 
-## HTTP-039 — Совместимый профиль
-
-- `GET /api/me`; требуется сессия.
-- 200 **без оболочки `data`**: `{"user":{"id":string,"email":string|null,"telegramId":string|null,"telegramUsername":string|null,"fullName":string|null,"photoUrl":string|null,"displayName":string|null,"emailVerified":boolean,"lastLoginAt":string|null}}`.
-- Нет сессии: 401 `{"user":null}`. Обновление сессии может заменить cookie.
-
 ## HTTP-041 — Начать Telegram-вход
 
-- `GET /auth/telegram/start`; параметры `redirect_to?`, `turnstile_token?`, `cf-turnstile-response?`, `mode?`.
+- `GET /account/telegram_authorization/new`; параметры `redirect_to?`, `turnstile_token?`, `cf-turnstile-response?`, `mode?`.
 - `redirect_to` принимается только как безопасный корневой относительный путь. Для связывания уже вошедшего пользователя проверяются источник, Turnstile и предел 10 за 15 минут.
 - Обычный режим: 307 на Telegram с `response_type=code`, `scope=openid profile`, `state`, `nonce` и PKCE; устанавливаются три временные cookie на 10 минут.
 - `mode=popup`: 200 `{"clientId":string,"nonce":string,"redirectUri":string}` и те же cookie.
@@ -171,13 +165,13 @@
 
 ## HTTP-042 — Возврат Telegram
 
-- `GET /auth/telegram/callback`; обязательны `code` и `state`, временные cookie; возможны `error`, `error_description` поставщика.
+- `GET /account/telegram_authorization/callback`; обязательны `code` и `state`, временные cookie; возможны `error`, `error_description` поставщика.
 - Состояние сопоставляется с cookie и поглощается один раз; проверяются PKCE, подписанное удостоверение и `nonce`.
 - Успех: 307 на сохранённый безопасный путь либо `/cabinet`; если требуется объединение — 307 `/link-account?auth=<причина>` и cookie подтверждения.
 - Ошибка гостя: 307 `/login?auth=telegram_failed`; ошибка вошедшего пользователя — безопасный переход на связывание; временные cookie очищаются.
 
 ## HTTP-043 — Возврат всплывающего Telegram-входа
 
-- `POST /auth/telegram/callback`; доверенный источник; JSON до 65 536 байт; либо `idToken:string`, либо рабочий совместимый `authData:object` Telegram Login Widget. При наличии обоих приоритет имеет строковый `idToken`.
+- `POST /account/telegram_authorization/callback`; доверенный источник; JSON до 65 536 байт; либо `idToken:string`, либо рабочий совместимый `authData:object` Telegram Login Widget. При наличии обоих приоритет имеет строковый `idToken`.
 - Успех: 200 **без оболочки `data`** `{"redirectTo":string}`; могут устанавливаться сессионные и merge-cookie.
 - Нет токена/ошибка: 400 `{"error":"telegram_failed"}`; превышен размер: 413 `{"error":"payload_too_large"}`; уже поглощённое состояние при существующей сессии может вернуть 200 с безопасным адресом продолжения.

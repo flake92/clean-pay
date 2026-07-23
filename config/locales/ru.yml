@@ -1,0 +1,20 @@
+ru:
+  errors:
+    format: "%{attribute} %{message}"
+    messages:
+      blank: "не может быть пустым"
+      invalid: "имеет неверное значение"
+      taken: "уже используется"
+      greater_than: "должно быть больше %{count}"
+      greater_than_or_equal_to: "должно быть не меньше %{count}"
+      less_than: "должно быть меньше %{count}"
+      less_than_or_equal_to: "должно быть не больше %{count}"
+      too_long: "слишком длинное (максимум %{count})"
+      last_credential: "последний ключ доступа удалить нельзя"
+  date:
+    formats:
+      default: "%d.%m.%Y"
+  time:
+    formats:
+      default: "%d.%m.%Y %H:%M"
+      short: "%d.%m.%Y %H:%M"

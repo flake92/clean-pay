@@ -1,0 +1,10 @@
+#!/usr/bin/env ruby
+
+require_relative "../config/environment"
+
+runner = Platform::ReconciliationRunner.new
+exit 0 unless runner.enabled?
+
+Signal.trap("TERM") { runner.stop }
+Signal.trap("INT") { runner.stop }
+runner.run

@@ -1,0 +1,5 @@
+<div class="flash-stack" aria-live="polite">
+  <% flash.each do |type, message| %>
+    <div class="flash flash--<%= type %>" role="status"><%= message %></div>
+  <% end %>
+</div>

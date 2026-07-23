@@ -45,7 +45,7 @@
 | TS-001 | Turnstile | `POST` configured siteverify | проверка антибот-токена |
 | TS-000 | Turnstile widget | browser `GET https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit` | загрузить browser API виджета |
 | MP-001 | Mailpit | `GET /api/v1/messages` | optional readiness тестовой почты |
-| SELF-001 | Clean Pay internal | `POST /api/internal/payments/reconcile` | пакетная сверка worker |
+| SELF-001 | Clean Pay internal | `POST /internal/payment_reconciliations` | пакетная сверка worker |
 
 ## Косвенные внешние выходы
 

@@ -1,0 +1,251 @@
+.button {
+  display: inline-flex;
+  min-height: 3.125rem;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 0.875rem 1.25rem;
+  border: 1px solid var(--primary);
+  border-radius: 6px;
+  background: var(--primary);
+  color: #fff;
+  font-weight: 700;
+  line-height: 1.25;
+  text-align: center;
+  text-decoration: none;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.button:hover {
+  border-color: var(--primary-hover);
+  background: var(--primary-hover);
+}
+
+.button:focus-visible,
+.text-link:focus-visible,
+.nav-link:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: none;
+  box-shadow: var(--focus);
+}
+
+.button:disabled {
+  opacity: 0.65;
+  cursor: default;
+}
+
+.button--outline {
+  background: transparent;
+  color: var(--primary);
+}
+
+.button--outline:hover {
+  background: rgb(99 102 241 / 8%);
+  color: var(--primary-hover);
+}
+
+.button--small {
+  min-height: 2.5rem;
+  padding: 0.625rem 1rem;
+}
+
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: 1.125rem;
+  padding: 2rem;
+  border: 1px solid #dce3ec;
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+.form-stack,
+.stacked-form {
+  display: grid;
+  gap: 0.75rem;
+}
+
+label {
+  color: var(--text-strong);
+  font-weight: 650;
+}
+
+input,
+select,
+textarea {
+  width: 100%;
+  min-height: 3rem;
+  padding: 0.75rem;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  background: #fff;
+  color: var(--text-strong);
+}
+
+input:hover,
+select:hover,
+textarea:hover {
+  border-color: var(--primary);
+}
+
+input:invalid:not(:placeholder-shown) {
+  border-color: var(--danger);
+}
+
+.flash {
+  margin-bottom: 1rem;
+  padding: 1rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+}
+
+.flash--alert,
+.state--error {
+  border-color: #fecaca;
+  background: #fef2f2;
+  color: #991b1b;
+}
+
+.flash--notice {
+  border-color: #bbf7d0;
+  background: #f0fdf4;
+  color: #166534;
+}
+
+.eyebrow,
+.nav-label {
+  margin: 0;
+  color: var(--primary);
+  font-size: 0.8125rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.nav-link {
+  display: flex;
+  align-items: center;
+  min-height: 2.75rem;
+  padding: 0.75rem 1rem;
+  border: 0;
+  border-radius: 12px;
+  background: transparent;
+  color: var(--text);
+  font-weight: 600;
+  text-align: left;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.nav-link:hover,
+.nav-link[aria-current="page"] {
+  background: var(--surface-hover);
+  color: var(--primary);
+}
+
+.nav-link[aria-current="page"] {
+  font-weight: 800;
+}
+
+.nav-button {
+  width: 100%;
+}
+
+.menu-toggle,
+.navigation-overlay {
+  display: none;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.sidebar form {
+  margin-top: auto;
+}
+
+.text-link {
+  display: inline-flex;
+  align-items: center;
+  min-height: 2.75rem;
+  color: var(--primary);
+  font-weight: 700;
+}
+
+.danger {
+  color: var(--danger);
+}
+
+.state {
+  padding: 1rem;
+  border-radius: 6px;
+  background: var(--surface-hover);
+}
+
+.clean-list {
+  display: grid;
+  gap: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.clean-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.875rem 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.clean-list li:last-child {
+  border-bottom: 0;
+}
+
+.break-all {
+  overflow-wrap: anywhere;
+}
+
+.form-hint {
+  color: var(--muted);
+}
+
+.install-dialog {
+  max-width: min(32rem, calc(100vw - 2rem));
+  padding: 2rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-large);
+  color: var(--text);
+}
+
+.install-dialog::backdrop {
+  background: rgb(0 0 0 / 40%);
+}
+
+dl {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 0.75rem 1rem;
+  margin: 0;
+}
+
+dt {
+  color: var(--muted);
+  font-weight: 650;
+}
+
+dd {
+  margin: 0;
+}

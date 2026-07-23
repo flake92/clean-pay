@@ -1,0 +1,26 @@
+<section class="hero card">
+  <div>
+    <p class="eyebrow">Clean Pay</p>
+    <h1>Web-кабинет для оплаты и управления подпиской</h1>
+    <p>Управляйте доступом, устройствами и платежами в одном безопасном кабинете.</p>
+  </div>
+  <div class="hero-actions">
+    <%= link_to Current.web_user ? "Открыть кабинет" : "Войти",
+      Current.web_user ? cabinet_path : login_path, class: "button" %>
+    <%= link_to "Тарифы", tariffs_path, class: "button button--outline" %>
+  </div>
+</section>
+<section class="action-grid" aria-label="Разделы сервиса">
+  <% [
+    [ "Подписка", "Кабинет", "Состояние доступа и устройства", cabinet_path ],
+    [ "Аккаунт", "Профиль", "E-mail, пароль и безопасность", profile_path ],
+    [ "Связь аккаунта", "Способы входа", "Telegram и ключи доступа", link_account_path ],
+    [ "Помощь", "Поддержка", "Контакты и частые вопросы", support_path ]
+  ].each do |label, title, text, path| %>
+    <%= link_to path, class: "action-card card" do %>
+      <span class="eyebrow"><%= label %></span>
+      <strong><%= title %></strong>
+      <span><%= text %></span>
+    <% end %>
+  <% end %>
+</section>

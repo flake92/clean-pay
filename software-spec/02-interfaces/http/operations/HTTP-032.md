@@ -26,7 +26,7 @@ Query: необязательный `payment_id` — UUID version 1…8/variant 
 
 ## Текущий транспорт
 
-`GET /api/bff/payments/status?payment_id=...&operation_id=...`; session cookie.
+`GET /payments/:id`; server-rendered member resource с полной сессией и owner scope.
 
 ## Правила валидации
 
@@ -58,7 +58,7 @@ Terminal manual/failure/success возвращается без Remnashop с `so
 
 ## Логический результат
 
-`200 {"data":{"payment":object|null,"operation":object|null,"subscription":object|null,"source":"local_terminal_payment_operation"|"local_payment_record_and_current_subscription"}}`.
+`200 text/html`; Rails рендерит платёж, связанную операцию и актуальную подписку; отсутствующий owner-scoped ресурс даёт стандартный `404`.
 
 ## Побочные эффекты
 
@@ -78,4 +78,4 @@ Operation ID и режим источника допустимы; URL/токен
 
 ## Статус уверенности
 
-`подтверждено`
+`требует повторной проверки после ADR-003`

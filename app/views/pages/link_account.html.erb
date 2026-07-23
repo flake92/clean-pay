@@ -1,0 +1,31 @@
+<header class="page-header"><div><p class="eyebrow">Безопасность</p><h1>Способы входа</h1>
+  <p>Свяжите аккаунты и настройте быстрый вход.</p></div></header>
+<section class="three-column">
+  <article class="card"><h2>E-mail</h2>
+    <p><%= Current.web_user.email || "Не привязан" %></p>
+    <%= form_with scope: :remnashop_link, url: account_remnashop_link_path,
+      class: "stacked-form", data: { controller: "form-lock" } do |form| %>
+      <%= form.label :email, "E-mail" %>
+      <%= form.email_field :email, required: true, autocomplete: "email" %>
+      <%= form.label :password, "Пароль" %>
+      <%= form.password_field :password, required: true,
+        autocomplete: "current-password" %>
+      <%= form.submit "Подключить e-mail", class: "button",
+        data: { form_lock_target: "submit" } %>
+    <% end %>
+  </article>
+  <article class="card"><h2>Telegram</h2><p><%= Current.web_user.telegram_id ? "Привязан" : "Не привязан" %></p>
+    <%= link_to "Привязать Telegram", new_account_telegram_authorization_path, class: "button" %></article>
+  <article class="card" data-controller="passkey"><h2>Passkey</h2>
+    <label for="linked-passkey-name">Название ключа</label>
+    <input id="linked-passkey-name" type="text" maxlength="80"
+      placeholder="Например: телефон" data-passkey-target="name">
+    <button type="button" class="button" data-action="passkey#register">Добавить Passkey</button>
+    <ul class="clean-list"><% @passkeys.each do |credential| %>
+      <li><span><%= credential.name %></span>
+        <%= button_to "Удалить", account_passkey_path(credential),
+          method: :delete, class: "text-link danger" %></li>
+    <% end %></ul>
+    <p data-passkey-target="status" aria-live="polite"></p>
+  </article>
+</section>

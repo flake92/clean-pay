@@ -1,5 +1,10 @@
 # Совместимость
 
-Сохраняются поля upstream/BFF в `snake_case`, локальные расширения профиля в `camelCase`, исторические плоские `/api/me` и `/api/logout`, плоские ответы Telegram callback/WebApp, псевдонимы query возврата платежа, совместимость `subscriptionUrl|subscription_url` Remnawave, объявленный, но игнорируемый клиентский `return_url`, официальное OIDC-поведение и PWA URL/assets. Неизвестные внешние строки отображаются дословно. Полное отображение задают `02-interfaces/compatibility-matrix.md`, карточки HTTP и frontend-документы.
+Сохраняются upstream wire-поля, пользовательские данные форм, псевдонимы
+возврата платежа, совместимость `subscriptionUrl|subscription_url` Remnawave,
+server-generated return URL, OIDC-поведение и PWA assets. Исторические
+`/api/bff`, `/api/me`, `/api/logout` и BFF envelopes намеренно сняты ADR-003.
+Неизвестные внешние строки отображаются дословно.
 
-Намеренное изменение требует принятой записи решения, версии контракта, переходного периода и обновления регрессии; текущий анализ таких изменений не разрешает.
+Следующее изменение входной архитектуры требует нового ADR и полного сброса
+verification cycle.

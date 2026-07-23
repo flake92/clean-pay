@@ -26,15 +26,18 @@
 
 ## Текущий транспорт
 
-`GET /api/bff/auth/passkey/credentials`.
+`GET /account/passkeys`. Bodyless Rails HTML resource read for a FULL verified session.
 
+ADR-003 заменяет исторический BFF/JSON transport этой операции.
+
+Коды ошибок в нижележащем историческом анализе теперь являются доменными классификациями: браузеру Rails рендерит form errors/flash либо выполняет безопасный redirect; BFF envelope не возвращается.
 ## Правила валидации
 
 Session assurance обязана быть точной `FULL`; затем проверяется email/Telegram policy.
 
 ## Нормализация
 
-Date сериализуются JSON как ISO date-time; bigint counter и public key не выводятся.
+Даты рендерятся через `<time datetime>` и Rails I18n; bigint counter и public key не выводятся.
 
 ## Авторизация
 
@@ -58,8 +61,7 @@ Date сериализуются JSON как ISO date-time; bigint counter и pub
 
 ## Логический результат
 
-`200 {"data":{"credentials":[...]}}`, где каждый элемент содержит обязательные `id`, `credentialId`, `name:string|null`, `transports:string[]`, `deviceType:string|null`, `backedUp:boolean`, `lastUsedAt:date-time|null`, `createdAt:date-time`. Порядок — от старого к новому.
-
+`200 text/html`; Rails renders the safe credential projection and delete forms.
 ## Побочные эффекты
 
 Только возможная refresh rotation и журналы.
@@ -78,4 +80,4 @@ Credential public keys и counters не выводятся/не журналир
 
 ## Статус уверенности
 
-`подтверждено`
+`требует повторной проверки после ADR-003`

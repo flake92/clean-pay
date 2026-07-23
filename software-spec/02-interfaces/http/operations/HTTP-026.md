@@ -26,7 +26,7 @@
 
 ## Текущий транспорт
 
-`POST /api/bff/subscription/reissue`; trusted origin; session cookie.
+`POST /subscription/reissue`; bodyless Rails form mutation с CSRF и полной сессией.
 
 ## Правила валидации
 
@@ -58,7 +58,7 @@
 
 ## Логический результат
 
-`200 {"data":{"success":boolean}}`.
+`303 See Other` на `/subscription` с flash-результатом.
 
 ## Побочные эффекты
 
@@ -78,4 +78,4 @@ Audit содержит user ID, но не URL.
 
 ## Статус уверенности
 
-`подтверждено`
+`требует повторной проверки после ADR-003`

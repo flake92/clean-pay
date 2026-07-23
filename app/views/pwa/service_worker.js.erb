@@ -1,0 +1,27 @@
+const CACHE_NAME = <%= raw JSON.generate("clean-pay-shell-#{@build_id}").gsub("<", "\\u003c") %>;
+const SHELL = ["/offline", "/manifest.webmanifest", "/clean-pay-icon-192.png",
+  "/clean-pay-icon-512.png", "/clean-pay-icon-maskable-512.png",
+  "/clean-pay-logo.png"];
+
+self.addEventListener("install", event => {
+  event.waitUntil(caches.open(CACHE_NAME).then(cache =>
+    Promise.all(SHELL.map(path => cache.add(new Request(path, { cache: "reload" }))))
+  ));
+});
+
+self.addEventListener("activate", event => {
+  event.waitUntil(caches.keys().then(keys => Promise.all(
+    keys.filter(key => key.startsWith("clean-pay-shell-") && key !== CACHE_NAME)
+      .map(key => caches.delete(key))
+  )));
+});
+
+self.addEventListener("fetch", event => {
+  const request = event.request;
+  const url = new URL(request.url);
+  if (request.method !== "GET" || request.mode !== "navigate" ||
+      url.origin !== self.location.origin) return;
+  event.respondWith(fetch(request).catch(async () =>
+    (await caches.match("/offline", { ignoreSearch: true })) || Response.error()
+  ));
+});

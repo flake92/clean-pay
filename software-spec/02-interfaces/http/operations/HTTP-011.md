@@ -39,8 +39,9 @@ WebAuthn-браузер и пользователь.
 
 ## Текущий транспорт
 
-`POST /api/bff/auth/passkey/register/verify`; JSON-object UTF-8 до 131 072 байт; доверенный origin; cookie сессии.
+`PATCH /account/passkey_registration`. WebAuthn JSON object up to 131072 bytes; Rails session and CSRF header.
 
+ADR-003 заменяет исторический BFF/JSON transport этой операции.
 ## Правила валидации
 
 `clientDataJSON` обязан быть base64url-кодированным JSON с непустым строковым challenge. Запись challenge должна иметь тип REGISTRATION, быть неистёкшей/непотреблённой и принадлежать текущему user. Проверяются expected challenge, точный origin, RP ID, подпись/attestation и обязательное user verification.
@@ -78,8 +79,7 @@ Concurrent create с unique conflict повторно проверяет owner+c
 
 ## Логический результат
 
-`200 {"data":{"success":true}}`. При bootstrap обновляется `clean_pay_access` до FULL с прежним сроком сессии, если upgrade использует уже рассчитанный новый access expiry по политике; фактическая операция устанавливает новый срок access `now+15m` в БД и cookie.
-
+`200 {"data":{"success":true}}`; bootstrap access may be promoted. This is a browser-protocol exception.
 ## Побочные эффекты
 
 Потреблённый challenge, ключ, пользовательское состояние, возможный upgrade сессии, cookie, audit.
@@ -98,4 +98,4 @@ Audit содержит credential ID и признак upgrade; public key и at
 
 ## Статус уверенности
 
-`подтверждено`
+`требует повторной проверки после ADR-003`

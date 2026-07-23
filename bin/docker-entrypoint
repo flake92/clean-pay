@@ -1,0 +1,7 @@
+#!/usr/bin/env ruby
+
+require_relative "../config/environment"
+
+config = Rails.application.config.x.clean_pay
+Platform::MigrationRunner.new.call if config.runtime.run_migrations
+exec(*ARGV)

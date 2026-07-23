@@ -33,8 +33,11 @@
 
 ## Текущий транспорт
 
-`POST /api/bff/auth/email/confirm`; доверенный origin; JSON UTF-8 до 65 536 байт; cookie сессии.
+`PATCH /account/email_verification`. Rails form scope `email_verification[code,turnstile_token]`; exact six ASCII digits; CSRF.
 
+ADR-003 заменяет исторический BFF/JSON transport этой операции.
+
+Коды ошибок в нижележащем историческом анализе теперь являются доменными классификациями: браузеру Rails рендерит form errors/flash либо выполняет безопасный redirect; BFF envelope не возвращается.
 ## Правила валидации
 
 Turnstile выполняется до сессии. Target выбирается: явный `email`, затем `pending_email`, внешний current e-mail, локальный e-mail, иначе отсутствие. Лимит — 5 подтверждений на 900 секунд по target/Telegram ID.
@@ -68,25 +71,11 @@ Turnstile выполняется до сессии. Target выбирается:
 
 ## Ошибочные сценарии
 
-До необратимого подтверждения возможны: `400 VALIDATION_ERROR`, `400 EMAIL_CODE_INVALID`, `400 EMAIL_CODE_EXPIRED`, `401`, `403`, `409` конфликта, `413`, `415`, `429`, `502` Remnashop, `503` Turnstile, `500` локального хранилища. После успешного внешнего confirm ошибки синхронизации **не** превращают HTTP-ответ в ошибку; они отражаются полем pending.
+До необратимого подтверждения возможны: `400 VALIDATION_ERROR`, `400 EMAIL_CODE_INVALID`, `400 EMAIL_CODE_EXPIRED`, `401`, `403`, `409` конфликта `429`, `502` Remnashop, `503` Turnstile, `500` локального хранилища. После успешного внешнего confirm ошибки синхронизации **не** превращают HTTP-ответ в ошибку; они отражаются полем pending.
 
 ## Логический результат
 
-`200`:
-
-```json
-{
-  "data": {
-    "success": true,
-    "email": "user@example.com",
-    "already_verified": false,
-    "account_sync_pending": false
-  }
-}
-```
-
-Clean Pay всегда добавляет boolean `already_verified` и `account_sync_pending`, даже если внешняя схема их не возвращала. Возможна refresh/access cookie rotation.
-
+`303 See Other` to `/cabinet`, or `/link-account` when account synchronization remains pending.
 ## Побочные эффекты
 
 Потребление внешнего кода; подтверждение/перенос pending e-mail; локальные evidence и признаки; возможное внешнее/локальное объединение владельцев; токены; audit; cookie.
@@ -105,4 +94,4 @@ Clean Pay всегда добавляет boolean `already_verified` и `account
 
 ## Статус уверенности
 
-`подтверждено`
+`требует повторной проверки после ADR-003`

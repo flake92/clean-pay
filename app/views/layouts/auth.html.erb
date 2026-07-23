@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="ru"
+  data-service-worker="<%= Rails.application.config.x.clean_pay.runtime.build_id.present? ? "enabled" : "disabled" %>">
+  <head>
+    <title><%= content_for(:title) || "Clean Pay" %></title>
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <meta name="theme-color" content="#4f46e5">
+    <%= csrf_meta_tags %>
+    <%= csp_meta_tag %>
+    <link rel="manifest" href="<%= web_app_manifest_path %>">
+    <link rel="icon" href="/clean-pay-icon-192.png" type="image/png">
+    <link rel="apple-touch-icon" href="/clean-pay-icon-192.png">
+    <% if Rails.application.config.x.clean_pay.turnstile.enabled %>
+      <%= javascript_include_tag "https://challenges.cloudflare.com/turnstile/v0/api.js",
+        async: true, defer: true, nonce: true %>
+    <% end %>
+    <%= stylesheet_link_tag "/themes/lara-light-indigo/theme.css",
+      "data-turbo-track": "reload" %>
+    <%= stylesheet_link_tag :app, "data-turbo-track": "reload" %>
+    <%= javascript_importmap_tags %>
+  </head>
+  <body class="auth-page">
+    <main class="auth-frame">
+      <section class="auth-card">
+        <%= image_tag "/clean-pay-logo.png", alt: "Clean Pay",
+          class: "auth-logo", width: 68, height: 68 %>
+        <%= render "shared/flash" %>
+        <%= yield %>
+        <p class="auth-footer">Clean Pay</p>
+      </section>
+    </main>
+  </body>
+</html>

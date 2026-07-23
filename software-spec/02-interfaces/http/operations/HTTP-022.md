@@ -26,7 +26,7 @@
 
 ## Текущий транспорт
 
-`GET /api/bff/subscription/current`; session cookie.
+`GET /subscription`; server-rendered singleton resource, полная Rails-сессия обязательна.
 
 ## Правила валидации
 
@@ -50,7 +50,7 @@
 
 ## Альтернативные сценарии
 
-RS-013 возвращает JSON `null` — ответ `200 {"data":null}`, обращение к Remnawave не выполняется.
+RS-013 возвращает `null` — Rails рендерит пустое состояние подписки, обращение к Remnawave не выполняется.
 
 ## Ошибочные сценарии
 
@@ -58,7 +58,7 @@ RS-013 возвращает JSON `null` — ответ `200 {"data":null}`, об
 
 ## Логический результат
 
-`200 {"data":null}` либо объект с `user_remna_id,status,is_trial,traffic_limit,device_limit,traffic_limit_strategy,expire_at,url,plan_name,plan_duration_days,used_traffic_bytes,lifetime_used_traffic_bytes,online_at` и точными типами из контракта подписки.
+`200 text/html`; Rails рендерит текущую подписку либо её пустое состояние.
 
 ## Побочные эффекты
 
@@ -78,4 +78,4 @@ RS-013 возвращает JSON `null` — ответ `200 {"data":null}`, об
 
 ## Статус уверенности
 
-`подтверждено`
+`требует повторной проверки после ADR-003`

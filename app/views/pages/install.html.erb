@@ -1,0 +1,21 @@
+<section class="auth-content status-card"
+  data-controller="pwa-install dialog">
+  <p class="eyebrow">Приложение</p><h1>Установить Clean Pay</h1>
+  <p>Добавьте кабинет на главный экран для быстрого доступа.</p>
+  <button type="button" class="button" data-action="pwa-install#install"
+    data-pwa-install-target="button">Установить</button>
+  <p data-pwa-install-target="status" aria-live="polite"></p>
+  <dialog class="install-dialog"
+    data-pwa-install-target="dialog"
+    data-dialog-target="dialog"
+    aria-labelledby="install-dialog-title">
+    <h2 id="install-dialog-title">Добавить на главный экран</h2>
+    <ol>
+      <li>Откройте меню «Поделиться» в браузере.</li>
+      <li>Выберите «На экран Домой» или «Установить приложение».</li>
+      <li>Подтвердите добавление Clean Pay.</li>
+    </ol>
+    <button type="button" class="button"
+      data-action="dialog#close">Понятно</button>
+  </dialog>
+</section>

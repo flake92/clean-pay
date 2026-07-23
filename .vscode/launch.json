@@ -1,0 +1,34 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "type": "rdbg",
+      "request": "launch",
+      "name": "Rails: server",
+      "command": "bundle exec ruby",
+      "script": "${workspaceFolder}/bin/rails",
+      "args": [
+        "server",
+        "--binding=0.0.0.0",
+        "--port=4000"
+      ],
+      "cwd": "${workspaceFolder}",
+      "askParameters": false,
+      "useTerminal": true
+    },
+    {
+      "type": "rdbg",
+      "request": "launch",
+      "name": "Rails: current test",
+      "command": "bundle exec ruby -Itest",
+      "script": "${file}",
+      "args": [],
+      "cwd": "${workspaceFolder}",
+      "env": {
+        "RAILS_ENV": "test"
+      },
+      "askParameters": false,
+      "useTerminal": true
+    }
+  ]
+}

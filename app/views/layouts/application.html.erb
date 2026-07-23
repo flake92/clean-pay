@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="ru"
+  data-service-worker="<%= Rails.application.config.x.clean_pay.runtime.build_id.present? ? "enabled" : "disabled" %>">
+  <head>
+    <title><%= content_for(:title) || "Clean Pay" %></title>
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="application-name" content="Clean Pay">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="theme-color" content="#4f46e5">
+    <%= csrf_meta_tags %>
+    <%= csp_meta_tag %>
+
+    <%= yield :head %>
+    <% if Rails.application.config.x.clean_pay.turnstile.enabled %>
+      <%= javascript_include_tag "https://challenges.cloudflare.com/turnstile/v0/api.js",
+        async: true, defer: true, nonce: true %>
+    <% end %>
+
+    <link rel="icon" href="/clean-pay-icon-192.png" type="image/png">
+    <link rel="apple-touch-icon" href="/clean-pay-icon-192.png">
+    <link rel="manifest" href="<%= web_app_manifest_path %>">
+
+    <%= stylesheet_link_tag "/themes/lara-light-indigo/theme.css",
+      "data-turbo-track": "reload" %>
+    <%= stylesheet_link_tag :app, "data-turbo-track": "reload" %>
+    <%= javascript_importmap_tags %>
+  </head>
+
+  <body data-controller="navigation">
+    <header class="topbar">
+      <button type="button" class="menu-toggle"
+        data-action="navigation#toggle"
+        data-navigation-target="toggle"
+        aria-expanded="false" aria-controls="main-navigation">
+        <span aria-hidden="true">☰</span>
+        <span class="visually-hidden">Открыть меню</span>
+      </button>
+      <%= link_to root_path, class: "brand", aria: { label: "Clean Pay — главная" } do %>
+        <%= image_tag "/clean-pay-logo.png", alt: "", width: 40, height: 40 %>
+        <span>Clean Pay</span>
+      <% end %>
+      <div class="topbar-actions">
+        <% if Current.web_user %>
+          <span><%= Current.web_user.email || "Telegram" %></span>
+        <% else %>
+          <%= link_to "Войти", login_path, class: "button button--small" %>
+        <% end %>
+      </div>
+    </header>
+    <div class="app-shell">
+      <%= render "shared/navigation" %>
+      <button type="button" class="navigation-overlay"
+        data-navigation-target="overlay"
+        data-action="navigation#close"
+        aria-label="Закрыть меню"></button>
+      <div class="content-shell">
+        <%= render "shared/flash" %>
+        <%= yield %>
+        <footer class="app-footer">Clean Pay</footer>
+      </div>
+    </div>
+  </body>
+</html>

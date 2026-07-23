@@ -1,50 +1,52 @@
 # Матрица HTTP-маршрутов
 
-Статус каждой строки `описан`; owner означает единственного владельца transport operation. Common proxy/error/cookie rules: `02-interfaces/http/identity.md`, `error-contracts.md`.
+Матрица проходит re-baseline 2026-07-23 после перехода на resourceful,
+server-rendered Rails. Старые BFF/e2e evidence недействительны; owner означает
+единственного владельца операции.
 
 | ID | Method/path | Source | Детальная карточка | Owner | Tests/evidence |
 |---|---|---|---|---|---|
-| HTTP-001 | POST `/api/bff/auth/identify` | auth/identify route | `http/operations/HTTP-001.md` | identity-access | anti-abuse, route handlers; полная карточка подтверждена |
-| HTTP-002 | POST `/api/bff/auth/login` | auth/login route | `http/operations/HTTP-002.md` | identity-access | auth use cases/e2e; полная карточка подтверждена |
-| HTTP-003 | POST `/api/bff/auth/register` | auth/register route | `http/operations/HTTP-003.md` | identity-access | auth use cases/e2e; полная карточка подтверждена, включая частичный успех письма |
-| HTTP-004 | GET `/api/bff/auth/me` | auth/me route | `http/operations/HTTP-004.md` | identity-access | payload/profile/routes; полная карточка подтверждена |
-| HTTP-005 | POST `/api/bff/auth/logout` | auth/logout route | `http/operations/HTTP-005.md` | identity-access | routes/proxy; полная карточка подтверждена |
-| HTTP-006 | POST `/api/bff/auth/change-password` | change-password route | `http/operations/HTTP-006.md` | identity-access | auth/session use cases; полная карточка подтверждена |
-| HTTP-007 | POST `/api/bff/auth/email/request-verification` | email request route | `http/operations/HTTP-007.md` | identity-access | anti-abuse/auth/e2e; полная карточка подтверждена |
-| HTTP-008 | POST `/api/bff/auth/email/confirm` | email confirm route | `http/operations/HTTP-008.md` | identity-access | auth/merge/e2e; полная карточка подтверждена |
-| HTTP-009 | POST `/api/bff/auth/email/change` | email change route | `http/operations/HTTP-009.md` | identity-access | auth/profile; полная карточка подтверждена, включая частичный успех |
-| HTTP-010 | POST `/api/bff/auth/passkey/register/options` | passkey route | `http/operations/HTTP-010.md` | identity-access | passkey/proxy; полная карточка подтверждена |
-| HTTP-011 | POST `/api/bff/auth/passkey/register/verify` | passkey route | `http/operations/HTTP-011.md` | identity-access | passkey; полная карточка подтверждена |
-| HTTP-012 | POST `/api/bff/auth/passkey/login/options` | passkey route | `http/operations/HTTP-012.md` | identity-access | passkey/rate; полная карточка подтверждена |
-| HTTP-013 | POST `/api/bff/auth/passkey/login/verify` | passkey route | `http/operations/HTTP-013.md` | identity-access | passkey/concurrency; полная карточка подтверждена |
-| HTTP-014 | GET `/api/bff/auth/passkey/credentials` | credentials route | `http/operations/HTTP-014.md` | identity-access | passkey; полная карточка подтверждена |
-| HTTP-015 | DELETE `/api/bff/auth/passkey/credentials/{id}` | dynamic route | `http/operations/HTTP-015.md` | identity-access | passkey deletion PG; полная карточка подтверждена |
-| HTTP-016 | POST `/api/bff/auth/telegram/webapp` | webapp route | `http/operations/HTTP-016.md` | identity-access | Telegram WebApp; полная карточка подтверждена |
-| HTTP-017 | GET `/api/bff/auth/telegram/merge-confirmation` | merge route | `http/operations/HTTP-017.md` | identity-access | merge route/service; исправлена точная схема ответа |
-| HTTP-018 | POST same | merge route | `http/operations/HTTP-018.md` | identity-access | merge PG; полная карточка подтверждена |
-| HTTP-019 | DELETE same | merge route | `http/operations/HTTP-019.md` | identity-access | merge route; полная карточка подтверждена |
-| HTTP-020 | POST `/api/bff/link/remnashop` | link route | `http/operations/HTTP-020.md` | identity-access | auth/merge; полная карточка подтверждена |
-| HTTP-021 | GET `/api/bff/plans/public` | plans route | `http/operations/HTTP-021.md` | subscription | полная карточка; route/e2e |
-| HTTP-022 | GET `/api/bff/subscription/current` | current route | `http/operations/HTTP-022.md` | subscription | полная карточка; URL-source/Remnawave |
-| HTTP-023 | GET `/api/bff/subscription/offers` | offers route | `http/operations/HTTP-023.md` | subscription | полная карточка; routes/frontend |
-| HTTP-024 | POST `/api/bff/subscription/purchase` | purchase route | `http/operations/HTTP-024.md` | payments | полная карточка; idempotency/rate/e2e |
-| HTTP-025 | POST `/api/bff/subscription/extend` | extend route | `http/operations/HTTP-025.md` | payments | полная карточка; idempotency/rate/e2e |
-| HTTP-026 | POST `/api/bff/subscription/reissue` | reissue route | `http/operations/HTTP-026.md` | subscription | полная карточка; mutation audit/routes |
-| HTTP-027 | POST `/api/bff/subscription/promocode` | promo route | `http/operations/HTTP-027.md` | subscription | полная карточка; routes/e2e |
-| HTTP-028 | GET `/api/bff/subscription/devices` | devices route | `http/operations/HTTP-028.md` | subscription | полная карточка; routes/e2e |
-| HTTP-029 | DELETE same | devices route | `http/operations/HTTP-029.md` | subscription | полная карточка; mutation/routes |
-| HTTP-030 | DELETE `/api/bff/subscription/devices/{hwid}` | dynamic route | `http/operations/HTTP-030.md` | subscription | полная карточка; routes/e2e |
-| HTTP-031 | GET `/api/bff/payments/history` | history route | `http/operations/HTTP-031.md` | payments | полная карточка; history/recovery |
-| HTTP-032 | GET `/api/bff/payments/status` | status route | `http/operations/HTTP-032.md` | payments | полная карточка; reconciliation/status |
-| HTTP-033 | GET `/api/bff/support` | support route | `http/operations/HTTP-033.md` | platform | полная карточка; routes/frontend |
-| HTTP-034 | GET `/api/health` | health route | `http/operations/HTTP-034.md` | platform | полная карточка; health |
-| HTTP-035 | GET `/api/health/liveness` | liveness route | `http/operations/HTTP-035.md` | platform | полная карточка; health/e2e |
-| HTTP-036 | GET `/api/health/readiness` | readiness route | `http/operations/HTTP-036.md` | platform | полная карточка; health/routes |
-| HTTP-037 | GET `/api/internal/health/readiness` | internal readiness | `http/operations/HTTP-037.md` | platform | полная карточка; health/compose |
-| HTTP-038 | POST `/api/internal/payments/reconcile` | reconcile route | `http/operations/HTTP-038.md` | payments | полная карточка; route/reconciliation |
-| HTTP-039 | GET `/api/me` | legacy me route | `http/operations/HTTP-039.md` | identity-access | полная карточка; e2e matrix |
-| HTTP-040 | POST `/api/logout` | legacy logout | `http/operations/HTTP-040.md` | platform | полная карточка; e2e matrix |
-| HTTP-041 | GET `/auth/telegram/start` | start route | `http/operations/HTTP-041.md` | identity-access | полная карточка; redirect/OIDC |
-| HTTP-042 | GET `/auth/telegram/callback` | callback route | `http/operations/HTTP-042.md` | identity-access | полная карточка; callback/OIDC |
-| HTTP-043 | POST `/auth/telegram/callback` | callback route | `http/operations/HTTP-043.md` | identity-access | полная карточка; popup + widget |
-| HTTP-044 | GET `/sw.js` | SW route | `http/operations/HTTP-044.md` | platform | полная карточка; SW/privacy tests |
+| HTTP-001 | POST `/account/identity` | auth/identify route | `http/operations/HTTP-001.md` | identity-access | ПРОВЕРЕНО В БЛОКЕ 3G; ТРЕБУЕТ ФИНАЛЬНОГО ЦИКЛА |
+| HTTP-002 | POST `/account/session` | auth/login route | `http/operations/HTTP-002.md` | identity-access | ПРОВЕРЕНО В БЛОКЕ 3G; ТРЕБУЕТ ФИНАЛЬНОГО ЦИКЛА |
+| HTTP-003 | POST `/account/registration` | auth/register route | `http/operations/HTTP-003.md` | identity-access | ПРОВЕРЕНО В БЛОКЕ 3G; ТРЕБУЕТ ФИНАЛЬНОГО ЦИКЛА |
+| HTTP-004 | GET `/account/session` | auth/me route | `http/operations/HTTP-004.md` | identity-access | ПРОВЕРЕНО В БЛОКЕ 3G; ТРЕБУЕТ ФИНАЛЬНОГО ЦИКЛА |
+| HTTP-005 | DELETE `/account/session` | session resource | `http/operations/HTTP-005.md` | identity-access | ПРОВЕРЕНО В БЛОКЕ 3G; ТРЕБУЕТ ФИНАЛЬНОГО ЦИКЛА |
+| HTTP-006 | PATCH `/account/password` | password resource | `http/operations/HTTP-006.md` | identity-access | ПРОВЕРЕНО В БЛОКЕ 3G; ТРЕБУЕТ ФИНАЛЬНОГО ЦИКЛА |
+| HTTP-007 | POST `/account/email_verification` | email request route | `http/operations/HTTP-007.md` | identity-access | ПРОВЕРЕНО В БЛОКЕ 3G; ТРЕБУЕТ ФИНАЛЬНОГО ЦИКЛА |
+| HTTP-008 | PATCH `/account/email_verification` | email verification resource | `http/operations/HTTP-008.md` | identity-access | ПРОВЕРЕНО В БЛОКЕ 3G; ТРЕБУЕТ ФИНАЛЬНОГО ЦИКЛА |
+| HTTP-009 | PATCH `/account/email` | email resource | `http/operations/HTTP-009.md` | identity-access | ПРОВЕРЕНО В БЛОКЕ 3G; ТРЕБУЕТ ФИНАЛЬНОГО ЦИКЛА |
+| HTTP-010 | POST `/account/passkey_registration` | passkey route | `http/operations/HTTP-010.md` | identity-access | ПРОВЕРЕНО В БЛОКЕ 3G; ТРЕБУЕТ ФИНАЛЬНОГО ЦИКЛА |
+| HTTP-011 | PATCH `/account/passkey_registration` | passkey registration resource | `http/operations/HTTP-011.md` | identity-access | ПРОВЕРЕНО В БЛОКЕ 3G; ТРЕБУЕТ ФИНАЛЬНОГО ЦИКЛА |
+| HTTP-012 | POST `/account/passkey_session` | passkey route | `http/operations/HTTP-012.md` | identity-access | ПРОВЕРЕНО В БЛОКЕ 3G; ТРЕБУЕТ ФИНАЛЬНОГО ЦИКЛА |
+| HTTP-013 | PATCH `/account/passkey_session` | passkey session resource | `http/operations/HTTP-013.md` | identity-access | ПРОВЕРЕНО В БЛОКЕ 3G; ТРЕБУЕТ ФИНАЛЬНОГО ЦИКЛА |
+| HTTP-014 | GET `/account/passkeys` | credentials route | `http/operations/HTTP-014.md` | identity-access | ПРОВЕРЕНО В БЛОКЕ 3G; ТРЕБУЕТ ФИНАЛЬНОГО ЦИКЛА |
+| HTTP-015 | DELETE `/account/passkeys/{id}` | dynamic route | `http/operations/HTTP-015.md` | identity-access | ПРОВЕРЕНО В БЛОКЕ 3G; ТРЕБУЕТ ФИНАЛЬНОГО ЦИКЛА |
+| HTTP-016 | POST `/account/telegram_session` | webapp route | `http/operations/HTTP-016.md` | identity-access | ПРОВЕРЕНО В БЛОКЕ 3G; ТРЕБУЕТ ФИНАЛЬНОГО ЦИКЛА |
+| HTTP-017 | GET `/account/merge_confirmation` | merge route | `http/operations/HTTP-017.md` | identity-access | ПРОВЕРЕНО В БЛОКЕ 3G; ТРЕБУЕТ ФИНАЛЬНОГО ЦИКЛА |
+| HTTP-018 | PATCH same | merge resource | `http/operations/HTTP-018.md` | identity-access | ПРОВЕРЕНО В БЛОКЕ 3G; ТРЕБУЕТ ФИНАЛЬНОГО ЦИКЛА |
+| HTTP-019 | DELETE same | merge route | `http/operations/HTTP-019.md` | identity-access | ПРОВЕРЕНО В БЛОКЕ 3G; ТРЕБУЕТ ФИНАЛЬНОГО ЦИКЛА |
+| HTTP-020 | POST `/account/remnashop_link` | link route | `http/operations/HTTP-020.md` | identity-access | ПРОВЕРЕНО В БЛОКЕ 3G; ТРЕБУЕТ ФИНАЛЬНОГО ЦИКЛА |
+| HTTP-021 | GET `/plans` | plans route | `http/operations/HTTP-021.md` | subscription | ПРОВЕРЕНО В БЛОКЕ 4G; ТРЕБУЕТ ФИНАЛЬНОГО ЦИКЛА |
+| HTTP-022 | GET `/subscription` | current route | `http/operations/HTTP-022.md` | subscription | ПРОВЕРЕНО В БЛОКЕ 4G; ТРЕБУЕТ ФИНАЛЬНОГО ЦИКЛА |
+| HTTP-023 | GET `/subscription/offers` | offers route | `http/operations/HTTP-023.md` | subscription | ПРОВЕРЕНО В БЛОКЕ 4G; ТРЕБУЕТ ФИНАЛЬНОГО ЦИКЛА |
+| HTTP-024 | POST `/purchases` | purchase route | `http/operations/HTTP-024.md` | payments | ТРЕБУЕТ ПОВТОРНОЙ ПРОВЕРКИ |
+| HTTP-025 | POST `/extensions` | extend route | `http/operations/HTTP-025.md` | payments | ТРЕБУЕТ ПОВТОРНОЙ ПРОВЕРКИ |
+| HTTP-026 | POST `/subscription/reissue` | reissue route | `http/operations/HTTP-026.md` | subscription | ПРОВЕРЕНО В БЛОКЕ 4G; ТРЕБУЕТ ФИНАЛЬНОГО ЦИКЛА |
+| HTTP-027 | POST `/subscription/promocode` | promo route | `http/operations/HTTP-027.md` | subscription | ПРОВЕРЕНО В БЛОКЕ 4G; ТРЕБУЕТ ФИНАЛЬНОГО ЦИКЛА |
+| HTTP-028 | GET `/subscription/devices` | devices route | `http/operations/HTTP-028.md` | subscription | ПРОВЕРЕНО В БЛОКЕ 4G; ТРЕБУЕТ ФИНАЛЬНОГО ЦИКЛА |
+| HTTP-029 | DELETE same | devices route | `http/operations/HTTP-029.md` | subscription | ПРОВЕРЕНО В БЛОКЕ 4G; ТРЕБУЕТ ФИНАЛЬНОГО ЦИКЛА |
+| HTTP-030 | DELETE `/subscription/devices/{id}` | dynamic route | `http/operations/HTTP-030.md` | subscription | ПРОВЕРЕНО В БЛОКЕ 4G; ТРЕБУЕТ ФИНАЛЬНОГО ЦИКЛА |
+| HTTP-031 | GET `/payments` | history route | `http/operations/HTTP-031.md` | payments | ТРЕБУЕТ ПОВТОРНОЙ ПРОВЕРКИ |
+| HTTP-032 | GET `/payments/{id}` | status route | `http/operations/HTTP-032.md` | payments | ТРЕБУЕТ ПОВТОРНОЙ ПРОВЕРКИ |
+| HTTP-033 | GET `/support` | support route | `http/operations/HTTP-033.md` | platform | ТРЕБУЕТ ПОВТОРНОЙ ПРОВЕРКИ |
+| HTTP-034 | GET `/health` | health route | `http/operations/HTTP-034.md` | platform | ТРЕБУЕТ ПОВТОРНОЙ ПРОВЕРКИ |
+| HTTP-035 | GET `/health/liveness` | liveness route | `http/operations/HTTP-035.md` | platform | ТРЕБУЕТ ПОВТОРНОЙ ПРОВЕРКИ |
+| HTTP-036 | GET `/health/readiness` | readiness route | `http/operations/HTTP-036.md` | platform | ТРЕБУЕТ ПОВТОРНОЙ ПРОВЕРКИ |
+| HTTP-037 | GET `/internal/health/readiness` | internal readiness | `http/operations/HTTP-037.md` | platform | ТРЕБУЕТ ПОВТОРНОЙ ПРОВЕРКИ |
+| HTTP-038 | POST `/internal/payment_reconciliations` | reconcile route | `http/operations/HTTP-038.md` | payments | ТРЕБУЕТ ПОВТОРНОЙ ПРОВЕРКИ |
+| HTTP-039 | — | superseded by HTTP-004; alias removed | ADR-003 | identity-access | СНЯТ ПРИ RE-BASELINE |
+| HTTP-040 | — | superseded by HTTP-005; alias removed | ADR-003 | identity-access | СНЯТ ПРИ RE-BASELINE |
+| HTTP-041 | GET `/account/telegram_authorization/new` | start route | `http/operations/HTTP-041.md` | identity-access | ПРОВЕРЕНО В БЛОКЕ 3G; ТРЕБУЕТ ФИНАЛЬНОГО ЦИКЛА |
+| HTTP-042 | GET `/account/telegram_authorization/callback` | callback route | `http/operations/HTTP-042.md` | identity-access | ПРОВЕРЕНО В БЛОКЕ 3G; ТРЕБУЕТ ФИНАЛЬНОГО ЦИКЛА |
+| HTTP-043 | POST `/account/telegram_authorization/callback` | callback route | `http/operations/HTTP-043.md` | identity-access | ПРОВЕРЕНО В БЛОКЕ 3G; ТРЕБУЕТ ФИНАЛЬНОГО ЦИКЛА |
+| HTTP-044 | GET `/service-worker.js` | SW route | `http/operations/HTTP-044.md` | platform | ТРЕБУЕТ ПОВТОРНОЙ ПРОВЕРКИ |

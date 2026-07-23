@@ -26,8 +26,11 @@
 
 ## Текущий транспорт
 
-`POST /api/bff/auth/telegram/merge-confirmation`; bodyless; доверенный origin; Content-Type не нужен.
+`PATCH /account/merge_confirmation`. Bodyless Rails resource mutation with CSRF, session, owner-bound token, lease and repeated external proof.
 
+ADR-003 заменяет исторический BFF/JSON transport этой операции.
+
+Коды ошибок в нижележащем историческом анализе теперь являются доменными классификациями: браузеру Rails рендерит form errors/flash либо выполняет безопасный redirect; BFF envelope не возвращается.
 ## Правила валидации
 
 Лимит 5/900 секунд по confirmation Telegram ID. Проверяются session/token, срок, status, локальный owner, текущая Telegram-auth owner, source profile, отсутствие pending e-mail, повторный admin dry-run, точное совпадение target и конфликтов. Payment-owner fence блокирует смену во время неоднозначных операций.
@@ -67,14 +70,7 @@ Session + owner-bound token + повторная Telegram HMAC-auth + admin API 
 
 ## Логический результат
 
-`200`:
-
-```json
-{"data":{"merged":true,"userId":"local-user-id"}}
-```
-
-Merge-cookie очищается (`Max-Age=0`, HttpOnly, Path `/`, config Secure/SameSite). Полей `success` и `redirectTo` нет.
-
+`303 See Other` to `/link-account` or `/cabinet` with flash; merge cookie is cleared after success.
 ## Побочные эффекты
 
 External merge, перенос/перепривязка платежей и подписки согласно Remnashop, локальное объединение/токены, confirmation state, cookie, audits.
@@ -93,4 +89,4 @@ Audit attempted/succeeded/failed содержит confirmation ID, error code, r
 
 ## Статус уверенности
 
-`подтверждено`
+`требует повторной проверки после ADR-003`

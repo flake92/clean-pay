@@ -1,0 +1,56 @@
+<header class="page-header">
+  <div><p class="eyebrow">Clean Pay</p><h1>Личный кабинет</h1>
+    <p>Подписка, устройства и последние платежи.</p></div>
+  <%= link_to "Тарифы", tariffs_path, class: "button button--outline" %>
+</header>
+<% if Current.web_user.remnashop_user_id.blank? %>
+  <%= render "shared/account_action_required",
+    title: "Привяжите внешний аккаунт",
+    message: "Это потребуется для управления подпиской и оплатой." %>
+<% end %>
+<section class="metric-grid">
+  <article class="metric card"><span>Подписка</span><strong><%= @subscription_error ? "Недоступна" : (@subscription ? "Активна" : "Нет") %></strong></article>
+  <article class="metric card"><span>Действует до</span><strong><%= @subscription && (@subscription["expire_at"] || @subscription["expires_at"]) || "—" %></strong></article>
+  <article class="metric card"><span>Устройства</span><strong><%= @subscription && @subscription["device_limit"] || "—" %></strong></article>
+  <article class="metric card"><span>Трафик</span><strong><%= @subscription && @subscription["traffic_limit"] || "—" %></strong></article>
+</section>
+<section class="two-column">
+  <article class="card">
+    <h2>Текущая подписка</h2>
+    <% if @subscription_error %>
+      <p class="state state--error">Не удалось обновить подписку. Попробуйте позже.</p>
+    <% elsif @subscription %>
+      <p><strong><%= @subscription["plan_name"] || "Подписка" %></strong></p>
+      <% if @subscription["url"].present? %>
+        <div data-controller="clipboard"
+          data-clipboard-text-value="<%= @subscription["url"] %>">
+          <p class="break-all"><%= @subscription["url"] %></p>
+          <button type="button" class="button button--outline"
+            data-action="clipboard#copy">Скопировать ссылку</button>
+          <%= link_to "Открыть подключение", @subscription["url"],
+            class: "button button--outline", rel: "noopener noreferrer",
+            referrerpolicy: "no-referrer" %>
+          <p data-clipboard-target="status" aria-live="polite"></p>
+        </div>
+      <% end %>
+      <%= link_to "Устройства", subscription_devices_path,
+        class: "button button--outline" %>
+      <%= link_to "Продлить", extend_path, class: "button" %>
+    <% else %>
+      <p class="state">Подписка не активна.</p>
+      <%= link_to "Выбрать тариф", tariffs_path, class: "button" %>
+    <% end %>
+  </article>
+  <article class="card"><h2>Профиль</h2>
+    <p class="break-all"><%= Current.web_user.email || "E-mail не привязан" %></p>
+    <%= link_to "Настройки профиля", profile_path, class: "button button--outline" %>
+  </article>
+</section>
+<section class="card"><h2>Последние платежи</h2>
+  <% if @payments.empty? %><p class="state">Платежей пока нет.</p>
+  <% else %><ul class="clean-list"><% @payments.each do |payment| %>
+    <li><span><%= payment.plan_name || payment.purchase_type %></span>
+      <strong><%= format_money(payment.final_amount, payment.currency) %></strong></li>
+  <% end %></ul><% end %>
+  <%= link_to "Вся история", payments_path, class: "text-link" %>
+</section>

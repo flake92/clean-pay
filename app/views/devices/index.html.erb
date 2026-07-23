@@ -1,0 +1,26 @@
+<main>
+  <h1>Устройства</h1>
+  <p>
+    Использовано <%= @devices["current_count"] %>
+    из <%= @devices["max_count"] %>
+  </p>
+  <% if @devices["devices"].empty? %>
+    <p>Подключённых устройств нет.</p>
+  <% else %>
+    <ul>
+      <% @devices["devices"].each do |device| %>
+        <li>
+          <span><%= device["device_model"].presence ||
+            device["platform"].presence || "Устройство" %></span>
+          <%= button_to "Удалить",
+            subscription_device_path(device.fetch("hwid")),
+            method: :delete,
+            aria: { label: "Удалить устройство" } %>
+        </li>
+      <% end %>
+    </ul>
+    <%= button_to "Удалить все устройства",
+      subscription_devices_path,
+      method: :delete %>
+  <% end %>
+</main>

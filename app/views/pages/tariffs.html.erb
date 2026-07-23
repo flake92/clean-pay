@@ -1,0 +1,18 @@
+<header class="page-header"><div><p class="eyebrow">Clean Pay</p><h1>Тарифы</h1>
+  <p>Выберите подходящие условия доступа.</p></div></header>
+<section class="plan-grid">
+  <% plans = @plans.is_a?(Hash) ? Array(@plans["plans"]) : Array(@plans) %>
+  <% if plans.empty? %>
+    <div class="card state"><%= @catalog_error ? "Каталог временно недоступен." : "Тарифы появятся позже." %></div>
+  <% else %>
+    <% plans.each do |plan| %><article class="card plan-card">
+      <p class="eyebrow"><%= plan["public_code"] %></p>
+      <h2><%= plan["name"] %></h2>
+      <p><%= plan["description"] %></p>
+      <p><strong>от <%= plan["monthly_from_rub"] %> ₽/мес.</strong></p>
+      <%= link_to "Выбрать",
+        Current.web_user ? purchase_page_path(plan_code: plan["public_code"]) : login_path,
+        class: "button" %>
+    </article><% end %>
+  <% end %>
+</section>

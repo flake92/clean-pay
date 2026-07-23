@@ -19,4 +19,8 @@ Thumbs.db
 
 # IDE пользователя не удаляется, но не коммитится
 .idea/
-.vscode/
+.vscode/*
+!.vscode/launch.json
+
+# Ignore key files for decrypting credentials and more.
+/config/*.key

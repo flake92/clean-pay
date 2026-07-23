@@ -20,7 +20,7 @@ Production endpoints фиксированы на официальном origin; 
 GET https://oauth.telegram.org/auth
   ?response_type=code
   &client_id={TELEGRAM_OIDC_CLIENT_ID}
-  &redirect_uri={APP_URL}/auth/telegram/callback
+  &redirect_uri={APP_URL}/account/telegram_authorization/callback
   &scope=openid%20profile
   &state={random}
   &nonce={random}
