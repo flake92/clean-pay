@@ -9,17 +9,20 @@
 ## Состояние работы
 
 - исходный срез: 2026-07-22;
-- текущий этап: re-baseline спецификации под server-rendered Rails;
+- текущий этап: Ruby on Rails монолит завершён и проверен единым cycle 3;
 - исходники исследованного приложения: намеренно удалены пользователем после фиксации спецификации;
-- готовность прежней спецификации: исторически подтверждена; новые Rails
-  route/form contracts требуют повторной проверки;
+- готовность: 581/581 строк реализации и MCU-001…033 подтверждены финальным
+  циклом; Rails route/form, внешние интерфейсы и визуальный контракт проверены;
 - интеграционные контейнеры, данные, volumes, assets и визуальные эталоны: сохранены;
-- материалы `99-llm/`: созданы после завершения и проверки этапов 1–9;
+- материалы `99-llm/`: сохранены как самодостаточная передача;
 - правила реализации: корневой `RUBY_RAILS_RULES.md`;
 - рабочий реестр реализации: корневой `TECHNICAL_IMPLEMENTATION_PLAN.md`;
 - очистка старого приложения: завершена; запись находится в `RUBY_MONOLITH_CLEANUP_PLAN.md`.
 
-Итоговая статистика: частично описанных, неописанных, конфликтных и требующих уточнения значимых элементов — 0. Физические результаты проверок находятся в `09-traceability/verification-report.md`.
+Итоговая статистика: частично описанных, неописанных, конфликтных и требующих уточнения значимых элементов — 0. Физические результаты Rails cycle 3 находятся
+в `09-traceability/verification-report.md`, а независимый от технологий
+пользовательский паритет с `main` — в
+`09-traceability/main-user-capability-parity.md`.
 
 ## Обнаруженные продуктовые области
 
@@ -44,6 +47,7 @@
 - [`09-traceability/interfaces-matrix.md`](09-traceability/interfaces-matrix.md) — первичная трассировка интерфейсов.
 - [`00-system/open-questions.md`](00-system/open-questions.md) — реестр закрытых вопросов и принятых решений.
 - [`09-traceability/verification-report.md`](09-traceability/verification-report.md) — автоматические, интеграционные, визуальные и clean-room проверки.
+- [`09-traceability/main-user-capability-parity.md`](09-traceability/main-user-capability-parity.md) — полный паритет пользовательских возможностей MCU-001…033 с `main`.
 - [`09-traceability/deletion-readiness-report.md`](09-traceability/deletion-readiness-report.md) — статистика и ограничение разрешения на удаление.
 - [`RUBY_MONOLITH_CLEANUP_PLAN.md`](RUBY_MONOLITH_CLEANUP_PLAN.md) — запись о завершённой очистке и сохранённых границах.
 - [`99-llm/master-implementation-prompt.md`](99-llm/master-implementation-prompt.md) — передача новой реализации без обращения к старому коду.

@@ -10,5 +10,6 @@ CI.run do
   step "Security: Brakeman code analysis", "bin/brakeman --quiet --no-pager --exit-on-warn --exit-on-error"
   step "Autoloading", "bin/rails zeitwerk:check"
   step "Database: Test prepare", "env RAILS_ENV=test bin/rails db:prepare"
+  step "Structure: routes/schema/plan", "bin/rails quality:structure"
   step "Tests: Rails", "bin/rails test"
 end

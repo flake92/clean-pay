@@ -5,7 +5,10 @@ class Account::TelegramAuthorizationsController < ApplicationController
 
   def new
     verify_turnstile!(params.permit(:turnstile_token, :"cf-turnstile-response"))
-    return_path = SafeReturnPath.parse(params[:redirect_to], default: cabinet_path)
+    return_path = Identity::SafeReturnPath.parse(
+      params[:redirect_to],
+      default: cabinet_path
+    )
     state, secrets = TelegramAuthState.issue!(
       web_user: Current.web_user,
       redirect_to: return_path.to_s

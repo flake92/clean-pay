@@ -5,39 +5,47 @@
     <p>Выберите опубликованный канал связи.</p>
   </div>
 </header>
-<main class="three-column">
-  <% unless @support.enabled %>
-    <div class="card state">
-      <h2>Каналы пока не опубликованы</h2>
-      <p>Каналы поддержки сейчас недоступны.</p>
-    </div>
-  <% else %>
-    <% if @support.email %>
-      <article class="card">
-        <h2>E-mail</h2>
-        <p class="break-all"><%= @support.email %></p>
-        <%= mail_to @support.email, "Написать по e-mail",
-          class: "button button--outline" %>
-      </article>
+<main class="stack">
+  <section class="card">
+    <h2>Контакты Clean Pay</h2>
+    <% unless @support.enabled %>
+      <div class="state">
+        <h3>Каналы пока не опубликованы</h3>
+        <p>Каналы поддержки сейчас недоступны.</p>
+      </div>
+    <% else %>
+      <div class="button-row">
+        <% if @support.email %>
+          <%= mail_to @support.email, "Написать на почту",
+            class: "button button--outline" %>
+        <% end %>
+        <% if @support.telegram_username %>
+          <%= link_to "Telegram",
+            "https://t.me/#{@support.telegram_username.delete_prefix("@")}",
+            class: "button button--outline",
+            target: "_blank", rel: "noopener noreferrer" %>
+        <% end %>
+        <% if @support.faq_url %>
+          <%= link_to "FAQ и инструкции", @support.faq_url,
+            class: "button button--outline",
+            target: "_blank", rel: "noopener noreferrer" %>
+        <% end %>
+      </div>
     <% end %>
-    <% if @support.telegram_username %>
-      <article class="card">
-        <h2>Telegram</h2>
-        <p><%= @support.telegram_username %></p>
-        <%= link_to "Открыть Telegram",
-          "https://t.me/#{@support.telegram_username.delete_prefix("@")}",
-          class: "button button--outline",
-          target: "_blank", rel: "noopener noreferrer" %>
-      </article>
-    <% end %>
-    <% if @support.faq_url %>
-      <article class="card">
-        <h2>Частые вопросы</h2>
-        <p>Инструкции по оплате, доступу и устройствам.</p>
-        <%= link_to "Открыть FAQ", @support.faq_url,
-          class: "button button--outline",
-          target: "_blank", rel: "noopener noreferrer" %>
-      </article>
-    <% end %>
-  <% end %>
+  </section>
+
+  <section class="card">
+    <h2>Как подключиться</h2>
+    <ol class="instruction-list">
+      <li>Войдите в web-кабинет и откройте раздел подписки.</li>
+      <li>Купите или продлите тариф, если активной подписки нет.</li>
+      <li>Нажмите кнопку подключения или скопируйте ссылку подписки.</li>
+      <li>Если устройство потеряло доступ, удалите его в кабинете или перевыпустите ссылку.</li>
+    </ol>
+  </section>
+
+  <section class="card">
+    <h2>Для кого этот сайт</h2>
+    <p>Web-кабинет Clean Pay предназначен для пользователей, которые хотят оплачивать и управлять подпиской без Telegram-бота.</p>
+  </section>
 </main>

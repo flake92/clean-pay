@@ -66,6 +66,9 @@ module Platform
       values["remnawave"] = -> {
         raise "unavailable" unless Integrations::RemnawaveClient.new.ready?
       } if config.readiness.remnawave_url
+      values["mailpit"] = -> {
+        raise "unavailable" unless Integrations::MailpitClient.new.ready?
+      } if config.readiness.mailpit_url
       values
     end
 

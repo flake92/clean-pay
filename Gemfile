@@ -63,6 +63,9 @@ group :test do
   # Minitest 6 extracted its Rails-used mock/stub API into this official gem.
   gem "minitest-mock", "~> 5.27"
 
+  # Pure-Ruby pixel inspection for reproducible visual regression reports.
+  gem "chunky_png", "~> 1.4"
+
   # Use system testing [https://guides.rubyonrails.org/testing.html#system-testing]
   gem "capybara"
   gem "selenium-webdriver"

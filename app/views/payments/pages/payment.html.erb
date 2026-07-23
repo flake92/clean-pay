@@ -1,0 +1,32 @@
+<header class="page-header"><div><p class="eyebrow">Покупка</p><h1>Подтверждение оплаты</h1>
+  <p>Цена будет повторно проверена сервером перед созданием платежа.</p></div></header>
+<% if @selected_offer %>
+  <% plan = @selected_offer.fetch(:plan) %>
+  <% duration = @selected_offer.fetch(:duration) %>
+  <% price = @selected_offer.fetch(:price) %>
+  <section class="plan-grid">
+    <article class="card plan-card">
+      <h2><%= plan["name"] %></h2>
+      <p><%= format_duration(duration["days"]) %> · <%= price["gateway_type"] %></p>
+      <p><strong><%= price["final_amount"] %> <%= price["currency"] %></strong></p>
+      <%= form_with scope: :purchase, url: purchases_path,
+        data: { controller: "payment", action: "submit->payment#submit" } do |form| %>
+        <%= form.hidden_field :plan_code, value: plan["public_code"] %>
+        <%= form.hidden_field :duration_days, value: duration["days"] %>
+        <%= form.hidden_field :gateway_type, value: price["gateway_type"] %>
+        <%= form.hidden_field :confirmed_amount, value: price["final_amount"] %>
+        <%= form.hidden_field :confirmed_currency, value: price["currency"] %>
+        <%= form.hidden_field :offer_version, value: @offer_version %>
+        <%= form.hidden_field :submission_token, value: @submission_token %>
+        <%= form.submit "Перейти к оплате", class: "button",
+          data: { payment_target: "submit" } %>
+      <% end %>
+      <%= link_to "Изменить выбор", tariffs_path, class: "button button--outline" %>
+    </article>
+  </section>
+<% else %>
+  <section class="card">
+    <p class="state" role="status">Выбранный тариф отсутствует или больше недоступен.</p>
+    <%= link_to "Выбрать тариф", tariffs_path, class: "button" %>
+  </section>
+<% end %>

@@ -1,4 +1,5 @@
-class IdempotencyKey
+module Payments
+  class IdempotencyKey
   include ActiveModel::Validations
 
   UUID_PATTERN =
@@ -19,5 +20,6 @@ class IdempotencyKey
 
   def digest(secret:)
     OpenSSL::HMAC.hexdigest("SHA256", secret, value)
+    end
   end
 end

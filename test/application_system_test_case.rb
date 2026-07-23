@@ -32,12 +32,13 @@ class ApplicationSystemTestCase < ActionDispatch::SystemTestCase
 
   def sign_in_browser(
     web_user: create_web_user,
+    auth_method: :email,
     assurance_level: :full,
     upstream: false
   )
     tokens = Identity::SessionAuthenticator.new.issue!(
       web_user:,
-      auth_method: :email,
+      auth_method:,
       assurance_level:
     )
     if upstream
@@ -48,8 +49,8 @@ class ApplicationSystemTestCase < ActionDispatch::SystemTestCase
         remnashop_refresh_token_expires_at: 30.days.from_now
       )
     end
-    page.driver.browser.set_cookie("clean_pay_access=#{tokens.access_token}")
-    page.driver.browser.set_cookie("clean_pay_refresh=#{tokens.refresh_token}")
+    write_browser_cookie("clean_pay_access", tokens.access_token)
+    write_browser_cookie("clean_pay_refresh", tokens.refresh_token)
     tokens
   end
 
@@ -71,5 +72,15 @@ class ApplicationSystemTestCase < ActionDispatch::SystemTestCase
     assert_text heading
     assert_selector "html[lang='ru']"
     assert_no_selector "script[src*='localhost']"
+  end
+
+  def write_browser_cookie(name, value)
+    browser = page.driver.browser
+    if browser.respond_to?(:set_cookie)
+      browser.set_cookie("#{name}=#{value}")
+    else
+      visit root_path unless page.current_url.start_with?("http")
+      browser.manage.add_cookie(name:, value:, path: "/")
+    end
   end
 end
