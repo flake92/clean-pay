@@ -4,7 +4,11 @@ class Account::IdentitiesController < ApplicationController
     normalized = Identity::EmailAddress.parse(email).to_s
     user = WebUser.find_by(email: normalized)
     redirect_to(
-      user ? login_path(email: normalized) : register_path(email: normalized),
+      login_path(
+        email: normalized,
+        mode: user ? "password" : "register",
+        passkey: user&.web_authn_credentials&.exists? ? "1" : nil
+      ),
       status: :see_other
     )
   rescue ActiveModel::ValidationError

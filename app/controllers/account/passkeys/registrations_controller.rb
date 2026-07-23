@@ -33,6 +33,7 @@ class Account::Passkeys::RegistrationsController < ApplicationController
       assurance_level: :full,
       auth_method: :passkey
     )
+    Current.web_user.update!(auth_pending: false)
     access_token = session_authenticator.reissue_access!(Current.web_session)
     write_access_cookie(access_token, Current.web_session)
   end

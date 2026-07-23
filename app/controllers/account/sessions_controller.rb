@@ -36,6 +36,7 @@ class Account::SessionsController < ApplicationController
       Current.web_session.bootstrap? && Current.web_user.identity_verified?
 
     Current.web_session.update!(assurance_level: :full, auth_method: :email)
+    Current.web_user.update!(auth_pending: false)
     access_token = session_authenticator.reissue_access!(Current.web_session)
     write_access_cookie(access_token, Current.web_session)
     redirect_to cabinet_path, status: :see_other

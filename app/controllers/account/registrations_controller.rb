@@ -12,6 +12,10 @@ class Account::RegistrationsController < ApplicationController
     result = Identity::EmailAuthentication.new.register!(
       body.except(:turnstile_token, :"cf-turnstile-response").to_h
     )
+    Identity::EmailVerification.new.request!(
+      web_session: result.tokens.web_session,
+      email: result.web_user.email
+    )
     write_session_cookies(result.tokens)
     redirect_to register_verify_email_path, status: :see_other
   end
