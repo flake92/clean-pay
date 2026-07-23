@@ -8,7 +8,8 @@
 - [`software-spec/99-llm/master-implementation-prompt.md`](software-spec/99-llm/master-implementation-prompt.md) — порядок передачи новой реализации;
 - [`software-spec/05-frontend/`](software-spec/05-frontend/) — текущий визуальный контракт, 19 экранов и эталоны;
 - [`software-spec/04-integrations/`](software-spec/04-integrations/) — точные внешние интерфейсы;
-- [`NEW_APPLICATION.md`](NEW_APPLICATION.md) — границы первого этапа Ruby-проекта.
+- [`RUBY_RAILS_RULES.md`](RUBY_RAILS_RULES.md) — обязательные правила реализации в стиле современного Ruby on Rails;
+- [`TECHNICAL_IMPLEMENTATION_PLAN.md`](TECHNICAL_IMPLEMENTATION_PLAN.md) — полный file/feature backlog и статусы реализации, соответствия и работоспособности.
 
 ## Инфраструктура prestage
 
@@ -33,4 +34,6 @@ make infra-up
 
 ## Текущее состояние
 
-Все контейнеры старого проекта погашены. Тома с данными и инфраструктурным состоянием сохранены; старый `node_modules` cache удалён. Новый код приложения, Ruby/Rails-зависимости и CI пока намеренно не созданы: их структура должна следовать спецификации, а не старому стеку.
+Все контейнеры старого приложения погашены. Его исходники и application-level Node/Next/Prisma tooling намеренно удалены пользователем. Тома с данными, системная спецификация, визуальные эталоны, assets и интеграционная test/spec-инфраструктура сохранены.
+
+Новый код приложения, Ruby/Rails-зависимости и CI пока не созданы. Реализация начинается с этапа 1 в `TECHNICAL_IMPLEMENTATION_PLAN.md`; общий статус остаётся `НЕ ГОТОВО`, пока все строки плана не пройдут один полный verification cycle.
