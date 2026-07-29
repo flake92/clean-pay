@@ -283,12 +283,12 @@ export function ProfilePanel({
       </Card>
 
       {isTelegramOnly ? (
-        <Card title="Привязать e-mail">
+        <Card title="Добавить e-mail и пароль">
           <div className="flex flex-column gap-3">
             <p className="m-0 line-height-3 text-600">
-              Вы вошли через Telegram. Чтобы оплачивать и управлять подпиской, привяжите e-mail к аккаунту.
+              Вы вошли через Telegram. Добавьте e-mail, придумайте пароль и подтвердите адрес, чтобы не потерять доступ без Telegram и продолжить оплату.
             </p>
-            <LinkButton className="w-fit" href="/link-account" label="Привязать e-mail" />
+            <LinkButton className="w-fit" href="/link-account" label="Добавить e-mail и пароль" />
           </div>
         </Card>
       ) : null}

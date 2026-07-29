@@ -503,6 +503,11 @@ describe("BFF route integration contracts", () => {
 
     expect(purchaseResponse.status).toBe(200);
     expect(extendResponse.status).toBe(200);
+    expect(mocks.assertEmailVerificationPolicy).toHaveBeenCalledTimes(2);
+    expect(mocks.assertEmailVerificationPolicy).toHaveBeenCalledWith(
+      session.user,
+      { requireVerifiedEmail: true },
+    );
     expect(mocks.assertRateLimit).toHaveBeenCalledWith(expect.objectContaining({ action: "subscription_purchase" }));
     expect(mocks.assertRateLimit).toHaveBeenCalledWith(expect.objectContaining({ action: "subscription_extend" }));
     expect(mocks.completePaymentOperationSuccess).toHaveBeenCalledWith(expect.objectContaining({
@@ -531,6 +536,59 @@ describe("BFF route integration contracts", () => {
       },
     }));
   });
+
+  it.each([
+    [
+      "purchase",
+      () =>
+        purchaseRoute.POST(
+          jsonRequest(
+            "/api/bff/subscription/purchase",
+            purchaseRequestBody(),
+            {
+              "idempotency-key":
+                "12121212-1212-4212-8212-121212121212",
+            },
+          ),
+        ),
+    ],
+    [
+      "extend",
+      () =>
+        extendRoute.POST(
+          jsonRequest(
+            "/api/bff/subscription/extend",
+            extendRequestBody(),
+            {
+              "idempotency-key":
+                "34343434-3434-4434-8434-343434343434",
+            },
+          ),
+        ),
+    ],
+  ] as const)(
+    "rejects %s before any payment side effect when verified e-mail is required",
+    async (_operation, invoke) => {
+      mocks.assertEmailVerificationPolicy.mockImplementationOnce(() => {
+        throw new BffError(
+          "EMAIL_NOT_VERIFIED",
+          403,
+          "E-mail must be verified",
+        );
+      });
+
+      const response = await invoke();
+
+      expect(response.status).toBe(403);
+      await expect(body(response)).resolves.toMatchObject({
+        error: { code: "EMAIL_NOT_VERIFIED" },
+      });
+      expect(mocks.beginPaymentOperation).not.toHaveBeenCalled();
+      expect(mocks.assertRateLimit).not.toHaveBeenCalled();
+      expect(mocks.getAuthorizedRemnashopTokens).not.toHaveBeenCalled();
+      expect(mocks.remnashopRequest).not.toHaveBeenCalled();
+    },
+  );
 
   it("returns provider payment URLs when legacy Remnashop omits return_url", async () => {
     const legacyPayment = { ...payment, return_url: undefined };

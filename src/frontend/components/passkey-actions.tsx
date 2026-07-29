@@ -11,6 +11,7 @@ import { Button } from "primereact/button";
 import { InputText } from "primereact/inputtext";
 import { Message } from "primereact/message";
 
+import { navigateTo } from "@/frontend/lib/browser-navigation";
 import { readBffError } from "@/frontend/lib/client-api";
 
 async function readError(response: Response, fallback: string) {
@@ -138,14 +139,18 @@ export function PasskeyLoginButton({ redirectTo = "/cabinet" }: { redirectTo?: s
   );
 }
 
-export function PasskeySetupPanel() {
+export function PasskeySetupPanel({
+  redirectTo = "/cabinet",
+}: {
+  redirectTo?: string;
+}) {
   const supported = useWebAuthnSupport();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [name, setName] = useState("");
 
-  function continueToCabinet() {
-    window.location.assign("/cabinet");
+  function continueWithoutPasskey() {
+    navigateTo(redirectTo);
   }
 
   async function createPasskey() {
@@ -178,7 +183,7 @@ export function PasskeySetupPanel() {
         return;
       }
 
-      window.location.assign("/cabinet");
+      navigateTo(redirectTo);
     } catch (error) {
       setError(
         isUserCancelled(error)
@@ -201,7 +206,11 @@ export function PasskeySetupPanel() {
           severity="info"
           text="Это устройство не поддерживает быстрый вход. Вы можете пользоваться кабинетом через e-mail, пароль или Telegram."
         />
-        <Button label="Продолжить в кабинет" onClick={continueToCabinet} type="button" />
+        <Button
+          label="Продолжить без быстрого входа"
+          onClick={continueWithoutPasskey}
+          type="button"
+        />
       </div>
     );
   }
@@ -240,7 +249,7 @@ export function PasskeySetupPanel() {
         <Button
           disabled={loading}
           label="Продолжить без него"
-          onClick={continueToCabinet}
+          onClick={continueWithoutPasskey}
           outlined
           severity="secondary"
           type="button"

@@ -284,6 +284,183 @@ describe("auth use cases", () => {
     expect(mocks.refreshCurrentAccessCookie).toHaveBeenCalledTimes(2);
   });
 
+  it.each([
+    {
+      action: "request verification",
+      run: () => requestEmailVerification(
+        { email: "first@example.com" },
+        {},
+      ),
+    },
+    {
+      action: "confirm verification",
+      run: () => confirmEmailVerification(
+        { email: "first@example.com", code: "123456" },
+        {},
+      ),
+    },
+    {
+      action: "change email",
+      run: () => changeEmail(
+        { email: "first@example.com" },
+        {},
+      ),
+    },
+  ])("requires password-backed setup before a Telegram-only user can $action", async ({ run }) => {
+    const telegramOnlySession = {
+      ...session,
+      authMethod: "TELEGRAM",
+      user: {
+        ...user,
+        email: "first@example.com",
+        emailVerified: false,
+        telegramId: "123456",
+        remnashopUserId: null,
+      },
+    };
+    mocks.getAuthorizedRemnashopTokens.mockResolvedValueOnce({
+      accessToken: "merged-access-token",
+      refreshToken: "merged-refresh-token",
+      session: telegramOnlySession,
+    });
+
+    await expect(run()).rejects.toMatchObject({
+      code: "EMAIL_REQUIRED",
+      status: 401,
+    });
+
+    expect(mocks.remnashopRequest).not.toHaveBeenCalled();
+    expect(mocks.getRemnashopMe).not.toHaveBeenCalled();
+    expect(mocks.assertCooldown).not.toHaveBeenCalled();
+    expect(mocks.assertRateLimit).not.toHaveBeenCalled();
+  });
+
+  it("allows verification resend after a password-backed e-mail account was staged", async () => {
+    const telegramOnlySession = {
+      ...session,
+      authMethod: "TELEGRAM",
+      user: {
+        ...user,
+        email: null,
+        emailVerified: false,
+        telegramId: "123456",
+        remnashopUserId: null,
+        pendingRemnashopUserId: "18367",
+        pendingRemnashopEmail: "first@example.com",
+      },
+    };
+    mocks.getAuthorizedRemnashopTokens.mockResolvedValueOnce({
+      accessToken: "access-token",
+      refreshToken: "refresh-token",
+      session: telegramOnlySession,
+    });
+
+    await expect(
+      requestEmailVerification({ email: "first@example.com" }, {}),
+    ).resolves.toMatchObject({ target_email: "user@example.com" });
+
+    expect(mocks.remnashopRequest).toHaveBeenCalledWith(
+      "/auth/email/request-verification",
+      expect.objectContaining({
+        accessToken: "access-token",
+        body: { email: "first@example.com" },
+      }),
+    );
+  });
+
+  it.each([
+    {
+      action: "request verification",
+      run: () =>
+        requestEmailVerification({ email: "first@example.com" }, {}),
+    },
+    {
+      action: "confirm verification",
+      run: () =>
+        confirmEmailVerification(
+          { email: "first@example.com", code: "123456" },
+          {},
+        ),
+    },
+  ])("requires the e-mail password again when a Telegram re-login changes the upstream owner before $action", async ({ run }) => {
+    const reloggedTelegramSession = {
+      ...session,
+      authMethod: "TELEGRAM",
+      user: {
+        ...user,
+        email: "first@example.com",
+        emailVerified: false,
+        telegramId: "123456",
+        remnashopUserId: "1",
+        pendingRemnashopUserId: "18367",
+        pendingRemnashopEmail: "first@example.com",
+      },
+    };
+    mocks.getAuthorizedRemnashopTokens.mockResolvedValueOnce({
+      accessToken: "merged-access-token",
+      refreshToken: "merged-refresh-token",
+      session: reloggedTelegramSession,
+    });
+
+    await expect(run()).rejects.toMatchObject({
+      code: "EMAIL_REQUIRED",
+      status: 401,
+    });
+
+    expect(mocks.remnashopRequest).not.toHaveBeenCalled();
+    expect(mocks.assertRateLimit).not.toHaveBeenCalled();
+  });
+
+  it("allows confirmation for an explicitly staged password account without an established Telegram owner", async () => {
+    const stagedSession = {
+      ...session,
+      authMethod: "TELEGRAM",
+      user: {
+        ...user,
+        email: null,
+        emailVerified: false,
+        telegramId: "123456",
+        remnashopUserId: null,
+        pendingRemnashopUserId: "18367",
+        pendingRemnashopEmail: "existing@example.com",
+      },
+    };
+    mocks.getAuthorizedRemnashopTokens.mockResolvedValueOnce({
+      accessToken: "access-token",
+      refreshToken: "refresh-token",
+      session: stagedSession,
+    });
+    mocks.getRemnashopMe.mockResolvedValueOnce({
+      ...profile,
+      email: "existing@example.com",
+      pending_email: "existing@example.com",
+    });
+    mocks.remnashopRequest.mockResolvedValueOnce({
+      success: true,
+      email: "existing@example.com",
+    });
+    mocks.prisma.webUser.findUnique.mockResolvedValueOnce({
+      id: "existing-owner",
+    });
+
+    await expect(
+      confirmEmailVerification(
+        { email: "existing@example.com", code: "123456" },
+        {},
+      ),
+    ).resolves.toMatchObject({
+      success: true,
+      email: "existing@example.com",
+    });
+
+    expect(mocks.remnashopRequest).toHaveBeenCalledWith(
+      "/auth/email/confirm",
+      expect.objectContaining({
+        accessToken: "access-token",
+      }),
+    );
+  });
+
   it("does not let the legacy registrationFlow flag bypass Turnstile", async () => {
     mocks.verifyTurnstileToken.mockRejectedValueOnce(
       new BffError("FORBIDDEN", 403, "Turnstile token is required"),
@@ -304,7 +481,13 @@ describe("auth use cases", () => {
       refreshToken: "refresh-token",
       session: {
         ...session,
-        user: { ...user, telegramId: "123456", telegramUsername: "clean_user" },
+        user: {
+          ...user,
+          telegramId: "123456",
+          telegramUsername: "clean_user",
+          pendingRemnashopUserId: "18367",
+          pendingRemnashopEmail: "verified@example.com",
+        },
       },
     });
     mocks.remnashopRequest.mockResolvedValueOnce({ email: "verified@example.com" });
@@ -352,6 +535,8 @@ describe("auth use cases", () => {
           remnashopUserId: "1",
           telegramId: "123456",
           telegramUsername: "clean_user",
+          pendingRemnashopUserId: "18367",
+          pendingRemnashopEmail: "verified@example.com",
         },
       },
     });
@@ -441,7 +626,13 @@ describe("auth use cases", () => {
       refreshToken: "refresh-token",
       session: {
         ...session,
-        user: { ...user, telegramId: "123456", telegramUsername: "clean_user" },
+        user: {
+          ...user,
+          telegramId: "123456",
+          telegramUsername: "clean_user",
+          pendingRemnashopUserId: "18367",
+          pendingRemnashopEmail: "verified@example.com",
+        },
       },
     });
     mocks.getRemnashopMe.mockResolvedValueOnce({
@@ -498,6 +689,44 @@ describe("auth use cases", () => {
       data: { emailVerified: false },
     });
     expect(mocks.auditLog).toHaveBeenCalledWith(expect.objectContaining({ action: "email_change_requested" }));
+  });
+
+  it("stages the authorized owner when a Telegram-linked user changes e-mail", async () => {
+    mocks.getAuthorizedRemnashopTokens.mockResolvedValueOnce({
+      accessToken: "access-token",
+      refreshToken: "refresh-token",
+      session: {
+        ...session,
+        authMethod: "TELEGRAM",
+        user: {
+          ...user,
+          emailVerified: true,
+          telegramId: "123456",
+        },
+      },
+    });
+    mocks.remnashopRequest
+      .mockResolvedValueOnce({ pending_email: "next@example.com" })
+      .mockResolvedValueOnce({
+        target_email: "next@example.com",
+        expires_at: "2026-06-25T10:15:00.000Z",
+      });
+
+    await expect(
+      changeEmail({ email: "next@example.com" }, {}),
+    ).resolves.toMatchObject({
+      pending_email: "next@example.com",
+    });
+
+    expect(mocks.prisma.webUser.update).toHaveBeenCalledWith({
+      where: { id: "user-1" },
+      data: {
+        emailVerified: false,
+        authPending: false,
+        pendingRemnashopUserId: "18367",
+        pendingRemnashopEmail: "next@example.com",
+      },
+    });
   });
 
   it("replaces the local session and rotates both token families after password change", async () => {
@@ -619,6 +848,42 @@ describe("auth use cases", () => {
     expect(mocks.refreshCurrentAccessCookie).toHaveBeenCalledOnce();
   });
 
+  it("does not clear a pending Telegram merge from an email-owner profile", async () => {
+    const pendingTelegramSession = {
+      ...session,
+      authMethod: "TELEGRAM",
+      user: {
+        ...user,
+        emailVerified: true,
+        telegramId: "123456",
+        authPending: true,
+        pendingRemnashopUserId: "18367",
+        pendingRemnashopEmail: "user@example.com",
+      },
+    };
+    mocks.getCurrentSession.mockResolvedValueOnce(pendingTelegramSession);
+    mocks.getAuthorizedRemnashopTokens.mockResolvedValueOnce({
+      accessToken: "access-token",
+      refreshToken: "refresh-token",
+      session: pendingTelegramSession,
+    });
+    mocks.getRemnashopMe.mockResolvedValueOnce({
+      ...profile,
+      email: "user@example.com",
+      is_email_verified: true,
+    });
+
+    await expect(getCurrentAuthProfile()).resolves.toMatchObject({
+      user: {
+        email: "user@example.com",
+        emailVerified: true,
+        accountSyncPending: true,
+      },
+    });
+    expect(mocks.prisma.webUser.update).not.toHaveBeenCalled();
+    expect(mocks.refreshCurrentAccessCookie).not.toHaveBeenCalled();
+  });
+
   it("presents the session identity committed by Telegram recovery", async () => {
     const initialSession = {
       ...session,
@@ -693,6 +958,16 @@ describe("auth use cases", () => {
         remnashopRefreshTokenEncrypted: "protected:refresh-token",
       }),
     }));
+    expect(mocks.prisma.webUser.update).toHaveBeenCalledWith({
+      where: { id: "user-1" },
+      data: {
+        pendingRemnashopUserId: "18367",
+        pendingRemnashopEmail: "user@example.com",
+        email: "user@example.com",
+        emailVerified: false,
+        authPending: false,
+      },
+    });
   });
 
   it("stops before owner-changing side effects when the same session changes identity", async () => {
@@ -933,11 +1208,21 @@ describe("auth use cases", () => {
   it("does not merge an existing local email owner before code confirmation", async () => {
     const stableSession = {
       ...session,
-      user: { ...user, email: null, telegramId: "123456", telegramUsername: "clean_user" },
+      user: {
+        ...user,
+        email: null,
+        telegramId: "123456",
+        telegramUsername: "clean_user",
+        remnashopUserId: null,
+      },
     };
     mocks.getCurrentSession
       .mockResolvedValueOnce(stableSession)
       .mockResolvedValueOnce(stableSession);
+    mocks.prisma.webUser.findUnique.mockResolvedValueOnce({
+      id: "existing-owner",
+      email: "user@example.com",
+    });
     mocks.linkCurrentUserToRemnashopAuth.mockResolvedValueOnce({
       user: { ...user, emailVerified: true, telegramId: "123456" },
       profile: { ...profile, is_email_verified: true, telegram_id: 123456 },
@@ -954,6 +1239,18 @@ describe("auth use cases", () => {
       method: "POST",
       accessToken: "access-token",
       body: { email: "user@example.com" },
+    });
+    const stagedUpdate = mocks.prisma.webUser.update.mock.calls.find(
+      ([input]) =>
+        input.where.id === "user-1" &&
+        input.data.pendingRemnashopUserId === "18367",
+    )?.[0];
+    expect(stagedUpdate).toEqual({
+      where: { id: "user-1" },
+      data: {
+        pendingRemnashopUserId: "18367",
+        pendingRemnashopEmail: "user@example.com",
+      },
     });
   });
 });

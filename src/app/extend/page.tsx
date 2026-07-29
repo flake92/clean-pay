@@ -1,5 +1,6 @@
 "use client";
 
+import { Suspense } from "react";
 import { Card } from "primereact/card";
 
 import { ExtendConfirmation } from "@/frontend/components/extend-confirmation";
@@ -14,7 +15,9 @@ export default function ExtendPage() {
           title="Продление подписки"
         />
         <Card>
-          <ExtendConfirmation />
+          <Suspense fallback={<p className="text-600">Загрузка...</p>}>
+            <ExtendConfirmation />
+          </Suspense>
         </Card>
       </div>
     </AppShell>

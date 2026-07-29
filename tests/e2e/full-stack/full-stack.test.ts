@@ -221,19 +221,30 @@ async function requestCase(
   testCase: { method: string; path: string; body?: unknown },
   jar?: CookieJar,
 ) {
-  const response = await http(testCase.path, {
+  const send = () => http(testCase.path, {
     method: testCase.method,
     body: testCase.body === undefined ? undefined : JSON.stringify(testCase.body),
   }, jar);
+  const response = await send();
+  const responseBody = response.status >= 500
+    ? await response.clone().text().catch(() => "")
+    : "";
+  const transientNextDevManifestError =
+    response.status === 500 &&
+    response.headers.get("content-type")?.includes("text/html") &&
+    responseBody.includes("Manifest file is empty");
 
   if (
-    response.status >= 500
-    && testCase.method === "GET"
-    && testCase.path.startsWith("/auth/telegram/callback?code=bad-code")
+    transientNextDevManifestError ||
+    (
+      response.status >= 500 &&
+      testCase.method === "GET" &&
+      testCase.path.startsWith("/auth/telegram/callback?code=bad-code")
+    )
   ) {
     await new Promise((resolve) => setTimeout(resolve, 250));
 
-    return http(testCase.path, { method: testCase.method }, jar);
+    return send();
   }
 
   return response;
@@ -641,8 +652,8 @@ describe("real devcontainer full-stack e2e", () => {
     expect(invalidRegisterVerify.status, JSON.stringify(await debugResponse(invalidRegisterVerify))).toBe(400);
   });
 
-  it("rejects email verification before a Telegram session is linked to Remnashop", async () => {
-    // Проверяем: запрос подтверждения email идет через Remnashop и реально доставляет письмо в Mailpit.
+  it("requires e-mail and password setup before Telegram verification", async () => {
+    // Telegram identity must first prove or create a password-backed account.
     const jar = await loginWithTelegramOidc();
     const response = await postJson(
       "/api/bff/auth/email/request-verification",
@@ -757,7 +768,8 @@ describe("real devcontainer full-stack e2e", () => {
     // Проверяем: offers показывают доступные тарифы/gateways для покупки или контролируемую доменную ошибку.
     const offersResponse = await http("/api/bff/subscription/offers", {}, jar);
 
-    await expectBffError(offersResponse, 401, "EMAIL_REQUIRED");
+    const providerOffers = await expectBffData<SubscriptionOffers>(offersResponse);
+    expect(providerOffers.plans).toEqual(expect.any(Array));
 
     const offers: SubscriptionOffers = {
       plans: [{
@@ -770,36 +782,36 @@ describe("real devcontainer full-stack e2e", () => {
     // Проверяем: current subscription endpoint не падает, даже если подписки еще нет.
     const current = await http("/api/bff/subscription/current", {}, jar);
 
-    await expectBffError(current, 401, "EMAIL_REQUIRED");
+    await expectBffData(current);
 
     // Проверяем: devices endpoint отражает состояние подписки или возвращает доменное ограничение без 5xx.
     const devices = await http("/api/bff/subscription/devices", {}, jar);
 
-    await expectBffError(devices, 401, "EMAIL_REQUIRED");
+    await expectBffError(devices, 404, "NOT_FOUND");
 
     // Проверяем: удаление всех устройств безопасно обрабатывает пустую/отсутствующую подписку.
     const deleteDevices = await http("/api/bff/subscription/devices", { method: "DELETE" }, jar);
 
-    await expectBffError(deleteDevices, 401, "EMAIL_REQUIRED");
+    await expectBffError(deleteDevices, 409, "DEVICE_DELETE_UNAVAILABLE");
 
     // Проверяем: удаление конкретного устройства с неизвестным hwid не должно давать внутреннюю ошибку.
     const deleteDevice = await http("/api/bff/subscription/devices/integration-missing-device", { method: "DELETE" }, jar);
 
-    await expectBffError(deleteDevice, 401, "EMAIL_REQUIRED");
+    await expectBffError(deleteDevice, 409, "DEVICE_DELETE_UNAVAILABLE");
 
     // Проверяем: неверный промокод возвращает контролируемую доменную ошибку.
     const promocode = await postJson("/api/bff/subscription/promocode", { code: "CLEAN_PAY_E2E_MISSING" }, jar);
 
-    await expectBffError(promocode, 401, "EMAIL_REQUIRED");
+    await expectBffError(promocode, 409, "EMAIL_NOT_VERIFIED");
 
     // Проверяем: reissue доступен только при валидном бизнес-состоянии подписки, но не падает 5xx.
     const reissue = await http("/api/bff/subscription/reissue", { method: "POST" }, jar);
 
-    await expectBffError(reissue, 401, "EMAIL_REQUIRED");
+    await expectBffError(reissue, 409, "CONFLICT");
 
     // Проверяем: payment status/history работают даже до создания платежей.
-    await expectBffError(await http("/api/bff/payments/history", {}, jar), 401, "EMAIL_REQUIRED");
-    await expectBffError(await http("/api/bff/payments/status", {}, jar), 401, "EMAIL_REQUIRED");
+    await expectBffData(await http("/api/bff/payments/history", {}, jar));
+    await expectBffData(await http("/api/bff/payments/status", {}, jar));
 
     const purchasable = offers ? findPurchasableOffer(offers) : null;
 
@@ -896,8 +908,8 @@ describe("real devcontainer full-stack e2e", () => {
     }
   });
 
-  it("links a Telegram session to an email Remnashop account and starts verification", async () => {
-    // Проверяем: Telegram-only пользователь может привязать email/Remnashop account как следующий бизнес-шаг.
+  it("guides a Telegram session through password, verification, merge and commerce readiness", async () => {
+    // Проверяем полный межпроектный happy path Telegram -> email/password -> code -> merge.
     await clearMailpit();
     const jar = await loginWithTelegramOidc();
     const email = `telegram-link-${Date.now()}-${Math.random().toString(16).slice(2)}@example.com`;
@@ -915,13 +927,105 @@ describe("real devcontainer full-stack e2e", () => {
       pendingVerification: true,
       emailVerification: { target_email: email },
     });
-    await verificationCodeFromMail(email);
+    const { code } = await verificationCodeFromMail(email);
 
-      // Проверяем: после link локальный профиль отражает привязанный email.
-    const me = await expectBffData<{ user: { email: string | null } }>(
+    // Проверяем: строгий commerce gate не создаёт payment operation до кода.
+    const blockedPurchase = await postJson(
+      "/api/bff/subscription/purchase",
+      {
+        plan_code: "blocked-before-verification",
+        duration_days: 30,
+        gateway_type: "TEST",
+        confirmed_amount: "1.00",
+        confirmed_currency: "USD",
+        offer_version: "v1:e2e-email-gate",
+      },
+      jar,
+    );
+    await expectBffError(
+      blockedPurchase,
+      403,
+      "EMAIL_NOT_VERIFIED",
+    );
+
+    // После link локальный профиль отражает pending email, но ещё не готов.
+    const pendingProfile = await expectBffData<{
+      user: {
+        email: string | null;
+        emailVerified: boolean;
+        accountSyncPending: boolean;
+      };
+    }>(
+      await http("/api/bff/auth/me", {}, jar),
+    );
+    expect(pendingProfile.user).toMatchObject({
+      email,
+      emailVerified: false,
+      accountSyncPending: false,
+    });
+
+    const confirm = await postJson(
+      "/api/bff/auth/email/confirm",
+      { email, code },
+      jar,
+    );
+    const confirmData = await expectBffData<{
+      success: boolean;
+      email: string;
+      account_sync_pending: boolean;
+    }>(confirm);
+
+    expect(confirmData).toMatchObject({
+      success: true,
+      email,
+      account_sync_pending: false,
+    });
+
+    type ReadyProfile = {
+      user: {
+        email: string | null;
+        emailVerified: boolean;
+        telegramId: string | null;
+        accountSyncPending: boolean;
+      };
+    };
+    const readyProfile = await expectBffData<ReadyProfile>(
       await http("/api/bff/auth/me", {}, jar),
     );
 
-    expect(me.user.email).toBe(email);
+    expect(readyProfile.user).toMatchObject({
+      email,
+      emailVerified: true,
+      accountSyncPending: false,
+    });
+
+    // После convergence provider offers снова доступны.
+    const offers = await expectBffData<SubscriptionOffers>(
+      await http("/api/bff/subscription/offers", {}, jar),
+    );
+    expect(offers.plans).toEqual(expect.any(Array));
+
+    // Пароль действительно даёт автономный вход без Telegram и ведёт к
+    // объединённой identity, а не к отдельному потерянному аккаунту.
+    const emailJar: CookieJar = {};
+    const emailLogin = await postJson(
+      "/api/bff/auth/login",
+      { email, password },
+      emailJar,
+    );
+    await expectBffData(emailLogin);
+    const emailProfile = await expectBffData<{
+      user: {
+        email: string | null;
+        emailVerified: boolean;
+        telegramId: string | null;
+      };
+    }>(await http("/api/bff/auth/me", {}, emailJar));
+
+    expect(emailProfile.user).toMatchObject({
+      email,
+      emailVerified: true,
+      telegramId: readyProfile.user.telegramId,
+    });
   });
 });

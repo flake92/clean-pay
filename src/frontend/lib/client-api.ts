@@ -74,6 +74,11 @@ export function redirectToLoginOnUnauthorized(error: unknown) {
 export async function readBffError(
   response: Response,
   fallback = 'Не удалось выполнить действие.',
+  {
+    redirectOnUnauthorized = true,
+  }: {
+    redirectOnUnauthorized?: boolean;
+  } = {},
 ) {
   const body = (await response.json().catch(() => null)) as BffErrorBody | null;
   const error = body?.error;
@@ -86,7 +91,9 @@ export async function readBffError(
     error?.debug,
   );
 
-  redirectToLoginOnUnauthorized(clientError);
+  if (redirectOnUnauthorized) {
+    redirectToLoginOnUnauthorized(clientError);
+  }
 
   return clientError;
 }

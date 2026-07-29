@@ -11,7 +11,15 @@ import { Password } from "primereact/password";
 import { Tag } from "primereact/tag";
 
 import { TurnstileWidget, type TurnstileHandle, hasTurnstileSiteKey } from "@/frontend/components/turnstile-widget";
+import { LinkButton } from "@/frontend/components/prime/link-button";
+import { navigateTo, replaceWith } from "@/frontend/lib/browser-navigation";
 import { readBffError } from "@/frontend/lib/client-api";
+import {
+  accountLinkPath,
+  accountSetupCompletePath,
+  emailVerificationPath,
+  isPaymentDestination,
+} from "@/shared/auth/account-setup-flow";
 
 type ProfileUser = {
   email: string | null;
@@ -127,9 +135,15 @@ function AuthMethodTile({
 }
 
 export function LinkAccountPanel({
+  guided = false,
+  passwordRequired = false,
+  redirectTo = "/cabinet",
   turnstileEnabled = false,
   turnstileSiteKey,
 }: {
+  guided?: boolean;
+  passwordRequired?: boolean;
+  redirectTo?: string;
   turnstileEnabled?: boolean;
   turnstileSiteKey?: string | null;
 }) {
@@ -142,6 +156,7 @@ export function LinkAccountPanel({
   const [passkeys, setPasskeys] = useState<PasskeyCredential[]>([]);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [sessionExpired, setSessionExpired] = useState(false);
   const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
   const [turnstile, setTurnstile] = useState<TurnstileHandle | null>(null);
   const [webAuthnSupported, setWebAuthnSupported] = useState<boolean | null>(null);
@@ -152,6 +167,20 @@ export function LinkAccountPanel({
   const hasEmail = Boolean(profile?.email);
   const hasTelegram = Boolean(telegramId);
   const hasPasskey = passkeys.length > 0;
+  const requiresPasswordReauth = guided && passwordRequired;
+  const usesCurrentPassword = hasEmail || requiresPasswordReauth;
+  const returnsToPayment = isPaymentDestination(redirectTo);
+  const verificationDestination = guided
+    ? emailVerificationPath(redirectTo)
+    : "/verify-email";
+  const setupDestination = guided
+    ? accountLinkPath(redirectTo, {
+        passwordRequired: requiresPasswordReauth,
+      })
+    : "/link-account";
+  const loginDestination = `/login?${new URLSearchParams({
+    redirect_to: setupDestination,
+  }).toString()}`;
 
   const passkeyDescription = useMemo(() => {
     if (webAuthnSupported === false) {
@@ -171,9 +200,26 @@ export function LinkAccountPanel({
       const profileResponse = await fetch("/api/bff/auth/me");
 
       if (!profileResponse.ok) {
-        throw new Error(await readError(profileResponse));
+        const responseError = await readBffError(
+          profileResponse,
+          "Не удалось загрузить способы входа.",
+          { redirectOnUnauthorized: false },
+        );
+
+        if (
+          responseError.status === 401 &&
+          (!responseError.code || responseError.code === "UNAUTHORIZED")
+        ) {
+          setSessionExpired(true);
+          setError(null);
+          replaceWith(loginDestination);
+          return;
+        }
+
+        throw responseError;
       }
 
+      setSessionExpired(false);
       const profileBody = await profileResponse.json();
       setProfile(profileBody.data.user);
 
@@ -221,7 +267,7 @@ export function LinkAccountPanel({
     } finally {
       setLoading(false);
     }
-  }, [callbackError, callbackStatus]);
+  }, [callbackError, callbackStatus, loginDestination]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -264,7 +310,9 @@ export function LinkAccountPanel({
         return;
       }
 
-      window.location.assign("/cabinet");
+      navigateTo(
+        guided ? accountSetupCompletePath(redirectTo) : redirectTo,
+      );
     } catch (error) {
       setError(error instanceof Error ? error.message : "Не удалось объединить аккаунты.");
     } finally {
@@ -343,27 +391,52 @@ export function LinkAccountPanel({
 
   async function onSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setActionLoading("email");
     setMessage(null);
     setError(null);
 
+    const formData = new FormData(event.currentTarget);
+    const email = String(formData.get("email") ?? "").trim();
+    const password = String(formData.get("password") ?? "");
+    const confirmPassword = String(formData.get("confirmPassword") ?? "");
+
+    if (!hasEmail && password !== confirmPassword) {
+      setError("Пароли не совпадают.");
+      return;
+    }
+
+    setActionLoading("email");
+
     try {
-      const formData = new FormData(event.currentTarget);
       const response = await fetch("/api/bff/link/remnashop", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
-          email: formData.get("email"),
-          password: formData.get("password"),
+          email,
+          password,
         }),
       });
 
       if (!response.ok) {
-        const responseError = await readError(response);
+        const responseError = await readBffError(
+          response,
+          "Не удалось связать e-mail с аккаунтом.",
+          { redirectOnUnauthorized: false },
+        );
+
+        if (
+          responseError.status === 401 &&
+          (!responseError.code || responseError.code === "UNAUTHORIZED")
+        ) {
+          setSessionExpired(true);
+          setError(null);
+          replaceWith(loginDestination);
+          return;
+        }
+
         turnstile?.reset();
         setTurnstileToken(null);
         await loadState();
-        setError(responseError);
+        setError(responseError.message);
         return;
       }
 
@@ -375,12 +448,12 @@ export function LinkAccountPanel({
       };
 
       if (body.data?.linked) {
-        setMessage("E-mail привязан.");
-        window.location.assign("/cabinet");
+        setMessage("E-mail и пароль подключены.");
+        navigateTo(accountSetupCompletePath(redirectTo));
         return;
       }
 
-      window.location.assign("/verify-email");
+      navigateTo(verificationDestination);
     } catch {
       turnstile?.reset();
       setTurnstileToken(null);
@@ -394,9 +467,60 @@ export function LinkAccountPanel({
     return <Message severity="info" text="Загружаем способы входа..." />;
   }
 
+  if (sessionExpired) {
+    return (
+      <div className="flex flex-column gap-4">
+        <Message
+          severity="warn"
+          text="Сессия завершилась. Войдите снова — мы сохранили этот шаг и исходное действие."
+        />
+        <LinkButton
+          className="w-fit"
+          href={loginDestination}
+          label="Войти и продолжить"
+        />
+      </div>
+    );
+  }
+
   return (
     <div className="link-account-panel">
       {error ? <Message severity="error" text={error} /> : null}
+      {guided ? (
+        <section
+          aria-labelledby="guided-account-setup-title"
+          className="surface-50 border-1 border-200 border-round-lg p-4"
+        >
+          <h2 className="mt-0 text-xl" id="guided-account-setup-title">
+            {hasEmail && emailVerified
+              ? "Подтвердите резервный вход"
+              : "Добавьте резервный вход"}
+          </h2>
+          <p className="line-height-3 text-700">
+            {hasEmail && emailVerified
+              ? "E-mail уже подтверждён. Введите пароль от него, чтобы восстановить связь с сервисом и продолжить."
+              : requiresPasswordReauth
+                ? hasEmail
+                  ? "Сессия подтверждения изменилась. Снова введите текущий пароль от e-mail, затем подтвердите адрес шестизначным кодом из письма."
+                  : "Сессия подтверждения изменилась. Снова введите e-mail и его текущий пароль, затем подтвердите адрес шестизначным кодом из письма."
+                : hasEmail
+                  ? "E-mail сохранён. Осталось подтвердить его шестизначным кодом из письма."
+                  : "Вы вошли через Telegram. Добавьте e-mail и пароль, чтобы не потерять доступ к кабинету, если Telegram станет недоступен."}
+          </p>
+          <ol className="mb-0 pl-4 line-height-3 text-600">
+            {!hasEmail ? <li>Введите e-mail и пароль для входа.</li> : null}
+            {hasEmail && !emailVerified && requiresPasswordReauth ? (
+              <li>Подтвердите адрес его текущим паролем.</li>
+            ) : null}
+            {!emailVerified ? <li>Подтвердите адрес кодом из письма.</li> : null}
+            <li>
+              {returnsToPayment
+                ? "После проверки мы вернём вас к выбранной оплате."
+                : "После проверки мы вернём вас к прерванному действию."}
+            </li>
+          </ol>
+        </section>
+      ) : null}
       {mergeConfirmation ? (
         <section className="account-method-card border-orange-400">
           <Message
@@ -428,93 +552,179 @@ export function LinkAccountPanel({
       <div className="account-method-grid">
         <AuthMethodTile
           active={hasEmail && emailVerified}
-          description={hasEmail ? "Используется для входа по паролю и восстановления доступа." : "Добавьте e-mail, чтобы входить по паролю и восстановить доступ при необходимости."}
+          description={
+            usesCurrentPassword
+              ? "Используется для входа по паролю и восстановления доступа."
+              : "Если e-mail уже зарегистрирован, введите текущий пароль. Для нового e-mail придумайте пароль не короче 8 символов."
+          }
           icon="pi pi-envelope"
           meta={hasEmail ? <span>{profile?.email}</span> : null}
           pending={hasEmail && !emailVerified}
           title="E-mail"
         >
-          {hasEmail && !emailVerified ? (
-            <Button label="Подтвердить e-mail" onClick={() => window.location.assign("/verify-email")} outlined type="button" />
-          ) : !hasEmail ? (
+          {hasEmail && !emailVerified && !requiresPasswordReauth ? (
+            <Button
+              label="Подтвердить e-mail"
+              onClick={() => navigateTo(verificationDestination)}
+              outlined
+              type="button"
+            />
+          ) : !hasEmail || guided ? (
             <form className="account-method-form" onSubmit={onSubmit}>
-              <InputText name="email" placeholder="user@example.com" required type="email" />
-              <Password
-                className="w-full"
-                feedback={false}
-                inputClassName="w-full"
-                minLength={8}
-                name="password"
-                placeholder="Пароль"
-                required
-                toggleMask
+              {!hasEmail ? (
+                <>
+                  <label className="flex flex-column gap-2">
+                    <span className="text-sm font-medium text-700">E-mail</span>
+                    <InputText
+                      autoComplete="email"
+                      maxLength={255}
+                      name="email"
+                      placeholder="user@example.com"
+                      required
+                      type="email"
+                    />
+                  </label>
+                  <Message
+                    severity="info"
+                    text="Для существующего e-mail нужен его текущий пароль. Если адрес новый, этот пароль будет создан после регистрации."
+                  />
+                </>
+              ) : (
+                <input name="email" type="hidden" value={profile?.email ?? ""} />
+              )}
+              <label className="flex flex-column gap-2">
+                <span className="text-sm font-medium text-700">
+                  {usesCurrentPassword
+                    ? "Пароль от e-mail"
+                    : "Пароль для входа"}
+                </span>
+                <Password
+                  autoComplete={
+                    usesCurrentPassword ? "current-password" : "new-password"
+                  }
+                  className="w-full"
+                  feedback={!usesCurrentPassword}
+                  inputClassName="w-full"
+                  maxLength={256}
+                  minLength={usesCurrentPassword ? 1 : 8}
+                  name="password"
+                  placeholder="Пароль"
+                  required
+                  toggleMask
+                />
+              </label>
+              {!hasEmail ? (
+                <label className="flex flex-column gap-2">
+                  <span className="text-sm font-medium text-700">
+                    Повторите пароль
+                  </span>
+                  <Password
+                    autoComplete="new-password"
+                    className="w-full"
+                    feedback={false}
+                    inputClassName="w-full"
+                    maxLength={256}
+                    minLength={1}
+                    name="confirmPassword"
+                    placeholder="Повторите пароль"
+                    required
+                    toggleMask
+                  />
+                </label>
+              ) : null}
+              {!hasEmail ? (
+                <Message
+                  severity="warn"
+                  text="Если этот e-mail относится к другому вашему аккаунту, данные будут безопасно объединены. На других устройствах может потребоваться повторный вход; конфликт двух активных подписок решается через поддержку."
+                />
+              ) : null}
+              <Button
+                disabled={actionLoading === "email"}
+                label={
+                  usesCurrentPassword
+                    ? "Подтвердить паролем"
+                    : "Сохранить e-mail и пароль"
+                }
+                loading={actionLoading === "email"}
+                type="submit"
               />
-              <Button disabled={actionLoading === "email"} label="Привязать e-mail" loading={actionLoading === "email"} type="submit" />
             </form>
           ) : null}
         </AuthMethodTile>
 
-        <AuthMethodTile
-          active={hasTelegram}
-          description="Дополнительный вход и восстановление доступа через Telegram."
-          icon="pi pi-send"
-          meta={hasTelegram ? <span>Telegram ID: {telegramId}</span> : null}
-          title="Telegram"
-        >
-          <div className="account-method-actions-stack">
-            {turnstileEnabled ? (
-              <TurnstileWidget onReady={setTurnstile} onToken={setTurnstileToken} siteKey={turnstileSiteKey} />
-            ) : null}
-            {hasTelegram ? (
-              <Button
-                disabled={actionLoading === "telegram"}
-                icon="pi pi-refresh"
-                label="Перепроверить связь Telegram"
-                loading={actionLoading === "telegram"}
-                onClick={linkTelegram}
-                outlined
-                type="button"
-              />
-            ) : (
-              <Button
-                disabled={actionLoading === "telegram"}
-                icon="pi pi-send"
-                label="Привязать Telegram"
-                loading={actionLoading === "telegram"}
-                onClick={linkTelegram}
-                severity="info"
-                type="button"
-              />
-            )}
-          </div>
-        </AuthMethodTile>
-
-        <AuthMethodTile
-          active={hasPasskey}
-          description={passkeyDescription}
-          icon="pi pi-lock"
-          meta={hasPasskey ? <span>Сохранено ключей: {passkeys.length}</span> : null}
-          title="Быстрый вход"
-        >
-          {webAuthnSupported !== false ? (
-            <div className="account-method-action-row">
-              <Button
-                icon="pi pi-lock"
-                label="Настроить"
-                onClick={() => window.location.assign("/passkey/setup")}
-                type="button"
-              />
-              <Button
-                label="Позже"
-                onClick={() => window.location.assign("/cabinet")}
-                outlined
-                severity="secondary"
-                type="button"
-              />
+        {!guided ? (
+          <AuthMethodTile
+            active={hasTelegram}
+            description="Дополнительный вход и восстановление доступа через Telegram."
+            icon="pi pi-send"
+            meta={hasTelegram ? <span>Telegram ID: {telegramId}</span> : null}
+            title="Telegram"
+          >
+            <div className="account-method-actions-stack">
+              {turnstileEnabled ? (
+                <TurnstileWidget
+                  onReady={setTurnstile}
+                  onToken={setTurnstileToken}
+                  siteKey={turnstileSiteKey}
+                />
+              ) : null}
+              {hasTelegram ? (
+                <Button
+                  disabled={actionLoading === "telegram"}
+                  icon="pi pi-refresh"
+                  label="Перепроверить связь Telegram"
+                  loading={actionLoading === "telegram"}
+                  onClick={linkTelegram}
+                  outlined
+                  type="button"
+                />
+              ) : (
+                <Button
+                  disabled={actionLoading === "telegram"}
+                  icon="pi pi-send"
+                  label="Привязать Telegram"
+                  loading={actionLoading === "telegram"}
+                  onClick={linkTelegram}
+                  severity="info"
+                  type="button"
+                />
+              )}
             </div>
-          ) : webAuthnSupported === false ? (
-            <Message severity="info" text="На этом устройстве нельзя добавить новый ключ. Сохранённые ключи можно удалить ниже." />
-          ) : null}
+          </AuthMethodTile>
+        ) : null}
+
+        {!guided ? (
+          <AuthMethodTile
+            active={hasPasskey}
+            description={passkeyDescription}
+            icon="pi pi-lock"
+            meta={
+              hasPasskey ? <span>Сохранено ключей: {passkeys.length}</span> : null
+            }
+            title="Быстрый вход"
+          >
+            {webAuthnSupported !== false ? (
+              <div className="account-method-action-row">
+                <Button
+                  icon="pi pi-lock"
+                  label="Настроить"
+                  onClick={() => navigateTo("/passkey/setup")}
+                  type="button"
+                />
+                <Button
+                  label="Позже"
+                  onClick={() => navigateTo("/cabinet")}
+                  outlined
+                  severity="secondary"
+                  type="button"
+                />
+              </div>
+            ) : webAuthnSupported === false ? (
+              <Message
+                severity="info"
+                text="На этом устройстве нельзя добавить новый ключ. Сохранённые ключи можно удалить ниже."
+              />
+            ) : null}
 
             {passkeys.length > 0 ? (
               <div className="passkey-list">
@@ -540,7 +750,8 @@ export function LinkAccountPanel({
                 ))}
               </div>
             ) : null}
-        </AuthMethodTile>
+          </AuthMethodTile>
+        ) : null}
       </div>
     </div>
   );

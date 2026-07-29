@@ -23,7 +23,10 @@ vi.mock("primereact/inputtext", () => ({ InputText: (props: Record<string, unkno
 vi.mock("primereact/message", () => ({ Message: ({ text }: { text?: string }) => createElement("div", { role: "alert" }, text) }));
 vi.mock("primereact/password", () => ({ Password: (props: Record<string, unknown>) => createElement("input", props) }));
 vi.mock("primereact/tag", () => ({ Tag: ({ value }: { value?: string }) => createElement("span", null, value) }));
-vi.mock("@/frontend/components/prime/link-button", () => ({ LinkButton: () => null }));
+vi.mock("@/frontend/components/prime/link-button", () => ({
+  LinkButton: ({ href, label }: { href: string; label: string }) =>
+    createElement("a", { href }, label),
+}));
 vi.mock("@/frontend/components/turnstile-widget", () => ({
   hasTurnstileSiteKey: (key?: string | null) => Boolean(key),
   TurnstileWidget: ({ onReady, onToken }: {
@@ -121,5 +124,32 @@ describe("profile e-mail Turnstile policy", () => {
       "cf-turnstile-response": "profile-turnstile-token",
     });
     expect(resetTurnstile).toHaveBeenCalledOnce();
+  });
+
+  it("sends a Telegram-only user to guided e-mail and password setup", async () => {
+    vi.mocked(fetch).mockReset().mockResolvedValueOnce(Response.json({
+      data: {
+        user: {
+          email: null,
+          emailVerified: false,
+          telegram_id: 123456,
+          auth_type: "telegram",
+          is_email_verified: false,
+          pending_email: null,
+          language: "ru",
+        },
+      },
+    }));
+
+    await act(async () => root.render(createElement(ProfilePanel, {
+      turnstileEnabled: false,
+      turnstileSiteKey: null,
+    })));
+    await flush();
+
+    expect(container.querySelectorAll("form")).toHaveLength(0);
+    expect(container.textContent).toContain("Добавить e-mail и пароль");
+    expect(container.textContent).toContain("не потерять доступ без Telegram");
+    expect(container.querySelector("a")?.getAttribute("href")).toBe("/link-account");
   });
 });

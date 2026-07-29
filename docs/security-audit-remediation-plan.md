@@ -342,6 +342,7 @@ Remnashop при этом не получает доказательство Web
 | Q-003 | Как оформляем dependency fixes за пределами текущих upstream ranges? | Clean Pay: временные exact npm overrides с owner/expiry. Remnashop: исправить constraint в `remnapy` и закрепить проверенный revision; `uv override` допустим только как time-bound аварийная мера | Ждать upstream-релизов — известные advisory дольше останутся в production |  | Ожидает |
 | Q-008 | Какая server-to-server граница для Remnashop auth утверждается? | Internal Docker/network URL плюс отдельный least-privilege BFF credential на `/api/v1/public/auth/*`; наружу оставить только действительно необходимые webhook endpoints | Для удалённого Remnashop — mTLS или тот же отдельный service credential. Оставить auth публичным означает возможность обхода BFF |  | Ожидает подтверждения topology/клиентов |
 | Q-009 | Какая семантика Passkey должна быть целевой? | Немедленно: локальный вход + явный step-up email/Telegram при отсутствии upstream tokens. Долгосрочно: Remnashop сам проверяет WebAuthn и выдаёт обычный JWT | Signed token exchange заставит Remnashop доверять Clean Pay на impersonation всех связанных users и расширит trust boundary |  | Ожидает |
+| Q-010 | Как гарантировать резервный пароль для уже подтверждённого Telegram e-mail, у которого в Remnashop отсутствует `password_hash`? | Добавить в Remnashop authenticated-признак `has_password` и безопасный idempotent flow создания первого пароля после подтверждения владения e-mail; до готовности не обещать автономный email-login | Только локальный proof в Clean Pay может fail-closed блокировать оплату, но не создаст пароль: редкий legacy/direct-verification случай потребует поддержки и ухудшит конверсию |  | Ожидает межпроектного решения |
 
 Уже определённые ограничения, не требующие повторного утверждения:
 
@@ -352,7 +353,7 @@ Remnashop при этом не получает доказательство Web
 - Q-006: отделение migration job остаётся следующим hardening-релизом и не блокирует срочное исправление.
 - Q-007: численные thresholds являются конфигурацией rollout: сначала observe-only метрики и нагрузочный тест, затем canary; отдельное продуктовое решение не требуется.
 
-Блокирующие изменение межпроектного контракта решения: Q-001, Q-008 и Q-009. Q-003 блокирует фиксацию финальных lock-файлов.
+Блокирующие изменение межпроектного контракта решения: Q-001, Q-008, Q-009 и Q-010. Q-003 блокирует фиксацию финальных lock-файлов. Q-010 не блокирует новый сопровождаемый flow для Telegram-only пользователя, но блокирует глобальное обещание резервного пароля для любого исторического состояния.
 
 ## 5. Целевой auth-контракт
 
@@ -373,6 +374,8 @@ Remnashop при этом не получает доказательство Web
 
 Не рекомендуется оставлять скрытый lookup в `identify` и только маскировать body: различие сохранится через timing и побочные эффекты.
 
+Общий email-register flow и Telegram-link flow используют разный безопасный порядок попыток. `registerWithEmail` выполняет register-first/login-fallback, а `linkRemnashopAccount` — login-first/register-fallback. Эти контракты нельзя описывать как один и тот же алгоритм.
+
 ### Изменение UX
 
 Пользователь потеряет только скрытое переключение логики по локальной БД. Интерфейс может сохранить одну кнопку «Продолжить» и независимо показывать «Войти с Passkey». На полном двухфазном контракте добавится подтверждение e-mail до регистрации/recovery. Для существующего пользователя это может быть дополнительным шагом, зато account state не раскрывается до подтверждения владения адресом.
@@ -384,7 +387,7 @@ Remnashop при этом не получает доказательство Web
 По решению пользователя работа выполняется небольшими независимо проверяемыми изменениями:
 
 1. **UI-1 — представление устройств:** не выводить в DOM видимый HWID и необработанный User-Agent, показывать тип устройства, ОС и клиент с доступными версиями. BFF по-прежнему передаёт эти поля браузеру, потому что HWID необходим для удаления.
-2. **AUTH-UX-1 — сопровождаемый Telegram → e-mail/password flow:** после Telegram-входа довести пользователя через ввод e-mail, создание пароля и подтверждение кода обратно к исходной оплате; отдельно предложить установку приложения и Passkey.
+2. **AUTH-UX-1 — сопровождаемый Telegram → e-mail/password flow:** после Telegram-входа довести пользователя через ввод e-mail, создание или проверку пароля и, когда это требуется состоянием адреса, подтверждение кода обратно к исходной оплате; отдельно предложить установку приложения и Passkey.
 3. **SEC-1—SEC-7 — security remediation:** выполнить этапы 0–7 ниже, включая закрытую Remnashop auth boundary, password-reset hardening, зависимости, enumeration, fail-closed anti-abuse и Passkey contract.
 4. **OPS-1 — воспроизводимое обновление и откат:** immutable images, отдельные миграции, проверяемый backup/restore, release manifest и rehearsal обновления/rollback.
 5. **REL-1 — тестовый стенд:** развернуть зафиксированные baseline/candidate версии, выполнить межпроектные smoke/E2E без реального списания и проверить повторное обновление.
@@ -404,13 +407,78 @@ Remnashop при этом не получает доказательство Web
 
 Условие завершения: интерфейс выдаёт компактные строки вида `iPhone 12 INCY 2.4.7` или `Windows Happ 5.2.0`, отдельно показывает ОС и не выводит технический HWID в DOM. Это требование относится к представлению, а не к удалению полей из BFF response.
 
-Статус: реализовано в `CHG-001`, повторно проверено и скорректировано в `FIND-010`/`CHG-002`; ожидает ручной приёмки перед следующим пунктом.
+Статус: реализовано в `CHG-001`, повторно проверено и скорректировано в `FIND-010`/`CHG-002`; принято переходом пользователя к AUTH-UX-1 (`DEC-003`).
 
 Известное UX-ограничение: два устройства с полностью одинаковыми типом, ОС и клиентом после скрытия HWID визуально неразличимы. Кнопка удаления по-прежнему относится к выбранной строке и использует полный внутренний HWID. В текущем upstream payload нет безопасного времени последней активности или другой понятной пользователю характеристики; технический идентификатор ради различения обратно не выводится.
 
+### Этап AUTH-UX-1. Сопровождаемый Telegram → e-mail/password → исходное действие
+
+Граница этапа: это UX- и commerce-gate изменение Clean Pay, использующее существующий контракт Remnashop PR #135. Оно не устраняет `/identify` enumeration, не закрывает публичную Remnashop auth boundary и не меняет Passkey trust model — эти задачи остаются в SEC-этапах.
+
+Пароль в этом сценарии обязателен. Telegram OIDC доказывает владение Telegram-аккаунтом, но не создаёт пароль для входа по e-mail. Код подтверждает владение e-mail, но также не заменяет пароль. Remnashop PR #135 требует пароль длиной 8–256 символов при регистрации и текущий пароль при входе.
+
+`linkRemnashopAccount` использует login-first/register-fallback. Это не следует смешивать с общим `registerWithEmail`, где применяется register-first/login-fallback.
+
+Password-backed доказательство для нового или неподтверждённого e-mail сохраняется атомарно вместе с pending token и ожидаемым Remnashop user id. До успешного ввода кода локальный `authPending` остаётся `false`: обычное чтение профиля не должно преждевременно запускать Telegram recovery или merge неподтверждённого адреса. После подтверждения кода `authPending` включается только тогда, когда для фактической сходимости identities действительно требуется recovery/merge.
+
+Доказательство привязано к владельцу: для Telegram-сессии подтверждающий access token должен принадлежать сохранённому `pendingRemnashopUserId`, а подтверждаемый адрес — совпадать с pending e-mail. Если между вводом пароля и кода Telegram-сессия сменилась, Clean Pay не отправляет запрос подтверждения от имени другого пользователя и возвращает человека к вводу пароля с тем же безопасным continuation. Параметр `step=password` служит только UX-подсказкой; публичный query-параметр не может отключить повтор нового пароля, когда локального e-mail ещё нет.
+
+| Состояние e-mail | Действие | Нужен код | Результат |
+|---|---|---|---|
+| Новый e-mail | Пользователь вводит e-mail, новый пароль и повтор пароля; после неуспешного login выполняется register | Да | После кода e-mail identity связывается или объединяется с Telegram identity |
+| Существующий подтверждённый e-mail | Пользователь вводит текущий пароль; выполняется login | Нет | Связь или merge выполняется сразу, затем пользователь возвращается к исходному действию |
+| Существующий неподтверждённый e-mail | Пользователь вводит текущий пароль; выполняется login | Да | До ввода кода объединение не выполняется |
+| Уже начатое подтверждение | Используется сохранённый pending flow | Да | Пользователь продолжает ввод кода без повторного создания аккаунта |
+| Неверный пароль существующего e-mail | Login отклоняется, register получает конфликт существующего адреса | Нет | Возвращается auth failure; связь, merge и отправка нового verification flow не выполняются |
+
+Пользовательский сценарий:
+
+1. Перед подтверждением покупки или продления Clean Pay проверяет локальную сессию через `/api/bff/auth/me`.
+2. Если подтверждённого e-mail нет, payment/extend operation не создаётся; пользователь автоматически направляется на сопровождаемую настройку.
+3. В URL сохраняется только безопасный локальный `redirect_to`. Для оплаты сохраняются выбранные `plan`, `duration` и `gateway`; для продления — `duration` и `gateway`. Внешние URL, API paths и рекурсивные setup/auth paths заменяются на `/cabinet`.
+4. Пользователь получает явное объяснение, что e-mail и пароль нужны для доступа к кабинету без Telegram.
+5. Для нового адреса запрашиваются e-mail, пароль и повтор пароля. Для существующего адреса требуется его текущий пароль.
+6. Новый или неподтверждённый e-mail направляется на ввод шестизначного кода. Подтверждённый существующий e-mail после правильного пароля продолжает без кода.
+7. После подтверждения Clean Pay дополнительно проверяет фактическую сходимость `/api/bff/auth/me`; authenticated profile явно передаёт `accountSyncPending`.
+8. При `account_sync_pending` пользователь остаётся на странице и может выполнить «Проверить и продолжить». Повторная оплата и повторное использование кода не выполняются.
+9. Если Telegram-сессия сменилась до ввода кода, подтверждение fail-closed отклоняется, а пользователь видит форму текущего пароля с сохранённым continuation.
+10. Terminal merge conflict ведёт в поддержку, завершившаяся сессия — на повторный вход с сохранённым continuation, а потерянная email-связь — обратно к вводу e-mail и пароля.
+11. После готовности пользователь возвращается точно к сохранённой оплате или продлению.
+12. На возвращённой странице оплаты установка приложения и настройка Passkey предлагаются отдельно и не блокируют кнопку оплаты; iOS-инструкция открывается только по явному нажатию.
+
+Если e-mail и Telegram принадлежат разным Remnashop users, e-mail user объединяется в Telegram target. В обычном случае target получает e-mail, пароль и признак подтверждения; source помечается объединённым и блокируется. Токены обеих сторон инвалидируются, поэтому на других устройствах может потребоваться повторный вход.
+
+Если у обеих сторон есть активная подписка либо Remnashop обнаруживает другой небезопасный merge conflict, автоматическое объединение прекращается до изменения владельца и пользователь получает инструкцию обратиться в поддержку.
+
+Backend purchase и extend повторно требуют существующий подтверждённый e-mail до чтения или создания idempotent payment operation. Frontend preflight является только UX-оптимизацией, а не единственной защитой. Если merge находится в pending-состоянии, `getAuthorizedRemnashopTokens` сначала выполняет owner-safe Telegram recovery и лишь после успеха разрешает создание операции.
+
+Docker regression fixture использует один и тот же exact image Remnashop PR #135 для API, worker и scheduler, проверяет revision `0050`, согласованный Telegram bot/OIDC id и соответствие `REMNASHOP_API_KEY` ключу admin API. Перед запуском harness требует свободный порт приложения, контролирует жизненный цикл именно нового Next.js PID и ограниченно повторяет transient compose image build/start не более трёх раз. Это обеспечивает проверку межпроектного merge, но само по себе не закрывает публичную Remnashop auth boundary: это отдельная задача SEC-этапов.
+
+Автоматическое отключение Remnashop payment rollout gate допустимо только в пустом изолированном E2E-контуре после проверки exact revision, одинаковых image id и нулевого числа payment operations. Этот test-only механизм не является инструкцией для production и не должен переноситься в release/deploy flow.
+
+Условия завершения:
+
+- Telegram-only пользователь не может создать purchase/extend operation до подтверждения e-mail;
+- новый e-mail требует пароль и код;
+- существующий подтверждённый e-mail требует правильный пароль, но не повторный код;
+- существующий неподтверждённый e-mail требует пароль и код;
+- неправильный пароль не создаёт новую identity и не запускает merge;
+- смена Telegram-сессии не позволяет подтвердить pending e-mail от имени другого владельца и требует повторного ввода пароля;
+- исходные параметры оплаты или продления сохраняются на всех шагах;
+- lifetime-продление с `duration=0` сохраняет исходное значение;
+- unsafe redirect заменяется на `/cabinet`;
+- `account_sync_pending` не возвращает пользователя к оплате;
+- install/Passkey остаются необязательными;
+- merge conflict не изменяет ownership автоматически;
+- общий nonguided `/link-account` и `/verify-email` сохраняет прежнее поведение.
+
+Статус: реализовано в `CHG-003`—`CHG-013`; полный integration/Docker gate после независимого review завершён в `TST-014`, а последние локальные source/docs corrections и production build повторно проверены в `TST-016`. Дополнительная браузерная проверка маршрута и текста — в `TST-012`. Этап готов к отдельному commit ветки `update-nodejs` и ручной приёмке.
+
+Открытая граница доказательства: PR #135 не возвращает `has_password` и не имеет операции создания первого пароля для Telegram user с уже подтверждённым e-mail и `password_hash = NULL`. Новый сопровождаемый flow создаёт или проверяет пароль, но общий глобальный инвариант для ранее сформированного/direct-verification состояния без изменения Remnashop доказать нельзя. Это зафиксировано в `FIND-015` и вынесено в Q-010; до решения нельзя заявлять, что любой исторический подтверждённый Telegram e-mail уже гарантирует автономный email-login.
+
 ### Этап 0. Зафиксировать решения и рабочую ветку
 
-1. Ответить на Q-001, Q-003, Q-008 и Q-009.
+1. Ответить на Q-001, Q-003, Q-008, Q-009 и Q-010.
 2. Назначить owner реализации и релиза.
 3. Назначить владельцев изменений в обоих репозиториях и согласовать порядок совместимого rollout.
 4. Создать отдельные ветки Clean Pay и Remnashop.
@@ -664,7 +732,7 @@ npm run test:e2e
 
 Релиз разрешён только если:
 
-- [ ] Q-001, Q-003, Q-008 и Q-009 имеют утверждённые ответы и строки `DEC-*` в журнале.
+- [ ] Q-001, Q-003, Q-008, Q-009 и Q-010 имеют утверждённые ответы и строки `DEC-*` в журнале.
 - [ ] Решение снять Q-004 и не использовать client IP зафиксировано в журнале.
 - [ ] `npm audit --omit=dev` возвращает `0` production vulnerabilities.
 - [ ] Frozen production export Remnashop проходит registry `pip-audit` с `0` известных advisory.
@@ -735,7 +803,7 @@ npm run test:e2e
 ## 11. Правила ведения журнала
 
 1. Журнал append-only: новые записи добавляются в конец таблицы.
-2. Ошибочная запись не удаляется и не переписывается; добавляется новая запись `COR-*` со ссылкой на исходную.
+2. Ошибочная запись не удаляется и не переписывается; добавляется новая запись `COR-*` со ссылкой на исходную. Узкое исключение — запрещённые privacy/security policy данные редактируются на месте без сохранения исходного значения, после чего в конец добавляется `COR-*` с классом удалённых данных и причиной redaction.
 3. Решение по вопросу фиксируется как `DEC-*` и ссылается на `Q-*`.
 4. Каждая проверка содержит commit SHA, среду и точный итог.
 5. Каждое изменение статуса релиза имеет автора.
@@ -790,6 +858,43 @@ npm run test:e2e
 | 2026-07-29 | CHG-002 | Изменение | `f7c6d98` + staged corrections, local | Исправлены результаты повторного review UI-1 | Завершено | Убраны придуманные hardware labels и Darwin inference; сохранён iPadOS; нормализованы sentinels/эмуляторы; очищаются все Unicode `Cf`; добавлен `Client version`; безопасные aria-label различают строки без HWID; форматирование выполняется один раз на строку | Codex |
 | 2026-07-29 | FIND-011 | Наблюдение | Clean Pay `f7c6d98` + Remnashop PR #135 `b9da68a`, API contract | Найдено прежнее ограничение path-based удаления произвольного HWID | Подтверждено, не UI-1 | HWID `.`/`..` нормализуется URL-стеком; безопасное исправление требует совместимого body/opaque-token контракта обоих проектов. Обычные HWID и delete-all работают | Codex |
 | 2026-07-29 | TST-009 | Проверка | `f7c6d98` + staged `CHG-002`; Node 24.18.0, npm 11.16.0, local | Выполнен regression gate исправлений review | Завершено | focused UI 29/29; unit 504/504; route 44/44; docs 5/5; lint, typecheck, CI-fixture production build и `git diff --check` успешны; production audit без изменений: 10 (5 high, 5 moderate) | Codex |
+| 2026-07-29 | COR-003 | Исправление записи | `CHG-002`, `TST-009`; commit `3647f26` | Зафиксирован итоговый commit исправлений UI-1 | Исправлено | `CHG-002` вошёл в `3647f26`; проверенный staged diff соответствует commit | Codex |
+| 2026-07-29 | DEC-003 | Решение | Указание пользователя; commits `f7c6d98`, `3647f26` | UI-1 принят переходом к пункту 2; AUTH-UX-1 утверждён следующим независимо проверяемым этапом | Принято | Пользователь поручил выполнить пункт 2 после проверки и исправления UI-1 | Пользователь |
+| 2026-07-29 | FIND-012 | Наблюдение | Clean Pay `3647f26` + Remnashop PR #135 `b9da68a`, source/tests | Уточнён обязательный password contract Telegram → e-mail link | Подтверждено | Register требует пароль 8–256; login — текущий пароль 1–256; Telegram auth пароль не создаёт; link использует login-first/register-fallback | Codex |
+| 2026-07-29 | FIND-013 | Наблюдение | Clean Pay `3647f26`, source/tests | Исходный flow терял payment continuation и полагался на поздний отказ provider/payment path | Подтверждено | `/payment` → `/link-account` → `/verify-email` завершался переходом в профиль/кабинет без исходных plan/duration/gateway; Telegram exemption не являлся строгим commerce gate | Codex |
+| 2026-07-29 | FIND-014 | Наблюдение | Remnashop PR #135 `b9da68a` + Clean Pay merge code/tests | Уточнены последствия объединения e-mail и Telegram identities | Подтверждено | E-mail source объединяется в Telegram target; source блокируется, token versions меняются, `requires_relogin=true`; две активные подписки дают conflict без автоматического merge | Codex |
+| 2026-07-29 | FIND-015 | Межпроектное ограничение | Remnashop PR #135 `b9da68a`, source/API contract | Найден достижимый Telegram user с подтверждённым e-mail, но без резервного пароля | Подтверждено | Telegram auth создаёт `password_hash = NULL`; direct request/confirm email пароль не задаёт; `/auth/me` не содержит `has_password`, reset при null не работает. Полный self-service требует Q-010 | Codex |
+| 2026-07-29 | CHG-003 | Изменение | `3647f26` + staged AUTH-UX-1, local | Реализован сопровождаемый Telegram → e-mail/password → verification → исходное действие flow | Завершено | Safe continuation, frontend preflight, строгие purchase/extend guards, ветви existing/new e-mail, sync-pending readiness/retry, terminal conflict handling и необязательные install/Passkey | Codex |
+| 2026-07-29 | FIND-016 | Межпроектная конфигурация | Docker E2E, Clean Pay + Remnashop PR #135 | Clean Pay не получал согласованный `REMNASHOP_API_KEY`, поэтому подтверждение кода завершалось, но admin merge не мог выполниться | Подтверждено | Remnashop email confirm возвращал `200`, однако запрос `/admin/users/merge` не отправлялся, а pending-состояние не сходилось | Codex |
+| 2026-07-29 | FIND-017 | Release-конфигурация | `.devcontainer/docker-compose.yml`, production validator | Telegram OIDC mock использовал несогласованный ненумерический client id и не проверял production-инвариант bot token | Подтверждено | Production требует числовой `TELEGRAM_OIDC_CLIENT_ID`, совпадающий с bot id из `TELEGRAM_BOT_TOKEN`; прежний стенд этого не воспроизводил | Codex |
+| 2026-07-29 | FIND-018 | Test infrastructure | Remnashop revision `0050`, Docker E2E | Fresh Remnashop сохраняет активный payment rollout gate, а прежний harness не доказывал безопасность его test-only отключения | Подтверждено | Не проверялись exact migration revision, одинаковые images API/worker/scheduler и отсутствие payment operations | Codex |
+| 2026-07-29 | CHG-004 | Изменение | staged AUTH-UX-1 Docker fixture | Согласованы межпроектный admin key и Telegram bot/OIDC identity тестового стенда | Завершено | Clean Pay получает matching `REMNASHOP_API_KEY`; client id совпадает с bot id. Изменение не закрывает публичную Remnashop auth boundary | Codex |
+| 2026-07-29 | CHG-005 | Изменение | staged AUTH-UX-1 E2E harness | Добавлена fail-closed подготовка изолированного payment rollout gate | Завершено | Требуются revision `0050`, одинаковый image id трёх Remnashop-процессов, ноль операций и транзакционное отключение с post-check; production не затрагивается | Codex |
+| 2026-07-29 | TST-010 | Проверка | `3647f26` + staged AUTH-UX-1; clean Docker E2E | Первый полный прогон выявил преждевременный recovery до подтверждения e-mail | Не пройдено | `103/104`: pending profile `/api/bff/auth/me` вернул `409 ACCOUNT_MERGE_REQUIRED`, причина `verified_email_mismatch`; результат не скрыт последующим успешным прогоном | Codex |
+| 2026-07-29 | FIND-019 | Дефект реализации | staged AUTH-UX-1, `linkRemnashopAccount` | Сохранение нового неподтверждённого e-mail с `authPending=true` позволяло чтению профиля начать recovery/merge до ввода кода | Исправлено | Password-backed pending proof отделён от recovery state: до подтверждения кода сохраняется `authPending=false`, после кода pending включается только при необходимости сходимости | Codex |
+| 2026-07-29 | CHG-006 | Исправление | staged AUTH-UX-1, source/tests | Устранён ранний merge неподтверждённого e-mail и добавлена защита от регрессии | Завершено | Pending token, ожидаемый owner и password proof сохраняются атомарно; unit и full-stack assertions подтверждают отсутствие `accountSyncPending` до кода | Codex |
+| 2026-07-29 | FIND-020 | Upstream-наблюдение | Remnashop PR #135 `b9da68a`, Docker E2E | Удаление отдельного HWID без подписки падает upstream с необработанным `ValueError` и HTTP 500 | Подтверждено, не AUTH-UX-1 | Clean Pay ограниченно нормализует только этот device-delete failure в `409 DEVICE_DELETE_UNAVAILABLE`; соответствующий E2E проходит, assertion не ослаблен | Codex |
+| 2026-07-29 | TST-011 | Проверка | `3647f26` + staged AUTH-UX-1; Node 24.18.0, npm 11.16.0, local + clean Docker | Выполнен полный regression gate второго пункта после исправления `FIND-019` | Завершено | lint и typecheck; unit `551/551`; route `46/46`; real PostgreSQL integration `60/60` и 15 migrations; clean Docker E2E `104/104`; Windows CI-fixture и Linux-container production builds успешны; production audit без изменений: 10 (5 high, 5 moderate) | Codex |
+| 2026-07-29 | TST-012 | Проверка | Local Docker + in-app browser, Linux production bundle | Проверены видимая маршрутизация и объяснение сопровождаемого flow | Завершено в заявленном scope | Неавторизованная оплата сохранила exact `redirect_to`; mock Telegram OIDC вернул пользователя к тем же `plan`/`duration`/`gateway`; guided page показала «Сохраните доступ к аккаунту» и объяснение возврата к прерванному действию. Полный business flow доказан `TST-011` | Codex |
+| 2026-07-29 | FIND-021 | Дефект реализации | staged AUTH-UX-1, Telegram session turnover review | После повторного Telegram-входа pending password proof мог потерять владельца, а попытка подтверждения — использовать access token новой сессии | Исправлено | До обращения к Remnashop проверяются token owner и pending e-mail; при несовпадении пользователь возвращается к password step с тем же continuation | Codex |
+| 2026-07-29 | CHG-007 | Исправление | staged AUTH-UX-1, source/tests | Pending e-mail verification привязана к Remnashop owner и целевому адресу | Завершено | Добавлены pre/post-profile guards, owner proof для Telegram change-email и безопасный `step=password`; query-параметр не может убрать подтверждение нового пароля | Codex |
+| 2026-07-29 | FIND-022 | Дефект test infrastructure | `scripts/e2e-devcontainer.sh`, manual server collision | Старый Next.js process на порту приложения мог пережить cleanup, а readiness — ошибочно принять его за новый тестируемый server | Исправлено | Воспроизведён `EADDRINUSE`; прежний harness проверял URL, но не владение process | Codex |
+| 2026-07-29 | CHG-008 | Исправление | staged E2E harness, source test | E2E запуск стал fail-closed относительно порта и точного Next.js PID | Завершено | Перед стартом проверяется освобождение порта; readiness прекращается, если созданный PID завершился, и не может пройти на старом server | Codex |
+| 2026-07-29 | FIND-023 | Дефект реализации | staged guided setup, focused review | Новый пароль имел слишком мягкий browser minimum, а публичный password step мог скрыть обязательное подтверждение нового пароля | Исправлено | Новый пароль требует 8 символов и повтор; текущий пароль сохраняет совместимый минимум 1; server-side контракт остаётся определяющим | Codex |
+| 2026-07-29 | FIND-024 | Дефект реализации | staged continuation/verification review | Missing/unsafe verification redirect выключал guided режим; lifetime `duration=0` терялся; client gateway limit расходился с backend | Исправлено | Guided fallback остаётся `/cabinet`; duration `0` и gateway до 100 символов проходят безопасную нормализацию и покрыты unit tests | Codex |
+| 2026-07-29 | CHG-009 | Исправление | staged AUTH-UX-1, source/tests | Исправлены validation и continuation edge cases | Завершено | Password UX, guided fallback, lifetime duration и gateway limits приведены к backend contract; добавлены регрессионные проверки | Codex |
+| 2026-07-29 | TST-013 | Проверка | final clean Docker E2E attempt, Docker Desktop | Первый финальный повтор остановился до запуска тестов на transient недоступности `ghcr.io` | Не пройдено, внешняя причина | Docker Desktop не смог получить build image из registry; функциональные тесты не начинались, результат сохранён в журнале | Codex |
+| 2026-07-29 | FIND-025 | Дефект test infrastructure | `scripts/e2e-devcontainer.mjs`, `TST-013` | Compose image build/start не имел ограниченного повтора при transient registry failure | Исправлено | Добавлен общий максимум три попытки с синхронной задержкой 2/4 секунды; постоянная ошибка по-прежнему завершает gate неуспешно | Codex |
+| 2026-07-29 | CHG-010 | Исправление | staged E2E runner, source test | Добавлен bounded retry только для compose image build/start | Завершено | Retry не распространяется на тестовые assertions и не может скрыть функциональную ошибку | Codex |
+| 2026-07-29 | TST-014 | Итоговая проверка | `3647f26` + final staged AUTH-UX-1; Node 24.18.0, npm 11.16.0, local + clean Docker | Выполнен полный regression gate после всех review-исправлений; заменяет TST-011 как финальное доказательство кандидата | Завершено | focused review `93/93`; lint/typecheck; unit `559/559`; route `46/46`; real PostgreSQL integration `60/60` и 15 migrations; clean Docker E2E `104/104` на Remnashop PR #135 `b9da68a`; production build успешен; audit без изменений: 10 (5 high, 5 moderate, 0 critical) | Codex |
+| 2026-07-29 | FIND-026 | Дефект реализации | staged extension continuation, final review | `gateway_type` разрешён backend как exact непустая строка до 100 символов, но extension continuation удалял краевые пробелы | Исправлено | Редкое разрешённое offer value могло после setup не совпасть с выбранной ценой и сброситься на первый gateway | Codex |
+| 2026-07-29 | CHG-011 | Исправление | staged extension continuation, source/test | Удалена изменяющая значение нормализация gateway | Завершено | `duration` и `gateway_type` сохраняются exact через вложенный URL; отдельный component test покрывает gateway с краевыми пробелами | Codex |
+| 2026-07-29 | TST-015 | Проверка | staged AUTH-UX-1, full unit | Повтор unit suite после `CHG-011` остановился на docs privacy gate | Не пройдено | Новый component test прошёл; общий результат `559 passed, 1 failed`: в TST-014 по ошибке была записана полная внешняя revision | Codex |
+| 2026-07-29 | FIND-027 | Дефект документации | `TST-015`, `docs-privacy.test.ts` | Итоговая запись нарушала правило запрета полных revision/checksum в документации | Исправлено | Полная внешняя revision заменена на уже используемую короткую `b9da68a`; runtime/config не затронуты | Codex |
+| 2026-07-29 | CHG-012 | Исправление | staged audit journal | Документация приведена к privacy policy проекта | Завершено | Смысл доказательства PR #135 сохранён без deployment-specific identifier | Codex |
+| 2026-07-29 | COR-004 | Исправление записи | `TST-014`, `FIND-027` | Уточнено представление revision в TST-014 | Исправлено | Полный SHA удалён из документа по обязательной privacy policy и заменён короткой проверяемой revision | Codex |
+| 2026-07-29 | CHG-013 | Исправление документации | final docs review, staged audit plan | Устранены несогласованности реестра решений и append-only/privacy правил | Завершено | Q-010 добавлен в Этап 0 и общий checklist; для обязательной privacy/security redaction описано узкое исключение с обязательной `COR-*` записью без сохранения запрещённого значения | Codex |
+| 2026-07-29 | TST-016 | Итоговая проверка | `3647f26` + final AUTH-UX-1 candidate; Node 24.18.0, npm 11.16.0, local | Повторно проверены последние source/docs corrections после TST-014 | Завершено | lint/typecheck; unit `560/560`, включая exact gateway continuation и docs privacy; route `46/46`; production build: compile, TypeScript и `50/50` pages; `git diff --check`, shell syntax и Node syntax успешны. Real PostgreSQL `60/60`, 15 migrations и clean Docker E2E `104/104` остаются зафиксированы в TST-014; после них backend/integration contract не менялся | Codex |
 
 ### Шаблон новой записи
 

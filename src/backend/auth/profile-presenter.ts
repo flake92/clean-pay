@@ -22,6 +22,8 @@ export function localUserProfile(session: SessionWithUser) {
     fullName: session.user.fullName,
     displayName: session.user.displayName,
     emailVerified,
+    account_sync_pending: session.user.authPending,
+    accountSyncPending: session.user.authPending,
   };
 }
 
@@ -59,5 +61,7 @@ export function remnashopUserProfile(session: SessionWithUser, profile: Remnasho
     fullName: localUser.fullName ?? profile.name,
     displayName: localUser.displayName ?? profile.name,
     emailVerified: localEmailVerified,
+    account_sync_pending: localUser.authPending,
+    accountSyncPending: localUser.authPending,
   };
 }

@@ -50,7 +50,9 @@ export async function POST(request: Request) {
     if (!currentSession) {
       throw new BffError("UNAUTHORIZED", 401);
     }
-    assertEmailVerificationPolicy(currentSession.user);
+    assertEmailVerificationPolicy(currentSession.user, {
+      requireVerifiedEmail: true,
+    });
 
     const operationInput = {
       userId: currentSession.userId,

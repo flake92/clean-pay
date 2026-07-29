@@ -18,9 +18,30 @@ const sessionCookieNames = {
 export const refreshTokenGraceMs = 10_000;
 
 export function assertEmailVerificationPolicy(user: {
+  email?: string | null;
   emailVerified: boolean;
   telegramId: string | null;
-}) {
+}, {
+  requireVerifiedEmail = false,
+}: {
+  requireVerifiedEmail?: boolean;
+} = {}) {
+  if (requireVerifiedEmail && !user.email) {
+    throw new BffError(
+      "EMAIL_REQUIRED",
+      401,
+      "E-mail and password must be linked before continuing",
+    );
+  }
+
+  if (requireVerifiedEmail && !user.emailVerified) {
+    throw new BffError(
+      "EMAIL_NOT_VERIFIED",
+      403,
+      "E-mail must be verified before continuing",
+    );
+  }
+
   if (!user.emailVerified && !user.telegramId) {
     throw new BffError(
       "EMAIL_NOT_VERIFIED",
