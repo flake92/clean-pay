@@ -182,7 +182,7 @@ export type CurrentSubscriptionResponse = {
   online_at: string | null;
 };
 
-type SubscriptionDevice = {
+export type SubscriptionDevice = {
   hwid: string;
   platform: string | null;
   device_model: string | null;
