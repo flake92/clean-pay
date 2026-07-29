@@ -14,7 +14,11 @@ import { Tag } from "primereact/tag";
 
 import { LinkButton } from "@/frontend/components/prime/link-button";
 import { SubscriptionDeviceDetails } from "@/frontend/components/subscription-device-details";
-import { formatSubscriptionDevice } from "@/frontend/lib/device-display";
+import {
+  formatSubscriptionDevice,
+  MISSING_DEVICE_VALUE,
+  type DevicePresentation,
+} from "@/frontend/lib/device-display";
 import { hasRenewOffer } from "@/frontend/lib/subscription-offers";
 import type {
   DevicesResponse,
@@ -57,6 +61,12 @@ type PaymentRecord = {
   duration_days: number | null;
   is_free: boolean;
   created_at: string;
+};
+
+type SubscriptionDeviceView = {
+  device: SubscriptionDevice;
+  presentation: DevicePresentation;
+  deleteLabel: string;
 };
 
 type SupportSettings = {
@@ -153,6 +163,22 @@ function detailValue(value?: string | number | boolean | null) {
   }
 
   return String(value);
+}
+
+function deviceDeleteLabel(
+  presentation: DevicePresentation,
+  position: number,
+) {
+  const safeDetails = [
+    ...new Set(
+      [presentation.summary, presentation.os].filter(
+        (value) => value !== MISSING_DEVICE_VALUE,
+      ),
+    ),
+  ];
+  const details = safeDetails.length > 0 ? `: ${safeDetails.join(", ")}` : "";
+
+  return `Удалить устройство ${position}${details}`;
 }
 
 function trafficLimitStrategyLabel(strategy?: string | null) {
@@ -442,6 +468,16 @@ export function CabinetPanel() {
       : null;
   const deviceCount = devices?.current_count ?? null;
   const maxDevices = devices?.max_count ?? subscription?.device_limit ?? null;
+  const deviceViews: SubscriptionDeviceView[] =
+    devices?.devices.map((device, index) => {
+      const presentation = formatSubscriptionDevice(device);
+
+      return {
+        device,
+        presentation,
+        deleteLabel: deviceDeleteLabel(presentation, index + 1),
+      };
+    }) ?? [];
   const hasEmail = Boolean(user.email);
   const isEmailVerified = hasEmail && Boolean(user.emailVerified ?? user.is_email_verified);
   const shouldShowVerifyEmail = hasEmail && !isEmailVerified;
@@ -638,18 +674,18 @@ export function CabinetPanel() {
       <div className="col-12 xl:col-6">
         <div className="card">
           <h5>Устройства</h5>
-          {devices.devices.length > 0 ? (
+          {deviceViews.length > 0 ? (
             <div className="cabinet-mobile-list">
-              {devices.devices.map((device) => (
+              {deviceViews.map(({ device, presentation, deleteLabel }) => (
                 <article className="cabinet-mobile-record" key={device.hwid}>
                   <div className="cabinet-mobile-record__header">
                     <div>
                       <div className="cabinet-mobile-record__title">
-                        {formatSubscriptionDevice(device).summary}
+                        {presentation.summary}
                       </div>
                     </div>
                     <Button
-                      aria-label="Удалить устройство"
+                      aria-label={deleteLabel}
                       disabled={pendingAction === `delete-device-${device.hwid}`}
                       icon="pi pi-trash"
                       loading={pendingAction === `delete-device-${device.hwid}`}
@@ -659,7 +695,7 @@ export function CabinetPanel() {
                       type="button"
                     />
                   </div>
-                  <SubscriptionDeviceDetails device={device} />
+                  <SubscriptionDeviceDetails presentation={presentation} />
                 </article>
               ))}
             </div>
@@ -670,34 +706,31 @@ export function CabinetPanel() {
             className="cabinet-desktop-table"
             emptyMessage="Подключенных устройств пока нет."
             responsiveLayout="scroll"
-            value={devices.devices}
+            value={deviceViews}
           >
             <Column
-              body={(device: SubscriptionDevice) =>
-                formatSubscriptionDevice(device).deviceType
+              body={(view: SubscriptionDeviceView) =>
+                view.presentation.deviceType
               }
               header="Тип устройства"
             />
             <Column
-              body={(device: SubscriptionDevice) =>
-                formatSubscriptionDevice(device).os
-              }
+              body={(view: SubscriptionDeviceView) => view.presentation.os}
               header="ОС"
             />
             <Column
-              body={(device: SubscriptionDevice) =>
-                formatSubscriptionDevice(device).client
-              }
+              body={(view: SubscriptionDeviceView) => view.presentation.client}
               header="Клиент"
             />
             <Column
-              body={(device: SubscriptionDevice) => (
+              body={(view: SubscriptionDeviceView) => (
                 <Button
-                  disabled={pendingAction === `delete-device-${device.hwid}`}
+                  aria-label={view.deleteLabel}
+                  disabled={pendingAction === `delete-device-${view.device.hwid}`}
                   icon="pi pi-trash"
                   label="Удалить"
-                  loading={pendingAction === `delete-device-${device.hwid}`}
-                  onClick={() => deleteDevice(device.hwid)}
+                  loading={pendingAction === `delete-device-${view.device.hwid}`}
+                  onClick={() => deleteDevice(view.device.hwid)}
                   outlined
                   severity="danger"
                   size="small"

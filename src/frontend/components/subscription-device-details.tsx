@@ -1,15 +1,12 @@
-import { formatSubscriptionDevice } from "@/frontend/lib/device-display";
-import type { SubscriptionDevice } from "@/shared/remnashop/types";
+import type { DevicePresentation } from "@/frontend/lib/device-display";
 
 type SubscriptionDeviceDetailsProps = {
-  device: SubscriptionDevice;
+  presentation: DevicePresentation;
 };
 
 export function SubscriptionDeviceDetails({
-  device,
+  presentation,
 }: SubscriptionDeviceDetailsProps) {
-  const presentation = formatSubscriptionDevice(device);
-
   return (
     <dl className="cabinet-mobile-record__details">
       <div>

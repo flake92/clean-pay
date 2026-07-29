@@ -19,10 +19,18 @@ const GENERIC_CLIENT_NAMES = new Set([
   "windows",
 ]);
 
-const TECHNICAL_DEVICE_MODEL =
-  /^(?:(?:byte|generic)[-_ ]*)?(?:aarch64|amd64|arm64|armv[5-9](?:l)?|i[3-6]86|x86(?:_64)?)(?:[-_ ].*)?$/iu;
+const TECHNICAL_DEVICE_MODEL_PATTERNS = [
+  /^(?:(?:byte|generic)[-_ ]*)?(?:aarch64|amd64|arm64|armeabi(?:-v7a)?|armv[5-9](?:l)?|i[3-6]86|ia32|x64|x86(?:_64)?)(?:[-_ ].*)?$/iu,
+  /^sdk[-_ ]*gphone(?:64)?(?:[-_ ]*(?:aarch64|arm64|x86(?:_64)?))?$/iu,
+  /^android sdk built for (?:aarch64|arm64|x86(?:_64)?)$/iu,
+];
 
-const EMPTY_DEVICE_VALUE = /^(?:device|generic|n\/a|null|undefined|unknown|unknown device)$/iu;
+const EMPTY_DEVICE_VALUE =
+  /^(?:-|–|—|device|generic|n\/a|none|not available|null|undefined|unknown|unknown device)$/iu;
+
+function isTechnicalDeviceModel(value: string) {
+  return TECHNICAL_DEVICE_MODEL_PATTERNS.some((pattern) => pattern.test(value));
+}
 
 function cleanTelemetry(value: string | null | undefined, maxLength = MAX_DEVICE_FIELD_LENGTH) {
   if (!value) {
@@ -31,7 +39,7 @@ function cleanTelemetry(value: string | null | undefined, maxLength = MAX_DEVICE
 
   const cleaned = value
     .replace(/[\u0000-\u001f\u007f-\u009f]/gu, " ")
-    .replace(/[\u200b-\u200f\u202a-\u202e\u2060\u2066-\u2069\ufeff]/gu, "")
+    .replace(/\p{Cf}/gu, "")
     .replace(/\s+/gu, " ")
     .trim()
     .slice(0, maxLength)
@@ -46,13 +54,17 @@ function cleanTelemetry(value: string | null | undefined, maxLength = MAX_DEVICE
 
 function platformLabel(value: string | null | undefined) {
   const cleaned = cleanTelemetry(value);
-  if (!cleaned || TECHNICAL_DEVICE_MODEL.test(cleaned)) {
+  if (!cleaned || isTechnicalDeviceModel(cleaned)) {
     return null;
   }
 
   const normalized = cleaned.toLowerCase().replace(/[\s_-]+/gu, "");
 
-  if (normalized === "ios" || normalized === "iphoneos" || normalized === "ipados") {
+  if (normalized === "ipados") {
+    return "iPadOS";
+  }
+
+  if (normalized === "ios" || normalized === "iphoneos") {
     return "iOS";
   }
 
@@ -80,24 +92,25 @@ function inferPlatform(userAgent: string | null | undefined) {
   if (!value) {
     return null;
   }
+  const searchableValue = value.replace(/_/gu, " ");
 
-  if (/\b(?:iphone|ipad|ipod|ios)\b/iu.test(value)) {
+  if (/\b(?:iphone|ipad|ipod|ios)\b/iu.test(searchableValue)) {
     return "iOS";
   }
 
-  if (/\bandroid\b/iu.test(value)) {
+  if (/\bandroid\b/iu.test(searchableValue)) {
     return "Android";
   }
 
-  if (/\bwindows\b/iu.test(value)) {
+  if (/\bwindows\b/iu.test(searchableValue)) {
     return "Windows";
   }
 
-  if (/\b(?:macos|mac os x|darwin)\b/iu.test(value)) {
+  if (/\b(?:macintosh|macos|mac os x)\b/iu.test(searchableValue)) {
     return "macOS";
   }
 
-  if (/\blinux\b/iu.test(value)) {
+  if (/\blinux\b/iu.test(searchableValue)) {
     return "Linux";
   }
 
@@ -106,7 +119,13 @@ function inferPlatform(userAgent: string | null | undefined) {
 
 function deviceTypeFromPlatform(platform: string, userAgent: string | null | undefined) {
   if (platform === "iOS") {
-    const value = cleanTelemetry(userAgent, MAX_USER_AGENT_LENGTH) ?? "";
+    const value = (
+      cleanTelemetry(userAgent, MAX_USER_AGENT_LENGTH) ?? ""
+    ).replace(/_/gu, " ");
+
+    if (/\biphone\b/iu.test(value)) {
+      return "iPhone";
+    }
 
     if (/\bipad\b/iu.test(value)) {
       return "iPad";
@@ -116,11 +135,7 @@ function deviceTypeFromPlatform(platform: string, userAgent: string | null | und
       return "iPod";
     }
 
-    return "iPhone";
-  }
-
-  if (platform === "macOS") {
-    return "Mac";
+    return platform;
   }
 
   return platform;
@@ -129,7 +144,7 @@ function deviceTypeFromPlatform(platform: string, userAgent: string | null | und
 function formatDeviceType(device: SubscriptionDevice, platform: string | null) {
   const model = cleanTelemetry(device.device_model);
 
-  if (model && !TECHNICAL_DEVICE_MODEL.test(model)) {
+  if (model && !isTechnicalDeviceModel(model)) {
     return model;
   }
 
@@ -163,6 +178,23 @@ function formatClient(userAgent: string | null | undefined) {
   const value = cleanTelemetry(userAgent, MAX_USER_AGENT_LENGTH);
   if (!value) {
     return MISSING_DEVICE_VALUE;
+  }
+
+  const spaceVersionMatch = value.match(
+    /^([\p{L}][\p{L}\p{N}._+-]*)\s+[vV]?(\d[\p{L}\p{N}._+-]*)(?=[/\s(]|$)/u,
+  );
+  if (spaceVersionMatch) {
+    const [, rawName, rawVersion] = spaceVersionMatch;
+    const name = cleanTelemetry(rawName, 32);
+    const version = cleanTelemetry(rawVersion, 32);
+
+    if (
+      name &&
+      version &&
+      !GENERIC_CLIENT_NAMES.has(name.toLowerCase())
+    ) {
+      return `${name} ${version}`;
+    }
   }
 
   const separatorIndex = value.indexOf("/");
