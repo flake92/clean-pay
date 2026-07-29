@@ -66,6 +66,7 @@ vi.mock("@/backend/observability/audit", () => ({
 }));
 
 import {
+  assertEmailVerificationPolicy,
   clearWebSession,
   createWebSession,
   createWebSessionForRemnashopUser,
@@ -125,6 +126,50 @@ describe("web session lifecycle", () => {
       async (callback: (tx: typeof mocks.prisma) => unknown) =>
         callback(mocks.prisma),
     );
+  });
+
+  it.each([
+    [
+      { email: null, emailVerified: false, telegramId: "123" },
+      "EMAIL_REQUIRED",
+      401,
+    ],
+    [
+      {
+        email: "pending@example.com",
+        emailVerified: false,
+        telegramId: "123",
+      },
+      "EMAIL_NOT_VERIFIED",
+      403,
+    ],
+  ])(
+    "blocks commerce before verified e-mail even for Telegram sessions",
+    (policyUser, code, status) => {
+      expect(() =>
+        assertEmailVerificationPolicy(policyUser, {
+          requireVerifiedEmail: true,
+        }),
+      ).toThrow(
+        expect.objectContaining({
+          code,
+          status,
+        }),
+      );
+    },
+  );
+
+  it("allows commerce after the e-mail is verified", () => {
+    expect(() =>
+      assertEmailVerificationPolicy(
+        {
+          email: "verified@example.com",
+          emailVerified: true,
+          telegramId: "123",
+        },
+        { requireVerifiedEmail: true },
+      ),
+    ).not.toThrow();
   });
 
   it("creates email and Remnashop-backed sessions and sets access/refresh cookies", async () => {

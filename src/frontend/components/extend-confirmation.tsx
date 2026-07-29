@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useSearchParams } from "next/navigation";
 
 import type {
   DurationGatewayPrice,
@@ -10,6 +11,7 @@ import type {
 } from "@/shared/remnashop/types";
 import { AccountActionRequired } from "@/frontend/components/account-action-required";
 import { LinkButton } from "@/frontend/components/prime/link-button";
+import { replaceWith } from "@/frontend/lib/browser-navigation";
 import { BffClientError, readBffError } from "@/frontend/lib/client-api";
 import {
   clearPaymentIdempotencyKey,
@@ -23,6 +25,10 @@ import {
   confirmedPaymentOffer,
   paymentOfferMatches,
 } from "@/shared/payments/offer-confirmation";
+import {
+  accountLinkPath,
+  emailVerificationPath,
+} from "@/shared/auth/account-setup-flow";
 import { Button } from "primereact/button";
 import { Card } from "primereact/card";
 import { Dropdown } from "primereact/dropdown";
@@ -102,6 +108,40 @@ function firstSelection(plan: PlanOffer | undefined) {
   return buildPriceOptions(plan)[0]?.value ?? "";
 }
 
+function extensionDestination(
+  duration: string | number | null | undefined,
+  gateway: string | null | undefined,
+) {
+  const normalizedDuration =
+    duration === null || duration === undefined ? "" : String(duration);
+  const normalizedGateway = gateway ?? "";
+
+  if (
+    !/^(?:0|[1-9]\d{0,5})$/.test(normalizedDuration) ||
+    !normalizedGateway ||
+    normalizedGateway.length > 100
+  ) {
+    return "/extend";
+  }
+
+  return `/extend?${new URLSearchParams({
+    duration: normalizedDuration,
+    gateway: normalizedGateway,
+  }).toString()}`;
+}
+
+function initialSelection(
+  plan: PlanOffer | undefined,
+  duration: string | null,
+  gateway: string | null,
+) {
+  const requested = duration && gateway ? `${duration}:${gateway}` : "";
+
+  return buildPriceOptions(plan).some(({ value }) => value === requested)
+    ? requested
+    : firstSelection(plan);
+}
+
 function priceChoiceList(
   options: PriceOption[],
   selected: string,
@@ -127,49 +167,123 @@ function priceChoiceList(
   );
 }
 
-async function readError(response: Response) {
-  return (await readBffError(response, "Не удалось выполнить действие.")).message;
-}
-
 export function ExtendConfirmation() {
+  const searchParams = useSearchParams();
   const [state, setState] = useState<LoadState>({ status: "loading" });
   const [selection, setSelection] = useState("");
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const requestedDuration = searchParams.get("duration");
+  const requestedGateway = searchParams.get("gateway");
+  const requestedExtendDestination = extensionDestination(
+    requestedDuration,
+    requestedGateway,
+  );
 
   useEffect(() => {
-    fetch("/api/bff/subscription/offers")
-      .then(async (response) => {
-        if (!response.ok) {
+    let active = true;
+
+    async function loadExtension() {
+      try {
+        const profileResponse = await fetch("/api/bff/auth/me", {
+          cache: "no-store",
+        });
+
+        if (!profileResponse.ok) {
           throw await readBffError(
-            response,
-            response.status === 401
+            profileResponse,
+            profileResponse.status === 401
+              ? "Нужно войти в аккаунт."
+              : "Не удалось проверить готовность аккаунта.",
+          );
+        }
+
+        const profileBody = await profileResponse.json().catch(() => null);
+        const user = profileBody?.data?.user;
+        const emailVerified = Boolean(
+          user?.email &&
+            (user.emailVerified ?? user.is_email_verified),
+        );
+        const accountSyncPending = Boolean(
+          user?.accountSyncPending ?? user?.account_sync_pending,
+        );
+
+        if (accountSyncPending) {
+          replaceWith(
+            emailVerificationPath(requestedExtendDestination),
+          );
+          return;
+        }
+
+        if (!emailVerified) {
+          if (active) {
+            setState({
+              status: "error",
+              message:
+                "Для продления добавьте e-mail и пароль, затем подтвердите адрес кодом из письма.",
+              action: "linkEmail",
+            });
+          }
+          return;
+        }
+
+        const offersResponse = await fetch("/api/bff/subscription/offers");
+
+        if (!offersResponse.ok) {
+          throw await readBffError(
+            offersResponse,
+            offersResponse.status === 401
               ? "Нужно войти в аккаунт."
               : "Не удалось загрузить предложения продления.",
           );
         }
 
-        const body = await response.json().catch(() => null);
+        const offersBody = await offersResponse.json().catch(() => null);
 
-        return body.data as SubscriptionOffersResponse;
-      })
-      .then((offers) => {
-        setState({ status: "ready", offers });
-        setSelection(firstSelection(findRenewPlan(offers)));
-      })
-      .catch((error: Error) =>
+        if (!offersBody?.data) {
+          throw new Error("Сервер вернул некорректные данные продления.");
+        }
+
+        if (active) {
+          const offers = offersBody.data as SubscriptionOffersResponse;
+          setState({ status: "ready", offers });
+          setSelection(
+            initialSelection(
+              findRenewPlan(offers),
+              requestedDuration,
+              requestedGateway,
+            ),
+          );
+        }
+      } catch (error) {
+        if (!active) {
+          return;
+        }
+
         setState({
           status: "error",
-          message: error.message,
+          message:
+            error instanceof Error
+              ? error.message
+              : "Не удалось загрузить предложения продления.",
           action:
-            error instanceof BffClientError && error.code === "EMAIL_REQUIRED"
+            error instanceof BffClientError &&
+            (error.code === "EMAIL_REQUIRED" ||
+              error.code === "EMAIL_NOT_VERIFIED")
               ? "linkEmail"
               : error instanceof BffClientError && error.status === 401
                 ? "login"
                 : undefined,
-        }),
-      );
-  }, []);
+        });
+      }
+    }
+
+    void loadExtension();
+
+    return () => {
+      active = false;
+    };
+  }, [requestedDuration, requestedGateway, requestedExtendDestination]);
 
   if (state.status === "loading") {
     return <Message severity="info" text="Загрузка предложений..." />;
@@ -177,7 +291,13 @@ export function ExtendConfirmation() {
 
   if (state.status === "error") {
     if (state.action) {
-      return <AccountActionRequired action={state.action} message={state.message} />;
+      return (
+        <AccountActionRequired
+          action={state.action}
+          message={state.message}
+          redirectTo={requestedExtendDestination}
+        />
+      );
     }
 
     return (
@@ -218,6 +338,10 @@ export function ExtendConfirmation() {
     (price): price is DurationGatewayPrice => price.gateway_type === selectedGateway,
   );
   const priceOptions = buildPriceOptions(plan);
+  const selectedExtendDestination = extensionDestination(
+    selectedDuration?.days,
+    selectedPrice?.gateway_type,
+  );
 
   async function extendSubscription() {
     if (!plan || !selectedDuration || !selectedPrice) {
@@ -271,7 +395,16 @@ export function ExtendConfirmation() {
         );
         return;
       }
-    } catch {
+    } catch (error) {
+      if (
+        error instanceof BffClientError &&
+        (error.code === "EMAIL_REQUIRED" ||
+          error.code === "EMAIL_NOT_VERIFIED")
+      ) {
+        replaceWith(accountLinkPath(selectedExtendDestination));
+        return;
+      }
+
       setSubmitting(false);
       setSubmitError("Не удалось перепроверить цену. Продление не создано; повторите попытку позже.");
       return;
@@ -333,9 +466,22 @@ export function ExtendConfirmation() {
 
       if (!response.ok) {
         const manualReview = operationStatus?.status === "manual_required";
+        const responseError = manualReview
+          ? null
+          : await readBffError(response, "Не удалось выполнить действие.");
+
+        if (
+          responseError instanceof BffClientError &&
+          (responseError.code === "EMAIL_REQUIRED" ||
+            responseError.code === "EMAIL_NOT_VERIFIED")
+        ) {
+          replaceWith(accountLinkPath(selectedExtendDestination));
+          return;
+        }
+
         const message = manualReview
           ? `Статус продления не удалось определить автоматически. Не повторяйте оплату; обратитесь в поддержку и сообщите номер операции ${operationStatus.operationId}.`
-          : await readError(response);
+          : responseError?.message ?? "Не удалось выполнить действие.";
 
         if (manualReview) {
           storePaymentReturnReference({

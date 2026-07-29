@@ -13,6 +13,7 @@ const baseSession = {
     telegramUsername: "clean_user",
     email: "user@example.com",
     emailVerified: true,
+    authPending: false,
     fullName: "Clean User",
     displayName: "Clean",
   },
@@ -40,6 +41,7 @@ describe("auth payload helpers and profile presenters", () => {
   it("builds local and remnashop-backed profiles", () => {
     expect(localUserProfile(baseSession).auth_type).toBe("telegram");
     expect(localUserProfile(baseSession).telegram_id).toBe("12345");
+    expect(localUserProfile(baseSession).accountSyncPending).toBe(false);
 
     const profile = remnashopUserProfile(baseSession, {
       telegram_id: 999,
@@ -137,6 +139,36 @@ describe("auth payload helpers and profile presenters", () => {
       email: null,
       is_email_verified: false,
       emailVerified: false,
+    });
+  });
+
+  it("exposes pending account synchronization in both profile formats", () => {
+    const pendingSession = {
+      ...baseSession,
+      user: {
+        ...baseSession.user,
+        authPending: true,
+      },
+    } as ProfileSession;
+
+    expect(localUserProfile(pendingSession)).toMatchObject({
+      account_sync_pending: true,
+      accountSyncPending: true,
+    });
+    expect(
+      remnashopUserProfile(pendingSession, {
+        telegram_id: 12345,
+        auth_type: "telegram",
+        email: "user@example.com",
+        is_email_verified: true,
+        pending_email: null,
+        name: "Remote User",
+        username: "remote",
+        language: "ru",
+      }),
+    ).toMatchObject({
+      account_sync_pending: true,
+      accountSyncPending: true,
     });
   });
 

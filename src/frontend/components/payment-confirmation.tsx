@@ -12,6 +12,8 @@ import { Button } from "primereact/button";
 import { Card } from "primereact/card";
 import { Message } from "primereact/message";
 import { BffClientError, readBffError } from "@/frontend/lib/client-api";
+import { InstallAppButton } from "@/frontend/components/install-app-button";
+import { replaceWith } from "@/frontend/lib/browser-navigation";
 import {
   clearPaymentIdempotencyKey,
   getOrCreatePaymentIdempotencyKey,
@@ -25,6 +27,12 @@ import {
   confirmedPaymentOffer,
   paymentOfferMatches,
 } from "@/shared/payments/offer-confirmation";
+import {
+  accountLinkPath,
+  emailVerificationPath,
+  hasAccountSetupNotice,
+  passkeySetupPath,
+} from "@/shared/auth/account-setup-flow";
 
 type LoadState =
   | { status: "loading" }
@@ -80,10 +88,6 @@ function describePlan(plan: PlanOffer) {
   ].join(" · ");
 }
 
-async function readError(response: Response) {
-  return (await readBffError(response, 'Не удалось выполнить действие.')).message;
-}
-
 export function PaymentConfirmation() {
   const searchParams = useSearchParams();
   const [state, setState] = useState<LoadState>({ status: "loading" });
@@ -92,32 +96,110 @@ export function PaymentConfirmation() {
   const planCode = searchParams.get("plan");
   const durationDays = searchParams.get("duration");
   const gatewayType = searchParams.get("gateway");
+  const paymentSearchParams = new URLSearchParams(searchParams.toString());
+  paymentSearchParams.delete("account_setup");
+  const paymentRedirectTo = `/payment${
+    paymentSearchParams.size > 0 ? `?${paymentSearchParams.toString()}` : ""
+  }`;
+  const showAccountSetupNotice = hasAccountSetupNotice(searchParams);
 
   useEffect(() => {
-    fetch("/api/bff/subscription/offers")
-      .then(async (response) => {
-        if (!response.ok) {
-          throw await readBffError(response, response.status === 401 ? 'Нужно войти в аккаунт.' : 'Не удалось загрузить данные оплаты.');
+    let active = true;
+
+    async function loadPayment() {
+      try {
+        const profileResponse = await fetch("/api/bff/auth/me", {
+          cache: "no-store",
+        });
+
+        if (!profileResponse.ok) {
+          throw await readBffError(
+            profileResponse,
+            profileResponse.status === 401
+              ? "Нужно войти в аккаунт."
+              : "Не удалось проверить готовность аккаунта.",
+          );
         }
 
-        const body = await response.json().catch(() => null);
+        const profileBody = await profileResponse.json().catch(() => null);
+        const user = profileBody?.data?.user;
+        const emailVerified = Boolean(
+          user?.email &&
+            (user.emailVerified ?? user.is_email_verified),
+        );
+        const accountSyncPending = Boolean(
+          user?.accountSyncPending ?? user?.account_sync_pending,
+        );
 
-        return body.data as SubscriptionOffersResponse;
-      })
-      .then((offers) => setState({ status: "ready", offers }))
-      .catch((error: Error) =>
+        if (accountSyncPending) {
+          replaceWith(emailVerificationPath(paymentRedirectTo));
+          return;
+        }
+
+        if (!emailVerified) {
+          if (active) {
+            setState({
+              status: "error",
+              message:
+                "Для оплаты добавьте e-mail и пароль, затем подтвердите адрес кодом из письма.",
+              action: "linkEmail",
+            });
+          }
+          return;
+        }
+
+        const offersResponse = await fetch("/api/bff/subscription/offers");
+
+        if (!offersResponse.ok) {
+          throw await readBffError(
+            offersResponse,
+            offersResponse.status === 401
+              ? "Нужно войти в аккаунт."
+              : "Не удалось загрузить данные оплаты.",
+          );
+        }
+
+        const offersBody = await offersResponse.json().catch(() => null);
+
+        if (!offersBody?.data) {
+          throw new Error("Сервер вернул некорректные данные оплаты.");
+        }
+
+        if (active) {
+          setState({
+            status: "ready",
+            offers: offersBody.data as SubscriptionOffersResponse,
+          });
+        }
+      } catch (error) {
+        if (!active) {
+          return;
+        }
+
         setState({
           status: "error",
-          message: error.message,
+          message:
+            error instanceof Error
+              ? error.message
+              : "Не удалось загрузить данные оплаты.",
           action:
-            error instanceof BffClientError && error.code === "EMAIL_REQUIRED"
+            error instanceof BffClientError &&
+            (error.code === "EMAIL_REQUIRED" ||
+              error.code === "EMAIL_NOT_VERIFIED")
               ? "linkEmail"
               : error instanceof BffClientError && error.status === 401
                 ? "login"
                 : undefined,
-        }),
-      );
-  }, []);
+        });
+      }
+    }
+
+    void loadPayment();
+
+    return () => {
+      active = false;
+    };
+  }, [paymentRedirectTo]);
 
   const selection = useMemo(() => {
     if (state.status !== "ready") {
@@ -186,7 +268,16 @@ export function PaymentConfirmation() {
         );
         return;
       }
-    } catch {
+    } catch (error) {
+      if (
+        error instanceof BffClientError &&
+        (error.code === "EMAIL_REQUIRED" ||
+          error.code === "EMAIL_NOT_VERIFIED")
+      ) {
+        replaceWith(accountLinkPath(paymentRedirectTo));
+        return;
+      }
+
       setSubmitting(false);
       setSubmitError("Не удалось перепроверить цену. Оплата не создана; повторите попытку позже.");
       return;
@@ -248,9 +339,22 @@ export function PaymentConfirmation() {
 
       if (!response.ok) {
         const manualReview = operationStatus?.status === "manual_required";
+        const responseError = manualReview
+          ? null
+          : await readBffError(response, "Не удалось выполнить действие.");
+
+        if (
+          responseError instanceof BffClientError &&
+          (responseError.code === "EMAIL_REQUIRED" ||
+            responseError.code === "EMAIL_NOT_VERIFIED")
+        ) {
+          replaceWith(accountLinkPath(paymentRedirectTo));
+          return;
+        }
+
         const message = manualReview
           ? `Статус оплаты не удалось определить автоматически. Не повторяйте оплату; обратитесь в поддержку и сообщите номер операции ${operationStatus.operationId}.`
-          : await readError(response);
+          : responseError?.message ?? "Не удалось выполнить действие.";
 
         if (manualReview) {
           storePaymentReturnReference({
@@ -317,7 +421,13 @@ export function PaymentConfirmation() {
 
   if (state.status === "error") {
     if (state.action) {
-      return <AccountActionRequired action={state.action} message={state.message} />;
+      return (
+        <AccountActionRequired
+          action={state.action}
+          message={state.message}
+          redirectTo={paymentRedirectTo}
+        />
+      );
     }
 
     return (
@@ -338,6 +448,34 @@ export function PaymentConfirmation() {
 
   return (
     <div className="flex flex-column gap-4">
+      {showAccountSetupNotice ? (
+        <Card>
+          <div className="flex flex-column gap-3">
+            <Message
+              severity="success"
+              text="E-mail подтверждён. Вы вернулись к выбранной оплате и можете продолжить."
+            />
+            <p className="m-0 line-height-3 text-600">
+              Теперь в аккаунт можно войти по e-mail и паролю, даже если
+              Telegram временно недоступен. Дополнительно можно установить
+              приложение и настроить быстрый вход — это необязательно и не
+              мешает оплате.
+            </p>
+            <div className="flex flex-wrap gap-3">
+              <InstallAppButton
+                alwaysVisible
+                autoOpenIosGuide={false}
+              />
+              <LinkButton
+                href={passkeySetupPath(paymentRedirectTo)}
+                icon="pi pi-lock"
+                label="Настроить быстрый вход"
+                outlined
+              />
+            </div>
+          </div>
+        </Card>
+      ) : null}
       <Card>
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>

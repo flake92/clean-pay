@@ -166,6 +166,49 @@ export async function requestRemnashopEmailVerification({
   throw new BffError("UPSTREAM_UNAVAILABLE", 502, "Failed to send verification email");
 }
 
+function assertTelegramEmailSetupIsPasswordBacked(
+  accessToken: string,
+  session: Awaited<ReturnType<typeof getAuthorizedRemnashopTokens>>["session"],
+  targetEmail?: string | null,
+) {
+  if (!session.user.telegramId) {
+    return;
+  }
+
+  const normalizedTargetEmail = targetEmail?.trim().toLowerCase() || null;
+  const normalizedLocalEmail =
+    session.user.email?.trim().toLowerCase() || null;
+  const normalizedPendingEmail =
+    session.user.pendingRemnashopEmail?.trim().toLowerCase() || null;
+  const authorizedRemnashopUserId =
+    getRemnashopUserIdFromAccessToken(accessToken);
+  const establishedVerifiedEmailMatchesTarget = Boolean(
+    session.user.emailVerified &&
+      normalizedLocalEmail &&
+      (!normalizedTargetEmail ||
+        normalizedLocalEmail === normalizedTargetEmail),
+  );
+  const passwordBackedAccountWasStaged = Boolean(
+    session.user.pendingRemnashopUserId === authorizedRemnashopUserId &&
+      normalizedPendingEmail &&
+      (!normalizedTargetEmail ||
+        normalizedPendingEmail === normalizedTargetEmail),
+  );
+
+  if (
+    establishedVerifiedEmailMatchesTarget ||
+    passwordBackedAccountWasStaged
+  ) {
+    return;
+  }
+
+  throw new BffError(
+    "EMAIL_REQUIRED",
+    401,
+    "Add an e-mail and password through the guided account setup before verifying the address.",
+  );
+}
+
 export async function requestEmailVerification(rawBody: AuthPayload<RequestEmailVerificationRequest>, turnstile: TurnstileContext) {
   const { body, turnstileToken } = stripTurnstile(rawBody);
 
@@ -179,6 +222,11 @@ export async function requestEmailVerification(rawBody: AuthPayload<RequestEmail
   const { accessToken, session } = await getAuthorizedRemnashopTokens({
     allowUnverifiedEmail: true,
   });
+  assertTelegramEmailSetupIsPasswordBacked(
+    accessToken,
+    session,
+    body.email,
+  );
   authDebugLog("email_verification_request_session_authorized", {
     sessionId: session.id,
     userId: session.userId,
@@ -238,8 +286,20 @@ export async function confirmEmailVerification(rawBody: AuthPayload<ConfirmEmail
   const { accessToken, refreshToken, session } = await getAuthorizedRemnashopTokens({
     allowUnverifiedEmail: true,
   });
+  assertTelegramEmailSetupIsPasswordBacked(
+    accessToken,
+    session,
+    body.email ??
+      session.user.pendingRemnashopEmail ??
+      session.user.email,
+  );
   const profile = await getRemnashopMe(accessToken);
   const targetEmail = body.email ?? profile.pending_email ?? profile.email ?? session.user.email ?? undefined;
+  assertTelegramEmailSetupIsPasswordBacked(
+    accessToken,
+    session,
+    targetEmail,
+  );
   const confirmBody = targetEmail ? { ...body, email: targetEmail } : body;
   authDebugLog("email_verification_confirm_target_resolved", {
     sessionId: session.id,
@@ -475,6 +535,7 @@ export async function changeEmail(rawBody: AuthPayload<ChangeEmailRequest>, turn
   await verifyTurnstileToken(turnstileToken ?? turnstile.token, turnstile.remoteIp);
   authDebugLog("email_change_turnstile_passed", {});
   const { accessToken, session } = await getAuthorizedRemnashopTokens();
+  assertTelegramEmailSetupIsPasswordBacked(accessToken, session);
   authDebugLog("email_change_session_authorized", {
     sessionId: session.id,
     userId: session.userId,
@@ -512,7 +573,17 @@ export async function changeEmail(rawBody: AuthPayload<ChangeEmailRequest>, turn
   });
   await prisma.webUser.update({
     where: { id: session.userId },
-    data: { emailVerified: false },
+    data: {
+      emailVerified: false,
+      ...(session.user.telegramId
+        ? {
+            authPending: false,
+            pendingRemnashopUserId:
+              getRemnashopUserIdFromAccessToken(accessToken),
+            pendingRemnashopEmail: result.pending_email,
+          }
+        : {}),
+    },
   });
   await refreshCurrentAccessCookie();
 

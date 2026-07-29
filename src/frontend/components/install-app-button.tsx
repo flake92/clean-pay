@@ -43,7 +43,13 @@ function isStandalone() {
   return window.matchMedia("(display-mode: standalone)").matches || ("standalone" in navigator && (navigator as Navigator & { standalone?: boolean }).standalone === true);
 }
 
-export function InstallAppButton({ alwaysVisible = false }: { alwaysVisible?: boolean } = {}) {
+export function InstallAppButton({
+  alwaysVisible = false,
+  autoOpenIosGuide = alwaysVisible,
+}: {
+  alwaysVisible?: boolean;
+  autoOpenIosGuide?: boolean;
+}) {
   const [installEvent, setInstallEvent] = useState<BeforeInstallPromptEvent | null>(null);
   const [showIosGuide, setShowIosGuide] = useState(false);
   const [showAndroidGuide, setShowAndroidGuide] = useState(false);
@@ -61,7 +67,12 @@ export function InstallAppButton({ alwaysVisible = false }: { alwaysVisible?: bo
       const embedded = isEmbeddedMobileBrowser();
       setEmbeddedBrowser(embedded);
 
-      if (alwaysVisible && (isIos || requestedPlatform === "ios") && !embedded && !isStandalone()) {
+      if (
+        autoOpenIosGuide &&
+        (isIos || requestedPlatform === "ios") &&
+        !embedded &&
+        !isStandalone()
+      ) {
         setShowIosGuide(true);
       }
 
@@ -82,7 +93,7 @@ export function InstallAppButton({ alwaysVisible = false }: { alwaysVisible?: bo
     }
 
     return () => { window.clearTimeout(platformTimer); window.removeEventListener("beforeinstallprompt", onBeforeInstallPrompt); window.removeEventListener("appinstalled", onInstalled); };
-  }, [alwaysVisible]);
+  }, [autoOpenIosGuide]);
 
   function openExternalInstallPage() {
     const installUrl = new URL("/install", window.location.origin);

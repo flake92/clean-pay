@@ -4,8 +4,18 @@ import { act, createElement, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+const navigationState = vi.hoisted(() => ({
+  search: "plan=pro&duration=30&gateway=card",
+}));
+const navigationMocks = vi.hoisted(() => ({
+  replaceWith: vi.fn(),
+}));
+
 vi.mock("next/navigation", () => ({
-  useSearchParams: () => new URLSearchParams("plan=pro&duration=30&gateway=card"),
+  useSearchParams: () => new URLSearchParams(navigationState.search),
+}));
+vi.mock("@/frontend/lib/browser-navigation", () => ({
+  replaceWith: navigationMocks.replaceWith,
 }));
 vi.mock("primereact/button", () => ({
   Button: (props: Record<string, unknown>) => {
@@ -26,10 +36,30 @@ vi.mock("primereact/message", () => ({
   Message: ({ text }: { text?: string }) => createElement("div", { role: "alert" }, text),
 }));
 vi.mock("@/frontend/components/account-action-required", () => ({
-  AccountActionRequired: ({ message }: { message: string }) => createElement("div", null, message),
+  AccountActionRequired: ({
+    action,
+    message,
+    redirectTo,
+  }: {
+    action: string;
+    message: string;
+    redirectTo?: string;
+  }) =>
+    createElement(
+      "div",
+      {
+        "data-account-action": action,
+        "data-redirect-to": redirectTo,
+      },
+      message,
+    ),
 }));
 vi.mock("@/frontend/components/prime/link-button", () => ({
-  LinkButton: ({ label }: { label: string }) => createElement("a", null, label),
+  LinkButton: ({ href, label }: { href?: string; label: string }) =>
+    createElement("a", { href }, label),
+}));
+vi.mock("@/frontend/components/install-app-button", () => ({
+  InstallAppButton: () => createElement("button", null, "Установить приложение"),
 }));
 
 import { ExtendConfirmation } from "@/frontend/components/extend-confirmation";
@@ -71,6 +101,17 @@ const offers = {
   ],
 };
 
+function verifiedProfileResponse() {
+  return Response.json({
+    data: {
+      user: {
+        email: "user@example.com",
+        emailVerified: true,
+      },
+    },
+  });
+}
+
 async function settle() {
   await act(async () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
@@ -94,6 +135,8 @@ describe("payment action loading recovery", () => {
   let root: Root;
 
   beforeEach(() => {
+    vi.clearAllMocks();
+    navigationState.search = "plan=pro&duration=30&gateway=card";
     window.sessionStorage.clear();
     vi.stubGlobal("fetch", vi.fn());
     container = document.createElement("div");
@@ -110,6 +153,7 @@ describe("payment action loading recovery", () => {
 
   it("stops purchase loading and reuses the same key after a lost response", async () => {
     vi.mocked(fetch)
+      .mockResolvedValueOnce(verifiedProfileResponse())
       .mockResolvedValueOnce(Response.json({ data: offers }))
       .mockResolvedValueOnce(Response.json({ data: offers }))
       .mockRejectedValueOnce(new TypeError("response lost"))
@@ -126,13 +170,151 @@ describe("payment action loading recovery", () => {
     expect(container.textContent).toContain("новая оплата не будет создана");
 
     await click(paymentButton);
-    expect(idempotencyKey(vi.mocked(fetch).mock.calls[2])).toBe(
-      idempotencyKey(vi.mocked(fetch).mock.calls[4]),
+    expect(idempotencyKey(vi.mocked(fetch).mock.calls[3])).toBe(
+      idempotencyKey(vi.mocked(fetch).mock.calls[5]),
     );
   });
 
+  it("guides an unverified Telegram session before creating a payment operation", async () => {
+    vi.mocked(fetch)
+      .mockResolvedValueOnce(Response.json({
+        data: {
+          user: {
+            email: null,
+            emailVerified: false,
+            telegramId: "777",
+          },
+        },
+      }));
+
+    await act(async () => root.render(createElement(PaymentConfirmation)));
+    await settle();
+
+    const action = container.querySelector<HTMLElement>(
+      '[data-account-action="linkEmail"]',
+    );
+    expect(action).not.toBeNull();
+    expect(action?.dataset.redirectTo).toBe(
+      "/payment?plan=pro&duration=30&gateway=card",
+    );
+    expect(container.textContent).toContain("e-mail и пароль");
+    expect(
+      Array.from(container.querySelectorAll("button")).some(
+        (button) => button.textContent === "Перейти к оплате",
+      ),
+    ).toBe(false);
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("offers optional installation and Passkey without blocking the returned payment", async () => {
+    navigationState.search =
+      "plan=pro&duration=30&gateway=card&account_setup=account-ready";
+    vi.mocked(fetch)
+      .mockResolvedValueOnce(verifiedProfileResponse())
+      .mockResolvedValueOnce(Response.json({ data: offers }));
+
+    await act(async () => root.render(createElement(PaymentConfirmation)));
+    await settle();
+
+    expect(container.textContent).toContain("Вы вернулись к выбранной оплате");
+    expect(container.textContent).toContain("Установить приложение");
+    expect(
+      Array.from(container.querySelectorAll("a")).find(
+        (link) => link.textContent === "Настроить быстрый вход",
+      )?.getAttribute("href"),
+    ).toBe(
+      "/passkey/setup?redirect_to=%2Fpayment%3Fplan%3Dpro%26duration%3D30%26gateway%3Dcard",
+    );
+    expect(container.textContent).toContain("Перейти к оплате");
+  });
+
+  it("returns a verification race to guided setup before retrying payment", async () => {
+    vi.mocked(fetch)
+      .mockResolvedValueOnce(verifiedProfileResponse())
+      .mockResolvedValueOnce(Response.json({ data: offers }))
+      .mockResolvedValueOnce(Response.json({ data: offers }))
+      .mockResolvedValueOnce(
+        Response.json(
+          {
+            error: {
+              code: "EMAIL_NOT_VERIFIED",
+              message: "Подтвердите e-mail.",
+            },
+          },
+          { status: 403 },
+        ),
+      );
+
+    await act(async () => root.render(createElement(PaymentConfirmation)));
+    await settle();
+    const paymentButton = Array.from(container.querySelectorAll("button")).find(
+      (button) => button.textContent === "Перейти к оплате",
+    )!;
+    await click(paymentButton);
+
+    expect(navigationMocks.replaceWith).toHaveBeenCalledWith(
+      "/link-account?reason=email-required&redirect_to=%2Fpayment%3Fplan%3Dpro%26duration%3D30%26gateway%3Dcard",
+    );
+    expect(window.sessionStorage.length).toBe(1);
+
+    vi.mocked(fetch)
+      .mockResolvedValueOnce(Response.json({ data: offers }))
+      .mockResolvedValueOnce(
+        Response.json(
+          {
+            error: {
+              code: "VALIDATION_ERROR",
+              message: "Операция отклонена после возврата.",
+            },
+          },
+          { status: 400 },
+        ),
+      );
+    await click(paymentButton);
+    expect(idempotencyKey(vi.mocked(fetch).mock.calls[3])).toBe(
+      idempotencyKey(vi.mocked(fetch).mock.calls[5]),
+    );
+  });
+
+  it.each([
+    [
+      "purchase",
+      PaymentConfirmation,
+      "/verify-email?flow=telegram-email&redirect_to=%2Fpayment%3Fplan%3Dpro%26duration%3D30%26gateway%3Dcard",
+    ],
+    [
+      "extend",
+      ExtendConfirmation,
+      "/verify-email?flow=telegram-email&redirect_to=%2Fextend%3Fduration%3D30%26gateway%3Dcard",
+    ],
+  ] as const)(
+    "keeps a synchronizing %s account away from payment operations",
+    async (_operation, Component, expectedDestination) => {
+      vi.mocked(fetch).mockResolvedValueOnce(
+        Response.json({
+          data: {
+            user: {
+              email: "user@example.com",
+              emailVerified: true,
+              accountSyncPending: true,
+            },
+          },
+        }),
+      );
+
+      await act(async () => root.render(createElement(Component)));
+      await settle();
+
+      expect(navigationMocks.replaceWith).toHaveBeenCalledWith(
+        expectedDestination,
+      );
+      expect(fetch).toHaveBeenCalledTimes(1);
+    },
+  );
+
   it("stops extend loading and reuses the same key after a lost response", async () => {
     vi.mocked(fetch)
+      .mockResolvedValueOnce(verifiedProfileResponse())
       .mockResolvedValueOnce(Response.json({ data: offers }))
       .mockResolvedValueOnce(Response.json({ data: offers }))
       .mockRejectedValueOnce(new TypeError("response lost"))
@@ -150,8 +332,303 @@ describe("payment action loading recovery", () => {
     expect(container.textContent).toContain("новая оплата не будет создана");
 
     await click(extendButton);
-    expect(idempotencyKey(vi.mocked(fetch).mock.calls[2])).toBe(
-      idempotencyKey(vi.mocked(fetch).mock.calls[4]),
+    expect(idempotencyKey(vi.mocked(fetch).mock.calls[3])).toBe(
+      idempotencyKey(vi.mocked(fetch).mock.calls[5]),
+    );
+  });
+
+  it("guides an unverified Telegram session before creating an extend operation", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(
+      Response.json({
+        data: {
+          user: {
+            email: null,
+            emailVerified: false,
+            telegramId: "777",
+          },
+        },
+      }),
+    );
+
+    await act(async () => root.render(createElement(ExtendConfirmation)));
+    await settle();
+
+    const action = container.querySelector<HTMLElement>(
+      '[data-account-action="linkEmail"]',
+    );
+    expect(action).not.toBeNull();
+    expect(action?.dataset.redirectTo).toBe(
+      "/extend?duration=30&gateway=card",
+    );
+    expect(container.textContent).toContain("e-mail и пароль");
+    expect(
+      Array.from(container.querySelectorAll("button")).some(
+        (button) => button.textContent === "Продлить",
+      ),
+    ).toBe(false);
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("returns a verification race to guided setup before retrying extend", async () => {
+    vi.mocked(fetch)
+      .mockResolvedValueOnce(verifiedProfileResponse())
+      .mockResolvedValueOnce(Response.json({ data: offers }))
+      .mockResolvedValueOnce(Response.json({ data: offers }))
+      .mockResolvedValueOnce(
+        Response.json(
+          {
+            error: {
+              code: "EMAIL_NOT_VERIFIED",
+              message: "Подтвердите e-mail.",
+            },
+          },
+          { status: 403 },
+        ),
+      );
+
+    await act(async () => root.render(createElement(ExtendConfirmation)));
+    await settle();
+    const extendButton = Array.from(container.querySelectorAll("button")).find(
+      (button) => button.textContent === "Продлить",
+    )!;
+    await click(extendButton);
+
+    expect(navigationMocks.replaceWith).toHaveBeenCalledWith(
+      "/link-account?reason=email-required&redirect_to=%2Fextend%3Fduration%3D30%26gateway%3Dcard",
+    );
+    expect(window.sessionStorage.length).toBe(1);
+
+    vi.mocked(fetch)
+      .mockResolvedValueOnce(Response.json({ data: offers }))
+      .mockResolvedValueOnce(
+        Response.json(
+          {
+            error: {
+              code: "VALIDATION_ERROR",
+              message: "Операция отклонена после возврата.",
+            },
+          },
+          { status: 400 },
+        ),
+      );
+    await click(extendButton);
+    expect(idempotencyKey(vi.mocked(fetch).mock.calls[3])).toBe(
+      idempotencyKey(vi.mocked(fetch).mock.calls[5]),
+    );
+  });
+
+  it.each([
+    [
+      "purchase",
+      PaymentConfirmation,
+      "Перейти к оплате",
+      "EMAIL_REQUIRED",
+      "/link-account?reason=email-required&redirect_to=%2Fpayment%3Fplan%3Dpro%26duration%3D30%26gateway%3Dcard",
+    ],
+    [
+      "purchase",
+      PaymentConfirmation,
+      "Перейти к оплате",
+      "EMAIL_NOT_VERIFIED",
+      "/link-account?reason=email-required&redirect_to=%2Fpayment%3Fplan%3Dpro%26duration%3D30%26gateway%3Dcard",
+    ],
+    [
+      "extend",
+      ExtendConfirmation,
+      "Продлить",
+      "EMAIL_REQUIRED",
+      "/link-account?reason=email-required&redirect_to=%2Fextend%3Fduration%3D30%26gateway%3Dcard",
+    ],
+    [
+      "extend",
+      ExtendConfirmation,
+      "Продлить",
+      "EMAIL_NOT_VERIFIED",
+      "/link-account?reason=email-required&redirect_to=%2Fextend%3Fduration%3D30%26gateway%3Dcard",
+    ],
+  ] as const)(
+    "redirects a %s %s price-check race before creating an operation",
+    async (
+      _operation,
+      Component,
+      buttonLabel,
+      errorCode,
+      expectedDestination,
+    ) => {
+      vi.mocked(fetch)
+        .mockResolvedValueOnce(verifiedProfileResponse())
+        .mockResolvedValueOnce(Response.json({ data: offers }))
+        .mockResolvedValueOnce(
+          Response.json(
+            {
+              error: {
+                code: errorCode,
+                message: "Подтвердите e-mail.",
+              },
+            },
+            { status: errorCode === "EMAIL_REQUIRED" ? 401 : 403 },
+          ),
+        );
+
+      await act(async () => root.render(createElement(Component)));
+      await settle();
+      const actionButton = Array.from(
+        container.querySelectorAll("button"),
+      ).find((button) => button.textContent === buttonLabel)!;
+      await click(actionButton);
+
+      expect(navigationMocks.replaceWith).toHaveBeenCalledWith(
+        expectedDestination,
+      );
+      expect(fetch).toHaveBeenCalledTimes(3);
+      expect(window.sessionStorage.length).toBe(0);
+    },
+  );
+
+  it("restores a non-default extension choice and preserves it through setup", async () => {
+    navigationState.search = "duration=90&gateway=sbp";
+    const multipleOffers = structuredClone(offers);
+    multipleOffers.plans[0]!.durations.push({
+      days: 90,
+      prices: [
+        {
+          gateway_type: "sbp",
+          currency: "RUB",
+          final_amount: "250",
+          currency_symbol: "₽",
+          original_amount: "250",
+          discount_percent: 0,
+          is_free: false,
+        },
+      ],
+    });
+    vi.mocked(fetch)
+      .mockResolvedValueOnce(verifiedProfileResponse())
+      .mockResolvedValueOnce(Response.json({ data: multipleOffers }))
+      .mockResolvedValueOnce(Response.json({ data: multipleOffers }))
+      .mockResolvedValueOnce(
+        Response.json(
+          {
+            error: {
+              code: "EMAIL_NOT_VERIFIED",
+              message: "Подтвердите e-mail.",
+            },
+          },
+          { status: 403 },
+        ),
+      );
+
+    await act(async () => root.render(createElement(ExtendConfirmation)));
+    await settle();
+
+    expect(
+      container.querySelector(".clean-pay-price-choice--selected")?.textContent,
+    ).toContain("250 ₽");
+    const extendButton = Array.from(container.querySelectorAll("button")).find(
+      (button) => button.textContent === "Продлить",
+    )!;
+    await click(extendButton);
+
+    expect(navigationMocks.replaceWith).toHaveBeenCalledWith(
+      "/link-account?reason=email-required&redirect_to=%2Fextend%3Fduration%3D90%26gateway%3Dsbp",
+    );
+  });
+
+  it("preserves a lifetime extension choice through account setup", async () => {
+    navigationState.search = "duration=0&gateway=card";
+    const lifetimeOffers = structuredClone(offers);
+    lifetimeOffers.plans[0]!.durations.push({
+      days: 0,
+      prices: [
+        {
+          gateway_type: "card",
+          currency: "RUB",
+          final_amount: "900",
+          currency_symbol: "₽",
+          original_amount: "900",
+          discount_percent: 0,
+          is_free: false,
+        },
+      ],
+    });
+    vi.mocked(fetch)
+      .mockResolvedValueOnce(verifiedProfileResponse())
+      .mockResolvedValueOnce(Response.json({ data: lifetimeOffers }))
+      .mockResolvedValueOnce(Response.json({ data: lifetimeOffers }))
+      .mockResolvedValueOnce(
+        Response.json(
+          {
+            error: {
+              code: "EMAIL_REQUIRED",
+              message: "Добавьте e-mail и пароль.",
+            },
+          },
+          { status: 401 },
+        ),
+      );
+
+    await act(async () => root.render(createElement(ExtendConfirmation)));
+    await settle();
+
+    expect(
+      container.querySelector(".clean-pay-price-choice--selected")?.textContent,
+    ).toContain("∞");
+    const extendButton = Array.from(container.querySelectorAll("button")).find(
+      (button) => button.textContent === "Продлить",
+    )!;
+    await click(extendButton);
+
+    expect(navigationMocks.replaceWith).toHaveBeenCalledWith(
+      "/link-account?reason=email-required&redirect_to=%2Fextend%3Fduration%3D0%26gateway%3Dcard",
+    );
+  });
+
+  it("preserves the exact gateway value through extension account setup", async () => {
+    navigationState.search = "duration=90&gateway=%20edge%20";
+    const whitespaceGatewayOffers = structuredClone(offers);
+    whitespaceGatewayOffers.plans[0]!.durations.push({
+      days: 90,
+      prices: [
+        {
+          gateway_type: " edge ",
+          currency: "RUB",
+          final_amount: "250",
+          currency_symbol: "₽",
+          original_amount: "250",
+          discount_percent: 0,
+          is_free: false,
+        },
+      ],
+    });
+    vi.mocked(fetch)
+      .mockResolvedValueOnce(verifiedProfileResponse())
+      .mockResolvedValueOnce(Response.json({ data: whitespaceGatewayOffers }))
+      .mockResolvedValueOnce(Response.json({ data: whitespaceGatewayOffers }))
+      .mockResolvedValueOnce(
+        Response.json(
+          {
+            error: {
+              code: "EMAIL_REQUIRED",
+              message: "Добавьте e-mail и пароль.",
+            },
+          },
+          { status: 401 },
+        ),
+      );
+
+    await act(async () => root.render(createElement(ExtendConfirmation)));
+    await settle();
+
+    expect(
+      container.querySelector(".clean-pay-price-choice--selected")?.textContent,
+    ).toContain("250 ₽");
+    const extendButton = Array.from(container.querySelectorAll("button")).find(
+      (button) => button.textContent === "Продлить",
+    )!;
+    await click(extendButton);
+
+    expect(navigationMocks.replaceWith).toHaveBeenCalledWith(
+      "/link-account?reason=email-required&redirect_to=%2Fextend%3Fduration%3D90%26gateway%3D%2Bedge%2B",
     );
   });
 
@@ -161,7 +638,9 @@ describe("payment action loading recovery", () => {
   ] as const)(
     "handles a non-JSON successful %s response as unknown and stops loading",
     async (_operation, Component, buttonLabel) => {
-      vi.mocked(fetch)
+      const fetchMock = vi.mocked(fetch);
+      fetchMock
+        .mockResolvedValueOnce(verifiedProfileResponse())
         .mockResolvedValueOnce(Response.json({ data: offers }))
         .mockResolvedValueOnce(Response.json({ data: offers }))
         .mockResolvedValueOnce(
@@ -188,13 +667,15 @@ describe("payment action loading recovery", () => {
     ["purchase", PaymentConfirmation, "Перейти к оплате"],
     ["extend", ExtendConfirmation, "Продлить"],
   ] as const)("shows the changed %s price before creating an invoice", async (
-    _operation,
+    operation,
     Component,
     buttonLabel,
   ) => {
     const changedOffers = structuredClone(offers);
     changedOffers.plans[0]!.durations[0]!.prices[0]!.final_amount = "150";
-    vi.mocked(fetch)
+    const fetchMock = vi.mocked(fetch);
+    fetchMock
+      .mockResolvedValueOnce(verifiedProfileResponse())
       .mockResolvedValueOnce(Response.json({ data: offers }))
       .mockResolvedValueOnce(Response.json({ data: changedOffers }));
     await act(async () => root.render(createElement(Component)));
@@ -207,7 +688,7 @@ describe("payment action loading recovery", () => {
 
     expect(actionButton.disabled).toBe(false);
     expect(container.textContent).toContain("было 100 ₽, стало 150 ₽");
-    expect(fetch).toHaveBeenCalledTimes(2);
+    expect(fetch).toHaveBeenCalledTimes(3);
     expect(window.sessionStorage.length).toBe(0);
   });
 });

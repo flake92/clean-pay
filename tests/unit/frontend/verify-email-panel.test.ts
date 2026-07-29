@@ -4,6 +4,15 @@ import { act, createElement, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+const mocks = vi.hoisted(() => ({
+  navigateTo: vi.fn(),
+  replaceWith: vi.fn(),
+}));
+
+vi.mock("@/frontend/lib/browser-navigation", () => ({
+  navigateTo: mocks.navigateTo,
+  replaceWith: mocks.replaceWith,
+}));
 vi.mock("primereact/button", () => ({
   Button: (props: Record<string, unknown>) => {
     const buttonProps = { ...props };
@@ -29,6 +38,10 @@ vi.mock("@/frontend/components/turnstile-widget", () => ({
   TurnstileWidget: () => null,
   hasTurnstileSiteKey: () => false,
 }));
+vi.mock("@/frontend/components/prime/link-button", () => ({
+  LinkButton: ({ href, label }: { href: string; label: string }) =>
+    createElement("a", { href }, label),
+}));
 
 import { VerifyEmailPanel } from "@/frontend/components/verify-email-panel";
 
@@ -53,11 +66,22 @@ async function submit(form: HTMLFormElement) {
   });
 }
 
+async function click(button: HTMLButtonElement) {
+  await act(async () => {
+    button.dispatchEvent(
+      new MouseEvent("click", { bubbles: true, cancelable: true }),
+    );
+    await Promise.resolve();
+    await Promise.resolve();
+  });
+}
+
 describe("e-mail verification feedback", () => {
   let container: HTMLDivElement;
   let root: Root;
 
   beforeEach(() => {
+    vi.clearAllMocks();
     vi.stubGlobal("fetch", vi.fn());
     container = document.createElement("div");
     document.body.append(container);
@@ -125,8 +149,268 @@ describe("e-mail verification feedback", () => {
     await submit(container.querySelector("form")!);
 
     expect(container.textContent).toContain("E-mail подтверждён");
-    expect(container.textContent).toContain("Синхронизация с Telegram");
+    expect(container.textContent).toContain("Синхронизация аккаунта");
     expect(container.querySelector('[data-severity="warn"]')).not.toBeNull();
     expect(container.querySelector("form")).toBeNull();
+  });
+
+  it("verifies convergence and returns a guided flow to the exact payment", async () => {
+    vi.mocked(fetch)
+      .mockResolvedValueOnce(Response.json({
+        data: { user: { email: "user@example.com", emailVerified: false } },
+      }))
+      .mockResolvedValueOnce(Response.json({
+        data: {
+          success: true,
+          email: "user@example.com",
+          account_sync_pending: false,
+        },
+      }))
+      .mockResolvedValueOnce(Response.json({
+        data: { user: { email: "user@example.com", emailVerified: true } },
+      }));
+
+    await act(async () =>
+      root.render(
+        createElement(VerifyEmailPanel, {
+          autoContinue: true,
+          redirectTo: "/payment?plan=pro&duration=30&gateway=card",
+        }),
+      ),
+    );
+    await flush();
+    await act(async () =>
+      setInputValue(
+        container.querySelector<HTMLInputElement>('input[name="code"]')!,
+        "123456",
+      ),
+    );
+    await submit(container.querySelector("form")!);
+
+    expect(mocks.replaceWith).toHaveBeenCalledWith(
+      "/payment?plan=pro&duration=30&gateway=card&account_setup=account-ready",
+    );
+    expect(fetch).toHaveBeenCalledTimes(3);
+    expect(container.textContent).toContain("Возвращаем");
+  });
+
+  it("does not return to payment while post-confirm synchronization is pending", async () => {
+    vi.mocked(fetch)
+      .mockResolvedValueOnce(Response.json({
+        data: { user: { email: "user@example.com", emailVerified: false } },
+      }))
+      .mockResolvedValueOnce(Response.json({
+        data: {
+          success: true,
+          email: "user@example.com",
+          account_sync_pending: true,
+        },
+      }));
+
+    await act(async () =>
+      root.render(
+        createElement(VerifyEmailPanel, {
+          autoContinue: true,
+          redirectTo: "/payment?plan=pro",
+        }),
+      ),
+    );
+    await flush();
+    await act(async () =>
+      setInputValue(
+        container.querySelector<HTMLInputElement>('input[name="code"]')!,
+        "123456",
+      ),
+    );
+    await submit(container.querySelector("form")!);
+
+    expect(mocks.replaceWith).not.toHaveBeenCalled();
+    expect(container.textContent).toContain(
+      "Синхронизация с Telegram ещё продолжается",
+    );
+    expect(container.textContent).toContain("Проверить и продолжить");
+  });
+
+  it("waits for account_sync_pending to clear before returning to payment", async () => {
+    vi.mocked(fetch)
+      .mockResolvedValueOnce(
+        Response.json({
+          data: {
+            user: {
+              email: "user@example.com",
+              emailVerified: true,
+              accountSyncPending: true,
+            },
+          },
+        }),
+      )
+      .mockResolvedValueOnce(
+        Response.json({
+          data: {
+            user: {
+              email: "user@example.com",
+              emailVerified: true,
+              accountSyncPending: true,
+            },
+          },
+        }),
+      )
+      .mockResolvedValueOnce(
+        Response.json({
+          data: {
+            user: {
+              email: "user@example.com",
+              emailVerified: true,
+              accountSyncPending: false,
+            },
+          },
+        }),
+      );
+
+    await act(async () =>
+      root.render(
+        createElement(VerifyEmailPanel, {
+          autoContinue: true,
+          redirectTo: "/payment?plan=pro",
+        }),
+      ),
+    );
+    await flush();
+
+    const checkButton = Array.from(container.querySelectorAll("button")).find(
+      (button) => button.textContent === "Проверить и продолжить",
+    )!;
+    await click(checkButton);
+    expect(mocks.replaceWith).not.toHaveBeenCalled();
+    expect(container.textContent).toContain("ещё не завершена");
+
+    await click(checkButton);
+    expect(mocks.replaceWith).toHaveBeenCalledWith(
+      "/payment?plan=pro&account_setup=account-ready",
+    );
+  });
+
+  it("returns a guided EMAIL_REQUIRED response to e-mail and password setup", async () => {
+    vi.mocked(fetch)
+      .mockResolvedValueOnce(
+        Response.json({
+          data: { user: { email: "user@example.com", emailVerified: false } },
+        }),
+      )
+      .mockResolvedValueOnce(
+        Response.json(
+          {
+            error: {
+              code: "EMAIL_REQUIRED",
+              message: "Связь с e-mail потеряна.",
+            },
+          },
+          { status: 401 },
+        ),
+      );
+
+    await act(async () =>
+      root.render(
+        createElement(VerifyEmailPanel, {
+          autoContinue: true,
+          redirectTo: "/payment?plan=pro",
+        }),
+      ),
+    );
+    await flush();
+    await act(async () =>
+      setInputValue(
+        container.querySelector<HTMLInputElement>('input[name="code"]')!,
+        "123456",
+      ),
+    );
+    await submit(container.querySelector("form")!);
+
+    expect(mocks.replaceWith).toHaveBeenCalledWith(
+      "/link-account?reason=email-required&step=password&redirect_to=%2Fpayment%3Fplan%3Dpro",
+    );
+  });
+
+  it("sends a terminal merge conflict to support without retrying payment", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(
+      Response.json(
+        {
+          error: {
+            code: "ACCOUNT_MERGE_REQUIRED",
+            message: "Merge conflict.",
+          },
+        },
+        { status: 409 },
+      ),
+    );
+
+    await act(async () =>
+      root.render(
+        createElement(VerifyEmailPanel, {
+          autoContinue: true,
+          redirectTo: "/payment?plan=pro",
+        }),
+      ),
+    );
+    await flush();
+
+    expect(container.textContent).toContain("обратитесь в поддержку");
+    expect(
+      Array.from(container.querySelectorAll("a")).find(
+        (link) => link.textContent === "Обратиться в поддержку",
+      )?.getAttribute("href"),
+    ).toBe("/support");
+    expect(mocks.replaceWith).not.toHaveBeenCalled();
+  });
+
+  it("retries unavailable readiness before deciding whether the code is still required", async () => {
+    vi.mocked(fetch)
+      .mockResolvedValueOnce(
+        Response.json(
+          {
+            error: {
+              code: "UPSTREAM_UNAVAILABLE",
+              message: "Remnashop unavailable.",
+            },
+          },
+          { status: 503 },
+        ),
+      )
+      .mockResolvedValueOnce(
+        Response.json({
+          data: {
+            user: {
+              email: "user@example.com",
+              emailVerified: false,
+              accountSyncPending: false,
+            },
+          },
+        }),
+      );
+
+    await act(async () =>
+      root.render(
+        createElement(VerifyEmailPanel, {
+          autoContinue: true,
+          redirectTo: "/payment?plan=pro",
+        }),
+      ),
+    );
+    await flush();
+
+    expect(container.querySelector("form")).toBeNull();
+    expect(container.textContent).toContain(
+      "Пока не вводите код повторно",
+    );
+    expect(container.textContent).toContain("Проверить и продолжить");
+    expect(mocks.replaceWith).not.toHaveBeenCalled();
+
+    const retryButton = Array.from(container.querySelectorAll("button")).find(
+      (button) => button.textContent === "Проверить и продолжить",
+    )!;
+    await click(retryButton);
+
+    expect(container.querySelector('input[name="code"]')).not.toBeNull();
+    expect(container.textContent).toContain("E-mail ещё не подтверждён");
   });
 });

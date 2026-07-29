@@ -330,6 +330,9 @@ export async function linkRemnashopAccount(body: LoginRequest) {
   const canStageEmailOnCurrentUser =
     Boolean(body.email) &&
     (!existingEmailOwner || existingEmailOwner.id === session.userId);
+  const passwordBackedRemnashopUserId =
+    getRemnashopUserIdFromAccessToken(auth.cookies.accessToken);
+  const passwordBackedEmail = profile.email ?? body.email ?? null;
 
   await prisma.$transaction(async (tx) => {
     await tx.webSession.update({
@@ -342,16 +345,23 @@ export async function linkRemnashopAccount(body: LoginRequest) {
       },
     });
 
-    if (canStageEmailOnCurrentUser) {
-      await tx.webUser.update({
-        where: { id: session.userId },
-        data: {
-          email: body.email,
-          emailVerified: false,
-          authPending: true,
-        },
-      });
-    }
+    await tx.webUser.update({
+      where: { id: session.userId },
+      data: {
+        pendingRemnashopUserId: passwordBackedRemnashopUserId,
+        pendingRemnashopEmail: passwordBackedEmail,
+        ...(canStageEmailOnCurrentUser
+          ? {
+              email: body.email,
+              emailVerified: false,
+              // Password ownership is proven, but the e-mail code has not
+              // been consumed yet. Recovery starts only after confirmation;
+              // otherwise a profile read could merge the accounts too early.
+              authPending: false,
+            }
+          : {}),
+      },
+    });
   });
 
   if (canStageEmailOnCurrentUser) {
@@ -426,6 +436,7 @@ export async function linkRemnashopAccount(body: LoginRequest) {
     expiresAt: verification.expires_at,
     stagedLocalEmail: canStageEmailOnCurrentUser,
     existingEmailOwnerId: existingEmailOwner?.id,
+    passwordBackedRemnashopUserId,
   });
 
   await auditLog({

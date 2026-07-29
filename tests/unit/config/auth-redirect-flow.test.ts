@@ -43,7 +43,7 @@ describe("post-auth redirect flow", () => {
     expect(loginPage).toContain("<TelegramLoginButton redirectTo={redirectTo} />");
     expect(authForms).toContain("redirectAfterAuth(redirectTo)");
     expect(authForms).toContain("<PasskeyLoginButton redirectTo={redirectTo} />");
-    expect(passkeys).toContain("window.location.assign(redirectTo)");
+    expect(passkeys).toContain("navigateTo(redirectTo)");
     expect(telegramStart).toContain(
       'safeRedirectPath(url.searchParams.get("redirect_to"))',
     );

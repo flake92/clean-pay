@@ -64,12 +64,17 @@ export async function getCurrentAuthProfile() {
     !authorizedSession.user.pendingRemnashopUserId ||
     authorizedSession.user.pendingRemnashopUserId ===
       authorizedRemnashopUserId;
+  const unresolvedTelegramMerge = Boolean(
+    authorizedSession.user.authPending &&
+      authorizedSession.user.telegramId,
+  );
   const shouldReconcileVerifiedEmail = Boolean(
     profile.email &&
     profile.is_email_verified &&
     authorizedSession.user.email === profile.email &&
     (!authorizedSession.user.emailVerified || authorizedSession.user.authPending) &&
-    pendingOwnerMatches,
+    pendingOwnerMatches &&
+    !unresolvedTelegramMerge,
   );
 
   let reconciledSession = authorizedSession;

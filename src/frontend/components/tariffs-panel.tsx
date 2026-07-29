@@ -155,7 +155,9 @@ export function TariffsPanel() {
           status: "error",
           message: error.message,
           action:
-            error instanceof BffClientError && error.code === "EMAIL_REQUIRED"
+            error instanceof BffClientError &&
+            (error.code === "EMAIL_REQUIRED" ||
+              error.code === "EMAIL_NOT_VERIFIED")
               ? "linkEmail"
               : error instanceof BffClientError && error.status === 401
                 ? "login"
@@ -170,7 +172,13 @@ export function TariffsPanel() {
 
   if (state.status === "error") {
     if (state.action) {
-      return <AccountActionRequired action={state.action} message={state.message} />;
+      return (
+        <AccountActionRequired
+          action={state.action}
+          message={state.message}
+          redirectTo="/tariffs"
+        />
+      );
     }
 
     return (

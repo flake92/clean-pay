@@ -37,6 +37,37 @@ function run(command, args) {
   return process.exitCode;
 }
 
+function sleepSync(milliseconds) {
+  Atomics.wait(
+    new Int32Array(new SharedArrayBuffer(4)),
+    0,
+    0,
+    milliseconds,
+  );
+}
+
+function runWithRetries(command, args, {
+  attempts = 3,
+  label = command,
+} = {}) {
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    const status = run(command, args);
+
+    if (status === 0) {
+      return 0;
+    }
+
+    if (attempt < attempts) {
+      console.error(
+        `${label} failed on attempt ${attempt}/${attempts}; retrying...`,
+      );
+      sleepSync(attempt * 2_000);
+    }
+  }
+
+  return process.exitCode || 1;
+}
+
 function dockerDesktopHostPath(value) {
   const windowsPath = /^([A-Za-z]):[\\/](.*)$/.exec(value);
 
@@ -71,7 +102,14 @@ function runInsideDevcontainer() {
     }
   }
 
-  const upStatus = run("docker", [...composeArgs, "up", "-d", "--build", "app"]);
+  const upStatus = runWithRetries(
+    "docker",
+    [...composeArgs, "up", "-d", "--build", "app"],
+    {
+      attempts: 3,
+      label: "Devcontainer image build/start",
+    },
+  );
 
   if (upStatus !== 0) {
     return upStatus;

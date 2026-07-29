@@ -55,4 +55,23 @@ describe("client API auth handling", () => {
     expect(error.message).toBe("Текущий пароль неверный.");
     expect(replace).not.toHaveBeenCalled();
   });
+
+  it("allows a flow to handle an unauthorized continuation explicitly", async () => {
+    const replace = stubLocation("/link-account", "?reason=email-required");
+
+    const error = await readBffError(
+      Response.json(
+        { error: { code: "UNAUTHORIZED", message: "Session is required" } },
+        { status: 401 },
+      ),
+      "Не удалось загрузить способы входа.",
+      { redirectOnUnauthorized: false },
+    );
+
+    expect(error).toMatchObject({
+      code: "UNAUTHORIZED",
+      status: 401,
+    });
+    expect(replace).not.toHaveBeenCalled();
+  });
 });
