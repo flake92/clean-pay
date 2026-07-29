@@ -13,8 +13,14 @@ import { ProgressBar } from "primereact/progressbar";
 import { Tag } from "primereact/tag";
 
 import { LinkButton } from "@/frontend/components/prime/link-button";
+import { SubscriptionDeviceDetails } from "@/frontend/components/subscription-device-details";
+import { formatSubscriptionDevice } from "@/frontend/lib/device-display";
 import { hasRenewOffer } from "@/frontend/lib/subscription-offers";
-import type { SubscriptionOffersResponse } from "@/shared/remnashop/types";
+import type {
+  DevicesResponse,
+  SubscriptionDevice,
+  SubscriptionOffersResponse,
+} from "@/shared/remnashop/types";
 
 type CabinetUser = {
   email: string | null;
@@ -38,20 +44,6 @@ type CurrentSubscription = {
   used_traffic_bytes?: number | null;
   lifetime_used_traffic_bytes?: number | null;
   online_at?: string | null;
-};
-
-type SubscriptionDevice = {
-  hwid: string;
-  platform?: string | null;
-  device_model?: string | null;
-  os_version?: string | null;
-  user_agent?: string | null;
-};
-
-type DevicesResponse = {
-  devices: SubscriptionDevice[];
-  current_count: number;
-  max_count: number;
 };
 
 type PaymentRecord = {
@@ -161,10 +153,6 @@ function detailValue(value?: string | number | boolean | null) {
   }
 
   return String(value);
-}
-
-function deviceTitle(device: SubscriptionDevice) {
-  return device.device_model ?? device.platform ?? "Устройство";
 }
 
 function trafficLimitStrategyLabel(strategy?: string | null) {
@@ -656,8 +644,9 @@ export function CabinetPanel() {
                 <article className="cabinet-mobile-record" key={device.hwid}>
                   <div className="cabinet-mobile-record__header">
                     <div>
-                      <div className="cabinet-mobile-record__title">{deviceTitle(device)}</div>
-                      <div className="cabinet-mobile-record__id">{device.hwid}</div>
+                      <div className="cabinet-mobile-record__title">
+                        {formatSubscriptionDevice(device).summary}
+                      </div>
                     </div>
                     <Button
                       aria-label="Удалить устройство"
@@ -670,16 +659,7 @@ export function CabinetPanel() {
                       type="button"
                     />
                   </div>
-                  <dl className="cabinet-mobile-record__details">
-                    <div>
-                      <dt>OS</dt>
-                      <dd>{detailValue(device.os_version)}</dd>
-                    </div>
-                    <div>
-                      <dt>User agent</dt>
-                      <dd>{detailValue(device.user_agent)}</dd>
-                    </div>
-                  </dl>
+                  <SubscriptionDeviceDetails device={device} />
                 </article>
               ))}
             </div>
@@ -693,23 +673,22 @@ export function CabinetPanel() {
             value={devices.devices}
           >
             <Column
-              body={(device: SubscriptionDevice) => (
-                <div>
-                  <div className="font-medium">{deviceTitle(device)}</div>
-                  <div className="mt-1 text-xs text-500 break-all">{device.hwid}</div>
-                </div>
-              )}
-              header="Устройство"
+              body={(device: SubscriptionDevice) =>
+                formatSubscriptionDevice(device).deviceType
+              }
+              header="Тип устройства"
             />
             <Column
-              body={(device: SubscriptionDevice) => detailValue(device.os_version)}
-              header="OS"
+              body={(device: SubscriptionDevice) =>
+                formatSubscriptionDevice(device).os
+              }
+              header="ОС"
             />
             <Column
-              body={(device: SubscriptionDevice) => (
-                <span className="text-xs text-500 break-all">{device.user_agent ?? "-"}</span>
-              )}
-              header="User agent"
+              body={(device: SubscriptionDevice) =>
+                formatSubscriptionDevice(device).client
+              }
+              header="Клиент"
             />
             <Column
               body={(device: SubscriptionDevice) => (
