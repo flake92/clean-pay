@@ -259,20 +259,34 @@ describe("cabinet device records", () => {
     expect(text).not.toContain(rawUserAgent);
     expect(text).not.toContain("CFNetwork");
     expect(text).not.toContain("private-trailing-data");
+    expect(container.innerHTML).not.toContain(internalHwid);
+    expect(container.innerHTML).not.toContain(encodeURIComponent(internalHwid));
   });
 
   it("keeps deletion bound to the original encoded HWID", async () => {
-    const mobileDeleteButtons = Array.from(
+    const deleteButtons = Array.from(
       container.querySelectorAll<HTMLButtonElement>(
-        'button[aria-label="Удалить устройство"]',
+        'button[aria-label^="Удалить устройство "]',
       ),
     );
-    const desktopDeleteButtons = Array.from(
-      container.querySelectorAll<HTMLButtonElement>("button"),
-    ).filter((button) => button.textContent === "Удалить");
+    const mobileDeleteButtons = deleteButtons.filter(
+      (button) => button.textContent === "",
+    );
+    const desktopDeleteButtons = deleteButtons.filter(
+      (button) => button.textContent === "Удалить",
+    );
 
+    expect(deleteButtons).toHaveLength(devices.devices.length * 2);
     expect(mobileDeleteButtons).toHaveLength(devices.devices.length);
     expect(desktopDeleteButtons).toHaveLength(devices.devices.length);
+    expect(mobileDeleteButtons[0]?.getAttribute("aria-label")).toBe(
+      "Удалить устройство 1: iPhone 12 INCY 2.4.7, iOS 26.5.2",
+    );
+    expect(
+      deleteButtons.every(
+        (button) => !button.getAttribute("aria-label")?.includes(internalHwid),
+      ),
+    ).toBe(true);
     await click(mobileDeleteButtons[0]!);
     await click(desktopDeleteButtons[0]!);
 

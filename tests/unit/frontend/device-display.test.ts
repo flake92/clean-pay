@@ -144,14 +144,132 @@ describe("subscription device display", () => {
     ).toBe("FreeBSD 14.1-RELEASE");
   });
 
+  it.each([
+    ["iOS", null, "iOS"],
+    ["iOS", "Client/1.0/iPad", "iPad"],
+    ["iOS", "Client/1.0/iPhone", "iPhone"],
+    ["macOS", null, "macOS"],
+  ])(
+    "does not invent a hardware type from platform %s",
+    (platform, userAgent, expectedDeviceType) => {
+      expect(
+        formatSubscriptionDevice(
+          device({
+            platform,
+            user_agent: userAgent,
+          }),
+        ).deviceType,
+      ).toBe(expectedDeviceType);
+    },
+  );
+
+  it("preserves the more precise iPadOS platform", () => {
+    expect(
+      formatSubscriptionDevice(
+        device({
+          platform: "iPadOS",
+          os_version: "18.0",
+        }),
+      ),
+    ).toEqual({
+      deviceType: "iPadOS",
+      os: "iPadOS 18.0",
+      client: MISSING_DEVICE_VALUE,
+      summary: "iPadOS",
+    });
+  });
+
+  it("does not classify a bare Darwin kernel token as macOS", () => {
+    expect(
+      formatSubscriptionDevice(
+        device({
+          user_agent: "CFNetwork/3826.500.131 Darwin/24.5.0",
+        }),
+      ),
+    ).toEqual({
+      deviceType: MISSING_DEVICE_VALUE,
+      os: MISSING_DEVICE_VALUE,
+      client: MISSING_DEVICE_VALUE,
+      summary: MISSING_DEVICE_VALUE,
+    });
+  });
+
+  it.each([
+    ["Happ/5.2.0/iOS_18.0", "iOS", "iOS"],
+    ["Happ/3.3.6/Windows_11", "Windows", "Windows"],
+    ["Client/1.0/iPad_18", "iPad", "iOS"],
+  ])(
+    "recognizes underscore-delimited platform in %s",
+    (userAgent, expectedDeviceType, expectedOs) => {
+      const presentation = formatSubscriptionDevice(
+        device({
+          user_agent: userAgent,
+        }),
+      );
+
+      expect(presentation.deviceType).toBe(expectedDeviceType);
+      expect(presentation.os).toBe(expectedOs);
+    },
+  );
+
+  it("normalizes unavailable sentinels to the same dash", () => {
+    expect(
+      formatSubscriptionDevice(
+        device({
+          platform: "-",
+          device_model: "—",
+          os_version: "–",
+          user_agent: "N/A",
+        }),
+      ),
+    ).toEqual({
+      deviceType: MISSING_DEVICE_VALUE,
+      os: MISSING_DEVICE_VALUE,
+      client: MISSING_DEVICE_VALUE,
+      summary: MISSING_DEVICE_VALUE,
+    });
+  });
+
+  it.each([
+    ["x64", "Windows", "Windows"],
+    ["sdk_gphone64_x86_64", "Android", "Android"],
+    ["Android SDK built for x86_64", "Android", "Android"],
+  ])(
+    "filters technical device model %s",
+    (deviceModel, platform, expectedDeviceType) => {
+      expect(
+        formatSubscriptionDevice(
+          device({
+            platform,
+            device_model: deviceModel,
+          }),
+        ).deviceType,
+      ).toBe(expectedDeviceType);
+    },
+  );
+
+  it.each([
+    ["Streisand 1.6.48 (iPhone; iOS 18)", "Streisand 1.6.48"],
+    ["Happ 5.2.0/iOS", "Happ 5.2.0"],
+    ["FlClash X/v0.8.91/Android", "FlClash X 0.8.91"],
+  ])("supports safe client version format %s", (userAgent, expectedClient) => {
+    expect(
+      formatSubscriptionDevice(
+        device({
+          user_agent: userAgent,
+        }),
+      ).client,
+    ).toBe(expectedClient);
+  });
+
   it("removes invisible and bidirectional formatting controls from telemetry", () => {
     expect(
       formatSubscriptionDevice(
         device({
           platform: "Win\u202Edows",
-          device_model: "Lap\u200Btop",
-          os_version: "11\u2066.0",
-          user_agent: "Ha\u200Bpp/5.2.0/Windows",
+          device_model: "Lap\u061Ctop",
+          os_version: "11\u2063.0",
+          user_agent: "Ha\u00ADpp/5.2.0/Windows",
         }),
       ),
     ).toEqual({
@@ -170,8 +288,9 @@ describe("subscription device display", () => {
       os_version: "26.5.2",
       user_agent: "INCY/2.4.7/ios CFNetwork/private-trailing-data",
     });
+    const presentation = formatSubscriptionDevice(source);
     const markup = renderToStaticMarkup(
-      createElement(SubscriptionDeviceDetails, { device: source }),
+      createElement(SubscriptionDeviceDetails, { presentation }),
     );
 
     expect(markup).toContain("Тип устройства");
