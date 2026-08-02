@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({
   upgradeCurrentSessionToFull: vi.fn(),
   assertEmailVerificationPolicy: vi.fn(),
   assertRateLimit: vi.fn(),
+  withAuthConcurrency: vi.fn(),
   prisma: {
     $queryRaw: vi.fn(),
     $transaction: vi.fn(),
@@ -60,6 +61,7 @@ vi.mock("@/backend/sessions/web-session", () => ({
 
 vi.mock("@/backend/limits/rate-limit", () => ({
   assertRateLimit: mocks.assertRateLimit,
+  withAuthConcurrency: mocks.withAuthConcurrency,
 }));
 
 vi.mock("next/headers", () => ({
@@ -111,6 +113,9 @@ const session = {
 describe("passkey use cases", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.withAuthConcurrency.mockImplementation(
+      async (_action: string, work: () => Promise<unknown>) => await work(),
+    );
     mocks.assertEmailVerificationPolicy.mockImplementation(() => undefined);
     mocks.prisma.$transaction.mockImplementation(async (callback: (tx: typeof mocks.prisma) => unknown) => callback(mocks.prisma));
     mocks.prisma.$queryRaw.mockResolvedValue([{ id: "user-1" }]);

@@ -1,6 +1,5 @@
 export type TurnstileContext = {
   token?: string | null;
-  remoteIp?: string | null;
 };
 
 export type AuthPayload<T> = T & {

@@ -28,8 +28,10 @@ row between backfill and constraint enforcement.
    commands below against an inferred database name.
 3. Stop every Clean Pay application replica and the reconciliation worker. Keep
    PostgreSQL running; do not allow an old writer during the migration.
-4. Run `npx prisma migrate status` with the production `DATABASE_URL`. Production
-   uses `prisma migrate deploy`, never `prisma migrate dev` or `db push`.
+4. Run the reviewed Clean Pay `migration` image with the production
+   `DATABASE_URL`. Production uses `prisma migrate deploy` only in this one-shot
+   job, never in the application container, and never uses `prisma migrate dev`
+   or `db push`.
 5. Record non-sensitive counts:
 
    ```sql
@@ -67,12 +69,16 @@ row between backfill and constraint enforcement.
 
 ## Upgrade
 
-1. From the reviewed image or checkout, run:
+1. Start the reviewed Compose migration service and require a successful exit
+   before any application revision starts:
 
    ```bash
-   npx prisma migrate deploy
-   npx prisma migrate status
+   docker compose --env-file deploy/prod/.env -f deploy/prod/docker-compose.yml run --rm migration
    ```
+
+   The migration image contains the Prisma CLI and migration files. The
+   standalone application image does not. Re-running the job on an up-to-date
+   database must report no pending migrations and exit successfully.
 
 2. Verify the final schema and absence of incomplete backfills:
 
@@ -146,3 +152,13 @@ known-good backup or an independently verified source of truth.
 The local production audit rehearses this exact flow on a non-empty PostgreSQL
 database, including an intentional malformed Telegram ID, transaction rollback,
 the complete migration chain, custom-format backup and restore.
+
+## Remnashop migration boundary
+
+Remnashop follows the same release invariant: run its one-shot `migration`
+service (`docker-migrate.sh`) before API, worker, or scheduler. All three runtime
+roles must use the same reviewed image and must not invoke Alembic from their
+entrypoint. A rehearsal must apply the full chain through revision `0050` on an
+empty database and then repeat with no pending work. Rollback uses the pinned
+previous image plus a verified pre-upgrade database restore; never run an
+automatic destructive downgrade against the only production database.

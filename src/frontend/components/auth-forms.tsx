@@ -11,12 +11,7 @@ import { PasskeyLoginButton } from "@/frontend/components/passkey-actions";
 import { TurnstileWidget, type TurnstileHandle, hasTurnstileSiteKey } from "@/frontend/components/turnstile-widget";
 import { BffClientError, readBffError } from "@/frontend/lib/client-api";
 
-type ApiState = {
-  loading: boolean;
-  error: string | null;
-};
-
-type LoginMode = "identify" | "password" | "register";
+type ApiState = { loading: boolean; error: string | null };
 
 type AuthTurnstileContextValue = {
   enabled: boolean;
@@ -38,32 +33,14 @@ const AuthTurnstileContext = createContext<AuthTurnstileContextValue>({
 
 async function readError(response: Response) {
   const error = await readBffError(response, "Не удалось выполнить действие.");
-
-  if (error instanceof BffClientError && error.code === "AUTH_FAILED") {
-    return "Неверный e-mail или пароль.";
-  }
-
   if (error instanceof BffClientError && error.code === "RATE_LIMITED") {
     return "Слишком много попыток. Попробуйте позже.";
   }
-
   return error.message;
-}
-
-async function readJsonBody(response: Response) {
-  return await response.json().catch(() => null) as Record<string, unknown> | null;
 }
 
 const unknownLoginResultMessage =
   "Не удалось определить результат входа. Обновите страницу, чтобы проверить состояние сессии.";
-
-function redirectAfterAuth(redirectTo: string) {
-  window.location.assign(redirectTo);
-}
-
-function shouldRedirectAfterRegisterFallback(body: { data?: { user?: { is_email_verified?: boolean }; emailVerification?: unknown } }) {
-  return body.data?.user?.is_email_verified === true || !body.data?.emailVerification;
-}
 
 function missingTurnstileTokenMessage(siteKey?: string | null) {
   return hasTurnstileSiteKey(siteKey)
@@ -71,17 +48,8 @@ function missingTurnstileTokenMessage(siteKey?: string | null) {
     : "Cloudflare Turnstile site key is not configured.";
 }
 
-function turnstilePayload(token: string | null) {
-  return token
-    ? {
-        turnstileToken: token,
-        "cf-turnstile-response": token,
-      }
-    : {};
-}
-
-function useAuthTurnstile() {
-  return useContext(AuthTurnstileContext);
+function redirectAfterAuth(redirectTo: string) {
+  window.location.assign(redirectTo);
 }
 
 export function AuthTurnstileProvider({
@@ -93,519 +61,204 @@ export function AuthTurnstileProvider({
   children: ReactNode;
   siteKey?: string | null;
 }) {
-  const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
-  const [turnstile, setTurnstile] = useState<TurnstileHandle | null>(null);
-
-  const value = useMemo<AuthTurnstileContextValue>(
-    () => ({
-      enabled,
-      siteKey: siteKey ?? null,
-      token: enabled ? turnstileToken : null,
-      reset: () => {
-        turnstile?.reset();
-        setTurnstileToken(null);
-      },
-      setHandle: setTurnstile,
-      setToken: setTurnstileToken,
-    }),
-    [enabled, siteKey, turnstile, turnstileToken],
-  );
+  const [token, setToken] = useState<string | null>(null);
+  const [handle, setHandle] = useState<TurnstileHandle | null>(null);
+  const value = useMemo<AuthTurnstileContextValue>(() => ({
+    enabled,
+    siteKey: siteKey ?? null,
+    token: enabled ? token : null,
+    reset: () => {
+      handle?.reset();
+      setToken(null);
+    },
+    setHandle,
+    setToken,
+  }), [enabled, handle, siteKey, token]);
 
   return <AuthTurnstileContext.Provider value={value}>{children}</AuthTurnstileContext.Provider>;
 }
 
-function AuthTurnstileChallenge() {
-  const turnstile = useAuthTurnstile();
-
-  if (!turnstile.enabled) {
-    return null;
-  }
-
-  return <TurnstileWidget onReady={turnstile.setHandle} onToken={turnstile.setToken} siteKey={turnstile.siteKey} />;
+function AuthTurnstileChallenge({ action }: { action: string }) {
+  const turnstile = useContext(AuthTurnstileContext);
+  if (!turnstile.enabled) return null;
+  return (
+    <TurnstileWidget
+      action={action}
+      onReady={turnstile.setHandle}
+      onToken={turnstile.setToken}
+      siteKey={turnstile.siteKey}
+    />
+  );
 }
 
 export function LoginForm({ redirectTo = "/cabinet" }: { redirectTo?: string }) {
+  const [stage, setStage] = useState<"start" | "complete">("start");
   const [state, setState] = useState<ApiState>({ loading: false, error: null });
   const [email, setEmail] = useState("");
-  const [mode, setMode] = useState<LoginMode>("identify");
-  const [knownLocalUser, setKnownLocalUser] = useState(false);
-  const [hasPasskey, setHasPasskey] = useState(false);
   const [password, setPassword] = useState("");
-  const [confirmPassword, setConfirmPassword] = useState("");
-  const [confirmTouched, setConfirmTouched] = useState(false);
-  const turnstile = useAuthTurnstile();
-  const passwordsDoNotMatch = confirmTouched && confirmPassword.length > 0 && password !== confirmPassword;
+  const [code, setCode] = useState("");
+  const turnstile = useContext(AuthTurnstileContext);
 
-  async function identifyEmail(event: FormEvent<HTMLFormElement>) {
+  async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-
-    if (!email.trim()) {
-      setState({ loading: false, error: "Введите e-mail." });
-      return;
-    }
-
-    setState({ loading: true, error: null });
-
-    try {
-      const response = await fetch("/api/bff/auth/identify", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ email }),
-      });
-
-      if (!response.ok) {
-        setState({ loading: true, error: await readError(response) });
-        return;
-      }
-
-      const body = await readJsonBody(response) as {
-        data?: { exists?: boolean; hasPasskey?: boolean };
-      } | null;
-
-      if (!body?.data || typeof body.data.exists !== "boolean") {
-        setState({ loading: true, error: "Сервер вернул некорректный ответ. Повторите попытку." });
-        return;
-      }
-
-      setHasPasskey(Boolean(body.data.hasPasskey));
-      setKnownLocalUser(body.data.exists);
-      setMode("password");
-      setState({ loading: true, error: null });
-    } catch {
-      setState({ loading: true, error: "Не удалось проверить e-mail. Проверьте соединение и повторите попытку." });
-    } finally {
-      setState((current) => ({ ...current, loading: false }));
-    }
-  }
-
-  function changeEmail() {
-    setState({ loading: false, error: null });
-    setMode("identify");
-    setKnownLocalUser(false);
-    setHasPasskey(false);
-    setPassword("");
-    setConfirmPassword("");
-    setConfirmTouched(false);
-  }
-
-  async function continueWithPassword(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-
     if (turnstile.enabled && !turnstile.token) {
       setState({ loading: false, error: missingTurnstileTokenMessage(turnstile.siteKey) });
       return;
     }
 
     setState({ loading: true, error: null });
-
-    const formData = new FormData(event.currentTarget);
-    let navigating = false;
-
     try {
-      const response = await fetch(knownLocalUser ? "/api/bff/auth/login" : "/api/bff/auth/register", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          email,
-          password: formData.get("password"),
-          ...turnstilePayload(turnstile.token),
-        }),
-      });
-
+      const response = await fetch(
+        stage === "start" ? "/api/bff/auth/email/start" : "/api/bff/auth/email/complete",
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            email,
+            ...(stage === "complete" ? { code, password } : {}),
+            ...(turnstile.token ? { turnstileToken: turnstile.token } : {}),
+          }),
+        },
+      );
+      turnstile.reset();
       if (!response.ok) {
-        turnstile.reset();
-        setState({ loading: true, error: await readError(response) });
+        setState({ loading: false, error: await readError(response) });
         return;
       }
-
-      if (knownLocalUser) {
-        navigating = true;
-        redirectAfterAuth(redirectTo);
+      if (stage === "start") {
+        setStage("complete");
+        setState({ loading: false, error: null });
         return;
       }
-
-      const body = await readJsonBody(response) as {
-        data?: { user?: { is_email_verified?: boolean }; emailVerification?: unknown };
-      } | null;
-      if (!body?.data?.user) {
-        setState({ loading: true, error: unknownLoginResultMessage });
-        return;
-      }
-
-      navigating = true;
-      if (shouldRedirectAfterRegisterFallback(body)) {
-        redirectAfterAuth(redirectTo);
-        return;
-      }
-
-      window.location.assign("/register/verify-email");
+      redirectAfterAuth(redirectTo);
     } catch {
-      navigating = false;
-      setState({ loading: true, error: unknownLoginResultMessage });
-    } finally {
-      if (!navigating) {
-        setState((current) => ({ ...current, loading: false }));
-      }
+      turnstile.reset();
+      setState({ loading: false, error: unknownLoginResultMessage });
     }
-  }
-
-  async function register(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-
-    const formData = new FormData(event.currentTarget);
-    const nextPassword = String(formData.get("password") ?? "");
-    const nextConfirmPassword = String(formData.get("confirmPassword") ?? "");
-
-    if (nextPassword !== nextConfirmPassword) {
-      setConfirmTouched(true);
-      setState({ loading: false, error: "Пароли не совпадают." });
-      return;
-    }
-
-    if (turnstile.enabled && !turnstile.token) {
-      setState({ loading: false, error: missingTurnstileTokenMessage(turnstile.siteKey) });
-      return;
-    }
-
-    setState({ loading: true, error: null });
-
-    let navigating = false;
-
-    try {
-      const response = await fetch("/api/bff/auth/register", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          email,
-          password: formData.get("password"),
-          ...turnstilePayload(turnstile.token),
-        }),
-      });
-
-      if (!response.ok) {
-        turnstile.reset();
-        setState({ loading: true, error: await readError(response) });
-        return;
-      }
-
-      const body = await readJsonBody(response) as {
-        data?: { user?: { is_email_verified?: boolean }; emailVerification?: unknown };
-      } | null;
-      if (!body?.data?.user) {
-        setState({ loading: true, error: unknownLoginResultMessage });
-        return;
-      }
-
-      navigating = true;
-      if (shouldRedirectAfterRegisterFallback(body)) {
-        redirectAfterAuth(redirectTo);
-        return;
-      }
-
-      window.location.assign("/register/verify-email");
-    } catch {
-      navigating = false;
-      setState({ loading: true, error: unknownLoginResultMessage });
-    } finally {
-      if (!navigating) {
-        setState((current) => ({ ...current, loading: false }));
-      }
-    }
-  }
-
-  const accountHeader =
-    mode === "identify" ? null : (
-      <div
-        className="auth-account-summary"
-        style={{
-          alignItems: "center",
-          display: "flex",
-          gap: "12px",
-          justifyContent: "space-between",
-          minWidth: 0,
-        }}
-      >
-        <div className="auth-account-identity" style={{ minWidth: 0 }}>
-          <i className="pi pi-envelope auth-account-icon" />
-          <div className="auth-account-text" style={{ minWidth: 0 }}>
-            <div className="auth-account-label">E-mail</div>
-            <div className="auth-account-email" title={email}>{email}</div>
-          </div>
-        </div>
-        <Button className="auth-account-change" label="Изменить" onClick={changeEmail} size="small" text type="button" />
-      </div>
-    );
-
-  if (mode === "identify") {
-    return (
-      <form className="flex flex-column gap-3" onSubmit={identifyEmail}>
-        <label className="flex flex-column gap-2">
-          <span className="text-sm font-medium text-700">E-mail</span>
-          <InputText
-            autoComplete="username"
-            id="login-email"
-            name="email"
-            placeholder="user@example.com"
-            required
-            type="email"
-            value={email}
-            onChange={(event) => setEmail(event.target.value)}
-          />
-        </label>
-        <AuthTurnstileChallenge />
-        {state.error ? <Message severity="error" text={state.error} /> : null}
-        <Button disabled={state.loading} label="Продолжить" loading={state.loading} type="submit" />
-      </form>
-    );
-  }
-
-  if (mode === "register") {
-    return (
-      <form className="flex flex-column gap-3" onSubmit={register}>
-        {accountHeader}
-        <Message severity="info" text="Аккаунт не найден. Создайте пароль, и мы отправим код подтверждения на e-mail." />
-        <label className="flex flex-column gap-2">
-          <span className="text-sm font-medium text-700">Пароль</span>
-          <Password
-            appendTo="self"
-            autoComplete="new-password"
-            className="w-full"
-            feedback={false}
-            inputId="register-password-inline"
-            inputClassName="w-full"
-            minLength={8}
-            name="password"
-            placeholder="Придумайте пароль"
-            required
-            toggleMask
-            value={password}
-            onChange={(event) => setPassword(event.target.value)}
-          />
-          <span className="text-xs text-500">Минимум 8 символов.</span>
-        </label>
-        <label className="flex flex-column gap-2">
-          <span className="text-sm font-medium text-700">Повторите пароль</span>
-          <Password
-            autoComplete="new-password"
-            className="w-full"
-            feedback={false}
-            inputId="register-password-confirm-inline"
-            inputClassName={`w-full${passwordsDoNotMatch ? " p-invalid" : ""}`}
-            minLength={8}
-            name="confirmPassword"
-            placeholder="Введите пароль еще раз"
-            required
-            toggleMask
-            value={confirmPassword}
-            onBlur={() => setConfirmTouched(true)}
-            onChange={(event) => setConfirmPassword(event.target.value)}
-          />
-          {passwordsDoNotMatch ? <span className="text-xs text-red-500">Пароли не совпадают.</span> : null}
-        </label>
-        <AuthTurnstileChallenge />
-        {state.error ? <Message severity="error" text={state.error} /> : null}
-        <Button disabled={state.loading} label="Создать аккаунт" loading={state.loading} type="submit" />
-      </form>
-    );
   }
 
   return (
-    <form className="flex flex-column gap-3" onSubmit={continueWithPassword}>
-      {accountHeader}
-      {hasPasskey ? <PasskeyLoginButton redirectTo={redirectTo} /> : null}
-      {!knownLocalUser ? (
-        <Message
-          severity="info"
-          text="Введите пароль. Если аккаунт уже есть, мы войдем в него. Если аккаунта нет, создадим и отправим код на e-mail."
-        />
-      ) : null}
+    <form className="flex flex-column gap-3" onSubmit={submit}>
+      <PasskeyLoginButton
+        redirectTo={redirectTo}
+        turnstileEnabled={turnstile.enabled}
+        turnstileSiteKey={turnstile.siteKey}
+      />
       <label className="flex flex-column gap-2">
-        <span className="text-sm font-medium text-700">Пароль</span>
-        <Password
-          autoComplete={knownLocalUser ? "current-password" : "new-password"}
-          className="w-full"
-          feedback={false}
-          inputId="login-password"
-          inputClassName="w-full"
-          minLength={knownLocalUser ? undefined : 8}
-          name="password"
-          placeholder="Введите пароль"
+        <span className="text-sm font-medium text-700">E-mail</span>
+        <InputText
+          autoComplete="username"
+          disabled={stage === "complete"}
+          name="email"
           required
-          toggleMask
+          type="email"
+          value={email}
+          onChange={(event) => setEmail(event.target.value)}
         />
       </label>
-      <AuthTurnstileChallenge />
+      {stage === "start" ? (
+        <Message severity="info" text="Мы отправим одноразовый код. Ответ одинаков для нового и существующего аккаунта." />
+      ) : (
+        <>
+          <Message severity="info" text="Введите код из письма и пароль аккаунта." />
+          <label className="flex flex-column gap-2">
+            <span className="text-sm font-medium text-700">Код из письма</span>
+            <InputText
+              autoComplete="one-time-code"
+              inputMode="numeric"
+              maxLength={6}
+              minLength={6}
+              name="code"
+              required
+              value={code}
+              onChange={(event) => setCode(event.target.value.replace(/\D/g, "").slice(0, 6))}
+            />
+          </label>
+          <label className="flex flex-column gap-2">
+            <span className="text-sm font-medium text-700">Пароль</span>
+            <Password
+              autoComplete="current-password"
+              className="w-full"
+              feedback={false}
+              inputClassName="w-full"
+              minLength={8}
+              name="password"
+              required
+              toggleMask
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
+            />
+          </label>
+          <Button
+            label="Изменить e-mail"
+            onClick={() => {
+              setStage("start");
+              setCode("");
+              setPassword("");
+              setState({ loading: false, error: null });
+            }}
+            text
+            type="button"
+          />
+        </>
+      )}
+      <AuthTurnstileChallenge action={stage === "start" ? "email_auth_start" : "email_auth_complete"} />
       {state.error ? <Message severity="error" text={state.error} /> : null}
-      <Button disabled={state.loading} label="Продолжить" loading={state.loading} type="submit" />
+      <Button
+        disabled={state.loading}
+        label={stage === "start" ? "Получить код" : "Продолжить"}
+        loading={state.loading}
+        type="submit"
+      />
     </form>
   );
 }
 
 export function RegisterForm() {
-  const [state, setState] = useState<ApiState>({ loading: false, error: null });
-  const [password, setPassword] = useState("");
-  const [confirmPassword, setConfirmPassword] = useState("");
-  const [confirmTouched, setConfirmTouched] = useState(false);
-  const turnstile = useAuthTurnstile();
-  const passwordsDoNotMatch = confirmTouched && confirmPassword.length > 0 && password !== confirmPassword;
-
-  const passwordFooter = (
-    <div className="mt-2 text-sm text-600 line-height-3">
-      Используйте минимум 8 символов. Надежнее: буквы в разных регистрах, цифры и спецсимвол.
-    </div>
-  );
-
-  async function onSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-
-    const formData = new FormData(event.currentTarget);
-    const nextPassword = String(formData.get("password") ?? "");
-    const nextConfirmPassword = String(formData.get("confirmPassword") ?? "");
-
-    if (nextPassword !== nextConfirmPassword) {
-      setConfirmTouched(true);
-      setState({ loading: false, error: "Пароли не совпадают." });
-      return;
-    }
-
-    if (turnstile.enabled && !turnstile.token) {
-      setState({ loading: false, error: missingTurnstileTokenMessage(turnstile.siteKey) });
-      return;
-    }
-
-    setState({ loading: true, error: null });
-
-    try {
-      const response = await fetch("/api/bff/auth/register", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          email: formData.get("email"),
-          password: formData.get("password"),
-          ...turnstilePayload(turnstile.token),
-        }),
-      });
-
-      if (!response.ok) {
-        turnstile.reset();
-        setState({ loading: false, error: await readError(response) });
-        return;
-      }
-
-      const body = (await response.json()) as { data?: { user?: { is_email_verified?: boolean }; emailVerification?: unknown } };
-      if (shouldRedirectAfterRegisterFallback(body)) {
-        redirectAfterAuth("/cabinet");
-        return;
-      }
-
-      window.location.assign("/register/verify-email");
-    } catch {
-      turnstile.reset();
-      setState({
-        loading: false,
-        error: "Не удалось определить результат регистрации. Проверьте соединение и повторите попытку.",
-      });
-    } finally {
-      setState((current) => ({ ...current, loading: false }));
-    }
-  }
-
-  return (
-    <form className="flex flex-column gap-3" onSubmit={onSubmit}>
-      <label className="flex flex-column gap-2">
-        <span className="text-sm font-medium text-700">E-mail</span>
-        <InputText autoComplete="username" id="register-email" name="email" placeholder="user@example.com" required type="email" />
-      </label>
-      <label className="flex flex-column gap-2">
-        <span className="text-sm font-medium text-700">Пароль</span>
-        <Password
-          appendTo="self"
-          autoComplete="new-password"
-          className="w-full"
-          footer={passwordFooter}
-          header={<div className="font-medium mb-2">Надежность пароля</div>}
-          inputId="register-password"
-          inputClassName="w-full"
-          mediumLabel="Средний"
-          minLength={8}
-          name="password"
-          panelClassName="auth-password-panel"
-          placeholder="Придумайте пароль"
-          promptLabel="Введите пароль"
-          required
-          strongLabel="Надежный"
-          toggleMask
-          value={password}
-          weakLabel="Слабый"
-          onChange={(event) => setPassword(event.target.value)}
-        />
-        <span className="text-xs text-500">Минимум 8 символов.</span>
-      </label>
-      <label className="flex flex-column gap-2">
-        <span className="text-sm font-medium text-700">Повторите пароль</span>
-        <Password
-          autoComplete="new-password"
-          className="w-full"
-          feedback={false}
-          inputId="register-password-confirm"
-          inputClassName={`w-full${passwordsDoNotMatch ? " p-invalid" : ""}`}
-          minLength={8}
-          name="confirmPassword"
-          placeholder="Введите пароль еще раз"
-          required
-          toggleMask
-          value={confirmPassword}
-          onBlur={() => setConfirmTouched(true)}
-          onChange={(event) => setConfirmPassword(event.target.value)}
-        />
-        {passwordsDoNotMatch ? <span className="text-xs text-red-500">Пароли не совпадают.</span> : null}
-      </label>
-      <AuthTurnstileChallenge />
-      {state.error ? <Message severity="error" text={state.error} /> : null}
-      <Button disabled={state.loading} label="Зарегистрироваться" loading={state.loading} type="submit" />
-    </form>
-  );
+  return <LoginForm redirectTo="/cabinet" />;
 }
 
 export function TelegramLoginButton({ redirectTo = "/cabinet" }: { redirectTo?: string }) {
   const [state, setState] = useState<ApiState>({ loading: false, error: null });
-  const turnstile = useAuthTurnstile();
-  const missingTurnstileMessage = missingTurnstileTokenMessage(turnstile.siteKey);
+  const turnstile = useContext(AuthTurnstileContext);
+  const [telegramToken, setTelegramToken] = useState<string | null>(null);
+  const [telegramTurnstile, setTelegramTurnstile] = useState<TurnstileHandle | null>(null);
 
-  async function onClick() {
-    if (turnstile.enabled && !turnstile.token) {
-      setState({ loading: false, error: missingTurnstileMessage });
+  function login() {
+    if (turnstile.enabled && !telegramToken) {
+      setState({ loading: false, error: missingTurnstileTokenMessage(turnstile.siteKey) });
       return;
     }
-
     setState({ loading: true, error: null });
-
     try {
       const url = new URL("/auth/telegram/start", window.location.origin);
       url.searchParams.set("redirect_to", redirectTo);
-      if (turnstile.token) {
-        url.searchParams.set("turnstile_token", turnstile.token);
-        url.searchParams.set("cf-turnstile-response", turnstile.token);
-      }
-
+      if (telegramToken) url.searchParams.set("turnstile_token", telegramToken);
+      telegramTurnstile?.reset();
+      setTelegramToken(null);
       window.location.assign(url.toString());
     } catch (error) {
-      setState({
-        loading: false,
-        error: error instanceof Error ? error.message : "Telegram login failed.",
-      });
+      setState({ loading: false, error: error instanceof Error ? error.message : "Telegram login failed." });
     }
   }
 
   return (
     <div className="flex flex-column gap-2">
       {state.error ? <Message severity="error" text={state.error} /> : null}
+      {turnstile.enabled ? (
+        <TurnstileWidget
+          action="telegram_auth_start"
+          onReady={setTelegramTurnstile}
+          onToken={setTelegramToken}
+          siteKey={turnstile.siteKey}
+        />
+      ) : null}
       <Button
         disabled={state.loading}
         icon="pi pi-send"
         label="Войти через Telegram"
         loading={state.loading}
-        onClick={onClick}
+        onClick={login}
         severity="info"
         type="button"
       />

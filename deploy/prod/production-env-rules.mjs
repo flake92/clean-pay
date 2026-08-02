@@ -254,6 +254,11 @@ export function validateProductionEnvironment(environment) {
     required("REMNASHOP_API_KEY"),
     24,
   );
+  const remnashopAuthServiceKey = strongSecret(
+    "REMNASHOP_AUTH_SERVICE_KEY",
+    required("REMNASHOP_AUTH_SERVICE_KEY"),
+    24,
+  );
   const remnawaveToken = strongSecret(
     "REMNAWAVE_TOKEN",
     required("REMNAWAVE_TOKEN"),
@@ -278,6 +283,20 @@ export function validateProductionEnvironment(environment) {
     "RATE_LIMIT_IDENTITY_SECRET",
     required("RATE_LIMIT_IDENTITY_SECRET"),
     32,
+  );
+  boundedInteger(
+    "AUTH_RATE_LIMIT_CAPACITY",
+    required("AUTH_RATE_LIMIT_CAPACITY"),
+    undefined,
+    100,
+    1_000_000,
+  );
+  boundedInteger(
+    "AUTH_CONCURRENCY_LIMIT",
+    required("AUTH_CONCURRENCY_LIMIT"),
+    undefined,
+    1,
+    10_000,
   );
   const readinessInternalSecret = strongSecret(
     "READINESS_INTERNAL_SECRET",
@@ -427,6 +446,10 @@ export function validateProductionEnvironment(environment) {
   const turnstileSecretValue = optional("TURNSTILE_SECRET_KEY");
   const turnstileVerifyValue = optional("TURNSTILE_VERIFY_URL");
 
+  if (!turnstileEnabled) {
+    fail("TURNSTILE_ENABLED must be true in production");
+  }
+
   if (turnstileSiteKey) {
     if (looksLikePlaceholder(turnstileSiteKey)) {
       fail("TURNSTILE_SITE_KEY must not use a placeholder value");
@@ -520,11 +543,10 @@ export function validateProductionEnvironment(environment) {
   }
 
   boundedInteger("CLEAN_PAY_PORT", optional("CLEAN_PAY_PORT"), 4000, 1, 65_535);
-  bool("RUN_MIGRATIONS", optional("RUN_MIGRATIONS"), true);
-
   const secretEntries = [
     ["POSTGRES_PASSWORD", postgresPassword],
     ["REMNASHOP_API_KEY", remnashopApiKey],
+    ["REMNASHOP_AUTH_SERVICE_KEY", remnashopAuthServiceKey],
     ["REMNAWAVE_TOKEN", remnawaveToken],
     ["WEB_JWT_SECRET", webJwtSecret],
     ["WEB_REFRESH_SECRET", webRefreshSecret],

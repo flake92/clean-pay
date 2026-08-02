@@ -450,7 +450,7 @@ export function VerifyEmailPanel({
         </div>
       ) : null}
       {turnstileEnabled ? (
-        <TurnstileWidget onReady={setTurnstile} onToken={setTurnstileToken} siteKey={turnstileSiteKey} />
+        <TurnstileWidget action="email_verification" onReady={setTurnstile} onToken={setTurnstileToken} siteKey={turnstileSiteKey} />
       ) : null}
       <Card title="Введите код из письма">
         <p className="mt-0 line-height-3 text-600">
