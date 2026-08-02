@@ -1,6 +1,6 @@
 import { bffError, bffJson } from "@/backend/http/bff-response";
 import type { RequestEmailVerificationRequest } from "@/shared/remnashop/types";
-import { getRequestIp, getTurnstileToken } from "@/backend/security/turnstile";
+import { getTurnstileToken } from "@/backend/security/turnstile";
 import { requestEmailVerification } from "@/backend/auth/email-verification";
 import { readBffJsonObject } from "@/backend/http/request-body";
 
@@ -16,7 +16,6 @@ export async function POST(request: Request) {
     return bffJson(
       await requestEmailVerification(rawBody, {
         token: getTurnstileToken(rawBody),
-        remoteIp: getRequestIp(request),
       }),
     );
   } catch (error) {

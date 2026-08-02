@@ -84,6 +84,8 @@ function auth(req, res, url) {
   const state = url.searchParams.get("state") || "";
   const nonce = url.searchParams.get("nonce") || "";
   const requestedClientId = url.searchParams.get("client_id") || clientId;
+  const requestedSubject = url.searchParams.get("test_user") || "100000001";
+  const subject = /^\d{1,20}$/.test(requestedSubject) ? requestedSubject : "100000001";
 
   if (!redirectUri) {
     html(res, 400, "redirect_uri required");
@@ -95,6 +97,7 @@ function auth(req, res, url) {
   codes.set(code, {
     nonce,
     clientId: requestedClientId,
+    subject,
     expiresAt: Date.now() + 10 * 60 * 1000,
   });
 
@@ -132,10 +135,10 @@ async function token(req, res) {
   const payload = {
     iss: issuer,
     aud: entry.clientId || clientId,
-    sub: "100000001",
-    id: "100000001",
-    telegram_id: "100000001",
-    username: "dev_telegram_user",
+    sub: entry.subject,
+    id: entry.subject,
+    telegram_id: entry.subject,
+    username: `dev_telegram_user_${entry.subject}`,
     name: "Dev Telegram User",
     given_name: "Dev",
     family_name: "User",

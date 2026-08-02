@@ -78,6 +78,7 @@ NEXT_PUBLIC_APP_URL=https://pay.example.com
 REMNASHOP_API_BASE_URL=https://shop.example.com/api/v1/public
 REMNASHOP_ADMIN_API_BASE_URL=https://shop.example.com/api/v1/admin
 REMNASHOP_API_KEY=<APP_API_KEY из Remnashop>
+REMNASHOP_AUTH_SERVICE_KEY=<отдельный APP_AUTH_SERVICE_KEY из Remnashop>
 
 REMNAWAVE_API_BASE_URL=https://panel.example.com
 REMNAWAVE_TOKEN=<API-токен Remnawave>
@@ -127,6 +128,8 @@ COOKIE_SECURE=true
 
 `WEB_JWT_SECRET`, `WEB_REFRESH_SECRET`, `AUDIT_IP_HASH_SECRET`, `RATE_LIMIT_IDENTITY_SECRET` и `READINESS_INTERNAL_SECRET` генерируются автоматически. Каждый секрет должен содержать не менее 32 символов.
 
+`REMNASHOP_AUTH_SERVICE_KEY` — отдельный server-to-server секрет только для `/api/v1/public/auth/*`. Он не должен совпадать с admin `REMNASHOP_API_KEY`, попадать в браузер или использоваться внешними клиентами. При общей Docker-сети направляйте `REMNASHOP_API_BASE_URL` на внутренний адрес Remnashop; при удалённом размещении защищайте тот же контракт service credential и сетевым ACL/mTLS.
+
 Для публичного HTTPS используйте:
 
 ```dotenv
@@ -150,6 +153,8 @@ TURNSTILE_SITE_KEY=<production site key>
 TURNSTILE_SECRET_KEY=<production secret key>
 ```
 
+В production `TURNSTILE_ENABLED=true` обязателен. Проверяются точные `action` и hostname, а token нельзя использовать повторно; IP клиента в anti-abuse identity не входит. Общую ёмкость и параллелизм задают `AUTH_RATE_LIMIT_CAPACITY` и `AUTH_CONCURRENCY_LIMIT`.
+
 Контакты поддержки включаются через `SUPPORT_ENABLED=true` и переменные `SUPPORT_EMAIL`, `SUPPORT_TELEGRAM_USERNAME`, `SUPPORT_FAQ_URL`.
 
 ### Сверка платежей
@@ -172,6 +177,7 @@ PAYMENT_RECONCILIATION_INTERNAL_URL=http://app:4000/api/internal/payments/reconc
 WEB_ENABLED=true
 WEB_CABINET_URL=https://pay.example.com/auth/telegram/webapp
 APP_API_KEY=<случайный секрет не короче 24 символов>
+APP_AUTH_SERVICE_KEY=<другой случайный секрет не короче 24 символов>
 APP_JWT_SECRET=<отдельный случайный секрет>
 ```
 
@@ -189,7 +195,9 @@ EMAIL_FROM_EMAIL=mail@example.com
 EMAIL_FROM_NAME=Clean Pay
 ```
 
-URL публичного API должен заканчиваться на `/api/v1/public`, admin API — на `/api/v1/admin`. Оба адреса должны использовать один origin и один API prefix.
+URL публичного API должен заканчиваться на `/api/v1/public`, admin API — на `/api/v1/admin`. Оба адреса должны использовать один origin и один API prefix. Все auth-маршруты Remnashop требуют заголовок `X-Remnashop-Auth-Service-Key`; Clean Pay добавляет его только server-side.
+
+Passkey создаёт локальную сессию Clean Pay. Если upstream-сессия Remnashop отсутствует или истекла, перед операцией с подпиской интерфейс запросит явный step-up через e-mail или Telegram.
 
 ### Совместимая версия Remnashop
 
@@ -199,7 +207,7 @@ URL публичного API должен заканчиваться на `/api/
 
 - не включайте `PAYMENT_RECONCILIATION_ENABLED`, если установленная версия не предоставляет требуемый capability/recovery contract;
 - полный сценарий объединения e-mail и Telegram может быть недоступен;
-- для контролируемого тестового окружения используйте зафиксированный проверенный commit PR #135 `b9da68a651e9ab0b7ed52d030e13754311614759`, а не движущуюся ветку;
+- для контролируемого тестового окружения используйте зафиксированный проверенный commit PR #135 `b9da68a`, а не движущуюся ветку;
 - перед production-обновлением проверьте актуальный статус PR и закрепите конкретную версию Docker image.
 
 На момент последней проверки PR #135 открыт, направлен в ветку `dev` и не является draft.
@@ -253,7 +261,7 @@ git pull --ff-only
 ./deploy.sh up
 ```
 
-Для production применяется только `prisma migrate deploy`. Не используйте `prisma migrate dev` или `prisma db push` с production-базой. Расширенная процедура обновления описана в [`docs/production-migration-runbook.md`](docs/production-migration-runbook.md).
+Для production применяется только отдельный одноразовый сервис `migration` с `prisma migrate deploy`; контейнер приложения миграции не запускает и не содержит Prisma CLI. Не используйте `prisma migrate dev` или `prisma db push` с production-базой. Расширенная процедура обновления описана в [`docs/production-migration-runbook.md`](docs/production-migration-runbook.md).
 
 ## Проверка и диагностика
 

@@ -326,6 +326,10 @@ print_diagnostics() {
     return
   fi
 
+  if [[ "${CLEAN_PAY_E2E_DIAGNOSTICS:-1}" == "0" ]]; then
+    return
+  fi
+
   log_step "e2e diagnostics"
   echo "Exit code: $exit_code"
   echo "Failed step: $failed_step"

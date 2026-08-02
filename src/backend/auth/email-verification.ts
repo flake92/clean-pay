@@ -216,7 +216,7 @@ export async function requestEmailVerification(rawBody: AuthPayload<RequestEmail
     hasEmail: Boolean(body.email),
     hasTurnstileToken: Boolean(turnstileToken ?? turnstile.token),
   });
-  await verifyTurnstileToken(turnstileToken ?? turnstile.token, turnstile.remoteIp);
+  await verifyTurnstileToken(turnstileToken ?? turnstile.token, "email_verification");
   authDebugLog("email_verification_request_turnstile_passed", {});
 
   const { accessToken, session } = await getAuthorizedRemnashopTokens({
@@ -280,7 +280,7 @@ export async function confirmEmailVerification(rawBody: AuthPayload<ConfirmEmail
     hasEmail: Boolean(body.email),
     hasTurnstileToken: Boolean(turnstileToken ?? turnstile.token),
   });
-  await verifyTurnstileToken(turnstileToken ?? turnstile.token, turnstile.remoteIp);
+  await verifyTurnstileToken(turnstileToken ?? turnstile.token, "email_verification");
   authDebugLog("email_verification_confirm_turnstile_passed", {});
 
   const { accessToken, refreshToken, session } = await getAuthorizedRemnashopTokens({
@@ -532,7 +532,7 @@ export async function changeEmail(rawBody: AuthPayload<ChangeEmailRequest>, turn
     hasEmail: Boolean(body.email),
     hasTurnstileToken: Boolean(turnstileToken ?? turnstile.token),
   });
-  await verifyTurnstileToken(turnstileToken ?? turnstile.token, turnstile.remoteIp);
+  await verifyTurnstileToken(turnstileToken ?? turnstile.token, "email_change");
   authDebugLog("email_change_turnstile_passed", {});
   const { accessToken, session } = await getAuthorizedRemnashopTokens();
   assertTelegramEmailSetupIsPasswordBacked(accessToken, session);

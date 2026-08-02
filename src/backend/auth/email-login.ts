@@ -14,10 +14,9 @@ export async function loginWithEmail(rawBody: AuthPayload<LoginRequest>, turnsti
   authDebugLog("auth_login_started", {
     hasEmail: Boolean(body.email),
     hasTurnstileToken: Boolean(turnstileToken ?? turnstile.token),
-    hasRemoteIp: Boolean(turnstile.remoteIp),
   });
-  await verifyTurnstileToken(turnstileToken ?? turnstile.token, turnstile.remoteIp);
-  authDebugLog("auth_login_turnstile_passed", { hasRemoteIp: Boolean(turnstile.remoteIp) });
+  await verifyTurnstileToken(turnstileToken ?? turnstile.token, "auth_login");
+  authDebugLog("auth_login_turnstile_passed", {});
   await assertRateLimit({
     action: "auth_login",
     email: body.email,

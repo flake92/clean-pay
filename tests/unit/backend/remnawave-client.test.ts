@@ -61,7 +61,7 @@ describe("Remnawave live subscription client", () => {
           status: "ACTIVE",
           email: "user@example.com",
           telegramId: 123,
-          expireAt: "2026-08-01T00:00:00.000Z",
+          expireAt: "2099-08-01T00:00:00.000Z",
           subscriptionUrl: "https://sub3.example.com/from-telegram",
         }],
       }))
@@ -101,7 +101,7 @@ describe("Remnawave live subscription client", () => {
             uuid: "rw-active",
             status: "ACTIVE",
             email: "user@example.com",
-            expireAt: "2026-08-01T00:00:00.000Z",
+            expireAt: "2099-08-01T00:00:00.000Z",
             subscriptionUrl: "https://sub3.example.com/active",
           },
         ],
