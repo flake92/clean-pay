@@ -168,7 +168,10 @@ export function normalizeRemnashopError(
     upstreamDetail: detail,
   };
 
-  if (status === 401 && lowerPath.includes('/auth/login')) {
+  if (
+    status === 401 &&
+    (lowerPath.includes('/auth/login') || lowerPath.includes('/auth/email/complete'))
+  ) {
     return new BffError('AUTH_FAILED', 401, message, debug);
   }
 
