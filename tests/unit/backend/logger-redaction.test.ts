@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { logEventBus, logger, sanitizeLogValue } from "@/backend/observability/logger";
 
@@ -46,5 +46,16 @@ describe("log levels", () => {
     unsubscribe();
 
     expect(levels).toEqual(["debug", "info", "warn", "error"]);
+  });
+
+  it("renders a readable message when a caller supplies only a structured event name", () => {
+    const consoleInfo = vi.spyOn(console, "info").mockImplementation(() => undefined);
+
+    logger.info("password_reset_success", { safe: true }, { source: "auth.password-reset" });
+
+    expect(consoleInfo).toHaveBeenCalledWith(expect.stringContaining("Password reset success"));
+    expect(consoleInfo).toHaveBeenCalledWith(expect.stringContaining("event=password_reset_success"));
+    expect(consoleInfo).toHaveBeenCalledWith(expect.stringContaining("clean-pay/auth.password-reset"));
+    consoleInfo.mockRestore();
   });
 });

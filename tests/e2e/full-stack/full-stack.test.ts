@@ -14,6 +14,10 @@ import {
 const baseUrl = process.env.CLEAN_PAY_E2E_BASE_URL ?? "http://localhost:4000";
 const mailpitBaseUrl = process.env.CLEAN_PAY_E2E_MAILPIT_URL ?? "http://localhost:8025";
 const oidcBaseUrl = process.env.CLEAN_PAY_E2E_OIDC_URL ?? "http://localhost:8090";
+const remnashopBaseUrl = process.env.REMNASHOP_API_BASE_URL
+  ?? process.env.CLEAN_PAY_E2E_REMNASHOP_URL
+  ?? "http://localhost:5001/api/v1/public";
+const remnashopAuthServiceKey = "dev-remnashop-auth-service-key-change-me";
 
 type CookieJar = Record<string, string>;
 type BffBody<T = unknown> = { data?: T; error?: { code: string; message: string; debug?: unknown } };
@@ -226,6 +230,17 @@ async function registerWithEmail() {
   expect(complete.status, JSON.stringify(await debugResponse(complete))).toBe(200);
 
   return { jar, email, password, body: await bff(complete) };
+}
+
+async function remnashopPasswordLogin(email: string, password: string) {
+  return fetch(`${remnashopBaseUrl}/auth/login`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-remnashop-auth-service-key": remnashopAuthServiceKey,
+    },
+    body: JSON.stringify({ email, password }),
+  });
 }
 
 async function createUnverifiedEmailSession() {
@@ -807,6 +822,35 @@ describe("real devcontainer full-stack e2e", () => {
       });
       await verificationCodeFromMail(nextEmail);
     }
+  });
+
+  it("resets an existing e-mail password, revokes the old credential and creates a fresh session", async () => {
+    await clearMailpit();
+    const { email, password } = await registerWithEmail();
+
+    await clearMailpit();
+    await expectBffData(
+      await postJson("/api/bff/auth/password/reset/start", { email }),
+      202,
+    );
+    const { code: resetCode } = await verificationCodeFromMail(email);
+    const newPassword = `${password}-recovered`;
+    const resetJar: CookieJar = {};
+    const reset = await postJson(
+      "/api/bff/auth/password/reset/confirm",
+      { email, code: resetCode, newPassword },
+      resetJar,
+    );
+    await expectBffData(reset);
+    const profile = await expectBffData<{ user: { email: string } }>(
+      await http("/api/bff/auth/me", {}, resetJar),
+    );
+    expect(profile.user.email).toBe(email);
+
+    const oldPasswordLogin = await remnashopPasswordLogin(email, password);
+    expect(oldPasswordLogin.status, JSON.stringify(await debugResponse(oldPasswordLogin))).toBe(401);
+    const newPasswordLogin = await remnashopPasswordLogin(email, newPassword);
+    expect(newPasswordLogin.status, JSON.stringify(await debugResponse(newPasswordLogin))).toBe(200);
   });
 
   it("covers subscription, device and payment business endpoints for an authenticated Telegram user", async () => {

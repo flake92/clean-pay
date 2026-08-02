@@ -7,6 +7,50 @@ const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..")
 const composeFile = path.join(rootDir, ".devcontainer", "docker-compose.yml");
 const projectName = process.env.CLEAN_PAY_DEVCONTAINER_PROJECT ?? "clean-pay-dev";
 
+function isRemnashopSource(directory) {
+  return (
+    existsSync(path.join(directory, "Dockerfile")) &&
+    existsSync(path.join(directory, "docker-migrate.sh")) &&
+    existsSync(path.join(directory, "src"))
+  );
+}
+
+if (
+  !isInsideDevcontainer() &&
+  !process.env.REMNASHOP_HOST_SOURCE &&
+  !process.env.REMNASHOP_BUILD_CONTEXT
+) {
+  const workspaceParent = path.dirname(rootDir);
+  const candidates = [
+    path.join(workspaceParent, "remnashop-security-remediation"),
+    path.join(workspaceParent, "remnashop"),
+  ];
+  const discovered = candidates.find(isRemnashopSource);
+
+  if (discovered) {
+    process.env.REMNASHOP_HOST_SOURCE = discovered;
+  } else {
+    console.error(
+      "A compatible local Remnashop source is required for E2E. " +
+      "Set REMNASHOP_HOST_SOURCE to a directory containing Dockerfile, " +
+      "docker-migrate.sh, and src.",
+    );
+    process.exit(1);
+  }
+}
+
+if (
+  !isInsideDevcontainer() &&
+  process.env.REMNASHOP_HOST_SOURCE &&
+  !isRemnashopSource(path.resolve(process.env.REMNASHOP_HOST_SOURCE))
+) {
+  console.error(
+    "REMNASHOP_HOST_SOURCE is not a compatible Remnashop checkout: " +
+    process.env.REMNASHOP_HOST_SOURCE,
+  );
+  process.exit(1);
+}
+
 if (process.platform === "win32" && !process.env.CLEAN_PAY_HOST_DEVCONTAINER_DIR) {
   process.env.CLEAN_PAY_HOST_DEVCONTAINER_DIR = path.join(rootDir, ".devcontainer");
 }

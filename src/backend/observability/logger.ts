@@ -120,7 +120,7 @@ function writeConsoleLog(event: LogEvent) {
   const metadata = sanitizeLogValue(event.metadata ?? {});
   const level = event.level.toUpperCase().padEnd(8, " ");
   const source = event.source ?? event.category ?? "app";
-  const message = event.message ?? event.event;
+  const message = event.message ?? humanizeEvent(event.event);
   const metadataText = formatMetadata(metadata);
   const line = `${new Date().toISOString()} | ${level} | clean-pay/${source} | ${message} | event=${event.event}${metadataText}`;
 
@@ -140,6 +140,12 @@ function writeConsoleLog(event: LogEvent) {
   }
 
   console.info(line);
+}
+
+function humanizeEvent(event: string) {
+  const words = event.replace(/[_-]+/g, " ").trim();
+
+  return words ? `${words.charAt(0).toUpperCase()}${words.slice(1)}` : "Application event";
 }
 
 function formatMetadata(metadata: unknown) {
