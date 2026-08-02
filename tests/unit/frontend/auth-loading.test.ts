@@ -5,12 +5,10 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("primereact/button", () => ({
-  Button: (props: Record<string, unknown>) => {
-    const buttonProps = { ...props };
-    const label = buttonProps.label;
-    delete buttonProps.label;
-    delete buttonProps.loading;
-    return createElement("button", buttonProps, String(label ?? ""));
+  Button: ({ label, ...props }: Record<string, unknown>) => {
+    delete props.loading;
+    delete props.text;
+    return createElement("button", props, String(label ?? ""));
   },
 }));
 vi.mock("primereact/inputtext", () => ({
@@ -23,6 +21,7 @@ vi.mock("primereact/password", () => ({
   Password: (props: Record<string, unknown>) => {
     const inputProps = { ...props };
     delete inputProps.feedback;
+    delete inputProps.inputClassName;
     delete inputProps.toggleMask;
     return createElement("input", { ...inputProps, type: "password" });
   },
@@ -38,11 +37,7 @@ vi.mock("@/frontend/components/turnstile-widget", () => ({
 import { LoginForm, RegisterForm } from "@/frontend/components/auth-forms";
 
 function setInputValue(input: HTMLInputElement, value: string) {
-  const setter = Object.getOwnPropertyDescriptor(
-    HTMLInputElement.prototype,
-    "value",
-  )?.set;
-  setter?.call(input, value);
+  Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set?.call(input, value);
   input.dispatchEvent(new Event("input", { bubbles: true }));
 }
 
@@ -53,7 +48,10 @@ async function submit(form: HTMLFormElement) {
   });
 }
 
-describe("login loading recovery", () => {
+describe.each([
+  ["login", LoginForm],
+  ["registration alias", RegisterForm],
+])("generic email %s loading recovery", (_label, Component) => {
   let container: HTMLDivElement;
   let root: Root;
 
@@ -62,7 +60,7 @@ describe("login loading recovery", () => {
     container = document.createElement("div");
     document.body.append(container);
     root = createRoot(container);
-    await act(async () => root.render(createElement(LoginForm)));
+    await act(async () => root.render(createElement(Component)));
   });
 
   afterEach(async () => {
@@ -72,86 +70,24 @@ describe("login loading recovery", () => {
     vi.restoreAllMocks();
   });
 
-  it("stops loading when identity lookup loses the network response", async () => {
+  it("stops loading after a start transport failure", async () => {
     vi.mocked(fetch).mockRejectedValueOnce(new TypeError("network unavailable"));
-    const email = container.querySelector<HTMLInputElement>('input[type="email"]');
-    expect(email).not.toBeNull();
-
-    await act(async () => setInputValue(email!, "user@example.com"));
-    await submit(container.querySelector("form")!);
-
-    expect(container.querySelector("button")?.disabled).toBe(false);
-    expect(container.textContent).toContain("Не удалось проверить e-mail");
-  });
-
-  it("stops loading and reports an unknown result after a login transport error", async () => {
-    vi.mocked(fetch)
-      .mockResolvedValueOnce(Response.json({ data: { exists: true, hasPasskey: false } }))
-      .mockRejectedValueOnce(new TypeError("response lost"));
     const email = container.querySelector<HTMLInputElement>('input[type="email"]')!;
-
     await act(async () => setInputValue(email, "user@example.com"));
     await submit(container.querySelector("form")!);
 
-    const password = container.querySelector<HTMLInputElement>('input[name="password"]');
-    expect(password).not.toBeNull();
-    await act(async () => setInputValue(password!, "valid-password"));
-    await submit(container.querySelector("form")!);
-
-    const submitButton = Array.from(container.querySelectorAll("button")).find(
-      (button) => button.type === "submit",
-    );
-    expect(submitButton?.disabled).toBe(false);
+    expect(container.querySelector<HTMLButtonElement>('button[type="submit"]')?.disabled).toBe(false);
     expect(container.textContent).toContain("Не удалось определить результат входа");
   });
 
-  it("rejects a successful identity response with a non-JSON body without hanging", async () => {
-    vi.mocked(fetch).mockResolvedValueOnce(new Response("not-json", { status: 200 }));
+  it("uses the generic start endpoint and reveals no account branch", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(Response.json({ data: { success: true } }, { status: 202 }));
     const email = container.querySelector<HTMLInputElement>('input[type="email"]')!;
-
     await act(async () => setInputValue(email, "user@example.com"));
     await submit(container.querySelector("form")!);
 
-    expect(container.querySelector("button")?.disabled).toBe(false);
-    expect(container.textContent).toContain("Сервер вернул некорректный ответ");
-  });
-});
-
-describe("registration loading recovery", () => {
-  let container: HTMLDivElement;
-  let root: Root;
-
-  beforeEach(async () => {
-    vi.stubGlobal("fetch", vi.fn());
-    container = document.createElement("div");
-    document.body.append(container);
-    root = createRoot(container);
-    await act(async () => root.render(createElement(RegisterForm)));
-  });
-
-  afterEach(async () => {
-    await act(async () => root.unmount());
-    container.remove();
-    vi.unstubAllGlobals();
-    vi.restoreAllMocks();
-  });
-
-  it("stops loading after an ambiguous registration transport failure", async () => {
-    vi.mocked(fetch).mockRejectedValueOnce(new TypeError("response lost"));
-    const values: Record<string, string> = {
-      email: "user@example.com",
-      password: "valid-password",
-      confirmPassword: "valid-password",
-    };
-
-    for (const [name, value] of Object.entries(values)) {
-      const input = container.querySelector<HTMLInputElement>(`[name="${name}"]`);
-      expect(input).not.toBeNull();
-      await act(async () => setInputValue(input!, value));
-    }
-    await submit(container.querySelector("form")!);
-
-    expect(container.querySelector("button")?.disabled).toBe(false);
-    expect(container.textContent).toContain("Не удалось определить результат регистрации");
+    expect(fetch).toHaveBeenCalledWith("/api/bff/auth/email/start", expect.any(Object));
+    expect(container.querySelector<HTMLInputElement>('input[type="password"]')).not.toBeNull();
+    expect(container.textContent).toContain("Введите код из письма");
   });
 });

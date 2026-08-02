@@ -11,13 +11,20 @@ if (process.platform === "win32" && !process.env.CLEAN_PAY_HOST_DEVCONTAINER_DIR
   process.env.CLEAN_PAY_HOST_DEVCONTAINER_DIR = path.join(rootDir, ".devcontainer");
 }
 
+if (process.env.REMNASHOP_HOST_SOURCE && !process.env.REMNASHOP_BUILD_CONTEXT) {
+  process.env.REMNASHOP_BUILD_CONTEXT = process.env.REMNASHOP_HOST_SOURCE;
+}
+
 const passThroughEnv = [
   "CLEAN_PAY_DEVCONTAINER_PROJECT",
   "CLEAN_PAY_E2E_BASE_URL",
   "CLEAN_PAY_E2E_MAILPIT_URL",
   "CLEAN_PAY_E2E_OIDC_URL",
   "CLEAN_PAY_HOST_DEVCONTAINER_DIR",
+  "CLEAN_PAY_E2E_DIAGNOSTICS",
   "KEEP_E2E_STACK",
+  "REMNASHOP_BUILD_CONTEXT",
+  "REMNASHOP_HOST_SOURCE",
 ];
 
 function run(command, args) {
@@ -137,7 +144,9 @@ function runInsideDevcontainer() {
     if (process.env[name] !== undefined) {
       const value = name === "CLEAN_PAY_HOST_DEVCONTAINER_DIR"
         ? dockerDesktopHostPath(process.env[name])
-        : process.env[name];
+        : name === "REMNASHOP_BUILD_CONTEXT" && process.env.REMNASHOP_HOST_SOURCE
+          ? "/workspace/remnashop-source"
+          : process.env[name];
 
       execArgs.push("-e", `${name}=${value}`);
     }

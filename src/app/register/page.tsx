@@ -1,4 +1,4 @@
-import { AuthTurnstileProvider, RegisterForm } from "@/frontend/components/auth-forms";
+import { AuthTurnstileProvider, LoginForm } from "@/frontend/components/auth-forms";
 import { AuthShell } from "@/frontend/components/layout";
 
 export const dynamic = "force-dynamic";
@@ -13,7 +13,7 @@ export default function RegisterPage() {
         description="Создайте e-mail аккаунт для оплаты и управления подпиской."
         title="Регистрация"
       >
-        <RegisterForm />
+        <LoginForm redirectTo="/cabinet" />
       </AuthShell>
     </AuthTurnstileProvider>
   );

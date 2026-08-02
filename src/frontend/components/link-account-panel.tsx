@@ -663,6 +663,7 @@ export function LinkAccountPanel({
             <div className="account-method-actions-stack">
               {turnstileEnabled ? (
                 <TurnstileWidget
+                  action="telegram_auth_start"
                   onReady={setTurnstile}
                   onToken={setTurnstileToken}
                   siteKey={turnstileSiteKey}

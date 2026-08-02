@@ -366,6 +366,7 @@ describe("remnashop client", () => {
         method: "POST",
         headers: expect.objectContaining({
           cookie: "access_token=access.jwt",
+          "x-remnashop-auth-service-key": "auth-service-unit-7Vr3Nm8Wp2Kq5Xs9Lc4D",
         }),
       }),
     );

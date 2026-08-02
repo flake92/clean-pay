@@ -4,6 +4,7 @@ import {
   remnashopRequestResult,
 } from "@/backend/integrations/remnashop/client";
 import { BffError } from "@/backend/integrations/remnashop/errors";
+import { logger } from "@/backend/observability/logger";
 import type {
   PaymentInitResponse,
   PaymentTransactionResponse,
@@ -110,8 +111,17 @@ function textValue(
   return value;
 }
 
-function nullableInteger(value: unknown, path: string, field: string) {
+function nullableInteger(
+  value: unknown,
+  path: string,
+  field: string,
+  options: { legacyUnlimited?: boolean } = {},
+) {
   if (value === null) {
+    return null;
+  }
+
+  if (options.legacyUnlimited && value === -1) {
     return null;
   }
 
@@ -235,7 +245,9 @@ export function parsePaymentTransaction(
     final_amount: amountValue(item.final_amount, path, "final_amount"),
     currency,
     plan_name: textValue(item.plan_name, path, "plan_name", true),
-    duration_days: nullableInteger(item.duration_days, path, "duration_days"),
+    duration_days: nullableInteger(item.duration_days, path, "duration_days", {
+      legacyUnlimited: true,
+    }),
     device_limit: nullableInteger(item.device_limit, path, "device_limit"),
     traffic_limit: nullableInteger(item.traffic_limit, path, "traffic_limit"),
     created_at: createdAt,
@@ -414,8 +426,28 @@ export function parseTransactionPage(
     return invalidContract(path, "next_cursor must be a bounded string or null");
   }
 
+  const items = root.items.flatMap((item, index) => {
+    try {
+      return [parsePaymentTransaction(item, path)];
+    } catch (error) {
+      if (!(error instanceof BffError) || error.code !== "UPSTREAM_ERROR") {
+        throw error;
+      }
+      logger.warn("remnashop_payment_history_row_rejected", {
+        index,
+        upstreamPath: path,
+        reason: error.message,
+      }, {
+        category: "upstream",
+        source: "remnashop.payment-recovery",
+        message: "Rejected one invalid Remnashop payment-history row",
+      });
+      return [];
+    }
+  });
+
   return {
-    items: root.items.map((item) => parsePaymentTransaction(item, path)),
+    items,
     next_cursor: root.next_cursor as string | null,
   };
 }
@@ -429,7 +461,25 @@ export function parseLegacyTransactions(
     return invalidContract(path, "legacy response must contain at most 20 rows");
   }
 
-  return value.map((item) => parsePaymentTransaction(item, path));
+  return value.flatMap((item, index) => {
+    try {
+      return [parsePaymentTransaction(item, path)];
+    } catch (error) {
+      if (!(error instanceof BffError) || error.code !== "UPSTREAM_ERROR") {
+        throw error;
+      }
+      logger.warn("remnashop_legacy_payment_history_row_rejected", {
+        index,
+        upstreamPath: path,
+        reason: error.message,
+      }, {
+        category: "upstream",
+        source: "remnashop.payment-recovery",
+        message: "Rejected one invalid legacy Remnashop payment-history row",
+      });
+      return [];
+    }
+  });
 }
 
 export function parsePaymentRecovery(

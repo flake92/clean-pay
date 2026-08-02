@@ -121,6 +121,29 @@ describe("Remnashop payment recovery v1 contract", () => {
     ).toThrow(/cursor/i);
   });
 
+  it("normalizes legacy unlimited duration and isolates an invalid history row", () => {
+    expect(
+      parsePaymentTransaction({ ...transaction, duration_days: -1 }).duration_days,
+    ).toBeNull();
+
+    expect(
+      parseTransactionPage({
+        items: [
+          { ...transaction, duration_days: -1 },
+          {
+            ...transaction,
+            payment_id: "22222222-2222-4222-8222-222222222222",
+            status: "corrupt-legacy-status",
+          },
+        ],
+        next_cursor: null,
+      }),
+    ).toEqual({
+      items: [{ ...transaction, duration_days: null }],
+      next_cursor: null,
+    });
+  });
+
   it("requires internally consistent successful recovery data", () => {
     expect(
       parsePaymentRecovery(

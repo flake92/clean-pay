@@ -13,6 +13,7 @@ type AppEnv = {
   remnashopApiBaseUrl: string;
   remnashopAdminApiBaseUrl: string;
   remnashopApiKey: string | null;
+  remnashopAuthServiceKey: string | null;
   remnawave: {
     apiBaseUrl: string | null;
     token: string | null;
@@ -21,6 +22,8 @@ type AppEnv = {
   webRefreshSecret: string;
   auditIpHashSecret: string;
   rateLimitIdentitySecret: string;
+  authRateLimitCapacity: number;
+  authConcurrencyLimit: number;
   cookieSecure: boolean;
   cookieSameSite: SameSite;
   telegramOidc: {
@@ -291,6 +294,7 @@ export function getEnv(): AppEnv {
     remnashopApiBaseUrl,
     remnashopAdminApiBaseUrl,
     remnashopApiKey: optional("REMNASHOP_API_KEY"),
+    remnashopAuthServiceKey: optional("REMNASHOP_AUTH_SERVICE_KEY"),
     remnawave: {
       apiBaseUrl: optionalUrl("REMNAWAVE_API_BASE_URL"),
       token: optional("REMNAWAVE_TOKEN"),
@@ -299,6 +303,8 @@ export function getEnv(): AppEnv {
     webRefreshSecret: required("WEB_REFRESH_SECRET"),
     auditIpHashSecret: optional("AUDIT_IP_HASH_SECRET") ?? required("WEB_JWT_SECRET"),
     rateLimitIdentitySecret: required("RATE_LIMIT_IDENTITY_SECRET"),
+    authRateLimitCapacity: integer("AUTH_RATE_LIMIT_CAPACITY", 1000, 100, 1_000_000),
+    authConcurrencyLimit: integer("AUTH_CONCURRENCY_LIMIT", 64, 1, 10_000),
     cookieSecure: bool("COOKIE_SECURE", true),
     cookieSameSite: sameSite("COOKIE_SAMESITE", "lax"),
     telegramOidc: {

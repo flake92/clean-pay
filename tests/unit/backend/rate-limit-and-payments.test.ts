@@ -20,7 +20,7 @@ vi.mock("@/backend/database/prisma", () => ({
   prisma: mocks.prisma,
 }));
 
-import { assertCooldown, assertRateLimit, rateLimitKey, recordRateLimitEvent } from "@/backend/limits/rate-limit";
+import { assertCooldown, assertRateLimit, rateLimitCapacityKey, rateLimitKey, recordRateLimitEvent, withAuthConcurrency } from "@/backend/limits/rate-limit";
 import {
   applyRemnashopTransaction,
   recordPayment,
@@ -49,36 +49,33 @@ describe("rate limiting", () => {
 
   it("builds normalized Redis keys", () => {
     const key = rateLimitKey({ action: "Auth_Login", email: " USER@Example.COM ", tgId: 123n });
-    expect(key).toMatch(/^clean-pay:rate-limit:v3:auth_login:email:[a-f0-9]{64}:tgid:[a-f0-9]{64}:ip:none$/);
+    expect(key).toMatch(/^clean-pay:rate-limit:v4:auth:auth_login:email:[a-f0-9]{64}$/);
     expect(key).not.toContain("user@example.com");
     expect(key).not.toContain(":123");
     expect(rateLimitKey({ action: "Auth_Login", email: " user@example.com ", tgId: "123" })).toBe(key);
     expect(rateLimitKey({ action: "", email: null, tgId: undefined })).toBe(
-      "clean-pay:rate-limit:v3:unknown:email:none:tgid:none:ip:none",
+      "clean-pay:rate-limit:v4:auth:unknown:capacity",
     );
-    const firstIp = rateLimitKey({ action: "passkey", clientIp: "192.0.2.10" });
-    const secondIp = rateLimitKey({ action: "passkey", clientIp: "192.0.2.11" });
-    expect(firstIp).toMatch(/^clean-pay:rate-limit:v3:passkey:email:none:tgid:none:ip:[a-f0-9]{64}$/);
-    expect(firstIp).not.toBe(secondIp);
-    expect(firstIp).not.toContain("192.0.2.10");
+    expect(rateLimitCapacityKey("passkey")).toBe("clean-pay:rate-limit:v4:auth:passkey:capacity");
   });
 
   it("increments counter and expires new keys atomically", async () => {
-    mocks.redisCommand.mockResolvedValueOnce(1);
+    mocks.redisCommand.mockResolvedValueOnce([1, 1]);
 
     await assertRateLimit({ action: "login", email: "u@e.test", limit: 5, windowSeconds: 60 });
 
     expect(mocks.redisCommand).toHaveBeenCalledWith([
       "EVAL",
       expect.stringContaining("redis.call('INCR'"),
-      1,
-      expect.stringMatching(/^clean-pay:rate-limit:v3:login:email:[a-f0-9]{64}:tgid:none:ip:none$/),
+      2,
+      expect.stringMatching(/^clean-pay:rate-limit:v4:auth:login:email:[a-f0-9]{64}$/),
+      "clean-pay:rate-limit:v4:auth:login:capacity",
       60,
     ]);
   });
 
   it("throws rate limited error with retry ttl", async () => {
-    mocks.redisCommand.mockResolvedValueOnce(6).mockResolvedValueOnce(42);
+    mocks.redisCommand.mockResolvedValueOnce([6, 6]).mockResolvedValueOnce(42);
 
     await expect(assertRateLimit({ action: "login", email: "u@e.test", limit: 5, windowSeconds: 60 })).rejects.toMatchObject({
       code: "RATE_LIMITED",
@@ -88,7 +85,7 @@ describe("rate limiting", () => {
   });
 
   it("uses rate-limit for cooldown compatibility helpers", async () => {
-    mocks.redisCommand.mockResolvedValueOnce(1);
+    mocks.redisCommand.mockResolvedValueOnce([1, 1]);
 
     await assertCooldown({ key: "email:user-1", action: "email_verification", windowSeconds: 60 });
     await expect(recordRateLimitEvent()).resolves.toBeUndefined();
@@ -96,8 +93,9 @@ describe("rate limiting", () => {
     expect(mocks.redisCommand).toHaveBeenCalledWith([
       "EVAL",
       expect.any(String),
-      1,
-      expect.stringMatching(/^clean-pay:rate-limit:v3:email_verification:email:[a-f0-9]{64}:tgid:none:ip:none$/),
+      2,
+      expect.stringMatching(/^clean-pay:rate-limit:v4:auth:email_verification:email:[a-f0-9]{64}$/),
+      "clean-pay:rate-limit:v4:auth:email_verification:capacity",
       60,
     ]);
   });
@@ -106,8 +104,44 @@ describe("rate limiting", () => {
     mocks.redisCommand.mockResolvedValueOnce("not-a-number");
 
     await expect(assertRateLimit({ action: "login", limit: 1, windowSeconds: 60 })).rejects.toMatchObject({
-      code: "UPSTREAM_ERROR",
+      code: "UPSTREAM_UNAVAILABLE",
     });
+  });
+
+  it("bounds expensive auth work with a leased Redis semaphore", async () => {
+    mocks.redisCommand.mockResolvedValueOnce(1).mockResolvedValueOnce(1);
+    const work = vi.fn().mockResolvedValue("done");
+
+    await expect(withAuthConcurrency("login", work)).resolves.toBe("done");
+
+    expect(work).toHaveBeenCalledOnce();
+    expect(mocks.redisCommand.mock.calls[0]?.[0]).toEqual([
+      "EVAL",
+      expect.stringContaining("ZREMRANGEBYSCORE"),
+      1,
+      "clean-pay:concurrency:v1:auth:login",
+      expect.any(Number),
+      expect.any(Number),
+      expect.any(String),
+      64,
+      30_000,
+    ]);
+    expect(mocks.redisCommand.mock.calls[1]?.[0]).toEqual([
+      "ZREM",
+      "clean-pay:concurrency:v1:auth:login",
+      expect.any(String),
+    ]);
+  });
+
+  it("rejects concurrency exhaustion before expensive work", async () => {
+    mocks.redisCommand.mockResolvedValueOnce(0);
+    const work = vi.fn();
+
+    await expect(withAuthConcurrency("login", work)).rejects.toMatchObject({
+      code: "UPSTREAM_UNAVAILABLE",
+      status: 503,
+    });
+    expect(work).not.toHaveBeenCalled();
   });
 });
 

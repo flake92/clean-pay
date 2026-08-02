@@ -298,6 +298,7 @@ export function ProfilePanel({
           <form className="flex flex-column gap-3" onSubmit={changeEmail}>
             {turnstileEnabled ? (
               <TurnstileWidget
+                action="email_change"
                 onReady={setTurnstile}
                 onToken={setTurnstileToken}
                 siteKey={turnstileSiteKey}
