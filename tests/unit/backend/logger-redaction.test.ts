@@ -32,6 +32,20 @@ describe("identity log redaction", () => {
     expect(JSON.stringify(sanitized)).not.toContain("123456789");
     expect(JSON.stringify(sanitized)).not.toContain("user@example.com");
   });
+
+  it("redacts credentials and email addresses embedded in unstructured errors", () => {
+    const sanitized = sanitizeLogValue({
+      error: "SMTP failed for user@example.com; password=hunter2 token='abc.def' Authorization: Bearer bearer-secret",
+    });
+
+    expect(JSON.stringify(sanitized)).not.toContain("user@example.com");
+    expect(JSON.stringify(sanitized)).not.toContain("hunter2");
+    expect(JSON.stringify(sanitized)).not.toContain("abc.def");
+    expect(JSON.stringify(sanitized)).not.toContain("bearer-secret");
+    expect(sanitized).toEqual({
+      error: expect.stringContaining("SMTP failed"),
+    });
+  });
 });
 
 describe("log levels", () => {
