@@ -61,10 +61,22 @@ describe("health checks", () => {
   });
 
   it("checks Remnashop availability", async () => {
-    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(new Response("{}", { status: 200 }));
+    const fetch = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response("{}", { status: 200 }))
+      .mockResolvedValueOnce(new Response("{}", { status: 422 }));
 
     await expect(checkRemnashop()).resolves.toMatchObject({ status: "ok" });
-    expect(globalThis.fetch).toHaveBeenCalledWith("http://remnashop:5000/api/v1/public/plans/public", expect.objectContaining({
+    expect(fetch).toHaveBeenNthCalledWith(1, "http://remnashop:5000/api/v1/public/plans/public", expect.objectContaining({
+      cache: "no-store",
+      signal: expect.any(Object),
+    }));
+    expect(fetch).toHaveBeenNthCalledWith(2, "http://remnashop:5000/api/v1/public/auth/email/start", expect.objectContaining({
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-remnashop-auth-service-key": "auth-service-unit-7Vr3Nm8Wp2Kq5Xs9Lc4D",
+      },
+      body: "{}",
       cache: "no-store",
       signal: expect.any(Object),
     }));
@@ -76,6 +88,34 @@ describe("health checks", () => {
     await expect(checkRemnashop()).resolves.toMatchObject({
       status: "down",
       message: "Remnashop public API returned 404; enable WEB_ENABLED=true with APP_API_KEY and APP_JWT_SECRET in Remnashop",
+    });
+  });
+
+  it("fails readiness for an incompatible Remnashop auth contract", async () => {
+    const fetch = vi.spyOn(globalThis, "fetch");
+
+    fetch
+      .mockResolvedValueOnce(new Response("{}", { status: 200 }))
+      .mockResolvedValueOnce(new Response("{}", { status: 404 }));
+    await expect(checkRemnashop()).resolves.toMatchObject({
+      status: "down",
+      message: "Remnashop is incompatible: generic e-mail auth route is missing",
+    });
+
+    fetch
+      .mockResolvedValueOnce(new Response("{}", { status: 200 }))
+      .mockResolvedValueOnce(new Response("{}", { status: 401 }));
+    await expect(checkRemnashop()).resolves.toMatchObject({
+      status: "down",
+      message: "Remnashop rejected REMNASHOP_AUTH_SERVICE_KEY",
+    });
+
+    fetch
+      .mockResolvedValueOnce(new Response("{}", { status: 200 }))
+      .mockResolvedValueOnce(new Response("{}", { status: 202 }));
+    await expect(checkRemnashop()).resolves.toMatchObject({
+      status: "down",
+      message: "Remnashop generic e-mail auth contract returned 202, expected 422",
     });
   });
 

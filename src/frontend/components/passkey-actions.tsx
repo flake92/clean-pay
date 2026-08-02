@@ -65,6 +65,23 @@ function isWebAuthnTransportError(error: unknown) {
   );
 }
 
+function isUnavailableCredential(error: unknown) {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+
+  const name = error.name.toLowerCase();
+  const message = error.message.toLowerCase();
+
+  return (
+    name.includes("unknownerror") ||
+    name.includes("notreadable") ||
+    message.includes("credential manager") ||
+    message.includes("credential not found") ||
+    message.includes("no credentials")
+  );
+}
+
 export function PasskeyLoginButton({
   redirectTo = "/cabinet",
   turnstileEnabled = false,
@@ -130,10 +147,10 @@ export function PasskeyLoginButton({
       setError(
         isUserCancelled(error)
           ? "Окно быстрого входа закрыто. Можно войти по паролю."
+          : isUnavailableCredential(error)
+            ? "Сохранённый на устройстве ключ больше не связан с этим стендом. Войдите через e-mail или Telegram и создайте новый ключ в профиле."
           : isWebAuthnTransportError(error)
             ? "Браузер не смог связаться с ключом. Для входа через телефон включите Bluetooth на компьютере и телефоне, затем повторите попытку."
-            : error instanceof Error
-            ? error.message
             : "Не удалось войти быстрым способом.",
       );
     } finally {

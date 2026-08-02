@@ -203,4 +203,30 @@ describe("Passkey setup continuation", () => {
       await Promise.resolve();
     });
   });
+
+  it("explains how to recover when Android keeps a credential from a destroyed stand", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(
+      Response.json({ data: { challenge: "challenge-1" } }),
+    );
+    const credentialManagerError = new Error(
+      "An unknown error occurred while talking to the credential manager.",
+    );
+    credentialManagerError.name = "UnknownError";
+    mocks.startAuthentication.mockRejectedValueOnce(credentialManagerError);
+
+    await act(async () => root.render(createElement(PasskeyLoginButton)));
+    await act(async () => {
+      await new Promise((resolve) => window.setTimeout(resolve, 0));
+    });
+    const loginButton = Array.from(container.querySelectorAll("button")).find(
+      (button) => button.textContent === "Войти быстро",
+    )!;
+    await click(loginButton);
+
+    expect(container.textContent).toContain(
+      "Сохранённый на устройстве ключ больше не связан с этим стендом. Войдите через e-mail или Telegram и создайте новый ключ в профиле.",
+    );
+    expect(container.textContent).not.toContain("credential manager");
+    expect(fetch).toHaveBeenCalledOnce();
+  });
 });
