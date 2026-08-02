@@ -425,4 +425,4 @@ log_step "Running full-stack e2e tests"
 CLEAN_PAY_E2E_BASE_URL="$base_url" \
 CLEAN_PAY_E2E_MAILPIT_URL="$mailpit_url" \
 CLEAN_PAY_E2E_OIDC_URL="$oidc_url" \
-npx vitest run --config "$root_dir/vitest.e2e.config.ts"
+npx vitest run --config "$root_dir/vitest.e2e.config.mts" --configLoader native
