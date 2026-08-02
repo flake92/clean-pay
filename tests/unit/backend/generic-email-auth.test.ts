@@ -42,7 +42,7 @@ describe("generic email authentication", () => {
 
     await expect(startGenericEmailAuth({ email: "user@example.com" }, "token")).resolves.toEqual({ success: true });
 
-    expect(mocks.verifyTurnstileToken).toHaveBeenCalledWith("token", "email_auth_start");
+    expect(mocks.verifyTurnstileToken).toHaveBeenCalledWith("token", "auth_login");
     expect(mocks.assertRateLimit).toHaveBeenCalledWith(expect.objectContaining({
       action: "email_auth_start",
       email: "user@example.com",
@@ -80,7 +80,7 @@ describe("generic email authentication", () => {
       "token",
     );
 
-    expect(mocks.verifyTurnstileToken).toHaveBeenCalledWith("token", "email_auth_complete");
+    expect(mocks.verifyTurnstileToken).toHaveBeenCalledWith("token", "auth_login");
     expect(mocks.remnashopAuth).toHaveBeenCalledWith("/auth/email/complete", expect.objectContaining({ code: "123456" }));
     expect(mocks.createSessionFromRemnashopAuth).toHaveBeenCalledOnce();
     expect(result.user).toEqual({ email: "user@example.com" });

@@ -326,7 +326,7 @@ export function ExtendConfirmation() {
       <div className="flex flex-column gap-4">
         <Message
           severity="info"
-          text="Продление текущего тарифа недоступно. Можно изменить тариф, но Remnashop применит новый тариф как замену текущего без перерасчета."
+          text="Продление текущего тарифа недоступно. Можно изменить тариф: новый тариф заменит текущий без перерасчёта."
         />
         <LinkButton className="w-fit" href="/tariffs" label="Изменить тариф" />
       </div>

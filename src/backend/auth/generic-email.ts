@@ -15,7 +15,7 @@ export async function startGenericEmailAuth(
   body: StartGenericEmailAuthRequest,
   turnstileToken: string | null,
 ) {
-  await verifyTurnstileToken(turnstileToken, "email_auth_start");
+  await verifyTurnstileToken(turnstileToken, "auth_login");
   await assertRateLimit({
     action: "email_auth_start",
     email: body.email,
@@ -30,7 +30,7 @@ export async function completeGenericEmailAuth(
   body: CompleteGenericEmailAuthRequest,
   turnstileToken: string | null,
 ) {
-  await verifyTurnstileToken(turnstileToken, "email_auth_complete");
+  await verifyTurnstileToken(turnstileToken, "auth_login");
   await assertRateLimit({
     action: "email_auth_complete",
     email: body.email,

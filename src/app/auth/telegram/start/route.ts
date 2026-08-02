@@ -50,7 +50,7 @@ export async function GET(request: Request) {
 
     await verifyTurnstileToken(
       url.searchParams.get("turnstile_token") ?? url.searchParams.get("cf-turnstile-response"),
-      "telegram_auth_start",
+      "auth_login",
     );
 
     if (currentUser) {

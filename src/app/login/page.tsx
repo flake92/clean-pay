@@ -32,7 +32,7 @@ export default async function LoginPage({
   return (
     <AuthTurnstileProvider enabled={turnstileEnabled} siteKey={turnstileSiteKey}>
       <AuthShell
-        description="Введите e-mail. Если аккаунт уже есть, покажем вход по паролю или быстрый вход. Если аккаунта нет, создадим его здесь же."
+        description="Введите e-mail, получите одноразовый код и продолжите вход. Также можно использовать быстрый вход или Telegram."
         footer={<TelegramLoginButton redirectTo={redirectTo} />}
         title="Вход"
       >

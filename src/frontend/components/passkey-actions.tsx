@@ -11,7 +11,6 @@ import { Button } from "primereact/button";
 import { InputText } from "primereact/inputtext";
 import { Message } from "primereact/message";
 
-import { TurnstileWidget, type TurnstileHandle, hasTurnstileSiteKey } from "@/frontend/components/turnstile-widget";
 import { navigateTo } from "@/frontend/lib/browser-navigation";
 import { readBffError } from "@/frontend/lib/client-api";
 
@@ -83,19 +82,19 @@ function isUnavailableCredential(error: unknown) {
 }
 
 export function PasskeyLoginButton({
+  consumeTurnstileToken,
   redirectTo = "/cabinet",
+  resetTurnstile,
   turnstileEnabled = false,
-  turnstileSiteKey,
 }: {
+  consumeTurnstileToken?: () => string | null;
   redirectTo?: string;
+  resetTurnstile?: () => void;
   turnstileEnabled?: boolean;
-  turnstileSiteKey?: string | null;
 }) {
   const supported = useWebAuthnSupport();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
-  const [turnstile, setTurnstile] = useState<TurnstileHandle | null>(null);
   const loginPendingRef = useRef(false);
 
   async function login() {
@@ -103,12 +102,9 @@ export function PasskeyLoginButton({
       return;
     }
 
+    const turnstileToken = turnstileEnabled ? consumeTurnstileToken?.() ?? null : null;
     if (turnstileEnabled && !turnstileToken) {
-      setError(
-        hasTurnstileSiteKey(turnstileSiteKey)
-          ? "Пройдите отдельную проверку Turnstile для входа с Passkey."
-          : "Cloudflare Turnstile site key is not configured.",
-      );
+      setError("Пройдите единую проверку безопасности.");
       return;
     }
     loginPendingRef.current = true;
@@ -121,8 +117,7 @@ export function PasskeyLoginButton({
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ turnstileToken }),
       });
-      turnstile?.reset();
-      setTurnstileToken(null);
+      resetTurnstile?.();
 
       if (!optionsResponse.ok) {
         setError(await readError(optionsResponse, "Не удалось начать быстрый вход."));
@@ -144,6 +139,7 @@ export function PasskeyLoginButton({
 
       window.location.assign(redirectTo);
     } catch (error) {
+      resetTurnstile?.();
       setError(
         isUserCancelled(error)
           ? "Окно быстрого входа закрыто. Можно войти по паролю."
@@ -173,17 +169,9 @@ export function PasskeyLoginButton({
         Можно войти через Face ID, отпечаток или PIN-код устройства.
       </div>
       <div className="text-xs text-500 line-height-3">
-        Passkey восстанавливает локальную сессию CleanPay. Если сессия RemnaShop истекла, перед оплатой или управлением подпиской потребуется подтверждение через e-mail либо Telegram.
+        Passkey восстанавливает вход на этом устройстве. Перед оплатой или управлением подпиской система при необходимости запросит подтверждение через e-mail либо Telegram.
       </div>
       {error ? <Message severity="warn" text={error} /> : null}
-      {turnstileEnabled ? (
-        <TurnstileWidget
-          action="passkey_login"
-          onReady={setTurnstile}
-          onToken={setTurnstileToken}
-          siteKey={turnstileSiteKey}
-        />
-      ) : null}
       <Button
         className="w-full"
         disabled={loading}

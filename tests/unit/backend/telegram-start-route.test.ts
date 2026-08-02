@@ -55,6 +55,7 @@ describe("Telegram start failure redirect", () => {
     expect(location.pathname).toBe("/login");
     expect(location.searchParams.get("auth")).toBe("telegram_failed");
     expect(location.searchParams.get("redirect_to")).toBe(paymentPath);
+    expect(mocks.verifyTurnstileToken).toHaveBeenCalledWith(null, "auth_login");
   });
 
   it("returns an authenticated link failure to the same guided setup URL", async () => {

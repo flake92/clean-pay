@@ -42,7 +42,7 @@ describe("password reset", () => {
     await expect(requestPasswordReset({ email: "user@example.com" }, "token"))
       .resolves.toEqual({ success: true });
 
-    expect(mocks.verifyTurnstileToken).toHaveBeenCalledWith("token", "password_reset_start");
+    expect(mocks.verifyTurnstileToken).toHaveBeenCalledWith("token", "auth_login");
     expect(mocks.assertRateLimit).toHaveBeenCalledWith(expect.objectContaining({
       action: "password_reset_start",
       email: "user@example.com",
@@ -67,7 +67,7 @@ describe("password reset", () => {
       new_password: "new-password-1",
     }, "token");
 
-    expect(mocks.verifyTurnstileToken).toHaveBeenCalledWith("token", "password_reset_confirm");
+    expect(mocks.verifyTurnstileToken).toHaveBeenCalledWith("token", "auth_login");
     expect(mocks.remnashopAuth).toHaveBeenCalledWith("/auth/password/confirm-reset", {
       email: "user@example.com",
       code: "123456",
