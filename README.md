@@ -78,7 +78,7 @@ NEXT_PUBLIC_APP_URL=https://pay.example.com
 REMNASHOP_API_BASE_URL=https://shop.example.com/api/v1/public
 REMNASHOP_ADMIN_API_BASE_URL=https://shop.example.com/api/v1/admin
 REMNASHOP_API_KEY=<APP_API_KEY из Remnashop>
-REMNASHOP_AUTH_SERVICE_KEY=<отдельный APP_AUTH_SERVICE_KEY из Remnashop>
+REMNASHOP_AUTH_SERVICE_KEY=<отдельный внутренний секрет Clean Pay>
 
 REMNAWAVE_API_BASE_URL=https://panel.example.com
 REMNAWAVE_TOKEN=<API-токен Remnawave>
@@ -128,7 +128,7 @@ COOKIE_SECURE=true
 
 `WEB_JWT_SECRET`, `WEB_REFRESH_SECRET`, `AUDIT_IP_HASH_SECRET`, `RATE_LIMIT_IDENTITY_SECRET` и `READINESS_INTERNAL_SECRET` генерируются автоматически. Каждый секрет должен содержать не менее 32 символов.
 
-`REMNASHOP_AUTH_SERVICE_KEY` — отдельный server-to-server секрет только для `/api/v1/public/auth/*`. Он не должен совпадать с admin `REMNASHOP_API_KEY`, попадать в браузер или использоваться внешними клиентами. При общей Docker-сети направляйте `REMNASHOP_API_BASE_URL` на внутренний адрес Remnashop; при удалённом размещении защищайте тот же контракт service credential и сетевым ACL/mTLS.
+`REMNASHOP_AUTH_SERVICE_KEY` — отдельный внутренний секрет Clean Pay, который приложение отправляет только в `/api/v1/public/auth/*`. Он не должен совпадать с admin `REMNASHOP_API_KEY`, попадать в браузер или использоваться внешними клиентами. Проверенный ниже commit Remnashop PR #135 пока не проверяет этот заголовок: его public auth-маршруты должны оставаться доступны только Clean Pay через общую Docker-сеть или отдельный сетевой ACL/mTLS. Не публикуйте порт Remnashop наружу. При общей Docker-сети направляйте `REMNASHOP_API_BASE_URL` на внутренний адрес `http://remnashop:5000/api/v1/public`.
 
 Для публичного HTTPS используйте:
 
@@ -177,7 +177,6 @@ PAYMENT_RECONCILIATION_INTERNAL_URL=http://app:4000/api/internal/payments/reconc
 WEB_ENABLED=true
 WEB_CABINET_URL=https://pay.example.com/auth/telegram/webapp
 APP_API_KEY=<случайный секрет не короче 24 символов>
-APP_AUTH_SERVICE_KEY=<другой случайный секрет не короче 24 символов>
 APP_JWT_SECRET=<отдельный случайный секрет>
 ```
 
@@ -195,7 +194,7 @@ EMAIL_FROM_EMAIL=mail@example.com
 EMAIL_FROM_NAME=Clean Pay
 ```
 
-URL публичного API должен заканчиваться на `/api/v1/public`, admin API — на `/api/v1/admin`. Оба адреса должны использовать один origin и один API prefix. Все auth-маршруты Remnashop требуют заголовок `X-Remnashop-Auth-Service-Key`; Clean Pay добавляет его только server-side.
+URL публичного API должен заканчиваться на `/api/v1/public`, admin API — на `/api/v1/admin`. Оба адреса должны использовать один origin и один API prefix. Admin-маршруты Remnashop проверяют `APP_API_KEY` через заголовок `X-API-Key`. В проверенном commit PR #135 отдельного `APP_AUTH_SERVICE_KEY` нет; заголовок `X-Remnashop-Auth-Service-Key`, отправляемый Clean Pay, там пока не проверяется.
 
 Passkey создаёт локальную сессию Clean Pay. Если upstream-сессия Remnashop отсутствует или истекла, перед операцией с подпиской интерфейс запросит явный step-up через e-mail или Telegram.
 

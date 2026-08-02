@@ -36,6 +36,9 @@ describe("production container boundary", () => {
     expect(dockerfile).toContain("node node_modules/prisma/build/index.js migrate deploy");
     expect(migration).toContain("--from=dependencies");
     expect(migration).not.toContain("--from=builder");
+    expect(migration).toContain("deploy/prod/deploy-log.mjs");
+    expect(migration).toContain("deploy/prod/validate-env.mjs");
+    expect(migration).toContain("deploy/prod/production-env-rules.mjs");
     expect(compose).toContain("migration:");
     expect(compose).toContain("target: migration");
     expect(compose).toContain("condition: service_completed_successfully");
@@ -68,6 +71,9 @@ describe("root production container boundary", () => {
     );
     expect(migration).toContain("--from=dependencies");
     expect(migration).not.toContain("--from=builder");
+    expect(migration).toContain("deploy/prod/deploy-log.mjs");
+    expect(migration).toContain("deploy/prod/validate-env.mjs");
+    expect(migration).toContain("deploy/prod/production-env-rules.mjs");
     expect(rootCompose).toContain("migration:");
     expect(rootCompose).toContain("target: migration");
     expect(rootCompose).toContain("target: runner");
