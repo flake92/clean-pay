@@ -76,6 +76,10 @@ export function emailVerificationPath(redirectTo: string) {
   });
 }
 
+export function registrationEmailVerificationPath(redirectTo: string) {
+  return flowPath("/register/verify-email", redirectTo, {});
+}
+
 export function resolveEmailVerificationSetup(
   flow: string | null | undefined,
   redirectTo: string | null | undefined,

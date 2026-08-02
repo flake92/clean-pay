@@ -28,7 +28,12 @@ import type {
 } from "@/shared/remnashop/types";
 
 const PAYMENT_OPERATION_CONTRACT_VERSION = 2;
-const READY_LEASE_MS = 30_000;
+// An existing operation is claimed before its Remnashop session is refreshed.
+// Refresh/recovery, identity verification and the final offers read are each
+// independently bounded upstream calls, so 30 seconds was shorter than a
+// valid pre-dispatch path. A crashed READY worker is safe to retry after this
+// lease because it has not crossed the provider mutation boundary yet.
+const READY_LEASE_MS = 90_000;
 const DISPATCH_LEASE_MS = 120_000;
 const MAX_BEGIN_STATE_READS = 5;
 const UUID_PATTERN =

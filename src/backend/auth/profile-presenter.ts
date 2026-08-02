@@ -4,13 +4,19 @@ import type { RemnashopMe } from "@/shared/remnashop/types";
 
 type SessionWithUser = WebSession & { user: WebUser };
 
+function profileAuthType(authMethod: WebSession["authMethod"]) {
+  if (authMethod === "TELEGRAM") return "telegram";
+  if (authMethod === "PASSKEY") return "passkey";
+  return "email";
+}
+
 export function localUserProfile(session: SessionWithUser) {
   const hasEmail = Boolean(session.user.email);
   const emailVerified = hasEmail && session.user.emailVerified;
 
   return {
     telegram_id: session.user.telegramId?.toString() ?? null,
-    auth_type: session.authMethod === "TELEGRAM" ? "telegram" : "email",
+    auth_type: profileAuthType(session.authMethod),
     email: session.user.email,
     is_email_verified: emailVerified,
     pending_email: null,
@@ -55,7 +61,7 @@ export function remnashopUserProfile(session: SessionWithUser, profile: Remnasho
     ...profile,
     email,
     is_email_verified: emailVerified,
-    auth_type: session.authMethod === "TELEGRAM" ? "telegram" : "email",
+    auth_type: profileAuthType(session.authMethod),
     telegram_id: localUser.telegramId?.toString() ?? profile.telegram_id?.toString() ?? null,
     telegramId: localUser.telegramId?.toString() ?? null,
     telegramUsername: localUser.telegramUsername ?? null,

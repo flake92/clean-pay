@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import { Button } from "primereact/button";
 import { Column } from "primereact/column";
@@ -212,7 +212,27 @@ export function CabinetPanel() {
   const [copyStatus, setCopyStatus] = useState<string | null>(null);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
   const [pendingAction, setPendingAction] = useState<string | null>(null);
+  const pendingActionRef = useRef<string | null>(null);
   const [promocode, setPromocode] = useState("");
+
+  function beginPendingAction(action: string) {
+    if (pendingActionRef.current) {
+      return false;
+    }
+
+    pendingActionRef.current = action;
+    setPendingAction(action);
+    return true;
+  }
+
+  function finishPendingAction(action: string) {
+    if (pendingActionRef.current !== action) {
+      return;
+    }
+
+    pendingActionRef.current = null;
+    setPendingAction(null);
+  }
 
   const loadSubscription = useCallback(async () => {
     const subscriptionResponse = await fetch("/api/bff/subscription/current");
@@ -334,13 +354,20 @@ export function CabinetPanel() {
   }
 
   async function deleteDevice(hwid: string) {
+    if (pendingActionRef.current) {
+      return;
+    }
+
     const confirmed = window.confirm("Удалить это устройство из подписки?");
 
     if (!confirmed) {
       return;
     }
 
-    setPendingAction(`delete-device-${hwid}`);
+    const action = `delete-device-${hwid}`;
+    if (!beginPendingAction(action)) {
+      return;
+    }
     setActionMessage(null);
 
     try {
@@ -358,18 +385,25 @@ export function CabinetPanel() {
     } catch (err) {
       setActionMessage(err instanceof Error ? err.message : "Не удалось удалить устройство.");
     } finally {
-      setPendingAction(null);
+      finishPendingAction(action);
     }
   }
 
   async function deleteAllDevices() {
+    if (pendingActionRef.current) {
+      return;
+    }
+
     const confirmed = window.confirm("Удалить все устройства из подписки?");
 
     if (!confirmed) {
       return;
     }
 
-    setPendingAction("delete-all-devices");
+    const action = "delete-all-devices";
+    if (!beginPendingAction(action)) {
+      return;
+    }
     setActionMessage(null);
 
     try {
@@ -386,11 +420,15 @@ export function CabinetPanel() {
     } catch (err) {
       setActionMessage(err instanceof Error ? err.message : "Не удалось удалить устройства.");
     } finally {
-      setPendingAction(null);
+      finishPendingAction(action);
     }
   }
 
   async function reissueSubscription() {
+    if (pendingActionRef.current) {
+      return;
+    }
+
     const confirmed = window.confirm(
       "Перевыпуск подписки отключит все текущие устройства. Продолжить?",
     );
@@ -399,7 +437,10 @@ export function CabinetPanel() {
       return;
     }
 
-    setPendingAction("reissue");
+    const action = "reissue";
+    if (!beginPendingAction(action)) {
+      return;
+    }
     setActionMessage(null);
 
     try {
@@ -417,12 +458,16 @@ export function CabinetPanel() {
     } catch (err) {
       setActionMessage(err instanceof Error ? err.message : "Не удалось перевыпустить подписку.");
     } finally {
-      setPendingAction(null);
+      finishPendingAction(action);
     }
   }
 
   async function activatePromocode(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+
+    if (pendingActionRef.current) {
+      return;
+    }
 
     const code = promocode.trim();
 
@@ -431,7 +476,10 @@ export function CabinetPanel() {
       return;
     }
 
-    setPendingAction("promocode");
+    const action = "promocode";
+    if (!beginPendingAction(action)) {
+      return;
+    }
     setActionMessage(null);
 
     try {
@@ -451,7 +499,7 @@ export function CabinetPanel() {
     } catch (err) {
       setActionMessage(err instanceof Error ? err.message : "Не удалось активировать промокод.");
     } finally {
-      setPendingAction(null);
+      finishPendingAction(action);
     }
   }
 
@@ -571,7 +619,7 @@ export function CabinetPanel() {
               />
               <div className="flex flex-wrap gap-2">
                 <Button
-                  disabled={pendingAction === "reissue"}
+                  disabled={pendingAction !== null}
                   label="Перевыпустить подписку"
                   loading={pendingAction === "reissue"}
                   onClick={reissueSubscription}
@@ -581,7 +629,7 @@ export function CabinetPanel() {
                 />
                 {devices && devices.devices.length > 0 ? (
                   <Button
-                    disabled={pendingAction === "delete-all-devices"}
+                    disabled={pendingAction !== null}
                     label="Удалить все устройства"
                     loading={pendingAction === "delete-all-devices"}
                     onClick={deleteAllDevices}
@@ -649,7 +697,7 @@ export function CabinetPanel() {
                   value={promocode}
                 />
                 <Button
-                  disabled={pendingAction === "promocode"}
+                  disabled={pendingAction !== null}
                   label="Активировать"
                   loading={pendingAction === "promocode"}
                   type="submit"
@@ -696,7 +744,7 @@ export function CabinetPanel() {
                     </div>
                     <Button
                       aria-label={deleteLabel}
-                      disabled={pendingAction === `delete-device-${device.hwid}`}
+                      disabled={pendingAction !== null}
                       icon="pi pi-trash"
                       loading={pendingAction === `delete-device-${device.hwid}`}
                       onClick={() => deleteDevice(device.hwid)}
@@ -736,7 +784,7 @@ export function CabinetPanel() {
               body={(view: SubscriptionDeviceView) => (
                 <Button
                   aria-label={view.deleteLabel}
-                  disabled={pendingAction === `delete-device-${view.device.hwid}`}
+                  disabled={pendingAction !== null}
                   icon="pi pi-trash"
                   label="Удалить"
                   loading={pendingAction === `delete-device-${view.device.hwid}`}

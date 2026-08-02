@@ -3,6 +3,9 @@
   "version": "0.1.0",
   "license": "AGPL-3.0-only",
   "private": true,
+  "engines": {
+    "node": ">=24.0.0 <25"
+  },
   "scripts": {
     "dev": "node scripts/next-command.mjs dev",
     "build": "node scripts/next-command.mjs build",
@@ -13,7 +16,8 @@
     "test:unit": "node node_modules/vitest/vitest.mjs run tests/unit",
     "test:route-handlers": "node node_modules/vitest/vitest.mjs run tests/integration/route-handlers",
     "test:integration": "node node_modules/vitest/vitest.mjs run --config vitest.integration.config.ts --passWithNoTests",
-    "test:postgres-concurrency": "node node_modules/vitest/vitest.mjs run --config vitest.integration.config.ts tests/integration/services/passkey-deletion-postgres.test.ts tests/integration/services/refresh-token-rotation-postgres.test.ts tests/integration/services/account-merge-postgres.test.ts tests/integration/services/telegram-recovery-postgres.test.ts",
+    "test:services": "node node_modules/vitest/vitest.mjs run --config vitest.integration.config.ts tests/integration/services",
+    "test:postgres-concurrency": "node node_modules/vitest/vitest.mjs run --config vitest.integration.config.ts tests/integration/services/passkey-deletion-postgres.test.ts tests/integration/services/refresh-token-rotation-postgres.test.ts tests/integration/services/account-merge-postgres.test.ts tests/integration/services/one-time-state-postgres.test.ts tests/integration/services/telegram-recovery-postgres.test.ts",
     "test:e2e:devcontainer": "node scripts/e2e-devcontainer.mjs",
     "test:e2e": "node scripts/e2e-devcontainer.mjs",
     "test:coverage": "node node_modules/vitest/vitest.mjs run --coverage",
@@ -39,10 +43,10 @@
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
-    "@types/node": "^20",
+    "@types/node": "^24",
     "@types/react": "^19",
     "@types/react-dom": "^19",
-    "@vitest/coverage-v8": "^4.1.9",
+    "@vitest/coverage-v8": "4.1.10",
     "eslint": "^9",
     "eslint-config-next": "16.2.12",
     "jsdom": "^29.1.1",
@@ -51,16 +55,26 @@
     "sass": "^1.101.0",
     "tailwindcss": "^4",
     "typescript": "^5",
-    "vitest": "^4.1.9"
+    "vitest": "4.1.10"
   },
   "overrides": {
     "@hono/node-server": "2.0.12",
+    "brace-expansion@>=1.1.0 <1.1.18": "1.1.18",
+    "brace-expansion@>=5.0.0 <5.0.9": "5.0.9",
     "fast-uri": "3.1.4",
     "find-my-way": "9.7.0",
     "hono": "4.12.32",
     "immutable": "5.1.9",
+    "js-yaml@>=4.0.0 <4.3.1": "4.3.1",
     "postcss": "8.5.23",
     "sharp": "0.35.3",
     "valibot": "1.4.2"
+  },
+  "allowScripts": {
+    "@parcel/watcher@2.5.6": true,
+    "@prisma/engines@7.9.0": true,
+    "fsevents@2.3.3": true,
+    "prisma@7.9.0": true,
+    "unrs-resolver@1.12.2": true
   }
 }

@@ -39,7 +39,8 @@ describe("post-auth redirect flow", () => {
     );
 
     expect(loginPage).toContain("safeRedirectPath(rawRedirect)");
-    expect(loginPage).toContain("<LoginForm redirectTo={redirectTo} />");
+    expect(loginPage).toContain("redirectTo={redirectTo}");
+    expect(loginPage).toContain("initialError={initialError}");
     expect(loginPage).toContain("<TelegramLoginButton redirectTo={redirectTo} />");
     expect(authForms).toContain("redirectAfterAuth(redirectTo)");
     expect(authForms).toContain("redirectTo={redirectTo}");
@@ -53,6 +54,21 @@ describe("post-auth redirect flow", () => {
     expect(telegramWebAppPage).toContain("safeRedirectPath(rawRedirect)");
     expect(telegramWebAppPage).toContain(
       "<TelegramWebAppLogin redirectTo={redirectTo} />",
+    );
+
+    const registrationVerification = readFileSync(
+      "src/frontend/components/register-email-confirm-form.tsx",
+      "utf8",
+    );
+    const registrationVerificationPage = readFileSync(
+      "src/app/register/verify-email/page.tsx",
+      "utf8",
+    );
+    expect(registrationVerificationPage).toContain(
+      "safeAccountSetupDestination(rawRedirect)",
+    );
+    expect(registrationVerification).toContain(
+      "passkeySetupPath(redirectTo)",
     );
   });
 });

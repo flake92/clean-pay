@@ -205,6 +205,56 @@ describe("web session lifecycle", () => {
     });
   });
 
+  it("atomically revokes prior sessions before a password-reset session is created", async () => {
+    const transactionClient = {
+      $queryRaw: vi.fn().mockResolvedValue([{ id: "user-1" }]),
+      webSession: {
+        updateMany: vi.fn().mockResolvedValue({ count: 2 }),
+        create: vi.fn().mockResolvedValue(session),
+      },
+      webUser: {
+        findUnique: vi.fn().mockResolvedValue(user),
+      },
+    };
+
+    await createWebSessionForRemnashopUser({
+      userId: "user-1",
+      remnashopAccessTokenEncrypted: "reset-access",
+      remnashopRefreshTokenEncrypted: "reset-refresh",
+      remnashopAccessExpiresAt: new Date("2099-01-02T00:00:00.000Z"),
+      remnashopRefreshExpiresAt: new Date("2099-02-02T00:00:00.000Z"),
+      replaceExistingSessions: true,
+      tx: transactionClient as never,
+    });
+
+    expect(transactionClient.webSession.updateMany).toHaveBeenCalledWith({
+      where: { userId: "user-1", revokedAt: null },
+      data: {
+        revokedAt: expect.any(Date),
+        accessTokenExpiresAt: expect.any(Date),
+        refreshExpiresAt: expect.any(Date),
+        remnashopAccessTokenEncrypted: null,
+        remnashopRefreshTokenEncrypted: null,
+        remnashopAccessExpiresAt: null,
+        remnashopRefreshExpiresAt: null,
+      },
+    });
+    expect(
+      transactionClient.webSession.updateMany.mock.invocationCallOrder[0],
+    ).toBeLessThan(
+      transactionClient.webSession.create.mock.invocationCallOrder[0],
+    );
+    expect(transactionClient.webSession.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        userId: "user-1",
+        remnashopAccessTokenEncrypted: "reset-access",
+        remnashopRefreshTokenEncrypted: "reset-refresh",
+      }),
+    });
+    expect(mocks.prisma.webSession.updateMany).not.toHaveBeenCalled();
+    expect(mocks.prisma.webSession.create).not.toHaveBeenCalled();
+  });
+
   it("loads current session and current user from a valid access cookie", async () => {
     state.cookies.set(
       "clean_pay_access",
@@ -252,6 +302,37 @@ describe("web session lifecycle", () => {
     const nextRefresh = state.setCalls.find((call) => call.name === "clean_pay_refresh")?.value;
     expect(nextRefresh).toBeTruthy();
     expect(nextRefresh).not.toBe("refresh-token");
+  });
+
+  it("clears access and refresh cookies after a definitive refresh miss", async () => {
+    state.cookies.set("clean_pay_access", "expired-or-invalid-access");
+    state.cookies.set("clean_pay_refresh", "unknown-refresh");
+    mocks.prisma.$queryRaw
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([]);
+
+    await expect(getCurrentSession()).resolves.toBeNull();
+
+    expect(state.cookies.has("clean_pay_access")).toBe(false);
+    expect(state.cookies.has("clean_pay_refresh")).toBe(false);
+    expect(state.deleteCalls).toEqual([
+      "clean_pay_access",
+      "clean_pay_refresh",
+    ]);
+  });
+
+  it("does not clear cookies when refresh lookup fails before a definitive result", async () => {
+    state.cookies.set("clean_pay_access", "expired-or-invalid-access");
+    state.cookies.set("clean_pay_refresh", "refresh-to-retry");
+    mocks.prisma.$queryRaw.mockRejectedValueOnce(new Error("database unavailable"));
+
+    await expect(getCurrentSession()).rejects.toThrow("database unavailable");
+
+    expect(state.cookies.get("clean_pay_access")).toBe(
+      "expired-or-invalid-access",
+    );
+    expect(state.cookies.get("clean_pay_refresh")).toBe("refresh-to-retry");
+    expect(state.deleteCalls).toEqual([]);
   });
 
   it("returns the same successor when the previous token is repeated within grace", async () => {
@@ -412,10 +493,16 @@ describe("web session lifecycle", () => {
     state.cookies.clear();
     state.setCalls = [];
     state.cookies.set("clean_pay_refresh", "old-refresh");
-    mocks.prisma.$queryRaw.mockResolvedValueOnce([]);
+    mocks.prisma.$queryRaw
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([]);
 
     await expect(getCurrentSession()).resolves.toBeNull();
     expect(state.setCalls).toEqual([]);
+    expect(state.deleteCalls).toEqual([
+      "clean_pay_access",
+      "clean_pay_refresh",
+    ]);
   });
 
   it("fails closed and clears cookies when replacement creation fails", async () => {
@@ -450,7 +537,7 @@ describe("web session lifecycle", () => {
     ]);
   });
 
-  it("upgrades partial sessions and clears sessions by access or refresh token", async () => {
+  it("upgrades partial sessions and clears only the current session by access or refresh token", async () => {
     state.cookies.set(
       "clean_pay_access",
       accessToken({ sid: "session-1", uid: "user-1", exp: Math.floor(Date.now() / 1000) + 60 }),
@@ -462,7 +549,11 @@ describe("web session lifecycle", () => {
 
     await clearWebSession();
     expect(mocks.prisma.webSession.updateMany).toHaveBeenCalledWith({
-      where: { userId: "user-1", revokedAt: null },
+      where: {
+        id: "session-1",
+        userId: "user-1",
+        revokedAt: null,
+      },
       data: { revokedAt: expect.any(Date) },
     });
     expect(state.deleteCalls).toEqual(["clean_pay_access", "clean_pay_refresh"]);

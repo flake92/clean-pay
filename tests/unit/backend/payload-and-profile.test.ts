@@ -60,6 +60,28 @@ describe("auth payload helpers and profile presenters", () => {
     expect(profile.emailVerified).toBe(false);
   });
 
+  it("reports passkey-authenticated sessions as passkey in both profile formats", () => {
+    const passkeySession = {
+      ...baseSession,
+      authMethod: "PASSKEY",
+    } as ProfileSession;
+    const upstreamProfile = {
+      telegram_id: 999,
+      auth_type: "email",
+      email: "user@example.com",
+      is_email_verified: true,
+      pending_email: null,
+      name: "Remote User",
+      username: "remote",
+      language: "ru",
+    };
+
+    expect(localUserProfile(passkeySession).auth_type).toBe("passkey");
+    expect(remnashopUserProfile(passkeySession, upstreamProfile).auth_type).toBe(
+      "passkey",
+    );
+  });
+
   it("uses Remnashop verification when the linked local email matches", () => {
     const staleLocalSession = {
       ...baseSession,

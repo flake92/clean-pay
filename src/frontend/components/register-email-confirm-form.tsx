@@ -1,13 +1,15 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 
 import { Button } from "primereact/button";
 import { InputText } from "primereact/inputtext";
 import { Message } from "primereact/message";
 
 import { TurnstileWidget, type TurnstileHandle, hasTurnstileSiteKey } from "@/frontend/components/turnstile-widget";
+import { navigateTo } from "@/frontend/lib/browser-navigation";
 import { readBffError } from "@/frontend/lib/client-api";
+import { passkeySetupPath } from "@/shared/auth/account-setup-flow";
 
 async function readError(response: Response, fallback: string) {
   return (await readBffError(response, fallback)).message;
@@ -29,17 +31,39 @@ function turnstilePayload(token: string | null) {
 }
 
 export function RegisterEmailConfirmForm({
+  redirectTo = "/cabinet",
   turnstileEnabled = false,
   turnstileSiteKey,
 }: {
+  redirectTo?: string;
   turnstileEnabled?: boolean;
   turnstileSiteKey?: string | null;
 }) {
   const [loading, setLoading] = useState<"confirm" | "resend" | "back" | null>(null);
+  const loadingRef = useRef<"confirm" | "resend" | "back" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
   const [turnstile, setTurnstile] = useState<TurnstileHandle | null>(null);
+
+  function beginLoading(action: "confirm" | "resend" | "back") {
+    if (loadingRef.current) {
+      return false;
+    }
+
+    loadingRef.current = action;
+    setLoading(action);
+    return true;
+  }
+
+  function finishLoading(action: "confirm" | "resend" | "back") {
+    if (loadingRef.current !== action) {
+      return;
+    }
+
+    loadingRef.current = null;
+    setLoading(null);
+  }
 
   function ensureTurnstileToken() {
     if (!turnstileEnabled || turnstileToken) {
@@ -51,9 +75,28 @@ export function RegisterEmailConfirmForm({
   }
 
   async function goBackToRegister() {
-    setLoading("back");
-    await fetch("/api/bff/auth/logout", { method: "POST" }).catch(() => null);
-    window.location.assign("/register");
+    if (!beginLoading("back")) {
+      return;
+    }
+
+    setError(null);
+
+    try {
+      const response = await fetch("/api/bff/auth/logout", { method: "POST" });
+
+      if (!response.ok) {
+        setError(await readError(response, "Не удалось вернуться к регистрации."));
+        return;
+      }
+
+      navigateTo(`/register?${new URLSearchParams({
+        redirect_to: redirectTo,
+      }).toString()}`);
+    } catch {
+      setError("Сеть недоступна. Не удалось вернуться к регистрации.");
+    } finally {
+      finishLoading("back");
+    }
   }
 
   async function resendCode() {
@@ -64,7 +107,9 @@ export function RegisterEmailConfirmForm({
       return;
     }
 
-    setLoading("resend");
+    if (!beginLoading("resend")) {
+      return;
+    }
 
     try {
       const response = await fetch("/api/bff/auth/email/request-verification", {
@@ -90,7 +135,7 @@ export function RegisterEmailConfirmForm({
       setTurnstileToken(null);
       setError("Сеть недоступна. Не удалось повторно отправить код.");
     } finally {
-      setLoading(null);
+      finishLoading("resend");
     }
   }
 
@@ -103,7 +148,9 @@ export function RegisterEmailConfirmForm({
       return;
     }
 
-    setLoading("confirm");
+    if (!beginLoading("confirm")) {
+      return;
+    }
 
     const formData = new FormData(event.currentTarget);
     try {
@@ -123,13 +170,13 @@ export function RegisterEmailConfirmForm({
         return;
       }
 
-      window.location.assign("/passkey/setup");
+      navigateTo(passkeySetupPath(redirectTo));
     } catch {
       turnstile?.reset();
       setTurnstileToken(null);
       setError("Сеть недоступна. Не удалось подтвердить e-mail.");
     } finally {
-      setLoading(null);
+      finishLoading("confirm");
     }
   }
 

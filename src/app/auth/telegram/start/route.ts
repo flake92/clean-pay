@@ -13,16 +13,40 @@ import { logTechnicalError } from "@/backend/observability/audit";
 
 export const runtime = "nodejs";
 
-function loginFailedRedirect() {
-  return NextResponse.redirect(new URL("/login?auth=telegram_failed", getEnv().publicAppUrl));
+function telegramFailedRedirect(
+  redirectTo: string | undefined,
+  authenticated: boolean,
+) {
+  const publicAppUrl = getEnv().publicAppUrl;
+
+  if (authenticated) {
+    const candidate = redirectTo
+      ? new URL(redirectTo, publicAppUrl)
+      : null;
+    const failureUrl = candidate?.pathname === "/link-account"
+      ? candidate
+      : new URL("/link-account", publicAppUrl);
+
+    failureUrl.searchParams.set("auth", "telegram_failed");
+    return NextResponse.redirect(failureUrl);
+  }
+
+  const failureUrl = new URL("/login", publicAppUrl);
+  failureUrl.searchParams.set("auth", "telegram_failed");
+  if (redirectTo) {
+    failureUrl.searchParams.set("redirect_to", redirectTo);
+  }
+
+  return NextResponse.redirect(failureUrl);
 }
 
 export async function GET(request: Request) {
   const url = new URL(request.url);
   const redirectTo = safeRedirectPath(url.searchParams.get("redirect_to"));
+  let currentUser: Awaited<ReturnType<typeof getCurrentUser>> = null;
 
   try {
-    const currentUser = await getCurrentUser();
+    currentUser = await getCurrentUser();
 
     await verifyTurnstileToken(
       url.searchParams.get("turnstile_token") ?? url.searchParams.get("cf-turnstile-response"),
@@ -40,13 +64,13 @@ export async function GET(request: Request) {
     }
 
     if (url.searchParams.get("mode") === "popup") {
-      return createTelegramPopupStartResponse(redirectTo, currentUser?.id);
+      return await createTelegramPopupStartResponse(redirectTo, currentUser?.id);
     }
 
-    return createTelegramAuthorizationResponse(redirectTo, currentUser?.id);
+    return await createTelegramAuthorizationResponse(redirectTo, currentUser?.id);
   } catch (error) {
     logTechnicalError("telegram_oidc_start_failed", error, { redirectTo });
 
-    return loginFailedRedirect();
+    return telegramFailedRedirect(redirectTo, Boolean(currentUser));
   }
 }

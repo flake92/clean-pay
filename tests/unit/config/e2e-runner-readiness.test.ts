@@ -3,6 +3,22 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 const runner = readFileSync("scripts/e2e-devcontainer.mjs", "utf8");
+const compose = readFileSync(".devcontainer/docker-compose.yml", "utf8");
+
+const hostPortContract = [
+  ["CLEAN_PAY_DEVCONTAINER_APP_HOST_PORT", "4000", "4000"],
+  ["CLEAN_PAY_DEVCONTAINER_PRISMA_STUDIO_HOST_PORT", "5555", "5555"],
+  ["CLEAN_PAY_DEVCONTAINER_POSTGRES_HOST_PORT", "5432", "5432"],
+  ["CLEAN_PAY_DEVCONTAINER_REDIS_HOST_PORT", "6379", "6379"],
+  ["CLEAN_PAY_DEVCONTAINER_REMNASHOP_HOST_PORT", "5001", "5000"],
+  ["CLEAN_PAY_DEVCONTAINER_REMNASHOP_POSTGRES_HOST_PORT", "6767", "5432"],
+  ["CLEAN_PAY_DEVCONTAINER_TELEGRAM_OIDC_HOST_PORT", "8090", "8090"],
+  ["CLEAN_PAY_DEVCONTAINER_MAILPIT_HTTP_HOST_PORT", "8025", "8025"],
+  ["CLEAN_PAY_DEVCONTAINER_MAILPIT_SMTP_HOST_PORT", "1025", "1025"],
+  ["CLEAN_PAY_DEVCONTAINER_CADDY_APP_HOST_PORT", "8080", "8080"],
+  ["CLEAN_PAY_DEVCONTAINER_CADDY_REMNASHOP_HOST_PORT", "8081", "8081"],
+  ["CLEAN_PAY_DEVCONTAINER_CADDY_MAILPIT_HOST_PORT", "8026", "8026"],
+] as const;
 
 describe("devcontainer e2e runner readiness", () => {
   it("allows slow dependency installation without waiting forever", () => {
@@ -18,5 +34,27 @@ describe("devcontainer e2e runner readiness", () => {
     expect(runner).toContain('label: "Devcontainer image build/start"');
     expect(runner).toContain("attempts: 3");
     expect(runner).toContain("attempt * 2_000");
+  });
+
+  it("allows every published host port to be isolated without changing defaults", () => {
+    const configuredPorts = [...compose.matchAll(
+      /^\s+- "\$\{(CLEAN_PAY_DEVCONTAINER_[A-Z_]+):-([0-9]+)\}:([0-9]+)"$/gm,
+    )].map((match) => [match[1], match[2], match[3]]).sort();
+
+    expect(configuredPorts).toEqual([...hostPortContract].sort());
+    expect(compose).not.toMatch(/^\s+- "[0-9]+:[0-9]+"$/m);
+
+    for (const [name] of hostPortContract) {
+      expect(runner).toContain(`"${name}"`);
+    }
+  });
+
+  it("uses one project-scoped Remnashop image across every service", () => {
+    const imageReference =
+      "image: ${CLEAN_PAY_DEVCONTAINER_REMNASHOP_IMAGE:-${COMPOSE_PROJECT_NAME:-clean-pay-dev}-remnashop:latest}";
+
+    expect(compose.split(imageReference)).toHaveLength(5);
+    expect(runner).toContain("`${projectName}-remnashop:latest`");
+    expect(runner).toContain('"CLEAN_PAY_DEVCONTAINER_REMNASHOP_IMAGE"');
   });
 });

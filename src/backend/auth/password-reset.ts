@@ -48,6 +48,8 @@ export async function confirmPasswordReset(
     accessToken: auth.cookies.accessToken,
     refreshToken: auth.cookies.refreshToken,
     auth: auth.data,
+    replaceExistingSessions: true,
+    replacementIdentityEmail: body.email,
   });
   await auditLog({ action: "password_reset_success", userId: user.id });
 

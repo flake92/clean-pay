@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => ({
   logTechnicalError: vi.fn(),
   logTechnicalWarning: vi.fn(),
   authDebugLog: vi.fn(),
+  getCurrentSession: vi.fn(),
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
   assertRateLimit: vi.fn(),
   remnashopAuth: vi.fn(),
@@ -117,6 +118,10 @@ vi.mock("@/backend/database/prisma", () => ({
   prisma: mocks.prisma,
 }));
 
+vi.mock("@/backend/sessions/web-session", () => ({
+  getCurrentSession: mocks.getCurrentSession,
+}));
+
 vi.mock("@/backend/auth/user-merge", () => ({
   mergeLocalUsersIntoTarget: mocks.mergeLocalUsersIntoTarget,
   assertUserMergeFinalOwner: mocks.assertUserMergeFinalOwner,
@@ -155,6 +160,10 @@ describe("Telegram OIDC integration", () => {
     mocks.prisma.webUser.upsert.mockResolvedValue({ id: "user-1", telegramId: "123456" });
     mocks.prisma.telegramAuthState.update.mockResolvedValue({});
     mocks.prisma.telegramAuthState.updateMany.mockResolvedValue({ count: 1 });
+    mocks.getCurrentSession.mockResolvedValue({
+      id: "current-session",
+      userId: "target-user",
+    });
     mocks.prisma.$transaction.mockImplementation(async (callback) => callback(tx));
     mocks.mergeLocalUsersIntoTarget.mockResolvedValue({});
     mocks.assertUserMergeFinalOwner.mockResolvedValue({ id: "target-user" });
@@ -334,6 +343,92 @@ describe("Telegram OIDC integration", () => {
         authPending: false,
       }),
     });
+  });
+
+  it.each([
+    ["redirect", "missing"],
+    ["redirect", "different user"],
+    ["popup", "missing"],
+    ["popup", "different user"],
+    ["widget", "missing"],
+    ["widget", "different user"],
+  ])(
+    "rejects a %s link callback when the current session is %s before token processing",
+    async (flow, sessionState) => {
+      state.cookies.set("clean_pay_tg_state", "state");
+      state.cookies.set("clean_pay_tg_nonce", "nonce");
+      state.cookies.set("clean_pay_tg_code_verifier", "verifier");
+      mocks.prisma.telegramAuthState.findFirst.mockResolvedValueOnce({
+        id: "auth-state-1",
+        userId: "target-user",
+        redirectTo: "/link-account",
+        expiresAt: new Date("2099-01-01T00:00:00.000Z"),
+      });
+      mocks.getCurrentSession.mockResolvedValue(
+        sessionState === "missing"
+          ? null
+          : { id: "other-session", userId: "other-user" },
+      );
+
+      const attempt = flow === "redirect"
+        ? consumeTelegramCallback("code", "state")
+        : flow === "popup"
+          ? consumeTelegramPopupToken("id-token")
+          : consumeTelegramLoginWidgetPayload({
+              id: 123456,
+              first_name: "Clean",
+              auth_date: Math.floor(Date.now() / 1_000),
+              hash: "not-processed-on-session-mismatch",
+            });
+
+      await expect(attempt).rejects.toMatchObject({
+        code: "UNAUTHORIZED",
+        status: 401,
+      });
+
+      expect(mocks.prisma.telegramAuthState.updateMany).toHaveBeenCalledWith({
+        where: {
+          id: "auth-state-1",
+          consumedAt: null,
+          expiresAt: { gt: expect.any(Date) },
+        },
+        data: { consumedAt: expect.any(Date) },
+      });
+      expect(state.deleted).toEqual([
+        "clean_pay_tg_state",
+        "clean_pay_tg_nonce",
+        "clean_pay_tg_code_verifier",
+      ]);
+      expect(globalThis.fetch).not.toHaveBeenCalled();
+      expect(mocks.jwtVerify).not.toHaveBeenCalled();
+      expect(mocks.remnashopAuth).not.toHaveBeenCalled();
+      expect(mocks.prisma.webUser.findUnique).not.toHaveBeenCalled();
+      expect(mocks.prisma.webUser.upsert).not.toHaveBeenCalled();
+      expect(mocks.prisma.$transaction).not.toHaveBeenCalled();
+    },
+  );
+
+  it("keeps a linked state retryable when current-session lookup has a transient failure", async () => {
+    state.cookies.set("clean_pay_tg_state", "state");
+    state.cookies.set("clean_pay_tg_nonce", "nonce");
+    state.cookies.set("clean_pay_tg_code_verifier", "verifier");
+    mocks.prisma.telegramAuthState.findFirst.mockResolvedValueOnce({
+      id: "auth-state-1",
+      userId: "target-user",
+      redirectTo: "/link-account",
+      expiresAt: new Date("2099-01-01T00:00:00.000Z"),
+    });
+    mocks.getCurrentSession.mockRejectedValueOnce(
+      new Error("session database unavailable"),
+    );
+
+    await expect(consumeTelegramCallback("code", "state")).rejects.toThrow(
+      "session database unavailable",
+    );
+
+    expect(mocks.prisma.telegramAuthState.updateMany).not.toHaveBeenCalled();
+    expect(state.deleted).toEqual([]);
+    expect(globalThis.fetch).not.toHaveBeenCalled();
   });
 
   it("does not mutate a linked account when Remnashop Telegram verification is unavailable", async () => {

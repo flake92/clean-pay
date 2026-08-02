@@ -5,9 +5,12 @@ const mocks = vi.hoisted(() => ({
   getRemnashopUserIdFromAccessToken: vi.fn(),
   protectRemnashopToken: vi.fn((token: string) => `protected:${token}`),
   auditLog: vi.fn(),
+  logTechnicalError: vi.fn(),
   authDebugLog: vi.fn(),
+  clearWebSessionCookies: vi.fn(),
   createWebSessionForRemnashopUser: vi.fn(),
   getCurrentSession: vi.fn(),
+  revokeAllWebSessionsForUser: vi.fn(),
   mergeLocalUsersIntoTarget: vi.fn(),
   assertUserMergeFinalOwner: vi.fn(),
   lockPaymentOwnerFence: vi.fn(),
@@ -50,6 +53,7 @@ vi.mock("@/backend/integrations/remnashop/client", () => ({
 
 vi.mock("@/backend/observability/audit", () => ({
   auditLog: mocks.auditLog,
+  logTechnicalError: mocks.logTechnicalError,
 }));
 
 vi.mock("@/backend/observability/auth-debug-log", () => ({
@@ -57,8 +61,10 @@ vi.mock("@/backend/observability/auth-debug-log", () => ({
 }));
 
 vi.mock("@/backend/sessions/web-session", () => ({
+  clearWebSessionCookies: mocks.clearWebSessionCookies,
   createWebSessionForRemnashopUser: mocks.createWebSessionForRemnashopUser,
   getCurrentSession: mocks.getCurrentSession,
+  revokeAllWebSessionsForUser: mocks.revokeAllWebSessionsForUser,
 }));
 
 vi.mock("@/backend/database/prisma", () => ({
@@ -163,8 +169,252 @@ describe("Remnashop session reconciliation", () => {
       remnashopAccessExpiresAt: new Date(auth.expires_at),
       remnashopRefreshExpiresAt: new Date(auth.refresh_expires_at),
       assuranceLevel: "FULL",
+      replaceExistingSessions: false,
       tx,
     });
+  });
+
+  it("replaces prior local sessions for password-reset authentication", async () => {
+    await expect(createSessionFromRemnashopAuth({
+      accessToken: "access",
+      refreshToken: "refresh",
+      auth,
+      replaceExistingSessions: true,
+    })).resolves.toMatchObject({ user: { id: "user-1" } });
+
+    expect(mocks.prisma.$transaction).toHaveBeenCalledOnce();
+    expect(mocks.createWebSessionForRemnashopUser).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: "user-1",
+        replaceExistingSessions: true,
+        tx,
+      }),
+    );
+  });
+
+  it("fails closed when password-reset session replacement cannot commit", async () => {
+    const replacementError = new Error("replacement failed");
+    mocks.createWebSessionForRemnashopUser.mockRejectedValueOnce(replacementError);
+
+    await expect(createSessionFromRemnashopAuth({
+      accessToken: "access",
+      refreshToken: "refresh",
+      auth,
+      replaceExistingSessions: true,
+    })).rejects.toThrow(replacementError);
+
+    expect(mocks.revokeAllWebSessionsForUser).toHaveBeenCalledWith("user-1");
+    expect(mocks.clearWebSessionCookies).toHaveBeenCalledOnce();
+  });
+
+  it("revokes every split identity when password-reset replacement rolls back after a merge", async () => {
+    const remnashopOwner = {
+      id: "remnashop-owner",
+      remnashopUserId: "remna-1",
+      email: null,
+      telegramId: null,
+      telegramUsername: null,
+      fullName: null,
+      displayName: null,
+      emailVerified: false,
+    };
+    const emailOwner = {
+      id: "email-owner",
+      remnashopUserId: null,
+      email: "user@example.com",
+      telegramId: null,
+      telegramUsername: null,
+      fullName: null,
+      displayName: null,
+      emailVerified: true,
+    };
+    const telegramOwner = {
+      id: "telegram-owner",
+      remnashopUserId: null,
+      email: null,
+      telegramId: "123",
+      telegramUsername: "clean_user",
+      fullName: "Clean User",
+      displayName: "Clean User",
+      emailVerified: false,
+    };
+    const replacementError = new Error("replacement failed after merge");
+    tx.webUser.findUnique
+      .mockResolvedValueOnce(remnashopOwner)
+      .mockResolvedValueOnce(emailOwner)
+      .mockResolvedValueOnce(telegramOwner);
+    tx.webUser.update.mockResolvedValueOnce({
+      ...emailOwner,
+      remnashopUserId: "remna-1",
+      telegramId: "123",
+    });
+    mocks.createWebSessionForRemnashopUser.mockRejectedValueOnce(
+      replacementError,
+    );
+
+    await expect(
+      createSessionFromRemnashopAuth({
+        accessToken: "access",
+        refreshToken: "refresh",
+        auth,
+        replaceExistingSessions: true,
+        replacementIdentityEmail: "user@example.com",
+      }),
+    ).rejects.toBe(replacementError);
+
+    expect(mocks.mergeLocalUsersIntoTarget).toHaveBeenCalledWith(
+      tx,
+      expect.objectContaining({
+        targetUserId: "email-owner",
+        sourceUserIds: ["remnashop-owner", "telegram-owner"],
+      }),
+    );
+    expect(mocks.revokeAllWebSessionsForUser.mock.calls).toEqual([
+      ["remnashop-owner"],
+      ["email-owner"],
+      ["telegram-owner"],
+    ]);
+    expect(mocks.clearWebSessionCookies).toHaveBeenCalledOnce();
+  });
+
+  it("revokes an existing Remnashop owner's sessions when profile loading fails after reset", async () => {
+    const profileError = new Error("profile unavailable");
+    mocks.getRemnashopMe.mockRejectedValueOnce(profileError);
+    mocks.prisma.webUser.findUnique.mockResolvedValueOnce({ id: "existing-owner" });
+
+    await expect(createSessionFromRemnashopAuth({
+      accessToken: "access",
+      refreshToken: "refresh",
+      auth,
+      replaceExistingSessions: true,
+      replacementIdentityEmail: "user@example.com",
+    })).rejects.toThrow(profileError);
+
+    expect(mocks.prisma.webUser.findUnique).toHaveBeenCalledWith({
+      where: { remnashopUserId: "remna-1" },
+      select: { id: true },
+    });
+    expect(mocks.revokeAllWebSessionsForUser).toHaveBeenCalledWith("existing-owner");
+    expect(mocks.clearWebSessionCookies).toHaveBeenCalledOnce();
+    expect(mocks.prisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  it("clears reset cookies without revoking an unrelated user when profile loading finds no owner", async () => {
+    const profileError = new Error("profile unavailable");
+    mocks.getRemnashopMe.mockRejectedValueOnce(profileError);
+    mocks.prisma.webUser.findUnique.mockResolvedValueOnce(null);
+
+    await expect(createSessionFromRemnashopAuth({
+      accessToken: "access",
+      refreshToken: "refresh",
+      auth,
+      replaceExistingSessions: true,
+      replacementIdentityEmail: "user@example.com",
+    })).rejects.toThrow(profileError);
+
+    expect(mocks.prisma.webUser.findUnique).toHaveBeenNthCalledWith(1, {
+      where: { remnashopUserId: "remna-1" },
+      select: { id: true },
+    });
+    expect(mocks.prisma.webUser.findUnique).toHaveBeenNthCalledWith(2, {
+      where: { email: "user@example.com" },
+      select: { id: true },
+    });
+    expect(mocks.revokeAllWebSessionsForUser).not.toHaveBeenCalled();
+    expect(mocks.clearWebSessionCookies).toHaveBeenCalledOnce();
+  });
+
+  it("falls back to the unique reset email when the parsed Remnashop owner is not linked locally", async () => {
+    const profileError = new Error("profile unavailable");
+    mocks.getRemnashopMe.mockRejectedValueOnce(profileError);
+    mocks.prisma.webUser.findUnique
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({ id: "email-owner" });
+
+    await expect(createSessionFromRemnashopAuth({
+      accessToken: "access",
+      refreshToken: "refresh",
+      auth,
+      replaceExistingSessions: true,
+      replacementIdentityEmail: "user@example.com",
+    })).rejects.toThrow(profileError);
+
+    expect(mocks.prisma.webUser.findUnique).toHaveBeenNthCalledWith(1, {
+      where: { remnashopUserId: "remna-1" },
+      select: { id: true },
+    });
+    expect(mocks.prisma.webUser.findUnique).toHaveBeenNthCalledWith(2, {
+      where: { email: "user@example.com" },
+      select: { id: true },
+    });
+    expect(mocks.revokeAllWebSessionsForUser).toHaveBeenCalledWith("email-owner");
+    expect(mocks.clearWebSessionCookies).toHaveBeenCalledOnce();
+  });
+
+  it("falls back to the normalized reset email when the access-token owner cannot be parsed", async () => {
+    const tokenError = new Error("missing sub");
+    mocks.getRemnashopUserIdFromAccessToken.mockImplementationOnce(() => {
+      throw tokenError;
+    });
+    mocks.prisma.webUser.findUnique.mockResolvedValueOnce({ id: "email-owner" });
+
+    await expect(createSessionFromRemnashopAuth({
+      accessToken: "malformed-access",
+      refreshToken: "refresh",
+      auth,
+      replaceExistingSessions: true,
+      replacementIdentityEmail: " User@Example.COM ",
+    })).rejects.toThrow(tokenError);
+
+    expect(mocks.getRemnashopMe).not.toHaveBeenCalled();
+    expect(mocks.prisma.webUser.findUnique).toHaveBeenCalledWith({
+      where: { email: "user@example.com" },
+      select: { id: true },
+    });
+    expect(mocks.revokeAllWebSessionsForUser).toHaveBeenCalledWith("email-owner");
+    expect(mocks.clearWebSessionCookies).toHaveBeenCalledOnce();
+  });
+
+  it("preserves the profile error and still clears cookies when fail-closed revocation fails", async () => {
+    const profileError = new Error("profile unavailable");
+    const revokeError = new Error("database unavailable");
+    mocks.getRemnashopMe.mockRejectedValueOnce(profileError);
+    mocks.prisma.webUser.findUnique.mockResolvedValueOnce({ id: "existing-owner" });
+    mocks.revokeAllWebSessionsForUser.mockRejectedValueOnce(revokeError);
+
+    const replacement = createSessionFromRemnashopAuth({
+      accessToken: "access",
+      refreshToken: "refresh",
+      auth,
+      replaceExistingSessions: true,
+      replacementIdentityEmail: "user@example.com",
+    });
+
+    await expect(replacement).rejects.toBe(profileError);
+    expect(mocks.clearWebSessionCookies).toHaveBeenCalledOnce();
+    expect(mocks.logTechnicalError).toHaveBeenCalledWith(
+      "remnashop_session_replacement_revoke_failed",
+      revokeError,
+      expect.objectContaining({
+        hasRemnashopUserId: true,
+        hasFallbackEmail: true,
+      }),
+    );
+  });
+
+  it("does not run replacement cleanup for an ordinary login profile failure", async () => {
+    const profileError = new Error("profile unavailable");
+    mocks.getRemnashopMe.mockRejectedValueOnce(profileError);
+
+    await expect(createSessionFromRemnashopAuth({
+      accessToken: "access",
+      refreshToken: "refresh",
+      auth,
+    })).rejects.toThrow(profileError);
+
+    expect(mocks.prisma.webUser.findUnique).not.toHaveBeenCalled();
+    expect(mocks.revokeAllWebSessionsForUser).not.toHaveBeenCalled();
+    expect(mocks.clearWebSessionCookies).not.toHaveBeenCalled();
   });
 
   it("reconciles an existing user from Remnashop auth without creating a session", async () => {

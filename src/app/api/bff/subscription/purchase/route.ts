@@ -36,9 +36,10 @@ export const runtime = "nodejs";
 function isFinalBeforeDispatch(error: unknown) {
   return (
     error instanceof BffError &&
-    error.code !== "RATE_LIMITED" &&
-    error.status >= 400 &&
-    error.status < 500
+    (error.code === "OFFER_CHANGED" ||
+      error.code === "PLAN_UNAVAILABLE" ||
+      error.code === "PAYMENT_GATEWAY_UNAVAILABLE" ||
+      error.code === "IDEMPOTENCY_KEY_REUSED")
   );
 }
 

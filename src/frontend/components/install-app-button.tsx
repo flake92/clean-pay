@@ -55,7 +55,7 @@ export function InstallAppButton({
   const [showAndroidGuide, setShowAndroidGuide] = useState(false);
   const [showEmbeddedGuide, setShowEmbeddedGuide] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
-  const [installed, setInstalled] = useState(() => typeof window !== "undefined" && isStandalone());
+  const [installed, setInstalled] = useState(false);
   const [mobilePlatform, setMobilePlatform] = useState<"android" | "ios" | "other" | null>(null);
   const [embeddedBrowser, setEmbeddedBrowser] = useState(false);
 
@@ -63,6 +63,7 @@ export function InstallAppButton({
     const platformTimer = window.setTimeout(() => {
       const isIos = isAppleMobileDevice();
       const requestedPlatform = new URLSearchParams(window.location.search).get("platform");
+      setInstalled((current) => current || isStandalone());
       setMobilePlatform(isIos ? "ios" : isAndroidDevice() ? "android" : "other");
       const embedded = isEmbeddedMobileBrowser();
       setEmbeddedBrowser(embedded);

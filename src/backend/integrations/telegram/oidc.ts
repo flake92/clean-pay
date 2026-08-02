@@ -15,6 +15,7 @@ import { claimTelegramAuthState as claimTelegramAuthStateRecord } from "@/backen
 import { stageTelegramAccountMerge } from "@/backend/auth/telegram-account-merge";
 import { remnashopAuth } from "@/backend/integrations/remnashop/client";
 import { BffError } from "@/backend/integrations/remnashop/errors";
+import { getCurrentSession } from "@/backend/sessions/web-session";
 import {
   assertUserMergeFinalOwner,
   mergeLocalUsersIntoTarget,
@@ -36,6 +37,14 @@ const telegramOidcCookieNames = {
   nonce: "clean_pay_tg_nonce",
   codeVerifier: "clean_pay_tg_code_verifier",
 } as const;
+
+type TelegramCookieStore = Awaited<ReturnType<typeof cookies>>;
+
+function clearTemporaryTelegramAuthCookies(cookieStore: TelegramCookieStore) {
+  cookieStore.delete(telegramOidcCookieNames.state);
+  cookieStore.delete(telegramOidcCookieNames.nonce);
+  cookieStore.delete(telegramOidcCookieNames.codeVerifier);
+}
 
 function addSeconds(date: Date, seconds: number) {
   return new Date(date.getTime() + seconds * 1000);
@@ -491,11 +500,14 @@ export async function consumeTelegramCallback(code: string, state: string) {
     expiresAt: authState.expiresAt,
   });
 
+  await assertTelegramLinkSession(authState, cookieStore);
+
   const idToken = await exchangeCodeForIdToken(code, codeVerifier);
 
   return consumeTelegramIdToken(idToken, {
     authState,
     nonce,
+    cookieStore,
   });
 }
 
@@ -532,9 +544,12 @@ export async function consumeTelegramPopupToken(idToken: string) {
     throw new Error("Telegram popup state was not found or has expired");
   }
 
+  await assertTelegramLinkSession(authState, cookieStore);
+
   return consumeTelegramIdToken(idToken, {
     authState,
     nonce,
+    cookieStore,
   });
 }
 
@@ -571,11 +586,15 @@ export async function consumeTelegramLoginWidgetPayload(payload: TelegramLoginWi
     throw new Error("Telegram widget state was not found or has expired");
   }
 
+  await assertTelegramLinkSession(authState, cookieStore);
+
   const verifiedPayload = verifyTelegramLoginWidgetPayload(payload);
   const fullName = [
     verifiedPayload.first_name,
     verifiedPayload.last_name,
   ].filter(Boolean).join(" ") || null;
+
+  await assertTelegramLinkSession(authState, cookieStore);
 
   await claimTelegramAuthState(authState);
 
@@ -594,6 +613,7 @@ async function consumeTelegramIdToken(
   {
     authState,
     nonce,
+    cookieStore,
   }: {
     authState: {
       id: string;
@@ -602,6 +622,7 @@ async function consumeTelegramIdToken(
       expiresAt: Date;
     };
     nonce: string;
+    cookieStore: TelegramCookieStore;
   },
 ) {
   const payload = await verifyTelegramIdToken(idToken, nonce).catch((error) => {
@@ -620,6 +641,7 @@ async function consumeTelegramIdToken(
       : null;
   const fullName = getFullName(payload);
   const photoUrl = typeof payload.picture === "string" ? payload.picture : null;
+  await assertTelegramLinkSession(authState, cookieStore);
   await claimTelegramAuthState(authState);
   const remnashopAuthResult = await authenticateRemnashopWithTelegram(
     payload,
@@ -644,6 +666,40 @@ async function claimTelegramAuthState(authState: { id: string }) {
     });
     throw new TelegramAuthStateAlreadyConsumedError();
   }
+}
+
+async function assertTelegramLinkSession(
+  authState: { id: string; userId: string | null },
+  cookieStore: TelegramCookieStore,
+) {
+  if (!authState.userId) {
+    return;
+  }
+
+  const session = await getCurrentSession();
+
+  if (session?.userId === authState.userId) {
+    return;
+  }
+
+  authDebugLog("telegram_link_session_mismatch", {
+    authStateId: authState.id,
+    targetUserId: authState.userId,
+    hasCurrentSession: Boolean(session),
+    currentSessionId: session?.id,
+  });
+
+  try {
+    await claimTelegramAuthState(authState);
+  } finally {
+    clearTemporaryTelegramAuthCookies(cookieStore);
+  }
+
+  throw new BffError(
+    "UNAUTHORIZED",
+    401,
+    "Telegram account linking session is no longer active",
+  );
 }
 
 async function completeTelegramAuth(
@@ -724,9 +780,7 @@ async function completeTelegramAuth(
     });
 
     if (mergeConfirmation.required) {
-      cookieStore.delete(telegramOidcCookieNames.state);
-      cookieStore.delete(telegramOidcCookieNames.nonce);
-      cookieStore.delete(telegramOidcCookieNames.codeVerifier);
+      clearTemporaryTelegramAuthCookies(cookieStore);
       await auditLog({
         action: "telegram_merge_confirmation_required",
         userId: targetUserId,
@@ -851,9 +905,7 @@ async function completeTelegramAuth(
     userId: user.id,
   });
 
-  cookieStore.delete(telegramOidcCookieNames.state);
-  cookieStore.delete(telegramOidcCookieNames.nonce);
-  cookieStore.delete(telegramOidcCookieNames.codeVerifier);
+  clearTemporaryTelegramAuthCookies(cookieStore);
 
   authDebugLog("telegram_oidc_callback_success", {
     authStateId: authState.id,

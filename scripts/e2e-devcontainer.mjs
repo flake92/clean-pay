@@ -6,6 +6,58 @@ import { fileURLToPath } from "node:url";
 const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const composeFile = path.join(rootDir, ".devcontainer", "docker-compose.yml");
 const projectName = process.env.CLEAN_PAY_DEVCONTAINER_PROJECT ?? "clean-pay-dev";
+const devcontainerHostPortDefaults = {
+  CLEAN_PAY_DEVCONTAINER_APP_HOST_PORT: "4000",
+  CLEAN_PAY_DEVCONTAINER_PRISMA_STUDIO_HOST_PORT: "5555",
+  CLEAN_PAY_DEVCONTAINER_POSTGRES_HOST_PORT: "5432",
+  CLEAN_PAY_DEVCONTAINER_REDIS_HOST_PORT: "6379",
+  CLEAN_PAY_DEVCONTAINER_REMNASHOP_HOST_PORT: "5001",
+  CLEAN_PAY_DEVCONTAINER_REMNASHOP_POSTGRES_HOST_PORT: "6767",
+  CLEAN_PAY_DEVCONTAINER_TELEGRAM_OIDC_HOST_PORT: "8090",
+  CLEAN_PAY_DEVCONTAINER_MAILPIT_HTTP_HOST_PORT: "8025",
+  CLEAN_PAY_DEVCONTAINER_MAILPIT_SMTP_HOST_PORT: "1025",
+  CLEAN_PAY_DEVCONTAINER_CADDY_APP_HOST_PORT: "8080",
+  CLEAN_PAY_DEVCONTAINER_CADDY_REMNASHOP_HOST_PORT: "8081",
+  CLEAN_PAY_DEVCONTAINER_CADDY_MAILPIT_HOST_PORT: "8026",
+};
+
+configureDevcontainerIsolation();
+
+function configureDevcontainerIsolation() {
+  if (!/^[a-z0-9][a-z0-9_-]*$/.test(projectName)) {
+    console.error(
+      "CLEAN_PAY_DEVCONTAINER_PROJECT must start with a lowercase letter or digit " +
+      "and contain only lowercase letters, digits, hyphens, or underscores.",
+    );
+    process.exit(1);
+  }
+
+  const allocatedPorts = new Map();
+
+  for (const [name, fallback] of Object.entries(devcontainerHostPortDefaults)) {
+    const value = process.env[name]?.trim() || fallback;
+
+    if (!/^[1-9][0-9]{0,4}$/.test(value) || Number(value) > 65_535) {
+      console.error(`${name} must be an integer between 1 and 65535.`);
+      process.exit(1);
+    }
+
+    const previous = allocatedPorts.get(value);
+
+    if (previous) {
+      console.error(`${name} and ${previous} cannot publish the same host port ${value}.`);
+      process.exit(1);
+    }
+
+    allocatedPorts.set(value, name);
+    process.env[name] = value;
+  }
+
+  process.env.CLEAN_PAY_DEVCONTAINER_PROJECT = projectName;
+  process.env.CLEAN_PAY_DEVCONTAINER_REMNASHOP_IMAGE =
+    process.env.CLEAN_PAY_DEVCONTAINER_REMNASHOP_IMAGE?.trim() ||
+    `${projectName}-remnashop:latest`;
+}
 
 function isRemnashopSource(directory) {
   return (
@@ -61,6 +113,19 @@ if (process.env.REMNASHOP_HOST_SOURCE && !process.env.REMNASHOP_BUILD_CONTEXT) {
 
 const passThroughEnv = [
   "CLEAN_PAY_DEVCONTAINER_PROJECT",
+  "CLEAN_PAY_DEVCONTAINER_APP_HOST_PORT",
+  "CLEAN_PAY_DEVCONTAINER_PRISMA_STUDIO_HOST_PORT",
+  "CLEAN_PAY_DEVCONTAINER_POSTGRES_HOST_PORT",
+  "CLEAN_PAY_DEVCONTAINER_REDIS_HOST_PORT",
+  "CLEAN_PAY_DEVCONTAINER_REMNASHOP_HOST_PORT",
+  "CLEAN_PAY_DEVCONTAINER_REMNASHOP_POSTGRES_HOST_PORT",
+  "CLEAN_PAY_DEVCONTAINER_TELEGRAM_OIDC_HOST_PORT",
+  "CLEAN_PAY_DEVCONTAINER_MAILPIT_HTTP_HOST_PORT",
+  "CLEAN_PAY_DEVCONTAINER_MAILPIT_SMTP_HOST_PORT",
+  "CLEAN_PAY_DEVCONTAINER_CADDY_APP_HOST_PORT",
+  "CLEAN_PAY_DEVCONTAINER_CADDY_REMNASHOP_HOST_PORT",
+  "CLEAN_PAY_DEVCONTAINER_CADDY_MAILPIT_HOST_PORT",
+  "CLEAN_PAY_DEVCONTAINER_REMNASHOP_IMAGE",
   "CLEAN_PAY_E2E_BASE_URL",
   "CLEAN_PAY_E2E_MAILPIT_URL",
   "CLEAN_PAY_E2E_OIDC_URL",

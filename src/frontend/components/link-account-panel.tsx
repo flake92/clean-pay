@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 
 import { browserSupportsWebAuthn } from "@simplewebauthn/browser";
@@ -161,6 +161,26 @@ export function LinkAccountPanel({
   const [turnstile, setTurnstile] = useState<TurnstileHandle | null>(null);
   const [webAuthnSupported, setWebAuthnSupported] = useState<boolean | null>(null);
   const [mergeConfirmation, setMergeConfirmation] = useState<MergeConfirmation | null>(null);
+  const actionLoadingRef = useRef<string | null>(null);
+
+  function beginAction(action: string) {
+    if (actionLoadingRef.current !== null) {
+      return false;
+    }
+
+    actionLoadingRef.current = action;
+    setActionLoading(action);
+    return true;
+  }
+
+  function finishAction(action: string) {
+    if (actionLoadingRef.current !== action) {
+      return;
+    }
+
+    actionLoadingRef.current = null;
+    setActionLoading(null);
+  }
 
   const emailVerified = Boolean(profile?.emailVerified ?? profile?.is_email_verified);
   const telegramId = profile?.telegramId ?? profile?.telegram_id ?? null;
@@ -286,7 +306,10 @@ export function LinkAccountPanel({
   }, [loadState]);
 
   async function confirmTelegramMerge() {
-    setActionLoading("telegram-merge-confirm");
+    const action = "telegram-merge-confirm";
+    if (!beginAction(action)) {
+      return;
+    }
     setError(null);
 
     try {
@@ -316,12 +339,15 @@ export function LinkAccountPanel({
     } catch (error) {
       setError(error instanceof Error ? error.message : "Не удалось объединить аккаунты.");
     } finally {
-      setActionLoading(null);
+      finishAction(action);
     }
   }
 
   async function cancelTelegramMerge() {
-    setActionLoading("telegram-merge-cancel");
+    const action = "telegram-merge-cancel";
+    if (!beginAction(action)) {
+      return;
+    }
     setError(null);
 
     try {
@@ -344,11 +370,14 @@ export function LinkAccountPanel({
     } catch (error) {
       setError(error instanceof Error ? error.message : "Не удалось отменить объединение.");
     } finally {
-      setActionLoading(null);
+      finishAction(action);
     }
   }
 
   function linkTelegram() {
+    if (actionLoadingRef.current !== null) {
+      return;
+    }
     setMessage(null);
     setError(null);
 
@@ -357,9 +386,11 @@ export function LinkAccountPanel({
       return;
     }
 
-    setActionLoading("telegram");
+    if (!beginAction("telegram")) {
+      return;
+    }
     const url = new URL("/auth/telegram/start", window.location.origin);
-    url.searchParams.set("redirect_to", "/link-account");
+    url.searchParams.set("redirect_to", setupDestination);
     if (turnstileToken) {
       url.searchParams.set("turnstile_token", turnstileToken);
       url.searchParams.set("cf-turnstile-response", turnstileToken);
@@ -368,7 +399,10 @@ export function LinkAccountPanel({
   }
 
   async function deletePasskey(id: string) {
-    setActionLoading(`passkey-${id}`);
+    const action = `passkey-${id}`;
+    if (!beginAction(action)) {
+      return;
+    }
     setMessage(null);
     setError(null);
 
@@ -384,13 +418,22 @@ export function LinkAccountPanel({
 
       setMessage("Ключ быстрого входа удалён.");
       await loadState();
+    } catch (error) {
+      setError(
+        error instanceof Error
+          ? error.message
+          : "Не удалось удалить ключ быстрого входа.",
+      );
     } finally {
-      setActionLoading(null);
+      finishAction(action);
     }
   }
 
   async function onSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (actionLoadingRef.current !== null) {
+      return;
+    }
     setMessage(null);
     setError(null);
 
@@ -404,7 +447,9 @@ export function LinkAccountPanel({
       return;
     }
 
-    setActionLoading("email");
+    if (!beginAction("email")) {
+      return;
+    }
 
     try {
       const response = await fetch("/api/bff/link/remnashop", {
@@ -459,7 +504,7 @@ export function LinkAccountPanel({
       setTurnstileToken(null);
       setError("Сеть недоступна. Не удалось связать e-mail с аккаунтом.");
     } finally {
-      setActionLoading(null);
+      finishAction("email");
     }
   }
 
@@ -564,6 +609,7 @@ export function LinkAccountPanel({
         >
           {hasEmail && !emailVerified && !requiresPasswordReauth ? (
             <Button
+              disabled={actionLoading !== null}
               label="Подтвердить e-mail"
               onClick={() => navigateTo(verificationDestination)}
               outlined
@@ -639,7 +685,7 @@ export function LinkAccountPanel({
                 />
               ) : null}
               <Button
-                disabled={actionLoading === "email"}
+                disabled={actionLoading !== null}
                 label={
                   usesCurrentPassword
                     ? "Подтвердить паролем"
@@ -671,7 +717,7 @@ export function LinkAccountPanel({
               ) : null}
               {hasTelegram ? (
                 <Button
-                  disabled={actionLoading === "telegram"}
+                  disabled={actionLoading !== null}
                   icon="pi pi-refresh"
                   label="Перепроверить связь Telegram"
                   loading={actionLoading === "telegram"}
@@ -681,7 +727,7 @@ export function LinkAccountPanel({
                 />
               ) : (
                 <Button
-                  disabled={actionLoading === "telegram"}
+                  disabled={actionLoading !== null}
                   icon="pi pi-send"
                   label="Привязать Telegram"
                   loading={actionLoading === "telegram"}
@@ -707,12 +753,14 @@ export function LinkAccountPanel({
             {webAuthnSupported !== false ? (
               <div className="account-method-action-row">
                 <Button
+                  disabled={actionLoading !== null}
                   icon="pi pi-lock"
                   label="Настроить"
                   onClick={() => navigateTo("/passkey/setup")}
                   type="button"
                 />
                 <Button
+                  disabled={actionLoading !== null}
                   label="Позже"
                   onClick={() => navigateTo("/cabinet")}
                   outlined
@@ -739,7 +787,7 @@ export function LinkAccountPanel({
                     </div>
                     <Button
                       aria-label="Удалить ключ"
-                      disabled={passkeys.length <= 1 || actionLoading === `passkey-${credential.id}`}
+                      disabled={passkeys.length <= 1 || actionLoading !== null}
                       icon="pi pi-trash"
                       loading={actionLoading === `passkey-${credential.id}`}
                       onClick={() => deletePasskey(credential.id)}

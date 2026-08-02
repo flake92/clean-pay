@@ -6,12 +6,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   navigateTo: vi.fn(),
+  startAuthentication: vi.fn(),
   startRegistration: vi.fn(),
 }));
 
 vi.mock("@simplewebauthn/browser", () => ({
   browserSupportsWebAuthn: () => true,
-  startAuthentication: vi.fn(),
+  startAuthentication: mocks.startAuthentication,
   startRegistration: mocks.startRegistration,
 }));
 vi.mock("@/frontend/lib/browser-navigation", () => ({
@@ -38,7 +39,10 @@ vi.mock("primereact/message", () => ({
     createElement("div", { role: "alert" }, text),
 }));
 
-import { PasskeySetupPanel } from "@/frontend/components/passkey-actions";
+import {
+  PasskeyLoginButton,
+  PasskeySetupPanel,
+} from "@/frontend/components/passkey-actions";
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean })
   .IS_REACT_ACT_ENVIRONMENT = true;
@@ -123,5 +127,80 @@ describe("Passkey setup continuation", () => {
     expect(fetch).not.toHaveBeenCalled();
     expect(mocks.startRegistration).not.toHaveBeenCalled();
     expect(mocks.navigateTo).toHaveBeenCalledWith(paymentPath);
+  });
+
+  it("starts only one registration flow for same-tick clicks", async () => {
+    let resolveOptions!: (response: Response) => void;
+    vi.mocked(fetch).mockReturnValueOnce(
+      new Promise<Response>((resolve) => {
+        resolveOptions = resolve;
+      }),
+    );
+
+    await act(async () =>
+      root.render(createElement(PasskeySetupPanel)),
+    );
+    const setupButton = Array.from(container.querySelectorAll("button")).find(
+      (button) => button.textContent === "Настроить быстрый вход",
+    )!;
+
+    await act(async () => {
+      setupButton.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      setupButton.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      await Promise.resolve();
+    });
+
+    expect(fetch).toHaveBeenCalledOnce();
+    expect(mocks.startRegistration).not.toHaveBeenCalled();
+
+    await act(async () => {
+      resolveOptions(
+        Response.json(
+          { error: { code: "UPSTREAM_UNAVAILABLE", message: "Unavailable" } },
+          { status: 503 },
+        ),
+      );
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+  });
+
+  it("starts only one authentication flow for same-tick clicks", async () => {
+    let resolveOptions!: (response: Response) => void;
+    vi.mocked(fetch).mockReturnValueOnce(
+      new Promise<Response>((resolve) => {
+        resolveOptions = resolve;
+      }),
+    );
+
+    await act(async () =>
+      root.render(createElement(PasskeyLoginButton)),
+    );
+    await act(async () => {
+      await new Promise((resolve) => window.setTimeout(resolve, 0));
+    });
+    const loginButton = Array.from(container.querySelectorAll("button")).find(
+      (button) => button.textContent === "Войти быстро",
+    )!;
+
+    await act(async () => {
+      loginButton.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      loginButton.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      await Promise.resolve();
+    });
+
+    expect(fetch).toHaveBeenCalledOnce();
+    expect(mocks.startAuthentication).not.toHaveBeenCalled();
+
+    await act(async () => {
+      resolveOptions(
+        Response.json(
+          { error: { code: "UPSTREAM_UNAVAILABLE", message: "Unavailable" } },
+          { status: 503 },
+        ),
+      );
+      await Promise.resolve();
+      await Promise.resolve();
+    });
   });
 });
