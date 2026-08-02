@@ -1,7 +1,7 @@
 import { defineConfig } from "vitest/config";
 import path from "node:path";
 
-const srcPath = path.resolve(__dirname, "src");
+const srcPath = path.resolve(import.meta.dirname, "src");
 
 export default defineConfig({
   test: {
@@ -21,8 +21,8 @@ export default defineConfig({
           },
         },
       },
-      "./vitest.integration.config.ts",
-      "./vitest.e2e.config.ts",
+      "./vitest.integration.config.mts",
+      "./vitest.e2e.config.mts",
     ],
   },
   resolve: {
