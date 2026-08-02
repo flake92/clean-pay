@@ -324,6 +324,16 @@ Remnashop при этом не получает доказательство Web
 
 Регрессия покрывает legacy `-1`, пропуск одной плохой строки, exact reconciliation, owner-bound fallback и полный межпроектный E2E.
 
+### 2.12. SUB-RENEW: изменённые администратором условия действующей подписки
+
+Проверен сценарий, в котором после покупки администратор меняет параметры тарифа или подписки, например лимит устройств. Каноническое поведение текущего Remnashop-бота установлено по исходному коду:
+
+- если исходный `plan id` по-прежнему доступен, но snapshot больше не совпадает с актуальными условиями, продление разрешается по актуальным лимитам и цене с явным предупреждением;
+- если исходный `plan id` удалён или недоступен пользователю, продление запрещается;
+- изменение только live-параметров подписки в Remnawave не должно само по себе превращать продление в произвольную смену тарифа.
+
+Обнаружено расхождение: Remnashop public `/subscription/offers` и `/subscription/extend` принимали только полное совпадение snapshot, тогда как бот имел fallback по тому же `plan id`. Из-за этого Clean Pay не мог гарантировать поведение бота. Исправление использует общий resolver для bot/public API, публикует `renewal_terms_changed`, показывает предупреждение в Clean Pay и сохраняет `409` для удалённого plan id.
+
 ## 3. Цели и границы
 
 ### Цели
@@ -773,6 +783,7 @@ npm run test:e2e
 - [x] Платежи, idempotency и concurrent operations проходят regression.
 - [x] Legacy `duration_days = -1` не блокирует страницу истории, одна плохая строка изолируется, а локальные pending payments проходят exact reconciliation.
 - [x] Ошибка upstream history сохраняет owner-bound локальную историю и не превращается в ложный пустой список UI.
+- [x] Продление изменённого тарифа совпадает с Remnashop-ботом: тот же `plan id` разрешён с предупреждением и актуальными условиями, отсутствующий `plan id` отклоняется.
 - [ ] Canary не показывает аномального роста auth failures/latency.
 - [ ] Rollback images и инструкции обоих проектов проверены до production rollout.
 
@@ -931,6 +942,10 @@ npm run test:e2e
 | 2026-08-02 | TST-019 | Независимый повтор | local source Docker stack | После исправления test infrastructure повторно собраны локальные образы, применены миграции и пройден полный межсервисный набор | Завершено | Локальный Remnashop image содержит отдельный `docker-migrate.sh`; Clean Pay migration deploy завершён без pending migrations; E2E повторно `92/92`, lint/typecheck зелёные | Codex |
 | 2026-08-02 | REL-001 | Release gate | production rollout | Кодовый remediation candidate готов; production canary и проверка фактических rollback image tags требуют доступа и полномочий оператора production | Ожидает production rollout | Два соответствующих checklist-пункта намеренно оставлены открытыми: локальные проверки не подменяют canary telemetry и существующие production image digests | Codex |
 | 2026-08-02 | TST-020 | Проверка документации | final journal privacy gate | Первый вызов использовал неподдерживаемую Vitest опцию `--runInBand` и остановился до тестов; точный тест немедленно повторён корректной командой | Завершено | `docs-privacy.test.ts` — `3/3`; полные revision в README/docs не найдены; `git diff --check` чист | Codex |
+| 2026-08-02 | FIND-031 | Межпроектный дефект | Remnashop bot/public renewal contract | Public `/offers` и `/extend` требовали полного совпадения plan snapshot, тогда как бот разрешал изменённые условия при сохранённом `plan id` | Исправлено | Подтверждено исходным bot resolver и текстом предупреждения; удалённый/недоступный `plan id` остаётся запрещён | Codex |
+| 2026-08-02 | CHG-019 | Исправление | Remnashop + Clean Pay source/tests | Bot, public offers и extend переведены на общий renew resolver; в контракт добавлен флаг изменённых условий, в Clean Pay — предупреждение до оплаты | Завершено | Same-id modified plan получает `RENEW` и проходит extend по актуальным условиям; missing id возвращает `409`; старый API без нового необязательного поля совместим с Clean Pay | Codex |
+| 2026-08-02 | TST-021 | Проверка | focused SUB-RENEW regression | Проверены обе ветки renew resolver и отображение предупреждения | Завершено | Remnashop focused pytest `19/19`, Ruff и mypy; Clean Pay focused route/UI `66/66`, lint и typecheck | Codex |
+| 2026-08-02 | TST-022 | Итоговая проверка | SUB-RENEW final candidate, local + clean Docker | После исправления выполнен полный regression gate обоих проектов и чистый межсервисный прогон | Завершено | Clean Pay lint/typecheck, unit `572/572`, routes `48/48`, production build `52/52`; Remnashop Ruff, mypy `542` файлов, pytest `179/179`; локальные Docker images и миграции успешны; E2E `92/92` | Codex |
 
 ### Шаблон новой записи
 
