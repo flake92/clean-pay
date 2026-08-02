@@ -4,6 +4,7 @@ import {
   verifyAuthenticationResponse,
   verifyRegistrationResponse,
   type AuthenticationResponseJSON,
+  type AuthenticatorTransportFuture,
   type RegistrationResponseJSON,
   type WebAuthnCredential as SimpleWebAuthnCredential,
 } from "@simplewebauthn/server";
@@ -310,25 +311,48 @@ export async function finishPasskeyRegistration(response: RegistrationResponseJS
   return { success: true };
 }
 
-export async function beginPasskeyLogin() {
+export async function beginPasskeyLogin(rawEmail: string) {
+  const email = rawEmail.trim().toLowerCase();
+  if (!email) {
+    throw new BffError("VALIDATION_ERROR", 400, "Email is required for passkey login");
+  }
   await assertRateLimit({
     action: "passkey_login_options",
+    email,
     limit: 20,
     windowSeconds: 15 * 60,
   });
 
   return withAuthConcurrency("passkey_login_options", async () => {
+    const user = await prisma.webUser.findUnique({
+      where: { email },
+      select: {
+        id: true,
+        webAuthnCredentials: {
+          select: { credentialId: true, transports: true },
+        },
+      },
+    });
+    if (!user?.webAuthnCredentials.length) {
+      throw new BffError("NOT_FOUND", 404, "No passkey is registered for this account");
+    }
+
     const { rpID } = webAuthnRelyingParty();
     const options = await generateAuthenticationOptions({
       rpID,
       timeout: 60_000,
       userVerification: "required",
+      allowCredentials: user.webAuthnCredentials.map((credential) => ({
+        id: credential.credentialId,
+        transports: credential.transports as AuthenticatorTransportFuture[],
+      })),
     });
 
     await prisma.webAuthnChallenge.create({
       data: {
         challenge: options.challenge,
         type: WebAuthnChallengeType.AUTHENTICATION,
+        userId: user.id,
         expiresAt: addMs(new Date(), challengeTtlMs),
       },
     });
@@ -393,6 +417,10 @@ export async function finishPasskeyLogin(response: AuthenticationResponseJSON) {
 
   if (!credential) {
     throw new BffError("UNAUTHORIZED", 401, "Passkey was not found");
+  }
+
+  if (!challenge.userId || challenge.userId !== credential.userId) {
+    throw new BffError("UNAUTHORIZED", 401, "Passkey does not belong to the selected account");
   }
 
   const { rpID, origin } = webAuthnRelyingParty();

@@ -9,7 +9,7 @@ export async function POST(request: Request) {
   try {
     const body = await readBffJsonObject(request);
     await verifyTurnstileToken(getTurnstileToken(body), "auth_login");
-    return bffJson(await beginPasskeyLogin());
+    return bffJson(await beginPasskeyLogin(String(body.email ?? "")));
   } catch (error) {
     return bffError(error);
   }

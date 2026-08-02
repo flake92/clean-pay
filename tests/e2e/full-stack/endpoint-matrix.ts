@@ -52,7 +52,7 @@ export const anonymousPublicCases: EndpointMatrixCase[] = [
   { method: "GET", path: "/api/health/liveness", statuses: [200], session: "none", verifiedEmail: "not-required", upstream: cleanPayOnly, unexpected5xx: "bug" },
   { method: "GET", path: "/api/health/readiness", statuses: [200], session: "none", verifiedEmail: "not-required", upstream: coreReadiness, unexpected5xx: "bug" },
   { method: "GET", path: "/api/bff/plans/public", statuses: [200], session: "none", verifiedEmail: "not-required", upstream: remnashopFlow, unexpected5xx: "bug" },
-  { method: "POST", path: "/api/bff/auth/identify", body: { email: "nobody@example.com" }, statuses: [202], session: "none", verifiedEmail: "not-required", upstream: cleanPayOnly, unexpected5xx: "bug" },
+  { method: "POST", path: "/api/bff/auth/identify", body: { email: "nobody@example.com" }, statuses: [200], session: "none", verifiedEmail: "not-required", upstream: cleanPayOnly, unexpected5xx: "bug" },
   { method: "POST", path: "/api/bff/auth/identify", body: { email: "" }, statuses: [400], session: "none", verifiedEmail: "not-required", upstream: cleanPayOnly, unexpected5xx: "bug" },
   { method: "POST", path: "/api/bff/auth/login", body: { email: "nobody@example.com", password: "bad-password" }, statuses: [410], session: "none", verifiedEmail: "not-required", upstream: cleanPayOnly, unexpected5xx: "bug" },
   { method: "POST", path: "/api/bff/auth/register", body: { email: "", password: "" }, statuses: [410], session: "none", verifiedEmail: "not-required", upstream: cleanPayOnly, unexpected5xx: "bug" },

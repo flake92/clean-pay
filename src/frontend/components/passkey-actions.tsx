@@ -12,10 +12,14 @@ import { InputText } from "primereact/inputtext";
 import { Message } from "primereact/message";
 
 import { navigateTo } from "@/frontend/lib/browser-navigation";
-import { readBffError } from "@/frontend/lib/client-api";
+import { BffClientError, readBffError } from "@/frontend/lib/client-api";
 
 async function readError(response: Response, fallback: string) {
-  return (await readBffError(response, fallback)).message;
+  const error = await readBffError(response, fallback);
+  if (error instanceof BffClientError && (error.code === "NOT_FOUND" || error.code === "UNAUTHORIZED")) {
+    return "Этот ключ не подходит выбранному аккаунту. Войдите по паролю и при необходимости создайте новый ключ в профиле.";
+  }
+  return error.message;
 }
 
 function useWebAuthnSupport() {
@@ -83,11 +87,13 @@ function isUnavailableCredential(error: unknown) {
 
 export function PasskeyLoginButton({
   consumeTurnstileToken,
+  email,
   redirectTo = "/cabinet",
   resetTurnstile,
   turnstileEnabled = false,
 }: {
   consumeTurnstileToken?: () => string | null;
+  email: string;
   redirectTo?: string;
   resetTurnstile?: () => void;
   turnstileEnabled?: boolean;
@@ -115,7 +121,7 @@ export function PasskeyLoginButton({
       const optionsResponse = await fetch("/api/bff/auth/passkey/login/options", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ turnstileToken }),
+        body: JSON.stringify({ email, turnstileToken }),
       });
       resetTurnstile?.();
 

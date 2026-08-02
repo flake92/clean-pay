@@ -60,7 +60,7 @@ export async function registerWithEmail(rawBody: AuthPayload<RegisterRequest>, t
     hasReferralCode: Boolean(body.referral_code),
     hasTurnstileToken: Boolean(turnstileToken ?? turnstile.token),
   });
-  await verifyTurnstileToken(turnstileToken ?? turnstile.token, "auth_register");
+  await verifyTurnstileToken(turnstileToken ?? turnstile.token, "auth_login");
   authDebugLog("auth_register_turnstile_passed", {});
   await assertRateLimit({
     action: "auth_register",

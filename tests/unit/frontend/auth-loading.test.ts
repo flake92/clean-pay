@@ -51,7 +51,7 @@ async function submit(form: HTMLFormElement) {
 describe.each([
   ["login", LoginForm],
   ["registration alias", RegisterForm],
-])("generic email %s loading recovery", (_label, Component) => {
+])("automatic email %s flow", (_label, Component) => {
   let container: HTMLDivElement;
   let root: Root;
 
@@ -109,20 +109,22 @@ describe.each([
     expect(fetch).toHaveBeenCalledTimes(1);
   });
 
-  it("uses the generic start endpoint and reveals no account branch", async () => {
-    vi.mocked(fetch).mockResolvedValueOnce(Response.json({ data: { success: true } }, { status: 202 }));
+  it("does not request a code for an existing account", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(Response.json({
+      data: { exists: true, hasPasskey: false },
+    }));
     const email = container.querySelector<HTMLInputElement>('input[type="email"]')!;
     await act(async () => setInputValue(email, "user@example.com"));
     await submit(container.querySelector("form")!);
 
-    expect(fetch).toHaveBeenCalledWith("/api/bff/auth/email/start", expect.any(Object));
+    expect(fetch).toHaveBeenCalledWith("/api/bff/auth/identify", expect.any(Object));
     expect(container.querySelector<HTMLInputElement>('input[type="password"]')).not.toBeNull();
-    expect(container.textContent).toContain("Введите код из письма");
+    expect(container.textContent).not.toContain("Код из письма");
   });
 
-  it("offers password recovery only after an existing account rejects its password", async () => {
+  it("offers password recovery only after a password is rejected", async () => {
     vi.mocked(fetch)
-      .mockResolvedValueOnce(Response.json({ data: { success: true } }, { status: 202 }))
+      .mockResolvedValueOnce(Response.json({ data: { exists: true, hasPasskey: false } }))
       .mockResolvedValueOnce(Response.json({
         error: { code: "AUTH_FAILED", message: "Неверный пароль." },
       }, { status: 401 }))
@@ -132,11 +134,8 @@ describe.each([
     await act(async () => setInputValue(email, "existing@example.com"));
     await submit(container.querySelector("form")!);
 
-    const inputs = container.querySelectorAll<HTMLInputElement>("input");
-    await act(async () => {
-      setInputValue(Array.from(inputs).find((input) => input.name === "code")!, "123456");
-      setInputValue(Array.from(inputs).find((input) => input.name === "password")!, "wrong-password");
-    });
+    const password = container.querySelector<HTMLInputElement>('input[name="password"]')!;
+    await act(async () => setInputValue(password, "wrong-password"));
     await submit(container.querySelector("form")!);
 
     const recoveryButton = Array.from(container.querySelectorAll("button"))
@@ -154,23 +153,17 @@ describe.each([
     expect(container.textContent).toContain("задайте новый пароль");
   });
 
-  it("does not offer recovery for an invalid e-mail code", async () => {
-    vi.mocked(fetch)
-      .mockResolvedValueOnce(Response.json({ data: { success: true } }, { status: 202 }))
-      .mockResolvedValueOnce(Response.json({
-        error: { code: "EMAIL_CODE_INVALID", message: "Неверный код." },
-      }, { status: 400 }));
+  it("requests a code only after an unknown account is registered", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(Response.json({
+      data: { exists: false, hasPasskey: false },
+    }));
 
     const email = container.querySelector<HTMLInputElement>('input[type="email"]')!;
     await act(async () => setInputValue(email, "user@example.com"));
     await submit(container.querySelector("form")!);
-    const inputs = container.querySelectorAll<HTMLInputElement>("input");
-    await act(async () => {
-      setInputValue(Array.from(inputs).find((input) => input.name === "code")!, "000000");
-      setInputValue(Array.from(inputs).find((input) => input.name === "password")!, "some-password");
-    });
-    await submit(container.querySelector("form")!);
-
-    expect(container.textContent).not.toContain("Забыли пароль?");
+    expect(container.textContent).toContain("Аккаунт не найден");
+    expect(container.textContent).toContain("код подтверждения");
+    expect(container.querySelector<HTMLInputElement>('input[name="password"]')).not.toBeNull();
+    expect(container.querySelector<HTMLInputElement>('input[name="code"]')).toBeNull();
   });
 });

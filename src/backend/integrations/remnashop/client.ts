@@ -415,6 +415,13 @@ export async function remnashopStartGenericEmailAuth(
   });
 }
 
+export async function remnashopIdentifyEmail(body: StartGenericEmailAuthRequest) {
+  return remnashopRequest<{ exists: boolean }>("/auth/identify", {
+    method: "POST",
+    body,
+  });
+}
+
 export async function remnashopRequestPasswordReset(
   body: RequestPasswordResetRequest,
 ) {

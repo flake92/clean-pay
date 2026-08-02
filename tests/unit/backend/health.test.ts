@@ -63,6 +63,7 @@ describe("health checks", () => {
   it("checks Remnashop availability", async () => {
     const fetch = vi.spyOn(globalThis, "fetch")
       .mockResolvedValueOnce(new Response("{}", { status: 200 }))
+      .mockResolvedValueOnce(new Response("{}", { status: 422 }))
       .mockResolvedValueOnce(new Response("{}", { status: 422 }));
 
     await expect(checkRemnashop()).resolves.toMatchObject({ status: "ok" });
@@ -79,6 +80,10 @@ describe("health checks", () => {
       body: "{}",
       cache: "no-store",
       signal: expect.any(Object),
+    }));
+    expect(fetch).toHaveBeenNthCalledWith(3, "http://remnashop:5000/api/v1/public/auth/identify", expect.objectContaining({
+      method: "POST",
+      body: "{}",
     }));
 
     vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(new Response("{}", { status: 503 }));
@@ -99,7 +104,7 @@ describe("health checks", () => {
       .mockResolvedValueOnce(new Response("{}", { status: 404 }));
     await expect(checkRemnashop()).resolves.toMatchObject({
       status: "down",
-      message: "Remnashop is incompatible: generic e-mail auth route is missing",
+      message: "Remnashop is incompatible: /auth/email/start is missing",
     });
 
     fetch
@@ -115,7 +120,16 @@ describe("health checks", () => {
       .mockResolvedValueOnce(new Response("{}", { status: 202 }));
     await expect(checkRemnashop()).resolves.toMatchObject({
       status: "down",
-      message: "Remnashop generic e-mail auth contract returned 202, expected 422",
+      message: "Remnashop /auth/email/start contract returned 202, expected 422",
+    });
+
+    fetch
+      .mockResolvedValueOnce(new Response("{}", { status: 200 }))
+      .mockResolvedValueOnce(new Response("{}", { status: 422 }))
+      .mockResolvedValueOnce(new Response("{}", { status: 404 }));
+    await expect(checkRemnashop()).resolves.toMatchObject({
+      status: "down",
+      message: "Remnashop is incompatible: /auth/identify is missing",
     });
   });
 

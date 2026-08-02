@@ -91,27 +91,29 @@ export async function checkRemnashop(deadlineSignal?: AbortSignal) {
     // service credential has been accepted. This has no e-mail side effect and
     // prevents an older Remnashop image without generic e-mail auth from passing
     // readiness merely because its plans endpoint is available.
-    const authContractResponse = await fetch(`${env.remnashopApiBaseUrl}/auth/email/start`, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        "x-remnashop-auth-service-key": env.remnashopAuthServiceKey,
-      },
-      body: "{}",
-      cache: "no-store",
-      signal,
-    });
+    for (const path of ["/auth/email/start", "/auth/identify"]) {
+      const authContractResponse = await fetch(`${env.remnashopApiBaseUrl}${path}`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-remnashop-auth-service-key": env.remnashopAuthServiceKey,
+        },
+        body: "{}",
+        cache: "no-store",
+        signal,
+      });
 
-    if (authContractResponse.status === 404) {
-      throw new Error("Remnashop is incompatible: generic e-mail auth route is missing");
-    }
+      if (authContractResponse.status === 404) {
+        throw new Error(`Remnashop is incompatible: ${path} is missing`);
+      }
 
-    if (authContractResponse.status === 401 || authContractResponse.status === 403) {
-      throw new Error("Remnashop rejected REMNASHOP_AUTH_SERVICE_KEY");
-    }
+      if (authContractResponse.status === 401 || authContractResponse.status === 403) {
+        throw new Error("Remnashop rejected REMNASHOP_AUTH_SERVICE_KEY");
+      }
 
-    if (authContractResponse.status !== 422) {
-      throw new Error(`Remnashop generic e-mail auth contract returned ${authContractResponse.status}, expected 422`);
+      if (authContractResponse.status !== 422) {
+        throw new Error(`Remnashop ${path} contract returned ${authContractResponse.status}, expected 422`);
+      }
     }
   }, deadlineSignal);
 }

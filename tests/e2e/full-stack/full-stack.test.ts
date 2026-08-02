@@ -568,9 +568,9 @@ describe("real devcontainer full-stack e2e", () => {
     // Проверяем: identify можно вызвать до логина, чтобы UI выбрал следующий шаг входа.
     const unknownEmail = `unknown-${Date.now()}@example.com`;
     const identify = await postJson("/api/bff/auth/identify", { email: unknownEmail });
-    const identifyData = await expectBffData(identify, 202);
+    const identifyData = await expectBffData(identify, 200);
 
-    expect(identifyData).toMatchObject({ accepted: true });
+    expect(identifyData).toMatchObject({ exists: false, hasPasskey: false });
     await expectBffData(
       await postJson("/api/bff/auth/login", { email: unknownEmail, password: "bad-password" }),
       410,
@@ -757,7 +757,7 @@ describe("real devcontainer full-stack e2e", () => {
     // Проверяем: identify после регистрации видит локального пользователя.
     const identify = await postJson("/api/bff/auth/identify", { email });
 
-    await expectBffData(identify, 202);
+    await expectBffData(identify, 200);
 
     // Проверяем: неверный код подтверждения дает управляемую клиентскую ошибку, не 500.
     const invalidConfirm = await postJson(
