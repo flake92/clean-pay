@@ -128,7 +128,7 @@ COOKIE_SECURE=true
 
 `WEB_JWT_SECRET`, `WEB_REFRESH_SECRET`, `AUDIT_IP_HASH_SECRET`, `RATE_LIMIT_IDENTITY_SECRET` и `READINESS_INTERNAL_SECRET` генерируются автоматически. Каждый секрет должен содержать не менее 32 символов.
 
-`REMNASHOP_AUTH_SERVICE_KEY` — отдельный внутренний секрет Clean Pay, который приложение отправляет только в `/api/v1/public/auth/*`. Он не должен совпадать с admin `REMNASHOP_API_KEY`, попадать в браузер или использоваться внешними клиентами. Проверенный ниже commit Remnashop PR #135 пока не проверяет этот заголовок: его public auth-маршруты должны оставаться доступны только Clean Pay через общую Docker-сеть или отдельный сетевой ACL/mTLS. Не публикуйте порт Remnashop наружу. При общей Docker-сети направляйте `REMNASHOP_API_BASE_URL` на внутренний адрес `http://remnashop:5000/api/v1/public`.
+`REMNASHOP_AUTH_SERVICE_KEY` — отдельный внутренний секрет Clean Pay, который приложение отправляет только в `/api/v1/public/auth/*`. Он не должен совпадать с admin `REMNASHOP_API_KEY`, попадать в браузер или использоваться внешними клиентами. Remnashop обязан проверять этот заголовок до выполнения auth use case. Не публикуйте порт Remnashop наружу. При общей Docker-сети направляйте `REMNASHOP_API_BASE_URL` на внутренний адрес `http://remnashop:5000/api/v1/public`.
 
 Для публичного HTTPS используйте:
 
@@ -178,6 +178,7 @@ WEB_ENABLED=true
 WEB_CABINET_URL=https://pay.example.com/auth/telegram/webapp
 APP_API_KEY=<случайный секрет не короче 24 символов>
 APP_JWT_SECRET=<отдельный случайный секрет>
+APP_AUTH_SERVICE_KEY=<тот же отдельный секрет, что REMNASHOP_AUTH_SERVICE_KEY в Clean Pay>
 ```
 
 Для входа по e-mail настройте SMTP в Remnashop:
@@ -194,24 +195,24 @@ EMAIL_FROM_EMAIL=mail@example.com
 EMAIL_FROM_NAME=Clean Pay
 ```
 
-URL публичного API должен заканчиваться на `/api/v1/public`, admin API — на `/api/v1/admin`. Оба адреса должны использовать один origin и один API prefix. Admin-маршруты Remnashop проверяют `APP_API_KEY` через заголовок `X-API-Key`. В проверенном commit PR #135 отдельного `APP_AUTH_SERVICE_KEY` нет; заголовок `X-Remnashop-Auth-Service-Key`, отправляемый Clean Pay, там пока не проверяется.
+URL публичного API должен заканчиваться на `/api/v1/public`, admin API — на `/api/v1/admin`. Оба адреса должны использовать один origin и один API prefix. Admin-маршруты Remnashop проверяют `APP_API_KEY` через заголовок `X-API-Key`, auth-маршруты — отдельный `APP_AUTH_SERVICE_KEY` через `X-Remnashop-Auth-Service-Key`.
 
 Passkey создаёт локальную сессию Clean Pay. Если upstream-сессия Remnashop отсутствует или истекла, перед операцией с подпиской интерфейс запросит явный step-up через e-mail или Telegram.
 
 ### Совместимая версия Remnashop
 
-Для полного платёжного recovery contract и безопасного объединения e-mail/Telegram-аккаунтов необходимы изменения из [`snoups/remnashop#135`](https://github.com/snoups/remnashop/pull/135). PR добавляет требуемые public/admin API, идемпотентные операции покупки и продления, восстановление неоднозначных платежей и координированное объединение пользователей.
+Для generic e-mail auth, отдельной auth-границы, полного платёжного recovery contract и безопасного объединения e-mail/Telegram-аккаунтов используйте ветку `flake92/remnashop:update-nodejs`, проверенную revision `36918e17`. Она включает изменения из [`snoups/remnashop#135`](https://github.com/snoups/remnashop/pull/135) и последующие исправления auth-контракта.
 
-Пока PR #135 не вошёл в официальный release Remnashop:
+Пока эти изменения не вошли в официальный release Remnashop:
 
 - не включайте `PAYMENT_RECONCILIATION_ENABLED`, если установленная версия не предоставляет требуемый capability/recovery contract;
-- полный сценарий объединения e-mail и Telegram может быть недоступен;
-- для контролируемого тестового окружения используйте зафиксированный проверенный commit PR #135 `b9da68a`, а не движущуюся ветку;
+- не используйте `b9da68a`: в нём отсутствуют `/auth/email/start`, `/auth/email/complete` и проверка `APP_AUTH_SERVICE_KEY`;
+- для контролируемого окружения закрепляйте образ на проверенной revision `36918e17`, а не на движущемся теге;
 - перед production-обновлением проверьте актуальный статус PR и закрепите конкретную версию Docker image.
 
 На момент последней проверки PR #135 открыт, направлен в ветку `dev` и не является draft.
 
-Перед обновлением Remnashop сделайте резервную копию его базы данных и убедитесь, что HTTP-сервис, worker и scheduler используют одну версию образа.
+Перед обновлением Remnashop сделайте резервную копию его базы данных и убедитесь, что HTTP-сервис, worker и scheduler используют одну версию образа. Readiness Clean Pay выполняет безопасную проверку generic e-mail auth без отправки письма: старый образ, отсутствующий маршрут или неверный service key переводят стенд в `degraded`, поэтому `./deploy.sh up` не завершится успешно.
 
 ## Reverse proxy
 

@@ -70,17 +70,48 @@ export async function checkRemnashop(deadlineSignal?: AbortSignal) {
   const env = getEnv();
 
   return measure("Remnashop", async (signal) => {
-    const response = await fetch(`${env.remnashopApiBaseUrl}/plans/public`, {
+    const plansResponse = await fetch(`${env.remnashopApiBaseUrl}/plans/public`, {
       cache: "no-store",
       signal,
     });
 
-    if (response.status === 404) {
+    if (plansResponse.status === 404) {
       throw new Error("Remnashop public API returned 404; enable WEB_ENABLED=true with APP_API_KEY and APP_JWT_SECRET in Remnashop");
     }
 
-    if (!response.ok) {
-      throw new Error(`Remnashop returned ${response.status}`);
+    if (!plansResponse.ok) {
+      throw new Error(`Remnashop returned ${plansResponse.status}`);
+    }
+
+    if (!env.remnashopAuthServiceKey) {
+      throw new Error("REMNASHOP_AUTH_SERVICE_KEY is not configured");
+    }
+
+    // An empty request must be rejected by schema validation after the dedicated
+    // service credential has been accepted. This has no e-mail side effect and
+    // prevents an older Remnashop image without generic e-mail auth from passing
+    // readiness merely because its plans endpoint is available.
+    const authContractResponse = await fetch(`${env.remnashopApiBaseUrl}/auth/email/start`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-remnashop-auth-service-key": env.remnashopAuthServiceKey,
+      },
+      body: "{}",
+      cache: "no-store",
+      signal,
+    });
+
+    if (authContractResponse.status === 404) {
+      throw new Error("Remnashop is incompatible: generic e-mail auth route is missing");
+    }
+
+    if (authContractResponse.status === 401 || authContractResponse.status === 403) {
+      throw new Error("Remnashop rejected REMNASHOP_AUTH_SERVICE_KEY");
+    }
+
+    if (authContractResponse.status !== 422) {
+      throw new Error(`Remnashop generic e-mail auth contract returned ${authContractResponse.status}, expected 422`);
     }
   }, deadlineSignal);
 }
