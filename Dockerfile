@@ -67,6 +67,7 @@ COPY --from=dependencies --chown=cleanpay:nodejs /app/package.json /app/package-
 COPY --from=dependencies --chown=cleanpay:nodejs /app/node_modules ./node_modules
 COPY --chown=cleanpay:nodejs prisma ./prisma
 COPY --chown=cleanpay:nodejs prisma.config.ts ./prisma.config.ts
+COPY --chown=cleanpay:nodejs deploy/prod/deploy-log.mjs ./deploy/prod/deploy-log.mjs
 COPY --chown=cleanpay:nodejs deploy/prod/validate-env.mjs ./deploy/prod/validate-env.mjs
 COPY --chown=cleanpay:nodejs deploy/prod/production-env-rules.mjs ./deploy/prod/production-env-rules.mjs
 
