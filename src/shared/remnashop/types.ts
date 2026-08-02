@@ -37,6 +37,16 @@ export type CompleteGenericEmailAuthRequest = {
   password: string;
 };
 
+export type RequestPasswordResetRequest = {
+  email: string;
+};
+
+export type ConfirmPasswordResetRequest = {
+  email: string;
+  code: string;
+  new_password: string;
+};
+
 export type TelegramAuthRequest = {
   id: number;
   first_name: string;

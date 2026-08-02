@@ -28,6 +28,8 @@ If a route needs more than request parsing, a small audit call, and one backend 
 | `POST /api/bff/auth/email/change` | `src/app/api/bff/auth/email/change/route.ts` | `src/backend/auth/email-verification.ts` |
 | `POST /api/bff/auth/email/start` | `src/app/api/bff/auth/email/start/route.ts` | `src/backend/auth/generic-email.ts` |
 | `POST /api/bff/auth/email/complete` | `src/app/api/bff/auth/email/complete/route.ts` | `src/backend/auth/generic-email.ts` |
+| `POST /api/bff/auth/password/reset/start` | `src/app/api/bff/auth/password/reset/start/route.ts` | `src/backend/auth/password-reset.ts` |
+| `POST /api/bff/auth/password/reset/confirm` | `src/app/api/bff/auth/password/reset/confirm/route.ts` | `src/backend/auth/password-reset.ts` |
 
 ## Passkeys
 

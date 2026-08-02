@@ -46,6 +46,7 @@
     "eslint": "^9",
     "eslint-config-next": "16.2.12",
     "jsdom": "^29.1.1",
+    "pg-connection-string": "^2.14.0",
     "prisma": "7.9.0",
     "sass": "^1.101.0",
     "tailwindcss": "^4",
@@ -53,13 +54,13 @@
     "vitest": "^4.1.9"
   },
   "overrides": {
+    "@hono/node-server": "2.0.12",
+    "fast-uri": "3.1.4",
+    "find-my-way": "9.7.0",
+    "hono": "4.12.32",
+    "immutable": "5.1.9",
     "postcss": "8.5.23",
     "sharp": "0.35.3",
-    "fast-uri": "3.1.4",
-    "immutable": "5.1.9",
-    "hono": "4.12.32",
-    "@hono/node-server": "2.0.12",
-    "valibot": "1.4.2",
-    "find-my-way": "9.7.0"
+    "valibot": "1.4.2"
   }
 }
