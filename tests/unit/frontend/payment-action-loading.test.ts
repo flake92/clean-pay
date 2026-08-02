@@ -175,6 +175,25 @@ describe("payment action loading recovery", () => {
     );
   });
 
+  it("warns before renewing a plan whose terms changed in Remnashop", async () => {
+    const modifiedOffers = {
+      ...structuredClone(offers),
+      plans: offers.plans.map((plan) => ({
+        ...structuredClone(plan),
+        renewal_terms_changed: true,
+      })),
+    };
+    vi.mocked(fetch)
+      .mockResolvedValueOnce(verifiedProfileResponse())
+      .mockResolvedValueOnce(Response.json({ data: modifiedOffers }));
+
+    await act(async () => root.render(createElement(ExtendConfirmation)));
+    await settle();
+
+    expect(container.textContent).toContain("Условия тарифа изменились");
+    expect(container.textContent).toContain("по актуальным лимитам и цене");
+  });
+
   it("guides an unverified Telegram session before creating a payment operation", async () => {
     vi.mocked(fetch)
       .mockResolvedValueOnce(Response.json({
