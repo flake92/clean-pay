@@ -544,6 +544,12 @@ export function ExtendConfirmation() {
 
   return (
     <div className="flex flex-column gap-4">
+      {plan.renewal_terms_changed ? (
+        <Message
+          severity="warn"
+          text="Условия тарифа изменились с момента последней покупки. Продление будет оформлено по актуальным лимитам и цене, указанным ниже."
+        />
+      ) : null}
       <Card className="w-full md:w-30rem">
         <h2 className="text-xl font-semibold">{plan.name}</h2>
         <p className="text-sm text-600">

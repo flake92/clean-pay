@@ -167,6 +167,7 @@ export type PlanOffer = {
   device_limit: number;
   type: string;
   recommended_purchase_type: string;
+  renewal_terms_changed?: boolean;
   durations: DurationOffer[];
 };
 
