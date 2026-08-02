@@ -211,6 +211,7 @@ export function CabinetPanel() {
   const [subscriptionError, setSubscriptionError] = useState<string | null>(null);
   const [copyStatus, setCopyStatus] = useState<string | null>(null);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
+  const [promocodeMessage, setPromocodeMessage] = useState<string | null>(null);
   const [pendingAction, setPendingAction] = useState<string | null>(null);
   const pendingActionRef = useRef<string | null>(null);
   const [promocode, setPromocode] = useState("");
@@ -472,7 +473,7 @@ export function CabinetPanel() {
     const code = promocode.trim();
 
     if (!code) {
-      setActionMessage("Введите промокод.");
+      setPromocodeMessage("Введите промокод.");
       return;
     }
 
@@ -480,7 +481,7 @@ export function CabinetPanel() {
     if (!beginPendingAction(action)) {
       return;
     }
-    setActionMessage(null);
+    setPromocodeMessage(null);
 
     try {
       const response = await fetch("/api/bff/subscription/promocode", {
@@ -494,10 +495,10 @@ export function CabinetPanel() {
       }
 
       setPromocode("");
-      setActionMessage("Промокод активирован. Данные кабинета обновлены.");
+      setPromocodeMessage("Промокод активирован. Данные кабинета обновлены.");
       await Promise.all([loadSubscription(), loadOffers(), loadDevices(), loadPayments()]);
     } catch (err) {
-      setActionMessage(err instanceof Error ? err.message : "Не удалось активировать промокод.");
+      setPromocodeMessage(err instanceof Error ? err.message : "Не удалось активировать промокод.");
     } finally {
       finishPendingAction(action);
     }
@@ -680,30 +681,37 @@ export function CabinetPanel() {
         </div>
       </div>
 
-        {subscription ? (
+      <div className="col-12">
+        <div className="card">
+          <h5>Промокод</h5>
+          {promocodeMessage ? <Message severity="info" text={promocodeMessage} /> : null}
+          <form className="mt-3 flex w-full flex-column gap-2 md:w-30rem" onSubmit={activatePromocode}>
+            <label className="text-sm font-medium text-700" htmlFor="promocode">
+              Введите промокод
+            </label>
+            <div className="p-inputgroup">
+              <InputText
+                id="promocode"
+                onChange={(event) => setPromocode(event.target.value)}
+                placeholder="Введите код"
+                value={promocode}
+              />
+              <Button
+                disabled={pendingAction !== null}
+                label="Активировать"
+                loading={pendingAction === "promocode"}
+                type="submit"
+              />
+            </div>
+          </form>
+        </div>
+      </div>
+
+      {subscription ? (
       <div className="col-12 xl:col-6">
           <div className="card">
             <h5>Детали подписки</h5>
             {actionMessage ? <Message severity="info" text={actionMessage} /> : null}
-            <form className="mt-3 mb-4 flex flex-column gap-2" onSubmit={activatePromocode}>
-              <label className="text-sm font-medium text-700" htmlFor="promocode">
-                Промокод
-              </label>
-              <div className="p-inputgroup">
-                <InputText
-                  id="promocode"
-                  onChange={(event) => setPromocode(event.target.value)}
-                  placeholder="Введите код"
-                  value={promocode}
-                />
-                <Button
-                  disabled={pendingAction !== null}
-                  label="Активировать"
-                  loading={pendingAction === "promocode"}
-                  type="submit"
-                />
-              </div>
-            </form>
             <div className="grid">
               <div className="col-12 md:col-6">
                 <DetailLine label="RW_ID" value={subscription.user_remna_id} />
