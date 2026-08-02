@@ -67,7 +67,7 @@ describe("Telegram start failure redirect", () => {
     const setupPath =
       `/link-account?reason=email-required&redirect_to=${encodeURIComponent(paymentPath)}`;
     const response = await GET(new Request(
-      `https://pay.example.com/auth/telegram/start?redirect_to=${encodeURIComponent(setupPath)}`,
+      `https://pay.example.com/auth/telegram/start?redirect_to=${encodeURIComponent(setupPath)}&turnstile_token=link-token`,
     ));
     const location = new URL(response.headers.get("location")!);
 
@@ -76,6 +76,10 @@ describe("Telegram start failure redirect", () => {
     expect(location.searchParams.get("reason")).toBe("email-required");
     expect(location.searchParams.get("redirect_to")).toBe(paymentPath);
     expect(location.searchParams.get("auth")).toBe("telegram_failed");
+    expect(mocks.verifyTurnstileToken).toHaveBeenCalledWith(
+      "link-token",
+      "telegram_auth_start",
+    );
   });
 
   it("never reflects an unsafe external destination into the failure URL", async () => {
