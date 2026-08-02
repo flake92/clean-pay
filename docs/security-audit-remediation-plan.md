@@ -967,6 +967,20 @@ npm run test:e2e
 7. **Очистка.** Ruff/ESLint удалили доказанно неиспользуемые imports/variables. Удалены stale `poetry.lock`, дублирующий `pytest.ini` и два пустых Remnapy controller-модуля без импортов. Кандидаты статического file-level анализа вручную сверены: production launchers, workers, mocks, Prisma schema и Next special files являются реальными entrypoints и сохранены.
 8. **Регрессия и воспроизводимость.** Финальные результаты: Clean Pay `628/628`, Remnashop `180/180`, Remnapy `77/77` offline; `95` live SDK tests корректно требуют внешний Remnawave URL/token; Docker `97/97`; production build сформировал `54/54` pages; Clean Pay npm/pnpm и оба Python registry graph audit — `0`. Все исправления прошли повтор после последней модификации соответствующего репозитория.
 
+### Повторное полное ревью 2026-08-02
+
+| Дата | ID | Тип | Область | Результат | Статус | Доказательство | Автор |
+|---|---|---|---|---|---|---|---|
+| 2026-08-02 | FIND-034 | Дефект безопасности | Clean Pay и Remnashop logging | Структурная очистка ключей не закрывала e-mail/credentials внутри неструктурированного текста исключения; SMTP писал адрес и raw exception, payment gateways — полное webhook body и обе HMAC-подписи | Исправлено | Подтверждено source review всех production logger-вызовов и отдельными redaction tests | Codex |
+| 2026-08-02 | CHG-023 | Security/observability | Clean Pay logger | Строковые metadata теперь очищают embedded e-mail, Bearer credentials и подписанные secret/token/password-пары, сохраняя читаемый контекст события | Завершено | `logger-redaction.test.ts`: новый сценарий; полный Clean Pay suite `629/629` | Codex |
+| 2026-08-02 | CHG-024 | Security/observability | Remnashop `36918e1`: logger, SMTP, password reset, payment webhooks | Добавлен общий sink filter, отключён Loguru `diagnose`, SMTP/reset больше не пишут адрес/текст исключения, webhook logs содержат только имена полей, YooMoney не пишет expected/received signature | Завершено | Новый `tests/unit/core/test_logger.py`; Ruff, mypy `542`, pytest `182/182`; commit отправлен в `fork/update-nodejs` | Codex |
+| 2026-08-02 | AUD-009 | Полный повторный аудит | Clean Pay + Remnashop + Remnapy | Повторно просмотрены auth/password reset, Telegram/WebAuthn, merge/fences, renewal parity, payment/history reconciliation, error boundaries, logging, TODO/dead-code candidates и dependency graphs | Завершено в локально проверяемом scope | Новых функциональных дефектов после `FIND-034` не выявлено; production canary/rollback остаются операторскими gates `REL-001` | Codex |
+| 2026-08-02 | TST-024 | Итоговая проверка | Local + clean Docker | После последней правки выполнен полный post-review regression gate | Завершено | Clean Pay: ESLint, typecheck, `629/629`, build `54/54`, npm prod/full audit `0`; Remnashop: Ruff, mypy `542`, `182/182`, registry audit `0`; Remnapy: Ruff, `77 passed` + `95` credential-gated live skips, wheel/sdist build; clean Docker: 15 migrations и `97/97` | Codex |
+
+Первый вызов Docker gate был случайно оставлен работать после короткого внешнего timeout и столкнулся со вторым экземпляром за ресурсы `clean-pay-dev`; тесты продукта в конфликтующем запуске не начинались. Оба процесса и только их тестовые ресурсы были остановлены, после чего один изолированный запуск с чистыми volumes завершился `97/97`. Это инфраструктурное событие не засчитано как успешный прогон и не скрыто итоговой записью.
+
+Повторное ревью подтвердило требуемую логику восстановления: неизвестный e-mail после единого подтверждающего кода идёт в создание учётной записи; существующий — в проверку пароля; кнопка «Забыли пароль?» появляется только после `AUTH_FAILED` от неверного пароля уже подтверждённого адреса. Прямой reset request остаётся неразличимым (`202`) и защищён Turnstile/rate/concurrency controls, поэтому UI-ветвление не превращается в публичный oracle.
+
 ### Шаблон новой записи
 
 ```text

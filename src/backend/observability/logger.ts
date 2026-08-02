@@ -19,6 +19,9 @@ const levelWeight: Record<LogLevel, number> = {
 };
 
 const redactedKeyPattern = /(password|token|secret|cookie|authorization|verifier|nonce|state|key)/i;
+const emailPattern = /(?<![\w.+-])[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}(?![\w.-])/g;
+const bearerPattern = /\b(bearer\s+)[A-Za-z0-9._~+/=-]+/gi;
+const secretValuePattern = /(["']?(?:password|passwd|secret|token|authorization|api[_-]?key|signature|sign)["']?\s*[:=]\s*)(["']?)[^\s,;&}\]]+/gi;
 const exactRedactedKeys = new Set([
   "cf-turnstile-response",
   "response",
@@ -73,7 +76,14 @@ export function sanitizeLogValue(value: unknown): unknown {
     return value.toString();
   }
 
-  if (value === null || typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+  if (typeof value === "string") {
+    return value
+      .replace(emailPattern, "[redacted-email]")
+      .replace(bearerPattern, "$1[redacted]")
+      .replace(secretValuePattern, "$1[redacted]");
+  }
+
+  if (value === null || typeof value === "number" || typeof value === "boolean") {
     return value;
   }
 
