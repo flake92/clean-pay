@@ -11,6 +11,7 @@ import { Button } from "primereact/button";
 import { InputText } from "primereact/inputtext";
 import { Message } from "primereact/message";
 
+import { TurnstileWidget, type TurnstileHandle, hasTurnstileSiteKey } from "@/frontend/components/turnstile-widget";
 import { navigateTo } from "@/frontend/lib/browser-navigation";
 import { readBffError } from "@/frontend/lib/client-api";
 
@@ -64,17 +65,41 @@ function isWebAuthnTransportError(error: unknown) {
   );
 }
 
-export function PasskeyLoginButton({ redirectTo = "/cabinet" }: { redirectTo?: string }) {
+export function PasskeyLoginButton({
+  redirectTo = "/cabinet",
+  turnstileEnabled = false,
+  turnstileSiteKey,
+}: {
+  redirectTo?: string;
+  turnstileEnabled?: boolean;
+  turnstileSiteKey?: string | null;
+}) {
   const supported = useWebAuthnSupport();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
+  const [turnstile, setTurnstile] = useState<TurnstileHandle | null>(null);
 
   async function login() {
+    if (turnstileEnabled && !turnstileToken) {
+      setError(
+        hasTurnstileSiteKey(turnstileSiteKey)
+          ? "Пройдите отдельную проверку Turnstile для входа с Passkey."
+          : "Cloudflare Turnstile site key is not configured.",
+      );
+      return;
+    }
     setLoading(true);
     setError(null);
 
     try {
-      const optionsResponse = await fetch("/api/bff/auth/passkey/login/options", { method: "POST" });
+      const optionsResponse = await fetch("/api/bff/auth/passkey/login/options", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ turnstileToken }),
+      });
+      turnstile?.reset();
+      setTurnstileToken(null);
 
       if (!optionsResponse.ok) {
         setError(await readError(optionsResponse, "Не удалось начать быстрый вход."));
@@ -123,7 +148,18 @@ export function PasskeyLoginButton({ redirectTo = "/cabinet" }: { redirectTo?: s
       <div className="text-sm text-600 line-height-3">
         Можно войти через Face ID, отпечаток или PIN-код устройства.
       </div>
+      <div className="text-xs text-500 line-height-3">
+        Passkey восстанавливает локальную сессию CleanPay. Если сессия RemnaShop истекла, перед оплатой или управлением подпиской потребуется подтверждение через e-mail либо Telegram.
+      </div>
       {error ? <Message severity="warn" text={error} /> : null}
+      {turnstileEnabled ? (
+        <TurnstileWidget
+          action="passkey_login"
+          onReady={setTurnstile}
+          onToken={setTurnstileToken}
+          siteKey={turnstileSiteKey}
+        />
+      ) : null}
       <Button
         className="w-full"
         disabled={loading}

@@ -15,7 +15,7 @@ import { claimWebAuthnChallenge } from "@/backend/auth/one-time-state";
 import { getEnv } from "@/backend/config/env";
 import { prisma } from "@/backend/database/prisma";
 import { BffError } from "@/backend/integrations/remnashop/errors";
-import { assertRateLimit } from "@/backend/limits/rate-limit";
+import { assertRateLimit, withAuthConcurrency } from "@/backend/limits/rate-limit";
 import {
   assertEmailVerificationPolicy,
   createWebSession,
@@ -310,30 +310,31 @@ export async function finishPasskeyRegistration(response: RegistrationResponseJS
   return { success: true };
 }
 
-export async function beginPasskeyLogin(clientIp?: string | null) {
+export async function beginPasskeyLogin() {
   await assertRateLimit({
     action: "passkey_login_options",
-    clientIp,
     limit: 20,
     windowSeconds: 15 * 60,
   });
 
-  const { rpID } = webAuthnRelyingParty();
-  const options = await generateAuthenticationOptions({
-    rpID,
-    timeout: 60_000,
-    userVerification: "required",
-  });
+  return withAuthConcurrency("passkey_login_options", async () => {
+    const { rpID } = webAuthnRelyingParty();
+    const options = await generateAuthenticationOptions({
+      rpID,
+      timeout: 60_000,
+      userVerification: "required",
+    });
 
-  await prisma.webAuthnChallenge.create({
-    data: {
-      challenge: options.challenge,
-      type: WebAuthnChallengeType.AUTHENTICATION,
-      expiresAt: addMs(new Date(), challengeTtlMs),
-    },
-  });
+    await prisma.webAuthnChallenge.create({
+      data: {
+        challenge: options.challenge,
+        type: WebAuthnChallengeType.AUTHENTICATION,
+        expiresAt: addMs(new Date(), challengeTtlMs),
+      },
+    });
 
-  return options;
+    return options;
+  });
 }
 
 export async function recordPasskeyUse({
@@ -376,6 +377,11 @@ export async function recordPasskeyUse({
 }
 
 export async function finishPasskeyLogin(response: AuthenticationResponseJSON) {
+  await assertRateLimit({
+    action: "passkey_login_verify",
+    limit: 50,
+    windowSeconds: 15 * 60,
+  });
   const challenge = await consumeChallenge(
     challengeFromClientDataJSON(clientDataJSONFromCredentialResponse(response)),
     WebAuthnChallengeType.AUTHENTICATION,

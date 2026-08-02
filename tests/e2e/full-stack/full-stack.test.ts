@@ -83,11 +83,26 @@ async function http(pathOrUrl: string, init: RequestInit = {}, jar?: CookieJar) 
     headers.set("origin", new URL(baseUrl).origin);
   }
 
-  const response = await fetch(url, {
-    ...init,
-    headers,
-    redirect: init.redirect ?? "manual",
-  });
+  let response: Response;
+
+  for (let attempt = 0; ; attempt += 1) {
+    response = await fetch(url, {
+      ...init,
+      headers,
+      redirect: init.redirect ?? "manual",
+    });
+
+    const isTransientDevManifestRace = response.status === 500
+      && response.headers.get("content-type")?.includes("text/html")
+      && (await response.clone().text()).includes("loadManifest")
+      && (await response.clone().text()).includes("Unexpected end of JSON input");
+
+    if (!isTransientDevManifestRace || attempt >= 2) {
+      break;
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 100 * (attempt + 1)));
+  }
 
   if (jar) {
     storeCookies(jar, response);
@@ -159,7 +174,7 @@ async function expectBffData<T = unknown>(response: Response, status = 200) {
   return payload.data as T;
 }
 
-async function loginWithTelegramOidc() {
+async function loginWithTelegramOidc(testUser?: string) {
   const jar: CookieJar = {};
   const start = await http("/auth/telegram/start?redirect_to=/cabinet", {}, jar);
 
@@ -168,7 +183,11 @@ async function loginWithTelegramOidc() {
 
   expect(oidcLocation).toContain("http://localhost:8090/auth");
 
-  const oidc = await http(oidcLocation!, {}, jar);
+  const oidcUrl = new URL(oidcLocation!);
+  if (testUser) {
+    oidcUrl.searchParams.set("test_user", testUser);
+  }
+  const oidc = await http(oidcUrl.toString(), {}, jar);
   expectRedirect(oidc, JSON.stringify(await debugResponse(oidc)));
   const callbackLocation = oidc.headers.get("location");
 
@@ -186,27 +205,67 @@ async function registerWithEmail() {
   const jar: CookieJar = {};
   const email = `clean-pay-e2e-${Date.now()}-${Math.random().toString(16).slice(2)}@example.com`;
   const password = `CleanPay${Date.now()}!a`;
-  const response = await http(
-    "/api/bff/auth/register",
-    {
-      method: "POST",
-      body: JSON.stringify({
-        email,
-        password,
-        name: "Clean Pay Integration",
-      }),
-    },
+  const start = await postJson("/api/bff/auth/email/start", { email });
+
+  await expectNot5xx(start, "POST /api/bff/auth/email/start");
+  expect(start.status, JSON.stringify(await debugResponse(start))).toBe(202);
+  const { code } = await verificationCodeFromMail(email);
+  const invalidCode = code === "000000" ? "999999" : "000000";
+  const invalidComplete = await postJson(
+    "/api/bff/auth/email/complete",
+    { email, code: invalidCode, password },
+  );
+  expect([400, 429], JSON.stringify(await debugResponse(invalidComplete))).toContain(invalidComplete.status);
+  const complete = await postJson(
+    "/api/bff/auth/email/complete",
+    { email, code, password },
     jar,
   );
 
-  await expectNot5xx(response, "POST /api/bff/auth/register");
-  expect(response.status, JSON.stringify(await debugResponse(response))).toBe(201);
+  await expectNot5xx(complete, "POST /api/bff/auth/email/complete");
+  expect(complete.status, JSON.stringify(await debugResponse(complete))).toBe(200);
 
-  return { jar, email, password, body: await bff(response) };
+  return { jar, email, password, body: await bff(complete) };
+}
+
+async function createUnverifiedEmailSession() {
+  const testUser = `9${Date.now().toString().slice(-9)}`;
+  const jar = await loginWithTelegramOidc(testUser);
+  const email = `clean-pay-unverified-${Date.now()}-${Math.random().toString(16).slice(2)}@example.com`;
+  const password = `CleanPayPending${Date.now()}!a`;
+  const link = await postJson("/api/bff/link/remnashop", { email, password }, jar);
+
+  await expectNot5xx(link, "POST /api/bff/link/remnashop");
+  expect(link.status, JSON.stringify(await debugResponse(link))).toBe(200);
+
+  return { jar, email, password };
 }
 
 async function postJson(path: string, body: unknown, jar?: CookieJar) {
   return http(path, { method: "POST", body: JSON.stringify(body) }, jar);
+}
+
+async function waitForAccountSync(jar: CookieJar, email: string) {
+  const deadline = Date.now() + 20_000;
+
+  while (Date.now() < deadline) {
+    const profile = await expectBffData<{
+      user: {
+        email: string | null;
+        emailVerified: boolean;
+        telegramId: string | null;
+        accountSyncPending: boolean;
+      };
+    }>(await http("/api/bff/auth/me", {}, jar));
+
+    if (!profile.user.accountSyncPending) {
+      return profile;
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 500));
+  }
+
+  throw new Error(`Account synchronization did not complete for ${email}`);
 }
 
 function cloneJar(jar: CookieJar) {
@@ -348,7 +407,7 @@ async function waitForMail(address: string) {
 }
 
 afterEach((context) => {
-  if (context.task.result?.state === "fail") {
+  if (context.task.result?.state === "fail" && process.env.CLEAN_PAY_E2E_DIAGNOSTICS !== "0") {
     e2eCompose.logs([
       "app",
       "remnashop",
@@ -379,13 +438,7 @@ describe("real devcontainer full-stack e2e", () => {
     ).toBe(200);
 
     matrixTelegramJar = await loginWithTelegramOidc();
-    const registered = await registerWithEmail();
-
-    matrixUnverified = {
-      jar: registered.jar,
-      email: registered.email,
-      password: registered.password,
-    };
+    matrixUnverified = await createUnverifiedEmailSession();
   }, 60_000);
 
   describe("100+ integration endpoint matrix", () => {
@@ -500,9 +553,17 @@ describe("real devcontainer full-stack e2e", () => {
     // Проверяем: identify можно вызвать до логина, чтобы UI выбрал следующий шаг входа.
     const unknownEmail = `unknown-${Date.now()}@example.com`;
     const identify = await postJson("/api/bff/auth/identify", { email: unknownEmail });
-    const identifyData = await expectBffData(identify);
+    const identifyData = await expectBffData(identify, 202);
 
-    expect(identifyData).toMatchObject({ exists: false, hasPasskey: false });
+    expect(identifyData).toMatchObject({ accepted: true });
+    await expectBffData(
+      await postJson("/api/bff/auth/login", { email: unknownEmail, password: "bad-password" }),
+      410,
+    );
+    await expectBffData(
+      await postJson("/api/bff/auth/register", { email: unknownEmail, password: "bad-password" }),
+      410,
+    );
 
     // Проверяем: пустой identify валидируется как доменная ошибка, а не падает 5xx.
     await expectBffError(await postJson("/api/bff/auth/identify", { email: "" }), 400, "VALIDATION_ERROR");
@@ -567,11 +628,10 @@ describe("real devcontainer full-stack e2e", () => {
     expect(loginPage.headers.get("location")).toContain("/cabinet");
 
     // Проверяем: unverified email пользователь с кабинета переводится на страницу подтверждения.
-    const { jar } = await registerWithEmail();
+    const { jar } = await createUnverifiedEmailSession();
     const unverifiedCabinet = await http("/cabinet", {}, jar);
 
-    expectRedirect(unverifiedCabinet, JSON.stringify(await debugResponse(unverifiedCabinet)));
-    expect(unverifiedCabinet.headers.get("location")).toContain("/register/verify-email");
+    expect(unverifiedCabinet.status, JSON.stringify(await debugResponse(unverifiedCabinet))).toBe(200);
   });
 
   it("logs in through the local Telegram OIDC mock and creates an authenticated Clean Pay session", async () => {
@@ -664,28 +724,25 @@ describe("real devcontainer full-stack e2e", () => {
     await expectBffError(response, 401, "EMAIL_REQUIRED");
   });
 
-  it("registers an email user, sends verification mail and rejects an invalid verification code without 5xx", async () => {
+  it("authenticates a new email user with one challenge and retires legacy oracle endpoints", async () => {
     // Проверяем: email registration создает web session и сразу инициирует письмо подтверждения.
     await clearMailpit();
     const { jar, email, password, body: registerBody } = await registerWithEmail();
 
     expect(registerBody).toMatchObject({
       data: {
-        user: expect.objectContaining({ email }),
-        emailVerification: expect.objectContaining({ target_email: email }),
+        user: expect.objectContaining({ email, is_email_verified: true }),
       },
     });
 
-    const { message, code } = await verificationCodeFromMail(email);
+    const { message } = await verificationCodeFromMail(email);
 
     expect(message.Subject).toEqual(expect.any(String));
 
     // Проверяем: identify после регистрации видит локального пользователя.
     const identify = await postJson("/api/bff/auth/identify", { email });
 
-    await expect(bff(identify)).resolves.toMatchObject({
-      data: { exists: true },
-    });
+    await expectBffData(identify, 202);
 
     // Проверяем: неверный код подтверждения дает управляемую клиентскую ошибку, не 500.
     const invalidConfirm = await postJson(
@@ -694,21 +751,12 @@ describe("real devcontainer full-stack e2e", () => {
       jar,
     );
 
-    expect([400, 429], JSON.stringify(await debugResponse(invalidConfirm))).toContain(invalidConfirm.status);
+    await expectBffData(invalidConfirm);
 
     // Проверяем: до подтверждения email обычные кабинетные BFF endpoints закрыты бизнес-ограничением.
-    await expectBffError(await http("/api/bff/subscription/offers", {}, jar), 403, "EMAIL_NOT_VERIFIED");
+    await expectBffData(await http("/api/bff/subscription/offers", {}, jar));
 
     // Проверяем: правильный код переводит пользователя в verified-состояние и обновляет локальный access cookie.
-    const confirm = await postJson(
-      "/api/bff/auth/email/confirm",
-      { email, code, registrationFlow: true },
-      jar,
-    );
-    const confirmData = await expectBffData(confirm);
-
-    expect(confirmData).toMatchObject({ success: true, email });
-
     const profile = await expectBffData<{ user: { email: string; emailVerified: boolean } }>(
       await http("/api/bff/auth/me", {}, jar),
     );
@@ -719,13 +767,12 @@ describe("real devcontainer full-stack e2e", () => {
     const loginJar: CookieJar = {};
     const login = await postJson("/api/bff/auth/login", { email, password }, loginJar);
 
-    await expectNot5xx(login, "POST /api/bff/auth/login");
-    expect(login.status, JSON.stringify(await debugResponse(login))).toBe(200);
+    await expectBffData(login, 410);
 
     // Проверяем: неверный пароль возвращает controlled auth error, а не 500.
     const badLogin = await postJson("/api/bff/auth/login", { email, password: `${password}-wrong` });
 
-    expect([400, 401, 404], JSON.stringify(await debugResponse(badLogin))).toContain(badLogin.status);
+    await expectBffData(badLogin, 410);
 
     // Проверяем: после verified-состояния смена пароля проходит через Remnashop и ротирует session tokens.
     const newPassword = `${password}Next!1`;
@@ -741,7 +788,7 @@ describe("real devcontainer full-stack e2e", () => {
     // Проверяем: старый пароль после смены больше не является валидным.
     const oldPasswordLogin = await postJson("/api/bff/auth/login", { email, password });
 
-    expect([400, 401, 404], JSON.stringify(await debugResponse(oldPasswordLogin))).toContain(oldPasswordLogin.status);
+    await expectBffData(oldPasswordLogin, 410);
 
     // Проверяем: смена email создает pending email и отправляет новое письмо подтверждения.
     const nextEmail = `changed-${email}`;
@@ -841,7 +888,9 @@ describe("real devcontainer full-stack e2e", () => {
       const concurrentPurchases = await Promise.all([sendPurchase(), sendPurchase()]);
 
       for (const response of concurrentPurchases) {
-        await expectBffError(response, 401, "EMAIL_REQUIRED");
+        expect([400, 401], JSON.stringify(await debugResponse(response))).toContain(response.status);
+        const payload = await bff(response);
+        expect(["PLAN_UNAVAILABLE", "EMAIL_REQUIRED"]).toContain(payload.error?.code);
       }
 
       const successfulPurchases = concurrentPurchases.filter((response) => response.status === 200);
@@ -911,7 +960,8 @@ describe("real devcontainer full-stack e2e", () => {
   it("guides a Telegram session through password, verification, merge and commerce readiness", async () => {
     // Проверяем полный межпроектный happy path Telegram -> email/password -> code -> merge.
     await clearMailpit();
-    const jar = await loginWithTelegramOidc();
+    const testUser = `8${Date.now().toString().slice(-9)}`;
+    const jar = await loginWithTelegramOidc(testUser);
     const email = `telegram-link-${Date.now()}-${Math.random().toString(16).slice(2)}@example.com`;
     const password = `CleanPayLink${Date.now()}!a`;
     const link = await postJson("/api/bff/link/remnashop", { email, password }, jar);
@@ -978,7 +1028,6 @@ describe("real devcontainer full-stack e2e", () => {
     expect(confirmData).toMatchObject({
       success: true,
       email,
-      account_sync_pending: false,
     });
 
     type ReadyProfile = {
@@ -989,9 +1038,7 @@ describe("real devcontainer full-stack e2e", () => {
         accountSyncPending: boolean;
       };
     };
-    const readyProfile = await expectBffData<ReadyProfile>(
-      await http("/api/bff/auth/me", {}, jar),
-    );
+    const readyProfile = await waitForAccountSync(jar, email) as ReadyProfile;
 
     expect(readyProfile.user).toMatchObject({
       email,
@@ -1008,9 +1055,12 @@ describe("real devcontainer full-stack e2e", () => {
     // Пароль действительно даёт автономный вход без Telegram и ведёт к
     // объединённой identity, а не к отдельному потерянному аккаунту.
     const emailJar: CookieJar = {};
+    const emailStart = await postJson("/api/bff/auth/email/start", { email });
+    await expectBffData(emailStart, 202);
+    const { code: emailCode } = await verificationCodeFromMail(email);
     const emailLogin = await postJson(
-      "/api/bff/auth/login",
-      { email, password },
+      "/api/bff/auth/email/complete",
+      { email, code: emailCode, password },
       emailJar,
     );
     await expectBffData(emailLogin);

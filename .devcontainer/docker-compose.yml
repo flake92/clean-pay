@@ -10,6 +10,7 @@ x-clean-pay-env: &clean-pay-env
   LOG_LEVEL: debug
   REMNASHOP_API_BASE_URL: http://remnashop:5000/api/v1/public
   REMNASHOP_API_KEY: dev-remnashop-api-key-change-me
+  REMNASHOP_AUTH_SERVICE_KEY: dev-remnashop-auth-service-key-change-me
   REDIS_URL: redis://redis:6379/0
   WEB_JWT_SECRET: dev-web-jwt-secret-change-me
   WEB_REFRESH_SECRET: dev-web-refresh-secret-change-me
@@ -49,6 +50,7 @@ x-remnashop-env: &remnashop-env
   WEB_ENABLED: "true"
   WEB_CABINET_URL: https://clean-pay.example.test/auth/telegram/webapp
   APP_API_KEY: dev-remnashop-api-key-change-me
+  APP_AUTH_SERVICE_KEY: dev-remnashop-auth-service-key-change-me
   APP_JWT_SECRET: dev-remnashop-jwt-secret-change-me
 
   BOT_TOKEN: "0000000000:dev-telegram-bot-token-placeholder"
@@ -150,6 +152,7 @@ services:
       CLEAN_PAY_E2E_OIDC_URL: http://telegram-oidc-mock:8090
     volumes:
       - ..:/workspace/clean-pay:cached
+      - ${REMNASHOP_HOST_SOURCE:-..}:/workspace/remnashop-source:ro
       - node-modules:/workspace/clean-pay/node_modules
       - /var/run/docker.sock:/var/run/docker.sock
     depends_on:
@@ -204,7 +207,7 @@ services:
 
   remnashop:
     build:
-      context: https://github.com/flake92/remnashop.git#b9da68a651e9ab0b7ed52d030e13754311614759
+      context: ${REMNASHOP_BUILD_CONTEXT:-https://github.com/flake92/remnashop.git#b9da68a651e9ab0b7ed52d030e13754311614759}
       dockerfile: Dockerfile
       args:
         BUILD_BRANCH: codex/clean-pay-integration-upstream-dev
@@ -214,6 +217,8 @@ services:
     environment:
       <<: *remnashop-env
     depends_on:
+      remnashop-migration:
+        condition: service_completed_successfully
       remnashop-postgres:
         condition: service_healthy
       remnashop-cache:
@@ -228,6 +233,16 @@ services:
     ports:
       - "5001:5000"
 
+  remnashop-migration:
+    image: clean-pay-dev-remnashop:latest
+    restart: "no"
+    command: ["./docker-migrate.sh"]
+    environment:
+      <<: *remnashop-env
+    depends_on:
+      remnashop-postgres:
+        condition: service_healthy
+
   remnashop-worker:
     image: clean-pay-dev-remnashop:latest
     restart: unless-stopped
@@ -235,6 +250,8 @@ services:
     environment:
       <<: *remnashop-env
     depends_on:
+      remnashop-migration:
+        condition: service_completed_successfully
       remnashop-postgres:
         condition: service_healthy
       remnashop-cache:
@@ -247,6 +264,8 @@ services:
     environment:
       <<: *remnashop-env
     depends_on:
+      remnashop-migration:
+        condition: service_completed_successfully
       remnashop-postgres:
         condition: service_healthy
       remnashop-cache:

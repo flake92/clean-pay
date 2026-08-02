@@ -344,10 +344,8 @@ describe("BFF route integration contracts", () => {
   });
 
   it("runs auth endpoints through their backend use cases", async () => {
-    const login = await loginRoute.POST(jsonRequest("/api/bff/auth/login", { email: "user@example.com", password: "secret" }, {
-      "x-forwarded-for": "10.0.0.1",
-    }));
-    const register = await registerRoute.POST(jsonRequest("/api/bff/auth/register", { email: "user@example.com", password: "secret" }));
+    const login = await loginRoute.POST();
+    const register = await registerRoute.POST();
     const me = await meRoute.GET();
     const password = await passwordRoute.POST(jsonRequest("/api/bff/auth/change-password", {
       current_password: "old",
@@ -355,15 +353,12 @@ describe("BFF route integration contracts", () => {
     }));
     const link = await linkRoute.POST(jsonRequest("/api/bff/link/remnashop", { email: "user@example.com", password: "secret" }));
 
-    expect(login.status).toBe(200);
-    expect(register.status).toBe(201);
+    expect(login.status).toBe(410);
+    expect(register.status).toBe(410);
     expect(me.status).toBe(200);
     expect(password.status).toBe(200);
     expect(link.status).toBe(200);
-    expect(mocks.loginWithEmail).toHaveBeenCalledWith(
-      expect.objectContaining({ email: "user@example.com" }),
-      { token: null, remoteIp: "10.0.0.1" },
-    );
+    expect(mocks.loginWithEmail).not.toHaveBeenCalled();
     expect(mocks.changePassword).toHaveBeenCalledWith({ current_password: "old", new_password: "new" });
   });
 
@@ -956,6 +951,45 @@ describe("BFF route integration contracts", () => {
     });
     await expect(body(await supportRoute.GET())).resolves.toMatchObject({
       data: { enabled: true, email: "support@clean-pay.localhost" },
+    });
+  });
+
+  it("exactly refreshes pending payments before the paged history sync", async () => {
+    const completed = { payment_id: paymentId, status: "completed" };
+    mocks.getPaymentCapabilities.mockResolvedValue({
+      transactions: { max_page_size: 100 },
+    });
+    mocks.prisma.paymentRecord.findMany
+      .mockResolvedValueOnce([{ paymentId }])
+      .mockResolvedValueOnce([{ ...record, status: "COMPLETED" }]);
+    mocks.getExactTransaction.mockResolvedValue(completed);
+
+    const response = await paymentsHistoryRoute.GET();
+
+    expect(response.status).toBe(200);
+    expect(mocks.getExactTransaction).toHaveBeenCalledWith({
+      accessToken: "access-token",
+      paymentId,
+    });
+    expect(mocks.syncExactPaymentRecordFromRemnashop).toHaveBeenCalledWith({
+      userId: "user-1",
+      upstreamAccountId: "remnashop-user-1",
+      transaction: completed,
+    });
+    expect(mocks.syncOnePaymentHistoryPage).toHaveBeenCalled();
+  });
+
+  it("serves cached owner-bound history when upstream synchronization fails", async () => {
+    mocks.getPaymentCapabilities.mockRejectedValueOnce(
+      new BffError("UPSTREAM_ERROR", 502, "invalid legacy row"),
+    );
+
+    const response = await paymentsHistoryRoute.GET();
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("x-clean-pay-history-stale")).toBe("1");
+    await expect(body(response)).resolves.toMatchObject({
+      data: [{ payment_id: paymentId, status: "pending" }],
     });
   });
 

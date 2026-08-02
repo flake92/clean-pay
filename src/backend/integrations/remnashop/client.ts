@@ -16,11 +16,13 @@ import {
 } from "@/backend/integrations/remnashop/errors";
 import type {
   ChangePasswordRequest,
+  CompleteGenericEmailAuthRequest,
   ChangePasswordResponse,
   LoginRequest,
   RegisterRequest,
   RemnashopAuthResponse,
   RemnashopMe,
+  StartGenericEmailAuthRequest,
   TelegramAuthRequest,
   TelegramWebAppAuthRequest,
 } from "@/shared/remnashop/types";
@@ -99,6 +101,22 @@ async function fetchRemnashop(path: string, init: RequestInit) {
   const method = init.method ?? "GET";
   const startedAt = Date.now();
   const safePath = safeRequestPath(path);
+  const requestInit = { ...init };
+
+  if (safePath.startsWith("/auth/")) {
+    const serviceKey = getEnv().remnashopAuthServiceKey;
+    if (!serviceKey) {
+      throw new BffError(
+        "INTERNAL_ERROR",
+        500,
+        "REMNASHOP_AUTH_SERVICE_KEY is required for a Remnashop auth request.",
+      );
+    }
+    requestInit.headers = {
+      ...(init.headers as Record<string, string> | undefined),
+      "x-remnashop-auth-service-key": serviceKey,
+    };
+  }
 
   logger.info("remnashop_request_sent", {
     method,
@@ -111,7 +129,7 @@ async function fetchRemnashop(path: string, init: RequestInit) {
   });
 
   try {
-    const response = await fetch(endpoint(path), init);
+    const response = await fetch(endpoint(path), requestInit);
 
     logger.info("remnashop_response_received", {
       method,
@@ -363,8 +381,8 @@ export async function remnashopAdminRequest<T>(
 }
 
 export async function remnashopAuth(
-  path: "/auth/register" | "/auth/login" | "/auth/telegram" | "/auth/telegram/webapp",
-  body: RegisterRequest | LoginRequest | TelegramAuthRequest | TelegramWebAppAuthRequest,
+  path: "/auth/register" | "/auth/login" | "/auth/telegram" | "/auth/telegram/webapp" | "/auth/email/complete",
+  body: RegisterRequest | LoginRequest | TelegramAuthRequest | TelegramWebAppAuthRequest | CompleteGenericEmailAuthRequest,
   { timeoutMs = 15_000 }: { timeoutMs?: number } = {},
 ) {
   const response = await fetchRemnashop(path, {
@@ -384,6 +402,15 @@ export async function remnashopAuth(
   const cookies = extractAuthCookies(response);
 
   return { data, cookies };
+}
+
+export async function remnashopStartGenericEmailAuth(
+  body: StartGenericEmailAuthRequest,
+) {
+  return remnashopRequest<{ success: boolean }>("/auth/email/start", {
+    method: "POST",
+    body,
+  });
 }
 
 export async function remnashopAuthTelegramIdentity({

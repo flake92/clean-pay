@@ -22,6 +22,7 @@ const contentSecurityPolicy = [
 ].join("; ");
 
 const nextConfig: NextConfig = {
+  output: "standalone",
   env: {
     CLEAN_PAY_BUILD_ID: buildId,
   },

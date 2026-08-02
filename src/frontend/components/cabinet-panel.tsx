@@ -205,6 +205,7 @@ export function CabinetPanel() {
   const [offers, setOffers] = useState<SubscriptionOffersResponse | null>(null);
   const [devices, setDevices] = useState<DevicesResponse | null>(null);
   const [payments, setPayments] = useState<PaymentRecord[]>([]);
+  const [paymentsError, setPaymentsError] = useState<string | null>(null);
   const [support, setSupport] = useState<SupportSettings | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [subscriptionError, setSubscriptionError] = useState<string | null>(null);
@@ -265,6 +266,15 @@ export function CabinetPanel() {
     if (paymentsResponse.ok) {
       const paymentsBody = await paymentsResponse.json();
       setPayments(paymentsBody.data);
+      setPaymentsError(
+        paymentsResponse.headers.get("x-clean-pay-history-stale") === "1"
+          ? "История показана из сохранённых данных. Обновление статусов временно недоступно."
+          : null,
+      );
+    } else {
+      setPaymentsError(
+        await getBffMessage(paymentsResponse, "Не удалось обновить историю платежей."),
+      );
     }
   }, []);
 
@@ -747,6 +757,7 @@ export function CabinetPanel() {
       <div className="col-12">
       <div className="card">
         <h5>История платежей</h5>
+        {paymentsError ? <Message severity="warn" text={paymentsError} /> : null}
         {payments.length > 0 ? (
           <div className="cabinet-mobile-list">
             {payments.map((payment) => (
@@ -780,12 +791,12 @@ export function CabinetPanel() {
               </article>
             ))}
           </div>
-        ) : (
+        ) : !paymentsError ? (
           <Message severity="info" text="Платежей через web-кабинет пока нет." />
-        )}
+        ) : null}
         <DataTable
           className="cabinet-desktop-table"
-          emptyMessage="Платежей через web-кабинет пока нет."
+          emptyMessage={paymentsError ?? "Платежей через web-кабинет пока нет."}
           responsiveLayout="scroll"
           value={payments}
         >

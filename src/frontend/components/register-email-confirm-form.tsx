@@ -136,7 +136,7 @@ export function RegisterEmailConfirmForm({
   return (
     <div className="flex flex-column gap-3">
       {turnstileEnabled ? (
-        <TurnstileWidget onReady={setTurnstile} onToken={setTurnstileToken} siteKey={turnstileSiteKey} />
+        <TurnstileWidget action="email_verification" onReady={setTurnstile} onToken={setTurnstileToken} siteKey={turnstileSiteKey} />
       ) : null}
       <form className="flex flex-column gap-3" onSubmit={onSubmit}>
         <label className="flex flex-column gap-2">

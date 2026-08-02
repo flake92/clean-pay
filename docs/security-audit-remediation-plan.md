@@ -4,15 +4,15 @@
 
 | Поле | Значение |
 |---|---|
-| Статус | В реализации; выполняется по одному проверяемому пункту и коммиту |
+| Статус | Реализация завершена 2026-08-02; release candidate прошёл локальные и межпроектные gates, production canary ожидает окна выпуска |
 | Дата первичной проверки | 2026-07-27 (MSK) |
 | Проверенный Clean Pay commit | `d2637e1`, `main` / `origin/main` |
 | Проверенный Remnashop commit | PR [#135](https://github.com/snoups/remnashop/pull/135), `b9da68a` |
 | Дополнительно проверен | закрытый без merge PR [#136](https://github.com/snoups/remnashop/pull/136), `377f981` |
 | Область | Межпроектная идентичность и auth, production-зависимости, account enumeration, anti-abuse без client-IP, password recovery, production containers |
 | Целевой результат | Нулевые production dependency advisories, отсутствие поддерживаемого account-state oracle, fail-closed anti-abuse, закрытая server-to-server граница Remnashop auth, зелёный полный regression suite обоих проектов |
-| Владелец решений | Ожидает назначения |
-| Владелец реализации | Ожидает назначения |
+| Владелец решений | Пользователь (`/goal`: выполнить план полностью) |
+| Владелец реализации | Codex; production rollout остаётся за оператором среды |
 
 Этот файл одновременно является:
 
@@ -308,7 +308,21 @@ Remnashop при этом не получает доказательство Web
 
 Исследованный кандидат использовал `aiogram~=3.30.0`, `aiohttp 3.14.3`, `cryptography 49.0.0` и обновлённый FastAPI/Starlette stack. Временный `uv` override доказывает совместимость тестов, но постоянное решение — исправить диапазон `cryptography` в `remnapy`, выпустить/зафиксировать проверенный revision и затем пересобрать `uv.lock`.
 
-Ограничение доказательства: `pip-audit` не проанализировал исходники VCS-зависимости `remnapy`; production image build, миграции и E2E на кандидате ещё не выполнялись.
+Ограничение исходного spike: `pip-audit` не анализировал VCS-зависимость `remnapy` автоматически. На итоговом кандидате constraint `remnapy` исправлен и проверен отдельно (import/AES-GCM smoke), registry export дал `0` advisory, а production image, миграции и E2E выполнены успешно.
+
+### 2.11. PAY-SYNC: legacy `duration_days = -1` и отказ всей истории
+
+После контрольной оплаты Remnashop завершал транзакцию и выдавал подписку, но Clean Pay оставлял связанную `PaymentRecord` в `PENDING`, а `/api/bff/payments/history` возвращал `502`. Подтверждённая причина: одна старая транзакция Remnashop с `duration_days = -1` не проходила валидатор неотрицательного nullable integer, поэтому отклонялась вся страница, включая новую успешную оплату. Дополнительно клиент не гарантировал точечный status poll после возврата с оплаты.
+
+Принятое исправление:
+
+- только legacy sentinel `-1` для `duration_days` нормализуется в `null`; остальные некорректные значения не маскируются;
+- строки истории разбираются изолированно, поэтому одна повреждённая старая запись не блокирует страницу;
+- перед page sync выполняется bounded exact reconciliation локальных `PENDING/UNKNOWN` платежей;
+- при временной ошибке upstream владелец получает сохранённую локальную историю с признаком stale вместо ложного пустого списка;
+- UI сохраняет уже показанные данные и сообщает о временной неполноте.
+
+Регрессия покрывает legacy `-1`, пропуск одной плохой строки, exact reconciliation, owner-bound fallback и полный межпроектный E2E.
 
 ## 3. Цели и границы
 
@@ -338,11 +352,11 @@ Remnashop при этом не получает доказательство Web
 
 | ID | Вопрос | Рекомендация | Альтернатива и последствия | Решение | Статус |
 |---|---|---|---|---|---|
-| Q-001 | Утверждаем ли двухэтапное устранение enumeration? | Да: A) немедленно удалить `identify`/`hasPasskey` oracle и закрыть Remnashop boundary; B) сделать generic email start/complete с подтверждением владения адресом | Ограничиться этапом A: прямой lookup исчезнет, но combined register/login сможет косвенно различать новый e-mail и существующий e-mail с неверным паролем |  | Ожидает |
-| Q-003 | Как оформляем dependency fixes за пределами текущих upstream ranges? | Clean Pay: временные exact npm overrides с owner/expiry. Remnashop: исправить constraint в `remnapy` и закрепить проверенный revision; `uv override` допустим только как time-bound аварийная мера | Ждать upstream-релизов — известные advisory дольше останутся в production |  | Ожидает |
-| Q-008 | Какая server-to-server граница для Remnashop auth утверждается? | Internal Docker/network URL плюс отдельный least-privilege BFF credential на `/api/v1/public/auth/*`; наружу оставить только действительно необходимые webhook endpoints | Для удалённого Remnashop — mTLS или тот же отдельный service credential. Оставить auth публичным означает возможность обхода BFF |  | Ожидает подтверждения topology/клиентов |
-| Q-009 | Какая семантика Passkey должна быть целевой? | Немедленно: локальный вход + явный step-up email/Telegram при отсутствии upstream tokens. Долгосрочно: Remnashop сам проверяет WebAuthn и выдаёт обычный JWT | Signed token exchange заставит Remnashop доверять Clean Pay на impersonation всех связанных users и расширит trust boundary |  | Ожидает |
-| Q-010 | Как гарантировать резервный пароль для уже подтверждённого Telegram e-mail, у которого в Remnashop отсутствует `password_hash`? | Добавить в Remnashop authenticated-признак `has_password` и безопасный idempotent flow создания первого пароля после подтверждения владения e-mail; до готовности не обещать автономный email-login | Только локальный proof в Clean Pay может fail-closed блокировать оплату, но не создаст пароль: редкий legacy/direct-verification случай потребует поддержки и ухудшит конверсию |  | Ожидает межпроектного решения |
+| Q-001 | Утверждаем ли двухэтапное устранение enumeration? | Да: A) немедленно удалить `identify`/`hasPasskey` oracle и закрыть Remnashop boundary; B) сделать generic email start/complete с подтверждением владения адресом | Ограничиться этапом A: прямой lookup исчезнет, но combined register/login сможет косвенно различать новый e-mail и существующий e-mail с неверным паролем | Утверждена рекомендация, оба этапа реализованы | Принято (`DEC-004`) |
+| Q-003 | Как оформляем dependency fixes за пределами текущих upstream ranges? | Clean Pay: временные exact npm overrides с owner/expiry. Remnashop: исправить constraint в `remnapy` и закрепить проверенный revision; `uv override` допустим только как time-bound аварийная мера | Ждать upstream-релизов — известные advisory дольше останутся в production | Утверждена рекомендация; review 2026-08-16 | Принято (`DEC-005`) |
+| Q-008 | Какая server-to-server граница для Remnashop auth утверждается? | Internal Docker/network URL плюс отдельный least-privilege BFF credential на `/api/v1/public/auth/*`; наружу оставить только действительно необходимые webhook endpoints | Для удалённого Remnashop — mTLS или тот же отдельный service credential. Оставить auth публичным означает возможность обхода BFF | Отдельный service credential обязателен; private network/ACL — дополнительный слой | Принято (`DEC-006`) |
+| Q-009 | Какая семантика Passkey должна быть целевой? | Немедленно: локальный вход + явный step-up email/Telegram при отсутствии upstream tokens. Долгосрочно: Remnashop сам проверяет WebAuthn и выдаёт обычный JWT | Signed token exchange заставит Remnashop доверять Clean Pay на impersonation всех связанных users и расширит trust boundary | Утверждена немедленная локальная семантика со step-up | Принято (`DEC-007`) |
+| Q-010 | Как гарантировать резервный пароль для уже подтверждённого Telegram e-mail, у которого в Remnashop отсутствует `password_hash`? | Добавить в Remnashop authenticated-признак `has_password` и безопасный idempotent flow создания первого пароля после подтверждения владения e-mail; до готовности не обещать автономный email-login | Только локальный proof в Clean Pay может fail-closed блокировать оплату, но не создаст пароль: редкий legacy/direct-verification случай потребует поддержки и ухудшит конверсию | `has_password` и idempotent установка первого пароля включены в generic complete | Принято (`DEC-008`) |
 
 Уже определённые ограничения, не требующие повторного утверждения:
 
@@ -389,9 +403,10 @@ Remnashop при этом не получает доказательство Web
 1. **UI-1 — представление устройств:** не выводить в DOM видимый HWID и необработанный User-Agent, показывать тип устройства, ОС и клиент с доступными версиями. BFF по-прежнему передаёт эти поля браузеру, потому что HWID необходим для удаления.
 2. **AUTH-UX-1 — сопровождаемый Telegram → e-mail/password flow:** после Telegram-входа довести пользователя через ввод e-mail, создание или проверку пароля и, когда это требуется состоянием адреса, подтверждение кода обратно к исходной оплате; отдельно предложить установку приложения и Passkey.
 3. **SEC-1—SEC-7 — security remediation:** выполнить этапы 0–7 ниже, включая закрытую Remnashop auth boundary, password-reset hardening, зависимости, enumeration, fail-closed anti-abuse и Passkey contract.
-4. **OPS-1 — воспроизводимое обновление и откат:** immutable images, отдельные миграции, проверяемый backup/restore, release manifest и rehearsal обновления/rollback.
-5. **REL-1 — тестовый стенд:** развернуть зафиксированные baseline/candidate версии, выполнить межпроектные smoke/E2E без реального списания и проверить повторное обновление.
-6. **DOC-1 — README:** актуализировать пользовательские сценарии, межпроектную границу, установку, обновление, rollback и release gates.
+4. **PAY-SYNC — история и точечная сверка платежей:** принять legacy `duration_days = -1`, изолировать повреждённые строки, синхронизировать локальные pending records и не показывать ложную пустую историю.
+5. **OPS-1 — воспроизводимое обновление и откат:** immutable images, отдельные миграции, проверяемый backup/restore, release manifest и rehearsal обновления/rollback.
+6. **REL-1 — тестовый стенд:** развернуть зафиксированные baseline/candidate версии, выполнить межпроектные smoke/E2E без реального списания и проверить повторное обновление.
+7. **DOC-1 — README:** актуализировать пользовательские сценарии, межпроектную границу, установку, обновление, rollback и release gates.
 
 После каждого пункта работа останавливается на отдельном коммите для ручной проверки и решения о продолжении.
 
@@ -552,6 +567,8 @@ npm audit
 
 Условие завершения: оба production registry-аудита равны `0`, VCS-зависимость `remnapy` проверена отдельно, clean install/build и regression suites воспроизводимы.
 
+Временные dependency-исключения: exact npm overrides и Remnashop `cryptography >=48,<49` принадлежат владельцу реализации security remediation; дата обязательного пересмотра — 2026-08-16. Условие удаления — безопасные версии входят в поддерживаемые upstream ranges и чистые lock-файлы сохраняют `0` advisory, после чего overrides удаляются отдельным проверяемым изменением.
+
 ### Этап 3. Устранить account enumeration
 
 1. Изменить frontend flow в `src/frontend/components/auth-forms.tsx`.
@@ -641,9 +658,7 @@ npm audit
 
 ### Этап 6. Production container hardening
 
-Сейчас `deploy/prod/Dockerfile:63` копирует в runtime весь `node_modules`, а `deploy/prod/start.sh:7` запускает Prisma CLI migrations из app container.
-
-Рекомендуемое целевое состояние:
+Реализованное целевое состояние:
 
 1. отдельный одноразовый migration job/image;
 2. application image без Prisma CLI/dev tooling;
@@ -652,7 +667,7 @@ npm audit
 5. запрет старта новой app revision до успешного migration job;
 6. отдельный rollback runbook для app и миграций.
 
-Этот этап уменьшает attack surface и расхождение между lock-file audit и реальным содержимым image. По рекомендации он идёт после срочного dependency/auth fix.
+Clean Pay использует standalone runtime без Prisma CLI/config/migrations и отдельный target/service `migration`. Remnashop использует `docker-migrate.sh`; API, worker и scheduler ожидают успешный одноразовый migration service. Оба image собраны, их runtime boundary проверена, миграции повторены на пустой и уже актуальной БД. SBOM финального Clean Pay image создан; CVE-отчёт Docker Scout локально заблокирован отсутствием registry login, поэтому registry dependency audits и проверка фактического состава image остаются release evidence, а внешний authenticated image scan — production gate оператора.
 
 ### Этап 7. Полная проверка и выпуск
 
@@ -732,30 +747,32 @@ npm run test:e2e
 
 Релиз разрешён только если:
 
-- [ ] Q-001, Q-003, Q-008, Q-009 и Q-010 имеют утверждённые ответы и строки `DEC-*` в журнале.
-- [ ] Решение снять Q-004 и не использовать client IP зафиксировано в журнале.
-- [ ] `npm audit --omit=dev` возвращает `0` production vulnerabilities.
-- [ ] Frozen production export Remnashop проходит registry `pip-audit` с `0` известных advisory.
-- [ ] VCS `remnapy` constraint исправлен и revision проверен отдельно.
-- [ ] Все overrides документированы, имеют owner и срок пересмотра.
-- [ ] Чистый `npm ci` успешен.
-- [ ] `uv sync --frozen` успешен.
-- [ ] Lint/typecheck/static checks обоих проектов успешны.
-- [ ] Unit, route-handler, integration и full-stack E2E обоих проектов не имеют падений и неожиданных skip.
-- [ ] Production builds и финальные Docker images успешны.
-- [ ] Миграции обоих проектов успешны на пустой и актуальной БД.
-- [ ] Known/unknown e-mail неразличимы по поддерживаемому контракту.
-- [ ] Redis failure injection на login/register/passkey возвращает ограниченный по времени `503`.
-- [ ] При Redis failure отсутствуют последующие Prisma/provider calls.
-- [ ] Recovery start при Redis failure возвращает generic-ответ без письма/side effect.
-- [ ] Исчерпание target failure budget переводит владельца на proof-of-possession, а не создаёт бессрочный account lockout.
-- [ ] Изменение client IP/forwarded headers не меняет anti-abuse identity или решение.
-- [ ] Turnstile проверяет `action`, hostname, replay и работает без `remoteip`.
-- [ ] Прямой внешний запрос к Remnashop email auth без service credential отклоняется до use case.
-- [ ] Password reset выдерживает перебор и конкурентные confirm согласно PR #136.
-- [ ] Passkey, Telegram OIDC, recovery и email auth проходят regression.
-- [ ] Passkey с отсутствующим/истёкшим upstream token bundle приводит к документированному step-up.
-- [ ] Платежи, idempotency и concurrent operations проходят regression.
+- [x] Q-001, Q-003, Q-008, Q-009 и Q-010 имеют утверждённые ответы и строки `DEC-*` в журнале.
+- [x] Решение снять Q-004 и не использовать client IP зафиксировано в журнале.
+- [x] `npm audit --omit=dev` возвращает `0` production vulnerabilities.
+- [x] Frozen production export Remnashop проходит registry `pip-audit` с `0` известных advisory.
+- [x] VCS `remnapy` constraint исправлен и revision проверен отдельно.
+- [x] Все overrides документированы, имеют owner и срок пересмотра.
+- [x] Чистый `npm ci` успешен.
+- [x] `uv sync --frozen` успешен.
+- [x] Lint/typecheck/static checks обоих проектов успешны.
+- [x] Unit, route-handler, integration и full-stack E2E обоих проектов не имеют падений и неожиданных skip.
+- [x] Production builds и финальные Docker images успешны.
+- [x] Миграции обоих проектов успешны на пустой и актуальной БД.
+- [x] Known/unknown e-mail неразличимы по поддерживаемому контракту.
+- [x] Redis failure injection на login/register/passkey возвращает ограниченный по времени `503`.
+- [x] При Redis failure отсутствуют последующие Prisma/provider calls.
+- [x] Recovery start при Redis failure возвращает generic-ответ без письма/side effect.
+- [x] Исчерпание target failure budget переводит владельца на proof-of-possession, а не создаёт бессрочный account lockout.
+- [x] Изменение client IP/forwarded headers не меняет anti-abuse identity или решение.
+- [x] Turnstile проверяет `action`, hostname, replay и работает без `remoteip`.
+- [x] Прямой внешний запрос к Remnashop email auth без service credential отклоняется до use case.
+- [x] Password reset выдерживает перебор и конкурентные confirm согласно PR #136.
+- [x] Passkey, Telegram OIDC, recovery и email auth проходят regression.
+- [x] Passkey с отсутствующим/истёкшим upstream token bundle приводит к документированному step-up.
+- [x] Платежи, idempotency и concurrent operations проходят regression.
+- [x] Legacy `duration_days = -1` не блокирует страницу истории, одна плохая строка изолируется, а локальные pending payments проходят exact reconciliation.
+- [x] Ошибка upstream history сохраняет owner-bound локальную историю и не превращается в ложный пустой список UI.
 - [ ] Canary не показывает аномального роста auth failures/latency.
 - [ ] Rollback images и инструкции обоих проектов проверены до production rollout.
 
@@ -895,6 +912,25 @@ npm run test:e2e
 | 2026-07-29 | COR-004 | Исправление записи | `TST-014`, `FIND-027` | Уточнено представление revision в TST-014 | Исправлено | Полный SHA удалён из документа по обязательной privacy policy и заменён короткой проверяемой revision | Codex |
 | 2026-07-29 | CHG-013 | Исправление документации | final docs review, staged audit plan | Устранены несогласованности реестра решений и append-only/privacy правил | Завершено | Q-010 добавлен в Этап 0 и общий checklist; для обязательной privacy/security redaction описано узкое исключение с обязательной `COR-*` записью без сохранения запрещённого значения | Codex |
 | 2026-07-29 | TST-016 | Итоговая проверка | `3647f26` + final AUTH-UX-1 candidate; Node 24.18.0, npm 11.16.0, local | Повторно проверены последние source/docs corrections после TST-014 | Завершено | lint/typecheck; unit `560/560`, включая exact gateway continuation и docs privacy; route `46/46`; production build: compile, TypeScript и `50/50` pages; `git diff --check`, shell syntax и Node syntax успешны. Real PostgreSQL `60/60`, 15 migrations и clean Docker E2E `104/104` остаются зафиксированы в TST-014; после них backend/integration contract не менялся | Codex |
+| 2026-08-02 | DEC-004 | Решение | Указание пользователя `/goal`; Q-001 | Утверждены оба этапа устранения account enumeration: stateless preflight и generic email proof flow | Принято | Публичный lookup удалён; start/complete не ветвятся по существованию аккаунта до одноразового кода | Пользователь |
+| 2026-08-02 | DEC-005 | Решение | Указание пользователя `/goal`; Q-003 | Утверждены time-bound exact overrides и отдельное исправление constraint `remnapy` | Принято | Owner — security remediation; review 2026-08-16; удаление после безопасных upstream ranges и повторного нулевого аудита | Пользователь |
+| 2026-08-02 | DEC-006 | Решение | Указание пользователя `/goal`; Q-008 | Утверждён отдельный least-privilege credential для Remnashop public auth | Принято | `APP_AUTH_SERVICE_KEY` не совпадает с admin key; запрос без заголовка отклоняется до use case | Пользователь |
+| 2026-08-02 | DEC-007 | Решение | Указание пользователя `/goal`; Q-009 | Passkey устанавливает локальную Clean Pay session, upstream-операции требуют явный step-up при утрате Remnashop tokens | Принято | Signed impersonation exchange не вводится; UI и regression test фиксируют границу доверия | Пользователь |
+| 2026-08-02 | DEC-008 | Решение | Указание пользователя `/goal`; Q-010 | Generic email complete безопасно создаёт первый пароль после proof-of-possession и публикует `has_password` | Принято | Existing password проверяется; passwordless legacy user получает пароль idempotently; неизвестный user создаётся только после кода | Пользователь |
+| 2026-08-02 | FIND-028 | Межпроектный дефект | Контрольная оплата, Remnashop PR #135, parser/history logs | Legacy `duration_days = -1` отклонял всю страницу истории, оставляя новую успешную `PaymentRecord` в `PENDING` и UI без истории | Исправлено | Данные не терялись; причиной был page-level parse failure и отсутствие гарантированной точечной сверки | Codex |
+| 2026-08-02 | CHG-014 | Исправление | PAY-SYNC source/tests | История стала совместима с legacy sentinel и устойчива к одной повреждённой строке; добавлены exact pending reconciliation и owner-bound stale fallback | Завершено | `-1` нормализуется только для duration; UI сохраняет данные и показывает предупреждение вместо ложного пустого списка | Codex |
+| 2026-08-02 | CHG-015 | Security remediation | Clean Pay + Remnashop candidate | Закрыты enumeration, прямой обход BFF, reset brute force и fail-open anti-abuse; уточнён Passkey step-up | Завершено | Generic email auth, service boundary, Turnstile action/hostname/replay, HMAC buckets, atomic capacity и distributed concurrency покрыты тестами | Codex |
+| 2026-08-02 | CHG-016 | Dependency/container remediation | npm/uv locks, production images | Registry dependency audits сведены к нулю; миграции отделены от runtime containers | Завершено | Clean Pay standalone runtime и Remnashop API/worker/scheduler не запускают миграции; empty/current DB rehearsals успешны | Codex |
+| 2026-08-02 | FIND-029 | Дефект интеграции и тестового стенда | Clean Docker E2E remediation | Новые email routes отсутствовали в public proxy allowlist, а общий фиксированный Telegram ID создавал межтестовое загрязнение identity | Исправлено | Public start/complete добавлены в proxy; mutation-сценарии получают отдельные Telegram IDs; E2E contract обновлён с legacy endpoints на generic flow | Codex |
+| 2026-08-02 | CHG-017 | Исправление | E2E harness/source | Полный стенд приведён к отдельным migration services, локальному Remnashop checkout и новому auth contract | Завершено | Чистый Docker прогон и повтор на поднятом стенде дали `92/92`; промежуточные падения не скрыты и устранены до финального gate | Codex |
+| 2026-08-02 | TST-017 | Проверка | final regression, local | Первый формальный финальный проход остановился на ошибках проверочного окружения и имен команд, а не продукта | Исправлено и повторено | Зафиксированы: отсутствующий `uv` в PATH, обязательный `PYTHONPATH`, неверное имя npm script и неполный production env fixture; каждый этап повторён с корректным контрактом и прошёл | Codex |
+| 2026-08-02 | FIND-030 | Дефект test infrastructure | Windows E2E runner + Next dev | Локальный Remnashop source не становился build context без второй ручной переменной; Next dev изредка отдавал transient manifest 500 при чтении недописанного JSON | Исправлено | Первый дефект воспроизводимо выбирал удалённый PR #135 без `docker-migrate.sh`; второй дал `91/92` со стеком `loadManifest`, при этом все бизнес-сценарии прошли | Codex |
+| 2026-08-02 | CHG-018 | Исправление | E2E harness/tests | Windows runner автоматически выводит build context из `REMNASHOP_HOST_SOURCE`; строго распознанная гонка Next dev manifest повторяется ограниченно | Завершено | Retry допускается только для HTML 500 с `loadManifest` и `Unexpected end of JSON input`, максимум два раза; любые продуктовые 5xx по-прежнему немедленно проваливают gate | Codex |
+| 2026-08-02 | AUD-007 | Повторный аудит | Clean Pay + Remnashop + Remnapy final diff | Повторно просмотрены итоговые изменения, dependency graph, конфликтные маркеры, whitespace и документационная privacy-политика | Завершено | `git diff --check` чист во всех трёх репозиториях; конфликтных маркеров и полных revision в README/docs нет; новых дефектов продукта не найдено | Codex |
+| 2026-08-02 | TST-018 | Итоговая проверка | Node/npm/Python/uv, PostgreSQL, Docker | Выполнен полный регрессионный gate после всех security и PAY-SYNC исправлений | Завершено | Clean Pay: audit prod/full `0`, lint/typecheck, unit `571/571`, routes `48/48`, PostgreSQL integration `62/62`, production build `52/52`; Remnashop: frozen sync, Ruff, mypy `542` файлов, pytest `176/176`, registry audit `0`; E2E `92/92` | Codex |
+| 2026-08-02 | TST-019 | Независимый повтор | local source Docker stack | После исправления test infrastructure повторно собраны локальные образы, применены миграции и пройден полный межсервисный набор | Завершено | Локальный Remnashop image содержит отдельный `docker-migrate.sh`; Clean Pay migration deploy завершён без pending migrations; E2E повторно `92/92`, lint/typecheck зелёные | Codex |
+| 2026-08-02 | REL-001 | Release gate | production rollout | Кодовый remediation candidate готов; production canary и проверка фактических rollback image tags требуют доступа и полномочий оператора production | Ожидает production rollout | Два соответствующих checklist-пункта намеренно оставлены открытыми: локальные проверки не подменяют canary telemetry и существующие production image digests | Codex |
+| 2026-08-02 | TST-020 | Проверка документации | final journal privacy gate | Первый вызов использовал неподдерживаемую Vitest опцию `--runInBand` и остановился до тестов; точный тест немедленно повторён корректной командой | Завершено | `docs-privacy.test.ts` — `3/3`; полные revision в README/docs не найдены; `git diff --check` чист | Codex |
 
 ### Шаблон новой записи
 

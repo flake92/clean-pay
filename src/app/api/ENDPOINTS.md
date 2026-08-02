@@ -26,6 +26,8 @@ If a route needs more than request parsing, a small audit call, and one backend 
 | `POST /api/bff/auth/email/request-verification` | `src/app/api/bff/auth/email/request-verification/route.ts` | `src/backend/auth/email-verification.ts` |
 | `POST /api/bff/auth/email/confirm` | `src/app/api/bff/auth/email/confirm/route.ts` | `src/backend/auth/email-verification.ts` |
 | `POST /api/bff/auth/email/change` | `src/app/api/bff/auth/email/change/route.ts` | `src/backend/auth/email-verification.ts` |
+| `POST /api/bff/auth/email/start` | `src/app/api/bff/auth/email/start/route.ts` | `src/backend/auth/generic-email.ts` |
+| `POST /api/bff/auth/email/complete` | `src/app/api/bff/auth/email/complete/route.ts` | `src/backend/auth/generic-email.ts` |
 
 ## Passkeys
 

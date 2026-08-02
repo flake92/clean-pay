@@ -78,16 +78,17 @@ describe("public auth anti-abuse routes", () => {
     expect(mocks.findUser).not.toHaveBeenCalled();
   });
 
-  it("continues identify when the limiter itself is unavailable", async () => {
-    mocks.assertRateLimit.mockRejectedValueOnce(new Error("redis unavailable"));
+  it("fails closed before lookup when the limiter itself is unavailable", async () => {
+    mocks.assertRateLimit.mockRejectedValueOnce(
+      new BffError("UPSTREAM_UNAVAILABLE", 503, "Authentication protection is temporarily unavailable"),
+    );
 
     const response = await identify(post("http://localhost/api/bff/auth/identify", {
       email: "user@example.com",
     }));
 
-    expect(response.status).toBe(200);
-    expect(mocks.findUser).toHaveBeenCalledOnce();
-    expect(mocks.logger.warn).toHaveBeenCalledOnce();
+    expect(response.status).toBe(503);
+    expect(mocks.findUser).not.toHaveBeenCalled();
   });
 
   it("rate-limits Telegram WebApp only by the verified upstream identity", async () => {

@@ -18,6 +18,7 @@ function envExampleKeys() {
 const secrets = {
   postgres: "pg-unit-9QvL2xR8mT4pK7sN6cWd",
   remnashop: "shop-unit-8Wp4Jz7Lc2Nq9Vr5Ks3M",
+  remnashopAuth: "auth-service-unit-7Vr3Nm8Wp2Kq5Xs9Lc4D",
   remnawave: "wave-unit-7Nq3Kp9Xs4Vm2Lc8Wr6J",
   webJwt: "jwt-unit-6Vr2Kp8Wm4Xq9Lc3Ns7D5Hz1",
   webRefresh: "refresh-unit-5Kq8Vr2Nm7Wp4Lc9Xs3D6Hz1",
@@ -41,12 +42,15 @@ const validEnv: Record<string, string> = {
   REMNASHOP_API_BASE_URL: "http://remnashop:5000/api/v1/public",
   REMNASHOP_ADMIN_API_BASE_URL: "http://remnashop:5000/api/v1/admin",
   REMNASHOP_API_KEY: secrets.remnashop,
+  REMNASHOP_AUTH_SERVICE_KEY: secrets.remnashopAuth,
   REMNAWAVE_API_BASE_URL: "https://panel.clean-pay.dev",
   REMNAWAVE_TOKEN: secrets.remnawave,
   WEB_JWT_SECRET: secrets.webJwt,
   WEB_REFRESH_SECRET: secrets.webRefresh,
   AUDIT_IP_HASH_SECRET: secrets.audit,
   RATE_LIMIT_IDENTITY_SECRET: secrets.rateLimit,
+  AUTH_RATE_LIMIT_CAPACITY: "1000",
+  AUTH_CONCURRENCY_LIMIT: "64",
   READINESS_INTERNAL_SECRET: secrets.readiness,
   TELEGRAM_OIDC_ISSUER: "https://oauth.telegram.org",
   TELEGRAM_OIDC_AUTHORIZATION_ENDPOINT: "https://oauth.telegram.org/auth",
@@ -57,9 +61,9 @@ const validEnv: Record<string, string> = {
   TELEGRAM_BOT_TOKEN: secrets.telegramBot,
   COOKIE_SECURE: "true",
   COOKIE_SAMESITE: "lax",
-  TURNSTILE_ENABLED: "false",
-  TURNSTILE_SITE_KEY: "",
-  TURNSTILE_SECRET_KEY: "",
+  TURNSTILE_ENABLED: "true",
+  TURNSTILE_SITE_KEY: "0x4AAAAAUnitOnlySiteKey8Wp4Jz7Lc2",
+  TURNSTILE_SECRET_KEY: secrets.turnstile,
   TURNSTILE_VERIFY_URL: "https://challenges.cloudflare.com/turnstile/v0/siteverify",
   SUPPORT_ENABLED: "false",
   SUPPORT_EMAIL: "",
@@ -400,9 +404,6 @@ describe("production env validator", () => {
     );
     expect(runValidator({ DATA_RETENTION_INTERVAL_SECONDS: "299" }).stderr).toContain(
       "DATA_RETENTION_INTERVAL_SECONDS must be an integer between 300 and 86400",
-    );
-    expect(runValidator({ RUN_MIGRATIONS: "treu" }).stderr).toContain(
-      'RUN_MIGRATIONS must be "true" or "false"',
     );
   });
 

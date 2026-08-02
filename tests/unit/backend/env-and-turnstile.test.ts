@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { getEnv } from "@/backend/config/env";
-import { getRequestIp, getTurnstileToken, verifyTurnstileToken } from "@/backend/security/turnstile";
+import { getTurnstileToken, verifyTurnstileToken } from "@/backend/security/turnstile";
 
 function stubValidProductionEnv() {
   const postgresPassword = "pg-runtime-9QvL2xR8mT4pK7sN6cWd";
@@ -19,12 +19,14 @@ function stubValidProductionEnv() {
     REMNASHOP_API_BASE_URL: "http://remnashop:5000/api/v1/public",
     REMNASHOP_ADMIN_API_BASE_URL: "http://remnashop:5000/api/v1/admin",
     REMNASHOP_API_KEY: "shop-runtime-8Wp4Jz7Lc2Nq9Vr5Ks3M",
+    REMNASHOP_AUTH_SERVICE_KEY: "auth-service-runtime-7Vr3Nm8Wp2Kq5Xs9Lc4D",
     REMNAWAVE_API_BASE_URL: "https://panel.runtime-clean.dev",
     REMNAWAVE_TOKEN: "wave-runtime-7Nq3Kp9Xs4Vm2Lc8Wr6J",
     WEB_JWT_SECRET: "jwt-runtime-6Vr2Kp8Wm4Xq9Lc3Ns7D5Hz1",
     WEB_REFRESH_SECRET: "refresh-runtime-5Kq8Vr2Nm7Wp4Lc9Xs3D6Hz1",
     AUDIT_IP_HASH_SECRET: "audit-runtime-4Wp7Kq2Vr9Nm5Xs8Lc3D6Hz1",
     RATE_LIMIT_IDENTITY_SECRET: "rate-limit-runtime-4Lc8Kq2Vr9Nm5Xs7Wp3D6Hz1",
+    AUTH_RATE_LIMIT_CAPACITY: "1000",
     READINESS_INTERNAL_SECRET: "readiness-runtime-9Wp2Kq7Vr4Nm5Xs8Lc3D6Hz1",
     COOKIE_SECURE: "true",
     COOKIE_SAMESITE: "lax",
@@ -34,9 +36,9 @@ function stubValidProductionEnv() {
     PAYMENT_RECONCILIATION_ENABLED: "false",
     PAYMENT_RECONCILIATION_SECRET: "",
     PAYMENT_RECONCILIATION_INTERNAL_URL: "http://app:4000/api/internal/payments/reconcile",
-    TURNSTILE_ENABLED: "false",
-    TURNSTILE_SITE_KEY: "",
-    TURNSTILE_SECRET_KEY: "",
+    TURNSTILE_ENABLED: "true",
+    TURNSTILE_SITE_KEY: "0x4AAAAARuntimeSiteKey8Wp4Jz7Lc2",
+    TURNSTILE_SECRET_KEY: "turnstile-runtime-8Xs3Lc7Nm4Wp9Kq5Vr2D6Hz1",
     TURNSTILE_VERIFY_URL: "https://challenges.cloudflare.com/turnstile/v0/siteverify",
     SUPPORT_ENABLED: "false",
     SUPPORT_EMAIL: "",
@@ -196,30 +198,17 @@ describe("Turnstile helpers", () => {
     vi.restoreAllMocks();
   });
 
-  it("extracts token and request ip from supported fields", () => {
+  it("extracts tokens without trusting client-controlled proxy headers", () => {
     expect(getTurnstileToken({ turnstileToken: "a", "cf-turnstile-response": "b" })).toBe("a");
     expect(getTurnstileToken({ "cf-turnstile-response": "b" })).toBe("b");
 
-    const request = new Request("http://clean-pay.local", {
-      headers: {
-        "cf-connecting-ip": "1.1.1.1",
-        "x-real-ip": "2.2.2.2",
-        "x-forwarded-for": "10.0.0.1, 10.0.0.2",
-      },
-    });
-
-    expect(getRequestIp(request)).toBe("10.0.0.2");
-    expect(getRequestIp(new Request("http://clean-pay.local", { headers: { "cf-connecting-ip": "1.1.1.1" } }))).toBe(
-      null,
-    );
-    expect(getRequestIp(new Request("http://clean-pay.local", { headers: { "x-forwarded-for": "spoofed" } }))).toBeNull();
   });
 
   it("skips verification when disabled", async () => {
     vi.stubEnv("TURNSTILE_ENABLED", "false");
     const fetchSpy = vi.spyOn(globalThis, "fetch");
 
-    await expect(verifyTurnstileToken(null)).resolves.toBeUndefined();
+    await expect(verifyTurnstileToken(null, "auth_login")).resolves.toBeUndefined();
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
@@ -229,31 +218,31 @@ describe("Turnstile helpers", () => {
     vi.stubEnv("TURNSTILE_SECRET_KEY", "secret");
     vi.stubEnv("TURNSTILE_VERIFY_URL", "https://turnstile.test/siteverify");
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
-      new Response(JSON.stringify({ success: true, hostname: "localhost" }), { status: 200 }),
+      new Response(JSON.stringify({ success: true, hostname: "localhost", action: "auth_login" }), { status: 200 }),
     );
 
-    await verifyTurnstileToken("token", "127.0.0.1");
+    await verifyTurnstileToken("token", "auth_login");
 
     expect(fetchMock).toHaveBeenCalledOnce();
     const body = fetchMock.mock.calls[0]?.[1]?.body as URLSearchParams;
     expect(body.get("secret")).toBe("secret");
     expect(body.get("response")).toBe("token");
-    expect(body.get("remoteip")).toBe("127.0.0.1");
+    expect(body.has("remoteip")).toBe(false);
   });
 
   it("returns BFF errors for invalid Turnstile states", async () => {
     vi.stubEnv("TURNSTILE_ENABLED", "true");
     vi.stubEnv("TURNSTILE_SITE_KEY", "site-key");
     vi.stubEnv("TURNSTILE_SECRET_KEY", "");
-    await expect(verifyTurnstileToken("token")).rejects.toThrow(
+    await expect(verifyTurnstileToken("token", "auth_login")).rejects.toThrow(
       "TURNSTILE_SECRET_KEY is required when TURNSTILE_ENABLED=true",
     );
 
     vi.stubEnv("TURNSTILE_SECRET_KEY", "secret");
-    await expect(verifyTurnstileToken(null)).rejects.toMatchObject({ code: "FORBIDDEN", status: 403 });
+    await expect(verifyTurnstileToken(null, "auth_login")).rejects.toMatchObject({ code: "FORBIDDEN", status: 403 });
 
     vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({ success: false }), { status: 200 }));
-    await expect(verifyTurnstileToken("bad")).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(verifyTurnstileToken("bad", "auth_login")).rejects.toMatchObject({ code: "FORBIDDEN" });
   });
 
   it("rejects a successful Turnstile response issued for another hostname", async () => {
@@ -261,10 +250,40 @@ describe("Turnstile helpers", () => {
     vi.stubEnv("TURNSTILE_SITE_KEY", "site-key");
     vi.stubEnv("TURNSTILE_SECRET_KEY", "secret");
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
-      new Response(JSON.stringify({ success: true, hostname: "attacker.example" }), { status: 200 }),
+      new Response(JSON.stringify({ success: true, hostname: "attacker.example", action: "auth_login" }), { status: 200 }),
     );
 
-    await expect(verifyTurnstileToken("token")).rejects.toMatchObject({ code: "FORBIDDEN", status: 403 });
+    await expect(verifyTurnstileToken("token", "auth_login")).rejects.toMatchObject({ code: "FORBIDDEN", status: 403 });
+  });
+
+  it("rejects a successful token issued for another action", async () => {
+    vi.stubEnv("TURNSTILE_ENABLED", "true");
+    vi.stubEnv("TURNSTILE_SITE_KEY", "site-key");
+    vi.stubEnv("TURNSTILE_SECRET_KEY", "secret");
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ success: true, hostname: "localhost", action: "auth_register" }), { status: 200 }),
+    );
+
+    await expect(verifyTurnstileToken("token", "auth_login")).rejects.toMatchObject({ code: "FORBIDDEN", status: 403 });
+  });
+
+  it("rejects replay after Cloudflare consumes a single-use token", async () => {
+    vi.stubEnv("TURNSTILE_ENABLED", "true");
+    vi.stubEnv("TURNSTILE_SITE_KEY", "site-key");
+    vi.stubEnv("TURNSTILE_SECRET_KEY", "secret");
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ success: true, hostname: "localhost", action: "auth_login" }), { status: 200 }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ success: false, hostname: "localhost", action: "auth_login", "error-codes": ["timeout-or-duplicate"] }), { status: 200 }),
+      );
+
+    await expect(verifyTurnstileToken("single-use", "auth_login")).resolves.toBeUndefined();
+    await expect(verifyTurnstileToken("single-use", "auth_login")).rejects.toMatchObject({
+      code: "FORBIDDEN",
+      status: 403,
+    });
   });
 
   it("returns 503 for an unavailable or malformed Turnstile response", async () => {
@@ -272,13 +291,13 @@ describe("Turnstile helpers", () => {
     vi.stubEnv("TURNSTILE_SITE_KEY", "site-key");
     vi.stubEnv("TURNSTILE_SECRET_KEY", "secret");
     vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(new Response("not-json", { status: 200 }));
-    await expect(verifyTurnstileToken("token")).rejects.toMatchObject({
+    await expect(verifyTurnstileToken("token", "auth_login")).rejects.toMatchObject({
       code: "UPSTREAM_UNAVAILABLE",
       status: 503,
     });
 
     vi.mocked(fetch).mockRejectedValueOnce(new Error("network unavailable"));
-    await expect(verifyTurnstileToken("token")).rejects.toMatchObject({
+    await expect(verifyTurnstileToken("token", "auth_login")).rejects.toMatchObject({
       code: "UPSTREAM_UNAVAILABLE",
       status: 503,
     });

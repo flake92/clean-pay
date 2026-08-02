@@ -1,5 +1,3 @@
-import { isIP } from "node:net";
-
 import { getEnv } from "@/backend/config/env";
 import { logger } from "@/backend/observability/logger";
 import { BffError } from "@/backend/integrations/remnashop/errors";
@@ -7,6 +5,7 @@ import { BffError } from "@/backend/integrations/remnashop/errors";
 type TurnstileResponse = {
   success?: boolean;
   hostname?: string;
+  action?: string;
   "error-codes"?: string[];
 };
 
@@ -19,20 +18,10 @@ export function getTurnstileToken(body: TurnstileBody) {
   return body.turnstileToken ?? body["cf-turnstile-response"] ?? null;
 }
 
-export function getRequestIp(request: Request) {
-  // Production exposes the app only through the local reverse proxy. Use the
-  // right-most X-Forwarded-For hop set/appended by that proxy and ignore
-  // vendor-specific headers that an Internet client can supply directly.
-  const candidate = request.headers
-    .get("x-forwarded-for")
-    ?.split(",")
-    .at(-1)
-    ?.trim();
-
-  return candidate && isIP(candidate) ? candidate : null;
-}
-
-export async function verifyTurnstileToken(token: string | null | undefined, remoteIp?: string | null) {
+export async function verifyTurnstileToken(
+  token: string | null | undefined,
+  expectedAction: string,
+) {
   const env = getEnv();
 
   if (!env.turnstile.enabled) {
@@ -54,17 +43,13 @@ export async function verifyTurnstileToken(token: string | null | undefined, rem
     response: token,
   });
 
-  if (remoteIp) {
-    body.set("remoteip", remoteIp);
-  }
-
   let response: Response;
   const startedAt = Date.now();
 
   logger.info("turnstile_request_sent", {
     method: "POST",
     hasToken: Boolean(token),
-    hasRemoteIp: Boolean(remoteIp),
+    action: expectedAction,
   }, {
     category: "upstream",
     source: "turnstile.client",
@@ -118,6 +103,7 @@ export async function verifyTurnstileToken(token: string | null | undefined, rem
 
   const expectedHostname = new URL(env.appUrl).hostname.toLowerCase();
   const responseHostname = result?.hostname?.toLowerCase();
+  const responseAction = result?.action;
 
   if (!response.ok) {
     throw new BffError("UPSTREAM_UNAVAILABLE", 503, "Turnstile verification unavailable", {
@@ -126,7 +112,11 @@ export async function verifyTurnstileToken(token: string | null | undefined, rem
     });
   }
 
-  if (!result?.success || responseHostname !== expectedHostname) {
+  if (
+    !result?.success ||
+    responseHostname !== expectedHostname ||
+    responseAction !== expectedAction
+  ) {
     throw new BffError("FORBIDDEN", 403, "Turnstile verification failed", {
       upstreamStatus: response.status,
       upstreamPath: env.turnstile.verifyUrl,
@@ -134,10 +124,10 @@ export async function verifyTurnstileToken(token: string | null | undefined, rem
         ? {
             success: result.success,
             hostnameMatches: responseHostname === expectedHostname,
+            actionMatches: responseAction === expectedAction,
             errorCodes: result["error-codes"],
           }
         : null,
     });
   }
 }
-

@@ -17,6 +17,7 @@ export function localUserProfile(session: SessionWithUser) {
     name: session.user.fullName ?? session.user.displayName ?? "",
     username: session.user.telegramUsername,
     language: "ru",
+    has_password: false,
     telegramId: session.user.telegramId?.toString() ?? null,
     telegramUsername: session.user.telegramUsername ?? null,
     fullName: session.user.fullName,

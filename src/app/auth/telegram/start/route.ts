@@ -7,7 +7,7 @@ import {
 } from "@/backend/integrations/telegram/oidc";
 import { assertRateLimit } from "@/backend/limits/rate-limit";
 import { getCurrentUser } from "@/backend/sessions/web-session";
-import { getRequestIp, verifyTurnstileToken } from "@/backend/security/turnstile";
+import { verifyTurnstileToken } from "@/backend/security/turnstile";
 import { safeRedirectPath } from "@/backend/auth/redirect-policy";
 import { logTechnicalError } from "@/backend/observability/audit";
 
@@ -26,7 +26,7 @@ export async function GET(request: Request) {
 
     await verifyTurnstileToken(
       url.searchParams.get("turnstile_token") ?? url.searchParams.get("cf-turnstile-response"),
-      getRequestIp(request),
+      "telegram_auth_start",
     );
 
     if (currentUser) {

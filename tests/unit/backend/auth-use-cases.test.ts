@@ -173,14 +173,14 @@ describe("auth use cases", () => {
 
   it("logs in with email through Turnstile, rate-limit and Remnashop session creation", async () => {
     await expect(
-      loginWithEmail({ email: "user@example.com", password: "secret", turnstileToken: "ts" }, { remoteIp: "127.0.0.1" }),
+      loginWithEmail({ email: "user@example.com", password: "secret", turnstileToken: "ts" }, {}),
     ).resolves.toEqual({
       user: profile,
       expiresAt: authData.expires_at,
       refreshExpiresAt: authData.refresh_expires_at,
     });
 
-    expect(mocks.verifyTurnstileToken).toHaveBeenCalledWith("ts", "127.0.0.1");
+    expect(mocks.verifyTurnstileToken).toHaveBeenCalledWith("ts", "auth_login");
     expect(mocks.assertRateLimit).toHaveBeenCalledWith(
       expect.objectContaining({ action: "auth_login", email: "user@example.com", limit: 5 }),
     );
@@ -196,7 +196,7 @@ describe("auth use cases", () => {
   it("registers new email users and requests verification", async () => {
     const result = await registerWithEmail(
       { email: "user@example.com", password: "secret", name: "User" },
-      { token: "ctx-token", remoteIp: null },
+      { token: "ctx-token" },
     );
 
     expect(result.emailVerification?.target_email).toBe("user@example.com");
@@ -246,10 +246,10 @@ describe("auth use cases", () => {
   it("requests and confirms email verification for the current session", async () => {
     await requestEmailVerification(
       { email: "user@example.com", turnstileToken: "ts-resend" },
-      { remoteIp: "127.0.0.1" },
+      {},
     );
 
-    expect(mocks.verifyTurnstileToken).toHaveBeenCalledWith("ts-resend", "127.0.0.1");
+    expect(mocks.verifyTurnstileToken).toHaveBeenCalledWith("ts-resend", "email_verification");
     expect(mocks.getAuthorizedRemnashopTokens).toHaveBeenCalledWith({ allowUnverifiedEmail: true });
     expect(mocks.assertCooldown).toHaveBeenCalledWith(
       expect.objectContaining({ key: "email-verification:user-1", action: "email_verification_request" }),
@@ -260,12 +260,12 @@ describe("auth use cases", () => {
 
     await confirmEmailVerification(
       { code: "123456", registrationFlow: true, turnstileToken: "ts-confirm" },
-      { remoteIp: "127.0.0.1" },
+      {},
     );
 
     expect(mocks.remnashopLinkTelegram).not.toHaveBeenCalled();
     expect(mocks.linkCurrentUserToRemnashopAuth).toHaveBeenCalledOnce();
-    expect(mocks.verifyTurnstileToken).toHaveBeenCalledWith("ts-confirm", "127.0.0.1");
+    expect(mocks.verifyTurnstileToken).toHaveBeenCalledWith("ts-confirm", "email_verification");
     expect(mocks.remnashopRequest).toHaveBeenLastCalledWith("/auth/email/confirm", {
       method: "POST",
       accessToken: "access-token",
@@ -470,7 +470,7 @@ describe("auth use cases", () => {
       confirmEmailVerification({ code: "123456", registrationFlow: true }, {}),
     ).rejects.toMatchObject({ code: "FORBIDDEN", status: 403 });
 
-    expect(mocks.verifyTurnstileToken).toHaveBeenCalledWith(undefined, undefined);
+    expect(mocks.verifyTurnstileToken).toHaveBeenCalledWith(undefined, "email_verification");
     expect(mocks.getAuthorizedRemnashopTokens).not.toHaveBeenCalled();
     expect(mocks.remnashopRequest).not.toHaveBeenCalled();
   });
@@ -678,12 +678,12 @@ describe("auth use cases", () => {
       expires_at: "2026-06-25T10:15:00.000Z",
     });
 
-    await expect(changeEmail({ email: "next@example.com", turnstileToken: "ts-change" }, { remoteIp: "127.0.0.1" })).resolves.toMatchObject({
+    await expect(changeEmail({ email: "next@example.com", turnstileToken: "ts-change" }, {})).resolves.toMatchObject({
       pending_email: "next@example.com",
       emailVerification: { target_email: "next@example.com" },
     });
 
-    expect(mocks.verifyTurnstileToken).toHaveBeenCalledWith("ts-change", "127.0.0.1");
+    expect(mocks.verifyTurnstileToken).toHaveBeenCalledWith("ts-change", "email_change");
     expect(mocks.prisma.webUser.update).toHaveBeenCalledWith({
       where: { id: "user-1" },
       data: { emailVerified: false },

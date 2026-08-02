@@ -12,6 +12,7 @@ export type RemnashopMe = {
   name: string;
   username: string | null;
   language: string;
+  has_password?: boolean;
 };
 
 export type RegisterRequest = {
@@ -23,6 +24,16 @@ export type RegisterRequest = {
 
 export type LoginRequest = {
   email: string;
+  password: string;
+};
+
+export type StartGenericEmailAuthRequest = {
+  email: string;
+};
+
+export type CompleteGenericEmailAuthRequest = {
+  email: string;
+  code: string;
   password: string;
 };
 

@@ -1,14 +1,39 @@
 name: ${COMPOSE_PROJECT_NAME:-clean-pay-prod}
 
 services:
+  migration:
+    image: ${CLEAN_PAY_MIGRATION_IMAGE:-clean-pay-prod-migration:local}
+    build:
+      context: ../..
+      dockerfile: deploy/prod/Dockerfile
+      target: migration
+      args:
+        NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL:?NEXT_PUBLIC_APP_URL is required}
+        TURNSTILE_ENABLED: ${TURNSTILE_ENABLED:?TURNSTILE_ENABLED=true is required}
+        TURNSTILE_SITE_KEY: ${TURNSTILE_SITE_KEY:-}
+        NEXT_PUBLIC_BRAND_NAME: ${NEXT_PUBLIC_BRAND_NAME:-Clean Pay}
+        NEXT_PUBLIC_BRAND_LOGO_URL: ${NEXT_PUBLIC_BRAND_LOGO_URL:-/clean-pay-logo.png}
+    restart: "no"
+    env_file:
+      - .env
+    environment:
+      NODE_ENV: production
+      NEXT_TELEMETRY_DISABLED: "1"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      default:
+
   app:
     image: ${CLEAN_PAY_IMAGE:-clean-pay-prod-app:local}
     build:
       context: ../..
       dockerfile: deploy/prod/Dockerfile
+      target: runner
       args:
         NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL:?NEXT_PUBLIC_APP_URL is required}
-        TURNSTILE_ENABLED: ${TURNSTILE_ENABLED:-false}
+        TURNSTILE_ENABLED: ${TURNSTILE_ENABLED:?TURNSTILE_ENABLED=true is required}
         TURNSTILE_SITE_KEY: ${TURNSTILE_SITE_KEY:-}
         NEXT_PUBLIC_BRAND_NAME: ${NEXT_PUBLIC_BRAND_NAME:-Clean Pay}
         NEXT_PUBLIC_BRAND_LOGO_URL: ${NEXT_PUBLIC_BRAND_LOGO_URL:-/clean-pay-logo.png}
@@ -20,6 +45,8 @@ services:
       NEXT_TELEMETRY_DISABLED: "1"
       LOG_LEVEL: ${LOG_LEVEL:-info}
     depends_on:
+      migration:
+        condition: service_completed_successfully
       postgres:
         condition: service_healthy
       redis:
