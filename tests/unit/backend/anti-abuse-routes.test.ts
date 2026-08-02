@@ -2,9 +2,11 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   assertRateLimit: vi.fn(),
+  verifyTurnstileToken: vi.fn(),
   findUser: vi.fn(),
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
   remnashopAuth: vi.fn(),
+  remnashopIdentifyEmail: vi.fn(),
   getRemnashopMe: vi.fn(),
   recoverTelegramSession: vi.fn(),
   reconcileUser: vi.fn(),
@@ -16,6 +18,11 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("@/backend/limits/rate-limit", () => ({
   assertRateLimit: mocks.assertRateLimit,
+}));
+
+vi.mock("@/backend/security/turnstile", () => ({
+  getTurnstileToken: (body: { turnstileToken?: string }) => body.turnstileToken ?? null,
+  verifyTurnstileToken: mocks.verifyTurnstileToken,
 }));
 
 vi.mock("@/backend/database/prisma", () => ({
@@ -30,6 +37,7 @@ vi.mock("@/backend/observability/logger", () => ({
 
 vi.mock("@/backend/integrations/remnashop/client", () => ({
   remnashopAuth: mocks.remnashopAuth,
+  remnashopIdentifyEmail: mocks.remnashopIdentifyEmail,
   getRemnashopMe: mocks.getRemnashopMe,
   recoverRemnashopTelegramSession: mocks.recoverTelegramSession,
 }));
@@ -64,6 +72,7 @@ describe("public auth anti-abuse routes", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.findUser.mockResolvedValue(null);
+    mocks.remnashopIdentifyEmail.mockResolvedValue({ exists: false });
     mocks.createWebSession.mockResolvedValue({ id: "session-1" });
   });
 
@@ -89,6 +98,22 @@ describe("public auth anti-abuse routes", () => {
 
     expect(response.status).toBe(503);
     expect(mocks.findUser).not.toHaveBeenCalled();
+  });
+
+  it("returns the backend-selected account mode and passkey availability", async () => {
+    mocks.findUser.mockResolvedValueOnce({ id: "user-1", webAuthnCredentials: [{ id: "key-1" }] });
+    mocks.remnashopIdentifyEmail.mockResolvedValueOnce({ exists: true });
+
+    const response = await identify(post("http://localhost/api/bff/auth/identify", {
+      email: " User@Example.com ", turnstileToken: "verified-token",
+    }));
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ data: { exists: true, hasPasskey: true } });
+    expect(mocks.verifyTurnstileToken).toHaveBeenCalledWith("verified-token", "auth_login");
+    expect(mocks.findUser).toHaveBeenCalledWith(expect.objectContaining({
+      where: { email: "user@example.com" },
+    }));
   });
 
   it("rate-limits Telegram WebApp only by the verified upstream identity", async () => {

@@ -35,6 +35,9 @@ const AuthTurnstileContext = createContext<AuthTurnstileContextValue>({
 
 async function readAuthError(response: Response) {
   const error = await readBffError(response, "Не удалось выполнить действие.");
+  if (error instanceof BffClientError && error.code === "AUTH_FAILED") {
+    error.message = "Неверный e-mail или пароль.";
+  }
   if (error instanceof BffClientError && error.code === "RATE_LIMITED") {
     error.message = "Слишком много попыток. Попробуйте позже.";
   }
@@ -113,27 +116,34 @@ export function LoginForm({
   initialError?: string | null;
   redirectTo?: string;
 }) {
-  const [stage, setStage] = useState<"start" | "complete" | "resetStart" | "resetConfirm">("start");
+  const [stage, setStage] = useState<"identify" | "password" | "register" | "resetStart" | "resetConfirm">("identify");
   const [state, setState] = useState<ApiState>({ loading: false, error: initialError });
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [passwordConfirmation, setPasswordConfirmation] = useState("");
   const [code, setCode] = useState("");
+  const [hasPasskey, setHasPasskey] = useState(false);
   const [canRecoverPassword, setCanRecoverPassword] = useState(false);
   const requestPendingRef = useRef(false);
   const turnstile = useContext(AuthTurnstileContext);
-  const endpoint = {
-    start: "/api/bff/auth/email/start",
-    complete: "/api/bff/auth/email/complete",
-    resetStart: "/api/bff/auth/password/reset/start",
-    resetConfirm: "/api/bff/auth/password/reset/confirm",
-  }[stage];
+
+  function changeEmail() {
+    setStage("identify");
+    setPassword("");
+    setPasswordConfirmation("");
+    setCode("");
+    setHasPasskey(false);
+    setCanRecoverPassword(false);
+    setState({ loading: false, error: null });
+    turnstile.reset();
+  }
+
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (requestPendingRef.current) {
       return;
     }
-    if (stage === "resetConfirm" && password !== passwordConfirmation) {
+    if ((stage === "register" || stage === "resetConfirm") && password !== passwordConfirmation) {
       setState({ loading: false, error: "Пароли не совпадают." });
       return;
     }
@@ -146,12 +156,19 @@ export function LoginForm({
     requestPendingRef.current = true;
     setState({ loading: true, error: null });
     try {
+      const endpoint = {
+        identify: "/api/bff/auth/identify",
+        password: "/api/bff/auth/login",
+        register: "/api/bff/auth/register",
+        resetStart: "/api/bff/auth/password/reset/start",
+        resetConfirm: "/api/bff/auth/password/reset/confirm",
+      }[stage];
       const response = await fetch(endpoint, {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({
             email,
-            ...(stage === "complete" ? { code, password } : {}),
+            ...(stage === "password" || stage === "register" ? { password } : {}),
             ...(stage === "resetConfirm" ? { code, newPassword: password } : {}),
             ...(turnstileToken ? { turnstileToken } : {}),
           }),
@@ -159,12 +176,22 @@ export function LoginForm({
       turnstile.reset();
       if (!response.ok) {
         const error = await readAuthError(response);
-        setCanRecoverPassword(stage === "complete" && error.code === "AUTH_FAILED");
+        const rejectedPassword = (stage === "password" || stage === "register") && error.code === "AUTH_FAILED";
+        setCanRecoverPassword(rejectedPassword);
+        if (stage === "register" && rejectedPassword) setStage("password");
         setState({ loading: false, error: error.message });
         return;
       }
-      if (stage === "start") {
-        setStage("complete");
+      if (stage === "identify") {
+        const payload = await response.json().catch(() => null) as {
+          data?: { exists?: boolean; hasPasskey?: boolean };
+        } | null;
+        if (typeof payload?.data?.exists !== "boolean") {
+          setState({ loading: false, error: "Сервер вернул некорректный ответ. Повторите попытку." });
+          return;
+        }
+        setHasPasskey(Boolean(payload.data.hasPasskey));
+        setStage(payload.data.exists ? "password" : "register");
         setState({ loading: false, error: null });
         return;
       }
@@ -174,6 +201,21 @@ export function LoginForm({
         setPassword("");
         setPasswordConfirmation("");
         setState({ loading: false, error: null });
+        return;
+      }
+      if (stage === "register") {
+        const payload = await response.json().catch(() => null) as {
+          data?: { user?: { is_email_verified?: boolean }; emailVerification?: unknown };
+        } | null;
+        if (!payload?.data?.user) {
+          setState({ loading: false, error: unknownLoginResultMessage });
+          return;
+        }
+        if (payload.data.user.is_email_verified === true || !payload.data.emailVerification) {
+          redirectAfterAuth(redirectTo);
+        } else {
+          window.location.assign("/register/verify-email");
+        }
         return;
       }
       redirectAfterAuth(redirectTo);
@@ -187,17 +229,20 @@ export function LoginForm({
 
   return (
     <form className="flex flex-column gap-3" onSubmit={submit}>
-      <PasskeyLoginButton
-        consumeTurnstileToken={turnstile.consumeToken}
-        redirectTo={redirectTo}
-        resetTurnstile={turnstile.reset}
-        turnstileEnabled={turnstile.enabled}
-      />
+      {stage === "password" && hasPasskey ? (
+        <PasskeyLoginButton
+          consumeTurnstileToken={turnstile.consumeToken}
+          email={email}
+          redirectTo={redirectTo}
+          resetTurnstile={turnstile.reset}
+          turnstileEnabled={turnstile.enabled}
+        />
+      ) : null}
       <label className="flex flex-column gap-2">
         <span className="text-sm font-medium text-700">E-mail</span>
         <InputText
           autoComplete="username"
-          disabled={stage !== "start"}
+          disabled={stage !== "identify"}
           name="email"
           required
           type="email"
@@ -205,37 +250,32 @@ export function LoginForm({
           onChange={(event) => setEmail(event.target.value)}
         />
       </label>
-      {stage === "start" ? (
-        <Message severity="info" text="Отправим одноразовый код на указанный e-mail." />
+      {stage === "identify" ? (
+        <Message severity="info" text="Введите e-mail — способ входа определится автоматически." />
       ) : stage === "resetStart" ? (
         <Message severity="info" text="Мы отправим отдельный код для восстановления пароля на подтверждённый e-mail." />
       ) : (
         <>
-          <Message
-            severity="info"
-            text={stage === "complete"
-              ? "Введите код из письма и пароль от кабинета. Если входите впервые, придумайте новый пароль."
-              : "Введите код восстановления из нового письма и задайте новый пароль."}
-          />
-          <label className="flex flex-column gap-2">
-            <span className="text-sm font-medium text-700">Код из письма</span>
-            <InputText
-              autoComplete="one-time-code"
-              inputMode="numeric"
-              maxLength={6}
-              minLength={6}
-              name="code"
-              required
-              value={code}
-              onChange={(event) => setCode(event.target.value.replace(/\D/g, "").slice(0, 6))}
-            />
-          </label>
+          {stage === "register" ? (
+            <Message severity="info" text="Аккаунт не найден. Создайте пароль — код подтверждения будет отправлен на e-mail." />
+          ) : null}
+          {stage === "resetConfirm" ? (
+            <>
+              <Message severity="info" text="Введите код восстановления из письма и задайте новый пароль." />
+              <label className="flex flex-column gap-2">
+                <span className="text-sm font-medium text-700">Код из письма</span>
+                <InputText autoComplete="one-time-code" inputMode="numeric" maxLength={6} minLength={6}
+                  name="code" required value={code}
+                  onChange={(event) => setCode(event.target.value.replace(/\D/g, "").slice(0, 6))} />
+              </label>
+            </>
+          ) : null}
           <label className="flex flex-column gap-2">
             <span className="text-sm font-medium text-700">
-              {stage === "complete" ? "Пароль" : "Новый пароль"}
+              {stage === "password" ? "Пароль" : stage === "register" ? "Придумайте пароль" : "Новый пароль"}
             </span>
             <Password
-              autoComplete={stage === "complete" ? "current-password" : "new-password"}
+              autoComplete={stage === "password" ? "current-password" : "new-password"}
               className="w-full"
               feedback={false}
               inputClassName="w-full"
@@ -247,7 +287,7 @@ export function LoginForm({
               onChange={(event) => setPassword(event.target.value)}
             />
           </label>
-          {stage === "resetConfirm" ? (
+          {stage === "register" || stage === "resetConfirm" ? (
             <label className="flex flex-column gap-2">
               <span className="text-sm font-medium text-700">Повторите новый пароль</span>
               <Password
@@ -264,7 +304,7 @@ export function LoginForm({
               />
             </label>
           ) : null}
-          {stage === "complete" && canRecoverPassword ? (
+          {stage === "password" && canRecoverPassword ? (
             <Button
               disabled={state.loading}
               label="Забыли пароль?"
@@ -279,28 +319,17 @@ export function LoginForm({
               type="button"
             />
           ) : null}
-          <Button
-            disabled={state.loading}
-            label="Изменить e-mail"
-            onClick={() => {
-              setStage("start");
-              setCode("");
-              setPassword("");
-              setPasswordConfirmation("");
-              setCanRecoverPassword(false);
-              setState({ loading: false, error: null });
-            }}
-            text
-            type="button"
-          />
         </>
       )}
+      {stage !== "identify" ? <Button disabled={state.loading} label="Изменить e-mail" onClick={changeEmail} text type="button" /> : null}
       <AuthTurnstileChallenge />
       {state.error ? <Message severity="error" text={state.error} /> : null}
       <Button
         disabled={state.loading}
-        label={stage === "start"
-          ? "Получить код"
+        label={stage === "identify"
+          ? "Продолжить"
+          : stage === "register"
+            ? "Создать аккаунт"
           : stage === "resetStart"
             ? "Получить код восстановления"
             : stage === "resetConfirm"

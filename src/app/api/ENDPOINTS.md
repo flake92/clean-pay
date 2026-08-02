@@ -16,7 +16,7 @@ If a route needs more than request parsing, a small audit call, and one backend 
 | `POST /api/bff/auth/register` | `src/app/api/bff/auth/register/route.ts` | `src/backend/auth/email-register.ts` |
 | `GET /api/bff/auth/me` | `src/app/api/bff/auth/me/route.ts` | `src/backend/auth/profile.ts` |
 | `POST /api/bff/auth/logout` | `src/app/api/bff/auth/logout/route.ts` | `src/backend/sessions/web-session.ts` |
-| `POST /api/bff/auth/identify` | `src/app/api/bff/auth/identify/route.ts` | Inline route flow using `src/backend/database`, `src/backend/limits` |
+| `POST /api/bff/auth/identify` | `src/app/api/bff/auth/identify/route.ts` | Inline Turnstile-protected flow using `src/backend/database`, `src/backend/limits` |
 | `POST /api/bff/auth/change-password` | `src/app/api/bff/auth/change-password/route.ts` | `src/backend/auth/password.ts` |
 
 ## E-mail

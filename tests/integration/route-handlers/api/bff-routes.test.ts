@@ -344,8 +344,12 @@ describe("BFF route integration contracts", () => {
   });
 
   it("runs auth endpoints through their backend use cases", async () => {
-    const login = await loginRoute.POST();
-    const register = await registerRoute.POST();
+    const login = await loginRoute.POST(jsonRequest("/api/bff/auth/login", {
+      email: "user@example.com", password: "secret",
+    }));
+    const register = await registerRoute.POST(jsonRequest("/api/bff/auth/register", {
+      email: "new@example.com", password: "secret",
+    }));
     const me = await meRoute.GET();
     const password = await passwordRoute.POST(jsonRequest("/api/bff/auth/change-password", {
       current_password: "old",
@@ -353,12 +357,13 @@ describe("BFF route integration contracts", () => {
     }));
     const link = await linkRoute.POST(jsonRequest("/api/bff/link/remnashop", { email: "user@example.com", password: "secret" }));
 
-    expect(login.status).toBe(410);
-    expect(register.status).toBe(410);
+    expect(login.status).toBe(200);
+    expect(register.status).toBe(201);
     expect(me.status).toBe(200);
     expect(password.status).toBe(200);
     expect(link.status).toBe(200);
-    expect(mocks.loginWithEmail).not.toHaveBeenCalled();
+    expect(mocks.loginWithEmail).toHaveBeenCalledOnce();
+    expect(mocks.registerWithEmail).toHaveBeenCalledOnce();
     expect(mocks.changePassword).toHaveBeenCalledWith({ current_password: "old", new_password: "new" });
   });
 

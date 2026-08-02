@@ -32,6 +32,7 @@ const mocks = vi.hoisted(() => ({
       count: vi.fn(),
     },
     webUser: {
+      findUnique: vi.fn(),
       update: vi.fn(),
     },
   },
@@ -123,6 +124,10 @@ describe("passkey use cases", () => {
     mocks.generateRegistrationOptions.mockResolvedValue({ challenge: "reg-challenge", rp: { id: "localhost" } });
     mocks.generateAuthenticationOptions.mockResolvedValue({ challenge: "auth-challenge" });
     mocks.prisma.webAuthnCredential.findMany.mockResolvedValue([]);
+    mocks.prisma.webUser.findUnique.mockResolvedValue({
+      id: "user-1",
+      webAuthnCredentials: [{ credentialId: "credential-1", transports: ["internal"] }],
+    });
     mocks.prisma.webAuthnCredential.create.mockResolvedValue(undefined);
     mocks.prisma.webAuthnCredential.updateMany.mockResolvedValue({ count: 0 });
     mocks.prisma.webAuthnCredential.count.mockResolvedValue(2);
@@ -346,15 +351,18 @@ describe("passkey use cases", () => {
   });
 
   it("begins and finishes passkey login", async () => {
-    await expect(beginPasskeyLogin()).resolves.toEqual({ challenge: "auth-challenge" });
+    await expect(beginPasskeyLogin("user@example.com")).resolves.toEqual({ challenge: "auth-challenge" });
     expect(mocks.assertRateLimit).toHaveBeenCalledWith(expect.objectContaining({
       action: "passkey_login_options",
     }));
     expect(mocks.prisma.webAuthnChallenge.create).toHaveBeenCalledWith({
-      data: expect.objectContaining({ challenge: "auth-challenge", type: "AUTHENTICATION" }),
+      data: expect.objectContaining({ challenge: "auth-challenge", type: "AUTHENTICATION", userId: "user-1" }),
     });
+    expect(mocks.generateAuthenticationOptions).toHaveBeenCalledWith(expect.objectContaining({
+      allowCredentials: [{ id: "credential-1", transports: ["internal"] }],
+    }));
 
-    mocks.prisma.webAuthnChallenge.findFirst.mockResolvedValueOnce({ id: "challenge-2", challenge: "auth-challenge" });
+    mocks.prisma.webAuthnChallenge.findFirst.mockResolvedValueOnce({ id: "challenge-2", userId: "user-1", challenge: "auth-challenge" });
     mocks.prisma.webAuthnCredential.updateMany.mockResolvedValueOnce({ count: 1 });
 
     await expect(
@@ -383,7 +391,7 @@ describe("passkey use cases", () => {
   });
 
   it("rejects a non-zero counter CAS conflict before creating a session", async () => {
-    mocks.prisma.webAuthnChallenge.findFirst.mockResolvedValueOnce({ id: "challenge-2", challenge: "auth-challenge" });
+    mocks.prisma.webAuthnChallenge.findFirst.mockResolvedValueOnce({ id: "challenge-2", userId: "user-1", challenge: "auth-challenge" });
     mocks.prisma.webAuthnCredential.updateMany.mockResolvedValueOnce({ count: 0 });
 
     await expect(finishPasskeyLogin({
@@ -408,7 +416,7 @@ describe("passkey use cases", () => {
   });
 
   it("allows authenticators without counters to use the 0 to 0 branch", async () => {
-    mocks.prisma.webAuthnChallenge.findFirst.mockResolvedValueOnce({ id: "challenge-2", challenge: "auth-challenge" });
+    mocks.prisma.webAuthnChallenge.findFirst.mockResolvedValueOnce({ id: "challenge-2", userId: "user-1", challenge: "auth-challenge" });
     mocks.prisma.webAuthnCredential.findUnique.mockResolvedValueOnce({
       id: "db-credential-1",
       userId: "user-1",

@@ -76,6 +76,7 @@ import {
   remnashopAuthTelegramIdentity,
   remnashopAdminRequest,
   remnashopLinkTelegram,
+  remnashopIdentifyEmail,
   remnashopMergeUsers,
   remnashopRequest,
   recoverRemnashopTelegramSession,
@@ -330,6 +331,22 @@ describe("remnashop client", () => {
         headers: expect.objectContaining({
           accept: "application/json",
           "content-type": "application/json",
+        }),
+      }),
+    );
+  });
+
+  it("identifies an e-mail through the protected upstream auth boundary", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(response({ body: { exists: true } }));
+
+    await expect(remnashopIdentifyEmail({ email: "user@example.com" })).resolves.toEqual({ exists: true });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://remnashop:5000/api/v1/public/auth/identify",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ email: "user@example.com" }),
+        headers: expect.objectContaining({
+          "x-remnashop-auth-service-key": "auth-service-unit-7Vr3Nm8Wp2Kq5Xs9Lc4D",
         }),
       }),
     );
