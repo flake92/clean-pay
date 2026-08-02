@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useContext, useMemo, useState, type FormEvent, type ReactNode } from "react";
+import { createContext, useContext, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
 
 import { Button } from "primereact/button";
 import { InputText } from "primereact/inputtext";
@@ -91,14 +91,21 @@ function AuthTurnstileChallenge({ action }: { action: string }) {
   );
 }
 
-export function LoginForm({ redirectTo = "/cabinet" }: { redirectTo?: string }) {
+export function LoginForm({
+  initialError = null,
+  redirectTo = "/cabinet",
+}: {
+  initialError?: string | null;
+  redirectTo?: string;
+}) {
   const [stage, setStage] = useState<"start" | "complete" | "resetStart" | "resetConfirm">("start");
-  const [state, setState] = useState<ApiState>({ loading: false, error: null });
+  const [state, setState] = useState<ApiState>({ loading: false, error: initialError });
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [passwordConfirmation, setPasswordConfirmation] = useState("");
   const [code, setCode] = useState("");
   const [canRecoverPassword, setCanRecoverPassword] = useState(false);
+  const requestPendingRef = useRef(false);
   const turnstile = useContext(AuthTurnstileContext);
   const endpoint = {
     start: "/api/bff/auth/email/start",
@@ -115,6 +122,9 @@ export function LoginForm({ redirectTo = "/cabinet" }: { redirectTo?: string }) 
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (requestPendingRef.current) {
+      return;
+    }
     if (turnstile.enabled && !turnstile.token) {
       setState({ loading: false, error: missingTurnstileTokenMessage(turnstile.siteKey) });
       return;
@@ -124,6 +134,7 @@ export function LoginForm({ redirectTo = "/cabinet" }: { redirectTo?: string }) 
       return;
     }
 
+    requestPendingRef.current = true;
     setState({ loading: true, error: null });
     try {
       const response = await fetch(endpoint, {
@@ -160,6 +171,8 @@ export function LoginForm({ redirectTo = "/cabinet" }: { redirectTo?: string }) 
     } catch {
       turnstile.reset();
       setState({ loading: false, error: unknownLoginResultMessage });
+    } finally {
+      requestPendingRef.current = false;
     }
   }
 
@@ -243,6 +256,7 @@ export function LoginForm({ redirectTo = "/cabinet" }: { redirectTo?: string }) 
           ) : null}
           {stage === "complete" && canRecoverPassword ? (
             <Button
+              disabled={state.loading}
               label="Забыли пароль?"
               onClick={() => {
                 setStage("resetStart");
@@ -256,6 +270,7 @@ export function LoginForm({ redirectTo = "/cabinet" }: { redirectTo?: string }) 
             />
           ) : null}
           <Button
+            disabled={state.loading}
             label="Изменить e-mail"
             onClick={() => {
               setStage("start");

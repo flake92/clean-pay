@@ -4,7 +4,9 @@ import {
   paymentPollDelayMs,
   paymentReturnOutcome,
   shouldPollPaymentReturn,
+  shouldRetryPaymentReturnError,
 } from "@/frontend/lib/payment-return";
+import { BffClientError } from "@/frontend/lib/client-api";
 
 describe("payment return state", () => {
   it("derives the page outcome only from server-authoritative state", () => {
@@ -28,6 +30,39 @@ describe("payment return state", () => {
     expect(paymentPollDelayMs(4)).toBe(30_000);
     expect(paymentPollDelayMs(20)).toBe(30_000);
     expect(paymentPollDelayMs(0, 9)).toBe(9_000);
+  });
+
+  it("stops polling when the operation is terminal even if its payment is pending", () => {
+    for (const status of ["failed", "manual_required", "retry_ready"]) {
+      expect(shouldPollPaymentReturn({
+        operation: { status },
+        payment: { status: "pending" },
+      })).toBe(false);
+    }
+
+    expect(shouldPollPaymentReturn({
+      operation: { status: "succeeded" },
+      payment: { status: "pending" },
+    })).toBe(true);
+  });
+
+  it("retries only transient HTTP and actual network failures", () => {
+    for (const status of [408, 429, 500, 503]) {
+      expect(shouldRetryPaymentReturnError(
+        new BffClientError("transient", status),
+      )).toBe(true);
+    }
+
+    for (const status of [400, 401, 403, 404, 409, 422]) {
+      expect(shouldRetryPaymentReturnError(
+        new BffClientError("permanent", status),
+      )).toBe(false);
+    }
+
+    expect(shouldRetryPaymentReturnError(new TypeError("Failed to fetch")))
+      .toBe(true);
+    expect(shouldRetryPaymentReturnError(new Error("Invalid response contract")))
+      .toBe(false);
   });
 
   it("documents why identifiers from separate attempts must never be mixed", () => {

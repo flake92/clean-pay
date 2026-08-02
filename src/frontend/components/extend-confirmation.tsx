@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 
 import type {
@@ -146,6 +146,7 @@ function priceChoiceList(
   options: PriceOption[],
   selected: string,
   onSelect: (value: string) => void,
+  disabled = false,
 ) {
   return (
     <div className="clean-pay-price-choice-list">
@@ -156,6 +157,7 @@ function priceChoiceList(
               ? "clean-pay-price-choice clean-pay-price-choice--selected"
               : "clean-pay-price-choice"
           }
+          disabled={disabled}
           key={option.value}
           onClick={() => onSelect(option.value)}
           type="button"
@@ -173,6 +175,7 @@ export function ExtendConfirmation() {
   const [selection, setSelection] = useState("");
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const submittingRef = useRef(false);
   const requestedDuration = searchParams.get("duration");
   const requestedGateway = searchParams.get("gateway");
   const requestedExtendDestination = extensionDestination(
@@ -343,11 +346,22 @@ export function ExtendConfirmation() {
     selectedPrice?.gateway_type,
   );
 
+  function finishSubmitting() {
+    submittingRef.current = false;
+    setSubmitting(false);
+  }
+
   async function extendSubscription() {
-    if (!plan || !selectedDuration || !selectedPrice) {
+    if (
+      !plan ||
+      !selectedDuration ||
+      !selectedPrice ||
+      submittingRef.current
+    ) {
       return;
     }
 
+    submittingRef.current = true;
     setSubmitting(true);
     setSubmitError(null);
     const payload = {
@@ -381,7 +395,7 @@ export function ExtendConfirmation() {
       );
 
       if (!freshOffers || !freshPlan || !freshDuration || !freshPrice) {
-        setSubmitting(false);
+        finishSubmitting();
         setSubmitError("Выбранное предложение продления больше недоступно. Оплата не создана.");
         return;
       }
@@ -389,7 +403,7 @@ export function ExtendConfirmation() {
       if (!paymentOfferMatches(payload, freshPlan, freshDuration.days, freshPrice)) {
         setState({ status: "ready", offers: freshOffers });
         setSelection(`${freshDuration.days}:${freshPrice.gateway_type}`);
-        setSubmitting(false);
+        finishSubmitting();
         setSubmitError(
           `Цена изменилась: было ${selectedPrice.final_amount} ${selectedPrice.currency_symbol}, стало ${freshPrice.final_amount} ${freshPrice.currency_symbol}. Проверьте новую цену перед оплатой.`,
         );
@@ -405,7 +419,7 @@ export function ExtendConfirmation() {
         return;
       }
 
-      setSubmitting(false);
+      finishSubmitting();
       setSubmitError("Не удалось перепроверить цену. Продление не создано; повторите попытку позже.");
       return;
     }
@@ -415,7 +429,7 @@ export function ExtendConfirmation() {
     try {
       idempotencyKey = getOrCreatePaymentIdempotencyKey("extend", payload);
     } catch {
-      setSubmitting(false);
+      finishSubmitting();
       setSubmitError(
         "Браузер не смог безопасно подготовить продление. Обновите страницу или используйте другой браузер.",
       );
@@ -537,7 +551,7 @@ export function ExtendConfirmation() {
       );
     } finally {
       if (!paymentConfirmed) {
-        setSubmitting(false);
+        finishSubmitting();
       }
     }
   }
@@ -560,6 +574,7 @@ export function ExtendConfirmation() {
           <Dropdown
             aria-label="Длительность и способ оплаты"
             className="clean-pay-price-dropdown"
+            disabled={submitting}
             id="extend-offer"
             onChange={(event) => setSelection(event.value)}
             optionLabel="label"
@@ -570,7 +585,7 @@ export function ExtendConfirmation() {
             value={selection}
             valueTemplate={priceOptionTemplate}
           />
-          {priceChoiceList(priceOptions, selection, setSelection)}
+          {priceChoiceList(priceOptions, selection, setSelection, submitting)}
         </div>
         {selectedPrice ? (
           <p className="text-2xl font-semibold">

@@ -15,6 +15,7 @@ import {
   paymentPollDelayMs,
   paymentReturnOutcome,
   shouldPollPaymentReturn,
+  shouldRetryPaymentReturnError,
 } from "@/frontend/lib/payment-return";
 import { readPaymentReturnReference } from "@/frontend/lib/payment-return-storage";
 
@@ -193,7 +194,10 @@ export function PaymentReturnStatus({ kind }: Props) {
 
           // An operation id is durable, so a transient BFF/Remnashop outage
           // must not permanently stop the callback page from observing it.
-          if (resolvedOperationId || resolvedPaymentId) {
+          if (
+            (resolvedOperationId || resolvedPaymentId)
+            && shouldRetryPaymentReturnError(loadError)
+          ) {
             const delay = paymentPollDelayMs(pollAttempt);
             pollAttempt += 1;
             pollTimer = setTimeout(loadStatus, delay);

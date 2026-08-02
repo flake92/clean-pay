@@ -41,6 +41,15 @@ type ApplyTransactionInput = {
 
 const MAX_RECORD_PAYMENT_WRITE_ATTEMPTS = 3;
 
+const paymentStatusProgress: Record<PaymentRecordStatus, number> = {
+  UNKNOWN: 0,
+  PENDING: 1,
+  FAILED: 2,
+  CANCELED: 2,
+  COMPLETED: 3,
+  REFUNDED: 4,
+};
+
 function isUniqueConstraintError(error: unknown) {
   return (
     error instanceof Prisma.PrismaClientKnownRequestError &&
@@ -108,12 +117,14 @@ export async function applyRemnashopTransaction(
     input.transaction,
   );
   const syncedAt = new Date();
+  const incomingStatus = toPaymentStatus(input.transaction.status);
   const existing = await client.paymentRecord.findUnique({
     where: { paymentId: input.transaction.payment_id },
     select: {
       id: true,
       userId: true,
       operationId: true,
+      status: true,
       upstreamCreatedAt: true,
       upstreamUpdatedAt: true,
       lastSyncedAt: true,
@@ -141,13 +152,38 @@ export async function applyRemnashopTransaction(
   }
 
   if (existing) {
+    const sameUpstreamVersion =
+      upstreamUpdatedAt.getTime() === existing.upstreamUpdatedAt.getTime();
+    const wouldRegressSameVersion =
+      sameUpstreamVersion &&
+      paymentStatusProgress[incomingStatus] <
+        paymentStatusProgress[existing.status];
+
     if (
       existing.lastSyncedAt !== null &&
-      upstreamUpdatedAt < existing.upstreamUpdatedAt
+      (upstreamUpdatedAt < existing.upstreamUpdatedAt ||
+        wouldRegressSameVersion)
     ) {
       const touched = await client.paymentRecord.updateMany({
-        where: { id: existing.id, userId: input.userId },
-        data: { lastSyncedAt: syncedAt },
+        where: {
+          id: existing.id,
+          userId: input.userId,
+          ...(input.operationId
+            ? {
+                OR: [
+                  { operationId: null },
+                  { operationId: input.operationId },
+                ],
+              }
+            : {}),
+        },
+        data: {
+          lastSyncedAt: syncedAt,
+          // A newer history row may already exist before an ambiguous payment
+          // operation is reconciled. Preserve that newer authoritative state,
+          // but still establish the one-to-one operation relation.
+          ...(input.operationId ? { operationId: input.operationId } : {}),
+        },
       });
 
       if (touched.count !== 1) {
@@ -165,14 +201,18 @@ export async function applyRemnashopTransaction(
         userId: input.userId,
         ...(existing.lastSyncedAt === null
           ? { lastSyncedAt: null }
-          : { upstreamUpdatedAt: { lte: upstreamUpdatedAt } }),
+          : {
+              upstreamUpdatedAt: existing.upstreamUpdatedAt,
+              lastSyncedAt: existing.lastSyncedAt,
+              status: existing.status,
+            }),
         ...(input.operationId
           ? { OR: [{ operationId: null }, { operationId: input.operationId }] }
           : {}),
       },
       data: {
         purchaseType: input.transaction.purchase_type,
-        status: toPaymentStatus(input.transaction.status),
+        status: incomingStatus,
         finalAmount: input.transaction.final_amount,
         currency: input.transaction.currency,
         gatewayType: input.transaction.gateway_type,

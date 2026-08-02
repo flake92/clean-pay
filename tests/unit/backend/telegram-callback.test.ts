@@ -73,7 +73,7 @@ vi.mock("@/backend/payments/user-merge", () => ({
   withPaymentOwnerChangeFence: mocks.withPaymentOwnerChangeFence,
 }));
 
-import { POST } from "@/app/auth/telegram/callback/route";
+import { GET, POST } from "@/app/auth/telegram/callback/route";
 
 describe("Telegram callback payment-owner fence", () => {
   beforeEach(() => {
@@ -147,5 +147,37 @@ describe("Telegram callback payment-owner fence", () => {
       invalidateSiblingRemnashopTokens: true,
       paymentOwnerFenceHeld: true,
     });
+  });
+
+  it("returns generic failures without exposing a mismatched link-state owner", async () => {
+    mocks.consumeTelegramCallback.mockRejectedValueOnce(
+      new Error("link state belongs to target-user"),
+    );
+    mocks.consumeTelegramPopupToken.mockRejectedValueOnce(
+      new Error("link state belongs to target-user"),
+    );
+    mocks.getCurrentSession.mockResolvedValue(null);
+
+    const redirectResponse = await GET(new Request(
+      "https://clean-pay.example.com/auth/telegram/callback?code=code&state=state",
+    ));
+    const popupResponse = await POST(new Request(
+      "https://clean-pay.example.com/auth/telegram/callback",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ idToken: "telegram-id-token" }),
+      },
+    ));
+
+    expect(redirectResponse.status).toBe(307);
+    expect(redirectResponse.headers.get("location")).toBe(
+      "https://clean-pay.example.com/login?auth=telegram_failed",
+    );
+    expect(popupResponse.status).toBe(400);
+    await expect(popupResponse.json()).resolves.toEqual({
+      error: "telegram_failed",
+    });
+    expect(mocks.createWebSessionOnResponse).not.toHaveBeenCalled();
   });
 });

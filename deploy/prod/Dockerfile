@@ -1,8 +1,18 @@
-FROM node:24-bookworm-slim AS builder
+FROM node:24-bookworm-slim AS dependencies
 
 WORKDIR /app
 
 ENV NEXT_TELEMETRY_DISABLED=1
+
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends ca-certificates openssl \
+  && rm -rf /var/lib/apt/lists/*
+
+COPY package.json package-lock.json .npmrc ./
+RUN npm ci
+
+FROM dependencies AS builder
+
 ENV DATABASE_URL=postgresql://clean_pay:clean_pay@localhost:5432/clean_pay?schema=public
 ENV APP_URL=http://localhost:4000
 ARG NEXT_PUBLIC_APP_URL
@@ -36,13 +46,6 @@ ENV NEXT_PUBLIC_BRAND_LOGO_URL=${NEXT_PUBLIC_BRAND_LOGO_URL}
 ENV TURNSTILE_VERIFY_URL=https://challenges.cloudflare.com/turnstile/v0/siteverify
 ENV SUPPORT_ENABLED=false
 
-RUN apt-get update \
-  && apt-get install -y --no-install-recommends ca-certificates openssl \
-  && rm -rf /var/lib/apt/lists/*
-
-COPY package.json package-lock.json ./
-RUN npm ci
-
 COPY . .
 RUN npm run prisma:generate
 RUN npm run build
@@ -60,10 +63,10 @@ RUN apt-get update \
   && groupadd --system --gid 1001 nodejs \
   && useradd --system --uid 1001 --gid nodejs cleanpay
 
-COPY --from=builder --chown=cleanpay:nodejs /app/package.json /app/package-lock.json ./
-COPY --from=builder --chown=cleanpay:nodejs /app/node_modules ./node_modules
-COPY --from=builder --chown=cleanpay:nodejs /app/prisma ./prisma
-COPY --from=builder --chown=cleanpay:nodejs /app/prisma.config.ts ./prisma.config.ts
+COPY --from=dependencies --chown=cleanpay:nodejs /app/package.json /app/package-lock.json ./
+COPY --from=dependencies --chown=cleanpay:nodejs /app/node_modules ./node_modules
+COPY --chown=cleanpay:nodejs prisma ./prisma
+COPY --chown=cleanpay:nodejs prisma.config.ts ./prisma.config.ts
 COPY --chown=cleanpay:nodejs deploy/prod/validate-env.mjs ./deploy/prod/validate-env.mjs
 COPY --chown=cleanpay:nodejs deploy/prod/production-env-rules.mjs ./deploy/prod/production-env-rules.mjs
 

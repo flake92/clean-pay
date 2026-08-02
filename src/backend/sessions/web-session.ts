@@ -15,6 +15,40 @@ const sessionCookieNames = {
   refresh: "clean_pay_refresh",
 } as const;
 
+function revokedWebSessionData(now: Date) {
+  return {
+    revokedAt: now,
+    accessTokenExpiresAt: now,
+    refreshExpiresAt: now,
+    remnashopAccessTokenEncrypted: null,
+    remnashopRefreshTokenEncrypted: null,
+    remnashopAccessExpiresAt: null,
+    remnashopRefreshExpiresAt: null,
+  };
+}
+
+export async function clearWebSessionCookies() {
+  const cookieStore = await cookies();
+  cookieStore.delete(sessionCookieNames.access);
+  cookieStore.delete(sessionCookieNames.refresh);
+}
+
+export async function revokeAllWebSessionsForUser(
+  userId: string,
+  {
+    client = prisma,
+    now = new Date(),
+  }: {
+    client?: Pick<Prisma.TransactionClient, "webSession">;
+    now?: Date;
+  } = {},
+) {
+  return client.webSession.updateMany({
+    where: { userId, revokedAt: null },
+    data: revokedWebSessionData(now),
+  });
+}
+
 export const refreshTokenGraceMs = 10_000;
 
 export function assertEmailVerificationPolicy(user: {
@@ -263,6 +297,7 @@ async function getSessionByRefreshToken() {
 
   if (!rotated) {
     authDebugLog("session_refresh_lookup_miss", { reason: "not_found_revoked_or_expired" });
+    await clearWebSessionCookies();
     return null;
   }
 
@@ -397,6 +432,7 @@ export async function createWebSessionForRemnashopUser({
   remnashopRefreshExpiresAt,
   tx,
   assuranceLevel = WebSessionAssuranceLevel.FULL,
+  replaceExistingSessions = false,
 }: {
   userId: string;
   remnashopAccessTokenEncrypted: string;
@@ -405,6 +441,7 @@ export async function createWebSessionForRemnashopUser({
   remnashopRefreshExpiresAt: Date;
   tx?: Prisma.TransactionClient;
   assuranceLevel?: WebSessionAssuranceLevel;
+  replaceExistingSessions?: boolean;
 }) {
   const env = getEnv();
   const cookieStore = await cookies();
@@ -427,7 +464,42 @@ export async function createWebSessionForRemnashopUser({
     hasRemnashopTokens: true,
     remnashopAccessExpiresAt,
     remnashopRefreshExpiresAt,
+    replaceExistingSessions,
   });
+
+  if (replaceExistingSessions) {
+    if (!tx) {
+      throw new Error(
+        "Replacing existing Remnashop sessions requires an existing database transaction",
+      );
+    }
+
+    const lockedUser = await tx.$queryRaw<Array<{ id: string }>>(
+      Prisma.sql`
+        SELECT app_user."id"
+        FROM "WebUser" AS app_user
+        WHERE app_user."id" = ${userId}
+        FOR UPDATE
+      `,
+    );
+
+    if (lockedUser.length !== 1 || lockedUser[0]?.id !== userId) {
+      throw new BffError(
+        "CONFLICT",
+        409,
+        "Local account changed while replacing password-reset sessions",
+      );
+    }
+
+    const revokedSessions = await revokeAllWebSessionsForUser(userId, {
+      client: tx,
+      now,
+    });
+    authDebugLog("session_reset_existing_sessions_revoked", {
+      userId,
+      revokedSessionCount: revokedSessions.count,
+    });
+  }
 
   const session = await db.webSession.create({
     data: {
@@ -789,15 +861,7 @@ export async function replaceWebSessionAfterPasswordChange({
   );
   const refreshExpiresAt = addDays(now, securityPolicy.refreshSessionTtlDays);
   const refreshToken = randomToken(48);
-  const revokedSessionData = {
-    revokedAt: now,
-    accessTokenExpiresAt: now,
-    refreshExpiresAt: now,
-    remnashopAccessTokenEncrypted: null,
-    remnashopRefreshTokenEncrypted: null,
-    remnashopAccessExpiresAt: null,
-    remnashopRefreshExpiresAt: null,
-  };
+  const revokedSessionData = revokedWebSessionData(now);
 
   const replaceSession = () => prisma.$transaction(async (tx) => {
     const lockedSession = await tx.$queryRaw<Array<{ id: string }>>(
@@ -941,7 +1005,11 @@ export async function clearWebSession() {
 
     if (session) {
       await prisma.webSession.updateMany({
-        where: { userId: session.userId, revokedAt: null },
+        where: {
+          id: session.id,
+          userId: session.userId,
+          revokedAt: null,
+        },
         data: { revokedAt: new Date() },
       });
     } else if (refreshToken) {

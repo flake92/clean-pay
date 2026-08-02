@@ -199,14 +199,14 @@ model WebSession {
 }
 
 model WebRefreshToken {
-  id                        String     @id @default(cuid())
-  sessionId                 String
-  tokenHash                 String     @unique
-  successorTokenEncrypted   String
-  graceExpiresAt            DateTime
-  consumedAt                DateTime   @default(now())
-  createdAt                 DateTime   @default(now())
-  session                   WebSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  id                      String     @id @default(cuid())
+  sessionId               String
+  tokenHash               String     @unique
+  successorTokenEncrypted String
+  graceExpiresAt          DateTime
+  consumedAt              DateTime   @default(now())
+  createdAt               DateTime   @default(now())
+  session                 WebSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
 
   @@index([sessionId, consumedAt])
   @@index([graceExpiresAt])

@@ -29,13 +29,15 @@ vi.mock("@/frontend/components/prime/link-button", () => ({
 }));
 vi.mock("@/frontend/components/turnstile-widget", () => ({
   hasTurnstileSiteKey: (key?: string | null) => Boolean(key),
-  TurnstileWidget: ({ onReady, onToken }: {
+  TurnstileWidget: ({ action, onReady, onToken }: {
+    action: string;
     onReady?: (handle: { reset: () => void }) => void;
     onToken: (token: string | null) => void;
   }) => {
     useEffect(() => onReady?.({ reset: resetTurnstile }), [onReady]);
     return createElement("button", {
       "data-testid": "turnstile",
+      "data-action": action,
       onClick: () => onToken("profile-turnstile-token"),
       type: "button",
     }, "Turnstile");
@@ -103,6 +105,8 @@ describe("profile e-mail Turnstile policy", () => {
     const form = container.querySelector("form")!;
     const email = form.querySelector('input[type="email"]') as HTMLInputElement;
     await act(async () => setInputValue(email, "next@example.com"));
+    expect(container.querySelector('[data-testid="turnstile"]')?.getAttribute("data-action"))
+      .toBe("email_change");
 
     await submit(form);
     expect(fetch).toHaveBeenCalledTimes(1);
@@ -123,6 +127,36 @@ describe("profile e-mail Turnstile policy", () => {
       turnstileToken: "profile-turnstile-token",
       "cf-turnstile-response": "profile-turnstile-token",
     });
+    expect(resetTurnstile).toHaveBeenCalledOnce();
+  });
+
+  it("uses the verification action when resending a code for the current e-mail", async () => {
+    await act(async () => root.render(createElement(ProfilePanel, {
+      turnstileEnabled: true,
+      turnstileSiteKey: "site-key",
+    })));
+    await flush();
+
+    const widget = container.querySelector('[data-testid="turnstile"]') as HTMLButtonElement;
+    expect(widget.getAttribute("data-action")).toBe("email_verification");
+    await act(async () => widget.click());
+    vi.mocked(fetch).mockResolvedValueOnce(Response.json({
+      error: { code: "RATE_LIMITED", message: "try later" },
+    }, { status: 429 }));
+
+    await submit(container.querySelector("form")!);
+    await flush();
+
+    expect(fetch).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(fetch).mock.calls[1]?.[0]).toBe(
+      "/api/bff/auth/email/request-verification",
+    );
+    expect(JSON.parse(String(vi.mocked(fetch).mock.calls[1]?.[1]?.body)))
+      .toMatchObject({
+        email: "user@example.com",
+        turnstileToken: "profile-turnstile-token",
+        "cf-turnstile-response": "profile-turnstile-token",
+      });
     expect(resetTurnstile).toHaveBeenCalledOnce();
   });
 
@@ -151,5 +185,69 @@ describe("profile e-mail Turnstile policy", () => {
     expect(container.textContent).toContain("Добавить e-mail и пароль");
     expect(container.textContent).toContain("не потерять доступ без Telegram");
     expect(container.querySelector("a")?.getAttribute("href")).toBe("/link-account");
+  });
+
+  it("labels a Passkey-authenticated profile without calling it e-mail login", async () => {
+    vi.mocked(fetch).mockReset().mockResolvedValueOnce(Response.json({
+      data: {
+        user: {
+          email: "user@example.com",
+          emailVerified: true,
+          telegram_id: null,
+          auth_type: "passkey",
+          is_email_verified: true,
+          pending_email: null,
+          language: "ru",
+        },
+      },
+    }));
+
+    await act(async () => root.render(createElement(ProfilePanel, {
+      turnstileEnabled: false,
+      turnstileSiteKey: null,
+    })));
+    await flush();
+
+    expect(container.textContent).toContain("Ключ доступа");
+  });
+
+  it("atomically ignores a second profile mutation while another one is pending", async () => {
+    await act(async () => root.render(createElement(ProfilePanel, {
+      turnstileEnabled: false,
+      turnstileSiteKey: null,
+    })));
+    await flush();
+
+    let resolveRequest!: (response: Response) => void;
+    const pendingRequest = new Promise<Response>((resolve) => {
+      resolveRequest = resolve;
+    });
+    vi.mocked(fetch).mockImplementationOnce(() => pendingRequest);
+
+    const [emailForm, passwordForm] = Array.from(
+      container.querySelectorAll<HTMLFormElement>("form"),
+    );
+    expect(emailForm).toBeDefined();
+    expect(passwordForm).toBeDefined();
+
+    await act(async () => {
+      emailForm!.dispatchEvent(new SubmitEvent("submit", { bubbles: true, cancelable: true }));
+      passwordForm!.dispatchEvent(new SubmitEvent("submit", { bubbles: true, cancelable: true }));
+      await Promise.resolve();
+    });
+
+    expect(fetch).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(fetch).mock.calls[1]?.[0]).toBe(
+      "/api/bff/auth/email/request-verification",
+    );
+    expect(Array.from(container.querySelectorAll<HTMLButtonElement>('button[type="submit"]'))
+      .every((button) => button.disabled)).toBe(true);
+
+    resolveRequest(Response.json({
+      error: { code: "RATE_LIMITED", message: "try later" },
+    }, { status: 429 }));
+    await flush();
+
+    expect(fetch).toHaveBeenCalledTimes(2);
   });
 });

@@ -80,6 +80,35 @@ describe.each([
     expect(container.textContent).toContain("Не удалось определить результат входа");
   });
 
+  it("atomically ignores a same-tick duplicate start request", async () => {
+    let resolveRequest!: (response: Response) => void;
+    const pendingRequest = new Promise<Response>((resolve) => {
+      resolveRequest = resolve;
+    });
+    vi.mocked(fetch).mockImplementationOnce(() => pendingRequest);
+    const email = container.querySelector<HTMLInputElement>('input[type="email"]')!;
+    await act(async () => setInputValue(email, "user@example.com"));
+    const form = container.querySelector("form")!;
+
+    await act(async () => {
+      form.dispatchEvent(new SubmitEvent("submit", { bubbles: true, cancelable: true }));
+      form.dispatchEvent(new SubmitEvent("submit", { bubbles: true, cancelable: true }));
+      await Promise.resolve();
+    });
+
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(container.querySelector<HTMLButtonElement>('button[type="submit"]')?.disabled)
+      .toBe(true);
+
+    resolveRequest(Response.json({ data: { success: true } }, { status: 202 }));
+    await act(async () => {
+      await pendingRequest;
+      await Promise.resolve();
+    });
+
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
   it("uses the generic start endpoint and reveals no account branch", async () => {
     vi.mocked(fetch).mockResolvedValueOnce(Response.json({ data: { success: true } }, { status: 202 }));
     const email = container.querySelector<HTMLInputElement>('input[type="email"]')!;

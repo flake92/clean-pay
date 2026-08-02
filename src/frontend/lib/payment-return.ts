@@ -1,3 +1,5 @@
+import { BffClientError } from "@/frontend/lib/client-api";
+
 type PaymentReturnSnapshot = {
   payment?: { status?: string } | null;
   operation?: { status?: string; retry_after_seconds?: number | null } | null;
@@ -33,9 +35,29 @@ export function paymentReturnOutcome(snapshot: PaymentReturnSnapshot | null): Pa
 export function shouldPollPaymentReturn(snapshot: PaymentReturnSnapshot | null) {
   if (!snapshot) return false;
 
-  return snapshot.operation?.status === "processing"
-    || snapshot.operation?.status === "outcome_unknown"
+  const operationStatus = snapshot.operation?.status;
+
+  if (
+    operationStatus === "failed"
+    || operationStatus === "manual_required"
+    || operationStatus === "retry_ready"
+  ) {
+    return false;
+  }
+
+  return operationStatus === "processing"
+    || operationStatus === "outcome_unknown"
     || snapshot.payment?.status === "pending";
+}
+
+export function shouldRetryPaymentReturnError(error: unknown) {
+  if (!(error instanceof BffClientError)) {
+    return error instanceof TypeError;
+  }
+
+  return error.status === 408
+    || error.status === 429
+    || error.status >= 500;
 }
 
 export function paymentPollDelayMs(attempt: number, retryAfterSeconds?: number | null) {

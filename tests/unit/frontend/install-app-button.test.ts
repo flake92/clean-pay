@@ -1,7 +1,8 @@
 /** @vitest-environment jsdom */
 
 import { act, createElement } from "react";
-import { createRoot, type Root } from "react-dom/client";
+import { createRoot, hydrateRoot, type Root } from "react-dom/client";
+import { renderToString } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/frontend/components/ios-install-guide", () => ({
@@ -21,7 +22,7 @@ import { InstallAppButton } from "@/frontend/components/install-app-button";
 
 describe("InstallAppButton", () => {
   let container: HTMLDivElement;
-  let root: Root;
+  let root: Root | null;
   let originalUserAgent: PropertyDescriptor | undefined;
 
   beforeEach(() => {
@@ -44,11 +45,13 @@ describe("InstallAppButton", () => {
     );
     container = document.createElement("div");
     document.body.append(container);
-    root = createRoot(container);
+    root = null;
   });
 
   afterEach(async () => {
-    await act(async () => root.unmount());
+    if (root) {
+      await act(async () => root?.unmount());
+    }
     container.remove();
     vi.unstubAllGlobals();
     if (originalUserAgent) {
@@ -61,8 +64,9 @@ describe("InstallAppButton", () => {
   });
 
   it("keeps the iOS guide closed until the optional install button is clicked", async () => {
+    root = createRoot(container);
     await act(async () => {
-      root.render(
+      root?.render(
         createElement(InstallAppButton, {
           alwaysVisible: true,
           autoOpenIosGuide: false,
@@ -87,5 +91,39 @@ describe("InstallAppButton", () => {
     expect(container.querySelector('[role="dialog"]')?.textContent).toContain(
       "Инструкция iOS",
     );
+  });
+
+  it("hydrates the server button before detecting standalone display mode", async () => {
+    vi.mocked(matchMedia).mockReturnValue({
+      matches: true,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    } as unknown as MediaQueryList);
+    const browserWindow = window;
+    vi.stubGlobal("window", undefined);
+    const markup = renderToString(createElement(InstallAppButton, {
+      alwaysVisible: true,
+      autoOpenIosGuide: false,
+    }));
+    vi.stubGlobal("window", browserWindow);
+    container.innerHTML = markup;
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    await act(async () => {
+      root = hydrateRoot(container, createElement(InstallAppButton, {
+        alwaysVisible: true,
+        autoOpenIosGuide: false,
+      }));
+    });
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    expect(container.textContent).toContain("Clean Pay уже установлен");
+    expect(
+      consoleError.mock.calls.some((call) =>
+        call.some((part) => String(part).toLowerCase().includes("hydration")),
+      ),
+    ).toBe(false);
   });
 });

@@ -165,8 +165,8 @@ services:
       telegram-oidc-mock:
         condition: service_started
     ports:
-      - "4000:4000"
-      - "5555:5555"
+      - "${CLEAN_PAY_DEVCONTAINER_APP_HOST_PORT:-4000}:4000"
+      - "${CLEAN_PAY_DEVCONTAINER_PRISMA_STUDIO_HOST_PORT:-5555}:5555"
     healthcheck:
       test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:4000/api/internal/health/readiness',{headers:{'x-clean-pay-readiness-secret':process.env.READINESS_INTERNAL_SECRET},signal:AbortSignal.timeout(10000)}).then(async r=>{const b=await r.json();if(!r.ok||b.status!=='ok'||!b.checks||Object.values(b.checks).some(c=>c.status!=='ok'))process.exit(1)}).catch(()=>process.exit(1))\""]
       interval: 15s
@@ -189,7 +189,7 @@ services:
       timeout: 5s
       retries: 20
     ports:
-      - "5432:5432"
+      - "${CLEAN_PAY_DEVCONTAINER_POSTGRES_HOST_PORT:-5432}:5432"
 
   redis:
     image: redis:7-alpine
@@ -203,7 +203,7 @@ services:
       timeout: 5s
       retries: 20
     ports:
-      - "6379:6379"
+      - "${CLEAN_PAY_DEVCONTAINER_REDIS_HOST_PORT:-6379}:6379"
 
   remnashop:
     build:
@@ -212,7 +212,7 @@ services:
       args:
         BUILD_BRANCH: codex/clean-pay-integration-upstream-dev
         BUILD_COMMIT: b9da68a651e9ab0b7ed52d030e13754311614759
-    image: clean-pay-dev-remnashop:latest
+    image: ${CLEAN_PAY_DEVCONTAINER_REMNASHOP_IMAGE:-${COMPOSE_PROJECT_NAME:-clean-pay-dev}-remnashop:latest}
     restart: unless-stopped
     environment:
       <<: *remnashop-env
@@ -231,10 +231,10 @@ services:
       - remnashop-assets:/opt/remnashop/assets
       - remnashop-logs:/opt/remnashop/logs
     ports:
-      - "5001:5000"
+      - "${CLEAN_PAY_DEVCONTAINER_REMNASHOP_HOST_PORT:-5001}:5000"
 
   remnashop-migration:
-    image: clean-pay-dev-remnashop:latest
+    image: ${CLEAN_PAY_DEVCONTAINER_REMNASHOP_IMAGE:-${COMPOSE_PROJECT_NAME:-clean-pay-dev}-remnashop:latest}
     restart: "no"
     command: ["./docker-migrate.sh"]
     environment:
@@ -244,7 +244,7 @@ services:
         condition: service_healthy
 
   remnashop-worker:
-    image: clean-pay-dev-remnashop:latest
+    image: ${CLEAN_PAY_DEVCONTAINER_REMNASHOP_IMAGE:-${COMPOSE_PROJECT_NAME:-clean-pay-dev}-remnashop:latest}
     restart: unless-stopped
     command: taskiq worker src.infrastructure.taskiq.worker:worker --workers 1 --ack-type when_received --tasks-pattern src/infrastructure/taskiq/tasks/*.py -fsd
     environment:
@@ -258,7 +258,7 @@ services:
         condition: service_healthy
 
   remnashop-scheduler:
-    image: clean-pay-dev-remnashop:latest
+    image: ${CLEAN_PAY_DEVCONTAINER_REMNASHOP_IMAGE:-${COMPOSE_PROJECT_NAME:-clean-pay-dev}-remnashop:latest}
     restart: unless-stopped
     command: taskiq scheduler src.infrastructure.taskiq.scheduler:scheduler --tasks-pattern src/infrastructure/taskiq/tasks/*.py -fsd
     environment:
@@ -287,7 +287,7 @@ services:
       timeout: 5s
       retries: 20
     ports:
-      - "6767:5432"
+      - "${CLEAN_PAY_DEVCONTAINER_REMNASHOP_POSTGRES_HOST_PORT:-6767}:5432"
 
   remnashop-cache:
     image: valkey/valkey:9-alpine
@@ -330,7 +330,7 @@ services:
     volumes:
       - ${CLEAN_PAY_HOST_DEVCONTAINER_DIR:-.}/telegram-oidc-mock:/mock:ro
     ports:
-      - "8090:8090"
+      - "${CLEAN_PAY_DEVCONTAINER_TELEGRAM_OIDC_HOST_PORT:-8090}:8090"
 
   smtp:
     image: axllent/mailpit:latest
@@ -341,8 +341,8 @@ services:
       MP_WEBHOOK_URL: http://smtp-log:8126/
       MP_WEBHOOK_LIMIT: "0"
     ports:
-      - "8025:8025"
-      - "1025:1025"
+      - "${CLEAN_PAY_DEVCONTAINER_MAILPIT_HTTP_HOST_PORT:-8025}:8025"
+      - "${CLEAN_PAY_DEVCONTAINER_MAILPIT_SMTP_HOST_PORT:-1025}:1025"
     depends_on:
       smtp-log:
         condition: service_started
@@ -378,9 +378,9 @@ services:
       smtp:
         condition: service_started
     ports:
-      - "8080:8080"
-      - "8081:8081"
-      - "8026:8026"
+      - "${CLEAN_PAY_DEVCONTAINER_CADDY_APP_HOST_PORT:-8080}:8080"
+      - "${CLEAN_PAY_DEVCONTAINER_CADDY_REMNASHOP_HOST_PORT:-8081}:8081"
+      - "${CLEAN_PAY_DEVCONTAINER_CADDY_MAILPIT_HOST_PORT:-8026}:8026"
 
 volumes:
   node-modules:

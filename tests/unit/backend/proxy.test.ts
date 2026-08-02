@@ -55,7 +55,7 @@ describe("proxy auth redirects", () => {
     },
   );
 
-  it.each(["/install", "/offline"])("allows public PWA page %s without cookies", async (pathname) => {
+  it.each(["/", "/install", "/offline"])("allows public page %s without cookies", async (pathname) => {
     const response = await proxy(request(pathname));
 
     expect(response.status).toBe(200);
@@ -121,7 +121,109 @@ describe("proxy auth redirects", () => {
     const response = await proxy(request("/cabinet", cookie));
 
     expect(response.status).toBe(307);
-    expect(response.headers.get("location")).toBe("https://pay.example.com/passkey/setup");
+    expect(response.headers.get("location")).toBe(
+      "https://pay.example.com/passkey/setup?redirect_to=%2Fcabinet",
+    );
+  });
+
+  it("preserves a payment query when an authenticated login redirect is resolved", async () => {
+    const cookie = `clean_pay_access=${accessToken({
+      sid: "session-1",
+      uid: "user-1",
+      exp: Math.floor(Date.now() / 1000) + 60,
+      al: "FULL",
+      ev: true,
+      tg: false,
+    })}`;
+    const paymentPath = "/payment?plan=pro&duration=30&gateway=card#confirm";
+    const response = await proxy(request(
+      `/login?redirect_to=${encodeURIComponent(paymentPath)}`,
+      cookie,
+    ));
+
+    expect(response.status).toBe(307);
+    expect(response.headers.get("location")).toBe(
+      `https://pay.example.com${paymentPath}`,
+    );
+  });
+
+  it("preserves an authenticated continuation to the account-link page", async () => {
+    const cookie = `clean_pay_access=${accessToken({
+      sid: "session-1",
+      uid: "user-1",
+      exp: Math.floor(Date.now() / 1000) + 60,
+      al: "FULL",
+      ev: true,
+      tg: false,
+    })}`;
+    const response = await proxy(request(
+      "/login?redirect_to=%2Flink-account%3Freason%3Dmanual",
+      cookie,
+    ));
+
+    expect(response.status).toBe(307);
+    expect(response.headers.get("location")).toBe(
+      "https://pay.example.com/link-account?reason=manual",
+    );
+  });
+
+  it("threads an unverified login destination through registration verification", async () => {
+    const cookie = `clean_pay_access=${accessToken({
+      sid: "session-1",
+      uid: "user-1",
+      exp: Math.floor(Date.now() / 1000) + 60,
+      al: "FULL",
+      ev: false,
+      tg: false,
+    })}`;
+    const paymentPath = "/payment?plan=pro&duration=30&gateway=card";
+    const response = await proxy(request(
+      `/login?redirect_to=${encodeURIComponent(paymentPath)}`,
+      cookie,
+    ));
+
+    expect(response.status).toBe(307);
+    expect(response.headers.get("location")).toBe(
+      `https://pay.example.com/register/verify-email?redirect_to=${encodeURIComponent(paymentPath)}`,
+    );
+  });
+
+  it("preserves a protected payment destination for an unverified session", async () => {
+    const cookie = `clean_pay_access=${accessToken({
+      sid: "session-1",
+      uid: "user-1",
+      exp: Math.floor(Date.now() / 1000) + 60,
+      al: "FULL",
+      ev: false,
+      tg: false,
+    })}`;
+    const paymentPath = "/payment?plan=pro&duration=30&gateway=card";
+    const response = await proxy(request(paymentPath, cookie));
+
+    expect(response.status).toBe(307);
+    expect(response.headers.get("location")).toBe(
+      `https://pay.example.com/register/verify-email?redirect_to=${encodeURIComponent(paymentPath)}`,
+    );
+  });
+
+  it("threads a login destination into bootstrap Passkey setup", async () => {
+    const cookie = `clean_pay_access=${accessToken({
+      sid: "session-1",
+      uid: "user-1",
+      exp: Math.floor(Date.now() / 1000) + 60,
+      al: "BOOTSTRAP",
+      ev: true,
+    })}; clean_pay_refresh=refresh-token`;
+    const paymentPath = "/payment?plan=pro&duration=30&gateway=card";
+    const response = await proxy(request(
+      `/login?redirect_to=${encodeURIComponent(paymentPath)}`,
+      cookie,
+    ));
+
+    expect(response.status).toBe(307);
+    expect(response.headers.get("location")).toBe(
+      `https://pay.example.com/passkey/setup?redirect_to=${encodeURIComponent(paymentPath)}`,
+    );
   });
 
   it("allows a bootstrap session to finish passkey setup", async () => {

@@ -7,6 +7,7 @@ import {
   hasAccountSetupNotice,
   isPaymentDestination,
   passkeySetupPath,
+  registrationEmailVerificationPath,
   resolveEmailVerificationSetup,
   safeAccountSetupDestination,
 } from "@/shared/auth/account-setup-flow";
@@ -28,6 +29,9 @@ describe("guided account setup redirects", () => {
     );
     expect(passkeySetupPath(paymentPath)).toBe(
       "/passkey/setup?redirect_to=%2Fpayment%3Fplan%3Dpro%26duration%3D30%26gateway%3Dcard",
+    );
+    expect(registrationEmailVerificationPath(paymentPath)).toBe(
+      "/register/verify-email?redirect_to=%2Fpayment%3Fplan%3Dpro%26duration%3D30%26gateway%3Dcard",
     );
     expect(accountSetupCompletePath(paymentPath)).toBe(
       "/payment?plan=pro&duration=30&gateway=card&account_setup=account-ready",

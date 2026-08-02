@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 
 import type {
@@ -93,6 +93,7 @@ export function PaymentConfirmation() {
   const [state, setState] = useState<LoadState>({ status: "loading" });
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const submittingRef = useRef(false);
   const planCode = searchParams.get("plan");
   const durationDays = searchParams.get("duration");
   const gatewayType = searchParams.get("gateway");
@@ -209,11 +210,17 @@ export function PaymentConfirmation() {
     return findSelection(state.offers, planCode, durationDays, gatewayType);
   }, [durationDays, gatewayType, planCode, state]);
 
+  function finishSubmitting() {
+    submittingRef.current = false;
+    setSubmitting(false);
+  }
+
   async function createPayment() {
-    if (!selection) {
+    if (!selection || submittingRef.current) {
       return;
     }
 
+    submittingRef.current = true;
     setSubmitting(true);
     setSubmitError(null);
     const payload = {
@@ -248,7 +255,7 @@ export function PaymentConfirmation() {
         : null;
 
       if (!freshOffers || !freshSelection) {
-        setSubmitting(false);
+        finishSubmitting();
         setSubmitError("Выбранное предложение больше недоступно. Оплата не создана.");
         return;
       }
@@ -262,7 +269,7 @@ export function PaymentConfirmation() {
         )
       ) {
         setState({ status: "ready", offers: freshOffers });
-        setSubmitting(false);
+        finishSubmitting();
         setSubmitError(
           `Цена изменилась: было ${selection.price.final_amount} ${selection.price.currency_symbol}, стало ${freshSelection.price.final_amount} ${freshSelection.price.currency_symbol}. Проверьте новую цену перед оплатой.`,
         );
@@ -278,7 +285,7 @@ export function PaymentConfirmation() {
         return;
       }
 
-      setSubmitting(false);
+      finishSubmitting();
       setSubmitError("Не удалось перепроверить цену. Оплата не создана; повторите попытку позже.");
       return;
     }
@@ -288,7 +295,7 @@ export function PaymentConfirmation() {
     try {
       idempotencyKey = getOrCreatePaymentIdempotencyKey("purchase", payload);
     } catch {
-      setSubmitting(false);
+      finishSubmitting();
       setSubmitError(
         "Браузер не смог безопасно подготовить оплату. Обновите страницу или используйте другой браузер.",
       );
@@ -410,7 +417,7 @@ export function PaymentConfirmation() {
       );
     } finally {
       if (!paymentConfirmed) {
-        setSubmitting(false);
+        finishSubmitting();
       }
     }
   }

@@ -77,6 +77,8 @@ describe("password reset", () => {
       accessToken: "new-access",
       refreshToken: "new-refresh",
       auth: auth.data,
+      replaceExistingSessions: true,
+      replacementIdentityEmail: "user@example.com",
     });
     expect(mocks.auditLog).toHaveBeenCalledWith({
       action: "password_reset_success",

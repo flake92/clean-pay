@@ -2,6 +2,11 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import { logger } from "@/backend/observability/logger";
 import { validateMutationRequest, validateRequestSource } from "@/backend/security/csrf";
+import {
+  passkeySetupPath,
+  registrationEmailVerificationPath,
+} from "@/shared/auth/account-setup-flow";
+import { safeRedirectPath } from "@/shared/auth/redirect-policy";
 
 const accessCookieName = 'clean_pay_access';
 const refreshCookieName = 'clean_pay_refresh';
@@ -37,6 +42,7 @@ function isBodylessMutation(method: string, pathname: string) {
 }
 
 const publicPagePaths = new Set([
+  '/',
   '/manifest.webmanifest',
   '/install',
   '/offline',
@@ -202,6 +208,17 @@ function safeRedirectTarget(request: NextRequest) {
   return target;
 }
 
+function localRedirectUrl(request: NextRequest, target: string) {
+  const resolved = new URL(target, request.nextUrl.origin);
+  const url = request.nextUrl.clone();
+
+  url.pathname = resolved.pathname;
+  url.search = resolved.search;
+  url.hash = resolved.hash;
+
+  return url;
+}
+
 function loginRedirect(request: NextRequest) {
   const url = request.nextUrl.clone();
   url.pathname = '/login';
@@ -216,17 +233,14 @@ function loginRedirect(request: NextRequest) {
 }
 
 function authenticatedRedirect(request: NextRequest, emailVerificationRequired: boolean) {
-  const redirectTo = request.nextUrl.searchParams.get('redirect_to');
-  const url = request.nextUrl.clone();
+  const redirectTo = safeRedirectPath(
+    request.nextUrl.searchParams.get('redirect_to'),
+  ) ?? '/cabinet';
+  const target = emailVerificationRequired
+    ? registrationEmailVerificationPath(redirectTo)
+    : redirectTo;
 
-  url.pathname = emailVerificationRequired
-    ? '/register/verify-email'
-    : redirectTo?.startsWith('/') && !redirectTo.startsWith('//')
-    ? redirectTo
-    : '/cabinet';
-  url.search = '';
-
-  return NextResponse.redirect(url);
+  return NextResponse.redirect(localRedirectUrl(request, target));
 }
 
 function requestMetadata(request: NextRequest, accessState: AccessState) {
@@ -331,11 +345,14 @@ export async function proxy(request: NextRequest) {
 
   if (isPublicPath(pathname)) {
     if ((accessState.authenticated || isBootstrapAuthenticated) && (pathname === '/login' || pathname === '/register')) {
+      const requestedRedirect = safeRedirectPath(
+        request.nextUrl.searchParams.get('redirect_to'),
+      ) ?? '/cabinet';
       const redirectTo = isBootstrapAuthenticated
-        ? "/passkey/setup"
+        ? passkeySetupPath(requestedRedirect)
         : accessState.emailVerificationRequired
-          ? "/register/verify-email"
-          : "/cabinet";
+          ? registrationEmailVerificationPath(requestedRedirect)
+          : requestedRedirect;
       logger.info("http_request_decision", {
         ...metadata,
         action: "redirect_authenticated_user",
@@ -348,10 +365,7 @@ export async function proxy(request: NextRequest) {
         message: `${request.method} ${pathname} -> 307 redirect authenticated user`,
       });
       if (isBootstrapAuthenticated) {
-        const url = request.nextUrl.clone();
-        url.pathname = "/passkey/setup";
-        url.search = "";
-        return NextResponse.redirect(url);
+        return NextResponse.redirect(localRedirectUrl(request, redirectTo));
       }
 
       return authenticatedRedirect(request, accessState.emailVerificationRequired);
@@ -390,15 +404,16 @@ export async function proxy(request: NextRequest) {
         );
       }
 
-      const url = request.nextUrl.clone();
-      url.pathname = '/register/verify-email';
-      url.search = '';
+      const redirectTarget = registrationEmailVerificationPath(
+        safeRedirectTarget(request),
+      );
+      const url = localRedirectUrl(request, redirectTarget);
 
       logger.info("http_request_decision", {
         ...metadata,
         action: "redirect_email_unverified",
         status: 307,
-        redirectTo: "/register/verify-email",
+        redirectTo: redirectTarget,
       }, {
         category: "http",
         source: "http.access",
@@ -449,15 +464,14 @@ export async function proxy(request: NextRequest) {
       );
     }
 
-    const url = request.nextUrl.clone();
-    url.pathname = '/passkey/setup';
-    url.search = '';
+    const redirectTarget = passkeySetupPath(safeRedirectTarget(request));
+    const url = localRedirectUrl(request, redirectTarget);
 
     logger.info("http_request_decision", {
       ...metadata,
       action: "redirect_passkey_setup",
       status: 307,
-      redirectTo: "/passkey/setup",
+      redirectTo: redirectTarget,
     }, {
       category: "http",
       source: "http.access",

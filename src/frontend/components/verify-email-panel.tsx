@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { Button } from "primereact/button";
 import { Card } from "primereact/card";
@@ -110,6 +110,7 @@ export function VerifyEmailPanel({
   const [targetEmail, setTargetEmail] = useState<string | null>(null);
   const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
   const [turnstile, setTurnstile] = useState<TurnstileHandle | null>(null);
+  const actionLoadingRef = useRef<string | null>(null);
   const completedDestination = accountSetupCompletePath(redirectTo);
   const verificationDestination = emailVerificationPath(redirectTo);
 
@@ -188,15 +189,38 @@ export function VerifyEmailPanel({
     setTurnstileToken(null);
   }
 
+  function beginAction(action: string) {
+    if (actionLoadingRef.current !== null) {
+      return false;
+    }
+
+    actionLoadingRef.current = action;
+    setLoading(action);
+    return true;
+  }
+
+  function finishAction(action: string) {
+    if (actionLoadingRef.current !== action) {
+      return;
+    }
+
+    actionLoadingRef.current = null;
+    setLoading(null);
+  }
+
   async function requestCode(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (actionLoadingRef.current !== null) {
+      return;
+    }
     setMessage(null);
     setError(null);
-    setLoading("request");
 
     if (turnstileEnabled && !turnstileToken) {
-      setLoading(null);
       setError(missingTurnstileTokenMessage(turnstileSiteKey));
+      return;
+    }
+    if (!beginAction("request")) {
       return;
     }
 
@@ -243,19 +267,23 @@ export function VerifyEmailPanel({
       setTargetEmail(null);
       setError("Не удалось отправить код. Проверьте соединение и попробуйте снова.");
     } finally {
-      setLoading(null);
+      finishAction("request");
     }
   }
 
   async function confirmCode(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (actionLoadingRef.current !== null) {
+      return;
+    }
     setMessage(null);
     setError(null);
-    setLoading("confirm");
 
     if (turnstileEnabled && !turnstileToken) {
-      setLoading(null);
       setError(missingTurnstileTokenMessage(turnstileSiteKey));
+      return;
+    }
+    if (!beginAction("confirm")) {
       return;
     }
 
@@ -336,12 +364,14 @@ export function VerifyEmailPanel({
       resetTurnstile();
       setError("Не удалось подтвердить e-mail. Проверьте соединение и попробуйте снова.");
     } finally {
-      setLoading(null);
+      finishAction("confirm");
     }
   }
 
   async function continueAfterSynchronization() {
-    setLoading("continue");
+    if (!beginAction("continue")) {
+      return;
+    }
     setMessageSeverity("warn");
     setMessage("Проверяем готовность аккаунта...");
 
@@ -353,7 +383,7 @@ export function VerifyEmailPanel({
       setMessageSeverity("success");
       setMessage("Аккаунт готов. Возвращаем вас к прерванному действию.");
       replaceWith(completedDestination);
-      setLoading(null);
+      finishAction("continue");
       return;
     }
 
@@ -368,7 +398,7 @@ export function VerifyEmailPanel({
       setMessage(
         "E-mail ещё не подтверждён. Введите код из письма, чтобы продолжить.",
       );
-      setLoading(null);
+      finishAction("continue");
       return;
     }
 
@@ -388,7 +418,7 @@ export function VerifyEmailPanel({
             ? "Готовность аккаунта сейчас проверить не удалось. Код повторно вводить не нужно; повторите проверку позже."
           : "E-mail подтверждён, но синхронизация аккаунта ещё не завершена. Подождите немного и повторите проверку; повторная оплата не создавалась.",
     );
-    setLoading(null);
+    finishAction("continue");
   }
 
   if (confirmed) {
@@ -413,7 +443,7 @@ export function VerifyEmailPanel({
           ) : (
             <Button
               className="w-fit"
-              disabled={loading === "continue"}
+              disabled={loading !== null}
               label={
                 autoContinue
                   ? accountSyncPending
@@ -470,7 +500,7 @@ export function VerifyEmailPanel({
             />
           </label>
           <Button
-            disabled={loading === "confirm"}
+            disabled={loading !== null}
             label="Подтвердить e-mail"
             loading={loading === "confirm"}
             type="submit"
@@ -487,7 +517,7 @@ export function VerifyEmailPanel({
             <InputText name="email" placeholder="user@example.com" type="email" />
           </label>
           <Button
-            disabled={loading === "request"}
+            disabled={loading !== null}
             label="Отправить код повторно"
             loading={loading === "request"}
             severity="info"

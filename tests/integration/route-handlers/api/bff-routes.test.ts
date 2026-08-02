@@ -438,6 +438,33 @@ describe("BFF route integration contracts", () => {
     ]);
   });
 
+  it("validates and narrows promocode input before authentication or forwarding", async () => {
+    const invalid = await promocodeRoute.POST(
+      jsonRequest("/api/bff/subscription/promocode", { code: { nested: true } }),
+    );
+
+    expect(invalid.status).toBe(400);
+    expect(mocks.getAuthorizedRemnashopTokens).not.toHaveBeenCalled();
+    expect(mocks.remnashopRequest).not.toHaveBeenCalled();
+
+    const valid = await promocodeRoute.POST(
+      jsonRequest("/api/bff/subscription/promocode", {
+        code: "  PROMO-1  ",
+        ignored_client_field: "must-not-reach-upstream",
+      }),
+    );
+
+    expect(valid.status).toBe(200);
+    expect(mocks.remnashopRequest).toHaveBeenCalledWith(
+      "/subscription/promocode",
+      {
+        method: "POST",
+        accessToken: "access-token",
+        body: { code: "PROMO-1" },
+      },
+    );
+  });
+
   it.each([
     [
       "promocode_activation",
@@ -752,6 +779,43 @@ describe("BFF route integration contracts", () => {
     expect(response.status).toBe(429);
     expect(mocks.settlePaymentOperationBeforeDispatchFailure).toHaveBeenCalledWith(
       expect.objectContaining({ final: false }),
+    );
+    expect(mocks.markPaymentOperationDispatched).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [
+      "authentication expiry",
+      new BffError("UNAUTHORIZED", 401, "session expired"),
+    ],
+    [
+      "a local claim conflict",
+      new BffError("CONFLICT", 409, "claim expired"),
+    ],
+    [
+      "an upstream offers validation failure",
+      new BffError("VALIDATION_ERROR", 400, "offers request rejected", {
+        upstreamStatus: 400,
+        upstreamPath: "/subscription/offers",
+      }),
+    ],
+  ])("does not permanently poison an undispatched key after %s", async (
+    _name,
+    error,
+  ) => {
+    mocks.getAuthorizedRemnashopTokens.mockRejectedValueOnce(error);
+
+    const response = await extendRoute.POST(
+      jsonRequest(
+        "/api/bff/subscription/extend",
+        extendRequestBody(),
+        { "idempotency-key": "78787878-7878-4787-8787-787878787878" },
+      ),
+    );
+
+    expect(response.status).toBe(error.status);
+    expect(mocks.settlePaymentOperationBeforeDispatchFailure).toHaveBeenCalledWith(
+      expect.objectContaining({ error, final: false }),
     );
     expect(mocks.markPaymentOperationDispatched).not.toHaveBeenCalled();
   });

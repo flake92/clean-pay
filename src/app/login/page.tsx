@@ -4,18 +4,30 @@ import { safeRedirectPath } from "@/shared/auth/redirect-policy";
 
 export const dynamic = "force-dynamic";
 
+function firstSearchParam(value: string | string[] | undefined) {
+  return Array.isArray(value) ? value[0] : value;
+}
+
+function loginError(auth: string | undefined) {
+  return auth === "telegram_failed"
+    ? "Не удалось завершить вход через Telegram. Повторите попытку или войдите по e-mail."
+    : null;
+}
+
 export default async function LoginPage({
   searchParams,
 }: {
-  searchParams: Promise<{ redirect_to?: string | string[] }>;
+  searchParams: Promise<{
+    auth?: string | string[];
+    redirect_to?: string | string[];
+  }>;
 }) {
   const turnstileEnabled = process.env.TURNSTILE_ENABLED === "true";
   const turnstileSiteKey = process.env.TURNSTILE_SITE_KEY;
   const params = await searchParams;
-  const rawRedirect = Array.isArray(params.redirect_to)
-    ? params.redirect_to[0]
-    : params.redirect_to;
+  const rawRedirect = firstSearchParam(params.redirect_to);
   const redirectTo = safeRedirectPath(rawRedirect) ?? "/cabinet";
+  const initialError = loginError(firstSearchParam(params.auth));
 
   return (
     <AuthTurnstileProvider enabled={turnstileEnabled} siteKey={turnstileSiteKey}>
@@ -24,7 +36,7 @@ export default async function LoginPage({
         footer={<TelegramLoginButton redirectTo={redirectTo} />}
         title="Вход"
       >
-        <LoginForm redirectTo={redirectTo} />
+        <LoginForm initialError={initialError} redirectTo={redirectTo} />
       </AuthShell>
     </AuthTurnstileProvider>
   );

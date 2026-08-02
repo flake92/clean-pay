@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import {
   browserSupportsWebAuthn,
@@ -79,8 +79,13 @@ export function PasskeyLoginButton({
   const [error, setError] = useState<string | null>(null);
   const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
   const [turnstile, setTurnstile] = useState<TurnstileHandle | null>(null);
+  const loginPendingRef = useRef(false);
 
   async function login() {
+    if (loginPendingRef.current) {
+      return;
+    }
+
     if (turnstileEnabled && !turnstileToken) {
       setError(
         hasTurnstileSiteKey(turnstileSiteKey)
@@ -89,6 +94,7 @@ export function PasskeyLoginButton({
       );
       return;
     }
+    loginPendingRef.current = true;
     setLoading(true);
     setError(null);
 
@@ -131,6 +137,7 @@ export function PasskeyLoginButton({
             : "Не удалось войти быстрым способом.",
       );
     } finally {
+      loginPendingRef.current = false;
       setLoading(false);
     }
   }
@@ -184,12 +191,20 @@ export function PasskeySetupPanel({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [name, setName] = useState("");
+  const setupPendingRef = useRef(false);
 
   function continueWithoutPasskey() {
+    if (setupPendingRef.current) {
+      return;
+    }
     navigateTo(redirectTo);
   }
 
   async function createPasskey() {
+    if (setupPendingRef.current) {
+      return;
+    }
+    setupPendingRef.current = true;
     setLoading(true);
     setError(null);
 
@@ -231,6 +246,7 @@ export function PasskeySetupPanel({
             : "Не удалось создать быстрый вход.",
       );
     } finally {
+      setupPendingRef.current = false;
       setLoading(false);
     }
   }

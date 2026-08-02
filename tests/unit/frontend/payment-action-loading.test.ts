@@ -710,4 +710,52 @@ describe("payment action loading recovery", () => {
     expect(fetch).toHaveBeenCalledTimes(3);
     expect(window.sessionStorage.length).toBe(0);
   });
+
+  it.each([
+    ["purchase", PaymentConfirmation, "Перейти к оплате"],
+    ["extend", ExtendConfirmation, "Продлить"],
+  ] as const)(
+    "runs only one %s price preflight for same-tick clicks",
+    async (_operation, Component, buttonLabel) => {
+      const fetchMock = vi.mocked(fetch);
+      fetchMock
+        .mockResolvedValueOnce(verifiedProfileResponse())
+        .mockResolvedValueOnce(Response.json({ data: offers }));
+      let resolvePreflight!: (response: Response) => void;
+      fetchMock.mockReturnValueOnce(
+        new Promise<Response>((resolve) => {
+          resolvePreflight = resolve;
+        }),
+      );
+
+      await act(async () => root.render(createElement(Component)));
+      await settle();
+      const actionButton = Array.from(container.querySelectorAll("button")).find(
+        (button) => button.textContent === buttonLabel,
+      )!;
+
+      await act(async () => {
+        actionButton.dispatchEvent(
+          new MouseEvent("click", { bubbles: true, cancelable: true }),
+        );
+        actionButton.dispatchEvent(
+          new MouseEvent("click", { bubbles: true, cancelable: true }),
+        );
+        await Promise.resolve();
+      });
+
+      expect(fetch).toHaveBeenCalledTimes(3);
+
+      const changedOffers = structuredClone(offers);
+      changedOffers.plans[0]!.durations[0]!.prices[0]!.final_amount = "150";
+      await act(async () => {
+        resolvePreflight(Response.json({ data: changedOffers }));
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      expect(fetch).toHaveBeenCalledTimes(3);
+      expect(actionButton.disabled).toBe(false);
+    },
+  );
 });

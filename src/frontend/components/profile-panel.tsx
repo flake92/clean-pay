@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
 
 import { Button } from "primereact/button";
@@ -31,7 +31,13 @@ async function readError(response: Response, fallback: string) {
 }
 
 function authTypeLabel(value: string) {
-  return value === "telegram" ? "Telegram" : "E-mail";
+  const labels: Record<string, string> = {
+    email: "E-mail",
+    passkey: "Ключ доступа",
+    telegram: "Telegram",
+  };
+
+  return labels[value] ?? value;
 }
 
 function missingTurnstileTokenMessage(siteKey?: string | null) {
@@ -57,8 +63,37 @@ export function ProfilePanel({
   const [passwordMessage, setPasswordMessage] = useState<string | null>(null);
   const [passwordMessageSeverity, setPasswordMessageSeverity] = useState<"success" | "warn">("success");
   const [pendingAction, setPendingAction] = useState<string | null>(null);
+  const pendingActionRef = useRef<string | null>(null);
   const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
   const [turnstile, setTurnstile] = useState<TurnstileHandle | null>(null);
+  const currentEmailTarget = user?.pending_email ?? user?.email ?? "";
+
+  function turnstileActionForEmail(candidate: string) {
+    return candidate.trim().toLowerCase() === currentEmailTarget.toLowerCase()
+      ? "email_verification"
+      : "email_change";
+  }
+
+  const emailTurnstileAction = turnstileActionForEmail(email);
+
+  function beginPendingAction(action: string) {
+    if (pendingActionRef.current) {
+      return false;
+    }
+
+    pendingActionRef.current = action;
+    setPendingAction(action);
+    return true;
+  }
+
+  function finishPendingAction(action: string) {
+    if (pendingActionRef.current !== action) {
+      return;
+    }
+
+    pendingActionRef.current = null;
+    setPendingAction(null);
+  }
 
   async function fetchProfile() {
     const response = await fetch("/api/bff/auth/me");
@@ -153,15 +188,18 @@ export function ProfilePanel({
 
   async function changeEmail(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setPendingAction("email");
+
+    if (!beginPendingAction("email")) {
+      return;
+    }
+
     setMessage(null);
 
     const nextEmail = email.trim();
-    const currentTarget = user?.pending_email ?? user?.email ?? "";
-    const isSameEmail = nextEmail.toLowerCase() === currentTarget.toLowerCase();
+    const isSameEmail = turnstileActionForEmail(nextEmail) === "email_verification";
 
     if (turnstileEnabled && !turnstileToken) {
-      setPendingAction(null);
+      finishPendingAction("email");
       showMessage(missingTurnstileTokenMessage(turnstileSiteKey), "warn");
       return;
     }
@@ -197,13 +235,17 @@ export function ProfilePanel({
       showMessage(messageFromError(err, "Не удалось изменить e-mail."), "warn");
     } finally {
       resetTurnstile();
-      setPendingAction(null);
+      finishPendingAction("email");
     }
   }
 
   async function changePassword(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setPendingAction("password");
+
+    if (!beginPendingAction("password")) {
+      return;
+    }
+
     setMessage(null);
     setPasswordMessage(null);
 
@@ -227,7 +269,7 @@ export function ProfilePanel({
     } catch (err) {
       showPasswordMessage(err instanceof Error ? err.message : "Не удалось изменить пароль.", "warn");
     } finally {
-      setPendingAction(null);
+      finishPendingAction("password");
     }
   }
 
@@ -298,7 +340,8 @@ export function ProfilePanel({
           <form className="flex flex-column gap-3" onSubmit={changeEmail}>
             {turnstileEnabled ? (
               <TurnstileWidget
-                action="email_change"
+                action={emailTurnstileAction}
+                key={emailTurnstileAction}
                 onReady={setTurnstile}
                 onToken={setTurnstileToken}
                 siteKey={turnstileSiteKey}
@@ -307,7 +350,17 @@ export function ProfilePanel({
             <label className="flex flex-column gap-2">
               <span className="text-sm font-medium text-700">Новый e-mail</span>
               <InputText
-                onChange={(event) => setEmail(event.target.value)}
+                onChange={(event) => {
+                  const nextEmail = event.target.value;
+
+                  if (
+                    turnstileToken
+                    && turnstileActionForEmail(nextEmail) !== emailTurnstileAction
+                  ) {
+                    resetTurnstile();
+                  }
+                  setEmail(nextEmail);
+                }}
                 required
                 type="email"
                 value={email}
@@ -315,7 +368,7 @@ export function ProfilePanel({
             </label>
             <div className="flex flex-wrap gap-3">
               <Button
-                disabled={pendingAction === "email"}
+                disabled={pendingAction !== null}
                 label="Сохранить и отправить код"
                 loading={pendingAction === "email"}
                 type="submit"
@@ -355,7 +408,7 @@ export function ProfilePanel({
             </label>
             <Button
               className="w-fit"
-              disabled={pendingAction === "password"}
+              disabled={pendingAction !== null}
               label="Изменить пароль"
               loading={pendingAction === "password"}
               type="submit"

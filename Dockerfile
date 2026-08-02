@@ -1,36 +1,119 @@
-FROM node:24-bookworm-slim AS builder
+FROM node:24-bookworm-slim AS dependencies
+
 WORKDIR /app
-ENV NEXT_TELEMETRY_DISABLED=1 DATABASE_URL=postgresql://a:a@localhost:5432/a APP_URL=http://localhost:4000 REMNASHOP_API_BASE_URL=http://remnashop:5000/api/v1/public REMNASHOP_ADMIN_API_BASE_URL=http://remnashop:5000/api/v1/admin REMNAWAVE_API_BASE_URL=http://remnawave:3000 REMNAWAVE_TOKEN=build-placeholder REDIS_URL=redis://localhost:6379 WEB_JWT_SECRET=build-placeholder WEB_REFRESH_SECRET=build-placeholder AUDIT_IP_HASH_SECRET=build-placeholder RATE_LIMIT_IDENTITY_SECRET=build-placeholder READINESS_INTERNAL_SECRET=build-placeholder COOKIE_SECURE=false COOKIE_SAMESITE=lax TELEGRAM_OIDC_CLIENT_ID=1 TELEGRAM_OIDC_CLIENT_SECRET=build-placeholder TURNSTILE_SECRET_KEY=build-placeholder SUPPORT_ENABLED=false
+
+ENV NEXT_TELEMETRY_DISABLED=1
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates openssl \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY package.json package-lock.json .npmrc ./
+RUN npm ci
+
+FROM dependencies AS builder
+
+ENV DATABASE_URL=postgresql://a:a@localhost:5432/a
+ENV APP_URL=http://localhost:4000
+ENV REMNASHOP_API_BASE_URL=http://remnashop:5000/api/v1/public
+ENV REMNASHOP_ADMIN_API_BASE_URL=http://remnashop:5000/api/v1/admin
+ENV REMNASHOP_AUTH_SERVICE_KEY=build-time-placeholder-remnashop-auth-service-key
+ENV REMNAWAVE_API_BASE_URL=http://remnawave:3000
+ENV REMNAWAVE_TOKEN=build-placeholder
+ENV REDIS_URL=redis://localhost:6379
+ENV WEB_JWT_SECRET=build-placeholder
+ENV WEB_REFRESH_SECRET=build-placeholder
+ENV AUDIT_IP_HASH_SECRET=build-placeholder
+ENV RATE_LIMIT_IDENTITY_SECRET=build-placeholder
+ENV AUTH_RATE_LIMIT_CAPACITY=1000
+ENV AUTH_CONCURRENCY_LIMIT=64
+ENV READINESS_INTERNAL_SECRET=build-placeholder
+ENV COOKIE_SECURE=false
+ENV COOKIE_SAMESITE=lax
+ENV TELEGRAM_OIDC_CLIENT_ID=1
+ENV TELEGRAM_OIDC_CLIENT_SECRET=build-placeholder
 ARG NEXT_PUBLIC_APP_URL
 ENV NEXT_PUBLIC_APP_URL=${NEXT_PUBLIC_APP_URL}
-ARG TURNSTILE_ENABLED=false
-ARG TURNSTILE_SITE_KEY=
+ARG TURNSTILE_ENABLED=true
+ARG TURNSTILE_SITE_KEY=build-time-placeholder-site-key
 ARG NEXT_PUBLIC_BRAND_NAME="Clean Pay"
 ARG NEXT_PUBLIC_BRAND_LOGO_URL=/clean-pay-logo.png
-ENV TURNSTILE_ENABLED=${TURNSTILE_ENABLED} TURNSTILE_SITE_KEY=${TURNSTILE_SITE_KEY} NEXT_PUBLIC_BRAND_NAME=${NEXT_PUBLIC_BRAND_NAME} NEXT_PUBLIC_BRAND_LOGO_URL=${NEXT_PUBLIC_BRAND_LOGO_URL} TURNSTILE_VERIFY_URL=https://challenges.cloudflare.com/turnstile/v0/siteverify
-COPY package.json package-lock.json ./
-RUN npm ci
-COPY . .
-RUN npm run prisma:generate && npm run build
+ENV TURNSTILE_ENABLED=${TURNSTILE_ENABLED}
+ENV TURNSTILE_SITE_KEY=${TURNSTILE_SITE_KEY}
+ENV TURNSTILE_SECRET_KEY=build-placeholder
+ENV NEXT_PUBLIC_BRAND_NAME=${NEXT_PUBLIC_BRAND_NAME}
+ENV NEXT_PUBLIC_BRAND_LOGO_URL=${NEXT_PUBLIC_BRAND_LOGO_URL}
+ENV TURNSTILE_VERIFY_URL=https://challenges.cloudflare.com/turnstile/v0/siteverify
+ENV SUPPORT_ENABLED=false
 
-FROM node:24-bookworm-slim AS runner
+COPY . .
+RUN npm run prisma:generate
+RUN npm run build
+
+FROM node:24-bookworm-slim AS migration
+
 WORKDIR /app
-ARG NEXT_PUBLIC_APP_URL
-ENV NODE_ENV=production NEXT_TELEMETRY_DISABLED=1
-ENV CLEAN_PAY_BAKED_PUBLIC_APP_URL=${NEXT_PUBLIC_APP_URL}
+
+ENV NODE_ENV=production
+ENV NEXT_TELEMETRY_DISABLED=1
+
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates openssl \
     && rm -rf /var/lib/apt/lists/* \
     && groupadd --system --gid 1001 nodejs \
     && useradd --system --uid 1001 --gid nodejs cleanpay
-COPY --from=builder --chown=cleanpay:nodejs /app/package.json /app/package-lock.json ./
-COPY --from=builder --chown=cleanpay:nodejs /app/node_modules ./node_modules
-COPY --from=builder --chown=cleanpay:nodejs /app/.next ./.next
-COPY --from=builder --chown=cleanpay:nodejs /app/public ./public
-COPY --from=builder --chown=cleanpay:nodejs /app/prisma ./prisma
-COPY --from=builder --chown=cleanpay:nodejs /app/prisma.config.ts ./
-COPY --from=builder --chown=cleanpay:nodejs /app/deploy/prod/start.sh /app/deploy/prod/deploy-log.mjs /app/deploy/prod/validate-env.mjs /app/deploy/prod/production-env-rules.mjs /app/deploy/prod/reconcile-loop.mjs /app/deploy/prod/reconciliation-batch.mjs /app/deploy/prod/retention-cleanup.mjs /app/deploy/prod/retention-loop.mjs ./deploy/prod/
-RUN chmod +x ./deploy/prod/start.sh
+
+COPY --from=dependencies --chown=cleanpay:nodejs /app/package.json /app/package-lock.json ./
+COPY --from=dependencies --chown=cleanpay:nodejs /app/node_modules ./node_modules
+COPY --chown=cleanpay:nodejs prisma ./prisma
+COPY --chown=cleanpay:nodejs prisma.config.ts ./prisma.config.ts
+COPY --chown=cleanpay:nodejs deploy/prod/validate-env.mjs ./deploy/prod/validate-env.mjs
+COPY --chown=cleanpay:nodejs deploy/prod/production-env-rules.mjs ./deploy/prod/production-env-rules.mjs
+
 USER cleanpay
+
+CMD ["sh", "-c", "node deploy/prod/validate-env.mjs && node node_modules/prisma/build/index.js migrate deploy"]
+
+FROM node:24-bookworm-slim AS runner
+
+WORKDIR /app
+
+ARG NEXT_PUBLIC_APP_URL
+ENV NODE_ENV=production
+ENV NEXT_TELEMETRY_DISABLED=1
+ENV CLEAN_PAY_BAKED_PUBLIC_APP_URL=${NEXT_PUBLIC_APP_URL}
+ENV HOSTNAME=0.0.0.0
+ENV PORT=4000
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates openssl \
+    && rm -rf /var/lib/apt/lists/* \
+    && groupadd --system --gid 1001 nodejs \
+    && useradd --system --uid 1001 --gid nodejs cleanpay
+
+COPY --from=builder --chown=cleanpay:nodejs /app/.next/standalone ./
+COPY --from=builder --chown=cleanpay:nodejs /app/.next/static ./.next/static
+COPY --from=builder --chown=cleanpay:nodejs /app/public ./public
+# The standalone server bundles this adapter, while the retention worker imports
+# it directly. Copy only its runtime package pair; Prisma CLI remains migration-only.
+COPY --from=builder --chown=cleanpay:nodejs /app/node_modules/@prisma/adapter-pg ./node_modules/@prisma/adapter-pg
+COPY --from=builder --chown=cleanpay:nodejs /app/node_modules/@prisma/driver-adapter-utils ./node_modules/@prisma/driver-adapter-utils
+COPY --from=builder --chown=cleanpay:nodejs /app/node_modules/@prisma/debug ./node_modules/@prisma/debug
+COPY --from=builder --chown=cleanpay:nodejs /app/node_modules/postgres-array ./node_modules/postgres-array
+COPY --chown=cleanpay:nodejs deploy/prod/start.sh ./deploy/prod/start.sh
+COPY --chown=cleanpay:nodejs deploy/prod/deploy-log.mjs ./deploy/prod/deploy-log.mjs
+COPY --chown=cleanpay:nodejs deploy/prod/validate-env.mjs ./deploy/prod/validate-env.mjs
+COPY --chown=cleanpay:nodejs deploy/prod/production-env-rules.mjs ./deploy/prod/production-env-rules.mjs
+COPY --chown=cleanpay:nodejs deploy/prod/reconcile-loop.mjs ./deploy/prod/reconcile-loop.mjs
+COPY --chown=cleanpay:nodejs deploy/prod/reconciliation-batch.mjs ./deploy/prod/reconciliation-batch.mjs
+COPY --chown=cleanpay:nodejs deploy/prod/retention-cleanup.mjs ./deploy/prod/retention-cleanup.mjs
+COPY --chown=cleanpay:nodejs deploy/prod/retention-loop.mjs ./deploy/prod/retention-loop.mjs
+
+RUN sed -i 's/\r$//' ./deploy/prod/start.sh \
+    && chmod +x ./deploy/prod/start.sh
+
+USER cleanpay
+
 EXPOSE 4000
+
 CMD ["./deploy/prod/start.sh"]

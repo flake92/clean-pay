@@ -105,9 +105,9 @@ export async function assertRateLimit(options: RateLimitOptions) {
     });
   }
   const targetExceeded = keys.length === 2 && (counts[0] ?? 0) > options.limit;
-  const capacityLimit = keys.length === 1
-    ? Math.min(options.limit, getEnv().authRateLimitCapacity)
-    : getEnv().authRateLimitCapacity;
+  // Actions without a stable identity only have the shared capacity bucket.
+  // Their per-target limit must not accidentally become a tiny global limit.
+  const capacityLimit = getEnv().authRateLimitCapacity;
   const capacityExceeded = (counts.at(-1) ?? 0) > capacityLimit;
 
   if (targetExceeded || capacityExceeded) {

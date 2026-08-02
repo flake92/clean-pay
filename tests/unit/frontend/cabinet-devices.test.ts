@@ -297,4 +297,32 @@ describe("cabinet device records", () => {
     );
     expect(container.textContent).toContain("Устройство удалено.");
   });
+
+  it("atomically ignores a same-tick duplicate destructive action", async () => {
+    const deleteButtons = Array.from(
+      container.querySelectorAll<HTMLButtonElement>(
+        'button[aria-label^="Удалить устройство "]',
+      ),
+    );
+    const mobileButton = deleteButtons.find((button) => button.textContent === "")!;
+    const desktopButton = deleteButtons.find((button) => button.textContent === "Удалить")!;
+
+    await act(async () => {
+      mobileButton.dispatchEvent(
+        new MouseEvent("click", { bubbles: true, cancelable: true }),
+      );
+      desktopButton.dispatchEvent(
+        new MouseEvent("click", { bubbles: true, cancelable: true }),
+      );
+      await Promise.resolve();
+    });
+    await settle();
+
+    const deletionCalls = fetchMock.mock.calls.filter(([input, init]) =>
+      String(input).startsWith("/api/bff/subscription/devices/")
+      && init?.method === "DELETE",
+    );
+    expect(window.confirm).toHaveBeenCalledOnce();
+    expect(deletionCalls).toHaveLength(1);
+  });
 });

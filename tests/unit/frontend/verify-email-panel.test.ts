@@ -413,4 +413,114 @@ describe("e-mail verification feedback", () => {
     expect(container.querySelector('input[name="code"]')).not.toBeNull();
     expect(container.textContent).toContain("E-mail ещё не подтверждён");
   });
+
+  it("does not overlap code confirmation and resend in the same tick", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(
+      Response.json({
+        data: { user: { email: "user@example.com", emailVerified: false } },
+      }),
+    );
+    let resolveConfirmation!: (response: Response) => void;
+    vi.mocked(fetch).mockReturnValueOnce(
+      new Promise<Response>((resolve) => {
+        resolveConfirmation = resolve;
+      }),
+    );
+
+    await act(async () => root.render(createElement(VerifyEmailPanel)));
+    await flush();
+    const [confirmForm, requestForm] = container.querySelectorAll("form");
+
+    await act(async () => {
+      confirmForm!.dispatchEvent(
+        new SubmitEvent("submit", { bubbles: true, cancelable: true }),
+      );
+      requestForm!.dispatchEvent(
+        new SubmitEvent("submit", { bubbles: true, cancelable: true }),
+      );
+      await Promise.resolve();
+    });
+
+    expect(fetch).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(fetch).mock.calls[1]?.[0]).toBe(
+      "/api/bff/auth/email/confirm",
+    );
+    expect(
+      [...container.querySelectorAll("button")].every(
+        (button) => button.disabled,
+      ),
+    ).toBe(true);
+
+    await act(async () => {
+      resolveConfirmation(
+        Response.json(
+          { error: { code: "EMAIL_CODE_INVALID", message: "Invalid code" } },
+          { status: 400 },
+        ),
+      );
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+  });
+
+  it("starts only one readiness check for same-tick continue clicks", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(
+      Response.json({
+        data: {
+          user: {
+            email: "user@example.com",
+            emailVerified: true,
+            accountSyncPending: true,
+          },
+        },
+      }),
+    );
+    let resolveReadiness!: (response: Response) => void;
+    vi.mocked(fetch).mockReturnValueOnce(
+      new Promise<Response>((resolve) => {
+        resolveReadiness = resolve;
+      }),
+    );
+
+    await act(async () =>
+      root.render(
+        createElement(VerifyEmailPanel, {
+          autoContinue: true,
+          redirectTo: "/payment?plan=pro",
+        }),
+      ),
+    );
+    await flush();
+    const continueButton = Array.from(container.querySelectorAll("button")).find(
+      (button) => button.textContent === "Проверить и продолжить",
+    )!;
+
+    await act(async () => {
+      continueButton.dispatchEvent(
+        new MouseEvent("click", { bubbles: true, cancelable: true }),
+      );
+      continueButton.dispatchEvent(
+        new MouseEvent("click", { bubbles: true, cancelable: true }),
+      );
+      await Promise.resolve();
+    });
+
+    expect(fetch).toHaveBeenCalledTimes(2);
+
+    await act(async () => {
+      resolveReadiness(
+        Response.json({
+          data: {
+            user: {
+              email: "user@example.com",
+              emailVerified: true,
+              accountSyncPending: true,
+            },
+          },
+        }),
+      );
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+  });
 });

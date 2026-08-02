@@ -91,6 +91,56 @@ describe("Telegram account merge confirmation", () => {
     expect(container.textContent).toContain("Объединить аккаунты");
   });
 
+  it("serializes merge and other account actions before React rerenders", async () => {
+    await act(async () => root.render(createElement(LinkAccountPanel)));
+    await flush();
+
+    let resolveMerge!: (response: Response) => void;
+    vi.mocked(fetch).mockReturnValueOnce(
+      new Promise<Response>((resolve) => {
+        resolveMerge = resolve;
+      }),
+    );
+    const confirmButton = [...container.querySelectorAll("button")].find(
+      (button) => button.textContent === "Объединить аккаунты",
+    )!;
+    const cancelButton = [...container.querySelectorAll("button")].find(
+      (button) => button.textContent === "Отмена",
+    )!;
+
+    await act(async () => {
+      confirmButton.dispatchEvent(
+        new MouseEvent("click", { bubbles: true, cancelable: true }),
+      );
+      cancelButton.dispatchEvent(
+        new MouseEvent("click", { bubbles: true, cancelable: true }),
+      );
+      await Promise.resolve();
+    });
+
+    expect(fetch).toHaveBeenCalledTimes(4);
+    expect(vi.mocked(fetch).mock.calls[3]).toEqual([
+      "/api/bff/auth/telegram/merge-confirmation",
+      { method: "POST" },
+    ]);
+    expect(
+      [...container.querySelectorAll("button")].every(
+        (button) => button.disabled,
+      ),
+    ).toBe(true);
+
+    await act(async () => {
+      resolveMerge(
+        Response.json(
+          { error: { code: "ACCOUNT_MERGE_REQUIRED", message: "Conflict" } },
+          { status: 409 },
+        ),
+      );
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+  });
+
   it("does not claim an e-mail replacement when the source account has none", async () => {
     vi.mocked(fetch).mockReset();
     vi.mocked(fetch)
