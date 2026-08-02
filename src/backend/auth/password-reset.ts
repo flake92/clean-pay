@@ -15,7 +15,7 @@ export async function requestPasswordReset(
   body: RequestPasswordResetRequest,
   turnstileToken: string | null,
 ) {
-  await verifyTurnstileToken(turnstileToken, "password_reset_start");
+  await verifyTurnstileToken(turnstileToken, "auth_login");
   await assertRateLimit({
     action: "password_reset_start",
     email: body.email,
@@ -34,7 +34,7 @@ export async function confirmPasswordReset(
   body: ConfirmPasswordResetRequest,
   turnstileToken: string | null,
 ) {
-  await verifyTurnstileToken(turnstileToken, "password_reset_confirm");
+  await verifyTurnstileToken(turnstileToken, "auth_login");
   await assertRateLimit({
     action: "password_reset_confirm",
     email: body.email,

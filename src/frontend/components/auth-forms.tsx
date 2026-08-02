@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useContext, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
 
 import { Button } from "primereact/button";
 import { InputText } from "primereact/inputtext";
@@ -17,6 +17,7 @@ type AuthTurnstileContextValue = {
   enabled: boolean;
   siteKey: string | null;
   token: string | null;
+  consumeToken: () => string | null;
   reset: () => void;
   setHandle: (handle: TurnstileHandle) => void;
   setToken: (token: string | null) => void;
@@ -26,6 +27,7 @@ const AuthTurnstileContext = createContext<AuthTurnstileContextValue>({
   enabled: false,
   siteKey: null,
   token: null,
+  consumeToken: () => null,
   reset: () => {},
   setHandle: () => {},
   setToken: () => {},
@@ -44,8 +46,8 @@ const unknownLoginResultMessage =
 
 function missingTurnstileTokenMessage(siteKey?: string | null) {
   return hasTurnstileSiteKey(siteKey)
-    ? "Пройдите проверку Cloudflare Turnstile."
-    : "Cloudflare Turnstile site key is not configured.";
+    ? "Пройдите единую проверку безопасности."
+    : "Проверка безопасности временно недоступна.";
 }
 
 function redirectAfterAuth(redirectTo: string) {
@@ -63,27 +65,40 @@ export function AuthTurnstileProvider({
 }) {
   const [token, setToken] = useState<string | null>(null);
   const [handle, setHandle] = useState<TurnstileHandle | null>(null);
+  const tokenRef = useRef<string | null>(null);
+  const updateToken = useCallback((nextToken: string | null) => {
+    tokenRef.current = nextToken;
+    setToken(nextToken);
+  }, []);
+  const consumeToken = useCallback(() => {
+    const currentToken = tokenRef.current;
+    tokenRef.current = null;
+    setToken(null);
+    return currentToken;
+  }, []);
+  const reset = useCallback(() => {
+    handle?.reset();
+    updateToken(null);
+  }, [handle, updateToken]);
   const value = useMemo<AuthTurnstileContextValue>(() => ({
     enabled,
     siteKey: siteKey ?? null,
     token: enabled ? token : null,
-    reset: () => {
-      handle?.reset();
-      setToken(null);
-    },
+    consumeToken,
+    reset,
     setHandle,
-    setToken,
-  }), [enabled, handle, siteKey, token]);
+    setToken: updateToken,
+  }), [consumeToken, enabled, reset, siteKey, token, updateToken]);
 
   return <AuthTurnstileContext.Provider value={value}>{children}</AuthTurnstileContext.Provider>;
 }
 
-function AuthTurnstileChallenge({ action }: { action: string }) {
+function AuthTurnstileChallenge() {
   const turnstile = useContext(AuthTurnstileContext);
   if (!turnstile.enabled) return null;
   return (
     <TurnstileWidget
-      action={action}
+      action="auth_login"
       onReady={turnstile.setHandle}
       onToken={turnstile.setToken}
       siteKey={turnstile.siteKey}
@@ -113,24 +128,18 @@ export function LoginForm({
     resetStart: "/api/bff/auth/password/reset/start",
     resetConfirm: "/api/bff/auth/password/reset/confirm",
   }[stage];
-  const turnstileAction = {
-    start: "email_auth_start",
-    complete: "email_auth_complete",
-    resetStart: "password_reset_start",
-    resetConfirm: "password_reset_confirm",
-  }[stage];
-
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (requestPendingRef.current) {
       return;
     }
-    if (turnstile.enabled && !turnstile.token) {
-      setState({ loading: false, error: missingTurnstileTokenMessage(turnstile.siteKey) });
-      return;
-    }
     if (stage === "resetConfirm" && password !== passwordConfirmation) {
       setState({ loading: false, error: "Пароли не совпадают." });
+      return;
+    }
+    const turnstileToken = turnstile.enabled ? turnstile.consumeToken() : null;
+    if (turnstile.enabled && !turnstileToken) {
+      setState({ loading: false, error: missingTurnstileTokenMessage(turnstile.siteKey) });
       return;
     }
 
@@ -144,7 +153,7 @@ export function LoginForm({
             email,
             ...(stage === "complete" ? { code, password } : {}),
             ...(stage === "resetConfirm" ? { code, newPassword: password } : {}),
-            ...(turnstile.token ? { turnstileToken: turnstile.token } : {}),
+            ...(turnstileToken ? { turnstileToken } : {}),
           }),
         });
       turnstile.reset();
@@ -179,9 +188,10 @@ export function LoginForm({
   return (
     <form className="flex flex-column gap-3" onSubmit={submit}>
       <PasskeyLoginButton
+        consumeTurnstileToken={turnstile.consumeToken}
         redirectTo={redirectTo}
+        resetTurnstile={turnstile.reset}
         turnstileEnabled={turnstile.enabled}
-        turnstileSiteKey={turnstile.siteKey}
       />
       <label className="flex flex-column gap-2">
         <span className="text-sm font-medium text-700">E-mail</span>
@@ -196,7 +206,7 @@ export function LoginForm({
         />
       </label>
       {stage === "start" ? (
-        <Message severity="info" text="Мы отправим одноразовый код. Ответ одинаков для нового и существующего аккаунта." />
+        <Message severity="info" text="Отправим одноразовый код на указанный e-mail." />
       ) : stage === "resetStart" ? (
         <Message severity="info" text="Мы отправим отдельный код для восстановления пароля на подтверждённый e-mail." />
       ) : (
@@ -204,7 +214,7 @@ export function LoginForm({
           <Message
             severity="info"
             text={stage === "complete"
-              ? "Введите код из письма и пароль. Для нового e-mail будет создана учётная запись."
+              ? "Введите код из письма и пароль от кабинета. Если входите впервые, придумайте новый пароль."
               : "Введите код восстановления из нового письма и задайте новый пароль."}
           />
           <label className="flex flex-column gap-2">
@@ -285,7 +295,7 @@ export function LoginForm({
           />
         </>
       )}
-      <AuthTurnstileChallenge action={turnstileAction} />
+      <AuthTurnstileChallenge />
       {state.error ? <Message severity="error" text={state.error} /> : null}
       <Button
         disabled={state.loading}
@@ -310,10 +320,9 @@ export function RegisterForm() {
 export function TelegramLoginButton({ redirectTo = "/cabinet" }: { redirectTo?: string }) {
   const [state, setState] = useState<ApiState>({ loading: false, error: null });
   const turnstile = useContext(AuthTurnstileContext);
-  const [telegramToken, setTelegramToken] = useState<string | null>(null);
-  const [telegramTurnstile, setTelegramTurnstile] = useState<TurnstileHandle | null>(null);
 
   function login() {
+    const telegramToken = turnstile.enabled ? turnstile.consumeToken() : null;
     if (turnstile.enabled && !telegramToken) {
       setState({ loading: false, error: missingTurnstileTokenMessage(turnstile.siteKey) });
       return;
@@ -323,10 +332,9 @@ export function TelegramLoginButton({ redirectTo = "/cabinet" }: { redirectTo?: 
       const url = new URL("/auth/telegram/start", window.location.origin);
       url.searchParams.set("redirect_to", redirectTo);
       if (telegramToken) url.searchParams.set("turnstile_token", telegramToken);
-      telegramTurnstile?.reset();
-      setTelegramToken(null);
       window.location.assign(url.toString());
     } catch (error) {
+      turnstile.reset();
       setState({ loading: false, error: error instanceof Error ? error.message : "Telegram login failed." });
     }
   }
@@ -334,14 +342,6 @@ export function TelegramLoginButton({ redirectTo = "/cabinet" }: { redirectTo?: 
   return (
     <div className="flex flex-column gap-2">
       {state.error ? <Message severity="error" text={state.error} /> : null}
-      {turnstile.enabled ? (
-        <TurnstileWidget
-          action="telegram_auth_start"
-          onReady={setTelegramTurnstile}
-          onToken={setTelegramToken}
-          siteKey={turnstile.siteKey}
-        />
-      ) : null}
       <Button
         disabled={state.loading}
         icon="pi pi-send"
