@@ -17,12 +17,14 @@ import {
 import type {
   ChangePasswordRequest,
   CompleteGenericEmailAuthRequest,
+  ConfirmPasswordResetRequest,
   ChangePasswordResponse,
   LoginRequest,
   RegisterRequest,
   RemnashopAuthResponse,
   RemnashopMe,
   StartGenericEmailAuthRequest,
+  RequestPasswordResetRequest,
   TelegramAuthRequest,
   TelegramWebAppAuthRequest,
 } from "@/shared/remnashop/types";
@@ -381,8 +383,8 @@ export async function remnashopAdminRequest<T>(
 }
 
 export async function remnashopAuth(
-  path: "/auth/register" | "/auth/login" | "/auth/telegram" | "/auth/telegram/webapp" | "/auth/email/complete",
-  body: RegisterRequest | LoginRequest | TelegramAuthRequest | TelegramWebAppAuthRequest | CompleteGenericEmailAuthRequest,
+  path: "/auth/register" | "/auth/login" | "/auth/telegram" | "/auth/telegram/webapp" | "/auth/email/complete" | "/auth/password/confirm-reset",
+  body: RegisterRequest | LoginRequest | TelegramAuthRequest | TelegramWebAppAuthRequest | CompleteGenericEmailAuthRequest | ConfirmPasswordResetRequest,
   { timeoutMs = 15_000 }: { timeoutMs?: number } = {},
 ) {
   const response = await fetchRemnashop(path, {
@@ -408,6 +410,15 @@ export async function remnashopStartGenericEmailAuth(
   body: StartGenericEmailAuthRequest,
 ) {
   return remnashopRequest<{ success: boolean }>("/auth/email/start", {
+    method: "POST",
+    body,
+  });
+}
+
+export async function remnashopRequestPasswordReset(
+  body: RequestPasswordResetRequest,
+) {
+  return remnashopRequest<{ success: boolean }>("/auth/password/request-reset", {
     method: "POST",
     body,
   });

@@ -70,6 +70,7 @@ describe("Remnashop BFF errors", () => {
 
   it.each([
     [401, "bad credentials", "/auth/login", "AUTH_FAILED", 401],
+    [401, "bad credentials", "/auth/email/complete", "AUTH_FAILED", 401],
     [401, "Current password is invalid", "/auth/change-password", "CURRENT_PASSWORD_INVALID", 401],
     [401, "missing", "/subscription/current", "UNAUTHORIZED", 401],
     [403, "blocked", "/auth/me", "FORBIDDEN", 403],

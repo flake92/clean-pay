@@ -90,4 +90,58 @@ describe.each([
     expect(container.querySelector<HTMLInputElement>('input[type="password"]')).not.toBeNull();
     expect(container.textContent).toContain("Введите код из письма");
   });
+
+  it("offers password recovery only after an existing account rejects its password", async () => {
+    vi.mocked(fetch)
+      .mockResolvedValueOnce(Response.json({ data: { success: true } }, { status: 202 }))
+      .mockResolvedValueOnce(Response.json({
+        error: { code: "AUTH_FAILED", message: "Неверный пароль." },
+      }, { status: 401 }))
+      .mockResolvedValueOnce(Response.json({ data: { success: true } }, { status: 202 }));
+
+    const email = container.querySelector<HTMLInputElement>('input[type="email"]')!;
+    await act(async () => setInputValue(email, "existing@example.com"));
+    await submit(container.querySelector("form")!);
+
+    const inputs = container.querySelectorAll<HTMLInputElement>("input");
+    await act(async () => {
+      setInputValue(Array.from(inputs).find((input) => input.name === "code")!, "123456");
+      setInputValue(Array.from(inputs).find((input) => input.name === "password")!, "wrong-password");
+    });
+    await submit(container.querySelector("form")!);
+
+    const recoveryButton = Array.from(container.querySelectorAll("button"))
+      .find((button) => button.textContent === "Забыли пароль?");
+    expect(recoveryButton).toBeDefined();
+
+    await act(async () => recoveryButton!.click());
+    expect(container.textContent).toContain("отдельный код для восстановления");
+    await submit(container.querySelector("form")!);
+
+    expect(fetch).toHaveBeenLastCalledWith(
+      "/api/bff/auth/password/reset/start",
+      expect.objectContaining({ method: "POST" }),
+    );
+    expect(container.textContent).toContain("задайте новый пароль");
+  });
+
+  it("does not offer recovery for an invalid e-mail code", async () => {
+    vi.mocked(fetch)
+      .mockResolvedValueOnce(Response.json({ data: { success: true } }, { status: 202 }))
+      .mockResolvedValueOnce(Response.json({
+        error: { code: "EMAIL_CODE_INVALID", message: "Неверный код." },
+      }, { status: 400 }));
+
+    const email = container.querySelector<HTMLInputElement>('input[type="email"]')!;
+    await act(async () => setInputValue(email, "user@example.com"));
+    await submit(container.querySelector("form")!);
+    const inputs = container.querySelectorAll<HTMLInputElement>("input");
+    await act(async () => {
+      setInputValue(Array.from(inputs).find((input) => input.name === "code")!, "000000");
+      setInputValue(Array.from(inputs).find((input) => input.name === "password")!, "some-password");
+    });
+    await submit(container.querySelector("form")!);
+
+    expect(container.textContent).not.toContain("Забыли пароль?");
+  });
 });

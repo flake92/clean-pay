@@ -56,6 +56,8 @@ const publicApiPaths = new Set([
   '/api/bff/auth/register',
   '/api/bff/auth/email/start',
   '/api/bff/auth/email/complete',
+  '/api/bff/auth/password/reset/start',
+  '/api/bff/auth/password/reset/confirm',
   '/api/bff/auth/telegram/webapp',
   '/api/bff/auth/logout',
   '/api/bff/auth/passkey/login/options',

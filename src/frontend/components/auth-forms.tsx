@@ -31,12 +31,12 @@ const AuthTurnstileContext = createContext<AuthTurnstileContextValue>({
   setToken: () => {},
 });
 
-async function readError(response: Response) {
+async function readAuthError(response: Response) {
   const error = await readBffError(response, "Не удалось выполнить действие.");
   if (error instanceof BffClientError && error.code === "RATE_LIMITED") {
-    return "Слишком много попыток. Попробуйте позже.";
+    error.message = "Слишком много попыток. Попробуйте позже.";
   }
-  return error.message;
+  return error;
 }
 
 const unknownLoginResultMessage =
@@ -92,12 +92,26 @@ function AuthTurnstileChallenge({ action }: { action: string }) {
 }
 
 export function LoginForm({ redirectTo = "/cabinet" }: { redirectTo?: string }) {
-  const [stage, setStage] = useState<"start" | "complete">("start");
+  const [stage, setStage] = useState<"start" | "complete" | "resetStart" | "resetConfirm">("start");
   const [state, setState] = useState<ApiState>({ loading: false, error: null });
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [passwordConfirmation, setPasswordConfirmation] = useState("");
   const [code, setCode] = useState("");
+  const [canRecoverPassword, setCanRecoverPassword] = useState(false);
   const turnstile = useContext(AuthTurnstileContext);
+  const endpoint = {
+    start: "/api/bff/auth/email/start",
+    complete: "/api/bff/auth/email/complete",
+    resetStart: "/api/bff/auth/password/reset/start",
+    resetConfirm: "/api/bff/auth/password/reset/confirm",
+  }[stage];
+  const turnstileAction = {
+    start: "email_auth_start",
+    complete: "email_auth_complete",
+    resetStart: "password_reset_start",
+    resetConfirm: "password_reset_confirm",
+  }[stage];
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -105,28 +119,40 @@ export function LoginForm({ redirectTo = "/cabinet" }: { redirectTo?: string }) 
       setState({ loading: false, error: missingTurnstileTokenMessage(turnstile.siteKey) });
       return;
     }
+    if (stage === "resetConfirm" && password !== passwordConfirmation) {
+      setState({ loading: false, error: "Пароли не совпадают." });
+      return;
+    }
 
     setState({ loading: true, error: null });
     try {
-      const response = await fetch(
-        stage === "start" ? "/api/bff/auth/email/start" : "/api/bff/auth/email/complete",
-        {
+      const response = await fetch(endpoint, {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({
             email,
             ...(stage === "complete" ? { code, password } : {}),
+            ...(stage === "resetConfirm" ? { code, newPassword: password } : {}),
             ...(turnstile.token ? { turnstileToken: turnstile.token } : {}),
           }),
-        },
-      );
+        });
       turnstile.reset();
       if (!response.ok) {
-        setState({ loading: false, error: await readError(response) });
+        const error = await readAuthError(response);
+        setCanRecoverPassword(stage === "complete" && error.code === "AUTH_FAILED");
+        setState({ loading: false, error: error.message });
         return;
       }
       if (stage === "start") {
         setStage("complete");
+        setState({ loading: false, error: null });
+        return;
+      }
+      if (stage === "resetStart") {
+        setStage("resetConfirm");
+        setCode("");
+        setPassword("");
+        setPasswordConfirmation("");
         setState({ loading: false, error: null });
         return;
       }
@@ -148,7 +174,7 @@ export function LoginForm({ redirectTo = "/cabinet" }: { redirectTo?: string }) 
         <span className="text-sm font-medium text-700">E-mail</span>
         <InputText
           autoComplete="username"
-          disabled={stage === "complete"}
+          disabled={stage !== "start"}
           name="email"
           required
           type="email"
@@ -158,9 +184,16 @@ export function LoginForm({ redirectTo = "/cabinet" }: { redirectTo?: string }) 
       </label>
       {stage === "start" ? (
         <Message severity="info" text="Мы отправим одноразовый код. Ответ одинаков для нового и существующего аккаунта." />
+      ) : stage === "resetStart" ? (
+        <Message severity="info" text="Мы отправим отдельный код для восстановления пароля на подтверждённый e-mail." />
       ) : (
         <>
-          <Message severity="info" text="Введите код из письма и пароль аккаунта." />
+          <Message
+            severity="info"
+            text={stage === "complete"
+              ? "Введите код из письма и пароль. Для нового e-mail будет создана учётная запись."
+              : "Введите код восстановления из нового письма и задайте новый пароль."}
+          />
           <label className="flex flex-column gap-2">
             <span className="text-sm font-medium text-700">Код из письма</span>
             <InputText
@@ -175,9 +208,11 @@ export function LoginForm({ redirectTo = "/cabinet" }: { redirectTo?: string }) 
             />
           </label>
           <label className="flex flex-column gap-2">
-            <span className="text-sm font-medium text-700">Пароль</span>
+            <span className="text-sm font-medium text-700">
+              {stage === "complete" ? "Пароль" : "Новый пароль"}
+            </span>
             <Password
-              autoComplete="current-password"
+              autoComplete={stage === "complete" ? "current-password" : "new-password"}
               className="w-full"
               feedback={false}
               inputClassName="w-full"
@@ -189,12 +224,45 @@ export function LoginForm({ redirectTo = "/cabinet" }: { redirectTo?: string }) 
               onChange={(event) => setPassword(event.target.value)}
             />
           </label>
+          {stage === "resetConfirm" ? (
+            <label className="flex flex-column gap-2">
+              <span className="text-sm font-medium text-700">Повторите новый пароль</span>
+              <Password
+                autoComplete="new-password"
+                className="w-full"
+                feedback={false}
+                inputClassName="w-full"
+                minLength={8}
+                name="passwordConfirmation"
+                required
+                toggleMask
+                value={passwordConfirmation}
+                onChange={(event) => setPasswordConfirmation(event.target.value)}
+              />
+            </label>
+          ) : null}
+          {stage === "complete" && canRecoverPassword ? (
+            <Button
+              label="Забыли пароль?"
+              onClick={() => {
+                setStage("resetStart");
+                setCode("");
+                setPassword("");
+                setCanRecoverPassword(false);
+                setState({ loading: false, error: null });
+              }}
+              text
+              type="button"
+            />
+          ) : null}
           <Button
             label="Изменить e-mail"
             onClick={() => {
               setStage("start");
               setCode("");
               setPassword("");
+              setPasswordConfirmation("");
+              setCanRecoverPassword(false);
               setState({ loading: false, error: null });
             }}
             text
@@ -202,11 +270,17 @@ export function LoginForm({ redirectTo = "/cabinet" }: { redirectTo?: string }) 
           />
         </>
       )}
-      <AuthTurnstileChallenge action={stage === "start" ? "email_auth_start" : "email_auth_complete"} />
+      <AuthTurnstileChallenge action={turnstileAction} />
       {state.error ? <Message severity="error" text={state.error} /> : null}
       <Button
         disabled={state.loading}
-        label={stage === "start" ? "Получить код" : "Продолжить"}
+        label={stage === "start"
+          ? "Получить код"
+          : stage === "resetStart"
+            ? "Получить код восстановления"
+            : stage === "resetConfirm"
+              ? "Сохранить новый пароль"
+              : "Продолжить"}
         loading={state.loading}
         type="submit"
       />
