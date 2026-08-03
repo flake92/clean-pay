@@ -1,11 +1,11 @@
 import { bffError, bffJson } from "@/backend/http/bff-response";
-import { remnashopRequest } from "@/backend/integrations/remnashop/client";
+import { getPublicPlans } from "@/backend/plans/public-plans";
 
 export const runtime = "nodejs";
 
 export async function GET() {
   try {
-    return bffJson(await remnashopRequest("/plans/public"));
+    return bffJson(await getPublicPlans());
   } catch (error) {
     return bffError(error);
   }

@@ -234,6 +234,19 @@ describe("confirmed Telegram account merge", () => {
       });
   });
 
+  it("blocks merge confirmation access from a BOOTSTRAP session", async () => {
+    mocks.getCurrentSession.mockResolvedValueOnce({
+      id: "session-1",
+      userId: "target-local",
+      assuranceLevel: "BOOTSTRAP",
+    });
+
+    await expect(
+      getTelegramAccountMergeConfirmation("raw-confirmation-token"),
+    ).rejects.toMatchObject({ code: "PASSKEY_REQUIRED", status: 403 });
+    expect(mocks.accountFindFirst).not.toHaveBeenCalled();
+  });
+
   it("does not stage while the source account has a pending e-mail change", async () => {
     mocks.getRemnashopMe.mockResolvedValueOnce({
       ...sourceProfile,

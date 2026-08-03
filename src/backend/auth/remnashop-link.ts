@@ -1,3 +1,5 @@
+import { WebSessionAssuranceLevel } from "@prisma/client";
+
 import { prisma } from "@/backend/database/prisma";
 import {
   getRemnashopMe,
@@ -230,6 +232,10 @@ export async function linkRemnashopAccount(body: LoginRequest) {
 
   if (!session) {
     throw new BffError("UNAUTHORIZED", 401, "Login is required.");
+  }
+
+  if (session.assuranceLevel === WebSessionAssuranceLevel.BOOTSTRAP) {
+    throw new BffError("PASSKEY_REQUIRED", 403, "Create a passkey to continue");
   }
 
   await assertRateLimit({

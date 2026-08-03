@@ -49,6 +49,28 @@ type PriceOption = {
   value: string;
 };
 
+function selectionValue(days: number | string, gateway: string) {
+  return JSON.stringify([String(days), gateway]);
+}
+
+function parseSelection(value: string): [string, string] {
+  try {
+    const parsed: unknown = JSON.parse(value);
+    if (
+      Array.isArray(parsed) &&
+      parsed.length === 2 &&
+      typeof parsed[0] === "string" &&
+      typeof parsed[1] === "string"
+    ) {
+      return [parsed[0], parsed[1]];
+    }
+  } catch {
+    // Invalid UI state is handled as no selection below.
+  }
+
+  return ["", ""];
+}
+
 function formatDuration(days: number) {
   if (days <= 0) {
     return "∞";
@@ -93,7 +115,7 @@ function buildPriceOptions(plan: PlanOffer | undefined) {
         duration: formatDuration(duration.days),
         gateway: price.gateway_type,
         label: `${formatDuration(duration.days)} - ${price.final_amount} ${price.currency_symbol} - ${price.gateway_type}`,
-        value: `${duration.days}:${price.gateway_type}`,
+        value: selectionValue(duration.days, price.gateway_type),
       })),
     )
     .sort(
@@ -135,7 +157,7 @@ function initialSelection(
   duration: string | null,
   gateway: string | null,
 ) {
-  const requested = duration && gateway ? `${duration}:${gateway}` : "";
+  const requested = duration && gateway ? selectionValue(duration, gateway) : "";
 
   return buildPriceOptions(plan).some(({ value }) => value === requested)
     ? requested
@@ -333,7 +355,7 @@ export function ExtendConfirmation() {
     );
   }
 
-  const [selectedDays, selectedGateway] = selection.split(":");
+  const [selectedDays, selectedGateway] = parseSelection(selection);
   const selectedDuration = plan.durations.find(
     (duration) => String(duration.days) === selectedDays,
   );
@@ -402,7 +424,7 @@ export function ExtendConfirmation() {
 
       if (!paymentOfferMatches(payload, freshPlan, freshDuration.days, freshPrice)) {
         setState({ status: "ready", offers: freshOffers });
-        setSelection(`${freshDuration.days}:${freshPrice.gateway_type}`);
+        setSelection(selectionValue(freshDuration.days, freshPrice.gateway_type));
         finishSubmitting();
         setSubmitError(
           `Цена изменилась: было ${selectedPrice.final_amount} ${selectedPrice.currency_symbol}, стало ${freshPrice.final_amount} ${freshPrice.currency_symbol}. Проверьте новую цену перед оплатой.`,

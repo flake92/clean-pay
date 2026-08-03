@@ -1418,6 +1418,21 @@ export async function getAuthorizedRemnashopTokens({
     throw normalizeRemnashopError(401, "Not authenticated", { path: "/auth/session" });
   }
 
+  // The refresh cookie proves only that the local session can be resumed. It
+  // must never promote a deliberately restricted BOOTSTRAP session into an
+  // upstream-authorized session after the short-lived access cookie expires.
+  if (localSession.assuranceLevel === WebSessionAssuranceLevel.BOOTSTRAP) {
+    authDebugLog("remnashop_tokens_authorize_failed", {
+      reason: "passkey_required",
+      assuranceLevel: localSession.assuranceLevel,
+    });
+    throw new BffError(
+      "PASSKEY_REQUIRED",
+      403,
+      "Create a passkey to continue",
+    );
+  }
+
   // Mirror the proxy policy from current database state before token refresh,
   // Telegram recovery or any other upstream side effect. Verification flows
   // opt out explicitly while they are completing that state transition.

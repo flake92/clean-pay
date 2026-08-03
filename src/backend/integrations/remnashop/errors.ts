@@ -1,6 +1,7 @@
 export type BffErrorCode =
   | 'UNAUTHORIZED'
   | 'AUTH_FAILED'
+  | 'PASSKEY_REQUIRED'
   | 'CURRENT_PASSWORD_INVALID'
   | 'FORBIDDEN'
   | 'NOT_FOUND'
@@ -48,6 +49,7 @@ type BffErrorDebug = {
 const PROD_MESSAGES: Record<BffErrorCode, string> = {
   UNAUTHORIZED: 'Войдите в аккаунт, чтобы продолжить.',
   AUTH_FAILED: 'Не удалось войти. Проверьте данные.',
+  PASSKEY_REQUIRED: 'Создайте ключ доступа, чтобы продолжить.',
   CURRENT_PASSWORD_INVALID: 'Текущий пароль неверный.',
   FORBIDDEN: 'Действие недоступно.',
   NOT_FOUND: 'Данные не найдены.',
