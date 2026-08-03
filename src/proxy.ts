@@ -42,7 +42,6 @@ function isBodylessMutation(method: string, pathname: string) {
 }
 
 const publicPagePaths = new Set([
-  '/',
   '/manifest.webmanifest',
   '/install',
   '/offline',

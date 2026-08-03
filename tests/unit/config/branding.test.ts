@@ -44,7 +44,6 @@ describe("cabinet branding", () => {
       "src/frontend/layout/useCleanPayMenu.ts",
       "src/frontend/components/layout/page-header.tsx",
       "src/frontend/components/support-panel.tsx",
-      "src/app/page.tsx",
       "src/app/tariffs/page.tsx",
       "src/app/profile/page.tsx",
     ];
