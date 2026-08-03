@@ -45,7 +45,7 @@ describe("proxy auth redirects", () => {
     vi.stubEnv("NEXT_PUBLIC_APP_URL", "https://pay.example.com");
   });
 
-  it.each(["/cabinet", "/profile", "/tariffs", "/link-account"])(
+  it.each(["/", "/cabinet", "/profile", "/tariffs", "/link-account"])(
     "redirects protected page %s to login without cookies",
     async (pathname) => {
       const response = await proxy(request(pathname));
@@ -55,7 +55,7 @@ describe("proxy auth redirects", () => {
     },
   );
 
-  it.each(["/", "/install", "/offline"])("allows public page %s without cookies", async (pathname) => {
+  it.each(["/install", "/offline"])("allows public page %s without cookies", async (pathname) => {
     const response = await proxy(request(pathname));
 
     expect(response.status).toBe(200);
