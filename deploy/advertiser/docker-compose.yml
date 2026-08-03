@@ -15,7 +15,7 @@ services:
       PORT: 4100
       BASE_PATH: /partners
       COOKIE_SECURE: "true"
-      ATTRIBUTION_DAYS: "7"
+      ATTRIBUTION_DAYS: "30"
       STATS_TIMEZONE: Europe/Moscow
     healthcheck:
       test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:4100/partners/health',{signal:AbortSignal.timeout(5000)}).then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))\""]

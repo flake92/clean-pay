@@ -12,17 +12,17 @@ test("calculates monthly ad-link attribution against PostgreSQL", { skip: !datab
       pool,
       { id: "lopez", name: "Lopez", adLinkCode: "lopez", telegramUrl: "https://t.me/clean_vpn_bot?start=ad_lopez" },
       "2026-08",
-      { timezone: "Europe/Moscow", attributionDays: 7 },
+      { timezone: "Europe/Moscow", attributionDays: 30 },
     );
     assert.equal(result.linkFound, true);
     assert.equal(result.registrations, 2);
     assert.equal(result.trials, 1);
     assert.equal(result.payingRegistrations, 2);
     assert.equal(result.trialBuyers, 1);
-    assert.equal(result.totals.RUB.payments, 1);
-    assert.equal(result.totals.RUB.firstPayments, 1);
-    assert.equal(result.totals.RUB.revenue, 100);
-    assert.equal(result.totals.RUB.firstRevenue, 100);
+    assert.equal(result.totals.RUB.payments, 3);
+    assert.equal(result.totals.RUB.firstPayments, 2);
+    assert.equal(result.totals.RUB.revenue, 450);
+    assert.equal(result.totals.RUB.firstRevenue, 400);
     assert.equal(result.totals.USD.revenue, 200);
   } finally {
     await pool.end();
