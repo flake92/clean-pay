@@ -9,7 +9,7 @@ export type BffJsonResult<T> = {
 const inFlightRequests = new Map<string, Promise<BffJsonResult<unknown>>>();
 
 async function requestBffJson<T>(url: string): Promise<BffJsonResult<T>> {
-  const response = await fetch(url);
+  const response = await fetch(url, { cache: "no-store" });
   const body = await response.json().catch(() => null);
 
   return {
@@ -42,4 +42,17 @@ export function invalidateCachedBffJson(url?: string) {
   } else {
     inFlightRequests.clear();
   }
+}
+
+export async function getAuthenticatedBffJson<T>(url: string) {
+  const initial = await getCachedBffJson<T>(url);
+  if (initial.status !== 401) {
+    return initial;
+  }
+
+  // A navigation can start while the login response is still completing.
+  // Do not let an overlapping pre-auth request become the cabinet's terminal
+  // state. Resolved requests leave the in-flight map, so this performs one
+  // fresh non-cacheable identity check that other consumers can share.
+  return getCachedBffJson<T>(url);
 }

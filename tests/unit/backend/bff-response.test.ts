@@ -31,6 +31,7 @@ describe("BFF response logging", () => {
     await expect(response.json()).resolves.toEqual({
       data: { email: "user@example.com", token: "secret-token" },
     });
+    expect(response.headers.get("cache-control")).toBe("no-store");
     expect(mocks.logger.info).toHaveBeenCalledWith(
       "bff_response_sent",
       { status: 200, hasData: true },
@@ -48,6 +49,7 @@ describe("BFF response logging", () => {
         code: "VALIDATION_ERROR",
       },
     });
+    expect(response.headers.get("cache-control")).toBe("no-store");
     expect(mocks.logger.warn).toHaveBeenCalledWith(
       "bff_error_response_sent",
       { status: 400, code: "VALIDATION_ERROR" },

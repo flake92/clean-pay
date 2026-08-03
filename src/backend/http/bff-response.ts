@@ -51,7 +51,9 @@ export function bffJson<T>(data: T, init?: ResponseInit) {
     message: `BFF Response -> ${init?.status ?? 200}`,
   });
 
-  return NextResponse.json({ data }, init);
+  const headers = new Headers(init?.headers);
+  headers.set("cache-control", "no-store");
+  return NextResponse.json({ data }, { ...init, headers });
 }
 
 export function bffError(error: unknown) {
@@ -82,7 +84,7 @@ export function bffError(error: unknown) {
 
     return NextResponse.json(
       body,
-      { status: error.status },
+      { status: error.status, headers: { "cache-control": "no-store" } },
     );
   }
 
@@ -110,6 +112,6 @@ export function bffError(error: unknown) {
 
   return NextResponse.json(
     body,
-    { status: 500 },
+    { status: 500, headers: { "cache-control": "no-store" } },
   );
 }

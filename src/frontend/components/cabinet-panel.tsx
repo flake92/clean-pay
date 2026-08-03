@@ -8,7 +8,10 @@ import { DataTable } from "primereact/datatable";
 import { InputText } from "primereact/inputtext";
 import { Message } from "primereact/message";
 import { readBffError } from "@/frontend/lib/client-api";
-import { getCachedBffJson } from "@/frontend/lib/bff-cache";
+import {
+  getAuthenticatedBffJson,
+  getCachedBffJson,
+} from "@/frontend/lib/bff-cache";
 import { ProgressBar } from "primereact/progressbar";
 import { Tag } from "primereact/tag";
 
@@ -311,7 +314,7 @@ export function CabinetPanel() {
   useEffect(() => {
     async function loadCabinet() {
       try {
-        const profileResponse = await getCachedBffJson<{ user: CabinetUser }>(
+        const profileResponse = await getAuthenticatedBffJson<{ user: CabinetUser }>(
           "/api/bff/auth/me",
         );
 
@@ -509,7 +512,11 @@ export function CabinetPanel() {
       <div className="card">
         <Message severity="error" text={error} />
         <div className="mt-3">
-          <LinkButton href="/login" label="Войти" />
+          <LinkButton
+            external
+            href="/login?redirect_to=%2Fcabinet"
+            label="Войти"
+          />
         </div>
       </div>
     );

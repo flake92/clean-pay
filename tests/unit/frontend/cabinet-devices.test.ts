@@ -93,6 +93,15 @@ vi.mock("@/frontend/components/prime/link-button", () => ({
     createElement("a", null, label),
 }));
 vi.mock("@/frontend/lib/bff-cache", () => ({
+  getAuthenticatedBffJson: vi.fn(async () => ({
+    ok: true,
+    data: {
+      user: {
+        email: "user@example.com",
+        emailVerified: true,
+      },
+    },
+  })),
   getCachedBffJson: vi.fn(async (path: string) =>
     path === "/api/bff/auth/me"
       ? {
