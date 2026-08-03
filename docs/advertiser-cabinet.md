@@ -27,7 +27,9 @@ RemnaShop и использует только PostgreSQL-роль `advertiser_s
 3. Создать пароль и scrypt-хеш командой из каталога `advertiser-cabinet`:
    `npm run credentials -- <login> <admin|advertiser> [campaign-id]`.
 4. Заполнить JSON-массивы аккаунтов и кампаний. Администратор видит все
-   кампании; рекламодатель — только перечисленные в `campaignIds`.
+   кампании; рекламодатель — только перечисленные в `campaignIds`. JSON в
+   `.env` должен оставаться в одинарных кавычках: они не дают Docker Compose
+   интерпретировать символы `$` внутри scrypt-хешей как переменные.
 5. Проверить конфигурацию из `deploy/advertiser` командой
    `docker compose --env-file .env config`.
 6. Собрать и запустить отдельный Compose-проект командой
@@ -39,7 +41,7 @@ RemnaShop и использует только PostgreSQL-роль `advertiser_s
 
 ```caddyfile
 handle /partners* {
-    reverse_proxy advertiser-cabinet:4100
+    reverse_proxy clean-pay-advertiser-cabinet:4100
 }
 
 handle {
