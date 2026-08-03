@@ -492,10 +492,16 @@ export async function proxy(request: NextRequest) {
     });
     const response = NextResponse.json(
       { error: { code: 'UNAUTHORIZED', message: 'Войдите в аккаунт, чтобы продолжить.' } },
-      { status: 401 },
+      { status: 401, headers: { 'cache-control': 'no-store' } },
     );
-    response.cookies.delete(accessCookieName);
-    response.cookies.delete(refreshCookieName);
+    // An anonymous request can still be in flight when a login response sets
+    // fresh cookies. Do not let that older 401 erase the newly-created session.
+    if (request.cookies.has(accessCookieName)) {
+      response.cookies.delete(accessCookieName);
+    }
+    if (request.cookies.has(refreshCookieName)) {
+      response.cookies.delete(refreshCookieName);
+    }
 
     return response;
   }
