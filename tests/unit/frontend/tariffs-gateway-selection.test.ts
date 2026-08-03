@@ -37,7 +37,7 @@ const gatewayPrice = (gateway: string, amount: string) => ({
   is_free: false,
 });
 
-function offers(gateways: string[]) {
+function offers(gateways: string[], description: string | null = null) {
   return {
     has_current_subscription: false,
     current_subscription_status: null,
@@ -46,7 +46,7 @@ function offers(gateways: string[]) {
         id: 1,
         public_code: "pro",
         name: "Pro",
-        description: null,
+        description,
         type: "regular",
         device_limit: 5,
         traffic_limit: 0,
@@ -108,6 +108,24 @@ describe("tariff payment gateway selection", () => {
     expect(container.querySelector('[aria-label="Выбор платёжного шлюза"]')).toBeNull();
     expect(container.querySelector('[data-dropdown-options="2"]')).not.toBeNull();
     expect(container.querySelectorAll(".clean-pay-price-choice")).toHaveLength(2);
+  });
+
+  it("allows long tariff descriptions to wrap on narrow screens", async () => {
+    const description = "https://teletype.in/very-long-unbroken-tariff-instructions-link";
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(Response.json({ data: offers(["YOOKASSA"], description) })),
+    );
+
+    await act(async () => root.render(createElement(TariffsPanel)));
+    await settle();
+
+    const descriptionNode = Array.from(container.querySelectorAll("p")).find(
+      (node) => node.textContent === description,
+    );
+    expect(descriptionNode?.classList.contains("break-words")).toBe(true);
+    expect(descriptionNode?.parentElement?.classList.contains("min-w-0")).toBe(true);
+    expect(descriptionNode?.parentElement?.classList.contains("flex-1")).toBe(true);
   });
 
   it("separates gateways and moves forward and backward without mixing durations", async () => {
