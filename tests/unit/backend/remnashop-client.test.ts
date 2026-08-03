@@ -881,6 +881,41 @@ describe("remnashop client", () => {
     );
   });
 
+  it("converges on tokens stored by a concurrent Telegram recovery", async () => {
+    const staleSession = telegramSession();
+    const winningSession = {
+      ...staleSession,
+      remnashopAccessTokenEncrypted: protectRemnashopToken("winner-access"),
+      remnashopRefreshTokenEncrypted: protectRemnashopToken("winner-refresh"),
+      remnashopAccessExpiresAt: new Date(Date.now() + 10 * 60_000),
+      remnashopRefreshExpiresAt: new Date(Date.now() + 60 * 60_000),
+    };
+    vi.mocked(getCurrentSession)
+      .mockResolvedValueOnce(staleSession as never)
+      .mockResolvedValueOnce(staleSession as never)
+      .mockResolvedValueOnce(winningSession as never);
+    prismaMock.$transaction.mockRejectedValueOnce(
+      new BffError(
+        "ACCOUNT_MERGE_REQUIRED",
+        409,
+        "Concurrent recovery changed the local session",
+        { message: "local_identity_changed_before_recovery" },
+      ),
+    );
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(telegramAuthResponse({ userId: "2" }))
+      .mockResolvedValueOnce(remnashopProfile());
+
+    await expect(
+      getAuthorizedRemnashopTokens({ allowUnverifiedEmail: true }),
+    ).resolves.toMatchObject({
+      accessToken: "winner-access",
+      refreshToken: "winner-refresh",
+      session: { id: "session-1" },
+    });
+    expect(getCurrentSession).toHaveBeenCalledTimes(3);
+  });
+
   it("detects a conflicting local owner before dispatching an upstream merge", async () => {
     const session = telegramSession({ remnashopUserId: "1" });
     const sourceUser = {
