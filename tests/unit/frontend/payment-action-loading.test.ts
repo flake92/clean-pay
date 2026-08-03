@@ -602,14 +602,14 @@ describe("payment action loading recovery", () => {
     );
   });
 
-  it("preserves the exact gateway value through extension account setup", async () => {
-    navigationState.search = "duration=90&gateway=%20edge%20";
+  it("preserves gateway values with colons, Unicode and spaces through extension setup", async () => {
+    navigationState.search = "duration=90&gateway=%20bank%3A%D0%B1%D1%8B%D1%81%D1%82%D1%80%D0%BE%20";
     const whitespaceGatewayOffers = structuredClone(offers);
     whitespaceGatewayOffers.plans[0]!.durations.push({
       days: 90,
       prices: [
         {
-          gateway_type: " edge ",
+          gateway_type: " bank:быстро ",
           currency: "RUB",
           final_amount: "250",
           currency_symbol: "₽",
@@ -647,7 +647,7 @@ describe("payment action loading recovery", () => {
     await click(extendButton);
 
     expect(navigationMocks.replaceWith).toHaveBeenCalledWith(
-      "/link-account?reason=email-required&redirect_to=%2Fextend%3Fduration%3D90%26gateway%3D%2Bedge%2B",
+      "/link-account?reason=email-required&redirect_to=%2Fextend%3Fduration%3D90%26gateway%3D%2Bbank%253A%25D0%25B1%25D1%258B%25D1%2581%25D1%2582%25D1%2580%25D0%25BE%2B",
     );
   });
 

@@ -1,4 +1,7 @@
-import { AccountMergeConfirmationStatus } from "@prisma/client";
+import {
+  AccountMergeConfirmationStatus,
+  WebSessionAssuranceLevel,
+} from "@prisma/client";
 
 import { prisma } from "@/backend/database/prisma";
 import {
@@ -303,6 +306,10 @@ async function confirmationForCurrentSession(token: string) {
 
   if (!session) {
     throw new BffError("UNAUTHORIZED", 401, "Login is required.");
+  }
+
+  if (session.assuranceLevel === WebSessionAssuranceLevel.BOOTSTRAP) {
+    throw new BffError("PASSKEY_REQUIRED", 403, "Create a passkey to continue");
   }
 
   const confirmation = await prisma.accountMergeConfirmation.findFirst({

@@ -816,6 +816,25 @@ describe("auth use cases", () => {
     expect(mocks.getAuthorizedRemnashopTokens).toHaveBeenCalledWith({ allowUnverifiedEmail: true });
   });
 
+  it("returns the minimal local profile when a BOOTSTRAP session needs a passkey", async () => {
+    const bootstrapSession = {
+      ...session,
+      assuranceLevel: "BOOTSTRAP",
+    };
+    mocks.getCurrentSession.mockResolvedValueOnce(bootstrapSession);
+    mocks.getAuthorizedRemnashopTokens.mockRejectedValueOnce(
+      new BffError("PASSKEY_REQUIRED", 403, "Create a passkey to continue"),
+    );
+
+    await expect(getCurrentAuthProfile()).resolves.toMatchObject({
+      user: {
+        email: "user@example.com",
+        auth_type: "email",
+      },
+    });
+    expect(mocks.getRemnashopMe).not.toHaveBeenCalled();
+  });
+
   it("reconciles a locally stale verification flag from the matching Remnashop profile", async () => {
     const staleSession = {
       ...session,
@@ -928,6 +947,18 @@ describe("auth use cases", () => {
         auth_type: "telegram",
       },
     });
+  });
+
+  it("blocks Remnashop account linking from a BOOTSTRAP session", async () => {
+    mocks.getCurrentSession.mockResolvedValueOnce({
+      ...session,
+      assuranceLevel: "BOOTSTRAP",
+    });
+
+    await expect(
+      linkRemnashopAccount({ email: "user@example.com", password: "secret" }),
+    ).rejects.toMatchObject({ code: "PASSKEY_REQUIRED", status: 403 });
+    expect(mocks.remnashopAuth).not.toHaveBeenCalled();
   });
 
   it("stages Remnashop account and falls back to registration after auth failure", async () => {

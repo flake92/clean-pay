@@ -43,13 +43,18 @@ export async function getCurrentAuthProfile() {
       allowUnverifiedEmail: true,
     }));
   } catch (error) {
-    if (error instanceof BffError && error.code === "EMAIL_REQUIRED") {
+    if (
+      error instanceof BffError &&
+      (error.code === "EMAIL_REQUIRED" || error.code === "PASSKEY_REQUIRED")
+    ) {
       authDebugLog("auth_me_local_profile_returned", {
         sessionId: session.id,
         userId: session.userId,
         authMethod: session.authMethod,
         hasRemnashopTokens: false,
-        reason: "no_claimable_remnashop_token_bundle",
+        reason: error.code === "PASSKEY_REQUIRED"
+          ? "passkey_required"
+          : "no_claimable_remnashop_token_bundle",
       });
       return { user: localUserProfile(session) };
     }

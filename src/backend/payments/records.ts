@@ -4,6 +4,7 @@ import { prisma } from "@/backend/database/prisma";
 import { BffError } from "@/backend/integrations/remnashop/errors";
 import { paymentUpstreamOwnerHash } from "@/backend/payments/hashes";
 import { lockPaymentUpstreamOwner } from "@/backend/payments/owner";
+import { logger } from "@/backend/observability/logger";
 import type {
   PaymentInitResponse,
   PaymentTransactionResponse,
@@ -41,13 +42,16 @@ type ApplyTransactionInput = {
 
 const MAX_RECORD_PAYMENT_WRITE_ATTEMPTS = 3;
 
-const paymentStatusProgress: Record<PaymentRecordStatus, number> = {
-  UNKNOWN: 0,
-  PENDING: 1,
-  FAILED: 2,
-  CANCELED: 2,
-  COMPLETED: 3,
-  REFUNDED: 4,
+const allowedPaymentStatusTransitions: Record<
+  PaymentRecordStatus,
+  ReadonlySet<PaymentRecordStatus>
+> = {
+  UNKNOWN: new Set(["UNKNOWN", "PENDING", "COMPLETED", "FAILED", "CANCELED", "REFUNDED"]),
+  PENDING: new Set(["PENDING", "COMPLETED", "FAILED", "CANCELED", "REFUNDED"]),
+  FAILED: new Set(["FAILED", "COMPLETED", "REFUNDED"]),
+  CANCELED: new Set(["CANCELED", "COMPLETED", "REFUNDED"]),
+  COMPLETED: new Set(["COMPLETED", "REFUNDED"]),
+  REFUNDED: new Set(["REFUNDED"]),
 };
 
 function isUniqueConstraintError(error: unknown) {
@@ -152,18 +156,23 @@ export async function applyRemnashopTransaction(
   }
 
   if (existing) {
-    const sameUpstreamVersion =
-      upstreamUpdatedAt.getTime() === existing.upstreamUpdatedAt.getTime();
-    const wouldRegressSameVersion =
-      sameUpstreamVersion &&
-      paymentStatusProgress[incomingStatus] <
-        paymentStatusProgress[existing.status];
+    const transitionAllowed =
+      allowedPaymentStatusTransitions[existing.status].has(incomingStatus);
 
     if (
       existing.lastSyncedAt !== null &&
       (upstreamUpdatedAt < existing.upstreamUpdatedAt ||
-        wouldRegressSameVersion)
+        !transitionAllowed)
     ) {
+      if (!transitionAllowed) {
+        logger.warn("payment_status_transition_rejected", {
+          paymentRecordId: existing.id,
+          currentStatus: existing.status,
+          incomingStatus,
+          currentUpstreamUpdatedAt: existing.upstreamUpdatedAt,
+          incomingUpstreamUpdatedAt: upstreamUpdatedAt,
+        });
+      }
       const touched = await client.paymentRecord.updateMany({
         where: {
           id: existing.id,

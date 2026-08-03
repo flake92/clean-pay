@@ -402,6 +402,7 @@ describe("payment records", () => {
         id: "record-1",
         userId: "user-1",
         operationId: null,
+        status: "COMPLETED",
         upstreamCreatedAt: new Date("2026-07-17T09:00:00.000Z"),
         upstreamUpdatedAt: new Date("2026-07-17T11:00:00.000Z"),
         lastSyncedAt: new Date("2026-07-17T11:00:01.000Z"),
@@ -528,12 +529,56 @@ describe("payment records", () => {
     );
   });
 
+  it("rejects a newer upstream row that regresses a terminal payment", async () => {
+    const currentUpdatedAt = new Date("2026-07-17T10:01:00.000Z");
+    mocks.prisma.paymentRecord.findUnique
+      .mockResolvedValueOnce({
+        id: "record-terminal-newer",
+        userId: "user-1",
+        operationId: null,
+        status: "REFUNDED",
+        upstreamCreatedAt: new Date(upstreamTransaction.created_at),
+        upstreamUpdatedAt: currentUpdatedAt,
+        lastSyncedAt: new Date("2026-07-17T10:02:00.000Z"),
+        planCode: "basic",
+        planName: "Basic",
+        durationDays: 30,
+        deviceLimit: 3,
+        trafficLimit: null,
+        paymentUrl: "https://pay.test/checkout",
+        isFree: false,
+        raw: { status: "refunded" },
+      })
+      .mockResolvedValueOnce({ id: "record-terminal-newer", status: "REFUNDED" });
+    mocks.prisma.paymentRecord.updateMany.mockResolvedValue({ count: 1 });
+
+    await applyRemnashopTransaction(mocks.prisma as never, {
+      userId: "user-1",
+      transaction: {
+        ...upstreamTransaction,
+        status: "completed",
+        updated_at: "2026-07-17T10:03:00.000Z",
+      },
+    });
+
+    expect(mocks.prisma.paymentRecord.updateMany).toHaveBeenCalledWith({
+      where: { id: "record-terminal-newer", userId: "user-1" },
+      data: { lastSyncedAt: expect.any(Date) },
+    });
+    expect(mocks.prisma.paymentRecord.updateMany).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ status: "COMPLETED" }),
+      }),
+    );
+  });
+
   it("corrects migration fallback timestamps and free flag on first authoritative sync", async () => {
     mocks.prisma.paymentRecord.findUnique
       .mockResolvedValueOnce({
         id: "legacy-record",
         userId: "user-1",
         operationId: null,
+        status: "PENDING",
         upstreamCreatedAt: new Date("2026-07-18T12:00:00.000Z"),
         upstreamUpdatedAt: new Date("2026-07-18T12:00:00.000Z"),
         lastSyncedAt: null,
@@ -571,6 +616,7 @@ describe("payment records", () => {
       id: "legacy-race",
       userId: "user-1",
       operationId: null,
+      status: "PENDING",
       upstreamCreatedAt: new Date("2026-07-18T12:00:00.000Z"),
       upstreamUpdatedAt: new Date("2026-07-18T12:00:00.000Z"),
       lastSyncedAt: null,
@@ -620,6 +666,7 @@ describe("payment records", () => {
       id: "record-winner",
       userId: "user-1",
       operationId: null,
+      status: "PENDING",
       upstreamCreatedAt: new Date(upstreamTransaction.created_at),
       upstreamUpdatedAt: new Date(upstreamTransaction.created_at),
       lastSyncedAt: null,
