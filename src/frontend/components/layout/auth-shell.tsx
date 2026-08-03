@@ -2,6 +2,7 @@
 
 import Image from "next/image";
 import Link from "next/link";
+import { APP_VERSION } from "@/shared/app-version";
 import { getBranding } from "@/shared/branding";
 
 export function AuthShell({
@@ -52,6 +53,9 @@ export function AuthShell({
                 <Link className="font-medium no-underline" href="/" style={{ color: "var(--primary-color)" }}>
                   {branding.name}
                 </Link>
+                <div aria-label={`Версия приложения ${APP_VERSION}`} className="text-600 text-sm mt-2">
+                  Версия {APP_VERSION}
+                </div>
               </div>
             </div>
           </div>

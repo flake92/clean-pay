@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { getPublicReadiness } from "@/backend/health/readiness";
+import { APP_VERSION } from "@/shared/app-version";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -12,7 +13,7 @@ export async function GET() {
     {
       ...readiness,
       service: "clean-pay",
-      version: process.env.npm_package_version ?? "0.1.0",
+      version: APP_VERSION,
     },
     {
       status: readiness.status === "ok" ? 200 : 503,
