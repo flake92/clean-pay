@@ -1499,8 +1499,44 @@ export async function getAuthorizedRemnashopTokens({
       );
     }
 
-    const restoredTelegramSession =
-      await attachRemnashopTokensForTelegramSession(recoverySession);
+    let restoredTelegramSession;
+    try {
+      restoredTelegramSession =
+        await attachRemnashopTokensForTelegramSession(recoverySession);
+    } catch (error) {
+      const concurrentRecoveryWon =
+        error instanceof BffError &&
+        error.code === "ACCOUNT_MERGE_REQUIRED" &&
+        error.debug?.message === "local_identity_changed_before_recovery";
+      if (!concurrentRecoveryWon) {
+        throw error;
+      }
+
+      const convergedSession = await getCurrentSession();
+      if (
+        !convergedSession ||
+        convergedSession.id !== localSession.id ||
+        convergedSession.userId !== localSession.userId
+      ) {
+        throw new BffError(
+          "UNAUTHORIZED",
+          401,
+          "Current session changed after concurrent Remnashop recovery",
+        );
+      }
+      authorized = await acquireRemnashopTokensForSession({
+        session: convergedSession,
+        refresh: remnashopRefreshTokens,
+      });
+      if (!authorized) {
+        throw error;
+      }
+      authorizationSource = authorized.source;
+      authDebugLog("remnashop_token_restore_converged", {
+        sessionId: convergedSession.id,
+        userId: convergedSession.userId,
+      });
+    }
 
     if (restoredTelegramSession) {
       authorized = {
