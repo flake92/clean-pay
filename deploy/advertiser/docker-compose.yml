@@ -1,0 +1,39 @@
+name: clean-pay-advertiser
+
+services:
+  app:
+    image: ${ADVERTISER_CABINET_IMAGE:?ADVERTISER_CABINET_IMAGE is required}
+    build:
+      context: ../../advertiser-cabinet
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      NODE_ENV: production
+      HOST: 0.0.0.0
+      PORT: 4100
+      BASE_PATH: /partners
+      COOKIE_SECURE: "true"
+      ATTRIBUTION_DAYS: "7"
+      STATS_TIMEZONE: Europe/Moscow
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:4100/partners/health',{signal:AbortSignal.timeout(5000)}).then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))\""]
+      interval: 15s
+      timeout: 7s
+      retries: 10
+      start_period: 15s
+    networks:
+      remnashop:
+        aliases:
+          - clean-pay-advertiser-cabinet
+    logging:
+      driver: json-file
+      options:
+        max-size: "5m"
+        max-file: "3"
+
+networks:
+  remnashop:
+    external: true
+    name: ${REMNASHOP_DOCKER_NETWORK:-remnawave-network}
