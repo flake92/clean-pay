@@ -500,12 +500,23 @@ describe("proxy auth redirects", () => {
     expect(response.status).toBe(200);
   });
 
-  it("blocks API requests without cookies and clears stale session cookies on the response", async () => {
+  it("blocks anonymous API requests without erasing a concurrently created session", async () => {
     const response = await proxy(request("/api/bff/auth/me"));
 
     expect(response.status).toBe(401);
     expect(await response.json()).toMatchObject({ error: { code: "UNAUTHORIZED" } });
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(response.headers.get("set-cookie")).toBeNull();
+  });
+
+  it("clears an invalid access cookie that was present on the request", async () => {
+    const response = await proxy(request(
+      "/api/bff/auth/me",
+      "clean_pay_access=invalid-token",
+    ));
+
+    expect(response.status).toBe(401);
     expect(response.cookies.get("clean_pay_access")?.value).toBe("");
-    expect(response.cookies.get("clean_pay_refresh")?.value).toBe("");
+    expect(response.cookies.get("clean_pay_refresh")).toBeUndefined();
   });
 });
