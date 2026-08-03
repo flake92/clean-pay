@@ -81,7 +81,7 @@ export function loadConfig(source = process.env) {
   const sessionSecret = required("ADVERTISER_SESSION_SECRET", source);
   if (sessionSecret.length < 48) throw new Error("ADVERTISER_SESSION_SECRET must contain at least 48 characters");
 
-  const attributionDays = Number(source.ATTRIBUTION_DAYS || "7");
+  const attributionDays = Number(source.ATTRIBUTION_DAYS || "30");
   if (!Number.isInteger(attributionDays) || attributionDays < 1 || attributionDays > 365) {
     throw new Error("ATTRIBUTION_DAYS must be between 1 and 365");
   }

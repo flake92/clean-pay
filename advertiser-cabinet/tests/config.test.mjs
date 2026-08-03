@@ -19,7 +19,7 @@ function env(overrides = {}) {
 test("loads multiple roles and a Telegram campaign", () => {
   const config = loadConfig(env());
   assert.equal(config.basePath, "/partners");
-  assert.equal(config.attributionDays, 7);
+  assert.equal(config.attributionDays, 30);
   assert.equal(config.accounts.length, 2);
   assert.equal(config.campaigns[0].adLinkCode, "lopez");
 });
