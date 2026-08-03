@@ -300,13 +300,13 @@ export function TariffsPanel() {
               <Card className="shadow-1 h-full">
                 <div className="flex flex-column gap-4">
                   <div className="flex flex-wrap items-start justify-between gap-3">
-                    <div>
+                    <div className="min-w-0 flex-1">
                       <div className="flex flex-wrap items-center gap-2">
-                        <h2 className="text-xl font-semibold">{plan.name}</h2>
+                        <h2 className="text-xl font-semibold break-words">{plan.name}</h2>
                         <Tag severity="info" value={plan.type} />
                       </div>
                       {plan.description ? (
-                        <p className="mt-1 line-height-3 text-600">
+                        <p className="mt-1 line-height-3 text-600 break-words">
                           {plan.description}
                         </p>
                       ) : null}
