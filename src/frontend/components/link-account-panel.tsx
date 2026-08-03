@@ -305,6 +305,12 @@ export function LinkAccountPanel({
     return () => window.clearTimeout(timer);
   }, [loadState]);
 
+  useEffect(() => {
+    if (!loading && guided && hasEmail && emailVerified && !mergeConfirmation) {
+      navigateTo(accountSetupCompletePath(redirectTo));
+    }
+  }, [emailVerified, guided, hasEmail, loading, mergeConfirmation, redirectTo]);
+
   async function confirmTelegramMerge() {
     const action = "telegram-merge-confirm";
     if (!beginAction(action)) {
@@ -537,25 +543,21 @@ export function LinkAccountPanel({
           className="surface-50 border-1 border-200 border-round-lg p-4"
         >
           <h2 className="mt-0 text-xl" id="guided-account-setup-title">
-            {hasEmail && emailVerified
-              ? "Подтвердите резервный вход"
-              : "Добавьте резервный вход"}
+            Добавьте резервный вход
           </h2>
           <p className="line-height-3 text-700">
-            {hasEmail && emailVerified
-              ? "E-mail уже подтверждён. Введите пароль от него, чтобы восстановить связь с сервисом и продолжить."
-              : requiresPasswordReauth
+            {requiresPasswordReauth
                 ? hasEmail
-                  ? "Сессия подтверждения изменилась. Снова введите текущий пароль от e-mail, затем подтвердите адрес шестизначным кодом из письма."
-                  : "Сессия подтверждения изменилась. Снова введите e-mail и его текущий пароль, затем подтвердите адрес шестизначным кодом из письма."
+                  ? "Сессия подтверждения изменилась. Введите пароль личного кабинета, затем подтвердите адрес шестизначным кодом из письма."
+                  : "Сессия подтверждения изменилась. Снова введите e-mail и пароль личного кабинета, затем подтвердите адрес шестизначным кодом из письма."
                 : hasEmail
                   ? "E-mail сохранён. Осталось подтвердить его шестизначным кодом из письма."
-                  : "Вы вошли через Telegram. Добавьте e-mail и пароль, чтобы не потерять доступ к кабинету, если Telegram станет недоступен."}
+                  : "Вы вошли через Telegram. Добавьте e-mail и придумайте пароль для личного кабинета, чтобы не потерять доступ, если Telegram станет недоступен."}
           </p>
           <ol className="mb-0 pl-4 line-height-3 text-600">
             {!hasEmail ? <li>Введите e-mail и пароль для входа.</li> : null}
             {hasEmail && !emailVerified && requiresPasswordReauth ? (
-              <li>Подтвердите адрес его текущим паролем.</li>
+              <li>Подтвердите вход паролем личного кабинета.</li>
             ) : null}
             {!emailVerified ? <li>Подтвердите адрес кодом из письма.</li> : null}
             <li>
@@ -641,7 +643,7 @@ export function LinkAccountPanel({
               <label className="flex flex-column gap-2">
                 <span className="text-sm font-medium text-700">
                   {usesCurrentPassword
-                    ? "Пароль от e-mail"
+                    ? "Пароль личного кабинета"
                     : "Пароль для входа"}
                 </span>
                 <Password

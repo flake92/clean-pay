@@ -1,5 +1,5 @@
 import { createHash, createHmac } from "node:crypto";
-import { Prisma } from "@prisma/client";
+import { Prisma, WebSessionAssuranceLevel } from "@prisma/client";
 import {
   assertUserMergeFinalOwner,
   mergeLocalUsersIntoTarget,
@@ -420,6 +420,24 @@ export async function remnashopIdentifyEmail(body: StartGenericEmailAuthRequest)
     method: "POST",
     body,
   });
+}
+
+export async function remnashopCreateServiceSession(
+  body: StartGenericEmailAuthRequest & { user_id: string },
+) {
+  const path = "/auth/service-session";
+  const response = await fetchRemnashop(path, {
+    method: "POST",
+    headers: {
+      accept: "application/json",
+      "content-type": "application/json",
+    },
+    body: JSON.stringify(body),
+    cache: "no-store",
+    signal: AbortSignal.timeout(15_000),
+  });
+  const data = await parseResponse<RemnashopAuthResponse>(response, path);
+  return { data, cookies: extractAuthCookies(response) };
 }
 
 export async function remnashopRequestPasswordReset(
@@ -1316,6 +1334,79 @@ export async function recoverRemnashopTelegramSession(
   }
 }
 
+async function attachRemnashopTokensForVerifiedEmailSession(
+  session: NonNullable<Awaited<ReturnType<typeof getCurrentSession>>>,
+) {
+  if (
+    session.assuranceLevel !== WebSessionAssuranceLevel.FULL ||
+    !session.user.email ||
+    !session.user.emailVerified ||
+    !session.user.remnashopUserId
+  ) {
+    return null;
+  }
+
+  const auth = await remnashopCreateServiceSession({
+    email: session.user.email,
+    user_id: session.user.remnashopUserId,
+  });
+  const profile = await getRemnashopMe(auth.cookies.accessToken);
+  const remnashopUserId = getRemnashopUserIdFromAccessToken(auth.cookies.accessToken);
+  if (
+    profile.email !== session.user.email ||
+    !profile.is_email_verified ||
+    (session.user.remnashopUserId && session.user.remnashopUserId !== remnashopUserId)
+  ) {
+    throw new BffError(
+      "ACCOUNT_MERGE_REQUIRED",
+      409,
+      "Verified e-mail session resolved to another upstream account",
+    );
+  }
+
+  const accessExpiresAt = new Date(auth.data.expires_at);
+  const refreshExpiresAt = new Date(auth.data.refresh_expires_at);
+  const protectedAccessToken = protectRemnashopToken(auth.cookies.accessToken);
+  const protectedRefreshToken = protectRemnashopToken(auth.cookies.refreshToken);
+  const stored = await prisma.webSession.updateMany({
+    where: { id: session.id, userId: session.userId, revokedAt: null },
+    data: {
+      remnashopAccessTokenEncrypted: protectedAccessToken,
+      remnashopRefreshTokenEncrypted: protectedRefreshToken,
+      remnashopAccessExpiresAt: accessExpiresAt,
+      remnashopRefreshExpiresAt: refreshExpiresAt,
+    },
+  });
+  if (stored.count !== 1) {
+    throw new BffError("UNAUTHORIZED", 401, "Local session changed during automatic recovery");
+  }
+  await prisma.webUser.update({
+    where: { id: session.userId },
+    data: { remnashopUserId, lastLoginAt: new Date() },
+  });
+
+  authDebugLog("remnashop_email_token_restore_success", {
+    sessionId: session.id,
+    userId: session.userId,
+    remnashopUserId,
+    accessExpiresAt,
+    refreshExpiresAt,
+  });
+
+  return {
+    accessToken: auth.cookies.accessToken,
+    refreshToken: auth.cookies.refreshToken,
+    session: {
+      ...session,
+      user: { ...session.user, remnashopUserId },
+      remnashopAccessTokenEncrypted: protectedAccessToken,
+      remnashopRefreshTokenEncrypted: protectedRefreshToken,
+      remnashopAccessExpiresAt: accessExpiresAt,
+      remnashopRefreshExpiresAt: refreshExpiresAt,
+    },
+  };
+}
+
 export async function getAuthorizedRemnashopTokens({
   allowUnverifiedEmail = false,
 }: { allowUnverifiedEmail?: boolean } = {}) {
@@ -1335,7 +1426,7 @@ export async function getAuthorizedRemnashopTokens({
   }
 
   let authorized: Awaited<ReturnType<typeof acquireRemnashopTokensForSession>> = null;
-  let authorizationSource: "stored" | "refresh" | "telegram_restore" | null = null;
+  let authorizationSource: "stored" | "refresh" | "email_restore" | "telegram_restore" | null = null;
 
   if (
     localSession.user.authPending &&
@@ -1366,6 +1457,28 @@ export async function getAuthorizedRemnashopTokens({
       refresh: remnashopRefreshTokens,
     });
     authorizationSource = authorized?.source ?? null;
+  }
+
+  if (
+    !authorized &&
+    localSession.assuranceLevel === WebSessionAssuranceLevel.FULL &&
+    localSession.user.email &&
+    localSession.user.emailVerified
+  ) {
+    const recoverySession = await getCurrentSession();
+    if (
+      !recoverySession ||
+      recoverySession.id !== localSession.id ||
+      recoverySession.userId !== localSession.userId
+    ) {
+      throw new BffError("UNAUTHORIZED", 401, "Current session changed before e-mail recovery");
+    }
+    const restoredEmailSession =
+      await attachRemnashopTokensForVerifiedEmailSession(recoverySession);
+    if (restoredEmailSession) {
+      authorized = { ...restoredEmailSession, source: "stored" as const };
+      authorizationSource = "email_restore";
+    }
   }
 
   if (!authorized && localSession.user.telegramId) {
