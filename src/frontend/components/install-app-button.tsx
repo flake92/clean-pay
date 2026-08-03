@@ -81,8 +81,16 @@ export function InstallAppButton({
         void loadTelegramWebAppScript().catch(() => undefined);
       }
     }, 0);
-    const onBeforeInstallPrompt = (event: Event) => { event.preventDefault(); setInstallEvent(event as BeforeInstallPromptEvent); };
-    const onInstalled = () => setInstalled(true);
+    const onBeforeInstallPrompt = (event: Event) => {
+      event.preventDefault();
+      setMessage(null);
+      setInstallEvent(event as BeforeInstallPromptEvent);
+    };
+    const onInstalled = () => {
+      setMessage(null);
+      setInstallEvent(null);
+      setInstalled(true);
+    };
     window.addEventListener("beforeinstallprompt", onBeforeInstallPrompt);
     window.addEventListener("appinstalled", onInstalled);
 
@@ -118,7 +126,7 @@ export function InstallAppButton({
     await installEvent.prompt();
     const choice = await installEvent.userChoice;
     setInstallEvent(null);
-    if (choice.outcome === "dismissed") setMessage("Установка отменена. Вы сможете вернуться к ней в любой момент.");
+    if (choice.outcome === "dismissed") setMessage(null);
   }
 
   if (installed) {
