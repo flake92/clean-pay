@@ -513,6 +513,79 @@ body {
   box-shadow: 0 0 0 0.15rem rgba(99, 102, 241, 0.16);
 }
 
+.clean-pay-gateway-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.clean-pay-gateway-switcher {
+  align-items: stretch;
+  background: #f8fafc;
+  border: 1px solid #dce3ec;
+  border-radius: 12px;
+  display: grid;
+  grid-template-columns: 3rem minmax(0, 1fr) 3rem;
+  overflow: hidden;
+}
+
+.clean-pay-gateway-switcher__button {
+  align-items: center;
+  appearance: none;
+  background: #ffffff;
+  border: 0;
+  color: #4f46e5;
+  cursor: pointer;
+  display: flex;
+  font-size: 1rem;
+  justify-content: center;
+  min-height: 3.5rem;
+  transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+.clean-pay-gateway-switcher__button:first-child {
+  border-right: 1px solid #dce3ec;
+}
+
+.clean-pay-gateway-switcher__button:last-child {
+  border-left: 1px solid #dce3ec;
+}
+
+.clean-pay-gateway-switcher__button:hover,
+.clean-pay-gateway-switcher__button:focus-visible {
+  background: #eef2ff;
+  color: #3730a3;
+  outline: none;
+}
+
+.clean-pay-gateway-switcher__button:focus-visible {
+  box-shadow: inset 0 0 0 2px #6366f1;
+}
+
+.clean-pay-gateway-switcher__current {
+  align-items: center;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  justify-content: center;
+  min-width: 0;
+  padding: 0.65rem 0.75rem;
+  text-align: center;
+}
+
+.clean-pay-gateway-switcher__current strong {
+  color: #1f2937;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  text-transform: uppercase;
+}
+
+.clean-pay-gateway-switcher__current span {
+  color: #64748b;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
 .link-account-panel {
   display: flex;
   flex-direction: column;
