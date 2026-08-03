@@ -642,15 +642,63 @@ describe("remnashop client", () => {
     vi.mocked(getCurrentSession).mockResolvedValueOnce(null);
     await expect(getAuthorizedRemnashopTokens()).rejects.toMatchObject({ code: "UNAUTHORIZED" });
 
-    vi.mocked(getCurrentSession).mockResolvedValueOnce({
+    const verifiedPasskeySession = {
       id: "session-1",
       userId: "user-1",
-      authMethod: "EMAIL",
+      authMethod: "PASSKEY",
+      assuranceLevel: "FULL",
       remnashopAccessTokenEncrypted: null,
       remnashopRefreshTokenEncrypted: null,
-      user: { email: "user@example.com", emailVerified: true, telegramId: null },
-    } as never);
-    await expect(getAuthorizedRemnashopTokens()).rejects.toMatchObject({ code: "EMAIL_REQUIRED" });
+      user: {
+        email: "user@example.com",
+        emailVerified: true,
+        telegramId: null,
+        remnashopUserId: "1",
+      },
+    } as never;
+    vi.mocked(getCurrentSession)
+      .mockResolvedValueOnce(verifiedPasskeySession)
+      .mockResolvedValueOnce(verifiedPasskeySession);
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(telegramAuthResponse({ userId: "1" }))
+      .mockResolvedValueOnce(response({
+        body: {
+          email: "user@example.com",
+          is_email_verified: true,
+          telegram_id: null,
+          auth_type: "email",
+          pending_email: null,
+          name: "User",
+          username: null,
+          language: "ru",
+        },
+      }))
+      .mockResolvedValueOnce(response({
+        body: {
+          email: "user@example.com",
+          is_email_verified: true,
+          telegram_id: null,
+          auth_type: "email",
+          pending_email: null,
+          name: "User",
+          username: null,
+          language: "ru",
+        },
+      }));
+    await expect(getAuthorizedRemnashopTokens()).resolves.toMatchObject({
+      accessToken: expect.any(String),
+      session: { id: "session-1", remnashopAccessTokenEncrypted: expect.any(String) },
+    });
+    expect(prismaMock.webSession.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: "session-1", userId: "user-1", revokedAt: null },
+    }));
+    expect(globalThis.fetch).toHaveBeenNthCalledWith(
+      1,
+      "http://remnashop:5000/api/v1/public/auth/service-session",
+      expect.objectContaining({
+        body: JSON.stringify({ email: "user@example.com", user_id: "1" }),
+      }),
+    );
 
     vi.mocked(getCurrentSession).mockResolvedValueOnce({
       id: "session-1",
@@ -663,6 +711,7 @@ describe("remnashop client", () => {
       user: { email: "user@example.com", emailVerified: false, telegramId: null },
     } as never);
     const fetchSpy = vi.spyOn(globalThis, "fetch");
+    fetchSpy.mockClear();
     await expect(getAuthorizedRemnashopTokens()).rejects.toMatchObject({ code: "EMAIL_NOT_VERIFIED" });
     expect(fetchSpy).not.toHaveBeenCalled();
 

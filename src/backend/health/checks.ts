@@ -91,7 +91,7 @@ export async function checkRemnashop(deadlineSignal?: AbortSignal) {
     // service credential has been accepted. This has no e-mail side effect and
     // prevents an older Remnashop image without generic e-mail auth from passing
     // readiness merely because its plans endpoint is available.
-    for (const path of ["/auth/email/start", "/auth/identify"]) {
+    for (const path of ["/auth/email/start", "/auth/identify", "/auth/service-session"]) {
       const authContractResponse = await fetch(`${env.remnashopApiBaseUrl}${path}`, {
         method: "POST",
         headers: {

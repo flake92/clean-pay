@@ -64,6 +64,7 @@ describe("health checks", () => {
     const fetch = vi.spyOn(globalThis, "fetch")
       .mockResolvedValueOnce(new Response("{}", { status: 200 }))
       .mockResolvedValueOnce(new Response("{}", { status: 422 }))
+      .mockResolvedValueOnce(new Response("{}", { status: 422 }))
       .mockResolvedValueOnce(new Response("{}", { status: 422 }));
 
     await expect(checkRemnashop()).resolves.toMatchObject({ status: "ok" });
@@ -82,6 +83,10 @@ describe("health checks", () => {
       signal: expect.any(Object),
     }));
     expect(fetch).toHaveBeenNthCalledWith(3, "http://remnashop:5000/api/v1/public/auth/identify", expect.objectContaining({
+      method: "POST",
+      body: "{}",
+    }));
+    expect(fetch).toHaveBeenNthCalledWith(4, "http://remnashop:5000/api/v1/public/auth/service-session", expect.objectContaining({
       method: "POST",
       body: "{}",
     }));
@@ -130,6 +135,16 @@ describe("health checks", () => {
     await expect(checkRemnashop()).resolves.toMatchObject({
       status: "down",
       message: "Remnashop is incompatible: /auth/identify is missing",
+    });
+
+    fetch
+      .mockResolvedValueOnce(new Response("{}", { status: 200 }))
+      .mockResolvedValueOnce(new Response("{}", { status: 422 }))
+      .mockResolvedValueOnce(new Response("{}", { status: 422 }))
+      .mockResolvedValueOnce(new Response("{}", { status: 404 }));
+    await expect(checkRemnashop()).resolves.toMatchObject({
+      status: "down",
+      message: "Remnashop is incompatible: /auth/service-session is missing",
     });
   });
 

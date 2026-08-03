@@ -402,9 +402,6 @@ describe("guided Telegram e-mail setup", () => {
       )
       .mockResolvedValueOnce(
         Response.json({ data: { credentials: [] } }),
-      )
-      .mockResolvedValueOnce(
-        Response.json({ data: { linked: true } }),
       );
 
     await act(async () =>
@@ -417,38 +414,10 @@ describe("guided Telegram e-mail setup", () => {
     );
     await settle();
 
-    expect(container.querySelector('input[name="email"]')?.getAttribute("type"))
-      .toBe("hidden");
-    expect(
-      container.querySelector('input[name="confirmPassword"]'),
-    ).toBeNull();
-    expect(
-      container
-        .querySelector('input[name="password"]')
-        ?.getAttribute("autocomplete"),
-    ).toBe("current-password");
-    expect(
-      container
-        .querySelector('input[name="password"]')
-        ?.getAttribute("minlength"),
-    ).toBe("1");
-    await act(async () =>
-      setInputValue(
-        container.querySelector<HTMLInputElement>('input[name="password"]')!,
-        "existing-password",
-      ),
-    );
-    await submit(container.querySelector("form")!);
-
-    const linkCall = vi.mocked(fetch).mock.calls[2]!;
-    expect(linkCall[0]).toBe("/api/bff/link/remnashop");
-    expect(JSON.parse(String(linkCall[1]?.body))).toEqual({
-      email: "owner@example.com",
-      password: "existing-password",
-    });
     expect(mocks.navigateTo).toHaveBeenCalledWith(
       "/payment?plan=pro&duration=30&gateway=card&account_setup=account-ready",
     );
+    expect(fetch).toHaveBeenCalledTimes(2);
   });
 
   it("continues an already pending e-mail with the same payment destination", async () => {

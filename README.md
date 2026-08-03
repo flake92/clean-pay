@@ -197,7 +197,7 @@ EMAIL_FROM_NAME=Clean Pay
 
 URL публичного API должен заканчиваться на `/api/v1/public`, admin API — на `/api/v1/admin`. Оба адреса должны использовать один origin и один API prefix. Admin-маршруты Remnashop проверяют `APP_API_KEY` через заголовок `X-API-Key`, auth-маршруты — отдельный `APP_AUTH_SERVICE_KEY` через `X-Remnashop-Auth-Service-Key`.
 
-Passkey создаёт локальную сессию Clean Pay. Если upstream-сессия Remnashop отсутствует или истекла, перед операцией с подпиской интерфейс запросит явный step-up через e-mail или Telegram.
+Passkey создаёт полноценную локальную сессию Clean Pay. Для пользователя с уже подтверждённым e-mail отсутствующая или истёкшая upstream-сессия Remnashop восстанавливается автоматически через закрытый service-to-service маршрут; пароль повторно не запрашивается. Сопровождаемое добавление e-mail перед изменением тарифа или продлением показывается только пользователю, который вошёл через Telegram и ещё не добавил подтверждённый e-mail. В этой форме создаётся пароль личного кабинета, а не пароль от почтового ящика.
 
 ### Логика входа
 
@@ -212,7 +212,7 @@ Passkey options обязательно содержат `allowCredentials` вы�
 
 ### Совместимая версия Remnashop
 
-Для backend-identify, generic e-mail auth, отдельной auth-границы, полного платёжного recovery contract и безопасного объединения e-mail/Telegram-аккаунтов используйте ветку `flake92/remnashop:update-nodejs`, проверенную revision `ab0b9e1`. Она включает изменения из [`snoups/remnashop#135`](https://github.com/snoups/remnashop/pull/135) и последующие исправления auth-контракта.
+Для backend-identify, generic e-mail auth, автоматического восстановления подтверждённой service-сессии, отдельной auth-границы, полного платёжного recovery contract и безопасного объединения e-mail/Telegram-аккаунтов используйте ветку `flake92/remnashop:update-nodejs`, проверенную revision `27a6d80`. Она включает изменения из [`snoups/remnashop#135`](https://github.com/snoups/remnashop/pull/135) и последующие исправления auth-контракта.
 
 Пока эти изменения не вошли в официальный release Remnashop:
 
@@ -223,7 +223,7 @@ Passkey options обязательно содержат `allowCredentials` вы�
 
 На момент последней проверки PR #135 открыт, направлен в ветку `dev` и не является draft.
 
-Перед обновлением Remnashop сделайте резервную копию его базы данных и убедитесь, что HTTP-сервис, worker и scheduler используют одну версию образа. Readiness Clean Pay выполняет безопасную проверку generic e-mail auth без отправки письма: старый образ, отсутствующий маршрут или неверный service key переводят стенд в `degraded`, поэтому `./deploy.sh up` не завершится успешно.
+Перед обновлением Remnashop сделайте резервную копию его базы данных и убедитесь, что HTTP-сервис, worker и scheduler используют одну версию образа. Readiness Clean Pay выполняет безопасную проверку generic e-mail auth и закрытого `/auth/service-session` без отправки письма: старый образ, отсутствующий маршрут или неверный service key переводят стенд в `degraded`, поэтому `./deploy.sh up` не завершится успешно.
 
 ## Reverse proxy
 
