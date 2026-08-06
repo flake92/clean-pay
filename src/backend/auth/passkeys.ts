@@ -189,6 +189,7 @@ export async function beginPasskeyRegistration() {
     // synced credentials are excluded. Verified duplicates are handled with an
     // owner-and-key scoped update in finishPasskeyRegistration.
     authenticatorSelection: {
+      authenticatorAttachment: "platform",
       residentKey: "preferred",
       userVerification: "required",
     },

@@ -174,6 +174,7 @@ describe("passkey use cases", () => {
         userName: "user@example.com",
         timeout: 120_000,
         authenticatorSelection: {
+          authenticatorAttachment: "platform",
           residentKey: "preferred",
           userVerification: "required",
         },
