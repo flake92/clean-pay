@@ -163,10 +163,6 @@ export function normalizeRemnashopError(
     return new ServiceError('PAYMENT_GATEWAY_UNAVAILABLE', 409, message, debug);
   }
 
-  if (includesAny(lowerMessage, ['user merge disabled during payment rollout gate'])) {
-    return new ServiceError('ACCOUNT_MERGE_IN_PROGRESS', 409, message, debug);
-  }
-
   if (lowerPath.includes('/subscription/devices') && status >= 400) {
     return new ServiceError('DEVICE_DELETE_UNAVAILABLE', status >= 500 ? 409 : status, message, debug);
   }
