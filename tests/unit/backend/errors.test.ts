@@ -95,6 +95,7 @@ describe("Remnashop service errors", () => {
     [422, [{ msg: "bad field" }], "/auth/register", "VALIDATION_ERROR", 400],
     [429, "slow down", "/auth/login", "RATE_LIMITED", 429],
     [500, "boom", "/plans/public", "UPSTREAM_UNAVAILABLE", 502],
+    [500, "user merge disabled during payment rollout gate", "/users/merge", "ACCOUNT_MERGE_IN_PROGRESS", 409],
   ])("maps status %s and detail %j to %s", (status, detail, path, code, mappedStatus) => {
     const error = normalizeRemnashopError(status as number, detail, { path: path as string });
 
