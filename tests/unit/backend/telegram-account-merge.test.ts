@@ -549,4 +549,46 @@ describe("confirmed Telegram account merge", () => {
       .rejects.toMatchObject({ code: "ACCOUNT_MERGE_REQUIRED", status: 409 });
     expect(mocks.linkCurrentUser).not.toHaveBeenCalled();
   });
+
+  it("returns ACCOUNT_MERGE_REQUIRED when confirmation is FAILED", async () => {
+    mocks.accountFindFirst.mockResolvedValue({
+      ...confirmation,
+      status: AccountMergeConfirmationStatus.FAILED,
+      lastErrorCode: "ACCOUNT_MERGE_SUBSCRIPTIONS_CONFLICT",
+    });
+
+    await expect(confirmTelegramAccountMerge("raw-confirmation-token"))
+      .rejects.toMatchObject({ code: "ACCOUNT_MERGE_REQUIRED", status: 409 });
+    expect(mocks.remnashopMergeUsers).not.toHaveBeenCalled();
+  });
+
+  it("returns ACCOUNT_MERGE_REQUIRED when confirmation has expired", async () => {
+    mocks.accountFindFirst.mockResolvedValue({
+      ...confirmation,
+      status: AccountMergeConfirmationStatus.PENDING,
+      expiresAt: new Date("2020-01-01T00:00:00.000Z"),
+    });
+
+    await expect(confirmTelegramAccountMerge("raw-confirmation-token"))
+      .rejects.toMatchObject({ code: "ACCOUNT_MERGE_REQUIRED", status: 409 });
+    expect(mocks.remnashopMergeUsers).not.toHaveBeenCalled();
+  });
+
+  it("still returns success when refreshCurrentAccessCookie throws after merge", async () => {
+    mocks.refreshCurrentAccessCookie.mockRejectedValue(new Error("cookie refresh failed"));
+
+    await expect(confirmTelegramAccountMerge("raw-confirmation-token"))
+      .resolves.toEqual({ merged: true, userId: "target-local" });
+    expect(mocks.linkCurrentUser).toHaveBeenCalledOnce();
+  });
+
+  it("still returns success when auditLog throws on the success event after merge", async () => {
+    mocks.auditLog
+      .mockResolvedValueOnce(undefined) // telegram_account_merge_attempted
+      .mockRejectedValueOnce(new Error("audit failed")); // telegram_account_merge_succeeded
+
+    await expect(confirmTelegramAccountMerge("raw-confirmation-token"))
+      .resolves.toEqual({ merged: true, userId: "target-local" });
+    expect(mocks.linkCurrentUser).toHaveBeenCalledOnce();
+  });
 });
