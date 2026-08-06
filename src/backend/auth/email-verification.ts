@@ -8,7 +8,7 @@ import {
   remnashopMergeUsers,
   remnashopRequest,
 } from "@/backend/integrations/remnashop/client";
-import { BffError } from "@/backend/integrations/remnashop/errors";
+import { ServiceError } from "@/backend/errors/service-error";
 import { linkCurrentUserToRemnashopAuth } from "@/backend/integrations/remnashop/session";
 import { assertCooldown, assertRateLimit } from "@/backend/limits/rate-limit";
 import { auditLog } from "@/backend/observability/audit";
@@ -34,18 +34,18 @@ function sleep(ms: number) {
 
 function isTransientEmailSendError(error: unknown) {
   return (
-    error instanceof BffError &&
+    error instanceof ServiceError &&
     error.code === "UPSTREAM_UNAVAILABLE" &&
     String(error.debug?.message ?? error.message).toLowerCase().includes("failed to send verification email")
   );
 }
 
 function isTelegramAlreadyLinkedConflict(error: unknown) {
-  return error instanceof BffError && error.code === "CONFLICT";
+  return error instanceof ServiceError && error.code === "CONFLICT";
 }
 
 function accountMergeRequiredError(message = "Telegram account is already attached to a different Remnashop account.") {
-  return new BffError(
+  return new ServiceError(
     "ACCOUNT_MERGE_REQUIRED",
     409,
     message,
@@ -63,7 +63,7 @@ function mergeSubscriptionsConflictError() {
 
 function isBothSubscriptionsMergeConflict(error: unknown) {
   return (
-    error instanceof BffError &&
+    error instanceof ServiceError &&
     error.code === "CONFLICT" &&
     String(error.debug?.message ?? error.message).toLowerCase().includes("both users have current subscriptions")
   );
@@ -163,7 +163,7 @@ export async function requestRemnashopEmailVerification({
     }
   }
 
-  throw new BffError("UPSTREAM_UNAVAILABLE", 502, "Failed to send verification email");
+  throw new ServiceError("UPSTREAM_UNAVAILABLE", 502, "Failed to send verification email");
 }
 
 function assertTelegramEmailSetupIsPasswordBacked(
@@ -202,7 +202,7 @@ function assertTelegramEmailSetupIsPasswordBacked(
     return;
   }
 
-  throw new BffError(
+  throw new ServiceError(
     "EMAIL_REQUIRED",
     401,
     "Add an e-mail and password through the guided account setup before verifying the address.",
@@ -511,7 +511,7 @@ export async function confirmEmailVerification(rawBody: AuthPayload<ConfirmEmail
     logger.warn("email_verification_post_confirm_sync_failed", {
       sessionId: session.id,
       userId: session.userId,
-      errorCode: error instanceof BffError ? error.code : "INTERNAL_ERROR",
+      errorCode: error instanceof ServiceError ? error.code : "INTERNAL_ERROR",
     }, {
       category: "auth",
       source: "email.verification",

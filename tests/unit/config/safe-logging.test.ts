@@ -12,13 +12,6 @@ const logEvents = [
     ],
   },
   {
-    file: "src/backend/http/bff-response.ts",
-    events: [
-      "bff_response_sent",
-      "bff_error_response_sent",
-    ],
-  },
-  {
     file: "src/backend/integrations/telegram/oidc.ts",
     events: [
       "telegram_token_request_sent",
@@ -64,7 +57,7 @@ function extractLoggerCall(source: string, event: string) {
 }
 
 describe("safe production logging shape", () => {
-  it("does not log headers, urls or request/response bodies for critical upstream and BFF events", () => {
+  it("does not log headers, urls or request/response bodies for critical upstream events", () => {
     const offenders: string[] = [];
 
     for (const { file, events } of logEvents) {

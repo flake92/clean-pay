@@ -1,7 +1,7 @@
 import { auditLog, logTechnicalError } from "@/backend/observability/audit";
 import { authDebugLog } from "@/backend/observability/auth-debug-log";
 import { prisma } from "@/backend/database/prisma";
-import { BffError } from "@/backend/integrations/remnashop/errors";
+import { ServiceError } from "@/backend/errors/service-error";
 import { WebSessionAssuranceLevel, type Prisma } from "@prisma/client";
 import {
   getRemnashopMe,
@@ -228,7 +228,7 @@ async function reconcileRemnashopUser(
     targetCandidate?.remnashopUserId &&
     targetCandidate.remnashopUserId !== identity.remnashopUserId
   ) {
-    throw new BffError(
+    throw new ServiceError(
       "ACCOUNT_MERGE_REQUIRED",
       409,
       "The linked Clean Pay identity belongs to a different Remnashop account.",
@@ -487,7 +487,7 @@ export async function reconcileUserFromRemnashopAuth({
     );
 
     if (!recoveryIsProven) {
-      throw new BffError(
+      throw new ServiceError(
         "ACCOUNT_MERGE_REQUIRED",
         409,
         "Telegram login resolved to a different Remnashop owner.",
@@ -559,7 +559,7 @@ export async function linkCurrentUserToRemnashopAuth({
   });
 
   if (!session) {
-    throw new BffError("UNAUTHORIZED", 401, "Login is required.");
+    throw new ServiceError("UNAUTHORIZED", 401, "Login is required.");
   }
 
   const remnashopUserId = getRemnashopUserIdFromAccessToken(accessToken);
@@ -631,7 +631,7 @@ export async function linkCurrentUserToRemnashopAuth({
       lockedCurrentUser.email !== expectedCurrentOwner.email ||
       lockedCurrentUser.telegramId !== expectedCurrentOwner.telegramId
     ) {
-      throw new BffError(
+      throw new ServiceError(
         "ACCOUNT_MERGE_REQUIRED",
         409,
         "Current account ownership changed before linking.",

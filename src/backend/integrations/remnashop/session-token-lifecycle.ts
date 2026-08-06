@@ -1,7 +1,7 @@
 import { Prisma } from "@prisma/client";
 
 import { prisma } from "@/backend/database/prisma";
-import { BffError } from "@/backend/integrations/remnashop/errors";
+import { ServiceError } from "@/backend/errors/service-error";
 import {
   protectRemnashopToken,
   revealRemnashopToken,
@@ -111,7 +111,7 @@ export async function acquireRemnashopTokensForSession({
     const lockedIds = lockedRows.map(({ id }) => id);
 
     if (!lockedIds.includes(sessionId)) {
-      throw new BffError("UNAUTHORIZED", 401, "Current session is no longer active");
+      throw new ServiceError("UNAUTHORIZED", 401, "Current session is no longer active");
     }
 
     const sessions = await tx.webSession.findMany({
@@ -122,7 +122,7 @@ export async function acquireRemnashopTokensForSession({
     const targetSession = sessions.find(({ id }) => id === sessionId);
 
     if (!targetSession || sessions.length !== lockedIds.length) {
-      throw new BffError("UNAUTHORIZED", 401, "Current session ownership changed");
+      throw new ServiceError("UNAUTHORIZED", 401, "Current session ownership changed");
     }
 
     const candidates: TokenCandidate[] = [];
@@ -189,7 +189,7 @@ export async function acquireRemnashopTokensForSession({
       });
 
       if (transferred.count !== 1) {
-        throw new BffError("UNAUTHORIZED", 401, "Current session ownership changed");
+        throw new ServiceError("UNAUTHORIZED", 401, "Current session ownership changed");
       }
 
       ownedSession = {
@@ -246,7 +246,7 @@ export async function acquireRemnashopTokensForSession({
     });
 
     if (stored.count !== 1) {
-      throw new BffError(
+      throw new ServiceError(
         "UNAUTHORIZED",
         401,
         "Remnashop refresh token ownership changed",

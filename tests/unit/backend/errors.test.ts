@@ -1,13 +1,13 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  BffError,
   normalizeRemnashopError,
   remnashopInvalidJsonError,
   remnashopUnavailableError,
 } from "@/backend/integrations/remnashop/errors";
+import { ServiceError } from "@/backend/errors/service-error";
 
-describe("Remnashop BFF errors", () => {
+describe("Remnashop service errors", () => {
   it("keeps production messages readable Russian", () => {
     const codes = [
       "UNAUTHORIZED",
@@ -61,7 +61,7 @@ describe("Remnashop BFF errors", () => {
     ];
 
     for (const code of codes) {
-      const error = new BffError(code, 400);
+      const error = new ServiceError(code, 400);
 
       expect(mojibakeFragments.some((fragment) => error.prodMessage.includes(fragment))).toBe(false);
       expect(error.prodMessage).toMatch(/[А-Яа-яЁё]/);
@@ -98,7 +98,7 @@ describe("Remnashop BFF errors", () => {
   ])("maps status %s and detail %j to %s", (status, detail, path, code, mappedStatus) => {
     const error = normalizeRemnashopError(status as number, detail, { path: path as string });
 
-    expect(error).toBeInstanceOf(BffError);
+    expect(error).toBeInstanceOf(ServiceError);
     expect(error.code).toBe(code);
     expect(error.status).toBe(mappedStatus);
     expect(error.debug?.upstreamPath).toBe(path);

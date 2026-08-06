@@ -1,75 +1,21 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import type { AppMenuItem } from "@/frontend/types";
-import { hasRenewOffer } from "@/frontend/lib/subscription-offers";
 import { getBranding } from "@/shared/branding";
-import type { SubscriptionOffersResponse } from "@/shared/remnashop/types";
-import {
-    getAuthenticatedBffJson,
-    getCachedBffJson,
-} from "@/frontend/lib/bff-cache";
+import { logoutAction } from "@/app/actions/session";
+import type { NavigationViewModel } from "@/shared/presentation/navigation";
 
-type MenuUser = {
-    email: string | null;
-    emailVerified: boolean;
-    telegramId: string | null;
-};
-
-export function useCleanPayMenu() {
+export function useCleanPayMenu(navigation: NavigationViewModel) {
     const branding = getBranding();
-    const [user, setUser] = useState<MenuUser | null>(null);
-    const [offers, setOffers] = useState<SubscriptionOffersResponse | null>(null);
-    const [profileLoaded, setProfileLoaded] = useState(false);
-
-    useEffect(() => {
-        let alive = true;
-
-        async function loadMenuState() {
-            try {
-                const profileResponse = await getAuthenticatedBffJson<{ user: MenuUser }>("/api/bff/auth/me");
-                const nextUser = profileResponse.ok
-                    ? profileResponse.data?.user ?? null
-                    : null;
-
-                let nextOffers: SubscriptionOffersResponse | null = null;
-                if (nextUser) {
-                    const offersResponse = await getCachedBffJson<SubscriptionOffersResponse>("/api/bff/subscription/offers");
-                    nextOffers = offersResponse.ok
-                        ? offersResponse.data
-                        : null;
-                }
-
-                if (!alive) {
-                    return;
-                }
-
-                setUser(nextUser);
-                setOffers(nextOffers);
-                setProfileLoaded(true);
-            } catch {
-                if (alive) {
-                    setProfileLoaded(true);
-                }
-            }
-        }
-
-        void loadMenuState();
-
-        return () => {
-            alive = false;
-        };
-    }, []);
 
     async function logout() {
-        await fetch("/api/bff/auth/logout", { method: "POST", cache: "no-store" }).catch(() => null);
-        window.location.replace("/login");
+        await logoutAction();
     }
 
-    const shouldShowVerifyEmail = profileLoaded && user !== null && Boolean(user.email) && !user.emailVerified;
-    const shouldShowLinkAccount = profileLoaded && user !== null;
-    const canRenewSubscription = hasRenewOffer(offers);
-    const hasSubscription = Boolean(offers?.has_current_subscription);
+    const shouldShowVerifyEmail = navigation.emailVerificationRequired;
+    const shouldShowLinkAccount = navigation.authenticated;
+    const canRenewSubscription = navigation.canRenewSubscription;
+    const hasSubscription = navigation.hasSubscription;
     const accountItems: AppMenuItem[] = [
         { label: "Профиль", icon: "pi pi-fw pi-user", to: "/profile" },
         ...(shouldShowVerifyEmail

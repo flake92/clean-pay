@@ -43,7 +43,7 @@ describe("guided account setup redirects", () => {
       "https://evil.example/payment",
       "//evil.example/payment",
       "/api",
-      "/api/bff/auth/me",
+      "/api/internal/private-operation",
       "/auth/",
       "/link-account?redirect_to=/payment",
       "/link-account/",

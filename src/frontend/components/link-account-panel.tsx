@@ -1,7 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useSearchParams } from "next/navigation";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { browserSupportsWebAuthn } from "@simplewebauthn/browser";
 import { Button } from "primereact/button";
@@ -10,40 +9,32 @@ import { Message } from "primereact/message";
 import { Password } from "primereact/password";
 import { Tag } from "primereact/tag";
 
+import {
+  cancelLinkedTelegramAction,
+  confirmLinkedTelegramAction,
+  linkAccountEmailAction,
+  removeLinkedPasskeyAction,
+} from "@/app/actions/link-account";
 import { TurnstileWidget, type TurnstileHandle, hasTurnstileSiteKey } from "@/frontend/components/turnstile-widget";
 import { LinkButton } from "@/frontend/components/prime/link-button";
 import { navigateTo, replaceWith } from "@/frontend/lib/browser-navigation";
-import { readBffError } from "@/frontend/lib/client-api";
 import {
   accountLinkPath,
   accountSetupCompletePath,
   emailVerificationPath,
   isPaymentDestination,
 } from "@/shared/auth/account-setup-flow";
+import type { LinkAccountViewModel, TelegramMergeViewModel } from "@/shared/presentation/link-account";
 
-type ProfileUser = {
-  email: string | null;
-  emailVerified?: boolean;
-  is_email_verified?: boolean;
-  telegramId?: string | null;
-  telegram_id?: string | number | null;
+const defaultLinkAccountModel: LinkAccountViewModel = {
+  status: "ready",
+  profile: { email: null, emailVerified: false, telegramId: null },
+  passkeys: [],
+  mergeConfirmation: null,
+  callbackError: null,
 };
 
-type PasskeyCredential = {
-  id: string;
-  name: string | null;
-  createdAt: string;
-  lastUsedAt: string | null;
-};
-
-type MergeConfirmation = {
-  targetEmail: string;
-  sourceEmailMasked: string | null;
-  emailWillBeReplaced?: boolean;
-  telegramId: string;
-};
-
-function telegramMergeConfirmationMessage(confirmation: MergeConfirmation) {
+function telegramMergeConfirmationMessage(confirmation: TelegramMergeViewModel) {
   // Keep the old payload compatible during a rolling deployment: previously
   // sourceEmailMasked was only returned when the source account had an e-mail.
   const emailWillBeReplaced = confirmation.emailWillBeReplaced
@@ -55,10 +46,6 @@ function telegramMergeConfirmationMessage(confirmation: MergeConfirmation) {
   }
 
   return `Этот Telegram принадлежит отдельной учётной записи. После объединения текущий e-mail ${confirmation.targetEmail} останется без изменений, а подписки, платежи и остальные данные из Telegram-учётной записи будут перенесены. Продолжить?`;
-}
-
-async function readError(response: Response) {
-  return (await readBffError(response, "Не удалось выполнить действие.")).message;
 }
 
 function missingTurnstileTokenMessage(siteKey?: string | null) {
@@ -81,22 +68,6 @@ function statusLabel(active: boolean, pending = false) {
   }
 
   return pending ? "Нужно подтвердить" : "Не подключено";
-}
-
-function telegramCallbackError(status: string | null) {
-  if (status === "telegram_merge_subscriptions") {
-    return "В обеих учётных записях есть подписки. Данные не изменены — обратитесь в службу поддержки.";
-  }
-
-  if (status === "telegram_merge_required") {
-    return "Автоматическое объединение остановлено из-за конфликта данных учётных записей. Ничего не изменено. Обновите страницу и повторите привязку; если ошибка сохраняется, обратитесь в поддержку.";
-  }
-
-  if (status === "telegram_failed") {
-    return "Не удалось завершить привязку Telegram. Повторите попытку или обратитесь в поддержку.";
-  }
-
-  return null;
 }
 
 function AuthMethodTile({
@@ -136,31 +107,29 @@ function AuthMethodTile({
 
 export function LinkAccountPanel({
   guided = false,
+  model = defaultLinkAccountModel,
   passwordRequired = false,
   redirectTo = "/cabinet",
   turnstileEnabled = false,
   turnstileSiteKey,
 }: {
   guided?: boolean;
+  model?: LinkAccountViewModel;
   passwordRequired?: boolean;
   redirectTo?: string;
   turnstileEnabled?: boolean;
   turnstileSiteKey?: string | null;
 }) {
-  const searchParams = useSearchParams();
-  const callbackStatus = searchParams.get("auth");
-  const callbackError = telegramCallbackError(callbackStatus);
-  const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
-  const [profile, setProfile] = useState<ProfileUser | null>(null);
-  const [passkeys, setPasskeys] = useState<PasskeyCredential[]>([]);
+  const profile = model.status === "ready" ? model.profile : null;
+  const [passkeys, setPasskeys] = useState(model.status === "ready" ? model.passkeys : []);
   const [message, setMessage] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [sessionExpired, setSessionExpired] = useState(false);
+  const [error, setError] = useState<string | null>(model.status === "error" ? model.message : model.status === "ready" ? model.callbackError : null);
+  const sessionExpired = model.status === "unauthorized";
   const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
   const [turnstile, setTurnstile] = useState<TurnstileHandle | null>(null);
   const [webAuthnSupported, setWebAuthnSupported] = useState<boolean | null>(null);
-  const [mergeConfirmation, setMergeConfirmation] = useState<MergeConfirmation | null>(null);
+  const [mergeConfirmation, setMergeConfirmation] = useState<TelegramMergeViewModel | null>(model.status === "ready" ? model.mergeConfirmation : null);
   const actionLoadingRef = useRef<string | null>(null);
 
   function beginAction(action: string) {
@@ -182,8 +151,8 @@ export function LinkAccountPanel({
     setActionLoading(null);
   }
 
-  const emailVerified = Boolean(profile?.emailVerified ?? profile?.is_email_verified);
-  const telegramId = profile?.telegramId ?? profile?.telegram_id ?? null;
+  const emailVerified = Boolean(profile?.emailVerified);
+  const telegramId = profile?.telegramId ?? null;
   const hasEmail = Boolean(profile?.email);
   const hasTelegram = Boolean(telegramId);
   const hasPasskey = passkeys.length > 0;
@@ -212,83 +181,6 @@ export function LinkAccountPanel({
       : "Можно добавить вход по Face ID, отпечатку или PIN-коду устройства.";
   }, [hasPasskey, webAuthnSupported]);
 
-  const loadState = useCallback(async () => {
-    setLoading(true);
-    setError(callbackError);
-
-    try {
-      const profileResponse = await fetch("/api/bff/auth/me");
-
-      if (!profileResponse.ok) {
-        const responseError = await readBffError(
-          profileResponse,
-          "Не удалось загрузить способы входа.",
-          { redirectOnUnauthorized: false },
-        );
-
-        if (
-          responseError.status === 401 &&
-          (!responseError.code || responseError.code === "UNAUTHORIZED")
-        ) {
-          setSessionExpired(true);
-          setError(null);
-          replaceWith(loginDestination);
-          return;
-        }
-
-        throw responseError;
-      }
-
-      setSessionExpired(false);
-      const profileBody = await profileResponse.json();
-      setProfile(profileBody.data.user);
-
-      if (
-        callbackStatus === "telegram_email_replace" ||
-        callbackStatus === "telegram_processing"
-      ) {
-        let confirmationResponse: Response | null = null;
-        const attempts = callbackStatus === "telegram_processing" ? 8 : 1;
-        for (let attempt = 0; attempt < attempts; attempt += 1) {
-          confirmationResponse = await fetch(
-            "/api/bff/auth/telegram/merge-confirmation",
-          );
-          if (confirmationResponse.ok || confirmationResponse.status !== 404) {
-            break;
-          }
-          if (attempt + 1 < attempts) {
-            await new Promise((resolve) => window.setTimeout(resolve, 250));
-          }
-        }
-
-        if (!confirmationResponse) {
-          throw new Error("Не удалось получить подтверждение объединения.");
-        }
-        if (!confirmationResponse.ok) {
-          throw new Error(await readError(confirmationResponse));
-        }
-
-        const confirmationBody = await confirmationResponse.json();
-        setMergeConfirmation(confirmationBody.data);
-      } else {
-        setMergeConfirmation(null);
-      }
-
-      const passkeyResponse = await fetch("/api/bff/auth/passkey/credentials");
-
-      if (passkeyResponse.ok) {
-        const passkeyBody = await passkeyResponse.json();
-        setPasskeys(passkeyBody.data.credentials ?? []);
-      } else {
-        setPasskeys([]);
-      }
-    } catch (error) {
-      setError(error instanceof Error ? error.message : "Не удалось загрузить способы входа.");
-    } finally {
-      setLoading(false);
-    }
-  }, [callbackError, callbackStatus, loginDestination]);
-
   useEffect(() => {
     const timer = window.setTimeout(() => {
       setWebAuthnSupported(browserSupportsWebAuthn());
@@ -298,18 +190,10 @@ export function LinkAccountPanel({
   }, []);
 
   useEffect(() => {
-    const timer = window.setTimeout(() => {
-      void loadState();
-    }, 0);
-
-    return () => window.clearTimeout(timer);
-  }, [loadState]);
-
-  useEffect(() => {
-    if (!loading && guided && hasEmail && emailVerified && !mergeConfirmation) {
+    if (guided && hasEmail && emailVerified && !mergeConfirmation) {
       navigateTo(accountSetupCompletePath(redirectTo));
     }
-  }, [emailVerified, guided, hasEmail, loading, mergeConfirmation, redirectTo]);
+  }, [emailVerified, guided, hasEmail, mergeConfirmation, redirectTo]);
 
   async function confirmTelegramMerge() {
     const action = "telegram-merge-confirm";
@@ -319,19 +203,12 @@ export function LinkAccountPanel({
     setError(null);
 
     try {
-      const response = await fetch("/api/bff/auth/telegram/merge-confirmation", {
-        method: "POST",
-      });
-
-      if (!response.ok) {
-        const responseError = await readBffError(
-          response,
-          "Не удалось объединить аккаунты.",
-        );
-        setError(responseError.message);
+      const result = await confirmLinkedTelegramAction();
+      if (!result.ok) {
+        setError(result.message);
         if (
-          responseError.code === "ACCOUNT_MERGE_SUBSCRIPTIONS_CONFLICT" ||
-          responseError.code === "ACCOUNT_MERGE_REQUIRED"
+          result.code === "ACCOUNT_MERGE_SUBSCRIPTIONS_CONFLICT" ||
+          result.code === "ACCOUNT_MERGE_REQUIRED"
         ) {
           setMergeConfirmation(null);
           window.history.replaceState({}, "", "/link-account");
@@ -357,16 +234,9 @@ export function LinkAccountPanel({
     setError(null);
 
     try {
-      const response = await fetch("/api/bff/auth/telegram/merge-confirmation", {
-        method: "DELETE",
-      });
-
-      if (!response.ok) {
-        const deleteError = await readError(response);
-        if (response.status === 403 || response.status === 409) {
-          await loadState();
-        }
-        setError(deleteError);
+      const result = await cancelLinkedTelegramAction();
+      if (!result.ok) {
+        setError(result.message);
         return;
       }
 
@@ -413,17 +283,14 @@ export function LinkAccountPanel({
     setError(null);
 
     try {
-      const response = await fetch(`/api/bff/auth/passkey/credentials/${encodeURIComponent(id)}`, {
-        method: "DELETE",
-      });
-
-      if (!response.ok) {
-        setError(await readError(response));
+      const result = await removeLinkedPasskeyAction(id);
+      if (!result.ok) {
+        setError(result.message);
         return;
       }
 
       setMessage("Ключ быстрого входа удалён.");
-      await loadState();
+      setPasskeys((current) => current.filter((passkey) => passkey.id !== id));
     } catch (error) {
       setError(
         error instanceof Error
@@ -458,27 +325,9 @@ export function LinkAccountPanel({
     }
 
     try {
-      const response = await fetch("/api/bff/link/remnashop", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          email,
-          password,
-        }),
-      });
-
-      if (!response.ok) {
-        const responseError = await readBffError(
-          response,
-          "Не удалось связать e-mail с аккаунтом.",
-          { redirectOnUnauthorized: false },
-        );
-
-        if (
-          responseError.status === 401 &&
-          (!responseError.code || responseError.code === "UNAUTHORIZED")
-        ) {
-          setSessionExpired(true);
+      const result = await linkAccountEmailAction({ email, password });
+      if (!result.ok) {
+        if (result.code === "UNAUTHORIZED") {
           setError(null);
           replaceWith(loginDestination);
           return;
@@ -486,19 +335,10 @@ export function LinkAccountPanel({
 
         turnstile?.reset();
         setTurnstileToken(null);
-        await loadState();
-        setError(responseError.message);
+        setError(result.message);
         return;
       }
-
-      const body = (await response.json()) as {
-        data?: {
-          linked?: boolean;
-          pendingVerification?: boolean;
-        };
-      };
-
-      if (body.data?.linked) {
+      if (result.kind === "linked") {
         setMessage("E-mail и пароль подключены.");
         navigateTo(accountSetupCompletePath(redirectTo));
         return;
@@ -512,10 +352,6 @@ export function LinkAccountPanel({
     } finally {
       finishAction("email");
     }
-  }
-
-  if (loading) {
-    return <Message severity="info" text="Загружаем способы входа..." />;
   }
 
   if (sessionExpired) {

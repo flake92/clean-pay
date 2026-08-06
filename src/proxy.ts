@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { logger } from "@/backend/observability/logger";
-import { validateMutationRequest, validateRequestSource } from "@/backend/security/csrf";
+import { validateRequestSource } from "@/backend/security/csrf";
 import {
   passkeySetupPath,
   registrationEmailVerificationPath,
@@ -11,35 +11,8 @@ import { safeRedirectPath } from "@/shared/auth/redirect-policy";
 const accessCookieName = 'clean_pay_access';
 const refreshCookieName = 'clean_pay_refresh';
 
-const bodylessPostMutationPaths = new Set([
-  '/api/logout',
-  '/api/bff/auth/logout',
-  '/api/bff/auth/passkey/login/options',
-  '/api/bff/auth/passkey/register/options',
-  '/api/bff/auth/telegram/merge-confirmation',
-  '/api/bff/subscription/reissue',
-]);
-
-const passkeyCredentialPathPrefix = '/api/bff/auth/passkey/credentials/';
-const subscriptionDevicePathPrefix = '/api/bff/subscription/devices/';
 const paymentReconciliationInternalPath = '/api/internal/payments/reconcile';
 const readinessInternalPath = '/api/internal/health/readiness';
-
-function isSingleSegmentPath(pathname: string, prefix: string) {
-  const suffix = pathname.startsWith(prefix) ? pathname.slice(prefix.length) : '';
-
-  return suffix.length > 0 && !suffix.includes('/');
-}
-
-function isBodylessMutation(method: string, pathname: string) {
-  return (
-    (method === 'POST' && bodylessPostMutationPaths.has(pathname)) ||
-    (method === 'DELETE' && pathname === '/api/bff/auth/telegram/merge-confirmation') ||
-    (method === 'DELETE' && pathname === '/api/bff/subscription/devices') ||
-    (method === 'DELETE' && isSingleSegmentPath(pathname, passkeyCredentialPathPrefix)) ||
-    (method === 'DELETE' && isSingleSegmentPath(pathname, subscriptionDevicePathPrefix))
-  );
-}
 
 const publicPagePaths = new Set([
   '/manifest.webmanifest',
@@ -56,33 +29,11 @@ const publicApiPaths = new Set([
   '/api/health',
   '/api/health/liveness',
   '/api/health/readiness',
-  '/api/bff/auth/identify',
-  '/api/bff/auth/login',
-  '/api/bff/auth/register',
-  '/api/bff/auth/email/start',
-  '/api/bff/auth/email/complete',
-  '/api/bff/auth/password/reset/start',
-  '/api/bff/auth/password/reset/confirm',
-  '/api/bff/auth/telegram/webapp',
-  '/api/bff/auth/logout',
-  '/api/bff/auth/passkey/login/options',
-  '/api/bff/auth/passkey/login/verify',
-  '/api/bff/plans/public',
-  '/api/logout',
 ]);
 
 const emailVerificationPagePaths = new Set([
   '/verify-email',
   '/register/verify-email',
-]);
-
-const emailVerificationApiPrefixes = [
-  '/api/bff/auth/email/',
-];
-
-const emailVerificationApiPaths = new Set([
-  '/api/bff/auth/logout',
-  '/api/logout',
 ]);
 
 function decodeBase64Url(value: string) {
@@ -181,19 +132,12 @@ function isPublicPath(pathname: string) {
 }
 
 function isEmailVerificationAllowedPath(pathname: string) {
-  return (
-    emailVerificationPagePaths.has(pathname) ||
-    emailVerificationApiPaths.has(pathname) ||
-    emailVerificationApiPrefixes.some((prefix) => pathname.startsWith(prefix))
-  );
+  return emailVerificationPagePaths.has(pathname);
 }
 
 function isBootstrapAllowedPath(pathname: string) {
   return (
-    pathname === '/passkey/setup' ||
-    pathname === '/api/bff/auth/logout' ||
-    pathname === '/api/logout' ||
-    pathname.startsWith('/api/bff/auth/passkey/')
+    pathname === '/passkey/setup'
   );
 }
 
@@ -270,21 +214,7 @@ function browserMutationGuard(request: NextRequest) {
     });
   }
 
-  const isProtectedMutationPath =
-    request.nextUrl.pathname.startsWith('/api/bff/') ||
-    request.nextUrl.pathname === '/api/logout' ||
-    request.nextUrl.pathname === '/auth/telegram/callback';
-
-  if (!isProtectedMutationPath) {
-    return { ok: true } as const;
-  }
-
-  return validateMutationRequest({
-    method: request.method,
-    headers: request.headers,
-    trustedAppUrl: process.env.NEXT_PUBLIC_APP_URL,
-    requireJson: !isBodylessMutation(request.method.toUpperCase(), request.nextUrl.pathname),
-  });
+  return { ok: true } as const;
 }
 
 export async function proxy(request: NextRequest) {
@@ -335,9 +265,7 @@ export async function proxy(request: NextRequest) {
     });
 
     return NextResponse.json(
-      csrfResult.reason === "unsupported_media_type"
-        ? { error: { code: 'VALIDATION_ERROR', message: 'Для этого запроса требуется application/json.' } }
-        : { error: { code: 'FORBIDDEN', message: 'Источник запроса не разрешён.' } },
+      { error: { code: 'FORBIDDEN', message: 'Источник запроса не разрешён.' } },
       { status: csrfResult.status },
     );
   }

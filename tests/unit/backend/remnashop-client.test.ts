@@ -81,7 +81,7 @@ import {
   remnashopRequest,
   recoverRemnashopTelegramSession,
 } from "@/backend/integrations/remnashop/client";
-import { BffError } from "@/backend/integrations/remnashop/errors";
+import { ServiceError } from "@/backend/errors/service-error";
 import { decryptSecret } from "@/backend/security/crypto";
 import { getCurrentSession } from "@/backend/sessions/web-session";
 
@@ -251,7 +251,7 @@ describe("remnashop client", () => {
     sessionPolicyMock.assertEmailVerificationPolicy.mockImplementation(
       (user: { emailVerified: boolean; telegramId: string | null }) => {
         if (!user.emailVerified && !user.telegramId) {
-          throw new BffError("EMAIL_NOT_VERIFIED", 403);
+          throw new ServiceError("EMAIL_NOT_VERIFIED", 403);
         }
       },
     );
@@ -602,7 +602,7 @@ describe("remnashop client", () => {
     });
   });
 
-  it("turns invalid JSON and upstream errors into BFF errors", async () => {
+  it("turns invalid JSON and upstream errors into service errors", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(new Response("<html>", { status: 200 }));
 
     await expect(remnashopRequest("/plans/public")).rejects.toMatchObject({
@@ -914,7 +914,7 @@ describe("remnashop client", () => {
       .mockResolvedValueOnce(staleSession as never)
       .mockResolvedValueOnce(winningSession as never);
     prismaMock.$transaction.mockRejectedValueOnce(
-      new BffError(
+      new ServiceError(
         "ACCOUNT_MERGE_REQUIRED",
         409,
         "Concurrent recovery changed the local session",
@@ -1008,7 +1008,7 @@ describe("remnashop client", () => {
       .mockResolvedValueOnce([{ id: "user-1" }])
       .mockResolvedValueOnce([{ id: "session-1" }]);
     paymentMergeMock.preflightPaymentOperationsForUserMerge.mockRejectedValueOnce(
-      new BffError(
+      new ServiceError(
         "ACCOUNT_MERGE_REQUIRED",
         409,
         "Payment operation keys conflict during account merge",

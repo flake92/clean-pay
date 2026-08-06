@@ -89,7 +89,7 @@ import { changeEmail, confirmEmailVerification, requestEmailVerification } from 
 import { changePassword } from "@/backend/auth/password";
 import { getCurrentAuthProfile } from "@/backend/auth/profile";
 import { linkRemnashopAccount } from "@/backend/auth/remnashop-link";
-import { BffError } from "@/backend/integrations/remnashop/errors";
+import { ServiceError } from "@/backend/errors/service-error";
 
 const authData = {
   expires_at: "2026-06-25T10:00:00.000Z",
@@ -215,7 +215,7 @@ describe("auth use cases", () => {
 
   it("resumes registration by logging in when Remnashop reports existing email", async () => {
     mocks.remnashopAuth
-      .mockRejectedValueOnce(new BffError("CONFLICT", 409, "email already exists"))
+      .mockRejectedValueOnce(new ServiceError("CONFLICT", 409, "email already exists"))
       .mockResolvedValueOnce(authResult);
 
     await registerWithEmail({ email: "user@example.com", password: "secret", name: "User" }, {});
@@ -229,7 +229,7 @@ describe("auth use cases", () => {
 
   it("does not request email verification when resumed registration is already verified", async () => {
     mocks.remnashopAuth
-      .mockRejectedValueOnce(new BffError("CONFLICT", 409, "email already exists"))
+      .mockRejectedValueOnce(new ServiceError("CONFLICT", 409, "email already exists"))
       .mockResolvedValueOnce(authResult);
     mocks.createSessionFromRemnashopAuth.mockResolvedValueOnce({
       user: { ...user, emailVerified: true },
@@ -463,7 +463,7 @@ describe("auth use cases", () => {
 
   it("does not let the legacy registrationFlow flag bypass Turnstile", async () => {
     mocks.verifyTurnstileToken.mockRejectedValueOnce(
-      new BffError("FORBIDDEN", 403, "Turnstile token is required"),
+      new ServiceError("FORBIDDEN", 403, "Turnstile token is required"),
     );
 
     await expect(
@@ -492,7 +492,7 @@ describe("auth use cases", () => {
     });
     mocks.remnashopRequest.mockResolvedValueOnce({ email: "verified@example.com" });
     mocks.getRemnashopMe.mockResolvedValueOnce({ ...profile, pending_email: "verified@example.com" });
-    mocks.remnashopLinkTelegram.mockRejectedValueOnce(new BffError("CONFLICT", 409, "telegram already linked"));
+    mocks.remnashopLinkTelegram.mockRejectedValueOnce(new ServiceError("CONFLICT", 409, "telegram already linked"));
 
     await expect(confirmEmailVerification({ code: "123456", registrationFlow: true }, {})).resolves.toMatchObject({
       email: "verified@example.com",
@@ -550,7 +550,7 @@ describe("auth use cases", () => {
     });
     mocks.prisma.webUser.findUnique.mockResolvedValueOnce(existingEmailOwner);
     mocks.remnashopLinkTelegram.mockRejectedValueOnce(
-      new BffError("CONFLICT", 409, "telegram already linked"),
+      new ServiceError("CONFLICT", 409, "telegram already linked"),
     );
 
     await expect(
@@ -644,7 +644,7 @@ describe("auth use cases", () => {
       email: "verified@example.com",
     });
     mocks.remnashopLinkTelegram.mockRejectedValueOnce(
-      new BffError("UPSTREAM_UNAVAILABLE", 503, "temporary Telegram link failure"),
+      new ServiceError("UPSTREAM_UNAVAILABLE", 503, "temporary Telegram link failure"),
     );
 
     await expect(
@@ -749,7 +749,7 @@ describe("auth use cases", () => {
 
   it("refreshes stale Remnashop tokens and retries password change once", async () => {
     mocks.remnashopChangePassword
-      .mockRejectedValueOnce(new BffError("CURRENT_PASSWORD_INVALID", 401, "Current password is invalid"))
+      .mockRejectedValueOnce(new ServiceError("CURRENT_PASSWORD_INVALID", 401, "Current password is invalid"))
       .mockResolvedValueOnce({
         data: { success: true },
         cookies: { accessToken: "retry-access", refreshToken: "retry-refresh" },
@@ -823,7 +823,7 @@ describe("auth use cases", () => {
     };
     mocks.getCurrentSession.mockResolvedValueOnce(bootstrapSession);
     mocks.getAuthorizedRemnashopTokens.mockRejectedValueOnce(
-      new BffError("PASSKEY_REQUIRED", 403, "Create a passkey to continue"),
+      new ServiceError("PASSKEY_REQUIRED", 403, "Create a passkey to continue"),
     );
 
     await expect(getCurrentAuthProfile()).resolves.toMatchObject({
@@ -963,7 +963,7 @@ describe("auth use cases", () => {
 
   it("stages Remnashop account and falls back to registration after auth failure", async () => {
     mocks.remnashopAuth
-      .mockRejectedValueOnce(new BffError("AUTH_FAILED", 401, "bad credentials"))
+      .mockRejectedValueOnce(new ServiceError("AUTH_FAILED", 401, "bad credentials"))
       .mockResolvedValueOnce(authResult);
 
     await expect(linkRemnashopAccount({ email: "user@example.com", password: "secret" })).resolves.toMatchObject({
@@ -1113,7 +1113,7 @@ describe("auth use cases", () => {
       is_email_verified: true,
     });
     mocks.withPaymentOwnerChangeFence.mockRejectedValueOnce(
-      new BffError(
+      new ServiceError(
         "ACCOUNT_MERGE_REQUIRED",
         409,
         "Payment dispatch is in progress",
@@ -1141,7 +1141,7 @@ describe("auth use cases", () => {
       .mockResolvedValueOnce(stableSession)
       .mockResolvedValueOnce(stableSession);
     mocks.getRemnashopMe.mockResolvedValueOnce({ ...profile, is_email_verified: true });
-    mocks.remnashopLinkTelegram.mockRejectedValueOnce(new BffError("CONFLICT", 409, "telegram already linked"));
+    mocks.remnashopLinkTelegram.mockRejectedValueOnce(new ServiceError("CONFLICT", 409, "telegram already linked"));
 
     await expect(linkRemnashopAccount({ email: "user@example.com", password: "secret" })).resolves.toMatchObject({
       linked: true,
@@ -1175,10 +1175,10 @@ describe("auth use cases", () => {
       .mockResolvedValueOnce(stableSession)
       .mockResolvedValueOnce(stableSession);
     mocks.remnashopAuth
-      .mockRejectedValueOnce(new BffError("AUTH_FAILED", 401, "bad credentials"))
+      .mockRejectedValueOnce(new ServiceError("AUTH_FAILED", 401, "bad credentials"))
       .mockResolvedValueOnce(authResult);
     mocks.getRemnashopMe.mockResolvedValueOnce({ ...profile, is_email_verified: true });
-    mocks.remnashopRequest.mockRejectedValueOnce(new BffError("CONFLICT", 409, "email is already verified"));
+    mocks.remnashopRequest.mockRejectedValueOnce(new ServiceError("CONFLICT", 409, "email is already verified"));
 
     await expect(linkRemnashopAccount({ email: "user@example.com", password: "secret" })).rejects.toMatchObject({
       code: "EMAIL_LINK_REQUIRES_VERIFICATION",
@@ -1191,8 +1191,8 @@ describe("auth use cases", () => {
 
   it("returns auth failure when the target email exists but the password is wrong", async () => {
     mocks.remnashopAuth
-      .mockRejectedValueOnce(new BffError("AUTH_FAILED", 401, "bad credentials"))
-      .mockRejectedValueOnce(new BffError("CONFLICT", 409, "email already exists"));
+      .mockRejectedValueOnce(new ServiceError("AUTH_FAILED", 401, "bad credentials"))
+      .mockRejectedValueOnce(new ServiceError("CONFLICT", 409, "email already exists"));
 
     await expect(linkRemnashopAccount({ email: "user@example.com", password: "wrong" })).rejects.toMatchObject({
       code: "AUTH_FAILED",

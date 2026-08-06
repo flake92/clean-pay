@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 
 describe("subscription connection URL source", () => {
   it("requires the current subscription route to use only the Remnawave URL", () => {
-    const source = readFileSync("src/app/api/bff/subscription/current/route.ts", "utf8");
+    const source = readFileSync("src/backend/integrations/remnashop/subscription-reader.ts", "utf8");
 
     expect(source).toContain("getLiveRemnawaveSubscriptionUrl");
     expect(source).toContain('"SUBSCRIPTION_URL_UNAVAILABLE"');

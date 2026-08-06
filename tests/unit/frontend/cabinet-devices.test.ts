@@ -11,6 +11,17 @@ import {
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+const actionMocks = vi.hoisted(() => ({ deleteDeviceAction: vi.fn(), refresh: vi.fn() }));
+
+vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: actionMocks.refresh }) }));
+vi.mock("@/app/actions/cabinet", () => ({
+  activatePromocodeAction: vi.fn(),
+  deleteAllDevicesAction: vi.fn(),
+  deleteDeviceAction: actionMocks.deleteDeviceAction,
+  logoutAction: vi.fn(),
+  reissueSubscriptionAction: vi.fn(),
+}));
+
 type ColumnProps = {
   body?: (value: unknown) => ReactNode;
   header?: ReactNode;
@@ -92,38 +103,6 @@ vi.mock("@/frontend/components/prime/link-button", () => ({
   LinkButton: ({ label }: { label: string }) =>
     createElement("a", null, label),
 }));
-vi.mock("@/frontend/lib/bff-cache", () => ({
-  getAuthenticatedBffJson: vi.fn(async () => ({
-    ok: true,
-    data: {
-      user: {
-        email: "user@example.com",
-        emailVerified: true,
-      },
-    },
-  })),
-  getCachedBffJson: vi.fn(async (path: string) =>
-    path === "/api/bff/auth/me"
-      ? {
-          ok: true,
-          data: {
-            user: {
-              email: "user@example.com",
-              emailVerified: true,
-            },
-          },
-        }
-      : {
-          ok: true,
-          data: {
-            has_current_subscription: true,
-            current_subscription_status: "ACTIVE",
-            plans: [],
-          },
-        },
-  ),
-}));
-
 import { CabinetPanel } from "@/frontend/components/cabinet-panel";
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean })
@@ -177,10 +156,6 @@ const currentSubscription = {
   online_at: null,
 };
 
-function response(data: unknown) {
-  return Response.json({ data });
-}
-
 async function settle() {
   await act(async () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
@@ -199,57 +174,34 @@ async function click(button: HTMLButtonElement) {
 describe("cabinet device records", () => {
   let container: HTMLDivElement;
   let root: Root;
-  let fetchMock: ReturnType<typeof vi.fn>;
 
   beforeEach(async () => {
-    fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      const path = String(input);
-
-      if (
-        path ===
-          `/api/bff/subscription/devices/${encodeURIComponent(internalHwid)}` &&
-        init?.method === "DELETE"
-      ) {
-        return response({ deleted: true });
-      }
-
-      if (path === "/api/bff/subscription/current") {
-        return response(currentSubscription);
-      }
-
-      if (path === "/api/bff/subscription/devices") {
-        return response(devices);
-      }
-
-      if (path === "/api/bff/payments/history") {
-        return response([]);
-      }
-
-      if (path === "/api/bff/support") {
-        return response({
-          enabled: false,
-          email: null,
-          telegramUsername: null,
-          faqUrl: null,
-        });
-      }
-
-      throw new Error(`Unexpected fetch: ${path}`);
-    });
-    vi.stubGlobal("fetch", fetchMock);
+    vi.clearAllMocks();
+    actionMocks.deleteDeviceAction.mockResolvedValue({ status: "success", message: "Устройство удалено." });
     vi.spyOn(window, "confirm").mockReturnValue(true);
 
     container = document.createElement("div");
     document.body.append(container);
     root = createRoot(container);
-    await act(async () => root.render(createElement(CabinetPanel)));
+    await act(async () => root.render(createElement(CabinetPanel, {
+      model: {
+        status: "ready",
+        user: { email: "user@example.com", emailVerified: true },
+        subscription: currentSubscription,
+        subscriptionError: null,
+        offers: { gateways: [], plans: [], has_current_subscription: true, current_subscription_status: "ACTIVE" },
+        devices,
+        payments: [],
+        paymentsWarning: null,
+        support: { enabled: false, email: null, telegramUsername: null, faqUrl: null },
+      },
+    })));
     await settle();
   });
 
   afterEach(async () => {
     await act(async () => root.unmount());
     container.remove();
-    vi.unstubAllGlobals();
     vi.restoreAllMocks();
   });
 
@@ -300,10 +252,7 @@ describe("cabinet device records", () => {
     await click(desktopDeleteButtons[0]!);
 
     expect(window.confirm).toHaveBeenCalledTimes(2);
-    expect(fetchMock).toHaveBeenCalledWith(
-      `/api/bff/subscription/devices/${encodeURIComponent(internalHwid)}`,
-      { method: "DELETE" },
-    );
+    expect(actionMocks.deleteDeviceAction).toHaveBeenCalledWith(internalHwid);
     expect(container.textContent).toContain("Устройство удалено.");
   });
 
@@ -327,11 +276,7 @@ describe("cabinet device records", () => {
     });
     await settle();
 
-    const deletionCalls = fetchMock.mock.calls.filter(([input, init]) =>
-      String(input).startsWith("/api/bff/subscription/devices/")
-      && init?.method === "DELETE",
-    );
     expect(window.confirm).toHaveBeenCalledOnce();
-    expect(deletionCalls).toHaveLength(1);
+    expect(actionMocks.deleteDeviceAction).toHaveBeenCalledOnce();
   });
 });

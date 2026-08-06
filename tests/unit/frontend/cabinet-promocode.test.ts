@@ -4,6 +4,20 @@ import { act, createElement, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+const actionMocks = vi.hoisted(() => ({
+  activatePromocodeAction: vi.fn(),
+  refresh: vi.fn(),
+}));
+
+vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: actionMocks.refresh }) }));
+vi.mock("@/app/actions/cabinet", () => ({
+  activatePromocodeAction: actionMocks.activatePromocodeAction,
+  deleteAllDevicesAction: vi.fn(),
+  deleteDeviceAction: vi.fn(),
+  logoutAction: vi.fn(),
+  reissueSubscriptionAction: vi.fn(),
+}));
+
 vi.mock("primereact/button", () => ({
   Button: (props: Record<string, unknown>) => {
     const buttonProps = { ...props };
@@ -39,60 +53,10 @@ vi.mock("primereact/tag", () => ({
 vi.mock("@/frontend/components/prime/link-button", () => ({
   LinkButton: ({ label }: { label: string }) => createElement("a", null, label),
 }));
-vi.mock("@/frontend/lib/bff-cache", () => ({
-  getAuthenticatedBffJson: vi.fn(async () => ({
-    ok: true,
-    data: {
-      user: {
-        email: "user@example.com",
-        emailVerified: true,
-        telegramId: "777",
-      },
-    },
-  })),
-  getCachedBffJson: vi.fn(async (path: string) =>
-    path === "/api/bff/auth/me"
-      ? {
-          ok: true,
-          data: {
-            user: {
-              email: "user@example.com",
-              emailVerified: true,
-              telegramId: "777",
-            },
-          },
-        }
-      : {
-          ok: true,
-          data: {
-            has_current_subscription: false,
-            current_subscription_status: null,
-            plans: [],
-          },
-        },
-  ),
-}));
-
 import { CabinetPanel } from "@/frontend/components/cabinet-panel";
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean })
   .IS_REACT_ACT_ENVIRONMENT = true;
-
-function response(data: unknown) {
-  return Response.json({ data });
-}
-
-function subscriptionNotFound() {
-  return Response.json(
-    {
-      error: {
-        code: "SUBSCRIPTION_NOT_FOUND",
-        message: "Подписка не найдена.",
-      },
-    },
-    { status: 404 },
-  );
-}
 
 async function settle() {
   await act(async () => {
@@ -121,60 +85,35 @@ async function submit(form: HTMLFormElement) {
 describe("cabinet promocode activation", () => {
   let container: HTMLDivElement;
   let root: Root;
-  let fetchMock: ReturnType<typeof vi.fn>;
 
   beforeEach(async () => {
-    fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      const path = String(input);
-
-      if (path === "/api/bff/subscription/current") {
-        return subscriptionNotFound();
-      }
-
-      if (path === "/api/bff/subscription/promocode" && init?.method === "POST") {
-        return response({ success: true, reward_type: "DAYS" });
-      }
-
-      if (path === "/api/bff/subscription/offers") {
-        return response({
-          has_current_subscription: false,
-          current_subscription_status: null,
-          plans: [],
-        });
-      }
-
-      if (path === "/api/bff/subscription/devices") {
-        return response({ devices: [], current_count: 0, max_count: 0 });
-      }
-
-      if (path === "/api/bff/payments/history") {
-        return response([]);
-      }
-
-      if (path === "/api/bff/support") {
-        return response({
-          enabled: false,
-          email: null,
-          telegramUsername: null,
-          faqUrl: null,
-        });
-      }
-
-      throw new Error(`Unexpected fetch: ${path}`);
+    vi.clearAllMocks();
+    actionMocks.activatePromocodeAction.mockResolvedValue({
+      status: "success",
+      message: "Промокод активирован. Данные кабинета обновлены.",
     });
-    vi.stubGlobal("fetch", fetchMock);
-
     container = document.createElement("div");
     document.body.append(container);
     root = createRoot(container);
-    await act(async () => root.render(createElement(CabinetPanel)));
+    await act(async () => root.render(createElement(CabinetPanel, {
+      model: {
+        status: "ready",
+        user: { email: "user@example.com", emailVerified: true, telegramId: "777" },
+        subscription: null,
+        subscriptionError: null,
+        offers: { gateways: [], plans: [], has_current_subscription: false, current_subscription_status: null },
+        devices: { devices: [], current_count: 0, max_count: 0 },
+        payments: [],
+        paymentsWarning: null,
+        support: { enabled: false, email: null, telegramUsername: null, faqUrl: null },
+      },
+    })));
     await settle();
   });
 
   afterEach(async () => {
     await act(async () => root.unmount());
     container.remove();
-    vi.unstubAllGlobals();
     vi.restoreAllMocks();
   });
 
@@ -201,10 +140,7 @@ describe("cabinet promocode activation", () => {
 
     expect(container.textContent).toContain("Введите промокод.");
     expect(
-      fetchMock.mock.calls.some(
-        ([input, init]) =>
-          String(input) === "/api/bff/subscription/promocode" && init?.method === "POST",
-      ),
+      actionMocks.activatePromocodeAction.mock.calls.length > 0,
     ).toBe(false);
   });
 
@@ -216,32 +152,13 @@ describe("cabinet promocode activation", () => {
     await submit(form);
     await settle();
 
-    const promocodeCalls = fetchMock.mock.calls.filter(
-      ([request, init]) =>
-        String(request) === "/api/bff/subscription/promocode" && init?.method === "POST",
-    );
-    expect(promocodeCalls).toHaveLength(1);
-    expect(promocodeCalls[0]?.[1]).toMatchObject({
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ code: "WELCOME-2026" }),
-    });
+    expect(actionMocks.activatePromocodeAction).toHaveBeenCalledOnce();
+    expect(actionMocks.activatePromocodeAction).toHaveBeenCalledWith("WELCOME-2026");
     expect(container.querySelector<HTMLInputElement>("#promocode")?.value).toBe("");
     expect(container.textContent).toContain(
       "Промокод активирован. Данные кабинета обновлены.",
     );
 
-    for (const path of [
-      "/api/bff/subscription/current",
-      "/api/bff/subscription/devices",
-      "/api/bff/payments/history",
-    ]) {
-      expect(fetchMock.mock.calls.filter(([request]) => String(request) === path)).toHaveLength(2);
-    }
-    expect(
-      fetchMock.mock.calls.filter(
-        ([request]) => String(request) === "/api/bff/subscription/offers",
-      ),
-    ).toHaveLength(1);
+    expect(actionMocks.refresh).toHaveBeenCalledOnce();
   });
 });

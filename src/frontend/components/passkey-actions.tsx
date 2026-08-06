@@ -11,16 +11,13 @@ import { Button } from "primereact/button";
 import { InputText } from "primereact/inputtext";
 import { Message } from "primereact/message";
 
+import {
+  beginPasskeyLoginAction,
+  beginPasskeyRegistrationAction,
+  verifyPasskeyLoginAction,
+  verifyPasskeyRegistrationAction,
+} from "@/app/actions/passkeys";
 import { navigateTo } from "@/frontend/lib/browser-navigation";
-import { BffClientError, readBffError } from "@/frontend/lib/client-api";
-
-async function readError(response: Response, fallback: string) {
-  const error = await readBffError(response, fallback);
-  if (error instanceof BffClientError && (error.code === "NOT_FOUND" || error.code === "UNAUTHORIZED")) {
-    return "Этот ключ не подходит выбранному аккаунту. Войдите по паролю и при необходимости создайте новый ключ в профиле.";
-  }
-  return error.message;
-}
 
 function useWebAuthnSupport() {
   const [supported, setSupported] = useState<boolean | null>(null);
@@ -118,28 +115,19 @@ export function PasskeyLoginButton({
     setError(null);
 
     try {
-      const optionsResponse = await fetch("/api/bff/auth/passkey/login/options", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ email, turnstileToken }),
-      });
+      const optionsResult = await beginPasskeyLoginAction({ email, ...(turnstileToken ? { turnstileToken } : {}) });
       resetTurnstile?.();
 
-      if (!optionsResponse.ok) {
-        setError(await readError(optionsResponse, "Не удалось начать быстрый вход."));
+      if (!optionsResult.ok) {
+        setError(optionsResult.message);
         return;
       }
 
-      const optionsBody = await optionsResponse.json();
-      const assertion = await startAuthentication({ optionsJSON: optionsBody.data });
-      const verifyResponse = await fetch("/api/bff/auth/passkey/login/verify", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(assertion),
-      });
+      const assertion = await startAuthentication({ optionsJSON: optionsResult.options });
+      const verifyResult = await verifyPasskeyLoginAction(assertion);
 
-      if (!verifyResponse.ok) {
-        setError(await readError(verifyResponse, "Быстрый вход не подошел. Войдите по паролю."));
+      if (!verifyResult.ok) {
+        setError(verifyResult.message);
         return;
       }
 
@@ -225,23 +213,18 @@ export function PasskeySetupPanel({
         return;
       }
 
-      const optionsResponse = await fetch("/api/bff/auth/passkey/register/options", { method: "POST" });
+      const optionsResult = await beginPasskeyRegistrationAction();
 
-      if (!optionsResponse.ok) {
-        setError(await readError(optionsResponse, "Не удалось подготовить быстрый вход."));
+      if (!optionsResult.ok) {
+        setError(optionsResult.message);
         return;
       }
 
-      const optionsBody = await optionsResponse.json();
-      const attestation = await startRegistration({ optionsJSON: optionsBody.data });
-      const verifyResponse = await fetch("/api/bff/auth/passkey/register/verify", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ ...attestation, name: name.trim() || undefined }),
-      });
+      const attestation = await startRegistration({ optionsJSON: optionsResult.options });
+      const verifyResult = await verifyPasskeyRegistrationAction({ ...attestation, name: name.trim() || undefined });
 
-      if (!verifyResponse.ok) {
-        setError(await readError(verifyResponse, "Не удалось сохранить быстрый вход."));
+      if (!verifyResult.ok) {
+        setError(verifyResult.message);
         return;
       }
 

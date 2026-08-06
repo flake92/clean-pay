@@ -7,15 +7,22 @@ import { Card } from "primereact/card";
 import { InputText } from "primereact/inputtext";
 import { Message } from "primereact/message";
 
+import {
+  checkAccountReadinessAction,
+  confirmEmailVerificationCodeAction,
+  requestEmailVerificationCodeAction,
+} from "@/app/actions/email-verification";
 import { TurnstileWidget, type TurnstileHandle, hasTurnstileSiteKey } from "@/frontend/components/turnstile-widget";
 import { LinkButton } from "@/frontend/components/prime/link-button";
-import { BffClientError, readBffError } from "@/frontend/lib/client-api";
 import { navigateTo, replaceWith } from "@/frontend/lib/browser-navigation";
 import {
   accountLinkPath,
   accountSetupCompletePath,
   emailVerificationPath,
 } from "@/shared/auth/account-setup-flow";
+import type { AccountReadiness } from "@/shared/presentation/email-verification";
+
+const defaultReadiness: AccountReadiness = { status: "pending", emailVerified: false };
 
 function missingTurnstileTokenMessage(siteKey?: string | null) {
   return hasTurnstileSiteKey(siteKey)
@@ -23,77 +30,15 @@ function missingTurnstileTokenMessage(siteKey?: string | null) {
     : "Ключ сайта Cloudflare Turnstile не настроен.";
 }
 
-function turnstilePayload(token: string | null) {
-  return token
-    ? {
-        turnstileToken: token,
-        "cf-turnstile-response": token,
-      }
-    : {};
-}
-
-type AccountReadiness =
-  | { status: "ready" }
-  | { status: "pending"; emailVerified: boolean }
-  | { status: "merge-conflict" }
-  | { status: "unauthorized" }
-  | { status: "unavailable" };
-
-async function readAccountReadiness(): Promise<AccountReadiness> {
-  try {
-    const response = await fetch("/api/bff/auth/me", { cache: "no-store" });
-
-    if (!response.ok) {
-      const responseError = await readBffError(
-        response,
-        "Не удалось проверить готовность аккаунта.",
-      );
-
-      if (
-        responseError.code === "ACCOUNT_MERGE_REQUIRED" ||
-        responseError.code === "ACCOUNT_MERGE_SUBSCRIPTIONS_CONFLICT"
-      ) {
-        return { status: "merge-conflict" };
-      }
-
-      if (responseError.status === 401) {
-        return { status: "unauthorized" };
-      }
-
-      return { status: "unavailable" };
-    }
-
-    const body = await response.json().catch(() => null);
-    const user = body?.data?.user;
-
-    if (!user || typeof user !== "object") {
-      return { status: "unavailable" };
-    }
-
-    const accountSyncPending = Boolean(
-      user?.accountSyncPending ?? user?.account_sync_pending,
-    );
-
-    const emailVerified = Boolean(
-      user?.email &&
-        (user.emailVerified ?? user.is_email_verified),
-    );
-
-    return emailVerified && !accountSyncPending
-      ? { status: "ready" }
-      : { status: "pending", emailVerified };
-  } catch {
-    return { status: "unavailable" };
-  }
-}
-
 export function VerifyEmailPanel({
   autoContinue = false,
+  initialReadiness = defaultReadiness,
   redirectTo = "/profile",
   turnstileEnabled = false,
   turnstileSiteKey,
 }: {
   autoContinue?: boolean;
+  initialReadiness?: AccountReadiness;
   redirectTo?: string;
   turnstileEnabled?: boolean;
   turnstileSiteKey?: string | null;
@@ -118,7 +63,7 @@ export function VerifyEmailPanel({
     let alive = true;
 
     async function loadVerificationState() {
-      const readiness = await readAccountReadiness();
+      const readiness = initialReadiness;
 
       if (!alive) {
         return;
@@ -182,7 +127,7 @@ export function VerifyEmailPanel({
     return () => {
       alive = false;
     };
-  }, [autoContinue, completedDestination]);
+  }, [autoContinue, completedDestination, initialReadiness]);
 
   function resetTurnstile() {
     turnstile?.reset();
@@ -227,20 +172,15 @@ export function VerifyEmailPanel({
     try {
       const formData = new FormData(event.currentTarget);
       const email = formData.get("email");
-      const response = await fetch("/api/bff/auth/email/request-verification", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          email: email ? String(email) : undefined,
-          ...turnstilePayload(turnstileToken),
-        }),
+      const result = await requestEmailVerificationCodeAction({
+        ...(email ? { email: String(email) } : {}),
+        ...(turnstileToken ? { turnstileToken } : {}),
       });
 
-      if (!response.ok) {
+      if (!result.ok) {
         resetTurnstile();
         setTargetEmail(null);
-        const requestError = await readBffError(response, "Не удалось отправить код.");
-        if (requestError instanceof BffClientError && requestError.code === "EMAIL_REQUIRED") {
+        if (result.code === "EMAIL_REQUIRED") {
           if (autoContinue) {
             setError(
               "Связь с e-mail нужно восстановить. Возвращаем к вводу e-mail и пароля.",
@@ -252,15 +192,15 @@ export function VerifyEmailPanel({
             setError(null);
           }
         } else {
-          setError(requestError.message);
+          setError(result.message);
         }
         return;
       }
 
-      const body = await response.json();
-      setTargetEmail(body.data.target_email);
+      if (result.kind !== "code-sent") return;
+      setTargetEmail(result.targetEmail);
       setMessageSeverity("success");
-      setMessage(`Код отправлен на ${body.data.target_email}.`);
+      setMessage(`Код отправлен на ${result.targetEmail}.`);
       resetTurnstile();
     } catch {
       resetTurnstile();
@@ -289,20 +229,15 @@ export function VerifyEmailPanel({
 
     try {
       const formData = new FormData(event.currentTarget);
-      const response = await fetch("/api/bff/auth/email/confirm", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          email: targetEmail ?? undefined,
-          code: formData.get("code"),
-          ...turnstilePayload(turnstileToken),
-        }),
+      const result = await confirmEmailVerificationCodeAction({
+        ...(targetEmail ? { email: targetEmail } : {}),
+        code: String(formData.get("code") ?? ""),
+        ...(turnstileToken ? { turnstileToken } : {}),
       });
 
-      if (!response.ok) {
+      if (!result.ok) {
         resetTurnstile();
-        const confirmError = await readBffError(response, "Не удалось подтвердить e-mail.");
-        if (confirmError instanceof BffClientError && confirmError.code === "EMAIL_REQUIRED") {
+        if (result.code === "EMAIL_REQUIRED") {
           if (autoContinue) {
             setError(
               "Связь с e-mail нужно восстановить. Возвращаем к вводу e-mail и пароля.",
@@ -314,21 +249,13 @@ export function VerifyEmailPanel({
             setError(null);
           }
         } else {
-          setError(confirmError.message);
+          setError(result.message);
         }
         return;
       }
 
-      const body = await response.json();
-      const syncPending = Boolean(body?.data?.account_sync_pending);
-      let readiness: AccountReadiness = syncPending
-        ? { status: "pending", emailVerified: true }
-        : { status: "ready" };
-
-      if (autoContinue && readiness.status === "ready") {
-        setLoading("continue");
-        readiness = await readAccountReadiness();
-      }
+      if (result.kind !== "confirmed") return;
+      const readiness = result.readiness;
 
       const accountReady = readiness.status === "ready";
       setConfirmed(true);
@@ -375,7 +302,7 @@ export function VerifyEmailPanel({
     setMessageSeverity("warn");
     setMessage("Проверяем готовность аккаунта...");
 
-    const readiness = await readAccountReadiness();
+    const readiness = await checkAccountReadinessAction();
 
     if (readiness.status === "ready") {
       setAccountSyncPending(false);

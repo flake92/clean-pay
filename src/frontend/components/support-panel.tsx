@@ -1,51 +1,11 @@
-"use client";
-
-import { useEffect, useState } from "react";
-
 import { Card } from "primereact/card";
-import { Message } from "primereact/message";
 
 import { LinkButton } from "@/frontend/components/prime/link-button";
-import { readBffError } from "@/frontend/lib/client-api";
 import { getBranding } from "@/shared/branding";
+import type { SupportViewModel } from "@/shared/presentation/support";
 
-type SupportSettings = {
-  enabled: boolean;
-  email: string | null;
-  telegramUsername: string | null;
-  faqUrl: string | null;
-};
-
-async function readSupportSettings() {
-  const response = await fetch("/api/bff/support");
-
-  if (!response.ok) {
-    throw await readBffError(response, "Не удалось загрузить контакты поддержки.");
-  }
-
-  const body = await response.json().catch(() => null);
-
-  return body.data as SupportSettings;
-}
-
-export function SupportPanel() {
+export function SupportPanel({ support }: { support: SupportViewModel }) {
   const branding = getBranding();
-  const [support, setSupport] = useState<SupportSettings | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    readSupportSettings()
-      .then(setSupport)
-      .catch((err: Error) => setError(err.message));
-  }, []);
-
-  if (error) {
-    return <Message severity="error" text={error} />;
-  }
-
-  if (!support) {
-    return <Message severity="info" text="Загрузка контактов поддержки..." />;
-  }
 
   const hasContacts = support.email || support.telegramUsername || support.faqUrl;
 

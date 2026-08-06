@@ -9,11 +9,11 @@ import { getEnv } from "@/backend/config/env";
 import { logger } from "@/backend/observability/logger";
 import { prisma } from "@/backend/database/prisma";
 import {
-  BffError,
   normalizeRemnashopError,
   remnashopInvalidJsonError,
   remnashopUnavailableError,
 } from "@/backend/integrations/remnashop/errors";
+import { ServiceError } from "@/backend/errors/service-error";
 import type {
   ChangePasswordRequest,
   CompleteGenericEmailAuthRequest,
@@ -108,7 +108,7 @@ async function fetchRemnashop(path: string, init: RequestInit) {
   if (safePath.startsWith("/auth/")) {
     const serviceKey = getEnv().remnashopAuthServiceKey;
     if (!serviceKey) {
-      throw new BffError(
+      throw new ServiceError(
         "INTERNAL_ERROR",
         500,
         "REMNASHOP_AUTH_SERVICE_KEY is required for a Remnashop auth request.",
@@ -239,7 +239,7 @@ function extractAuthCookies(response: Response): AuthCookies {
   const refreshToken = getCookieValue(setCookieHeaders, "refresh_token");
 
   if (!accessToken || !refreshToken) {
-    throw new BffError('UPSTREAM_ERROR', 502, 'Auth response did not include auth cookies', { upstreamPath: '/auth' });
+    throw new ServiceError('UPSTREAM_ERROR', 502, 'Auth response did not include auth cookies', { upstreamPath: '/auth' });
   }
 
   return { accessToken, refreshToken };
@@ -334,7 +334,7 @@ export async function remnashopAdminRequestResult<T>(
   const apiKey = getEnv().remnashopApiKey;
 
   if (!apiKey) {
-    throw new BffError(
+    throw new ServiceError(
       "INTERNAL_ERROR",
       500,
       "REMNASHOP_API_KEY is required for an admin Remnashop request.",
@@ -461,7 +461,7 @@ export async function remnashopAuthTelegramIdentity({
   const botToken = getEnv().telegramBotToken;
 
   if (!botToken) {
-    throw new BffError("INTERNAL_ERROR", 500, "TELEGRAM_BOT_TOKEN is required to authenticate Telegram in Remnashop.");
+    throw new ServiceError("INTERNAL_ERROR", 500, "TELEGRAM_BOT_TOKEN is required to authenticate Telegram in Remnashop.");
   }
 
   const bodyWithoutHash: Omit<TelegramAuthRequest, "hash"> = {
@@ -519,7 +519,7 @@ export async function remnashopMergeUsers({
   const apiKey = getEnv().remnashopApiKey;
 
   if (!apiKey) {
-    throw new BffError("INTERNAL_ERROR", 500, "REMNASHOP_API_KEY is required to merge Remnashop users.");
+    throw new ServiceError("INTERNAL_ERROR", 500, "REMNASHOP_API_KEY is required to merge Remnashop users.");
   }
 
   const path = `/users/merge?dry_run=${dryRun ? "true" : "false"}`;
@@ -613,7 +613,7 @@ export async function remnashopLinkTelegram({
   const botToken = getEnv().telegramBotToken;
 
   if (!botToken) {
-    throw new BffError("INTERNAL_ERROR", 500, "TELEGRAM_BOT_TOKEN is required to link Telegram in Remnashop.");
+    throw new ServiceError("INTERNAL_ERROR", 500, "TELEGRAM_BOT_TOKEN is required to link Telegram in Remnashop.");
   }
 
   const bodyWithoutHash: Omit<TelegramAuthRequest, "hash"> = {
@@ -705,7 +705,7 @@ export async function attachRemnashopTokensForTelegramSession(
       : null;
   const normalizedExpectedEmail = recoveryEmail?.trim().toLowerCase() ?? null;
   const ownershipError = (reason: string) =>
-    new BffError(
+    new ServiceError(
       "ACCOUNT_MERGE_REQUIRED",
       409,
       "Telegram recovery did not prove the expected Remnashop account owner",
@@ -1033,7 +1033,7 @@ export async function attachRemnashopTokensForTelegramSession(
         const remainingMs = lockedNetworkDeadline - Date.now();
 
         if (remainingMs <= 100) {
-          throw new BffError(
+          throw new ServiceError(
             "UPSTREAM_UNAVAILABLE",
             502,
             "Telegram recovery exceeded its upstream merge deadline",
@@ -1053,7 +1053,7 @@ export async function attachRemnashopTokensForTelegramSession(
           timeoutMs: nextLockedRequestTimeout(),
         });
       } catch (error) {
-        if (error instanceof BffError && error.code === "CONFLICT") {
+        if (error instanceof ServiceError && error.code === "CONFLICT") {
           throw ownershipError("upstream_merge_conflict");
         }
 
@@ -1307,7 +1307,7 @@ export async function recoverRemnashopTelegramSession(
   });
 
   if (!session) {
-    throw new BffError(
+    throw new ServiceError(
       "UNAUTHORIZED",
       401,
       "Telegram recovery session is no longer active.",
@@ -1318,7 +1318,7 @@ export async function recoverRemnashopTelegramSession(
     const recovered = await attachRemnashopTokensForTelegramSession(session);
 
     if (!recovered) {
-      throw new BffError(
+      throw new ServiceError(
         "UPSTREAM_UNAVAILABLE",
         503,
         "Telegram recovery could not obtain a verified Remnashop session.",
@@ -1357,7 +1357,7 @@ async function attachRemnashopTokensForVerifiedEmailSession(
     !profile.is_email_verified ||
     (session.user.remnashopUserId && session.user.remnashopUserId !== remnashopUserId)
   ) {
-    throw new BffError(
+    throw new ServiceError(
       "ACCOUNT_MERGE_REQUIRED",
       409,
       "Verified e-mail session resolved to another upstream account",
@@ -1378,7 +1378,7 @@ async function attachRemnashopTokensForVerifiedEmailSession(
     },
   });
   if (stored.count !== 1) {
-    throw new BffError("UNAUTHORIZED", 401, "Local session changed during automatic recovery");
+    throw new ServiceError("UNAUTHORIZED", 401, "Local session changed during automatic recovery");
   }
   await prisma.webUser.update({
     where: { id: session.userId },
@@ -1426,7 +1426,7 @@ export async function getAuthorizedRemnashopTokens({
       reason: "passkey_required",
       assuranceLevel: localSession.assuranceLevel,
     });
-    throw new BffError(
+    throw new ServiceError(
       "PASSKEY_REQUIRED",
       403,
       "Create a passkey to continue",
@@ -1486,7 +1486,7 @@ export async function getAuthorizedRemnashopTokens({
       recoverySession.id !== localSession.id ||
       recoverySession.userId !== localSession.userId
     ) {
-      throw new BffError("UNAUTHORIZED", 401, "Current session changed before e-mail recovery");
+      throw new ServiceError("UNAUTHORIZED", 401, "Current session changed before e-mail recovery");
     }
     const restoredEmailSession =
       await attachRemnashopTokensForVerifiedEmailSession(recoverySession);
@@ -1507,7 +1507,7 @@ export async function getAuthorizedRemnashopTokens({
       recoverySession.id !== localSession.id ||
       recoverySession.userId !== localSession.userId
     ) {
-      throw new BffError(
+      throw new ServiceError(
         "UNAUTHORIZED",
         401,
         "Current session changed before Remnashop recovery",
@@ -1520,7 +1520,7 @@ export async function getAuthorizedRemnashopTokens({
         await attachRemnashopTokensForTelegramSession(recoverySession);
     } catch (error) {
       const concurrentRecoveryWon =
-        error instanceof BffError &&
+        error instanceof ServiceError &&
         error.code === "ACCOUNT_MERGE_REQUIRED" &&
         error.debug?.message === "local_identity_changed_before_recovery";
       if (!concurrentRecoveryWon) {
@@ -1533,7 +1533,7 @@ export async function getAuthorizedRemnashopTokens({
         convergedSession.id !== localSession.id ||
         convergedSession.userId !== localSession.userId
       ) {
-        throw new BffError(
+        throw new ServiceError(
           "UNAUTHORIZED",
           401,
           "Current session changed after concurrent Remnashop recovery",
@@ -1569,7 +1569,7 @@ export async function getAuthorizedRemnashopTokens({
       userId: localSession.userId,
       authMethod: localSession.authMethod,
     });
-    throw new BffError(
+    throw new ServiceError(
       "EMAIL_REQUIRED",
       401,
       "Clean Pay session must be linked to Remnashop before using Remnashop actions",
@@ -1605,7 +1605,7 @@ export async function getAuthorizedRemnashopTokens({
         remnashopEmailVerified: profile.is_email_verified,
         hasTelegramId: Boolean(session.user.telegramId),
       });
-      throw new BffError(
+      throw new ServiceError(
         "ACCOUNT_MERGE_REQUIRED",
         409,
         "Telegram and e-mail accounts must be merged in Remnashop before payment.",
@@ -1638,7 +1638,7 @@ export async function getAuthorizedRemnashopTokens({
         remnashopEmailMatches,
         remnashopEmailVerified: profile.is_email_verified,
       });
-      throw new BffError(
+      throw new ServiceError(
         "EMAIL_NOT_VERIFIED",
         403,
         "E-mail must be verified before using Remnashop actions",

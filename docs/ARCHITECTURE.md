@@ -1,0 +1,38 @@
+# Clean Pay architecture
+
+## Dependency rule
+
+Dependencies point inward:
+
+1. `src/shared/domain` — entities, value objects, domain errors and policies.
+2. `src/backend/application` — commands, queries, ports and application results.
+3. `src/backend/integrations`, `database`, `cache` — adapters implementing application ports.
+4. `src/app` — composition root and server presentation (Server Components, Server Actions and external HTTP controllers).
+5. `src/frontend` — view-only React components receiving serializable props and invoking Server Actions.
+
+Domain and application code must not import Next.js, Prisma, Redis, HTTP clients, cookies or concrete integrations.
+
+## UI boundary
+
+React components are views. They may own ephemeral presentation state such as an open dialog or a selected tariff, but they must not:
+
+- call `fetch`;
+- know API paths, HTTP methods, headers or response envelopes;
+- import database, integration or application implementations;
+- orchestrate business workflows.
+
+Server Components load query view models. Server Actions accept explicit command DTOs, invoke application use cases and return explicit action results.
+
+## Application boundary
+
+Each scenario has an explicit input and output. Application use cases depend on ports. Concrete Prisma, Redis, Remnashop, Remnawave and Telegram implementations live outside the application layer and are wired in `src/app` composition roots.
+
+## HTTP boundary
+
+Route handlers are retained only for real HTTP contracts: health/readiness, service-to-service callbacks, payment reconciliation and third-party authentication callbacks. A route handler decodes an endpoint-specific request, invokes one use case and presents an endpoint-specific response.
+
+The browser UI does not use internal `/api/bff/*` routes. Those routes are removed as their callers migrate to Server Components and Server Actions.
+
+## Error handling
+
+Adapters translate infrastructure failures into application/domain errors. Application use cases translate those errors into explicit results suitable for the scenario. Views never inspect upstream status codes or provider-specific error payloads.

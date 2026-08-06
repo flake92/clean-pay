@@ -38,7 +38,7 @@ import {
   settlePaymentReconciliation,
 } from "@/backend/payments/reconciliation";
 import { paymentUpstreamOwnerHash } from "@/backend/payments/hashes";
-import { BffError } from "@/backend/integrations/remnashop/errors";
+import { ServiceError } from "@/backend/errors/service-error";
 import { sha256 } from "@/backend/security/crypto";
 
 const now = new Date("2026-07-17T10:00:00.000Z");
@@ -476,7 +476,7 @@ describe("payment outcome reconciliation fencing", () => {
     );
     mocks.tx.paymentRecord.findUnique.mockResolvedValue(null);
     mocks.applyRemnashopTransaction.mockRejectedValue(
-      new BffError("CONFLICT", 409, "payment belongs to another owner"),
+      new ServiceError("CONFLICT", 409, "payment belongs to another owner"),
     );
     mocks.tx.paymentOperation.updateMany.mockResolvedValue({ count: 1 });
 

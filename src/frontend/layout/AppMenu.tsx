@@ -5,9 +5,10 @@ import { getBranding } from "@/shared/branding";
 import AppMenuitem from "./AppMenuitem";
 import { MenuProvider } from "./context/menucontext";
 import { useCleanPayMenu } from "./useCleanPayMenu";
+import type { NavigationViewModel } from "@/shared/presentation/navigation";
 
-const AppMenu = () => {
-    const { model } = useCleanPayMenu();
+const AppMenu = ({ navigation }: { navigation: NavigationViewModel }) => {
+    const { model } = useCleanPayMenu(navigation);
     const branding = getBranding();
 
     return (

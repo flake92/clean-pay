@@ -6,10 +6,11 @@ import { AppTopbarRef } from "@/frontend/types";
 import { getBranding } from "@/shared/branding";
 import { LayoutContext } from "./context/layoutcontext";
 import { useCleanPayMenu } from "./useCleanPayMenu";
+import type { NavigationViewModel } from "@/shared/presentation/navigation";
 
-const AppTopbar = forwardRef<AppTopbarRef>((props, ref) => {
+const AppTopbar = forwardRef<AppTopbarRef, { navigation: NavigationViewModel }>(({ navigation }, ref) => {
     const { layoutState, onMenuToggle, showProfileSidebar } = useContext(LayoutContext);
-    const { flatItems } = useCleanPayMenu();
+    const { flatItems } = useCleanPayMenu(navigation);
     const menubuttonRef = useRef(null);
     const topbarmenuRef = useRef(null);
     const topbarmenubuttonRef = useRef(null);

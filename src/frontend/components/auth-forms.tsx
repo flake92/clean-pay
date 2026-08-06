@@ -7,9 +7,9 @@ import { InputText } from "primereact/inputtext";
 import { Message } from "primereact/message";
 import { Password } from "primereact/password";
 
+import { executeAuthAction } from "@/app/actions/auth";
 import { PasskeyLoginButton } from "@/frontend/components/passkey-actions";
 import { TurnstileWidget, type TurnstileHandle, hasTurnstileSiteKey } from "@/frontend/components/turnstile-widget";
-import { BffClientError, readBffError } from "@/frontend/lib/client-api";
 
 type ApiState = { loading: boolean; error: string | null };
 
@@ -32,17 +32,6 @@ const AuthTurnstileContext = createContext<AuthTurnstileContextValue>({
   setHandle: () => {},
   setToken: () => {},
 });
-
-async function readAuthError(response: Response) {
-  const error = await readBffError(response, "Не удалось выполнить действие.");
-  if (error instanceof BffClientError && error.code === "AUTH_FAILED") {
-    error.message = "Неверный e-mail или пароль.";
-  }
-  if (error instanceof BffClientError && error.code === "RATE_LIMITED") {
-    error.message = "Слишком много попыток. Попробуйте позже.";
-  }
-  return error;
-}
 
 const unknownLoginResultMessage =
   "Не удалось определить результат входа. Обновите страницу, чтобы проверить состояние сессии.";
@@ -156,42 +145,31 @@ export function LoginForm({
     requestPendingRef.current = true;
     setState({ loading: true, error: null });
     try {
-      const endpoint = {
-        identify: "/api/bff/auth/identify",
-        password: "/api/bff/auth/login",
-        register: "/api/bff/auth/register",
-        resetStart: "/api/bff/auth/password/reset/start",
-        resetConfirm: "/api/bff/auth/password/reset/confirm",
-      }[stage];
-      const response = await fetch(endpoint, {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({
-            email,
-            ...(stage === "password" || stage === "register" ? { password } : {}),
-            ...(stage === "resetConfirm" ? { code, newPassword: password } : {}),
-            ...(turnstileToken ? { turnstileToken } : {}),
-          }),
-        });
+      const command = stage === "identify"
+        ? { kind: "identify" as const, email, ...(turnstileToken ? { turnstileToken } : {}) }
+        : stage === "password"
+          ? { kind: "login" as const, email, password, ...(turnstileToken ? { turnstileToken } : {}) }
+          : stage === "register"
+            ? { kind: "register" as const, email, password, ...(turnstileToken ? { turnstileToken } : {}) }
+            : stage === "resetStart"
+              ? { kind: "request-password-reset" as const, email, ...(turnstileToken ? { turnstileToken } : {}) }
+              : { kind: "confirm-password-reset" as const, email, code, newPassword: password, ...(turnstileToken ? { turnstileToken } : {}) };
+      const result = await executeAuthAction(command);
       turnstile.reset();
-      if (!response.ok) {
-        const error = await readAuthError(response);
-        const rejectedPassword = (stage === "password" || stage === "register") && error.code === "AUTH_FAILED";
+      if (!result.ok) {
+        const rejectedPassword = (stage === "password" || stage === "register") && result.code === "AUTH_FAILED";
         setCanRecoverPassword(rejectedPassword);
         if (stage === "register" && rejectedPassword) setStage("password");
-        setState({ loading: false, error: error.message });
+        setState({ loading: false, error: result.message });
         return;
       }
       if (stage === "identify") {
-        const payload = await response.json().catch(() => null) as {
-          data?: { exists?: boolean; hasPasskey?: boolean };
-        } | null;
-        if (typeof payload?.data?.exists !== "boolean") {
+        if (result.kind !== "identified") {
           setState({ loading: false, error: "Сервер вернул некорректный ответ. Повторите попытку." });
           return;
         }
-        setHasPasskey(Boolean(payload.data.hasPasskey));
-        setStage(payload.data.exists ? "password" : "register");
+        setHasPasskey(result.hasPasskey);
+        setStage(result.exists ? "password" : "register");
         setState({ loading: false, error: null });
         return;
       }
@@ -204,14 +182,11 @@ export function LoginForm({
         return;
       }
       if (stage === "register") {
-        const payload = await response.json().catch(() => null) as {
-          data?: { user?: { is_email_verified?: boolean }; emailVerification?: unknown };
-        } | null;
-        if (!payload?.data?.user) {
+        if (result.kind !== "authenticated") {
           setState({ loading: false, error: unknownLoginResultMessage });
           return;
         }
-        if (payload.data.user.is_email_verified === true || !payload.data.emailVerification) {
+        if (result.emailVerified || !result.verificationRequired) {
           redirectAfterAuth(redirectTo);
         } else {
           window.location.assign("/register/verify-email");

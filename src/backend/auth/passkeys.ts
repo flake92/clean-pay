@@ -15,7 +15,7 @@ import { auditLog } from "@/backend/observability/audit";
 import { claimWebAuthnChallenge } from "@/backend/auth/one-time-state";
 import { getEnv } from "@/backend/config/env";
 import { prisma } from "@/backend/database/prisma";
-import { BffError } from "@/backend/integrations/remnashop/errors";
+import { ServiceError } from "@/backend/errors/service-error";
 import { assertRateLimit, withAuthConcurrency } from "@/backend/limits/rate-limit";
 import {
   assertEmailVerificationPolicy,
@@ -67,11 +67,11 @@ async function consumeChallenge(challenge: string, type: WebAuthnChallengeType) 
   });
 
   if (!record) {
-    throw new BffError("VALIDATION_ERROR", 400, "WebAuthn challenge is invalid or expired");
+    throw new ServiceError("VALIDATION_ERROR", 400, "WebAuthn challenge is invalid or expired");
   }
 
   if (!await claimWebAuthnChallenge(record.id, now)) {
-    throw new BffError("VALIDATION_ERROR", 400, "WebAuthn challenge is invalid or expired");
+    throw new ServiceError("VALIDATION_ERROR", 400, "WebAuthn challenge is invalid or expired");
   }
 
   return record;
@@ -79,7 +79,7 @@ async function consumeChallenge(challenge: string, type: WebAuthnChallengeType) 
 
 function challengeFromClientDataJSON(clientDataJSON: unknown) {
   if (typeof clientDataJSON !== "string") {
-    throw new BffError("VALIDATION_ERROR", 400, "WebAuthn client data is required");
+    throw new ServiceError("VALIDATION_ERROR", 400, "WebAuthn client data is required");
   }
 
   try {
@@ -93,19 +93,19 @@ function challengeFromClientDataJSON(clientDataJSON: unknown) {
 
     return data.challenge;
   } catch {
-    throw new BffError("VALIDATION_ERROR", 400, "WebAuthn client data is invalid");
+    throw new ServiceError("VALIDATION_ERROR", 400, "WebAuthn client data is invalid");
   }
 }
 
 function clientDataJSONFromCredentialResponse(response: unknown) {
   if (!response || typeof response !== "object" || !("response" in response)) {
-    throw new BffError("VALIDATION_ERROR", 400, "WebAuthn response is required");
+    throw new ServiceError("VALIDATION_ERROR", 400, "WebAuthn response is required");
   }
 
   const credentialResponse = (response as { response?: unknown }).response;
 
   if (!credentialResponse || typeof credentialResponse !== "object" || !("clientDataJSON" in credentialResponse)) {
-    throw new BffError("VALIDATION_ERROR", 400, "WebAuthn client data is required");
+    throw new ServiceError("VALIDATION_ERROR", 400, "WebAuthn client data is required");
   }
 
   return (credentialResponse as { clientDataJSON?: unknown }).clientDataJSON;
@@ -171,7 +171,7 @@ export async function beginPasskeyRegistration() {
   const session = await getCurrentSession();
 
   if (!session) {
-    throw new BffError("UNAUTHORIZED", 401, "Session is required");
+    throw new ServiceError("UNAUTHORIZED", 401, "Session is required");
   }
   assertPasskeySessionPolicy(session);
 
@@ -210,7 +210,7 @@ export async function finishPasskeyRegistration(response: RegistrationResponseJS
   const session = await getCurrentSession();
 
   if (!session) {
-    throw new BffError("UNAUTHORIZED", 401, "Session is required");
+    throw new ServiceError("UNAUTHORIZED", 401, "Session is required");
   }
   assertPasskeySessionPolicy(session);
 
@@ -220,7 +220,7 @@ export async function finishPasskeyRegistration(response: RegistrationResponseJS
   );
 
   if (challenge.userId !== session.userId) {
-    throw new BffError("FORBIDDEN", 403, "WebAuthn challenge belongs to another user");
+    throw new ServiceError("FORBIDDEN", 403, "WebAuthn challenge belongs to another user");
   }
 
   const { rpID, origin } = webAuthnRelyingParty();
@@ -231,11 +231,11 @@ export async function finishPasskeyRegistration(response: RegistrationResponseJS
     expectedRPID: rpID,
     requireUserVerification: true,
   }).catch(() => {
-    throw new BffError("VALIDATION_ERROR", 400, "Passkey registration failed");
+    throw new ServiceError("VALIDATION_ERROR", 400, "Passkey registration failed");
   });
 
   if (!result.verified) {
-    throw new BffError("VALIDATION_ERROR", 400, "Passkey registration failed");
+    throw new ServiceError("VALIDATION_ERROR", 400, "Passkey registration failed");
   }
 
   const { credential, aaguid, credentialBackedUp, credentialDeviceType } = result.registrationInfo;
@@ -281,7 +281,7 @@ export async function finishPasskeyRegistration(response: RegistrationResponseJS
       const concurrentlyCreatedCredential = await updateOwnedCredential();
 
       if (concurrentlyCreatedCredential.count === 0) {
-        throw new BffError("CONFLICT", 409, "Passkey credential belongs to another user");
+        throw new ServiceError("CONFLICT", 409, "Passkey credential belongs to another user");
       }
     }
   }
@@ -314,7 +314,7 @@ export async function finishPasskeyRegistration(response: RegistrationResponseJS
 export async function beginPasskeyLogin(rawEmail: string) {
   const email = rawEmail.trim().toLowerCase();
   if (!email) {
-    throw new BffError("VALIDATION_ERROR", 400, "Email is required for passkey login");
+    throw new ServiceError("VALIDATION_ERROR", 400, "Email is required for passkey login");
   }
   await assertRateLimit({
     action: "passkey_login_options",
@@ -334,7 +334,7 @@ export async function beginPasskeyLogin(rawEmail: string) {
       },
     });
     if (!user?.webAuthnCredentials.length) {
-      throw new BffError("NOT_FOUND", 404, "No passkey is registered for this account");
+      throw new ServiceError("NOT_FOUND", 404, "No passkey is registered for this account");
     }
 
     const { rpID } = webAuthnRelyingParty();
@@ -396,7 +396,7 @@ export async function recordPasskeyUse({
       userId,
       metadata: { credentialId },
     });
-    throw new BffError("UNAUTHORIZED", 401, "Passkey counter state changed");
+    throw new ServiceError("UNAUTHORIZED", 401, "Passkey counter state changed");
   }
 }
 
@@ -416,11 +416,11 @@ export async function finishPasskeyLogin(response: AuthenticationResponseJSON) {
   });
 
   if (!credential) {
-    throw new BffError("UNAUTHORIZED", 401, "Passkey was not found");
+    throw new ServiceError("UNAUTHORIZED", 401, "Passkey was not found");
   }
 
   if (!challenge.userId || challenge.userId !== credential.userId) {
-    throw new BffError("UNAUTHORIZED", 401, "Passkey does not belong to the selected account");
+    throw new ServiceError("UNAUTHORIZED", 401, "Passkey does not belong to the selected account");
   }
 
   const { rpID, origin } = webAuthnRelyingParty();
@@ -432,11 +432,11 @@ export async function finishPasskeyLogin(response: AuthenticationResponseJSON) {
     credential: toSimpleCredential(credential),
     requireUserVerification: true,
   }).catch(() => {
-    throw new BffError("UNAUTHORIZED", 401, "Passkey verification failed");
+    throw new ServiceError("UNAUTHORIZED", 401, "Passkey verification failed");
   });
 
   if (!result.verified) {
-    throw new BffError("UNAUTHORIZED", 401, "Passkey verification failed");
+    throw new ServiceError("UNAUTHORIZED", 401, "Passkey verification failed");
   }
 
   const oldCounter = credential.counter;
@@ -466,7 +466,7 @@ export async function listPasskeys() {
   const session = await getCurrentSession();
 
   if (!session || session.assuranceLevel !== WebSessionAssuranceLevel.FULL) {
-    throw new BffError("UNAUTHORIZED", 401, "Full session is required");
+    throw new ServiceError("UNAUTHORIZED", 401, "Full session is required");
   }
   assertPasskeySessionPolicy(session);
 
@@ -500,7 +500,7 @@ export async function deleteOwnedPasskey(userId: string, credentialId: string) {
     );
 
     if (lockedUsers.length !== 1) {
-      throw new BffError("UNAUTHORIZED", 401, "Current user no longer exists");
+      throw new ServiceError("UNAUTHORIZED", 401, "Current user no longer exists");
     }
 
     const credential = await tx.webAuthnCredential.findFirst({
@@ -508,7 +508,7 @@ export async function deleteOwnedPasskey(userId: string, credentialId: string) {
     });
 
     if (!credential) {
-      throw new BffError("NOT_FOUND", 404, "Passkey was not found");
+      throw new ServiceError("NOT_FOUND", 404, "Passkey was not found");
     }
 
     const credentialCount = await tx.webAuthnCredential.count({
@@ -516,7 +516,7 @@ export async function deleteOwnedPasskey(userId: string, credentialId: string) {
     });
 
     if (credentialCount <= 1) {
-      throw new BffError("FORBIDDEN", 403, "Last passkey cannot be deleted");
+      throw new ServiceError("FORBIDDEN", 403, "Last passkey cannot be deleted");
     }
 
     await tx.webAuthnCredential.delete({
@@ -531,7 +531,7 @@ export async function deletePasskey(credentialId: string) {
   const session = await getCurrentSession();
 
   if (!session || session.assuranceLevel !== WebSessionAssuranceLevel.FULL) {
-    throw new BffError("UNAUTHORIZED", 401, "Full session is required");
+    throw new ServiceError("UNAUTHORIZED", 401, "Full session is required");
   }
   assertPasskeySessionPolicy(session);
 

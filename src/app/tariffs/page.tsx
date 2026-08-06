@@ -1,9 +1,13 @@
-import { AppShell, PageHeader } from "@/frontend/components/layout";
+import { AppShell } from "@/app/_components/app-shell";
+import { PageHeader } from "@/frontend/components/layout";
 import { TariffsPanel } from "@/frontend/components/tariffs-panel";
 import { getBranding } from "@/shared/branding";
+import { loadTariffsViewModel } from "@/backend/application/subscriptions/load-tariffs";
+import { remnashopSubscriptionCatalog } from "@/backend/integrations/remnashop/subscription-catalog";
 
-export default function TariffsPage() {
+export default async function TariffsPage() {
   const branding = getBranding();
+  const model = await loadTariffsViewModel(remnashopSubscriptionCatalog);
 
   return (
     <AppShell>
@@ -12,7 +16,7 @@ export default function TariffsPage() {
           description={`Доступные тарифы, длительности и способы оплаты загружаются для ${branding.name}.`}
           title="Тарифы"
         />
-        <TariffsPanel />
+        <TariffsPanel model={model} />
       </div>
     </AppShell>
   );

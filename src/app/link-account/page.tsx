@@ -1,5 +1,8 @@
-import { AppShell, PageHeader } from "@/frontend/components/layout";
+import { AppShell } from "@/app/_components/app-shell";
+import { PageHeader } from "@/frontend/components/layout";
 import { LinkAccountPanel } from "@/frontend/components/link-account-panel";
+import { loadLinkAccount } from "@/backend/application/auth/manage-linked-account";
+import { productionLinkAccountReader } from "@/backend/integrations/auth/link-account";
 import {
   ACCOUNT_SETUP_PASSWORD_STEP,
   ACCOUNT_SETUP_REASON,
@@ -17,6 +20,7 @@ export default async function LinkAccountPage({
 }: {
   searchParams: Promise<{
     reason?: string | string[];
+    auth?: string | string[];
     redirect_to?: string | string[];
     step?: string | string[];
   }>;
@@ -31,6 +35,7 @@ export default async function LinkAccountPage({
   const redirectTo = safeAccountSetupDestination(
     firstSearchParam(params.redirect_to),
   );
+  const model = await loadLinkAccount(productionLinkAccountReader, firstSearchParam(params.auth) ?? null);
 
   return (
     <AppShell>
@@ -45,6 +50,7 @@ export default async function LinkAccountPage({
         />
         <LinkAccountPanel
           guided={guided}
+          model={model}
           passwordRequired={passwordRequired}
           redirectTo={redirectTo}
           turnstileEnabled={turnstileEnabled}

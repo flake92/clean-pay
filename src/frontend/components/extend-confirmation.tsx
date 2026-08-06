@@ -1,29 +1,23 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-import { useSearchParams } from "next/navigation";
+import { useRef, useState } from "react";
 
 import type {
   DurationGatewayPrice,
-  PaymentInitResponse,
   PlanOffer,
-  SubscriptionOffersResponse,
 } from "@/shared/remnashop/types";
+import { executePaymentAction } from "@/app/actions/payments";
 import { AccountActionRequired } from "@/frontend/components/account-action-required";
 import { LinkButton } from "@/frontend/components/prime/link-button";
 import { replaceWith } from "@/frontend/lib/browser-navigation";
-import { BffClientError, readBffError } from "@/frontend/lib/client-api";
 import {
   clearPaymentIdempotencyKey,
   getOrCreatePaymentIdempotencyKey,
-  parsePaymentOperationStatusEnvelope,
-  shouldRetainPaymentIdempotencyKey,
 } from "@/frontend/lib/payment-idempotency";
 import { storePaymentReturnReference } from "@/frontend/lib/payment-return-storage";
 import { findRenewPlan } from "@/frontend/lib/subscription-offers";
 import {
   confirmedPaymentOffer,
-  paymentOfferMatches,
 } from "@/shared/payments/offer-confirmation";
 import {
   accountLinkPath,
@@ -33,11 +27,9 @@ import { Button } from "primereact/button";
 import { Card } from "primereact/card";
 import { Dropdown } from "primereact/dropdown";
 import { Message } from "primereact/message";
+import type { CheckoutViewModel } from "@/shared/presentation/checkout";
 
-type LoadState =
-  | { status: "loading" }
-  | { status: "error"; message: string; action?: "login" | "linkEmail" }
-  | { status: "ready"; offers: SubscriptionOffersResponse };
+const defaultCheckoutModel: CheckoutViewModel = { status: "error", message: "Не удалось загрузить предложения продления." };
 
 type PriceOption = {
   amount: string;
@@ -191,130 +183,27 @@ function priceChoiceList(
   );
 }
 
-export function ExtendConfirmation() {
-  const searchParams = useSearchParams();
-  const [state, setState] = useState<LoadState>({ status: "loading" });
-  const [selection, setSelection] = useState("");
+export function ExtendConfirmation({ model = defaultCheckoutModel, requestedDuration = null, requestedGateway = null }: {
+  model?: CheckoutViewModel;
+  requestedDuration?: string | null;
+  requestedGateway?: string | null;
+}) {
+  const state = model;
+  const initialPlan = state.status === "ready" ? findRenewPlan(state.offers) : undefined;
+  const [selection, setSelection] = useState(() => initialSelection(initialPlan, requestedDuration, requestedGateway));
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const submittingRef = useRef(false);
-  const requestedDuration = searchParams.get("duration");
-  const requestedGateway = searchParams.get("gateway");
   const requestedExtendDestination = extensionDestination(
     requestedDuration,
     requestedGateway,
   );
 
-  useEffect(() => {
-    let active = true;
-
-    async function loadExtension() {
-      try {
-        const profileResponse = await fetch("/api/bff/auth/me", {
-          cache: "no-store",
-        });
-
-        if (!profileResponse.ok) {
-          throw await readBffError(
-            profileResponse,
-            profileResponse.status === 401
-              ? "Нужно войти в аккаунт."
-              : "Не удалось проверить готовность аккаунта.",
-          );
-        }
-
-        const profileBody = await profileResponse.json().catch(() => null);
-        const user = profileBody?.data?.user;
-        const emailVerified = Boolean(
-          user?.email &&
-            (user.emailVerified ?? user.is_email_verified),
-        );
-        const accountSyncPending = Boolean(
-          user?.accountSyncPending ?? user?.account_sync_pending,
-        );
-
-        if (accountSyncPending) {
-          replaceWith(
-            emailVerificationPath(requestedExtendDestination),
-          );
-          return;
-        }
-
-        if (!emailVerified) {
-          if (active) {
-            setState({
-              status: "error",
-              message:
-                "Для продления добавьте e-mail и пароль, затем подтвердите адрес кодом из письма.",
-              action: "linkEmail",
-            });
-          }
-          return;
-        }
-
-        const offersResponse = await fetch("/api/bff/subscription/offers");
-
-        if (!offersResponse.ok) {
-          throw await readBffError(
-            offersResponse,
-            offersResponse.status === 401
-              ? "Нужно войти в аккаунт."
-              : "Не удалось загрузить предложения продления.",
-          );
-        }
-
-        const offersBody = await offersResponse.json().catch(() => null);
-
-        if (!offersBody?.data) {
-          throw new Error("Сервер вернул некорректные данные продления.");
-        }
-
-        if (active) {
-          const offers = offersBody.data as SubscriptionOffersResponse;
-          setState({ status: "ready", offers });
-          setSelection(
-            initialSelection(
-              findRenewPlan(offers),
-              requestedDuration,
-              requestedGateway,
-            ),
-          );
-        }
-      } catch (error) {
-        if (!active) {
-          return;
-        }
-
-        setState({
-          status: "error",
-          message:
-            error instanceof Error
-              ? error.message
-              : "Не удалось загрузить предложения продления.",
-          action:
-            error instanceof BffClientError &&
-            (error.code === "EMAIL_REQUIRED" ||
-              error.code === "EMAIL_NOT_VERIFIED")
-              ? "linkEmail"
-              : error instanceof BffClientError && error.status === 401
-                ? "login"
-                : undefined,
-        });
-      }
+  if (state.status === "account-action-required") {
+    if (state.action === "verifyEmail") {
+      replaceWith(emailVerificationPath(requestedExtendDestination));
+      return null;
     }
-
-    void loadExtension();
-
-    return () => {
-      active = false;
-    };
-  }, [requestedDuration, requestedGateway, requestedExtendDestination]);
-
-  if (state.status === "loading") {
-    return <Message severity="info" text="Загрузка предложений..." />;
-  }
-
-  if (state.status === "error") {
     if (state.action) {
       return (
         <AccountActionRequired
@@ -331,6 +220,8 @@ export function ExtendConfirmation() {
       </div>
     );
   }
+
+  if (state.status === "error") return <Message severity="error" text={state.message} />;
 
   const plan = findRenewPlan(state.offers);
 
@@ -392,60 +283,6 @@ export function ExtendConfirmation() {
       ...confirmedPaymentOffer(plan, selectedDuration.days, selectedPrice),
     };
 
-    try {
-      const offersResponse = await fetch("/api/bff/subscription/offers", {
-        cache: "no-store",
-      });
-
-      if (!offersResponse.ok) {
-        throw await readBffError(
-          offersResponse,
-          "Не удалось перепроверить цену. Продление не создано.",
-        );
-      }
-
-      const offersBody = await offersResponse.json().catch(() => null) as {
-        data?: SubscriptionOffersResponse;
-      } | null;
-      const freshOffers = offersBody?.data;
-      const freshPlan = freshOffers ? findRenewPlan(freshOffers) : undefined;
-      const freshDuration = freshPlan?.durations.find(
-        (duration) => duration.days === selectedDuration.days,
-      );
-      const freshPrice = freshDuration?.prices.find(
-        (price) => price.gateway_type === selectedPrice.gateway_type,
-      );
-
-      if (!freshOffers || !freshPlan || !freshDuration || !freshPrice) {
-        finishSubmitting();
-        setSubmitError("Выбранное предложение продления больше недоступно. Оплата не создана.");
-        return;
-      }
-
-      if (!paymentOfferMatches(payload, freshPlan, freshDuration.days, freshPrice)) {
-        setState({ status: "ready", offers: freshOffers });
-        setSelection(selectionValue(freshDuration.days, freshPrice.gateway_type));
-        finishSubmitting();
-        setSubmitError(
-          `Цена изменилась: было ${selectedPrice.final_amount} ${selectedPrice.currency_symbol}, стало ${freshPrice.final_amount} ${freshPrice.currency_symbol}. Проверьте новую цену перед оплатой.`,
-        );
-        return;
-      }
-    } catch (error) {
-      if (
-        error instanceof BffClientError &&
-        (error.code === "EMAIL_REQUIRED" ||
-          error.code === "EMAIL_NOT_VERIFIED")
-      ) {
-        replaceWith(accountLinkPath(selectedExtendDestination));
-        return;
-      }
-
-      finishSubmitting();
-      setSubmitError("Не удалось перепроверить цену. Продление не создано; повторите попытку позже.");
-      return;
-    }
-
     let idempotencyKey: string;
 
     try {
@@ -461,111 +298,43 @@ export function ExtendConfirmation() {
     let paymentConfirmed = false;
 
     try {
-      let response: Response;
-
-      try {
-        response = await fetch("/api/bff/subscription/extend", {
-          method: "POST",
-          headers: {
-            "content-type": "application/json",
-            "Idempotency-Key": idempotencyKey,
-          },
-          body: JSON.stringify(payload),
-        });
-      } catch {
-        setSubmitError(
-          "Не удалось получить результат продления. Повторите попытку — новая оплата не будет создана.",
-        );
-        return;
-      }
-
-      const operationStatus = parsePaymentOperationStatusEnvelope(
-        await response.clone().json().catch(() => null),
-      );
-
-      if (response.status === 202) {
-        if (operationStatus) {
-          storePaymentReturnReference({
-            operationId: operationStatus.operationId,
-          });
-          paymentConfirmed = true;
-          window.location.assign(
-            `/payment/pending?operation_id=${encodeURIComponent(operationStatus.operationId)}`,
-          );
-          return;
-        }
-        setSubmitError(
-          "Результат продления уточняется. Не создавайте новую оплату; повторите проверку через несколько секунд.",
-        );
-        return;
-      }
-
-      if (!response.ok) {
-        const manualReview = operationStatus?.status === "manual_required";
-        const responseError = manualReview
-          ? null
-          : await readBffError(response, "Не удалось выполнить действие.");
-
-        if (
-          responseError instanceof BffClientError &&
-          (responseError.code === "EMAIL_REQUIRED" ||
-            responseError.code === "EMAIL_NOT_VERIFIED")
-        ) {
+      const result = await executePaymentAction({ kind: "extend", request: payload, idempotencyKey });
+      if (!result.ok) {
+        if (result.code === "EMAIL_REQUIRED" || result.code === "EMAIL_NOT_VERIFIED") {
           replaceWith(accountLinkPath(selectedExtendDestination));
           return;
         }
-
-        const message = manualReview
-          ? `Статус продления не удалось определить автоматически. Не повторяйте оплату; обратитесь в поддержку и сообщите номер операции ${operationStatus.operationId}.`
-          : responseError?.message ?? "Не удалось выполнить действие.";
-
-        if (manualReview) {
-          storePaymentReturnReference({
-            operationId: operationStatus.operationId,
-          });
-        }
-
-        if (response.status < 500) {
-          if (!shouldRetainPaymentIdempotencyKey(response.status, operationStatus?.status)) {
-            clearPaymentIdempotencyKey("extend", payload, idempotencyKey);
-          }
-          setSubmitError(message);
-        } else {
-          setSubmitError(
-            "Не удалось подтвердить результат продления. Повторите попытку — новая оплата не будет создана.",
-          );
-        }
+        if (!result.retainIdempotencyKey) clearPaymentIdempotencyKey("extend", payload, idempotencyKey);
+        setSubmitError(result.message);
         return;
       }
-
-      const body = (await response.json().catch(() => null)) as {
-        data?: PaymentInitResponse;
-      } | null;
-
-      if (!body?.data || typeof body.data.payment_id !== "string") {
-        setSubmitError(
-          "Не удалось подтвердить результат продления. Повторите попытку — новая оплата не будет создана.",
-        );
+      if (result.status === "pending") {
+        storePaymentReturnReference({ operationId: result.operationId });
+        paymentConfirmed = true;
+        window.location.assign(`/payment/pending?operation_id=${encodeURIComponent(result.operationId)}`);
+        return;
+      }
+      if (result.status === "manual-review") {
+        storePaymentReturnReference({ operationId: result.operationId });
+        setSubmitError(`Статус продления требует ручной проверки. Сообщите поддержке номер операции ${result.operationId}.`);
         return;
       }
 
       clearPaymentIdempotencyKey("extend", payload, idempotencyKey);
       paymentConfirmed = true;
-
-      storePaymentReturnReference({ paymentId: body.data.payment_id });
-
-      if (body.data.is_free) {
+      storePaymentReturnReference({ paymentId: result.payment.payment_id });
+      if (result.payment.is_free) {
         window.location.assign("/cabinet");
         return;
       }
 
-      if (body.data.payment_url) {
-        window.location.assign(body.data.payment_url);
+      if (result.payment.payment_url) {
+        window.location.assign(result.payment.payment_url);
         return;
       }
 
       window.location.assign(
-        `/payment/pending?payment_id=${encodeURIComponent(body.data.payment_id)}`,
+        `/payment/pending?payment_id=${encodeURIComponent(result.payment.payment_id)}`,
       );
     } catch {
       setSubmitError(

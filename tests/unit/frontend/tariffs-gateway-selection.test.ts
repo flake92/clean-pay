@@ -39,6 +39,11 @@ const gatewayPrice = (gateway: string, amount: string) => ({
 
 function offers(gateways: string[], description: string | null = null) {
   return {
+    gateways: gateways.map((gateway) => ({
+      gateway_type: gateway,
+      currency: "RUB",
+      currency_symbol: "₽",
+    })),
     has_current_subscription: false,
     current_subscription_status: null,
     plans: [
@@ -70,12 +75,6 @@ function offers(gateways: string[], description: string | null = null) {
   };
 }
 
-async function settle() {
-  await act(async () => {
-    await new Promise((resolve) => setTimeout(resolve, 0));
-  });
-}
-
 async function click(button: HTMLButtonElement) {
   await act(async () => {
     button.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
@@ -100,10 +99,9 @@ describe("tariff payment gateway selection", () => {
   });
 
   it("keeps a single gateway compact", async () => {
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(Response.json({ data: offers(["YOOKASSA"]) })));
-
-    await act(async () => root.render(createElement(TariffsPanel)));
-    await settle();
+    await act(async () => root.render(createElement(TariffsPanel, {
+      model: { status: "ready", offers: offers(["YOOKASSA"]) },
+    })));
 
     expect(container.querySelector('[aria-label="Выбор платёжного шлюза"]')).toBeNull();
     expect(container.querySelector('[data-dropdown-options="2"]')).not.toBeNull();
@@ -112,13 +110,9 @@ describe("tariff payment gateway selection", () => {
 
   it("allows long tariff descriptions to wrap on narrow screens", async () => {
     const description = "https://teletype.in/very-long-unbroken-tariff-instructions-link";
-    vi.stubGlobal(
-      "fetch",
-      vi.fn().mockResolvedValue(Response.json({ data: offers(["YOOKASSA"], description) })),
-    );
-
-    await act(async () => root.render(createElement(TariffsPanel)));
-    await settle();
+    await act(async () => root.render(createElement(TariffsPanel, {
+      model: { status: "ready", offers: offers(["YOOKASSA"], description) },
+    })));
 
     const descriptionNode = Array.from(container.querySelectorAll("p")).find(
       (node) => node.textContent === description,
@@ -129,13 +123,9 @@ describe("tariff payment gateway selection", () => {
   });
 
   it("separates gateways and moves forward and backward without mixing durations", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn().mockResolvedValue(Response.json({ data: offers(["YOOKASSA", "SBP"]) })),
-    );
-
-    await act(async () => root.render(createElement(TariffsPanel)));
-    await settle();
+    await act(async () => root.render(createElement(TariffsPanel, {
+      model: { status: "ready", offers: offers(["YOOKASSA", "SBP"]) },
+    })));
 
     const gatewayGroup = container.querySelector('[aria-label="Выбор платёжного шлюза"]');
     expect(gatewayGroup?.textContent).toContain("YOOKASSA");

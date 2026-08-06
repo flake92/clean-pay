@@ -1,13 +1,17 @@
 import { Card } from "primereact/card";
 
-import { AppShell, PageHeader } from "@/frontend/components/layout";
+import { loadProfileViewModel } from "@/backend/application/profile/load-profile";
+import { productionProfileReader } from "@/backend/integrations/profile/profile-adapter";
+import { AppShell } from "@/app/_components/app-shell";
+import { PageHeader } from "@/frontend/components/layout";
 import { ProfilePanel } from "@/frontend/components/profile-panel";
 import { getBranding } from "@/shared/branding";
 
 export const dynamic = "force-dynamic";
 
-export default function ProfilePage() {
+export default async function ProfilePage() {
   const branding = getBranding();
+  const model = await loadProfileViewModel(productionProfileReader);
   const turnstileEnabled = process.env.TURNSTILE_ENABLED === "true";
   const turnstileSiteKey = process.env.TURNSTILE_SITE_KEY;
 
@@ -19,7 +23,7 @@ export default function ProfilePage() {
           title="Профиль"
         />
         <Card>
-          <ProfilePanel turnstileEnabled={turnstileEnabled} turnstileSiteKey={turnstileSiteKey} />
+          <ProfilePanel model={model} turnstileEnabled={turnstileEnabled} turnstileSiteKey={turnstileSiteKey} />
         </Card>
       </div>
     </AppShell>

@@ -6,7 +6,7 @@ import { authDebugLog } from "@/backend/observability/auth-debug-log";
 import { decryptSecret, encryptSecret, sha256, hmacSha256, jsonBase64Url, parseJsonBase64Url, randomToken, safeEqual } from "@/backend/security/crypto";
 import { getEnv } from "@/backend/config/env";
 import { prisma } from "@/backend/database/prisma";
-import { BffError } from "@/backend/integrations/remnashop/errors";
+import { ServiceError } from "@/backend/errors/service-error";
 import { securityPolicy } from "@/backend/security/policy";
 import { auditLog } from "@/backend/observability/audit";
 
@@ -61,7 +61,7 @@ export function assertEmailVerificationPolicy(user: {
   requireVerifiedEmail?: boolean;
 } = {}) {
   if (requireVerifiedEmail && !user.email) {
-    throw new BffError(
+    throw new ServiceError(
       "EMAIL_REQUIRED",
       401,
       "E-mail and password must be linked before continuing",
@@ -69,7 +69,7 @@ export function assertEmailVerificationPolicy(user: {
   }
 
   if (requireVerifiedEmail && !user.emailVerified) {
-    throw new BffError(
+    throw new ServiceError(
       "EMAIL_NOT_VERIFIED",
       403,
       "E-mail must be verified before continuing",
@@ -77,7 +77,7 @@ export function assertEmailVerificationPolicy(user: {
   }
 
   if (!user.emailVerified && !user.telegramId) {
-    throw new BffError(
+    throw new ServiceError(
       "EMAIL_NOT_VERIFIED",
       403,
       "E-mail must be verified before continuing",
@@ -431,6 +431,7 @@ export async function createWebSessionForRemnashopUser({
   remnashopAccessExpiresAt,
   remnashopRefreshExpiresAt,
   tx,
+  authMethod = WebSessionAuthMethod.EMAIL,
   assuranceLevel = WebSessionAssuranceLevel.FULL,
   replaceExistingSessions = false,
 }: {
@@ -440,6 +441,7 @@ export async function createWebSessionForRemnashopUser({
   remnashopAccessExpiresAt: Date;
   remnashopRefreshExpiresAt: Date;
   tx?: Prisma.TransactionClient;
+  authMethod?: WebSessionAuthMethod;
   assuranceLevel?: WebSessionAssuranceLevel;
   replaceExistingSessions?: boolean;
 }) {
@@ -457,7 +459,7 @@ export async function createWebSessionForRemnashopUser({
 
   authDebugLog("session_create_started", {
     userId,
-    authMethod: "EMAIL",
+    authMethod,
     assuranceLevel,
     accessTokenExpiresAt,
     refreshExpiresAt,
@@ -484,7 +486,7 @@ export async function createWebSessionForRemnashopUser({
     );
 
     if (lockedUser.length !== 1 || lockedUser[0]?.id !== userId) {
-      throw new BffError(
+      throw new ServiceError(
         "CONFLICT",
         409,
         "Local account changed while replacing password-reset sessions",
@@ -509,7 +511,7 @@ export async function createWebSessionForRemnashopUser({
       remnashopRefreshTokenEncrypted,
       remnashopAccessExpiresAt,
       remnashopRefreshExpiresAt,
-      authMethod: WebSessionAuthMethod.EMAIL,
+      authMethod,
       assuranceLevel,
       userAgent: requestHeaders.get("user-agent"),
       accessTokenExpiresAt,
@@ -877,7 +879,7 @@ export async function replaceWebSessionAfterPasswordChange({
     );
 
     if (lockedSession.length !== 1 || lockedSession[0]?.id !== sessionId) {
-      throw new BffError("UNAUTHORIZED", 401, "Current session is no longer active");
+      throw new ServiceError("UNAUTHORIZED", 401, "Current session is no longer active");
     }
 
     const currentSession = await tx.webSession.findUnique({
@@ -890,7 +892,7 @@ export async function replaceWebSessionAfterPasswordChange({
       currentSession.userId !== userId ||
       currentSession.revokedAt
     ) {
-      throw new BffError("UNAUTHORIZED", 401, "Current session is no longer active");
+      throw new ServiceError("UNAUTHORIZED", 401, "Current session is no longer active");
     }
 
     const revokedSessions = await tx.webSession.updateMany({
@@ -899,7 +901,7 @@ export async function replaceWebSessionAfterPasswordChange({
     });
 
     if (revokedSessions.count < 1) {
-      throw new BffError("UNAUTHORIZED", 401, "Current session is no longer active");
+      throw new ServiceError("UNAUTHORIZED", 401, "Current session is no longer active");
     }
 
     const newSession = await tx.webSession.create({

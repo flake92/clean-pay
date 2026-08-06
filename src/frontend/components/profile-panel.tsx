@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import type { FormEvent } from "react";
 
 import { Button } from "primereact/button";
@@ -10,25 +10,14 @@ import { Message } from "primereact/message";
 import { Password } from "primereact/password";
 import { Tag } from "primereact/tag";
 
+import {
+  changeProfileEmailAction,
+  changeProfilePasswordAction,
+  requestProfileEmailVerificationAction,
+} from "@/app/actions/profile";
 import { LinkButton } from "@/frontend/components/prime/link-button";
 import { TurnstileWidget, type TurnstileHandle, hasTurnstileSiteKey } from "@/frontend/components/turnstile-widget";
-import { BffClientError, readBffError } from "@/frontend/lib/client-api";
-
-type ProfileUser = {
-  telegram_id: string | number | null;
-  telegramId?: string | null;
-  telegramUsername?: string | null;
-  auth_type: string;
-  email: string | null;
-  is_email_verified: boolean;
-  emailVerified?: boolean;
-  pending_email: string | null;
-  language: string;
-};
-
-async function readError(response: Response, fallback: string) {
-  return readBffError(response, fallback);
-}
+import type { ProfileViewModel } from "@/shared/presentation/profile";
 
 function authTypeLabel(value: string) {
   const labels: Record<string, string> = {
@@ -47,15 +36,16 @@ function missingTurnstileTokenMessage(siteKey?: string | null) {
 }
 
 export function ProfilePanel({
+  model,
   turnstileEnabled = false,
   turnstileSiteKey,
 }: {
+  model: ProfileViewModel;
   turnstileEnabled?: boolean;
   turnstileSiteKey?: string | null;
 }) {
-  const [user, setUser] = useState<ProfileUser | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [email, setEmail] = useState("");
+  const user = model.status === "ready" ? model.user : null;
+  const [email, setEmail] = useState(user?.pendingEmail ?? user?.email ?? "");
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [message, setMessage] = useState<string | null>(null);
@@ -66,7 +56,7 @@ export function ProfilePanel({
   const pendingActionRef = useRef<string | null>(null);
   const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
   const [turnstile, setTurnstile] = useState<TurnstileHandle | null>(null);
-  const currentEmailTarget = user?.pending_email ?? user?.email ?? "";
+  const currentEmailTarget = user?.pendingEmail ?? user?.email ?? "";
 
   function turnstileActionForEmail(candidate: string) {
     return candidate.trim().toLowerCase() === currentEmailTarget.toLowerCase()
@@ -95,45 +85,6 @@ export function ProfilePanel({
     setPendingAction(null);
   }
 
-  async function fetchProfile() {
-    const response = await fetch("/api/bff/auth/me");
-
-    if (!response.ok) {
-      throw await readBffError(response, "Не удалось загрузить профиль.");
-    }
-
-    const body = await response.json().catch(() => null);
-
-    return body.data.user as ProfileUser;
-  }
-
-  const loadProfile = useCallback(async () => {
-    const profile = await fetchProfile();
-
-    setUser(profile);
-    setEmail(profile.pending_email ?? profile.email ?? "");
-  }, []);
-
-  useEffect(() => {
-    let alive = true;
-
-    async function load() {
-      try {
-        await loadProfile();
-      } catch (err) {
-        if (alive) {
-          setError(err instanceof Error ? err.message : "Не удалось загрузить профиль.");
-        }
-      }
-    }
-
-    void load();
-
-    return () => {
-      alive = false;
-    };
-  }, [loadProfile]);
-
   function showMessage(text: string, severity: "success" | "info" | "warn" = "info") {
     setMessage(text);
     setMessageSeverity(severity);
@@ -149,41 +100,11 @@ export function ProfilePanel({
     setTurnstileToken(null);
   }
 
-  function turnstilePayload() {
-    return turnstileToken
-      ? { turnstileToken, "cf-turnstile-response": turnstileToken }
-      : {};
-  }
-
   async function requestVerificationFor(nextTargetEmail: string) {
-    const response = await fetch("/api/bff/auth/email/request-verification", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        ...(nextTargetEmail ? { email: nextTargetEmail } : {}),
-        ...turnstilePayload(),
-      }),
+    return requestProfileEmailVerificationAction({
+      ...(nextTargetEmail ? { email: nextTargetEmail } : {}),
+      ...(turnstileToken ? { turnstileToken } : {}),
     });
-
-    if (!response.ok) {
-      throw await readError(response, "Не удалось отправить код.");
-    }
-
-    const body = await response.json().catch(() => null);
-
-    return body?.data?.target_email ?? nextTargetEmail;
-  }
-
-  function messageFromError(err: unknown, fallback: string) {
-    if (err instanceof BffClientError && err.code === "EMAIL_REQUIRED") {
-      return "Чтобы привязать e-mail к Telegram-аккаунту, используйте раздел «Связать аккаунт».";
-    }
-
-    if (err instanceof BffClientError && err.code === "CONFLICT") {
-      return "Этот e-mail уже используется другим аккаунтом.";
-    }
-
-    return err instanceof Error ? err.message : fallback;
   }
 
   async function changeEmail(event: FormEvent<HTMLFormElement>) {
@@ -206,33 +127,28 @@ export function ProfilePanel({
 
     try {
       if (isSameEmail) {
-        const sentTo = await requestVerificationFor(nextEmail);
-        showMessage(`E-mail уже указан. Код подтверждения отправлен на ${sentTo}.`, "success");
+        const result = await requestVerificationFor(nextEmail);
+        if (!result.ok) {
+          showMessage(result.message, "warn");
+          return;
+        }
+        showMessage(`E-mail уже указан. ${result.message}`, "success");
         window.location.assign("/verify-email");
         return;
       }
 
-      const response = await fetch("/api/bff/auth/email/change", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          email: nextEmail,
-          ...turnstilePayload(),
-        }),
+      const result = await changeProfileEmailAction({
+        email: nextEmail,
+        ...(turnstileToken ? { turnstileToken } : {}),
       });
-
-      if (!response.ok) {
-        throw await readError(response, "Не удалось изменить e-mail.");
+      if (!result.ok) {
+        showMessage(result.message, "warn");
+        return;
       }
-
-      const body = await response.json().catch(() => null);
-      const nextTargetEmail =
-        body?.data?.emailVerification?.target_email ?? body?.data?.pending_email ?? nextEmail;
-      await loadProfile();
-      showMessage(`Новый e-mail сохранен. Код подтверждения отправлен на ${nextTargetEmail}.`, "success");
+      showMessage(result.message, "success");
       window.location.assign("/verify-email");
     } catch (err) {
-      showMessage(messageFromError(err, "Не удалось изменить e-mail."), "warn");
+      showMessage(err instanceof Error ? err.message : "Не удалось изменить e-mail.", "warn");
     } finally {
       resetTurnstile();
       finishPendingAction("email");
@@ -250,22 +166,18 @@ export function ProfilePanel({
     setPasswordMessage(null);
 
     try {
-      const response = await fetch("/api/bff/auth/change-password", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          current_password: currentPassword,
-          new_password: newPassword,
-        }),
+      const result = await changeProfilePasswordAction({
+        currentPassword,
+        newPassword,
       });
-
-      if (!response.ok) {
-        throw await readError(response, "Не удалось изменить пароль.");
+      if (!result.ok) {
+        showPasswordMessage(result.message, "warn");
+        return;
       }
 
       setCurrentPassword("");
       setNewPassword("");
-      showPasswordMessage("Пароль изменен.", "success");
+      showPasswordMessage(result.message, "success");
     } catch (err) {
       showPasswordMessage(err instanceof Error ? err.message : "Не удалось изменить пароль.", "warn");
     } finally {
@@ -273,22 +185,19 @@ export function ProfilePanel({
     }
   }
 
-  if (error) {
+  if (model.status === "error") {
     return (
       <div className="flex flex-column gap-4">
-        <Message severity="error" text={error} />
+        <Message severity="error" text={model.message} />
         <LinkButton className="w-fit" href="/login" label="Войти" />
       </div>
     );
   }
 
-  if (!user) {
-    return <Message severity="info" text="Загрузка профиля..." />;
-  }
-
-  const telegramId = user.telegramId ?? user.telegram_id;
+  if (!user) return null;
+  const telegramId = user.telegramId;
   const hasEmail = Boolean(user.email);
-  const isEmailVerified = hasEmail && Boolean(user.emailVerified ?? user.is_email_verified);
+  const isEmailVerified = hasEmail && user.emailVerified;
   const isTelegramOnly = Boolean(telegramId) && !user.email;
   const canManageRemnashopEmail = Boolean(user.email);
   const canChangePassword = hasEmail;
@@ -300,7 +209,7 @@ export function ProfilePanel({
         <div className="grid">
           {[
             ["E-mail", user.email ?? "Не привязан"],
-            ["Тип входа", authTypeLabel(user.auth_type)],
+            ["Тип входа", authTypeLabel(user.authType)],
             ["Telegram", telegramId ?? "Не привязан"],
           ].map(([label, value]) => (
             <div className="col-12 md:col-6" key={label}>

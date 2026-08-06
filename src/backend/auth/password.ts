@@ -1,5 +1,5 @@
 import { prisma } from "@/backend/database/prisma";
-import { BffError } from "@/backend/integrations/remnashop/errors";
+import { ServiceError } from "@/backend/errors/service-error";
 import {
   getAuthorizedRemnashopTokens,
   getJwtExpiresAt,
@@ -51,7 +51,7 @@ export async function changePassword(body: ChangePasswordRequest) {
   try {
     result = await remnashopChangePassword(accessToken, body);
   } catch (error) {
-    if (!(error instanceof BffError) || error.code !== "CURRENT_PASSWORD_INVALID") {
+    if (!(error instanceof ServiceError) || error.code !== "CURRENT_PASSWORD_INVALID") {
       throw error;
     }
 
