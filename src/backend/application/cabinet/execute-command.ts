@@ -1,4 +1,5 @@
 import type { CabinetCommands } from "@/backend/application/cabinet/ports/cabinet-commands";
+import { ServiceError } from "@/backend/errors/service-error";
 import type { CabinetCommandResult } from "@/shared/presentation/cabinet-actions";
 
 function printable(value: string, maxLength: number) {
@@ -8,14 +9,21 @@ function printable(value: string, maxLength: number) {
     : null;
 }
 
+function errorMessage(error: unknown, fallback: string): string {
+  if (error instanceof ServiceError) {
+    return error.prodMessage;
+  }
+  return fallback;
+}
+
 export async function deleteCabinetDevice(commands: CabinetCommands, hwid: string): Promise<CabinetCommandResult> {
   const validHwid = printable(hwid, 512);
   if (!validHwid) return { status: "error", message: "Некорректный идентификатор устройства." };
   try {
     await commands.deleteDevice(validHwid);
     return { status: "success", message: "Устройство удалено." };
-  } catch {
-    return { status: "error", message: "Не удалось удалить устройство." };
+  } catch (error) {
+    return { status: "error", message: errorMessage(error, "Не удалось удалить устройство.") };
   }
 }
 
@@ -23,8 +31,8 @@ export async function deleteAllCabinetDevices(commands: CabinetCommands): Promis
   try {
     await commands.deleteAllDevices();
     return { status: "success", message: "Все устройства удалены." };
-  } catch {
-    return { status: "error", message: "Не удалось удалить устройства." };
+  } catch (error) {
+    return { status: "error", message: errorMessage(error, "Не удалось удалить устройства.") };
   }
 }
 
@@ -32,8 +40,8 @@ export async function reissueCabinetSubscription(commands: CabinetCommands): Pro
   try {
     await commands.reissueSubscription();
     return { status: "success", message: "Подписка перевыпущена. Ссылка обновлена." };
-  } catch {
-    return { status: "error", message: "Не удалось перевыпустить подписку." };
+  } catch (error) {
+    return { status: "error", message: errorMessage(error, "Не удалось перевыпустить подписку.") };
   }
 }
 
@@ -43,7 +51,7 @@ export async function activateCabinetPromocode(commands: CabinetCommands, code: 
   try {
     await commands.activatePromocode(validCode);
     return { status: "success", message: "Промокод активирован. Данные кабинета обновлены." };
-  } catch {
-    return { status: "error", message: "Не удалось активировать промокод." };
+  } catch (error) {
+    return { status: "error", message: errorMessage(error, "Не удалось активировать промокод.") };
   }
 }
