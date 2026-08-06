@@ -1327,9 +1327,18 @@ export async function recoverRemnashopTelegramSession(
 
     return recovered;
   } catch (error) {
-    await prisma.webSession.deleteMany({
-      where: { id: sessionId, userId },
-    });
+    const isTerminal = error instanceof ServiceError && (
+      error.code === "ACCOUNT_MERGE_REQUIRED" ||
+      error.code === "ACCOUNT_MERGE_SUBSCRIPTIONS_CONFLICT"
+    );
+
+    if (isTerminal) {
+      await prisma.webSession.updateMany({
+        where: { id: sessionId, userId, revokedAt: null },
+        data: { revokedAt: new Date() },
+      });
+    }
+
     throw error;
   }
 }
