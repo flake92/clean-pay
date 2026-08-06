@@ -398,6 +398,17 @@ export async function confirmTelegramAccountMerge(token: string) {
     return { merged: true, userId: session.userId };
   }
 
+  if (
+    confirmation.status === AccountMergeConfirmationStatus.FAILED ||
+    confirmation.expiresAt <= now
+  ) {
+    throw new ServiceError(
+      "ACCOUNT_MERGE_REQUIRED",
+      409,
+      "Предыдущее объединение не удалось или истекло. Начните привязку Telegram заново.",
+    );
+  }
+
   const claimed = await prisma.$transaction(async (tx) => {
     await tx.$queryRaw<Array<{ id: string }>>`
       SELECT "id"
@@ -575,12 +586,23 @@ export async function confirmTelegramAccountMerge(token: string) {
         "Account merge confirmation changed before completion.",
       );
     }
-    await refreshCurrentAccessCookie();
-    await auditLog({
-      action: "telegram_account_merge_succeeded",
-      userId: linked.user.id,
-      metadata: { confirmationId: confirmation.id },
-    });
+
+    try {
+      await refreshCurrentAccessCookie();
+    } catch {
+      // Post-merge cookie refresh failure must not mask a successful merge.
+      // The user already has a valid session; the next request will refresh.
+    }
+
+    try {
+      await auditLog({
+        action: "telegram_account_merge_succeeded",
+        userId: linked.user.id,
+        metadata: { confirmationId: confirmation.id },
+      });
+    } catch {
+      // Audit log failure must not mask a successful merge.
+    }
 
         return { merged: true, userId: linked.user.id };
       },
