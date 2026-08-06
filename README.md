@@ -225,6 +225,35 @@ Passkey options обязательно содержат `allowCredentials` вы�
 
 Перед обновлением Remnashop сделайте резервную копию его базы данных и убедитесь, что HTTP-сервис, worker и scheduler используют одну версию образа. Readiness Clean Pay выполняет безопасную проверку generic e-mail auth и закрытого `/auth/service-session` без отправки письма: старый образ, отсутствующий маршрут или неверный service key переводят стенд в `degraded`, поэтому `./deploy.sh up` не завершится успешно.
 
+### Отключение payment rollout gate
+
+Миграция 0049 в Remnashop создаёт таблицу `payment_runtime_control` с флагом `legacy_rollout_gate_active`. Этот gate блокирует объединение учётных записей (merge) как защиту при развёртывании платёжной системы. После развёртывания Remnashop gate должен быть отключён, иначе привязка Telegram к существующему e-mail аккаунту будет завершаться ошибкой.
+
+Отключение выполняется **один раз** после развёртывания или обновления Remnashop:
+
+```bash
+# 1. Проверить что все контейнеры Remnashop используют один образ
+docker inspect remnashop --format '{{.Image}}'
+docker inspect remnashop-taskiq-worker --format '{{.Image}}'
+docker inspect remnashop-taskiq-scheduler --format '{{.Image}}'
+
+# 2. Проверить revision миграции
+docker exec remnashop-db psql -U remnashop -d remnashop \
+  -c "SELECT version_num FROM alembic_version;"
+# Ожидается: 0050
+
+# 3. Проверить отсутствие активных платёжных операций
+docker exec remnashop-db psql -U remnashop -d remnashop \
+  -c "SELECT count(*) FROM payment_operations;"
+# Ожидается: 0
+
+# 4. Отключить gate
+docker exec remnashop-db psql -U remnashop -d remnashop \
+  -c "UPDATE payment_runtime_control SET legacy_rollout_gate_active = false WHERE id = 1;"
+```
+
+Если хотя бы одна проверка не пройдена, отключать gate нельзя — сначала завершите развёртывание. Штатная процедура с автоматическими проверками находится в `scripts/e2e-devcontainer.sh` (функция `prepare_remnashop_payment_rollout_gate`).
+
 ## Reverse proxy
 
 Если reverse proxy работает на хосте, направьте его на `127.0.0.1:4000`. Если proxy подключён к `CLEAN_PAY_EDGE_NETWORK`, используйте Docker alias `clean-pay:4000`.
