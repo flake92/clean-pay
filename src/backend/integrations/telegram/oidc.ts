@@ -14,7 +14,7 @@ import { assertRateLimit } from "@/backend/limits/rate-limit";
 import { claimTelegramAuthState as claimTelegramAuthStateRecord } from "@/backend/auth/one-time-state";
 import { stageTelegramAccountMerge } from "@/backend/auth/telegram-account-merge";
 import { remnashopAuth } from "@/backend/integrations/remnashop/client";
-import { BffError } from "@/backend/integrations/remnashop/errors";
+import { ServiceError } from "@/backend/errors/service-error";
 import { getCurrentSession } from "@/backend/sessions/web-session";
 import {
   assertUserMergeFinalOwner,
@@ -695,7 +695,7 @@ async function assertTelegramLinkSession(
     clearTemporaryTelegramAuthCookies(cookieStore);
   }
 
-  throw new BffError(
+  throw new ServiceError(
     "UNAUTHORIZED",
     401,
     "Telegram account linking session is no longer active",
@@ -764,7 +764,7 @@ async function completeTelegramAuth(
     : null;
 
   if (targetUserId && targetLinkUser && !remnashopAuthResult) {
-    throw new BffError(
+    throw new ServiceError(
       "UPSTREAM_UNAVAILABLE",
       503,
       "Remnashop Telegram verification is unavailable; no account data was changed.",

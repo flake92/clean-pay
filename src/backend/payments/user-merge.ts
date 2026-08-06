@@ -1,7 +1,7 @@
 import { Prisma } from "@prisma/client";
 
 import { prisma } from "@/backend/database/prisma";
-import { BffError } from "@/backend/integrations/remnashop/errors";
+import { ServiceError } from "@/backend/errors/service-error";
 import { paymentUpstreamOwnerHash } from "@/backend/payments/hashes";
 import { sha256 } from "@/backend/security/crypto";
 
@@ -171,7 +171,7 @@ function normalizedMergeUserIds(
 }
 
 function paymentMergeRequired(message: string): never {
-  throw new BffError("ACCOUNT_MERGE_REQUIRED", 409, message);
+  throw new ServiceError("ACCOUNT_MERGE_REQUIRED", 409, message);
 }
 
 /**

@@ -1,7 +1,7 @@
 import { Prisma, type PaymentOperationKind } from "@prisma/client";
 
 import { prisma } from "@/backend/database/prisma";
-import { BffError } from "@/backend/integrations/remnashop/errors";
+import { ServiceError } from "@/backend/errors/service-error";
 import {
   reconcilePaymentOperation,
   reconcilePaymentOperationAsAdmin,
@@ -65,7 +65,7 @@ function reconciliationDelayMs(failureCount: number) {
 }
 
 function safeFailureSnapshot(error: unknown): Prisma.InputJsonObject {
-  if (error instanceof BffError) {
+  if (error instanceof ServiceError) {
     return { code: error.code, status: error.status };
   }
 
@@ -205,7 +205,7 @@ export async function completeReconciledPayment(
     recovery.payment === null ||
     recovery.transaction === null
   ) {
-    throw new BffError(
+    throw new ServiceError(
       "INTERNAL_ERROR",
       500,
       "Only a successful recovery can complete a payment operation",
@@ -239,7 +239,7 @@ export async function completeReconciledPayment(
       !operation.reconcileLeaseExpiresAt ||
       operation.reconcileLeaseExpiresAt <= now
     ) {
-      throw new BffError(
+      throw new ServiceError(
         "CONFLICT",
         409,
         "Payment reconciliation was fenced by another completion",
@@ -269,7 +269,7 @@ export async function completeReconciledPayment(
         planCode: planCodeFromPayload(operation.requestPayload),
       });
     } catch (error) {
-      if (error instanceof BffError && error.code === "CONFLICT") {
+      if (error instanceof ServiceError && error.code === "CONFLICT") {
         throw new PaymentReconciliationManualError(
           "PAYMENT_RECORD_OWNER_OR_ID_COLLISION",
         );
@@ -304,7 +304,7 @@ export async function completeReconciledPayment(
     });
 
     if (transitioned.count !== 1) {
-      throw new BffError(
+      throw new ServiceError(
         "CONFLICT",
         409,
         "Payment reconciliation lost its completion race",
@@ -344,7 +344,7 @@ async function releaseReconciliationClaim(
           claim.upstreamOwnerHash,
         )
       ) {
-        throw new BffError(
+        throw new ServiceError(
           "CONFLICT",
           409,
           "Payment owner mismatch was not proven while releasing reconciliation",
@@ -387,7 +387,7 @@ async function releaseReconciliationClaim(
     });
 
     if (released.count !== 1) {
-      throw new BffError(
+      throw new ServiceError(
         "CONFLICT",
         409,
         "Payment reconciliation release was fenced by another worker",
@@ -471,7 +471,7 @@ async function resetMissingUpstreamOperation(
     });
 
     if (reset.count !== 1) {
-      throw new BffError(
+      throw new ServiceError(
         "CONFLICT",
         409,
         "Payment reconciliation reset was fenced by another worker",
@@ -578,7 +578,7 @@ export async function processPaymentReconciliationClaim(
       await failPaymentReconciliation(claim, error);
     } catch (releaseError) {
       if (
-        releaseError instanceof BffError &&
+        releaseError instanceof ServiceError &&
         releaseError.code === "ACCOUNT_MERGE_REQUIRED"
       ) {
         await markPaymentReconciliationManual(
@@ -602,7 +602,7 @@ export async function processPaymentReconciliationClaim(
         await markPaymentReconciliationManual(claim, error.reason);
       } catch (manualError) {
         if (
-          manualError instanceof BffError &&
+          manualError instanceof ServiceError &&
           manualError.code === "ACCOUNT_MERGE_REQUIRED"
         ) {
           await markPaymentReconciliationManual(
@@ -617,7 +617,7 @@ export async function processPaymentReconciliationClaim(
       return "MANUAL_REQUIRED" as const;
     }
 
-    if (error instanceof BffError && error.code === "ACCOUNT_MERGE_REQUIRED") {
+    if (error instanceof ServiceError && error.code === "ACCOUNT_MERGE_REQUIRED") {
       await markPaymentReconciliationManual(
         claim,
         "UPSTREAM_OWNER_CHANGED_DURING_SETTLEMENT",
@@ -630,7 +630,7 @@ export async function processPaymentReconciliationClaim(
       await failPaymentReconciliation(claim, error);
     } catch (releaseError) {
       if (
-        releaseError instanceof BffError &&
+        releaseError instanceof ServiceError &&
         releaseError.code === "ACCOUNT_MERGE_REQUIRED"
       ) {
         await markPaymentReconciliationManual(
@@ -654,7 +654,7 @@ export async function reconcileUnknownPayments(input: {
   deadlineMs?: number;
 }) {
   if (!Number.isSafeInteger(input.limit) || input.limit < 1 || input.limit > 100) {
-    throw new BffError(
+    throw new ServiceError(
       "VALIDATION_ERROR",
       400,
       "Reconciliation limit must be between 1 and 100",
@@ -668,7 +668,7 @@ export async function reconcileUnknownPayments(input: {
     deadlineMs < 1_000 ||
     deadlineMs > 30_000
   ) {
-    throw new BffError(
+    throw new ServiceError(
       "VALIDATION_ERROR",
       400,
       "Reconciliation deadline must be between 1000 and 30000 milliseconds",

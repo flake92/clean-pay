@@ -1,24 +1,18 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 
 import { AccountActionRequired } from "@/frontend/components/account-action-required";
 import { LinkButton } from "@/frontend/components/prime/link-button";
-import { BffClientError, readBffError } from "@/frontend/lib/client-api";
 import type {
   DurationGatewayPrice,
   PlanOffer,
-  SubscriptionOffersResponse,
 } from "@/shared/remnashop/types";
+import type { TariffsViewModel } from "@/shared/presentation/tariffs";
 import { Card } from "primereact/card";
 import { Dropdown } from "primereact/dropdown";
 import { Message } from "primereact/message";
 import { Tag } from "primereact/tag";
-
-type LoadState =
-  | { status: "loading" }
-  | { status: "error"; message: string; action?: "login" | "linkEmail" }
-  | { status: "ready"; offers: SubscriptionOffersResponse };
 
 type PriceOption = {
   amount: string;
@@ -182,51 +176,15 @@ function bestPrice(plan: PlanOffer) {
   }, null);
 }
 
-export function TariffsPanel() {
-  const [state, setState] = useState<LoadState>({ status: "loading" });
+export function TariffsPanel({ model }: { model: TariffsViewModel }) {
   const [selection, setSelection] = useState<Record<string, string>>({});
 
-  useEffect(() => {
-    fetch("/api/bff/subscription/offers")
-      .then(async (response) => {
-        if (!response.ok) {
-          throw await readBffError(
-            response,
-            response.status === 401 ? "Нужно войти в аккаунт." : "Не удалось загрузить тарифы.",
-          );
-        }
-
-        const body = await response.json().catch(() => null);
-
-        return body.data as SubscriptionOffersResponse;
-      })
-      .then((offers) => setState({ status: "ready", offers }))
-      .catch((error: Error) =>
-        setState({
-          status: "error",
-          message: error.message,
-          action:
-            error instanceof BffClientError &&
-            (error.code === "EMAIL_REQUIRED" ||
-              error.code === "EMAIL_NOT_VERIFIED")
-              ? "linkEmail"
-              : error instanceof BffClientError && error.status === 401
-                ? "login"
-                : undefined,
-        }),
-      );
-  }, []);
-
-  if (state.status === "loading") {
-    return <Message severity="info" text="Загрузка тарифов..." />;
-  }
-
-  if (state.status === "error") {
-    if (state.action) {
+  if (model.status === "error") {
+    if (model.action) {
       return (
         <AccountActionRequired
-          action={state.action}
-          message={state.message}
+          action={model.action}
+          message={model.message}
           redirectTo="/tariffs"
         />
       );
@@ -234,16 +192,16 @@ export function TariffsPanel() {
 
     return (
       <div className="flex flex-column gap-4">
-        <Message severity="error" text={state.message} />
+        <Message severity="error" text={model.message} />
       </div>
     );
   }
 
-  if (state.offers.plans.length === 0) {
+  if (model.offers.plans.length === 0) {
     return <Message severity="info" text="Доступных тарифов пока нет." />;
   }
 
-  const hasCurrentSubscription = state.offers.has_current_subscription;
+  const hasCurrentSubscription = model.offers.has_current_subscription;
 
   return (
     <div className="flex flex-column gap-4">
@@ -254,7 +212,7 @@ export function TariffsPanel() {
         />
       ) : null}
       <div className="grid">
-        {state.offers.plans.map((plan) => {
+        {model.offers.plans.map((plan) => {
           const priceOptions = buildPriceOptions(plan);
           const defaultSelected = priceOptions[0]?.value ?? "";
           const selected = selection[plan.public_code] ?? defaultSelected;

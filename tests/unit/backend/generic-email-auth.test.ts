@@ -27,7 +27,7 @@ vi.mock("@/backend/integrations/remnashop/session", () => ({
 vi.mock("@/backend/observability/audit", () => ({ auditLog: mocks.auditLog }));
 
 import { completeGenericEmailAuth, startGenericEmailAuth } from "@/backend/auth/generic-email";
-import { BffError } from "@/backend/integrations/remnashop/errors";
+import { ServiceError } from "@/backend/errors/service-error";
 
 describe("generic email authentication", () => {
   beforeEach(() => {
@@ -53,7 +53,7 @@ describe("generic email authentication", () => {
 
   it("fails closed without a provider call when Redis protection is unavailable", async () => {
     mocks.assertRateLimit.mockRejectedValueOnce(
-      new BffError("UPSTREAM_UNAVAILABLE", 503, "redis unavailable"),
+      new ServiceError("UPSTREAM_UNAVAILABLE", 503, "redis unavailable"),
     );
 
     await expect(startGenericEmailAuth({ email: "user@example.com" }, "token")).rejects.toMatchObject({

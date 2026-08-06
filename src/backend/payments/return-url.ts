@@ -1,5 +1,5 @@
 import { getEnv } from "@/backend/config/env";
-import { BffError } from "@/backend/integrations/remnashop/errors";
+import { ServiceError } from "@/backend/errors/service-error";
 
 export function paymentReturnUrl(operationId: string) {
   const url = new URL(getEnv().paymentReturnUrls.pending);
@@ -18,7 +18,7 @@ export function assertPaymentReturnUrl(expected: string, actual: unknown) {
   }
 
   if (actual !== expected) {
-    throw new BffError(
+    throw new ServiceError(
       "UPSTREAM_ERROR",
       502,
       "Remnashop did not confirm the requested payment return URL",

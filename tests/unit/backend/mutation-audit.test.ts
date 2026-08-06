@@ -4,7 +4,7 @@ const mocks = vi.hoisted(() => ({ auditLog: vi.fn() }));
 
 vi.mock("@/backend/observability/audit", () => ({ auditLog: mocks.auditLog }));
 
-import { BffError } from "@/backend/integrations/remnashop/errors";
+import { ServiceError } from "@/backend/errors/service-error";
 import { auditedMutation } from "@/backend/observability/mutation-audit";
 
 describe("audited mutation lifecycle", () => {
@@ -36,7 +36,7 @@ describe("audited mutation lifecycle", () => {
   });
 
   it("writes failed with a bounded error classification and never writes success", async () => {
-    const error = new BffError("UPSTREAM_UNAVAILABLE", 502, "secret upstream details");
+    const error = new ServiceError("UPSTREAM_UNAVAILABLE", 502, "secret upstream details");
 
     await expect(
       auditedMutation({

@@ -11,7 +11,7 @@ import {
   remnashopMergeUsers,
   remnashopRequest,
 } from "@/backend/integrations/remnashop/client";
-import { BffError } from "@/backend/integrations/remnashop/errors";
+import { ServiceError } from "@/backend/errors/service-error";
 import { linkCurrentUserToRemnashopAuth } from "@/backend/integrations/remnashop/session";
 import { assertRateLimit } from "@/backend/limits/rate-limit";
 import { auditLog } from "@/backend/observability/audit";
@@ -80,7 +80,7 @@ function isTransientPaymentConflict(conflict: string) {
 }
 
 function mergeRequired(message: string, conflicts?: string[]) {
-  return new BffError("ACCOUNT_MERGE_REQUIRED", 409, message, {
+  return new ServiceError("ACCOUNT_MERGE_REQUIRED", 409, message, {
     message,
     cause: conflicts,
   });
@@ -107,7 +107,7 @@ async function mergePreflight({
 
   if (result.conflicts.length > 0) {
     if (hasSubscriptionConflict(result.conflicts)) {
-      throw new BffError(
+      throw new ServiceError(
         "ACCOUNT_MERGE_SUBSCRIPTIONS_CONFLICT",
         409,
         "У обеих учётных записей есть активные подписки. Объединение остановлено; обратитесь в службу поддержки.",
@@ -126,7 +126,7 @@ async function mergePreflight({
     }
 
     if (!allowTransientPaymentWork) {
-      throw new BffError(
+      throw new ServiceError(
         "ACCOUNT_MERGE_IN_PROGRESS",
         409,
         "Платёж ещё обрабатывается. Дождитесь завершения и повторите объединение — данные не изменены.",
@@ -251,7 +251,7 @@ export async function stageTelegramAccountMerge({
     `;
 
     if (activeProcessing.length > 0) {
-      throw new BffError(
+      throw new ServiceError(
         "CONFLICT",
         409,
         "Another account merge is already being processed.",
@@ -305,11 +305,11 @@ async function confirmationForCurrentSession(token: string) {
   const session = await getCurrentSession();
 
   if (!session) {
-    throw new BffError("UNAUTHORIZED", 401, "Login is required.");
+    throw new ServiceError("UNAUTHORIZED", 401, "Login is required.");
   }
 
   if (session.assuranceLevel === WebSessionAssuranceLevel.BOOTSTRAP) {
-    throw new BffError("PASSKEY_REQUIRED", 403, "Create a passkey to continue");
+    throw new ServiceError("PASSKEY_REQUIRED", 403, "Create a passkey to continue");
   }
 
   const confirmation = await prisma.accountMergeConfirmation.findFirst({
@@ -320,7 +320,7 @@ async function confirmationForCurrentSession(token: string) {
   });
 
   if (!confirmation) {
-    throw new BffError("NOT_FOUND", 404, "Account merge confirmation was not found.");
+    throw new ServiceError("NOT_FOUND", 404, "Account merge confirmation was not found.");
   }
 
   return { confirmation, session };
@@ -333,7 +333,7 @@ export async function getTelegramAccountMergeConfirmation(token: string) {
     confirmation.expiresAt <= new Date() ||
     confirmation.status === AccountMergeConfirmationStatus.FAILED
   ) {
-    throw new BffError("NOT_FOUND", 404, "Account merge confirmation has expired.");
+    throw new ServiceError("NOT_FOUND", 404, "Account merge confirmation has expired.");
   }
 
   return {
@@ -363,7 +363,7 @@ export async function cancelTelegramAccountMerge(token: string) {
   });
 
   if (cancelled.count !== 1) {
-    throw new BffError(
+    throw new ServiceError(
       "CONFLICT",
       409,
       "Account merge can no longer be cancelled.",
@@ -439,7 +439,7 @@ export async function confirmTelegramAccountMerge(token: string) {
         retryable: true,
       },
     });
-    throw new BffError("CONFLICT", 409, "Account merge is already being processed.");
+    throw new ServiceError("CONFLICT", 409, "Account merge is already being processed.");
   }
 
   try {
@@ -569,7 +569,7 @@ export async function confirmTelegramAccountMerge(token: string) {
       },
     });
     if (completed.count !== 1) {
-      throw new BffError(
+      throw new ServiceError(
         "INTERNAL_ERROR",
         500,
         "Account merge confirmation changed before completion.",
@@ -586,7 +586,7 @@ export async function confirmTelegramAccountMerge(token: string) {
       },
     });
   } catch (error) {
-    const terminal = error instanceof BffError && (
+    const terminal = error instanceof ServiceError && (
       error.code === "ACCOUNT_MERGE_REQUIRED" ||
       error.code === "ACCOUNT_MERGE_SUBSCRIPTIONS_CONFLICT"
     );
@@ -601,7 +601,7 @@ export async function confirmTelegramAccountMerge(token: string) {
           ? AccountMergeConfirmationStatus.FAILED
           : AccountMergeConfirmationStatus.PENDING,
         leaseExpiresAt: null,
-        lastErrorCode: error instanceof BffError ? error.code : "INTERNAL_ERROR",
+        lastErrorCode: error instanceof ServiceError ? error.code : "INTERNAL_ERROR",
       },
     });
     await auditLog({
@@ -610,7 +610,7 @@ export async function confirmTelegramAccountMerge(token: string) {
       severity: "WARN",
       metadata: {
         confirmationId: confirmation.id,
-        errorCode: error instanceof BffError ? error.code : "INTERNAL_ERROR",
+        errorCode: error instanceof ServiceError ? error.code : "INTERNAL_ERROR",
         retryable: !terminal,
       },
     });

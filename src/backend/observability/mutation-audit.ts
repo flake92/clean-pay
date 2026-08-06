@@ -1,4 +1,4 @@
-import { BffError } from "@/backend/integrations/remnashop/errors";
+import { ServiceError } from "@/backend/errors/service-error";
 import { auditLog } from "@/backend/observability/audit";
 
 type MutationAuditInput<T> = {
@@ -9,7 +9,7 @@ type MutationAuditInput<T> = {
 };
 
 function failureMetadata(error: unknown) {
-  if (error instanceof BffError) {
+  if (error instanceof ServiceError) {
     return {
       errorCode: error.code,
       errorStatus: error.status,

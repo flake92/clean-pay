@@ -14,8 +14,8 @@ import {
   remnashopLinkTelegram,
   remnashopMergeUsers,
 } from "@/backend/integrations/remnashop/client";
-import { BffError } from "@/backend/integrations/remnashop/errors";
-import { readBffJsonObject } from "@/backend/http/request-body";
+import { ServiceError } from "@/backend/errors/service-error";
+import { readTelegramPopupRequest } from "@/backend/integrations/telegram/popup-request";
 import {
   createWebSessionOnResponse,
   getCurrentSession,
@@ -57,9 +57,9 @@ async function redirectAfterTelegramFailure(error?: unknown) {
   }
 
   const reason =
-    error instanceof BffError && error.code === "ACCOUNT_MERGE_SUBSCRIPTIONS_CONFLICT"
+    error instanceof ServiceError && error.code === "ACCOUNT_MERGE_SUBSCRIPTIONS_CONFLICT"
       ? "telegram_merge_subscriptions"
-      : error instanceof BffError && error.code === "ACCOUNT_MERGE_REQUIRED"
+      : error instanceof ServiceError && error.code === "ACCOUNT_MERGE_REQUIRED"
         ? "telegram_merge_required"
       : "telegram_failed";
 
@@ -125,7 +125,7 @@ async function linkTelegramToCurrentRemnashopAccount({
 
 function isBothSubscriptionsMergeConflict(error: unknown) {
   return (
-    error instanceof BffError &&
+    error instanceof ServiceError &&
     error.code === "CONFLICT" &&
     String(error.debug?.message ?? error.message).toLowerCase().includes("both users have current subscriptions")
   );
@@ -139,7 +139,7 @@ async function mergeCurrentRemnashopAccountIntoTelegramAccount({
   currentRemnashopUserId: string | null;
 }) {
   if (!currentRemnashopUserId) {
-    throw new BffError(
+    throw new ServiceError(
       "ACCOUNT_MERGE_REQUIRED",
       409,
       "Current Clean Pay account is not linked to Remnashop.",
@@ -161,7 +161,7 @@ async function mergeCurrentRemnashopAccountIntoTelegramAccount({
     });
   } catch (error) {
     if (isBothSubscriptionsMergeConflict(error)) {
-      throw new BffError(
+      throw new ServiceError(
         "ACCOUNT_MERGE_REQUIRED",
         409,
         "У обеих учетных записей есть активные подписки. Объединение нужно выполнить через поддержку.",
@@ -358,17 +358,7 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   try {
-    const body = await readBffJsonObject(request) as {
-      authData?: unknown;
-      idToken?: unknown;
-    } | null;
-    const idToken = typeof body?.idToken === "string" ? body.idToken : null;
-    const authData = body?.authData;
-
-    if (!idToken && (!authData || typeof authData !== "object")) {
-      logTechnicalWarning("telegram_popup_callback_missing_token", {});
-      return NextResponse.json({ error: "telegram_failed" }, { status: 400 });
-    }
+    const popupRequest = await readTelegramPopupRequest(request);
 
     const {
       user,
@@ -378,9 +368,11 @@ export async function POST(request: Request) {
       telegramId,
       telegramUsername,
       mergeConfirmation,
-    } = idToken
-      ? await consumeTelegramPopupToken(idToken)
-      : await consumeTelegramLoginWidgetPayload(authData as Parameters<typeof consumeTelegramLoginWidgetPayload>[0]);
+    } = popupRequest.method === "oidc"
+      ? await consumeTelegramPopupToken(popupRequest.idToken)
+      : await consumeTelegramLoginWidgetPayload(
+          popupRequest.authData as Parameters<typeof consumeTelegramLoginWidgetPayload>[0],
+        );
     const redirectPath = mergeConfirmation?.required
       ? "/link-account?auth=telegram_email_replace"
       : nextPath ?? "/cabinet";
@@ -410,7 +402,7 @@ export async function POST(request: Request) {
     return response;
   } catch (error) {
     logTechnicalError("telegram_popup_callback_failed", error, {});
-    if (error instanceof BffError && error.status === 413) {
+    if (error instanceof ServiceError && error.status === 413) {
       return NextResponse.json({ error: "payload_too_large" }, { status: 413 });
     }
     if (error instanceof TelegramAuthStateAlreadyConsumedError) {

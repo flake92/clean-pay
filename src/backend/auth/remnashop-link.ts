@@ -10,7 +10,7 @@ import {
   remnashopLinkTelegram,
   remnashopMergeUsers,
 } from "@/backend/integrations/remnashop/client";
-import { BffError } from "@/backend/integrations/remnashop/errors";
+import { ServiceError } from "@/backend/errors/service-error";
 import { linkCurrentUserToRemnashopAuth } from "@/backend/integrations/remnashop/session";
 import { assertRateLimit } from "@/backend/limits/rate-limit";
 import { auditLog } from "@/backend/observability/audit";
@@ -22,7 +22,7 @@ import { withPaymentOwnerChangeFence } from "@/backend/payments/user-merge";
 
 function isEmailAlreadyExistsConflict(error: unknown) {
   return (
-    error instanceof BffError &&
+    error instanceof ServiceError &&
     error.code === "CONFLICT" &&
     String(error.debug?.message ?? error.message).toLowerCase().includes("email already exists")
   );
@@ -30,18 +30,18 @@ function isEmailAlreadyExistsConflict(error: unknown) {
 
 function isEmailAlreadyVerifiedConflict(error: unknown) {
   return (
-    error instanceof BffError &&
+    error instanceof ServiceError &&
     error.code === "CONFLICT" &&
     String(error.debug?.message ?? error.message).toLowerCase().includes("email is already verified")
   );
 }
 
 function isTelegramAlreadyLinkedConflict(error: unknown) {
-  return error instanceof BffError && error.code === "CONFLICT";
+  return error instanceof ServiceError && error.code === "CONFLICT";
 }
 
 function accountMergeRequiredError(message = "Telegram account is already attached to a different Remnashop account.") {
-  return new BffError(
+  return new ServiceError(
     "ACCOUNT_MERGE_REQUIRED",
     409,
     message,
@@ -59,7 +59,7 @@ function mergeSubscriptionsConflictError() {
 
 function isBothSubscriptionsMergeConflict(error: unknown) {
   return (
-    error instanceof BffError &&
+    error instanceof ServiceError &&
     error.code === "CONFLICT" &&
     String(error.debug?.message ?? error.message).toLowerCase().includes("both users have current subscriptions")
   );
@@ -231,11 +231,11 @@ export async function linkRemnashopAccount(body: LoginRequest) {
   const session = await getCurrentSession();
 
   if (!session) {
-    throw new BffError("UNAUTHORIZED", 401, "Login is required.");
+    throw new ServiceError("UNAUTHORIZED", 401, "Login is required.");
   }
 
   if (session.assuranceLevel === WebSessionAssuranceLevel.BOOTSTRAP) {
-    throw new BffError("PASSKEY_REQUIRED", 403, "Create a passkey to continue");
+    throw new ServiceError("PASSKEY_REQUIRED", 403, "Create a passkey to continue");
   }
 
   await assertRateLimit({
@@ -249,7 +249,7 @@ export async function linkRemnashopAccount(body: LoginRequest) {
   let auth: Awaited<ReturnType<typeof remnashopAuth>>;
   let authSource: "login" | "register" = "login";
 
-  let loginFailed: BffError | null = null;
+  let loginFailed: ServiceError | null = null;
 
   try {
     auth = await remnashopAuth("/auth/login", body);
@@ -258,7 +258,7 @@ export async function linkRemnashopAccount(body: LoginRequest) {
       refreshExpiresAt: auth.data.refresh_expires_at,
     });
   } catch (error) {
-    if (!(error instanceof BffError) || error.code !== "AUTH_FAILED") {
+    if (!(error instanceof ServiceError) || error.code !== "AUTH_FAILED") {
       throw error;
     }
 
@@ -292,7 +292,7 @@ export async function linkRemnashopAccount(body: LoginRequest) {
     activeSession.user.telegramId !== session.user.telegramId ||
     activeSession.user.telegramUsername !== session.user.telegramUsername
   ) {
-    throw new BffError(
+    throw new ServiceError(
       "UNAUTHORIZED",
       401,
       "Current session changed while linking the account",
@@ -433,7 +433,7 @@ export async function linkRemnashopAccount(body: LoginRequest) {
       };
     }
 
-    throw new BffError("EMAIL_LINK_REQUIRES_VERIFICATION", 409, "New email account must be confirmed before linking.");
+    throw new ServiceError("EMAIL_LINK_REQUIRES_VERIFICATION", 409, "New email account must be confirmed before linking.");
   }
 
   authDebugLog("remnashop_account_link_verification_requested", {

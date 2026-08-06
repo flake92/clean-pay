@@ -1,11 +1,11 @@
 import { prisma } from "@/backend/database/prisma";
-import { BffError } from "@/backend/integrations/remnashop/errors";
+import { ServiceError } from "@/backend/errors/service-error";
 import { paymentUpstreamOwnerHash } from "@/backend/payments/hashes";
 import { safeEqual } from "@/backend/security/crypto";
 import { Prisma } from "@prisma/client";
 
 function identityConflict(): never {
-  throw new BffError(
+  throw new ServiceError(
     "ACCOUNT_MERGE_REQUIRED",
     409,
     "Authenticated Remnashop identity does not match the local payment owner",

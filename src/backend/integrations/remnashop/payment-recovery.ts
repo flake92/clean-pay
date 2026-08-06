@@ -3,7 +3,7 @@ import {
   remnashopRequest,
   remnashopRequestResult,
 } from "@/backend/integrations/remnashop/client";
-import { BffError } from "@/backend/integrations/remnashop/errors";
+import { ServiceError } from "@/backend/errors/service-error";
 import { logger } from "@/backend/observability/logger";
 import type {
   PaymentInitResponse,
@@ -58,7 +58,7 @@ export type RemnashopPaymentRecovery = {
 };
 
 function invalidContract(path: string, reason: string): never {
-  throw new BffError(
+  throw new ServiceError(
     "UPSTREAM_ERROR",
     502,
     `Remnashop payment recovery response is invalid: ${reason}`,
@@ -430,7 +430,7 @@ export function parseTransactionPage(
     try {
       return [parsePaymentTransaction(item, path)];
     } catch (error) {
-      if (!(error instanceof BffError) || error.code !== "UPSTREAM_ERROR") {
+      if (!(error instanceof ServiceError) || error.code !== "UPSTREAM_ERROR") {
         throw error;
       }
       logger.warn("remnashop_payment_history_row_rejected", {
@@ -465,7 +465,7 @@ export function parseLegacyTransactions(
     try {
       return [parsePaymentTransaction(item, path)];
     } catch (error) {
-      if (!(error instanceof BffError) || error.code !== "UPSTREAM_ERROR") {
+      if (!(error instanceof ServiceError) || error.code !== "UPSTREAM_ERROR") {
         throw error;
       }
       logger.warn("remnashop_legacy_payment_history_row_rejected", {
@@ -586,7 +586,7 @@ export async function getTransactionPage(input: {
   limit: number;
 }) {
   if (!Number.isSafeInteger(input.limit) || input.limit < 1 || input.limit > 100) {
-    throw new BffError("INTERNAL_ERROR", 500, "Invalid transaction page size");
+    throw new ServiceError("INTERNAL_ERROR", 500, "Invalid transaction page size");
   }
 
   const params = new URLSearchParams({ limit: String(input.limit) });

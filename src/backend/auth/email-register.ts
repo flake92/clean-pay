@@ -1,6 +1,6 @@
 import { createSessionFromRemnashopAuth } from "@/backend/integrations/remnashop/session";
 import { remnashopAuth } from "@/backend/integrations/remnashop/client";
-import { BffError } from "@/backend/integrations/remnashop/errors";
+import { ServiceError } from "@/backend/errors/service-error";
 import { assertRateLimit } from "@/backend/limits/rate-limit";
 import { auditLog } from "@/backend/observability/audit";
 import { authDebugLog } from "@/backend/observability/auth-debug-log";
@@ -12,7 +12,7 @@ import { requestRemnashopEmailVerification } from "@/backend/auth/email-verifica
 
 function isEmailAlreadyExistsConflict(error: unknown) {
   return (
-    error instanceof BffError &&
+    error instanceof ServiceError &&
     error.code === "CONFLICT" &&
     String(error.debug?.message ?? error.message).toLowerCase().includes("email already exists")
   );

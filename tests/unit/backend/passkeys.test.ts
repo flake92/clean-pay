@@ -525,7 +525,7 @@ describe("passkey use cases", () => {
     );
   });
 
-  it("throws BFF errors for missing sessions, invalid challenges and last passkey delete", async () => {
+  it("throws service errors for missing sessions, invalid challenges and last passkey delete", async () => {
     mocks.getCurrentSession.mockResolvedValueOnce(null);
     await expect(beginPasskeyRegistration()).rejects.toMatchObject({ code: "UNAUTHORIZED" });
 

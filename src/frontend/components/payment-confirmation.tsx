@@ -1,43 +1,35 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
-import { useSearchParams } from "next/navigation";
+import { useMemo, useRef, useState } from "react";
 
 import type {
-  PaymentInitResponse,
   PlanOffer,
   SubscriptionOffersResponse,
 } from "@/shared/remnashop/types";
 import { Button } from "primereact/button";
 import { Card } from "primereact/card";
 import { Message } from "primereact/message";
-import { BffClientError, readBffError } from "@/frontend/lib/client-api";
+import { executePaymentAction } from "@/app/actions/payments";
 import { InstallAppButton } from "@/frontend/components/install-app-button";
 import { replaceWith } from "@/frontend/lib/browser-navigation";
 import {
   clearPaymentIdempotencyKey,
   getOrCreatePaymentIdempotencyKey,
-  parsePaymentOperationStatusEnvelope,
-  shouldRetainPaymentIdempotencyKey,
 } from "@/frontend/lib/payment-idempotency";
 import { storePaymentReturnReference } from "@/frontend/lib/payment-return-storage";
 import { AccountActionRequired } from "@/frontend/components/account-action-required";
 import { LinkButton } from "@/frontend/components/prime/link-button";
 import {
   confirmedPaymentOffer,
-  paymentOfferMatches,
 } from "@/shared/payments/offer-confirmation";
 import {
   accountLinkPath,
   emailVerificationPath,
-  hasAccountSetupNotice,
   passkeySetupPath,
 } from "@/shared/auth/account-setup-flow";
+import type { CheckoutViewModel } from "@/shared/presentation/checkout";
 
-type LoadState =
-  | { status: "loading" }
-  | { status: "error"; message: string; action?: "login" | "linkEmail" }
-  | { status: "ready"; offers: SubscriptionOffersResponse };
+const defaultCheckoutModel: CheckoutViewModel = { status: "error", message: "Не удалось загрузить данные оплаты." };
 
 function formatDuration(days: number) {
   if (days <= 0) {
@@ -88,120 +80,25 @@ function describePlan(plan: PlanOffer) {
   ].join(" · ");
 }
 
-export function PaymentConfirmation() {
-  const searchParams = useSearchParams();
-  const [state, setState] = useState<LoadState>({ status: "loading" });
+export function PaymentConfirmation({
+  durationDays = null,
+  gatewayType = null,
+  model = defaultCheckoutModel,
+  paymentRedirectTo = "/payment",
+  planCode = null,
+  showAccountSetupNotice = false,
+}: {
+  durationDays?: string | null;
+  gatewayType?: string | null;
+  model?: CheckoutViewModel;
+  paymentRedirectTo?: string;
+  planCode?: string | null;
+  showAccountSetupNotice?: boolean;
+}) {
+  const state = model;
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const submittingRef = useRef(false);
-  const planCode = searchParams.get("plan");
-  const durationDays = searchParams.get("duration");
-  const gatewayType = searchParams.get("gateway");
-  const paymentSearchParams = new URLSearchParams(searchParams.toString());
-  paymentSearchParams.delete("account_setup");
-  const paymentRedirectTo = `/payment${
-    paymentSearchParams.size > 0 ? `?${paymentSearchParams.toString()}` : ""
-  }`;
-  const showAccountSetupNotice = hasAccountSetupNotice(searchParams);
-
-  useEffect(() => {
-    let active = true;
-
-    async function loadPayment() {
-      try {
-        const profileResponse = await fetch("/api/bff/auth/me", {
-          cache: "no-store",
-        });
-
-        if (!profileResponse.ok) {
-          throw await readBffError(
-            profileResponse,
-            profileResponse.status === 401
-              ? "Нужно войти в аккаунт."
-              : "Не удалось проверить готовность аккаунта.",
-          );
-        }
-
-        const profileBody = await profileResponse.json().catch(() => null);
-        const user = profileBody?.data?.user;
-        const emailVerified = Boolean(
-          user?.email &&
-            (user.emailVerified ?? user.is_email_verified),
-        );
-        const accountSyncPending = Boolean(
-          user?.accountSyncPending ?? user?.account_sync_pending,
-        );
-
-        if (accountSyncPending) {
-          replaceWith(emailVerificationPath(paymentRedirectTo));
-          return;
-        }
-
-        if (!emailVerified) {
-          if (active) {
-            setState({
-              status: "error",
-              message:
-                "Для оплаты добавьте e-mail и пароль, затем подтвердите адрес кодом из письма.",
-              action: "linkEmail",
-            });
-          }
-          return;
-        }
-
-        const offersResponse = await fetch("/api/bff/subscription/offers");
-
-        if (!offersResponse.ok) {
-          throw await readBffError(
-            offersResponse,
-            offersResponse.status === 401
-              ? "Нужно войти в аккаунт."
-              : "Не удалось загрузить данные оплаты.",
-          );
-        }
-
-        const offersBody = await offersResponse.json().catch(() => null);
-
-        if (!offersBody?.data) {
-          throw new Error("Сервер вернул некорректные данные оплаты.");
-        }
-
-        if (active) {
-          setState({
-            status: "ready",
-            offers: offersBody.data as SubscriptionOffersResponse,
-          });
-        }
-      } catch (error) {
-        if (!active) {
-          return;
-        }
-
-        setState({
-          status: "error",
-          message:
-            error instanceof Error
-              ? error.message
-              : "Не удалось загрузить данные оплаты.",
-          action:
-            error instanceof BffClientError &&
-            (error.code === "EMAIL_REQUIRED" ||
-              error.code === "EMAIL_NOT_VERIFIED")
-              ? "linkEmail"
-              : error instanceof BffClientError && error.status === 401
-                ? "login"
-                : undefined,
-        });
-      }
-    }
-
-    void loadPayment();
-
-    return () => {
-      active = false;
-    };
-  }, [paymentRedirectTo]);
-
   const selection = useMemo(() => {
     if (state.status !== "ready") {
       return null;
@@ -234,62 +131,6 @@ export function PaymentConfirmation() {
       ),
     };
 
-    try {
-      const offersResponse = await fetch("/api/bff/subscription/offers", {
-        cache: "no-store",
-      });
-
-      if (!offersResponse.ok) {
-        throw await readBffError(
-          offersResponse,
-          "Не удалось перепроверить цену. Оплата не создана.",
-        );
-      }
-
-      const offersBody = await offersResponse.json().catch(() => null) as {
-        data?: SubscriptionOffersResponse;
-      } | null;
-      const freshOffers = offersBody?.data;
-      const freshSelection = freshOffers
-        ? findSelection(freshOffers, planCode, durationDays, gatewayType)
-        : null;
-
-      if (!freshOffers || !freshSelection) {
-        finishSubmitting();
-        setSubmitError("Выбранное предложение больше недоступно. Оплата не создана.");
-        return;
-      }
-
-      if (
-        !paymentOfferMatches(
-          payload,
-          freshSelection.plan,
-          freshSelection.duration.days,
-          freshSelection.price,
-        )
-      ) {
-        setState({ status: "ready", offers: freshOffers });
-        finishSubmitting();
-        setSubmitError(
-          `Цена изменилась: было ${selection.price.final_amount} ${selection.price.currency_symbol}, стало ${freshSelection.price.final_amount} ${freshSelection.price.currency_symbol}. Проверьте новую цену перед оплатой.`,
-        );
-        return;
-      }
-    } catch (error) {
-      if (
-        error instanceof BffClientError &&
-        (error.code === "EMAIL_REQUIRED" ||
-          error.code === "EMAIL_NOT_VERIFIED")
-      ) {
-        replaceWith(accountLinkPath(paymentRedirectTo));
-        return;
-      }
-
-      finishSubmitting();
-      setSubmitError("Не удалось перепроверить цену. Оплата не создана; повторите попытку позже.");
-      return;
-    }
-
     let idempotencyKey: string;
 
     try {
@@ -305,111 +146,43 @@ export function PaymentConfirmation() {
     let paymentConfirmed = false;
 
     try {
-      let response: Response;
-
-      try {
-        response = await fetch("/api/bff/subscription/purchase", {
-          method: "POST",
-          headers: {
-            "content-type": "application/json",
-            "Idempotency-Key": idempotencyKey,
-          },
-          body: JSON.stringify(payload),
-        });
-      } catch {
-        setSubmitError(
-          "Не удалось получить результат оплаты. Повторите попытку — новая оплата не будет создана.",
-        );
-        return;
-      }
-
-      const operationStatus = parsePaymentOperationStatusEnvelope(
-        await response.clone().json().catch(() => null),
-      );
-
-      if (response.status === 202) {
-        if (operationStatus) {
-          storePaymentReturnReference({
-            operationId: operationStatus.operationId,
-          });
-          paymentConfirmed = true;
-          window.location.assign(
-            `/payment/pending?operation_id=${encodeURIComponent(operationStatus.operationId)}`,
-          );
-          return;
-        }
-        setSubmitError(
-          "Результат оплаты уточняется. Не создавайте новую оплату; повторите проверку через несколько секунд.",
-        );
-        return;
-      }
-
-      if (!response.ok) {
-        const manualReview = operationStatus?.status === "manual_required";
-        const responseError = manualReview
-          ? null
-          : await readBffError(response, "Не удалось выполнить действие.");
-
-        if (
-          responseError instanceof BffClientError &&
-          (responseError.code === "EMAIL_REQUIRED" ||
-            responseError.code === "EMAIL_NOT_VERIFIED")
-        ) {
+      const result = await executePaymentAction({ kind: "purchase", request: payload, idempotencyKey });
+      if (!result.ok) {
+        if (result.code === "EMAIL_REQUIRED" || result.code === "EMAIL_NOT_VERIFIED") {
           replaceWith(accountLinkPath(paymentRedirectTo));
           return;
         }
-
-        const message = manualReview
-          ? `Статус оплаты не удалось определить автоматически. Не повторяйте оплату; обратитесь в поддержку и сообщите номер операции ${operationStatus.operationId}.`
-          : responseError?.message ?? "Не удалось выполнить действие.";
-
-        if (manualReview) {
-          storePaymentReturnReference({
-            operationId: operationStatus.operationId,
-          });
-        }
-
-        if (response.status < 500) {
-          if (!shouldRetainPaymentIdempotencyKey(response.status, operationStatus?.status)) {
-            clearPaymentIdempotencyKey("purchase", payload, idempotencyKey);
-          }
-          setSubmitError(message);
-        } else {
-          setSubmitError(
-            "Не удалось подтвердить результат оплаты. Повторите попытку — новая оплата не будет создана.",
-          );
-        }
+        if (!result.retainIdempotencyKey) clearPaymentIdempotencyKey("purchase", payload, idempotencyKey);
+        setSubmitError(result.message);
         return;
       }
-
-      const body = (await response.json().catch(() => null)) as {
-        data?: PaymentInitResponse;
-      } | null;
-
-      if (!body?.data || typeof body.data.payment_id !== "string") {
-        setSubmitError(
-          "Не удалось подтвердить результат оплаты. Повторите попытку — новая оплата не будет создана.",
-        );
+      if (result.status === "pending") {
+        storePaymentReturnReference({ operationId: result.operationId });
+        paymentConfirmed = true;
+        window.location.assign(`/payment/pending?operation_id=${encodeURIComponent(result.operationId)}`);
+        return;
+      }
+      if (result.status === "manual-review") {
+        storePaymentReturnReference({ operationId: result.operationId });
+        setSubmitError(`Статус оплаты требует ручной проверки. Сообщите поддержке номер операции ${result.operationId}.`);
         return;
       }
 
       clearPaymentIdempotencyKey("purchase", payload, idempotencyKey);
       paymentConfirmed = true;
-
-      storePaymentReturnReference({ paymentId: body.data.payment_id });
-
-      if (body.data.is_free) {
+      storePaymentReturnReference({ paymentId: result.payment.payment_id });
+      if (result.payment.is_free) {
         window.location.assign("/cabinet");
         return;
       }
 
-      if (body.data.payment_url) {
-        window.location.assign(body.data.payment_url);
+      if (result.payment.payment_url) {
+        window.location.assign(result.payment.payment_url);
         return;
       }
 
       window.location.assign(
-        `/payment/pending?payment_id=${encodeURIComponent(body.data.payment_id)}`,
+        `/payment/pending?payment_id=${encodeURIComponent(result.payment.payment_id)}`,
       );
     } catch {
       setSubmitError(
@@ -422,11 +195,11 @@ export function PaymentConfirmation() {
     }
   }
 
-  if (state.status === "loading") {
-    return <Message severity="info" text="Загрузка данных оплаты..." />;
-  }
-
-  if (state.status === "error") {
+  if (state.status === "account-action-required") {
+    if (state.action === "verifyEmail") {
+      replaceWith(emailVerificationPath(paymentRedirectTo));
+      return null;
+    }
     if (state.action) {
       return (
         <AccountActionRequired
@@ -443,6 +216,8 @@ export function PaymentConfirmation() {
       </div>
     );
   }
+
+  if (state.status === "error") return <Message severity="error" text={state.message} />;
 
   if (!selection) {
     return (

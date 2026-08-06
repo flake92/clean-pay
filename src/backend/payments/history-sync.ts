@@ -11,7 +11,7 @@ import {
   getJwtExpiresAt,
   revealRemnashopToken,
 } from "@/backend/integrations/remnashop/client";
-import { BffError } from "@/backend/integrations/remnashop/errors";
+import { ServiceError } from "@/backend/errors/service-error";
 import { paymentUpstreamOwnerHash } from "@/backend/payments/hashes";
 import { applyRemnashopTransaction } from "@/backend/payments/records";
 import { lockPaymentUpstreamOwner } from "@/backend/payments/owner";
@@ -61,7 +61,7 @@ function retryDelayMs(failureCount: number) {
 }
 
 function safeFailureSnapshot(error: unknown): Prisma.InputJsonObject {
-  if (error instanceof BffError) {
+  if (error instanceof ServiceError) {
     return { code: error.code, status: error.status };
   }
 
@@ -95,7 +95,7 @@ export async function claimPaymentHistorySync(input: {
         upstreamOwnerHash,
       )
     ) {
-      throw new BffError(
+      throw new ServiceError(
         "ACCOUNT_MERGE_REQUIRED",
         409,
         "Remnashop identity changed before payment history sync",
@@ -284,7 +284,7 @@ export async function completePaymentHistoryPage(
       !state.leaseExpiresAt ||
       state.leaseExpiresAt <= now
     ) {
-      throw new BffError(
+      throw new ServiceError(
         "CONFLICT",
         409,
         "Payment history sync lease is no longer owned by this worker",
@@ -322,7 +322,7 @@ export async function completePaymentHistoryPage(
     });
 
     if (completed.count !== 1) {
-      throw new BffError(
+      throw new ServiceError(
         "CONFLICT",
         409,
         "Payment history sync was fenced by another worker",
@@ -455,7 +455,7 @@ async function loadCurrentPaymentHistoryCredential(
       expectedOwnerHash,
     )
   ) {
-    throw new BffError(
+    throw new ServiceError(
       "ACCOUNT_MERGE_REQUIRED",
       409,
       "Remnashop identity changed during payment history recovery",
@@ -483,7 +483,7 @@ async function loadCurrentPaymentHistoryCredential(
     }
   }
 
-  throw new BffError(
+  throw new ServiceError(
     "UNAUTHORIZED",
     401,
     "No current owner-matching Remnashop session is available for payment history recovery",
@@ -502,7 +502,7 @@ export async function continuePaymentHistoryBackfills(input: {
     input.deadlineMs < 1_000 ||
     input.deadlineMs > 30_000
   ) {
-    throw new BffError(
+    throw new ServiceError(
       "VALIDATION_ERROR",
       400,
       "Invalid payment history backfill bounds",
@@ -570,7 +570,7 @@ export async function continuePaymentHistoryBackfills(input: {
       );
 
       if (!accessToken) {
-        throw new BffError(
+        throw new ServiceError(
           "UNAUTHORIZED",
           401,
           "No current Remnashop session is available for payment history recovery",
@@ -580,7 +580,7 @@ export async function continuePaymentHistoryBackfills(input: {
       const capabilities = await getPaymentCapabilities(accessToken);
 
       if (!capabilities) {
-        throw new BffError(
+        throw new ServiceError(
           "UPSTREAM_ERROR",
           502,
           "Remnashop keyset history capability is temporarily unavailable",

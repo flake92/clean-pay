@@ -4,10 +4,10 @@ import { Prisma, type PaymentOperation } from "@prisma/client";
 
 import { prisma } from "@/backend/database/prisma";
 import {
-  BffError,
-  isBffErrorCode,
-  type BffErrorCode,
-} from "@/backend/integrations/remnashop/errors";
+  ServiceError,
+  isServiceErrorCode,
+  type ServiceErrorCode,
+} from "@/backend/errors/service-error";
 import {
   recordPayment,
   type RecordPaymentInput,
@@ -65,7 +65,7 @@ export type PaymentOperationRequest =
     };
 
 export type PaymentOperationErrorSnapshot = {
-  code: BffErrorCode;
+  code: ServiceErrorCode;
   status: number;
   message: string;
 };
@@ -126,7 +126,7 @@ function paymentHash(value: string, purpose: string) {
 
 function normalizeIdempotencyKey(value: string | null) {
   if (value === null || value.trim() === "") {
-    throw new BffError(
+    throw new ServiceError(
       "IDEMPOTENCY_KEY_REQUIRED",
       400,
       "Idempotency-Key header is required",
@@ -136,7 +136,7 @@ function normalizeIdempotencyKey(value: string | null) {
   const normalized = value.trim().toLowerCase();
 
   if (!UUID_PATTERN.test(normalized)) {
-    throw new BffError(
+    throw new ServiceError(
       "IDEMPOTENCY_KEY_INVALID",
       400,
       "Idempotency-Key must be a UUID",
@@ -152,7 +152,7 @@ function normalizedString(value: unknown, field: string, maxLength: number) {
     value.length === 0 ||
     value.length > maxLength
   ) {
-    throw new BffError(
+    throw new ServiceError(
       "VALIDATION_ERROR",
       400,
       `${field} must be a non-empty string up to ${maxLength} characters`,
@@ -164,7 +164,7 @@ function normalizedString(value: unknown, field: string, maxLength: number) {
 
 function normalizedDuration(value: unknown) {
   if (!Number.isSafeInteger(value) || Number(value) < 0) {
-    throw new BffError(
+    throw new ServiceError(
       "VALIDATION_ERROR",
       400,
       "duration_days must be a non-negative integer",
@@ -313,7 +313,7 @@ async function createOrFindOperation({
           );
 
           if (lockedUsers.length !== 1 || lockedUsers[0]?.id !== userId) {
-            throw new BffError(
+            throw new ServiceError(
               "ACCOUNT_MERGE_REQUIRED",
               409,
               "Payment owner changed before operation creation",
@@ -324,7 +324,7 @@ async function createOrFindOperation({
             expectedUpstreamAccountId !== undefined &&
             lockedUsers[0]?.remnashopUserId !== expectedUpstreamAccountId
           ) {
-            throw new BffError(
+            throw new ServiceError(
               "ACCOUNT_MERGE_REQUIRED",
               409,
               "Payment upstream owner changed before operation creation",
@@ -363,7 +363,7 @@ async function createOrFindOperation({
     }
   }
 
-  throw new BffError(
+  throw new ServiceError(
     "INTERNAL_ERROR",
     500,
     "Could not allocate a unique payment operation key",
@@ -378,7 +378,7 @@ function assertSameOperation(
     operation.kind !== identity.kind ||
     !safeEqual(operation.requestFingerprint, identity.fingerprint)
   ) {
-    throw new BffError(
+    throw new ServiceError(
       "IDEMPOTENCY_KEY_REUSED",
       409,
       "Idempotency key is already bound to another payment operation",
@@ -392,7 +392,7 @@ function isObject(value: unknown): value is Record<string, unknown> {
 
 function parsePaymentResponse(value: Prisma.JsonValue | null) {
   if (!isObject(value)) {
-    throw new BffError(
+    throw new ServiceError(
       "INTERNAL_ERROR",
       500,
       "Stored payment operation response is missing",
@@ -410,7 +410,7 @@ function parsePaymentResponse(value: Prisma.JsonValue | null) {
     typeof value.final_amount !== "string" ||
     typeof value.currency !== "string"
   ) {
-    throw new BffError(
+    throw new ServiceError(
       "INTERNAL_ERROR",
       500,
       "Stored payment operation response is invalid",
@@ -433,12 +433,12 @@ function parseErrorSnapshot(
 ): PaymentOperationErrorSnapshot {
   if (
     !isObject(value) ||
-    !isBffErrorCode(value.code) ||
+    !isServiceErrorCode(value.code) ||
     typeof value.status !== "number" ||
     !Number.isInteger(value.status) ||
     typeof value.message !== "string"
   ) {
-    throw new BffError(
+    throw new ServiceError(
       "INTERNAL_ERROR",
       500,
       "Stored payment operation error is invalid",
@@ -581,7 +581,7 @@ export async function beginPaymentOperation(input: {
             !currentOwner ||
             currentOwner.remnashopUserId !== input.expectedUpstreamAccountId
           ) {
-            throw new BffError(
+            throw new ServiceError(
               "ACCOUNT_MERGE_REQUIRED",
               409,
               "Payment upstream owner changed before operation claim",
@@ -631,7 +631,7 @@ export async function beginPaymentOperation(input: {
     );
 
     if (!refreshed) {
-      throw new BffError(
+      throw new ServiceError(
         "INTERNAL_ERROR",
         500,
         "Payment operation disappeared during claim",
@@ -692,7 +692,7 @@ export async function bindPaymentOperationUpstreamOwner(input: {
     !operation.claimTokenHash ||
     !safeEqual(operation.claimTokenHash, claimHash)
   ) {
-    throw new BffError(
+    throw new ServiceError(
       "CONFLICT",
       409,
       "Payment operation is not owned by this execution",
@@ -706,7 +706,7 @@ export async function bindPaymentOperationUpstreamOwner(input: {
     return;
   }
 
-  throw new BffError(
+  throw new ServiceError(
     "IDEMPOTENCY_KEY_REUSED",
     409,
     "Payment operation is already bound to another upstream account",
@@ -734,7 +734,7 @@ export async function markPaymentOperationDispatched(input: {
   });
 
   if (transitioned.count !== 1) {
-    throw new BffError(
+    throw new ServiceError(
       "CONFLICT",
       409,
       "Payment operation claim expired before dispatch",
@@ -757,7 +757,7 @@ export function paymentResponseSnapshot(
 }
 
 function errorSnapshot(error: unknown): PaymentOperationErrorSnapshot {
-  if (error instanceof BffError) {
+  if (error instanceof ServiceError) {
     return {
       code: error.code,
       status: error.status,
@@ -783,7 +783,7 @@ function errorSnapshotJson(
 }
 
 function paymentOperationConflict(message: string) {
-  return new BffError("CONFLICT", 409, message);
+  return new ServiceError("CONFLICT", 409, message);
 }
 
 export async function completePaymentOperationSuccess(input: {
@@ -799,7 +799,7 @@ export async function completePaymentOperationSuccess(input: {
     responseStatus < 200 ||
     responseStatus > 299
   ) {
-    throw new BffError(
+    throw new ServiceError(
       "INTERNAL_ERROR",
       500,
       "Successful payment response status must be 2xx",
@@ -910,7 +910,7 @@ export async function completePaymentOperationSuccess(input: {
       });
     });
   } catch (error) {
-    if (error instanceof BffError) {
+    if (error instanceof ServiceError) {
       throw error;
     }
 
@@ -965,7 +965,7 @@ export async function settlePaymentOperationBeforeDispatchFailure(input: {
 export function paymentOperationDispatchFailureOutcome(
   error: unknown,
 ): PaymentOperationDispatchFailureOutcome {
-  if (!(error instanceof BffError)) {
+  if (!(error instanceof ServiceError)) {
     return "UNKNOWN";
   }
 
@@ -1048,5 +1048,5 @@ export async function settlePaymentOperationAfterDispatchFailure(input: {
 export function paymentOperationErrorFromSnapshot(
   snapshot: PaymentOperationErrorSnapshot,
 ) {
-  return new BffError(snapshot.code, snapshot.status, snapshot.message);
+  return new ServiceError(snapshot.code, snapshot.status, snapshot.message);
 }

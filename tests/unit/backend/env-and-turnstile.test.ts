@@ -230,7 +230,7 @@ describe("Turnstile helpers", () => {
     expect(body.has("remoteip")).toBe(false);
   });
 
-  it("returns BFF errors for invalid Turnstile states", async () => {
+  it("returns service errors for invalid Turnstile states", async () => {
     vi.stubEnv("TURNSTILE_ENABLED", "true");
     vi.stubEnv("TURNSTILE_SITE_KEY", "site-key");
     vi.stubEnv("TURNSTILE_SECRET_KEY", "");

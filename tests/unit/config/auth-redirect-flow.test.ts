@@ -29,10 +29,7 @@ describe("post-auth redirect flow", () => {
     const authForms = readFileSync("src/frontend/components/auth-forms.tsx", "utf8");
     const passkeys = readFileSync("src/frontend/components/passkey-actions.tsx", "utf8");
     const telegramStart = readFileSync("src/app/auth/telegram/start/route.ts", "utf8");
-    const telegramWebApp = readFileSync(
-      "src/app/api/bff/auth/telegram/webapp/route.ts",
-      "utf8",
-    );
+    const telegramWebApp = readFileSync("src/frontend/components/telegram-webapp-login.tsx", "utf8");
     const telegramWebAppPage = readFileSync(
       "src/app/auth/telegram/webapp/page.tsx",
       "utf8",
@@ -49,8 +46,8 @@ describe("post-auth redirect flow", () => {
     expect(telegramStart).toContain(
       'safeRedirectPath(url.searchParams.get("redirect_to"))',
     );
-    expect(telegramWebApp).toContain("safeRedirectPath(");
-    expect(telegramWebApp).toContain("NextResponse.json({ redirectTo })");
+    expect(telegramWebApp).toContain("authenticateTelegramWebAppAction(initData)");
+    expect(telegramWebApp).toContain("window.location.replace(redirectTo)");
     expect(telegramWebAppPage).toContain("safeRedirectPath(rawRedirect)");
     expect(telegramWebAppPage).toContain(
       "<TelegramWebAppLogin redirectTo={redirectTo} />",

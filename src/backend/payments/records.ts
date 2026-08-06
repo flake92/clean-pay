@@ -1,7 +1,7 @@
 import { Prisma } from "@prisma/client";
 
 import { prisma } from "@/backend/database/prisma";
-import { BffError } from "@/backend/integrations/remnashop/errors";
+import { ServiceError } from "@/backend/errors/service-error";
 import { paymentUpstreamOwnerHash } from "@/backend/payments/hashes";
 import { lockPaymentUpstreamOwner } from "@/backend/payments/owner";
 import { logger } from "@/backend/observability/logger";
@@ -62,7 +62,7 @@ function isUniqueConstraintError(error: unknown) {
 }
 
 function paymentConflict(message: string) {
-  return new BffError("CONFLICT", 409, message);
+  return new ServiceError("CONFLICT", 409, message);
 }
 
 function jsonObject(value: Prisma.JsonValue | null): Prisma.InputJsonObject {
@@ -82,7 +82,7 @@ function transactionDates(transaction: PaymentTransactionResponse) {
     !Number.isFinite(upstreamUpdatedAt.getTime()) ||
     upstreamUpdatedAt < upstreamCreatedAt
   ) {
-    throw new BffError(
+    throw new ServiceError(
       "UPSTREAM_ERROR",
       502,
       "Remnashop transaction timestamps are invalid",

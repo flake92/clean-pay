@@ -88,7 +88,10 @@ describe("internal payment reconciliation route", () => {
       deadlineMs: 12_000,
     });
     expect(payload).toMatchObject({
-      data: { claimed: 1, succeeded: 1, history: { applied: 20 } },
+      claimed: 1,
+      succeeded: 1,
+      history: { applied: 20 },
     });
+    expect(payload).not.toHaveProperty("data");
   });
 });

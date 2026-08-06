@@ -5,7 +5,7 @@ import { headers } from "next/headers";
 import { getEnv } from "@/backend/config/env";
 import { logger, sanitizeLogValue } from "@/backend/observability/logger";
 import { prisma } from "@/backend/database/prisma";
-import type { BffError } from "@/backend/integrations/remnashop/errors";
+import type { ServiceError } from "@/backend/errors/service-error";
 
 type AuditSeverity = "INFO" | "WARN" | "ERROR";
 
@@ -76,12 +76,12 @@ export async function auditLog({
 }
 
 export function logTechnicalError(event: string, error: unknown, metadata: Record<string, unknown> = {}) {
-  const bffError = error as Partial<BffError>;
+  const serviceError = error as Partial<ServiceError>;
   const safeMetadata = technicalMetadata(metadata);
 
   logger.error(event, {
-    code: typeof bffError.code === "string" ? bffError.code : undefined,
-    status: typeof bffError.status === "number" ? bffError.status : undefined,
+    code: typeof serviceError.code === "string" ? serviceError.code : undefined,
+    status: typeof serviceError.status === "number" ? serviceError.status : undefined,
     message: isProductionLog() ? undefined : error instanceof Error ? error.message : String(error),
     ...(safeMetadata === undefined ? {} : { metadata: safeMetadata }),
   }, { category: "technical" });

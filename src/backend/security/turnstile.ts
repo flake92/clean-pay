@@ -1,6 +1,6 @@
 import { getEnv } from "@/backend/config/env";
 import { logger } from "@/backend/observability/logger";
-import { BffError } from "@/backend/integrations/remnashop/errors";
+import { ServiceError } from "@/backend/errors/service-error";
 
 type TurnstileResponse = {
   success?: boolean;
@@ -29,13 +29,13 @@ export async function verifyTurnstileToken(
   }
 
   if (!env.turnstile.secretKey) {
-    throw new BffError("UPSTREAM_UNAVAILABLE", 503, "TURNSTILE_SECRET_KEY is required", {
+    throw new ServiceError("UPSTREAM_UNAVAILABLE", 503, "TURNSTILE_SECRET_KEY is required", {
       message: "TURNSTILE_SECRET_KEY is required",
     });
   }
 
   if (!token) {
-    throw new BffError("FORBIDDEN", 403, "Turnstile token is required");
+    throw new ServiceError("FORBIDDEN", 403, "Turnstile token is required");
   }
 
   const body = new URLSearchParams({
@@ -73,7 +73,7 @@ export async function verifyTurnstileToken(
       source: "turnstile.client",
       message: "HTTP Request failed: POST Turnstile siteverify",
     });
-    throw new BffError("UPSTREAM_UNAVAILABLE", 503, "Turnstile verification unavailable", {
+    throw new ServiceError("UPSTREAM_UNAVAILABLE", 503, "Turnstile verification unavailable", {
       message: error instanceof Error ? error.message : String(error),
     });
   }
@@ -83,7 +83,7 @@ export async function verifyTurnstileToken(
   try {
     result = await response.json() as TurnstileResponse;
   } catch (error) {
-    throw new BffError("UPSTREAM_UNAVAILABLE", 503, "Turnstile returned an invalid response", {
+    throw new ServiceError("UPSTREAM_UNAVAILABLE", 503, "Turnstile returned an invalid response", {
       upstreamStatus: response.status,
       upstreamPath: env.turnstile.verifyUrl,
       message: error instanceof Error ? error.message : String(error),
@@ -106,7 +106,7 @@ export async function verifyTurnstileToken(
   const responseAction = result?.action;
 
   if (!response.ok) {
-    throw new BffError("UPSTREAM_UNAVAILABLE", 503, "Turnstile verification unavailable", {
+    throw new ServiceError("UPSTREAM_UNAVAILABLE", 503, "Turnstile verification unavailable", {
       upstreamStatus: response.status,
       upstreamPath: env.turnstile.verifyUrl,
     });
@@ -117,7 +117,7 @@ export async function verifyTurnstileToken(
     responseHostname !== expectedHostname ||
     responseAction !== expectedAction
   ) {
-    throw new BffError("FORBIDDEN", 403, "Turnstile verification failed", {
+    throw new ServiceError("FORBIDDEN", 403, "Turnstile verification failed", {
       upstreamStatus: response.status,
       upstreamPath: env.turnstile.verifyUrl,
       upstreamDetail: result

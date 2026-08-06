@@ -4,7 +4,7 @@ import {
   getRemnashopMe,
   getRemnashopUserIdFromAccessToken,
 } from "@/backend/integrations/remnashop/client";
-import { BffError } from "@/backend/integrations/remnashop/errors";
+import { ServiceError } from "@/backend/errors/service-error";
 import { authDebugLog } from "@/backend/observability/auth-debug-log";
 import { getCurrentSession, refreshCurrentAccessCookie } from "@/backend/sessions/web-session";
 import { localUserProfile, remnashopUserProfile } from "@/backend/auth/profile-presenter";
@@ -15,7 +15,7 @@ export async function getCurrentAuthProfile() {
 
   if (!session) {
     authDebugLog("auth_me_unauthorized", { reason: "missing_session" });
-    throw new BffError("UNAUTHORIZED", 401, "Session is required");
+    throw new ServiceError("UNAUTHORIZED", 401, "Session is required");
   }
 
   const canResolveRemnashopSession = Boolean(
@@ -44,7 +44,7 @@ export async function getCurrentAuthProfile() {
     }));
   } catch (error) {
     if (
-      error instanceof BffError &&
+      error instanceof ServiceError &&
       (error.code === "EMAIL_REQUIRED" || error.code === "PASSKEY_REQUIRED")
     ) {
       authDebugLog("auth_me_local_profile_returned", {

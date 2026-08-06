@@ -2,7 +2,7 @@ import { createHmac, randomUUID } from 'node:crypto';
 
 import { redisCommand } from '@/backend/cache/redis';
 import { getEnv } from '@/backend/config/env';
-import { BffError } from '@/backend/integrations/remnashop/errors';
+import { ServiceError } from '@/backend/errors/service-error';
 import { logger } from '@/backend/observability/logger';
 
 type RateLimitIdentity = {
@@ -77,7 +77,7 @@ async function incrementRateLimits(keys: string[], windowSeconds: number) {
     count.length !== keys.length ||
     count.some((value) => typeof value !== "number")
   ) {
-    throw new BffError('UPSTREAM_UNAVAILABLE', 503, 'Redis returned invalid rate-limit counters', {
+    throw new ServiceError('UPSTREAM_UNAVAILABLE', 503, 'Redis returned invalid rate-limit counters', {
       message: 'Invalid Redis INCR response',
     });
   }
@@ -97,10 +97,10 @@ export async function assertRateLimit(options: RateLimitOptions) {
       action: options.action,
       errorName: error instanceof Error ? error.name : "UnknownError",
     });
-    if (error instanceof BffError) {
+    if (error instanceof ServiceError) {
       throw error;
     }
-    throw new BffError("UPSTREAM_UNAVAILABLE", 503, "Authentication protection is temporarily unavailable", {
+    throw new ServiceError("UPSTREAM_UNAVAILABLE", 503, "Authentication protection is temporarily unavailable", {
       retryAfterSeconds: Math.min(options.windowSeconds, 30),
     });
   }
@@ -119,7 +119,7 @@ export async function assertRateLimit(options: RateLimitOptions) {
       retryAfterSeconds = Math.min(options.windowSeconds, 30);
     }
 
-    throw new BffError(
+    throw new ServiceError(
       'RATE_LIMITED',
       429,
       options.message ?? 'Too many attempts. Try again later.',
@@ -155,13 +155,13 @@ export async function withAuthConcurrency<T>(
       action,
       errorName: error instanceof Error ? error.name : "UnknownError",
     });
-    throw new BffError("UPSTREAM_UNAVAILABLE", 503, "Authentication protection is temporarily unavailable", {
+    throw new ServiceError("UPSTREAM_UNAVAILABLE", 503, "Authentication protection is temporarily unavailable", {
       retryAfterSeconds: 2,
     });
   }
 
   if (acquired !== 1) {
-    throw new BffError("UPSTREAM_UNAVAILABLE", 503, "Authentication capacity is temporarily exhausted", {
+    throw new ServiceError("UPSTREAM_UNAVAILABLE", 503, "Authentication capacity is temporarily exhausted", {
       retryAfterSeconds: 2,
     });
   }

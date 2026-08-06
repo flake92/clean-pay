@@ -1,11 +1,5 @@
-import { Suspense } from "react";
+import { PaymentStatusPage } from "@/app/payment/payment-status-page";
 
-import { PaymentReturnStatus } from "@/frontend/components/payment-return-status";
-
-export default function PaymentPendingPage() {
-  return (
-    <Suspense fallback={<p className="p-6 text-600">Загрузка...</p>}>
-      <PaymentReturnStatus kind="pending" />
-    </Suspense>
-  );
+export default function PaymentPendingPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
+  return <PaymentStatusPage kind="pending" searchParams={searchParams} />;
 }

@@ -6,28 +6,19 @@ import { Button } from "primereact/button";
 import { InputText } from "primereact/inputtext";
 import { Message } from "primereact/message";
 
+import {
+  confirmEmailVerificationCodeAction,
+  requestEmailVerificationCodeAction,
+} from "@/app/actions/email-verification";
 import { TurnstileWidget, type TurnstileHandle, hasTurnstileSiteKey } from "@/frontend/components/turnstile-widget";
 import { navigateTo } from "@/frontend/lib/browser-navigation";
-import { readBffError } from "@/frontend/lib/client-api";
 import { passkeySetupPath } from "@/shared/auth/account-setup-flow";
-
-async function readError(response: Response, fallback: string) {
-  return (await readBffError(response, fallback)).message;
-}
+import { clearSessionAction } from "@/app/actions/session";
 
 function missingTurnstileTokenMessage(siteKey?: string | null) {
   return hasTurnstileSiteKey(siteKey)
     ? "Пройдите проверку Cloudflare Turnstile."
     : "Ключ сайта Cloudflare Turnstile не настроен.";
-}
-
-function turnstilePayload(token: string | null) {
-  return token
-    ? {
-        turnstileToken: token,
-        "cf-turnstile-response": token,
-      }
-    : {};
 }
 
 export function RegisterEmailConfirmForm({
@@ -82,10 +73,10 @@ export function RegisterEmailConfirmForm({
     setError(null);
 
     try {
-      const response = await fetch("/api/bff/auth/logout", { method: "POST" });
+      const result = await clearSessionAction();
 
-      if (!response.ok) {
-        setError(await readError(response, "Не удалось вернуться к регистрации."));
+      if (result.status === "error") {
+        setError(result.message);
         return;
       }
 
@@ -112,21 +103,18 @@ export function RegisterEmailConfirmForm({
     }
 
     try {
-      const response = await fetch("/api/bff/auth/email/request-verification", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(turnstilePayload(turnstileToken)),
+      const result = await requestEmailVerificationCodeAction({
+        ...(turnstileToken ? { turnstileToken } : {}),
       });
 
-      if (!response.ok) {
+      if (!result.ok) {
         turnstile?.reset();
         setTurnstileToken(null);
-        setError(await readError(response, "Не удалось повторно отправить код."));
+        setError(result.message);
         return;
       }
 
-      const body = await response.json().catch(() => null);
-      const targetEmail = body?.data?.target_email;
+      const targetEmail = result.kind === "code-sent" ? result.targetEmail : null;
       setMessage(targetEmail ? `Код повторно отправлен на ${targetEmail}.` : "Код повторно отправлен.");
       turnstile?.reset();
       setTurnstileToken(null);
@@ -154,19 +142,15 @@ export function RegisterEmailConfirmForm({
 
     const formData = new FormData(event.currentTarget);
     try {
-      const response = await fetch("/api/bff/auth/email/confirm", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          code: formData.get("code"),
-          ...turnstilePayload(turnstileToken),
-        }),
+      const result = await confirmEmailVerificationCodeAction({
+        code: String(formData.get("code") ?? ""),
+        ...(turnstileToken ? { turnstileToken } : {}),
       });
 
-      if (!response.ok) {
+      if (!result.ok) {
         turnstile?.reset();
         setTurnstileToken(null);
-        setError(await readError(response, "Не удалось подтвердить e-mail."));
+        setError(result.message);
         return;
       }
 

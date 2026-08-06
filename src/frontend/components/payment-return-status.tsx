@@ -1,61 +1,23 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { useSearchParams } from "next/navigation";
-import { Card } from "primereact/card";
+import { useEffect, useTransition } from "react";
+import { useRouter } from "next/navigation";
 import { Message } from "primereact/message";
-import { readBffError } from "@/frontend/lib/client-api";
 import { Tag } from "primereact/tag";
 import { Button } from "primereact/button";
 
-import { AppShell, PageHeader } from "@/frontend/components/layout";
 import { LinkButton } from "@/frontend/components/prime/link-button";
 import { shouldPollPaymentOperation } from "@/frontend/lib/payment-idempotency";
 import {
   paymentPollDelayMs,
   paymentReturnOutcome,
   shouldPollPaymentReturn,
-  shouldRetryPaymentReturnError,
 } from "@/frontend/lib/payment-return";
-import { readPaymentReturnReference } from "@/frontend/lib/payment-return-storage";
-
-type PaymentStatus = {
-  payment_id: string;
-  purchase_type: string;
-  status: string;
-  final_amount: string;
-  currency: string;
-  gateway_type: string;
-  plan_name: string | null;
-  created_at: string;
-} | null;
-
-type CurrentSubscription = {
-  status: string;
-  plan_name: string;
-  expire_at: string;
-} | null;
-
-type StatusResponse = {
-  payment: PaymentStatus;
-  operation: {
-    operation_id: string;
-    status:
-      | "processing"
-      | "outcome_unknown"
-      | "manual_required"
-      | "succeeded"
-      | "failed"
-      | "retry_ready";
-    retry_after_seconds: number | null;
-    requires_support: boolean;
-    operator_action: string | null;
-  } | null;
-  subscription: CurrentSubscription;
-};
+import type { PaymentStatusPageModel, PaymentStatusViewModel } from "@/shared/presentation/payment-status";
 
 type Props = {
   kind: "success" | "fail" | "pending";
+  model: PaymentStatusPageModel;
 };
 
 function formatDate(value: string) {
@@ -65,7 +27,7 @@ function formatDate(value: string) {
   }).format(new Date(value));
 }
 
-function heading(data: StatusResponse | null) {
+function heading(data: PaymentStatusViewModel | null) {
   const outcome = paymentReturnOutcome(data);
 
   if (outcome === "success") return "Оплата подтверждена";
@@ -74,14 +36,6 @@ function heading(data: StatusResponse | null) {
   if (outcome === "unknown") return "Статус платежа требует проверки";
 
   return "Проверяем статус платежа";
-}
-
-function intro(kind: Props["kind"]) {
-  if (kind === "fail") {
-    return "Возврат от провайдера не является подтверждением результата — сверяем серверный статус.";
-  }
-
-  return "Результат определяется по локальной операции, провайдеру и актуальной подписке.";
 }
 
 function paymentStatusLabel(status: string) {
@@ -113,112 +67,21 @@ function paymentSeverity(status: string): "success" | "warning" | "danger" | "in
   return "info";
 }
 
-export function PaymentReturnStatus({ kind }: Props) {
-  const searchParams = useSearchParams();
-  const [data, setData] = useState<StatusResponse | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [refreshKey, setRefreshKey] = useState(0);
-  const [loading, setLoading] = useState(true);
-
-  const paymentId = useMemo(() => {
-    return (
-      searchParams.get("payment_id") ??
-      searchParams.get("paymentId") ??
-      searchParams.get("order_id") ??
-      searchParams.get("id")
-    );
-  }, [searchParams]);
-
-  const operationId = useMemo(() => {
-    return (
-      searchParams.get("operation_id") ?? searchParams.get("operationId")
-    );
-  }, [searchParams]);
+export function PaymentReturnStatus({ kind, model }: Props) {
+  const router = useRouter();
+  const [loading, startRefresh] = useTransition();
+  const data = model.status === "ready" ? model.data : null;
+  const error = model.status === "error" ? model.message : null;
 
   useEffect(() => {
-    const fallback = paymentId || operationId
-      ? null
-      : readPaymentReturnReference();
-    const resolvedPaymentId = paymentId ?? fallback?.paymentId ?? null;
-    const resolvedOperationId = operationId ?? fallback?.operationId ?? null;
-    const query = new URLSearchParams();
-
-    if (resolvedPaymentId) query.set("payment_id", resolvedPaymentId);
-    if (resolvedOperationId) query.set("operation_id", resolvedOperationId);
-
-    let cancelled = false;
-    let pollTimer: ReturnType<typeof setTimeout> | undefined;
-    let pollAttempt = 0;
-
-    const loadStatus = async () => {
-      if (!cancelled) setLoading(true);
-
-      try {
-        const response = await fetch(
-          `/api/bff/payments/status${query.size > 0 ? `?${query.toString()}` : ""}`,
-        );
-
-        if (!response.ok) {
-          throw await readBffError(response, "Не удалось проверить статус.");
-        }
-
-        const body = await response.json().catch(() => null);
-        const nextData = body?.data as StatusResponse | undefined;
-
-        if (!nextData) {
-          throw new Error("Сервер вернул некорректный статус платежа.");
-        }
-
-        if (!cancelled) {
-          setData(nextData);
-          setError(null);
-          setLoading(false);
-
-          if (shouldPollPaymentReturn(nextData)) {
-            const delay = paymentPollDelayMs(
-              pollAttempt,
-              nextData.operation?.retry_after_seconds,
-            );
-            pollAttempt += 1;
-            pollTimer = setTimeout(loadStatus, delay);
-          }
-        }
-      } catch (loadError) {
-        if (!cancelled) {
-          setError(
-            loadError instanceof Error
-              ? loadError.message
-              : "Не удалось проверить статус.",
-          );
-          setLoading(false);
-
-          // An operation id is durable, so a transient BFF/Remnashop outage
-          // must not permanently stop the callback page from observing it.
-          if (
-            (resolvedOperationId || resolvedPaymentId)
-            && shouldRetryPaymentReturnError(loadError)
-          ) {
-            const delay = paymentPollDelayMs(pollAttempt);
-            pollAttempt += 1;
-            pollTimer = setTimeout(loadStatus, delay);
-          }
-        }
-      }
-    };
-
-    void loadStatus();
-
-    return () => {
-      cancelled = true;
-      if (pollTimer) clearTimeout(pollTimer);
-    };
-  }, [operationId, paymentId, refreshKey]);
+    if (!data || !shouldPollPaymentReturn(data)) return;
+    const timer = window.setTimeout(() => startRefresh(() => router.refresh()), paymentPollDelayMs(0, data.operation?.retry_after_seconds));
+    return () => window.clearTimeout(timer);
+  }, [data, router]);
 
   return (
-    <AppShell>
-      <div className="flex flex-column gap-6">
-        <PageHeader description={intro(kind)} title={heading(data)} />
-      <Card>
+    <div className="flex flex-column gap-6">
+      <h1 className="text-3xl font-semibold m-0">{heading(data)}</h1>
         <div className="flex flex-column gap-4">
         {error ? <Message severity="warn" text={`Результат пока неизвестен. ${error}`} /> : null}
         {loading && !data ? <Message severity="info" text="Проверка..." /> : null}
@@ -277,14 +140,12 @@ export function PaymentReturnStatus({ kind }: Props) {
           />
         ) : null}
         </div>
-      </Card>
-
       <div className="flex flex-wrap gap-2">
         <Button
           icon="pi pi-refresh"
           label="Обновить статус"
           loading={loading}
-          onClick={() => setRefreshKey((value) => value + 1)}
+          onClick={() => startRefresh(() => router.refresh())}
           outlined
           type="button"
         />
@@ -293,8 +154,7 @@ export function PaymentReturnStatus({ kind }: Props) {
           <LinkButton href="/tariffs" label="Вернуться к тарифам" outlined />
         ) : null}
       </div>
-      </div>
-    </AppShell>
+    </div>
   );
 }
 

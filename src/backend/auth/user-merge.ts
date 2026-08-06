@@ -1,6 +1,6 @@
 import { Prisma } from "@prisma/client";
 
-import { BffError } from "@/backend/integrations/remnashop/errors";
+import { ServiceError } from "@/backend/errors/service-error";
 import {
   lockPaymentOwnerFence,
   transferPaymentOperationsForUserMerge,
@@ -28,7 +28,7 @@ export type LocalUserOwnerExpectation = {
 };
 
 function mergeStateChangedError() {
-  return new BffError(
+  return new ServiceError(
     "ACCOUNT_MERGE_REQUIRED",
     409,
     "Local account merge ownership changed; retry with freshly verified identities",

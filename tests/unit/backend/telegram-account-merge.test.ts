@@ -69,7 +69,7 @@ import {
   getTelegramAccountMergeConfirmation,
   stageTelegramAccountMerge,
 } from "@/backend/auth/telegram-account-merge";
-import { BffError } from "@/backend/integrations/remnashop/errors";
+import { ServiceError } from "@/backend/errors/service-error";
 
 const targetUser = {
   id: "target-local",
@@ -492,7 +492,7 @@ describe("confirmed Telegram account merge", () => {
   it("retries safely after a lost upstream response and mutates local state only after proof", async () => {
     mocks.remnashopMergeUsers
       .mockResolvedValueOnce(mergeResult())
-      .mockRejectedValueOnce(new BffError("UPSTREAM_UNAVAILABLE", 503, "lost response"));
+      .mockRejectedValueOnce(new ServiceError("UPSTREAM_UNAVAILABLE", 503, "lost response"));
 
     await expect(confirmTelegramAccountMerge("raw-confirmation-token"))
       .rejects.toMatchObject({ code: "UPSTREAM_UNAVAILABLE" });
