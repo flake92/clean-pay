@@ -2,6 +2,7 @@ import type { AuditLogger } from "@/backend/services/audit-logger";
 import type { CacheStore } from "@/backend/services/cache-store";
 import type { CryptoService } from "@/backend/services/crypto-service";
 import type { ExternalGateway } from "@/backend/services/external-gateway";
+import type { MergeConfirmationStore } from "@/backend/services/merge-confirmation-store";
 import type { SessionStore } from "@/backend/services/session-store";
 import type { UserStore } from "@/backend/services/user-store";
 import { nodeCryptoService } from "@/backend/services/node-crypto-service";
@@ -15,6 +16,7 @@ export type ServiceRegistry = {
   cryptoService: CryptoService;
   externalGateway: ExternalGateway;
   auditLogger: AuditLogger;
+  mergeConfirmationStore: MergeConfirmationStore;
 };
 
 let registry: ServiceRegistry | null = null;
@@ -34,6 +36,7 @@ export function initServiceRegistry(services: Partial<ServiceRegistry> = {}): Se
     cryptoService: services.cryptoService ?? nodeCryptoService,
     externalGateway: services.externalGateway ?? createHttpExternalGateway(),
     auditLogger: services.auditLogger ?? prismaAuditLogger,
+    mergeConfirmationStore: services.mergeConfirmationStore ?? createPrismaMergeConfirmationStore(),
   };
   return registry;
 }
@@ -55,4 +58,10 @@ function createHttpExternalGateway(): ExternalGateway {
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const { httpExternalGateway } = require("@/backend/services/http-external-gateway") as { httpExternalGateway: ExternalGateway };
   return httpExternalGateway;
+}
+
+function createPrismaMergeConfirmationStore(): MergeConfirmationStore {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { prismaMergeConfirmationStore } = require("@/backend/services/prisma-merge-confirmation-store") as { prismaMergeConfirmationStore: MergeConfirmationStore };
+  return prismaMergeConfirmationStore;
 }
