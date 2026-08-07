@@ -45,7 +45,8 @@ describeWithPostgres("Telegram recovery PostgreSQL serialization", () => {
 
     ({ prisma } = await import("@/backend/database/prisma"));
     const { initServiceRegistry } = await import("@/backend/services/registry");
-    initServiceRegistry();
+    const { prismaAuditLogger } = await import("@/backend/services/prisma-audit-logger");
+    initServiceRegistry({ auditLogger: prismaAuditLogger });
     ({ getAuthorizedRemnashopTokens } = await import(
       "@/backend/integrations/remnashop/client"
     ));

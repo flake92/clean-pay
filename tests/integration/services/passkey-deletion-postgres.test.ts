@@ -15,7 +15,8 @@ describeWithPostgres("passkey deletion PostgreSQL serialization", () => {
 
     ({ prisma } = await import("@/backend/database/prisma"));
     const { initServiceRegistry } = await import("@/backend/services/registry");
-    initServiceRegistry();
+    const { prismaAuditLogger } = await import("@/backend/services/prisma-audit-logger");
+    initServiceRegistry({ auditLogger: prismaAuditLogger });
     ({ deleteOwnedPasskey, recordPasskeyUse } = await import("@/backend/auth/passkeys"));
   });
 
