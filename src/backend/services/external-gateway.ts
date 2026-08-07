@@ -17,7 +17,7 @@ export interface ChangePasswordInput {
 export interface MergeResult {
   success: boolean;
   message?: string;
-  data?: any;
+  data?: Record<string, unknown>;
 }
 
 export interface MergeUsersInput {
@@ -37,13 +37,13 @@ export interface RemnashopMe {
   username?: string;
   balance?: number;
   subscription_end_date?: string;
-  [key: string]: any;
+  [key: string]: unknown;
 }
 
 export interface RequestOptions {
   method?: string;
   headers?: Record<string, string>;
-  body?: any;
+  body?: unknown;
   accessToken?: string;
   signal?: AbortSignal;
   timeoutMs?: number;

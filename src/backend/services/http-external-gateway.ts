@@ -27,9 +27,9 @@ export const httpExternalGateway: ExternalGateway = {
     if (!response.ok) {
       throw new Error(`Remnashop auth failed: ${response.status}`);
     }
-    const data = await response.json() as any;
+    const data = await response.json() as AuthResponse["data"];
     const cookies = extractCookies(response);
-    return { data: data as AuthResponse["data"], cookies };
+    return { data, cookies };
   },
 
   async getRemnashopMe(accessToken: string): Promise<RemnashopMe> {
@@ -57,7 +57,7 @@ export const httpExternalGateway: ExternalGateway = {
       signal: AbortSignal.timeout(15_000),
     });
     if (!response.ok) throw new Error(`Refresh failed: ${response.status}`);
-    const data = await response.json() as any;
+    const data = await response.json() as TokenPair["data"];
     const cookies = extractCookies(response);
     return { data, cookies };
   },
@@ -184,7 +184,7 @@ export const httpExternalGateway: ExternalGateway = {
       signal: AbortSignal.timeout(10_000),
     });
     if (!response.ok) throw new Error(`Telegram token exchange failed: ${response.status}`);
-    const data = await response.json() as any;
+    const data = await response.json() as { id_token: string };
     return data.id_token;
   },
 
@@ -203,7 +203,7 @@ export const httpExternalGateway: ExternalGateway = {
       signal: AbortSignal.timeout(10_000),
     });
     if (!response.ok) throw new Error(`Turnstile verification failed: ${response.status}`);
-    const result = await response.json() as any;
+    const result = await response.json() as { success: boolean };
     if (!result.success) throw new Error("Turnstile verification failed");
   },
 };

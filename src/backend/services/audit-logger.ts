@@ -1,7 +1,7 @@
 export interface AuditLogInput {
   action: string;
   userId?: string;
-  metadata?: Record<string, any>;
+  metadata?: Record<string, unknown>;
 }
 
 export interface AuditLogger {
