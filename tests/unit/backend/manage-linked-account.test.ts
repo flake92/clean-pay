@@ -2,9 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   confirmLinkedTelegram,
-  cancelLinkedTelegram,
   linkAccountEmail,
-  removeLinkedPasskey,
 } from "@/backend/application/auth/manage-linked-account";
 import { ServiceError } from "@/backend/errors/service-error";
 
