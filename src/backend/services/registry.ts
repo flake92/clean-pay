@@ -25,6 +25,19 @@ export type ServiceRegistry = {
   oneTimeStateStore: OneTimeStateStore;
 };
 
+const defaultFactories: Record<string, () => unknown> = {
+  userStore: () => createPrismaUserStore(),
+  sessionStore: () => createPrismaSessionStore(),
+  cacheStore: () => redisCacheStore,
+  cryptoService: () => nodeCryptoService,
+  externalGateway: () => createHttpExternalGateway(),
+  auditLogger: () => prismaAuditLogger,
+  mergeConfirmationStore: () => createPrismaMergeConfirmationStore(),
+  paymentOperationStore: () => createPrismaPaymentOperationStore(),
+  paymentRecordStore: () => createPrismaPaymentRecordStore(),
+  oneTimeStateStore: () => createPrismaOneTimeStateStore(),
+};
+
 let registry: ServiceRegistry | null = null;
 
 export function getServiceRegistry(): ServiceRegistry {
@@ -35,18 +48,21 @@ export function getServiceRegistry(): ServiceRegistry {
 }
 
 export function initServiceRegistry(services: Partial<ServiceRegistry> = {}): ServiceRegistry {
-  registry = {
-    userStore: services.userStore ?? createPrismaUserStore(),
-    sessionStore: services.sessionStore ?? createPrismaSessionStore(),
-    cacheStore: services.cacheStore ?? redisCacheStore,
-    cryptoService: services.cryptoService ?? nodeCryptoService,
-    externalGateway: services.externalGateway ?? createHttpExternalGateway(),
-    auditLogger: services.auditLogger ?? prismaAuditLogger,
-    mergeConfirmationStore: services.mergeConfirmationStore ?? createPrismaMergeConfirmationStore(),
-    paymentOperationStore: services.paymentOperationStore ?? createPrismaPaymentOperationStore(),
-    paymentRecordStore: services.paymentRecordStore ?? createPrismaPaymentRecordStore(),
-    oneTimeStateStore: services.oneTimeStateStore ?? createPrismaOneTimeStateStore(),
-  };
+  const overrides = services as Record<string, unknown>;
+  const cache: Record<string, unknown> = { ...overrides };
+
+  registry = new Proxy({} as ServiceRegistry, {
+    get(_target, prop: string) {
+      if (prop in cache) {
+        return cache[prop];
+      }
+      if (prop in defaultFactories) {
+        cache[prop] = defaultFactories[prop]();
+        return cache[prop];
+      }
+      return undefined;
+    },
+  });
   return registry;
 }
 
