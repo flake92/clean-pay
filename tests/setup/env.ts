@@ -1,4 +1,4 @@
-process.env.DATABASE_URL = "postgresql://clean_pay:clean_pay@postgres:5432/clean_pay?schema=public";
+process.env.DATABASE_URL ||= "postgresql://clean_pay:clean_pay@postgres:5432/clean_pay?schema=public";
 process.env.APP_URL = "http://localhost:8080";
 process.env.NEXT_PUBLIC_APP_URL = "http://localhost:8080";
 process.env.REMNASHOP_API_BASE_URL = "http://remnashop:5000/api/v1/public";
