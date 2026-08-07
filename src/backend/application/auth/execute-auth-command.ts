@@ -1,18 +1,18 @@
 import type { AuthCommands } from "@/backend/application/auth/ports/auth-commands";
+import { ServiceError } from "@/backend/errors/service-error";
 import type { AuthCommand, AuthCommandResult } from "@/shared/presentation/auth-actions";
 
 function errorResult(error: unknown): AuthCommandResult {
-  const candidate = error as { code?: unknown };
-  const code = typeof candidate?.code === "string" ? candidate.code : "INTERNAL_ERROR";
+  const code = error instanceof ServiceError ? error.code : "INTERNAL_ERROR";
   const messages: Record<string, string> = {
     AUTH_FAILED: "Неверный e-mail или пароль.",
     RATE_LIMITED: "Слишком много попыток. Попробуйте позже.",
     VALIDATION_ERROR: "Проверьте введённые данные.",
     EMAIL_CODE_INVALID: "Код не подошёл. Проверьте его и попробуйте снова.",
     EMAIL_CODE_EXPIRED: "Код истёк. Запросите новый.",
-    UPSTREAM_UNAVAILABLE: "Сервис временно недоступен. Попробуйте позже.",
   };
-  return { ok: false, code, message: messages[code] ?? "Не удалось выполнить действие." };
+  const message = messages[code] ?? (error instanceof ServiceError ? error.prodMessage : null) ?? "Не удалось выполнить действие.";
+  return { ok: false, code, message };
 }
 
 export async function executeAuthCommand(commands: AuthCommands, command: AuthCommand): Promise<AuthCommandResult> {

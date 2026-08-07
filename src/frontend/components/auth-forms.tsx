@@ -339,7 +339,7 @@ export function TelegramLoginButton({ redirectTo = "/cabinet" }: { redirectTo?: 
       window.location.assign(url.toString());
     } catch (error) {
       turnstile.reset();
-      setState({ loading: false, error: error instanceof Error ? error.message : "Telegram login failed." });
+      setState({ loading: false, error: error instanceof Error ? error.message : "Не удалось войти через Telegram." });
     }
   }
 

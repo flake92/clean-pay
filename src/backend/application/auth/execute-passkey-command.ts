@@ -1,6 +1,7 @@
 import type { AuthenticationResponseJSON, RegistrationResponseJSON } from "@simplewebauthn/server";
 
 import type { PasskeyCommands } from "@/backend/application/auth/ports/passkey-commands";
+import { ServiceError } from "@/backend/errors/service-error";
 import type {
   PasskeyLoginOptionsResult,
   PasskeyRegistrationOptionsResult,
@@ -8,12 +9,12 @@ import type {
 } from "@/shared/presentation/passkey-actions";
 
 function failure(error: unknown, fallback: string): { ok: false; code: string; message: string } {
-  const candidate = error as { code?: unknown };
-  const code = typeof candidate?.code === "string" ? candidate.code : "INTERNAL_ERROR";
+  const code = error instanceof ServiceError ? error.code : "INTERNAL_ERROR";
   if (code === "NOT_FOUND" || code === "UNAUTHORIZED") {
     return { ok: false, code, message: "Этот ключ не подходит выбранному аккаунту. Войдите по паролю и при необходимости создайте новый ключ в профиле." };
   }
-  return { ok: false, code, message: fallback };
+  const message = error instanceof ServiceError ? error.prodMessage : fallback;
+  return { ok: false, code, message };
 }
 
 export async function beginPasskeyLogin(commands: PasskeyCommands, input: { email: string; turnstileToken?: string }): Promise<PasskeyLoginOptionsResult> {

@@ -6,7 +6,7 @@ import { NextResponse } from "next/server";
 
 import { auditLog, logTechnicalError, logTechnicalWarning } from "@/backend/observability/audit";
 import { authDebugLog } from "@/backend/observability/auth-debug-log";
-import { randomToken, sha256 } from "@/backend/security/crypto";
+import { randomToken, safeEqual, sha256 } from "@/backend/security/crypto";
 import { getEnv } from "@/backend/config/env";
 import { logger } from "@/backend/observability/logger";
 import { prisma } from "@/backend/database/prisma";
@@ -385,7 +385,7 @@ function verifyTelegramLoginWidgetPayload(payload: TelegramLoginWidgetPayload) {
   };
   const expectedHash = signTelegramAuthPayload(bodyWithoutHash, env.telegramBotToken);
 
-  if (expectedHash !== payload.hash) {
+  if (!safeEqual(expectedHash, payload.hash)) {
     throw new Error("Telegram Login payload hash is invalid");
   }
 

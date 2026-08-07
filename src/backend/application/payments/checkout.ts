@@ -1,4 +1,5 @@
 import type { CheckoutReader, PaymentCommands } from "@/backend/application/payments/ports/checkout";
+import { ServiceError } from "@/backend/errors/service-error";
 import type { CheckoutViewModel, PaymentCommand, PaymentCommandResult } from "@/shared/presentation/checkout";
 
 export async function loadCheckout(reader: CheckoutReader): Promise<CheckoutViewModel> {
@@ -8,8 +9,9 @@ export async function loadCheckout(reader: CheckoutReader): Promise<CheckoutView
     if (account.accountSyncPending) return { status: "account-action-required", action: "verifyEmail", message: "Дождитесь завершения подтверждения e-mail." };
     if (!account.emailVerified) return { status: "account-action-required", action: "linkEmail", message: "Для оплаты добавьте e-mail и пароль, затем подтвердите адрес кодом из письма." };
     return { status: "ready", offers: await reader.loadOffers() };
-  } catch {
-    return { status: "error", message: "Не удалось загрузить данные оплаты." };
+  } catch (error) {
+    const message = error instanceof ServiceError ? error.prodMessage : "Не удалось загрузить данные оплаты.";
+    return { status: "error", message };
   }
 }
 
@@ -21,8 +23,7 @@ export async function executePayment(commands: PaymentCommands, command: Payment
       : await commands.extend(command.request, command.idempotencyKey);
     return { ok: true, ...result };
   } catch (error) {
-    const candidate = error as { code?: unknown };
-    const code = typeof candidate?.code === "string" ? candidate.code : "INTERNAL_ERROR";
+    const code = error instanceof ServiceError ? error.code : "INTERNAL_ERROR";
     const messages: Record<string, string> = {
       OFFER_CHANGED: "Цена или условия предложения изменились. Проверьте новую цену перед оплатой.",
       PLAN_UNAVAILABLE: "Выбранное предложение больше недоступно.",
@@ -32,6 +33,7 @@ export async function executePayment(commands: PaymentCommands, command: Payment
       RATE_LIMITED: "Слишком много попыток. Попробуйте позже.",
     };
     const finalCodes = new Set(["OFFER_CHANGED", "PLAN_UNAVAILABLE", "PAYMENT_GATEWAY_UNAVAILABLE", "IDEMPOTENCY_KEY_REUSED", "VALIDATION_ERROR"]);
-    return { ok: false, code, message: messages[code] ?? "Не удалось подтвердить результат оплаты. Повторите попытку с тем же запросом.", retainIdempotencyKey: !finalCodes.has(code) };
+    const message = messages[code] ?? (error instanceof ServiceError ? error.prodMessage : null) ?? "Не удалось подтвердить результат оплаты. Повторите попытку с тем же запросом.";
+    return { ok: false, code, message, retainIdempotencyKey: !finalCodes.has(code) };
   }
 }
