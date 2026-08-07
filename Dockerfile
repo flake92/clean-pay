@@ -4,8 +4,8 @@ WORKDIR /app
 
 ENV NEXT_TELEMETRY_DISABLED=1
 
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates openssl \
+RUN apt-get -o Acquire::AllowInsecureRepositories=true -o Acquire::AllowDowngradeToInsecureRepositories=true update \
+    && apt-get -o Acquire::AllowInsecureRepositories=true -o Acquire::AllowDowngradeToInsecureRepositories=true install -y --no-install-recommends --allow-unauthenticated ca-certificates openssl \
     && rm -rf /var/lib/apt/lists/*
 
 COPY package.json package-lock.json .npmrc ./
@@ -57,8 +57,8 @@ WORKDIR /app
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
 
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates openssl \
+RUN apt-get -o Acquire::AllowInsecureRepositories=true -o Acquire::AllowDowngradeToInsecureRepositories=true update \
+    && apt-get -o Acquire::AllowInsecureRepositories=true -o Acquire::AllowDowngradeToInsecureRepositories=true install -y --no-install-recommends --allow-unauthenticated ca-certificates openssl \
     && rm -rf /var/lib/apt/lists/* \
     && groupadd --system --gid 1001 nodejs \
     && useradd --system --uid 1001 --gid nodejs cleanpay
@@ -86,8 +86,8 @@ ENV CLEAN_PAY_BAKED_PUBLIC_APP_URL=${NEXT_PUBLIC_APP_URL}
 ENV HOSTNAME=0.0.0.0
 ENV PORT=4000
 
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates openssl \
+RUN apt-get -o Acquire::AllowInsecureRepositories=true -o Acquire::AllowDowngradeToInsecureRepositories=true update \
+    && apt-get -o Acquire::AllowInsecureRepositories=true -o Acquire::AllowDowngradeToInsecureRepositories=true install -y --no-install-recommends --allow-unauthenticated ca-certificates openssl \
     && rm -rf /var/lib/apt/lists/* \
     && groupadd --system --gid 1001 nodejs \
     && useradd --system --uid 1001 --gid nodejs cleanpay
