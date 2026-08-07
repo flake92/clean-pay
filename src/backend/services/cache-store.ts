@@ -1,3 +1,5 @@
+export type CacheValue = string | number;
+
 export interface CacheStore {
   get(key: string): Promise<string | null>;
   set(key: string, value: string, ttlSeconds?: number): Promise<void>;
@@ -9,6 +11,6 @@ export interface CacheStore {
   zrem(key: string, member: string): Promise<void>;
   zcard(key: string): Promise<number>;
   zremrangebyscore(key: string, min: string, max: string): Promise<void>;
-  eval(script: string, keys: string[], args: any[]): Promise<unknown>;
+  eval(script: string, keys: string[], args: CacheValue[]): Promise<unknown>;
   ping(): Promise<boolean>;
 }
