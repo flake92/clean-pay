@@ -32,6 +32,14 @@ export const prismaPaymentOperationStore: PaymentOperationStore = {
     }) as Promise<Pick<PaymentOperationRecord, "id" | "status" | "claimTokenHash" | "upstreamOwnerHash"> | null>;
   },
 
+  async findReconcileFailureCount(id: string): Promise<number | null> {
+    const row = await prisma.paymentOperation.findUnique({
+      where: { id },
+      select: { reconcileFailureCount: true },
+    });
+    return row?.reconcileFailureCount ?? null;
+  },
+
   async updateMany(where: UpdateWhereInput, data: UpdateDataInput): Promise<number> {
     const result = await prisma.paymentOperation.updateMany({
       where: where as any,

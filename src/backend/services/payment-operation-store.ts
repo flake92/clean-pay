@@ -63,5 +63,6 @@ export interface UpdateDataInput {
 export interface PaymentOperationStore {
   findByUserAndKey(input: FindByUserAndKeyInput): Promise<PaymentOperationRecord | null>;
   findById(id: string): Promise<Pick<PaymentOperationRecord, "id" | "status" | "claimTokenHash" | "upstreamOwnerHash"> | null>;
+  findReconcileFailureCount(id: string): Promise<number | null>;
   updateMany(where: UpdateWhereInput, data: UpdateDataInput): Promise<number>;
 }
