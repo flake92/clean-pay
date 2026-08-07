@@ -18,15 +18,30 @@ interface PrismaSessionRow {
   refreshTokenHash: string;
   revokedAt: Date | null;
   userAgent: string | null;
+  ipHash: string | null;
+  refreshRotatedAt: Date | null;
   remnashopAccessTokenEncrypted: string | null;
   remnashopRefreshTokenEncrypted: string | null;
   remnashopAccessExpiresAt: Date | null;
   remnashopRefreshExpiresAt: Date | null;
+  createdAt: Date;
+  updatedAt: Date;
   user?: {
     id: string;
     email: string | null;
     emailVerified: boolean;
     telegramId: string | null;
+    telegramUsername: string | null;
+    remnashopUserId: string | null;
+    fullName: string | null;
+    displayName: string | null;
+    photoUrl: string | null;
+    authPending: boolean;
+    pendingRemnashopUserId: string | null;
+    pendingRemnashopEmail: string | null;
+    lastLoginAt: Date | null;
+    createdAt: Date;
+    updatedAt: Date;
   };
 }
 
@@ -47,10 +62,14 @@ function toSession(row: PrismaSessionRow): Session {
     refreshTokenHash: row.refreshTokenHash,
     revokedAt: row.revokedAt,
     userAgent: row.userAgent,
+    ipHash: row.ipHash,
+    refreshRotatedAt: row.refreshRotatedAt,
     remnashopAccessTokenEncrypted: row.remnashopAccessTokenEncrypted,
     remnashopRefreshTokenEncrypted: row.remnashopRefreshTokenEncrypted,
     remnashopAccessExpiresAt: row.remnashopAccessExpiresAt,
     remnashopRefreshExpiresAt: row.remnashopRefreshExpiresAt,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
   };
 }
 
@@ -62,6 +81,17 @@ function toSessionWithUser(row: PrismaSessionRow & { user: NonNullable<PrismaSes
       email: row.user.email,
       emailVerified: row.user.emailVerified,
       telegramId: row.user.telegramId,
+      telegramUsername: row.user.telegramUsername,
+      remnashopUserId: row.user.remnashopUserId,
+      fullName: row.user.fullName,
+      displayName: row.user.displayName,
+      photoUrl: row.user.photoUrl,
+      authPending: row.user.authPending,
+      pendingRemnashopUserId: row.user.pendingRemnashopUserId,
+      pendingRemnashopEmail: row.user.pendingRemnashopEmail,
+      lastLoginAt: row.user.lastLoginAt,
+      createdAt: row.user.createdAt,
+      updatedAt: row.user.updatedAt,
     },
   };
 }
@@ -91,6 +121,19 @@ export const prismaSessionStore: SessionStore = {
   async findByRefreshToken(hash: string): Promise<SessionWithUser | null> {
     const row = await prisma.webSession.findFirst({
       where: { refreshTokenHash: hash, revokedAt: null },
+      include: { user: true },
+    });
+    return row ? toSessionWithUser(row as PrismaSessionRow & { user: NonNullable<PrismaSessionRow["user"]> }) : null;
+  },
+
+  async findActiveSession(id: string, userId: string): Promise<SessionWithUser | null> {
+    const row = await prisma.webSession.findFirst({
+      where: {
+        id,
+        userId,
+        revokedAt: null,
+        accessTokenExpiresAt: { gt: new Date() },
+      },
       include: { user: true },
     });
     return row ? toSessionWithUser(row as PrismaSessionRow & { user: NonNullable<PrismaSessionRow["user"]> }) : null;

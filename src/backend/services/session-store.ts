@@ -10,10 +10,14 @@ export interface Session {
   refreshTokenHash: string;
   revokedAt: Date | null;
   userAgent: string | null;
+  ipHash: string | null;
+  refreshRotatedAt: Date | null;
   remnashopAccessTokenEncrypted: string | null;
   remnashopRefreshTokenEncrypted: string | null;
   remnashopAccessExpiresAt: Date | null;
   remnashopRefreshExpiresAt: Date | null;
+  createdAt: Date;
+  updatedAt: Date;
 }
 
 export interface SessionWithUser extends Session {
@@ -22,6 +26,17 @@ export interface SessionWithUser extends Session {
     email: string | null;
     emailVerified: boolean;
     telegramId: string | null;
+    telegramUsername: string | null;
+    remnashopUserId: string | null;
+    fullName: string | null;
+    displayName: string | null;
+    photoUrl: string | null;
+    authPending: boolean;
+    pendingRemnashopUserId: string | null;
+    pendingRemnashopEmail: string | null;
+    lastLoginAt: Date | null;
+    createdAt: Date;
+    updatedAt: Date;
   };
 }
 
@@ -59,6 +74,7 @@ export interface SessionWhereInput {
 export interface SessionStore {
   findById(id: string): Promise<Session | null>;
   findByIdWithUser(id: string): Promise<SessionWithUser | null>;
+  findActiveSession(id: string, userId: string): Promise<SessionWithUser | null>;
   findByRefreshToken(hash: string): Promise<SessionWithUser | null>;
   create(data: CreateSessionInput): Promise<Session>;
   update(id: string, data: UpdateSessionInput): Promise<void>;
