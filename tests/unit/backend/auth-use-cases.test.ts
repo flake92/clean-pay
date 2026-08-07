@@ -72,6 +72,17 @@ vi.mock("@/backend/database/prisma", () => ({
   prisma: mocks.prisma,
 }));
 
+vi.mock("@/backend/services/registry", () => ({
+  getServiceRegistry: vi.fn(() => ({
+    userStore: {
+      findByEmail: mocks.prisma.webUser.findUnique,
+      update: vi.fn(async (id: string, data: Record<string, unknown>) => {
+        return mocks.prisma.webUser.update({ where: { id }, data });
+      }),
+    },
+  })),
+}));
+
 vi.mock("@/backend/sessions/web-session", () => ({
   getCurrentSession: mocks.getCurrentSession,
   refreshCurrentAccessCookie: mocks.refreshCurrentAccessCookie,
