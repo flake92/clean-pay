@@ -7,7 +7,8 @@ export const prismaAuditLogger: AuditLogger = {
       data: {
         action: input.action,
         userId: input.userId ?? null,
-        metadata: input.metadata ?? undefined,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        metadata: (input.metadata as any) ?? undefined,
       },
     });
   },

@@ -32,6 +32,12 @@ interface PrismaWhereInput {
   OR?: PrismaWhereInput[];
 }
 
+interface PrismaUpsertWhere {
+  id?: string;
+  email?: string;
+  telegramId?: string;
+}
+
 function toUser(row: PrismaUserRow): User {
   return {
     id: row.id,
@@ -88,24 +94,26 @@ export const prismaUserStore: UserStore = {
     return rows.map(row => toUser(row as PrismaUserRow));
   },
 
+  /* eslint-disable @typescript-eslint/no-explicit-any */
   async create(data: CreateUserInput): Promise<User> {
-    const row = await prisma.webUser.create({ data: data as Record<string, unknown> });
+    const row = await prisma.webUser.create({ data: data as any });
     return toUser(row as PrismaUserRow);
   },
 
   async update(id: string, data: UpdateUserInput): Promise<User> {
-    const row = await prisma.webUser.update({ where: { id }, data: data as Record<string, unknown> });
+    const row = await prisma.webUser.update({ where: { id }, data: data as any });
     return toUser(row as PrismaUserRow);
   },
 
   async upsert(where: UpsertUserWhere, create: CreateUserInput, update: UpdateUserInput): Promise<User> {
     const row = await prisma.webUser.upsert({
-      where: where as Record<string, unknown>,
-      create: create as Record<string, unknown>,
-      update: update as Record<string, unknown>,
+      where: where as any,
+      create: create as any,
+      update: update as any,
     });
     return toUser(row as PrismaUserRow);
   },
+  /* eslint-enable @typescript-eslint/no-explicit-any */
 
   async deleteMany(ids: string[]): Promise<number> {
     const result = await prisma.webUser.deleteMany({ where: { id: { in: ids } } });
