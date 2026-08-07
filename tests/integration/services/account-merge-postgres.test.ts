@@ -14,6 +14,8 @@ describeWithPostgres("account merge PostgreSQL invariants", () => {
     process.env.DATABASE_URL = realDatabaseUrl as string;
     delete (globalThis as typeof globalThis & { prisma?: unknown }).prisma;
     ({ prisma } = await import("@/backend/database/prisma"));
+    const { initServiceRegistry } = await import("@/backend/services/registry");
+    initServiceRegistry();
     ({ mergeLocalUsersIntoTarget } = await import("@/backend/auth/user-merge"));
     ({ withPaymentOwnerChangeFence, lockPaymentOwnerFence } =
       await import("@/backend/payments/user-merge"));
