@@ -19,17 +19,31 @@ export const productionTelegramWebAppAuthenticator: TelegramWebAppAuthenticator 
       auth: auth.data,
       verifiedProfile,
     });
-    const session = reconciled.remnashopSession
-      ? await createWebSessionForRemnashopUser({
-          userId: reconciled.user.id,
-          authMethod: WebSessionAuthMethod.TELEGRAM,
-          remnashopAccessTokenEncrypted: reconciled.remnashopSession.accessTokenEncrypted,
-          remnashopRefreshTokenEncrypted: reconciled.remnashopSession.refreshTokenEncrypted,
-          remnashopAccessExpiresAt: reconciled.remnashopSession.accessExpiresAt,
-          remnashopRefreshExpiresAt: reconciled.remnashopSession.refreshExpiresAt,
-        })
-      : null;
-    if (!session) throw new ServiceError("INTERNAL_ERROR", 500, "Remnashop session was not reconciled.");
-    if (reconciled.requiresTelegramRecovery) await recoverRemnashopTelegramSession(session.id, reconciled.user.id);
+
+    if (reconciled.requiresTelegramRecovery) {
+      const session = await createWebSessionForRemnashopUser({
+        userId: reconciled.user.id,
+        authMethod: WebSessionAuthMethod.TELEGRAM,
+        remnashopAccessTokenEncrypted: "",
+        remnashopRefreshTokenEncrypted: "",
+        remnashopAccessExpiresAt: new Date(0),
+        remnashopRefreshExpiresAt: new Date(0),
+      });
+      await recoverRemnashopTelegramSession(session.id, reconciled.user.id);
+      return;
+    }
+
+    if (!reconciled.remnashopSession) {
+      throw new ServiceError("INTERNAL_ERROR", 500, "Remnashop session was not reconciled.");
+    }
+
+    await createWebSessionForRemnashopUser({
+      userId: reconciled.user.id,
+      authMethod: WebSessionAuthMethod.TELEGRAM,
+      remnashopAccessTokenEncrypted: reconciled.remnashopSession.accessTokenEncrypted,
+      remnashopRefreshTokenEncrypted: reconciled.remnashopSession.refreshTokenEncrypted,
+      remnashopAccessExpiresAt: reconciled.remnashopSession.accessExpiresAt,
+      remnashopRefreshExpiresAt: reconciled.remnashopSession.refreshExpiresAt,
+    });
   },
 };
