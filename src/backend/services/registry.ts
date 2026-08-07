@@ -3,6 +3,7 @@ import type { CacheStore } from "@/backend/services/cache-store";
 import type { CryptoService } from "@/backend/services/crypto-service";
 import type { ExternalGateway } from "@/backend/services/external-gateway";
 import type { MergeConfirmationStore } from "@/backend/services/merge-confirmation-store";
+import type { PaymentOperationStore } from "@/backend/services/payment-operation-store";
 import type { SessionStore } from "@/backend/services/session-store";
 import type { UserStore } from "@/backend/services/user-store";
 import { nodeCryptoService } from "@/backend/services/node-crypto-service";
@@ -17,6 +18,7 @@ export type ServiceRegistry = {
   externalGateway: ExternalGateway;
   auditLogger: AuditLogger;
   mergeConfirmationStore: MergeConfirmationStore;
+  paymentOperationStore: PaymentOperationStore;
 };
 
 let registry: ServiceRegistry | null = null;
@@ -37,6 +39,7 @@ export function initServiceRegistry(services: Partial<ServiceRegistry> = {}): Se
     externalGateway: services.externalGateway ?? createHttpExternalGateway(),
     auditLogger: services.auditLogger ?? prismaAuditLogger,
     mergeConfirmationStore: services.mergeConfirmationStore ?? createPrismaMergeConfirmationStore(),
+    paymentOperationStore: services.paymentOperationStore ?? createPrismaPaymentOperationStore(),
   };
   return registry;
 }
@@ -64,4 +67,10 @@ function createPrismaMergeConfirmationStore(): MergeConfirmationStore {
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const { prismaMergeConfirmationStore } = require("@/backend/services/prisma-merge-confirmation-store") as { prismaMergeConfirmationStore: MergeConfirmationStore };
   return prismaMergeConfirmationStore;
+}
+
+function createPrismaPaymentOperationStore(): PaymentOperationStore {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { prismaPaymentOperationStore } = require("@/backend/services/prisma-payment-operation-store") as { prismaPaymentOperationStore: PaymentOperationStore };
+  return prismaPaymentOperationStore;
 }
