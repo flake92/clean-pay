@@ -2,38 +2,20 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { Prisma } from "@prisma/client";
 
 const mocks = vi.hoisted(() => ({
+  redisCommand: vi.fn(),
   cacheStore: {
     get: vi.fn(),
     set: vi.fn(),
-    incr: vi.fn(),
-    expire: vi.fn(),
     ttl: vi.fn(),
-    del: vi.fn(),
-    zadd: vi.fn(),
+    eval: vi.fn(),
     zrem: vi.fn(),
+    zadd: vi.fn(),
     zcard: vi.fn(),
     zremrangebyscore: vi.fn(),
-    eval: vi.fn(),
+    incr: vi.fn(),
+    expire: vi.fn(),
+    del: vi.fn(),
     ping: vi.fn(),
-  },
-  cryptoService: {
-    randomToken: vi.fn(),
-    randomUUID: vi.fn(() => "test-uuid-1234"),
-    sha256: vi.fn((v: string) => "sha256-" + v),
-    hmacSha256: vi.fn((v: string) => {
-      // Return a deterministic hex string for testing
-      let hash = 0;
-      for (let i = 0; i < v.length; i++) {
-        hash = ((hash << 5) - hash) + v.charCodeAt(i);
-        hash |= 0;
-      }
-      return Math.abs(hash).toString(16).padStart(64, '0');
-    }),
-    safeEqual: vi.fn(),
-    encryptSecret: vi.fn(),
-    decryptSecret: vi.fn(),
-    jsonBase64Url: vi.fn(),
-    parseJsonBase64Url: vi.fn(),
   },
   prisma: {
     paymentRecord: {
@@ -44,14 +26,13 @@ const mocks = vi.hoisted(() => ({
   },
 }));
 
+vi.mock("@/backend/cache/redis", () => ({
+  redisCommand: mocks.redisCommand,
+}));
+
 vi.mock("@/backend/services/registry", () => ({
   getServiceRegistry: vi.fn(() => ({
     cacheStore: mocks.cacheStore,
-    cryptoService: mocks.cryptoService,
-    userStore: {},
-    sessionStore: {},
-    externalGateway: {},
-    auditLogger: {},
   })),
 }));
 
@@ -105,7 +86,7 @@ describe("rate limiting", () => {
 
     expect(mocks.cacheStore.eval).toHaveBeenCalledWith(
       expect.stringContaining("redis.call('INCR'"),
-      expect.arrayContaining([expect.stringMatching(/^clean-pay:rate-limit:v4:auth:login:email:/)]),
+      [expect.stringMatching(/^clean-pay:rate-limit:v4:auth:login:email:[a-f0-9]{64}$/), "clean-pay:rate-limit:v4:auth:login:capacity"],
       [60],
     );
   });
@@ -133,7 +114,7 @@ describe("rate limiting", () => {
       windowSeconds: 15 * 60,
     })).resolves.toBeUndefined();
 
-    expect(mocks.cacheStore.eval).toHaveBeenCalledWith(
+    expect(mocks.cacheStore.eval).toHaveBeenNthCalledWith(1,
       expect.any(String),
       ["clean-pay:rate-limit:v4:auth:passkey_login_options:capacity"],
       [15 * 60],
@@ -158,13 +139,13 @@ describe("rate limiting", () => {
 
     expect(mocks.cacheStore.eval).toHaveBeenCalledWith(
       expect.any(String),
-      expect.arrayContaining([expect.stringMatching(/^clean-pay:rate-limit:v4:auth:email_verification:email:/)]),
+      [expect.stringMatching(/^clean-pay:rate-limit:v4:auth:email_verification:email:[a-f0-9]{64}$/), "clean-pay:rate-limit:v4:auth:email_verification:capacity"],
       [60],
     );
   });
 
   it("rejects invalid Redis counter values", async () => {
-    mocks.cacheStore.eval.mockResolvedValueOnce("not-an-array");
+    mocks.cacheStore.eval.mockResolvedValueOnce("not-a-number");
 
     await expect(assertRateLimit({ action: "login", limit: 1, windowSeconds: 60 })).rejects.toMatchObject({
       code: "UPSTREAM_UNAVAILABLE",
@@ -173,6 +154,7 @@ describe("rate limiting", () => {
 
   it("bounds expensive auth work with a leased Redis semaphore", async () => {
     mocks.cacheStore.eval.mockResolvedValueOnce(1);
+    mocks.cacheStore.zrem.mockResolvedValueOnce(0);
     const work = vi.fn().mockResolvedValue("done");
 
     await expect(withAuthConcurrency("login", work)).resolves.toBe("done");
@@ -181,12 +163,9 @@ describe("rate limiting", () => {
     expect(mocks.cacheStore.eval).toHaveBeenCalledWith(
       expect.stringContaining("ZREMRANGEBYSCORE"),
       ["clean-pay:concurrency:v1:auth:login"],
-      expect.arrayContaining([expect.any(Number)]),
+      [expect.any(Number), expect.any(Number), expect.any(String), 64, 30_000],
     );
-    expect(mocks.cacheStore.zrem).toHaveBeenCalledWith(
-      "clean-pay:concurrency:v1:auth:login",
-      "test-uuid-1234",
-    );
+    expect(mocks.cacheStore.zrem).toHaveBeenCalledWith("clean-pay:concurrency:v1:auth:login", expect.any(String));
   });
 
   it("rejects concurrency exhaustion before expensive work", async () => {

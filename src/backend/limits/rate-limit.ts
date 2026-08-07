@@ -1,3 +1,5 @@
+import { createHmac, randomUUID } from 'node:crypto';
+
 import { getEnv } from '@/backend/config/env';
 import { ServiceError } from '@/backend/errors/service-error';
 import { logger } from '@/backend/observability/logger';
@@ -25,11 +27,9 @@ function normalizePart(value: string | number | bigint | null | undefined) {
 }
 
 function digest(kind: "email" | "tgid" | "session", value: string) {
-  const { cryptoService } = getServiceRegistry();
-  return cryptoService.hmacSha256(
-    `clean-pay:rate-limit:v4:${kind}:${value}`,
-    getEnv().rateLimitIdentitySecret,
-  );
+  return createHmac("sha256", getEnv().rateLimitIdentitySecret)
+    .update(`clean-pay:rate-limit:v4:${kind}:${value}`)
+    .digest("hex");
 }
 
 export function rateLimitKey({ action, email, tgId, sessionId }: RateLimitIdentity) {
@@ -60,6 +60,7 @@ function concurrencyKey(action: string) {
 async function getRetryAfterSeconds(key: string, windowSeconds: number) {
   const { cacheStore } = getServiceRegistry();
   const ttl = await cacheStore.ttl(key);
+
   return typeof ttl === 'number' && ttl > 0 ? ttl : windowSeconds;
 }
 
@@ -132,9 +133,9 @@ export async function withAuthConcurrency<T>(
   work: () => Promise<T>,
   ttlMs = 30_000,
 ): Promise<T> {
-  const { cacheStore, cryptoService } = getServiceRegistry();
+  const { cacheStore } = getServiceRegistry();
   const key = concurrencyKey(action);
-  const token = cryptoService.randomUUID();
+  const token = randomUUID();
   const now = Date.now();
   let acquired: unknown;
 
