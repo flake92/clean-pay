@@ -14,6 +14,8 @@ describeWithPostgres("refresh token family PostgreSQL rotation", () => {
     process.env.DATABASE_URL = realDatabaseUrl as string;
     delete (globalThis as typeof globalThis & { prisma?: unknown }).prisma;
     ({ prisma } = await import("@/backend/database/prisma"));
+    const { initServiceRegistry } = await import("@/backend/services/registry");
+    initServiceRegistry();
     ({ rotateRefreshTokenFamily } = await import("@/backend/sessions/web-session"));
   });
 
