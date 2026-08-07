@@ -60,6 +60,15 @@ vi.mock("@/backend/services/registry", () => ({
         return mocks.prisma.webUser.update({ where: { id }, data });
       }),
     },
+    oneTimeStateStore: {
+      claimWebAuthnChallenge: vi.fn(async (id: string, now?: Date) => {
+        const result = await mocks.prisma.webAuthnChallenge.updateMany({
+          where: { id, consumedAt: null, expiresAt: { gt: now ?? new Date() } },
+          data: { consumedAt: now ?? new Date() },
+        });
+        return result.count === 1;
+      }),
+    },
   })),
 }));
 

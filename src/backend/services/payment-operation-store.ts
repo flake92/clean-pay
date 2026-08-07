@@ -1,4 +1,4 @@
-import type { Prisma, PaymentOperationStatus, PaymentOperationKind } from "@prisma/client";
+import type { Prisma, PaymentOperationStatus, PaymentOperationKind, PaymentRecord } from "@prisma/client";
 
 export interface PaymentOperationRecord {
   id: string;
@@ -60,9 +60,14 @@ export interface UpdateDataInput {
   attemptCount?: { increment: number };
 }
 
+export interface PaymentOperationWithRecord extends PaymentOperationRecord {
+  paymentRecord: PaymentRecord | null;
+}
+
 export interface PaymentOperationStore {
   findByUserAndKey(input: FindByUserAndKeyInput): Promise<PaymentOperationRecord | null>;
   findById(id: string): Promise<Pick<PaymentOperationRecord, "id" | "status" | "claimTokenHash" | "upstreamOwnerHash"> | null>;
   findReconcileFailureCount(id: string): Promise<number | null>;
+  findWithRecordByUser(userId: string, operationId?: string): Promise<PaymentOperationWithRecord | null>;
   updateMany(where: UpdateWhereInput, data: UpdateDataInput): Promise<number>;
 }

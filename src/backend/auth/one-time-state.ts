@@ -1,27 +1,11 @@
-import { prisma } from "@/backend/database/prisma";
+import { getServiceRegistry } from "@/backend/services/registry";
 
-export async function claimWebAuthnChallenge(id: string, now = new Date()) {
-  const result = await prisma.webAuthnChallenge.updateMany({
-    where: {
-      id,
-      consumedAt: null,
-      expiresAt: { gt: now },
-    },
-    data: { consumedAt: now },
-  });
-
-  return result.count === 1;
+export async function claimWebAuthnChallenge(id: string, now?: Date) {
+  const { oneTimeStateStore } = getServiceRegistry();
+  return oneTimeStateStore.claimWebAuthnChallenge(id, now);
 }
 
-export async function claimTelegramAuthState(id: string, now = new Date()) {
-  const result = await prisma.telegramAuthState.updateMany({
-    where: {
-      id,
-      consumedAt: null,
-      expiresAt: { gt: now },
-    },
-    data: { consumedAt: now },
-  });
-
-  return result.count === 1;
+export async function claimTelegramAuthState(id: string, now?: Date) {
+  const { oneTimeStateStore } = getServiceRegistry();
+  return oneTimeStateStore.claimTelegramAuthState(id, now);
 }
