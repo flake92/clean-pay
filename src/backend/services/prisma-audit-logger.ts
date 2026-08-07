@@ -7,7 +7,6 @@ export const prismaAuditLogger: AuditLogger = {
       data: {
         action: input.action,
         userId: input.userId ?? null,
-        sessionId: input.sessionId ?? null,
         metadata: input.metadata ?? undefined,
       },
     });
