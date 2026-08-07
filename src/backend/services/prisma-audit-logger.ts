@@ -1,5 +1,5 @@
 import { prisma } from "@/backend/database/prisma";
-import type { AuditLogInput, AuditLogger } from "@/backend/ports/audit-logger";
+import type { AuditLogInput, AuditLogger } from "@/backend/services/audit-logger";
 
 export const prismaAuditLogger: AuditLogger = {
   async log(input: AuditLogInput): Promise<void> {

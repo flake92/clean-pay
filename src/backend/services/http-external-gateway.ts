@@ -8,7 +8,7 @@ import type {
   RemnashopMe,
   RequestOptions,
   TokenPair,
-} from "@/backend/ports/external-gateway";
+} from "@/backend/services/external-gateway";
 
 export const httpExternalGateway: ExternalGateway = {
   async remnashopAuth(path: string, body: unknown): Promise<AuthResponse> {

@@ -1,6 +1,6 @@
 import { createCipheriv, createDecipheriv, createHash, createHmac, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 
-import type { CryptoService } from "@/backend/ports/crypto-service";
+import type { CryptoService } from "@/backend/services/crypto-service";
 
 function encryptionKey(secret: string) {
   return createHash("sha256").update(secret).digest();

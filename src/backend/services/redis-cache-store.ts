@@ -1,5 +1,5 @@
 import { redisCommand } from "@/backend/cache/redis";
-import type { CacheStore, CacheValue } from "@/backend/ports/cache-store";
+import type { CacheStore, CacheValue } from "@/backend/services/cache-store";
 
 export const redisCacheStore: CacheStore = {
   async get(key: string): Promise<string | null> {

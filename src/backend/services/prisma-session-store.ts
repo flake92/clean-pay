@@ -6,7 +6,7 @@ import type {
   SessionWhereInput,
   SessionWithUser,
   UpdateSessionInput,
-} from "@/backend/ports/session-store";
+} from "@/backend/services/session-store";
 
 function toSession(row: any): Session {
   return {
