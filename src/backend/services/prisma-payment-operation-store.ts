@@ -3,6 +3,7 @@ import type {
   FindByUserAndKeyInput,
   PaymentOperationRecord,
   PaymentOperationStore,
+  PaymentOperationWithRecord,
   UpdateDataInput,
   UpdateWhereInput,
 } from "@/backend/services/payment-operation-store";
@@ -38,6 +39,46 @@ export const prismaPaymentOperationStore: PaymentOperationStore = {
       select: { reconcileFailureCount: true },
     });
     return row?.reconcileFailureCount ?? null;
+  },
+
+  async findWithRecordByUser(userId: string, operationId?: string): Promise<PaymentOperationWithRecord | null> {
+    return prisma.paymentOperation.findFirst({
+      where: operationId
+        ? { id: operationId, userId }
+        : { userId, status: { in: ["DISPATCHING", "OUTCOME_UNKNOWN"] } },
+      orderBy: operationId ? undefined : { createdAt: "desc" },
+      select: {
+        id: true,
+        userId: true,
+        kind: true,
+        idempotencyKeyHash: true,
+        upstreamOwnerHash: true,
+        upstreamKey: true,
+        status: true,
+        attemptCount: true,
+        claimTokenHash: true,
+        leaseExpiresAt: true,
+        dispatchedAt: true,
+        outcomeUnknownAt: true,
+        completedAt: true,
+        responseStatus: true,
+        responseSnapshot: true,
+        errorSnapshot: true,
+        reconcileClaimTokenHash: true,
+        reconcileLeaseExpiresAt: true,
+        reconcileNextAttemptAt: true,
+        reconcileErrorSnapshot: true,
+        reconcileAttemptCount: true,
+        reconcileFailureCount: true,
+        reconcileLastAttemptAt: true,
+        reconciledAt: true,
+        requestFingerprint: true,
+        requestPayload: true,
+        createdAt: true,
+        updatedAt: true,
+        paymentRecord: true,
+      },
+    }) as Promise<PaymentOperationWithRecord | null>;
   },
 
   async updateMany(where: UpdateWhereInput, data: UpdateDataInput): Promise<number> {
