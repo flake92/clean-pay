@@ -40,16 +40,19 @@ export function initServiceRegistry(services: Partial<ServiceRegistry> = {}): Se
 
 function createPrismaUserStore(): UserStore {
   // Lazy import to avoid circular dependency
-  const { prismaUserStore } = require("@/backend/services/prisma-user-store");
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { prismaUserStore } = require("@/backend/services/prisma-user-store") as { prismaUserStore: UserStore };
   return prismaUserStore;
 }
 
 function createPrismaSessionStore(): SessionStore {
-  const { prismaSessionStore } = require("@/backend/services/prisma-session-store");
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { prismaSessionStore } = require("@/backend/services/prisma-session-store") as { prismaSessionStore: SessionStore };
   return prismaSessionStore;
 }
 
 function createHttpExternalGateway(): ExternalGateway {
-  const { httpExternalGateway } = require("@/backend/services/http-external-gateway");
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { httpExternalGateway } = require("@/backend/services/http-external-gateway") as { httpExternalGateway: ExternalGateway };
   return httpExternalGateway;
 }
