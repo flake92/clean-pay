@@ -31,7 +31,7 @@ interface PrismaSessionRow {
 }
 
 interface PrismaWhereInput {
-  id?: string;
+  id?: string | { not: string };
   userId?: string;
   revokedAt?: null | { not: null };
 }
@@ -96,19 +96,21 @@ export const prismaSessionStore: SessionStore = {
     return row ? toSessionWithUser(row as PrismaSessionRow & { user: NonNullable<PrismaSessionRow["user"]> }) : null;
   },
 
+  /* eslint-disable @typescript-eslint/no-explicit-any */
   async create(data: CreateSessionInput): Promise<Session> {
-    const row = await prisma.webSession.create({ data: data as Record<string, unknown> });
+    const row = await prisma.webSession.create({ data: data as any });
     return toSession(row as PrismaSessionRow);
   },
 
   async update(id: string, data: UpdateSessionInput): Promise<void> {
-    await prisma.webSession.update({ where: { id }, data: data as Record<string, unknown> });
+    await prisma.webSession.update({ where: { id }, data: data as any });
   },
 
   async updateMany(where: SessionWhereInput, data: UpdateSessionInput): Promise<number> {
-    const result = await prisma.webSession.updateMany({ where: toPrismaWhere(where), data: data as Record<string, unknown> });
+    const result = await prisma.webSession.updateMany({ where: toPrismaWhere(where), data: data as any });
     return result.count;
   },
+  /* eslint-enable @typescript-eslint/no-explicit-any */
 
   async revoke(id: string): Promise<void> {
     await prisma.webSession.update({
