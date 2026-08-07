@@ -1,3 +1,5 @@
+import { redirect } from "next/navigation";
+
 import { CabinetHeaderActions } from "@/frontend/components/cabinet-header-actions";
 import { CabinetPanel } from "@/frontend/components/cabinet-panel";
 import { AppShell } from "@/app/_components/app-shell";
@@ -7,6 +9,11 @@ import { productionCabinetReader } from "@/backend/integrations/cabinet/cabinet-
 
 export default async function CabinetPage() {
   const model = await loadCabinetViewModel(productionCabinetReader);
+
+  if (model.status === "error") {
+    redirect("/login");
+  }
+
   return (
     <AppShell>
       <div className="grid">
