@@ -3,7 +3,9 @@ import type { CacheStore } from "@/backend/services/cache-store";
 import type { CryptoService } from "@/backend/services/crypto-service";
 import type { ExternalGateway } from "@/backend/services/external-gateway";
 import type { MergeConfirmationStore } from "@/backend/services/merge-confirmation-store";
+import type { OneTimeStateStore } from "@/backend/services/one-time-state-store";
 import type { PaymentOperationStore } from "@/backend/services/payment-operation-store";
+import type { PaymentRecordStore } from "@/backend/services/payment-record-store";
 import type { SessionStore } from "@/backend/services/session-store";
 import type { UserStore } from "@/backend/services/user-store";
 import { nodeCryptoService } from "@/backend/services/node-crypto-service";
@@ -19,6 +21,8 @@ export type ServiceRegistry = {
   auditLogger: AuditLogger;
   mergeConfirmationStore: MergeConfirmationStore;
   paymentOperationStore: PaymentOperationStore;
+  paymentRecordStore: PaymentRecordStore;
+  oneTimeStateStore: OneTimeStateStore;
 };
 
 let registry: ServiceRegistry | null = null;
@@ -40,6 +44,8 @@ export function initServiceRegistry(services: Partial<ServiceRegistry> = {}): Se
     auditLogger: services.auditLogger ?? prismaAuditLogger,
     mergeConfirmationStore: services.mergeConfirmationStore ?? createPrismaMergeConfirmationStore(),
     paymentOperationStore: services.paymentOperationStore ?? createPrismaPaymentOperationStore(),
+    paymentRecordStore: services.paymentRecordStore ?? createPrismaPaymentRecordStore(),
+    oneTimeStateStore: services.oneTimeStateStore ?? createPrismaOneTimeStateStore(),
   };
   return registry;
 }
@@ -73,4 +79,16 @@ function createPrismaPaymentOperationStore(): PaymentOperationStore {
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const { prismaPaymentOperationStore } = require("@/backend/services/prisma-payment-operation-store") as { prismaPaymentOperationStore: PaymentOperationStore };
   return prismaPaymentOperationStore;
+}
+
+function createPrismaPaymentRecordStore(): PaymentRecordStore {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { prismaPaymentRecordStore } = require("@/backend/services/prisma-payment-record-store") as { prismaPaymentRecordStore: PaymentRecordStore };
+  return prismaPaymentRecordStore;
+}
+
+function createPrismaOneTimeStateStore(): OneTimeStateStore {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { prismaOneTimeStateStore } = require("@/backend/services/prisma-one-time-state-store") as { prismaOneTimeStateStore: OneTimeStateStore };
+  return prismaOneTimeStateStore;
 }

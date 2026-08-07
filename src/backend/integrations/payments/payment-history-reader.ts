@@ -1,4 +1,3 @@
-import { prisma } from "@/backend/database/prisma";
 import {
   getAuthorizedRemnashopTokens,
   getRemnashopUserIdFromAccessToken,
@@ -16,6 +15,7 @@ import {
   syncExactPaymentRecordFromRemnashop,
   syncPaymentRecordsFromRemnashopTransactions,
 } from "@/backend/payments/records";
+import { getServiceRegistry } from "@/backend/services/registry";
 
 export async function loadPaymentHistory(userId: string) {
   let stale = false;
@@ -27,12 +27,8 @@ export async function loadPaymentHistory(userId: string) {
     const capabilities = await getPaymentCapabilities(accessToken);
 
     if (capabilities) {
-      const pending = await prisma.paymentRecord.findMany({
-        where: { userId, status: { in: ["PENDING", "UNKNOWN"] } },
-        orderBy: { createdAt: "desc" },
-        select: { paymentId: true },
-        take: 5,
-      });
+      const { paymentRecordStore } = getServiceRegistry();
+      const pending = await paymentRecordStore.findPendingForUser(userId, 5);
 
       for (const [index, record] of pending.entries()) {
         try {
@@ -77,11 +73,8 @@ export async function loadPaymentHistory(userId: string) {
     });
   }
 
-  const records = await prisma.paymentRecord.findMany({
-    where: { userId },
-    orderBy: [{ upstreamCreatedAt: "desc" }, { paymentId: "desc" }],
-    take: 20,
-  });
+  const { paymentRecordStore } = getServiceRegistry();
+  const records = await paymentRecordStore.findManyForUser(userId, 20);
 
   return { records: records.map(serializePaymentRecord), stale };
 }
