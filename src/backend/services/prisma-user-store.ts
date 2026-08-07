@@ -8,7 +8,7 @@ import type {
   User,
   UserStore,
   UserWhereInput,
-} from "@/backend/ports/user-store";
+} from "@/backend/services/user-store";
 
 function toUser(row: any): User {
   return {

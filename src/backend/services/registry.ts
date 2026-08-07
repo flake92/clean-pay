@@ -1,9 +1,9 @@
-import type { AuditLogger } from "@/backend/ports/audit-logger";
-import type { CacheStore } from "@/backend/ports/cache-store";
-import type { CryptoService } from "@/backend/ports/crypto-service";
-import type { ExternalGateway } from "@/backend/ports/external-gateway";
-import type { SessionStore } from "@/backend/ports/session-store";
-import type { UserStore } from "@/backend/ports/user-store";
+import type { AuditLogger } from "@/backend/services/audit-logger";
+import type { CacheStore } from "@/backend/services/cache-store";
+import type { CryptoService } from "@/backend/services/crypto-service";
+import type { ExternalGateway } from "@/backend/services/external-gateway";
+import type { SessionStore } from "@/backend/services/session-store";
+import type { UserStore } from "@/backend/services/user-store";
 import { nodeCryptoService } from "@/backend/services/node-crypto-service";
 import { prismaAuditLogger } from "@/backend/services/prisma-audit-logger";
 import { redisCacheStore } from "@/backend/services/redis-cache-store";
