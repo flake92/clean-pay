@@ -53,6 +53,16 @@ vi.mock("@/backend/database/prisma", () => ({
   prisma: mocks.prisma,
 }));
 
+vi.mock("@/backend/services/registry", () => ({
+  getServiceRegistry: vi.fn(() => ({
+    userStore: {
+      update: vi.fn(async (id: string, data: Record<string, unknown>) => {
+        return mocks.prisma.webUser.update({ where: { id }, data });
+      }),
+    },
+  })),
+}));
+
 vi.mock("@/backend/sessions/web-session", () => ({
   assertEmailVerificationPolicy: mocks.assertEmailVerificationPolicy,
   createWebSession: mocks.createWebSession,
