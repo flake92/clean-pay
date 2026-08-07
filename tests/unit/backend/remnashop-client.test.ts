@@ -831,10 +831,11 @@ describe("remnashop client", () => {
       status: 409,
     });
 
-    expect(prismaMock.webSession.deleteMany).toHaveBeenCalledWith({
-      where: { id: "session-1", userId: "user-1" },
+    expect(prismaMock.webSession.updateMany).toHaveBeenCalledWith({
+      where: { id: "session-1", userId: "user-1", revokedAt: null },
+      data: { revokedAt: expect.any(Date) },
     });
-    expect(prismaMock.webSession.updateMany).not.toHaveBeenCalled();
+    expect(prismaMock.webSession.deleteMany).not.toHaveBeenCalled();
   });
 
   it("rejects a Telegram profile that does not confirm the local Telegram ID", async () => {
