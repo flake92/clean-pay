@@ -1,7 +1,6 @@
 export interface AuditLogInput {
   action: string;
   userId?: string;
-  sessionId?: string;
   metadata?: Record<string, any>;
 }
 
