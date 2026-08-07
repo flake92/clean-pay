@@ -61,8 +61,12 @@ services:
       driver: json-file
       options: {max-size: "10m", max-file: "3"}
     networks:
-      - default
-      - remnawave-network
+      default:
+        aliases:
+          - clean-pay
+      remnawave-network:
+        aliases:
+          - clean-pay
 
   reconciliation-worker:
     profiles: ["reconciliation"]
