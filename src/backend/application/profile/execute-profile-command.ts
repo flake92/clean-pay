@@ -1,9 +1,9 @@
 import type { ProfileCommands } from "@/backend/application/profile/ports/profile-commands";
+import { ServiceError } from "@/backend/errors/service-error";
 import type { ProfileCommandResult } from "@/shared/presentation/profile";
 
 function failure(error: unknown, fallback: string): ProfileCommandResult {
-  const candidate = error as { code?: unknown; message?: unknown };
-  const code = typeof candidate?.code === "string" ? candidate.code : "INTERNAL_ERROR";
+  const code = error instanceof ServiceError ? error.code : "INTERNAL_ERROR";
   const messages: Record<string, string> = {
     CURRENT_PASSWORD_INVALID: "Текущий пароль неверный.",
     EMAIL_REQUIRED: "Чтобы привязать e-mail к Telegram-аккаунту, используйте раздел «Связать аккаунт».",
@@ -11,7 +11,8 @@ function failure(error: unknown, fallback: string): ProfileCommandResult {
     RATE_LIMITED: "Слишком много попыток. Попробуйте позже.",
     VALIDATION_ERROR: "Проверьте введённые данные.",
   };
-  return { ok: false, code, message: messages[code] ?? fallback };
+  const message = messages[code] ?? (error instanceof ServiceError ? error.prodMessage : null) ?? fallback;
+  return { ok: false, code, message };
 }
 
 export async function requestProfileEmailVerification(
