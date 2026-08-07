@@ -1377,21 +1377,23 @@ async function attachRemnashopTokensForVerifiedEmailSession(
   const refreshExpiresAt = new Date(auth.data.refresh_expires_at);
   const protectedAccessToken = protectRemnashopToken(auth.cookies.accessToken);
   const protectedRefreshToken = protectRemnashopToken(auth.cookies.refreshToken);
-  const stored = await prisma.webSession.updateMany({
-    where: { id: session.id, userId: session.userId, revokedAt: null },
-    data: {
-      remnashopAccessTokenEncrypted: protectedAccessToken,
-      remnashopRefreshTokenEncrypted: protectedRefreshToken,
-      remnashopAccessExpiresAt: accessExpiresAt,
-      remnashopRefreshExpiresAt: refreshExpiresAt,
-    },
-  });
-  if (stored.count !== 1) {
-    throw new ServiceError("UNAUTHORIZED", 401, "Local session changed during automatic recovery");
-  }
-  await prisma.webUser.update({
-    where: { id: session.userId },
-    data: { remnashopUserId, lastLoginAt: new Date() },
+  await prisma.$transaction(async (tx) => {
+    const stored = await tx.webSession.updateMany({
+      where: { id: session.id, userId: session.userId, revokedAt: null },
+      data: {
+        remnashopAccessTokenEncrypted: protectedAccessToken,
+        remnashopRefreshTokenEncrypted: protectedRefreshToken,
+        remnashopAccessExpiresAt: accessExpiresAt,
+        remnashopRefreshExpiresAt: refreshExpiresAt,
+      },
+    });
+    if (stored.count !== 1) {
+      throw new ServiceError("UNAUTHORIZED", 401, "Local session changed during automatic recovery");
+    }
+    await tx.webUser.update({
+      where: { id: session.userId },
+      data: { remnashopUserId, lastLoginAt: new Date() },
+    });
   });
 
   authDebugLog("remnashop_email_token_restore_success", {
