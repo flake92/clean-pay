@@ -5,8 +5,8 @@ const state = vi.hoisted(() => ({
 }));
 
 const mocks = vi.hoisted(() => ({
-  prisma: {
-    auditLog: { create: vi.fn() },
+  auditLogger: {
+    log: vi.fn(),
   },
   logger: {
     error: vi.fn(),
@@ -20,8 +20,10 @@ vi.mock("next/headers", () => ({
   headers: vi.fn(async () => state.headers),
 }));
 
-vi.mock("@/backend/database/prisma", () => ({
-  prisma: mocks.prisma,
+vi.mock("@/backend/services/registry", () => ({
+  getServiceRegistry: vi.fn(() => ({
+    auditLogger: mocks.auditLogger,
+  })),
 }));
 
 vi.mock("@/backend/observability/logger", () => ({
@@ -52,19 +54,15 @@ describe("audit logging", () => {
     });
 
     expect(mocks.sanitizeLogValue).toHaveBeenCalledWith({ email: "user@example.com" });
-    expect(mocks.prisma.auditLog.create).toHaveBeenCalledWith({
-      data: expect.objectContaining({
-        userId: "user-1",
-        action: "auth_login_success",
-        severity: "INFO",
-        ipHash: expect.stringMatching(/^[a-f0-9]{64}$/),
-        metadata: { email: "user@example.com" },
-      }),
+    expect(mocks.auditLogger.log).toHaveBeenCalledWith({
+      action: "auth_login_success",
+      userId: "user-1",
+      metadata: { email: "user@example.com" },
     });
   });
 
   it("logs write failures without throwing", async () => {
-    mocks.prisma.auditLog.create.mockRejectedValueOnce(new Error("db down"));
+    mocks.auditLogger.log.mockRejectedValueOnce(new Error("db down"));
 
     await expect(auditLog({ action: "failed" })).resolves.toBeUndefined();
     expect(mocks.logger.error).toHaveBeenCalledWith("audit_write_failed", expect.objectContaining({ action: "failed" }), {
