@@ -8,12 +8,40 @@ import type {
   UpdateSessionInput,
 } from "@/backend/services/session-store";
 
-function toSession(row: any): Session {
+interface PrismaSessionRow {
+  id: string;
+  userId: string;
+  authMethod: string;
+  assuranceLevel: string;
+  accessTokenExpiresAt: Date;
+  refreshExpiresAt: Date;
+  refreshTokenHash: string;
+  revokedAt: Date | null;
+  userAgent: string | null;
+  remnashopAccessTokenEncrypted: string | null;
+  remnashopRefreshTokenEncrypted: string | null;
+  remnashopAccessExpiresAt: Date | null;
+  remnashopRefreshExpiresAt: Date | null;
+  user?: {
+    id: string;
+    email: string | null;
+    emailVerified: boolean;
+    telegramId: string | null;
+  };
+}
+
+interface PrismaWhereInput {
+  id?: string;
+  userId?: string;
+  revokedAt?: null | { not: null };
+}
+
+function toSession(row: PrismaSessionRow): Session {
   return {
     id: row.id,
     userId: row.userId,
-    authMethod: row.authMethod,
-    assuranceLevel: row.assuranceLevel,
+    authMethod: row.authMethod as Session["authMethod"],
+    assuranceLevel: row.assuranceLevel as Session["assuranceLevel"],
     accessTokenExpiresAt: row.accessTokenExpiresAt,
     refreshExpiresAt: row.refreshExpiresAt,
     refreshTokenHash: row.refreshTokenHash,
@@ -26,7 +54,7 @@ function toSession(row: any): Session {
   };
 }
 
-function toSessionWithUser(row: any): SessionWithUser {
+function toSessionWithUser(row: PrismaSessionRow & { user: NonNullable<PrismaSessionRow["user"]> }): SessionWithUser {
   return {
     ...toSession(row),
     user: {
@@ -38,8 +66,8 @@ function toSessionWithUser(row: any): SessionWithUser {
   };
 }
 
-function toPrismaWhere(where: SessionWhereInput): any {
-  const result: any = {};
+function toPrismaWhere(where: SessionWhereInput): PrismaWhereInput {
+  const result: PrismaWhereInput = {};
   if (where.id) result.id = where.id;
   if (where.userId) result.userId = where.userId;
   if (where.revokedAt === null) result.revokedAt = null;
@@ -52,12 +80,12 @@ function toPrismaWhere(where: SessionWhereInput): any {
 export const prismaSessionStore: SessionStore = {
   async findById(id: string): Promise<Session | null> {
     const row = await prisma.webSession.findUnique({ where: { id } });
-    return row ? toSession(row) : null;
+    return row ? toSession(row as PrismaSessionRow) : null;
   },
 
   async findByIdWithUser(id: string): Promise<SessionWithUser | null> {
     const row = await prisma.webSession.findUnique({ where: { id }, include: { user: true } });
-    return row ? toSessionWithUser(row) : null;
+    return row ? toSessionWithUser(row as PrismaSessionRow & { user: NonNullable<PrismaSessionRow["user"]> }) : null;
   },
 
   async findByRefreshToken(hash: string): Promise<SessionWithUser | null> {
@@ -65,20 +93,20 @@ export const prismaSessionStore: SessionStore = {
       where: { refreshTokenHash: hash, revokedAt: null },
       include: { user: true },
     });
-    return row ? toSessionWithUser(row) : null;
+    return row ? toSessionWithUser(row as PrismaSessionRow & { user: NonNullable<PrismaSessionRow["user"]> }) : null;
   },
 
   async create(data: CreateSessionInput): Promise<Session> {
-    const row = await prisma.webSession.create({ data: data as any });
-    return toSession(row);
+    const row = await prisma.webSession.create({ data: data as Record<string, unknown> });
+    return toSession(row as PrismaSessionRow);
   },
 
   async update(id: string, data: UpdateSessionInput): Promise<void> {
-    await prisma.webSession.update({ where: { id }, data: data as any });
+    await prisma.webSession.update({ where: { id }, data: data as Record<string, unknown> });
   },
 
   async updateMany(where: SessionWhereInput, data: UpdateSessionInput): Promise<number> {
-    const result = await prisma.webSession.updateMany({ where: toPrismaWhere(where), data: data as any });
+    const result = await prisma.webSession.updateMany({ where: toPrismaWhere(where), data: data as Record<string, unknown> });
     return result.count;
   },
 
@@ -90,7 +118,7 @@ export const prismaSessionStore: SessionStore = {
   },
 
   async revokeAllForUser(userId: string, exceptSessionId?: string): Promise<void> {
-    const where: any = { userId, revokedAt: null };
+    const where: PrismaWhereInput = { userId, revokedAt: null };
     if (exceptSessionId) {
       where.id = { not: exceptSessionId };
     }
