@@ -15,6 +15,8 @@ describeWithPostgres("one-time auth state PostgreSQL claims", () => {
     delete (globalThis as typeof globalThis & { prisma?: unknown }).prisma;
 
     ({ prisma } = await import("@/backend/database/prisma"));
+    const { initServiceRegistry } = await import("@/backend/services/registry");
+    initServiceRegistry();
     ({ claimWebAuthnChallenge, claimTelegramAuthState } = await import(
       "@/backend/auth/one-time-state"
     ));
