@@ -4,7 +4,7 @@ import {
   beginPasskeyRegistration,
   finishPasskeyLogin,
   finishPasskeyRegistration,
-} from "@/backend/auth/passkeys";
+} from "@/backend/integrations/auth/passkey-service";
 import { verifyTurnstileToken } from "@/backend/security/turnstile";
 
 export const productionPasskeyCommands: PasskeyCommands = {

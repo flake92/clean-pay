@@ -26,4 +26,27 @@ describe("clean architecture boundaries", () => {
   it("does not expose the removed internal browser transport", () => {
     expect(globSync("src/app/api/bff/**/route.ts")).toEqual([]);
   });
+
+  it("keeps backend orchestration free from direct database access", () => {
+    for (const pattern of [
+      "src/backend/auth/**/*.{ts,tsx}",
+      "src/backend/payments/**/*.{ts,tsx}",
+      "src/backend/sessions/**/*.{ts,tsx}",
+      "src/backend/observability/**/*.{ts,tsx}",
+    ]) {
+      for (const { file, source } of files(pattern)) {
+        expect(source, file).not.toContain("@/backend/database/prisma");
+        expect(source, file).not.toMatch(/\bprisma\./);
+      }
+    }
+  });
+
+  it("keeps persistence dependencies out of shared and frontend code", () => {
+    for (const pattern of ["src/shared/**/*.{ts,tsx}", "src/frontend/**/*.{ts,tsx}"]) {
+      for (const { file, source } of files(pattern)) {
+        expect(source, file).not.toContain("@/backend/database/");
+        expect(source, file).not.toContain("@prisma/client");
+      }
+    }
+  });
 });
