@@ -1,27 +1,10 @@
-import { prisma } from "@/backend/database/prisma";
+import { claimOneTimeState } from "@/backend/application/auth/claim-one-time-state";
+import { prismaOneTimeStateRepository } from "@/backend/integrations/auth/prisma-one-time-state";
 
 export async function claimWebAuthnChallenge(id: string, now = new Date()) {
-  const result = await prisma.webAuthnChallenge.updateMany({
-    where: {
-      id,
-      consumedAt: null,
-      expiresAt: { gt: now },
-    },
-    data: { consumedAt: now },
-  });
-
-  return result.count === 1;
+  return claimOneTimeState(prismaOneTimeStateRepository, "webauthn-challenge", id, now);
 }
 
 export async function claimTelegramAuthState(id: string, now = new Date()) {
-  const result = await prisma.telegramAuthState.updateMany({
-    where: {
-      id,
-      consumedAt: null,
-      expiresAt: { gt: now },
-    },
-    data: { consumedAt: now },
-  });
-
-  return result.count === 1;
+  return claimOneTimeState(prismaOneTimeStateRepository, "telegram-auth-state", id, now);
 }
