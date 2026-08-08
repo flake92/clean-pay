@@ -25,6 +25,9 @@ describe("clean architecture boundaries", () => {
 
   it("does not expose the removed internal browser transport", () => {
     expect(globSync("src/app/api/bff/**/route.ts")).toEqual([]);
+    const proxy = readFileSync("src/proxy.ts", "utf8");
+    expect(proxy).toContain("removedBrowserTransportPaths");
+    expect(proxy).toContain("'/api/bff/payments/status'");
   });
 
   it("keeps backend orchestration free from direct database access", () => {
