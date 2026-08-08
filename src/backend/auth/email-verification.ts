@@ -27,7 +27,6 @@ import type {
 } from "@/shared/remnashop/types";
 import type { AuthPayload, TurnstileContext } from "@/backend/auth/payload";
 import { stripTurnstile } from "@/backend/auth/payload";
-import { getServiceRegistry } from "@/backend/services/registry";
 
 function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -353,8 +352,9 @@ export async function confirmEmailVerification(rawBody: AuthPayload<ConfirmEmail
   // failure or invite the user to submit an already-consumed code again.
   const confirmedRemnashopUserId =
     getRemnashopUserIdFromAccessToken(accessToken);
-  const { userStore } = getServiceRegistry();
-  const existingEmailOwner = await userStore.findByEmail(result.email);
+  const existingEmailOwner = await prisma.webUser.findUnique({
+    where: { email: result.email },
+  });
   const currentUserOwnsEmail =
     !existingEmailOwner || existingEmailOwner.id === session.userId;
   const localVerificationChanged =
@@ -504,8 +504,10 @@ export async function confirmEmailVerification(rawBody: AuthPayload<ConfirmEmail
     });
   } catch (error) {
     accountSyncPending = true;
-    const { userStore } = getServiceRegistry();
-    await userStore.update(session.userId, { authPending: true });
+    await prisma.webUser.update({
+      where: { id: session.userId },
+      data: { authPending: true },
+    });
     logger.warn("email_verification_post_confirm_sync_failed", {
       sessionId: session.id,
       userId: session.userId,
@@ -569,17 +571,19 @@ export async function changeEmail(rawBody: AuthPayload<ChangeEmailRequest>, turn
     userId: session.userId,
     pendingEmail: result.pending_email,
   });
-  const { userStore } = getServiceRegistry();
-  await userStore.update(session.userId, {
-    emailVerified: false,
-    ...(session.user.telegramId
-      ? {
-          authPending: false,
-          pendingRemnashopUserId:
-            getRemnashopUserIdFromAccessToken(accessToken),
-          pendingRemnashopEmail: result.pending_email,
-        }
-      : {}),
+  await prisma.webUser.update({
+    where: { id: session.userId },
+    data: {
+      emailVerified: false,
+      ...(session.user.telegramId
+        ? {
+            authPending: false,
+            pendingRemnashopUserId:
+              getRemnashopUserIdFromAccessToken(accessToken),
+            pendingRemnashopEmail: result.pending_email,
+          }
+        : {}),
+    },
   });
   await refreshCurrentAccessCookie();
 

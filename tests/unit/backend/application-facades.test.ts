@@ -61,7 +61,7 @@ describe("application facades", () => {
     await expect(authenticateTelegramWebApp(authenticator, " signed-data ")).resolves.toEqual({ ok: true });
     expect(authenticate).toHaveBeenCalledWith("signed-data");
 
-    authenticate.mockRejectedValueOnce(new ServiceError("UNAUTHORIZED", 401, "no session"));
+    authenticate.mockRejectedValueOnce(Object.assign(new Error("rejected"), { code: "UNAUTHORIZED" }));
     await expect(authenticateTelegramWebApp(authenticator, "bad")).resolves.toMatchObject({ ok: false, code: "UNAUTHORIZED" });
   });
 
@@ -79,7 +79,7 @@ describe("application facades", () => {
     await expect(verifyPasskeyLogin(commands, {} as never)).resolves.toEqual({ ok: true });
     await expect(verifyPasskeyRegistration(commands, {} as never)).resolves.toEqual({ ok: true });
 
-    vi.mocked(commands.finishLogin).mockRejectedValueOnce(new ServiceError("NOT_FOUND", 404, "credential not found"));
+    vi.mocked(commands.finishLogin).mockRejectedValueOnce(Object.assign(new Error(), { code: "NOT_FOUND" }));
     await expect(verifyPasskeyLogin(commands, {} as never)).resolves.toMatchObject({ ok: false, code: "NOT_FOUND" });
   });
 
@@ -226,7 +226,7 @@ describe("application facades", () => {
     await expect(changeProfilePassword(commands, { currentPassword: "old", newPassword: "new-pass-123" })).resolves.toMatchObject({ ok: true });
     await expect(changeProfilePassword(commands, { currentPassword: "", newPassword: "short" })).resolves.toMatchObject({ ok: false, code: "VALIDATION_ERROR" });
 
-    vi.mocked(commands.changePassword).mockRejectedValueOnce(new ServiceError("CURRENT_PASSWORD_INVALID", 400, "wrong password"));
+    vi.mocked(commands.changePassword).mockRejectedValueOnce(Object.assign(new Error(), { code: "CURRENT_PASSWORD_INVALID" }));
     await expect(changeProfilePassword(commands, { currentPassword: "bad", newPassword: "new-pass-123" })).resolves.toMatchObject({
       ok: false,
       code: "CURRENT_PASSWORD_INVALID",

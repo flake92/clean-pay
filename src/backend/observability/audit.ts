@@ -4,7 +4,7 @@ import { headers } from "next/headers";
 
 import { getEnv } from "@/backend/config/env";
 import { logger, sanitizeLogValue } from "@/backend/observability/logger";
-import { getServiceRegistry } from "@/backend/services/registry";
+import { prisma } from "@/backend/database/prisma";
 import type { ServiceError } from "@/backend/errors/service-error";
 
 type AuditSeverity = "INFO" | "WARN" | "ERROR";
@@ -57,12 +57,15 @@ export async function auditLog({
   try {
     const requestHeaders = await headers();
     const sanitized = metadata ? sanitizeValue(metadata) : undefined;
-    const { auditLogger } = getServiceRegistry();
 
-    await auditLogger.log({
-      action,
-      userId: userId ?? undefined,
-      metadata: sanitized as Record<string, unknown> | undefined,
+    await prisma.auditLog.create({
+      data: {
+        userId: userId ?? null,
+        action,
+        severity,
+        ipHash: hashIp(getIpFromHeaders(requestHeaders)),
+        metadata: sanitized as Prisma.InputJsonValue,
+      },
     });
   } catch (error) {
     logger.error("audit_write_failed", {

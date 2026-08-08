@@ -22,7 +22,6 @@ import {
 } from "@/backend/sessions/web-session";
 import type { CurrentSubscriptionResponse } from "@/shared/remnashop/types";
 import { withPaymentOwnerChangeFence } from "@/backend/payments/user-merge";
-import { getServiceRegistry } from "@/backend/services/registry";
 
 const confirmationTtlMs = 10 * 60 * 1000;
 const processingLeaseMs = 2 * 60 * 1000;
@@ -182,9 +181,8 @@ export async function stageTelegramAccountMerge({
   telegramUsername: string | null;
   telegramAuth: TelegramAuthResult;
 }) {
-  const { userStore } = getServiceRegistry();
   const [targetUser, sourceProfile] = await Promise.all([
-    userStore.findById(userId),
+    prisma.webUser.findUnique({ where: { id: userId } }),
     getRemnashopMe(telegramAuth.cookies.accessToken),
   ]);
 
@@ -314,10 +312,11 @@ async function confirmationForCurrentSession(token: string) {
     throw new ServiceError("PASSKEY_REQUIRED", 403, "Create a passkey to continue");
   }
 
-  const { mergeConfirmationStore } = getServiceRegistry();
-  const confirmation = await mergeConfirmationStore.findFirst({
-    tokenHash: sha256(token),
-    userId: session.userId,
+  const confirmation = await prisma.accountMergeConfirmation.findFirst({
+    where: {
+      tokenHash: sha256(token),
+      userId: session.userId,
+    },
   });
 
   if (!confirmation) {
@@ -351,20 +350,19 @@ export async function getTelegramAccountMergeConfirmation(token: string) {
 
 export async function cancelTelegramAccountMerge(token: string) {
   const { confirmation, session } = await confirmationForCurrentSession(token);
-  const { mergeConfirmationStore } = getServiceRegistry();
-  const cancelled = await mergeConfirmationStore.updateMany(
-    {
+  const cancelled = await prisma.accountMergeConfirmation.updateMany({
+    where: {
       id: confirmation.id,
       userId: session.userId,
       status: AccountMergeConfirmationStatus.PENDING,
     },
-    {
+    data: {
       status: AccountMergeConfirmationStatus.FAILED,
       lastErrorCode: "USER_CANCELLED",
     },
-  );
+  });
 
-  if (cancelled !== 1) {
+  if (cancelled.count !== 1) {
     throw new ServiceError(
       "CONFLICT",
       409,
@@ -614,21 +612,20 @@ export async function confirmTelegramAccountMerge(token: string) {
       error.code === "ACCOUNT_MERGE_REQUIRED" ||
       error.code === "ACCOUNT_MERGE_SUBSCRIPTIONS_CONFLICT"
     );
-    const { mergeConfirmationStore } = getServiceRegistry();
-    await mergeConfirmationStore.updateMany(
-      {
+    await prisma.accountMergeConfirmation.updateMany({
+      where: {
         id: confirmation.id,
         userId: session.userId,
         status: AccountMergeConfirmationStatus.PROCESSING,
       },
-      {
+      data: {
         status: terminal
           ? AccountMergeConfirmationStatus.FAILED
           : AccountMergeConfirmationStatus.PENDING,
         leaseExpiresAt: null,
         lastErrorCode: error instanceof ServiceError ? error.code : "INTERNAL_ERROR",
       },
-    );
+    });
     await auditLog({
       action: "telegram_account_merge_failed",
       userId: session.userId,

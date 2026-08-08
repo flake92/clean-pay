@@ -30,19 +30,6 @@ vi.mock("@/backend/integrations/remnashop/payment-recovery", () => ({
   reconcilePaymentOperation: mocks.reconcilePaymentOperation,
   reconcilePaymentOperationAsAdmin: mocks.reconcilePaymentOperationAsAdmin,
 }));
-vi.mock("@/backend/services/registry", () => ({
-  getServiceRegistry: vi.fn(() => ({
-    paymentOperationStore: {
-      findReconcileFailureCount: vi.fn(async (id: string) => {
-        const result = await mocks.prisma.paymentOperation.findUnique({
-          where: { id },
-          select: { reconcileFailureCount: true },
-        });
-        return result?.reconcileFailureCount ?? null;
-      }),
-    },
-  })),
-}));
 
 import {
   claimUnknownPaymentOperation,

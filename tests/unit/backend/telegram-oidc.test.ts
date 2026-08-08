@@ -118,20 +118,6 @@ vi.mock("@/backend/database/prisma", () => ({
   prisma: mocks.prisma,
 }));
 
-vi.mock("@/backend/services/registry", () => ({
-  getServiceRegistry: vi.fn(() => ({
-    oneTimeStateStore: {
-      claimTelegramAuthState: vi.fn(async (id: string, now?: Date) => {
-        const result = await mocks.prisma.telegramAuthState.updateMany({
-          where: { id, consumedAt: null, expiresAt: { gt: now ?? new Date() } },
-          data: { consumedAt: now ?? new Date() },
-        });
-        return result.count === 1;
-      }),
-    },
-  })),
-}));
-
 vi.mock("@/backend/sessions/web-session", () => ({
   getCurrentSession: mocks.getCurrentSession,
 }));

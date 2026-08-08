@@ -21,9 +21,6 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-    networks:
-      - default
-      - remnawave-network
 
   app:
     image: ${CLEAN_PAY_IMAGE:-clean-pay:local}
@@ -60,13 +57,6 @@ services:
     logging:
       driver: json-file
       options: {max-size: "10m", max-file: "3"}
-    networks:
-      default:
-        aliases:
-          - clean-pay
-      remnawave-network:
-        aliases:
-          - clean-pay
 
   reconciliation-worker:
     profiles: ["reconciliation"]
@@ -115,9 +105,6 @@ services:
     logging:
       driver: json-file
       options: {max-size: "5m", max-file: "2"}
-    networks:
-      - default
-      - remnawave-network
 
   postgres:
     image: postgres:17-alpine
@@ -147,7 +134,3 @@ services:
 volumes:
   postgres-data:
   redis-data:
-
-networks:
-  remnawave-network:
-    external: true

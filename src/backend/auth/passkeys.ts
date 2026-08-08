@@ -23,7 +23,6 @@ import {
   getCurrentSession,
   upgradeCurrentSessionToFull,
 } from "@/backend/sessions/web-session";
-import { getServiceRegistry } from "@/backend/services/registry";
 
 const challengeTtlMs = 5 * 60 * 1000;
 const maxPasskeyNameLength = 80;
@@ -287,15 +286,17 @@ export async function finishPasskeyRegistration(response: RegistrationResponseJS
       }
     }
   }
-  const { userStore } = getServiceRegistry();
-  await userStore.update(session.userId, {
-    ...(
-      session.user.pendingRemnashopUserId &&
-      session.user.pendingRemnashopEmail
-        ? {}
-        : { authPending: false }
-    ),
-    lastLoginAt: new Date(),
+  await prisma.webUser.update({
+    where: { id: session.userId },
+    data: {
+      ...(
+        session.user.pendingRemnashopUserId &&
+        session.user.pendingRemnashopEmail
+          ? {}
+          : { authPending: false }
+      ),
+      lastLoginAt: new Date(),
+    },
   });
 
   const upgradedSession = session.assuranceLevel === WebSessionAssuranceLevel.FULL

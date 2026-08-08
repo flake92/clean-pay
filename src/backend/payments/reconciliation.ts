@@ -15,7 +15,6 @@ import { applyRemnashopTransaction } from "@/backend/payments/records";
 import { lockPaymentUpstreamOwner } from "@/backend/payments/owner";
 import { PAYMENT_MANUAL_REQUIRED_CODE } from "@/backend/payments/manual-review";
 import { randomToken, safeEqual, sha256 } from "@/backend/security/crypto";
-import { getServiceRegistry } from "@/backend/services/registry";
 
 const RECONCILIATION_LEASE_MS = 30_000;
 const MAX_RECONCILIATION_BACKOFF_MS = 60 * 60_000;
@@ -508,13 +507,15 @@ export async function settlePaymentReconciliation(
   }
 
   if (recovery?.state === "UNKNOWN") {
-    const { paymentOperationStore } = getServiceRegistry();
-    const failureCount = await paymentOperationStore.findReconcileFailureCount(claim.operationId);
+    const operation = await prisma.paymentOperation.findUnique({
+      where: { id: claim.operationId },
+      select: { reconcileFailureCount: true },
+    });
     await releaseReconciliationClaim(claim, {
       nextAttemptDelayMs:
         (recovery.retry_after_seconds ?? 0) > 0
           ? recovery.retry_after_seconds! * 1_000
-          : reconciliationDelayMs(failureCount ?? 0),
+          : reconciliationDelayMs(operation?.reconcileFailureCount ?? 0),
       failure: true,
       errorSnapshot: { code: "UPSTREAM_OUTCOME_UNKNOWN" },
     });
@@ -529,10 +530,14 @@ export async function failPaymentReconciliation(
   claim: PaymentReconciliationClaim,
   error: unknown,
 ) {
-  const { paymentOperationStore } = getServiceRegistry();
-  const failureCount = await paymentOperationStore.findReconcileFailureCount(claim.operationId);
+  const operation = await prisma.paymentOperation.findUnique({
+    where: { id: claim.operationId },
+    select: { reconcileFailureCount: true },
+  });
   await releaseReconciliationClaim(claim, {
-    nextAttemptDelayMs: reconciliationDelayMs(failureCount ?? 0),
+    nextAttemptDelayMs: reconciliationDelayMs(
+      operation?.reconcileFailureCount ?? 0,
+    ),
     failure: true,
     errorSnapshot: safeFailureSnapshot(error),
   });

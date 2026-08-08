@@ -8,7 +8,6 @@ import type { AuthCommands } from "@/backend/application/auth/ports/auth-command
 import type { EmailVerificationCommands } from "@/backend/application/auth/ports/email-verification";
 import type { LinkAccountCommands } from "@/backend/application/auth/ports/link-account";
 import type { CheckoutReader, PaymentCommands } from "@/backend/application/payments/ports/checkout";
-import { ServiceError } from "@/backend/errors/service-error";
 import { loadSupportViewModel } from "@/backend/application/support/load-support";
 
 function authCommands(overrides: Partial<AuthCommands> = {}): AuthCommands {
@@ -38,7 +37,7 @@ describe("server application flows", () => {
   });
 
   it("maps provider auth failures before they reach React", async () => {
-    const commands = authCommands({ login: vi.fn(async () => { throw new ServiceError("AUTH_FAILED", 401, "bad credentials"); }) });
+    const commands = authCommands({ login: vi.fn(async () => { throw Object.assign(new Error(), { code: "AUTH_FAILED" }); }) });
     await expect(executeAuthCommand(commands, { kind: "login", email: "u@example.com", password: "wrong" })).resolves.toEqual({
       ok: false, code: "AUTH_FAILED", message: "Неверный e-mail или пароль.",
     });
@@ -86,7 +85,7 @@ describe("server application flows", () => {
     await expect(executePayment(commands, { kind: "extend", request, idempotencyKey: "key-1" })).resolves.toEqual({
       ok: true, status: "pending", operationId: "op-1", retryAfterSeconds: 5,
     });
-    commands.extend = vi.fn(async () => { throw new ServiceError("UPSTREAM_UNAVAILABLE", 502, "upstream down"); });
+    commands.extend = vi.fn(async () => { throw Object.assign(new Error(), { code: "UPSTREAM_UNAVAILABLE" }); });
     await expect(executePayment(commands, { kind: "extend", request, idempotencyKey: "key-1" })).resolves.toMatchObject({
       ok: false, code: "UPSTREAM_UNAVAILABLE", retainIdempotencyKey: true,
     });

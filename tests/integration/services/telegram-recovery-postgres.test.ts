@@ -44,8 +44,6 @@ describeWithPostgres("Telegram recovery PostgreSQL serialization", () => {
     delete (globalThis as typeof globalThis & { prisma?: unknown }).prisma;
 
     ({ prisma } = await import("@/backend/database/prisma"));
-    const { initServiceRegistry } = await import("@/backend/services/registry");
-    initServiceRegistry();
     ({ getAuthorizedRemnashopTokens } = await import(
       "@/backend/integrations/remnashop/client"
     ));

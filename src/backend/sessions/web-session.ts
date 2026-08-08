@@ -9,7 +9,6 @@ import { prisma } from "@/backend/database/prisma";
 import { ServiceError } from "@/backend/errors/service-error";
 import { securityPolicy } from "@/backend/security/policy";
 import { auditLog } from "@/backend/observability/audit";
-import { getServiceRegistry } from "@/backend/services/registry";
 
 const sessionCookieNames = {
   access: "clean_pay_access",
@@ -111,8 +110,10 @@ async function revokeSessionByRefreshToken(refreshToken: string) {
     return;
   }
 
-  const { sessionStore } = getServiceRegistry();
-  await sessionStore.revoke(session.id);
+  await prisma.webSession.updateMany({
+    where: { id: session.id, revokedAt: null },
+    data: { revokedAt: now },
+  });
 }
 
 type AccessPayload = {
@@ -377,17 +378,21 @@ export async function createWebSession(
     hasRemnashopTokens: false,
   });
 
-  const { sessionStore, userStore } = getServiceRegistry();
-  const session = await sessionStore.create({
-    userId,
-    refreshTokenHash: sha256(refreshToken),
-    userAgent: requestHeaders.get("user-agent") ?? undefined,
-    authMethod,
-    assuranceLevel,
-    accessTokenExpiresAt,
-    refreshExpiresAt,
+  const session = await prisma.webSession.create({
+    data: {
+      userId,
+      refreshTokenHash: sha256(refreshToken),
+      userAgent: requestHeaders.get("user-agent"),
+      authMethod,
+      assuranceLevel,
+      accessTokenExpiresAt,
+      refreshExpiresAt,
+    },
   });
-  const user = await userStore.findById(userId);
+  const user = await prisma.webUser.findUnique({
+    where: { id: userId },
+    select: { emailVerified: true, telegramId: true },
+  });
 
   await setAccessCookie({
     sessionId: session.id,
@@ -587,8 +592,15 @@ export async function getCurrentUser() {
     userId: payload.uid,
     expiresAtEpochSeconds: payload.exp,
   });
-  const { sessionStore } = getServiceRegistry();
-  const session = await sessionStore.findActiveSession(payload.sid, payload.uid);
+  const session = await prisma.webSession.findFirst({
+    where: {
+      id: payload.sid,
+      userId: payload.uid,
+      revokedAt: null,
+      accessTokenExpiresAt: { gt: new Date() },
+    },
+    include: { user: true },
+  });
 
   if (session) {
     authDebugLog("session_current_user_result", {
@@ -638,8 +650,15 @@ export async function getCurrentSession() {
     userId: payload.uid,
     expiresAtEpochSeconds: payload.exp,
   });
-  const { sessionStore } = getServiceRegistry();
-  const session = await sessionStore.findActiveSession(payload.sid, payload.uid);
+  const session = await prisma.webSession.findFirst({
+    where: {
+      id: payload.sid,
+      userId: payload.uid,
+      revokedAt: null,
+      accessTokenExpiresAt: { gt: new Date() },
+    },
+    include: { user: true },
+  });
 
   if (session) {
     authDebugLog("session_current_result", {
@@ -671,8 +690,10 @@ export async function refreshCurrentAccessCookie() {
     return null;
   }
 
-  const { userStore } = getServiceRegistry();
-  const user = await userStore.findById(session.userId);
+  const user = await prisma.webUser.findUnique({
+    where: { id: session.userId },
+    select: { emailVerified: true, telegramId: true },
+  });
 
   await setAccessCookie({
     sessionId: session.id,
@@ -728,22 +749,25 @@ export async function createWebSessionOnResponse(
     hasProvidedRemnashopSession: Boolean(options.remnashopSession),
   });
 
-  const { sessionStore, userStore } = getServiceRegistry();
-  const session = await sessionStore.create({
-    userId,
-    refreshTokenHash: sha256(refreshToken),
-    remnashopAccessTokenEncrypted: options.remnashopSession?.accessTokenEncrypted,
-    remnashopRefreshTokenEncrypted: options.remnashopSession?.refreshTokenEncrypted,
-    remnashopAccessExpiresAt: options.remnashopSession?.accessExpiresAt,
-    remnashopRefreshExpiresAt: options.remnashopSession?.refreshExpiresAt,
-    authMethod: options.authMethod ?? WebSessionAuthMethod.TELEGRAM,
-    assuranceLevel: WebSessionAssuranceLevel.FULL,
-    userAgent: requestHeaders.get("user-agent") ?? undefined,
-    accessTokenExpiresAt,
-    refreshExpiresAt,
+  const session = await prisma.webSession.create({
+    data: {
+      userId,
+      refreshTokenHash: sha256(refreshToken),
+      remnashopAccessTokenEncrypted: options.remnashopSession?.accessTokenEncrypted,
+      remnashopRefreshTokenEncrypted: options.remnashopSession?.refreshTokenEncrypted,
+      remnashopAccessExpiresAt: options.remnashopSession?.accessExpiresAt,
+      remnashopRefreshExpiresAt: options.remnashopSession?.refreshExpiresAt,
+      authMethod: options.authMethod ?? WebSessionAuthMethod.TELEGRAM,
+      assuranceLevel: WebSessionAssuranceLevel.FULL,
+      userAgent: requestHeaders.get("user-agent"),
+      accessTokenExpiresAt,
+      refreshExpiresAt,
+    },
   });
-
-  const user = await userStore.findById(userId);
+  const user = await prisma.webUser.findUnique({
+    where: { id: userId },
+    select: { emailVerified: true, telegramId: true },
+  });
   const accessToken = signAccessToken({
     sid: session.id,
     uid: userId,
@@ -971,8 +995,15 @@ export async function clearWebSession() {
   });
 
   if (payload) {
-    const { sessionStore } = getServiceRegistry();
-    const session = await sessionStore.findActiveSession(payload.sid, payload.uid);
+    const session = await prisma.webSession.findFirst({
+      where: {
+        id: payload.sid,
+        userId: payload.uid,
+        revokedAt: null,
+        accessTokenExpiresAt: { gt: new Date() },
+      },
+      select: { id: true, userId: true },
+    });
 
     if (session) {
       await prisma.webSession.updateMany({

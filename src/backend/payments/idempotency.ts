@@ -18,7 +18,6 @@ import {
   sha256,
 } from "@/backend/security/crypto";
 import { paymentUpstreamOwnerHash } from "@/backend/payments/hashes";
-import { getServiceRegistry } from "@/backend/services/registry";
 import { lockPaymentUpstreamOwner } from "@/backend/payments/owner";
 import { isPaymentManualRequired } from "@/backend/payments/manual-review";
 import { lockPaymentOwnerFence } from "@/backend/payments/user-merge";
@@ -277,8 +276,14 @@ function isUniqueConstraintError(error: unknown) {
 }
 
 async function findOperation(userId: string, idempotencyKeyHash: string) {
-  const { paymentOperationStore } = getServiceRegistry();
-  return paymentOperationStore.findByUserAndKey({ userId, idempotencyKeyHash });
+  return prisma.paymentOperation.findUnique({
+    where: {
+      userId_idempotencyKeyHash: {
+        userId,
+        idempotencyKeyHash,
+      },
+    },
+  });
 }
 
 async function createOrFindOperation({
@@ -527,9 +532,8 @@ export async function beginPaymentOperation(input: {
         operation.leaseExpiresAt === null ||
         operation.leaseExpiresAt <= now
       ) {
-        const { paymentOperationStore } = getServiceRegistry();
-        const settled = await paymentOperationStore.updateMany(
-          {
+        const settled = await prisma.paymentOperation.updateMany({
+          where: {
             id: operation.id,
             status: "DISPATCHING",
             OR: [
@@ -537,15 +541,15 @@ export async function beginPaymentOperation(input: {
               { leaseExpiresAt: { lte: now } },
             ],
           },
-          {
+          data: {
             status: "OUTCOME_UNKNOWN",
             outcomeUnknownAt: now,
             leaseExpiresAt: null,
             reconcileNextAttemptAt: now,
           },
-        );
+        });
 
-        if (settled === 1) {
+        if (settled.count === 1) {
           return {
             state: "pending",
             operationId: operation.id,
@@ -657,24 +661,30 @@ export async function bindPaymentOperationUpstreamOwner(input: {
   );
   const ownerHash = paymentUpstreamOwnerHash(upstreamAccountId);
   const claimHash = claimTokenHash(input.claimToken);
-  const { paymentOperationStore } = getServiceRegistry();
-  const bound = await paymentOperationStore.updateMany(
-    {
+  const bound = await prisma.paymentOperation.updateMany({
+    where: {
       id: input.operationId,
       status: "READY",
       claimTokenHash: claimHash,
       upstreamOwnerHash: null,
     },
-    {
+    data: {
       upstreamOwnerHash: ownerHash,
     },
-  );
+  });
 
-  if (bound === 1) {
+  if (bound.count === 1) {
     return;
   }
 
-  const operation = await paymentOperationStore.findById(input.operationId);
+  const operation = await prisma.paymentOperation.findUnique({
+    where: { id: input.operationId },
+    select: {
+      status: true,
+      claimTokenHash: true,
+      upstreamOwnerHash: true,
+    },
+  });
 
   if (
     !operation ||
@@ -708,23 +718,22 @@ export async function markPaymentOperationDispatched(input: {
   claimToken: string;
 }) {
   const now = new Date();
-  const { paymentOperationStore } = getServiceRegistry();
-  const transitioned = await paymentOperationStore.updateMany(
-    {
+  const transitioned = await prisma.paymentOperation.updateMany({
+    where: {
       id: input.operationId,
       status: "READY",
       claimTokenHash: claimTokenHash(input.claimToken),
       upstreamOwnerHash: { not: null },
       leaseExpiresAt: { gt: now },
     },
-    {
+    data: {
       status: "DISPATCHING",
       dispatchedAt: now,
       leaseExpiresAt: new Date(now.getTime() + DISPATCH_LEASE_MS),
     },
-  );
+  });
 
-  if (transitioned !== 1) {
+  if (transitioned.count !== 1) {
     throw new ServiceError(
       "CONFLICT",
       409,
@@ -925,14 +934,13 @@ export async function settlePaymentOperationBeforeDispatchFailure(input: {
 }) {
   const snapshot = errorSnapshot(input.error);
   const now = new Date();
-  const { paymentOperationStore } = getServiceRegistry();
-  const transitioned = await paymentOperationStore.updateMany(
-    {
+  const transitioned = await prisma.paymentOperation.updateMany({
+    where: {
       id: input.operationId,
       status: "READY",
       claimTokenHash: claimTokenHash(input.claimToken),
     },
-    input.final
+    data: input.final
       ? {
           status: "FAILED_FINAL",
           responseStatus: snapshot.status,
@@ -945,9 +953,9 @@ export async function settlePaymentOperationBeforeDispatchFailure(input: {
           claimTokenHash: null,
           leaseExpiresAt: null,
         },
-  );
+  });
 
-  if (transitioned !== 1) {
+  if (transitioned.count !== 1) {
     throw paymentOperationConflict(
       "Payment operation could not settle a pre-dispatch failure",
     );
@@ -1021,17 +1029,16 @@ export async function settlePaymentOperationAfterDispatchFailure(input: {
             claimTokenHash: null,
             leaseExpiresAt: null,
           };
-  const { paymentOperationStore } = getServiceRegistry();
-  const transitioned = await paymentOperationStore.updateMany(
-    {
+  const transitioned = await prisma.paymentOperation.updateMany({
+    where: {
       id: input.operationId,
       status: { in: ["DISPATCHING", "OUTCOME_UNKNOWN"] },
       claimTokenHash: claimTokenHash(input.claimToken),
     },
     data,
-  );
+  });
 
-  if (transitioned !== 1) {
+  if (transitioned.count !== 1) {
     throw paymentOperationConflict(
       "Payment operation could not settle a dispatched failure",
     );
