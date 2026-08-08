@@ -1,4 +1,4 @@
-import { describe, expect, it, onTestFailed } from "vitest";
+import { beforeEach, describe, expect, it, onTestFailed } from "vitest";
 
 import { e2eCompose } from "../setup/compose";
 
@@ -18,7 +18,9 @@ function logServicesOnFailure() {
 }
 
 describe("server-rendered application surface", () => {
-  logServicesOnFailure();
+  beforeEach(() => {
+    logServicesOnFailure();
+  });
 
   it.each(["/api/health", "/api/health/liveness"])(
     "%s exposes a concrete health controller",
