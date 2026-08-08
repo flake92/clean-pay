@@ -20,6 +20,8 @@ const publicPagePaths = new Set([
   '/offline',
   '/login',
   '/register',
+  '/support',
+  '/tariffs',
   '/auth/telegram/start',
   '/auth/telegram/callback',
   '/auth/telegram/webapp',
@@ -29,6 +31,17 @@ const publicApiPaths = new Set([
   '/api/health',
   '/api/health/liveness',
   '/api/health/readiness',
+]);
+
+// These legacy browser endpoints were removed. Let Next.js resolve them to a
+// real 404 instead of turning a nonexistent transport into an authentication
+// oracle at the proxy boundary.
+const removedBrowserTransportPaths = new Set([
+  '/api/me',
+  '/api/logout',
+  '/api/bff/auth/me',
+  '/api/bff/subscription/current',
+  '/api/bff/payments/status',
 ]);
 
 const emailVerificationPagePaths = new Set([
@@ -307,6 +320,10 @@ export async function proxy(request: NextRequest) {
       source: "http.access",
       message: `${request.method} ${pathname} -> allow public`,
     });
+    return NextResponse.next();
+  }
+
+  if (removedBrowserTransportPaths.has(pathname)) {
     return NextResponse.next();
   }
 
