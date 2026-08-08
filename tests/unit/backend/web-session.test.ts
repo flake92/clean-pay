@@ -57,19 +57,6 @@ vi.mock("@/backend/database/prisma", () => ({
   prisma: mocks.prisma,
 }));
 
-const sessionStoreMocks = vi.hoisted(() => ({
-  findActiveSession: vi.fn(),
-  create: vi.fn(),
-  revoke: vi.fn(),
-}));
-
-vi.mock("@/backend/services/registry", () => ({
-  getServiceRegistry: vi.fn(() => ({
-    userStore: { findById: mocks.prisma.webUser.findUnique },
-    sessionStore: sessionStoreMocks,
-  })),
-}));
-
 vi.mock("@/backend/observability/auth-debug-log", () => ({
   authDebugLog: mocks.authDebugLog,
 }));
@@ -139,9 +126,6 @@ describe("web session lifecycle", () => {
       async (callback: (tx: typeof mocks.prisma) => unknown) =>
         callback(mocks.prisma),
     );
-    sessionStoreMocks.findActiveSession.mockResolvedValue(null);
-    sessionStoreMocks.create.mockResolvedValue(session);
-    sessionStoreMocks.revoke.mockResolvedValue({ count: 1 });
   });
 
   it.each([
@@ -191,15 +175,16 @@ describe("web session lifecycle", () => {
   it("creates email and Remnashop-backed sessions and sets access/refresh cookies", async () => {
     await expect(createWebSession("user-1")).resolves.toEqual(session);
 
-    expect(sessionStoreMocks.create).toHaveBeenCalledWith(
-      expect.objectContaining({
+    expect(mocks.prisma.webSession.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
         userId: "user-1",
         authMethod: "EMAIL",
         assuranceLevel: "FULL",
         userAgent: "vitest",
       }),
-    );
-    const localSessionData = sessionStoreMocks.create.mock.calls[0]?.[0] as Record<string, unknown>;
+    });
+    const localSessionData = mocks.prisma.webSession.create.mock.calls[0]?.[0]
+      ?.data as Record<string, unknown>;
     expect(localSessionData).not.toHaveProperty("remnashopAccessTokenEncrypted");
     expect(localSessionData).not.toHaveProperty("remnashopRefreshTokenEncrypted");
     expect(state.setCalls.map((call) => call.name)).toEqual(["clean_pay_access", "clean_pay_refresh"]);
@@ -275,12 +260,20 @@ describe("web session lifecycle", () => {
       "clean_pay_access",
       accessToken({ sid: "session-1", uid: "user-1", exp: Math.floor(Date.now() / 1000) + 60 }),
     );
-    sessionStoreMocks.findActiveSession.mockResolvedValue(session);
+    mocks.prisma.webSession.findFirst.mockResolvedValue(session);
 
     await expect(getCurrentSession()).resolves.toEqual(session);
     await expect(getCurrentUser()).resolves.toEqual(user);
 
-    expect(sessionStoreMocks.findActiveSession).toHaveBeenCalledWith("session-1", "user-1");
+    expect(mocks.prisma.webSession.findFirst).toHaveBeenCalledWith({
+      where: {
+        id: "session-1",
+        userId: "user-1",
+        revokedAt: null,
+        accessTokenExpiresAt: { gt: expect.any(Date) },
+      },
+      include: { user: true },
+    });
   });
 
   it("falls back to refresh cookie when access is missing or invalid", async () => {
@@ -419,7 +412,8 @@ describe("web session lifecycle", () => {
     await createWebSessionOnResponse(response, "user-1");
     expect(response.cookies.get("clean_pay_access")?.value).toBeTruthy();
     expect(response.cookies.get("clean_pay_refresh")?.value).toBeTruthy();
-    const responseSessionData = sessionStoreMocks.create.mock.calls.at(-1)?.[0] as Record<string, unknown>;
+    const responseSessionData = mocks.prisma.webSession.create.mock.calls.at(-1)?.[0]
+      ?.data as Record<string, unknown>;
     expect(responseSessionData.remnashopAccessTokenEncrypted).toBeUndefined();
     expect(responseSessionData.remnashopRefreshTokenEncrypted).toBeUndefined();
 
@@ -427,7 +421,7 @@ describe("web session lifecycle", () => {
       "clean_pay_access",
       accessToken({ sid: "session-1", uid: "user-1", exp: Math.floor(Date.now() / 1000) + 60 }),
     );
-    sessionStoreMocks.findActiveSession.mockResolvedValue(session);
+    mocks.prisma.webSession.findFirst.mockResolvedValue(session);
     await expect(refreshCurrentAccessCookie()).resolves.toEqual(session);
     expect(state.setCalls.some((call) => call.name === "clean_pay_access")).toBe(true);
   });
@@ -548,7 +542,7 @@ describe("web session lifecycle", () => {
       "clean_pay_access",
       accessToken({ sid: "session-1", uid: "user-1", exp: Math.floor(Date.now() / 1000) + 60 }),
     );
-    sessionStoreMocks.findActiveSession.mockResolvedValue({ ...session, assuranceLevel: "PARTIAL" });
+    mocks.prisma.webSession.findFirst.mockResolvedValue({ ...session, assuranceLevel: "PARTIAL" });
     mocks.prisma.webSession.update.mockResolvedValue({ ...session, assuranceLevel: "FULL" });
 
     await expect(upgradeCurrentSessionToFull()).resolves.toMatchObject({ assuranceLevel: "FULL" });
@@ -565,10 +559,12 @@ describe("web session lifecycle", () => {
     expect(state.deleteCalls).toEqual(["clean_pay_access", "clean_pay_refresh"]);
 
     state.cookies.set("clean_pay_refresh", "refresh-only");
-    sessionStoreMocks.findActiveSession.mockResolvedValueOnce(null);
     mocks.prisma.webSession.findFirst.mockResolvedValueOnce({ id: "refresh-session" });
     await clearWebSession();
-    expect(sessionStoreMocks.revoke).toHaveBeenLastCalledWith("refresh-session");
+    expect(mocks.prisma.webSession.updateMany).toHaveBeenLastCalledWith({
+      where: { id: "refresh-session", revokedAt: null },
+      data: { revokedAt: expect.any(Date) },
+    });
     expect(mocks.prisma.webSession.findFirst).toHaveBeenLastCalledWith({
       where: {
         revokedAt: null,
@@ -601,7 +597,15 @@ describe("web session lifecycle", () => {
 
     await clearWebSession();
 
-    expect(sessionStoreMocks.findActiveSession).toHaveBeenCalledWith("revoked-session-1", "user-1");
+    expect(mocks.prisma.webSession.findFirst).toHaveBeenCalledWith({
+      where: {
+        id: "revoked-session-1",
+        userId: "user-1",
+        revokedAt: null,
+        accessTokenExpiresAt: { gt: expect.any(Date) },
+      },
+      select: { id: true, userId: true },
+    });
     expect(mocks.prisma.webSession.updateMany).not.toHaveBeenCalled();
 
     vi.clearAllMocks();
@@ -613,7 +617,7 @@ describe("web session lifecycle", () => {
         exp: Math.floor(Date.now() / 1000) + 60,
       }),
     );
-    sessionStoreMocks.findActiveSession.mockResolvedValueOnce(null);
+    mocks.prisma.webSession.findFirst.mockResolvedValueOnce(null);
 
     await clearWebSession();
 

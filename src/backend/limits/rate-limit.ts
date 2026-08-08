@@ -1,9 +1,9 @@
 import { createHmac, randomUUID } from 'node:crypto';
 
+import { redisCommand } from '@/backend/cache/redis';
 import { getEnv } from '@/backend/config/env';
 import { ServiceError } from '@/backend/errors/service-error';
 import { logger } from '@/backend/observability/logger';
-import { getServiceRegistry } from '@/backend/services/registry';
 
 type RateLimitIdentity = {
   action: string;
@@ -58,19 +58,19 @@ function concurrencyKey(action: string) {
 }
 
 async function getRetryAfterSeconds(key: string, windowSeconds: number) {
-  const { cacheStore } = getServiceRegistry();
-  const ttl = await cacheStore.ttl(key);
+  const ttl = await redisCommand(['TTL', key]);
 
   return typeof ttl === 'number' && ttl > 0 ? ttl : windowSeconds;
 }
 
 async function incrementRateLimits(keys: string[], windowSeconds: number) {
-  const { cacheStore } = getServiceRegistry();
-  const count = await cacheStore.eval(
+  const count = await redisCommand([
+    'EVAL',
     "local counts = {}; for i, key in ipairs(KEYS) do local count = redis.call('INCR', key); if count == 1 then redis.call('EXPIRE', key, ARGV[1]); end; counts[i] = count; end; return counts",
-    keys,
-    [windowSeconds],
-  );
+    keys.length,
+    ...keys,
+    windowSeconds,
+  ]);
 
   if (
     !Array.isArray(count) ||
@@ -133,18 +133,23 @@ export async function withAuthConcurrency<T>(
   work: () => Promise<T>,
   ttlMs = 30_000,
 ): Promise<T> {
-  const { cacheStore } = getServiceRegistry();
   const key = concurrencyKey(action);
   const token = randomUUID();
   const now = Date.now();
   let acquired: unknown;
 
   try {
-    acquired = await cacheStore.eval(
+    acquired = await redisCommand([
+      "EVAL",
       "redis.call('ZREMRANGEBYSCORE', KEYS[1], '-inf', ARGV[1]); if redis.call('ZCARD', KEYS[1]) >= tonumber(ARGV[4]) then return 0 end; redis.call('ZADD', KEYS[1], ARGV[2], ARGV[3]); redis.call('PEXPIRE', KEYS[1], ARGV[5]); return 1",
-      [key],
-      [now, now + ttlMs, token, getEnv().authConcurrencyLimit, ttlMs],
-    );
+      1,
+      key,
+      now,
+      now + ttlMs,
+      token,
+      getEnv().authConcurrencyLimit,
+      ttlMs,
+    ]);
   } catch (error) {
     logger.error("auth_concurrency_unavailable", {
       action,
@@ -165,7 +170,7 @@ export async function withAuthConcurrency<T>(
     return await work();
   } finally {
     try {
-      await cacheStore.zrem(key, token);
+      await redisCommand(["ZREM", key, token]);
     } catch (error) {
       logger.error("auth_concurrency_release_failed", {
         action,

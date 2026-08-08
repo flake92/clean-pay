@@ -50,32 +50,6 @@ vi.mock("@/backend/payments/owner", () => ({
 vi.mock("@/backend/payments/user-merge", () => ({
   lockPaymentOwnerFence: mocks.lockPaymentOwnerFence,
 }));
-vi.mock("@/backend/services/registry", () => ({
-  getServiceRegistry: vi.fn(() => ({
-    paymentOperationStore: {
-      findByUserAndKey: vi.fn(async (input: { userId: string; idempotencyKeyHash: string }) => {
-        return mocks.paymentOperation.findUnique({
-          where: {
-            userId_idempotencyKeyHash: {
-              userId: input.userId,
-              idempotencyKeyHash: input.idempotencyKeyHash,
-            },
-          },
-        });
-      }),
-      findById: vi.fn(async (id: string) => {
-        return mocks.paymentOperation.findUnique({
-          where: { id },
-          select: { id: true, status: true, claimTokenHash: true, upstreamOwnerHash: true },
-        });
-      }),
-      updateMany: vi.fn(async (where: Record<string, unknown>, data: Record<string, unknown>) => {
-        const result = await mocks.paymentOperation.updateMany({ where, data });
-        return result.count;
-      }),
-    },
-  })),
-}));
 
 import { ServiceError } from "@/backend/errors/service-error";
 import {

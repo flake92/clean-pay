@@ -86,15 +86,6 @@ jobs:
           --health-interval 5s
           --health-timeout 5s
           --health-retries 20
-      redis:
-        image: redis:7-alpine
-        ports:
-          - 6379:6379
-        options: >-
-          --health-cmd "redis-cli ping"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 20
     env:
       DATABASE_URL: postgresql://clean_pay:clean_pay_ci_password@localhost:5432/clean_pay?schema=public
       REAL_DATABASE_URL: postgresql://clean_pay:clean_pay_ci_password@localhost:5432/clean_pay?schema=public
