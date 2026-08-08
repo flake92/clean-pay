@@ -49,4 +49,11 @@ describe("clean architecture boundaries", () => {
       }
     }
   });
+
+  it("allows database clients only in database and integration adapters", () => {
+    for (const { file, source } of files("src/backend/**/*.{ts,tsx}")) {
+      if (!source.includes("@/backend/database/")) continue;
+      expect(file.replaceAll("\\", "/"), file).toMatch(/^src\/backend\/(?:database|integrations)\//);
+    }
+  });
 });
