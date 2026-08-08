@@ -1,4 +1,4 @@
-import { prisma } from "@/backend/database/prisma";
+import { prismaPaymentQueryRepository } from "@/backend/integrations/payments/prisma-payment-query-repository";
 import {
   getAuthorizedRemnashopTokens,
   getRemnashopUserIdFromAccessToken,
@@ -27,16 +27,11 @@ export async function loadPaymentHistory(userId: string) {
     const capabilities = await getPaymentCapabilities(accessToken);
 
     if (capabilities) {
-      const pending = await prisma.paymentRecord.findMany({
-        where: { userId, status: { in: ["PENDING", "UNKNOWN"] } },
-        orderBy: { createdAt: "desc" },
-        select: { paymentId: true },
-        take: 5,
-      });
+      const pending = await prismaPaymentQueryRepository.findPendingPaymentIds(userId, 5);
 
-      for (const [index, record] of pending.entries()) {
+      for (const [index, paymentId] of pending.entries()) {
         try {
-          const exact = await getExactTransaction({ accessToken, paymentId: record.paymentId });
+          const exact = await getExactTransaction({ accessToken, paymentId });
           if (exact) {
             await syncExactPaymentRecordFromRemnashop({ userId, upstreamAccountId, transaction: exact });
           }
@@ -77,11 +72,7 @@ export async function loadPaymentHistory(userId: string) {
     });
   }
 
-  const records = await prisma.paymentRecord.findMany({
-    where: { userId },
-    orderBy: [{ upstreamCreatedAt: "desc" }, { paymentId: "desc" }],
-    take: 20,
-  });
+  const records = await prismaPaymentQueryRepository.findRecentRecords(userId, 20);
 
   return { records: records.map(serializePaymentRecord), stale };
 }

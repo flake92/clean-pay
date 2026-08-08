@@ -2,7 +2,7 @@ import { loginWithEmail } from "@/backend/auth/email-login";
 import { registerWithEmail } from "@/backend/auth/email-register";
 import { confirmPasswordReset, requestPasswordReset } from "@/backend/auth/password-reset";
 import type { AuthCommands } from "@/backend/application/auth/ports/auth-commands";
-import { prisma } from "@/backend/database/prisma";
+import { prismaPasskeyAccountReader } from "@/backend/integrations/auth/prisma-passkey-account-reader";
 import { remnashopIdentifyEmail } from "@/backend/integrations/remnashop/client";
 import { assertRateLimit } from "@/backend/limits/rate-limit";
 import { verifyTurnstileToken } from "@/backend/security/turnstile";
@@ -11,14 +11,11 @@ export const productionAuthCommands: AuthCommands = {
   async identify(input) {
     await verifyTurnstileToken(input.turnstileToken ?? null, "auth_login");
     await assertRateLimit({ action: "auth_identify", email: input.email, limit: 20, windowSeconds: 15 * 60 });
-    const [upstream, user] = await Promise.all([
+    const [upstream, hasPasskey] = await Promise.all([
       remnashopIdentifyEmail({ email: input.email }),
-      prisma.webUser.findUnique({
-        where: { email: input.email },
-        select: { webAuthnCredentials: { select: { id: true }, take: 1 } },
-      }),
+      prismaPasskeyAccountReader.hasCredential(input.email),
     ]);
-    return { exists: upstream.exists, hasPasskey: Boolean(user?.webAuthnCredentials.length) };
+    return { exists: upstream.exists, hasPasskey };
   },
   async login(input) {
     await loginWithEmail(input, { token: input.turnstileToken ?? null });

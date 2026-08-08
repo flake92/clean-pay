@@ -1,4 +1,3 @@
-import { prisma } from "@/backend/database/prisma";
 import { ServiceError } from "@/backend/errors/service-error";
 import {
   getAuthorizedRemnashopTokens,
@@ -12,6 +11,7 @@ import { authDebugLog } from "@/backend/observability/auth-debug-log";
 import { replaceWebSessionAfterPasswordChange } from "@/backend/sessions/web-session";
 import type { ChangePasswordRequest } from "@/shared/remnashop/types";
 import { addDays } from "@/backend/auth/payload";
+import { prismaAuthSessionRepository } from "@/backend/integrations/auth/prisma-auth-session-repository";
 
 type PasswordSession = Awaited<ReturnType<typeof getAuthorizedRemnashopTokens>>["session"];
 
@@ -24,15 +24,11 @@ async function rotateRemnashopSessionTokens(
     refreshExpiresAt?: Date | null;
   },
 ) {
-  await prisma.webSession.update({
-    where: { id: session.id },
-    data: {
-      remnashopAccessTokenEncrypted: protectRemnashopToken(tokens.accessToken),
-      remnashopRefreshTokenEncrypted: protectRemnashopToken(tokens.refreshToken),
-      remnashopAccessExpiresAt:
-        tokens.accessExpiresAt ?? getJwtExpiresAt(tokens.accessToken) ?? addDays(new Date(), 1),
-      remnashopRefreshExpiresAt: tokens.refreshExpiresAt ?? addDays(new Date(), 30),
-    },
+  await prismaAuthSessionRepository.replaceUpstreamTokens(session.id, {
+    accessTokenEncrypted: protectRemnashopToken(tokens.accessToken),
+    refreshTokenEncrypted: protectRemnashopToken(tokens.refreshToken),
+    accessExpiresAt: tokens.accessExpiresAt ?? getJwtExpiresAt(tokens.accessToken) ?? addDays(new Date(), 1),
+    refreshExpiresAt: tokens.refreshExpiresAt ?? addDays(new Date(), 30),
   });
 }
 
