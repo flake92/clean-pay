@@ -1,8 +1,8 @@
-import { prisma } from "@/backend/database/prisma";
 import { ServiceError } from "@/backend/errors/service-error";
 import { paymentUpstreamOwnerHash } from "@/backend/payments/hashes";
 import { safeEqual } from "@/backend/security/crypto";
-import { Prisma } from "@prisma/client";
+import type { Prisma } from "@prisma/client";
+import { lockPrismaPaymentOwner, prismaPaymentOwnerReader } from "@/backend/integrations/payments/prisma-payment-owner-reader";
 
 function identityConflict(): never {
   throw new ServiceError(
@@ -16,14 +16,11 @@ export async function assertPaymentUpstreamIdentity(
   userId: string,
   upstreamAccountId: string,
 ) {
-  const user = await prisma.webUser.findUnique({
-    where: { id: userId },
-    select: { remnashopUserId: true },
-  });
+  const remnashopUserId = await prismaPaymentOwnerReader.findUpstreamOwnerId(userId);
 
   if (
-    !user?.remnashopUserId ||
-    !safeEqual(user.remnashopUserId, upstreamAccountId)
+    !remnashopUserId ||
+    !safeEqual(remnashopUserId, upstreamAccountId)
   ) {
     identityConflict();
   }
@@ -34,15 +31,7 @@ export async function lockPaymentUpstreamOwner(
   userId: string,
   expectedOwnerHash: string,
 ) {
-  const rows = await tx.$queryRaw<Array<{ remnashopUserId: string | null }>>(
-    Prisma.sql`
-      SELECT "remnashopUserId"
-      FROM "WebUser"
-      WHERE "id" = ${userId}
-      FOR KEY SHARE
-    `,
-  );
-  const remnashopUserId = rows[0]?.remnashopUserId;
+  const remnashopUserId = await lockPrismaPaymentOwner(tx, userId);
 
   if (
     !remnashopUserId ||

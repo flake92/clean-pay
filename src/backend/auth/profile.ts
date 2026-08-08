@@ -1,4 +1,3 @@
-import { prisma } from "@/backend/database/prisma";
 import {
   getAuthorizedRemnashopTokens,
   getRemnashopMe,
@@ -8,6 +7,7 @@ import { ServiceError } from "@/backend/errors/service-error";
 import { authDebugLog } from "@/backend/observability/auth-debug-log";
 import { getCurrentSession, refreshCurrentAccessCookie } from "@/backend/sessions/web-session";
 import { localUserProfile, remnashopUserProfile } from "@/backend/auth/profile-presenter";
+import { prismaProfileAccountRepository } from "@/backend/integrations/profile/prisma-profile-account-repository";
 
 export async function getCurrentAuthProfile() {
   authDebugLog("auth_me_started", {});
@@ -85,15 +85,7 @@ export async function getCurrentAuthProfile() {
   let reconciledSession = authorizedSession;
 
   if (shouldReconcileVerifiedEmail) {
-    await prisma.webUser.update({
-      where: { id: authorizedSession.userId },
-      data: {
-        emailVerified: true,
-        authPending: false,
-        pendingRemnashopUserId: null,
-        pendingRemnashopEmail: null,
-      },
-    });
+    await prismaProfileAccountRepository.confirmVerifiedEmail(authorizedSession.userId);
     reconciledSession = {
       ...authorizedSession,
       user: {
