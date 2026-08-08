@@ -1,4 +1,3 @@
-import { redirect } from "next/navigation";
 import { Card } from "primereact/card";
 
 import { loadProfileViewModel } from "@/backend/application/profile/load-profile";
@@ -13,11 +12,6 @@ export const dynamic = "force-dynamic";
 export default async function ProfilePage() {
   const branding = getBranding();
   const model = await loadProfileViewModel(productionProfileReader);
-
-  if (model.status === "error") {
-    redirect("/login");
-  }
-
   const turnstileEnabled = process.env.TURNSTILE_ENABLED === "true";
   const turnstileSiteKey = process.env.TURNSTILE_SITE_KEY;
 

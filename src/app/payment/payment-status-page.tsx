@@ -1,4 +1,3 @@
-import { redirect } from "next/navigation";
 import { Card } from "primereact/card";
 
 import { loadPaymentStatus } from "@/backend/application/payments/load-payment-status";
@@ -21,11 +20,6 @@ export async function PaymentStatusPage({ kind, searchParams }: {
     paymentId: first(params.payment_id) ?? first(params.paymentId) ?? first(params.order_id) ?? first(params.id) ?? null,
     operationId: first(params.operation_id) ?? first(params.operationId) ?? null,
   });
-
-  if (model.status === "error") {
-    redirect("/login");
-  }
-
   return (
     <AppShell>
       <div className="flex flex-column gap-6">

@@ -1,17 +1,16 @@
 import type { EmailVerificationCommands } from "@/backend/application/auth/ports/email-verification";
-import { ServiceError } from "@/backend/errors/service-error";
 import type { AccountReadiness, EmailVerificationResult } from "@/shared/presentation/email-verification";
 
 function failure(error: unknown, fallback: string): EmailVerificationResult {
-  const code = error instanceof ServiceError ? error.code : "INTERNAL_ERROR";
+  const candidate = error as { code?: unknown };
+  const code = typeof candidate?.code === "string" ? candidate.code : "INTERNAL_ERROR";
   const messages: Record<string, string> = {
     EMAIL_REQUIRED: "Сначала добавьте e-mail и пароль к аккаунту.",
     EMAIL_CODE_INVALID: "Код не подошёл. Проверьте его и попробуйте снова.",
     EMAIL_CODE_EXPIRED: "Код истёк. Запросите новый.",
     RATE_LIMITED: "Слишком много попыток. Попробуйте позже.",
   };
-  const message = messages[code] ?? (error instanceof ServiceError ? error.prodMessage : null) ?? fallback;
-  return { ok: false, code, message };
+  return { ok: false, code, message: messages[code] ?? fallback };
 }
 
 export async function requestEmailVerificationCode(

@@ -1,4 +1,5 @@
 import type { PaymentStatusReader } from "@/backend/application/payments/ports/payment-status-reader";
+import { prisma } from "@/backend/database/prisma";
 import { getAuthorizedRemnashopTokens, getRemnashopUserIdFromAccessToken, remnashopRequest } from "@/backend/integrations/remnashop/client";
 import { ServiceError } from "@/backend/errors/service-error";
 import { getExactTransaction, getLegacyTransactions, getPaymentCapabilities } from "@/backend/integrations/remnashop/payment-recovery";
@@ -8,7 +9,6 @@ import { assertPaymentUpstreamIdentity } from "@/backend/payments/owner";
 import { reconcileUnknownPayments } from "@/backend/payments/reconciliation";
 import { serializePaymentRecord, syncExactPaymentRecordFromRemnashop, syncPaymentRecordsFromRemnashopTransactions } from "@/backend/payments/records";
 import { assertEmailVerificationPolicy, getCurrentUser } from "@/backend/sessions/web-session";
-import { getServiceRegistry } from "@/backend/services/registry";
 import type { PaymentStatusViewModel } from "@/shared/presentation/payment-status";
 import type { CurrentSubscriptionResponse } from "@/shared/remnashop/types";
 
@@ -23,8 +23,11 @@ function operationStatus(operation: { id: string; status: string; reconciledAt: 
 
 type OperationRecord = Awaited<ReturnType<typeof findOperation>>;
 async function findOperation(userId: string, operationId: string | null) {
-  const { paymentOperationStore } = getServiceRegistry();
-  return paymentOperationStore.findWithRecordByUser(userId, operationId ?? undefined);
+  return prisma.paymentOperation.findFirst({
+    where: operationId ? { id: operationId, userId } : { userId, status: { in: ["DISPATCHING", "OUTCOME_UNKNOWN"] } },
+    orderBy: operationId ? undefined : { createdAt: "desc" },
+    select: { id: true, status: true, reconciledAt: true, reconcileErrorSnapshot: true, paymentRecord: true },
+  });
 }
 
 function terminal(operation: NonNullable<OperationRecord>, status: ReturnType<typeof operationStatus>) {
@@ -83,12 +86,11 @@ export const productionPaymentStatusReader: PaymentStatusReader = {
       if (!(error instanceof ServiceError && error.code === "SUBSCRIPTION_NOT_FOUND")) throw error;
     }
 
-    const { paymentRecordStore } = getServiceRegistry();
     const record = resolvedPaymentId
-      ? await paymentRecordStore.findByPaymentId(user.id, resolvedPaymentId)
+      ? await prisma.paymentRecord.findFirst({ where: { userId: user.id, paymentId: resolvedPaymentId } })
       : operationId
         ? operation?.paymentRecord ?? null
-        : await paymentRecordStore.findLatestForUser(user.id);
+        : await prisma.paymentRecord.findFirst({ where: { userId: user.id }, orderBy: [{ upstreamCreatedAt: "desc" }, { paymentId: "desc" }] });
     return view(operation, subscription, record);
   },
 };

@@ -34,18 +34,6 @@ vi.mock("@/backend/database/prisma", () => {
   return { prisma };
 });
 
-vi.mock("@/backend/services/registry", () => ({
-  getServiceRegistry: vi.fn(() => ({
-    userStore: { findById: mocks.findUser },
-    mergeConfirmationStore: {
-      findFirst: mocks.accountFindFirst,
-      updateMany: vi.fn(async (where: { id: string; userId: string; status?: string }, data: Record<string, unknown>) => {
-        return mocks.accountUpdateMany({ where, data });
-      }),
-    },
-  })),
-}));
-
 vi.mock("@/backend/integrations/remnashop/client", () => ({
   getRemnashopMe: mocks.getRemnashopMe,
   getRemnashopUserIdFromAccessToken: mocks.getRemnashopUserId,

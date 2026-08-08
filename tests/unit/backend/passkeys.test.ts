@@ -53,25 +53,6 @@ vi.mock("@/backend/database/prisma", () => ({
   prisma: mocks.prisma,
 }));
 
-vi.mock("@/backend/services/registry", () => ({
-  getServiceRegistry: vi.fn(() => ({
-    userStore: {
-      update: vi.fn(async (id: string, data: Record<string, unknown>) => {
-        return mocks.prisma.webUser.update({ where: { id }, data });
-      }),
-    },
-    oneTimeStateStore: {
-      claimWebAuthnChallenge: vi.fn(async (id: string, now?: Date) => {
-        const result = await mocks.prisma.webAuthnChallenge.updateMany({
-          where: { id, consumedAt: null, expiresAt: { gt: now ?? new Date() } },
-          data: { consumedAt: now ?? new Date() },
-        });
-        return result.count === 1;
-      }),
-    },
-  })),
-}));
-
 vi.mock("@/backend/sessions/web-session", () => ({
   assertEmailVerificationPolicy: mocks.assertEmailVerificationPolicy,
   createWebSession: mocks.createWebSession,
