@@ -1333,9 +1333,8 @@ export async function recoverRemnashopTelegramSession(
     );
 
     if (isTerminal) {
-      await prisma.webSession.updateMany({
-        where: { id: sessionId, userId, revokedAt: null },
-        data: { revokedAt: new Date() },
+      await prisma.webSession.deleteMany({
+        where: { id: sessionId, userId },
       });
     }
 
