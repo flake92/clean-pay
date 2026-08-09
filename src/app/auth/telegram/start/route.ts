@@ -10,8 +10,8 @@ import {
   createTelegramAuthorizationResponse,
   createTelegramPopupStartResponse,
 } from "@/backend/integrations/telegram/oidc";
-import { safeRedirectPath } from "@/backend/auth/redirect-policy";
 import { logTechnicalError } from "@/backend/observability/audit";
+import { safeRedirectPath } from "@/shared/auth/redirect-policy";
 
 export const runtime = "nodejs";
 

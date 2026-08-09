@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { executeAuthCommand } from "@/backend/application/auth/execute-auth-command";
 import { completeTelegramCallback } from "@/backend/application/auth/complete-telegram-callback";
+import { recoverTelegramSession } from "@/backend/application/auth/recover-telegram-session";
 import {
   prepareTelegramAuthStart,
   TelegramAuthStartFailure,
@@ -113,6 +114,14 @@ describe("server application flows", () => {
       code: "callback-code",
       state: "callback-state",
     });
+  });
+
+  it("recovers Telegram sessions through an explicit application port", async () => {
+    const recover = vi.fn(async () => undefined);
+
+    await recoverTelegramSession({ recover }, "session-1", "user-1");
+
+    expect(recover).toHaveBeenCalledWith("session-1", "user-1");
   });
 
   it("loads support through its application port", () => {
