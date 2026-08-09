@@ -131,8 +131,9 @@ services:
     command: >
       sh -c "sudo mkdir -p /workspace/clean-pay/node_modules /home/node/.npm
       /workspace/clean-pay/.next
+      && sudo touch /workspace/clean-pay/next-env.d.ts
       && sudo chown -R node:node /workspace/clean-pay/node_modules /home/node/.npm
-      /workspace/clean-pay/.next
+      /workspace/clean-pay/.next /workspace/clean-pay/next-env.d.ts
       && if [ -S /var/run/docker.sock ]; then
         docker_gid=$$(stat -c '%g' /var/run/docker.sock);
         if [ "$$docker_gid" = "0" ]; then
