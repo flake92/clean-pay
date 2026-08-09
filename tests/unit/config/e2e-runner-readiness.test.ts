@@ -79,6 +79,7 @@ describe("devcontainer e2e runner readiness", () => {
     expect(ciWorkflow).not.toMatch(/actions\/(?:checkout|setup-node)@v4/);
     expect(ciWorkflow).toContain("actions/checkout@v5");
     expect(ciWorkflow).toContain("actions/setup-node@v5");
+    expect(ciWorkflow).toContain("timeout --signal=TERM --kill-after=30s 12m npm run test:e2e");
   });
 
   it("pre-creates the Next.js build directory for the unprivileged container user", () => {
