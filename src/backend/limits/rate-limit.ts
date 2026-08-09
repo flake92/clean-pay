@@ -197,7 +197,3 @@ export async function assertCooldown({
     message: 'Please wait before requesting another code.',
   });
 }
-
-export async function recordRateLimitEvent() {
-  // Redis counters are recorded by assertRateLimit(). Kept for compatibility with old callers.
-}

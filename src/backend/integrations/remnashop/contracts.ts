@@ -31,12 +31,6 @@ export type StartGenericEmailAuthRequest = {
   email: string;
 };
 
-export type CompleteGenericEmailAuthRequest = {
-  email: string;
-  code: string;
-  password: string;
-};
-
 export type RequestPasswordResetRequest = {
   email: string;
 };
@@ -70,10 +64,6 @@ export type ChangePasswordResponse = {
   success: boolean;
 };
 
-export type ChangeEmailRequest = {
-  email: string;
-};
-
 export type ChangeEmailResponse = {
   success: boolean;
   pending_email: string;
@@ -87,12 +77,6 @@ export type RequestEmailVerificationResponse = {
   success: boolean;
   target_email: string;
   expires_at: string;
-};
-
-export type ConfirmEmailVerificationRequest = {
-  email?: string;
-  code: string;
-  registrationFlow?: boolean;
 };
 
 export type ConfirmEmailVerificationResponse = {
