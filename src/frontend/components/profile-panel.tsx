@@ -50,7 +50,8 @@ export function ProfilePanel({
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [message, setMessage] = useState<string | null>(null);
-  const [messageSeverity, setMessageSeverity] = useState<"success" | "info" | "warn">("info");
+  const [messageSeverity, setMessageSeverity] = useState<"success" | "info" | "warn" | "error">("info");
+  const emailFeedbackRef = useRef<HTMLDivElement>(null);
   const [passwordMessage, setPasswordMessage] = useState<string | null>(null);
   const [passwordMessageSeverity, setPasswordMessageSeverity] = useState<"success" | "warn">("success");
   const [pendingAction, setPendingAction] = useState<string | null>(null);
@@ -86,9 +87,15 @@ export function ProfilePanel({
     setPendingAction(null);
   }
 
-  function showMessage(text: string, severity: "success" | "info" | "warn" = "info") {
+  function showMessage(text: string, severity: "success" | "info" | "warn" | "error" = "info") {
     setMessage(text);
     setMessageSeverity(severity);
+    if (severity === "error") {
+      requestAnimationFrame(() => requestAnimationFrame(() => {
+        emailFeedbackRef.current?.focus({ preventScroll: true });
+        emailFeedbackRef.current?.scrollIntoView?.({ behavior: "smooth", block: "center" });
+      }));
+    }
   }
 
   function showPasswordMessage(text: string, severity: "success" | "warn") {
@@ -143,13 +150,13 @@ export function ProfilePanel({
         ...(turnstileToken ? { turnstileToken } : {}),
       });
       if (!result.ok) {
-        showMessage(result.message, "warn");
+        showMessage(result.message, "error");
         return;
       }
       showMessage(result.message, "success");
       navigateTo("/verify-email");
     } catch (err) {
-      showMessage(err instanceof Error ? err.message : "Не удалось изменить e-mail.", "warn");
+      showMessage(err instanceof Error ? err.message : "Не удалось изменить e-mail.", "error");
     } finally {
       resetTurnstile();
       finishPendingAction("email");
@@ -204,8 +211,6 @@ export function ProfilePanel({
   const canChangePassword = hasEmail;
   return (
     <div className="clean-profile-panel flex flex-column gap-4">
-      {message ? <Message severity={messageSeverity} text={message} /> : null}
-
       <Card title="Данные аккаунта">
         <div className="grid">
           {[
@@ -248,6 +253,11 @@ export function ProfilePanel({
       {canManageRemnashopEmail ? (
         <Card title="Смена e-mail">
           <form className="flex flex-column gap-3" onSubmit={changeEmail}>
+            {message ? (
+              <div aria-live="assertive" ref={emailFeedbackRef} tabIndex={-1}>
+                <Message severity={messageSeverity} text={message} />
+              </div>
+            ) : null}
             {turnstileEnabled ? (
               <TurnstileWidget
                 action={emailTurnstileAction}
