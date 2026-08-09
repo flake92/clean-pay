@@ -12,12 +12,16 @@ import { serializePaymentRecord, syncExactPaymentRecordFromRemnashop, syncPaymen
 import type { PaymentTransactionResponse } from "@/backend/integrations/remnashop/contracts";
 
 type Authorized = Awaited<ReturnType<typeof getAuthorizedRemnashopTokens>>;
+type PaymentHistoryAuthorizer = () => Promise<Authorized>;
 function authorized(value: PaymentHistoryAuthorization) { return value.context as Authorized; }
 function transaction(value: PaymentHistoryTransaction) { return value.context as PaymentTransactionResponse; }
 
-export const productionPaymentHistoryGateway: PaymentHistoryGateway = {
+export function createProductionPaymentHistoryGateway(
+  authorize: PaymentHistoryAuthorizer = getAuthorizedRemnashopTokens,
+): PaymentHistoryGateway {
+  return {
   async authorize(userId) {
-    const result = await getAuthorizedRemnashopTokens();
+    const result = await authorize();
     const upstreamAccountId = getRemnashopUserIdFromAccessToken(result.accessToken);
     await assertPaymentUpstreamIdentity(userId, upstreamAccountId);
     return { context: result, upstreamAccountId };
@@ -53,4 +57,7 @@ export const productionPaymentHistoryGateway: PaymentHistoryGateway = {
       category: "upstream", source: "payments.history", message: "Serving owner-bound cached payment history after sync failure",
     });
   },
-};
+  };
+}
+
+export const productionPaymentHistoryGateway = createProductionPaymentHistoryGateway();

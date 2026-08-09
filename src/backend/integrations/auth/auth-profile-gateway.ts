@@ -18,6 +18,7 @@ import { authDebugLog } from "@/backend/observability/auth-debug-log";
 
 type Session = NonNullable<Awaited<ReturnType<typeof getCurrentSession>>>;
 type Authorized = Awaited<ReturnType<typeof getAuthorizedRemnashopTokens>>;
+type ProfileAuthorizer = () => Promise<Authorized>;
 
 async function adapt<T>(work: () => Promise<T>): Promise<T> {
   try { return await work(); }
@@ -51,13 +52,16 @@ function adaptSession(session: Session): AuthProfileSession {
   };
 }
 
-export const productionAuthProfileGateway: AuthProfileGateway = {
+export function createProductionAuthProfileGateway(
+  authorize: ProfileAuthorizer = () => getAuthorizedRemnashopTokens({ allowUnverifiedEmail: true }),
+): AuthProfileGateway {
+  return {
   async loadCurrentSession() {
     const session = await adapt(() => getCurrentSession());
     return session ? adaptSession(session) : null;
   },
   async authorizeCurrentSession() {
-    const authorized = await adapt(() => getAuthorizedRemnashopTokens({ allowUnverifiedEmail: true }));
+    const authorized = await adapt(authorize);
     return {
       context: authorized,
       session: adaptSession(authorized.session),
@@ -78,4 +82,7 @@ export const productionAuthProfileGateway: AuthProfileGateway = {
   confirmVerifiedEmail: (userId) => adapt(() => prismaProfileAccountRepository.confirmVerifiedEmail(userId)),
   async refreshCurrentAccess() { await adapt(() => refreshCurrentAccessCookie()); },
   debug: authDebugLog,
-};
+  };
+}
+
+export const productionAuthProfileGateway = createProductionAuthProfileGateway();

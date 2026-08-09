@@ -5,6 +5,21 @@ import { resolveAuthProfile } from "@/application/auth/resolve-auth-profile";
 
 const guest: NavigationViewModel = { authenticated: false, emailVerificationRequired: false, hasSubscription: false, canRenewSubscription: false };
 
+export async function loadNavigationShell(auth: AuthProfileGateway): Promise<NavigationViewModel> {
+  try {
+    const session = await auth.loadCurrentSession();
+    if (!session) return guest;
+    return {
+      authenticated: true,
+      emailVerificationRequired: Boolean(session.user.email && !session.user.emailVerified),
+      hasSubscription: false,
+      canRenewSubscription: false,
+    };
+  } catch {
+    return guest;
+  }
+}
+
 export async function loadNavigation(reader: NavigationReader, auth: AuthProfileGateway): Promise<NavigationViewModel> {
   try {
     const user = await resolveAuthProfile(auth);

@@ -33,7 +33,7 @@ import {
   type CabinetCommands,
 } from "@/application/cabinet/ports/cabinet-commands";
 import type { CabinetReader } from "@/application/cabinet/ports/cabinet-reader";
-import { loadNavigation } from "@/application/navigation/load-navigation";
+import { loadNavigation, loadNavigationShell } from "@/application/navigation/load-navigation";
 import { loadPaymentStatus } from "@/application/payments/load-payment-status";
 import type { PaymentHistoryGateway } from "@/application/payments/ports/payment-history";
 import type { PaymentMaintenanceRunner } from "@/application/payments/ports/payment-maintenance";
@@ -318,6 +318,16 @@ describe("application facades", () => {
   });
 
   it("uses safe fallbacks for navigation and payment status", async () => {
+    const shellGateway = authGateway();
+    await expect(loadNavigationShell(shellGateway)).resolves.toEqual({
+      authenticated: true,
+      emailVerificationRequired: false,
+      hasSubscription: false,
+      canRenewSubscription: false,
+    });
+    expect(shellGateway.authorizeCurrentSession).not.toHaveBeenCalled();
+    expect(shellGateway.loadProviderProfile).not.toHaveBeenCalled();
+
     await expect(loadNavigation({ loadOffers: async () => ({ ...offers, has_current_subscription: true, plans: [{ recommended_purchase_type: "renew" }] as never }) }, authGateway())).resolves.toMatchObject({
       authenticated: true, hasSubscription: true, canRenewSubscription: true,
     });

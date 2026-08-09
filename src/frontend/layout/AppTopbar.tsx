@@ -41,7 +41,7 @@ const AppTopbar = forwardRef<AppTopbarRef, { navigation: NavigationViewModel }>(
                 {flatItems.map((item) => {
                     if (item.to) {
                         return (
-                            <Link key={`${item.label}-${item.to}`} href={item.to} className="p-link layout-topbar-button" title={item.label}>
+                            <Link key={`${item.label}-${item.to}`} href={item.to} prefetch={false} className="p-link layout-topbar-button" title={item.label}>
                                 <i className={item.icon}></i>
                                 <span>{item.label}</span>
                             </Link>

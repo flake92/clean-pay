@@ -139,7 +139,7 @@ export function InstallAppButton({
         <span className="text-600 line-height-3">
           Ярлык уже находится на главном экране. Если хотите установить его заново, сначала удалите существующее приложение Clean Pay.
         </span>
-        <Link className="p-button p-component no-underline" href="/cabinet">
+        <Link className="p-button p-component no-underline" href="/cabinet" prefetch={false}>
           <span className="p-button-icon p-c pi pi-home" />
           <span className="p-button-label">Открыть кабинет</span>
         </Link>
