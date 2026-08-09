@@ -5,14 +5,21 @@ import { CabinetPanel } from "@/frontend/components/cabinet-panel";
 import { AppShell } from "@/app/_components/app-shell";
 import { PageHeader } from "@/frontend/components/layout";
 import { loadRequestCabinetViewModel } from "@/app/_composition/request-scoped-readers";
+import { redirect } from "next/navigation";
+
+async function loadAuthenticatedCabinet() {
+  const model = await loadRequestCabinetViewModel();
+  if (model.status === "unauthorized") redirect("/login");
+  return model;
+}
 
 async function CabinetActions() {
-  const model = await loadRequestCabinetViewModel();
+  const model = await loadAuthenticatedCabinet();
   return <CabinetHeaderActions offers={model.status === "ready" ? model.offers : null} />;
 }
 
 async function CabinetContent() {
-  return <CabinetPanel model={await loadRequestCabinetViewModel()} />;
+  return <CabinetPanel model={await loadAuthenticatedCabinet()} />;
 }
 
 function CabinetLoading() {
@@ -28,7 +35,7 @@ function CabinetLoading() {
 
 export default function CabinetPage() {
   return (
-    <AppShell>
+    <AppShell requireAuth>
       <div className="grid">
         <div className="col-12">
           <PageHeader

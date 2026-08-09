@@ -8,6 +8,7 @@ export type ProfileUserViewModel = {
 
 export type ProfileViewModel =
   | { status: "ready"; user: ProfileUserViewModel }
+  | { status: "unauthorized" }
   | { status: "error"; message: string };
 
 export type ProfileCommandResult =
