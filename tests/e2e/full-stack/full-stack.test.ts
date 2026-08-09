@@ -8,6 +8,7 @@ async function http(path: string, init: RequestInit = {}) {
   return fetch(`${baseUrl}${path}`, {
     ...init,
     redirect: init.redirect ?? "manual",
+    signal: init.signal ?? AbortSignal.timeout(20_000),
   });
 }
 

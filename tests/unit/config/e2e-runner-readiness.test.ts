@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 const runner = readFileSync("scripts/e2e-devcontainer.mjs", "utf8");
+const shellRunner = readFileSync("scripts/e2e-devcontainer.sh", "utf8");
 const compose = readFileSync(".devcontainer/docker-compose.yml", "utf8");
 const ciWorkflow = readFileSync(".github/workflows/ci.yml", "utf8");
 const remnashopRevision = "1262f98cd3904ea0e4ddbe4628ceecf56c5f598b";
@@ -88,5 +89,11 @@ describe("devcontainer e2e runner readiness", () => {
       /sudo chown -R node:node[^\n]*node_modules[^\n]*\/home\/node\/\.npm\s+\/workspace\/clean-pay\/\.next/,
     );
     expect(compose).not.toContain("if [ -d /workspace/clean-pay/.next ]");
+  });
+
+  it("bounds the test process and graceful Next.js shutdown", () => {
+    expect(shellRunner).toContain("timeout --signal=TERM --kill-after=10s 360s");
+    expect(shellRunner).toContain('kill -KILL -- "-$next_pid"');
+    expect(shellRunner).toContain("for _ in $(seq 1 10)");
   });
 });
