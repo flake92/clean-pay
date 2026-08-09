@@ -186,6 +186,40 @@ describe("clean architecture boundaries", () => {
     }
   });
 
+  it("keeps profile resolution and passkey-management policy in application use cases", () => {
+    const profileUseCase = readFileSync("src/application/auth/resolve-auth-profile.ts", "utf8");
+    const profileAdapter = readFileSync("src/backend/integrations/auth/auth-profile-gateway.ts", "utf8");
+    const passkeyUseCase = readFileSync("src/application/auth/manage-linked-account.ts", "utf8");
+    const passkeyPersistence = readFileSync("src/backend/integrations/auth/passkey-service.ts", "utf8");
+    const linkAdapter = readFileSync("src/backend/integrations/auth/link-account.ts", "utf8");
+    const mergeAdapter = readFileSync("src/backend/integrations/auth/telegram-account-merge-gateway.ts", "utf8");
+    const mergeStore = readFileSync("src/backend/integrations/auth/telegram-account-merge-store.ts", "utf8");
+    const passkeyAdapter = readFileSync("src/backend/integrations/auth/passkey-gateway.ts", "utf8");
+    const paymentWorkflowAdapter = readFileSync("src/backend/integrations/payments/payment-workflow-gateway.ts", "utf8");
+    const paymentStatusAdapter = readFileSync("src/backend/integrations/payments/payment-status-reader.ts", "utf8");
+
+    expect(globSync("src/backend/auth/profile.ts")).toEqual([]);
+    expect(profileUseCase).toContain("shouldReconcileVerifiedEmail");
+    expect(profileUseCase).toContain("EMAIL_REQUIRED");
+    expect(profileAdapter).not.toContain("shouldReconcileVerifiedEmail");
+    expect(profileAdapter).not.toContain("resolveAuthProfile");
+    expect(passkeyUseCase).toContain("accountAccessIssue(actor)");
+    expect(passkeyPersistence).not.toContain("getCurrentSession");
+    expect(passkeyPersistence).not.toContain("assertEmailVerificationPolicy");
+    expect(passkeyPersistence).not.toMatch(/export async function (?:listPasskeys|deletePasskey)\b/);
+    expect(linkAdapter).not.toContain("WebSessionAssuranceLevel.BOOTSTRAP");
+    expect(passkeyUseCase).toContain('new LinkAccountGatewayError("PASSKEY_REQUIRED")');
+    expect(mergeAdapter).not.toContain("WebSessionAssuranceLevel.BOOTSTRAP");
+    expect(mergeStore).not.toContain("getCurrentSession");
+    expect(readFileSync("src/application/auth/confirm-telegram-account-merge.ts", "utf8"))
+      .toContain('new AccountMergeError("PASSKEY_REQUIRED")');
+    expect(passkeyAdapter).toContain("if (!session) return null");
+    expect(paymentWorkflowAdapter).not.toContain('throw new ServiceError("UNAUTHORIZED"');
+    expect(paymentStatusAdapter).not.toContain('throw new PaymentStatusGatewayError("UNAUTHORIZED")');
+    expect(readFileSync("src/application/payments/execute-payment-workflow.ts", "utf8"))
+      .toContain('workflowError("UNAUTHORIZED"');
+  });
+
   it("keeps only ports that are consumed by an application use case", () => {
     expect(unusedApplicationPorts(
       files("src/application/**/ports/*.{ts,tsx}"),
@@ -256,14 +290,18 @@ describe("clean architecture boundaries", () => {
     expect(controller).not.toContain("remnashopLinkTelegram(");
     expect(controller).not.toContain("withPaymentOwnerChangeFence(");
     expect(controller).not.toContain("reconcileUserFromRemnashopAuth(");
-    expect(controller).toContain("recoverTelegramSession(");
-    expect(controller).not.toContain("recoverRemnashopTelegramSession(");
+    expect(controller).toContain("recoverRemnashopTelegramSession(");
     expect(useCase).toContain("withOwnerChangeFence({");
     expect(useCase).toContain("mergeIntoTelegramAccount(");
+    expect(useCase).toContain("resolveVerifiedIdentity(");
+    expect(useCase).toContain("stageAccountMerge(");
+    expect(useCase).toContain("preflightAccountMerge(");
     expect(useCase).toContain('"/link-account?auth=telegram_email_replace"');
     expect(useCase).not.toMatch(/return gateway\.complete\(input\)/);
     expect(gateway).not.toContain("completeConsumedCallback");
     expect(gateway).not.toContain("reconcileTelegramCallbackResult");
+    expect(gateway).not.toContain("stageTelegramAccountMerge");
+    expect(gateway).toContain("verifyTelegramCallback");
     expect(globSync("src/backend/integrations/auth/telegram-callback-processor.ts")).toEqual([]);
   });
 
@@ -306,10 +344,70 @@ describe("clean architecture boundaries", () => {
 
   it("keeps human-verification ordering in application use cases", () => {
     const useCase = readFileSync("src/application/auth/execute-passkey-command.ts", "utf8");
-    const adapter = readFileSync("src/backend/integrations/auth/passkey-commands.ts", "utf8");
+    const gateway = readFileSync("src/backend/integrations/auth/passkey-gateway.ts", "utf8");
+    const legacyService = readFileSync("src/backend/integrations/auth/passkey-service.ts", "utf8");
 
-    expect(useCase.indexOf("commands.verifyHuman(")).toBeLessThan(useCase.indexOf("commands.beginLogin("));
-    expect(adapter).not.toMatch(/async beginLogin[\s\S]*verifyTurnstileToken/);
+    expect(useCase.indexOf("commands.verifyHuman(")).toBeLessThan(useCase.indexOf("commands.assertLoginOptionsRateLimit("));
+    expect(useCase.indexOf("commands.assertLoginOptionsRateLimit(")).toBeLessThan(useCase.indexOf("commands.findLoginAccount("));
+    expect(useCase.indexOf("commands.recordAuthentication(")).toBeLessThan(useCase.indexOf("commands.createAuthenticatedSession("));
+    expect(gateway).not.toContain("if (!account?.credentials.length)");
+    expect(gateway).not.toContain("challenge.userId !== credential.userId");
+    expect(legacyService).not.toMatch(/export async function (begin|finish)Passkey/);
+  });
+
+  it("keeps e-mail verification and change workflows in the application layer", () => {
+    const useCase = readFileSync("src/application/auth/execute-email-verification.ts", "utf8");
+    const adapter = readFileSync("src/backend/integrations/auth/email-verification.ts", "utf8");
+    const profileAdapter = readFileSync("src/backend/integrations/profile/profile-adapter.ts", "utf8");
+
+    expect(useCase.indexOf("commands.verifyHuman(")).toBeLessThan(useCase.indexOf("commands.loadActor("));
+    expect(useCase.indexOf("commands.assertRequestLimits(")).toBeLessThan(useCase.indexOf("commands.requestProviderCode("));
+    expect(useCase).toContain("synchronizeConfirmedAccount(commands");
+    expect(useCase).toContain("mergeEmailAndTelegramAccounts(");
+    expect(useCase.indexOf("commands.assertChangeLimits(")).toBeLessThan(useCase.indexOf("commands.changeProviderEmail("));
+    expect(adapter).not.toContain("confirmEmailVerification(");
+    expect(profileAdapter).not.toContain("email-verification-service");
+    expect(profileAdapter).not.toContain("requestEmailVerification(");
+    expect(profileAdapter).not.toContain("changeEmail(");
+  });
+
+  it("keeps linked-email authentication and merge policy in the application layer", () => {
+    const useCase = readFileSync("src/application/auth/manage-linked-account.ts", "utf8");
+    const adapter = readFileSync("src/backend/integrations/auth/link-account.ts", "utf8");
+
+    expect(useCase).toContain('operation: "login"');
+    expect(useCase).toContain('operation: "register"');
+    expect(useCase).toContain("linkActorIsCurrent(actor)");
+    expect(useCase).toContain("linkVerifiedEmailAccount(");
+    expect(useCase).toContain("mergeLinkAccounts(");
+    expect(adapter).not.toContain("linkRemnashopAccount");
+    expect(adapter).not.toContain("remnashop-link-service");
+  });
+
+  it("keeps password-change retry and session replacement policy in application", () => {
+    const useCase = readFileSync("src/application/profile/execute-profile-command.ts", "utf8");
+    const adapter = readFileSync("src/backend/integrations/profile/profile-adapter.ts", "utf8");
+
+    expect(useCase).toContain('error.code !== "CURRENT_PASSWORD_INVALID"');
+    expect(useCase.indexOf("refreshProviderSession(session)")).toBeLessThan(useCase.indexOf("persistRefreshedProviderSession(session, refreshed)"));
+    expect(useCase.indexOf("replaceLocalPasswordSession(session, changed)")).toBeLessThan(useCase.indexOf("auditPasswordChanged(session.userId)"));
+    expect(adapter).not.toContain("@/backend/auth/password");
+    expect(adapter).not.toContain("changePassword(");
+  });
+
+  it("keeps Telegram account-merge state machine in the application layer", () => {
+    const useCase = readFileSync("src/application/auth/confirm-telegram-account-merge.ts", "utf8");
+    const gateway = readFileSync("src/backend/integrations/auth/telegram-account-merge-gateway.ts", "utf8");
+    const action = readFileSync("src/app/actions/link-account.ts", "utf8");
+
+    expect(useCase).toContain('confirmation.status === "COMPLETED"');
+    expect(useCase).toContain("assertOwnerUnchanged(");
+    expect(useCase).toContain("assertPreflight(");
+    expect(useCase).toContain("expectedSubscription !== finalSubscription");
+    expect(useCase).toContain("gateway.release(confirmation");
+    expect(gateway).not.toContain("confirmTelegramAccountMerge(");
+    expect(action).toContain("productionTelegramAccountMergeGateway");
+    expect(action).toContain("confirmLinkedTelegram(productionTelegramAccountMergeGateway)");
   });
 
   it("keeps session business operations out of server actions", () => {

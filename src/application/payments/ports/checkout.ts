@@ -7,7 +7,6 @@ export type PaymentExecution =
   | { status: "manual-review"; operationId: string };
 
 export interface CheckoutReader {
-  loadAccount(): Promise<{ authenticated: boolean; emailVerified: boolean; accountSyncPending: boolean }>;
   loadOffers(): Promise<SubscriptionOffersResponse>;
 }
 

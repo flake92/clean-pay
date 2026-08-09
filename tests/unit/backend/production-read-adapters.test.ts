@@ -1,19 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
-  getCurrentAuthProfile: vi.fn(),
   getEnv: vi.fn(),
-  loadPaymentHistory: vi.fn(),
-  getCurrentUser: vi.fn(),
   getAuthorizedRemnashopTokens: vi.fn(),
   remnashopRequest: vi.fn(),
   getLiveRemnawaveSubscriptionUrl: vi.fn(),
 }));
 
-vi.mock("@/backend/auth/profile", () => ({ getCurrentAuthProfile: mocks.getCurrentAuthProfile }));
 vi.mock("@/backend/config/env", () => ({ getEnv: mocks.getEnv }));
-vi.mock("@/backend/integrations/payments/payment-history-reader", () => ({ loadPaymentHistory: mocks.loadPaymentHistory }));
-vi.mock("@/backend/integrations/sessions/web-session-service", () => ({ getCurrentUser: mocks.getCurrentUser }));
 vi.mock("@/backend/integrations/remnashop/client", () => ({
   getAuthorizedRemnashopTokens: mocks.getAuthorizedRemnashopTokens,
   remnashopRequest: mocks.remnashopRequest,
@@ -99,65 +93,28 @@ describe("production read adapters", () => {
   });
 
   it("assembles cabinet data through its dedicated readers", async () => {
-    mocks.getCurrentUser.mockResolvedValue({ id: "user-1" });
-    mocks.getCurrentAuthProfile.mockResolvedValue({ user: { email: "u@example.com" } });
     mocks.remnashopRequest
       .mockResolvedValueOnce(null)
       .mockResolvedValueOnce(offers)
       .mockResolvedValueOnce({ devices: [] });
-    mocks.loadPaymentHistory.mockResolvedValue({ records: [], stale: false });
 
-    await expect(productionCabinetReader.loadUser()).resolves.toEqual({
-      id: "user-1",
-      profile: { email: "u@example.com" },
-    });
     await expect(productionCabinetReader.loadSubscription()).resolves.toBeNull();
     await expect(productionCabinetReader.loadOffers()).resolves.toBe(offers);
     await expect(productionCabinetReader.loadDevices()).resolves.toEqual({ devices: [] });
-    await expect(productionCabinetReader.loadPayments("user-1")).resolves.toMatchObject({ stale: false });
     await expect(productionCabinetReader.loadSupport()).resolves.toMatchObject({ enabled: true });
-
-    mocks.getCurrentUser.mockResolvedValueOnce(null);
-    await expect(productionCabinetReader.loadUser()).rejects.toThrow("unauthorized");
   });
 
-  it("builds navigation state and degrades only optional offers", async () => {
-    mocks.getCurrentAuthProfile.mockResolvedValue({ user: { email: "u@example.com", emailVerified: false } });
+  it("loads navigation offers without owning navigation policy", async () => {
     mocks.remnashopRequest.mockResolvedValueOnce(offers);
-    await expect(productionNavigationReader.load()).resolves.toEqual({
-      authenticated: true,
-      emailVerificationRequired: true,
-      hasSubscription: true,
-      canRenewSubscription: true,
-    });
+    await expect(productionNavigationReader.loadOffers()).resolves.toBe(offers);
 
     mocks.remnashopRequest.mockRejectedValueOnce(new Error("offline"));
-    await expect(productionNavigationReader.load()).resolves.toMatchObject({
-      authenticated: true,
-      hasSubscription: false,
-      canRenewSubscription: false,
-    });
+    await expect(productionNavigationReader.loadOffers()).rejects.toThrow("offline");
   });
 
-  it("maps checkout authentication and sync state", async () => {
-    mocks.getCurrentAuthProfile.mockResolvedValueOnce({
-      user: { email: "u@example.com", is_email_verified: true, account_sync_pending: true },
-    });
-    await expect(productionCheckoutReader.loadAccount()).resolves.toEqual({
-      authenticated: true,
-      emailVerified: true,
-      accountSyncPending: true,
-    });
-
-    mocks.getCurrentAuthProfile.mockRejectedValueOnce({ code: "UNAUTHORIZED" });
-    await expect(productionCheckoutReader.loadAccount()).resolves.toEqual({
-      authenticated: false,
-      emailVerified: false,
-      accountSyncPending: false,
-    });
-    const providerError = new Error("offline");
-    mocks.getCurrentAuthProfile.mockRejectedValueOnce(providerError);
-    await expect(productionCheckoutReader.loadAccount()).rejects.toBe(providerError);
+  it("loads checkout offers without owning account policy", async () => {
+    mocks.remnashopRequest.mockResolvedValueOnce(offers);
+    await expect(productionCheckoutReader.loadOffers()).resolves.toBe(offers);
   });
 
   it("reads support configuration without exposing the complete environment", () => {

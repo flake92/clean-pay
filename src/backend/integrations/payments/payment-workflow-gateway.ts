@@ -23,10 +23,7 @@ import {
   settlePaymentOperationBeforeDispatchFailure,
 } from "@/backend/integrations/payments/payment-idempotency-service";
 import { assertPaymentReturnUrl, paymentReturnUrl } from "@/backend/payments/return-url";
-import {
-  assertEmailVerificationPolicy,
-  getCurrentSession,
-} from "@/backend/integrations/sessions/web-session-service";
+import { getCurrentSession } from "@/backend/integrations/sessions/web-session-service";
 import type { SubscriptionOffersResponse } from "@/shared/domain/subscriptions";
 
 type ProviderAuthorization = {
@@ -55,11 +52,11 @@ function serviceError(error: unknown) {
 export const productionPaymentWorkflowGateway: PaymentWorkflowGateway = {
   async loadActor() {
     const session = await getCurrentSession();
-    if (!session) throw new ServiceError("UNAUTHORIZED", 401);
-    assertEmailVerificationPolicy(session.user, { requireVerifiedEmail: true });
+    if (!session) return null;
     return {
       userId: session.userId,
       email: session.user.email ?? null,
+      emailVerified: session.user.emailVerified,
       telegramId: session.user.telegramId,
     };
   },

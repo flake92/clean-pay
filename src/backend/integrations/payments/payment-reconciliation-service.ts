@@ -3,8 +3,6 @@ import { Prisma, type PaymentOperationKind } from "@prisma/client";
 import { prisma } from "@/backend/database/prisma";
 import { ServiceError } from "@/backend/errors/service-error";
 import {
-  reconcilePaymentOperation,
-  reconcilePaymentOperationAsAdmin,
   type RemnashopPaymentRecovery,
 } from "@/backend/integrations/remnashop/payment-recovery";
 import {
@@ -33,7 +31,7 @@ export type PaymentReconciliationClaim = {
   failureCount: number;
 };
 
-class PaymentReconciliationManualError extends Error {
+export class PaymentReconciliationManualError extends Error {
   constructor(public readonly reason: string) {
     super(reason);
     this.name = "PaymentReconciliationManualError";
@@ -314,7 +312,7 @@ export async function completeReconciledPayment(
   });
 }
 
-async function releaseReconciliationClaim(
+export async function releaseReconciliationClaim(
   claim: PaymentReconciliationClaim,
   input: {
     nextAttemptDelayMs: number | null;
@@ -413,7 +411,7 @@ async function releaseReconciliationClaim(
   });
 }
 
-async function markPaymentReconciliationManual(
+export async function markPaymentReconciliationManual(
   claim: PaymentReconciliationClaim,
   reason: string,
   options: { allowOwnerMismatch?: boolean } = {},
@@ -432,7 +430,7 @@ async function markPaymentReconciliationManual(
   });
 }
 
-async function resetMissingUpstreamOperation(
+export async function resetMissingUpstreamOperation(
   claim: PaymentReconciliationClaim,
 ) {
   await prisma.$transaction(async (tx) => {
@@ -480,53 +478,7 @@ async function resetMissingUpstreamOperation(
   });
 }
 
-export async function settlePaymentReconciliation(
-  claim: PaymentReconciliationClaim,
-  recovery: RemnashopPaymentRecovery | null,
-) {
-  if (recovery?.state === "SUCCEEDED") {
-    await completeReconciledPayment(claim, recovery);
-    return "SUCCEEDED" as const;
-  }
-
-  if (recovery === null) {
-    await resetMissingUpstreamOperation(claim);
-    return "RETRY_READY" as const;
-  }
-
-  if (recovery?.state === "IN_PROGRESS") {
-    const retryAfterSeconds = Math.max(
-      1,
-      recovery.retry_after_seconds ?? 5,
-    );
-    await releaseReconciliationClaim(claim, {
-      nextAttemptDelayMs: retryAfterSeconds * 1_000,
-      failure: false,
-    });
-    return "IN_PROGRESS" as const;
-  }
-
-  if (recovery?.state === "UNKNOWN") {
-    const operation = await prisma.paymentOperation.findUnique({
-      where: { id: claim.operationId },
-      select: { reconcileFailureCount: true },
-    });
-    await releaseReconciliationClaim(claim, {
-      nextAttemptDelayMs:
-        (recovery.retry_after_seconds ?? 0) > 0
-          ? recovery.retry_after_seconds! * 1_000
-          : reconciliationDelayMs(operation?.reconcileFailureCount ?? 0),
-      failure: true,
-      errorSnapshot: { code: "UPSTREAM_OUTCOME_UNKNOWN" },
-    });
-    return "UNKNOWN" as const;
-  }
-
-  await markPaymentReconciliationManual(claim, "UPSTREAM_MANUAL_REQUIRED");
-  return "MANUAL_REQUIRED" as const;
-}
-
-async function failPaymentReconciliation(
+export async function failPaymentReconciliation(
   claim: PaymentReconciliationClaim,
   error: unknown,
 ) {
@@ -541,181 +493,4 @@ async function failPaymentReconciliation(
     failure: true,
     errorSnapshot: safeFailureSnapshot(error),
   });
-}
-
-export async function processPaymentReconciliationClaim(
-  claim: PaymentReconciliationClaim,
-  options: { accessToken?: string },
-) {
-  const expectedOwnerHash = paymentUpstreamOwnerHash(claim.remnashopUserId);
-
-  if (!safeEqual(expectedOwnerHash, claim.upstreamOwnerHash)) {
-    await markPaymentReconciliationManual(claim, "UPSTREAM_OWNER_MISMATCH", {
-      allowOwnerMismatch: true,
-    });
-    return "MANUAL_REQUIRED" as const;
-  }
-
-  let recovery: RemnashopPaymentRecovery | null;
-
-  try {
-    recovery = options.accessToken
-      ? await reconcilePaymentOperation({
-          accessToken: options.accessToken,
-          operation: claim.operation,
-          idempotencyKey: claim.upstreamKey,
-          trigger: true,
-        })
-      : await reconcilePaymentOperationAsAdmin({
-          remnashopUserId: claim.remnashopUserId,
-          operation: claim.operation,
-          idempotencyKey: claim.upstreamKey,
-          trigger: true,
-        });
-
-  } catch (error) {
-    try {
-      await failPaymentReconciliation(claim, error);
-    } catch (releaseError) {
-      if (
-        releaseError instanceof ServiceError &&
-        releaseError.code === "ACCOUNT_MERGE_REQUIRED"
-      ) {
-        await markPaymentReconciliationManual(
-          claim,
-          "UPSTREAM_OWNER_CHANGED_DURING_REQUEST",
-          { allowOwnerMismatch: true },
-        );
-        return "MANUAL_REQUIRED" as const;
-      }
-
-      throw releaseError;
-    }
-    throw error;
-  }
-
-  try {
-    return await settlePaymentReconciliation(claim, recovery);
-  } catch (error) {
-    if (error instanceof PaymentReconciliationManualError) {
-      try {
-        await markPaymentReconciliationManual(claim, error.reason);
-      } catch (manualError) {
-        if (
-          manualError instanceof ServiceError &&
-          manualError.code === "ACCOUNT_MERGE_REQUIRED"
-        ) {
-          await markPaymentReconciliationManual(
-            claim,
-            `${error.reason}_AND_OWNER_CHANGED`,
-            { allowOwnerMismatch: true },
-          );
-        } else {
-          throw manualError;
-        }
-      }
-      return "MANUAL_REQUIRED" as const;
-    }
-
-    if (error instanceof ServiceError && error.code === "ACCOUNT_MERGE_REQUIRED") {
-      await markPaymentReconciliationManual(
-        claim,
-        "UPSTREAM_OWNER_CHANGED_DURING_SETTLEMENT",
-        { allowOwnerMismatch: true },
-      );
-      return "MANUAL_REQUIRED" as const;
-    }
-
-    try {
-      await failPaymentReconciliation(claim, error);
-    } catch (releaseError) {
-      if (
-        releaseError instanceof ServiceError &&
-        releaseError.code === "ACCOUNT_MERGE_REQUIRED"
-      ) {
-        await markPaymentReconciliationManual(
-          claim,
-          "UPSTREAM_OWNER_CHANGED_AFTER_SETTLEMENT_FAILURE",
-          { allowOwnerMismatch: true },
-        );
-        return "MANUAL_REQUIRED" as const;
-      }
-
-      throw releaseError;
-    }
-    throw error;
-  }
-}
-
-export async function reconcileUnknownPayments(input: {
-  limit: number;
-  userId?: string;
-  accessToken?: string;
-  deadlineMs?: number;
-}) {
-  if (!Number.isSafeInteger(input.limit) || input.limit < 1 || input.limit > 100) {
-    throw new ServiceError(
-      "VALIDATION_ERROR",
-      400,
-      "Reconciliation limit must be between 1 and 100",
-    );
-  }
-
-  const deadlineMs = input.deadlineMs ?? 20_000;
-
-  if (
-    !Number.isSafeInteger(deadlineMs) ||
-    deadlineMs < 1_000 ||
-    deadlineMs > 30_000
-  ) {
-    throw new ServiceError(
-      "VALIDATION_ERROR",
-      400,
-      "Reconciliation deadline must be between 1000 and 30000 milliseconds",
-    );
-  }
-  const deadlineAt = Date.now() + deadlineMs;
-
-  const counts = {
-    claimed: 0,
-    succeeded: 0,
-    inProgress: 0,
-    unknown: 0,
-    manualRequired: 0,
-    retryReady: 0,
-    failed: 0,
-    manualRequiredOperationIds: [] as string[],
-  };
-
-  for (let index = 0; index < input.limit; index += 1) {
-    if (Date.now() >= deadlineAt) {
-      break;
-    }
-    const claim = await claimUnknownPaymentOperation({ userId: input.userId });
-
-    if (!claim) {
-      break;
-    }
-
-    counts.claimed += 1;
-
-    try {
-      const result = await processPaymentReconciliationClaim(claim, {
-        accessToken: input.accessToken,
-      });
-
-      if (result === "SUCCEEDED") counts.succeeded += 1;
-      if (result === "IN_PROGRESS") counts.inProgress += 1;
-      if (result === "UNKNOWN") counts.unknown += 1;
-      if (result === "MANUAL_REQUIRED") {
-        counts.manualRequired += 1;
-        counts.manualRequiredOperationIds.push(claim.operationId);
-      }
-      if (result === "RETRY_READY") counts.retryReady += 1;
-    } catch {
-      counts.failed += 1;
-    }
-  }
-
-  return counts;
 }

@@ -34,9 +34,9 @@ vi.mock("@/backend/integrations/remnashop/payment-recovery", () => ({
 import {
   claimUnknownPaymentOperation,
   completeReconciledPayment,
-  processPaymentReconciliationClaim,
-  settlePaymentReconciliation,
 } from "@/backend/integrations/payments/payment-reconciliation-service";
+import { processPaymentReconciliation } from "@/application/payments/run-payment-maintenance";
+import { productionPaymentMaintenanceRunner } from "@/backend/integrations/payments/payment-maintenance-runner";
 import { paymentUpstreamOwnerHash } from "@/backend/payments/hashes";
 import { ServiceError } from "@/backend/errors/service-error";
 import { sha256 } from "@/backend/security/crypto";
@@ -97,6 +97,30 @@ function claim(claimToken = "reconcile-claim") {
     attemptCount: 3,
     failureCount: 1,
   };
+}
+
+function applicationClaim(value: ReturnType<typeof claim>) {
+  return {
+    context: value,
+    operationId: value.operationId,
+    failureCount: value.failureCount,
+    ownerMatches: paymentUpstreamOwnerHash(value.remnashopUserId) === value.upstreamOwnerHash,
+  };
+}
+
+async function settlePaymentReconciliation(value: ReturnType<typeof claim>, result: unknown) {
+  return processPaymentReconciliation({
+    ...productionPaymentMaintenanceRunner,
+    recoverPayment: async () => result === null ? null : {
+      context: result,
+      state: (result as { state: "SUCCEEDED" | "IN_PROGRESS" | "UNKNOWN" | "MANUAL_REQUIRED" }).state,
+      retryAfterSeconds: (result as { retry_after_seconds?: number | null }).retry_after_seconds ?? null,
+    },
+  }, applicationClaim(value));
+}
+
+async function processPaymentReconciliationClaim(value: ReturnType<typeof claim>, options: { accessToken?: string }) {
+  return processPaymentReconciliation(productionPaymentMaintenanceRunner, applicationClaim(value), options);
 }
 
 function operationForClaim(claimToken: string, overrides: Record<string, unknown> = {}) {
@@ -323,8 +347,12 @@ describe("payment outcome reconciliation fencing", () => {
   it("cannot reset a missing operation after another winner fenced the claim", async () => {
     mocks.tx.$queryRaw
       .mockResolvedValueOnce([{ remnashopUserId: "42" }])
+      .mockResolvedValueOnce([{ now }])
+      .mockResolvedValueOnce([{ remnashopUserId: "42" }])
       .mockResolvedValueOnce([{ now }]);
-    mocks.tx.paymentOperation.updateMany.mockResolvedValue({ count: 0 });
+    mocks.tx.paymentOperation.updateMany
+      .mockResolvedValueOnce({ count: 0 })
+      .mockResolvedValueOnce({ count: 1 });
 
     await expect(
       settlePaymentReconciliation(claim(), null),
@@ -332,12 +360,18 @@ describe("payment outcome reconciliation fencing", () => {
   });
 
   it("never resets READY when the owner changes before the 404 is settled", async () => {
-    mocks.tx.$queryRaw.mockResolvedValueOnce([{ remnashopUserId: "99" }]);
+    mocks.tx.$queryRaw
+      .mockResolvedValueOnce([{ remnashopUserId: "99" }])
+      .mockResolvedValueOnce([{ remnashopUserId: "99" }])
+      .mockResolvedValueOnce([{ now }]);
+    mocks.tx.paymentOperation.updateMany.mockResolvedValueOnce({ count: 1 });
 
     await expect(
       settlePaymentReconciliation(claim(), null),
-    ).rejects.toMatchObject({ code: "ACCOUNT_MERGE_REQUIRED" });
-    expect(mocks.tx.paymentOperation.updateMany).not.toHaveBeenCalled();
+    ).resolves.toBe("MANUAL_REQUIRED");
+    expect(mocks.tx.paymentOperation.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ reconciledAt: now }),
+    }));
   });
 
   it("marks an upstream-owner mismatch for manual review without calling upstream", async () => {

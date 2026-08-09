@@ -6,6 +6,7 @@ import type {
   PaymentWorkflowInput,
 } from "@/application/payments/ports/payment-workflow";
 import { paymentOfferMatches } from "@/shared/domain/payment-offer";
+import { accountAccessIssue } from "@/shared/domain/account-access-policy";
 
 class PaymentWorkflowError extends Error {
   constructor(public readonly code: string, public readonly status: number, message: string) {
@@ -50,12 +51,18 @@ function assertSameActor(actorId: string, authorization: PaymentAuthorization) {
   }
 }
 
+function assertPaymentActorReady(actor: { email: string | null; emailVerified: boolean }) {
+  const issue = accountAccessIssue({ ...actor, telegramId: null }, { requireVerifiedEmail: true });
+  if (issue) throw workflowError(issue, issue === "EMAIL_REQUIRED" ? 401 : 403, "Verified e-mail is required before payment");
+}
+
 export async function executePaymentWorkflow(
   gateway: PaymentWorkflowGateway,
   input: PaymentWorkflowInput,
   idempotencyKey: string,
 ): Promise<PaymentExecution> {
   const actor = await gateway.loadActor();
+  if (!actor) throw workflowError("UNAUTHORIZED", 401, "Payment session is required");
   const operationRequest = input.kind === "PURCHASE"
     ? { kind: "PURCHASE" as const, payload: input.request }
     : { kind: "EXTEND" as const, payload: input.request };
@@ -64,6 +71,7 @@ export async function executePaymentWorkflow(
   let authorization: PaymentAuthorization | null = null;
 
   if (operation.state === "missing") {
+    assertPaymentActorReady(actor);
     await gateway.rateLimit({
       kind: input.kind,
       email: actor.email ?? `user:${actor.userId}`,
@@ -90,6 +98,7 @@ export async function executePaymentWorkflow(
   let dispatched = false;
   try {
     if (!authorization) {
+      assertPaymentActorReady(actor);
       await gateway.rateLimit({
         kind: input.kind,
         email: actor.email ?? `user:${actor.userId}`,
