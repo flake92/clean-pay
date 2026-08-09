@@ -4,13 +4,17 @@ import type { PaymentHistoryGateway } from "@/application/payments/ports/payment
 import type { PaymentMaintenanceRunner } from "@/application/payments/ports/payment-maintenance";
 import { loadPaymentHistory } from "@/application/payments/load-payment-history";
 import type { AuthProfileGateway } from "@/application/auth/ports/auth-profile";
+import { AuthProfileError } from "@/application/auth/ports/auth-profile";
 import { resolveAuthProfile } from "@/application/auth/resolve-auth-profile";
 
 export async function loadCabinetViewModel(reader: CabinetReader, auth: AuthProfileGateway, history: PaymentHistoryGateway, maintenance: PaymentMaintenanceRunner): Promise<CabinetViewModel> {
   let account;
   try {
     account = await resolveAuthProfile(auth);
-  } catch {
+  } catch (error) {
+    if (error instanceof AuthProfileError && error.code === "UNAUTHORIZED") {
+      return { status: "unauthorized" };
+    }
     return { status: "error", message: "Нужно войти в аккаунт." };
   }
 

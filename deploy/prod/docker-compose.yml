@@ -1,5 +1,9 @@
 name: ${COMPOSE_PROJECT_NAME:-clean-pay-prod}
 
+# Consumed by deploy.sh before Compose starts a build. Keeping the value in
+# the rendered configuration makes the production example self-documenting.
+x-clean-pay-min-free-disk-mb: ${CLEAN_PAY_MIN_FREE_DISK_MB:-8192}
+
 services:
   migration:
     image: ${CLEAN_PAY_MIGRATION_IMAGE:-clean-pay-prod-migration:local}

@@ -22,7 +22,7 @@ export async function PaymentStatusPage({ kind, searchParams }: {
     operationId: first(params.operation_id) ?? first(params.operationId) ?? null,
   });
   return (
-    <AppShell>
+    <AppShell requireAuth>
       <div className="flex flex-column gap-6">
         <PageHeader description={intro(kind)} title="Статус платежа" />
         <Card><PaymentReturnStatus kind={kind} model={model} /></Card>

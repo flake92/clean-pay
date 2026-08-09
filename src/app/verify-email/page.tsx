@@ -6,6 +6,7 @@ import { productionAuthProfileGateway } from "@/backend/integrations/auth/auth-p
 import {
   resolveEmailVerificationSetup,
 } from "@/shared/auth/account-setup-flow";
+import { redirect } from "next/navigation";
 
 export const dynamic = "force-dynamic";
 
@@ -29,9 +30,10 @@ export default async function VerifyEmailPage({
     firstSearchParam(params.redirect_to),
   );
   const initialReadiness = await safeReadiness(productionAuthProfileGateway);
+  if (initialReadiness.status === "unauthorized") redirect("/login");
 
   return (
-    <AppShell>
+    <AppShell requireAuth>
       <div className="flex flex-column gap-6">
         <PageHeader
           description={

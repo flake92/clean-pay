@@ -2,7 +2,7 @@
 'use client';
 
 import { useEventListener, useUnmountEffect } from 'primereact/hooks';
-import React, { useContext, useEffect, useRef, useState } from 'react';
+import React, { useContext, useEffect, useRef } from 'react';
 import { classNames } from 'primereact/utils';
 import AppFooter from './AppFooter';
 import AppSidebar from './AppSidebar';
@@ -11,11 +11,9 @@ import { LayoutContext } from './context/layoutcontext';
 import { ChildContainerProps, LayoutState, AppTopbarRef } from '@/frontend/types';
 import { usePathname } from 'next/navigation';
 import type { NavigationViewModel } from '@/application/models/navigation';
-import { loadNavigationAction } from '@/app/actions/navigation';
 
-const Layout = ({ children, navigation: initialNavigation }: ChildContainerProps & { navigation: NavigationViewModel }) => {
+const Layout = ({ children, navigation }: ChildContainerProps & { navigation: NavigationViewModel }) => {
     const { layoutState, setLayoutState } = useContext(LayoutContext);
-    const [navigation, setNavigation] = useState(initialNavigation);
     const topbarRef = useRef<AppTopbarRef>(null);
     const sidebarRef = useRef<HTMLDivElement>(null);
 
@@ -63,20 +61,6 @@ const Layout = ({ children, navigation: initialNavigation }: ChildContainerProps
     });
 
     const pathname = usePathname();
-    useEffect(() => {
-        let active = true;
-        void loadNavigationAction().then((nextNavigation) => {
-            if (active) {
-                setNavigation((current) => (
-                    current.authenticated && !nextNavigation.authenticated
-                        ? current
-                        : nextNavigation
-                ));
-            }
-        }).catch(() => undefined);
-        return () => { active = false; };
-    }, [initialNavigation, pathname]);
-
     useEffect(() => {
         hideMenu();
         setLayoutState((prevLayoutState: LayoutState) => ({

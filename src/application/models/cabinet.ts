@@ -27,6 +27,7 @@ export type CabinetPaymentViewModel = {
 };
 
 export type CabinetViewModel =
+  | { status: "unauthorized" }
   | { status: "error"; message: string }
   | {
       status: "ready";
