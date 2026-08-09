@@ -90,6 +90,10 @@ describe("devcontainer e2e runner readiness", () => {
       /sudo chown -R node:node[^\n]*node_modules[^\n]*\/home\/node\/\.npm\s+\/workspace\/clean-pay\/\.next/,
     );
     expect(compose).not.toContain("if [ -d /workspace/clean-pay/.next ]");
+    expect(compose).toContain("sudo touch /workspace/clean-pay/next-env.d.ts");
+    expect(compose).toMatch(
+      /sudo chown -R node:node[\s\S]*\/workspace\/clean-pay\/\.next \/workspace\/clean-pay\/next-env\.d\.ts/,
+    );
   });
 
   it("bounds the test process and graceful Next.js shutdown", () => {
