@@ -96,4 +96,14 @@ describe("devcontainer e2e runner readiness", () => {
     expect(shellRunner).toContain('kill -KILL -- "-$next_pid"');
     expect(shellRunner).toContain("for _ in $(seq 1 10)");
   });
+
+  it("cannot block forever while probing or warming Next.js", () => {
+    expect(shellRunner).toMatch(
+      /--connect-timeout 2\s+\\\s+--max-time 5\s+\\\s+"\$base_url\/api\/health"/,
+    );
+    expect(shellRunner).toContain("Waiting for Next.js health endpoint");
+    expect(shellRunner).toContain("Warming Next.js route: $route");
+    expect(shellRunner).toContain("--max-time 45");
+    expect(shellRunner).not.toContain("--max-time 90");
+  });
 });
