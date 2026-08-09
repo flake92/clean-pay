@@ -44,7 +44,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 24
+          node-version: 24.18.0
           cache: npm
 
       - run: npm ci
@@ -52,8 +52,7 @@ jobs:
       - run: node node_modules/prisma/build/index.js format --check
       - run: npm run lint
       - run: npm run typecheck
-      - run: npm run test:unit
-      - run: npm run test:route-handlers
+      - run: npm run test:coverage
       - run: npm run build
 
   pnpm-lock:
@@ -63,7 +62,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 24
+          node-version: 24.18.0
       - run: corepack enable
       - run: corepack prepare pnpm@11.9.0 --activate
       - run: pnpm install --lockfile-only --frozen-lockfile --ignore-scripts
@@ -111,9 +110,30 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 24
+          node-version: 24.18.0
           cache: npm
       - run: npm ci
       - run: npm run prisma:generate
       - run: node node_modules/prisma/build/index.js migrate deploy
       - run: npm run test:services
+
+  full-stack-e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.18.0
+          cache: npm
+      - run: npm ci
+      - run: npm run test:e2e
+        env:
+          KEEP_E2E_STACK: "1"
+          CLEAN_PAY_E2E_DIAGNOSTICS: "0"
+      - name: Collect Docker diagnostics
+        if: failure()
+        run: docker compose -p clean-pay-dev -f .devcontainer/docker-compose.yml logs --tail=200
+      - name: Clean up E2E stack
+        if: always()
+        run: docker compose -p clean-pay-dev -f .devcontainer/docker-compose.yml down --remove-orphans --volumes

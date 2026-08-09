@@ -11,7 +11,7 @@ import { Card } from "primereact/card";
 import { Message } from "primereact/message";
 import { executePaymentAction } from "@/app/actions/payments";
 import { InstallAppButton } from "@/frontend/components/install-app-button";
-import { replaceWith } from "@/frontend/lib/browser-navigation";
+import { navigateTo, replaceWith } from "@/frontend/lib/browser-navigation";
 import {
   clearPaymentIdempotencyKey,
   getOrCreatePaymentIdempotencyKey,
@@ -159,7 +159,7 @@ export function PaymentConfirmation({
       if (result.status === "pending") {
         storePaymentReturnReference({ operationId: result.operationId });
         paymentConfirmed = true;
-        window.location.assign(`/payment/pending?operation_id=${encodeURIComponent(result.operationId)}`);
+        navigateTo(`/payment/pending?operation_id=${encodeURIComponent(result.operationId)}`);
         return;
       }
       if (result.status === "manual-review") {
@@ -172,16 +172,16 @@ export function PaymentConfirmation({
       paymentConfirmed = true;
       storePaymentReturnReference({ paymentId: result.payment.payment_id });
       if (result.payment.is_free) {
-        window.location.assign("/cabinet");
+        navigateTo("/cabinet");
         return;
       }
 
       if (result.payment.payment_url) {
-        window.location.assign(result.payment.payment_url);
+        navigateTo(result.payment.payment_url);
         return;
       }
 
-      window.location.assign(
+      navigateTo(
         `/payment/pending?payment_id=${encodeURIComponent(result.payment.payment_id)}`,
       );
     } catch {

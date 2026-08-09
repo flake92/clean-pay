@@ -27,6 +27,8 @@ Server Components load query view models. Server Actions accept explicit command
 
 Each scenario has an explicit input and output. Application use cases depend on ports. Concrete Prisma, Redis, Remnashop, Remnawave, WebAuthn and Telegram implementations live outside the application layer and are wired in `src/app` composition roots. Provider-neutral DTOs in `src/application/models` may be imported as types by the React presentation layer.
 
+Payment dispatch ordering, offer revalidation, idempotency state transitions and uncertain-outcome handling are owned by `src/application/payments/execute-payment-workflow.ts`. The backend payment adapter supplies only provider, persistence, session, rate-limit and audit capabilities through an opaque application port.
+
 ## HTTP boundary
 
 Route handlers are retained only for real HTTP contracts: health/readiness, service-to-service callbacks, payment reconciliation and third-party authentication callbacks. A route handler decodes an endpoint-specific request, invokes one use case and presents an endpoint-specific response.
