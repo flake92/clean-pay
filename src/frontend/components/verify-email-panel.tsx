@@ -76,8 +76,8 @@ export function VerifyEmailPanel({
         setMessageSeverity("success");
         setMessage(
           autoContinue
-            ? "E-mail уже подтверждён. Возвращаем вас к прерванному действию."
-            : "E-mail уже подтверждён. Повторно вводить код не нужно.",
+            ? "E-mail подтверждён. Возвращаем вас к прерванному действию."
+            : "Ваш e-mail подтверждён.",
         );
 
         if (autoContinue) {
