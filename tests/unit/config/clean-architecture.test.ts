@@ -93,6 +93,15 @@ describe("clean architecture boundaries", () => {
     expect(controller).not.toContain("continuePaymentHistoryBackfills(");
   });
 
+  it("keeps Telegram start security orchestration out of the HTTP controller", () => {
+    const controller = readFileSync("src/app/auth/telegram/start/route.ts", "utf8");
+
+    expect(controller).toContain("prepareTelegramAuthStart(");
+    expect(controller).not.toContain("verifyTurnstileToken(");
+    expect(controller).not.toContain("assertRateLimit(");
+    expect(controller).not.toContain("getCurrentUser(");
+  });
+
   it("keeps backend orchestration free from direct database access", () => {
     for (const pattern of [
       "src/backend/auth/**/*.{ts,tsx}",

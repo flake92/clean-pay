@@ -2,6 +2,10 @@ import { describe, expect, it, vi } from "vitest";
 
 import { executeAuthCommand } from "@/backend/application/auth/execute-auth-command";
 import { completeTelegramCallback } from "@/backend/application/auth/complete-telegram-callback";
+import {
+  prepareTelegramAuthStart,
+  TelegramAuthStartFailure,
+} from "@/backend/application/auth/prepare-telegram-auth-start";
 import { confirmEmailVerificationCode, requestEmailVerificationCode } from "@/backend/application/auth/execute-email-verification";
 import { linkAccountEmail, removeLinkedPasskey } from "@/backend/application/auth/manage-linked-account";
 import { executePayment, loadCheckout } from "@/backend/application/payments/checkout";
@@ -10,6 +14,7 @@ import type { AuthCommands } from "@/backend/application/auth/ports/auth-command
 import type { EmailVerificationCommands } from "@/backend/application/auth/ports/email-verification";
 import type { LinkAccountCommands } from "@/backend/application/auth/ports/link-account";
 import type { TelegramCallbackProcessor } from "@/backend/application/auth/ports/telegram-callback";
+import type { TelegramAuthStartSecurity } from "@/backend/application/auth/ports/telegram-auth-start";
 import type { CheckoutReader, PaymentCommands } from "@/backend/application/payments/ports/checkout";
 import type { PaymentMaintenanceRunner } from "@/backend/application/payments/ports/payment-maintenance";
 import { loadSupportViewModel } from "@/backend/application/support/load-support";
@@ -26,6 +31,30 @@ function authCommands(overrides: Partial<AuthCommands> = {}): AuthCommands {
 }
 
 describe("server application flows", () => {
+  it("prepares Telegram auth with authentication-aware failure context", async () => {
+    const security: TelegramAuthStartSecurity = {
+      loadCurrentUser: vi.fn(async () => ({
+        id: "user-1",
+        email: "user@example.com",
+        telegramId: null,
+      })),
+      verifyHuman: vi.fn(async () => undefined),
+      assertLinkRateLimit: vi.fn(async () => undefined),
+    };
+
+    await expect(prepareTelegramAuthStart(security, {
+      turnstileToken: "turnstile-token",
+    })).resolves.toEqual({ authenticated: true, userId: "user-1" });
+    expect(security.verifyHuman).toHaveBeenCalledWith("turnstile-token", "telegram_auth_start");
+    expect(security.assertLinkRateLimit).toHaveBeenCalledWith(expect.objectContaining({ id: "user-1" }));
+
+    vi.mocked(security.verifyHuman).mockRejectedValueOnce(new Error("challenge failed"));
+    const failure = await prepareTelegramAuthStart(security, { turnstileToken: null })
+      .catch((error: unknown) => error);
+    expect(failure).toBeInstanceOf(TelegramAuthStartFailure);
+    expect(failure).toMatchObject({ authenticated: true });
+  });
+
   it("runs bounded payment maintenance through one application scenario", async () => {
     const runner: PaymentMaintenanceRunner = {
       reconcile: vi.fn(async () => ({
