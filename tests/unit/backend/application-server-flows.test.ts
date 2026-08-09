@@ -1,12 +1,14 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { executeAuthCommand } from "@/backend/application/auth/execute-auth-command";
+import { completeTelegramCallback } from "@/backend/application/auth/complete-telegram-callback";
 import { confirmEmailVerificationCode, requestEmailVerificationCode } from "@/backend/application/auth/execute-email-verification";
 import { linkAccountEmail, removeLinkedPasskey } from "@/backend/application/auth/manage-linked-account";
 import { executePayment, loadCheckout } from "@/backend/application/payments/checkout";
 import type { AuthCommands } from "@/backend/application/auth/ports/auth-commands";
 import type { EmailVerificationCommands } from "@/backend/application/auth/ports/email-verification";
 import type { LinkAccountCommands } from "@/backend/application/auth/ports/link-account";
+import type { TelegramCallbackProcessor } from "@/backend/application/auth/ports/telegram-callback";
 import type { CheckoutReader, PaymentCommands } from "@/backend/application/payments/ports/checkout";
 import { loadSupportViewModel } from "@/backend/application/support/load-support";
 
@@ -22,6 +24,34 @@ function authCommands(overrides: Partial<AuthCommands> = {}): AuthCommands {
 }
 
 describe("server application flows", () => {
+  it("completes Telegram callbacks through an explicit application port", async () => {
+    const outcome = {
+      redirectTo: "/cabinet",
+      session: {
+        userId: "user-1",
+        requiresTelegramRecovery: false,
+      },
+      audit: {
+        userId: "user-1",
+        remnashopLinked: true,
+      },
+    };
+    const processor: TelegramCallbackProcessor = {
+      complete: vi.fn(async () => outcome),
+    };
+
+    await expect(completeTelegramCallback(processor, {
+      kind: "oidc",
+      code: "callback-code",
+      state: "callback-state",
+    })).resolves.toEqual(outcome);
+    expect(processor.complete).toHaveBeenCalledWith({
+      kind: "oidc",
+      code: "callback-code",
+      state: "callback-state",
+    });
+  });
+
   it("loads support through its application port", () => {
     const support = { enabled: true, email: "help@example.com", telegramUsername: null, faqUrl: null };
 

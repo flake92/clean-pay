@@ -53,6 +53,38 @@ describe("clean architecture boundaries", () => {
     expect(proxy).toContain("'/api/bff/payments/status'");
   });
 
+  it("uses concrete adapters only from application composition roots", () => {
+    const legacyInfrastructureFacades = [
+      "@/backend/auth/email-verification",
+      "@/backend/auth/passkeys",
+      "@/backend/auth/remnashop-link",
+      "@/backend/auth/telegram-account-merge",
+      "@/backend/payments/history-sync",
+      "@/backend/payments/idempotency",
+      "@/backend/payments/reconciliation",
+      "@/backend/payments/records",
+      "@/backend/payments/user-merge",
+      "@/backend/sessions/web-session",
+    ];
+
+    for (const { file, source } of files("src/app/**/*.{ts,tsx}")) {
+      for (const facade of legacyInfrastructureFacades) {
+        expect(source, file).not.toContain(`from "${facade}"`);
+        expect(source, file).not.toContain(`from '${facade}'`);
+      }
+    }
+  });
+
+  it("keeps Telegram callback business orchestration out of the HTTP controller", () => {
+    const controller = readFileSync("src/app/auth/telegram/callback/route.ts", "utf8");
+
+    expect(controller).toContain("completeTelegramCallback(");
+    expect(controller).not.toContain("remnashopMergeUsers(");
+    expect(controller).not.toContain("remnashopLinkTelegram(");
+    expect(controller).not.toContain("withPaymentOwnerChangeFence(");
+    expect(controller).not.toContain("reconcileUserFromRemnashopAuth(");
+  });
+
   it("keeps backend orchestration free from direct database access", () => {
     for (const pattern of [
       "src/backend/auth/**/*.{ts,tsx}",
