@@ -21,9 +21,11 @@ import {
   reissueCabinetSubscription,
 } from "@/backend/application/cabinet/execute-command";
 import { loadCabinetViewModel } from "@/backend/application/cabinet/load-cabinet";
-import type { CabinetCommands } from "@/backend/application/cabinet/ports/cabinet-commands";
+import {
+  CabinetCommandError,
+  type CabinetCommands,
+} from "@/backend/application/cabinet/ports/cabinet-commands";
 import type { CabinetReader } from "@/backend/application/cabinet/ports/cabinet-reader";
-import { ServiceError } from "@/backend/errors/service-error";
 import { loadNavigation } from "@/backend/application/navigation/load-navigation";
 import { loadPaymentStatus } from "@/backend/application/payments/load-payment-status";
 import {
@@ -130,11 +132,11 @@ describe("application facades", () => {
     await expect(deleteAllCabinetDevices(commands)).resolves.toEqual({ status: "error", message: "Не удалось удалить устройства." });
   });
 
-  it("uses ServiceError.prodMessage for cabinet commands", async () => {
+  it("uses the explicit public error contract for cabinet commands", async () => {
     const commands = cabinetCommands();
 
     vi.mocked(commands.activatePromocode).mockRejectedValueOnce(
-      new ServiceError("PROMOCODE_EXPIRED", 409, "debug message"),
+      new CabinetCommandError("Срок действия промокода истёк."),
     );
     await expect(activateCabinetPromocode(commands, "EXPIRED")).resolves.toEqual({
       status: "error",
@@ -142,7 +144,7 @@ describe("application facades", () => {
     });
 
     vi.mocked(commands.activatePromocode).mockRejectedValueOnce(
-      new ServiceError("PROMOCODE_ALREADY_ACTIVATED", 409, "debug message"),
+      new CabinetCommandError("Этот промокод уже был активирован."),
     );
     await expect(activateCabinetPromocode(commands, "USED")).resolves.toEqual({
       status: "error",
@@ -150,7 +152,7 @@ describe("application facades", () => {
     });
 
     vi.mocked(commands.activatePromocode).mockRejectedValueOnce(
-      new ServiceError("RATE_LIMITED", 429, "debug message"),
+      new CabinetCommandError("Слишком много попыток. Попробуйте позже."),
     );
     await expect(activateCabinetPromocode(commands, "LIMIT")).resolves.toEqual({
       status: "error",
@@ -158,7 +160,7 @@ describe("application facades", () => {
     });
 
     vi.mocked(commands.deleteDevice).mockRejectedValueOnce(
-      new ServiceError("UPSTREAM_UNAVAILABLE", 502, "debug message"),
+      new CabinetCommandError("Сервис временно недоступен. Попробуйте позже."),
     );
     await expect(deleteCabinetDevice(commands, "hwid-1")).resolves.toEqual({
       status: "error",

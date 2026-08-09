@@ -1,5 +1,7 @@
-import type { CabinetCommands } from "@/backend/application/cabinet/ports/cabinet-commands";
-import { ServiceError } from "@/backend/errors/service-error";
+import {
+  CabinetCommandError,
+  type CabinetCommands,
+} from "@/backend/application/cabinet/ports/cabinet-commands";
 import type { CabinetCommandResult } from "@/shared/presentation/cabinet-actions";
 
 function printable(value: string, maxLength: number) {
@@ -10,8 +12,8 @@ function printable(value: string, maxLength: number) {
 }
 
 function errorMessage(error: unknown, fallback: string): string {
-  if (error instanceof ServiceError) {
-    return error.prodMessage;
+  if (error instanceof CabinetCommandError) {
+    return error.publicMessage;
   }
   return fallback;
 }

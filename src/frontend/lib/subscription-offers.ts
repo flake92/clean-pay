@@ -1,4 +1,4 @@
-import type { PlanOffer, SubscriptionOffersResponse } from "@/shared/remnashop/types";
+import type { PlanOffer, SubscriptionOffersResponse } from "@/shared/domain/subscriptions";
 
 export function getRecommendedPurchaseType(plan: PlanOffer) {
   return plan.recommended_purchase_type.toLowerCase();

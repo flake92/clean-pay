@@ -5,7 +5,7 @@ import { useMemo, useRef, useState } from "react";
 import type {
   PlanOffer,
   SubscriptionOffersResponse,
-} from "@/shared/remnashop/types";
+} from "@/shared/domain/subscriptions";
 import { Button } from "primereact/button";
 import { Card } from "primereact/card";
 import { Message } from "primereact/message";
