@@ -9,7 +9,7 @@ import { verifyTurnstileToken } from "@/backend/security/turnstile";
 import type {
   ConfirmPasswordResetRequest,
   RequestPasswordResetRequest,
-} from "@/shared/remnashop/types";
+} from "@/backend/integrations/remnashop/contracts";
 
 export async function requestPasswordReset(
   body: RequestPasswordResetRequest,

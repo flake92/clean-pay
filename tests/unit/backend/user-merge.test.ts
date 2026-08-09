@@ -6,7 +6,7 @@ const mocks = vi.hoisted(() => ({
   transferPaymentOperationsForUserMerge: vi.fn(),
 }));
 
-vi.mock("@/backend/payments/user-merge", () => ({
+vi.mock("@/backend/integrations/payments/payment-user-merge-service", () => ({
   lockPaymentOwnerFence: mocks.lockPaymentOwnerFence,
   transferPaymentOperationsForUserMerge:
     mocks.transferPaymentOperationsForUserMerge,
@@ -15,7 +15,7 @@ vi.mock("@/backend/payments/user-merge", () => ({
 import {
   assertUserMergeFinalOwner,
   mergeLocalUsersIntoTarget,
-} from "@/backend/auth/user-merge";
+} from "@/backend/integrations/auth/local-user-merge-service";
 
 function mergeTransaction() {
   return {

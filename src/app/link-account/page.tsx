@@ -1,7 +1,7 @@
 import { AppShell } from "@/app/_components/app-shell";
 import { PageHeader } from "@/frontend/components/layout";
 import { LinkAccountPanel } from "@/frontend/components/link-account-panel";
-import { loadLinkAccount } from "@/backend/application/auth/manage-linked-account";
+import { loadLinkAccount } from "@/application/auth/manage-linked-account";
 import { productionLinkAccountReader } from "@/backend/integrations/auth/link-account";
 import {
   ACCOUNT_SETUP_PASSWORD_STEP,

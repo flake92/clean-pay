@@ -1,4 +1,4 @@
-import type { NavigationReader } from "@/backend/application/navigation/ports/navigation-reader";
+import type { NavigationReader } from "@/application/navigation/ports/navigation-reader";
 import { getCurrentAuthProfile } from "@/backend/auth/profile";
 import { remnashopSubscriptionReader } from "@/backend/integrations/remnashop/subscription-reader";
 

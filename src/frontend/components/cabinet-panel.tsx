@@ -24,7 +24,7 @@ import type {
   SubscriptionDevice,
   SubscriptionOffersResponse,
 } from "@/shared/domain/subscriptions";
-import type { CabinetViewModel } from "@/shared/presentation/cabinet";
+import type { CabinetViewModel } from "@/application/models/cabinet";
 import {
   activatePromocodeAction,
   deleteAllDevicesAction,

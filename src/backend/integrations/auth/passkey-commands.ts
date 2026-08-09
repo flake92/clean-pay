@@ -1,4 +1,8 @@
-import type { PasskeyCommands } from "@/backend/application/auth/ports/passkey-commands";
+import type { PasskeyCommands } from "@/application/auth/ports/passkey-commands";
+import type {
+  AuthenticationResponseJSON,
+  RegistrationResponseJSON,
+} from "@simplewebauthn/server";
 import {
   beginPasskeyLogin,
   beginPasskeyRegistration,
@@ -12,7 +16,11 @@ export const productionPasskeyCommands: PasskeyCommands = {
     await verifyTurnstileToken(input.turnstileToken ?? null, "auth_login");
     return beginPasskeyLogin(input.email);
   },
-  finishLogin: async (response) => { await finishPasskeyLogin(response); },
+  finishLogin: async (response) => {
+    await finishPasskeyLogin(response as AuthenticationResponseJSON);
+  },
   beginRegistration: beginPasskeyRegistration,
-  finishRegistration: async (response) => { await finishPasskeyRegistration(response); },
+  finishRegistration: async (response) => {
+    await finishPasskeyRegistration(response as RegistrationResponseJSON & { name?: string });
+  },
 };

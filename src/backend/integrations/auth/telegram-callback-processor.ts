@@ -2,7 +2,7 @@ import type {
   TelegramCallbackInput,
   TelegramCallbackOutcome,
   TelegramCallbackProcessor,
-} from "@/backend/application/auth/ports/telegram-callback";
+} from "@/application/auth/ports/telegram-callback";
 import { ServiceError } from "@/backend/errors/service-error";
 import {
   linkCurrentUserToRemnashopAuth,

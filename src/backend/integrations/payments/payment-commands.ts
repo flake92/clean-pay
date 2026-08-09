@@ -1,6 +1,6 @@
-import type { ExtendRequest, PurchaseRequest, SubscriptionOffersResponse } from "@/shared/remnashop/types";
+import type { ExtendRequest, PurchaseRequest, SubscriptionOffersResponse } from "@/backend/integrations/remnashop/contracts";
 
-import type { PaymentCommands, PaymentExecution } from "@/backend/application/payments/ports/checkout";
+import type { PaymentCommands, PaymentExecution } from "@/application/payments/ports/checkout";
 import { getAuthorizedRemnashopTokens, getRemnashopUserIdFromAccessToken, remnashopRequest } from "@/backend/integrations/remnashop/client";
 import { ServiceError } from "@/backend/errors/service-error";
 import { parsePaymentInit } from "@/backend/integrations/remnashop/payment-recovery";
@@ -15,10 +15,10 @@ import {
   paymentOperationErrorFromSnapshot,
   settlePaymentOperationAfterDispatchFailure,
   settlePaymentOperationBeforeDispatchFailure,
-} from "@/backend/payments/idempotency";
+} from "@/backend/integrations/payments/payment-idempotency-service";
 import { assertPaymentReturnUrl, paymentReturnUrl } from "@/backend/payments/return-url";
-import { assertEmailVerificationPolicy, getCurrentSession } from "@/backend/sessions/web-session";
-import { paymentOfferMatches } from "@/shared/payments/offer-confirmation";
+import { assertEmailVerificationPolicy, getCurrentSession } from "@/backend/integrations/sessions/web-session-service";
+import { paymentOfferMatches } from "@/shared/domain/payment-offer";
 
 type OperationInput =
   | { kind: "PURCHASE"; request: PurchaseRequest }

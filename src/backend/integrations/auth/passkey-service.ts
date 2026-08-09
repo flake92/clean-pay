@@ -22,7 +22,7 @@ import {
   createWebSession,
   getCurrentSession,
   upgradeCurrentSessionToFull,
-} from "@/backend/sessions/web-session";
+} from "@/backend/integrations/sessions/web-session-service";
 
 const challengeTtlMs = 5 * 60 * 1000;
 const maxPasskeyNameLength = 80;

@@ -1,7 +1,7 @@
 import { AppShell } from "@/app/_components/app-shell";
 import { PageHeader } from "@/frontend/components/layout";
 import { VerifyEmailPanel } from "@/frontend/components/verify-email-panel";
-import { safeReadiness } from "@/backend/application/auth/execute-email-verification";
+import { safeReadiness } from "@/application/auth/execute-email-verification";
 import { productionEmailVerificationCommands } from "@/backend/integrations/auth/email-verification";
 import {
   resolveEmailVerificationSetup,

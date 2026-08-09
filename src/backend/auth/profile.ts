@@ -5,8 +5,8 @@ import {
 } from "@/backend/integrations/remnashop/client";
 import { ServiceError } from "@/backend/errors/service-error";
 import { authDebugLog } from "@/backend/observability/auth-debug-log";
-import { getCurrentSession, refreshCurrentAccessCookie } from "@/backend/sessions/web-session";
-import { localUserProfile, remnashopUserProfile } from "@/backend/auth/profile-presenter";
+import { getCurrentSession, refreshCurrentAccessCookie } from "@/backend/integrations/sessions/web-session-service";
+import { localUserProfile, remnashopUserProfile } from "@/backend/integrations/auth/profile-presenter";
 import { prismaProfileAccountRepository } from "@/backend/integrations/profile/prisma-profile-account-repository";
 
 export async function getCurrentAuthProfile() {

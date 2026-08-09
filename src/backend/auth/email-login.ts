@@ -4,7 +4,7 @@ import { assertRateLimit } from "@/backend/limits/rate-limit";
 import { auditLog } from "@/backend/observability/audit";
 import { authDebugLog } from "@/backend/observability/auth-debug-log";
 import { verifyTurnstileToken } from "@/backend/security/turnstile";
-import type { LoginRequest } from "@/shared/remnashop/types";
+import type { LoginRequest } from "@/backend/integrations/remnashop/contracts";
 import type { AuthPayload, TurnstileContext } from "@/backend/auth/payload";
 import { stripTurnstile } from "@/backend/auth/payload";
 

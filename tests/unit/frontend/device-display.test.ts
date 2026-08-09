@@ -7,7 +7,7 @@ import {
   formatSubscriptionDevice,
   MISSING_DEVICE_VALUE,
 } from "@/frontend/lib/device-display";
-import type { SubscriptionDevice } from "@/shared/remnashop/types";
+import type { SubscriptionDevice } from "@/shared/domain/subscriptions";
 
 function device(overrides: Partial<SubscriptionDevice>): SubscriptionDevice {
   return {

@@ -1,15 +1,15 @@
 import { cookies } from "next/headers";
 
-import type { LinkAccountCommands, LinkAccountReader } from "@/backend/application/auth/ports/link-account";
-import { deletePasskey, listPasskeys } from "@/backend/auth/passkeys";
+import type { LinkAccountCommands, LinkAccountReader } from "@/application/auth/ports/link-account";
+import { deletePasskey, listPasskeys } from "@/backend/integrations/auth/passkey-service";
 import { getCurrentAuthProfile } from "@/backend/auth/profile";
-import { linkRemnashopAccount } from "@/backend/auth/remnashop-link";
+import { linkRemnashopAccount } from "@/backend/integrations/auth/remnashop-link-service";
 import {
   cancelTelegramAccountMerge,
   confirmTelegramAccountMerge,
   getTelegramAccountMergeConfirmation,
   telegramAccountMergeCookieName,
-} from "@/backend/auth/telegram-account-merge";
+} from "@/backend/integrations/auth/telegram-account-merge-service";
 import { ServiceError } from "@/backend/errors/service-error";
 
 async function mergeToken() {

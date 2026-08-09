@@ -54,12 +54,12 @@ vi.mock("@/backend/observability/audit", () => ({
   auditLog: mocks.auditLog,
 }));
 
-vi.mock("@/backend/sessions/web-session", () => ({
+vi.mock("@/backend/integrations/sessions/web-session-service", () => ({
   getCurrentSession: mocks.getCurrentSession,
   refreshCurrentAccessCookie: mocks.refreshCurrentAccessCookie,
 }));
 
-vi.mock("@/backend/payments/user-merge", () => ({
+vi.mock("@/backend/integrations/payments/payment-user-merge-service", () => ({
   withPaymentOwnerChangeFence: mocks.withPaymentOwnerChangeFence,
 }));
 
@@ -68,7 +68,7 @@ import {
   confirmTelegramAccountMerge,
   getTelegramAccountMergeConfirmation,
   stageTelegramAccountMerge,
-} from "@/backend/auth/telegram-account-merge";
+} from "@/backend/integrations/auth/telegram-account-merge-service";
 import { ServiceError } from "@/backend/errors/service-error";
 
 const targetUser = {

@@ -1,18 +1,18 @@
 import {
   CabinetCommandError,
   type CabinetCommands,
-} from "@/backend/application/cabinet/ports/cabinet-commands";
+} from "@/application/cabinet/ports/cabinet-commands";
 import { ServiceError } from "@/backend/errors/service-error";
 import { getAuthorizedRemnashopTokens, remnashopRequest } from "@/backend/integrations/remnashop/client";
 import { auditLog } from "@/backend/observability/audit";
 import { auditedMutation } from "@/backend/observability/mutation-audit";
-import { clearWebSession } from "@/backend/sessions/web-session";
+import { clearWebSession } from "@/backend/integrations/sessions/web-session-service";
 import type {
   DeviceDeleteResponse,
   DevicesDeleteAllResponse,
   PromocodeActivateResponse,
   ReissueResponse,
-} from "@/shared/remnashop/types";
+} from "@/backend/integrations/remnashop/contracts";
 
 async function authorizedMutation<T>(action: string, mutate: (accessToken: string) => Promise<T>) {
   try {

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
-import { claimOneTimeState } from "@/backend/application/auth/claim-one-time-state";
-import type { OneTimeStateRepository } from "@/backend/application/auth/ports/one-time-state";
+import { claimOneTimeState } from "@/application/auth/claim-one-time-state";
+import type { OneTimeStateRepository } from "@/application/auth/ports/one-time-state";
 
 describe("claimOneTimeState", () => {
   it("delegates the atomic compare-and-set to the repository", async () => {
