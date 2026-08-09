@@ -14,7 +14,6 @@ import {
   clearPaymentIdempotencyKey,
   getOrCreatePaymentIdempotencyKey,
 } from "@/frontend/lib/payment-idempotency";
-import { storePaymentReturnReference } from "@/frontend/lib/payment-return-storage";
 import { findRenewPlan } from "@/frontend/lib/subscription-offers";
 import {
   confirmedPaymentOffer,
@@ -309,20 +308,17 @@ export function ExtendConfirmation({ model = defaultCheckoutModel, requestedDura
         return;
       }
       if (result.status === "pending") {
-        storePaymentReturnReference({ operationId: result.operationId });
         paymentConfirmed = true;
         navigateTo(`/payment/pending?operation_id=${encodeURIComponent(result.operationId)}`);
         return;
       }
       if (result.status === "manual-review") {
-        storePaymentReturnReference({ operationId: result.operationId });
         setSubmitError(`Статус продления требует ручной проверки. Сообщите поддержке номер операции ${result.operationId}.`);
         return;
       }
 
       clearPaymentIdempotencyKey("extend", payload, idempotencyKey);
       paymentConfirmed = true;
-      storePaymentReturnReference({ paymentId: result.payment.payment_id });
       if (result.payment.is_free) {
         navigateTo("/cabinet");
         return;

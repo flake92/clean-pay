@@ -9,15 +9,6 @@ type TurnstileResponse = {
   "error-codes"?: string[];
 };
 
-type TurnstileBody = {
-  turnstileToken?: string | null;
-  "cf-turnstile-response"?: string | null;
-};
-
-export function getTurnstileToken(body: TurnstileBody) {
-  return body.turnstileToken ?? body["cf-turnstile-response"] ?? null;
-}
-
 export async function verifyTurnstileToken(
   token: string | null | undefined,
   expectedAction: string,

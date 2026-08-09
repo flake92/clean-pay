@@ -16,7 +16,6 @@ import {
   clearPaymentIdempotencyKey,
   getOrCreatePaymentIdempotencyKey,
 } from "@/frontend/lib/payment-idempotency";
-import { storePaymentReturnReference } from "@/frontend/lib/payment-return-storage";
 import { AccountActionRequired } from "@/frontend/components/account-action-required";
 import { LinkButton } from "@/frontend/components/prime/link-button";
 import {
@@ -157,20 +156,17 @@ export function PaymentConfirmation({
         return;
       }
       if (result.status === "pending") {
-        storePaymentReturnReference({ operationId: result.operationId });
         paymentConfirmed = true;
         navigateTo(`/payment/pending?operation_id=${encodeURIComponent(result.operationId)}`);
         return;
       }
       if (result.status === "manual-review") {
-        storePaymentReturnReference({ operationId: result.operationId });
         setSubmitError(`Статус оплаты требует ручной проверки. Сообщите поддержке номер операции ${result.operationId}.`);
         return;
       }
 
       clearPaymentIdempotencyKey("purchase", payload, idempotencyKey);
       paymentConfirmed = true;
-      storePaymentReturnReference({ paymentId: result.payment.payment_id });
       if (result.payment.is_free) {
         navigateTo("/cabinet");
         return;

@@ -20,7 +20,7 @@ vi.mock("@/backend/database/prisma", () => ({
   prisma: mocks.prisma,
 }));
 
-import { assertCooldown, assertRateLimit, rateLimitCapacityKey, rateLimitKey, recordRateLimitEvent, withAuthConcurrency } from "@/backend/limits/rate-limit";
+import { assertCooldown, assertRateLimit, rateLimitCapacityKey, rateLimitKey, withAuthConcurrency } from "@/backend/limits/rate-limit";
 import {
   applyRemnashopTransaction,
   recordPayment,
@@ -115,12 +115,10 @@ describe("rate limiting", () => {
     });
   });
 
-  it("uses rate-limit for cooldown compatibility helpers", async () => {
+  it("uses rate-limit for cooldown checks", async () => {
     mocks.redisCommand.mockResolvedValueOnce([1, 1]);
 
     await assertCooldown({ key: "email:user-1", action: "email_verification", windowSeconds: 60 });
-    await expect(recordRateLimitEvent()).resolves.toBeUndefined();
-
     expect(mocks.redisCommand).toHaveBeenCalledWith([
       "EVAL",
       expect.any(String),

@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { getEnv } from "@/backend/config/env";
-import { getTurnstileToken, verifyTurnstileToken } from "@/backend/security/turnstile";
+import { verifyTurnstileToken } from "@/backend/security/turnstile";
 
 function stubValidProductionEnv() {
   const postgresPassword = "pg-runtime-9QvL2xR8mT4pK7sN6cWd";
@@ -196,12 +196,6 @@ describe("Turnstile helpers", () => {
   afterEach(() => {
     vi.unstubAllEnvs();
     vi.restoreAllMocks();
-  });
-
-  it("extracts tokens without trusting client-controlled proxy headers", () => {
-    expect(getTurnstileToken({ turnstileToken: "a", "cf-turnstile-response": "b" })).toBe("a");
-    expect(getTurnstileToken({ "cf-turnstile-response": "b" })).toBe("b");
-
   });
 
   it("skips verification when disabled", async () => {

@@ -74,7 +74,7 @@ import {
   revealRemnashopToken,
   remnashopAuth,
   remnashopAuthTelegramIdentity,
-  remnashopAdminRequest,
+  remnashopAdminRequestResult,
   remnashopLinkTelegram,
   remnashopIdentifyEmail,
   remnashopMergeUsers,
@@ -512,7 +512,7 @@ describe("remnashop client", () => {
     );
 
     await expect(
-      remnashopAdminRequest(
+      remnashopAdminRequestResult(
         "/payment-operations/PURCHASE?user_id=sensitive-user",
         {
           idempotencyKey: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
@@ -536,8 +536,8 @@ describe("remnashop client", () => {
     );
 
     await expect(
-      remnashopAdminRequest("/payment-operations/PURCHASE"),
-    ).resolves.toEqual({ state: "IN_PROGRESS" });
+      remnashopAdminRequestResult("/payment-operations/PURCHASE"),
+    ).resolves.toEqual({ status: 200, data: { state: "IN_PROGRESS" } });
     expect(fetchMock).toHaveBeenCalledWith(
       "http://remnashop:5000/api/v1/admin/payment-operations/PURCHASE",
       expect.any(Object),
