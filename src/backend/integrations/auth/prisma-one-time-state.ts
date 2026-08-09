@@ -1,4 +1,4 @@
-import type { OneTimeStateRepository } from "@/backend/application/auth/ports/one-time-state";
+import type { OneTimeStateRepository } from "@/application/auth/ports/one-time-state";
 import { prisma } from "@/backend/database/prisma";
 
 export const prismaOneTimeStateRepository: OneTimeStateRepository = {

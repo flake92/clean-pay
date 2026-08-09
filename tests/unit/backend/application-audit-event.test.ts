@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { writeAuditEvent } from "@/backend/application/observability/write-audit-event";
+import { writeAuditEvent } from "@/application/observability/write-audit-event";
 
 describe("writeAuditEvent", () => {
   it("uses the supplied persistence port", async () => {

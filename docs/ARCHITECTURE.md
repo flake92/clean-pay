@@ -5,12 +5,12 @@
 Dependencies point inward:
 
 1. `src/shared/domain` — entities, value objects, domain errors and policies.
-2. `src/backend/application` — commands, queries, ports and application results.
-3. `src/backend/integrations`, `database`, `cache` — adapters implementing application ports.
+2. `src/application` — commands, queries, ports and application results.
+3. `src/backend` — infrastructure and adapters implementing application ports; provider contracts stay inside this outer layer.
 4. `src/app` — composition root and server presentation (Server Components, Server Actions and external HTTP controllers).
 5. `src/frontend` — view-only React components receiving serializable props and invoking Server Actions.
 
-Domain and application code must not import Next.js, Prisma, Redis, HTTP clients, cookies or concrete integrations.
+Domain and application code must not import Next.js, Prisma, Redis, HTTP clients, cookies, provider SDK types or concrete integrations.
 
 ## UI boundary
 
@@ -25,7 +25,7 @@ Server Components load query view models. Server Actions accept explicit command
 
 ## Application boundary
 
-Each scenario has an explicit input and output. Application use cases depend on ports. Concrete Prisma, Redis, Remnashop, Remnawave and Telegram implementations live outside the application layer and are wired in `src/app` composition roots.
+Each scenario has an explicit input and output. Application use cases depend on ports. Concrete Prisma, Redis, Remnashop, Remnawave, WebAuthn and Telegram implementations live outside the application layer and are wired in `src/app` composition roots. Provider-neutral DTOs in `src/application/models` may be imported as types by the React presentation layer.
 
 ## HTTP boundary
 

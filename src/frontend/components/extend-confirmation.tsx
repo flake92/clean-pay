@@ -18,7 +18,7 @@ import { storePaymentReturnReference } from "@/frontend/lib/payment-return-stora
 import { findRenewPlan } from "@/frontend/lib/subscription-offers";
 import {
   confirmedPaymentOffer,
-} from "@/shared/payments/offer-confirmation";
+} from "@/shared/domain/payment-offer";
 import {
   accountLinkPath,
   emailVerificationPath,
@@ -27,7 +27,7 @@ import { Button } from "primereact/button";
 import { Card } from "primereact/card";
 import { Dropdown } from "primereact/dropdown";
 import { Message } from "primereact/message";
-import type { CheckoutViewModel } from "@/shared/presentation/checkout";
+import type { CheckoutViewModel } from "@/application/models/checkout";
 
 const defaultCheckoutModel: CheckoutViewModel = { status: "error", message: "Не удалось загрузить предложения продления." };
 

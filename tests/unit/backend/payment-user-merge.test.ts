@@ -5,7 +5,7 @@ import { paymentUpstreamOwnerHash } from "@/backend/payments/hashes";
 import {
   preflightPaymentOperationsForUserMerge,
   transferPaymentOperationsForUserMerge,
-} from "@/backend/payments/user-merge";
+} from "@/backend/integrations/payments/payment-user-merge-service";
 
 type TransactionOptions = {
   targetOwner?: string | null;

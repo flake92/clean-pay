@@ -21,13 +21,13 @@ import { AccountActionRequired } from "@/frontend/components/account-action-requ
 import { LinkButton } from "@/frontend/components/prime/link-button";
 import {
   confirmedPaymentOffer,
-} from "@/shared/payments/offer-confirmation";
+} from "@/shared/domain/payment-offer";
 import {
   accountLinkPath,
   emailVerificationPath,
   passkeySetupPath,
 } from "@/shared/auth/account-setup-flow";
-import type { CheckoutViewModel } from "@/shared/presentation/checkout";
+import type { CheckoutViewModel } from "@/application/models/checkout";
 
 const defaultCheckoutModel: CheckoutViewModel = { status: "error", message: "Не удалось загрузить данные оплаты." };
 

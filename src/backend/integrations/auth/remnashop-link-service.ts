@@ -15,10 +15,10 @@ import { linkCurrentUserToRemnashopAuth } from "@/backend/integrations/remnashop
 import { assertRateLimit } from "@/backend/limits/rate-limit";
 import { auditLog } from "@/backend/observability/audit";
 import { authDebugLog } from "@/backend/observability/auth-debug-log";
-import type { LoginRequest } from "@/shared/remnashop/types";
-import { requestRemnashopEmailVerification } from "@/backend/auth/email-verification";
-import { getCurrentSession, refreshCurrentAccessCookie } from "@/backend/sessions/web-session";
-import { withPaymentOwnerChangeFence } from "@/backend/payments/user-merge";
+import type { LoginRequest } from "@/backend/integrations/remnashop/contracts";
+import { requestRemnashopEmailVerification } from "@/backend/integrations/auth/email-verification-service";
+import { getCurrentSession, refreshCurrentAccessCookie } from "@/backend/integrations/sessions/web-session-service";
+import { withPaymentOwnerChangeFence } from "@/backend/integrations/payments/payment-user-merge-service";
 
 function isEmailAlreadyExistsConflict(error: unknown) {
   return (

@@ -1,17 +1,25 @@
 "use server";
 
-import type { AuthenticationResponseJSON, RegistrationResponseJSON } from "@simplewebauthn/server";
+import type {
+  AuthenticationResponseJSON,
+  PublicKeyCredentialCreationOptionsJSON,
+  PublicKeyCredentialRequestOptionsJSON,
+  RegistrationResponseJSON,
+} from "@simplewebauthn/server";
 
 import {
   beginPasskeyLogin,
   beginPasskeyRegistration,
   verifyPasskeyLogin,
   verifyPasskeyRegistration,
-} from "@/backend/application/auth/execute-passkey-command";
+} from "@/application/auth/execute-passkey-command";
 import { productionPasskeyCommands } from "@/backend/integrations/auth/passkey-commands";
 
 export async function beginPasskeyLoginAction(input: { email: string; turnstileToken?: string }) {
-  return beginPasskeyLogin(productionPasskeyCommands, input);
+  return beginPasskeyLogin(productionPasskeyCommands, input) as Promise<
+    | { ok: true; options: PublicKeyCredentialRequestOptionsJSON }
+    | { ok: false; code: string; message: string }
+  >;
 }
 
 export async function verifyPasskeyLoginAction(response: AuthenticationResponseJSON) {
@@ -19,7 +27,10 @@ export async function verifyPasskeyLoginAction(response: AuthenticationResponseJ
 }
 
 export async function beginPasskeyRegistrationAction() {
-  return beginPasskeyRegistration(productionPasskeyCommands);
+  return beginPasskeyRegistration(productionPasskeyCommands) as Promise<
+    | { ok: true; options: PublicKeyCredentialCreationOptionsJSON }
+    | { ok: false; code: string; message: string }
+  >;
 }
 
 export async function verifyPasskeyRegistrationAction(response: RegistrationResponseJSON & { name?: string }) {

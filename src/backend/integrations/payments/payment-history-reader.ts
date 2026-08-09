@@ -9,13 +9,13 @@ import {
   getPaymentCapabilities,
 } from "@/backend/integrations/remnashop/payment-recovery";
 import { logger } from "@/backend/observability/logger";
-import { syncOnePaymentHistoryPage } from "@/backend/payments/history-sync";
-import { assertPaymentUpstreamIdentity } from "@/backend/payments/owner";
+import { syncOnePaymentHistoryPage } from "@/backend/integrations/payments/payment-history-sync-service";
+import { assertPaymentUpstreamIdentity } from "@/backend/integrations/payments/payment-owner-service";
 import {
   serializePaymentRecord,
   syncExactPaymentRecordFromRemnashop,
   syncPaymentRecordsFromRemnashopTransactions,
-} from "@/backend/payments/records";
+} from "@/backend/integrations/payments/payment-record-service";
 
 export async function loadPaymentHistory(userId: string) {
   let stale = false;

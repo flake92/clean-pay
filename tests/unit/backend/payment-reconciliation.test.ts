@@ -23,7 +23,7 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("@/backend/database/prisma", () => ({ prisma: mocks.prisma }));
-vi.mock("@/backend/payments/records", () => ({
+vi.mock("@/backend/integrations/payments/payment-record-service", () => ({
   applyRemnashopTransaction: mocks.applyRemnashopTransaction,
 }));
 vi.mock("@/backend/integrations/remnashop/payment-recovery", () => ({
@@ -36,7 +36,7 @@ import {
   completeReconciledPayment,
   processPaymentReconciliationClaim,
   settlePaymentReconciliation,
-} from "@/backend/payments/reconciliation";
+} from "@/backend/integrations/payments/payment-reconciliation-service";
 import { paymentUpstreamOwnerHash } from "@/backend/payments/hashes";
 import { ServiceError } from "@/backend/errors/service-error";
 import { sha256 } from "@/backend/security/crypto";

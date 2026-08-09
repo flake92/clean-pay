@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   confirmLinkedTelegram,
   linkAccountEmail,
-} from "@/backend/application/auth/manage-linked-account";
+} from "@/application/auth/manage-linked-account";
 import { ServiceError } from "@/backend/errors/service-error";
 
 function mockCommands(overrides: Record<string, () => Promise<void>> = {}) {

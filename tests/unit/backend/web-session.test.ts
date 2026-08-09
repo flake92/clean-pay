@@ -77,7 +77,7 @@ import {
   refreshCurrentAccessCookie,
   rotateRefreshTokenFamily,
   upgradeCurrentSessionToFull,
-} from "@/backend/sessions/web-session";
+} from "@/backend/integrations/sessions/web-session-service";
 import { hmacSha256, jsonBase64Url, sha256 } from "@/backend/security/crypto";
 
 function accessToken(payload: Record<string, unknown>) {

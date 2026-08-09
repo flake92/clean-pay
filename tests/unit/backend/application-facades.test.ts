@@ -1,19 +1,19 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { authenticateTelegramWebApp } from "@/backend/application/auth/authenticate-telegram-webapp";
+import { authenticateTelegramWebApp } from "@/application/auth/authenticate-telegram-webapp";
 import {
   beginPasskeyLogin,
   beginPasskeyRegistration,
   verifyPasskeyLogin,
   verifyPasskeyRegistration,
-} from "@/backend/application/auth/execute-passkey-command";
+} from "@/application/auth/execute-passkey-command";
 import {
   cancelLinkedTelegram,
   confirmLinkedTelegram,
   loadLinkAccount,
-} from "@/backend/application/auth/manage-linked-account";
-import type { LinkAccountCommands, LinkAccountReader } from "@/backend/application/auth/ports/link-account";
-import type { PasskeyCommands } from "@/backend/application/auth/ports/passkey-commands";
+} from "@/application/auth/manage-linked-account";
+import type { LinkAccountCommands, LinkAccountReader } from "@/application/auth/ports/link-account";
+import type { PasskeyCommands } from "@/application/auth/ports/passkey-commands";
 import {
   activateCabinetPromocode,
   clearCabinetSession,
@@ -21,22 +21,22 @@ import {
   deleteCabinetDevice,
   endCabinetSession,
   reissueCabinetSubscription,
-} from "@/backend/application/cabinet/execute-command";
-import { loadCabinetViewModel } from "@/backend/application/cabinet/load-cabinet";
+} from "@/application/cabinet/execute-command";
+import { loadCabinetViewModel } from "@/application/cabinet/load-cabinet";
 import {
   CabinetCommandError,
   type CabinetCommands,
-} from "@/backend/application/cabinet/ports/cabinet-commands";
-import type { CabinetReader } from "@/backend/application/cabinet/ports/cabinet-reader";
-import { loadNavigation } from "@/backend/application/navigation/load-navigation";
-import { loadPaymentStatus } from "@/backend/application/payments/load-payment-status";
+} from "@/application/cabinet/ports/cabinet-commands";
+import type { CabinetReader } from "@/application/cabinet/ports/cabinet-reader";
+import { loadNavigation } from "@/application/navigation/load-navigation";
+import { loadPaymentStatus } from "@/application/payments/load-payment-status";
 import {
   changeProfileEmail,
   changeProfilePassword,
   requestProfileEmailVerification,
-} from "@/backend/application/profile/execute-profile-command";
-import { loadProfileViewModel } from "@/backend/application/profile/load-profile";
-import type { ProfileCommands } from "@/backend/application/profile/ports/profile-commands";
+} from "@/application/profile/execute-profile-command";
+import { loadProfileViewModel } from "@/application/profile/load-profile";
+import type { ProfileCommands } from "@/application/profile/ports/profile-commands";
 
 const offers = {
   gateways: [],

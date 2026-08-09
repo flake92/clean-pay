@@ -1,5 +1,4 @@
-import type { DatabaseHealthCheck } from "@/backend/application/health/ports/database-health-check";
 import { readinessPrisma } from "@/backend/database/readiness-prisma";
-export const prismaDatabaseHealthCheck: DatabaseHealthCheck = {
+export const prismaDatabaseHealthCheck = {
   async ping() { await readinessPrisma.$queryRaw`SELECT 1`; },
 };

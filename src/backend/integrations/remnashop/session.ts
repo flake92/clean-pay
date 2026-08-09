@@ -8,18 +8,18 @@ import {
   getRemnashopUserIdFromAccessToken,
   protectRemnashopToken,
 } from "@/backend/integrations/remnashop/client";
-import type { RemnashopAuthResponse, RemnashopMe } from "@/shared/remnashop/types";
+import type { RemnashopAuthResponse, RemnashopMe } from "@/backend/integrations/remnashop/contracts";
 import {
   clearWebSessionCookies,
   createWebSessionForRemnashopUser,
   getCurrentSession,
   revokeAllWebSessionsForUser,
-} from "@/backend/sessions/web-session";
+} from "@/backend/integrations/sessions/web-session-service";
 import {
   assertUserMergeFinalOwner,
   mergeLocalUsersIntoTarget,
-} from "@/backend/auth/user-merge";
-import { lockPaymentOwnerFence } from "@/backend/payments/user-merge";
+} from "@/backend/integrations/auth/local-user-merge-service";
+import { lockPaymentOwnerFence } from "@/backend/integrations/payments/payment-user-merge-service";
 
 type RemnashopProfileIdentity = {
   remnashopUserId: string;

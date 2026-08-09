@@ -3,13 +3,13 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "@/backend/database/prisma";
 import { ServiceError } from "@/backend/errors/service-error";
 import { paymentUpstreamOwnerHash } from "@/backend/payments/hashes";
-import { lockPaymentUpstreamOwner } from "@/backend/payments/owner";
+import { lockPaymentUpstreamOwner } from "@/backend/integrations/payments/payment-owner-service";
 import { logger } from "@/backend/observability/logger";
 import type {
   PaymentInitResponse,
   PaymentTransactionResponse,
   PlanOffer,
-} from "@/shared/remnashop/types";
+} from "@/backend/integrations/remnashop/contracts";
 
 type PaymentRecordStatus =
   | "PENDING"

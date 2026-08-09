@@ -9,7 +9,7 @@ import { verifyTurnstileToken } from "@/backend/security/turnstile";
 import type {
   CompleteGenericEmailAuthRequest,
   StartGenericEmailAuthRequest,
-} from "@/shared/remnashop/types";
+} from "@/backend/integrations/remnashop/contracts";
 
 export async function startGenericEmailAuth(
   body: StartGenericEmailAuthRequest,

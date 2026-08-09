@@ -1,24 +1,24 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { executeAuthCommand } from "@/backend/application/auth/execute-auth-command";
-import { completeTelegramCallback } from "@/backend/application/auth/complete-telegram-callback";
-import { recoverTelegramSession } from "@/backend/application/auth/recover-telegram-session";
+import { executeAuthCommand } from "@/application/auth/execute-auth-command";
+import { completeTelegramCallback } from "@/application/auth/complete-telegram-callback";
+import { recoverTelegramSession } from "@/application/auth/recover-telegram-session";
 import {
   prepareTelegramAuthStart,
   TelegramAuthStartFailure,
-} from "@/backend/application/auth/prepare-telegram-auth-start";
-import { confirmEmailVerificationCode, requestEmailVerificationCode } from "@/backend/application/auth/execute-email-verification";
-import { linkAccountEmail, removeLinkedPasskey } from "@/backend/application/auth/manage-linked-account";
-import { executePayment, loadCheckout } from "@/backend/application/payments/checkout";
-import { runPaymentMaintenance } from "@/backend/application/payments/run-payment-maintenance";
-import type { AuthCommands } from "@/backend/application/auth/ports/auth-commands";
-import type { EmailVerificationCommands } from "@/backend/application/auth/ports/email-verification";
-import type { LinkAccountCommands } from "@/backend/application/auth/ports/link-account";
-import type { TelegramCallbackProcessor } from "@/backend/application/auth/ports/telegram-callback";
-import type { TelegramAuthStartSecurity } from "@/backend/application/auth/ports/telegram-auth-start";
-import type { CheckoutReader, PaymentCommands } from "@/backend/application/payments/ports/checkout";
-import type { PaymentMaintenanceRunner } from "@/backend/application/payments/ports/payment-maintenance";
-import { loadSupportViewModel } from "@/backend/application/support/load-support";
+} from "@/application/auth/prepare-telegram-auth-start";
+import { confirmEmailVerificationCode, requestEmailVerificationCode } from "@/application/auth/execute-email-verification";
+import { linkAccountEmail, removeLinkedPasskey } from "@/application/auth/manage-linked-account";
+import { executePayment, loadCheckout } from "@/application/payments/checkout";
+import { runPaymentMaintenance } from "@/application/payments/run-payment-maintenance";
+import type { AuthCommands } from "@/application/auth/ports/auth-commands";
+import type { EmailVerificationCommands } from "@/application/auth/ports/email-verification";
+import type { LinkAccountCommands } from "@/application/auth/ports/link-account";
+import type { TelegramCallbackProcessor } from "@/application/auth/ports/telegram-callback";
+import type { TelegramAuthStartSecurity } from "@/application/auth/ports/telegram-auth-start";
+import type { CheckoutReader, PaymentCommands } from "@/application/payments/ports/checkout";
+import type { PaymentMaintenanceRunner } from "@/application/payments/ports/payment-maintenance";
+import { loadSupportViewModel } from "@/application/support/load-support";
 
 function authCommands(overrides: Partial<AuthCommands> = {}): AuthCommands {
   return {

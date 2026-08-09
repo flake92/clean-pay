@@ -5,7 +5,7 @@ import { redirect } from "next/navigation";
 import {
   clearCabinetSession,
   endCabinetSession,
-} from "@/backend/application/cabinet/execute-command";
+} from "@/application/cabinet/execute-command";
 import { productionCabinetCommands } from "@/backend/integrations/cabinet/cabinet-commands";
 
 export async function clearSessionAction() {

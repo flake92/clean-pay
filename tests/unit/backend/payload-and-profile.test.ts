@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import { addDays, stripTurnstile } from "@/backend/auth/payload";
-import { localUserProfile, remnashopUserProfile } from "@/backend/auth/profile-presenter";
-import { safeRedirectPath } from "@/backend/auth/redirect-policy";
+import { localUserProfile, remnashopUserProfile } from "@/backend/integrations/auth/profile-presenter";
+import { safeRedirectPath } from "@/shared/auth/redirect-policy";
 
 type ProfileSession = Parameters<typeof localUserProfile>[0];
 

@@ -2,7 +2,7 @@ import { Card } from "primereact/card";
 
 import { LinkButton } from "@/frontend/components/prime/link-button";
 import { getBranding } from "@/shared/branding";
-import type { SupportViewModel } from "@/shared/presentation/support";
+import type { SupportViewModel } from "@/application/models/support";
 
 export function SupportPanel({ support }: { support: SupportViewModel }) {
   const branding = getBranding();

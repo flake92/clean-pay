@@ -8,7 +8,7 @@ import type {
   DurationGatewayPrice,
   PlanOffer,
 } from "@/shared/domain/subscriptions";
-import type { TariffsViewModel } from "@/shared/presentation/tariffs";
+import type { TariffsViewModel } from "@/application/models/tariffs";
 import { Card } from "primereact/card";
 import { Dropdown } from "primereact/dropdown";
 import { Message } from "primereact/message";

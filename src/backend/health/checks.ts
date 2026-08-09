@@ -1,193 +1,140 @@
+import {
+  aggregateReadinessStatus,
+  measureReadinessCheck,
+  type CheckResult,
+} from "@/application/health/readiness";
+import type { ReadinessGateway } from "@/application/health/ports/readiness-gateway";
+import { redisCommand } from "@/backend/cache/redis";
 import { getEnv } from "@/backend/config/env";
 import { prismaDatabaseHealthCheck } from "@/backend/integrations/health/prisma-database-health-check";
-import { redisCommand } from "@/backend/cache/redis";
 
-export type CheckResult = {
-  status: "ok" | "down";
-  latencyMs: number;
-  message?: string;
-};
+const READINESS_CACHE_KEY = "clean-pay:health:readiness:v1";
 
-const readinessCheckTimeoutMs = 5_000;
-
-async function measure(
-  label: string,
-  check: (signal: AbortSignal) => Promise<void>,
-  deadlineSignal?: AbortSignal,
-): Promise<CheckResult> {
-  const startedAt = Date.now();
-  const timeoutSignal = AbortSignal.timeout(readinessCheckTimeoutMs);
-  const signal = deadlineSignal
-    ? AbortSignal.any([deadlineSignal, timeoutSignal])
-    : timeoutSignal;
-
-  try {
-    await Promise.race([
-      check(signal),
-      new Promise<never>((_, reject) => {
-        if (signal.aborted) {
-          reject(signal.reason);
-          return;
-        }
-
-        signal.addEventListener("abort", () => reject(signal.reason), { once: true });
-      }),
-    ]);
-
-    return { status: "ok", latencyMs: Date.now() - startedAt };
-  } catch (error) {
-    const message = deadlineSignal?.aborted
-      ? `${label} cancelled: readiness deadline exceeded`
-      : timeoutSignal.aborted
-        ? `${label} timed out after ${readinessCheckTimeoutMs}ms`
-        : error instanceof Error ? error.message : String(error);
-
-    return {
-      status: "down",
-      latencyMs: Date.now() - startedAt,
-      message,
-    };
-  }
-}
-
-export async function checkDatabase(deadlineSignal?: AbortSignal) {
-  return measure("Database", async () => {
-    await prismaDatabaseHealthCheck.ping();
-  }, deadlineSignal);
-}
-
-export async function checkRedis(deadlineSignal?: AbortSignal) {
-  return measure("Redis", async () => {
-    const pong = await redisCommand(["PING"]);
-
-    if (pong !== "PONG") {
-      throw new Error("Redis did not return PONG");
-    }
-  }, deadlineSignal);
-}
-
-export async function checkRemnashop(deadlineSignal?: AbortSignal) {
+export function createProductionReadinessGateway(): ReadinessGateway {
   const env = getEnv();
+  const mailpitUrl = env.readiness.mailpitUrl;
+  const remnawaveUrl = env.readiness.remnawaveUrl;
+  const remnawaveToken = env.remnawave.token;
 
-  return measure("Remnashop", async (signal) => {
-    const plansResponse = await fetch(`${env.remnashopApiBaseUrl}/plans/public`, {
-      cache: "no-store",
-      signal,
-    });
-
-    if (plansResponse.status === 404) {
-      throw new Error("Remnashop public API returned 404; enable WEB_ENABLED=true with APP_API_KEY and APP_JWT_SECRET in Remnashop");
-    }
-
-    if (!plansResponse.ok) {
-      throw new Error(`Remnashop returned ${plansResponse.status}`);
-    }
-
-    if (!env.remnashopAuthServiceKey) {
-      throw new Error("REMNASHOP_AUTH_SERVICE_KEY is not configured");
-    }
-
-    // An empty request must be rejected by schema validation after the dedicated
-    // service credential has been accepted. This has no e-mail side effect and
-    // prevents an older Remnashop image without generic e-mail auth from passing
-    // readiness merely because its plans endpoint is available.
-    for (const path of ["/auth/email/start", "/auth/identify", "/auth/service-session"]) {
-      const authContractResponse = await fetch(`${env.remnashopApiBaseUrl}${path}`, {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          "x-remnashop-auth-service-key": env.remnashopAuthServiceKey,
-        },
-        body: "{}",
+  return {
+    async checkDatabase() {
+      await prismaDatabaseHealthCheck.ping();
+    },
+    async checkRedis() {
+      const pong = await redisCommand(["PING"]);
+      if (pong !== "PONG") throw new Error("Redis did not return PONG");
+    },
+    async checkRemnashop(signal) {
+      const plansResponse = await fetch(`${env.remnashopApiBaseUrl}/plans/public`, {
         cache: "no-store",
         signal,
       });
 
-      if (authContractResponse.status === 404) {
-        throw new Error(`Remnashop is incompatible: ${path} is missing`);
+      if (plansResponse.status === 404) {
+        throw new Error("Remnashop public API returned 404; enable WEB_ENABLED=true with APP_API_KEY and APP_JWT_SECRET in Remnashop");
+      }
+      if (!plansResponse.ok) throw new Error(`Remnashop returned ${plansResponse.status}`);
+      if (!env.remnashopAuthServiceKey) {
+        throw new Error("REMNASHOP_AUTH_SERVICE_KEY is not configured");
       }
 
-      if (authContractResponse.status === 401 || authContractResponse.status === 403) {
-        throw new Error("Remnashop rejected REMNASHOP_AUTH_SERVICE_KEY");
+      for (const path of ["/auth/email/start", "/auth/identify", "/auth/service-session"]) {
+        const response = await fetch(`${env.remnashopApiBaseUrl}${path}`, {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            "x-remnashop-auth-service-key": env.remnashopAuthServiceKey,
+          },
+          body: "{}",
+          cache: "no-store",
+          signal,
+        });
+
+        if (response.status === 404) throw new Error(`Remnashop is incompatible: ${path} is missing`);
+        if (response.status === 401 || response.status === 403) {
+          throw new Error("Remnashop rejected REMNASHOP_AUTH_SERVICE_KEY");
+        }
+        if (response.status !== 422) {
+          throw new Error(`Remnashop ${path} contract returned ${response.status}, expected 422`);
+        }
       }
+    },
+    async checkTelegramOidc(signal) {
+      const response = await fetch(env.telegramOidc.jwksUri, {
+        cache: "no-store",
+        signal,
+      });
 
-      if (authContractResponse.status !== 422) {
-        throw new Error(`Remnashop ${path} contract returned ${authContractResponse.status}, expected 422`);
+      if (!response.ok) throw new Error(`Telegram OIDC returned ${response.status}`);
+      const body = await response.json() as { keys?: unknown[] };
+      if (!Array.isArray(body.keys) || body.keys.length === 0) {
+        throw new Error("Telegram OIDC JWKS did not include keys");
       }
-    }
-  }, deadlineSignal);
-}
-
-export async function checkMailpit(deadlineSignal?: AbortSignal) {
-  const env = getEnv();
-  const mailpitUrl = env.readiness.mailpitUrl;
-
-  if (!mailpitUrl) {
-    return null;
-  }
-
-  return measure("Mailpit", async (signal) => {
-    const response = await fetch(new URL("/api/v1/messages", mailpitUrl), {
-      cache: "no-store",
-      signal,
-    });
-
-    if (!response.ok) {
-      throw new Error(`Mailpit returned ${response.status}`);
-    }
-  }, deadlineSignal);
-}
-
-export async function checkTelegramOidc(deadlineSignal?: AbortSignal) {
-  const env = getEnv();
-
-  return measure("Telegram OIDC", async (signal) => {
-    const response = await fetch(env.telegramOidc.jwksUri, {
-      cache: "no-store",
-      signal,
-    });
-
-    if (!response.ok) {
-      throw new Error(`Telegram OIDC returned ${response.status}`);
-    }
-
-    const body = await response.json() as { keys?: unknown[] };
-
-    if (!Array.isArray(body.keys) || body.keys.length === 0) {
-      throw new Error("Telegram OIDC JWKS did not include keys");
-    }
-  }, deadlineSignal);
-}
-
-export async function checkRemnawave(deadlineSignal?: AbortSignal) {
-  const env = getEnv();
-  const remnawaveUrl = env.readiness.remnawaveUrl;
-  const token = env.remnawave.token;
-
-  if (!remnawaveUrl) {
-    return null;
-  }
-
-  return measure("Remnawave", async (signal) => {
-    if (!token) {
-      throw new Error("Remnawave token is not configured");
-    }
-
-    const response = await fetch(new URL("/api/system/metadata", remnawaveUrl), {
-      headers: {
-        accept: "application/json",
-        authorization: token.startsWith("Bearer ") ? token : `Bearer ${token}`,
+    },
+    ...(mailpitUrl ? {
+      async checkMailpit(signal: AbortSignal) {
+        const response = await fetch(new URL("/api/v1/messages", mailpitUrl), {
+          cache: "no-store",
+          signal,
+        });
+        if (!response.ok) throw new Error(`Mailpit returned ${response.status}`);
       },
-      cache: "no-store",
-      signal,
-    });
+    } : {}),
+    ...(remnawaveUrl ? {
+      async checkRemnawave(signal: AbortSignal) {
+        if (!remnawaveToken) throw new Error("Remnawave token is not configured");
+        const response = await fetch(new URL("/api/system/metadata", remnawaveUrl), {
+          headers: {
+            accept: "application/json",
+            authorization: remnawaveToken.startsWith("Bearer ")
+              ? remnawaveToken
+              : `Bearer ${remnawaveToken}`,
+          },
+          cache: "no-store",
+          signal,
+        });
+        if (!response.ok) throw new Error(`Remnawave returned ${response.status}`);
+      },
+    } : {}),
+    readSharedState() {
+      return redisCommand(["GET", READINESS_CACHE_KEY]);
+    },
+    async writeSharedState(value, ttlSeconds) {
+      await redisCommand(["SET", READINESS_CACHE_KEY, value, "EX", ttlSeconds]);
+    },
+  };
+}
 
-    if (!response.ok) {
-      throw new Error(`Remnawave returned ${response.status}`);
-    }
-  }, deadlineSignal);
+export function checkDatabase(deadlineSignal?: AbortSignal) {
+  const gateway = createProductionReadinessGateway();
+  return measureReadinessCheck("Database", gateway.checkDatabase, deadlineSignal);
+}
+
+export function checkRedis(deadlineSignal?: AbortSignal) {
+  const gateway = createProductionReadinessGateway();
+  return measureReadinessCheck("Redis", gateway.checkRedis, deadlineSignal);
+}
+
+export function checkRemnashop(deadlineSignal?: AbortSignal) {
+  const gateway = createProductionReadinessGateway();
+  return measureReadinessCheck("Remnashop", gateway.checkRemnashop, deadlineSignal);
+}
+
+export function checkMailpit(deadlineSignal?: AbortSignal) {
+  const check = createProductionReadinessGateway().checkMailpit;
+  return check ? measureReadinessCheck("Mailpit", check, deadlineSignal) : Promise.resolve(null);
+}
+
+export function checkTelegramOidc(deadlineSignal?: AbortSignal) {
+  const gateway = createProductionReadinessGateway();
+  return measureReadinessCheck("Telegram OIDC", gateway.checkTelegramOidc, deadlineSignal);
+}
+
+export function checkRemnawave(deadlineSignal?: AbortSignal) {
+  const check = createProductionReadinessGateway().checkRemnawave;
+  return check ? measureReadinessCheck("Remnawave", check, deadlineSignal) : Promise.resolve(null);
 }
 
 export function aggregateStatus(results: Record<string, CheckResult>) {
-  return Object.values(results).every((result) => result.status === "ok") ? "ok" : "degraded";
+  return aggregateReadinessStatus(results);
 }

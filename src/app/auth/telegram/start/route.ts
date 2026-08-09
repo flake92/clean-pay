@@ -3,7 +3,7 @@ import { NextResponse } from "next/server";
 import {
   prepareTelegramAuthStart,
   TelegramAuthStartFailure,
-} from "@/backend/application/auth/prepare-telegram-auth-start";
+} from "@/application/auth/prepare-telegram-auth-start";
 import { getEnv } from "@/backend/config/env";
 import { productionTelegramAuthStartSecurity } from "@/backend/integrations/auth/telegram-auth-start-security";
 import {

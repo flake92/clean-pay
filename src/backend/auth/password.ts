@@ -8,8 +8,8 @@ import {
 } from "@/backend/integrations/remnashop/client";
 import { auditLog } from "@/backend/observability/audit";
 import { authDebugLog } from "@/backend/observability/auth-debug-log";
-import { replaceWebSessionAfterPasswordChange } from "@/backend/sessions/web-session";
-import type { ChangePasswordRequest } from "@/shared/remnashop/types";
+import { replaceWebSessionAfterPasswordChange } from "@/backend/integrations/sessions/web-session-service";
+import type { ChangePasswordRequest } from "@/backend/integrations/remnashop/contracts";
 import { addDays } from "@/backend/auth/payload";
 import { prismaAuthSessionRepository } from "@/backend/integrations/auth/prisma-auth-session-repository";
 
