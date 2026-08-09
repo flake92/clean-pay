@@ -35,7 +35,7 @@
 - Это противоречит уже принятому в документации правилу fail-closed при недоступности Redis.
 - В Remnashop нет и не требуется отдельная сущность «идентификация»: каноническая сущность — строка `users`, её `id` попадает в JWT `sub`; Clean Pay хранит локальную проекцию с уникальным `remnashopUserId`.
 - `/identify` проверяет только локальную БД Clean Pay. Поэтому он не только раскрывает данные, но и может ошибочно вернуть `exists: false` для существующего в Remnashop пользователя, который ещё не синхронизирован с Clean Pay.
-- Текущий `registerWithEmail` в Clean Pay уже умеет работать без предварительного `identify`: сначала вызывает Remnashop `/auth/register`, а при конфликте существующего e-mail пробует `/auth/login` с тем же паролем. Прежняя рекомендация обязательно разделить login/register после ввода e-mail была избыточной.
+- Текущий registration flow в `executeAuthCommand` уже умеет работать без предварительного `identify`: сначала вызывает Remnashop `/auth/register`, а при конфликте существующего e-mail пробует `/auth/login` с тем же паролем. Прежняя рекомендация обязательно разделить login/register после ввода e-mail была избыточной.
 - PR #135 добавляет в существующую модель `users` email/password auth. README по-прежнему описывает Remnashop прежде всего как Telegram-бот; отдельного внешнего identity-provider слоя документация не заявляет.
 - В PR #135 публичный password-reset confirm принимает e-mail и шестизначный код без счётчика неудачных попыток и без общего HTTP rate limit. Если `/api/v1/public/auth/*` доступен из Интернета, это существенная brute-force поверхность и одновременно обход любых ограничений Clean Pay.
 - Документированный deployment делает такую доступность вероятной: Clean Pay README использует `https://shop.example.com/api/v1/public`, а public router PR #135 не требует `APP_API_KEY`. Передаваемый Clean Pay `REMNASHOP_API_KEY` используется для admin API и сам по себе не защищает public auth.
@@ -248,7 +248,7 @@ Clean Pay не должен повторно «идентифицировать�
 
 ### 2.7. Фактический email auth flow
 
-`src/backend/auth/email-register.ts:21-50` уже реализует единый server-side flow:
+`src/application/auth/execute-auth-command.ts` реализует единый application-layer flow:
 
 1. попытка Remnashop `/auth/register`;
 2. если e-mail уже существует, попытка `/auth/login` с теми же credentials;
@@ -398,7 +398,7 @@ Remnashop при этом не получает доказательство Web
 
 Не рекомендуется оставлять скрытый lookup в `identify` и только маскировать body: различие сохранится через timing и побочные эффекты.
 
-Общий email-register flow и Telegram-link flow используют разный безопасный порядок попыток. `registerWithEmail` выполняет register-first/login-fallback, а `linkRemnashopAccount` — login-first/register-fallback. Эти контракты нельзя описывать как один и тот же алгоритм.
+Общий email-register flow и Telegram-link flow используют разный безопасный порядок попыток. `executeAuthCommand` выполняет register-first/login-fallback, а `linkRemnashopAccount` — login-first/register-fallback. Эти контракты нельзя описывать как один и тот же алгоритм.
 
 ### Изменение UX
 
@@ -442,7 +442,7 @@ Remnashop при этом не получает доказательство Web
 
 Пароль в этом сценарии обязателен. Telegram OIDC доказывает владение Telegram-аккаунтом, но не создаёт пароль для входа по e-mail. Код подтверждает владение e-mail, но также не заменяет пароль. Remnashop PR #135 требует пароль длиной 8–256 символов при регистрации и текущий пароль при входе.
 
-`linkRemnashopAccount` использует login-first/register-fallback. Это не следует смешивать с общим `registerWithEmail`, где применяется register-first/login-fallback.
+`linkRemnashopAccount` использует login-first/register-fallback. Это не следует смешивать с общим registration flow в `executeAuthCommand`, где применяется register-first/login-fallback.
 
 Password-backed доказательство для нового или неподтверждённого e-mail сохраняется атомарно вместе с pending token и ожидаемым Remnashop user id. До успешного ввода кода локальный `authPending` остаётся `false`: обычное чтение профиля не должно преждевременно запускать Telegram recovery или merge неподтверждённого адреса. После подтверждения кода `authPending` включается только тогда, когда для фактической сходимости identities действительно требуется recovery/merge.
 
@@ -861,7 +861,7 @@ npm run test:e2e
 | 2026-07-27 | AUD-002 | Dependency spike | temp lock-only copy | Проверено обновление только Next до 16.2.12 | Завершено | Прямые Next advisory закрываются, всего остаётся 10 production vulnerabilities | Codex |
 | 2026-07-27 | AUD-003 | Dependency spike | temp lock-only copy | Проверен полный кандидат версий и overrides из раздела 2.1 | Кандидат | `npm audit --omit=dev`: `found 0 vulnerabilities`; install/build/tests ещё не выполнялись | Codex |
 | 2026-07-27 | FIND-003 | Наблюдение | Remnashop PR #135 `b9da68a` + Clean Pay `d2637e1` | Установлена каноническая модель идентичности между проектами | Подтверждено | Remnashop `users.id` → JWT `sub`; Clean Pay unique `WebUser.remnashopUserId`; отдельная identity-сущность не нужна | Codex |
-| 2026-07-27 | FIND-004 | Наблюдение | Clean Pay `d2637e1`, source | Установлено, что local `identify` не является канонической идентификацией и может дать false negative | Подтверждено | Lookup выполняется только в Clean Pay; `registerWithEmail` уже делает upstream register-first/login-fallback | Codex |
+| 2026-07-27 | FIND-004 | Наблюдение | Clean Pay `d2637e1`, source | Установлено, что local `identify` не является канонической идентификацией и может дать false negative | Подтверждено | Lookup выполняется только в Clean Pay; registration flow в `executeAuthCommand` уже делает upstream register-first/login-fallback | Codex |
 | 2026-07-27 | FIND-005 | High risk | Remnashop PR #135 `b9da68a`, source | Найдена обходная поверхность BFF и неограниченный password-reset confirm при публичном Remnashop auth | Подтверждено условно topology | В reset confirm нет failed-attempt limiter; общий HTTP limiter не найден. Реальная Internet exposure требует проверки production ingress | Codex |
 | 2026-07-27 | FIND-006 | Наблюдение | Clean Pay `d2637e1`, source | Уточнена семантика Passkey | Подтверждено | Passkey создаёт local session; без upstream token/Telegram recovery Remnashop operation заканчивается `EMAIL_REQUIRED` | Codex |
 | 2026-07-27 | TST-002 | Проверка | Remnashop PR #135 `b9da68a`, temp exact source | Проверен baseline PR #135 | Завершено | pytest `153/153`, Ruff успешно, выборочный auth/identity mypy успешно | Codex |

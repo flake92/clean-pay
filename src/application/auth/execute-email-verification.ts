@@ -1,9 +1,11 @@
-import type { EmailVerificationCommands } from "@/application/auth/ports/email-verification";
+import {
+  EmailVerificationError,
+  type EmailVerificationCommands,
+} from "@/application/auth/ports/email-verification";
 import type { AccountReadiness, EmailVerificationResult } from "@/application/models/email-verification";
 
 function failure(error: unknown, fallback: string): EmailVerificationResult {
-  const candidate = error as { code?: unknown };
-  const code = typeof candidate?.code === "string" ? candidate.code : "INTERNAL_ERROR";
+  const code = error instanceof EmailVerificationError ? error.code : "INTERNAL_ERROR";
   const messages: Record<string, string> = {
     EMAIL_REQUIRED: "Сначала добавьте e-mail и пароль к аккаунту.",
     EMAIL_CODE_INVALID: "Код не подошёл. Проверьте его и попробуйте снова.",
