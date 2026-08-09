@@ -12,9 +12,10 @@ import { linkAccountEmail, removeLinkedPasskey } from "@/application/auth/manage
 import { executePayment, loadCheckout } from "@/application/payments/checkout";
 import { runPaymentMaintenance } from "@/application/payments/run-payment-maintenance";
 import type { AuthCommands } from "@/application/auth/ports/auth-commands";
+import { AuthGatewayError } from "@/application/auth/ports/auth-commands";
 import type { EmailVerificationCommands } from "@/application/auth/ports/email-verification";
 import type { LinkAccountCommands } from "@/application/auth/ports/link-account";
-import type { TelegramCallbackProcessor } from "@/application/auth/ports/telegram-callback";
+import type { TelegramCallbackGateway } from "@/application/auth/ports/telegram-callback";
 import type { TelegramAuthStartSecurity } from "@/application/auth/ports/telegram-auth-start";
 import type { CheckoutReader, PaymentCommands } from "@/application/payments/ports/checkout";
 import type { PaymentMaintenanceRunner } from "@/application/payments/ports/payment-maintenance";
@@ -22,11 +23,15 @@ import { loadSupportViewModel } from "@/application/support/load-support";
 
 function authCommands(overrides: Partial<AuthCommands> = {}): AuthCommands {
   return {
-    identify: vi.fn(async () => ({ exists: true, hasPasskey: false })),
-    login: vi.fn(async () => undefined),
-    register: vi.fn(async () => ({ emailVerified: false, verificationRequired: true })),
+    verifyHuman: vi.fn(async () => undefined),
+    rateLimit: vi.fn(async () => undefined),
+    identifyEmail: vi.fn(async () => ({ exists: true })),
+    hasPasskey: vi.fn(async () => false),
+    authenticate: vi.fn(async () => ({ context: {} })),
+    establishSession: vi.fn(async () => ({ userId: "user-1", emailVerified: true })),
+    requestEmailVerification: vi.fn(async () => undefined),
     requestPasswordReset: vi.fn(async () => undefined),
-    confirmPasswordReset: vi.fn(async () => undefined),
+    audit: vi.fn(async () => undefined),
     ...overrides,
   };
 }
@@ -88,7 +93,7 @@ describe("server application flows", () => {
     expect(runner.continueHistory).toHaveBeenCalledWith({ limit: 1, deadlineMs: 12_000 });
   });
 
-  it("completes Telegram callbacks through an explicit application port", async () => {
+  it("owns Telegram callback outcome policy in the application use case", async () => {
     const outcome = {
       redirectTo: "/cabinet",
       session: {
@@ -100,20 +105,36 @@ describe("server application flows", () => {
         remnashopLinked: true,
       },
     };
-    const processor: TelegramCallbackProcessor = {
-      complete: vi.fn(async () => outcome),
+    const gateway: TelegramCallbackGateway = {
+      consume: vi.fn(async () => ({
+        user: { id: "user-1", upstreamAccountId: null },
+        redirectTo: null,
+        providerSession: { context: {} },
+        linked: false,
+        telegramId: "777",
+        telegramUsername: null,
+        mergeConfirmation: null,
+      })),
+      providerAccountId: vi.fn(() => "upstream-1"),
+      attachTelegramToCurrentAccount: vi.fn(async () => undefined),
+      mergeProviderAccounts: vi.fn(async () => true),
+      linkProviderSession: vi.fn(async () => outcome.session),
+      reconcileProviderSession: vi.fn(async () => outcome.session),
+      withOwnerChangeFence: vi.fn(async ({ work }) => work()),
+      logAttachFailure: vi.fn(),
     };
 
-    await expect(completeTelegramCallback(processor, {
+    await expect(completeTelegramCallback(gateway, {
       kind: "oidc",
       code: "callback-code",
       state: "callback-state",
     })).resolves.toEqual(outcome);
-    expect(processor.complete).toHaveBeenCalledWith({
+    expect(gateway.consume).toHaveBeenCalledWith({
       kind: "oidc",
       code: "callback-code",
       state: "callback-state",
     });
+    expect(gateway.reconcileProviderSession).toHaveBeenCalledWith({ context: {} });
   });
 
   it("recovers Telegram sessions through an explicit application port", async () => {
@@ -135,14 +156,118 @@ describe("server application flows", () => {
     await expect(executeAuthCommand(commands, { kind: "identify", email: " User@Example.COM " })).resolves.toEqual({
       ok: true, kind: "identified", exists: true, hasPasskey: false,
     });
-    expect(commands.identify).toHaveBeenCalledWith({ email: "user@example.com" });
+    expect(commands.identifyEmail).toHaveBeenCalledWith("user@example.com");
   });
 
   it("maps provider auth failures before they reach React", async () => {
-    const commands = authCommands({ login: vi.fn(async () => { throw Object.assign(new Error(), { code: "AUTH_FAILED" }); }) });
+    const commands = authCommands({ authenticate: vi.fn(async () => { throw new AuthGatewayError("AUTH_FAILED"); }) });
     await expect(executeAuthCommand(commands, { kind: "login", email: "u@example.com", password: "wrong" })).resolves.toEqual({
       ok: false, code: "AUTH_FAILED", message: "Неверный e-mail или пароль.",
     });
+  });
+
+  it("owns registration fallback, session establishment, verification and audit", async () => {
+    const providerSession = { context: { token: "provider-session" } };
+    const commands = authCommands({
+      authenticate: vi.fn()
+        .mockRejectedValueOnce(new AuthGatewayError("EMAIL_ALREADY_EXISTS"))
+        .mockResolvedValueOnce(providerSession),
+      establishSession: vi.fn(async () => ({ userId: "user-1", emailVerified: false })),
+    });
+
+    await expect(executeAuthCommand(commands, {
+      kind: "register",
+      email: "User@Example.com",
+      password: "secret123",
+    })).resolves.toEqual({
+      ok: true,
+      kind: "authenticated",
+      emailVerified: false,
+      verificationRequired: true,
+    });
+    expect(commands.authenticate).toHaveBeenNthCalledWith(1, {
+      operation: "register",
+      email: "user@example.com",
+      password: "secret123",
+    });
+    expect(commands.authenticate).toHaveBeenNthCalledWith(2, {
+      operation: "login",
+      email: "user@example.com",
+      password: "secret123",
+    });
+    expect(commands.requestEmailVerification).toHaveBeenCalledWith(providerSession, "user@example.com");
+    expect(commands.audit).toHaveBeenCalledWith({
+      action: "auth_register_success",
+      userId: "user-1",
+      metadata: { flow: "existing_email_login" },
+    });
+  });
+
+  it("does not request verification for an already verified registration", async () => {
+    const commands = authCommands({
+      establishSession: vi.fn(async () => ({ userId: "user-1", emailVerified: true })),
+    });
+
+    await expect(executeAuthCommand(commands, {
+      kind: "register",
+      email: "user@example.com",
+      password: "secret123",
+    })).resolves.toMatchObject({
+      ok: true,
+      emailVerified: true,
+      verificationRequired: false,
+    });
+    expect(commands.requestEmailVerification).not.toHaveBeenCalled();
+  });
+
+  it("owns login session establishment and success audit", async () => {
+    const providerSession = { context: { token: "login-session" } };
+    const commands = authCommands({ authenticate: vi.fn(async () => providerSession) });
+
+    await expect(executeAuthCommand(commands, {
+      kind: "login",
+      email: "user@example.com",
+      password: "secret123",
+    })).resolves.toMatchObject({ ok: true, kind: "authenticated", emailVerified: true });
+    expect(commands.establishSession).toHaveBeenCalledWith(providerSession);
+    expect(commands.audit).toHaveBeenCalledWith({ action: "auth_login_success", userId: "user-1" });
+  });
+
+  it("owns indistinguishable password-reset request policy", async () => {
+    const commands = authCommands();
+
+    await expect(executeAuthCommand(commands, {
+      kind: "request-password-reset",
+      email: "unknown@example.com",
+    })).resolves.toEqual({ ok: true, kind: "password-reset-requested" });
+    expect(commands.rateLimit).toHaveBeenCalledWith(expect.objectContaining({
+      action: "password_reset_start",
+      email: "unknown@example.com",
+    }));
+    expect(commands.requestPasswordReset).toHaveBeenCalledWith("unknown@example.com");
+  });
+
+  it("owns password reset security policy and session replacement", async () => {
+    const providerSession = { context: { token: "reset-session" } };
+    const commands = authCommands({ authenticate: vi.fn(async () => providerSession) });
+
+    await expect(executeAuthCommand(commands, {
+      kind: "confirm-password-reset",
+      email: "user@example.com",
+      code: "123456",
+      newPassword: "new-password",
+      turnstileToken: "human-token",
+    })).resolves.toMatchObject({ ok: true, kind: "authenticated" });
+    expect(commands.verifyHuman).toHaveBeenCalledWith("human-token", "auth_login");
+    expect(commands.rateLimit).toHaveBeenCalledWith(expect.objectContaining({
+      action: "password_reset_confirm",
+      email: "user@example.com",
+    }));
+    expect(commands.establishSession).toHaveBeenCalledWith(providerSession, {
+      replaceExistingSessions: true,
+      replacementIdentityEmail: "user@example.com",
+    });
+    expect(commands.audit).toHaveBeenCalledWith({ action: "password_reset_success", userId: "user-1" });
   });
 
   it("returns explicit e-mail verification outcomes", async () => {

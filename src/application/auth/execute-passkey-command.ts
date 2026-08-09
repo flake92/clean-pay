@@ -15,7 +15,10 @@ function failure(error: unknown, fallback: string): { ok: false; code: string; m
 }
 
 export async function beginPasskeyLogin(commands: PasskeyCommands, input: { email: string; turnstileToken?: string }): Promise<PasskeyLoginOptionsResult> {
-  try { return { ok: true, options: await commands.beginLogin({ ...input, email: input.email.trim().toLowerCase() }) }; }
+  try {
+    await commands.verifyHuman(input.turnstileToken ?? null);
+    return { ok: true, options: await commands.beginLogin(input.email.trim().toLowerCase()) };
+  }
   catch (error) { return failure(error, "Не удалось начать быстрый вход."); }
 }
 

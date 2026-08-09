@@ -83,8 +83,6 @@ vi.mock("@/backend/integrations/payments/payment-user-merge-service", () => ({
   withPaymentOwnerChangeFence: mocks.withPaymentOwnerChangeFence,
 }));
 
-import { loginWithEmail } from "@/backend/auth/email-login";
-import { registerWithEmail } from "@/backend/auth/email-register";
 import { changeEmail, confirmEmailVerification, requestEmailVerification } from "@/backend/integrations/auth/email-verification-service";
 import { changePassword } from "@/backend/auth/password";
 import { getCurrentAuthProfile } from "@/backend/auth/profile";
@@ -169,78 +167,6 @@ describe("auth use cases", () => {
     mocks.withPaymentOwnerChangeFence.mockImplementation(
       ({ work }: { work: () => Promise<unknown> }) => work(),
     );
-  });
-
-  it("logs in with email through Turnstile, rate-limit and Remnashop session creation", async () => {
-    await expect(
-      loginWithEmail({ email: "user@example.com", password: "secret", turnstileToken: "ts" }, {}),
-    ).resolves.toEqual({
-      user: profile,
-      expiresAt: authData.expires_at,
-      refreshExpiresAt: authData.refresh_expires_at,
-    });
-
-    expect(mocks.verifyTurnstileToken).toHaveBeenCalledWith("ts", "auth_login");
-    expect(mocks.assertRateLimit).toHaveBeenCalledWith(
-      expect.objectContaining({ action: "auth_login", email: "user@example.com", limit: 5 }),
-    );
-    expect(mocks.remnashopAuth).toHaveBeenCalledWith("/auth/login", { email: "user@example.com", password: "secret" });
-    expect(mocks.createSessionFromRemnashopAuth).toHaveBeenCalledWith({
-      accessToken: "access-token",
-      refreshToken: "refresh-token",
-      auth: authData,
-    });
-    expect(mocks.auditLog).toHaveBeenCalledWith(expect.objectContaining({ action: "auth_login_success", userId: "user-1" }));
-  });
-
-  it("registers new email users and requests verification", async () => {
-    const result = await registerWithEmail(
-      { email: "user@example.com", password: "secret", name: "User" },
-      { token: "ctx-token" },
-    );
-
-    expect(result.emailVerification?.target_email).toBe("user@example.com");
-    expect(mocks.remnashopAuth).toHaveBeenCalledWith("/auth/register", {
-      email: "user@example.com",
-      password: "secret",
-      name: "User",
-    });
-    expect(mocks.remnashopRequest).toHaveBeenCalledWith("/auth/email/request-verification", {
-      method: "POST",
-      accessToken: "access-token",
-      body: { email: "user@example.com" },
-    });
-    expect(mocks.auditLog).toHaveBeenCalledWith(expect.objectContaining({ action: "auth_register_success" }));
-  });
-
-  it("resumes registration by logging in when Remnashop reports existing email", async () => {
-    mocks.remnashopAuth
-      .mockRejectedValueOnce(new ServiceError("CONFLICT", 409, "email already exists"))
-      .mockResolvedValueOnce(authResult);
-
-    await registerWithEmail({ email: "user@example.com", password: "secret", name: "User" }, {});
-
-    expect(mocks.remnashopAuth).toHaveBeenNthCalledWith(1, "/auth/register", expect.any(Object));
-    expect(mocks.remnashopAuth).toHaveBeenNthCalledWith(2, "/auth/login", {
-      email: "user@example.com",
-      password: "secret",
-    });
-  });
-
-  it("does not request email verification when resumed registration is already verified", async () => {
-    mocks.remnashopAuth
-      .mockRejectedValueOnce(new ServiceError("CONFLICT", 409, "email already exists"))
-      .mockResolvedValueOnce(authResult);
-    mocks.createSessionFromRemnashopAuth.mockResolvedValueOnce({
-      user: { ...user, emailVerified: true },
-      profile: { ...profile, is_email_verified: true },
-    });
-
-    await expect(registerWithEmail({ email: "user@example.com", password: "secret" }, {})).resolves.toMatchObject({
-      user: expect.objectContaining({ is_email_verified: true }),
-    });
-
-    expect(mocks.remnashopRequest).not.toHaveBeenCalledWith("/auth/email/request-verification", expect.any(Object));
   });
 
   it("requests and confirms email verification for the current session", async () => {

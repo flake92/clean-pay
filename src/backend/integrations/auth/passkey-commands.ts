@@ -12,10 +12,8 @@ import {
 import { verifyTurnstileToken } from "@/backend/security/turnstile";
 
 export const productionPasskeyCommands: PasskeyCommands = {
-  async beginLogin(input) {
-    await verifyTurnstileToken(input.turnstileToken ?? null, "auth_login");
-    return beginPasskeyLogin(input.email);
-  },
+  verifyHuman: (token) => verifyTurnstileToken(token, "auth_login"),
+  beginLogin: (email) => beginPasskeyLogin(email),
   finishLogin: async (response) => {
     await finishPasskeyLogin(response as AuthenticationResponseJSON);
   },

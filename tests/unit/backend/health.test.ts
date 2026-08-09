@@ -1,5 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import {
+  aggregateReadinessStatus,
+  measureReadinessCheck,
+} from "@/application/health/readiness";
+
 const mocks = vi.hoisted(() => ({
   readinessPrisma: { $queryRaw: vi.fn() },
   redisCommand: vi.fn(),
@@ -13,15 +18,15 @@ vi.mock("@/backend/cache/redis", () => ({
   redisCommand: mocks.redisCommand,
 }));
 
-import {
-  aggregateStatus,
-  checkDatabase,
-  checkMailpit,
-  checkRedis,
-  checkRemnawave,
-  checkRemnashop,
-  checkTelegramOidc,
-} from "@/backend/health/checks";
+import { createProductionReadinessGateway } from "@/backend/health/checks";
+
+function measuredCheck(
+  name: string,
+  check: ((signal: AbortSignal) => Promise<void>) | undefined,
+  deadlineSignal?: AbortSignal,
+) {
+  return check ? measureReadinessCheck(name, check, deadlineSignal) : Promise.resolve(null);
+}
 
 describe("health checks", () => {
   beforeEach(() => {
@@ -30,8 +35,8 @@ describe("health checks", () => {
   });
 
   it("aggregates degraded and ok statuses", () => {
-    expect(aggregateStatus({ db: { status: "ok", latencyMs: 1 }, redis: { status: "ok", latencyMs: 1 } })).toBe("ok");
-    expect(aggregateStatus({ db: { status: "ok", latencyMs: 1 }, redis: { status: "down", latencyMs: 1 } })).toBe(
+    expect(aggregateReadinessStatus({ db: { status: "ok", latencyMs: 1 }, redis: { status: "ok", latencyMs: 1 } })).toBe("ok");
+    expect(aggregateReadinessStatus({ db: { status: "ok", latencyMs: 1 }, redis: { status: "down", latencyMs: 1 } })).toBe(
       "degraded",
     );
   });
@@ -40,18 +45,19 @@ describe("health checks", () => {
     mocks.readinessPrisma.$queryRaw.mockResolvedValue([{ "?column?": 1 }]);
     mocks.redisCommand.mockResolvedValue("PONG");
 
-    await expect(checkDatabase()).resolves.toMatchObject({ status: "ok" });
-    await expect(checkRedis()).resolves.toMatchObject({ status: "ok" });
+    const gateway = createProductionReadinessGateway();
+    await expect(measuredCheck("Database", gateway.checkDatabase)).resolves.toMatchObject({ status: "ok" });
+    await expect(measuredCheck("Redis", gateway.checkRedis)).resolves.toMatchObject({ status: "ok" });
 
     mocks.redisCommand.mockResolvedValueOnce("NOPE");
-    await expect(checkRedis()).resolves.toMatchObject({ status: "down", message: "Redis did not return PONG" });
+    await expect(measuredCheck("Redis", gateway.checkRedis)).resolves.toMatchObject({ status: "down", message: "Redis did not return PONG" });
   });
 
   it("stops waiting for a hanging check with a distinct shared-deadline reason", async () => {
     const controller = new AbortController();
     mocks.readinessPrisma.$queryRaw.mockReturnValue(new Promise(() => undefined));
 
-    const result = checkDatabase(controller.signal);
+    const result = measuredCheck("Database", createProductionReadinessGateway().checkDatabase, controller.signal);
     controller.abort(new Error("readiness deadline"));
 
     await expect(result).resolves.toMatchObject({
@@ -67,7 +73,7 @@ describe("health checks", () => {
       .mockResolvedValueOnce(new Response("{}", { status: 422 }))
       .mockResolvedValueOnce(new Response("{}", { status: 422 }));
 
-    await expect(checkRemnashop()).resolves.toMatchObject({ status: "ok" });
+    await expect(measuredCheck("Remnashop", createProductionReadinessGateway().checkRemnashop)).resolves.toMatchObject({ status: "ok" });
     expect(fetch).toHaveBeenNthCalledWith(1, "http://remnashop:5000/api/v1/public/plans/public", expect.objectContaining({
       cache: "no-store",
       signal: expect.any(Object),
@@ -92,10 +98,10 @@ describe("health checks", () => {
     }));
 
     vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(new Response("{}", { status: 503 }));
-    await expect(checkRemnashop()).resolves.toMatchObject({ status: "down", message: "Remnashop returned 503" });
+    await expect(measuredCheck("Remnashop", createProductionReadinessGateway().checkRemnashop)).resolves.toMatchObject({ status: "down", message: "Remnashop returned 503" });
 
     vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(new Response("{}", { status: 404 }));
-    await expect(checkRemnashop()).resolves.toMatchObject({
+    await expect(measuredCheck("Remnashop", createProductionReadinessGateway().checkRemnashop)).resolves.toMatchObject({
       status: "down",
       message: "Remnashop public API returned 404; enable WEB_ENABLED=true with APP_API_KEY and APP_JWT_SECRET in Remnashop",
     });
@@ -107,7 +113,7 @@ describe("health checks", () => {
     fetch
       .mockResolvedValueOnce(new Response("{}", { status: 200 }))
       .mockResolvedValueOnce(new Response("{}", { status: 404 }));
-    await expect(checkRemnashop()).resolves.toMatchObject({
+    await expect(measuredCheck("Remnashop", createProductionReadinessGateway().checkRemnashop)).resolves.toMatchObject({
       status: "down",
       message: "Remnashop is incompatible: /auth/email/start is missing",
     });
@@ -115,7 +121,7 @@ describe("health checks", () => {
     fetch
       .mockResolvedValueOnce(new Response("{}", { status: 200 }))
       .mockResolvedValueOnce(new Response("{}", { status: 401 }));
-    await expect(checkRemnashop()).resolves.toMatchObject({
+    await expect(measuredCheck("Remnashop", createProductionReadinessGateway().checkRemnashop)).resolves.toMatchObject({
       status: "down",
       message: "Remnashop rejected REMNASHOP_AUTH_SERVICE_KEY",
     });
@@ -123,7 +129,7 @@ describe("health checks", () => {
     fetch
       .mockResolvedValueOnce(new Response("{}", { status: 200 }))
       .mockResolvedValueOnce(new Response("{}", { status: 202 }));
-    await expect(checkRemnashop()).resolves.toMatchObject({
+    await expect(measuredCheck("Remnashop", createProductionReadinessGateway().checkRemnashop)).resolves.toMatchObject({
       status: "down",
       message: "Remnashop /auth/email/start contract returned 202, expected 422",
     });
@@ -132,7 +138,7 @@ describe("health checks", () => {
       .mockResolvedValueOnce(new Response("{}", { status: 200 }))
       .mockResolvedValueOnce(new Response("{}", { status: 422 }))
       .mockResolvedValueOnce(new Response("{}", { status: 404 }));
-    await expect(checkRemnashop()).resolves.toMatchObject({
+    await expect(measuredCheck("Remnashop", createProductionReadinessGateway().checkRemnashop)).resolves.toMatchObject({
       status: "down",
       message: "Remnashop is incompatible: /auth/identify is missing",
     });
@@ -142,7 +148,7 @@ describe("health checks", () => {
       .mockResolvedValueOnce(new Response("{}", { status: 422 }))
       .mockResolvedValueOnce(new Response("{}", { status: 422 }))
       .mockResolvedValueOnce(new Response("{}", { status: 404 }));
-    await expect(checkRemnashop()).resolves.toMatchObject({
+    await expect(measuredCheck("Remnashop", createProductionReadinessGateway().checkRemnashop)).resolves.toMatchObject({
       status: "down",
       message: "Remnashop is incompatible: /auth/service-session is missing",
     });
@@ -159,9 +165,10 @@ describe("health checks", () => {
       .mockResolvedValueOnce(new Response(JSON.stringify({ keys: [{ kid: "dev" }] }), { status: 200 }))
       .mockResolvedValueOnce(new Response("{}", { status: 200 }));
 
-    await expect(checkMailpit()).resolves.toMatchObject({ status: "ok" });
-    await expect(checkTelegramOidc()).resolves.toMatchObject({ status: "ok" });
-    await expect(checkRemnawave()).resolves.toMatchObject({ status: "ok" });
+    const gateway = createProductionReadinessGateway();
+    await expect(measuredCheck("Mailpit", gateway.checkMailpit)).resolves.toMatchObject({ status: "ok" });
+    await expect(measuredCheck("Telegram OIDC", gateway.checkTelegramOidc)).resolves.toMatchObject({ status: "ok" });
+    await expect(measuredCheck("Remnawave", gateway.checkRemnawave)).resolves.toMatchObject({ status: "ok" });
 
     expect(fetch).toHaveBeenNthCalledWith(1, new URL("http://mailpit.test:8025/api/v1/messages"), expect.objectContaining({
       cache: "no-store",
@@ -187,7 +194,8 @@ describe("health checks", () => {
     vi.stubEnv("REMNAWAVE_TOKEN", "");
     const fetch = vi.spyOn(globalThis, "fetch");
 
-    await expect(checkRemnawave()).resolves.toMatchObject({
+    const gateway = createProductionReadinessGateway();
+    await expect(measuredCheck("Remnawave", gateway.checkRemnawave)).resolves.toMatchObject({
       status: "down",
       message: "Remnawave token is not configured",
     });
@@ -200,7 +208,8 @@ describe("health checks", () => {
     vi.stubEnv("REMNAWAVE_TOKEN", "Bearer ready-token");
     const fetch = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(new Response("{}", { status: 200 }));
 
-    await expect(checkRemnawave()).resolves.toMatchObject({ status: "ok" });
+    const gateway = createProductionReadinessGateway();
+    await expect(measuredCheck("Remnawave", gateway.checkRemnawave)).resolves.toMatchObject({ status: "ok" });
     expect(fetch).toHaveBeenCalledWith(new URL("http://remnawave.test:3000/api/system/metadata"), expect.objectContaining({
       headers: {
         accept: "application/json",
@@ -215,7 +224,8 @@ describe("health checks", () => {
     vi.stubEnv("CLEAN_PAY_READINESS_MAILPIT_URL", "");
     vi.stubEnv("CLEAN_PAY_READINESS_REMNAWAVE_URL", "");
 
-    await expect(checkMailpit()).resolves.toBeNull();
-    await expect(checkRemnawave()).resolves.toBeNull();
+    const gateway = createProductionReadinessGateway();
+    await expect(measuredCheck("Mailpit", gateway.checkMailpit)).resolves.toBeNull();
+    await expect(measuredCheck("Remnawave", gateway.checkRemnawave)).resolves.toBeNull();
   });
 });

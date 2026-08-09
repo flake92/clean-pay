@@ -1,6 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { confirmedPaymentOffer } from "@/shared/domain/payment-offer";
+import type { ExtendRequest, PurchaseRequest } from "@/shared/domain/payments";
+import { executePaymentWorkflow } from "@/application/payments/execute-payment-workflow";
 
 const mocks = vi.hoisted(() => ({
   getCurrentSession: vi.fn(),
@@ -54,7 +56,20 @@ vi.mock("@/backend/observability/audit", () => ({
   logTechnicalError: mocks.logTechnicalError,
 }));
 
-import { productionPaymentCommands } from "@/backend/integrations/payments/payment-commands";
+import { productionPaymentWorkflowGateway } from "@/backend/integrations/payments/payment-workflow-gateway";
+
+const productionPaymentCommands = {
+  purchase: (request: PurchaseRequest, idempotencyKey: string) => executePaymentWorkflow(
+    productionPaymentWorkflowGateway,
+    { kind: "PURCHASE" as const, request },
+    idempotencyKey,
+  ),
+  extend: (request: ExtendRequest, idempotencyKey: string) => executePaymentWorkflow(
+    productionPaymentWorkflowGateway,
+    { kind: "EXTEND" as const, request },
+    idempotencyKey,
+  ),
+};
 
 const price = {
   gateway_type: "YOOKASSA",
@@ -164,5 +179,39 @@ describe("production payment adapter", () => {
       { operationId: "operation-1", kind: "PURCHASE" },
     );
     expect(mocks.settlePaymentOperationAfterDispatchFailure).not.toHaveBeenCalled();
+  });
+
+  it("translates provider-shaped failures and keeps settlement logging technical", async () => {
+    const upstreamError = { code: "RATE_LIMITED", status: 429, message: "slow down" };
+
+    await productionPaymentWorkflowGateway.settleBeforeDispatch({
+      operationId: "operation-1",
+      claimToken: "claim-1",
+      error: upstreamError,
+      final: false,
+    });
+    expect(mocks.settlePaymentOperationBeforeDispatchFailure).toHaveBeenCalledWith({
+      operationId: "operation-1",
+      claimToken: "claim-1",
+      final: false,
+      error: expect.objectContaining({ code: "RATE_LIMITED", status: 429 }),
+    });
+
+    expect(productionPaymentWorkflowGateway.errorFromSnapshot({
+      code: "UNRECOGNIZED_PROVIDER_CODE",
+      status: 502,
+      message: "provider response",
+    })).toMatchObject({ code: "INTERNAL_ERROR", status: 500 });
+
+    const settlementError = new Error("settlement unavailable");
+    productionPaymentWorkflowGateway.logSettlementFailure(settlementError, {
+      operationId: "operation-1",
+      kind: "PURCHASE",
+    });
+    expect(mocks.logTechnicalError).toHaveBeenCalledWith(
+      "payment_operation_settlement_failed",
+      settlementError,
+      { operationId: "operation-1", kind: "PURCHASE" },
+    );
   });
 });

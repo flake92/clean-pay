@@ -8,7 +8,7 @@ function files(pattern: string) {
 }
 
 function importedModules(source: string) {
-  return [...source.matchAll(/\b(?:from|import)\s*(?:\(\s*)?["']([^"']+)["']/g)]
+  return [...source.matchAll(/\b(?:from|import|require)\s*(?:\(\s*)?["']([^"']+)["']/g)]
     .map((match) => match[1]!);
 }
 
@@ -30,6 +30,23 @@ function projectDependencies(file: string, source: string) {
     .filter((item): item is { dependency: string; resolved: string } => item.resolved !== null);
 }
 
+function modulePath(file: string) {
+  return file.replaceAll("\\", "/").replace(/\.(?:ts|tsx)$/, "");
+}
+
+function unusedApplicationPorts(
+  ports: Array<{ file: string }>,
+  applicationFiles: Array<{ file: string; source: string }>,
+) {
+  const consumedContracts = new Set(
+    applicationFiles.flatMap(({ file, source }) =>
+      projectDependencies(file, source).map(({ resolved }) => modulePath(resolved)),
+    ),
+  );
+
+  return ports.map(({ file }) => modulePath(file)).filter((contract) => !consumedContracts.has(contract));
+}
+
 describe("clean architecture boundaries", () => {
   it("resolves alias and relative imports before applying layer rules", () => {
     expect(projectPath("src/shared/domain/value.ts", "../../backend/database/prisma"))
@@ -37,6 +54,8 @@ describe("clean architecture boundaries", () => {
     expect(projectPath("src/frontend/components/view.tsx", "@/backend/config/env"))
       .toBe("src/backend/config/env");
     expect(projectPath("src/application/payments/use-case.ts", "node:crypto")).toBeNull();
+    expect(importedModules('const adapter = require("@/backend/database/prisma")'))
+      .toEqual(["@/backend/database/prisma"]);
   });
 
   it("keeps application use cases independent from frameworks and adapters", () => {
@@ -112,6 +131,96 @@ describe("clean architecture boundaries", () => {
     }
   });
 
+  it("allows backend adapters to depend only on application contracts", () => {
+    for (const { file, source } of files("src/backend/**/*.{ts,tsx}")) {
+      for (const { dependency, resolved } of projectDependencies(file, source)) {
+        if (!resolved.startsWith("src/application/")) continue;
+        expect(
+          resolved.includes("/ports/") || resolved.startsWith("src/application/models/"),
+          `${file} composes application implementation ${dependency} (${resolved})`,
+        ).toBe(true);
+      }
+    }
+  });
+
+  it("keeps domain code free from packages and non-domain modules", () => {
+    for (const { file, source } of files("src/shared/domain/**/*.{ts,tsx}")) {
+      for (const dependency of importedModules(source)) {
+        const resolved = projectPath(file, dependency);
+        expect(
+          resolved?.startsWith("src/shared/domain/") ?? false,
+          `${file} imports package or non-domain module ${dependency}`,
+        ).toBe(true);
+      }
+    }
+  });
+
+  it("does not retain pass-through use cases without application policy", () => {
+    for (const facade of [
+      "src/application/auth/claim-one-time-state.ts",
+      "src/application/auth/ports/one-time-state.ts",
+      "src/application/observability/write-audit-event.ts",
+      "src/application/observability/ports/audit-event-repository.ts",
+    ]) {
+      expect(globSync(facade), facade).toEqual([]);
+    }
+  });
+
+  it("keeps authentication workflow policy in the application layer", () => {
+    const useCase = readFileSync("src/application/auth/execute-auth-command.ts", "utf8");
+    const adapter = readFileSync("src/backend/integrations/auth/auth-commands.ts", "utf8");
+
+    expect(useCase).toContain('action: "auth_register"');
+    expect(useCase).toContain('error instanceof AuthGatewayError');
+    expect(useCase).toContain("requestEmailVerification(providerSession, email)");
+    expect(useCase).toContain('action: "password_reset_confirm"');
+    expect(adapter).not.toContain("verificationRequired");
+    expect(adapter).not.toContain("auth_register_success");
+    expect(useCase).not.toMatch(/as \{ code\?: unknown \}/);
+    for (const facade of [
+      "src/backend/auth/email-login.ts",
+      "src/backend/auth/email-register.ts",
+      "src/backend/auth/password-reset.ts",
+    ]) {
+      expect(globSync(facade), facade).toEqual([]);
+    }
+  });
+
+  it("keeps only ports that are consumed by an application use case", () => {
+    expect(unusedApplicationPorts(
+      files("src/application/**/ports/*.{ts,tsx}"),
+      files("src/application/**/*.{ts,tsx}"),
+    )).toEqual([]);
+  });
+
+  it("detects an application port that has no use-case consumer", () => {
+    expect(unusedApplicationPorts(
+      [
+        { file: "src/application/orders/ports/orders.ts" },
+        { file: "src/application/orders/ports/orphaned-gateway.ts" },
+      ],
+      [
+        { file: "src/application/orders/place-order.ts", source: 'import type { Orders } from "@/application/orders/ports/orders";' },
+      ],
+    )).toEqual(["src/application/orders/ports/orphaned-gateway"]);
+  });
+
+  it("wires payment and readiness use cases only at the application boundary", () => {
+    const paymentAdapter = readFileSync("src/backend/integrations/payments/payment-workflow-gateway.ts", "utf8");
+    const paymentAction = readFileSync("src/app/actions/payments.ts", "utf8");
+    const readinessAdapter = readFileSync("src/backend/health/checks.ts", "utf8");
+    const publicReadinessController = readFileSync("src/app/api/health/readiness/route.ts", "utf8");
+    const internalReadinessController = readFileSync("src/app/api/internal/health/readiness/route.ts", "utf8");
+
+    expect(paymentAdapter).not.toContain("executePaymentWorkflow");
+    expect(paymentAction).toContain("executePaymentWorkflow(");
+    expect(paymentAction).toContain("productionPaymentWorkflowGateway");
+    expect(readinessAdapter).not.toContain("@/application/health/readiness");
+    expect(publicReadinessController).toContain("getPublicReadiness(createProductionReadinessGateway())");
+    expect(internalReadinessController).toContain("runDetailedReadiness(createProductionReadinessGateway())");
+    expect(globSync("src/backend/health/readiness.ts")).toEqual([]);
+  });
+
   it("does not expose the removed internal browser transport", () => {
     expect(globSync("src/app/api/bff/**/route.ts")).toEqual([]);
     const proxy = readFileSync("src/proxy.ts", "utf8");
@@ -139,6 +248,8 @@ describe("clean architecture boundaries", () => {
 
   it("keeps Telegram callback business orchestration out of the HTTP controller", () => {
     const controller = readFileSync("src/app/auth/telegram/callback/route.ts", "utf8");
+    const useCase = readFileSync("src/application/auth/complete-telegram-callback.ts", "utf8");
+    const gateway = readFileSync("src/backend/integrations/auth/telegram-callback-gateway.ts", "utf8");
 
     expect(controller).toContain("completeTelegramCallback(");
     expect(controller).not.toContain("remnashopMergeUsers(");
@@ -147,6 +258,58 @@ describe("clean architecture boundaries", () => {
     expect(controller).not.toContain("reconcileUserFromRemnashopAuth(");
     expect(controller).toContain("recoverTelegramSession(");
     expect(controller).not.toContain("recoverRemnashopTelegramSession(");
+    expect(useCase).toContain("withOwnerChangeFence({");
+    expect(useCase).toContain("mergeIntoTelegramAccount(");
+    expect(useCase).toContain('"/link-account?auth=telegram_email_replace"');
+    expect(useCase).not.toMatch(/return gateway\.complete\(input\)/);
+    expect(gateway).not.toContain("completeConsumedCallback");
+    expect(gateway).not.toContain("reconcileTelegramCallbackResult");
+    expect(globSync("src/backend/integrations/auth/telegram-callback-processor.ts")).toEqual([]);
+  });
+
+  it("keeps Telegram WebApp workflow policy in the application layer", () => {
+    const useCase = readFileSync("src/application/auth/authenticate-telegram-webapp.ts", "utf8");
+    const gateway = readFileSync("src/backend/integrations/auth/telegram-webapp-gateway.ts", "utf8");
+    const action = readFileSync("src/app/actions/telegram.ts", "utf8");
+
+    for (const operation of [
+      "authenticateProvider",
+      "verifiedIdentity",
+      "rateLimit",
+      "reconcileIdentity",
+      "createSession",
+      "recoverSession",
+    ]) {
+      expect(useCase, operation).toContain(`gateway.${operation}`);
+    }
+    expect(useCase).toContain("if (reconciled.requiresRecovery)");
+    expect(gateway).not.toContain("if (reconciled.requiresRecovery)");
+    expect(action).toContain("authenticateTelegramWebApp(productionTelegramWebAppGateway");
+    expect(globSync("src/backend/integrations/auth/telegram-webapp.ts")).toEqual([]);
+  });
+
+  it("keeps Telegram WebApp workflow policy in the application layer", () => {
+    const useCase = readFileSync("src/application/auth/authenticate-telegram-webapp.ts", "utf8");
+    const gateway = readFileSync("src/backend/integrations/auth/telegram-webapp-gateway.ts", "utf8");
+    const action = readFileSync("src/app/actions/telegram.ts", "utf8");
+
+    expect(useCase).toContain("authenticateProvider(initData.trim())");
+    expect(useCase).toContain("verifiedIdentity(providerSession)");
+    expect(useCase).toContain("rateLimit(verifiedIdentity.telegramId)");
+    expect(useCase).toContain("reconcileIdentity(providerSession, verifiedIdentity)");
+    expect(useCase).toContain("recoverSession(session.id, reconciled.userId)");
+    expect(gateway).not.toContain("if (!session)");
+    expect(gateway).not.toContain("requiresRecovery)");
+    expect(action).toContain("authenticateTelegramWebApp(productionTelegramWebAppGateway");
+    expect(globSync("src/backend/integrations/auth/telegram-webapp.ts")).toEqual([]);
+  });
+
+  it("keeps human-verification ordering in application use cases", () => {
+    const useCase = readFileSync("src/application/auth/execute-passkey-command.ts", "utf8");
+    const adapter = readFileSync("src/backend/integrations/auth/passkey-commands.ts", "utf8");
+
+    expect(useCase.indexOf("commands.verifyHuman(")).toBeLessThan(useCase.indexOf("commands.beginLogin("));
+    expect(adapter).not.toMatch(/async beginLogin[\s\S]*verifyTurnstileToken/);
   });
 
   it("keeps session business operations out of server actions", () => {

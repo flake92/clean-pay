@@ -3,7 +3,6 @@ import { headers } from "next/headers";
 
 import { getEnv } from "@/backend/config/env";
 import { logger, sanitizeLogValue } from "@/backend/observability/logger";
-import { writeAuditEvent } from "@/application/observability/write-audit-event";
 import { prismaAuditEventRepository } from "@/backend/integrations/observability/prisma-audit-event-repository";
 import type { ServiceError } from "@/backend/errors/service-error";
 
@@ -58,7 +57,7 @@ export async function auditLog({
     const requestHeaders = await headers();
     const sanitized = metadata ? sanitizeValue(metadata) : undefined;
 
-    await writeAuditEvent(prismaAuditEventRepository, {
+    await prismaAuditEventRepository.append({
       userId: userId ?? null,
       action,
       severity,

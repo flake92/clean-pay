@@ -1,13 +1,16 @@
 import { NextResponse } from "next/server";
 
 import { completeTelegramCallback } from "@/application/auth/complete-telegram-callback";
-import type { TelegramCallbackOutcome } from "@/application/auth/ports/telegram-callback";
+import {
+  TelegramCallbackError,
+  type TelegramCallbackOutcome,
+} from "@/application/auth/ports/telegram-callback";
 import { recoverTelegramSession } from "@/application/auth/recover-telegram-session";
 import { getEnv } from "@/backend/config/env";
 import { ServiceError } from "@/backend/errors/service-error";
 import {
-  productionTelegramCallbackProcessor,
-} from "@/backend/integrations/auth/telegram-callback-processor";
+  productionTelegramCallbackGateway,
+} from "@/backend/integrations/auth/telegram-callback-gateway";
 import { productionTelegramSessionRecovery } from "@/backend/integrations/auth/telegram-session-recovery";
 import {
   telegramAccountMergeCookieMaxAgeSeconds,
@@ -78,9 +81,9 @@ async function redirectAfterTelegramFailure(error?: unknown) {
   if (!session) return redirectTo("/login?auth=telegram_failed");
 
   const reason =
-    error instanceof ServiceError && error.code === "ACCOUNT_MERGE_SUBSCRIPTIONS_CONFLICT"
+    error instanceof TelegramCallbackError && error.code === "ACCOUNT_MERGE_SUBSCRIPTIONS_CONFLICT"
       ? "telegram_merge_subscriptions"
-      : error instanceof ServiceError && error.code === "ACCOUNT_MERGE_REQUIRED"
+      : error instanceof TelegramCallbackError && error.code === "ACCOUNT_MERGE_REQUIRED"
         ? "telegram_merge_required"
         : "telegram_failed";
 
@@ -125,7 +128,7 @@ export async function GET(request: Request) {
 
   try {
     const outcome = await completeTelegramCallback(
-      productionTelegramCallbackProcessor,
+      productionTelegramCallbackGateway,
       { kind: "oidc", code, state },
     );
     const response = redirectTo(outcome.redirectTo);
@@ -152,7 +155,7 @@ export async function POST(request: Request) {
   try {
     const popupRequest = await readTelegramPopupRequest(request);
     const outcome = await completeTelegramCallback(
-      productionTelegramCallbackProcessor,
+      productionTelegramCallbackGateway,
       popupRequest.method === "oidc"
         ? { kind: "popup-oidc", idToken: popupRequest.idToken }
         : { kind: "login-widget", authData: popupRequest.authData },

@@ -33,7 +33,7 @@ export default defineConfig({
           functions: 85,
           lines: 85,
         },
-        "src/backend/integrations/payments/payment-commands.ts": {
+        "src/backend/integrations/payments/payment-workflow-gateway.ts": {
           statements: 60,
           branches: 30,
           functions: 65,

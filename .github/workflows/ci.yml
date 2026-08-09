@@ -52,6 +52,8 @@ jobs:
       - run: node node_modules/prisma/build/index.js format --check
       - run: npm run lint
       - run: npm run typecheck
+      - name: Enforce clean architecture boundaries
+        run: npm run test:architecture
       - run: npm run test:coverage
       - run: npm run build
 

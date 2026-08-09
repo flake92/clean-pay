@@ -60,7 +60,7 @@ vi.mock("@/backend/integrations/sessions/web-session-service", () => ({
 
 import { prismaPasskeyAccountReader } from "@/backend/integrations/auth/prisma-passkey-account-reader";
 import { productionTelegramSessionRecovery } from "@/backend/integrations/auth/telegram-session-recovery";
-import { productionTelegramWebAppAuthenticator } from "@/backend/integrations/auth/telegram-webapp";
+import { productionTelegramWebAppGateway } from "@/backend/integrations/auth/telegram-webapp-gateway";
 import { loadPaymentHistory } from "@/backend/integrations/payments/payment-history-reader";
 import { prismaPaymentQueryRepository } from "@/backend/integrations/payments/prisma-payment-query-repository";
 
@@ -151,7 +151,7 @@ describe("production persistence and Telegram adapters", () => {
     expect(mocks.recoverRemnashopTelegramSession).toHaveBeenCalledWith("session-1", "user-1");
   });
 
-  it("authenticates Telegram WebApp data and recovers the reconciled session", async () => {
+  it("implements granular Telegram WebApp provider and persistence operations", async () => {
     mocks.remnashopAuth.mockResolvedValue({
       cookies: { accessToken: "access-token", refreshToken: "refresh-token" },
       data: { user: {} },
@@ -169,8 +169,16 @@ describe("production persistence and Telegram adapters", () => {
     });
     mocks.createWebSessionForRemnashopUser.mockResolvedValue({ id: "session-1" });
 
-    await productionTelegramWebAppAuthenticator.authenticate("signed-init-data");
-    expect(mocks.assertRateLimit).toHaveBeenCalledWith(expect.objectContaining({ tgId: 123 }));
+    const provider = await productionTelegramWebAppGateway.authenticateProvider("signed-init-data");
+    const identity = await productionTelegramWebAppGateway.verifiedIdentity(provider);
+    await productionTelegramWebAppGateway.rateLimit(String(identity.telegramId));
+    const reconciled = await productionTelegramWebAppGateway.reconcileIdentity(provider, identity);
+    const session = await productionTelegramWebAppGateway.createSession({
+      userId: reconciled.userId,
+      upstreamSession: reconciled.upstreamSession!,
+    });
+    await productionTelegramWebAppGateway.recoverSession(session!.id, reconciled.userId);
+    expect(mocks.assertRateLimit).toHaveBeenCalledWith(expect.objectContaining({ tgId: "123" }));
     expect(mocks.createWebSessionForRemnashopUser).toHaveBeenCalledWith(expect.objectContaining({
       userId: "user-1",
       remnashopAccessTokenEncrypted: "encrypted-access",
@@ -178,11 +186,12 @@ describe("production persistence and Telegram adapters", () => {
     expect(mocks.recoverRemnashopTelegramSession).toHaveBeenCalledWith("session-1", "user-1");
   });
 
-  it("rejects an unverified Telegram identity", async () => {
+  it("returns an unverified Telegram identity for application policy", async () => {
     mocks.remnashopAuth.mockResolvedValue({ cookies: { accessToken: "access", refreshToken: "refresh" }, data: {} });
     mocks.getRemnashopMe.mockResolvedValue({ telegram_id: null });
-    await expect(productionTelegramWebAppAuthenticator.authenticate("bad-init-data"))
-      .rejects.toMatchObject({ code: "UNAUTHORIZED", status: 401 });
+    const provider = await productionTelegramWebAppGateway.authenticateProvider("bad-init-data");
+    await expect(productionTelegramWebAppGateway.verifiedIdentity(provider))
+      .resolves.toMatchObject({ telegramId: null });
     expect(mocks.reconcileUserFromRemnashopAuth).not.toHaveBeenCalled();
   });
 });

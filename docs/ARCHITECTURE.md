@@ -27,6 +27,12 @@ Server Components load query view models. Server Actions accept explicit command
 
 Each scenario has an explicit input and output. Application use cases depend on ports. Concrete Prisma, Redis, Remnashop, Remnawave, WebAuthn and Telegram implementations live outside the application layer and are wired in `src/app` composition roots. Provider-neutral DTOs in `src/application/models` may be imported as types by the React presentation layer.
 
+Every application port must be consumed by an application use case. Technical helpers that merely forward a call to one concrete repository are not use cases and must stay in the outer adapter layer. Backend adapters may import application ports and models, but never an application use-case implementation; production use cases are composed only in `src/app`.
+
+Authentication policy belongs to `src/application/auth`: human verification and rate-limit ordering, registration fallback, session establishment, verification dispatch, password-reset session replacement and success auditing are application decisions. The backend authentication gateway exposes granular provider and persistence operations and translates provider failures into application-owned errors.
+
+Telegram callback and WebApp authentication follow the same rule: account-link/merge/recovery branching, redirect selection, identity-verification ordering and session-recovery decisions live in application use cases. Telegram/Remnashop adapters expose only granular verification, provider and persistence operations; a single adapter method must not implement an end-to-end authentication scenario.
+
 Payment dispatch ordering, offer revalidation, idempotency state transitions and uncertain-outcome handling are owned by `src/application/payments/execute-payment-workflow.ts`. The backend payment adapter supplies only provider, persistence, session, rate-limit and audit capabilities through an opaque application port.
 
 ## HTTP boundary

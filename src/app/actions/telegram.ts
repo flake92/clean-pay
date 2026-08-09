@@ -1,8 +1,8 @@
 "use server";
 
 import { authenticateTelegramWebApp } from "@/application/auth/authenticate-telegram-webapp";
-import { productionTelegramWebAppAuthenticator } from "@/backend/integrations/auth/telegram-webapp";
+import { productionTelegramWebAppGateway } from "@/backend/integrations/auth/telegram-webapp-gateway";
 
 export async function authenticateTelegramWebAppAction(initData: string) {
-  return authenticateTelegramWebApp(productionTelegramWebAppAuthenticator, initData);
+  return authenticateTelegramWebApp(productionTelegramWebAppGateway, initData);
 }

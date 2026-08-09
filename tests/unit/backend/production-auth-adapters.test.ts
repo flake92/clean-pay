@@ -1,12 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
-  loginWithEmail: vi.fn(),
-  registerWithEmail: vi.fn(),
-  confirmPasswordReset: vi.fn(),
-  requestPasswordReset: vi.fn(),
   hasCredential: vi.fn(),
   remnashopIdentifyEmail: vi.fn(),
+  remnashopAuth: vi.fn(),
+  remnashopRequestPasswordReset: vi.fn(),
+  createSessionFromRemnashopAuth: vi.fn(),
+  requestRemnashopEmailVerification: vi.fn(),
+  withAuthConcurrency: vi.fn(),
+  auditLog: vi.fn(),
   assertRateLimit: vi.fn(),
   verifyTurnstileToken: vi.fn(),
   requestEmailVerification: vi.fn(),
@@ -28,19 +30,25 @@ const mocks = vi.hoisted(() => ({
   cookieDelete: vi.fn(),
 }));
 
-vi.mock("@/backend/auth/email-login", () => ({ loginWithEmail: mocks.loginWithEmail }));
-vi.mock("@/backend/auth/email-register", () => ({ registerWithEmail: mocks.registerWithEmail }));
-vi.mock("@/backend/auth/password-reset", () => ({
-  confirmPasswordReset: mocks.confirmPasswordReset,
-  requestPasswordReset: mocks.requestPasswordReset,
-}));
 vi.mock("@/backend/integrations/auth/prisma-passkey-account-reader", () => ({
   prismaPasskeyAccountReader: { hasCredential: mocks.hasCredential },
 }));
-vi.mock("@/backend/integrations/remnashop/client", () => ({ remnashopIdentifyEmail: mocks.remnashopIdentifyEmail }));
-vi.mock("@/backend/limits/rate-limit", () => ({ assertRateLimit: mocks.assertRateLimit }));
+vi.mock("@/backend/integrations/remnashop/client", () => ({
+  remnashopIdentifyEmail: mocks.remnashopIdentifyEmail,
+  remnashopAuth: mocks.remnashopAuth,
+  remnashopRequestPasswordReset: mocks.remnashopRequestPasswordReset,
+}));
+vi.mock("@/backend/integrations/remnashop/session", () => ({
+  createSessionFromRemnashopAuth: mocks.createSessionFromRemnashopAuth,
+}));
+vi.mock("@/backend/limits/rate-limit", () => ({
+  assertRateLimit: mocks.assertRateLimit,
+  withAuthConcurrency: mocks.withAuthConcurrency,
+}));
+vi.mock("@/backend/observability/audit", () => ({ auditLog: mocks.auditLog }));
 vi.mock("@/backend/security/turnstile", () => ({ verifyTurnstileToken: mocks.verifyTurnstileToken }));
 vi.mock("@/backend/integrations/auth/email-verification-service", () => ({
+  requestRemnashopEmailVerification: mocks.requestRemnashopEmailVerification,
   requestEmailVerification: mocks.requestEmailVerification,
   confirmEmailVerification: mocks.confirmEmailVerification,
   changeEmail: mocks.changeEmail,
@@ -67,6 +75,7 @@ vi.mock("next/headers", () => ({
 }));
 
 import { ServiceError } from "@/backend/errors/service-error";
+import { AuthGatewayError } from "@/application/auth/ports/auth-commands";
 import { productionAuthCommands } from "@/backend/integrations/auth/auth-commands";
 import { productionEmailVerificationCommands } from "@/backend/integrations/auth/email-verification";
 import { productionLinkAccountCommands, productionLinkAccountReader } from "@/backend/integrations/auth/link-account";
@@ -77,32 +86,126 @@ describe("production auth and profile adapters", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.cookieGet.mockReturnValue({ value: "signed-merge-token" });
+    mocks.withAuthConcurrency.mockImplementation(async (_key: string, work: () => Promise<unknown>) => work());
   });
 
-  it("wires identify, login, registration and password-reset commands", async () => {
+  it("implements granular auth operations without owning the workflow", async () => {
     mocks.remnashopIdentifyEmail.mockResolvedValue({ exists: true });
     mocks.hasCredential.mockResolvedValue(true);
-    mocks.registerWithEmail.mockResolvedValue({ user: { is_email_verified: false }, emailVerification: {} });
-
-    await expect(productionAuthCommands.identify({ email: "u@example.com", turnstileToken: "token" }))
-      .resolves.toEqual({ exists: true, hasPasskey: true });
-    await productionAuthCommands.login({ email: "u@example.com", password: "secret", turnstileToken: "token" });
-    await expect(productionAuthCommands.register({ email: "u@example.com", password: "secret", turnstileToken: "token" }))
-      .resolves.toEqual({ emailVerified: false, verificationRequired: true });
-    await productionAuthCommands.requestPasswordReset({ email: "u@example.com", turnstileToken: "token" });
-    await productionAuthCommands.confirmPasswordReset({
-      email: "u@example.com",
-      code: "123456",
-      newPassword: "new-password",
-      turnstileToken: "token",
+    const providerAuth = { data: {}, cookies: { accessToken: "access", refreshToken: "refresh" } };
+    mocks.remnashopAuth.mockResolvedValue(providerAuth);
+    mocks.createSessionFromRemnashopAuth.mockResolvedValue({
+      user: { id: "user-1" },
+      profile: { is_email_verified: true },
     });
+
+    await productionAuthCommands.verifyHuman("token", "auth_login");
+    await productionAuthCommands.rateLimit({
+      action: "auth_identify",
+      email: "u@example.com",
+      limit: 20,
+      windowSeconds: 900,
+    });
+    await expect(productionAuthCommands.identifyEmail("u@example.com")).resolves.toEqual({ exists: true });
+    await expect(productionAuthCommands.hasPasskey("u@example.com")).resolves.toBe(true);
+    const providerSession = await productionAuthCommands.authenticate({
+      operation: "login",
+      email: "u@example.com",
+      password: "secret",
+    });
+    await expect(productionAuthCommands.establishSession(providerSession))
+      .resolves.toEqual({ userId: "user-1", emailVerified: true });
+    await productionAuthCommands.requestPasswordReset("u@example.com");
 
     expect(mocks.verifyTurnstileToken).toHaveBeenCalledWith("token", "auth_login");
     expect(mocks.assertRateLimit).toHaveBeenCalledWith(expect.objectContaining({ action: "auth_identify" }));
-    expect(mocks.confirmPasswordReset).toHaveBeenCalledWith(
-      { email: "u@example.com", code: "123456", new_password: "new-password" },
-      "token",
-    );
+    expect(mocks.remnashopAuth).toHaveBeenCalledWith("/auth/login", {
+      email: "u@example.com",
+      password: "secret",
+    });
+    expect(mocks.remnashopRequestPasswordReset).toHaveBeenCalledWith({ email: "u@example.com" });
+  });
+
+  it("translates provider registration conflicts into an application error", async () => {
+    mocks.remnashopAuth.mockRejectedValueOnce(new ServiceError("CONFLICT", 409, "email already exists"));
+
+    await expect(productionAuthCommands.authenticate({
+      operation: "register",
+      email: "u@example.com",
+      password: "secret123",
+    })).rejects.toBeInstanceOf(AuthGatewayError);
+  });
+
+  it("adapts registration, reset confirmation, verification and audit operations", async () => {
+    const providerAuth = { data: { expires_at: "later" }, cookies: { accessToken: "access", refreshToken: "refresh" } };
+    mocks.remnashopAuth.mockResolvedValue(providerAuth);
+    mocks.createSessionFromRemnashopAuth.mockResolvedValue({
+      user: { id: "user-1" },
+      profile: { is_email_verified: false },
+    });
+
+    const registration = await productionAuthCommands.authenticate({
+      operation: "register",
+      email: "u@example.com",
+      password: "secret123",
+    });
+    expect(mocks.remnashopAuth).toHaveBeenCalledWith("/auth/register", {
+      email: "u@example.com",
+      password: "secret123",
+    });
+    await productionAuthCommands.requestEmailVerification(registration, "u@example.com");
+    expect(mocks.requestRemnashopEmailVerification).toHaveBeenCalledWith({
+      accessToken: "access",
+      body: { email: "u@example.com" },
+      source: "register",
+    });
+
+    const reset = await productionAuthCommands.authenticate({
+      operation: "confirm-password-reset",
+      email: "u@example.com",
+      code: "123456",
+      password: "new-password",
+    });
+    await expect(productionAuthCommands.establishSession(reset, {
+      replaceExistingSessions: true,
+      replacementIdentityEmail: "u@example.com",
+    })).resolves.toEqual({ userId: "user-1", emailVerified: false });
+    expect(mocks.remnashopAuth).toHaveBeenLastCalledWith("/auth/password/confirm-reset", {
+      email: "u@example.com",
+      code: "123456",
+      new_password: "new-password",
+    });
+
+    await productionAuthCommands.audit({ action: "auth_success", userId: "user-1" });
+    expect(mocks.auditLog).toHaveBeenCalledWith({ action: "auth_success", userId: "user-1" });
+  });
+
+  it("translates unrelated provider failures without leaking backend errors", async () => {
+    const failure = new ServiceError("UPSTREAM_UNAVAILABLE", 503);
+    mocks.remnashopAuth.mockRejectedValueOnce(failure);
+
+    await expect(productionAuthCommands.authenticate({
+      operation: "login",
+      email: "u@example.com",
+      password: "secret123",
+    })).rejects.toMatchObject({ code: "UPSTREAM_UNAVAILABLE" });
+  });
+
+  it("translates security, persistence and unknown failures at the gateway boundary", async () => {
+    mocks.verifyTurnstileToken.mockRejectedValueOnce(new ServiceError("RATE_LIMITED", 429));
+    await expect(productionAuthCommands.verifyHuman("token", "auth_login"))
+      .rejects.toMatchObject({ code: "RATE_LIMITED" });
+
+    mocks.hasCredential.mockRejectedValueOnce(new Error("database unavailable"));
+    await expect(productionAuthCommands.hasPasskey("u@example.com"))
+      .rejects.toMatchObject({ code: "INTERNAL_ERROR" });
+
+    mocks.remnashopAuth.mockRejectedValueOnce(new Error("invalid provider response"));
+    await expect(productionAuthCommands.authenticate({
+      operation: "login",
+      email: "u@example.com",
+      password: "secret123",
+    })).rejects.toMatchObject({ code: "INTERNAL_ERROR" });
   });
 
   it("maps email verification and readiness without leaking provider DTOs", async () => {
@@ -128,12 +231,23 @@ describe("production auth and profile adapters", () => {
       .resolves.toEqual({ status: "unavailable" });
   });
 
+  it("translates e-mail verification adapter failures", async () => {
+    mocks.requestEmailVerification.mockRejectedValueOnce(new ServiceError("RATE_LIMITED", 429));
+    await expect(productionEmailVerificationCommands.requestCode({ email: "u@example.com" }))
+      .rejects.toMatchObject({ code: "RATE_LIMITED" });
+
+    mocks.confirmEmailVerification.mockRejectedValueOnce(new Error("invalid response"));
+    await expect(productionEmailVerificationCommands.confirmCode({ code: "123456" }))
+      .rejects.toMatchObject({ code: "INTERNAL_ERROR" });
+  });
+
   it("keeps WebAuthn provider types inside the adapter", async () => {
     const options = { challenge: "challenge" };
     mocks.beginPasskeyLogin.mockResolvedValue(options);
     mocks.beginPasskeyRegistration.mockResolvedValue(options);
 
-    await expect(productionPasskeyCommands.beginLogin({ email: "u@example.com", turnstileToken: "token" }))
+    await productionPasskeyCommands.verifyHuman("token");
+    await expect(productionPasskeyCommands.beginLogin("u@example.com"))
       .resolves.toBe(options);
     await productionPasskeyCommands.finishLogin({ id: "credential" } as never);
     await expect(productionPasskeyCommands.beginRegistration()).resolves.toBe(options);

@@ -1,8 +1,3 @@
-import {
-  aggregateReadinessStatus,
-  measureReadinessCheck,
-  type CheckResult,
-} from "@/application/health/readiness";
 import type { ReadinessGateway } from "@/application/health/ports/readiness-gateway";
 import { redisCommand } from "@/backend/cache/redis";
 import { getEnv } from "@/backend/config/env";
@@ -103,38 +98,4 @@ export function createProductionReadinessGateway(): ReadinessGateway {
       await redisCommand(["SET", READINESS_CACHE_KEY, value, "EX", ttlSeconds]);
     },
   };
-}
-
-export function checkDatabase(deadlineSignal?: AbortSignal) {
-  const gateway = createProductionReadinessGateway();
-  return measureReadinessCheck("Database", gateway.checkDatabase, deadlineSignal);
-}
-
-export function checkRedis(deadlineSignal?: AbortSignal) {
-  const gateway = createProductionReadinessGateway();
-  return measureReadinessCheck("Redis", gateway.checkRedis, deadlineSignal);
-}
-
-export function checkRemnashop(deadlineSignal?: AbortSignal) {
-  const gateway = createProductionReadinessGateway();
-  return measureReadinessCheck("Remnashop", gateway.checkRemnashop, deadlineSignal);
-}
-
-export function checkMailpit(deadlineSignal?: AbortSignal) {
-  const check = createProductionReadinessGateway().checkMailpit;
-  return check ? measureReadinessCheck("Mailpit", check, deadlineSignal) : Promise.resolve(null);
-}
-
-export function checkTelegramOidc(deadlineSignal?: AbortSignal) {
-  const gateway = createProductionReadinessGateway();
-  return measureReadinessCheck("Telegram OIDC", gateway.checkTelegramOidc, deadlineSignal);
-}
-
-export function checkRemnawave(deadlineSignal?: AbortSignal) {
-  const check = createProductionReadinessGateway().checkRemnawave;
-  return check ? measureReadinessCheck("Remnawave", check, deadlineSignal) : Promise.resolve(null);
-}
-
-export function aggregateStatus(results: Record<string, CheckResult>) {
-  return aggregateReadinessStatus(results);
 }
