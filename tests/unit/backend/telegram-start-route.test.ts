@@ -19,7 +19,7 @@ vi.mock("@/backend/integrations/telegram/oidc", () => ({
 vi.mock("@/backend/limits/rate-limit", () => ({
   assertRateLimit: mocks.assertRateLimit,
 }));
-vi.mock("@/backend/sessions/web-session", () => ({
+vi.mock("@/backend/integrations/sessions/web-session-service", () => ({
   getCurrentUser: mocks.getCurrentUser,
 }));
 vi.mock("@/backend/security/turnstile", () => ({

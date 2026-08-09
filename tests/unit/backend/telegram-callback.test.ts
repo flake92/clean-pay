@@ -48,7 +48,7 @@ vi.mock("@/backend/integrations/remnashop/client", () => ({
   remnashopMergeUsers: mocks.remnashopMergeUsers,
 }));
 
-vi.mock("@/backend/sessions/web-session", () => ({
+vi.mock("@/backend/integrations/sessions/web-session-service", () => ({
   createWebSessionOnResponse: mocks.createWebSessionOnResponse,
   getCurrentSession: mocks.getCurrentSession,
 }));
@@ -64,12 +64,12 @@ vi.mock("@/backend/integrations/telegram/oidc", () => {
   };
 });
 
-vi.mock("@/backend/auth/telegram-account-merge", () => ({
+vi.mock("@/backend/integrations/auth/telegram-account-merge-service", () => ({
   telegramAccountMergeCookieMaxAgeSeconds: 300,
   telegramAccountMergeCookieName: "telegram-account-merge",
 }));
 
-vi.mock("@/backend/payments/user-merge", () => ({
+vi.mock("@/backend/integrations/payments/payment-user-merge-service", () => ({
   withPaymentOwnerChangeFence: mocks.withPaymentOwnerChangeFence,
 }));
 

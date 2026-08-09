@@ -1,7 +1,7 @@
 import { getEnv } from "@/backend/config/env";
 import { ServiceError } from "@/backend/errors/service-error";
-import { reconcileUnknownPayments } from "@/backend/payments/reconciliation";
-import { continuePaymentHistoryBackfills } from "@/backend/payments/history-sync";
+import { continuePaymentHistoryBackfills } from "@/backend/integrations/payments/payment-history-sync-service";
+import { reconcileUnknownPayments } from "@/backend/integrations/payments/payment-reconciliation-service";
 import { safeEqual, sha256 } from "@/backend/security/crypto";
 import { logTechnicalError } from "@/backend/observability/audit";
 import { NextResponse } from "next/server";
