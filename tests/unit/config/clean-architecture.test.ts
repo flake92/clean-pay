@@ -85,6 +85,14 @@ describe("clean architecture boundaries", () => {
     expect(controller).not.toContain("reconcileUserFromRemnashopAuth(");
   });
 
+  it("keeps payment maintenance orchestration out of the HTTP controller", () => {
+    const controller = readFileSync("src/app/api/internal/payments/reconcile/route.ts", "utf8");
+
+    expect(controller).toContain("runPaymentMaintenance(");
+    expect(controller).not.toContain("reconcileUnknownPayments(");
+    expect(controller).not.toContain("continuePaymentHistoryBackfills(");
+  });
+
   it("keeps backend orchestration free from direct database access", () => {
     for (const pattern of [
       "src/backend/auth/**/*.{ts,tsx}",

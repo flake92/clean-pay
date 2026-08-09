@@ -5,11 +5,13 @@ import { completeTelegramCallback } from "@/backend/application/auth/complete-te
 import { confirmEmailVerificationCode, requestEmailVerificationCode } from "@/backend/application/auth/execute-email-verification";
 import { linkAccountEmail, removeLinkedPasskey } from "@/backend/application/auth/manage-linked-account";
 import { executePayment, loadCheckout } from "@/backend/application/payments/checkout";
+import { runPaymentMaintenance } from "@/backend/application/payments/run-payment-maintenance";
 import type { AuthCommands } from "@/backend/application/auth/ports/auth-commands";
 import type { EmailVerificationCommands } from "@/backend/application/auth/ports/email-verification";
 import type { LinkAccountCommands } from "@/backend/application/auth/ports/link-account";
 import type { TelegramCallbackProcessor } from "@/backend/application/auth/ports/telegram-callback";
 import type { CheckoutReader, PaymentCommands } from "@/backend/application/payments/ports/checkout";
+import type { PaymentMaintenanceRunner } from "@/backend/application/payments/ports/payment-maintenance";
 import { loadSupportViewModel } from "@/backend/application/support/load-support";
 
 function authCommands(overrides: Partial<AuthCommands> = {}): AuthCommands {
@@ -24,6 +26,38 @@ function authCommands(overrides: Partial<AuthCommands> = {}): AuthCommands {
 }
 
 describe("server application flows", () => {
+  it("runs bounded payment maintenance through one application scenario", async () => {
+    const runner: PaymentMaintenanceRunner = {
+      reconcile: vi.fn(async () => ({
+        claimed: 1,
+        succeeded: 1,
+        inProgress: 0,
+        unknown: 0,
+        manualRequired: 0,
+        retryReady: 0,
+        failed: 0,
+        manualRequiredOperationIds: [],
+      })),
+      continueHistory: vi.fn(async () => ({
+        attempted: 1,
+        applied: 20,
+        completed: 0,
+        failed: 0,
+      })),
+    };
+
+    await expect(runPaymentMaintenance(runner, {
+      paymentLimit: 7,
+      deadlineMs: 12_000,
+    })).resolves.toMatchObject({
+      claimed: 1,
+      succeeded: 1,
+      history: { attempted: 1, applied: 20 },
+    });
+    expect(runner.reconcile).toHaveBeenCalledWith({ limit: 7, deadlineMs: 12_000 });
+    expect(runner.continueHistory).toHaveBeenCalledWith({ limit: 1, deadlineMs: 12_000 });
+  });
+
   it("completes Telegram callbacks through an explicit application port", async () => {
     const outcome = {
       redirectTo: "/cabinet",
