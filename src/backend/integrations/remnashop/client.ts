@@ -3,7 +3,7 @@ import { Prisma, WebSessionAssuranceLevel } from "@prisma/client";
 import {
   assertUserMergeFinalOwner,
   mergeLocalUsersIntoTarget,
-} from "@/backend/auth/user-merge";
+} from "@/backend/integrations/auth/local-user-merge-service";
 import { authDebugLog } from "@/backend/observability/auth-debug-log";
 import { getEnv } from "@/backend/config/env";
 import { logger } from "@/backend/observability/logger";
@@ -27,12 +27,12 @@ import type {
   RequestPasswordResetRequest,
   TelegramAuthRequest,
   TelegramWebAppAuthRequest,
-} from "@/shared/remnashop/types";
+} from "@/backend/integrations/remnashop/contracts";
 import {
   assertEmailVerificationPolicy,
   getCurrentSession,
   refreshCurrentAccessCookie,
-} from "@/backend/sessions/web-session";
+} from "@/backend/integrations/sessions/web-session-service";
 import { acquireRemnashopTokensForSession } from "@/backend/integrations/remnashop/session-token-lifecycle";
 import { protectRemnashopToken } from "@/backend/integrations/remnashop/token-protection";
 import {
@@ -40,7 +40,7 @@ import {
   lockPaymentOwnerFence,
   preflightPaymentOperationsForUserMerge,
   transferPaymentOperationsForUserMerge,
-} from "@/backend/payments/user-merge";
+} from "@/backend/integrations/payments/payment-user-merge-service";
 
 export { protectRemnashopToken, revealRemnashopToken } from "@/backend/integrations/remnashop/token-protection";
 

@@ -6,7 +6,7 @@ import {
   confirmLinkedTelegram,
   linkAccountEmail,
   removeLinkedPasskey,
-} from "@/backend/application/auth/manage-linked-account";
+} from "@/application/auth/manage-linked-account";
 import { productionLinkAccountCommands } from "@/backend/integrations/auth/link-account";
 
 export async function linkAccountEmailAction(input: { email: string; password: string }) { return linkAccountEmail(productionLinkAccountCommands, input); }

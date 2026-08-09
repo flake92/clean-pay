@@ -6,7 +6,7 @@ import {
   changeProfileEmail,
   changeProfilePassword,
   requestProfileEmailVerification,
-} from "@/backend/application/profile/execute-profile-command";
+} from "@/application/profile/execute-profile-command";
 import { productionProfileCommands } from "@/backend/integrations/profile/profile-adapter";
 
 export async function requestProfileEmailVerificationAction(input: { email?: string; turnstileToken?: string }) {

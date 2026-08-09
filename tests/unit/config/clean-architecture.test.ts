@@ -6,34 +6,53 @@ function files(pattern: string) {
   return globSync(pattern).map((file) => ({ file, source: readFileSync(file, "utf8") }));
 }
 
+function importedModules(source: string) {
+  return [...source.matchAll(/\b(?:from|import)\s*(?:\(\s*)?["']([^"']+)["']/g)]
+    .map((match) => match[1]!);
+}
+
 describe("clean architecture boundaries", () => {
   it("keeps application use cases independent from frameworks and adapters", () => {
-    for (const { file, source } of files("src/backend/application/**/*.{ts,tsx}")) {
-      expect(source, file).not.toMatch(/from ["']next(?:\/|["'])/);
-      expect(source, file).not.toMatch(/@\/backend\/(?:database|integrations|cache|config|errors)\//);
-      expect(source, file).not.toMatch(/@prisma\/client/);
-      expect(source, file).not.toContain("@/shared/remnashop/");
+    for (const { file, source } of files("src/application/**/*.{ts,tsx}")) {
+      for (const dependency of importedModules(source)) {
+        expect(
+          dependency.startsWith("@/application/")
+          || dependency.startsWith("@/shared/domain/"),
+          `${file} imports outer or provider module ${dependency}`,
+        ).toBe(true);
+      }
     }
   });
 
   it("keeps domain contracts independent from outer layers and providers", () => {
     for (const { file, source } of files("src/shared/domain/**/*.{ts,tsx}")) {
-      expect(source, file).not.toMatch(/@\/(?:app|backend|frontend)\//);
-      expect(source, file).not.toMatch(/@\/shared\/(?:presentation|remnashop|pwa)\//);
+      expect(source, file).not.toMatch(/@\/(?:app|application|backend|frontend)\//);
+      expect(source, file).not.toMatch(/@\/shared\/(?:remnashop|pwa)\//);
       expect(source, file).not.toMatch(/from ["']next(?:\/|["'])/);
       expect(source, file).not.toMatch(/@prisma\/client/);
     }
   });
 
-  it("does not leak provider contracts into application or view models", () => {
+  it("keeps all shared policies independent from application and adapters", () => {
+    for (const { file, source } of files("src/shared/**/*.{ts,tsx}")) {
+      for (const dependency of importedModules(source)) {
+        expect(
+          dependency.startsWith("@/shared/") || dependency.startsWith("."),
+          `${file} imports non-shared module ${dependency}`,
+        ).toBe(true);
+      }
+    }
+  });
+
+  it("does not leak provider contracts into the application boundary", () => {
     for (const pattern of [
-      "src/backend/application/**/*.{ts,tsx}",
-      "src/frontend/**/*.{ts,tsx}",
-      "src/shared/presentation/**/*.{ts,tsx}",
+      "src/application/**/*.{ts,tsx}",
       "src/shared/payments/**/*.{ts,tsx}",
     ]) {
       for (const { file, source } of files(pattern)) {
         expect(source, file).not.toContain("@/shared/remnashop/");
+        expect(source, file).not.toContain("@simplewebauthn/");
+        expect(source, file).not.toContain("@prisma/client");
       }
     }
   });
@@ -46,6 +65,12 @@ describe("clean architecture boundaries", () => {
     }
   });
 
+  it("prevents infrastructure from depending on framework composition or React", () => {
+    for (const { file, source } of files("src/backend/**/*.{ts,tsx}")) {
+      expect(source, file).not.toMatch(/@\/(?:app|frontend)\//);
+    }
+  });
+
   it("does not expose the removed internal browser transport", () => {
     expect(globSync("src/app/api/bff/**/route.ts")).toEqual([]);
     const proxy = readFileSync("src/proxy.ts", "utf8");
@@ -53,26 +78,21 @@ describe("clean architecture boundaries", () => {
     expect(proxy).toContain("'/api/bff/payments/status'");
   });
 
-  it("uses concrete adapters only from application composition roots", () => {
-    const legacyInfrastructureFacades = [
-      "@/backend/auth/email-verification",
-      "@/backend/auth/passkeys",
-      "@/backend/auth/remnashop-link",
-      "@/backend/auth/telegram-account-merge",
-      "@/backend/auth/redirect-policy",
-      "@/backend/payments/history-sync",
-      "@/backend/payments/idempotency",
-      "@/backend/payments/reconciliation",
-      "@/backend/payments/records",
-      "@/backend/payments/user-merge",
-      "@/backend/sessions/web-session",
-    ];
-
-    for (const { file, source } of files("src/app/**/*.{ts,tsx}")) {
-      for (const facade of legacyInfrastructureFacades) {
-        expect(source, file).not.toContain(`from "${facade}"`);
-        expect(source, file).not.toContain(`from '${facade}'`);
-      }
+  it("does not retain compatibility facades around infrastructure adapters", () => {
+    for (const facade of [
+      "src/backend/auth/email-verification.ts",
+      "src/backend/auth/passkeys.ts",
+      "src/backend/auth/redirect-policy.ts",
+      "src/backend/auth/remnashop-link.ts",
+      "src/backend/auth/telegram-account-merge.ts",
+      "src/backend/payments/history-sync.ts",
+      "src/backend/payments/idempotency.ts",
+      "src/backend/payments/reconciliation.ts",
+      "src/backend/payments/records.ts",
+      "src/backend/payments/user-merge.ts",
+      "src/backend/sessions/web-session.ts",
+    ]) {
+      expect(globSync(facade), facade).toEqual([]);
     }
   });
 
@@ -138,7 +158,7 @@ describe("clean architecture boundaries", () => {
 
   it("allows database clients only in database and integration adapters", () => {
     for (const { file, source } of files("src/backend/**/*.{ts,tsx}")) {
-      if (!source.includes("@/backend/database/")) continue;
+      if (!source.includes("@/backend/database/") && !source.includes("@prisma/client")) continue;
       expect(file.replaceAll("\\", "/"), file).toMatch(/^src\/backend\/(?:database|integrations)\//);
     }
   });

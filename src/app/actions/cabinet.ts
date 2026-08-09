@@ -7,7 +7,7 @@ import {
   deleteAllCabinetDevices,
   deleteCabinetDevice,
   reissueCabinetSubscription,
-} from "@/backend/application/cabinet/execute-command";
+} from "@/application/cabinet/execute-command";
 import { productionCabinetCommands } from "@/backend/integrations/cabinet/cabinet-commands";
 
 export async function deleteDeviceAction(hwid: string) {

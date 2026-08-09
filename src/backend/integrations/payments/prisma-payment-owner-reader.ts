@@ -1,8 +1,7 @@
 import { Prisma, type Prisma as PrismaTypes } from "@prisma/client";
-import type { PaymentOwnerReader } from "@/backend/application/payments/ports/payment-owner-reader";
 import { prisma } from "@/backend/database/prisma";
-export const prismaPaymentOwnerReader: PaymentOwnerReader = {
-  async findUpstreamOwnerId(userId) {
+export const prismaPaymentOwnerReader = {
+  async findUpstreamOwnerId(userId: string) {
     const user = await prisma.webUser.findUnique({ where: { id: userId }, select: { remnashopUserId: true } });
     return user?.remnashopUserId ?? null;
   },

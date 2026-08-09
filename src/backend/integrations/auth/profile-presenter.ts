@@ -1,0 +1,74 @@
+import type { WebSession, WebUser } from "@prisma/client";
+
+import type { RemnashopMe } from "@/backend/integrations/remnashop/contracts";
+
+type SessionWithUser = WebSession & { user: WebUser };
+
+function profileAuthType(authMethod: WebSession["authMethod"]) {
+  if (authMethod === "TELEGRAM") return "telegram";
+  if (authMethod === "PASSKEY") return "passkey";
+  return "email";
+}
+
+export function localUserProfile(session: SessionWithUser) {
+  const hasEmail = Boolean(session.user.email);
+  const emailVerified = hasEmail && session.user.emailVerified;
+
+  return {
+    telegram_id: session.user.telegramId?.toString() ?? null,
+    auth_type: profileAuthType(session.authMethod),
+    email: session.user.email,
+    is_email_verified: emailVerified,
+    pending_email: null,
+    name: session.user.fullName ?? session.user.displayName ?? "",
+    username: session.user.telegramUsername,
+    language: "ru",
+    has_password: false,
+    telegramId: session.user.telegramId?.toString() ?? null,
+    telegramUsername: session.user.telegramUsername ?? null,
+    fullName: session.user.fullName,
+    displayName: session.user.displayName,
+    emailVerified,
+    account_sync_pending: session.user.authPending,
+    accountSyncPending: session.user.authPending,
+  };
+}
+
+export function remnashopUserProfile(session: SessionWithUser, profile: RemnashopMe) {
+  const localUser = session.user;
+  const remnashopEmailMatchesLocalEmail = Boolean(
+    localUser.email && profile.email === localUser.email,
+  );
+  const email = profile.email ?? localUser.email;
+  const emailVerified = Boolean(
+    email &&
+    (
+      profile.email
+        ? profile.is_email_verified
+        : false
+    ),
+  );
+  const localEmailVerified = Boolean(
+    localUser.email &&
+    (
+      remnashopEmailMatchesLocalEmail
+        ? localUser.emailVerified || profile.is_email_verified
+        : false
+    ),
+  );
+
+  return {
+    ...profile,
+    email,
+    is_email_verified: emailVerified,
+    auth_type: profileAuthType(session.authMethod),
+    telegram_id: localUser.telegramId?.toString() ?? profile.telegram_id?.toString() ?? null,
+    telegramId: localUser.telegramId?.toString() ?? null,
+    telegramUsername: localUser.telegramUsername ?? null,
+    fullName: localUser.fullName ?? profile.name,
+    displayName: localUser.displayName ?? profile.name,
+    emailVerified: localEmailVerified,
+    account_sync_pending: localUser.authPending,
+    accountSyncPending: localUser.authPending,
+  };
+}

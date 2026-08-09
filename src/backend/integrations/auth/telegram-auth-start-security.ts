@@ -1,6 +1,6 @@
 import type {
   TelegramAuthStartSecurity,
-} from "@/backend/application/auth/ports/telegram-auth-start";
+} from "@/application/auth/ports/telegram-auth-start";
 import { getCurrentUser } from "@/backend/integrations/sessions/web-session-service";
 import { assertRateLimit } from "@/backend/limits/rate-limit";
 import { verifyTurnstileToken } from "@/backend/security/turnstile";

@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
 
-import { completeTelegramCallback } from "@/backend/application/auth/complete-telegram-callback";
-import type { TelegramCallbackOutcome } from "@/backend/application/auth/ports/telegram-callback";
-import { recoverTelegramSession } from "@/backend/application/auth/recover-telegram-session";
+import { completeTelegramCallback } from "@/application/auth/complete-telegram-callback";
+import type { TelegramCallbackOutcome } from "@/application/auth/ports/telegram-callback";
+import { recoverTelegramSession } from "@/application/auth/recover-telegram-session";
 import { getEnv } from "@/backend/config/env";
 import { ServiceError } from "@/backend/errors/service-error";
 import {

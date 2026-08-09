@@ -1,6 +1,6 @@
 import { Card } from "primereact/card";
 
-import { loadProfileViewModel } from "@/backend/application/profile/load-profile";
+import { loadProfileViewModel } from "@/application/profile/load-profile";
 import { productionProfileReader } from "@/backend/integrations/profile/profile-adapter";
 import { AppShell } from "@/app/_components/app-shell";
 import { PageHeader } from "@/frontend/components/layout";

@@ -20,7 +20,7 @@ import {
   accountSetupCompletePath,
   emailVerificationPath,
 } from "@/shared/auth/account-setup-flow";
-import type { AccountReadiness } from "@/shared/presentation/email-verification";
+import type { AccountReadiness } from "@/application/models/email-verification";
 
 const defaultReadiness: AccountReadiness = { status: "pending", emailVerified: false };
 

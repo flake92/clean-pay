@@ -17,7 +17,7 @@ import {
 } from "@/app/actions/profile";
 import { LinkButton } from "@/frontend/components/prime/link-button";
 import { TurnstileWidget, type TurnstileHandle, hasTurnstileSiteKey } from "@/frontend/components/turnstile-widget";
-import type { ProfileViewModel } from "@/shared/presentation/profile";
+import type { ProfileViewModel } from "@/application/models/profile";
 
 function authTypeLabel(value: string) {
   const labels: Record<string, string> = {

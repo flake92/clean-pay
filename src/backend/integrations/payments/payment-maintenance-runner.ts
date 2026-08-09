@@ -1,6 +1,6 @@
 import type {
   PaymentMaintenanceRunner,
-} from "@/backend/application/payments/ports/payment-maintenance";
+} from "@/application/payments/ports/payment-maintenance";
 import { continuePaymentHistoryBackfills } from "@/backend/integrations/payments/payment-history-sync-service";
 import { reconcileUnknownPayments } from "@/backend/integrations/payments/payment-reconciliation-service";
 

@@ -25,7 +25,7 @@ import {
   applyRemnashopTransaction,
   recordPayment,
   serializePaymentRecord,
-} from "@/backend/payments/records";
+} from "@/backend/integrations/payments/payment-record-service";
 
 const upstreamTransaction = {
   payment_id: "11111111-1111-4111-8111-111111111111",

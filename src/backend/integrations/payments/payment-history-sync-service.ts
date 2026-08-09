@@ -13,8 +13,8 @@ import {
 } from "@/backend/integrations/remnashop/client";
 import { ServiceError } from "@/backend/errors/service-error";
 import { paymentUpstreamOwnerHash } from "@/backend/payments/hashes";
-import { applyRemnashopTransaction } from "@/backend/payments/records";
-import { lockPaymentUpstreamOwner } from "@/backend/payments/owner";
+import { applyRemnashopTransaction } from "@/backend/integrations/payments/payment-record-service";
+import { lockPaymentUpstreamOwner } from "@/backend/integrations/payments/payment-owner-service";
 import { randomToken, safeEqual, sha256 } from "@/backend/security/crypto";
 
 // A backfill claim can perform two independently bounded 10s upstream calls and

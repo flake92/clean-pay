@@ -44,10 +44,10 @@ const mocks = vi.hoisted(() => {
 vi.mock("@/backend/database/prisma", () => ({
   prisma: mocks.prisma,
 }));
-vi.mock("@/backend/payments/owner", () => ({
+vi.mock("@/backend/integrations/payments/payment-owner-service", () => ({
   lockPaymentUpstreamOwner: mocks.lockPaymentUpstreamOwner,
 }));
-vi.mock("@/backend/payments/user-merge", () => ({
+vi.mock("@/backend/integrations/payments/payment-user-merge-service", () => ({
   lockPaymentOwnerFence: mocks.lockPaymentOwnerFence,
 }));
 
@@ -61,7 +61,7 @@ import {
   paymentOperationErrorFromSnapshot,
   settlePaymentOperationAfterDispatchFailure,
   settlePaymentOperationBeforeDispatchFailure,
-} from "@/backend/payments/idempotency";
+} from "@/backend/integrations/payments/payment-idempotency-service";
 import { sha256 } from "@/backend/security/crypto";
 
 const CLIENT_KEY = "4f4cf1a3-797f-4b69-b39f-09c4da39f96a";

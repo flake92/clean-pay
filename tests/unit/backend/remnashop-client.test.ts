@@ -51,11 +51,11 @@ vi.mock("@/backend/observability/auth-debug-log", () => ({
 
 vi.mock("@/backend/database/prisma", () => ({ prisma: prismaMock }));
 
-vi.mock("@/backend/auth/user-merge", () => userMergeMock);
+vi.mock("@/backend/integrations/auth/local-user-merge-service", () => userMergeMock);
 
-vi.mock("@/backend/payments/user-merge", () => paymentMergeMock);
+vi.mock("@/backend/integrations/payments/payment-user-merge-service", () => paymentMergeMock);
 
-vi.mock("@/backend/sessions/web-session", () => ({
+vi.mock("@/backend/integrations/sessions/web-session-service", () => ({
   assertEmailVerificationPolicy: sessionPolicyMock.assertEmailVerificationPolicy,
   getCurrentSession: vi.fn(),
   refreshCurrentAccessCookie: vi.fn(),
@@ -83,7 +83,7 @@ import {
 } from "@/backend/integrations/remnashop/client";
 import { ServiceError } from "@/backend/errors/service-error";
 import { decryptSecret } from "@/backend/security/crypto";
-import { getCurrentSession } from "@/backend/sessions/web-session";
+import { getCurrentSession } from "@/backend/integrations/sessions/web-session-service";
 
 function jwt(payload: object) {
   return `header.${Buffer.from(JSON.stringify(payload)).toString("base64url")}.signature`;

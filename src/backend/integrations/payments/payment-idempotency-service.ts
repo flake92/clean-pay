@@ -11,21 +11,21 @@ import {
 import {
   recordPayment,
   type RecordPaymentInput,
-} from "@/backend/payments/records";
+} from "@/backend/integrations/payments/payment-record-service";
 import {
   randomToken,
   safeEqual,
   sha256,
 } from "@/backend/security/crypto";
 import { paymentUpstreamOwnerHash } from "@/backend/payments/hashes";
-import { lockPaymentUpstreamOwner } from "@/backend/payments/owner";
+import { lockPaymentUpstreamOwner } from "@/backend/integrations/payments/payment-owner-service";
 import { isPaymentManualRequired } from "@/backend/payments/manual-review";
-import { lockPaymentOwnerFence } from "@/backend/payments/user-merge";
+import { lockPaymentOwnerFence } from "@/backend/integrations/payments/payment-user-merge-service";
 import type {
   ExtendRequest,
   PaymentInitResponse,
   PurchaseRequest,
-} from "@/shared/remnashop/types";
+} from "@/backend/integrations/remnashop/contracts";
 
 const PAYMENT_OPERATION_CONTRACT_VERSION = 2;
 // An existing operation is claimed before its Remnashop session is refreshed.

@@ -1,6 +1,6 @@
 import { Card } from "primereact/card";
 
-import { loadPaymentStatus } from "@/backend/application/payments/load-payment-status";
+import { loadPaymentStatus } from "@/application/payments/load-payment-status";
 import { productionPaymentStatusReader } from "@/backend/integrations/payments/payment-status-reader";
 import { AppShell } from "@/app/_components/app-shell";
 import { PageHeader } from "@/frontend/components/layout";

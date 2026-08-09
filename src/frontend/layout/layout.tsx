@@ -10,7 +10,7 @@ import AppTopbar from './AppTopbar';
 import { LayoutContext } from './context/layoutcontext';
 import { ChildContainerProps, LayoutState, AppTopbarRef } from '@/frontend/types';
 import { usePathname } from 'next/navigation';
-import type { NavigationViewModel } from '@/shared/presentation/navigation';
+import type { NavigationViewModel } from '@/application/models/navigation';
 
 const Layout = ({ children, navigation }: ChildContainerProps & { navigation: NavigationViewModel }) => {
     const { layoutState, setLayoutState } = useContext(LayoutContext);

@@ -110,7 +110,7 @@ vi.mock("@/backend/integrations/remnashop/client", () => ({
   remnashopAuth: mocks.remnashopAuth,
 }));
 
-vi.mock("@/backend/auth/telegram-account-merge", () => ({
+vi.mock("@/backend/integrations/auth/telegram-account-merge-service", () => ({
   stageTelegramAccountMerge: mocks.stageTelegramAccountMerge,
 }));
 
@@ -118,11 +118,11 @@ vi.mock("@/backend/database/prisma", () => ({
   prisma: mocks.prisma,
 }));
 
-vi.mock("@/backend/sessions/web-session", () => ({
+vi.mock("@/backend/integrations/sessions/web-session-service", () => ({
   getCurrentSession: mocks.getCurrentSession,
 }));
 
-vi.mock("@/backend/auth/user-merge", () => ({
+vi.mock("@/backend/integrations/auth/local-user-merge-service", () => ({
   mergeLocalUsersIntoTarget: mocks.mergeLocalUsersIntoTarget,
   assertUserMergeFinalOwner: mocks.assertUserMergeFinalOwner,
 }));

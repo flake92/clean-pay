@@ -1,10 +1,9 @@
-import type { Prisma } from "@prisma/client";
 import { createHash } from "node:crypto";
 import { headers } from "next/headers";
 
 import { getEnv } from "@/backend/config/env";
 import { logger, sanitizeLogValue } from "@/backend/observability/logger";
-import { writeAuditEvent } from "@/backend/application/observability/write-audit-event";
+import { writeAuditEvent } from "@/application/observability/write-audit-event";
 import { prismaAuditEventRepository } from "@/backend/integrations/observability/prisma-audit-event-repository";
 import type { ServiceError } from "@/backend/errors/service-error";
 
@@ -30,7 +29,7 @@ function technicalMetadata(metadata: Record<string, unknown>) {
     return undefined;
   }
 
-  return sanitizeValue(metadata) as Prisma.InputJsonValue;
+  return sanitizeValue(metadata);
 }
 
 function getIpFromHeaders(requestHeaders: Headers) {

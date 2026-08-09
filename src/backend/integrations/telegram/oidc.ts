@@ -12,15 +12,15 @@ import { logger } from "@/backend/observability/logger";
 import { prisma } from "@/backend/database/prisma";
 import { assertRateLimit } from "@/backend/limits/rate-limit";
 import { claimTelegramAuthState as claimTelegramAuthStateRecord } from "@/backend/auth/one-time-state";
-import { stageTelegramAccountMerge } from "@/backend/auth/telegram-account-merge";
+import { stageTelegramAccountMerge } from "@/backend/integrations/auth/telegram-account-merge-service";
 import { remnashopAuth } from "@/backend/integrations/remnashop/client";
 import { ServiceError } from "@/backend/errors/service-error";
-import { getCurrentSession } from "@/backend/sessions/web-session";
+import { getCurrentSession } from "@/backend/integrations/sessions/web-session-service";
 import {
   assertUserMergeFinalOwner,
   mergeLocalUsersIntoTarget,
-} from "@/backend/auth/user-merge";
-import type { TelegramAuthRequest } from "@/shared/remnashop/types";
+} from "@/backend/integrations/auth/local-user-merge-service";
+import type { TelegramAuthRequest } from "@/backend/integrations/remnashop/contracts";
 
 const telegramAuthTtlSeconds = 10 * 60;
 const telegramLoginAuthMaxAgeSeconds = 24 * 60 * 60;

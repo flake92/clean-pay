@@ -1,5 +1,5 @@
 import type { Prisma } from "@prisma/client";
-import type { AuditEventRepository } from "@/backend/application/observability/ports/audit-event-repository";
+import type { AuditEventRepository } from "@/application/observability/ports/audit-event-repository";
 import { prisma } from "@/backend/database/prisma";
 
 export const prismaAuditEventRepository: AuditEventRepository = {

@@ -1,4 +1,3 @@
-import type { SubscriptionReader } from "@/backend/application/subscriptions/ports/subscription-reader";
 import { getAuthorizedRemnashopTokens, remnashopRequest } from "@/backend/integrations/remnashop/client";
 import { ServiceError } from "@/backend/errors/service-error";
 import { getLiveRemnawaveSubscriptionUrl } from "@/backend/integrations/remnawave/client";
@@ -6,7 +5,7 @@ import type {
   CurrentSubscriptionResponse,
   DevicesResponse,
   SubscriptionOffersResponse,
-} from "@/shared/remnashop/types";
+} from "@/backend/integrations/remnashop/contracts";
 
 async function loadCurrentSubscription() {
   const { accessToken, session } = await getAuthorizedRemnashopTokens();
@@ -43,7 +42,7 @@ async function loadSubscriptionOffers() {
   return remnashopRequest<SubscriptionOffersResponse>("/subscription/offers", { accessToken });
 }
 
-export const remnashopSubscriptionReader: SubscriptionReader = {
+export const remnashopSubscriptionReader = {
   loadCurrent: loadCurrentSubscription,
   loadDevices: loadSubscriptionDevices,
   loadOffers: loadSubscriptionOffers,

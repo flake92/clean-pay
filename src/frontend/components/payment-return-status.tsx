@@ -13,7 +13,7 @@ import {
   paymentReturnOutcome,
   shouldPollPaymentReturn,
 } from "@/frontend/lib/payment-return";
-import type { PaymentStatusPageModel, PaymentStatusViewModel } from "@/shared/presentation/payment-status";
+import type { PaymentStatusPageModel, PaymentStatusViewModel } from "@/application/models/payment-status";
 
 type Props = {
   kind: "success" | "fail" | "pending";

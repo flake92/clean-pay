@@ -8,7 +8,7 @@ import { logger } from "@/backend/observability/logger";
 import type {
   PaymentInitResponse,
   PaymentTransactionResponse,
-} from "@/shared/remnashop/types";
+} from "@/backend/integrations/remnashop/contracts";
 
 const RECOVERY_TIMEOUT_MS = 10_000;
 const MAX_CURSOR_LENGTH = 8_192;

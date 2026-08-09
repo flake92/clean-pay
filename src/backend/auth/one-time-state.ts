@@ -1,4 +1,4 @@
-import { claimOneTimeState } from "@/backend/application/auth/claim-one-time-state";
+import { claimOneTimeState } from "@/application/auth/claim-one-time-state";
 import { prismaOneTimeStateRepository } from "@/backend/integrations/auth/prisma-one-time-state";
 
 export async function claimWebAuthnChallenge(id: string, now = new Date()) {

@@ -1,16 +1,16 @@
-import type { PaymentStatusReader } from "@/backend/application/payments/ports/payment-status-reader";
+import type { PaymentStatusReader } from "@/application/payments/ports/payment-status-reader";
 import { prismaPaymentQueryRepository } from "@/backend/integrations/payments/prisma-payment-query-repository";
 import { getAuthorizedRemnashopTokens, getRemnashopUserIdFromAccessToken, remnashopRequest } from "@/backend/integrations/remnashop/client";
 import { ServiceError } from "@/backend/errors/service-error";
 import { getExactTransaction, getLegacyTransactions, getPaymentCapabilities } from "@/backend/integrations/remnashop/payment-recovery";
-import { syncOnePaymentHistoryPage } from "@/backend/payments/history-sync";
+import { syncOnePaymentHistoryPage } from "@/backend/integrations/payments/payment-history-sync-service";
 import { isPaymentManualRequired } from "@/backend/payments/manual-review";
-import { assertPaymentUpstreamIdentity } from "@/backend/payments/owner";
-import { reconcileUnknownPayments } from "@/backend/payments/reconciliation";
-import { serializePaymentRecord, syncExactPaymentRecordFromRemnashop, syncPaymentRecordsFromRemnashopTransactions } from "@/backend/payments/records";
-import { assertEmailVerificationPolicy, getCurrentUser } from "@/backend/sessions/web-session";
-import type { PaymentStatusViewModel } from "@/shared/presentation/payment-status";
-import type { CurrentSubscriptionResponse } from "@/shared/remnashop/types";
+import { assertPaymentUpstreamIdentity } from "@/backend/integrations/payments/payment-owner-service";
+import { reconcileUnknownPayments } from "@/backend/integrations/payments/payment-reconciliation-service";
+import { serializePaymentRecord, syncExactPaymentRecordFromRemnashop, syncPaymentRecordsFromRemnashopTransactions } from "@/backend/integrations/payments/payment-record-service";
+import { assertEmailVerificationPolicy, getCurrentUser } from "@/backend/integrations/sessions/web-session-service";
+import type { PaymentStatusViewModel } from "@/application/models/payment-status";
+import type { CurrentSubscriptionResponse } from "@/backend/integrations/remnashop/contracts";
 
 const paymentIdPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const operationIdPattern = /^[a-z0-9_-]{1,191}$/i;

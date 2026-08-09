@@ -24,7 +24,7 @@ import {
   emailVerificationPath,
   isPaymentDestination,
 } from "@/shared/auth/account-setup-flow";
-import type { LinkAccountViewModel, TelegramMergeViewModel } from "@/shared/presentation/link-account";
+import type { LinkAccountViewModel, TelegramMergeViewModel } from "@/application/models/link-account";
 
 const defaultLinkAccountModel: LinkAccountViewModel = {
   status: "ready",

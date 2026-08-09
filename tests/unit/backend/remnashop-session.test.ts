@@ -60,7 +60,7 @@ vi.mock("@/backend/observability/auth-debug-log", () => ({
   authDebugLog: mocks.authDebugLog,
 }));
 
-vi.mock("@/backend/sessions/web-session", () => ({
+vi.mock("@/backend/integrations/sessions/web-session-service", () => ({
   clearWebSessionCookies: mocks.clearWebSessionCookies,
   createWebSessionForRemnashopUser: mocks.createWebSessionForRemnashopUser,
   getCurrentSession: mocks.getCurrentSession,
@@ -71,12 +71,12 @@ vi.mock("@/backend/database/prisma", () => ({
   prisma: mocks.prisma,
 }));
 
-vi.mock("@/backend/auth/user-merge", () => ({
+vi.mock("@/backend/integrations/auth/local-user-merge-service", () => ({
   mergeLocalUsersIntoTarget: mocks.mergeLocalUsersIntoTarget,
   assertUserMergeFinalOwner: mocks.assertUserMergeFinalOwner,
 }));
 
-vi.mock("@/backend/payments/user-merge", () => ({
+vi.mock("@/backend/integrations/payments/payment-user-merge-service", () => ({
   lockPaymentOwnerFence: mocks.lockPaymentOwnerFence,
 }));
 

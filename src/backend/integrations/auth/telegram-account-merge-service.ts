@@ -19,9 +19,9 @@ import { randomToken, sha256 } from "@/backend/security/crypto";
 import {
   getCurrentSession,
   refreshCurrentAccessCookie,
-} from "@/backend/sessions/web-session";
-import type { CurrentSubscriptionResponse } from "@/shared/remnashop/types";
-import { withPaymentOwnerChangeFence } from "@/backend/payments/user-merge";
+} from "@/backend/integrations/sessions/web-session-service";
+import type { CurrentSubscriptionResponse } from "@/backend/integrations/remnashop/contracts";
+import { withPaymentOwnerChangeFence } from "@/backend/integrations/payments/payment-user-merge-service";
 
 const confirmationTtlMs = 10 * 60 * 1000;
 const processingLeaseMs = 2 * 60 * 1000;

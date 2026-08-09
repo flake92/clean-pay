@@ -1,8 +1,8 @@
-import { changeEmail, requestEmailVerification } from "@/backend/auth/email-verification";
+import { changeEmail, requestEmailVerification } from "@/backend/integrations/auth/email-verification-service";
 import { changePassword } from "@/backend/auth/password";
 import { getCurrentAuthProfile } from "@/backend/auth/profile";
-import type { ProfileCommands } from "@/backend/application/profile/ports/profile-commands";
-import type { ProfileReader } from "@/backend/application/profile/ports/profile-reader";
+import type { ProfileCommands } from "@/application/profile/ports/profile-commands";
+import type { ProfileReader } from "@/application/profile/ports/profile-reader";
 
 export const productionProfileReader: ProfileReader = {
   async loadCurrent() {

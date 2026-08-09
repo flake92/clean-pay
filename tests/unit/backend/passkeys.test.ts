@@ -53,7 +53,7 @@ vi.mock("@/backend/database/prisma", () => ({
   prisma: mocks.prisma,
 }));
 
-vi.mock("@/backend/sessions/web-session", () => ({
+vi.mock("@/backend/integrations/sessions/web-session-service", () => ({
   assertEmailVerificationPolicy: mocks.assertEmailVerificationPolicy,
   createWebSession: mocks.createWebSession,
   getCurrentSession: mocks.getCurrentSession,
@@ -76,7 +76,7 @@ import {
   finishPasskeyLogin,
   finishPasskeyRegistration,
   listPasskeys,
-} from "@/backend/auth/passkeys";
+} from "@/backend/integrations/auth/passkey-service";
 
 function clientData(challenge: string) {
   return Buffer.from(JSON.stringify({ challenge })).toString("base64url");

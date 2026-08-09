@@ -1,4 +1,4 @@
-import { runPaymentMaintenance } from "@/backend/application/payments/run-payment-maintenance";
+import { runPaymentMaintenance } from "@/application/payments/run-payment-maintenance";
 import { getEnv } from "@/backend/config/env";
 import { ServiceError } from "@/backend/errors/service-error";
 import { productionPaymentMaintenanceRunner } from "@/backend/integrations/payments/payment-maintenance-runner";

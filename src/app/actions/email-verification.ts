@@ -4,7 +4,7 @@ import {
   confirmEmailVerificationCode,
   requestEmailVerificationCode,
   safeReadiness,
-} from "@/backend/application/auth/execute-email-verification";
+} from "@/application/auth/execute-email-verification";
 import { productionEmailVerificationCommands } from "@/backend/integrations/auth/email-verification";
 
 export async function requestEmailVerificationCodeAction(input: { email?: string; turnstileToken?: string }) {

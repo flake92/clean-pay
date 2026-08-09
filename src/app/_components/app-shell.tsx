@@ -1,4 +1,4 @@
-import { loadNavigation } from "@/backend/application/navigation/load-navigation";
+import { loadNavigation } from "@/application/navigation/load-navigation";
 import { productionNavigationReader } from "@/backend/integrations/navigation/navigation-reader";
 import Layout from "@/frontend/layout/layout";
 

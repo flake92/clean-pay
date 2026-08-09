@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { loadTariffsViewModel } from "@/backend/application/subscriptions/load-tariffs";
+import { loadTariffsViewModel } from "@/application/subscriptions/load-tariffs";
 import {
   SubscriptionCatalogAccessError,
   type SubscriptionCatalog,
-} from "@/backend/application/subscriptions/ports/subscription-catalog";
+} from "@/application/subscriptions/ports/subscription-catalog";
 
 const offers = {
   gateways: [],

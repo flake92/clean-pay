@@ -1,10 +1,10 @@
 import {
   SubscriptionCatalogAccessError,
   type SubscriptionCatalog,
-} from "@/backend/application/subscriptions/ports/subscription-catalog";
+} from "@/application/subscriptions/ports/subscription-catalog";
 import { getAuthorizedRemnashopTokens, remnashopRequest } from "@/backend/integrations/remnashop/client";
 import { ServiceError } from "@/backend/errors/service-error";
-import type { SubscriptionOffersResponse } from "@/shared/remnashop/types";
+import type { SubscriptionOffersResponse } from "@/backend/integrations/remnashop/contracts";
 
 export const remnashopSubscriptionCatalog: SubscriptionCatalog = {
   async loadOffers() {

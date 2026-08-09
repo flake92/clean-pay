@@ -1,5 +1,5 @@
-import type { EmailVerificationCommands } from "@/backend/application/auth/ports/email-verification";
-import { confirmEmailVerification, requestEmailVerification } from "@/backend/auth/email-verification";
+import type { EmailVerificationCommands } from "@/application/auth/ports/email-verification";
+import { confirmEmailVerification, requestEmailVerification } from "@/backend/integrations/auth/email-verification-service";
 import { getCurrentAuthProfile } from "@/backend/auth/profile";
 import { ServiceError } from "@/backend/errors/service-error";
 

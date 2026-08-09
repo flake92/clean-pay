@@ -9,10 +9,10 @@ import {
 } from "@/backend/integrations/remnashop/payment-recovery";
 import {
   paymentResponseSnapshot,
-} from "@/backend/payments/idempotency";
+} from "@/backend/integrations/payments/payment-idempotency-service";
 import { paymentUpstreamOwnerHash } from "@/backend/payments/hashes";
-import { applyRemnashopTransaction } from "@/backend/payments/records";
-import { lockPaymentUpstreamOwner } from "@/backend/payments/owner";
+import { applyRemnashopTransaction } from "@/backend/integrations/payments/payment-record-service";
+import { lockPaymentUpstreamOwner } from "@/backend/integrations/payments/payment-owner-service";
 import { PAYMENT_MANUAL_REQUIRED_CODE } from "@/backend/payments/manual-review";
 import { randomToken, safeEqual, sha256 } from "@/backend/security/crypto";
 

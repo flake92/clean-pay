@@ -5,7 +5,7 @@ const sessionMock = vi.hoisted(() => ({
   refreshCurrentAccessCookie: vi.fn(),
 }));
 
-vi.mock("@/backend/sessions/web-session", () => sessionMock);
+vi.mock("@/backend/integrations/sessions/web-session-service", () => sessionMock);
 
 vi.mock("@/backend/integrations/remnashop/session-token-lifecycle", () => ({
   acquireRemnashopTokensForSession: vi.fn(async () => null),

@@ -1,6 +1,6 @@
 import { Card } from "primereact/card";
 
-import { loadCheckout } from "@/backend/application/payments/checkout";
+import { loadCheckout } from "@/application/payments/checkout";
 import { productionCheckoutReader } from "@/backend/integrations/payments/checkout-reader";
 import { AppShell } from "@/app/_components/app-shell";
 import { PageHeader } from "@/frontend/components/layout";

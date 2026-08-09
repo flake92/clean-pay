@@ -1,7 +1,7 @@
 import { loginWithEmail } from "@/backend/auth/email-login";
 import { registerWithEmail } from "@/backend/auth/email-register";
 import { confirmPasswordReset, requestPasswordReset } from "@/backend/auth/password-reset";
-import type { AuthCommands } from "@/backend/application/auth/ports/auth-commands";
+import type { AuthCommands } from "@/application/auth/ports/auth-commands";
 import { prismaPasskeyAccountReader } from "@/backend/integrations/auth/prisma-passkey-account-reader";
 import { remnashopIdentifyEmail } from "@/backend/integrations/remnashop/client";
 import { assertRateLimit } from "@/backend/limits/rate-limit";

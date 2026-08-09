@@ -1,4 +1,4 @@
-import type { CheckoutReader } from "@/backend/application/payments/ports/checkout";
+import type { CheckoutReader } from "@/application/payments/ports/checkout";
 import { getCurrentAuthProfile } from "@/backend/auth/profile";
 import { remnashopSubscriptionReader } from "@/backend/integrations/remnashop/subscription-reader";
 

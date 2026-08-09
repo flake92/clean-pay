@@ -15,8 +15,8 @@ import { auditLog } from "@/backend/observability/audit";
 import { authDebugLog } from "@/backend/observability/auth-debug-log";
 import { logger } from "@/backend/observability/logger";
 import { verifyTurnstileToken } from "@/backend/security/turnstile";
-import { refreshCurrentAccessCookie } from "@/backend/sessions/web-session";
-import { withPaymentOwnerChangeFence } from "@/backend/payments/user-merge";
+import { refreshCurrentAccessCookie } from "@/backend/integrations/sessions/web-session-service";
+import { withPaymentOwnerChangeFence } from "@/backend/integrations/payments/payment-user-merge-service";
 import type {
   ChangeEmailRequest,
   ChangeEmailResponse,
@@ -24,7 +24,7 @@ import type {
   ConfirmEmailVerificationResponse,
   RequestEmailVerificationRequest,
   RequestEmailVerificationResponse,
-} from "@/shared/remnashop/types";
+} from "@/backend/integrations/remnashop/contracts";
 import type { AuthPayload, TurnstileContext } from "@/backend/auth/payload";
 import { stripTurnstile } from "@/backend/auth/payload";
 

@@ -1,11 +1,11 @@
 import { WebSessionAuthMethod } from "@prisma/client";
 
-import type { TelegramWebAppAuthenticator } from "@/backend/application/auth/ports/telegram-webapp";
+import type { TelegramWebAppAuthenticator } from "@/application/auth/ports/telegram-webapp";
 import { getRemnashopMe, recoverRemnashopTelegramSession, remnashopAuth } from "@/backend/integrations/remnashop/client";
 import { reconcileUserFromRemnashopAuth } from "@/backend/integrations/remnashop/session";
 import { ServiceError } from "@/backend/errors/service-error";
 import { assertRateLimit } from "@/backend/limits/rate-limit";
-import { createWebSessionForRemnashopUser } from "@/backend/sessions/web-session";
+import { createWebSessionForRemnashopUser } from "@/backend/integrations/sessions/web-session-service";
 
 export const productionTelegramWebAppAuthenticator: TelegramWebAppAuthenticator = {
   async authenticate(initData) {

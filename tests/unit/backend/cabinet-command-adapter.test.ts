@@ -20,11 +20,11 @@ vi.mock("@/backend/observability/mutation-audit", () => ({
   auditedMutation: vi.fn(async ({ mutate }: { mutate: () => Promise<unknown> }) => mutate()),
 }));
 
-vi.mock("@/backend/sessions/web-session", () => ({
+vi.mock("@/backend/integrations/sessions/web-session-service", () => ({
   clearWebSession: vi.fn(),
 }));
 
-import { CabinetCommandError } from "@/backend/application/cabinet/ports/cabinet-commands";
+import { CabinetCommandError } from "@/application/cabinet/ports/cabinet-commands";
 import { ServiceError } from "@/backend/errors/service-error";
 import { productionCabinetCommands } from "@/backend/integrations/cabinet/cabinet-commands";
 

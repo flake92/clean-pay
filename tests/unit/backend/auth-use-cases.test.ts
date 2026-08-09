@@ -72,23 +72,23 @@ vi.mock("@/backend/database/prisma", () => ({
   prisma: mocks.prisma,
 }));
 
-vi.mock("@/backend/sessions/web-session", () => ({
+vi.mock("@/backend/integrations/sessions/web-session-service", () => ({
   getCurrentSession: mocks.getCurrentSession,
   refreshCurrentAccessCookie: mocks.refreshCurrentAccessCookie,
   replaceWebSessionAfterPasswordChange:
     mocks.replaceWebSessionAfterPasswordChange,
 }));
 
-vi.mock("@/backend/payments/user-merge", () => ({
+vi.mock("@/backend/integrations/payments/payment-user-merge-service", () => ({
   withPaymentOwnerChangeFence: mocks.withPaymentOwnerChangeFence,
 }));
 
 import { loginWithEmail } from "@/backend/auth/email-login";
 import { registerWithEmail } from "@/backend/auth/email-register";
-import { changeEmail, confirmEmailVerification, requestEmailVerification } from "@/backend/auth/email-verification";
+import { changeEmail, confirmEmailVerification, requestEmailVerification } from "@/backend/integrations/auth/email-verification-service";
 import { changePassword } from "@/backend/auth/password";
 import { getCurrentAuthProfile } from "@/backend/auth/profile";
-import { linkRemnashopAccount } from "@/backend/auth/remnashop-link";
+import { linkRemnashopAccount } from "@/backend/integrations/auth/remnashop-link-service";
 import { ServiceError } from "@/backend/errors/service-error";
 
 const authData = {

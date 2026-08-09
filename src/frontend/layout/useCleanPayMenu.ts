@@ -3,7 +3,7 @@
 import type { AppMenuItem } from "@/frontend/types";
 import { getBranding } from "@/shared/branding";
 import { logoutAction } from "@/app/actions/session";
-import type { NavigationViewModel } from "@/shared/presentation/navigation";
+import type { NavigationViewModel } from "@/application/models/navigation";
 
 export function useCleanPayMenu(navigation: NavigationViewModel) {
     const branding = getBranding();

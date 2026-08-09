@@ -13,7 +13,11 @@ export default defineConfig({
       provider: "v8",
       reporter: ["text", "json-summary", "html"],
       reportsDirectory: "coverage",
-      include: ["src/backend/**/*.ts"],
+      include: [
+        "src/application/**/*.ts",
+        "src/backend/**/*.ts",
+        "src/shared/domain/**/*.ts",
+      ],
       exclude: [
         "src/backend/database/prisma.ts",
         "src/backend/observability/logger.ts",
