@@ -92,7 +92,7 @@ function transactionDates(transaction: PaymentTransactionResponse) {
   return { upstreamCreatedAt, upstreamUpdatedAt };
 }
 
-export function toPaymentStatus(status: string): PaymentRecordStatus {
+function toPaymentStatus(status: string): PaymentRecordStatus {
   const normalized = status.toUpperCase();
 
   if (

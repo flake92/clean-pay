@@ -1,5 +1,4 @@
 import Image from "next/image";
-import React from "react";
 import { APP_VERSION } from "@/shared/app-version";
 import { getBranding } from "@/shared/branding";
 

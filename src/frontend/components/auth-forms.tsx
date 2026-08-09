@@ -317,10 +317,6 @@ export function LoginForm({
   );
 }
 
-export function RegisterForm() {
-  return <LoginForm redirectTo="/cabinet" />;
-}
-
 export function TelegramLoginButton({ redirectTo = "/cabinet" }: { redirectTo?: string }) {
   const [state, setState] = useState<ApiState>({ loading: false, error: null });
   const turnstile = useContext(AuthTurnstileContext);

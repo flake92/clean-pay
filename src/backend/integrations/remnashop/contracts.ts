@@ -126,9 +126,7 @@ export type PaymentTransactionResponse = {
 export type {
   CurrentSubscriptionResponse,
   DevicesResponse,
-  DurationGatewayPrice,
   PlanOffer,
-  SubscriptionDevice,
   SubscriptionOffersResponse,
 } from "@/shared/domain/subscriptions";
 
@@ -142,10 +140,6 @@ export type DevicesDeleteAllResponse = {
 
 export type ReissueResponse = {
   success: boolean;
-};
-
-export type PromocodeActivateRequest = {
-  code: string;
 };
 
 export type PromocodeActivateResponse = {

@@ -1,8 +1,8 @@
 import { safeRedirectPath } from "@/shared/auth/redirect-policy";
 
-export const ACCOUNT_SETUP_FLOW = "telegram-email";
+const ACCOUNT_SETUP_FLOW = "telegram-email";
 export const ACCOUNT_SETUP_REASON = "email-required";
-export const ACCOUNT_SETUP_NOTICE = "account-ready";
+const ACCOUNT_SETUP_NOTICE = "account-ready";
 export const ACCOUNT_SETUP_PASSWORD_STEP = "password";
 
 const fallbackOrigin = "https://clean-pay.local";

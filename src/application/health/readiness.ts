@@ -1,8 +1,8 @@
 import type { ReadinessGateway } from "@/application/health/ports/readiness-gateway";
 
-export const READINESS_DEADLINE_MS = 8_000;
-export const READINESS_STALE_AFTER_MS = 90_000;
-export const READINESS_CACHE_TTL_SECONDS = 120;
+const READINESS_DEADLINE_MS = 8_000;
+const READINESS_STALE_AFTER_MS = 90_000;
+const READINESS_CACHE_TTL_SECONDS = 120;
 const readinessCheckTimeoutMs = 5_000;
 
 export type CheckResult = {

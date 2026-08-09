@@ -526,7 +526,7 @@ export async function settlePaymentReconciliation(
   return "MANUAL_REQUIRED" as const;
 }
 
-export async function failPaymentReconciliation(
+async function failPaymentReconciliation(
   claim: PaymentReconciliationClaim,
   error: unknown,
 ) {
