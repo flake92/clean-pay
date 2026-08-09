@@ -127,6 +127,7 @@ describe("application authentication policy", () => {
     const order: string[] = [];
     const actor = { ...emailActor, telegramId: "777", telegramUsername: "clean_user", pendingEmail: "user@example.com", pendingUpstreamAccountId: "email-account" };
     const commands = emailCommands({
+      confirmProviderCode: vi.fn(async () => { order.push("confirm-code"); return { email: "user@example.com" }; }),
       loadActor: vi.fn(async () => actor),
       persistConfirmedEmail: vi.fn(async () => { order.push("persist-proof"); return { existingOwnerId: "old-owner", upstreamAccountId: "email-account", localVerificationChanged: true }; }),
       refreshLocalSession: vi.fn(async () => { order.push("refresh-local"); }),
@@ -144,7 +145,7 @@ describe("application authentication policy", () => {
 
     await expect(confirmEmailVerificationCode(commands, { code: "123456" }))
       .resolves.toEqual({ ok: true, kind: "confirmed", readiness: { status: "ready" } });
-    expect(order.slice(0, 4)).toEqual(["persist-proof", "refresh-local", "audit-proof", "fence"]);
+    expect(order.slice(0, 5)).toEqual(["confirm-code", "persist-proof", "refresh-local", "audit-proof", "fence"]);
     expect(order).toContain("merge");
     expect(order.at(-2)).toBe("link");
     expect(commands.mergeProviderAccounts).toHaveBeenCalledWith(expect.objectContaining({ sourceAccountId: "email-account", targetAccountId: "telegram-account" }));
