@@ -15,6 +15,7 @@ const prodDir = path.dirname(fileURLToPath(import.meta.url));
 const rootDir = path.resolve(prodDir, "../..");
 const envFile = path.join(prodDir, ".env");
 const validateEnvScript = path.join(prodDir, "validate-env.mjs");
+const remnashopRolloutScript = path.join(prodDir, "prepare-remnashop-rollout.sh");
 const composeFiles = [
   path.join(prodDir, "docker-compose.yml"),
 ];
@@ -113,6 +114,24 @@ function runDocker(args, options = {}) {
   }
 
   return result.status ?? 1;
+}
+
+function prepareRemnashopPaymentRollout() {
+  const result = spawnSync("sh", [remnashopRolloutScript, envFile], {
+    cwd: rootDir,
+    env: productionChildEnvironment(),
+    stdio: "inherit",
+    shell: false,
+  });
+
+  if (result.error) {
+    console.error(result.error.message);
+    process.exit(1);
+  }
+
+  if (result.status !== 0) {
+    process.exit(result.status ?? 1);
+  }
 }
 
 function sleepSync(milliseconds) {
@@ -375,6 +394,7 @@ switch (command) {
       process.exit(1);
     }
     await verify();
+    prepareRemnashopPaymentRollout();
     break;
   case "down":
     run("docker", composeArgs("down"));
