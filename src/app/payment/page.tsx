@@ -7,12 +7,14 @@ import { AppShell } from "@/app/_components/app-shell";
 import { PageHeader } from "@/frontend/components/layout";
 import { PaymentConfirmation } from "@/frontend/components/payment-confirmation";
 import { hasAccountSetupNotice } from "@/shared/auth/account-setup-flow";
+import { redirect } from "next/navigation";
 
 function first(value: string | string[] | undefined) { return Array.isArray(value) ? value[0] : value; }
 
 export default async function PaymentPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   const params = await searchParams;
   const model = await loadCheckout(productionCheckoutReader, productionAuthProfileGateway);
+  if (model.status === "account-action-required" && model.action === "login") redirect("/login");
   const planCode = first(params.plan) ?? null;
   const durationDays = first(params.duration) ?? null;
   const gatewayType = first(params.gateway) ?? null;
@@ -22,7 +24,7 @@ export default async function PaymentPage({ searchParams }: { searchParams: Prom
   if (gatewayType) paymentParams.set("gateway", gatewayType);
   const paymentRedirectTo = `/payment${paymentParams.size ? `?${paymentParams}` : ""}`;
   return (
-    <AppShell>
+    <AppShell requireAuth>
       <div className="flex flex-column gap-6">
         <PageHeader
           description="Проверьте выбранный тариф перед переходом к платёжной странице."

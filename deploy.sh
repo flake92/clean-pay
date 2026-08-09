@@ -94,15 +94,48 @@ ensure_network() {
   docker network inspect "$network" >/dev/null 2>&1 || docker network create "$network" >/dev/null
 }
 
+available_disk_kb() {
+  df -Pk "$ROOT_DIR" | awk 'NR == 2 { print $4 }'
+}
+
+ensure_build_disk_space() {
+  min_mb=${CLEAN_PAY_MIN_FREE_DISK_MB:-$(env_value CLEAN_PAY_MIN_FREE_DISK_MB 8192)}
+  case "$min_mb" in
+    ''|*[!0-9]*) die "CLEAN_PAY_MIN_FREE_DISK_MB must be a positive integer." ;;
+  esac
+  [ "$min_mb" -gt 0 ] || die "CLEAN_PAY_MIN_FREE_DISK_MB must be greater than zero."
+  min_kb=$((min_mb * 1024))
+  available_kb=$(available_disk_kb)
+  [ -n "$available_kb" ] || die "Could not determine available disk space."
+
+  if [ "$available_kb" -lt "$min_kb" ]; then
+    printf 'Only %s MB is free. Removing unused Docker build cache and dangling images...\n' "$((available_kb / 1024))"
+    docker builder prune -af >/dev/null
+    docker image prune -f >/dev/null
+    available_kb=$(available_disk_kb)
+  fi
+
+  [ "$available_kb" -ge "$min_kb" ] || die "Only $((available_kb / 1024)) MB is free after safe Docker cleanup; at least ${min_mb} MB is required before a build."
+}
+
+cleanup_build_artifacts() {
+  # Keep fresh layers for quick retries, but never accumulate old build cache
+  # and dangling application images until PostgreSQL runs out of disk space.
+  docker builder prune -af --filter until=24h >/dev/null || true
+  docker image prune -f >/dev/null || true
+}
+
 up() {
   require_env
   ensure_network
+  ensure_build_disk_space
   printf 'Building and starting Clean Pay. The first build can take several minutes...\n'
   if ! compose up -d --build --wait --wait-timeout 180; then
     printf '\nStartup failed. Recent logs:\n' >&2
     compose logs --tail=200 >&2 || true
     exit 1
   fi
+  cleanup_build_artifacts
   sh "$REMNASHOP_ROLLOUT_SCRIPT" "$ENV_FILE"
   printf '\nClean Pay is healthy. Following logs (Ctrl+C only closes the log view):\n\n'
   compose logs --tail=100 -f

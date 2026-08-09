@@ -33,7 +33,7 @@ import {
   type CabinetCommands,
 } from "@/application/cabinet/ports/cabinet-commands";
 import type { CabinetReader } from "@/application/cabinet/ports/cabinet-reader";
-import { loadNavigation, loadNavigationShell } from "@/application/navigation/load-navigation";
+import { loadNavigationShell } from "@/application/navigation/load-navigation";
 import { loadPaymentStatus } from "@/application/payments/load-payment-status";
 import type { PaymentHistoryGateway } from "@/application/payments/ports/payment-history";
 import type { PaymentMaintenanceRunner } from "@/application/payments/ports/payment-maintenance";
@@ -314,7 +314,7 @@ describe("application facades", () => {
     });
     expect(history.loadRecent).toHaveBeenCalledWith("user-1", 20);
 
-    await expect(loadCabinetViewModel(reader, authGateway({ loadCurrentSession: vi.fn(async () => null) }), history, maintenance)).resolves.toEqual({ status: "error", message: "Нужно войти в аккаунт." });
+    await expect(loadCabinetViewModel(reader, authGateway({ loadCurrentSession: vi.fn(async () => null) }), history, maintenance)).resolves.toEqual({ status: "unauthorized" });
   });
 
   it("uses safe fallbacks for navigation and payment status", async () => {
@@ -327,16 +327,6 @@ describe("application facades", () => {
     });
     expect(shellGateway.authorizeCurrentSession).not.toHaveBeenCalled();
     expect(shellGateway.loadProviderProfile).not.toHaveBeenCalled();
-
-    await expect(loadNavigation({ loadOffers: async () => ({ ...offers, has_current_subscription: true, plans: [{ recommended_purchase_type: "renew" }] as never }) }, authGateway())).resolves.toMatchObject({
-      authenticated: true, hasSubscription: true, canRenewSubscription: true,
-    });
-    await expect(loadNavigation({ loadOffers: async () => { throw new Error(); } }, authGateway({ loadCurrentSession: vi.fn(async () => null) }))).resolves.toEqual({
-      authenticated: false,
-      emailVerificationRequired: false,
-      hasSubscription: false,
-      canRenewSubscription: false,
-    });
 
     const paymentStatus = { payment: null, operation: null, subscription: null };
     const statusReader = {
@@ -413,6 +403,7 @@ describe("application facades", () => {
   it("loads profile data through its reader port", async () => {
     const user = { authType: "email", email: "u@example.com", emailVerified: true, pendingEmail: null, telegramId: null };
     await expect(loadProfileViewModel(authGateway())).resolves.toEqual({ status: "ready", user });
+    await expect(loadProfileViewModel(authGateway({ loadCurrentSession: vi.fn(async () => null) }))).resolves.toEqual({ status: "unauthorized" });
     await expect(loadProfileViewModel(authGateway({ loadCurrentSession: vi.fn(async () => { throw new Error(); }) }))).resolves.toMatchObject({ status: "error" });
   });
 });

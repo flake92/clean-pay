@@ -10,6 +10,7 @@ import {
   ACCOUNT_SETUP_REASON,
   safeAccountSetupDestination,
 } from "@/shared/auth/account-setup-flow";
+import { redirect } from "next/navigation";
 
 export const dynamic = "force-dynamic";
 
@@ -38,9 +39,10 @@ export default async function LinkAccountPage({
     firstSearchParam(params.redirect_to),
   );
   const model = await loadLinkAccount(productionLinkAccountReader, productionAuthProfileGateway, productionPasskeyManagementGateway, firstSearchParam(params.auth) ?? null);
+  if (model.status === "unauthorized") redirect("/login");
 
   return (
-    <AppShell>
+    <AppShell requireAuth>
       <div className="flex flex-column gap-4">
         <PageHeader
           description={

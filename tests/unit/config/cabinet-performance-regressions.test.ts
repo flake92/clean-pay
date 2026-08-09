@@ -18,6 +18,31 @@ describe("cabinet performance regressions", () => {
     expect(shell).not.toContain("loadNavigation(");
   });
 
+  it("never refreshes provider authorization in a background navigation action", () => {
+    const layout = source("src/frontend/layout/layout.tsx");
+
+    expect(layout).not.toContain("loadNavigationAction");
+    expect(layout).not.toContain("setNavigation");
+    expect(() => source("src/app/actions/navigation.ts")).toThrow();
+  });
+
+  it("redirects protected shells and unauthorized page models to login", () => {
+    const shell = source("src/app/_components/app-shell.tsx");
+    expect(shell).toContain('if (requireAuth && !navigation.authenticated) redirect("/login")');
+
+    for (const file of [
+      "src/app/cabinet/page.tsx",
+      "src/app/profile/page.tsx",
+      "src/app/link-account/page.tsx",
+      "src/app/verify-email/page.tsx",
+      "src/app/extend/page.tsx",
+      "src/app/payment/page.tsx",
+      "src/app/payment/payment-status-page.tsx",
+    ]) {
+      expect(source(file), file).toContain("<AppShell requireAuth>");
+    }
+  });
+
   it("coalesces provider authorization only within the current request", () => {
     const composition = source("src/app/_composition/request-scoped-readers.ts");
     const backendFiles = [

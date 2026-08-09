@@ -18,7 +18,6 @@ vi.mock("@/backend/integrations/remnawave/client", () => ({
 
 import { ServiceError } from "@/backend/errors/service-error";
 import { productionCabinetReader } from "@/backend/integrations/cabinet/cabinet-reader";
-import { productionNavigationReader } from "@/backend/integrations/navigation/navigation-reader";
 import { productionCheckoutReader } from "@/backend/integrations/payments/checkout-reader";
 import { remnashopSubscriptionCatalog } from "@/backend/integrations/remnashop/subscription-catalog";
 import { remnashopSubscriptionReader } from "@/backend/integrations/remnashop/subscription-reader";
@@ -102,14 +101,6 @@ describe("production read adapters", () => {
     await expect(productionCabinetReader.loadOffers()).resolves.toBe(offers);
     await expect(productionCabinetReader.loadDevices()).resolves.toEqual({ devices: [] });
     await expect(productionCabinetReader.loadSupport()).resolves.toMatchObject({ enabled: true });
-  });
-
-  it("loads navigation offers without owning navigation policy", async () => {
-    mocks.remnashopRequest.mockResolvedValueOnce(offers);
-    await expect(productionNavigationReader.loadOffers()).resolves.toBe(offers);
-
-    mocks.remnashopRequest.mockRejectedValueOnce(new Error("offline"));
-    await expect(productionNavigationReader.loadOffers()).rejects.toThrow("offline");
   });
 
   it("loads checkout offers without owning account policy", async () => {
