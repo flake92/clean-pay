@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 
 const runner = readFileSync("scripts/e2e-devcontainer.mjs", "utf8");
 const compose = readFileSync(".devcontainer/docker-compose.yml", "utf8");
+const ciWorkflow = readFileSync(".github/workflows/ci.yml", "utf8");
 const remnashopRevision = "1262f98cd3904ea0e4ddbe4628ceecf56c5f598b";
 
 const hostPortContract = [
@@ -69,5 +70,13 @@ describe("devcontainer e2e runner readiness", () => {
     expect(compose).toContain(`https://github.com/flake92/remnashop.git#${remnashopRevision}`);
     expect(compose).toContain(`BUILD_COMMIT: ${remnashopRevision}`);
     expect(compose).not.toContain("b9da68a651e9ab0b7ed52d030e13754311614759");
+  });
+
+  it("keeps actionable E2E diagnostics and current GitHub action runtimes in CI", () => {
+    expect(ciWorkflow).toContain('CLEAN_PAY_E2E_DIAGNOSTICS: "1"');
+    expect(ciWorkflow).not.toContain('CLEAN_PAY_E2E_DIAGNOSTICS: "0"');
+    expect(ciWorkflow).not.toMatch(/actions\/(?:checkout|setup-node)@v4/);
+    expect(ciWorkflow).toContain("actions/checkout@v5");
+    expect(ciWorkflow).toContain("actions/setup-node@v5");
   });
 });

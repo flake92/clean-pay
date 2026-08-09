@@ -40,9 +40,9 @@ jobs:
       TURNSTILE_ENABLED: "false"
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: 24.18.0
           cache: npm
@@ -59,8 +59,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: 24.18.0
       - run: corepack enable
@@ -107,8 +107,8 @@ jobs:
       TURNSTILE_ENABLED: "false"
 
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: 24.18.0
           cache: npm
@@ -121,8 +121,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: 24.18.0
           cache: npm
@@ -130,7 +130,7 @@ jobs:
       - run: npm run test:e2e
         env:
           KEEP_E2E_STACK: "1"
-          CLEAN_PAY_E2E_DIAGNOSTICS: "0"
+          CLEAN_PAY_E2E_DIAGNOSTICS: "1"
       - name: Collect Docker diagnostics
         if: failure()
         run: docker compose -p clean-pay-dev -f .devcontainer/docker-compose.yml logs --tail=200
