@@ -189,7 +189,7 @@ export function LoginForm({
         if (result.emailVerified || !result.verificationRequired) {
           redirectAfterAuth(redirectTo);
         } else {
-          window.location.assign("/register/verify-email");
+          redirectAfterAuth("/register/verify-email");
         }
         return;
       }

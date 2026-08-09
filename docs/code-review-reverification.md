@@ -49,12 +49,15 @@
 npm ci
 npm run lint
 npm run typecheck
-npm run test:unit
-npm run test:route-handlers
+npm run test:coverage
+npm run test:services
+npm run test:e2e
 npm run build
 ```
 
-PostgreSQL concurrency и full-stack E2E выполняются только в изолированном тестовом окружении. Результаты конкретного rollout хранятся во внешнем закрытом операционном журнале и не добавляются в репозиторий.
+PostgreSQL concurrency и full-stack E2E выполняются в одноразовом изолированном окружении.
+CI сохраняет результат каждого запуска, собирает Docker-диагностику при ошибке и всегда
+удаляет тестовые контейнеры и volumes после завершения.
 
 ## Ограничения документа
 
