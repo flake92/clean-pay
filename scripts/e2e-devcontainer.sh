@@ -368,6 +368,18 @@ cleanup() {
 
   if [[ -n "$next_pid" ]]; then
     kill -- "-$next_pid" >/dev/null 2>&1 || true
+
+    for _ in $(seq 1 10); do
+      if ! kill -0 "$next_pid" >/dev/null 2>&1; then
+        break
+      fi
+      sleep 1
+    done
+
+    if kill -0 "$next_pid" >/dev/null 2>&1; then
+      kill -KILL -- "-$next_pid" >/dev/null 2>&1 || true
+    fi
+
     wait "$next_pid" >/dev/null 2>&1 || true
   fi
 
@@ -437,7 +449,8 @@ bash "$root_dir/scripts/wait-for-http.sh" "$mailpit_url/api/v1/messages" 60 "Wai
 bash "$root_dir/scripts/wait-for-http.sh" "$oidc_url/.well-known/jwks.json" 60 "Wait for Telegram OIDC JWKS" "GET"
 
 log_step "Running full-stack e2e tests"
-CLEAN_PAY_E2E_BASE_URL="$base_url" \
-CLEAN_PAY_E2E_MAILPIT_URL="$mailpit_url" \
-CLEAN_PAY_E2E_OIDC_URL="$oidc_url" \
-npx vitest run --config "$root_dir/vitest.e2e.config.mts" --configLoader native
+timeout --signal=TERM --kill-after=10s 360s \
+  env CLEAN_PAY_E2E_BASE_URL="$base_url" \
+  CLEAN_PAY_E2E_MAILPIT_URL="$mailpit_url" \
+  CLEAN_PAY_E2E_OIDC_URL="$oidc_url" \
+  npx vitest run --config "$root_dir/vitest.e2e.config.mts" --configLoader native
