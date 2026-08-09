@@ -59,7 +59,7 @@ function configuredLevel(): LogLevel {
   return "info";
 }
 
-export function shouldLog(level: LogLevel) {
+function shouldLog(level: LogLevel) {
   return levelWeight[level] >= levelWeight[configuredLevel()];
 }
 
@@ -201,7 +201,7 @@ export const logEventBus = {
 
 logEventBus.subscribe(writeConsoleLog);
 
-export function logEvent(level: LogLevel, event: string, metadata: Record<string, unknown> = {}, options: {
+function logEvent(level: LogLevel, event: string, metadata: Record<string, unknown> = {}, options: {
   category?: string;
   source?: string;
   message?: string;

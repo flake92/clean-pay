@@ -1,4 +1,4 @@
-export type AuditSeverity = "INFO" | "WARN" | "ERROR";
+type AuditSeverity = "INFO" | "WARN" | "ERROR";
 export interface AuditEvent {
   action: string;
   userId: string | null;

@@ -26,7 +26,7 @@ const PAYMENT_STATES = [
 const PURCHASE_TYPES = ["NEW", "RENEW", "CHANGE"] as const;
 
 export type RemnashopPaymentOperation = "PURCHASE" | "EXTEND";
-export type RemnashopPaymentRecoveryState = (typeof PAYMENT_STATES)[number];
+type RemnashopPaymentRecoveryState = (typeof PAYMENT_STATES)[number];
 
 export type RemnashopPaymentCapabilities = {
   contract_version: 1;
@@ -452,7 +452,7 @@ export function parseTransactionPage(
   };
 }
 
-export function parseLegacyTransactions(
+function parseLegacyTransactions(
   value: unknown,
 ): PaymentTransactionResponse[] {
   const path = "/subscription/transactions";

@@ -74,7 +74,7 @@ describe("production readiness startup gate", () => {
     );
     expect(readinessPrismaClient).toContain("max: 1");
     expect(readinessPrismaClient).toContain(
-      "export const readinessDatabaseTimeoutMs = 4_000",
+      "const readinessDatabaseTimeoutMs = 4_000",
     );
     expect(prismaClient).not.toContain("query_timeout");
   });

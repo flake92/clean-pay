@@ -5,9 +5,9 @@ import { ServiceError } from '@/backend/errors/service-error';
 
 type RedisValue = string | number | null;
 
-export const REDIS_CONNECT_TIMEOUT_MS = 2_000;
-export const REDIS_COMMAND_DEADLINE_MS = 3_000;
-export const REDIS_MAX_RESPONSE_BYTES = 1024 * 1024;
+const REDIS_CONNECT_TIMEOUT_MS = 2_000;
+const REDIS_COMMAND_DEADLINE_MS = 3_000;
+const REDIS_MAX_RESPONSE_BYTES = 1024 * 1024;
 
 class RedisAdapterError extends Error {
   constructor(message: string, options?: ErrorOptions) {
