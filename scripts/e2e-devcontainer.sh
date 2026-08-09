@@ -459,4 +459,4 @@ timeout --signal=TERM --kill-after=10s 360s \
   env CLEAN_PAY_E2E_BASE_URL="$base_url" \
   CLEAN_PAY_E2E_MAILPIT_URL="$mailpit_url" \
   CLEAN_PAY_E2E_OIDC_URL="$oidc_url" \
-  npx vitest run --config "$root_dir/vitest.e2e.config.mts" --configLoader native
+  npx vitest run --config "$root_dir/config/vitest/vitest.e2e.config.mts" --configLoader native

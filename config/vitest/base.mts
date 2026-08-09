@@ -1,11 +1,13 @@
-import { defineConfig } from "vitest/config";
 import path from "node:path";
+import { defineConfig } from "vitest/config";
+
+const projectRoot = path.resolve(import.meta.dirname, "../..");
 
 export default defineConfig({
   test: {
     environment: "node",
     globals: true,
-    setupFiles: ["./tests/setup/env.ts"],
+    setupFiles: [path.join(projectRoot, "tests/setup/env.ts")],
     include: ["tests/unit/**/*.test.ts", "tests/integration/route-handlers/**/*.test.ts"],
     pool: "forks",
     testTimeout: 15_000,
@@ -55,7 +57,7 @@ export default defineConfig({
   },
   resolve: {
     alias: {
-      "@": path.resolve(import.meta.dirname, "src"),
+      "@": path.join(projectRoot, "src"),
     },
   },
 });

@@ -225,34 +225,20 @@ Passkey options обязательно содержат `allowCredentials` вы�
 
 Перед обновлением Remnashop сделайте резервную копию его базы данных и убедитесь, что HTTP-сервис, worker и scheduler используют одну версию образа. Readiness Clean Pay выполняет безопасную проверку generic e-mail auth и закрытого `/auth/service-session` без отправки письма: старый образ, отсутствующий маршрут или неверный service key переводят стенд в `degraded`, поэтому `./deploy.sh up` не завершится успешно.
 
-### Отключение payment rollout gate
+### Автоматическое отключение payment rollout gate
 
-Миграция 0049 в Remnashop создаёт таблицу `payment_runtime_control` с флагом `legacy_rollout_gate_active`. Этот gate блокирует объединение учётных записей (merge) как защиту при развёртывании платёжной системы. После развёртывания Remnashop gate должен быть отключён, иначе привязка Telegram к существующему e-mail аккаунту будет завершаться ошибкой.
+Миграция 0049 в Remnashop создаёт таблицу `payment_runtime_control` с флагом `legacy_rollout_gate_active`. Этот gate блокирует объединение учётных записей (merge) как защиту при развёртывании платёжной системы.
 
-Отключение выполняется **один раз** после развёртывания или обновления Remnashop:
+`./deploy.sh up` автоматически отключает gate после успешного запуска Clean Pay. `CLEAN_PAY_MODE=remnashop sh start.sh` делает то же самое после readiness-проверки. Перед изменением скрипт проверяет, что:
 
-```bash
-# 1. Проверить что все контейнеры Remnashop используют один образ
-docker inspect remnashop --format '{{.Image}}'
-docker inspect remnashop-taskiq-worker --format '{{.Image}}'
-docker inspect remnashop-taskiq-scheduler --format '{{.Image}}'
+- API, worker и scheduler Remnashop запущены на одном Docker image;
+- применена Alembic revision не ниже `0050` и rollout-таблицы существуют;
+- в `payment_operations` нет записей;
+- нет выполняющихся fulfillment-транзакций.
 
-# 2. Проверить revision миграции
-docker exec remnashop-db psql -U remnashop -d remnashop \
-  -c "SELECT version_num FROM alembic_version;"
-# Ожидается: 0050
+Операция идемпотентна и защищена транзакционной блокировкой. Если хотя бы одна проверка не пройдена, deploy завершается ошибкой, gate остаётся включённым, а объединение аккаунтов не разрешается. Имена контейнеров и минимальная revision настраиваются переменными `REMNASHOP_*_CONTAINER` и `REMNASHOP_MINIMUM_ALEMBIC_REVISION` из env-файла.
 
-# 3. Проверить отсутствие активных платёжных операций
-docker exec remnashop-db psql -U remnashop -d remnashop \
-  -c "SELECT count(*) FROM payment_operations;"
-# Ожидается: 0
-
-# 4. Отключить gate
-docker exec remnashop-db psql -U remnashop -d remnashop \
-  -c "UPDATE payment_runtime_control SET legacy_rollout_gate_active = false WHERE id = 1;"
-```
-
-Если хотя бы одна проверка не пройдена, отключать gate нельзя — сначала завершите развёртывание. Штатная процедура с автоматическими проверками находится в `scripts/e2e-devcontainer.sh` (функция `prepare_remnashop_payment_rollout_gate`).
+Изолированный e2e-стенд выполняет эквивалентную проверку в `scripts/e2e-devcontainer.sh`.
 
 ## Reverse proxy
 

@@ -5,6 +5,7 @@ ROOT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 ENV_FILE="$ROOT_DIR/deploy/prod/.env"
 ENV_EXAMPLE="$ROOT_DIR/deploy/prod/.env.example"
 COMPOSE_PATH="$ROOT_DIR/deploy/prod/docker-compose.yml"
+REMNASHOP_ROLLOUT_SCRIPT="$ROOT_DIR/deploy/prod/prepare-remnashop-rollout.sh"
 
 die() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
 
@@ -102,6 +103,7 @@ up() {
     compose logs --tail=200 >&2 || true
     exit 1
   fi
+  sh "$REMNASHOP_ROLLOUT_SCRIPT" "$ENV_FILE"
   printf '\nClean Pay is healthy. Following logs (Ctrl+C only closes the log view):\n\n'
   compose logs --tail=100 -f
 }
