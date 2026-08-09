@@ -64,7 +64,7 @@ function providerSession(auth: {
 }
 
 export const productionEmailVerificationCommands: EmailVerificationCommands = {
-  verifyHuman: (token) => adapt(() => verifyTurnstileToken(token, "email_verification")),
+  verifyHuman: (token, action) => adapt(() => verifyTurnstileToken(token, action)),
 
   async loadActor(options) {
     const authorized = await adapt(() => getAuthorizedRemnashopTokens(
