@@ -1,7 +1,7 @@
+import { runPaymentMaintenance } from "@/backend/application/payments/run-payment-maintenance";
 import { getEnv } from "@/backend/config/env";
 import { ServiceError } from "@/backend/errors/service-error";
-import { continuePaymentHistoryBackfills } from "@/backend/integrations/payments/payment-history-sync-service";
-import { reconcileUnknownPayments } from "@/backend/integrations/payments/payment-reconciliation-service";
+import { productionPaymentMaintenanceRunner } from "@/backend/integrations/payments/payment-maintenance-runner";
 import { safeEqual, sha256 } from "@/backend/security/crypto";
 import { logTechnicalError } from "@/backend/observability/audit";
 import { NextResponse } from "next/server";
@@ -28,16 +28,12 @@ export async function POST(request: Request) {
     }
 
     assertInternalSecret(request, config.secret);
-    const result = await reconcileUnknownPayments({
-      limit: config.batchSize,
-      deadlineMs: 12_000,
-    });
-    const history = await continuePaymentHistoryBackfills({
-      limit: 1,
+    const result = await runPaymentMaintenance(productionPaymentMaintenanceRunner, {
+      paymentLimit: config.batchSize,
       deadlineMs: 12_000,
     });
 
-    return NextResponse.json({ ...result, history }, {
+    return NextResponse.json(result, {
       headers: { "cache-control": "no-store" },
     });
   } catch (error) {
