@@ -2,7 +2,7 @@ import { AppShell } from "@/app/_components/app-shell";
 import { PageHeader } from "@/frontend/components/layout";
 import { VerifyEmailPanel } from "@/frontend/components/verify-email-panel";
 import { safeReadiness } from "@/application/auth/execute-email-verification";
-import { productionEmailVerificationCommands } from "@/backend/integrations/auth/email-verification";
+import { productionAuthProfileGateway } from "@/backend/integrations/auth/auth-profile-gateway";
 import {
   resolveEmailVerificationSetup,
 } from "@/shared/auth/account-setup-flow";
@@ -28,7 +28,7 @@ export default async function VerifyEmailPage({
     firstSearchParam(params.flow),
     firstSearchParam(params.redirect_to),
   );
-  const initialReadiness = await safeReadiness(productionEmailVerificationCommands);
+  const initialReadiness = await safeReadiness(productionAuthProfileGateway);
 
   return (
     <AppShell>

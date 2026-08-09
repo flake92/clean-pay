@@ -1,7 +1,7 @@
 import { Card } from "primereact/card";
 
 import { loadProfileViewModel } from "@/application/profile/load-profile";
-import { productionProfileReader } from "@/backend/integrations/profile/profile-adapter";
+import { productionAuthProfileGateway } from "@/backend/integrations/auth/auth-profile-gateway";
 import { AppShell } from "@/app/_components/app-shell";
 import { PageHeader } from "@/frontend/components/layout";
 import { ProfilePanel } from "@/frontend/components/profile-panel";
@@ -11,7 +11,7 @@ export const dynamic = "force-dynamic";
 
 export default async function ProfilePage() {
   const branding = getBranding();
-  const model = await loadProfileViewModel(productionProfileReader);
+  const model = await loadProfileViewModel(productionAuthProfileGateway);
   const turnstileEnabled = process.env.TURNSTILE_ENABLED === "true";
   const turnstileSiteKey = process.env.TURNSTILE_SITE_KEY;
 

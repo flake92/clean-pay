@@ -5,7 +5,7 @@ import {
 } from "@/application/auth/ports/auth-commands";
 import { ServiceError } from "@/backend/errors/service-error";
 import { prismaPasskeyAccountReader } from "@/backend/integrations/auth/prisma-passkey-account-reader";
-import { requestRemnashopEmailVerification } from "@/backend/integrations/auth/email-verification-service";
+import { requestRemnashopEmailVerification } from "@/backend/integrations/auth/email-verification-delivery";
 import {
   remnashopAuth,
   remnashopIdentifyEmail,

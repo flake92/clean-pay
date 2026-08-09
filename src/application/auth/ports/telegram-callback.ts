@@ -15,6 +15,25 @@ export type ConsumedTelegramCallback = {
   mergeConfirmation: { required: boolean; token: string } | null;
 };
 
+export type VerifiedTelegramCallback = {
+  authState: { id: string; targetUserId: string | null; redirectTo: string | null };
+  identity: {
+    telegramId: string;
+    telegramUsername: string | null;
+    fullName: string | null;
+    photoUrl: string | null;
+    providerSession: TelegramProviderSession | null;
+  };
+};
+
+export type TelegramLocalUser = {
+  id: string;
+  upstreamAccountId: string | null;
+  email: string | null;
+  emailVerified: boolean;
+  telegramId: string | null;
+};
+
 export type TelegramCallbackSession = {
   userId: string;
   remnashopSession?: {
@@ -34,13 +53,30 @@ export type TelegramCallbackOutcome = {
 };
 
 export class TelegramCallbackError extends Error {
-  constructor(public readonly code: "ACCOUNT_MERGE_REQUIRED" | "ACCOUNT_MERGE_SUBSCRIPTIONS_CONFLICT") {
+  constructor(public readonly code: string) {
     super(code);
   }
 }
 
 export interface TelegramCallbackGateway {
-  consume(input: TelegramCallbackInput): Promise<ConsumedTelegramCallback>;
+  consume(input: TelegramCallbackInput): Promise<VerifiedTelegramCallback>;
+  assertIdentityRateLimit(input: { linked: boolean; telegramId: string }): Promise<void>;
+  findUserByTelegramId(telegramId: string): Promise<TelegramLocalUser | null>;
+  findUserById(userId: string): Promise<TelegramLocalUser | null>;
+  loadProviderMergeIdentity(session: TelegramProviderSession): Promise<{ accountId: string; email: string | null; emailVerified: boolean; pendingEmail: string | null; telegramId: string | null }>;
+  preflightAccountMerge(input: { sourceAccountId: string; targetAccountId: string }): Promise<{
+    conflicts: string[]; dryRun: boolean; sourceAccountId: string; targetAccountId: string;
+    target: { accountId: string; email: string | null; emailVerified: boolean; telegramId: string | null };
+    requiresRelogin: boolean;
+  }>;
+  persistAccountMergeConfirmation(input: {
+    userId: string; telegramId: string; telegramUsername: string | null; sourceEmail: string | null;
+    targetEmail: string; sourceAccountId: string; targetAccountId: string;
+  }): Promise<{ token: string }>;
+  applyTelegramIdentity(input: { targetUserId: string | null; existingTelegramUserId: string | null; telegramId: string; telegramUsername: string | null; fullName: string | null; photoUrl: string | null }): Promise<TelegramLocalUser>;
+  markAuthStateUser(authStateId: string, userId: string): Promise<void>;
+  auditIdentityResolved(input: { linked: boolean; userId: string }): Promise<void>;
+  clearTemporaryAuth(): Promise<void>;
   providerAccountId(session: TelegramProviderSession): string;
   attachTelegramToCurrentAccount(input: {
     telegramId: string;

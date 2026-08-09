@@ -45,7 +45,7 @@ const payment = {
 
 function gateway(overrides: Partial<PaymentWorkflowGateway> = {}): PaymentWorkflowGateway {
   return {
-    loadActor: vi.fn(async () => ({ userId: "user-1", email: "u@example.com", telegramId: null })),
+    loadActor: vi.fn(async () => ({ userId: "user-1", email: "u@example.com", emailVerified: true, telegramId: null })),
     rateLimit: vi.fn(async () => undefined),
     beginOperation: vi.fn()
       .mockResolvedValueOnce({ state: "missing" })

@@ -5,17 +5,16 @@ import {
   TelegramCallbackError,
   type TelegramCallbackOutcome,
 } from "@/application/auth/ports/telegram-callback";
-import { recoverTelegramSession } from "@/application/auth/recover-telegram-session";
 import { getEnv } from "@/backend/config/env";
 import { ServiceError } from "@/backend/errors/service-error";
 import {
   productionTelegramCallbackGateway,
 } from "@/backend/integrations/auth/telegram-callback-gateway";
-import { productionTelegramSessionRecovery } from "@/backend/integrations/auth/telegram-session-recovery";
+import { recoverRemnashopTelegramSession } from "@/backend/integrations/remnashop/client";
 import {
   telegramAccountMergeCookieMaxAgeSeconds,
   telegramAccountMergeCookieName,
-} from "@/backend/integrations/auth/telegram-account-merge-service";
+} from "@/backend/integrations/auth/telegram-account-merge-store";
 import {
   createWebSessionOnResponse,
   getCurrentSession,
@@ -67,11 +66,7 @@ async function applyCallbackOutcome(
   );
 
   if (outcome.session.requiresTelegramRecovery) {
-    await recoverTelegramSession(
-      productionTelegramSessionRecovery,
-      session.id,
-      outcome.session.userId,
-    );
+    await recoverRemnashopTelegramSession(session.id, outcome.session.userId);
   }
 }
 

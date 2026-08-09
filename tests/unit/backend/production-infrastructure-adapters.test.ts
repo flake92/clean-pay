@@ -11,7 +11,7 @@ const mocks = vi.hoisted(() => ({
   getExactTransaction: vi.fn(),
   getLegacyTransactions: vi.fn(),
   getPaymentCapabilities: vi.fn(),
-  syncOnePaymentHistoryPage: vi.fn(),
+  claimHistory: vi.fn(), loadHistoryPage: vi.fn(), completeHistoryPage: vi.fn(), failHistory: vi.fn(),
   assertPaymentUpstreamIdentity: vi.fn(),
   serializePaymentRecord: vi.fn(),
   syncExactPaymentRecordFromRemnashop: vi.fn(),
@@ -38,9 +38,6 @@ vi.mock("@/backend/integrations/remnashop/payment-recovery", () => ({
   getLegacyTransactions: mocks.getLegacyTransactions,
   getPaymentCapabilities: mocks.getPaymentCapabilities,
 }));
-vi.mock("@/backend/integrations/payments/payment-history-sync-service", () => ({
-  syncOnePaymentHistoryPage: mocks.syncOnePaymentHistoryPage,
-}));
 vi.mock("@/backend/integrations/payments/payment-owner-service", () => ({
   assertPaymentUpstreamIdentity: mocks.assertPaymentUpstreamIdentity,
 }));
@@ -59,15 +56,31 @@ vi.mock("@/backend/integrations/sessions/web-session-service", () => ({
 }));
 
 import { prismaPasskeyAccountReader } from "@/backend/integrations/auth/prisma-passkey-account-reader";
-import { productionTelegramSessionRecovery } from "@/backend/integrations/auth/telegram-session-recovery";
 import { productionTelegramWebAppGateway } from "@/backend/integrations/auth/telegram-webapp-gateway";
-import { loadPaymentHistory } from "@/backend/integrations/payments/payment-history-reader";
+import { loadPaymentHistory } from "@/application/payments/load-payment-history";
+import { productionPaymentHistoryGateway } from "@/backend/integrations/payments/payment-history-reader";
+import type { PaymentMaintenanceRunner } from "@/application/payments/ports/payment-maintenance";
 import { prismaPaymentQueryRepository } from "@/backend/integrations/payments/prisma-payment-query-repository";
+
+function maintenance(): PaymentMaintenanceRunner {
+  return {
+    claimReconciliation: vi.fn(async () => null), recoverPayment: vi.fn(async () => null),
+    completeRecoveredPayment: vi.fn(async () => undefined), resetMissingPayment: vi.fn(async () => undefined),
+    releaseReconciliation: vi.fn(async () => undefined), markReconciliationManual: vi.fn(async () => undefined),
+    failReconciliation: vi.fn(async () => "released" as const), classifyReconciliationError: vi.fn(() => ({ kind: "other" as const })),
+    listHistoryCandidates: vi.fn(async () => []), claimHistory: mocks.claimHistory, authorizeHistory: vi.fn(async () => ({ context: {} })),
+    historyPageSize: vi.fn(async () => 100), loadHistoryPage: mocks.loadHistoryPage,
+    completeHistoryPage: mocks.completeHistoryPage, failHistory: mocks.failHistory, now: vi.fn(() => Date.now()),
+  };
+}
 
 describe("production persistence and Telegram adapters", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.serializePaymentRecord.mockImplementation((record) => ({ id: record.id }));
+    mocks.claimHistory.mockResolvedValue({ context: {}, cursor: null });
+    mocks.loadHistoryPage.mockResolvedValue({ context: {} });
+    mocks.completeHistoryPage.mockResolvedValue({ applied: 0, hasMore: false });
   });
 
   it("checks passkey existence with a bounded projection", async () => {
@@ -116,16 +129,17 @@ describe("production persistence and Telegram adapters", () => {
       .mockResolvedValueOnce({ payment_id: "payment-1" })
       .mockRejectedValueOnce(new Error("one lookup failed"));
 
-    await expect(loadPaymentHistory("user-1")).resolves.toEqual({ records: [{ id: "record-1" }], stale: true });
+    const runner = maintenance();
+    await expect(loadPaymentHistory(productionPaymentHistoryGateway, runner, "user-1")).resolves.toEqual({ records: [{ id: "record-1" }], stale: true });
     expect(mocks.syncExactPaymentRecordFromRemnashop).toHaveBeenCalledOnce();
-    expect(mocks.syncOnePaymentHistoryPage).toHaveBeenCalledWith(expect.objectContaining({ pageSize: 100 }));
+    expect(mocks.loadHistoryPage).toHaveBeenCalledWith(expect.anything(), null, 100);
     expect(mocks.loggerWarn).toHaveBeenCalledWith("payment_history_exact_sync_failed", expect.anything(), expect.anything());
   });
 
   it("serves owner-bound cached history when the provider is unavailable", async () => {
     mocks.getAuthorizedRemnashopTokens.mockRejectedValue(new Error("offline"));
     mocks.prisma.paymentRecord.findMany.mockResolvedValueOnce([{ id: "cached-record" }]);
-    await expect(loadPaymentHistory("user-1")).resolves.toEqual({
+    await expect(loadPaymentHistory(productionPaymentHistoryGateway, maintenance(), "user-1")).resolves.toEqual({
       records: [{ id: "cached-record" }],
       stale: true,
     });
@@ -138,17 +152,12 @@ describe("production persistence and Telegram adapters", () => {
     mocks.getPaymentCapabilities.mockResolvedValue(null);
     mocks.getLegacyTransactions.mockResolvedValue([{ payment_id: "payment-1" }]);
     mocks.prisma.paymentRecord.findMany.mockResolvedValueOnce([]);
-    await loadPaymentHistory("user-1");
+    await loadPaymentHistory(productionPaymentHistoryGateway, maintenance(), "user-1");
     expect(mocks.syncPaymentRecordsFromRemnashopTransactions).toHaveBeenCalledWith({
       userId: "user-1",
       upstreamAccountId: "upstream-user-1",
       transactions: [{ payment_id: "payment-1" }],
     });
-  });
-
-  it("delegates explicit Telegram session recovery", async () => {
-    await productionTelegramSessionRecovery.recover("session-1", "user-1");
-    expect(mocks.recoverRemnashopTelegramSession).toHaveBeenCalledWith("session-1", "user-1");
   });
 
   it("implements granular Telegram WebApp provider and persistence operations", async () => {
