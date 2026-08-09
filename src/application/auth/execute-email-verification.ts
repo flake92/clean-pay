@@ -12,6 +12,7 @@ import { resolveAuthProfile } from "@/application/auth/resolve-auth-profile";
 function failure(error: unknown, fallback: string): EmailVerificationResult {
   const code = error instanceof EmailVerificationError ? error.code : "INTERNAL_ERROR";
   const messages: Record<string, string> = {
+    FORBIDDEN: "Проверка безопасности не пройдена. Выполните её ещё раз и повторите попытку.",
     EMAIL_REQUIRED: "Сначала добавьте e-mail и пароль к аккаунту.",
     EMAIL_CODE_INVALID: "Код не подошёл. Проверьте его и попробуйте снова.",
     EMAIL_CODE_EXPIRED: "Код истёк. Запросите новый.",
@@ -37,7 +38,7 @@ export async function requestEmailVerificationCode(
   input: { email?: string; turnstileToken?: string },
 ): Promise<EmailVerificationResult> {
   try {
-    await commands.verifyHuman(input.turnstileToken ?? null);
+    await commands.verifyHuman(input.turnstileToken ?? null, "email_verification");
     const actor = await commands.loadActor({ allowUnverifiedEmail: true });
     assertPasswordBackedEmail(actor, input.email);
     await commands.assertRequestLimits({
@@ -124,7 +125,7 @@ export async function confirmEmailVerificationCode(
     return { ok: false, code: "VALIDATION_ERROR", message: "Введите код из 6 цифр." };
   }
   try {
-    await commands.verifyHuman(input.turnstileToken ?? null);
+    await commands.verifyHuman(input.turnstileToken ?? null, "email_verification");
     const actor = await commands.loadActor({ allowUnverifiedEmail: true });
     const profile = await commands.loadProviderProfile(actor);
     const targetEmail = input.email ?? profile.pendingEmail ?? profile.email ?? actor.email ?? undefined;
@@ -183,7 +184,7 @@ export async function changeVerifiedEmail(
   const email = input.email.trim().toLowerCase();
   if (!email) return { ok: false, code: "VALIDATION_ERROR", message: "Укажите e-mail." };
   try {
-    await commands.verifyHuman(input.turnstileToken ?? null);
+    await commands.verifyHuman(input.turnstileToken ?? null, "email_change");
     const actor = await commands.loadActor({ allowUnverifiedEmail: false });
     assertPasswordBackedEmail(actor);
     await commands.assertChangeLimits({ userId: actor.userId, email, telegramId: actor.telegramId });

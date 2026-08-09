@@ -17,9 +17,10 @@ export type EmailVerificationActor = {
 };
 
 export type EmailProviderSession = { context: unknown };
+export type EmailVerificationHumanAction = "email_verification" | "email_change";
 
 export interface EmailVerificationCommands {
-  verifyHuman(token: string | null): Promise<void>;
+  verifyHuman(token: string | null, action: EmailVerificationHumanAction): Promise<void>;
   loadActor(options?: { allowUnverifiedEmail: boolean }): Promise<EmailVerificationActor>;
   assertRequestLimits(input: { userId: string; email: string | null; telegramId: string | null }): Promise<void>;
   requestProviderCode(actor: EmailVerificationActor, email?: string): Promise<{ targetEmail: string }>;

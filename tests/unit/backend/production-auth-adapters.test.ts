@@ -243,7 +243,8 @@ describe("production auth and profile adapters", () => {
     mocks.remnashopRequest.mockResolvedValue({ email: "u@example.com" });
 
     const actor = await productionEmailVerificationCommands.loadActor();
-    await productionEmailVerificationCommands.verifyHuman("token");
+    await productionEmailVerificationCommands.verifyHuman("token", "email_change");
+    expect(mocks.verifyTurnstileToken).toHaveBeenCalledWith("token", "email_change");
     await productionEmailVerificationCommands.assertRequestLimits({
       userId: actor.userId, email: actor.email, telegramId: actor.telegramId,
     });
@@ -259,7 +260,7 @@ describe("production auth and profile adapters", () => {
 
   it("translates e-mail verification adapter failures", async () => {
     mocks.verifyTurnstileToken.mockRejectedValueOnce(new ServiceError("RATE_LIMITED", 429));
-    await expect(productionEmailVerificationCommands.verifyHuman("token"))
+    await expect(productionEmailVerificationCommands.verifyHuman("token", "email_verification"))
       .rejects.toMatchObject({ code: "RATE_LIMITED" });
 
     mocks.getAuthorizedRemnashopTokens.mockResolvedValueOnce({

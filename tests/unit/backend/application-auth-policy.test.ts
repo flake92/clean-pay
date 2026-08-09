@@ -109,6 +109,7 @@ describe("application authentication policy", () => {
 
     await expect(requestEmailVerificationCode(commands, { turnstileToken: "human" }))
       .resolves.toEqual({ ok: true, kind: "code-sent", targetEmail: "user@example.com" });
+    expect(commands.verifyHuman).toHaveBeenCalledWith("human", "email_verification");
     expect(order).toEqual(["human", "actor", "limit", "provider", "audit"]);
   });
 
@@ -175,7 +176,24 @@ describe("application authentication policy", () => {
 
     await expect(changeVerifiedEmail(commands, { email: " New@Example.com " }))
       .resolves.toEqual({ ok: true, kind: "code-sent", targetEmail: "new@example.com" });
+    expect(commands.verifyHuman).toHaveBeenCalledWith(null, "email_change");
     expect(order).toEqual(["human", "limit", "provider-change", "persist", "refresh", "code", "audit"]);
+  });
+
+  it("returns an actionable security-check error without calling the provider", async () => {
+    const commands = emailCommands({
+      verifyHuman: vi.fn(async () => { throw new EmailVerificationError("FORBIDDEN"); }),
+    });
+
+    await expect(changeVerifiedEmail(commands, {
+      email: "new@example.com",
+      turnstileToken: "wrong-action-token",
+    })).resolves.toEqual({
+      ok: false,
+      code: "FORBIDDEN",
+      message: "Проверка безопасности не пройдена. Выполните её ещё раз и повторите попытку.",
+    });
+    expect(commands.changeProviderEmail).not.toHaveBeenCalled();
   });
 
   it("falls back from login to registration but does not mutate ownership before verification", async () => {
