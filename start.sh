@@ -4,6 +4,7 @@ set -eu
 ROOT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 ENV_FILE="$ROOT_DIR/.env"
 COMPOSE_FILE="$ROOT_DIR/docker-compose.yml"
+REMNASHOP_ROLLOUT_SCRIPT="$ROOT_DIR/deploy/prod/prepare-remnashop-rollout.sh"
 MODE="${CLEAN_PAY_MODE:-standalone}"
 COMMAND="${1:-start}"
 
@@ -230,6 +231,9 @@ start() {
   info "building and starting containers"
   compose up -d --build
   verify
+  if [ "$MODE" = "remnashop" ]; then
+    sh "$REMNASHOP_ROLLOUT_SCRIPT" "$ENV_FILE"
+  fi
   info "started. Use 'sh start.sh logs' to follow app logs"
 }
 

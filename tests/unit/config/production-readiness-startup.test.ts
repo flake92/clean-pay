@@ -47,7 +47,9 @@ describe("production readiness startup gate", () => {
     expect(prodCommand).toMatch(
       /case "up":[\s\S]*runDocker\(composeArgs\("up", "-d", "--build"\)\)[\s\S]*await verify\(\)/,
     );
-    expect(rootStart).toMatch(/compose up -d --build\s+verify\s+info "started/);
+    expect(rootStart).toMatch(
+      /compose up -d --build\s+verify[\s\S]*sh "\$REMNASHOP_ROLLOUT_SCRIPT" "\$ENV_FILE"[\s\S]*info "started/,
+    );
   });
 
   it("marks the app healthy only for a fully healthy readiness response", () => {

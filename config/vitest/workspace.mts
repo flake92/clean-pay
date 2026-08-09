@@ -1,7 +1,8 @@
-import { defineConfig } from "vitest/config";
 import path from "node:path";
+import { defineConfig } from "vitest/config";
 
-const srcPath = path.resolve(import.meta.dirname, "src");
+const projectRoot = path.resolve(import.meta.dirname, "../..");
+const srcPath = path.join(projectRoot, "src");
 
 export default defineConfig({
   test: {
@@ -11,7 +12,7 @@ export default defineConfig({
           name: "unit",
           environment: "node",
           globals: true,
-          setupFiles: ["./tests/setup/env.ts"],
+          setupFiles: [path.join(projectRoot, "tests/setup/env.ts")],
           include: ["tests/unit/**/*.test.ts"],
           pool: "forks",
         },
@@ -21,8 +22,8 @@ export default defineConfig({
           },
         },
       },
-      "./vitest.integration.config.mts",
-      "./vitest.e2e.config.mts",
+      path.join(import.meta.dirname, "vitest.integration.config.mts"),
+      path.join(import.meta.dirname, "vitest.e2e.config.mts"),
     ],
   },
   resolve: {
