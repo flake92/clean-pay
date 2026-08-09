@@ -79,4 +79,14 @@ describe("devcontainer e2e runner readiness", () => {
     expect(ciWorkflow).toContain("actions/checkout@v5");
     expect(ciWorkflow).toContain("actions/setup-node@v5");
   });
+
+  it("pre-creates the Next.js build directory for the unprivileged container user", () => {
+    expect(compose).toMatch(
+      /sudo mkdir -p[^\n]*node_modules[^\n]*\/home\/node\/\.npm\s+\/workspace\/clean-pay\/\.next/,
+    );
+    expect(compose).toMatch(
+      /sudo chown -R node:node[^\n]*node_modules[^\n]*\/home\/node\/\.npm\s+\/workspace\/clean-pay\/\.next/,
+    );
+    expect(compose).not.toContain("if [ -d /workspace/clean-pay/.next ]");
+  });
 });

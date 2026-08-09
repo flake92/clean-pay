@@ -130,8 +130,9 @@ services:
       dockerfile: .devcontainer/Dockerfile
     command: >
       sh -c "sudo mkdir -p /workspace/clean-pay/node_modules /home/node/.npm
+      /workspace/clean-pay/.next
       && sudo chown -R node:node /workspace/clean-pay/node_modules /home/node/.npm
-      && if [ -d /workspace/clean-pay/.next ]; then sudo chown -R node:node /workspace/clean-pay/.next; fi
+      /workspace/clean-pay/.next
       && if [ -S /var/run/docker.sock ]; then
         docker_gid=$$(stat -c '%g' /var/run/docker.sock);
         if [ "$$docker_gid" = "0" ]; then
