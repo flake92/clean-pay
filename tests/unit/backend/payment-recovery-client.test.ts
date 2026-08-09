@@ -2,14 +2,12 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   remnashopRequest: vi.fn(),
-  remnashopAdminRequest: vi.fn(),
   remnashopRequestResult: vi.fn(),
   remnashopAdminRequestResult: vi.fn(),
 }));
 
 vi.mock("@/backend/integrations/remnashop/client", () => ({
   remnashopRequest: mocks.remnashopRequest,
-  remnashopAdminRequest: mocks.remnashopAdminRequest,
   remnashopRequestResult: mocks.remnashopRequestResult,
   remnashopAdminRequestResult: mocks.remnashopAdminRequestResult,
 }));

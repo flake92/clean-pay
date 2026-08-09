@@ -6,6 +6,7 @@ import { productionAuthProfileGateway } from "@/backend/integrations/auth/auth-p
 import { AppShell } from "@/app/_components/app-shell";
 import { PageHeader } from "@/frontend/components/layout";
 import { PaymentConfirmation } from "@/frontend/components/payment-confirmation";
+import { hasAccountSetupNotice } from "@/shared/auth/account-setup-flow";
 
 function first(value: string | string[] | undefined) { return Array.isArray(value) ? value[0] : value; }
 
@@ -34,7 +35,9 @@ export default async function PaymentPage({ searchParams }: { searchParams: Prom
             model={model}
             paymentRedirectTo={paymentRedirectTo}
             planCode={planCode}
-            showAccountSetupNotice={first(params.account_setup) !== undefined}
+            showAccountSetupNotice={hasAccountSetupNotice({
+              get: (name) => name === "account_setup" ? first(params.account_setup) ?? null : null,
+            })}
           />
         </Card>
       </div>
