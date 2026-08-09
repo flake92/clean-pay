@@ -1,13 +1,15 @@
 import { NextResponse } from "next/server";
 
+import {
+  prepareTelegramAuthStart,
+  TelegramAuthStartFailure,
+} from "@/backend/application/auth/prepare-telegram-auth-start";
 import { getEnv } from "@/backend/config/env";
+import { productionTelegramAuthStartSecurity } from "@/backend/integrations/auth/telegram-auth-start-security";
 import {
   createTelegramAuthorizationResponse,
   createTelegramPopupStartResponse,
 } from "@/backend/integrations/telegram/oidc";
-import { assertRateLimit } from "@/backend/limits/rate-limit";
-import { getCurrentUser } from "@/backend/integrations/sessions/web-session-service";
-import { verifyTurnstileToken } from "@/backend/security/turnstile";
 import { safeRedirectPath } from "@/backend/auth/redirect-policy";
 import { logTechnicalError } from "@/backend/observability/audit";
 
@@ -43,34 +45,23 @@ function telegramFailedRedirect(
 export async function GET(request: Request) {
   const url = new URL(request.url);
   const redirectTo = safeRedirectPath(url.searchParams.get("redirect_to"));
-  let currentUser: Awaited<ReturnType<typeof getCurrentUser>> = null;
+  let authenticated = false;
 
   try {
-    currentUser = await getCurrentUser();
-
-    await verifyTurnstileToken(
-      url.searchParams.get("turnstile_token") ?? url.searchParams.get("cf-turnstile-response"),
-      currentUser ? "telegram_auth_start" : "auth_login",
-    );
-
-    if (currentUser) {
-      await assertRateLimit({
-        action: "telegram_link_start",
-        email: currentUser.email,
-        tgId: currentUser.telegramId,
-        limit: 10,
-        windowSeconds: 15 * 60,
-      });
-    }
+    const prepared = await prepareTelegramAuthStart(productionTelegramAuthStartSecurity, {
+      turnstileToken: url.searchParams.get("turnstile_token") ?? url.searchParams.get("cf-turnstile-response"),
+    });
+    authenticated = prepared.authenticated;
 
     if (url.searchParams.get("mode") === "popup") {
-      return await createTelegramPopupStartResponse(redirectTo, currentUser?.id);
+      return await createTelegramPopupStartResponse(redirectTo, prepared.userId);
     }
 
-    return await createTelegramAuthorizationResponse(redirectTo, currentUser?.id);
+    return await createTelegramAuthorizationResponse(redirectTo, prepared.userId);
   } catch (error) {
-    logTechnicalError("telegram_oidc_start_failed", error, { redirectTo });
+    const failure = error instanceof TelegramAuthStartFailure ? error : null;
+    logTechnicalError("telegram_oidc_start_failed", failure?.cause ?? error, { redirectTo });
 
-    return telegramFailedRedirect(redirectTo, Boolean(currentUser));
+    return telegramFailedRedirect(redirectTo, failure?.authenticated ?? authenticated);
   }
 }
