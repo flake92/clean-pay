@@ -57,3 +57,19 @@ export async function activateCabinetPromocode(commands: CabinetCommands, code: 
     return { status: "error", message: errorMessage(error, "Не удалось активировать промокод.") };
   }
 }
+
+export function endCabinetSession(commands: CabinetCommands) {
+  return commands.logout();
+}
+
+export async function clearCabinetSession(commands: CabinetCommands) {
+  try {
+    await endCabinetSession(commands);
+    return { status: "success" as const };
+  } catch {
+    return {
+      status: "error" as const,
+      message: "Не удалось завершить сессию.",
+    };
+  }
+}

@@ -2,18 +2,17 @@
 
 import { redirect } from "next/navigation";
 
+import {
+  clearCabinetSession,
+  endCabinetSession,
+} from "@/backend/application/cabinet/execute-command";
 import { productionCabinetCommands } from "@/backend/integrations/cabinet/cabinet-commands";
 
 export async function clearSessionAction() {
-  try {
-    await productionCabinetCommands.logout();
-    return { status: "success" as const };
-  } catch {
-    return { status: "error" as const, message: "Не удалось завершить сессию." };
-  }
+  return clearCabinetSession(productionCabinetCommands);
 }
 
 export async function logoutAction() {
-  await productionCabinetCommands.logout();
+  await endCabinetSession(productionCabinetCommands);
   redirect("/login");
 }

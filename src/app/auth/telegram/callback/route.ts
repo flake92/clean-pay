@@ -2,16 +2,17 @@ import { NextResponse } from "next/server";
 
 import { completeTelegramCallback } from "@/backend/application/auth/complete-telegram-callback";
 import type { TelegramCallbackOutcome } from "@/backend/application/auth/ports/telegram-callback";
+import { recoverTelegramSession } from "@/backend/application/auth/recover-telegram-session";
 import { getEnv } from "@/backend/config/env";
 import { ServiceError } from "@/backend/errors/service-error";
 import {
   productionTelegramCallbackProcessor,
 } from "@/backend/integrations/auth/telegram-callback-processor";
+import { productionTelegramSessionRecovery } from "@/backend/integrations/auth/telegram-session-recovery";
 import {
   telegramAccountMergeCookieMaxAgeSeconds,
   telegramAccountMergeCookieName,
 } from "@/backend/integrations/auth/telegram-account-merge-service";
-import { recoverRemnashopTelegramSession } from "@/backend/integrations/remnashop/client";
 import {
   createWebSessionOnResponse,
   getCurrentSession,
@@ -63,7 +64,11 @@ async function applyCallbackOutcome(
   );
 
   if (outcome.session.requiresTelegramRecovery) {
-    await recoverRemnashopTelegramSession(session.id, outcome.session.userId);
+    await recoverTelegramSession(
+      productionTelegramSessionRecovery,
+      session.id,
+      outcome.session.userId,
+    );
   }
 }
 
