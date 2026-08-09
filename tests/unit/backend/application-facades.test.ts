@@ -16,8 +16,10 @@ import type { LinkAccountCommands, LinkAccountReader } from "@/backend/applicati
 import type { PasskeyCommands } from "@/backend/application/auth/ports/passkey-commands";
 import {
   activateCabinetPromocode,
+  clearCabinetSession,
   deleteAllCabinetDevices,
   deleteCabinetDevice,
+  endCabinetSession,
   reissueCabinetSubscription,
 } from "@/backend/application/cabinet/execute-command";
 import { loadCabinetViewModel } from "@/backend/application/cabinet/load-cabinet";
@@ -130,6 +132,20 @@ describe("application facades", () => {
 
     vi.mocked(commands.deleteAllDevices).mockRejectedValueOnce(new Error("provider detail"));
     await expect(deleteAllCabinetDevices(commands)).resolves.toEqual({ status: "error", message: "Не удалось удалить устройства." });
+  });
+
+  it("keeps session termination behind the cabinet command port", async () => {
+    const commands = cabinetCommands();
+
+    await expect(endCabinetSession(commands)).resolves.toBeUndefined();
+    await expect(clearCabinetSession(commands)).resolves.toEqual({ status: "success" });
+    expect(commands.logout).toHaveBeenCalledTimes(2);
+
+    vi.mocked(commands.logout).mockRejectedValueOnce(new Error("provider detail"));
+    await expect(clearCabinetSession(commands)).resolves.toEqual({
+      status: "error",
+      message: "Не удалось завершить сессию.",
+    });
   });
 
   it("uses the explicit public error contract for cabinet commands", async () => {

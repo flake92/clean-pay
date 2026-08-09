@@ -59,6 +59,7 @@ describe("clean architecture boundaries", () => {
       "@/backend/auth/passkeys",
       "@/backend/auth/remnashop-link",
       "@/backend/auth/telegram-account-merge",
+      "@/backend/auth/redirect-policy",
       "@/backend/payments/history-sync",
       "@/backend/payments/idempotency",
       "@/backend/payments/reconciliation",
@@ -83,6 +84,16 @@ describe("clean architecture boundaries", () => {
     expect(controller).not.toContain("remnashopLinkTelegram(");
     expect(controller).not.toContain("withPaymentOwnerChangeFence(");
     expect(controller).not.toContain("reconcileUserFromRemnashopAuth(");
+    expect(controller).toContain("recoverTelegramSession(");
+    expect(controller).not.toContain("recoverRemnashopTelegramSession(");
+  });
+
+  it("keeps session business operations out of server actions", () => {
+    const action = readFileSync("src/app/actions/session.ts", "utf8");
+
+    expect(action).toContain("clearCabinetSession(");
+    expect(action).toContain("endCabinetSession(");
+    expect(action).not.toContain("productionCabinetCommands.logout(");
   });
 
   it("keeps payment maintenance orchestration out of the HTTP controller", () => {
