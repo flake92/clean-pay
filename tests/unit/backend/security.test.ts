@@ -10,6 +10,7 @@ import {
   safeEqual,
   sha256,
 } from "@/backend/security/crypto";
+import { validateRequestSource } from "@/backend/security/csrf";
 
 describe("security crypto helpers", () => {
   it("hashes, signs and compares values", () => {
@@ -41,5 +42,37 @@ describe("security crypto helpers", () => {
 
     expect(token).toMatch(/^[A-Za-z0-9_-]+$/);
     expect(token.length).toBeGreaterThan(20);
+  });
+});
+
+describe("request source policy", () => {
+  it("accepts an exact trusted Origin", () => {
+    expect(validateRequestSource({
+      headers: new Headers({ origin: "https://app.example.com" }),
+      trustedAppUrl: "https://app.example.com/path",
+    })).toEqual({ ok: true });
+  });
+
+  it("uses Referer only when Origin is absent", () => {
+    expect(validateRequestSource({
+      headers: new Headers({ referer: "https://app.example.com/form" }),
+      trustedAppUrl: "https://app.example.com",
+    })).toEqual({ ok: true });
+    expect(validateRequestSource({
+      headers: new Headers({ origin: "null", referer: "https://app.example.com/form" }),
+      trustedAppUrl: "https://app.example.com",
+    })).toMatchObject({ ok: false, reason: "untrusted_origin" });
+  });
+
+  it.each([
+    ["https://evil.example", "https://app.example.com"],
+    ["https://app.example.com", undefined],
+    ["https://user:password@app.example.com", "https://app.example.com"],
+    ["not-a-url", "https://app.example.com"],
+  ])("rejects an invalid or untrusted source %#", (origin, trustedAppUrl) => {
+    expect(validateRequestSource({
+      headers: new Headers({ origin }),
+      trustedAppUrl,
+    })).toEqual({ ok: false, reason: "untrusted_origin", status: 403 });
   });
 });

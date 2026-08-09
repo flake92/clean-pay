@@ -8,8 +8,8 @@ export default defineConfig({
     globals: true,
     include: ["tests/e2e/full-stack/**/*.test.ts"],
     pool: "forks",
-    testTimeout: 60_000,
-    hookTimeout: 120_000,
+    testTimeout: 90_000,
+    hookTimeout: 180_000,
   },
   resolve: {
     alias: {

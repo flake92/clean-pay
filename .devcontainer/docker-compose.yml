@@ -207,11 +207,11 @@ services:
 
   remnashop:
     build:
-      context: ${REMNASHOP_BUILD_CONTEXT:-https://github.com/flake92/remnashop.git#b9da68a651e9ab0b7ed52d030e13754311614759}
+      context: ${REMNASHOP_BUILD_CONTEXT:-https://github.com/flake92/remnashop.git#1262f98cd3904ea0e4ddbe4628ceecf56c5f598b}
       dockerfile: Dockerfile
       args:
-        BUILD_BRANCH: codex/clean-pay-integration-upstream-dev
-        BUILD_COMMIT: b9da68a651e9ab0b7ed52d030e13754311614759
+        BUILD_BRANCH: update-nodejs
+        BUILD_COMMIT: 1262f98cd3904ea0e4ddbe4628ceecf56c5f598b
     image: ${CLEAN_PAY_DEVCONTAINER_REMNASHOP_IMAGE:-${COMPOSE_PROJECT_NAME:-clean-pay-dev}-remnashop:latest}
     restart: unless-stopped
     environment:

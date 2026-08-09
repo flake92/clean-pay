@@ -17,6 +17,7 @@ import {
 } from "@/app/actions/profile";
 import { LinkButton } from "@/frontend/components/prime/link-button";
 import { TurnstileWidget, type TurnstileHandle, hasTurnstileSiteKey } from "@/frontend/components/turnstile-widget";
+import { navigateTo } from "@/frontend/lib/browser-navigation";
 import type { ProfileViewModel } from "@/application/models/profile";
 
 function authTypeLabel(value: string) {
@@ -133,7 +134,7 @@ export function ProfilePanel({
           return;
         }
         showMessage(`E-mail уже указан. ${result.message}`, "success");
-        window.location.assign("/verify-email");
+        navigateTo("/verify-email");
         return;
       }
 
@@ -146,7 +147,7 @@ export function ProfilePanel({
         return;
       }
       showMessage(result.message, "success");
-      window.location.assign("/verify-email");
+      navigateTo("/verify-email");
     } catch (err) {
       showMessage(err instanceof Error ? err.message : "Не удалось изменить e-mail.", "warn");
     } finally {

@@ -212,13 +212,13 @@ Passkey options обязательно содержат `allowCredentials` вы�
 
 ### Совместимая версия Remnashop
 
-Для backend-identify, generic e-mail auth, автоматического восстановления подтверждённой service-сессии, отдельной auth-границы, полного платёжного recovery contract и безопасного объединения e-mail/Telegram-аккаунтов используйте ветку `flake92/remnashop:update-nodejs`, проверенную revision `27a6d80`. Она включает изменения из [`snoups/remnashop#135`](https://github.com/snoups/remnashop/pull/135) и последующие исправления auth-контракта.
+Для backend-identify, generic e-mail auth, автоматического восстановления подтверждённой service-сессии, отдельной auth-границы, полного платёжного recovery contract и безопасного объединения e-mail/Telegram-аккаунтов используйте ветку `flake92/remnashop:update-nodejs`, проверенную revision `1262f98`. Она включает изменения из [`snoups/remnashop#135`](https://github.com/snoups/remnashop/pull/135) и последующие исправления auth-контракта.
 
 Пока эти изменения не вошли в официальный release Remnashop:
 
 - не включайте `PAYMENT_RECONCILIATION_ENABLED`, если установленная версия не предоставляет требуемый capability/recovery contract;
 - не используйте `b9da68a`: в нём отсутствуют `/auth/email/start`, `/auth/email/complete` и проверка `APP_AUTH_SERVICE_KEY`;
-- для контролируемого окружения закрепляйте образ на проверенной revision `ab0b9e1`, а не на движущемся теге;
+- для контролируемого окружения закрепляйте образ на проверенной revision `1262f98`, а не на движущемся теге;
 - перед production-обновлением проверьте актуальный статус PR и закрепите конкретную версию Docker image.
 
 На момент последней проверки PR #135 открыт, направлен в ветку `dev` и не является draft.
@@ -342,8 +342,10 @@ docker compose --env-file deploy/prod/.env -f deploy/prod/docker-compose.yml exe
 npm ci
 npm run lint
 npm run typecheck
-npm run test:unit
+npm run test:coverage
 npm run build
 ```
 
-Интеграционные и E2E-проверки требуют окружения из devcontainer. Полезные технические документы находятся в каталоге [`docs`](docs).
+PostgreSQL-интеграция и full-stack E2E запускаются в изолированном окружении командами
+`npm run test:services` и `npm run test:e2e`. Тот же полный контур является обязательной
+частью CI. Полезные технические документы находятся в каталоге [`docs`](docs).

@@ -1,4 +1,4 @@
-FROM node:24-bookworm-slim AS dependencies
+FROM node:24.18.0-bookworm-slim AS dependencies
 
 WORKDIR /app
 
@@ -50,7 +50,7 @@ COPY . .
 RUN npm run prisma:generate
 RUN npm run build
 
-FROM node:24-bookworm-slim AS migration
+FROM node:24.18.0-bookworm-slim AS migration
 
 WORKDIR /app
 
@@ -75,7 +75,7 @@ USER cleanpay
 
 CMD ["sh", "-c", "node deploy/prod/validate-env.mjs && node node_modules/prisma/build/index.js migrate deploy"]
 
-FROM node:24-bookworm-slim AS runner
+FROM node:24.18.0-bookworm-slim AS runner
 
 WORKDIR /app
 

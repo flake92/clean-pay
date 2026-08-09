@@ -106,6 +106,20 @@ wait_for_started_next() {
   return 1
 }
 
+warm_next_routes() {
+  local route
+
+  # Turbopack compiles routes lazily in development. Warm the public pages so
+  # cold CI workers test HTTP behavior rather than contend with first-compile
+  # latency inside an individual Vitest timeout.
+  for route in /login /register /tariffs /support; do
+    curl --fail --silent --show-error \
+      --max-time 90 \
+      --output /dev/null \
+      "$base_url$route"
+  done
+}
+
 container_image_id() {
   local service="$1"
   local container_id
@@ -418,6 +432,7 @@ setsid npm run dev -- --hostname 0.0.0.0 --port 4000 >"$next_log" 2>&1 &
 next_pid="$!"
 
 wait_for_started_next
+warm_next_routes
 bash "$root_dir/scripts/wait-for-http.sh" "$mailpit_url/api/v1/messages" 60 "Wait for Mailpit API" "GET"
 bash "$root_dir/scripts/wait-for-http.sh" "$oidc_url/.well-known/jwks.json" 60 "Wait for Telegram OIDC JWKS" "GET"
 

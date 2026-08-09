@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { logEventBus, logger, sanitizeLogValue } from "@/backend/observability/logger";
+import { authDebugLog } from "@/backend/observability/auth-debug-log";
 
 describe("identity log redaction", () => {
   it("removes raw PII and internal identity values while preserving booleans", () => {
@@ -49,6 +50,19 @@ describe("identity log redaction", () => {
 });
 
 describe("log levels", () => {
+  it("tags authentication debug events with the auth category", () => {
+    const events: Array<{ category?: string; event: string }> = [];
+    const unsubscribe = logEventBus.subscribe((event) => events.push({
+      category: event.category,
+      event: event.event,
+    }));
+
+    authDebugLog("auth_debug_test", { safe: true });
+    unsubscribe();
+
+    expect(events).toContainEqual({ category: "auth", event: "auth_debug_test" });
+  });
+
   it("publishes debug, info, warn and error events for subscribers", () => {
     const levels: string[] = [];
     const unsubscribe = logEventBus.subscribe((event) => levels.push(event.level));

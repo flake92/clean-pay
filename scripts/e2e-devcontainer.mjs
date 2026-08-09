@@ -78,17 +78,7 @@ if (
     path.join(workspaceParent, "remnashop"),
   ];
   const discovered = candidates.find(isRemnashopSource);
-
-  if (discovered) {
-    process.env.REMNASHOP_HOST_SOURCE = discovered;
-  } else {
-    console.error(
-      "A compatible local Remnashop source is required for E2E. " +
-      "Set REMNASHOP_HOST_SOURCE to a directory containing Dockerfile, " +
-      "docker-migrate.sh, and src.",
-    );
-    process.exit(1);
-  }
+  if (discovered) process.env.REMNASHOP_HOST_SOURCE = discovered;
 }
 
 if (

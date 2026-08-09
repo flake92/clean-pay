@@ -1,4 +1,5 @@
 import { globSync, readFileSync } from "node:fs";
+import path from "node:path";
 
 import { describe, expect, it } from "vitest";
 
@@ -11,7 +12,33 @@ function importedModules(source: string) {
     .map((match) => match[1]!);
 }
 
+function projectPath(importer: string, dependency: string) {
+  const candidate = dependency.startsWith("@/")
+    ? path.resolve("src", dependency.slice(2))
+    : dependency.startsWith(".")
+      ? path.resolve(path.dirname(importer), dependency)
+      : null;
+
+  return candidate
+    ? path.relative(process.cwd(), path.normalize(candidate)).replaceAll("\\", "/")
+    : null;
+}
+
+function projectDependencies(file: string, source: string) {
+  return importedModules(source)
+    .map((dependency) => ({ dependency, resolved: projectPath(file, dependency) }))
+    .filter((item): item is { dependency: string; resolved: string } => item.resolved !== null);
+}
+
 describe("clean architecture boundaries", () => {
+  it("resolves alias and relative imports before applying layer rules", () => {
+    expect(projectPath("src/shared/domain/value.ts", "../../backend/database/prisma"))
+      .toBe("src/backend/database/prisma");
+    expect(projectPath("src/frontend/components/view.tsx", "@/backend/config/env"))
+      .toBe("src/backend/config/env");
+    expect(projectPath("src/application/payments/use-case.ts", "node:crypto")).toBeNull();
+  });
+
   it("keeps application use cases independent from frameworks and adapters", () => {
     for (const { file, source } of files("src/application/**/*.{ts,tsx}")) {
       for (const dependency of importedModules(source)) {
@@ -26,8 +53,12 @@ describe("clean architecture boundaries", () => {
 
   it("keeps domain contracts independent from outer layers and providers", () => {
     for (const { file, source } of files("src/shared/domain/**/*.{ts,tsx}")) {
-      expect(source, file).not.toMatch(/@\/(?:app|application|backend|frontend)\//);
-      expect(source, file).not.toMatch(/@\/shared\/(?:remnashop|pwa)\//);
+      for (const { dependency, resolved } of projectDependencies(file, source)) {
+        expect(
+          resolved.startsWith("src/shared/domain/"),
+          `${file} imports non-domain module ${dependency} (${resolved})`,
+        ).toBe(true);
+      }
       expect(source, file).not.toMatch(/from ["']next(?:\/|["'])/);
       expect(source, file).not.toMatch(/@prisma\/client/);
     }
@@ -35,10 +66,10 @@ describe("clean architecture boundaries", () => {
 
   it("keeps all shared policies independent from application and adapters", () => {
     for (const { file, source } of files("src/shared/**/*.{ts,tsx}")) {
-      for (const dependency of importedModules(source)) {
+      for (const { dependency, resolved } of projectDependencies(file, source)) {
         expect(
-          dependency.startsWith("@/shared/") || dependency.startsWith("."),
-          `${file} imports non-shared module ${dependency}`,
+          resolved.startsWith("src/shared/"),
+          `${file} imports non-shared module ${dependency} (${resolved})`,
         ).toBe(true);
       }
     }
@@ -61,13 +92,23 @@ describe("clean architecture boundaries", () => {
     for (const { file, source } of files("src/frontend/**/*.{ts,tsx}")) {
       expect(source, file).not.toMatch(/\bfetch\s*\(/);
       expect(source, file).not.toContain("/api/bff");
-      expect(source, file).not.toMatch(/@\/backend\//);
+      for (const { dependency, resolved } of projectDependencies(file, source)) {
+        expect(resolved, `${file} imports backend module ${dependency}`).not.toMatch(/^src\/backend\//);
+        if (resolved.startsWith("src/application/")) {
+          expect(
+            resolved.startsWith("src/application/models/"),
+            `${file} imports application implementation ${dependency}`,
+          ).toBe(true);
+        }
+      }
     }
   });
 
   it("prevents infrastructure from depending on framework composition or React", () => {
     for (const { file, source } of files("src/backend/**/*.{ts,tsx}")) {
-      expect(source, file).not.toMatch(/@\/(?:app|frontend)\//);
+      for (const { dependency, resolved } of projectDependencies(file, source)) {
+        expect(resolved, `${file} imports outer module ${dependency}`).not.toMatch(/^src\/(?:app|frontend)\//);
+      }
     }
   });
 
