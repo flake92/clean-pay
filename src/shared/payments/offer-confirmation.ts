@@ -1,4 +1,4 @@
-import type { DurationGatewayPrice, PlanOffer } from "@/shared/remnashop/types";
+import type { DurationGatewayPrice, PlanOffer } from "@/shared/domain/subscriptions";
 
 export type ConfirmedPaymentOffer = {
   confirmed_amount: string;

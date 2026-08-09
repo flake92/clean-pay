@@ -2,7 +2,7 @@ import type {
   CurrentSubscriptionResponse,
   DevicesResponse,
   SubscriptionOffersResponse,
-} from "@/shared/remnashop/types";
+} from "@/shared/domain/subscriptions";
 import type { SupportViewModel } from "@/shared/presentation/support";
 
 export type CabinetUserViewModel = {

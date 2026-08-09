@@ -7,7 +7,7 @@ import { LinkButton } from "@/frontend/components/prime/link-button";
 import type {
   DurationGatewayPrice,
   PlanOffer,
-} from "@/shared/remnashop/types";
+} from "@/shared/domain/subscriptions";
 import type { TariffsViewModel } from "@/shared/presentation/tariffs";
 import { Card } from "primereact/card";
 import { Dropdown } from "primereact/dropdown";

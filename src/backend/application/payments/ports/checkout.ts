@@ -1,4 +1,5 @@
-import type { ExtendRequest, PaymentInitResponse, PurchaseRequest, SubscriptionOffersResponse } from "@/shared/remnashop/types";
+import type { ExtendRequest, PaymentInitResponse, PurchaseRequest } from "@/shared/domain/payments";
+import type { SubscriptionOffersResponse } from "@/shared/domain/subscriptions";
 
 export type PaymentExecution =
   | { status: "completed"; payment: PaymentInitResponse; operationId: string }

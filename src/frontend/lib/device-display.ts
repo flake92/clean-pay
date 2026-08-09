@@ -1,4 +1,4 @@
-import type { SubscriptionDevice } from "@/shared/remnashop/types";
+import type { SubscriptionDevice } from "@/shared/domain/subscriptions";
 
 export const MISSING_DEVICE_VALUE = "—";
 
