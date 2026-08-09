@@ -10,8 +10,31 @@ describe("clean architecture boundaries", () => {
   it("keeps application use cases independent from frameworks and adapters", () => {
     for (const { file, source } of files("src/backend/application/**/*.{ts,tsx}")) {
       expect(source, file).not.toMatch(/from ["']next(?:\/|["'])/);
-      expect(source, file).not.toMatch(/@\/backend\/(?:database|integrations|cache|config)\//);
+      expect(source, file).not.toMatch(/@\/backend\/(?:database|integrations|cache|config|errors)\//);
       expect(source, file).not.toMatch(/@prisma\/client/);
+      expect(source, file).not.toContain("@/shared/remnashop/");
+    }
+  });
+
+  it("keeps domain contracts independent from outer layers and providers", () => {
+    for (const { file, source } of files("src/shared/domain/**/*.{ts,tsx}")) {
+      expect(source, file).not.toMatch(/@\/(?:app|backend|frontend)\//);
+      expect(source, file).not.toMatch(/@\/shared\/(?:presentation|remnashop|pwa)\//);
+      expect(source, file).not.toMatch(/from ["']next(?:\/|["'])/);
+      expect(source, file).not.toMatch(/@prisma\/client/);
+    }
+  });
+
+  it("does not leak provider contracts into application or view models", () => {
+    for (const pattern of [
+      "src/backend/application/**/*.{ts,tsx}",
+      "src/frontend/**/*.{ts,tsx}",
+      "src/shared/presentation/**/*.{ts,tsx}",
+      "src/shared/payments/**/*.{ts,tsx}",
+    ]) {
+      for (const { file, source } of files(pattern)) {
+        expect(source, file).not.toContain("@/shared/remnashop/");
+      }
     }
   });
 

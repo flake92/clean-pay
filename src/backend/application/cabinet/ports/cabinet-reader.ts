@@ -7,7 +7,7 @@ import type {
   CurrentSubscriptionResponse,
   DevicesResponse,
   SubscriptionOffersResponse,
-} from "@/shared/remnashop/types";
+} from "@/shared/domain/subscriptions";
 
 export interface CabinetReader {
   loadUser(): Promise<{ id: string; profile: CabinetUserViewModel }>;

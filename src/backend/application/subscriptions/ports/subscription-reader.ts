@@ -2,7 +2,7 @@ import type {
   CurrentSubscriptionResponse,
   DevicesResponse,
   SubscriptionOffersResponse,
-} from "@/shared/remnashop/types";
+} from "@/shared/domain/subscriptions";
 
 export interface SubscriptionReader {
   loadCurrent(): Promise<CurrentSubscriptionResponse | null>;

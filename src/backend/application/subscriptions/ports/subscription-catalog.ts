@@ -1,4 +1,4 @@
-import type { SubscriptionOffersResponse } from "@/shared/remnashop/types";
+import type { SubscriptionOffersResponse } from "@/shared/domain/subscriptions";
 
 export interface SubscriptionCatalog {
   loadOffers(): Promise<SubscriptionOffersResponse>;

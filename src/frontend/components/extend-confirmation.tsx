@@ -5,7 +5,7 @@ import { useRef, useState } from "react";
 import type {
   DurationGatewayPrice,
   PlanOffer,
-} from "@/shared/remnashop/types";
+} from "@/shared/domain/subscriptions";
 import { executePaymentAction } from "@/app/actions/payments";
 import { AccountActionRequired } from "@/frontend/components/account-action-required";
 import { LinkButton } from "@/frontend/components/prime/link-button";

@@ -1,4 +1,8 @@
-import type { CabinetCommands } from "@/backend/application/cabinet/ports/cabinet-commands";
+import {
+  CabinetCommandError,
+  type CabinetCommands,
+} from "@/backend/application/cabinet/ports/cabinet-commands";
+import { ServiceError } from "@/backend/errors/service-error";
 import { getAuthorizedRemnashopTokens, remnashopRequest } from "@/backend/integrations/remnashop/client";
 import { auditLog } from "@/backend/observability/audit";
 import { auditedMutation } from "@/backend/observability/mutation-audit";
@@ -11,8 +15,15 @@ import type {
 } from "@/shared/remnashop/types";
 
 async function authorizedMutation<T>(action: string, mutate: (accessToken: string) => Promise<T>) {
-  const { accessToken, session } = await getAuthorizedRemnashopTokens();
-  await auditedMutation({ action, userId: session.userId, mutate: () => mutate(accessToken) });
+  try {
+    const { accessToken, session } = await getAuthorizedRemnashopTokens();
+    await auditedMutation({ action, userId: session.userId, mutate: () => mutate(accessToken) });
+  } catch (error) {
+    if (error instanceof ServiceError) {
+      throw new CabinetCommandError(error.prodMessage);
+    }
+    throw error;
+  }
 }
 
 export const productionCabinetCommands: CabinetCommands = {

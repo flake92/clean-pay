@@ -23,7 +23,7 @@ import type {
   DevicesResponse,
   SubscriptionDevice,
   SubscriptionOffersResponse,
-} from "@/shared/remnashop/types";
+} from "@/shared/domain/subscriptions";
 import type { CabinetViewModel } from "@/shared/presentation/cabinet";
 import {
   activatePromocodeAction,
