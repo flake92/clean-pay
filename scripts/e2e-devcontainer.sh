@@ -90,13 +90,17 @@ wait_for_started_next() {
 
     last_status="$(
       curl -fsS -o /dev/null -w '%{http_code}' \
+        --connect-timeout 2 \
+        --max-time 5 \
         "$base_url/api/health" 2>/dev/null || true
     )"
 
     if [[ "$last_status" =~ ^[23][0-9][0-9]$ ]]; then
+      echo "Next.js health endpoint is ready (HTTP $last_status)"
       return 0
     fi
 
+    echo "Waiting for Next.js health endpoint (last HTTP status: $last_status)"
     sleep 2
   done
 
@@ -113,8 +117,10 @@ warm_next_routes() {
   # cold CI workers test HTTP behavior rather than contend with first-compile
   # latency inside an individual Vitest timeout.
   for route in /login /register /tariffs /support; do
+    echo "Warming Next.js route: $route"
     curl --fail --silent --show-error \
-      --max-time 90 \
+      --connect-timeout 5 \
+      --max-time 45 \
       --output /dev/null \
       "$base_url$route"
   done
