@@ -127,7 +127,7 @@ jobs:
           node-version: 24.18.0
           cache: npm
       - run: npm ci
-      - run: npm run test:e2e
+      - run: timeout --signal=TERM --kill-after=30s 12m npm run test:e2e
         env:
           KEEP_E2E_STACK: "1"
           CLEAN_PAY_E2E_DIAGNOSTICS: "1"
