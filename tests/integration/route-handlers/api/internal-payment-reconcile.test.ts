@@ -9,10 +9,10 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("@/backend/config/env", () => ({ getEnv: mocks.getEnv }));
-vi.mock("@/backend/payments/reconciliation", () => ({
+vi.mock("@/backend/integrations/payments/payment-reconciliation-service", () => ({
   reconcileUnknownPayments: mocks.reconcileUnknownPayments,
 }));
-vi.mock("@/backend/payments/history-sync", () => ({
+vi.mock("@/backend/integrations/payments/payment-history-sync-service", () => ({
   continuePaymentHistoryBackfills: mocks.continuePaymentHistoryBackfills,
 }));
 vi.mock("@/backend/observability/audit", () => ({

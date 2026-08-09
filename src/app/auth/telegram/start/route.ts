@@ -6,7 +6,7 @@ import {
   createTelegramPopupStartResponse,
 } from "@/backend/integrations/telegram/oidc";
 import { assertRateLimit } from "@/backend/limits/rate-limit";
-import { getCurrentUser } from "@/backend/sessions/web-session";
+import { getCurrentUser } from "@/backend/integrations/sessions/web-session-service";
 import { verifyTurnstileToken } from "@/backend/security/turnstile";
 import { safeRedirectPath } from "@/backend/auth/redirect-policy";
 import { logTechnicalError } from "@/backend/observability/audit";
