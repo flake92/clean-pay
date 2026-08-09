@@ -8,7 +8,7 @@ export default defineConfig({
     globals: true,
     include: ["tests/e2e/full-stack/**/*.test.ts"],
     pool: "forks",
-    testTimeout: 90_000,
+    testTimeout: 30_000,
     hookTimeout: 180_000,
   },
   resolve: {
