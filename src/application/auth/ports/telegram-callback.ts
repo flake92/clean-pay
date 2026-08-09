@@ -3,7 +3,7 @@ export type TelegramCallbackInput =
   | { kind: "popup-oidc"; idToken: string }
   | { kind: "login-widget"; authData: Record<string, unknown> };
 
-export type TelegramCallbackSession = {
+type TelegramCallbackSession = {
   userId: string;
   remnashopSession?: {
     accessTokenEncrypted: string;

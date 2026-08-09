@@ -1,7 +1,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import { classNames } from "primereact/utils";
-import React, { forwardRef, useContext, useImperativeHandle, useRef } from "react";
+import { forwardRef, useContext, useImperativeHandle, useRef } from "react";
 import { AppTopbarRef } from "@/frontend/types";
 import { getBranding } from "@/shared/branding";
 import { LayoutContext } from "./context/layoutcontext";

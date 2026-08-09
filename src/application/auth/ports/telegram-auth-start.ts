@@ -1,4 +1,4 @@
-export type TelegramAuthStartUser = {
+type TelegramAuthStartUser = {
   id: string;
   email: string | null;
   telegramId: string | null;

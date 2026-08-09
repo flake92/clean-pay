@@ -7,7 +7,7 @@ const globalForReadinessPrisma = globalThis as unknown as {
   readinessPrisma?: PrismaClient;
 };
 
-export const readinessDatabaseTimeoutMs = 4_000;
+const readinessDatabaseTimeoutMs = 4_000;
 
 const readinessAdapter = new PrismaPg({
   connectionString: getEnv().databaseUrl,

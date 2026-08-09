@@ -1,6 +1,5 @@
 "use client";
 
-import React from "react";
 import { getBranding } from "@/shared/branding";
 import AppMenuitem from "./AppMenuitem";
 import { MenuProvider } from "./context/menucontext";

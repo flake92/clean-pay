@@ -1,4 +1,4 @@
-export type PaymentReconciliationBatch = {
+type PaymentReconciliationBatch = {
   claimed: number;
   succeeded: number;
   inProgress: number;
@@ -9,7 +9,7 @@ export type PaymentReconciliationBatch = {
   manualRequiredOperationIds: string[];
 };
 
-export type PaymentHistoryBackfillBatch = {
+type PaymentHistoryBackfillBatch = {
   attempted: number;
   applied: number;
   completed: number;

@@ -336,7 +336,7 @@ export async function completePaymentHistoryPage(
   });
 }
 
-export async function failPaymentHistorySync(
+async function failPaymentHistorySync(
   claim: PaymentHistorySyncClaim,
   error: unknown,
 ) {
