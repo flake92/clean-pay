@@ -33,7 +33,15 @@ Authentication policy belongs to `src/application/auth`: human verification and 
 
 Telegram callback and WebApp authentication follow the same rule: account-link/merge/recovery branching, redirect selection, identity-verification ordering and session-recovery decisions live in application use cases. Telegram/Remnashop adapters expose only granular verification, provider and persistence operations; a single adapter method must not implement an end-to-end authentication scenario.
 
+E-mail verification/change, password change and linked-account workflows follow the same boundary. Retry/fallback order, actor revalidation, merge preflight interpretation, post-confirm synchronization and account-merge state transitions belong to `src/application`; backend gateways expose provider calls, atomic persistence transitions, locks and session-cookie operations only. Historical end-to-end implementations must not be reachable from `src/app` composition roots.
+
+Current-profile resolution is also an application query. Selection between a local and provider profile, recoverable fallback, verified-email reconciliation and readiness classification live in `src/application/auth/resolve-auth-profile.ts`. The production gateway only reads session/provider data and performs the explicitly requested atomic confirmation or cookie refresh. Cabinet, navigation, checkout, profile, linked-account and verification screens compose this same query at the `src/app` boundary.
+
+Passkey registration and management authorization is application policy. Gateways report the current actor and assurance level; application use cases decide whether full assurance and account access are sufficient before listing, registering or deleting credentials. Infrastructure owns WebAuthn SDK calls and atomic credential persistence, including the invariant that the final credential cannot be deleted.
+
 Payment dispatch ordering, offer revalidation, idempotency state transitions and uncertain-outcome handling are owned by `src/application/payments/execute-payment-workflow.ts`. The backend payment adapter supplies only provider, persistence, session, rate-limit and audit capabilities through an opaque application port.
+
+Payment status/history refresh and maintenance batches are application workflows as well. Claim processing, provider fallback, stale-history behavior, reconciliation outcomes and batch continuation decisions stay in `src/application/payments`; backend adapters expose fenced transitions, provider reads and persistence primitives.
 
 ## HTTP boundary
 

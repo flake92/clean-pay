@@ -5,15 +5,48 @@ import {
   linkAccountEmail,
 } from "@/application/auth/manage-linked-account";
 import { ServiceError } from "@/backend/errors/service-error";
+import type { LinkAccountCommands } from "@/application/auth/ports/link-account";
+import type { TelegramAccountMergeGateway } from "@/application/auth/ports/telegram-account-merge";
 
-function mockCommands(overrides: Record<string, () => Promise<void>> = {}) {
-  return {
-    linkEmail: vi.fn(async () => ({ linked: true })),
+function mockCommands(overrides: Partial<LinkAccountCommands> & { confirmTelegramMerge?: () => Promise<void> } = {}): LinkAccountCommands & TelegramAccountMergeGateway & { confirmTelegramMerge: () => Promise<void> } {
+  const commands = {
+    loadLinkActor: vi.fn(async () => ({ context: {}, userId: "user-1", email: null, emailVerified: false, telegramId: null, telegramUsername: null, upstreamAccountId: null, fullAssurance: true })),
+    assertLinkRateLimit: vi.fn(async () => undefined),
+    authenticateEmail: vi.fn(async () => ({ context: {} })),
+    linkActorIsCurrent: vi.fn(async () => true),
+    loadProviderProfile: vi.fn(async () => ({ email: "test@test.com", emailVerified: false })),
+    providerAccountId: vi.fn(() => "upstream-1"),
+    telegramProviderSession: vi.fn(async () => ({ context: {} })),
+    attachTelegram: vi.fn(async () => undefined),
+    mergeProviderAccounts: vi.fn(async () => undefined),
+    refreshTelegramProviderSession: vi.fn(async () => ({ context: {} })),
+    linkCurrentAccount: vi.fn(async () => ({ userId: "user-1" })),
+    withOwnerChangeFence: vi.fn(async ({ work }) => work()),
+    emailOwnerId: vi.fn(async () => null),
+    stagePendingEmail: vi.fn(async () => undefined),
+    requestProviderVerification: vi.fn(async (_session, email) => ({ targetEmail: email })),
+    auditLinkEvent: vi.fn(async () => undefined),
     confirmTelegramMerge: vi.fn(async () => undefined),
     cancelTelegramMerge: vi.fn(async () => undefined),
-    deletePasskey: vi.fn(async () => undefined),
     ...overrides,
-  };
+  } as unknown as LinkAccountCommands & TelegramAccountMergeGateway & { confirmTelegramMerge: () => Promise<void> };
+  commands.loadActor = vi.fn(async () => ({ userId: "user-1", fullAssurance: true }));
+  commands.loadConfirmation = vi.fn(async () => {
+    await commands.confirmTelegramMerge();
+    return {
+      context: {}, id: "merge-1", userId: "user-1", status: "COMPLETED" as const, expiresAt: new Date(Date.now() + 60_000),
+      sourceAccountId: "source", targetAccountId: "target", sourceEmail: null, targetEmail: "u@example.com",
+      telegramId: "777", telegramUsername: null,
+    };
+  });
+  commands.assertRateLimit = vi.fn(async () => undefined);
+  commands.audit = vi.fn(async () => undefined);
+  commands.claim = vi.fn(async () => true);
+  commands.loadCurrentOwner = vi.fn(); commands.authenticateTelegram = vi.fn(); commands.preflight = vi.fn();
+  commands.loadCurrentSubscription = vi.fn(); commands.complete = vi.fn(); commands.release = vi.fn();
+  commands.cancel = vi.fn(async () => true);
+  commands.refreshLocalSession = vi.fn();
+  return commands;
 }
 
 describe("failed() error message mapping", () => {
@@ -79,7 +112,7 @@ describe("failed() error message mapping", () => {
 
   it("uses specific message for AUTH_FAILED", async () => {
     const commands = mockCommands({
-      linkEmail: vi.fn(async () => {
+      loadLinkActor: vi.fn(async () => {
         throw new ServiceError("AUTH_FAILED", 401, "bad credentials");
       }),
     });

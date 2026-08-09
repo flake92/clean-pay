@@ -1,3 +1,5 @@
+import type { SubscriptionOffersResponse } from "@/shared/domain/subscriptions";
+
 export interface NavigationReader {
-  load(): Promise<{ authenticated: boolean; emailVerificationRequired: boolean; hasSubscription: boolean; canRenewSubscription: boolean }>;
+  loadOffers(): Promise<SubscriptionOffersResponse>;
 }

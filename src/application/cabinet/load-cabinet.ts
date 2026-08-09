@@ -1,10 +1,15 @@
 import type { CabinetReader } from "@/application/cabinet/ports/cabinet-reader";
 import type { CabinetViewModel } from "@/application/models/cabinet";
+import type { PaymentHistoryGateway } from "@/application/payments/ports/payment-history";
+import type { PaymentMaintenanceRunner } from "@/application/payments/ports/payment-maintenance";
+import { loadPaymentHistory } from "@/application/payments/load-payment-history";
+import type { AuthProfileGateway } from "@/application/auth/ports/auth-profile";
+import { resolveAuthProfile } from "@/application/auth/resolve-auth-profile";
 
-export async function loadCabinetViewModel(reader: CabinetReader): Promise<CabinetViewModel> {
-  let account: Awaited<ReturnType<CabinetReader["loadUser"]>>;
+export async function loadCabinetViewModel(reader: CabinetReader, auth: AuthProfileGateway, history: PaymentHistoryGateway, maintenance: PaymentMaintenanceRunner): Promise<CabinetViewModel> {
+  let account;
   try {
-    account = await reader.loadUser();
+    account = await resolveAuthProfile(auth);
   } catch {
     return { status: "error", message: "Нужно войти в аккаунт." };
   }
@@ -13,13 +18,13 @@ export async function loadCabinetViewModel(reader: CabinetReader): Promise<Cabin
     reader.loadSubscription(),
     reader.loadOffers(),
     reader.loadDevices(),
-    reader.loadPayments(account.id),
+    loadPaymentHistory(history, maintenance, account.userId),
     reader.loadSupport(),
   ]);
 
   return {
     status: "ready",
-    user: account.profile,
+    user: account,
     subscription: subscription.status === "fulfilled" ? subscription.value : null,
     subscriptionError: subscription.status === "rejected" ? "Не удалось загрузить подписку." : null,
     offers: offers.status === "fulfilled" ? offers.value : null,

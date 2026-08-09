@@ -6,6 +6,8 @@ import {
   type TelegramProviderSession,
 } from "@/application/auth/ports/telegram-callback";
 import { ServiceError } from "@/backend/errors/service-error";
+import { prisma } from "@/backend/database/prisma";
+import { AccountMergeConfirmationStatus } from "@prisma/client";
 import {
   linkCurrentUserToRemnashopAuth,
   reconcileUserFromRemnashopAuth,
@@ -13,20 +15,34 @@ import {
 import {
   getAuthorizedRemnashopTokens,
   getJwtExpiresAt,
+  getRemnashopMe,
   getRemnashopUserIdFromAccessToken,
   remnashopLinkTelegram,
   remnashopMergeUsers,
 } from "@/backend/integrations/remnashop/client";
 import { withPaymentOwnerChangeFence } from "@/backend/integrations/payments/payment-user-merge-service";
 import {
-  consumeTelegramCallback,
-  consumeTelegramLoginWidgetPayload,
-  consumeTelegramPopupToken,
+  clearTelegramAuthCookies,
+  verifyTelegramCallback,
+  verifyTelegramWidgetCallbackPayload,
+  verifyTelegramPopupToken,
 } from "@/backend/integrations/telegram/oidc";
-import { logTechnicalWarning } from "@/backend/observability/audit";
+import { auditLog, logTechnicalWarning } from "@/backend/observability/audit";
+import { assertRateLimit } from "@/backend/limits/rate-limit";
+import { assertUserMergeFinalOwner, mergeLocalUsersIntoTarget } from "@/backend/integrations/auth/local-user-merge-service";
+import { randomToken, sha256 } from "@/backend/security/crypto";
 
-type RawConsumedCallback = Awaited<ReturnType<typeof consumeTelegramCallback>>;
-type ProviderSession = NonNullable<RawConsumedCallback["remnashopAuth"]>;
+type ProviderSession = {
+  cookies: { accessToken: string; refreshToken: string };
+  data: { expires_at: string; refresh_expires_at: string };
+};
+type VerifiedResult = {
+  authState: { id: string; userId: string | null; redirectTo: string | null };
+  identity: {
+    telegramId: string; telegramUsername: string | null; fullName: string | null; photoUrl: string | null;
+    remnashopAuthResult?: ProviderSession | null;
+  };
+};
 
 function providerSession(session: TelegramProviderSession) {
   return session.context as ProviderSession;
@@ -42,17 +58,19 @@ function reconciliationResult(
   };
 }
 
-async function consume(input: TelegramCallbackInput): Promise<RawConsumedCallback> {
+async function consume(input: TelegramCallbackInput): Promise<VerifiedResult> {
   switch (input.kind) {
     case "oidc":
-      return consumeTelegramCallback(input.code, input.state);
+      return verifyTelegramCallback(input.code, input.state) as Promise<VerifiedResult>;
     case "popup-oidc":
-      return consumeTelegramPopupToken(input.idToken);
+      return verifyTelegramPopupToken(input.idToken) as Promise<VerifiedResult>;
     case "login-widget":
-      return consumeTelegramLoginWidgetPayload(
-        input.authData as Parameters<typeof consumeTelegramLoginWidgetPayload>[0],
-      );
+      return verifyTelegramWidgetCallbackPayload(input.authData as never) as Promise<VerifiedResult>;
   }
+}
+
+function localUser(user: { id: string; remnashopUserId: string | null; email: string | null; emailVerified: boolean; telegramId: string | null }) {
+  return { id: user.id, upstreamAccountId: user.remnashopUserId, email: user.email, emailVerified: user.emailVerified, telegramId: user.telegramId };
 }
 
 function subscriptionsConflict(error: unknown) {
@@ -67,15 +85,178 @@ export const productionTelegramCallbackGateway: TelegramCallbackGateway = {
   async consume(input) {
     const result = await consume(input);
     return {
-      user: { id: result.user.id, upstreamAccountId: result.user.remnashopUserId },
-      redirectTo: result.redirectTo,
-      providerSession: result.remnashopAuth ? { context: result.remnashopAuth } : null,
-      linked: result.linked,
-      telegramId: result.telegramId,
-      telegramUsername: result.telegramUsername,
-      mergeConfirmation: result.mergeConfirmation,
+      authState: {
+        id: result.authState.id,
+        targetUserId: result.authState.userId,
+        redirectTo: result.authState.redirectTo,
+      },
+      identity: {
+        telegramId: result.identity.telegramId,
+        telegramUsername: result.identity.telegramUsername,
+        fullName: result.identity.fullName,
+        photoUrl: result.identity.photoUrl,
+        providerSession: result.identity.remnashopAuthResult ? { context: result.identity.remnashopAuthResult } : null,
+      },
     };
   },
+
+  async assertIdentityRateLimit(input) {
+    await assertRateLimit({
+      action: input.linked ? "telegram_link_confirm" : "telegram_login_confirm",
+      tgId: input.telegramId,
+      limit: 10,
+      windowSeconds: 15 * 60,
+    });
+  },
+
+  async findUserByTelegramId(telegramId) {
+    const user = await prisma.webUser.findUnique({ where: { telegramId } });
+    return user ? localUser(user) : null;
+  },
+
+  async findUserById(userId) {
+    const user = await prisma.webUser.findUnique({ where: { id: userId } });
+    return user ? localUser(user) : null;
+  },
+
+  async loadProviderMergeIdentity(session) {
+    const auth = providerSession(session);
+    const profile = await getRemnashopMe(auth.cookies.accessToken);
+    return {
+      accountId: getRemnashopUserIdFromAccessToken(auth.cookies.accessToken),
+      email: profile.email,
+      emailVerified: profile.is_email_verified,
+      pendingEmail: profile.pending_email,
+      telegramId: profile.telegram_id === null ? null : String(profile.telegram_id),
+    };
+  },
+
+  async preflightAccountMerge(input) {
+    const result = await remnashopMergeUsers({
+      sourceUserId: input.sourceAccountId,
+      targetUserId: input.targetAccountId,
+      reason: "Clean Pay confirmed account merge: keep target e-mail and selected source Telegram (dry run)",
+      dryRun: true,
+      emailResolution: "KEEP_TARGET",
+      telegramResolution: "KEEP_SOURCE",
+      paymentResolution: "REKEY_SOURCE",
+    });
+    return {
+      conflicts: result.conflicts,
+      dryRun: result.dry_run,
+      sourceAccountId: String(result.source_user_id),
+      targetAccountId: String(result.target_user_id),
+      target: {
+        accountId: String(result.target.id),
+        email: result.target.email,
+        emailVerified: result.target.is_email_verified,
+        telegramId: result.target.telegram_id === null ? null : String(result.target.telegram_id),
+      },
+      requiresRelogin: result.requires_relogin,
+    };
+  },
+
+  async persistAccountMergeConfirmation(input) {
+    const token = randomToken();
+    const now = new Date();
+    await prisma.$transaction(async (tx) => {
+      await tx.$queryRaw<Array<{ id: string }>>`
+        SELECT "id" FROM "WebUser" WHERE "id" = ${input.userId} FOR UPDATE
+      `;
+      const active = await tx.$queryRaw<Array<{ id: string }>>`
+        SELECT "id" FROM "AccountMergeConfirmation"
+        WHERE "userId" = ${input.userId} AND "status" = 'PROCESSING'
+          AND "leaseExpiresAt" > clock_timestamp() LIMIT 1 FOR UPDATE
+      `;
+      if (active.length) throw new ServiceError("CONFLICT", 409, "Another account merge is already being processed.");
+      await tx.accountMergeConfirmation.updateMany({
+        where: {
+          userId: input.userId,
+          OR: [
+            { status: AccountMergeConfirmationStatus.PENDING },
+            { status: AccountMergeConfirmationStatus.PROCESSING, leaseExpiresAt: { lte: now } },
+          ],
+        },
+        data: { status: AccountMergeConfirmationStatus.FAILED, lastErrorCode: "SUPERSEDED" },
+      });
+      await tx.accountMergeConfirmation.create({
+        data: {
+          userId: input.userId,
+          tokenHash: sha256(token),
+          telegramId: input.telegramId,
+          telegramUsername: input.telegramUsername,
+          sourceEmail: input.sourceEmail,
+          targetEmail: input.targetEmail,
+          sourceRemnashopUserId: input.sourceAccountId,
+          targetRemnashopUserId: input.targetAccountId,
+          expiresAt: new Date(now.getTime() + 10 * 60 * 1000),
+        },
+      });
+    });
+    return { token };
+  },
+
+  async applyTelegramIdentity(input) {
+    const existing = input.existingTelegramUserId
+      ? await prisma.webUser.findUnique({ where: { id: input.existingTelegramUserId } })
+      : null;
+    const user = input.targetUserId
+      ? await prisma.$transaction(async (tx) => {
+          const target = await tx.webUser.findUniqueOrThrow({ where: { id: input.targetUserId! } });
+          const source = existing && existing.id !== input.targetUserId ? existing : null;
+          if (source) {
+            await mergeLocalUsersIntoTarget(tx, {
+              targetUserId: input.targetUserId!,
+              targetUpstreamAccountId: target.remnashopUserId ?? source.remnashopUserId,
+              sourceUserIds: [source.id],
+              ownerExpectations: [target, source].map((owner) => ({
+                id: owner.id, remnashopUserId: owner.remnashopUserId, email: owner.email, telegramId: owner.telegramId,
+              })),
+            });
+          }
+          const updated = await tx.webUser.update({
+            where: { id: input.targetUserId! },
+            data: {
+              remnashopUserId: target.remnashopUserId ?? source?.remnashopUserId,
+              email: target.email ?? source?.email,
+              emailVerified: target.emailVerified || Boolean(source?.emailVerified),
+              telegramId: input.telegramId,
+              telegramUsername: input.telegramUsername,
+              fullName: input.fullName,
+              photoUrl: input.photoUrl,
+              displayName: input.fullName ?? input.telegramUsername,
+              authPending: false,
+              pendingRemnashopUserId: null,
+              pendingRemnashopEmail: null,
+              lastLoginAt: new Date(),
+            },
+          });
+          if (source) {
+            await assertUserMergeFinalOwner(tx, {
+              targetUserId: updated.id,
+              sourceUserIds: [source.id],
+              expected: { telegramId: input.telegramId, ...(updated.remnashopUserId ? { remnashopUserId: updated.remnashopUserId } : {}), ...(updated.email ? { email: updated.email } : {}) },
+            });
+          }
+          return updated;
+        })
+      : await prisma.webUser.upsert({
+          where: { telegramId: input.telegramId },
+          create: { telegramId: input.telegramId, telegramUsername: input.telegramUsername, fullName: input.fullName, photoUrl: input.photoUrl, displayName: input.fullName ?? input.telegramUsername, lastLoginAt: new Date() },
+          update: { telegramUsername: input.telegramUsername, fullName: input.fullName, photoUrl: input.photoUrl, displayName: input.fullName ?? input.telegramUsername, lastLoginAt: new Date() },
+        });
+    return localUser(user);
+  },
+
+  async markAuthStateUser(authStateId, userId) {
+    await prisma.telegramAuthState.update({ where: { id: authStateId }, data: { userId } });
+  },
+
+  async auditIdentityResolved(input) {
+    await auditLog({ action: input.linked ? "telegram_link_success" : "telegram_login", userId: input.userId });
+  },
+
+  clearTemporaryAuth: clearTelegramAuthCookies,
 
   providerAccountId(session) {
     return getRemnashopUserIdFromAccessToken(providerSession(session).cookies.accessToken);

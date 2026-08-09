@@ -2,6 +2,7 @@ import { Card } from "primereact/card";
 
 import { loadCheckout } from "@/application/payments/checkout";
 import { productionCheckoutReader } from "@/backend/integrations/payments/checkout-reader";
+import { productionAuthProfileGateway } from "@/backend/integrations/auth/auth-profile-gateway";
 import { AppShell } from "@/app/_components/app-shell";
 import { PageHeader } from "@/frontend/components/layout";
 import { PaymentConfirmation } from "@/frontend/components/payment-confirmation";
@@ -10,7 +11,7 @@ function first(value: string | string[] | undefined) { return Array.isArray(valu
 
 export default async function PaymentPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   const params = await searchParams;
-  const model = await loadCheckout(productionCheckoutReader);
+  const model = await loadCheckout(productionCheckoutReader, productionAuthProfileGateway);
   const planCode = first(params.plan) ?? null;
   const durationDays = first(params.duration) ?? null;
   const gatewayType = first(params.gateway) ?? null;

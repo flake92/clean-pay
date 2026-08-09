@@ -9,6 +9,7 @@ import { prisma } from "@/backend/database/prisma";
 import { ServiceError } from "@/backend/errors/service-error";
 import { securityPolicy } from "@/backend/security/policy";
 import { auditLog } from "@/backend/observability/audit";
+import { accountAccessIssue } from "@/shared/domain/account-access-policy";
 
 const sessionCookieNames = {
   access: "clean_pay_access",
@@ -60,29 +61,9 @@ export function assertEmailVerificationPolicy(user: {
 }: {
   requireVerifiedEmail?: boolean;
 } = {}) {
-  if (requireVerifiedEmail && !user.email) {
-    throw new ServiceError(
-      "EMAIL_REQUIRED",
-      401,
-      "E-mail and password must be linked before continuing",
-    );
-  }
-
-  if (requireVerifiedEmail && !user.emailVerified) {
-    throw new ServiceError(
-      "EMAIL_NOT_VERIFIED",
-      403,
-      "E-mail must be verified before continuing",
-    );
-  }
-
-  if (!user.emailVerified && !user.telegramId) {
-    throw new ServiceError(
-      "EMAIL_NOT_VERIFIED",
-      403,
-      "E-mail must be verified before continuing",
-    );
-  }
+  const issue = accountAccessIssue(user, { requireVerifiedEmail });
+  if (issue === "EMAIL_REQUIRED") throw new ServiceError(issue, 401, "E-mail and password must be linked before continuing");
+  if (issue) throw new ServiceError(issue, 403, "E-mail must be verified before continuing");
 }
 
 async function revokeSessionByRefreshToken(refreshToken: string) {

@@ -134,10 +134,7 @@ describe("production payment adapter", () => {
     await expect(productionPaymentCommands.purchase(request, "key-1"))
       .resolves.toEqual({ status: "completed", operationId: "operation-1", payment });
 
-    expect(mocks.assertEmailVerificationPolicy).toHaveBeenCalledWith(
-      expect.objectContaining({ emailVerified: true }),
-      { requireVerifiedEmail: true },
-    );
+    expect(mocks.assertEmailVerificationPolicy).not.toHaveBeenCalled();
     expect(mocks.assertRateLimit).toHaveBeenCalledWith(expect.objectContaining({
       action: "subscription_purchase",
       email: "u@example.com",

@@ -4,22 +4,16 @@ import { createRemoteJWKSet, jwtVerify } from "jose";
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 
-import { auditLog, logTechnicalError, logTechnicalWarning } from "@/backend/observability/audit";
+import { logTechnicalError, logTechnicalWarning } from "@/backend/observability/audit";
 import { authDebugLog } from "@/backend/observability/auth-debug-log";
 import { randomToken, sha256 } from "@/backend/security/crypto";
 import { getEnv } from "@/backend/config/env";
 import { logger } from "@/backend/observability/logger";
 import { prisma } from "@/backend/database/prisma";
-import { assertRateLimit } from "@/backend/limits/rate-limit";
 import { claimTelegramAuthState as claimTelegramAuthStateRecord } from "@/backend/auth/one-time-state";
-import { stageTelegramAccountMerge } from "@/backend/integrations/auth/telegram-account-merge-service";
 import { remnashopAuth } from "@/backend/integrations/remnashop/client";
 import { ServiceError } from "@/backend/errors/service-error";
 import { getCurrentSession } from "@/backend/integrations/sessions/web-session-service";
-import {
-  assertUserMergeFinalOwner,
-  mergeLocalUsersIntoTarget,
-} from "@/backend/integrations/auth/local-user-merge-service";
 import type { TelegramAuthRequest } from "@/backend/integrations/remnashop/contracts";
 
 const telegramAuthTtlSeconds = 10 * 60;
@@ -44,6 +38,10 @@ function clearTemporaryTelegramAuthCookies(cookieStore: TelegramCookieStore) {
   cookieStore.delete(telegramOidcCookieNames.state);
   cookieStore.delete(telegramOidcCookieNames.nonce);
   cookieStore.delete(telegramOidcCookieNames.codeVerifier);
+}
+
+export async function clearTelegramAuthCookies() {
+  clearTemporaryTelegramAuthCookies(await cookies());
 }
 
 function addSeconds(date: Date, seconds: number) {
@@ -442,7 +440,7 @@ async function authenticateRemnashopWithTelegramPayload(payload: TelegramAuthReq
   }
 }
 
-export async function consumeTelegramCallback(code: string, state: string) {
+export async function verifyTelegramCallback(code: string, state: string) {
   const cookieStore = await cookies();
   const cookieState = cookieStore.get(telegramOidcCookieNames.state)?.value;
   const nonce = cookieStore.get(telegramOidcCookieNames.nonce)?.value;
@@ -504,14 +502,14 @@ export async function consumeTelegramCallback(code: string, state: string) {
 
   const idToken = await exchangeCodeForIdToken(code, codeVerifier);
 
-  return consumeTelegramIdToken(idToken, {
+  return verifyTelegramIdTokenForState(idToken, {
     authState,
     nonce,
     cookieStore,
   });
 }
 
-export async function consumeTelegramPopupToken(idToken: string) {
+export async function verifyTelegramPopupToken(idToken: string) {
   const cookieStore = await cookies();
   const nonce = cookieStore.get(telegramOidcCookieNames.nonce)?.value;
 
@@ -546,14 +544,14 @@ export async function consumeTelegramPopupToken(idToken: string) {
 
   await assertTelegramLinkSession(authState, cookieStore);
 
-  return consumeTelegramIdToken(idToken, {
+  return verifyTelegramIdTokenForState(idToken, {
     authState,
     nonce,
     cookieStore,
   });
 }
 
-export async function consumeTelegramLoginWidgetPayload(payload: TelegramLoginWidgetPayload) {
+export async function verifyTelegramWidgetCallbackPayload(payload: TelegramLoginWidgetPayload) {
   const cookieStore = await cookies();
   const nonce = cookieStore.get(telegramOidcCookieNames.nonce)?.value;
 
@@ -598,17 +596,18 @@ export async function consumeTelegramLoginWidgetPayload(payload: TelegramLoginWi
 
   await claimTelegramAuthState(authState);
 
-  return completeTelegramAuth(authState, {
+  const identity = {
     telegramId: verifiedPayload.id.toString(),
     telegramUsername: verifiedPayload.username ?? null,
     fullName,
     photoUrl: verifiedPayload.photo_url ?? null,
-    remnashopPayload: verifiedPayload,
+    remnashopAuthResult: await authenticateRemnashopWithTelegramPayload(verifiedPayload),
     source: "widget",
-  });
+  } as const;
+  return { authState, identity };
 }
 
-async function consumeTelegramIdToken(
+async function verifyTelegramIdTokenForState(
   idToken: string,
   {
     authState,
@@ -649,14 +648,15 @@ async function consumeTelegramIdToken(
     telegramUsername,
   );
 
-  return completeTelegramAuth(authState, {
+  const identity = {
     telegramId,
     telegramUsername,
     fullName,
     photoUrl,
     remnashopAuthResult,
     source: "oidc",
-  });
+  } as const;
+  return { authState, identity };
 }
 
 async function claimTelegramAuthState(authState: { id: string }) {
@@ -700,228 +700,4 @@ async function assertTelegramLinkSession(
     401,
     "Telegram account linking session is no longer active",
   );
-}
-
-async function completeTelegramAuth(
-  authState: {
-    id: string;
-    userId: string | null;
-    redirectTo: string | null;
-    expiresAt: Date;
-  },
-  identity: {
-    telegramId: string;
-    telegramUsername: string | null;
-    fullName: string | null;
-    photoUrl: string | null;
-    remnashopAuthResult?: Awaited<ReturnType<typeof remnashopAuth>> | null;
-    remnashopPayload?: TelegramAuthRequest;
-    source: "oidc" | "widget";
-  },
-) {
-  const cookieStore = await cookies();
-  const {
-    telegramId,
-    telegramUsername,
-    fullName,
-    photoUrl,
-  } = identity;
-  const remnashopAuthResult = identity.remnashopAuthResult
-    ?? (identity.remnashopPayload
-      ? await authenticateRemnashopWithTelegramPayload(identity.remnashopPayload)
-      : null);
-
-  authDebugLog("telegram_oidc_identity_resolved", {
-    authStateId: authState.id,
-    telegramId,
-    hasUsername: Boolean(telegramUsername),
-    hasFullName: Boolean(fullName),
-    hasPhotoUrl: Boolean(photoUrl),
-    linkUserId: authState.userId,
-    source: identity.source,
-  });
-
-  await assertRateLimit({
-    action: authState.userId ? "telegram_link_confirm" : "telegram_login_confirm",
-    tgId: telegramId,
-    limit: 10,
-    windowSeconds: 15 * 60,
-  });
-  authDebugLog("telegram_oidc_rate_limit_passed", {
-    action: authState.userId ? "telegram_link_confirm" : "telegram_login_confirm",
-    telegramId,
-  });
-
-  const existingTelegramUser = await prisma.webUser.findUnique({
-    where: { telegramId },
-  });
-
-  const targetUserId = authState.userId;
-  const targetLinkUser = targetUserId
-    ? await prisma.webUser.findUnique({
-        where: { id: targetUserId },
-      })
-    : null;
-
-  if (targetUserId && targetLinkUser && !remnashopAuthResult) {
-    throw new ServiceError(
-      "UPSTREAM_UNAVAILABLE",
-      503,
-      "Remnashop Telegram verification is unavailable; no account data was changed.",
-    );
-  }
-
-  if (targetUserId && targetLinkUser && remnashopAuthResult) {
-    const mergeConfirmation = await stageTelegramAccountMerge({
-      userId: targetUserId,
-      telegramId,
-      telegramUsername,
-      telegramAuth: remnashopAuthResult,
-    });
-
-    if (mergeConfirmation.required) {
-      clearTemporaryTelegramAuthCookies(cookieStore);
-      await auditLog({
-        action: "telegram_merge_confirmation_required",
-        userId: targetUserId,
-      });
-
-      return {
-        user: targetLinkUser,
-        redirectTo: authState.redirectTo,
-        remnashopAuth: remnashopAuthResult,
-        linked: true,
-        telegramId,
-        telegramUsername,
-        mergeConfirmation,
-      };
-    }
-  }
-  authDebugLog("telegram_oidc_user_resolution_started", {
-    targetUserId,
-    existingTelegramUserId: existingTelegramUser?.id,
-    mergeRequired: Boolean(targetUserId && existingTelegramUser && existingTelegramUser.id !== targetUserId),
-  });
-  const user = targetUserId
-    ? await prisma.$transaction(async (tx) => {
-        const targetUser = await tx.webUser.findUniqueOrThrow({
-          where: { id: targetUserId },
-        });
-        const sourceUser =
-          existingTelegramUser && existingTelegramUser.id !== targetUserId
-            ? existingTelegramUser
-            : null;
-
-        if (sourceUser) {
-          authDebugLog("telegram_oidc_link_merge_started", {
-            targetUserId,
-            sourceUserId: sourceUser.id,
-          });
-
-          await mergeLocalUsersIntoTarget(tx, {
-            targetUserId,
-            targetUpstreamAccountId:
-              targetUser.remnashopUserId ?? sourceUser.remnashopUserId,
-            sourceUserIds: [sourceUser.id],
-            ownerExpectations: [targetUser, sourceUser].map((owner) => ({
-              id: owner.id,
-              remnashopUserId: owner.remnashopUserId,
-              email: owner.email,
-              telegramId: owner.telegramId,
-            })),
-          });
-          authDebugLog("telegram_oidc_link_merge_completed", {
-            targetUserId,
-            sourceUserId: sourceUser.id,
-          });
-        }
-
-        const updatedUser = await tx.webUser.update({
-          where: { id: targetUserId },
-          data: {
-            remnashopUserId: targetUser.remnashopUserId ?? sourceUser?.remnashopUserId,
-            email: targetUser.email ?? sourceUser?.email,
-            emailVerified: targetUser.emailVerified || Boolean(sourceUser?.emailVerified),
-            telegramId,
-            telegramUsername,
-            fullName,
-            photoUrl,
-            displayName: fullName ?? telegramUsername,
-            authPending: false,
-            pendingRemnashopUserId: null,
-            pendingRemnashopEmail: null,
-            lastLoginAt: new Date(),
-          },
-        });
-
-        if (sourceUser) {
-          await assertUserMergeFinalOwner(tx, {
-            targetUserId: updatedUser.id,
-            sourceUserIds: [sourceUser.id],
-            expected: {
-              telegramId,
-              ...(updatedUser.remnashopUserId
-                ? { remnashopUserId: updatedUser.remnashopUserId }
-                : {}),
-              ...(updatedUser.email ? { email: updatedUser.email } : {}),
-            },
-          });
-        }
-
-        return updatedUser;
-      })
-    : await prisma.webUser.upsert({
-        where: { telegramId },
-        create: {
-          telegramId,
-          telegramUsername,
-          fullName,
-          photoUrl,
-          displayName: fullName ?? telegramUsername,
-          lastLoginAt: new Date(),
-        },
-        update: {
-          telegramUsername,
-          fullName,
-          photoUrl,
-          displayName: fullName ?? telegramUsername,
-          lastLoginAt: new Date(),
-        },
-      });
-
-  await prisma.telegramAuthState.update({
-    where: { id: authState.id },
-    data: {
-      userId: user.id,
-    },
-  });
-  authDebugLog("telegram_oidc_state_consumed", {
-    authStateId: authState.id,
-    userId: user.id,
-  });
-
-  await auditLog({
-    action: authState.userId ? "telegram_link_success" : "telegram_login",
-    userId: user.id,
-  });
-
-  clearTemporaryTelegramAuthCookies(cookieStore);
-
-  authDebugLog("telegram_oidc_callback_success", {
-    authStateId: authState.id,
-    userId: user.id,
-    telegramId,
-    redirectTo: authState.redirectTo,
-    linked: Boolean(authState.userId),
-  });
-
-  return {
-    user,
-    redirectTo: authState.redirectTo,
-    remnashopAuth: remnashopAuthResult,
-    linked: Boolean(authState.userId),
-    telegramId,
-    telegramUsername,
-    mergeConfirmation: null,
-  };
 }

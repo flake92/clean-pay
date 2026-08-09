@@ -1,14 +1,19 @@
 import type { CheckoutReader, PaymentCommands } from "@/application/payments/ports/checkout";
 import type { CheckoutViewModel, PaymentCommand, PaymentCommandResult } from "@/application/models/checkout";
+import type { AuthProfileGateway } from "@/application/auth/ports/auth-profile";
+import { AuthProfileError } from "@/application/auth/ports/auth-profile";
+import { resolveAuthProfile } from "@/application/auth/resolve-auth-profile";
 
-export async function loadCheckout(reader: CheckoutReader): Promise<CheckoutViewModel> {
+export async function loadCheckout(reader: CheckoutReader, auth: AuthProfileGateway): Promise<CheckoutViewModel> {
   try {
-    const account = await reader.loadAccount();
-    if (!account.authenticated) return { status: "account-action-required", action: "login", message: "Нужно войти в аккаунт." };
+    const account = await resolveAuthProfile(auth);
     if (account.accountSyncPending) return { status: "account-action-required", action: "verifyEmail", message: "Дождитесь завершения подтверждения e-mail." };
     if (!account.emailVerified) return { status: "account-action-required", action: "linkEmail", message: "Для оплаты добавьте e-mail и пароль, затем подтвердите адрес кодом из письма." };
     return { status: "ready", offers: await reader.loadOffers() };
-  } catch {
+  } catch (error) {
+    if (error instanceof AuthProfileError && error.code === "UNAUTHORIZED") {
+      return { status: "account-action-required", action: "login", message: "Нужно войти в аккаунт." };
+    }
     return { status: "error", message: "Не удалось загрузить данные оплаты." };
   }
 }

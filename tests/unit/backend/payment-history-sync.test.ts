@@ -1,4 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { runPaymentMaintenance } from "@/application/payments/run-payment-maintenance";
+import { productionPaymentMaintenanceRunner } from "@/backend/integrations/payments/payment-maintenance-runner";
 
 const mocks = vi.hoisted(() => ({
   tx: {
@@ -40,8 +42,17 @@ vi.mock("@/backend/integrations/remnashop/client", () => ({
 import {
   claimPaymentHistorySync,
   completePaymentHistoryPage,
-  continuePaymentHistoryBackfills,
+  listDuePaymentHistoryCandidates,
 } from "@/backend/integrations/payments/payment-history-sync-service";
+
+async function continuePaymentHistoryBackfills(input: { limit: number; deadlineMs: number }) {
+  const result = await runPaymentMaintenance({
+    ...productionPaymentMaintenanceRunner,
+    claimReconciliation: async () => null,
+    listHistoryCandidates: () => productionPaymentMaintenanceRunner.listHistoryCandidates(input.limit),
+  }, { paymentLimit: 1, deadlineMs: input.deadlineMs });
+  return result.history;
+}
 import { paymentUpstreamOwnerHash } from "@/backend/payments/hashes";
 import { sha256 } from "@/backend/security/crypto";
 
@@ -444,7 +455,7 @@ describe("payment history sync fencing", () => {
   it("discovers backfills whose initial page failed before a cursor existed", async () => {
     mocks.prisma.$queryRaw.mockResolvedValue([]);
 
-    await continuePaymentHistoryBackfills({ limit: 1, deadlineMs: 1_000 });
+    await listDuePaymentHistoryCandidates(1);
 
     const sql = mocks.prisma.$queryRaw.mock.calls[0]?.[0] as {
       strings?: string[];
@@ -462,7 +473,7 @@ describe("payment history sync fencing", () => {
   it("asks the database for due rows so an earlier backoff cannot starve a ready user", async () => {
     mocks.prisma.$queryRaw.mockResolvedValue([]);
 
-    await continuePaymentHistoryBackfills({ limit: 1, deadlineMs: 1_000 });
+    await listDuePaymentHistoryCandidates(1);
 
     const sql = mocks.prisma.$queryRaw.mock.calls[0]?.[0] as {
       strings?: string[];

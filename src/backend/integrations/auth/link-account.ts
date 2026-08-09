@@ -1,16 +1,63 @@
 import { cookies } from "next/headers";
 
-import type { LinkAccountCommands, LinkAccountReader } from "@/application/auth/ports/link-account";
-import { deletePasskey, listPasskeys } from "@/backend/integrations/auth/passkey-service";
-import { getCurrentAuthProfile } from "@/backend/auth/profile";
-import { linkRemnashopAccount } from "@/backend/integrations/auth/remnashop-link-service";
 import {
-  cancelTelegramAccountMerge,
-  confirmTelegramAccountMerge,
+  LinkAccountGatewayError,
+  type LinkAccountCommands,
+  type LinkAccountReader,
+} from "@/application/auth/ports/link-account";
+import { prisma } from "@/backend/database/prisma";
+import { ServiceError } from "@/backend/errors/service-error";
+import {
   getTelegramAccountMergeConfirmation,
   telegramAccountMergeCookieName,
-} from "@/backend/integrations/auth/telegram-account-merge-service";
-import { ServiceError } from "@/backend/errors/service-error";
+} from "@/backend/integrations/auth/telegram-account-merge-store";
+import { requestRemnashopEmailVerification } from "@/backend/integrations/auth/email-verification-delivery";
+import {
+  getRemnashopMe,
+  getRemnashopUserIdFromAccessToken,
+  protectRemnashopToken,
+  remnashopAuth,
+  remnashopAuthTelegramIdentity,
+  remnashopLinkTelegram,
+  remnashopMergeUsers,
+} from "@/backend/integrations/remnashop/client";
+import { linkCurrentUserToRemnashopAuth } from "@/backend/integrations/remnashop/session";
+import { getCurrentSession, refreshCurrentAccessCookie } from "@/backend/integrations/sessions/web-session-service";
+import { withPaymentOwnerChangeFence } from "@/backend/integrations/payments/payment-user-merge-service";
+import { assertRateLimit } from "@/backend/limits/rate-limit";
+import { auditLog } from "@/backend/observability/audit";
+
+type CurrentSession = NonNullable<Awaited<ReturnType<typeof getCurrentSession>>>;
+type ProviderAuth = Awaited<ReturnType<typeof remnashopAuth>>;
+
+function actorSession(actor: { context: unknown }) {
+  return actor.context as CurrentSession;
+}
+
+function providerAuth(session: { context: unknown }) {
+  return session.context as ProviderAuth;
+}
+
+function gatewayError(error: unknown): LinkAccountGatewayError {
+  if (error instanceof LinkAccountGatewayError) return error;
+  if (!(error instanceof ServiceError)) return new LinkAccountGatewayError("INTERNAL_ERROR");
+  const message = String(error.debug?.message ?? error.message).toLowerCase();
+  if (error.code === "CONFLICT" && message.includes("email already exists")) {
+    return new LinkAccountGatewayError("EMAIL_ALREADY_EXISTS");
+  }
+  if (error.code === "CONFLICT" && message.includes("email is already verified")) {
+    return new LinkAccountGatewayError("EMAIL_ALREADY_VERIFIED");
+  }
+  if (error.code === "CONFLICT" && message.includes("both users have current subscriptions")) {
+    return new LinkAccountGatewayError("ACCOUNT_MERGE_SUBSCRIPTIONS_CONFLICT");
+  }
+  return new LinkAccountGatewayError(error.code);
+}
+
+async function adapt<T>(work: () => Promise<T>) {
+  try { return await work(); }
+  catch (error) { throw gatewayError(error); }
+}
 
 async function mergeToken() {
   const token = (await cookies()).get(telegramAccountMergeCookieName)?.value;
@@ -18,46 +65,141 @@ async function mergeToken() {
   return token;
 }
 
-async function clearMergeToken() {
-  (await cookies()).delete(telegramAccountMergeCookieName);
-}
-
 export const productionLinkAccountReader: LinkAccountReader = {
-  async loadProfile() {
-    const { user } = await getCurrentAuthProfile();
-    return {
-      email: user.email ?? null,
-      emailVerified: Boolean(user.emailVerified ?? user.is_email_verified),
-      telegramId: user.telegramId ?? user.telegram_id?.toString() ?? null,
-    };
+  async loadMergeActor() {
+    const session = await adapt(() => getCurrentSession());
+    return session ? { userId: session.userId, fullAssurance: session.assuranceLevel === "FULL" } : null;
   },
-  async loadPasskeys() {
-    const { credentials } = await listPasskeys();
-    return credentials.map((credential) => ({
-      id: credential.id,
-      name: credential.name,
-      createdAt: credential.createdAt.toISOString(),
-      lastUsedAt: credential.lastUsedAt?.toISOString() ?? null,
-    }));
-  },
-  async loadTelegramMergeConfirmation() {
-    const confirmation = await getTelegramAccountMergeConfirmation(await mergeToken());
+  async loadTelegramMergeConfirmation(userId) {
+    const confirmation = await getTelegramAccountMergeConfirmation(await mergeToken(), userId);
     return { ...confirmation, emailWillBeReplaced: confirmation.emailWillBeReplaced };
   },
 };
 
 export const productionLinkAccountCommands: LinkAccountCommands = {
-  async linkEmail(input) {
-    const result = await linkRemnashopAccount(input);
-    return { linked: result.linked };
+  async loadLinkActor() {
+    const session = await adapt(() => getCurrentSession());
+    if (!session) return null;
+    return {
+      context: session,
+      userId: session.userId,
+      email: session.user.email,
+      emailVerified: session.user.emailVerified,
+      telegramId: session.user.telegramId,
+      telegramUsername: session.user.telegramUsername,
+      upstreamAccountId: session.user.remnashopUserId,
+      fullAssurance: session.assuranceLevel === "FULL",
+    };
   },
-  async confirmTelegramMerge() {
-    await confirmTelegramAccountMerge(await mergeToken());
-    await clearMergeToken();
+
+  async assertLinkRateLimit(email) {
+    await adapt(() => assertRateLimit({ action: "remnashop_link", email, limit: 10, windowSeconds: 15 * 60 }));
   },
-  async cancelTelegramMerge() {
-    await cancelTelegramAccountMerge(await mergeToken());
-    await clearMergeToken();
+
+  async authenticateEmail(input) {
+    return { context: await adapt(() => remnashopAuth(
+      input.operation === "login" ? "/auth/login" : "/auth/register",
+      { email: input.email, password: input.password },
+    )) };
   },
-  async deletePasskey(id) { await deletePasskey(id); },
+
+  async linkActorIsCurrent(actor) {
+    const expected = actorSession(actor);
+    const current = await adapt(() => getCurrentSession());
+    return Boolean(current
+      && current.id === expected.id
+      && current.userId === expected.userId
+      && current.user.remnashopUserId === expected.user.remnashopUserId
+      && current.user.email === expected.user.email
+      && current.user.emailVerified === expected.user.emailVerified
+      && current.user.telegramId === expected.user.telegramId
+      && current.user.telegramUsername === expected.user.telegramUsername);
+  },
+
+  async loadProviderProfile(session) {
+    const profile = await adapt(() => getRemnashopMe(providerAuth(session).cookies.accessToken));
+    return { email: profile.email, emailVerified: profile.is_email_verified };
+  },
+
+  providerAccountId(session) {
+    return getRemnashopUserIdFromAccessToken(providerAuth(session).cookies.accessToken);
+  },
+
+  async telegramProviderSession(input) {
+    return { context: await adapt(() => remnashopAuthTelegramIdentity(input)) };
+  },
+
+  async attachTelegram(session, input) {
+    await adapt(() => remnashopLinkTelegram({ accessToken: providerAuth(session).cookies.accessToken, ...input }));
+  },
+
+  async mergeProviderAccounts(input) {
+    await adapt(() => remnashopMergeUsers({
+      sourceUserId: input.sourceAccountId,
+      targetUserId: input.targetAccountId,
+      reason: input.reason,
+    }).then(() => undefined));
+  },
+
+  async refreshTelegramProviderSession(input) {
+    return { context: await adapt(() => remnashopAuthTelegramIdentity(input)) };
+  },
+
+  async linkCurrentAccount(session, input) {
+    const auth = providerAuth(session);
+    const linked = await adapt(() => linkCurrentUserToRemnashopAuth({
+      accessToken: auth.cookies.accessToken,
+      refreshToken: auth.cookies.refreshToken,
+      auth: auth.data,
+      ...(input.upstreamMerged ? { invalidateSiblingRemnashopTokens: true } : {}),
+      paymentOwnerFenceHeld: input.ownerFenceHeld,
+    }));
+    await adapt(() => refreshCurrentAccessCookie());
+    return { userId: linked.user.id };
+  },
+
+  withOwnerChangeFence: withPaymentOwnerChangeFence,
+
+  async emailOwnerId(email) {
+    return (await adapt(() => prisma.webUser.findUnique({ where: { email }, select: { id: true } })))?.id ?? null;
+  },
+
+  async stagePendingEmail({ actor, providerSession, email, providerEmail, stagedLocally }) {
+    const session = actorSession(actor);
+    const auth = providerAuth(providerSession);
+    await adapt(() => prisma.$transaction(async (tx) => {
+      await tx.webSession.update({
+        where: { id: session.id },
+        data: {
+          remnashopAccessTokenEncrypted: protectRemnashopToken(auth.cookies.accessToken),
+          remnashopRefreshTokenEncrypted: protectRemnashopToken(auth.cookies.refreshToken),
+          remnashopAccessExpiresAt: new Date(auth.data.expires_at),
+          remnashopRefreshExpiresAt: new Date(auth.data.refresh_expires_at),
+        },
+      });
+      await tx.webUser.update({
+        where: { id: session.userId },
+        data: {
+          pendingRemnashopUserId: getRemnashopUserIdFromAccessToken(auth.cookies.accessToken),
+          pendingRemnashopEmail: providerEmail ?? email,
+          ...(stagedLocally ? { email, emailVerified: false, authPending: false } : {}),
+        },
+      });
+    }));
+    if (stagedLocally) await adapt(() => refreshCurrentAccessCookie());
+  },
+
+  async requestProviderVerification(session, email) {
+    const result = await adapt(() => requestRemnashopEmailVerification({
+      accessToken: providerAuth(session).cookies.accessToken,
+      body: { email },
+      source: "link_remnashop",
+    }));
+    return { targetEmail: result.target_email };
+  },
+
+  async auditLinkEvent(input) {
+    await adapt(() => auditLog(input));
+  },
+
 };

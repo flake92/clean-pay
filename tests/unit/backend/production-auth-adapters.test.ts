@@ -5,23 +5,27 @@ const mocks = vi.hoisted(() => ({
   remnashopIdentifyEmail: vi.fn(),
   remnashopAuth: vi.fn(),
   remnashopRequestPasswordReset: vi.fn(),
+  getAuthorizedRemnashopTokens: vi.fn(),
+  getRemnashopUserIdFromAccessToken: vi.fn(),
+  getRemnashopMe: vi.fn(),
+  remnashopRequest: vi.fn(),
   createSessionFromRemnashopAuth: vi.fn(),
   requestRemnashopEmailVerification: vi.fn(),
   withAuthConcurrency: vi.fn(),
   auditLog: vi.fn(),
   assertRateLimit: vi.fn(),
+  assertCooldown: vi.fn(),
   verifyTurnstileToken: vi.fn(),
   requestEmailVerification: vi.fn(),
   confirmEmailVerification: vi.fn(),
   changeEmail: vi.fn(),
   changePassword: vi.fn(),
-  getCurrentAuthProfile: vi.fn(),
-  beginPasskeyLogin: vi.fn(),
-  beginPasskeyRegistration: vi.fn(),
-  finishPasskeyLogin: vi.fn(),
-  finishPasskeyRegistration: vi.fn(),
-  deletePasskey: vi.fn(),
-  listPasskeys: vi.fn(),
+  remnashopChangePassword: vi.fn(), remnashopRefreshTokens: vi.fn(), protectRemnashopToken: vi.fn((value: string) => `protected:${value}`),
+  getJwtExpiresAt: vi.fn(), replaceUpstreamTokens: vi.fn(), replaceWebSessionAfterPasswordChange: vi.fn(),
+  remnashopAuthTelegramIdentity: vi.fn(), remnashopLinkTelegram: vi.fn(), remnashopMergeUsers: vi.fn(),
+  linkCurrentUserToRemnashopAuth: vi.fn(), refreshCurrentAccessCookie: vi.fn(), withPaymentOwnerChangeFence: vi.fn(),
+  getCurrentSession: vi.fn(), loggerWarn: vi.fn(),
+  prisma: { $transaction: vi.fn(), webUser: { findUnique: vi.fn(), update: vi.fn() }, webSession: { update: vi.fn() } },
   linkRemnashopAccount: vi.fn(),
   cancelTelegramAccountMerge: vi.fn(),
   confirmTelegramAccountMerge: vi.fn(),
@@ -37,36 +41,49 @@ vi.mock("@/backend/integrations/remnashop/client", () => ({
   remnashopIdentifyEmail: mocks.remnashopIdentifyEmail,
   remnashopAuth: mocks.remnashopAuth,
   remnashopRequestPasswordReset: mocks.remnashopRequestPasswordReset,
+  getAuthorizedRemnashopTokens: mocks.getAuthorizedRemnashopTokens,
+  getRemnashopUserIdFromAccessToken: mocks.getRemnashopUserIdFromAccessToken,
+  getRemnashopMe: mocks.getRemnashopMe,
+  remnashopRequest: mocks.remnashopRequest,
+  remnashopChangePassword: mocks.remnashopChangePassword,
+  remnashopRefreshTokens: mocks.remnashopRefreshTokens,
+  protectRemnashopToken: mocks.protectRemnashopToken,
+  getJwtExpiresAt: mocks.getJwtExpiresAt,
+  remnashopAuthTelegramIdentity: mocks.remnashopAuthTelegramIdentity,
+  remnashopLinkTelegram: mocks.remnashopLinkTelegram,
+  remnashopMergeUsers: mocks.remnashopMergeUsers,
 }));
 vi.mock("@/backend/integrations/remnashop/session", () => ({
   createSessionFromRemnashopAuth: mocks.createSessionFromRemnashopAuth,
+  linkCurrentUserToRemnashopAuth: mocks.linkCurrentUserToRemnashopAuth,
 }));
 vi.mock("@/backend/limits/rate-limit", () => ({
   assertRateLimit: mocks.assertRateLimit,
+  assertCooldown: mocks.assertCooldown,
   withAuthConcurrency: mocks.withAuthConcurrency,
 }));
 vi.mock("@/backend/observability/audit", () => ({ auditLog: mocks.auditLog }));
 vi.mock("@/backend/security/turnstile", () => ({ verifyTurnstileToken: mocks.verifyTurnstileToken }));
-vi.mock("@/backend/integrations/auth/email-verification-service", () => ({
+vi.mock("@/backend/integrations/auth/email-verification-delivery", () => ({
   requestRemnashopEmailVerification: mocks.requestRemnashopEmailVerification,
-  requestEmailVerification: mocks.requestEmailVerification,
-  confirmEmailVerification: mocks.confirmEmailVerification,
-  changeEmail: mocks.changeEmail,
 }));
-vi.mock("@/backend/auth/password", () => ({ changePassword: mocks.changePassword }));
-vi.mock("@/backend/auth/profile", () => ({ getCurrentAuthProfile: mocks.getCurrentAuthProfile }));
+vi.mock("@/backend/integrations/auth/prisma-auth-session-repository", () => ({
+  prismaAuthSessionRepository: { replaceUpstreamTokens: mocks.replaceUpstreamTokens },
+}));
+vi.mock("@/backend/integrations/sessions/web-session-service", () => ({
+  replaceWebSessionAfterPasswordChange: mocks.replaceWebSessionAfterPasswordChange,
+  refreshCurrentAccessCookie: mocks.refreshCurrentAccessCookie,
+  getCurrentSession: mocks.getCurrentSession,
+}));
+vi.mock("@/backend/integrations/payments/payment-user-merge-service", () => ({
+  withPaymentOwnerChangeFence: mocks.withPaymentOwnerChangeFence,
+}));
+vi.mock("@/backend/observability/logger", () => ({ logger: { warn: mocks.loggerWarn } }));
+vi.mock("@/backend/database/prisma", () => ({ prisma: mocks.prisma }));
 vi.mock("@/backend/integrations/auth/passkey-service", () => ({
-  beginPasskeyLogin: mocks.beginPasskeyLogin,
-  beginPasskeyRegistration: mocks.beginPasskeyRegistration,
-  finishPasskeyLogin: mocks.finishPasskeyLogin,
-  finishPasskeyRegistration: mocks.finishPasskeyRegistration,
-  deletePasskey: mocks.deletePasskey,
-  listPasskeys: mocks.listPasskeys,
+  recordPasskeyUse: vi.fn(),
 }));
-vi.mock("@/backend/integrations/auth/remnashop-link-service", () => ({ linkRemnashopAccount: mocks.linkRemnashopAccount }));
-vi.mock("@/backend/integrations/auth/telegram-account-merge-service", () => ({
-  cancelTelegramAccountMerge: mocks.cancelTelegramAccountMerge,
-  confirmTelegramAccountMerge: mocks.confirmTelegramAccountMerge,
+vi.mock("@/backend/integrations/auth/telegram-account-merge-store", () => ({
   getTelegramAccountMergeConfirmation: mocks.getTelegramAccountMergeConfirmation,
   telegramAccountMergeCookieName: "merge-token",
 }));
@@ -79,14 +96,15 @@ import { AuthGatewayError } from "@/application/auth/ports/auth-commands";
 import { productionAuthCommands } from "@/backend/integrations/auth/auth-commands";
 import { productionEmailVerificationCommands } from "@/backend/integrations/auth/email-verification";
 import { productionLinkAccountCommands, productionLinkAccountReader } from "@/backend/integrations/auth/link-account";
-import { productionPasskeyCommands } from "@/backend/integrations/auth/passkey-commands";
-import { productionProfileCommands, productionProfileReader } from "@/backend/integrations/profile/profile-adapter";
+import { productionProfileCommands } from "@/backend/integrations/profile/profile-adapter";
 
 describe("production auth and profile adapters", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.cookieGet.mockReturnValue({ value: "signed-merge-token" });
     mocks.withAuthConcurrency.mockImplementation(async (_key: string, work: () => Promise<unknown>) => work());
+    mocks.withPaymentOwnerChangeFence.mockImplementation(async ({ work }: { work: () => Promise<unknown> }) => work());
+    mocks.prisma.$transaction.mockImplementation(async (work: (tx: typeof mocks.prisma) => Promise<unknown>) => work(mocks.prisma));
   });
 
   it("implements granular auth operations without owning the workflow", async () => {
@@ -208,115 +226,258 @@ describe("production auth and profile adapters", () => {
     })).rejects.toMatchObject({ code: "INTERNAL_ERROR" });
   });
 
-  it("maps email verification and readiness without leaking provider DTOs", async () => {
-    mocks.requestEmailVerification.mockResolvedValue({ target_email: "u@example.com" });
-    mocks.confirmEmailVerification.mockResolvedValue({ account_sync_pending: true });
-    mocks.getCurrentAuthProfile.mockResolvedValue({ user: { email: "u@example.com", emailVerified: true } });
+  it("maps email verification without leaking provider DTOs", async () => {
+    mocks.getAuthorizedRemnashopTokens.mockResolvedValue({
+      accessToken: "access-token",
+      session: {
+        userId: "user-1",
+        user: {
+          email: "u@example.com", emailVerified: false, telegramId: null,
+          pendingRemnashopUserId: null, pendingRemnashopEmail: null,
+        },
+      },
+    });
+    mocks.getRemnashopUserIdFromAccessToken.mockReturnValue("upstream-1");
+    mocks.requestRemnashopEmailVerification.mockResolvedValue({ target_email: "u@example.com" });
+    mocks.getRemnashopMe.mockResolvedValue({ email: "u@example.com", pending_email: null, is_email_verified: false });
+    mocks.remnashopRequest.mockResolvedValue({ email: "u@example.com" });
 
-    await expect(productionEmailVerificationCommands.requestCode({ email: "u@example.com" }))
+    const actor = await productionEmailVerificationCommands.loadActor();
+    await productionEmailVerificationCommands.verifyHuman("token");
+    await productionEmailVerificationCommands.assertRequestLimits({
+      userId: actor.userId, email: actor.email, telegramId: actor.telegramId,
+    });
+    await expect(productionEmailVerificationCommands.requestProviderCode(actor, "u@example.com"))
       .resolves.toEqual({ targetEmail: "u@example.com" });
-    await expect(productionEmailVerificationCommands.confirmCode({ code: "123456" }))
-      .resolves.toEqual({ accountSyncPending: true });
-    await expect(productionEmailVerificationCommands.checkReadiness())
-      .resolves.toEqual({ status: "ready" });
-
-    mocks.getCurrentAuthProfile.mockRejectedValueOnce(new ServiceError("ACCOUNT_MERGE_REQUIRED", 409));
-    await expect(productionEmailVerificationCommands.checkReadiness())
-      .resolves.toEqual({ status: "merge-conflict" });
-    mocks.getCurrentAuthProfile.mockRejectedValueOnce(new ServiceError("UNAUTHORIZED", 401));
-    await expect(productionEmailVerificationCommands.checkReadiness())
-      .resolves.toEqual({ status: "unauthorized" });
-    mocks.getCurrentAuthProfile.mockRejectedValueOnce(new Error("offline"));
-    await expect(productionEmailVerificationCommands.checkReadiness())
-      .resolves.toEqual({ status: "unavailable" });
+    await productionEmailVerificationCommands.auditCodeRequested({ userId: actor.userId, targetEmail: "u@example.com" });
+    await expect(productionEmailVerificationCommands.loadProviderProfile(actor))
+      .resolves.toEqual({ email: "u@example.com", pendingEmail: null, emailVerified: false });
+    await expect(productionEmailVerificationCommands.confirmProviderCode(actor, {
+      code: "123456", email: "u@example.com", alreadyVerified: false,
+    })).resolves.toMatchObject({ email: "u@example.com" });
   });
 
   it("translates e-mail verification adapter failures", async () => {
-    mocks.requestEmailVerification.mockRejectedValueOnce(new ServiceError("RATE_LIMITED", 429));
-    await expect(productionEmailVerificationCommands.requestCode({ email: "u@example.com" }))
+    mocks.verifyTurnstileToken.mockRejectedValueOnce(new ServiceError("RATE_LIMITED", 429));
+    await expect(productionEmailVerificationCommands.verifyHuman("token"))
       .rejects.toMatchObject({ code: "RATE_LIMITED" });
 
-    mocks.confirmEmailVerification.mockRejectedValueOnce(new Error("invalid response"));
-    await expect(productionEmailVerificationCommands.confirmCode({ code: "123456" }))
+    mocks.getAuthorizedRemnashopTokens.mockResolvedValueOnce({
+      accessToken: "access", refreshToken: "refresh",
+      session: { userId: "u", user: { email: null, emailVerified: false, telegramId: null, telegramUsername: null, pendingRemnashopUserId: null, pendingRemnashopEmail: null } },
+    });
+    mocks.getRemnashopUserIdFromAccessToken.mockReturnValueOnce("upstream");
+    const actor = await productionEmailVerificationCommands.loadActor();
+    mocks.remnashopRequest.mockRejectedValueOnce(new Error("invalid response"));
+    await expect(productionEmailVerificationCommands.confirmProviderCode(actor, { code: "123456", alreadyVerified: false }))
       .rejects.toMatchObject({ code: "INTERNAL_ERROR" });
   });
 
-  it("keeps WebAuthn provider types inside the adapter", async () => {
-    const options = { challenge: "challenge" };
-    mocks.beginPasskeyLogin.mockResolvedValue(options);
-    mocks.beginPasskeyRegistration.mockResolvedValue(options);
-
-    await productionPasskeyCommands.verifyHuman("token");
-    await expect(productionPasskeyCommands.beginLogin("u@example.com"))
-      .resolves.toBe(options);
-    await productionPasskeyCommands.finishLogin({ id: "credential" } as never);
-    await expect(productionPasskeyCommands.beginRegistration()).resolves.toBe(options);
-    await productionPasskeyCommands.finishRegistration({ id: "credential", name: "Laptop" } as never);
-
-    expect(mocks.finishPasskeyLogin).toHaveBeenCalledWith({ id: "credential" });
-    expect(mocks.finishPasskeyRegistration).toHaveBeenCalledWith({ id: "credential", name: "Laptop" });
-  });
-
-  it("maps profile queries and mutations to application DTOs", async () => {
-    mocks.getCurrentAuthProfile.mockResolvedValue({
-      user: {
-        auth_type: "EMAIL",
-        email: "u@example.com",
-        is_email_verified: true,
-        pending_email: "new@example.com",
-        telegram_id: 123n,
+  it("implements the complete granular e-mail persistence and provider gateway", async () => {
+    mocks.getAuthorizedRemnashopTokens.mockResolvedValue({
+      accessToken: "email-access", refreshToken: "email-refresh",
+      session: {
+        id: "session-1", userId: "user-1", remnashopAccessExpiresAt: new Date("2099-01-01"), remnashopRefreshExpiresAt: new Date("2099-02-01"),
+        user: { email: "u@example.com", emailVerified: false, telegramId: "777", telegramUsername: "clean", pendingRemnashopUserId: "upstream-1", pendingRemnashopEmail: "u@example.com" },
       },
     });
-    mocks.requestEmailVerification.mockResolvedValue({ target_email: "u@example.com" });
-    mocks.changeEmail.mockResolvedValue({ emailVerification: { target_email: "new@example.com" } });
-
-    await expect(productionProfileReader.loadCurrent()).resolves.toEqual({
-      authType: "EMAIL",
-      email: "u@example.com",
-      emailVerified: true,
-      pendingEmail: "new@example.com",
-      telegramId: "123",
+    mocks.getRemnashopUserIdFromAccessToken.mockImplementation((token: string) => token.includes("telegram") ? "telegram-account" : "upstream-1");
+    mocks.prisma.webUser.findUnique.mockResolvedValue(null);
+    mocks.prisma.webUser.update.mockResolvedValue({});
+    mocks.remnashopAuthTelegramIdentity.mockResolvedValue({
+      data: { expires_at: "2099-01-01", refresh_expires_at: "2099-02-01" },
+      cookies: { accessToken: "telegram-access", refreshToken: "telegram-refresh" },
     });
-    await expect(productionProfileCommands.requestEmailVerification({ email: "u@example.com" }))
-      .resolves.toEqual({ targetEmail: "u@example.com" });
-    await expect(productionProfileCommands.changeEmail({ email: "new@example.com" }))
-      .resolves.toEqual({ targetEmail: "new@example.com" });
-    await productionProfileCommands.changePassword({ currentPassword: "old", newPassword: "new" });
-    expect(mocks.changePassword).toHaveBeenCalledWith({ current_password: "old", new_password: "new" });
+    mocks.remnashopRequest.mockResolvedValue({ pending_email: "new@example.com" });
+    mocks.requestRemnashopEmailVerification.mockResolvedValue({ target_email: "new@example.com" });
+    mocks.linkCurrentUserToRemnashopAuth.mockResolvedValue({ user: { id: "user-1" } });
+
+    const actor = await productionEmailVerificationCommands.loadActor({ allowUnverifiedEmail: true });
+    await expect(productionEmailVerificationCommands.persistConfirmedEmail(actor, "u@example.com"))
+      .resolves.toMatchObject({ upstreamAccountId: "upstream-1", localVerificationChanged: true });
+    const current = productionEmailVerificationCommands.currentProviderSession(actor);
+    expect(productionEmailVerificationCommands.providerAccountId(current)).toBe("upstream-1");
+    const telegram = await productionEmailVerificationCommands.telegramProviderSession({ telegramId: "777", telegramUsername: "clean" });
+    await productionEmailVerificationCommands.attachTelegram(current, { telegramId: "777", telegramUsername: "clean" });
+    await productionEmailVerificationCommands.mergeProviderAccounts({ sourceAccountId: "upstream-1", targetAccountId: "telegram-account", reason: "proof" });
+    await productionEmailVerificationCommands.refreshProviderSession({ telegramId: "777", telegramUsername: "clean" });
+    await productionEmailVerificationCommands.linkCurrentAccount(telegram, { upstreamMerged: true, ownerFenceHeld: true });
+    await productionEmailVerificationCommands.withOwnerChangeFence({ userIds: ["user-1"], upstreamAccountIds: ["upstream-1"], emails: ["u@example.com"], telegramIds: ["777"], work: async () => "done" });
+    await productionEmailVerificationCommands.refreshLocalSession();
+    await productionEmailVerificationCommands.auditEmailVerified({ userId: "user-1", email: "u@example.com" });
+    await productionEmailVerificationCommands.markAccountSyncPending("user-1", new Error("offline"));
+    await productionEmailVerificationCommands.assertChangeLimits({ userId: "user-1", email: "new@example.com", telegramId: "777" });
+    await expect(productionEmailVerificationCommands.changeProviderEmail(actor, "new@example.com"))
+      .resolves.toEqual({ pendingEmail: "new@example.com" });
+    await productionEmailVerificationCommands.persistPendingEmail(actor, "new@example.com");
+    await productionEmailVerificationCommands.auditEmailChangeRequested({ userId: "user-1", pendingEmail: "new@example.com", verificationTargetEmail: "new@example.com" });
+
+    expect(mocks.remnashopLinkTelegram).toHaveBeenCalled();
+    expect(mocks.remnashopMergeUsers).toHaveBeenCalled();
+    expect(mocks.linkCurrentUserToRemnashopAuth).toHaveBeenCalledWith(expect.objectContaining({ paymentOwnerFenceHeld: true }));
+    expect(mocks.refreshCurrentAccessCookie).toHaveBeenCalled();
+    expect(mocks.loggerWarn).toHaveBeenCalled();
   });
 
-  it("maps linked-account state and consumes merge cookies", async () => {
-    mocks.getCurrentAuthProfile.mockResolvedValue({
-      user: { email: "u@example.com", emailVerified: true, telegramId: "123" },
+  it("covers e-mail adapter ownership and conflict translations", async () => {
+    mocks.getAuthorizedRemnashopTokens.mockResolvedValue({
+      accessToken: "access", refreshToken: "refresh",
+      session: { userId: "user-1", user: { email: "u@example.com", emailVerified: true, telegramId: null, telegramUsername: null, pendingRemnashopUserId: null, pendingRemnashopEmail: null } },
     });
-    mocks.listPasskeys.mockResolvedValue({
-      credentials: [{ id: "passkey-1", name: "Laptop", createdAt: new Date("2026-01-01"), lastUsedAt: null }],
+    mocks.getRemnashopUserIdFromAccessToken.mockReturnValue("upstream-1");
+    const actor = await productionEmailVerificationCommands.loadActor();
+    await productionEmailVerificationCommands.assertConfirmationLimit({ email: "u@example.com", telegramId: null });
+    await expect(productionEmailVerificationCommands.confirmProviderCode(actor, { email: "u@example.com", code: "123456", alreadyVerified: true }))
+      .resolves.toEqual({ email: "u@example.com" });
+    mocks.prisma.webUser.findUnique.mockResolvedValueOnce({ id: "other-user" });
+    await expect(productionEmailVerificationCommands.persistConfirmedEmail(actor, "u@example.com"))
+      .resolves.toMatchObject({ existingOwnerId: "other-user", localVerificationChanged: true });
+
+    mocks.remnashopMergeUsers.mockRejectedValueOnce(new ServiceError("CONFLICT", 409, "Both users have current subscriptions"));
+    await expect(productionEmailVerificationCommands.mergeProviderAccounts({ sourceAccountId: "one", targetAccountId: "two", reason: "proof" }))
+      .rejects.toMatchObject({ code: "ACCOUNT_MERGE_SUBSCRIPTIONS_CONFLICT" });
+    mocks.remnashopMergeUsers.mockRejectedValueOnce(new ServiceError("UPSTREAM_UNAVAILABLE", 503));
+    await expect(productionEmailVerificationCommands.mergeProviderAccounts({ sourceAccountId: "one", targetAccountId: "two", reason: "proof" }))
+      .rejects.toMatchObject({ code: "UPSTREAM_UNAVAILABLE" });
+  });
+
+  it("implements every password adapter operation with opaque provider contexts", async () => {
+    const authorized = {
+      accessToken: "old-access", refreshToken: "old-refresh",
+      session: { id: "session-1", userId: "user-1" },
+    };
+    mocks.getAuthorizedRemnashopTokens.mockResolvedValue(authorized);
+    mocks.remnashopChangePassword.mockResolvedValue({
+      data: {}, cookies: { accessToken: "new-access", refreshToken: "new-refresh" },
     });
+    mocks.remnashopRefreshTokens.mockResolvedValue({
+      data: { expires_at: "2099-01-01T00:00:00.000Z", refresh_expires_at: "2099-02-01T00:00:00.000Z" },
+      cookies: { accessToken: "fresh-access", refreshToken: "fresh-refresh" },
+    });
+    mocks.getJwtExpiresAt.mockReturnValue(new Date("2099-01-01T00:00:00.000Z"));
+
+    const session = await productionProfileCommands.loadPasswordSession();
+    const refreshed = await productionProfileCommands.refreshProviderSession(session);
+    await productionProfileCommands.persistRefreshedProviderSession(session, refreshed);
+    const changed = await productionProfileCommands.changeProviderPassword(session, { currentPassword: "old", newPassword: "new-password" });
+    await productionProfileCommands.replaceLocalPasswordSession(session, changed);
+    await productionProfileCommands.auditPasswordChanged("user-1");
+
+    expect(mocks.replaceUpstreamTokens).toHaveBeenCalledWith("session-1", expect.objectContaining({ accessTokenEncrypted: "protected:fresh-access" }));
+    expect(mocks.replaceWebSessionAfterPasswordChange).toHaveBeenCalledWith(expect.objectContaining({ sessionId: "session-1", userId: "user-1" }));
+    expect(mocks.auditLog).toHaveBeenCalledWith({ action: "password_changed", userId: "user-1" });
+
+    mocks.remnashopChangePassword.mockRejectedValueOnce(new ServiceError("CURRENT_PASSWORD_INVALID", 401));
+    await expect(productionProfileCommands.changeProviderPassword(session, { currentPassword: "bad", newPassword: "new-password" }))
+      .rejects.toMatchObject({ code: "CURRENT_PASSWORD_INVALID" });
+    mocks.remnashopChangePassword.mockRejectedValueOnce(new Error("invalid provider response"));
+    await expect(productionProfileCommands.changeProviderPassword(session, { currentPassword: "bad", newPassword: "new-password" }))
+      .rejects.toMatchObject({ code: "INTERNAL_ERROR" });
+    mocks.getJwtExpiresAt.mockReturnValueOnce(null);
+    await productionProfileCommands.replaceLocalPasswordSession(session, changed);
+    expect(mocks.replaceWebSessionAfterPasswordChange).toHaveBeenLastCalledWith(expect.objectContaining({
+      remnashopAccessExpiresAt: expect.any(Date),
+    }));
+  });
+
+  it("loads linked-account merge confirmation from its store", async () => {
     mocks.getTelegramAccountMergeConfirmation.mockResolvedValue({ emailWillBeReplaced: true });
-    mocks.linkRemnashopAccount.mockResolvedValue({ linked: true });
+    mocks.getCurrentSession.mockResolvedValueOnce({ userId: "user-1", assuranceLevel: "FULL" });
+    await expect(productionLinkAccountReader.loadMergeActor()).resolves.toEqual({ userId: "user-1", fullAssurance: true });
+    mocks.getCurrentSession.mockResolvedValueOnce(null);
+    await expect(productionLinkAccountReader.loadMergeActor()).resolves.toBeNull();
 
-    await expect(productionLinkAccountReader.loadProfile()).resolves.toMatchObject({ telegramId: "123" });
-    await expect(productionLinkAccountReader.loadPasskeys()).resolves.toEqual([expect.objectContaining({
-      id: "passkey-1",
-      createdAt: "2026-01-01T00:00:00.000Z",
-    })]);
-    await expect(productionLinkAccountReader.loadTelegramMergeConfirmation())
+    await expect(productionLinkAccountReader.loadTelegramMergeConfirmation("user-1"))
       .resolves.toMatchObject({ emailWillBeReplaced: true });
-    await expect(productionLinkAccountCommands.linkEmail({ email: "u@example.com", password: "secret" } as never))
-      .resolves.toEqual({ linked: true });
-    await productionLinkAccountCommands.confirmTelegramMerge();
-    await productionLinkAccountCommands.cancelTelegramMerge();
-    await productionLinkAccountCommands.deletePasskey("passkey-1");
+    expect(mocks.getTelegramAccountMergeConfirmation).toHaveBeenCalledWith("signed-merge-token", "user-1");
+  });
 
-    expect(mocks.confirmTelegramAccountMerge).toHaveBeenCalledWith("signed-merge-token");
-    expect(mocks.cancelTelegramAccountMerge).toHaveBeenCalledWith("signed-merge-token");
-    expect(mocks.cookieDelete).toHaveBeenCalledTimes(2);
-    expect(mocks.deletePasskey).toHaveBeenCalledWith("passkey-1");
+  it("implements every linked-account gateway operation without scenario branching", async () => {
+    const session = {
+      id: "session-1", userId: "user-1", assuranceLevel: "FULL",
+      user: { email: "u@example.com", emailVerified: true, telegramId: "777", telegramUsername: "clean", remnashopUserId: "telegram-account" },
+    };
+    const provider = {
+      data: { expires_at: "2099-01-01", refresh_expires_at: "2099-02-01" },
+      cookies: { accessToken: "email-access", refreshToken: "email-refresh" },
+    };
+    mocks.getCurrentSession.mockResolvedValue(session);
+    mocks.remnashopAuth.mockResolvedValue(provider);
+    mocks.getRemnashopMe.mockResolvedValue({ email: "u@example.com", is_email_verified: true });
+    mocks.getRemnashopUserIdFromAccessToken.mockReturnValue("email-account");
+    mocks.remnashopAuthTelegramIdentity.mockResolvedValue(provider);
+    mocks.remnashopMergeUsers.mockResolvedValue({});
+    mocks.linkCurrentUserToRemnashopAuth.mockResolvedValue({ user: { id: "user-1" } });
+    mocks.prisma.webUser.findUnique.mockResolvedValue({ id: "owner-1" });
+    mocks.requestRemnashopEmailVerification.mockResolvedValue({ target_email: "u@example.com" });
+
+    const actor = await productionLinkAccountCommands.loadLinkActor();
+    if (!actor) throw new Error("expected actor");
+    await productionLinkAccountCommands.assertLinkRateLimit("u@example.com");
+    const emailSession = await productionLinkAccountCommands.authenticateEmail({ operation: "login", email: "u@example.com", password: "secret123" });
+    await expect(productionLinkAccountCommands.linkActorIsCurrent(actor)).resolves.toBe(true);
+    await expect(productionLinkAccountCommands.loadProviderProfile(emailSession)).resolves.toEqual({ email: "u@example.com", emailVerified: true });
+    expect(productionLinkAccountCommands.providerAccountId(emailSession)).toBe("email-account");
+    await productionLinkAccountCommands.telegramProviderSession({ telegramId: "777", telegramUsername: "clean" });
+    await productionLinkAccountCommands.attachTelegram(emailSession, { telegramId: "777", telegramUsername: "clean" });
+    await productionLinkAccountCommands.mergeProviderAccounts({ sourceAccountId: "email-account", targetAccountId: "telegram-account", reason: "proof" });
+    await productionLinkAccountCommands.refreshTelegramProviderSession({ telegramId: "777", telegramUsername: "clean" });
+    await expect(productionLinkAccountCommands.linkCurrentAccount(emailSession, { upstreamMerged: true, ownerFenceHeld: true })).resolves.toEqual({ userId: "user-1" });
+    await productionLinkAccountCommands.withOwnerChangeFence({ userIds: ["user-1"], upstreamAccountIds: ["email-account"], emails: ["u@example.com"], telegramIds: ["777"], work: async () => undefined });
+    await expect(productionLinkAccountCommands.emailOwnerId("u@example.com")).resolves.toBe("owner-1");
+    await productionLinkAccountCommands.stagePendingEmail({ actor, providerSession: emailSession, email: "u@example.com", providerEmail: null, stagedLocally: true });
+    await expect(productionLinkAccountCommands.requestProviderVerification(emailSession, "u@example.com")).resolves.toEqual({ targetEmail: "u@example.com" });
+    await productionLinkAccountCommands.auditLinkEvent({ action: "linked", userId: "user-1" });
+
+    expect(mocks.prisma.webSession.update).toHaveBeenCalled();
+    expect(mocks.prisma.webUser.update).toHaveBeenCalled();
+    expect(mocks.remnashopMergeUsers).toHaveBeenCalled();
+  });
+
+  it("covers linked-account authorization fences and provider error translations", async () => {
+    mocks.getCurrentSession.mockResolvedValueOnce(null);
+    await expect(productionLinkAccountCommands.loadLinkActor()).resolves.toBeNull();
+    mocks.getCurrentSession.mockResolvedValueOnce({ assuranceLevel: "BOOTSTRAP", userId: "user-1", user: {} });
+    await expect(productionLinkAccountCommands.loadLinkActor()).resolves.toMatchObject({ fullAssurance: false });
+    mocks.assertRateLimit.mockRejectedValueOnce(new ServiceError("RATE_LIMITED", 429));
+    await expect(productionLinkAccountCommands.assertLinkRateLimit("u@example.com"))
+      .rejects.toMatchObject({ code: "RATE_LIMITED" });
+
+    for (const [message, code] of [
+      ["email already exists", "EMAIL_ALREADY_EXISTS"],
+      ["email is already verified", "EMAIL_ALREADY_VERIFIED"],
+      ["both users have current subscriptions", "ACCOUNT_MERGE_SUBSCRIPTIONS_CONFLICT"],
+    ] as const) {
+      mocks.remnashopAuth.mockRejectedValueOnce(new ServiceError("CONFLICT", 409, message));
+      await expect(productionLinkAccountCommands.authenticateEmail({ operation: "register", email: "u@example.com", password: "secret123" }))
+        .rejects.toMatchObject({ code });
+    }
+    mocks.remnashopAuth.mockRejectedValueOnce(new Error("bad response"));
+    await expect(productionLinkAccountCommands.authenticateEmail({ operation: "login", email: "u@example.com", password: "secret123" }))
+      .rejects.toMatchObject({ code: "INTERNAL_ERROR" });
+
+    const expected = { context: { id: "session-1", userId: "user-1", user: { remnashopUserId: null, email: null, emailVerified: false, telegramId: null, telegramUsername: null } } };
+    mocks.getCurrentSession.mockResolvedValueOnce(null);
+    await expect(productionLinkAccountCommands.linkActorIsCurrent(expected)).resolves.toBe(false);
+  });
+
+  it("covers optional linked-account projections and non-local staging", async () => {
+    const session = { id: "session-1", userId: "user-1", assuranceLevel: "FULL", user: { email: null, emailVerified: false, telegramId: "777", telegramUsername: null, remnashopUserId: null } };
+    const provider = { data: { expires_at: "2099-01-01", refresh_expires_at: "2099-02-01" }, cookies: { accessToken: "access", refreshToken: "refresh" } };
+    mocks.getCurrentSession.mockResolvedValue(session);
+    mocks.remnashopAuth.mockResolvedValue(provider);
+    mocks.prisma.webUser.findUnique.mockResolvedValueOnce(null);
+    const actor = await productionLinkAccountCommands.loadLinkActor();
+    if (!actor) throw new Error("expected actor");
+    const providerSession = await productionLinkAccountCommands.authenticateEmail({ operation: "register", email: "u@example.com", password: "secret123" });
+    await expect(productionLinkAccountCommands.emailOwnerId("none@example.com")).resolves.toBeNull();
+    await productionLinkAccountCommands.stagePendingEmail({ actor, providerSession, email: "u@example.com", providerEmail: "provider@example.com", stagedLocally: false });
+    expect(mocks.refreshCurrentAccessCookie).not.toHaveBeenCalled();
   });
 
   it("fails closed when merge confirmation cookie is absent", async () => {
     mocks.cookieGet.mockReturnValueOnce(undefined);
-    await expect(productionLinkAccountCommands.confirmTelegramMerge())
+    await expect(productionLinkAccountReader.loadTelegramMergeConfirmation("user-1"))
       .rejects.toMatchObject({ code: "NOT_FOUND", status: 404 });
     expect(mocks.confirmTelegramAccountMerge).not.toHaveBeenCalled();
   });

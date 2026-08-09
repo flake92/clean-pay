@@ -1,11 +1,7 @@
 import { Prisma, type PaymentHistorySyncState } from "@prisma/client";
 
 import { prisma } from "@/backend/database/prisma";
-import {
-  getPaymentCapabilities,
-  getTransactionPage,
-  type RemnashopTransactionPage,
-} from "@/backend/integrations/remnashop/payment-recovery";
+import type { RemnashopTransactionPage } from "@/backend/integrations/remnashop/payment-recovery";
 import {
   getRemnashopUserIdFromAccessToken,
   getJwtExpiresAt,
@@ -336,7 +332,7 @@ export async function completePaymentHistoryPage(
   });
 }
 
-async function failPaymentHistorySync(
+export async function failPaymentHistorySync(
   claim: PaymentHistorySyncClaim,
   error: unknown,
 ) {
@@ -385,34 +381,7 @@ async function failPaymentHistorySync(
   });
 }
 
-export async function syncOnePaymentHistoryPage(input: {
-  userId: string;
-  upstreamAccountId: string;
-  accessToken: string;
-  pageSize: number;
-}) {
-  const claim = await claimPaymentHistorySync(input);
-
-  if (!claim) {
-    return { claimed: false, applied: 0, hasMore: false } as const;
-  }
-
-  try {
-    const page = await getTransactionPage({
-      accessToken: input.accessToken,
-      cursor: claim.cursor,
-      limit: input.pageSize,
-    });
-    const result = await completePaymentHistoryPage(claim, page);
-
-    return { claimed: true, ...result } as const;
-  } catch (error) {
-    await failPaymentHistorySync(claim, error);
-    throw error;
-  }
-}
-
-async function loadCurrentPaymentHistoryCredential(
+export async function loadCurrentPaymentHistoryCredential(
   userId: string,
   expectedOwnerHash: string,
 ) {
@@ -490,26 +459,8 @@ async function loadCurrentPaymentHistoryCredential(
   );
 }
 
-export async function continuePaymentHistoryBackfills(input: {
-  limit: number;
-  deadlineMs: number;
-}) {
-  if (
-    !Number.isSafeInteger(input.limit) ||
-    input.limit < 1 ||
-    input.limit > 20 ||
-    !Number.isSafeInteger(input.deadlineMs) ||
-    input.deadlineMs < 1_000 ||
-    input.deadlineMs > 30_000
-  ) {
-    throw new ServiceError(
-      "VALIDATION_ERROR",
-      400,
-      "Invalid payment history backfill bounds",
-    );
-  }
-
-  const dueRows = await prisma.$queryRaw<Array<{
+export async function listDuePaymentHistoryCandidates(limit: number) {
+  return prisma.$queryRaw<Array<{
     userId: string;
     remnashopUserId: string;
   }>>(Prisma.sql`
@@ -542,64 +493,6 @@ export async function continuePaymentHistoryBackfills(input: {
           AND web_session."remnashopAccessExpiresAt" > clock_timestamp() + INTERVAL '60 seconds'
       )
     ORDER BY sync_state."lastAttemptAt" ASC NULLS FIRST, sync_state."userId" ASC
-    LIMIT ${input.limit}
+    LIMIT ${limit}
   `);
-
-  if (dueRows.length === 0) {
-    return { attempted: 0, applied: 0, completed: 0, failed: 0 };
-  }
-  const deadlineAt = Date.now() + input.deadlineMs;
-  const counts = { attempted: 0, applied: 0, completed: 0, failed: 0 };
-
-  for (const candidate of dueRows) {
-    if (Date.now() >= deadlineAt) break;
-
-    const claim = await claimPaymentHistorySync({
-      userId: candidate.userId,
-      upstreamAccountId: candidate.remnashopUserId,
-    });
-
-    if (!claim) continue;
-
-    counts.attempted += 1;
-
-    try {
-      const accessToken = await loadCurrentPaymentHistoryCredential(
-        candidate.userId,
-        claim.upstreamOwnerHash,
-      );
-
-      if (!accessToken) {
-        throw new ServiceError(
-          "UNAUTHORIZED",
-          401,
-          "No current Remnashop session is available for payment history recovery",
-        );
-      }
-
-      const capabilities = await getPaymentCapabilities(accessToken);
-
-      if (!capabilities) {
-        throw new ServiceError(
-          "UPSTREAM_ERROR",
-          502,
-          "Remnashop keyset history capability is temporarily unavailable",
-        );
-      }
-
-      const page = await getTransactionPage({
-        accessToken,
-        cursor: claim.cursor,
-        limit: Math.min(100, capabilities.transactions.max_page_size),
-      });
-      const result = await completePaymentHistoryPage(claim, page);
-      counts.applied += result.applied;
-      if (!result.hasMore) counts.completed += 1;
-    } catch (error) {
-      await failPaymentHistorySync(claim, error);
-      counts.failed += 1;
-    }
-  }
-
-  return counts;
 }

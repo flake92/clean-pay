@@ -32,7 +32,7 @@ export type PaymentWorkflowInput =
   | { kind: "EXTEND"; request: ExtendRequest };
 
 export interface PaymentWorkflowGateway {
-  loadActor(): Promise<{ userId: string; email: string | null; telegramId: string | number | bigint | null }>;
+  loadActor(): Promise<{ userId: string; email: string | null; emailVerified: boolean; telegramId: string | number | bigint | null } | null>;
   rateLimit(input: { kind: PaymentWorkflowInput["kind"]; email: string; telegramId: string | number | bigint | null }): Promise<void>;
   beginOperation(input: {
     userId: string;

@@ -4,9 +4,12 @@ import { AppShell } from "@/app/_components/app-shell";
 import { PageHeader } from "@/frontend/components/layout";
 import { loadCabinetViewModel } from "@/application/cabinet/load-cabinet";
 import { productionCabinetReader } from "@/backend/integrations/cabinet/cabinet-reader";
+import { productionPaymentHistoryGateway } from "@/backend/integrations/payments/payment-history-reader";
+import { productionPaymentMaintenanceRunner } from "@/backend/integrations/payments/payment-maintenance-runner";
+import { productionAuthProfileGateway } from "@/backend/integrations/auth/auth-profile-gateway";
 
 export default async function CabinetPage() {
-  const model = await loadCabinetViewModel(productionCabinetReader);
+  const model = await loadCabinetViewModel(productionCabinetReader, productionAuthProfileGateway, productionPaymentHistoryGateway, productionPaymentMaintenanceRunner);
   return (
     <AppShell>
       <div className="grid">

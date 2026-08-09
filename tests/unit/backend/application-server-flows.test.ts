@@ -2,7 +2,6 @@ import { describe, expect, it, vi } from "vitest";
 
 import { executeAuthCommand } from "@/application/auth/execute-auth-command";
 import { completeTelegramCallback } from "@/application/auth/complete-telegram-callback";
-import { recoverTelegramSession } from "@/application/auth/recover-telegram-session";
 import {
   prepareTelegramAuthStart,
   TelegramAuthStartFailure,
@@ -19,6 +18,8 @@ import type { TelegramCallbackGateway } from "@/application/auth/ports/telegram-
 import type { TelegramAuthStartSecurity } from "@/application/auth/ports/telegram-auth-start";
 import type { CheckoutReader, PaymentCommands } from "@/application/payments/ports/checkout";
 import type { PaymentMaintenanceRunner } from "@/application/payments/ports/payment-maintenance";
+import type { AuthProfileGateway } from "@/application/auth/ports/auth-profile";
+import type { PasskeyManagementGateway } from "@/application/auth/ports/passkey-management";
 import { loadSupportViewModel } from "@/application/support/load-support";
 
 function authCommands(overrides: Partial<AuthCommands> = {}): AuthCommands {
@@ -33,6 +34,20 @@ function authCommands(overrides: Partial<AuthCommands> = {}): AuthCommands {
     requestPasswordReset: vi.fn(async () => undefined),
     audit: vi.fn(async () => undefined),
     ...overrides,
+  };
+}
+
+function linkCommands(overrides: Partial<LinkAccountCommands> = {}): LinkAccountCommands {
+  return {
+    loadLinkActor: vi.fn(async () => ({ context: {}, userId: "user-1", email: null, emailVerified: false, telegramId: null, telegramUsername: null, upstreamAccountId: null, fullAssurance: true })),
+    assertLinkRateLimit: vi.fn(async () => undefined), authenticateEmail: vi.fn(async () => ({ context: {} })),
+    linkActorIsCurrent: vi.fn(async () => true), loadProviderProfile: vi.fn(async () => ({ email: null, emailVerified: false })),
+    providerAccountId: vi.fn(() => "upstream-1"), telegramProviderSession: vi.fn(async () => ({ context: {} })),
+    attachTelegram: vi.fn(async () => undefined), mergeProviderAccounts: vi.fn(async () => undefined),
+    refreshTelegramProviderSession: vi.fn(async () => ({ context: {} })), linkCurrentAccount: vi.fn(async () => ({ userId: "user-1" })),
+    withOwnerChangeFence: vi.fn(async ({ work }) => work()), emailOwnerId: vi.fn(async () => null),
+    stagePendingEmail: vi.fn(async () => undefined), requestProviderVerification: vi.fn(async (_session, email) => ({ targetEmail: email })),
+    auditLinkEvent: vi.fn(async () => undefined), ...overrides,
   };
 }
 
@@ -62,23 +77,23 @@ describe("server application flows", () => {
   });
 
   it("runs bounded payment maintenance through one application scenario", async () => {
+    let now = 1_000;
     const runner: PaymentMaintenanceRunner = {
-      reconcile: vi.fn(async () => ({
-        claimed: 1,
-        succeeded: 1,
-        inProgress: 0,
-        unknown: 0,
-        manualRequired: 0,
-        retryReady: 0,
-        failed: 0,
-        manualRequiredOperationIds: [],
-      })),
-      continueHistory: vi.fn(async () => ({
-        attempted: 1,
-        applied: 20,
-        completed: 0,
-        failed: 0,
-      })),
+      claimReconciliation: vi.fn()
+        .mockResolvedValueOnce({ context: {}, operationId: "op-1", ownerMatches: true, failureCount: 0 })
+        .mockResolvedValueOnce(null),
+      recoverPayment: vi.fn(async () => ({ context: {}, state: "SUCCEEDED" as const, retryAfterSeconds: null })),
+      completeRecoveredPayment: vi.fn(async () => undefined), resetMissingPayment: vi.fn(async () => undefined),
+      releaseReconciliation: vi.fn(async () => undefined), markReconciliationManual: vi.fn(async () => undefined),
+      failReconciliation: vi.fn(async () => "released" as const), classifyReconciliationError: vi.fn(() => ({ kind: "other" as const })),
+      listHistoryCandidates: vi.fn(async () => [{ userId: "user-1", upstreamAccountId: "upstream-1" }]),
+      claimHistory: vi.fn(async () => ({ context: {}, cursor: null })),
+      authorizeHistory: vi.fn(async () => ({ context: {} })),
+      historyPageSize: vi.fn(async () => 100),
+      loadHistoryPage: vi.fn(async () => ({ context: {} })),
+      completeHistoryPage: vi.fn(async () => ({ applied: 20, hasMore: true })),
+      failHistory: vi.fn(async () => undefined),
+      now: vi.fn(() => now++),
     };
 
     await expect(runPaymentMaintenance(runner, {
@@ -89,8 +104,8 @@ describe("server application flows", () => {
       succeeded: 1,
       history: { attempted: 1, applied: 20 },
     });
-    expect(runner.reconcile).toHaveBeenCalledWith({ limit: 7, deadlineMs: 12_000 });
-    expect(runner.continueHistory).toHaveBeenCalledWith({ limit: 1, deadlineMs: 12_000 });
+    expect(runner.completeRecoveredPayment).toHaveBeenCalledOnce();
+    expect(runner.listHistoryCandidates).toHaveBeenCalledWith(1);
   });
 
   it("owns Telegram callback outcome policy in the application use case", async () => {
@@ -107,14 +122,19 @@ describe("server application flows", () => {
     };
     const gateway: TelegramCallbackGateway = {
       consume: vi.fn(async () => ({
-        user: { id: "user-1", upstreamAccountId: null },
-        redirectTo: null,
-        providerSession: { context: {} },
-        linked: false,
-        telegramId: "777",
-        telegramUsername: null,
-        mergeConfirmation: null,
+        authState: { id: "state-1", targetUserId: null, redirectTo: null },
+        identity: { telegramId: "777", telegramUsername: null, fullName: null, photoUrl: null, providerSession: { context: {} } },
       })),
+      assertIdentityRateLimit: vi.fn(async () => undefined),
+      findUserByTelegramId: vi.fn(async () => null),
+      findUserById: vi.fn(async () => null),
+      loadProviderMergeIdentity: vi.fn(async () => ({ accountId: "upstream-1", email: "u@example.com", emailVerified: true, pendingEmail: null, telegramId: "777" })),
+      preflightAccountMerge: vi.fn(),
+      persistAccountMergeConfirmation: vi.fn(async () => ({ token: "merge-token" })),
+      applyTelegramIdentity: vi.fn(async () => ({ id: "user-1", upstreamAccountId: null, email: null, emailVerified: false, telegramId: "777" })),
+      markAuthStateUser: vi.fn(async () => undefined),
+      auditIdentityResolved: vi.fn(async () => undefined),
+      clearTemporaryAuth: vi.fn(async () => undefined),
       providerAccountId: vi.fn(() => "upstream-1"),
       attachTelegramToCurrentAccount: vi.fn(async () => undefined),
       mergeProviderAccounts: vi.fn(async () => true),
@@ -135,14 +155,6 @@ describe("server application flows", () => {
       state: "callback-state",
     });
     expect(gateway.reconcileProviderSession).toHaveBeenCalledWith({ context: {} });
-  });
-
-  it("recovers Telegram sessions through an explicit application port", async () => {
-    const recover = vi.fn(async () => undefined);
-
-    await recoverTelegramSession({ recover }, "session-1", "user-1");
-
-    expect(recover).toHaveBeenCalledWith("session-1", "user-1");
   });
 
   it("loads support through its application port", () => {
@@ -272,9 +284,34 @@ describe("server application flows", () => {
 
   it("returns explicit e-mail verification outcomes", async () => {
     const commands: EmailVerificationCommands = {
-      requestCode: vi.fn(async () => ({ targetEmail: "u@example.com" })),
-      confirmCode: vi.fn(async () => ({ accountSyncPending: true })),
-      checkReadiness: vi.fn(async () => ({ status: "pending" as const, emailVerified: true })),
+      verifyHuman: vi.fn(async () => undefined),
+      loadActor: vi.fn(async () => ({
+        context: {}, userId: "user-1", email: "u@example.com", emailVerified: false,
+        telegramId: null, pendingUpstreamAccountId: null, pendingEmail: null,
+        authorizedUpstreamAccountId: "upstream-1", telegramUsername: null,
+      })),
+      assertRequestLimits: vi.fn(async () => undefined),
+      requestProviderCode: vi.fn(async () => ({ targetEmail: "u@example.com" })),
+      auditCodeRequested: vi.fn(async () => undefined),
+      loadProviderProfile: vi.fn(async () => ({ email: "u@example.com", pendingEmail: null, emailVerified: false })),
+      assertConfirmationLimit: vi.fn(async () => undefined),
+      confirmProviderCode: vi.fn(async () => ({ email: "u@example.com" })),
+      persistConfirmedEmail: vi.fn(async () => ({ existingOwnerId: null, upstreamAccountId: "upstream-1", localVerificationChanged: false })),
+      currentProviderSession: vi.fn(() => ({ context: {} })),
+      providerAccountId: vi.fn(() => "upstream-1"),
+      telegramProviderSession: vi.fn(async () => ({ context: {} })),
+      attachTelegram: vi.fn(async () => undefined),
+      mergeProviderAccounts: vi.fn(async () => undefined),
+      refreshProviderSession: vi.fn(async () => ({ context: {} })),
+      linkCurrentAccount: vi.fn(async () => undefined),
+      withOwnerChangeFence: vi.fn(async () => { throw new Error("sync pending"); }),
+      refreshLocalSession: vi.fn(async () => undefined),
+      auditEmailVerified: vi.fn(async () => undefined),
+      markAccountSyncPending: vi.fn(async () => undefined),
+      assertChangeLimits: vi.fn(async () => undefined),
+      changeProviderEmail: vi.fn(async (_actor, email) => ({ pendingEmail: email })),
+      persistPendingEmail: vi.fn(async () => undefined),
+      auditEmailChangeRequested: vi.fn(async () => undefined),
     };
     await expect(requestEmailVerificationCode(commands, {})).resolves.toEqual({ ok: true, kind: "code-sent", targetEmail: "u@example.com" });
     await expect(confirmEmailVerificationCode(commands, { code: "123456" })).resolves.toEqual({
@@ -283,23 +320,28 @@ describe("server application flows", () => {
   });
 
   it("keeps linked-account commands behind a port", async () => {
-    const commands: LinkAccountCommands = {
-      linkEmail: vi.fn(async () => ({ linked: false })),
-      confirmTelegramMerge: vi.fn(async () => undefined),
-      cancelTelegramMerge: vi.fn(async () => undefined),
-      deletePasskey: vi.fn(async () => undefined),
-    };
+    const commands = linkCommands();
     await expect(linkAccountEmail(commands, { email: " U@Example.com ", password: "secret123" })).resolves.toEqual({ ok: true, kind: "verification-required" });
-    expect(commands.linkEmail).toHaveBeenCalledWith({ email: "u@example.com", password: "secret123" });
-    await expect(removeLinkedPasskey(commands, "credential-id")).resolves.toEqual({ ok: true, kind: "passkey-deleted" });
+    expect(commands.authenticateEmail).toHaveBeenCalledWith({ operation: "login", email: "u@example.com", password: "secret123" });
+    const passkeys: PasskeyManagementGateway = {
+      loadActor: vi.fn(async () => ({ userId: "user-1", fullAssurance: true, email: "u@example.com", emailVerified: true, telegramId: null })),
+      loadOwned: vi.fn(async () => []), deleteOwned: vi.fn(async () => ({ externalCredentialId: "external-id" })), auditDeleted: vi.fn(async () => undefined),
+    };
+    await expect(removeLinkedPasskey(passkeys, "credential-id")).resolves.toEqual({ ok: true, kind: "passkey-deleted" });
   });
 
   it("blocks checkout before loading offers when the account is not ready", async () => {
     const reader: CheckoutReader = {
-      loadAccount: vi.fn(async () => ({ authenticated: true, emailVerified: false, accountSyncPending: false })),
       loadOffers: vi.fn(),
     };
-    await expect(loadCheckout(reader)).resolves.toMatchObject({ status: "account-action-required", action: "linkEmail" });
+    const auth: AuthProfileGateway = {
+      loadCurrentSession: vi.fn(async () => ({
+        context: {}, id: "session-1", userId: "user-1", authMethod: "EMAIL" as const, hasUpstreamTokens: false,
+        user: { email: "u@example.com", emailVerified: false, telegramId: null, telegramUsername: null, fullName: null, displayName: null, upstreamUserId: null, pendingUpstreamUserId: null, pendingEmail: null, accountSyncPending: false },
+      })),
+      authorizeCurrentSession: vi.fn(), loadProviderProfile: vi.fn(), confirmVerifiedEmail: vi.fn(), refreshCurrentAccess: vi.fn(), debug: vi.fn(),
+    };
+    await expect(loadCheckout(reader, auth)).resolves.toMatchObject({ status: "account-action-required", action: "linkEmail" });
     expect(reader.loadOffers).not.toHaveBeenCalled();
   });
 

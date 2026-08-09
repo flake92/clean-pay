@@ -1,92 +1,86 @@
-import type { PaymentStatusReader } from "@/application/payments/ports/payment-status-reader";
+import {
+  PaymentStatusGatewayError,
+  type PaymentStatusAuthorization,
+  type PaymentStatusReader,
+  type PaymentStatusTransaction,
+} from "@/application/payments/ports/payment-status-reader";
 import { prismaPaymentQueryRepository } from "@/backend/integrations/payments/prisma-payment-query-repository";
 import { getAuthorizedRemnashopTokens, getRemnashopUserIdFromAccessToken, remnashopRequest } from "@/backend/integrations/remnashop/client";
 import { ServiceError } from "@/backend/errors/service-error";
 import { getExactTransaction, getLegacyTransactions, getPaymentCapabilities } from "@/backend/integrations/remnashop/payment-recovery";
-import { syncOnePaymentHistoryPage } from "@/backend/integrations/payments/payment-history-sync-service";
 import { isPaymentManualRequired } from "@/backend/payments/manual-review";
 import { assertPaymentUpstreamIdentity } from "@/backend/integrations/payments/payment-owner-service";
-import { reconcileUnknownPayments } from "@/backend/integrations/payments/payment-reconciliation-service";
 import { serializePaymentRecord, syncExactPaymentRecordFromRemnashop, syncPaymentRecordsFromRemnashopTransactions } from "@/backend/integrations/payments/payment-record-service";
-import { assertEmailVerificationPolicy, getCurrentUser } from "@/backend/integrations/sessions/web-session-service";
-import type { PaymentStatusViewModel } from "@/application/models/payment-status";
-import type { CurrentSubscriptionResponse } from "@/backend/integrations/remnashop/contracts";
+import { getCurrentUser } from "@/backend/integrations/sessions/web-session-service";
+import type { CurrentSubscriptionResponse, PaymentTransactionResponse } from "@/backend/integrations/remnashop/contracts";
 
-const paymentIdPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-const operationIdPattern = /^[a-z0-9_-]{1,191}$/i;
+type AuthorizationContext = Awaited<ReturnType<typeof getAuthorizedRemnashopTokens>>;
+function authorization(value: PaymentStatusAuthorization) { return value.context as AuthorizationContext; }
+function transaction(value: PaymentStatusTransaction) { return value.context as PaymentTransactionResponse; }
 
-function operationStatus(operation: { id: string; status: string; reconciledAt: Date | null; reconcileErrorSnapshot: unknown }) {
-  if (isPaymentManualRequired(operation)) return { operation_id: operation.id, status: "manual_required" as const, retry_after_seconds: null, requires_support: true, operator_action: "review_payment_operation" };
-  const status: "succeeded" | "failed" | "retry_ready" | "outcome_unknown" | "processing" = operation.status === "SUCCEEDED" ? "succeeded" : operation.status === "FAILED_FINAL" ? "failed" : operation.status === "READY" ? "retry_ready" : operation.status === "OUTCOME_UNKNOWN" ? "outcome_unknown" : "processing";
-  return { operation_id: operation.id, status, retry_after_seconds: status === "processing" || status === "outcome_unknown" ? 5 : null, requires_support: false, operator_action: null };
+function translate(error: unknown): never {
+  if (error instanceof PaymentStatusGatewayError) throw error;
+  throw new PaymentStatusGatewayError(error instanceof ServiceError ? error.code : "INTERNAL_ERROR");
+}
+async function adapt<T>(work: () => Promise<T>): Promise<T> {
+  try { return await work(); } catch (error) { translate(error); }
 }
 
-type OperationRecord = Awaited<ReturnType<typeof findOperation>>;
-async function findOperation(userId: string, operationId: string | null) {
-  return prismaPaymentQueryRepository.findOperation(userId, operationId);
-}
-
-function terminal(operation: NonNullable<OperationRecord>, status: ReturnType<typeof operationStatus>) {
-  const localStatus = operation.paymentRecord?.status;
-  return status.status === "manual_required" || operation.status === "FAILED_FINAL" || (operation.status === "SUCCEEDED" && (!operation.paymentRecord || (localStatus !== "PENDING" && localStatus !== "UNKNOWN")));
-}
-
-function view(operation: OperationRecord, subscription: CurrentSubscriptionResponse | null, paymentRecord: NonNullable<OperationRecord>["paymentRecord"] | null): PaymentStatusViewModel {
-  return {
-    payment: paymentRecord ? serializePaymentRecord(paymentRecord) : null,
-    operation: operation ? operationStatus(operation) : null,
-    subscription,
-  };
+async function operation(userId: string, operationId: string | null) {
+  const record = await prismaPaymentQueryRepository.findOperation(userId, operationId);
+  return record ? {
+    id: record.id,
+    status: record.status,
+    manualRequired: isPaymentManualRequired(record),
+    paymentId: record.paymentRecord?.paymentId ?? null,
+    paymentStatus: record.paymentRecord?.status ?? null,
+    payment: record.paymentRecord ? serializePaymentRecord(record.paymentRecord) : null,
+  } : null;
 }
 
 export const productionPaymentStatusReader: PaymentStatusReader = {
-  async load({ paymentId, operationId }) {
-    if (paymentId && !paymentIdPattern.test(paymentId)) throw new ServiceError("VALIDATION_ERROR", 400, "payment_id must be a UUID");
-    if (operationId && !operationIdPattern.test(operationId)) throw new ServiceError("VALIDATION_ERROR", 400, "operation_id has an invalid format");
-    const user = await getCurrentUser();
-    if (!user) throw new ServiceError("UNAUTHORIZED", 401);
-    assertEmailVerificationPolicy(user);
-
-    let operation = operationId || !paymentId ? await findOperation(user.id, operationId) : null;
-    const status = operation ? operationStatus(operation) : null;
-    let operationPaymentId = operation?.paymentRecord?.paymentId ?? null;
-    if (paymentId && operationId && operationPaymentId && paymentId !== operationPaymentId) throw new ServiceError("CONFLICT", 409, "Payment id does not belong to operation");
-    let resolvedPaymentId = operationId ? operationPaymentId : paymentId;
-    if (operation && status && terminal(operation, status)) return view(operation, null, operation.paymentRecord);
-
-    let subscription: CurrentSubscriptionResponse | null = null;
-    try {
-      const { accessToken } = await getAuthorizedRemnashopTokens();
-      const upstreamAccountId = getRemnashopUserIdFromAccessToken(accessToken);
-      await assertPaymentUpstreamIdentity(user.id, upstreamAccountId);
-      const capabilities = await getPaymentCapabilities(accessToken);
-      if (capabilities) {
-        if (resolvedPaymentId) {
-          const exact = await getExactTransaction({ accessToken, paymentId: resolvedPaymentId });
-          if (exact) await syncExactPaymentRecordFromRemnashop({ userId: user.id, upstreamAccountId, transaction: exact });
-        } else {
-          await syncOnePaymentHistoryPage({ userId: user.id, upstreamAccountId, accessToken, pageSize: Math.min(100, capabilities.transactions.max_page_size) });
-        }
-        await reconcileUnknownPayments({ limit: 1, userId: user.id, accessToken });
-      } else {
-        await syncPaymentRecordsFromRemnashopTransactions({ userId: user.id, upstreamAccountId, transactions: await getLegacyTransactions(accessToken) });
-      }
-      if (operation) {
-        operation = await findOperation(user.id, operation.id);
-        operationPaymentId = operation?.paymentRecord?.paymentId ?? null;
-        resolvedPaymentId = operationId ? operationPaymentId : paymentId;
-      }
-      subscription = await remnashopRequest<CurrentSubscriptionResponse | null>("/subscription/current", { accessToken });
-    } catch (error) {
-      if (operation?.status === "SUCCEEDED") return view(operation, null, operation.paymentRecord);
-      if (!(error instanceof ServiceError && error.code === "SUBSCRIPTION_NOT_FOUND")) throw error;
-    }
-
-    const record = resolvedPaymentId
-      ? await prismaPaymentQueryRepository.findRecord(user.id, resolvedPaymentId)
-      : operationId
-        ? operation?.paymentRecord ?? null
-        : await prismaPaymentQueryRepository.findLatestRecord(user.id);
-    return view(operation, subscription, record);
+  async loadActor() {
+    const user = await adapt(() => getCurrentUser());
+    if (!user) return null;
+    return { id: user.id, emailVerified: user.emailVerified, telegramId: user.telegramId };
+  },
+  findOperation: operation,
+  async authorize() {
+    const authorized = await adapt(() => getAuthorizedRemnashopTokens());
+    return { context: authorized, upstreamAccountId: getRemnashopUserIdFromAccessToken(authorized.accessToken) };
+  },
+  async assertUpstreamOwner(userId, upstreamAccountId) {
+    await adapt(() => assertPaymentUpstreamIdentity(userId, upstreamAccountId));
+  },
+  async loadCapabilities(value) {
+    const capabilities = await adapt(() => getPaymentCapabilities(authorization(value).accessToken));
+    return capabilities ? { maxPageSize: capabilities.transactions.max_page_size } : null;
+  },
+  async loadExactTransaction(value, paymentId) {
+    const item = await adapt(() => getExactTransaction({ accessToken: authorization(value).accessToken, paymentId }));
+    return item ? { context: item } : null;
+  },
+  async persistExactTransaction(userId, upstreamAccountId, value) {
+    await adapt(() => syncExactPaymentRecordFromRemnashop({ userId, upstreamAccountId, transaction: transaction(value) }));
+  },
+  async loadLegacyTransactions(value) {
+    return (await adapt(() => getLegacyTransactions(authorization(value).accessToken))).map((item) => ({ context: item }));
+  },
+  async persistLegacyTransactions(userId, upstreamAccountId, values) {
+    await adapt(() => syncPaymentRecordsFromRemnashopTransactions({ userId, upstreamAccountId, transactions: values.map(transaction) }));
+  },
+  async loadSubscription(value) {
+    return adapt(() => remnashopRequest<CurrentSubscriptionResponse | null>("/subscription/current", { accessToken: authorization(value).accessToken }));
+  },
+  async findPayment(userId, paymentId) {
+    const record = await prismaPaymentQueryRepository.findRecord(userId, paymentId);
+    return record ? serializePaymentRecord(record) : null;
+  },
+  async findLatestPayment(userId) {
+    const record = await prismaPaymentQueryRepository.findLatestRecord(userId);
+    return record ? serializePaymentRecord(record) : null;
+  },
+  isSubscriptionMissing(error) {
+    return error instanceof PaymentStatusGatewayError && error.code === "SUBSCRIPTION_NOT_FOUND";
   },
 };

@@ -1,9 +1,20 @@
-import type { ProfileReader } from "@/application/profile/ports/profile-reader";
 import type { ProfileViewModel } from "@/application/models/profile";
+import type { AuthProfileGateway } from "@/application/auth/ports/auth-profile";
+import { resolveAuthProfile } from "@/application/auth/resolve-auth-profile";
 
-export async function loadProfileViewModel(reader: ProfileReader): Promise<ProfileViewModel> {
+export async function loadProfileViewModel(gateway: AuthProfileGateway): Promise<ProfileViewModel> {
   try {
-    return { status: "ready", user: await reader.loadCurrent() };
+    const user = await resolveAuthProfile(gateway);
+    return {
+      status: "ready",
+      user: {
+        authType: user.authType,
+        email: user.email,
+        emailVerified: user.emailVerified,
+        pendingEmail: user.pendingEmail,
+        telegramId: user.telegramId,
+      },
+    };
   } catch {
     return { status: "error", message: "Не удалось загрузить профиль." };
   }

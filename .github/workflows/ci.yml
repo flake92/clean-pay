@@ -47,15 +47,24 @@ jobs:
           node-version: 24.18.0
           cache: npm
 
-      - run: npm ci
-      - run: npm audit --audit-level high
-      - run: node node_modules/prisma/build/index.js format --check
-      - run: npm run lint
-      - run: npm run typecheck
+      - name: Install locked dependencies
+        run: npm ci
+      - name: Audit production dependencies
+        run: npm audit --audit-level high
+      - name: Validate Prisma schema formatting
+        run: node node_modules/prisma/build/index.js format --check
+      - name: Lint
+        run: npm run lint
+      - name: Typecheck
+        run: npm run typecheck
       - name: Enforce clean architecture boundaries
         run: npm run test:architecture
-      - run: npm run test:coverage
-      - run: npm run build
+      - name: Test route-handler contracts
+        run: npm run test:route-handlers
+      - name: Test with enforced coverage thresholds
+        run: npm run test:coverage
+      - name: Build production application
+        run: npm run build
 
   pnpm-lock:
     runs-on: ubuntu-latest
@@ -70,7 +79,7 @@ jobs:
       - run: pnpm install --lockfile-only --frozen-lockfile --ignore-scripts
       - run: pnpm audit --audit-level high
 
-  postgres-concurrency:
+  integration-services:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     services:
@@ -114,10 +123,14 @@ jobs:
         with:
           node-version: 24.18.0
           cache: npm
-      - run: npm ci
-      - run: npm run prisma:generate
-      - run: node node_modules/prisma/build/index.js migrate deploy
-      - run: npm run test:services
+      - name: Install locked dependencies
+        run: npm ci
+      - name: Generate Prisma client
+        run: npm run prisma:generate
+      - name: Apply migrations to an empty PostgreSQL database
+        run: node node_modules/prisma/build/index.js migrate deploy
+      - name: Run PostgreSQL concurrency and service integration tests
+        run: npm run test:services
 
   full-stack-e2e:
     runs-on: ubuntu-latest
