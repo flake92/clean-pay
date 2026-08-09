@@ -1,9 +1,16 @@
 import type { Prisma } from "@prisma/client";
-import type { AuditEventRepository } from "@/application/observability/ports/audit-event-repository";
 import { prisma } from "@/backend/database/prisma";
 
-export const prismaAuditEventRepository: AuditEventRepository = {
-  async append(event) {
+type AuditEvent = {
+  action: string;
+  userId: string | null;
+  severity: "INFO" | "WARN" | "ERROR";
+  ipHash: string | null;
+  metadata?: Record<string, unknown>;
+};
+
+export const prismaAuditEventRepository = {
+  async append(event: AuditEvent) {
     await prisma.auditLog.create({ data: {
       userId: event.userId,
       action: event.action,

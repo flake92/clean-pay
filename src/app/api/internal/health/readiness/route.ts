@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 
+import { runDetailedReadiness } from "@/application/health/readiness";
 import { getEnv } from "@/backend/config/env";
-import { runDetailedReadiness } from "@/backend/health/readiness";
+import { createProductionReadinessGateway } from "@/backend/health/checks";
 import { safeEqual, sha256 } from "@/backend/security/crypto";
 import { APP_VERSION } from "@/shared/app-version";
 
@@ -19,7 +20,7 @@ export async function GET(request: Request) {
   }
 
   try {
-    const readiness = await runDetailedReadiness();
+    const readiness = await runDetailedReadiness(createProductionReadinessGateway());
     return NextResponse.json(
       {
         ...readiness,

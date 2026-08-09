@@ -13,6 +13,7 @@
     "lint": "eslint",
     "typecheck": "node scripts/typecheck.mjs",
     "test": "node node_modules/vitest/vitest.mjs run --config vitest.config.mts --configLoader native",
+    "test:architecture": "node node_modules/vitest/vitest.mjs run --config vitest.config.mts --configLoader native tests/unit/config/clean-architecture.test.ts",
     "test:unit": "node node_modules/vitest/vitest.mjs run --configLoader native tests/unit",
     "test:route-handlers": "node node_modules/vitest/vitest.mjs run --configLoader native tests/integration/route-handlers",
     "test:integration": "node node_modules/vitest/vitest.mjs run --config vitest.integration.config.mts --configLoader native --passWithNoTests",

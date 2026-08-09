@@ -14,6 +14,7 @@ import {
 } from "@/application/auth/manage-linked-account";
 import type { LinkAccountCommands, LinkAccountReader } from "@/application/auth/ports/link-account";
 import type { PasskeyCommands } from "@/application/auth/ports/passkey-commands";
+import type { TelegramWebAppGateway } from "@/application/auth/ports/telegram-webapp";
 import {
   activateCabinetPromocode,
   clearCabinetSession,
@@ -58,19 +59,37 @@ function cabinetCommands(overrides: Partial<CabinetCommands> = {}): CabinetComma
 
 describe("application facades", () => {
   it("validates and normalizes Telegram WebApp input before the port", async () => {
-    const authenticate = vi.fn(async () => undefined);
-    const authenticator = { authenticate };
+    const gateway: TelegramWebAppGateway = {
+      authenticateProvider: vi.fn(async () => ({ context: {} })),
+      verifiedIdentity: vi.fn(async () => ({ telegramId: "777", context: {} })),
+      rateLimit: vi.fn(async () => undefined),
+      reconcileIdentity: vi.fn(async () => ({
+        userId: "user-1",
+        upstreamSession: {
+          accessTokenEncrypted: "a",
+          refreshTokenEncrypted: "r",
+          accessExpiresAt: new Date(0),
+          refreshExpiresAt: new Date(0),
+        },
+        requiresRecovery: true,
+      })),
+      createSession: vi.fn(async () => ({ id: "session-1" })),
+      recoverSession: vi.fn(async () => undefined),
+    };
 
-    await expect(authenticateTelegramWebApp(authenticator, "   ")).resolves.toMatchObject({ ok: false, code: "VALIDATION_ERROR" });
-    await expect(authenticateTelegramWebApp(authenticator, " signed-data ")).resolves.toEqual({ ok: true });
-    expect(authenticate).toHaveBeenCalledWith("signed-data");
+    await expect(authenticateTelegramWebApp(gateway, "   ")).resolves.toMatchObject({ ok: false, code: "VALIDATION_ERROR" });
+    await expect(authenticateTelegramWebApp(gateway, " signed-data ")).resolves.toEqual({ ok: true });
+    expect(gateway.authenticateProvider).toHaveBeenCalledWith("signed-data");
+    expect(gateway.rateLimit).toHaveBeenCalledWith("777");
+    expect(gateway.recoverSession).toHaveBeenCalledWith("session-1", "user-1");
 
-    authenticate.mockRejectedValueOnce(Object.assign(new Error("rejected"), { code: "UNAUTHORIZED" }));
-    await expect(authenticateTelegramWebApp(authenticator, "bad")).resolves.toMatchObject({ ok: false, code: "UNAUTHORIZED" });
+    vi.mocked(gateway.authenticateProvider).mockRejectedValueOnce(Object.assign(new Error("rejected"), { code: "UNAUTHORIZED" }));
+    await expect(authenticateTelegramWebApp(gateway, "bad")).resolves.toMatchObject({ ok: false, code: "UNAUTHORIZED" });
   });
 
   it("keeps WebAuthn ceremonies behind the passkey port", async () => {
     const commands: PasskeyCommands = {
+      verifyHuman: vi.fn(async () => undefined),
       beginLogin: vi.fn(async () => ({ challenge: "login" }) as never),
       finishLogin: vi.fn(async () => undefined),
       beginRegistration: vi.fn(async () => ({ challenge: "register" }) as never),
@@ -78,7 +97,8 @@ describe("application facades", () => {
     };
 
     await expect(beginPasskeyLogin(commands, { email: " User@Example.COM " })).resolves.toMatchObject({ ok: true });
-    expect(commands.beginLogin).toHaveBeenCalledWith({ email: "user@example.com" });
+    expect(commands.verifyHuman).toHaveBeenCalledWith(null);
+    expect(commands.beginLogin).toHaveBeenCalledWith("user@example.com");
     await expect(beginPasskeyRegistration(commands)).resolves.toMatchObject({ ok: true });
     await expect(verifyPasskeyLogin(commands, {} as never)).resolves.toEqual({ ok: true });
     await expect(verifyPasskeyRegistration(commands, {} as never)).resolves.toEqual({ ok: true });

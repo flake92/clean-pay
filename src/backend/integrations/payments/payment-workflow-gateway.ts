@@ -1,10 +1,8 @@
-import type { PaymentCommands } from "@/application/payments/ports/checkout";
 import type {
   PaymentAuthorization,
   PaymentOperationErrorSnapshot,
   PaymentWorkflowGateway,
 } from "@/application/payments/ports/payment-workflow";
-import { executePaymentWorkflow } from "@/application/payments/execute-payment-workflow";
 import { ServiceError, isServiceErrorCode } from "@/backend/errors/service-error";
 import {
   getAuthorizedRemnashopTokens,
@@ -54,7 +52,7 @@ function serviceError(error: unknown) {
   return error;
 }
 
-const productionPaymentWorkflowGateway: PaymentWorkflowGateway = {
+export const productionPaymentWorkflowGateway: PaymentWorkflowGateway = {
   async loadActor() {
     const session = await getCurrentSession();
     if (!session) throw new ServiceError("UNAUTHORIZED", 401);
@@ -178,17 +176,4 @@ const productionPaymentWorkflowGateway: PaymentWorkflowGateway = {
   logSettlementFailure(error, input) {
     logTechnicalError("payment_operation_settlement_failed", error, input);
   },
-};
-
-export const productionPaymentCommands: PaymentCommands = {
-  purchase: (request, idempotencyKey) => executePaymentWorkflow(
-    productionPaymentWorkflowGateway,
-    { kind: "PURCHASE", request },
-    idempotencyKey,
-  ),
-  extend: (request, idempotencyKey) => executePaymentWorkflow(
-    productionPaymentWorkflowGateway,
-    { kind: "EXTEND", request },
-    idempotencyKey,
-  ),
 };
