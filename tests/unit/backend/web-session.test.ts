@@ -73,6 +73,7 @@ import {
   createWebSessionOnResponse,
   getCurrentSession,
   getCurrentUser,
+  getWebSessionUserIdFromAccessCookie,
   replaceWebSessionAfterPasswordChange,
   refreshCurrentAccessCookie,
   rotateRefreshTokenFamily,
@@ -626,7 +627,11 @@ describe("web session lifecycle", () => {
         userId: "user-1",
         revokedAt: null,
       },
-      data: { revokedAt: expect.any(Date) },
+      data: expect.objectContaining({
+        revokedAt: expect.any(Date),
+        remnashopAccessTokenEncrypted: null,
+        remnashopRefreshTokenEncrypted: null,
+      }),
     });
     expect(state.deleteCalls).toEqual(["clean_pay_access", "clean_pay_refresh"]);
 
@@ -635,7 +640,11 @@ describe("web session lifecycle", () => {
     await clearWebSession();
     expect(mocks.prisma.webSession.updateMany).toHaveBeenLastCalledWith({
       where: { id: "refresh-session", revokedAt: null },
-      data: { revokedAt: expect.any(Date) },
+      data: expect.objectContaining({
+        revokedAt: expect.any(Date),
+        remnashopAccessTokenEncrypted: null,
+        remnashopRefreshTokenEncrypted: null,
+      }),
     });
     expect(mocks.prisma.webSession.findFirst).toHaveBeenLastCalledWith({
       where: {
@@ -654,6 +663,31 @@ describe("web session lifecycle", () => {
       },
       select: { id: true },
     });
+  });
+
+  it("always deletes browser cookies when database revocation fails", async () => {
+    state.cookies.set(
+      "clean_pay_access",
+      accessToken({ sid: "session-1", uid: "user-1", exp: Math.floor(Date.now() / 1000) + 60 }),
+    );
+    state.cookies.set("clean_pay_refresh", "refresh-token");
+    mocks.prisma.webSession.findFirst.mockRejectedValueOnce(new Error("database unavailable"));
+
+    await expect(clearWebSession()).rejects.toThrow("database unavailable");
+
+    expect(state.cookies.size).toBe(0);
+    expect(state.deleteCalls).toEqual(["clean_pay_access", "clean_pay_refresh"]);
+  });
+
+  it("reads the logout audit subject only from a valid signed access cookie", async () => {
+    state.cookies.set(
+      "clean_pay_access",
+      accessToken({ sid: "session-1", uid: "user-1", exp: Math.floor(Date.now() / 1000) + 60 }),
+    );
+    await expect(getWebSessionUserIdFromAccessCookie()).resolves.toBe("user-1");
+
+    state.cookies.set("clean_pay_access", "untrusted.invalid");
+    await expect(getWebSessionUserIdFromAccessCookie()).resolves.toBeNull();
   });
 
   it("does not let a revoked or mismatched access token revoke replacement sessions", async () => {
