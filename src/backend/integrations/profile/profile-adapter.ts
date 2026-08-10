@@ -10,6 +10,7 @@ import {
 import { prismaAuthSessionRepository } from "@/backend/integrations/auth/prisma-auth-session-repository";
 import { replaceWebSessionAfterPasswordChange } from "@/backend/integrations/sessions/web-session-service";
 import { auditLog } from "@/backend/observability/audit";
+import { assertRateLimit } from "@/backend/limits/rate-limit";
 
 type PasswordSessionContext = Awaited<ReturnType<typeof getAuthorizedRemnashopTokens>>;
 type PasswordProviderContext = Awaited<ReturnType<typeof remnashopChangePassword>>;
@@ -23,6 +24,14 @@ export const productionProfileCommands: ProfileCommands = {
   async loadPasswordSession() {
     const authorized = await getAuthorizedRemnashopTokens();
     return { context: authorized, userId: authorized.session.userId };
+  },
+  async assertPasswordChangeRateLimit(session) {
+    await assertRateLimit({
+      action: "password_change",
+      sessionId: passwordSession(session).session.id,
+      limit: 5,
+      windowSeconds: 15 * 60,
+    });
   },
   async changeProviderPassword(session, input) {
     try {

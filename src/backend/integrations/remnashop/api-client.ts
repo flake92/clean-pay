@@ -45,6 +45,8 @@ type AuthCookies = {
   refreshToken: string;
 };
 
+const MAX_REMNASHOP_RESPONSE_BYTES = 2 * 1024 * 1024;
+
 function endpoint(path: string) {
   return `${getEnv().remnashopApiBaseUrl}${path}`;
 }
@@ -57,8 +59,62 @@ function adminEndpoint(path: string) {
   return `${getEnv().remnashopAdminApiBaseUrl}${path}`;
 }
 
+async function readResponseText(response: Response, path: string) {
+  const declaredLength = Number(response.headers.get("content-length"));
+
+  if (Number.isFinite(declaredLength) && declaredLength > MAX_REMNASHOP_RESPONSE_BYTES) {
+    try {
+      await response.body?.cancel("Remnashop response limit exceeded");
+    } catch {
+      // The response is rejected regardless of whether cancellation succeeds.
+    }
+    throw remnashopUnavailableError(
+      path,
+      new Error(`Remnashop response exceeded ${MAX_REMNASHOP_RESPONSE_BYTES} bytes`),
+    );
+  }
+
+  if (!response.body) {
+    return "";
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let receivedBytes = 0;
+  let text = "";
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      receivedBytes += value.byteLength;
+      if (receivedBytes > MAX_REMNASHOP_RESPONSE_BYTES) {
+        try {
+          await reader.cancel("Remnashop response limit exceeded");
+        } catch {
+          // The response is rejected regardless of whether cancellation succeeds.
+        }
+        throw remnashopUnavailableError(
+          path,
+          new Error(`Remnashop response exceeded ${MAX_REMNASHOP_RESPONSE_BYTES} bytes`),
+        );
+      }
+
+      text += decoder.decode(value, { stream: true });
+    }
+
+    return text + decoder.decode();
+  } catch (error) {
+    if (error instanceof ServiceError) throw error;
+    throw remnashopUnavailableError(path, error);
+  } finally {
+    reader.releaseLock();
+  }
+}
+
 async function parseResponse<T>(response: Response, path: string) {
-  const text = await response.text();
+  const text = await readResponseText(response, path);
   let data: unknown = null;
 
   if (text) {

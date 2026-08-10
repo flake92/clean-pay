@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => ({
   logTechnicalWarning: vi.fn(),
   authDebugLog: vi.fn(),
   getCurrentSession: vi.fn(),
+  redisCommand: vi.fn(),
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
   remnashopAuth: vi.fn(),
   prisma: {
@@ -51,6 +52,7 @@ vi.mock("@/backend/observability/logger", () => ({ logger: mocks.logger }));
 vi.mock("@/backend/integrations/remnashop/client", () => ({ remnashopAuth: mocks.remnashopAuth }));
 vi.mock("@/backend/database/prisma", () => ({ prisma: mocks.prisma }));
 vi.mock("@/backend/integrations/sessions/web-session-service", () => ({ getCurrentSession: mocks.getCurrentSession }));
+vi.mock("@/backend/cache/redis", () => ({ redisCommand: mocks.redisCommand }));
 
 import {
   createTelegramAuthorizationResponse,
@@ -100,6 +102,7 @@ describe("Telegram identity verification adapter", () => {
     });
     mocks.prisma.telegramAuthState.updateMany.mockResolvedValue({ count: 1 });
     mocks.getCurrentSession.mockResolvedValue({ id: "session-1", userId: "target-user" });
+    mocks.redisCommand.mockResolvedValue("OK");
     mocks.remnashopAuth.mockResolvedValue({
       data: { expires_at: "2099-01-01", refresh_expires_at: "2099-02-01" },
       cookies: { accessToken: "access", refreshToken: "refresh" },
@@ -187,6 +190,25 @@ describe("Telegram identity verification adapter", () => {
         identity: { telegramId: "123456", telegramUsername: "clean_user", fullName: "Clean", source: "widget" },
       });
     expect(globalThis.fetch).not.toHaveBeenCalled();
+    expect(mocks.redisCommand).toHaveBeenCalledWith([
+      "SET",
+      expect.stringMatching(/^clean-pay:telegram-widget:v1:/),
+      "1",
+      "NX",
+      "EX",
+      expect.any(Number),
+    ]);
+  });
+
+  it("rejects replayed Telegram Login Widget credentials", async () => {
+    state.cookies.set("clean_pay_tg_nonce", "nonce");
+    mocks.redisCommand.mockResolvedValueOnce(null);
+    const body = { id: 123456, auth_date: Math.floor(Date.now() / 1000), first_name: "Clean" };
+
+    await expect(
+      verifyTelegramWidgetCallbackPayload({ ...body, hash: signWidgetPayload(body) }),
+    ).rejects.toThrow("already used");
+    expect(mocks.prisma.telegramAuthState.updateMany).not.toHaveBeenCalled();
   });
 
   it("rejects invalid token claims and failed token exchange", async () => {
@@ -246,7 +268,8 @@ describe("Telegram identity verification adapter", () => {
     [{ id: 1, auth_date: Math.floor(Date.now() / 1000) }, "hash"],
     [{ hash: "bad", auth_date: Math.floor(Date.now() / 1000) }, "incomplete"],
     [{ id: 1, hash: "bad", auth_date: "invalid" }, "invalid auth_date"],
-    [{ id: 1, hash: "bad", auth_date: Math.floor(Date.now() / 1000) - 86_401 }, "expired"],
+    [{ id: 1, hash: "bad", auth_date: Math.floor(Date.now() / 1000) - 301 }, "expired"],
+    [{ id: 1, hash: "bad", auth_date: Math.floor(Date.now() / 1000) + 31 }, "expired"],
     [{ id: 1, hash: "bad", auth_date: Math.floor(Date.now() / 1000) }, "hash is invalid"],
   ])("rejects invalid widget payload %#", async (payload, message) => {
     state.cookies.set("clean_pay_tg_nonce", "nonce");

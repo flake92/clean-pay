@@ -273,6 +273,7 @@ describe("application authentication policy", () => {
     const changed = { context: { token: "changed" } };
     const commands: ProfileCommands = {
       loadPasswordSession: vi.fn(async () => original),
+      assertPasswordChangeRateLimit: vi.fn(async () => { order.push("rate-limit"); }),
       changeProviderPassword: vi.fn()
         .mockImplementationOnce(async () => { order.push("change-old"); throw new ProfileGatewayError("CURRENT_PASSWORD_INVALID"); })
         .mockImplementationOnce(async () => { order.push("change-fresh"); return changed; }),
@@ -284,7 +285,7 @@ describe("application authentication policy", () => {
 
     await expect(changeProfilePassword(commands, { currentPassword: "old-password", newPassword: "new-password" }))
       .resolves.toMatchObject({ ok: true });
-    expect(order).toEqual(["change-old", "refresh-provider", "persist-refresh", "change-fresh", "replace-local", "audit"]);
+    expect(order).toEqual(["rate-limit", "change-old", "refresh-provider", "persist-refresh", "change-fresh", "replace-local", "audit"]);
     expect(commands.replaceLocalPasswordSession).toHaveBeenCalledWith(original, changed);
   });
 });

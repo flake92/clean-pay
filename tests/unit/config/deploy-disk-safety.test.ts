@@ -3,13 +3,14 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 const deploy = readFileSync("deploy.sh", "utf8");
+const up = deploy.match(/install_services\(\) \{[\s\S]*?\n\}/)?.[0] ?? "";
 
 describe("deployment disk safety", () => {
   it("checks capacity before Docker starts a build", () => {
     expect(deploy).toContain("env_value CLEAN_PAY_MIN_FREE_DISK_MB 8192");
-    expect(deploy.indexOf("ensure_build_disk_space\n  printf 'Building")).toBeGreaterThan(-1);
-    expect(deploy.indexOf("ensure_build_disk_space\n  printf 'Building")).toBeLessThan(
-      deploy.indexOf("compose up -d --build"),
+    expect(up.indexOf("ensure_build_disk_space")).toBeGreaterThan(-1);
+    expect(up.indexOf("ensure_build_disk_space")).toBeLessThan(
+      up.indexOf("compose up -d --build"),
     );
   });
 
@@ -23,11 +24,14 @@ describe("deployment disk safety", () => {
 
   it("cleans stale build artifacts after a successful deployment", () => {
     expect(deploy).toContain("docker builder prune -af --filter until=24h");
-    expect(deploy.indexOf("cleanup_build_artifacts\n  verify_external_security_headers")).toBeGreaterThan(
-      deploy.indexOf("compose up -d --build"),
+    expect(up.indexOf("cleanup_build_artifacts")).toBeGreaterThan(
+      up.indexOf("compose up -d --build"),
     );
-    expect(deploy.indexOf("verify_external_security_headers\n  sh")).toBeGreaterThan(
-      deploy.indexOf("cleanup_build_artifacts\n  verify_external_security_headers"),
+    expect(up.indexOf("verify_detailed_readiness")).toBeGreaterThan(
+      up.indexOf("cleanup_build_artifacts"),
+    );
+    expect(up.indexOf("verify_external_security_headers")).toBeGreaterThan(
+      up.indexOf("verify_detailed_readiness"),
     );
   });
 });

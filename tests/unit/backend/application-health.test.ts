@@ -82,4 +82,20 @@ describe("application readiness", () => {
       stale: true,
     });
   });
+
+  it("serves a fresh process-local readiness snapshot without opening Redis", async () => {
+    const dependencies = gateway();
+    const detailed = await runDetailedReadiness(dependencies);
+    const readSharedState = vi.fn(async () => {
+      throw new Error("Redis should not be read for a fresh local snapshot");
+    });
+
+    await expect(getPublicReadiness({ readSharedState }, Date.parse(detailed.checkedAt) + 1_000))
+      .resolves.toEqual({
+        status: "ok",
+        checkedAt: detailed.checkedAt,
+        stale: false,
+      });
+    expect(readSharedState).not.toHaveBeenCalled();
+  });
 });

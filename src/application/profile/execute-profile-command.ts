@@ -65,6 +65,7 @@ export async function changeProfilePassword(
   }
   try {
     const session = await commands.loadPasswordSession();
+    await commands.assertPasswordChangeRateLimit(session);
     let changed: { context: unknown };
     try {
       changed = await commands.changeProviderPassword(session, input);

@@ -143,11 +143,15 @@ describe("production reconciliation startup", () => {
     );
   });
 
-  it("counts only unresolved operations in every backlog state", () => {
+  it("keeps terminal manual-review operations visible in the backlog", () => {
     const manualRequiredFilter = reconciliationService.match(
-      /WHERE "reconcileErrorSnapshot" ->> 'code' = 'MANUAL_REQUIRED'[\s\S]*?\)::int AS "manualRequired"/,
+      /COUNT\(\*\) FILTER \([\s\S]*?\)::int AS "manualRequired"/,
     )?.[0];
 
-    expect(manualRequiredFilter).toContain('AND "reconciledAt" IS NULL');
+    expect(manualRequiredFilter).toContain('WHERE "status" = \'OUTCOME_UNKNOWN\'');
+    expect(manualRequiredFilter).toContain('AND "reconciledAt" IS NOT NULL');
+    expect(manualRequiredFilter).toContain("AND \"reconcileErrorSnapshot\" ->> 'code' = 'MANUAL_REQUIRED'");
+    expect(reconciliationService.match(/"reconcileErrorSnapshot" ->> 'code' = 'MANUAL_REQUIRED'/g))
+      .toHaveLength(3);
   });
 });
