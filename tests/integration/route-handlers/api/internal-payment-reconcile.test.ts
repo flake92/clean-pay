@@ -30,6 +30,7 @@ vi.mock("@/backend/observability/audit", () => ({
 vi.mock("@/backend/observability/logger", () => ({ logger: mocks.logger }));
 
 import { POST } from "@/app/api/internal/payments/reconcile/route";
+import { parseReconciliationBatch } from "../../../../deploy/prod/reconciliation-batch.mjs";
 
 const secret = "a".repeat(48);
 
@@ -97,5 +98,10 @@ describe("internal payment reconciliation route", () => {
       history: { applied: 20 },
     });
     expect(payload).not.toHaveProperty("data");
+    expect(parseReconciliationBatch(payload)).toMatchObject({
+      claimed: 1,
+      succeeded: 1,
+      history: { applied: 20 },
+    });
   });
 });

@@ -84,52 +84,48 @@ describe("production reconciliation startup", () => {
     expect(parseSuccess).toBeGreaterThan(loopStart);
     expect(firstHeartbeat).toBeGreaterThan(loopStart);
     expect(firstHeartbeat).toBeGreaterThan(parseSuccess);
-    expect(() => parseReconciliationBatch({ data: {} })).toThrow(
+    expect(() => parseReconciliationBatch({})).toThrow(
       "data.history must be an object",
     );
     expect(() =>
       parseReconciliationBatch({
-        data: {
-          claimed: 1,
-          succeeded: 1,
-          inProgress: 0,
-          unknown: 0,
-          manualRequired: 0,
-          retryReady: 0,
-          failed: 0,
-          manualRequiredOperationIds: [],
-          history: {
-            attempted: 0,
-            applied: 0,
-            completed: 0,
-            // Missing history.failed means a malformed HTTP 200 is not healthy.
-          },
-          backlog: emptyBacklog,
+        claimed: 1,
+        succeeded: 1,
+        inProgress: 0,
+        unknown: 0,
+        manualRequired: 0,
+        retryReady: 0,
+        failed: 0,
+        manualRequiredOperationIds: [],
+        history: {
+          attempted: 0,
+          applied: 0,
+          completed: 0,
+          // Missing history.failed means a malformed HTTP 200 is not healthy.
         },
+        backlog: emptyBacklog,
       }),
     ).toThrow("data.history.failed");
     expect(
       parseReconciliationBatch({
-        data: {
-          claimed: 1,
-          succeeded: 0,
-          inProgress: 0,
-          unknown: 0,
-          manualRequired: 1,
-          retryReady: 0,
+        claimed: 1,
+        succeeded: 0,
+        inProgress: 0,
+        unknown: 0,
+        manualRequired: 1,
+        retryReady: 0,
+        failed: 0,
+        manualRequiredOperationIds: ["operation-1"],
+        history: {
+          attempted: 1,
+          applied: 10,
+          completed: 1,
           failed: 0,
-          manualRequiredOperationIds: ["operation-1"],
-          history: {
-            attempted: 1,
-            applied: 10,
-            completed: 1,
-            failed: 0,
-          },
-          backlog: {
-            ...emptyBacklog,
-            pending: 1,
-            manualRequired: 1,
-          },
+        },
+        backlog: {
+          ...emptyBacklog,
+          pending: 1,
+          manualRequired: 1,
         },
       }),
     ).toMatchObject({
