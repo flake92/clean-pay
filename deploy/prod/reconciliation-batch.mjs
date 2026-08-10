@@ -36,8 +36,7 @@ function countValue(value, field) {
 }
 
 export function parseReconciliationBatch(value) {
-  const envelope = objectValue(value, "envelope");
-  const data = objectValue(envelope.data, "data");
+  const data = objectValue(value, "data");
   const history = objectValue(data.history, "data.history");
   const backlog = objectValue(data.backlog, "data.backlog");
   const parsed = {};
