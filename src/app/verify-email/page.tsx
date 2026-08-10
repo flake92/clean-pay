@@ -1,20 +1,55 @@
-import { AppShell, PageHeader } from "@/frontend/components/layout";
+import { AppShell } from "@/app/_components/app-shell";
+import { PageHeader } from "@/frontend/components/layout";
 import { VerifyEmailPanel } from "@/frontend/components/verify-email-panel";
+import { safeReadiness } from "@/application/auth/execute-email-verification";
+import { productionAuthProfileGateway } from "@/backend/integrations/auth/auth-profile-gateway";
+import {
+  resolveEmailVerificationSetup,
+} from "@/shared/auth/account-setup-flow";
+import { redirect } from "next/navigation";
 
 export const dynamic = "force-dynamic";
 
-export default function VerifyEmailPage() {
+function firstSearchParam(value: string | string[] | undefined) {
+  return Array.isArray(value) ? value[0] : value;
+}
+
+export default async function VerifyEmailPage({
+  searchParams,
+}: {
+  searchParams: Promise<{
+    flow?: string | string[];
+    redirect_to?: string | string[];
+  }>;
+}) {
   const turnstileEnabled = process.env.TURNSTILE_ENABLED === "true";
   const turnstileSiteKey = process.env.TURNSTILE_SITE_KEY;
+  const params = await searchParams;
+  const { guided, redirectTo } = resolveEmailVerificationSetup(
+    firstSearchParam(params.flow),
+    firstSearchParam(params.redirect_to),
+  );
+  const initialReadiness = await safeReadiness(productionAuthProfileGateway);
+  if (initialReadiness.status === "unauthorized") redirect("/login");
 
   return (
-    <AppShell>
+    <AppShell requireAuth>
       <div className="flex flex-column gap-6">
         <PageHeader
-          description="Запросите код и подтвердите e-mail, чтобы разблокировать покупку."
+          description={
+            guided
+              ? "Введите код из письма. После проверки мы автоматически вернём вас к выбранной оплате."
+              : "Запросите код и подтвердите e-mail, чтобы разблокировать покупку."
+          }
           title="Подтверждение e-mail"
         />
-        <VerifyEmailPanel turnstileEnabled={turnstileEnabled} turnstileSiteKey={turnstileSiteKey} />
+        <VerifyEmailPanel
+          autoContinue={guided}
+          initialReadiness={initialReadiness}
+          redirectTo={redirectTo}
+          turnstileEnabled={turnstileEnabled}
+          turnstileSiteKey={turnstileSiteKey}
+        />
       </div>
     </AppShell>
   );

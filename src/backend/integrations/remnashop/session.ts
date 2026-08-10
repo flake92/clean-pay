@@ -1,23 +1,27 @@
 import { auditLog } from "@/backend/observability/audit";
 import { authDebugLog } from "@/backend/observability/auth-debug-log";
 import { prisma } from "@/backend/database/prisma";
-import { BffError } from "@/backend/integrations/remnashop/errors";
+import { ServiceError } from "@/backend/errors/service-error";
 import { WebSessionAssuranceLevel, type Prisma } from "@prisma/client";
 import {
   getRemnashopMe,
   getRemnashopUserIdFromAccessToken,
   protectRemnashopToken,
 } from "@/backend/integrations/remnashop/client";
-import type { RemnashopAuthResponse, RemnashopMe } from "@/shared/remnashop/types";
+import type { RemnashopAuthResponse, RemnashopMe } from "@/backend/integrations/remnashop/contracts";
 import {
   createWebSessionForRemnashopUser,
   getCurrentSession,
-} from "@/backend/sessions/web-session";
+} from "@/backend/integrations/sessions/web-session-service";
 import {
   assertUserMergeFinalOwner,
   mergeLocalUsersIntoTarget,
-} from "@/backend/auth/user-merge";
-import { lockPaymentOwnerFence } from "@/backend/payments/user-merge";
+} from "@/backend/integrations/auth/local-user-merge-service";
+import { lockPaymentOwnerFence } from "@/backend/integrations/payments/payment-user-merge-service";
+import {
+  cleanupFailedSessionReplacement,
+  normalizeReplacementIdentityEmail,
+} from "@/backend/integrations/remnashop/session-replacement-cleanup";
 
 type RemnashopProfileIdentity = {
   remnashopUserId: string;
@@ -63,6 +67,7 @@ function profileIdentity({
 async function reconcileRemnashopUser(
   tx: Prisma.TransactionClient,
   identity: RemnashopProfileIdentity,
+  onMatchedUserIds?: (userIds: readonly string[]) => void,
 ) {
   const [linkedByRemnashopId, linkedByEmail, linkedByTelegramId] =
     await Promise.all([
@@ -79,6 +84,13 @@ async function reconcileRemnashopUser(
         : Promise.resolve(null),
     ]);
 
+  onMatchedUserIds?.(
+    [linkedByRemnashopId, linkedByEmail, linkedByTelegramId]
+      .filter((user): user is NonNullable<typeof user> => Boolean(user))
+      .map((user) => user.id)
+      .filter((userId, index, userIds) => userIds.indexOf(userId) === index),
+  );
+
   const targetCandidate =
     linkedByEmail ?? linkedByTelegramId ?? linkedByRemnashopId;
 
@@ -86,7 +98,7 @@ async function reconcileRemnashopUser(
     targetCandidate?.remnashopUserId &&
     targetCandidate.remnashopUserId !== identity.remnashopUserId
   ) {
-    throw new BffError(
+    throw new ServiceError(
       "ACCOUNT_MERGE_REQUIRED",
       409,
       "The linked Clean Pay identity belongs to a different Remnashop account.",
@@ -210,43 +222,85 @@ export async function createSessionFromRemnashopAuth({
   accessToken,
   refreshToken,
   auth,
+  replaceExistingSessions = false,
+  replacementIdentityEmail,
 }: {
   accessToken: string;
   refreshToken: string;
   auth: RemnashopAuthResponse;
+  replaceExistingSessions?: boolean;
+  replacementIdentityEmail?: string | null;
 }) {
-  const remnashopUserId = getRemnashopUserIdFromAccessToken(accessToken);
-  authDebugLog("remnashop_session_create_started", {
-    remnashopUserId,
-    remnashopAccessExpiresAt: auth.expires_at,
-    remnashopRefreshExpiresAt: auth.refresh_expires_at,
-  });
-  const profile = await getRemnashopMe(accessToken);
-  authDebugLog("remnashop_profile_loaded", {
-    remnashopUserId,
-    hasEmail: Boolean(profile.email),
-    emailVerified: profile.is_email_verified,
-    hasTelegramId: profile.telegram_id !== null,
-    authType: profile.auth_type,
-  });
-  const user = await prisma.$transaction(async (tx) => {
-    const reconciledUser = await reconcileRemnashopUser(
-      tx,
-      profileIdentity({ remnashopUserId, profile }),
-    );
+  const fallbackEmail = normalizeReplacementIdentityEmail(replacementIdentityEmail);
+  let remnashopUserId: string | null = null;
+  let profileEmail: string | null = null;
+  let profileTelegramId: string | null = null;
+  const replacementOwnerIds = new Set<string>();
+  let user: Awaited<ReturnType<typeof reconcileRemnashopUser>>;
+  let profile: Awaited<ReturnType<typeof getRemnashopMe>>;
 
-    await createWebSessionForRemnashopUser({
-      userId: reconciledUser.id,
-      remnashopAccessTokenEncrypted: protectRemnashopToken(accessToken),
-      remnashopRefreshTokenEncrypted: protectRemnashopToken(refreshToken),
-      remnashopAccessExpiresAt: new Date(auth.expires_at),
-      remnashopRefreshExpiresAt: new Date(auth.refresh_expires_at),
-      assuranceLevel: WebSessionAssuranceLevel.FULL,
-      tx,
+  try {
+    const parsedRemnashopUserId = getRemnashopUserIdFromAccessToken(accessToken);
+    remnashopUserId = parsedRemnashopUserId;
+    authDebugLog("remnashop_session_create_started", {
+      remnashopUserId: parsedRemnashopUserId,
+      remnashopAccessExpiresAt: auth.expires_at,
+      remnashopRefreshExpiresAt: auth.refresh_expires_at,
+    });
+    profile = await getRemnashopMe(accessToken);
+    profileEmail = normalizeReplacementIdentityEmail(profile.email);
+    profileTelegramId =
+      profile.telegram_id === null ? null : String(profile.telegram_id);
+    authDebugLog("remnashop_profile_loaded", {
+      remnashopUserId,
+      hasEmail: Boolean(profile.email),
+      emailVerified: profile.is_email_verified,
+      hasTelegramId: profile.telegram_id !== null,
+      authType: profile.auth_type,
     });
 
-    return reconciledUser;
-  });
+    user = await prisma.$transaction(async (tx) => {
+      const reconciledUser = await reconcileRemnashopUser(
+        tx,
+        profileIdentity({ remnashopUserId: parsedRemnashopUserId, profile }),
+        replaceExistingSessions
+          ? (userIds) => {
+              for (const userId of userIds) {
+                replacementOwnerIds.add(userId);
+              }
+            }
+          : undefined,
+      );
+      replacementOwnerIds.add(reconciledUser.id);
+
+      await createWebSessionForRemnashopUser({
+        userId: reconciledUser.id,
+        remnashopAccessTokenEncrypted: protectRemnashopToken(accessToken),
+        remnashopRefreshTokenEncrypted: protectRemnashopToken(refreshToken),
+        remnashopAccessExpiresAt: new Date(auth.expires_at),
+        remnashopRefreshExpiresAt: new Date(auth.refresh_expires_at),
+        assuranceLevel: WebSessionAssuranceLevel.FULL,
+        replaceExistingSessions,
+        tx,
+      });
+
+      return reconciledUser;
+    });
+  } catch (error) {
+    if (replaceExistingSessions) {
+      await cleanupFailedSessionReplacement({
+        originalError: error,
+        knownOwnerIds: replacementOwnerIds,
+        remnashopUserId,
+        emails: [fallbackEmail, profileEmail].filter(
+          (email): email is string => Boolean(email),
+        ),
+        telegramId: profileTelegramId,
+      });
+    }
+
+    throw error;
+  }
 
   authDebugLog("remnashop_session_create_success", {
     userId: user.id,
@@ -303,7 +357,7 @@ export async function reconcileUserFromRemnashopAuth({
     );
 
     if (!recoveryIsProven) {
-      throw new BffError(
+      throw new ServiceError(
         "ACCOUNT_MERGE_REQUIRED",
         409,
         "Telegram login resolved to a different Remnashop owner.",
@@ -375,7 +429,7 @@ export async function linkCurrentUserToRemnashopAuth({
   });
 
   if (!session) {
-    throw new BffError("UNAUTHORIZED", 401, "Login is required.");
+    throw new ServiceError("UNAUTHORIZED", 401, "Login is required.");
   }
 
   const remnashopUserId = getRemnashopUserIdFromAccessToken(accessToken);
@@ -447,7 +501,7 @@ export async function linkCurrentUserToRemnashopAuth({
       lockedCurrentUser.email !== expectedCurrentOwner.email ||
       lockedCurrentUser.telegramId !== expectedCurrentOwner.telegramId
     ) {
-      throw new BffError(
+      throw new ServiceError(
         "ACCOUNT_MERGE_REQUIRED",
         409,
         "Current account ownership changed before linking.",

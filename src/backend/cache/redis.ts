@@ -1,13 +1,13 @@
 import net from 'node:net';
 import tls from 'node:tls';
 
-import { BffError } from '@/backend/integrations/remnashop/errors';
+import { ServiceError } from '@/backend/errors/service-error';
 
 type RedisValue = string | number | null;
 
-export const REDIS_CONNECT_TIMEOUT_MS = 2_000;
-export const REDIS_COMMAND_DEADLINE_MS = 3_000;
-export const REDIS_MAX_RESPONSE_BYTES = 1024 * 1024;
+const REDIS_CONNECT_TIMEOUT_MS = 2_000;
+const REDIS_COMMAND_DEADLINE_MS = 3_000;
+const REDIS_MAX_RESPONSE_BYTES = 1024 * 1024;
 
 class RedisAdapterError extends Error {
   constructor(message: string, options?: ErrorOptions) {
@@ -20,7 +20,7 @@ function getRedisUrl() {
   const value = process.env.REDIS_URL;
 
   if (!value) {
-    throw new BffError('UPSTREAM_UNAVAILABLE', 503, 'REDIS_URL is required for rate limiting', {
+    throw new ServiceError('UPSTREAM_UNAVAILABLE', 503, 'REDIS_URL is required for rate limiting', {
       message: 'REDIS_URL is required',
     });
   }
@@ -293,11 +293,11 @@ export async function redisCommand(parts: RedisValue[]) {
       destroySocket(socket, error instanceof Error ? error : new RedisAdapterError(String(error)));
     }
 
-    if (error instanceof BffError) {
+    if (error instanceof ServiceError) {
       throw error;
     }
 
-    throw new BffError('UPSTREAM_UNAVAILABLE', 503, 'Redis is unavailable', {
+    throw new ServiceError('UPSTREAM_UNAVAILABLE', 503, 'Redis is unavailable', {
       message: error instanceof Error ? error.message : String(error),
       cause: error,
     });

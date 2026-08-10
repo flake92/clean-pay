@@ -1,4 +1,5 @@
 import { execFileSync } from "node:child_process";
+import { readFileSync } from "node:fs";
 
 import { describe, expect, it } from "vitest";
 
@@ -15,5 +16,23 @@ describe("security cleanup guardrails", () => {
     expect(git(["check-ignore", "deploy/prod/remnashop.env"])).toBe("deploy/prod/remnashop.env");
     expect(git(["ls-files", "deploy/prod/.env.example"])).toBe("deploy/prod/.env.example");
     expect(git(["ls-files", "deploy/prod/remnashop.env.example"])).toBe("deploy/prod/remnashop.env.example");
+  });
+
+  it("requires explicit review for every npm dependency install script", () => {
+    const packageJson = JSON.parse(readFileSync("package.json", "utf8")) as {
+      allowScripts?: Record<string, boolean>;
+    };
+    const packageLock = JSON.parse(readFileSync("package-lock.json", "utf8")) as {
+      packages: Record<string, { hasInstallScript?: boolean; version?: string }>;
+    };
+    const installScriptPackages = Object.entries(packageLock.packages)
+      .filter(([packagePath, metadata]) => packagePath && metadata.hasInstallScript)
+      .map(([packagePath, metadata]) => (
+        `${packagePath.replace(/^.*node_modules\//, "")}@${metadata.version}`
+      ))
+      .sort();
+
+    expect(readFileSync(".npmrc", "utf8")).toContain("strict-allow-scripts=true");
+    expect(Object.keys(packageJson.allowScripts ?? {}).sort()).toEqual(installScriptPackages);
   });
 });

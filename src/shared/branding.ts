@@ -5,8 +5,6 @@ const defaultBranding = {
 
 type BrandingEnv = Record<string, string | undefined>;
 
-export type Branding = typeof defaultBranding;
-
 function optional(value: string | undefined) {
   return value?.trim() || null;
 }

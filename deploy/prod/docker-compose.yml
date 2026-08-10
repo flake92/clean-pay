@@ -1,15 +1,38 @@
 name: ${COMPOSE_PROJECT_NAME:-clean-pay-prod}
 
+# Consumed by deploy.sh before Compose starts a build. Keeping the value in
+# the rendered configuration makes the production example self-documenting.
+x-clean-pay-min-free-disk-mb: ${CLEAN_PAY_MIN_FREE_DISK_MB:-8192}
+
 services:
+  migration:
+    image: ${CLEAN_PAY_MIGRATION_IMAGE:-clean-pay-prod-migration:local}
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+      target: migration
+    restart: "no"
+    env_file:
+      - .env
+    environment:
+      NODE_ENV: production
+      NEXT_TELEMETRY_DISABLED: "1"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      default:
+
   app:
     image: ${CLEAN_PAY_IMAGE:-clean-pay-prod-app:local}
     build:
       context: ../..
-      dockerfile: deploy/prod/Dockerfile
+      dockerfile: Dockerfile
+      target: runner
       args:
         NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL:?NEXT_PUBLIC_APP_URL is required}
-        TURNSTILE_ENABLED: ${TURNSTILE_ENABLED:-false}
-        TURNSTILE_SITE_KEY: ${TURNSTILE_SITE_KEY:-}
+        TURNSTILE_ENABLED: ${TURNSTILE_ENABLED:?TURNSTILE_ENABLED=true is required}
+        TURNSTILE_WIDGET_ID: ${TURNSTILE_SITE_KEY:-}
         NEXT_PUBLIC_BRAND_NAME: ${NEXT_PUBLIC_BRAND_NAME:-Clean Pay}
         NEXT_PUBLIC_BRAND_LOGO_URL: ${NEXT_PUBLIC_BRAND_LOGO_URL:-/clean-pay-logo.png}
     restart: unless-stopped
@@ -20,6 +43,8 @@ services:
       NEXT_TELEMETRY_DISABLED: "1"
       LOG_LEVEL: ${LOG_LEVEL:-info}
     depends_on:
+      migration:
+        condition: service_completed_successfully
       postgres:
         condition: service_healthy
       redis:
@@ -27,8 +52,8 @@ services:
     ports:
       - "${CLEAN_PAY_BIND:-127.0.0.1}:${CLEAN_PAY_PORT:-4000}:4000"
     healthcheck:
-      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:4000/api/internal/health/readiness',{headers:{'x-clean-pay-readiness-secret':process.env.READINESS_INTERNAL_SECRET},signal:AbortSignal.timeout(10000)}).then(async r=>{const b=await r.json();if(!r.ok||b.status!=='ok'||!b.checks||Object.values(b.checks).some(c=>c.status!=='ok'))process.exit(1)}).catch(()=>process.exit(1))\""]
-      interval: 15s
+      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:4000/api/internal/health/readiness',{headers:{'x-clean-pay-readiness-secret':process.env.READINESS_INTERNAL_SECRET},signal:AbortSignal.timeout(10000)}).then(async r=>{const b=await r.json();if(!b.checks||b.checks.database?.status!=='ok'||b.checks.redis?.status!=='ok')process.exit(1)}).catch(()=>process.exit(1))\""]
+      interval: 30s
       timeout: 12s
       retries: 20
       start_period: 30s

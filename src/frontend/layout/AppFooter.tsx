@@ -1,5 +1,5 @@
 import Image from "next/image";
-import React from "react";
+import { APP_VERSION } from "@/shared/app-version";
 import { getBranding } from "@/shared/branding";
 
 const AppFooter = () => {
@@ -21,6 +21,9 @@ const AppFooter = () => {
             />
 
             <span className="font-medium ml-1">{branding.name}</span>
+            <span aria-label={`Версия приложения ${APP_VERSION}`} className="text-600 text-sm ml-2">
+                Версия {APP_VERSION}
+            </span>
         </div>
     );
 };

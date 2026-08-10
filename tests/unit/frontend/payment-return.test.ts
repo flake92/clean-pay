@@ -30,6 +30,20 @@ describe("payment return state", () => {
     expect(paymentPollDelayMs(0, 9)).toBe(9_000);
   });
 
+  it("stops polling when the operation is terminal even if its payment is pending", () => {
+    for (const status of ["failed", "manual_required", "retry_ready"]) {
+      expect(shouldPollPaymentReturn({
+        operation: { status },
+        payment: { status: "pending" },
+      })).toBe(false);
+    }
+
+    expect(shouldPollPaymentReturn({
+      operation: { status: "succeeded" },
+      payment: { status: "pending" },
+    })).toBe(true);
+  });
+
   it("documents why identifiers from separate attempts must never be mixed", () => {
     const processingWithStalePayment = {
       operation: { status: "processing" },

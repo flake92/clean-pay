@@ -3,6 +3,7 @@ name: CI
 on:
   push:
   pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -12,6 +13,34 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  secret-scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - name: Scan changed commits for secrets and PII-like credentials
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  codeql:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v5
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v4
+        with:
+          languages: javascript-typescript
+          queries: security-extended
+      - name: Analyze application source
+        uses: github/codeql-action/analyze@v4
+
   validate:
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -40,20 +69,41 @@ jobs:
       TURNSTILE_ENABLED: "false"
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
-          node-version: 24
+          node-version-file: .node-version
           cache: npm
 
-      - run: npm ci
-      - run: npm run lint
-      - run: npm run typecheck
-      - run: npm run test:unit
-      - run: npm run build
+      - name: Install locked dependencies
+        run: npm ci
+      - name: Audit production dependencies
+        run: npm audit --audit-level high
+      - name: Validate Prisma schema formatting
+        run: node node_modules/prisma/build/index.js format --check
+      - name: Validate deployment scripts and production Compose
+        run: |
+          sh -n deploy.sh start.sh scripts/*.sh deploy/prod/*.sh
+          cp deploy/prod/.env.example deploy/prod/.env
+          trap 'rm -f deploy/prod/.env' EXIT
+          docker compose --env-file deploy/prod/.env -f deploy/prod/docker-compose.yml config --quiet
+      - name: Lint
+        run: npm run lint
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Enforce clean architecture boundaries
+        run: npm run test:architecture
+      - name: Test route-handler contracts
+        run: npm run test:route-handlers
+      - name: Test with enforced coverage thresholds
+        run: npm run test:coverage
+      - name: Test critical frontend components with enforced coverage thresholds
+        run: npm run test:coverage:frontend
+      - name: Build production application
+        run: npm run build
 
-  postgres-concurrency:
+  integration-services:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     services:
@@ -92,12 +142,67 @@ jobs:
       TURNSTILE_ENABLED: "false"
 
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
-          node-version: 24
+          node-version-file: .node-version
+          cache: npm
+      - name: Install locked dependencies
+        run: npm ci
+      - name: Generate Prisma client
+        run: npm run prisma:generate
+      - name: Apply migrations to an empty PostgreSQL database
+        run: node node_modules/prisma/build/index.js migrate deploy
+      - name: Run PostgreSQL concurrency and service integration tests
+        run: npm run test:services
+
+  container-security:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - name: Build the exact production runtime image
+        run: >-
+          docker build
+          --target runner
+          --build-arg NEXT_PUBLIC_APP_URL=https://app.example.com
+          --build-arg TURNSTILE_ENABLED=true
+          --build-arg TURNSTILE_WIDGET_ID=0x4AAAAACIBuildSiteKeyOnlyNotASecret
+          --tag clean-pay:ci
+          .
+      - name: Generate image SBOM
+        uses: anchore/sbom-action@v0
+        with:
+          image: clean-pay:ci
+          artifact-name: clean-pay-image.spdx.json
+          format: spdx-json
+          upload-release-assets: false
+      - name: Scan image packages and application dependencies
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: clean-pay:ci
+          format: table
+          exit-code: "1"
+          ignore-unfixed: true
+          severity: HIGH,CRITICAL
+
+  full-stack-e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .node-version
           cache: npm
       - run: npm ci
-      - run: npm run prisma:generate
-      - run: node node_modules/prisma/build/index.js migrate deploy
-      - run: npm run test:postgres-concurrency
+      - run: timeout --signal=TERM --kill-after=30s 12m npm run test:e2e
+        env:
+          KEEP_E2E_STACK: "1"
+          CLEAN_PAY_E2E_DIAGNOSTICS: "1"
+      - name: Collect Docker diagnostics
+        if: failure()
+        run: docker compose -p clean-pay-dev -f .devcontainer/docker-compose.yml logs --tail=200
+      - name: Clean up E2E stack
+        if: always()
+        run: docker compose -p clean-pay-dev -f .devcontainer/docker-compose.yml down --remove-orphans --volumes

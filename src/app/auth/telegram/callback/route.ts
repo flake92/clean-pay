@@ -1,36 +1,31 @@
 import { NextResponse } from "next/server";
 
-import { logTechnicalError, logTechnicalInfo, logTechnicalWarning } from "@/backend/observability/audit";
+import { completeTelegramCallback } from "@/application/auth/complete-telegram-callback";
+import {
+  TelegramCallbackError,
+  type TelegramCallbackOutcome,
+} from "@/application/auth/ports/telegram-callback";
 import { getEnv } from "@/backend/config/env";
+import { ServiceError } from "@/backend/errors/service-error";
 import {
-  linkCurrentUserToRemnashopAuth,
-  reconcileUserFromRemnashopAuth,
-} from "@/backend/integrations/remnashop/session";
-import {
-  getAuthorizedRemnashopTokens,
-  getRemnashopUserIdFromAccessToken,
-  getJwtExpiresAt,
-  recoverRemnashopTelegramSession,
-  remnashopLinkTelegram,
-  remnashopMergeUsers,
-} from "@/backend/integrations/remnashop/client";
-import { BffError } from "@/backend/integrations/remnashop/errors";
-import { readBffJsonObject } from "@/backend/http/request-body";
-import {
-  createWebSessionOnResponse,
-  getCurrentSession,
-} from "@/backend/sessions/web-session";
-import {
-  consumeTelegramCallback,
-  consumeTelegramLoginWidgetPayload,
-  consumeTelegramPopupToken,
-  TelegramAuthStateAlreadyConsumedError,
-} from "@/backend/integrations/telegram/oidc";
+  productionTelegramCallbackGateway,
+} from "@/backend/integrations/auth/telegram-callback-gateway";
+import { recoverRemnashopTelegramSession } from "@/backend/integrations/remnashop/client";
 import {
   telegramAccountMergeCookieMaxAgeSeconds,
   telegramAccountMergeCookieName,
-} from "@/backend/auth/telegram-account-merge";
-import { withPaymentOwnerChangeFence } from "@/backend/payments/user-merge";
+} from "@/backend/integrations/auth/telegram-account-merge-store";
+import {
+  createWebSessionOnResponse,
+  getCurrentSession,
+} from "@/backend/integrations/sessions/web-session-service";
+import { readTelegramPopupRequest } from "@/backend/integrations/telegram/popup-request";
+import { TelegramAuthStateAlreadyConsumedError } from "@/backend/integrations/telegram/oidc";
+import {
+  logTechnicalError,
+  logTechnicalInfo,
+  logTechnicalWarning,
+} from "@/backend/observability/audit";
 
 export const runtime = "nodejs";
 
@@ -49,19 +44,43 @@ function setMergeConfirmationCookie(response: NextResponse, token: string) {
   });
 }
 
+async function applyCallbackOutcome(
+  response: NextResponse,
+  outcome: TelegramCallbackOutcome,
+) {
+  if (outcome.mergeConfirmation) {
+    setMergeConfirmationCookie(response, outcome.mergeConfirmation.token);
+    return;
+  }
+
+  if (!outcome.session) {
+    throw new Error("Telegram callback completed without a session result");
+  }
+
+  const session = await createWebSessionOnResponse(
+    response,
+    outcome.session.userId,
+    outcome.session.remnashopSession
+      ? { remnashopSession: outcome.session.remnashopSession }
+      : undefined,
+  );
+
+  if (outcome.session.requiresTelegramRecovery) {
+    await recoverRemnashopTelegramSession(session.id, outcome.session.userId);
+  }
+}
+
 async function redirectAfterTelegramFailure(error?: unknown) {
   const session = await getCurrentSession().catch(() => null);
 
-  if (!session) {
-    return redirectTo("/login?auth=telegram_failed");
-  }
+  if (!session) return redirectTo("/login?auth=telegram_failed");
 
   const reason =
-    error instanceof BffError && error.code === "ACCOUNT_MERGE_SUBSCRIPTIONS_CONFLICT"
+    error instanceof TelegramCallbackError && error.code === "ACCOUNT_MERGE_SUBSCRIPTIONS_CONFLICT"
       ? "telegram_merge_subscriptions"
-      : error instanceof BffError && error.code === "ACCOUNT_MERGE_REQUIRED"
+      : error instanceof TelegramCallbackError && error.code === "ACCOUNT_MERGE_REQUIRED"
         ? "telegram_merge_required"
-      : "telegram_failed";
+        : "telegram_failed";
 
   return redirectTo(`/link-account?auth=${reason}`);
 }
@@ -89,211 +108,6 @@ function callbackRequestMetadata(request: Request, url: URL) {
   };
 }
 
-async function linkTelegramToCurrentRemnashopAccount({
-  telegramId,
-  telegramUsername,
-  paymentOwnerFenceHeld = false,
-}: {
-  telegramId: string;
-  telegramUsername: string | null;
-  paymentOwnerFenceHeld?: boolean;
-}) {
-  const tokens = await getAuthorizedRemnashopTokens({ allowUnverifiedEmail: true });
-
-  await remnashopLinkTelegram({
-    accessToken: tokens.accessToken,
-    telegramId,
-    telegramUsername,
-  });
-
-  return linkCurrentUserToRemnashopAuth({
-    accessToken: tokens.accessToken,
-    refreshToken: tokens.refreshToken,
-    auth: {
-      expires_at:
-        getJwtExpiresAt(tokens.accessToken)?.toISOString()
-        ?? tokens.session.remnashopAccessExpiresAt?.toISOString()
-        ?? new Date(Date.now() + 60_000).toISOString(),
-      refresh_expires_at:
-        getJwtExpiresAt(tokens.refreshToken)?.toISOString()
-        ?? tokens.session.remnashopRefreshExpiresAt?.toISOString()
-        ?? new Date(Date.now() + 60_000).toISOString(),
-    },
-    paymentOwnerFenceHeld,
-  });
-}
-
-function isBothSubscriptionsMergeConflict(error: unknown) {
-  return (
-    error instanceof BffError &&
-    error.code === "CONFLICT" &&
-    String(error.debug?.message ?? error.message).toLowerCase().includes("both users have current subscriptions")
-  );
-}
-
-async function mergeCurrentRemnashopAccountIntoTelegramAccount({
-  remnashopAuth,
-  currentRemnashopUserId,
-}: {
-  remnashopAuth: NonNullable<Awaited<ReturnType<typeof consumeTelegramCallback>>["remnashopAuth"]>;
-  currentRemnashopUserId: string | null;
-}) {
-  if (!currentRemnashopUserId) {
-    throw new BffError(
-      "ACCOUNT_MERGE_REQUIRED",
-      409,
-      "Current Clean Pay account is not linked to Remnashop.",
-    );
-  }
-
-  const sourceUserId = currentRemnashopUserId;
-  const targetUserId = getRemnashopUserIdFromAccessToken(remnashopAuth.cookies.accessToken);
-
-  if (sourceUserId === targetUserId) {
-    return false;
-  }
-
-  try {
-    await remnashopMergeUsers({
-      sourceUserId,
-      targetUserId,
-      reason: "Clean Pay Telegram link: merge current e-mail account into owned Telegram account",
-    });
-  } catch (error) {
-    if (isBothSubscriptionsMergeConflict(error)) {
-      throw new BffError(
-        "ACCOUNT_MERGE_REQUIRED",
-        409,
-        "У обеих учетных записей есть активные подписки. Объединение нужно выполнить через поддержку.",
-        {
-          message: "У обеих учетных записей есть активные подписки. Объединение нужно выполнить через поддержку.",
-        },
-      );
-    }
-
-    throw error;
-  }
-
-  return true;
-}
-
-async function reconcileTelegramCallbackResult({
-  linked,
-  userId,
-  currentRemnashopUserId,
-  telegramId,
-  telegramUsername,
-  remnashopAuth,
-}: {
-  linked: boolean;
-  userId: string;
-  currentRemnashopUserId: string | null;
-  telegramId: string;
-  telegramUsername: string | null;
-  remnashopAuth: Awaited<ReturnType<typeof consumeTelegramCallback>>["remnashopAuth"];
-}) {
-  if (linked) {
-    const incomingRemnashopUserId = remnashopAuth
-      ? getRemnashopUserIdFromAccessToken(remnashopAuth.cookies.accessToken)
-      : null;
-
-    return withPaymentOwnerChangeFence({
-      userIds: [userId],
-      upstreamAccountIds: [
-        currentRemnashopUserId,
-        incomingRemnashopUserId,
-      ].filter((ownerId): ownerId is string => Boolean(ownerId)),
-      telegramIds: [telegramId],
-      work: async () => {
-        try {
-          await linkTelegramToCurrentRemnashopAccount({
-            telegramId,
-            telegramUsername,
-            paymentOwnerFenceHeld: true,
-          });
-
-          return {
-            userId,
-            remnashopSession: undefined,
-            requiresTelegramRecovery: false,
-          };
-        } catch (error) {
-          logTechnicalWarning("telegram_link_remnashop_attach_failed", {
-            errorName: error instanceof Error ? error.name : "UnknownError",
-            telegramId,
-          });
-
-          if (!remnashopAuth) {
-            return {
-              userId,
-              remnashopSession: undefined,
-              requiresTelegramRecovery: false,
-            };
-          }
-
-          const upstreamMerged = await mergeCurrentRemnashopAccountIntoTelegramAccount({
-            remnashopAuth,
-            currentRemnashopUserId,
-          });
-
-          const linkedUser = await linkCurrentUserToRemnashopAuth({
-            accessToken: remnashopAuth.cookies.accessToken,
-            refreshToken: remnashopAuth.cookies.refreshToken,
-            auth: remnashopAuth.data,
-            paymentOwnerFenceHeld: true,
-            ...(upstreamMerged
-              ? { invalidateSiblingRemnashopTokens: true }
-              : {}),
-          });
-
-          return {
-            userId: linkedUser.user.id,
-            remnashopSession: undefined,
-            requiresTelegramRecovery: false,
-          };
-        }
-      },
-    });
-  }
-
-  if (!remnashopAuth) {
-    return {
-      userId,
-      remnashopSession: undefined,
-      requiresTelegramRecovery: false,
-    };
-  }
-
-  const reconciled = await reconcileUserFromRemnashopAuth({
-    accessToken: remnashopAuth.cookies.accessToken,
-    refreshToken: remnashopAuth.cookies.refreshToken,
-    auth: remnashopAuth.data,
-  });
-
-  return {
-    userId: reconciled.user.id,
-    remnashopSession: reconciled.remnashopSession,
-    requiresTelegramRecovery: reconciled.requiresTelegramRecovery,
-  };
-}
-
-async function createTelegramCallbackSession(
-  response: NextResponse,
-  reconciled: Awaited<ReturnType<typeof reconcileTelegramCallbackResult>>,
-) {
-  const session = await createWebSessionOnResponse(
-    response,
-    reconciled.userId,
-    reconciled.remnashopSession
-      ? { remnashopSession: reconciled.remnashopSession }
-      : undefined,
-  );
-
-  if (reconciled.requiresTelegramRecovery) {
-    await recoverRemnashopTelegramSession(session.id, reconciled.userId);
-  }
-}
-
 export async function GET(request: Request) {
   const url = new URL(request.url);
   const code = url.searchParams.get("code");
@@ -308,42 +122,18 @@ export async function GET(request: Request) {
   }
 
   try {
-    const {
-      user,
-      redirectTo: nextPath,
-      remnashopAuth,
-      linked,
-      telegramId,
-      telegramUsername,
-      mergeConfirmation,
-    } = await consumeTelegramCallback(code, state);
-    const response = redirectTo(
-      mergeConfirmation?.required
-        ? "/link-account?auth=telegram_email_replace"
-        : nextPath ?? "/cabinet",
+    const outcome = await completeTelegramCallback(
+      productionTelegramCallbackGateway,
+      { kind: "oidc", code, state },
     );
-
-    if (mergeConfirmation?.required) {
-      setMergeConfirmationCookie(response, mergeConfirmation.token);
-      return response;
-    }
-
-    const reconciled = await reconcileTelegramCallbackResult({
-      linked,
-      userId: user.id,
-      currentRemnashopUserId: user.remnashopUserId,
-      telegramId,
-      telegramUsername,
-      remnashopAuth,
-    });
-
-    await createTelegramCallbackSession(response, reconciled);
+    const response = redirectTo(outcome.redirectTo);
+    await applyCallbackOutcome(response, outcome);
+    if (outcome.mergeConfirmation) return response;
 
     logTechnicalInfo("telegram_callback_success", {
       ...metadata,
-      userId: user.id,
-      remnashopLinked: linked || Boolean(remnashopAuth),
-      redirectTo: nextPath ?? "/cabinet",
+      ...outcome.audit,
+      redirectTo: outcome.redirectTo,
     });
 
     return response;
@@ -358,59 +148,26 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   try {
-    const body = await readBffJsonObject(request) as {
-      authData?: unknown;
-      idToken?: unknown;
-    } | null;
-    const idToken = typeof body?.idToken === "string" ? body.idToken : null;
-    const authData = body?.authData;
-
-    if (!idToken && (!authData || typeof authData !== "object")) {
-      logTechnicalWarning("telegram_popup_callback_missing_token", {});
-      return NextResponse.json({ error: "telegram_failed" }, { status: 400 });
-    }
-
-    const {
-      user,
-      redirectTo: nextPath,
-      remnashopAuth,
-      linked,
-      telegramId,
-      telegramUsername,
-      mergeConfirmation,
-    } = idToken
-      ? await consumeTelegramPopupToken(idToken)
-      : await consumeTelegramLoginWidgetPayload(authData as Parameters<typeof consumeTelegramLoginWidgetPayload>[0]);
-    const redirectPath = mergeConfirmation?.required
-      ? "/link-account?auth=telegram_email_replace"
-      : nextPath ?? "/cabinet";
-    const response = NextResponse.json({ redirectTo: redirectPath });
-
-    if (mergeConfirmation?.required) {
-      setMergeConfirmationCookie(response, mergeConfirmation.token);
-      return response;
-    }
-    const reconciled = await reconcileTelegramCallbackResult({
-      linked,
-      userId: user.id,
-      currentRemnashopUserId: user.remnashopUserId,
-      telegramId,
-      telegramUsername,
-      remnashopAuth,
-    });
-
-    await createTelegramCallbackSession(response, reconciled);
+    const popupRequest = await readTelegramPopupRequest(request);
+    const outcome = await completeTelegramCallback(
+      productionTelegramCallbackGateway,
+      popupRequest.method === "oidc"
+        ? { kind: "popup-oidc", idToken: popupRequest.idToken }
+        : { kind: "login-widget", authData: popupRequest.authData },
+    );
+    const response = NextResponse.json({ redirectTo: outcome.redirectTo });
+    await applyCallbackOutcome(response, outcome);
+    if (outcome.mergeConfirmation) return response;
 
     logTechnicalInfo("telegram_popup_callback_success", {
-      userId: user.id,
-      remnashopLinked: linked || Boolean(remnashopAuth),
-      redirectTo: nextPath ?? "/cabinet",
+      ...outcome.audit,
+      redirectTo: outcome.redirectTo,
     });
 
     return response;
   } catch (error) {
     logTechnicalError("telegram_popup_callback_failed", error, {});
-    if (error instanceof BffError && error.status === 413) {
+    if (error instanceof ServiceError && error.status === 413) {
       return NextResponse.json({ error: "payload_too_large" }, { status: 413 });
     }
     if (error instanceof TelegramAuthStateAlreadyConsumedError) {

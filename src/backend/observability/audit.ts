@@ -1,11 +1,10 @@
-import type { Prisma } from "@prisma/client";
 import { createHash } from "node:crypto";
 import { headers } from "next/headers";
 
 import { getEnv } from "@/backend/config/env";
 import { logger, sanitizeLogValue } from "@/backend/observability/logger";
-import { prisma } from "@/backend/database/prisma";
-import type { BffError } from "@/backend/integrations/remnashop/errors";
+import { prismaAuditEventRepository } from "@/backend/integrations/observability/prisma-audit-event-repository";
+import type { ServiceError } from "@/backend/errors/service-error";
 
 type AuditSeverity = "INFO" | "WARN" | "ERROR";
 
@@ -29,13 +28,24 @@ function technicalMetadata(metadata: Record<string, unknown>) {
     return undefined;
   }
 
-  return sanitizeValue(metadata) as Prisma.InputJsonValue;
+  return sanitizeValue(metadata);
 }
 
-function getIpFromHeaders(requestHeaders: Headers) {
-  const forwardedFor = requestHeaders.get("x-forwarded-for")?.split(",")[0]?.trim();
+export function getTrustedClientIp(
+  requestHeaders: Headers,
+  trustedProxyHops: number,
+) {
+  if (!Number.isSafeInteger(trustedProxyHops) || trustedProxyHops < 1) {
+    return null;
+  }
 
-  return forwardedFor || requestHeaders.get("x-real-ip") || null;
+  const addresses = (requestHeaders.get("x-forwarded-for") ?? "")
+    .split(",")
+    .map((value) => value.trim())
+    .filter(Boolean);
+  const clientIndex = addresses.length - trustedProxyHops;
+
+  return clientIndex >= 0 ? addresses[clientIndex] ?? null : null;
 }
 
 function hashIp(ip: string | null) {
@@ -58,14 +68,14 @@ export async function auditLog({
     const requestHeaders = await headers();
     const sanitized = metadata ? sanitizeValue(metadata) : undefined;
 
-    await prisma.auditLog.create({
-      data: {
-        userId: userId ?? null,
-        action,
-        severity,
-        ipHash: hashIp(getIpFromHeaders(requestHeaders)),
-        metadata: sanitized as Prisma.InputJsonValue,
-      },
+    await prismaAuditEventRepository.append({
+      userId: userId ?? null,
+      action,
+      severity,
+      ipHash: hashIp(
+        getTrustedClientIp(requestHeaders, getEnv().trustedProxyHops),
+      ),
+      metadata: sanitized as Record<string, unknown> | undefined,
     });
   } catch (error) {
     logger.error("audit_write_failed", {
@@ -76,12 +86,12 @@ export async function auditLog({
 }
 
 export function logTechnicalError(event: string, error: unknown, metadata: Record<string, unknown> = {}) {
-  const bffError = error as Partial<BffError>;
+  const serviceError = error as Partial<ServiceError>;
   const safeMetadata = technicalMetadata(metadata);
 
   logger.error(event, {
-    code: typeof bffError.code === "string" ? bffError.code : undefined,
-    status: typeof bffError.status === "number" ? bffError.status : undefined,
+    code: typeof serviceError.code === "string" ? serviceError.code : undefined,
+    status: typeof serviceError.status === "number" ? serviceError.status : undefined,
     message: isProductionLog() ? undefined : error instanceof Error ? error.message : String(error),
     ...(safeMetadata === undefined ? {} : { metadata: safeMetadata }),
   }, { category: "technical" });

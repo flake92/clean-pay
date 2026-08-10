@@ -2,8 +2,8 @@
 
 import { useEffect, useState } from "react";
 
+import { authenticateTelegramWebAppAction } from "@/app/actions/telegram";
 import { LinkButton } from "@/frontend/components/prime/link-button";
-import { readBffError } from "@/frontend/lib/client-api";
 import {
   getTelegramWebApp,
   loadTelegramWebAppScript,
@@ -16,10 +16,6 @@ function redirectToTelegramLogin(redirectTo: string) {
   const url = new URL("/auth/telegram/start", window.location.origin);
   url.searchParams.set("redirect_to", redirectTo);
   window.location.replace(url.toString());
-}
-
-async function readError(response: Response) {
-  return (await readBffError(response, "Не удалось войти через Telegram.")).message;
 }
 
 export function TelegramWebAppLogin({ redirectTo = "/cabinet" }: { redirectTo?: string }) {
@@ -47,18 +43,9 @@ export function TelegramWebAppLogin({ redirectTo = "/cabinet" }: { redirectTo?: 
 
         markTelegramWebAppSession();
 
-        const response = await fetch("/api/bff/auth/telegram/webapp", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ initData, redirectTo }),
-        });
-
-        if (!response.ok) {
-          throw new Error(await readError(response));
-        }
-
-        const body = await response.json().catch(() => null) as { redirectTo?: string } | null;
-        window.location.replace(body?.redirectTo ?? "/cabinet");
+        const result = await authenticateTelegramWebAppAction(initData);
+        if (!result.ok) throw new Error(result.message);
+        window.location.replace(redirectTo);
       } catch (nextError) {
         if (alive) {
           setError(nextError instanceof Error ? nextError.message : "Не удалось войти через Telegram.");

@@ -59,7 +59,7 @@ export function LinkButton({
   }
 
   return (
-    <Link className={classes({ outlined, text, severity, className })} href={href}>
+    <Link className={classes({ outlined, text, severity, className })} href={href} prefetch={false}>
       {content}
     </Link>
   );

@@ -44,14 +44,14 @@ const mocks = vi.hoisted(() => {
 vi.mock("@/backend/database/prisma", () => ({
   prisma: mocks.prisma,
 }));
-vi.mock("@/backend/payments/owner", () => ({
+vi.mock("@/backend/integrations/payments/payment-owner-service", () => ({
   lockPaymentUpstreamOwner: mocks.lockPaymentUpstreamOwner,
 }));
-vi.mock("@/backend/payments/user-merge", () => ({
+vi.mock("@/backend/integrations/payments/payment-user-merge-service", () => ({
   lockPaymentOwnerFence: mocks.lockPaymentOwnerFence,
 }));
 
-import { BffError } from "@/backend/integrations/remnashop/errors";
+import { ServiceError } from "@/backend/errors/service-error";
 import {
   beginPaymentOperation,
   bindPaymentOperationUpstreamOwner,
@@ -61,7 +61,7 @@ import {
   paymentOperationErrorFromSnapshot,
   settlePaymentOperationAfterDispatchFailure,
   settlePaymentOperationBeforeDispatchFailure,
-} from "@/backend/payments/idempotency";
+} from "@/backend/integrations/payments/payment-idempotency-service";
 import { sha256 } from "@/backend/security/crypto";
 
 const CLIENT_KEY = "4f4cf1a3-797f-4b69-b39f-09c4da39f96a";
@@ -621,7 +621,7 @@ describe("payment operation idempotency", () => {
     await settlePaymentOperationBeforeDispatchFailure({
       operationId: "operation-2",
       claimToken: "claim-2",
-      error: new BffError("RATE_LIMITED", 429),
+      error: new ServiceError("RATE_LIMITED", 429),
       final: false,
     });
     await settlePaymentOperationAfterDispatchFailure({
@@ -663,42 +663,44 @@ describe("payment operation idempotency", () => {
   });
 
   it("classifies post-dispatch failures consistently with client key retention", () => {
+    expect(paymentOperationDispatchFailureOutcome(new Error("network failed")))
+      .toBe("UNKNOWN");
     expect(
       paymentOperationDispatchFailureOutcome(
-        new BffError("CONFLICT", 409, "local persistence collision"),
+        new ServiceError("CONFLICT", 409, "local persistence collision"),
       ),
     ).toBe("UNKNOWN");
     expect(
       paymentOperationDispatchFailureOutcome(
-        new BffError("RATE_LIMITED", 429, "slow down", {
+        new ServiceError("RATE_LIMITED", 429, "slow down", {
           upstreamStatus: 429,
         }),
       ),
     ).toBe("RETRYABLE");
     expect(
       paymentOperationDispatchFailureOutcome(
-        new BffError("UPSTREAM_ERROR", 502, "request timeout", {
+        new ServiceError("UPSTREAM_ERROR", 502, "request timeout", {
           upstreamStatus: 408,
         }),
       ),
     ).toBe("UNKNOWN");
     expect(
       paymentOperationDispatchFailureOutcome(
-        new BffError("UPSTREAM_ERROR", 502, "method not allowed", {
+        new ServiceError("UPSTREAM_ERROR", 502, "method not allowed", {
           upstreamStatus: 405,
         }),
       ),
     ).toBe("UNKNOWN");
     expect(
       paymentOperationDispatchFailureOutcome(
-        new BffError("IDEMPOTENCY_KEY_REUSED", 409, "upstream key conflict", {
+        new ServiceError("IDEMPOTENCY_KEY_REUSED", 409, "upstream key conflict", {
           upstreamStatus: 409,
         }),
       ),
     ).toBe("UNKNOWN");
     expect(
       paymentOperationDispatchFailureOutcome(
-        new BffError("VALIDATION_ERROR", 400, "invalid duration", {
+        new ServiceError("VALIDATION_ERROR", 400, "invalid duration", {
           upstreamStatus: 400,
         }),
       ),
@@ -711,7 +713,7 @@ describe("payment operation idempotency", () => {
     await settlePaymentOperationAfterDispatchFailure({
       operationId: "operation-retry",
       claimToken: "claim-retry",
-      error: new BffError("RATE_LIMITED", 429),
+      error: new ServiceError("RATE_LIMITED", 429),
       outcome: "RETRYABLE",
     });
 
@@ -791,7 +793,7 @@ describe("payment operation idempotency", () => {
       ),
     );
     mocks.lockPaymentUpstreamOwner.mockRejectedValue(
-      new BffError(
+      new ServiceError(
         "ACCOUNT_MERGE_REQUIRED",
         409,
         "owner changed during payment",
@@ -809,7 +811,7 @@ describe("payment operation idempotency", () => {
     expect(mocks.paymentRecord.create).not.toHaveBeenCalled();
   });
 
-  it("reconstructs terminal BFF errors from safe snapshots", () => {
+  it("reconstructs terminal service errors from safe snapshots", () => {
     expect(
       paymentOperationErrorFromSnapshot({
         code: "PLAN_UNAVAILABLE",

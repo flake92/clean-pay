@@ -13,6 +13,7 @@ describe("Next lint warning guardrails", () => {
     const layout = readFileSync("src/app/layout.tsx", "utf8");
 
     expect(layout).toContain('import "../../public/themes/lara-light-indigo/theme.css";');
+    expect(layout).not.toContain('from "next/font/google"');
     expect(layout).not.toContain('rel="stylesheet"');
     expect(layout).not.toContain("theme-css");
   });

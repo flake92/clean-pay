@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { APP_VERSION } from "@/shared/app-version";
 
 export const runtime = "nodejs";
 
@@ -6,6 +7,6 @@ export async function GET() {
   return NextResponse.json({
     status: "ok",
     service: "clean-pay",
-    version: process.env.npm_package_version ?? "0.1.0",
+    version: APP_VERSION,
   });
 }

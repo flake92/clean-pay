@@ -5,8 +5,8 @@ const describeWithPostgres = realDatabaseUrl ? describe : describe.skip;
 
 describeWithPostgres("passkey deletion PostgreSQL serialization", () => {
   let prisma: typeof import("@/backend/database/prisma")["prisma"];
-  let deleteOwnedPasskey: typeof import("@/backend/auth/passkeys")["deleteOwnedPasskey"];
-  let recordPasskeyUse: typeof import("@/backend/auth/passkeys")["recordPasskeyUse"];
+  let deleteOwnedPasskey: typeof import("@/backend/integrations/auth/passkey-service")["deleteOwnedPasskey"];
+  let recordPasskeyUse: typeof import("@/backend/integrations/auth/passkey-service")["recordPasskeyUse"];
   const userIds: string[] = [];
 
   beforeAll(async () => {
@@ -14,7 +14,7 @@ describeWithPostgres("passkey deletion PostgreSQL serialization", () => {
     delete (globalThis as typeof globalThis & { prisma?: unknown }).prisma;
 
     ({ prisma } = await import("@/backend/database/prisma"));
-    ({ deleteOwnedPasskey, recordPasskeyUse } = await import("@/backend/auth/passkeys"));
+    ({ deleteOwnedPasskey, recordPasskeyUse } = await import("@/backend/integrations/auth/passkey-service"));
   });
 
   afterAll(async () => {

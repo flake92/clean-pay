@@ -1,17 +1,19 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 
 import { Button } from "primereact/button";
 import { InputText } from "primereact/inputtext";
 import { Message } from "primereact/message";
 
+import {
+  confirmEmailVerificationCodeAction,
+  requestEmailVerificationCodeAction,
+} from "@/app/actions/email-verification";
 import { TurnstileWidget, type TurnstileHandle, hasTurnstileSiteKey } from "@/frontend/components/turnstile-widget";
-import { readBffError } from "@/frontend/lib/client-api";
-
-async function readError(response: Response, fallback: string) {
-  return (await readBffError(response, fallback)).message;
-}
+import { navigateTo } from "@/frontend/lib/browser-navigation";
+import { passkeySetupPath } from "@/shared/auth/account-setup-flow";
+import { clearSessionAction } from "@/app/actions/session";
 
 function missingTurnstileTokenMessage(siteKey?: string | null) {
   return hasTurnstileSiteKey(siteKey)
@@ -19,27 +21,40 @@ function missingTurnstileTokenMessage(siteKey?: string | null) {
     : "Ключ сайта Cloudflare Turnstile не настроен.";
 }
 
-function turnstilePayload(token: string | null) {
-  return token
-    ? {
-        turnstileToken: token,
-        "cf-turnstile-response": token,
-      }
-    : {};
-}
-
 export function RegisterEmailConfirmForm({
+  redirectTo = "/cabinet",
   turnstileEnabled = false,
   turnstileSiteKey,
 }: {
+  redirectTo?: string;
   turnstileEnabled?: boolean;
   turnstileSiteKey?: string | null;
 }) {
   const [loading, setLoading] = useState<"confirm" | "resend" | "back" | null>(null);
+  const loadingRef = useRef<"confirm" | "resend" | "back" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
   const [turnstile, setTurnstile] = useState<TurnstileHandle | null>(null);
+
+  function beginLoading(action: "confirm" | "resend" | "back") {
+    if (loadingRef.current) {
+      return false;
+    }
+
+    loadingRef.current = action;
+    setLoading(action);
+    return true;
+  }
+
+  function finishLoading(action: "confirm" | "resend" | "back") {
+    if (loadingRef.current !== action) {
+      return;
+    }
+
+    loadingRef.current = null;
+    setLoading(null);
+  }
 
   function ensureTurnstileToken() {
     if (!turnstileEnabled || turnstileToken) {
@@ -51,9 +66,28 @@ export function RegisterEmailConfirmForm({
   }
 
   async function goBackToRegister() {
-    setLoading("back");
-    await fetch("/api/bff/auth/logout", { method: "POST" }).catch(() => null);
-    window.location.assign("/register");
+    if (!beginLoading("back")) {
+      return;
+    }
+
+    setError(null);
+
+    try {
+      const result = await clearSessionAction();
+
+      if (result.status === "error") {
+        setError(result.message);
+        return;
+      }
+
+      navigateTo(`/register?${new URLSearchParams({
+        redirect_to: redirectTo,
+      }).toString()}`);
+    } catch {
+      setError("Сеть недоступна. Не удалось вернуться к регистрации.");
+    } finally {
+      finishLoading("back");
+    }
   }
 
   async function resendCode() {
@@ -64,24 +98,23 @@ export function RegisterEmailConfirmForm({
       return;
     }
 
-    setLoading("resend");
+    if (!beginLoading("resend")) {
+      return;
+    }
 
     try {
-      const response = await fetch("/api/bff/auth/email/request-verification", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(turnstilePayload(turnstileToken)),
+      const result = await requestEmailVerificationCodeAction({
+        ...(turnstileToken ? { turnstileToken } : {}),
       });
 
-      if (!response.ok) {
+      if (!result.ok) {
         turnstile?.reset();
         setTurnstileToken(null);
-        setError(await readError(response, "Не удалось повторно отправить код."));
+        setError(result.message);
         return;
       }
 
-      const body = await response.json().catch(() => null);
-      const targetEmail = body?.data?.target_email;
+      const targetEmail = result.kind === "code-sent" ? result.targetEmail : null;
       setMessage(targetEmail ? `Код повторно отправлен на ${targetEmail}.` : "Код повторно отправлен.");
       turnstile?.reset();
       setTurnstileToken(null);
@@ -90,7 +123,7 @@ export function RegisterEmailConfirmForm({
       setTurnstileToken(null);
       setError("Сеть недоступна. Не удалось повторно отправить код.");
     } finally {
-      setLoading(null);
+      finishLoading("resend");
     }
   }
 
@@ -103,40 +136,38 @@ export function RegisterEmailConfirmForm({
       return;
     }
 
-    setLoading("confirm");
+    if (!beginLoading("confirm")) {
+      return;
+    }
 
     const formData = new FormData(event.currentTarget);
     try {
-      const response = await fetch("/api/bff/auth/email/confirm", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          code: formData.get("code"),
-          ...turnstilePayload(turnstileToken),
-        }),
+      const result = await confirmEmailVerificationCodeAction({
+        code: String(formData.get("code") ?? ""),
+        ...(turnstileToken ? { turnstileToken } : {}),
       });
 
-      if (!response.ok) {
+      if (!result.ok) {
         turnstile?.reset();
         setTurnstileToken(null);
-        setError(await readError(response, "Не удалось подтвердить e-mail."));
+        setError(result.message);
         return;
       }
 
-      window.location.assign("/passkey/setup");
+      navigateTo(passkeySetupPath(redirectTo));
     } catch {
       turnstile?.reset();
       setTurnstileToken(null);
       setError("Сеть недоступна. Не удалось подтвердить e-mail.");
     } finally {
-      setLoading(null);
+      finishLoading("confirm");
     }
   }
 
   return (
     <div className="flex flex-column gap-3">
       {turnstileEnabled ? (
-        <TurnstileWidget onReady={setTurnstile} onToken={setTurnstileToken} siteKey={turnstileSiteKey} />
+        <TurnstileWidget action="email_verification" onReady={setTurnstile} onToken={setTurnstileToken} siteKey={turnstileSiteKey} />
       ) : null}
       <form className="flex flex-column gap-3" onSubmit={onSubmit}>
         <label className="flex flex-column gap-2">

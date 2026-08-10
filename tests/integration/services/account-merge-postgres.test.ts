@@ -5,18 +5,18 @@ const describeWithPostgres = realDatabaseUrl ? describe : describe.skip;
 
 describeWithPostgres("account merge PostgreSQL invariants", () => {
   let prisma: typeof import("@/backend/database/prisma")["prisma"];
-  let mergeLocalUsersIntoTarget: typeof import("@/backend/auth/user-merge")["mergeLocalUsersIntoTarget"];
-  let withPaymentOwnerChangeFence: typeof import("@/backend/payments/user-merge")["withPaymentOwnerChangeFence"];
-  let lockPaymentOwnerFence: typeof import("@/backend/payments/user-merge")["lockPaymentOwnerFence"];
+  let mergeLocalUsersIntoTarget: typeof import("@/backend/integrations/auth/local-user-merge-service")["mergeLocalUsersIntoTarget"];
+  let withPaymentOwnerChangeFence: typeof import("@/backend/integrations/payments/payment-user-merge-service")["withPaymentOwnerChangeFence"];
+  let lockPaymentOwnerFence: typeof import("@/backend/integrations/payments/payment-user-merge-service")["lockPaymentOwnerFence"];
   const userIds: string[] = [];
 
   beforeAll(async () => {
     process.env.DATABASE_URL = realDatabaseUrl as string;
     delete (globalThis as typeof globalThis & { prisma?: unknown }).prisma;
     ({ prisma } = await import("@/backend/database/prisma"));
-    ({ mergeLocalUsersIntoTarget } = await import("@/backend/auth/user-merge"));
+    ({ mergeLocalUsersIntoTarget } = await import("@/backend/integrations/auth/local-user-merge-service"));
     ({ withPaymentOwnerChangeFence, lockPaymentOwnerFence } =
-      await import("@/backend/payments/user-merge"));
+      await import("@/backend/integrations/payments/payment-user-merge-service"));
   });
 
   afterAll(async () => {

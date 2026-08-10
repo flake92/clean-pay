@@ -10,8 +10,9 @@ import AppTopbar from './AppTopbar';
 import { LayoutContext } from './context/layoutcontext';
 import { ChildContainerProps, LayoutState, AppTopbarRef } from '@/frontend/types';
 import { usePathname } from 'next/navigation';
+import type { NavigationViewModel } from '@/application/models/navigation';
 
-const Layout = ({ children }: ChildContainerProps) => {
+const Layout = ({ children, navigation }: ChildContainerProps & { navigation: NavigationViewModel }) => {
     const { layoutState, setLayoutState } = useContext(LayoutContext);
     const topbarRef = useRef<AppTopbarRef>(null);
     const sidebarRef = useRef<HTMLDivElement>(null);
@@ -123,9 +124,9 @@ const Layout = ({ children }: ChildContainerProps) => {
     return (
         <React.Fragment>
             <div className={containerClass}>
-                <AppTopbar ref={topbarRef} />
-                <div ref={sidebarRef} className="layout-sidebar">
-                    <AppSidebar />
+                <AppTopbar navigation={navigation} ref={topbarRef} />
+                <div id="app-sidebar" ref={sidebarRef} className="layout-sidebar">
+                    <AppSidebar navigation={navigation} />
                 </div>
                 <div className="layout-main-container">
                     <div className="layout-main">{children}</div>

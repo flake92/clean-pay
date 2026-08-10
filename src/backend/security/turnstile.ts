@@ -1,38 +1,23 @@
-import { isIP } from "node:net";
-
 import { getEnv } from "@/backend/config/env";
 import { logger } from "@/backend/observability/logger";
-import { BffError } from "@/backend/integrations/remnashop/errors";
+import { recordUpstreamRequest } from "@/backend/observability/metrics";
+import {
+  currentRequestTrace,
+  tracedHeaders,
+} from "@/backend/observability/request-trace";
+import { ServiceError } from "@/backend/errors/service-error";
 
 type TurnstileResponse = {
   success?: boolean;
   hostname?: string;
+  action?: string;
   "error-codes"?: string[];
 };
 
-type TurnstileBody = {
-  turnstileToken?: string | null;
-  "cf-turnstile-response"?: string | null;
-};
-
-export function getTurnstileToken(body: TurnstileBody) {
-  return body.turnstileToken ?? body["cf-turnstile-response"] ?? null;
-}
-
-export function getRequestIp(request: Request) {
-  // Production exposes the app only through the local reverse proxy. Use the
-  // right-most X-Forwarded-For hop set/appended by that proxy and ignore
-  // vendor-specific headers that an Internet client can supply directly.
-  const candidate = request.headers
-    .get("x-forwarded-for")
-    ?.split(",")
-    .at(-1)
-    ?.trim();
-
-  return candidate && isIP(candidate) ? candidate : null;
-}
-
-export async function verifyTurnstileToken(token: string | null | undefined, remoteIp?: string | null) {
+export async function verifyTurnstileToken(
+  token: string | null | undefined,
+  expectedAction: string,
+) {
   const env = getEnv();
 
   if (!env.turnstile.enabled) {
@@ -40,13 +25,13 @@ export async function verifyTurnstileToken(token: string | null | undefined, rem
   }
 
   if (!env.turnstile.secretKey) {
-    throw new BffError("UPSTREAM_UNAVAILABLE", 503, "TURNSTILE_SECRET_KEY is required", {
+    throw new ServiceError("UPSTREAM_UNAVAILABLE", 503, "TURNSTILE_SECRET_KEY is required", {
       message: "TURNSTILE_SECRET_KEY is required",
     });
   }
 
   if (!token) {
-    throw new BffError("FORBIDDEN", 403, "Turnstile token is required");
+    throw new ServiceError("FORBIDDEN", 403, "Turnstile token is required");
   }
 
   const body = new URLSearchParams({
@@ -54,17 +39,14 @@ export async function verifyTurnstileToken(token: string | null | undefined, rem
     response: token,
   });
 
-  if (remoteIp) {
-    body.set("remoteip", remoteIp);
-  }
-
   let response: Response;
   const startedAt = Date.now();
+  const trace = await currentRequestTrace();
 
   logger.info("turnstile_request_sent", {
     method: "POST",
     hasToken: Boolean(token),
-    hasRemoteIp: Boolean(remoteIp),
+    action: expectedAction,
   }, {
     category: "upstream",
     source: "turnstile.client",
@@ -74,11 +56,18 @@ export async function verifyTurnstileToken(token: string | null | undefined, rem
   try {
     response = await fetch(env.turnstile.verifyUrl, {
       method: "POST",
+      headers: tracedHeaders(undefined, trace),
       body,
       cache: "no-store",
       signal: AbortSignal.timeout(10_000),
     });
   } catch (error) {
+    recordUpstreamRequest({
+      service: "turnstile",
+      operation: "/turnstile/v0/siteverify",
+      outcome: "unavailable",
+      durationMs: Date.now() - startedAt,
+    });
     logger.error("turnstile_request_failed", {
       method: "POST",
       durationMs: Date.now() - startedAt,
@@ -88,7 +77,7 @@ export async function verifyTurnstileToken(token: string | null | undefined, rem
       source: "turnstile.client",
       message: "HTTP Request failed: POST Turnstile siteverify",
     });
-    throw new BffError("UPSTREAM_UNAVAILABLE", 503, "Turnstile verification unavailable", {
+    throw new ServiceError("UPSTREAM_UNAVAILABLE", 503, "Turnstile verification unavailable", {
       message: error instanceof Error ? error.message : String(error),
     });
   }
@@ -98,7 +87,13 @@ export async function verifyTurnstileToken(token: string | null | undefined, rem
   try {
     result = await response.json() as TurnstileResponse;
   } catch (error) {
-    throw new BffError("UPSTREAM_UNAVAILABLE", 503, "Turnstile returned an invalid response", {
+    recordUpstreamRequest({
+      service: "turnstile",
+      operation: "/turnstile/v0/siteverify",
+      outcome: "unavailable",
+      durationMs: Date.now() - startedAt,
+    });
+    throw new ServiceError("UPSTREAM_UNAVAILABLE", 503, "Turnstile returned an invalid response", {
       upstreamStatus: response.status,
       upstreamPath: env.turnstile.verifyUrl,
       message: error instanceof Error ? error.message : String(error),
@@ -118,26 +113,43 @@ export async function verifyTurnstileToken(token: string | null | undefined, rem
 
   const expectedHostname = new URL(env.appUrl).hostname.toLowerCase();
   const responseHostname = result?.hostname?.toLowerCase();
+  const responseAction = result?.action;
+  const challengeAccepted = Boolean(
+    result?.success &&
+    responseHostname === expectedHostname &&
+    responseAction === expectedAction,
+  );
+
+  recordUpstreamRequest({
+    service: "turnstile",
+    operation: "/turnstile/v0/siteverify",
+    outcome: response.ok
+      ? challengeAccepted ? "success" : "rejected"
+      : "unavailable",
+    durationMs: Date.now() - startedAt,
+  });
 
   if (!response.ok) {
-    throw new BffError("UPSTREAM_UNAVAILABLE", 503, "Turnstile verification unavailable", {
+    throw new ServiceError("UPSTREAM_UNAVAILABLE", 503, "Turnstile verification unavailable", {
       upstreamStatus: response.status,
       upstreamPath: env.turnstile.verifyUrl,
     });
   }
 
-  if (!result?.success || responseHostname !== expectedHostname) {
-    throw new BffError("FORBIDDEN", 403, "Turnstile verification failed", {
+  if (
+    !challengeAccepted
+  ) {
+    throw new ServiceError("FORBIDDEN", 403, "Turnstile verification failed", {
       upstreamStatus: response.status,
       upstreamPath: env.turnstile.verifyUrl,
       upstreamDetail: result
         ? {
             success: result.success,
             hostnameMatches: responseHostname === expectedHostname,
+            actionMatches: responseAction === expectedAction,
             errorCodes: result["error-codes"],
           }
         : null,
     });
   }
 }
-

@@ -18,6 +18,7 @@ function envExampleKeys() {
 const secrets = {
   postgres: "pg-unit-9QvL2xR8mT4pK7sN6cWd",
   remnashop: "shop-unit-8Wp4Jz7Lc2Nq9Vr5Ks3M",
+  remnashopAuth: "auth-service-unit-7Vr3Nm8Wp2Kq5Xs9Lc4D",
   remnawave: "wave-unit-7Nq3Kp9Xs4Vm2Lc8Wr6J",
   webJwt: "jwt-unit-6Vr2Kp8Wm4Xq9Lc3Ns7D5Hz1",
   webRefresh: "refresh-unit-5Kq8Vr2Nm7Wp4Lc9Xs3D6Hz1",
@@ -41,12 +42,16 @@ const validEnv: Record<string, string> = {
   REMNASHOP_API_BASE_URL: "http://remnashop:5000/api/v1/public",
   REMNASHOP_ADMIN_API_BASE_URL: "http://remnashop:5000/api/v1/admin",
   REMNASHOP_API_KEY: secrets.remnashop,
+  REMNASHOP_AUTH_SERVICE_KEY: secrets.remnashopAuth,
   REMNAWAVE_API_BASE_URL: "https://panel.clean-pay.dev",
   REMNAWAVE_TOKEN: secrets.remnawave,
   WEB_JWT_SECRET: secrets.webJwt,
   WEB_REFRESH_SECRET: secrets.webRefresh,
   AUDIT_IP_HASH_SECRET: secrets.audit,
+  TRUSTED_PROXY_HOPS: "1",
   RATE_LIMIT_IDENTITY_SECRET: secrets.rateLimit,
+  AUTH_RATE_LIMIT_CAPACITY: "1000",
+  AUTH_CONCURRENCY_LIMIT: "64",
   READINESS_INTERNAL_SECRET: secrets.readiness,
   TELEGRAM_OIDC_ISSUER: "https://oauth.telegram.org",
   TELEGRAM_OIDC_AUTHORIZATION_ENDPOINT: "https://oauth.telegram.org/auth",
@@ -57,9 +62,9 @@ const validEnv: Record<string, string> = {
   TELEGRAM_BOT_TOKEN: secrets.telegramBot,
   COOKIE_SECURE: "true",
   COOKIE_SAMESITE: "lax",
-  TURNSTILE_ENABLED: "false",
-  TURNSTILE_SITE_KEY: "",
-  TURNSTILE_SECRET_KEY: "",
+  TURNSTILE_ENABLED: "true",
+  TURNSTILE_SITE_KEY: "0x4AAAAAUnitOnlySiteKey8Wp4Jz7Lc2",
+  TURNSTILE_SECRET_KEY: secrets.turnstile,
   TURNSTILE_VERIFY_URL: "https://challenges.cloudflare.com/turnstile/v0/siteverify",
   SUPPORT_ENABLED: "false",
   SUPPORT_EMAIL: "",
@@ -153,9 +158,10 @@ describe("production env validator", () => {
       "deploy/prod/production-env-rules.mjs",
       "deploy/prod/validate-env.mjs",
       "deploy/prod/prod.mjs",
+      "deploy/prod/prepare-remnashop-rollout.sh",
       "start.sh",
       "src/backend/config/env.ts",
-      "deploy/prod/Dockerfile",
+      "Dockerfile",
     ]
       .map((file) => readFileSync(file, "utf8"))
       .join("\n");
@@ -222,23 +228,19 @@ describe("production env validator", () => {
   });
 
   it("keeps build placeholders build-only and passes the public origin as a non-secret build arg", () => {
-    const dockerfile = readFileSync("deploy/prod/Dockerfile", "utf8");
-    const rootDockerfile = readFileSync("Dockerfile", "utf8");
+    const dockerfile = readFileSync("Dockerfile", "utf8");
     const compose = readFileSync("deploy/prod/docker-compose.yml", "utf8");
     const buildCommand = readFileSync("scripts/next-command.mjs", "utf8");
     const packageJson = readFileSync("package.json", "utf8");
     const prodCommand = readFileSync("deploy/prod/prod.mjs", "utf8");
 
-    expect(dockerfile).toContain("ENV REMNAWAVE_TOKEN=build-time-placeholder");
-    expect(dockerfile).toContain("ENV TURNSTILE_SECRET_KEY=build-time-placeholder");
+    expect(dockerfile).not.toContain("ENV REMNAWAVE_TOKEN=");
+    expect(dockerfile).not.toContain("ENV TURNSTILE_SECRET_KEY=");
+    expect(buildCommand).toContain('REMNAWAVE_TOKEN: "build-only-remnawave-token"');
+    expect(buildCommand).toContain('TURNSTILE_ENABLED: "false"');
     expect(dockerfile).toContain("ARG NEXT_PUBLIC_APP_URL");
-    expect(rootDockerfile).toContain("ARG NEXT_PUBLIC_APP_URL");
     expect(dockerfile).not.toContain("ARG NEXT_PUBLIC_APP_URL=");
-    expect(rootDockerfile).not.toContain("ARG NEXT_PUBLIC_APP_URL=");
     expect(dockerfile).toContain(
-      "ENV CLEAN_PAY_BAKED_PUBLIC_APP_URL=${NEXT_PUBLIC_APP_URL}",
-    );
-    expect(rootDockerfile).toContain(
       "ENV CLEAN_PAY_BAKED_PUBLIC_APP_URL=${NEXT_PUBLIC_APP_URL}",
     );
     expect(compose).toContain(
@@ -249,7 +251,7 @@ describe("production env validator", () => {
     expect(prodCommand).toContain("COMPOSE_INTERPOLATION_ENVIRONMENT_NAMES");
     expect(prodCommand).toContain("delete environment[name]");
     expect(prodCommand).toContain("...productionFileEnvironment()");
-    expect(prodCommand.match(/env: productionChildEnvironment\(\)/g)).toHaveLength(6);
+    expect(prodCommand.match(/env: productionChildEnvironment\(\)/g)).toHaveLength(7);
     expect(runValidator({ CLEAN_PAY_BUILD_PHASE: "true" }).stderr).toContain(
       "CLEAN_PAY_BUILD_PHASE is build-only",
     );
@@ -400,9 +402,6 @@ describe("production env validator", () => {
     );
     expect(runValidator({ DATA_RETENTION_INTERVAL_SECONDS: "299" }).stderr).toContain(
       "DATA_RETENTION_INTERVAL_SECONDS must be an integer between 300 and 86400",
-    );
-    expect(runValidator({ RUN_MIGRATIONS: "treu" }).stderr).toContain(
-      'RUN_MIGRATIONS must be "true" or "false"',
     );
   });
 

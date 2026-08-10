@@ -1,20 +1,11 @@
 # Clean Pay
 
 Clean Pay — веб-кабинет для оплаты и управления подписками Remnashop/Remnawave.
+Пользователь может войти по e-mail, Telegram или Passkey, купить и продлить
+подписку, управлять устройствами и посмотреть историю платежей.
 
-Приложение разворачивается через Docker Compose и включает собственные PostgreSQL и Redis. Базы данных наружу не публикуются, а веб-приложение по умолчанию доступно только на `127.0.0.1:4000`.
-
-Лицензия: `AGPL-3.0-only`.
-
-## Возможности
-
-- вход по e-mail, Telegram и Passkey;
-- покупка и продление подписки;
-- управление устройствами и просмотр истории платежей;
-- безопасное объединение e-mail и Telegram-аккаунтов;
-- идемпотентная обработка платежей и фоновая сверка их статусов;
-- healthcheck, аудит, rate limiting и автоматическая очистка устаревших данных;
-- PWA и настройка названия, логотипа, Turnstile и контактов поддержки.
+Приложение запускается в Docker Compose вместе с собственными PostgreSQL и
+Redis. Node.js на сервер устанавливать не нужно.
 
 ## Интерфейс
 
@@ -46,171 +37,92 @@ Clean Pay — веб-кабинет для оплаты и управления 
   </tr>
 </table>
 
-## Требования
+## Что потребуется
 
 - Linux-сервер с Docker Engine и Docker Compose v2;
 - работающие Remnashop и Remnawave;
-- домен с HTTPS reverse proxy;
-- `git` и `openssl` для первоначальной настройки;
-- внешняя Docker-сеть, если reverse proxy или соседние сервисы должны обращаться к контейнеру `clean-pay`.
+- домен с настроенным HTTPS reverse proxy;
+- `git` и `openssl`;
+- значения из таблицы ниже.
 
-Node.js на сервере устанавливать не требуется.
+| Что подготовить | Где взять |
+| --- | --- |
+| Публичный адрес Clean Pay | Например, `https://pay.example.com` |
+| URL и `APP_API_KEY` Remnashop | Конфигурация Remnashop |
+| URL и API-токен Remnawave | Панель Remnawave |
+| Bot token и OIDC client secret | Настройки Telegram-бота |
+| Site key и secret key Turnstile | Cloudflare Turnstile |
+| Docker-сеть reverse proxy | Обычно `remnawave-network` |
 
-## Быстрая установка
+## Установка: один мастер, три этапа
 
 ```bash
 sudo mkdir -p /opt/clean-pay
 sudo chown "$USER":"$USER" /opt/clean-pay
 git clone https://github.com/flake92/clean-pay.git /opt/clean-pay
 cd /opt/clean-pay
-./deploy.sh init
-nano deploy/prod/.env
+./deploy.sh
 ```
 
-`./deploy.sh init` создаёт `deploy/prod/.env`, устанавливает права `600` и генерирует пароль PostgreSQL и внутренние секреты.
+Без аргументов `deploy.sh` запускает понятный интерактивный мастер:
 
-Замените в `.env` все значения `change-me` и адреса `example.com`. Минимальный набор внешних настроек:
+1. **Настройка `.env`.** Мастер задаёт только необходимые вопросы, скрывает
+   ввод секретов и автоматически генерирует пароль PostgreSQL и внутренние
+   ключи Clean Pay.
+2. **Подготовка Docker Compose.** Готовый файл
+   `deploy/prod/docker-compose.yml` поставляется с проектом. Мастер проверяет
+   его вместе с `.env` и создаёт отсутствующую Docker-сеть. Писать YAML вручную
+   не требуется.
+3. **Установка.** Мастер проверяет свободное место, собирает образы, применяет
+   миграции, запускает сервисы и проверяет контейнеры, внешние зависимости,
+   HTTPS и security headers.
 
-```dotenv
-APP_URL=https://pay.example.com
-NEXT_PUBLIC_APP_URL=https://pay.example.com
+В конце мастер покажет адрес приложения и команды диагностики. Повторный запуск
+безопасен: существующие секреты сохраняются, Docker volumes не удаляются.
 
-REMNASHOP_API_BASE_URL=https://shop.example.com/api/v1/public
-REMNASHOP_ADMIN_API_BASE_URL=https://shop.example.com/api/v1/admin
-REMNASHOP_API_KEY=<APP_API_KEY из Remnashop>
+### Важный шаг для Remnashop
 
-REMNAWAVE_API_BASE_URL=https://panel.example.com
-REMNAWAVE_TOKEN=<API-токен Remnawave>
-
-TELEGRAM_OIDC_CLIENT_ID=<ID Telegram-бота>
-TELEGRAM_OIDC_CLIENT_SECRET=<OIDC client secret>
-TELEGRAM_BOT_TOKEN=<токен того же бота>
-
-COOKIE_SECURE=true
-```
-
-Запустите приложение:
-
-```bash
-./deploy.sh up
-```
-
-Команда проверит конфигурацию, создаст отсутствующую Docker-сеть, соберёт образы, запустит сервисы и дождётся успешных healthcheck. После запуска она покажет логи; `Ctrl+C` закрывает только их просмотр, контейнеры продолжат работать.
-
-## Настройка `.env`
-
-Используйте файл, созданный командой `./deploy.sh init`. Не копируйте `.env.example` поверх него: это заменит автоматически созданные секреты.
-
-Основные правила:
-
-- одна переменная `NAME=value` на строку;
-- комментарии размещаются на отдельных строках;
-- не используйте `${NAME}`, inline-комментарии, многострочные значения и повторяющиеся имена;
-- `APP_URL` и `NEXT_PUBLIC_APP_URL` должны содержать один и тот же публичный HTTPS origin;
-- сгенерированные секреты должны оставаться разными;
-- не публикуйте `.env` и не передавайте его целиком третьим лицам.
-
-Полный перечень переменных и безопасные значения по умолчанию находятся в [`deploy/prod/.env.example`](deploy/prod/.env.example).
-
-### Docker и сеть
-
-| Переменная | Назначение |
-| --- | --- |
-| `COMPOSE_PROJECT_NAME` | Имя Compose-проекта. Меняйте только до первого запуска. |
-| `CLEAN_PAY_IMAGE` | Имя локально собираемого образа. |
-| `CLEAN_PAY_BIND` | Адрес публикации приложения; в production допустимы только `127.0.0.1` и `::1`. |
-| `CLEAN_PAY_PORT` | Локальный порт приложения, по умолчанию `4000`. |
-| `CLEAN_PAY_EDGE_NETWORK` | Внешняя Docker-сеть reverse proxy/Remnawave, по умолчанию `remnawave-network`. |
-| `LOG_LEVEL` | `debug`, `info`, `warn` или `error`; для production рекомендуется `info`. |
-
-### Сессии и безопасность
-
-`WEB_JWT_SECRET`, `WEB_REFRESH_SECRET`, `AUDIT_IP_HASH_SECRET`, `RATE_LIMIT_IDENTITY_SECRET` и `READINESS_INTERNAL_SECRET` генерируются автоматически. Каждый секрет должен содержать не менее 32 символов.
-
-Для публичного HTTPS используйте:
-
-```dotenv
-COOKIE_SECURE=true
-COOKIE_SAMESITE=lax
-```
-
-### Telegram OIDC
-
-`TELEGRAM_OIDC_CLIENT_ID` — числовая часть bot token до `:`. Она должна совпадать с ID в `TELEGRAM_BOT_TOKEN`.
-
-`TELEGRAM_OIDC_CLIENT_SECRET` и `TELEGRAM_BOT_TOKEN` — разные секреты. Официальные Telegram OIDC endpoints уже встроены в приложение, поэтому задавать `TELEGRAM_OIDC_ISSUER`, `TELEGRAM_OIDC_AUTHORIZATION_ENDPOINT`, `TELEGRAM_OIDC_TOKEN_ENDPOINT` и `TELEGRAM_OIDC_JWKS_URI` не требуется.
-
-### Turnstile и поддержка
-
-Cloudflare Turnstile включается так:
-
-```dotenv
-TURNSTILE_ENABLED=true
-TURNSTILE_SITE_KEY=<production site key>
-TURNSTILE_SECRET_KEY=<production secret key>
-```
-
-Контакты поддержки включаются через `SUPPORT_ENABLED=true` и переменные `SUPPORT_EMAIL`, `SUPPORT_TELEGRAM_USERNAME`, `SUPPORT_FAQ_URL`.
-
-### Сверка платежей
-
-Фоновая сверка неоднозначных результатов платежей по умолчанию выключена. Включайте её только после проверки совместимости admin API Remnashop:
-
-```dotenv
-PAYMENT_RECONCILIATION_ENABLED=true
-PAYMENT_RECONCILIATION_SECRET=<результат openssl rand -hex 32>
-PAYMENT_RECONCILIATION_BATCH_SIZE=10
-PAYMENT_RECONCILIATION_INTERVAL_SECONDS=30
-PAYMENT_RECONCILIATION_INTERNAL_URL=http://app:4000/api/internal/payments/reconcile
-```
-
-## Настройка Remnashop
-
-В `.env` Remnashop включите веб-кабинет и задайте тот же API-ключ, который указан в `REMNASHOP_API_KEY` Clean Pay:
+При первой настройке Clean Pay автоматически создаёт отдельный
+`REMNASHOP_AUTH_SERVICE_KEY`. Скопируйте его значение из
+`deploy/prod/.env` в `.env` Remnashop:
 
 ```dotenv
 WEB_ENABLED=true
 WEB_CABINET_URL=https://pay.example.com/auth/telegram/webapp
-APP_API_KEY=<случайный секрет не короче 24 символов>
-APP_JWT_SECRET=<отдельный случайный секрет>
+APP_API_KEY=<то же значение, что REMNASHOP_API_KEY в Clean Pay>
+APP_AUTH_SERVICE_KEY=<то же значение, что REMNASHOP_AUTH_SERVICE_KEY в Clean Pay>
 ```
 
-Для входа по e-mail настройте SMTP в Remnashop:
+После изменения перезапустите HTTP-сервис, worker и scheduler Remnashop. Не
+публикуйте `APP_AUTH_SERVICE_KEY` и не используйте вместо него admin API key.
 
-```dotenv
-EMAIL_ENABLED=true
-EMAIL_HOST=smtp.example.com
-EMAIL_PORT=587
-EMAIL_USE_TLS=true
-EMAIL_USE_SSL=false
-EMAIL_USERNAME=mail@example.com
-EMAIL_PASSWORD=<пароль>
-EMAIL_FROM_EMAIL=mail@example.com
-EMAIL_FROM_NAME=Clean Pay
+## Отдельный запуск этапов
+
+Если автоматический мастер не нужен, этапы можно выполнить отдельно:
+
+```bash
+./deploy.sh configure  # интерактивно заполнить .env
+./deploy.sh compose    # проверить .env, Compose и сеть
+./deploy.sh install    # собрать, запустить и проверить сервисы
 ```
 
-URL публичного API должен заканчиваться на `/api/v1/public`, admin API — на `/api/v1/admin`. Оба адреса должны использовать один origin и один API prefix.
+Для полностью ручной настройки используйте `./deploy.sh init`, затем откройте
+`deploy/prod/.env` в своём редакторе.
 
-### Совместимая версия Remnashop
+Команда `./deploy.sh up` сохранена как совместимый псевдоним `install`.
 
-Для полного платёжного recovery contract и безопасного объединения e-mail/Telegram-аккаунтов необходимы изменения из [`snoups/remnashop#135`](https://github.com/snoups/remnashop/pull/135). PR добавляет требуемые public/admin API, идемпотентные операции покупки и продления, восстановление неоднозначных платежей и координированное объединение пользователей.
-
-Пока PR #135 не вошёл в официальный release Remnashop:
-
-- не включайте `PAYMENT_RECONCILIATION_ENABLED`, если установленная версия не предоставляет требуемый capability/recovery contract;
-- полный сценарий объединения e-mail и Telegram может быть недоступен;
-- для контролируемого тестового окружения используйте зафиксированный проверенный commit PR #135 `b9da68a651e9ab0b7ed52d030e13754311614759`, а не движущуюся ветку;
-- перед production-обновлением проверьте актуальный статус PR и закрепите конкретную версию Docker image.
-
-На момент последней проверки PR #135 открыт, направлен в ветку `dev` и не является draft.
-
-Перед обновлением Remnashop сделайте резервную копию его базы данных и убедитесь, что HTTP-сервис, worker и scheduler используют одну версию образа.
+Формат `.env` простой: одна строка `NAME=value`, комментарии только на
+отдельных строках. Не используйте `${NAME}`, inline-комментарии, дублирующиеся
+имена и многострочные значения. Полный перечень настроек находится в
+[`deploy/prod/.env.example`](deploy/prod/.env.example).
 
 ## Reverse proxy
 
-Если reverse proxy работает на хосте, направьте его на `127.0.0.1:4000`. Если proxy подключён к `CLEAN_PAY_EDGE_NETWORK`, используйте Docker alias `clean-pay:4000`.
+По умолчанию приложение доступно только на `127.0.0.1:4000`. Если reverse proxy
+работает на хосте, направьте его туда. Если он подключён к Docker-сети из
+`CLEAN_PAY_EDGE_NETWORK`, используйте адрес `clean-pay:4000`.
 
-Пример Caddy:
+Минимальный пример Caddy:
 
 ```caddyfile
 pay.example.com {
@@ -220,82 +132,106 @@ pay.example.com {
 }
 ```
 
-HSTS должен выставлять реальный HTTPS-терминатор. Приложение самостоятельно добавляет остальные security headers, включая CSP и `frame-ancestors 'none'`.
+HTTPS-терминатор обязан выставлять HSTS минимум на один год. Остальные security
+headers, включая nonce-based CSP, добавляет Clean Pay.
 
 ## Управление
 
 ```bash
-./deploy.sh logs
-./deploy.sh ps
-./deploy.sh restart
-./deploy.sh down
+./deploy.sh ps         # состояние контейнеров
+./deploy.sh logs       # логи, выход — Ctrl+C
+./deploy.sh restart    # перезапуск контейнеров
+./deploy.sh install    # пересборка и безопасное обновление
+./deploy.sh down       # остановка без удаления данных
 ```
 
-`retention-worker` включён постоянно и удаляет только устаревшие служебные данные. Платёжные записи он не удаляет.
+Не запускайте `docker compose down -v`, `docker volume prune` или
+`docker system prune --volumes`, если данные нужно сохранить.
 
-Команда `up` не удаляет Docker volumes. Не запускайте `docker compose down -v`, `docker volume prune` или `docker system prune --volumes`, если данные нужно сохранить.
+## Обновление
 
-## Обновление и резервная копия
-
-Перед обновлением сохраните конфигурацию и базу данных:
+Перед обновлением сохраните конфигурацию и базу:
 
 ```bash
 cd /opt/clean-pay
 cp -p deploy/prod/.env "deploy/prod/.env.backup-$(date +%Y%m%d-%H%M%S)"
-docker compose --env-file deploy/prod/.env -f deploy/prod/docker-compose.yml exec -T postgres \
-  sh -ec 'exec pg_dump -U "$POSTGRES_USER" -Fc "$POSTGRES_DB"' > clean-pay.dump
-```
-
-Обновите код и пересоберите сервисы:
-
-```bash
+docker compose --env-file deploy/prod/.env -f deploy/prod/docker-compose.yml \
+  exec -T postgres sh -ec 'exec pg_dump -U "$POSTGRES_USER" -Fc "$POSTGRES_DB"' \
+  > "clean-pay-$(date +%Y%m%d-%H%M%S).dump"
 git pull --ff-only
-./deploy.sh up
+./deploy.sh install
 ```
 
-Для production применяется только `prisma migrate deploy`. Не используйте `prisma migrate dev` или `prisma db push` с production-базой. Расширенная процедура обновления описана в [`docs/production-migration-runbook.md`](docs/production-migration-runbook.md).
+Установщик применяет только `prisma migrate deploy`, ждёт healthcheck и не
+удаляет volumes. Расширенный порядок обновления и восстановления описан в
+[`docs/production-migration-runbook.md`](docs/production-migration-runbook.md).
 
-## Проверка и диагностика
+## Совместимость Remnashop
+
+Clean Pay использует generic e-mail auth, service-session, объединение аккаунтов
+и восстановление статуса платежей. Пока эти контракты не вошли в официальный
+release Remnashop, используйте проверенную revision `1262f98` ветки
+`flake92/remnashop:update-nodejs`.
+
+Фоновая сверка платежей включается переменной
+`PAYMENT_RECONCILIATION_ENABLED=true`. Если установленная версия Remnashop не
+поддерживает admin recovery contract, временно отключите её. После успешного
+развёртывания установщик безопасно проверяет Remnashop и отключает legacy
+payment rollout gate. При несовместимой версии или выполняющихся платёжных
+операциях установка остановится без открытия gate.
+
+## Проверка и частые ошибки
 
 ```bash
 ./deploy.sh ps
-./deploy.sh logs
 curl -f https://pay.example.com/api/health/liveness
 curl -f https://pay.example.com/api/health/readiness
+./deploy.sh logs
 ```
 
-Подробный readiness доступен только внутри контейнера и защищён секретом:
+| Симптом | Что проверить |
+| --- | --- |
+| `502` | Запущен ли `app`, правильный ли upstream у reverse proxy |
+| Remnashop `degraded` | URL API, оба service/admin ключа, совместимую revision |
+| Remnawave `degraded` | HTTPS URL, API-токен и доступность панели |
+| Не работает Telegram | Bot ID, bot token, OIDC secret и callback текущего домена |
+| Не приходит e-mail | SMTP в Remnashop и состояние его worker/scheduler |
+| Ошибка security headers | HSTS и проксирование реального HTTPS origin |
+| Не хватает диска | Освободите место; установщик требует минимум 8 ГБ |
 
-```bash
-docker compose --env-file deploy/prod/.env -f deploy/prod/docker-compose.yml exec -T app \
-  node -e "fetch('http://127.0.0.1:4000/api/internal/health/readiness',{headers:{'x-clean-pay-readiness-secret':process.env.READINESS_INTERNAL_SECRET}}).then(async r=>{console.log(r.status,await r.text());process.exit(r.ok?0:1)})"
-```
+Установщик может очистить только неиспользуемый Docker build cache и висячие
+образы. Базы данных и volumes он не удаляет.
 
-Частые причины ошибок:
+## Разработка и CI
 
-- `502` — приложение не запущено или reverse proxy направлен на неверный upstream;
-- ошибка Remnashop API — проверьте `REMNASHOP_API_KEY`, `APP_API_KEY` и адреса API;
-- ошибка Remnawave — проверьте URL, токен и доступность сети;
-- Telegram/OIDC — проверьте домен, callback `APP_URL/auth/telegram/callback`, client ID и оба секрета;
-- e-mail — проверьте SMTP-настройки Remnashop и перезапустите его HTTP/worker/scheduler;
-- `readiness=degraded` — откройте внутренний readiness и проверьте состояние PostgreSQL, Redis, Remnashop и Remnawave.
-
-Логи имеют формат:
-
-```text
-2026-07-22T14:12:41.331Z | WARN | clean-pay/component | Понятное сообщение | event=event_name | key="value"
-```
-
-При обращении за помощью не публикуйте `.env`, cookies, токены и полные внутренние readiness-ответы.
-
-## Разработка
+Поддерживается Node.js из `.node-version` и только npm с фиксированным
+`package-lock.json`.
 
 ```bash
 npm ci
 npm run lint
 npm run typecheck
-npm run test:unit
+npm run test:architecture
+npm run test:route-handlers
+npm run test:coverage
+npm run test:coverage:frontend
 npm run build
 ```
 
-Интеграционные и E2E-проверки требуют окружения из devcontainer. Полезные технические документы находятся в каталоге [`docs`](docs).
+CI дополнительно выполняет:
+
+- проверку shell-скриптов и production Compose;
+- тесты с реальной PostgreSQL и миграциями;
+- полный Docker E2E пользовательского сценария;
+- `npm audit`, gitleaks, CodeQL, SBOM и Trivy scan production-образа.
+
+Workflow находится в [`.github/workflows/ci.yml`](.github/workflows/ci.yml).
+
+## Документация
+
+- [Архитектура](docs/ARCHITECTURE.md)
+- [Production migration runbook](docs/production-migration-runbook.md)
+- [Security audit](docs/production-security-audit.md)
+- [Payment recovery design](docs/payment-idempotency-recovery-design.md)
+
+Лицензия: `AGPL-3.0-only`.

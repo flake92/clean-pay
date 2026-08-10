@@ -1,5 +1,5 @@
 'use client';
-import React, { useState, createContext } from 'react';
+import { useState, createContext } from 'react';
 import { LayoutState, ChildContainerProps, LayoutContextProps } from '@/frontend/types';
 export const LayoutContext = createContext({} as LayoutContextProps);
 

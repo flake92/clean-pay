@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
 
 import { Button } from "primereact/button";
@@ -10,28 +10,24 @@ import { Message } from "primereact/message";
 import { Password } from "primereact/password";
 import { Tag } from "primereact/tag";
 
+import {
+  changeProfileEmailAction,
+  changeProfilePasswordAction,
+  requestProfileEmailVerificationAction,
+} from "@/app/actions/profile";
 import { LinkButton } from "@/frontend/components/prime/link-button";
 import { TurnstileWidget, type TurnstileHandle, hasTurnstileSiteKey } from "@/frontend/components/turnstile-widget";
-import { BffClientError, readBffError } from "@/frontend/lib/client-api";
-
-type ProfileUser = {
-  telegram_id: string | number | null;
-  telegramId?: string | null;
-  telegramUsername?: string | null;
-  auth_type: string;
-  email: string | null;
-  is_email_verified: boolean;
-  emailVerified?: boolean;
-  pending_email: string | null;
-  language: string;
-};
-
-async function readError(response: Response, fallback: string) {
-  return readBffError(response, fallback);
-}
+import { navigateTo } from "@/frontend/lib/browser-navigation";
+import type { ProfileViewModel } from "@/application/models/profile";
 
 function authTypeLabel(value: string) {
-  return value === "telegram" ? "Telegram" : "E-mail";
+  const labels: Record<string, string> = {
+    email: "E-mail",
+    passkey: "Ключ доступа",
+    telegram: "Telegram",
+  };
+
+  return labels[value] ?? value;
 }
 
 function missingTurnstileTokenMessage(siteKey?: string | null) {
@@ -41,65 +37,66 @@ function missingTurnstileTokenMessage(siteKey?: string | null) {
 }
 
 export function ProfilePanel({
+  model,
   turnstileEnabled = false,
   turnstileSiteKey,
 }: {
+  model: ProfileViewModel;
   turnstileEnabled?: boolean;
   turnstileSiteKey?: string | null;
 }) {
-  const [user, setUser] = useState<ProfileUser | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [email, setEmail] = useState("");
+  const user = model.status === "ready" ? model.user : null;
+  const [email, setEmail] = useState(user?.pendingEmail ?? user?.email ?? "");
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [message, setMessage] = useState<string | null>(null);
-  const [messageSeverity, setMessageSeverity] = useState<"success" | "info" | "warn">("info");
+  const [messageSeverity, setMessageSeverity] = useState<"success" | "info" | "warn" | "error">("info");
+  const emailFeedbackRef = useRef<HTMLDivElement>(null);
   const [passwordMessage, setPasswordMessage] = useState<string | null>(null);
   const [passwordMessageSeverity, setPasswordMessageSeverity] = useState<"success" | "warn">("success");
   const [pendingAction, setPendingAction] = useState<string | null>(null);
-  const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
-  const [turnstile, setTurnstile] = useState<TurnstileHandle | null>(null);
-
-  async function fetchProfile() {
-    const response = await fetch("/api/bff/auth/me");
-
-    if (!response.ok) {
-      throw await readBffError(response, "Не удалось загрузить профиль.");
-    }
-
-    const body = await response.json().catch(() => null);
-
-    return body.data.user as ProfileUser;
-  }
-
-  const loadProfile = useCallback(async () => {
-    const profile = await fetchProfile();
-
-    setUser(profile);
-    setEmail(profile.pending_email ?? profile.email ?? "");
-  }, []);
+  const pendingActionRef = useRef<string | null>(null);
 
   useEffect(() => {
-    let alive = true;
+    if (!message || messageSeverity !== "error") return;
+    const frame = requestAnimationFrame(() => {
+      emailFeedbackRef.current?.focus({ preventScroll: true });
+      emailFeedbackRef.current?.scrollIntoView?.({ behavior: "smooth", block: "center" });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [message, messageSeverity]);
+  const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
+  const [turnstile, setTurnstile] = useState<TurnstileHandle | null>(null);
+  const currentEmailTarget = user?.pendingEmail ?? user?.email ?? "";
 
-    async function load() {
-      try {
-        await loadProfile();
-      } catch (err) {
-        if (alive) {
-          setError(err instanceof Error ? err.message : "Не удалось загрузить профиль.");
-        }
-      }
+  function turnstileActionForEmail(candidate: string) {
+    return candidate.trim().toLowerCase() === currentEmailTarget.toLowerCase()
+      ? "email_verification"
+      : "email_change";
+  }
+
+  const emailTurnstileAction = turnstileActionForEmail(email);
+
+  function beginPendingAction(action: string) {
+    if (pendingActionRef.current) {
+      return false;
     }
 
-    void load();
+    pendingActionRef.current = action;
+    setPendingAction(action);
+    return true;
+  }
 
-    return () => {
-      alive = false;
-    };
-  }, [loadProfile]);
+  function finishPendingAction(action: string) {
+    if (pendingActionRef.current !== action) {
+      return;
+    }
 
-  function showMessage(text: string, severity: "success" | "info" | "warn" = "info") {
+    pendingActionRef.current = null;
+    setPendingAction(null);
+  }
+
+  function showMessage(text: string, severity: "success" | "info" | "warn" | "error" = "info") {
     setMessage(text);
     setMessageSeverity(severity);
   }
@@ -114,151 +111,114 @@ export function ProfilePanel({
     setTurnstileToken(null);
   }
 
-  function turnstilePayload() {
-    return turnstileToken
-      ? { turnstileToken, "cf-turnstile-response": turnstileToken }
-      : {};
-  }
-
   async function requestVerificationFor(nextTargetEmail: string) {
-    const response = await fetch("/api/bff/auth/email/request-verification", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        ...(nextTargetEmail ? { email: nextTargetEmail } : {}),
-        ...turnstilePayload(),
-      }),
+    return requestProfileEmailVerificationAction({
+      ...(nextTargetEmail ? { email: nextTargetEmail } : {}),
+      ...(turnstileToken ? { turnstileToken } : {}),
     });
-
-    if (!response.ok) {
-      throw await readError(response, "Не удалось отправить код.");
-    }
-
-    const body = await response.json().catch(() => null);
-
-    return body?.data?.target_email ?? nextTargetEmail;
-  }
-
-  function messageFromError(err: unknown, fallback: string) {
-    if (err instanceof BffClientError && err.code === "EMAIL_REQUIRED") {
-      return "Чтобы привязать e-mail к Telegram-аккаунту, используйте раздел «Связать аккаунт».";
-    }
-
-    if (err instanceof BffClientError && err.code === "CONFLICT") {
-      return "Этот e-mail уже используется другим аккаунтом.";
-    }
-
-    return err instanceof Error ? err.message : fallback;
   }
 
   async function changeEmail(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setPendingAction("email");
+
+    if (!beginPendingAction("email")) {
+      return;
+    }
+
     setMessage(null);
 
     const nextEmail = email.trim();
-    const currentTarget = user?.pending_email ?? user?.email ?? "";
-    const isSameEmail = nextEmail.toLowerCase() === currentTarget.toLowerCase();
+    const isSameEmail = turnstileActionForEmail(nextEmail) === "email_verification";
 
     if (turnstileEnabled && !turnstileToken) {
-      setPendingAction(null);
+      finishPendingAction("email");
       showMessage(missingTurnstileTokenMessage(turnstileSiteKey), "warn");
       return;
     }
 
     try {
       if (isSameEmail) {
-        const sentTo = await requestVerificationFor(nextEmail);
-        showMessage(`E-mail уже указан. Код подтверждения отправлен на ${sentTo}.`, "success");
-        window.location.assign("/verify-email");
+        const result = await requestVerificationFor(nextEmail);
+        if (!result.ok) {
+          showMessage(result.message, "warn");
+          return;
+        }
+        showMessage(`E-mail уже указан. ${result.message}`, "success");
+        navigateTo("/verify-email");
         return;
       }
 
-      const response = await fetch("/api/bff/auth/email/change", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          email: nextEmail,
-          ...turnstilePayload(),
-        }),
+      const result = await changeProfileEmailAction({
+        email: nextEmail,
+        ...(turnstileToken ? { turnstileToken } : {}),
       });
-
-      if (!response.ok) {
-        throw await readError(response, "Не удалось изменить e-mail.");
+      if (!result.ok) {
+        showMessage(result.message, "error");
+        return;
       }
-
-      const body = await response.json().catch(() => null);
-      const nextTargetEmail =
-        body?.data?.emailVerification?.target_email ?? body?.data?.pending_email ?? nextEmail;
-      await loadProfile();
-      showMessage(`Новый e-mail сохранен. Код подтверждения отправлен на ${nextTargetEmail}.`, "success");
-      window.location.assign("/verify-email");
+      showMessage(result.message, "success");
+      navigateTo("/verify-email");
     } catch (err) {
-      showMessage(messageFromError(err, "Не удалось изменить e-mail."), "warn");
+      showMessage(err instanceof Error ? err.message : "Не удалось изменить e-mail.", "error");
     } finally {
       resetTurnstile();
-      setPendingAction(null);
+      finishPendingAction("email");
     }
   }
 
   async function changePassword(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setPendingAction("password");
+
+    if (!beginPendingAction("password")) {
+      return;
+    }
+
     setMessage(null);
     setPasswordMessage(null);
 
     try {
-      const response = await fetch("/api/bff/auth/change-password", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          current_password: currentPassword,
-          new_password: newPassword,
-        }),
+      const result = await changeProfilePasswordAction({
+        currentPassword,
+        newPassword,
       });
-
-      if (!response.ok) {
-        throw await readError(response, "Не удалось изменить пароль.");
+      if (!result.ok) {
+        showPasswordMessage(result.message, "warn");
+        return;
       }
 
       setCurrentPassword("");
       setNewPassword("");
-      showPasswordMessage("Пароль изменен.", "success");
+      showPasswordMessage(result.message, "success");
     } catch (err) {
       showPasswordMessage(err instanceof Error ? err.message : "Не удалось изменить пароль.", "warn");
     } finally {
-      setPendingAction(null);
+      finishPendingAction("password");
     }
   }
 
-  if (error) {
+  if (model.status === "error") {
     return (
       <div className="flex flex-column gap-4">
-        <Message severity="error" text={error} />
+        <Message severity="error" text={model.message} />
         <LinkButton className="w-fit" href="/login" label="Войти" />
       </div>
     );
   }
 
-  if (!user) {
-    return <Message severity="info" text="Загрузка профиля..." />;
-  }
-
-  const telegramId = user.telegramId ?? user.telegram_id;
+  if (!user) return null;
+  const telegramId = user.telegramId;
   const hasEmail = Boolean(user.email);
-  const isEmailVerified = hasEmail && Boolean(user.emailVerified ?? user.is_email_verified);
+  const isEmailVerified = hasEmail && user.emailVerified;
   const isTelegramOnly = Boolean(telegramId) && !user.email;
   const canManageRemnashopEmail = Boolean(user.email);
   const canChangePassword = hasEmail;
   return (
     <div className="clean-profile-panel flex flex-column gap-4">
-      {message ? <Message severity={messageSeverity} text={message} /> : null}
-
       <Card title="Данные аккаунта">
         <div className="grid">
           {[
             ["E-mail", user.email ?? "Не привязан"],
-            ["Тип входа", authTypeLabel(user.auth_type)],
+            ["Тип входа", authTypeLabel(user.authType)],
             ["Telegram", telegramId ?? "Не привязан"],
           ].map(([label, value]) => (
             <div className="col-12 md:col-6" key={label}>
@@ -283,12 +243,12 @@ export function ProfilePanel({
       </Card>
 
       {isTelegramOnly ? (
-        <Card title="Привязать e-mail">
+        <Card title="Добавить e-mail и пароль">
           <div className="flex flex-column gap-3">
             <p className="m-0 line-height-3 text-600">
-              Вы вошли через Telegram. Чтобы оплачивать и управлять подпиской, привяжите e-mail к аккаунту.
+              Вы вошли через Telegram. Добавьте e-mail, придумайте пароль и подтвердите адрес, чтобы не потерять доступ без Telegram и продолжить оплату.
             </p>
-            <LinkButton className="w-fit" href="/link-account" label="Привязать e-mail" />
+            <LinkButton className="w-fit" href="/link-account" label="Добавить e-mail и пароль" />
           </div>
         </Card>
       ) : null}
@@ -296,8 +256,15 @@ export function ProfilePanel({
       {canManageRemnashopEmail ? (
         <Card title="Смена e-mail">
           <form className="flex flex-column gap-3" onSubmit={changeEmail}>
+            {message ? (
+              <div aria-live="assertive" ref={emailFeedbackRef} tabIndex={-1}>
+                <Message severity={messageSeverity} text={message} />
+              </div>
+            ) : null}
             {turnstileEnabled ? (
               <TurnstileWidget
+                action={emailTurnstileAction}
+                key={emailTurnstileAction}
                 onReady={setTurnstile}
                 onToken={setTurnstileToken}
                 siteKey={turnstileSiteKey}
@@ -306,7 +273,17 @@ export function ProfilePanel({
             <label className="flex flex-column gap-2">
               <span className="text-sm font-medium text-700">Новый e-mail</span>
               <InputText
-                onChange={(event) => setEmail(event.target.value)}
+                onChange={(event) => {
+                  const nextEmail = event.target.value;
+
+                  if (
+                    turnstileToken
+                    && turnstileActionForEmail(nextEmail) !== emailTurnstileAction
+                  ) {
+                    resetTurnstile();
+                  }
+                  setEmail(nextEmail);
+                }}
                 required
                 type="email"
                 value={email}
@@ -314,7 +291,7 @@ export function ProfilePanel({
             </label>
             <div className="flex flex-wrap gap-3">
               <Button
-                disabled={pendingAction === "email"}
+                disabled={pendingAction !== null}
                 label="Сохранить и отправить код"
                 loading={pendingAction === "email"}
                 type="submit"
@@ -354,7 +331,7 @@ export function ProfilePanel({
             </label>
             <Button
               className="w-fit"
-              disabled={pendingAction === "password"}
+              disabled={pendingAction !== null}
               label="Изменить пароль"
               loading={pendingAction === "password"}
               type="submit"

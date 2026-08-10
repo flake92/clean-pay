@@ -4,18 +4,11 @@ import { describe, expect, it } from "vitest";
 
 const logEvents = [
   {
-    file: "src/backend/integrations/remnashop/client.ts",
+    file: "src/backend/integrations/remnashop/api-client.ts",
     events: [
       "remnashop_request_sent",
       "remnashop_response_received",
       "remnashop_request_failed",
-    ],
-  },
-  {
-    file: "src/backend/http/bff-response.ts",
-    events: [
-      "bff_response_sent",
-      "bff_error_response_sent",
     ],
   },
   {
@@ -64,7 +57,7 @@ function extractLoggerCall(source: string, event: string) {
 }
 
 describe("safe production logging shape", () => {
-  it("does not log headers, urls or request/response bodies for critical upstream and BFF events", () => {
+  it("does not log headers, urls or request/response bodies for critical upstream events", () => {
     const offenders: string[] = [];
 
     for (const { file, events } of logEvents) {

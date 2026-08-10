@@ -104,7 +104,6 @@ describe("production data retention", () => {
     const prodCommand = readFileSync("deploy/prod/prod.mjs", "utf8");
     const startScript = readFileSync("start.sh", "utf8");
     const rootDockerfile = readFileSync("Dockerfile", "utf8");
-    const prodDockerfile = readFileSync("deploy/prod/Dockerfile", "utf8");
 
     for (const compose of [prodCompose, rootCompose]) {
       expect(compose).toMatch(
@@ -121,6 +120,6 @@ describe("production data retention", () => {
     expect(prodCommand).toContain('composeArgs("ps", "-q", "retention-worker")');
     expect(startScript).toContain("compose ps -q retention-worker");
     expect(rootDockerfile).toContain("retention-cleanup.mjs");
-    expect(prodDockerfile).toContain("retention-cleanup.mjs");
+    expect(prodCompose).toContain("dockerfile: Dockerfile");
   });
 });

@@ -33,8 +33,18 @@ export function paymentReturnOutcome(snapshot: PaymentReturnSnapshot | null): Pa
 export function shouldPollPaymentReturn(snapshot: PaymentReturnSnapshot | null) {
   if (!snapshot) return false;
 
-  return snapshot.operation?.status === "processing"
-    || snapshot.operation?.status === "outcome_unknown"
+  const operationStatus = snapshot.operation?.status;
+
+  if (
+    operationStatus === "failed"
+    || operationStatus === "manual_required"
+    || operationStatus === "retry_ready"
+  ) {
+    return false;
+  }
+
+  return operationStatus === "processing"
+    || operationStatus === "outcome_unknown"
     || snapshot.payment?.status === "pending";
 }
 

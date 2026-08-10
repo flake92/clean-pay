@@ -1,14 +1,16 @@
-import { createHmac } from 'node:crypto';
+import { createHmac, randomUUID } from 'node:crypto';
 
 import { redisCommand } from '@/backend/cache/redis';
 import { getEnv } from '@/backend/config/env';
-import { BffError } from '@/backend/integrations/remnashop/errors';
+import { ServiceError } from '@/backend/errors/service-error';
+import { logger } from '@/backend/observability/logger';
+import { recordOperationalEvent } from '@/backend/observability/metrics';
 
 type RateLimitIdentity = {
   action: string;
   email?: string | null;
   tgId?: string | number | bigint | null;
-  clientIp?: string | null;
+  sessionId?: string | null;
 };
 
 type RateLimitOptions = RateLimitIdentity & {
@@ -25,18 +27,35 @@ function normalizePart(value: string | number | bigint | null | undefined) {
   return String(value).trim().toLowerCase();
 }
 
-export function rateLimitKey({ action, email, tgId, clientIp }: RateLimitIdentity) {
-  const normalizedAction = normalizePart(action) ?? 'unknown';
-  const digest = (kind: 'email' | 'tgid' | 'ip', value: string | null) => value === null
-    ? 'none'
-    : createHmac('sha256', getEnv().rateLimitIdentitySecret)
-      .update(`clean-pay:rate-limit:v3:${kind}:${value}`)
-      .digest('hex');
-  const emailDigest = digest('email', normalizePart(email));
-  const telegramDigest = digest('tgid', normalizePart(tgId));
-  const clientIpDigest = digest('ip', normalizePart(clientIp));
+function digest(kind: "email" | "tgid" | "session", value: string) {
+  return createHmac("sha256", getEnv().rateLimitIdentitySecret)
+    .update(`clean-pay:rate-limit:v4:${kind}:${value}`)
+    .digest("hex");
+}
 
-  return `clean-pay:rate-limit:v3:${normalizedAction}:email:${emailDigest}:tgid:${telegramDigest}:ip:${clientIpDigest}`;
+export function rateLimitKey({ action, email, tgId, sessionId }: RateLimitIdentity) {
+  const normalizedAction = normalizePart(action) ?? 'unknown';
+  const target = normalizePart(email)
+    ? ["email", normalizePart(email)!] as const
+    : normalizePart(tgId)
+      ? ["tgid", normalizePart(tgId)!] as const
+      : normalizePart(sessionId)
+        ? ["session", normalizePart(sessionId)!] as const
+        : null;
+
+  return target
+    ? `clean-pay:rate-limit:v4:auth:${normalizedAction}:${target[0]}:${digest(target[0], target[1])}`
+    : `clean-pay:rate-limit:v4:auth:${normalizedAction}:capacity`;
+}
+
+export function rateLimitCapacityKey(action: string) {
+  const normalizedAction = normalizePart(action) ?? "unknown";
+  return `clean-pay:rate-limit:v4:auth:${normalizedAction}:capacity`;
+}
+
+function concurrencyKey(action: string) {
+  const normalizedAction = normalizePart(action) ?? "unknown";
+  return `clean-pay:concurrency:v1:auth:${normalizedAction}`;
 }
 
 async function getRetryAfterSeconds(key: string, windowSeconds: number) {
@@ -45,37 +64,126 @@ async function getRetryAfterSeconds(key: string, windowSeconds: number) {
   return typeof ttl === 'number' && ttl > 0 ? ttl : windowSeconds;
 }
 
-async function incrementRateLimit(key: string, windowSeconds: number) {
+async function incrementRateLimits(keys: string[], windowSeconds: number) {
   const count = await redisCommand([
     'EVAL',
-    "local count = redis.call('INCR', KEYS[1]); if count == 1 then redis.call('EXPIRE', KEYS[1], ARGV[1]); end; return count",
-    1,
-    key,
+    "local counts = {}; for i, key in ipairs(KEYS) do local count = redis.call('INCR', key); if count == 1 then redis.call('EXPIRE', key, ARGV[1]); end; counts[i] = count; end; return counts",
+    keys.length,
+    ...keys,
     windowSeconds,
   ]);
 
-  if (typeof count !== 'number') {
-    throw new BffError('UPSTREAM_ERROR', 502, 'Redis returned invalid rate-limit counter', {
+  if (
+    !Array.isArray(count) ||
+    count.length !== keys.length ||
+    count.some((value) => typeof value !== "number")
+  ) {
+    throw new ServiceError('UPSTREAM_UNAVAILABLE', 503, 'Redis returned invalid rate-limit counters', {
       message: 'Invalid Redis INCR response',
     });
   }
 
-  return count;
+  return count as number[];
 }
 
 export async function assertRateLimit(options: RateLimitOptions) {
-  const key = rateLimitKey(options);
-  const count = await incrementRateLimit(key, options.windowSeconds);
+  const targetKey = rateLimitKey(options);
+  const capacityKey = rateLimitCapacityKey(options.action);
+  const keys = targetKey === capacityKey ? [capacityKey] : [targetKey, capacityKey];
+  let counts: number[];
+  try {
+    counts = await incrementRateLimits(keys, options.windowSeconds);
+  } catch (error) {
+    logger.error("auth_rate_limit_unavailable", {
+      action: options.action,
+      errorName: error instanceof Error ? error.name : "UnknownError",
+    });
+    if (error instanceof ServiceError) {
+      throw error;
+    }
+    throw new ServiceError("UPSTREAM_UNAVAILABLE", 503, "Authentication protection is temporarily unavailable", {
+      retryAfterSeconds: Math.min(options.windowSeconds, 30),
+    });
+  }
+  const targetExceeded = keys.length === 2 && (counts[0] ?? 0) > options.limit;
+  // Actions without a stable identity only have the shared capacity bucket.
+  // Their per-target limit must not accidentally become a tiny global limit.
+  const capacityLimit = getEnv().authRateLimitCapacity;
+  const capacityExceeded = (counts.at(-1) ?? 0) > capacityLimit;
 
-  if (count > options.limit) {
-    const retryAfterSeconds = await getRetryAfterSeconds(key, options.windowSeconds);
+  if (targetExceeded || capacityExceeded) {
+    const exceededKey = capacityExceeded ? capacityKey : targetKey;
+    let retryAfterSeconds: number;
+    try {
+      retryAfterSeconds = await getRetryAfterSeconds(exceededKey, options.windowSeconds);
+    } catch {
+      retryAfterSeconds = Math.min(options.windowSeconds, 30);
+    }
 
-    throw new BffError(
+    recordOperationalEvent(
+      capacityExceeded ? "rate_limit_capacity_rejected" : "rate_limit_target_rejected",
+      options.action,
+    );
+    throw new ServiceError(
       'RATE_LIMITED',
       429,
       options.message ?? 'Too many attempts. Try again later.',
       { retryAfterSeconds },
     );
+  }
+}
+
+export async function withAuthConcurrency<T>(
+  action: string,
+  work: () => Promise<T>,
+  ttlMs = 30_000,
+): Promise<T> {
+  const key = concurrencyKey(action);
+  const token = randomUUID();
+  const now = Date.now();
+  let acquired: unknown;
+
+  try {
+    acquired = await redisCommand([
+      "EVAL",
+      "redis.call('ZREMRANGEBYSCORE', KEYS[1], '-inf', ARGV[1]); if redis.call('ZCARD', KEYS[1]) >= tonumber(ARGV[4]) then return 0 end; redis.call('ZADD', KEYS[1], ARGV[2], ARGV[3]); redis.call('PEXPIRE', KEYS[1], ARGV[5]); return 1",
+      1,
+      key,
+      now,
+      now + ttlMs,
+      token,
+      getEnv().authConcurrencyLimit,
+      ttlMs,
+    ]);
+  } catch (error) {
+    logger.error("auth_concurrency_unavailable", {
+      action,
+      errorName: error instanceof Error ? error.name : "UnknownError",
+    });
+    throw new ServiceError("UPSTREAM_UNAVAILABLE", 503, "Authentication protection is temporarily unavailable", {
+      retryAfterSeconds: 2,
+    });
+  }
+
+  if (acquired !== 1) {
+    recordOperationalEvent("auth_concurrency_saturated", action);
+    throw new ServiceError("UPSTREAM_UNAVAILABLE", 503, "Authentication capacity is temporarily exhausted", {
+      retryAfterSeconds: 2,
+    });
+  }
+
+  try {
+    return await work();
+  } finally {
+    try {
+      await redisCommand(["ZREM", key, token]);
+    } catch (error) {
+      recordOperationalEvent("auth_concurrency_release_failed", action);
+      logger.error("auth_concurrency_release_failed", {
+        action,
+        errorName: error instanceof Error ? error.name : "UnknownError",
+      });
+    }
   }
 }
 
@@ -95,8 +203,4 @@ export async function assertCooldown({
     windowSeconds,
     message: 'Please wait before requesting another code.',
   });
-}
-
-export async function recordRateLimitEvent() {
-  // Redis counters are recorded by assertRateLimit(). Kept for compatibility with old callers.
 }
