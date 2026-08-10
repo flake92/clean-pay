@@ -1,74 +1,25 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import type { AppMenuItem } from "@/frontend/types";
-import { hasRenewOffer } from "@/frontend/lib/subscription-offers";
 import { getBranding } from "@/shared/branding";
-import type { SubscriptionOffersResponse } from "@/shared/remnashop/types";
-import { getCachedBffJson } from "@/frontend/lib/bff-cache";
+import { logoutAction } from "@/app/actions/session";
+import type { NavigationViewModel } from "@/application/models/navigation";
 
-type MenuUser = {
-    email: string | null;
-    emailVerified: boolean;
-    telegramId: string | null;
-};
-
-export function useCleanPayMenu() {
+export function useCleanPayMenu(navigation: NavigationViewModel) {
     const branding = getBranding();
-    const [user, setUser] = useState<MenuUser | null>(null);
-    const [offers, setOffers] = useState<SubscriptionOffersResponse | null>(null);
-    const [profileLoaded, setProfileLoaded] = useState(false);
-
-    useEffect(() => {
-        let alive = true;
-
-        async function loadMenuState() {
-            try {
-                const profileResponse = await getCachedBffJson<{ user: MenuUser }>("/api/bff/auth/me");
-                const nextUser = profileResponse.ok
-                    ? profileResponse.data?.user ?? null
-                    : null;
-
-                let nextOffers: SubscriptionOffersResponse | null = null;
-                if (nextUser) {
-                    const offersResponse = await getCachedBffJson<SubscriptionOffersResponse>("/api/bff/subscription/offers");
-                    nextOffers = offersResponse.ok
-                        ? offersResponse.data
-                        : null;
-                }
-
-                if (!alive) {
-                    return;
-                }
-
-                setUser(nextUser);
-                setOffers(nextOffers);
-                setProfileLoaded(true);
-            } catch {
-                if (alive) {
-                    setProfileLoaded(true);
-                }
-            }
-        }
-
-        void loadMenuState();
-
-        return () => {
-            alive = false;
-        };
-    }, []);
 
     async function logout() {
-        await fetch("/api/bff/auth/logout", { method: "POST", cache: "no-store" }).catch(() => null);
-        window.location.replace("/login");
+        await logoutAction();
     }
 
-    const shouldShowVerifyEmail = profileLoaded && user !== null && Boolean(user.email) && !user.emailVerified;
-    const shouldShowLinkAccount = profileLoaded && user !== null;
-    const canRenewSubscription = hasRenewOffer(offers);
-    const hasSubscription = Boolean(offers?.has_current_subscription);
+    const shouldShowVerifyEmail = navigation.emailVerificationRequired;
+    const shouldShowLinkAccount = navigation.authenticated;
+    const canRenewSubscription = navigation.canRenewSubscription;
+    const hasSubscription = navigation.hasSubscription;
     const accountItems: AppMenuItem[] = [
-        { label: "Профиль", icon: "pi pi-fw pi-user", to: "/profile" },
+        ...(navigation.authenticated
+            ? [{ label: "Профиль", icon: "pi pi-fw pi-user", to: "/profile" }]
+            : []),
         ...(shouldShowVerifyEmail
             ? [{ label: "Подтвердить e-mail", icon: "pi pi-fw pi-envelope", to: "/verify-email" }]
             : []),
@@ -78,7 +29,9 @@ export function useCleanPayMenu() {
     ];
 
     const cleanPayItems: AppMenuItem[] = [
-        { label: "Кабинет", icon: "pi pi-fw pi-home", to: "/cabinet" },
+        ...(navigation.authenticated
+            ? [{ label: "Кабинет", icon: "pi pi-fw pi-home", to: "/cabinet" }]
+            : []),
         {
             label: hasSubscription ? "Изменить тариф" : "Тарифы",
             icon: "pi pi-fw pi-tags",
@@ -88,28 +41,30 @@ export function useCleanPayMenu() {
             ? [{ label: "Продление", icon: "pi pi-fw pi-refresh", to: "/extend" }]
             : []),
     ];
+    const sessionItem: AppMenuItem = navigation.authenticated
+        ? {
+            label: "Выйти",
+            icon: "pi pi-fw pi-sign-out",
+            command: ({ originalEvent }) => {
+                originalEvent.preventDefault();
+                void logout();
+            },
+        }
+        : { label: "Войти", icon: "pi pi-fw pi-sign-in", to: "/login" };
 
     const model: AppMenuItem[] = [
         {
             label: branding.name,
             items: cleanPayItems,
         },
-        {
-            label: "Аккаунт",
-            items: accountItems,
-        },
+        ...(accountItems.length > 0
+            ? [{ label: "Аккаунт", items: accountItems }]
+            : []),
         {
             label: "Помощь",
             items: [
                 { label: "Поддержка", icon: "pi pi-fw pi-question-circle", to: "/support" },
-                {
-                    label: "Выйти",
-                    icon: "pi pi-fw pi-sign-out",
-                    command: ({ originalEvent }) => {
-                        originalEvent.preventDefault();
-                        void logout();
-                    },
-                },
+                sessionItem,
             ],
         },
     ];

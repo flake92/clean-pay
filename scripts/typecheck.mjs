@@ -28,7 +28,7 @@ function run(script, args) {
 run("node_modules/prisma/build/index.js", ["generate"]);
 run("node_modules/typescript/bin/tsc", [
   "--project",
-  "tsconfig.typecheck.json",
+  "config/typescript/typecheck.json",
   "--noEmit",
   "--pretty",
   "false",

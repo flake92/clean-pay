@@ -1,8 +1,0 @@
-allowBuilds:
-  "@parcel/watcher": true
-  "@prisma/engines": true
-  prisma: true
-  sharp: true
-  unrs-resolver: true
-minimumReleaseAgeExclude:
-  - "@simplewebauthn/server@13.3.2"

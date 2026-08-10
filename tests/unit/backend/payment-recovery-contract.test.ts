@@ -45,7 +45,13 @@ describe("Remnashop payment recovery v1 contract", () => {
         { ...payment, payment_url: "javascript:alert(1)" },
         "/purchase",
       ),
-    ).toThrow(/http\(s\) URL/i);
+    ).toThrow(/https URL/i);
+    expect(() =>
+      parsePaymentInit(
+        { ...payment, payment_url: "http://pay.example.test/checkout" },
+        "/purchase",
+      ),
+    ).toThrow(/https URL/i);
     expect(() =>
       parsePaymentInit(
         { ...payment, payment_id: "not-a-uuid" },
@@ -119,6 +125,29 @@ describe("Remnashop payment recovery v1 contract", () => {
     expect(() =>
       parseTransactionPage({ items: [transaction], next_cursor: "x".repeat(9_000) }),
     ).toThrow(/cursor/i);
+  });
+
+  it("normalizes legacy unlimited duration and isolates an invalid history row", () => {
+    expect(
+      parsePaymentTransaction({ ...transaction, duration_days: -1 }).duration_days,
+    ).toBeNull();
+
+    expect(
+      parseTransactionPage({
+        items: [
+          { ...transaction, duration_days: -1 },
+          {
+            ...transaction,
+            payment_id: "22222222-2222-4222-8222-222222222222",
+            status: "corrupt-legacy-status",
+          },
+        ],
+        next_cursor: null,
+      }),
+    ).toEqual({
+      items: [{ ...transaction, duration_days: null }],
+      next_cursor: null,
+    });
   });
 
   it("requires internally consistent successful recovery data", () => {

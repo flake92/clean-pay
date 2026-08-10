@@ -1,8 +1,11 @@
 import { NextResponse } from "next/server";
 
+import { runDetailedReadiness } from "@/application/health/readiness";
 import { getEnv } from "@/backend/config/env";
-import { runDetailedReadiness } from "@/backend/health/readiness";
+import { createProductionReadinessGateway } from "@/backend/health/checks";
 import { safeEqual, sha256 } from "@/backend/security/crypto";
+import { setReadinessMetric } from "@/backend/observability/metrics";
+import { APP_VERSION } from "@/shared/app-version";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -18,12 +21,13 @@ export async function GET(request: Request) {
   }
 
   try {
-    const readiness = await runDetailedReadiness();
+    const readiness = await runDetailedReadiness(createProductionReadinessGateway());
+    setReadinessMetric(readiness.status);
     return NextResponse.json(
       {
         ...readiness,
         service: "clean-pay",
-        version: process.env.npm_package_version ?? "0.1.0",
+        version: APP_VERSION,
       },
       {
         status: readiness.status === "ok" ? 200 : 503,
@@ -31,6 +35,7 @@ export async function GET(request: Request) {
       },
     );
   } catch {
+    setReadinessMetric("degraded");
     return NextResponse.json(
       { status: "degraded", service: "clean-pay", checkedAt: null },
       { status: 503, headers: { "cache-control": "no-store" } },

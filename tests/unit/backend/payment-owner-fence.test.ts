@@ -18,7 +18,7 @@ vi.mock("@/backend/database/prisma", () => ({ prisma: mocks.prisma }));
 
 import {
   withPaymentOwnerChangeFence,
-} from "@/backend/payments/user-merge";
+} from "@/backend/integrations/payments/payment-user-merge-service";
 
 describe("payment owner change fence", () => {
   beforeEach(() => {

@@ -43,13 +43,19 @@ function isStandalone() {
   return window.matchMedia("(display-mode: standalone)").matches || ("standalone" in navigator && (navigator as Navigator & { standalone?: boolean }).standalone === true);
 }
 
-export function InstallAppButton({ alwaysVisible = false }: { alwaysVisible?: boolean } = {}) {
+export function InstallAppButton({
+  alwaysVisible = false,
+  autoOpenIosGuide = alwaysVisible,
+}: {
+  alwaysVisible?: boolean;
+  autoOpenIosGuide?: boolean;
+}) {
   const [installEvent, setInstallEvent] = useState<BeforeInstallPromptEvent | null>(null);
   const [showIosGuide, setShowIosGuide] = useState(false);
   const [showAndroidGuide, setShowAndroidGuide] = useState(false);
   const [showEmbeddedGuide, setShowEmbeddedGuide] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
-  const [installed, setInstalled] = useState(() => typeof window !== "undefined" && isStandalone());
+  const [installed, setInstalled] = useState(false);
   const [mobilePlatform, setMobilePlatform] = useState<"android" | "ios" | "other" | null>(null);
   const [embeddedBrowser, setEmbeddedBrowser] = useState(false);
 
@@ -57,11 +63,17 @@ export function InstallAppButton({ alwaysVisible = false }: { alwaysVisible?: bo
     const platformTimer = window.setTimeout(() => {
       const isIos = isAppleMobileDevice();
       const requestedPlatform = new URLSearchParams(window.location.search).get("platform");
+      setInstalled((current) => current || isStandalone());
       setMobilePlatform(isIos ? "ios" : isAndroidDevice() ? "android" : "other");
       const embedded = isEmbeddedMobileBrowser();
       setEmbeddedBrowser(embedded);
 
-      if (alwaysVisible && (isIos || requestedPlatform === "ios") && !embedded && !isStandalone()) {
+      if (
+        autoOpenIosGuide &&
+        (isIos || requestedPlatform === "ios") &&
+        !embedded &&
+        !isStandalone()
+      ) {
         setShowIosGuide(true);
       }
 
@@ -69,8 +81,16 @@ export function InstallAppButton({ alwaysVisible = false }: { alwaysVisible?: bo
         void loadTelegramWebAppScript().catch(() => undefined);
       }
     }, 0);
-    const onBeforeInstallPrompt = (event: Event) => { event.preventDefault(); setInstallEvent(event as BeforeInstallPromptEvent); };
-    const onInstalled = () => setInstalled(true);
+    const onBeforeInstallPrompt = (event: Event) => {
+      event.preventDefault();
+      setMessage(null);
+      setInstallEvent(event as BeforeInstallPromptEvent);
+    };
+    const onInstalled = () => {
+      setMessage(null);
+      setInstallEvent(null);
+      setInstalled(true);
+    };
     window.addEventListener("beforeinstallprompt", onBeforeInstallPrompt);
     window.addEventListener("appinstalled", onInstalled);
 
@@ -82,7 +102,7 @@ export function InstallAppButton({ alwaysVisible = false }: { alwaysVisible?: bo
     }
 
     return () => { window.clearTimeout(platformTimer); window.removeEventListener("beforeinstallprompt", onBeforeInstallPrompt); window.removeEventListener("appinstalled", onInstalled); };
-  }, [alwaysVisible]);
+  }, [autoOpenIosGuide]);
 
   function openExternalInstallPage() {
     const installUrl = new URL("/install", window.location.origin);
@@ -106,7 +126,7 @@ export function InstallAppButton({ alwaysVisible = false }: { alwaysVisible?: bo
     await installEvent.prompt();
     const choice = await installEvent.userChoice;
     setInstallEvent(null);
-    if (choice.outcome === "dismissed") setMessage("Установка отменена. Вы сможете вернуться к ней в любой момент.");
+    if (choice.outcome === "dismissed") setMessage(null);
   }
 
   if (installed) {
@@ -119,7 +139,7 @@ export function InstallAppButton({ alwaysVisible = false }: { alwaysVisible?: bo
         <span className="text-600 line-height-3">
           Ярлык уже находится на главном экране. Если хотите установить его заново, сначала удалите существующее приложение Clean Pay.
         </span>
-        <Link className="p-button p-component no-underline" href="/cabinet">
+        <Link className="p-button p-component no-underline" href="/cabinet" prefetch={false}>
           <span className="p-button-icon p-c pi pi-home" />
           <span className="p-button-label">Открыть кабинет</span>
         </Link>

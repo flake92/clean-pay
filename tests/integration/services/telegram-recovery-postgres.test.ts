@@ -5,7 +5,7 @@ const sessionMock = vi.hoisted(() => ({
   refreshCurrentAccessCookie: vi.fn(),
 }));
 
-vi.mock("@/backend/sessions/web-session", () => sessionMock);
+vi.mock("@/backend/integrations/sessions/web-session-service", () => sessionMock);
 
 vi.mock("@/backend/integrations/remnashop/session-token-lifecycle", () => ({
   acquireRemnashopTokensForSession: vi.fn(async () => null),
@@ -57,7 +57,9 @@ describeWithPostgres("Telegram recovery PostgreSQL serialization", () => {
       data: {
         remnashopUserId: "2",
         email: `owner-${suffix}@example.com`,
-        emailVerified: true,
+        // Keep this fixture on the Telegram recovery path. A verified e-mail
+        // session is recovered through /auth/service-session before Telegram.
+        emailVerified: false,
         telegramId: `123456${Date.now().toString().slice(-5)}`,
         telegramUsername: "clean_user",
       },

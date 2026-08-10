@@ -29,29 +29,43 @@ describe("post-auth redirect flow", () => {
     const authForms = readFileSync("src/frontend/components/auth-forms.tsx", "utf8");
     const passkeys = readFileSync("src/frontend/components/passkey-actions.tsx", "utf8");
     const telegramStart = readFileSync("src/app/auth/telegram/start/route.ts", "utf8");
-    const telegramWebApp = readFileSync(
-      "src/app/api/bff/auth/telegram/webapp/route.ts",
-      "utf8",
-    );
+    const telegramWebApp = readFileSync("src/frontend/components/telegram-webapp-login.tsx", "utf8");
     const telegramWebAppPage = readFileSync(
       "src/app/auth/telegram/webapp/page.tsx",
       "utf8",
     );
 
     expect(loginPage).toContain("safeRedirectPath(rawRedirect)");
-    expect(loginPage).toContain("<LoginForm redirectTo={redirectTo} />");
+    expect(loginPage).toContain("redirectTo={redirectTo}");
+    expect(loginPage).toContain("initialError={initialError}");
     expect(loginPage).toContain("<TelegramLoginButton redirectTo={redirectTo} />");
     expect(authForms).toContain("redirectAfterAuth(redirectTo)");
-    expect(authForms).toContain("<PasskeyLoginButton redirectTo={redirectTo} />");
-    expect(passkeys).toContain("window.location.assign(redirectTo)");
+    expect(authForms).toContain("redirectTo={redirectTo}");
+    expect(authForms).toContain("turnstileEnabled={turnstile.enabled}");
+    expect(passkeys).toContain("navigateTo(redirectTo)");
     expect(telegramStart).toContain(
       'safeRedirectPath(url.searchParams.get("redirect_to"))',
     );
-    expect(telegramWebApp).toContain("safeRedirectPath(");
-    expect(telegramWebApp).toContain("NextResponse.json({ redirectTo })");
+    expect(telegramWebApp).toContain("authenticateTelegramWebAppAction(initData)");
+    expect(telegramWebApp).toContain("window.location.replace(redirectTo)");
     expect(telegramWebAppPage).toContain("safeRedirectPath(rawRedirect)");
     expect(telegramWebAppPage).toContain(
       "<TelegramWebAppLogin redirectTo={redirectTo} />",
+    );
+
+    const registrationVerification = readFileSync(
+      "src/frontend/components/register-email-confirm-form.tsx",
+      "utf8",
+    );
+    const registrationVerificationPage = readFileSync(
+      "src/app/register/verify-email/page.tsx",
+      "utf8",
+    );
+    expect(registrationVerificationPage).toContain(
+      "safeAccountSetupDestination(rawRedirect)",
+    );
+    expect(registrationVerification).toContain(
+      "passkeySetupPath(redirectTo)",
     );
   });
 });

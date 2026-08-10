@@ -1,24 +1,18 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 
 import { AccountActionRequired } from "@/frontend/components/account-action-required";
 import { LinkButton } from "@/frontend/components/prime/link-button";
-import { BffClientError, readBffError } from "@/frontend/lib/client-api";
 import type {
   DurationGatewayPrice,
   PlanOffer,
-  SubscriptionOffersResponse,
-} from "@/shared/remnashop/types";
+} from "@/shared/domain/subscriptions";
+import type { TariffsViewModel } from "@/application/models/tariffs";
 import { Card } from "primereact/card";
 import { Dropdown } from "primereact/dropdown";
 import { Message } from "primereact/message";
 import { Tag } from "primereact/tag";
-
-type LoadState =
-  | { status: "loading" }
-  | { status: "error"; message: string; action?: "login" | "linkEmail" }
-  | { status: "ready"; offers: SubscriptionOffersResponse };
 
 type PriceOption = {
   amount: string;
@@ -57,7 +51,7 @@ function formatDeviceLimit(limit: number) {
 
 function priceOptionTemplate(option?: PriceOption) {
   if (!option) {
-    return <span>Выберите срок и способ оплаты</span>;
+    return <span>Выберите длительность</span>;
   }
 
   return (
@@ -68,7 +62,58 @@ function priceOptionTemplate(option?: PriceOption) {
           {option.amount} {option.currency}
         </span>
       </div>
-      <span className="clean-pay-price-option__gateway">{option.gateway}</span>
+    </div>
+  );
+}
+
+function gatewaySwitcher(
+  gateways: string[],
+  selectedGateway: string,
+  onSelect: (gateway: string) => void,
+) {
+  if (gateways.length <= 1) {
+    return null;
+  }
+
+  const selectedIndex = Math.max(gateways.indexOf(selectedGateway), 0);
+  const move = (offset: number) => {
+    const nextIndex = (selectedIndex + offset + gateways.length) % gateways.length;
+    const nextGateway = gateways[nextIndex];
+
+    if (nextGateway) {
+      onSelect(nextGateway);
+    }
+  };
+
+  return (
+    <div className="clean-pay-gateway-field">
+      <span className="text-sm font-medium text-700">Платёжный шлюз</span>
+      <div
+        aria-label="Выбор платёжного шлюза"
+        className="clean-pay-gateway-switcher"
+        role="group"
+      >
+        <button
+          aria-label="Предыдущий платёжный шлюз"
+          className="clean-pay-gateway-switcher__button"
+          onClick={() => move(-1)}
+          type="button"
+        >
+          <i aria-hidden="true" className="pi pi-chevron-left" />
+        </button>
+        <div aria-live="polite" className="clean-pay-gateway-switcher__current">
+          <strong>{selectedGateway}</strong>
+          <span>{selectedIndex + 1} из {gateways.length}</span>
+        </div>
+        <button
+          aria-label="Следующий платёжный шлюз"
+          className="clean-pay-gateway-switcher__button"
+          onClick={() => move(1)}
+          type="button"
+        >
+          <i aria-hidden="true" className="pi pi-chevron-right" />
+        </button>
+      </div>
     </div>
   );
 }
@@ -131,60 +176,32 @@ function bestPrice(plan: PlanOffer) {
   }, null);
 }
 
-export function TariffsPanel() {
-  const [state, setState] = useState<LoadState>({ status: "loading" });
+export function TariffsPanel({ model }: { model: TariffsViewModel }) {
   const [selection, setSelection] = useState<Record<string, string>>({});
 
-  useEffect(() => {
-    fetch("/api/bff/subscription/offers")
-      .then(async (response) => {
-        if (!response.ok) {
-          throw await readBffError(
-            response,
-            response.status === 401 ? "Нужно войти в аккаунт." : "Не удалось загрузить тарифы.",
-          );
-        }
-
-        const body = await response.json().catch(() => null);
-
-        return body.data as SubscriptionOffersResponse;
-      })
-      .then((offers) => setState({ status: "ready", offers }))
-      .catch((error: Error) =>
-        setState({
-          status: "error",
-          message: error.message,
-          action:
-            error instanceof BffClientError && error.code === "EMAIL_REQUIRED"
-              ? "linkEmail"
-              : error instanceof BffClientError && error.status === 401
-                ? "login"
-                : undefined,
-        }),
+  if (model.status === "error") {
+    if (model.action) {
+      return (
+        <AccountActionRequired
+          action={model.action}
+          message={model.message}
+          redirectTo="/tariffs"
+        />
       );
-  }, []);
-
-  if (state.status === "loading") {
-    return <Message severity="info" text="Загрузка тарифов..." />;
-  }
-
-  if (state.status === "error") {
-    if (state.action) {
-      return <AccountActionRequired action={state.action} message={state.message} />;
     }
 
     return (
       <div className="flex flex-column gap-4">
-        <Message severity="error" text={state.message} />
+        <Message severity="error" text={model.message} />
       </div>
     );
   }
 
-  if (state.offers.plans.length === 0) {
+  if (model.offers.plans.length === 0) {
     return <Message severity="info" text="Доступных тарифов пока нет." />;
   }
 
-  const hasCurrentSubscription = state.offers.has_current_subscription;
+  const hasCurrentSubscription = model.offers.has_current_subscription;
 
   return (
     <div className="flex flex-column gap-4">
@@ -195,13 +212,21 @@ export function TariffsPanel() {
         />
       ) : null}
       <div className="grid">
-        {state.offers.plans.map((plan) => {
+        {model.offers.plans.map((plan) => {
           const priceOptions = buildPriceOptions(plan);
           const defaultSelected = priceOptions[0]?.value ?? "";
           const selected = selection[plan.public_code] ?? defaultSelected;
-          const [selectedDays, selectedGateway] = selected.split(":");
+          const selectedOption =
+            priceOptions.find((option) => option.value === selected) ?? priceOptions[0];
+          const selectedGateway = selectedOption?.gateway ?? "";
+          const gateways = Array.from(
+            new Set(priceOptions.map((option) => option.gateway)),
+          );
+          const gatewayPriceOptions = priceOptions.filter(
+            (option) => option.gateway === selectedGateway,
+          );
           const selectedDuration = plan.durations.find(
-            (duration) => String(duration.days) === selectedDays,
+            (duration) => duration.days === selectedOption?.days,
           );
           const selectedPrice = selectedDuration?.prices.find(
             (price) => price.gateway_type === selectedGateway,
@@ -210,22 +235,36 @@ export function TariffsPanel() {
           const currentPrice = selectedPrice ?? fallbackPrice;
           const paymentHref = currentPrice
             ? `/payment?plan=${encodeURIComponent(plan.public_code)}&duration=${encodeURIComponent(
-                selectedDuration?.days ?? priceOptions[0]?.days ?? plan.durations[0]?.days ?? "",
+                selectedDuration?.days ?? selectedOption?.days ?? plan.durations[0]?.days ?? "",
               )}&gateway=${encodeURIComponent(currentPrice.gateway_type)}`
             : "#";
+          const selectGateway = (gateway: string) => {
+            const nextOptions = priceOptions.filter(
+              (option) => option.gateway === gateway,
+            );
+            const nextOption =
+              nextOptions.find((option) => option.days === selectedOption?.days) ?? nextOptions[0];
+
+            if (nextOption) {
+              setSelection((current) => ({
+                ...current,
+                [plan.public_code]: nextOption.value,
+              }));
+            }
+          };
 
           return (
             <div className="col-12 xl:col-6" key={plan.public_code}>
               <Card className="shadow-1 h-full">
                 <div className="flex flex-column gap-4">
                   <div className="flex flex-wrap items-start justify-between gap-3">
-                    <div>
+                    <div className="min-w-0 flex-1">
                       <div className="flex flex-wrap items-center gap-2">
-                        <h2 className="text-xl font-semibold">{plan.name}</h2>
+                        <h2 className="text-xl font-semibold break-words">{plan.name}</h2>
                         <Tag severity="info" value={plan.type} />
                       </div>
                       {plan.description ? (
-                        <p className="mt-1 line-height-3 text-600">
+                        <p className="mt-1 line-height-3 text-600 break-words">
                           {plan.description}
                         </p>
                       ) : null}
@@ -255,10 +294,11 @@ export function TariffsPanel() {
                       </div>
                     ))}
                   </div>
-                  <div className="flex flex-column gap-2 text-sm font-medium text-700">
-                    <span>Длительность и способ оплаты</span>
+                  <div className="flex flex-column gap-3">
+                    {gatewaySwitcher(gateways, selectedGateway, selectGateway)}
+                    <span className="text-sm font-medium text-700">Длительность</span>
                     <Dropdown
-                      aria-label="Длительность и способ оплаты"
+                      aria-label="Длительность"
                       className="clean-pay-price-dropdown"
                       id={plan.public_code}
                       onChange={(event) =>
@@ -270,12 +310,12 @@ export function TariffsPanel() {
                       optionLabel="label"
                       optionValue="value"
                       itemTemplate={priceOptionTemplate}
-                      options={priceOptions}
+                      options={gatewayPriceOptions}
                       panelClassName="clean-pay-price-dropdown-panel"
                       value={selected}
                       valueTemplate={priceOptionTemplate}
                     />
-                    {priceChoiceList(priceOptions, selected, (value) =>
+                    {priceChoiceList(gatewayPriceOptions, selected, (value) =>
                       setSelection((current) => ({
                         ...current,
                         [plan.public_code]: value,

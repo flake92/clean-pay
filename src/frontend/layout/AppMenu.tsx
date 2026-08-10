@@ -1,13 +1,13 @@
 "use client";
 
-import React from "react";
 import { getBranding } from "@/shared/branding";
 import AppMenuitem from "./AppMenuitem";
 import { MenuProvider } from "./context/menucontext";
 import { useCleanPayMenu } from "./useCleanPayMenu";
+import type { NavigationViewModel } from "@/application/models/navigation";
 
-const AppMenu = () => {
-    const { model } = useCleanPayMenu();
+const AppMenu = ({ navigation }: { navigation: NavigationViewModel }) => {
+    const { model } = useCleanPayMenu(navigation);
     const branding = getBranding();
 
     return (

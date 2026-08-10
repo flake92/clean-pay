@@ -13,6 +13,7 @@ type AppEnv = {
   remnashopApiBaseUrl: string;
   remnashopAdminApiBaseUrl: string;
   remnashopApiKey: string | null;
+  remnashopAuthServiceKey: string | null;
   remnawave: {
     apiBaseUrl: string | null;
     token: string | null;
@@ -20,7 +21,10 @@ type AppEnv = {
   webJwtSecret: string;
   webRefreshSecret: string;
   auditIpHashSecret: string;
+  trustedProxyHops: number;
   rateLimitIdentitySecret: string;
+  authRateLimitCapacity: number;
+  authConcurrencyLimit: number;
   cookieSecure: boolean;
   cookieSameSite: SameSite;
   telegramOidc: {
@@ -223,13 +227,14 @@ function telegramOidcUrl(
 
 function validateEnv(env: AppEnv) {
   const isProduction = process.env.NODE_ENV === "production";
+  const isBuildPhase = process.env.CLEAN_PAY_BUILD_PHASE === "true";
 
   if (env.turnstile.enabled) {
     if (!env.turnstile.siteKey) {
       throw new Error("TURNSTILE_SITE_KEY is required when TURNSTILE_ENABLED=true");
     }
 
-    if (!env.turnstile.secretKey) {
+    if (!env.turnstile.secretKey && !isBuildPhase) {
       throw new Error("TURNSTILE_SECRET_KEY is required when TURNSTILE_ENABLED=true");
     }
   }
@@ -268,7 +273,7 @@ function validateEnv(env: AppEnv) {
     }
   }
 
-  if (isProduction && process.env.CLEAN_PAY_BUILD_PHASE !== "true") {
+  if (isProduction && !isBuildPhase) {
     validateProductionEnvironment(process.env);
   }
 }
@@ -291,6 +296,7 @@ export function getEnv(): AppEnv {
     remnashopApiBaseUrl,
     remnashopAdminApiBaseUrl,
     remnashopApiKey: optional("REMNASHOP_API_KEY"),
+    remnashopAuthServiceKey: optional("REMNASHOP_AUTH_SERVICE_KEY"),
     remnawave: {
       apiBaseUrl: optionalUrl("REMNAWAVE_API_BASE_URL"),
       token: optional("REMNAWAVE_TOKEN"),
@@ -298,7 +304,10 @@ export function getEnv(): AppEnv {
     webJwtSecret: required("WEB_JWT_SECRET"),
     webRefreshSecret: required("WEB_REFRESH_SECRET"),
     auditIpHashSecret: optional("AUDIT_IP_HASH_SECRET") ?? required("WEB_JWT_SECRET"),
+    trustedProxyHops: integer("TRUSTED_PROXY_HOPS", 0, 0, 8),
     rateLimitIdentitySecret: required("RATE_LIMIT_IDENTITY_SECRET"),
+    authRateLimitCapacity: integer("AUTH_RATE_LIMIT_CAPACITY", 1000, 100, 1_000_000),
+    authConcurrencyLimit: integer("AUTH_CONCURRENCY_LIMIT", 64, 1, 10_000),
     cookieSecure: bool("COOKIE_SECURE", true),
     cookieSameSite: sameSite("COOKIE_SAMESITE", "lax"),
     telegramOidc: {
@@ -320,7 +329,7 @@ export function getEnv(): AppEnv {
       pending: joinUrl(appUrl, "/payment/pending"),
     },
     paymentReconciliation: {
-      enabled: bool("PAYMENT_RECONCILIATION_ENABLED", false),
+      enabled: bool("PAYMENT_RECONCILIATION_ENABLED", true),
       secret: optional("PAYMENT_RECONCILIATION_SECRET"),
       batchSize: integer("PAYMENT_RECONCILIATION_BATCH_SIZE", 10, 1, 100),
       intervalSeconds: integer(

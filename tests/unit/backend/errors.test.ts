@@ -1,13 +1,13 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  BffError,
   normalizeRemnashopError,
   remnashopInvalidJsonError,
   remnashopUnavailableError,
 } from "@/backend/integrations/remnashop/errors";
+import { ServiceError } from "@/backend/errors/service-error";
 
-describe("Remnashop BFF errors", () => {
+describe("Remnashop service errors", () => {
   it("keeps production messages readable Russian", () => {
     const codes = [
       "UNAUTHORIZED",
@@ -61,7 +61,7 @@ describe("Remnashop BFF errors", () => {
     ];
 
     for (const code of codes) {
-      const error = new BffError(code, 400);
+      const error = new ServiceError(code, 400);
 
       expect(mojibakeFragments.some((fragment) => error.prodMessage.includes(fragment))).toBe(false);
       expect(error.prodMessage).toMatch(/[А-Яа-яЁё]/);
@@ -70,7 +70,9 @@ describe("Remnashop BFF errors", () => {
 
   it.each([
     [401, "bad credentials", "/auth/login", "AUTH_FAILED", 401],
+    [401, "bad credentials", "/auth/email/complete", "AUTH_FAILED", 401],
     [401, "Current password is invalid", "/auth/change-password", "CURRENT_PASSWORD_INVALID", 401],
+    [409, "New password must be different from current password", "/auth/change-password", "PASSWORD_UNCHANGED", 409],
     [401, "missing", "/subscription/current", "UNAUTHORIZED", 401],
     [403, "blocked", "/auth/me", "FORBIDDEN", 403],
     [404, "missing", "/subscription/current", "SUBSCRIPTION_NOT_FOUND", 404],
@@ -94,10 +96,11 @@ describe("Remnashop BFF errors", () => {
     [422, [{ msg: "bad field" }], "/auth/register", "VALIDATION_ERROR", 400],
     [429, "slow down", "/auth/login", "RATE_LIMITED", 429],
     [500, "boom", "/plans/public", "UPSTREAM_UNAVAILABLE", 502],
+    [500, "user merge disabled during payment rollout gate", "/users/merge", "ACCOUNT_MERGE_IN_PROGRESS", 409],
   ])("maps status %s and detail %j to %s", (status, detail, path, code, mappedStatus) => {
     const error = normalizeRemnashopError(status as number, detail, { path: path as string });
 
-    expect(error).toBeInstanceOf(BffError);
+    expect(error).toBeInstanceOf(ServiceError);
     expect(error.code).toBe(code);
     expect(error.status).toBe(mappedStatus);
     expect(error.debug?.upstreamPath).toBe(path);
@@ -118,5 +121,26 @@ describe("Remnashop BFF errors", () => {
     expect(unavailable.debug?.message).toBe("ECONNREFUSED");
     expect(invalidJson.code).toBe("UPSTREAM_ERROR");
     expect(invalidJson.debug?.upstreamDetail).toBe("<html>");
+  });
+
+  it.each([
+    [{ message: "object message" }, "object message"],
+    [{ error: "object error" }, "object error"],
+    [{ detail: "nested detail" }, "nested detail"],
+    [["first", { msg: "second" }, null], "first; second"],
+    [[null, { value: "ignored" }], "Validation error"],
+    [42, "Request failed"],
+  ])("extracts safe messages from heterogeneous upstream detail %#", (detail, message) => {
+    const error = normalizeRemnashopError(418, detail);
+
+    expect(error.code).toBe("UPSTREAM_ERROR");
+    expect(error.debug?.message).toBe(message);
+  });
+
+  it("covers generic conflict and non-Error transport failures", () => {
+    expect(normalizeRemnashopError(409, "duplicate", { path: "/other" }).code)
+      .toBe("CONFLICT");
+    expect(remnashopUnavailableError("/plans", "socket closed").debug?.message)
+      .toBe("socket closed");
   });
 });

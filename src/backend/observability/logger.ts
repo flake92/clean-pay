@@ -19,6 +19,9 @@ const levelWeight: Record<LogLevel, number> = {
 };
 
 const redactedKeyPattern = /(password|token|secret|cookie|authorization|verifier|nonce|state|key)/i;
+const emailPattern = /(?<![\w.+-])[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}(?![\w.-])/g;
+const bearerPattern = /\b(bearer\s+)[A-Za-z0-9._~+/=-]+/gi;
+const secretValuePattern = /(["']?(?:password|passwd|secret|token|authorization|api[_-]?key|signature|sign)["']?\s*[:=]\s*)(["']?)[^\s,;&}\]]+/gi;
 const exactRedactedKeys = new Set([
   "cf-turnstile-response",
   "response",
@@ -56,7 +59,7 @@ function configuredLevel(): LogLevel {
   return "info";
 }
 
-export function shouldLog(level: LogLevel) {
+function shouldLog(level: LogLevel) {
   return levelWeight[level] >= levelWeight[configuredLevel()];
 }
 
@@ -73,7 +76,14 @@ export function sanitizeLogValue(value: unknown): unknown {
     return value.toString();
   }
 
-  if (value === null || typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+  if (typeof value === "string") {
+    return value
+      .replace(emailPattern, "[redacted-email]")
+      .replace(bearerPattern, "$1[redacted]")
+      .replace(secretValuePattern, "$1[redacted]");
+  }
+
+  if (value === null || typeof value === "number" || typeof value === "boolean") {
     return value;
   }
 
@@ -120,7 +130,7 @@ function writeConsoleLog(event: LogEvent) {
   const metadata = sanitizeLogValue(event.metadata ?? {});
   const level = event.level.toUpperCase().padEnd(8, " ");
   const source = event.source ?? event.category ?? "app";
-  const message = event.message ?? event.event;
+  const message = event.message ?? humanizeEvent(event.event);
   const metadataText = formatMetadata(metadata);
   const line = `${new Date().toISOString()} | ${level} | clean-pay/${source} | ${message} | event=${event.event}${metadataText}`;
 
@@ -140,6 +150,12 @@ function writeConsoleLog(event: LogEvent) {
   }
 
   console.info(line);
+}
+
+function humanizeEvent(event: string) {
+  const words = event.replace(/[_-]+/g, " ").trim();
+
+  return words ? `${words.charAt(0).toUpperCase()}${words.slice(1)}` : "Application event";
 }
 
 function formatMetadata(metadata: unknown) {
@@ -185,7 +201,7 @@ export const logEventBus = {
 
 logEventBus.subscribe(writeConsoleLog);
 
-export function logEvent(level: LogLevel, event: string, metadata: Record<string, unknown> = {}, options: {
+function logEvent(level: LogLevel, event: string, metadata: Record<string, unknown> = {}, options: {
   category?: string;
   source?: string;
   message?: string;

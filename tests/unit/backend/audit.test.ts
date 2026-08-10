@@ -31,17 +31,31 @@ vi.mock("@/backend/observability/logger", () => ({
 
 import {
   auditLog,
+  getTrustedClientIp,
   logTechnicalError,
   logTechnicalInfo,
   logTechnicalWarning,
 } from "@/backend/observability/audit";
-import { BffError } from "@/backend/integrations/remnashop/errors";
+import { ServiceError } from "@/backend/errors/service-error";
 
 describe("audit logging", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.unstubAllEnvs();
     state.headers = new Headers({ "x-forwarded-for": "10.0.0.1, 10.0.0.2" });
+  });
+
+  it("attributes audit IP through the configured trusted proxy boundary", () => {
+    const headers = new Headers({
+      "x-forwarded-for": "203.0.113.77, 198.51.100.24, 10.0.0.5",
+      "x-real-ip": "192.0.2.99",
+    });
+
+    expect(getTrustedClientIp(headers, 1)).toBe("10.0.0.5");
+    expect(getTrustedClientIp(headers, 2)).toBe("198.51.100.24");
+    expect(getTrustedClientIp(headers, 0)).toBeNull();
+    expect(getTrustedClientIp(new Headers({ "x-real-ip": "192.0.2.99" }), 1))
+      .toBeNull();
   });
 
   it("writes sanitized audit log with hashed ip", async () => {
@@ -73,12 +87,12 @@ describe("audit logging", () => {
   });
 
   it("logs technical errors, warnings and info", () => {
-    logTechnicalError("bff_error", new BffError("UNAUTHORIZED", 401, "no"), { token: "secret" });
+    logTechnicalError("service_error", new ServiceError("UNAUTHORIZED", 401, "no"), { token: "secret" });
     logTechnicalWarning("warn_event", { ok: true });
     logTechnicalInfo("info_event", { ok: true });
 
     expect(mocks.logger.error).toHaveBeenCalledWith(
-      "bff_error",
+      "service_error",
       expect.objectContaining({ code: "UNAUTHORIZED", status: 401, message: "no" }),
       { category: "technical" },
     );
@@ -90,8 +104,8 @@ describe("audit logging", () => {
     vi.stubEnv("NODE_ENV", "production");
 
     logTechnicalError(
-      "bff_error",
-      new BffError("VALIDATION_ERROR", 400, "email user@example.com token secret"),
+      "service_error",
+      new ServiceError("VALIDATION_ERROR", 400, "email user@example.com token secret"),
       {
         email: "user@example.com",
         token: "secret-token",
@@ -102,7 +116,7 @@ describe("audit logging", () => {
     logTechnicalInfo("info_event", { response: { idToken: "id-token" } });
 
     expect(mocks.logger.error).toHaveBeenCalledWith(
-      "bff_error",
+      "service_error",
       {
         code: "VALIDATION_ERROR",
         status: 400,

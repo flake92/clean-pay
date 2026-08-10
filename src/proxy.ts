@@ -1,39 +1,91 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { logger } from "@/backend/observability/logger";
-import { validateMutationRequest, validateRequestSource } from "@/backend/security/csrf";
+import { validateRequestSource } from "@/backend/security/csrf";
+import {
+  passkeySetupPath,
+  registrationEmailVerificationPath,
+} from "@/shared/auth/account-setup-flow";
+import { safeRedirectPath } from "@/shared/auth/redirect-policy";
 
 const accessCookieName = 'clean_pay_access';
 const refreshCookieName = 'clean_pay_refresh';
 
-const bodylessPostMutationPaths = new Set([
-  '/api/logout',
-  '/api/bff/auth/logout',
-  '/api/bff/auth/passkey/login/options',
-  '/api/bff/auth/passkey/register/options',
-  '/api/bff/auth/telegram/merge-confirmation',
-  '/api/bff/subscription/reissue',
-]);
-
-const passkeyCredentialPathPrefix = '/api/bff/auth/passkey/credentials/';
-const subscriptionDevicePathPrefix = '/api/bff/subscription/devices/';
 const paymentReconciliationInternalPath = '/api/internal/payments/reconcile';
 const readinessInternalPath = '/api/internal/health/readiness';
+const metricsInternalPath = '/api/internal/metrics';
 
-function isSingleSegmentPath(pathname: string, prefix: string) {
-  const suffix = pathname.startsWith(prefix) ? pathname.slice(prefix.length) : '';
+type RequestSecurityContext = {
+  contentSecurityPolicy: string;
+  requestHeaders: Headers;
+  requestId: string;
+  traceId: string;
+};
 
-  return suffix.length > 0 && !suffix.includes('/');
+function randomHex(byteLength: number) {
+  const bytes = new Uint8Array(byteLength);
+  crypto.getRandomValues(bytes);
+  return Array.from(bytes, (value) => value.toString(16).padStart(2, '0')).join('');
 }
 
-function isBodylessMutation(method: string, pathname: string) {
-  return (
-    (method === 'POST' && bodylessPostMutationPaths.has(pathname)) ||
-    (method === 'DELETE' && pathname === '/api/bff/auth/telegram/merge-confirmation') ||
-    (method === 'DELETE' && pathname === '/api/bff/subscription/devices') ||
-    (method === 'DELETE' && isSingleSegmentPath(pathname, passkeyCredentialPathPrefix)) ||
-    (method === 'DELETE' && isSingleSegmentPath(pathname, subscriptionDevicePathPrefix))
+function requestSecurityContext(request: NextRequest): RequestSecurityContext {
+  const suppliedRequestId = request.headers.get('x-request-id')?.trim() ?? '';
+  const requestId = /^[A-Za-z0-9._:-]{8,128}$/.test(suppliedRequestId)
+    ? suppliedRequestId
+    : crypto.randomUUID();
+  const suppliedTraceparent = request.headers.get('traceparent')?.trim().toLowerCase() ?? '';
+  const traceMatch = suppliedTraceparent.match(
+    /^00-([0-9a-f]{32})-([0-9a-f]{16})-([0-9a-f]{2})$/,
   );
+  const suppliedTraceId = traceMatch?.[1];
+  const traceId = suppliedTraceId && !/^0+$/.test(suppliedTraceId)
+    ? suppliedTraceId
+    : randomHex(16);
+  const traceFlags = traceMatch?.[3] ?? '01';
+  const nonce = randomHex(16);
+  const contentSecurityPolicy = [
+    "default-src 'self'",
+    "base-uri 'self'",
+    "object-src 'none'",
+    "frame-ancestors 'none'",
+    "form-action 'self'",
+    "img-src 'self' data: blob: https:",
+    "font-src 'self' data:",
+    "style-src 'self' 'unsafe-inline'",
+    `script-src 'self' 'nonce-${nonce}' 'strict-dynamic' https://challenges.cloudflare.com https://telegram.org`,
+    "connect-src 'self' https://challenges.cloudflare.com https://telegram.org",
+    "frame-src https://challenges.cloudflare.com",
+    "worker-src 'self' blob:",
+    "manifest-src 'self'",
+  ].join('; ');
+  const requestHeaders = new Headers(request.headers);
+  requestHeaders.set('content-security-policy', contentSecurityPolicy);
+  requestHeaders.set('x-nonce', nonce);
+  requestHeaders.set('x-request-id', requestId);
+  requestHeaders.set(
+    'traceparent',
+    `00-${traceId}-${randomHex(8)}-${traceFlags}`,
+  );
+  requestHeaders.set('x-clean-pay-trace-id', traceId);
+
+  return { contentSecurityPolicy, requestHeaders, requestId, traceId };
+}
+
+function secureResponse<T extends NextResponse>(
+  response: T,
+  context: RequestSecurityContext,
+) {
+  response.headers.set('content-security-policy', context.contentSecurityPolicy);
+  response.headers.set('strict-transport-security', 'max-age=31536000; includeSubDomains');
+  response.headers.set('x-request-id', context.requestId);
+  response.headers.set('x-clean-pay-trace-id', context.traceId);
+  return response;
+}
+
+function continueRequest(context: RequestSecurityContext) {
+  return secureResponse(NextResponse.next({
+    request: { headers: context.requestHeaders },
+  }), context);
 }
 
 const publicPagePaths = new Set([
@@ -42,6 +94,8 @@ const publicPagePaths = new Set([
   '/offline',
   '/login',
   '/register',
+  '/support',
+  '/tariffs',
   '/auth/telegram/start',
   '/auth/telegram/callback',
   '/auth/telegram/webapp',
@@ -51,29 +105,22 @@ const publicApiPaths = new Set([
   '/api/health',
   '/api/health/liveness',
   '/api/health/readiness',
-  '/api/bff/auth/identify',
-  '/api/bff/auth/login',
-  '/api/bff/auth/register',
-  '/api/bff/auth/telegram/webapp',
-  '/api/bff/auth/logout',
-  '/api/bff/auth/passkey/login/options',
-  '/api/bff/auth/passkey/login/verify',
-  '/api/bff/plans/public',
+]);
+
+// These legacy browser endpoints were removed. Let Next.js resolve them to a
+// real 404 instead of turning a nonexistent transport into an authentication
+// oracle at the proxy boundary.
+const removedBrowserTransportPaths = new Set([
+  '/api/me',
   '/api/logout',
+  '/api/bff/auth/me',
+  '/api/bff/subscription/current',
+  '/api/bff/payments/status',
 ]);
 
 const emailVerificationPagePaths = new Set([
   '/verify-email',
   '/register/verify-email',
-]);
-
-const emailVerificationApiPrefixes = [
-  '/api/bff/auth/email/',
-];
-
-const emailVerificationApiPaths = new Set([
-  '/api/bff/auth/logout',
-  '/api/logout',
 ]);
 
 function decodeBase64Url(value: string) {
@@ -172,19 +219,12 @@ function isPublicPath(pathname: string) {
 }
 
 function isEmailVerificationAllowedPath(pathname: string) {
-  return (
-    emailVerificationPagePaths.has(pathname) ||
-    emailVerificationApiPaths.has(pathname) ||
-    emailVerificationApiPrefixes.some((prefix) => pathname.startsWith(prefix))
-  );
+  return emailVerificationPagePaths.has(pathname);
 }
 
 function isBootstrapAllowedPath(pathname: string) {
   return (
-    pathname === '/passkey/setup' ||
-    pathname === '/api/bff/auth/logout' ||
-    pathname === '/api/logout' ||
-    pathname.startsWith('/api/bff/auth/passkey/')
+    pathname === '/passkey/setup'
   );
 }
 
@@ -196,6 +236,17 @@ function safeRedirectTarget(request: NextRequest) {
   }
 
   return target;
+}
+
+function localRedirectUrl(request: NextRequest, target: string) {
+  const resolved = new URL(target, request.nextUrl.origin);
+  const url = request.nextUrl.clone();
+
+  url.pathname = resolved.pathname;
+  url.search = resolved.search;
+  url.hash = resolved.hash;
+
+  return url;
 }
 
 function loginRedirect(request: NextRequest) {
@@ -212,20 +263,21 @@ function loginRedirect(request: NextRequest) {
 }
 
 function authenticatedRedirect(request: NextRequest, emailVerificationRequired: boolean) {
-  const redirectTo = request.nextUrl.searchParams.get('redirect_to');
-  const url = request.nextUrl.clone();
+  const redirectTo = safeRedirectPath(
+    request.nextUrl.searchParams.get('redirect_to'),
+  ) ?? '/cabinet';
+  const target = emailVerificationRequired
+    ? registrationEmailVerificationPath(redirectTo)
+    : redirectTo;
 
-  url.pathname = emailVerificationRequired
-    ? '/register/verify-email'
-    : redirectTo?.startsWith('/') && !redirectTo.startsWith('//')
-    ? redirectTo
-    : '/cabinet';
-  url.search = '';
-
-  return NextResponse.redirect(url);
+  return NextResponse.redirect(localRedirectUrl(request, target));
 }
 
-function requestMetadata(request: NextRequest, accessState: AccessState) {
+function requestMetadata(
+  request: NextRequest,
+  accessState: AccessState,
+  security: RequestSecurityContext,
+) {
   const { pathname } = request.nextUrl;
 
   return {
@@ -238,6 +290,8 @@ function requestMetadata(request: NextRequest, accessState: AccessState) {
     bootstrapAuthenticated: accessState.bootstrapAuthenticated,
     hasRefreshToken: accessState.hasRefreshToken,
     emailVerificationRequired: accessState.emailVerificationRequired,
+    requestId: security.requestId,
+    traceId: security.traceId,
   };
 }
 
@@ -253,25 +307,12 @@ function browserMutationGuard(request: NextRequest) {
     });
   }
 
-  const isProtectedMutationPath =
-    request.nextUrl.pathname.startsWith('/api/bff/') ||
-    request.nextUrl.pathname === '/api/logout' ||
-    request.nextUrl.pathname === '/auth/telegram/callback';
-
-  if (!isProtectedMutationPath) {
-    return { ok: true } as const;
-  }
-
-  return validateMutationRequest({
-    method: request.method,
-    headers: request.headers,
-    trustedAppUrl: process.env.NEXT_PUBLIC_APP_URL,
-    requireJson: !isBodylessMutation(request.method.toUpperCase(), request.nextUrl.pathname),
-  });
+  return { ok: true } as const;
 }
 
 export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
+  const security = requestSecurityContext(request);
   const accessState = await getAccessState(request);
   // Edge middleware cannot validate the opaque database-backed refresh token.
   // Treat it as a session candidate for both pages and APIs and let the first
@@ -279,9 +320,11 @@ export async function proxy(request: NextRequest) {
   // destroy a valid session whenever the short-lived access cookie expires.
   const isAuthenticated = accessState.authenticated || accessState.hasRefreshToken;
   const isBootstrapAuthenticated = accessState.bootstrapAuthenticated && !accessState.fullAuthenticated;
-  const metadata = requestMetadata(request, accessState);
+  const metadata = requestMetadata(request, accessState, security);
+  const isRoutineReadinessProbe = pathname === readinessInternalPath && request.method === 'GET';
 
-  logger.info("http_request_received", metadata, {
+  const logRequest = isRoutineReadinessProbe ? logger.debug : logger.info;
+  logRequest("http_request_received", metadata, {
     category: "http",
     source: "http.access",
     message: `${request.method} ${pathname} received`,
@@ -289,9 +332,11 @@ export async function proxy(request: NextRequest) {
 
   if (
     (pathname === paymentReconciliationInternalPath && request.method === 'POST') ||
-    (pathname === readinessInternalPath && request.method === 'GET')
+    (pathname === readinessInternalPath && request.method === 'GET') ||
+    (pathname === metricsInternalPath && request.method === 'GET')
   ) {
-    logger.info("http_request_decision", {
+    const logDecision = isRoutineReadinessProbe ? logger.debug : logger.info;
+    logDecision("http_request_decision", {
       ...metadata,
       action: "allow_internal_service",
       status: 200,
@@ -300,7 +345,7 @@ export async function proxy(request: NextRequest) {
       source: "http.access",
       message: `${request.method} ${pathname} -> allow internal service`,
     });
-    return NextResponse.next();
+    return continueRequest(security);
   }
 
   const csrfResult = browserMutationGuard(request);
@@ -317,21 +362,22 @@ export async function proxy(request: NextRequest) {
       message: `${request.method} ${pathname} -> ${csrfResult.status} ${csrfResult.reason}`,
     });
 
-    return NextResponse.json(
-      csrfResult.reason === "unsupported_media_type"
-        ? { error: { code: 'VALIDATION_ERROR', message: 'Для этого запроса требуется application/json.' } }
-        : { error: { code: 'FORBIDDEN', message: 'Источник запроса не разрешён.' } },
+    return secureResponse(NextResponse.json(
+      { error: { code: 'FORBIDDEN', message: 'Источник запроса не разрешён.' } },
       { status: csrfResult.status },
-    );
+    ), security);
   }
 
   if (isPublicPath(pathname)) {
     if ((accessState.authenticated || isBootstrapAuthenticated) && (pathname === '/login' || pathname === '/register')) {
+      const requestedRedirect = safeRedirectPath(
+        request.nextUrl.searchParams.get('redirect_to'),
+      ) ?? '/cabinet';
       const redirectTo = isBootstrapAuthenticated
-        ? "/passkey/setup"
+        ? passkeySetupPath(requestedRedirect)
         : accessState.emailVerificationRequired
-          ? "/register/verify-email"
-          : "/cabinet";
+          ? registrationEmailVerificationPath(requestedRedirect)
+          : requestedRedirect;
       logger.info("http_request_decision", {
         ...metadata,
         action: "redirect_authenticated_user",
@@ -344,13 +390,16 @@ export async function proxy(request: NextRequest) {
         message: `${request.method} ${pathname} -> 307 redirect authenticated user`,
       });
       if (isBootstrapAuthenticated) {
-        const url = request.nextUrl.clone();
-        url.pathname = "/passkey/setup";
-        url.search = "";
-        return NextResponse.redirect(url);
+        return secureResponse(
+          NextResponse.redirect(localRedirectUrl(request, redirectTo)),
+          security,
+        );
       }
 
-      return authenticatedRedirect(request, accessState.emailVerificationRequired);
+      return secureResponse(
+        authenticatedRedirect(request, accessState.emailVerificationRequired),
+        security,
+      );
     }
 
     logger.info("http_request_decision", {
@@ -362,7 +411,11 @@ export async function proxy(request: NextRequest) {
       source: "http.access",
       message: `${request.method} ${pathname} -> allow public`,
     });
-    return NextResponse.next();
+    return continueRequest(security);
+  }
+
+  if (removedBrowserTransportPaths.has(pathname)) {
+    return continueRequest(security);
   }
 
   // A BOOTSTRAP access token represents a deliberately restricted session.
@@ -380,27 +433,28 @@ export async function proxy(request: NextRequest) {
           source: "http.access",
           message: `${request.method} ${pathname} -> 403 email not verified`,
         });
-        return NextResponse.json(
+        return secureResponse(NextResponse.json(
           { error: { code: 'EMAIL_NOT_VERIFIED', message: 'Подтвердите e-mail, чтобы продолжить.' } },
           { status: 403 },
-        );
+        ), security);
       }
 
-      const url = request.nextUrl.clone();
-      url.pathname = '/register/verify-email';
-      url.search = '';
+      const redirectTarget = registrationEmailVerificationPath(
+        safeRedirectTarget(request),
+      );
+      const url = localRedirectUrl(request, redirectTarget);
 
       logger.info("http_request_decision", {
         ...metadata,
         action: "redirect_email_unverified",
         status: 307,
-        redirectTo: "/register/verify-email",
+        redirectTo: redirectTarget,
       }, {
         category: "http",
         source: "http.access",
         message: `${request.method} ${pathname} -> 307 email verification required`,
       });
-      return NextResponse.redirect(url);
+      return secureResponse(NextResponse.redirect(url), security);
     }
 
     logger.info("http_request_decision", {
@@ -412,7 +466,7 @@ export async function proxy(request: NextRequest) {
       source: "http.access",
       message: `${request.method} ${pathname} -> allow authenticated`,
     });
-    return NextResponse.next();
+    return continueRequest(security);
   }
 
   if (isBootstrapAuthenticated) {
@@ -426,7 +480,7 @@ export async function proxy(request: NextRequest) {
         source: "http.access",
         message: `${request.method} ${pathname} -> allow bootstrap`,
       });
-      return NextResponse.next();
+      return continueRequest(security);
     }
 
     if (pathname.startsWith('/api/')) {
@@ -439,27 +493,26 @@ export async function proxy(request: NextRequest) {
         source: "http.access",
         message: `${request.method} ${pathname} -> 403 passkey required`,
       });
-      return NextResponse.json(
+      return secureResponse(NextResponse.json(
         { error: { code: 'PASSKEY_REQUIRED', message: 'Создайте ключ доступа, чтобы продолжить.' } },
         { status: 403 },
-      );
+      ), security);
     }
 
-    const url = request.nextUrl.clone();
-    url.pathname = '/passkey/setup';
-    url.search = '';
+    const redirectTarget = passkeySetupPath(safeRedirectTarget(request));
+    const url = localRedirectUrl(request, redirectTarget);
 
     logger.info("http_request_decision", {
       ...metadata,
       action: "redirect_passkey_setup",
       status: 307,
-      redirectTo: "/passkey/setup",
+      redirectTo: redirectTarget,
     }, {
       category: "http",
       source: "http.access",
       message: `${request.method} ${pathname} -> 307 passkey setup`,
     });
-    return NextResponse.redirect(url);
+    return secureResponse(NextResponse.redirect(url), security);
   }
 
   if (pathname.startsWith('/api/')) {
@@ -474,12 +527,18 @@ export async function proxy(request: NextRequest) {
     });
     const response = NextResponse.json(
       { error: { code: 'UNAUTHORIZED', message: 'Войдите в аккаунт, чтобы продолжить.' } },
-      { status: 401 },
+      { status: 401, headers: { 'cache-control': 'no-store' } },
     );
-    response.cookies.delete(accessCookieName);
-    response.cookies.delete(refreshCookieName);
+    // An anonymous request can still be in flight when a login response sets
+    // fresh cookies. Do not let that older 401 erase the newly-created session.
+    if (request.cookies.has(accessCookieName)) {
+      response.cookies.delete(accessCookieName);
+    }
+    if (request.cookies.has(refreshCookieName)) {
+      response.cookies.delete(refreshCookieName);
+    }
 
-    return response;
+    return secureResponse(response, security);
   }
 
   logger.info("http_request_decision", {
@@ -492,7 +551,7 @@ export async function proxy(request: NextRequest) {
     source: "http.access",
     message: `${request.method} ${pathname} -> 307 login`,
   });
-  return loginRedirect(request);
+  return secureResponse(loginRedirect(request), security);
 }
 
 export const config = {

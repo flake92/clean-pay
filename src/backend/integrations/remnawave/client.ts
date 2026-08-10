@@ -1,5 +1,8 @@
 import { getEnv } from "@/backend/config/env";
+import { ServiceError } from "@/backend/errors/service-error";
 import { logger } from "@/backend/observability/logger";
+import { recordUpstreamRequest } from "@/backend/observability/metrics";
+import { currentRequestTrace, tracedHeaders } from "@/backend/observability/request-trace";
 
 type RemnawaveUser = {
   uuid?: string;
@@ -137,21 +140,26 @@ async function remnawaveRequest<T>(path: string) {
     return null;
   }
 
+  const startedAt = Date.now();
+  const trace = await currentRequestTrace();
+
   try {
     const response = await fetch(endpoint, {
-      headers: {
+      headers: tracedHeaders({
         accept: "application/json",
         authorization: token.startsWith("Bearer ") ? token : `Bearer ${token}`,
-      },
+      }, trace),
       cache: "no-store",
       signal: AbortSignal.timeout(10_000),
     });
 
     if (response.status === 404) {
+      recordUpstreamRequest({ service: "remnawave", operation: path, outcome: "rejected", durationMs: Date.now() - startedAt });
       return null;
     }
 
     if (!response.ok) {
+      recordUpstreamRequest({ service: "remnawave", operation: path, outcome: "rejected", durationMs: Date.now() - startedAt });
       logger.warn("remnawave_live_subscription_failed", {
         path,
         status: response.status,
@@ -163,8 +171,10 @@ async function remnawaveRequest<T>(path: string) {
       return null;
     }
 
+    recordUpstreamRequest({ service: "remnawave", operation: path, outcome: "success", durationMs: Date.now() - startedAt });
     return await response.json() as T;
   } catch (error) {
+    recordUpstreamRequest({ service: "remnawave", operation: path, outcome: "unavailable", durationMs: Date.now() - startedAt });
     logger.warn("remnawave_live_subscription_unavailable", {
       path,
       errorName: error instanceof Error ? error.name : "UnknownError",
@@ -193,6 +203,58 @@ async function getUsersByTelegramId(telegramId: string | number) {
   const data = await remnawaveRequest<RemnawaveListResponse>(`/users/by-telegram-id/${encodeURIComponent(String(telegramId))}`);
 
   return data?.response ?? [];
+}
+
+export async function synchronizeRemnawaveUserIdentity(input: {
+  uuid: string;
+  email: string;
+  telegramId: string;
+}) {
+  const endpoint = remnawaveEndpoint("/users");
+  const token = getEnv().remnawave.token;
+  if (!endpoint || !token) {
+    throw new ServiceError("UPSTREAM_UNAVAILABLE", 503, "Remnawave identity synchronization is not configured.");
+  }
+
+  let response: Response;
+  const startedAt = Date.now();
+  const trace = await currentRequestTrace();
+  try {
+    response = await fetch(endpoint, {
+      method: "PATCH",
+      headers: tracedHeaders({
+        accept: "application/json",
+        authorization: token.startsWith("Bearer ") ? token : `Bearer ${token}`,
+        "content-type": "application/json",
+      }, trace),
+      body: JSON.stringify({
+        uuid: input.uuid,
+        email: input.email,
+        telegramId: Number(input.telegramId),
+      }),
+      cache: "no-store",
+      signal: AbortSignal.timeout(10_000),
+    });
+  } catch (error) {
+    recordUpstreamRequest({ service: "remnawave", operation: "/users", outcome: "unavailable", durationMs: Date.now() - startedAt });
+    throw new ServiceError("UPSTREAM_UNAVAILABLE", 503, "Remnawave identity synchronization failed.", {
+      cause: error instanceof Error ? error.name : "UnknownError",
+    });
+  }
+  if (!response.ok) {
+    recordUpstreamRequest({ service: "remnawave", operation: "/users", outcome: "rejected", durationMs: Date.now() - startedAt });
+    throw new ServiceError("UPSTREAM_UNAVAILABLE", 503, "Remnawave identity synchronization was rejected.", {
+      upstreamStatus: response.status,
+    });
+  }
+  recordUpstreamRequest({ service: "remnawave", operation: "/users", outcome: "success", durationMs: Date.now() - startedAt });
+
+  const verified = await getUserByUuid(input.uuid);
+  if (normalizedIdentity(verified?.uuid) !== normalizedIdentity(input.uuid)
+    || normalizedEmail(verified?.email) !== normalizedEmail(input.email)
+    || normalizedIdentity(verified?.telegramId) !== normalizedIdentity(input.telegramId)) {
+    throw new ServiceError("UPSTREAM_UNAVAILABLE", 503, "Remnawave returned an inconsistent account owner.");
+  }
 }
 
 export async function getLiveRemnawaveSubscriptionUrl(input: LiveSubscriptionUrlInput) {

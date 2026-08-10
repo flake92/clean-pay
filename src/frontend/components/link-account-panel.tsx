@@ -1,7 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { useSearchParams } from "next/navigation";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { browserSupportsWebAuthn } from "@simplewebauthn/browser";
 import { Button } from "primereact/button";
@@ -10,32 +9,32 @@ import { Message } from "primereact/message";
 import { Password } from "primereact/password";
 import { Tag } from "primereact/tag";
 
+import {
+  cancelLinkedTelegramAction,
+  confirmLinkedTelegramAction,
+  linkAccountEmailAction,
+  removeLinkedPasskeyAction,
+} from "@/app/actions/link-account";
 import { TurnstileWidget, type TurnstileHandle, hasTurnstileSiteKey } from "@/frontend/components/turnstile-widget";
-import { readBffError } from "@/frontend/lib/client-api";
+import { LinkButton } from "@/frontend/components/prime/link-button";
+import { navigateTo, replaceWith } from "@/frontend/lib/browser-navigation";
+import {
+  accountLinkPath,
+  accountSetupCompletePath,
+  emailVerificationPath,
+  isPaymentDestination,
+} from "@/shared/auth/account-setup-flow";
+import type { LinkAccountViewModel, TelegramMergeViewModel } from "@/application/models/link-account";
 
-type ProfileUser = {
-  email: string | null;
-  emailVerified?: boolean;
-  is_email_verified?: boolean;
-  telegramId?: string | null;
-  telegram_id?: string | number | null;
+const defaultLinkAccountModel: LinkAccountViewModel = {
+  status: "ready",
+  profile: { email: null, emailVerified: false, telegramId: null },
+  passkeys: [],
+  mergeConfirmation: null,
+  callbackError: null,
 };
 
-type PasskeyCredential = {
-  id: string;
-  name: string | null;
-  createdAt: string;
-  lastUsedAt: string | null;
-};
-
-type MergeConfirmation = {
-  targetEmail: string;
-  sourceEmailMasked: string | null;
-  emailWillBeReplaced?: boolean;
-  telegramId: string;
-};
-
-function telegramMergeConfirmationMessage(confirmation: MergeConfirmation) {
+function telegramMergeConfirmationMessage(confirmation: TelegramMergeViewModel) {
   // Keep the old payload compatible during a rolling deployment: previously
   // sourceEmailMasked was only returned when the source account had an e-mail.
   const emailWillBeReplaced = confirmation.emailWillBeReplaced
@@ -47,10 +46,6 @@ function telegramMergeConfirmationMessage(confirmation: MergeConfirmation) {
   }
 
   return `Этот Telegram принадлежит отдельной учётной записи. После объединения текущий e-mail ${confirmation.targetEmail} останется без изменений, а подписки, платежи и остальные данные из Telegram-учётной записи будут перенесены. Продолжить?`;
-}
-
-async function readError(response: Response) {
-  return (await readBffError(response, "Не удалось выполнить действие.")).message;
 }
 
 function missingTurnstileTokenMessage(siteKey?: string | null) {
@@ -73,22 +68,6 @@ function statusLabel(active: boolean, pending = false) {
   }
 
   return pending ? "Нужно подтвердить" : "Не подключено";
-}
-
-function telegramCallbackError(status: string | null) {
-  if (status === "telegram_merge_subscriptions") {
-    return "В обеих учётных записях есть подписки. Данные не изменены — обратитесь в службу поддержки.";
-  }
-
-  if (status === "telegram_merge_required") {
-    return "Автоматическое объединение остановлено из-за конфликта данных учётных записей. Ничего не изменено. Обновите страницу и повторите привязку; если ошибка сохраняется, обратитесь в поддержку.";
-  }
-
-  if (status === "telegram_failed") {
-    return "Не удалось завершить привязку Telegram. Повторите попытку или обратитесь в поддержку.";
-  }
-
-  return null;
 }
 
 function AuthMethodTile({
@@ -127,31 +106,70 @@ function AuthMethodTile({
 }
 
 export function LinkAccountPanel({
+  guided = false,
+  model = defaultLinkAccountModel,
+  passwordRequired = false,
+  redirectTo = "/cabinet",
   turnstileEnabled = false,
   turnstileSiteKey,
 }: {
+  guided?: boolean;
+  model?: LinkAccountViewModel;
+  passwordRequired?: boolean;
+  redirectTo?: string;
   turnstileEnabled?: boolean;
   turnstileSiteKey?: string | null;
 }) {
-  const searchParams = useSearchParams();
-  const callbackStatus = searchParams.get("auth");
-  const callbackError = telegramCallbackError(callbackStatus);
-  const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
-  const [profile, setProfile] = useState<ProfileUser | null>(null);
-  const [passkeys, setPasskeys] = useState<PasskeyCredential[]>([]);
+  const profile = model.status === "ready" ? model.profile : null;
+  const [passkeys, setPasskeys] = useState(model.status === "ready" ? model.passkeys : []);
   const [message, setMessage] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(model.status === "error" ? model.message : model.status === "ready" ? model.callbackError : null);
+  const sessionExpired = model.status === "unauthorized";
   const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
   const [turnstile, setTurnstile] = useState<TurnstileHandle | null>(null);
   const [webAuthnSupported, setWebAuthnSupported] = useState<boolean | null>(null);
-  const [mergeConfirmation, setMergeConfirmation] = useState<MergeConfirmation | null>(null);
+  const [mergeConfirmation, setMergeConfirmation] = useState<TelegramMergeViewModel | null>(model.status === "ready" ? model.mergeConfirmation : null);
+  const actionLoadingRef = useRef<string | null>(null);
 
-  const emailVerified = Boolean(profile?.emailVerified ?? profile?.is_email_verified);
-  const telegramId = profile?.telegramId ?? profile?.telegram_id ?? null;
+  function beginAction(action: string) {
+    if (actionLoadingRef.current !== null) {
+      return false;
+    }
+
+    actionLoadingRef.current = action;
+    setActionLoading(action);
+    return true;
+  }
+
+  function finishAction(action: string) {
+    if (actionLoadingRef.current !== action) {
+      return;
+    }
+
+    actionLoadingRef.current = null;
+    setActionLoading(null);
+  }
+
+  const emailVerified = Boolean(profile?.emailVerified);
+  const telegramId = profile?.telegramId ?? null;
   const hasEmail = Boolean(profile?.email);
   const hasTelegram = Boolean(telegramId);
   const hasPasskey = passkeys.length > 0;
+  const requiresPasswordReauth = guided && passwordRequired;
+  const usesCurrentPassword = hasEmail || requiresPasswordReauth;
+  const returnsToPayment = isPaymentDestination(redirectTo);
+  const verificationDestination = guided
+    ? emailVerificationPath(redirectTo)
+    : "/verify-email";
+  const setupDestination = guided
+    ? accountLinkPath(redirectTo, {
+        passwordRequired: requiresPasswordReauth,
+      })
+    : "/link-account";
+  const loginDestination = `/login?${new URLSearchParams({
+    redirect_to: setupDestination,
+  }).toString()}`;
 
   const passkeyDescription = useMemo(() => {
     if (webAuthnSupported === false) {
@@ -163,66 +181,6 @@ export function LinkAccountPanel({
       : "Можно добавить вход по Face ID, отпечатку или PIN-коду устройства.";
   }, [hasPasskey, webAuthnSupported]);
 
-  const loadState = useCallback(async () => {
-    setLoading(true);
-    setError(callbackError);
-
-    try {
-      const profileResponse = await fetch("/api/bff/auth/me");
-
-      if (!profileResponse.ok) {
-        throw new Error(await readError(profileResponse));
-      }
-
-      const profileBody = await profileResponse.json();
-      setProfile(profileBody.data.user);
-
-      if (
-        callbackStatus === "telegram_email_replace" ||
-        callbackStatus === "telegram_processing"
-      ) {
-        let confirmationResponse: Response | null = null;
-        const attempts = callbackStatus === "telegram_processing" ? 8 : 1;
-        for (let attempt = 0; attempt < attempts; attempt += 1) {
-          confirmationResponse = await fetch(
-            "/api/bff/auth/telegram/merge-confirmation",
-          );
-          if (confirmationResponse.ok || confirmationResponse.status !== 404) {
-            break;
-          }
-          if (attempt + 1 < attempts) {
-            await new Promise((resolve) => window.setTimeout(resolve, 250));
-          }
-        }
-
-        if (!confirmationResponse) {
-          throw new Error("Не удалось получить подтверждение объединения.");
-        }
-        if (!confirmationResponse.ok) {
-          throw new Error(await readError(confirmationResponse));
-        }
-
-        const confirmationBody = await confirmationResponse.json();
-        setMergeConfirmation(confirmationBody.data);
-      } else {
-        setMergeConfirmation(null);
-      }
-
-      const passkeyResponse = await fetch("/api/bff/auth/passkey/credentials");
-
-      if (passkeyResponse.ok) {
-        const passkeyBody = await passkeyResponse.json();
-        setPasskeys(passkeyBody.data.credentials ?? []);
-      } else {
-        setPasskeys([]);
-      }
-    } catch (error) {
-      setError(error instanceof Error ? error.message : "Не удалось загрузить способы входа.");
-    } finally {
-      setLoading(false);
-    }
-  }, [callbackError, callbackStatus]);
-
   useEffect(() => {
     const timer = window.setTimeout(() => {
       setWebAuthnSupported(browserSupportsWebAuthn());
@@ -232,31 +190,25 @@ export function LinkAccountPanel({
   }, []);
 
   useEffect(() => {
-    const timer = window.setTimeout(() => {
-      void loadState();
-    }, 0);
-
-    return () => window.clearTimeout(timer);
-  }, [loadState]);
+    if (guided && hasEmail && emailVerified && !mergeConfirmation) {
+      navigateTo(accountSetupCompletePath(redirectTo));
+    }
+  }, [emailVerified, guided, hasEmail, mergeConfirmation, redirectTo]);
 
   async function confirmTelegramMerge() {
-    setActionLoading("telegram-merge-confirm");
+    const action = "telegram-merge-confirm";
+    if (!beginAction(action)) {
+      return;
+    }
     setError(null);
 
     try {
-      const response = await fetch("/api/bff/auth/telegram/merge-confirmation", {
-        method: "POST",
-      });
-
-      if (!response.ok) {
-        const responseError = await readBffError(
-          response,
-          "Не удалось объединить аккаунты.",
-        );
-        setError(responseError.message);
+      const result = await confirmLinkedTelegramAction();
+      if (!result.ok) {
+        setError(result.message);
         if (
-          responseError.code === "ACCOUNT_MERGE_SUBSCRIPTIONS_CONFLICT" ||
-          responseError.code === "ACCOUNT_MERGE_REQUIRED"
+          result.code === "ACCOUNT_MERGE_SUBSCRIPTIONS_CONFLICT" ||
+          result.code === "ACCOUNT_MERGE_REQUIRED"
         ) {
           setMergeConfirmation(null);
           window.history.replaceState({}, "", "/link-account");
@@ -264,29 +216,27 @@ export function LinkAccountPanel({
         return;
       }
 
-      window.location.assign("/cabinet");
+      navigateTo(
+        guided ? accountSetupCompletePath(redirectTo) : redirectTo,
+      );
     } catch (error) {
       setError(error instanceof Error ? error.message : "Не удалось объединить аккаунты.");
     } finally {
-      setActionLoading(null);
+      finishAction(action);
     }
   }
 
   async function cancelTelegramMerge() {
-    setActionLoading("telegram-merge-cancel");
+    const action = "telegram-merge-cancel";
+    if (!beginAction(action)) {
+      return;
+    }
     setError(null);
 
     try {
-      const response = await fetch("/api/bff/auth/telegram/merge-confirmation", {
-        method: "DELETE",
-      });
-
-      if (!response.ok) {
-        const deleteError = await readError(response);
-        if (response.status === 403 || response.status === 409) {
-          await loadState();
-        }
-        setError(deleteError);
+      const result = await cancelLinkedTelegramAction();
+      if (!result.ok) {
+        setError(result.message);
         return;
       }
 
@@ -296,11 +246,14 @@ export function LinkAccountPanel({
     } catch (error) {
       setError(error instanceof Error ? error.message : "Не удалось отменить объединение.");
     } finally {
-      setActionLoading(null);
+      finishAction(action);
     }
   }
 
   function linkTelegram() {
+    if (actionLoadingRef.current !== null) {
+      return;
+    }
     setMessage(null);
     setError(null);
 
@@ -309,9 +262,11 @@ export function LinkAccountPanel({
       return;
     }
 
-    setActionLoading("telegram");
+    if (!beginAction("telegram")) {
+      return;
+    }
     const url = new URL("/auth/telegram/start", window.location.origin);
-    url.searchParams.set("redirect_to", "/link-account");
+    url.searchParams.set("redirect_to", setupDestination);
     if (turnstileToken) {
       url.searchParams.set("turnstile_token", turnstileToken);
       url.searchParams.set("cf-turnstile-response", turnstileToken);
@@ -320,83 +275,135 @@ export function LinkAccountPanel({
   }
 
   async function deletePasskey(id: string) {
-    setActionLoading(`passkey-${id}`);
+    const action = `passkey-${id}`;
+    if (!beginAction(action)) {
+      return;
+    }
     setMessage(null);
     setError(null);
 
     try {
-      const response = await fetch(`/api/bff/auth/passkey/credentials/${encodeURIComponent(id)}`, {
-        method: "DELETE",
-      });
-
-      if (!response.ok) {
-        setError(await readError(response));
+      const result = await removeLinkedPasskeyAction(id);
+      if (!result.ok) {
+        setError(result.message);
         return;
       }
 
       setMessage("Ключ быстрого входа удалён.");
-      await loadState();
+      setPasskeys((current) => current.filter((passkey) => passkey.id !== id));
+    } catch (error) {
+      setError(
+        error instanceof Error
+          ? error.message
+          : "Не удалось удалить ключ быстрого входа.",
+      );
     } finally {
-      setActionLoading(null);
+      finishAction(action);
     }
   }
 
   async function onSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setActionLoading("email");
+    if (actionLoadingRef.current !== null) {
+      return;
+    }
     setMessage(null);
     setError(null);
 
-    try {
-      const formData = new FormData(event.currentTarget);
-      const response = await fetch("/api/bff/link/remnashop", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          email: formData.get("email"),
-          password: formData.get("password"),
-        }),
-      });
+    const formData = new FormData(event.currentTarget);
+    const email = String(formData.get("email") ?? "").trim();
+    const password = String(formData.get("password") ?? "");
+    const confirmPassword = String(formData.get("confirmPassword") ?? "");
 
-      if (!response.ok) {
-        const responseError = await readError(response);
+    if (!hasEmail && password !== confirmPassword) {
+      setError("Пароли не совпадают.");
+      return;
+    }
+
+    if (!beginAction("email")) {
+      return;
+    }
+
+    try {
+      const result = await linkAccountEmailAction({ email, password });
+      if (!result.ok) {
+        if (result.code === "UNAUTHORIZED") {
+          setError(null);
+          replaceWith(loginDestination);
+          return;
+        }
+
         turnstile?.reset();
         setTurnstileToken(null);
-        await loadState();
-        setError(responseError);
+        setError(result.message);
+        return;
+      }
+      if (result.kind === "linked") {
+        setMessage("E-mail и пароль подключены.");
+        navigateTo(accountSetupCompletePath(redirectTo));
         return;
       }
 
-      const body = (await response.json()) as {
-        data?: {
-          linked?: boolean;
-          pendingVerification?: boolean;
-        };
-      };
-
-      if (body.data?.linked) {
-        setMessage("E-mail привязан.");
-        window.location.assign("/cabinet");
-        return;
-      }
-
-      window.location.assign("/verify-email");
+      navigateTo(verificationDestination);
     } catch {
       turnstile?.reset();
       setTurnstileToken(null);
       setError("Сеть недоступна. Не удалось связать e-mail с аккаунтом.");
     } finally {
-      setActionLoading(null);
+      finishAction("email");
     }
   }
 
-  if (loading) {
-    return <Message severity="info" text="Загружаем способы входа..." />;
+  if (sessionExpired) {
+    return (
+      <div className="flex flex-column gap-4">
+        <Message
+          severity="warn"
+          text="Сессия завершилась. Войдите снова — мы сохранили этот шаг и исходное действие."
+        />
+        <LinkButton
+          className="w-fit"
+          href={loginDestination}
+          label="Войти и продолжить"
+        />
+      </div>
+    );
   }
 
   return (
     <div className="link-account-panel">
       {error ? <Message severity="error" text={error} /> : null}
+      {guided ? (
+        <section
+          aria-labelledby="guided-account-setup-title"
+          className="surface-50 border-1 border-200 border-round-lg p-4"
+        >
+          <h2 className="mt-0 text-xl" id="guided-account-setup-title">
+            Добавьте резервный вход
+          </h2>
+          <p className="line-height-3 text-700">
+            {requiresPasswordReauth
+                ? hasEmail
+                  ? "Сессия подтверждения изменилась. Введите пароль личного кабинета, затем подтвердите адрес шестизначным кодом из письма."
+                  : "Сессия подтверждения изменилась. Снова введите e-mail и пароль личного кабинета, затем подтвердите адрес шестизначным кодом из письма."
+                : hasEmail
+                  ? "E-mail сохранён. Осталось подтвердить его шестизначным кодом из письма."
+                  : "Вы вошли через Telegram. Добавьте e-mail и придумайте пароль для личного кабинета, чтобы не потерять доступ, если Telegram станет недоступен."}
+          </p>
+          <ol className="mb-0 pl-4 line-height-3 text-600">
+            {!hasEmail ? <li>Введите e-mail и пароль для входа.</li> : null}
+            {hasEmail && !emailVerified && requiresPasswordReauth ? (
+              <li>Подтвердите вход паролем личного кабинета.</li>
+            ) : null}
+            {!emailVerified ? <li>Подтвердите адрес кодом из письма.</li> : null}
+            <li>
+              {returnsToPayment
+                ? "После проверки мы вернём вас к выбранной оплате."
+                : "После проверки мы вернём вас к прерванному действию."}
+            </li>
+          </ol>
+        </section>
+      ) : null}
       {mergeConfirmation ? (
         <section className="account-method-card border-orange-400">
           <Message
@@ -428,93 +435,183 @@ export function LinkAccountPanel({
       <div className="account-method-grid">
         <AuthMethodTile
           active={hasEmail && emailVerified}
-          description={hasEmail ? "Используется для входа по паролю и восстановления доступа." : "Добавьте e-mail, чтобы входить по паролю и восстановить доступ при необходимости."}
+          description={
+            usesCurrentPassword
+              ? "Используется для входа по паролю и восстановления доступа."
+              : "Если e-mail уже зарегистрирован, введите текущий пароль. Для нового e-mail придумайте пароль не короче 8 символов."
+          }
           icon="pi pi-envelope"
           meta={hasEmail ? <span>{profile?.email}</span> : null}
           pending={hasEmail && !emailVerified}
           title="E-mail"
         >
-          {hasEmail && !emailVerified ? (
-            <Button label="Подтвердить e-mail" onClick={() => window.location.assign("/verify-email")} outlined type="button" />
-          ) : !hasEmail ? (
+          {hasEmail && !emailVerified && !requiresPasswordReauth ? (
+            <Button
+              disabled={actionLoading !== null}
+              label="Подтвердить e-mail"
+              onClick={() => navigateTo(verificationDestination)}
+              outlined
+              type="button"
+            />
+          ) : !hasEmail || guided ? (
             <form className="account-method-form" onSubmit={onSubmit}>
-              <InputText name="email" placeholder="user@example.com" required type="email" />
-              <Password
-                className="w-full"
-                feedback={false}
-                inputClassName="w-full"
-                minLength={8}
-                name="password"
-                placeholder="Пароль"
-                required
-                toggleMask
+              {!hasEmail ? (
+                <>
+                  <label className="flex flex-column gap-2">
+                    <span className="text-sm font-medium text-700">E-mail</span>
+                    <InputText
+                      autoComplete="email"
+                      maxLength={255}
+                      name="email"
+                      placeholder="user@example.com"
+                      required
+                      type="email"
+                    />
+                  </label>
+                  <Message
+                    severity="info"
+                    text="Для существующего e-mail нужен его текущий пароль. Если адрес новый, этот пароль будет создан после регистрации."
+                  />
+                </>
+              ) : (
+                <input name="email" type="hidden" value={profile?.email ?? ""} />
+              )}
+              <label className="flex flex-column gap-2">
+                <span className="text-sm font-medium text-700">
+                  {usesCurrentPassword
+                    ? "Пароль личного кабинета"
+                    : "Пароль для входа"}
+                </span>
+                <Password
+                  autoComplete={
+                    usesCurrentPassword ? "current-password" : "new-password"
+                  }
+                  className="w-full"
+                  feedback={!usesCurrentPassword}
+                  inputClassName="w-full"
+                  maxLength={256}
+                  minLength={usesCurrentPassword ? 1 : 8}
+                  name="password"
+                  placeholder="Пароль"
+                  required
+                  toggleMask
+                />
+              </label>
+              {!hasEmail ? (
+                <label className="flex flex-column gap-2">
+                  <span className="text-sm font-medium text-700">
+                    Повторите пароль
+                  </span>
+                  <Password
+                    autoComplete="new-password"
+                    className="w-full"
+                    feedback={false}
+                    inputClassName="w-full"
+                    maxLength={256}
+                    minLength={1}
+                    name="confirmPassword"
+                    placeholder="Повторите пароль"
+                    required
+                    toggleMask
+                  />
+                </label>
+              ) : null}
+              {!hasEmail ? (
+                <Message
+                  severity="warn"
+                  text="Если этот e-mail относится к другому вашему аккаунту, данные будут безопасно объединены. На других устройствах может потребоваться повторный вход; конфликт двух активных подписок решается через поддержку."
+                />
+              ) : null}
+              <Button
+                disabled={actionLoading !== null}
+                label={
+                  usesCurrentPassword
+                    ? "Подтвердить паролем"
+                    : "Сохранить e-mail и пароль"
+                }
+                loading={actionLoading === "email"}
+                type="submit"
               />
-              <Button disabled={actionLoading === "email"} label="Привязать e-mail" loading={actionLoading === "email"} type="submit" />
             </form>
           ) : null}
         </AuthMethodTile>
 
-        <AuthMethodTile
-          active={hasTelegram}
-          description="Дополнительный вход и восстановление доступа через Telegram."
-          icon="pi pi-send"
-          meta={hasTelegram ? <span>Telegram ID: {telegramId}</span> : null}
-          title="Telegram"
-        >
-          <div className="account-method-actions-stack">
-            {turnstileEnabled ? (
-              <TurnstileWidget onReady={setTurnstile} onToken={setTurnstileToken} siteKey={turnstileSiteKey} />
-            ) : null}
-            {hasTelegram ? (
-              <Button
-                disabled={actionLoading === "telegram"}
-                icon="pi pi-refresh"
-                label="Перепроверить связь Telegram"
-                loading={actionLoading === "telegram"}
-                onClick={linkTelegram}
-                outlined
-                type="button"
-              />
-            ) : (
-              <Button
-                disabled={actionLoading === "telegram"}
-                icon="pi pi-send"
-                label="Привязать Telegram"
-                loading={actionLoading === "telegram"}
-                onClick={linkTelegram}
-                severity="info"
-                type="button"
-              />
-            )}
-          </div>
-        </AuthMethodTile>
-
-        <AuthMethodTile
-          active={hasPasskey}
-          description={passkeyDescription}
-          icon="pi pi-lock"
-          meta={hasPasskey ? <span>Сохранено ключей: {passkeys.length}</span> : null}
-          title="Быстрый вход"
-        >
-          {webAuthnSupported !== false ? (
-            <div className="account-method-action-row">
-              <Button
-                icon="pi pi-lock"
-                label="Настроить"
-                onClick={() => window.location.assign("/passkey/setup")}
-                type="button"
-              />
-              <Button
-                label="Позже"
-                onClick={() => window.location.assign("/cabinet")}
-                outlined
-                severity="secondary"
-                type="button"
-              />
+        {!guided ? (
+          <AuthMethodTile
+            active={hasTelegram}
+            description="Дополнительный вход и восстановление доступа через Telegram."
+            icon="pi pi-send"
+            meta={hasTelegram ? <span>Telegram ID: {telegramId}</span> : null}
+            title="Telegram"
+          >
+            <div className="account-method-actions-stack">
+              {turnstileEnabled ? (
+                <TurnstileWidget
+                  action="telegram_auth_start"
+                  onReady={setTurnstile}
+                  onToken={setTurnstileToken}
+                  siteKey={turnstileSiteKey}
+                />
+              ) : null}
+              {hasTelegram ? (
+                <Button
+                  disabled={actionLoading !== null}
+                  icon="pi pi-refresh"
+                  label="Перепроверить связь Telegram"
+                  loading={actionLoading === "telegram"}
+                  onClick={linkTelegram}
+                  outlined
+                  type="button"
+                />
+              ) : (
+                <Button
+                  disabled={actionLoading !== null}
+                  icon="pi pi-send"
+                  label="Привязать Telegram"
+                  loading={actionLoading === "telegram"}
+                  onClick={linkTelegram}
+                  severity="info"
+                  type="button"
+                />
+              )}
             </div>
-          ) : webAuthnSupported === false ? (
-            <Message severity="info" text="На этом устройстве нельзя добавить новый ключ. Сохранённые ключи можно удалить ниже." />
-          ) : null}
+          </AuthMethodTile>
+        ) : null}
+
+        {!guided ? (
+          <AuthMethodTile
+            active={hasPasskey}
+            description={passkeyDescription}
+            icon="pi pi-lock"
+            meta={
+              hasPasskey ? <span>Сохранено ключей: {passkeys.length}</span> : null
+            }
+            title="Быстрый вход"
+          >
+            {webAuthnSupported !== false ? (
+              <div className="account-method-action-row">
+                <Button
+                  disabled={actionLoading !== null}
+                  icon="pi pi-lock"
+                  label="Настроить"
+                  onClick={() => navigateTo("/passkey/setup")}
+                  type="button"
+                />
+                <Button
+                  disabled={actionLoading !== null}
+                  label="Позже"
+                  onClick={() => navigateTo("/cabinet")}
+                  outlined
+                  severity="secondary"
+                  type="button"
+                />
+              </div>
+            ) : webAuthnSupported === false ? (
+              <Message
+                severity="info"
+                text="На этом устройстве нельзя добавить новый ключ. Сохранённые ключи можно удалить ниже."
+              />
+            ) : null}
 
             {passkeys.length > 0 ? (
               <div className="passkey-list">
@@ -528,7 +625,7 @@ export function LinkAccountPanel({
                     </div>
                     <Button
                       aria-label="Удалить ключ"
-                      disabled={passkeys.length <= 1 || actionLoading === `passkey-${credential.id}`}
+                      disabled={passkeys.length <= 1 || actionLoading !== null}
                       icon="pi pi-trash"
                       loading={actionLoading === `passkey-${credential.id}`}
                       onClick={() => deletePasskey(credential.id)}
@@ -540,7 +637,8 @@ export function LinkAccountPanel({
                 ))}
               </div>
             ) : null}
-        </AuthMethodTile>
+          </AuthMethodTile>
+        ) : null}
       </div>
     </div>
   );

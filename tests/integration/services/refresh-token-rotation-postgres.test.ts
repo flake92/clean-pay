@@ -7,14 +7,14 @@ const describeWithPostgres = realDatabaseUrl ? describe : describe.skip;
 
 describeWithPostgres("refresh token family PostgreSQL rotation", () => {
   let prisma: typeof import("@/backend/database/prisma")["prisma"];
-  let rotateRefreshTokenFamily: typeof import("@/backend/sessions/web-session")["rotateRefreshTokenFamily"];
+  let rotateRefreshTokenFamily: typeof import("@/backend/integrations/sessions/web-session-service")["rotateRefreshTokenFamily"];
   const userIds: string[] = [];
 
   beforeAll(async () => {
     process.env.DATABASE_URL = realDatabaseUrl as string;
     delete (globalThis as typeof globalThis & { prisma?: unknown }).prisma;
     ({ prisma } = await import("@/backend/database/prisma"));
-    ({ rotateRefreshTokenFamily } = await import("@/backend/sessions/web-session"));
+    ({ rotateRefreshTokenFamily } = await import("@/backend/integrations/sessions/web-session-service"));
   });
 
   afterAll(async () => {

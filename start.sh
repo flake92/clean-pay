@@ -4,6 +4,7 @@ set -eu
 ROOT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 ENV_FILE="$ROOT_DIR/.env"
 COMPOSE_FILE="$ROOT_DIR/docker-compose.yml"
+REMNASHOP_ROLLOUT_SCRIPT="$ROOT_DIR/deploy/prod/prepare-remnashop-rollout.sh"
 MODE="${CLEAN_PAY_MODE:-standalone}"
 COMMAND="${1:-start}"
 
@@ -142,6 +143,7 @@ compose() (
   unset \
     CLEAN_PAY_BIND \
     CLEAN_PAY_IMAGE \
+    CLEAN_PAY_MIGRATION_IMAGE \
     CLEAN_PAY_PORT \
     COMPOSE_ENV_FILES \
     COMPOSE_PROFILES \
@@ -157,13 +159,13 @@ compose() (
     TURNSTILE_SITE_KEY
 
   if [ "$MODE" = "remnashop" ]; then
-    if [ "$(env_value PAYMENT_RECONCILIATION_ENABLED false)" = "true" ]; then
+    if [ "$(env_value PAYMENT_RECONCILIATION_ENABLED true)" = "true" ]; then
       docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" -f "$ROOT_DIR/docker-compose.remnashop.yml" --profile reconciliation "$@"
     else
       docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" -f "$ROOT_DIR/docker-compose.remnashop.yml" "$@"
     fi
   else
-    if [ "$(env_value PAYMENT_RECONCILIATION_ENABLED false)" = "true" ]; then
+    if [ "$(env_value PAYMENT_RECONCILIATION_ENABLED true)" = "true" ]; then
       docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" --profile reconciliation "$@"
     else
       docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" "$@"
@@ -172,7 +174,7 @@ compose() (
 )
 
 assert_reconciliation_worker() {
-  [ "$(env_value PAYMENT_RECONCILIATION_ENABLED false)" = "true" ] || return 0
+  [ "$(env_value PAYMENT_RECONCILIATION_ENABLED true)" = "true" ] || return 0
 
   attempts=0
   last_status="container not found"
@@ -229,6 +231,9 @@ start() {
   info "building and starting containers"
   compose up -d --build
   verify
+  if [ "$MODE" = "remnashop" ]; then
+    sh "$REMNASHOP_ROLLOUT_SCRIPT" "$ENV_FILE"
+  fi
   info "started. Use 'sh start.sh logs' to follow app logs"
 }
 

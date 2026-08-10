@@ -12,6 +12,7 @@ declare global {
         container: HTMLElement,
         options: {
           sitekey: string;
+          action: string;
           size?: "normal" | "flexible" | "compact";
           callback: (token: string) => void;
           "expired-callback": () => void;
@@ -101,10 +102,12 @@ export function TurnstileWidget({
   onToken,
   onReady,
   siteKey,
+  action,
 }: {
   onToken: (token: string | null) => void;
   onReady?: (handle: TurnstileHandle) => void;
   siteKey?: string | null;
+  action: string;
 }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const widgetIdRef = useRef<string | null>(null);
@@ -133,6 +136,7 @@ export function TurnstileWidget({
 
         widgetIdRef.current = window.turnstile.render(containerRef.current, {
           sitekey: siteKey,
+          action,
           size: "flexible",
           callback: (token) => {
             setError(null);
@@ -161,8 +165,9 @@ export function TurnstileWidget({
       if (widgetIdRef.current && window.turnstile) {
         window.turnstile.remove(widgetIdRef.current);
       }
+      widgetIdRef.current = null;
     };
-  }, [onReady, onToken, reset, siteKey]);
+  }, [action, onReady, onToken, reset, siteKey]);
 
   if (!siteKey) {
     return <Message severity="error" text="Cloudflare Turnstile site key is not configured." />;

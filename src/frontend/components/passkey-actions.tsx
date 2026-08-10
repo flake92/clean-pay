@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import {
   browserSupportsWebAuthn,
@@ -11,11 +11,13 @@ import { Button } from "primereact/button";
 import { InputText } from "primereact/inputtext";
 import { Message } from "primereact/message";
 
-import { readBffError } from "@/frontend/lib/client-api";
-
-async function readError(response: Response, fallback: string) {
-  return (await readBffError(response, fallback)).message;
-}
+import {
+  beginPasskeyLoginAction,
+  beginPasskeyRegistrationAction,
+  verifyPasskeyLoginAction,
+  verifyPasskeyRegistrationAction,
+} from "@/app/actions/passkeys";
+import { navigateTo } from "@/frontend/lib/browser-navigation";
 
 function useWebAuthnSupport() {
   const [supported, setSupported] = useState<boolean | null>(null);
@@ -63,48 +65,86 @@ function isWebAuthnTransportError(error: unknown) {
   );
 }
 
-export function PasskeyLoginButton({ redirectTo = "/cabinet" }: { redirectTo?: string }) {
+function isUnavailableCredential(error: unknown) {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+
+  const name = error.name.toLowerCase();
+  const message = error.message.toLowerCase();
+
+  return (
+    name.includes("unknownerror") ||
+    name.includes("notreadable") ||
+    message.includes("credential manager") ||
+    message.includes("credential not found") ||
+    message.includes("no credentials")
+  );
+}
+
+export function PasskeyLoginButton({
+  consumeTurnstileToken,
+  email,
+  redirectTo = "/cabinet",
+  resetTurnstile,
+  turnstileEnabled = false,
+}: {
+  consumeTurnstileToken?: () => string | null;
+  email: string;
+  redirectTo?: string;
+  resetTurnstile?: () => void;
+  turnstileEnabled?: boolean;
+}) {
   const supported = useWebAuthnSupport();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const loginPendingRef = useRef(false);
 
   async function login() {
+    if (loginPendingRef.current) {
+      return;
+    }
+
+    const turnstileToken = turnstileEnabled ? consumeTurnstileToken?.() ?? null : null;
+    if (turnstileEnabled && !turnstileToken) {
+      setError("Пройдите единую проверку безопасности.");
+      return;
+    }
+    loginPendingRef.current = true;
     setLoading(true);
     setError(null);
 
     try {
-      const optionsResponse = await fetch("/api/bff/auth/passkey/login/options", { method: "POST" });
+      const optionsResult = await beginPasskeyLoginAction({ email, ...(turnstileToken ? { turnstileToken } : {}) });
+      resetTurnstile?.();
 
-      if (!optionsResponse.ok) {
-        setError(await readError(optionsResponse, "Не удалось начать быстрый вход."));
+      if (!optionsResult.ok) {
+        setError(optionsResult.message);
         return;
       }
 
-      const optionsBody = await optionsResponse.json();
-      const assertion = await startAuthentication({ optionsJSON: optionsBody.data });
-      const verifyResponse = await fetch("/api/bff/auth/passkey/login/verify", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(assertion),
-      });
+      const assertion = await startAuthentication({ optionsJSON: optionsResult.options });
+      const verifyResult = await verifyPasskeyLoginAction(assertion);
 
-      if (!verifyResponse.ok) {
-        setError(await readError(verifyResponse, "Быстрый вход не подошел. Войдите по паролю."));
+      if (!verifyResult.ok) {
+        setError(verifyResult.message);
         return;
       }
 
       window.location.assign(redirectTo);
     } catch (error) {
+      resetTurnstile?.();
       setError(
         isUserCancelled(error)
           ? "Окно быстрого входа закрыто. Можно войти по паролю."
+          : isUnavailableCredential(error)
+            ? "Сохранённый на устройстве ключ больше не связан с этим стендом. Войдите через e-mail или Telegram и создайте новый ключ в профиле."
           : isWebAuthnTransportError(error)
             ? "Браузер не смог связаться с ключом. Для входа через телефон включите Bluetooth на компьютере и телефоне, затем повторите попытку."
-            : error instanceof Error
-            ? error.message
             : "Не удалось войти быстрым способом.",
       );
     } finally {
+      loginPendingRef.current = false;
       setLoading(false);
     }
   }
@@ -122,6 +162,9 @@ export function PasskeyLoginButton({ redirectTo = "/cabinet" }: { redirectTo?: s
       <div className="text-sm text-600 line-height-3">
         Можно войти через Face ID, отпечаток или PIN-код устройства.
       </div>
+      <div className="text-xs text-500 line-height-3">
+        Passkey восстанавливает вход на этом устройстве. Перед оплатой или управлением подпиской система при необходимости запросит подтверждение через e-mail либо Telegram.
+      </div>
       {error ? <Message severity="warn" text={error} /> : null}
       <Button
         className="w-full"
@@ -138,17 +181,29 @@ export function PasskeyLoginButton({ redirectTo = "/cabinet" }: { redirectTo?: s
   );
 }
 
-export function PasskeySetupPanel() {
+export function PasskeySetupPanel({
+  redirectTo = "/cabinet",
+}: {
+  redirectTo?: string;
+}) {
   const supported = useWebAuthnSupport();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [name, setName] = useState("");
+  const setupPendingRef = useRef(false);
 
-  function continueToCabinet() {
-    window.location.assign("/cabinet");
+  function continueWithoutPasskey() {
+    if (setupPendingRef.current) {
+      return;
+    }
+    navigateTo(redirectTo);
   }
 
   async function createPasskey() {
+    if (setupPendingRef.current) {
+      return;
+    }
+    setupPendingRef.current = true;
     setLoading(true);
     setError(null);
 
@@ -158,27 +213,22 @@ export function PasskeySetupPanel() {
         return;
       }
 
-      const optionsResponse = await fetch("/api/bff/auth/passkey/register/options", { method: "POST" });
+      const optionsResult = await beginPasskeyRegistrationAction();
 
-      if (!optionsResponse.ok) {
-        setError(await readError(optionsResponse, "Не удалось подготовить быстрый вход."));
+      if (!optionsResult.ok) {
+        setError(optionsResult.message);
         return;
       }
 
-      const optionsBody = await optionsResponse.json();
-      const attestation = await startRegistration({ optionsJSON: optionsBody.data });
-      const verifyResponse = await fetch("/api/bff/auth/passkey/register/verify", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ ...attestation, name: name.trim() || undefined }),
-      });
+      const attestation = await startRegistration({ optionsJSON: optionsResult.options });
+      const verifyResult = await verifyPasskeyRegistrationAction({ ...attestation, name: name.trim() || undefined });
 
-      if (!verifyResponse.ok) {
-        setError(await readError(verifyResponse, "Не удалось сохранить быстрый вход."));
+      if (!verifyResult.ok) {
+        setError(verifyResult.message);
         return;
       }
 
-      window.location.assign("/cabinet");
+      navigateTo(redirectTo);
     } catch (error) {
       setError(
         isUserCancelled(error)
@@ -190,6 +240,7 @@ export function PasskeySetupPanel() {
             : "Не удалось создать быстрый вход.",
       );
     } finally {
+      setupPendingRef.current = false;
       setLoading(false);
     }
   }
@@ -201,7 +252,11 @@ export function PasskeySetupPanel() {
           severity="info"
           text="Это устройство не поддерживает быстрый вход. Вы можете пользоваться кабинетом через e-mail, пароль или Telegram."
         />
-        <Button label="Продолжить в кабинет" onClick={continueToCabinet} type="button" />
+        <Button
+          label="Продолжить без быстрого входа"
+          onClick={continueWithoutPasskey}
+          type="button"
+        />
       </div>
     );
   }
@@ -240,7 +295,7 @@ export function PasskeySetupPanel() {
         <Button
           disabled={loading}
           label="Продолжить без него"
-          onClick={continueToCabinet}
+          onClick={continueWithoutPasskey}
           outlined
           severity="secondary"
           type="button"
