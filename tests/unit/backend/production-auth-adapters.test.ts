@@ -277,6 +277,10 @@ describe("production auth and profile adapters", () => {
     mocks.remnashopRequest.mockRejectedValueOnce(new Error("invalid response"));
     await expect(productionEmailVerificationCommands.confirmProviderCode(actor, { code: "123456", alreadyVerified: false }))
       .rejects.toMatchObject({ code: "INTERNAL_ERROR" });
+
+    mocks.assertCooldown.mockRejectedValueOnce(new ServiceError("RATE_LIMITED", 429, undefined, { retryAfterSeconds: 42 }));
+    await expect(productionEmailVerificationCommands.assertChangeCooldown("user-1"))
+      .rejects.toMatchObject({ code: "RATE_LIMITED", retryAfterSeconds: 42 });
   });
 
   it("implements the complete granular e-mail persistence and provider gateway", async () => {
@@ -312,7 +316,9 @@ describe("production auth and profile adapters", () => {
     await productionEmailVerificationCommands.refreshLocalSession();
     await productionEmailVerificationCommands.auditEmailVerified({ userId: "user-1", email: "u@example.com" });
     await productionEmailVerificationCommands.markAccountSyncPending("user-1", new Error("offline"));
-    await productionEmailVerificationCommands.assertChangeLimits({ userId: "user-1", email: "new@example.com", telegramId: "777" });
+    await productionEmailVerificationCommands.assertChangeLimits({ userId: "user-1" });
+    await expect(productionEmailVerificationCommands.emailOwnerId("new@example.com")).resolves.toBeNull();
+    await productionEmailVerificationCommands.assertChangeCooldown("user-1");
     await expect(productionEmailVerificationCommands.changeProviderEmail(actor, "new@example.com"))
       .resolves.toEqual({ pendingEmail: "new@example.com" });
     await productionEmailVerificationCommands.persistPendingEmail(actor, "new@example.com");
@@ -323,6 +329,17 @@ describe("production auth and profile adapters", () => {
     expect(mocks.linkCurrentUserToRemnashopAuth).toHaveBeenCalledWith(expect.objectContaining({ paymentOwnerFenceHeld: true }));
     expect(mocks.refreshCurrentAccessCookie).toHaveBeenCalled();
     expect(mocks.loggerWarn).toHaveBeenCalled();
+    expect(mocks.assertRateLimit).toHaveBeenCalledWith({
+      action: "email_change_attempt",
+      sessionId: "user-1",
+      limit: 5,
+      windowSeconds: 15 * 60,
+    });
+    expect(mocks.assertCooldown).toHaveBeenCalledWith({
+      key: "email-change:user-1",
+      action: "email_change_cooldown",
+      windowSeconds: 60,
+    });
   });
 
   it("covers e-mail adapter ownership and conflict translations", async () => {

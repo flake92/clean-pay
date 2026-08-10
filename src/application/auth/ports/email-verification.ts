@@ -1,5 +1,8 @@
 export class EmailVerificationError extends Error {
-  constructor(public readonly code: string) {
+  constructor(
+    public readonly code: string,
+    public readonly retryAfterSeconds?: number,
+  ) {
     super(code);
   }
 }
@@ -40,7 +43,9 @@ export interface EmailVerificationCommands {
   refreshLocalSession(): Promise<void>;
   auditEmailVerified(input: { userId: string; email: string }): Promise<void>;
   markAccountSyncPending(userId: string, error: unknown): Promise<void>;
-  assertChangeLimits(input: { userId: string; email: string; telegramId: string | null }): Promise<void>;
+  assertChangeLimits(input: { userId: string }): Promise<void>;
+  emailOwnerId(email: string): Promise<string | null>;
+  assertChangeCooldown(userId: string): Promise<void>;
   changeProviderEmail(actor: EmailVerificationActor, email: string): Promise<{ pendingEmail: string }>;
   persistPendingEmail(actor: EmailVerificationActor, pendingEmail: string): Promise<void>;
   auditEmailChangeRequested(input: { userId: string; pendingEmail: string; verificationTargetEmail: string }): Promise<void>;

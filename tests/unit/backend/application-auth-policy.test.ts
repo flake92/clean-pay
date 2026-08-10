@@ -56,6 +56,8 @@ function emailCommands(overrides: Partial<EmailVerificationCommands> = {}): Emai
     auditEmailVerified: vi.fn(async () => undefined),
     markAccountSyncPending: vi.fn(async () => undefined),
     assertChangeLimits: vi.fn(async () => undefined),
+    emailOwnerId: vi.fn(async () => null),
+    assertChangeCooldown: vi.fn(async () => undefined),
     changeProviderEmail: vi.fn(async (_actor, email) => ({ pendingEmail: email })),
     persistPendingEmail: vi.fn(async () => undefined),
     auditEmailChangeRequested: vi.fn(async () => undefined),
@@ -167,6 +169,8 @@ describe("application authentication policy", () => {
     const commands = emailCommands({
       verifyHuman: vi.fn(async () => { order.push("human"); }),
       assertChangeLimits: vi.fn(async () => { order.push("limit"); }),
+      emailOwnerId: vi.fn(async () => { order.push("owner"); return null; }),
+      assertChangeCooldown: vi.fn(async () => { order.push("cooldown"); }),
       changeProviderEmail: vi.fn(async () => { order.push("provider-change"); return { pendingEmail: "new@example.com" }; }),
       persistPendingEmail: vi.fn(async () => { order.push("persist"); }),
       refreshLocalSession: vi.fn(async () => { order.push("refresh"); }),
@@ -177,7 +181,34 @@ describe("application authentication policy", () => {
     await expect(changeVerifiedEmail(commands, { email: " New@Example.com " }))
       .resolves.toEqual({ ok: true, kind: "code-sent", targetEmail: "new@example.com" });
     expect(commands.verifyHuman).toHaveBeenCalledWith(null, "email_change");
-    expect(order).toEqual(["human", "limit", "provider-change", "persist", "refresh", "code", "audit"]);
+    expect(order).toEqual(["human", "limit", "owner", "cooldown", "provider-change", "persist", "refresh", "code", "audit"]);
+  });
+
+  it("reports an existing e-mail owner before consuming the change cooldown", async () => {
+    const commands = emailCommands({
+      emailOwnerId: vi.fn(async () => "other-user"),
+    });
+
+    await expect(changeVerifiedEmail(commands, { email: "owned@example.com" })).resolves.toEqual({
+      ok: false,
+      code: "CONFLICT",
+      message: "Этот e-mail уже привязан к другому аккаунту. Войдите в него или укажите другой адрес.",
+    });
+    expect(commands.assertChangeLimits).toHaveBeenCalledOnce();
+    expect(commands.assertChangeCooldown).not.toHaveBeenCalled();
+    expect(commands.changeProviderEmail).not.toHaveBeenCalled();
+  });
+
+  it("reports the exact remaining rate-limit delay", async () => {
+    const commands = emailCommands({
+      assertChangeLimits: vi.fn(async () => { throw new EmailVerificationError("RATE_LIMITED", 47); }),
+    });
+
+    await expect(changeVerifiedEmail(commands, { email: "new@example.com" })).resolves.toEqual({
+      ok: false,
+      code: "RATE_LIMITED",
+      message: "Повторите попытку через 47 сек.",
+    });
   });
 
   it("returns an actionable security-check error without calling the provider", async () => {

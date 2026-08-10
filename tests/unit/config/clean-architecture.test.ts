@@ -366,6 +366,10 @@ describe("clean architecture boundaries", () => {
     expect(useCase).toContain("synchronizeConfirmedAccount(commands");
     expect(useCase).toContain("mergeEmailAndTelegramAccounts(");
     expect(useCase.indexOf("commands.assertChangeLimits(")).toBeLessThan(useCase.indexOf("commands.changeProviderEmail("));
+    expect(useCase.indexOf("commands.emailOwnerId(")).toBeLessThan(useCase.indexOf("commands.assertChangeCooldown("));
+    expect(useCase.indexOf("commands.assertChangeCooldown(")).toBeLessThan(useCase.indexOf("commands.changeProviderEmail("));
+    expect(adapter).toContain('action: "email_change_attempt"');
+    expect(adapter).toContain('action: "email_change_cooldown"');
     expect(adapter).not.toContain("confirmEmailVerification(");
     expect(profileAdapter).not.toContain("email-verification-service");
     expect(profileAdapter).not.toContain("requestEmailVerification(");

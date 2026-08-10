@@ -11,12 +11,20 @@ import { resolveAuthProfile } from "@/application/auth/resolve-auth-profile";
 
 function failure(error: unknown, fallback: string): EmailVerificationResult {
   const code = error instanceof EmailVerificationError ? error.code : "INTERNAL_ERROR";
+  const retryAfterSeconds = error instanceof EmailVerificationError
+    && typeof error.retryAfterSeconds === "number"
+    && error.retryAfterSeconds > 0
+    ? Math.ceil(error.retryAfterSeconds)
+    : null;
   const messages: Record<string, string> = {
     FORBIDDEN: "Проверка безопасности не пройдена. Выполните её ещё раз и повторите попытку.",
     EMAIL_REQUIRED: "Сначала добавьте e-mail и пароль к аккаунту.",
     EMAIL_CODE_INVALID: "Код не подошёл. Проверьте его и попробуйте снова.",
     EMAIL_CODE_EXPIRED: "Код истёк. Запросите новый.",
-    RATE_LIMITED: "Слишком много попыток. Попробуйте позже.",
+    CONFLICT: "Этот e-mail уже привязан к другому аккаунту. Войдите в него или укажите другой адрес.",
+    RATE_LIMITED: retryAfterSeconds
+      ? `Повторите попытку через ${retryAfterSeconds} сек.`
+      : "Слишком много попыток. Попробуйте позже.",
   };
   return { ok: false, code, message: messages[code] ?? fallback };
 }
@@ -187,7 +195,10 @@ export async function changeVerifiedEmail(
     await commands.verifyHuman(input.turnstileToken ?? null, "email_change");
     const actor = await commands.loadActor({ allowUnverifiedEmail: false });
     assertPasswordBackedEmail(actor);
-    await commands.assertChangeLimits({ userId: actor.userId, email, telegramId: actor.telegramId });
+    await commands.assertChangeLimits({ userId: actor.userId });
+    const ownerId = await commands.emailOwnerId(email);
+    if (ownerId && ownerId !== actor.userId) throw new EmailVerificationError("CONFLICT");
+    await commands.assertChangeCooldown(actor.userId);
     const changed = await commands.changeProviderEmail(actor, email);
     await commands.persistPendingEmail(actor, changed.pendingEmail);
     await commands.refreshLocalSession();
