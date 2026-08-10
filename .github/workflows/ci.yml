@@ -170,7 +170,7 @@ jobs:
           artifact-name: clean-pay-image.spdx.json
           format: spdx-json
       - name: Scan image packages and application dependencies
-        uses: aquasecurity/trivy-action@0.33.1
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: clean-pay:ci
           format: table
