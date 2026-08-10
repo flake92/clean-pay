@@ -31,6 +31,7 @@ import { auditLog, logTechnicalWarning } from "@/backend/observability/audit";
 import { assertRateLimit } from "@/backend/limits/rate-limit";
 import { assertUserMergeFinalOwner, mergeLocalUsersIntoTarget } from "@/backend/integrations/auth/local-user-merge-service";
 import { randomToken, sha256 } from "@/backend/security/crypto";
+import { synchronizeProviderAccountIdentity } from "@/backend/integrations/auth/provider-account-identity-sync";
 
 type ProviderSession = {
   cookies: { accessToken: string; refreshToken: string };
@@ -187,6 +188,7 @@ export const productionTelegramCallbackGateway: TelegramCallbackGateway = {
           telegramUsername: input.telegramUsername,
           sourceEmail: input.sourceEmail,
           targetEmail: input.targetEmail,
+          targetTelegramId: input.targetTelegramId,
           sourceRemnashopUserId: input.sourceAccountId,
           targetRemnashopUserId: input.targetAccountId,
           expiresAt: new Date(now.getTime() + 10 * 60 * 1000),
@@ -299,6 +301,7 @@ export const productionTelegramCallbackGateway: TelegramCallbackGateway = {
 
   async linkProviderSession({ session, ownerFenceHeld, invalidateSiblingTokens }) {
     const auth = providerSession(session);
+    await synchronizeProviderAccountIdentity(auth.cookies.accessToken);
     const result = await linkCurrentUserToRemnashopAuth({
       accessToken: auth.cookies.accessToken,
       refreshToken: auth.cookies.refreshToken,

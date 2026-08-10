@@ -32,6 +32,7 @@ const mocks = vi.hoisted(() => ({
   getTelegramAccountMergeConfirmation: vi.fn(),
   cookieGet: vi.fn(),
   cookieDelete: vi.fn(),
+  synchronizeProviderAccountIdentity: vi.fn(),
 }));
 
 vi.mock("@/backend/integrations/auth/prisma-passkey-account-reader", () => ({
@@ -87,6 +88,9 @@ vi.mock("@/backend/integrations/auth/telegram-account-merge-store", () => ({
   getTelegramAccountMergeConfirmation: mocks.getTelegramAccountMergeConfirmation,
   telegramAccountMergeCookieName: "merge-token",
 }));
+vi.mock("@/backend/integrations/auth/provider-account-identity-sync", () => ({
+  synchronizeProviderAccountIdentity: mocks.synchronizeProviderAccountIdentity,
+}));
 vi.mock("next/headers", () => ({
   cookies: async () => ({ get: mocks.cookieGet, delete: mocks.cookieDelete }),
 }));
@@ -105,6 +109,7 @@ describe("production auth and profile adapters", () => {
     mocks.withAuthConcurrency.mockImplementation(async (_key: string, work: () => Promise<unknown>) => work());
     mocks.withPaymentOwnerChangeFence.mockImplementation(async ({ work }: { work: () => Promise<unknown> }) => work());
     mocks.prisma.$transaction.mockImplementation(async (work: (tx: typeof mocks.prisma) => Promise<unknown>) => work(mocks.prisma));
+    mocks.synchronizeProviderAccountIdentity.mockResolvedValue(false);
   });
 
   it("implements granular auth operations without owning the workflow", async () => {

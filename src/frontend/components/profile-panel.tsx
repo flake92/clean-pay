@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
 
 import { Button } from "primereact/button";
@@ -56,6 +56,15 @@ export function ProfilePanel({
   const [passwordMessageSeverity, setPasswordMessageSeverity] = useState<"success" | "warn">("success");
   const [pendingAction, setPendingAction] = useState<string | null>(null);
   const pendingActionRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (!message || messageSeverity !== "error") return;
+    const frame = requestAnimationFrame(() => {
+      emailFeedbackRef.current?.focus({ preventScroll: true });
+      emailFeedbackRef.current?.scrollIntoView?.({ behavior: "smooth", block: "center" });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [message, messageSeverity]);
   const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
   const [turnstile, setTurnstile] = useState<TurnstileHandle | null>(null);
   const currentEmailTarget = user?.pendingEmail ?? user?.email ?? "";
@@ -90,12 +99,6 @@ export function ProfilePanel({
   function showMessage(text: string, severity: "success" | "info" | "warn" | "error" = "info") {
     setMessage(text);
     setMessageSeverity(severity);
-    if (severity === "error") {
-      requestAnimationFrame(() => requestAnimationFrame(() => {
-        emailFeedbackRef.current?.focus({ preventScroll: true });
-        emailFeedbackRef.current?.scrollIntoView?.({ behavior: "smooth", block: "center" });
-      }));
-    }
   }
 
   function showPasswordMessage(text: string, severity: "success" | "warn") {

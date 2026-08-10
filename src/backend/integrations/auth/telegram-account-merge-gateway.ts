@@ -15,15 +15,14 @@ import {
   getRemnashopUserIdFromAccessToken,
   remnashopAuthTelegramIdentity,
   remnashopMergeUsers,
-  remnashopRequest,
 } from "@/backend/integrations/remnashop/client";
 import { linkCurrentUserToRemnashopAuth } from "@/backend/integrations/remnashop/session";
-import type { CurrentSubscriptionResponse } from "@/backend/integrations/remnashop/contracts";
 import { getCurrentSession, refreshCurrentAccessCookie } from "@/backend/integrations/sessions/web-session-service";
 import { withPaymentOwnerChangeFence } from "@/backend/integrations/payments/payment-user-merge-service";
 import { assertRateLimit } from "@/backend/limits/rate-limit";
 import { auditLog } from "@/backend/observability/audit";
 import { sha256 } from "@/backend/security/crypto";
+import { synchronizeProviderAccountIdentity } from "@/backend/integrations/auth/provider-account-identity-sync";
 
 const processingLeaseMs = 2 * 60 * 1000;
 const mergeReason = "Clean Pay confirmed account merge: keep target e-mail and selected source Telegram";
@@ -68,6 +67,7 @@ export const productionTelegramAccountMergeGateway: TelegramAccountMergeGateway 
       targetAccountId: record.targetRemnashopUserId,
       sourceEmail: record.sourceEmail,
       targetEmail: record.targetEmail,
+      targetTelegramId: record.targetTelegramId,
       telegramId: record.telegramId,
       telegramUsername: record.telegramUsername,
     };
@@ -116,7 +116,7 @@ export const productionTelegramAccountMergeGateway: TelegramAccountMergeGateway 
       userIds: [confirmation.userId],
       upstreamAccountIds: [confirmation.sourceAccountId, confirmation.targetAccountId],
       emails: [confirmation.sourceEmail, confirmation.targetEmail],
-      telegramIds: [confirmation.telegramId],
+      telegramIds: [confirmation.telegramId, confirmation.targetTelegramId],
       work,
     });
   },
@@ -185,11 +185,8 @@ export const productionTelegramAccountMergeGateway: TelegramAccountMergeGateway 
     return { targetHasSubscription: Boolean(result.target.current_subscription_id) };
   },
 
-  async loadCurrentSubscription(identity) {
-    return Boolean(await adapt(() => remnashopRequest<CurrentSubscriptionResponse | null>(
-      "/subscription/current",
-      { accessToken: providerAuth(identity).cookies.accessToken },
-    )));
+  async synchronizeSubscriptionIdentity(identity) {
+    return adapt(() => synchronizeProviderAccountIdentity(providerAuth(identity).cookies.accessToken));
   },
 
   async linkCurrentAccount(identity) {

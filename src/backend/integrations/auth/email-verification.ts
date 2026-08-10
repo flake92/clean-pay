@@ -19,6 +19,7 @@ import {
 import { linkCurrentUserToRemnashopAuth } from "@/backend/integrations/remnashop/session";
 import { refreshCurrentAccessCookie } from "@/backend/integrations/sessions/web-session-service";
 import { withPaymentOwnerChangeFence } from "@/backend/integrations/payments/payment-user-merge-service";
+import { synchronizeProviderAccountIdentity } from "@/backend/integrations/auth/provider-account-identity-sync";
 import { assertCooldown, assertRateLimit } from "@/backend/limits/rate-limit";
 import { auditLog } from "@/backend/observability/audit";
 import { logger } from "@/backend/observability/logger";
@@ -206,6 +207,9 @@ export const productionEmailVerificationCommands: EmailVerificationCommands = {
           sourceUserId: input.sourceAccountId,
           targetUserId: input.targetAccountId,
           reason: input.reason,
+          emailResolution: "KEEP_TARGET",
+          telegramResolution: "KEEP_SOURCE",
+          paymentResolution: "REKEY_SOURCE",
         });
       } catch (error) {
         if (error instanceof ServiceError && error.code === "CONFLICT"
@@ -223,6 +227,7 @@ export const productionEmailVerificationCommands: EmailVerificationCommands = {
 
   async linkCurrentAccount(session, input) {
     const provider = providerContext(session);
+    await adapt(() => synchronizeProviderAccountIdentity(provider.accessToken));
     await adapt(async () => {
       await linkCurrentUserToRemnashopAuth({
         accessToken: provider.accessToken,

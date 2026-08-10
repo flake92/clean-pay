@@ -24,10 +24,6 @@ async function stageAccountMerge(
   const source = await gateway.loadProviderMergeIdentity(identity.providerSession!);
   if (source.telegramId !== identity.telegramId) throw new TelegramCallbackError("ACCOUNT_MERGE_REQUIRED");
   if (source.accountId === target.upstreamAccountId) return { required: false as const };
-  if (target.telegramId && target.telegramId !== identity.telegramId) {
-    throw new TelegramCallbackError("ACCOUNT_MERGE_REQUIRED");
-  }
-  if (normalizedEmail(source.pendingEmail)) throw new TelegramCallbackError("ACCOUNT_MERGE_REQUIRED");
   const preflight = await gateway.preflightAccountMerge({
     sourceAccountId: source.accountId,
     targetAccountId: target.upstreamAccountId,
@@ -46,7 +42,7 @@ async function stageAccountMerge(
     || preflight.target.accountId !== target.upstreamAccountId
     || normalizedEmail(preflight.target.email) !== normalizedEmail(target.email)
     || !preflight.target.emailVerified
-    || (preflight.target.telegramId !== null && preflight.target.telegramId !== identity.telegramId)
+    || preflight.target.telegramId !== target.telegramId
     || !preflight.requiresRelogin) {
     throw new TelegramCallbackError("ACCOUNT_MERGE_REQUIRED");
   }
@@ -56,6 +52,7 @@ async function stageAccountMerge(
     telegramUsername: identity.telegramUsername,
     sourceEmail: normalizedEmail(source.email),
     targetEmail: normalizedEmail(target.email)!,
+    targetTelegramId: target.telegramId,
     sourceAccountId: source.accountId,
     targetAccountId: target.upstreamAccountId,
   });
