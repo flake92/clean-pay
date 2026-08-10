@@ -227,13 +227,14 @@ function telegramOidcUrl(
 
 function validateEnv(env: AppEnv) {
   const isProduction = process.env.NODE_ENV === "production";
+  const isBuildPhase = process.env.CLEAN_PAY_BUILD_PHASE === "true";
 
   if (env.turnstile.enabled) {
     if (!env.turnstile.siteKey) {
       throw new Error("TURNSTILE_SITE_KEY is required when TURNSTILE_ENABLED=true");
     }
 
-    if (!env.turnstile.secretKey) {
+    if (!env.turnstile.secretKey && !isBuildPhase) {
       throw new Error("TURNSTILE_SECRET_KEY is required when TURNSTILE_ENABLED=true");
     }
   }
@@ -272,7 +273,7 @@ function validateEnv(env: AppEnv) {
     }
   }
 
-  if (isProduction && process.env.CLEAN_PAY_BUILD_PHASE !== "true") {
+  if (isProduction && !isBuildPhase) {
     validateProductionEnvironment(process.env);
   }
 }

@@ -155,6 +155,23 @@ describe("backend env", () => {
     expect(getEnv().appUrl).toBe("http://localhost:4000");
   });
 
+  it("keeps the public Turnstile widget enabled during builds without exposing its runtime secret", () => {
+    stubValidProductionEnv();
+    vi.stubEnv("CLEAN_PAY_BUILD_PHASE", "true");
+    vi.stubEnv("TURNSTILE_SECRET_KEY", "");
+
+    expect(getEnv().turnstile).toMatchObject({
+      enabled: true,
+      siteKey: "0x4AAAAARuntimeSiteKey8Wp4Jz7Lc2",
+      secretKey: null,
+    });
+
+    vi.stubEnv("CLEAN_PAY_BUILD_PHASE", "");
+    expect(() => getEnv()).toThrow(
+      "TURNSTILE_SECRET_KEY is required when TURNSTILE_ENABLED=true",
+    );
+  });
+
   it("fails fast for invalid URLs and inconsistent Telegram settings", () => {
     vi.stubEnv("APP_URL", "ftp://clean-pay.local");
     expect(() => getEnv()).toThrow("APP_URL must be a valid http(s) URL");
