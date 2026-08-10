@@ -34,11 +34,32 @@ describe("Telegram popup HTTP contract", () => {
       code: "VALIDATION_ERROR",
       status: 400,
     });
+    await expect(readTelegramPopupRequest(request("null"))).rejects.toMatchObject({
+      code: "VALIDATION_ERROR",
+      status: 400,
+    });
+    await expect(readTelegramPopupRequest(request("[]"))).rejects.toMatchObject({
+      code: "VALIDATION_ERROR",
+      status: 400,
+    });
   });
 
   it("enforces the endpoint-specific payload limit", async () => {
     await expect(
       readTelegramPopupRequest(request("{}", { "content-length": String(65 * 1024) })),
     ).rejects.toMatchObject({ code: "VALIDATION_ERROR", status: 413 });
+
+    await expect(
+      readTelegramPopupRequest(request("x".repeat(65 * 1024))),
+    ).rejects.toMatchObject({ code: "VALIDATION_ERROR", status: 413 });
+  });
+
+  it("rejects a request without a body", async () => {
+    const empty = new Request("http://clean-pay.local/auth/telegram/callback", { method: "POST" });
+
+    await expect(readTelegramPopupRequest(empty)).rejects.toMatchObject({
+      code: "VALIDATION_ERROR",
+      status: 400,
+    });
   });
 });

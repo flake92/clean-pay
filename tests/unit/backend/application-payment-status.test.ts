@@ -38,6 +38,42 @@ describe("payment status application workflow", () => {
     expect(subject.loadActor).not.toHaveBeenCalled();
   });
 
+  it("validates operation identifiers and account access before provider work", async () => {
+    const invalid = reader();
+    await expect(loadPaymentStatus(invalid, reconciliation(), { paymentId: null, operationId: "invalid value!" })).resolves.toMatchObject({ status: "error" });
+    expect(invalid.loadActor).not.toHaveBeenCalled();
+    const absent = reader({ loadActor: vi.fn(async () => null) });
+    await expect(loadPaymentStatus(absent, reconciliation(), { paymentId: null, operationId: null })).resolves.toMatchObject({ status: "error" });
+    const inaccessible = reader({ loadActor: vi.fn(async () => ({ id: "user-1", emailVerified: false, telegramId: null })) });
+    await expect(loadPaymentStatus(inaccessible, reconciliation(), { paymentId: null, operationId: null })).resolves.toMatchObject({ status: "error" });
+    expect(inaccessible.authorize).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [{ status: "FAILED_FINAL", manualRequired: false }, "failed"],
+    [{ status: "READY", manualRequired: false }, "retry_ready"],
+    [{ status: "OUTCOME_UNKNOWN", manualRequired: false }, "outcome_unknown"],
+    [{ status: "DISPATCHING", manualRequired: false }, "processing"],
+    [{ status: "READY", manualRequired: true }, "manual_required"],
+  ])("maps terminal/local operation state %# to %s", async (change, status) => {
+    const operation = { id: "op-1", paymentId: null, paymentStatus: null, payment: null, ...change } as never;
+    const subject = reader({ findOperation: vi.fn(async () => operation) });
+    const result = await loadPaymentStatus(subject, reconciliation(), { paymentId: null, operationId: "op-1" });
+    expect(result).toMatchObject({ status: "ready", data: { operation: { status } } });
+    if (status === "failed" || status === "manual_required") expect(subject.authorize).not.toHaveBeenCalled();
+  });
+
+  it("rejects a payment id that conflicts with the selected operation", async () => {
+    const subject = reader({
+      findOperation: vi.fn(async () => ({ id: "op-1", status: "DISPATCHING", manualRequired: false,
+        paymentId: "11111111-1111-4111-8111-111111111111", paymentStatus: null, payment: null })),
+    });
+    await expect(loadPaymentStatus(subject, reconciliation(), {
+      paymentId: "22222222-2222-4222-8222-222222222222", operationId: "op-1",
+    })).resolves.toMatchObject({ status: "error" });
+    expect(subject.authorize).not.toHaveBeenCalled();
+  });
+
   it("returns a terminal local operation without touching the provider", async () => {
     const payment = { payment_id: "p", purchase_type: "NEW", status: "SUCCEEDED", final_amount: "100", currency: "RUB", gateway_type: "CARD", plan_name: null, created_at: "2026-01-01" };
     const subject = reader({
@@ -92,5 +128,33 @@ describe("payment status application workflow", () => {
     await expect(loadPaymentStatus(subject, reconciliation(), { paymentId: null, operationId: "op-1" })).resolves.toMatchObject({
       status: "ready", data: { operation: { status: "succeeded" } },
     });
+  });
+
+  it("swallows an explicit missing-subscription response but not other provider failures", async () => {
+    const missing = new Error("subscription missing");
+    const subject = reader({
+      loadSubscription: vi.fn(async () => { throw missing; }), isSubscriptionMissing: vi.fn((error) => error === missing),
+      findLatestPayment: vi.fn(async () => ({ payment_id: "local" } as never)),
+    });
+    await expect(loadPaymentStatus(subject, reconciliation(), { paymentId: null, operationId: null })).resolves.toMatchObject({
+      status: "ready", data: { subscription: null, payment: { payment_id: "local" } },
+    });
+    const failure = new Error("provider failed");
+    const broken = reader({ loadSubscription: vi.fn(async () => { throw failure; }), isSubscriptionMissing: vi.fn(() => false) });
+    await expect(loadPaymentStatus(broken, reconciliation(), { paymentId: null, operationId: null })).resolves.toMatchObject({ status: "error" });
+  });
+
+  it("reloads a nonterminal operation after reconciliation and uses its assigned payment", async () => {
+    const before = { id: "op-1", status: "OUTCOME_UNKNOWN", manualRequired: false, paymentId: null, paymentStatus: null, payment: null } as never;
+    const after = { id: "op-1", status: "SUCCEEDED", manualRequired: false,
+      paymentId: "11111111-1111-4111-8111-111111111111", paymentStatus: "COMPLETED", payment: { payment_id: "assigned" } } as never;
+    const subject = reader({
+      findOperation: vi.fn().mockResolvedValueOnce(before).mockResolvedValueOnce(after),
+      findPayment: vi.fn(async () => ({ payment_id: "persisted" } as never)),
+    });
+    await expect(loadPaymentStatus(subject, reconciliation(), { paymentId: null, operationId: "op-1" })).resolves.toMatchObject({
+      status: "ready", data: { operation: { status: "succeeded" }, payment: { payment_id: "persisted" } },
+    });
+    expect(subject.findPayment).toHaveBeenCalledWith("user-1", "11111111-1111-4111-8111-111111111111");
   });
 });

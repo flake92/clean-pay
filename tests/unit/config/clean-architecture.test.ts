@@ -260,6 +260,7 @@ describe("clean architecture boundaries", () => {
     const proxy = readFileSync("src/proxy.ts", "utf8");
     expect(proxy).toContain("removedBrowserTransportPaths");
     expect(proxy).toContain("'/api/bff/payments/status'");
+    expect(proxy).toContain("isRoutineReadinessProbe ? logger.debug : logger.info");
   });
 
   it("does not retain compatibility facades around infrastructure adapters", () => {

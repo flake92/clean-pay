@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   aggregateReadinessStatus,
@@ -32,6 +32,10 @@ describe("health checks", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.restoreAllMocks();
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
   });
 
   it("aggregates degraded and ok statuses", () => {
@@ -154,6 +158,38 @@ describe("health checks", () => {
     });
   });
 
+  it("reports a missing Remnashop service key before probing auth contracts", async () => {
+    vi.stubEnv("REMNASHOP_AUTH_SERVICE_KEY", "");
+    const fetch = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(new Response("{}", { status: 200 }));
+
+    await expect(measuredCheck("Remnashop", createProductionReadinessGateway().checkRemnashop)).resolves.toMatchObject({
+      status: "down",
+      message: "REMNASHOP_AUTH_SERVICE_KEY is not configured",
+    });
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects unavailable and empty Telegram OIDC key sets", async () => {
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response("{}", { status: 503 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ keys: [] }), { status: 200 }))
+      .mockResolvedValueOnce(new Response("{}", { status: 200 }));
+    const gateway = createProductionReadinessGateway();
+
+    await expect(measuredCheck("Telegram OIDC", gateway.checkTelegramOidc)).resolves.toMatchObject({
+      status: "down",
+      message: "Telegram OIDC returned 503",
+    });
+    await expect(measuredCheck("Telegram OIDC", gateway.checkTelegramOidc)).resolves.toMatchObject({
+      status: "down",
+      message: "Telegram OIDC JWKS did not include keys",
+    });
+    await expect(measuredCheck("Telegram OIDC", gateway.checkTelegramOidc)).resolves.toMatchObject({
+      status: "down",
+      message: "Telegram OIDC JWKS did not include keys",
+    });
+  });
+
   it("checks optional Mailpit, Telegram OIDC and Remnawave readiness dependencies", async () => {
     vi.stubEnv("CLEAN_PAY_READINESS_MAILPIT_URL", "http://mailpit.test:8025");
     vi.stubEnv("CLEAN_PAY_READINESS_REMNAWAVE_URL", "http://remnawave.test:3000");
@@ -227,5 +263,32 @@ describe("health checks", () => {
     const gateway = createProductionReadinessGateway();
     await expect(measuredCheck("Mailpit", gateway.checkMailpit)).resolves.toBeNull();
     await expect(measuredCheck("Remnawave", gateway.checkRemnawave)).resolves.toBeNull();
+  });
+
+  it("reports optional dependency failures and persists shared readiness state", async () => {
+    vi.stubEnv("CLEAN_PAY_READINESS_MAILPIT_URL", "http://mailpit.test:8025");
+    vi.stubEnv("CLEAN_PAY_READINESS_REMNAWAVE_URL", "http://remnawave.test:3000");
+    vi.stubEnv("REMNAWAVE_API_BASE_URL", "http://remnawave.test:3000");
+    vi.stubEnv("REMNAWAVE_TOKEN", "ready-token");
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response("{}", { status: 502 }))
+      .mockResolvedValueOnce(new Response("{}", { status: 503 }));
+    mocks.redisCommand
+      .mockResolvedValueOnce('{"status":"ok"}')
+      .mockResolvedValueOnce("OK");
+    const gateway = createProductionReadinessGateway();
+
+    await expect(measuredCheck("Mailpit", gateway.checkMailpit)).resolves.toMatchObject({
+      status: "down",
+      message: "Mailpit returned 502",
+    });
+    await expect(measuredCheck("Remnawave", gateway.checkRemnawave)).resolves.toMatchObject({
+      status: "down",
+      message: "Remnawave returned 503",
+    });
+    await expect(gateway.readSharedState()).resolves.toBe('{"status":"ok"}');
+    await expect(gateway.writeSharedState('{"status":"ok"}', 15)).resolves.toBeUndefined();
+    expect(mocks.redisCommand).toHaveBeenNthCalledWith(1, ["GET", "clean-pay:health:readiness:v1"]);
+    expect(mocks.redisCommand).toHaveBeenNthCalledWith(2, ["SET", "clean-pay:health:readiness:v1", '{"status":"ok"}', "EX", 15]);
   });
 });
