@@ -91,6 +91,7 @@ while (true) {
   } catch (error) {
     deployLog("error", "reconciliation_batch_failed", "Payment reconciliation batch failed; it will be retried on the next interval.", {
       error: error instanceof Error ? error.name : "UnknownError",
+      reason: error instanceof Error ? error.message.slice(0, 240) : "unknown_failure",
     });
   }
 
