@@ -17,7 +17,9 @@ export function useCleanPayMenu(navigation: NavigationViewModel) {
     const canRenewSubscription = navigation.canRenewSubscription;
     const hasSubscription = navigation.hasSubscription;
     const accountItems: AppMenuItem[] = [
-        { label: "Профиль", icon: "pi pi-fw pi-user", to: "/profile" },
+        ...(navigation.authenticated
+            ? [{ label: "Профиль", icon: "pi pi-fw pi-user", to: "/profile" }]
+            : []),
         ...(shouldShowVerifyEmail
             ? [{ label: "Подтвердить e-mail", icon: "pi pi-fw pi-envelope", to: "/verify-email" }]
             : []),
@@ -27,7 +29,9 @@ export function useCleanPayMenu(navigation: NavigationViewModel) {
     ];
 
     const cleanPayItems: AppMenuItem[] = [
-        { label: "Кабинет", icon: "pi pi-fw pi-home", to: "/cabinet" },
+        ...(navigation.authenticated
+            ? [{ label: "Кабинет", icon: "pi pi-fw pi-home", to: "/cabinet" }]
+            : []),
         {
             label: hasSubscription ? "Изменить тариф" : "Тарифы",
             icon: "pi pi-fw pi-tags",
@@ -37,28 +41,30 @@ export function useCleanPayMenu(navigation: NavigationViewModel) {
             ? [{ label: "Продление", icon: "pi pi-fw pi-refresh", to: "/extend" }]
             : []),
     ];
+    const sessionItem: AppMenuItem = navigation.authenticated
+        ? {
+            label: "Выйти",
+            icon: "pi pi-fw pi-sign-out",
+            command: ({ originalEvent }) => {
+                originalEvent.preventDefault();
+                void logout();
+            },
+        }
+        : { label: "Войти", icon: "pi pi-fw pi-sign-in", to: "/login" };
 
     const model: AppMenuItem[] = [
         {
             label: branding.name,
             items: cleanPayItems,
         },
-        {
-            label: "Аккаунт",
-            items: accountItems,
-        },
+        ...(accountItems.length > 0
+            ? [{ label: "Аккаунт", items: accountItems }]
+            : []),
         {
             label: "Помощь",
             items: [
                 { label: "Поддержка", icon: "pi pi-fw pi-question-circle", to: "/support" },
-                {
-                    label: "Выйти",
-                    icon: "pi pi-fw pi-sign-out",
-                    command: ({ originalEvent }) => {
-                        originalEvent.preventDefault();
-                        void logout();
-                    },
-                },
+                sessionItem,
             ],
         },
     ];

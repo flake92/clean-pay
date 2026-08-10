@@ -72,6 +72,7 @@ describe("Remnashop service errors", () => {
     [401, "bad credentials", "/auth/login", "AUTH_FAILED", 401],
     [401, "bad credentials", "/auth/email/complete", "AUTH_FAILED", 401],
     [401, "Current password is invalid", "/auth/change-password", "CURRENT_PASSWORD_INVALID", 401],
+    [409, "New password must be different from current password", "/auth/change-password", "PASSWORD_UNCHANGED", 409],
     [401, "missing", "/subscription/current", "UNAUTHORIZED", 401],
     [403, "blocked", "/auth/me", "FORBIDDEN", 403],
     [404, "missing", "/subscription/current", "SUBSCRIPTION_NOT_FOUND", 404],
