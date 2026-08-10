@@ -47,7 +47,10 @@ async function adapt<T>(work: () => Promise<T>): Promise<T> {
     return await work();
   } catch (error) {
     if (error instanceof EmailVerificationError) throw error;
-    throw new EmailVerificationError(error instanceof ServiceError ? error.code : "INTERNAL_ERROR");
+    throw new EmailVerificationError(
+      error instanceof ServiceError ? error.code : "INTERNAL_ERROR",
+      error instanceof ServiceError ? error.debug?.retryAfterSeconds : undefined,
+    );
   }
 }
 
@@ -263,15 +266,28 @@ export const productionEmailVerificationCommands: EmailVerificationCommands = {
 
   async assertChangeLimits(input) {
     await adapt(async () => {
-      await assertCooldown({ key: `email-change:${input.userId}`, action: "email_change_request", windowSeconds: 60 });
       await assertRateLimit({
-        action: "email_change_request",
-        email: input.email,
-        tgId: input.telegramId,
+        action: "email_change_attempt",
+        sessionId: input.userId,
         limit: 5,
         windowSeconds: 15 * 60,
       });
     });
+  },
+
+  async emailOwnerId(email) {
+    return adapt(async () => (await prisma.webUser.findUnique({
+      where: { email },
+      select: { id: true },
+    }))?.id ?? null);
+  },
+
+  async assertChangeCooldown(userId) {
+    await adapt(() => assertCooldown({
+      key: `email-change:${userId}`,
+      action: "email_change_cooldown",
+      windowSeconds: 60,
+    }));
   },
 
   async changeProviderEmail(actor, email) {
