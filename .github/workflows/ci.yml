@@ -159,8 +159,8 @@ jobs:
           docker build
           --target runner
           --build-arg NEXT_PUBLIC_APP_URL=https://app.example.com
-          --build-arg TURNSTILE_ENABLED=false
-          --build-arg TURNSTILE_WIDGET_ID=
+          --build-arg TURNSTILE_ENABLED=true
+          --build-arg TURNSTILE_WIDGET_ID=0x4AAAAACIBuildSiteKeyOnlyNotASecret
           --tag clean-pay:ci
           .
       - name: Generate image SBOM
