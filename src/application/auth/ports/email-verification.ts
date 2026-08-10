@@ -20,7 +20,7 @@ export type EmailVerificationActor = {
 };
 
 export type EmailProviderSession = { context: unknown };
-export type EmailVerificationHumanAction = "email_verification" | "email_change";
+type EmailVerificationHumanAction = "email_verification" | "email_change";
 
 export interface EmailVerificationCommands {
   verifyHuman(token: string | null, action: EmailVerificationHumanAction): Promise<void>;

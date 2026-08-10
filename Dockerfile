@@ -13,42 +13,21 @@ RUN npm ci
 
 FROM dependencies AS builder
 
-ENV DATABASE_URL=postgresql://a:a@localhost:5432/a
-ENV APP_URL=http://localhost:4000
-ENV REMNASHOP_API_BASE_URL=http://remnashop:5000/api/v1/public
-ENV REMNASHOP_ADMIN_API_BASE_URL=http://remnashop:5000/api/v1/admin
-ENV REMNASHOP_AUTH_SERVICE_KEY=build-time-placeholder-remnashop-auth-service-key
-ENV REMNAWAVE_API_BASE_URL=http://remnawave:3000
-ENV REMNAWAVE_TOKEN=build-placeholder
-ENV REDIS_URL=redis://localhost:6379
-ENV WEB_JWT_SECRET=build-placeholder
-ENV WEB_REFRESH_SECRET=build-placeholder
-ENV AUDIT_IP_HASH_SECRET=build-placeholder
-ENV RATE_LIMIT_IDENTITY_SECRET=build-placeholder
-ENV AUTH_RATE_LIMIT_CAPACITY=1000
-ENV AUTH_CONCURRENCY_LIMIT=64
-ENV READINESS_INTERNAL_SECRET=build-placeholder
-ENV COOKIE_SECURE=false
-ENV COOKIE_SAMESITE=lax
-ENV TELEGRAM_OIDC_CLIENT_ID=1
-ENV TELEGRAM_OIDC_CLIENT_SECRET=build-placeholder
 ARG NEXT_PUBLIC_APP_URL
-ENV NEXT_PUBLIC_APP_URL=${NEXT_PUBLIC_APP_URL}
 ARG TURNSTILE_ENABLED=true
-ARG TURNSTILE_SITE_KEY=build-time-placeholder-site-key
+ARG TURNSTILE_WIDGET_ID=build-time-placeholder-site-key
 ARG NEXT_PUBLIC_BRAND_NAME="Clean Pay"
 ARG NEXT_PUBLIC_BRAND_LOGO_URL=/clean-pay-logo.png
-ENV TURNSTILE_ENABLED=${TURNSTILE_ENABLED}
-ENV TURNSTILE_SITE_KEY=${TURNSTILE_SITE_KEY}
-ENV TURNSTILE_SECRET_KEY=build-placeholder
-ENV NEXT_PUBLIC_BRAND_NAME=${NEXT_PUBLIC_BRAND_NAME}
-ENV NEXT_PUBLIC_BRAND_LOGO_URL=${NEXT_PUBLIC_BRAND_LOGO_URL}
-ENV TURNSTILE_VERIFY_URL=https://challenges.cloudflare.com/turnstile/v0/siteverify
-ENV SUPPORT_ENABLED=false
 
 COPY . .
-RUN npm run prisma:generate
-RUN npm run build
+RUN DATABASE_URL="postgresql://clean_pay:clean_pay@localhost:5432/clean_pay?schema=public" \
+    npm run prisma:generate
+RUN NEXT_PUBLIC_APP_URL="${NEXT_PUBLIC_APP_URL}" \
+    NEXT_PUBLIC_BRAND_NAME="${NEXT_PUBLIC_BRAND_NAME}" \
+    NEXT_PUBLIC_BRAND_LOGO_URL="${NEXT_PUBLIC_BRAND_LOGO_URL}" \
+    TURNSTILE_ENABLED="${TURNSTILE_ENABLED}" \
+    TURNSTILE_SITE_KEY="${TURNSTILE_WIDGET_ID}" \
+    npm run build
 
 FROM node:24.18.0-bookworm-slim AS migration
 

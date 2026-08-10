@@ -663,6 +663,8 @@ describe("payment operation idempotency", () => {
   });
 
   it("classifies post-dispatch failures consistently with client key retention", () => {
+    expect(paymentOperationDispatchFailureOutcome(new Error("network failed")))
+      .toBe("UNKNOWN");
     expect(
       paymentOperationDispatchFailureOutcome(
         new ServiceError("CONFLICT", 409, "local persistence collision"),

@@ -48,6 +48,7 @@ const validEnv: Record<string, string> = {
   WEB_JWT_SECRET: secrets.webJwt,
   WEB_REFRESH_SECRET: secrets.webRefresh,
   AUDIT_IP_HASH_SECRET: secrets.audit,
+  TRUSTED_PROXY_HOPS: "1",
   RATE_LIMIT_IDENTITY_SECRET: secrets.rateLimit,
   AUTH_RATE_LIMIT_CAPACITY: "1000",
   AUTH_CONCURRENCY_LIMIT: "64",
@@ -160,7 +161,7 @@ describe("production env validator", () => {
       "deploy/prod/prepare-remnashop-rollout.sh",
       "start.sh",
       "src/backend/config/env.ts",
-      "deploy/prod/Dockerfile",
+      "Dockerfile",
     ]
       .map((file) => readFileSync(file, "utf8"))
       .join("\n");
@@ -227,23 +228,19 @@ describe("production env validator", () => {
   });
 
   it("keeps build placeholders build-only and passes the public origin as a non-secret build arg", () => {
-    const dockerfile = readFileSync("deploy/prod/Dockerfile", "utf8");
-    const rootDockerfile = readFileSync("Dockerfile", "utf8");
+    const dockerfile = readFileSync("Dockerfile", "utf8");
     const compose = readFileSync("deploy/prod/docker-compose.yml", "utf8");
     const buildCommand = readFileSync("scripts/next-command.mjs", "utf8");
     const packageJson = readFileSync("package.json", "utf8");
     const prodCommand = readFileSync("deploy/prod/prod.mjs", "utf8");
 
-    expect(dockerfile).toContain("ENV REMNAWAVE_TOKEN=build-time-placeholder");
-    expect(dockerfile).toContain("ENV TURNSTILE_SECRET_KEY=build-time-placeholder");
+    expect(dockerfile).not.toContain("ENV REMNAWAVE_TOKEN=");
+    expect(dockerfile).not.toContain("ENV TURNSTILE_SECRET_KEY=");
+    expect(buildCommand).toContain('REMNAWAVE_TOKEN: "build-only-remnawave-token"');
+    expect(buildCommand).toContain('TURNSTILE_ENABLED: "false"');
     expect(dockerfile).toContain("ARG NEXT_PUBLIC_APP_URL");
-    expect(rootDockerfile).toContain("ARG NEXT_PUBLIC_APP_URL");
     expect(dockerfile).not.toContain("ARG NEXT_PUBLIC_APP_URL=");
-    expect(rootDockerfile).not.toContain("ARG NEXT_PUBLIC_APP_URL=");
     expect(dockerfile).toContain(
-      "ENV CLEAN_PAY_BAKED_PUBLIC_APP_URL=${NEXT_PUBLIC_APP_URL}",
-    );
-    expect(rootDockerfile).toContain(
       "ENV CLEAN_PAY_BAKED_PUBLIC_APP_URL=${NEXT_PUBLIC_APP_URL}",
     );
     expect(compose).toContain(

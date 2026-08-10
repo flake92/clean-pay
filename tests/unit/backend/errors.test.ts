@@ -122,4 +122,25 @@ describe("Remnashop service errors", () => {
     expect(invalidJson.code).toBe("UPSTREAM_ERROR");
     expect(invalidJson.debug?.upstreamDetail).toBe("<html>");
   });
+
+  it.each([
+    [{ message: "object message" }, "object message"],
+    [{ error: "object error" }, "object error"],
+    [{ detail: "nested detail" }, "nested detail"],
+    [["first", { msg: "second" }, null], "first; second"],
+    [[null, { value: "ignored" }], "Validation error"],
+    [42, "Request failed"],
+  ])("extracts safe messages from heterogeneous upstream detail %#", (detail, message) => {
+    const error = normalizeRemnashopError(418, detail);
+
+    expect(error.code).toBe("UPSTREAM_ERROR");
+    expect(error.debug?.message).toBe(message);
+  });
+
+  it("covers generic conflict and non-Error transport failures", () => {
+    expect(normalizeRemnashopError(409, "duplicate", { path: "/other" }).code)
+      .toBe("CONFLICT");
+    expect(remnashopUnavailableError("/plans", "socket closed").debug?.message)
+      .toBe("socket closed");
+  });
 });

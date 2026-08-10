@@ -74,11 +74,15 @@ import {
   revealRemnashopToken,
   remnashopAuth,
   remnashopAuthTelegramIdentity,
+  remnashopChangePassword,
   remnashopAdminRequestResult,
   remnashopLinkTelegram,
   remnashopIdentifyEmail,
   remnashopMergeUsers,
+  remnashopRefreshTokens,
   remnashopRequest,
+  remnashopRequestPasswordReset,
+  remnashopRequestResult,
   recoverRemnashopTelegramSession,
 } from "@/backend/integrations/remnashop/client";
 import { ServiceError } from "@/backend/errors/service-error";
@@ -333,6 +337,103 @@ describe("remnashop client", () => {
           "content-type": "application/json",
         }),
       }),
+    );
+  });
+
+  it("supports password reset, token refresh and password change endpoints", async () => {
+    const authBody = {
+      expires_at: "2026-08-10T12:00:00.000Z",
+      refresh_expires_at: "2026-09-10T12:00:00.000Z",
+    };
+    const fetchMock = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(response({ body: { success: true } }))
+      .mockResolvedValueOnce(response({
+        body: authBody,
+        setCookie: ["access_token=new-access; Path=/", "refresh_token=new-refresh; Path=/"],
+      }))
+      .mockResolvedValueOnce(response({
+        body: { success: true },
+        setCookie: ["access_token=changed-access; Path=/", "refresh_token=changed-refresh; Path=/"],
+      }));
+
+    await expect(remnashopRequestPasswordReset({ email: "user@example.com" }))
+      .resolves.toEqual({ success: true });
+    await expect(remnashopRefreshTokens("old-refresh")).resolves.toMatchObject({
+      data: authBody,
+      cookies: { accessToken: "new-access", refreshToken: "new-refresh" },
+    });
+    await expect(remnashopChangePassword("new-access", {
+      current_password: "old-password",
+      new_password: "new-password",
+    })).resolves.toMatchObject({
+      cookies: { accessToken: "changed-access", refreshToken: "changed-refresh" },
+    });
+
+    expect(fetchMock.mock.calls[1]?.[1]?.headers).toMatchObject({
+      cookie: "refresh_token=old-refresh",
+    });
+    expect(fetchMock.mock.calls[2]?.[1]?.headers).toMatchObject({
+      cookie: "access_token=new-access",
+      "content-type": "application/json",
+    });
+  });
+
+  it("returns null for explicitly allowed public and admin 404 responses", async () => {
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response("missing", { status: 404 }))
+      .mockResolvedValueOnce(new Response("missing", { status: 404 }));
+
+    await expect(remnashopRequestResult("/missing", { allowNotFound: true }))
+      .resolves.toEqual({ status: 404, data: null });
+    await expect(remnashopAdminRequestResult("/missing", { allowNotFound: true }))
+      .resolves.toEqual({ status: 404, data: null });
+  });
+
+  it("extracts cookies through the single set-cookie fallback and rejects incomplete auth cookies", async () => {
+    const fallback = new Response(JSON.stringify({ expires_at: "now", refresh_expires_at: "later" }), {
+      headers: {
+        "content-type": "application/json",
+        "set-cookie": "access_token=access-only; Path=/",
+      },
+    });
+    Object.defineProperty(fallback.headers, "getSetCookie", { value: undefined });
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(fallback);
+
+    await expect(remnashopAuth("/auth/login", {
+      email: "user@example.com",
+      password: "password",
+    })).rejects.toMatchObject({ code: "UPSTREAM_ERROR", status: 502 });
+  });
+
+  it("fails before dispatch when required Remnashop credentials are absent", async () => {
+    vi.stubEnv("TELEGRAM_BOT_TOKEN", "");
+    await expect(remnashopAuthTelegramIdentity({ telegramId: "42" }))
+      .rejects.toMatchObject({ code: "INTERNAL_ERROR" });
+    await expect(remnashopLinkTelegram({ accessToken: "access", telegramId: "42" }))
+      .rejects.toMatchObject({ code: "INTERNAL_ERROR" });
+
+    vi.stubEnv("REMNASHOP_API_KEY", "");
+    await expect(remnashopMergeUsers({
+      sourceUserId: "1",
+      targetUserId: "2",
+      reason: "missing key",
+    })).rejects.toMatchObject({ code: "INTERNAL_ERROR" });
+    await expect(remnashopAdminRequestResult("/users"))
+      .rejects.toMatchObject({ code: "INTERNAL_ERROR" });
+  });
+
+  it("normalizes failed admin transport calls without leaking the query", async () => {
+    vi.spyOn(globalThis, "fetch").mockRejectedValueOnce(new Error("admin network down"));
+
+    await expect(remnashopAdminRequestResult("/users?email=secret@example.com"))
+      .rejects.toMatchObject({
+        code: "UPSTREAM_UNAVAILABLE",
+        debug: { upstreamPath: "/users" },
+      });
+    expect(loggerMock.error).toHaveBeenCalledWith(
+      "remnashop_admin_request_failed",
+      expect.objectContaining({ path: "/users" }),
+      expect.objectContaining({ category: "upstream" }),
     );
   });
 
@@ -628,6 +729,9 @@ describe("remnashop client", () => {
 
     expect(getRemnashopUserIdFromAccessToken(token)).toBe("42");
     expect(getJwtExpiresAt(token)?.toISOString()).toBe("2026-05-28T20:26:40.000Z");
+    expect(getJwtExpiresAt(jwt({ sub: 42 }))).toBeNull();
+    expect(() => getRemnashopUserIdFromAccessToken("invalid-token"))
+      .toThrow("Invalid JWT payload");
     expect(() => getRemnashopUserIdFromAccessToken(jwt({}))).toThrow("does not contain sub");
   });
 

@@ -17,6 +17,8 @@ x-clean-pay-env: &clean-pay-env
   AUDIT_IP_HASH_SECRET: dev-audit-ip-hash-secret-change-me
   RATE_LIMIT_IDENTITY_SECRET: dev-rate-limit-identity-secret-change-me
   READINESS_INTERNAL_SECRET: dev-readiness-internal-secret-change-me
+  # This topology does not run the production reconciliation worker.
+  PAYMENT_RECONCILIATION_ENABLED: "false"
   COOKIE_SECURE: "false"
   COOKIE_SAMESITE: lax
 

@@ -9,6 +9,11 @@ import { authDebugLog } from "@/backend/observability/auth-debug-log";
 import { randomToken, sha256 } from "@/backend/security/crypto";
 import { getEnv } from "@/backend/config/env";
 import { logger } from "@/backend/observability/logger";
+import { recordUpstreamRequest } from "@/backend/observability/metrics";
+import {
+  currentRequestTrace,
+  tracedHeaders,
+} from "@/backend/observability/request-trace";
 import { prisma } from "@/backend/database/prisma";
 import { claimTelegramAuthState as claimTelegramAuthStateRecord } from "@/backend/auth/one-time-state";
 import { remnashopAuth } from "@/backend/integrations/remnashop/client";
@@ -193,16 +198,37 @@ async function exchangeCodeForIdToken(code: string, codeVerifier: string) {
     message: "HTTP Request: POST Telegram OIDC token",
   });
 
-  const response = await fetch(env.telegramOidc.tokenEndpoint, {
-    method: "POST",
-    headers: {
-      "content-type": "application/x-www-form-urlencoded",
-      authorization: `Basic ${basicAuth}`,
-    },
-    body,
-    cache: "no-store",
-    signal: AbortSignal.timeout(10_000),
-  });
+  const trace = await currentRequestTrace();
+  let response: Response;
+  try {
+    response = await fetch(env.telegramOidc.tokenEndpoint, {
+      method: "POST",
+      headers: tracedHeaders({
+        "content-type": "application/x-www-form-urlencoded",
+        authorization: `Basic ${basicAuth}`,
+      }, trace),
+      body,
+      cache: "no-store",
+      signal: AbortSignal.timeout(10_000),
+    });
+  } catch (error) {
+    recordUpstreamRequest({
+      service: "telegram_oidc",
+      operation: "/token",
+      outcome: "unavailable",
+      durationMs: Date.now() - startedAt,
+    });
+    logger.error("telegram_token_request_failed", {
+      method: "POST",
+      durationMs: Date.now() - startedAt,
+      errorName: error instanceof Error ? error.name : "UnknownError",
+    }, {
+      category: "upstream",
+      source: "telegram.oidc",
+      message: "HTTP Request failed: POST Telegram OIDC token",
+    });
+    throw new Error("Telegram token exchange unavailable", { cause: error });
+  }
   const responseText = await response.clone().text().catch(() => "");
 
   logger.info("telegram_token_response_received", {
@@ -217,6 +243,12 @@ async function exchangeCodeForIdToken(code: string, codeVerifier: string) {
   });
 
   if (!response.ok) {
+    recordUpstreamRequest({
+      service: "telegram_oidc",
+      operation: "/token",
+      outcome: "rejected",
+      durationMs: Date.now() - startedAt,
+    });
     const errorBody = responseText || null;
 
     logTechnicalWarning("telegram_token_exchange_failed", {
@@ -228,9 +260,26 @@ async function exchangeCodeForIdToken(code: string, codeVerifier: string) {
     throw new Error("Telegram token exchange failed");
   }
 
-  const tokenSet = (await response.json()) as { id_token?: string; error?: string; error_description?: string };
+  let tokenSet: { id_token?: string; error?: string; error_description?: string };
+  try {
+    tokenSet = JSON.parse(responseText) as typeof tokenSet;
+  } catch (error) {
+    recordUpstreamRequest({
+      service: "telegram_oidc",
+      operation: "/token",
+      outcome: "unavailable",
+      durationMs: Date.now() - startedAt,
+    });
+    throw new Error("Telegram token exchange returned an invalid response", { cause: error });
+  }
 
   if (tokenSet.error) {
+    recordUpstreamRequest({
+      service: "telegram_oidc",
+      operation: "/token",
+      outcome: "rejected",
+      durationMs: Date.now() - startedAt,
+    });
     logTechnicalWarning("telegram_token_exchange_error_response", {
       error: tokenSet.error,
       errorDescription: tokenSet.error_description ?? null,
@@ -240,8 +289,21 @@ async function exchangeCodeForIdToken(code: string, codeVerifier: string) {
   }
 
   if (!tokenSet.id_token) {
+    recordUpstreamRequest({
+      service: "telegram_oidc",
+      operation: "/token",
+      outcome: "unavailable",
+      durationMs: Date.now() - startedAt,
+    });
     throw new Error("Telegram token response does not contain id_token");
   }
+
+  recordUpstreamRequest({
+    service: "telegram_oidc",
+    operation: "/token",
+    outcome: "success",
+    durationMs: Date.now() - startedAt,
+  });
 
   authDebugLog("telegram_oidc_token_exchange_success", { hasIdToken: true });
 

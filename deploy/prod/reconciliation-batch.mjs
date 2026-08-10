@@ -8,6 +8,14 @@ const PAYMENT_COUNT_FIELDS = [
   "failed",
 ];
 const HISTORY_COUNT_FIELDS = ["attempted", "applied", "completed", "failed"];
+const BACKLOG_COUNT_FIELDS = [
+  "pending",
+  "due",
+  "manualRequired",
+  "oldestAgeSeconds",
+  "maximumAttemptCount",
+  "totalFailureCount",
+];
 
 function objectValue(value, field) {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
@@ -31,6 +39,7 @@ export function parseReconciliationBatch(value) {
   const envelope = objectValue(value, "envelope");
   const data = objectValue(envelope.data, "data");
   const history = objectValue(data.history, "data.history");
+  const backlog = objectValue(data.backlog, "data.backlog");
   const parsed = {};
 
   for (const field of PAYMENT_COUNT_FIELDS) {
@@ -43,6 +52,14 @@ export function parseReconciliationBatch(value) {
     parsed.history[field] = countValue(
       history[field],
       `data.history.${field}`,
+    );
+  }
+
+  parsed.backlog = {};
+  for (const field of BACKLOG_COUNT_FIELDS) {
+    parsed.backlog[field] = countValue(
+      backlog[field],
+      `data.backlog.${field}`,
     );
   }
 

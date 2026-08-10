@@ -199,6 +199,23 @@ describe("Telegram identity verification adapter", () => {
     await expect(verifyTelegramCallback("code", "state")).rejects.toThrow("Telegram token exchange failed");
   });
 
+  it("handles an unreadable token error body and normalizes a prefixed client secret", async () => {
+    vi.stubEnv("TELEGRAM_OIDC_CLIENT_SECRET", "123456:normalized-secret");
+    setCallbackCookies();
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce({
+      ok: false,
+      status: 502,
+      statusText: "Bad Gateway",
+      clone: () => ({ text: () => Promise.reject(new Error("body unavailable")) }),
+    } as Response);
+
+    await expect(verifyTelegramCallback("code", "state"))
+      .rejects.toThrow("Telegram token exchange failed");
+    expect(vi.mocked(globalThis.fetch).mock.calls[0]?.[1]?.headers).toMatchObject({
+      authorization: `Basic ${Buffer.from("123456:normalized-secret").toString("base64")}`,
+    });
+  });
+
   it("clears all temporary Telegram cookies explicitly", async () => {
     setCallbackCookies();
     await clearTelegramAuthCookies();
@@ -270,6 +287,25 @@ describe("Telegram identity verification adapter", () => {
     });
     expect(mocks.logTechnicalWarning).toHaveBeenCalledWith("telegram_remnashop_auth_skipped", expect.anything());
     vi.unstubAllEnvs();
+  });
+
+  it("requires a bot token for widget verification and tolerates OIDC provider auth failure", async () => {
+    vi.stubEnv("TELEGRAM_BOT_TOKEN", "");
+    state.cookies.set("clean_pay_tg_nonce", "nonce");
+    await expect(verifyTelegramWidgetCallbackPayload({}))
+      .rejects.toThrow("TELEGRAM_BOT_TOKEN is required");
+    vi.unstubAllEnvs();
+
+    state.cookies.set("clean_pay_tg_nonce", "nonce");
+    mocks.remnashopAuth.mockRejectedValueOnce(new Error("provider offline"));
+    await expect(verifyTelegramPopupToken("token")).resolves.toMatchObject({
+      identity: { remnashopAuthResult: null },
+    });
+    expect(mocks.logTechnicalError).toHaveBeenCalledWith(
+      "telegram_remnashop_auth_failed",
+      expect.any(Error),
+      expect.objectContaining({ telegramId: "123456" }),
+    );
   });
 
   it("rejects token endpoint error payloads and missing id_token", async () => {

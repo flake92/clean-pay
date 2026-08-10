@@ -5,7 +5,7 @@ import type {
 } from "@/shared/domain/subscriptions";
 import type { SupportViewModel } from "@/application/models/support";
 
-export type CabinetUserViewModel = {
+type CabinetUserViewModel = {
   email: string | null;
   telegramId?: string | null;
   telegramUsername?: string | null;

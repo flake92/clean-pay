@@ -157,4 +157,90 @@ describe("raw Redis command adapter", () => {
     });
     expect(state.tcpSocket?.destroyed).toBe(true);
   });
+
+  it("waits for fragmented array and bulk RESP frames", async () => {
+    process.env.REDIS_URL = "redis://localhost:6379";
+    const promise = redisCommand(["MGET", "a", "b"]);
+    await vi.waitFor(() => expect(state.tcpSocket?.writes).toHaveLength(1));
+
+    state.tcpSocket?.emit("data", Buffer.from("*"));
+    state.tcpSocket?.emit("data", Buffer.from("2\r\n$5"));
+    state.tcpSocket?.emit("data", Buffer.from("\r\nhe"));
+    state.tcpSocket?.emit("data", Buffer.from("llo\r\n+OK"));
+    state.tcpSocket?.emit("data", Buffer.from("\r\n"));
+
+    await expect(promise).resolves.toEqual(["hello", "OK"]);
+  });
+
+  it("handles connection errors and closes before readiness", async () => {
+    vi.mocked((await import("node:net")).default.connect)
+      .mockImplementationOnce(() => {
+        state.tcpSocket = new FakeSocket();
+        queueMicrotask(() => state.tcpSocket?.emit("error", new Error("connect failed")));
+        return state.tcpSocket as never;
+      });
+    await expect(redisCommand(["PING"])).rejects.toMatchObject({
+      code: "UPSTREAM_UNAVAILABLE",
+      debug: { message: "connect failed" },
+    });
+
+    vi.mocked((await import("node:net")).default.connect)
+      .mockImplementationOnce(() => {
+        state.tcpSocket = new FakeSocket();
+        queueMicrotask(() => state.tcpSocket?.emit("close"));
+        return state.tcpSocket as never;
+      });
+    await expect(redisCommand(["PING"])).rejects.toMatchObject({
+      code: "UPSTREAM_UNAVAILABLE",
+      debug: { message: "Redis connection closed before it was ready" },
+    });
+  });
+
+  it("rejects socket errors and closes while reading a command", async () => {
+    process.env.REDIS_URL = "redis://localhost:6379";
+    let promise = redisCommand(["PING"]);
+    await vi.waitFor(() => expect(state.tcpSocket?.writes).toHaveLength(1));
+    state.tcpSocket?.emit("error", new Error("read failed"));
+    await expect(promise).rejects.toMatchObject({
+      code: "UPSTREAM_UNAVAILABLE",
+      debug: { message: "read failed" },
+    });
+
+    state.tcpSocket = null;
+    promise = redisCommand(["PING"]);
+    await vi.waitFor(() => expect(state.tcpSocket?.writes).toHaveLength(1));
+    (state.tcpSocket as FakeSocket | null)?.emit("close");
+    await expect(promise).rejects.toMatchObject({
+      code: "UPSTREAM_UNAVAILABLE",
+      debug: { message: "Redis connection closed" },
+    });
+  });
+
+  it("fails immediately when the shared deadline is exhausted", async () => {
+    const now = vi.spyOn(Date, "now")
+      .mockReturnValueOnce(0)
+      .mockReturnValue(4_000);
+
+    await expect(redisCommand(["PING"])).rejects.toMatchObject({
+      code: "UPSTREAM_UNAVAILABLE",
+      debug: { message: "Redis connection deadline exceeded" },
+    });
+    now.mockRestore();
+  });
+
+  it("times out a command response and removes its listeners", async () => {
+    vi.useFakeTimers();
+    process.env.REDIS_URL = "redis://localhost:6379";
+    const promise = redisCommand(["PING"]);
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.waitFor(() => expect(state.tcpSocket?.writes).toHaveLength(1));
+    const rejection = expect(promise).rejects.toMatchObject({
+      code: "UPSTREAM_UNAVAILABLE",
+      debug: { message: expect.stringContaining("Redis command timed out") },
+    });
+    await vi.advanceTimersByTimeAsync(3_000);
+    await rejection;
+    expect(state.tcpSocket?.listenerCount("data")).toBe(0);
+    vi.useRealTimers();
+  });
 });

@@ -3,11 +3,7 @@ import { randomUUID } from "node:crypto";
 import { Prisma, type PaymentOperation } from "@prisma/client";
 
 import { prisma } from "@/backend/database/prisma";
-import {
-  ServiceError,
-  isServiceErrorCode,
-  type ServiceErrorCode,
-} from "@/backend/errors/service-error";
+import { ServiceError } from "@/backend/errors/service-error";
 import {
   recordPayment,
   type RecordPaymentInput,
@@ -15,259 +11,46 @@ import {
 import {
   randomToken,
   safeEqual,
-  sha256,
 } from "@/backend/security/crypto";
 import { paymentUpstreamOwnerHash } from "@/backend/payments/hashes";
 import { lockPaymentUpstreamOwner } from "@/backend/integrations/payments/payment-owner-service";
 import { isPaymentManualRequired } from "@/backend/payments/manual-review";
 import { lockPaymentOwnerFence } from "@/backend/integrations/payments/payment-user-merge-service";
-import type {
-  ExtendRequest,
-  PaymentInitResponse,
-  PurchaseRequest,
-} from "@/backend/integrations/remnashop/contracts";
+import {
+  normalizedString,
+  operationIdentity,
+  type OperationIdentity,
+  type PaymentOperationBeginResult,
+  type PaymentOperationDispatchFailureOutcome,
+  type PaymentOperationRequest,
+} from "@/backend/integrations/payments/payment-operation-contract";
+import {
+  claimTokenHash,
+  errorSnapshot,
+  errorSnapshotJson,
+  parseErrorSnapshot,
+  parsePaymentResponse,
+  paymentOperationConflict,
+  paymentResponseSnapshot,
+  secondsUntil,
+} from "@/backend/integrations/payments/payment-operation-snapshot";
 
-const PAYMENT_OPERATION_CONTRACT_VERSION = 2;
-// An existing operation is claimed before its Remnashop session is refreshed.
-// Refresh/recovery, identity verification and the final offers read are each
-// independently bounded upstream calls, so 30 seconds was shorter than a
-// valid pre-dispatch path. A crashed READY worker is safe to retry after this
-// lease because it has not crossed the provider mutation boundary yet.
+export type {
+  PaymentOperationBeginResult,
+  PaymentOperationDispatchFailureOutcome,
+  PaymentOperationRequest,
+} from "@/backend/integrations/payments/payment-operation-contract";
+export {
+  paymentOperationDispatchFailureOutcome,
+  paymentOperationErrorFromSnapshot,
+  paymentResponseSnapshot,
+} from "@/backend/integrations/payments/payment-operation-snapshot";
+
+// Provider mutations have longer leases than local preparation because
+// recovery and capability checks are independently bounded upstream calls.
 const READY_LEASE_MS = 90_000;
 const DISPATCH_LEASE_MS = 120_000;
 const MAX_BEGIN_STATE_READS = 5;
-const UUID_PATTERN =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-
-export type PaymentOperationRequest =
-  | {
-      kind: "PURCHASE";
-      payload: Pick<
-        PurchaseRequest,
-        | "plan_code"
-        | "duration_days"
-        | "gateway_type"
-        | "confirmed_amount"
-        | "confirmed_currency"
-        | "offer_version"
-      >;
-    }
-  | {
-      kind: "EXTEND";
-      payload: Pick<
-        ExtendRequest,
-        | "duration_days"
-        | "gateway_type"
-        | "confirmed_amount"
-        | "confirmed_currency"
-        | "offer_version"
-      >;
-    };
-
-export type PaymentOperationErrorSnapshot = {
-  code: ServiceErrorCode;
-  status: number;
-  message: string;
-};
-
-export type PaymentOperationDispatchFailureOutcome =
-  | "FINAL"
-  | "RETRYABLE"
-  | "UNKNOWN";
-
-export type PaymentOperationBeginResult =
-  | {
-      state: "missing";
-    }
-  | {
-      state: "execute";
-      operationId: string;
-      claimToken: string;
-      upstreamKey: string;
-    }
-  | {
-      state: "replay";
-      outcome: "success";
-      operationId: string;
-      responseStatus: number;
-      response: PaymentInitResponse;
-    }
-  | {
-      state: "replay";
-      outcome: "failure";
-      operationId: string;
-      responseStatus: number;
-      error: PaymentOperationErrorSnapshot;
-    }
-  | {
-      state: "pending";
-      operationId: string;
-      reason: "IN_PROGRESS" | "OUTCOME_UNKNOWN";
-      retryAfterSeconds?: number;
-    }
-  | {
-      state: "manual_required";
-      operationId: string;
-    };
-
-type NormalizedOperation = {
-  kind: "PURCHASE" | "EXTEND";
-  payload: Prisma.InputJsonObject;
-  fingerprint: string;
-};
-
-type OperationIdentity = NormalizedOperation & {
-  idempotencyKeyHash: string;
-};
-
-function paymentHash(value: string, purpose: string) {
-  return sha256(`clean-pay:payment-operation:${purpose}:v1:${value}`);
-}
-
-function normalizeIdempotencyKey(value: string | null) {
-  if (value === null || value.trim() === "") {
-    throw new ServiceError(
-      "IDEMPOTENCY_KEY_REQUIRED",
-      400,
-      "Idempotency-Key header is required",
-    );
-  }
-
-  const normalized = value.trim().toLowerCase();
-
-  if (!UUID_PATTERN.test(normalized)) {
-    throw new ServiceError(
-      "IDEMPOTENCY_KEY_INVALID",
-      400,
-      "Idempotency-Key must be a UUID",
-    );
-  }
-
-  return normalized;
-}
-
-function normalizedString(value: unknown, field: string, maxLength: number) {
-  if (
-    typeof value !== "string" ||
-    value.length === 0 ||
-    value.length > maxLength
-  ) {
-    throw new ServiceError(
-      "VALIDATION_ERROR",
-      400,
-      `${field} must be a non-empty string up to ${maxLength} characters`,
-    );
-  }
-
-  return value;
-}
-
-function normalizedDuration(value: unknown) {
-  if (!Number.isSafeInteger(value) || Number(value) < 0) {
-    throw new ServiceError(
-      "VALIDATION_ERROR",
-      400,
-      "duration_days must be a non-negative integer",
-    );
-  }
-
-  return Number(value);
-}
-
-function normalizeOperation(
-  operation: PaymentOperationRequest,
-): NormalizedOperation {
-  const durationDays = normalizedDuration(operation.payload.duration_days);
-  const gatewayType = normalizedString(
-    operation.payload.gateway_type,
-    "gateway_type",
-    100,
-  );
-  const confirmedAmount = normalizedString(
-    operation.payload.confirmed_amount,
-    "confirmed_amount",
-    64,
-  );
-  const confirmedCurrency = normalizedString(
-    operation.payload.confirmed_currency,
-    "confirmed_currency",
-    12,
-  );
-  const offerVersion = normalizedString(
-    operation.payload.offer_version,
-    "offer_version",
-    2_048,
-  );
-
-  if (operation.kind === "PURCHASE") {
-    const payload: Prisma.InputJsonObject = {
-      plan_code: normalizedString(
-        operation.payload.plan_code,
-        "plan_code",
-        200,
-      ),
-      duration_days: durationDays,
-      gateway_type: gatewayType,
-      confirmed_amount: confirmedAmount,
-      confirmed_currency: confirmedCurrency,
-      offer_version: offerVersion,
-    };
-    const canonicalRequest = JSON.stringify([
-      "clean-pay.payment-operation",
-      PAYMENT_OPERATION_CONTRACT_VERSION,
-      operation.kind,
-      payload.plan_code,
-      payload.duration_days,
-      payload.gateway_type,
-      payload.confirmed_amount,
-      payload.confirmed_currency,
-      payload.offer_version,
-    ]);
-
-    return {
-      kind: operation.kind,
-      payload,
-      fingerprint: sha256(canonicalRequest),
-    };
-  }
-
-  const payload: Prisma.InputJsonObject = {
-    duration_days: durationDays,
-    gateway_type: gatewayType,
-    confirmed_amount: confirmedAmount,
-    confirmed_currency: confirmedCurrency,
-    offer_version: offerVersion,
-  };
-  const canonicalRequest = JSON.stringify([
-    "clean-pay.payment-operation",
-    PAYMENT_OPERATION_CONTRACT_VERSION,
-    operation.kind,
-    payload.duration_days,
-    payload.gateway_type,
-    payload.confirmed_amount,
-    payload.confirmed_currency,
-    payload.offer_version,
-  ]);
-
-  return {
-    kind: operation.kind,
-    payload,
-    fingerprint: sha256(canonicalRequest),
-  };
-}
-
-function operationIdentity(input: {
-  idempotencyKey: string | null;
-  operation: PaymentOperationRequest;
-}): OperationIdentity {
-  const idempotencyKey = normalizeIdempotencyKey(input.idempotencyKey);
-
-  return {
-    ...normalizeOperation(input.operation),
-    idempotencyKeyHash: paymentHash(idempotencyKey, "client-key"),
-  };
-}
-
 function isUniqueConstraintError(error: unknown) {
   return (
     error instanceof Prisma.PrismaClientKnownRequestError &&
@@ -384,80 +167,6 @@ function assertSameOperation(
       "Idempotency key is already bound to another payment operation",
     );
   }
-}
-
-function isObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function parsePaymentResponse(value: Prisma.JsonValue | null) {
-  if (!isObject(value)) {
-    throw new ServiceError(
-      "INTERNAL_ERROR",
-      500,
-      "Stored payment operation response is missing",
-    );
-  }
-
-  const paymentUrl = value.payment_url;
-
-  if (
-    typeof value.payment_id !== "string" ||
-    (paymentUrl !== null && typeof paymentUrl !== "string") ||
-    typeof value.purchase_type !== "string" ||
-    typeof value.status !== "string" ||
-    typeof value.is_free !== "boolean" ||
-    typeof value.final_amount !== "string" ||
-    typeof value.currency !== "string"
-  ) {
-    throw new ServiceError(
-      "INTERNAL_ERROR",
-      500,
-      "Stored payment operation response is invalid",
-    );
-  }
-
-  return {
-    payment_id: value.payment_id,
-    payment_url: paymentUrl,
-    purchase_type: value.purchase_type,
-    status: value.status,
-    is_free: value.is_free,
-    final_amount: value.final_amount,
-    currency: value.currency,
-  } satisfies PaymentInitResponse;
-}
-
-function parseErrorSnapshot(
-  value: Prisma.JsonValue | null,
-): PaymentOperationErrorSnapshot {
-  if (
-    !isObject(value) ||
-    !isServiceErrorCode(value.code) ||
-    typeof value.status !== "number" ||
-    !Number.isInteger(value.status) ||
-    typeof value.message !== "string"
-  ) {
-    throw new ServiceError(
-      "INTERNAL_ERROR",
-      500,
-      "Stored payment operation error is invalid",
-    );
-  }
-
-  return {
-    code: value.code,
-    status: value.status,
-    message: value.message,
-  };
-}
-
-function secondsUntil(date: Date, now: Date) {
-  return Math.max(1, Math.ceil((date.getTime() - now.getTime()) / 1_000));
-}
-
-function claimTokenHash(claimToken: string) {
-  return sha256(`clean-pay:payment-operation:claim:v1:${claimToken}`);
 }
 
 export async function beginPaymentOperation(input: {
@@ -742,50 +451,6 @@ export async function markPaymentOperationDispatched(input: {
   }
 }
 
-export function paymentResponseSnapshot(
-  response: PaymentInitResponse,
-): Prisma.InputJsonObject {
-  return {
-    payment_id: response.payment_id,
-    payment_url: response.payment_url,
-    purchase_type: response.purchase_type,
-    status: response.status,
-    is_free: response.is_free,
-    final_amount: response.final_amount,
-    currency: response.currency,
-  };
-}
-
-function errorSnapshot(error: unknown): PaymentOperationErrorSnapshot {
-  if (error instanceof ServiceError) {
-    return {
-      code: error.code,
-      status: error.status,
-      message: error.prodMessage,
-    };
-  }
-
-  return {
-    code: "INTERNAL_ERROR",
-    status: 500,
-    message: "Internal payment operation error",
-  };
-}
-
-function errorSnapshotJson(
-  snapshot: PaymentOperationErrorSnapshot,
-): Prisma.InputJsonObject {
-  return {
-    code: snapshot.code,
-    status: snapshot.status,
-    message: snapshot.message,
-  };
-}
-
-function paymentOperationConflict(message: string) {
-  return new ServiceError("CONFLICT", 409, message);
-}
-
 export async function completePaymentOperationSuccess(input: {
   operationId: string;
   claimToken: string;
@@ -962,36 +627,6 @@ export async function settlePaymentOperationBeforeDispatchFailure(input: {
   }
 }
 
-export function paymentOperationDispatchFailureOutcome(
-  error: unknown,
-): PaymentOperationDispatchFailureOutcome {
-  if (!(error instanceof ServiceError)) {
-    return "UNKNOWN";
-  }
-
-  if (typeof error.debug?.upstreamStatus !== "number") {
-    return "UNKNOWN";
-  }
-
-  if (
-    error.code === "PAYMENT_OPERATION_IN_PROGRESS" ||
-    error.code === "PAYMENT_OUTCOME_UNKNOWN" ||
-    error.code === "IDEMPOTENCY_KEY_REUSED"
-  ) {
-    return "UNKNOWN";
-  }
-
-  if (error.status === 429) {
-    return "RETRYABLE";
-  }
-
-  if (error.status >= 400 && error.status < 500 && error.status !== 408) {
-    return "FINAL";
-  }
-
-  return "UNKNOWN";
-}
-
 export async function settlePaymentOperationAfterDispatchFailure(input: {
   operationId: string;
   claimToken: string;
@@ -1043,10 +678,4 @@ export async function settlePaymentOperationAfterDispatchFailure(input: {
       "Payment operation could not settle a dispatched failure",
     );
   }
-}
-
-export function paymentOperationErrorFromSnapshot(
-  snapshot: PaymentOperationErrorSnapshot,
-) {
-  return new ServiceError(snapshot.code, snapshot.status, snapshot.message);
 }
