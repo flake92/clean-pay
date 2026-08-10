@@ -1,5 +1,20 @@
 import type { PaymentMaintenanceRunner, PaymentReconciliationGateway } from "@/application/payments/ports/payment-maintenance";
 
+const emptyBacklog = {
+  pending: 0,
+  due: 0,
+  manualRequired: 0,
+  oldestAgeSeconds: 0,
+  maximumAttemptCount: 0,
+  totalFailureCount: 0,
+};
+
+export async function loadPaymentReconciliationBacklog(
+  runner: PaymentMaintenanceRunner,
+) {
+  return runner.readReconciliationBacklog?.() ?? emptyBacklog;
+}
+
 function assertBounds(input: { paymentLimit: number; deadlineMs: number }) {
   if (!Number.isSafeInteger(input.paymentLimit) || input.paymentLimit < 1 || input.paymentLimit > 100
     || !Number.isSafeInteger(input.deadlineMs) || input.deadlineMs < 1_000 || input.deadlineMs > 30_000) {
@@ -137,5 +152,6 @@ export async function runPaymentMaintenance(
       history.failed += 1;
     }
   }
-  return { ...payments, history };
+  const backlog = await loadPaymentReconciliationBacklog(runner);
+  return { ...payments, history, backlog };
 }

@@ -52,7 +52,9 @@ describe("cabinet branding", () => {
       expect(readFileSync(file, "utf8"), `${file} should use branding`).toContain("getBranding");
     }
 
-    expect(readFileSync("deploy/prod/Dockerfile", "utf8")).toContain("ARG NEXT_PUBLIC_BRAND_NAME");
+    expect(readFileSync("Dockerfile", "utf8")).toContain(
+      'ARG NEXT_PUBLIC_BRAND_NAME="Clean Pay"',
+    );
     expect(readFileSync("deploy/prod/docker-compose.yml", "utf8")).toContain("NEXT_PUBLIC_BRAND_NAME");
   });
 });

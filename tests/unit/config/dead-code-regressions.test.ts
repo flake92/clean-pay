@@ -137,4 +137,15 @@ describe("dead-code regressions", () => {
       expect(source).toContain("payment_id=");
     }
   });
+
+  it("keeps composition details and retired payment aliases out of the public surface", () => {
+    const requestReaders = readFileSync("src/app/_composition/request-scoped-readers.ts", "utf8");
+    expect(requestReaders).not.toMatch(/export const request(?:CabinetReader|PaymentHistoryGateway)/);
+
+    const maintenancePort = readFileSync("src/application/payments/ports/payment-maintenance.ts", "utf8");
+    expect(maintenancePort).not.toContain("PaymentReconciliationResult");
+
+    const workflowPort = readFileSync("src/application/payments/ports/payment-workflow.ts", "utf8");
+    expect(workflowPort).not.toMatch(/\bPaymentWorkflow\s*=/);
+  });
 });

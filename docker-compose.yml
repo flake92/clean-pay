@@ -7,12 +7,6 @@ services:
       context: .
       dockerfile: Dockerfile
       target: migration
-      args:
-        NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL:?NEXT_PUBLIC_APP_URL is required}
-        TURNSTILE_ENABLED: ${TURNSTILE_ENABLED:?TURNSTILE_ENABLED=true is required}
-        TURNSTILE_SITE_KEY: ${TURNSTILE_SITE_KEY:-}
-        NEXT_PUBLIC_BRAND_NAME: ${NEXT_PUBLIC_BRAND_NAME:-Clean Pay}
-        NEXT_PUBLIC_BRAND_LOGO_URL: ${NEXT_PUBLIC_BRAND_LOGO_URL:-/clean-pay-logo.png}
     restart: "no"
     env_file: .env
     environment:
@@ -31,7 +25,7 @@ services:
       args:
         NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL:?NEXT_PUBLIC_APP_URL is required}
         TURNSTILE_ENABLED: ${TURNSTILE_ENABLED:?TURNSTILE_ENABLED=true is required}
-        TURNSTILE_SITE_KEY: ${TURNSTILE_SITE_KEY:-}
+        TURNSTILE_WIDGET_ID: ${TURNSTILE_SITE_KEY:-}
         NEXT_PUBLIC_BRAND_NAME: ${NEXT_PUBLIC_BRAND_NAME:-Clean Pay}
         NEXT_PUBLIC_BRAND_LOGO_URL: ${NEXT_PUBLIC_BRAND_LOGO_URL:-/clean-pay-logo.png}
     restart: unless-stopped

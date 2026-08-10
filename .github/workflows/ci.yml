@@ -12,6 +12,34 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  secret-scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - name: Scan changed commits for secrets and PII-like credentials
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  codeql:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v5
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v4
+        with:
+          languages: javascript-typescript
+          queries: security-extended
+      - name: Analyze application source
+        uses: github/codeql-action/analyze@v4
+
   validate:
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -63,21 +91,10 @@ jobs:
         run: npm run test:route-handlers
       - name: Test with enforced coverage thresholds
         run: npm run test:coverage
+      - name: Test critical frontend components with enforced coverage thresholds
+        run: npm run test:coverage:frontend
       - name: Build production application
         run: npm run build
-
-  pnpm-lock:
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-node@v5
-        with:
-          node-version: 24.18.0
-      - run: corepack enable
-      - run: corepack prepare pnpm@11.9.0 --activate
-      - run: pnpm install --lockfile-only --frozen-lockfile --ignore-scripts
-      - run: pnpm audit --audit-level high
 
   integration-services:
     runs-on: ubuntu-latest
@@ -131,6 +148,35 @@ jobs:
         run: node node_modules/prisma/build/index.js migrate deploy
       - name: Run PostgreSQL concurrency and service integration tests
         run: npm run test:services
+
+  container-security:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - name: Build the exact production runtime image
+        run: >-
+          docker build
+          --target runner
+          --build-arg NEXT_PUBLIC_APP_URL=https://app.example.com
+          --build-arg TURNSTILE_ENABLED=false
+          --build-arg TURNSTILE_WIDGET_ID=
+          --tag clean-pay:ci
+          .
+      - name: Generate image SBOM
+        uses: anchore/sbom-action@v0
+        with:
+          image: clean-pay:ci
+          artifact-name: clean-pay-image.spdx.json
+          format: spdx-json
+      - name: Scan image packages and application dependencies
+        uses: aquasecurity/trivy-action@0.33.1
+        with:
+          image-ref: clean-pay:ci
+          format: table
+          exit-code: "1"
+          ignore-unfixed: true
+          severity: HIGH,CRITICAL
 
   full-stack-e2e:
     runs-on: ubuntu-latest

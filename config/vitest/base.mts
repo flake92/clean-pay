@@ -25,10 +25,10 @@ export default defineConfig({
         "src/backend/observability/logger.ts",
       ],
       thresholds: {
-        statements: 92,
-        branches: 82.5,
-        functions: 98,
-        lines: 92.5,
+        statements: 94.5,
+        branches: 85.5,
+        functions: 100,
+        lines: 95,
         "src/application/payments/execute-payment-workflow.ts": {
           statements: 95,
           branches: 80,

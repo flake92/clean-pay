@@ -2,9 +2,8 @@ import { readFileSync } from "node:fs";
 
 import { describe, expect, it } from "vitest";
 
-const dockerfile = readFileSync("deploy/prod/Dockerfile", "utf8");
+const dockerfile = readFileSync("Dockerfile", "utf8");
 const compose = readFileSync("deploy/prod/docker-compose.yml", "utf8");
-const rootDockerfile = readFileSync("Dockerfile", "utf8");
 const rootCompose = readFileSync("docker-compose.yml", "utf8");
 const rootStart = readFileSync("start.sh", "utf8");
 const start = readFileSync("deploy/prod/start.sh", "utf8");
@@ -49,9 +48,9 @@ describe("production container boundary", () => {
 
 describe("root production container boundary", () => {
   it("places the standalone server at the path used by the shared startup script", () => {
-    const runner = rootDockerfile.slice(rootDockerfile.indexOf("AS runner"));
+    const runner = dockerfile.slice(dockerfile.indexOf("AS runner"));
 
-    expect(rootDockerfile).toContain("package.json package-lock.json .npmrc");
+    expect(dockerfile).toContain("package.json package-lock.json .npmrc");
     expect(runner).toContain("/app/.next/standalone ./");
     expect(runner).toContain("/app/.next/static ./.next/static");
     expect(runner).not.toContain("/app/.next ./.next");
@@ -60,13 +59,13 @@ describe("root production container boundary", () => {
   });
 
   it("runs migrations once before the root application and workers can start", () => {
-    const migration = rootDockerfile.slice(
-      rootDockerfile.indexOf("AS migration"),
-      rootDockerfile.indexOf("AS runner"),
+    const migration = dockerfile.slice(
+      dockerfile.indexOf("AS migration"),
+      dockerfile.indexOf("AS runner"),
     );
 
-    expect(rootDockerfile).toContain("AS migration");
-    expect(rootDockerfile).toContain(
+    expect(dockerfile).toContain("AS migration");
+    expect(dockerfile).toContain(
       "node node_modules/prisma/build/index.js migrate deploy",
     );
     expect(migration).toContain("--from=dependencies");
@@ -82,12 +81,13 @@ describe("root production container boundary", () => {
   });
 
   it("fails fast unless the production Turnstile build invariant is provided", () => {
-    expect(rootDockerfile).toContain("ARG TURNSTILE_ENABLED=true");
-    expect(rootDockerfile).toContain(
-      "ARG TURNSTILE_SITE_KEY=build-time-placeholder-site-key",
+    expect(dockerfile).toContain("ARG TURNSTILE_ENABLED=true");
+    expect(dockerfile).toContain(
+      "ARG TURNSTILE_WIDGET_ID=build-time-placeholder-site-key",
     );
     expect(rootCompose.match(/TURNSTILE_ENABLED: \$\{TURNSTILE_ENABLED:\?TURNSTILE_ENABLED=true is required\}/g))
-      .toHaveLength(2);
+      .toHaveLength(1);
+    expect(rootCompose).toContain("TURNSTILE_WIDGET_ID: ${TURNSTILE_SITE_KEY:-}");
     expect(rootCompose).not.toContain("TURNSTILE_ENABLED: ${TURNSTILE_ENABLED:-false}");
   });
 });

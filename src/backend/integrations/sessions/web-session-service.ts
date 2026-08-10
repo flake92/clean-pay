@@ -3,68 +3,40 @@ import type { NextResponse } from "next/server";
 import { Prisma, WebSessionAssuranceLevel, WebSessionAuthMethod } from "@prisma/client";
 
 import { authDebugLog } from "@/backend/observability/auth-debug-log";
-import { decryptSecret, encryptSecret, sha256, hmacSha256, jsonBase64Url, parseJsonBase64Url, randomToken, safeEqual } from "@/backend/security/crypto";
+import { decryptSecret, encryptSecret, sha256, randomToken } from "@/backend/security/crypto";
 import { getEnv } from "@/backend/config/env";
 import { prisma } from "@/backend/database/prisma";
 import { ServiceError } from "@/backend/errors/service-error";
 import { securityPolicy } from "@/backend/security/policy";
 import { auditLog } from "@/backend/observability/audit";
-import { accountAccessIssue } from "@/shared/domain/account-access-policy";
+import { recordOperationalEvent } from "@/backend/observability/metrics";
+import {
+  clearWebSessionCookies,
+  revokedWebSessionData,
+  sessionCookieNames,
+} from "@/backend/integrations/sessions/web-session-revocation";
+import {
+  addDays,
+  addMinutes,
+  setAccessCookie,
+  signAccessToken,
+  verifyAccessToken,
+} from "@/backend/integrations/sessions/web-session-token";
 
-const sessionCookieNames = {
-  access: "clean_pay_access",
-  refresh: "clean_pay_refresh",
-} as const;
+export {
+  clearWebSessionCookies,
+  revokeAllWebSessionsForUser,
+} from "@/backend/integrations/sessions/web-session-revocation";
+export {
+  createWebSession,
+  createWebSessionForRemnashopUser,
+} from "@/backend/integrations/sessions/web-session-creation";
+import { refreshTokenGraceMs } from "@/backend/integrations/sessions/web-session-policy";
 
-function revokedWebSessionData(now: Date) {
-  return {
-    revokedAt: now,
-    accessTokenExpiresAt: now,
-    refreshExpiresAt: now,
-    remnashopAccessTokenEncrypted: null,
-    remnashopRefreshTokenEncrypted: null,
-    remnashopAccessExpiresAt: null,
-    remnashopRefreshExpiresAt: null,
-  };
-}
-
-export async function clearWebSessionCookies() {
-  const cookieStore = await cookies();
-  cookieStore.delete(sessionCookieNames.access);
-  cookieStore.delete(sessionCookieNames.refresh);
-}
-
-export async function revokeAllWebSessionsForUser(
-  userId: string,
-  {
-    client = prisma,
-    now = new Date(),
-  }: {
-    client?: Pick<Prisma.TransactionClient, "webSession">;
-    now?: Date;
-  } = {},
-) {
-  return client.webSession.updateMany({
-    where: { userId, revokedAt: null },
-    data: revokedWebSessionData(now),
-  });
-}
-
-export const refreshTokenGraceMs = 10_000;
-
-export function assertEmailVerificationPolicy(user: {
-  email?: string | null;
-  emailVerified: boolean;
-  telegramId: string | null;
-}, {
-  requireVerifiedEmail = false,
-}: {
-  requireVerifiedEmail?: boolean;
-} = {}) {
-  const issue = accountAccessIssue(user, { requireVerifiedEmail });
-  if (issue === "EMAIL_REQUIRED") throw new ServiceError(issue, 401, "E-mail and password must be linked before continuing");
-  if (issue) throw new ServiceError(issue, 403, "E-mail must be verified before continuing");
-}
+export {
+  assertEmailVerificationPolicy,
+  refreshTokenGraceMs,
+} from "@/backend/integrations/sessions/web-session-policy";
 
 async function revokeSessionByRefreshToken(refreshToken: string) {
   const tokenHash = sha256(refreshToken);
@@ -97,96 +69,6 @@ async function revokeSessionByRefreshToken(refreshToken: string) {
   });
 }
 
-type AccessPayload = {
-  sid: string;
-  uid: string;
-  exp: number;
-  al?: WebSessionAssuranceLevel;
-  ev?: boolean;
-  tg?: boolean;
-};
-
-function addMinutes(date: Date, minutes: number) {
-  return new Date(date.getTime() + minutes * 60 * 1000);
-}
-
-function addDays(date: Date, days: number) {
-  return new Date(date.getTime() + days * 24 * 60 * 60 * 1000);
-}
-
-function signAccessToken(payload: AccessPayload) {
-  const env = getEnv();
-  const encodedPayload = jsonBase64Url(payload);
-  const signature = hmacSha256(encodedPayload, env.webJwtSecret);
-
-  return `${encodedPayload}.${signature}`;
-}
-
-async function setAccessCookie({
-  sessionId,
-  userId,
-  expiresAt,
-  assuranceLevel,
-  emailVerified,
-  telegramId,
-}: {
-  sessionId: string;
-  userId: string;
-  expiresAt: Date;
-  assuranceLevel: WebSessionAssuranceLevel;
-  emailVerified?: boolean | null;
-  telegramId?: number | string | null;
-}) {
-  const env = getEnv();
-  const cookieStore = await cookies();
-  const accessToken = signAccessToken({
-    sid: sessionId,
-    uid: userId,
-    exp: Math.floor(expiresAt.getTime() / 1000),
-    al: assuranceLevel,
-    ev: Boolean(emailVerified),
-    tg: Boolean(telegramId),
-  });
-
-  cookieStore.set(sessionCookieNames.access, accessToken, {
-    httpOnly: true,
-    secure: env.cookieSecure,
-    sameSite: env.cookieSameSite,
-    path: "/",
-    expires: expiresAt,
-  });
-  authDebugLog("session_access_cookie_set", {
-    sessionId,
-    userId,
-    expiresAt,
-    assuranceLevel,
-    emailVerified: Boolean(emailVerified),
-    hasTelegramId: Boolean(telegramId),
-  });
-}
-
-function verifyAccessToken(token: string) {
-  const env = getEnv();
-  const [encodedPayload, signature] = token.split(".");
-
-  if (!encodedPayload || !signature) {
-    return null;
-  }
-
-  const expectedSignature = hmacSha256(encodedPayload, env.webJwtSecret);
-
-  if (!safeEqual(signature, expectedSignature)) {
-    return null;
-  }
-
-  const payload = parseJsonBase64Url<AccessPayload>(encodedPayload);
-
-  if (payload.exp <= Math.floor(Date.now() / 1000)) {
-    return null;
-  }
-
-  return payload;
-}
 
 export async function rotateRefreshTokenFamily(refreshToken: string, now = new Date()) {
   const tokenHash = sha256(refreshToken);
@@ -261,7 +143,12 @@ export async function rotateRefreshTokenFamily(refreshToken: string, now = new D
   // can lose the WHERE recheck after waiting for the row lock. A second
   // transaction observes the newly-created consumed-token row and returns the
   // same successor; it never creates a second branch.
-  return await rotateOnce() ?? await rotateOnce();
+  try {
+    return await rotateOnce() ?? await rotateOnce();
+  } catch (error) {
+    recordOperationalEvent("refresh_token_rotation_failed");
+    throw error;
+  }
 }
 
 async function getSessionByRefreshToken() {
@@ -283,6 +170,7 @@ async function getSessionByRefreshToken() {
   }
 
   if (rotated.status === "reuse") {
+    recordOperationalEvent("refresh_token_reuse_detected");
     cookieStore.delete(sessionCookieNames.access);
     cookieStore.delete(sessionCookieNames.refresh);
     await auditLog({
@@ -327,211 +215,6 @@ async function getSessionByRefreshToken() {
   });
 
   return updatedSession;
-}
-
-export async function createWebSession(
-  userId: string,
-  {
-    authMethod = WebSessionAuthMethod.EMAIL,
-    assuranceLevel = WebSessionAssuranceLevel.FULL,
-  }: {
-    authMethod?: WebSessionAuthMethod;
-    assuranceLevel?: WebSessionAssuranceLevel;
-  } = {},
-) {
-  const env = getEnv();
-  const cookieStore = await cookies();
-  const requestHeaders = await headers();
-  const now = new Date();
-  const accessTokenExpiresAt = addMinutes(
-    now,
-    securityPolicy.accessSessionTtlMinutes,
-  );
-  const refreshExpiresAt = addDays(now, securityPolicy.refreshSessionTtlDays);
-  const refreshToken = randomToken(48);
-
-  authDebugLog("session_create_started", {
-    userId,
-    authMethod,
-    assuranceLevel,
-    accessTokenExpiresAt,
-    refreshExpiresAt,
-    hasRemnashopTokens: false,
-  });
-
-  const session = await prisma.webSession.create({
-    data: {
-      userId,
-      refreshTokenHash: sha256(refreshToken),
-      userAgent: requestHeaders.get("user-agent"),
-      authMethod,
-      assuranceLevel,
-      accessTokenExpiresAt,
-      refreshExpiresAt,
-    },
-  });
-  const user = await prisma.webUser.findUnique({
-    where: { id: userId },
-    select: { emailVerified: true, telegramId: true },
-  });
-
-  await setAccessCookie({
-    sessionId: session.id,
-    userId,
-    expiresAt: accessTokenExpiresAt,
-    assuranceLevel,
-    emailVerified: user?.emailVerified,
-    telegramId: user?.telegramId,
-  });
-
-  cookieStore.set(sessionCookieNames.refresh, refreshToken, {
-    httpOnly: true,
-    secure: env.cookieSecure,
-    sameSite: env.cookieSameSite,
-    path: "/",
-    expires: refreshExpiresAt,
-  });
-
-  authDebugLog("session_create_success", {
-    sessionId: session.id,
-    userId,
-    authMethod: session.authMethod,
-    assuranceLevel: session.assuranceLevel,
-    accessTokenExpiresAt,
-    refreshExpiresAt,
-    hasRemnashopTokens: Boolean(session.remnashopAccessTokenEncrypted && session.remnashopRefreshTokenEncrypted),
-  });
-
-  return session;
-}
-
-export async function createWebSessionForRemnashopUser({
-  userId,
-  remnashopAccessTokenEncrypted,
-  remnashopRefreshTokenEncrypted,
-  remnashopAccessExpiresAt,
-  remnashopRefreshExpiresAt,
-  tx,
-  authMethod = WebSessionAuthMethod.EMAIL,
-  assuranceLevel = WebSessionAssuranceLevel.FULL,
-  replaceExistingSessions = false,
-}: {
-  userId: string;
-  remnashopAccessTokenEncrypted: string;
-  remnashopRefreshTokenEncrypted: string;
-  remnashopAccessExpiresAt: Date;
-  remnashopRefreshExpiresAt: Date;
-  tx?: Prisma.TransactionClient;
-  authMethod?: WebSessionAuthMethod;
-  assuranceLevel?: WebSessionAssuranceLevel;
-  replaceExistingSessions?: boolean;
-}) {
-  const env = getEnv();
-  const cookieStore = await cookies();
-  const requestHeaders = await headers();
-  const db = tx ?? prisma;
-  const now = new Date();
-  const accessTokenExpiresAt = addMinutes(
-    now,
-    securityPolicy.accessSessionTtlMinutes,
-  );
-  const refreshExpiresAt = addDays(now, securityPolicy.refreshSessionTtlDays);
-  const refreshToken = randomToken(48);
-
-  authDebugLog("session_create_started", {
-    userId,
-    authMethod,
-    assuranceLevel,
-    accessTokenExpiresAt,
-    refreshExpiresAt,
-    hasRemnashopTokens: true,
-    remnashopAccessExpiresAt,
-    remnashopRefreshExpiresAt,
-    replaceExistingSessions,
-  });
-
-  if (replaceExistingSessions) {
-    if (!tx) {
-      throw new Error(
-        "Replacing existing Remnashop sessions requires an existing database transaction",
-      );
-    }
-
-    const lockedUser = await tx.$queryRaw<Array<{ id: string }>>(
-      Prisma.sql`
-        SELECT app_user."id"
-        FROM "WebUser" AS app_user
-        WHERE app_user."id" = ${userId}
-        FOR UPDATE
-      `,
-    );
-
-    if (lockedUser.length !== 1 || lockedUser[0]?.id !== userId) {
-      throw new ServiceError(
-        "CONFLICT",
-        409,
-        "Local account changed while replacing password-reset sessions",
-      );
-    }
-
-    const revokedSessions = await revokeAllWebSessionsForUser(userId, {
-      client: tx,
-      now,
-    });
-    authDebugLog("session_reset_existing_sessions_revoked", {
-      userId,
-      revokedSessionCount: revokedSessions.count,
-    });
-  }
-
-  const session = await db.webSession.create({
-    data: {
-      userId,
-      refreshTokenHash: sha256(refreshToken),
-      remnashopAccessTokenEncrypted,
-      remnashopRefreshTokenEncrypted,
-      remnashopAccessExpiresAt,
-      remnashopRefreshExpiresAt,
-      authMethod,
-      assuranceLevel,
-      userAgent: requestHeaders.get("user-agent"),
-      accessTokenExpiresAt,
-      refreshExpiresAt,
-    },
-  });
-  const user = await db.webUser.findUnique({
-    where: { id: userId },
-    select: { emailVerified: true, telegramId: true },
-  });
-
-  await setAccessCookie({
-    sessionId: session.id,
-    userId,
-    expiresAt: accessTokenExpiresAt,
-    assuranceLevel,
-    emailVerified: user?.emailVerified,
-    telegramId: user?.telegramId,
-  });
-
-  cookieStore.set(sessionCookieNames.refresh, refreshToken, {
-    httpOnly: true,
-    secure: env.cookieSecure,
-    sameSite: env.cookieSameSite,
-    path: "/",
-    expires: refreshExpiresAt,
-  });
-
-  authDebugLog("session_create_success", {
-    sessionId: session.id,
-    userId,
-    authMethod: session.authMethod,
-    assuranceLevel: session.assuranceLevel,
-    accessTokenExpiresAt,
-    refreshExpiresAt,
-    hasRemnashopTokens: true,
-  });
-
-  return session;
 }
 
 export async function getCurrentUser() {

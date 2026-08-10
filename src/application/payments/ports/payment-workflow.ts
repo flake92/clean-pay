@@ -1,8 +1,7 @@
-import type { PaymentExecution } from "@/application/payments/ports/checkout";
 import type { ExtendRequest, PaymentInitResponse, PurchaseRequest } from "@/shared/domain/payments";
 import type { PlanOffer, SubscriptionOffersResponse } from "@/shared/domain/subscriptions";
 
-export type PaymentOperationRequest =
+type PaymentOperationRequest =
   | { kind: "PURCHASE"; payload: PurchaseRequest }
   | { kind: "EXTEND"; payload: ExtendRequest };
 
@@ -68,5 +67,3 @@ export interface PaymentWorkflowGateway {
   logAuditFailure(error: unknown, input: { operationId: string; kind: PaymentWorkflowInput["kind"] }): void;
   logSettlementFailure(error: unknown, input: { operationId: string; kind: PaymentWorkflowInput["kind"] }): void;
 }
-
-export type PaymentWorkflow = (input: PaymentWorkflowInput, idempotencyKey: string) => Promise<PaymentExecution>;

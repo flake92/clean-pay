@@ -45,9 +45,15 @@ Payment status/history refresh and maintenance batches are application workflows
 
 ## HTTP boundary
 
-Route handlers are retained only for real HTTP contracts: health/readiness, service-to-service callbacks, payment reconciliation and third-party authentication callbacks. A route handler decodes an endpoint-specific request, invokes one use case and presents an endpoint-specific response.
+Route handlers are retained only for real HTTP contracts: health/readiness/metrics, service-to-service callbacks, payment reconciliation and third-party authentication callbacks. A route handler decodes an endpoint-specific request, invokes one use case and presents an endpoint-specific response. Internal readiness and Prometheus metrics endpoints use the same dedicated service secret and are never exposed as browser API contracts.
 
 The browser UI does not use internal `/api/bff/*` routes. Those routes are removed as their callers migrate to Server Components and Server Actions.
+
+## Infrastructure module boundaries
+
+Large provider adapters are split by responsibility while retaining narrow compatibility facades. Remnashop HTTP transport and DTO normalization, Telegram session recovery and provider authorization are separate modules. Payment idempotency keeps operation contracts and persisted snapshots separate from orchestration. Web-session token handling, creation policy and revocation are likewise independent from the public session service. These modules may collaborate, but must not recreate application workflows inside infrastructure.
+
+Operational metrics use bounded, normalized labels. Request IDs and W3C trace context are propagated to upstream HTTP calls where available; secrets, raw user identifiers and unbounded error text must never become metric labels or log fields.
 
 ## Error handling
 

@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 
 const logEvents = [
   {
-    file: "src/backend/integrations/remnashop/client.ts",
+    file: "src/backend/integrations/remnashop/api-client.ts",
     events: [
       "remnashop_request_sent",
       "remnashop_response_received",

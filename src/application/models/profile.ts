@@ -1,4 +1,4 @@
-export type ProfileUserViewModel = {
+type ProfileUserViewModel = {
   authType: string;
   email: string | null;
   emailVerified: boolean;

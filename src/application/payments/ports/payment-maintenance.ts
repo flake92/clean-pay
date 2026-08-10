@@ -1,16 +1,24 @@
 export type PaymentReconciliationClaim = {
   context: unknown; operationId: string; ownerMatches: boolean; failureCount: number;
 };
-export type PaymentReconciliationResult = "SUCCEEDED" | "IN_PROGRESS" | "UNKNOWN" | "MANUAL_REQUIRED" | "RETRY_READY";
-export type PaymentRecovery = {
+type PaymentRecovery = {
   context: unknown;
   state: "SUCCEEDED" | "IN_PROGRESS" | "UNKNOWN" | "MANUAL_REQUIRED";
   retryAfterSeconds: number | null;
 } | null;
-export type PaymentHistoryCandidate = { userId: string; upstreamAccountId: string };
+type PaymentHistoryCandidate = { userId: string; upstreamAccountId: string };
 export type PaymentHistoryClaim = { context: unknown; cursor: string | null };
 export type PaymentHistoryAuthorization = { context: unknown };
 export type PaymentHistoryPage = { context: unknown };
+
+export type PaymentReconciliationBacklog = {
+  pending: number;
+  due: number;
+  manualRequired: number;
+  oldestAgeSeconds: number;
+  maximumAttemptCount: number;
+  totalFailureCount: number;
+};
 
 export interface PaymentReconciliationGateway {
   claimReconciliation(userId?: string): Promise<PaymentReconciliationClaim | null>;
@@ -24,6 +32,7 @@ export interface PaymentReconciliationGateway {
 }
 
 export interface PaymentMaintenanceRunner extends PaymentReconciliationGateway {
+  readReconciliationBacklog?(): Promise<PaymentReconciliationBacklog>;
   listHistoryCandidates(limit: number): Promise<PaymentHistoryCandidate[]>;
   claimHistory(candidate: PaymentHistoryCandidate): Promise<PaymentHistoryClaim | null>;
   authorizeHistory(claim: PaymentHistoryClaim): Promise<PaymentHistoryAuthorization>;

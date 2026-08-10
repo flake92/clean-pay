@@ -165,7 +165,10 @@ TURNSTILE_SECRET_KEY=<production secret key>
 
 ### Сверка платежей
 
-Фоновая сверка неоднозначных результатов платежей по умолчанию выключена. Включайте её только после проверки совместимости admin API Remnashop:
+Фоновая сверка неоднозначных результатов платежей включена в новых конфигурациях.
+`deploy.sh init` генерирует отдельный секрет, запускает worker и проверяет его heartbeat.
+Перед первым запуском подтвердите совместимость admin API Remnashop; для старого
+upstream явно установите `PAYMENT_RECONCILIATION_ENABLED=false` до его обновления:
 
 ```dotenv
 PAYMENT_RECONCILIATION_ENABLED=true
@@ -311,6 +314,18 @@ docker compose --env-file deploy/prod/.env -f deploy/prod/docker-compose.yml exe
   node -e "fetch('http://127.0.0.1:4000/api/internal/health/readiness',{headers:{'x-clean-pay-readiness-secret':process.env.READINESS_INTERNAL_SECRET}}).then(async r=>{console.log(r.status,await r.text());process.exit(r.ok?0:1)})"
 ```
 
+Метрики Prometheus защищены тем же внутренним секретом и доступны только через
+`/api/internal/metrics`. В них входят задержки и ошибки Remnashop/Remnawave,
+состояние readiness, отказы rate limit/concurrency, ротация сессий, а также размер,
+возраст и число повторов очереди сверки платежей. Для очереди настройте оповещения
+как минимум на `manual_required > 0`, `oldest_age_seconds > 900` и устойчивый рост
+`due`. Пример безопасной проверки из контейнера:
+
+```bash
+docker compose --env-file deploy/prod/.env -f deploy/prod/docker-compose.yml exec -T app \
+  node -e "fetch('http://127.0.0.1:4000/api/internal/metrics',{headers:{'x-clean-pay-readiness-secret':process.env.READINESS_INTERNAL_SECRET}}).then(async r=>{console.log(r.status,await r.text());process.exit(r.ok?0:1)})"
+```
+
 Частые причины ошибок:
 
 - `502` — приложение не запущено или reverse proxy направлен на неверный upstream;
@@ -330,11 +345,20 @@ docker compose --env-file deploy/prod/.env -f deploy/prod/docker-compose.yml exe
 
 ## Разработка
 
+`npm run build` использует только для отсутствующих переменных безопасные
+build-only значения. Они не записываются в runtime-конфигурацию и не заменяют
+обязательную проверку `deploy/prod/.env` перед запуском production-контейнера.
+
+Единственный поддерживаемый менеджер пакетов — npm; источником воспроизводимой
+установки является `package-lock.json`. Production-образ собирается только из
+корневого `Dockerfile`.
+
 ```bash
 npm ci
 npm run lint
 npm run typecheck
 npm run test:coverage
+npm run test:coverage:frontend
 npm run build
 ```
 

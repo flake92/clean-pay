@@ -1,5 +1,10 @@
 import { getEnv } from "@/backend/config/env";
 import { logger } from "@/backend/observability/logger";
+import { recordUpstreamRequest } from "@/backend/observability/metrics";
+import {
+  currentRequestTrace,
+  tracedHeaders,
+} from "@/backend/observability/request-trace";
 import { ServiceError } from "@/backend/errors/service-error";
 
 type TurnstileResponse = {
@@ -36,6 +41,7 @@ export async function verifyTurnstileToken(
 
   let response: Response;
   const startedAt = Date.now();
+  const trace = await currentRequestTrace();
 
   logger.info("turnstile_request_sent", {
     method: "POST",
@@ -50,11 +56,18 @@ export async function verifyTurnstileToken(
   try {
     response = await fetch(env.turnstile.verifyUrl, {
       method: "POST",
+      headers: tracedHeaders(undefined, trace),
       body,
       cache: "no-store",
       signal: AbortSignal.timeout(10_000),
     });
   } catch (error) {
+    recordUpstreamRequest({
+      service: "turnstile",
+      operation: "/turnstile/v0/siteverify",
+      outcome: "unavailable",
+      durationMs: Date.now() - startedAt,
+    });
     logger.error("turnstile_request_failed", {
       method: "POST",
       durationMs: Date.now() - startedAt,
@@ -74,6 +87,12 @@ export async function verifyTurnstileToken(
   try {
     result = await response.json() as TurnstileResponse;
   } catch (error) {
+    recordUpstreamRequest({
+      service: "turnstile",
+      operation: "/turnstile/v0/siteverify",
+      outcome: "unavailable",
+      durationMs: Date.now() - startedAt,
+    });
     throw new ServiceError("UPSTREAM_UNAVAILABLE", 503, "Turnstile returned an invalid response", {
       upstreamStatus: response.status,
       upstreamPath: env.turnstile.verifyUrl,
@@ -95,6 +114,20 @@ export async function verifyTurnstileToken(
   const expectedHostname = new URL(env.appUrl).hostname.toLowerCase();
   const responseHostname = result?.hostname?.toLowerCase();
   const responseAction = result?.action;
+  const challengeAccepted = Boolean(
+    result?.success &&
+    responseHostname === expectedHostname &&
+    responseAction === expectedAction,
+  );
+
+  recordUpstreamRequest({
+    service: "turnstile",
+    operation: "/turnstile/v0/siteverify",
+    outcome: response.ok
+      ? challengeAccepted ? "success" : "rejected"
+      : "unavailable",
+    durationMs: Date.now() - startedAt,
+  });
 
   if (!response.ok) {
     throw new ServiceError("UPSTREAM_UNAVAILABLE", 503, "Turnstile verification unavailable", {
@@ -104,9 +137,7 @@ export async function verifyTurnstileToken(
   }
 
   if (
-    !result?.success ||
-    responseHostname !== expectedHostname ||
-    responseAction !== expectedAction
+    !challengeAccepted
   ) {
     throw new ServiceError("FORBIDDEN", 403, "Turnstile verification failed", {
       upstreamStatus: response.status,

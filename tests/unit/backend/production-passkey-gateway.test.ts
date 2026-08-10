@@ -108,6 +108,13 @@ describe("production passkey gateway through application workflows", () => {
     expect(mocks.auditLog).toHaveBeenCalledWith(expect.objectContaining({ action: "passkey_registered" }));
   });
 
+  it("upgrades the registration session through the production adapter", async () => {
+    mocks.upgradeCurrentSessionToFull.mockResolvedValue({ id: "session-full" });
+
+    await expect(gateway.upgradeRegistrationSession()).resolves.toBeUndefined();
+    expect(mocks.upgradeCurrentSessionToFull).toHaveBeenCalledOnce();
+  });
+
   it("generates login options under Turnstile, rate and concurrency guards", async () => {
     await expect(beginPasskeyLogin(gateway, { email: " U@Example.com ", turnstileToken: "human" })).resolves.toEqual({ ok: true, options: { challenge: "authentication" } });
     expect(mocks.verifyTurnstileToken).toHaveBeenCalledWith("human", "auth_login");

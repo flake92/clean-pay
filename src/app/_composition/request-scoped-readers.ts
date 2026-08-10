@@ -20,8 +20,8 @@ const subscriptions = createRemnashopSubscriptionReader(authorizeVerifiedSession
 export const requestAuthProfileGateway = createProductionAuthProfileGateway(
   authorizeProfileSession,
 );
-export const requestCabinetReader = createProductionCabinetReader(subscriptions);
-export const requestPaymentHistoryGateway = createProductionPaymentHistoryGateway(
+const requestCabinetReader = createProductionCabinetReader(subscriptions);
+const requestPaymentHistoryGateway = createProductionPaymentHistoryGateway(
   authorizeVerifiedSession,
 );
 

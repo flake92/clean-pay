@@ -159,13 +159,13 @@ compose() (
     TURNSTILE_SITE_KEY
 
   if [ "$MODE" = "remnashop" ]; then
-    if [ "$(env_value PAYMENT_RECONCILIATION_ENABLED false)" = "true" ]; then
+    if [ "$(env_value PAYMENT_RECONCILIATION_ENABLED true)" = "true" ]; then
       docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" -f "$ROOT_DIR/docker-compose.remnashop.yml" --profile reconciliation "$@"
     else
       docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" -f "$ROOT_DIR/docker-compose.remnashop.yml" "$@"
     fi
   else
-    if [ "$(env_value PAYMENT_RECONCILIATION_ENABLED false)" = "true" ]; then
+    if [ "$(env_value PAYMENT_RECONCILIATION_ENABLED true)" = "true" ]; then
       docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" --profile reconciliation "$@"
     else
       docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" "$@"
@@ -174,7 +174,7 @@ compose() (
 )
 
 assert_reconciliation_worker() {
-  [ "$(env_value PAYMENT_RECONCILIATION_ENABLED false)" = "true" ] || return 0
+  [ "$(env_value PAYMENT_RECONCILIATION_ENABLED true)" = "true" ] || return 0
 
   attempts=0
   last_status="container not found"

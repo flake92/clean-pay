@@ -4,6 +4,7 @@ import { redisCommand } from '@/backend/cache/redis';
 import { getEnv } from '@/backend/config/env';
 import { ServiceError } from '@/backend/errors/service-error';
 import { logger } from '@/backend/observability/logger';
+import { recordOperationalEvent } from '@/backend/observability/metrics';
 
 type RateLimitIdentity = {
   action: string;
@@ -119,6 +120,10 @@ export async function assertRateLimit(options: RateLimitOptions) {
       retryAfterSeconds = Math.min(options.windowSeconds, 30);
     }
 
+    recordOperationalEvent(
+      capacityExceeded ? "rate_limit_capacity_rejected" : "rate_limit_target_rejected",
+      options.action,
+    );
     throw new ServiceError(
       'RATE_LIMITED',
       429,
@@ -161,6 +166,7 @@ export async function withAuthConcurrency<T>(
   }
 
   if (acquired !== 1) {
+    recordOperationalEvent("auth_concurrency_saturated", action);
     throw new ServiceError("UPSTREAM_UNAVAILABLE", 503, "Authentication capacity is temporarily exhausted", {
       retryAfterSeconds: 2,
     });
@@ -172,6 +178,7 @@ export async function withAuthConcurrency<T>(
     try {
       await redisCommand(["ZREM", key, token]);
     } catch (error) {
+      recordOperationalEvent("auth_concurrency_release_failed", action);
       logger.error("auth_concurrency_release_failed", {
         action,
         errorName: error instanceof Error ? error.name : "UnknownError",

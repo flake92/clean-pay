@@ -277,6 +277,91 @@ describe("payment records", () => {
     });
   });
 
+  it("preserves non-unique insert failures", async () => {
+    const failure = new TypeError("database write failed");
+    mocks.prisma.paymentRecord.findUnique.mockResolvedValue(null);
+    mocks.prisma.paymentRecord.create.mockRejectedValue(failure);
+
+    await expect(recordPayment({
+      userId: "user-1",
+      gatewayType: "YOOKASSA",
+      payment: {
+        payment_id: "payment-failed",
+        purchase_type: "NEW",
+        status: "pending",
+        final_amount: "100.00",
+        currency: "RUB",
+        payment_url: null,
+        is_free: false,
+      },
+    })).rejects.toBe(failure);
+  });
+
+  it("fails closed when an insert race has no compatible winner", async () => {
+    const unique = new Prisma.PrismaClientKnownRequestError("unique", {
+      code: "P2002",
+      clientVersion: "7.9.0",
+    });
+    const input = {
+      userId: "user-1",
+      gatewayType: "YOOKASSA",
+      payment: {
+        payment_id: "payment-race-owner",
+        purchase_type: "NEW",
+        status: "pending" as const,
+        final_amount: "100.00",
+        currency: "RUB",
+        payment_url: null,
+        is_free: false,
+      },
+    };
+    mocks.prisma.paymentRecord.create.mockRejectedValue(unique);
+    mocks.prisma.paymentRecord.findUnique
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({ userId: "another-user", operationId: null })
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({ userId: "user-1", operationId: "another-operation" });
+
+    await expect(recordPayment(input)).rejects.toMatchObject({ code: "CONFLICT" });
+    await expect(recordPayment(input)).rejects.toMatchObject({ code: "CONFLICT" });
+    await expect(recordPayment(input, { operationId: "operation-1" }))
+      .rejects.toMatchObject({ code: "CONFLICT" });
+  });
+
+  it("bounds repeated compatible insert races", async () => {
+    const unique = new Prisma.PrismaClientKnownRequestError("unique", {
+      code: "P2002",
+      clientVersion: "7.9.0",
+    });
+    mocks.prisma.paymentRecord.create.mockRejectedValue(unique);
+    mocks.prisma.paymentRecord.findUnique.mockImplementation(async () => {
+      const call = mocks.prisma.paymentRecord.findUnique.mock.calls.length;
+      return call % 2 === 1
+        ? null
+        : { userId: "user-1", operationId: null };
+    });
+
+    await expect(recordPayment({
+      userId: "user-1",
+      gatewayType: "YOOKASSA",
+      payment: {
+        payment_id: "payment-contended-insert",
+        purchase_type: "NEW",
+        status: "pending",
+        final_amount: "100.00",
+        currency: "RUB",
+        payment_url: null,
+        is_free: false,
+      },
+    })).rejects.toMatchObject({
+      code: "CONFLICT",
+      message: "Payment record kept changing during insert",
+    });
+    expect(mocks.prisma.paymentRecord.create).toHaveBeenCalledTimes(3);
+  });
+
   it("never updates a payment id owned by another user", async () => {
     mocks.prisma.paymentRecord.findUnique.mockResolvedValue({
       id: "record-foreign",

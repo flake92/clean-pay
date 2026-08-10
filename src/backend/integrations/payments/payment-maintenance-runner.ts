@@ -11,6 +11,7 @@ import {
   failPaymentReconciliation,
   markPaymentReconciliationManual,
   PaymentReconciliationManualError,
+  readPaymentReconciliationBacklog,
   releaseReconciliationClaim,
   resetMissingUpstreamOperation,
   type PaymentReconciliationClaim as BackendReconciliationClaim,
@@ -38,6 +39,7 @@ function historyPage(value: PaymentHistoryPage) { return value.context as Remnas
 function recovery(value: { context: unknown }) { return value.context as RemnashopPaymentRecovery; }
 
 export const productionPaymentMaintenanceRunner: PaymentMaintenanceRunner = {
+  readReconciliationBacklog: readPaymentReconciliationBacklog,
   async claimReconciliation(userId) {
     const claim = await claimUnknownPaymentOperation({ userId });
     return claim ? {

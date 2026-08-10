@@ -38,6 +38,60 @@ export class PaymentReconciliationManualError extends Error {
   }
 }
 
+export async function readPaymentReconciliationBacklog() {
+  const rows = await prisma.$queryRaw<Array<{
+    pending: number;
+    due: number;
+    manualRequired: number;
+    oldestAgeSeconds: number;
+    maximumAttemptCount: number;
+    totalFailureCount: number;
+  }>>(Prisma.sql`
+    SELECT
+      COUNT(*) FILTER (
+        WHERE "status" IN ('DISPATCHING', 'OUTCOME_UNKNOWN')
+          AND "reconciledAt" IS NULL
+      )::int AS "pending",
+      COUNT(*) FILTER (
+        WHERE "status" IN ('DISPATCHING', 'OUTCOME_UNKNOWN')
+          AND "reconciledAt" IS NULL
+          AND ("reconcileNextAttemptAt" IS NULL OR "reconcileNextAttemptAt" <= clock_timestamp())
+          AND ("reconcileLeaseExpiresAt" IS NULL OR "reconcileLeaseExpiresAt" <= clock_timestamp())
+      )::int AS "due",
+      COUNT(*) FILTER (
+        WHERE "reconcileErrorSnapshot" ->> 'code' = 'MANUAL_REQUIRED'
+          AND "reconciledAt" IS NULL
+      )::int AS "manualRequired",
+      COALESCE(EXTRACT(EPOCH FROM (
+        clock_timestamp() - (
+          MIN(COALESCE("outcomeUnknownAt", "dispatchedAt", "createdAt")) FILTER (
+            WHERE "status" IN ('DISPATCHING', 'OUTCOME_UNKNOWN')
+              AND "reconciledAt" IS NULL
+          )
+        )
+      )), 0)::int AS "oldestAgeSeconds",
+        COALESCE(MAX("reconcileAttemptCount") FILTER (
+          WHERE "status" IN ('DISPATCHING', 'OUTCOME_UNKNOWN')
+            AND "reconciledAt" IS NULL
+        ), 0)::int AS "maximumAttemptCount",
+        COALESCE(SUM("reconcileFailureCount") FILTER (
+          WHERE "status" IN ('DISPATCHING', 'OUTCOME_UNKNOWN')
+            AND "reconciledAt" IS NULL
+        ), 0)::int AS "totalFailureCount"
+    FROM "PaymentOperation"
+  `);
+  const row = rows[0];
+
+  return {
+    pending: row?.pending ?? 0,
+    due: row?.due ?? 0,
+    manualRequired: row?.manualRequired ?? 0,
+    oldestAgeSeconds: Math.max(0, row?.oldestAgeSeconds ?? 0),
+    maximumAttemptCount: row?.maximumAttemptCount ?? 0,
+    totalFailureCount: row?.totalFailureCount ?? 0,
+  };
+}
+
 function reconciliationClaimHash(token: string) {
   return sha256(`clean-pay:payment-reconciliation:claim:v1:${token}`);
 }

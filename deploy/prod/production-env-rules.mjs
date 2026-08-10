@@ -279,6 +279,13 @@ export function validateProductionEnvironment(environment) {
     required("AUDIT_IP_HASH_SECRET"),
     32,
   );
+  boundedInteger(
+    "TRUSTED_PROXY_HOPS",
+    required("TRUSTED_PROXY_HOPS"),
+    undefined,
+    1,
+    8,
+  );
   const rateLimitIdentitySecret = strongSecret(
     "RATE_LIMIT_IDENTITY_SECRET",
     required("RATE_LIMIT_IDENTITY_SECRET"),
@@ -350,7 +357,7 @@ export function validateProductionEnvironment(environment) {
   const paymentReconciliationEnabled = bool(
     "PAYMENT_RECONCILIATION_ENABLED",
     optional("PAYMENT_RECONCILIATION_ENABLED"),
-    false,
+    true,
   );
   boundedInteger(
     "PAYMENT_RECONCILIATION_BATCH_SIZE",
