@@ -18,7 +18,7 @@ export type AuthProfileSession = {
   };
 };
 
-export type AuthorizedAuthProfile = {
+type AuthorizedAuthProfile = {
   context: unknown;
   session: AuthProfileSession;
   upstreamUserId: string;

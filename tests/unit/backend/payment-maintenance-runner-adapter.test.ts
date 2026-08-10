@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
+  readPaymentReconciliationBacklog: vi.fn(),
   claimUnknownPaymentOperation: vi.fn(), failPaymentReconciliation: vi.fn(), completeReconciledPayment: vi.fn(),
   resetMissingUpstreamOperation: vi.fn(), releaseReconciliationClaim: vi.fn(), markPaymentReconciliationManual: vi.fn(),
   listDuePaymentHistoryCandidates: vi.fn(), claimPaymentHistorySync: vi.fn(), loadCurrentPaymentHistoryCredential: vi.fn(),
@@ -14,6 +15,7 @@ vi.mock("@/backend/integrations/payments/payment-reconciliation-service", () => 
   }
   return {
     PaymentReconciliationManualError,
+    readPaymentReconciliationBacklog: mocks.readPaymentReconciliationBacklog,
     claimUnknownPaymentOperation: mocks.claimUnknownPaymentOperation,
     failPaymentReconciliation: mocks.failPaymentReconciliation,
     completeReconciledPayment: mocks.completeReconciledPayment,
@@ -48,11 +50,16 @@ const applicationClaim = { context: backendClaim, operationId: "operation-1", fa
 describe("production payment maintenance runner adapter", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.readPaymentReconciliationBacklog.mockResolvedValue({
+      pending: 0, due: 0, manualRequired: 0, oldestAgeSeconds: 0,
+      maximumAttemptCount: 0, totalFailureCount: 0,
+    });
     mocks.claimUnknownPaymentOperation.mockResolvedValue(backendClaim);
     mocks.failPaymentReconciliation.mockResolvedValue(undefined);
   });
 
   it("maps claimed reconciliation ownership and absent work", async () => {
+    await expect(runner.readReconciliationBacklog!()).resolves.toMatchObject({ pending: 0 });
     await expect(runner.claimReconciliation("user-1")).resolves.toMatchObject({
       operationId: "operation-1", failureCount: 2, ownerMatches: true,
     });

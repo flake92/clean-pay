@@ -1,6 +1,7 @@
 import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import http from "node:http";
+import https from "node:https";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -77,7 +78,7 @@ function composeArgs(...extra) {
     base.push("-f", file);
   }
 
-  if (readEnvValue("PAYMENT_RECONCILIATION_ENABLED", "false") === "true") {
+  if (readEnvValue("PAYMENT_RECONCILIATION_ENABLED", "true") === "true") {
     base.push("--profile", "reconciliation");
   }
 
@@ -139,7 +140,7 @@ function sleepSync(milliseconds) {
 }
 
 function assertReconciliationWorkerHealthy() {
-  if (readEnvValue("PAYMENT_RECONCILIATION_ENABLED", "false") !== "true") {
+  if (readEnvValue("PAYMENT_RECONCILIATION_ENABLED", "true") !== "true") {
     return;
   }
 
@@ -325,14 +326,19 @@ function validateProductionEnvFile() {
 
 function get(url, headers = {}) {
   return new Promise((resolve, reject) => {
-    const request = http.get(url, { headers }, (response) => {
+    const transport = new URL(url).protocol === "https:" ? https : http;
+    const request = transport.get(url, { headers }, (response) => {
       let body = "";
 
       response.setEncoding("utf8");
       response.on("data", (chunk) => {
         body += chunk;
       });
-      response.on("end", () => resolve({ status: response.statusCode, body }));
+      response.on("end", () => resolve({
+        status: response.statusCode,
+        body,
+        headers: response.headers,
+      }));
     });
 
     request.on("error", reject);
@@ -340,6 +346,28 @@ function get(url, headers = {}) {
       request.destroy(new Error(`Timed out waiting for ${url}`));
     });
   });
+}
+
+async function verifyExternalSecurityHeaders() {
+  const appUrl = new URL(readEnvValue("APP_URL", ""));
+  const livenessUrl = new URL("/api/health/liveness", appUrl).toString();
+  const response = await get(livenessUrl);
+  const hsts = String(response.headers["strict-transport-security"] ?? "");
+  const csp = String(response.headers["content-security-policy"] ?? "");
+  const hstsMaxAge = Number(hsts.match(/(?:^|;)\s*max-age=(\d+)/i)?.[1] ?? 0);
+  const scriptPolicy = csp.match(/(?:^|;)\s*script-src\s+([^;]+)/i)?.[1] ?? "";
+
+  if (response.status !== 200) {
+    throw new Error(`External liveness returned ${response.status}`);
+  }
+  if (!Number.isSafeInteger(hstsMaxAge) || hstsMaxAge < 31_536_000) {
+    throw new Error("External HTTPS response is missing a one-year HSTS policy");
+  }
+  if (!/'nonce-[^']+'/.test(scriptPolicy) || /'unsafe-inline'/i.test(scriptPolicy)) {
+    throw new Error("External HTTPS response is missing the nonce-based script CSP");
+  }
+
+  console.log(`OK ${livenessUrl} security headers`);
 }
 
 async function verify() {
@@ -364,6 +392,7 @@ async function verify() {
         console.log(response.body);
         assertReconciliationWorkerHealthy();
         assertRetentionWorkerHealthy();
+        await verifyExternalSecurityHeaders();
         return;
       }
 

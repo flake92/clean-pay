@@ -1,10 +1,23 @@
 import { Prisma } from "@prisma/client";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+const databaseMocks = vi.hoisted(() => ({
+  prisma: {
+    $transaction: vi.fn(),
+  },
+}));
+
+vi.mock("@/backend/database/prisma", () => ({
+  prisma: databaseMocks.prisma,
+}));
 
 import { paymentUpstreamOwnerHash } from "@/backend/payments/hashes";
 import {
+  assertNoActivePaymentDispatches,
+  lockPaymentOwnerFence,
   preflightPaymentOperationsForUserMerge,
   transferPaymentOperationsForUserMerge,
+  withPaymentOwnerChangeFence,
 } from "@/backend/integrations/payments/payment-user-merge-service";
 
 type TransactionOptions = {
@@ -14,6 +27,8 @@ type TransactionOptions = {
     userId: string;
     idempotencyKeyHash: string;
     upstreamKey: string;
+    status?: string;
+    leaseExpiresAt?: Date | null;
   }>;
 };
 
@@ -66,6 +81,110 @@ function transaction(
 }
 
 describe("payment operations during user merge", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("normalizes advisory locks and skips dispatch lookup for an empty owner set", async () => {
+    const tx = transaction() as unknown as {
+      $queryRaw: ReturnType<typeof vi.fn>;
+      paymentOperation: { findFirst: ReturnType<typeof vi.fn> };
+    };
+    tx.paymentOperation.findFirst = vi.fn();
+
+    await expect(lockPaymentOwnerFence(
+      tx as unknown as Prisma.TransactionClient,
+      ["user-b", "", "user-a", "user-b"],
+    )).resolves.toEqual(["user-a", "user-b"]);
+    await expect(assertNoActivePaymentDispatches(
+      tx as unknown as Prisma.TransactionClient,
+      ["", ""],
+    )).resolves.toBeUndefined();
+
+    expect(tx.$queryRaw).toHaveBeenCalledTimes(2);
+    expect(tx.paymentOperation.findFirst).not.toHaveBeenCalled();
+  });
+
+  it("blocks owner changes while a payment dispatch is active", async () => {
+    const tx = transaction() as unknown as {
+      paymentOperation: { findFirst: ReturnType<typeof vi.fn> };
+    };
+    tx.paymentOperation.findFirst = vi.fn().mockResolvedValue({ id: "operation-active" });
+
+    await expect(assertNoActivePaymentDispatches(
+      tx as unknown as Prisma.TransactionClient,
+      ["user-1"],
+    )).rejects.toMatchObject({ code: "ACCOUNT_MERGE_REQUIRED", status: 409 });
+  });
+
+  it("fences every normalized identity and revalidates the mapping", async () => {
+    const work = vi.fn().mockResolvedValue("done");
+    const tx = {
+      webUser: {
+        findMany: vi.fn()
+          .mockResolvedValueOnce([{ id: "mapped-user" }])
+          .mockResolvedValueOnce([{ id: "mapped-user" }]),
+      },
+      paymentOperation: { findFirst: vi.fn().mockResolvedValue(null) },
+      $queryRaw: vi.fn().mockResolvedValue([{ locked: 1 }]),
+    };
+    databaseMocks.prisma.$transaction.mockImplementation(
+      async (callback: (value: typeof tx) => unknown) => callback(tx),
+    );
+
+    await expect(withPaymentOwnerChangeFence({
+      userIds: ["explicit-user", "explicit-user"],
+      upstreamAccountIds: ["upstream-1", "upstream-1"],
+      emails: [null, " User@Example.COM ", "user@example.com"],
+      telegramIds: [undefined, 42, "42"],
+      work,
+    })).resolves.toBe("done");
+
+    expect(tx.webUser.findMany).toHaveBeenCalledWith({
+      where: { OR: [
+        { id: { in: ["explicit-user"] } },
+        { remnashopUserId: { in: ["upstream-1"] } },
+        { email: { in: ["user@example.com"] } },
+        { telegramId: { in: ["42"] } },
+      ] },
+      select: { id: true },
+    });
+    expect(tx.paymentOperation.findFirst).toHaveBeenCalledOnce();
+    expect(work).toHaveBeenCalledOnce();
+  });
+
+  it("fails closed when no owner can be fenced or the mapping changes under the lock", async () => {
+    const noOwnerTx = {
+      webUser: { findMany: vi.fn() },
+      paymentOperation: { findFirst: vi.fn() },
+      $queryRaw: vi.fn(),
+    };
+    databaseMocks.prisma.$transaction.mockImplementationOnce(
+      async (callback: (value: typeof noOwnerTx) => unknown) => callback(noOwnerTx),
+    );
+    await expect(withPaymentOwnerChangeFence({
+      work: vi.fn(),
+    })).rejects.toMatchObject({ code: "ACCOUNT_MERGE_REQUIRED" });
+
+    const changedTx = {
+      webUser: {
+        findMany: vi.fn()
+          .mockResolvedValueOnce([{ id: "user-before" }])
+          .mockResolvedValueOnce([{ id: "user-after" }]),
+      },
+      paymentOperation: { findFirst: vi.fn() },
+      $queryRaw: vi.fn().mockResolvedValue([{ locked: 1 }]),
+    };
+    databaseMocks.prisma.$transaction.mockImplementationOnce(
+      async (callback: (value: typeof changedTx) => unknown) => callback(changedTx),
+    );
+    await expect(withPaymentOwnerChangeFence({
+      emails: ["owner@example.com"],
+      work: vi.fn(),
+    })).rejects.toMatchObject({ code: "ACCOUNT_MERGE_REQUIRED" });
+    expect(changedTx.paymentOperation.findFirst).not.toHaveBeenCalled();
+  });
+
   it("locks users, operations and history while preserving a colliding source operation", async () => {
     const tx = transaction(undefined, {
       lockedOperations: [
@@ -286,6 +405,88 @@ describe("payment operations during user merge", () => {
       code: "ACCOUNT_MERGE_REQUIRED",
       status: 409,
     });
+  });
+
+  it("rejects a disappearing preflight owner and a colliding operation changed under lock", async () => {
+    const missingOwnerTx = transaction() as unknown as {
+      $queryRaw: ReturnType<typeof vi.fn>;
+    };
+    missingOwnerTx.$queryRaw.mockResolvedValueOnce([{ id: "target-user", remnashopUserId: "owner" }]);
+
+    await expect(preflightPaymentOperationsForUserMerge(
+      missingOwnerTx as unknown as Prisma.TransactionClient,
+      "target-user",
+      ["source-user"],
+    )).rejects.toMatchObject({ code: "ACCOUNT_MERGE_REQUIRED" });
+
+    const changedOperationTx = transaction(vi.fn().mockResolvedValue({ count: 0 }), {
+      lockedOperations: [
+        { id: "target", userId: "target-user", idempotencyKeyHash: "same", upstreamKey: "target-key" },
+        { id: "source", userId: "source-user", idempotencyKeyHash: "same", upstreamKey: "source-key" },
+      ],
+    });
+    await expect(transferPaymentOperationsForUserMerge(
+      changedOperationTx,
+      "target-user",
+      "target-owner",
+      ["source-user"],
+    )).rejects.toMatchObject({ code: "ACCOUNT_MERGE_REQUIRED" });
+  });
+
+  it("blocks in-flight merges and clears derived history when no upstream owner remains", async () => {
+    const activeTx = transaction(undefined, {
+      lockedOperations: [{
+        id: "active",
+        userId: "source-user",
+        idempotencyKeyHash: "key",
+        upstreamKey: "upstream-key",
+        status: "DISPATCHING",
+        leaseExpiresAt: null,
+      }],
+    });
+    await expect(transferPaymentOperationsForUserMerge(
+      activeTx,
+      "target-user",
+      "target-owner",
+      ["source-user"],
+    )).rejects.toMatchObject({ code: "ACCOUNT_MERGE_REQUIRED" });
+
+    const ownerlessTx = transaction(undefined, { targetOwner: null }) as unknown as {
+      paymentOperation: { count: ReturnType<typeof vi.fn> };
+      paymentHistorySyncState: { deleteMany: ReturnType<typeof vi.fn> };
+      $executeRaw: ReturnType<typeof vi.fn>;
+    };
+    ownerlessTx.paymentOperation.count.mockResolvedValue(0);
+    await expect(transferPaymentOperationsForUserMerge(
+      ownerlessTx as unknown as Prisma.TransactionClient,
+      "target-user",
+      null,
+      ["source-user"],
+    )).resolves.toBeUndefined();
+    expect(ownerlessTx.paymentHistorySyncState.deleteMany).toHaveBeenCalledOnce();
+    expect(ownerlessTx.$executeRaw).not.toHaveBeenCalled();
+  });
+
+  it("returns without writes when an unchanged owner has no operations to move", async () => {
+    const tx = transaction() as unknown as {
+      paymentOperation: { updateMany: ReturnType<typeof vi.fn> };
+      paymentHistorySyncState: {
+        deleteMany: ReturnType<typeof vi.fn>;
+        updateMany: ReturnType<typeof vi.fn>;
+      };
+      $executeRaw: ReturnType<typeof vi.fn>;
+    };
+
+    await expect(transferPaymentOperationsForUserMerge(
+      tx as unknown as Prisma.TransactionClient,
+      "target-user",
+      "target-owner",
+      [],
+    )).resolves.toBeUndefined();
+    expect(tx.paymentOperation.updateMany).not.toHaveBeenCalled();
+    expect(tx.paymentHistorySyncState.deleteMany).not.toHaveBeenCalled();
+    expect(tx.paymentHistorySyncState.updateMany).not.toHaveBeenCalled();
+    expect(tx.$executeRaw).not.toHaveBeenCalled();
   });
 
   it("rejects affected operations when no target owner was proven", async () => {

@@ -23,8 +23,11 @@ describe("deployment disk safety", () => {
 
   it("cleans stale build artifacts after a successful deployment", () => {
     expect(deploy).toContain("docker builder prune -af --filter until=24h");
-    expect(deploy.indexOf("cleanup_build_artifacts\n  sh")).toBeGreaterThan(
+    expect(deploy.indexOf("cleanup_build_artifacts\n  verify_external_security_headers")).toBeGreaterThan(
       deploy.indexOf("compose up -d --build"),
+    );
+    expect(deploy.indexOf("verify_external_security_headers\n  sh")).toBeGreaterThan(
+      deploy.indexOf("cleanup_build_artifacts\n  verify_external_security_headers"),
     );
   });
 });

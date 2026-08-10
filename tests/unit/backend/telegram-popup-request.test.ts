@@ -54,6 +54,27 @@ describe("Telegram popup HTTP contract", () => {
     ).rejects.toMatchObject({ code: "VALIDATION_ERROR", status: 413 });
   });
 
+  it("preserves the payload-limit error when cancelling the body stream also fails", async () => {
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new Uint8Array(65 * 1024));
+      },
+      cancel() {
+        return Promise.reject(new Error("stream cancellation failed"));
+      },
+    });
+    const streamed = new Request("http://clean-pay.local/auth/telegram/callback", {
+      method: "POST",
+      body,
+      duplex: "half",
+    } as RequestInit);
+
+    await expect(readTelegramPopupRequest(streamed)).rejects.toMatchObject({
+      code: "VALIDATION_ERROR",
+      status: 413,
+    });
+  });
+
   it("rejects a request without a body", async () => {
     const empty = new Request("http://clean-pay.local/auth/telegram/callback", { method: "POST" });
 

@@ -63,7 +63,11 @@ while (true) {
       const counts = parseReconciliationBatch(await response.json());
       const manualOperationIds = counts.manualRequiredOperationIds.join(",");
       const history = counts.history;
-      deployLog("info", "reconciliation_batch_completed", `Payment reconciliation batch completed: manual_operation_ids=${manualOperationIds || "none"}, history_failed=${history.failed}.`, {
+      const backlog = counts.backlog;
+      const severity = backlog.manualRequired > 0 || backlog.oldestAgeSeconds > 900
+        ? "warn"
+        : "info";
+      deployLog(severity, "reconciliation_batch_completed", `Payment reconciliation batch completed: manual_operation_ids=${manualOperationIds || "none"}, history_failed=${history.failed}, backlog=${backlog.pending}.`, {
         claimed: counts.claimed,
         succeeded: counts.succeeded,
         in_progress: counts.inProgress,
@@ -75,6 +79,12 @@ while (true) {
         history_applied: history.applied,
         history_completed: history.completed,
         history_failed: history.failed,
+        backlog_pending: backlog.pending,
+        backlog_due: backlog.due,
+        backlog_manual_required: backlog.manualRequired,
+        backlog_oldest_age_seconds: backlog.oldestAgeSeconds,
+        backlog_maximum_attempt_count: backlog.maximumAttemptCount,
+        backlog_total_failure_count: backlog.totalFailureCount,
       });
       writeHeartbeat();
     }

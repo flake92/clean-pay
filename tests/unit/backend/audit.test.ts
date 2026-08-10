@@ -31,6 +31,7 @@ vi.mock("@/backend/observability/logger", () => ({
 
 import {
   auditLog,
+  getTrustedClientIp,
   logTechnicalError,
   logTechnicalInfo,
   logTechnicalWarning,
@@ -42,6 +43,19 @@ describe("audit logging", () => {
     vi.clearAllMocks();
     vi.unstubAllEnvs();
     state.headers = new Headers({ "x-forwarded-for": "10.0.0.1, 10.0.0.2" });
+  });
+
+  it("attributes audit IP through the configured trusted proxy boundary", () => {
+    const headers = new Headers({
+      "x-forwarded-for": "203.0.113.77, 198.51.100.24, 10.0.0.5",
+      "x-real-ip": "192.0.2.99",
+    });
+
+    expect(getTrustedClientIp(headers, 1)).toBe("10.0.0.5");
+    expect(getTrustedClientIp(headers, 2)).toBe("198.51.100.24");
+    expect(getTrustedClientIp(headers, 0)).toBeNull();
+    expect(getTrustedClientIp(new Headers({ "x-real-ip": "192.0.2.99" }), 1))
+      .toBeNull();
   });
 
   it("writes sanitized audit log with hashed ip", async () => {

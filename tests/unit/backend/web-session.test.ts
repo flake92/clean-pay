@@ -276,6 +276,49 @@ describe("web session lifecycle", () => {
     });
   });
 
+  it("fails closed across missing, malformed, expired and database-missing access sessions", async () => {
+    await expect(getCurrentUser()).resolves.toBeNull();
+    await expect(refreshCurrentAccessCookie()).resolves.toBeNull();
+    await expect(upgradeCurrentSessionToFull()).resolves.toBeNull();
+
+    state.cookies.set("clean_pay_access", "malformed");
+    await expect(getCurrentUser()).resolves.toBeNull();
+
+    state.cookies.set("clean_pay_access", `${jsonBase64Url({
+      sid: "session-1",
+      uid: "user-1",
+      exp: Math.floor(Date.now() / 1000) + 60,
+    })}.wrong-signature`);
+    await expect(getCurrentUser()).resolves.toBeNull();
+
+    state.cookies.set("clean_pay_access", accessToken({
+      sid: "session-expired",
+      uid: "user-1",
+      exp: Math.floor(Date.now() / 1000) - 1,
+    }));
+    await expect(getCurrentUser()).resolves.toBeNull();
+
+    state.cookies.set("clean_pay_access", accessToken({
+      sid: "session-missing",
+      uid: "user-1",
+      exp: Math.floor(Date.now() / 1000) + 60,
+    }));
+    mocks.prisma.webSession.findFirst.mockResolvedValue(null);
+    await expect(getCurrentUser()).resolves.toBeNull();
+    await expect(getCurrentSession()).resolves.toBeNull();
+  });
+
+  it("requires an explicit transaction when replacing Remnashop sessions", async () => {
+    await expect(createWebSessionForRemnashopUser({
+      userId: "user-1",
+      remnashopAccessTokenEncrypted: "access",
+      remnashopRefreshTokenEncrypted: "refresh",
+      remnashopAccessExpiresAt: new Date("2099-01-01T00:00:00.000Z"),
+      remnashopRefreshExpiresAt: new Date("2099-02-01T00:00:00.000Z"),
+      replaceExistingSessions: true,
+    })).rejects.toThrow("requires an existing database transaction");
+  });
+
   it("falls back to refresh cookie when access is missing or invalid", async () => {
     state.cookies.set("clean_pay_refresh", "refresh-token");
     mocks.prisma.webSession.findUnique.mockResolvedValueOnce({
@@ -503,6 +546,35 @@ describe("web session lifecycle", () => {
       "clean_pay_access",
       "clean_pay_refresh",
     ]);
+  });
+
+  it("rejects password replacement when the locked session disappears or cannot be revoked", async () => {
+    const input = {
+      sessionId: "session-1",
+      userId: "user-1",
+      remnashopAccessTokenEncrypted: "reset-access",
+      remnashopRefreshTokenEncrypted: "reset-refresh",
+      remnashopAccessExpiresAt: new Date("2099-01-01T00:00:00.000Z"),
+      remnashopRefreshExpiresAt: new Date("2099-02-01T00:00:00.000Z"),
+    };
+
+    mocks.prisma.$queryRaw.mockResolvedValueOnce([]);
+    await expect(replaceWebSessionAfterPasswordChange(input))
+      .rejects.toMatchObject({ code: "UNAUTHORIZED" });
+
+    mocks.prisma.$queryRaw.mockResolvedValueOnce([{ id: "session-1" }]);
+    mocks.prisma.webSession.findUnique.mockResolvedValueOnce(null);
+    await expect(replaceWebSessionAfterPasswordChange(input))
+      .rejects.toMatchObject({ code: "UNAUTHORIZED" });
+
+    mocks.prisma.$queryRaw.mockResolvedValueOnce([{ id: "session-1" }]);
+    mocks.prisma.webSession.findUnique.mockResolvedValueOnce({
+      ...session,
+      revokedAt: null,
+    });
+    mocks.prisma.webSession.updateMany.mockResolvedValueOnce({ count: 0 });
+    await expect(replaceWebSessionAfterPasswordChange(input))
+      .rejects.toMatchObject({ code: "UNAUTHORIZED" });
   });
 
   it("fails closed and clears cookies when replacement creation fails", async () => {

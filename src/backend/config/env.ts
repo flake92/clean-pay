@@ -21,6 +21,7 @@ type AppEnv = {
   webJwtSecret: string;
   webRefreshSecret: string;
   auditIpHashSecret: string;
+  trustedProxyHops: number;
   rateLimitIdentitySecret: string;
   authRateLimitCapacity: number;
   authConcurrencyLimit: number;
@@ -302,6 +303,7 @@ export function getEnv(): AppEnv {
     webJwtSecret: required("WEB_JWT_SECRET"),
     webRefreshSecret: required("WEB_REFRESH_SECRET"),
     auditIpHashSecret: optional("AUDIT_IP_HASH_SECRET") ?? required("WEB_JWT_SECRET"),
+    trustedProxyHops: integer("TRUSTED_PROXY_HOPS", 0, 0, 8),
     rateLimitIdentitySecret: required("RATE_LIMIT_IDENTITY_SECRET"),
     authRateLimitCapacity: integer("AUTH_RATE_LIMIT_CAPACITY", 1000, 100, 1_000_000),
     authConcurrencyLimit: integer("AUTH_CONCURRENCY_LIMIT", 64, 1, 10_000),
@@ -326,7 +328,7 @@ export function getEnv(): AppEnv {
       pending: joinUrl(appUrl, "/payment/pending"),
     },
     paymentReconciliation: {
-      enabled: bool("PAYMENT_RECONCILIATION_ENABLED", false),
+      enabled: bool("PAYMENT_RECONCILIATION_ENABLED", true),
       secret: optional("PAYMENT_RECONCILIATION_SECRET"),
       batchSize: integer("PAYMENT_RECONCILIATION_BATCH_SIZE", 10, 1, 100),
       intervalSeconds: integer(

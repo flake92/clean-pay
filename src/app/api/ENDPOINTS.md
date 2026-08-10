@@ -10,6 +10,7 @@ Only contracts that must be reached by infrastructure outside the React applicat
 | `GET /api/health/liveness` | Container liveness probe |
 | `GET /api/health/readiness` | Public cached readiness result |
 | `GET /api/internal/health/readiness` | Secret-protected detailed readiness probe |
+| `GET /api/internal/metrics` | Secret-protected Prometheus operational metrics |
 | `POST /api/internal/payments/reconcile` | Secret-protected reconciliation worker entrypoint |
 | `GET /auth/telegram/start` | Telegram OIDC authorization redirect |
 | `GET /auth/telegram/callback` | Telegram OIDC callback |

@@ -31,10 +31,21 @@ function technicalMetadata(metadata: Record<string, unknown>) {
   return sanitizeValue(metadata);
 }
 
-function getIpFromHeaders(requestHeaders: Headers) {
-  const forwardedFor = requestHeaders.get("x-forwarded-for")?.split(",")[0]?.trim();
+export function getTrustedClientIp(
+  requestHeaders: Headers,
+  trustedProxyHops: number,
+) {
+  if (!Number.isSafeInteger(trustedProxyHops) || trustedProxyHops < 1) {
+    return null;
+  }
 
-  return forwardedFor || requestHeaders.get("x-real-ip") || null;
+  const addresses = (requestHeaders.get("x-forwarded-for") ?? "")
+    .split(",")
+    .map((value) => value.trim())
+    .filter(Boolean);
+  const clientIndex = addresses.length - trustedProxyHops;
+
+  return clientIndex >= 0 ? addresses[clientIndex] ?? null : null;
 }
 
 function hashIp(ip: string | null) {
@@ -61,7 +72,9 @@ export async function auditLog({
       userId: userId ?? null,
       action,
       severity,
-      ipHash: hashIp(getIpFromHeaders(requestHeaders)),
+      ipHash: hashIp(
+        getTrustedClientIp(requestHeaders, getEnv().trustedProxyHops),
+      ),
       metadata: sanitized as Record<string, unknown> | undefined,
     });
   } catch (error) {

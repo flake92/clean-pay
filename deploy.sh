@@ -53,7 +53,7 @@ compose() (
     TURNSTILE_ENABLED \
     TURNSTILE_SITE_KEY
 
-  if [ "$(env_value PAYMENT_RECONCILIATION_ENABLED false)" = "true" ]; then
+  if [ "$(env_value PAYMENT_RECONCILIATION_ENABLED true)" = "true" ]; then
     docker compose --env-file "$ENV_FILE" -f "$COMPOSE_PATH" --profile reconciliation "$@"
   else
     docker compose --env-file "$ENV_FILE" -f "$COMPOSE_PATH" "$@"
@@ -82,6 +82,7 @@ init() {
   replace_env AUDIT_IP_HASH_SECRET "$(openssl rand -hex 32)"
   replace_env RATE_LIMIT_IDENTITY_SECRET "$(openssl rand -hex 32)"
   replace_env READINESS_INTERNAL_SECRET "$(openssl rand -hex 32)"
+  replace_env PAYMENT_RECONCILIATION_SECRET "$(openssl rand -hex 32)"
   printf '\nCreated %s and generated local secrets.\n' "$ENV_FILE"
   printf 'Now run: nano deploy/prod/.env\nThen run: ./deploy.sh up\n'
 }
@@ -125,6 +126,31 @@ cleanup_build_artifacts() {
   docker image prune -f >/dev/null || true
 }
 
+verify_external_security_headers() {
+  app_url=$(env_value APP_URL)
+  [ -n "$app_url" ] || die "APP_URL is required for the external security-header check."
+  command -v curl >/dev/null 2>&1 || die "curl is required for the external security-header check."
+  headers=$(curl --fail --show-error --silent --head --max-time 15 "${app_url%/}/api/health/liveness") \
+    || die "External HTTPS liveness check failed."
+  hsts=$(printf '%s\n' "$headers" | tr -d '\r' | awk 'BEGIN{IGNORECASE=1} /^strict-transport-security:/{sub(/^[^:]*:[[:space:]]*/, ""); print; exit}')
+  csp=$(printf '%s\n' "$headers" | tr -d '\r' | awk 'BEGIN{IGNORECASE=1} /^content-security-policy:/{sub(/^[^:]*:[[:space:]]*/, ""); print; exit}')
+
+  hsts_max_age=$(printf '%s' "$hsts" | sed -n 's/.*[Mm][Aa][Xx]-[Aa][Gg][Ee]=\([0-9][0-9]*\).*/\1/p')
+  case "$hsts_max_age" in
+    ''|*[!0-9]*) die "External HTTPS response is missing a one-year HSTS policy." ;;
+  esac
+  [ "$hsts_max_age" -ge 31536000 ] \
+    || die "External HTTPS response is missing a one-year HSTS policy."
+  script_policy=$(printf '%s' "$csp" | sed -n 's/.*script-src[[:space:]]\([^;]*\).*/\1/p')
+  printf '%s' "$script_policy" | grep -Eq "'nonce-[^']+'" \
+    || die "External HTTPS response is missing a nonce-based script CSP."
+  if printf '%s' "$script_policy" | grep -Fiq "'unsafe-inline'"; then
+    die "External script CSP still permits unsafe-inline."
+  fi
+
+  printf 'External HTTPS security headers are valid.\n'
+}
+
 up() {
   require_env
   ensure_network
@@ -136,6 +162,7 @@ up() {
     exit 1
   fi
   cleanup_build_artifacts
+  verify_external_security_headers
   sh "$REMNASHOP_ROLLOUT_SCRIPT" "$ENV_FILE"
   printf '\nClean Pay is healthy. Following logs (Ctrl+C only closes the log view):\n\n'
   compose logs --tail=100 -f

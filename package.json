@@ -22,6 +22,7 @@
     "test:e2e:devcontainer": "node scripts/e2e-devcontainer.mjs",
     "test:e2e": "node scripts/e2e-devcontainer.mjs",
     "test:coverage": "node node_modules/vitest/vitest.mjs run --config config/vitest/base.mts --configLoader native --coverage",
+    "test:coverage:frontend": "node node_modules/vitest/vitest.mjs run --config config/vitest/frontend.mts --configLoader native --coverage",
     "prisma:generate": "node node_modules/prisma/build/index.js generate",
     "prisma:migrate": "node node_modules/prisma/build/index.js migrate dev",
     "prisma:studio": "node node_modules/prisma/build/index.js studio"
@@ -44,6 +45,8 @@
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
+    "@testing-library/react": "^16.3.0",
+    "@testing-library/user-event": "^14.6.1",
     "@types/node": "^24",
     "@types/react": "^19",
     "@types/react-dom": "^19",

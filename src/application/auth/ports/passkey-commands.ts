@@ -16,7 +16,7 @@ export type PasskeyRegistrationActor = {
 };
 
 export type PasskeyChallenge = { context: unknown; challenge: string; userId: string | null };
-export type PasskeyLoginAccount = {
+type PasskeyLoginAccount = {
   context: unknown;
   userId: string;
   credentials: Array<{ id: string; transports: string[] }>;
@@ -28,8 +28,8 @@ export type PasskeyCredential = {
   credentialId: string;
   oldCounter: bigint;
 };
-export type VerifiedRegistration = { context: unknown; credentialId: string };
-export type VerifiedAuthentication = { newCounter: bigint };
+type VerifiedRegistration = { context: unknown; credentialId: string };
+type VerifiedAuthentication = { newCounter: bigint };
 
 export interface PasskeyCommands {
   verifyHuman(token: string | null): Promise<void>;

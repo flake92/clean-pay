@@ -1,6 +1,6 @@
 import type { LinkAccountPasskeyViewModel } from "@/application/models/link-account";
 
-export type PasskeyManagementActor = {
+type PasskeyManagementActor = {
   userId: string;
   fullAssurance: boolean;
   email: string | null;
