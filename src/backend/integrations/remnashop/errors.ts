@@ -72,6 +72,14 @@ export function normalizeRemnashopError(
     return new ServiceError('CURRENT_PASSWORD_INVALID', 401, message, debug);
   }
 
+  if (
+    status === 409 &&
+    lowerPath.includes('/auth/change-password') &&
+    includesAny(lowerMessage, ['must be different from current password', 'must differ from current password'])
+  ) {
+    return new ServiceError('PASSWORD_UNCHANGED', 409, message, debug);
+  }
+
   if (status === 401) {
     return new ServiceError('UNAUTHORIZED', 401, message, debug);
   }

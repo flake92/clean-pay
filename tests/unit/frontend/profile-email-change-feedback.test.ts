@@ -7,13 +7,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   changeEmail: vi.fn(),
+  changePassword: vi.fn(),
   navigateTo: vi.fn(),
   scrollIntoView: vi.fn(),
 }));
 
 vi.mock("@/app/actions/profile", () => ({
   changeProfileEmailAction: mocks.changeEmail,
-  changeProfilePasswordAction: vi.fn(),
+  changeProfilePasswordAction: mocks.changePassword,
   requestProfileEmailVerificationAction: vi.fn(),
 }));
 vi.mock("@/frontend/lib/browser-navigation", () => ({ navigateTo: mocks.navigateTo }));
@@ -37,7 +38,14 @@ vi.mock("primereact/button", () => ({
   Button: (props: { label?: string; type?: "button" | "submit" }) =>
     createElement("button", { type: props.type ?? "button" }, props.label),
 }));
-vi.mock("primereact/password", () => ({ Password: () => createElement("input") }));
+vi.mock("primereact/password", () => ({
+  Password: (props: Record<string, unknown>) => createElement("input", {
+    onChange: props.onChange,
+    required: props.required,
+    type: "password",
+    value: props.value,
+  }),
+}));
 vi.mock("primereact/tag", () => ({ Tag: () => null }));
 
 import { ProfilePanel } from "@/frontend/components/profile-panel";
@@ -56,6 +64,11 @@ describe("profile e-mail change feedback", () => {
       ok: false,
       code: "INTERNAL_ERROR",
       message: "Не удалось изменить e-mail.",
+    });
+    mocks.changePassword.mockResolvedValue({
+      ok: false,
+      code: "PASSWORD_UNCHANGED",
+      message: "Новый пароль должен отличаться от текущего.",
     });
     vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) =>
       window.setTimeout(() => callback(performance.now()), 0));
@@ -110,5 +123,44 @@ describe("profile e-mail change feedback", () => {
     expect(alert?.textContent).toBe("Не удалось изменить e-mail.");
     expect(mocks.scrollIntoView).toHaveBeenCalledWith({ behavior: "smooth", block: "center" });
     expect(mocks.navigateTo).not.toHaveBeenCalled();
+  });
+
+  it("shows a password failure only inside the password form", async () => {
+    await act(async () => {
+      root.render(createElement(ProfilePanel, {
+        model: {
+          status: "ready",
+          user: {
+            authType: "email",
+            email: "old@example.com",
+            emailVerified: true,
+            pendingEmail: null,
+            telegramId: "777",
+          },
+        },
+      }));
+    });
+
+    const passwordInputs = [...container.querySelectorAll<HTMLInputElement>('input[type="password"]')];
+    await act(async () => {
+      for (const [input, value] of passwordInputs.map((input, index) => [input, index === 0 ? "old-password" : "new-password"] as const)) {
+        Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set?.call(input, value);
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+      }
+    });
+
+    const forms = container.querySelectorAll("form");
+    await act(async () => {
+      forms[1]?.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    });
+
+    expect(mocks.changePassword).toHaveBeenCalledWith({
+      currentPassword: "old-password",
+      newPassword: "new-password",
+    });
+    expect(forms[0]?.querySelector('[role="alert"]')).toBeNull();
+    expect(forms[1]?.querySelector('[role="alert"]')?.textContent)
+      .toBe("Новый пароль должен отличаться от текущего.");
   });
 });

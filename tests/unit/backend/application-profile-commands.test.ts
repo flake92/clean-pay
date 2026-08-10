@@ -93,4 +93,33 @@ describe("profile command presentation policy", () => {
     await expect(changeProfilePassword(commands, input)).resolves.toMatchObject({ ok: false, code: "VALIDATION_ERROR" });
     expect(commands.loadPasswordSession).not.toHaveBeenCalled();
   });
+
+  it("rejects an unchanged password before calling Remnashop", async () => {
+    const commands = passwordCommands();
+
+    await expect(changeProfilePassword(commands, {
+      currentPassword: "same-password",
+      newPassword: "same-password",
+    })).resolves.toEqual({
+      ok: false,
+      code: "PASSWORD_UNCHANGED",
+      message: "Новый пароль должен отличаться от текущего.",
+    });
+    expect(commands.loadPasswordSession).not.toHaveBeenCalled();
+  });
+
+  it("uses password-specific conflict messages", async () => {
+    const commands = passwordCommands({
+      changeProviderPassword: vi.fn(async () => { throw new ProfileGatewayError("PASSWORD_UNCHANGED"); }),
+    });
+
+    await expect(changeProfilePassword(commands, {
+      currentPassword: "old-password",
+      newPassword: "another-password",
+    })).resolves.toMatchObject({
+      ok: false,
+      code: "PASSWORD_UNCHANGED",
+      message: "Новый пароль должен отличаться от текущего.",
+    });
+  });
 });

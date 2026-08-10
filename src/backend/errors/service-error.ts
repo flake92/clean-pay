@@ -3,6 +3,7 @@ export type ServiceErrorCode =
   | "AUTH_FAILED"
   | "PASSKEY_REQUIRED"
   | "CURRENT_PASSWORD_INVALID"
+  | "PASSWORD_UNCHANGED"
   | "FORBIDDEN"
   | "NOT_FOUND"
   | "VALIDATION_ERROR"
@@ -51,6 +52,7 @@ const PROD_MESSAGES: Record<ServiceErrorCode, string> = {
   AUTH_FAILED: "Не удалось войти. Проверьте данные.",
   PASSKEY_REQUIRED: "Создайте ключ доступа, чтобы продолжить.",
   CURRENT_PASSWORD_INVALID: "Текущий пароль неверный.",
+  PASSWORD_UNCHANGED: "Новый пароль должен отличаться от текущего.",
   FORBIDDEN: "Действие недоступно.",
   NOT_FOUND: "Данные не найдены.",
   VALIDATION_ERROR: "Проверьте введённые данные.",

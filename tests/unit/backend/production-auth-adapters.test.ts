@@ -393,6 +393,9 @@ describe("production auth and profile adapters", () => {
     mocks.remnashopChangePassword.mockRejectedValueOnce(new ServiceError("CURRENT_PASSWORD_INVALID", 401));
     await expect(productionProfileCommands.changeProviderPassword(session, { currentPassword: "bad", newPassword: "new-password" }))
       .rejects.toMatchObject({ code: "CURRENT_PASSWORD_INVALID" });
+    mocks.remnashopChangePassword.mockRejectedValueOnce(new ServiceError("PASSWORD_UNCHANGED", 409));
+    await expect(productionProfileCommands.changeProviderPassword(session, { currentPassword: "same-password", newPassword: "same-password" }))
+      .rejects.toMatchObject({ code: "PASSWORD_UNCHANGED" });
     mocks.remnashopChangePassword.mockRejectedValueOnce(new Error("invalid provider response"));
     await expect(productionProfileCommands.changeProviderPassword(session, { currentPassword: "bad", newPassword: "new-password" }))
       .rejects.toMatchObject({ code: "INTERNAL_ERROR" });
