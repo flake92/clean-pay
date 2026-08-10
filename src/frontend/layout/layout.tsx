@@ -125,7 +125,7 @@ const Layout = ({ children, navigation }: ChildContainerProps & { navigation: Na
         <React.Fragment>
             <div className={containerClass}>
                 <AppTopbar navigation={navigation} ref={topbarRef} />
-                <div ref={sidebarRef} className="layout-sidebar">
+                <div id="app-sidebar" ref={sidebarRef} className="layout-sidebar">
                     <AppSidebar navigation={navigation} />
                 </div>
                 <div className="layout-main-container">

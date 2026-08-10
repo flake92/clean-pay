@@ -65,7 +65,7 @@ async function revokeSessionByRefreshToken(refreshToken: string) {
 
   await prisma.webSession.updateMany({
     where: { id: session.id, revokedAt: null },
-    data: { revokedAt: now },
+    data: revokedWebSessionData(now),
   });
 }
 
@@ -644,6 +644,13 @@ export async function replaceWebSessionAfterPasswordChange({
   };
 }
 
+export async function getWebSessionUserIdFromAccessCookie() {
+  const cookieStore = await cookies();
+  const accessToken = cookieStore.get(sessionCookieNames.access)?.value;
+
+  return accessToken ? verifyAccessToken(accessToken)?.uid ?? null : null;
+}
+
 export async function clearWebSession() {
   const cookieStore = await cookies();
   const accessToken = cookieStore.get(sessionCookieNames.access)?.value;
@@ -658,37 +665,40 @@ export async function clearWebSession() {
     userId: payload?.uid,
   });
 
-  if (payload) {
-    const session = await prisma.webSession.findFirst({
-      where: {
-        id: payload.sid,
-        userId: payload.uid,
-        revokedAt: null,
-        accessTokenExpiresAt: { gt: new Date() },
-      },
-      select: { id: true, userId: true },
-    });
-
-    if (session) {
-      await prisma.webSession.updateMany({
+  try {
+    if (payload) {
+      const session = await prisma.webSession.findFirst({
         where: {
-          id: session.id,
-          userId: session.userId,
+          id: payload.sid,
+          userId: payload.uid,
           revokedAt: null,
+          accessTokenExpiresAt: { gt: new Date() },
         },
-        data: { revokedAt: new Date() },
+        select: { id: true, userId: true },
       });
+
+      if (session) {
+        const now = new Date();
+        await prisma.webSession.updateMany({
+          where: {
+            id: session.id,
+            userId: session.userId,
+            revokedAt: null,
+          },
+          data: revokedWebSessionData(now),
+        });
+      } else if (refreshToken) {
+        await revokeSessionByRefreshToken(refreshToken);
+      }
     } else if (refreshToken) {
       await revokeSessionByRefreshToken(refreshToken);
     }
-  } else if (refreshToken) {
-    await revokeSessionByRefreshToken(refreshToken);
+    authDebugLog("session_clear_success", {
+      revokedBy: payload ? "access" : refreshToken ? "refresh" : "cookies_only",
+      sessionId: payload?.sid,
+    });
+  } finally {
+    cookieStore.delete(sessionCookieNames.access);
+    cookieStore.delete(sessionCookieNames.refresh);
   }
-
-  cookieStore.delete(sessionCookieNames.access);
-  cookieStore.delete(sessionCookieNames.refresh);
-  authDebugLog("session_clear_success", {
-    revokedBy: payload ? "access" : refreshToken ? "refresh" : "cookies_only",
-    sessionId: payload?.sid,
-  });
 }

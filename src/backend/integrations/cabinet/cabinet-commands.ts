@@ -6,7 +6,10 @@ import { ServiceError } from "@/backend/errors/service-error";
 import { getAuthorizedRemnashopTokens, remnashopRequest } from "@/backend/integrations/remnashop/client";
 import { auditLog } from "@/backend/observability/audit";
 import { auditedMutation } from "@/backend/observability/mutation-audit";
-import { clearWebSession } from "@/backend/integrations/sessions/web-session-service";
+import {
+  clearWebSession,
+  getWebSessionUserIdFromAccessCookie,
+} from "@/backend/integrations/sessions/web-session-service";
 import type {
   DeviceDeleteResponse,
   DevicesDeleteAllResponse,
@@ -40,7 +43,8 @@ export const productionCabinetCommands: CabinetCommands = {
       method: "POST", accessToken, body: { code },
     })),
   async logout() {
-    await auditLog({ action: "auth_logout" });
+    const userId = await getWebSessionUserIdFromAccessCookie();
+    await auditLog({ action: "auth_logout", userId });
     await clearWebSession();
   },
 };
