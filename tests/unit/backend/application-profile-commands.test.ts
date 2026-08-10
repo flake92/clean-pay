@@ -19,6 +19,7 @@ import { ProfileGatewayError, type ProfileCommands } from "@/application/profile
 function passwordCommands(overrides: Partial<ProfileCommands> = {}): ProfileCommands {
   return {
     loadPasswordSession: vi.fn(async () => ({ context: {}, userId: "user-1" })),
+    assertPasswordChangeRateLimit: vi.fn(async () => undefined),
     changeProviderPassword: vi.fn(async () => ({ context: { changed: true } })),
     refreshProviderSession: vi.fn(async () => ({ context: { refreshed: true } })),
     persistRefreshedProviderSession: vi.fn(async () => undefined),
@@ -62,7 +63,22 @@ describe("profile command presentation policy", () => {
     const commands = passwordCommands();
     await expect(changeProfilePassword(commands, { currentPassword: "old-password", newPassword: "new-password" })).resolves.toMatchObject({ ok: true });
     expect(commands.changeProviderPassword).toHaveBeenCalledBefore(vi.mocked(commands.replaceLocalPasswordSession));
+    expect(commands.assertPasswordChangeRateLimit).toHaveBeenCalledBefore(vi.mocked(commands.changeProviderPassword));
     expect(commands.replaceLocalPasswordSession).toHaveBeenCalledBefore(vi.mocked(commands.auditPasswordChanged));
+  });
+
+  it("stops before the provider when the password-change limit is exceeded", async () => {
+    const commands = passwordCommands({
+      assertPasswordChangeRateLimit: vi.fn(async () => {
+        throw Object.assign(new Error("limited"), { code: "RATE_LIMITED" });
+      }),
+    });
+
+    await expect(changeProfilePassword(commands, {
+      currentPassword: "old-password",
+      newPassword: "new-password",
+    })).resolves.toMatchObject({ ok: false, code: "RATE_LIMITED" });
+    expect(commands.changeProviderPassword).not.toHaveBeenCalled();
   });
 
   it("refreshes an expired provider session once after a current-password failure", async () => {

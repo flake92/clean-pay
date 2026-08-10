@@ -300,11 +300,11 @@ export function parsePaymentInit(
     try {
       const parsedUrl = new URL(paymentUrl);
 
-      if (parsedUrl.protocol !== "http:" && parsedUrl.protocol !== "https:") {
+      if (parsedUrl.protocol !== "https:") {
         throw new Error();
       }
     } catch {
-      return invalidContract(path, "payment.payment_url must be an http(s) URL or null");
+      return invalidContract(path, "payment.payment_url must be an https URL or null");
     }
   }
 

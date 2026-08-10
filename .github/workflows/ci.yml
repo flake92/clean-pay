@@ -3,6 +3,7 @@ name: CI
 on:
   push:
   pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -72,7 +73,7 @@ jobs:
 
       - uses: actions/setup-node@v5
         with:
-          node-version: 24.18.0
+          node-version-file: .node-version
           cache: npm
 
       - name: Install locked dependencies
@@ -81,6 +82,12 @@ jobs:
         run: npm audit --audit-level high
       - name: Validate Prisma schema formatting
         run: node node_modules/prisma/build/index.js format --check
+      - name: Validate deployment scripts and production Compose
+        run: |
+          sh -n deploy.sh start.sh scripts/*.sh deploy/prod/*.sh
+          cp deploy/prod/.env.example deploy/prod/.env
+          trap 'rm -f deploy/prod/.env' EXIT
+          docker compose --env-file deploy/prod/.env -f deploy/prod/docker-compose.yml config --quiet
       - name: Lint
         run: npm run lint
       - name: Typecheck
@@ -138,7 +145,7 @@ jobs:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v5
         with:
-          node-version: 24.18.0
+          node-version-file: .node-version
           cache: npm
       - name: Install locked dependencies
         run: npm ci
@@ -185,7 +192,7 @@ jobs:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v5
         with:
-          node-version: 24.18.0
+          node-version-file: .node-version
           cache: npm
       - run: npm ci
       - run: timeout --signal=TERM --kill-after=30s 12m npm run test:e2e

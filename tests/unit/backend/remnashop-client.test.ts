@@ -724,6 +724,37 @@ describe("remnashop client", () => {
     });
   });
 
+  it("rejects oversized upstream response bodies before buffering them", async () => {
+    const oversized = JSON.stringify({ payload: "x".repeat(2 * 1024 * 1024) });
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response(oversized, { status: 200 }),
+    );
+
+    await expect(remnashopRequest("/plans/public")).rejects.toMatchObject({
+      code: "UPSTREAM_UNAVAILABLE",
+      status: 502,
+    });
+
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response("{}", {
+        status: 200,
+        headers: { "content-length": String(3 * 1024 * 1024) },
+      }),
+    );
+    await expect(remnashopRequest("/plans/public")).rejects.toMatchObject({
+      code: "UPSTREAM_UNAVAILABLE",
+      status: 502,
+    });
+  });
+
+  it("accepts an empty successful upstream response without buffering", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response(null, { status: 200 }),
+    );
+
+    await expect(remnashopRequest("/plans/public")).resolves.toBeNull();
+  });
+
   it("decodes jwt identity and expiry", () => {
     const token = jwt({ sub: 42, exp: 1_780_000_000 });
 

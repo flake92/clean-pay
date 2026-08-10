@@ -59,8 +59,9 @@ export async function readPaymentReconciliationBacklog() {
           AND ("reconcileLeaseExpiresAt" IS NULL OR "reconcileLeaseExpiresAt" <= clock_timestamp())
       )::int AS "due",
       COUNT(*) FILTER (
-        WHERE "reconcileErrorSnapshot" ->> 'code' = 'MANUAL_REQUIRED'
-          AND "reconciledAt" IS NULL
+        WHERE "status" = 'OUTCOME_UNKNOWN'
+          AND "reconciledAt" IS NOT NULL
+          AND "reconcileErrorSnapshot" ->> 'code' = 'MANUAL_REQUIRED'
       )::int AS "manualRequired",
       COALESCE(EXTRACT(EPOCH FROM (
         clock_timestamp() - (
@@ -71,12 +72,24 @@ export async function readPaymentReconciliationBacklog() {
         )
       )), 0)::int AS "oldestAgeSeconds",
         COALESCE(MAX("reconcileAttemptCount") FILTER (
-          WHERE "status" IN ('DISPATCHING', 'OUTCOME_UNKNOWN')
+          WHERE (
+            "status" IN ('DISPATCHING', 'OUTCOME_UNKNOWN')
             AND "reconciledAt" IS NULL
+          ) OR (
+            "status" = 'OUTCOME_UNKNOWN'
+            AND "reconciledAt" IS NOT NULL
+            AND "reconcileErrorSnapshot" ->> 'code' = 'MANUAL_REQUIRED'
+          )
         ), 0)::int AS "maximumAttemptCount",
         COALESCE(SUM("reconcileFailureCount") FILTER (
-          WHERE "status" IN ('DISPATCHING', 'OUTCOME_UNKNOWN')
+          WHERE (
+            "status" IN ('DISPATCHING', 'OUTCOME_UNKNOWN')
             AND "reconciledAt" IS NULL
+          ) OR (
+            "status" = 'OUTCOME_UNKNOWN'
+            AND "reconciledAt" IS NOT NULL
+            AND "reconcileErrorSnapshot" ->> 'code' = 'MANUAL_REQUIRED'
+          )
         ), 0)::int AS "totalFailureCount"
     FROM "PaymentOperation"
   `);
