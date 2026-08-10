@@ -69,6 +69,7 @@ function isRemnashopSource(directory) {
 
 if (
   !isInsideDevcontainer() &&
+  process.env.REMNASHOP_DISCOVER_HOST_SOURCE === "1" &&
   !process.env.REMNASHOP_HOST_SOURCE &&
   !process.env.REMNASHOP_BUILD_CONTEXT
 ) {
@@ -124,6 +125,8 @@ const passThroughEnv = [
   "KEEP_E2E_STACK",
   "REMNASHOP_BUILD_CONTEXT",
   "REMNASHOP_HOST_SOURCE",
+  "REMNASHOP_DISCOVER_HOST_SOURCE",
+  "REMNASHOP_MINIMUM_ALEMBIC_REVISION",
 ];
 
 function run(command, args) {

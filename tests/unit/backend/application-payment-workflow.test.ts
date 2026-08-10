@@ -99,6 +99,50 @@ describe("application payment workflow", () => {
     expect(port.completeSuccess).toHaveBeenCalledBefore(vi.mocked(port.auditSuccess));
   });
 
+  it("authorizes an already claimed operation before provider dispatch", async () => {
+    const port = gateway({
+      loadActor: vi.fn(async () => ({ userId: "user-1", email: "u@example.com", emailVerified: true, telegramId: "777" })),
+      beginOperation: vi.fn(async () => ({
+        state: "execute", operationId: "operation-1", claimToken: "claim-1", upstreamKey: "upstream-1",
+      } as const)),
+    });
+
+    await expect(executePaymentWorkflow(port, { kind: "PURCHASE", request }, "key-1"))
+      .resolves.toMatchObject({ status: "completed" });
+    expect(port.rateLimit).toHaveBeenCalledWith({ kind: "PURCHASE", email: "u@example.com", telegramId: "777" });
+    expect(port.authorize).toHaveBeenCalledOnce();
+  });
+
+  it("selects a renewal offer for extension", async () => {
+    const extendRequest = {
+      duration_days: request.duration_days,
+      gateway_type: request.gateway_type,
+      confirmed_amount: request.confirmed_amount,
+      confirmed_currency: request.confirmed_currency,
+      offer_version: request.offer_version,
+    };
+    const port = gateway();
+
+    await expect(executePaymentWorkflow(port, { kind: "EXTEND", request: extendRequest }, "key-extend"))
+      .resolves.toMatchObject({ status: "completed" });
+    expect(port.rateLimit).toHaveBeenCalledWith(expect.objectContaining({ kind: "EXTEND" }));
+  });
+
+  it("fails closed when operation creation returns no record", async () => {
+    const port = gateway({ beginOperation: vi.fn(async () => ({ state: "missing" } as const)) });
+
+    await expect(executePaymentWorkflow(port, { kind: "PURCHASE", request }, "key-1"))
+      .rejects.toMatchObject({ code: "INTERNAL_ERROR", status: 500 });
+    expect(port.dispatch).not.toHaveBeenCalled();
+  });
+
+  it("fails closed for an adapter state outside the application contract", async () => {
+    const port = gateway({ beginOperation: vi.fn(async () => ({ state: "unexpected" }) as never) });
+
+    await expect(executePaymentWorkflow(port, { kind: "PURCHASE", request }, "key-1"))
+      .rejects.toMatchObject({ code: "INTERNAL_ERROR", status: 500 });
+  });
+
   it.each([
     [
       { state: "replay", outcome: "success", operationId: "op-replay", responseStatus: 200, response: payment },
@@ -169,6 +213,18 @@ describe("application payment workflow", () => {
       error: upstreamError,
       outcome: "UNKNOWN",
     }));
+  });
+
+  it("rethrows a classified post-dispatch failure after settlement", async () => {
+    const upstreamError = Object.assign(new Error("rejected"), { code: "PAYMENT_FAILED" });
+    const port = gateway({
+      dispatch: vi.fn(async () => { throw upstreamError; }),
+      dispatchFailureOutcome: vi.fn((): "FINAL" => "FINAL"),
+    });
+
+    await expect(executePaymentWorkflow(port, { kind: "PURCHASE", request }, "key-1"))
+      .rejects.toBe(upstreamError);
+    expect(port.settleAfterDispatch).toHaveBeenCalledWith(expect.objectContaining({ outcome: "FINAL" }));
   });
 
   it("does not downgrade a completed payment when best-effort audit fails", async () => {

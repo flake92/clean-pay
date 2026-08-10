@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   getCurrentSession: vi.fn(), upgradeCurrentSessionToFull: vi.fn(), createWebSession: vi.fn(),
   verifyTurnstileToken: vi.fn(), assertRateLimit: vi.fn(), withAuthConcurrency: vi.fn(), auditLog: vi.fn(),
   recordPasskeyUse: vi.fn(),
+  headerGet: vi.fn<(name: string) => string | null>(() => "Mozilla/5.0 Windows Chrome/120"),
   prisma: {
     webAuthnChallenge: { findFirst: vi.fn(), updateMany: vi.fn(), create: vi.fn() },
     webAuthnCredential: { findUnique: vi.fn(), findMany: vi.fn(), updateMany: vi.fn(), create: vi.fn() },
@@ -28,7 +29,7 @@ vi.mock("@/backend/security/turnstile", () => ({ verifyTurnstileToken: mocks.ver
 vi.mock("@/backend/limits/rate-limit", () => ({ assertRateLimit: mocks.assertRateLimit, withAuthConcurrency: mocks.withAuthConcurrency }));
 vi.mock("@/backend/observability/audit", () => ({ auditLog: mocks.auditLog }));
 vi.mock("@/backend/integrations/auth/passkey-service", () => ({ recordPasskeyUse: mocks.recordPasskeyUse }));
-vi.mock("next/headers", () => ({ headers: async () => new Headers({ "user-agent": "Mozilla/5.0 Windows Chrome/120" }) }));
+vi.mock("next/headers", () => ({ headers: async () => ({ get: mocks.headerGet }) }));
 
 import {
   beginPasskeyLogin, beginPasskeyRegistration, verifyPasskeyLogin, verifyPasskeyRegistration,
@@ -88,6 +89,7 @@ describe("production passkey gateway through application workflows", () => {
     });
     mocks.verifyAuthenticationResponse.mockResolvedValue({ verified: true, authenticationInfo: { newCounter: 2 } });
     mocks.createWebSession.mockResolvedValue({ id: "new-session" });
+    mocks.headerGet.mockReturnValue("Mozilla/5.0 Windows Chrome/120");
   });
 
   it("generates and stores registration options through the application policy", async () => {
@@ -128,5 +130,106 @@ describe("production passkey gateway through application workflows", () => {
     await expect(beginPasskeyLogin(gateway, { email: "missing@example.com" })).resolves.toMatchObject({ ok: false, code: "NOT_FOUND" });
     mocks.verifyAuthenticationResponse.mockRejectedValueOnce(new Error("bad signature"));
     await expect(verifyPasskeyLogin(gateway, authenticationResponse)).resolves.toMatchObject({ ok: false, code: "UNAUTHORIZED" });
+  });
+
+  it("validates option and client challenge shapes before persistence", async () => {
+    expect(() => gateway.registrationChallenge({})).toThrowError(expect.objectContaining({ code: "INTERNAL_ERROR" }));
+    expect(() => gateway.loginChallenge({ challenge: 123 })).toThrowError(expect.objectContaining({ code: "INTERNAL_ERROR" }));
+    await expect(gateway.consumeRegistrationChallenge({ response: {} })).rejects.toMatchObject({ code: "VALIDATION_ERROR" });
+    await expect(gateway.consumeLoginChallenge({ response: { clientDataJSON: "not-base64-json" } })).rejects.toMatchObject({ code: "VALIDATION_ERROR" });
+    mocks.prisma.webAuthnChallenge.findFirst.mockResolvedValueOnce(null);
+    await expect(gateway.consumeLoginChallenge(authenticationResponse)).rejects.toMatchObject({ code: "VALIDATION_ERROR" });
+    mocks.prisma.webAuthnChallenge.updateMany.mockResolvedValueOnce({ count: 0 });
+    await expect(gateway.consumeLoginChallenge(authenticationResponse)).rejects.toMatchObject({ code: "VALIDATION_ERROR" });
+  });
+
+  it("maps provider service errors while preserving programming failures", async () => {
+    const { ServiceError } = await import("@/backend/errors/service-error");
+    mocks.getCurrentSession.mockRejectedValueOnce(new ServiceError("UNAUTHORIZED", 401));
+    await expect(gateway.loadRegistrationActor()).rejects.toMatchObject({ code: "UNAUTHORIZED" });
+    const programmingFailure = new TypeError("broken adapter");
+    mocks.getCurrentSession.mockRejectedValueOnce(programmingFailure);
+    await expect(gateway.loadRegistrationActor()).rejects.toBe(programmingFailure);
+  });
+
+  it("uses stable registration identity fallbacks and preserves pending merges", async () => {
+    mocks.getCurrentSession.mockResolvedValueOnce({
+      ...session, assuranceLevel: "BOOTSTRAP",
+      user: { ...session.user, email: null, telegramUsername: null, telegramId: "777", displayName: null,
+        pendingRemnashopUserId: "pending-owner", pendingRemnashopEmail: "pending@example.com" },
+    });
+    const actor = await gateway.loadRegistrationActor();
+    expect(actor).toMatchObject({ assuranceLevel: "BOOTSTRAP", hasPendingAccountMerge: true });
+    await gateway.generateRegistrationOptions(actor!);
+    expect(mocks.generateRegistrationOptions).toHaveBeenCalledWith(expect.objectContaining({ userName: "777", userDisplayName: "777" }));
+    await gateway.markRegistrationComplete(actor!);
+    expect(mocks.prisma.webUser.update).toHaveBeenCalledWith({
+      where: { id: "user-1" }, data: { lastLoginAt: expect.any(Date) },
+    });
+  });
+
+  it("rejects invalid registration proofs", async () => {
+    const challenge = { context: {}, challenge: "registration", userId: "user-1" };
+    mocks.verifyRegistrationResponse.mockRejectedValueOnce(new Error("bad attestation"));
+    await expect(gateway.verifyRegistration(registrationResponse, challenge)).rejects.toMatchObject({ code: "VALIDATION_ERROR" });
+    mocks.verifyRegistrationResponse.mockResolvedValueOnce({ verified: false });
+    await expect(gateway.verifyRegistration(registrationResponse, challenge)).rejects.toMatchObject({ code: "VALIDATION_ERROR" });
+  });
+
+  it("updates an owned credential and safely resolves unique registration races", async () => {
+    const actor = { userId: "user-1" } as never;
+    const verified = { context: {
+      credential: { id: "credential-1", publicKey: new Uint8Array([1, 2]), counter: 0 },
+      aaguid: "aaguid", credentialBackedUp: false, credentialDeviceType: "singleDevice",
+    } } as never;
+    mocks.prisma.webAuthnCredential.updateMany.mockResolvedValueOnce({ count: 1 });
+    await gateway.persistRegistration(actor, { ...registrationResponse, name: "  Work   Laptop  " }, verified);
+    expect(mocks.prisma.webAuthnCredential.create).not.toHaveBeenCalled();
+
+    mocks.prisma.webAuthnCredential.updateMany.mockResolvedValueOnce({ count: 0 }).mockResolvedValueOnce({ count: 1 });
+    mocks.prisma.webAuthnCredential.create.mockRejectedValueOnce({ code: "P2002" });
+    await expect(gateway.persistRegistration(actor, { ...registrationResponse, name: "" }, verified)).resolves.toBeUndefined();
+
+    mocks.prisma.webAuthnCredential.updateMany.mockResolvedValueOnce({ count: 0 }).mockResolvedValueOnce({ count: 0 });
+    mocks.prisma.webAuthnCredential.create.mockRejectedValueOnce({ code: "P2002" });
+    await expect(gateway.persistRegistration(actor, registrationResponse, verified)).rejects.toMatchObject({ code: "CONFLICT" });
+
+    const failure = new TypeError("db failed");
+    mocks.prisma.webAuthnCredential.updateMany.mockResolvedValueOnce({ count: 0 });
+    mocks.prisma.webAuthnCredential.create.mockRejectedValueOnce(failure);
+    await expect(gateway.persistRegistration(actor, registrationResponse, verified)).rejects.toBe(failure);
+  });
+
+  it.each([
+    ["Mozilla/5.0 iPhone Safari/17", "iPhone Safari"],
+    ["Mozilla/5.0 iPad CriOS/120", "iPad Chrome"],
+    ["Mozilla/5.0 Android Edg/120", "Android Edge"],
+    ["Mozilla/5.0 Macintosh Firefox/120", "macOS Firefox"],
+    ["Mozilla/5.0 Linux", "Linux браузер"],
+    [null, "Устройство браузер"],
+  ])("infers a bounded credential name from %s", async (userAgent, expectedName) => {
+    mocks.headerGet.mockReturnValueOnce(userAgent);
+    mocks.prisma.webAuthnCredential.updateMany.mockResolvedValueOnce({ count: 1 });
+    await gateway.persistRegistration(
+      { userId: "user-1" } as never,
+      { ...registrationResponse, name: undefined },
+      { context: {
+        credential: { id: "credential-1", publicKey: new Uint8Array([1]), counter: 0 },
+        aaguid: "aaguid", credentialBackedUp: false, credentialDeviceType: "singleDevice",
+      } } as never,
+    );
+    expect(mocks.prisma.webAuthnCredential.updateMany).toHaveBeenLastCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ name: expectedName }),
+    }));
+  });
+
+  it("validates credential lookup and authentication verification", async () => {
+    await expect(gateway.findCredential({})).rejects.toMatchObject({ code: "VALIDATION_ERROR" });
+    mocks.prisma.webAuthnCredential.findUnique.mockResolvedValueOnce(null);
+    await expect(gateway.findCredential({ id: "missing" })).resolves.toBeNull();
+    const credential = await gateway.findCredential({ id: "credential-1" });
+    const challenge = { context: {}, challenge: "authentication", userId: "user-1" };
+    mocks.verifyAuthenticationResponse.mockResolvedValueOnce({ verified: false });
+    await expect(gateway.verifyAuthentication(authenticationResponse, challenge, credential!)).rejects.toMatchObject({ code: "UNAUTHORIZED" });
   });
 });

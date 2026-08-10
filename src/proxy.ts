@@ -240,8 +240,10 @@ export async function proxy(request: NextRequest) {
   const isAuthenticated = accessState.authenticated || accessState.hasRefreshToken;
   const isBootstrapAuthenticated = accessState.bootstrapAuthenticated && !accessState.fullAuthenticated;
   const metadata = requestMetadata(request, accessState);
+  const isRoutineReadinessProbe = pathname === readinessInternalPath && request.method === 'GET';
 
-  logger.info("http_request_received", metadata, {
+  const logRequest = isRoutineReadinessProbe ? logger.debug : logger.info;
+  logRequest("http_request_received", metadata, {
     category: "http",
     source: "http.access",
     message: `${request.method} ${pathname} received`,
@@ -251,7 +253,8 @@ export async function proxy(request: NextRequest) {
     (pathname === paymentReconciliationInternalPath && request.method === 'POST') ||
     (pathname === readinessInternalPath && request.method === 'GET')
   ) {
-    logger.info("http_request_decision", {
+    const logDecision = isRoutineReadinessProbe ? logger.debug : logger.info;
+    logDecision("http_request_decision", {
       ...metadata,
       action: "allow_internal_service",
       status: 200,
