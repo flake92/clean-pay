@@ -29,7 +29,7 @@ RUN NEXT_PUBLIC_APP_URL="${NEXT_PUBLIC_APP_URL}" \
     TURNSTILE_SITE_KEY="${TURNSTILE_WIDGET_ID}" \
     npm run build
 
-FROM node:24.18.0-bookworm-slim AS migration
+FROM node:24.18.0-bookworm-slim AS runtime-base
 
 WORKDIR /app
 
@@ -40,7 +40,14 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates openssl \
     && rm -rf /var/lib/apt/lists/* \
     && groupadd --system --gid 1001 nodejs \
-    && useradd --system --uid 1001 --gid nodejs cleanpay
+    && useradd --system --uid 1001 --gid nodejs cleanpay \
+    && rm -rf /usr/local/lib/node_modules/npm \
+        /usr/local/lib/node_modules/corepack \
+        /opt/yarn-v1.22.22 \
+    && rm -f /usr/local/bin/npm /usr/local/bin/npx \
+        /usr/local/bin/corepack /usr/local/bin/yarn /usr/local/bin/yarnpkg
+
+FROM runtime-base AS migration
 
 COPY --from=dependencies --chown=cleanpay:nodejs /app/package.json /app/package-lock.json ./
 COPY --from=dependencies --chown=cleanpay:nodejs /app/node_modules ./node_modules
@@ -54,22 +61,12 @@ USER cleanpay
 
 CMD ["sh", "-c", "node deploy/prod/validate-env.mjs && node node_modules/prisma/build/index.js migrate deploy"]
 
-FROM node:24.18.0-bookworm-slim AS runner
-
-WORKDIR /app
+FROM runtime-base AS runner
 
 ARG NEXT_PUBLIC_APP_URL
-ENV NODE_ENV=production
-ENV NEXT_TELEMETRY_DISABLED=1
 ENV CLEAN_PAY_BAKED_PUBLIC_APP_URL=${NEXT_PUBLIC_APP_URL}
 ENV HOSTNAME=0.0.0.0
 ENV PORT=4000
-
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates openssl \
-    && rm -rf /var/lib/apt/lists/* \
-    && groupadd --system --gid 1001 nodejs \
-    && useradd --system --uid 1001 --gid nodejs cleanpay
 
 COPY --from=builder --chown=cleanpay:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=cleanpay:nodejs /app/.next/static ./.next/static
