@@ -10,8 +10,9 @@ function normalizedEmail(email: string | null | undefined) {
 }
 
 function maskEmail(email: string | null) {
-  if (!email) return null;
-  const [local = "", domain = ""] = email.split("@", 2);
+  const normalized = normalizedEmail(email);
+  if (!normalized) return null;
+  const [local = "", domain = ""] = normalized.split("@", 2);
   const visible = local.slice(0, Math.min(2, local.length));
   return `${visible}${"*".repeat(Math.max(3, local.length - visible.length))}@${domain}`;
 }

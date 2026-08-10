@@ -142,10 +142,16 @@ container_image_id() {
 
 wait_for_remnashop_payment_schema() {
   local timeout_seconds="${REMNASHOP_SCHEMA_TIMEOUT_SECONDS:-300}"
+  local minimum_revision="${REMNASHOP_MINIMUM_ALEMBIC_REVISION:-0050}"
   local deadline schema_ready current_revision
 
   if [[ ! "$timeout_seconds" =~ ^[1-9][0-9]*$ ]]; then
     echo "REMNASHOP_SCHEMA_TIMEOUT_SECONDS must be a positive integer" >&2
+    return 1
+  fi
+
+  if [[ ! "$minimum_revision" =~ ^[0-9]+$ ]]; then
+    echo "REMNASHOP_MINIMUM_ALEMBIC_REVISION must contain only digits" >&2
     return 1
   fi
 
@@ -169,21 +175,22 @@ wait_for_remnashop_payment_schema() {
           2>/dev/null || true
       )"
 
-      if [[ "$current_revision" == "0050" ]]; then
+      if [[ "$current_revision" =~ ^[0-9]+$ ]] && (( 10#$current_revision >= 10#$minimum_revision )); then
         return 0
       fi
     fi
 
-    echo "Waiting for Remnashop payment schema revision 0050..." >&2
+    echo "Waiting for Remnashop payment schema revision >= $minimum_revision (current: ${current_revision:-unknown})..." >&2
     sleep 2
   done
 
-  echo "Timed out waiting for Remnashop payment schema revision 0050" >&2
+  echo "Timed out waiting for Remnashop payment schema revision >= $minimum_revision" >&2
   compose logs --tail=100 remnashop >&2 || true
   return 1
 }
 
 prepare_remnashop_payment_rollout_gate() {
+  local minimum_revision="${REMNASHOP_MINIMUM_ALEMBIC_REVISION:-0050}"
   local api_image worker_image scheduler_image
 
   wait_for_remnashop_payment_schema
@@ -201,8 +208,10 @@ prepare_remnashop_payment_rollout_gate() {
   fi
 
   compose exec -T remnashop-postgres \
-    psql -v ON_ERROR_STOP=1 -U remnashop -d remnashop <<'SQL'
+    psql -v ON_ERROR_STOP=1 -v minimum_revision="$minimum_revision" -U remnashop -d remnashop <<'SQL'
 BEGIN;
+
+SELECT set_config('cleanpay.minimum_revision', :'minimum_revision', true);
 
 DO $$
 DECLARE
@@ -214,10 +223,11 @@ BEGIN
   INTO STRICT current_revision
   FROM alembic_version;
 
-  IF current_revision <> '0050' THEN
+  IF current_revision !~ '^[0-9]+$'
+     OR current_revision::bigint < current_setting('cleanpay.minimum_revision')::bigint THEN
     RAISE EXCEPTION
-      'Expected Remnashop Alembic revision 0050 before opening the e2e rollout gate, got %',
-      current_revision;
+      'Expected Remnashop Alembic revision >= % before opening the e2e rollout gate, got %',
+      current_setting('cleanpay.minimum_revision'), current_revision;
   END IF;
 
   SELECT legacy_rollout_gate_active

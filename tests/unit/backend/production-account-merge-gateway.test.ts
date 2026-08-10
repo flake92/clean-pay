@@ -97,4 +97,41 @@ describe("production Telegram account merge gateway", () => {
     mocks.prisma.webUser.findUnique.mockResolvedValueOnce(null);
     await expect(gateway.loadCurrentOwner("missing")).resolves.toBeNull();
   });
+
+  it("translates service and unexpected adapter failures into the application error contract", async () => {
+    const { ServiceError } = await import("@/backend/errors/service-error");
+    mocks.getCurrentSession.mockRejectedValueOnce(new ServiceError("UNAUTHORIZED", 401));
+    await expect(gateway.loadActor()).rejects.toMatchObject({ code: "UNAUTHORIZED" });
+    mocks.getCurrentSession.mockRejectedValueOnce(new TypeError("broken adapter"));
+    await expect(gateway.loadActor()).rejects.toMatchObject({ code: "INTERNAL_ERROR" });
+    mocks.prisma.accountMergeConfirmation.findFirst.mockResolvedValueOnce(null);
+    await expect(gateway.loadConfirmation("user-1")).rejects.toMatchObject({ code: "NOT_FOUND" });
+  });
+
+  it("maps nullable provider identities and subscription outcomes", async () => {
+    const confirmation = await gateway.loadConfirmation("user-1");
+    mocks.getRemnashopMe.mockResolvedValueOnce({ telegram_id: null, email: null, is_email_verified: false, pending_email: "pending@example.com" });
+    await expect(gateway.authenticateTelegram(confirmation)).resolves.toMatchObject({ telegramId: null, email: null });
+    mocks.remnashopMergeUsers.mockResolvedValueOnce({
+      conflicts: [], dry_run: true, source_user_id: "source", target_user_id: "target", requires_relogin: true,
+      target: { id: "target", email: "target@example.com", is_email_verified: true, telegram_id: 888, current_subscription_id: null },
+    });
+    await expect(gateway.preflight(confirmation)).resolves.toMatchObject({ target: { telegramId: "888" } });
+    mocks.remnashopMergeUsers.mockResolvedValueOnce({
+      target: { current_subscription_id: null },
+    });
+    await expect(gateway.mergeProviderAccounts(confirmation)).resolves.toEqual({ targetHasSubscription: false });
+  });
+
+  it("reports lost completion and cancellation races and releases terminal claims", async () => {
+    const confirmation = await gateway.loadConfirmation("user-1");
+    mocks.prisma.accountMergeConfirmation.updateMany.mockResolvedValueOnce({ count: 0 });
+    await expect(gateway.complete(confirmation)).resolves.toBe(false);
+    mocks.prisma.accountMergeConfirmation.updateMany.mockResolvedValueOnce({ count: 0 });
+    await expect(gateway.cancel(confirmation)).resolves.toBe(false);
+    await gateway.release(confirmation, { terminal: true, errorCode: "ACCOUNT_MERGE_REQUIRED" });
+    expect(mocks.prisma.accountMergeConfirmation.updateMany).toHaveBeenLastCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ status: "FAILED", lastErrorCode: "ACCOUNT_MERGE_REQUIRED" }),
+    }));
+  });
 });

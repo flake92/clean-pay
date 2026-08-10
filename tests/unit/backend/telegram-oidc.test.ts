@@ -55,6 +55,7 @@ vi.mock("@/backend/integrations/sessions/web-session-service", () => ({ getCurre
 import {
   createTelegramAuthorizationResponse,
   createTelegramPopupStartResponse,
+  clearTelegramAuthCookies,
   TelegramAuthStateAlreadyConsumedError,
   verifyTelegramCallback,
   verifyTelegramPopupToken,
@@ -196,5 +197,87 @@ describe("Telegram identity verification adapter", () => {
     setCallbackCookies();
     vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(new Response("bad", { status: 500 }));
     await expect(verifyTelegramCallback("code", "state")).rejects.toThrow("Telegram token exchange failed");
+  });
+
+  it("clears all temporary Telegram cookies explicitly", async () => {
+    setCallbackCookies();
+    await clearTelegramAuthCookies();
+    expect(state.cookies.size).toBe(0);
+    expect(state.deleted).toEqual([
+      "clean_pay_tg_state", "clean_pay_tg_nonce", "clean_pay_tg_code_verifier",
+    ]);
+  });
+
+  it("rejects absent popup/widget nonce and missing persisted state", async () => {
+    await expect(verifyTelegramPopupToken("token")).rejects.toThrow("popup nonce");
+    await expect(verifyTelegramWidgetCallbackPayload({})).rejects.toThrow("widget nonce");
+    state.cookies.set("clean_pay_tg_nonce", "nonce");
+    mocks.prisma.telegramAuthState.findFirst.mockResolvedValueOnce(null);
+    await expect(verifyTelegramPopupToken("token")).rejects.toThrow("popup state");
+    mocks.prisma.telegramAuthState.findFirst.mockResolvedValueOnce(null);
+    await expect(verifyTelegramWidgetCallbackPayload({})).rejects.toThrow("widget state");
+  });
+
+  it("rejects a missing persisted OIDC state before token exchange", async () => {
+    setCallbackCookies();
+    mocks.prisma.telegramAuthState.findFirst.mockResolvedValueOnce(null);
+    await expect(verifyTelegramCallback("code", "state")).rejects.toThrow("not found or has expired");
+    expect(globalThis.fetch).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [{ id: 1, auth_date: Math.floor(Date.now() / 1000) }, "hash"],
+    [{ hash: "bad", auth_date: Math.floor(Date.now() / 1000) }, "incomplete"],
+    [{ id: 1, hash: "bad", auth_date: "invalid" }, "invalid auth_date"],
+    [{ id: 1, hash: "bad", auth_date: Math.floor(Date.now() / 1000) - 86_401 }, "expired"],
+    [{ id: 1, hash: "bad", auth_date: Math.floor(Date.now() / 1000) }, "hash is invalid"],
+  ])("rejects invalid widget payload %#", async (payload, message) => {
+    state.cookies.set("clean_pay_tg_nonce", "nonce");
+    await expect(verifyTelegramWidgetCallbackPayload(payload as never)).rejects.toThrow(message);
+  });
+
+  it("accepts widget optional identity fields and tolerates provider authentication failure", async () => {
+    state.cookies.set("clean_pay_tg_nonce", "nonce");
+    const body = { id: 123456, auth_date: Math.floor(Date.now() / 1000), first_name: "Clean", last_name: "User", photo_url: "https://img.test/a.png" };
+    mocks.remnashopAuth.mockRejectedValueOnce(new Error("provider offline"));
+    await expect(verifyTelegramWidgetCallbackPayload({ ...body, hash: signWidgetPayload(body) })).resolves.toMatchObject({
+      identity: { telegramUsername: null, fullName: "Clean User", photoUrl: "https://img.test/a.png", remnashopAuthResult: null },
+    });
+    expect(mocks.logTechnicalError).toHaveBeenCalled();
+  });
+
+  it("validates Telegram identity claims and derives fallback names", async () => {
+    state.cookies.set("clean_pay_tg_nonce", "nonce");
+    mocks.jwtVerify.mockResolvedValueOnce({ payload: {
+      nonce: "nonce", telegram_id: 123456, given_name: "Clean", family_name: "User",
+    } });
+    await expect(verifyTelegramPopupToken("token")).resolves.toMatchObject({
+      identity: { telegramId: "123456", telegramUsername: null, fullName: "Clean User", photoUrl: null },
+    });
+
+    for (const invalid of [undefined, 0, -1]) {
+      state.cookies.set("clean_pay_tg_nonce", "nonce");
+      mocks.jwtVerify.mockResolvedValueOnce({ payload: { nonce: "nonce", id: invalid } });
+      await expect(verifyTelegramPopupToken("token")).rejects.toThrow(/Telegram user id|invalid telegram_id/);
+    }
+  });
+
+  it("returns null provider auth when Telegram bot integration is unavailable", async () => {
+    vi.stubEnv("TELEGRAM_BOT_TOKEN", "");
+    state.cookies.set("clean_pay_tg_nonce", "nonce");
+    await expect(verifyTelegramPopupToken("token")).resolves.toMatchObject({
+      identity: { remnashopAuthResult: null },
+    });
+    expect(mocks.logTechnicalWarning).toHaveBeenCalledWith("telegram_remnashop_auth_skipped", expect.anything());
+    vi.unstubAllEnvs();
+  });
+
+  it("rejects token endpoint error payloads and missing id_token", async () => {
+    setCallbackCookies();
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(new Response(JSON.stringify({ error: "invalid_grant", error_description: "expired" }), { status: 200 }));
+    await expect(verifyTelegramCallback("code", "state")).rejects.toThrow("invalid_grant");
+    setCallbackCookies();
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(new Response(JSON.stringify({}), { status: 200 }));
+    await expect(verifyTelegramCallback("code", "state")).rejects.toThrow("does not contain id_token");
   });
 });

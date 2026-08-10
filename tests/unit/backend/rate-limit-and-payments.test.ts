@@ -4,12 +4,14 @@ import { Prisma } from "@prisma/client";
 const mocks = vi.hoisted(() => ({
   redisCommand: vi.fn(),
   prisma: {
+    $transaction: vi.fn(),
     paymentRecord: {
       findUnique: vi.fn(),
       create: vi.fn(),
       updateMany: vi.fn(),
     },
   },
+  lockPaymentUpstreamOwner: vi.fn(),
 }));
 
 vi.mock("@/backend/cache/redis", () => ({
@@ -20,11 +22,17 @@ vi.mock("@/backend/database/prisma", () => ({
   prisma: mocks.prisma,
 }));
 
+vi.mock("@/backend/integrations/payments/payment-owner-service", () => ({
+  lockPaymentUpstreamOwner: mocks.lockPaymentUpstreamOwner,
+}));
+
 import { assertCooldown, assertRateLimit, rateLimitCapacityKey, rateLimitKey, withAuthConcurrency } from "@/backend/limits/rate-limit";
 import {
   applyRemnashopTransaction,
   recordPayment,
   serializePaymentRecord,
+  syncExactPaymentRecordFromRemnashop,
+  syncPaymentRecordsFromRemnashopTransactions,
 } from "@/backend/integrations/payments/payment-record-service";
 
 const upstreamTransaction = {
@@ -177,6 +185,61 @@ describe("rate limiting", () => {
 describe("payment records", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.lockPaymentUpstreamOwner.mockResolvedValue("upstream-1");
+    mocks.prisma.$transaction.mockImplementation(async (work: (tx: typeof mocks.prisma) => Promise<unknown>) => work(mocks.prisma));
+  });
+
+  it("synchronizes transaction pages and exact rows under a locked owner", async () => {
+    mocks.prisma.paymentRecord.findUnique.mockResolvedValue(null);
+    mocks.prisma.paymentRecord.create.mockResolvedValue({ id: "record-1" });
+
+    await syncPaymentRecordsFromRemnashopTransactions({
+      userId: "user-1", upstreamAccountId: "upstream-1",
+      transactions: [upstreamTransaction, { ...upstreamTransaction, payment_id: "payment-2" }],
+    });
+    await expect(syncExactPaymentRecordFromRemnashop({
+      userId: "user-1", upstreamAccountId: "upstream-1", transaction: upstreamTransaction,
+    })).resolves.toEqual({ id: "record-1" });
+
+    expect(mocks.lockPaymentUpstreamOwner).toHaveBeenCalledTimes(2);
+    expect(mocks.prisma.paymentRecord.create).toHaveBeenCalledTimes(3);
+  });
+
+  it("retries one transaction-level unique race and then succeeds", async () => {
+    const unique = new Prisma.PrismaClientKnownRequestError("unique", { code: "P2002", clientVersion: "7.9.0" });
+    mocks.prisma.$transaction.mockRejectedValueOnce(unique).mockImplementationOnce(async (work: (tx: typeof mocks.prisma) => Promise<unknown>) => work(mocks.prisma));
+    mocks.prisma.paymentRecord.findUnique.mockResolvedValue(null);
+    mocks.prisma.paymentRecord.create.mockResolvedValue({ id: "record-1" });
+
+    await expect(syncExactPaymentRecordFromRemnashop({
+      userId: "user-1", upstreamAccountId: "upstream-1", transaction: upstreamTransaction,
+    })).resolves.toEqual({ id: "record-1" });
+    expect(mocks.prisma.$transaction).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not retry non-unique transaction failures or a second unique race", async () => {
+    const failure = new TypeError("database offline");
+    mocks.prisma.$transaction.mockRejectedValueOnce(failure);
+    await expect(syncPaymentRecordsFromRemnashopTransactions({
+      userId: "user-1", upstreamAccountId: "upstream-1", transactions: [],
+    })).rejects.toBe(failure);
+
+    const unique = new Prisma.PrismaClientKnownRequestError("unique", { code: "P2002", clientVersion: "7.9.0" });
+    mocks.prisma.$transaction.mockRejectedValue(unique);
+    await expect(syncExactPaymentRecordFromRemnashop({
+      userId: "user-1", upstreamAccountId: "upstream-1", transaction: upstreamTransaction,
+    })).rejects.toBe(unique);
+    expect(mocks.prisma.$transaction).toHaveBeenCalledTimes(3);
+  });
+
+  it("rejects invalid upstream timestamps before touching a record", async () => {
+    await expect(applyRemnashopTransaction(mocks.prisma as never, {
+      userId: "user-1", transaction: { ...upstreamTransaction, created_at: "invalid" },
+    })).rejects.toMatchObject({ code: "UPSTREAM_ERROR" });
+    await expect(applyRemnashopTransaction(mocks.prisma as never, {
+      userId: "user-1", transaction: { ...upstreamTransaction, updated_at: "2026-07-17T09:00:00.000Z" },
+    })).rejects.toMatchObject({ code: "UPSTREAM_ERROR" });
+    expect(mocks.prisma.paymentRecord.findUnique).not.toHaveBeenCalled();
   });
 
   it("creates normalized payment records", async () => {

@@ -30,4 +30,13 @@ describe("loadTariffsViewModel", () => {
 
     await expect(loadTariffsViewModel(catalog)).resolves.toMatchObject({ status: "error", action });
   });
+
+  it("hides unexpected catalog failures behind the generic view model", async () => {
+    const catalog: SubscriptionCatalog = {
+      loadOffers: async () => { throw new TypeError("private adapter detail"); },
+    };
+    await expect(loadTariffsViewModel(catalog)).resolves.toEqual({
+      status: "error", message: "Не удалось загрузить тарифы.",
+    });
+  });
 });

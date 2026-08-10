@@ -315,6 +315,18 @@ describe("application facades", () => {
     expect(history.loadRecent).toHaveBeenCalledWith("user-1", 20);
 
     await expect(loadCabinetViewModel(reader, authGateway({ loadCurrentSession: vi.fn(async () => null) }), history, maintenance)).resolves.toEqual({ status: "unauthorized" });
+
+    await expect(loadCabinetViewModel(reader, authGateway({
+      loadCurrentSession: vi.fn(async () => { throw new Error("database unavailable"); }),
+    }), history, maintenance)).resolves.toMatchObject({ status: "error" });
+  });
+
+  it("returns a safe fallback when subscription reissue fails unexpectedly", async () => {
+    const commands = cabinetCommands({
+      reissueSubscription: vi.fn(async () => { throw new Error("provider details"); }),
+    });
+
+    await expect(reissueCabinetSubscription(commands)).resolves.toMatchObject({ status: "error" });
   });
 
   it("uses safe fallbacks for navigation and payment status", async () => {

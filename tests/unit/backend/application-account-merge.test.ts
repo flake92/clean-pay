@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { confirmTelegramAccountMerge } from "@/application/auth/confirm-telegram-account-merge";
+import { cancelTelegramAccountMerge, confirmTelegramAccountMerge } from "@/application/auth/confirm-telegram-account-merge";
 import type { AccountMergeConfirmation, TelegramAccountMergeGateway } from "@/application/auth/ports/telegram-account-merge";
 
 const confirmation: AccountMergeConfirmation = {
@@ -102,5 +102,157 @@ describe("Telegram account merge application workflow", () => {
       terminal: false,
       errorCode: "INTERNAL_ERROR",
     });
+  });
+
+  it("treats a completed confirmation as an idempotent replay", async () => {
+    const subject = gateway();
+    vi.mocked(subject.loadConfirmation).mockResolvedValueOnce({ ...confirmation, status: "COMPLETED" });
+    await expect(confirmTelegramAccountMerge(subject)).resolves.toEqual({ merged: true, userId: "user-1" });
+    expect(subject.claim).not.toHaveBeenCalled();
+    expect(subject.audit).toHaveBeenLastCalledWith(expect.objectContaining({
+      action: "telegram_account_merge_succeeded", metadata: expect.objectContaining({ replay: true }),
+    }));
+  });
+
+  it.each([
+    [{ ...confirmation, status: "FAILED" as const }, "failed"],
+    [{ ...confirmation, expiresAt: new Date(0) }, "expired"],
+  ])("rejects a %s confirmation before claiming it", async (stored) => {
+    const subject = gateway();
+    vi.mocked(subject.loadConfirmation).mockResolvedValueOnce(stored);
+    await expect(confirmTelegramAccountMerge(subject)).rejects.toMatchObject({ code: "ACCOUNT_MERGE_REQUIRED" });
+    expect(subject.claim).not.toHaveBeenCalled();
+  });
+
+  it("reports a retryable conflict when another worker owns the claim", async () => {
+    const subject = gateway();
+    vi.mocked(subject.claim).mockResolvedValueOnce(false);
+    await expect(confirmTelegramAccountMerge(subject)).rejects.toMatchObject({ code: "CONFLICT" });
+    expect(subject.release).not.toHaveBeenCalled();
+    expect(subject.audit).toHaveBeenLastCalledWith(expect.objectContaining({
+      action: "telegram_account_merge_failed", metadata: expect.objectContaining({ retryable: true }),
+    }));
+  });
+
+  it.each([
+    [null],
+    [{ email: "other@example.com", emailVerified: true, upstreamAccountId: "target", telegramId: null }],
+    [{ email: "email@example.com", emailVerified: false, upstreamAccountId: "target", telegramId: null }],
+    [{ email: "email@example.com", emailVerified: true, upstreamAccountId: "other", telegramId: null }],
+    [{ email: "email@example.com", emailVerified: true, upstreamAccountId: "target", telegramId: "other" }],
+  ])("fails closed when the staged local owner no longer matches: %j", async (owner) => {
+    const subject = gateway();
+    vi.mocked(subject.loadCurrentOwner).mockResolvedValueOnce(owner);
+    await expect(confirmTelegramAccountMerge(subject)).rejects.toMatchObject({ code: "ACCOUNT_MERGE_REQUIRED" });
+    expect(subject.release).toHaveBeenCalledWith(confirmation, { terminal: true, errorCode: "ACCOUNT_MERGE_REQUIRED" });
+  });
+
+  it("rejects a Telegram identity that moved to an unrelated provider account", async () => {
+    const subject = gateway();
+    vi.mocked(subject.authenticateTelegram).mockReset().mockResolvedValue({
+      context: {}, accountId: "other", telegramId: "777", email: "other@example.com", emailVerified: true, pendingEmail: null,
+    });
+    await expect(confirmTelegramAccountMerge(subject)).rejects.toMatchObject({ code: "ACCOUNT_MERGE_REQUIRED" });
+  });
+
+  it("skips provider merge when an earlier attempt already moved Telegram to the target", async () => {
+    const subject = gateway();
+    const targetIdentity = { context: {}, accountId: "target", telegramId: "777", email: "email@example.com", emailVerified: true, pendingEmail: null };
+    vi.mocked(subject.authenticateTelegram).mockReset().mockResolvedValue(targetIdentity);
+    vi.mocked(subject.synchronizeSubscriptionIdentity).mockResolvedValueOnce(false);
+    await expect(confirmTelegramAccountMerge(subject)).resolves.toEqual({ merged: true, userId: "user-1" });
+    expect(subject.preflight).not.toHaveBeenCalled();
+    expect(subject.mergeProviderAccounts).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { telegramId: "other" },
+    { email: "other@example.com" },
+  ])("rejects a changed source %s", async (change) => {
+    const subject = gateway();
+    vi.mocked(subject.authenticateTelegram).mockReset().mockResolvedValue({
+      context: {}, accountId: "source", telegramId: "777", email: "telegram@example.com", emailVerified: true, pendingEmail: null,
+      ...change,
+    });
+    await expect(confirmTelegramAccountMerge(subject)).rejects.toMatchObject({ code: "ACCOUNT_MERGE_REQUIRED" });
+    expect(subject.preflight).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [["active payment operations"], "ACCOUNT_MERGE_IN_PROGRESS"],
+    [["payment fulfillment in progress"], "ACCOUNT_MERGE_IN_PROGRESS"],
+    [["unknown ownership conflict"], "ACCOUNT_MERGE_REQUIRED"],
+  ])("classifies provider preflight conflicts %j", async (conflicts, code) => {
+    const subject = gateway();
+    vi.mocked(subject.preflight).mockResolvedValueOnce({
+      conflicts, dryRun: true, sourceAccountId: "source", targetAccountId: "target",
+      target: { accountId: "target", email: "email@example.com", emailVerified: true, telegramId: null }, requiresRelogin: true,
+    });
+    await expect(confirmTelegramAccountMerge(subject)).rejects.toMatchObject({ code });
+    expect(subject.mergeProviderAccounts).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [{ dryRun: false }],
+    [{ sourceAccountId: "other" }],
+    [{ targetAccountId: "other" }],
+    [{ target: { accountId: "other", email: "email@example.com", emailVerified: true, telegramId: null } }],
+    [{ target: { accountId: "target", email: "other@example.com", emailVerified: true, telegramId: null } }],
+    [{ target: { accountId: "target", email: "email@example.com", emailVerified: false, telegramId: null } }],
+    [{ target: { accountId: "target", email: "email@example.com", emailVerified: true, telegramId: "other" } }],
+    [{ requiresRelogin: false }],
+  ])("rejects an inconsistent provider preflight: %j", async (change) => {
+    const subject = gateway();
+    vi.mocked(subject.preflight).mockResolvedValueOnce({
+      conflicts: [], dryRun: true, sourceAccountId: "source", targetAccountId: "target",
+      target: { accountId: "target", email: "email@example.com", emailVerified: true, telegramId: null }, requiresRelogin: true,
+      ...change,
+    });
+    await expect(confirmTelegramAccountMerge(subject)).rejects.toMatchObject({ code: "ACCOUNT_MERGE_REQUIRED" });
+  });
+
+  it.each([
+    [{ accountId: "source" }],
+    [{ telegramId: "other" }],
+    [{ email: "other@example.com" }],
+    [{ emailVerified: false }],
+    [{ pendingEmail: "pending@example.com" }],
+  ])("rejects an inconsistent final provider identity: %j", async (change) => {
+    const subject = gateway();
+    const source = { context: {}, accountId: "source", telegramId: "777", email: "telegram@example.com", emailVerified: true, pendingEmail: null };
+    const target = { context: {}, accountId: "target", telegramId: "777", email: "email@example.com", emailVerified: true, pendingEmail: null, ...change };
+    vi.mocked(subject.authenticateTelegram).mockReset().mockResolvedValueOnce(source).mockResolvedValueOnce(target);
+    await expect(confirmTelegramAccountMerge(subject)).rejects.toMatchObject({ code: "ACCOUNT_MERGE_REQUIRED" });
+    expect(subject.linkCurrentAccount).not.toHaveBeenCalled();
+  });
+
+  it("rejects a changed subscription result and an unsuccessful local commit", async () => {
+    const subscriptionChanged = gateway();
+    vi.mocked(subscriptionChanged.synchronizeSubscriptionIdentity).mockResolvedValueOnce(false);
+    await expect(confirmTelegramAccountMerge(subscriptionChanged)).rejects.toMatchObject({ code: "ACCOUNT_MERGE_REQUIRED" });
+
+    const commitFailed = gateway();
+    vi.mocked(commitFailed.complete).mockResolvedValueOnce(false);
+    await expect(confirmTelegramAccountMerge(commitFailed)).rejects.toMatchObject({ code: "INTERNAL_ERROR" });
+  });
+
+  it("keeps a committed merge successful when refresh or success audit fails", async () => {
+    const subject = gateway();
+    vi.mocked(subject.refreshLocalSession).mockRejectedValueOnce(new Error("cookie unavailable"));
+    vi.mocked(subject.audit).mockImplementation(async ({ action }) => {
+      if (action === "telegram_account_merge_succeeded") throw new Error("audit unavailable");
+    });
+    await expect(confirmTelegramAccountMerge(subject)).resolves.toEqual({ merged: true, userId: "user-1" });
+  });
+
+  it("cancels only a pending, still-owned confirmation", async () => {
+    const subject = gateway();
+    await expect(cancelTelegramAccountMerge(subject)).resolves.toBeUndefined();
+    const completed = gateway();
+    vi.mocked(completed.loadConfirmation).mockResolvedValueOnce({ ...confirmation, status: "COMPLETED" });
+    await expect(cancelTelegramAccountMerge(completed)).rejects.toMatchObject({ code: "CONFLICT" });
+    const raced = gateway();
+    vi.mocked(raced.cancel).mockResolvedValueOnce(false);
+    await expect(cancelTelegramAccountMerge(raced)).rejects.toMatchObject({ code: "CONFLICT" });
   });
 });
