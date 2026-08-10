@@ -1,4 +1,5 @@
 import { getEnv } from "@/backend/config/env";
+import { ServiceError } from "@/backend/errors/service-error";
 import { logger } from "@/backend/observability/logger";
 
 type RemnawaveUser = {
@@ -193,6 +194,53 @@ async function getUsersByTelegramId(telegramId: string | number) {
   const data = await remnawaveRequest<RemnawaveListResponse>(`/users/by-telegram-id/${encodeURIComponent(String(telegramId))}`);
 
   return data?.response ?? [];
+}
+
+export async function synchronizeRemnawaveUserIdentity(input: {
+  uuid: string;
+  email: string;
+  telegramId: string;
+}) {
+  const endpoint = remnawaveEndpoint("/users");
+  const token = getEnv().remnawave.token;
+  if (!endpoint || !token) {
+    throw new ServiceError("UPSTREAM_UNAVAILABLE", 503, "Remnawave identity synchronization is not configured.");
+  }
+
+  let response: Response;
+  try {
+    response = await fetch(endpoint, {
+      method: "PATCH",
+      headers: {
+        accept: "application/json",
+        authorization: token.startsWith("Bearer ") ? token : `Bearer ${token}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        uuid: input.uuid,
+        email: input.email,
+        telegramId: Number(input.telegramId),
+      }),
+      cache: "no-store",
+      signal: AbortSignal.timeout(10_000),
+    });
+  } catch (error) {
+    throw new ServiceError("UPSTREAM_UNAVAILABLE", 503, "Remnawave identity synchronization failed.", {
+      cause: error instanceof Error ? error.name : "UnknownError",
+    });
+  }
+  if (!response.ok) {
+    throw new ServiceError("UPSTREAM_UNAVAILABLE", 503, "Remnawave identity synchronization was rejected.", {
+      upstreamStatus: response.status,
+    });
+  }
+
+  const verified = await getUserByUuid(input.uuid);
+  if (normalizedIdentity(verified?.uuid) !== normalizedIdentity(input.uuid)
+    || normalizedEmail(verified?.email) !== normalizedEmail(input.email)
+    || normalizedIdentity(verified?.telegramId) !== normalizedIdentity(input.telegramId)) {
+    throw new ServiceError("UPSTREAM_UNAVAILABLE", 503, "Remnawave returned an inconsistent account owner.");
+  }
 }
 
 export async function getLiveRemnawaveSubscriptionUrl(input: LiveSubscriptionUrlInput) {

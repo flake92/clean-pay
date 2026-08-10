@@ -8,7 +8,10 @@ vi.mock("@/backend/observability/logger", () => ({
   logger: mocks.logger,
 }));
 
-import { getLiveRemnawaveSubscriptionUrl } from "@/backend/integrations/remnawave/client";
+import {
+  getLiveRemnawaveSubscriptionUrl,
+  synchronizeRemnawaveUserIdentity,
+} from "@/backend/integrations/remnawave/client";
 
 const originalFetch = global.fetch;
 
@@ -212,5 +215,37 @@ describe("Remnawave live subscription client", () => {
       expect.objectContaining({ category: "upstream" }),
     );
     expect(JSON.stringify(mocks.logger.warn.mock.calls)).not.toContain("network token secret");
+  });
+
+  it("updates and verifies the subscription owner identity with the Remnawave 2.7 API", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ response: { uuid: "rw-1" } }))
+      .mockResolvedValueOnce(jsonResponse({
+        response: { uuid: "rw-1", email: "owner@example.com", telegramId: 777 },
+      }));
+    global.fetch = fetchMock;
+
+    await expect(synchronizeRemnawaveUserIdentity({
+      uuid: "rw-1", email: "owner@example.com", telegramId: "777",
+    })).resolves.toBeUndefined();
+    expect(fetchMock).toHaveBeenNthCalledWith(1, "https://panel.example.com/api/users", expect.objectContaining({
+      method: "PATCH",
+      body: JSON.stringify({ uuid: "rw-1", email: "owner@example.com", telegramId: 777 }),
+    }));
+    expect(fetchMock).toHaveBeenNthCalledWith(2, "https://panel.example.com/api/users/rw-1", expect.objectContaining({
+      cache: "no-store",
+    }));
+  });
+
+  it("keeps merge retryable when Remnawave does not confirm the new owner", async () => {
+    global.fetch = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ response: { uuid: "rw-1" } }))
+      .mockResolvedValueOnce(jsonResponse({
+        response: { uuid: "rw-1", email: "owner@example.com", telegramId: 888 },
+      }));
+
+    await expect(synchronizeRemnawaveUserIdentity({
+      uuid: "rw-1", email: "owner@example.com", telegramId: "777",
+    })).rejects.toMatchObject({ code: "UPSTREAM_UNAVAILABLE" });
   });
 });
