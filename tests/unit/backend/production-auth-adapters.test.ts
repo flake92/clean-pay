@@ -380,6 +380,7 @@ describe("production auth and profile adapters", () => {
     mocks.getJwtExpiresAt.mockReturnValue(new Date("2099-01-01T00:00:00.000Z"));
 
     const session = await productionProfileCommands.loadPasswordSession();
+    await productionProfileCommands.assertPasswordChangeRateLimit(session);
     const refreshed = await productionProfileCommands.refreshProviderSession(session);
     await productionProfileCommands.persistRefreshedProviderSession(session, refreshed);
     const changed = await productionProfileCommands.changeProviderPassword(session, { currentPassword: "old", newPassword: "new-password" });
@@ -387,6 +388,12 @@ describe("production auth and profile adapters", () => {
     await productionProfileCommands.auditPasswordChanged("user-1");
 
     expect(mocks.replaceUpstreamTokens).toHaveBeenCalledWith("session-1", expect.objectContaining({ accessTokenEncrypted: "protected:fresh-access" }));
+    expect(mocks.assertRateLimit).toHaveBeenCalledWith({
+      action: "password_change",
+      sessionId: "session-1",
+      limit: 5,
+      windowSeconds: 15 * 60,
+    });
     expect(mocks.replaceWebSessionAfterPasswordChange).toHaveBeenCalledWith(expect.objectContaining({ sessionId: "session-1", userId: "user-1" }));
     expect(mocks.auditLog).toHaveBeenCalledWith({ action: "password_changed", userId: "user-1" });
 

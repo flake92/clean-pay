@@ -52,6 +52,15 @@ describe("devcontainer e2e runner readiness", () => {
     }
   });
 
+  it("keeps service URLs container-local when host ports are isolated", () => {
+    expect(runner).toContain('name === "CLEAN_PAY_E2E_BASE_URL"');
+    expect(runner).toContain('? "http://localhost:4000"');
+    expect(runner).toContain('name === "CLEAN_PAY_E2E_MAILPIT_URL"');
+    expect(runner).toContain('? "http://smtp:8025"');
+    expect(runner).toContain('name === "CLEAN_PAY_E2E_OIDC_URL"');
+    expect(runner).toContain('? "http://telegram-oidc-mock:8090"');
+  });
+
   it("uses one project-scoped Remnashop image across every service", () => {
     const imageReference =
       "image: ${CLEAN_PAY_DEVCONTAINER_REMNASHOP_IMAGE:-${COMPOSE_PROJECT_NAME:-clean-pay-dev}-remnashop:latest}";
@@ -87,6 +96,10 @@ describe("devcontainer e2e runner readiness", () => {
     expect(ciWorkflow).not.toMatch(/actions\/(?:checkout|setup-node)@v4/);
     expect(ciWorkflow).toContain("actions/checkout@v5");
     expect(ciWorkflow).toContain("actions/setup-node@v5");
+    expect(ciWorkflow.match(/node-version-file: \.node-version/g)).toHaveLength(3);
+    expect(ciWorkflow).toContain("workflow_dispatch:");
+    expect(ciWorkflow).toContain("sh -n deploy.sh start.sh scripts/*.sh deploy/prod/*.sh");
+    expect(ciWorkflow).toContain("docker compose --env-file deploy/prod/.env");
     expect(ciWorkflow).toContain("timeout --signal=TERM --kill-after=30s 12m npm run test:e2e");
   });
 

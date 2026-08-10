@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import type {
   PlanOffer,
@@ -105,6 +105,14 @@ export function PaymentConfirmation({
 
     return findSelection(state.offers, planCode, durationDays, gatewayType);
   }, [durationDays, gatewayType, planCode, state]);
+  const verifyEmailRequired =
+    state.status === "account-action-required" && state.action === "verifyEmail";
+
+  useEffect(() => {
+    if (verifyEmailRequired) {
+      replaceWith(emailVerificationPath(paymentRedirectTo));
+    }
+  }, [paymentRedirectTo, verifyEmailRequired]);
 
   function finishSubmitting() {
     submittingRef.current = false;
@@ -193,7 +201,6 @@ export function PaymentConfirmation({
 
   if (state.status === "account-action-required") {
     if (state.action === "verifyEmail") {
-      replaceWith(emailVerificationPath(paymentRedirectTo));
       return null;
     }
     if (state.action) {

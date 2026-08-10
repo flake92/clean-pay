@@ -8,7 +8,10 @@ export default defineConfig({
     environment: "jsdom",
     globals: true,
     setupFiles: [path.join(projectRoot, "tests/setup/env.ts")],
-    include: ["tests/unit/frontend/critical-flow-components.test.ts"],
+    include: [
+      "tests/unit/frontend/critical-flow-components.test.ts",
+      "tests/unit/frontend/payment-return-status-component.test.ts",
+    ],
     pool: "forks",
     testTimeout: 15_000,
     coverage: {
@@ -19,6 +22,7 @@ export default defineConfig({
         "src/frontend/components/link-account-panel.tsx",
         "src/frontend/components/passkey-actions.tsx",
         "src/frontend/components/payment-confirmation.tsx",
+        "src/frontend/components/payment-return-status.tsx",
         "src/frontend/components/register-email-confirm-form.tsx",
       ],
       thresholds: {

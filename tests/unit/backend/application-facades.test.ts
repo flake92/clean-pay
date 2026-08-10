@@ -362,6 +362,7 @@ describe("application facades", () => {
   it("normalizes profile commands and presents stable failures", async () => {
     const commands: ProfileCommands = {
       loadPasswordSession: vi.fn(async () => ({ context: {}, userId: "user-1" })),
+      assertPasswordChangeRateLimit: vi.fn(async () => undefined),
       changeProviderPassword: vi.fn(async () => ({ context: {} })),
       refreshProviderSession: vi.fn(async () => ({ context: {} })),
       persistRefreshedProviderSession: vi.fn(async () => undefined),

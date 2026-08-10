@@ -4,6 +4,7 @@ import { assessReadinessResponse } from "../../../deploy/prod/readiness.mjs";
 
 const prodCommand = readFileSync("deploy/prod/prod.mjs", "utf8");
 const rootStart = readFileSync("start.sh", "utf8");
+const deployScript = readFileSync("deploy.sh", "utf8");
 const prodCompose = readFileSync("deploy/prod/docker-compose.yml", "utf8");
 const rootCompose = readFileSync("docker-compose.yml", "utf8");
 const devcontainerCompose = readFileSync(".devcontainer/docker-compose.yml", "utf8");
@@ -20,6 +21,10 @@ describe("production readiness startup gate", () => {
     expect(prodCommand).toContain("assessReadinessResponse(response)");
     expect(rootStart).toContain('/api/internal/health/readiness');
     expect(rootStart).toContain('x-clean-pay-readiness-secret');
+    expect(deployScript).toContain("verify_detailed_readiness");
+    expect(deployScript).toContain("Object.entries(body.checks||{})");
+    expect(deployScript.indexOf("verify_detailed_readiness\n  verify_external_security_headers"))
+      .toBeGreaterThan(deployScript.indexOf("compose up -d --build --wait"));
   });
 
   it("fails closed for malformed or degraded readiness payloads", () => {
@@ -52,14 +57,15 @@ describe("production readiness startup gate", () => {
     );
   });
 
-  it("marks the app healthy only for a fully healthy readiness response", () => {
+  it("keeps container health on core dependencies while retaining detailed diagnostics", () => {
     for (const compose of [prodCompose, rootCompose, devcontainerCompose]) {
       expect(compose).toContain("/api/internal/health/readiness");
       expect(compose).toContain("AbortSignal.timeout(10000)");
       expect(compose).toContain("x-clean-pay-readiness-secret");
-      expect(compose).toContain("b.status!=='ok'");
-      expect(compose).toContain("Object.values(b.checks).some(c=>c.status!=='ok')");
-      expect(compose).toContain("interval: 15s");
+      expect(compose).toContain("b.checks.database?.status!=='ok'");
+      expect(compose).toContain("b.checks.redis?.status!=='ok'");
+      expect(compose).not.toContain("Object.values(b.checks).some(c=>c.status!=='ok')");
+      expect(compose).toContain("interval: 30s");
       expect(compose).toContain("timeout: 12s");
     }
   });

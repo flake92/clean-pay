@@ -6,7 +6,8 @@ import { NextResponse } from "next/server";
 
 import { logTechnicalError, logTechnicalWarning } from "@/backend/observability/audit";
 import { authDebugLog } from "@/backend/observability/auth-debug-log";
-import { randomToken, sha256 } from "@/backend/security/crypto";
+import { randomToken, safeEqual, sha256 } from "@/backend/security/crypto";
+import { redisCommand } from "@/backend/cache/redis";
 import { getEnv } from "@/backend/config/env";
 import { logger } from "@/backend/observability/logger";
 import { recordUpstreamRequest } from "@/backend/observability/metrics";
@@ -22,7 +23,8 @@ import { getCurrentSession } from "@/backend/integrations/sessions/web-session-s
 import type { TelegramAuthRequest } from "@/backend/integrations/remnashop/contracts";
 
 const telegramAuthTtlSeconds = 10 * 60;
-const telegramLoginAuthMaxAgeSeconds = 24 * 60 * 60;
+const telegramLoginAuthMaxAgeSeconds = 5 * 60;
+const telegramLoginClockSkewSeconds = 30;
 
 export class TelegramAuthStateAlreadyConsumedError extends Error {
   constructor() {
@@ -431,7 +433,10 @@ function verifyTelegramLoginWidgetPayload(payload: TelegramLoginWidgetPayload) {
 
   const now = Math.floor(Date.now() / 1000);
 
-  if (now - authDate > telegramLoginAuthMaxAgeSeconds) {
+  if (
+    authDate - now > telegramLoginClockSkewSeconds
+    || now - authDate > telegramLoginAuthMaxAgeSeconds
+  ) {
     throw new Error("Telegram Login payload is expired");
   }
 
@@ -445,7 +450,7 @@ function verifyTelegramLoginWidgetPayload(payload: TelegramLoginWidgetPayload) {
   };
   const expectedHash = signTelegramAuthPayload(bodyWithoutHash, env.telegramBotToken);
 
-  if (expectedHash !== payload.hash) {
+  if (!safeEqual(expectedHash, payload.hash)) {
     throw new Error("Telegram Login payload hash is invalid");
   }
 
@@ -453,6 +458,26 @@ function verifyTelegramLoginWidgetPayload(payload: TelegramLoginWidgetPayload) {
     ...bodyWithoutHash,
     hash: payload.hash,
   };
+}
+
+async function claimTelegramLoginWidgetPayload(payload: TelegramAuthRequest) {
+  const ageSeconds = Math.max(
+    0,
+    Math.floor(Date.now() / 1000) - Number(payload.auth_date),
+  );
+  const ttlSeconds = Math.max(1, telegramLoginAuthMaxAgeSeconds - ageSeconds);
+  const claimed = await redisCommand([
+    "SET",
+    `clean-pay:telegram-widget:v1:${sha256(payload.hash)}`,
+    "1",
+    "NX",
+    "EX",
+    ttlSeconds,
+  ]);
+
+  if (claimed !== "OK") {
+    throw new Error("Telegram Login payload was already used");
+  }
 }
 
 async function authenticateRemnashopWithTelegram(payload: JWTPayload, telegramId: string, telegramUsername: string | null) {
@@ -656,6 +681,7 @@ export async function verifyTelegramWidgetCallbackPayload(payload: TelegramLogin
 
   await assertTelegramLinkSession(authState, cookieStore);
 
+  await claimTelegramLoginWidgetPayload(verifiedPayload);
   await claimTelegramAuthState(authState);
 
   const identity = {

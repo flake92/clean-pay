@@ -45,7 +45,13 @@ describe("Remnashop payment recovery v1 contract", () => {
         { ...payment, payment_url: "javascript:alert(1)" },
         "/purchase",
       ),
-    ).toThrow(/http\(s\) URL/i);
+    ).toThrow(/https URL/i);
+    expect(() =>
+      parsePaymentInit(
+        { ...payment, payment_url: "http://pay.example.test/checkout" },
+        "/purchase",
+      ),
+    ).toThrow(/https URL/i);
     expect(() =>
       parsePaymentInit(
         { ...payment, payment_id: "not-a-uuid" },

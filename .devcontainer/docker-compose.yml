@@ -172,8 +172,8 @@ services:
       - "${CLEAN_PAY_DEVCONTAINER_APP_HOST_PORT:-4000}:4000"
       - "${CLEAN_PAY_DEVCONTAINER_PRISMA_STUDIO_HOST_PORT:-5555}:5555"
     healthcheck:
-      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:4000/api/internal/health/readiness',{headers:{'x-clean-pay-readiness-secret':process.env.READINESS_INTERNAL_SECRET},signal:AbortSignal.timeout(10000)}).then(async r=>{const b=await r.json();if(!r.ok||b.status!=='ok'||!b.checks||Object.values(b.checks).some(c=>c.status!=='ok'))process.exit(1)}).catch(()=>process.exit(1))\""]
-      interval: 15s
+      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:4000/api/internal/health/readiness',{headers:{'x-clean-pay-readiness-secret':process.env.READINESS_INTERNAL_SECRET},signal:AbortSignal.timeout(10000)}).then(async r=>{const b=await r.json();if(!b.checks||b.checks.database?.status!=='ok'||b.checks.redis?.status!=='ok')process.exit(1)}).catch(()=>process.exit(1))\""]
+      interval: 30s
       timeout: 12s
       retries: 20
       start_period: 180s

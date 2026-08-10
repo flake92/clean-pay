@@ -244,11 +244,17 @@ function runInsideDevcontainer() {
 
   for (const name of passThroughEnv) {
     if (process.env[name] !== undefined) {
-      const value = name === "CLEAN_PAY_HOST_DEVCONTAINER_DIR"
-        ? dockerDesktopHostPath(process.env[name])
-        : name === "REMNASHOP_BUILD_CONTEXT" && process.env.REMNASHOP_HOST_SOURCE
-          ? "/workspace/remnashop-source"
-          : process.env[name];
+      const value = name === "CLEAN_PAY_E2E_BASE_URL"
+        ? "http://localhost:4000"
+        : name === "CLEAN_PAY_E2E_MAILPIT_URL"
+          ? "http://smtp:8025"
+          : name === "CLEAN_PAY_E2E_OIDC_URL"
+            ? "http://telegram-oidc-mock:8090"
+            : name === "CLEAN_PAY_HOST_DEVCONTAINER_DIR"
+              ? dockerDesktopHostPath(process.env[name])
+              : name === "REMNASHOP_BUILD_CONTEXT" && process.env.REMNASHOP_HOST_SOURCE
+                ? "/workspace/remnashop-source"
+                : process.env[name];
 
       execArgs.push("-e", `${name}=${value}`);
     }

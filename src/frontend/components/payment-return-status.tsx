@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useTransition } from "react";
+import { useEffect, useRef, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Message } from "primereact/message";
 import { Tag } from "primereact/tag";
@@ -70,12 +70,22 @@ function paymentSeverity(status: string): "success" | "warning" | "danger" | "in
 export function PaymentReturnStatus({ kind, model }: Props) {
   const router = useRouter();
   const [loading, startRefresh] = useTransition();
+  const pollAttemptRef = useRef(0);
   const data = model.status === "ready" ? model.data : null;
   const error = model.status === "error" ? model.message : null;
 
   useEffect(() => {
-    if (!data || !shouldPollPaymentReturn(data)) return;
-    const timer = window.setTimeout(() => startRefresh(() => router.refresh()), paymentPollDelayMs(0, data.operation?.retry_after_seconds));
+    if (!data || !shouldPollPaymentReturn(data)) {
+      pollAttemptRef.current = 0;
+      return;
+    }
+
+    const attempt = pollAttemptRef.current;
+    const timer = window.setTimeout(() => {
+      pollAttemptRef.current = attempt + 1;
+      startRefresh(() => router.refresh());
+    }, paymentPollDelayMs(attempt, data.operation?.retry_after_seconds));
+
     return () => window.clearTimeout(timer);
   }, [data, router]);
 

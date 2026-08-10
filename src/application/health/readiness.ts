@@ -147,15 +147,22 @@ export async function getPublicReadiness(
   gateway: Pick<ReadinessGateway, "readSharedState">,
   now = Date.now(),
 ) {
-  let cached: Pick<DetailedReadiness, "status" | "checkedAt"> | null = null;
+  let cached = state().cached;
+  const localCheckedAtMs = cached ? Date.parse(cached.checkedAt) : Number.NaN;
+  const localFresh = Boolean(
+    cached
+      && Number.isFinite(localCheckedAtMs)
+      && now - localCheckedAtMs <= READINESS_STALE_AFTER_MS,
+  );
 
-  try {
-    cached = parseCachedReadiness(await gateway.readSharedState());
-  } catch {
-    // Public readiness must remain safe when the shared cache is unavailable.
+  if (!localFresh) {
+    try {
+      cached = parseCachedReadiness(await gateway.readSharedState()) ?? cached;
+    } catch {
+      // Public readiness must remain safe when the shared cache is unavailable.
+    }
   }
 
-  cached ??= state().cached;
   const checkedAtMs = cached ? Date.parse(cached.checkedAt) : Number.NaN;
   const stale = !cached || !Number.isFinite(checkedAtMs) || now - checkedAtMs > READINESS_STALE_AFTER_MS;
 

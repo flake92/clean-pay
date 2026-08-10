@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import type {
   DurationGatewayPrice,
@@ -197,10 +197,17 @@ export function ExtendConfirmation({ model = defaultCheckoutModel, requestedDura
     requestedDuration,
     requestedGateway,
   );
+  const verifyEmailRequired =
+    state.status === "account-action-required" && state.action === "verifyEmail";
+
+  useEffect(() => {
+    if (verifyEmailRequired) {
+      replaceWith(emailVerificationPath(requestedExtendDestination));
+    }
+  }, [requestedExtendDestination, verifyEmailRequired]);
 
   if (state.status === "account-action-required") {
     if (state.action === "verifyEmail") {
-      replaceWith(emailVerificationPath(requestedExtendDestination));
       return null;
     }
     if (state.action) {
