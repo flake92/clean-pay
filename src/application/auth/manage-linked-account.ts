@@ -78,8 +78,8 @@ async function mergeLinkAccounts(
   identity: { telegramId: string; telegramUsername: string | null },
 ) {
   const telegramSession = await commands.telegramProviderSession(identity);
-  const sourceAccountId = commands.providerAccountId(emailSession);
-  const targetAccountId = commands.providerAccountId(telegramSession);
+  const sourceAccountId = commands.providerAccountId(telegramSession);
+  const targetAccountId = commands.providerAccountId(emailSession);
   if (sourceAccountId !== targetAccountId) {
     await commands.mergeProviderAccounts({
       sourceAccountId,

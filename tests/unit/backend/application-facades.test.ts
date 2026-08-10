@@ -201,18 +201,18 @@ describe("application facades", () => {
       loadActor: vi.fn(async () => ({ userId: "user-1", fullAssurance: true })),
       loadConfirmation: vi.fn(async () => ({
         context: {}, id: "merge-1", userId: "user-1", status: "COMPLETED" as const, expiresAt: new Date(Date.now() + 60_000),
-        sourceAccountId: "source", targetAccountId: "target", sourceEmail: null, targetEmail: "u@example.com", telegramId: "777", telegramUsername: null,
+        sourceAccountId: "source", targetAccountId: "target", sourceEmail: null, targetEmail: "u@example.com", targetTelegramId: null, telegramId: "777", telegramUsername: null,
       })),
       assertRateLimit: vi.fn(async () => undefined), audit: vi.fn(async () => undefined), claim: vi.fn(async () => true),
       withOwnerChangeFence: vi.fn(async (_confirmation, work) => work()), loadCurrentOwner: vi.fn(), authenticateTelegram: vi.fn(),
-      preflight: vi.fn(), mergeProviderAccounts: vi.fn(), loadCurrentSubscription: vi.fn(), linkCurrentAccount: vi.fn(),
+      preflight: vi.fn(), mergeProviderAccounts: vi.fn(), synchronizeSubscriptionIdentity: vi.fn(), linkCurrentAccount: vi.fn(),
       complete: vi.fn(), cancel: vi.fn(async () => true), release: vi.fn(), refreshLocalSession: vi.fn(),
     };
 
     await expect(confirmLinkedTelegram(mergeGateway)).resolves.toEqual({ ok: true, kind: "merge-confirmed" });
     vi.mocked(mergeGateway.loadConfirmation).mockResolvedValueOnce({
       context: {}, id: "merge-2", userId: "user-1", status: "PENDING", expiresAt: new Date(Date.now() + 60_000),
-      sourceAccountId: "source", targetAccountId: "target", sourceEmail: null, targetEmail: "u@example.com", telegramId: "777", telegramUsername: null,
+      sourceAccountId: "source", targetAccountId: "target", sourceEmail: null, targetEmail: "u@example.com", targetTelegramId: null, telegramId: "777", telegramUsername: null,
     });
     await expect(cancelLinkedTelegram(mergeGateway)).resolves.toEqual({ ok: true, kind: "merge-cancelled" });
     vi.mocked(mergeGateway.loadConfirmation).mockRejectedValueOnce(Object.assign(new Error(), { code: "UNAUTHORIZED" }));

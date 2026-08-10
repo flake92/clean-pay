@@ -22,6 +22,7 @@ const mocks = vi.hoisted(() => ({
   auditLog: vi.fn(),
   assertRateLimit: vi.fn(),
   stageTelegramAccountMerge: vi.fn(),
+  synchronizeProviderAccountIdentity: vi.fn(),
   prisma: {
     webUser: { findUnique: vi.fn(), findUniqueOrThrow: vi.fn(), update: vi.fn(), upsert: vi.fn() },
     telegramAuthState: { update: vi.fn() },
@@ -61,6 +62,9 @@ vi.mock("@/backend/integrations/remnashop/client", () => ({
   recoverRemnashopTelegramSession: mocks.recoverRemnashopTelegramSession,
   remnashopLinkTelegram: mocks.remnashopLinkTelegram,
   remnashopMergeUsers: mocks.remnashopMergeUsers,
+}));
+vi.mock("@/backend/integrations/auth/provider-account-identity-sync", () => ({
+  synchronizeProviderAccountIdentity: mocks.synchronizeProviderAccountIdentity,
 }));
 
 vi.mock("@/backend/integrations/sessions/web-session-service", () => ({

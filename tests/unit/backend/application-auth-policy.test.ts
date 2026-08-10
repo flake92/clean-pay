@@ -149,7 +149,7 @@ describe("application authentication policy", () => {
     expect(order.slice(0, 5)).toEqual(["confirm-code", "persist-proof", "refresh-local", "audit-proof", "fence"]);
     expect(order).toContain("merge");
     expect(order.at(-2)).toBe("link");
-    expect(commands.mergeProviderAccounts).toHaveBeenCalledWith(expect.objectContaining({ sourceAccountId: "email-account", targetAccountId: "telegram-account" }));
+    expect(commands.mergeProviderAccounts).toHaveBeenCalledWith(expect.objectContaining({ sourceAccountId: "telegram-account", targetAccountId: "email-account" }));
   });
 
   it("keeps successful verification and records pending synchronization on an optional sync failure", async () => {
@@ -231,7 +231,7 @@ describe("application authentication policy", () => {
     await expect(linkAccountEmail(commands, { email: "user@example.com", password: "secret123" }))
       .resolves.toEqual({ ok: true, kind: "linked" });
     expect(commands.withOwnerChangeFence).toHaveBeenCalledOnce();
-    expect(commands.mergeProviderAccounts).toHaveBeenCalledWith(expect.objectContaining({ sourceAccountId: "email-account", targetAccountId: "telegram-account" }));
+    expect(commands.mergeProviderAccounts).toHaveBeenCalledWith(expect.objectContaining({ sourceAccountId: "telegram-account", targetAccountId: "email-account" }));
     expect(commands.linkCurrentAccount).toHaveBeenCalledWith(expect.anything(), { upstreamMerged: true, ownerFenceHeld: true });
   });
 

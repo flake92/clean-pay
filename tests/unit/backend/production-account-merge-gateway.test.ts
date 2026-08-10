@@ -5,6 +5,7 @@ const mocks = vi.hoisted(() => ({
   assertRateLimit: vi.fn(), auditLog: vi.fn(), withPaymentOwnerChangeFence: vi.fn(),
   remnashopAuthTelegramIdentity: vi.fn(), getRemnashopMe: vi.fn(), getRemnashopUserIdFromAccessToken: vi.fn(),
   remnashopMergeUsers: vi.fn(), remnashopRequest: vi.fn(), linkCurrentUserToRemnashopAuth: vi.fn(),
+  synchronizeProviderAccountIdentity: vi.fn(),
   prisma: {
     $transaction: vi.fn(), accountMergeConfirmation: { findFirst: vi.fn(), updateMany: vi.fn() },
     webUser: { findUnique: vi.fn() }, $queryRaw: vi.fn(),
@@ -27,6 +28,7 @@ vi.mock("@/backend/integrations/remnashop/client", () => ({
   remnashopRequest: mocks.remnashopRequest,
 }));
 vi.mock("@/backend/integrations/remnashop/session", () => ({ linkCurrentUserToRemnashopAuth: mocks.linkCurrentUserToRemnashopAuth }));
+vi.mock("@/backend/integrations/auth/provider-account-identity-sync", () => ({ synchronizeProviderAccountIdentity: mocks.synchronizeProviderAccountIdentity }));
 
 import { productionTelegramAccountMergeGateway as gateway } from "@/backend/integrations/auth/telegram-account-merge-gateway";
 
@@ -38,7 +40,7 @@ describe("production Telegram account merge gateway", () => {
     mocks.prisma.accountMergeConfirmation.findFirst.mockResolvedValue({
       id: "merge-1", userId: "user-1", status: "PENDING", expiresAt: new Date("2099-01-01"),
       sourceRemnashopUserId: "source", targetRemnashopUserId: "target", sourceEmail: "source@example.com",
-      targetEmail: "target@example.com", telegramId: "777", telegramUsername: "clean",
+      targetEmail: "target@example.com", targetTelegramId: null, telegramId: "777", telegramUsername: "clean",
     });
     mocks.prisma.$transaction.mockImplementation(async (work: (tx: typeof mocks.prisma) => Promise<unknown>) => work(mocks.prisma));
     mocks.prisma.$queryRaw.mockResolvedValue([{ id: "user-1" }]);
@@ -56,7 +58,8 @@ describe("production Telegram account merge gateway", () => {
       target: { id: "target", email: "target@example.com", is_email_verified: true, telegram_id: 777, current_subscription_id: "sub-1" },
       requires_relogin: true,
     });
-    mocks.remnashopRequest.mockResolvedValue({ status: "ACTIVE" });
+    mocks.remnashopRequest.mockResolvedValue({ status: "ACTIVE", user_remna_id: "remna-1" });
+    mocks.synchronizeProviderAccountIdentity.mockResolvedValue(true);
     mocks.linkCurrentUserToRemnashopAuth.mockResolvedValue({ user: { id: "user-1" } });
   });
 
@@ -71,7 +74,7 @@ describe("production Telegram account merge gateway", () => {
     const identity = await gateway.authenticateTelegram(confirmation);
     await expect(gateway.preflight(confirmation)).resolves.toMatchObject({ sourceAccountId: "source", targetAccountId: "target" });
     await expect(gateway.mergeProviderAccounts(confirmation)).resolves.toEqual({ targetHasSubscription: true });
-    await expect(gateway.loadCurrentSubscription(identity)).resolves.toBe(true);
+    await expect(gateway.synchronizeSubscriptionIdentity(identity)).resolves.toBe(true);
     await expect(gateway.linkCurrentAccount(identity)).resolves.toEqual({ userId: "user-1" });
     await expect(gateway.complete(confirmation)).resolves.toBe(true);
     await expect(gateway.cancel(confirmation)).resolves.toBe(true);
@@ -80,6 +83,7 @@ describe("production Telegram account merge gateway", () => {
 
     expect(mocks.assertRateLimit).toHaveBeenCalledWith(expect.objectContaining({ action: "telegram_account_merge_confirm" }));
     expect(mocks.withPaymentOwnerChangeFence).toHaveBeenCalled();
+    expect(mocks.synchronizeProviderAccountIdentity).toHaveBeenCalledWith("provider-access");
     expect(mocks.linkCurrentUserToRemnashopAuth).toHaveBeenCalledWith(expect.objectContaining({ paymentOwnerFenceHeld: true }));
   });
 

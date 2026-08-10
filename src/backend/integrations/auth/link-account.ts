@@ -26,6 +26,7 @@ import { getCurrentSession, refreshCurrentAccessCookie } from "@/backend/integra
 import { withPaymentOwnerChangeFence } from "@/backend/integrations/payments/payment-user-merge-service";
 import { assertRateLimit } from "@/backend/limits/rate-limit";
 import { auditLog } from "@/backend/observability/audit";
+import { synchronizeProviderAccountIdentity } from "@/backend/integrations/auth/provider-account-identity-sync";
 
 type CurrentSession = NonNullable<Awaited<ReturnType<typeof getCurrentSession>>>;
 type ProviderAuth = Awaited<ReturnType<typeof remnashopAuth>>;
@@ -138,6 +139,9 @@ export const productionLinkAccountCommands: LinkAccountCommands = {
       sourceUserId: input.sourceAccountId,
       targetUserId: input.targetAccountId,
       reason: input.reason,
+      emailResolution: "KEEP_TARGET",
+      telegramResolution: "KEEP_SOURCE",
+      paymentResolution: "REKEY_SOURCE",
     }).then(() => undefined));
   },
 
@@ -147,6 +151,7 @@ export const productionLinkAccountCommands: LinkAccountCommands = {
 
   async linkCurrentAccount(session, input) {
     const auth = providerAuth(session);
+    await adapt(() => synchronizeProviderAccountIdentity(auth.cookies.accessToken));
     const linked = await adapt(() => linkCurrentUserToRemnashopAuth({
       accessToken: auth.cookies.accessToken,
       refreshToken: auth.cookies.refreshToken,

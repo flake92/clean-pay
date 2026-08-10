@@ -25,7 +25,7 @@ function assertOwnerUnchanged(
   if (!owner || !owner.emailVerified
     || normalizedEmail(owner.email) !== confirmation.targetEmail
     || owner.upstreamAccountId !== confirmation.targetAccountId
-    || (owner.telegramId !== null && owner.telegramId !== confirmation.telegramId)) {
+    || owner.telegramId !== confirmation.targetTelegramId) {
     throw new AccountMergeError("ACCOUNT_MERGE_REQUIRED", "Current account owner changed");
   }
 }
@@ -46,7 +46,7 @@ function assertPreflight(confirmation: AccountMergeConfirmation, result: Account
     || result.target.accountId !== confirmation.targetAccountId
     || normalizedEmail(result.target.email) !== confirmation.targetEmail
     || !result.target.emailVerified
-    || (result.target.telegramId !== null && result.target.telegramId !== confirmation.telegramId)
+    || result.target.telegramId !== confirmation.targetTelegramId
     || !result.requiresRelogin) {
     throw new AccountMergeError("ACCOUNT_MERGE_REQUIRED", "Provider target ownership changed");
   }
@@ -98,8 +98,7 @@ export async function confirmTelegramAccountMerge(gateway: TelegramAccountMergeG
       let expectedSubscription: boolean | null = null;
       if (identity.accountId === confirmation.sourceAccountId) {
         if (identity.telegramId !== confirmation.telegramId
-          || normalizedEmail(identity.email) !== confirmation.sourceEmail
-          || normalizedEmail(identity.pendingEmail) !== null) {
+          || normalizedEmail(identity.email) !== confirmation.sourceEmail) {
           throw new AccountMergeError("ACCOUNT_MERGE_REQUIRED", "Telegram identity changed");
         }
         const preflight = await gateway.preflight(confirmation);
@@ -107,7 +106,7 @@ export async function confirmTelegramAccountMerge(gateway: TelegramAccountMergeG
         expectedSubscription = (await gateway.mergeProviderAccounts(confirmation)).targetHasSubscription;
       }
       identity = await gateway.authenticateTelegram(confirmation);
-      const finalSubscription = await gateway.loadCurrentSubscription(identity);
+      const finalSubscription = await gateway.synchronizeSubscriptionIdentity(identity);
       if (identity.accountId !== confirmation.targetAccountId
         || identity.telegramId !== confirmation.telegramId
         || normalizedEmail(identity.email) !== confirmation.targetEmail

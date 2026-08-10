@@ -8,6 +8,7 @@ export type AccountMergeConfirmation = {
   targetAccountId: string;
   sourceEmail: string | null;
   targetEmail: string;
+  targetTelegramId: string | null;
   telegramId: string;
   telegramUsername: string | null;
 };
@@ -45,7 +46,7 @@ export interface TelegramAccountMergeGateway {
   authenticateTelegram(confirmation: AccountMergeConfirmation): Promise<AccountMergeProviderIdentity>;
   preflight(confirmation: AccountMergeConfirmation): Promise<AccountMergePreflight>;
   mergeProviderAccounts(confirmation: AccountMergeConfirmation): Promise<{ targetHasSubscription: boolean }>;
-  loadCurrentSubscription(identity: AccountMergeProviderIdentity): Promise<boolean>;
+  synchronizeSubscriptionIdentity(identity: AccountMergeProviderIdentity): Promise<boolean>;
   linkCurrentAccount(identity: AccountMergeProviderIdentity): Promise<{ userId: string }>;
   complete(confirmation: AccountMergeConfirmation): Promise<boolean>;
   cancel(confirmation: AccountMergeConfirmation): Promise<boolean>;

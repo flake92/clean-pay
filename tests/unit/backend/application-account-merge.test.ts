@@ -7,6 +7,7 @@ const confirmation: AccountMergeConfirmation = {
   context: {}, id: "merge-1", userId: "user-1", status: "PENDING",
   expiresAt: new Date(Date.now() + 60_000), sourceAccountId: "source", targetAccountId: "target",
   sourceEmail: "telegram@example.com", targetEmail: "email@example.com",
+  targetTelegramId: null,
   telegramId: "777", telegramUsername: "clean_pay",
 };
 
@@ -32,7 +33,7 @@ function gateway(): TelegramAccountMergeGateway {
       requiresRelogin: true,
     })),
     mergeProviderAccounts: vi.fn(async () => ({ targetHasSubscription: true })),
-    loadCurrentSubscription: vi.fn(async () => true), linkCurrentAccount: vi.fn(async () => ({ userId: "user-1" })),
+    synchronizeSubscriptionIdentity: vi.fn(async () => true), linkCurrentAccount: vi.fn(async () => ({ userId: "user-1" })),
     complete: vi.fn(async () => true), cancel: vi.fn(async () => true), release: vi.fn(async () => undefined),
     refreshLocalSession: vi.fn(async () => undefined),
   };
@@ -59,9 +60,43 @@ describe("Telegram account merge application workflow", () => {
     expect(subject.release).not.toHaveBeenCalled();
   });
 
+  it("replaces the target Telegram while fencing the owner captured at staging", async () => {
+    const subject = gateway();
+    const staged = { ...confirmation, targetTelegramId: "888" };
+    vi.mocked(subject.loadConfirmation).mockResolvedValueOnce(staged);
+    vi.mocked(subject.loadCurrentOwner).mockResolvedValueOnce({
+      email: "email@example.com", emailVerified: true, upstreamAccountId: "target", telegramId: "888",
+    });
+    vi.mocked(subject.preflight).mockResolvedValueOnce({
+      conflicts: [], dryRun: true, sourceAccountId: "source", targetAccountId: "target",
+      target: { accountId: "target", email: "email@example.com", emailVerified: true, telegramId: "888" },
+      requiresRelogin: true,
+    });
+
+    await expect(confirmTelegramAccountMerge(subject)).resolves.toEqual({ merged: true, userId: "user-1" });
+    expect(subject.mergeProviderAccounts).toHaveBeenCalledWith(staged);
+    expect(subject.synchronizeSubscriptionIdentity).toHaveBeenCalled();
+  });
+
+  it("blocks only the two-subscription business conflict before mutation", async () => {
+    const subject = gateway();
+    vi.mocked(subject.preflight).mockResolvedValueOnce({
+      conflicts: ["Both users have current subscriptions"], dryRun: true,
+      sourceAccountId: "source", targetAccountId: "target",
+      target: { accountId: "target", email: "email@example.com", emailVerified: true, telegramId: null },
+      requiresRelogin: true,
+    });
+
+    await expect(confirmTelegramAccountMerge(subject)).rejects.toMatchObject({
+      code: "ACCOUNT_MERGE_SUBSCRIPTIONS_CONFLICT",
+    });
+    expect(subject.mergeProviderAccounts).not.toHaveBeenCalled();
+    expect(subject.linkCurrentAccount).not.toHaveBeenCalled();
+  });
+
   it("returns a claimed workflow to a retryable state after an infrastructure failure", async () => {
     const subject = gateway();
-    vi.mocked(subject.loadCurrentSubscription).mockRejectedValueOnce(new Error("provider unavailable"));
+    vi.mocked(subject.synchronizeSubscriptionIdentity).mockRejectedValueOnce(new Error("provider unavailable"));
     await expect(confirmTelegramAccountMerge(subject)).rejects.toThrow("provider unavailable");
     expect(subject.release).toHaveBeenCalledWith(confirmation, {
       terminal: false,

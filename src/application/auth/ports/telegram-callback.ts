@@ -71,7 +71,7 @@ export interface TelegramCallbackGateway {
   }>;
   persistAccountMergeConfirmation(input: {
     userId: string; telegramId: string; telegramUsername: string | null; sourceEmail: string | null;
-    targetEmail: string; sourceAccountId: string; targetAccountId: string;
+    targetEmail: string; targetTelegramId: string | null; sourceAccountId: string; targetAccountId: string;
   }): Promise<{ token: string }>;
   applyTelegramIdentity(input: { targetUserId: string | null; existingTelegramUserId: string | null; telegramId: string; telegramUsername: string | null; fullName: string | null; photoUrl: string | null }): Promise<TelegramLocalUser>;
   markAuthStateUser(authStateId: string, userId: string): Promise<void>;

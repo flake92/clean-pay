@@ -102,6 +102,7 @@ model AccountMergeConfirmation {
   telegramUsername      String?
   sourceEmail           String?
   targetEmail           String
+  targetTelegramId      String?
   sourceRemnashopUserId String
   targetRemnashopUserId String
   status                AccountMergeConfirmationStatus @default(PENDING)

@@ -5,7 +5,7 @@ import {
   linkAccountEmail,
 } from "@/application/auth/manage-linked-account";
 import { ServiceError } from "@/backend/errors/service-error";
-import type { LinkAccountCommands } from "@/application/auth/ports/link-account";
+import { LinkAccountGatewayError, type LinkAccountCommands } from "@/application/auth/ports/link-account";
 import type { TelegramAccountMergeGateway } from "@/application/auth/ports/telegram-account-merge";
 
 function mockCommands(overrides: Partial<LinkAccountCommands> & { confirmTelegramMerge?: () => Promise<void> } = {}): LinkAccountCommands & TelegramAccountMergeGateway & { confirmTelegramMerge: () => Promise<void> } {
@@ -36,20 +36,44 @@ function mockCommands(overrides: Partial<LinkAccountCommands> & { confirmTelegra
     return {
       context: {}, id: "merge-1", userId: "user-1", status: "COMPLETED" as const, expiresAt: new Date(Date.now() + 60_000),
       sourceAccountId: "source", targetAccountId: "target", sourceEmail: null, targetEmail: "u@example.com",
-      telegramId: "777", telegramUsername: null,
+      targetTelegramId: null, telegramId: "777", telegramUsername: null,
     };
   });
   commands.assertRateLimit = vi.fn(async () => undefined);
   commands.audit = vi.fn(async () => undefined);
   commands.claim = vi.fn(async () => true);
   commands.loadCurrentOwner = vi.fn(); commands.authenticateTelegram = vi.fn(); commands.preflight = vi.fn();
-  commands.loadCurrentSubscription = vi.fn(); commands.complete = vi.fn(); commands.release = vi.fn();
+  commands.synchronizeSubscriptionIdentity = vi.fn(); commands.complete = vi.fn(); commands.release = vi.fn();
   commands.cancel = vi.fn(async () => true);
   commands.refreshLocalSession = vi.fn();
   return commands;
 }
 
 describe("failed() error message mapping", () => {
+  it("keeps the authenticated e-mail and password while replacing Telegram in the reverse merge flow", async () => {
+    const emailSession = { context: { accountId: "email-account" } };
+    const telegramSession = { context: { accountId: "telegram-account" } };
+    const commands = mockCommands({
+      loadLinkActor: vi.fn(async () => ({
+        context: {}, userId: "user-1", email: null, emailVerified: false,
+        telegramId: "777", telegramUsername: "clean", upstreamAccountId: "telegram-account", fullAssurance: true,
+      })),
+      authenticateEmail: vi.fn(async () => emailSession),
+      loadProviderProfile: vi.fn(async () => ({ email: "owner@example.com", emailVerified: true })),
+      providerAccountId: vi.fn((session) => (session.context as { accountId: string }).accountId),
+      telegramProviderSession: vi.fn(async () => telegramSession),
+      attachTelegram: vi.fn(async () => { throw new LinkAccountGatewayError("CONFLICT"); }),
+      refreshTelegramProviderSession: vi.fn(async () => emailSession),
+    });
+
+    await expect(linkAccountEmail(commands, { email: "owner@example.com", password: "password-1" }))
+      .resolves.toEqual({ ok: true, kind: "linked" });
+    expect(commands.mergeProviderAccounts).toHaveBeenCalledWith(expect.objectContaining({
+      sourceAccountId: "telegram-account",
+      targetAccountId: "email-account",
+    }));
+  });
+
   it("uses ServiceError.prodMessage for ACCOUNT_MERGE_REQUIRED", async () => {
     const commands = mockCommands({
       confirmTelegramMerge: vi.fn(async () => {

@@ -157,6 +157,36 @@ describe("server application flows", () => {
     expect(gateway.reconcileProviderSession).toHaveBeenCalledWith({ context: {} });
   });
 
+  it("stages replacement of an existing Telegram and ignores a superseded pending source e-mail", async () => {
+    const persist = vi.fn(async () => ({ token: "merge-token" }));
+    const gateway: TelegramCallbackGateway = {
+      consume: vi.fn(async () => ({
+        authState: { id: "state-1", targetUserId: "target-local", redirectTo: "/cabinet" },
+        identity: { telegramId: "777", telegramUsername: "selected", fullName: null, photoUrl: null, providerSession: { context: {} } },
+      })),
+      assertIdentityRateLimit: vi.fn(async () => undefined),
+      findUserByTelegramId: vi.fn(async () => ({ id: "source-local", upstreamAccountId: "source", email: "old@example.com", emailVerified: true, telegramId: "777" })),
+      findUserById: vi.fn(async () => ({ id: "target-local", upstreamAccountId: "target", email: "owner@example.com", emailVerified: true, telegramId: "888" })),
+      loadProviderMergeIdentity: vi.fn(async () => ({ accountId: "source", email: "old@example.com", emailVerified: true, pendingEmail: "superseded@example.com", telegramId: "777" })),
+      preflightAccountMerge: vi.fn(async () => ({
+        conflicts: [], dryRun: true, sourceAccountId: "source", targetAccountId: "target",
+        target: { accountId: "target", email: "owner@example.com", emailVerified: true, telegramId: "888" },
+        requiresRelogin: true,
+      })),
+      persistAccountMergeConfirmation: persist,
+      applyTelegramIdentity: vi.fn(), markAuthStateUser: vi.fn(), auditIdentityResolved: vi.fn(), clearTemporaryAuth: vi.fn(async () => undefined),
+      providerAccountId: vi.fn(() => "source"), attachTelegramToCurrentAccount: vi.fn(), mergeProviderAccounts: vi.fn(),
+      linkProviderSession: vi.fn(), reconcileProviderSession: vi.fn(), withOwnerChangeFence: vi.fn(async ({ work }) => work()), logAttachFailure: vi.fn(),
+    };
+
+    await expect(completeTelegramCallback(gateway, { kind: "oidc", code: "code", state: "state" }))
+      .resolves.toMatchObject({ redirectTo: "/link-account?auth=telegram_email_replace", mergeConfirmation: { token: "merge-token" } });
+    expect(persist).toHaveBeenCalledWith(expect.objectContaining({
+      telegramId: "777", targetTelegramId: "888", sourceAccountId: "source", targetAccountId: "target",
+    }));
+    expect(gateway.applyTelegramIdentity).not.toHaveBeenCalled();
+  });
+
   it("loads support through its application port", () => {
     const support = { enabled: true, email: "help@example.com", telegramUsername: null, faqUrl: null };
 
