@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   auditLog: vi.fn(),
   auditedMutation: vi.fn(),
   clearWebSession: vi.fn(),
+  getWebSessionUserIdFromAccessCookie: vi.fn(),
 }));
 
 vi.mock("@/backend/integrations/remnashop/client", () => ({
@@ -23,6 +24,7 @@ vi.mock("@/backend/observability/mutation-audit", () => ({
 
 vi.mock("@/backend/integrations/sessions/web-session-service", () => ({
   clearWebSession: mocks.clearWebSession,
+  getWebSessionUserIdFromAccessCookie: mocks.getWebSessionUserIdFromAccessCookie,
 }));
 
 import { CabinetCommandError } from "@/application/cabinet/ports/cabinet-commands";
@@ -37,6 +39,7 @@ describe("cabinet command adapter", () => {
     });
     mocks.auditedMutation.mockImplementation(async ({ mutate }: { mutate: () => Promise<unknown> }) => mutate());
     mocks.remnashopRequest.mockResolvedValue({ ok: true });
+    mocks.getWebSessionUserIdFromAccessCookie.mockResolvedValue("user-1");
   });
 
   it("executes every mutation through the authenticated audit boundary", async () => {
@@ -65,7 +68,7 @@ describe("cabinet command adapter", () => {
 
   it("audits logout before clearing the local web session", async () => {
     await productionCabinetCommands.logout();
-    expect(mocks.auditLog).toHaveBeenCalledWith({ action: "auth_logout" });
+    expect(mocks.auditLog).toHaveBeenCalledWith({ action: "auth_logout", userId: "user-1" });
     expect(mocks.auditLog.mock.invocationCallOrder[0]).toBeLessThan(mocks.clearWebSession.mock.invocationCallOrder[0]!);
   });
 

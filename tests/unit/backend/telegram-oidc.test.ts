@@ -268,12 +268,24 @@ describe("Telegram identity verification adapter", () => {
     [{ id: 1, auth_date: Math.floor(Date.now() / 1000) }, "hash"],
     [{ hash: "bad", auth_date: Math.floor(Date.now() / 1000) }, "incomplete"],
     [{ id: 1, hash: "bad", auth_date: "invalid" }, "invalid auth_date"],
-    [{ id: 1, hash: "bad", auth_date: Math.floor(Date.now() / 1000) - 301 }, "expired"],
-    [{ id: 1, hash: "bad", auth_date: Math.floor(Date.now() / 1000) + 31 }, "expired"],
     [{ id: 1, hash: "bad", auth_date: Math.floor(Date.now() / 1000) }, "hash is invalid"],
   ])("rejects invalid widget payload %#", async (payload, message) => {
     state.cookies.set("clean_pay_tg_nonce", "nonce");
     await expect(verifyTelegramWidgetCallbackPayload(payload as never)).rejects.toThrow(message);
+  });
+
+  it.each([-301, 31])("rejects a validly signed widget payload outside the allowed clock window (%#)", async (offsetSeconds) => {
+    state.cookies.set("clean_pay_tg_nonce", "nonce");
+    const body = {
+      id: 1,
+      first_name: "Telegram",
+      auth_date: Math.floor(Date.now() / 1000) + offsetSeconds,
+    };
+
+    await expect(verifyTelegramWidgetCallbackPayload({
+      ...body,
+      hash: signWidgetPayload(body),
+    })).rejects.toThrow("expired");
   });
 
   it("accepts widget optional identity fields and tolerates provider authentication failure", async () => {

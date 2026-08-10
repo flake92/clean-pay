@@ -111,6 +111,43 @@ describe("health checks", () => {
     });
   });
 
+  it("cancels every unused Remnashop, Mailpit and Remnawave response body", async () => {
+    vi.stubEnv("CLEAN_PAY_READINESS_MAILPIT_URL", "http://mailpit.test:8025");
+    vi.stubEnv("CLEAN_PAY_READINESS_REMNAWAVE_URL", "http://remnawave.test:3000");
+    vi.stubEnv("REMNAWAVE_API_BASE_URL", "http://remnawave.test:3000");
+    vi.stubEnv("REMNAWAVE_TOKEN", "ready-token");
+    const responses = [
+      new Response("plans", { status: 200 }),
+      new Response("email", { status: 422 }),
+      new Response("identify", { status: 422 }),
+      new Response("service", { status: 422 }),
+      new Response("mailpit", { status: 200 }),
+      new Response("remnawave", { status: 200 }),
+    ];
+    vi.spyOn(globalThis, "fetch");
+    for (const response of responses) {
+      vi.mocked(fetch).mockResolvedValueOnce(response);
+    }
+
+    const gateway = createProductionReadinessGateway();
+    await expect(gateway.checkRemnashop(new AbortController().signal)).resolves.toBeUndefined();
+    await expect(gateway.checkMailpit?.(new AbortController().signal)).resolves.toBeUndefined();
+    await expect(gateway.checkRemnawave?.(new AbortController().signal)).resolves.toBeUndefined();
+
+    expect(responses.every((response) => response.bodyUsed)).toBe(true);
+  });
+
+  it("cancels a failed health response before reporting its status", async () => {
+    const response = new Response("unavailable", { status: 503 });
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(response);
+
+    await expect(measuredCheck("Remnashop", createProductionReadinessGateway().checkRemnashop)).resolves.toMatchObject({
+      status: "down",
+      message: "Remnashop returned 503",
+    });
+    expect(response.bodyUsed).toBe(true);
+  });
+
   it("fails readiness for an incompatible Remnashop auth contract", async () => {
     const fetch = vi.spyOn(globalThis, "fetch");
 

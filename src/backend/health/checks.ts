@@ -5,6 +5,14 @@ import { prismaDatabaseHealthCheck } from "@/backend/integrations/health/prisma-
 
 const READINESS_CACHE_KEY = "clean-pay:health:readiness:v1";
 
+async function cancelResponseBody(response: Response) {
+  try {
+    await response.body?.cancel();
+  } catch {
+    // The body may already be consumed or aborted by the readiness deadline.
+  }
+}
+
 export function createProductionReadinessGateway(): ReadinessGateway {
   const env = getEnv();
   const mailpitUrl = env.readiness.mailpitUrl;
@@ -25,10 +33,14 @@ export function createProductionReadinessGateway(): ReadinessGateway {
         signal,
       });
 
-      if (plansResponse.status === 404) {
-        throw new Error("Remnashop public API returned 404; enable WEB_ENABLED=true with APP_API_KEY and APP_JWT_SECRET in Remnashop");
+      try {
+        if (plansResponse.status === 404) {
+          throw new Error("Remnashop public API returned 404; enable WEB_ENABLED=true with APP_API_KEY and APP_JWT_SECRET in Remnashop");
+        }
+        if (!plansResponse.ok) throw new Error(`Remnashop returned ${plansResponse.status}`);
+      } finally {
+        await cancelResponseBody(plansResponse);
       }
-      if (!plansResponse.ok) throw new Error(`Remnashop returned ${plansResponse.status}`);
       if (!env.remnashopAuthServiceKey) {
         throw new Error("REMNASHOP_AUTH_SERVICE_KEY is not configured");
       }
@@ -45,12 +57,16 @@ export function createProductionReadinessGateway(): ReadinessGateway {
           signal,
         });
 
-        if (response.status === 404) throw new Error(`Remnashop is incompatible: ${path} is missing`);
-        if (response.status === 401 || response.status === 403) {
-          throw new Error("Remnashop rejected REMNASHOP_AUTH_SERVICE_KEY");
-        }
-        if (response.status !== 422) {
-          throw new Error(`Remnashop ${path} contract returned ${response.status}, expected 422`);
+        try {
+          if (response.status === 404) throw new Error(`Remnashop is incompatible: ${path} is missing`);
+          if (response.status === 401 || response.status === 403) {
+            throw new Error("Remnashop rejected REMNASHOP_AUTH_SERVICE_KEY");
+          }
+          if (response.status !== 422) {
+            throw new Error(`Remnashop ${path} contract returned ${response.status}, expected 422`);
+          }
+        } finally {
+          await cancelResponseBody(response);
         }
       }
     },
@@ -72,7 +88,11 @@ export function createProductionReadinessGateway(): ReadinessGateway {
           cache: "no-store",
           signal,
         });
-        if (!response.ok) throw new Error(`Mailpit returned ${response.status}`);
+        try {
+          if (!response.ok) throw new Error(`Mailpit returned ${response.status}`);
+        } finally {
+          await cancelResponseBody(response);
+        }
       },
     } : {}),
     ...(remnawaveUrl ? {
@@ -88,7 +108,11 @@ export function createProductionReadinessGateway(): ReadinessGateway {
           cache: "no-store",
           signal,
         });
-        if (!response.ok) throw new Error(`Remnawave returned ${response.status}`);
+        try {
+          if (!response.ok) throw new Error(`Remnawave returned ${response.status}`);
+        } finally {
+          await cancelResponseBody(response);
+        }
       },
     } : {}),
     readSharedState() {

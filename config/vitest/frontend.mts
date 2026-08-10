@@ -9,6 +9,7 @@ export default defineConfig({
     globals: true,
     setupFiles: [path.join(projectRoot, "tests/setup/env.ts")],
     include: [
+      "tests/unit/frontend/app-topbar-accessibility.test.ts",
       "tests/unit/frontend/critical-flow-components.test.ts",
       "tests/unit/frontend/payment-return-status-component.test.ts",
     ],
@@ -19,6 +20,7 @@ export default defineConfig({
       reporter: ["text", "json-summary", "html"],
       reportsDirectory: "coverage/frontend",
       include: [
+        "src/frontend/layout/AppTopbar.tsx",
         "src/frontend/components/link-account-panel.tsx",
         "src/frontend/components/passkey-actions.tsx",
         "src/frontend/components/payment-confirmation.tsx",
@@ -26,10 +28,10 @@ export default defineConfig({
         "src/frontend/components/register-email-confirm-form.tsx",
       ],
       thresholds: {
-        statements: 40,
-        branches: 30,
-        functions: 60,
-        lines: 40,
+        statements: 60,
+        branches: 45,
+        functions: 70,
+        lines: 60,
       },
     },
   },
