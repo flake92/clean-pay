@@ -2,7 +2,8 @@
 
 Clean Pay — веб-кабинет для оплаты и управления подписками Remnashop/Remnawave.
 Пользователь может войти по e-mail, Telegram или Passkey, купить и продлить
-подписку, управлять устройствами и посмотреть историю платежей.
+подписку, управлять устройствами, посмотреть историю платежей и обратиться в
+поддержку через авторизованный виджет Chatwoot.
 
 Приложение запускается в Docker Compose вместе с собственными PostgreSQL и
 Redis. Node.js на сервер устанавливать не нужно.
@@ -24,6 +25,7 @@ Redis. Node.js на сервер устанавливать не нужно.
 | URL и API-токен Remnawave | Панель Remnawave |
 | Bot token и OIDC client secret | Настройки Telegram-бота |
 | Site key и secret key Turnstile | Cloudflare Turnstile |
+| Website Token и HMAC Token Chatwoot | Необязательно; настройки Website Inbox и Identity Validation |
 | Docker-сеть reverse proxy | Обычно `remnawave-network` |
 
 ## Установка: один мастер, три этапа
@@ -87,6 +89,70 @@ APP_AUTH_SERVICE_KEY=<то же значение, что REMNASHOP_AUTH_SERVICE_
 отдельных строках. Не используйте `${NAME}`, inline-комментарии, дублирующиеся
 имена и многострочные значения. Полный перечень настроек находится в
 [`deploy/prod/.env.example`](deploy/prod/.env.example).
+
+## Поддержка через Chatwoot
+
+Интеграция необязательна и по умолчанию отключена. Она использует стандартный
+Chatwoot Website Widget без дополнительных npm-пакетов, миграций, webhooks или
+изменений самого Chatwoot. Кнопка чата появляется только после авторизации в
+Clean Pay; на страницах входа и у гостя виджет скрыт.
+
+### Настройка Chatwoot
+
+1. В Chatwoot создайте или откройте **Settings → Inboxes → Website**.
+2. Добавьте публичный домен Clean Pay в **Allowed Domains**, например
+   `pay.example.com`.
+3. Включите **Identity Validation** и скопируйте **Website Token** и
+   **HMAC Token**.
+4. В **Settings → Custom Attributes → Contact** создайте текстовые атрибуты
+   `clean_pay_user_id`, `telegram_id` и `telegram_username`. Chatwoot принимает
+   их и без предварительного создания, но объявленные атрибуты удобнее видеть,
+   фильтровать и использовать в автоматизациях.
+
+Затем заполните все три переменные в `deploy/prod/.env`:
+
+```dotenv
+CHATWOOT_BASE_URL=https://chat.example.com
+CHATWOOT_WEBSITE_TOKEN=<website-token>
+CHATWOOT_HMAC_TOKEN=<identity-validation-hmac-token>
+```
+
+`CHATWOOT_BASE_URL` должен быть HTTPS origin без пути, query string и fragment.
+Все три переменные задаются вместе; если оставить их пустыми, интеграция
+останется отключённой. `CHATWOOT_HMAC_TOKEN` — серверный секрет: не добавляйте
+к нему префикс `NEXT_PUBLIC_`, не публикуйте его и не используйте как другой
+секрет Clean Pay.
+
+Интерактивный мастер не запрашивает необязательные параметры Chatwoot. После
+`./deploy.sh configure` выберите открытие расширенных настроек либо отредактируйте
+`deploy/prod/.env` вручную, затем примените конфигурацию:
+
+```bash
+./deploy.sh install
+```
+
+Production-валидатор проверит комплектность, HTTPS origin, формат токенов и
+отсутствие повторного использования HMAC-секрета. Clean Pay автоматически
+добавит origin Chatwoot в CSP; отдельно ослаблять security headers не нужно.
+
+### Данные и безопасность
+
+Clean Pay передаёт агенту неизменяемый внутренний ID, имя, подтверждённый
+e-mail, Telegram ID и Telegram username. HMAC-SHA256 вычисляется на сервере:
+браузер получает только готовую подпись идентификатора, но никогда не получает
+`CHATWOOT_HMAC_TOKEN`. Неподтверждённый e-mail намеренно не отправляется,
+поскольку Chatwoot может объединять контакты по адресу почты.
+
+При выходе из Clean Pay сессия, cookies и локальное состояние Chatwoot
+сбрасываются до завершения локальной сессии. Гостевые страницы повторяют
+очистку на случай истечения сессии или незавершённой загрузки SDK, чтобы
+следующий пользователь не увидел чужую историю.
+
+После установки войдите, отправьте тестовое сообщение и проверьте контакт в
+Chatwoot. Затем выйдите и войдите под другим тестовым пользователем: кнопка
+должна исчезнуть на странице входа, а второй пользователь должен получить
+отдельный контакт и историю. Подробная настройка и полный чек-лист находятся в
+[`docs/chatwoot-support.md`](docs/chatwoot-support.md).
 
 ## Reverse proxy
 
@@ -168,6 +234,9 @@ curl -f https://pay.example.com/api/health/readiness
 | Remnawave `degraded` | HTTPS URL, API-токен и доступность панели |
 | Не работает Telegram | Bot ID, bot token, OIDC secret и callback текущего домена |
 | Не приходит e-mail | SMTP в Remnashop и состояние его worker/scheduler |
+| Не появился Chatwoot | Заполнены ли все три `CHATWOOT_*`, разрешён ли домен Clean Pay в Website Inbox, включена ли Identity Validation |
+| Chatwoot отклоняет пользователя | Совпадают ли Website/HMAC Token с выбранным Inbox; после смены токенов перезапустите Clean Pay и войдите снова |
+| Ошибка CSP у Chatwoot | Указан ли `CHATWOOT_BASE_URL` как HTTPS origin без пути и доступен ли он из браузера |
 | Ошибка security headers | HSTS и проксирование реального HTTPS origin |
 | Не хватает диска | Освободите место; установщик требует минимум 8 ГБ |
 
@@ -202,6 +271,7 @@ Workflow находится в [`.github/workflows/ci.yml`](.github/workflows/ci
 ## Документация
 
 - [Архитектура](docs/ARCHITECTURE.md)
+- [Поддержка через Chatwoot](docs/chatwoot-support.md)
 - [Production migration runbook](docs/production-migration-runbook.md)
 - [Security audit](docs/production-security-audit.md)
 - [Payment recovery design](docs/payment-idempotency-recovery-design.md)

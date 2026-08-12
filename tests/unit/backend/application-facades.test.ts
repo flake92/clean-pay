@@ -332,10 +332,21 @@ describe("application facades", () => {
   it("uses safe fallbacks for navigation and payment status", async () => {
     const shellGateway = authGateway();
     await expect(loadNavigationShell(shellGateway)).resolves.toEqual({
-      authenticated: true,
-      emailVerificationRequired: false,
-      hasSubscription: false,
-      canRenewSubscription: false,
+      navigation: {
+        authenticated: true,
+        emailVerificationRequired: false,
+        hasSubscription: false,
+        canRenewSubscription: false,
+      },
+      supportIdentity: {
+        userId: "user-1",
+        email: "u@example.com",
+        emailVerified: true,
+        telegramId: null,
+        telegramUsername: null,
+        fullName: null,
+        displayName: null,
+      },
     });
     expect(shellGateway.authorizeCurrentSession).not.toHaveBeenCalled();
     expect(shellGateway.loadProviderProfile).not.toHaveBeenCalled();

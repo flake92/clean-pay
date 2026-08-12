@@ -29,6 +29,7 @@ const secrets = {
   telegramBot: "7654321098:BotTokenUnitOnly_9QvL2xR8mT4p",
   reconciliation: "reconcile-unit-2Lc7Nm4Wp9Kq5Vr8Xs3D6Hz1",
   turnstile: "turnstile-unit-8Xs3Lc7Nm4Wp9Kq5Vr2D6Hz1",
+  chatwoot: "chatwoot-unit-6Nm3Wp8Kq2Vr7Xs9Lc4D5Hz1",
 } as const;
 
 const validEnv: Record<string, string> = {
@@ -70,6 +71,9 @@ const validEnv: Record<string, string> = {
   SUPPORT_EMAIL: "",
   SUPPORT_TELEGRAM_USERNAME: "",
   SUPPORT_FAQ_URL: "",
+  CHATWOOT_BASE_URL: "",
+  CHATWOOT_WEBSITE_TOKEN: "",
+  CHATWOOT_HMAC_TOKEN: "",
   PAYMENT_RECONCILIATION_ENABLED: "false",
   PAYMENT_RECONCILIATION_SECRET: "",
   PAYMENT_RECONCILIATION_BATCH_SIZE: "10",
@@ -483,5 +487,37 @@ describe("production env validator", () => {
       SUPPORT_ENABLED: "true",
       SUPPORT_FAQ_URL: "http://support.clean-pay.dev/faq",
     }).stderr).toContain("SUPPORT_FAQ_URL must be a valid https: URL");
+
+    expect(runValidator({
+      CHATWOOT_BASE_URL: "https://chat.clean-pay.dev",
+      CHATWOOT_WEBSITE_TOKEN: "website_token_123456789",
+      CHATWOOT_HMAC_TOKEN: secrets.chatwoot,
+    }).status).toBe(0);
+    expect(runValidator({
+      CHATWOOT_BASE_URL: "https://chat.clean-pay.dev",
+      CHATWOOT_WEBSITE_TOKEN: "website_token_123456789",
+    }).stderr).toContain(
+      "CHATWOOT_BASE_URL, CHATWOOT_WEBSITE_TOKEN and CHATWOOT_HMAC_TOKEN must be configured together",
+    );
+    expect(runValidator({
+      CHATWOOT_BASE_URL: "http://chat.clean-pay.dev",
+      CHATWOOT_WEBSITE_TOKEN: "website_token_123456789",
+      CHATWOOT_HMAC_TOKEN: secrets.chatwoot,
+    }).stderr).toContain("CHATWOOT_BASE_URL must be a valid https: URL");
+    expect(runValidator({
+      CHATWOOT_BASE_URL: "https://chat.clean-pay.dev/app",
+      CHATWOOT_WEBSITE_TOKEN: "website_token_123456789",
+      CHATWOOT_HMAC_TOKEN: secrets.chatwoot,
+    }).stderr).toContain("CHATWOOT_BASE_URL must contain only an origin");
+    expect(runValidator({
+      CHATWOOT_BASE_URL: "https://chat.clean-pay.dev",
+      CHATWOOT_WEBSITE_TOKEN: "short",
+      CHATWOOT_HMAC_TOKEN: secrets.chatwoot,
+    }).stderr).toContain("CHATWOOT_WEBSITE_TOKEN must be a complete Chatwoot token");
+    expect(runValidator({
+      CHATWOOT_BASE_URL: "https://chat.clean-pay.dev",
+      CHATWOOT_WEBSITE_TOKEN: "website_token_123456789",
+      CHATWOOT_HMAC_TOKEN: secrets.webJwt,
+    }).stderr).toContain("CHATWOOT_HMAC_TOKEN must be different from WEB_JWT_SECRET");
   });
 });
