@@ -47,6 +47,7 @@ import {
   type SupportSettings,
 } from "@/frontend/components/cabinet-presentation";
 import { DetailLine, Metric } from "@/frontend/components/cabinet-view-parts";
+import { resetChatwootSession } from "@/frontend/lib/chatwoot";
 
 export function CabinetPanel({ model }: { model: CabinetViewModel }) {
   const router = useRouter();
@@ -87,6 +88,7 @@ export function CabinetPanel({ model }: { model: CabinetViewModel }) {
   }
 
   async function logout() {
+    resetChatwootSession();
     await logoutAction();
   }
 

@@ -44,6 +44,9 @@ function stubValidProductionEnv() {
     SUPPORT_EMAIL: "",
     SUPPORT_TELEGRAM_USERNAME: "",
     SUPPORT_FAQ_URL: "",
+    CHATWOOT_BASE_URL: "",
+    CHATWOOT_WEBSITE_TOKEN: "",
+    CHATWOOT_HMAC_TOKEN: "",
     CLEAN_PAY_READINESS_MAILPIT_URL: "",
     CLEAN_PAY_READINESS_REMNAWAVE_URL: "https://panel.runtime-clean.dev",
   } as const;
@@ -181,6 +184,31 @@ describe("backend env", () => {
     vi.stubEnv("TELEGRAM_OIDC_CLIENT_SECRET", "111111:legacy-oidc-secret");
     vi.stubEnv("TELEGRAM_BOT_TOKEN", "222222:test-token");
     expect(() => getEnv()).toThrow("TELEGRAM_OIDC_CLIENT_ID must match the bot id in TELEGRAM_BOT_TOKEN");
+  });
+
+  it("validates the optional Chatwoot origin and all-or-nothing tokens", () => {
+    vi.stubEnv("CHATWOOT_BASE_URL", "https://chat.clean-pay.local/");
+    vi.stubEnv("CHATWOOT_WEBSITE_TOKEN", "website_token_123456789");
+    vi.stubEnv("CHATWOOT_HMAC_TOKEN", "hmac_token_12345678901234567890");
+
+    expect(getEnv().chatwoot).toEqual({
+      baseUrl: "https://chat.clean-pay.local",
+      websiteToken: "website_token_123456789",
+      hmacToken: "hmac_token_12345678901234567890",
+    });
+
+    vi.stubEnv("CHATWOOT_HMAC_TOKEN", "");
+    expect(() => getEnv()).toThrow(
+      "CHATWOOT_BASE_URL, CHATWOOT_WEBSITE_TOKEN and CHATWOOT_HMAC_TOKEN must be configured together",
+    );
+
+    vi.stubEnv("CHATWOOT_HMAC_TOKEN", "hmac_token_12345678901234567890");
+    vi.stubEnv("CHATWOOT_BASE_URL", "https://chat.clean-pay.local/app");
+    expect(() => getEnv()).toThrow("CHATWOOT_BASE_URL must contain only an http(s) origin");
+
+    vi.stubEnv("CHATWOOT_BASE_URL", "https://chat.clean-pay.local");
+    vi.stubEnv("CHATWOOT_WEBSITE_TOKEN", "short");
+    expect(() => getEnv()).toThrow("CHATWOOT_WEBSITE_TOKEN must be a complete Chatwoot token");
   });
 
   it("derives the Remnashop admin URL and requires strong bounded reconciliation configuration", () => {

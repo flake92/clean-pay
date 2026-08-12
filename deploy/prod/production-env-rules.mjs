@@ -525,6 +525,30 @@ export function validateProductionEnvironment(environment) {
     publicHttpsUrl("SUPPORT_FAQ_URL", supportFaqUrl);
   }
 
+  const chatwootBaseUrl = optional("CHATWOOT_BASE_URL");
+  const chatwootWebsiteToken = optional("CHATWOOT_WEBSITE_TOKEN");
+  const chatwootHmacValue = optional("CHATWOOT_HMAC_TOKEN");
+  const chatwootConfiguredCount = [
+    chatwootBaseUrl,
+    chatwootWebsiteToken,
+    chatwootHmacValue,
+  ].filter(Boolean).length;
+  let chatwootHmacToken = null;
+
+  if (chatwootConfiguredCount !== 0 && chatwootConfiguredCount !== 3) {
+    fail("CHATWOOT_BASE_URL, CHATWOOT_WEBSITE_TOKEN and CHATWOOT_HMAC_TOKEN must be configured together");
+  }
+
+  if (chatwootConfiguredCount === 3) {
+    publicHttpsOrigin("CHATWOOT_BASE_URL", chatwootBaseUrl);
+    chatwootToken("CHATWOOT_WEBSITE_TOKEN", chatwootWebsiteToken);
+    chatwootHmacToken = strongSecret(
+      "CHATWOOT_HMAC_TOKEN",
+      chatwootToken("CHATWOOT_HMAC_TOKEN", chatwootHmacValue),
+      24,
+    );
+  }
+
   const mailpitReadinessValue = optional("CLEAN_PAY_READINESS_MAILPIT_URL");
 
   if (mailpitReadinessValue) {
@@ -577,6 +601,10 @@ export function validateProductionEnvironment(environment) {
 
   if (turnstileSecret) {
     secretEntries.push(["TURNSTILE_SECRET_KEY", turnstileSecret]);
+  }
+
+  if (chatwootHmacToken) {
+    secretEntries.push(["CHATWOOT_HMAC_TOKEN", chatwootHmacToken]);
   }
 
   distinctSecrets(secretEntries);
@@ -950,6 +978,18 @@ function decodedUrlComponent(name, value) {
 function simpleDatabaseName(name, value) {
   if (!/^[A-Za-z_][A-Za-z0-9_]{0,62}$/.test(value)) {
     fail(`${name} must be a shell-safe PostgreSQL identifier of at most 63 characters`);
+  }
+
+  return value;
+}
+
+function chatwootToken(name, value) {
+  if (!/^[A-Za-z0-9_-]{16,256}$/.test(value)) {
+    fail(`${name} must be a complete Chatwoot token`);
+  }
+
+  if (looksLikePlaceholder(value)) {
+    fail(`${name} must not use a placeholder value`);
   }
 
   return value;

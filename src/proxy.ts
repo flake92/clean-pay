@@ -7,6 +7,7 @@ import {
   registrationEmailVerificationPath,
 } from "@/shared/auth/account-setup-flow";
 import { safeRedirectPath } from "@/shared/auth/redirect-policy";
+import { buildContentSecurityPolicy } from "@/shared/security/content-security-policy";
 
 const accessCookieName = 'clean_pay_access';
 const refreshCookieName = 'clean_pay_refresh';
@@ -43,21 +44,17 @@ function requestSecurityContext(request: NextRequest): RequestSecurityContext {
     : randomHex(16);
   const traceFlags = traceMatch?.[3] ?? '01';
   const nonce = randomHex(16);
-  const contentSecurityPolicy = [
-    "default-src 'self'",
-    "base-uri 'self'",
-    "object-src 'none'",
-    "frame-ancestors 'none'",
-    "form-action 'self'",
-    "img-src 'self' data: blob: https:",
-    "font-src 'self' data:",
-    "style-src 'self' 'unsafe-inline'",
-    `script-src 'self' 'nonce-${nonce}' 'strict-dynamic' https://challenges.cloudflare.com https://telegram.org`,
-    "connect-src 'self' https://challenges.cloudflare.com https://telegram.org",
-    "frame-src https://challenges.cloudflare.com",
-    "worker-src 'self' blob:",
-    "manifest-src 'self'",
-  ].join('; ');
+  const chatwootConfigured = Boolean(
+    process.env.CHATWOOT_BASE_URL?.trim()
+    && process.env.CHATWOOT_WEBSITE_TOKEN?.trim()
+    && process.env.CHATWOOT_HMAC_TOKEN?.trim(),
+  );
+  const contentSecurityPolicy = buildContentSecurityPolicy({
+    nonce,
+    chatwootBaseUrl: chatwootConfigured
+      ? process.env.CHATWOOT_BASE_URL?.trim()
+      : null,
+  });
   const requestHeaders = new Headers(request.headers);
   requestHeaders.set('content-security-policy', contentSecurityPolicy);
   requestHeaders.set('x-nonce', nonce);

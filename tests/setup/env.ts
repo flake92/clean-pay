@@ -28,3 +28,6 @@ process.env.SUPPORT_ENABLED = "true";
 process.env.SUPPORT_EMAIL = "support@clean-pay.localhost";
 process.env.SUPPORT_TELEGRAM_USERNAME = "cleanpay_support";
 process.env.SUPPORT_FAQ_URL = "http://localhost:8080/support";
+process.env.CHATWOOT_BASE_URL = "";
+process.env.CHATWOOT_WEBSITE_TOKEN = "";
+process.env.CHATWOOT_HMAC_TOKEN = "";

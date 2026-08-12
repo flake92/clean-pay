@@ -14,6 +14,7 @@ import { TurnstileWidget, type TurnstileHandle, hasTurnstileSiteKey } from "@/fr
 import { navigateTo } from "@/frontend/lib/browser-navigation";
 import { passkeySetupPath } from "@/shared/auth/account-setup-flow";
 import { clearSessionAction } from "@/app/actions/session";
+import { resetChatwootSession } from "@/frontend/lib/chatwoot";
 
 function missingTurnstileTokenMessage(siteKey?: string | null) {
   return hasTurnstileSiteKey(siteKey)
@@ -73,6 +74,7 @@ export function RegisterEmailConfirmForm({
     setError(null);
 
     try {
+      resetChatwootSession();
       const result = await clearSessionAction();
 
       if (result.status === "error") {

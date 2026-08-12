@@ -28,7 +28,7 @@ describe("cabinet performance regressions", () => {
 
   it("redirects protected shells and unauthorized page models to login", () => {
     const shell = source("src/app/_components/app-shell.tsx");
-    expect(shell).toContain('if (requireAuth && !navigation.authenticated) redirect("/login")');
+    expect(shell).toContain('if (requireAuth && !shell.navigation.authenticated) redirect("/login")');
 
     for (const file of [
       "src/app/cabinet/page.tsx",

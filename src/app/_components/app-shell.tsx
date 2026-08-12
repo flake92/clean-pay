@@ -1,5 +1,10 @@
 import { loadNavigationShell } from "@/application/navigation/load-navigation";
 import { requestAuthProfileGateway } from "@/app/_composition/request-scoped-readers";
+import { createChatwootWidgetConfig } from "@/backend/integrations/support/chatwoot-widget";
+import {
+  ChatwootGuestBoundary,
+  ChatwootWidget,
+} from "@/frontend/components/chatwoot-widget";
 import Layout from "@/frontend/layout/layout";
 import { redirect } from "next/navigation";
 
@@ -10,7 +15,14 @@ export async function AppShell({
   children: React.ReactNode;
   requireAuth?: boolean;
 }) {
-  const navigation = await loadNavigationShell(requestAuthProfileGateway);
-  if (requireAuth && !navigation.authenticated) redirect("/login");
-  return <Layout navigation={navigation}>{children}</Layout>;
+  const shell = await loadNavigationShell(requestAuthProfileGateway);
+  if (requireAuth && !shell.navigation.authenticated) redirect("/login");
+  const chatwoot = createChatwootWidgetConfig(shell.supportIdentity);
+
+  return (
+    <>
+      <Layout navigation={shell.navigation}>{children}</Layout>
+      {chatwoot ? <ChatwootWidget config={chatwoot} /> : <ChatwootGuestBoundary />}
+    </>
+  );
 }
