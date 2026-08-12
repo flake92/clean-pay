@@ -60,6 +60,11 @@ type AppEnv = {
     telegramUsername: string | null;
     faqUrl: string | null;
   };
+  chatwoot: {
+    baseUrl: string;
+    websiteToken: string;
+    hmacToken: string;
+  } | null;
   readiness: {
     internalSecret: string;
     mailpitUrl: string | null;
@@ -178,6 +183,54 @@ function optionalUrl(name: string) {
   } catch {
     throw new Error(`${name} must be a valid http(s) URL`);
   }
+}
+
+function originUrl(name: string, value: string) {
+  const normalized = httpUrlValue(name, value);
+  const parsed = new URL(normalized);
+
+  if (
+    parsed.username ||
+    parsed.password ||
+    parsed.pathname !== "/" ||
+    parsed.search ||
+    parsed.hash
+  ) {
+    throw new Error(`${name} must contain only an http(s) origin`);
+  }
+
+  return parsed.origin;
+}
+
+function chatwootToken(name: string, value: string) {
+  if (!/^[A-Za-z0-9_-]{16,256}$/.test(value)) {
+    throw new Error(`${name} must be a complete Chatwoot token`);
+  }
+
+  return value;
+}
+
+function chatwootConfig(): AppEnv["chatwoot"] {
+  const baseUrl = optional("CHATWOOT_BASE_URL");
+  const websiteToken = optional("CHATWOOT_WEBSITE_TOKEN");
+  const hmacToken = optional("CHATWOOT_HMAC_TOKEN");
+  const configuredCount = [baseUrl, websiteToken, hmacToken].filter(Boolean).length;
+
+  if (configuredCount === 0) {
+    return null;
+  }
+
+  if (configuredCount !== 3) {
+    throw new Error(
+      "CHATWOOT_BASE_URL, CHATWOOT_WEBSITE_TOKEN and CHATWOOT_HMAC_TOKEN must be configured together",
+    );
+  }
+
+  return {
+    baseUrl: originUrl("CHATWOOT_BASE_URL", baseUrl!),
+    websiteToken: chatwootToken("CHATWOOT_WEBSITE_TOKEN", websiteToken!),
+    hmacToken: chatwootToken("CHATWOOT_HMAC_TOKEN", hmacToken!),
+  };
 }
 
 function deriveRemnashopAdminApiBaseUrl(publicApiBaseUrl: string) {
@@ -351,6 +404,7 @@ export function getEnv(): AppEnv {
       telegramUsername: optional("SUPPORT_TELEGRAM_USERNAME"),
       faqUrl: optionalUrl("SUPPORT_FAQ_URL"),
     },
+    chatwoot: chatwootConfig(),
     readiness: {
       internalSecret: required("READINESS_INTERNAL_SECRET"),
       mailpitUrl: optionalUrl("CLEAN_PAY_READINESS_MAILPIT_URL"),

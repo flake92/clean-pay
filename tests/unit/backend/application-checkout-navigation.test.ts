@@ -92,15 +92,27 @@ describe("checkout and navigation application policy", () => {
 
   it("builds authenticated and guest navigation without upstream calls", async () => {
     await expect(loadNavigationShell(auth(session({ emailVerified: false })))).resolves.toEqual({
-      authenticated: true, emailVerificationRequired: true, hasSubscription: false, canRenewSubscription: false,
+      navigation: {
+        authenticated: true, emailVerificationRequired: true, hasSubscription: false, canRenewSubscription: false,
+      },
+      supportIdentity: {
+        userId: "user-1", email: "user@example.com", emailVerified: false,
+        telegramId: null, telegramUsername: null, fullName: null, displayName: null,
+      },
     });
     await expect(loadNavigationShell(auth(null))).resolves.toEqual({
-      authenticated: false, emailVerificationRequired: false, hasSubscription: false, canRenewSubscription: false,
+      navigation: {
+        authenticated: false, emailVerificationRequired: false, hasSubscription: false, canRenewSubscription: false,
+      },
+      supportIdentity: null,
     });
     const broken = auth();
     vi.mocked(broken.loadCurrentSession).mockRejectedValueOnce(new Error("offline"));
     await expect(loadNavigationShell(broken)).resolves.toEqual({
-      authenticated: false, emailVerificationRequired: false, hasSubscription: false, canRenewSubscription: false,
+      navigation: {
+        authenticated: false, emailVerificationRequired: false, hasSubscription: false, canRenewSubscription: false,
+      },
+      supportIdentity: null,
     });
   });
 });

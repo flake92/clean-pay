@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 import nextConfig from "../../../next.config";
+import { buildContentSecurityPolicy } from "@/shared/security/content-security-policy";
 
 describe("application security headers", () => {
   it("keeps transport security headers on every response", async () => {
@@ -22,10 +23,30 @@ describe("application security headers", () => {
 
   it("generates a per-request nonce CSP without unsafe inline scripts", () => {
     const proxy = readFileSync("src/proxy.ts", "utf8");
+    const policy = buildContentSecurityPolicy({ nonce: "request-nonce" });
 
-    expect(proxy).toContain("'nonce-${nonce}'");
-    expect(proxy).toContain("'strict-dynamic'");
-    expect(proxy).not.toContain("script-src 'self' 'unsafe-inline'");
+    expect(policy).toContain("'nonce-request-nonce'");
+    expect(policy).toContain("'strict-dynamic'");
+    expect(policy).not.toContain("script-src 'self' 'unsafe-inline'");
     expect(proxy).toContain("request: { headers: context.requestHeaders }");
+  });
+
+  it("allows only the configured Chatwoot origins", () => {
+    const policy = buildContentSecurityPolicy({
+      nonce: "safe-nonce",
+      chatwootBaseUrl: "https://chat.example.com",
+    });
+
+    expect(policy).toContain("script-src 'self' 'nonce-safe-nonce' 'strict-dynamic'");
+    expect(policy).toContain("https://chat.example.com");
+    expect(policy).toContain("wss://chat.example.com");
+    expect(policy).toContain("frame-src https://challenges.cloudflare.com https://chat.example.com");
+
+    const invalid = buildContentSecurityPolicy({
+      nonce: "safe-nonce",
+      chatwootBaseUrl: "javascript:alert(1)",
+    });
+    expect(invalid).not.toContain("javascript:");
+    expect(invalid).not.toContain("alert(1)");
   });
 });
