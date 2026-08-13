@@ -6,7 +6,9 @@ const mocks = vi.hoisted(() => ({
   resetMissingUpstreamOperation: vi.fn(), releaseReconciliationClaim: vi.fn(), markPaymentReconciliationManual: vi.fn(),
   listDuePaymentHistoryCandidates: vi.fn(), claimPaymentHistorySync: vi.fn(), loadCurrentPaymentHistoryCredential: vi.fn(),
   completePaymentHistoryPage: vi.fn(), failPaymentHistorySync: vi.fn(), getPaymentCapabilities: vi.fn(),
-  getTransactionPage: vi.fn(), reconcilePaymentOperation: vi.fn(), reconcilePaymentOperationAsAdmin: vi.fn(),
+  getExactTransaction: vi.fn(), getLegacyTransactions: vi.fn(), getTransactionPage: vi.fn(),
+  reconcilePaymentOperation: vi.fn(), reconcilePaymentOperationAsAdmin: vi.fn(),
+  findPendingPaymentIds: vi.fn(), syncExactPaymentRecordFromRemnashop: vi.fn(), warn: vi.fn(),
 }));
 
 vi.mock("@/backend/integrations/payments/payment-reconciliation-service", () => {
@@ -33,8 +35,16 @@ vi.mock("@/backend/integrations/payments/payment-history-sync-service", () => ({
 }));
 vi.mock("@/backend/integrations/remnashop/payment-recovery", () => ({
   getPaymentCapabilities: mocks.getPaymentCapabilities, getTransactionPage: mocks.getTransactionPage,
+  getExactTransaction: mocks.getExactTransaction, getLegacyTransactions: mocks.getLegacyTransactions,
   reconcilePaymentOperation: mocks.reconcilePaymentOperation, reconcilePaymentOperationAsAdmin: mocks.reconcilePaymentOperationAsAdmin,
 }));
+vi.mock("@/backend/integrations/payments/prisma-payment-query-repository", () => ({
+  prismaPaymentQueryRepository: { findPendingPaymentIds: mocks.findPendingPaymentIds },
+}));
+vi.mock("@/backend/integrations/payments/payment-record-service", () => ({
+  syncExactPaymentRecordFromRemnashop: mocks.syncExactPaymentRecordFromRemnashop,
+}));
+vi.mock("@/backend/observability/logger", () => ({ logger: { warn: mocks.warn } }));
 
 import { ServiceError } from "@/backend/errors/service-error";
 import { PaymentReconciliationManualError } from "@/backend/integrations/payments/payment-reconciliation-service";
@@ -139,5 +149,51 @@ describe("production payment maintenance runner adapter", () => {
     expect(mocks.completePaymentHistoryPage).toHaveBeenCalledWith({ id: "history-claim" }, page);
     expect(mocks.failPaymentHistorySync).toHaveBeenCalledWith({ id: "history-claim" }, expect.any(Error));
     expect(typeof runner.now()).toBe("number");
+  });
+
+  it("loads pending, exact and legacy recovery paths with timeout propagation", async () => {
+    const authorization = { context: { accessToken: "access" } } as never;
+    const candidate = { userId: "user-1", upstreamAccountId: "owner-1" };
+    mocks.findPendingPaymentIds.mockResolvedValue(["payment-1"]);
+    const exact = { id: "payment-1" };
+    mocks.getExactTransaction.mockResolvedValueOnce(exact).mockResolvedValueOnce(null);
+    const legacy = [{ id: "legacy-1" }];
+    mocks.getLegacyTransactions.mockResolvedValue(legacy);
+
+    await expect(runner.findPendingHistoryPaymentIds("user-1", 7)).resolves.toEqual(["payment-1"]);
+    const loaded = await runner.loadExactHistoryPayment(authorization, "payment-1", 1_500);
+    await expect(runner.loadExactHistoryPayment(authorization, "missing", 900)).resolves.toBeNull();
+    expect(loaded).toEqual({ context: exact });
+    await runner.persistExactHistoryPayment(candidate, loaded!);
+    await expect(runner.loadLegacyHistory(authorization, 2_000)).resolves.toEqual({
+      context: { items: legacy, next_cursor: null },
+    });
+
+    expect(mocks.findPendingPaymentIds).toHaveBeenCalledWith("user-1", 7);
+    expect(mocks.getExactTransaction).toHaveBeenNthCalledWith(1, {
+      accessToken: "access", paymentId: "payment-1", timeoutMs: 1_500,
+    });
+    expect(mocks.syncExactPaymentRecordFromRemnashop).toHaveBeenCalledWith({
+      userId: "user-1", upstreamAccountId: "owner-1", transaction: exact,
+    });
+    expect(mocks.getLegacyTransactions).toHaveBeenCalledWith("access", 2_000);
+  });
+
+  it("logs typed and unknown exact-history failures", () => {
+    runner.logHistoryExactFailure?.(new TypeError("failed"), 1);
+    runner.logHistoryExactFailure?.("failed", 2);
+
+    expect(mocks.warn).toHaveBeenNthCalledWith(
+      1,
+      "payment_history_worker_exact_sync_failed",
+      { index: 1, errorName: "TypeError" },
+      expect.objectContaining({ source: "payments.history.worker" }),
+    );
+    expect(mocks.warn).toHaveBeenNthCalledWith(
+      2,
+      "payment_history_worker_exact_sync_failed",
+      { index: 2, errorName: "UnknownError" },
+      expect.any(Object),
+    );
   });
 });

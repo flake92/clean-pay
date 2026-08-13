@@ -3,7 +3,8 @@ import type { ChatwootIdentityGateway } from "@/application/support/ports/chatwo
 export type ChatwootIdentityVerification =
   | "confirmed"
   | "pending"
-  | "rejected";
+  | "rejected"
+  | "refresh_required";
 
 export async function verifyChatwootIdentity(
   gateway: ChatwootIdentityGateway,
@@ -19,7 +20,11 @@ export async function verifyChatwootIdentity(
 
   const actor = await gateway.loadActor();
 
-  if (!actor) {
+  if (actor.status === "refresh_required") {
+    return "refresh_required";
+  }
+
+  if (actor.status !== "authenticated") {
     return "pending";
   }
 
@@ -33,7 +38,7 @@ export async function verifyChatwootIdentity(
     return "pending";
   }
 
-  const probe = await gateway.probeContactIdentity(conversationToken);
+  const probe = await gateway.probeContactIdentity(conversationToken, actor);
 
   if (probe.status !== "available") {
     return "pending";

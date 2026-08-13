@@ -17,6 +17,7 @@ import {
   CHATWOOT_IDENTITY_MAX_RETRIES,
   clearChatwootIdentityState,
   confirmChatwootIdentity,
+  confirmChatwootIdentityOwnership,
   enterChatwootAuthenticatedMode,
   enterChatwootGuestMode,
   failChatwootIdentity,
@@ -30,6 +31,7 @@ import {
   loadChatwootSdk,
   retryChatwootIdentityAttempt,
 } from "@/frontend/lib/chatwoot";
+import { navigateTo } from "@/frontend/lib/browser-navigation";
 
 export function ChatwootWidget({ config }: { config: ChatwootWidgetConfig }) {
   useEffect(() => {
@@ -39,9 +41,9 @@ export function ChatwootWidget({ config }: { config: ChatwootWidgetConfig }) {
     let identityProbeTimer: ReturnType<typeof setTimeout> | null = null;
     const identityProbesInFlight = new Set<string>();
     const identityProbeCounts = new Map<string, number>();
-    const identityRotationProbeAttemptIds = new Set<string>();
     const identityProbeLimit = 6;
     const initialIdentityProbeDelayMs = 750;
+    let sessionRefreshRequested = false;
 
     enterChatwootAuthenticatedMode();
     window.chatwootSettings = {
@@ -75,7 +77,7 @@ export function ChatwootWidget({ config }: { config: ChatwootWidgetConfig }) {
       cancelIdentityAttemptTimer();
       const pending = getChatwootPendingIdentityAttempt();
 
-      if (!active || !pending) {
+      if (!active || sessionRefreshRequested || !pending) {
         return;
       }
 
@@ -116,6 +118,7 @@ export function ChatwootWidget({ config }: { config: ChatwootWidgetConfig }) {
 
       if (
         !active
+        || sessionRefreshRequested
         || !pending
         || pending.phase !== "sent"
         || identityProbeTimer !== null
@@ -170,15 +173,27 @@ export function ChatwootWidget({ config }: { config: ChatwootWidgetConfig }) {
             return;
           }
 
+          if (result === "refresh_required") {
+            sessionRefreshRequested = true;
+            cancelIdentityAttemptTimer();
+            cancelIdentityProbeTimer();
+            identityProbeCounts.delete(attemptId);
+            hideLauncher();
+            const returnTo = `${window.location.pathname}${window.location.search}`;
+            const search = new URLSearchParams({ return_to: returnTo });
+            navigateTo(`/auth/session/refresh?${search.toString()}`);
+            return;
+          }
+
           if (result === "confirmed") {
-            if (confirmChatwootIdentity(attemptId)) {
+            if (confirmChatwootIdentityOwnership(attemptId)) {
               cancelIdentityAttemptTimer();
               cancelIdentityProbeTimer();
               identityProbeCounts.delete(attemptId);
-              identityRotationProbeAttemptIds.delete(attemptId);
-              // identify() now observes the verified contact and reveals the
-              // launcher. A newer support-context snapshot is serialized by
-              // the same identity state machine.
+              // Ownership permits revealing this contact, but does not prove
+              // that Chatwoot applied the complete setUser payload. The
+              // in-memory generation remains unpersisted; identify() either
+              // reveals it or queues newer context through a fresh iframe.
               identifyWithCurrentContext();
             }
             return;
@@ -196,7 +211,7 @@ export function ChatwootWidget({ config }: { config: ChatwootWidgetConfig }) {
       }, Math.min(Math.max(0, delayMs), remainingMs));
     };
     const identify = (applyLabels = true) => {
-      if (active) {
+      if (active && !sessionRefreshRequested) {
         try {
           const status = identifyChatwootUser(
             config,
@@ -243,6 +258,10 @@ export function ChatwootWidget({ config }: { config: ChatwootWidgetConfig }) {
       refreshSupportContext();
     };
     const identificationFailed = () => {
+      if (!active || sessionRefreshRequested) {
+        return;
+      }
+
       cancelIdentityAttemptTimer();
       cancelIdentityProbeTimer();
       const attemptId = getChatwootPendingIdentityAttempt()?.attemptId;
@@ -257,7 +276,6 @@ export function ChatwootWidget({ config }: { config: ChatwootWidgetConfig }) {
       clearChatwootIdentityState(true);
       if (attemptId) {
         identityProbeCounts.delete(attemptId);
-        identityRotationProbeAttemptIds.delete(attemptId);
       }
       hideLauncher();
     };
@@ -267,6 +285,10 @@ export function ChatwootWidget({ config }: { config: ChatwootWidgetConfig }) {
       // handler can mutate cookies or confirm the wrong identity attempt.
       if (isUnexpectedChatwootFrameMessage(event, config.baseUrl)) {
         event.stopImmediatePropagation();
+        return;
+      }
+
+      if (sessionRefreshRequested) {
         return;
       }
 
@@ -294,20 +316,14 @@ export function ChatwootWidget({ config }: { config: ChatwootWidgetConfig }) {
         const attemptId = getChatwootPendingIdentityAttempt()?.attemptId;
 
         queueMicrotask(() => {
-          if (
-            active
-            && attemptId
-            && getChatwootPendingIdentityAttempt()?.attemptId === attemptId
-            && !identityRotationProbeAttemptIds.has(attemptId)
-          ) {
-            // Chatwoot emits this only when it rotates to a different contact.
-            // Its SDK has updated cw_conversation by the time this microtask
-            // runs; the same-origin server probe still verifies the resulting
-            // contact instead of trusting the message as proof on its own.
-            identityRotationProbeAttemptIds.add(attemptId);
-            identityProbeCounts.set(attemptId, 0);
+          if (active && attemptId && confirmChatwootIdentity(attemptId)) {
+            // setAuthCookie is emitted by Chatwoot 4.16 only from the awaited
+            // setUser response that rotates the contact. Unlike an ownership
+            // GET, it is a correlated success for the complete payload.
+            cancelIdentityAttemptTimer();
             cancelIdentityProbeTimer();
-            scheduleIdentityProbe(0);
+            identityProbeCounts.delete(attemptId);
+            identifyWithCurrentContext();
           }
         });
       }
@@ -361,8 +377,8 @@ export function ChatwootWidget({ config }: { config: ChatwootWidgetConfig }) {
       active = false;
       cancelIdentityAttemptTimer();
       cancelIdentityProbeTimer();
+      identityProbesInFlight.clear();
       identityProbeCounts.clear();
-      identityRotationProbeAttemptIds.clear();
       window.removeEventListener("message", chatwootMessage, { capture: true });
       window.removeEventListener("chatwoot:ready", identifyWithCurrentContext);
       window.removeEventListener("chatwoot:error", identificationFailed);

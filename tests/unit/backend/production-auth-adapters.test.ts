@@ -162,6 +162,22 @@ describe("production auth and profile adapters", () => {
     expect(mocks.remnashopRequestPasswordReset).toHaveBeenCalledWith({ email: "u@example.com" });
   });
 
+  it("delegates capacity and concurrency guards through the auth error boundary", async () => {
+    await productionAuthCommands.preflightCapacity("auth_login");
+    expect(mocks.assertRateLimitCapacity).toHaveBeenCalledWith("auth_login");
+
+    const work = vi.fn().mockResolvedValue("guarded-result");
+    await expect(productionAuthCommands.withUpstreamConcurrency("auth_login", work))
+      .resolves.toBe("guarded-result");
+    expect(mocks.withAuthConcurrency).toHaveBeenCalledWith("auth_login", work);
+    expect(work).toHaveBeenCalledOnce();
+
+    const gatewayError = new AuthGatewayError("RATE_LIMITED");
+    mocks.assertRateLimitCapacity.mockRejectedValueOnce(gatewayError);
+    await expect(productionAuthCommands.preflightCapacity("auth_register"))
+      .rejects.toBe(gatewayError);
+  });
+
   it("translates provider registration conflicts into an application error", async () => {
     mocks.remnashopAuth.mockRejectedValueOnce(new ServiceError("CONFLICT", 409, "email already exists"));
 

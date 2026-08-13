@@ -330,6 +330,205 @@ describe("Remnashop session token lifecycle", () => {
     });
   });
 
+  it("clears token material that cannot be decrypted", async () => {
+    const target = {
+      ...localSession({ id: "target", refreshToken: "refresh" }),
+      remnashopAccessTokenEncrypted: "not-an-encrypted-token",
+    };
+    mocks.tx.$queryRaw.mockResolvedValue([{ id: "target" }]);
+    mocks.tx.webSession.findMany.mockResolvedValue([target]);
+    const refresh = vi.fn();
+
+    await expect(
+      acquireRemnashopTokensForSession({ session: target, refresh }),
+    ).resolves.toBeNull();
+
+    expect(refresh).not.toHaveBeenCalled();
+    expect(mocks.tx.webSession.updateMany).toHaveBeenCalledWith({
+      where: { id: { in: ["target"] }, userId: "user-1" },
+      data: expect.objectContaining({
+        remnashopAccessTokenEncrypted: null,
+        remnashopRefreshTokenEncrypted: null,
+      }),
+    });
+  });
+
+  it("rejects invalid tokens and expiry dates returned by refresh", async () => {
+    const target = localSession({
+      id: "target",
+      accessToken: "old-access",
+      refreshToken: "old-refresh",
+      accessExpiresAt: new Date(Date.now() - 1_000),
+    });
+    mocks.tx.$queryRaw.mockResolvedValue([{ id: "target" }]);
+    mocks.tx.webSession.findMany.mockResolvedValue([target]);
+
+    await expect(acquireRemnashopTokensForSession({
+      session: target,
+      refresh: vi.fn().mockResolvedValue({
+        ...refreshResponse(),
+        cookies: { accessToken: "", refreshToken: "new-refresh" },
+      }),
+    })).rejects.toMatchObject({ code: "UPSTREAM_ERROR", status: 502 });
+
+    vi.clearAllMocks();
+    mocks.prisma.$transaction.mockImplementation(
+      async (callback: (tx: typeof mocks.tx) => unknown) => callback(mocks.tx),
+    );
+    mocks.tx.webSession.updateMany.mockResolvedValue({ count: 1 });
+    mocks.tx.$queryRaw.mockResolvedValue([{ id: "target" }]);
+    mocks.tx.webSession.findMany.mockResolvedValue([target]);
+    await expect(acquireRemnashopTokensForSession({
+      session: target,
+      refresh: vi.fn().mockResolvedValue({
+        ...refreshResponse(),
+        data: {
+          expires_at: "not-a-date",
+          refresh_expires_at: "2099-03-01T00:00:00.000Z",
+        },
+      }),
+    })).rejects.toMatchObject({ code: "UPSTREAM_ERROR", status: 502 });
+  });
+
+  it("clears a corrupt durable refresh recovery and detects a competing cleanup", async () => {
+    const corrupt = {
+      ...localSession({
+        id: "target",
+        accessToken: "old-access",
+        refreshToken: "old-refresh",
+        accessExpiresAt: new Date(Date.now() - 1_000),
+      }),
+      remnashopRefreshRecoveryEncrypted: protectRemnashopToken(
+        JSON.stringify({ version: 2, accessToken: "bad" }),
+      ),
+    };
+    mocks.tx.$queryRaw.mockResolvedValue([{ id: "target" }]);
+    mocks.tx.webSession.findMany.mockResolvedValue([corrupt]);
+
+    await expect(acquireRemnashopTokensForSession({
+      session: corrupt,
+      refresh: vi.fn(),
+    })).resolves.toBeNull();
+    expect(mocks.authDebugLog).toHaveBeenCalledWith(
+      "remnashop_token_refresh_recovery_corrupt",
+      { sessionId: "target", userId: "user-1" },
+    );
+
+    vi.clearAllMocks();
+    mocks.prisma.$transaction.mockImplementation(
+      async (callback: (tx: typeof mocks.tx) => unknown) => callback(mocks.tx),
+    );
+    mocks.tx.$queryRaw.mockResolvedValue([{ id: "target" }]);
+    mocks.tx.webSession.findMany.mockResolvedValue([corrupt]);
+    mocks.tx.webSession.updateMany.mockResolvedValue({ count: 0 });
+    await expect(acquireRemnashopTokensForSession({
+      session: corrupt,
+      refresh: vi.fn(),
+    })).rejects.toMatchObject({ code: "CONFLICT", status: 409 });
+  });
+
+  it("rejects when the locked session set changes before it is loaded", async () => {
+    const target = localSession({ id: "target" });
+    mocks.tx.$queryRaw.mockResolvedValue([{ id: "target" }, { id: "other" }]);
+    mocks.tx.webSession.findMany.mockResolvedValue([target]);
+
+    await expect(acquireRemnashopTokensForSession({
+      session: target,
+      refresh: vi.fn(),
+    })).rejects.toMatchObject({ code: "UNAUTHORIZED", status: 401 });
+  });
+
+  it("detects competing stale-dispatch cleanup and token transfer", async () => {
+    const stale = {
+      ...localSession({
+        id: "target",
+        accessToken: "old-access",
+        refreshToken: "old-refresh",
+        accessExpiresAt: new Date(Date.now() - 1_000),
+      }),
+      remnashopRefreshClaimTokenHash: "stale-claim",
+      remnashopRefreshLeaseExpiresAt: new Date(Date.now() - 1_000),
+      remnashopRefreshDispatchedAt: new Date(Date.now() - 2_000),
+    };
+    mocks.tx.$queryRaw.mockResolvedValue([{ id: "target" }]);
+    mocks.tx.webSession.findMany.mockResolvedValue([stale]);
+    mocks.tx.webSession.updateMany.mockResolvedValueOnce({ count: 0 });
+    await expect(acquireRemnashopTokensForSession({
+      session: stale,
+      refresh: vi.fn(),
+    })).rejects.toMatchObject({ code: "CONFLICT", status: 409 });
+
+    vi.clearAllMocks();
+    mocks.prisma.$transaction.mockImplementation(
+      async (callback: (tx: typeof mocks.tx) => unknown) => callback(mocks.tx),
+    );
+    const target = localSession({ id: "target" });
+    const owner = localSession({
+      id: "owner",
+      accessToken: "owner-access",
+      refreshToken: "owner-refresh",
+    });
+    mocks.tx.$queryRaw.mockResolvedValue([{ id: "owner" }, { id: "target" }]);
+    mocks.tx.webSession.findMany.mockResolvedValue([owner, target]);
+    mocks.tx.webSession.updateMany
+      .mockResolvedValueOnce({ count: 1 })
+      .mockResolvedValueOnce({ count: 0 });
+    await expect(acquireRemnashopTokensForSession({
+      session: target,
+      refresh: vi.fn(),
+    })).rejects.toMatchObject({ code: "UNAUTHORIZED", status: 401 });
+  });
+
+  it("clears an obsolete refresh fence from a still-valid stored bundle", async () => {
+    const target = {
+      ...localSession({
+        id: "target",
+        accessToken: "access",
+        refreshToken: "refresh",
+      }),
+      remnashopRefreshClaimTokenHash: "expired-claim",
+      remnashopRefreshLeaseExpiresAt: new Date(Date.now() - 1_000),
+    };
+    mocks.tx.$queryRaw.mockResolvedValue([{ id: "target" }]);
+    mocks.tx.webSession.findMany.mockResolvedValue([target]);
+
+    await expect(acquireRemnashopTokensForSession({
+      session: target,
+      refresh: vi.fn(),
+    })).resolves.toMatchObject({
+      source: "stored",
+      session: {
+        remnashopRefreshClaimTokenHash: null,
+        remnashopRefreshLeaseExpiresAt: null,
+      },
+    });
+    expect(mocks.tx.webSession.updateMany).toHaveBeenCalledWith({
+      where: { id: "target", userId: "user-1", revokedAt: null },
+      data: expect.objectContaining({ remnashopRefreshClaimTokenHash: null }),
+    });
+  });
+
+  it("rejects when another worker wins the refresh claim", async () => {
+    const target = localSession({
+      id: "target",
+      accessToken: "old-access",
+      refreshToken: "old-refresh",
+      accessExpiresAt: new Date(Date.now() - 1_000),
+    });
+    mocks.tx.$queryRaw.mockResolvedValue([{ id: "target" }]);
+    mocks.tx.webSession.findMany.mockResolvedValue([target]);
+    mocks.tx.webSession.updateMany.mockResolvedValueOnce({ count: 0 });
+
+    await expect(acquireRemnashopTokensForSession({
+      session: target,
+      refresh: vi.fn(),
+    })).rejects.toMatchObject({
+      code: "UPSTREAM_UNAVAILABLE",
+      status: 503,
+      debug: { retryAfterSeconds: 1 },
+    });
+  });
+
   it("returns retryable contention without consuming a refresh token while a lease is active", async () => {
     const target = {
       ...localSession({

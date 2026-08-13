@@ -71,6 +71,7 @@ import {
   createWebSession,
   createWebSessionForRemnashopUser,
   createWebSessionOnResponse,
+  getCurrentRefreshSessionCandidateReadOnly,
   getCurrentSession,
   getCurrentSessionReadOnly,
   getCurrentUser,
@@ -371,6 +372,54 @@ describe("web session lifecycle", () => {
     mocks.prisma.webSession.findFirst.mockResolvedValueOnce(session);
 
     await expect(getCurrentSessionReadOnly()).resolves.toEqual(session);
+    expect(state.setCalls).toEqual([]);
+    expect(state.deleteCalls).toEqual([]);
+  });
+
+  it("verifies a refresh-session candidate without consuming or rotating it", async () => {
+    state.cookies.set("clean_pay_refresh", "refresh-token");
+    mocks.prisma.webSession.findFirst.mockResolvedValueOnce({
+      id: "session-1",
+      userId: "user-1",
+    });
+
+    await expect(getCurrentRefreshSessionCandidateReadOnly()).resolves.toEqual({
+      sessionId: "session-1",
+      userId: "user-1",
+    });
+
+    expect(mocks.prisma.webSession.findFirst).toHaveBeenCalledWith({
+      where: {
+        revokedAt: null,
+        refreshExpiresAt: { gt: expect.any(Date) },
+        OR: [
+          { refreshTokenHash: sha256("refresh-token") },
+          {
+            refreshTokenHistory: {
+              some: {
+                tokenHash: sha256("refresh-token"),
+                graceExpiresAt: { gte: expect.any(Date) },
+              },
+            },
+          },
+        ],
+      },
+      select: { id: true, userId: true },
+    });
+    expect(mocks.prisma.$queryRaw).not.toHaveBeenCalled();
+    expect(mocks.prisma.webRefreshToken.create).not.toHaveBeenCalled();
+    expect(mocks.prisma.webSession.update).not.toHaveBeenCalled();
+    expect(state.setCalls).toEqual([]);
+    expect(state.deleteCalls).toEqual([]);
+  });
+
+  it("does not query or mutate sessions without a refresh candidate", async () => {
+    await expect(getCurrentRefreshSessionCandidateReadOnly())
+      .resolves.toBeNull();
+
+    expect(mocks.prisma.webSession.findFirst).not.toHaveBeenCalled();
+    expect(mocks.prisma.webRefreshToken.create).not.toHaveBeenCalled();
+    expect(mocks.prisma.webSession.update).not.toHaveBeenCalled();
     expect(state.setCalls).toEqual([]);
     expect(state.deleteCalls).toEqual([]);
   });

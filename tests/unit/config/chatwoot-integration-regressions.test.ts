@@ -72,4 +72,22 @@ describe("Chatwoot integration boundaries", () => {
     expect(adapter).not.toContain("paymentUrl");
     expect(adapter).not.toContain("subscription.url");
   });
+
+  it("keeps the Chatwoot state machine inside the enforced frontend coverage gate", () => {
+    const coverage = source("config/vitest/frontend.mts");
+
+    for (const path of [
+      "tests/unit/frontend/chatwoot-client.test.ts",
+      "tests/unit/frontend/chatwoot-widget.test.ts",
+      "src/frontend/components/chatwoot-widget.tsx",
+      "src/frontend/lib/chatwoot.ts",
+    ]) {
+      expect(coverage, path).toContain(`\"${path}\"`);
+    }
+
+    expect(coverage).toContain(
+      '\"src/frontend/components/chatwoot-widget.tsx\": {',
+    );
+    expect(coverage).toContain('\"src/frontend/lib/chatwoot.ts\": {');
+  });
 });

@@ -6,9 +6,11 @@ import type { ChatwootWidgetConfig } from "@/application/models/chatwoot";
 import {
   applyChatwootManagedLabels,
   confirmChatwootIdentity,
+  confirmChatwootIdentityOwnership,
   enterChatwootAuthenticatedMode,
   enterChatwootGuestMode,
   failChatwootIdentity,
+  getChatwootPendingIdentityAttempt,
   identifyChatwootUser,
   isChatwootIdentityConfirmation,
   loadChatwootSupportContextCached,
@@ -162,6 +164,50 @@ describe("Chatwoot browser lifecycle", () => {
         subscription_plan: "Premium",
       },
     }));
+  });
+
+  it("does not persist a full payload after ownership-only confirmation", () => {
+    const api = chatwootApi();
+    window.$chatwoot = api;
+    enterChatwootAuthenticatedMode();
+
+    expect(identifyChatwootUser(config)).toBe("pending");
+    const attemptId = getChatwootPendingIdentityAttempt()!.attemptId;
+    document.cookie = "cw_conversation=authenticated; Path=/";
+    document.cookie = `cw_user_${config.websiteToken}=identified; Path=/`;
+
+    expect(confirmChatwootIdentityOwnership(attemptId)).toBe(true);
+    expect(identifyChatwootUser(config)).toBe("ready");
+    expect(api.toggleBubbleVisibility).toHaveBeenLastCalledWith("show");
+    expect(window.localStorage.length).toBe(0);
+
+    // Simulate a browser reload: only persisted state and cookies survive.
+    window.cleanPayChatwootIdentity = undefined;
+    window.cleanPayChatwootPendingIdentity = undefined;
+    window.cleanPayChatwootFailedIdentity = undefined;
+    expect(identifyChatwootUser(config)).toBe("pending");
+    expect(api.setUser).toHaveBeenCalledTimes(2);
+  });
+
+  it("fails ownership-only state closed when an unobserved SDK error removed its cookie", () => {
+    const api = chatwootApi();
+    window.$chatwoot = api;
+    enterChatwootAuthenticatedMode();
+
+    identifyChatwootUser(config);
+    const attemptId = getChatwootPendingIdentityAttempt()!.attemptId;
+    document.cookie = "cw_conversation=authenticated; Path=/";
+    document.cookie = `cw_user_${config.websiteToken}=identified; Path=/`;
+    expect(confirmChatwootIdentityOwnership(attemptId)).toBe(true);
+
+    // Chatwoot 4.16 removes this cookie before dispatching chatwoot:error. If
+    // the component was unmounted at that instant, the remaining cookie state
+    // still prevents the ownership-only generation from being revealed.
+    document.cookie = `cw_user_${config.websiteToken}=; Path=/; Max-Age=0`;
+    expect(identifyChatwootUser(config)).toBe("failed");
+    expect(getChatwootPendingIdentityAttempt()).toBeUndefined();
+    expect(api.toggleBubbleVisibility).toHaveBeenLastCalledWith("hide");
+    expect(window.localStorage.length).toBe(0);
   });
 
   it("identifies with support attributes in the same signed set-user command", () => {

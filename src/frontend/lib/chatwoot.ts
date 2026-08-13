@@ -33,7 +33,7 @@ type ChatwootPendingIdentityState = ChatwootIdentityState & {
   attemptId: string;
   startedAt: number;
   retryCount: number;
-  phase: "sent" | "waiting_for_frame";
+  phase: "sent" | "waiting_for_frame" | "ownership_confirmed";
 };
 
 export type ChatwootIdentificationStatus =
@@ -240,6 +240,60 @@ function sendChatwootIdentity(
   }
 }
 
+function queueChatwootIdentityAfterOwnership(
+  config: ChatwootWidgetConfig,
+  supportAttributes: Record<string, string>,
+) {
+  const pending = window.cleanPayChatwootPendingIdentity;
+  const chatwoot = window.$chatwoot;
+  const frame = document.getElementById(
+    "chatwoot_live_chat_widget",
+  ) as HTMLIFrameElement | null;
+
+  if (
+    !pending
+    || pending.phase !== "ownership_confirmed"
+    || !chatwoot
+    || !frame?.parentNode
+    || !window.cleanPayChatwootAuthorized
+  ) {
+    return false;
+  }
+
+  const { identity } = desiredIdentity(config, supportAttributes);
+  const replacement = frame.cloneNode(false) as HTMLIFrameElement;
+  const widgetUrl = new URL(`${config.baseUrl.replace(/\/$/, "")}/widget`);
+  const conversation = cookieValue("cw_conversation");
+  widgetUrl.searchParams.set("website_token", config.websiteToken);
+  if (conversation) {
+    widgetUrl.searchParams.set("cw_conversation", conversation);
+  }
+  replacement.src = widgetUrl.toString();
+  replacement.style.visibility = "hidden";
+
+  // Chatwoot 4.16 does not correlate its error event with setUser(). Retire
+  // the generation that was ownership-confirmed before sending a newer
+  // payload. Our capture listener can then reject every late message from the
+  // detached frame before the SDK turns it into an unscoped chatwoot:error.
+  chatwoot.identifier = undefined;
+  chatwoot.user = undefined;
+  chatwoot.hasLoaded = false;
+  chatwoot.resetTriggered = false;
+  chatwoot.toggleBubbleVisibility(
+    pending.core === identity.core ? "show" : "hide",
+  );
+  expireCookie(`cw_user_${config.websiteToken}`);
+  window.cleanPayChatwootPendingIdentity = {
+    ...identity,
+    attemptId: nextIdentityAttemptId(),
+    startedAt: Date.now(),
+    retryCount: 0,
+    phase: "waiting_for_frame",
+  };
+  frame.replaceWith(replacement);
+  return true;
+}
+
 export function clearChatwootIdentityState(preserveFailedIdentity = false) {
   if (typeof window === "undefined") {
     return;
@@ -370,9 +424,40 @@ export function identifyChatwootUser(
     window.cleanPayChatwootFailedIdentity = undefined;
   }
 
-  // A waiting retry is activated only by a validated `loaded` message from
-  // the replacement iframe. Generic ready/open events must not race it.
-  if (window.cleanPayChatwootPendingIdentity) {
+  const pending = window.cleanPayChatwootPendingIdentity;
+
+  if (pending) {
+    if (pending.phase === "ownership_confirmed") {
+      if (!hasCookie(identityCookieName) || !hasCookie("cw_conversation")) {
+        // The SDK removes cw_user_* when setUser fails. This also catches an
+        // error delivered while the React boundary was temporarily unmounted
+        // and therefore could not observe the chatwoot:error CustomEvent.
+        failChatwootPendingIdentityAttempt(
+          pending.attemptId,
+          config.websiteToken,
+        );
+        chatwoot.toggleBubbleVisibility("hide");
+        return "failed";
+      }
+
+      if (
+        pending.core === desired.core
+        && pending.customAttributes === desired.customAttributes
+      ) {
+        chatwoot.toggleBubbleVisibility("show");
+        return "ready";
+      }
+
+      // No success event exists for a same-contact setUser in Chatwoot 4.16.
+      // Serialize a newer desired payload through a fresh iframe generation,
+      // so an eventual error from the ownership-confirmed request cannot be
+      // misattributed to the new request.
+      queueChatwootIdentityAfterOwnership(config, supportAttributes);
+    }
+
+    // A waiting retry/update is activated only by a validated `loaded`
+    // message from the replacement iframe. Generic ready/open events must not
+    // race it.
     return "pending";
   }
 
@@ -531,6 +616,33 @@ export function confirmChatwootIdentity(expectedAttemptId?: string) {
     core: pending.core,
     customAttributes: pending.customAttributes,
   });
+  return true;
+}
+
+/**
+ * Marks a transport generation as ownership-confirmed after the current
+ * conversation was proved to belong to the desired user, without claiming
+ * that Chatwoot applied the generation's name, email or custom attributes.
+ * Those payload fingerprints are persisted only by confirmChatwootIdentity(),
+ * which is reserved for the correlated setAuthCookie success path.
+ */
+export function confirmChatwootIdentityOwnership(expectedAttemptId: string) {
+  const pending = window.cleanPayChatwootPendingIdentity;
+
+  if (
+    !pending
+    || pending.phase !== "sent"
+    || pending.attemptId !== expectedAttemptId
+    || !window.cleanPayChatwootAuthorized
+  ) {
+    return false;
+  }
+
+  window.cleanPayChatwootPendingIdentity = {
+    ...pending,
+    phase: "ownership_confirmed",
+  };
+  window.cleanPayChatwootFailedIdentity = undefined;
   return true;
 }
 
