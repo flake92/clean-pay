@@ -8,6 +8,7 @@ import {
   confirmChatwootIdentity,
   enterChatwootAuthenticatedMode,
   enterChatwootGuestMode,
+  failChatwootIdentity,
   identifyChatwootUser,
   isChatwootIdentityConfirmation,
   loadChatwootSupportContextCached,
@@ -247,6 +248,19 @@ describe("Chatwoot browser lifecycle", () => {
       ],
     })).not.toThrow();
     expect(window.cleanPayChatwootAuthorized).toBe(true);
+  });
+
+  it("latches a late SDK failure to the desired identity", () => {
+    const api = chatwootApi();
+    window.$chatwoot = api;
+    enterChatwootAuthenticatedMode();
+
+    failChatwootIdentity(config, { subscription_status: "ACTIVE" });
+
+    expect(identifyChatwootUser(config, { subscription_status: "ACTIVE" }))
+      .toBe("failed");
+    expect(api.setUser).not.toHaveBeenCalled();
+    expect(document.cookie).not.toContain(`cw_user_${config.websiteToken}=`);
   });
 
   it("coalesces support-context loads briefly and clears them on logout", async () => {

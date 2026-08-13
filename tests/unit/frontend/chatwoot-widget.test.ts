@@ -6,10 +6,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   loadContext: vi.fn(),
+  verifyIdentity: vi.fn(),
 }));
 
 vi.mock("@/app/actions/chatwoot", () => ({
   loadChatwootSupportContextAction: mocks.loadContext,
+  verifyChatwootIdentityAction: mocks.verifyIdentity,
 }));
 
 import type { ChatwootWidgetConfig } from "@/application/models/chatwoot";
@@ -88,6 +90,7 @@ describe("Chatwoot widget context lifecycle", () => {
     frame.id = "chatwoot_live_chat_widget";
     document.body.appendChild(frame);
     mocks.loadContext.mockResolvedValue(context);
+    mocks.verifyIdentity.mockResolvedValue("confirmed");
   });
 
   afterEach(() => {
@@ -154,6 +157,7 @@ describe("Chatwoot widget context lifecycle", () => {
 
   it("recreates the iframe once, ignores the stale frame, and then fails closed", async () => {
     vi.useFakeTimers();
+    mocks.verifyIdentity.mockResolvedValue("pending");
     const api = chatwootApi();
     api.setUser.mockImplementation(() => undefined);
     window.$chatwoot = api;
@@ -229,6 +233,7 @@ describe("Chatwoot widget context lifecycle", () => {
   });
 
   it("blocks Chatwoot-prefixed messages with the wrong origin from the SDK", async () => {
+    mocks.verifyIdentity.mockResolvedValue("pending");
     const api = chatwootApi();
     api.setUser.mockImplementation(() => undefined);
     window.$chatwoot = api;
@@ -256,6 +261,7 @@ describe("Chatwoot widget context lifecycle", () => {
   it("cancels the pending timeout after a valid identity confirmation", async () => {
     vi.useFakeTimers();
     mocks.loadContext.mockResolvedValue(null);
+    mocks.verifyIdentity.mockResolvedValue("pending");
     const api = chatwootApi();
     api.setUser.mockImplementation(() => undefined);
     window.$chatwoot = api;
@@ -267,6 +273,7 @@ describe("Chatwoot widget context lifecycle", () => {
     await flushWidgetEffects();
     document.cookie = "cw_conversation=authenticated; Path=/";
     document.cookie = `cw_user_${config.websiteToken}=identified; Path=/`;
+    mocks.verifyIdentity.mockResolvedValue("confirmed");
 
     await act(async () => {
       window.dispatchEvent(new MessageEvent("message", {
@@ -283,8 +290,72 @@ describe("Chatwoot widget context lifecycle", () => {
     expect(document.getElementById("chatwoot_live_chat_widget")).toBe(frame);
   });
 
+  it("supports Chatwoot success without a setAuthCookie message", async () => {
+    vi.useFakeTimers();
+    mocks.loadContext.mockResolvedValue(null);
+    const api = chatwootApi();
+    api.setUser.mockImplementation(() => {
+      // Chatwoot 4.16 returns a successful contact response without a new
+      // widget_auth_token when the current contact does not need rotation.
+      document.cookie = "cw_conversation=authenticated; Path=/";
+      document.cookie = `cw_user_${config.websiteToken}=identified; Path=/`;
+    });
+    window.$chatwoot = api;
+    const frame = document.getElementById("chatwoot_live_chat_widget");
+
+    render(createElement(ChatwootWidget, { config }));
+    await flushWidgetEffects();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(750);
+    });
+
+    expect(mocks.verifyIdentity).toHaveBeenCalledWith("user-123");
+    expect(getChatwootPendingIdentityAttempt()).toBeUndefined();
+    expect(api.setUser).toHaveBeenCalledTimes(1);
+    expect(api.toggleBubbleVisibility).toHaveBeenCalledWith("show");
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(CHATWOOT_IDENTITY_ATTEMPT_TIMEOUT_MS * 2);
+    });
+    expect(document.getElementById("chatwoot_live_chat_widget")).toBe(frame);
+    expect(api.setUser).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps a late Chatwoot identity error fail-closed after an ownership probe", async () => {
+    vi.useFakeTimers();
+    mocks.loadContext.mockResolvedValue(null);
+    const api = chatwootApi();
+    api.setUser.mockImplementation(() => {
+      document.cookie = "cw_conversation=authenticated; Path=/";
+      document.cookie = `cw_user_${config.websiteToken}=identified; Path=/`;
+    });
+    window.$chatwoot = api;
+
+    render(createElement(ChatwootWidget, { config }));
+    await flushWidgetEffects();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(750);
+    });
+    expect(api.toggleBubbleVisibility).toHaveBeenCalledWith("show");
+
+    act(() => window.dispatchEvent(new CustomEvent("chatwoot:error")));
+    expect(api.toggleBubbleVisibility).toHaveBeenLastCalledWith("hide");
+
+    act(() => {
+      window.dispatchEvent(new CustomEvent("chatwoot:ready"));
+      window.dispatchEvent(new CustomEvent("chatwoot:opened"));
+    });
+    await flushWidgetEffects();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(CHATWOOT_IDENTITY_ATTEMPT_TIMEOUT_MS * 2);
+    });
+    expect(api.setUser).toHaveBeenCalledTimes(1);
+    expect(api.toggleBubbleVisibility).toHaveBeenLastCalledWith("hide");
+  });
+
   it("cancels the component timer on unmount without launching a background retry", async () => {
     vi.useFakeTimers();
+    mocks.verifyIdentity.mockResolvedValue("pending");
     const api = chatwootApi();
     api.setUser.mockImplementation(() => undefined);
     window.$chatwoot = api;
