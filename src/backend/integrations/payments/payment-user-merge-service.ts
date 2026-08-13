@@ -1,9 +1,11 @@
+import { AsyncLocalStorage } from "node:async_hooks";
+
 import { Prisma } from "@prisma/client";
 
 import { prisma } from "@/backend/database/prisma";
 import { ServiceError } from "@/backend/errors/service-error";
 import { paymentUpstreamOwnerHash } from "@/backend/payments/hashes";
-import { sha256 } from "@/backend/security/crypto";
+import { randomToken, sha256 } from "@/backend/security/crypto";
 
 type LockedPaymentMergeUser = {
   id: string;
@@ -19,16 +21,121 @@ type LockedPaymentMergeOperation = {
   leaseExpiresAt: Date | null;
 };
 
-// The longest owner-changing flow performs up to eight independently bounded
-// 15-second Remnashop requests while the lock is held. Leave headroom for its
-// database work without allowing an unbounded interactive transaction.
-const paymentOwnerFenceTimeoutMs = 180_000;
+const paymentOwnerFenceLeaseMs = 180_000;
+const paymentOwnerFenceRenewIntervalMs = 30_000;
+const paymentOwnerFenceTransactionOptions = { maxWait: 5_000, timeout: 10_000 };
+
+type PaymentOwnerChangeContext = {
+  tokenHash: string;
+  userIds: string[];
+  upstreamMutationStarted: boolean;
+  recoverable: boolean;
+};
+
+const paymentOwnerChangeContext = new AsyncLocalStorage<PaymentOwnerChangeContext>();
+
+/**
+ * Must be called immediately before the first irreversible provider mutation
+ * in an owner-change workflow. Pre-dispatch validation failures can then
+ * safely compensate their local barrier; post-dispatch failures stay fenced
+ * for an explicit retry/reconciliation.
+ */
+export async function markPaymentOwnerChangeUpstreamMutationStarted() {
+  const context = paymentOwnerChangeContext.getStore();
+  if (!context) {
+    paymentMergeRequired("Payment owner fence context is missing");
+  }
+  if (!context.recoverable) {
+    paymentMergeRequired(
+      "Payment owner change has no durable operation and target owner",
+    );
+  }
+
+  await markPaymentOwnerChangeMutation(context.userIds, context.tokenHash);
+  context.upstreamMutationStarted = true;
+}
+
+/** Clears only an expired barrier after the caller has durably proven that the
+ * owner-changing workflow itself completed. Used by idempotent replay paths. */
+export async function reconcileCompletedPaymentOwnerChange(
+  userIds: string[],
+  operationKey: string,
+) {
+  const normalized = normalizedOwnerFenceUserIds(userIds);
+  if (normalized.length === 0) return;
+  const operationHash = sha256(operationKey);
+  await prisma.$transaction(async (tx) => {
+    await lockPaymentOwnerAdvisoryFence(tx, normalized);
+    const now = new Date();
+    const users = await tx.webUser.findMany({
+      where: { id: { in: normalized } },
+      select: {
+        id: true,
+        paymentOwnerChangeTokenHash: true,
+        paymentOwnerChangeLeaseExpiresAt: true,
+        paymentOwnerChangeMutationStartedAt: true,
+        paymentOwnerChangeOperationHash: true,
+        paymentOwnerChangeExpectedOwnerHash: true,
+      },
+    });
+    if (users.length !== normalized.length) {
+      paymentMergeRequired("Completed owner change no longer has its local owner");
+    }
+    const pending = users.filter((user) => user.paymentOwnerChangeTokenHash);
+    if (pending.length === 0) return;
+    if (pending.some((user) =>
+      user.paymentOwnerChangeOperationHash !== operationHash ||
+      !user.paymentOwnerChangeMutationStartedAt
+    )) {
+      paymentMergeRequired("Completed owner change does not own the current payment fence");
+    }
+    if (pending.some((user) =>
+      !user.paymentOwnerChangeLeaseExpiresAt ||
+      user.paymentOwnerChangeLeaseExpiresAt > now
+    )) {
+      paymentMergeRequired("Completed owner change is still finalizing");
+    }
+    const reconciled = await tx.webUser.updateMany({
+      where: {
+        id: { in: pending.map(({ id }) => id) },
+        paymentOwnerChangeTokenHash: { not: null },
+        paymentOwnerChangeLeaseExpiresAt: { lte: now },
+        paymentOwnerChangeMutationStartedAt: { not: null },
+        paymentOwnerChangeOperationHash: operationHash,
+      },
+      data: {
+        paymentOwnerChangeTokenHash: null,
+        paymentOwnerChangeLeaseExpiresAt: null,
+        paymentOwnerChangeStartedAt: null,
+        paymentOwnerChangeMutationStartedAt: null,
+        paymentOwnerChangeLocalFinalizedAt: null,
+        paymentOwnerChangeOperationHash: null,
+        paymentOwnerChangeExpectedOwnerHash: null,
+      },
+    });
+    if (reconciled.count !== pending.length) {
+      paymentMergeRequired("Completed owner change fence changed during reconciliation");
+    }
+  }, paymentOwnerFenceTransactionOptions);
+}
 
 function normalizedOwnerFenceUserIds(userIds: string[]) {
   return [...new Set(userIds.filter(Boolean))].sort();
 }
 
-export async function lockPaymentOwnerFence(
+function clearedPaymentOwnerChangeFence() {
+  return {
+    paymentOwnerChangeTokenHash: null,
+    paymentOwnerChangeLeaseExpiresAt: null,
+    paymentOwnerChangeStartedAt: null,
+    paymentOwnerChangeMutationStartedAt: null,
+    paymentOwnerChangeLocalFinalizedAt: null,
+    paymentOwnerChangeOperationHash: null,
+    paymentOwnerChangeExpectedOwnerHash: null,
+  } as const;
+}
+
+async function lockPaymentOwnerAdvisoryFence(
   tx: Prisma.TransactionClient,
   rawUserIds: string[],
 ) {
@@ -47,6 +154,171 @@ export async function lockPaymentOwnerFence(
   }
 
   return userIds;
+}
+
+/**
+ * Serializes payment dispatch against owner changes and fails closed while a
+ * durable owner-change barrier exists. Expired owner-change leases may only be
+ * taken over by another owner-change attempt; a payment must never clear one.
+ */
+export async function lockPaymentOwnerFence(
+  tx: Prisma.TransactionClient,
+  rawUserIds: string[],
+) {
+  const userIds = await lockPaymentOwnerAdvisoryFence(tx, rawUserIds);
+
+  if (userIds.length === 0) {
+    return userIds;
+  }
+
+  const now = new Date();
+  const staleUsers = await tx.webUser.findMany({
+    where: {
+      id: { in: userIds },
+      paymentOwnerChangeTokenHash: { not: null },
+      paymentOwnerChangeLeaseExpiresAt: { lte: now },
+    },
+    select: {
+      id: true,
+      remnashopUserId: true,
+      paymentOwnerChangeTokenHash: true,
+      paymentOwnerChangeMutationStartedAt: true,
+      paymentOwnerChangeLocalFinalizedAt: true,
+      paymentOwnerChangeExpectedOwnerHash: true,
+    },
+  });
+
+  // An expired pre-dispatch claim is safe to remove. A post-dispatch claim is
+  // removed only when the surviving local row already carries the expected
+  // payment owner, proving that the local finalize transaction committed.
+  for (const user of staleUsers) {
+    const localFinalizeCommitted = Boolean(
+      user.paymentOwnerChangeMutationStartedAt &&
+      user.paymentOwnerChangeLocalFinalizedAt &&
+      user.remnashopUserId &&
+      user.paymentOwnerChangeExpectedOwnerHash ===
+        paymentUpstreamOwnerHash(user.remnashopUserId),
+    );
+    if (user.paymentOwnerChangeMutationStartedAt && !localFinalizeCommitted) {
+      continue;
+    }
+    await tx.webUser.updateMany({
+      where: {
+        id: user.id,
+        paymentOwnerChangeTokenHash: user.paymentOwnerChangeTokenHash,
+        paymentOwnerChangeLeaseExpiresAt: { lte: now },
+      },
+      data: clearedPaymentOwnerChangeFence(),
+    });
+  }
+
+  const activeOwnerChange = await tx.webUser.findFirst({
+    where: {
+      id: { in: userIds },
+      paymentOwnerChangeTokenHash: { not: null },
+    },
+    select: { id: true },
+  });
+
+  if (activeOwnerChange) {
+    paymentMergeRequired(
+      "Payment owner change is incomplete; payment dispatch remains fenced",
+    );
+  }
+
+  return userIds;
+}
+
+/**
+ * Owner-changing local transactions use the token installed by
+ * withPaymentOwnerChangeFence. This check makes an expired/taken-over worker a
+ * stale writer instead of allowing it to commit after its upstream calls.
+ */
+export async function assertPaymentOwnerChangeFenceHeld(
+  tx: Prisma.TransactionClient,
+  rawUserIds: string[],
+) {
+  const context = paymentOwnerChangeContext.getStore();
+  if (!context) {
+    paymentMergeRequired("Payment owner fence context is missing");
+  }
+
+  const userIds = await lockPaymentOwnerAdvisoryFence(tx, rawUserIds);
+  const now = new Date();
+  const users = await tx.webUser.findMany({
+    where: { id: { in: userIds } },
+    select: {
+      id: true,
+      paymentOwnerChangeTokenHash: true,
+      paymentOwnerChangeLeaseExpiresAt: true,
+    },
+  });
+
+  if (
+    users.length !== userIds.length ||
+    users.some((user) =>
+      user.paymentOwnerChangeTokenHash !== context.tokenHash ||
+      !user.paymentOwnerChangeLeaseExpiresAt ||
+      user.paymentOwnerChangeLeaseExpiresAt <= now
+    )
+  ) {
+    paymentMergeRequired("Payment owner fence lease was lost");
+  }
+}
+
+/** Records the local ownership/payment-transfer commit in the same database
+ * transaction that performs it. Only this explicit phase can make an expired
+ * post-provider barrier eligible for automatic reconciliation. */
+export async function markPaymentOwnerChangeLocalFinalized(
+  tx: Prisma.TransactionClient,
+  rawUserIds: string[],
+) {
+  const context = paymentOwnerChangeContext.getStore();
+  if (!context) {
+    paymentMergeRequired("Payment owner fence context is missing");
+  }
+  if (!context.upstreamMutationStarted) {
+    return;
+  }
+  const userIds = normalizedOwnerFenceUserIds(rawUserIds);
+  const now = new Date();
+  const users = await tx.webUser.findMany({
+    where: { id: { in: userIds } },
+    select: {
+      id: true,
+      remnashopUserId: true,
+      paymentOwnerChangeTokenHash: true,
+      paymentOwnerChangeLeaseExpiresAt: true,
+      paymentOwnerChangeMutationStartedAt: true,
+      paymentOwnerChangeExpectedOwnerHash: true,
+    },
+  });
+  if (
+    users.length !== userIds.length ||
+    users.some((user) =>
+      user.paymentOwnerChangeTokenHash !== context.tokenHash ||
+      !user.paymentOwnerChangeLeaseExpiresAt ||
+      user.paymentOwnerChangeLeaseExpiresAt <= now ||
+      !user.paymentOwnerChangeMutationStartedAt ||
+      !user.remnashopUserId ||
+      user.paymentOwnerChangeExpectedOwnerHash !==
+        paymentUpstreamOwnerHash(user.remnashopUserId)
+    )
+  ) {
+    paymentMergeRequired("Local payment owner finalize does not match its fence");
+  }
+  const marked = await tx.webUser.updateMany({
+    where: {
+      id: { in: userIds },
+      paymentOwnerChangeTokenHash: context.tokenHash,
+      paymentOwnerChangeLeaseExpiresAt: { gt: now },
+      paymentOwnerChangeMutationStartedAt: { not: null },
+    },
+    data: { paymentOwnerChangeLocalFinalizedAt: now },
+  });
+  if (marked.count !== users.length) {
+    paymentMergeRequired("Local payment owner finalize changed concurrently");
+  }
 }
 
 export async function assertNoActivePaymentDispatches(
@@ -86,14 +358,25 @@ export async function withPaymentOwnerChangeFence<T>({
   upstreamAccountIds = [],
   emails = [],
   telegramIds = [],
+  operationKey,
+  targetUpstreamAccountId,
+  claimGuard,
   work,
 }: {
   userIds?: string[];
   upstreamAccountIds?: string[];
   emails?: Array<string | null | undefined>;
   telegramIds?: Array<string | number | null | undefined>;
+  operationKey: string;
+  targetUpstreamAccountId: string;
+  claimGuard?: (tx: Prisma.TransactionClient) => Promise<void>;
   work: () => Promise<T>;
 }) {
+  if (!operationKey.trim() || !targetUpstreamAccountId.trim()) {
+    paymentMergeRequired(
+      "Payment owner change requires a durable operation and target owner",
+    );
+  }
   const normalizedUpstreamIds = [...new Set(upstreamAccountIds.filter(Boolean))];
   const normalizedEmails = [
     ...new Set(
@@ -110,8 +393,10 @@ export async function withPaymentOwnerChangeFence<T>({
     ),
   ];
   const explicitUserIds = normalizedOwnerFenceUserIds(userIds);
-
-  return prisma.$transaction(async (tx) => {
+  const tokenHash = sha256(randomToken());
+  const operationHash = sha256(operationKey);
+  const expectedOwnerHash = paymentUpstreamOwnerHash(targetUpstreamAccountId);
+  const claim = await prisma.$transaction(async (tx) => {
     const ownerSelectors: Prisma.WebUserWhereInput[] = [];
     if (explicitUserIds.length > 0) {
       ownerSelectors.push({ id: { in: explicitUserIds } });
@@ -132,7 +417,7 @@ export async function withPaymentOwnerChangeFence<T>({
           select: { id: true },
         })
       : [];
-    const fencedUserIds = await lockPaymentOwnerFence(tx, [
+    const fencedUserIds = await lockPaymentOwnerAdvisoryFence(tx, [
       ...explicitUserIds,
       ...mappedUsers.map(({ id }) => id),
     ]);
@@ -140,6 +425,19 @@ export async function withPaymentOwnerChangeFence<T>({
     if (fencedUserIds.length === 0) {
       paymentMergeRequired("Payment owner fence has no proven local owner");
     }
+
+    // Coordinate with workflow rows which use the WebUser row as their
+    // serialization point (for example account-merge confirmation claims).
+    await tx.$queryRaw<Array<{ id: string }>>(
+      Prisma.sql`
+        SELECT "id"
+        FROM "WebUser"
+        WHERE "id" IN (${Prisma.join(fencedUserIds)})
+        ORDER BY "id"
+        FOR UPDATE
+      `,
+    );
+    await claimGuard?.(tx);
 
     // Owner-changing paths use the same advisory key. Re-read after acquiring
     // all locks and fail closed if the mapping changed while the plan formed.
@@ -155,9 +453,307 @@ export async function withPaymentOwnerChangeFence<T>({
       paymentMergeRequired("Payment merge owner changed before fencing");
     }
 
+    const now = new Date();
+    const fencedUsers = await tx.webUser.findMany({
+      where: { id: { in: fencedUserIds } },
+      select: {
+        id: true,
+        remnashopUserId: true,
+        paymentOwnerChangeTokenHash: true,
+        paymentOwnerChangeLeaseExpiresAt: true,
+        paymentOwnerChangeMutationStartedAt: true,
+        paymentOwnerChangeLocalFinalizedAt: true,
+        paymentOwnerChangeOperationHash: true,
+        paymentOwnerChangeExpectedOwnerHash: true,
+      },
+    });
+    if (fencedUsers.length !== fencedUserIds.length) {
+      paymentMergeRequired("Payment owner fence has an unproven local owner");
+    }
+    if (fencedUsers.some((user) =>
+      user.paymentOwnerChangeTokenHash !== null &&
+      (!user.paymentOwnerChangeLeaseExpiresAt ||
+        user.paymentOwnerChangeLeaseExpiresAt > now)
+    )) {
+      paymentMergeRequired("Another payment owner change is still in progress");
+    }
+
+    for (const user of fencedUsers) {
+      if (
+        !user.paymentOwnerChangeTokenHash ||
+        !user.paymentOwnerChangeMutationStartedAt
+      ) {
+        continue;
+      }
+      const localFinalizeCommitted = Boolean(
+        user.paymentOwnerChangeLocalFinalizedAt &&
+        user.remnashopUserId &&
+        user.paymentOwnerChangeExpectedOwnerHash ===
+          paymentUpstreamOwnerHash(user.remnashopUserId),
+      );
+      if (localFinalizeCommitted) {
+        const cleared = await tx.webUser.updateMany({
+          where: {
+            id: user.id,
+            paymentOwnerChangeTokenHash: user.paymentOwnerChangeTokenHash,
+            paymentOwnerChangeLeaseExpiresAt: { lte: now },
+          },
+          data: clearedPaymentOwnerChangeFence(),
+        });
+        if (cleared.count !== 1) {
+          paymentMergeRequired("Completed payment owner fence changed during retry");
+        }
+        user.paymentOwnerChangeTokenHash = null;
+        user.paymentOwnerChangeMutationStartedAt = null;
+        user.paymentOwnerChangeOperationHash = null;
+        user.paymentOwnerChangeExpectedOwnerHash = null;
+        continue;
+      }
+      if (
+        user.paymentOwnerChangeOperationHash !== operationHash ||
+        user.paymentOwnerChangeExpectedOwnerHash !== expectedOwnerHash
+      ) {
+        paymentMergeRequired(
+          "An incomplete payment owner change requires its exact retry",
+        );
+      }
+    }
+
+    const resumedAfterMutation = fencedUsers.some(
+      (user) => Boolean(user.paymentOwnerChangeMutationStartedAt),
+    );
+
     await assertNoActivePaymentDispatches(tx, fencedUserIds);
-    return work();
-  }, { maxWait: 5_000, timeout: paymentOwnerFenceTimeoutMs });
+    const claimed = await tx.webUser.updateMany({
+      where: {
+        id: { in: fencedUserIds },
+        OR: [
+          { paymentOwnerChangeTokenHash: null },
+          { paymentOwnerChangeLeaseExpiresAt: { lte: now } },
+        ],
+      },
+      data: {
+        paymentOwnerChangeTokenHash: tokenHash,
+        paymentOwnerChangeLeaseExpiresAt: new Date(
+          now.getTime() + paymentOwnerFenceLeaseMs,
+        ),
+        paymentOwnerChangeStartedAt: now,
+        paymentOwnerChangeMutationStartedAt: resumedAfterMutation ? now : null,
+        paymentOwnerChangeLocalFinalizedAt: null,
+        paymentOwnerChangeOperationHash: operationHash,
+        paymentOwnerChangeExpectedOwnerHash: expectedOwnerHash,
+        paymentOwnerChangeAttemptCount: { increment: 1 },
+      },
+    });
+    if (claimed.count !== fencedUserIds.length) {
+      paymentMergeRequired("Payment owner fence changed before it was claimed");
+    }
+
+    return { userIds: fencedUserIds, resumedAfterMutation };
+  }, paymentOwnerFenceTransactionOptions);
+  const claimedUserIds = claim.userIds;
+
+  let renewalFailure: unknown = null;
+  let pendingRenewal = Promise.resolve();
+  const renew = () => {
+    pendingRenewal = pendingRenewal
+      .then(() => renewPaymentOwnerChangeFence(claimedUserIds, tokenHash))
+      .catch((error: unknown) => {
+        renewalFailure = error;
+      });
+  };
+  const renewalTimer = setInterval(renew, paymentOwnerFenceRenewIntervalMs);
+  renewalTimer.unref?.();
+
+  const context: PaymentOwnerChangeContext = {
+    tokenHash,
+    userIds: claimedUserIds,
+    upstreamMutationStarted: claim.resumedAfterMutation,
+    recoverable: true,
+  };
+  try {
+    const result = await paymentOwnerChangeContext.run(
+      context,
+      work,
+    );
+    clearInterval(renewalTimer);
+    await pendingRenewal;
+    if (renewalFailure) {
+      throw renewalFailure;
+    }
+    await finalizePaymentOwnerChangeFence(claimedUserIds, tokenHash);
+    return result;
+  } catch (error) {
+    clearInterval(renewalTimer);
+    await pendingRenewal;
+    if (!context.upstreamMutationStarted && !renewalFailure) {
+      await releasePaymentOwnerChangeFence(claimedUserIds, tokenHash);
+    }
+    throw error;
+  } finally {
+    clearInterval(renewalTimer);
+  }
+}
+
+async function markPaymentOwnerChangeMutation(
+  userIds: string[],
+  tokenHash: string,
+) {
+  await prisma.$transaction(async (tx) => {
+    await lockPaymentOwnerAdvisoryFence(tx, userIds);
+    const now = new Date();
+    const users = await tx.webUser.findMany({
+      where: { id: { in: userIds } },
+      select: {
+        id: true,
+        remnashopUserId: true,
+        paymentOwnerChangeTokenHash: true,
+        paymentOwnerChangeLeaseExpiresAt: true,
+        paymentOwnerChangeMutationStartedAt: true,
+        paymentOwnerChangeLocalFinalizedAt: true,
+        paymentOwnerChangeExpectedOwnerHash: true,
+      },
+    });
+    if (users.length !== userIds.length || users.some((user) =>
+      user.paymentOwnerChangeTokenHash !== tokenHash ||
+      !user.paymentOwnerChangeLeaseExpiresAt ||
+      user.paymentOwnerChangeLeaseExpiresAt <= now
+    )) {
+      paymentMergeRequired("Payment owner fence lease was lost before upstream mutation");
+    }
+    const marked = await tx.webUser.updateMany({
+      where: {
+        id: { in: userIds },
+        paymentOwnerChangeTokenHash: tokenHash,
+        paymentOwnerChangeLeaseExpiresAt: { gt: now },
+      },
+      data: { paymentOwnerChangeMutationStartedAt: now },
+    });
+    if (marked.count !== users.length) {
+      paymentMergeRequired("Payment owner fence changed before upstream mutation");
+    }
+  }, paymentOwnerFenceTransactionOptions);
+}
+
+async function releasePaymentOwnerChangeFence(
+  userIds: string[],
+  tokenHash: string,
+) {
+  await prisma.$transaction(async (tx) => {
+    await lockPaymentOwnerAdvisoryFence(tx, userIds);
+    await tx.webUser.updateMany({
+      where: {
+        id: { in: userIds },
+        paymentOwnerChangeTokenHash: tokenHash,
+      },
+      data: {
+        ...clearedPaymentOwnerChangeFence(),
+      },
+    });
+  }, paymentOwnerFenceTransactionOptions);
+}
+
+async function renewPaymentOwnerChangeFence(userIds: string[], tokenHash: string) {
+  await prisma.$transaction(async (tx) => {
+    await lockPaymentOwnerAdvisoryFence(tx, userIds);
+    const now = new Date();
+    const currentUsers = await tx.webUser.findMany({
+      where: { id: { in: userIds } },
+      select: {
+        id: true,
+        remnashopUserId: true,
+        paymentOwnerChangeTokenHash: true,
+        paymentOwnerChangeLeaseExpiresAt: true,
+        paymentOwnerChangeMutationStartedAt: true,
+        paymentOwnerChangeLocalFinalizedAt: true,
+        paymentOwnerChangeExpectedOwnerHash: true,
+      },
+    });
+    if (
+      currentUsers.length === 0 ||
+      currentUsers.some((user) =>
+        user.paymentOwnerChangeTokenHash !== tokenHash ||
+        !user.paymentOwnerChangeLeaseExpiresAt ||
+        user.paymentOwnerChangeLeaseExpiresAt <= now
+      )
+    ) {
+      paymentMergeRequired("Payment owner fence lease was lost before renewal");
+    }
+
+    const renewed = await tx.webUser.updateMany({
+      where: {
+        id: { in: currentUsers.map(({ id }) => id) },
+        paymentOwnerChangeTokenHash: tokenHash,
+        paymentOwnerChangeLeaseExpiresAt: { gt: now },
+      },
+      data: {
+        paymentOwnerChangeLeaseExpiresAt: new Date(
+          now.getTime() + paymentOwnerFenceLeaseMs,
+        ),
+      },
+    });
+    if (renewed.count !== currentUsers.length) {
+      paymentMergeRequired("Payment owner fence changed during renewal");
+    }
+  }, paymentOwnerFenceTransactionOptions);
+}
+
+async function finalizePaymentOwnerChangeFence(userIds: string[], tokenHash: string) {
+  await prisma.$transaction(async (tx) => {
+    await lockPaymentOwnerAdvisoryFence(tx, userIds);
+    const now = new Date();
+    const currentUsers = await tx.webUser.findMany({
+      where: { id: { in: userIds } },
+      select: {
+        id: true,
+        remnashopUserId: true,
+        paymentOwnerChangeTokenHash: true,
+        paymentOwnerChangeLeaseExpiresAt: true,
+        paymentOwnerChangeMutationStartedAt: true,
+        paymentOwnerChangeLocalFinalizedAt: true,
+        paymentOwnerChangeExpectedOwnerHash: true,
+      },
+    });
+    if (
+      currentUsers.length === 0 ||
+      currentUsers.some((user) =>
+        user.paymentOwnerChangeTokenHash !== tokenHash ||
+        !user.paymentOwnerChangeLeaseExpiresAt ||
+        user.paymentOwnerChangeLeaseExpiresAt <= now
+      )
+    ) {
+      paymentMergeRequired("Payment owner fence was lost before finalization");
+    }
+    if (currentUsers.some((user) =>
+      user.paymentOwnerChangeMutationStartedAt &&
+      (
+        !user.paymentOwnerChangeLocalFinalizedAt ||
+        !user.remnashopUserId ||
+        user.paymentOwnerChangeExpectedOwnerHash !==
+          paymentUpstreamOwnerHash(user.remnashopUserId)
+      )
+    )) {
+      paymentMergeRequired(
+        "Payment owner change local finalize was not durably committed",
+      );
+    }
+
+    // A successful local merge may have deleted one or more claimed source
+    // users. Deleted rows no longer need a barrier; every surviving row must
+    // still carry this attempt's token before it can be cleared.
+    const finalized = await tx.webUser.updateMany({
+      where: {
+        id: { in: currentUsers.map(({ id }) => id) },
+        paymentOwnerChangeTokenHash: tokenHash,
+      },
+      data: {
+        ...clearedPaymentOwnerChangeFence(),
+      },
+    });
+    if (finalized.count !== currentUsers.length) {
+      paymentMergeRequired("Payment owner fence changed during finalization");
+    }
+  }, paymentOwnerFenceTransactionOptions);
 }
 
 function normalizedMergeUserIds(

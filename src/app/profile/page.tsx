@@ -1,19 +1,20 @@
 import { Card } from "primereact/card";
 
 import { loadProfileViewModel } from "@/application/profile/load-profile";
-import { productionAuthProfileGateway } from "@/backend/integrations/auth/auth-profile-gateway";
+import { requestAuthProfileGateway } from "@/app/_composition/request-scoped-readers";
 import { AppShell } from "@/app/_components/app-shell";
 import { PageHeader } from "@/frontend/components/layout";
 import { ProfilePanel } from "@/frontend/components/profile-panel";
 import { getBranding } from "@/shared/branding";
+import { sessionRefreshPath } from "@/shared/auth/session-navigation";
 import { redirect } from "next/navigation";
 
 export const dynamic = "force-dynamic";
 
 export default async function ProfilePage() {
   const branding = getBranding();
-  const model = await loadProfileViewModel(productionAuthProfileGateway);
-  if (model.status === "unauthorized") redirect("/login");
+  const model = await loadProfileViewModel(requestAuthProfileGateway);
+  if (model.status === "unauthorized") redirect(sessionRefreshPath("/profile"));
   const turnstileEnabled = process.env.TURNSTILE_ENABLED === "true";
   const turnstileSiteKey = process.env.TURNSTILE_SITE_KEY;
 

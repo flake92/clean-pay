@@ -1,20 +1,21 @@
 import { Card } from "primereact/card";
 
 import { loadCheckout } from "@/application/payments/checkout";
-import { productionCheckoutReader } from "@/backend/integrations/payments/checkout-reader";
-import { productionAuthProfileGateway } from "@/backend/integrations/auth/auth-profile-gateway";
+import {
+  requestAuthProfileGateway,
+  requestCheckoutReader,
+} from "@/app/_composition/request-scoped-readers";
 import { AppShell } from "@/app/_components/app-shell";
 import { PageHeader } from "@/frontend/components/layout";
 import { PaymentConfirmation } from "@/frontend/components/payment-confirmation";
 import { hasAccountSetupNotice } from "@/shared/auth/account-setup-flow";
+import { sessionRefreshPath } from "@/shared/auth/session-navigation";
 import { redirect } from "next/navigation";
 
 function first(value: string | string[] | undefined) { return Array.isArray(value) ? value[0] : value; }
 
 export default async function PaymentPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   const params = await searchParams;
-  const model = await loadCheckout(productionCheckoutReader, productionAuthProfileGateway);
-  if (model.status === "account-action-required" && model.action === "login") redirect("/login");
   const planCode = first(params.plan) ?? null;
   const durationDays = first(params.duration) ?? null;
   const gatewayType = first(params.gateway) ?? null;
@@ -23,6 +24,10 @@ export default async function PaymentPage({ searchParams }: { searchParams: Prom
   if (durationDays) paymentParams.set("duration", durationDays);
   if (gatewayType) paymentParams.set("gateway", gatewayType);
   const paymentRedirectTo = `/payment${paymentParams.size ? `?${paymentParams}` : ""}`;
+  const model = await loadCheckout(requestCheckoutReader, requestAuthProfileGateway);
+  if (model.status === "account-action-required" && model.action === "login") {
+    redirect(sessionRefreshPath(paymentRedirectTo));
+  }
   return (
     <AppShell requireAuth>
       <div className="flex flex-column gap-6">

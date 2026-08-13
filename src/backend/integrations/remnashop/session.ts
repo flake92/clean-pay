@@ -17,7 +17,11 @@ import {
   assertUserMergeFinalOwner,
   mergeLocalUsersIntoTarget,
 } from "@/backend/integrations/auth/local-user-merge-service";
-import { lockPaymentOwnerFence } from "@/backend/integrations/payments/payment-user-merge-service";
+import {
+  assertPaymentOwnerChangeFenceHeld,
+  lockPaymentOwnerFence,
+  markPaymentOwnerChangeLocalFinalized,
+} from "@/backend/integrations/payments/payment-user-merge-service";
 import {
   cleanupFailedSessionReplacement,
   normalizeReplacementIdentityEmail,
@@ -480,6 +484,11 @@ export async function linkCurrentUserToRemnashopAuth({
   const user = await prisma.$transaction(async (tx) => {
     if (!paymentOwnerFenceHeld) {
       await lockPaymentOwnerFence(tx, [session.userId, ...sourceUserIds]);
+    } else {
+      await assertPaymentOwnerChangeFenceHeld(tx, [
+        session.userId,
+        ...sourceUserIds,
+      ]);
     }
     const [lockedCurrentUser] = await tx.$queryRaw<Array<{
       id: string;
@@ -561,6 +570,10 @@ export async function linkCurrentUserToRemnashopAuth({
         remnashopRefreshTokenEncrypted: protectedRefreshToken,
         remnashopAccessExpiresAt: new Date(auth.expires_at),
         remnashopRefreshExpiresAt: new Date(auth.refresh_expires_at),
+        remnashopRefreshClaimTokenHash: null,
+        remnashopRefreshLeaseExpiresAt: null,
+        remnashopRefreshDispatchedAt: null,
+        remnashopRefreshRecoveryEncrypted: null,
       },
     });
 
@@ -576,6 +589,10 @@ export async function linkCurrentUserToRemnashopAuth({
           remnashopRefreshTokenEncrypted: null,
           remnashopAccessExpiresAt: null,
           remnashopRefreshExpiresAt: null,
+          remnashopRefreshClaimTokenHash: null,
+          remnashopRefreshLeaseExpiresAt: null,
+          remnashopRefreshDispatchedAt: null,
+          remnashopRefreshRecoveryEncrypted: null,
         },
       });
     }
@@ -592,6 +609,10 @@ export async function linkCurrentUserToRemnashopAuth({
             : { telegramId: String(profile.telegram_id) }),
         },
       });
+    }
+
+    if (paymentOwnerFenceHeld) {
+      await markPaymentOwnerChangeLocalFinalized(tx, [updatedUser.id]);
     }
 
     return updatedUser;

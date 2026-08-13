@@ -27,6 +27,7 @@ describe("Remnawave live subscription client", () => {
   beforeEach(() => {
     process.env.REMNAWAVE_API_BASE_URL = "https://panel.example.com";
     process.env.REMNAWAVE_TOKEN = "test-token";
+    process.env.REMNAWAVE_SUBSCRIPTION_ORIGINS = "https://sub3.example.com";
     vi.clearAllMocks();
   });
 
@@ -34,6 +35,7 @@ describe("Remnawave live subscription client", () => {
     global.fetch = originalFetch;
     delete process.env.REMNAWAVE_API_BASE_URL;
     delete process.env.REMNAWAVE_TOKEN;
+    delete process.env.REMNAWAVE_SUBSCRIPTION_ORIGINS;
   });
 
   it("returns subscriptionUrl from the Remnawave user UUID endpoint", async () => {
@@ -137,6 +139,42 @@ describe("Remnawave live subscription client", () => {
       userRemnaId: "rw-1",
       email: "user@example.com",
     })).resolves.toBeNull();
+  });
+
+  it("accepts only an exact allowlisted origin and rejects URL credentials", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({
+        response: {
+          uuid: "rw-1",
+          status: "ACTIVE",
+          subscriptionUrl: "https://sub3.example.com.evil.invalid/token",
+        },
+      }))
+      .mockResolvedValueOnce(jsonResponse({
+        response: {
+          uuid: "rw-1",
+          status: "ACTIVE",
+          subscriptionUrl: "https://user:password@sub3.example.com/token",
+        },
+      }));
+    global.fetch = fetchMock;
+
+    await expect(getLiveRemnawaveSubscriptionUrl({ userRemnaId: "rw-1" })).resolves.toBeNull();
+    await expect(getLiveRemnawaveSubscriptionUrl({ userRemnaId: "rw-1" })).resolves.toBeNull();
+  });
+
+  it("permits explicitly allowlisted loopback HTTP only outside production", async () => {
+    process.env.REMNAWAVE_SUBSCRIPTION_ORIGINS = "http://127.0.0.1:8081";
+    global.fetch = vi.fn().mockResolvedValue(jsonResponse({
+      response: {
+        uuid: "rw-1",
+        status: "ACTIVE",
+        subscriptionUrl: "http://127.0.0.1:8081/subscription/token",
+      },
+    }));
+
+    await expect(getLiveRemnawaveSubscriptionUrl({ userRemnaId: "rw-1" }))
+      .resolves.toBe("http://127.0.0.1:8081/subscription/token");
   });
 
   it("rejects a UUID response that belongs to a different or expired user", async () => {

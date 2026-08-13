@@ -22,10 +22,14 @@ function assertOwnerUnchanged(
   confirmation: AccountMergeConfirmation,
   owner: Awaited<ReturnType<TelegramAccountMergeGateway["loadCurrentOwner"]>>,
 ) {
+  const telegramOwnerMatches = owner && (
+    owner.telegramId === confirmation.targetTelegramId ||
+    owner.telegramId === confirmation.telegramId
+  );
   if (!owner || !owner.emailVerified
     || normalizedEmail(owner.email) !== confirmation.targetEmail
     || owner.upstreamAccountId !== confirmation.targetAccountId
-    || owner.telegramId !== confirmation.targetTelegramId) {
+    || !telegramOwnerMatches) {
     throw new AccountMergeError("ACCOUNT_MERGE_REQUIRED", "Current account owner changed");
   }
 }
@@ -68,6 +72,7 @@ export async function confirmTelegramAccountMerge(gateway: TelegramAccountMergeG
     metadata: { confirmationId: confirmation.id },
   });
   if (confirmation.status === "COMPLETED") {
+    await gateway.reconcileCompletedOwnerChange(confirmation);
     await gateway.audit({
       action: "telegram_account_merge_succeeded",
       userId: confirmation.userId,

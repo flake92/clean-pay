@@ -233,6 +233,8 @@ describeWithPostgres("account merge PostgreSQL invariants", () => {
 
     await expect(withPaymentOwnerChangeFence({
       userIds: [user.id],
+      operationKey: `integration-owner-change:${user.id}`,
+      targetUpstreamAccountId: user.remnashopUserId!,
       work: async () => {
         workStarted = true;
       },
@@ -243,7 +245,7 @@ describeWithPostgres("account merge PostgreSQL invariants", () => {
     expect(workStarted).toBe(false);
   });
 
-  it("holds the owner advisory lock until upstream and local work completes", async () => {
+  it("commits a durable payment barrier before upstream work without holding the advisory lock", async () => {
     const suffix = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
     const user = await prisma.webUser.create({
       data: {
@@ -263,6 +265,8 @@ describeWithPostgres("account merge PostgreSQL invariants", () => {
     });
     const ownerWork = withPaymentOwnerChangeFence({
       userIds: [user.id],
+      operationKey: `integration-owner-change:${user.id}`,
+      targetUpstreamAccountId: user.remnashopUserId!,
       work: async () => {
         signalEntered();
         await release;
@@ -270,17 +274,37 @@ describeWithPostgres("account merge PostgreSQL invariants", () => {
     });
     await entered;
 
-    let claimantEntered = false;
-    const claimant = prisma.$transaction(async (tx) => {
+    const claimedUser = await prisma.webUser.findUniqueOrThrow({
+      where: { id: user.id },
+      select: {
+        paymentOwnerChangeTokenHash: true,
+        paymentOwnerChangeLeaseExpiresAt: true,
+      },
+    });
+    expect(claimedUser.paymentOwnerChangeTokenHash).toEqual(expect.any(String));
+    expect(claimedUser.paymentOwnerChangeLeaseExpiresAt?.getTime())
+      .toBeGreaterThan(Date.now());
+
+    // The short claim transaction has committed: another connection can take
+    // the advisory key immediately, but payment dispatch observes the durable
+    // barrier and fails closed while external work is still pending.
+    await expect(prisma.$transaction(async (tx) => {
       await lockPaymentOwnerFence(tx, [user.id]);
-      claimantEntered = true;
-    }, { maxWait: 5_000, timeout: 15_000 });
-    await new Promise((resolve) => setTimeout(resolve, 75));
-    expect(claimantEntered).toBe(false);
+    }, { maxWait: 5_000, timeout: 5_000 })).rejects.toMatchObject({
+      code: "ACCOUNT_MERGE_REQUIRED",
+      status: 409,
+    });
 
     releaseWork();
     await ownerWork;
-    await claimant;
-    expect(claimantEntered).toBe(true);
+    await expect(prisma.$transaction(async (tx) => {
+      await lockPaymentOwnerFence(tx, [user.id]);
+    }, { maxWait: 5_000, timeout: 5_000 })).resolves.toBeUndefined();
+
+    const finalizedUser = await prisma.webUser.findUniqueOrThrow({
+      where: { id: user.id },
+      select: { paymentOwnerChangeTokenHash: true },
+    });
+    expect(finalizedUser.paymentOwnerChangeTokenHash).toBeNull();
   });
 });

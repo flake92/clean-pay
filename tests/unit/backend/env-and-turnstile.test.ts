@@ -22,6 +22,7 @@ function stubValidProductionEnv() {
     REMNASHOP_AUTH_SERVICE_KEY: "auth-service-runtime-7Vr3Nm8Wp2Kq5Xs9Lc4D",
     REMNAWAVE_API_BASE_URL: "https://panel.runtime-clean.dev",
     REMNAWAVE_TOKEN: "wave-runtime-7Nq3Kp9Xs4Vm2Lc8Wr6J",
+    REMNAWAVE_SUBSCRIPTION_ORIGINS: "https://subscription.runtime-clean.dev",
     WEB_JWT_SECRET: "jwt-runtime-6Vr2Kp8Wm4Xq9Lc3Ns7D5Hz1",
     WEB_REFRESH_SECRET: "refresh-runtime-5Kq8Vr2Nm7Wp4Lc9Xs3D6Hz1",
     AUDIT_IP_HASH_SECRET: "audit-runtime-4Wp7Kq2Vr9Nm5Xs8Lc3D6Hz1",
@@ -184,6 +185,33 @@ describe("backend env", () => {
     vi.stubEnv("TELEGRAM_OIDC_CLIENT_SECRET", "111111:legacy-oidc-secret");
     vi.stubEnv("TELEGRAM_BOT_TOKEN", "222222:test-token");
     expect(() => getEnv()).toThrow("TELEGRAM_OIDC_CLIENT_ID must match the bot id in TELEGRAM_BOT_TOKEN");
+  });
+
+  it("allows only HTTPS subscription origins plus explicit development loopback HTTP", () => {
+    vi.stubEnv("NODE_ENV", "test");
+    vi.stubEnv(
+      "REMNAWAVE_SUBSCRIPTION_ORIGINS",
+      "https://subscriptions.example.com,http://127.0.0.1:8081",
+    );
+    expect(getEnv().remnawave.subscriptionOrigins).toEqual([
+      "https://subscriptions.example.com",
+      "http://127.0.0.1:8081",
+    ]);
+
+    vi.stubEnv("REMNAWAVE_SUBSCRIPTION_ORIGINS", "http://subscriptions.example.com");
+    expect(() => getEnv()).toThrow(
+      "REMNAWAVE_SUBSCRIPTION_ORIGINS must use HTTPS",
+    );
+
+    vi.stubEnv("REMNAWAVE_SUBSCRIPTION_ORIGINS", "http://127.evil");
+    expect(() => getEnv()).toThrow(
+      "REMNAWAVE_SUBSCRIPTION_ORIGINS must use HTTPS",
+    );
+
+    vi.stubEnv("REMNAWAVE_SUBSCRIPTION_ORIGINS", "https://user:password@subscriptions.example.com");
+    expect(() => getEnv()).toThrow(
+      "REMNAWAVE_SUBSCRIPTION_ORIGINS must contain only URL origins without credentials",
+    );
   });
 
   it("validates the optional Chatwoot origin and all-or-nothing tokens", () => {

@@ -26,9 +26,9 @@ describe("cabinet performance regressions", () => {
     expect(() => source("src/app/actions/navigation.ts")).toThrow();
   });
 
-  it("redirects protected shells and unauthorized page models to login", () => {
+  it("redirects protected shells and unauthorized page models through the refresh handler", () => {
     const shell = source("src/app/_components/app-shell.tsx");
-    expect(shell).toContain('if (requireAuth && !shell.navigation.authenticated) redirect("/login")');
+    expect(shell).toContain('redirect(sessionRefreshPath("/cabinet"))');
 
     for (const file of [
       "src/app/cabinet/page.tsx",
@@ -40,6 +40,7 @@ describe("cabinet performance regressions", () => {
       "src/app/payment/payment-status-page.tsx",
     ]) {
       expect(source(file), file).toContain("<AppShell requireAuth>");
+      expect(source(file), file).not.toMatch(/redirect\(["']\/login/);
     }
   });
 
@@ -53,11 +54,50 @@ describe("cabinet performance regressions", () => {
 
     expect(composition).toContain('import { cache } from "react"');
     expect(composition).toContain("authorizeVerifiedSession");
+    expect(composition).toContain("getCurrentSessionReadOnly");
+    expect(composition).toContain("readSession: getCurrentSessionReadOnly");
+    expect(composition).toContain("refreshAccessCookie: skipAccessCookieRefresh");
+    expect(composition).toContain("createProductionLinkAccountReader(");
+    expect(composition).toContain("createProductionPasskeyManagementGateway(");
+    expect(composition).toContain("createProductionCheckoutReader(subscriptions)");
+    expect(composition).toContain("createProductionPaymentStatusReader(");
+    expect(composition).toContain("createRemnashopSubscriptionCatalog(authorizeVerifiedSession)");
+    const proxy = source("src/proxy.ts");
+    expect(proxy).toContain("redirect_session_refresh");
     expect(composition).toContain("createRemnashopSubscriptionReader(authorizeVerifiedSession)");
     expect(composition).toContain("createProductionPaymentHistoryGateway(");
     for (const file of backendFiles) {
       expect(source(file), file).not.toContain('from "react"');
     }
+  });
+
+  it("keeps render-time readers behind the read-only session composition", () => {
+    const renderedReaders = [
+      "src/app/cabinet/page.tsx",
+      "src/app/profile/page.tsx",
+      "src/app/link-account/page.tsx",
+      "src/app/verify-email/page.tsx",
+      "src/app/extend/page.tsx",
+      "src/app/payment/page.tsx",
+      "src/app/payment/payment-status-page.tsx",
+      "src/app/support/page.tsx",
+      "src/app/tariffs/page.tsx",
+      "src/app/_components/app-shell.tsx",
+    ];
+
+    for (const file of renderedReaders) {
+      const contents = source(file);
+      expect(contents, file).not.toContain("productionAuthProfileGateway");
+      expect(contents, file).not.toContain("productionCheckoutReader");
+      expect(contents, file).not.toContain("productionLinkAccountReader");
+      expect(contents, file).not.toContain("productionPasskeyManagementGateway");
+      expect(contents, file).not.toContain("productionPaymentStatusReader");
+      expect(contents, file).not.toMatch(/\bgetCurrentSession\s*\(/);
+      expect(contents, file).not.toMatch(/\brefreshCurrentAccessCookie\s*\(/);
+    }
+
+    const actions = source("src/app/actions/email-verification.ts");
+    expect(actions).toContain("productionAuthProfileGateway");
   });
 
   it("does not prefetch dynamic cabinet routes from duplicated navigation links", () => {
@@ -69,5 +109,15 @@ describe("cabinet performance regressions", () => {
     ]) {
       expect(source(file), file).toContain("prefetch={false}");
     }
+  });
+
+  it("renders payment history only from the local snapshot", () => {
+    const history = source("src/application/payments/load-payment-history.ts");
+
+    expect(history).toContain("gateway.loadRecent(userId, 20)");
+    expect(history).not.toContain("gateway.authorize(");
+    expect(history).not.toContain("loadCapabilities(");
+    expect(history).not.toContain("loadExactTransaction(");
+    expect(history).not.toContain("processPaymentHistoryPage(");
   });
 });

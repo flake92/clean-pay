@@ -234,6 +234,10 @@ export function validateProductionEnvironment(environment) {
     "REMNAWAVE_API_BASE_URL",
     required("REMNAWAVE_API_BASE_URL"),
   );
+  publicHttpsOriginList(
+    "REMNAWAVE_SUBSCRIPTION_ORIGINS",
+    required("REMNAWAVE_SUBSCRIPTION_ORIGINS"),
+  );
   const remnawaveReadinessValue = optional("CLEAN_PAY_READINESS_REMNAWAVE_URL");
 
   if (remnawaveReadinessValue) {
@@ -756,6 +760,24 @@ function publicHttpsOrigin(name, value) {
   const url = publicHttpsUrl(name, value);
   assertOriginOnly(name, url);
   return url;
+}
+
+function publicHttpsOriginList(name, value) {
+  const entries = value.split(",").map((entry) => entry.trim());
+
+  if (entries.some((entry) => !entry) || entries.length > 32) {
+    fail(`${name} must contain 1 to 32 comma-separated HTTPS origins`);
+  }
+
+  const origins = entries.map((entry, index) =>
+    publicHttpsOrigin(`${name}[${index + 1}]`, entry).origin
+  );
+
+  if (new Set(origins).size !== origins.length) {
+    fail(`${name} must not contain duplicate origins`);
+  }
+
+  return origins;
 }
 
 function publicHttpsUrl(name, value) {

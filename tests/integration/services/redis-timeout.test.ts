@@ -1,7 +1,10 @@
 import net from "node:net";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { redisCommand } from "@/backend/cache/redis";
+import {
+  redisCommand,
+  resetRedisTransportForTests,
+} from "@/backend/cache/redis";
 
 describe("Redis adapter network deadline", () => {
   const sockets = new Set<net.Socket>();
@@ -9,6 +12,7 @@ describe("Redis adapter network deadline", () => {
   const originalRedisUrl = process.env.REDIS_URL;
 
   afterEach(async () => {
+    await resetRedisTransportForTests();
     for (const socket of sockets) socket.destroy();
     sockets.clear();
     if (server) {

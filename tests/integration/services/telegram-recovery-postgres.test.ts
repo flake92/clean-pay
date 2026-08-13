@@ -204,6 +204,9 @@ describeWithPostgres("Telegram recovery PostgreSQL serialization", () => {
         remnashopRefreshTokenEncrypted: protectRemnashopToken("stale-refresh"),
         remnashopAccessExpiresAt: new Date(Date.now() + 10 * 60_000),
         remnashopRefreshExpiresAt: new Date(Date.now() + 60 * 60_000),
+        remnashopRefreshClaimTokenHash: "stale-claim",
+        remnashopRefreshLeaseExpiresAt: new Date(Date.now() + 60_000),
+        remnashopRefreshRecoveryEncrypted: protectRemnashopToken("stale-recovery"),
       },
     });
     const operation = await prisma.paymentOperation.create({
@@ -342,21 +345,24 @@ describeWithPostgres("Telegram recovery PostgreSQL serialization", () => {
     expect(storedHistory.generation).toBe(8);
     expect(storedSibling.remnashopAccessTokenEncrypted).toBeNull();
     expect(storedSibling.remnashopRefreshTokenEncrypted).toBeNull();
+    expect(storedSibling.remnashopRefreshClaimTokenHash).toBeNull();
+    expect(storedSibling.remnashopRefreshLeaseExpiresAt).toBeNull();
+    expect(storedSibling.remnashopRefreshRecoveryEncrypted).toBeNull();
   }, 60_000);
 
   it("merges a durable pending e-mail owner when the current local owner already points to Telegram", async () => {
     const suffix = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
-    const sourceUpstreamId = "301";
-    const targetUpstreamId = "302";
+    const durableTargetUpstreamId = "301";
+    const telegramSourceUpstreamId = "302";
     const email = `pending-owner-${suffix}@example.com`;
     const telegramId = `765432${Date.now().toString().slice(-5)}`;
     const [currentUser, emailOwner] = await Promise.all([
       prisma.webUser.create({
         data: {
-          remnashopUserId: targetUpstreamId,
+          remnashopUserId: telegramSourceUpstreamId,
           emailVerified: false,
           authPending: true,
-          pendingRemnashopUserId: sourceUpstreamId,
+          pendingRemnashopUserId: durableTargetUpstreamId,
           pendingRemnashopEmail: email,
           telegramId,
           telegramUsername: "pending_merge_user",
@@ -364,7 +370,7 @@ describeWithPostgres("Telegram recovery PostgreSQL serialization", () => {
       }),
       prisma.webUser.create({
         data: {
-          remnashopUserId: sourceUpstreamId,
+          remnashopUserId: durableTargetUpstreamId,
           email,
           emailVerified: true,
         },
@@ -395,7 +401,9 @@ describeWithPostgres("Telegram recovery PostgreSQL serialization", () => {
         if (url.endsWith("/auth/telegram")) {
           issued += 1;
           const accessToken = jwt({
-            sub: targetUpstreamId,
+            sub: mergeCommitted
+              ? durableTargetUpstreamId
+              : telegramSourceUpstreamId,
             exp: 1_900_002_000 + issued,
           });
 
@@ -431,10 +439,10 @@ describeWithPostgres("Telegram recovery PostgreSQL serialization", () => {
 
           return jsonResponse({
             dry_run: false,
-            source_user_id: Number(sourceUpstreamId),
-            target_user_id: Number(targetUpstreamId),
+            source_user_id: Number(telegramSourceUpstreamId),
+            target_user_id: Number(durableTargetUpstreamId),
             target: {
-              id: Number(targetUpstreamId),
+              id: Number(durableTargetUpstreamId),
               email,
               telegram_id: Number(telegramId),
               is_email_verified: true,
@@ -456,7 +464,7 @@ describeWithPostgres("Telegram recovery PostgreSQL serialization", () => {
       session: {
         user: {
           id: currentUser.id,
-          remnashopUserId: targetUpstreamId,
+          remnashopUserId: durableTargetUpstreamId,
           email,
           emailVerified: true,
           authPending: false,
@@ -472,7 +480,7 @@ describeWithPostgres("Telegram recovery PostgreSQL serialization", () => {
     ]);
     expect(deletedSource).toBe(0);
     expect(storedCurrent).toMatchObject({
-      remnashopUserId: targetUpstreamId,
+      remnashopUserId: durableTargetUpstreamId,
       email,
       emailVerified: true,
       authPending: false,

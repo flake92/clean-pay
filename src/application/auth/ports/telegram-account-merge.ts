@@ -52,4 +52,5 @@ export interface TelegramAccountMergeGateway {
   cancel(confirmation: AccountMergeConfirmation): Promise<boolean>;
   release(confirmation: AccountMergeConfirmation, input: { terminal: boolean; errorCode: string }): Promise<void>;
   refreshLocalSession(): Promise<void>;
+  reconcileCompletedOwnerChange(confirmation: AccountMergeConfirmation): Promise<void>;
 }

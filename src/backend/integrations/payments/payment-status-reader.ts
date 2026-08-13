@@ -15,6 +15,8 @@ import { getCurrentUser } from "@/backend/integrations/sessions/web-session-serv
 import type { CurrentSubscriptionResponse, PaymentTransactionResponse } from "@/backend/integrations/remnashop/contracts";
 
 type AuthorizationContext = Awaited<ReturnType<typeof getAuthorizedRemnashopTokens>>;
+type UserReader = () => ReturnType<typeof getCurrentUser>;
+type Authorizer = () => Promise<AuthorizationContext>;
 function authorization(value: PaymentStatusAuthorization) { return value.context as AuthorizationContext; }
 function transaction(value: PaymentStatusTransaction) { return value.context as PaymentTransactionResponse; }
 
@@ -38,15 +40,19 @@ async function operation(userId: string, operationId: string | null) {
   } : null;
 }
 
-export const productionPaymentStatusReader: PaymentStatusReader = {
+export function createProductionPaymentStatusReader(
+  readUser: UserReader = getCurrentUser,
+  authorizeSession: Authorizer = getAuthorizedRemnashopTokens,
+): PaymentStatusReader {
+  return {
   async loadActor() {
-    const user = await adapt(() => getCurrentUser());
+    const user = await adapt(readUser);
     if (!user) return null;
     return { id: user.id, emailVerified: user.emailVerified, telegramId: user.telegramId };
   },
   findOperation: operation,
   async authorize() {
-    const authorized = await adapt(() => getAuthorizedRemnashopTokens());
+    const authorized = await adapt(authorizeSession);
     return { context: authorized, upstreamAccountId: getRemnashopUserIdFromAccessToken(authorized.accessToken) };
   },
   async assertUpstreamOwner(userId, upstreamAccountId) {
@@ -83,4 +89,7 @@ export const productionPaymentStatusReader: PaymentStatusReader = {
   isSubscriptionMissing(error) {
     return error instanceof PaymentStatusGatewayError && error.code === "SUBSCRIPTION_NOT_FOUND";
   },
-};
+  };
+}
+
+export const productionPaymentStatusReader = createProductionPaymentStatusReader();

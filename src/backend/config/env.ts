@@ -17,6 +17,7 @@ type AppEnv = {
   remnawave: {
     apiBaseUrl: string | null;
     token: string | null;
+    subscriptionOrigins: string[];
   };
   webJwtSecret: string;
   webRefreshSecret: string;
@@ -202,6 +203,63 @@ function originUrl(name: string, value: string) {
   return parsed.origin;
 }
 
+function isLoopbackHostname(hostname: string) {
+  const normalized = hostname.toLowerCase().replace(/^\[/, "").replace(/\]$/, "");
+  const octets = normalized.split(".");
+  const ipv4Loopback = octets.length === 4
+    && octets[0] === "127"
+    && octets.every((octet) => /^(?:0|[1-9]\d{0,2})$/.test(octet) && Number(octet) <= 255);
+
+  return normalized === "localhost"
+    || normalized.endsWith(".localhost")
+    || normalized === "::1"
+    || ipv4Loopback;
+}
+
+function remnawaveSubscriptionOrigins() {
+  const raw = optional("REMNAWAVE_SUBSCRIPTION_ORIGINS");
+  if (!raw) return [];
+
+  const values = raw.split(",").map((value) => value.trim());
+  if (values.some((value) => !value) || values.length > 32) {
+    throw new Error("REMNAWAVE_SUBSCRIPTION_ORIGINS must contain 1 to 32 comma-separated origins");
+  }
+
+  const origins = values.map((value) => {
+    let parsed: URL;
+    try {
+      parsed = new URL(value);
+    } catch {
+      throw new Error("REMNAWAVE_SUBSCRIPTION_ORIGINS must contain valid URL origins");
+    }
+
+    if (
+      parsed.username
+      || parsed.password
+      || parsed.pathname !== "/"
+      || parsed.search
+      || parsed.hash
+    ) {
+      throw new Error("REMNAWAVE_SUBSCRIPTION_ORIGINS must contain only URL origins without credentials");
+    }
+
+    const developmentLoopbackHttp = process.env.NODE_ENV !== "production"
+      && parsed.protocol === "http:"
+      && isLoopbackHostname(parsed.hostname);
+    if (parsed.protocol !== "https:" && !developmentLoopbackHttp) {
+      throw new Error("REMNAWAVE_SUBSCRIPTION_ORIGINS must use HTTPS (loopback HTTP is development-only)");
+    }
+
+    return parsed.origin;
+  });
+
+  if (new Set(origins).size !== origins.length) {
+    throw new Error("REMNAWAVE_SUBSCRIPTION_ORIGINS must not contain duplicate origins");
+  }
+
+  return origins;
+}
+
 function chatwootToken(name: string, value: string) {
   if (!/^[A-Za-z0-9_-]{16,256}$/.test(value)) {
     throw new Error(`${name} must be a complete Chatwoot token`);
@@ -353,6 +411,7 @@ export function getEnv(): AppEnv {
     remnawave: {
       apiBaseUrl: optionalUrl("REMNAWAVE_API_BASE_URL"),
       token: optional("REMNAWAVE_TOKEN"),
+      subscriptionOrigins: remnawaveSubscriptionOrigins(),
     },
     webJwtSecret: required("WEB_JWT_SECRET"),
     webRefreshSecret: required("WEB_REFRESH_SECRET"),

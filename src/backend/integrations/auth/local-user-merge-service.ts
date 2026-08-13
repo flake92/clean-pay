@@ -2,6 +2,7 @@ import { Prisma } from "@prisma/client";
 
 import { ServiceError } from "@/backend/errors/service-error";
 import {
+  assertPaymentOwnerChangeFenceHeld,
   lockPaymentOwnerFence,
   transferPaymentOperationsForUserMerge,
 } from "@/backend/integrations/payments/payment-user-merge-service";
@@ -63,6 +64,8 @@ export async function mergeLocalUsersIntoTarget(
   // fence used by foreground payment creation and claiming.
   if (!paymentOwnerFenceHeld) {
     await lockPaymentOwnerFence(tx, userIds);
+  } else {
+    await assertPaymentOwnerChangeFenceHeld(tx, userIds);
   }
 
   const emptyResult: LocalUserMergeResult = {

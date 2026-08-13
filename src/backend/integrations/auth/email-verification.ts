@@ -18,7 +18,10 @@ import {
 } from "@/backend/integrations/remnashop/client";
 import { linkCurrentUserToRemnashopAuth } from "@/backend/integrations/remnashop/session";
 import { refreshCurrentAccessCookie } from "@/backend/integrations/sessions/web-session-service";
-import { withPaymentOwnerChangeFence } from "@/backend/integrations/payments/payment-user-merge-service";
+import {
+  markPaymentOwnerChangeUpstreamMutationStarted,
+  withPaymentOwnerChangeFence,
+} from "@/backend/integrations/payments/payment-user-merge-service";
 import { synchronizeProviderAccountIdentity } from "@/backend/integrations/auth/provider-account-identity-sync";
 import { assertCooldown, assertRateLimit } from "@/backend/limits/rate-limit";
 import { auditLog } from "@/backend/observability/audit";
@@ -84,6 +87,7 @@ export const productionEmailVerificationCommands: EmailVerificationCommands = {
       telegramUsername: session.user.telegramUsername,
       pendingUpstreamAccountId: session.user.pendingRemnashopUserId,
       pendingEmail: session.user.pendingRemnashopEmail,
+      localUpstreamAccountId: session.user.remnashopUserId,
       authorizedUpstreamAccountId: getRemnashopUserIdFromAccessToken(accessToken),
     };
   },
@@ -200,10 +204,12 @@ export const productionEmailVerificationCommands: EmailVerificationCommands = {
 
   async attachTelegram(session, input) {
     const provider = providerContext(session);
+    await markPaymentOwnerChangeUpstreamMutationStarted();
     await adapt(() => remnashopLinkTelegram({ accessToken: provider.accessToken, ...input }));
   },
 
   async mergeProviderAccounts(input) {
+    await markPaymentOwnerChangeUpstreamMutationStarted();
     await adapt(async () => {
       try {
         await remnashopMergeUsers({

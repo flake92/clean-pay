@@ -3,11 +3,11 @@ import { PageHeader } from "@/frontend/components/layout";
 import { TariffsPanel } from "@/frontend/components/tariffs-panel";
 import { getBranding } from "@/shared/branding";
 import { loadTariffsViewModel } from "@/application/subscriptions/load-tariffs";
-import { remnashopSubscriptionCatalog } from "@/backend/integrations/remnashop/subscription-catalog";
+import { requestSubscriptionCatalog } from "@/app/_composition/request-scoped-readers";
 
 export default async function TariffsPage() {
   const branding = getBranding();
-  const model = await loadTariffsViewModel(remnashopSubscriptionCatalog);
+  const model = await loadTariffsViewModel(requestSubscriptionCatalog);
 
   return (
     <AppShell>

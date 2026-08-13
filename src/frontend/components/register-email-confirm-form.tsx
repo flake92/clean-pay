@@ -26,10 +26,12 @@ export function RegisterEmailConfirmForm({
   redirectTo = "/cabinet",
   turnstileEnabled = false,
   turnstileSiteKey,
+  verificationDeliveryFailed = false,
 }: {
   redirectTo?: string;
   turnstileEnabled?: boolean;
   turnstileSiteKey?: string | null;
+  verificationDeliveryFailed?: boolean;
 }) {
   const [loading, setLoading] = useState<"confirm" | "resend" | "back" | null>(null);
   const loadingRef = useRef<"confirm" | "resend" | "back" | null>(null);
@@ -168,6 +170,12 @@ export function RegisterEmailConfirmForm({
 
   return (
     <div className="flex flex-column gap-3">
+      {verificationDeliveryFailed ? (
+        <Message
+          severity="warn"
+          text="Аккаунт создан, но письмо с кодом не удалось отправить автоматически. Нажмите «Отправить код повторно»."
+        />
+      ) : null}
       {turnstileEnabled ? (
         <TurnstileWidget action="email_verification" onReady={setTurnstile} onToken={setTurnstileToken} siteKey={turnstileSiteKey} />
       ) : null}

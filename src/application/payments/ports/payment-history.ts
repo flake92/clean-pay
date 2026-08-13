@@ -12,6 +12,7 @@ export interface PaymentHistoryGateway {
   loadLegacyTransactions(authorization: PaymentHistoryAuthorization): Promise<PaymentHistoryTransaction[]>;
   persistLegacyTransactions(userId: string, authorization: PaymentHistoryAuthorization, transactions: PaymentHistoryTransaction[]): Promise<void>;
   loadRecent(userId: string, limit: number): Promise<CabinetPaymentViewModel[]>;
+  isSnapshotStale(userId: string): Promise<boolean>;
   logExactFailure(error: unknown, index: number): void;
   logDegraded(error: unknown): void;
 }

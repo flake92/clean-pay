@@ -52,6 +52,11 @@ function transaction(
     }),
   );
   const tx = {
+    webUser: {
+      findFirst: vi.fn().mockResolvedValue(null),
+      findMany: vi.fn().mockResolvedValue([]),
+      updateMany: vi.fn().mockResolvedValue({ count: 0 }),
+    },
     paymentOperation: {
       updateMany,
       count: vi.fn().mockResolvedValue(0),
@@ -88,6 +93,7 @@ describe("payment operations during user merge", () => {
   it("normalizes advisory locks and skips dispatch lookup for an empty owner set", async () => {
     const tx = transaction() as unknown as {
       $queryRaw: ReturnType<typeof vi.fn>;
+      webUser: { findFirst: ReturnType<typeof vi.fn> };
       paymentOperation: { findFirst: ReturnType<typeof vi.fn> };
     };
     tx.paymentOperation.findFirst = vi.fn();
@@ -102,6 +108,7 @@ describe("payment operations during user merge", () => {
     )).resolves.toBeUndefined();
 
     expect(tx.$queryRaw).toHaveBeenCalledTimes(2);
+    expect(tx.webUser.findFirst).toHaveBeenCalledOnce();
     expect(tx.paymentOperation.findFirst).not.toHaveBeenCalled();
   });
 
@@ -119,11 +126,33 @@ describe("payment operations during user merge", () => {
 
   it("fences every normalized identity and revalidates the mapping", async () => {
     const work = vi.fn().mockResolvedValue("done");
+    let tokenHash: string | null = null;
+    let leaseExpiresAt: Date | null = null;
     const tx = {
       webUser: {
-        findMany: vi.fn()
-          .mockResolvedValueOnce([{ id: "mapped-user" }])
-          .mockResolvedValueOnce([{ id: "mapped-user" }]),
+        findMany: vi.fn().mockImplementation(async (input: {
+          select?: { paymentOwnerChangeTokenHash?: boolean };
+        }) => input.select?.paymentOwnerChangeTokenHash
+          ? ["explicit-user", "mapped-user"].map((id) => ({
+              id,
+              paymentOwnerChangeTokenHash: tokenHash,
+              paymentOwnerChangeLeaseExpiresAt: leaseExpiresAt,
+            }))
+          : [{ id: "mapped-user" }]),
+        updateMany: vi.fn().mockImplementation(async (input: {
+          data: {
+            paymentOwnerChangeTokenHash?: string | null;
+            paymentOwnerChangeLeaseExpiresAt?: Date | null;
+          };
+        }) => {
+          if ("paymentOwnerChangeTokenHash" in input.data) {
+            tokenHash = input.data.paymentOwnerChangeTokenHash ?? null;
+          }
+          if ("paymentOwnerChangeLeaseExpiresAt" in input.data) {
+            leaseExpiresAt = input.data.paymentOwnerChangeLeaseExpiresAt ?? null;
+          }
+          return { count: 2 };
+        }),
       },
       paymentOperation: { findFirst: vi.fn().mockResolvedValue(null) },
       $queryRaw: vi.fn().mockResolvedValue([{ locked: 1 }]),
@@ -137,10 +166,12 @@ describe("payment operations during user merge", () => {
       upstreamAccountIds: ["upstream-1", "upstream-1"],
       emails: [null, " User@Example.COM ", "user@example.com"],
       telegramIds: [undefined, 42, "42"],
+      operationKey: "test-owner-change",
+      targetUpstreamAccountId: "upstream-1",
       work,
     })).resolves.toBe("done");
 
-    expect(tx.webUser.findMany).toHaveBeenCalledWith({
+    expect(tx.webUser.findMany).toHaveBeenNthCalledWith(1, {
       where: { OR: [
         { id: { in: ["explicit-user"] } },
         { remnashopUserId: { in: ["upstream-1"] } },
@@ -151,6 +182,7 @@ describe("payment operations during user merge", () => {
     });
     expect(tx.paymentOperation.findFirst).toHaveBeenCalledOnce();
     expect(work).toHaveBeenCalledOnce();
+    expect(tokenHash).toBeNull();
   });
 
   it("fails closed when no owner can be fenced or the mapping changes under the lock", async () => {
@@ -163,6 +195,8 @@ describe("payment operations during user merge", () => {
       async (callback: (value: typeof noOwnerTx) => unknown) => callback(noOwnerTx),
     );
     await expect(withPaymentOwnerChangeFence({
+      operationKey: "test-owner-change",
+      targetUpstreamAccountId: "owner-1",
       work: vi.fn(),
     })).rejects.toMatchObject({ code: "ACCOUNT_MERGE_REQUIRED" });
 
@@ -180,6 +214,8 @@ describe("payment operations during user merge", () => {
     );
     await expect(withPaymentOwnerChangeFence({
       emails: ["owner@example.com"],
+      operationKey: "test-owner-change",
+      targetUpstreamAccountId: "owner-1",
       work: vi.fn(),
     })).rejects.toMatchObject({ code: "ACCOUNT_MERGE_REQUIRED" });
     expect(changedTx.paymentOperation.findFirst).not.toHaveBeenCalled();

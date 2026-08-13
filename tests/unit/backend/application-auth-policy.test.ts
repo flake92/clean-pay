@@ -30,6 +30,7 @@ const emailActor: EmailVerificationActor = {
   pendingUpstreamAccountId: null,
   pendingEmail: null,
   authorizedUpstreamAccountId: "email-account",
+  localUpstreamAccountId: "email-account",
   telegramUsername: null,
 };
 

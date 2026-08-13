@@ -88,7 +88,10 @@ function paymentMaintenance(): PaymentMaintenanceRunner {
     releaseReconciliation: vi.fn(async () => undefined), markReconciliationManual: vi.fn(async () => undefined),
     failReconciliation: vi.fn(async () => "released" as const), classifyReconciliationError: vi.fn(() => ({ kind: "other" as const })),
     listHistoryCandidates: vi.fn(async () => []), claimHistory: vi.fn(async () => null), authorizeHistory: vi.fn(async () => ({ context: {} })),
-    historyPageSize: vi.fn(async () => 100), loadHistoryPage: vi.fn(async () => ({ context: {} })),
+    historyPageSize: vi.fn(async () => 100), findPendingHistoryPaymentIds: vi.fn(async () => []),
+    loadExactHistoryPayment: vi.fn(async () => null), persistExactHistoryPayment: vi.fn(async () => undefined),
+    loadLegacyHistory: vi.fn(async () => ({ context: {} })),
+    loadHistoryPage: vi.fn(async () => ({ context: {} })),
     completeHistoryPage: vi.fn(async () => ({ applied: 0, hasMore: false })), failHistory: vi.fn(async () => undefined), now: vi.fn(() => Date.now()),
   };
 }
@@ -107,6 +110,8 @@ function cabinetCommands(overrides: Partial<CabinetCommands> = {}): CabinetComma
 describe("application facades", () => {
   it("validates and normalizes Telegram WebApp input before the port", async () => {
     const gateway: TelegramWebAppGateway = {
+      preflightCapacity: vi.fn(async () => undefined),
+      withUpstreamConcurrency: vi.fn(async (_action, work) => work()),
       authenticateProvider: vi.fn(async () => ({ context: {} })),
       verifiedIdentity: vi.fn(async () => ({ telegramId: "777", context: {} })),
       rateLimit: vi.fn(async () => undefined),
@@ -122,6 +127,8 @@ describe("application facades", () => {
       })),
       createSession: vi.fn(async () => ({ id: "session-1" })),
       recoverSession: vi.fn(async () => undefined),
+      revokeSession: vi.fn(async () => undefined),
+      clearSessionCookies: vi.fn(async () => undefined),
     };
 
     await expect(authenticateTelegramWebApp(gateway, "   ")).resolves.toMatchObject({ ok: false, code: "VALIDATION_ERROR" });
@@ -207,6 +214,7 @@ describe("application facades", () => {
       withOwnerChangeFence: vi.fn(async (_confirmation, work) => work()), loadCurrentOwner: vi.fn(), authenticateTelegram: vi.fn(),
       preflight: vi.fn(), mergeProviderAccounts: vi.fn(), synchronizeSubscriptionIdentity: vi.fn(), linkCurrentAccount: vi.fn(),
       complete: vi.fn(), cancel: vi.fn(async () => true), release: vi.fn(), refreshLocalSession: vi.fn(),
+      reconcileCompletedOwnerChange: vi.fn(async () => undefined),
     };
 
     await expect(confirmLinkedTelegram(mergeGateway)).resolves.toEqual({ ok: true, kind: "merge-confirmed" });
@@ -301,7 +309,7 @@ describe("application facades", () => {
       authorize: vi.fn(async () => { throw new Error("sync unavailable"); }), loadCapabilities: vi.fn(async () => null),
       findPendingPaymentIds: vi.fn(async () => []), loadExactTransaction: vi.fn(async () => null), persistExactTransaction: vi.fn(async () => undefined),
       loadLegacyTransactions: vi.fn(async () => []), persistLegacyTransactions: vi.fn(async () => undefined),
-      loadRecent: vi.fn(async () => []), logExactFailure: vi.fn(), logDegraded: vi.fn(),
+      loadRecent: vi.fn(async () => []), isSnapshotStale: vi.fn(async () => false), logExactFailure: vi.fn(), logDegraded: vi.fn(),
     };
     const maintenance = paymentMaintenance();
 
@@ -309,10 +317,12 @@ describe("application facades", () => {
       status: "ready",
       offers,
       devices: null,
-      paymentsWarning: "История показана из сохранённых данных. Обновление статусов временно недоступно.",
+      paymentsWarning: null,
       support: { enabled: false },
     });
     expect(history.loadRecent).toHaveBeenCalledWith("user-1", 20);
+    expect(history.authorize).not.toHaveBeenCalled();
+    expect(maintenance.claimHistory).not.toHaveBeenCalled();
 
     await expect(loadCabinetViewModel(reader, authGateway({ loadCurrentSession: vi.fn(async () => null) }), history, maintenance)).resolves.toEqual({ status: "unauthorized" });
 
@@ -385,7 +395,7 @@ describe("application facades", () => {
       loadActor: vi.fn(async () => ({
         context: {}, userId: "user-1", email: "u@example.com", emailVerified: false,
         telegramId: null, pendingUpstreamAccountId: null, pendingEmail: null,
-        authorizedUpstreamAccountId: "upstream-1", telegramUsername: null,
+        authorizedUpstreamAccountId: "upstream-1", localUpstreamAccountId: "upstream-1", telegramUsername: null,
       })),
       assertRequestLimits: vi.fn(async () => undefined),
       requestProviderCode: vi.fn(async () => ({ targetEmail: "u@example.com" })),

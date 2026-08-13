@@ -1,11 +1,18 @@
 #!/usr/bin/env node
 
-import { writeFileSync } from "node:fs";
+import { rmSync, writeFileSync } from "node:fs";
 
 import { deployLog } from "./deploy-log.mjs";
-import { parseReconciliationBatch } from "./reconciliation-batch.mjs";
+import {
+  classifyReconciliationBatchHealth,
+  parseReconciliationBatch,
+} from "./reconciliation-batch.mjs";
 
 const enabled = process.env.PAYMENT_RECONCILIATION_ENABLED === "true";
+const heartbeatFile = "/tmp/clean-pay-reconciliation-heartbeat";
+const maxConsecutiveFailures = 5;
+
+rmSync(heartbeatFile, { force: true });
 
 if (!enabled) {
   deployLog("info", "reconciliation_worker_disabled", "Payment reconciliation worker is disabled by configuration.");
@@ -22,8 +29,6 @@ const intervalSeconds = boundedInteger(
 const endpoint =
   process.env.PAYMENT_RECONCILIATION_INTERNAL_URL?.trim() ||
   "http://app:4000/api/internal/payments/reconcile";
-const heartbeatFile = "/tmp/clean-pay-reconciliation-heartbeat";
-
 if (!secret || secret.length < 32) {
   throw new Error(
     "PAYMENT_RECONCILIATION_SECRET must contain at least 32 characters",
@@ -41,8 +46,11 @@ deployLog("info", "reconciliation_worker_started", "Payment reconciliation worke
   endpoint: parsedEndpoint.origin,
 });
 
+let consecutiveFailures = 0;
+
 while (true) {
   const startedAt = Date.now();
+  let batchHealthy = false;
 
   try {
     const response = await fetch(parsedEndpoint, {
@@ -56,43 +64,68 @@ while (true) {
 
     if (!response.ok) {
       await response.body?.cancel();
-      deployLog("warn", "reconciliation_batch_rejected", "Payment reconciliation endpoint returned an unsuccessful response.", {
-        status: response.status,
-      });
-    } else {
-      const counts = parseReconciliationBatch(await response.json());
-      const manualOperationIds = counts.manualRequiredOperationIds.join(",");
-      const history = counts.history;
-      const backlog = counts.backlog;
-      const severity = backlog.manualRequired > 0 || backlog.oldestAgeSeconds > 900
-        ? "warn"
-        : "info";
-      deployLog(severity, "reconciliation_batch_completed", `Payment reconciliation batch completed: manual_operation_ids=${manualOperationIds || "none"}, history_failed=${history.failed}, backlog=${backlog.pending}.`, {
-        claimed: counts.claimed,
-        succeeded: counts.succeeded,
-        in_progress: counts.inProgress,
-        unknown: counts.unknown,
-        manual_required: counts.manualRequired,
-        manual_operation_ids: manualOperationIds || "none",
-        failed: counts.failed,
-        history_attempted: history.attempted,
-        history_applied: history.applied,
-        history_completed: history.completed,
-        history_failed: history.failed,
-        backlog_pending: backlog.pending,
-        backlog_due: backlog.due,
-        backlog_manual_required: backlog.manualRequired,
-        backlog_oldest_age_seconds: backlog.oldestAgeSeconds,
-        backlog_maximum_attempt_count: backlog.maximumAttemptCount,
-        backlog_total_failure_count: backlog.totalFailureCount,
-      });
-      writeHeartbeat();
+      throw Object.assign(
+        new Error(`Payment reconciliation endpoint returned HTTP ${response.status}`),
+        { name: "ReconciliationHttpError" },
+      );
     }
+
+    const counts = parseReconciliationBatch(await response.json());
+    const health = classifyReconciliationBatchHealth(counts);
+    const manualOperationIds = counts.manualRequiredOperationIds.join(",");
+    const history = counts.history;
+    const backlog = counts.backlog;
+    const severity = !health.healthy || backlog.manualRequired > 0 || backlog.oldestAgeSeconds > 900
+      ? "warn"
+      : "info";
+    deployLog(severity, "reconciliation_batch_completed", `Payment reconciliation batch completed: health=${health.outcome}, manual_operation_ids=${manualOperationIds || "none"}, history_failed=${history.failed}, backlog=${backlog.pending}.`, {
+      health: health.outcome,
+      claimed: counts.claimed,
+      succeeded: counts.succeeded,
+      in_progress: counts.inProgress,
+      unknown: counts.unknown,
+      manual_required: counts.manualRequired,
+      manual_operation_ids: manualOperationIds || "none",
+      failed: counts.failed,
+      history_attempted: history.attempted,
+      history_applied: history.applied,
+      history_completed: history.completed,
+      history_failed: history.failed,
+      backlog_pending: backlog.pending,
+      backlog_due: backlog.due,
+      backlog_manual_required: backlog.manualRequired,
+      backlog_oldest_age_seconds: backlog.oldestAgeSeconds,
+      backlog_maximum_attempt_count: backlog.maximumAttemptCount,
+      backlog_total_failure_count: backlog.totalFailureCount,
+    });
+
+    if (!health.healthy) {
+      throw Object.assign(
+        new Error(`Payment reconciliation batch made no healthy progress (${health.outcome})`),
+        { name: "ReconciliationBatchUnhealthy" },
+      );
+    }
+
+    writeHeartbeat();
+    batchHealthy = true;
   } catch (error) {
     deployLog("error", "reconciliation_batch_failed", "Payment reconciliation batch failed; it will be retried on the next interval.", {
       error: error instanceof Error ? error.name : "UnknownError",
       reason: error instanceof Error ? error.message.slice(0, 240) : "unknown_failure",
     });
+  }
+
+  if (batchHealthy) {
+    consecutiveFailures = 0;
+  } else {
+    consecutiveFailures += 1;
+
+    if (consecutiveFailures >= maxConsecutiveFailures) {
+      deployLog("error", "reconciliation_worker_failure_limit_reached", "Payment reconciliation worker reached its consecutive failure limit and will restart.", {
+        consecutive_failures: consecutiveFailures,
+      });
+      process.exit(1);
+    }
   }
 
   const remainingMs = Math.max(

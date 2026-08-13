@@ -15,6 +15,7 @@ export type EmailVerificationActor = {
   telegramId: string | null;
   pendingUpstreamAccountId: string | null;
   pendingEmail: string | null;
+  localUpstreamAccountId: string | null;
   authorizedUpstreamAccountId: string;
   telegramUsername: string | null;
 };
@@ -39,7 +40,7 @@ export interface EmailVerificationCommands {
   mergeProviderAccounts(input: { sourceAccountId: string; targetAccountId: string; reason: string }): Promise<void>;
   refreshProviderSession(input: { telegramId: string; telegramUsername: string | null }): Promise<EmailProviderSession>;
   linkCurrentAccount(session: EmailProviderSession, input: { upstreamMerged: boolean; ownerFenceHeld: boolean }): Promise<void>;
-  withOwnerChangeFence<T>(input: { userIds: string[]; upstreamAccountIds: string[]; emails: string[]; telegramIds: Array<string | null>; work: () => Promise<T> }): Promise<T>;
+  withOwnerChangeFence<T>(input: { userIds: string[]; upstreamAccountIds: string[]; emails: string[]; telegramIds: Array<string | null>; operationKey: string; targetUpstreamAccountId: string; work: () => Promise<T> }): Promise<T>;
   refreshLocalSession(): Promise<void>;
   auditEmailVerified(input: { userId: string; email: string }): Promise<void>;
   markAccountSyncPending(userId: string, error: unknown): Promise<void>;

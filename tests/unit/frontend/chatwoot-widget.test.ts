@@ -1,0 +1,304 @@
+/** @vitest-environment jsdom */
+
+import { createElement } from "react";
+import { act, cleanup, render, waitFor } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+const mocks = vi.hoisted(() => ({
+  loadContext: vi.fn(),
+}));
+
+vi.mock("@/app/actions/chatwoot", () => ({
+  loadChatwootSupportContextAction: mocks.loadContext,
+}));
+
+import type { ChatwootWidgetConfig } from "@/application/models/chatwoot";
+import { ChatwootWidget } from "@/frontend/components/chatwoot-widget";
+import {
+  CHATWOOT_IDENTITY_ATTEMPT_TIMEOUT_MS,
+  clearChatwootSupportContextCache,
+  getChatwootPendingIdentityAttempt,
+  resetChatwootSession,
+} from "@/frontend/lib/chatwoot";
+
+const config: ChatwootWidgetConfig = {
+  baseUrl: "https://chat.example.com",
+  websiteToken: "website_token_123456789",
+  user: {
+    identifier: "user-123",
+    identifierHash: "signed-identifier",
+    name: "Clean Pay User",
+    email: "verified@example.com",
+    customAttributes: { clean_pay_user_id: "user-123" },
+  },
+};
+
+const context = {
+  customAttributes: {
+    subscription_plan: "Premium",
+    payment_context_status: "ready",
+  },
+  managedLabels: [
+    { name: "payment_problem" as const, enabled: true },
+    { name: "subscription_expired" as const, enabled: false },
+  ],
+};
+
+function chatwootApi() {
+  return {
+    baseUrl: config.baseUrl,
+    websiteToken: config.websiteToken,
+    hasLoaded: true,
+    setUser: vi.fn(() => {
+      document.cookie = "cw_conversation=authenticated; Path=/";
+      document.cookie = `cw_user_${config.websiteToken}=identified; Path=/`;
+      queueMicrotask(() => {
+        const frame = document.getElementById(
+          "chatwoot_live_chat_widget",
+        ) as HTMLIFrameElement | null;
+
+        window.dispatchEvent(new MessageEvent("message", {
+          origin: config.baseUrl,
+          source: frame?.contentWindow ?? null,
+          data: 'chatwoot-widget:{"event":"setAuthCookie","data":{"widgetAuthToken":"token"}}',
+        }));
+      });
+    }),
+    setLabel: vi.fn(),
+    removeLabel: vi.fn(),
+    toggleBubbleVisibility: vi.fn(),
+    reset: vi.fn(),
+  };
+}
+
+describe("Chatwoot widget context lifecycle", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    clearChatwootSupportContextCache();
+    window.$chatwoot = chatwootApi();
+    window.chatwootSDK = { run: vi.fn() };
+    window.cleanPayChatwootAuthorized = undefined;
+    window.cleanPayChatwootIdentity = undefined;
+    window.cleanPayChatwootPendingIdentity = undefined;
+    window.cleanPayChatwootFailedIdentity = undefined;
+    window.onmessage = null;
+    window.localStorage.clear();
+    document.getElementById("chatwoot_live_chat_widget")?.remove();
+    const frame = document.createElement("iframe");
+    frame.id = "chatwoot_live_chat_widget";
+    document.body.appendChild(frame);
+    mocks.loadContext.mockResolvedValue(context);
+  });
+
+  afterEach(() => {
+    cleanup();
+    resetChatwootSession();
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  async function flushWidgetEffects() {
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+  }
+
+  it("reapplies managed labels after Chatwoot creates a conversation", async () => {
+    render(createElement(ChatwootWidget, { config }));
+
+    await waitFor(() => expect(window.$chatwoot?.setLabel).toHaveBeenCalled());
+    vi.mocked(window.$chatwoot!.setLabel!).mockClear();
+    vi.mocked(window.$chatwoot!.removeLabel!).mockClear();
+
+    await act(async () => {
+      window.dispatchEvent(new CustomEvent("chatwoot:on-message"));
+    });
+
+    await waitFor(() => {
+      expect(window.$chatwoot?.setLabel).toHaveBeenCalledWith("payment_problem");
+      expect(window.$chatwoot?.removeLabel).toHaveBeenCalledWith("subscription_expired");
+    });
+  });
+
+  it("refreshes context on open after the one-minute cache expires", async () => {
+    const now = vi.spyOn(Date, "now").mockReturnValue(1_000);
+    render(createElement(ChatwootWidget, { config }));
+
+    await waitFor(() => expect(mocks.loadContext).toHaveBeenCalledTimes(1));
+    now.mockReturnValue(62_000);
+
+    act(() => window.dispatchEvent(new CustomEvent("chatwoot:opened")));
+
+    await waitFor(() => expect(mocks.loadContext).toHaveBeenCalledTimes(2));
+  });
+
+  it("does not remove labels from an expired snapshot while refresh is failing", async () => {
+    const now = vi.spyOn(Date, "now").mockReturnValue(1_000);
+    mocks.loadContext.mockResolvedValue({
+      ...context,
+      managedLabels: [{ name: "payment_problem", enabled: false }],
+    });
+    render(createElement(ChatwootWidget, { config }));
+
+    await waitFor(() => expect(window.$chatwoot?.removeLabel).toHaveBeenCalled());
+    vi.mocked(window.$chatwoot!.removeLabel!).mockClear();
+    mocks.loadContext.mockRejectedValueOnce(new Error("offline"));
+    now.mockReturnValue(62_000);
+
+    act(() => window.dispatchEvent(new CustomEvent("chatwoot:opened")));
+    await waitFor(() => expect(mocks.loadContext).toHaveBeenCalledTimes(2));
+
+    expect(window.$chatwoot?.removeLabel).not.toHaveBeenCalled();
+  });
+
+  it("recreates the iframe once, ignores the stale frame, and then fails closed", async () => {
+    vi.useFakeTimers();
+    const api = chatwootApi();
+    api.setUser.mockImplementation(() => undefined);
+    window.$chatwoot = api;
+    const firstFrame = document.getElementById(
+      "chatwoot_live_chat_widget",
+    ) as HTMLIFrameElement;
+    const firstFrameWindow = firstFrame.contentWindow;
+
+    render(createElement(ChatwootWidget, { config }));
+    await flushWidgetEffects();
+
+    expect(api.setUser).toHaveBeenCalledTimes(1);
+    expect(getChatwootPendingIdentityAttempt()).toMatchObject({
+      phase: "sent",
+      retryCount: 0,
+    });
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(CHATWOOT_IDENTITY_ATTEMPT_TIMEOUT_MS);
+    });
+
+    const replacementFrame = document.getElementById(
+      "chatwoot_live_chat_widget",
+    ) as HTMLIFrameElement;
+    expect(replacementFrame).not.toBe(firstFrame);
+    expect(api.setUser).toHaveBeenCalledTimes(1);
+    expect(getChatwootPendingIdentityAttempt()).toMatchObject({
+      phase: "waiting_for_frame",
+      retryCount: 1,
+    });
+
+    await act(async () => {
+      window.dispatchEvent(new MessageEvent("message", {
+        origin: config.baseUrl,
+        source: firstFrameWindow,
+        data: 'chatwoot-widget:{"event":"setAuthCookie","data":{"widgetAuthToken":"stale"}}',
+      }));
+      await Promise.resolve();
+    });
+    expect(getChatwootPendingIdentityAttempt()?.phase).toBe("waiting_for_frame");
+    expect(api.setUser).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      window.dispatchEvent(new MessageEvent("message", {
+        origin: config.baseUrl,
+        source: replacementFrame.contentWindow,
+        data: 'chatwoot-widget:{"event":"loaded"}',
+      }));
+      await Promise.resolve();
+    });
+    expect(api.setUser).toHaveBeenCalledTimes(2);
+    expect(getChatwootPendingIdentityAttempt()).toMatchObject({
+      phase: "sent",
+      retryCount: 1,
+    });
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(CHATWOOT_IDENTITY_ATTEMPT_TIMEOUT_MS);
+      await vi.advanceTimersByTimeAsync(CHATWOOT_IDENTITY_ATTEMPT_TIMEOUT_MS);
+    });
+    expect(getChatwootPendingIdentityAttempt()).toBeUndefined();
+    expect(api.setUser).toHaveBeenCalledTimes(2);
+    expect(api.toggleBubbleVisibility).toHaveBeenLastCalledWith("hide");
+
+    act(() => {
+      window.dispatchEvent(new CustomEvent("chatwoot:error"));
+      window.dispatchEvent(new CustomEvent("chatwoot:ready"));
+      window.dispatchEvent(new CustomEvent("chatwoot:opened"));
+      window.dispatchEvent(new CustomEvent("chatwoot:on-message"));
+    });
+    await flushWidgetEffects();
+    expect(api.setUser).toHaveBeenCalledTimes(2);
+  });
+
+  it("blocks Chatwoot-prefixed messages with the wrong origin from the SDK", async () => {
+    const api = chatwootApi();
+    api.setUser.mockImplementation(() => undefined);
+    window.$chatwoot = api;
+    const frame = document.getElementById(
+      "chatwoot_live_chat_widget",
+    ) as HTMLIFrameElement;
+    const permissiveSdkHandler = vi.fn();
+
+    render(createElement(ChatwootWidget, { config }));
+    await flushWidgetEffects();
+    window.onmessage = permissiveSdkHandler;
+
+    act(() => {
+      window.dispatchEvent(new MessageEvent("message", {
+        origin: "https://attacker.example",
+        source: frame.contentWindow,
+        data: 'chatwoot-widget:{"event":"setAuthCookie","data":{"widgetAuthToken":"attacker"}}',
+      }));
+    });
+
+    expect(permissiveSdkHandler).not.toHaveBeenCalled();
+    expect(getChatwootPendingIdentityAttempt()).toBeDefined();
+  });
+
+  it("cancels the pending timeout after a valid identity confirmation", async () => {
+    vi.useFakeTimers();
+    mocks.loadContext.mockResolvedValue(null);
+    const api = chatwootApi();
+    api.setUser.mockImplementation(() => undefined);
+    window.$chatwoot = api;
+    const frame = document.getElementById(
+      "chatwoot_live_chat_widget",
+    ) as HTMLIFrameElement;
+
+    render(createElement(ChatwootWidget, { config }));
+    await flushWidgetEffects();
+    document.cookie = "cw_conversation=authenticated; Path=/";
+    document.cookie = `cw_user_${config.websiteToken}=identified; Path=/`;
+
+    await act(async () => {
+      window.dispatchEvent(new MessageEvent("message", {
+        origin: config.baseUrl,
+        source: frame.contentWindow,
+        data: 'chatwoot-widget:{"event":"setAuthCookie","data":{"widgetAuthToken":"token"}}',
+      }));
+      await Promise.resolve();
+      await vi.advanceTimersByTimeAsync(CHATWOOT_IDENTITY_ATTEMPT_TIMEOUT_MS * 2);
+    });
+
+    expect(getChatwootPendingIdentityAttempt()).toBeUndefined();
+    expect(api.setUser).toHaveBeenCalledTimes(1);
+    expect(document.getElementById("chatwoot_live_chat_widget")).toBe(frame);
+  });
+
+  it("cancels the component timer on unmount without launching a background retry", async () => {
+    vi.useFakeTimers();
+    const api = chatwootApi();
+    api.setUser.mockImplementation(() => undefined);
+    window.$chatwoot = api;
+    const frame = document.getElementById("chatwoot_live_chat_widget");
+    const view = render(createElement(ChatwootWidget, { config }));
+    await flushWidgetEffects();
+
+    view.unmount();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(CHATWOOT_IDENTITY_ATTEMPT_TIMEOUT_MS * 2);
+    });
+
+    expect(api.setUser).toHaveBeenCalledTimes(1);
+    expect(document.getElementById("chatwoot_live_chat_widget")).toBe(frame);
+    expect(getChatwootPendingIdentityAttempt()).toMatchObject({ retryCount: 0 });
+  });
+});

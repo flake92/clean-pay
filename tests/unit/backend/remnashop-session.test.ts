@@ -637,6 +637,10 @@ describe("Remnashop session reconciliation", () => {
         remnashopRefreshTokenEncrypted: null,
         remnashopAccessExpiresAt: null,
         remnashopRefreshExpiresAt: null,
+        remnashopRefreshClaimTokenHash: null,
+        remnashopRefreshLeaseExpiresAt: null,
+        remnashopRefreshDispatchedAt: null,
+        remnashopRefreshRecoveryEncrypted: null,
       },
     });
   });

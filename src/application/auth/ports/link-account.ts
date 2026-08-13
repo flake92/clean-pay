@@ -23,7 +23,7 @@ export interface LinkAccountCommands {
   mergeProviderAccounts(input: { sourceAccountId: string; targetAccountId: string; reason: string }): Promise<void>;
   refreshTelegramProviderSession(input: { telegramId: string; telegramUsername: string | null }): Promise<{ context: unknown }>;
   linkCurrentAccount(session: { context: unknown }, input: { upstreamMerged: boolean; ownerFenceHeld: boolean }): Promise<{ userId: string }>;
-  withOwnerChangeFence<T>(input: { userIds: string[]; upstreamAccountIds: string[]; emails: Array<string | null>; telegramIds: Array<string | null>; work: () => Promise<T> }): Promise<T>;
+  withOwnerChangeFence<T>(input: { userIds: string[]; upstreamAccountIds: string[]; emails: Array<string | null>; telegramIds: Array<string | null>; operationKey: string; targetUpstreamAccountId: string; work: () => Promise<T> }): Promise<T>;
   emailOwnerId(email: string): Promise<string | null>;
   stagePendingEmail(input: { actor: LinkAccountActor; providerSession: { context: unknown }; email: string; providerEmail: string | null; stagedLocally: boolean }): Promise<void>;
   requestProviderVerification(session: { context: unknown }, email: string): Promise<{ targetEmail: string }>;

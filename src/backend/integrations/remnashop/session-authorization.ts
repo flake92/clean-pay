@@ -111,6 +111,10 @@ async function attachRemnashopTokensForVerifiedEmailSession(
       remnashopRefreshTokenEncrypted: protectedRefreshToken,
       remnashopAccessExpiresAt: accessExpiresAt,
       remnashopRefreshExpiresAt: refreshExpiresAt,
+      remnashopRefreshClaimTokenHash: null,
+      remnashopRefreshLeaseExpiresAt: null,
+      remnashopRefreshDispatchedAt: null,
+      remnashopRefreshRecoveryEncrypted: null,
     },
   });
   if (stored.count !== 1) {
@@ -145,9 +149,15 @@ async function attachRemnashopTokensForVerifiedEmailSession(
 
 export async function getAuthorizedRemnashopTokens({
   allowUnverifiedEmail = false,
-}: { allowUnverifiedEmail?: boolean } = {}) {
+  readSession = getCurrentSession,
+  refreshAccessCookie = refreshCurrentAccessCookie,
+}: {
+  allowUnverifiedEmail?: boolean;
+  readSession?: typeof getCurrentSession;
+  refreshAccessCookie?: typeof refreshCurrentAccessCookie;
+} = {}) {
   authDebugLog("remnashop_tokens_authorize_started", { allowUnverifiedEmail });
-  const localSession = await getCurrentSession();
+  const localSession = await readSession();
 
   if (!localSession) {
     authDebugLog("remnashop_tokens_authorize_failed", { reason: "missing_session" });
@@ -216,7 +226,7 @@ export async function getAuthorizedRemnashopTokens({
     localSession.user.email &&
     localSession.user.emailVerified
   ) {
-    const recoverySession = await getCurrentSession();
+    const recoverySession = await readSession();
     if (
       !recoverySession ||
       recoverySession.id !== localSession.id ||
@@ -236,7 +246,7 @@ export async function getAuthorizedRemnashopTokens({
     // Token acquisition can atomically clear an expired/corrupt legacy bundle.
     // Reload before Telegram recovery so the transaction compares against the
     // committed cleanup rather than the stale request snapshot.
-    const recoverySession = await getCurrentSession();
+    const recoverySession = await readSession();
 
     if (
       !recoverySession ||
@@ -263,7 +273,7 @@ export async function getAuthorizedRemnashopTokens({
         throw error;
       }
 
-      const convergedSession = await getCurrentSession();
+      const convergedSession = await readSession();
       if (
         !convergedSession ||
         convergedSession.id !== localSession.id ||
@@ -358,7 +368,7 @@ export async function getAuthorizedRemnashopTokens({
         where: { id: session.userId },
         data: { emailVerified: true },
       });
-      await refreshCurrentAccessCookie();
+      await refreshAccessCookie();
       session.user.emailVerified = true;
       authDebugLog("remnashop_tokens_authorize_email_verified_synced", {
         sessionId: session.id,

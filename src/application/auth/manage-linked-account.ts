@@ -11,6 +11,7 @@ import type { AuthProfileGateway } from "@/application/auth/ports/auth-profile";
 import { resolveAuthProfile } from "@/application/auth/resolve-auth-profile";
 import type { PasskeyManagementGateway } from "@/application/auth/ports/passkey-management";
 import { accountAccessIssue } from "@/shared/domain/account-access-policy";
+import { paymentOwnerTransitionKey } from "@/shared/domain/payment-owner-transition";
 
 function callbackError(status: string | null) {
   if (status === "telegram_merge_subscriptions") return "В обеих учётных записях есть подписки. Данные не изменены — обратитесь в службу поддержки.";
@@ -99,11 +100,19 @@ async function linkVerifiedEmailAccount(
   const identity = actor.telegramId
     ? { telegramId: actor.telegramId, telegramUsername: actor.telegramUsername }
     : null;
+  const targetAccountId = commands.providerAccountId(initialSession);
   const linked = await commands.withOwnerChangeFence({
     userIds: [actor.userId],
-    upstreamAccountIds: [commands.providerAccountId(initialSession), actor.upstreamAccountId ?? ""],
+    upstreamAccountIds: [targetAccountId, actor.upstreamAccountId ?? ""],
     emails: [email, actor.email],
     telegramIds: [actor.telegramId],
+    operationKey: paymentOwnerTransitionKey({
+      actorUserId: actor.userId,
+      sourceUpstreamAccountId: actor.upstreamAccountId ?? targetAccountId,
+      targetUpstreamAccountId: targetAccountId,
+      telegramId: actor.telegramId,
+    }),
+    targetUpstreamAccountId: targetAccountId,
     work: async () => {
       let providerSession = initialSession;
       let upstreamMerged = false;

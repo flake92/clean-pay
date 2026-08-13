@@ -19,6 +19,7 @@ import { authDebugLog } from "@/backend/observability/auth-debug-log";
 type Session = NonNullable<Awaited<ReturnType<typeof getCurrentSession>>>;
 type Authorized = Awaited<ReturnType<typeof getAuthorizedRemnashopTokens>>;
 type ProfileAuthorizer = () => Promise<Authorized>;
+type SessionReader = () => ReturnType<typeof getCurrentSession>;
 
 async function adapt<T>(work: () => Promise<T>): Promise<T> {
   try { return await work(); }
@@ -54,10 +55,16 @@ function adaptSession(session: Session): AuthProfileSession {
 
 export function createProductionAuthProfileGateway(
   authorize: ProfileAuthorizer = () => getAuthorizedRemnashopTokens({ allowUnverifiedEmail: true }),
+  readSession: SessionReader = getCurrentSession,
+  refreshAccess: () => Promise<unknown> = refreshCurrentAccessCookie,
+  confirmVerifiedEmail: (userId: string) => Promise<unknown> =
+    (userId) => prismaProfileAccountRepository.confirmVerifiedEmail(userId),
+  canReconcileVerifiedEmail = true,
 ): AuthProfileGateway {
   return {
+  canReconcileVerifiedEmail,
   async loadCurrentSession() {
-    const session = await adapt(() => getCurrentSession());
+    const session = await adapt(readSession);
     return session ? adaptSession(session) : null;
   },
   async authorizeCurrentSession() {
@@ -79,8 +86,8 @@ export function createProductionAuthProfileGateway(
       telegramId: profile.telegram_id?.toString() ?? null,
     };
   },
-  confirmVerifiedEmail: (userId) => adapt(() => prismaProfileAccountRepository.confirmVerifiedEmail(userId)),
-  async refreshCurrentAccess() { await adapt(() => refreshCurrentAccessCookie()); },
+  async confirmVerifiedEmail(userId) { await adapt(() => confirmVerifiedEmail(userId)); },
+  async refreshCurrentAccess() { await adapt(refreshAccess); },
   debug: authDebugLog,
   };
 }

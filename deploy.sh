@@ -215,6 +215,7 @@ configure() {
   prompt_value REMNAWAVE_API_BASE_URL 'Публичный HTTPS-адрес Remnawave, без пути' 'https://panel.example.com'
   replace_env CLEAN_PAY_READINESS_REMNAWAVE_URL "$(env_value REMNAWAVE_API_BASE_URL)"
   prompt_secret REMNAWAVE_TOKEN 'API-токен Remnawave'
+  prompt_value REMNAWAVE_SUBSCRIPTION_ORIGINS 'Разрешённые HTTPS origin ссылок подписки (через запятую)' 'https://sub.example.com'
 
   prompt_secret TELEGRAM_BOT_TOKEN 'Токен Telegram-бота'
   bot_token=$(env_value TELEGRAM_BOT_TOKEN)
@@ -248,7 +249,7 @@ configure() {
 }
 
 assert_required_env() {
-  required_names='APP_URL NEXT_PUBLIC_APP_URL REMNASHOP_API_BASE_URL REMNASHOP_ADMIN_API_BASE_URL REMNASHOP_API_KEY REMNASHOP_AUTH_SERVICE_KEY REMNAWAVE_API_BASE_URL REMNAWAVE_TOKEN TELEGRAM_OIDC_CLIENT_ID TELEGRAM_OIDC_CLIENT_SECRET TELEGRAM_BOT_TOKEN TURNSTILE_SITE_KEY TURNSTILE_SECRET_KEY'
+  required_names='APP_URL NEXT_PUBLIC_APP_URL REMNASHOP_API_BASE_URL REMNASHOP_ADMIN_API_BASE_URL REMNASHOP_API_KEY REMNASHOP_AUTH_SERVICE_KEY REMNAWAVE_API_BASE_URL REMNAWAVE_TOKEN REMNAWAVE_SUBSCRIPTION_ORIGINS TELEGRAM_OIDC_CLIENT_ID TELEGRAM_OIDC_CLIENT_SECRET TELEGRAM_BOT_TOKEN TURNSTILE_SITE_KEY TURNSTILE_SECRET_KEY'
   for name in $required_names; do
     value=$(env_value "$name")
     [ -n "$value" ] || die "$name is empty. Run ./deploy.sh setup."

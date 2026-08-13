@@ -283,6 +283,14 @@ describe("critical user-flow components", () => {
     );
   });
 
+  it("shows a resend warning when initial verification delivery failed", () => {
+    render(createElement(RegisterEmailConfirmForm, {
+      verificationDeliveryFailed: true,
+    }));
+
+    expect(screen.getByText(/Аккаунт создан, но письмо с кодом не удалось отправить/i)).toBeTruthy();
+  });
+
   it("handles resend and back-to-registration outcomes", async () => {
     mocks.requestEmailVerificationCodeAction.mockResolvedValue({
       ok: true,

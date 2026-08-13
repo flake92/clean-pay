@@ -33,6 +33,9 @@ describe("guided account setup redirects", () => {
     expect(registrationEmailVerificationPath(paymentPath)).toBe(
       "/register/verify-email?redirect_to=%2Fpayment%3Fplan%3Dpro%26duration%3D30%26gateway%3Dcard",
     );
+    expect(registrationEmailVerificationPath(paymentPath, { deliveryFailed: true })).toBe(
+      "/register/verify-email?delivery=failed&redirect_to=%2Fpayment%3Fplan%3Dpro%26duration%3D30%26gateway%3Dcard",
+    );
     expect(accountSetupCompletePath(paymentPath)).toBe(
       "/payment?plan=pro&duration=30&gateway=card&account_setup=account-ready",
     );

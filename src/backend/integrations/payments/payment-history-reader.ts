@@ -47,6 +47,8 @@ export function createProductionPaymentHistoryGateway(
   async loadRecent(userId, limit) {
     return (await prismaPaymentQueryRepository.findRecentRecords(userId, limit)).map(serializePaymentRecord);
   },
+  isSnapshotStale: (userId) =>
+    prismaPaymentQueryRepository.isHistorySnapshotStale(userId),
   logExactFailure(error, index) {
     logger.warn("payment_history_exact_sync_failed", { index, errorName: error instanceof Error ? error.name : "UnknownError" }, {
       category: "upstream", source: "payments.history", message: "Exact payment-history sync failed; continuing with page sync",

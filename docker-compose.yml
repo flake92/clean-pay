@@ -55,7 +55,7 @@ services:
   reconciliation-worker:
     profiles: ["reconciliation"]
     image: ${CLEAN_PAY_IMAGE:-clean-pay:local}
-    restart: "on-failure:5"
+    restart: "on-failure"
     command: ["node", "deploy/prod/reconcile-loop.mjs"]
     env_file: .env
     environment:

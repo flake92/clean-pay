@@ -39,14 +39,31 @@ function remnawaveEndpoint(path: string) {
 }
 
 function isValidSubscriptionUrl(value: unknown) {
-  if (typeof value !== "string" || !value) {
+  if (typeof value !== "string" || !value || value !== value.trim()) {
     return false;
   }
 
   try {
     const url = new URL(value);
+    const allowedOrigins = getEnv().remnawave.subscriptionOrigins;
+    const normalizedHostname = url.hostname.toLowerCase().replace(/^\[/, "").replace(/\]$/, "");
+    const octets = normalizedHostname.split(".");
+    const ipv4Loopback = octets.length === 4
+      && octets[0] === "127"
+      && octets.every((octet) => /^(?:0|[1-9]\d{0,2})$/.test(octet) && Number(octet) <= 255);
+    const developmentLoopbackHttp = process.env.NODE_ENV !== "production"
+      && url.protocol === "http:"
+      && (
+        normalizedHostname === "localhost"
+        || normalizedHostname.endsWith(".localhost")
+        || normalizedHostname === "::1"
+        || ipv4Loopback
+      );
 
-    return url.protocol === "https:" || url.protocol === "http:";
+    return !url.username
+      && !url.password
+      && allowedOrigins.includes(url.origin)
+      && (url.protocol === "https:" || developmentLoopbackHttp);
   } catch {
     return false;
   }
@@ -55,7 +72,7 @@ function isValidSubscriptionUrl(value: unknown) {
 function subscriptionUrl(user: RemnawaveUser | null | undefined) {
   const value = user?.subscriptionUrl ?? user?.subscription_url;
 
-  return isValidSubscriptionUrl(value) ? value : null;
+  return isValidSubscriptionUrl(value) ? new URL(value!).toString() : null;
 }
 
 function normalizedIdentity(value: string | number | null | undefined) {

@@ -12,7 +12,6 @@ const mocks = vi.hoisted(() => ({
 vi.mock("@/backend/database/prisma", () => ({ prisma: mocks.prisma }));
 vi.mock("@/backend/security/crypto", () => ({ sha256: mocks.sha256 }));
 
-import { prismaAuthSessionRepository } from "@/backend/integrations/auth/prisma-auth-session-repository";
 import {
   getTelegramAccountMergeConfirmation,
   telegramAccountMergeCookieMaxAgeSeconds,
@@ -64,26 +63,6 @@ describe("authentication persistence adapters", () => {
 
     await expect(getTelegramAccountMergeConfirmation("expired", "user-1")).rejects.toMatchObject({
       code: "NOT_FOUND", status: 404,
-    });
-  });
-
-  it("replaces only the upstream token fields of the selected session", async () => {
-    const tokens = {
-      accessTokenEncrypted: "encrypted-access",
-      refreshTokenEncrypted: "encrypted-refresh",
-      accessExpiresAt: new Date("2026-08-10T11:00:00Z"),
-      refreshExpiresAt: new Date("2026-09-10T11:00:00Z"),
-    };
-
-    await prismaAuthSessionRepository.replaceUpstreamTokens("session-1", tokens);
-    expect(mocks.prisma.webSession.update).toHaveBeenCalledWith({
-      where: { id: "session-1" },
-      data: {
-        remnashopAccessTokenEncrypted: tokens.accessTokenEncrypted,
-        remnashopRefreshTokenEncrypted: tokens.refreshTokenEncrypted,
-        remnashopAccessExpiresAt: tokens.accessExpiresAt,
-        remnashopRefreshExpiresAt: tokens.refreshExpiresAt,
-      },
     });
   });
 

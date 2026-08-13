@@ -46,6 +46,7 @@ const validEnv: Record<string, string> = {
   REMNASHOP_AUTH_SERVICE_KEY: secrets.remnashopAuth,
   REMNAWAVE_API_BASE_URL: "https://panel.clean-pay.dev",
   REMNAWAVE_TOKEN: secrets.remnawave,
+  REMNAWAVE_SUBSCRIPTION_ORIGINS: "https://subscription.clean-pay.dev",
   WEB_JWT_SECRET: secrets.webJwt,
   WEB_REFRESH_SECRET: secrets.webRefresh,
   AUDIT_IP_HASH_SECRET: secrets.audit,
@@ -425,6 +426,18 @@ describe("production env validator", () => {
     expect(runValidator({ REMNAWAVE_API_BASE_URL: "http://remnawave:3000" }).stderr).toContain(
       "REMNAWAVE_API_BASE_URL must be a valid https: URL",
     );
+    expect(runValidator({
+      REMNAWAVE_SUBSCRIPTION_ORIGINS: "http://subscription.clean-pay.dev",
+    }).stderr).toContain("REMNAWAVE_SUBSCRIPTION_ORIGINS[1] must be a valid https: URL");
+    expect(runValidator({
+      REMNAWAVE_SUBSCRIPTION_ORIGINS: "https://localhost:8443",
+    }).stderr).toContain("must not use localhost or a loopback address");
+    expect(runValidator({
+      REMNAWAVE_SUBSCRIPTION_ORIGINS: "https://user:password@subscription.clean-pay.dev",
+    }).stderr).toContain("must not include URL credentials");
+    expect(runValidator({
+      REMNAWAVE_SUBSCRIPTION_ORIGINS: "https://subscription.clean-pay.dev/path",
+    }).stderr).toContain("must contain only an origin");
     expect(runValidator({
       CLEAN_PAY_READINESS_REMNAWAVE_URL: "https://status.clean-pay.dev",
     }).stderr).toContain("must use the REMNAWAVE_API_BASE_URL origin");

@@ -72,6 +72,7 @@ import {
   createWebSessionForRemnashopUser,
   createWebSessionOnResponse,
   getCurrentSession,
+  getCurrentSessionReadOnly,
   getCurrentUser,
   getWebSessionUserIdFromAccessCookie,
   replaceWebSessionAfterPasswordChange,
@@ -238,6 +239,10 @@ describe("web session lifecycle", () => {
         remnashopRefreshTokenEncrypted: null,
         remnashopAccessExpiresAt: null,
         remnashopRefreshExpiresAt: null,
+        remnashopRefreshClaimTokenHash: null,
+        remnashopRefreshLeaseExpiresAt: null,
+        remnashopRefreshDispatchedAt: null,
+        remnashopRefreshRecoveryEncrypted: null,
       },
     });
     expect(
@@ -348,6 +353,54 @@ describe("web session lifecycle", () => {
     expect(nextRefresh).not.toBe("refresh-token");
   });
 
+  it("keeps the Server Component session reader free of refresh side effects", async () => {
+    state.cookies.set("clean_pay_refresh", "refresh-token");
+
+    await expect(getCurrentSessionReadOnly()).resolves.toBeNull();
+
+    expect(mocks.prisma.$queryRaw).not.toHaveBeenCalled();
+    expect(mocks.prisma.webRefreshToken.create).not.toHaveBeenCalled();
+    expect(state.setCalls).toEqual([]);
+    expect(state.deleteCalls).toEqual([]);
+
+    state.cookies.set("clean_pay_access", accessToken({
+      sid: "session-1",
+      uid: "user-1",
+      exp: Math.floor(Date.now() / 1000) + 60,
+    }));
+    mocks.prisma.webSession.findFirst.mockResolvedValueOnce(session);
+
+    await expect(getCurrentSessionReadOnly()).resolves.toEqual(session);
+    expect(state.setCalls).toEqual([]);
+    expect(state.deleteCalls).toEqual([]);
+  });
+
+  it("treats a signed but database-revoked access session as unauthorized without rotating refresh", async () => {
+    state.cookies.set("clean_pay_access", accessToken({
+      sid: "revoked-session",
+      uid: "user-1",
+      exp: Math.floor(Date.now() / 1000) + 60,
+    }));
+    state.cookies.set("clean_pay_refresh", "revoked-refresh-candidate");
+    mocks.prisma.webSession.findFirst.mockResolvedValueOnce(null);
+
+    await expect(getCurrentSessionReadOnly()).resolves.toBeNull();
+
+    expect(mocks.prisma.webSession.findFirst).toHaveBeenCalledWith({
+      where: {
+        id: "revoked-session",
+        userId: "user-1",
+        revokedAt: null,
+        accessTokenExpiresAt: { gt: expect.any(Date) },
+      },
+      include: { user: true },
+    });
+    expect(mocks.prisma.$queryRaw).not.toHaveBeenCalled();
+    expect(mocks.prisma.webRefreshToken.create).not.toHaveBeenCalled();
+    expect(state.setCalls).toEqual([]);
+    expect(state.deleteCalls).toEqual([]);
+  });
+
   it("clears access and refresh cookies after a definitive refresh miss", async () => {
     state.cookies.set("clean_pay_access", "expired-or-invalid-access");
     state.cookies.set("clean_pay_refresh", "unknown-refresh");
@@ -447,6 +500,20 @@ describe("web session lifecycle", () => {
       severity: "WARN",
       userId: "user-1",
     }));
+    expect(mocks.prisma.webSession.update).toHaveBeenCalledWith({
+      where: { id: "session-1" },
+      data: expect.objectContaining({
+        revokedAt: expect.any(Date),
+        remnashopAccessTokenEncrypted: null,
+        remnashopRefreshTokenEncrypted: null,
+        remnashopAccessExpiresAt: null,
+        remnashopRefreshExpiresAt: null,
+        remnashopRefreshClaimTokenHash: null,
+        remnashopRefreshLeaseExpiresAt: null,
+        remnashopRefreshDispatchedAt: null,
+        remnashopRefreshRecoveryEncrypted: null,
+      }),
+    });
   });
 
   it("sets cookies on explicit NextResponse and can refresh access cookie", async () => {
@@ -512,6 +579,10 @@ describe("web session lifecycle", () => {
         remnashopRefreshTokenEncrypted: null,
         remnashopAccessExpiresAt: null,
         remnashopRefreshExpiresAt: null,
+        remnashopRefreshClaimTokenHash: null,
+        remnashopRefreshLeaseExpiresAt: null,
+        remnashopRefreshDispatchedAt: null,
+        remnashopRefreshRecoveryEncrypted: null,
       },
     });
     const refreshCookie = state.setCalls.find(

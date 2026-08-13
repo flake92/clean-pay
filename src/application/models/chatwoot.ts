@@ -11,3 +11,13 @@ export type ChatwootWidgetConfig = {
   websiteToken: string;
   user: ChatwootWidgetUser;
 };
+
+export type ChatwootManagedLabel = {
+  name: "payment_problem" | "subscription_expired";
+  enabled: boolean;
+};
+
+export type ChatwootSupportContext = {
+  customAttributes: Record<string, string>;
+  managedLabels: ChatwootManagedLabel[];
+};
