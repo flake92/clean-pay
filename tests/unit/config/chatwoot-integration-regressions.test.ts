@@ -54,4 +54,22 @@ describe("Chatwoot integration boundaries", () => {
     expect(proxy).toContain("process.env.CHATWOOT_HMAC_TOKEN?.trim()");
     expect(proxy).toContain("buildContentSecurityPolicy");
   });
+
+  it("loads extra support context through an authenticated server action", () => {
+    const component = source("src/frontend/components/chatwoot-widget.tsx");
+    const action = source("src/app/actions/chatwoot.ts");
+    const adapter = source("src/backend/integrations/support/chatwoot-context-gateway.ts");
+
+    expect(component).toContain("loadChatwootSupportContextCached(");
+    expect(component).toContain(
+      "loadChatwootSupportContextAction(config.user.identifier)",
+    );
+    expect(component).not.toMatch(/\bfetch\s*\(/);
+    expect(action).toContain("loadChatwootSupportContext(");
+    expect(action).toContain("productionChatwootContextGateway,");
+    expect(action).toContain("expectedUserId,");
+    expect(adapter).toContain('where: { userId }');
+    expect(adapter).not.toContain("paymentUrl");
+    expect(adapter).not.toContain("subscription.url");
+  });
 });

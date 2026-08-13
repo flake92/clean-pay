@@ -94,6 +94,8 @@ export interface TelegramCallbackGateway {
     userIds: string[];
     upstreamAccountIds: string[];
     telegramIds: string[];
+    operationKey: string;
+    targetUpstreamAccountId: string;
     work: () => Promise<T>;
   }): Promise<T>;
   logAttachFailure(error: unknown, telegramId: string): void;

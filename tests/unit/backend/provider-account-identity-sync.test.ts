@@ -4,6 +4,7 @@ const mocks = vi.hoisted(() => ({
   getRemnashopMe: vi.fn(),
   remnashopRequest: vi.fn(),
   synchronizeRemnawaveUserIdentity: vi.fn(),
+  markPaymentOwnerChangeUpstreamMutationStarted: vi.fn(),
 }));
 
 vi.mock("@/backend/integrations/remnashop/client", () => ({
@@ -12,6 +13,10 @@ vi.mock("@/backend/integrations/remnashop/client", () => ({
 }));
 vi.mock("@/backend/integrations/remnawave/client", () => ({
   synchronizeRemnawaveUserIdentity: mocks.synchronizeRemnawaveUserIdentity,
+}));
+vi.mock("@/backend/integrations/payments/payment-user-merge-service", () => ({
+  markPaymentOwnerChangeUpstreamMutationStarted:
+    mocks.markPaymentOwnerChangeUpstreamMutationStarted,
 }));
 
 import { synchronizeProviderAccountIdentity } from "@/backend/integrations/auth/provider-account-identity-sync";

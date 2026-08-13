@@ -6,6 +6,7 @@ import {
   ChatwootWidget,
 } from "@/frontend/components/chatwoot-widget";
 import Layout from "@/frontend/layout/layout";
+import { sessionRefreshPath } from "@/shared/auth/session-navigation";
 import { redirect } from "next/navigation";
 
 export async function AppShell({
@@ -16,7 +17,9 @@ export async function AppShell({
   requireAuth?: boolean;
 }) {
   const shell = await loadNavigationShell(requestAuthProfileGateway);
-  if (requireAuth && !shell.navigation.authenticated) redirect("/login");
+  if (requireAuth && !shell.navigation.authenticated) {
+    redirect(sessionRefreshPath("/cabinet"));
+  }
   const chatwoot = createChatwootWidgetConfig(shell.supportIdentity);
 
   return (

@@ -6,6 +6,7 @@ const runner = readFileSync("scripts/e2e-devcontainer.mjs", "utf8");
 const shellRunner = readFileSync("scripts/e2e-devcontainer.sh", "utf8");
 const compose = readFileSync(".devcontainer/docker-compose.yml", "utf8");
 const ciWorkflow = readFileSync(".github/workflows/ci.yml", "utf8");
+const dependabot = readFileSync(".github/dependabot.yml", "utf8");
 const remnashopRevision = "1262f98cd3904ea0e4ddbe4628ceecf56c5f598b";
 
 const hostPortContract = [
@@ -90,17 +91,36 @@ describe("devcontainer e2e runner readiness", () => {
     expect(compose).not.toContain("b9da68a651e9ab0b7ed52d030e13754311614759");
   });
 
-  it("keeps actionable E2E diagnostics and current GitHub action runtimes in CI", () => {
+  it("keeps actionable E2E diagnostics and immutable GitHub action runtimes in CI", () => {
     expect(ciWorkflow).toContain('CLEAN_PAY_E2E_DIAGNOSTICS: "1"');
     expect(ciWorkflow).not.toContain('CLEAN_PAY_E2E_DIAGNOSTICS: "0"');
-    expect(ciWorkflow).not.toMatch(/actions\/(?:checkout|setup-node)@v4/);
-    expect(ciWorkflow).toContain("actions/checkout@v5");
-    expect(ciWorkflow).toContain("actions/setup-node@v5");
+    const actionReferences = [
+      ...ciWorkflow.matchAll(/^\s*(?:-\s*)?uses:\s+([^\s#]+)(?:\s+#\s*(\S.*))?$/gm),
+    ];
+
+    expect(actionReferences.length).toBeGreaterThan(0);
+    for (const [, reference, versionComment] of actionReferences) {
+      expect(reference).toMatch(/^[^@\s]+@[0-9a-f]{40}$/);
+      expect(versionComment).toMatch(/^v\d/);
+    }
+
+    expect(ciWorkflow).toContain(
+      "actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0",
+    );
+    expect(ciWorkflow).toContain(
+      "actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0",
+    );
     expect(ciWorkflow.match(/node-version-file: \.node-version/g)).toHaveLength(3);
     expect(ciWorkflow).toContain("workflow_dispatch:");
     expect(ciWorkflow).toContain("sh -n deploy.sh start.sh scripts/*.sh deploy/prod/*.sh");
     expect(ciWorkflow).toContain("docker compose --env-file deploy/prod/.env");
     expect(ciWorkflow).toContain("timeout --signal=TERM --kill-after=30s 12m npm run test:e2e");
+  });
+
+  it("keeps pinned GitHub Actions current through Dependabot", () => {
+    expect(dependabot).toContain("package-ecosystem: github-actions");
+    expect(dependabot).toContain('directory: "/"');
+    expect(dependabot).toContain("interval: weekly");
   });
 
   it("pre-creates the Next.js build directory for the unprivileged container user", () => {

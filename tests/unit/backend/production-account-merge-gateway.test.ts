@@ -3,12 +3,14 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   cookieGet: vi.fn(), getCurrentSession: vi.fn(), refreshCurrentAccessCookie: vi.fn(),
   assertRateLimit: vi.fn(), auditLog: vi.fn(), withPaymentOwnerChangeFence: vi.fn(),
+  markPaymentOwnerChangeUpstreamMutationStarted: vi.fn(),
+  reconcileCompletedPaymentOwnerChange: vi.fn(),
   remnashopAuthTelegramIdentity: vi.fn(), getRemnashopMe: vi.fn(), getRemnashopUserIdFromAccessToken: vi.fn(),
   remnashopMergeUsers: vi.fn(), remnashopRequest: vi.fn(), linkCurrentUserToRemnashopAuth: vi.fn(),
   synchronizeProviderAccountIdentity: vi.fn(),
   prisma: {
     $transaction: vi.fn(), accountMergeConfirmation: { findFirst: vi.fn(), updateMany: vi.fn() },
-    webUser: { findUnique: vi.fn() }, $queryRaw: vi.fn(),
+    webUser: { findUnique: vi.fn(), findFirst: vi.fn() }, $queryRaw: vi.fn(),
   },
 }));
 
@@ -19,7 +21,11 @@ vi.mock("@/backend/integrations/sessions/web-session-service", () => ({
 }));
 vi.mock("@/backend/limits/rate-limit", () => ({ assertRateLimit: mocks.assertRateLimit }));
 vi.mock("@/backend/observability/audit", () => ({ auditLog: mocks.auditLog }));
-vi.mock("@/backend/integrations/payments/payment-user-merge-service", () => ({ withPaymentOwnerChangeFence: mocks.withPaymentOwnerChangeFence }));
+vi.mock("@/backend/integrations/payments/payment-user-merge-service", () => ({
+  withPaymentOwnerChangeFence: mocks.withPaymentOwnerChangeFence,
+  markPaymentOwnerChangeUpstreamMutationStarted: mocks.markPaymentOwnerChangeUpstreamMutationStarted,
+  reconcileCompletedPaymentOwnerChange: mocks.reconcileCompletedPaymentOwnerChange,
+}));
 vi.mock("@/backend/integrations/remnashop/client", () => ({
   remnashopAuthTelegramIdentity: mocks.remnashopAuthTelegramIdentity,
   getRemnashopMe: mocks.getRemnashopMe,
@@ -87,6 +93,40 @@ describe("production Telegram account merge gateway", () => {
     expect(mocks.linkCurrentUserToRemnashopAuth).toHaveBeenCalledWith(expect.objectContaining({ paymentOwnerFenceHeld: true }));
   });
 
+  it("does not steal an expired confirmation lease while its owner fence is active", async () => {
+    const confirmation = await gateway.loadConfirmation("user-1");
+    mocks.prisma.webUser.findUnique.mockResolvedValueOnce({
+      paymentOwnerChangeTokenHash: "active-owner-change",
+      paymentOwnerChangeLeaseExpiresAt: new Date("2026-01-01T00:01:00.000Z"),
+    });
+
+    await expect(
+      gateway.claim(confirmation, new Date("2026-01-01T00:00:00.000Z")),
+    ).resolves.toBe(false);
+    expect(mocks.prisma.accountMergeConfirmation.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("rejects stale confirmation work before any provider mutation", async () => {
+    const confirmation = await gateway.loadConfirmation("user-1");
+    await expect(
+      gateway.claim(confirmation, new Date("2098-01-01T00:00:00.000Z")),
+    ).resolves.toBe(true);
+    mocks.prisma.accountMergeConfirmation.findFirst.mockResolvedValueOnce(null);
+    mocks.withPaymentOwnerChangeFence.mockImplementationOnce(async (input: {
+      claimGuard: (tx: typeof mocks.prisma) => Promise<void>;
+      work: () => Promise<unknown>;
+    }) => {
+      await input.claimGuard(mocks.prisma);
+      return input.work();
+    });
+    const work = vi.fn();
+
+    await expect(
+      gateway.withOwnerChangeFence(confirmation, work),
+    ).rejects.toMatchObject({ code: "CONFLICT" });
+    expect(work).not.toHaveBeenCalled();
+  });
+
   it("fails closed for missing sessions, bootstrap sessions and absent confirmations", async () => {
     mocks.getCurrentSession.mockResolvedValueOnce(null);
     await expect(gateway.loadActor()).resolves.toBeNull();
@@ -125,6 +165,8 @@ describe("production Telegram account merge gateway", () => {
 
   it("reports lost completion and cancellation races and releases terminal claims", async () => {
     const confirmation = await gateway.loadConfirmation("user-1");
+    (confirmation.context as { claimLeaseExpiresAt?: Date }).claimLeaseExpiresAt =
+      new Date("2026-01-01T00:02:00.000Z");
     mocks.prisma.accountMergeConfirmation.updateMany.mockResolvedValueOnce({ count: 0 });
     await expect(gateway.complete(confirmation)).resolves.toBe(false);
     mocks.prisma.accountMergeConfirmation.updateMany.mockResolvedValueOnce({ count: 0 });

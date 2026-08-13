@@ -17,6 +17,10 @@ export function revokedWebSessionData(now: Date) {
     remnashopRefreshTokenEncrypted: null,
     remnashopAccessExpiresAt: null,
     remnashopRefreshExpiresAt: null,
+    remnashopRefreshClaimTokenHash: null,
+    remnashopRefreshLeaseExpiresAt: null,
+    remnashopRefreshDispatchedAt: null,
+    remnashopRefreshRecoveryEncrypted: null,
   };
 }
 
@@ -38,6 +42,22 @@ export async function revokeAllWebSessionsForUser(
 ) {
   return client.webSession.updateMany({
     where: { userId, revokedAt: null },
+    data: revokedWebSessionData(now),
+  });
+}
+
+export async function revokeWebSessionById(
+  sessionId: string,
+  userId?: string,
+) {
+  const now = new Date();
+
+  return prisma.webSession.updateMany({
+    where: {
+      id: sessionId,
+      ...(userId ? { userId } : {}),
+      revokedAt: null,
+    },
     data: revokedWebSessionData(now),
   });
 }

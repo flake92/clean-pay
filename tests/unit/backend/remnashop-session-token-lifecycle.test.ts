@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
     $queryRaw: vi.fn(),
     webSession: {
       findMany: vi.fn(),
+      findFirst: vi.fn(),
       updateMany: vi.fn(),
     },
   },
@@ -20,7 +21,10 @@ vi.mock("@/backend/observability/auth-debug-log", () => ({
 }));
 
 import { acquireRemnashopTokensForSession } from "@/backend/integrations/remnashop/session-token-lifecycle";
-import { protectRemnashopToken } from "@/backend/integrations/remnashop/token-protection";
+import {
+  protectRemnashopToken,
+  revealRemnashopToken,
+} from "@/backend/integrations/remnashop/token-protection";
 
 const future = new Date("2099-01-01T00:00:00.000Z");
 
@@ -49,6 +53,11 @@ function localSession({
       : null,
     remnashopAccessExpiresAt: accessExpiresAt,
     remnashopRefreshExpiresAt: refreshExpiresAt,
+    remnashopRefreshClaimTokenHash: null,
+    remnashopRefreshLeaseExpiresAt: null,
+    remnashopRefreshDispatchedAt: null,
+    remnashopRefreshRecoveryEncrypted: null,
+    remnashopRefreshAttemptCount: 0,
     authMethod: "EMAIL",
     assuranceLevel: "FULL",
     userAgent: "vitest",
@@ -68,6 +77,19 @@ function localSession({
 }
 
 describe("Remnashop session token lifecycle", () => {
+  function refreshResponse() {
+    return {
+      data: {
+        expires_at: "2099-02-01T00:00:00.000Z",
+        refresh_expires_at: "2099-03-01T00:00:00.000Z",
+      },
+      cookies: {
+        accessToken: "new-access",
+        refreshToken: "new-refresh",
+      },
+    };
+  }
+
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.prisma.$transaction.mockImplementation(
@@ -130,6 +152,10 @@ describe("Remnashop session token lifecycle", () => {
         remnashopRefreshTokenEncrypted: null,
         remnashopAccessExpiresAt: null,
         remnashopRefreshExpiresAt: null,
+        remnashopRefreshClaimTokenHash: null,
+        remnashopRefreshLeaseExpiresAt: null,
+        remnashopRefreshDispatchedAt: null,
+        remnashopRefreshRecoveryEncrypted: null,
       },
     });
     const clearedIds = mocks.tx.webSession.updateMany.mock.calls[0]?.[0]?.where
@@ -142,11 +168,15 @@ describe("Remnashop session token lifecycle", () => {
         remnashopRefreshTokenEncrypted: owner.remnashopRefreshTokenEncrypted,
         remnashopAccessExpiresAt: future,
         remnashopRefreshExpiresAt: future,
+        remnashopRefreshClaimTokenHash: null,
+        remnashopRefreshLeaseExpiresAt: null,
+        remnashopRefreshDispatchedAt: null,
+        remnashopRefreshRecoveryEncrypted: null,
       },
     });
   });
 
-  it("refreshes an expiring bundle once while its owner rows are locked", async () => {
+  it("commits the claim before refreshing, then stores recovery before finalizing", async () => {
     const target = localSession({
       id: "target",
       accessToken: "old-access",
@@ -155,15 +185,54 @@ describe("Remnashop session token lifecycle", () => {
     });
     mocks.tx.$queryRaw.mockResolvedValue([{ id: "target" }]);
     mocks.tx.webSession.findMany.mockResolvedValue([target]);
-    const refresh = vi.fn().mockResolvedValue({
-      data: {
-        expires_at: "2099-02-01T00:00:00.000Z",
-        refresh_expires_at: "2099-03-01T00:00:00.000Z",
+    const events: string[] = [];
+    let transactionNumber = 0;
+    mocks.prisma.$transaction.mockImplementation(
+      async (callback: (tx: typeof mocks.tx) => unknown) => {
+        transactionNumber += 1;
+        const current = transactionNumber;
+        events.push(`tx-${current}-start`);
+        const result = await callback(mocks.tx);
+        events.push(`tx-${current}-commit`);
+        return result;
       },
-      cookies: {
-        accessToken: "new-access",
-        refreshToken: "new-refresh",
-      },
+    );
+    const claimed = {
+      ...target,
+      remnashopRefreshClaimTokenHash: "claim-hash",
+      remnashopRefreshLeaseExpiresAt: new Date(Date.now() + 60_000),
+    };
+    let recoveryEncrypted: string | null = null;
+    let claimHash: string | null = null;
+    mocks.tx.webSession.updateMany.mockImplementation(async (input) => {
+      if (
+        input.data?.remnashopRefreshClaimTokenHash &&
+        !input.data?.remnashopRefreshRecoveryEncrypted
+      ) {
+        claimHash = input.data.remnashopRefreshClaimTokenHash;
+      }
+      if (input.data?.remnashopRefreshRecoveryEncrypted) {
+        events.push("recovery-stored");
+        recoveryEncrypted = input.data.remnashopRefreshRecoveryEncrypted;
+      }
+      if (input.data?.remnashopRefreshDispatchedAt) {
+        events.push("dispatch-marked");
+      }
+      return { count: 1 };
+    });
+    mocks.tx.webSession.findFirst.mockImplementation(async () => {
+      if (recoveryEncrypted) {
+        return {
+          ...claimed,
+          remnashopRefreshClaimTokenHash: claimHash,
+          remnashopRefreshRecoveryEncrypted: recoveryEncrypted,
+        };
+      }
+      return claimed;
+    });
+    const refresh = vi.fn().mockImplementation(async () => {
+      events.push("upstream-refresh");
+      return refreshResponse();
     });
 
     await expect(
@@ -179,25 +248,51 @@ describe("Remnashop session token lifecycle", () => {
 
     expect(refresh).toHaveBeenCalledTimes(1);
     expect(refresh).toHaveBeenCalledWith("old-refresh");
-    expect(mocks.tx.webSession.updateMany).toHaveBeenCalledWith({
-      where: {
-        id: "target",
-        userId: "user-1",
-        revokedAt: null,
-        remnashopRefreshTokenEncrypted:
-          target.remnashopRefreshTokenEncrypted,
-      },
-      data: expect.objectContaining({
-        remnashopAccessTokenEncrypted: expect.any(String),
-        remnashopRefreshTokenEncrypted: expect.any(String),
-        remnashopAccessExpiresAt: new Date("2099-02-01T00:00:00.000Z"),
-        remnashopRefreshExpiresAt: new Date("2099-03-01T00:00:00.000Z"),
-      }),
-    });
-    expect(mocks.prisma.$transaction).toHaveBeenCalledWith(
-      expect.any(Function),
-      { maxWait: 5_000, timeout: 20_000 },
+    expect(events.indexOf("tx-1-commit")).toBeLessThan(
+      events.indexOf("dispatch-marked"),
     );
+    expect(events.indexOf("dispatch-marked")).toBeLessThan(
+      events.indexOf("tx-2-commit"),
+    );
+    expect(events.indexOf("tx-2-commit")).toBeLessThan(
+      events.indexOf("upstream-refresh"),
+    );
+    expect(events.indexOf("upstream-refresh")).toBeLessThan(
+      events.indexOf("recovery-stored"),
+    );
+    expect(mocks.prisma.$transaction).toHaveBeenCalledTimes(4);
+    for (const call of mocks.prisma.$transaction.mock.calls) {
+      expect(call[1]).toEqual({ maxWait: 5_000, timeout: 10_000 });
+    }
+    const recoveryWrite = mocks.tx.webSession.updateMany.mock.calls.find(
+      ([input]) => input.data?.remnashopRefreshRecoveryEncrypted,
+    )?.[0];
+    const dispatchWrite = mocks.tx.webSession.updateMany.mock.calls.find(
+      ([input]) => input.data?.remnashopRefreshDispatchedAt,
+    )?.[0];
+    expect(recoveryWrite?.where.remnashopRefreshDispatchedAt).toEqual(
+      dispatchWrite?.data.remnashopRefreshDispatchedAt,
+    );
+    const recoveryPayload = recoveryWrite?.data
+      .remnashopRefreshRecoveryEncrypted as string;
+    expect(JSON.parse(revealRemnashopToken(recoveryPayload))).toMatchObject({
+      version: 1,
+      accessToken: "new-access",
+      refreshToken: "new-refresh",
+    });
+    const finalWrite = mocks.tx.webSession.updateMany.mock.calls.find(
+      ([input]) => input.data?.remnashopAccessTokenEncrypted,
+    )?.[0];
+    expect(finalWrite?.data).toMatchObject({
+      remnashopAccessTokenEncrypted: expect.any(String),
+      remnashopRefreshTokenEncrypted: expect.any(String),
+      remnashopAccessExpiresAt: new Date("2099-02-01T00:00:00.000Z"),
+      remnashopRefreshExpiresAt: new Date("2099-03-01T00:00:00.000Z"),
+      remnashopRefreshClaimTokenHash: null,
+      remnashopRefreshLeaseExpiresAt: null,
+      remnashopRefreshDispatchedAt: null,
+      remnashopRefreshRecoveryEncrypted: null,
+    });
   });
 
   it("clears unusable token material without attempting an expired refresh", async () => {
@@ -227,8 +322,295 @@ describe("Remnashop session token lifecycle", () => {
         remnashopRefreshTokenEncrypted: null,
         remnashopAccessExpiresAt: null,
         remnashopRefreshExpiresAt: null,
+        remnashopRefreshClaimTokenHash: null,
+        remnashopRefreshLeaseExpiresAt: null,
+        remnashopRefreshDispatchedAt: null,
+        remnashopRefreshRecoveryEncrypted: null,
       },
     });
+  });
+
+  it("returns retryable contention without consuming a refresh token while a lease is active", async () => {
+    const target = {
+      ...localSession({
+        id: "target",
+        accessToken: "old-access",
+        refreshToken: "old-refresh",
+        accessExpiresAt: new Date(Date.now() - 1_000),
+      }),
+      remnashopRefreshClaimTokenHash: "other-claim",
+      remnashopRefreshLeaseExpiresAt: new Date(Date.now() + 45_000),
+    };
+    mocks.tx.$queryRaw.mockResolvedValue([{ id: "target" }]);
+    mocks.tx.webSession.findMany.mockResolvedValue([target]);
+    const refresh = vi.fn();
+
+    await expect(
+      acquireRemnashopTokensForSession({ session: target, refresh }),
+    ).rejects.toMatchObject({
+      code: "UPSTREAM_UNAVAILABLE",
+      status: 503,
+      debug: { retryAfterSeconds: 5 },
+    });
+
+    expect(refresh).not.toHaveBeenCalled();
+    expect(mocks.tx.webSession.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("takes over an expired lease with a new fenced claim", async () => {
+    const target = {
+      ...localSession({
+        id: "target",
+        accessToken: "old-access",
+        refreshToken: "old-refresh",
+        accessExpiresAt: new Date(Date.now() - 1_000),
+      }),
+      remnashopRefreshClaimTokenHash: "expired-claim",
+      remnashopRefreshLeaseExpiresAt: new Date(Date.now() - 1_000),
+      remnashopRefreshAttemptCount: 4,
+    };
+    mocks.tx.$queryRaw.mockResolvedValue([{ id: "target" }]);
+    mocks.tx.webSession.findMany.mockResolvedValue([target]);
+    let recoveryEncrypted: string | null = null;
+    mocks.tx.webSession.updateMany.mockImplementation(async (input) => {
+      if (input.data?.remnashopRefreshRecoveryEncrypted) {
+        recoveryEncrypted = input.data.remnashopRefreshRecoveryEncrypted;
+      }
+      return { count: 1 };
+    });
+    mocks.tx.webSession.findFirst.mockImplementation(async () => ({
+      ...target,
+      remnashopRefreshClaimTokenHash:
+        mocks.tx.webSession.updateMany.mock.calls[0]?.[0]?.data
+          ?.remnashopRefreshClaimTokenHash,
+      remnashopRefreshRecoveryEncrypted: recoveryEncrypted,
+    }));
+    const refresh = vi.fn().mockResolvedValue(refreshResponse());
+
+    await expect(
+      acquireRemnashopTokensForSession({ session: target, refresh }),
+    ).resolves.toMatchObject({ source: "refresh" });
+
+    expect(refresh).toHaveBeenCalledOnce();
+    expect(mocks.tx.webSession.updateMany).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        where: expect.objectContaining({
+          OR: expect.arrayContaining([
+            { remnashopRefreshLeaseExpiresAt: { lte: expect.any(Date) } },
+          ]),
+        }),
+        data: expect.objectContaining({
+          remnashopRefreshClaimTokenHash: expect.not.stringMatching(
+            /^expired-claim$/,
+          ),
+          remnashopRefreshAttemptCount: { increment: 1 },
+        }),
+      }),
+    );
+  });
+
+  it("never replays a one-time token after a dispatched claim expires without recovery", async () => {
+    const target = {
+      ...localSession({
+        id: "target",
+        accessToken: "old-access",
+        refreshToken: "consumed-refresh",
+        accessExpiresAt: new Date(Date.now() - 1_000),
+      }),
+      remnashopRefreshClaimTokenHash: "expired-dispatched-claim",
+      remnashopRefreshLeaseExpiresAt: new Date(Date.now() - 1_000),
+      remnashopRefreshDispatchedAt: new Date(Date.now() - 2_000),
+    };
+    mocks.tx.$queryRaw.mockResolvedValue([{ id: "target" }]);
+    mocks.tx.webSession.findMany.mockResolvedValue([target]);
+    const refresh = vi.fn();
+
+    await expect(
+      acquireRemnashopTokensForSession({ session: target, refresh }),
+    ).resolves.toBeNull();
+
+    expect(refresh).not.toHaveBeenCalled();
+    expect(mocks.tx.webSession.updateMany).toHaveBeenCalledTimes(1);
+    expect(mocks.tx.webSession.updateMany).toHaveBeenCalledWith({
+      where: expect.objectContaining({
+        id: { in: ["target"] },
+        userId: "user-1",
+        remnashopRefreshDispatchedAt: { not: null },
+        remnashopRefreshRecoveryEncrypted: null,
+      }),
+      data: expect.objectContaining({
+        remnashopAccessTokenEncrypted: null,
+        remnashopRefreshTokenEncrypted: null,
+        remnashopRefreshClaimTokenHash: null,
+        remnashopRefreshLeaseExpiresAt: null,
+        remnashopRefreshDispatchedAt: null,
+        remnashopRefreshRecoveryEncrypted: null,
+      }),
+    });
+  });
+
+  it("promotes an encrypted recovery without calling the provider again", async () => {
+    const recovery = {
+      version: 1,
+      accessToken: "recovered-access",
+      refreshToken: "recovered-refresh",
+      accessExpiresAt: "2099-02-01T00:00:00.000Z",
+      refreshExpiresAt: "2099-03-01T00:00:00.000Z",
+    };
+    const target = {
+      ...localSession({
+        id: "target",
+        accessToken: "old-access",
+        refreshToken: "old-refresh",
+        accessExpiresAt: new Date(Date.now() - 1_000),
+      }),
+      remnashopRefreshClaimTokenHash: "claim-hash",
+      remnashopRefreshLeaseExpiresAt: new Date(Date.now() - 1_000),
+      remnashopRefreshRecoveryEncrypted: protectRemnashopToken(
+        JSON.stringify(recovery),
+      ),
+    };
+    mocks.tx.$queryRaw.mockResolvedValue([{ id: "target" }]);
+    mocks.tx.webSession.findMany.mockResolvedValue([target]);
+    const refresh = vi.fn();
+
+    await expect(
+      acquireRemnashopTokensForSession({ session: target, refresh }),
+    ).resolves.toMatchObject({
+      accessToken: "recovered-access",
+      refreshToken: "recovered-refresh",
+      source: "stored",
+    });
+
+    expect(refresh).not.toHaveBeenCalled();
+    expect(mocks.tx.webSession.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          remnashopRefreshRecoveryEncrypted:
+            target.remnashopRefreshRecoveryEncrypted,
+        }),
+        data: expect.objectContaining({
+          remnashopRefreshClaimTokenHash: null,
+          remnashopRefreshLeaseExpiresAt: null,
+          remnashopRefreshDispatchedAt: null,
+          remnashopRefreshRecoveryEncrypted: null,
+        }),
+      }),
+    );
+  });
+
+  it("retries transient recovery storage and finalization failures without another provider call", async () => {
+    const target = localSession({
+      id: "target",
+      accessToken: "old-access",
+      refreshToken: "old-refresh",
+      accessExpiresAt: new Date(Date.now() - 1_000),
+    });
+    mocks.tx.$queryRaw.mockResolvedValue([{ id: "target" }]);
+    mocks.tx.webSession.findMany.mockResolvedValue([target]);
+    const refresh = vi.fn().mockResolvedValue(refreshResponse());
+    let call = 0;
+    let recoveryEncrypted: string | null = null;
+    let claimHash: string | null = null;
+    mocks.tx.webSession.updateMany.mockImplementation(async (input) => {
+      call += 1;
+
+      if (call === 1) {
+        claimHash = input.data.remnashopRefreshClaimTokenHash;
+        return { count: 1 };
+      }
+
+      if (input.data?.remnashopRefreshRecoveryEncrypted) {
+        if (!recoveryEncrypted) {
+          recoveryEncrypted = input.data.remnashopRefreshRecoveryEncrypted;
+          throw new Error("transient recovery commit failure");
+        }
+        return { count: 1 };
+      }
+
+      if (input.data?.remnashopAccessTokenEncrypted && call < 5) {
+        throw new Error("transient finalization commit failure");
+      }
+
+      return { count: 1 };
+    });
+    mocks.tx.webSession.findFirst.mockImplementation(async () => ({
+      ...target,
+      remnashopRefreshClaimTokenHash: claimHash,
+      remnashopRefreshLeaseExpiresAt: new Date(Date.now() + 60_000),
+      remnashopRefreshRecoveryEncrypted: recoveryEncrypted,
+    }));
+
+    await expect(
+      acquireRemnashopTokensForSession({ session: target, refresh }),
+    ).resolves.toMatchObject({
+      accessToken: "new-access",
+      refreshToken: "new-refresh",
+      source: "refresh",
+    });
+
+    expect(refresh).toHaveBeenCalledOnce();
+    expect(mocks.prisma.$transaction.mock.calls.length).toBeGreaterThanOrEqual(5);
+  });
+
+  it("keeps a failed upstream claim fenced until its lease expires", async () => {
+    const target = localSession({
+      id: "target",
+      accessToken: "old-access",
+      refreshToken: "old-refresh",
+      accessExpiresAt: new Date(Date.now() - 1_000),
+    });
+    mocks.tx.$queryRaw.mockResolvedValue([{ id: "target" }]);
+    mocks.tx.webSession.findMany.mockResolvedValue([target]);
+    const refresh = vi.fn().mockRejectedValue(new Error("upstream failed"));
+
+    await expect(
+      acquireRemnashopTokensForSession({ session: target, refresh }),
+    ).rejects.toThrow("upstream failed");
+
+    expect(refresh).toHaveBeenCalledOnce();
+    expect(mocks.tx.webSession.updateMany).toHaveBeenCalledTimes(2);
+    expect(mocks.tx.webSession.updateMany).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        data: expect.objectContaining({
+          remnashopRefreshClaimTokenHash: expect.any(String),
+          remnashopRefreshLeaseExpiresAt: expect.any(Date),
+        }),
+      }),
+    );
+    expect(mocks.tx.webSession.updateMany).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        where: expect.objectContaining({
+          remnashopRefreshClaimTokenHash: expect.any(String),
+          remnashopRefreshDispatchedAt: null,
+        }),
+        data: { remnashopRefreshDispatchedAt: expect.any(Date) },
+      }),
+    );
+  });
+
+  it("does not call the provider unless the dispatch marker commits", async () => {
+    const target = localSession({
+      id: "target",
+      accessToken: "old-access",
+      refreshToken: "old-refresh",
+      accessExpiresAt: new Date(Date.now() - 1_000),
+    });
+    mocks.tx.$queryRaw.mockResolvedValue([{ id: "target" }]);
+    mocks.tx.webSession.findMany.mockResolvedValue([target]);
+    mocks.tx.webSession.updateMany
+      .mockResolvedValueOnce({ count: 1 })
+      .mockResolvedValueOnce({ count: 0 });
+    const refresh = vi.fn();
+
+    await expect(
+      acquireRemnashopTokensForSession({ session: target, refresh }),
+    ).rejects.toMatchObject({ code: "CONFLICT", status: 409 });
+
+    expect(refresh).not.toHaveBeenCalled();
   });
 
   it("fails closed when the requesting session was not part of the locked owner set", async () => {

@@ -134,7 +134,7 @@ export async function rotateRefreshTokenFamily(refreshToken: string, now = new D
 
     await tx.webSession.update({
       where: { id: session.id },
-      data: { revokedAt: now, accessTokenExpiresAt: now, refreshExpiresAt: now },
+      data: revokedWebSessionData(now),
     });
     return { status: "reuse" as const, sessionId: session.id, userId: session.userId };
   }, { maxWait: 5_000, timeout: 15_000 });
@@ -343,6 +343,50 @@ export async function getCurrentSession() {
   });
 
   return getSessionByRefreshToken();
+}
+
+/**
+ * Reads only the short-lived access session.
+ *
+ * Server Components must use this reader: Next.js render phases cannot mutate
+ * cookies, and rotating the database-backed refresh token without returning
+ * its successor to the browser would strand the session. Navigation requests
+ * with only a refresh candidate are resumed by the dedicated Route Handler
+ * before React renders.
+ */
+export async function getCurrentSessionReadOnly() {
+  const cookieStore = await cookies();
+  const accessToken = cookieStore.get(sessionCookieNames.access)?.value;
+
+  if (!accessToken) {
+    authDebugLog("session_read_only_access_missing", {});
+    return null;
+  }
+
+  const payload = verifyAccessToken(accessToken);
+
+  if (!payload) {
+    authDebugLog("session_read_only_access_invalid", {});
+    return null;
+  }
+
+  const session = await prisma.webSession.findFirst({
+    where: {
+      id: payload.sid,
+      userId: payload.uid,
+      revokedAt: null,
+      accessTokenExpiresAt: { gt: new Date() },
+    },
+    include: { user: true },
+  });
+
+  authDebugLog("session_read_only_result", {
+    found: Boolean(session),
+    sessionId: payload.sid,
+    userId: payload.uid,
+  });
+
+  return session;
 }
 
 export async function refreshCurrentAccessCookie() {

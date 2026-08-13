@@ -6,6 +6,8 @@ const mocks = vi.hoisted(() => ({
   releaseReconciliation: vi.fn(), markReconciliationManual: vi.fn(), failReconciliation: vi.fn(), classifyReconciliationError: vi.fn(),
   listHistoryCandidates: vi.fn(),
   claimHistory: vi.fn(), authorizeHistory: vi.fn(), historyPageSize: vi.fn(), loadHistoryPage: vi.fn(),
+  findPendingHistoryPaymentIds: vi.fn(), loadExactHistoryPayment: vi.fn(),
+  persistExactHistoryPayment: vi.fn(), loadLegacyHistory: vi.fn(),
   completeHistoryPage: vi.fn(), failHistory: vi.fn(), now: vi.fn(),
   logTechnicalError: vi.fn(),
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
@@ -20,6 +22,10 @@ vi.mock("@/backend/integrations/payments/payment-maintenance-runner", () => ({
     failReconciliation: mocks.failReconciliation, classifyReconciliationError: mocks.classifyReconciliationError,
     listHistoryCandidates: mocks.listHistoryCandidates, claimHistory: mocks.claimHistory,
     authorizeHistory: mocks.authorizeHistory, historyPageSize: mocks.historyPageSize,
+    findPendingHistoryPaymentIds: mocks.findPendingHistoryPaymentIds,
+    loadExactHistoryPayment: mocks.loadExactHistoryPayment,
+    persistExactHistoryPayment: mocks.persistExactHistoryPayment,
+    loadLegacyHistory: mocks.loadLegacyHistory,
     loadHistoryPage: mocks.loadHistoryPage, completeHistoryPage: mocks.completeHistoryPage,
     failHistory: mocks.failHistory, now: mocks.now,
   },
@@ -63,6 +69,7 @@ describe("internal payment reconciliation route", () => {
     mocks.claimHistory.mockResolvedValue({ context: {}, cursor: null });
     mocks.authorizeHistory.mockResolvedValue({ context: {} });
     mocks.historyPageSize.mockResolvedValue(100);
+    mocks.findPendingHistoryPaymentIds.mockResolvedValue([]);
     mocks.loadHistoryPage.mockResolvedValue({ context: {} });
     mocks.completeHistoryPage.mockResolvedValue({ applied: 20, hasMore: true });
   });
@@ -91,7 +98,7 @@ describe("internal payment reconciliation route", () => {
     expect(response.status).toBe(200);
     expect(response.headers.get("cache-control")).toBe("no-store");
     expect(mocks.claimReconciliation).toHaveBeenCalledTimes(2);
-    expect(mocks.listHistoryCandidates).toHaveBeenCalledWith(1);
+    expect(mocks.listHistoryCandidates).toHaveBeenCalledWith(20);
     expect(payload).toMatchObject({
       claimed: 1,
       succeeded: 1,
@@ -103,5 +110,16 @@ describe("internal payment reconciliation route", () => {
       succeeded: 1,
       history: { applied: 20 },
     });
+  });
+
+  it("returns a non-success status when every claimed operation fails", async () => {
+    mocks.recoverPayment.mockRejectedValue(new Error("provider unavailable"));
+    mocks.listHistoryCandidates.mockResolvedValue([]);
+
+    const response = await POST(request(secret));
+    const payload = await response.json();
+
+    expect(response.status).toBe(503);
+    expect(payload).toMatchObject({ claimed: 1, failed: 1 });
   });
 });

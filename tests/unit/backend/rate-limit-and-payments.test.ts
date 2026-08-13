@@ -26,7 +26,15 @@ vi.mock("@/backend/integrations/payments/payment-owner-service", () => ({
   lockPaymentUpstreamOwner: mocks.lockPaymentUpstreamOwner,
 }));
 
-import { assertCooldown, assertRateLimit, rateLimitCapacityKey, rateLimitKey, withAuthConcurrency } from "@/backend/limits/rate-limit";
+import {
+  assertCooldown,
+  assertRateLimit,
+  assertRateLimitCapacity,
+  assertTargetRateLimit,
+  rateLimitCapacityKey,
+  rateLimitKey,
+  withAuthConcurrency,
+} from "@/backend/limits/rate-limit";
 import {
   applyRemnashopTransaction,
   recordPayment,
@@ -78,6 +86,33 @@ describe("rate limiting", () => {
       2,
       expect.stringMatching(/^clean-pay:rate-limit:v4:auth:login:email:[a-f0-9]{64}$/),
       "clean-pay:rate-limit:v4:auth:login:capacity",
+      60,
+    ]);
+  });
+
+  it("separates the anonymous preflight capacity bucket from the proven target bucket", async () => {
+    mocks.redisCommand.mockResolvedValueOnce([1]).mockResolvedValueOnce([1]);
+
+    await assertRateLimitCapacity("auth_command", 60);
+    await assertTargetRateLimit({
+      action: "auth_login",
+      email: "u@example.com",
+      limit: 5,
+      windowSeconds: 60,
+    });
+
+    expect(mocks.redisCommand).toHaveBeenNthCalledWith(1, [
+      "EVAL",
+      expect.any(String),
+      1,
+      "clean-pay:rate-limit:v4:auth:auth_command:capacity",
+      60,
+    ]);
+    expect(mocks.redisCommand).toHaveBeenNthCalledWith(2, [
+      "EVAL",
+      expect.any(String),
+      1,
+      expect.stringMatching(/^clean-pay:rate-limit:v4:auth:auth_login:email:[a-f0-9]{64}$/),
       60,
     ]);
   });

@@ -20,7 +20,10 @@ import {
   remnashopLinkTelegram,
   remnashopMergeUsers,
 } from "@/backend/integrations/remnashop/client";
-import { withPaymentOwnerChangeFence } from "@/backend/integrations/payments/payment-user-merge-service";
+import {
+  markPaymentOwnerChangeUpstreamMutationStarted,
+  withPaymentOwnerChangeFence,
+} from "@/backend/integrations/payments/payment-user-merge-service";
 import {
   clearTelegramAuthCookies,
   verifyTelegramCallback,
@@ -164,6 +167,17 @@ export const productionTelegramCallbackGateway: TelegramCallbackGateway = {
       await tx.$queryRaw<Array<{ id: string }>>`
         SELECT "id" FROM "WebUser" WHERE "id" = ${input.userId} FOR UPDATE
       `;
+      const owner = await tx.webUser.findUnique({
+        where: { id: input.userId },
+        select: { paymentOwnerChangeTokenHash: true },
+      });
+      if (owner?.paymentOwnerChangeTokenHash) {
+        throw new ServiceError(
+          "CONFLICT",
+          409,
+          "The previous account merge still owns the payment transition.",
+        );
+      }
       const active = await tx.$queryRaw<Array<{ id: string }>>`
         SELECT "id" FROM "AccountMergeConfirmation"
         WHERE "userId" = ${input.userId} AND "status" = 'PROCESSING'
@@ -266,6 +280,7 @@ export const productionTelegramCallbackGateway: TelegramCallbackGateway = {
 
   async attachTelegramToCurrentAccount({ telegramId, telegramUsername, ownerFenceHeld }) {
     const tokens = await getAuthorizedRemnashopTokens({ allowUnverifiedEmail: true });
+    await markPaymentOwnerChangeUpstreamMutationStarted();
     await remnashopLinkTelegram({ accessToken: tokens.accessToken, telegramId, telegramUsername });
     await linkCurrentUserToRemnashopAuth({
       accessToken: tokens.accessToken,
@@ -285,6 +300,7 @@ export const productionTelegramCallbackGateway: TelegramCallbackGateway = {
   async mergeProviderAccounts({ sourceAccountId, targetAccountId }) {
     if (sourceAccountId === targetAccountId) return false;
     try {
+      await markPaymentOwnerChangeUpstreamMutationStarted();
       await remnashopMergeUsers({
         sourceUserId: sourceAccountId,
         targetUserId: targetAccountId,

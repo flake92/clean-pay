@@ -1,4 +1,4 @@
-import { runPaymentMaintenance } from "@/application/payments/run-payment-maintenance";
+import { paymentMaintenanceBatchIsHealthy, runPaymentMaintenance } from "@/application/payments/run-payment-maintenance";
 import { getEnv } from "@/backend/config/env";
 import { ServiceError } from "@/backend/errors/service-error";
 import { productionPaymentMaintenanceRunner } from "@/backend/integrations/payments/payment-maintenance-runner";
@@ -34,6 +34,7 @@ export async function POST(request: Request) {
     });
 
     return NextResponse.json(result, {
+      status: paymentMaintenanceBatchIsHealthy(result) ? 200 : 503,
       headers: { "cache-control": "no-store" },
     });
   } catch (error) {

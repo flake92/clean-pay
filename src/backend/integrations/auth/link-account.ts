@@ -23,13 +23,17 @@ import {
 } from "@/backend/integrations/remnashop/client";
 import { linkCurrentUserToRemnashopAuth } from "@/backend/integrations/remnashop/session";
 import { getCurrentSession, refreshCurrentAccessCookie } from "@/backend/integrations/sessions/web-session-service";
-import { withPaymentOwnerChangeFence } from "@/backend/integrations/payments/payment-user-merge-service";
+import {
+  markPaymentOwnerChangeUpstreamMutationStarted,
+  withPaymentOwnerChangeFence,
+} from "@/backend/integrations/payments/payment-user-merge-service";
 import { assertRateLimit } from "@/backend/limits/rate-limit";
 import { auditLog } from "@/backend/observability/audit";
 import { synchronizeProviderAccountIdentity } from "@/backend/integrations/auth/provider-account-identity-sync";
 
 type CurrentSession = NonNullable<Awaited<ReturnType<typeof getCurrentSession>>>;
 type ProviderAuth = Awaited<ReturnType<typeof remnashopAuth>>;
+type SessionReader = () => ReturnType<typeof getCurrentSession>;
 
 function actorSession(actor: { context: unknown }) {
   return actor.context as CurrentSession;
@@ -66,16 +70,22 @@ async function mergeToken() {
   return token;
 }
 
-export const productionLinkAccountReader: LinkAccountReader = {
-  async loadMergeActor() {
-    const session = await adapt(() => getCurrentSession());
-    return session ? { userId: session.userId, fullAssurance: session.assuranceLevel === "FULL" } : null;
-  },
-  async loadTelegramMergeConfirmation(userId) {
-    const confirmation = await getTelegramAccountMergeConfirmation(await mergeToken(), userId);
-    return { ...confirmation, emailWillBeReplaced: confirmation.emailWillBeReplaced };
-  },
-};
+export function createProductionLinkAccountReader(
+  readSession: SessionReader = getCurrentSession,
+): LinkAccountReader {
+  return {
+    async loadMergeActor() {
+      const session = await adapt(readSession);
+      return session ? { userId: session.userId, fullAssurance: session.assuranceLevel === "FULL" } : null;
+    },
+    async loadTelegramMergeConfirmation(userId) {
+      const confirmation = await getTelegramAccountMergeConfirmation(await mergeToken(), userId);
+      return { ...confirmation, emailWillBeReplaced: confirmation.emailWillBeReplaced };
+    },
+  };
+}
+
+export const productionLinkAccountReader = createProductionLinkAccountReader();
 
 export const productionLinkAccountCommands: LinkAccountCommands = {
   async loadLinkActor() {
@@ -131,10 +141,12 @@ export const productionLinkAccountCommands: LinkAccountCommands = {
   },
 
   async attachTelegram(session, input) {
+    await markPaymentOwnerChangeUpstreamMutationStarted();
     await adapt(() => remnashopLinkTelegram({ accessToken: providerAuth(session).cookies.accessToken, ...input }));
   },
 
   async mergeProviderAccounts(input) {
+    await markPaymentOwnerChangeUpstreamMutationStarted();
     await adapt(() => remnashopMergeUsers({
       sourceUserId: input.sourceAccountId,
       targetUserId: input.targetAccountId,
@@ -180,6 +192,10 @@ export const productionLinkAccountCommands: LinkAccountCommands = {
           remnashopRefreshTokenEncrypted: protectRemnashopToken(auth.cookies.refreshToken),
           remnashopAccessExpiresAt: new Date(auth.data.expires_at),
           remnashopRefreshExpiresAt: new Date(auth.data.refresh_expires_at),
+          remnashopRefreshClaimTokenHash: null,
+          remnashopRefreshLeaseExpiresAt: null,
+          remnashopRefreshDispatchedAt: null,
+          remnashopRefreshRecoveryEncrypted: null,
         },
       });
       await tx.webUser.update({

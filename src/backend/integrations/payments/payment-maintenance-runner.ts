@@ -1,6 +1,7 @@
 import type {
   PaymentHistoryAuthorization,
   PaymentHistoryClaim,
+  PaymentHistoryExact,
   PaymentHistoryPage,
   PaymentMaintenanceRunner,
   PaymentReconciliationClaim,
@@ -24,18 +25,22 @@ import {
   loadCurrentPaymentHistoryCredential,
   type PaymentHistorySyncClaim,
 } from "@/backend/integrations/payments/payment-history-sync-service";
+import { prismaPaymentQueryRepository } from "@/backend/integrations/payments/prisma-payment-query-repository";
+import { syncExactPaymentRecordFromRemnashop } from "@/backend/integrations/payments/payment-record-service";
 import {
-  getPaymentCapabilities, getTransactionPage, reconcilePaymentOperation,
+  getExactTransaction, getLegacyTransactions, getPaymentCapabilities, getTransactionPage, reconcilePaymentOperation,
   reconcilePaymentOperationAsAdmin, type RemnashopPaymentRecovery, type RemnashopTransactionPage,
 } from "@/backend/integrations/remnashop/payment-recovery";
 import { ServiceError } from "@/backend/errors/service-error";
 import { paymentUpstreamOwnerHash } from "@/backend/payments/hashes";
 import { safeEqual } from "@/backend/security/crypto";
+import { logger } from "@/backend/observability/logger";
 
 function reconciliation(value: PaymentReconciliationClaim) { return value.context as BackendReconciliationClaim; }
 function historyClaim(value: PaymentHistoryClaim) { return value.context as PaymentHistorySyncClaim; }
 function historyAuthorization(value: PaymentHistoryAuthorization) { return value.context as { accessToken: string }; }
 function historyPage(value: PaymentHistoryPage) { return value.context as RemnashopTransactionPage; }
+function historyExact(value: PaymentHistoryExact) { return value.context as import("@/backend/integrations/remnashop/contracts").PaymentTransactionResponse; }
 function recovery(value: { context: unknown }) { return value.context as RemnashopPaymentRecovery; }
 
 export const productionPaymentMaintenanceRunner: PaymentMaintenanceRunner = {
@@ -95,20 +100,61 @@ export const productionPaymentMaintenanceRunner: PaymentMaintenanceRunner = {
     const claim = await claimPaymentHistorySync(candidate);
     return claim ? { context: claim, cursor: claim.cursor } : null;
   },
-  async authorizeHistory(claim) {
+  async authorizeHistory(claim, timeoutMs) {
     const backendClaim = historyClaim(claim);
-    const accessToken = await loadCurrentPaymentHistoryCredential(backendClaim.userId, backendClaim.upstreamOwnerHash);
+    const accessToken = await loadCurrentPaymentHistoryCredential(
+      backendClaim.userId,
+      backendClaim.upstreamOwnerHash,
+      timeoutMs,
+    );
     if (!accessToken) throw new ServiceError("UNAUTHORIZED", 401, "No current Remnashop session is available for payment history recovery");
     return { context: { accessToken } };
   },
-  async historyPageSize(value) {
-    const capabilities = await getPaymentCapabilities(historyAuthorization(value).accessToken);
+  async historyPageSize(value, timeoutMs) {
+    const capabilities = await getPaymentCapabilities(
+      historyAuthorization(value).accessToken,
+      timeoutMs,
+    );
     return capabilities?.transactions.max_page_size ?? null;
   },
-  async loadHistoryPage(value, cursor, limit) {
-    return { context: await getTransactionPage({ accessToken: historyAuthorization(value).accessToken, cursor, limit }) };
+  findPendingHistoryPaymentIds: (userId, limit) =>
+    prismaPaymentQueryRepository.findPendingPaymentIds(userId, limit),
+  async loadExactHistoryPayment(value, paymentId, timeoutMs) {
+    const item = await getExactTransaction({
+      accessToken: historyAuthorization(value).accessToken,
+      paymentId,
+      timeoutMs,
+    });
+    return item ? { context: item } : null;
+  },
+  async persistExactHistoryPayment(candidate, item) {
+    await syncExactPaymentRecordFromRemnashop({
+      userId: candidate.userId,
+      upstreamAccountId: candidate.upstreamAccountId,
+      transaction: historyExact(item),
+    });
+  },
+  async loadLegacyHistory(value, timeoutMs) {
+    const items = await getLegacyTransactions(
+      historyAuthorization(value).accessToken,
+      timeoutMs,
+    );
+    return { context: { items, next_cursor: null } };
+  },
+  async loadHistoryPage(value, cursor, limit, timeoutMs) {
+    return { context: await getTransactionPage({ accessToken: historyAuthorization(value).accessToken, cursor, limit, timeoutMs }) };
   },
   completeHistoryPage: (claim, page) => completePaymentHistoryPage(historyClaim(claim), historyPage(page)),
   failHistory: (claim, error) => failPaymentHistorySync(historyClaim(claim), error),
+  logHistoryExactFailure(error, index) {
+    logger.warn("payment_history_worker_exact_sync_failed", {
+      index,
+      errorName: error instanceof Error ? error.name : "UnknownError",
+    }, {
+      category: "upstream",
+      source: "payments.history.worker",
+      message: "Exact payment-history recovery failed; continuing with the bounded page",
+    });
+  },
   now: Date.now,
 };

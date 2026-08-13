@@ -115,6 +115,13 @@ export async function resolveAuthProfile(gateway: AuthProfileGateway): Promise<A
 
   let reconciledSession = authorized.session;
   if (shouldReconcileVerifiedEmail) {
+    if (gateway.canReconcileVerifiedEmail === false) {
+      gateway.debug("auth_me_verified_email_reconciliation_deferred", {
+        sessionId: authorized.session.id,
+        userId: authorized.session.userId,
+      });
+      return localProfile(authorized.session);
+    }
     await gateway.confirmVerifiedEmail(authorized.session.userId);
     reconciledSession = {
       ...authorized.session,

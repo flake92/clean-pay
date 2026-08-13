@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   getRemnashopUserIdFromAccessToken: vi.fn(), remnashopLinkTelegram: vi.fn(), remnashopMergeUsers: vi.fn(),
   linkCurrentUserToRemnashopAuth: vi.fn(), reconcileUserFromRemnashopAuth: vi.fn(),
   withPaymentOwnerChangeFence: vi.fn(), mergeLocalUsersIntoTarget: vi.fn(), assertUserMergeFinalOwner: vi.fn(),
+  markPaymentOwnerChangeUpstreamMutationStarted: vi.fn(),
   synchronizeProviderAccountIdentity: vi.fn(), randomToken: vi.fn(() => "merge-token"), sha256: vi.fn((v: string) => `hash:${v}`),
   prisma: {
     webUser: { findUnique: vi.fn(), findUniqueOrThrow: vi.fn(), update: vi.fn(), upsert: vi.fn() },
@@ -39,6 +40,7 @@ vi.mock("@/backend/integrations/remnashop/session", () => ({
 }));
 vi.mock("@/backend/integrations/payments/payment-user-merge-service", () => ({
   withPaymentOwnerChangeFence: mocks.withPaymentOwnerChangeFence,
+  markPaymentOwnerChangeUpstreamMutationStarted: mocks.markPaymentOwnerChangeUpstreamMutationStarted,
 }));
 vi.mock("@/backend/integrations/auth/local-user-merge-service", () => ({
   mergeLocalUsersIntoTarget: mocks.mergeLocalUsersIntoTarget,
@@ -147,6 +149,20 @@ describe("production Telegram callback gateway", () => {
     })).rejects.toMatchObject({ code: "CONFLICT" });
   });
 
+  it("keeps the exact confirmation retryable while it owns a payment transition", async () => {
+    mocks.prisma.webUser.findUnique.mockResolvedValueOnce({
+      paymentOwnerChangeTokenHash: "incomplete-owner-change",
+    });
+
+    await expect(gateway.persistAccountMergeConfirmation({
+      userId: "user-1", telegramId: "777", telegramUsername: "clean",
+      sourceEmail: "source@example.com", targetEmail: "target@example.com",
+      targetTelegramId: null, sourceAccountId: "source", targetAccountId: "target",
+    })).rejects.toMatchObject({ code: "CONFLICT" });
+    expect(mocks.prisma.accountMergeConfirmation.updateMany).not.toHaveBeenCalled();
+    expect(mocks.prisma.accountMergeConfirmation.create).not.toHaveBeenCalled();
+  });
+
   it("updates a target user, merging a distinct Telegram owner when necessary", async () => {
     const source = { ...local, id: "source-user", email: "source@example.com", emailVerified: false };
     const target = { ...local, id: "target-user", remnashopUserId: null, email: null, emailVerified: false, telegramId: null };
@@ -235,7 +251,7 @@ describe("production Telegram callback gateway", () => {
       remnashopSession: { accessTokenEncrypted: "a", refreshTokenEncrypted: "r", accessExpiresAt: new Date(), refreshExpiresAt: new Date() },
     });
     await expect(gateway.reconcileProviderSession(provider)).resolves.toMatchObject({ userId: "user-2", requiresTelegramRecovery: true });
-    await gateway.withOwnerChangeFence({ userIds: [], upstreamAccountIds: [], telegramIds: [], work: async () => "done" });
+    await gateway.withOwnerChangeFence({ userIds: [], upstreamAccountIds: [], telegramIds: [], operationKey: "telegram-callback:test", targetUpstreamAccountId: "account-1", work: async () => "done" });
     gateway.logAttachFailure(new TypeError("secret"), "777");
     gateway.logAttachFailure("secret", "888");
     expect(mocks.logTechnicalWarning).toHaveBeenNthCalledWith(1, "telegram_link_remnashop_attach_failed", { errorName: "TypeError", telegramId: "777" });
