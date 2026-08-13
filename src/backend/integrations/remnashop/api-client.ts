@@ -621,7 +621,10 @@ export async function remnashopMergeUsers({
   );
 }
 
-export async function remnashopRefreshTokens(refreshToken: string) {
+export async function remnashopRefreshTokens(
+  refreshToken: string,
+  timeoutMs = 15_000,
+) {
   authDebugLog("remnashop_token_refresh_started", {});
   const response = await fetchRemnashop("/auth/refresh", {
     method: "POST",
@@ -630,7 +633,7 @@ export async function remnashopRefreshTokens(refreshToken: string) {
       cookie: `refresh_token=${refreshToken}`,
     },
     cache: "no-store",
-    signal: AbortSignal.timeout(15_000),
+    signal: AbortSignal.timeout(Math.max(1, Math.min(15_000, timeoutMs))),
   });
   const data = await parseResponse<RemnashopAuthResponse>(response, "/auth/refresh");
   const cookies = extractAuthCookies(response);

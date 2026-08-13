@@ -12,6 +12,9 @@ function reconciliation(overrides: Partial<PaymentMaintenanceRunner> = {}): Paym
     failReconciliation: vi.fn(async () => "released" as const), classifyReconciliationError: vi.fn(() => ({ kind: "other" as const })),
     listHistoryCandidates: vi.fn(async () => []), claimHistory: vi.fn(async () => ({ context: {}, cursor: null })),
     authorizeHistory: vi.fn(async () => ({ context: {} })), historyPageSize: vi.fn(async () => 100),
+    findPendingHistoryPaymentIds: vi.fn(async () => []), loadExactHistoryPayment: vi.fn(async () => null),
+    persistExactHistoryPayment: vi.fn(async () => undefined),
+    loadLegacyHistory: vi.fn(async () => ({ context: {} })),
     loadHistoryPage: vi.fn(async () => ({ context: {} })), completeHistoryPage: vi.fn(async () => ({ applied: 0, hasMore: false })),
     failHistory: vi.fn(async () => undefined), now: vi.fn(() => Date.now()),
     ...overrides,
@@ -120,28 +123,55 @@ describe("payment status application workflow", () => {
     expect(reconciliationGateway.claimReconciliation).not.toHaveBeenCalled();
   });
 
-  it("keeps an already successful local result when provider refresh fails", async () => {
+  it("keeps critical synchronization failures fatal for nonterminal operations", async () => {
     const subject = reader({
-      findOperation: vi.fn(async () => ({ id: "op-1", status: "SUCCEEDED", manualRequired: false, paymentId: null, paymentStatus: null, payment: null })),
+      findOperation: vi.fn(async () => ({
+        id: "op-1",
+        status: "SUCCEEDED",
+        manualRequired: false,
+        paymentId: "550e8400-e29b-41d4-a716-446655440000",
+        paymentStatus: "PENDING",
+        payment: { payment_id: "550e8400-e29b-41d4-a716-446655440000" },
+      } as never)),
       authorize: vi.fn(async () => { throw new Error("offline"); }),
     });
-    await expect(loadPaymentStatus(subject, reconciliation(), { paymentId: null, operationId: "op-1" })).resolves.toMatchObject({
-      status: "ready", data: { operation: { status: "succeeded" } },
-    });
+    await expect(loadPaymentStatus(subject, reconciliation(), { paymentId: null, operationId: "op-1" }))
+      .resolves.toMatchObject({ status: "error" });
+    expect(subject.loadSubscription).not.toHaveBeenCalled();
   });
 
-  it("swallows an explicit missing-subscription response but not other provider failures", async () => {
-    const missing = new Error("subscription missing");
+  it("treats any subscription failure as optional after successful synchronization", async () => {
+    const transaction = { context: { payment_id: "550e8400-e29b-41d4-a716-446655440000" } };
+    const failure = new Error("subscription unavailable");
     const subject = reader({
-      loadSubscription: vi.fn(async () => { throw missing; }), isSubscriptionMissing: vi.fn((error) => error === missing),
-      findLatestPayment: vi.fn(async () => ({ payment_id: "local" } as never)),
+      loadExactTransaction: vi.fn(async () => transaction),
+      loadSubscription: vi.fn(async () => { throw failure; }),
+      findPayment: vi.fn(async () => ({ payment_id: "local" } as never)),
     });
-    await expect(loadPaymentStatus(subject, reconciliation(), { paymentId: null, operationId: null })).resolves.toMatchObject({
+    await expect(loadPaymentStatus(subject, reconciliation(), {
+      paymentId: "550e8400-e29b-41d4-a716-446655440000",
+      operationId: null,
+    })).resolves.toMatchObject({
       status: "ready", data: { subscription: null, payment: { payment_id: "local" } },
     });
-    const failure = new Error("provider failed");
-    const broken = reader({ loadSubscription: vi.fn(async () => { throw failure; }), isSubscriptionMissing: vi.fn(() => false) });
-    await expect(loadPaymentStatus(broken, reconciliation(), { paymentId: null, operationId: null })).resolves.toMatchObject({ status: "error" });
+    expect(subject.persistExactTransaction).toHaveBeenCalledWith(
+      "user-1",
+      "upstream-1",
+      transaction,
+    );
+  });
+
+  it("does not hide a payment persistence failure as an optional subscription failure", async () => {
+    const failure = new Error("database unavailable");
+    const subject = reader({
+      loadExactTransaction: vi.fn(async () => ({ context: {} })),
+      persistExactTransaction: vi.fn(async () => { throw failure; }),
+    });
+    await expect(loadPaymentStatus(subject, reconciliation(), {
+      paymentId: "550e8400-e29b-41d4-a716-446655440000",
+      operationId: null,
+    })).resolves.toMatchObject({ status: "error" });
+    expect(subject.loadSubscription).not.toHaveBeenCalled();
   });
 
   it("reloads a nonterminal operation after reconciliation and uses its assigned payment", async () => {

@@ -95,3 +95,24 @@ export function parseReconciliationBatch(value) {
 
   return parsed;
 }
+
+export function classifyReconciliationBatchHealth(batch) {
+  const attempted = batch.claimed + batch.history.attempted;
+  const processedWithoutFailure =
+    batch.claimed - batch.failed +
+    batch.history.attempted - batch.history.failed;
+
+  if (processedWithoutFailure > 0) {
+    return { healthy: true, outcome: "progress" };
+  }
+
+  if (attempted > 0) {
+    return { healthy: false, outcome: "failed" };
+  }
+
+  if (batch.backlog.due === 0) {
+    return { healthy: true, outcome: "idle" };
+  }
+
+  return { healthy: false, outcome: "no_progress" };
+}

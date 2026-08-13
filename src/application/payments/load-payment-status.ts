@@ -42,34 +42,34 @@ async function execute(reader: PaymentStatusReader, reconciliation: PaymentMaint
   let resolvedPaymentId = input.operationId ? operationPaymentId : input.paymentId;
   if (operation && status && terminal(operation, status)) return view(operation, null, operation.payment);
 
+  const authorization = await reader.authorize();
+  await reader.assertUpstreamOwner(actor.id, authorization.upstreamAccountId);
+  const capabilities = await reader.loadCapabilities(authorization);
+  if (capabilities) {
+    if (resolvedPaymentId) {
+      const exact = await reader.loadExactTransaction(authorization, resolvedPaymentId);
+      if (exact) await reader.persistExactTransaction(actor.id, authorization.upstreamAccountId, exact);
+    } else {
+      await processPaymentHistoryPage(reconciliation, { userId: actor.id, upstreamAccountId: authorization.upstreamAccountId }, authorization.context, capabilities.maxPageSize);
+    }
+    const claim = await reconciliation.claimReconciliation(actor.id);
+    if (claim) await processPaymentReconciliation(reconciliation, claim, authorization.context);
+  } else {
+    const legacy = await reader.loadLegacyTransactions(authorization);
+    await reader.persistLegacyTransactions(actor.id, authorization.upstreamAccountId, legacy);
+  }
+  if (operation) {
+    operation = await reader.findOperation(actor.id, operation.id);
+    status = operation ? operationStatus(operation) : null;
+    operationPaymentId = operation?.paymentId ?? null;
+    resolvedPaymentId = input.operationId ? operationPaymentId : input.paymentId;
+  }
+
   let subscription: PaymentStatusViewModel["subscription"] = null;
   try {
-    const authorization = await reader.authorize();
-    await reader.assertUpstreamOwner(actor.id, authorization.upstreamAccountId);
-    const capabilities = await reader.loadCapabilities(authorization);
-    if (capabilities) {
-      if (resolvedPaymentId) {
-        const exact = await reader.loadExactTransaction(authorization, resolvedPaymentId);
-        if (exact) await reader.persistExactTransaction(actor.id, authorization.upstreamAccountId, exact);
-      } else {
-        await processPaymentHistoryPage(reconciliation, { userId: actor.id, upstreamAccountId: authorization.upstreamAccountId }, authorization.context, capabilities.maxPageSize);
-      }
-      const claim = await reconciliation.claimReconciliation(actor.id);
-      if (claim) await processPaymentReconciliation(reconciliation, claim, authorization.context);
-    } else {
-      const legacy = await reader.loadLegacyTransactions(authorization);
-      await reader.persistLegacyTransactions(actor.id, authorization.upstreamAccountId, legacy);
-    }
-    if (operation) {
-      operation = await reader.findOperation(actor.id, operation.id);
-      status = operation ? operationStatus(operation) : null;
-      operationPaymentId = operation?.paymentId ?? null;
-      resolvedPaymentId = input.operationId ? operationPaymentId : input.paymentId;
-    }
     subscription = await reader.loadSubscription(authorization);
-  } catch (error) {
-    if (operation?.status === "SUCCEEDED") return view(operation, null, operation.payment);
-    if (!reader.isSubscriptionMissing(error)) throw error;
+  } catch {
+    // Payment synchronization is authoritative; subscription decoration is optional.
   }
 
   const payment = resolvedPaymentId ? await reader.findPayment(actor.id, resolvedPaymentId)

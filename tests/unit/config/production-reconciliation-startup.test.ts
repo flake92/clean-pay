@@ -2,7 +2,10 @@ import { readFileSync } from "node:fs";
 
 import { describe, expect, it } from "vitest";
 
-import { parseReconciliationBatch } from "../../../deploy/prod/reconciliation-batch.mjs";
+import {
+  classifyReconciliationBatchHealth,
+  parseReconciliationBatch,
+} from "../../../deploy/prod/reconciliation-batch.mjs";
 
 const prodCommand = readFileSync("deploy/prod/prod.mjs", "utf8");
 const startScript = readFileSync("start.sh", "utf8");
@@ -67,10 +70,49 @@ describe("production reconciliation startup", () => {
       /reconciliation-worker:[\s\S]*healthcheck:[\s\S]*clean-pay-reconciliation-heartbeat/,
     );
     expect(reconcileLoop).toContain("writeHeartbeat()");
+    expect(reconcileLoop).toContain("rmSync(heartbeatFile, { force: true })");
+    expect(reconcileLoop).toContain("maxConsecutiveFailures");
+    expect(reconcileLoop).toContain("process.exit(1)");
     expect(reconcileLoop).toContain("manual_operation_ids=");
     expect(reconcileLoop).toContain("history_failed=");
     expect(rootDockerfile).toContain("reconciliation-batch.mjs");
     expect(prodCompose).toContain("dockerfile: Dockerfile");
+    expect(prodCompose).toContain('restart: "on-failure"');
+    expect(rootCompose).toContain('restart: "on-failure"');
+    expect(prodCompose).not.toContain('restart: "on-failure:');
+    expect(rootCompose).not.toContain('restart: "on-failure:');
+  });
+
+  it("publishes health only for useful progress or a genuinely idle queue", () => {
+    const batch = (overrides: Record<string, unknown> = {}) => parseReconciliationBatch({
+      claimed: 0,
+      succeeded: 0,
+      inProgress: 0,
+      unknown: 0,
+      manualRequired: 0,
+      retryReady: 0,
+      failed: 0,
+      manualRequiredOperationIds: [],
+      history: { attempted: 0, applied: 0, completed: 0, failed: 0 },
+      backlog: emptyBacklog,
+      ...overrides,
+    });
+
+    expect(classifyReconciliationBatchHealth(batch())).toEqual({
+      healthy: true,
+      outcome: "idle",
+    });
+    expect(classifyReconciliationBatchHealth(batch({
+      claimed: 1,
+      succeeded: 1,
+    }))).toEqual({ healthy: true, outcome: "progress" });
+    expect(classifyReconciliationBatchHealth(batch({
+      claimed: 1,
+      failed: 1,
+    }))).toEqual({ healthy: false, outcome: "failed" });
+    expect(classifyReconciliationBatchHealth(batch({
+      backlog: { ...emptyBacklog, pending: 1, due: 1 },
+    }))).toEqual({ healthy: false, outcome: "no_progress" });
   });
 
   it("publishes no heartbeat before the first strictly valid successful batch", () => {

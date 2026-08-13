@@ -76,8 +76,15 @@ export function emailVerificationPath(redirectTo: string) {
   });
 }
 
-export function registrationEmailVerificationPath(redirectTo: string) {
-  return flowPath("/register/verify-email", redirectTo, {});
+export function registrationEmailVerificationPath(
+  redirectTo: string,
+  options: { deliveryFailed?: boolean } = {},
+) {
+  return flowPath(
+    "/register/verify-email",
+    redirectTo,
+    options.deliveryFailed ? { delivery: "failed" } : {},
+  );
 }
 
 export function resolveEmailVerificationSetup(

@@ -7,7 +7,10 @@ export const dynamic = "force-dynamic";
 export default async function RegisterVerifyEmailPage({
   searchParams,
 }: {
-  searchParams: Promise<{ redirect_to?: string | string[] }>;
+  searchParams: Promise<{
+    redirect_to?: string | string[];
+    delivery?: string | string[];
+  }>;
 }) {
   const turnstileEnabled = process.env.TURNSTILE_ENABLED === "true";
   const turnstileSiteKey = process.env.TURNSTILE_SITE_KEY;
@@ -16,6 +19,9 @@ export default async function RegisterVerifyEmailPage({
     ? params.redirect_to[0]
     : params.redirect_to;
   const redirectTo = safeAccountSetupDestination(rawRedirect);
+  const rawDelivery = Array.isArray(params.delivery)
+    ? params.delivery[0]
+    : params.delivery;
 
   return (
     <AuthShell
@@ -26,6 +32,7 @@ export default async function RegisterVerifyEmailPage({
         redirectTo={redirectTo}
         turnstileEnabled={turnstileEnabled}
         turnstileSiteKey={turnstileSiteKey}
+        verificationDeliveryFailed={rawDelivery === "failed"}
       />
     </AuthShell>
   );

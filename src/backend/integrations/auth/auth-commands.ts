@@ -12,7 +12,11 @@ import {
   remnashopRequestPasswordReset,
 } from "@/backend/integrations/remnashop/client";
 import { createSessionFromRemnashopAuth } from "@/backend/integrations/remnashop/session";
-import { assertRateLimit, withAuthConcurrency } from "@/backend/limits/rate-limit";
+import {
+  assertRateLimitCapacity,
+  assertTargetRateLimit,
+  withAuthConcurrency,
+} from "@/backend/limits/rate-limit";
 import { auditLog } from "@/backend/observability/audit";
 import { verifyTurnstileToken } from "@/backend/security/turnstile";
 
@@ -39,17 +43,19 @@ async function adapt<T>(work: () => Promise<T>): Promise<T> {
 }
 
 export const productionAuthCommands: AuthCommands = {
+  preflightCapacity: (action) => adapt(() => assertRateLimitCapacity(action)),
+  withUpstreamConcurrency: (action, work) => adapt(() => withAuthConcurrency(action, work)),
   verifyHuman: (token, action) => adapt(() => verifyTurnstileToken(token, action)),
-  rateLimit: (input) => adapt(() => assertRateLimit(input)),
+  rateLimit: (input) => adapt(() => assertTargetRateLimit(input)),
   identifyEmail: (email) => adapt(() => remnashopIdentifyEmail({ email })),
   hasPasskey: (email) => adapt(() => prismaPasskeyAccountReader.hasCredential(email)),
   async authenticate(input) {
     try {
       const auth = input.operation === "confirm-password-reset"
-        ? await withAuthConcurrency("password_reset_confirm", () => remnashopAuth(
+        ? await remnashopAuth(
             "/auth/password/confirm-reset",
             { email: input.email, code: input.code!, new_password: input.password! },
-          ))
+          )
         : await remnashopAuth(
             input.operation === "register" ? "/auth/register" : "/auth/login",
             { email: input.email, password: input.password! },
@@ -86,7 +92,7 @@ export const productionAuthCommands: AuthCommands = {
     });
   },
   async requestPasswordReset(email) {
-    await adapt(() => withAuthConcurrency("password_reset_start", () => remnashopRequestPasswordReset({ email })));
+    await adapt(() => remnashopRequestPasswordReset({ email }));
   },
   audit: auditLog,
 };

@@ -1,5 +1,5 @@
 import { EventEmitter } from "node:events";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 class FakeSocket extends EventEmitter {
   destroyed = false;
@@ -27,6 +27,18 @@ class FakeSocket extends EventEmitter {
   }
 }
 
+async function respond(
+  socket: FakeSocket | null,
+  writeCount: number,
+  response: string | Buffer,
+) {
+  await vi.waitFor(() => expect(socket?.writes).toHaveLength(writeCount));
+  socket?.emit(
+    "data",
+    typeof response === "string" ? Buffer.from(response) : response,
+  );
+}
+
 const state = vi.hoisted(() => ({
   tcpSocket: null as FakeSocket | null,
   tlsSocket: null as FakeSocket | null,
@@ -52,14 +64,23 @@ vi.mock("node:tls", () => ({
   },
 }));
 
-import { redisCommand } from "@/backend/cache/redis";
+import {
+  redisCommand,
+  resetRedisTransportForTests,
+} from "@/backend/cache/redis";
 
-describe("raw Redis command adapter", () => {
-  beforeEach(() => {
+describe("persistent Redis command adapter", () => {
+  beforeEach(async () => {
+    await resetRedisTransportForTests();
     vi.clearAllMocks();
     state.tcpSocket = null;
     state.tlsSocket = null;
     process.env.REDIS_URL = "redis://localhost:6379/0";
+  });
+
+  afterEach(async () => {
+    await resetRedisTransportForTests();
+    vi.useRealTimers();
   });
 
   it("requires REDIS_URL", async () => {
@@ -74,7 +95,8 @@ describe("raw Redis command adapter", () => {
   it("encodes a command and parses simple string responses", async () => {
     const promise = redisCommand(["PING"]);
     await vi.waitFor(() => expect(state.tcpSocket).toBeTruthy());
-    state.tcpSocket?.responses.push(Buffer.from("+OK\r\n"), Buffer.from("+PONG\r\n"));
+    await respond(state.tcpSocket, 1, "+OK\r\n");
+    await respond(state.tcpSocket, 2, "+PONG\r\n");
 
     await expect(promise).resolves.toBe("PONG");
     expect(state.tcpSocket?.writes[0]).toBe("*2\r\n$6\r\nSELECT\r\n$1\r\n0\r\n");
@@ -85,10 +107,12 @@ describe("raw Redis command adapter", () => {
     process.env.REDIS_URL = "redis://user:pass@localhost:6379/2";
     const promise = redisCommand(["MGET", "a", "b"]);
     await vi.waitFor(() => expect(state.tcpSocket).toBeTruthy());
-    state.tcpSocket?.responses.push(
-      Buffer.from("+OK\r\n"),
-      Buffer.from("+OK\r\n"),
-      Buffer.from("*4\r\n:1\r\n$5\r\nhello\r\n$-1\r\n+OK\r\n"),
+    await respond(state.tcpSocket, 1, "+OK\r\n");
+    await respond(state.tcpSocket, 2, "+OK\r\n");
+    await respond(
+      state.tcpSocket,
+      3,
+      "*4\r\n:1\r\n$5\r\nhello\r\n$-1\r\n+OK\r\n",
     );
 
     await expect(promise).resolves.toEqual([1, "hello", null, "OK"]);
@@ -96,30 +120,90 @@ describe("raw Redis command adapter", () => {
     expect(state.tcpSocket?.writes[1]).toBe("*2\r\n$6\r\nSELECT\r\n$1\r\n2\r\n");
   });
 
+  it("serializes concurrent commands and reuses one authenticated connection", async () => {
+    process.env.REDIS_URL = "redis://user:pass@localhost:6379/2";
+    const first = redisCommand(["GET", "first"]);
+    const second = redisCommand(["GET", "second"]);
+    await vi.waitFor(() => expect(state.tcpSocket).toBeTruthy());
+
+    await respond(state.tcpSocket, 1, "+OK\r\n");
+    await respond(state.tcpSocket, 2, "+OK\r\n");
+    await respond(state.tcpSocket, 3, "$3\r\none\r\n");
+    await respond(state.tcpSocket, 4, "$3\r\ntwo\r\n");
+    await expect(Promise.all([first, second])).resolves.toEqual(["one", "two"]);
+
+    const third = redisCommand(["GET", "third"]);
+    await respond(state.tcpSocket, 5, "$5\r\nthree\r\n");
+    await expect(third).resolves.toBe("three");
+
+    expect(vi.mocked((await import("node:net")).default.connect)).toHaveBeenCalledTimes(1);
+    expect(state.tcpSocket?.writes.filter((write) => write.includes("AUTH"))).toHaveLength(1);
+    expect(state.tcpSocket?.writes.filter((write) => write.includes("SELECT"))).toHaveLength(1);
+  });
+
   it("uses TLS for rediss and supports password-only auth", async () => {
-    process.env.REDIS_URL = "rediss://:secret@redis.example.test:6380";
+    process.env.REDIS_URL = "rediss://:secret@redis.example.test:6380/4";
     const promise = redisCommand(["INCR", "key"]);
     await vi.waitFor(() => expect(state.tlsSocket).toBeTruthy());
-    state.tlsSocket?.responses.push(Buffer.from("+OK\r\n"), Buffer.from(":2\r\n"));
+    await respond(state.tlsSocket, 1, "+OK\r\n");
+    await respond(state.tlsSocket, 2, "+OK\r\n");
+    await respond(state.tlsSocket, 3, ":2\r\n");
 
     await expect(promise).resolves.toBe(2);
     expect(state.tlsSocket?.writes[0]).toBe("*2\r\n$4\r\nAUTH\r\n$6\r\nsecret\r\n");
+    expect(state.tlsSocket?.writes[1]).toBe("*2\r\n$6\r\nSELECT\r\n$1\r\n4\r\n");
+    expect(vi.mocked((await import("node:net")).default.connect)).not.toHaveBeenCalled();
+    expect(vi.mocked((await import("node:tls")).default.connect)).toHaveBeenCalledTimes(1);
+  });
+
+  it("reconnects after an idle connection closes", async () => {
+    process.env.REDIS_URL = "redis://localhost:6379";
+    const first = redisCommand(["PING"]);
+    await vi.waitFor(() => expect(state.tcpSocket).toBeTruthy());
+    await respond(state.tcpSocket, 1, "+PONG\r\n");
+    await expect(first).resolves.toBe("PONG");
+    const closedSocket = state.tcpSocket;
+    closedSocket?.destroy();
+    state.tcpSocket = null;
+
+    const second = redisCommand(["PING"]);
+    await vi.waitFor(() => expect(state.tcpSocket).toBeTruthy());
+    expect(state.tcpSocket).not.toBe(closedSocket);
+    await respond(state.tcpSocket, 1, "+PONG\r\n");
+    await expect(second).resolves.toBe("PONG");
+    expect(vi.mocked((await import("node:net")).default.connect)).toHaveBeenCalledTimes(2);
+  });
+
+  it("rejects work beyond the bounded command queue", async () => {
+    process.env.REDIS_URL = "redis://localhost:6379";
+    const active = redisCommand(["PING"]).catch((error) => error);
+    await vi.waitFor(() => expect(state.tcpSocket?.writes).toHaveLength(1));
+    const queued = Array.from({ length: 128 }, (_, index) => (
+      redisCommand(["GET", `key-${index}`]).catch((error) => error)
+    ));
+
+    await expect(redisCommand(["GET", "overflow"])).rejects.toMatchObject({
+      code: "UPSTREAM_UNAVAILABLE",
+      debug: { message: "Redis command queue exceeded 128 entries" },
+    });
+
+    await resetRedisTransportForTests();
+    await Promise.all([active, ...queued]);
   });
 
   it("rejects Redis error and unsupported responses", async () => {
+    process.env.REDIS_URL = "redis://localhost:6379";
     let promise = redisCommand(["PING"]);
     await vi.waitFor(() => expect(state.tcpSocket).toBeTruthy());
-    state.tcpSocket?.responses.push(Buffer.from("-ERR nope\r\n"));
+    await respond(state.tcpSocket, 1, "-ERR nope\r\n");
     await expect(promise).rejects.toMatchObject({
       code: "UPSTREAM_UNAVAILABLE",
       status: 503,
       debug: { message: "ERR nope" },
     });
 
-    state.tcpSocket = null;
     promise = redisCommand(["PING"]);
-    await vi.waitFor(() => expect(state.tcpSocket).toBeTruthy());
-    (state.tcpSocket as FakeSocket | null)?.responses.push(Buffer.from("?wat\r\n"));
+    await respond(state.tcpSocket, 2, "?wat\r\n");
     await expect(promise).rejects.toMatchObject({
       code: "UPSTREAM_UNAVAILABLE",
       status: 503,
@@ -147,9 +231,10 @@ describe("raw Redis command adapter", () => {
   });
 
   it("rejects oversized RESP before unbounded buffering", async () => {
+    process.env.REDIS_URL = "redis://localhost:6379";
     const promise = redisCommand(["PING"]);
     await vi.waitFor(() => expect(state.tcpSocket).toBeTruthy());
-    state.tcpSocket?.responses.push(Buffer.alloc(1024 * 1024 + 1, 65));
+    await respond(state.tcpSocket, 1, Buffer.alloc(1024 * 1024 + 1, 65));
 
     await expect(promise).rejects.toMatchObject({
       code: "UPSTREAM_UNAVAILABLE",
@@ -223,7 +308,7 @@ describe("raw Redis command adapter", () => {
 
     await expect(redisCommand(["PING"])).rejects.toMatchObject({
       code: "UPSTREAM_UNAVAILABLE",
-      debug: { message: "Redis connection deadline exceeded" },
+      debug: { message: "Redis command deadline exceeded in queue" },
     });
     now.mockRestore();
   });
@@ -241,6 +326,18 @@ describe("raw Redis command adapter", () => {
     await vi.advanceTimersByTimeAsync(3_000);
     await rejection;
     expect(state.tcpSocket?.listenerCount("data")).toBe(0);
+
+    const poisonedSocket = state.tcpSocket;
+    state.tcpSocket = null;
+    const recovered = redisCommand(["PING"]);
+    await vi.advanceTimersByTimeAsync(100);
+    expect(state.tcpSocket).toBeTruthy();
+    expect(state.tcpSocket).not.toBe(poisonedSocket);
+    (state.tcpSocket as FakeSocket | null)?.emit(
+      "data",
+      Buffer.from("+PONG\r\n"),
+    );
+    await expect(recovered).resolves.toBe("PONG");
     vi.useRealTimers();
   });
 });

@@ -8,6 +8,7 @@ import {
   type TelegramProviderSession,
   type VerifiedTelegramCallback,
 } from "@/application/auth/ports/telegram-callback";
+import { paymentOwnerTransitionKey } from "@/shared/domain/payment-owner-transition";
 
 function normalizedEmail(value: string | null | undefined) {
   return value?.trim().toLowerCase() || null;
@@ -129,12 +130,24 @@ async function reconcileLinkedCallback(
   const incomingAccountId = consumed.providerSession
     ? gateway.providerAccountId(consumed.providerSession)
     : null;
+  const targetAccountId = incomingAccountId ?? consumed.user.upstreamAccountId;
+  if (!targetAccountId) {
+    throw new TelegramCallbackError("ACCOUNT_MERGE_REQUIRED");
+  }
 
   return gateway.withOwnerChangeFence({
     userIds: [consumed.user.id],
     upstreamAccountIds: [consumed.user.upstreamAccountId, incomingAccountId]
       .filter((id): id is string => Boolean(id)),
     telegramIds: [consumed.telegramId],
+    operationKey: paymentOwnerTransitionKey({
+      actorUserId: consumed.user.id,
+      sourceUpstreamAccountId:
+        consumed.user.upstreamAccountId ?? targetAccountId,
+      targetUpstreamAccountId: targetAccountId,
+      telegramId: consumed.telegramId,
+    }),
+    targetUpstreamAccountId: targetAccountId,
     work: async () => {
       try {
         await gateway.attachTelegramToCurrentAccount({

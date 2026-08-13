@@ -65,33 +65,44 @@ enum WebAuthnChallengeType {
 }
 
 model WebUser {
-  id                        String                     @id @default(cuid())
-  remnashopUserId           String?                    @unique
-  email                     String?                    @unique
-  telegramId                String?                    @unique
-  telegramUsername          String?
-  fullName                  String?
-  photoUrl                  String?
-  lastLoginAt               DateTime?
-  emailVerified             Boolean                    @default(false)
-  authPending               Boolean                    @default(false)
-  pendingRemnashopUserId    String?
-  pendingRemnashopEmail     String?
-  displayName               String?
-  createdAt                 DateTime                   @default(now())
-  updatedAt                 DateTime                   @updatedAt
-  sessions                  WebSession[]
-  auditLogs                 AuditLog[]
-  emailVerificationCodes    EmailVerificationCode[]
-  paymentOperations         PaymentOperation[]
-  paymentRecords            PaymentRecord[]
-  paymentHistorySyncState   PaymentHistorySyncState?
-  telegramAuthStates        TelegramAuthState[]
-  webAuthnCredentials       WebAuthnCredential[]
-  webAuthnChallenges        WebAuthnChallenge[]
-  accountMergeConfirmations AccountMergeConfirmation[]
+  id                                  String                     @id @default(cuid())
+  remnashopUserId                     String?                    @unique
+  email                               String?                    @unique
+  telegramId                          String?                    @unique
+  telegramUsername                    String?
+  fullName                            String?
+  photoUrl                            String?
+  lastLoginAt                         DateTime?
+  emailVerified                       Boolean                    @default(false)
+  authPending                         Boolean                    @default(false)
+  pendingRemnashopUserId              String?
+  pendingRemnashopEmail               String?
+  paymentOwnerChangeTokenHash         String?
+  paymentOwnerChangeLeaseExpiresAt    DateTime?
+  paymentOwnerChangeStartedAt         DateTime?
+  paymentOwnerChangeMutationStartedAt DateTime?
+  paymentOwnerChangeLocalFinalizedAt  DateTime?
+  paymentOwnerChangeOperationHash     String?
+  paymentOwnerChangeExpectedOwnerHash String?
+  paymentOwnerChangeAttemptCount      Int                        @default(0)
+  displayName                         String?
+  createdAt                           DateTime                   @default(now())
+  updatedAt                           DateTime                   @updatedAt
+  sessions                            WebSession[]
+  auditLogs                           AuditLog[]
+  emailVerificationCodes              EmailVerificationCode[]
+  paymentOperations                   PaymentOperation[]
+  paymentRecords                      PaymentRecord[]
+  paymentHistorySyncState             PaymentHistorySyncState?
+  telegramAuthStates                  TelegramAuthState[]
+  webAuthnCredentials                 WebAuthnCredential[]
+  webAuthnChallenges                  WebAuthnChallenge[]
+  accountMergeConfirmations           AccountMergeConfirmation[]
 
   @@index([pendingRemnashopUserId])
+  @@index([paymentOwnerChangeTokenHash])
+  @@index([paymentOwnerChangeLeaseExpiresAt])
+  @@index([paymentOwnerChangeOperationHash])
 }
 
 model AccountMergeConfirmation {
@@ -170,31 +181,37 @@ model TelegramAuthState {
 }
 
 model WebSession {
-  id                             String                   @id @default(cuid())
-  userId                         String
-  refreshTokenHash               String                   @unique
-  refreshRotatedAt               DateTime?
-  remnashopAccessTokenEncrypted  String?
-  remnashopRefreshTokenEncrypted String?
-  remnashopAccessExpiresAt       DateTime?
-  remnashopRefreshExpiresAt      DateTime?
-  authMethod                     WebSessionAuthMethod     @default(EMAIL)
-  assuranceLevel                 WebSessionAssuranceLevel @default(FULL)
-  userAgent                      String?
-  ipHash                         String?
-  accessTokenExpiresAt           DateTime
-  refreshExpiresAt               DateTime
-  revokedAt                      DateTime?
-  createdAt                      DateTime                 @default(now())
-  updatedAt                      DateTime                 @updatedAt
-  user                           WebUser                  @relation(fields: [userId], references: [id], onDelete: Cascade)
-  refreshTokenHistory            WebRefreshToken[]
+  id                                String                   @id @default(cuid())
+  userId                            String
+  refreshTokenHash                  String                   @unique
+  refreshRotatedAt                  DateTime?
+  remnashopAccessTokenEncrypted     String?
+  remnashopRefreshTokenEncrypted    String?
+  remnashopAccessExpiresAt          DateTime?
+  remnashopRefreshExpiresAt         DateTime?
+  remnashopRefreshClaimTokenHash    String?
+  remnashopRefreshLeaseExpiresAt    DateTime?
+  remnashopRefreshDispatchedAt      DateTime?
+  remnashopRefreshRecoveryEncrypted String?
+  remnashopRefreshAttemptCount      Int                      @default(0)
+  authMethod                        WebSessionAuthMethod     @default(EMAIL)
+  assuranceLevel                    WebSessionAssuranceLevel @default(FULL)
+  userAgent                         String?
+  ipHash                            String?
+  accessTokenExpiresAt              DateTime
+  refreshExpiresAt                  DateTime
+  revokedAt                         DateTime?
+  createdAt                         DateTime                 @default(now())
+  updatedAt                         DateTime                 @updatedAt
+  user                              WebUser                  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  refreshTokenHistory               WebRefreshToken[]
 
   @@index([userId])
   @@index([accessTokenExpiresAt])
   @@index([refreshExpiresAt])
   @@index([remnashopAccessExpiresAt])
   @@index([remnashopRefreshExpiresAt])
+  @@index([remnashopRefreshLeaseExpiresAt])
   @@index([revokedAt])
   @@index([assuranceLevel])
 }

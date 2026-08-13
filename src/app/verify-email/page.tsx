@@ -2,10 +2,11 @@ import { AppShell } from "@/app/_components/app-shell";
 import { PageHeader } from "@/frontend/components/layout";
 import { VerifyEmailPanel } from "@/frontend/components/verify-email-panel";
 import { safeReadiness } from "@/application/auth/execute-email-verification";
-import { productionAuthProfileGateway } from "@/backend/integrations/auth/auth-profile-gateway";
+import { requestAuthProfileGateway } from "@/app/_composition/request-scoped-readers";
 import {
   resolveEmailVerificationSetup,
 } from "@/shared/auth/account-setup-flow";
+import { sessionRefreshPath } from "@/shared/auth/session-navigation";
 import { redirect } from "next/navigation";
 
 export const dynamic = "force-dynamic";
@@ -29,8 +30,10 @@ export default async function VerifyEmailPage({
     firstSearchParam(params.flow),
     firstSearchParam(params.redirect_to),
   );
-  const initialReadiness = await safeReadiness(productionAuthProfileGateway);
-  if (initialReadiness.status === "unauthorized") redirect("/login");
+  const initialReadiness = await safeReadiness(requestAuthProfileGateway);
+  if (initialReadiness.status === "unauthorized") {
+    redirect(sessionRefreshPath("/verify-email"));
+  }
 
   return (
     <AppShell requireAuth>

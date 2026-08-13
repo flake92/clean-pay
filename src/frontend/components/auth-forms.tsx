@@ -10,6 +10,7 @@ import { Password } from "primereact/password";
 import { executeAuthAction } from "@/app/actions/auth";
 import { PasskeyLoginButton } from "@/frontend/components/passkey-actions";
 import { TurnstileWidget, type TurnstileHandle, hasTurnstileSiteKey } from "@/frontend/components/turnstile-widget";
+import { registrationEmailVerificationPath } from "@/shared/auth/account-setup-flow";
 
 type ApiState = { loading: boolean; error: string | null };
 
@@ -189,7 +190,9 @@ export function LoginForm({
         if (result.emailVerified || !result.verificationRequired) {
           redirectAfterAuth(redirectTo);
         } else {
-          redirectAfterAuth("/register/verify-email");
+          redirectAfterAuth(registrationEmailVerificationPath(redirectTo, {
+            deliveryFailed: result.verificationDeliveryFailed,
+          }));
         }
         return;
       }

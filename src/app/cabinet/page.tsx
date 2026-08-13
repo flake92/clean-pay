@@ -5,11 +5,12 @@ import { CabinetPanel } from "@/frontend/components/cabinet-panel";
 import { AppShell } from "@/app/_components/app-shell";
 import { PageHeader } from "@/frontend/components/layout";
 import { loadRequestCabinetViewModel } from "@/app/_composition/request-scoped-readers";
+import { sessionRefreshPath } from "@/shared/auth/session-navigation";
 import { redirect } from "next/navigation";
 
 async function loadAuthenticatedCabinet() {
   const model = await loadRequestCabinetViewModel();
-  if (model.status === "unauthorized") redirect("/login");
+  if (model.status === "unauthorized") redirect(sessionRefreshPath("/cabinet"));
   return model;
 }
 

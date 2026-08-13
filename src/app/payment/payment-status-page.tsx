@@ -1,7 +1,7 @@
 import { Card } from "primereact/card";
 
 import { loadPaymentStatus } from "@/application/payments/load-payment-status";
-import { productionPaymentStatusReader } from "@/backend/integrations/payments/payment-status-reader";
+import { requestPaymentStatusReader } from "@/app/_composition/request-scoped-readers";
 import { productionPaymentMaintenanceRunner } from "@/backend/integrations/payments/payment-maintenance-runner";
 import { AppShell } from "@/app/_components/app-shell";
 import { PageHeader } from "@/frontend/components/layout";
@@ -17,7 +17,7 @@ export async function PaymentStatusPage({ kind, searchParams }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const params = await searchParams;
-  const model = await loadPaymentStatus(productionPaymentStatusReader, productionPaymentMaintenanceRunner, {
+  const model = await loadPaymentStatus(requestPaymentStatusReader, productionPaymentMaintenanceRunner, {
     paymentId: first(params.payment_id) ?? first(params.paymentId) ?? first(params.order_id) ?? first(params.id) ?? null,
     operationId: first(params.operation_id) ?? first(params.operationId) ?? null,
   });

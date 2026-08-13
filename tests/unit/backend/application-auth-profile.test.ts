@@ -65,6 +65,22 @@ describe("application auth profile policy", () => {
     expect(port.refreshCurrentAccess).toHaveBeenCalledOnce();
   });
 
+  it("defers verified-email reconciliation for render-only adapters", async () => {
+    const port = gateway({ canReconcileVerifiedEmail: false });
+
+    await expect(resolveAuthProfile(port)).resolves.toMatchObject({
+      email: "u@example.com",
+      emailVerified: false,
+      accountSyncPending: false,
+    });
+    expect(port.confirmVerifiedEmail).not.toHaveBeenCalled();
+    expect(port.refreshCurrentAccess).not.toHaveBeenCalled();
+    expect(port.debug).toHaveBeenCalledWith(
+      "auth_me_verified_email_reconciliation_deferred",
+      { sessionId: "session-1", userId: "user-1" },
+    );
+  });
+
   it("does not reconcile an unresolved Telegram merge or a different pending owner", async () => {
     for (const user of [
       { ...session().user, telegramId: "777", accountSyncPending: true },

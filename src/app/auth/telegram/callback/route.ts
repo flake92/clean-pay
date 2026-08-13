@@ -19,6 +19,7 @@ import {
   createWebSessionOnResponse,
   getCurrentSession,
 } from "@/backend/integrations/sessions/web-session-service";
+import { revokeWebSessionById } from "@/backend/integrations/sessions/web-session-revocation";
 import { readTelegramPopupRequest } from "@/backend/integrations/telegram/popup-request";
 import { TelegramAuthStateAlreadyConsumedError } from "@/backend/integrations/telegram/oidc";
 import {
@@ -66,7 +67,19 @@ async function applyCallbackOutcome(
   );
 
   if (outcome.session.requiresTelegramRecovery) {
-    await recoverRemnashopTelegramSession(session.id, outcome.session.userId);
+    try {
+      await recoverRemnashopTelegramSession(session.id, outcome.session.userId);
+    } catch (error) {
+      try {
+        await revokeWebSessionById(session.id, outcome.session.userId);
+      } catch (revocationError) {
+        logTechnicalError("telegram_callback_session_revocation_failed", revocationError, {
+          sessionId: session.id,
+          userId: outcome.session.userId,
+        });
+      }
+      throw error;
+    }
   }
 }
 

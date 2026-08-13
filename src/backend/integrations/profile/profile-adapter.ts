@@ -7,17 +7,15 @@ import {
   remnashopChangePassword,
   remnashopRefreshTokens,
 } from "@/backend/integrations/remnashop/client";
-import { prismaAuthSessionRepository } from "@/backend/integrations/auth/prisma-auth-session-repository";
+import { acquireRemnashopTokensForSession } from "@/backend/integrations/remnashop/session-token-lifecycle";
 import { replaceWebSessionAfterPasswordChange } from "@/backend/integrations/sessions/web-session-service";
 import { auditLog } from "@/backend/observability/audit";
 import { assertRateLimit } from "@/backend/limits/rate-limit";
 
 type PasswordSessionContext = Awaited<ReturnType<typeof getAuthorizedRemnashopTokens>>;
 type PasswordProviderContext = Awaited<ReturnType<typeof remnashopChangePassword>>;
-type RefreshedProviderContext = Awaited<ReturnType<typeof remnashopRefreshTokens>>;
 function passwordSession(value: { context: unknown }) { return value.context as PasswordSessionContext; }
 function passwordProvider(value: { context: unknown }) { return value.context as PasswordProviderContext; }
-function refreshedProvider(value: { context: unknown }) { return value.context as RefreshedProviderContext; }
 function addDays(date: Date, days: number) { return new Date(date.getTime() + days * 86_400_000); }
 
 export const productionProfileCommands: ProfileCommands = {
@@ -45,18 +43,20 @@ export const productionProfileCommands: ProfileCommands = {
     }
   },
   async refreshProviderSession(session) {
-    const refreshed = await remnashopRefreshTokens(passwordSession(session).refreshToken);
+    const authorized = passwordSession(session);
+    const refreshed = await acquireRemnashopTokensForSession({
+      session: authorized.session,
+      refresh: remnashopRefreshTokens,
+      forceRefresh: true,
+    });
+    if (!refreshed) {
+      throw new ProfileGatewayError("UNAUTHORIZED");
+    }
     return { context: refreshed };
   },
-  async persistRefreshedProviderSession(session, refreshed) {
-    const authorized = passwordSession(session);
-    const result = refreshedProvider(refreshed);
-    await prismaAuthSessionRepository.replaceUpstreamTokens(authorized.session.id, {
-      accessTokenEncrypted: protectRemnashopToken(result.cookies.accessToken),
-      refreshTokenEncrypted: protectRemnashopToken(result.cookies.refreshToken),
-      accessExpiresAt: new Date(result.data.expires_at),
-      refreshExpiresAt: new Date(result.data.refresh_expires_at),
-    });
+  async persistRefreshedProviderSession() {
+    // The shared refresh lifecycle durably stores and fences the one-time
+    // token response before returning it to this workflow.
   },
   async replaceLocalPasswordSession(session, changed) {
     const authorized = passwordSession(session);

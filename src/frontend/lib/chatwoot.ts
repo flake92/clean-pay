@@ -1,4 +1,7 @@
-import type { ChatwootWidgetConfig } from "@/application/models/chatwoot";
+import type {
+  ChatwootSupportContext,
+  ChatwootWidgetConfig,
+} from "@/application/models/chatwoot";
 
 type ChatwootUserInput = {
   name: string;
@@ -11,8 +14,12 @@ type ChatwootApi = {
   baseUrl: string;
   websiteToken: string;
   hasLoaded: boolean;
+  identifier?: string | number;
+  user?: ChatwootUserInput;
+  resetTriggered?: boolean;
   setUser(identifier: string, user: ChatwootUserInput): void;
-  setCustomAttributes(attributes: Record<string, string>): void;
+  setLabel?(label: string): void;
+  removeLabel?(label: string): void;
   toggleBubbleVisibility(visibility: "hide" | "show"): void;
   reset(): void;
 };
@@ -21,6 +28,19 @@ type ChatwootIdentityState = {
   core: string;
   customAttributes: string;
 };
+
+type ChatwootPendingIdentityState = ChatwootIdentityState & {
+  attemptId: string;
+  startedAt: number;
+  retryCount: number;
+  phase: "sent" | "waiting_for_frame";
+};
+
+export type ChatwootIdentificationStatus =
+  | "unavailable"
+  | "pending"
+  | "failed"
+  | "ready";
 
 declare global {
   interface Window {
@@ -31,12 +51,49 @@ declare global {
     chatwootSettings?: Record<string, unknown>;
     cleanPayChatwootAuthorized?: boolean;
     cleanPayChatwootIdentity?: ChatwootIdentityState;
+    cleanPayChatwootPendingIdentity?: ChatwootPendingIdentityState;
+    cleanPayChatwootFailedIdentity?: ChatwootIdentityState;
   }
 }
 
 const scriptId = "clean-pay-chatwoot-sdk";
 const identityStorageKey = "clean-pay:chatwoot-identity:v1";
+const supportContextCacheTtlMs = 60_000;
+export const CHATWOOT_IDENTITY_ATTEMPT_TIMEOUT_MS = 12_000;
+export const CHATWOOT_IDENTITY_MAX_RETRIES = 1;
 let sdkPromise: Promise<void> | null = null;
+let identityAttemptSequence = 0;
+const supportContextCache = new Map<string, {
+  expiresAt: number;
+  value: Promise<ChatwootSupportContext | null>;
+}>();
+
+export function loadChatwootSupportContextCached(
+  identifier: string,
+  loader: () => Promise<ChatwootSupportContext | null>,
+  now = Date.now(),
+) {
+  const cached = supportContextCache.get(identifier);
+
+  if (cached && cached.expiresAt > now) {
+    return cached.value;
+  }
+
+  const value = loader().catch((error) => {
+    supportContextCache.delete(identifier);
+    throw error;
+  });
+  supportContextCache.set(identifier, {
+    expiresAt: now + supportContextCacheTtlMs,
+    value,
+  });
+
+  return value;
+}
+
+export function clearChatwootSupportContextCache() {
+  supportContextCache.clear();
+}
 
 function fingerprint(value: string) {
   let hash = 0x811c9dc5;
@@ -74,12 +131,125 @@ function rememberIdentity(identity: ChatwootIdentityState) {
   }
 }
 
-export function clearChatwootIdentityState() {
+function hasCookie(name: string) {
+  try {
+    const encodedName = `${encodeURIComponent(name)}=`;
+
+    return document.cookie.split(";").some((cookie) => (
+      cookie.trim().startsWith(encodedName)
+    ));
+  } catch {
+    return false;
+  }
+}
+
+function cookieValue(name: string) {
+  try {
+    const encodedName = `${encodeURIComponent(name)}=`;
+    const value = document.cookie.split(";").find((cookie) => (
+      cookie.trim().startsWith(encodedName)
+    ));
+
+    if (!value) {
+      return null;
+    }
+
+    const encodedValue = value.trim().slice(encodedName.length);
+
+    try {
+      return decodeURIComponent(encodedValue);
+    } catch {
+      return encodedValue;
+    }
+  } catch {
+    return null;
+  }
+}
+
+function nextIdentityAttemptId() {
+  identityAttemptSequence += 1;
+  return `${Date.now().toString(36)}-${identityAttemptSequence.toString(36)}`;
+}
+
+function desiredIdentity(
+  config: ChatwootWidgetConfig,
+  supportAttributes: Record<string, string>,
+) {
+  const customAttributes = {
+    ...config.user.customAttributes,
+    ...supportAttributes,
+  };
+  const core = fingerprint(JSON.stringify([
+    config.baseUrl,
+    config.websiteToken,
+    config.user.identifier,
+    config.user.identifierHash,
+    config.user.name,
+    config.user.email,
+  ]));
+
+  return {
+    customAttributes,
+    identity: {
+      core,
+      customAttributes: fingerprint(JSON.stringify(customAttributes)),
+    },
+  };
+}
+
+function sendChatwootIdentity(
+  config: ChatwootWidgetConfig,
+  supportAttributes: Record<string, string>,
+  retryCount: number,
+) {
+  const chatwoot = window.$chatwoot;
+
+  if (!chatwoot || !window.cleanPayChatwootAuthorized) {
+    return false;
+  }
+
+  const { customAttributes, identity } = desiredIdentity(
+    config,
+    supportAttributes,
+  );
+  const pending: ChatwootPendingIdentityState = {
+    ...identity,
+    attemptId: nextIdentityAttemptId(),
+    startedAt: Date.now(),
+    retryCount,
+    phase: "sent",
+  };
+
+  expireCookie(`cw_user_${config.websiteToken}`);
+  window.cleanPayChatwootPendingIdentity = pending;
+
+  try {
+    chatwoot.setUser(config.user.identifier, {
+      name: config.user.name,
+      ...(config.user.email ? { email: config.user.email } : {}),
+      identifier_hash: config.user.identifierHash,
+      custom_attributes: customAttributes,
+    });
+    return true;
+  } catch (error) {
+    failChatwootPendingIdentityAttempt(
+      pending.attemptId,
+      config.websiteToken,
+    );
+    throw error;
+  }
+}
+
+export function clearChatwootIdentityState(preserveFailedIdentity = false) {
   if (typeof window === "undefined") {
     return;
   }
 
   window.cleanPayChatwootIdentity = undefined;
+  window.cleanPayChatwootPendingIdentity = undefined;
+  if (!preserveFailedIdentity) {
+    window.cleanPayChatwootFailedIdentity = undefined;
+  }
 
   try {
     window.localStorage.removeItem(identityStorageKey);
@@ -173,43 +343,261 @@ export function enterChatwootAuthenticatedMode() {
   }
 }
 
-export function identifyChatwootUser(config: ChatwootWidgetConfig) {
+export function identifyChatwootUser(
+  config: ChatwootWidgetConfig,
+  supportAttributes: Record<string, string> = {},
+): ChatwootIdentificationStatus {
+  const chatwoot = window.$chatwoot;
+
+  if (!chatwoot || !window.cleanPayChatwootAuthorized) {
+    return "unavailable";
+  }
+
+  const { identity: desired } = desiredIdentity(config, supportAttributes);
+  const previous = window.cleanPayChatwootIdentity ?? storedIdentity();
+  const identityCookieName = `cw_user_${config.websiteToken}`;
+  const failed = window.cleanPayChatwootFailedIdentity;
+
+  if (
+    failed?.core === desired.core
+    && failed.customAttributes === desired.customAttributes
+  ) {
+    return "failed";
+  }
+
+  if (failed) {
+    // A changed signed identity or support context gets its own bounded cycle.
+    window.cleanPayChatwootFailedIdentity = undefined;
+  }
+
+  // A waiting retry is activated only by a validated `loaded` message from
+  // the replacement iframe. Generic ready/open events must not race it.
+  if (window.cleanPayChatwootPendingIdentity) {
+    return "pending";
+  }
+
+  if (
+    previous?.core === desired.core
+    && previous.customAttributes === desired.customAttributes
+    && hasCookie(identityCookieName)
+    && hasCookie("cw_conversation")
+  ) {
+    chatwoot.toggleBubbleVisibility("show");
+    return "ready";
+  }
+
+  if (previous?.core && previous.core !== desired.core) {
+    // Never expose a bubble still associated with another Clean Pay user,
+    // inbox origin, or signed identity while the replacement is in flight.
+    chatwoot.toggleBubbleVisibility("hide");
+  }
+
+  // The SDK's identity cookie ignores custom_attributes. Force the signed
+  // request whenever our confirmed fingerprint or its cookies are missing.
+  sendChatwootIdentity(config, supportAttributes, 0);
+
+  return "pending";
+}
+
+export function getChatwootPendingIdentityAttempt() {
+  return typeof window === "undefined"
+    ? undefined
+    : window.cleanPayChatwootPendingIdentity;
+}
+
+export function failChatwootPendingIdentityAttempt(
+  attemptId: string,
+  websiteToken?: string,
+) {
+  const pending = window.cleanPayChatwootPendingIdentity;
+
+  if (!pending || pending.attemptId !== attemptId) {
+    return false;
+  }
+
+  window.cleanPayChatwootFailedIdentity = {
+    core: pending.core,
+    customAttributes: pending.customAttributes,
+  };
+  window.cleanPayChatwootPendingIdentity = undefined;
+  if (websiteToken) {
+    expireCookie(`cw_user_${websiteToken}`);
+  }
+  return true;
+}
+
+export function retryChatwootIdentityAttempt(
+  attemptId: string,
+  config: ChatwootWidgetConfig,
+) {
+  const pending = window.cleanPayChatwootPendingIdentity;
+  const chatwoot = window.$chatwoot;
+  const frame = document.getElementById(
+    "chatwoot_live_chat_widget",
+  ) as HTMLIFrameElement | null;
+
+  if (
+    !pending
+    || pending.attemptId !== attemptId
+    || pending.retryCount >= CHATWOOT_IDENTITY_MAX_RETRIES
+    || !chatwoot
+    || !frame?.parentNode
+    || !window.cleanPayChatwootAuthorized
+  ) {
+    return false;
+  }
+
+  try {
+    chatwoot.toggleBubbleVisibility("hide");
+  } catch {
+    // A partially loaded launcher must not prevent the bounded retry.
+  }
+
+  const replacement = frame.cloneNode(false) as HTMLIFrameElement;
+  const widgetUrl = new URL(`${config.baseUrl.replace(/\/$/, "")}/widget`);
+  const conversation = cookieValue("cw_conversation");
+  widgetUrl.searchParams.set("website_token", config.websiteToken);
+  if (conversation) {
+    widgetUrl.searchParams.set("cw_conversation", conversation);
+  }
+  replacement.src = widgetUrl.toString();
+  replacement.style.visibility = "hidden";
+
+  // Reset only the SDK's in-memory delivery state. Calling its public reset()
+  // would erase the active conversation; replacing the frame creates a new
+  // WindowProxy while preserving that conversation for the retry.
+  chatwoot.identifier = undefined;
+  chatwoot.user = undefined;
+  chatwoot.hasLoaded = false;
+  chatwoot.resetTriggered = false;
+  expireCookie(`cw_user_${config.websiteToken}`);
+
+  const waitingAttempt: ChatwootPendingIdentityState = {
+    ...pending,
+    attemptId: nextIdentityAttemptId(),
+    startedAt: Date.now(),
+    retryCount: pending.retryCount + 1,
+    phase: "waiting_for_frame",
+  };
+  window.cleanPayChatwootPendingIdentity = waitingAttempt;
+  frame.replaceWith(replacement);
+  return true;
+}
+
+export function activateChatwootIdentityRetry(
+  config: ChatwootWidgetConfig,
+  supportAttributes: Record<string, string> = {},
+) {
+  const pending = window.cleanPayChatwootPendingIdentity;
+
+  if (!pending || pending.phase !== "waiting_for_frame") {
+    return false;
+  }
+
+  return sendChatwootIdentity(config, supportAttributes, pending.retryCount);
+}
+
+export function confirmChatwootIdentity(expectedAttemptId?: string) {
+  const pending = window.cleanPayChatwootPendingIdentity;
+
+  if (
+    !pending
+    || pending.phase !== "sent"
+    || (expectedAttemptId && pending.attemptId !== expectedAttemptId)
+    || !window.cleanPayChatwootAuthorized
+  ) {
+    return false;
+  }
+
+  window.cleanPayChatwootPendingIdentity = undefined;
+  window.cleanPayChatwootFailedIdentity = undefined;
+  rememberIdentity({
+    core: pending.core,
+    customAttributes: pending.customAttributes,
+  });
+  return true;
+}
+
+function chatwootFrameMessage(event: MessageEvent, baseUrl: string) {
+  let origin: string;
+
+  try {
+    origin = new URL(baseUrl).origin;
+  } catch {
+    return null;
+  }
+
+  const frame = document.getElementById(
+    "chatwoot_live_chat_widget",
+  ) as HTMLIFrameElement | null;
+
+  if (
+    event.origin !== origin
+    || !frame?.contentWindow
+    || event.source !== frame.contentWindow
+    || typeof event.data !== "string"
+    || !event.data.startsWith("chatwoot-widget:")
+  ) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(event.data.slice("chatwoot-widget:".length)) as {
+      event?: unknown;
+      data?: { widgetAuthToken?: unknown };
+    };
+  } catch {
+    return null;
+  }
+}
+
+export function isUnexpectedChatwootFrameMessage(
+  event: MessageEvent,
+  baseUrl: string,
+) {
+  if (
+    typeof event.data !== "string"
+    || !event.data.startsWith("chatwoot-widget:")
+  ) {
+    return false;
+  }
+
+  return chatwootFrameMessage(event, baseUrl) === null;
+}
+
+export function isChatwootFrameReady(event: MessageEvent, baseUrl: string) {
+  return chatwootFrameMessage(event, baseUrl)?.event === "loaded";
+}
+
+export function isChatwootIdentityConfirmation(
+  event: MessageEvent,
+  baseUrl: string,
+) {
+  const message = chatwootFrameMessage(event, baseUrl);
+
+  return message?.event === "setAuthCookie"
+    && typeof message.data?.widgetAuthToken === "string"
+    && message.data.widgetAuthToken.length > 0;
+}
+
+export function applyChatwootManagedLabels(context: ChatwootSupportContext) {
   const chatwoot = window.$chatwoot;
 
   if (!chatwoot || !window.cleanPayChatwootAuthorized) {
     return;
   }
 
-  const core = fingerprint(JSON.stringify([
-    config.websiteToken,
-    config.user.identifier,
-    config.user.identifierHash,
-    config.user.name,
-    config.user.email,
-  ]));
-  const customAttributes = fingerprint(JSON.stringify(config.user.customAttributes));
-  const previous = window.cleanPayChatwootIdentity ?? storedIdentity();
-
-  // Calling setUser repeatedly is intentional: the official SDK performs its
-  // own cookie-based deduplication and will resend identity if that cookie was
-  // removed independently of Clean Pay state.
-  chatwoot.setUser(config.user.identifier, {
-    name: config.user.name,
-    ...(config.user.email ? { email: config.user.email } : {}),
-    identifier_hash: config.user.identifierHash,
-    custom_attributes: config.user.customAttributes,
-  });
-
-  // setUser is asynchronous inside the SDK. A separate attribute update is
-  // safe only when the already-bound core identity did not change.
-  if (previous?.core === core && previous.customAttributes !== customAttributes) {
-    chatwoot.setCustomAttributes(config.user.customAttributes);
+  for (const label of context.managedLabels) {
+    try {
+      if (label.enabled) {
+        chatwoot.setLabel?.(label.name);
+      } else {
+        chatwoot.removeLabel?.(label.name);
+      }
+    } catch {
+      // Older or partially loaded SDKs may not expose label operations.
+    }
   }
-
-  rememberIdentity({ core, customAttributes });
-  // Reveal the launcher only after the signed identity command was accepted
-  // by the SDK. This also avoids a guest-widget flash during initial loading.
-  chatwoot.toggleBubbleVisibility("show");
 }
 
 export function resetChatwootSession() {
@@ -219,13 +607,24 @@ export function resetChatwootSession() {
 
   window.cleanPayChatwootAuthorized = false;
   clearChatwootIdentityState();
+  clearChatwootSupportContextCache();
   const chatwoot = window.$chatwoot;
 
   if (chatwoot) {
+    // The standard SDK keeps these fields across reset() and otherwise sends
+    // the previous signed user to the freshly loaded guest iframe again.
+    chatwoot.identifier = undefined;
+    chatwoot.user = undefined;
+    chatwoot.hasLoaded = false;
+
     try {
       chatwoot.reset();
     } catch {
       // Fall through to direct cookie cleanup.
+    } finally {
+      // reset() suppresses the next ready event. Re-enable it so a later
+      // client-side login can identify safely after the guest iframe reloads.
+      chatwoot.resetTriggered = false;
     }
 
     try {

@@ -2,14 +2,17 @@ import { AppShell } from "@/app/_components/app-shell";
 import { PageHeader } from "@/frontend/components/layout";
 import { LinkAccountPanel } from "@/frontend/components/link-account-panel";
 import { loadLinkAccount } from "@/application/auth/manage-linked-account";
-import { productionLinkAccountReader } from "@/backend/integrations/auth/link-account";
-import { productionAuthProfileGateway } from "@/backend/integrations/auth/auth-profile-gateway";
-import { productionPasskeyManagementGateway } from "@/backend/integrations/auth/passkey-management-gateway";
+import {
+  requestAuthProfileGateway,
+  requestLinkAccountReader,
+  requestPasskeyManagementGateway,
+} from "@/app/_composition/request-scoped-readers";
 import {
   ACCOUNT_SETUP_PASSWORD_STEP,
   ACCOUNT_SETUP_REASON,
   safeAccountSetupDestination,
 } from "@/shared/auth/account-setup-flow";
+import { sessionRefreshPath } from "@/shared/auth/session-navigation";
 import { redirect } from "next/navigation";
 
 export const dynamic = "force-dynamic";
@@ -38,8 +41,15 @@ export default async function LinkAccountPage({
   const redirectTo = safeAccountSetupDestination(
     firstSearchParam(params.redirect_to),
   );
-  const model = await loadLinkAccount(productionLinkAccountReader, productionAuthProfileGateway, productionPasskeyManagementGateway, firstSearchParam(params.auth) ?? null);
-  if (model.status === "unauthorized") redirect("/login");
+  const model = await loadLinkAccount(
+    requestLinkAccountReader,
+    requestAuthProfileGateway,
+    requestPasskeyManagementGateway,
+    firstSearchParam(params.auth) ?? null,
+  );
+  if (model.status === "unauthorized") {
+    redirect(sessionRefreshPath("/link-account"));
+  }
 
   return (
     <AppShell requireAuth>

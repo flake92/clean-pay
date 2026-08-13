@@ -571,10 +571,13 @@ export function parsePaymentRecovery(
   };
 }
 
-export async function getPaymentCapabilities(accessToken: string) {
+export async function getPaymentCapabilities(
+  accessToken: string,
+  timeoutMs = RECOVERY_TIMEOUT_MS,
+) {
   const value = await remnashopRequest<unknown>(
     "/subscription/capabilities",
-    { accessToken, timeoutMs: RECOVERY_TIMEOUT_MS, allowNotFound: true },
+    { accessToken, timeoutMs, allowNotFound: true },
   );
 
   return value === null ? null : parsePaymentCapabilities(value);
@@ -584,6 +587,7 @@ export async function getTransactionPage(input: {
   accessToken: string;
   cursor: string | null;
   limit: number;
+  timeoutMs?: number;
 }) {
   if (!Number.isSafeInteger(input.limit) || input.limit < 1 || input.limit > 100) {
     throw new ServiceError("INTERNAL_ERROR", 500, "Invalid transaction page size");
@@ -597,7 +601,7 @@ export async function getTransactionPage(input: {
 
   const value = await remnashopRequest<unknown>(
     `/subscription/transactions/page?${params.toString()}`,
-    { accessToken: input.accessToken, timeoutMs: RECOVERY_TIMEOUT_MS },
+    { accessToken: input.accessToken, timeoutMs: input.timeoutMs ?? RECOVERY_TIMEOUT_MS },
   );
 
   return parseTransactionPage(value);
@@ -606,13 +610,14 @@ export async function getTransactionPage(input: {
 export async function getExactTransaction(input: {
   accessToken: string;
   paymentId: string;
+  timeoutMs?: number;
 }) {
   const paymentId = textValue(input.paymentId, "local", "paymentId");
   const value = await remnashopRequest<unknown>(
     `/subscription/transactions/by-id/${encodeURIComponent(paymentId)}`,
     {
       accessToken: input.accessToken,
-      timeoutMs: RECOVERY_TIMEOUT_MS,
+      timeoutMs: input.timeoutMs ?? RECOVERY_TIMEOUT_MS,
       allowNotFound: true,
     },
   );
@@ -636,10 +641,13 @@ export async function getExactTransaction(input: {
   return transaction;
 }
 
-export async function getLegacyTransactions(accessToken: string) {
+export async function getLegacyTransactions(
+  accessToken: string,
+  timeoutMs = RECOVERY_TIMEOUT_MS,
+) {
   const value = await remnashopRequest<unknown>("/subscription/transactions", {
     accessToken,
-    timeoutMs: RECOVERY_TIMEOUT_MS,
+    timeoutMs,
   });
 
   return parseLegacyTransactions(value);

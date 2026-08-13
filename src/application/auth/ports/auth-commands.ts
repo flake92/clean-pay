@@ -7,6 +7,8 @@ export class AuthGatewayError extends Error {
 }
 
 export interface AuthCommands {
+  preflightCapacity(action: string): Promise<void>;
+  withUpstreamConcurrency<T>(action: string, work: () => Promise<T>): Promise<T>;
   verifyHuman(token: string | null, action: "auth_login"): Promise<void>;
   rateLimit(input: {
     action: "auth_identify" | "auth_login" | "auth_register" | "password_reset_start" | "password_reset_confirm";

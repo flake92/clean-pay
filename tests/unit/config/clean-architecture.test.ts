@@ -332,7 +332,7 @@ describe("clean architecture boundaries", () => {
     const gateway = readFileSync("src/backend/integrations/auth/telegram-webapp-gateway.ts", "utf8");
     const action = readFileSync("src/app/actions/telegram.ts", "utf8");
 
-    expect(useCase).toContain("authenticateProvider(initData.trim())");
+    expect(useCase).toContain("authenticateProvider(normalizedInitData)");
     expect(useCase).toContain("verifiedIdentity(providerSession)");
     expect(useCase).toContain("rateLimit(verifiedIdentity.telegramId)");
     expect(useCase).toContain("reconcileIdentity(providerSession, verifiedIdentity)");

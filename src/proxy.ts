@@ -15,6 +15,7 @@ const refreshCookieName = 'clean_pay_refresh';
 const paymentReconciliationInternalPath = '/api/internal/payments/reconcile';
 const readinessInternalPath = '/api/internal/health/readiness';
 const metricsInternalPath = '/api/internal/metrics';
+const sessionRefreshPath = '/auth/session/refresh';
 
 type RequestSecurityContext = {
   contentSecurityPolicy: string;
@@ -96,6 +97,7 @@ const publicPagePaths = new Set([
   '/auth/telegram/start',
   '/auth/telegram/callback',
   '/auth/telegram/webapp',
+  sessionRefreshPath,
 ]);
 
 const publicApiPaths = new Set([
@@ -270,6 +272,24 @@ function authenticatedRedirect(request: NextRequest, emailVerificationRequired: 
   return NextResponse.redirect(localRedirectUrl(request, target));
 }
 
+function refreshSessionRedirect(request: NextRequest) {
+  const url = request.nextUrl.clone();
+  url.pathname = sessionRefreshPath;
+  url.search = '';
+  const isAuthEntry = request.nextUrl.pathname === '/login'
+    || request.nextUrl.pathname === '/register';
+  const returnTo = isAuthEntry
+    ? safeRedirectPath(request.nextUrl.searchParams.get('redirect_to')) ?? '/cabinet'
+    : safeRedirectTarget(request);
+  url.searchParams.set('return_to', returnTo);
+  if (isAuthEntry) {
+    const fallback = new URL(request.nextUrl.pathname, request.nextUrl.origin);
+    fallback.searchParams.set('redirect_to', returnTo);
+    url.searchParams.set('fallback_to', `${fallback.pathname}${fallback.search}`);
+  }
+  return NextResponse.redirect(url);
+}
+
 function requestMetadata(
   request: NextRequest,
   accessState: AccessState,
@@ -326,6 +346,34 @@ export async function proxy(request: NextRequest) {
     source: "http.access",
     message: `${request.method} ${pathname} received`,
   });
+
+  const refreshableNavigation =
+    (request.method === 'GET' || request.method === 'HEAD')
+    && !pathname.startsWith('/api/')
+    && !pathname.startsWith('/auth/')
+    && (
+      pathname === '/login'
+      || pathname === '/register'
+      || !isPublicPath(pathname)
+    );
+
+  if (
+    refreshableNavigation
+    && accessState.hasRefreshToken
+    && !accessState.authenticated
+  ) {
+    logger.info("http_request_decision", {
+      ...metadata,
+      action: "redirect_session_refresh",
+      status: 307,
+      redirectTo: sessionRefreshPath,
+    }, {
+      category: "http",
+      source: "http.access",
+      message: `${request.method} ${pathname} -> 307 session refresh`,
+    });
+    return secureResponse(refreshSessionRedirect(request), security);
+  }
 
   if (
     (pathname === paymentReconciliationInternalPath && request.method === 'POST') ||

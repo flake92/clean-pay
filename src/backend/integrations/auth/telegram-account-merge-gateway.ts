@@ -18,7 +18,11 @@ import {
 } from "@/backend/integrations/remnashop/client";
 import { linkCurrentUserToRemnashopAuth } from "@/backend/integrations/remnashop/session";
 import { getCurrentSession, refreshCurrentAccessCookie } from "@/backend/integrations/sessions/web-session-service";
-import { withPaymentOwnerChangeFence } from "@/backend/integrations/payments/payment-user-merge-service";
+import {
+  markPaymentOwnerChangeUpstreamMutationStarted,
+  reconcileCompletedPaymentOwnerChange,
+  withPaymentOwnerChangeFence,
+} from "@/backend/integrations/payments/payment-user-merge-service";
 import { assertRateLimit } from "@/backend/limits/rate-limit";
 import { auditLog } from "@/backend/observability/audit";
 import { sha256 } from "@/backend/security/crypto";
@@ -42,7 +46,11 @@ async function adapt<T>(work: () => Promise<T>) {
 }
 
 function confirmationContext(confirmation: AccountMergeConfirmation) {
-  return confirmation.context as { confirmationId: string; sessionUserId: string };
+  return confirmation.context as {
+    confirmationId: string;
+    sessionUserId: string;
+    claimLeaseExpiresAt?: Date;
+  };
 }
 
 export const productionTelegramAccountMergeGateway: TelegramAccountMergeGateway = {
@@ -86,10 +94,25 @@ export const productionTelegramAccountMergeGateway: TelegramAccountMergeGateway 
 
   async claim(confirmation, now) {
     const context = confirmationContext(confirmation);
+    const claimLeaseExpiresAt = new Date(now.getTime() + processingLeaseMs);
     const claimed = await prisma.$transaction(async (tx) => {
       await tx.$queryRaw<Array<{ id: string }>>`
         SELECT "id" FROM "WebUser" WHERE "id" = ${context.sessionUserId} FOR UPDATE
       `;
+      const owner = await tx.webUser.findUnique({
+        where: { id: context.sessionUserId },
+        select: {
+          paymentOwnerChangeTokenHash: true,
+          paymentOwnerChangeLeaseExpiresAt: true,
+        },
+      });
+      if (
+        owner?.paymentOwnerChangeTokenHash &&
+        (!owner.paymentOwnerChangeLeaseExpiresAt ||
+          owner.paymentOwnerChangeLeaseExpiresAt > now)
+      ) {
+        return { count: 0 };
+      }
       return tx.accountMergeConfirmation.updateMany({
         where: {
           id: context.confirmationId,
@@ -102,21 +125,48 @@ export const productionTelegramAccountMergeGateway: TelegramAccountMergeGateway 
         },
         data: {
           status: AccountMergeConfirmationStatus.PROCESSING,
-          leaseExpiresAt: new Date(now.getTime() + processingLeaseMs),
+          leaseExpiresAt: claimLeaseExpiresAt,
           attemptCount: { increment: 1 },
           lastErrorCode: null,
         },
       });
     });
-    return claimed.count === 1;
+    if (claimed.count === 1) {
+      context.claimLeaseExpiresAt = claimLeaseExpiresAt;
+      return true;
+    }
+    return false;
   },
 
   withOwnerChangeFence(confirmation, work) {
+    const context = confirmationContext(confirmation);
+    if (!context.claimLeaseExpiresAt) {
+      throw new AccountMergeError("CONFLICT");
+    }
     return withPaymentOwnerChangeFence({
       userIds: [confirmation.userId],
       upstreamAccountIds: [confirmation.sourceAccountId, confirmation.targetAccountId],
       emails: [confirmation.sourceEmail, confirmation.targetEmail],
       telegramIds: [confirmation.telegramId, confirmation.targetTelegramId],
+      operationKey: `telegram-account-merge:v1:${confirmation.id}`,
+      targetUpstreamAccountId: confirmation.targetAccountId,
+      claimGuard: async (tx) => {
+        const current = await tx.accountMergeConfirmation.findFirst({
+          where: {
+            id: context.confirmationId,
+            userId: context.sessionUserId,
+            status: AccountMergeConfirmationStatus.PROCESSING,
+            AND: [
+              { leaseExpiresAt: context.claimLeaseExpiresAt },
+              { leaseExpiresAt: { gt: new Date() } },
+            ],
+          },
+          select: { id: true },
+        });
+        if (!current) {
+          throw new AccountMergeError("CONFLICT");
+        }
+      },
       work,
     });
   },
@@ -173,6 +223,7 @@ export const productionTelegramAccountMergeGateway: TelegramAccountMergeGateway 
   },
 
   async mergeProviderAccounts(confirmation) {
+    await markPaymentOwnerChangeUpstreamMutationStarted();
     const result = await adapt(() => remnashopMergeUsers({
       sourceUserId: confirmation.sourceAccountId,
       targetUserId: confirmation.targetAccountId,
@@ -203,8 +254,14 @@ export const productionTelegramAccountMergeGateway: TelegramAccountMergeGateway 
 
   async complete(confirmation) {
     const context = confirmationContext(confirmation);
+    if (!context.claimLeaseExpiresAt) return false;
     const result = await prisma.accountMergeConfirmation.updateMany({
-      where: { id: context.confirmationId, userId: context.sessionUserId, status: AccountMergeConfirmationStatus.PROCESSING },
+      where: {
+        id: context.confirmationId,
+        userId: context.sessionUserId,
+        status: AccountMergeConfirmationStatus.PROCESSING,
+        leaseExpiresAt: context.claimLeaseExpiresAt,
+      },
       data: { status: AccountMergeConfirmationStatus.COMPLETED, completedAt: new Date(), leaseExpiresAt: null, lastErrorCode: null },
     });
     return result.count === 1;
@@ -221,10 +278,51 @@ export const productionTelegramAccountMergeGateway: TelegramAccountMergeGateway 
 
   async release(confirmation, input) {
     const context = confirmationContext(confirmation);
+    if (!context.claimLeaseExpiresAt) return;
+    const identitySelectors = [
+      confirmation.sourceEmail,
+      confirmation.targetEmail,
+    ].filter((value): value is string => Boolean(value));
+    const telegramSelectors = [
+      confirmation.telegramId,
+      confirmation.targetTelegramId,
+    ].filter((value): value is string => Boolean(value));
+    const incompleteOwnerChange = await prisma.webUser.findFirst({
+      where: {
+        paymentOwnerChangeOperationHash: sha256(
+          `telegram-account-merge:v1:${confirmation.id}`,
+        ),
+        paymentOwnerChangeMutationStartedAt: { not: null },
+        OR: [
+          { id: context.sessionUserId },
+          {
+            remnashopUserId: {
+              in: [confirmation.sourceAccountId, confirmation.targetAccountId],
+            },
+          },
+          ...(identitySelectors.length > 0
+            ? [{ email: { in: identitySelectors } }]
+            : []),
+          ...(telegramSelectors.length > 0
+            ? [{ telegramId: { in: telegramSelectors } }]
+            : []),
+        ],
+      },
+      select: { id: true },
+    });
+    // Once an upstream owner mutation may have crossed the provider boundary,
+    // keep the durable confirmation retryable. A later attempt takes over the
+    // expired owner lease and reconciles the provider/local result.
+    const terminal = input.terminal && !incompleteOwnerChange;
     await prisma.accountMergeConfirmation.updateMany({
-      where: { id: context.confirmationId, userId: context.sessionUserId, status: AccountMergeConfirmationStatus.PROCESSING },
+      where: {
+        id: context.confirmationId,
+        userId: context.sessionUserId,
+        status: AccountMergeConfirmationStatus.PROCESSING,
+        leaseExpiresAt: context.claimLeaseExpiresAt,
+      },
       data: {
-        status: input.terminal ? AccountMergeConfirmationStatus.FAILED : AccountMergeConfirmationStatus.PENDING,
+        status: terminal ? AccountMergeConfirmationStatus.FAILED : AccountMergeConfirmationStatus.PENDING,
         leaseExpiresAt: null,
         lastErrorCode: input.errorCode,
       },
@@ -232,4 +330,10 @@ export const productionTelegramAccountMergeGateway: TelegramAccountMergeGateway 
   },
 
   async refreshLocalSession() { await refreshCurrentAccessCookie(); },
+  async reconcileCompletedOwnerChange(confirmation) {
+    await adapt(() => reconcileCompletedPaymentOwnerChange(
+      [confirmation.userId],
+      `telegram-account-merge:v1:${confirmation.id}`,
+    ));
+  },
 };

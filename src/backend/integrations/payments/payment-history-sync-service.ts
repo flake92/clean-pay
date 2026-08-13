@@ -5,8 +5,9 @@ import type { RemnashopTransactionPage } from "@/backend/integrations/remnashop/
 import {
   getRemnashopUserIdFromAccessToken,
   getJwtExpiresAt,
-  revealRemnashopToken,
+  remnashopRefreshTokens,
 } from "@/backend/integrations/remnashop/client";
+import { acquireRemnashopTokensForSession } from "@/backend/integrations/remnashop/session-token-lifecycle";
 import { ServiceError } from "@/backend/errors/service-error";
 import { paymentUpstreamOwnerHash } from "@/backend/payments/hashes";
 import { applyRemnashopTransaction } from "@/backend/integrations/payments/payment-record-service";
@@ -19,7 +20,7 @@ import { randomToken, safeEqual, sha256 } from "@/backend/security/crypto";
 const HISTORY_LEASE_MS = 120_000;
 const HISTORY_TOKEN_MIN_TTL_MS = 30_000;
 const HISTORY_REFRESH_INTERVAL_MS = 5 * 60_000;
-const MAX_HISTORY_SESSION_CANDIDATES = 20;
+const MAX_HISTORY_SESSION_CANDIDATES = 3;
 const MAX_HISTORY_FAILURE_BACKOFF_MS = 15 * 60_000;
 
 export type PaymentHistorySyncClaim = {
@@ -384,32 +385,60 @@ export async function failPaymentHistorySync(
 export async function loadCurrentPaymentHistoryCredential(
   userId: string,
   expectedOwnerHash: string,
+  timeoutMs = 10_000,
 ) {
+  const deadlineAt = Date.now() + Math.max(1, timeoutMs);
   const rows = await prisma.$queryRaw<Array<{
+    id: string;
+    userId: string;
     remnashopUserId: string;
-    encryptedToken: string;
     databaseNow: Date;
   }>>(Prisma.sql`
     SELECT
+      valid_session."id",
+      valid_session."userId",
       web_user."remnashopUserId",
-      valid_session."remnashopAccessTokenEncrypted" AS "encryptedToken",
       clock_timestamp() AS "databaseNow"
     FROM "WebUser" AS web_user
     CROSS JOIN LATERAL (
       SELECT
+        web_session."userId",
         web_session."remnashopAccessTokenEncrypted",
+        web_session."remnashopRefreshTokenEncrypted",
+        web_session."remnashopAccessExpiresAt",
+        web_session."remnashopRefreshExpiresAt",
+        web_session."remnashopRefreshRecoveryEncrypted",
         web_session."updatedAt",
         web_session."id"
       FROM "WebSession" AS web_session
       WHERE web_session."userId" = web_user."id"
         AND web_session."revokedAt" IS NULL
-        AND web_session."remnashopAccessTokenEncrypted" IS NOT NULL
-        AND web_session."remnashopAccessExpiresAt" > clock_timestamp() + INTERVAL '60 seconds'
-      ORDER BY web_session."updatedAt" DESC, web_session."id" DESC
+        AND web_session."assuranceLevel" = 'FULL'
+        AND web_session."refreshExpiresAt" > clock_timestamp()
+        AND (
+          web_session."remnashopRefreshRecoveryEncrypted" IS NOT NULL
+          OR (
+            web_session."remnashopAccessTokenEncrypted" IS NOT NULL
+            AND web_session."remnashopAccessExpiresAt" > clock_timestamp() + INTERVAL '30 seconds'
+          )
+          OR (
+            web_session."remnashopRefreshTokenEncrypted" IS NOT NULL
+            AND (
+              web_session."remnashopRefreshExpiresAt" IS NULL
+              OR web_session."remnashopRefreshExpiresAt" > clock_timestamp() + INTERVAL '30 seconds'
+            )
+          )
+        )
+      ORDER BY
+        (web_session."remnashopRefreshRecoveryEncrypted" IS NOT NULL) DESC,
+        (web_session."remnashopAccessExpiresAt" > clock_timestamp() + INTERVAL '30 seconds') DESC,
+        web_session."updatedAt" DESC,
+        web_session."id" DESC
       LIMIT ${MAX_HISTORY_SESSION_CANDIDATES}
     ) AS valid_session
     WHERE web_user."id" = ${userId}
       AND web_user."remnashopUserId" IS NOT NULL
+      AND (web_user."emailVerified" = TRUE OR web_user."telegramId" IS NOT NULL)
     ORDER BY valid_session."updatedAt" DESC, valid_session."id" DESC
     FOR KEY SHARE OF web_user
   `);
@@ -432,8 +461,22 @@ export async function loadCurrentPaymentHistoryCredential(
   }
 
   for (const candidate of rows) {
+    const remainingMs = deadlineAt - Date.now();
+    if (remainingMs <= 0) {
+      break;
+    }
     try {
-      const accessToken = revealRemnashopToken(candidate.encryptedToken);
+      const acquired = await acquireRemnashopTokensForSession({
+        session: { id: candidate.id, userId: candidate.userId },
+        refresh: (refreshToken) => remnashopRefreshTokens(
+          refreshToken,
+          Math.max(1, Math.min(15_000, remainingMs)),
+        ),
+      });
+      if (!acquired) {
+        continue;
+      }
+      const accessToken = acquired.accessToken;
       const tokenOwner = getRemnashopUserIdFromAccessToken(accessToken);
       const tokenExpiresAt = getJwtExpiresAt(accessToken);
 
@@ -447,7 +490,13 @@ export async function loadCurrentPaymentHistoryCredential(
       ) {
         return accessToken;
       }
-    } catch {
+    } catch (error) {
+      if (
+        error instanceof ServiceError &&
+        (error.code === "ACCOUNT_MERGE_REQUIRED" || error.code === "CONFLICT")
+      ) {
+        throw error;
+      }
       // A different valid session can still carry the current owner identity.
     }
   }
@@ -460,39 +509,63 @@ export async function loadCurrentPaymentHistoryCredential(
 }
 
 export async function listDuePaymentHistoryCandidates(limit: number) {
+  const boundedLimit = Number.isSafeInteger(limit)
+    ? Math.max(1, Math.min(100, limit))
+    : 1;
+
   return prisma.$queryRaw<Array<{
     userId: string;
     remnashopUserId: string;
   }>>(Prisma.sql`
-    SELECT sync_state."userId", web_user."remnashopUserId"
-    FROM "PaymentHistorySyncState" AS sync_state
-    INNER JOIN "WebUser" AS web_user
-      ON web_user."id" = sync_state."userId"
-    WHERE (
-        sync_state."backfillCompletedAt" IS NULL
-        OR COALESCE(
-          sync_state."lastSyncedAt",
-          sync_state."backfillCompletedAt"
-        ) <= clock_timestamp() - (${HISTORY_REFRESH_INTERVAL_MS} * INTERVAL '1 millisecond')
-      )
-      AND web_user."remnashopUserId" IS NOT NULL
+    SELECT web_user."id" AS "userId", web_user."remnashopUserId"
+    FROM "WebUser" AS web_user
+    LEFT JOIN "PaymentHistorySyncState" AS sync_state
+      ON sync_state."userId" = web_user."id"
+    WHERE web_user."remnashopUserId" IS NOT NULL
       AND (
-        sync_state."leaseExpiresAt" IS NULL
-        OR sync_state."leaseExpiresAt" <= clock_timestamp()
-      )
-      AND (
-        sync_state."nextAttemptAt" IS NULL
-        OR sync_state."nextAttemptAt" <= clock_timestamp()
+        sync_state."userId" IS NULL
+        OR (
+          (
+            sync_state."backfillCompletedAt" IS NULL
+            OR COALESCE(
+              sync_state."lastSyncedAt",
+              sync_state."backfillCompletedAt"
+            ) <= clock_timestamp() - (${HISTORY_REFRESH_INTERVAL_MS} * INTERVAL '1 millisecond')
+          )
+          AND (
+            sync_state."leaseExpiresAt" IS NULL
+            OR sync_state."leaseExpiresAt" <= clock_timestamp()
+          )
+          AND (
+            sync_state."nextAttemptAt" IS NULL
+            OR sync_state."nextAttemptAt" <= clock_timestamp()
+          )
+        )
       )
       AND EXISTS (
         SELECT 1
         FROM "WebSession" AS web_session
-        WHERE web_session."userId" = sync_state."userId"
+        WHERE web_session."userId" = web_user."id"
           AND web_session."revokedAt" IS NULL
-          AND web_session."remnashopAccessTokenEncrypted" IS NOT NULL
-          AND web_session."remnashopAccessExpiresAt" > clock_timestamp() + INTERVAL '60 seconds'
+          AND web_session."assuranceLevel" = 'FULL'
+          AND web_session."refreshExpiresAt" > clock_timestamp()
+          AND (web_user."emailVerified" = TRUE OR web_user."telegramId" IS NOT NULL)
+          AND (
+            web_session."remnashopRefreshRecoveryEncrypted" IS NOT NULL
+            OR (
+              web_session."remnashopAccessTokenEncrypted" IS NOT NULL
+              AND web_session."remnashopAccessExpiresAt" > clock_timestamp() + INTERVAL '30 seconds'
+            )
+            OR (
+              web_session."remnashopRefreshTokenEncrypted" IS NOT NULL
+              AND (
+                web_session."remnashopRefreshExpiresAt" IS NULL
+                OR web_session."remnashopRefreshExpiresAt" > clock_timestamp() + INTERVAL '30 seconds'
+              )
+            )
+          )
       )
-    ORDER BY sync_state."lastAttemptAt" ASC NULLS FIRST, sync_state."userId" ASC
-    LIMIT ${limit}
+    ORDER BY sync_state."lastAttemptAt" ASC NULLS FIRST, web_user."id" ASC
+    LIMIT ${boundedLimit}
   `);
 }

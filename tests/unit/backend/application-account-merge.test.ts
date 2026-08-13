@@ -36,6 +36,7 @@ function gateway(): TelegramAccountMergeGateway {
     synchronizeSubscriptionIdentity: vi.fn(async () => true), linkCurrentAccount: vi.fn(async () => ({ userId: "user-1" })),
     complete: vi.fn(async () => true), cancel: vi.fn(async () => true), release: vi.fn(async () => undefined),
     refreshLocalSession: vi.fn(async () => undefined),
+    reconcileCompletedOwnerChange: vi.fn(async () => undefined),
   };
 }
 
@@ -109,6 +110,9 @@ describe("Telegram account merge application workflow", () => {
     vi.mocked(subject.loadConfirmation).mockResolvedValueOnce({ ...confirmation, status: "COMPLETED" });
     await expect(confirmTelegramAccountMerge(subject)).resolves.toEqual({ merged: true, userId: "user-1" });
     expect(subject.claim).not.toHaveBeenCalled();
+    expect(subject.reconcileCompletedOwnerChange).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "merge-1", status: "COMPLETED" }),
+    );
     expect(subject.audit).toHaveBeenLastCalledWith(expect.objectContaining({
       action: "telegram_account_merge_succeeded", metadata: expect.objectContaining({ replay: true }),
     }));
@@ -163,6 +167,44 @@ describe("Telegram account merge application workflow", () => {
     await expect(confirmTelegramAccountMerge(subject)).resolves.toEqual({ merged: true, userId: "user-1" });
     expect(subject.preflight).not.toHaveBeenCalled();
     expect(subject.mergeProviderAccounts).not.toHaveBeenCalled();
+  });
+
+  it("completes an exact retry after local merge committed before confirmation completion", async () => {
+    const subject = gateway();
+    const sourceIdentity = {
+      context: {}, accountId: "source", telegramId: "777", email: "telegram@example.com",
+      emailVerified: true, pendingEmail: null,
+    };
+    const targetIdentity = {
+      context: {}, accountId: "target", telegramId: "777", email: "email@example.com",
+      emailVerified: true, pendingEmail: null,
+    };
+    vi.mocked(subject.authenticateTelegram).mockReset()
+      .mockResolvedValueOnce(sourceIdentity)
+      .mockResolvedValue(targetIdentity);
+    vi.mocked(subject.complete)
+      .mockRejectedValueOnce(new Error("crash before confirmation completion"))
+      .mockResolvedValueOnce(true);
+
+    await expect(confirmTelegramAccountMerge(subject)).rejects.toThrow(
+      "crash before confirmation completion",
+    );
+
+    vi.mocked(subject.loadCurrentOwner).mockResolvedValue({
+      email: "email@example.com",
+      emailVerified: true,
+      upstreamAccountId: "target",
+      telegramId: "777",
+    });
+
+    await expect(confirmTelegramAccountMerge(subject)).resolves.toEqual({
+      merged: true,
+      userId: "user-1",
+    });
+    expect(subject.preflight).toHaveBeenCalledTimes(1);
+    expect(subject.mergeProviderAccounts).toHaveBeenCalledTimes(1);
+    expect(subject.linkCurrentAccount).toHaveBeenCalledTimes(2);
+    expect(subject.complete).toHaveBeenCalledTimes(2);
   });
 
   it.each([

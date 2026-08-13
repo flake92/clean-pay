@@ -71,7 +71,7 @@ describe("checkout and navigation application policy", () => {
 
   it.each([
     ["OFFER_CHANGED", false], ["PLAN_UNAVAILABLE", false], ["PAYMENT_GATEWAY_UNAVAILABLE", false],
-    ["IDEMPOTENCY_KEY_REUSED", false], ["VALIDATION_ERROR", false],
+    ["IDEMPOTENCY_KEY_INVALID", false], ["IDEMPOTENCY_KEY_REUSED", false], ["VALIDATION_ERROR", false],
     ["EMAIL_REQUIRED", true], ["EMAIL_NOT_VERIFIED", true], ["RATE_LIMITED", true],
     ["UPSTREAM_UNAVAILABLE", true],
   ])("maps payment failure %s and key retention=%s", async (code, retainIdempotencyKey) => {
@@ -80,6 +80,19 @@ describe("checkout and navigation application policy", () => {
     } as unknown as PaymentCommands;
     await expect(executePayment(commands, { kind: "purchase", request, idempotencyKey: "key-1" })).resolves.toMatchObject({
       ok: false, code, retainIdempotencyKey,
+    });
+  });
+
+  it("asks for a fresh page after rejecting an invalid idempotency key", async () => {
+    const commands = {
+      purchase: vi.fn(async () => { throw Object.assign(new Error("invalid key"), { code: "IDEMPOTENCY_KEY_INVALID" }); }),
+      extend: vi.fn(),
+    } as unknown as PaymentCommands;
+    await expect(executePayment(commands, { kind: "purchase", request, idempotencyKey: "bad-key" })).resolves.toEqual({
+      ok: false,
+      code: "IDEMPOTENCY_KEY_INVALID",
+      message: "Не удалось безопасно начать оплату. Обновите страницу и попробуйте снова.",
+      retainIdempotencyKey: false,
     });
   });
 

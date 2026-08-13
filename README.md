@@ -104,10 +104,21 @@ Clean Pay; на страницах входа и у гостя виджет ск
    `pay.example.com`.
 3. Включите **Identity Validation** и скопируйте **Website Token** и
    **HMAC Token**.
-4. В **Settings → Custom Attributes → Contact** создайте текстовые атрибуты
-   `clean_pay_user_id`, `telegram_id` и `telegram_username`. Chatwoot принимает
-   их и без предварительного создания, но объявленные атрибуты удобнее видеть,
-   фильтровать и использовать в автоматизациях.
+4. В **Settings → Custom Attributes → Contact** создайте текстовые атрибуты:
+
+   - `clean_pay_user_id`, `telegram_id`, `telegram_username`;
+   - `subscription_context_status`, `subscription_plan`,
+     `subscription_status`, `subscription_expires_at`,
+     `subscription_is_trial`;
+   - `payment_context_status`, `last_payment_status`, `last_payment_at`,
+     `last_payment_amount`, `last_payment_gateway`, `last_payment_plan`,
+     `recent_payments`.
+
+   Chatwoot принимает их и без предварительного создания, но объявленные
+   атрибуты удобнее видеть, фильтровать и использовать в автоматизациях.
+5. В **Settings → Labels** создайте labels `payment_problem` и
+   `subscription_expired`. Clean Pay автоматически добавляет либо снимает их у
+   диалога по актуальному контексту.
 
 Затем заполните все три переменные в `deploy/prod/.env`:
 
@@ -138,10 +149,34 @@ Production-валидатор проверит комплектность, HTTPS
 ### Данные и безопасность
 
 Clean Pay передаёт агенту неизменяемый внутренний ID, имя, подтверждённый
-e-mail, Telegram ID и Telegram username. HMAC-SHA256 вычисляется на сервере:
+e-mail, Telegram ID, Telegram username, тариф, состояние и срок подписки, а
+также безопасную сводку пяти последних синхронизированных платежей.
+HMAC-SHA256 вычисляется на сервере:
 браузер получает только готовую подпись идентификатора, но никогда не получает
 `CHATWOOT_HMAC_TOKEN`. Неподтверждённый e-mail намеренно не отправляется,
 поскольку Chatwoot может объединять контакты по адресу почты.
+
+Label `subscription_expired` включается, если текущая подписка имеет статус
+`EXPIRED` либо её дата окончания уже прошла. Label `payment_problem`
+включается, если последний платёж завершился ошибкой/отменой, имеет неизвестный
+статус либо остаётся `PENDING` не менее 30 минут. Успешный следующий платёж
+снимает прежний label. Если источник временно недоступен, Clean Pay показывает
+`*_context_status=unavailable`, но не снимает label на основании неполных
+данных. Некорректная дата подписки помечается
+`subscription_context_status=invalid` и также не изменяет
+`subscription_expired`. Для платежей проверяется время успешной синхронизации:
+снимок старше 15 минут получает `payment_context_status=stale` и не изменяет
+`payment_problem`.
+
+Контекст загружается в фоне и кешируется в браузере на одну минуту, поэтому
+сбой Remnashop или истории платежей не задерживает интерфейс и не отключает
+базовый чат. VPN URL, платёжные URL, сырые ответы провайдеров и секреты в
+Chatwoot не передаются.
+
+При открытии чата Clean Pay повторно проверяет кеш и загружает свежий контекст,
+если прошла минута. Идентификатор, HMAC и все custom attributes отправляются
+одной подписанной командой `setUser`. Labels повторно применяются после первого
+сообщения, когда новый диалог уже создан в Chatwoot.
 
 При выходе из Clean Pay сессия, cookies и локальное состояние Chatwoot
 сбрасываются до завершения локальной сессии. Гостевые страницы повторяют
@@ -153,6 +188,14 @@ Chatwoot. Затем выйдите и войдите под другим тес
 должна исчезнуть на странице входа, а второй пользователь должен получить
 отдельный контакт и историю. Подробная настройка и полный чек-лист находятся в
 [`docs/chatwoot-support.md`](docs/chatwoot-support.md).
+
+Для первого этапа маршрутизацию и автоматические ответы удобно настроить
+штатными Automation Rules Chatwoot по labels `payment_problem` и
+`subscription_expired`: событие **Conversation Updated**, условия **Labels
+contains** и **Team is not**, действия **Assign team** и при необходимости
+**Send message**. Проверка текущей команды предотвращает повторное срабатывание
+после назначения и автоматического ответа. Webhooks и доступ Chatwoot к
+управляющим операциям Clean Pay для этого не требуются.
 
 ## Reverse proxy
 
