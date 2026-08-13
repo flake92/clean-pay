@@ -301,6 +301,25 @@ describe("persistent Redis command adapter", () => {
     });
   });
 
+  it("handles a synchronous socket write failure without leaking the response promise", async () => {
+    process.env.REDIS_URL = "redis://localhost:6379";
+    vi.mocked((await import("node:net")).default.connect)
+      .mockImplementationOnce(() => {
+        state.tcpSocket = new FakeSocket();
+        vi.spyOn(state.tcpSocket, "write").mockImplementationOnce(() => {
+          throw new Error("write failed");
+        });
+        queueMicrotask(() => state.tcpSocket?.emit("connect"));
+        return state.tcpSocket as never;
+      });
+
+    await expect(redisCommand(["PING"])).rejects.toMatchObject({
+      code: "UPSTREAM_UNAVAILABLE",
+      debug: { message: "write failed" },
+    });
+    expect(state.tcpSocket?.destroyed).toBe(true);
+  });
+
   it("fails immediately when the shared deadline is exhausted", async () => {
     const now = vi.spyOn(Date, "now")
       .mockReturnValueOnce(0)

@@ -2,11 +2,18 @@ import { cookies } from "next/headers";
 
 import type { ChatwootIdentityGateway } from "@/application/support/ports/chatwoot-identity";
 import { getEnv } from "@/backend/config/env";
-import { getCurrentSessionReadOnly } from "@/backend/integrations/sessions/web-session-service";
+import {
+  getCurrentRefreshSessionCandidateReadOnly,
+  getCurrentSessionReadOnly,
+} from "@/backend/integrations/sessions/web-session-service";
+import { productionChatwootIdentityRequestGuard } from "@/backend/integrations/support/chatwoot-identity-request-guard";
+import { logger } from "@/backend/observability/logger";
+import { recordUpstreamRequest } from "@/backend/observability/metrics";
 
 const conversationCookieName = "cw_conversation";
 const contactProbeTimeoutMs = 3_000;
 const maxContactResponseBytes = 4_096;
+const contactProbeOperation = "/api/v1/widget/contact";
 
 function validConversationToken(value: string | undefined) {
   const token = value?.trim();
@@ -83,7 +90,19 @@ export const productionChatwootIdentityGateway: ChatwootIdentityGateway = {
     // action; a navigation refresh route owns that state change.
     const session = await getCurrentSessionReadOnly();
 
-    return session ? { userId: session.userId } : null;
+    if (session) {
+      return {
+        status: "authenticated",
+        userId: session.userId,
+        sessionId: session.id,
+      };
+    }
+
+    const refreshCandidate = await getCurrentRefreshSessionCandidateReadOnly();
+
+    return refreshCandidate
+      ? { status: "refresh_required" }
+      : { status: "anonymous" };
   },
 
   async loadConversationToken() {
@@ -94,7 +113,7 @@ export const productionChatwootIdentityGateway: ChatwootIdentityGateway = {
     );
   },
 
-  async probeContactIdentity(conversationToken) {
+  async probeContactIdentity(conversationToken, actor) {
     const chatwoot = getEnv().chatwoot;
 
     if (!chatwoot) {
@@ -105,23 +124,100 @@ export const productionChatwootIdentityGateway: ChatwootIdentityGateway = {
     endpoint.searchParams.set("website_token", chatwoot.websiteToken);
 
     try {
-      const response = await fetch(endpoint, {
-        method: "GET",
-        headers: {
-          Accept: "application/json",
-          "X-Auth-Token": conversationToken,
+      return await productionChatwootIdentityRequestGuard.runProbe({
+        sessionId: actor.sessionId,
+        conversationToken,
+        work: async () => {
+          const startedAt = Date.now();
+
+          try {
+            const response = await fetch(endpoint, {
+              method: "GET",
+              headers: {
+                Accept: "application/json",
+                "X-Auth-Token": conversationToken,
+              },
+              cache: "no-store",
+              redirect: "error",
+              signal: AbortSignal.timeout(contactProbeTimeoutMs),
+            });
+
+            if (!response.ok) {
+              const durationMs = Date.now() - startedAt;
+              recordUpstreamRequest({
+                service: "chatwoot",
+                operation: contactProbeOperation,
+                outcome: "rejected",
+                durationMs,
+              });
+              logger.warn("chatwoot_identity_probe_rejected", {
+                status: response.status,
+                durationMs,
+              }, {
+                category: "upstream",
+                source: "chatwoot.identity",
+                message: `Chatwoot identity probe rejected: GET ${contactProbeOperation} -> ${response.status}`,
+              });
+              try {
+                await response.body?.cancel();
+              } catch {
+                // The HTTP rejection is already classified and fail-closed.
+                // A broken response stream must not emit a second,
+                // contradictory "unavailable" outcome for the same probe.
+              }
+              return { status: "pending" } as const;
+            }
+
+            // Await inside this try so a stream that fails after the response
+            // headers is still converted into the same fail-closed state.
+            const result = await readContactIdentifier(response);
+            const durationMs = Date.now() - startedAt;
+            const identityAvailable = result.status === "available";
+            recordUpstreamRequest({
+              service: "chatwoot",
+              operation: contactProbeOperation,
+              outcome: identityAvailable ? "success" : "rejected",
+              durationMs,
+            });
+            if (identityAvailable) {
+              logger.info("chatwoot_identity_probe_completed", {
+                durationMs,
+                identityAvailable: true,
+              }, {
+                category: "upstream",
+                source: "chatwoot.identity",
+                message: `Chatwoot identity probe completed: GET ${contactProbeOperation}`,
+              });
+            } else {
+              logger.warn("chatwoot_identity_probe_response_invalid", {
+                durationMs,
+              }, {
+                category: "upstream",
+                source: "chatwoot.identity",
+                message: `Chatwoot identity probe returned an invalid response: GET ${contactProbeOperation}`,
+              });
+            }
+            return result;
+          } catch (error) {
+            const durationMs = Date.now() - startedAt;
+            recordUpstreamRequest({
+              service: "chatwoot",
+              operation: contactProbeOperation,
+              outcome: "unavailable",
+              durationMs,
+            });
+            logger.warn("chatwoot_identity_probe_unavailable", {
+              durationMs,
+              errorName: error instanceof Error ? error.name : "UnknownError",
+            }, {
+              category: "upstream",
+              source: "chatwoot.identity",
+              message: `Chatwoot identity probe unavailable: GET ${contactProbeOperation}`,
+            });
+            return { status: "pending" } as const;
+          }
         },
-        cache: "no-store",
-        redirect: "error",
-        signal: AbortSignal.timeout(contactProbeTimeoutMs),
       });
-
-      if (!response.ok) {
-        await response.body?.cancel();
-        return { status: "pending" };
-      }
-
-      return readContactIdentifier(response);
     } catch {
       return { status: "pending" };
     }

@@ -7,11 +7,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   loadContext: vi.fn(),
   verifyIdentity: vi.fn(),
+  navigateTo: vi.fn(),
 }));
 
 vi.mock("@/app/actions/chatwoot", () => ({
   loadChatwootSupportContextAction: mocks.loadContext,
   verifyChatwootIdentityAction: mocks.verifyIdentity,
+}));
+vi.mock("@/frontend/lib/browser-navigation", () => ({
+  navigateTo: mocks.navigateTo,
 }));
 
 import type { ChatwootWidgetConfig } from "@/application/models/chatwoot";
@@ -85,6 +89,7 @@ describe("Chatwoot widget context lifecycle", () => {
     window.cleanPayChatwootFailedIdentity = undefined;
     window.onmessage = null;
     window.localStorage.clear();
+    window.history.replaceState({}, "", "/");
     document.getElementById("chatwoot_live_chat_widget")?.remove();
     const frame = document.createElement("iframe");
     frame.id = "chatwoot_live_chat_widget";
@@ -288,6 +293,7 @@ describe("Chatwoot widget context lifecycle", () => {
     expect(getChatwootPendingIdentityAttempt()).toBeUndefined();
     expect(api.setUser).toHaveBeenCalledTimes(1);
     expect(document.getElementById("chatwoot_live_chat_widget")).toBe(frame);
+    expect(mocks.verifyIdentity).not.toHaveBeenCalled();
   });
 
   it("supports Chatwoot success without a setAuthCookie message", async () => {
@@ -310,7 +316,10 @@ describe("Chatwoot widget context lifecycle", () => {
     });
 
     expect(mocks.verifyIdentity).toHaveBeenCalledWith("user-123");
-    expect(getChatwootPendingIdentityAttempt()).toBeUndefined();
+    expect(getChatwootPendingIdentityAttempt()).toMatchObject({
+      phase: "ownership_confirmed",
+    });
+    expect(window.localStorage.length).toBe(0);
     expect(api.setUser).toHaveBeenCalledTimes(1);
     expect(api.toggleBubbleVisibility).toHaveBeenCalledWith("show");
 
@@ -319,6 +328,175 @@ describe("Chatwoot widget context lifecycle", () => {
     });
     expect(document.getElementById("chatwoot_live_chat_widget")).toBe(frame);
     expect(api.setUser).toHaveBeenCalledTimes(1);
+  });
+
+  it("retries an ownership-only payload after its PATCH fails and the page reloads", async () => {
+    vi.useFakeTimers();
+    mocks.loadContext.mockResolvedValue(null);
+    const firstApi = chatwootApi();
+    firstApi.setUser.mockImplementation(() => {
+      document.cookie = "cw_conversation=authenticated; Path=/";
+      document.cookie = `cw_user_${config.websiteToken}=identified; Path=/`;
+    });
+    window.$chatwoot = firstApi;
+    const firstView = render(createElement(ChatwootWidget, { config }));
+
+    await flushWidgetEffects();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(750);
+    });
+
+    expect(getChatwootPendingIdentityAttempt()).toMatchObject({
+      phase: "ownership_confirmed",
+    });
+    expect(window.localStorage.length).toBe(0);
+
+    act(() => window.dispatchEvent(new CustomEvent("chatwoot:error")));
+    expect(getChatwootPendingIdentityAttempt()).toBeUndefined();
+    expect(document.cookie).not.toContain(`cw_user_${config.websiteToken}=`);
+    expect(window.localStorage.length).toBe(0);
+
+    firstView.unmount();
+    // A hard reload discards in-memory transport/failure latches but preserves
+    // localStorage. Ownership alone must not have left an applied fingerprint
+    // that suppresses the failed payload on the next SDK instance.
+    window.cleanPayChatwootAuthorized = undefined;
+    window.cleanPayChatwootIdentity = undefined;
+    window.cleanPayChatwootPendingIdentity = undefined;
+    window.cleanPayChatwootFailedIdentity = undefined;
+    const secondApi = chatwootApi();
+    secondApi.setUser.mockImplementation(() => undefined);
+    window.$chatwoot = secondApi;
+
+    render(createElement(ChatwootWidget, { config }));
+    await flushWidgetEffects();
+
+    expect(secondApi.setUser).toHaveBeenCalledTimes(1);
+  });
+
+  it("retires ownership-confirmed A before B so a late A error cannot fail B", async () => {
+    vi.useFakeTimers();
+    let resolveContext!: (value: typeof context) => void;
+    mocks.loadContext.mockReturnValue(new Promise((resolve) => {
+      resolveContext = resolve;
+    }));
+    const api = chatwootApi();
+    api.setUser.mockImplementation(() => {
+      document.cookie = "cw_conversation=authenticated; Path=/";
+      document.cookie = `cw_user_${config.websiteToken}=identified; Path=/`;
+    });
+    window.$chatwoot = api;
+    const firstFrame = document.getElementById(
+      "chatwoot_live_chat_widget",
+    ) as HTMLIFrameElement;
+    const firstFrameWindow = firstFrame.contentWindow;
+
+    render(createElement(ChatwootWidget, { config }));
+    await flushWidgetEffects();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(750);
+    });
+    expect(getChatwootPendingIdentityAttempt()).toMatchObject({
+      phase: "ownership_confirmed",
+    });
+    expect(api.setUser).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      resolveContext(context);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    const replacementFrame = document.getElementById(
+      "chatwoot_live_chat_widget",
+    ) as HTMLIFrameElement;
+    expect(replacementFrame).not.toBe(firstFrame);
+    expect(getChatwootPendingIdentityAttempt()).toMatchObject({
+      phase: "waiting_for_frame",
+    });
+    expect(api.setUser).toHaveBeenCalledTimes(1);
+
+    const permissiveSdkHandler = vi.fn(() => {
+      window.dispatchEvent(new CustomEvent("chatwoot:error"));
+    });
+    window.onmessage = permissiveSdkHandler;
+    act(() => {
+      window.dispatchEvent(new MessageEvent("message", {
+        origin: config.baseUrl,
+        source: firstFrameWindow,
+        data: 'chatwoot-widget:{"event":"error","errorType":"SET_USER_ERROR"}',
+      }));
+    });
+    expect(permissiveSdkHandler).not.toHaveBeenCalled();
+    expect(getChatwootPendingIdentityAttempt()).toMatchObject({
+      phase: "waiting_for_frame",
+    });
+
+    await act(async () => {
+      window.dispatchEvent(new MessageEvent("message", {
+        origin: config.baseUrl,
+        source: replacementFrame.contentWindow,
+        data: 'chatwoot-widget:{"event":"loaded"}',
+      }));
+      await Promise.resolve();
+    });
+    expect(api.setUser).toHaveBeenCalledTimes(2);
+    expect(api.setUser).toHaveBeenLastCalledWith(
+      "user-123",
+      expect.objectContaining({
+        custom_attributes: {
+          ...config.user.customAttributes,
+          ...context.customAttributes,
+        },
+      }),
+    );
+
+    await act(async () => {
+      window.dispatchEvent(new MessageEvent("message", {
+        origin: config.baseUrl,
+        source: replacementFrame.contentWindow,
+        data: 'chatwoot-widget:{"event":"setAuthCookie","data":{"widgetAuthToken":"B"}}',
+      }));
+      await Promise.resolve();
+    });
+    expect(getChatwootPendingIdentityAttempt()).toBeUndefined();
+    expect(window.localStorage.length).toBe(1);
+    expect(api.toggleBubbleVisibility).toHaveBeenLastCalledWith("show");
+  });
+
+  it("requests one session refresh and stops probing when access refresh is required", async () => {
+    vi.useFakeTimers();
+    mocks.loadContext.mockResolvedValue(null);
+    mocks.verifyIdentity.mockResolvedValue("refresh_required");
+    window.history.replaceState({}, "", "/cabinet?tab=payments");
+    const api = chatwootApi();
+    api.setUser.mockImplementation(() => undefined);
+    window.$chatwoot = api;
+
+    render(createElement(ChatwootWidget, { config }));
+    await flushWidgetEffects();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(750);
+    });
+
+    expect(mocks.navigateTo).toHaveBeenCalledWith(
+      "/auth/session/refresh?return_to=%2Fcabinet%3Ftab%3Dpayments",
+    );
+    expect(mocks.navigateTo).toHaveBeenCalledTimes(1);
+    expect(mocks.verifyIdentity).toHaveBeenCalledTimes(1);
+    expect(window.cleanPayChatwootFailedIdentity).toBeUndefined();
+
+    act(() => {
+      window.dispatchEvent(new CustomEvent("chatwoot:ready"));
+      window.dispatchEvent(new CustomEvent("chatwoot:opened"));
+      window.dispatchEvent(new CustomEvent("chatwoot:error"));
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(CHATWOOT_IDENTITY_ATTEMPT_TIMEOUT_MS * 2);
+    });
+    expect(mocks.navigateTo).toHaveBeenCalledTimes(1);
+    expect(mocks.verifyIdentity).toHaveBeenCalledTimes(1);
+    expect(api.setUser).toHaveBeenCalledTimes(1);
+    expect(window.cleanPayChatwootFailedIdentity).toBeUndefined();
   });
 
   it("keeps a late Chatwoot identity error fail-closed after an ownership probe", async () => {

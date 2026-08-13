@@ -75,6 +75,13 @@ describe("production Telegram account merge gateway", () => {
     await gateway.assertRateLimit(confirmation.telegramId);
     await gateway.audit({ action: "merge", userId: "user-1" });
     await expect(gateway.claim(confirmation, new Date("2026-01-01"))).resolves.toBe(true);
+    mocks.withPaymentOwnerChangeFence.mockImplementationOnce(async (input: {
+      claimGuard: (tx: typeof mocks.prisma) => Promise<void>;
+      work: () => Promise<unknown>;
+    }) => {
+      await input.claimGuard(mocks.prisma);
+      return input.work();
+    });
     await gateway.withOwnerChangeFence(confirmation, async () => undefined);
     await expect(gateway.loadCurrentOwner("user-1")).resolves.toMatchObject({ upstreamAccountId: "target" });
     const identity = await gateway.authenticateTelegram(confirmation);
@@ -86,11 +93,16 @@ describe("production Telegram account merge gateway", () => {
     await expect(gateway.cancel(confirmation)).resolves.toBe(true);
     await gateway.release(confirmation, { terminal: false, errorCode: "UPSTREAM_UNAVAILABLE" });
     await gateway.refreshLocalSession();
+    await gateway.reconcileCompletedOwnerChange(confirmation);
 
     expect(mocks.assertRateLimit).toHaveBeenCalledWith(expect.objectContaining({ action: "telegram_account_merge_confirm" }));
     expect(mocks.withPaymentOwnerChangeFence).toHaveBeenCalled();
     expect(mocks.synchronizeProviderAccountIdentity).toHaveBeenCalledWith("provider-access");
     expect(mocks.linkCurrentUserToRemnashopAuth).toHaveBeenCalledWith(expect.objectContaining({ paymentOwnerFenceHeld: true }));
+    expect(mocks.reconcileCompletedPaymentOwnerChange).toHaveBeenCalledWith(
+      ["user-1"],
+      "telegram-account-merge:v1:merge-1",
+    );
   });
 
   it("does not steal an expired confirmation lease while its owner fence is active", async () => {
@@ -127,6 +139,24 @@ describe("production Telegram account merge gateway", () => {
     expect(work).not.toHaveBeenCalled();
   });
 
+  it("rejects owner-fenced work before a confirmation lease is claimed", async () => {
+    const confirmation = await gateway.loadConfirmation("user-1");
+    const work = vi.fn();
+
+    expect(() => gateway.withOwnerChangeFence(confirmation, work))
+      .toThrow(expect.objectContaining({ code: "CONFLICT" }));
+    expect(mocks.withPaymentOwnerChangeFence).not.toHaveBeenCalled();
+    expect(work).not.toHaveBeenCalled();
+  });
+
+  it("does not complete or release a confirmation without its exact claim lease", async () => {
+    const confirmation = await gateway.loadConfirmation("user-1");
+
+    await expect(gateway.complete(confirmation)).resolves.toBe(false);
+    await gateway.release(confirmation, { terminal: true, errorCode: "UPSTREAM_UNAVAILABLE" });
+    expect(mocks.prisma.accountMergeConfirmation.updateMany).not.toHaveBeenCalled();
+  });
+
   it("fails closed for missing sessions, bootstrap sessions and absent confirmations", async () => {
     mocks.getCurrentSession.mockResolvedValueOnce(null);
     await expect(gateway.loadActor()).resolves.toBeNull();
@@ -140,6 +170,10 @@ describe("production Telegram account merge gateway", () => {
 
   it("translates service and unexpected adapter failures into the application error contract", async () => {
     const { ServiceError } = await import("@/backend/errors/service-error");
+    const { AccountMergeError } = await import("@/application/auth/ports/telegram-account-merge");
+    const applicationError = new AccountMergeError("RATE_LIMITED");
+    mocks.assertRateLimit.mockRejectedValueOnce(applicationError);
+    await expect(gateway.assertRateLimit("777")).rejects.toBe(applicationError);
     mocks.getCurrentSession.mockRejectedValueOnce(new ServiceError("UNAUTHORIZED", 401));
     await expect(gateway.loadActor()).rejects.toMatchObject({ code: "UNAUTHORIZED" });
     mocks.getCurrentSession.mockRejectedValueOnce(new TypeError("broken adapter"));
@@ -174,6 +208,25 @@ describe("production Telegram account merge gateway", () => {
     await gateway.release(confirmation, { terminal: true, errorCode: "ACCOUNT_MERGE_REQUIRED" });
     expect(mocks.prisma.accountMergeConfirmation.updateMany).toHaveBeenLastCalledWith(expect.objectContaining({
       data: expect.objectContaining({ status: "FAILED", lastErrorCode: "ACCOUNT_MERGE_REQUIRED" }),
+    }));
+  });
+
+  it("keeps a terminal failure retryable after an upstream owner mutation started", async () => {
+    const confirmation = await gateway.loadConfirmation("user-1");
+    await expect(gateway.claim(confirmation, new Date("2026-01-01T00:00:00.000Z")))
+      .resolves.toBe(true);
+    mocks.prisma.webUser.findFirst.mockResolvedValueOnce({ id: "owner-change-user" });
+
+    await gateway.release(confirmation, {
+      terminal: true,
+      errorCode: "UPSTREAM_UNAVAILABLE",
+    });
+
+    expect(mocks.prisma.accountMergeConfirmation.updateMany).toHaveBeenLastCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        status: "PENDING",
+        lastErrorCode: "UPSTREAM_UNAVAILABLE",
+      }),
     }));
   });
 });

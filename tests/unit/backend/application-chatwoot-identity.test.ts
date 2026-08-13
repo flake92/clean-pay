@@ -7,7 +7,11 @@ function gateway(
   overrides: Partial<ChatwootIdentityGateway> = {},
 ): ChatwootIdentityGateway {
   return {
-    loadActor: vi.fn(async () => ({ userId: "user-1" })),
+    loadActor: vi.fn(async () => ({
+      status: "authenticated" as const,
+      userId: "user-1",
+      sessionId: "session-1",
+    })),
     loadConversationToken: vi.fn(async () => "conversation-token"),
     probeContactIdentity: vi.fn(async () => ({
       status: "available" as const,
@@ -24,12 +28,25 @@ describe("Chatwoot identity verification", () => {
       .resolves.toBe("rejected");
     expect(malformed.loadActor).not.toHaveBeenCalled();
 
-    const missingActor = gateway({ loadActor: vi.fn(async () => null) });
+    const missingActor = gateway({
+      loadActor: vi.fn(async () => ({ status: "anonymous" as const })),
+    });
     await expect(verifyChatwootIdentity(missingActor, "user-1"))
       .resolves.toBe("pending");
 
+    const refreshRequired = gateway({
+      loadActor: vi.fn(async () => ({ status: "refresh_required" as const })),
+    });
+    await expect(verifyChatwootIdentity(refreshRequired, "user-1"))
+      .resolves.toBe("refresh_required");
+    expect(refreshRequired.loadConversationToken).not.toHaveBeenCalled();
+
     const changedActor = gateway({
-      loadActor: vi.fn(async () => ({ userId: "user-2" })),
+      loadActor: vi.fn(async () => ({
+        status: "authenticated" as const,
+        userId: "user-2",
+        sessionId: "session-2",
+      })),
     });
     await expect(verifyChatwootIdentity(changedActor, "user-1"))
       .resolves.toBe("rejected");
@@ -70,6 +87,11 @@ describe("Chatwoot identity verification", () => {
       .resolves.toBe("confirmed");
     expect(subject.probeContactIdentity).toHaveBeenCalledWith(
       "conversation-token",
+      {
+        status: "authenticated",
+        userId: "user-1",
+        sessionId: "session-1",
+      },
     );
   });
 });

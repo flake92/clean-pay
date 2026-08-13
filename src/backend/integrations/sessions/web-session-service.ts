@@ -389,6 +389,57 @@ export async function getCurrentSessionReadOnly() {
   return session;
 }
 
+/**
+ * Verifies that the browser still has a usable refresh-session candidate
+ * without consuming or rotating its one-time refresh token.
+ *
+ * Polling Server Actions may use this only to tell the browser to visit the
+ * dedicated refresh Route Handler. They must never turn this read into a
+ * session or mutate either credential cookie themselves.
+ */
+export async function getCurrentRefreshSessionCandidateReadOnly() {
+  const cookieStore = await cookies();
+  const refreshToken = cookieStore.get(sessionCookieNames.refresh)?.value;
+
+  if (!refreshToken) {
+    authDebugLog("session_refresh_candidate_read_only_skipped", {
+      reason: "missing_refresh_cookie",
+    });
+    return null;
+  }
+
+  const now = new Date();
+  const tokenHash = sha256(refreshToken);
+  const session = await prisma.webSession.findFirst({
+    where: {
+      revokedAt: null,
+      refreshExpiresAt: { gt: now },
+      OR: [
+        { refreshTokenHash: tokenHash },
+        {
+          refreshTokenHistory: {
+            some: {
+              tokenHash,
+              graceExpiresAt: { gte: now },
+            },
+          },
+        },
+      ],
+    },
+    select: { id: true, userId: true },
+  });
+
+  authDebugLog("session_refresh_candidate_read_only_result", {
+    found: Boolean(session),
+    sessionId: session?.id,
+    userId: session?.userId,
+  });
+
+  return session
+    ? { sessionId: session.id, userId: session.userId }
+    : null;
+}
+
 export async function refreshCurrentAccessCookie() {
   authDebugLog("session_access_cookie_refresh_started", {});
   const session = await getCurrentSession();
