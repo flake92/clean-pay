@@ -62,11 +62,30 @@ CHATWOOT_HMAC_TOKEN=<identity-validation-hmac-token>
 Перед запуском production-валидатор проверит комплектность настроек, HTTPS,
 формат токенов, отсутствие шаблонных и повторно использованных секретов.
 
+### Сетевой доступ
+
+Интеграции нужен исходящий HTTPS-доступ к `CHATWOOT_BASE_URL` из двух мест:
+
+- браузер пользователя загружает SDK, iframe и WebSocket Chatwoot;
+- сервер приложения обращается к `GET /api/v1/widget/contact`, чтобы проверить,
+  что cookie текущего диалога принадлежит вошедшему пользователю Clean Pay.
+
+Разрешите DNS и TCP/443 до origin Chatwoot для контейнера приложения, reverse
+proxy и сетевых политик хоста. Серверный запрос использует публичный Website
+Token и token текущего диалога; административный API-токен Chatwoot для него не
+нужен. Не выводите token диалога в логи и диагностические команды.
+
+Chatwoot остаётся необязательной службой поддержки и не входит в основной
+readiness Clean Pay. Поэтому недоступность этого исходящего соединения не
+останавливает кабинет и не делает deployment unhealthy, но кнопка чата остаётся
+скрытой до безопасного подтверждения контакта.
+
 ## 3. Как это работает
 
 После входа пользователя Clean Pay загружает SDK с
-`https://chat.example.com/packs/js/sdk.js`, показывает плавающую кнопку и
-передаёт Chatwoot:
+`https://chat.example.com/packs/js/sdk.js`, передаёт Chatwoot подписанную
+идентичность и показывает плавающую кнопку только после безопасного
+подтверждения контакта. В идентичность входят:
 
 - неизменяемый внутренний ID как основной `identifier`;
 - серверную HMAC-SHA256 подпись этого ID;
@@ -78,6 +97,35 @@ CHATWOOT_HMAC_TOKEN=<identity-validation-hmac-token>
 
 Неподтверждённый e-mail намеренно не отправляется: Chatwoot умеет объединять
 контакты по e-mail, поэтому доверять адресу до его подтверждения небезопасно.
+
+После `setUser` браузер просит защищённый Server Action проверить текущий
+`cw_conversation`. Сервер сопоставляет пользователя активной access-сессии с
+`identifier`, который возвращает Chatwoot. Ответ контакта остаётся на сервере и
+не передаётся браузеру. Проверка владения диалогом разрешает показать launcher,
+но сама по себе не считается подтверждением применения имени, e-mail и custom
+attributes: их обновления сериализуются отдельно и при неуспешном запросе
+повторяются после следующей загрузки. Если во время ещё не завершившегося
+обновления появляется новый набор support attributes, Clean Pay сначала
+заменяет iframe, дожидается проверенного события загрузки нового frame и только
+затем отправляет новый `setUser`. Поэтому поздняя некоррелированная ошибка
+старого iframe не отменяет более новое обновление.
+
+Проверяющий Server Action намеренно не обновляет access-сессию и не расходует
+одноразовый refresh token. Если короткая access-сессия истекла, но у браузера
+ещё есть действующий refresh-кандидат, action возвращает `refresh_required`.
+Виджет не более одного раза за текущий цикл направляет текущую страницу через
+`/auth/session/refresh`; только этот маршрут вращает refresh token, выдаёт новую
+access-cookie и возвращает пользователя на исходную страницу. Само polling
+остаётся read-only и не может запустить цикл вращения refresh token.
+
+Проверки ограничены до обращения к сессии и Chatwoot. Глобальные лимиты берутся
+из `AUTH_RATE_LIMIT_CAPACITY` и `AUTH_CONCURRENCY_LIMIT`; для одной сессии
+разрешено не более 24 вызовов в минуту и двух одновременных запросов. Одинаковые
+одновременные проверки одной session/cookie объединяются в один исходящий
+запрос. Redis координирует лимиты между экземплярами, а при его временной
+недоступности остаются process-local ограничения. Превышение лимита не
+раскрывается браузеру как отдельная ошибка: launcher остаётся скрытым в
+безопасном состоянии `pending`.
 
 Контекст подписки и платежей загружается отдельным защищённым Server Action
 после запуска виджета и кешируется в браузере на одну минуту. При следующем
@@ -146,8 +194,29 @@ iframe, HTTP-запросов и WebSocket. Если настройки непо
 
 Если кнопка не появилась, проверьте разрешённый домен Website Inbox, включённую
 Identity Validation, совпадение Website/HMAC Token, доступность
-`CHATWOOT_BASE_URL` из браузера и отсутствие ошибок CSP в консоли. После смены
-Website Token или HMAC Token перезапустите Clean Pay и повторно войдите.
+`CHATWOOT_BASE_URL` из браузера **и из контейнера приложения**, а также
+отсутствие ошибок CSP в консоли. После смены Website Token или HMAC Token
+перезапустите Clean Pay и повторно войдите.
+
+Для диагностики используйте внутренние Prometheus-метрики:
+
+- `clean_pay_upstream_requests_total` и
+  `clean_pay_upstream_request_duration_seconds` с `service="chatwoot"`,
+  `operation="/api/v1/widget/contact"` и outcome `success`, `rejected` или
+  `unavailable`;
+- `clean_pay_operational_events_total{event="chatwoot_identity_rate_limited"}`
+  и `chatwoot_identity_concurrency_saturated` со scope `global` или `session`;
+- `chatwoot_identity_probe_coalesced` со scope `session`;
+- `chatwoot_identity_guard_degraded` со scope `redis`.
+
+При отказе Redis журнал содержит событие
+`chatwoot_identity_guard_redis_unavailable` с безопасными полями `phase` и
+`errorName`; оно ограничено одним сообщением в минуту на процесс. Результат
+upstream-проверки отражается событиями `chatwoot_identity_probe_completed`,
+`chatwoot_identity_probe_rejected`, `chatwoot_identity_probe_response_invalid`
+и `chatwoot_identity_probe_unavailable` без идентификатора пользователя и
+token диалога. Не включайте в диагностику значения `cw_conversation`, cookies
+сессии или HMAC Token.
 
 ## Что ещё не входит в интеграцию
 

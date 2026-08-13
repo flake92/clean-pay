@@ -75,6 +75,16 @@ describe("rate limiting", () => {
     expect(rateLimitCapacityKey("passkey")).toBe("clean-pay:rate-limit:v4:auth:passkey:capacity");
   });
 
+  it("builds hashed Telegram and session rate-limit identities", () => {
+    expect(rateLimitKey({ action: " Telegram ", tgId: 123n })).toMatch(
+      /^clean-pay:rate-limit:v4:auth:telegram:tgid:[a-f0-9]{64}$/,
+    );
+    expect(rateLimitKey({ action: " Session ", sessionId: " SESSION-1 " })).toMatch(
+      /^clean-pay:rate-limit:v4:auth:session:session:[a-f0-9]{64}$/,
+    );
+    expect(rateLimitCapacityKey("")).toBe("clean-pay:rate-limit:v4:auth:unknown:capacity");
+  });
+
   it("increments counter and expires new keys atomically", async () => {
     mocks.redisCommand.mockResolvedValueOnce([1, 1]);
 
@@ -180,6 +190,84 @@ describe("rate limiting", () => {
     });
   });
 
+  it("fails closed when Redis throws while consuming either rate-limit bucket", async () => {
+    mocks.redisCommand.mockRejectedValueOnce(new TypeError("redis offline"));
+
+    await expect(assertRateLimit({
+      action: "login",
+      email: "u@example.com",
+      limit: 1,
+      windowSeconds: 120,
+    })).rejects.toMatchObject({
+      code: "UPSTREAM_UNAVAILABLE",
+      status: 503,
+      debug: { retryAfterSeconds: 30 },
+    });
+
+    mocks.redisCommand.mockRejectedValueOnce("redis offline");
+    await expect(assertTargetRateLimit({
+      action: "login",
+      email: "u@example.com",
+      limit: 1,
+      windowSeconds: 10,
+    })).rejects.toMatchObject({
+      code: "UPSTREAM_UNAVAILABLE",
+      status: 503,
+      debug: { retryAfterSeconds: 10 },
+    });
+  });
+
+  it("requires a stable identity for a target-only rate limit", async () => {
+    await expect(assertTargetRateLimit({
+      action: "login",
+      limit: 1,
+      windowSeconds: 60,
+    })).rejects.toMatchObject({
+      code: "VALIDATION_ERROR",
+      status: 400,
+    });
+    expect(mocks.redisCommand).not.toHaveBeenCalled();
+  });
+
+  it("uses the target TTL and fallback when the target-only limit is exceeded", async () => {
+    mocks.redisCommand.mockResolvedValueOnce([2]).mockResolvedValueOnce(23);
+    await expect(assertTargetRateLimit({
+      action: "login",
+      sessionId: "session-1",
+      limit: 1,
+      windowSeconds: 60,
+      message: "Slow down",
+    })).rejects.toMatchObject({
+      code: "RATE_LIMITED",
+      message: "Slow down",
+      debug: { retryAfterSeconds: 23 },
+    });
+
+    mocks.redisCommand.mockResolvedValueOnce([2]).mockRejectedValueOnce(new Error("ttl unavailable"));
+    await expect(assertTargetRateLimit({
+      action: "login",
+      sessionId: "session-1",
+      limit: 1,
+      windowSeconds: 120,
+    })).rejects.toMatchObject({
+      code: "RATE_LIMITED",
+      debug: { retryAfterSeconds: 30 },
+    });
+  });
+
+  it("falls back to a bounded retry delay when an exceeded shared bucket has no TTL", async () => {
+    mocks.redisCommand.mockResolvedValueOnce([1_001]).mockRejectedValueOnce(new Error("ttl unavailable"));
+
+    await expect(assertRateLimit({
+      action: "anonymous",
+      limit: 1,
+      windowSeconds: 120,
+    })).rejects.toMatchObject({
+      code: "RATE_LIMITED",
+      debug: { retryAfterSeconds: 30 },
+    });
+  });
+
   it("bounds expensive auth work with a leased Redis semaphore", async () => {
     mocks.redisCommand.mockResolvedValueOnce(1).mockResolvedValueOnce(1);
     const work = vi.fn().mockResolvedValue("done");
@@ -214,6 +302,23 @@ describe("rate limiting", () => {
       status: 503,
     });
     expect(work).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when the concurrency lease cannot be acquired", async () => {
+    mocks.redisCommand.mockRejectedValueOnce("redis offline");
+
+    await expect(withAuthConcurrency("", vi.fn())).rejects.toMatchObject({
+      code: "UPSTREAM_UNAVAILABLE",
+      status: 503,
+      debug: { retryAfterSeconds: 2 },
+    });
+  });
+
+  it("preserves work results when releasing the concurrency lease fails", async () => {
+    mocks.redisCommand.mockResolvedValueOnce(1).mockRejectedValueOnce("release failed");
+
+    await expect(withAuthConcurrency("login", async () => "done", 500)).resolves.toBe("done");
+    expect(mocks.redisCommand).toHaveBeenCalledTimes(2);
   });
 });
 

@@ -210,6 +210,49 @@ function telegramSession({
   };
 }
 
+function emailSession({
+  remnashopUserId = "1",
+  emailVerified = true,
+  telegramId = null,
+  withTokens = false,
+}: {
+  remnashopUserId?: string | null;
+  emailVerified?: boolean;
+  telegramId?: string | null;
+  withTokens?: boolean;
+} = {}) {
+  return {
+    id: "session-1",
+    userId: "user-1",
+    authMethod: "EMAIL",
+    assuranceLevel: "FULL",
+    remnashopAccessTokenEncrypted: withTokens
+      ? protectRemnashopToken("access")
+      : null,
+    remnashopRefreshTokenEncrypted: withTokens
+      ? protectRemnashopToken("refresh")
+      : null,
+    remnashopAccessExpiresAt: withTokens
+      ? new Date(Date.now() + 10 * 60_000)
+      : null,
+    remnashopRefreshExpiresAt: withTokens
+      ? new Date(Date.now() + 60 * 60_000)
+      : null,
+    revokedAt: null,
+    user: {
+      id: "user-1",
+      remnashopUserId,
+      email: "user@example.com",
+      emailVerified,
+      authPending: false,
+      pendingRemnashopUserId: null,
+      pendingRemnashopEmail: null,
+      telegramId,
+      telegramUsername: null,
+    },
+  };
+}
+
 function mergeResponse({
   sourceUserId = 1,
   targetUserId = 2,
@@ -936,6 +979,133 @@ describe("remnashop client", () => {
     });
     expect(lifecycleMock.acquireRemnashopTokensForSession).not.toHaveBeenCalled();
     expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("rejects recovery for a missing or non-recoverable callback session", async () => {
+    prismaMock.webSession.findFirst.mockResolvedValueOnce(null);
+    await expect(
+      recoverRemnashopTelegramSession("missing-session", "user-1"),
+    ).rejects.toMatchObject({ code: "UNAUTHORIZED", status: 401 });
+
+    vi.stubEnv("TELEGRAM_BOT_TOKEN", "");
+    prismaMock.webSession.findFirst.mockResolvedValueOnce(telegramSession());
+    await expect(
+      recoverRemnashopTelegramSession("session-1", "user-1"),
+    ).rejects.toMatchObject({ code: "UPSTREAM_UNAVAILABLE", status: 503 });
+    expect(prismaMock.webSession.deleteMany).not.toHaveBeenCalled();
+  });
+
+  it("rejects an automatic e-mail restore that resolves to another upstream owner", async () => {
+    const session = emailSession();
+    vi.mocked(getCurrentSession).mockResolvedValue(session as never);
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(telegramAuthResponse({ userId: "2" }))
+      .mockResolvedValueOnce(remnashopProfile({
+        email: "user@example.com",
+        telegramId: null,
+      }));
+
+    await expect(getAuthorizedRemnashopTokens()).rejects.toMatchObject({
+      code: "ACCOUNT_MERGE_REQUIRED",
+      status: 409,
+    });
+    expect(prismaMock.webSession.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("fails automatic e-mail restore if the local session changed before storage", async () => {
+    const session = emailSession();
+    vi.mocked(getCurrentSession).mockResolvedValue(session as never);
+    prismaMock.webSession.updateMany.mockResolvedValueOnce({ count: 0 });
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(telegramAuthResponse({ userId: "1" }))
+      .mockResolvedValueOnce(remnashopProfile({
+        email: "user@example.com",
+        telegramId: null,
+      }));
+
+    await expect(getAuthorizedRemnashopTokens()).rejects.toMatchObject({
+      code: "UNAUTHORIZED",
+      status: 401,
+    });
+    expect(prismaMock.webUser.update).not.toHaveBeenCalled();
+  });
+
+  it("revalidates the local session before e-mail and Telegram recovery", async () => {
+    const email = emailSession();
+    vi.mocked(getCurrentSession)
+      .mockResolvedValueOnce(email as never)
+      .mockResolvedValueOnce(null);
+    await expect(getAuthorizedRemnashopTokens()).rejects.toMatchObject({
+      code: "UNAUTHORIZED",
+      message: "Current session changed before e-mail recovery",
+    });
+
+    const telegram = telegramSession({
+      remnashopUserId: null,
+      email: null,
+      emailVerified: false,
+    });
+    vi.mocked(getCurrentSession)
+      .mockResolvedValueOnce(telegram as never)
+      .mockResolvedValueOnce(null);
+    await expect(
+      getAuthorizedRemnashopTokens({ allowUnverifiedEmail: true }),
+    ).rejects.toMatchObject({
+      code: "UNAUTHORIZED",
+      message: "Current session changed before Remnashop recovery",
+    });
+  });
+
+  it("rejects an unlinked full session after e-mail restore declines it", async () => {
+    const session = emailSession({ remnashopUserId: null });
+    vi.mocked(getCurrentSession).mockResolvedValue(session as never);
+
+    await expect(getAuthorizedRemnashopTokens()).rejects.toMatchObject({
+      code: "EMAIL_REQUIRED",
+      status: 401,
+    });
+  });
+
+  it("synchronizes upstream e-mail verification for an authorized Telegram-linked session", async () => {
+    const session = emailSession({
+      emailVerified: false,
+      telegramId: "123456",
+      withTokens: true,
+    });
+    const refreshAccessCookie = vi.fn().mockResolvedValue(undefined);
+    vi.mocked(getCurrentSession).mockResolvedValueOnce(session as never);
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(remnashopProfile({
+      email: "user@example.com",
+      telegramId: 123456,
+      emailVerified: true,
+    }));
+
+    await expect(getAuthorizedRemnashopTokens({ refreshAccessCookie }))
+      .resolves.toMatchObject({ session: { user: { emailVerified: true } } });
+    expect(prismaMock.webUser.update).toHaveBeenCalledWith({
+      where: { id: "user-1" },
+      data: { emailVerified: true },
+    });
+    expect(refreshAccessCookie).toHaveBeenCalledOnce();
+  });
+
+  it("rejects when upstream still does not verify an authorized local e-mail", async () => {
+    const session = emailSession({
+      emailVerified: false,
+      telegramId: "123456",
+      withTokens: true,
+    });
+    vi.mocked(getCurrentSession).mockResolvedValueOnce(session as never);
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(remnashopProfile({
+      email: "other@example.com",
+      telegramId: 123456,
+      emailVerified: false,
+    }));
+
+    await expect(getAuthorizedRemnashopTokens()).rejects.toMatchObject({
+      code: "EMAIL_NOT_VERIFIED",
+      status: 403,
+    });
   });
 
   it("never stores Telegram recovery tokens when the verified owner differs", async () => {

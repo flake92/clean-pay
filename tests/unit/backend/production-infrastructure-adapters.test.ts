@@ -27,6 +27,7 @@ const mocks = vi.hoisted(() => ({
   assertTargetRateLimit: vi.fn(),
   withAuthConcurrency: vi.fn(),
   revokeWebSessionById: vi.fn(),
+  clearWebSessionCookies: vi.fn(),
   createWebSessionForRemnashopUser: vi.fn(),
 }));
 
@@ -66,6 +67,7 @@ vi.mock("@/backend/integrations/sessions/web-session-service", () => ({
 }));
 vi.mock("@/backend/integrations/sessions/web-session-revocation", () => ({
   revokeWebSessionById: mocks.revokeWebSessionById,
+  clearWebSessionCookies: mocks.clearWebSessionCookies,
 }));
 
 import { prismaPasskeyAccountReader } from "@/backend/integrations/auth/prisma-passkey-account-reader";
@@ -204,6 +206,13 @@ describe("production persistence and Telegram adapters", () => {
     });
     mocks.createWebSessionForRemnashopUser.mockResolvedValue({ id: "session-1" });
 
+    await productionTelegramWebAppGateway.preflightCapacity();
+    const concurrencyWork = vi.fn().mockResolvedValue("guarded-result");
+    await expect(productionTelegramWebAppGateway.withUpstreamConcurrency(
+      "telegram_webapp_login",
+      concurrencyWork,
+    )).resolves.toBe("guarded-result");
+
     const provider = await productionTelegramWebAppGateway.authenticateProvider("signed-init-data");
     const identity = await productionTelegramWebAppGateway.verifiedIdentity(provider);
     await productionTelegramWebAppGateway.rateLimit(String(identity.telegramId));
@@ -213,12 +222,18 @@ describe("production persistence and Telegram adapters", () => {
       upstreamSession: reconciled.upstreamSession!,
     });
     await productionTelegramWebAppGateway.recoverSession(session!.id, reconciled.userId);
+    await productionTelegramWebAppGateway.revokeSession(session!.id, reconciled.userId);
+    await productionTelegramWebAppGateway.clearSessionCookies();
+    expect(mocks.assertRateLimitCapacity).toHaveBeenCalledWith("telegram_webapp_login");
+    expect(mocks.withAuthConcurrency).toHaveBeenCalledWith("telegram_webapp_login", concurrencyWork);
     expect(mocks.assertTargetRateLimit).toHaveBeenCalledWith(expect.objectContaining({ tgId: "123" }));
     expect(mocks.createWebSessionForRemnashopUser).toHaveBeenCalledWith(expect.objectContaining({
       userId: "user-1",
       remnashopAccessTokenEncrypted: "encrypted-access",
     }));
     expect(mocks.recoverRemnashopTelegramSession).toHaveBeenCalledWith("session-1", "user-1");
+    expect(mocks.revokeWebSessionById).toHaveBeenCalledWith("session-1", "user-1");
+    expect(mocks.clearWebSessionCookies).toHaveBeenCalledOnce();
   });
 
   it("returns an unverified Telegram identity for application policy", async () => {
