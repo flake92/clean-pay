@@ -426,6 +426,22 @@ export function failChatwootPendingIdentityAttempt(
   return true;
 }
 
+export function failChatwootIdentity(
+  config: ChatwootWidgetConfig,
+  supportAttributes: Record<string, string> = {},
+) {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  const { identity } = desiredIdentity(config, supportAttributes);
+
+  window.cleanPayChatwootFailedIdentity = identity;
+  window.cleanPayChatwootPendingIdentity = undefined;
+  clearChatwootIdentityState(true);
+  expireCookie(`cw_user_${config.websiteToken}`);
+}
+
 export function retryChatwootIdentityAttempt(
   attemptId: string,
   config: ChatwootWidgetConfig,
