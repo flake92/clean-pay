@@ -27,6 +27,7 @@ import {
   logTechnicalInfo,
   logTechnicalWarning,
 } from "@/backend/observability/audit";
+import { clearReferralAttributionCookieOnResponse } from "@/backend/integrations/referral/referral-attribution";
 
 export const runtime = "nodejs";
 
@@ -142,6 +143,7 @@ export async function GET(request: Request) {
     const response = redirectTo(outcome.redirectTo);
     await applyCallbackOutcome(response, outcome);
     if (outcome.mergeConfirmation) return response;
+    clearReferralAttributionCookieOnResponse(response);
 
     logTechnicalInfo("telegram_callback_success", {
       ...metadata,
@@ -171,6 +173,7 @@ export async function POST(request: Request) {
     const response = NextResponse.json({ redirectTo: outcome.redirectTo });
     await applyCallbackOutcome(response, outcome);
     if (outcome.mergeConfirmation) return response;
+    clearReferralAttributionCookieOnResponse(response);
 
     logTechnicalInfo("telegram_popup_callback_success", {
       ...outcome.audit,

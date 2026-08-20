@@ -8,6 +8,7 @@ import {
 } from "@/shared/auth/account-setup-flow";
 import { safeRedirectPath } from "@/shared/auth/redirect-policy";
 import { buildContentSecurityPolicy } from "@/shared/security/content-security-policy";
+import { REFERRAL_ATTRIBUTION_COOKIE_NAME } from "@/shared/domain/referrals";
 
 const accessCookieName = 'clean_pay_access';
 const refreshCookieName = 'clean_pay_refresh';
@@ -214,7 +215,13 @@ async function getAccessState(request: NextRequest): Promise<AccessState> {
 }
 
 function isPublicPath(pathname: string) {
-  return publicPagePaths.has(pathname) || publicApiPaths.has(pathname);
+  return publicPagePaths.has(pathname)
+    || publicApiPaths.has(pathname)
+    || pathname.startsWith('/invite/');
+}
+
+function isInvitePath(pathname: string) {
+  return pathname.startsWith('/invite/');
 }
 
 function isEmailVerificationAllowedPath(pathname: string) {
@@ -354,6 +361,7 @@ export async function proxy(request: NextRequest) {
     && (
       pathname === '/login'
       || pathname === '/register'
+      || isInvitePath(pathname)
       || !isPublicPath(pathname)
     );
 
@@ -373,6 +381,17 @@ export async function proxy(request: NextRequest) {
       message: `${request.method} ${pathname} -> 307 session refresh`,
     });
     return secureResponse(refreshSessionRedirect(request), security);
+  }
+
+  if (isInvitePath(pathname) && (accessState.authenticated || isBootstrapAuthenticated)) {
+    const redirectTo = isBootstrapAuthenticated
+      ? passkeySetupPath('/tariffs')
+      : accessState.emailVerificationRequired
+        ? registrationEmailVerificationPath('/tariffs')
+        : '/tariffs';
+    const response = NextResponse.redirect(localRedirectUrl(request, redirectTo));
+    response.cookies.delete(REFERRAL_ATTRIBUTION_COOKIE_NAME);
+    return secureResponse(response, security);
   }
 
   if (

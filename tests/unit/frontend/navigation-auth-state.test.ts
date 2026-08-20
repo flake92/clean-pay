@@ -69,6 +69,7 @@ describe("navigation authentication state", () => {
 
     expect(result.flatItems.map(({ label }) => label)).toEqual([
       "Кабинет",
+      "Пригласить друзей",
       "Тарифы",
       "Профиль",
       "Связать аккаунт",

@@ -58,7 +58,13 @@ export const productionAuthCommands: AuthCommands = {
           )
         : await remnashopAuth(
             input.operation === "register" ? "/auth/register" : "/auth/login",
-            { email: input.email, password: input.password! },
+            input.operation === "register"
+              ? {
+                  email: input.email,
+                  password: input.password,
+                  ...(input.referralCode ? { referral_code: input.referralCode } : {}),
+                }
+              : { email: input.email, password: input.password },
           );
       return { context: auth };
     } catch (error) {

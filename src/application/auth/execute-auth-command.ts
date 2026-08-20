@@ -3,7 +3,12 @@ import {
   type AuthCommands,
   type AuthProviderSession,
 } from "@/application/auth/ports/auth-commands";
-import type { AuthCommand, AuthCommandResult } from "@/application/models/auth-actions";
+import type {
+  AuthCommand,
+  AuthExecutionCommand,
+  AuthExecutionResult,
+} from "@/application/models/auth-actions";
+import { normalizeReferralCode } from "@/shared/domain/referrals";
 
 const MAX_EMAIL_LENGTH = 254;
 const MAX_EMAIL_INPUT_LENGTH = 320;
@@ -17,14 +22,14 @@ const AUTH_COMMAND_KINDS = new Set<AuthCommand["kind"]>([
   "confirm-password-reset",
 ]);
 
-type AuthCommandFailure = Extract<AuthCommandResult, { ok: false }>;
+type AuthCommandFailure = Extract<AuthExecutionResult, { ok: false }>;
 type ParsedAuthCommand = {
-  command: AuthCommand;
+  command: AuthExecutionCommand;
   email: string;
   turnstileToken: string | null;
 };
 
-function errorResult(error: unknown): AuthCommandResult {
+function errorResult(error: unknown): AuthExecutionResult {
   const code = error instanceof AuthGatewayError ? error.code : "INTERNAL_ERROR";
   const messages: Record<string, string> = {
     AUTH_FAILED: "Неверный e-mail или пароль.",
@@ -104,8 +109,19 @@ function parseAuthCommand(value: unknown): ParsedAuthCommand | AuthCommandFailur
       if (input.password.length > MAX_PASSWORD_LENGTH) {
         return validationError("Пароль слишком длинный.");
       }
+      const referralCode = input.referralCode === undefined
+        ? null
+        : normalizeReferralCode(input.referralCode);
+      if (input.referralCode !== undefined && !referralCode) {
+        return validationError("Реферальная ссылка некорректна.");
+      }
       return {
-        command: { kind: "register", ...common, password: input.password },
+        command: {
+          kind: "register",
+          ...common,
+          password: input.password,
+          ...(referralCode ? { referralCode } : {}),
+        },
         email,
         turnstileToken,
       };
@@ -135,16 +151,28 @@ function parseAuthCommand(value: unknown): ParsedAuthCommand | AuthCommandFailur
 
 async function authenticate(
   commands: AuthCommands,
-  input: { operation: "login" | "register"; email: string; password: string },
+  input:
+    | { operation: "login"; email: string; password: string }
+    | { operation: "register"; email: string; password: string; referralCode?: string },
 ) {
   return commands.withUpstreamConcurrency("remnashop_auth", () => commands.authenticate(input));
 }
 
-async function register(commands: AuthCommands, email: string, password: string) {
+async function register(
+  commands: AuthCommands,
+  email: string,
+  password: string,
+  referralCode?: string,
+) {
   let providerSession: AuthProviderSession;
   let flow: "created" | "existing_email_login" = "created";
   try {
-    providerSession = await authenticate(commands, { operation: "register", email, password });
+    providerSession = await authenticate(commands, {
+      operation: "register",
+      email,
+      password,
+      ...(referralCode ? { referralCode } : {}),
+    });
   } catch (error) {
     if (!(error instanceof AuthGatewayError) || error.code !== "EMAIL_ALREADY_EXISTS") throw error;
     flow = "existing_email_login";
@@ -174,12 +202,13 @@ async function register(commands: AuthCommands, email: string, password: string)
   });
   return {
     emailVerified: session.emailVerified,
+    registrationFlow: flow,
     verificationRequired: !session.emailVerified,
     verificationDeliveryFailed: verificationDelivery === "failed",
   };
 }
 
-export async function executeAuthCommand(commands: AuthCommands, input: unknown): Promise<AuthCommandResult> {
+export async function executeAuthCommand(commands: AuthCommands, input: unknown): Promise<AuthExecutionResult> {
   const parsed = parseAuthCommand(input);
   if ("ok" in parsed) return parsed;
   const { command, email, turnstileToken } = parsed;
@@ -214,7 +243,11 @@ export async function executeAuthCommand(commands: AuthCommands, input: unknown)
       }
       case "register": {
         await commands.rateLimit({ action: "auth_register", email, limit: 5, windowSeconds: 15 * 60 });
-        return { ok: true, kind: "authenticated", ...await register(commands, email, command.password) };
+        return {
+          ok: true,
+          kind: "authenticated",
+          ...await register(commands, email, command.password, command.referralCode),
+        };
       }
       case "request-password-reset":
         await commands.rateLimit({ action: "password_reset_start", email, limit: 5, windowSeconds: 15 * 60 });

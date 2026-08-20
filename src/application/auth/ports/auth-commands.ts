@@ -18,12 +18,11 @@ export interface AuthCommands {
   }): Promise<void>;
   identifyEmail(email: string): Promise<{ exists: boolean }>;
   hasPasskey(email: string): Promise<boolean>;
-  authenticate(input: {
-    operation: "login" | "register" | "confirm-password-reset";
-    email: string;
-    password?: string;
-    code?: string;
-  }): Promise<AuthProviderSession>;
+  authenticate(input:
+    | { operation: "login"; email: string; password: string }
+    | { operation: "register"; email: string; password: string; referralCode?: string }
+    | { operation: "confirm-password-reset"; email: string; password: string; code: string }
+  ): Promise<AuthProviderSession>;
   establishSession(
     providerSession: AuthProviderSession,
     options?: { replaceExistingSessions?: boolean; replacementIdentityEmail?: string },
