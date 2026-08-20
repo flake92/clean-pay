@@ -200,10 +200,12 @@ describe("production auth and profile adapters", () => {
       operation: "register",
       email: "u@example.com",
       password: "secret123",
+      referralCode: "Friend42",
     });
     expect(mocks.remnashopAuth).toHaveBeenCalledWith("/auth/register", {
       email: "u@example.com",
       password: "secret123",
+      referral_code: "Friend42",
     });
     await productionAuthCommands.requestEmailVerification(registration, "u@example.com");
     expect(mocks.requestRemnashopEmailVerification).toHaveBeenCalledWith({

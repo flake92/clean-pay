@@ -1,6 +1,8 @@
 import { cache } from "react";
 
 import { loadCabinetViewModel } from "@/application/cabinet/load-cabinet";
+import { loadReferralProgram } from "@/application/referral/load-referral-program";
+import { getEnv } from "@/backend/config/env";
 import { createProductionAuthProfileGateway } from "@/backend/integrations/auth/auth-profile-gateway";
 import { createProductionLinkAccountReader } from "@/backend/integrations/auth/link-account";
 import { createProductionPasskeyManagementGateway } from "@/backend/integrations/auth/passkey-management-gateway";
@@ -9,6 +11,7 @@ import { createProductionCheckoutReader } from "@/backend/integrations/payments/
 import { createProductionPaymentHistoryGateway } from "@/backend/integrations/payments/payment-history-reader";
 import { productionPaymentMaintenanceRunner } from "@/backend/integrations/payments/payment-maintenance-runner";
 import { createProductionPaymentStatusReader } from "@/backend/integrations/payments/payment-status-reader";
+import { createReferralProgramReader } from "@/backend/integrations/referral/referral-program-reader";
 import { getAuthorizedRemnashopTokens } from "@/backend/integrations/remnashop/client";
 import { createRemnashopSubscriptionCatalog } from "@/backend/integrations/remnashop/subscription-catalog";
 import { getCurrentSessionReadOnly } from "@/backend/integrations/sessions/web-session-service";
@@ -36,6 +39,10 @@ const authorizeProfileSession = cache(() =>
 const subscriptions = createRemnashopSubscriptionReader(authorizeVerifiedSession);
 export const requestSubscriptionCatalog =
   createRemnashopSubscriptionCatalog(authorizeVerifiedSession);
+export const requestReferralProgramReader = createReferralProgramReader(
+  authorizeVerifiedSession,
+  getEnv().publicAppUrl,
+);
 
 export const requestAuthProfileGateway = createProductionAuthProfileGateway(
   authorizeProfileSession,
@@ -66,4 +73,7 @@ export const loadRequestCabinetViewModel = cache(() =>
     requestPaymentHistoryGateway,
     productionPaymentMaintenanceRunner,
   ),
+);
+export const loadRequestReferralProgram = cache(() =>
+  loadReferralProgram(requestReferralProgramReader),
 );

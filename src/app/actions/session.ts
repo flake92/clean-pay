@@ -7,6 +7,7 @@ import {
   endCabinetSession,
 } from "@/application/cabinet/execute-command";
 import { productionCabinetCommands } from "@/backend/integrations/cabinet/cabinet-commands";
+import { clearReferralAttributionCookie } from "@/backend/integrations/referral/referral-attribution";
 
 export async function clearSessionAction() {
   return clearCabinetSession(productionCabinetCommands);
@@ -14,5 +15,8 @@ export async function clearSessionAction() {
 
 export async function logoutAction() {
   await endCabinetSession(productionCabinetCommands);
+  // Also remove attribution created by an older application version or an
+  // interrupted auth flow, so a later account on this browser cannot inherit it.
+  await clearReferralAttributionCookie();
   redirect("/login");
 }

@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { createHmac } from "node:crypto";
 import { NextRequest } from "next/server";
 
 const logger = vi.hoisted(() => ({
@@ -50,6 +51,38 @@ describe("proxy session refresh navigation", () => {
     expect(response.status).toBe(307);
     expect(location.pathname).toBe("/auth/session/refresh");
     expect(location.searchParams.get("return_to")).toBe("/cabinet?tab=payments");
+  });
+
+  it("refreshes a session candidate before accepting a new invite attribution", async () => {
+    const response = await proxy(request("/invite/Friend42"));
+    const location = new URL(response.headers.get("location")!);
+
+    expect(response.status).toBe(307);
+    expect(location.pathname).toBe("/auth/session/refresh");
+    expect(location.searchParams.get("return_to")).toBe("/invite/Friend42");
+  });
+
+  it("sends an authenticated invite visitor to tariffs and deletes stale attribution", async () => {
+    const payload = Buffer.from(JSON.stringify({
+      exp: Math.floor(Date.now() / 1_000) + 60,
+      ev: true,
+      al: "FULL",
+    })).toString("base64url");
+    const signature = createHmac("sha256", "test-secret")
+      .update(payload)
+      .digest("base64url");
+    const authenticatedRequest = new NextRequest("https://pay.example.com/invite/Friend42", {
+      headers: {
+        cookie: `clean_pay_access=${payload}.${signature}; clean_pay_referral=stale-signed-value`,
+      },
+    });
+
+    const response = await proxy(authenticatedRequest);
+
+    expect(response.status).toBe(307);
+    expect(new URL(response.headers.get("location")!).pathname).toBe("/tariffs");
+    expect(response.headers.get("set-cookie")).toMatch(/clean_pay_referral=;/);
+    expect(response.headers.get("set-cookie")).toMatch(/Expires=Thu, 01 Jan 1970/i);
   });
 
   it.each(["login", "register"])(

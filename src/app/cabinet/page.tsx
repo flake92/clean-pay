@@ -4,7 +4,11 @@ import { CabinetHeaderActions } from "@/frontend/components/cabinet-header-actio
 import { CabinetPanel } from "@/frontend/components/cabinet-panel";
 import { AppShell } from "@/app/_components/app-shell";
 import { PageHeader } from "@/frontend/components/layout";
-import { loadRequestCabinetViewModel } from "@/app/_composition/request-scoped-readers";
+import {
+  loadRequestCabinetViewModel,
+  loadRequestReferralProgram,
+} from "@/app/_composition/request-scoped-readers";
+import { ReferralProgramPanel } from "@/frontend/components/referral-program-panel";
 import { sessionRefreshPath } from "@/shared/auth/session-navigation";
 import { redirect } from "next/navigation";
 
@@ -21,6 +25,11 @@ async function CabinetActions() {
 
 async function CabinetContent() {
   return <CabinetPanel model={await loadAuthenticatedCabinet()} />;
+}
+
+async function CabinetReferralContent() {
+  const model = await loadRequestReferralProgram();
+  return model.status === "ready" ? <ReferralProgramPanel model={model} /> : null;
 }
 
 function CabinetLoading() {
@@ -48,6 +57,11 @@ export default function CabinetPage() {
         <div className="col-12">
           <Suspense fallback={<CabinetLoading />}>
             <CabinetContent />
+          </Suspense>
+        </div>
+        <div className="col-12" id="referral-program">
+          <Suspense fallback={null}>
+            <CabinetReferralContent />
           </Suspense>
         </div>
       </div>
