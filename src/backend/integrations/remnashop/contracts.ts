@@ -130,3 +130,19 @@ export type PromocodeActivateResponse = {
   success: boolean;
   reward_type: string;
 };
+
+export type ReferralProgramResponse = {
+  enabled: boolean;
+  referral_code: string;
+  web_referral_url: string;
+  invited_count: number;
+  invited_with_payment_count: number;
+  points_balance: number;
+  total_points_issued: number;
+  total_days_issued: number;
+  reward_type: string;
+  reward_strategy: string;
+  accrual_strategy: string;
+  max_level: number;
+  reward_levels: Array<{ level: number; value: number }>;
+};

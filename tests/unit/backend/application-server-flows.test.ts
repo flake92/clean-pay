@@ -258,6 +258,8 @@ describe("server application flows", () => {
     ["unknown kind", { kind: "destroy", email: "user@example.com" }],
     ["non-string email", { kind: "identify", email: 123 }],
     ["non-string password", { kind: "login", email: "user@example.com", password: 123 }],
+    ["invalid referral code", { kind: "register", email: "user@example.com", password: "secret123", referralCode: "../friend" }],
+    ["non-string referral code", { kind: "register", email: "user@example.com", password: "secret123", referralCode: 42 }],
     ["non-string reset code", { kind: "confirm-password-reset", email: "user@example.com", code: 123456, newPassword: "new-password" }],
     ["non-string Turnstile token", { kind: "identify", email: "user@example.com", turnstileToken: 123 }],
   ])("rejects malformed runtime command %s before gateway work", async (_name, malformed) => {
@@ -291,10 +293,12 @@ describe("server application flows", () => {
       kind: "register",
       email: "User@Example.com",
       password: "secret123",
+      referralCode: "Friend42",
     })).resolves.toEqual({
       ok: true,
       kind: "authenticated",
       emailVerified: false,
+      registrationFlow: "existing_email_login",
       verificationRequired: true,
       verificationDeliveryFailed: false,
     });
@@ -302,6 +306,7 @@ describe("server application flows", () => {
       operation: "register",
       email: "user@example.com",
       password: "secret123",
+      referralCode: "Friend42",
     });
     expect(commands.authenticate).toHaveBeenNthCalledWith(2, {
       operation: "login",
@@ -347,6 +352,7 @@ describe("server application flows", () => {
       ok: true,
       kind: "authenticated",
       emailVerified: false,
+      registrationFlow: "created",
       verificationRequired: true,
       verificationDeliveryFailed: true,
     });

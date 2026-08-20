@@ -14,6 +14,7 @@ import {
   verifyPasskeyRegistration,
 } from "@/application/auth/execute-passkey-command";
 import { productionPasskeyCommands } from "@/backend/integrations/auth/passkey-commands";
+import { clearReferralAttributionCookie } from "@/backend/integrations/referral/referral-attribution";
 
 export async function beginPasskeyLoginAction(input: { email: string; turnstileToken?: string }) {
   return beginPasskeyLogin(productionPasskeyCommands, input) as Promise<
@@ -23,7 +24,9 @@ export async function beginPasskeyLoginAction(input: { email: string; turnstileT
 }
 
 export async function verifyPasskeyLoginAction(response: AuthenticationResponseJSON) {
-  return verifyPasskeyLogin(productionPasskeyCommands, response);
+  const result = await verifyPasskeyLogin(productionPasskeyCommands, response);
+  if (result.ok) await clearReferralAttributionCookie();
+  return result;
 }
 
 export async function beginPasskeyRegistrationAction() {
