@@ -7,7 +7,7 @@ const shellRunner = readFileSync("scripts/e2e-devcontainer.sh", "utf8");
 const compose = readFileSync(".devcontainer/docker-compose.yml", "utf8");
 const ciWorkflow = readFileSync(".github/workflows/ci.yml", "utf8");
 const dependabot = readFileSync(".github/dependabot.yml", "utf8");
-const remnashopRevision = "1262f98cd3904ea0e4ddbe4628ceecf56c5f598b";
+const remnashopRevision = "b9eb118c41c472684152a979b1f0dbf045db3d53";
 
 const hostPortContract = [
   ["CLEAN_PAY_DEVCONTAINER_APP_HOST_PORT", "4000", "4000"],
@@ -80,9 +80,9 @@ describe("devcontainer e2e runner readiness", () => {
   it("keeps the default E2E source hermetic and accepts newer compatible schemas", () => {
     expect(runner).toContain('process.env.REMNASHOP_DISCOVER_HOST_SOURCE === "1"');
     expect(runner).toContain('"REMNASHOP_MINIMUM_ALEMBIC_REVISION"');
-    expect(shellRunner).toContain('REMNASHOP_MINIMUM_ALEMBIC_REVISION:-0050');
+    expect(shellRunner).toContain('REMNASHOP_MINIMUM_ALEMBIC_REVISION:-0052');
     expect(shellRunner).toContain('10#$current_revision >= 10#$minimum_revision');
-    expect(shellRunner).not.toContain('current_revision <> \'0050\'');
+    expect(shellRunner).not.toContain('current_revision <> \'0052\'');
   });
 
   it("pins E2E to the compatible Remnashop revision with container migrations", () => {
