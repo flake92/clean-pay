@@ -7,6 +7,7 @@ import { PrismaClient } from "@prisma/client";
 
 import { deployLog } from "./deploy-log.mjs";
 import { retentionPolicy, runRetentionCleanup } from "./retention-cleanup.mjs";
+import { createWorkerShutdownController } from "./worker-shutdown.mjs";
 
 const connectionString = process.env.DATABASE_URL?.trim();
 
@@ -30,9 +31,19 @@ const prisma = new PrismaClient({
 deployLog("info", "retention_worker_started", "Data retention worker started.", {
   intervalSeconds,
 });
+const shutdown = createWorkerShutdownController({
+  onSignal(signal) {
+    deployLog(
+      "info",
+      "retention_worker_shutdown_requested",
+      "Data retention worker shutdown requested; the current cleanup will finish.",
+      { signal },
+    );
+  },
+});
 
 try {
-  while (true) {
+  while (!shutdown.requested) {
     const startedAt = Date.now();
 
     try {
@@ -45,14 +56,26 @@ try {
       });
     }
 
+    if (shutdown.requested) break;
+
     const remainingMs = Math.max(
       1_000,
       intervalSeconds * 1_000 - (Date.now() - startedAt),
     );
-    await new Promise((resolve) => setTimeout(resolve, remainingMs));
+    await shutdown.sleep(remainingMs);
   }
 } finally {
-  await prisma.$disconnect();
+  try {
+    await prisma.$disconnect();
+    deployLog(
+      "info",
+      "retention_worker_stopped",
+      "Data retention worker stopped after disconnecting from the database.",
+      { signal: shutdown.requestedSignal },
+    );
+  } finally {
+    shutdown.dispose();
+  }
 }
 
 function boundedInteger(name, fallback, min, max) {
