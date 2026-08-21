@@ -20,6 +20,7 @@ import {
 import {
   claimPaymentHistorySync,
   completePaymentHistoryPage,
+  deferPaymentHistorySync,
   failPaymentHistorySync,
   listDuePaymentHistoryCandidates,
   loadCurrentPaymentHistoryCredential,
@@ -145,6 +146,21 @@ export const productionPaymentMaintenanceRunner: PaymentMaintenanceRunner = {
     return { context: await getTransactionPage({ accessToken: historyAuthorization(value).accessToken, cursor, limit, timeoutMs }) };
   },
   completeHistoryPage: (claim, page) => completePaymentHistoryPage(historyClaim(claim), historyPage(page)),
+  classifyHistoryError(error) {
+    if (
+      error instanceof ServiceError &&
+      (
+        error.code === "UNAUTHORIZED" ||
+        error.code === "ACCOUNT_MERGE_REQUIRED" ||
+        error.code === "CONFLICT"
+      )
+    ) {
+      return { kind: "deferred" };
+    }
+
+    return { kind: "unexpected" };
+  },
+  deferHistory: (claim, error) => deferPaymentHistorySync(historyClaim(claim), error),
   failHistory: (claim, error) => failPaymentHistorySync(historyClaim(claim), error),
   logHistoryExactFailure(error, index) {
     logger.warn("payment_history_worker_exact_sync_failed", {
