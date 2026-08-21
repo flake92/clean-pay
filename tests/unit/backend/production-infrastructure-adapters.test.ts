@@ -88,7 +88,9 @@ function maintenance(): PaymentMaintenanceRunner {
     loadExactHistoryPayment: vi.fn(async () => null), persistExactHistoryPayment: vi.fn(async () => undefined),
     loadLegacyHistory: vi.fn(async () => ({ context: {} })),
     loadHistoryPage: mocks.loadHistoryPage,
-    completeHistoryPage: mocks.completeHistoryPage, failHistory: mocks.failHistory, now: vi.fn(() => Date.now()),
+    completeHistoryPage: mocks.completeHistoryPage,
+    classifyHistoryError: vi.fn(() => ({ kind: "unexpected" as const })),
+    deferHistory: vi.fn(async () => undefined), failHistory: mocks.failHistory, now: vi.fn(() => Date.now()),
   };
 }
 

@@ -7,7 +7,13 @@ const PAYMENT_COUNT_FIELDS = [
   "retryReady",
   "failed",
 ];
-const HISTORY_COUNT_FIELDS = ["attempted", "applied", "completed", "failed"];
+const HISTORY_COUNT_FIELDS = [
+  "attempted",
+  "applied",
+  "completed",
+  "failed",
+  "deferred",
+];
 const BACKLOG_COUNT_FIELDS = [
   "pending",
   "due",
@@ -88,6 +94,8 @@ export function parseReconciliationBatch(value) {
       parsed.retryReady +
       parsed.failed !==
       parsed.claimed ||
+    parsed.history.failed > parsed.history.attempted ||
+    parsed.history.deferred > parsed.history.failed ||
     parsed.history.completed + parsed.history.failed > parsed.history.attempted
   ) {
     throw new Error("Payment reconciliation response counters are inconsistent");
@@ -97,22 +105,37 @@ export function parseReconciliationBatch(value) {
 }
 
 export function classifyReconciliationBatchHealth(batch) {
-  const attempted = batch.claimed + batch.history.attempted;
-  const processedWithoutFailure =
-    batch.claimed - batch.failed +
-    batch.history.attempted - batch.history.failed;
+  const processedWithoutFailure = batch.claimed - batch.failed;
 
   if (processedWithoutFailure > 0) {
     return { healthy: true, outcome: "progress" };
   }
 
-  if (attempted > 0) {
+  if (batch.claimed > 0) {
     return { healthy: false, outcome: "failed" };
   }
 
-  if (batch.backlog.due === 0) {
-    return { healthy: true, outcome: "idle" };
+  if (batch.backlog.due > 0) {
+    return { healthy: false, outcome: "no_progress" };
   }
 
-  return { healthy: false, outcome: "no_progress" };
+  const historyProcessedWithoutFailure =
+    batch.history.attempted - batch.history.failed;
+
+  if (historyProcessedWithoutFailure > 0) {
+    return { healthy: true, outcome: "history_progress" };
+  }
+
+  if (batch.history.attempted > 0) {
+    if (
+      batch.history.failed === batch.history.attempted &&
+      batch.history.deferred === batch.history.failed
+    ) {
+      return { healthy: true, outcome: "history_deferred" };
+    }
+
+    return { healthy: false, outcome: "history_failed" };
+  }
+
+  return { healthy: true, outcome: "idle" };
 }
