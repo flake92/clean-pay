@@ -16,7 +16,8 @@ function reconciliation(overrides: Partial<PaymentMaintenanceRunner> = {}): Paym
     persistExactHistoryPayment: vi.fn(async () => undefined),
     loadLegacyHistory: vi.fn(async () => ({ context: {} })),
     loadHistoryPage: vi.fn(async () => ({ context: {} })), completeHistoryPage: vi.fn(async () => ({ applied: 0, hasMore: false })),
-    failHistory: vi.fn(async () => undefined), now: vi.fn(() => Date.now()),
+    classifyHistoryError: vi.fn(() => ({ kind: "unexpected" as const })),
+    deferHistory: vi.fn(async () => undefined), failHistory: vi.fn(async () => undefined), now: vi.fn(() => Date.now()),
     ...overrides,
   };
 }

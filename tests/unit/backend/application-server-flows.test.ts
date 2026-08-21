@@ -98,6 +98,8 @@ describe("server application flows", () => {
       loadLegacyHistory: vi.fn(async () => ({ context: {} })),
       loadHistoryPage: vi.fn(async () => ({ context: {} })),
       completeHistoryPage: vi.fn(async () => ({ applied: 20, hasMore: true })),
+      classifyHistoryError: vi.fn(() => ({ kind: "unexpected" as const })),
+      deferHistory: vi.fn(async () => undefined),
       failHistory: vi.fn(async () => undefined),
       now: vi.fn(() => now++),
     };

@@ -5,7 +5,7 @@ const mocks = vi.hoisted(() => ({
   claimUnknownPaymentOperation: vi.fn(), failPaymentReconciliation: vi.fn(), completeReconciledPayment: vi.fn(),
   resetMissingUpstreamOperation: vi.fn(), releaseReconciliationClaim: vi.fn(), markPaymentReconciliationManual: vi.fn(),
   listDuePaymentHistoryCandidates: vi.fn(), claimPaymentHistorySync: vi.fn(), loadCurrentPaymentHistoryCredential: vi.fn(),
-  completePaymentHistoryPage: vi.fn(), failPaymentHistorySync: vi.fn(), getPaymentCapabilities: vi.fn(),
+  completePaymentHistoryPage: vi.fn(), deferPaymentHistorySync: vi.fn(), failPaymentHistorySync: vi.fn(), getPaymentCapabilities: vi.fn(),
   getExactTransaction: vi.fn(), getLegacyTransactions: vi.fn(), getTransactionPage: vi.fn(),
   reconcilePaymentOperation: vi.fn(), reconcilePaymentOperationAsAdmin: vi.fn(),
   findPendingPaymentIds: vi.fn(), syncExactPaymentRecordFromRemnashop: vi.fn(), warn: vi.fn(),
@@ -31,6 +31,7 @@ vi.mock("@/backend/integrations/payments/payment-history-sync-service", () => ({
   claimPaymentHistorySync: mocks.claimPaymentHistorySync,
   loadCurrentPaymentHistoryCredential: mocks.loadCurrentPaymentHistoryCredential,
   completePaymentHistoryPage: mocks.completePaymentHistoryPage,
+  deferPaymentHistorySync: mocks.deferPaymentHistorySync,
   failPaymentHistorySync: mocks.failPaymentHistorySync,
 }));
 vi.mock("@/backend/integrations/remnashop/payment-recovery", () => ({
@@ -129,8 +130,14 @@ describe("production payment maintenance runner adapter", () => {
     await expect(runner.claimHistory({ userId: "user-1", upstreamAccountId: "owner-1" })).resolves.toBeNull();
     expect(claimed).toMatchObject({ cursor: "cursor" });
     mocks.loadCurrentPaymentHistoryCredential.mockResolvedValueOnce("access").mockResolvedValueOnce(null);
-    await expect(runner.authorizeHistory(claimed!)).resolves.toEqual({ context: { accessToken: "access" } });
+    await expect(runner.authorizeHistory(claimed!, 1_234)).resolves.toEqual({ context: { accessToken: "access" } });
     await expect(runner.authorizeHistory(claimed!)).rejects.toMatchObject({ code: "UNAUTHORIZED" });
+    expect(mocks.loadCurrentPaymentHistoryCredential).toHaveBeenNthCalledWith(
+      1,
+      "user-1",
+      "hash",
+      1_234,
+    );
   });
 
   it("loads capabilities and applies or fails history pages", async () => {
@@ -145,9 +152,24 @@ describe("production payment maintenance runner adapter", () => {
     expect(mocks.getTransactionPage).toHaveBeenCalledWith({ accessToken: "access", cursor: "cursor", limit: 50 });
     const claim = { context: { id: "history-claim" }, cursor: null } as never;
     await runner.completeHistoryPage(claim, loaded);
+    await runner.deferHistory(claim, new ServiceError("UNAUTHORIZED", 401));
     await runner.failHistory(claim, new Error("failed"));
     expect(mocks.completePaymentHistoryPage).toHaveBeenCalledWith({ id: "history-claim" }, page);
+    expect(mocks.deferPaymentHistorySync).toHaveBeenCalledWith(
+      { id: "history-claim" },
+      expect.objectContaining({ code: "UNAUTHORIZED" }),
+    );
     expect(mocks.failPaymentHistorySync).toHaveBeenCalledWith({ id: "history-claim" }, expect.any(Error));
+    expect(runner.classifyHistoryError(new ServiceError("UNAUTHORIZED", 401)))
+      .toEqual({ kind: "deferred" });
+    expect(runner.classifyHistoryError(new ServiceError("ACCOUNT_MERGE_REQUIRED", 409)))
+      .toEqual({ kind: "deferred" });
+    expect(runner.classifyHistoryError(new ServiceError("CONFLICT", 409)))
+      .toEqual({ kind: "deferred" });
+    expect(runner.classifyHistoryError(new ServiceError("UPSTREAM_UNAVAILABLE", 503)))
+      .toEqual({ kind: "unexpected" });
+    expect(runner.classifyHistoryError(new Error("db failed")))
+      .toEqual({ kind: "unexpected" });
     expect(typeof runner.now()).toBe("number");
   });
 

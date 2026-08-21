@@ -11,6 +11,9 @@ export type PaymentHistoryClaim = { context: unknown; cursor: string | null };
 export type PaymentHistoryAuthorization = { context: unknown };
 export type PaymentHistoryPage = { context: unknown };
 export type PaymentHistoryExact = { context: unknown };
+export type PaymentHistoryFailureClassification =
+  | { kind: "deferred" }
+  | { kind: "unexpected" };
 
 export type PaymentReconciliationBacklog = {
   pending: number;
@@ -44,6 +47,8 @@ export interface PaymentMaintenanceRunner extends PaymentReconciliationGateway {
   loadLegacyHistory(authorization: PaymentHistoryAuthorization, timeoutMs?: number): Promise<PaymentHistoryPage>;
   loadHistoryPage(authorization: PaymentHistoryAuthorization, cursor: string | null, limit: number, timeoutMs?: number): Promise<PaymentHistoryPage>;
   completeHistoryPage(claim: PaymentHistoryClaim, page: PaymentHistoryPage): Promise<{ applied: number; hasMore: boolean }>;
+  classifyHistoryError(error: unknown): PaymentHistoryFailureClassification;
+  deferHistory(claim: PaymentHistoryClaim, error: unknown): Promise<void>;
   failHistory(claim: PaymentHistoryClaim, error: unknown): Promise<void>;
   logHistoryExactFailure?(error: unknown, index: number): void;
   now(): number;

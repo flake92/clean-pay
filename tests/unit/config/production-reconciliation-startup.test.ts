@@ -75,6 +75,7 @@ describe("production reconciliation startup", () => {
     expect(reconcileLoop).toContain("process.exitCode = 1");
     expect(reconcileLoop).toContain("manual_operation_ids=");
     expect(reconcileLoop).toContain("history_failed=");
+    expect(reconcileLoop).toContain("history_deferred=");
     expect(rootDockerfile).toContain("reconciliation-batch.mjs");
     expect(prodCompose).toContain("dockerfile: Dockerfile");
     expect(prodCompose).toContain('restart: "on-failure"');
@@ -83,7 +84,7 @@ describe("production reconciliation startup", () => {
     expect(rootCompose).not.toContain('restart: "on-failure:');
   });
 
-  it("publishes health only for useful progress or a genuinely idle queue", () => {
+  it("separates opportunistic history degradation from core payment health", () => {
     const batch = (overrides: Record<string, unknown> = {}) => parseReconciliationBatch({
       claimed: 0,
       succeeded: 0,
@@ -93,7 +94,7 @@ describe("production reconciliation startup", () => {
       retryReady: 0,
       failed: 0,
       manualRequiredOperationIds: [],
-      history: { attempted: 0, applied: 0, completed: 0, failed: 0 },
+      history: { attempted: 0, applied: 0, completed: 0, failed: 0, deferred: 0 },
       backlog: emptyBacklog,
       ...overrides,
     });
@@ -111,7 +112,22 @@ describe("production reconciliation startup", () => {
       failed: 1,
     }))).toEqual({ healthy: false, outcome: "failed" });
     expect(classifyReconciliationBatchHealth(batch({
+      history: { attempted: 2, applied: 0, completed: 0, failed: 2, deferred: 2 },
+    }))).toEqual({ healthy: true, outcome: "history_deferred" });
+    expect(classifyReconciliationBatchHealth(batch({
+      history: { attempted: 2, applied: 0, completed: 0, failed: 2, deferred: 0 },
+    }))).toEqual({ healthy: false, outcome: "history_failed" });
+    expect(classifyReconciliationBatchHealth(batch({
+      history: { attempted: 2, applied: 10, completed: 1, failed: 1, deferred: 0 },
+    }))).toEqual({ healthy: true, outcome: "history_progress" });
+    expect(classifyReconciliationBatchHealth(batch({
+      claimed: 1,
+      failed: 1,
+      history: { attempted: 1, applied: 10, completed: 1, failed: 0, deferred: 0 },
+    }))).toEqual({ healthy: false, outcome: "failed" });
+    expect(classifyReconciliationBatchHealth(batch({
       backlog: { ...emptyBacklog, pending: 1, due: 1 },
+      history: { attempted: 1, applied: 10, completed: 1, failed: 0, deferred: 0 },
     }))).toEqual({ healthy: false, outcome: "no_progress" });
   });
 
@@ -143,6 +159,7 @@ describe("production reconciliation startup", () => {
           attempted: 0,
           applied: 0,
           completed: 0,
+          deferred: 0,
           // Missing history.failed means a malformed HTTP 200 is not healthy.
         },
         backlog: emptyBacklog,
@@ -163,6 +180,7 @@ describe("production reconciliation startup", () => {
           applied: 10,
           completed: 1,
           failed: 0,
+          deferred: 0,
         },
         backlog: {
           ...emptyBacklog,
@@ -176,6 +194,39 @@ describe("production reconciliation startup", () => {
       history: { failed: 0 },
       backlog: { pending: 1, manualRequired: 1 },
     });
+
+    const malformedHistory = (history: Record<string, number>) => ({
+      claimed: 0,
+      succeeded: 0,
+      inProgress: 0,
+      unknown: 0,
+      manualRequired: 0,
+      retryReady: 0,
+      failed: 0,
+      manualRequiredOperationIds: [],
+      history,
+      backlog: emptyBacklog,
+    });
+    expect(() => parseReconciliationBatch(malformedHistory({
+      attempted: 1,
+      applied: 0,
+      completed: 0,
+      failed: 1,
+    }))).toThrow("data.history.deferred");
+    expect(() => parseReconciliationBatch(malformedHistory({
+      attempted: 1,
+      applied: 0,
+      completed: 0,
+      failed: 1,
+      deferred: 2,
+    }))).toThrow("counters are inconsistent");
+    expect(() => parseReconciliationBatch(malformedHistory({
+      attempted: 1,
+      applied: 0,
+      completed: 0,
+      failed: 2,
+      deferred: 1,
+    }))).toThrow("counters are inconsistent");
   });
 
   it("starts the worker only after the production app readiness healthcheck", () => {

@@ -90,10 +90,10 @@ try {
       const manualOperationIds = counts.manualRequiredOperationIds.join(",");
       const history = counts.history;
       const backlog = counts.backlog;
-      const severity = !health.healthy || backlog.manualRequired > 0 || backlog.oldestAgeSeconds > 900
+      const severity = !health.healthy || history.failed > 0 || backlog.manualRequired > 0 || backlog.oldestAgeSeconds > 900
         ? "warn"
         : "info";
-      deployLog(severity, "reconciliation_batch_completed", `Payment reconciliation batch completed: health=${health.outcome}, manual_operation_ids=${manualOperationIds || "none"}, history_failed=${history.failed}, backlog=${backlog.pending}.`, {
+      deployLog(severity, "reconciliation_batch_completed", `Payment reconciliation batch completed: health=${health.outcome}, manual_operation_ids=${manualOperationIds || "none"}, history_failed=${history.failed}, history_deferred=${history.deferred}, backlog=${backlog.pending}.`, {
         health: health.outcome,
         claimed: counts.claimed,
         succeeded: counts.succeeded,
@@ -106,6 +106,7 @@ try {
         history_applied: history.applied,
         history_completed: history.completed,
         history_failed: history.failed,
+        history_deferred: history.deferred,
         backlog_pending: backlog.pending,
         backlog_due: backlog.due,
         backlog_manual_required: backlog.manualRequired,

@@ -92,7 +92,9 @@ function paymentMaintenance(): PaymentMaintenanceRunner {
     loadExactHistoryPayment: vi.fn(async () => null), persistExactHistoryPayment: vi.fn(async () => undefined),
     loadLegacyHistory: vi.fn(async () => ({ context: {} })),
     loadHistoryPage: vi.fn(async () => ({ context: {} })),
-    completeHistoryPage: vi.fn(async () => ({ applied: 0, hasMore: false })), failHistory: vi.fn(async () => undefined), now: vi.fn(() => Date.now()),
+    completeHistoryPage: vi.fn(async () => ({ applied: 0, hasMore: false })),
+    classifyHistoryError: vi.fn(() => ({ kind: "unexpected" as const })),
+    deferHistory: vi.fn(async () => undefined), failHistory: vi.fn(async () => undefined), now: vi.fn(() => Date.now()),
   };
 }
 

@@ -20,7 +20,8 @@ function runner(overrides: Partial<PaymentMaintenanceRunner> = {}): PaymentMaint
     persistExactHistoryPayment: vi.fn(async () => undefined),
     loadLegacyHistory: vi.fn(async () => ({ context: {} })),
     loadHistoryPage: vi.fn(async () => ({ context: {} })), completeHistoryPage: vi.fn(async () => ({ applied: 0, hasMore: false })),
-    failHistory: vi.fn(async () => undefined), now: vi.fn(() => 1_000), ...overrides,
+    classifyHistoryError: vi.fn(() => ({ kind: "unexpected" as const })),
+    deferHistory: vi.fn(async () => undefined), failHistory: vi.fn(async () => undefined), now: vi.fn(() => 1_000), ...overrides,
   };
 }
 
@@ -227,11 +228,37 @@ describe("payment maintenance application policy", () => {
     expect(subject.failHistory).toHaveBeenCalledOnce();
   });
 
-  it("classifies idle and progressing batches as healthy but full failures as unhealthy", () => {
+  it("defers expected stale history credentials without recording a hard failure", async () => {
+    const staleCredential = Object.assign(new Error("expired"), {
+      code: "UNAUTHORIZED",
+    });
+    const subject = runner({
+      listHistoryCandidates: vi.fn(async () => [
+        { userId: "user-1", upstreamAccountId: "owner-1" },
+      ]),
+      claimHistory: vi.fn(async () => ({ context: {}, cursor: null })),
+      authorizeHistory: vi.fn(async () => { throw staleCredential; }),
+      classifyHistoryError: vi.fn(() => ({ kind: "deferred" as const })),
+    });
+
+    await expect(runPaymentMaintenance(subject, {
+      paymentLimit: 1,
+      deadlineMs: 10_000,
+    })).resolves.toMatchObject({
+      history: { attempted: 1, failed: 1, deferred: 1 },
+    });
+    expect(subject.deferHistory).toHaveBeenCalledWith(
+      expect.anything(),
+      staleCredential,
+    );
+    expect(subject.failHistory).not.toHaveBeenCalled();
+  });
+
+  it("keeps opportunistic history degradation out of core reconciliation health", () => {
     const result = (overrides: Record<string, unknown>) => ({
       claimed: 0, succeeded: 0, inProgress: 0, unknown: 0, manualRequired: 0,
       retryReady: 0, failed: 0, manualRequiredOperationIds: [],
-      history: { attempted: 0, applied: 0, completed: 0, failed: 0 },
+      history: { attempted: 0, applied: 0, completed: 0, failed: 0, deferred: 0 },
       backlog: { pending: 0, due: 0, manualRequired: 0, oldestAgeSeconds: 0, maximumAttemptCount: 0, totalFailureCount: 0 },
       ...overrides,
     }) as Awaited<ReturnType<typeof runPaymentMaintenance>>;
@@ -240,7 +267,19 @@ describe("payment maintenance application policy", () => {
     expect(paymentMaintenanceBatchIsHealthy(result({ claimed: 1, succeeded: 1 }))).toBe(true);
     expect(paymentMaintenanceBatchIsHealthy(result({ claimed: 1, failed: 1 }))).toBe(false);
     expect(paymentMaintenanceBatchIsHealthy(result({
+      history: { attempted: 3, applied: 0, completed: 0, failed: 3, deferred: 3 },
+    }))).toBe(true);
+    expect(paymentMaintenanceBatchIsHealthy(result({
+      history: { attempted: 1, applied: 0, completed: 0, failed: 1, deferred: 0 },
+    }))).toBe(false);
+    expect(paymentMaintenanceBatchIsHealthy(result({
+      claimed: 1,
+      failed: 1,
+      history: { attempted: 1, applied: 10, completed: 1, failed: 0, deferred: 0 },
+    }))).toBe(false);
+    expect(paymentMaintenanceBatchIsHealthy(result({
       backlog: { pending: 1, due: 1, manualRequired: 0, oldestAgeSeconds: 1, maximumAttemptCount: 0, totalFailureCount: 0 },
+      history: { attempted: 1, applied: 10, completed: 1, failed: 0, deferred: 0 },
     }))).toBe(false);
   });
 });

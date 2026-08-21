@@ -145,7 +145,13 @@ export async function runPaymentMaintenance(
     }
   }
 
-  const history = { attempted: 0, applied: 0, completed: 0, failed: 0 };
+  const history = {
+    attempted: 0,
+    applied: 0,
+    completed: 0,
+    failed: 0,
+    deferred: 0,
+  };
   const candidates = await runner.listHistoryCandidates(HISTORY_CANDIDATE_LIMIT);
   for (const candidate of candidates) {
     if (runner.now() >= deadlineAt) break;
@@ -199,7 +205,14 @@ export async function runPaymentMaintenance(
       history.applied += result.applied;
       if (!result.hasMore) history.completed += 1;
     } catch (error) {
-      await runner.failHistory(claim, error);
+      const classification = runner.classifyHistoryError(error);
+
+      if (classification.kind === "deferred") {
+        await runner.deferHistory(claim, error);
+        history.deferred += 1;
+      } else {
+        await runner.failHistory(claim, error);
+      }
       history.failed += 1;
     }
   }
@@ -210,11 +223,17 @@ export async function runPaymentMaintenance(
 export function paymentMaintenanceBatchIsHealthy(
   result: Awaited<ReturnType<typeof runPaymentMaintenance>>,
 ) {
-  const attempted = result.claimed + result.history.attempted;
-  const processedWithoutFailure =
-    result.claimed - result.failed +
+  const processedWithoutFailure = result.claimed - result.failed;
+
+  if (processedWithoutFailure > 0) return true;
+  if (result.claimed > 0 || result.backlog.due > 0) return false;
+
+  const historyProcessedWithoutFailure =
     result.history.attempted - result.history.failed;
 
-  return processedWithoutFailure > 0 ||
-    (attempted === 0 && result.backlog.due === 0);
+  if (historyProcessedWithoutFailure > 0) return true;
+  if (result.history.attempted === 0) return true;
+
+  return result.history.failed === result.history.attempted &&
+    result.history.deferred === result.history.failed;
 }
