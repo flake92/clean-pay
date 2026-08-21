@@ -79,6 +79,7 @@ COPY --from=builder --chown=cleanpay:nodejs /app/node_modules/@prisma/debug ./no
 COPY --from=builder --chown=cleanpay:nodejs /app/node_modules/postgres-array ./node_modules/postgres-array
 COPY --chown=cleanpay:nodejs deploy/prod/start.sh ./deploy/prod/start.sh
 COPY --chown=cleanpay:nodejs deploy/prod/deploy-log.mjs ./deploy/prod/deploy-log.mjs
+COPY --chown=cleanpay:nodejs deploy/prod/worker-shutdown.mjs ./deploy/prod/worker-shutdown.mjs
 COPY --chown=cleanpay:nodejs deploy/prod/validate-env.mjs ./deploy/prod/validate-env.mjs
 COPY --chown=cleanpay:nodejs deploy/prod/production-env-rules.mjs ./deploy/prod/production-env-rules.mjs
 COPY --chown=cleanpay:nodejs deploy/prod/reconcile-loop.mjs ./deploy/prod/reconcile-loop.mjs
