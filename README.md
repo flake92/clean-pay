@@ -251,7 +251,7 @@ git pull --ff-only
 
 Clean Pay использует generic e-mail auth, service-session, объединение аккаунтов
 и восстановление статуса платежей. Пока эти контракты не вошли в официальный
-release Remnashop, используйте проверенную revision `b9eb118` из PR #135
+release Remnashop, используйте проверенную revision `47ecf6f` из PR #135
 (`flake92/remnashop:codex/clean-pay-integration-upstream-dev`).
 
 Фоновая сверка платежей включается переменной

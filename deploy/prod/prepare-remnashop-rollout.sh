@@ -50,7 +50,7 @@ api_container=$(env_value REMNASHOP_API_CONTAINER remnashop)
 worker_container=$(env_value REMNASHOP_WORKER_CONTAINER remnashop-taskiq-worker)
 scheduler_container=$(env_value REMNASHOP_SCHEDULER_CONTAINER remnashop-taskiq-scheduler)
 postgres_container=$(env_value REMNASHOP_POSTGRES_CONTAINER remnashop-db)
-minimum_revision=$(env_value REMNASHOP_MINIMUM_ALEMBIC_REVISION 0052)
+minimum_revision=$(env_value REMNASHOP_MINIMUM_ALEMBIC_REVISION 0053)
 
 api_image=$(container_image "$api_container")
 worker_image=$(container_image "$worker_container")
