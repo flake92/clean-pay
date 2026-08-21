@@ -72,7 +72,7 @@ describe("production reconciliation startup", () => {
     expect(reconcileLoop).toContain("writeHeartbeat()");
     expect(reconcileLoop).toContain("rmSync(heartbeatFile, { force: true })");
     expect(reconcileLoop).toContain("maxConsecutiveFailures");
-    expect(reconcileLoop).toContain("process.exit(1)");
+    expect(reconcileLoop).toContain("process.exitCode = 1");
     expect(reconcileLoop).toContain("manual_operation_ids=");
     expect(reconcileLoop).toContain("history_failed=");
     expect(rootDockerfile).toContain("reconciliation-batch.mjs");
@@ -116,7 +116,7 @@ describe("production reconciliation startup", () => {
   });
 
   it("publishes no heartbeat before the first strictly valid successful batch", () => {
-    const loopStart = reconcileLoop.indexOf("while (true)");
+    const loopStart = reconcileLoop.indexOf("while (!shutdown.requested)");
     const parseSuccess = reconcileLoop.indexOf(
       "const counts = parseReconciliationBatch(await response.json())",
     );
@@ -183,6 +183,23 @@ describe("production reconciliation startup", () => {
     expect(prodCompose).toMatch(
       /reconciliation-worker:[\s\S]*depends_on:[\s\S]*app:[\s\S]*condition: service_healthy/,
     );
+  });
+
+  it("uses an init process and a bounded graceful-stop window", () => {
+    for (const compose of [prodCompose, rootCompose]) {
+      const reconciliationSection =
+        compose.split(/\n  reconciliation-worker:\n/)[1]?.split(/\n  retention-worker:\n/)[0] ?? "";
+
+      expect(reconciliationSection).toContain("init: true");
+      expect(reconciliationSection).toContain("stop_grace_period: 2m");
+    }
+    expect(reconcileLoop).toContain("createWorkerShutdownController");
+    expect(reconcileLoop).toContain("AbortSignal.any([");
+    expect(reconcileLoop).toContain("shutdown.signal");
+    expect(reconcileLoop.indexOf("if (shutdown.requested) break;"))
+      .toBeLessThan(reconcileLoop.indexOf("consecutiveFailures += 1"));
+    expect(reconcileLoop).toContain("await shutdown.sleep(remainingMs)");
+    expect(rootDockerfile).toContain("worker-shutdown.mjs");
   });
 
   it("keeps terminal manual-review operations visible in the backlog", () => {

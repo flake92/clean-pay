@@ -112,6 +112,8 @@ describe("production data retention", () => {
       const retentionSection =
         compose.split(/\n  retention-worker:\n/)[1]?.split(/\n  postgres:\n/)[0] ?? "";
       expect(retentionSection).toContain("depends_on:");
+      expect(retentionSection).toContain("init: true");
+      expect(retentionSection).toContain("stop_grace_period: 2m");
       expect(retentionSection).toMatch(
         /\n\s+app:\n\s+condition: service_healthy/,
       );
@@ -120,6 +122,22 @@ describe("production data retention", () => {
     expect(prodCommand).toContain('composeArgs("ps", "-q", "retention-worker")');
     expect(startScript).toContain("compose ps -q retention-worker");
     expect(rootDockerfile).toContain("retention-cleanup.mjs");
+    expect(rootDockerfile).toContain("worker-shutdown.mjs");
     expect(prodCompose).toContain("dockerfile: Dockerfile");
+  });
+
+  it("finishes the active cleanup before disconnecting during shutdown", () => {
+    const retentionLoop = readFileSync("deploy/prod/retention-loop.mjs", "utf8");
+    const cleanup = retentionLoop.indexOf("await runRetentionCleanup(prisma, policy)");
+    const shutdownCheck = retentionLoop.indexOf("if (shutdown.requested) break;");
+    const disconnect = retentionLoop.indexOf("await prisma.$disconnect()");
+    const finallyBlock = retentionLoop.indexOf("} finally {");
+
+    expect(retentionLoop).toContain("createWorkerShutdownController");
+    expect(retentionLoop).toContain("while (!shutdown.requested)");
+    expect(cleanup).toBeGreaterThan(0);
+    expect(shutdownCheck).toBeGreaterThan(cleanup);
+    expect(retentionLoop).toContain("await shutdown.sleep(remainingMs)");
+    expect(disconnect).toBeGreaterThan(finallyBlock);
   });
 });

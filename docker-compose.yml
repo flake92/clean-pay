@@ -55,6 +55,8 @@ services:
   reconciliation-worker:
     profiles: ["reconciliation"]
     image: ${CLEAN_PAY_IMAGE:-clean-pay:local}
+    init: true
+    stop_grace_period: 2m
     restart: "on-failure"
     command: ["node", "deploy/prod/reconcile-loop.mjs"]
     env_file: .env
@@ -79,6 +81,8 @@ services:
 
   retention-worker:
     image: ${CLEAN_PAY_IMAGE:-clean-pay:local}
+    init: true
+    stop_grace_period: 2m
     restart: unless-stopped
     command: ["node", "deploy/prod/retention-loop.mjs"]
     env_file: .env
