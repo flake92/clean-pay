@@ -158,7 +158,7 @@ the complete migration chain, custom-format backup and restore.
 Remnashop follows the same release invariant: run its one-shot `migration`
 service (`docker-migrate.sh`) before API, worker, or scheduler. All three runtime
 roles must use the same reviewed image and must not invoke Alembic from their
-entrypoint. A rehearsal must apply the full chain through revision `0052` on an
+entrypoint. A rehearsal must apply the full chain through revision `0053` on an
 empty database and then repeat with no pending work. Rollback uses the pinned
 previous image plus a verified pre-upgrade database restore; never run an
 automatic destructive downgrade against the only production database.
