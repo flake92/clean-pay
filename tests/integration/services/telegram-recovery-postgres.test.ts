@@ -40,6 +40,8 @@ describeWithPostgres("Telegram recovery PostgreSQL serialization", () => {
   let sessionId = "";
 
   beforeAll(async () => {
+    vi.stubEnv("REMNAWAVE_API_BASE_URL", "https://remnawave.test");
+    vi.stubEnv("REMNAWAVE_TOKEN", "test-remnawave-token");
     process.env.DATABASE_URL = realDatabaseUrl as string;
     delete (globalThis as typeof globalThis & { prisma?: unknown }).prisma;
 
@@ -127,6 +129,7 @@ describeWithPostgres("Telegram recovery PostgreSQL serialization", () => {
 
   afterAll(async () => {
     vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
 
     if (prisma && userIds.length > 0) {
       await prisma.paymentOperation.deleteMany({
