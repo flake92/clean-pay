@@ -40,13 +40,49 @@ describe("Chatwoot identity request guard", () => {
     vi.clearAllMocks();
   });
 
-  it("uses the configured production limits when none are overridden", async () => {
+  it("passes every configured production limit to the distributed guard", async () => {
+    const redis = vi.fn()
+      .mockResolvedValue(1);
     const guard = createChatwootIdentityRequestGuard({
-      distributedCommand: null,
+      distributedCommand: redis,
+      now: () => 1_000,
+      token: () => "production-limit-token",
     });
 
-    await expect(guard.runAction(async () => "confirmed"))
-      .resolves.toBe("confirmed");
+    await guard.runAction(async () => undefined);
+    await guard.runProbe({
+      sessionId: "production-session",
+      conversationToken: "production-conversation",
+      work: async () => undefined,
+    });
+
+    const globalAcquire = redis.mock.calls[0]?.[0];
+    expect(globalAcquire?.slice(3)).toEqual([
+      "clean-pay:rate-limit:v4:auth:chatwoot_identity_probe:capacity",
+      "clean-pay:rate-limit:v4:auth:chatwoot_identity_probe:capacity:concurrency",
+      60_000,
+      1_000,
+      1_000,
+      11_000,
+      "production-limit-token",
+      64,
+      10_000,
+    ]);
+
+    const sessionAcquire = redis.mock.calls[2]?.[0];
+    expect(sessionAcquire?.[3]).toEqual(
+      expect.stringContaining("chatwoot_identity_probe:session"),
+    );
+    expect(sessionAcquire?.[4]).toBe(`${sessionAcquire?.[3]}:concurrency`);
+    expect(sessionAcquire?.slice(5)).toEqual([
+      60_000,
+      24,
+      1_000,
+      11_000,
+      "production-limit-token",
+      2,
+      10_000,
+    ]);
   });
 
   it("allows the twelve probes used by a complete browser retry cycle", async () => {

@@ -76,7 +76,9 @@
     "@hono/node-server": "2.0.12",
     "brace-expansion@>=1.1.0 <1.1.18": "1.1.18",
     "brace-expansion@>=5.0.0 <5.0.9": "5.0.9",
-    "deepmerge-ts": "8.0.2",
+    "@prisma/config@7.9.1": {
+      "deepmerge-ts": "8.0.2"
+    },
     "fast-uri": "3.1.5",
     "find-my-way": "9.7.0",
     "hono": "4.12.32",
