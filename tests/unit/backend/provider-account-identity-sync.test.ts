@@ -4,17 +4,20 @@ const mocks = vi.hoisted(() => ({
   getRemnashopMe: vi.fn(),
   remnashopRequest: vi.fn(),
   synchronizeRemnawaveUserIdentity: vi.fn(),
+  assertRemnawaveIdentitySynchronizationConfigured: vi.fn(),
   markPaymentOwnerChangeUpstreamMutationStarted: vi.fn(),
   getRemnashopUserIdFromAccessToken: vi.fn(),
 }));
 
-vi.mock("@/backend/integrations/remnashop/client", () => ({
+vi.mock("@/backend/integrations/remnashop/api-client", () => ({
   getRemnashopMe: mocks.getRemnashopMe,
   remnashopRequest: mocks.remnashopRequest,
   getRemnashopUserIdFromAccessToken: mocks.getRemnashopUserIdFromAccessToken,
 }));
 vi.mock("@/backend/integrations/remnawave/client", () => ({
   synchronizeRemnawaveUserIdentity: mocks.synchronizeRemnawaveUserIdentity,
+  assertRemnawaveIdentitySynchronizationConfigured:
+    mocks.assertRemnawaveIdentitySynchronizationConfigured,
 }));
 vi.mock("@/backend/integrations/payments/payment-user-merge-service", () => ({
   markPaymentOwnerChangeUpstreamMutationStarted:
@@ -43,9 +46,22 @@ describe("provider account identity synchronization", () => {
 
   it("copies the final Remnashop owner to the preserved Remnawave subscription", async () => {
     await expect(synchronizeProviderAccountIdentity("access-token", expected)).resolves.toMatchObject({ hasSubscription: true });
+    expect(mocks.assertRemnawaveIdentitySynchronizationConfigured).toHaveBeenCalledOnce();
+    expect(mocks.assertRemnawaveIdentitySynchronizationConfigured.mock.invocationCallOrder[0])
+      .toBeLessThan(mocks.markPaymentOwnerChangeUpstreamMutationStarted.mock.invocationCallOrder[0]!);
     expect(mocks.synchronizeRemnawaveUserIdentity).toHaveBeenCalledWith({
       uuid: "rw-1", email: "owner@example.com", telegramId: "777",
     });
+  });
+
+  it("does not leave a mutation barrier when Remnawave configuration is absent", async () => {
+    mocks.assertRemnawaveIdentitySynchronizationConfigured.mockImplementationOnce(() => {
+      throw new Error("not configured");
+    });
+    await expect(synchronizeProviderAccountIdentity("access-token", expected))
+      .rejects.toThrow("not configured");
+    expect(mocks.markPaymentOwnerChangeUpstreamMutationStarted).not.toHaveBeenCalled();
+    expect(mocks.synchronizeRemnawaveUserIdentity).not.toHaveBeenCalled();
   });
 
   it("does not write Remnawave when neither account has a subscription", async () => {

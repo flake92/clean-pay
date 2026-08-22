@@ -227,11 +227,7 @@ export async function synchronizeRemnawaveUserIdentity(input: {
   email: string;
   telegramId: string;
 }) {
-  const endpoint = remnawaveEndpoint("/users");
-  const token = getEnv().remnawave.token;
-  if (!endpoint || !token) {
-    throw new ServiceError("UPSTREAM_UNAVAILABLE", 503, "Remnawave identity synchronization is not configured.");
-  }
+  const { endpoint, token } = remnawaveIdentitySynchronizationTarget();
 
   let response: Response;
   const startedAt = Date.now();
@@ -272,6 +268,20 @@ export async function synchronizeRemnawaveUserIdentity(input: {
     || normalizedIdentity(verified?.telegramId) !== normalizedIdentity(input.telegramId)) {
     throw new ServiceError("UPSTREAM_UNAVAILABLE", 503, "Remnawave returned an inconsistent account owner.");
   }
+}
+
+function remnawaveIdentitySynchronizationTarget() {
+  const endpoint = remnawaveEndpoint("/users");
+  const token = getEnv().remnawave.token;
+  if (!endpoint || !token) {
+    throw new ServiceError("UPSTREAM_UNAVAILABLE", 503, "Remnawave identity synchronization is not configured.");
+  }
+
+  return { endpoint, token };
+}
+
+export function assertRemnawaveIdentitySynchronizationConfigured() {
+  remnawaveIdentitySynchronizationTarget();
 }
 
 export async function getLiveRemnawaveSubscriptionUrl(input: LiveSubscriptionUrlInput) {

@@ -401,6 +401,7 @@ describe("clean architecture boundaries", () => {
     const useCase = readFileSync("src/application/auth/recover-telegram-session.ts", "utf8");
     const adapter = readFileSync("src/backend/integrations/remnashop/telegram-session-recovery.ts", "utf8");
     const composition = readFileSync("src/backend/composition/telegram-session-recovery.ts", "utf8");
+    const identitySync = readFileSync("src/backend/integrations/auth/provider-account-identity-sync.ts", "utf8");
 
     expect(useCase).toContain('emailResolution: "KEEP_TARGET"');
     expect(useCase).toContain("synchronizeProviderIdentity({");
@@ -409,6 +410,8 @@ describe("clean architecture boundaries", () => {
     expect(adapter).not.toContain('emailResolution: "KEEP_TARGET"');
     expect(adapter).not.toContain("recoverTelegramSession(");
     expect(composition).toContain("recoverTelegramSession(");
+    expect(identitySync).toContain("@/backend/integrations/remnashop/api-client");
+    expect(identitySync).not.toContain("@/backend/integrations/remnashop/client");
   });
 
   it("keeps session business operations out of server actions", () => {
