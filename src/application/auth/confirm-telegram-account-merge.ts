@@ -80,7 +80,8 @@ export async function confirmTelegramAccountMerge(gateway: TelegramAccountMergeG
     });
     return { merged: true, userId: confirmation.userId };
   }
-  if (confirmation.status === "FAILED" || confirmation.expiresAt <= new Date()) {
+  if (confirmation.status === "FAILED"
+    || (confirmation.expiresAt <= new Date() && !confirmation.recoverableAfterExpiry)) {
     throw new AccountMergeError("ACCOUNT_MERGE_REQUIRED");
   }
   if (!await gateway.claim(confirmation, new Date())) {
@@ -111,7 +112,9 @@ export async function confirmTelegramAccountMerge(gateway: TelegramAccountMergeG
         expectedSubscription = (await gateway.mergeProviderAccounts(confirmation)).targetHasSubscription;
       }
       identity = await gateway.authenticateTelegram(confirmation);
-      const finalSubscription = await gateway.synchronizeSubscriptionIdentity(identity);
+      const synchronized = await gateway.synchronizeSubscriptionIdentity(identity);
+      identity = synchronized.identity;
+      const finalSubscription = synchronized.hasSubscription;
       if (identity.accountId !== confirmation.targetAccountId
         || identity.telegramId !== confirmation.telegramId
         || normalizedEmail(identity.email) !== confirmation.targetEmail
@@ -133,13 +136,17 @@ export async function confirmTelegramAccountMerge(gateway: TelegramAccountMergeG
       return { merged: true, userId: linked.userId };
     });
   } catch (error) {
-    await gateway.release(confirmation, { terminal: terminal(error), errorCode: errorCode(error) });
-    await gateway.audit({
-      action: "telegram_account_merge_failed",
-      userId: confirmation.userId,
-      severity: "WARN",
-      metadata: { confirmationId: confirmation.id, errorCode: errorCode(error), retryable: !terminal(error) },
-    });
+    try {
+      await gateway.release(confirmation, { terminal: terminal(error), errorCode: errorCode(error) });
+    } catch { /* recovery metadata failure must not hide the workflow error */ }
+    try {
+      await gateway.audit({
+        action: "telegram_account_merge_failed",
+        userId: confirmation.userId,
+        severity: "WARN",
+        metadata: { confirmationId: confirmation.id, errorCode: errorCode(error), retryable: !terminal(error) },
+      });
+    } catch { /* audit failure must not hide the workflow error */ }
     throw error;
   }
 }

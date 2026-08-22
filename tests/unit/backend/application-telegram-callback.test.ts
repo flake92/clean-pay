@@ -105,6 +105,23 @@ describe("completeTelegramCallback", () => {
     expect(subject.loadProviderMergeIdentity).not.toHaveBeenCalled();
   });
 
+  it("does not delete a local Telegram owner bound to an unrelated provider account", async () => {
+    const subject = gateway({
+      findUserByTelegramId: vi.fn(async () => ({
+        id: "stale-local-owner",
+        upstreamAccountId: "unrelated-account",
+        email: "stale@example.com",
+        emailVerified: true,
+        telegramId: "777",
+      })),
+    });
+
+    await expect(completeTelegramCallback(subject, input)).rejects.toMatchObject({
+      code: "ACCOUNT_MERGE_REQUIRED",
+    });
+    expect(subject.applyTelegramIdentity).not.toHaveBeenCalled();
+  });
+
   it("keeps the local link when attachment fails without a provider session", async () => {
     const subject = gateway({
       consume: vi.fn(async () => ({
@@ -135,11 +152,11 @@ describe("completeTelegramCallback", () => {
       sourceAccountId: "target-account",
       targetAccountId: "source-account",
     });
-    expect(subject.linkProviderSession).toHaveBeenCalledWith({
+    expect(subject.linkProviderSession).toHaveBeenCalledWith(expect.objectContaining({
       session: providerSession,
       ownerFenceHeld: true,
       invalidateSiblingTokens: true,
-    });
+    }));
   });
 
   it("does not merge without a known current provider account", async () => {

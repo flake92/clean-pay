@@ -30,6 +30,7 @@ import {
 import { assertRateLimit } from "@/backend/limits/rate-limit";
 import { auditLog } from "@/backend/observability/audit";
 import { synchronizeProviderAccountIdentity } from "@/backend/integrations/auth/provider-account-identity-sync";
+import { productionTelegramAccountMergeGateway } from "@/backend/integrations/auth/telegram-account-merge-gateway";
 
 type CurrentSession = NonNullable<Awaited<ReturnType<typeof getCurrentSession>>>;
 type ProviderAuth = Awaited<ReturnType<typeof remnashopAuth>>;
@@ -79,8 +80,36 @@ export function createProductionLinkAccountReader(
       return session ? { userId: session.userId, fullAssurance: session.assuranceLevel === "FULL" } : null;
     },
     async loadTelegramMergeConfirmation(userId) {
-      const confirmation = await getTelegramAccountMergeConfirmation(await mergeToken(), userId);
-      return { ...confirmation, emailWillBeReplaced: confirmation.emailWillBeReplaced };
+      try {
+        const confirmation = await getTelegramAccountMergeConfirmation(await mergeToken(), userId);
+        return { ...confirmation, emailWillBeReplaced: confirmation.emailWillBeReplaced };
+      } catch (error) {
+        const code = error instanceof ServiceError ? error.code : null;
+        if (code !== "NOT_FOUND") throw error;
+        let confirmation;
+        try {
+          confirmation = await productionTelegramAccountMergeGateway.loadConfirmation(userId);
+        } catch (fallbackError) {
+          if ((fallbackError as { code?: unknown })?.code === "NOT_FOUND") {
+            throw new ServiceError("NOT_FOUND", 404, "Account merge confirmation has expired.");
+          }
+          throw fallbackError;
+        }
+        const sourceEmail = confirmation.sourceEmail?.trim().toLowerCase() ?? null;
+        const targetEmail = confirmation.targetEmail.trim().toLowerCase();
+        const sourceEmailMasked = sourceEmail
+          ? `${sourceEmail.slice(0, Math.min(2, sourceEmail.indexOf("@")))}***@${sourceEmail.split("@", 2)[1] ?? ""}`
+          : null;
+        return {
+          targetEmail: confirmation.targetEmail,
+          sourceEmailMasked,
+          emailWillBeReplaced: sourceEmail !== null && sourceEmail !== targetEmail,
+          telegramId: confirmation.telegramId,
+          status: confirmation.status,
+          expiresAt: confirmation.expiresAt,
+          recoverableAfterExpiry: confirmation.recoverableAfterExpiry,
+        };
+      }
     },
   };
 }
@@ -129,7 +158,12 @@ export const productionLinkAccountCommands: LinkAccountCommands = {
 
   async loadProviderProfile(session) {
     const profile = await adapt(() => getRemnashopMe(providerAuth(session).cookies.accessToken));
-    return { email: profile.email, emailVerified: profile.is_email_verified };
+    return {
+      email: profile.email,
+      emailVerified: profile.is_email_verified,
+      pendingEmail: profile.pending_email,
+      telegramId: profile.telegram_id === null ? null : String(profile.telegram_id),
+    };
   },
 
   providerAccountId(session) {
@@ -163,13 +197,17 @@ export const productionLinkAccountCommands: LinkAccountCommands = {
 
   async linkCurrentAccount(session, input) {
     const auth = providerAuth(session);
-    await adapt(() => synchronizeProviderAccountIdentity(auth.cookies.accessToken));
+    const verified = await adapt(() => synchronizeProviderAccountIdentity(
+      auth.cookies.accessToken,
+      input.expectedIdentity,
+    ));
     const linked = await adapt(() => linkCurrentUserToRemnashopAuth({
       accessToken: auth.cookies.accessToken,
       refreshToken: auth.cookies.refreshToken,
       auth: auth.data,
       ...(input.upstreamMerged ? { invalidateSiblingRemnashopTokens: true } : {}),
       paymentOwnerFenceHeld: input.ownerFenceHeld,
+      verifiedProfile: verified.profile,
     }));
     await adapt(() => refreshCurrentAccessCookie());
     return { userId: linked.user.id };
@@ -181,12 +219,12 @@ export const productionLinkAccountCommands: LinkAccountCommands = {
     return (await adapt(() => prisma.webUser.findUnique({ where: { email }, select: { id: true } })))?.id ?? null;
   },
 
-  async stagePendingEmail({ actor, providerSession, email, providerEmail, stagedLocally }) {
+  async stagePendingEmail({ actor, providerSession, email, providerEmail, stagedLocally, ownerTransitionStarted }) {
     const session = actorSession(actor);
     const auth = providerAuth(providerSession);
     await adapt(() => prisma.$transaction(async (tx) => {
       await tx.webSession.update({
-        where: { id: session.id },
+        where: { id: session.id, userId: session.userId, revokedAt: null },
         data: {
           remnashopAccessTokenEncrypted: protectRemnashopToken(auth.cookies.accessToken),
           remnashopRefreshTokenEncrypted: protectRemnashopToken(auth.cookies.refreshToken),
@@ -203,6 +241,7 @@ export const productionLinkAccountCommands: LinkAccountCommands = {
         data: {
           pendingRemnashopUserId: getRemnashopUserIdFromAccessToken(auth.cookies.accessToken),
           pendingRemnashopEmail: providerEmail ?? email,
+          ...(ownerTransitionStarted ? { authPending: true } : {}),
           ...(stagedLocally ? { email, emailVerified: false, authPending: false } : {}),
         },
       });

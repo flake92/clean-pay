@@ -133,6 +133,7 @@ describe("clean architecture boundaries", () => {
 
   it("allows backend adapters to depend only on application contracts", () => {
     for (const { file, source } of files("src/backend/**/*.{ts,tsx}")) {
+      if (file.replaceAll("\\", "/").startsWith("src/backend/composition/")) continue;
       for (const { dependency, resolved } of projectDependencies(file, source)) {
         if (!resolved.startsWith("src/application/")) continue;
         expect(
@@ -394,6 +395,20 @@ describe("clean architecture boundaries", () => {
     expect(gateway).not.toContain("confirmTelegramAccountMerge(");
     expect(action).toContain("productionTelegramAccountMergeGateway");
     expect(action).toContain("confirmLinkedTelegram(productionTelegramAccountMergeGateway)");
+  });
+
+  it("keeps Telegram session-recovery orchestration in the application layer", () => {
+    const useCase = readFileSync("src/application/auth/recover-telegram-session.ts", "utf8");
+    const adapter = readFileSync("src/backend/integrations/remnashop/telegram-session-recovery.ts", "utf8");
+    const composition = readFileSync("src/backend/composition/telegram-session-recovery.ts", "utf8");
+
+    expect(useCase).toContain('emailResolution: "KEEP_TARGET"');
+    expect(useCase).toContain("synchronizeProviderIdentity({");
+    expect(useCase.indexOf("synchronizeProviderIdentity({"))
+      .toBeLessThan(useCase.indexOf("commitLocalRecovery({"));
+    expect(adapter).not.toContain('emailResolution: "KEEP_TARGET"');
+    expect(adapter).not.toContain("recoverTelegramSession(");
+    expect(composition).toContain("recoverTelegramSession(");
   });
 
   it("keeps session business operations out of server actions", () => {

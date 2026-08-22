@@ -12,7 +12,7 @@ const mocks = vi.hoisted(() => ({
   prisma: {
     webUser: { findUnique: vi.fn(), findUniqueOrThrow: vi.fn(), update: vi.fn(), upsert: vi.fn() },
     telegramAuthState: { update: vi.fn() },
-    accountMergeConfirmation: { updateMany: vi.fn(), create: vi.fn() },
+    accountMergeConfirmation: { updateMany: vi.fn(), create: vi.fn(), findMany: vi.fn(), update: vi.fn() },
     $queryRaw: vi.fn(), $transaction: vi.fn(),
   },
 }));
@@ -79,7 +79,12 @@ describe("production Telegram callback gateway", () => {
     mocks.prisma.$queryRaw.mockResolvedValue([]);
     mocks.prisma.accountMergeConfirmation.updateMany.mockResolvedValue({ count: 1 });
     mocks.prisma.accountMergeConfirmation.create.mockResolvedValue({ id: "confirmation-1" });
-    mocks.synchronizeProviderAccountIdentity.mockResolvedValue(true);
+    mocks.prisma.accountMergeConfirmation.findMany.mockResolvedValue([]);
+    mocks.prisma.accountMergeConfirmation.update.mockResolvedValue({ id: "confirmation-1" });
+    mocks.synchronizeProviderAccountIdentity.mockResolvedValue({
+      hasSubscription: true,
+      profile: { email: "owner@example.com", is_email_verified: true, pending_email: null, telegram_id: 777 },
+    });
   });
 
   it("consumes every Telegram transport and maps provider sessions", async () => {
@@ -163,6 +168,37 @@ describe("production Telegram callback gateway", () => {
     expect(mocks.prisma.accountMergeConfirmation.create).not.toHaveBeenCalled();
   });
 
+  it("rotates the bearer token for the exact durable post-mutation retry", async () => {
+    mocks.prisma.webUser.findUnique.mockResolvedValueOnce({
+      paymentOwnerChangeTokenHash: "incomplete-owner-change",
+      paymentOwnerChangeLeaseExpiresAt: new Date(0),
+      paymentOwnerChangeOperationHash: "hash:telegram-account-merge:v1:confirmation-1",
+      paymentOwnerChangeMutationStartedAt: new Date(),
+    });
+    mocks.prisma.accountMergeConfirmation.findMany.mockResolvedValueOnce([{
+      id: "confirmation-1",
+      userId: "user-1",
+      status: "PENDING",
+      leaseExpiresAt: null,
+      createdAt: new Date(),
+      telegramId: "777",
+      sourceRemnashopUserId: "source",
+      targetRemnashopUserId: "target",
+      targetEmail: "target@example.com",
+    }]);
+
+    await expect(gateway.persistAccountMergeConfirmation({
+      userId: "user-1", telegramId: "777", telegramUsername: "clean",
+      sourceEmail: "source@example.com", targetEmail: "target@example.com",
+      targetTelegramId: null, sourceAccountId: "source", targetAccountId: "target",
+    })).resolves.toEqual({ token: "merge-token" });
+    expect(mocks.prisma.accountMergeConfirmation.update).toHaveBeenCalledWith({
+      where: { id: "confirmation-1" },
+      data: expect.objectContaining({ tokenHash: "hash:merge-token", expiresAt: expect.any(Date) }),
+    });
+    expect(mocks.prisma.accountMergeConfirmation.create).not.toHaveBeenCalled();
+  });
+
   it("updates a target user, merging a distinct Telegram owner when necessary", async () => {
     const source = { ...local, id: "source-user", email: "source@example.com", emailVerified: false };
     const target = { ...local, id: "target-user", remnashopUserId: null, email: null, emailVerified: false, telegramId: null };
@@ -172,6 +208,7 @@ describe("production Telegram callback gateway", () => {
 
     await expect(gateway.applyTelegramIdentity({
       targetUserId: "target-user", existingTelegramUserId: "source-user", telegramId: "777",
+      expectedExistingUpstreamAccountId: "account-1", provenProviderAccountId: "account-1",
       telegramUsername: "clean", fullName: "Clean User", photoUrl: "photo",
     })).resolves.toMatchObject({ id: "target-user", upstreamAccountId: "account-1", email: "source@example.com", telegramId: "777" });
     expect(mocks.mergeLocalUsersIntoTarget).toHaveBeenCalledWith(mocks.prisma, expect.objectContaining({ sourceUserIds: ["source-user"] }));
@@ -181,6 +218,7 @@ describe("production Telegram callback gateway", () => {
     mocks.prisma.webUser.findUniqueOrThrow.mockResolvedValueOnce(target);
     await gateway.applyTelegramIdentity({
       targetUserId: "target-user", existingTelegramUserId: "target-user", telegramId: "777",
+      expectedExistingUpstreamAccountId: null, provenProviderAccountId: "account-1",
       telegramUsername: null, fullName: null, photoUrl: null,
     });
     expect(mocks.mergeLocalUsersIntoTarget).toHaveBeenCalledTimes(1);
@@ -190,6 +228,7 @@ describe("production Telegram callback gateway", () => {
     mocks.prisma.webUser.upsert.mockResolvedValue({ ...local, remnashopUserId: null, email: null, emailVerified: false });
     await expect(gateway.applyTelegramIdentity({
       targetUserId: null, existingTelegramUserId: null, telegramId: "777",
+      expectedExistingUpstreamAccountId: null, provenProviderAccountId: null,
       telegramUsername: "clean", fullName: null, photoUrl: null,
     })).resolves.toMatchObject({ id: "user-1", telegramId: "777" });
     expect(mocks.prisma.webUser.upsert).toHaveBeenCalledWith(expect.objectContaining({
@@ -202,6 +241,25 @@ describe("production Telegram callback gateway", () => {
     expect(mocks.auditLog).toHaveBeenNthCalledWith(1, { action: "telegram_link_success", userId: "user-1" });
     expect(mocks.auditLog).toHaveBeenNthCalledWith(2, { action: "telegram_login", userId: "user-1" });
     expect(gateway.providerAccountId(provider)).toBe("account-1");
+  });
+
+  it("revalidates the local Telegram source owner inside the merge transaction", async () => {
+    const target = { ...local, id: "target-user", remnashopUserId: "account-1", telegramId: null };
+    const changedSource = { ...local, id: "source-user", remnashopUserId: "other-account" };
+    mocks.prisma.webUser.findUniqueOrThrow.mockResolvedValueOnce(target);
+    mocks.prisma.webUser.findUnique.mockResolvedValueOnce(changedSource);
+
+    await expect(gateway.applyTelegramIdentity({
+      targetUserId: "target-user",
+      existingTelegramUserId: "source-user",
+      expectedExistingUpstreamAccountId: "account-1",
+      provenProviderAccountId: "account-1",
+      telegramId: "777",
+      telegramUsername: null,
+      fullName: null,
+      photoUrl: null,
+    })).rejects.toMatchObject({ code: "ACCOUNT_MERGE_REQUIRED" });
+    expect(mocks.mergeLocalUsersIntoTarget).not.toHaveBeenCalled();
   });
 
   it("attaches Telegram using token expirations with safe fallbacks", async () => {
@@ -241,10 +299,11 @@ describe("production Telegram callback gateway", () => {
 
   it("links and reconciles provider sessions and logs sanitized attach failures", async () => {
     mocks.linkCurrentUserToRemnashopAuth.mockResolvedValue({ user: { id: "user-1" } });
-    await expect(gateway.linkProviderSession({ session: provider, ownerFenceHeld: true, invalidateSiblingTokens: true })).resolves.toEqual({
+    const expectedIdentity = { accountId: "account-1", email: "owner@example.com", emailVerified: true, pendingEmail: null, telegramId: "777" };
+    await expect(gateway.linkProviderSession({ session: provider, ownerFenceHeld: true, invalidateSiblingTokens: true, expectedIdentity })).resolves.toEqual({
       userId: "user-1", requiresTelegramRecovery: false,
     });
-    expect(mocks.synchronizeProviderAccountIdentity).toHaveBeenCalledWith("provider-access");
+    expect(mocks.synchronizeProviderAccountIdentity).toHaveBeenCalledWith("provider-access", expectedIdentity);
     expect(mocks.linkCurrentUserToRemnashopAuth).toHaveBeenCalledWith(expect.objectContaining({ invalidateSiblingRemnashopTokens: true }));
     mocks.reconcileUserFromRemnashopAuth.mockResolvedValue({
       user: { id: "user-2" }, requiresTelegramRecovery: true,

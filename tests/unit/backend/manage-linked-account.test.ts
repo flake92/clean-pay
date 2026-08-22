@@ -157,7 +157,10 @@ describe("failed() error message mapping", () => {
       loadProviderProfile: vi.fn(async () => ({ email: "user@example.com", emailVerified: true })),
     });
     await expect(linkAccountEmail(commands, { email: "user@example.com", password: "password" })).resolves.toEqual({ ok: true, kind: "linked" });
-    expect(commands.linkCurrentAccount).toHaveBeenCalledWith(expect.anything(), { upstreamMerged: false, ownerFenceHeld: true });
+    expect(commands.linkCurrentAccount).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ upstreamMerged: false, ownerFenceHeld: true }));
+    expect(commands.stagePendingEmail).toHaveBeenCalledWith(expect.objectContaining({ ownerTransitionStarted: true }));
+    expect(vi.mocked(commands.stagePendingEmail).mock.invocationCallOrder[0])
+      .toBeLessThan(vi.mocked(commands.withOwnerChangeFence).mock.invocationCallOrder[0]!);
     expect(commands.requestProviderVerification).not.toHaveBeenCalled();
   });
 

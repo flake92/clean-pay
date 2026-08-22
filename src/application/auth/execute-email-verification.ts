@@ -128,7 +128,17 @@ async function synchronizeConfirmedAccount(
           upstreamMerged = true;
         }
       }
-      await commands.linkCurrentAccount(providerSession, { upstreamMerged, ownerFenceHeld: true });
+      await commands.linkCurrentAccount(providerSession, {
+        upstreamMerged,
+        ownerFenceHeld: true,
+        expectedIdentity: {
+          accountId: persisted.upstreamAccountId,
+          email,
+          emailVerified: true,
+          pendingEmail: null,
+          telegramId: actor.telegramId,
+        },
+      });
       await commands.refreshLocalSession();
     },
   });

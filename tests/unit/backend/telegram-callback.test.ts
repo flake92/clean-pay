@@ -139,8 +139,7 @@ describe("Telegram callback payment-owner fence", () => {
     mocks.prisma.webUser.update.mockImplementation(async ({ data }: { data: Record<string, unknown> }) => ({ ...targetUser, ...data }));
     mocks.prisma.$transaction.mockImplementation(async (work: (tx: typeof mocks.prisma) => Promise<unknown>) => work(mocks.prisma));
     mocks.stageTelegramAccountMerge.mockResolvedValue({ required: false });
-    mocks.getRemnashopUserIdFromAccessToken.mockReturnValue("target-owner");
-    mocks.getRemnashopUserIdFromAccessToken.mockReturnValueOnce("source-owner");
+    mocks.getRemnashopUserIdFromAccessToken.mockReturnValue("source-owner");
     mocks.getRemnashopMe.mockResolvedValue({
       email: "user@example.com", is_email_verified: true, pending_email: null, telegram_id: 777,
     });
@@ -155,13 +154,17 @@ describe("Telegram callback payment-owner fence", () => {
     mocks.getJwtExpiresAt.mockReturnValue(null);
     mocks.remnashopLinkTelegram.mockRejectedValue(new Error("attach failed"));
     mocks.remnashopMergeUsers.mockResolvedValue({});
+    mocks.synchronizeProviderAccountIdentity.mockResolvedValue({
+      hasSubscription: false,
+      profile: { email: "user@example.com", is_email_verified: true, pending_email: null, telegram_id: 777 },
+    });
     mocks.linkCurrentUserToRemnashopAuth.mockResolvedValue({
       user: { id: "local-user" },
     });
     mocks.createWebSessionOnResponse.mockResolvedValue({ id: "new-session" });
   });
 
-  it("holds the owner fence before Telegram attach, upstream merge and local relink", async () => {
+  it("holds the owner fence before Telegram attach and local relink", async () => {
     const response = await POST(new Request("https://clean-pay.example.com/auth/telegram/callback", {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -171,26 +174,24 @@ describe("Telegram callback payment-owner fence", () => {
     expect(response.status).toBe(200);
     expect(mocks.withPaymentOwnerChangeFence).toHaveBeenCalledWith(expect.objectContaining({
       userIds: ["local-user"],
-      upstreamAccountIds: ["source-owner", "target-owner"],
+      upstreamAccountIds: ["source-owner", "source-owner"],
       telegramIds: ["777"],
       work: expect.any(Function),
     }));
     expect(mocks.withPaymentOwnerChangeFence.mock.invocationCallOrder[0]).toBeLessThan(
       mocks.remnashopLinkTelegram.mock.invocationCallOrder[0]!,
     );
-    expect(mocks.remnashopLinkTelegram.mock.invocationCallOrder[0]).toBeLessThan(
-      mocks.remnashopMergeUsers.mock.invocationCallOrder[0]!,
-    );
-    expect(mocks.linkCurrentUserToRemnashopAuth).toHaveBeenCalledWith({
+    expect(mocks.remnashopMergeUsers).not.toHaveBeenCalled();
+    expect(mocks.linkCurrentUserToRemnashopAuth).toHaveBeenCalledWith(expect.objectContaining({
       accessToken: "incoming-access",
       refreshToken: "incoming-refresh",
       auth: {
         expires_at: "2030-01-01T00:00:00.000Z",
         refresh_expires_at: "2030-02-01T00:00:00.000Z",
       },
-      invalidateSiblingRemnashopTokens: true,
       paymentOwnerFenceHeld: true,
-    });
+      verifiedProfile: expect.any(Object),
+    }));
   });
 
   it("returns generic failures without exposing a mismatched link-state owner", async () => {

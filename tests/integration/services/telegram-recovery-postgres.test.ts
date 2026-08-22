@@ -116,6 +116,10 @@ describeWithPostgres("Telegram recovery PostgreSQL serialization", () => {
           });
         }
 
+        if (url.endsWith("/subscription/current")) {
+          return jsonResponse(null);
+        }
+
         throw new Error(`Unexpected request: ${url}`);
       }),
     );
@@ -238,9 +242,10 @@ describeWithPostgres("Telegram recovery PostgreSQL serialization", () => {
     let issued = 0;
     let mergeCommitted = false;
     let mergeCalls = 0;
+    let mergeRequest: Record<string, unknown> | null = null;
     vi.stubGlobal(
       "fetch",
-      vi.fn(async (input: string | URL | Request) => {
+      vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
         const url = String(input);
 
         if (url.endsWith("/auth/telegram")) {
@@ -280,6 +285,7 @@ describeWithPostgres("Telegram recovery PostgreSQL serialization", () => {
         if (url.endsWith("/users/merge?dry_run=false")) {
           mergeCalls += 1;
           mergeCommitted = true;
+          mergeRequest = JSON.parse(String(init?.body)) as Record<string, unknown>;
 
           return jsonResponse({
             dry_run: false,
@@ -298,6 +304,11 @@ describeWithPostgres("Telegram recovery PostgreSQL serialization", () => {
           });
         }
 
+
+        if (url.endsWith("/subscription/current")) {
+          return jsonResponse(null);
+        }
+
         throw new Error(`Unexpected request: ${url}`);
       }),
     );
@@ -313,6 +324,13 @@ describeWithPostgres("Telegram recovery PostgreSQL serialization", () => {
       1,
     );
     expect(mergeCalls).toBe(1);
+    expect(mergeRequest).toMatchObject({
+      source_user_id: Number(sourceUpstreamId),
+      target_user_id: Number(targetUpstreamId),
+      email_resolution: "KEEP_TARGET",
+      telegram_resolution: "KEEP_SOURCE",
+      payment_resolution: "REKEY_SOURCE",
+    });
 
     const [storedUser, storedOperation, storedHistory, storedSibling] =
       await Promise.all([
@@ -393,9 +411,11 @@ describeWithPostgres("Telegram recovery PostgreSQL serialization", () => {
 
     let mergeCommitted = false;
     let issued = 0;
+    let mergeRequest: Record<string, unknown> | null = null;
+    let remnawaveSync: Record<string, unknown> | null = null;
     vi.stubGlobal(
       "fetch",
-      vi.fn(async (input: string | URL | Request) => {
+      vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
         const url = String(input);
 
         if (url.endsWith("/auth/telegram")) {
@@ -436,6 +456,7 @@ describeWithPostgres("Telegram recovery PostgreSQL serialization", () => {
 
         if (url.endsWith("/users/merge?dry_run=false")) {
           mergeCommitted = true;
+          mergeRequest = JSON.parse(String(init?.body)) as Record<string, unknown>;
 
           return jsonResponse({
             dry_run: false,
@@ -451,6 +472,26 @@ describeWithPostgres("Telegram recovery PostgreSQL serialization", () => {
             moved: {},
             conflicts: [],
             requires_relogin: true,
+          });
+        }
+
+
+        if (url.endsWith("/subscription/current")) {
+          return jsonResponse({ user_remna_id: `rw-${suffix}` });
+        }
+
+        if (url.endsWith("/users") && init?.method === "PATCH") {
+          remnawaveSync = JSON.parse(String(init.body)) as Record<string, unknown>;
+          return jsonResponse({ response: {} });
+        }
+
+        if (url.endsWith(`/users/rw-${suffix}`) && (!init?.method || init.method === "GET")) {
+          return jsonResponse({
+            response: {
+              uuid: `rw-${suffix}`,
+              email,
+              telegramId: Number(telegramId),
+            },
           });
         }
 
@@ -487,6 +528,18 @@ describeWithPostgres("Telegram recovery PostgreSQL serialization", () => {
       pendingRemnashopUserId: null,
       pendingRemnashopEmail: null,
       telegramId,
+    });
+    expect(mergeRequest).toMatchObject({
+      source_user_id: Number(telegramSourceUpstreamId),
+      target_user_id: Number(durableTargetUpstreamId),
+      email_resolution: "KEEP_TARGET",
+      telegram_resolution: "KEEP_SOURCE",
+      payment_resolution: "REKEY_SOURCE",
+    });
+    expect(remnawaveSync).toEqual({
+      uuid: `rw-${suffix}`,
+      email,
+      telegramId: Number(telegramId),
     });
   }, 60_000);
 });

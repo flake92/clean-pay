@@ -33,7 +33,7 @@ function gateway(): TelegramAccountMergeGateway {
       requiresRelogin: true,
     })),
     mergeProviderAccounts: vi.fn(async () => ({ targetHasSubscription: true })),
-    synchronizeSubscriptionIdentity: vi.fn(async () => true), linkCurrentAccount: vi.fn(async () => ({ userId: "user-1" })),
+    synchronizeSubscriptionIdentity: vi.fn(async (identity) => ({ hasSubscription: true, identity })), linkCurrentAccount: vi.fn(async () => ({ userId: "user-1" })),
     complete: vi.fn(async () => true), cancel: vi.fn(async () => true), release: vi.fn(async () => undefined),
     refreshLocalSession: vi.fn(async () => undefined),
     reconcileCompletedOwnerChange: vi.fn(async () => undefined),
@@ -128,6 +128,20 @@ describe("Telegram account merge application workflow", () => {
     expect(subject.claim).not.toHaveBeenCalled();
   });
 
+  it("allows an expired confirmation only when the durable mutation is recoverable", async () => {
+    const subject = gateway();
+    vi.mocked(subject.loadConfirmation).mockResolvedValueOnce({
+      ...confirmation,
+      expiresAt: new Date(0),
+      recoverableAfterExpiry: true,
+    });
+    await expect(confirmTelegramAccountMerge(subject)).resolves.toEqual({
+      merged: true,
+      userId: "user-1",
+    });
+    expect(subject.claim).toHaveBeenCalled();
+  });
+
   it("reports a retryable conflict when another worker owns the claim", async () => {
     const subject = gateway();
     vi.mocked(subject.claim).mockResolvedValueOnce(false);
@@ -163,7 +177,7 @@ describe("Telegram account merge application workflow", () => {
     const subject = gateway();
     const targetIdentity = { context: {}, accountId: "target", telegramId: "777", email: "email@example.com", emailVerified: true, pendingEmail: null };
     vi.mocked(subject.authenticateTelegram).mockReset().mockResolvedValue(targetIdentity);
-    vi.mocked(subject.synchronizeSubscriptionIdentity).mockResolvedValueOnce(false);
+    vi.mocked(subject.synchronizeSubscriptionIdentity).mockImplementationOnce(async (identity) => ({ hasSubscription: false, identity }));
     await expect(confirmTelegramAccountMerge(subject)).resolves.toEqual({ merged: true, userId: "user-1" });
     expect(subject.preflight).not.toHaveBeenCalled();
     expect(subject.mergeProviderAccounts).not.toHaveBeenCalled();
@@ -270,7 +284,7 @@ describe("Telegram account merge application workflow", () => {
 
   it("rejects a changed subscription result and an unsuccessful local commit", async () => {
     const subscriptionChanged = gateway();
-    vi.mocked(subscriptionChanged.synchronizeSubscriptionIdentity).mockResolvedValueOnce(false);
+    vi.mocked(subscriptionChanged.synchronizeSubscriptionIdentity).mockImplementationOnce(async (identity) => ({ hasSubscription: false, identity }));
     await expect(confirmTelegramAccountMerge(subscriptionChanged)).rejects.toMatchObject({ code: "ACCOUNT_MERGE_REQUIRED" });
 
     const commitFailed = gateway();
@@ -285,6 +299,16 @@ describe("Telegram account merge application workflow", () => {
       if (action === "telegram_account_merge_succeeded") throw new Error("audit unavailable");
     });
     await expect(confirmTelegramAccountMerge(subject)).resolves.toEqual({ merged: true, userId: "user-1" });
+  });
+
+  it("preserves the workflow error when release and failure audit also fail", async () => {
+    const subject = gateway();
+    vi.mocked(subject.synchronizeSubscriptionIdentity).mockRejectedValueOnce(new Error("root failure"));
+    vi.mocked(subject.release).mockRejectedValueOnce(new Error("release failure"));
+    vi.mocked(subject.audit).mockImplementation(async ({ action }) => {
+      if (action === "telegram_account_merge_failed") throw new Error("audit failure");
+    });
+    await expect(confirmTelegramAccountMerge(subject)).rejects.toThrow("root failure");
   });
 
   it("cancels only a pending, still-owned confirmation", async () => {
