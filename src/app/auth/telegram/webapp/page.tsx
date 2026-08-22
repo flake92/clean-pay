@@ -1,5 +1,5 @@
 import { TelegramWebAppLogin } from "@/frontend/components/telegram-webapp-login";
-import { AuthShell } from "@/frontend/components/layout/auth-shell";
+import { AuthShell } from "@/frontend/components/auth-shell";
 import { safeRedirectPath } from "@/shared/auth/redirect-policy";
 
 export default async function TelegramWebAppLoginPage({

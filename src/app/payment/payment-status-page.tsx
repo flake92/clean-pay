@@ -4,7 +4,7 @@ import { loadPaymentStatus } from "@/application/payments/load-payment-status";
 import { requestPaymentStatusReader } from "@/app/_composition/request-scoped-readers";
 import { productionPaymentMaintenanceRunner } from "@/backend/integrations/payments/payment-maintenance-runner";
 import { AppShell } from "@/app/_components/app-shell";
-import { PageHeader } from "@/frontend/components/layout";
+import { PageHeader } from "@/frontend/components/page-header";
 import { PaymentReturnStatus } from "@/frontend/components/payment-return-status";
 
 function first(value: string | string[] | undefined) { return Array.isArray(value) ? value[0] : value; }

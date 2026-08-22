@@ -7,7 +7,7 @@ import {
 } from "@/app/_composition/request-scoped-readers";
 import { ExtendConfirmation } from "@/frontend/components/extend-confirmation";
 import { AppShell } from "@/app/_components/app-shell";
-import { PageHeader } from "@/frontend/components/layout";
+import { PageHeader } from "@/frontend/components/page-header";
 import { sessionRefreshPath } from "@/shared/auth/session-navigation";
 import { redirect } from "next/navigation";
 

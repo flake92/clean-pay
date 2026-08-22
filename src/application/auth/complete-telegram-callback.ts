@@ -5,6 +5,7 @@ import {
   type TelegramCallbackInput,
   type TelegramCallbackOutcome,
   type TelegramCallbackSession,
+  type TelegramLocalUser,
   type TelegramProviderSession,
   type VerifiedTelegramCallback,
 } from "@/application/auth/ports/telegram-callback";
@@ -16,7 +17,7 @@ function normalizedEmail(value: string | null | undefined) {
 
 async function stageAccountMerge(
   gateway: TelegramCallbackGateway,
-  target: import("@/application/auth/ports/telegram-callback").TelegramLocalUser,
+  target: TelegramLocalUser,
   identity: VerifiedTelegramCallback["identity"],
 ) {
   if (!target.email || !target.emailVerified || !target.upstreamAccountId) {

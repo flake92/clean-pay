@@ -13,9 +13,9 @@ const AppMenu = ({ navigation }: { navigation: NavigationViewModel }) => {
     return (
         <MenuProvider>
             <ul className="layout-menu">
-                {model.map((item, i) => {
-                    return !item?.seperator ? <AppMenuitem item={item} root={true} index={i} key={item.label} /> : <li className="menu-separator"></li>;
-                })}
+                {model.map((item, i) => (
+                    <AppMenuitem item={item} root index={i} key={item.label} />
+                ))}
 
                 <li className="mt-4 px-3 py-3 border-round surface-ground">
                     <div className="text-900 font-medium mb-2">{branding.name}</div>

@@ -1,5 +1,5 @@
 import { AppShell } from "@/app/_components/app-shell";
-import { PageHeader } from "@/frontend/components/layout";
+import { PageHeader } from "@/frontend/components/page-header";
 import { VerifyEmailPanel } from "@/frontend/components/verify-email-panel";
 import { safeReadiness } from "@/application/auth/execute-email-verification";
 import { requestAuthProfileGateway } from "@/app/_composition/request-scoped-readers";

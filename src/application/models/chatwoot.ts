@@ -1,4 +1,4 @@
-export type ChatwootWidgetUser = {
+type ChatwootWidgetUser = {
   identifier: string;
   identifierHash: string;
   name: string;
@@ -12,7 +12,7 @@ export type ChatwootWidgetConfig = {
   user: ChatwootWidgetUser;
 };
 
-export type ChatwootManagedLabel = {
+type ChatwootManagedLabel = {
   name: "payment_problem" | "subscription_expired";
   enabled: boolean;
 };

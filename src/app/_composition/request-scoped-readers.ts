@@ -39,7 +39,7 @@ const authorizeProfileSession = cache(() =>
 const subscriptions = createRemnashopSubscriptionReader(authorizeVerifiedSession);
 export const requestSubscriptionCatalog =
   createRemnashopSubscriptionCatalog(authorizeVerifiedSession);
-export const requestReferralProgramReader = createReferralProgramReader(
+const requestReferralProgramReader = createReferralProgramReader(
   authorizeVerifiedSession,
   getEnv().publicAppUrl,
 );

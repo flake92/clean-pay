@@ -32,13 +32,15 @@
             margin: .75rem 0;
         }
 
-        > a {
+        > a,
+        > button {
             display: none;
         }
     }
 
     li.active-menuitem {
-        > a {
+        > a,
+        > button {
             .layout-submenu-toggler {
                 transform: rotate(-180deg);
             }
@@ -54,13 +56,19 @@
         padding: 0;
         list-style-type: none;
 
-        a {
+        a,
+        button {
             display: flex;
             align-items: center;
             position: relative;
+            width: 100%;
             outline: 0 none;
+            border: 0;
             color: var(--text-color);
+            background: transparent;
             cursor: pointer;
+            font: inherit;
+            text-align: left;
             padding: .75rem 1rem;
             border-radius: $borderRadius;
             transition: background-color $transitionDuration, box-shadow $transitionDuration;
@@ -101,32 +109,38 @@
             border-radius: $borderRadius;
 
             li {
-                a {
+                a,
+                button {
                     margin-left: 1rem;
                 }
 
                 li {
-                    a {
+                    a,
+                    button {
                         margin-left: 2rem;
                     }
 
                     li {
-                        a {
+                        a,
+                        button {
                             margin-left: 2.5rem;
                         }
 
                         li {
-                            a {
+                            a,
+                            button {
                                 margin-left: 3rem;
                             }
 
                             li {
-                                a {
+                                a,
+                                button {
                                     margin-left: 3.5rem;
                                 }
 
                                 li {
-                                    a {
+                                    a,
+                                    button {
                                         margin-left: 4rem;
                                     }
                                 }

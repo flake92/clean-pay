@@ -1,5 +1,5 @@
-export const REFERRAL_CODE_MIN_LENGTH = 3;
-export const REFERRAL_CODE_MAX_LENGTH = 64;
+const REFERRAL_CODE_MIN_LENGTH = 3;
+const REFERRAL_CODE_MAX_LENGTH = 64;
 export const REFERRAL_ATTRIBUTION_COOKIE_NAME = "clean_pay_referral";
 
 const REFERRAL_CODE_PATTERN = /^[A-Za-z0-9]+$/;

@@ -1,8 +1,8 @@
-export type ChatwootContactIdentityProbe =
+type ChatwootContactIdentityProbe =
   | { status: "available"; identifier: string | null }
   | { status: "pending" };
 
-export type ChatwootIdentityActor =
+type ChatwootIdentityActor =
   | { status: "authenticated"; userId: string; sessionId: string }
   | { status: "refresh_required" }
   | { status: "anonymous" };

@@ -3,7 +3,7 @@ import { Suspense } from "react";
 import { CabinetHeaderActions } from "@/frontend/components/cabinet-header-actions";
 import { CabinetPanel } from "@/frontend/components/cabinet-panel";
 import { AppShell } from "@/app/_components/app-shell";
-import { PageHeader } from "@/frontend/components/layout";
+import { PageHeader } from "@/frontend/components/page-header";
 import {
   loadRequestCabinetViewModel,
   loadRequestReferralProgram,

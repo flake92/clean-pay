@@ -49,10 +49,8 @@ const navigation = {
 
 const collapsedState: LayoutState = {
   staticMenuDesktopInactive: true,
-  overlayMenuActive: false,
   profileSidebarVisible: false,
   staticMenuMobileActive: false,
-  menuHoverActive: false,
 };
 
 function renderTopbar(layoutState: LayoutState) {

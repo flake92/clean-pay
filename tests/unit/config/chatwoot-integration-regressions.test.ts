@@ -23,7 +23,7 @@ describe("Chatwoot integration boundaries", () => {
 
   it("mounts the widget only through the authenticated shell and clears guest pages", () => {
     const appShell = source("src/app/_components/app-shell.tsx");
-    const authShell = source("src/frontend/components/layout/auth-shell.tsx");
+    const authShell = source("src/frontend/components/auth-shell.tsx");
 
     expect(appShell).toContain("createChatwootWidgetConfig(shell.supportIdentity)");
     expect(appShell).toContain("<ChatwootWidget config={chatwoot} />");

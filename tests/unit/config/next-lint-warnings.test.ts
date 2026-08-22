@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 const filesWithLogo = [
-  "src/frontend/components/layout/auth-shell.tsx",
+  "src/frontend/components/auth-shell.tsx",
   "src/frontend/layout/AppTopbar.tsx",
   "src/frontend/layout/AppFooter.tsx",
 ];

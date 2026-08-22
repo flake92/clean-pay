@@ -1,4 +1,4 @@
-import { AuthShell } from "@/frontend/components/layout";
+import { AuthShell } from "@/frontend/components/auth-shell";
 import { RegisterEmailConfirmForm } from "@/frontend/components/register-email-confirm-form";
 import { safeAccountSetupDestination } from "@/shared/auth/account-setup-flow";
 
