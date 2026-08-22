@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   loggerInfo: vi.fn(),
   loggerWarn: vi.fn(),
   recordUpstreamRequest: vi.fn(),
+  runProbe: vi.fn(),
 }));
 
 vi.mock("next/headers", () => ({ cookies: mocks.cookies }));
@@ -26,6 +27,11 @@ vi.mock("@/backend/observability/logger", () => ({
 vi.mock("@/backend/observability/metrics", () => ({
   recordUpstreamRequest: mocks.recordUpstreamRequest,
 }));
+vi.mock("@/backend/integrations/support/chatwoot-identity-request-guard", () => ({
+  productionChatwootIdentityRequestGuard: {
+    runProbe: mocks.runProbe,
+  },
+}));
 
 import { productionChatwootIdentityGateway } from "@/backend/integrations/support/chatwoot-identity-gateway";
 
@@ -39,6 +45,7 @@ describe("Chatwoot identity gateway", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.unstubAllGlobals();
+    mocks.runProbe.mockImplementation(({ work }) => work());
     mocks.getCurrentSessionReadOnly.mockResolvedValue({
       id: "session-1",
       userId: "user-1",
