@@ -90,9 +90,21 @@ async function resolveVerifiedIdentity(
       };
     }
   }
+  const provenProviderAccountId = identity.providerSession
+    ? gateway.providerAccountId(identity.providerSession)
+    : null;
+  if (authState.targetUserId
+    && existingTelegramUser
+    && existingTelegramUser.id !== authState.targetUserId
+    && existingTelegramUser.upstreamAccountId
+    && existingTelegramUser.upstreamAccountId !== provenProviderAccountId) {
+    throw new TelegramCallbackError("ACCOUNT_MERGE_REQUIRED");
+  }
   const user = await gateway.applyTelegramIdentity({
     targetUserId: authState.targetUserId,
     existingTelegramUserId: existingTelegramUser?.id ?? null,
+    expectedExistingUpstreamAccountId: existingTelegramUser?.upstreamAccountId ?? null,
+    provenProviderAccountId,
     telegramId: identity.telegramId,
     telegramUsername: identity.telegramUsername,
     fullName: identity.fullName,
@@ -171,6 +183,13 @@ async function reconcileLinkedCallback(
           session: consumed.providerSession,
           ownerFenceHeld: true,
           invalidateSiblingTokens: merged,
+          expectedIdentity: {
+            accountId: targetAccountId,
+            email: consumed.user.email,
+            emailVerified: consumed.user.emailVerified,
+            pendingEmail: null,
+            telegramId: consumed.telegramId,
+          },
         });
       }
     },

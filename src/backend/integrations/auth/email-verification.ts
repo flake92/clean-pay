@@ -236,7 +236,10 @@ export const productionEmailVerificationCommands: EmailVerificationCommands = {
 
   async linkCurrentAccount(session, input) {
     const provider = providerContext(session);
-    await adapt(() => synchronizeProviderAccountIdentity(provider.accessToken));
+    const verified = await adapt(() => synchronizeProviderAccountIdentity(
+      provider.accessToken,
+      input.expectedIdentity,
+    ));
     await adapt(async () => {
       await linkCurrentUserToRemnashopAuth({
         accessToken: provider.accessToken,
@@ -244,6 +247,7 @@ export const productionEmailVerificationCommands: EmailVerificationCommands = {
         auth: provider.auth,
         ...(input.upstreamMerged ? { invalidateSiblingRemnashopTokens: true } : {}),
         paymentOwnerFenceHeld: input.ownerFenceHeld,
+        verifiedProfile: verified.profile,
       });
     });
   },

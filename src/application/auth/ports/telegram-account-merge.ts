@@ -4,6 +4,7 @@ export type AccountMergeConfirmation = {
   userId: string;
   status: "PENDING" | "PROCESSING" | "COMPLETED" | "FAILED";
   expiresAt: Date;
+  recoverableAfterExpiry?: boolean;
   sourceAccountId: string;
   targetAccountId: string;
   sourceEmail: string | null;
@@ -46,7 +47,10 @@ export interface TelegramAccountMergeGateway {
   authenticateTelegram(confirmation: AccountMergeConfirmation): Promise<AccountMergeProviderIdentity>;
   preflight(confirmation: AccountMergeConfirmation): Promise<AccountMergePreflight>;
   mergeProviderAccounts(confirmation: AccountMergeConfirmation): Promise<{ targetHasSubscription: boolean }>;
-  synchronizeSubscriptionIdentity(identity: AccountMergeProviderIdentity): Promise<boolean>;
+  synchronizeSubscriptionIdentity(identity: AccountMergeProviderIdentity): Promise<{
+    hasSubscription: boolean;
+    identity: AccountMergeProviderIdentity;
+  }>;
   linkCurrentAccount(identity: AccountMergeProviderIdentity): Promise<{ userId: string }>;
   complete(confirmation: AccountMergeConfirmation): Promise<boolean>;
   cancel(confirmation: AccountMergeConfirmation): Promise<boolean>;

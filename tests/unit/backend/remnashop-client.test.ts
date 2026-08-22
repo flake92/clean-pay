@@ -1203,7 +1203,8 @@ describe("remnashop client", () => {
     prismaMock.webUser.update.mockResolvedValue(currentUser);
     vi.spyOn(globalThis, "fetch")
       .mockResolvedValueOnce(telegramAuthResponse({ userId: "2" }))
-      .mockResolvedValueOnce(remnashopProfile());
+      .mockResolvedValueOnce(remnashopProfile())
+      .mockResolvedValueOnce(response({ body: null }));
 
     await expect(
       getAuthorizedRemnashopTokens({ allowUnverifiedEmail: true }),
@@ -1382,7 +1383,8 @@ describe("remnashop client", () => {
       .mockResolvedValueOnce(
         telegramAuthResponse({ userId: "2", accessToken, refreshToken }),
       )
-      .mockResolvedValueOnce(remnashopProfile());
+      .mockResolvedValueOnce(remnashopProfile())
+      .mockResolvedValueOnce(response({ body: null }));
 
     await expect(
       getAuthorizedRemnashopTokens({ allowUnverifiedEmail: true }),
@@ -1395,7 +1397,7 @@ describe("remnashop client", () => {
       },
     });
 
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
     expect(fetchMock.mock.calls[1]?.[0]).toBe(
       "http://remnashop:5000/api/v1/public/auth/me",
     );
@@ -1477,7 +1479,8 @@ describe("remnashop client", () => {
           refreshToken: "post-merge-refresh",
         }),
       )
-      .mockResolvedValueOnce(remnashopProfile());
+      .mockResolvedValueOnce(remnashopProfile())
+      .mockResolvedValueOnce(response({ body: null }));
 
     await expect(
       getAuthorizedRemnashopTokens({ allowUnverifiedEmail: true }),
@@ -1487,7 +1490,7 @@ describe("remnashop client", () => {
       session: { user: { remnashopUserId: "2" } },
     });
 
-    expect(fetchMock).toHaveBeenCalledTimes(5);
+    expect(fetchMock).toHaveBeenCalledTimes(6);
     const [mergeUrl, mergeInit] = fetchMock.mock.calls[2] ?? [];
     expect(mergeUrl).toBe(
       "http://remnashop:5000/api/v1/admin/users/merge?dry_run=false",
@@ -1495,6 +1498,9 @@ describe("remnashop client", () => {
     expect(JSON.parse(String((mergeInit as RequestInit).body))).toMatchObject({
       source_user_id: 1,
       target_user_id: 2,
+      email_resolution: "KEEP_TARGET",
+      telegram_resolution: "KEEP_SOURCE",
+      payment_resolution: "REKEY_SOURCE",
     });
     expect(
       prismaMock.$transaction.mock.invocationCallOrder[0] ??
@@ -1519,12 +1525,12 @@ describe("remnashop client", () => {
       paymentMergeMock.markPaymentOwnerChangeUpstreamMutationStarted,
     ).toHaveBeenCalledTimes(1);
     expect(
-      fetchMock.mock.invocationCallOrder[4] ?? Number.MAX_SAFE_INTEGER,
+      fetchMock.mock.invocationCallOrder[5] ?? Number.MAX_SAFE_INTEGER,
     ).toBeLessThan(
       prismaMock.webSession.updateMany.mock.invocationCallOrder[0] ?? 0,
     );
     expect(
-      fetchMock.mock.invocationCallOrder[4] ?? Number.MAX_SAFE_INTEGER,
+      fetchMock.mock.invocationCallOrder[5] ?? Number.MAX_SAFE_INTEGER,
     ).toBeLessThan(
       prismaMock.$transaction.mock.invocationCallOrder[1] ?? 0,
     );
@@ -1546,7 +1552,7 @@ describe("remnashop client", () => {
     );
     const timeoutBudgets = timeoutSpy.mock.calls.map(([timeoutMs]) => timeoutMs);
     expect(timeoutBudgets.slice(0, 2)).toEqual([15_000, 15_000]);
-    expect(timeoutBudgets.slice(2)).toHaveLength(3);
+    expect(timeoutBudgets.slice(2)).toHaveLength(4);
     expect(
       timeoutBudgets.slice(2).every(
         (timeoutMs) => timeoutMs > 0 && timeoutMs <= 8_000,
@@ -1599,7 +1605,8 @@ describe("remnashop client", () => {
       )
       .mockResolvedValueOnce(mergeResponse())
       .mockResolvedValueOnce(telegramAuthResponse({ userId: "2" }))
-      .mockResolvedValueOnce(remnashopProfile());
+      .mockResolvedValueOnce(remnashopProfile())
+      .mockResolvedValueOnce(response({ body: null }));
 
     await expect(
       getAuthorizedRemnashopTokens({ allowUnverifiedEmail: true }),
@@ -1668,7 +1675,8 @@ describe("remnashop client", () => {
           refreshToken: "post-merge-refresh",
         }),
       )
-      .mockResolvedValueOnce(remnashopProfile());
+      .mockResolvedValueOnce(remnashopProfile())
+      .mockResolvedValueOnce(response({ body: null }));
 
     await expect(
       getAuthorizedRemnashopTokens({ allowUnverifiedEmail: true }),
@@ -1757,7 +1765,8 @@ describe("remnashop client", () => {
           refreshToken: "post-merge-refresh",
         }),
       )
-      .mockResolvedValueOnce(remnashopProfile());
+      .mockResolvedValueOnce(remnashopProfile())
+      .mockResolvedValueOnce(response({ body: null }));
 
     await expect(
       getAuthorizedRemnashopTokens({ allowUnverifiedEmail: true }),
@@ -1828,6 +1837,7 @@ describe("remnashop client", () => {
         }),
       )
       .mockResolvedValueOnce(remnashopProfile())
+      .mockResolvedValueOnce(response({ body: null }))
       .mockResolvedValueOnce(telegramAuthResponse({ userId: "2" }))
       .mockResolvedValueOnce(remnashopProfile())
       .mockResolvedValueOnce(mergeResponse())
@@ -1838,7 +1848,8 @@ describe("remnashop client", () => {
           refreshToken: "retry-post-merge-refresh",
         }),
       )
-      .mockResolvedValueOnce(remnashopProfile());
+      .mockResolvedValueOnce(remnashopProfile())
+      .mockResolvedValueOnce(response({ body: null }));
 
     await expect(
       getAuthorizedRemnashopTokens({ allowUnverifiedEmail: true }),
@@ -1852,9 +1863,9 @@ describe("remnashop client", () => {
       refreshToken: "retry-post-merge-refresh",
     });
 
-    expect(fetchMock).toHaveBeenCalledTimes(10);
+    expect(fetchMock).toHaveBeenCalledTimes(12);
     expect(fetchMock.mock.calls[2]?.[0]).toContain("/users/merge");
-    expect(fetchMock.mock.calls[7]?.[0]).toContain("/users/merge");
+    expect(fetchMock.mock.calls[8]?.[0]).toContain("/users/merge");
     expect(prismaMock.webSession.updateMany).toHaveBeenCalledTimes(3);
   });
 
@@ -1900,7 +1911,8 @@ describe("remnashop client", () => {
           refreshToken: "refresh-2",
         }),
       )
-      .mockResolvedValueOnce(remnashopProfile());
+      .mockResolvedValueOnce(remnashopProfile())
+      .mockResolvedValueOnce(response({ body: null }));
 
     await expect(
       getAuthorizedRemnashopTokens({ allowUnverifiedEmail: true }),

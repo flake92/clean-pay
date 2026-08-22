@@ -3,14 +3,44 @@ import { getRemnashopMe, remnashopRequest } from "@/backend/integrations/remnash
 import type { CurrentSubscriptionResponse } from "@/backend/integrations/remnashop/contracts";
 import { synchronizeRemnawaveUserIdentity } from "@/backend/integrations/remnawave/client";
 import { markPaymentOwnerChangeUpstreamMutationStarted } from "@/backend/integrations/payments/payment-user-merge-service";
+import {
+  providerAccountIdentityMismatch,
+  type ExpectedProviderAccountIdentity,
+} from "@/application/auth/ports/provider-account-identity";
+import { getRemnashopUserIdFromAccessToken } from "@/backend/integrations/remnashop/client";
 
-export async function synchronizeProviderAccountIdentity(accessToken: string) {
+export async function synchronizeProviderAccountIdentity(
+  accessToken: string,
+  expected: ExpectedProviderAccountIdentity,
+  options?: {
+    verifiedProfile?: Awaited<ReturnType<typeof getRemnashopMe>>;
+    timeoutMs?: number;
+  },
+) {
   const [profile, subscription] = await Promise.all([
-    getRemnashopMe(accessToken),
-    remnashopRequest<CurrentSubscriptionResponse | null>("/subscription/current", { accessToken }),
+    options?.verifiedProfile ?? getRemnashopMe(accessToken),
+    remnashopRequest<CurrentSubscriptionResponse | null>("/subscription/current", {
+      accessToken,
+      ...(options?.timeoutMs ? { timeoutMs: options.timeoutMs } : {}),
+    }),
   ]);
-  if (!subscription) return false;
   const telegramId = profile.telegram_id === null ? null : String(profile.telegram_id);
+  const mismatch = providerAccountIdentityMismatch({
+    accountId: getRemnashopUserIdFromAccessToken(accessToken),
+    email: profile.email,
+    emailVerified: profile.is_email_verified,
+    pendingEmail: profile.pending_email,
+    telegramId,
+  }, expected);
+  if (mismatch) {
+    throw new ServiceError(
+      "ACCOUNT_MERGE_REQUIRED",
+      409,
+      "Provider account identity changed during owner transition.",
+      { message: `provider_identity_mismatch_${mismatch}` },
+    );
+  }
+  if (!subscription) return { hasSubscription: false, profile };
   if (!profile.email || !telegramId) {
     throw new ServiceError("ACCOUNT_MERGE_REQUIRED", 409, "Merged subscription owner is incomplete.");
   }
@@ -20,5 +50,5 @@ export async function synchronizeProviderAccountIdentity(accessToken: string) {
     email: profile.email,
     telegramId,
   });
-  return true;
+  return { hasSubscription: true, profile };
 }
