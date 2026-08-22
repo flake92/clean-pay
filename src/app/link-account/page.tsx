@@ -1,5 +1,5 @@
 import { AppShell } from "@/app/_components/app-shell";
-import { PageHeader } from "@/frontend/components/layout";
+import { PageHeader } from "@/frontend/components/page-header";
 import { LinkAccountPanel } from "@/frontend/components/link-account-panel";
 import { loadLinkAccount } from "@/application/auth/manage-linked-account";
 import {

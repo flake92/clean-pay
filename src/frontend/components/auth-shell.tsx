@@ -2,6 +2,7 @@
 
 import Image from "next/image";
 import Link from "next/link";
+
 import { APP_VERSION } from "@/shared/app-version";
 import { getBranding } from "@/shared/branding";
 import { ChatwootGuestBoundary } from "@/frontend/components/chatwoot-widget";

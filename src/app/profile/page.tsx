@@ -3,7 +3,7 @@ import { Card } from "primereact/card";
 import { loadProfileViewModel } from "@/application/profile/load-profile";
 import { requestAuthProfileGateway } from "@/app/_composition/request-scoped-readers";
 import { AppShell } from "@/app/_components/app-shell";
-import { PageHeader } from "@/frontend/components/layout";
+import { PageHeader } from "@/frontend/components/page-header";
 import { ProfilePanel } from "@/frontend/components/profile-panel";
 import { getBranding } from "@/shared/branding";
 import { sessionRefreshPath } from "@/shared/auth/session-navigation";

@@ -1,5 +1,5 @@
 import { AppShell } from "@/app/_components/app-shell";
-import { PageHeader } from "@/frontend/components/layout";
+import { PageHeader } from "@/frontend/components/page-header";
 import { TariffsPanel } from "@/frontend/components/tariffs-panel";
 import { getBranding } from "@/shared/branding";
 import { loadTariffsViewModel } from "@/application/subscriptions/load-tariffs";

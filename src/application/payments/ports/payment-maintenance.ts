@@ -6,12 +6,12 @@ type PaymentRecovery = {
   state: "SUCCEEDED" | "IN_PROGRESS" | "UNKNOWN" | "MANUAL_REQUIRED";
   retryAfterSeconds: number | null;
 } | null;
-export type PaymentHistoryCandidate = { userId: string; upstreamAccountId: string };
+type PaymentHistoryCandidate = { userId: string; upstreamAccountId: string };
 export type PaymentHistoryClaim = { context: unknown; cursor: string | null };
 export type PaymentHistoryAuthorization = { context: unknown };
 export type PaymentHistoryPage = { context: unknown };
 export type PaymentHistoryExact = { context: unknown };
-export type PaymentHistoryFailureClassification =
+type PaymentHistoryFailureClassification =
   | { kind: "deferred" }
   | { kind: "unexpected" };
 

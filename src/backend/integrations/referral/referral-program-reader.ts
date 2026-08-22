@@ -179,5 +179,3 @@ export function createReferralProgramReader(
     },
   };
 }
-
-export const referralProgramReader = createReferralProgramReader();

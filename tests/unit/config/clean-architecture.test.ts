@@ -311,31 +311,12 @@ describe("clean architecture boundaries", () => {
     const gateway = readFileSync("src/backend/integrations/auth/telegram-webapp-gateway.ts", "utf8");
     const action = readFileSync("src/app/actions/telegram.ts", "utf8");
 
-    for (const operation of [
-      "authenticateProvider",
-      "verifiedIdentity",
-      "rateLimit",
-      "reconcileIdentity",
-      "createSession",
-      "recoverSession",
-    ]) {
-      expect(useCase, operation).toContain(`gateway.${operation}`);
-    }
-    expect(useCase).toContain("if (reconciled.requiresRecovery)");
-    expect(gateway).not.toContain("if (reconciled.requiresRecovery)");
-    expect(action).toContain("authenticateTelegramWebApp(productionTelegramWebAppGateway");
-    expect(globSync("src/backend/integrations/auth/telegram-webapp.ts")).toEqual([]);
-  });
-
-  it("keeps Telegram WebApp workflow policy in the application layer", () => {
-    const useCase = readFileSync("src/application/auth/authenticate-telegram-webapp.ts", "utf8");
-    const gateway = readFileSync("src/backend/integrations/auth/telegram-webapp-gateway.ts", "utf8");
-    const action = readFileSync("src/app/actions/telegram.ts", "utf8");
-
     expect(useCase).toContain("authenticateProvider(normalizedInitData)");
     expect(useCase).toContain("verifiedIdentity(providerSession)");
     expect(useCase).toContain("rateLimit(verifiedIdentity.telegramId)");
     expect(useCase).toContain("reconcileIdentity(providerSession, verifiedIdentity)");
+    expect(useCase).toContain("createSession({");
+    expect(useCase).toContain("if (reconciled.requiresRecovery)");
     expect(useCase).toContain("recoverSession(session.id, reconciled.userId)");
     expect(gateway).not.toContain("if (!session)");
     expect(gateway).not.toContain("requiresRecovery)");

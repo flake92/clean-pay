@@ -37,12 +37,12 @@ describe("cabinet branding", () => {
   it("wires branding into visible shell surfaces and Docker build args", () => {
     const files = [
       "src/app/layout.tsx",
-      "src/frontend/components/layout/auth-shell.tsx",
+      "src/frontend/components/auth-shell.tsx",
       "src/frontend/layout/AppTopbar.tsx",
       "src/frontend/layout/AppFooter.tsx",
       "src/frontend/layout/AppMenu.tsx",
       "src/frontend/layout/useCleanPayMenu.ts",
-      "src/frontend/components/layout/page-header.tsx",
+      "src/frontend/components/page-header.tsx",
       "src/frontend/components/support-panel.tsx",
       "src/app/tariffs/page.tsx",
       "src/app/profile/page.tsx",

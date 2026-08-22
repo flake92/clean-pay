@@ -1,5 +1,7 @@
 "use client";
 
+import Image from "next/image";
+
 type IosInstallGuideProps = {
   onClose: () => void;
 };
@@ -58,8 +60,14 @@ function ConfirmationPreview() {
   return (
     <div aria-hidden="true" style={panelStyle}>
       <div className="flex align-items-center gap-3">
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src="/clean-pay-icon-192.png?v=3" alt="" style={{ borderRadius: "0.8rem", height: "3.5rem", objectFit: "cover", width: "3.5rem" }} />
+        <Image
+          alt=""
+          height={56}
+          src="/clean-pay-icon-192.png?v=3"
+          style={{ borderRadius: "0.8rem", objectFit: "cover" }}
+          unoptimized
+          width={56}
+        />
         <div className="flex-1 min-w-0">
           <div className="font-semibold text-900">Clean Pay</div>
           <div className="text-500 text-sm text-overflow-ellipsis overflow-hidden">Личный кабинет</div>

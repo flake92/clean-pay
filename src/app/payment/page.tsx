@@ -6,7 +6,7 @@ import {
   requestCheckoutReader,
 } from "@/app/_composition/request-scoped-readers";
 import { AppShell } from "@/app/_components/app-shell";
-import { PageHeader } from "@/frontend/components/layout";
+import { PageHeader } from "@/frontend/components/page-header";
 import { PaymentConfirmation } from "@/frontend/components/payment-confirmation";
 import { hasAccountSetupNotice } from "@/shared/auth/account-setup-flow";
 import { sessionRefreshPath } from "@/shared/auth/session-navigation";
