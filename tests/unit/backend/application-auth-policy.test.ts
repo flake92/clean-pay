@@ -144,7 +144,10 @@ describe("application authentication policy", () => {
       }),
       attachTelegram: vi.fn(async () => { order.push("attach"); throw new EmailVerificationError("CONFLICT"); }),
       mergeProviderAccounts: vi.fn(async () => { order.push("merge"); }),
-      linkCurrentAccount: vi.fn(async (_session, flags) => { order.push("link"); expect(flags).toEqual({ upstreamMerged: true, ownerFenceHeld: true }); }),
+      linkCurrentAccount: vi.fn(async (_session, flags) => {
+        order.push("link");
+        expect(flags).toMatchObject({ upstreamMerged: true, ownerFenceHeld: true });
+      }),
     });
 
     await expect(confirmEmailVerificationCode(commands, { code: "123456" }))
@@ -264,7 +267,7 @@ describe("application authentication policy", () => {
       .resolves.toEqual({ ok: true, kind: "linked" });
     expect(commands.withOwnerChangeFence).toHaveBeenCalledOnce();
     expect(commands.mergeProviderAccounts).toHaveBeenCalledWith(expect.objectContaining({ sourceAccountId: "telegram-account", targetAccountId: "email-account" }));
-    expect(commands.linkCurrentAccount).toHaveBeenCalledWith(expect.anything(), { upstreamMerged: true, ownerFenceHeld: true });
+    expect(commands.linkCurrentAccount).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ upstreamMerged: true, ownerFenceHeld: true }));
   });
 
   it("refreshes a stale provider session once before replacing the local password session", async () => {

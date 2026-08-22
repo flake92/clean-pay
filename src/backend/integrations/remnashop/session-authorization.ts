@@ -9,7 +9,7 @@ import {
   remnashopRefreshTokens,
 } from "@/backend/integrations/remnashop/api-client";
 import { acquireRemnashopTokensForSession } from "@/backend/integrations/remnashop/session-token-lifecycle";
-import { attachRemnashopTokensForTelegramSession } from "@/backend/integrations/remnashop/telegram-session-recovery";
+import { attachRemnashopTokensForTelegramSession } from "@/backend/composition/telegram-session-recovery";
 import { protectRemnashopToken } from "@/backend/integrations/remnashop/token-protection";
 import {
   assertEmailVerificationPolicy,
@@ -19,7 +19,7 @@ import {
 import { authDebugLog } from "@/backend/observability/auth-debug-log";
 import { normalizeRemnashopError } from "@/backend/integrations/remnashop/errors";
 
-export { attachRemnashopTokensForTelegramSession } from "@/backend/integrations/remnashop/telegram-session-recovery";
+export { attachRemnashopTokensForTelegramSession } from "@/backend/composition/telegram-session-recovery";
 
 export async function recoverRemnashopTelegramSession(
   sessionId: string,

@@ -33,7 +33,9 @@ async function loadMergeConfirmation(reader: LinkAccountReader) {
   if (!actor) throw new LinkAccountGatewayError("UNAUTHORIZED");
   if (!actor.fullAssurance) throw new LinkAccountGatewayError("PASSKEY_REQUIRED");
   const confirmation = await reader.loadTelegramMergeConfirmation(actor.userId);
-  if (!confirmation || confirmation.expiresAt <= new Date() || confirmation.status === "FAILED") {
+  if (!confirmation
+    || (confirmation.expiresAt <= new Date() && !confirmation.recoverableAfterExpiry)
+    || confirmation.status === "FAILED") {
     throw new LinkAccountGatewayError("NOT_FOUND");
   }
   return {
@@ -101,8 +103,17 @@ async function linkVerifiedEmailAccount(
     ? { telegramId: actor.telegramId, telegramUsername: actor.telegramUsername }
     : null;
   const targetAccountId = commands.providerAccountId(initialSession);
+  const existingOwnerId = await commands.emailOwnerId(email);
+  await commands.stagePendingEmail({
+    actor,
+    providerSession: initialSession,
+    email,
+    providerEmail: email,
+    stagedLocally: false,
+    ownerTransitionStarted: true,
+  });
   const linked = await commands.withOwnerChangeFence({
-    userIds: [actor.userId],
+    userIds: [actor.userId, existingOwnerId ?? ""],
     upstreamAccountIds: [targetAccountId, actor.upstreamAccountId ?? ""],
     emails: [email, actor.email],
     telegramIds: [actor.telegramId],
@@ -130,14 +141,26 @@ async function linkVerifiedEmailAccount(
           upstreamMerged = true;
         }
       }
-      return commands.linkCurrentAccount(providerSession, { upstreamMerged, ownerFenceHeld: true });
+      return commands.linkCurrentAccount(providerSession, {
+        upstreamMerged,
+        ownerFenceHeld: true,
+        expectedIdentity: {
+          accountId: targetAccountId,
+          email,
+          emailVerified: true,
+          pendingEmail: null,
+          telegramId: actor.telegramId,
+        },
+      });
     },
   });
-  await commands.auditLinkEvent({
-    action: "remnashop_account_linked_verified_email",
-    userId: linked.userId,
-    metadata: { email, telegramId: actor.telegramId },
-  });
+  try {
+    await commands.auditLinkEvent({
+      action: "remnashop_account_linked_verified_email",
+      userId: linked.userId,
+      metadata: { email, telegramId: actor.telegramId },
+    });
+  } catch { /* committed owner transition must remain successful */ }
 }
 
 export async function linkAccountEmail(
@@ -168,7 +191,7 @@ export async function linkAccountEmail(
     }
     if (!await commands.linkActorIsCurrent(actor)) throw new LinkAccountGatewayError("UNAUTHORIZED");
     const profile = await commands.loadProviderProfile(providerSession);
-    if (source === "login" && profile.email && profile.emailVerified) {
+    if (source === "login" && profile.email && profile.emailVerified && !profile.pendingEmail) {
       await linkVerifiedEmailAccount(commands, actor, providerSession, profile.email);
       return { ok: true, kind: "linked" };
     }

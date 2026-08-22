@@ -9,7 +9,7 @@ const mocks = vi.hoisted(() => ({
   remnashopMergeUsers: vi.fn(), remnashopRequest: vi.fn(), linkCurrentUserToRemnashopAuth: vi.fn(),
   synchronizeProviderAccountIdentity: vi.fn(),
   prisma: {
-    $transaction: vi.fn(), accountMergeConfirmation: { findFirst: vi.fn(), updateMany: vi.fn() },
+    $transaction: vi.fn(), accountMergeConfirmation: { findFirst: vi.fn(), findMany: vi.fn(), updateMany: vi.fn() },
     webUser: { findUnique: vi.fn(), findFirst: vi.fn() }, $queryRaw: vi.fn(),
   },
 }));
@@ -51,6 +51,7 @@ describe("production Telegram account merge gateway", () => {
     mocks.prisma.$transaction.mockImplementation(async (work: (tx: typeof mocks.prisma) => Promise<unknown>) => work(mocks.prisma));
     mocks.prisma.$queryRaw.mockResolvedValue([{ id: "user-1" }]);
     mocks.prisma.accountMergeConfirmation.updateMany.mockResolvedValue({ count: 1 });
+    mocks.prisma.accountMergeConfirmation.findMany.mockResolvedValue([]);
     mocks.withPaymentOwnerChangeFence.mockImplementation(async ({ work }: { work: () => Promise<unknown> }) => work());
     mocks.prisma.webUser.findUnique.mockResolvedValue({ email: "target@example.com", emailVerified: true, remnashopUserId: "target", telegramId: null });
     mocks.remnashopAuthTelegramIdentity.mockResolvedValue({
@@ -65,7 +66,10 @@ describe("production Telegram account merge gateway", () => {
       requires_relogin: true,
     });
     mocks.remnashopRequest.mockResolvedValue({ status: "ACTIVE", user_remna_id: "remna-1" });
-    mocks.synchronizeProviderAccountIdentity.mockResolvedValue(true);
+    mocks.synchronizeProviderAccountIdentity.mockResolvedValue({
+      hasSubscription: true,
+      profile: { telegram_id: 777, email: "target@example.com", is_email_verified: true, pending_email: null },
+    });
     mocks.linkCurrentUserToRemnashopAuth.mockResolvedValue({ user: { id: "user-1" } });
   });
 
@@ -87,8 +91,9 @@ describe("production Telegram account merge gateway", () => {
     const identity = await gateway.authenticateTelegram(confirmation);
     await expect(gateway.preflight(confirmation)).resolves.toMatchObject({ sourceAccountId: "source", targetAccountId: "target" });
     await expect(gateway.mergeProviderAccounts(confirmation)).resolves.toEqual({ targetHasSubscription: true });
-    await expect(gateway.synchronizeSubscriptionIdentity(identity)).resolves.toBe(true);
-    await expect(gateway.linkCurrentAccount(identity)).resolves.toEqual({ userId: "user-1" });
+    const synchronized = await gateway.synchronizeSubscriptionIdentity(identity);
+    expect(synchronized.hasSubscription).toBe(true);
+    await expect(gateway.linkCurrentAccount(synchronized.identity)).resolves.toEqual({ userId: "user-1" });
     await expect(gateway.complete(confirmation)).resolves.toBe(true);
     await expect(gateway.cancel(confirmation)).resolves.toBe(true);
     await gateway.release(confirmation, { terminal: false, errorCode: "UPSTREAM_UNAVAILABLE" });
@@ -97,7 +102,7 @@ describe("production Telegram account merge gateway", () => {
 
     expect(mocks.assertRateLimit).toHaveBeenCalledWith(expect.objectContaining({ action: "telegram_account_merge_confirm" }));
     expect(mocks.withPaymentOwnerChangeFence).toHaveBeenCalled();
-    expect(mocks.synchronizeProviderAccountIdentity).toHaveBeenCalledWith("provider-access");
+    expect(mocks.synchronizeProviderAccountIdentity).toHaveBeenCalledWith("provider-access", expect.objectContaining({ accountId: "target" }));
     expect(mocks.linkCurrentUserToRemnashopAuth).toHaveBeenCalledWith(expect.objectContaining({ paymentOwnerFenceHeld: true }));
     expect(mocks.reconcileCompletedPaymentOwnerChange).toHaveBeenCalledWith(
       ["user-1"],
@@ -115,6 +120,43 @@ describe("production Telegram account merge gateway", () => {
     await expect(
       gateway.claim(confirmation, new Date("2026-01-01T00:00:00.000Z")),
     ).resolves.toBe(false);
+    expect(mocks.prisma.accountMergeConfirmation.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("recovers an expired post-mutation confirmation without its bearer cookie", async () => {
+    const { sha256 } = await import("@/backend/security/crypto");
+    const expired = {
+      id: "merge-1", userId: "user-1", status: "PENDING", expiresAt: new Date("2025-01-01"),
+      sourceRemnashopUserId: "source", targetRemnashopUserId: "target", sourceEmail: "source@example.com",
+      targetEmail: "target@example.com", targetTelegramId: null, telegramId: "777", telegramUsername: "clean",
+    };
+    mocks.cookieGet.mockReturnValue(undefined);
+    mocks.prisma.accountMergeConfirmation.findMany.mockResolvedValueOnce([expired]);
+    mocks.prisma.webUser.findUnique.mockResolvedValue({
+      remnashopUserId: "source",
+      email: "source@example.com",
+      emailVerified: true,
+      telegramId: "777",
+      paymentOwnerChangeTokenHash: "stale-lease",
+      paymentOwnerChangeLeaseExpiresAt: new Date("2025-01-02"),
+      paymentOwnerChangeOperationHash: sha256("telegram-account-merge:v1:merge-1"),
+      paymentOwnerChangeMutationStartedAt: new Date("2025-01-01"),
+    });
+
+    const confirmation = await gateway.loadConfirmation("user-1");
+    expect(confirmation.recoverableAfterExpiry).toBe(true);
+    mocks.prisma.accountMergeConfirmation.findFirst.mockResolvedValueOnce(expired);
+    await expect(gateway.claim(confirmation, new Date("2026-01-01"))).resolves.toBe(true);
+  });
+
+  it("does not allow cancelling a confirmation after an upstream mutation", async () => {
+    const { sha256 } = await import("@/backend/security/crypto");
+    const confirmation = await gateway.loadConfirmation("user-1");
+    mocks.prisma.webUser.findUnique.mockResolvedValueOnce({
+      paymentOwnerChangeOperationHash: sha256("telegram-account-merge:v1:merge-1"),
+      paymentOwnerChangeMutationStartedAt: new Date(),
+    });
+    await expect(gateway.cancel(confirmation)).resolves.toBe(false);
     expect(mocks.prisma.accountMergeConfirmation.updateMany).not.toHaveBeenCalled();
   });
 

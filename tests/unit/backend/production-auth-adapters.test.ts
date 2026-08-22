@@ -29,7 +29,12 @@ const mocks = vi.hoisted(() => ({
   markPaymentOwnerChangeUpstreamMutationStarted: vi.fn(),
   acquireRemnashopTokensForSession: vi.fn(),
   getCurrentSession: vi.fn(), loggerWarn: vi.fn(),
-  prisma: { $transaction: vi.fn(), webUser: { findUnique: vi.fn(), update: vi.fn() }, webSession: { update: vi.fn() } },
+  prisma: {
+    $transaction: vi.fn(),
+    webUser: { findUnique: vi.fn(), update: vi.fn() },
+    webSession: { update: vi.fn() },
+    accountMergeConfirmation: { findMany: vi.fn() },
+  },
   linkRemnashopAccount: vi.fn(),
   cancelTelegramAccountMerge: vi.fn(),
   confirmTelegramAccountMerge: vi.fn(),
@@ -116,7 +121,11 @@ describe("production auth and profile adapters", () => {
     mocks.withAuthConcurrency.mockImplementation(async (_key: string, work: () => Promise<unknown>) => work());
     mocks.withPaymentOwnerChangeFence.mockImplementation(async ({ work }: { work: () => Promise<unknown> }) => work());
     mocks.prisma.$transaction.mockImplementation(async (work: (tx: typeof mocks.prisma) => Promise<unknown>) => work(mocks.prisma));
-    mocks.synchronizeProviderAccountIdentity.mockResolvedValue(false);
+    mocks.synchronizeProviderAccountIdentity.mockResolvedValue({
+      hasSubscription: false,
+      profile: { email: "u@example.com", is_email_verified: true, pending_email: null, telegram_id: 777 },
+    });
+    mocks.prisma.accountMergeConfirmation.findMany.mockResolvedValue([]);
     mocks.acquireRemnashopTokensForSession.mockResolvedValue({
       accessToken: "fresh-access",
       refreshToken: "fresh-refresh",
@@ -342,7 +351,11 @@ describe("production auth and profile adapters", () => {
     await productionEmailVerificationCommands.attachTelegram(current, { telegramId: "777", telegramUsername: "clean" });
     await productionEmailVerificationCommands.mergeProviderAccounts({ sourceAccountId: "upstream-1", targetAccountId: "telegram-account", reason: "proof" });
     await productionEmailVerificationCommands.refreshProviderSession({ telegramId: "777", telegramUsername: "clean" });
-    await productionEmailVerificationCommands.linkCurrentAccount(telegram, { upstreamMerged: true, ownerFenceHeld: true });
+    await productionEmailVerificationCommands.linkCurrentAccount(telegram, {
+      upstreamMerged: true,
+      ownerFenceHeld: true,
+      expectedIdentity: { accountId: "telegram-account", email: "u@example.com", emailVerified: true, pendingEmail: null, telegramId: "777" },
+    });
     await productionEmailVerificationCommands.withOwnerChangeFence({ userIds: ["user-1"], upstreamAccountIds: ["upstream-1"], emails: ["u@example.com"], telegramIds: ["777"], operationKey: "email-verify:test", targetUpstreamAccountId: "upstream-1", work: async () => "done" });
     await productionEmailVerificationCommands.refreshLocalSession();
     await productionEmailVerificationCommands.auditEmailVerified({ userId: "user-1", email: "u@example.com" });
@@ -484,13 +497,17 @@ describe("production auth and profile adapters", () => {
     await productionLinkAccountCommands.assertLinkRateLimit("u@example.com");
     const emailSession = await productionLinkAccountCommands.authenticateEmail({ operation: "login", email: "u@example.com", password: "secret123" });
     await expect(productionLinkAccountCommands.linkActorIsCurrent(actor)).resolves.toBe(true);
-    await expect(productionLinkAccountCommands.loadProviderProfile(emailSession)).resolves.toEqual({ email: "u@example.com", emailVerified: true });
+    await expect(productionLinkAccountCommands.loadProviderProfile(emailSession)).resolves.toMatchObject({ email: "u@example.com", emailVerified: true });
     expect(productionLinkAccountCommands.providerAccountId(emailSession)).toBe("email-account");
     await productionLinkAccountCommands.telegramProviderSession({ telegramId: "777", telegramUsername: "clean" });
     await productionLinkAccountCommands.attachTelegram(emailSession, { telegramId: "777", telegramUsername: "clean" });
     await productionLinkAccountCommands.mergeProviderAccounts({ sourceAccountId: "email-account", targetAccountId: "telegram-account", reason: "proof" });
     await productionLinkAccountCommands.refreshTelegramProviderSession({ telegramId: "777", telegramUsername: "clean" });
-    await expect(productionLinkAccountCommands.linkCurrentAccount(emailSession, { upstreamMerged: true, ownerFenceHeld: true })).resolves.toEqual({ userId: "user-1" });
+    await expect(productionLinkAccountCommands.linkCurrentAccount(emailSession, {
+      upstreamMerged: true,
+      ownerFenceHeld: true,
+      expectedIdentity: { accountId: "email-account", email: "u@example.com", emailVerified: true, pendingEmail: null, telegramId: "777" },
+    })).resolves.toEqual({ userId: "user-1" });
     await productionLinkAccountCommands.withOwnerChangeFence({ userIds: ["user-1"], upstreamAccountIds: ["email-account"], emails: ["u@example.com"], telegramIds: ["777"], operationKey: "link-email:test", targetUpstreamAccountId: "email-account", work: async () => undefined });
     await expect(productionLinkAccountCommands.emailOwnerId("u@example.com")).resolves.toBe("owner-1");
     await productionLinkAccountCommands.stagePendingEmail({ actor, providerSession: emailSession, email: "u@example.com", providerEmail: null, stagedLocally: true });
@@ -544,7 +561,7 @@ describe("production auth and profile adapters", () => {
   });
 
   it("fails closed when merge confirmation cookie is absent", async () => {
-    mocks.cookieGet.mockReturnValueOnce(undefined);
+    mocks.cookieGet.mockReturnValue(undefined);
     await expect(productionLinkAccountReader.loadTelegramMergeConfirmation("user-1"))
       .rejects.toMatchObject({ code: "NOT_FOUND", status: 404 });
     expect(mocks.confirmTelegramAccountMerge).not.toHaveBeenCalled();

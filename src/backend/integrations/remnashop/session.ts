@@ -418,12 +418,14 @@ export async function linkCurrentUserToRemnashopAuth({
   auth,
   invalidateSiblingRemnashopTokens = false,
   paymentOwnerFenceHeld = false,
+  verifiedProfile,
 }: {
   accessToken: string;
   refreshToken: string;
   auth: RemnashopAuthResponse;
   invalidateSiblingRemnashopTokens?: boolean;
   paymentOwnerFenceHeld?: boolean;
+  verifiedProfile?: RemnashopMe;
 }) {
   const session = await getCurrentSession();
   authDebugLog("remnashop_link_started", {
@@ -437,7 +439,7 @@ export async function linkCurrentUserToRemnashopAuth({
   }
 
   const remnashopUserId = getRemnashopUserIdFromAccessToken(accessToken);
-  const profile = await getRemnashopMe(accessToken);
+  const profile = verifiedProfile ?? await getRemnashopMe(accessToken);
   authDebugLog("remnashop_link_profile_loaded", {
     sessionId: session.id,
     currentUserId: session.userId,
