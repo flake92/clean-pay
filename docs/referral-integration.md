@@ -29,6 +29,6 @@ The referral panel always displays the current points balance. Historical point 
 
 ## Rollout boundary
 
-The reviewed Remnashop contract is PR #135 revision `efe7524` with Alembic head `0054` (including the durable referral schema in `0052`, bounded legacy recovery evidence in `0054`, and signed HWID webhook compatibility). API, worker, and scheduler must run that same image before referral traffic is enabled.
+The reviewed Remnashop contract is PR #135 revision `8645d3e` with Alembic head `0055`. It includes the durable referral schema from `0052`, bounded legacy/operator recovery through `0055`, permanent Remnapy contract compatibility, serialized recipient claims, and database-owned reward audit timestamps. API, worker, and scheduler must run that same immutable image before referral traffic is enabled.
 
 Historical compensation is deliberately separate from normal registration. Keep `REFERRAL_REWARD_BACKFILL_ENABLED=false` during a mixed-version rollout. After every pre-0052 Remnashop process has been drained, operators may enable it and follow Remnashop's `REFERRAL_REWARD_RECOVERY.md` inventory → preview → apply procedure. Legacy ambiguous rewards are never replayed automatically.
