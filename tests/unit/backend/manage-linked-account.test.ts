@@ -159,9 +159,23 @@ describe("failed() error message mapping", () => {
     await expect(linkAccountEmail(commands, { email: "user@example.com", password: "password" })).resolves.toEqual({ ok: true, kind: "linked" });
     expect(commands.linkCurrentAccount).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ upstreamMerged: false, ownerFenceHeld: true }));
     expect(commands.stagePendingEmail).toHaveBeenCalledWith(expect.objectContaining({ ownerTransitionStarted: true }));
+    expect(vi.mocked(commands.withOwnerChangeFence).mock.invocationCallOrder[0])
+      .toBeLessThan(vi.mocked(commands.stagePendingEmail).mock.invocationCallOrder[0]!);
     expect(vi.mocked(commands.stagePendingEmail).mock.invocationCallOrder[0])
-      .toBeLessThan(vi.mocked(commands.withOwnerChangeFence).mock.invocationCallOrder[0]!);
+      .toBeLessThan(vi.mocked(commands.linkCurrentAccount).mock.invocationCallOrder[0]!);
     expect(commands.requestProviderVerification).not.toHaveBeenCalled();
+  });
+
+  it("does not overwrite a durable transition when another owner fence wins", async () => {
+    const commands = mockCommands({
+      loadProviderProfile: vi.fn(async () => ({ email: "user@example.com", emailVerified: true })),
+      withOwnerChangeFence: vi.fn(async () => { throw new LinkAccountGatewayError("CONFLICT"); }),
+    });
+    await expect(linkAccountEmail(commands, { email: "user@example.com", password: "password" }))
+      .resolves.toMatchObject({ ok: false, code: "CONFLICT" });
+    expect(commands.stagePendingEmail).not.toHaveBeenCalled();
+    expect(commands.attachTelegram).not.toHaveBeenCalled();
+    expect(commands.linkCurrentAccount).not.toHaveBeenCalled();
   });
 
   it("requires real verification if a newly registered provider reports e-mail as already verified", async () => {

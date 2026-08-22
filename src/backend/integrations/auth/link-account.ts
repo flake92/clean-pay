@@ -24,6 +24,7 @@ import {
 import { linkCurrentUserToRemnashopAuth } from "@/backend/integrations/remnashop/session";
 import { getCurrentSession, refreshCurrentAccessCookie } from "@/backend/integrations/sessions/web-session-service";
 import {
+  assertPaymentOwnerChangeFenceHeld,
   markPaymentOwnerChangeUpstreamMutationStarted,
   withPaymentOwnerChangeFence,
 } from "@/backend/integrations/payments/payment-user-merge-service";
@@ -153,7 +154,10 @@ export const productionLinkAccountCommands: LinkAccountCommands = {
       && current.user.email === expected.user.email
       && current.user.emailVerified === expected.user.emailVerified
       && current.user.telegramId === expected.user.telegramId
-      && current.user.telegramUsername === expected.user.telegramUsername);
+      && current.user.telegramUsername === expected.user.telegramUsername
+      && current.user.authPending === expected.user.authPending
+      && current.user.pendingRemnashopUserId === expected.user.pendingRemnashopUserId
+      && current.user.pendingRemnashopEmail === expected.user.pendingRemnashopEmail);
   },
 
   async loadProviderProfile(session) {
@@ -223,6 +227,9 @@ export const productionLinkAccountCommands: LinkAccountCommands = {
     const session = actorSession(actor);
     const auth = providerAuth(providerSession);
     await adapt(() => prisma.$transaction(async (tx) => {
+      if (ownerTransitionStarted) {
+        await assertPaymentOwnerChangeFenceHeld(tx, [session.userId]);
+      }
       await tx.webSession.update({
         where: { id: session.id, userId: session.userId, revokedAt: null },
         data: {
@@ -236,8 +243,18 @@ export const productionLinkAccountCommands: LinkAccountCommands = {
           remnashopRefreshRecoveryEncrypted: null,
         },
       });
-      await tx.webUser.update({
-        where: { id: session.userId },
+      const staged = await tx.webUser.updateMany({
+        where: {
+          id: session.userId,
+          remnashopUserId: session.user.remnashopUserId,
+          email: session.user.email,
+          emailVerified: session.user.emailVerified,
+          telegramId: session.user.telegramId,
+          telegramUsername: session.user.telegramUsername,
+          authPending: session.user.authPending,
+          pendingRemnashopUserId: session.user.pendingRemnashopUserId,
+          pendingRemnashopEmail: session.user.pendingRemnashopEmail,
+        },
         data: {
           pendingRemnashopUserId: getRemnashopUserIdFromAccessToken(auth.cookies.accessToken),
           pendingRemnashopEmail: providerEmail ?? email,
@@ -245,6 +262,9 @@ export const productionLinkAccountCommands: LinkAccountCommands = {
           ...(stagedLocally ? { email, emailVerified: false, authPending: false } : {}),
         },
       });
+      if (staged.count !== 1) {
+        throw new ServiceError("UNAUTHORIZED", 401, "The local link actor changed before staging.");
+      }
     }));
     if (stagedLocally) await adapt(() => refreshCurrentAccessCookie());
   },

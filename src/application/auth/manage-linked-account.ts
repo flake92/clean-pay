@@ -104,14 +104,6 @@ async function linkVerifiedEmailAccount(
     : null;
   const targetAccountId = commands.providerAccountId(initialSession);
   const existingOwnerId = await commands.emailOwnerId(email);
-  await commands.stagePendingEmail({
-    actor,
-    providerSession: initialSession,
-    email,
-    providerEmail: email,
-    stagedLocally: false,
-    ownerTransitionStarted: true,
-  });
   const linked = await commands.withOwnerChangeFence({
     userIds: [actor.userId, existingOwnerId ?? ""],
     upstreamAccountIds: [targetAccountId, actor.upstreamAccountId ?? ""],
@@ -125,6 +117,14 @@ async function linkVerifiedEmailAccount(
     }),
     targetUpstreamAccountId: targetAccountId,
     work: async () => {
+      await commands.stagePendingEmail({
+        actor,
+        providerSession: initialSession,
+        email,
+        providerEmail: email,
+        stagedLocally: false,
+        ownerTransitionStarted: true,
+      });
       let providerSession = initialSession;
       let upstreamMerged = false;
       if (identity) {
