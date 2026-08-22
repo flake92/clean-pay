@@ -9,6 +9,7 @@ vi.mock("@/backend/observability/logger", () => ({
 }));
 
 import {
+  assertRemnawaveIdentitySynchronizationConfigured,
   getLiveRemnawaveSubscriptionUrl,
   synchronizeRemnawaveUserIdentity,
 } from "@/backend/integrations/remnawave/client";
@@ -253,6 +254,21 @@ describe("Remnawave live subscription client", () => {
       expect.objectContaining({ category: "upstream" }),
     );
     expect(JSON.stringify(mocks.logger.warn.mock.calls)).not.toContain("network token secret");
+  });
+
+  it("validates identity synchronization configuration without a network request", () => {
+    global.fetch = vi.fn();
+
+    expect(() => assertRemnawaveIdentitySynchronizationConfigured()).not.toThrow();
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+
+  it("rejects identity synchronization before mutation when it is not configured", () => {
+    delete process.env.REMNAWAVE_API_BASE_URL;
+    delete process.env.REMNAWAVE_TOKEN;
+
+    expect(() => assertRemnawaveIdentitySynchronizationConfigured())
+      .toThrow(expect.objectContaining({ code: "UPSTREAM_UNAVAILABLE", status: 503 }));
   });
 
   it("updates and verifies the subscription owner identity with the Remnawave 2.7 API", async () => {
