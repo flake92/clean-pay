@@ -1,13 +1,19 @@
 import { ServiceError } from "@/backend/errors/service-error";
-import { getRemnashopMe, remnashopRequest } from "@/backend/integrations/remnashop/client";
+import {
+  getRemnashopMe,
+  getRemnashopUserIdFromAccessToken,
+  remnashopRequest,
+} from "@/backend/integrations/remnashop/api-client";
 import type { CurrentSubscriptionResponse } from "@/backend/integrations/remnashop/contracts";
-import { synchronizeRemnawaveUserIdentity } from "@/backend/integrations/remnawave/client";
+import {
+  assertRemnawaveIdentitySynchronizationConfigured,
+  synchronizeRemnawaveUserIdentity,
+} from "@/backend/integrations/remnawave/client";
 import { markPaymentOwnerChangeUpstreamMutationStarted } from "@/backend/integrations/payments/payment-user-merge-service";
 import {
   providerAccountIdentityMismatch,
   type ExpectedProviderAccountIdentity,
 } from "@/application/auth/ports/provider-account-identity";
-import { getRemnashopUserIdFromAccessToken } from "@/backend/integrations/remnashop/client";
 
 export async function synchronizeProviderAccountIdentity(
   accessToken: string,
@@ -44,6 +50,7 @@ export async function synchronizeProviderAccountIdentity(
   if (!profile.email || !telegramId) {
     throw new ServiceError("ACCOUNT_MERGE_REQUIRED", 409, "Merged subscription owner is incomplete.");
   }
+  assertRemnawaveIdentitySynchronizationConfigured();
   await markPaymentOwnerChangeUpstreamMutationStarted();
   await synchronizeRemnawaveUserIdentity({
     uuid: subscription.user_remna_id,

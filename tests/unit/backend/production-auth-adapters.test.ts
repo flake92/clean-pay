@@ -26,12 +26,12 @@ const mocks = vi.hoisted(() => ({
   getJwtExpiresAt: vi.fn(), replaceWebSessionAfterPasswordChange: vi.fn(),
   remnashopAuthTelegramIdentity: vi.fn(), remnashopLinkTelegram: vi.fn(), remnashopMergeUsers: vi.fn(),
   linkCurrentUserToRemnashopAuth: vi.fn(), refreshCurrentAccessCookie: vi.fn(), withPaymentOwnerChangeFence: vi.fn(),
-  markPaymentOwnerChangeUpstreamMutationStarted: vi.fn(),
+  markPaymentOwnerChangeUpstreamMutationStarted: vi.fn(), assertPaymentOwnerChangeFenceHeld: vi.fn(),
   acquireRemnashopTokensForSession: vi.fn(),
   getCurrentSession: vi.fn(), loggerWarn: vi.fn(),
   prisma: {
     $transaction: vi.fn(),
-    webUser: { findUnique: vi.fn(), update: vi.fn() },
+    webUser: { findUnique: vi.fn(), update: vi.fn(), updateMany: vi.fn() },
     webSession: { update: vi.fn() },
     accountMergeConfirmation: { findMany: vi.fn() },
   },
@@ -87,6 +87,7 @@ vi.mock("@/backend/integrations/sessions/web-session-service", () => ({
 vi.mock("@/backend/integrations/payments/payment-user-merge-service", () => ({
   withPaymentOwnerChangeFence: mocks.withPaymentOwnerChangeFence,
   markPaymentOwnerChangeUpstreamMutationStarted: mocks.markPaymentOwnerChangeUpstreamMutationStarted,
+  assertPaymentOwnerChangeFenceHeld: mocks.assertPaymentOwnerChangeFenceHeld,
 }));
 vi.mock("@/backend/integrations/remnashop/session-token-lifecycle", () => ({
   acquireRemnashopTokensForSession: mocks.acquireRemnashopTokensForSession,
@@ -126,6 +127,7 @@ describe("production auth and profile adapters", () => {
       profile: { email: "u@example.com", is_email_verified: true, pending_email: null, telegram_id: 777 },
     });
     mocks.prisma.accountMergeConfirmation.findMany.mockResolvedValue([]);
+    mocks.prisma.webUser.updateMany.mockResolvedValue({ count: 1 });
     mocks.acquireRemnashopTokensForSession.mockResolvedValue({
       accessToken: "fresh-access",
       refreshToken: "fresh-refresh",
@@ -515,7 +517,7 @@ describe("production auth and profile adapters", () => {
     await productionLinkAccountCommands.auditLinkEvent({ action: "linked", userId: "user-1" });
 
     expect(mocks.prisma.webSession.update).toHaveBeenCalled();
-    expect(mocks.prisma.webUser.update).toHaveBeenCalled();
+    expect(mocks.prisma.webUser.updateMany).toHaveBeenCalled();
     expect(mocks.remnashopMergeUsers).toHaveBeenCalled();
   });
 
@@ -544,6 +546,73 @@ describe("production auth and profile adapters", () => {
     const expected = { context: { id: "session-1", userId: "user-1", user: { remnashopUserId: null, email: null, emailVerified: false, telegramId: null, telegramUsername: null } } };
     mocks.getCurrentSession.mockResolvedValueOnce(null);
     await expect(productionLinkAccountCommands.linkActorIsCurrent(expected)).resolves.toBe(false);
+  });
+
+  it("stages a verified owner transition only under its fence and exact actor snapshot", async () => {
+    const session = {
+      id: "session-1",
+      userId: "user-1",
+      assuranceLevel: "FULL",
+      user: {
+        remnashopUserId: "source-account",
+        email: null,
+        emailVerified: false,
+        telegramId: "777",
+        telegramUsername: "clean",
+        authPending: false,
+        pendingRemnashopUserId: null,
+        pendingRemnashopEmail: null,
+      },
+    };
+    const provider = {
+      data: { expires_at: "2099-01-01", refresh_expires_at: "2099-02-01" },
+      cookies: { accessToken: "target-access", refreshToken: "target-refresh" },
+    };
+    mocks.getCurrentSession.mockResolvedValue(session);
+    mocks.remnashopAuth.mockResolvedValue(provider);
+    mocks.getRemnashopUserIdFromAccessToken.mockReturnValue("target-account");
+    const actor = await productionLinkAccountCommands.loadLinkActor();
+    if (!actor) throw new Error("expected actor");
+    const providerSession = await productionLinkAccountCommands.authenticateEmail({
+      operation: "login",
+      email: "owner@example.com",
+      password: "secret123",
+    });
+
+    await productionLinkAccountCommands.stagePendingEmail({
+      actor,
+      providerSession,
+      email: "owner@example.com",
+      providerEmail: "owner@example.com",
+      stagedLocally: false,
+      ownerTransitionStarted: true,
+    });
+    expect(mocks.assertPaymentOwnerChangeFenceHeld).toHaveBeenCalledWith(
+      mocks.prisma,
+      ["user-1"],
+    );
+    expect(mocks.prisma.webUser.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({
+        id: "user-1",
+        remnashopUserId: "source-account",
+        authPending: false,
+        pendingRemnashopUserId: null,
+      }),
+      data: expect.objectContaining({
+        authPending: true,
+        pendingRemnashopUserId: "target-account",
+      }),
+    }));
+
+    mocks.prisma.webUser.updateMany.mockResolvedValueOnce({ count: 0 });
+    await expect(productionLinkAccountCommands.stagePendingEmail({
+      actor,
+      providerSession,
+      email: "owner@example.com",
+      providerEmail: "owner@example.com",
+      stagedLocally: false,
+      ownerTransitionStarted: true,
+    })).rejects.toMatchObject({ code: "UNAUTHORIZED" });
   });
 
   it("covers optional linked-account projections and non-local staging", async () => {
