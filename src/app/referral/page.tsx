@@ -2,7 +2,7 @@ import { Suspense } from "react";
 
 import { AppShell } from "@/app/_components/app-shell";
 import { loadRequestReferralProgram } from "@/app/_composition/request-scoped-readers";
-import { PageHeader } from "@/frontend/components/layout";
+import { PageHeader } from "@/frontend/components/page-header";
 import { ReferralProgramPanel } from "@/frontend/components/referral-program-panel";
 
 async function ReferralContent() {

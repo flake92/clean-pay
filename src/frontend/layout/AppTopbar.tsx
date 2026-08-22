@@ -35,7 +35,7 @@ const AppTopbar = forwardRef<AppTopbarRef, { navigation: NavigationViewModel }>(
                 className="p-link layout-menu-button layout-topbar-button"
                 aria-label="Главное меню"
                 aria-controls="app-sidebar"
-                aria-expanded={layoutState.staticMenuMobileActive || layoutState.overlayMenuActive || !layoutState.staticMenuDesktopInactive}
+                aria-expanded={layoutState.staticMenuMobileActive || !layoutState.staticMenuDesktopInactive}
                 onClick={onMenuToggle}
             >
                 <i className="pi pi-bars" aria-hidden="true" />

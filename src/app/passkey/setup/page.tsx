@@ -1,4 +1,4 @@
-import { AuthShell } from "@/frontend/components/layout";
+import { AuthShell } from "@/frontend/components/auth-shell";
 import { PasskeySetupPanel } from "@/frontend/components/passkey-actions";
 import {
   isPaymentDestination,

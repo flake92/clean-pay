@@ -1,82 +1,81 @@
-'use client';
-import Link from 'next/link';
-import { Ripple } from 'primereact/ripple';
-import { classNames } from 'primereact/utils';
-import React, { useEffect, useContext } from 'react';
-import { CSSTransition } from 'react-transition-group';
-import { MenuContext } from './context/menucontext';
-import { AppMenuItemProps } from '@/frontend/types';
-import { usePathname } from 'next/navigation';
+"use client";
+
+import Link from "next/link";
+import { usePathname } from "next/navigation";
+import { Ripple } from "primereact/ripple";
+import { classNames } from "primereact/utils";
+import { useContext, useEffect, type MouseEvent } from "react";
+import { CSSTransition } from "react-transition-group";
+
+import type { AppMenuItemProps } from "@/frontend/types";
+import { MenuContext } from "./context/menucontext";
 
 const AppMenuitem = (props: AppMenuItemProps) => {
-    const pathname = usePathname();
-    const { activeMenu, setActiveMenu } = useContext(MenuContext);
-    const item = props.item;
-    const key = props.parentKey ? props.parentKey + '-' + props.index : String(props.index);
-    const isActiveRoute = item!.to && pathname === item!.to;
-    const active = activeMenu === key || activeMenu.startsWith(key + '-');
-    const onRouteChange = (url: string) => {
-        if (item!.to && item!.to === url) {
-            setActiveMenu(key);
-        }
-    };
+  const pathname = usePathname();
+  const { activeMenu, setActiveMenu } = useContext(MenuContext);
+  const { item } = props;
+  const key = props.parentKey ? `${props.parentKey}-${props.index}` : String(props.index);
+  const isActiveRoute = item.to && pathname === item.to;
+  const active = activeMenu === key || activeMenu.startsWith(`${key}-`);
 
-    useEffect(() => {
-        onRouteChange(pathname);
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [pathname]);
+  useEffect(() => {
+    if (item.to === pathname) setActiveMenu(key);
+  }, [item.to, key, pathname, setActiveMenu]);
 
-    const itemClick = (event: React.MouseEvent<HTMLAnchorElement, MouseEvent>) => {
-        //avoid processing disabled items
-        if (item!.disabled) {
-            event.preventDefault();
-            return;
-        }
+  const itemClick = (event: MouseEvent<HTMLElement>) => {
+    item.command?.({ originalEvent: event, item });
+    setActiveMenu(item.items && active ? (props.parentKey ?? "") : key);
+  };
 
-        //execute command
-        if (item!.command) {
-            item!.command({ originalEvent: event, item: item });
-        }
+  const subMenu = item.items && (
+    <CSSTransition
+      classNames="layout-submenu"
+      in={props.root || active}
+      key={item.label}
+      timeout={{ enter: 1000, exit: 450 }}
+    >
+      <ul>
+        {item.items.map((child, index) => (
+          <AppMenuitem
+            index={index}
+            item={child}
+            key={child.label}
+            parentKey={key}
+          />
+        ))}
+      </ul>
+    </CSSTransition>
+  );
 
-        // toggle active state
-        if (item!.items) setActiveMenu(active ? (props.parentKey as string) : key);
-        else setActiveMenu(key);
-    };
+  return (
+    <li className={classNames({ "layout-root-menuitem": props.root, "active-menuitem": active })}>
+      {props.root ? <div className="layout-menuitem-root-text">{item.label}</div> : null}
+      {!item.to || item.items ? (
+        <button className="p-ripple" onClick={itemClick} type="button">
+          <i className={classNames("layout-menuitem-icon", item.icon)} />
+          <span className="layout-menuitem-text">{item.label}</span>
+          {item.items ? <i className="pi pi-fw pi-angle-down layout-submenu-toggler" /> : null}
+          <Ripple />
+        </button>
+      ) : null}
 
-    const subMenu = item!.items && item!.visible !== false && (
-        <CSSTransition timeout={{ enter: 1000, exit: 450 }} classNames="layout-submenu" in={props.root ? true : active} key={item!.label}>
-            <ul>
-                {item!.items.map((child, i) => {
-                    return <AppMenuitem item={child} index={i} className={child.badgeClass} parentKey={key} key={child.label} />;
-                })}
-            </ul>
-        </CSSTransition>
-    );
+      {item.to && !item.items ? (
+        <Link
+          className={classNames("p-ripple", { "active-route": isActiveRoute })}
+          href={item.to}
+          onClick={itemClick}
+          prefetch={false}
+          replace={item.replaceUrl}
+        >
+          <i className={classNames("layout-menuitem-icon", item.icon)} />
+          <span className="layout-menuitem-text">{item.label}</span>
+          <Ripple />
+        </Link>
+      ) : null}
 
-    return (
-        <li className={classNames({ 'layout-root-menuitem': props.root, 'active-menuitem': active })}>
-            {props.root && item!.visible !== false && <div className="layout-menuitem-root-text">{item!.label}</div>}
-            {(!item!.to || item!.items) && item!.visible !== false ? (
-                <a href={item!.url} onClick={(e) => itemClick(e)} className={classNames(item!.class, 'p-ripple')} target={item!.target} tabIndex={0}>
-                    <i className={classNames('layout-menuitem-icon', item!.icon)}></i>
-                    <span className="layout-menuitem-text">{item!.label}</span>
-                    {item!.items && <i className="pi pi-fw pi-angle-down layout-submenu-toggler"></i>}
-                    <Ripple />
-                </a>
-            ) : null}
-
-            {item!.to && !item!.items && item!.visible !== false ? (
-                <Link href={item!.to} prefetch={false} replace={item!.replaceUrl} target={item!.target} onClick={(e) => itemClick(e)} className={classNames(item!.class, 'p-ripple', { 'active-route': isActiveRoute })} tabIndex={0}>
-                    <i className={classNames('layout-menuitem-icon', item!.icon)}></i>
-                    <span className="layout-menuitem-text">{item!.label}</span>
-                    {item!.items && <i className="pi pi-fw pi-angle-down layout-submenu-toggler"></i>}
-                    <Ripple />
-                </Link>
-            ) : null}
-
-            {subMenu}
-        </li>
-    );
+      {subMenu}
+    </li>
+  );
 };
 
 export default AppMenuitem;

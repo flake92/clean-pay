@@ -1,4 +1,4 @@
-import { AuthShell } from "@/frontend/components/layout/auth-shell";
+import { AuthShell } from "@/frontend/components/auth-shell";
 
 export default function OfflinePage() {
   return (
