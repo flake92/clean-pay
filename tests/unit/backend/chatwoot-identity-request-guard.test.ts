@@ -40,6 +40,15 @@ describe("Chatwoot identity request guard", () => {
     vi.clearAllMocks();
   });
 
+  it("uses the configured production limits when none are overridden", async () => {
+    const guard = createChatwootIdentityRequestGuard({
+      distributedCommand: null,
+    });
+
+    await expect(guard.runAction(async () => "confirmed"))
+      .resolves.toBe("confirmed");
+  });
+
   it("allows the twelve probes used by a complete browser retry cycle", async () => {
     const guard = createChatwootIdentityRequestGuard({
       distributedCommand: null,
@@ -113,13 +122,13 @@ describe("Chatwoot identity request guard", () => {
     const sessionPending = deferred<void>();
     const firstProbe = sessionGuard.runProbe({
       sessionId: "session-1",
-      conversationToken: "conversation-1",
+      conversationToken: "a",
       work: () => sessionPending.promise,
     });
 
     await expect(sessionGuard.runProbe({
       sessionId: "session-1",
-      conversationToken: "conversation-2",
+      conversationToken: "b",
       work: async () => undefined,
     })).rejects.toEqual(expect.objectContaining({
       reason: "concurrency_saturated",

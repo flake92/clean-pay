@@ -8,6 +8,7 @@ const allowedRootFiles = [
   ".env.example",
   ".gitattributes",
   ".gitignore",
+  ".gitleaksignore",
   ".node-version",
   ".npmrc",
   ".nvmrc",
@@ -35,7 +36,8 @@ describe("repository root layout", () => {
       .filter((entry) => entry.isFile())
       .map((entry) => entry.name)
       .filter((file) => (
-        file !== "next-env.d.ts"
+        file !== ".git"
+        && file !== "next-env.d.ts"
         && !file.endsWith(".tsbuildinfo")
         && (file === ".env.example" || !file.startsWith(".env."))
         && file !== ".env"

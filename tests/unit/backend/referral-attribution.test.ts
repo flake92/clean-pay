@@ -1,9 +1,23 @@
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { NextResponse } from "next/server";
 
+const mocks = vi.hoisted(() => ({
+  cookieGet: vi.fn(),
+  cookieSet: vi.fn(),
+}));
+
+vi.mock("next/headers", () => ({
+  cookies: async () => ({
+    get: mocks.cookieGet,
+    set: mocks.cookieSet,
+  }),
+}));
+
 import {
+  clearReferralAttributionCookie,
   clearReferralAttributionCookieOnResponse,
   createReferralAttributionValue,
+  readReferralAttributionCookie,
   referralAttributionCookieName,
   referralAttributionTtlSeconds,
   verifyReferralAttributionValue,
@@ -15,6 +29,10 @@ import {
 
 describe("referral attribution", () => {
   const now = new Date("2026-08-20T10:00:00.000Z");
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
 
   it("accepts only bounded alphanumeric referral codes", () => {
     expect(normalizeReferralCode("AbC123")).toBe("AbC123");
@@ -65,5 +83,28 @@ describe("referral attribution", () => {
       value: "",
     });
     expect(response.headers.get("set-cookie")).toMatch(/Max-Age=0/);
+  });
+
+  it("reads a valid signed attribution from the server cookie store", async () => {
+    const value = createReferralAttributionValue("AbC123");
+    mocks.cookieGet.mockReturnValue({ value });
+
+    await expect(readReferralAttributionCookie()).resolves.toBe("AbC123");
+    expect(mocks.cookieGet).toHaveBeenCalledWith(referralAttributionCookieName);
+  });
+
+  it("expires attribution through the server cookie store", async () => {
+    await clearReferralAttributionCookie();
+
+    expect(mocks.cookieSet).toHaveBeenCalledWith(
+      referralAttributionCookieName,
+      "",
+      expect.objectContaining({
+        httpOnly: true,
+        maxAge: 0,
+        path: "/",
+        sameSite: "lax",
+      }),
+    );
   });
 });
