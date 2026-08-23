@@ -1,7 +1,7 @@
 /** @vitest-environment jsdom */
 
 import { createElement } from "react";
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, render, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
@@ -86,6 +86,7 @@ describe("Chatwoot widget context lifecycle", () => {
     window.chatwootSDK = { run: vi.fn() };
     window.cleanPayChatwootAuthorized = undefined;
     window.cleanPayChatwootIdentity = undefined;
+    window.cleanPayChatwootOwnership = undefined;
     window.cleanPayChatwootPendingIdentity = undefined;
     window.cleanPayChatwootFailedIdentity = undefined;
     window.onmessage = null;
@@ -113,27 +114,7 @@ describe("Chatwoot widget context lifecycle", () => {
     });
   }
 
-  it("keeps a first-party support launcher visible and opens only a verified conversation", async () => {
-    mocks.loadContext.mockResolvedValue(null);
-    const api = chatwootApi();
-    window.$chatwoot = api;
-
-    render(createElement(ChatwootWidget, { config }));
-
-    const launcher = screen.getByRole("button", { name: "Подключить чат поддержки" });
-    expect(launcher.classList.contains("clean-pay-chatwoot-launcher")).toBe(true);
-    expect(api.toggle).not.toHaveBeenCalled();
-
-    await waitFor(() => {
-      expect(screen.getByRole("button", { name: "Открыть чат поддержки" })).toBeTruthy();
-    });
-    fireEvent.click(screen.getByRole("button", { name: "Открыть чат поддержки" }));
-
-    expect(api.toggle).toHaveBeenCalledWith("open");
-    expect(api.toggle).toHaveBeenCalledTimes(1);
-  });
-
-  it("preserves an open request across an equivalent server-component rerender", async () => {
+  it("renders no application-owned button and reveals the official launcher after verification", async () => {
     vi.useFakeTimers();
     mocks.loadContext.mockResolvedValue(null);
     const api = chatwootApi();
@@ -145,26 +126,15 @@ describe("Chatwoot widget context lifecycle", () => {
 
     const view = render(createElement(ChatwootWidget, { config }));
     await flushWidgetEffects();
-    fireEvent.click(screen.getByRole("button", { name: "Подключить чат поддержки" }));
-
-    view.rerender(createElement(ChatwootWidget, {
-      config: {
-        ...config,
-        user: {
-          ...config.user,
-          customAttributes: { ...config.user.customAttributes },
-        },
-      },
-    }));
-    await flushWidgetEffects();
+    expect(view.container.firstChild).toBeNull();
+    expect(api.toggleBubbleVisibility).not.toHaveBeenCalledWith("show");
 
     await act(async () => {
       await vi.advanceTimersByTimeAsync(750);
     });
 
     expect(mocks.verifyIdentity).toHaveBeenCalledWith("user-123");
-    expect(api.toggle).toHaveBeenCalledWith("open");
-    expect(api.toggle).toHaveBeenCalledTimes(1);
+    expect(api.toggleBubbleVisibility).toHaveBeenCalledWith("show");
   });
 
   it("reapplies managed labels after Chatwoot creates a conversation", async () => {
@@ -424,7 +394,7 @@ describe("Chatwoot widget context lifecycle", () => {
     expect(api.toggleBubbleVisibility).toHaveBeenLastCalledWith("hide");
   });
 
-  it("retries an ownership-only payload after its PATCH fails and the page reloads", async () => {
+  it("revalidates an ownership-only payload after the page reloads", async () => {
     vi.useFakeTimers();
     mocks.loadContext.mockResolvedValue(null);
     const firstApi = chatwootApi();
@@ -446,8 +416,10 @@ describe("Chatwoot widget context lifecycle", () => {
     expect(window.localStorage.length).toBe(0);
 
     act(() => window.dispatchEvent(new CustomEvent("chatwoot:error")));
-    expect(getChatwootPendingIdentityAttempt()).toBeUndefined();
-    expect(document.cookie).not.toContain(`cw_user_${config.websiteToken}=`);
+    expect(getChatwootPendingIdentityAttempt()).toMatchObject({
+      phase: "ownership_confirmed",
+    });
+    expect(firstApi.toggleBubbleVisibility).toHaveBeenLastCalledWith("show");
     expect(window.localStorage.length).toBe(0);
 
     firstView.unmount();
@@ -456,6 +428,7 @@ describe("Chatwoot widget context lifecycle", () => {
     // that suppresses the failed payload on the next SDK instance.
     window.cleanPayChatwootAuthorized = undefined;
     window.cleanPayChatwootIdentity = undefined;
+    window.cleanPayChatwootOwnership = undefined;
     window.cleanPayChatwootPendingIdentity = undefined;
     window.cleanPayChatwootFailedIdentity = undefined;
     const secondApi = chatwootApi();
@@ -593,7 +566,7 @@ describe("Chatwoot widget context lifecycle", () => {
     expect(window.cleanPayChatwootFailedIdentity).toBeUndefined();
   });
 
-  it("keeps a late Chatwoot identity error fail-closed after an ownership probe", async () => {
+  it("keeps the official launcher visible after a late metadata error", async () => {
     vi.useFakeTimers();
     mocks.loadContext.mockResolvedValue(null);
     const api = chatwootApi();
@@ -611,7 +584,7 @@ describe("Chatwoot widget context lifecycle", () => {
     expect(api.toggleBubbleVisibility).toHaveBeenCalledWith("show");
 
     act(() => window.dispatchEvent(new CustomEvent("chatwoot:error")));
-    expect(api.toggleBubbleVisibility).toHaveBeenLastCalledWith("hide");
+    expect(api.toggleBubbleVisibility).toHaveBeenLastCalledWith("show");
 
     act(() => {
       window.dispatchEvent(new CustomEvent("chatwoot:ready"));
@@ -622,7 +595,7 @@ describe("Chatwoot widget context lifecycle", () => {
       await vi.advanceTimersByTimeAsync(CHATWOOT_IDENTITY_ATTEMPT_TIMEOUT_MS * 2);
     });
     expect(api.setUser).toHaveBeenCalledTimes(1);
-    expect(api.toggleBubbleVisibility).toHaveBeenLastCalledWith("hide");
+    expect(api.toggleBubbleVisibility).toHaveBeenLastCalledWith("show");
   });
 
   it("cancels the component timer on unmount without launching a background retry", async () => {
