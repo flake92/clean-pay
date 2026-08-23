@@ -163,4 +163,42 @@ describe("InstallAppButton", () => {
     expect(prompt).toHaveBeenCalledOnce();
     expect(container.textContent).not.toContain("Установка отменена");
   });
+
+  it("reports a rejected browser install prompt and restores the install button", async () => {
+    Object.defineProperty(Navigator.prototype, "userAgent", {
+      configurable: true,
+      value: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/140.0",
+    });
+    const prompt = vi.fn().mockRejectedValue(new DOMException("Not allowed", "NotAllowedError"));
+    const installPrompt = Object.assign(new Event("beforeinstallprompt"), {
+      prompt,
+      userChoice: Promise.resolve({ outcome: "dismissed" as const }),
+    });
+    root = createRoot(container);
+    await act(async () => {
+      root?.render(
+        createElement(InstallAppButton, {
+          alwaysVisible: false,
+          autoOpenIosGuide: false,
+        }),
+      );
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    await act(async () => {
+      window.dispatchEvent(installPrompt);
+    });
+
+    const button = container.querySelector<HTMLButtonElement>("button");
+    expect(button).not.toBeNull();
+    await act(async () => {
+      button!.dispatchEvent(
+        new MouseEvent("click", { bubbles: true, cancelable: true }),
+      );
+      await Promise.resolve();
+    });
+
+    expect(prompt).toHaveBeenCalledOnce();
+    expect(button!.disabled).toBe(false);
+    expect(container.textContent).toContain("Не удалось открыть системное окно установки");
+  });
 });

@@ -22,7 +22,7 @@ function ReferralLoading() {
 
 export default function ReferralPage() {
   return (
-    <AppShell requireAuth>
+    <AppShell requireAuth returnTo="/referral">
       <div className="flex flex-column gap-6">
         <PageHeader
           description="Делитесь единой ссылкой, следите за приглашениями и полученными наградами."

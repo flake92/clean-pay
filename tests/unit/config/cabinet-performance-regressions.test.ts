@@ -28,7 +28,10 @@ describe("cabinet performance regressions", () => {
 
   it("redirects protected shells and unauthorized page models through the refresh handler", () => {
     const shell = source("src/app/_components/app-shell.tsx");
-    expect(shell).toContain('redirect(sessionRefreshPath("/cabinet"))');
+    expect(shell).toContain("redirect(sessionRefreshPath(returnTo))");
+    expect(source("src/app/referral/page.tsx")).toContain('returnTo="/referral"');
+    expect(source("src/app/payment/payment-status-page.tsx"))
+      .toContain("<AppShell requireAuth returnTo={returnTo}>");
 
     for (const file of [
       "src/app/cabinet/page.tsx",
@@ -39,7 +42,7 @@ describe("cabinet performance regressions", () => {
       "src/app/payment/page.tsx",
       "src/app/payment/payment-status-page.tsx",
     ]) {
-      expect(source(file), file).toContain("<AppShell requireAuth>");
+      expect(source(file), file).toContain("<AppShell requireAuth");
       expect(source(file), file).not.toMatch(/redirect\(["']\/login/);
     }
   });

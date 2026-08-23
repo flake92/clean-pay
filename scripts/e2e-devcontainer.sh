@@ -25,6 +25,8 @@ services=(
   postgres
   redis
   remnashop
+  remnashop-cache
+  remnashop-postgres
   remnashop-worker
   remnashop-scheduler
   remnawave-mock

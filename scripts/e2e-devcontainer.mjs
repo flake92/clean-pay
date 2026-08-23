@@ -157,6 +157,7 @@ function sleepSync(milliseconds) {
 
 function runWithRetries(command, args, {
   attempts = 3,
+  beforeRetry,
   label = command,
 } = {}) {
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
@@ -170,6 +171,10 @@ function runWithRetries(command, args, {
       console.error(
         `${label} failed on attempt ${attempt}/${attempts}; retrying...`,
       );
+      if (beforeRetry && beforeRetry() !== 0) {
+        console.error(`${label} cleanup failed; aborting retries.`);
+        return process.exitCode || status;
+      }
       sleepSync(attempt * 2_000);
     }
   }
@@ -199,69 +204,88 @@ function runShellScript() {
   return run("bash", ["scripts/e2e-devcontainer.sh"]);
 }
 
+function cleanupComposeStack(composeArgs) {
+  return run("docker", [
+    ...composeArgs,
+    "down",
+    "--remove-orphans",
+    "--volumes",
+  ]);
+}
+
 function runInsideDevcontainer() {
   const composeArgs = ["compose", "-p", projectName, "-f", composeFile];
   const resetE2e = process.env.RESET_E2E ?? "1";
+  let status = 0;
 
-  if (resetE2e === "1") {
-    const resetStatus = run("docker", [...composeArgs, "down", "--remove-orphans", "--volumes"]);
+  try {
+    if (resetE2e === "1") {
+      status = cleanupComposeStack(composeArgs);
 
-    if (resetStatus !== 0) {
-      return resetStatus;
+      if (status !== 0) {
+        return status;
+      }
+    }
+
+    status = runWithRetries(
+      "docker",
+      [...composeArgs, "up", "-d", "--build", "app"],
+      {
+        attempts: 3,
+        beforeRetry: () => cleanupComposeStack(composeArgs),
+        label: "Devcontainer image build/start",
+      },
+    );
+
+    if (status !== 0) {
+      return status;
+    }
+
+    status = run("docker", [
+      ...composeArgs,
+      "exec",
+      "-T",
+      "-u",
+      "root",
+      "app",
+      "sh",
+      "-lc",
+      "for attempt in $(seq 1 120); do [ -f /tmp/clean-pay-dev-ready ] && exit 0; sleep 1; done; echo 'Timed out waiting 120 seconds for the Clean Pay devcontainer bootstrap' >&2; exit 1",
+    ]);
+
+    if (status !== 0) {
+      return status;
+    }
+
+    const execArgs = [...composeArgs, "exec", "-T", "-u", "node"];
+
+    for (const name of passThroughEnv) {
+      if (process.env[name] !== undefined) {
+        const value = name === "CLEAN_PAY_E2E_BASE_URL"
+          ? "http://localhost:4000"
+          : name === "CLEAN_PAY_E2E_MAILPIT_URL"
+            ? "http://smtp:8025"
+            : name === "CLEAN_PAY_E2E_OIDC_URL"
+              ? "http://telegram-oidc-mock:8090"
+              : name === "CLEAN_PAY_HOST_DEVCONTAINER_DIR"
+                ? dockerDesktopHostPath(process.env[name])
+                : name === "REMNASHOP_BUILD_CONTEXT" && process.env.REMNASHOP_HOST_SOURCE
+                  ? "/workspace/remnashop-source"
+                  : process.env[name];
+
+        execArgs.push("-e", `${name}=${value}`);
+      }
+    }
+
+    execArgs.push("app", "bash", "-lc", "CLEAN_PAY_E2E_RUNNER_INSIDE=1 npm run test:e2e:devcontainer");
+    status = run("docker", execArgs);
+    return status;
+  } finally {
+    if (process.env.KEEP_E2E_STACK !== "1") {
+      const cleanupStatus = cleanupComposeStack(composeArgs);
+      process.exitCode = status || cleanupStatus;
     }
   }
-
-  const upStatus = runWithRetries(
-    "docker",
-    [...composeArgs, "up", "-d", "--build", "app"],
-    {
-      attempts: 3,
-      label: "Devcontainer image build/start",
-    },
-  );
-
-  if (upStatus !== 0) {
-    return upStatus;
-  }
-
-  const readyStatus = run("docker", [
-    ...composeArgs,
-    "exec",
-    "-T",
-    "-u",
-    "root",
-    "app",
-    "sh",
-    "-lc",
-    "for attempt in $(seq 1 120); do [ -f /tmp/clean-pay-dev-ready ] && exit 0; sleep 1; done; echo 'Timed out waiting 120 seconds for the Clean Pay devcontainer bootstrap' >&2; exit 1",
-  ]);
-
-  if (readyStatus !== 0) {
-    return readyStatus;
-  }
-
-  const execArgs = [...composeArgs, "exec", "-T", "-u", "node"];
-
-  for (const name of passThroughEnv) {
-    if (process.env[name] !== undefined) {
-      const value = name === "CLEAN_PAY_E2E_BASE_URL"
-        ? "http://localhost:4000"
-        : name === "CLEAN_PAY_E2E_MAILPIT_URL"
-          ? "http://smtp:8025"
-          : name === "CLEAN_PAY_E2E_OIDC_URL"
-            ? "http://telegram-oidc-mock:8090"
-            : name === "CLEAN_PAY_HOST_DEVCONTAINER_DIR"
-              ? dockerDesktopHostPath(process.env[name])
-              : name === "REMNASHOP_BUILD_CONTEXT" && process.env.REMNASHOP_HOST_SOURCE
-                ? "/workspace/remnashop-source"
-                : process.env[name];
-
-      execArgs.push("-e", `${name}=${value}`);
-    }
-  }
-
-  execArgs.push("app", "bash", "-lc", "CLEAN_PAY_E2E_RUNNER_INSIDE=1 npm run test:e2e:devcontainer");
-  return run("docker", execArgs);
 }
 
 if (isInsideDevcontainer()) {
