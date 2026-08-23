@@ -498,7 +498,7 @@ describe("payment history sync fencing", () => {
     expect(query).toContain('sync_state."userId" IS NULL');
   });
 
-  it("asks the database for due rows so an earlier backoff cannot starve a ready user", async () => {
+  it("asks the database only for due rows with a usable headless access token", async () => {
     mocks.prisma.$queryRaw.mockResolvedValue([]);
 
     await listDuePaymentHistoryCandidates(1);
@@ -515,8 +515,12 @@ describe("payment history sync fencing", () => {
       'web_session."refreshExpiresAt" > clock_timestamp()',
     );
     expect(query).toContain('web_session."assuranceLevel" = \'FULL\'');
-    expect(query).not.toContain('web_session."remnashopAccessTokenEncrypted"');
-    expect(query).not.toContain('web_session."remnashopAccessExpiresAt"');
+    expect(query).toContain(
+      'web_session."remnashopAccessTokenEncrypted" IS NOT NULL',
+    );
+    expect(query).toContain(
+      'web_session."remnashopAccessExpiresAt" > clock_timestamp()',
+    );
     expect(query).not.toContain('web_session."remnashopRefreshRecoveryEncrypted"');
     expect(query).not.toContain('web_session."remnashopRefreshTokenEncrypted"');
     expect(query).toContain('web_user."emailVerified" = TRUE');
