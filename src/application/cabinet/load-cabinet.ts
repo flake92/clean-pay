@@ -1,13 +1,12 @@
 import type { CabinetReader } from "@/application/cabinet/ports/cabinet-reader";
 import type { CabinetViewModel } from "@/application/models/cabinet";
 import type { PaymentHistoryGateway } from "@/application/payments/ports/payment-history";
-import type { PaymentMaintenanceRunner } from "@/application/payments/ports/payment-maintenance";
 import { loadPaymentHistory } from "@/application/payments/load-payment-history";
 import type { AuthProfileGateway } from "@/application/auth/ports/auth-profile";
 import { AuthProfileError } from "@/application/auth/ports/auth-profile";
 import { resolveAuthProfile } from "@/application/auth/resolve-auth-profile";
 
-export async function loadCabinetViewModel(reader: CabinetReader, auth: AuthProfileGateway, history: PaymentHistoryGateway, maintenance: PaymentMaintenanceRunner): Promise<CabinetViewModel> {
+export async function loadCabinetViewModel(reader: CabinetReader, auth: AuthProfileGateway, history: PaymentHistoryGateway): Promise<CabinetViewModel> {
   let account;
   try {
     account = await resolveAuthProfile(auth);
@@ -22,7 +21,7 @@ export async function loadCabinetViewModel(reader: CabinetReader, auth: AuthProf
     reader.loadSubscription(),
     reader.loadOffers(),
     reader.loadDevices(),
-    loadPaymentHistory(history, maintenance, account.userId),
+    loadPaymentHistory(history, account.userId),
     reader.loadSupport(),
   ]);
 
@@ -34,11 +33,9 @@ export async function loadCabinetViewModel(reader: CabinetReader, auth: AuthProf
     offers: offers.status === "fulfilled" ? offers.value : null,
     devices: devices.status === "fulfilled" ? devices.value : null,
     payments: payments.status === "fulfilled" ? payments.value.records : [],
-    paymentsWarning: payments.status === "rejected"
-      ? "Не удалось обновить историю платежей."
-      : payments.value.stale
-        ? "История показана из сохранённых данных. Обновление статусов временно недоступно."
-        : null,
+    paymentHistoryStatus: payments.status === "fulfilled"
+      ? payments.value.status
+      : "unavailable",
     support: support.status === "fulfilled"
       ? support.value
       : { enabled: false, email: null, telegramUsername: null, faqUrl: null },

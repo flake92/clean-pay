@@ -17,6 +17,7 @@ import {
 import { SubscriptionDeviceDetails } from "@/frontend/components/subscription-device-details";
 import { formatSubscriptionDevice } from "@/frontend/lib/device-display";
 import type { DevicesResponse } from "@/shared/domain/subscriptions";
+import type { PaymentHistorySnapshotStatus } from "@/application/models/cabinet";
 
 export const MOBILE_PAYMENT_PREVIEW_COUNT = 5;
 
@@ -80,25 +81,36 @@ export function CabinetDevicesSection({
 }
 
 type CabinetPaymentHistorySectionProps = {
-  error: string | null;
   payments: PaymentRecord[];
+  status: PaymentHistorySnapshotStatus;
 };
 
 export function CabinetPaymentHistorySection({
-  error,
   payments,
+  status,
 }: CabinetPaymentHistorySectionProps) {
   const [isExpanded, setIsExpanded] = useState(false);
   const hiddenPaymentCount = Math.max(0, payments.length - MOBILE_PAYMENT_PREVIEW_COUNT);
   const mobilePayments = isExpanded
     ? payments
     : payments.slice(0, MOBILE_PAYMENT_PREVIEW_COUNT);
+  const notice = status === "refreshing"
+    ? {
+        severity: "info" as const,
+        text: "История платежей обновляется. Пока показаны сохранённые данные.",
+      }
+    : status === "unavailable"
+      ? {
+          severity: "warn" as const,
+          text: "Не удалось обновить статусы платежей. Показаны сохранённые данные.",
+        }
+      : null;
 
   return (
     <div className="col-12">
       <section className="card" aria-labelledby="cabinet-payments-title">
         <h5 id="cabinet-payments-title">История платежей</h5>
-        {error ? <Message severity="warn" text={error} /> : null}
+        {notice ? <Message severity={notice.severity} text={notice.text} /> : null}
         {payments.length > 0 ? (
           <div className="cabinet-mobile-list cabinet-payment-list">
             <div
@@ -155,12 +167,12 @@ export function CabinetPaymentHistorySection({
               />
             ) : null}
           </div>
-        ) : !error ? (
+        ) : !notice ? (
           <Message severity="info" text="Платежей через web-кабинет пока нет." />
         ) : null}
         <DataTable
           className="cabinet-desktop-table"
-          emptyMessage={error ?? "Платежей через web-кабинет пока нет."}
+          emptyMessage={notice?.text ?? "Платежей через web-кабинет пока нет."}
           responsiveLayout="scroll"
           value={payments}
         >

@@ -308,29 +308,24 @@ describe("application facades", () => {
       loadSupport: vi.fn(async () => { throw new Error("support unavailable"); }),
     };
     const history: PaymentHistoryGateway = {
-      authorize: vi.fn(async () => { throw new Error("sync unavailable"); }), loadCapabilities: vi.fn(async () => null),
-      findPendingPaymentIds: vi.fn(async () => []), loadExactTransaction: vi.fn(async () => null), persistExactTransaction: vi.fn(async () => undefined),
-      loadLegacyTransactions: vi.fn(async () => []), persistLegacyTransactions: vi.fn(async () => undefined),
-      loadRecent: vi.fn(async () => []), isSnapshotStale: vi.fn(async () => false), logExactFailure: vi.fn(), logDegraded: vi.fn(),
+      loadRecent: vi.fn(async () => []),
+      readSnapshotStatus: vi.fn(async () => "current" as const),
     };
-    const maintenance = paymentMaintenance();
 
-    await expect(loadCabinetViewModel(reader, authGateway(), history, maintenance)).resolves.toMatchObject({
+    await expect(loadCabinetViewModel(reader, authGateway(), history)).resolves.toMatchObject({
       status: "ready",
       offers,
       devices: null,
-      paymentsWarning: null,
+      paymentHistoryStatus: "current",
       support: { enabled: false },
     });
     expect(history.loadRecent).toHaveBeenCalledWith("user-1", 20);
-    expect(history.authorize).not.toHaveBeenCalled();
-    expect(maintenance.claimHistory).not.toHaveBeenCalled();
 
-    await expect(loadCabinetViewModel(reader, authGateway({ loadCurrentSession: vi.fn(async () => null) }), history, maintenance)).resolves.toEqual({ status: "unauthorized" });
+    await expect(loadCabinetViewModel(reader, authGateway({ loadCurrentSession: vi.fn(async () => null) }), history)).resolves.toEqual({ status: "unauthorized" });
 
     await expect(loadCabinetViewModel(reader, authGateway({
       loadCurrentSession: vi.fn(async () => { throw new Error("database unavailable"); }),
-    }), history, maintenance)).resolves.toMatchObject({ status: "error" });
+    }), history)).resolves.toMatchObject({ status: "error" });
   });
 
   it("returns a safe fallback when subscription reissue fails unexpectedly", async () => {

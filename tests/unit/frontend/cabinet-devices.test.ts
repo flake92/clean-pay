@@ -192,7 +192,7 @@ describe("cabinet device records", () => {
         offers: { gateways: [], plans: [], has_current_subscription: true, current_subscription_status: "ACTIVE" },
         devices,
         payments: [],
-        paymentsWarning: null,
+        paymentHistoryStatus: "current",
         support: { enabled: false, email: null, telegramUsername: null, faqUrl: null },
       },
     })));

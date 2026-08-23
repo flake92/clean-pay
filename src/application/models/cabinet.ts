@@ -5,6 +5,11 @@ import type {
 } from "@/shared/domain/subscriptions";
 import type { SupportViewModel } from "@/application/models/support";
 
+export type PaymentHistorySnapshotStatus =
+  | "current"
+  | "refreshing"
+  | "unavailable";
+
 type CabinetUserViewModel = {
   email: string | null;
   telegramId?: string | null;
@@ -37,6 +42,6 @@ export type CabinetViewModel =
       offers: SubscriptionOffersResponse | null;
       devices: DevicesResponse | null;
       payments: CabinetPaymentViewModel[];
-      paymentsWarning: string | null;
+      paymentHistoryStatus: PaymentHistorySnapshotStatus;
       support: SupportViewModel;
     };

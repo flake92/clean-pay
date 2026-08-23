@@ -74,25 +74,7 @@ import { prismaPasskeyAccountReader } from "@/backend/integrations/auth/prisma-p
 import { productionTelegramWebAppGateway } from "@/backend/integrations/auth/telegram-webapp-gateway";
 import { loadPaymentHistory } from "@/application/payments/load-payment-history";
 import { productionPaymentHistoryGateway } from "@/backend/integrations/payments/payment-history-reader";
-import type { PaymentMaintenanceRunner } from "@/application/payments/ports/payment-maintenance";
 import { prismaPaymentQueryRepository } from "@/backend/integrations/payments/prisma-payment-query-repository";
-
-function maintenance(): PaymentMaintenanceRunner {
-  return {
-    claimReconciliation: vi.fn(async () => null), recoverPayment: vi.fn(async () => null),
-    completeRecoveredPayment: vi.fn(async () => undefined), resetMissingPayment: vi.fn(async () => undefined),
-    releaseReconciliation: vi.fn(async () => undefined), markReconciliationManual: vi.fn(async () => undefined),
-    failReconciliation: vi.fn(async () => "released" as const), classifyReconciliationError: vi.fn(() => ({ kind: "other" as const })),
-    listHistoryCandidates: vi.fn(async () => []), claimHistory: mocks.claimHistory, authorizeHistory: vi.fn(async () => ({ context: {} })),
-    historyPageSize: vi.fn(async () => 100), findPendingHistoryPaymentIds: vi.fn(async () => []),
-    loadExactHistoryPayment: vi.fn(async () => null), persistExactHistoryPayment: vi.fn(async () => undefined),
-    loadLegacyHistory: vi.fn(async () => ({ context: {} })),
-    loadHistoryPage: mocks.loadHistoryPage,
-    completeHistoryPage: mocks.completeHistoryPage,
-    classifyHistoryError: vi.fn(() => ({ kind: "unexpected" as const })),
-    deferHistory: vi.fn(async () => undefined), failHistory: mocks.failHistory, now: vi.fn(() => Date.now()),
-  };
-}
 
 describe("production persistence and Telegram adapters", () => {
   beforeEach(() => {
@@ -148,23 +130,21 @@ describe("production persistence and Telegram adapters", () => {
   it("serves bounded payment history directly from the local snapshot", async () => {
     mocks.prisma.paymentRecord.findMany.mockResolvedValueOnce([{ id: "record-1" }]);
 
-    const runner = maintenance();
-    await expect(loadPaymentHistory(productionPaymentHistoryGateway, runner, "user-1")).resolves.toEqual({
+    await expect(loadPaymentHistory(productionPaymentHistoryGateway, "user-1")).resolves.toEqual({
       records: [{ id: "record-1" }],
-      stale: false,
+      status: "current",
     });
     expect(mocks.prisma.paymentRecord.findMany).toHaveBeenCalledWith(expect.objectContaining({ take: 20 }));
     expect(mocks.getAuthorizedRemnashopTokens).not.toHaveBeenCalled();
     expect(mocks.getExactTransaction).not.toHaveBeenCalled();
     expect(mocks.loadHistoryPage).not.toHaveBeenCalled();
-    expect(runner.claimHistory).not.toHaveBeenCalled();
   });
 
   it("does not contact an unavailable provider while rendering cached history", async () => {
     mocks.prisma.paymentRecord.findMany.mockResolvedValueOnce([{ id: "cached-record" }]);
-    await expect(loadPaymentHistory(productionPaymentHistoryGateway, maintenance(), "user-1")).resolves.toEqual({
+    await expect(loadPaymentHistory(productionPaymentHistoryGateway, "user-1")).resolves.toEqual({
       records: [{ id: "cached-record" }],
-      stale: false,
+      status: "current",
     });
     expect(mocks.getAuthorizedRemnashopTokens).not.toHaveBeenCalled();
     expect(mocks.loggerWarn).not.toHaveBeenCalled();
@@ -176,15 +156,33 @@ describe("production persistence and Telegram adapters", () => {
 
     await expect(loadPaymentHistory(
       productionPaymentHistoryGateway,
-      maintenance(),
       "user-1",
-    )).resolves.toEqual({ records: [], stale: true });
+    )).resolves.toEqual({ records: [], status: "refreshing" });
     expect(mocks.getAuthorizedRemnashopTokens).not.toHaveBeenCalled();
+  });
+
+  it("distinguishes a failed snapshot from a refresh that is still pending", async () => {
+    mocks.prisma.paymentHistorySyncState.findUnique
+      .mockResolvedValueOnce({
+        backfillCompletedAt: null,
+        lastSyncedAt: null,
+        errorSnapshot: null,
+      })
+      .mockResolvedValueOnce({
+        backfillCompletedAt: null,
+        lastSyncedAt: null,
+        errorSnapshot: { code: "UPSTREAM_UNAVAILABLE" },
+      });
+
+    await expect(prismaPaymentQueryRepository.readHistorySnapshotStatus("refreshing-user"))
+      .resolves.toBe("refreshing");
+    await expect(prismaPaymentQueryRepository.readHistorySnapshotStatus("failed-user"))
+      .resolves.toBe("unavailable");
   });
 
   it("leaves legacy history synchronization to the maintenance worker", async () => {
     mocks.prisma.paymentRecord.findMany.mockResolvedValueOnce([]);
-    await loadPaymentHistory(productionPaymentHistoryGateway, maintenance(), "user-1");
+    await loadPaymentHistory(productionPaymentHistoryGateway, "user-1");
     expect(mocks.getPaymentCapabilities).not.toHaveBeenCalled();
     expect(mocks.getLegacyTransactions).not.toHaveBeenCalled();
     expect(mocks.syncPaymentRecordsFromRemnashopTransactions).not.toHaveBeenCalled();

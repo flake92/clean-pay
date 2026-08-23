@@ -9,7 +9,6 @@ import { createProductionPasskeyManagementGateway } from "@/backend/integrations
 import { createProductionCabinetReader } from "@/backend/integrations/cabinet/cabinet-reader";
 import { createProductionCheckoutReader } from "@/backend/integrations/payments/checkout-reader";
 import { createProductionPaymentHistoryGateway } from "@/backend/integrations/payments/payment-history-reader";
-import { productionPaymentMaintenanceRunner } from "@/backend/integrations/payments/payment-maintenance-runner";
 import { createProductionPaymentStatusReader } from "@/backend/integrations/payments/payment-status-reader";
 import { createReferralProgramReader } from "@/backend/integrations/referral/referral-program-reader";
 import { getAuthorizedRemnashopTokens } from "@/backend/integrations/remnashop/client";
@@ -58,9 +57,7 @@ export const requestPasskeyManagementGateway =
   createProductionPasskeyManagementGateway(getCurrentSessionReadOnly);
 const requestCabinetReader = createProductionCabinetReader(subscriptions);
 export const requestCheckoutReader = createProductionCheckoutReader(subscriptions);
-const requestPaymentHistoryGateway = createProductionPaymentHistoryGateway(
-  authorizeVerifiedSession,
-);
+const requestPaymentHistoryGateway = createProductionPaymentHistoryGateway();
 export const requestPaymentStatusReader = createProductionPaymentStatusReader(
   readCurrentUserOnly,
   authorizeVerifiedSession,
@@ -71,7 +68,6 @@ export const loadRequestCabinetViewModel = cache(() =>
     requestCabinetReader,
     requestAuthProfileGateway,
     requestPaymentHistoryGateway,
-    productionPaymentMaintenanceRunner,
   ),
 );
 export const loadRequestReferralProgram = cache(() =>

@@ -94,7 +94,7 @@ describe("internal payment reconciliation route", () => {
     mocks.historyPageSize.mockResolvedValue(100);
     mocks.findPendingHistoryPaymentIds.mockResolvedValue([]);
     mocks.loadHistoryPage.mockResolvedValue({ context: {} });
-    mocks.completeHistoryPage.mockResolvedValue({ applied: 20, hasMore: true });
+    mocks.completeHistoryPage.mockResolvedValue({ applied: 20, hasMore: false });
   });
 
   it("is indistinguishable from not-found while disabled", async () => {

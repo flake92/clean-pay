@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "primereact/button";
@@ -43,6 +43,9 @@ import {
 import { DetailLine, Metric } from "@/frontend/components/cabinet-view-parts";
 import { resetChatwootSession } from "@/frontend/lib/chatwoot";
 
+const PAYMENT_HISTORY_REFRESH_INTERVAL_MS = 10_000;
+const PAYMENT_HISTORY_REFRESH_ATTEMPT_LIMIT = 4;
+
 export function CabinetPanel({ model }: { model: CabinetViewModel }) {
   const router = useRouter();
   const initial = model.status === "ready" ? model : null;
@@ -51,7 +54,7 @@ export function CabinetPanel({ model }: { model: CabinetViewModel }) {
   const offers: SubscriptionOffersResponse | null = initial?.offers ?? null;
   const devices: DevicesResponse | null = initial?.devices ?? null;
   const payments = initial?.payments ?? [];
-  const paymentsError = initial?.paymentsWarning ?? null;
+  const paymentHistoryStatus = initial?.paymentHistoryStatus ?? "current";
   const support: SupportSettings | null = initial?.support ?? null;
   const error = model.status === "error" ? model.message : null;
   const subscriptionError = initial?.subscriptionError ?? null;
@@ -60,7 +63,37 @@ export function CabinetPanel({ model }: { model: CabinetViewModel }) {
   const [promocodeMessage, setPromocodeMessage] = useState<string | null>(null);
   const [pendingAction, setPendingAction] = useState<string | null>(null);
   const pendingActionRef = useRef<string | null>(null);
+  const paymentHistoryRefreshAttempts = useRef(0);
   const [promocode, setPromocode] = useState("");
+
+  useEffect(() => {
+    if (paymentHistoryStatus !== "refreshing") {
+      paymentHistoryRefreshAttempts.current = 0;
+      return;
+    }
+
+    let timeoutId: ReturnType<typeof setTimeout> | null = null;
+    const scheduleRefresh = () => {
+      if (
+        paymentHistoryRefreshAttempts.current >=
+        PAYMENT_HISTORY_REFRESH_ATTEMPT_LIMIT
+      ) {
+        return;
+      }
+
+      timeoutId = setTimeout(() => {
+        paymentHistoryRefreshAttempts.current += 1;
+        router.refresh();
+        scheduleRefresh();
+      }, PAYMENT_HISTORY_REFRESH_INTERVAL_MS);
+    };
+
+    scheduleRefresh();
+
+    return () => {
+      if (timeoutId !== null) clearTimeout(timeoutId);
+    };
+  }, [paymentHistoryStatus, router]);
 
   function beginPendingAction(action: string) {
     if (pendingActionRef.current) {
@@ -453,7 +486,10 @@ export function CabinetPanel({ model }: { model: CabinetViewModel }) {
         />
       ) : null}
 
-      <CabinetPaymentHistorySection error={paymentsError} payments={payments} />
+      <CabinetPaymentHistorySection
+        payments={payments}
+        status={paymentHistoryStatus}
+      />
 
       {support?.enabled &&
       (support.email || support.telegramUsername || support.faqUrl) ? (

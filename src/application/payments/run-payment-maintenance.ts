@@ -1,4 +1,8 @@
-import type { PaymentMaintenanceRunner, PaymentReconciliationGateway } from "@/application/payments/ports/payment-maintenance";
+import type {
+  PaymentHistoryAuthorization,
+  PaymentMaintenanceRunner,
+  PaymentReconciliationGateway,
+} from "@/application/payments/ports/payment-maintenance";
 
 const emptyBacklog = {
   pending: 0,
@@ -11,6 +15,7 @@ const emptyBacklog = {
 
 const HISTORY_CANDIDATE_LIMIT = 20;
 const HISTORY_EXACT_PAYMENT_LIMIT = 5;
+const HISTORY_PAGE_LIMIT_PER_CANDIDATE = 3;
 
 export async function loadPaymentReconciliationBacklog(
   runner: PaymentMaintenanceRunner,
@@ -153,67 +158,89 @@ export async function runPaymentMaintenance(
     deferred: 0,
   };
   const candidates = await runner.listHistoryCandidates(HISTORY_CANDIDATE_LIMIT);
-  for (const candidate of candidates) {
-    if (runner.now() >= deadlineAt) break;
-    const claim = await runner.claimHistory(candidate);
-    if (!claim) continue;
-    history.attempted += 1;
-    try {
-      const authorization = await runner.authorizeHistory(
-        claim,
-        remainingHistoryBudget(runner, deadlineAt),
-      );
-      const pageSize = await runner.historyPageSize(
-        authorization,
-        remainingHistoryBudget(runner, deadlineAt),
-      );
-      if (!pageSize) {
-        const legacyPage = await runner.loadLegacyHistory(
-          authorization,
-          remainingHistoryBudget(runner, deadlineAt),
-        );
-        const result = await runner.completeHistoryPage(claim, legacyPage);
-        history.applied += result.applied;
-        if (!result.hasMore) history.completed += 1;
-        continue;
-      }
-      const pendingPaymentIds = await runner.findPendingHistoryPaymentIds(
-        candidate.userId,
-        HISTORY_EXACT_PAYMENT_LIMIT,
-      );
-      for (const [index, paymentId] of pendingPaymentIds.entries()) {
-        try {
-          const exact = await runner.loadExactHistoryPayment(
-            authorization,
-            paymentId,
+  candidateLoop: for (const candidate of candidates) {
+    let authorization: PaymentHistoryAuthorization | null = null;
+    let pageSize: number | null = null;
+
+    for (
+      let pageIndex = 0;
+      pageIndex < HISTORY_PAGE_LIMIT_PER_CANDIDATE;
+      pageIndex += 1
+    ) {
+      if (runner.now() >= deadlineAt) break candidateLoop;
+
+      const claim = await runner.claimHistory(candidate);
+      if (!claim) break;
+
+      history.attempted += 1;
+      try {
+        if (!authorization) {
+          authorization = await runner.authorizeHistory(
+            claim,
             remainingHistoryBudget(runner, deadlineAt),
           );
-          if (exact) {
-            await runner.persistExactHistoryPayment(candidate, exact);
-          }
-        } catch (error) {
-          runner.logHistoryExactFailure?.(error, index);
+          pageSize = await runner.historyPageSize(
+            authorization,
+            remainingHistoryBudget(runner, deadlineAt),
+          );
         }
-      }
-      const page = await runner.loadHistoryPage(
-        authorization,
-        claim.cursor,
-        Math.min(100, pageSize),
-        remainingHistoryBudget(runner, deadlineAt),
-      );
-      const result = await runner.completeHistoryPage(claim, page);
-      history.applied += result.applied;
-      if (!result.hasMore) history.completed += 1;
-    } catch (error) {
-      const classification = runner.classifyHistoryError(error);
 
-      if (classification.kind === "deferred") {
-        await runner.deferHistory(claim, error);
-        history.deferred += 1;
-      } else {
-        await runner.failHistory(claim, error);
+        if (!pageSize) {
+          const legacyPage = await runner.loadLegacyHistory(
+            authorization,
+            remainingHistoryBudget(runner, deadlineAt),
+          );
+          const result = await runner.completeHistoryPage(claim, legacyPage);
+          history.applied += result.applied;
+          if (!result.hasMore) history.completed += 1;
+          break;
+        }
+
+        if (pageIndex === 0) {
+          const pendingPaymentIds = await runner.findPendingHistoryPaymentIds(
+            candidate.userId,
+            HISTORY_EXACT_PAYMENT_LIMIT,
+          );
+          for (const [index, paymentId] of pendingPaymentIds.entries()) {
+            try {
+              const exact = await runner.loadExactHistoryPayment(
+                authorization,
+                paymentId,
+                remainingHistoryBudget(runner, deadlineAt),
+              );
+              if (exact) {
+                await runner.persistExactHistoryPayment(candidate, exact);
+              }
+            } catch (error) {
+              runner.logHistoryExactFailure?.(error, index);
+            }
+          }
+        }
+
+        const page = await runner.loadHistoryPage(
+          authorization,
+          claim.cursor,
+          Math.min(100, pageSize),
+          remainingHistoryBudget(runner, deadlineAt),
+        );
+        const result = await runner.completeHistoryPage(claim, page);
+        history.applied += result.applied;
+        if (!result.hasMore) {
+          history.completed += 1;
+          break;
+        }
+      } catch (error) {
+        const classification = runner.classifyHistoryError(error);
+
+        if (classification.kind === "deferred") {
+          await runner.deferHistory(claim, error);
+          history.deferred += 1;
+        } else {
+          await runner.failHistory(claim, error);
+        }
+        history.failed += 1;
+        break;
       }
-      history.failed += 1;
     }
   }
   const backlog = await loadPaymentReconciliationBacklog(runner);
