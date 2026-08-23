@@ -10,6 +10,7 @@ import {
   ProductionEnvironmentError,
   parseProductionEnvironmentFile,
 } from "./production-env-rules.mjs";
+import { assertRedisOvercommitValue } from "./host-safety.mjs";
 import { assessReadinessResponse } from "./readiness.mjs";
 
 const prodDir = path.dirname(fileURLToPath(import.meta.url));
@@ -299,6 +300,21 @@ function ensureEdgeNetwork() {
   }
 }
 
+function assertRedisHostMemoryPolicy() {
+  const overcommitPath = "/proc/sys/vm/overcommit_memory";
+
+  if (!existsSync(overcommitPath)) {
+    return;
+  }
+
+  try {
+    assertRedisOvercommitValue(readFileSync(overcommitPath, "utf8"));
+  } catch (error) {
+    console.error(error instanceof Error ? error.message : String(error));
+    process.exit(1);
+  }
+}
+
 function requireEnvFile() {
   if (!existsSync(envFile)) {
     console.error(`Missing ${envFile}. Copy deploy/prod/.env.example and fill real values.`);
@@ -418,6 +434,7 @@ switch (command) {
     break;
   case "up":
     validateProductionEnvFile();
+    assertRedisHostMemoryPolicy();
     ensureEdgeNetwork();
     if (runDocker(composeArgs("up", "-d", "--build")) !== 0) {
       process.exit(1);
