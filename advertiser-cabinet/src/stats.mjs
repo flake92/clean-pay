@@ -2,15 +2,27 @@ import pg from "pg";
 
 const { Pool } = pg;
 
+export function observePoolErrors(pool, log = console.error) {
+  pool.on("error", (error) => {
+    log(JSON.stringify({
+      level: "error",
+      event: "database_pool_error",
+      code: typeof error?.code === "string" ? error.code : undefined,
+      message: error instanceof Error ? error.message : "Unknown database pool error",
+    }));
+  });
+  return pool;
+}
+
 export function createStatsStore(config) {
-  const pool = new Pool({
+  const pool = observePoolErrors(new Pool({
     connectionString: config.databaseUrl,
     max: 4,
     idleTimeoutMillis: 30_000,
     connectionTimeoutMillis: 5_000,
     options: "-c default_transaction_read_only=on -c statement_timeout=8000 -c search_path=advertiser_stats",
     application_name: "clean-pay-advertiser-cabinet",
-  });
+  }));
 
   return {
     async health() {
