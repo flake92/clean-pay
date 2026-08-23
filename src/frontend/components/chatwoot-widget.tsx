@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 
 import {
   loadChatwootSupportContextAction,
@@ -35,6 +35,8 @@ import {
 import { navigateTo } from "@/frontend/lib/browser-navigation";
 
 export function ChatwootWidget({ config }: { config: ChatwootWidgetConfig }) {
+  const [launcherState, setLauncherState] = useState<"loading" | "ready">("loading");
+
   useEffect(() => {
     let active = true;
     let supportContext: ChatwootSupportContext | null = null;
@@ -46,6 +48,7 @@ export function ChatwootWidget({ config }: { config: ChatwootWidgetConfig }) {
     const initialIdentityProbeDelayMs = 750;
     let sessionRefreshRequested = false;
     let conversationResetRequested = false;
+    let openRequested = false;
 
     enterChatwootAuthenticatedMode();
     window.chatwootSettings = {
@@ -73,6 +76,18 @@ export function ChatwootWidget({ config }: { config: ChatwootWidgetConfig }) {
         window.$chatwoot?.toggleBubbleVisibility("hide");
       } catch {
         // Keep support failures isolated from the application shell.
+      }
+    };
+    const openVerifiedConversation = () => {
+      if (!openRequested) {
+        return;
+      }
+
+      try {
+        window.$chatwoot?.toggle?.("open");
+        openRequested = false;
+      } catch {
+        // The visible first-party launcher remains available for a retry.
       }
     };
     const scheduleIdentityAttemptTimeout = () => {
@@ -242,6 +257,12 @@ export function ChatwootWidget({ config }: { config: ChatwootWidgetConfig }) {
           if (status === "ready" && applyLabels && supportContext) {
             applyChatwootManagedLabels(supportContext);
           }
+          if (status === "ready") {
+            setLauncherState("ready");
+            openVerifiedConversation();
+          } else {
+            setLauncherState("loading");
+          }
           if (status === "pending") {
             scheduleIdentityAttemptTimeout();
             scheduleIdentityProbe();
@@ -249,6 +270,7 @@ export function ChatwootWidget({ config }: { config: ChatwootWidgetConfig }) {
             cancelIdentityAttemptTimer();
             cancelIdentityProbeTimer();
           }
+          return status;
         } catch {
           cancelIdentityAttemptTimer();
           cancelIdentityProbeTimer();
@@ -256,8 +278,18 @@ export function ChatwootWidget({ config }: { config: ChatwootWidgetConfig }) {
           hideLauncher();
         }
       }
+      return "unavailable";
     };
     const identifyWithCurrentContext = () => identify();
+    const requestConversationOpen = () => {
+      if (!active || sessionRefreshRequested) {
+        return;
+      }
+
+      openRequested = true;
+      setLauncherState("loading");
+      identifyWithCurrentContext();
+    };
     const refreshSupportContext = () => {
       void loadChatwootSupportContextCached(
         config.user.identifier,
@@ -360,6 +392,7 @@ export function ChatwootWidget({ config }: { config: ChatwootWidgetConfig }) {
     // conversation. Reapplying here makes managed labels reliable for a new
     // contact; earlier label calls are harmless no-ops in the standard SDK.
     window.addEventListener("chatwoot:on-message", identifyAndRefresh);
+    window.addEventListener("clean-pay:chatwoot-open", requestConversationOpen);
 
     refreshSupportContext();
 
@@ -407,12 +440,24 @@ export function ChatwootWidget({ config }: { config: ChatwootWidgetConfig }) {
       window.removeEventListener("chatwoot:opened", identifyAndRefresh);
       window.removeEventListener("chatwoot:on-start-conversation", identifyAndRefresh);
       window.removeEventListener("chatwoot:on-message", identifyAndRefresh);
+      window.removeEventListener("clean-pay:chatwoot-open", requestConversationOpen);
       // AppShell is a page-level wrapper. Do not reset here: ordinary client
       // navigation between authenticated pages may unmount this component.
     };
   }, [config]);
 
-  return null;
+  return (
+    <button
+      aria-label={launcherState === "ready" ? "Открыть чат поддержки" : "Подключить чат поддержки"}
+      className="clean-pay-chatwoot-launcher"
+      data-state={launcherState}
+      onClick={() => window.dispatchEvent(new CustomEvent("clean-pay:chatwoot-open"))}
+      title={launcherState === "ready" ? "Чат поддержки" : "Подключение чата поддержки"}
+      type="button"
+    >
+      <i className="pi pi-comments" aria-hidden="true" />
+    </button>
+  );
 }
 
 export function ChatwootGuestBoundary() {

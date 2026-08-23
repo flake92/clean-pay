@@ -90,4 +90,16 @@ describe("Chatwoot integration boundaries", () => {
     );
     expect(coverage).toContain('\"src/frontend/lib/chatwoot.ts\": {');
   });
+
+  it("keeps an application-owned launcher above the mobile cabinet layout", () => {
+    const component = source("src/frontend/components/chatwoot-widget.tsx");
+    const styles = source("src/frontend/styles/layout/_chatwoot.scss");
+    const layout = source("src/frontend/styles/layout/layout.scss");
+
+    expect(component).toContain('className="clean-pay-chatwoot-launcher"');
+    expect(component).toContain('new CustomEvent("clean-pay:chatwoot-open")');
+    expect(styles).toContain("position: fixed");
+    expect(styles).toContain("z-index: 2147483001");
+    expect(layout).toContain('@use "./chatwoot"');
+  });
 });
