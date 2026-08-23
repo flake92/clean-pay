@@ -90,4 +90,20 @@ describe("root production container boundary", () => {
     expect(rootCompose).toContain("TURNSTILE_WIDGET_ID: ${TURNSTILE_SITE_KEY:-}");
     expect(rootCompose).not.toContain("TURNSTILE_ENABLED: ${TURNSTILE_ENABLED:-false}");
   });
+
+  it("keeps the app on both the private service and external edge networks", () => {
+    for (const [path, source] of [
+      ["docker-compose.yml", rootCompose],
+      ["deploy/prod/docker-compose.yml", compose],
+    ] as const) {
+      const app = source.split(/\n  app:\n/)[1]?.split(/\n  reconciliation-worker:\n/)[0] ?? "";
+
+      expect(app, path).toMatch(
+        /networks:\s+default:\s+edge:\s+aliases:\s+- clean-pay/,
+      );
+      expect(source, path).toMatch(
+        /\nnetworks:\s+edge:\s+external: true\s+name: \$\{CLEAN_PAY_EDGE_NETWORK:-remnawave-network\}/,
+      );
+    }
+  });
 });
