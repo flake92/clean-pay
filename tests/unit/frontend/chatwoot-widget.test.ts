@@ -1,7 +1,7 @@
 /** @vitest-environment jsdom */
 
 import { createElement } from "react";
-import { act, cleanup, render, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
@@ -72,6 +72,7 @@ function chatwootApi() {
     }),
     setLabel: vi.fn(),
     removeLabel: vi.fn(),
+    toggle: vi.fn(),
     toggleBubbleVisibility: vi.fn(),
     reset: vi.fn(),
   };
@@ -111,6 +112,26 @@ describe("Chatwoot widget context lifecycle", () => {
       await Promise.resolve();
     });
   }
+
+  it("keeps a first-party support launcher visible and opens only a verified conversation", async () => {
+    mocks.loadContext.mockResolvedValue(null);
+    const api = chatwootApi();
+    window.$chatwoot = api;
+
+    render(createElement(ChatwootWidget, { config }));
+
+    const launcher = screen.getByRole("button", { name: "Подключить чат поддержки" });
+    expect(launcher.classList.contains("clean-pay-chatwoot-launcher")).toBe(true);
+    expect(api.toggle).not.toHaveBeenCalled();
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Открыть чат поддержки" })).toBeTruthy();
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Открыть чат поддержки" }));
+
+    expect(api.toggle).toHaveBeenCalledWith("open");
+    expect(api.toggle).toHaveBeenCalledTimes(1);
+  });
 
   it("reapplies managed labels after Chatwoot creates a conversation", async () => {
     render(createElement(ChatwootWidget, { config }));
