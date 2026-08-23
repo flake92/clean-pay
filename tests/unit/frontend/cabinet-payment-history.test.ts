@@ -70,8 +70,8 @@ describe("mobile cabinet payment history", () => {
   it("shows a bounded recent preview and expands without losing older payments", async () => {
     const payments = Array.from({ length: 8 }, (_, index) => payment(index + 1));
     await act(async () => root.render(createElement(CabinetPaymentHistorySection, {
-      error: null,
       payments,
+      status: "current",
     })));
 
     const mobileList = container.querySelector("#cabinet-payment-history-mobile")!;
@@ -97,11 +97,29 @@ describe("mobile cabinet payment history", () => {
 
   it("does not render a disclosure control when all payments fit in the preview", async () => {
     await act(async () => root.render(createElement(CabinetPaymentHistorySection, {
-      error: null,
       payments: [payment(1), payment(2)],
+      status: "current",
     })));
 
     expect(container.querySelectorAll("#cabinet-payment-history-mobile article")).toHaveLength(2);
     expect(container.querySelector('[aria-controls="cabinet-payment-history-mobile"]')).toBeNull();
+  });
+
+  it("distinguishes an in-progress refresh from an upstream failure", async () => {
+    await act(async () => root.render(createElement(CabinetPaymentHistorySection, {
+      payments: [payment(1)],
+      status: "refreshing",
+    })));
+
+    expect(container.querySelector('[role="alert"]')?.textContent)
+      .toBe("История платежей обновляется. Пока показаны сохранённые данные.");
+
+    await act(async () => root.render(createElement(CabinetPaymentHistorySection, {
+      payments: [payment(1)],
+      status: "unavailable",
+    })));
+
+    expect(container.querySelector('[role="alert"]')?.textContent)
+      .toBe("Не удалось обновить статусы платежей. Показаны сохранённые данные.");
   });
 });
