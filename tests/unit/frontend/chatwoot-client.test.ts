@@ -88,7 +88,7 @@ describe("Chatwoot browser lifecycle", () => {
     enterChatwootAuthenticatedMode();
     expect(identifyChatwootUser(config)).toBe("pending");
 
-    expect(api.toggleBubbleVisibility).not.toHaveBeenCalled();
+    expect(api.toggleBubbleVisibility).toHaveBeenCalledWith("hide");
     expect(api.setUser).toHaveBeenCalledWith("user-123", {
       name: "Clean Pay User",
       email: "verified@example.com",
@@ -98,8 +98,11 @@ describe("Chatwoot browser lifecycle", () => {
     confirmIdentity();
     expect(identifyChatwootUser(config)).toBe("ready");
     expect(api.toggleBubbleVisibility).toHaveBeenCalledWith("show");
+    expect(api.toggleBubbleVisibility.mock.invocationCallOrder[0]).toBeLessThan(
+      api.setUser.mock.invocationCallOrder[0],
+    );
     expect(api.setUser.mock.invocationCallOrder[0]).toBeLessThan(
-      api.toggleBubbleVisibility.mock.invocationCallOrder[0],
+      api.toggleBubbleVisibility.mock.invocationCallOrder[1],
     );
     expect(api.setUser).toHaveBeenCalledTimes(1);
 
@@ -167,7 +170,7 @@ describe("Chatwoot browser lifecycle", () => {
     }));
   });
 
-  it("does not persist a full payload after ownership-only confirmation", () => {
+  it("persists only a bounded ownership fingerprint and restores the same conversation", () => {
     const api = chatwootApi();
     window.$chatwoot = api;
     enterChatwootAuthenticatedMode();
@@ -180,15 +183,66 @@ describe("Chatwoot browser lifecycle", () => {
     expect(confirmChatwootIdentityOwnership(attemptId)).toBe(true);
     expect(identifyChatwootUser(config)).toBe("ready");
     expect(api.toggleBubbleVisibility).toHaveBeenLastCalledWith("show");
-    expect(window.localStorage.length).toBe(0);
+    expect(window.localStorage.length).toBe(1);
+    const persisted = Array.from(
+      { length: window.localStorage.length },
+      (_, index) => window.localStorage.getItem(window.localStorage.key(index)!) ?? "",
+    ).join("\n");
+    expect(persisted).not.toContain("authenticated");
+    expect(persisted).not.toContain(config.user.identifier);
+    expect(persisted).not.toContain(config.user.identifierHash);
 
-    // Simulate a browser reload: only persisted state and cookies survive.
+    // Simulate a browser reload and the observed Chatwoot behaviour where its
+    // transport cookie disappears while the same conversation remains.
     window.cleanPayChatwootIdentity = undefined;
     window.cleanPayChatwootOwnership = undefined;
     window.cleanPayChatwootPendingIdentity = undefined;
     window.cleanPayChatwootFailedIdentity = undefined;
+    document.cookie = `cw_user_${config.websiteToken}=; Path=/; Max-Age=0`;
+    expect(identifyChatwootUser(config)).toBe("ready");
+    expect(api.setUser).toHaveBeenCalledTimes(1);
+    expect(api.toggleBubbleVisibility).toHaveBeenLastCalledWith("show");
+  });
+
+  it("never restores a persisted proof for another conversation or signed actor", () => {
+    const api = chatwootApi();
+    window.$chatwoot = api;
+    enterChatwootAuthenticatedMode();
+
+    identifyChatwootUser(config);
+    const attemptId = getChatwootPendingIdentityAttempt()!.attemptId;
+    document.cookie = "cw_conversation=authenticated; Path=/";
+    document.cookie = `cw_user_${config.websiteToken}=identified; Path=/`;
+    expect(confirmChatwootIdentityOwnership(attemptId)).toBe(true);
+
+    window.cleanPayChatwootIdentity = undefined;
+    window.cleanPayChatwootOwnership = undefined;
+    window.cleanPayChatwootPendingIdentity = undefined;
+    window.cleanPayChatwootFailedIdentity = undefined;
+    document.cookie = "cw_conversation=different; Path=/";
+    document.cookie = `cw_user_${config.websiteToken}=; Path=/; Max-Age=0`;
+
     expect(identifyChatwootUser(config)).toBe("pending");
-    expect(api.setUser).toHaveBeenCalledTimes(2);
+    expect(api.toggleBubbleVisibility).toHaveBeenLastCalledWith("hide");
+
+    window.cleanPayChatwootOwnership = undefined;
+    window.cleanPayChatwootPendingIdentity = undefined;
+    document.cookie = "cw_conversation=authenticated; Path=/";
+    const otherActor = {
+      ...config,
+      user: {
+        ...config.user,
+        identifier: "user-456",
+        identifierHash: "other-signed-identifier",
+      },
+    };
+
+    expect(identifyChatwootUser(otherActor)).toBe("pending");
+    expect(api.toggleBubbleVisibility).toHaveBeenLastCalledWith("hide");
+    expect(api.setUser).toHaveBeenLastCalledWith(
+      "user-456",
+      expect.objectContaining({ identifier_hash: "other-signed-identifier" }),
+    );
   });
 
   it("keeps verified ownership usable when a late metadata error removes the SDK cookie", () => {
@@ -204,15 +258,15 @@ describe("Chatwoot browser lifecycle", () => {
 
     // Chatwoot 4.16 can remove this transport cookie after Clean Pay has
     // already proved that the conversation belongs to the authenticated user.
-    // The memory-only ownership proof keeps the official launcher available
-    // without claiming that the optional metadata payload was persisted.
+    // The bounded ownership proof keeps the official launcher available
+    // without persisting the signed hash, token, or optional metadata payload.
     document.cookie = `cw_user_${config.websiteToken}=; Path=/; Max-Age=0`;
     expect(identifyChatwootUser(config)).toBe("ready");
     expect(getChatwootPendingIdentityAttempt()).toMatchObject({
       phase: "ownership_confirmed",
     });
     expect(api.toggleBubbleVisibility).toHaveBeenLastCalledWith("show");
-    expect(window.localStorage.length).toBe(0);
+    expect(window.localStorage.length).toBe(1);
   });
 
   it("does not reuse an ownership proof for a different conversation", () => {

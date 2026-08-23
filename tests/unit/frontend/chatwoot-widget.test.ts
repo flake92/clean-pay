@@ -137,6 +137,42 @@ describe("Chatwoot widget context lifecycle", () => {
     expect(api.toggleBubbleVisibility).toHaveBeenCalledWith("show");
   });
 
+  it("keeps verification alive after an early SDK error and restores the official launcher", async () => {
+    vi.useFakeTimers();
+    mocks.loadContext.mockResolvedValue(null);
+    mocks.verifyIdentity
+      .mockResolvedValueOnce("pending")
+      .mockResolvedValueOnce("confirmed");
+    const api = chatwootApi();
+    api.setUser.mockImplementation(() => {
+      document.cookie = "cw_conversation=authenticated; Path=/";
+      document.cookie = `cw_user_${config.websiteToken}=identified; Path=/`;
+    });
+    window.$chatwoot = api;
+
+    render(createElement(ChatwootWidget, { config }));
+    await flushWidgetEffects();
+    act(() => window.dispatchEvent(new CustomEvent("chatwoot:error")));
+
+    expect(getChatwootPendingIdentityAttempt()).toMatchObject({ phase: "sent" });
+    expect(api.toggleBubbleVisibility).toHaveBeenLastCalledWith("hide");
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(750);
+    });
+    expect(mocks.verifyIdentity).toHaveBeenCalledTimes(1);
+    expect(getChatwootPendingIdentityAttempt()).toMatchObject({ phase: "sent" });
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(750);
+    });
+    expect(mocks.verifyIdentity).toHaveBeenCalledTimes(2);
+    expect(getChatwootPendingIdentityAttempt()).toMatchObject({
+      phase: "ownership_confirmed",
+    });
+    expect(api.toggleBubbleVisibility).toHaveBeenLastCalledWith("show");
+  });
+
   it("reapplies managed labels after Chatwoot creates a conversation", async () => {
     render(createElement(ChatwootWidget, { config }));
 
@@ -344,7 +380,7 @@ describe("Chatwoot widget context lifecycle", () => {
     expect(getChatwootPendingIdentityAttempt()).toMatchObject({
       phase: "ownership_confirmed",
     });
-    expect(window.localStorage.length).toBe(0);
+    expect(window.localStorage.length).toBe(1);
     expect(api.setUser).toHaveBeenCalledTimes(1);
     expect(api.toggleBubbleVisibility).toHaveBeenCalledWith("show");
 
@@ -394,7 +430,7 @@ describe("Chatwoot widget context lifecycle", () => {
     expect(api.toggleBubbleVisibility).toHaveBeenLastCalledWith("hide");
   });
 
-  it("revalidates an ownership-only payload after the page reloads", async () => {
+  it("restores a verified ownership-only launcher after the page reloads", async () => {
     vi.useFakeTimers();
     mocks.loadContext.mockResolvedValue(null);
     const firstApi = chatwootApi();
@@ -413,19 +449,19 @@ describe("Chatwoot widget context lifecycle", () => {
     expect(getChatwootPendingIdentityAttempt()).toMatchObject({
       phase: "ownership_confirmed",
     });
-    expect(window.localStorage.length).toBe(0);
+    expect(window.localStorage.length).toBe(1);
 
     act(() => window.dispatchEvent(new CustomEvent("chatwoot:error")));
     expect(getChatwootPendingIdentityAttempt()).toMatchObject({
       phase: "ownership_confirmed",
     });
     expect(firstApi.toggleBubbleVisibility).toHaveBeenLastCalledWith("show");
-    expect(window.localStorage.length).toBe(0);
+    expect(window.localStorage.length).toBe(1);
 
     firstView.unmount();
-    // A hard reload discards in-memory transport/failure latches but preserves
-    // localStorage. Ownership alone must not have left an applied fingerprint
-    // that suppresses the failed payload on the next SDK instance.
+    // A hard reload discards the in-memory latch. The persisted value contains
+    // only fingerprints and is accepted solely for the same signed core and
+    // exact current conversation.
     window.cleanPayChatwootAuthorized = undefined;
     window.cleanPayChatwootIdentity = undefined;
     window.cleanPayChatwootOwnership = undefined;
@@ -438,7 +474,8 @@ describe("Chatwoot widget context lifecycle", () => {
     render(createElement(ChatwootWidget, { config }));
     await flushWidgetEffects();
 
-    expect(secondApi.setUser).toHaveBeenCalledTimes(1);
+    expect(secondApi.setUser).not.toHaveBeenCalled();
+    expect(secondApi.toggleBubbleVisibility).toHaveBeenLastCalledWith("show");
   });
 
   it("retires ownership-confirmed A before B so a late A error cannot fail B", async () => {
