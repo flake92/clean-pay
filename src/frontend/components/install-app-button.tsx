@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { IosInstallGuide } from "@/frontend/components/ios-install-guide";
 import {
@@ -58,6 +58,8 @@ export function InstallAppButton({
   const [installed, setInstalled] = useState(false);
   const [mobilePlatform, setMobilePlatform] = useState<"android" | "ios" | "other" | null>(null);
   const [embeddedBrowser, setEmbeddedBrowser] = useState(false);
+  const [installPending, setInstallPending] = useState(false);
+  const installPendingRef = useRef(false);
 
   useEffect(() => {
     const platformTimer = window.setTimeout(() => {
@@ -115,6 +117,7 @@ export function InstallAppButton({
   }
 
   async function install() {
+    if (installPendingRef.current) return;
     setMessage(null);
     if (embeddedBrowser) { openExternalInstallPage(); return; }
     if (isAppleMobileDevice()) { setShowIosGuide(true); return; }
@@ -123,10 +126,20 @@ export function InstallAppButton({
       setMessage("Если системное окно установки не появилось, откройте меню браузера и выберите «Установить приложение».");
       return;
     }
-    await installEvent.prompt();
-    const choice = await installEvent.userChoice;
-    setInstallEvent(null);
-    if (choice.outcome === "dismissed") setMessage(null);
+    installPendingRef.current = true;
+    setInstallPending(true);
+    try {
+      await installEvent.prompt();
+      const choice = await installEvent.userChoice;
+      setInstallEvent(null);
+      if (choice.outcome === "dismissed") setMessage(null);
+    } catch {
+      setInstallEvent(null);
+      setMessage("Не удалось открыть системное окно установки. Попробуйте ещё раз через меню браузера.");
+    } finally {
+      installPendingRef.current = false;
+      setInstallPending(false);
+    }
   }
 
   if (installed) {
@@ -147,11 +160,23 @@ export function InstallAppButton({
     );
   }
 
-  if (!alwaysVisible && mobilePlatform !== "android" && mobilePlatform !== "ios" && !installEvent) return null;
+  if (
+    !alwaysVisible
+    && mobilePlatform !== "android"
+    && mobilePlatform !== "ios"
+    && !installEvent
+    && !message
+  ) return null;
 
   return (
     <>
-      <button type="button" className="p-button p-component p-button-outlined" onClick={() => void install()}>
+      <button
+        aria-busy={installPending}
+        className="p-button p-component p-button-outlined"
+        disabled={installPending}
+        onClick={() => void install()}
+        type="button"
+      >
         <span className="p-button-icon p-c pi pi-mobile" />
         <span className="p-button-label">{embeddedBrowser ? "Открыть установку в браузере" : "Установить приложение"}</span>
       </button>

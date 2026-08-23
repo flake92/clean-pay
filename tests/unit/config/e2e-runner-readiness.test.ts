@@ -38,6 +38,14 @@ describe("devcontainer e2e runner readiness", () => {
     expect(runner).toContain('label: "Devcontainer image build/start"');
     expect(runner).toContain("attempts: 3");
     expect(runner).toContain("attempt * 2_000");
+    expect(runner).toContain("beforeRetry: () => cleanupComposeStack(composeArgs)");
+  });
+
+  it("removes the host E2E stack unless it was explicitly retained", () => {
+    expect(runner).toContain('process.env.KEEP_E2E_STACK !== "1"');
+    expect(runner).toContain("process.exitCode = status || cleanupStatus");
+    expect(shellRunner).toContain("remnashop-cache");
+    expect(shellRunner).toContain("remnashop-postgres");
   });
 
   it("allows every published host port to be isolated without changing defaults", () => {

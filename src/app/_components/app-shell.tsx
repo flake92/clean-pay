@@ -12,13 +12,15 @@ import { redirect } from "next/navigation";
 export async function AppShell({
   children,
   requireAuth = false,
+  returnTo = "/cabinet",
 }: {
   children: React.ReactNode;
   requireAuth?: boolean;
+  returnTo?: string;
 }) {
   const shell = await loadNavigationShell(requestAuthProfileGateway);
   if (requireAuth && !shell.navigation.authenticated) {
-    redirect(sessionRefreshPath("/cabinet"));
+    redirect(sessionRefreshPath(returnTo));
   }
   const chatwoot = createChatwootWidgetConfig(shell.supportIdentity);
 
