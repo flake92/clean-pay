@@ -141,6 +141,14 @@ ensure_network() {
   docker network inspect "$network" >/dev/null 2>&1 || docker network create "$network" >/dev/null
 }
 
+ensure_redis_host_memory_policy() {
+  overcommit_path=/proc/sys/vm/overcommit_memory
+  [ -r "$overcommit_path" ] || return 0
+  overcommit_value=$(tr -d '[:space:]' < "$overcommit_path")
+  [ "$overcommit_value" = 1 ] || die \
+    "Redis requires vm.overcommit_memory=1. Apply 'sysctl -w vm.overcommit_memory=1' and persist it in /etc/sysctl.d before deployment."
+}
+
 prompt_value() {
   name=$1
   label=$2
@@ -280,6 +288,7 @@ prepare_compose() {
   info '[2/3] Подготовка Docker Compose'
   [ -f "$COMPOSE_PATH" ] || die "Compose file is missing: $COMPOSE_PATH"
   validate_env_file
+  ensure_redis_host_memory_policy
   ensure_network
   compose config --quiet
   ok "Compose-файл проверен: $COMPOSE_PATH"
