@@ -338,12 +338,19 @@ describe("application facades", () => {
 
   it("uses safe fallbacks for navigation and payment status", async () => {
     const shellGateway = authGateway();
-    await expect(loadNavigationShell(shellGateway)).resolves.toEqual({
+    const subscriptionCatalog = {
+      loadOffers: vi.fn(async () => ({
+        ...offers,
+        has_current_subscription: true,
+        plans: [{ recommended_purchase_type: "renew" } as never],
+      })),
+    };
+    await expect(loadNavigationShell(shellGateway, subscriptionCatalog)).resolves.toEqual({
       navigation: {
         authenticated: true,
         emailVerificationRequired: false,
-        hasSubscription: false,
-        canRenewSubscription: false,
+        hasSubscription: true,
+        canRenewSubscription: true,
       },
       supportIdentity: {
         userId: "user-1",
@@ -355,6 +362,7 @@ describe("application facades", () => {
         displayName: null,
       },
     });
+    expect(subscriptionCatalog.loadOffers).toHaveBeenCalledOnce();
     expect(shellGateway.authorizeCurrentSession).not.toHaveBeenCalled();
     expect(shellGateway.loadProviderProfile).not.toHaveBeenCalled();
 

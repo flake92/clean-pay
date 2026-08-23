@@ -183,6 +183,7 @@ export const productionChatwootIdentityGateway: ChatwootIdentityGateway = {
               logger.info("chatwoot_identity_probe_completed", {
                 durationMs,
                 identityAvailable: true,
+                identityMatchesActor: result.identifier === actor.userId,
               }, {
                 category: "upstream",
                 source: "chatwoot.identity",

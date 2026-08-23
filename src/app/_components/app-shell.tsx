@@ -1,5 +1,8 @@
 import { loadNavigationShell } from "@/application/navigation/load-navigation";
-import { requestAuthProfileGateway } from "@/app/_composition/request-scoped-readers";
+import {
+  requestAuthProfileGateway,
+  requestSubscriptionCatalog,
+} from "@/app/_composition/request-scoped-readers";
 import { createChatwootWidgetConfig } from "@/backend/integrations/support/chatwoot-widget";
 import {
   ChatwootGuestBoundary,
@@ -18,7 +21,10 @@ export async function AppShell({
   requireAuth?: boolean;
   returnTo?: string;
 }) {
-  const shell = await loadNavigationShell(requestAuthProfileGateway);
+  const shell = await loadNavigationShell(
+    requestAuthProfileGateway,
+    requestSubscriptionCatalog,
+  );
   if (requireAuth && !shell.navigation.authenticated) {
     redirect(sessionRefreshPath(returnTo));
   }

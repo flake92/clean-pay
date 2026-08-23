@@ -36,8 +36,15 @@ const authorizeProfileSession = cache(() =>
 );
 
 const subscriptions = createRemnashopSubscriptionReader(authorizeVerifiedSession);
-export const requestSubscriptionCatalog =
-  createRemnashopSubscriptionCatalog(authorizeVerifiedSession);
+const subscriptionCatalog = createRemnashopSubscriptionCatalog(authorizeVerifiedSession);
+const loadRequestSubscriptionOffers = cache(() => subscriptionCatalog.loadOffers());
+export const requestSubscriptionCatalog = {
+  loadOffers: loadRequestSubscriptionOffers,
+};
+const requestSubscriptions = {
+  ...subscriptions,
+  loadOffers: loadRequestSubscriptionOffers,
+};
 const requestReferralProgramReader = createReferralProgramReader(
   authorizeVerifiedSession,
   getEnv().publicAppUrl,
@@ -55,8 +62,8 @@ export const requestLinkAccountReader = createProductionLinkAccountReader(
 );
 export const requestPasskeyManagementGateway =
   createProductionPasskeyManagementGateway(getCurrentSessionReadOnly);
-const requestCabinetReader = createProductionCabinetReader(subscriptions);
-export const requestCheckoutReader = createProductionCheckoutReader(subscriptions);
+const requestCabinetReader = createProductionCabinetReader(requestSubscriptions);
+export const requestCheckoutReader = createProductionCheckoutReader(requestSubscriptions);
 const requestPaymentHistoryGateway = createProductionPaymentHistoryGateway();
 export const requestPaymentStatusReader = createProductionPaymentStatusReader(
   readCurrentUserOnly,

@@ -62,9 +62,13 @@ describe("cabinet performance regressions", () => {
     expect(composition).toContain("refreshAccessCookie: skipAccessCookieRefresh");
     expect(composition).toContain("createProductionLinkAccountReader(");
     expect(composition).toContain("createProductionPasskeyManagementGateway(");
-    expect(composition).toContain("createProductionCheckoutReader(subscriptions)");
+    expect(composition).toContain("createProductionCheckoutReader(requestSubscriptions)");
     expect(composition).toContain("createProductionPaymentStatusReader(");
     expect(composition).toContain("createRemnashopSubscriptionCatalog(authorizeVerifiedSession)");
+    expect(composition).toContain(
+      "loadRequestSubscriptionOffers = cache(() => subscriptionCatalog.loadOffers())",
+    );
+    expect(composition).toContain("loadOffers: loadRequestSubscriptionOffers");
     const proxy = source("src/proxy.ts");
     expect(proxy).toContain("redirect_session_refresh");
     expect(composition).toContain("createRemnashopSubscriptionReader(authorizeVerifiedSession)");
