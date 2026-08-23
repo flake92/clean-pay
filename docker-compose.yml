@@ -48,6 +48,11 @@ services:
       timeout: 12s
       retries: 20
       start_period: 30s
+    networks:
+      default:
+      edge:
+        aliases:
+          - clean-pay
     logging:
       driver: json-file
       options: {max-size: "10m", max-file: "3"}
@@ -132,3 +137,8 @@ services:
 volumes:
   postgres-data:
   redis-data:
+
+networks:
+  edge:
+    external: true
+    name: ${CLEAN_PAY_EDGE_NETWORK:-remnawave-network}
