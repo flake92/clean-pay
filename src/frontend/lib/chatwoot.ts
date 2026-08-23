@@ -29,7 +29,11 @@ type ChatwootIdentityState = {
   customAttributes: string;
 };
 
-type ChatwootOwnershipState = Pick<ChatwootIdentityState, "core"> & {
+type ChatwootOwnershipState = ChatwootIdentityState & {
+  conversation: string;
+};
+
+type StoredChatwootOwnershipState = ChatwootIdentityState & {
   conversation: string;
 };
 
@@ -63,6 +67,7 @@ declare global {
 
 const scriptId = "clean-pay-chatwoot-sdk";
 const identityStorageKey = "clean-pay:chatwoot-identity:v1";
+const ownershipStorageKey = "clean-pay:chatwoot-ownership:v1";
 const supportContextCacheTtlMs = 60_000;
 export const CHATWOOT_IDENTITY_ATTEMPT_TIMEOUT_MS = 12_000;
 export const CHATWOOT_IDENTITY_MAX_RETRIES = 1;
@@ -131,9 +136,82 @@ function rememberIdentity(identity: ChatwootIdentityState) {
     // Persist only non-reversible fingerprints. They let a new page notice a
     // custom-attribute-only change without retaining the HMAC signature.
     window.localStorage.setItem(identityStorageKey, JSON.stringify(identity));
+    // A correlated full-payload success supersedes the weaker ownership-only
+    // proof, so the latter must not outlive it as a second source of truth.
+    window.localStorage.removeItem(ownershipStorageKey);
   } catch {
     // Identification still works when persistent storage is unavailable.
   }
+}
+
+function storedOwnership() {
+  try {
+    const value = window.localStorage.getItem(ownershipStorageKey);
+    const parsed = value
+      ? JSON.parse(value) as Partial<StoredChatwootOwnershipState>
+      : null;
+
+    return (
+      typeof parsed?.core === "string"
+      && typeof parsed.customAttributes === "string"
+      && typeof parsed.conversation === "string"
+    )
+      ? parsed as StoredChatwootOwnershipState
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function rememberOwnership(
+  identity: ChatwootIdentityState,
+  conversation: string,
+  persist: boolean,
+) {
+  window.cleanPayChatwootOwnership = {
+    ...identity,
+    conversation,
+  };
+
+  if (!persist) {
+    return;
+  }
+
+  try {
+    // Store only fingerprints: neither the signed hash nor the Chatwoot
+    // conversation token is persisted. The proof is reusable solely with the
+    // same server-provided identity core and the exact current conversation.
+    window.localStorage.setItem(ownershipStorageKey, JSON.stringify({
+      ...identity,
+      conversation: fingerprint(conversation),
+    } satisfies StoredChatwootOwnershipState));
+  } catch {
+    // The current page can still use the in-memory ownership proof.
+  }
+}
+
+function restoreOwnership(core: string, conversation: string) {
+  const current = window.cleanPayChatwootOwnership;
+
+  if (current?.core === core && current.conversation === conversation) {
+    return current;
+  }
+
+  const stored = storedOwnership();
+  if (
+    stored?.core !== core
+    || stored.conversation !== fingerprint(conversation)
+  ) {
+    return undefined;
+  }
+
+  const restored: ChatwootOwnershipState = {
+    core: stored.core,
+    customAttributes: stored.customAttributes,
+    conversation,
+  };
+  window.cleanPayChatwootOwnership = restored;
+  return restored;
 }
 
 function hasCookie(name: string) {
@@ -313,6 +391,7 @@ export function clearChatwootIdentityState(preserveFailedIdentity = false) {
 
   try {
     window.localStorage.removeItem(identityStorageKey);
+    window.localStorage.removeItem(ownershipStorageKey);
   } catch {
     // Session cleanup must never block Clean Pay navigation.
   }
@@ -416,11 +495,22 @@ export function identifyChatwootUser(
   const { identity: desired } = desiredIdentity(config, supportAttributes);
   const previous = window.cleanPayChatwootIdentity ?? storedIdentity();
   const identityCookieName = `cw_user_${config.websiteToken}`;
+  const conversation = cookieValue("cw_conversation");
+  const ownership = conversation
+    ? restoreOwnership(desired.core, conversation)
+    : undefined;
   const failed = window.cleanPayChatwootFailedIdentity;
 
+  if (ownership && failed?.core === desired.core) {
+    // A prior server-confirmed proof for this exact signed actor and
+    // conversation wins over an uncorrelated, late metadata error.
+    window.cleanPayChatwootFailedIdentity = undefined;
+  }
+
   if (
-    failed?.core === desired.core
-    && failed.customAttributes === desired.customAttributes
+    window.cleanPayChatwootFailedIdentity?.core === desired.core
+    && window.cleanPayChatwootFailedIdentity.customAttributes
+      === desired.customAttributes
   ) {
     return "failed";
   }
@@ -434,10 +524,10 @@ export function identifyChatwootUser(
 
   if (pending) {
     if (pending.phase === "ownership_confirmed") {
-      const conversation = cookieValue("cw_conversation");
       const ownershipMatches = (
-        window.cleanPayChatwootOwnership?.core === pending.core
-        && window.cleanPayChatwootOwnership.conversation === conversation
+        conversation !== null
+        && restoreOwnership(pending.core, conversation)?.customAttributes
+          === pending.customAttributes
       );
 
       if (
@@ -472,6 +562,9 @@ export function identifyChatwootUser(
     // A waiting retry/update is activated only by a validated `loaded`
     // message from the replacement iframe. Generic ready/open events must not
     // race it.
+    if (ownership?.core === pending.core) {
+      chatwoot.toggleBubbleVisibility("show");
+    }
     return "pending";
   }
 
@@ -481,14 +574,27 @@ export function identifyChatwootUser(
     && hasCookie(identityCookieName)
     && hasCookie("cw_conversation")
   ) {
+    if (conversation) {
+      rememberOwnership(desired, conversation, false);
+    }
     chatwoot.toggleBubbleVisibility("show");
     return "ready";
   }
 
-  if (previous?.core && previous.core !== desired.core) {
+  if (ownership?.customAttributes === desired.customAttributes) {
+    chatwoot.toggleBubbleVisibility("show");
+    return "ready";
+  }
+
+  if (!ownership || (previous?.core && previous.core !== desired.core)) {
     // Never expose a bubble still associated with another Clean Pay user,
-    // inbox origin, or signed identity while the replacement is in flight.
+    // conversation, inbox origin, or signed identity while verification is
+    // in flight.
     chatwoot.toggleBubbleVisibility("hide");
+  } else {
+    // Metadata may be stale, but the conversation itself was already proved
+    // to belong to the current actor and can remain usable during its update.
+    chatwoot.toggleBubbleVisibility("show");
   }
 
   // The SDK's identity cookie ignores custom_attributes. Force the signed
@@ -630,6 +736,10 @@ export function confirmChatwootIdentity(expectedAttemptId?: string) {
     core: pending.core,
     customAttributes: pending.customAttributes,
   });
+  const conversation = cookieValue("cw_conversation");
+  if (conversation) {
+    rememberOwnership(pending, conversation, false);
+  }
   return true;
 }
 
@@ -637,8 +747,9 @@ export function confirmChatwootIdentity(expectedAttemptId?: string) {
  * Marks a transport generation as ownership-confirmed after the current
  * conversation was proved to belong to the desired user, without claiming
  * that Chatwoot applied the generation's name, email or custom attributes.
- * Those payload fingerprints are persisted only by confirmChatwootIdentity(),
- * which is reserved for the correlated setAuthCookie success path.
+ * The bounded proof persists only non-reversible identity, attempted-payload,
+ * and conversation fingerprints; confirmChatwootIdentity() remains the sole
+ * path that records the complete payload as successfully applied.
  */
 export function confirmChatwootIdentityOwnership(expectedAttemptId: string) {
   const pending = window.cleanPayChatwootPendingIdentity;
@@ -658,10 +769,10 @@ export function confirmChatwootIdentityOwnership(expectedAttemptId: string) {
     ...pending,
     phase: "ownership_confirmed",
   };
-  window.cleanPayChatwootOwnership = {
+  rememberOwnership({
     core: pending.core,
-    conversation,
-  };
+    customAttributes: pending.customAttributes,
+  }, conversation, true);
   window.cleanPayChatwootFailedIdentity = undefined;
   return true;
 }
@@ -669,8 +780,9 @@ export function confirmChatwootIdentityOwnership(expectedAttemptId: string) {
 /**
  * Keeps the official launcher usable when Chatwoot reports a late payload
  * update error after Clean Pay already proved that the active conversation
- * belongs to the authenticated user. The proof is memory-only and scoped to
- * the signed core identity; logout, reload or an account change clears it.
+ * belongs to the authenticated user. The proof is scoped to fingerprints of
+ * the signed core identity and exact conversation; logout or an account or
+ * conversation change invalidates it.
  */
 export function retainChatwootVerifiedOwnership(
   config: ChatwootWidgetConfig,
@@ -691,7 +803,7 @@ export function retainChatwootVerifiedOwnership(
   }
 
   const { identity } = desiredIdentity(config, supportAttributes);
-  const ownership = window.cleanPayChatwootOwnership;
+  const ownership = restoreOwnership(identity.core, conversation);
 
   if (
     !ownership
@@ -703,6 +815,10 @@ export function retainChatwootVerifiedOwnership(
 
   const pending = window.cleanPayChatwootPendingIdentity;
   if (pending?.core === ownership.core) {
+    rememberOwnership({
+      core: pending.core,
+      customAttributes: pending.customAttributes,
+    }, conversation, true);
     window.cleanPayChatwootPendingIdentity = {
       ...pending,
       phase: "ownership_confirmed",
