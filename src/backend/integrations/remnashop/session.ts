@@ -73,20 +73,20 @@ async function reconcileRemnashopUser(
   identity: RemnashopProfileIdentity,
   onMatchedUserIds?: (userIds: readonly string[]) => void,
 ) {
-  const [linkedByRemnashopId, linkedByEmail, linkedByTelegramId] =
-    await Promise.all([
-      tx.webUser.findUnique({
-        where: { remnashopUserId: identity.remnashopUserId },
-      }),
-      identity.email
-        ? tx.webUser.findUnique({ where: { email: identity.email } })
-        : Promise.resolve(null),
-      identity.telegramId
-        ? tx.webUser.findUnique({
-            where: { telegramId: identity.telegramId },
-          })
-        : Promise.resolve(null),
-    ]);
+  // An interactive Prisma transaction owns one PostgreSQL connection. Keep
+  // its queries sequential: pg@8 warns when client.query overlaps and pg@9
+  // will reject that unsupported usage.
+  const linkedByRemnashopId = await tx.webUser.findUnique({
+    where: { remnashopUserId: identity.remnashopUserId },
+  });
+  const linkedByEmail = identity.email
+    ? await tx.webUser.findUnique({ where: { email: identity.email } })
+    : null;
+  const linkedByTelegramId = identity.telegramId
+    ? await tx.webUser.findUnique({
+        where: { telegramId: identity.telegramId },
+      })
+    : null;
 
   onMatchedUserIds?.(
     [linkedByRemnashopId, linkedByEmail, linkedByTelegramId]
