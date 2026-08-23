@@ -24,6 +24,14 @@ function auth(value: AuthProfileSession | null = session()): AuthProfileGateway 
 }
 
 const reader: CheckoutReader = { loadOffers: vi.fn(async () => ({ gateways: [], plans: [], has_current_subscription: false, current_subscription_status: null })) };
+const navigationCatalog = (hasSubscription = false, purchaseType = "purchase") => ({
+  loadOffers: vi.fn(async () => ({
+    gateways: [],
+    plans: [{ recommended_purchase_type: purchaseType } as never],
+    has_current_subscription: hasSubscription,
+    current_subscription_status: hasSubscription ? "ACTIVE" : null,
+  })),
+});
 const request = { plan_code: "basic", duration_days: 30, gateway_type: "CARD" } as never;
 
 describe("checkout and navigation application policy", () => {
@@ -103,29 +111,49 @@ describe("checkout and navigation application policy", () => {
     });
   });
 
-  it("builds authenticated and guest navigation without upstream calls", async () => {
-    await expect(loadNavigationShell(auth(session({ emailVerified: false })))).resolves.toEqual({
+  it("builds subscription-aware navigation without weakening auth fallbacks", async () => {
+    const activeCatalog = navigationCatalog(true, "RENEW");
+    await expect(loadNavigationShell(
+      auth(session({ emailVerified: false })),
+      activeCatalog,
+    )).resolves.toEqual({
       navigation: {
-        authenticated: true, emailVerificationRequired: true, hasSubscription: false, canRenewSubscription: false,
+        authenticated: true, emailVerificationRequired: true, hasSubscription: true, canRenewSubscription: true,
       },
       supportIdentity: {
         userId: "user-1", email: "user@example.com", emailVerified: false,
         telegramId: null, telegramUsername: null, fullName: null, displayName: null,
       },
     });
-    await expect(loadNavigationShell(auth(null))).resolves.toEqual({
+    expect(activeCatalog.loadOffers).toHaveBeenCalledOnce();
+
+    const guestCatalog = navigationCatalog();
+    await expect(loadNavigationShell(auth(null), guestCatalog)).resolves.toEqual({
       navigation: {
         authenticated: false, emailVerificationRequired: false, hasSubscription: false, canRenewSubscription: false,
       },
       supportIdentity: null,
     });
+    expect(guestCatalog.loadOffers).not.toHaveBeenCalled();
+
     const broken = auth();
     vi.mocked(broken.loadCurrentSession).mockRejectedValueOnce(new Error("offline"));
-    await expect(loadNavigationShell(broken)).resolves.toEqual({
+    await expect(loadNavigationShell(broken, navigationCatalog())).resolves.toEqual({
       navigation: {
         authenticated: false, emailVerificationRequired: false, hasSubscription: false, canRenewSubscription: false,
       },
       supportIdentity: null,
+    });
+
+    const unavailableCatalog = navigationCatalog();
+    unavailableCatalog.loadOffers.mockRejectedValueOnce(new Error("offline"));
+    await expect(loadNavigationShell(auth(), unavailableCatalog)).resolves.toMatchObject({
+      navigation: {
+        authenticated: true,
+        hasSubscription: false,
+        canRenewSubscription: false,
+      },
+      supportIdentity: { userId: "user-1" },
     });
   });
 });
