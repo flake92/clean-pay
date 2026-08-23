@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect } from "react";
 
 import {
   loadChatwootSupportContextAction,
@@ -30,20 +30,12 @@ import {
   loadChatwootSupportContextCached,
   loadChatwootSdk,
   resetChatwootSession,
+  retainChatwootVerifiedOwnership,
   retryChatwootIdentityAttempt,
 } from "@/frontend/lib/chatwoot";
 import { navigateTo } from "@/frontend/lib/browser-navigation";
 
 export function ChatwootWidget({ config }: { config: ChatwootWidgetConfig }) {
-  const [launcherState, setLauncherState] = useState<"loading" | "ready">("loading");
-  const openRequestScopeRef = useRef<string | null>(null);
-  const openRequestScope = JSON.stringify([
-    config.baseUrl,
-    config.websiteToken,
-    config.user.identifier,
-    config.user.identifierHash,
-  ]);
-
   useEffect(() => {
     let active = true;
     let supportContext: ChatwootSupportContext | null = null;
@@ -82,23 +74,6 @@ export function ChatwootWidget({ config }: { config: ChatwootWidgetConfig }) {
         window.$chatwoot?.toggleBubbleVisibility("hide");
       } catch {
         // Keep support failures isolated from the application shell.
-      }
-    };
-    const openVerifiedConversation = () => {
-      if (openRequestScopeRef.current !== openRequestScope) {
-        return;
-      }
-
-      try {
-        const chatwoot = window.$chatwoot;
-        if (!chatwoot?.toggle) {
-          return;
-        }
-
-        chatwoot.toggle("open");
-        openRequestScopeRef.current = null;
-      } catch {
-        // The visible first-party launcher remains available for a retry.
       }
     };
     const scheduleIdentityAttemptTimeout = () => {
@@ -268,12 +243,6 @@ export function ChatwootWidget({ config }: { config: ChatwootWidgetConfig }) {
           if (status === "ready" && applyLabels && supportContext) {
             applyChatwootManagedLabels(supportContext);
           }
-          if (status === "ready") {
-            setLauncherState("ready");
-            openVerifiedConversation();
-          } else {
-            setLauncherState("loading");
-          }
           if (status === "pending") {
             scheduleIdentityAttemptTimeout();
             scheduleIdentityProbe();
@@ -292,20 +261,6 @@ export function ChatwootWidget({ config }: { config: ChatwootWidgetConfig }) {
       return "unavailable";
     };
     const identifyWithCurrentContext = () => identify();
-    const requestConversationOpen = () => {
-      if (!active || sessionRefreshRequested) {
-        return;
-      }
-
-      // A server action can refresh the RSC tree and restart this effect with
-      // an equivalent config object before ownership verification resolves.
-      // Keep the user's intent outside the effect, scoped to this exact signed
-      // identity, so that refresh cannot lose the pending open request or
-      // carry it over to another account.
-      openRequestScopeRef.current = openRequestScope;
-      setLauncherState("loading");
-      identifyWithCurrentContext();
-    };
     const refreshSupportContext = () => {
       void loadChatwootSupportContextCached(
         config.user.identifier,
@@ -332,12 +287,21 @@ export function ChatwootWidget({ config }: { config: ChatwootWidgetConfig }) {
         return;
       }
 
-      if (openRequestScopeRef.current === openRequestScope) {
-        openRequestScopeRef.current = null;
+      const attemptId = getChatwootPendingIdentityAttempt()?.attemptId;
+      if (retainChatwootVerifiedOwnership(
+        config,
+        supportContext?.customAttributes,
+      )) {
+        cancelIdentityAttemptTimer();
+        cancelIdentityProbeTimer();
+        if (attemptId) {
+          identityProbeCounts.delete(attemptId);
+        }
+        return;
       }
+
       cancelIdentityAttemptTimer();
       cancelIdentityProbeTimer();
-      const attemptId = getChatwootPendingIdentityAttempt()?.attemptId;
       if (attemptId) {
         failChatwootPendingIdentityAttempt(attemptId, config.websiteToken);
       } else {
@@ -411,7 +375,6 @@ export function ChatwootWidget({ config }: { config: ChatwootWidgetConfig }) {
     // conversation. Reapplying here makes managed labels reliable for a new
     // contact; earlier label calls are harmless no-ops in the standard SDK.
     window.addEventListener("chatwoot:on-message", identifyAndRefresh);
-    window.addEventListener("clean-pay:chatwoot-open", requestConversationOpen);
 
     refreshSupportContext();
 
@@ -459,24 +422,12 @@ export function ChatwootWidget({ config }: { config: ChatwootWidgetConfig }) {
       window.removeEventListener("chatwoot:opened", identifyAndRefresh);
       window.removeEventListener("chatwoot:on-start-conversation", identifyAndRefresh);
       window.removeEventListener("chatwoot:on-message", identifyAndRefresh);
-      window.removeEventListener("clean-pay:chatwoot-open", requestConversationOpen);
       // AppShell is a page-level wrapper. Do not reset here: ordinary client
       // navigation between authenticated pages may unmount this component.
     };
-  }, [config, openRequestScope]);
+  }, [config]);
 
-  return (
-    <button
-      aria-label={launcherState === "ready" ? "Открыть чат поддержки" : "Подключить чат поддержки"}
-      className="clean-pay-chatwoot-launcher"
-      data-state={launcherState}
-      onClick={() => window.dispatchEvent(new CustomEvent("clean-pay:chatwoot-open"))}
-      title={launcherState === "ready" ? "Чат поддержки" : "Подключение чата поддержки"}
-      type="button"
-    >
-      <i className="pi pi-comments" aria-hidden="true" />
-    </button>
-  );
+  return null;
 }
 
 export function ChatwootGuestBoundary() {

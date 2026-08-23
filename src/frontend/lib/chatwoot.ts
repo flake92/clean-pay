@@ -20,7 +20,6 @@ type ChatwootApi = {
   setUser(identifier: string, user: ChatwootUserInput): void;
   setLabel?(label: string): void;
   removeLabel?(label: string): void;
-  toggle?(state: "open" | "close"): void;
   toggleBubbleVisibility(visibility: "hide" | "show"): void;
   reset(): void;
 };
@@ -28,6 +27,10 @@ type ChatwootApi = {
 type ChatwootIdentityState = {
   core: string;
   customAttributes: string;
+};
+
+type ChatwootOwnershipState = Pick<ChatwootIdentityState, "core"> & {
+  conversation: string;
 };
 
 type ChatwootPendingIdentityState = ChatwootIdentityState & {
@@ -52,6 +55,7 @@ declare global {
     chatwootSettings?: Record<string, unknown>;
     cleanPayChatwootAuthorized?: boolean;
     cleanPayChatwootIdentity?: ChatwootIdentityState;
+    cleanPayChatwootOwnership?: ChatwootOwnershipState;
     cleanPayChatwootPendingIdentity?: ChatwootPendingIdentityState;
     cleanPayChatwootFailedIdentity?: ChatwootIdentityState;
   }
@@ -301,6 +305,7 @@ export function clearChatwootIdentityState(preserveFailedIdentity = false) {
   }
 
   window.cleanPayChatwootIdentity = undefined;
+  window.cleanPayChatwootOwnership = undefined;
   window.cleanPayChatwootPendingIdentity = undefined;
   if (!preserveFailedIdentity) {
     window.cleanPayChatwootFailedIdentity = undefined;
@@ -429,10 +434,18 @@ export function identifyChatwootUser(
 
   if (pending) {
     if (pending.phase === "ownership_confirmed") {
-      if (!hasCookie(identityCookieName) || !hasCookie("cw_conversation")) {
-        // The SDK removes cw_user_* when setUser fails. This also catches an
-        // error delivered while the React boundary was temporarily unmounted
-        // and therefore could not observe the chatwoot:error CustomEvent.
+      const conversation = cookieValue("cw_conversation");
+      const ownershipMatches = (
+        window.cleanPayChatwootOwnership?.core === pending.core
+        && window.cleanPayChatwootOwnership.conversation === conversation
+      );
+
+      if (
+        !ownershipMatches
+        && (!hasCookie(identityCookieName) || !hasCookie("cw_conversation"))
+      ) {
+        // Without a matching server-confirmed ownership proof, a missing SDK
+        // identity/conversation cookie must remain fail-closed.
         failChatwootPendingIdentityAttempt(
           pending.attemptId,
           config.websiteToken,
@@ -629,12 +642,14 @@ export function confirmChatwootIdentity(expectedAttemptId?: string) {
  */
 export function confirmChatwootIdentityOwnership(expectedAttemptId: string) {
   const pending = window.cleanPayChatwootPendingIdentity;
+  const conversation = cookieValue("cw_conversation");
 
   if (
     !pending
     || pending.phase !== "sent"
     || pending.attemptId !== expectedAttemptId
     || !window.cleanPayChatwootAuthorized
+    || !conversation
   ) {
     return false;
   }
@@ -643,7 +658,63 @@ export function confirmChatwootIdentityOwnership(expectedAttemptId: string) {
     ...pending,
     phase: "ownership_confirmed",
   };
+  window.cleanPayChatwootOwnership = {
+    core: pending.core,
+    conversation,
+  };
   window.cleanPayChatwootFailedIdentity = undefined;
+  return true;
+}
+
+/**
+ * Keeps the official launcher usable when Chatwoot reports a late payload
+ * update error after Clean Pay already proved that the active conversation
+ * belongs to the authenticated user. The proof is memory-only and scoped to
+ * the signed core identity; logout, reload or an account change clears it.
+ */
+export function retainChatwootVerifiedOwnership(
+  config: ChatwootWidgetConfig,
+  supportAttributes: Record<string, string> = {},
+) {
+  if (typeof window === "undefined") {
+    return false;
+  }
+
+  const chatwoot = window.$chatwoot;
+  const conversation = cookieValue("cw_conversation");
+  if (
+    !window.cleanPayChatwootAuthorized
+    || !chatwoot
+    || !conversation
+  ) {
+    return false;
+  }
+
+  const { identity } = desiredIdentity(config, supportAttributes);
+  const ownership = window.cleanPayChatwootOwnership;
+
+  if (
+    !ownership
+    || ownership.core !== identity.core
+    || ownership.conversation !== conversation
+  ) {
+    return false;
+  }
+
+  const pending = window.cleanPayChatwootPendingIdentity;
+  if (pending?.core === ownership.core) {
+    window.cleanPayChatwootPendingIdentity = {
+      ...pending,
+      phase: "ownership_confirmed",
+    };
+  }
+  window.cleanPayChatwootFailedIdentity = undefined;
+
+  try {
+    chatwoot.toggleBubbleVisibility("show");
+  } catch {
+    return false;
+  }
   return true;
 }
 
