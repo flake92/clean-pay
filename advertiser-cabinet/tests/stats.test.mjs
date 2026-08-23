@@ -30,3 +30,30 @@ test("handles and records idle PostgreSQL pool errors without terminating", () =
     message: "terminating connection due to administrator command",
   });
 });
+
+test("keeps the pool error fence active across repeated and non-Error failures", () => {
+  const pool = new EventEmitter();
+  const messages = [];
+
+  assert.equal(observePoolErrors(pool, (message) => messages.push(message)), pool);
+  assert.equal(pool.listenerCount("error"), 1);
+  assert.doesNotThrow(() => {
+    pool.emit("error", Object.assign(new Error("connection terminated"), { code: "57P01" }));
+    pool.emit("error", { code: "08006" });
+  });
+
+  assert.deepEqual(messages.map((message) => JSON.parse(message)), [
+    {
+      level: "error",
+      event: "database_pool_error",
+      code: "57P01",
+      message: "connection terminated",
+    },
+    {
+      level: "error",
+      event: "database_pool_error",
+      code: "08006",
+      message: "Unknown database pool error",
+    },
+  ]);
+});
