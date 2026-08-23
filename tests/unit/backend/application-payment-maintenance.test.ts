@@ -198,6 +198,88 @@ describe("payment maintenance application policy", () => {
     expect(subject.loadHistoryPage).toHaveBeenCalledOnce();
   });
 
+  it("finishes a bounded multi-page backfill in one maintenance cycle", async () => {
+    const claims = [
+      { context: {}, cursor: null },
+      { context: {}, cursor: "cursor-2" },
+      { context: {}, cursor: "cursor-3" },
+    ];
+    const subject = runner({
+      listHistoryCandidates: vi.fn(async () => [
+        { userId: "user-1", upstreamAccountId: "owner-1" },
+      ]),
+      claimHistory: vi.fn(async () => claims.shift() ?? null),
+      completeHistoryPage: vi.fn()
+        .mockResolvedValueOnce({ applied: 100, hasMore: true })
+        .mockResolvedValueOnce({ applied: 100, hasMore: true })
+        .mockResolvedValueOnce({ applied: 47, hasMore: false }),
+    });
+
+    await expect(runPaymentMaintenance(subject, {
+      paymentLimit: 1,
+      deadlineMs: 10_000,
+    })).resolves.toMatchObject({
+      history: {
+        attempted: 3,
+        applied: 247,
+        completed: 1,
+        failed: 0,
+      },
+    });
+
+    expect(subject.authorizeHistory).toHaveBeenCalledOnce();
+    expect(subject.historyPageSize).toHaveBeenCalledOnce();
+    expect(subject.findPendingHistoryPaymentIds).toHaveBeenCalledOnce();
+    expect(subject.loadHistoryPage).toHaveBeenNthCalledWith(
+      1,
+      expect.anything(),
+      null,
+      100,
+      expect.any(Number),
+    );
+    expect(subject.loadHistoryPage).toHaveBeenNthCalledWith(
+      2,
+      expect.anything(),
+      "cursor-2",
+      100,
+      expect.any(Number),
+    );
+    expect(subject.loadHistoryPage).toHaveBeenNthCalledWith(
+      3,
+      expect.anything(),
+      "cursor-3",
+      100,
+      expect.any(Number),
+    );
+  });
+
+  it("yields safely when another worker claims the next history page", async () => {
+    const subject = runner({
+      listHistoryCandidates: vi.fn(async () => [
+        { userId: "user-1", upstreamAccountId: "owner-1" },
+      ]),
+      claimHistory: vi.fn()
+        .mockResolvedValueOnce({ context: {}, cursor: null })
+        .mockResolvedValueOnce(null),
+      completeHistoryPage: vi.fn(async () => ({ applied: 100, hasMore: true })),
+    });
+
+    await expect(runPaymentMaintenance(subject, {
+      paymentLimit: 1,
+      deadlineMs: 10_000,
+    })).resolves.toMatchObject({
+      history: {
+        attempted: 1,
+        applied: 100,
+        completed: 0,
+        failed: 0,
+      },
+    });
+
+    expect(subject.claimHistory).toHaveBeenCalledTimes(2);
+    expect(subject.loadHistoryPage).toHaveBeenCalledOnce();
+  });
+
   it("passes one shrinking budget through history stages and stops after it expires", async () => {
     let time = 1_000;
     const authorizeHistory = vi.fn(async () => ({ context: {} }));
