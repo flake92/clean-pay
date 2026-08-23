@@ -139,6 +139,14 @@ ensure_network() {
     || fail "failed to create Docker network $network_name"
 }
 
+ensure_redis_host_memory_policy() {
+  overcommit_path=/proc/sys/vm/overcommit_memory
+  [ -r "$overcommit_path" ] || return 0
+  overcommit_value=$(tr -d '[:space:]' < "$overcommit_path")
+  [ "$overcommit_value" = 1 ] || fail \
+    "Redis requires vm.overcommit_memory=1. Apply 'sysctl -w vm.overcommit_memory=1' and persist it in /etc/sysctl.d before deployment."
+}
+
 compose() (
   unset \
     CLEAN_PAY_BIND \
@@ -227,6 +235,7 @@ start() {
   require_command docker
   docker compose version >/dev/null 2>&1 || fail "Docker Compose plugin is not available"
   validate_env
+  ensure_redis_host_memory_policy
   ensure_network
   info "building and starting containers"
   compose up -d --build
