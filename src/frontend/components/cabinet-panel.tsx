@@ -45,6 +45,17 @@ import { resetChatwootSession } from "@/frontend/lib/chatwoot";
 
 const PAYMENT_HISTORY_REFRESH_INTERVAL_MS = 10_000;
 const PAYMENT_HISTORY_REFRESH_ATTEMPT_LIMIT = 4;
+const REISSUE_SUBSCRIPTION_CONFIRMATION = [
+  "Перевыпуск подписки отключит все текущие устройства.",
+  "",
+  "После перевыпуска старая ссылка перестанет работать, и все устройства придётся заново переподключить.",
+  "",
+  "Вам потребуется:",
+  "• Удалить старую подписку из приложения",
+  "• Добавить новую ссылку из раздела «Подключиться»",
+  "",
+  "Вы уверены, что хотите перевыпустить подписку?",
+].join("\n");
 
 export function CabinetPanel({ model }: { model: CabinetViewModel }) {
   const router = useRouter();
@@ -193,9 +204,7 @@ export function CabinetPanel({ model }: { model: CabinetViewModel }) {
       return;
     }
 
-    const confirmed = window.confirm(
-      "Перевыпуск подписки отключит все текущие устройства. Продолжить?",
-    );
+    const confirmed = window.confirm(REISSUE_SUBSCRIPTION_CONFIRMATION);
 
     if (!confirmed) {
       return;
