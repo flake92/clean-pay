@@ -4,18 +4,16 @@ import { useRef, useState } from "react";
 import type { FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "primereact/button";
-import { Column } from "primereact/column";
-import { DataTable } from "primereact/datatable";
 import { InputText } from "primereact/inputtext";
 import { Message } from "primereact/message";
 import { ProgressBar } from "primereact/progressbar";
 import { Tag } from "primereact/tag";
 
 import { LinkButton } from "@/frontend/components/prime/link-button";
-import { SubscriptionDeviceDetails } from "@/frontend/components/subscription-device-details";
 import {
-  formatSubscriptionDevice,
-} from "@/frontend/lib/device-display";
+  CabinetDevicesSection,
+  CabinetPaymentHistorySection,
+} from "@/frontend/components/cabinet-responsive-sections";
 import { hasRenewOffer } from "@/frontend/lib/subscription-offers";
 import type {
   DevicesResponse,
@@ -31,19 +29,15 @@ import {
 import { logoutAction } from "@/app/actions/session";
 import {
   detailValue,
-  deviceDeleteLabel,
   formatBytes,
   formatDate,
   formatDeviceLimit,
   formatTrafficLimit,
-  paymentStatusLabel,
   statusLabel,
   statusSeverity,
   trafficLimitStrategyLabel,
   type CabinetUser,
   type CurrentSubscription,
-  type PaymentRecord,
-  type SubscriptionDeviceView,
   type SupportSettings,
 } from "@/frontend/components/cabinet-presentation";
 import { DetailLine, Metric } from "@/frontend/components/cabinet-view-parts";
@@ -56,7 +50,7 @@ export function CabinetPanel({ model }: { model: CabinetViewModel }) {
   const subscription: CurrentSubscription | null = initial?.subscription ?? null;
   const offers: SubscriptionOffersResponse | null = initial?.offers ?? null;
   const devices: DevicesResponse | null = initial?.devices ?? null;
-  const payments: PaymentRecord[] = initial?.payments ?? [];
+  const payments = initial?.payments ?? [];
   const paymentsError = initial?.paymentsWarning ?? null;
   const support: SupportSettings | null = initial?.support ?? null;
   const error = model.status === "error" ? model.message : null;
@@ -252,16 +246,6 @@ export function CabinetPanel({ model }: { model: CabinetViewModel }) {
       : null;
   const deviceCount = devices?.current_count ?? null;
   const maxDevices = devices?.max_count ?? subscription?.device_limit ?? null;
-  const deviceViews: SubscriptionDeviceView[] =
-    devices?.devices.map((device, index) => {
-      const presentation = formatSubscriptionDevice(device);
-
-      return {
-        device,
-        presentation,
-        deleteLabel: deviceDeleteLabel(presentation, index + 1),
-      };
-    }) ?? [];
   const hasEmail = Boolean(user.email);
   const isEmailVerified = hasEmail && Boolean(user.emailVerified ?? user.is_email_verified);
   const shouldShowVerifyEmail = hasEmail && !isEmailVerified;
@@ -462,156 +446,14 @@ export function CabinetPanel({ model }: { model: CabinetViewModel }) {
         ) : null}
 
       {devices ? (
-      <div className="col-12 xl:col-6">
-        <div className="card">
-          <h5>Устройства</h5>
-          {deviceViews.length > 0 ? (
-            <div className="cabinet-mobile-list">
-              {deviceViews.map(({ device, presentation, deleteLabel }) => (
-                <article className="cabinet-mobile-record" key={device.hwid}>
-                  <div className="cabinet-mobile-record__header">
-                    <div>
-                      <div className="cabinet-mobile-record__title">
-                        {presentation.summary}
-                      </div>
-                    </div>
-                    <Button
-                      aria-label={deleteLabel}
-                      disabled={pendingAction !== null}
-                      icon="pi pi-trash"
-                      loading={pendingAction === `delete-device-${device.hwid}`}
-                      onClick={() => deleteDevice(device.hwid)}
-                      outlined
-                      severity="danger"
-                      type="button"
-                    />
-                  </div>
-                  <SubscriptionDeviceDetails presentation={presentation} />
-                </article>
-              ))}
-            </div>
-          ) : (
-            <Message severity="info" text="Подключенных устройств пока нет." />
-          )}
-          <DataTable
-            className="cabinet-desktop-table"
-            emptyMessage="Подключенных устройств пока нет."
-            responsiveLayout="scroll"
-            value={deviceViews}
-          >
-            <Column
-              body={(view: SubscriptionDeviceView) =>
-                view.presentation.deviceType
-              }
-              header="Тип устройства"
-            />
-            <Column
-              body={(view: SubscriptionDeviceView) => view.presentation.os}
-              header="ОС"
-            />
-            <Column
-              body={(view: SubscriptionDeviceView) => view.presentation.client}
-              header="Клиент"
-            />
-            <Column
-              body={(view: SubscriptionDeviceView) => (
-                <Button
-                  aria-label={view.deleteLabel}
-                  disabled={pendingAction !== null}
-                  icon="pi pi-trash"
-                  label="Удалить"
-                  loading={pendingAction === `delete-device-${view.device.hwid}`}
-                  onClick={() => deleteDevice(view.device.hwid)}
-                  outlined
-                  severity="danger"
-                  size="small"
-                  type="button"
-                />
-              )}
-              header=""
-            />
-          </DataTable>
-        </div>
-      </div>
+        <CabinetDevicesSection
+          devices={devices}
+          onDelete={deleteDevice}
+          pendingAction={pendingAction}
+        />
       ) : null}
 
-      <div className="col-12">
-      <div className="card">
-        <h5>История платежей</h5>
-        {paymentsError ? <Message severity="warn" text={paymentsError} /> : null}
-        {payments.length > 0 ? (
-          <div className="cabinet-mobile-list">
-            {payments.map((payment) => (
-              <article className="cabinet-mobile-record" key={payment.payment_id}>
-                <div className="cabinet-mobile-record__header">
-                  <div>
-                    <div className="cabinet-mobile-record__title">{payment.plan_name ?? payment.purchase_type}</div>
-                    <div className="cabinet-mobile-record__id">{payment.payment_id}</div>
-                  </div>
-                  <Tag
-                    severity={payment.is_free ? "info" : statusSeverity(payment.status)}
-                    value={payment.is_free ? "Бесплатно" : paymentStatusLabel(payment.status)}
-                  />
-                </div>
-                <dl className="cabinet-mobile-record__details">
-                  <div>
-                    <dt>Дата</dt>
-                    <dd>{formatDate(payment.created_at)}</dd>
-                  </div>
-                  <div>
-                    <dt>Gateway</dt>
-                    <dd>{payment.gateway_type}</dd>
-                  </div>
-                  <div>
-                    <dt>Сумма</dt>
-                    <dd>
-                      {payment.final_amount} {payment.currency}
-                    </dd>
-                  </div>
-                </dl>
-              </article>
-            ))}
-          </div>
-        ) : !paymentsError ? (
-          <Message severity="info" text="Платежей через web-кабинет пока нет." />
-        ) : null}
-        <DataTable
-          className="cabinet-desktop-table"
-          emptyMessage={paymentsError ?? "Платежей через web-кабинет пока нет."}
-          responsiveLayout="scroll"
-          value={payments}
-        >
-          <Column
-            body={(payment: PaymentRecord) => (
-              <div>
-                <div className="font-medium">{payment.plan_name ?? payment.purchase_type}</div>
-                <div className="mt-1 text-xs text-500 break-all">{payment.payment_id}</div>
-              </div>
-            )}
-            header="Платёж"
-          />
-          <Column body={(payment: PaymentRecord) => formatDate(payment.created_at)} header="Дата" />
-          <Column field="gateway_type" header="Gateway" />
-          <Column
-            body={(payment: PaymentRecord) => (
-              <span>
-                {payment.final_amount} {payment.currency}
-              </span>
-            )}
-            header="Сумма"
-          />
-          <Column
-            body={(payment: PaymentRecord) => (
-              <Tag
-                severity={payment.is_free ? "info" : statusSeverity(payment.status)}
-                value={payment.is_free ? "Бесплатно" : paymentStatusLabel(payment.status)}
-              />
-            )}
-            header="Статус"
-          />
-        </DataTable>
-      </div>
-      </div>
+      <CabinetPaymentHistorySection error={paymentsError} payments={payments} />
 
       {support?.enabled &&
       (support.email || support.telegramUsername || support.faqUrl) ? (

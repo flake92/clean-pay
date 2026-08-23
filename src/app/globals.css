@@ -426,6 +426,39 @@ body {
   overflow-wrap: anywhere;
 }
 
+.cabinet-devices-section,
+.cabinet-device-list,
+.cabinet-device-record,
+.cabinet-device-record__header {
+  min-width: 0;
+}
+
+.cabinet-device-list {
+  display: grid;
+  gap: 0.75rem;
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.cabinet-device-record__delete.p-button {
+  max-width: 100%;
+  white-space: normal;
+}
+
+.cabinet-device-record .cabinet-mobile-record__details {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.cabinet-payment-history__toggle.p-button {
+  margin-top: 0.125rem;
+  width: 100%;
+}
+
+.cabinet-payment-list__records {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
 .clean-pay-price-dropdown {
   width: 100%;
 }
@@ -894,6 +927,18 @@ body {
     gap: 0.75rem;
   }
 
+  .cabinet-device-record .cabinet-mobile-record__details {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .cabinet-payment-record__details {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .cabinet-payment-record__date {
+    grid-column: 1 / -1;
+  }
+
   .clean-pay-price-dropdown .p-dropdown-label {
     padding-left: 0.75rem;
     padding-right: 0.5rem;
@@ -950,6 +995,16 @@ body {
     align-items: stretch;
     grid-template-columns: minmax(0, 1fr) auto;
     padding: 0.875rem;
+  }
+}
+
+@media (max-width: 400px) {
+  .cabinet-device-record__header {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .cabinet-device-record__delete.p-button {
+    width: 100%;
   }
 }
 
