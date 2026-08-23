@@ -217,6 +217,49 @@ describe("local user merge policy", () => {
     ).resolves.toMatchObject({ id: "target-user", telegramId: "123" });
   });
 
+  it("serializes final-owner checks on the transaction connection", async () => {
+    const tx = mergeTransaction();
+    let releaseTarget!: (value: {
+      id: string;
+      remnashopUserId: string;
+      email: string;
+      telegramId: string;
+    }) => void;
+    const target = new Promise<{
+      id: string;
+      remnashopUserId: string;
+      email: string;
+      telegramId: string;
+    }>((resolve) => {
+      releaseTarget = resolve;
+    });
+    tx.webUser.findUnique.mockImplementationOnce(() => target);
+    tx.webUser.count.mockResolvedValueOnce(0);
+
+    const assertion = assertUserMergeFinalOwner(
+      tx as unknown as Prisma.TransactionClient,
+      {
+        targetUserId: "target-user",
+        sourceUserIds: ["source-a"],
+        expected: { remnashopUserId: "remna-target" },
+      },
+    );
+
+    await vi.waitFor(() => {
+      expect(tx.webUser.findUnique).toHaveBeenCalledOnce();
+    });
+    expect(tx.webUser.count).not.toHaveBeenCalled();
+    releaseTarget({
+      id: "target-user",
+      remnashopUserId: "remna-target",
+      email: "user@example.com",
+      telegramId: "123",
+    });
+
+    await expect(assertion).resolves.toMatchObject({ id: "target-user" });
+    expect(tx.webUser.count).toHaveBeenCalledOnce();
+  });
+
   it.each([
     {
       target: {

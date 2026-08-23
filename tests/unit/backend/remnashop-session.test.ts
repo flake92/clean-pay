@@ -174,6 +174,31 @@ describe("Remnashop session reconciliation", () => {
     });
   });
 
+  it("serializes identity lookups on the transaction connection", async () => {
+    let releaseFirstLookup!: (value: null) => void;
+    const firstLookup = new Promise<null>((resolve) => {
+      releaseFirstLookup = resolve;
+    });
+    tx.webUser.findUnique
+      .mockImplementationOnce(() => firstLookup)
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(null);
+
+    const login = createSessionFromRemnashopAuth({
+      accessToken: "access",
+      refreshToken: "refresh",
+      auth,
+    });
+
+    await vi.waitFor(() => {
+      expect(tx.webUser.findUnique).toHaveBeenCalledTimes(1);
+    });
+    releaseFirstLookup(null);
+
+    await expect(login).resolves.toMatchObject({ user: { id: "user-1" } });
+    expect(tx.webUser.findUnique).toHaveBeenCalledTimes(3);
+  });
+
   it("replaces prior local sessions for password-reset authentication", async () => {
     await expect(createSessionFromRemnashopAuth({
       accessToken: "access",
