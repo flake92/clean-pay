@@ -53,7 +53,7 @@ describe("Chatwoot identity verification", () => {
     expect(changedActor.loadConversationToken).not.toHaveBeenCalled();
   });
 
-  it("waits until the current Chatwoot conversation has an identity", async () => {
+  it("waits for an identity and requests a safe reset for another contact", async () => {
     const noCookie = gateway({
       loadConversationToken: vi.fn(async () => null),
     });
@@ -77,7 +77,7 @@ describe("Chatwoot identity verification", () => {
         status: "available" as const,
         identifier: "another-user",
       })),
-    }), "user-1")).resolves.toBe("pending");
+    }), "user-1")).resolves.toBe("reset_required");
   });
 
   it("confirms only the contact bound to the current Clean Pay user", async () => {

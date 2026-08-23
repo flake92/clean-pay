@@ -330,6 +330,45 @@ describe("Chatwoot widget context lifecycle", () => {
     expect(api.setUser).toHaveBeenCalledTimes(1);
   });
 
+  it("replaces a stale conversation once and re-identifies the current user", async () => {
+    vi.useFakeTimers();
+    mocks.loadContext.mockResolvedValue(null);
+    mocks.verifyIdentity
+      .mockResolvedValueOnce("reset_required")
+      .mockResolvedValueOnce("reset_required");
+    const api = chatwootApi();
+    api.setUser.mockImplementation(() => {
+      document.cookie = "cw_conversation=stale; Path=/";
+      document.cookie = `cw_user_${config.websiteToken}=stale; Path=/`;
+    });
+    window.$chatwoot = api;
+
+    render(createElement(ChatwootWidget, { config }));
+    await flushWidgetEffects();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(750);
+    });
+
+    expect(mocks.verifyIdentity).toHaveBeenCalledTimes(1);
+    expect(api.reset).toHaveBeenCalledOnce();
+    expect(document.cookie).not.toContain("cw_conversation=");
+    expect(document.cookie).not.toContain(`cw_user_${config.websiteToken}=`);
+    expect(window.cleanPayChatwootAuthorized).toBe(true);
+
+    await act(async () => {
+      window.dispatchEvent(new CustomEvent("chatwoot:ready"));
+      await Promise.resolve();
+    });
+    expect(api.setUser).toHaveBeenCalledTimes(2);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(750);
+    });
+    expect(mocks.verifyIdentity).toHaveBeenCalledTimes(2);
+    expect(api.reset).toHaveBeenCalledOnce();
+    expect(api.toggleBubbleVisibility).toHaveBeenLastCalledWith("hide");
+  });
+
   it("retries an ownership-only payload after its PATCH fails and the page reloads", async () => {
     vi.useFakeTimers();
     mocks.loadContext.mockResolvedValue(null);

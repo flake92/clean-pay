@@ -4,6 +4,7 @@ export type ChatwootIdentityVerification =
   | "confirmed"
   | "pending"
   | "rejected"
+  | "reset_required"
   | "refresh_required";
 
 export async function verifyChatwootIdentity(
@@ -44,5 +45,9 @@ export async function verifyChatwootIdentity(
     return "pending";
   }
 
-  return probe.identifier === actor.userId ? "confirmed" : "pending";
+  if (probe.identifier === null) {
+    return "pending";
+  }
+
+  return probe.identifier === actor.userId ? "confirmed" : "reset_required";
 }

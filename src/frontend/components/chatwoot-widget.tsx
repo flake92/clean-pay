@@ -29,6 +29,7 @@ import {
   isUnexpectedChatwootFrameMessage,
   loadChatwootSupportContextCached,
   loadChatwootSdk,
+  resetChatwootSession,
   retryChatwootIdentityAttempt,
 } from "@/frontend/lib/chatwoot";
 import { navigateTo } from "@/frontend/lib/browser-navigation";
@@ -44,6 +45,7 @@ export function ChatwootWidget({ config }: { config: ChatwootWidgetConfig }) {
     const identityProbeLimit = 6;
     const initialIdentityProbeDelayMs = 750;
     let sessionRefreshRequested = false;
+    let conversationResetRequested = false;
 
     enterChatwootAuthenticatedMode();
     window.chatwootSettings = {
@@ -182,6 +184,26 @@ export function ChatwootWidget({ config }: { config: ChatwootWidgetConfig }) {
             const returnTo = `${window.location.pathname}${window.location.search}`;
             const search = new URLSearchParams({ return_to: returnTo });
             navigateTo(`/auth/session/refresh?${search.toString()}`);
+            return;
+          }
+
+          if (result === "reset_required") {
+            cancelIdentityAttemptTimer();
+            cancelIdentityProbeTimer();
+            identityProbeCounts.delete(attemptId);
+
+            if (conversationResetRequested) {
+              identificationFailed();
+              return;
+            }
+
+            // The first-party session is valid, but the browser still owns a
+            // Chatwoot conversation for another Clean Pay identity. Reset
+            // only the third-party state, then let the fresh iframe's ready
+            // event identify the authenticated user again.
+            conversationResetRequested = true;
+            resetChatwootSession();
+            enterChatwootAuthenticatedMode();
             return;
           }
 

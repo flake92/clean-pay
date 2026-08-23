@@ -78,4 +78,19 @@ describe("navigation authentication state", () => {
     ]);
     expect(result.flatItems.some(({ label }) => label === "Войти")).toBe(false);
   });
+
+  it("shows distinct change and renewal actions for an active subscription", async () => {
+    const result = await renderMenu({
+      authenticated: true,
+      emailVerificationRequired: false,
+      hasSubscription: true,
+      canRenewSubscription: true,
+    });
+
+    expect(result.flatItems).toEqual(expect.arrayContaining([
+      expect.objectContaining({ label: "Изменить тариф", to: "/tariffs" }),
+      expect.objectContaining({ label: "Продлить", to: "/extend" }),
+    ]));
+    expect(result.flatItems.some(({ label }) => label === "Тарифы")).toBe(false);
+  });
 });

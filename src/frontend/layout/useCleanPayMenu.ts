@@ -43,7 +43,7 @@ export function useCleanPayMenu(navigation: NavigationViewModel) {
             to: "/tariffs",
         },
         ...(canRenewSubscription
-            ? [{ label: "Продление", icon: "pi pi-fw pi-refresh", to: "/extend" }]
+            ? [{ label: "Продлить", icon: "pi pi-fw pi-refresh", to: "/extend" }]
             : []),
     ];
     const sessionItem: AppMenuItem = navigation.authenticated

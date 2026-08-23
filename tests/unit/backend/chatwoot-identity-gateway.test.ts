@@ -118,6 +118,7 @@ describe("Chatwoot identity gateway", () => {
       {
         durationMs: expect.any(Number),
         identityAvailable: true,
+        identityMatchesActor: true,
       },
       expect.objectContaining({ source: "chatwoot.identity" }),
     );
