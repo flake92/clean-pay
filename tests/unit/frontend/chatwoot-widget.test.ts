@@ -133,6 +133,40 @@ describe("Chatwoot widget context lifecycle", () => {
     expect(api.toggle).toHaveBeenCalledTimes(1);
   });
 
+  it("preserves an open request across an equivalent server-component rerender", async () => {
+    vi.useFakeTimers();
+    mocks.loadContext.mockResolvedValue(null);
+    const api = chatwootApi();
+    api.setUser.mockImplementation(() => {
+      document.cookie = "cw_conversation=authenticated; Path=/";
+      document.cookie = `cw_user_${config.websiteToken}=identified; Path=/`;
+    });
+    window.$chatwoot = api;
+
+    const view = render(createElement(ChatwootWidget, { config }));
+    await flushWidgetEffects();
+    fireEvent.click(screen.getByRole("button", { name: "Подключить чат поддержки" }));
+
+    view.rerender(createElement(ChatwootWidget, {
+      config: {
+        ...config,
+        user: {
+          ...config.user,
+          customAttributes: { ...config.user.customAttributes },
+        },
+      },
+    }));
+    await flushWidgetEffects();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(750);
+    });
+
+    expect(mocks.verifyIdentity).toHaveBeenCalledWith("user-123");
+    expect(api.toggle).toHaveBeenCalledWith("open");
+    expect(api.toggle).toHaveBeenCalledTimes(1);
+  });
+
   it("reapplies managed labels after Chatwoot creates a conversation", async () => {
     render(createElement(ChatwootWidget, { config }));
 

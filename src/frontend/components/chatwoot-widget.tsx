@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import {
   loadChatwootSupportContextAction,
@@ -36,6 +36,13 @@ import { navigateTo } from "@/frontend/lib/browser-navigation";
 
 export function ChatwootWidget({ config }: { config: ChatwootWidgetConfig }) {
   const [launcherState, setLauncherState] = useState<"loading" | "ready">("loading");
+  const openRequestScopeRef = useRef<string | null>(null);
+  const openRequestScope = JSON.stringify([
+    config.baseUrl,
+    config.websiteToken,
+    config.user.identifier,
+    config.user.identifierHash,
+  ]);
 
   useEffect(() => {
     let active = true;
@@ -48,7 +55,6 @@ export function ChatwootWidget({ config }: { config: ChatwootWidgetConfig }) {
     const initialIdentityProbeDelayMs = 750;
     let sessionRefreshRequested = false;
     let conversationResetRequested = false;
-    let openRequested = false;
 
     enterChatwootAuthenticatedMode();
     window.chatwootSettings = {
@@ -79,13 +85,18 @@ export function ChatwootWidget({ config }: { config: ChatwootWidgetConfig }) {
       }
     };
     const openVerifiedConversation = () => {
-      if (!openRequested) {
+      if (openRequestScopeRef.current !== openRequestScope) {
         return;
       }
 
       try {
-        window.$chatwoot?.toggle?.("open");
-        openRequested = false;
+        const chatwoot = window.$chatwoot;
+        if (!chatwoot?.toggle) {
+          return;
+        }
+
+        chatwoot.toggle("open");
+        openRequestScopeRef.current = null;
       } catch {
         // The visible first-party launcher remains available for a retry.
       }
@@ -286,7 +297,12 @@ export function ChatwootWidget({ config }: { config: ChatwootWidgetConfig }) {
         return;
       }
 
-      openRequested = true;
+      // A server action can refresh the RSC tree and restart this effect with
+      // an equivalent config object before ownership verification resolves.
+      // Keep the user's intent outside the effect, scoped to this exact signed
+      // identity, so that refresh cannot lose the pending open request or
+      // carry it over to another account.
+      openRequestScopeRef.current = openRequestScope;
       setLauncherState("loading");
       identifyWithCurrentContext();
     };
@@ -316,6 +332,9 @@ export function ChatwootWidget({ config }: { config: ChatwootWidgetConfig }) {
         return;
       }
 
+      if (openRequestScopeRef.current === openRequestScope) {
+        openRequestScopeRef.current = null;
+      }
       cancelIdentityAttemptTimer();
       cancelIdentityProbeTimer();
       const attemptId = getChatwootPendingIdentityAttempt()?.attemptId;
@@ -444,7 +463,7 @@ export function ChatwootWidget({ config }: { config: ChatwootWidgetConfig }) {
       // AppShell is a page-level wrapper. Do not reset here: ordinary client
       // navigation between authenticated pages may unmount this component.
     };
-  }, [config]);
+  }, [config, openRequestScope]);
 
   return (
     <button
