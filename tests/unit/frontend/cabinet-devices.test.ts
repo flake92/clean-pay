@@ -230,17 +230,10 @@ describe("cabinet device records", () => {
         'button[aria-label^="Удалить устройство "]',
       ),
     );
-    const mobileDeleteButtons = deleteButtons.filter(
-      (button) => button.textContent === "",
-    );
-    const desktopDeleteButtons = deleteButtons.filter(
-      (button) => button.textContent === "Удалить",
-    );
 
-    expect(deleteButtons).toHaveLength(devices.devices.length * 2);
-    expect(mobileDeleteButtons).toHaveLength(devices.devices.length);
-    expect(desktopDeleteButtons).toHaveLength(devices.devices.length);
-    expect(mobileDeleteButtons[0]?.getAttribute("aria-label")).toBe(
+    expect(deleteButtons).toHaveLength(devices.devices.length);
+    expect(deleteButtons.every((button) => button.textContent === "Удалить")).toBe(true);
+    expect(deleteButtons[0]?.getAttribute("aria-label")).toBe(
       "Удалить устройство 1: iPhone 12 INCY 2.4.7, iOS 26.5.2",
     );
     expect(
@@ -248,10 +241,9 @@ describe("cabinet device records", () => {
         (button) => !button.getAttribute("aria-label")?.includes(internalHwid),
       ),
     ).toBe(true);
-    await click(mobileDeleteButtons[0]!);
-    await click(desktopDeleteButtons[0]!);
+    await click(deleteButtons[0]!);
 
-    expect(window.confirm).toHaveBeenCalledTimes(2);
+    expect(window.confirm).toHaveBeenCalledOnce();
     expect(actionMocks.deleteDeviceAction).toHaveBeenCalledWith(internalHwid);
     expect(container.textContent).toContain("Устройство удалено.");
   });
@@ -262,14 +254,13 @@ describe("cabinet device records", () => {
         'button[aria-label^="Удалить устройство "]',
       ),
     );
-    const mobileButton = deleteButtons.find((button) => button.textContent === "")!;
-    const desktopButton = deleteButtons.find((button) => button.textContent === "Удалить")!;
+    const deleteButton = deleteButtons[0]!;
 
     await act(async () => {
-      mobileButton.dispatchEvent(
+      deleteButton.dispatchEvent(
         new MouseEvent("click", { bubbles: true, cancelable: true }),
       );
-      desktopButton.dispatchEvent(
+      deleteButton.dispatchEvent(
         new MouseEvent("click", { bubbles: true, cancelable: true }),
       );
       await Promise.resolve();
