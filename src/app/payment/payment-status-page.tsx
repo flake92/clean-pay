@@ -17,12 +17,18 @@ export async function PaymentStatusPage({ kind, searchParams }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const params = await searchParams;
+  const paymentId = first(params.payment_id) ?? first(params.paymentId) ?? first(params.order_id) ?? first(params.id) ?? null;
+  const operationId = first(params.operation_id) ?? first(params.operationId) ?? null;
+  const returnParams = new URLSearchParams();
+  if (paymentId) returnParams.set("payment_id", paymentId);
+  if (operationId) returnParams.set("operation_id", operationId);
+  const returnTo = `/payment/${kind}${returnParams.size ? `?${returnParams}` : ""}`;
   const model = await loadPaymentStatus(requestPaymentStatusReader, productionPaymentMaintenanceRunner, {
-    paymentId: first(params.payment_id) ?? first(params.paymentId) ?? first(params.order_id) ?? first(params.id) ?? null,
-    operationId: first(params.operation_id) ?? first(params.operationId) ?? null,
+    paymentId,
+    operationId,
   });
   return (
-    <AppShell requireAuth>
+    <AppShell requireAuth returnTo={returnTo}>
       <div className="flex flex-column gap-6">
         <PageHeader description={intro(kind)} title="Статус платежа" />
         <Card><PaymentReturnStatus kind={kind} model={model} /></Card>
