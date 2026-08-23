@@ -215,8 +215,8 @@ export function ChatwootWidget({ config }: { config: ChatwootWidgetConfig }) {
               identityProbeCounts.delete(attemptId);
               // Ownership permits revealing this contact, but does not prove
               // that Chatwoot applied the complete setUser payload. The
-              // in-memory generation remains unpersisted; identify() either
-              // reveals it or queues newer context through a fresh iframe.
+              // bounded fingerprint restores only this exact conversation;
+              // identify() reveals it or queues newer context separately.
               identifyWithCurrentContext();
             }
             return;
@@ -316,6 +316,35 @@ export function ChatwootWidget({ config }: { config: ChatwootWidgetConfig }) {
       }
       hideLauncher();
     };
+    const identityTransportFailed = () => {
+      if (!active || sessionRefreshRequested) {
+        return;
+      }
+
+      const pending = getChatwootPendingIdentityAttempt();
+      if (pending?.phase === "sent") {
+        if (retainChatwootVerifiedOwnership(
+          config,
+          supportContext?.customAttributes,
+        )) {
+          cancelIdentityAttemptTimer();
+          cancelIdentityProbeTimer();
+          identityProbeCounts.delete(pending.attemptId);
+          return;
+        }
+
+        // Chatwoot emits an uncorrelated error before its contact endpoint is
+        // necessarily queryable. Keep the bounded server verification alive:
+        // it can safely restore the official launcher for the same actor, or
+        // the existing timeout/retry path will still fail closed.
+        hideLauncher();
+        scheduleIdentityAttemptTimeout();
+        scheduleIdentityProbe(0);
+        return;
+      }
+
+      identificationFailed();
+    };
     const chatwootMessage = (event: MessageEvent) => {
       // The upstream SDK installs a permissive window.onmessage handler. Stop
       // stale frames (including the one replaced for retry) before that
@@ -368,7 +397,7 @@ export function ChatwootWidget({ config }: { config: ChatwootWidgetConfig }) {
 
     window.addEventListener("message", chatwootMessage, { capture: true });
     window.addEventListener("chatwoot:ready", identifyWithCurrentContext);
-    window.addEventListener("chatwoot:error", identificationFailed);
+    window.addEventListener("chatwoot:error", identityTransportFailed);
     window.addEventListener("chatwoot:opened", identifyAndRefresh);
     window.addEventListener("chatwoot:on-start-conversation", identifyAndRefresh);
     // The first message is emitted only after Chatwoot has created the actual
@@ -418,7 +447,7 @@ export function ChatwootWidget({ config }: { config: ChatwootWidgetConfig }) {
       identityProbeCounts.clear();
       window.removeEventListener("message", chatwootMessage, { capture: true });
       window.removeEventListener("chatwoot:ready", identifyWithCurrentContext);
-      window.removeEventListener("chatwoot:error", identificationFailed);
+      window.removeEventListener("chatwoot:error", identityTransportFailed);
       window.removeEventListener("chatwoot:opened", identifyAndRefresh);
       window.removeEventListener("chatwoot:on-start-conversation", identifyAndRefresh);
       window.removeEventListener("chatwoot:on-message", identifyAndRefresh);
