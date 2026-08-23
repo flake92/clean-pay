@@ -199,20 +199,18 @@ export async function assertUserMergeFinalOwner(
   },
 ) {
   const sourceUserIds = normalizedSourceIds(targetUserId, rawSourceUserIds);
-  const [target, remainingSourceCount] = await Promise.all([
-    tx.webUser.findUnique({
-      where: { id: targetUserId },
-      select: {
-        id: true,
-        remnashopUserId: true,
-        email: true,
-        telegramId: true,
-      },
-    }),
-    sourceUserIds.length > 0
-      ? tx.webUser.count({ where: { id: { in: sourceUserIds } } })
-      : Promise.resolve(0),
-  ]);
+  const target = await tx.webUser.findUnique({
+    where: { id: targetUserId },
+    select: {
+      id: true,
+      remnashopUserId: true,
+      email: true,
+      telegramId: true,
+    },
+  });
+  const remainingSourceCount = sourceUserIds.length > 0
+    ? await tx.webUser.count({ where: { id: { in: sourceUserIds } } })
+    : 0;
 
   if (!target || remainingSourceCount !== 0) {
     throw mergeStateChangedError();

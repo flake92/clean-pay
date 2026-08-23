@@ -771,6 +771,50 @@ describe("payment operation idempotency", () => {
     expect(mocks.paymentRecord.create).not.toHaveBeenCalled();
   });
 
+  it("serializes payment ownership checks on the transaction connection", async () => {
+    const claimToken = "claim-owner-serialized";
+    mocks.paymentOperation.findUnique.mockResolvedValue(
+      storedOperation(
+        {
+          userId: "user-1",
+          kind: "PURCHASE",
+          idempotencyKeyHash: "key-hash",
+          upstreamOwnerHash: "owner-hash",
+          requestFingerprint: "request-hash",
+          requestPayload: {},
+          upstreamKey: "upstream-key",
+        },
+        {
+          status: "DISPATCHING",
+          claimTokenHash: sha256(
+            `clean-pay:payment-operation:claim:v1:${claimToken}`,
+          ),
+        },
+      ),
+    );
+    let releasePaymentLookup!: (value: null) => void;
+    const paymentLookup = new Promise<null>((resolve) => {
+      releasePaymentLookup = resolve;
+    });
+    mocks.paymentRecord.findUnique
+      .mockImplementationOnce(() => paymentLookup)
+      .mockResolvedValueOnce(null);
+
+    const completion = completePaymentOperationSuccess({
+      operationId: "operation-1",
+      claimToken,
+      payment: paymentInput(),
+    });
+
+    await vi.waitFor(() => {
+      expect(mocks.paymentRecord.findUnique).toHaveBeenCalledTimes(1);
+    });
+    releasePaymentLookup(null);
+
+    await expect(completion).resolves.toEqual(paymentInput().payment);
+    expect(mocks.paymentRecord.findUnique).toHaveBeenCalledTimes(3);
+  });
+
   it("revalidates the current upstream owner before committing foreground success", async () => {
     const claimToken = "claim-owner-race";
     mocks.paymentOperation.findUnique.mockResolvedValue(
