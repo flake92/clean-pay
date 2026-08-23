@@ -608,6 +608,12 @@ export async function listDuePaymentHistoryCandidates(limit: number) {
           AND web_session."revokedAt" IS NULL
           AND web_session."assuranceLevel" = 'FULL'
           AND web_session."refreshExpiresAt" > clock_timestamp()
+          -- The headless worker deliberately cannot consume refresh tokens.
+          -- Keep discovery aligned with loadCurrentPaymentHistoryCredential so
+          -- users with only a refreshable interactive session are not claimed
+          -- and deferred forever in 20-row batches.
+          AND web_session."remnashopAccessTokenEncrypted" IS NOT NULL
+          AND web_session."remnashopAccessExpiresAt" > clock_timestamp() + INTERVAL '30 seconds'
           AND (web_user."emailVerified" = TRUE OR web_user."telegramId" IS NOT NULL)
       )
     ORDER BY sync_state."lastAttemptAt" ASC NULLS FIRST, web_user."id" ASC
