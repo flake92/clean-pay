@@ -14,9 +14,14 @@ try {
     ? readIsolatedEnvironmentFile(envFile)
     : process.env;
 
-  if (envFile && Object.hasOwn(environment, "CLEAN_PAY_BAKED_PUBLIC_APP_URL")) {
+  const imageMetadataName = [
+    "CLEAN_PAY_BAKED_PUBLIC_APP_URL",
+    "CLEAN_PAY_BAKED_BRAND_NAME",
+    "CLEAN_PAY_BAKED_BRAND_LOGO_URL",
+  ].find((name) => Object.hasOwn(environment, name));
+  if (envFile && imageMetadataName) {
     throw new ProductionEnvironmentError(
-      "CLEAN_PAY_BAKED_PUBLIC_APP_URL is image metadata and must not be set in an env file",
+      `${imageMetadataName} is image metadata and must not be set in an env file`,
     );
   }
 

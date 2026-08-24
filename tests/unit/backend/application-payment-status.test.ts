@@ -1,6 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { loadPaymentStatus } from "@/application/payments/load-payment-status";
+import {
+  loadPaymentStatus,
+  loadPaymentStatusSnapshot,
+} from "@/application/payments/load-payment-status";
 import type { PaymentStatusReader } from "@/application/payments/ports/payment-status-reader";
 import type { PaymentMaintenanceRunner } from "@/application/payments/ports/payment-maintenance";
 
@@ -36,6 +39,29 @@ function reader(overrides: Partial<PaymentStatusReader> = {}): PaymentStatusRead
 }
 
 describe("payment status application workflow", () => {
+  it("loads the render-time snapshot without provider calls or writes", async () => {
+    const payment = { payment_id: "local" } as never;
+    const subject = reader({
+      findOperation: vi.fn(async () => ({
+        id: "op-1", status: "OUTCOME_UNKNOWN", manualRequired: false,
+        paymentId: "11111111-1111-4111-8111-111111111111", paymentStatus: "PENDING", payment,
+      })),
+      findPayment: vi.fn(async () => payment),
+    });
+
+    await expect(loadPaymentStatusSnapshot(subject, {
+      paymentId: null,
+      operationId: "op-1",
+    })).resolves.toMatchObject({
+      status: "ready",
+      data: { operation: { status: "outcome_unknown" }, payment },
+    });
+    expect(subject.authorize).not.toHaveBeenCalled();
+    expect(subject.loadExactTransaction).not.toHaveBeenCalled();
+    expect(subject.persistExactTransaction).not.toHaveBeenCalled();
+    expect(subject.loadSubscription).not.toHaveBeenCalled();
+  });
+
   it("validates external identifiers before loading the actor", async () => {
     const subject = reader();
     await expect(loadPaymentStatus(subject, reconciliation(), { paymentId: "invalid", operationId: null })).resolves.toMatchObject({ status: "error" });

@@ -42,9 +42,7 @@ import { LayoutContext } from "@/frontend/layout/context/layoutcontext";
 
 const navigation = {
   authenticated: true,
-  canRenewSubscription: true,
   emailVerificationRequired: false,
-  hasSubscription: true,
 };
 
 const collapsedState: LayoutState = {

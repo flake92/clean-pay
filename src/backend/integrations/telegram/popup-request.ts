@@ -52,6 +52,19 @@ async function readBody(request: Request) {
 }
 
 export async function readTelegramPopupRequest(request: Request): Promise<TelegramPopupRequest> {
+  const contentType = request.headers.get("content-type")
+    ?.split(";", 1)[0]
+    ?.trim()
+    .toLowerCase();
+
+  if (contentType !== "application/json") {
+    throw new ServiceError(
+      "VALIDATION_ERROR",
+      415,
+      "Telegram callback payload must use application/json",
+    );
+  }
+
   const body = await readBody(request);
 
   if (!body || typeof body !== "object" || Array.isArray(body)) {

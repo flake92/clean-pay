@@ -257,9 +257,9 @@ export function TariffsPanel({ model }: { model: TariffsViewModel }) {
             <div className="col-12 xl:col-6" key={plan.public_code}>
               <Card className="shadow-1 h-full">
                 <div className="flex flex-column gap-4">
-                  <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div className="flex flex-wrap align-items-start justify-content-between gap-3">
                     <div className="min-w-0 flex-1">
-                      <div className="flex flex-wrap items-center gap-2">
+                      <div className="flex flex-wrap align-items-center gap-2">
                         <h2 className="text-xl font-semibold break-words">{plan.name}</h2>
                         <Tag severity="info" value={plan.type} />
                       </div>

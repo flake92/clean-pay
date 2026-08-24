@@ -29,6 +29,15 @@ describe("operational metrics", () => {
     expect(upstreamOperation("/users/by-email/Person@Example.com")).toBe(
       "/users/by-email/:identity",
     );
+    expect(upstreamOperation("/users/provider-user-42")).toBe("/users/:id");
+    expect(upstreamOperation("/subscription/devices/device-HWID.secret")).toBe(
+      "/subscription/devices/:id",
+    );
+    expect(upstreamOperation("/subscription/transactions/by-id/provider-payment-A"))
+      .toBe("/subscription/transactions/by-id/:id");
+    expect(upstreamOperation("/subscription/payment-operations/purchase"))
+      .toBe("/subscription/payment-operations/:operation");
+    expect(upstreamOperation("/users/merge?dry_run=true")).toBe("/users/merge");
   });
 
   it("exports bounded counters, durations, readiness and backlog gauges", () => {
@@ -54,6 +63,18 @@ describe("operational metrics", () => {
       outcome: "rejected",
       durationMs: 10,
     });
+    recordUpstreamRequest({
+      service: "Remnashop",
+      operation: "/subscription/devices/first-private-hwid",
+      outcome: "success",
+      durationMs: 20,
+    });
+    recordUpstreamRequest({
+      service: "Remnashop",
+      operation: "/subscription/devices/second-private-hwid",
+      outcome: "success",
+      durationMs: 30,
+    });
 
     const metrics = renderPrometheusMetrics(backlog);
 
@@ -71,6 +92,10 @@ describe("operational metrics", () => {
       'clean_pay_upstream_request_duration_seconds_sum{service="remnashop",operation="/users/:id",outcome="success"} 0.500',
     );
     expect(metrics).not.toContain("must-not-leak");
+    expect(metrics).toContain(
+      'clean_pay_upstream_requests_total{service="remnashop",operation="/subscription/devices/:id",outcome="success"} 2',
+    );
+    expect(metrics).not.toContain("private-hwid");
     expect(metrics.indexOf("rate_limit_rejected")).toBeLessThan(
       metrics.indexOf("refresh_reuse_detected"),
     );

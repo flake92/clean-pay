@@ -320,6 +320,16 @@ function requestMetadata(
 }
 
 function browserMutationGuard(request: NextRequest) {
+  if (
+    request.nextUrl.pathname === '/auth/telegram/callback'
+    && request.method === 'POST'
+  ) {
+    return validateRequestSource({
+      headers: request.headers,
+      trustedAppUrl: process.env.NEXT_PUBLIC_APP_URL,
+    });
+  }
+
   if (request.nextUrl.pathname === '/auth/telegram/start') {
     if (!request.cookies.has(accessCookieName) && !request.cookies.has(refreshCookieName)) {
       return { ok: true } as const;

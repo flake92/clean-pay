@@ -1,7 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useTransition } from "react";
-import { useRouter } from "next/navigation";
+import { useCallback, useEffect, useRef, useState, useTransition } from "react";
 import { Message } from "primereact/message";
 import { Tag } from "primereact/tag";
 import { Button } from "primereact/button";
@@ -14,10 +13,13 @@ import {
   shouldPollPaymentReturn,
 } from "@/frontend/lib/payment-return";
 import type { PaymentStatusPageModel, PaymentStatusViewModel } from "@/application/models/payment-status";
+import { refreshPaymentStatusAction } from "@/app/actions/payment-status";
 
 type Props = {
   kind: "success" | "fail" | "pending";
   model: PaymentStatusPageModel;
+  operationId: string | null;
+  paymentId: string | null;
 };
 
 function formatDate(value: string) {
@@ -67,12 +69,35 @@ function paymentSeverity(status: string): "success" | "warning" | "danger" | "in
   return "info";
 }
 
-export function PaymentReturnStatus({ kind, model }: Props) {
-  const router = useRouter();
+export function PaymentReturnStatus({ kind, model, operationId, paymentId }: Props) {
   const [loading, startRefresh] = useTransition();
+  const [currentModel, setCurrentModel] = useState(model);
+  const initialLookupAttemptedRef = useRef(false);
   const pollAttemptRef = useRef(0);
-  const data = model.status === "ready" ? model.data : null;
-  const error = model.status === "error" ? model.message : null;
+  const data = currentModel.status === "ready" ? currentModel.data : null;
+  const error = currentModel.status === "error" ? currentModel.message : null;
+
+  const refreshStatus = useCallback(() => {
+    startRefresh(async () => {
+      setCurrentModel(await refreshPaymentStatusAction({ operationId, paymentId }));
+    });
+  }, [operationId, paymentId]);
+
+  useEffect(() => {
+    const shouldAttemptInitialRefresh = !data?.operation && !data?.payment
+      || data?.operation?.status === "retry_ready";
+
+    if (
+      initialLookupAttemptedRef.current
+      || (!operationId && !paymentId)
+      || !shouldAttemptInitialRefresh
+    ) {
+      return;
+    }
+
+    initialLookupAttemptedRef.current = true;
+    refreshStatus();
+  }, [data, operationId, paymentId, refreshStatus]);
 
   useEffect(() => {
     if (!data || !shouldPollPaymentReturn(data)) {
@@ -83,11 +108,11 @@ export function PaymentReturnStatus({ kind, model }: Props) {
     const attempt = pollAttemptRef.current;
     const timer = window.setTimeout(() => {
       pollAttemptRef.current = attempt + 1;
-      startRefresh(() => router.refresh());
+      refreshStatus();
     }, paymentPollDelayMs(attempt, data.operation?.retry_after_seconds));
 
     return () => window.clearTimeout(timer);
-  }, [data, router]);
+  }, [data, refreshStatus]);
 
   return (
     <div className="flex flex-column gap-6">
@@ -155,7 +180,7 @@ export function PaymentReturnStatus({ kind, model }: Props) {
           icon="pi pi-refresh"
           label="Обновить статус"
           loading={loading}
-          onClick={() => startRefresh(() => router.refresh())}
+          onClick={refreshStatus}
           outlined
           type="button"
         />
