@@ -10,6 +10,7 @@ import { executePaymentAction } from "@/app/actions/payments";
 import { AccountActionRequired } from "@/frontend/components/account-action-required";
 import { LinkButton } from "@/frontend/components/prime/link-button";
 import { navigateTo, replaceWith } from "@/frontend/lib/browser-navigation";
+import { paymentGatewayLabel } from "@/frontend/lib/payment-gateway";
 import {
   clearPaymentIdempotencyKey,
   getOrCreatePaymentIdempotencyKey,
@@ -87,7 +88,9 @@ function priceOptionTemplate(option?: PriceOption) {
           {option.amount} {option.currency}
         </span>
       </div>
-      <span className="clean-pay-price-option__gateway">{option.gateway}</span>
+      <span className="clean-pay-price-option__gateway">
+        {paymentGatewayLabel(option.gateway)}
+      </span>
     </div>
   );
 }
@@ -105,7 +108,7 @@ function buildPriceOptions(plan: PlanOffer | undefined) {
         days: duration.days,
         duration: formatDuration(duration.days),
         gateway: price.gateway_type,
-        label: `${formatDuration(duration.days)} - ${price.final_amount} ${price.currency_symbol} - ${price.gateway_type}`,
+        label: `${formatDuration(duration.days)} - ${price.final_amount} ${price.currency_symbol} - ${paymentGatewayLabel(price.gateway_type)}`,
         value: selectionValue(duration.days, price.gateway_type),
       })),
     )

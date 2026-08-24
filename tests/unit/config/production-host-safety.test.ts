@@ -133,12 +133,14 @@ describe("production host safety", () => {
     expectBefore(
       rootStartBody,
       "ensure_redis_host_memory_policy",
-      "compose up",
+      "prepare_runtime_dependencies",
       "start.sh: start",
     );
 
     const installServices = shellFunction(deploy, "install_services");
-    expect(installServices, "deploy.sh: install_services").toContain("compose up");
+    expect(installServices, "deploy.sh: install_services").toContain(
+      "run_verified_migration",
+    );
     for (const functionName of ["up", "setup"]) {
       expectBefore(
         shellFunction(deploy, functionName),
@@ -167,7 +169,7 @@ describe("production host safety", () => {
     expectBefore(
       nodeUp,
       "assertRedisHostMemoryPolicy();",
-      "runDocker(composeArgs(\"up\"",
+      "prepareRuntimeDependencies();",
       "deploy/prod/prod.mjs: up",
     );
   });

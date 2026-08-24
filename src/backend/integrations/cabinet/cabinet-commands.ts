@@ -16,6 +16,7 @@ import type {
   PromocodeActivateResponse,
   ReissueResponse,
 } from "@/backend/integrations/remnashop/contracts";
+import { hasUnsafeDeviceHwidPathSegment } from "@/shared/domain/device-hwid";
 
 async function authorizedMutation<T>(action: string, mutate: (accessToken: string) => Promise<T>) {
   try {
@@ -30,10 +31,16 @@ async function authorizedMutation<T>(action: string, mutate: (accessToken: strin
 }
 
 export const productionCabinetCommands: CabinetCommands = {
-  deleteDevice: (hwid) => authorizedMutation("device_delete", (accessToken) =>
-    remnashopRequest<DeviceDeleteResponse>(`/subscription/devices/${encodeURIComponent(hwid)}`, {
-      method: "DELETE", accessToken,
-    })),
+  async deleteDevice(hwid) {
+    if (hasUnsafeDeviceHwidPathSegment(hwid)) {
+      throw new CabinetCommandError("Это устройство нельзя безопасно удалить отдельно.");
+    }
+
+    await authorizedMutation("device_delete", (accessToken) =>
+      remnashopRequest<DeviceDeleteResponse>(`/subscription/devices/${encodeURIComponent(hwid)}`, {
+        method: "DELETE", accessToken,
+      }));
+  },
   deleteAllDevices: () => authorizedMutation("devices_delete_all", (accessToken) =>
     remnashopRequest<DevicesDeleteAllResponse>("/subscription/devices", { method: "DELETE", accessToken })),
   reissueSubscription: () => authorizedMutation("subscription_reissue", (accessToken) =>

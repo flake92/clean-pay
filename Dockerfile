@@ -1,4 +1,4 @@
-FROM node:24.18.0-bookworm-slim AS dependencies
+FROM node:24.18.0-bookworm-slim@sha256:6f7b03f7c2c8e2e784dcf9295400527b9b1270fd37b7e9a7285cf83b6951452d AS dependencies
 
 WORKDIR /app
 
@@ -20,8 +20,6 @@ ARG NEXT_PUBLIC_BRAND_NAME="Clean Pay"
 ARG NEXT_PUBLIC_BRAND_LOGO_URL=/clean-pay-logo.png
 
 COPY . .
-RUN DATABASE_URL="postgresql://clean_pay:clean_pay@localhost:5432/clean_pay?schema=public" \
-    npm run prisma:generate
 RUN NEXT_PUBLIC_APP_URL="${NEXT_PUBLIC_APP_URL}" \
     NEXT_PUBLIC_BRAND_NAME="${NEXT_PUBLIC_BRAND_NAME}" \
     NEXT_PUBLIC_BRAND_LOGO_URL="${NEXT_PUBLIC_BRAND_LOGO_URL}" \
@@ -29,7 +27,7 @@ RUN NEXT_PUBLIC_APP_URL="${NEXT_PUBLIC_APP_URL}" \
     TURNSTILE_SITE_KEY="${TURNSTILE_WIDGET_ID}" \
     npm run build
 
-FROM node:24.18.0-bookworm-slim AS runtime-base
+FROM node:24.18.0-bookworm-slim@sha256:6f7b03f7c2c8e2e784dcf9295400527b9b1270fd37b7e9a7285cf83b6951452d AS runtime-base
 
 WORKDIR /app
 
@@ -49,6 +47,14 @@ RUN apt-get update \
 
 FROM runtime-base AS migration
 
+ARG CLEAN_PAY_RELEASE=local
+ARG CLEAN_PAY_REVISION=local
+
+LABEL org.opencontainers.image.revision="${CLEAN_PAY_REVISION}" \
+      org.opencontainers.image.version="${CLEAN_PAY_RELEASE}" \
+      io.clean-pay.release="${CLEAN_PAY_RELEASE}" \
+      io.clean-pay.role="migration"
+
 COPY --from=dependencies --chown=cleanpay:nodejs /app/package.json /app/package-lock.json ./
 COPY --from=dependencies --chown=cleanpay:nodejs /app/node_modules ./node_modules
 COPY --chown=cleanpay:nodejs prisma ./prisma
@@ -63,12 +69,26 @@ CMD ["sh", "-c", "node deploy/prod/validate-env.mjs && node node_modules/prisma/
 
 FROM runtime-base AS runner
 
+ARG CLEAN_PAY_RELEASE=local
+ARG CLEAN_PAY_REVISION=local
 ARG NEXT_PUBLIC_APP_URL
 ARG NEXT_PUBLIC_BRAND_NAME="Clean Pay"
 ARG NEXT_PUBLIC_BRAND_LOGO_URL=/clean-pay-logo.png
+ARG TURNSTILE_WIDGET_ID
+
+LABEL org.opencontainers.image.revision="${CLEAN_PAY_REVISION}" \
+      org.opencontainers.image.version="${CLEAN_PAY_RELEASE}" \
+      io.clean-pay.release="${CLEAN_PAY_RELEASE}" \
+      io.clean-pay.role="app" \
+      io.clean-pay.baked-public-app-url="${NEXT_PUBLIC_APP_URL}" \
+      io.clean-pay.baked-brand-name="${NEXT_PUBLIC_BRAND_NAME}" \
+      io.clean-pay.baked-brand-logo-url="${NEXT_PUBLIC_BRAND_LOGO_URL}" \
+      io.clean-pay.baked-turnstile-site-key="${TURNSTILE_WIDGET_ID}"
+
 ENV CLEAN_PAY_BAKED_PUBLIC_APP_URL=${NEXT_PUBLIC_APP_URL}
 ENV CLEAN_PAY_BAKED_BRAND_NAME=${NEXT_PUBLIC_BRAND_NAME}
 ENV CLEAN_PAY_BAKED_BRAND_LOGO_URL=${NEXT_PUBLIC_BRAND_LOGO_URL}
+ENV CLEAN_PAY_BAKED_TURNSTILE_WIDGET_ID=${TURNSTILE_WIDGET_ID}
 ENV HOSTNAME=0.0.0.0
 ENV PORT=4000
 

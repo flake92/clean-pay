@@ -130,7 +130,14 @@ export function normalizeRemnashopError(
     return new ServiceError('NOT_FOUND', 404, message, debug);
   }
 
-  if (status === 409 && includesAny(lowerMessage, ['email must be verified', 'email not verified'])) {
+  if (
+    status === 409
+    && includesAny(lowerMessage, [
+      'email must be verified',
+      'email not verified',
+      'verified email address is required',
+    ])
+  ) {
     return new ServiceError('EMAIL_NOT_VERIFIED', 409, message, debug);
   }
 

@@ -11,6 +11,9 @@ services:
       context: ../..
       dockerfile: Dockerfile
       target: migration
+      args:
+        CLEAN_PAY_RELEASE: ${CLEAN_PAY_RELEASE:-local}
+        CLEAN_PAY_REVISION: ${CLEAN_PAY_REVISION:-local}
     restart: "no"
     env_file:
       - .env
@@ -30,6 +33,8 @@ services:
       dockerfile: Dockerfile
       target: runner
       args:
+        CLEAN_PAY_RELEASE: ${CLEAN_PAY_RELEASE:-local}
+        CLEAN_PAY_REVISION: ${CLEAN_PAY_REVISION:-local}
         NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL:?NEXT_PUBLIC_APP_URL is required}
         TURNSTILE_ENABLED: ${TURNSTILE_ENABLED:?TURNSTILE_ENABLED=true is required}
         TURNSTILE_WIDGET_ID: ${TURNSTILE_SITE_KEY:-}
@@ -53,7 +58,7 @@ services:
       - "${CLEAN_PAY_BIND:-127.0.0.1}:${CLEAN_PAY_PORT:-4000}:4000"
     healthcheck:
       test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:4000/api/internal/health/readiness',{headers:{'x-clean-pay-readiness-secret':process.env.READINESS_INTERNAL_SECRET},signal:AbortSignal.timeout(10000)}).then(async r=>{const b=await r.json();if(!b.checks||b.checks.database?.status!=='ok'||b.checks.redis?.status!=='ok')process.exit(1)}).catch(()=>process.exit(1))\""]
-      interval: 30s
+      interval: 10s
       timeout: 12s
       retries: 20
       start_period: 30s

@@ -6,6 +6,12 @@ ENV_FILE="$ROOT_DIR/deploy/prod/.env"
 ENV_EXAMPLE="$ROOT_DIR/deploy/prod/.env.example"
 COMPOSE_PATH="$ROOT_DIR/deploy/prod/docker-compose.yml"
 REMNASHOP_ROLLOUT_SCRIPT="$ROOT_DIR/deploy/prod/prepare-remnashop-rollout.sh"
+IMAGE_PREFLIGHT_SCRIPT="$ROOT_DIR/deploy/prod/image-preflight.sh"
+BUILD_PROVENANCE_SCRIPT="$ROOT_DIR/deploy/prod/build-provenance.sh"
+verified_image_dir=''
+verified_image_output=''
+CLEAN_PAY_VERIFIED_APP_IMAGE=''
+CLEAN_PAY_VERIFIED_MIGRATION_IMAGE=''
 
 . "$ROOT_DIR/deploy/prod/redis-host-safety.sh"
 
@@ -62,7 +68,11 @@ compose() (
     CLEAN_PAY_BIND \
     CLEAN_PAY_EDGE_NETWORK \
     CLEAN_PAY_IMAGE \
+    CLEAN_PAY_MIGRATION_IMAGE \
+    CLEAN_PAY_MIN_FREE_DISK_MB \
     CLEAN_PAY_PORT \
+    CLEAN_PAY_RELEASE \
+    CLEAN_PAY_REVISION \
     COMPOSE_ENV_FILES \
     COMPOSE_FILE \
     COMPOSE_PROFILES \
@@ -77,6 +87,12 @@ compose() (
     REMNASHOP_DOCKER_NETWORK \
     TURNSTILE_ENABLED \
     TURNSTILE_SITE_KEY
+
+  if [ -n "$CLEAN_PAY_VERIFIED_APP_IMAGE" ]; then
+    CLEAN_PAY_IMAGE=$CLEAN_PAY_VERIFIED_APP_IMAGE
+    CLEAN_PAY_MIGRATION_IMAGE=$CLEAN_PAY_VERIFIED_MIGRATION_IMAGE
+    export CLEAN_PAY_IMAGE CLEAN_PAY_MIGRATION_IMAGE
+  fi
 
   if [ "$(env_value PAYMENT_RECONCILIATION_ENABLED true)" = "true" ]; then
     docker compose --env-file "$ENV_FILE" -f "$COMPOSE_PATH" --profile reconciliation "$@"
@@ -269,7 +285,7 @@ assert_required_env() {
 
 validate_env_file() {
   if command -v node >/dev/null 2>&1; then
-    node "$ROOT_DIR/deploy/prod/validate-env.mjs" --env-file "$ENV_FILE"
+    node "$ROOT_DIR/deploy/prod/validate-env.mjs" --clean-pay-env-file "$ENV_FILE"
     return
   fi
 
@@ -278,7 +294,7 @@ validate_env_file() {
     --mount "type=bind,source=$ROOT_DIR,target=/workspace,readonly" \
     --workdir /workspace \
     "node:${node_version}-bookworm-slim" \
-    node deploy/prod/validate-env.mjs --env-file deploy/prod/.env
+    node deploy/prod/validate-env.mjs --clean-pay-env-file deploy/prod/.env
 }
 
 prepare_compose() {
@@ -300,7 +316,7 @@ available_disk_kb() {
 }
 
 ensure_build_disk_space() {
-  min_mb=${CLEAN_PAY_MIN_FREE_DISK_MB:-$(env_value CLEAN_PAY_MIN_FREE_DISK_MB 8192)}
+  min_mb=$(env_value CLEAN_PAY_MIN_FREE_DISK_MB 8192)
   case "$min_mb" in
     ''|*[!0-9]*) die "CLEAN_PAY_MIN_FREE_DISK_MB must be a positive integer." ;;
   esac
@@ -317,6 +333,112 @@ ensure_build_disk_space() {
   fi
 
   [ "$available_kb" -ge "$min_kb" ] || die "Only $((available_kb / 1024)) MB is free after safe Docker cleanup; at least ${min_mb} MB is required before a build."
+}
+
+deployment_source() {
+  env_value CLEAN_PAY_DEPLOY_SOURCE build
+}
+
+prepare_images() {
+  deploy_source=$(deployment_source)
+
+  case "$deploy_source" in
+    build)
+      ensure_build_disk_space
+      sh "$BUILD_PROVENANCE_SCRIPT" \
+        "$ROOT_DIR" \
+        "$deploy_source" \
+        "$(env_value CLEAN_PAY_RELEASE local)" \
+        "$(env_value CLEAN_PAY_REVISION local)"
+      printf 'Building reviewed Clean Pay application and migration images...\n'
+      compose build migration app
+      ;;
+    pull)
+      printf 'Pulling digest-pinned Clean Pay application and migration images...\n'
+      compose pull migration app
+      ;;
+    *)
+      die 'CLEAN_PAY_DEPLOY_SOURCE must be build or pull.'
+      ;;
+  esac
+}
+
+cleanup_verified_images() {
+  if [ -n "$verified_image_output" ]; then
+    rm -f "$verified_image_output"
+  fi
+  if [ -n "$verified_image_dir" ]; then
+    rmdir "$verified_image_dir" 2>/dev/null || true
+  fi
+  verified_image_output=''
+  verified_image_dir=''
+  CLEAN_PAY_VERIFIED_APP_IMAGE=''
+  CLEAN_PAY_VERIFIED_MIGRATION_IMAGE=''
+}
+
+trap cleanup_verified_images EXIT
+trap 'cleanup_verified_images; exit 129' HUP
+trap 'cleanup_verified_images; exit 130' INT
+trap 'cleanup_verified_images; exit 143' TERM
+
+preflight_images() {
+  cleanup_verified_images
+  verified_image_dir=$(mktemp -d "${TMPDIR:-/tmp}/clean-pay-verified.XXXXXX") \
+    || die 'Could not create a private verified-image directory.'
+  verified_image_output="$verified_image_dir/images.env"
+
+  sh "$IMAGE_PREFLIGHT_SCRIPT" \
+    "$deploy_source" \
+    "$(env_value CLEAN_PAY_IMAGE)" \
+    "$(env_value CLEAN_PAY_MIGRATION_IMAGE)" \
+    "$ENV_FILE" \
+    "$(env_value NEXT_PUBLIC_APP_URL)" \
+    "$(env_value NEXT_PUBLIC_BRAND_NAME Clean Pay)" \
+    "$(env_value NEXT_PUBLIC_BRAND_LOGO_URL /clean-pay-logo.png)" \
+    "$(env_value TURNSTILE_SITE_KEY)" \
+    "$(env_value CLEAN_PAY_RELEASE local)" \
+    "$(env_value CLEAN_PAY_REVISION local)" \
+    "$verified_image_output"
+
+  [ "$(wc -l < "$verified_image_output" | tr -d ' ')" = "2" ] \
+    || die 'Image preflight returned malformed verified-image output.'
+  CLEAN_PAY_VERIFIED_APP_IMAGE=$(sed -n 's/^CLEAN_PAY_VERIFIED_APP_IMAGE=//p' "$verified_image_output")
+  CLEAN_PAY_VERIFIED_MIGRATION_IMAGE=$(sed -n 's/^CLEAN_PAY_VERIFIED_MIGRATION_IMAGE=//p' "$verified_image_output")
+  printf '%s\n' "$CLEAN_PAY_VERIFIED_APP_IMAGE" | grep -Eq '^sha256:[a-f0-9]{64}$' \
+    || die 'Image preflight returned an invalid application image ID.'
+  printf '%s\n' "$CLEAN_PAY_VERIFIED_MIGRATION_IMAGE" | grep -Eq '^sha256:[a-f0-9]{64}$' \
+    || die 'Image preflight returned an invalid migration image ID.'
+  [ "$CLEAN_PAY_VERIFIED_APP_IMAGE" != "$CLEAN_PAY_VERIFIED_MIGRATION_IMAGE" ] \
+    || die 'Image preflight returned the same ID for both image roles.'
+}
+
+prepare_runtime_dependencies() {
+  compose pull --policy missing postgres redis
+}
+
+stop_runtime_services() {
+  printf 'Stopping application runtimes for the database migration; PostgreSQL and Redis stay running...\n'
+  compose stop reconciliation-worker retention-worker app
+}
+
+run_verified_migration() {
+  compose up -d --no-build --pull never --wait --wait-timeout 120 postgres redis \
+    || return 1
+  compose rm -f -s migration || return 1
+  compose run --rm --no-deps --pull never migration || return 1
+}
+
+start_verified_runtimes() {
+  compose up -d --no-deps --no-build --pull never --wait --wait-timeout 180 app \
+    || return 1
+
+  if [ "$(env_value PAYMENT_RECONCILIATION_ENABLED true)" = "true" ]; then
+    compose up -d --no-deps --no-build --pull never --wait --wait-timeout 180 \
+      retention-worker reconciliation-worker || return 1
+  else
+    compose up -d --no-deps --no-build --pull never --wait --wait-timeout 180 \
+      retention-worker || return 1
+  fi
 }
 
 cleanup_build_artifacts() {
@@ -358,20 +480,38 @@ verify_detailed_readiness() {
 
 install_services() {
   info '[3/3] Установка и запуск'
-  ensure_build_disk_space
-  printf 'Building and starting Clean Pay. The first build can take several minutes...\n'
-  if ! compose up -d --build --wait --wait-timeout 180; then
+  sh "$REMNASHOP_ROLLOUT_SCRIPT" "$ENV_FILE" check
+  prepare_images
+  preflight_images
+  prepare_runtime_dependencies
+  stop_runtime_services
+  printf 'Running the verified one-shot migration before any application runtime starts...\n'
+  if ! run_verified_migration || ! start_verified_runtimes; then
     printf '\nStartup failed. Recent logs:\n' >&2
     compose logs --tail=200 >&2 || true
     exit 1
   fi
-  cleanup_build_artifacts
+  cleanup_verified_images
+  if [ "$deploy_source" = "build" ]; then
+    cleanup_build_artifacts
+  fi
   verify_detailed_readiness
   verify_external_security_headers
-  sh "$REMNASHOP_ROLLOUT_SCRIPT" "$ENV_FILE"
+  sh "$REMNASHOP_ROLLOUT_SCRIPT" "$ENV_FILE" finalize
   printf '\nClean Pay установлен и успешно прошёл healthcheck.\n'
   printf 'Адрес: %s\n' "$(env_value APP_URL)"
   printf 'Статус: ./deploy.sh ps\nЛоги:   ./deploy.sh logs\n'
+}
+
+build_images_only() {
+  info '[build] Подготовка образов без изменения runtime или базы данных'
+  prepare_compose
+  sh "$REMNASHOP_ROLLOUT_SCRIPT" "$ENV_FILE" check
+  prepare_images
+  preflight_images
+  cleanup_verified_images
+  printf 'Clean Pay application and migration images are prepared and verified.\n'
+  printf 'No container was stopped or replaced and no database migration was run.\n'
 }
 
 up() {
@@ -389,7 +529,7 @@ setup() {
   printf '  Адрес:  %s\n' "$(env_value APP_URL)"
   printf '  Сеть:   %s\n' "$(env_value CLEAN_PAY_EDGE_NETWORK remnawave-network)"
   printf '  Проект: %s\n' "$(env_value COMPOSE_PROJECT_NAME clean-pay-prod)"
-  confirm 'Собрать и запустить Clean Pay сейчас?' yes || {
+  confirm 'Подготовить образы и запустить Clean Pay сейчас?' yes || {
     printf 'Настройки сохранены. Для продолжения выполните: ./deploy.sh install\n'
     return
   }
@@ -407,7 +547,8 @@ Usage: ./deploy.sh <command>
   configure интерактивно создать или обновить deploy/prod/.env
   init      создать deploy/prod/.env и сгенерировать внутренние секреты
   compose   проверить .env, Compose-файл и подготовить Docker-сеть
-  install   собрать, запустить и полностью проверить Clean Pay
+  build     подготовить и проверить образы без остановки runtime и миграции БД
+  install   подготовить образы, запустить и полностью проверить Clean Pay
   up        совместимый псевдоним команды install
   logs      follow logs
   ps        show container status
@@ -426,6 +567,7 @@ case "$command" in
   configure|config) configure ;;
   init) init ;;
   compose|check) prepare_compose ;;
+  build) build_images_only ;;
   install) up ;;
   up) up ;;
   logs) require_env; need_docker; compose logs --tail=100 -f ;;
