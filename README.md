@@ -47,7 +47,7 @@ cd /opt/clean-pay
    `deploy/prod/docker-compose.yml` поставляется с проектом. Мастер проверяет
    его вместе с `.env` и создаёт отсутствующую Docker-сеть. Писать YAML вручную
    не требуется.
-3. **Установка.** Мастер проверяет свободное место, собирает образы, применяет
+3. **Установка.** Мастер подготавливает образы, применяет
    миграции, запускает сервисы и проверяет контейнеры, внешние зависимости,
    HTTPS и security headers.
 
@@ -77,7 +77,7 @@ APP_AUTH_SERVICE_KEY=<то же значение, что REMNASHOP_AUTH_SERVICE_
 ```bash
 ./deploy.sh configure  # интерактивно заполнить .env
 ./deploy.sh compose    # проверить .env, Compose и сеть
-./deploy.sh install    # собрать, запустить и проверить сервисы
+./deploy.sh install    # подготовить, запустить и проверить сервисы
 ```
 
 Для полностью ручной настройки используйте `./deploy.sh init`, затем откройте
@@ -89,6 +89,56 @@ APP_AUTH_SERVICE_KEY=<то же значение, что REMNASHOP_AUTH_SERVICE_
 отдельных строках. Не используйте `${NAME}`, inline-комментарии, дублирующиеся
 имена и многострочные значения. Полный перечень настроек находится в
 [`deploy/prod/.env.example`](deploy/prod/.env.example).
+
+### Сборка на сервере или готовые образы
+
+По умолчанию `CLEAN_PAY_DEPLOY_SOURCE=build`: сервер собирает оба Docker target
+из текущего checkout — `runner` для приложения и `migration` для
+`prisma migrate deploy`. `CLEAN_PAY_IMAGE` и `CLEAN_PAY_MIGRATION_IMAGE` должны
+быть разными явными тегами без digest. Для трассируемой локальной сборки также
+задайте одинаковые для обоих target `CLEAN_PAY_RELEASE` и
+`CLEAN_PAY_REVISION`; значения `local` допустимы только для режима `build`.
+
+Чтобы сервер только скачивал заранее проверенный release, укажите в `.env`:
+
+```dotenv
+CLEAN_PAY_DEPLOY_SOURCE=pull
+CLEAN_PAY_IMAGE=ghcr.io/owner/clean-pay-app@sha256:<64-hex-digest>
+CLEAN_PAY_MIGRATION_IMAGE=ghcr.io/owner/clean-pay-migration@sha256:<64-hex-digest>
+CLEAN_PAY_RELEASE=<release из GitHub Actions summary>
+CLEAN_PAY_REVISION=<полный 40-символьный Git SHA из того же summary>
+```
+
+Замените оба digest фактическими значениями двух target одного проверенного
+commit. В режиме `pull` теги (`latest`, `v1` и подобные), пустые значения,
+совпадающие digest даже в разных repositories и ссылки без `@sha256:`
+отклоняются до обращения к Docker.
+После `docker login` для закрытого registry команда `./deploy.sh install`
+выполняет `pull` и запускает Compose с `--no-build`; установщик не принимает и
+не сохраняет registry credentials.
+
+Перед миграцией общий fail-closed preflight проверяет роли образов, совпадение
+release/revision, а также baked URL, название и логотип приложения с
+авторитетным `.env`. Затем валидатор из app image запускается с `--network none`
+без PostgreSQL, Redis и других Compose-зависимостей. Для режима `pull` образы с
+метаданными `local`/`unknown` не принимаются.
+
+Workflow **Publish paired Clean Pay images** запускается вручную в GitHub
+Actions. Он принимает release и публичные build-time настройки, собирает оба
+target строго из одного `github.sha`, публикует их в GHCR и выводит готовую пару
+digest-pinned ссылок в job summary. Для публикации используется только штатный
+`GITHUB_TOKEN` с ограничением `packages: write`.
+
+Точная модель доверия к образам, порядок миграции и восстановление после её
+ошибки описаны в
+[`docs/deployment-safety.md`](docs/deployment-safety.md).
+
+Штатный `install` использует короткое maintenance window и не является
+zero-downtime командой. Для текущей одно-репличной production-топологии с Caddy
+используйте отдельный guarded canary flow из
+[`deploy/prod/zero-downtime-production-runbook.md`](deploy/prod/zero-downtime-production-runbook.md):
+он оставляет старый app запущенным до полной readiness canary, запрещает pending
+миграции и требует явных атомарных переключений reverse proxy.
 
 ## Поддержка через Chatwoot
 
@@ -222,7 +272,7 @@ headers, включая nonce-based CSP, добавляет Clean Pay.
 ./deploy.sh ps         # состояние контейнеров
 ./deploy.sh logs       # логи, выход — Ctrl+C
 ./deploy.sh restart    # перезапуск контейнеров
-./deploy.sh install    # пересборка и безопасное обновление
+./deploy.sh install    # подготовка образов и обновление после резервной копии
 ./deploy.sh down       # остановка без удаления данных
 ```
 
@@ -251,8 +301,19 @@ git pull --ff-only
 
 Clean Pay использует generic e-mail auth, service-session, объединение аккаунтов
 и восстановление статуса платежей. Пока эти контракты не вошли в официальный
-release Remnashop, используйте проверенную revision `efe7524` из PR #135
-(`flake92/remnashop:codex/clean-pay-integration-upstream-dev`).
+release Remnashop, собирайте API, worker и scheduler из одного checkout на
+точном immutable commit PR #135, закреплённом в CI, с полной цепочкой миграций
+через `0058`. Не смешивайте роли из разных образов или ревизий.
+
+Remnashop также остаётся единственным владельцем SMTP и очереди напоминаний об
+окончании подписки. В нём задаются
+`EMAIL_SUBSCRIPTION_EXPIRATION_CABINET_URL`, SMTP-параметры и независимый
+fail-closed переключатель
+`EMAIL_SUBSCRIPTION_EXPIRATION_REMINDERS_ENABLED`. Clean Pay только показывает
+пользователю opt-in/opt-out в профиле; настройка по умолчанию выключена, не
+проводит оплату и не включает автопродление. Порядок безопасного включения
+описан в
+[`docs/production-migration-runbook.md`](docs/production-migration-runbook.md).
 
 Фоновая сверка платежей включается переменной
 `PAYMENT_RECONCILIATION_ENABLED=true`. Если установленная версия Remnashop не
@@ -301,6 +362,11 @@ npm run test:coverage
 npm run test:coverage:frontend
 npm run build
 ```
+
+Локальный full-stack E2E контракта `0058` запускайте с
+`REMNASHOP_HOST_SOURCE`, указывающим на проверенный checkout PR #135. В CI
+workflow checkout'ит тот же точный immutable commit со встроенной реализацией
+напоминаний; локальный overlay больше не используется.
 
 CI дополнительно выполняет:
 

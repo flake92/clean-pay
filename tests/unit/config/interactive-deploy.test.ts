@@ -37,7 +37,7 @@ describe("interactive owner deployment", () => {
     const up = deploy.match(/install_services\(\) \{[\s\S]*?\n\}/)?.[0] ?? "";
     expect(up).not.toContain("logs --tail=100 -f");
     expect(up.indexOf("verify_detailed_readiness")).toBeGreaterThan(
-      up.indexOf("compose up -d --build"),
+      up.indexOf("start_verified_runtimes"),
     );
   });
 

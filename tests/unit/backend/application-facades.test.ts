@@ -244,6 +244,64 @@ describe("application facades", () => {
     await expect(deleteAllCabinetDevices(commands)).resolves.toEqual({ status: "error", message: "Не удалось удалить устройства." });
   });
 
+  it.each([
+    ".",
+    "..",
+    " . ",
+    " .. ",
+    "/",
+    "\\",
+    "device/other",
+    "device\\other",
+    "%2e",
+    "%2E%2e",
+    "%2f",
+    "%5C",
+    "%252E",
+    "%252F",
+    "%255c",
+    ".%252e",
+    "device/%252e%252e/other",
+    "%25%32%65",
+    "%25%32%66",
+    "%25%35%43",
+    "%",
+    "%2",
+    "%GG",
+    "%C0%AE",
+    "%00",
+  ])("rejects unsafe path-based device HWID %j before calling the command port", async (hwid) => {
+    const commands = cabinetCommands();
+
+    await expect(deleteCabinetDevice(commands, hwid)).resolves.toEqual({
+      status: "error",
+      message: "Это устройство нельзя безопасно удалить отдельно.",
+    });
+    expect(commands.deleteDevice).not.toHaveBeenCalled();
+  });
+
+  it.each(["", "   "])("rejects empty device HWID %j before calling the command port", async (hwid) => {
+    const commands = cabinetCommands();
+
+    await expect(deleteCabinetDevice(commands, hwid)).resolves.toEqual({
+      status: "error",
+      message: "Некорректный идентификатор устройства.",
+    });
+    expect(commands.deleteDevice).not.toHaveBeenCalled();
+  });
+
+  it.each(["device.one", "device%2Eone", "device%252Eone"])(
+    "does not reject an ordinary path-stable HWID %j",
+    async (hwid) => {
+      const commands = cabinetCommands();
+
+      await expect(deleteCabinetDevice(commands, hwid)).resolves.toMatchObject({
+        status: "success",
+      });
+      expect(commands.deleteDevice).toHaveBeenCalledWith(hwid);
+    },
+  );
+
   it("keeps session termination behind the cabinet command port", async () => {
     const commands = cabinetCommands();
 
@@ -433,8 +491,62 @@ describe("application facades", () => {
 
   it("loads profile data through its reader port", async () => {
     const user = { authType: "email", email: "u@example.com", emailVerified: true, pendingEmail: null, telegramId: null };
-    await expect(loadProfileViewModel(authGateway())).resolves.toEqual({ status: "ready", user });
+    await expect(loadProfileViewModel(authGateway())).resolves.toEqual({
+      status: "ready",
+      user,
+      emailReminders: { status: "unavailable" },
+    });
+    await expect(loadProfileViewModel(authGateway(), {
+      load: vi.fn(async () => ({
+        enabled: true,
+        emailEligible: true,
+        senderEmail: "no-reply@example.com",
+        daysBefore: [7, 3, 1],
+      })),
+    })).resolves.toMatchObject({
+      status: "ready",
+      emailReminders: { status: "ready", enabled: true },
+    });
     await expect(loadProfileViewModel(authGateway({ loadCurrentSession: vi.fn(async () => null) }))).resolves.toEqual({ status: "unauthorized" });
     await expect(loadProfileViewModel(authGateway({ loadCurrentSession: vi.fn(async () => { throw new Error(); }) }))).resolves.toMatchObject({ status: "error" });
+  });
+
+  it("starts the optional reminder read without adding its timeout after the profile read", async () => {
+    let releaseProfile: (() => void) | undefined;
+    const profileBlocked = new Promise<void>((resolve) => {
+      releaseProfile = resolve;
+    });
+    const remindersLoad = vi.fn(async () => ({
+      enabled: false,
+      emailEligible: true,
+      senderEmail: "no-reply@example.com",
+      daysBefore: [7, 3, 1],
+    }));
+    const modelPromise = loadProfileViewModel(
+      authGateway({
+        loadCurrentSession: vi.fn(async () => {
+          await profileBlocked;
+          return {
+            context: {}, id: "session-1", userId: "user-1", authMethod: "EMAIL" as const,
+            hasUpstreamTokens: false,
+            user: {
+              email: "u@example.com", emailVerified: true, telegramId: null,
+              telegramUsername: null, fullName: null, displayName: null,
+              upstreamUserId: null, pendingUpstreamUserId: null, pendingEmail: null,
+              accountSyncPending: false,
+            },
+          };
+        }),
+      }),
+      { load: remindersLoad },
+    );
+
+    await vi.waitFor(() => expect(remindersLoad).toHaveBeenCalledOnce());
+    releaseProfile?.();
+
+    await expect(modelPromise).resolves.toMatchObject({
+      status: "ready",
+      emailReminders: { status: "ready", enabled: false },
+    });
   });
 });

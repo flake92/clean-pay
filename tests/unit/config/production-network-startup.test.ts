@@ -9,19 +9,34 @@ describe("production Docker network startup", () => {
 
     expect(source).toContain("validate_env");
     expect(source).toContain(
-      'node "$ROOT_DIR/deploy/prod/validate-env.mjs" --env-file "$ENV_FILE"',
+      'node "$ROOT_DIR/deploy/prod/validate-env.mjs" --clean-pay-env-file "$ENV_FILE"',
     );
     expect(source).toContain("unset \\");
     expect(source).toContain("COMPOSE_PROFILES \\");
     expect(source).toContain("NEXT_PUBLIC_APP_URL \\");
-    expect(source).not.toContain("    COMPOSE_FILE \\");
+    expect(source).toContain("    COMPOSE_FILE \\");
     expect(source).toContain('docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE"');
+    expect(source).toContain("env_value CLEAN_PAY_EDGE_NETWORK remnawave-network");
     expect(source).toContain("env_value REMNASHOP_DOCKER_NETWORK remnawave-network");
     expect(source).toContain('docker network inspect "$network_name"');
     expect(source).toContain('docker network create "$network_name"');
+    const ensureNetwork = source.slice(
+      source.indexOf("ensure_network() {"),
+      source.indexOf("ensure_redis_host_memory_policy() {"),
+    );
+    expect(ensureNetwork.indexOf("CLEAN_PAY_EDGE_NETWORK")).toBeLessThan(
+      ensureNetwork.indexOf('[ "$MODE" = "remnashop" ] || return 0'),
+    );
+    expect(ensureNetwork.indexOf("REMNASHOP_DOCKER_NETWORK")).toBeGreaterThan(
+      ensureNetwork.indexOf('[ "$MODE" = "remnashop" ] || return 0'),
+    );
+    expect(ensureNetwork).toContain('[ "$remnashop_network" = "$edge_network" ]');
     expect(startFunction.indexOf("ensure_network")).toBeGreaterThanOrEqual(0);
-    expect(startFunction.indexOf("compose up -d --build")).toBeGreaterThan(
+    expect(startFunction.indexOf("start_verified_runtimes")).toBeGreaterThan(
       startFunction.indexOf("ensure_network"),
+    );
+    expect(source).toContain(
+      "compose up -d --no-deps --no-build --pull never --wait",
     );
   });
 

@@ -4,6 +4,7 @@ import { useState } from "react";
 
 import { AccountActionRequired } from "@/frontend/components/account-action-required";
 import { LinkButton } from "@/frontend/components/prime/link-button";
+import { paymentGatewayLabel } from "@/frontend/lib/payment-gateway";
 import type {
   DurationGatewayPrice,
   PlanOffer,
@@ -47,6 +48,27 @@ function formatTraffic(limit: number) {
 
 function formatDeviceLimit(limit: number) {
   return limit > 0 ? String(limit) : "∞";
+}
+
+function discountedPrice(price: DurationGatewayPrice) {
+  const original = Number(price.original_amount);
+  const final = Number(price.final_amount);
+
+  if (
+    !Number.isFinite(original)
+    || !Number.isFinite(final)
+    || !Number.isFinite(price.discount_percent)
+    || price.discount_percent <= 0
+    || original <= final
+  ) {
+    return null;
+  }
+
+  return {
+    originalAmount: price.original_amount,
+    percent: new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 2 })
+      .format(price.discount_percent),
+  };
 }
 
 function priceOptionTemplate(option?: PriceOption) {
@@ -102,7 +124,7 @@ function gatewaySwitcher(
           <i aria-hidden="true" className="pi pi-chevron-left" />
         </button>
         <div aria-live="polite" className="clean-pay-gateway-switcher__current">
-          <strong>{selectedGateway}</strong>
+          <strong>{paymentGatewayLabel(selectedGateway)}</strong>
           <span>{selectedIndex + 1} из {gateways.length}</span>
         </div>
         <button
@@ -127,7 +149,7 @@ function buildPriceOptions(plan: PlanOffer) {
         days: duration.days,
         duration: formatDuration(duration.days),
         gateway: price.gateway_type,
-        label: `${formatDuration(duration.days)} - ${price.final_amount} ${price.currency_symbol} - ${price.gateway_type}`,
+        label: `${formatDuration(duration.days)} - ${price.final_amount} ${price.currency_symbol} - ${paymentGatewayLabel(price.gateway_type)}`,
         value: `${duration.days}:${price.gateway_type}`,
       })),
     )
@@ -233,6 +255,7 @@ export function TariffsPanel({ model }: { model: TariffsViewModel }) {
           );
           const fallbackPrice = bestPrice(plan);
           const currentPrice = selectedPrice ?? fallbackPrice;
+          const discount = currentPrice ? discountedPrice(currentPrice) : null;
           const paymentHref = currentPrice
             ? `/payment?plan=${encodeURIComponent(plan.public_code)}&duration=${encodeURIComponent(
                 selectedDuration?.days ?? selectedOption?.days ?? plan.durations[0]?.days ?? "",
@@ -274,8 +297,16 @@ export function TariffsPanel({ model }: { model: TariffsViewModel }) {
                         <p className="m-0 text-3xl font-semibold text-900">
                           {currentPrice.final_amount} {currentPrice.currency_symbol}
                         </p>
+                        {discount ? (
+                          <div className="mt-1 flex align-items-center justify-content-end gap-2">
+                            <del className="text-sm text-500">
+                              {discount.originalAmount} {currentPrice.currency_symbol}
+                            </del>
+                            <Tag severity="success" value={`Скидка ${discount.percent}%`} />
+                          </div>
+                        ) : null}
                         <p className="m-0 mt-1 text-sm text-500">
-                          {currentPrice.gateway_type}
+                          {paymentGatewayLabel(currentPrice.gateway_type)}
                         </p>
                       </div>
                     ) : null}

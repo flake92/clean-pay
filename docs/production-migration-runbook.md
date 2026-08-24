@@ -158,7 +158,29 @@ the complete migration chain, custom-format backup and restore.
 Remnashop follows the same release invariant: run its one-shot `migration`
 service (`docker-migrate.sh`) before API, worker, or scheduler. All three runtime
 roles must use the same reviewed image and must not invoke Alembic from their
-entrypoint. A rehearsal must apply the full chain through revision `0056` on an
+entrypoint. A rehearsal must apply the full chain through revision `0058` on an
 empty database and then repeat with no pending work. Rollback uses the pinned
 previous image plus a verified pre-upgrade database restore; never run an
 automatic destructive downgrade against the only production database.
+
+Revision `0057` adds the explicit user opt-in and durable subscription-email
+outbox. Before enabling delivery, configure Remnashop SMTP plus:
+
+```dotenv
+EMAIL_USE_TLS=true
+EMAIL_USE_SSL=false
+EMAIL_ALLOW_INSECURE_SMTP=false
+EMAIL_SUBSCRIPTION_EXPIRATION_CABINET_URL=https://pay.example.com/cabinet
+EMAIL_SUBSCRIPTION_EXPIRATION_REMINDERS_ENABLED=false
+```
+
+Deploy migration, API, worker and scheduler from one image first. While the
+kill switch is `false`, verify the GET route and PATCH with `false`; enabling a
+user preference intentionally returns `503` in this state. Validate a complete
+opt-in and test delivery in staging. For production, be ready to restore the
+switch to `false`, change it to `true`, restart the Remnashop runtime roles,
+enable one controlled test account and verify its delivery before wider use.
+Do not use `WEB_CABINET_URL` in reminder emails: it points to Telegram WebApp
+auth in this integration. SMTP credentials remain only in Remnashop. Configure
+SPF, DKIM and DMARC for the sender domain before wider delivery; the application
+cannot establish those DNS/provider controls itself.

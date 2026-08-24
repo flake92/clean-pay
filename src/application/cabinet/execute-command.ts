@@ -3,6 +3,7 @@ import {
   type CabinetCommands,
 } from "@/application/cabinet/ports/cabinet-commands";
 import type { CabinetCommandResult } from "@/application/models/cabinet-actions";
+import { hasUnsafeDeviceHwidPathSegment } from "@/shared/domain/device-hwid";
 
 function printable(value: string, maxLength: number) {
   const normalized = value.trim();
@@ -20,7 +21,12 @@ function errorMessage(error: unknown, fallback: string): string {
 
 export async function deleteCabinetDevice(commands: CabinetCommands, hwid: string): Promise<CabinetCommandResult> {
   const validHwid = printable(hwid, 512);
-  if (!validHwid) return { status: "error", message: "Некорректный идентификатор устройства." };
+  if (!validHwid) {
+    return { status: "error", message: "Некорректный идентификатор устройства." };
+  }
+  if (hasUnsafeDeviceHwidPathSegment(validHwid)) {
+    return { status: "error", message: "Это устройство нельзя безопасно удалить отдельно." };
+  }
   try {
     await commands.deleteDevice(validHwid);
     return { status: "success", message: "Устройство удалено." };

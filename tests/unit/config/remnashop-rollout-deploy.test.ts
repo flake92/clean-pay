@@ -8,18 +8,37 @@ const start = readFileSync("start.sh", "utf8");
 const prodCommand = readFileSync("deploy/prod/prod.mjs", "utf8");
 
 describe("Remnashop payment rollout deployment", () => {
-  it("runs automatically only after Clean Pay becomes ready", () => {
-    expect(deploy.indexOf('sh "$REMNASHOP_ROLLOUT_SCRIPT" "$ENV_FILE"')).toBeGreaterThan(
-      deploy.indexOf("compose up -d --build --wait"),
+  it("checks compatibility before replacement and finalizes only after readiness", () => {
+    const deployInstall = deploy.slice(
+      deploy.indexOf("install_services() {"),
+      deploy.indexOf("up() {"),
     );
-    expect(start.indexOf('sh "$REMNASHOP_ROLLOUT_SCRIPT" "$ENV_FILE"')).toBeGreaterThan(
-      start.indexOf("verify"),
+    const startInstall = start.slice(start.indexOf("start() {"), start.indexOf("verify() {"));
+    const prodInstall = prodCommand.slice(
+      prodCommand.indexOf('case "up":'),
+      prodCommand.indexOf('case "down":'),
+    );
+
+    expect(deployInstall.indexOf('sh "$REMNASHOP_ROLLOUT_SCRIPT" "$ENV_FILE" check')).toBeLessThan(
+      deployInstall.indexOf("stop_runtime_services"),
+    );
+    expect(deployInstall.indexOf('sh "$REMNASHOP_ROLLOUT_SCRIPT" "$ENV_FILE" finalize')).toBeGreaterThan(
+      deployInstall.indexOf("verify_detailed_readiness"),
+    );
+    expect(startInstall.indexOf('sh "$REMNASHOP_ROLLOUT_SCRIPT" "$ENV_FILE" check')).toBeLessThan(
+      startInstall.indexOf("stop_runtime_services"),
+    );
+    expect(startInstall.indexOf('sh "$REMNASHOP_ROLLOUT_SCRIPT" "$ENV_FILE" finalize')).toBeGreaterThan(
+      startInstall.indexOf("verify"),
     );
     expect(start).toMatch(
-      /if \[ "\$MODE" = "remnashop" \]; then\s+sh "\$REMNASHOP_ROLLOUT_SCRIPT" "\$ENV_FILE"/,
+      /if \[ "\$MODE" = "remnashop" \]; then\s+sh "\$REMNASHOP_ROLLOUT_SCRIPT" "\$ENV_FILE" check/,
     );
-    expect(prodCommand.indexOf("prepareRemnashopPaymentRollout();")).toBeGreaterThan(
-      prodCommand.indexOf("await verify();"),
+    expect(prodInstall.indexOf('prepareRemnashopPaymentRollout("check");')).toBeLessThan(
+      prodInstall.indexOf("stopRuntimeServices();"),
+    );
+    expect(prodInstall.indexOf('prepareRemnashopPaymentRollout("finalize");')).toBeGreaterThan(
+      prodInstall.indexOf("await verify();"),
     );
   });
 
@@ -27,6 +46,19 @@ describe("Remnashop payment rollout deployment", () => {
     expect(rollout).toContain("API, worker and scheduler must use the same image");
     expect(rollout).toContain("current_revision");
     expect(rollout).toContain('to_regclass(\'public.payment_runtime_control\')');
+    expect(rollout).toContain('to_regclass(\'public.subscription_email_reminders\')');
+    expect(rollout).toContain("FROM information_schema.columns");
+    expect(rollout).toContain("table_schema = 'public'");
+    expect(rollout).toContain("table_name = 'users'");
+    expect(rollout).toContain("'subscription_expiration_email_enabled'");
+    expect(rollout).toContain("'subscription_expiration_email_enabled_at'");
+    expect(rollout).toContain("count(DISTINCT column_name)");
+    expect(rollout).toContain("= 2");
+    expect(rollout).toContain("/api/v1/public/auth/notification-preferences");
+    expect(rollout).toContain('contract_statuses" = "422 405');
+    expect(rollout.indexOf('if [ "$PHASE" = "check" ]')).toBeLessThan(
+      rollout.indexOf("pg_advisory_xact_lock"),
+    );
     expect(rollout).toContain("payment_operation_count <> 0");
     expect(rollout).toContain("active_fulfillment_count <> 0");
     expect(rollout).toContain("BEGIN;");

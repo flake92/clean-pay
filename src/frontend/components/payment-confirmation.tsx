@@ -12,6 +12,7 @@ import { Message } from "primereact/message";
 import { executePaymentAction } from "@/app/actions/payments";
 import { InstallAppButton } from "@/frontend/components/install-app-button";
 import { navigateTo, replaceWith } from "@/frontend/lib/browser-navigation";
+import { paymentGatewayLabel } from "@/frontend/lib/payment-gateway";
 import {
   clearPaymentIdempotencyKey,
   getOrCreatePaymentIdempotencyKey,
@@ -274,7 +275,7 @@ export function PaymentConfirmation({
               {selection.price.final_amount} {selection.price.currency_symbol}
             </p>
             <p className="m-0 mt-1 text-sm text-500">
-              {selection.price.gateway_type}
+              {paymentGatewayLabel(selection.price.gateway_type)}
             </p>
           </div>
         </div>

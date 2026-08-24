@@ -12,6 +12,8 @@ import type {
   RemnashopMe,
   StartGenericEmailAuthRequest,
   RequestPasswordResetRequest,
+  NotificationPreferencesResponse,
+  UpdateNotificationPreferencesRequest,
   TelegramAuthRequest,
   TelegramWebAppAuthRequest,
 } from "@/backend/integrations/remnashop/contracts";
@@ -31,7 +33,7 @@ import {
 export { protectRemnashopToken, revealRemnashopToken } from "@/backend/integrations/remnashop/token-protection";
 
 type RequestOptions = {
-  method?: "GET" | "POST" | "DELETE";
+  method?: "GET" | "POST" | "PATCH" | "DELETE";
   body?: unknown;
   accessToken?: string;
   refreshToken?: string;
@@ -677,6 +679,26 @@ export async function getRemnashopMe(
     accessToken,
     timeoutMs,
   });
+}
+
+export async function getRemnashopNotificationPreferences(
+  accessToken: string,
+  { timeoutMs = 3_000 }: { timeoutMs?: number } = {},
+) {
+  return remnashopRequest<NotificationPreferencesResponse>(
+    "/auth/notification-preferences",
+    { accessToken, timeoutMs },
+  );
+}
+
+export async function updateRemnashopNotificationPreferences(
+  accessToken: string,
+  body: UpdateNotificationPreferencesRequest,
+) {
+  return remnashopRequest<NotificationPreferencesResponse>(
+    "/auth/notification-preferences",
+    { method: "PATCH", accessToken, body },
+  );
 }
 
 export async function remnashopLinkTelegram({

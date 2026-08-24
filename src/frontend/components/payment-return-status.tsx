@@ -8,6 +8,7 @@ import { Button } from "primereact/button";
 import { LinkButton } from "@/frontend/components/prime/link-button";
 import { shouldPollPaymentOperation } from "@/frontend/lib/payment-idempotency";
 import {
+  canAutoPollPaymentReturn,
   paymentPollDelayMs,
   paymentReturnOutcome,
   shouldPollPaymentReturn,
@@ -72,16 +73,68 @@ function paymentSeverity(status: string): "success" | "warning" | "danger" | "in
 export function PaymentReturnStatus({ kind, model, operationId, paymentId }: Props) {
   const [loading, startRefresh] = useTransition();
   const [currentModel, setCurrentModel] = useState(model);
+  const [stoppedPollingKey, setStoppedPollingKey] = useState<string | null>(null);
+  const [refreshError, setRefreshError] = useState<string | null>(null);
+  const [pollingWakeSignal, setPollingWakeSignal] = useState(0);
   const initialLookupAttemptedRef = useRef(false);
   const pollAttemptRef = useRef(0);
+  const pollTimerRef = useRef<number | null>(null);
+  const refreshRequestRef = useRef(0);
   const data = currentModel.status === "ready" ? currentModel.data : null;
-  const error = currentModel.status === "error" ? currentModel.message : null;
+  const error = refreshError
+    ?? (currentModel.status === "error" ? currentModel.message : null);
+  const pollingKey = data?.operation?.operation_id
+    ?? data?.payment?.payment_id
+    ?? operationId
+    ?? paymentId
+    ?? "payment-return";
+  const autoPollingStopped = Boolean(
+    data
+    && shouldPollPaymentReturn(data)
+    && stoppedPollingKey === pollingKey,
+  );
 
   const refreshStatus = useCallback(() => {
+    const requestId = refreshRequestRef.current + 1;
+    refreshRequestRef.current = requestId;
     startRefresh(async () => {
-      setCurrentModel(await refreshPaymentStatusAction({ operationId, paymentId }));
+      try {
+        const refreshed = await refreshPaymentStatusAction({ operationId, paymentId });
+        if (refreshRequestRef.current !== requestId) return;
+        setCurrentModel(refreshed);
+        setRefreshError(null);
+      } catch {
+        if (refreshRequestRef.current !== requestId) return;
+        setRefreshError("Не удалось обновить статус. Проверьте соединение и повторите вручную.");
+      }
     });
   }, [operationId, paymentId]);
+
+  const refreshManually = useCallback(() => {
+    if (pollTimerRef.current !== null) {
+      window.clearTimeout(pollTimerRef.current);
+      pollTimerRef.current = null;
+    }
+    pollAttemptRef.current = 0;
+    setStoppedPollingKey(null);
+    setRefreshError(null);
+    refreshStatus();
+  }, [refreshStatus]);
+
+  useEffect(() => {
+    const wakePolling = () => {
+      if (document.visibilityState !== "hidden" && navigator.onLine !== false) {
+        setPollingWakeSignal((value) => value + 1);
+      }
+    };
+
+    document.addEventListener("visibilitychange", wakePolling);
+    window.addEventListener("online", wakePolling);
+    return () => {
+      document.removeEventListener("visibilitychange", wakePolling);
+      window.removeEventListener("online", wakePolling);
+    };
+  }, []);
 
   useEffect(() => {
     const shouldAttemptInitialRefresh = !data?.operation && !data?.payment
@@ -105,14 +158,33 @@ export function PaymentReturnStatus({ kind, model, operationId, paymentId }: Pro
       return;
     }
 
+    if (refreshError) return;
+
     const attempt = pollAttemptRef.current;
+    if (!canAutoPollPaymentReturn(attempt)) {
+      return;
+    }
+
     const timer = window.setTimeout(() => {
-      pollAttemptRef.current = attempt + 1;
+      pollTimerRef.current = null;
+      if (document.visibilityState === "hidden" || navigator.onLine === false) {
+        return;
+      }
+
+      const nextAttempt = attempt + 1;
+      pollAttemptRef.current = nextAttempt;
+      if (!canAutoPollPaymentReturn(nextAttempt)) {
+        setStoppedPollingKey(pollingKey);
+      }
       refreshStatus();
     }, paymentPollDelayMs(attempt, data.operation?.retry_after_seconds));
+    pollTimerRef.current = timer;
 
-    return () => window.clearTimeout(timer);
-  }, [data, refreshStatus]);
+    return () => {
+      window.clearTimeout(timer);
+      if (pollTimerRef.current === timer) pollTimerRef.current = null;
+    };
+  }, [data, pollingKey, pollingWakeSignal, refreshError, refreshStatus]);
 
   return (
     <div className="flex flex-column gap-6">
@@ -130,6 +202,12 @@ export function PaymentReturnStatus({ kind, model, operationId, paymentId }: Pro
           <Message
             severity="info"
             text={`Операция ${data.operation.operation_id} ещё проверяется. Новую оплату создавать не нужно.`}
+          />
+        ) : null}
+        {autoPollingStopped ? (
+          <Message
+            severity="warn"
+            text="Автоматическая проверка приостановлена, чтобы не обновлять страницу бесконечно. Нажмите «Обновить статус» для новой проверки; повторную оплату создавать не нужно."
           />
         ) : null}
         {data?.operation?.status === "retry_ready" ? (
@@ -180,7 +258,7 @@ export function PaymentReturnStatus({ kind, model, operationId, paymentId }: Pro
           icon="pi pi-refresh"
           label="Обновить статус"
           loading={loading}
-          onClick={refreshStatus}
+          onClick={refreshManually}
           outlined
           type="button"
         />

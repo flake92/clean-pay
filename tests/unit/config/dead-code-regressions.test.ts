@@ -81,7 +81,7 @@ function importedProjectFiles(file: string, filesByPath: Map<string, string>) {
 }
 
 function productionRoots(files: string[]) {
-  const nextEntry = /[\\/](?:page|layout|route|loading|error|not-found|template|default|manifest|robots|sitemap|icon|apple-icon|opengraph-image|twitter-image)\.(?:[cm]?[jt]sx?)$/;
+  const nextEntry = /[\\/](?:page|layout|route|loading|error|global-error|not-found|template|default|manifest|robots|sitemap|icon|apple-icon|opengraph-image|twitter-image)\.(?:[cm]?[jt]sx?)$/;
   const frameworkEntry = /[\\/](?:proxy|middleware|instrumentation|instrumentation-client)\.(?:[cm]?[jt]sx?)$/;
 
   return files.filter((file) => nextEntry.test(file) || frameworkEntry.test(file) || file.endsWith(".d.ts"));

@@ -75,7 +75,8 @@ describe("health checks", () => {
       .mockResolvedValueOnce(new Response("{}", { status: 200 }))
       .mockResolvedValueOnce(new Response("{}", { status: 422 }))
       .mockResolvedValueOnce(new Response("{}", { status: 422 }))
-      .mockResolvedValueOnce(new Response("{}", { status: 422 }));
+      .mockResolvedValueOnce(new Response("{}", { status: 422 }))
+      .mockResolvedValueOnce(new Response("{}", { status: 405 }));
 
     await expect(measuredCheck("Remnashop", createProductionReadinessGateway().checkRemnashop)).resolves.toMatchObject({ status: "ok" });
     expect(fetch).toHaveBeenNthCalledWith(1, "http://remnashop:5000/api/v1/public/plans/public", expect.objectContaining({
@@ -100,6 +101,10 @@ describe("health checks", () => {
       method: "POST",
       body: "{}",
     }));
+    expect(fetch).toHaveBeenNthCalledWith(5, "http://remnashop:5000/api/v1/public/auth/notification-preferences", expect.objectContaining({
+      method: "POST",
+      body: "{}",
+    }));
 
     vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(new Response("{}", { status: 503 }));
     await expect(measuredCheck("Remnashop", createProductionReadinessGateway().checkRemnashop)).resolves.toMatchObject({ status: "down", message: "Remnashop returned 503" });
@@ -121,6 +126,7 @@ describe("health checks", () => {
       new Response("email", { status: 422 }),
       new Response("identify", { status: 422 }),
       new Response("service", { status: 422 }),
+      new Response("notification-preferences", { status: 405 }),
       new Response("mailpit", { status: 200 }),
       new Response("remnawave", { status: 200 }),
     ];
@@ -192,6 +198,28 @@ describe("health checks", () => {
     await expect(measuredCheck("Remnashop", createProductionReadinessGateway().checkRemnashop)).resolves.toMatchObject({
       status: "down",
       message: "Remnashop is incompatible: /auth/service-session is missing",
+    });
+
+    fetch
+      .mockResolvedValueOnce(new Response("{}", { status: 200 }))
+      .mockResolvedValueOnce(new Response("{}", { status: 422 }))
+      .mockResolvedValueOnce(new Response("{}", { status: 422 }))
+      .mockResolvedValueOnce(new Response("{}", { status: 422 }))
+      .mockResolvedValueOnce(new Response("{}", { status: 404 }));
+    await expect(measuredCheck("Remnashop", createProductionReadinessGateway().checkRemnashop)).resolves.toMatchObject({
+      status: "down",
+      message: "Remnashop is incompatible: /auth/notification-preferences is missing",
+    });
+
+    fetch
+      .mockResolvedValueOnce(new Response("{}", { status: 200 }))
+      .mockResolvedValueOnce(new Response("{}", { status: 422 }))
+      .mockResolvedValueOnce(new Response("{}", { status: 422 }))
+      .mockResolvedValueOnce(new Response("{}", { status: 422 }))
+      .mockResolvedValueOnce(new Response("{}", { status: 200 }));
+    await expect(measuredCheck("Remnashop", createProductionReadinessGateway().checkRemnashop)).resolves.toMatchObject({
+      status: "down",
+      message: "Remnashop /auth/notification-preferences contract returned 200, expected 405",
     });
   });
 

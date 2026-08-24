@@ -55,11 +55,106 @@ const FORBIDDEN_COMPOSE_CONTROL_NAMES = new Set([
   "COMPOSE_PROFILES",
 ]);
 
+const FORBIDDEN_ENV_FILE_METADATA_NAMES = new Set([
+  "CLEAN_PAY_BAKED_BRAND_LOGO_URL",
+  "CLEAN_PAY_BAKED_BRAND_NAME",
+  "CLEAN_PAY_BAKED_PUBLIC_APP_URL",
+  "CLEAN_PAY_BAKED_TURNSTILE_WIDGET_ID",
+]);
+
+// Production env files are also passed to Docker as container env files. Keep
+// this list explicit so Node/Docker control variables (for example
+// NODE_OPTIONS) cannot be smuggled into a reviewed deployment.
+export const PRODUCTION_ENVIRONMENT_FILE_NAMES = Object.freeze([
+  "APP_URL",
+  "AUDIT_INFO_RETENTION_DAYS",
+  "AUDIT_IP_HASH_SECRET",
+  "AUDIT_SECURITY_RETENTION_DAYS",
+  "AUTH_CONCURRENCY_LIMIT",
+  "AUTH_RATE_LIMIT_CAPACITY",
+  "AUTH_STATE_RETENTION_DAYS",
+  "CHATWOOT_BASE_URL",
+  "CHATWOOT_HMAC_TOKEN",
+  "CHATWOOT_WEBSITE_TOKEN",
+  "CLEAN_PAY_BIND",
+  "CLEAN_PAY_DEPLOY_SOURCE",
+  "CLEAN_PAY_EDGE_NETWORK",
+  "CLEAN_PAY_IMAGE",
+  "CLEAN_PAY_MIGRATION_IMAGE",
+  "CLEAN_PAY_MIN_FREE_DISK_MB",
+  "CLEAN_PAY_PORT",
+  "CLEAN_PAY_READINESS_MAILPIT_URL",
+  "CLEAN_PAY_READINESS_REMNAWAVE_URL",
+  "CLEAN_PAY_RELEASE",
+  "CLEAN_PAY_REVISION",
+  "COMPOSE_PROJECT_NAME",
+  "COOKIE_SAMESITE",
+  "COOKIE_SECURE",
+  "DATABASE_URL",
+  "DATA_RETENTION_INTERVAL_SECONDS",
+  "LOG_LEVEL",
+  "NEXT_PUBLIC_APP_URL",
+  "NEXT_PUBLIC_BRAND_LOGO_URL",
+  "NEXT_PUBLIC_BRAND_NAME",
+  "PAYMENT_RECONCILIATION_BATCH_SIZE",
+  "PAYMENT_RECONCILIATION_ENABLED",
+  "PAYMENT_RECONCILIATION_INTERNAL_URL",
+  "PAYMENT_RECONCILIATION_INTERVAL_SECONDS",
+  "PAYMENT_RECONCILIATION_SECRET",
+  "POSTGRES_DB",
+  "POSTGRES_PASSWORD",
+  "POSTGRES_USER",
+  "RATE_LIMIT_IDENTITY_SECRET",
+  "RATE_LIMIT_RETENTION_DAYS",
+  "READINESS_INTERNAL_SECRET",
+  "REDIS_URL",
+  "REMNASHOP_ADMIN_API_BASE_URL",
+  "REMNASHOP_API_BASE_URL",
+  "REMNASHOP_API_CONTAINER",
+  "REMNASHOP_API_KEY",
+  "REMNASHOP_AUTH_SERVICE_KEY",
+  "REMNASHOP_DOCKER_NETWORK",
+  "REMNASHOP_MINIMUM_ALEMBIC_REVISION",
+  "REMNASHOP_POSTGRES_CONTAINER",
+  "REMNASHOP_SCHEDULER_CONTAINER",
+  "REMNASHOP_WORKER_CONTAINER",
+  "REMNAWAVE_API_BASE_URL",
+  "REMNAWAVE_SUBSCRIPTION_ORIGINS",
+  "REMNAWAVE_TOKEN",
+  "SESSION_RETENTION_DAYS",
+  "SUPPORT_EMAIL",
+  "SUPPORT_ENABLED",
+  "SUPPORT_FAQ_URL",
+  "SUPPORT_TELEGRAM_USERNAME",
+  "TELEGRAM_BOT_TOKEN",
+  "TELEGRAM_OIDC_AUTHORIZATION_ENDPOINT",
+  "TELEGRAM_OIDC_CLIENT_ID",
+  "TELEGRAM_OIDC_CLIENT_SECRET",
+  "TELEGRAM_OIDC_ISSUER",
+  "TELEGRAM_OIDC_JWKS_URI",
+  "TELEGRAM_OIDC_TOKEN_ENDPOINT",
+  "TRUSTED_PROXY_HOPS",
+  "TURNSTILE_ENABLED",
+  "TURNSTILE_SECRET_KEY",
+  "TURNSTILE_SITE_KEY",
+  "TURNSTILE_VERIFY_URL",
+  "WEB_JWT_SECRET",
+  "WEB_REFRESH_SECRET",
+]);
+
+const PRODUCTION_ENVIRONMENT_FILE_NAME_SET = new Set(
+  PRODUCTION_ENVIRONMENT_FILE_NAMES,
+);
+
 export const COMPOSE_INTERPOLATION_ENVIRONMENT_NAMES = Object.freeze([
   "CLEAN_PAY_BIND",
   "CLEAN_PAY_EDGE_NETWORK",
   "CLEAN_PAY_IMAGE",
+  "CLEAN_PAY_MIGRATION_IMAGE",
+  "CLEAN_PAY_MIN_FREE_DISK_MB",
   "CLEAN_PAY_PORT",
+  "CLEAN_PAY_RELEASE",
+  "CLEAN_PAY_REVISION",
   "COMPOSE_ENV_FILES",
   "COMPOSE_FILE",
   "COMPOSE_PROFILES",
@@ -112,6 +207,14 @@ export function parseProductionEnvironmentFile(contents, sourceName = ".env") {
       fail(`${sourceName}:${index + 1} must not set Compose control variable ${name}`);
     }
 
+    if (FORBIDDEN_ENV_FILE_METADATA_NAMES.has(name)) {
+      fail(`${name} is image metadata and must not be set in an env file`);
+    }
+
+    if (name === "CLEAN_PAY_BUILD_PHASE") {
+      fail("CLEAN_PAY_BUILD_PHASE is build-only and must not be set in an env file");
+    }
+
     if (Object.hasOwn(environment, name)) {
       fail(`${sourceName}:${index + 1} duplicates ${name}`);
     }
@@ -119,7 +222,125 @@ export function parseProductionEnvironmentFile(contents, sourceName = ".env") {
     environment[name] = parseEnvValue(rawValue, sourceName, index + 1);
   }
 
+  for (const name of Object.keys(environment)) {
+    if (!PRODUCTION_ENVIRONMENT_FILE_NAME_SET.has(name)) {
+      fail(
+        `${sourceName} contains unsupported runtime variable ${name}; only documented Clean Pay settings are allowed`,
+      );
+    }
+  }
+
   return environment;
+}
+
+export function validateProductionPublicBuildConfiguration(environment) {
+  const required = (name) => {
+    const value = deploymentEnvironmentValue(environment, name, true);
+    return value;
+  };
+
+  const appUrl = publicHttpsOrigin(
+    "NEXT_PUBLIC_APP_URL",
+    required("NEXT_PUBLIC_APP_URL"),
+  ).origin;
+  const brandName = required("NEXT_PUBLIC_BRAND_NAME");
+  const brandLogoUrl = required("NEXT_PUBLIC_BRAND_LOGO_URL");
+  const turnstileEnabled = bool(
+    "TURNSTILE_ENABLED",
+    required("TURNSTILE_ENABLED"),
+    false,
+  );
+  const turnstileSiteKey = required("TURNSTILE_SITE_KEY");
+
+  if (brandName.length > 80 || /[\r\n]/.test(brandName)) {
+    fail("NEXT_PUBLIC_BRAND_NAME must contain 1 to 80 characters");
+  }
+
+  publicPath("NEXT_PUBLIC_BRAND_LOGO_URL", brandLogoUrl);
+
+  if (!turnstileEnabled) {
+    fail("TURNSTILE_ENABLED must be true in a production public build");
+  }
+
+  if (
+    looksLikePlaceholder(turnstileSiteKey) ||
+    KNOWN_TURNSTILE_TEST_KEYS.has(turnstileSiteKey)
+  ) {
+    fail("TURNSTILE_SITE_KEY must be a real non-test Cloudflare site key");
+  }
+
+  if (turnstileSiteKey.length < 20 || /[\r\n]/.test(turnstileSiteKey)) {
+    fail("TURNSTILE_SITE_KEY must be a complete Cloudflare site key");
+  }
+
+  return Object.freeze({ appUrl, brandName, brandLogoUrl, turnstileSiteKey });
+}
+
+export function validateDeploymentImageReferences(environment) {
+  const source = deploymentEnvironmentValue(
+    environment,
+    "CLEAN_PAY_DEPLOY_SOURCE",
+    false,
+  ) ?? "build";
+
+  if (source !== "build" && source !== "pull") {
+    fail('CLEAN_PAY_DEPLOY_SOURCE must be "build" or "pull"');
+  }
+
+  const applicationValue = deploymentEnvironmentValue(
+    environment,
+    "CLEAN_PAY_IMAGE",
+    true,
+  );
+  const migrationValue = deploymentEnvironmentValue(
+    environment,
+    "CLEAN_PAY_MIGRATION_IMAGE",
+    true,
+  );
+
+  if (source === "build") {
+    const applicationImage = taggedImageReference(
+      "CLEAN_PAY_IMAGE",
+      applicationValue,
+    );
+    const migrationImage = taggedImageReference(
+      "CLEAN_PAY_MIGRATION_IMAGE",
+      migrationValue,
+    );
+
+    if (applicationImage === migrationImage) {
+      fail("CLEAN_PAY_IMAGE and CLEAN_PAY_MIGRATION_IMAGE must reference different target images");
+    }
+
+    return Object.freeze({
+      source,
+      applicationImage,
+      migrationImage,
+      applicationDigest: null,
+      migrationDigest: null,
+    });
+  }
+
+  const applicationImage = immutableImageReference(
+    "CLEAN_PAY_IMAGE",
+    applicationValue,
+  );
+  const migrationImage = immutableImageReference(
+    "CLEAN_PAY_MIGRATION_IMAGE",
+    migrationValue,
+  );
+
+  if (applicationImage.digest === migrationImage.digest) {
+    fail("CLEAN_PAY_IMAGE and CLEAN_PAY_MIGRATION_IMAGE must use different sha256 digests");
+  }
+
+  return Object.freeze({
+    source,
+    applicationImage: applicationImage.reference,
+    migrationImage: migrationImage.reference,
+    applicationDigest: applicationImage.digest,
+    migrationDigest: migrationImage.digest,
+  });
 }
 
 export function validateProductionEnvironment(environment) {
@@ -149,6 +370,36 @@ export function validateProductionEnvironment(environment) {
 
     return value;
   };
+
+  const deploymentImages = validateDeploymentImageReferences(environment);
+  const imageRelease = imageMetadataValue(
+    "CLEAN_PAY_RELEASE",
+    optional("CLEAN_PAY_RELEASE") ?? "local",
+  );
+  const imageRevision = imageMetadataValue(
+    "CLEAN_PAY_REVISION",
+    optional("CLEAN_PAY_REVISION") ?? "local",
+  );
+  const localImageMetadata = imageRelease === "local" && imageRevision === "local";
+
+  if ((imageRelease === "local") !== (imageRevision === "local")) {
+    fail("CLEAN_PAY_RELEASE and CLEAN_PAY_REVISION must both be local or both be traceable");
+  }
+
+  if (!localImageMetadata && !/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(imageRevision)) {
+    fail("CLEAN_PAY_REVISION must be an exact lowercase Git commit hash outside local mode");
+  }
+
+  if (deploymentImages.source === "pull" && localImageMetadata) {
+    fail("pull mode requires traceable CLEAN_PAY_RELEASE and CLEAN_PAY_REVISION metadata");
+  }
+  boundedInteger(
+    "CLEAN_PAY_MIN_FREE_DISK_MB",
+    optional("CLEAN_PAY_MIN_FREE_DISK_MB"),
+    8192,
+    1,
+    1_000_000,
+  );
 
   if (optional("CLEAN_PAY_BUILD_PHASE") === "true") {
     fail("CLEAN_PAY_BUILD_PHASE is build-only and must not be enabled at runtime");
@@ -505,7 +756,16 @@ export function validateProductionEnvironment(environment) {
     if (!turnstileSecret) {
       fail("TURNSTILE_SECRET_KEY is required when TURNSTILE_ENABLED=true");
     }
+  }
 
+  const bakedTurnstileSiteKey = optional(
+    "CLEAN_PAY_BAKED_TURNSTILE_WIDGET_ID",
+  );
+
+  if (bakedTurnstileSiteKey && bakedTurnstileSiteKey !== turnstileSiteKey) {
+    fail(
+      "CLEAN_PAY_BAKED_TURNSTILE_WIDGET_ID must match TURNSTILE_SITE_KEY; rebuild the image",
+    );
   }
 
   bool(
@@ -1166,6 +1426,140 @@ function publicPath(name, value) {
   ) {
     fail(`${name} must be a root-relative public path like /brand/logo.png`);
   }
+}
+
+function deploymentEnvironmentValue(environment, name, required) {
+  const rawValue = environment[name];
+
+  if (rawValue === undefined || rawValue === null || rawValue === "") {
+    if (required) {
+      fail(`${name} is required`);
+    }
+
+    return null;
+  }
+
+  if (typeof rawValue !== "string") {
+    fail(`${name} must be a string`);
+  }
+
+  if (rawValue !== rawValue.trim()) {
+    fail(`${name} must not contain surrounding whitespace`);
+  }
+
+  return rawValue;
+}
+
+function taggedImageReference(name, value) {
+  if (value.includes("@")) {
+    fail(`${name} must be a non-digest tagged image reference in build mode`);
+  }
+
+  const lastSlash = value.lastIndexOf("/");
+  const lastColon = value.lastIndexOf(":");
+
+  if (lastColon <= lastSlash) {
+    fail(`${name} must include an explicit tag in build mode`);
+  }
+
+  const repository = value.slice(0, lastColon);
+  const tag = value.slice(lastColon + 1);
+
+  if (!validImageRepository(repository) || !/^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$/.test(tag)) {
+    fail(`${name} must be a valid non-digest tagged image reference in build mode`);
+  }
+
+  return value;
+}
+
+function immutableImageReference(name, value) {
+  const match = /^(.*)@sha256:([a-f0-9]{64})$/.exec(value);
+
+  if (!match) {
+    fail(`${name} must be pinned by an exact sha256 digest in pull mode`);
+  }
+
+  const [, repository, digest] = match;
+
+  if (!validImageRepository(repository) || repositoryHasTag(repository)) {
+    fail(`${name} must be a valid image repository pinned by an exact sha256 digest`);
+  }
+
+  return Object.freeze({ reference: value, digest });
+}
+
+function repositoryHasTag(repository) {
+  return repository.lastIndexOf(":") > repository.lastIndexOf("/");
+}
+
+function validImageRepository(repository) {
+  if (
+    repository.length === 0 ||
+    repository.length > 255 ||
+    repository.includes("@") ||
+    repository.includes("//") ||
+    repository.startsWith("/") ||
+    repository.endsWith("/")
+  ) {
+    return false;
+  }
+
+  const components = repository.split("/");
+  const first = components[0];
+  const firstIsRegistry =
+    components.length > 1 &&
+    (first === "localhost" || first.includes(".") || first.includes(":"));
+  const pathComponents = firstIsRegistry ? components.slice(1) : components;
+
+  if (firstIsRegistry && !validImageRegistry(first)) {
+    return false;
+  }
+
+  return pathComponents.every((component) =>
+    /^[a-z0-9]+(?:(?:[._]|__|-+)[a-z0-9]+)*$/.test(component),
+  );
+}
+
+function validImageRegistry(registry) {
+  const separator = registry.lastIndexOf(":");
+  const hasPort = separator !== -1;
+  const hostname = hasPort ? registry.slice(0, separator) : registry;
+  const port = hasPort ? registry.slice(separator + 1) : null;
+
+  if (
+    !hostname ||
+    hostname.length > 253 ||
+    !hostname.split(".").every((label) =>
+      /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(label)
+    )
+  ) {
+    return false;
+  }
+
+  if (port !== null) {
+    if (!/^[1-9]\d{0,4}$/.test(port)) {
+      return false;
+    }
+
+    const portNumber = Number(port);
+
+    if (portNumber > 65_535) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+function imageMetadataValue(name, value) {
+  if (
+    value.length > 128 ||
+    !/^[A-Za-z0-9][A-Za-z0-9._+\/-]{0,127}$/.test(value)
+  ) {
+    fail(`${name} must be a compact release identifier of 1 to 128 characters`);
+  }
+
+  return value;
 }
 
 function parseEnvValue(rawValue, sourceName, lineNumber) {

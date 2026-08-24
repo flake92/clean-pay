@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import type { FormEvent } from "react";
+import type { ChangeEvent, FormEvent } from "react";
 
 import { Button } from "primereact/button";
 import { Card } from "primereact/card";
@@ -14,11 +14,15 @@ import {
   changeProfileEmailAction,
   changeProfilePasswordAction,
   requestProfileEmailVerificationAction,
+  updateEmailReminderPreferenceAction,
 } from "@/app/actions/profile";
 import { LinkButton } from "@/frontend/components/prime/link-button";
 import { TurnstileWidget, type TurnstileHandle, hasTurnstileSiteKey } from "@/frontend/components/turnstile-widget";
 import { navigateTo } from "@/frontend/lib/browser-navigation";
-import type { ProfileViewModel } from "@/application/models/profile";
+import type {
+  EmailReminderPreferenceViewModel,
+  ProfileViewModel,
+} from "@/application/models/profile";
 
 function authTypeLabel(value: string) {
   const labels: Record<string, string> = {
@@ -36,15 +40,29 @@ function missingTurnstileTokenMessage(siteKey?: string | null) {
     : "Ключ сайта Cloudflare Turnstile не настроен.";
 }
 
-export function ProfilePanel({
-  model,
-  turnstileEnabled = false,
-  turnstileSiteKey,
-}: {
+function reminderDaysLabel(days: number[]) {
+  if (days.length === 0) return "заранее";
+  if (days.length === 1) return `за ${days[0]} день`;
+  return `за ${days.slice(0, -1).join(", ")} и ${days.at(-1)} день`;
+}
+
+type ProfilePanelProps = {
   model: ProfileViewModel;
   turnstileEnabled?: boolean;
   turnstileSiteKey?: string | null;
-}) {
+};
+
+export function ProfilePanel(props: ProfilePanelProps) {
+  // Keep local form state across ordinary renders, but remount it when a soft
+  // RSC refresh supplies a genuinely different server snapshot.
+  return <ProfilePanelContent key={JSON.stringify(props.model)} {...props} />;
+}
+
+function ProfilePanelContent({
+  model,
+  turnstileEnabled = false,
+  turnstileSiteKey,
+}: ProfilePanelProps) {
   const user = model.status === "ready" ? model.user : null;
   const [email, setEmail] = useState(user?.pendingEmail ?? user?.email ?? "");
   const [currentPassword, setCurrentPassword] = useState("");
@@ -56,6 +74,15 @@ export function ProfilePanel({
   const [passwordMessageSeverity, setPasswordMessageSeverity] = useState<"success" | "warn">("success");
   const [pendingAction, setPendingAction] = useState<string | null>(null);
   const pendingActionRef = useRef<string | null>(null);
+  const initialEmailReminders = model.status === "ready"
+    && model.emailReminders.status === "ready"
+    ? model.emailReminders
+    : null;
+  const [emailReminders, setEmailReminders] = useState<EmailReminderPreferenceViewModel | null>(
+    initialEmailReminders,
+  );
+  const [emailReminderMessage, setEmailReminderMessage] = useState<string | null>(null);
+  const [emailReminderSeverity, setEmailReminderSeverity] = useState<"success" | "warn">("success");
 
   useEffect(() => {
     if (!message || messageSeverity !== "error") return;
@@ -196,6 +223,30 @@ export function ProfilePanel({
     }
   }
 
+  async function changeEmailReminders(event: ChangeEvent<HTMLInputElement>) {
+    const enabled = event.target.checked;
+    if (!beginPendingAction("email-reminders")) return;
+    setEmailReminderMessage(null);
+
+    try {
+      const result = await updateEmailReminderPreferenceAction(enabled);
+      if (!result.ok) {
+        setEmailReminderSeverity("warn");
+        setEmailReminderMessage(result.message);
+        return;
+      }
+
+      setEmailReminders(result.preference);
+      setEmailReminderSeverity("success");
+      setEmailReminderMessage(result.message);
+    } catch {
+      setEmailReminderSeverity("warn");
+      setEmailReminderMessage("Не удалось изменить настройку уведомлений.");
+    } finally {
+      finishPendingAction("email-reminders");
+    }
+  }
+
   if (model.status === "error") {
     return (
       <div className="flex flex-column gap-4">
@@ -240,6 +291,60 @@ export function ProfilePanel({
             </div>
           </div>
         </div>
+      </Card>
+
+      <Card title="Напоминания об окончании подписки">
+        {emailReminders ? (
+          <div className="flex flex-column gap-3">
+            <p className="m-0 line-height-3 text-600">
+              При включённой настройке мы отправим письма{
+              " "
+              }{reminderDaysLabel(emailReminders.daysBefore)} до окончания подписки на
+              подтверждённый адрес <strong>{user.email ?? "из профиля"}</strong>. Письма не
+              запускают оплату и не включают автопродление.
+            </p>
+            {emailReminderMessage ? (
+              <Message severity={emailReminderSeverity} text={emailReminderMessage} />
+            ) : null}
+            <label className="flex align-items-center gap-3" htmlFor="email-expiration-reminders">
+              <input
+                aria-describedby="email-expiration-reminders-help"
+                checked={emailReminders.enabled}
+                disabled={
+                  pendingAction !== null
+                  || (
+                    !emailReminders.enabled
+                    && !emailReminders.emailEligible
+                  )
+                }
+                id="email-expiration-reminders"
+                onChange={changeEmailReminders}
+                role="switch"
+                type="checkbox"
+              />
+              <span className="font-medium">Получать напоминания по e-mail</span>
+            </label>
+            {!emailReminders.emailEligible ? (
+              <Message
+                severity="warn"
+                text="Remnashop сейчас не разрешает включить напоминания. Проверьте подтверждение e-mail или попробуйте позже; уже сохранённую настройку можно отключить."
+              />
+            ) : null}
+            <p className="m-0 line-height-3 text-sm text-600" id="email-expiration-reminders-help">
+              Если письмо попадёт в папку «Спам», отметьте его как «Не спам» и добавьте{
+              " "
+              }{emailReminders.senderEmail ? <code>{emailReminders.senderEmail}</code> : "адрес отправителя"}{
+              " "
+              }в контакты или белый список. Так следующие напоминания с большей вероятностью
+              попадут во «Входящие».
+            </p>
+          </div>
+        ) : (
+          <Message
+            severity="warn"
+            text="Настройки e-mail-напоминаний временно недоступны. Их текущее состояние не изменено."
+          />
+        )}
       </Card>
 
       {isTelegramOnly ? (

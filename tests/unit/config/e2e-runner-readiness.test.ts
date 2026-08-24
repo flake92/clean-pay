@@ -7,7 +7,8 @@ const shellRunner = readFileSync("scripts/e2e-devcontainer.sh", "utf8");
 const compose = readFileSync(".devcontainer/docker-compose.yml", "utf8");
 const ciWorkflow = readFileSync(".github/workflows/ci.yml", "utf8");
 const dependabot = readFileSync(".github/dependabot.yml", "utf8");
-const remnashopRevision = "484cb1a7fb5947c88f971c6b7d839bae715b13b3";
+const productionRemnashopEnv = readFileSync("deploy/prod/remnashop.env.example", "utf8");
+const remnashopRevision = "16bfd616a400da9958b6c3442c827514a7b05796";
 
 const hostPortContract = [
   ["CLEAN_PAY_DEVCONTAINER_APP_HOST_PORT", "4000", "4000"],
@@ -70,6 +71,13 @@ describe("devcontainer e2e runner readiness", () => {
     expect(runner).toContain('? "http://telegram-oidc-mock:8090"');
   });
 
+  it("allows plaintext SMTP only inside the explicit Mailpit fixture", () => {
+    expect(compose).toContain('EMAIL_ALLOW_INSECURE_SMTP: "true"');
+    expect(compose).toContain("EMAIL_HOST: smtp");
+    expect(productionRemnashopEnv).toContain("EMAIL_ALLOW_INSECURE_SMTP=false");
+    expect(productionRemnashopEnv).toContain("EMAIL_USE_TLS=true");
+  });
+
   it("uses one project-scoped Remnashop image across every service", () => {
     const imageReference =
       "image: ${CLEAN_PAY_DEVCONTAINER_REMNASHOP_IMAGE:-${COMPOSE_PROJECT_NAME:-clean-pay-dev}-remnashop:latest}";
@@ -88,16 +96,27 @@ describe("devcontainer e2e runner readiness", () => {
   it("keeps the default E2E source hermetic and accepts newer compatible schemas", () => {
     expect(runner).toContain('process.env.REMNASHOP_DISCOVER_HOST_SOURCE === "1"');
     expect(runner).toContain('"REMNASHOP_MINIMUM_ALEMBIC_REVISION"');
-    expect(shellRunner).toContain('REMNASHOP_MINIMUM_ALEMBIC_REVISION:-0056');
+    expect(shellRunner).toContain('REMNASHOP_MINIMUM_ALEMBIC_REVISION:-0058');
     expect(shellRunner).toContain('10#$current_revision >= 10#$minimum_revision');
-    expect(shellRunner).not.toContain('current_revision <> \'0056\'');
+    expect(shellRunner).not.toContain('current_revision <> \'0058\'');
   });
 
-  it("pins E2E to the compatible Remnashop revision with container migrations", () => {
+  it("pins the default E2E source to the exact PR 135 head", () => {
     expect(compose).toContain(`https://github.com/flake92/remnashop.git#${remnashopRevision}`);
-    expect(compose).toContain(`BUILD_COMMIT: ${remnashopRevision}`);
+    expect(compose).toContain(
+      `BUILD_COMMIT: \${REMNASHOP_BUILD_REVISION:-${remnashopRevision}}`,
+    );
     expect(compose).toContain("BUILD_BRANCH: codex/clean-pay-integration-upstream-dev");
     expect(compose).not.toContain("b9da68a651e9ab0b7ed52d030e13754311614759");
+  });
+
+  it("uses the reviewed reminder implementation from that exact commit", () => {
+    expect(ciWorkflow).toContain("repository: flake92/remnashop");
+    expect(ciWorkflow).toContain(`ref: ${remnashopRevision}`);
+    expect(ciWorkflow).not.toContain("remnashop-pr135-email-reminders.patch");
+    expect(ciWorkflow).toContain("REMNASHOP_HOST_SOURCE:");
+    expect(ciWorkflow).toContain(`REMNASHOP_BUILD_REVISION: ${remnashopRevision}`);
+    expect(runner).toContain('"REMNASHOP_BUILD_REVISION"');
   });
 
   it("keeps actionable E2E diagnostics and immutable GitHub action runtimes in CI", () => {

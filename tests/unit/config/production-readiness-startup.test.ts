@@ -23,8 +23,12 @@ describe("production readiness startup gate", () => {
     expect(rootStart).toContain('x-clean-pay-readiness-secret');
     expect(deployScript).toContain("verify_detailed_readiness");
     expect(deployScript).toContain("Object.entries(body.checks||{})");
-    expect(deployScript.indexOf("verify_detailed_readiness\n  verify_external_security_headers"))
-      .toBeGreaterThan(deployScript.indexOf("compose up -d --build --wait"));
+    const install = deployScript.slice(
+      deployScript.indexOf("install_services() {"),
+      deployScript.indexOf("up() {"),
+    );
+    expect(install.indexOf("verify_detailed_readiness\n  verify_external_security_headers"))
+      .toBeGreaterThan(install.indexOf("start_verified_runtimes"));
   });
 
   it("fails closed for malformed or degraded readiness payloads", () => {
@@ -50,10 +54,10 @@ describe("production readiness startup gate", () => {
 
   it("does not report compose up as successful before readiness passes", () => {
     expect(prodCommand).toMatch(
-      /case "up":[\s\S]*runDocker\(composeArgs\("up", "-d", "--build"\)\)[\s\S]*await verify\(\)/,
+      /case "up":[\s\S]*prepareDeploymentImages\(\)[\s\S]*preflightDeploymentImages\(\)[\s\S]*stopRuntimeServices\(\)[\s\S]*runVerifiedMigration\(\)[\s\S]*startVerifiedRuntimes\(\)[\s\S]*await verify\(\)/,
     );
     expect(rootStart).toMatch(
-      /compose up -d --build\s+verify[\s\S]*sh "\$REMNASHOP_ROLLOUT_SCRIPT" "\$ENV_FILE"[\s\S]*info "started/,
+      /sh "\$REMNASHOP_ROLLOUT_SCRIPT" "\$ENV_FILE" check[\s\S]*prepare_images\s+preflight_images\s+prepare_runtime_dependencies\s+stop_runtime_services[\s\S]*run_verified_migration\s+start_verified_runtimes[\s\S]*verify[\s\S]*sh "\$REMNASHOP_ROLLOUT_SCRIPT" "\$ENV_FILE" finalize[\s\S]*info "started/,
     );
   });
 
@@ -65,8 +69,12 @@ describe("production readiness startup gate", () => {
       expect(compose).toContain("b.checks.database?.status!=='ok'");
       expect(compose).toContain("b.checks.redis?.status!=='ok'");
       expect(compose).not.toContain("Object.values(b.checks).some(c=>c.status!=='ok')");
-      expect(compose).toContain("interval: 30s");
       expect(compose).toContain("timeout: 12s");
+    }
+
+    for (const compose of [prodCompose, rootCompose]) {
+      expect(compose).toContain("interval: 10s");
+      expect(compose).not.toContain("start_interval:");
     }
   });
 

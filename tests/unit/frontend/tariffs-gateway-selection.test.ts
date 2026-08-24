@@ -128,7 +128,7 @@ describe("tariff payment gateway selection", () => {
     })));
 
     const gatewayGroup = container.querySelector('[aria-label="Выбор платёжного шлюза"]');
-    expect(gatewayGroup?.textContent).toContain("YOOKASSA");
+    expect(gatewayGroup?.textContent).toContain("ЮKassa");
     expect(gatewayGroup?.textContent).toContain("1 из 2");
     expect(container.querySelector('[data-dropdown-options="2"]')).not.toBeNull();
     expect(container.querySelectorAll(".clean-pay-price-choice")).toHaveLength(2);
@@ -143,7 +143,24 @@ describe("tariff payment gateway selection", () => {
 
     await click(container.querySelector<HTMLButtonElement>('[aria-label="Предыдущий платёжный шлюз"]')!);
 
-    expect(gatewayGroup?.textContent).toContain("YOOKASSA");
+    expect(gatewayGroup?.textContent).toContain("ЮKassa");
     expect(container.querySelector<HTMLAnchorElement>('a[href*="gateway=YOOKASSA"]')).not.toBeNull();
+  });
+
+  it("shows the original amount and discount for the selected offer", async () => {
+    const discountedOffers = offers(["YOOKASSA"]);
+    const price = discountedOffers.plans[0]?.durations[0]?.prices[0];
+    if (!price) throw new Error("Expected test price");
+    price.original_amount = "150";
+    price.final_amount = "100";
+    price.discount_percent = 33;
+
+    await act(async () => root.render(createElement(TariffsPanel, {
+      model: { status: "ready", offers: discountedOffers },
+    })));
+
+    expect(container.textContent).toContain("150 ₽");
+    expect(container.textContent).toContain("Скидка 33%");
+    expect(container.textContent).toContain("ЮKassa");
   });
 });

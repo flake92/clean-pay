@@ -3,6 +3,9 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 const dockerfile = readFileSync("Dockerfile", "utf8");
+const packageJson = JSON.parse(readFileSync("package.json", "utf8")) as {
+  scripts: Record<string, string>;
+};
 const compose = readFileSync("deploy/prod/docker-compose.yml", "utf8");
 const rootCompose = readFileSync("docker-compose.yml", "utf8");
 const rootStart = readFileSync("start.sh", "utf8");
@@ -10,6 +13,17 @@ const start = readFileSync("deploy/prod/start.sh", "utf8");
 const nextConfig = readFileSync("next.config.ts", "utf8");
 
 describe("production container boundary", () => {
+  it("generates Prisma once through the npm prebuild lifecycle", () => {
+    const builder = dockerfile.slice(
+      dockerfile.indexOf("AS builder"),
+      dockerfile.indexOf("AS runtime-base"),
+    );
+
+    expect(packageJson.scripts.prebuild).toBe("npm run prisma:generate");
+    expect(builder).toContain("npm run build");
+    expect(builder).not.toContain("npm run prisma:generate");
+  });
+
   it("uses the traced standalone runtime instead of the complete dependency tree", () => {
     expect(nextConfig).toContain('output: "standalone"');
     expect(dockerfile).toContain("package.json package-lock.json .npmrc");
@@ -43,6 +57,30 @@ describe("production container boundary", () => {
     expect(compose).toContain("condition: service_completed_successfully");
     expect(start).not.toContain("migrate deploy");
     expect(start).not.toContain("RUN_MIGRATIONS");
+  });
+
+  it("labels both targets as one traceable release with app public metadata", () => {
+    const migration = dockerfile.slice(
+      dockerfile.indexOf("AS migration"),
+      dockerfile.indexOf("AS runner"),
+    );
+    const runner = dockerfile.slice(dockerfile.indexOf("AS runner"));
+
+    for (const target of [migration, runner]) {
+      expect(target).toContain('org.opencontainers.image.revision="${CLEAN_PAY_REVISION}"');
+      expect(target).toContain('org.opencontainers.image.version="${CLEAN_PAY_RELEASE}"');
+      expect(target).toContain('io.clean-pay.release="${CLEAN_PAY_RELEASE}"');
+    }
+    expect(migration).toContain('io.clean-pay.role="migration"');
+    expect(runner).toContain('io.clean-pay.role="app"');
+    expect(runner).toContain('io.clean-pay.baked-public-app-url="${NEXT_PUBLIC_APP_URL}"');
+    expect(runner).toContain('io.clean-pay.baked-brand-name="${NEXT_PUBLIC_BRAND_NAME}"');
+    expect(runner).toContain('io.clean-pay.baked-brand-logo-url="${NEXT_PUBLIC_BRAND_LOGO_URL}"');
+
+    for (const source of [compose, rootCompose]) {
+      expect(source.match(/CLEAN_PAY_RELEASE: \$\{CLEAN_PAY_RELEASE:-local\}/g)).toHaveLength(2);
+      expect(source.match(/CLEAN_PAY_REVISION: \$\{CLEAN_PAY_REVISION:-local\}/g)).toHaveLength(2);
+    }
   });
 });
 

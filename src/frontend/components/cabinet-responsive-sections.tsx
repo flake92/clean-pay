@@ -16,6 +16,7 @@ import {
 } from "@/frontend/components/cabinet-presentation";
 import { SubscriptionDeviceDetails } from "@/frontend/components/subscription-device-details";
 import { formatSubscriptionDevice } from "@/frontend/lib/device-display";
+import { paymentGatewayLabel } from "@/frontend/lib/payment-gateway";
 import type { DevicesResponse } from "@/shared/domain/subscriptions";
 import type { PaymentHistorySnapshotStatus } from "@/application/models/cabinet";
 
@@ -137,8 +138,8 @@ export function CabinetPaymentHistorySection({
                       <dd>{formatDate(payment.created_at)}</dd>
                     </div>
                     <div>
-                      <dt>Gateway</dt>
-                      <dd>{payment.gateway_type}</dd>
+                      <dt>Способ оплаты</dt>
+                      <dd>{paymentGatewayLabel(payment.gateway_type)}</dd>
                     </div>
                     <div>
                       <dt>Сумма</dt>
@@ -186,7 +187,10 @@ export function CabinetPaymentHistorySection({
             header="Платёж"
           />
           <Column body={(payment: PaymentRecord) => formatDate(payment.created_at)} header="Дата" />
-          <Column field="gateway_type" header="Gateway" />
+          <Column
+            body={(payment: PaymentRecord) => paymentGatewayLabel(payment.gateway_type)}
+            header="Способ оплаты"
+          />
           <Column
             body={(payment: PaymentRecord) => (
               <span>

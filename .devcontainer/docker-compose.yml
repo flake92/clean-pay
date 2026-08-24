@@ -89,6 +89,9 @@ x-remnashop-env: &remnashop-env
   EMAIL_PORT: "1025"
   EMAIL_USE_TLS: "false"
   EMAIL_USE_SSL: "false"
+  # Explicitly permitted only for this container-local Mailpit fixture.
+  # Production keeps the Remnashop default (false) and requires TLS/SMTPS.
+  EMAIL_ALLOW_INSECURE_SMTP: "true"
   EMAIL_USERNAME: dev-smtp-user
   EMAIL_PASSWORD: dev-smtp-password
   EMAIL_FROM_EMAIL: no-reply@example.com
@@ -212,11 +215,11 @@ services:
 
   remnashop:
     build:
-      context: ${REMNASHOP_BUILD_CONTEXT:-https://github.com/flake92/remnashop.git#484cb1a7fb5947c88f971c6b7d839bae715b13b3}
+      context: ${REMNASHOP_BUILD_CONTEXT:-https://github.com/flake92/remnashop.git#16bfd616a400da9958b6c3442c827514a7b05796}
       dockerfile: Dockerfile
       args:
         BUILD_BRANCH: codex/clean-pay-integration-upstream-dev
-        BUILD_COMMIT: 484cb1a7fb5947c88f971c6b7d839bae715b13b3
+        BUILD_COMMIT: ${REMNASHOP_BUILD_REVISION:-16bfd616a400da9958b6c3442c827514a7b05796}
     image: ${CLEAN_PAY_DEVCONTAINER_REMNASHOP_IMAGE:-${COMPOSE_PROJECT_NAME:-clean-pay-dev}-remnashop:latest}
     restart: unless-stopped
     environment:

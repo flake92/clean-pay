@@ -1,0 +1,248 @@
+name: Publish paired Clean Pay images
+
+on:
+  workflow_dispatch:
+    inputs:
+      release:
+        description: Immutable release label and Docker tag (for example 0.1.1)
+        required: true
+        type: string
+      public_app_url:
+        description: Public HTTPS origin baked into the application
+        required: true
+        type: string
+      brand_name:
+        description: Public brand name baked into the application
+        required: true
+        default: Clean Pay
+        type: string
+      brand_logo_url:
+        description: Root-relative public logo path
+        required: true
+        default: /clean-pay-logo.png
+        type: string
+      turnstile_site_key:
+        description: Public Cloudflare Turnstile site key baked into the application
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+  packages: write
+
+concurrency:
+  # GHCR tag creation is not conditional/atomic. Serialize every publisher so
+  # the absence checks below also protect sha-* tags shared across releases.
+  group: publish-clean-pay
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    outputs:
+      application-image: ${{ steps.publish.outputs.application_image }}
+      migration-image: ${{ steps.publish.outputs.migration_image }}
+    env:
+      CLEAN_PAY_RELEASE: ${{ inputs.release }}
+      NEXT_PUBLIC_APP_URL: ${{ inputs.public_app_url }}
+      NEXT_PUBLIC_BRAND_NAME: ${{ inputs.brand_name }}
+      NEXT_PUBLIC_BRAND_LOGO_URL: ${{ inputs.brand_logo_url }}
+      TURNSTILE_ENABLED: "true"
+      TURNSTILE_SITE_KEY: ${{ inputs.turnstile_site_key }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version-file: .node-version
+
+      - name: Verify the exact clean checkout
+        shell: bash
+        run: |
+          set -euo pipefail
+          actual_sha=$(git rev-parse HEAD)
+          test "$actual_sha" = "$GITHUB_SHA" || {
+            printf 'Checked out %s, expected %s\n' "$actual_sha" "$GITHUB_SHA" >&2
+            exit 1
+          }
+          test -z "$(git status --porcelain=v1 --untracked-files=all)" || {
+            printf '%s\n' 'Refusing to publish from a dirty checkout.' >&2
+            git status --short >&2
+            exit 1
+          }
+
+      - name: Validate public build inputs with the production rules
+        shell: bash
+        run: node deploy/prod/validate-public-build.mjs
+
+      - name: Require successful CI for this exact commit
+        id: ci
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          response=$(gh api --method GET \
+            -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2022-11-28' \
+            "/repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/runs" \
+            -f "head_sha=${GITHUB_SHA}" \
+            -f 'status=success' \
+            -f 'per_page=100')
+          ci_url=$(printf '%s' "$response" | jq -er --arg sha "$GITHUB_SHA" '
+            [.workflow_runs[]
+              | select(.head_sha == $sha)
+              | select(.status == "completed" and .conclusion == "success")]
+            | sort_by(.updated_at)
+            | last
+            | .html_url // empty
+          ')
+          printf 'Verified successful CI for %s: %s\n' "$GITHUB_SHA" "$ci_url"
+          printf 'run_url=%s\n' "$ci_url" >> "$GITHUB_OUTPUT"
+
+      - name: Reject existing immutable GHCR tags
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          owner=${GITHUB_REPOSITORY_OWNER,,}
+          sha_tag="sha-${GITHUB_SHA}"
+          test "$CLEAN_PAY_RELEASE" != "$sha_tag" || {
+            printf 'Release tag must differ from reserved tag %s.\n' "$sha_tag" >&2
+            exit 1
+          }
+
+          response_file=$(mktemp "${RUNNER_TEMP}/clean-pay-ghcr-response.XXXXXX")
+          trap 'rm -f "$response_file"' EXIT
+
+          registry_token() {
+            repository=$1
+            curl --fail-with-body --silent --show-error \
+              --user "${GITHUB_ACTOR}:${GITHUB_TOKEN}" \
+              --get \
+              --data-urlencode 'service=ghcr.io' \
+              --data-urlencode "scope=repository:${repository}:pull" \
+              'https://ghcr.io/token' \
+              | jq -er '(.token // .access_token) | select(type == "string" and length > 0)'
+          }
+
+          assert_tag_absent() {
+            repository=$1
+            tag=$2
+            token=$(registry_token "$repository")
+            if ! status=$(curl --silent --show-error --location \
+              --request HEAD \
+              --output "$response_file" \
+              --write-out '%{http_code}' \
+              --header "Authorization: Bearer ${token}" \
+              --header 'Accept: application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json, application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json' \
+              "https://ghcr.io/v2/${repository}/manifests/${tag}"); then
+              printf 'Could not verify whether ghcr.io/%s:%s exists.\n' "$repository" "$tag" >&2
+              exit 1
+            fi
+
+            case "$status" in
+              404) ;;
+              200)
+                printf 'Refusing to overwrite existing immutable tag ghcr.io/%s:%s.\n' "$repository" "$tag" >&2
+                exit 1
+                ;;
+              *)
+                printf 'GHCR returned HTTP %s while checking ghcr.io/%s:%s; failing closed.\n' \
+                  "$status" "$repository" "$tag" >&2
+                exit 1
+                ;;
+            esac
+          }
+
+          for repository in "${owner}/clean-pay-app" "${owner}/clean-pay-migration"; do
+            assert_tag_absent "$repository" "$CLEAN_PAY_RELEASE"
+            assert_tag_absent "$repository" "$sha_tag"
+          done
+
+      - name: Set up QEMU for cross-platform builds
+        uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3.7.0
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+
+      - name: Log in to GHCR
+        shell: bash
+        run: echo "$GITHUB_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and publish both targets from this commit
+        id: publish
+        shell: bash
+        run: |
+          set -euo pipefail
+          owner=${GITHUB_REPOSITORY_OWNER,,}
+          app_repository="ghcr.io/${owner}/clean-pay-app"
+          migration_repository="ghcr.io/${owner}/clean-pay-migration"
+          sha_tag="sha-${GITHUB_SHA}"
+          app_metadata="${RUNNER_TEMP}/clean-pay-app-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.json"
+          migration_metadata="${RUNNER_TEMP}/clean-pay-migration-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.json"
+
+          docker buildx build --pull --push \
+            --platform linux/amd64,linux/arm64 \
+            --target runner \
+            --build-arg CLEAN_PAY_RELEASE="$CLEAN_PAY_RELEASE" \
+            --build-arg CLEAN_PAY_REVISION="$GITHUB_SHA" \
+            --build-arg NEXT_PUBLIC_APP_URL="$NEXT_PUBLIC_APP_URL" \
+            --build-arg TURNSTILE_ENABLED=true \
+            --build-arg TURNSTILE_WIDGET_ID="$TURNSTILE_SITE_KEY" \
+            --build-arg NEXT_PUBLIC_BRAND_NAME="$NEXT_PUBLIC_BRAND_NAME" \
+            --build-arg NEXT_PUBLIC_BRAND_LOGO_URL="$NEXT_PUBLIC_BRAND_LOGO_URL" \
+            --tag "${app_repository}:${CLEAN_PAY_RELEASE}" \
+            --tag "${app_repository}:${sha_tag}" \
+            --provenance=mode=max \
+            --sbom=true \
+            --metadata-file "$app_metadata" \
+            .
+
+          docker buildx build --pull --push \
+            --platform linux/amd64,linux/arm64 \
+            --target migration \
+            --build-arg CLEAN_PAY_RELEASE="$CLEAN_PAY_RELEASE" \
+            --build-arg CLEAN_PAY_REVISION="$GITHUB_SHA" \
+            --tag "${migration_repository}:${CLEAN_PAY_RELEASE}" \
+            --tag "${migration_repository}:${sha_tag}" \
+            --provenance=mode=max \
+            --sbom=true \
+            --metadata-file "$migration_metadata" \
+            .
+
+          app_digest=$(jq -er '."containerimage.digest" | select(test("^sha256:[a-f0-9]{64}$"))' "$app_metadata")
+          migration_digest=$(jq -er '."containerimage.digest" | select(test("^sha256:[a-f0-9]{64}$"))' "$migration_metadata")
+          test "$app_digest" != "$migration_digest"
+
+          application_image="${app_repository}@${app_digest}"
+          migration_image="${migration_repository}@${migration_digest}"
+          printf 'application_image=%s\n' "$application_image" >> "$GITHUB_OUTPUT"
+          printf 'migration_image=%s\n' "$migration_image" >> "$GITHUB_OUTPUT"
+          {
+            printf '## Digest-pinned deployment pair\n\n'
+            printf '```dotenv\n'
+            printf 'CLEAN_PAY_DEPLOY_SOURCE=pull\n'
+            printf 'CLEAN_PAY_IMAGE=%s\n' "$application_image"
+            printf 'CLEAN_PAY_MIGRATION_IMAGE=%s\n' "$migration_image"
+            printf 'CLEAN_PAY_RELEASE=%s\n' "$CLEAN_PAY_RELEASE"
+            printf 'CLEAN_PAY_REVISION=%s\n' "$GITHUB_SHA"
+            printf '```\n'
+            printf '\nRelease `%s`, revision `%s`, platforms `linux/amd64` and `linux/arm64`.\n' \
+              "$CLEAN_PAY_RELEASE" "$GITHUB_SHA"
+            printf 'Exact-SHA CI gate: %s\n' '${{ steps.ci.outputs.run_url }}'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Log out from GHCR
+        if: always()
+        shell: bash
+        run: docker logout ghcr.io >/dev/null 2>&1 || true

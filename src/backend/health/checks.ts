@@ -69,6 +69,36 @@ export function createProductionReadinessGateway(): ReadinessGateway {
           await cancelResponseBody(response);
         }
       }
+
+      // No user cookie is available to readiness. An unsupported method checks
+      // the exact path without changing state: FastAPI returns 405 when the
+      // PR #135 route exists and 404 on an older Remnashop image.
+      const notificationPreferencesResponse = await fetch(
+        `${env.remnashopApiBaseUrl}/auth/notification-preferences`,
+        {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            "x-remnashop-auth-service-key": env.remnashopAuthServiceKey,
+          },
+          body: "{}",
+          cache: "no-store",
+          signal,
+        },
+      );
+      try {
+        if (notificationPreferencesResponse.status === 404) {
+          throw new Error("Remnashop is incompatible: /auth/notification-preferences is missing");
+        }
+        if (notificationPreferencesResponse.status !== 405) {
+          throw new Error(
+            "Remnashop /auth/notification-preferences contract returned "
+            + `${notificationPreferencesResponse.status}, expected 405`,
+          );
+        }
+      } finally {
+        await cancelResponseBody(notificationPreferencesResponse);
+      }
     },
     async checkTelegramOidc(signal) {
       const response = await fetch(env.telegramOidc.jwksUri, {

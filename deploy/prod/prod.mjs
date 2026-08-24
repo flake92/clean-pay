@@ -1,7 +1,14 @@
 import { spawnSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  rmdirSync,
+  unlinkSync,
+} from "node:fs";
 import http from "node:http";
 import https from "node:https";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -21,6 +28,8 @@ const rootDir = path.resolve(prodDir, "../..");
 const envFile = path.join(prodDir, ".env");
 const validateEnvScript = path.join(prodDir, "validate-env.mjs");
 const remnashopRolloutScript = path.join(prodDir, "prepare-remnashop-rollout.sh");
+const imagePreflightScript = path.join(prodDir, "image-preflight.sh");
+const buildProvenanceScript = path.join(prodDir, "build-provenance.sh");
 const composeFiles = [
   path.join(prodDir, "docker-compose.yml"),
 ];
@@ -29,6 +38,7 @@ const args = process.argv.slice(2);
 const debug = args.includes("-debug") || args.includes("--debug");
 const command = args.find((arg) => !arg.startsWith("-")) || "help";
 let parsedEnvironment = null;
+let verifiedImages = null;
 
 if (debug) {
   composeFiles.push(path.join(prodDir, "docker-compose.debug.yml"));
@@ -72,7 +82,14 @@ function productionChildEnvironment() {
     delete environment[name];
   }
 
-  return { ...environment, ...productionFileEnvironment() };
+  const childEnvironment = { ...environment, ...productionFileEnvironment() };
+
+  if (verifiedImages) {
+    childEnvironment.CLEAN_PAY_IMAGE = verifiedImages.application;
+    childEnvironment.CLEAN_PAY_MIGRATION_IMAGE = verifiedImages.migration;
+  }
+
+  return childEnvironment;
 }
 
 function composeArgs(...extra) {
@@ -121,8 +138,189 @@ function runDocker(args, options = {}) {
   return result.status ?? 1;
 }
 
-function prepareRemnashopPaymentRollout() {
-  const result = spawnSync("sh", [remnashopRolloutScript, envFile], {
+function prepareDeploymentImages() {
+  const source = readEnvValue("CLEAN_PAY_DEPLOY_SOURCE", "build");
+  const operation = source === "build" ? "build" : source === "pull" ? "pull" : null;
+
+  if (!operation) {
+    console.error('CLEAN_PAY_DEPLOY_SOURCE must be "build" or "pull".');
+    process.exit(1);
+  }
+
+  console.log(
+    operation === "build"
+      ? "Building application and migration images..."
+      : "Pulling digest-pinned application and migration images...",
+  );
+
+  if (source === "build") {
+    const provenance = spawnSync(
+      "sh",
+      [
+        buildProvenanceScript,
+        rootDir,
+        source,
+        readEnvValue("CLEAN_PAY_RELEASE", "local"),
+        readEnvValue("CLEAN_PAY_REVISION", "local"),
+      ],
+      {
+        cwd: rootDir,
+        env: productionChildEnvironment(),
+        stdio: "inherit",
+        shell: false,
+      },
+    );
+
+    if (provenance.error || provenance.status !== 0) {
+      console.error(provenance.error?.message ?? "Build provenance validation failed.");
+      process.exit(provenance.status ?? 1);
+    }
+  }
+
+  const status = runDocker(composeArgs(operation, "migration", "app"));
+
+  if (status !== 0) {
+    process.exit(status);
+  }
+}
+
+function preflightDeploymentImages() {
+  const verifiedDirectory = mkdtempSync(
+    path.join(tmpdir(), "clean-pay-verified-"),
+  );
+  const verifiedOutput = path.join(verifiedDirectory, "images.env");
+
+  try {
+    const result = spawnSync(
+      "sh",
+      [
+        imagePreflightScript,
+        readEnvValue("CLEAN_PAY_DEPLOY_SOURCE", "build"),
+        readEnvValue("CLEAN_PAY_IMAGE", ""),
+        readEnvValue("CLEAN_PAY_MIGRATION_IMAGE", ""),
+        envFile,
+        readEnvValue("NEXT_PUBLIC_APP_URL", ""),
+        readEnvValue("NEXT_PUBLIC_BRAND_NAME", "Clean Pay"),
+        readEnvValue("NEXT_PUBLIC_BRAND_LOGO_URL", "/clean-pay-logo.png"),
+        readEnvValue("TURNSTILE_SITE_KEY", ""),
+        readEnvValue("CLEAN_PAY_RELEASE", "local"),
+        readEnvValue("CLEAN_PAY_REVISION", "local"),
+        verifiedOutput,
+      ],
+      {
+        cwd: rootDir,
+        env: productionChildEnvironment(),
+        stdio: "inherit",
+        shell: false,
+      },
+    );
+
+    if (result.error) {
+      throw result.error;
+    }
+
+    if (result.status !== 0) {
+      process.exit(result.status ?? 1);
+    }
+
+    const lines = readFileSync(verifiedOutput, "utf8")
+      .trimEnd()
+      .split(/\r?\n/);
+    const entries = new Map(lines.map((line) => {
+      const separator = line.indexOf("=");
+      return [line.slice(0, separator), line.slice(separator + 1)];
+    }));
+    const application = entries.get("CLEAN_PAY_VERIFIED_APP_IMAGE");
+    const migration = entries.get("CLEAN_PAY_VERIFIED_MIGRATION_IMAGE");
+    const imageIdPattern = /^sha256:[a-f0-9]{64}$/;
+
+    if (
+      lines.length !== 2 ||
+      entries.size !== 2 ||
+      !imageIdPattern.test(application ?? "") ||
+      !imageIdPattern.test(migration ?? "") ||
+      application === migration
+    ) {
+      throw new Error("Image preflight returned malformed verified image IDs.");
+    }
+
+    verifiedImages = { application, migration };
+  } catch (error) {
+    console.error(error instanceof Error ? error.message : String(error));
+    process.exit(1);
+  } finally {
+    if (existsSync(verifiedOutput)) {
+      unlinkSync(verifiedOutput);
+    }
+    try {
+      rmdirSync(verifiedDirectory);
+    } catch {
+      // The private directory is intentionally retained if it is unexpectedly
+      // non-empty; never recursively remove an unverified path.
+    }
+  }
+}
+
+function prepareRuntimeDependencies() {
+  if (runDocker(composeArgs("pull", "--policy", "missing", "postgres", "redis")) !== 0) {
+    process.exit(1);
+  }
+}
+
+function stopRuntimeServices() {
+  console.log(
+    "Stopping application runtimes for migration; PostgreSQL and Redis stay running...",
+  );
+  if (runDocker(composeArgs(
+    "stop",
+    "reconciliation-worker",
+    "retention-worker",
+    "app",
+  )) !== 0) {
+    process.exit(1);
+  }
+}
+
+function runVerifiedMigration() {
+  if (
+    runDocker(composeArgs(
+      "up", "-d", "--no-build", "--pull", "never", "--wait",
+      "--wait-timeout", "120", "postgres", "redis",
+    )) !== 0 ||
+    runDocker(composeArgs("rm", "-f", "-s", "migration")) !== 0 ||
+    runDocker(composeArgs("run", "--rm", "--no-deps", "--pull", "never", "migration")) !== 0
+  ) {
+    process.exit(1);
+  }
+}
+
+function startVerifiedRuntimes() {
+  const services = readEnvValue("PAYMENT_RECONCILIATION_ENABLED", "true") === "true"
+    ? ["retention-worker", "reconciliation-worker"]
+    : ["retention-worker"];
+  const appStatus = runDocker(composeArgs(
+    "up", "-d", "--no-deps", "--no-build", "--pull", "never", "--wait",
+    "--wait-timeout", "180", "app",
+  ));
+
+  if (appStatus !== 0) {
+    process.exit(appStatus);
+  }
+
+  const workerStatus = runDocker(composeArgs(
+    "up", "-d", "--no-deps", "--no-build", "--pull", "never", "--wait",
+    "--wait-timeout", "180", ...services,
+  ));
+
+  if (workerStatus !== 0) {
+    process.exit(workerStatus);
+  }
+
+  verifiedImages = null;
+}
+
+function prepareRemnashopPaymentRollout(phase = "finalize") {
+  const result = spawnSync("sh", [remnashopRolloutScript, envFile, phase], {
     cwd: rootDir,
     env: productionChildEnvironment(),
     stdio: "inherit",
@@ -327,12 +525,16 @@ function requireEnvFile() {
 }
 
 function validateProductionEnvFile() {
-  const result = spawnSync(process.execPath, [validateEnvScript, "--env-file", envFile], {
-    cwd: rootDir,
-    env: process.env,
-    stdio: "inherit",
-    shell: false,
-  });
+  const result = spawnSync(
+    process.execPath,
+    [validateEnvScript, "--clean-pay-env-file", envFile],
+    {
+      cwd: rootDir,
+      env: process.env,
+      stdio: "inherit",
+      shell: false,
+    },
+  );
 
   if (result.error) {
     console.error(result.error.message);
@@ -434,17 +636,23 @@ requireEnvFile();
 switch (command) {
   case "build":
     validateProductionEnvFile();
-    run("docker", composeArgs("build"));
+    prepareDeploymentImages();
+    preflightDeploymentImages();
+    verifiedImages = null;
     break;
   case "up":
     validateProductionEnvFile();
     assertRedisHostMemoryPolicy();
     ensureEdgeNetwork();
-    if (runDocker(composeArgs("up", "-d", "--build")) !== 0) {
-      process.exit(1);
-    }
+    prepareRemnashopPaymentRollout("check");
+    prepareDeploymentImages();
+    preflightDeploymentImages();
+    prepareRuntimeDependencies();
+    stopRuntimeServices();
+    runVerifiedMigration();
+    startVerifiedRuntimes();
     await verify();
-    prepareRemnashopPaymentRollout();
+    prepareRemnashopPaymentRollout("finalize");
     break;
   case "down":
     run("docker", composeArgs("down"));

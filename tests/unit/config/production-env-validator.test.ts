@@ -6,6 +6,8 @@ import { spawnSync } from "node:child_process";
 import { parse as parsePgConnectionString } from "pg-connection-string";
 import { describe, expect, it } from "vitest";
 
+import { PRODUCTION_ENVIRONMENT_FILE_NAMES } from "../../../deploy/prod/production-env-rules.mjs";
+
 function envExampleKeys() {
   return readFileSync("deploy/prod/.env.example", "utf8")
     .split(/\r?\n/)
@@ -33,6 +35,11 @@ const secrets = {
 } as const;
 
 const validEnv: Record<string, string> = {
+  CLEAN_PAY_DEPLOY_SOURCE: "build",
+  CLEAN_PAY_IMAGE: "clean-pay-prod-app:local",
+  CLEAN_PAY_MIGRATION_IMAGE: "clean-pay-prod-migration:local",
+  CLEAN_PAY_RELEASE: "local",
+  CLEAN_PAY_REVISION: "local",
   POSTGRES_DB: "clean_pay",
   POSTGRES_USER: "clean_pay",
   POSTGRES_PASSWORD: secrets.postgres,
@@ -118,7 +125,7 @@ function runValidatorContent(content: string) {
 
   const result = spawnSync(
     process.execPath,
-    ["deploy/prod/validate-env.mjs", "--env-file", envFile],
+    ["deploy/prod/validate-env.mjs", "--clean-pay-env-file", envFile],
     {
       cwd: process.cwd(),
       encoding: "utf8",
@@ -156,6 +163,23 @@ function runRuntimeValidator(overrides: EnvOverride = {}) {
   });
 }
 
+function runRuntimeStdinValidator(overrides: EnvOverride = {}) {
+  const runtimeMetadata: NodeJS.ProcessEnv = {
+    ...process.env,
+    CLEAN_PAY_BAKED_PUBLIC_APP_URL: validEnv.NEXT_PUBLIC_APP_URL,
+    CLEAN_PAY_BAKED_BRAND_NAME: validEnv.NEXT_PUBLIC_BRAND_NAME,
+    CLEAN_PAY_BAKED_BRAND_LOGO_URL: validEnv.NEXT_PUBLIC_BRAND_LOGO_URL,
+    CLEAN_PAY_BAKED_TURNSTILE_WIDGET_ID: validEnv.TURNSTILE_SITE_KEY,
+  };
+
+  return spawnSync(process.execPath, ["deploy/prod/validate-env.mjs", "--runtime-env-stdin"], {
+    cwd: process.cwd(),
+    encoding: "utf8",
+    env: runtimeMetadata,
+    input: envContent(overrides),
+  });
+}
+
 describe("production env validator", () => {
   it("keeps the production env example limited to variables used by production code", () => {
     const source = [
@@ -176,7 +200,14 @@ describe("production env validator", () => {
         source,
         `${key} from .env.example must be used by production code, compose, or startup`,
       ).toContain(key);
+      expect(PRODUCTION_ENVIRONMENT_FILE_NAMES, `${key} must be allowlisted`)
+        .toContain(key);
     }
+
+    expect(PRODUCTION_ENVIRONMENT_FILE_NAMES).not.toContain("NODE_OPTIONS");
+    expect(PRODUCTION_ENVIRONMENT_FILE_NAMES).not.toContain(
+      "CLEAN_PAY_BAKED_TURNSTILE_WIDGET_ID",
+    );
   });
 
   it("accepts a complete strong configuration including internal HTTP Remnashop", () => {
@@ -190,7 +221,7 @@ describe("production env validator", () => {
     for (const envFile of ["deploy/prod/.env.example", ".env.example"]) {
       const result = spawnSync(
         process.execPath,
-        ["deploy/prod/validate-env.mjs", "--env-file", envFile],
+        ["deploy/prod/validate-env.mjs", "--clean-pay-env-file", envFile],
         { cwd: process.cwd(), encoding: "utf8" },
       );
 
@@ -224,6 +255,8 @@ describe("production env validator", () => {
     expect(runValidatorContent(`${envContent()}\nCOMPOSE_PROFILES=debug`).stderr).toContain(
       "must not set Compose control variable COMPOSE_PROFILES",
     );
+    expect(runValidatorContent(`${envContent()}\nNODE_OPTIONS=--require=/tmp/payload.cjs`).stderr)
+      .toContain("unsupported runtime variable NODE_OPTIONS");
     expect(runValidatorContent(
       envContent().replace(
         `WEB_JWT_SECRET=${secrets.webJwt}`,
@@ -254,6 +287,9 @@ describe("production env validator", () => {
     expect(dockerfile).toContain(
       "ENV CLEAN_PAY_BAKED_BRAND_LOGO_URL=${NEXT_PUBLIC_BRAND_LOGO_URL}",
     );
+    expect(dockerfile).toContain(
+      "ENV CLEAN_PAY_BAKED_TURNSTILE_WIDGET_ID=${TURNSTILE_WIDGET_ID}",
+    );
     expect(compose).toContain(
       "NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL:?NEXT_PUBLIC_APP_URL is required}",
     );
@@ -262,7 +298,8 @@ describe("production env validator", () => {
     expect(prodCommand).toContain("COMPOSE_INTERPOLATION_ENVIRONMENT_NAMES");
     expect(prodCommand).toContain("delete environment[name]");
     expect(prodCommand).toContain("...productionFileEnvironment()");
-    expect(prodCommand.match(/env: productionChildEnvironment\(\)/g)).toHaveLength(8);
+    expect(prodCommand.match(/env: productionChildEnvironment\(\)/g)?.length ?? 0)
+      .toBeGreaterThanOrEqual(10);
     expect(runValidator({ CLEAN_PAY_BUILD_PHASE: "true" }).stderr).toContain(
       "CLEAN_PAY_BUILD_PHASE is build-only",
     );
@@ -286,6 +323,60 @@ describe("production env validator", () => {
     expect(runRuntimeValidator({
       CLEAN_PAY_BAKED_BRAND_LOGO_URL: "/old-logo.png",
     }).stderr).toContain("CLEAN_PAY_BAKED_BRAND_LOGO_URL must match NEXT_PUBLIC_BRAND_LOGO_URL");
+    expect(runRuntimeValidator({
+      CLEAN_PAY_BAKED_TURNSTILE_WIDGET_ID: "0x4AAAAADifferentSiteKey8Wp4Jz7Lc2",
+    }).stderr).toContain("CLEAN_PAY_BAKED_TURNSTILE_WIDGET_ID must match TURNSTILE_SITE_KEY");
+    expect(runRuntimeStdinValidator().status).toBe(0);
+    expect(runRuntimeStdinValidator({
+      CLEAN_PAY_BAKED_PUBLIC_APP_URL: validEnv.NEXT_PUBLIC_APP_URL,
+    }).stderr).toContain("is image metadata and must not be set in an env file");
+    expect(runRuntimeStdinValidator({
+      NEXT_PUBLIC_BRAND_NAME: "Different Brand",
+    }).stderr).toContain("CLEAN_PAY_BAKED_BRAND_NAME must match NEXT_PUBLIC_BRAND_NAME");
+  });
+
+  it("allows pull mode only with two distinct digest-pinned target images", () => {
+    const applicationImage = `ghcr.io/flake92/clean-pay-app@sha256:${"a".repeat(64)}`;
+    const migrationImage = `ghcr.io/flake92/clean-pay-migration@sha256:${"b".repeat(64)}`;
+
+    expect(runValidator({
+      CLEAN_PAY_DEPLOY_SOURCE: "pull",
+      CLEAN_PAY_IMAGE: applicationImage,
+      CLEAN_PAY_MIGRATION_IMAGE: migrationImage,
+      CLEAN_PAY_RELEASE: "0.1.1",
+      CLEAN_PAY_REVISION: "0123456789abcdef0123456789abcdef01234567",
+    }).status).toBe(0);
+    expect(runValidator({
+      CLEAN_PAY_RELEASE: "0.1.1",
+      CLEAN_PAY_REVISION: "local",
+    }).stderr).toContain("must both be local or both be traceable");
+    expect(runValidator({
+      CLEAN_PAY_RELEASE: "0.1.1",
+      CLEAN_PAY_REVISION: "not-a-commit",
+    }).stderr).toContain("exact lowercase Git commit hash");
+    expect(runValidator({ CLEAN_PAY_DEPLOY_SOURCE: "registry" }).stderr).toContain(
+      'CLEAN_PAY_DEPLOY_SOURCE must be "build" or "pull"',
+    );
+    expect(runValidator({
+      CLEAN_PAY_DEPLOY_SOURCE: "pull",
+      CLEAN_PAY_IMAGE: null,
+      CLEAN_PAY_MIGRATION_IMAGE: migrationImage,
+    }).stderr).toContain("CLEAN_PAY_IMAGE is required");
+    expect(runValidator({
+      CLEAN_PAY_DEPLOY_SOURCE: "pull",
+      CLEAN_PAY_IMAGE: "ghcr.io/flake92/clean-pay-app:latest",
+      CLEAN_PAY_MIGRATION_IMAGE: migrationImage,
+    }).stderr).toContain("CLEAN_PAY_IMAGE must be pinned by an exact sha256 digest");
+    expect(runValidator({
+      CLEAN_PAY_DEPLOY_SOURCE: "pull",
+      CLEAN_PAY_IMAGE: applicationImage,
+      CLEAN_PAY_MIGRATION_IMAGE: "ghcr.io/flake92/clean-pay-migration:v1",
+    }).stderr).toContain("CLEAN_PAY_MIGRATION_IMAGE must be pinned by an exact sha256 digest");
+    expect(runValidator({
+      CLEAN_PAY_DEPLOY_SOURCE: "pull",
+      CLEAN_PAY_IMAGE: applicationImage,
+      CLEAN_PAY_MIGRATION_IMAGE: applicationImage,
+    }).stderr).toContain("must use different sha256 digests");
   });
 
   it("requires one exact public HTTPS app origin and secure cookies", () => {

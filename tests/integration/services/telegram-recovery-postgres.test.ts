@@ -416,6 +416,11 @@ describeWithPostgres("Telegram recovery PostgreSQL serialization", () => {
     let issued = 0;
     let mergeRequest: Record<string, unknown> | null = null;
     let remnawaveSync: Record<string, unknown> | null = null;
+    let remnawaveIdentity: Record<string, unknown> = {
+      uuid: `rw-${suffix}`,
+      email,
+      telegramId: null,
+    };
     vi.stubGlobal(
       "fetch",
       vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
@@ -485,17 +490,12 @@ describeWithPostgres("Telegram recovery PostgreSQL serialization", () => {
 
         if (url.endsWith("/users") && init?.method === "PATCH") {
           remnawaveSync = JSON.parse(String(init.body)) as Record<string, unknown>;
+          remnawaveIdentity = { ...remnawaveSync };
           return jsonResponse({ response: {} });
         }
 
         if (url.endsWith(`/users/rw-${suffix}`) && (!init?.method || init.method === "GET")) {
-          return jsonResponse({
-            response: {
-              uuid: `rw-${suffix}`,
-              email,
-              telegramId: Number(telegramId),
-            },
-          });
+          return jsonResponse({ response: remnawaveIdentity });
         }
 
         throw new Error(`Unexpected request: ${url}`);
