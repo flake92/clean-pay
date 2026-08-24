@@ -46,10 +46,35 @@ const forbiddenPatterns = [
   },
 ] as const;
 
+const approvedGenericReadmeLines = new Set([
+  "sudo mkdir -p /opt/clean-pay",
+  'sudo chown "$USER":"$USER" /opt/clean-pay',
+  "git clone https://github.com/flake92/clean-pay.git /opt/clean-pay",
+  "cd /opt/clean-pay",
+  "По умолчанию приложение доступно только на `127.0.0.1:4000`. Если reverse proxy",
+  "    reverse_proxy 127.0.0.1:4000",
+]);
+
 function markdownFiles() {
-  return readdirSync(docsDirectory)
-    .filter((name) => name.endsWith(".md"))
-    .map((name) => join(docsDirectory, name));
+  return [
+    "README.md",
+    ...markdownFilesBelow(docsDirectory),
+    ...markdownFilesBelow("deploy"),
+  ];
+}
+
+function markdownFilesBelow(directory: string): string[] {
+  return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+    const path = join(directory, entry.name);
+    if (entry.isDirectory()) {
+      return markdownFilesBelow(path);
+    }
+    return entry.isFile() && entry.name.endsWith(".md") ? [path] : [];
+  });
+}
+
+function isApprovedGenericReadmeLine(file: string, line: string) {
+  return file === "README.md" && approvedGenericReadmeLines.has(line);
 }
 
 describe("documentation privacy", () => {
@@ -60,6 +85,7 @@ describe("documentation privacy", () => {
         .flatMap((line, index) =>
           forbiddenPatterns
             .filter(({ pattern }) => pattern.test(line))
+            .filter(() => !isApprovedGenericReadmeLine(file, line))
             .map(({ name }) => `${file}:${index + 1}: ${name}`),
         ),
     );

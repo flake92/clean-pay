@@ -144,7 +144,7 @@ container_image_id() {
 
 wait_for_remnashop_payment_schema() {
   local timeout_seconds="${REMNASHOP_SCHEMA_TIMEOUT_SECONDS:-300}"
-  local minimum_revision="${REMNASHOP_MINIMUM_ALEMBIC_REVISION:-0056}"
+  local minimum_revision="${REMNASHOP_MINIMUM_ALEMBIC_REVISION:-0058}"
   local deadline schema_ready current_revision
 
   if [[ ! "$timeout_seconds" =~ ^[1-9][0-9]*$ ]]; then
@@ -192,7 +192,7 @@ wait_for_remnashop_payment_schema() {
 }
 
 prepare_remnashop_payment_rollout_gate() {
-  local minimum_revision="${REMNASHOP_MINIMUM_ALEMBIC_REVISION:-0056}"
+  local minimum_revision="${REMNASHOP_MINIMUM_ALEMBIC_REVISION:-0058}"
   local api_image worker_image scheduler_image
 
   wait_for_remnashop_payment_schema

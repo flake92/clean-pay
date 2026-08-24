@@ -43,7 +43,7 @@ describe("cabinet command adapter", () => {
   });
 
   it("executes every mutation through the authenticated audit boundary", async () => {
-    await productionCabinetCommands.deleteDevice("device / one");
+    await productionCabinetCommands.deleteDevice("device%2Eone");
     await productionCabinetCommands.deleteAllDevices();
     await productionCabinetCommands.reissueSubscription();
     await productionCabinetCommands.activatePromocode(" CLEAN ");
@@ -52,7 +52,7 @@ describe("cabinet command adapter", () => {
     expect(mocks.auditedMutation.mock.calls.map(([input]) => input.action)).toEqual([
       "device_delete", "devices_delete_all", "subscription_reissue", "promocode_activation",
     ]);
-    expect(mocks.remnashopRequest).toHaveBeenNthCalledWith(1, "/subscription/devices/device%20%2F%20one", {
+    expect(mocks.remnashopRequest).toHaveBeenNthCalledWith(1, "/subscription/devices/device%252Eone", {
       method: "DELETE", accessToken: "access-token",
     });
     expect(mocks.remnashopRequest).toHaveBeenNthCalledWith(2, "/subscription/devices", {
@@ -65,6 +65,43 @@ describe("cabinet command adapter", () => {
       method: "POST", accessToken: "access-token", body: { code: " CLEAN " },
     });
   });
+
+  it.each([
+    "",
+    "   ",
+    ".",
+    "..",
+    " . ",
+    "/",
+    "\\",
+    "device/other",
+    "device\\other",
+    "%2e",
+    "%2f",
+    "%5c",
+    "%252E",
+    "%252F",
+    "%255C",
+    "device/%2e%2e/other",
+    "%25%32%65",
+    "%25%32%66",
+    "%25%35%43",
+    "%",
+    "%2",
+    "%GG",
+    "%C0%AE",
+    "%00",
+  ])(
+    "fails closed for path-ambiguous device HWID %j before authorization",
+    async (hwid) => {
+      await expect(productionCabinetCommands.deleteDevice(hwid)).rejects.toMatchObject({
+        publicMessage: "Это устройство нельзя безопасно удалить отдельно.",
+      });
+      expect(mocks.getAuthorizedRemnashopTokens).not.toHaveBeenCalled();
+      expect(mocks.auditedMutation).not.toHaveBeenCalled();
+      expect(mocks.remnashopRequest).not.toHaveBeenCalled();
+    },
+  );
 
   it("audits logout before clearing the local web session", async () => {
     await productionCabinetCommands.logout();

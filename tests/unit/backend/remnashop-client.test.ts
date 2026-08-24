@@ -74,6 +74,7 @@ import {
   getJwtExpiresAt,
   getAuthorizedRemnashopTokens,
   getRemnashopUserIdFromAccessToken,
+  getRemnashopNotificationPreferences,
   protectRemnashopToken,
   revealRemnashopToken,
   remnashopAuth,
@@ -87,6 +88,7 @@ import {
   remnashopRequest,
   remnashopRequestPasswordReset,
   remnashopRequestResult,
+  updateRemnashopNotificationPreferences,
   recoverRemnashopTelegramSession,
 } from "@/backend/integrations/remnashop/client";
 import { ServiceError } from "@/backend/errors/service-error";
@@ -393,6 +395,41 @@ describe("remnashop client", () => {
         headers: expect.objectContaining({
           accept: "application/json",
           "content-type": "application/json",
+        }),
+      }),
+    );
+  });
+
+  it("reads and patches authenticated notification preferences", async () => {
+    const preference = {
+      subscription_expiration_email_enabled: true,
+      email_eligible: true,
+      sender_email: "no-reply@example.com",
+      days_before: [7, 3, 1],
+    };
+    const fetchMock = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(response({ body: preference }))
+      .mockResolvedValueOnce(response({ body: preference }));
+    const timeoutMock = vi.spyOn(AbortSignal, "timeout");
+
+    await expect(getRemnashopNotificationPreferences("access-1"))
+      .resolves.toEqual(preference);
+    await expect(updateRemnashopNotificationPreferences("access-1", {
+      subscription_expiration_email_enabled: true,
+    })).resolves.toEqual(preference);
+
+    expect(timeoutMock).toHaveBeenNthCalledWith(1, 3_000);
+    expect(timeoutMock).toHaveBeenNthCalledWith(2, 15_000);
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      "http://remnashop:5000/api/v1/public/auth/notification-preferences",
+      expect.objectContaining({
+        method: "PATCH",
+        body: JSON.stringify({ subscription_expiration_email_enabled: true }),
+        headers: expect.objectContaining({
+          cookie: "access_token=access-1",
+          "x-remnashop-auth-service-key": expect.any(String),
         }),
       }),
     );

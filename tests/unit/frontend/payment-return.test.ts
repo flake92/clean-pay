@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  canAutoPollPaymentReturn,
+  PAYMENT_RETURN_MAX_AUTO_POLL_ATTEMPTS,
   paymentPollDelayMs,
   paymentReturnOutcome,
   shouldPollPaymentReturn,
@@ -28,6 +30,11 @@ describe("payment return state", () => {
     expect(paymentPollDelayMs(4)).toBe(30_000);
     expect(paymentPollDelayMs(20)).toBe(30_000);
     expect(paymentPollDelayMs(0, 9)).toBe(9_000);
+    expect(paymentPollDelayMs(0, 86_400)).toBe(30_000);
+    expect(paymentPollDelayMs(0, Number.POSITIVE_INFINITY)).toBe(2_000);
+    expect(canAutoPollPaymentReturn(PAYMENT_RETURN_MAX_AUTO_POLL_ATTEMPTS - 1)).toBe(true);
+    expect(canAutoPollPaymentReturn(PAYMENT_RETURN_MAX_AUTO_POLL_ATTEMPTS)).toBe(false);
+    expect(canAutoPollPaymentReturn(-1)).toBe(false);
   });
 
   it("stops polling when the operation is terminal even if its payment is pending", () => {

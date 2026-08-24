@@ -78,6 +78,7 @@ describe("Remnashop service errors", () => {
     [404, "missing", "/subscription/current", "SUBSCRIPTION_NOT_FOUND", 404],
     [404, "missing", "/plans/public", "NOT_FOUND", 404],
     [409, "email must be verified", "/subscription/purchase", "EMAIL_NOT_VERIFIED", 409],
+    [409, "A verified email address is required", "/auth/notification-preferences", "EMAIL_NOT_VERIFIED", 409],
     [400, "verification code expired", "/auth/email/confirm", "EMAIL_CODE_EXPIRED", 400],
     [400, "invalid code", "/auth/email/confirm", "EMAIL_CODE_INVALID", 400],
     [409, "plan unavailable", "/subscription/purchase", "PLAN_UNAVAILABLE", 409],

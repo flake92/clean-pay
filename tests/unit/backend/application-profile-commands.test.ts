@@ -15,6 +15,11 @@ import {
   requestProfileEmailVerification,
 } from "@/application/profile/execute-profile-command";
 import { ProfileGatewayError, type ProfileCommands } from "@/application/profile/ports/profile-commands";
+import {
+  EmailReminderPreferenceGatewayError,
+  type EmailReminderPreferenceCommands,
+} from "@/application/profile/ports/email-reminder-preferences";
+import { updateEmailReminderPreference } from "@/application/profile/update-email-reminder-preference";
 
 function passwordCommands(overrides: Partial<ProfileCommands> = {}): ProfileCommands {
   return {
@@ -24,6 +29,22 @@ function passwordCommands(overrides: Partial<ProfileCommands> = {}): ProfileComm
     refreshProviderSession: vi.fn(async () => ({ context: { refreshed: true } })),
     persistRefreshedProviderSession: vi.fn(async () => undefined),
     replaceLocalPasswordSession: vi.fn(async () => undefined), auditPasswordChanged: vi.fn(async () => undefined),
+    ...overrides,
+  };
+}
+
+function reminderCommands(
+  overrides: Partial<EmailReminderPreferenceCommands> = {},
+): EmailReminderPreferenceCommands {
+  return {
+    loadActor: vi.fn(async () => ({ context: {}, userId: "user-1" })),
+    assertRateLimit: vi.fn(async () => undefined),
+    update: vi.fn(async (_actor, enabled) => ({
+      enabled,
+      emailEligible: true,
+      senderEmail: "no-reply@example.com",
+      daysBefore: [7, 3, 1],
+    })),
     ...overrides,
   };
 }
@@ -136,6 +157,49 @@ describe("profile command presentation policy", () => {
       ok: false,
       code: "PASSWORD_UNCHANGED",
       message: "Новый пароль должен отличаться от текущего.",
+    });
+  });
+
+  it("updates an explicit e-mail reminder preference after the mutation limit", async () => {
+    const commands = reminderCommands();
+
+    await expect(updateEmailReminderPreference(commands, true)).resolves.toMatchObject({
+      ok: true,
+      preference: { enabled: true },
+    });
+    expect(commands.assertRateLimit).toHaveBeenCalledBefore(vi.mocked(commands.update));
+    expect(commands.update).toHaveBeenCalledWith(expect.anything(), true);
+  });
+
+  it("rejects malformed or ineligible reminder changes without false success", async () => {
+    const invalid = reminderCommands();
+    await expect(updateEmailReminderPreference(invalid, "true")).resolves.toMatchObject({
+      ok: false,
+      code: "VALIDATION_ERROR",
+    });
+    expect(invalid.loadActor).not.toHaveBeenCalled();
+
+    const ineligible = reminderCommands({
+      update: vi.fn(async () => {
+        throw new EmailReminderPreferenceGatewayError("EMAIL_NOT_VERIFIED");
+      }),
+    });
+    await expect(updateEmailReminderPreference(ineligible, true)).resolves.toMatchObject({
+      ok: false,
+      code: "EMAIL_NOT_VERIFIED",
+    });
+
+    const ignored = reminderCommands({
+      update: vi.fn(async () => ({
+        enabled: false,
+        emailEligible: true,
+        senderEmail: "no-reply@example.com",
+        daysBefore: [7, 3, 1],
+      })),
+    });
+    await expect(updateEmailReminderPreference(ignored, true)).resolves.toMatchObject({
+      ok: false,
+      code: "UPSTREAM_UNAVAILABLE",
     });
   });
 });

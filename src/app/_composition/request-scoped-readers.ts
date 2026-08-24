@@ -10,6 +10,7 @@ import { createProductionCabinetReader } from "@/backend/integrations/cabinet/ca
 import { createProductionCheckoutReader } from "@/backend/integrations/payments/checkout-reader";
 import { createProductionPaymentHistoryGateway } from "@/backend/integrations/payments/payment-history-reader";
 import { createProductionPaymentStatusReader } from "@/backend/integrations/payments/payment-status-reader";
+import { createEmailReminderPreferenceReader } from "@/backend/integrations/profile/email-reminder-preferences-adapter";
 import { createReferralProgramReader } from "@/backend/integrations/referral/referral-program-reader";
 import { getStoredAuthorizedRemnashopTokens } from "@/backend/integrations/remnashop/stored-session-authorization";
 import { createRemnashopSubscriptionCatalog } from "@/backend/integrations/remnashop/subscription-catalog";
@@ -66,6 +67,8 @@ export const requestPaymentStatusReader = createProductionPaymentStatusReader(
   readCurrentUserOnly,
   authorizeVerifiedSession,
 );
+export const requestEmailReminderPreferenceReader =
+  createEmailReminderPreferenceReader(authorizeProfileSession);
 
 export const loadRequestCabinetViewModel = cache(() =>
   loadCabinetViewModel(

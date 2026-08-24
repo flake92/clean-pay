@@ -64,6 +64,17 @@ export type ChangePasswordResponse = {
   success: boolean;
 };
 
+export type NotificationPreferencesResponse = {
+  subscription_expiration_email_enabled: boolean;
+  email_eligible: boolean;
+  sender_email: string | null;
+  days_before: number[];
+};
+
+export type UpdateNotificationPreferencesRequest = {
+  subscription_expiration_email_enabled: boolean;
+};
+
 export type ChangeEmailResponse = {
   success: boolean;
   pending_email: string;
