@@ -159,17 +159,96 @@ jobs:
   container-security:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    env:
+      POSTGRES_DB: clean_pay
+      POSTGRES_USER: clean_pay
+      POSTGRES_PASSWORD: ci-postgres-password-not-real-and-distinct
+      DATABASE_URL: postgresql://clean_pay:ci-postgres-password-not-real-and-distinct@postgres:5432/clean_pay?schema=public
+      REDIS_URL: redis://redis:6379/0
+      APP_URL: https://pay.clean-pay.dev
+      NEXT_PUBLIC_APP_URL: https://pay.clean-pay.dev
+      REMNASHOP_API_BASE_URL: http://remnashop:5000/api/v1/public
+      REMNASHOP_ADMIN_API_BASE_URL: http://remnashop:5000/api/v1/admin
+      REMNASHOP_API_KEY: ci-remnashop-key-not-real-and-distinct
+      REMNASHOP_AUTH_SERVICE_KEY: ci-remnashop-auth-key-not-real-and-distinct
+      REMNAWAVE_API_BASE_URL: https://panel.clean-pay.dev
+      REMNAWAVE_TOKEN: ci-remnawave-token-not-real-and-distinct
+      REMNAWAVE_SUBSCRIPTION_ORIGINS: https://subscription.clean-pay.dev
+      WEB_JWT_SECRET: ci-web-session-jwt-secret-not-real-and-distinct
+      WEB_REFRESH_SECRET: ci-web-refresh-secret-not-real-and-distinct
+      AUDIT_IP_HASH_SECRET: ci-audit-hash-secret-not-real-and-distinct
+      TRUSTED_PROXY_HOPS: "1"
+      RATE_LIMIT_IDENTITY_SECRET: ci-rate-limit-secret-not-real-and-distinct
+      AUTH_RATE_LIMIT_CAPACITY: "1000"
+      AUTH_CONCURRENCY_LIMIT: "64"
+      READINESS_INTERNAL_SECRET: ci-readiness-secret-not-real-and-distinct
+      TELEGRAM_OIDC_CLIENT_ID: "7654321098"
+      TELEGRAM_OIDC_CLIENT_SECRET: ci-telegram-oidc-secret-not-real-and-distinct
+      TELEGRAM_BOT_TOKEN: 7654321098:ci-telegram-bot-token-not-real
+      COOKIE_SECURE: "true"
+      COOKIE_SAMESITE: lax
+      PAYMENT_RECONCILIATION_ENABLED: "false"
+      TURNSTILE_ENABLED: "true"
+      TURNSTILE_SITE_KEY: ci-turnstile-site-key-not-real
+      TURNSTILE_SECRET_KEY: ci-turnstile-secret-not-real-and-distinct
+      NEXT_PUBLIC_BRAND_NAME: Clean Pay
+      NEXT_PUBLIC_BRAND_LOGO_URL: /clean-pay-logo.png
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
       - name: Build the exact production runtime image
         run: >-
           docker build
           --target runner
-          --build-arg NEXT_PUBLIC_APP_URL=https://app.example.com
-          --build-arg TURNSTILE_ENABLED=true
-          --build-arg TURNSTILE_WIDGET_ID=0x4AAAAACIBuildSiteKeyOnlyNotASecret
+          --build-arg NEXT_PUBLIC_APP_URL="$NEXT_PUBLIC_APP_URL"
+          --build-arg TURNSTILE_ENABLED="$TURNSTILE_ENABLED"
+          --build-arg TURNSTILE_WIDGET_ID="$TURNSTILE_SITE_KEY"
+          --build-arg NEXT_PUBLIC_BRAND_NAME="$NEXT_PUBLIC_BRAND_NAME"
+          --build-arg NEXT_PUBLIC_BRAND_LOGO_URL="$NEXT_PUBLIC_BRAND_LOGO_URL"
           --tag clean-pay:ci
           .
+      - name: Smoke-test the standalone production runtime
+        run: |
+          docker run --detach --name clean-pay-ci-runtime \
+            --publish 127.0.0.1:4000:4000 \
+            --env POSTGRES_DB \
+            --env POSTGRES_USER \
+            --env POSTGRES_PASSWORD \
+            --env DATABASE_URL \
+            --env REDIS_URL \
+            --env APP_URL \
+            --env NEXT_PUBLIC_APP_URL \
+            --env REMNASHOP_API_BASE_URL \
+            --env REMNASHOP_ADMIN_API_BASE_URL \
+            --env REMNASHOP_API_KEY \
+            --env REMNASHOP_AUTH_SERVICE_KEY \
+            --env REMNAWAVE_API_BASE_URL \
+            --env REMNAWAVE_TOKEN \
+            --env REMNAWAVE_SUBSCRIPTION_ORIGINS \
+            --env WEB_JWT_SECRET \
+            --env WEB_REFRESH_SECRET \
+            --env AUDIT_IP_HASH_SECRET \
+            --env TRUSTED_PROXY_HOPS \
+            --env RATE_LIMIT_IDENTITY_SECRET \
+            --env AUTH_RATE_LIMIT_CAPACITY \
+            --env AUTH_CONCURRENCY_LIMIT \
+            --env READINESS_INTERNAL_SECRET \
+            --env TELEGRAM_OIDC_CLIENT_ID \
+            --env TELEGRAM_OIDC_CLIENT_SECRET \
+            --env TELEGRAM_BOT_TOKEN \
+            --env COOKIE_SECURE \
+            --env COOKIE_SAMESITE \
+            --env PAYMENT_RECONCILIATION_ENABLED \
+            --env TURNSTILE_ENABLED \
+            --env TURNSTILE_SITE_KEY \
+            --env TURNSTILE_SECRET_KEY \
+            --env NEXT_PUBLIC_BRAND_NAME \
+            --env NEXT_PUBLIC_BRAND_LOGO_URL \
+            clean-pay:ci
+          trap 'docker logs clean-pay-ci-runtime || true; docker rm --force clean-pay-ci-runtime >/dev/null 2>&1 || true' EXIT
+          curl --fail --silent --show-error \
+            --retry 30 --retry-delay 1 --retry-connrefused --retry-all-errors \
+            http://127.0.0.1:4000/api/health/liveness
+          docker logs clean-pay-ci-runtime 2>&1 | grep --quiet 'event=production_environment_validated'
       - name: Generate image SBOM
         uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
         with:

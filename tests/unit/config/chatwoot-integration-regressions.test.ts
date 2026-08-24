@@ -29,6 +29,7 @@ describe("Chatwoot integration boundaries", () => {
     expect(appShell).toContain("<ChatwootWidget config={chatwoot} />");
     expect(appShell).toContain("<ChatwootGuestBoundary />");
     expect(authShell).toContain("<ChatwootGuestBoundary />");
+    expect(authShell).not.toContain('"use client"');
   });
 
   it("resets the third-party session before every explicit Clean Pay session exit", () => {

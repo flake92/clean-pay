@@ -9,8 +9,8 @@ const mocks = vi.hoisted(() => ({
   refresh: vi.fn(),
 }));
 
-vi.mock("next/navigation", () => ({
-  useRouter: () => ({ refresh: mocks.refresh }),
+vi.mock("@/app/actions/payment-status", () => ({
+  refreshPaymentStatusAction: mocks.refresh,
 }));
 vi.mock("@/frontend/lib/payment-return", async (importOriginal) => ({
   ...await importOriginal<typeof import("@/frontend/lib/payment-return")>(),
@@ -58,11 +58,31 @@ function terminalModel(): PaymentStatusPageModel {
   };
 }
 
+function retryReadyModel(): PaymentStatusPageModel {
+  return {
+    status: "ready",
+    data: {
+      operation: {
+        operation_id: "operation-1",
+        status: "retry_ready",
+        retry_after_seconds: null,
+        requires_support: false,
+        operator_action: null,
+      },
+      payment: null,
+      subscription: null,
+    },
+  };
+}
+
 describe("payment return polling", () => {
   beforeEach(() => {
     vi.useFakeTimers();
     vi.clearAllMocks();
     mocks.paymentPollDelayMs.mockReturnValue(10);
+    mocks.refresh
+      .mockResolvedValueOnce(pendingModel())
+      .mockResolvedValueOnce(terminalModel());
   });
 
   afterEach(() => {
@@ -70,30 +90,66 @@ describe("payment return polling", () => {
     vi.useRealTimers();
   });
 
-  it("increments the backoff attempt after every completed timer and resets at a terminal state", async () => {
-    const view = render(createElement(PaymentReturnStatus, {
+  it("increments the backoff attempt and stops polling at a terminal state", async () => {
+    render(createElement(PaymentReturnStatus, {
       kind: "pending",
       model: pendingModel(),
+      operationId: "operation-1",
+      paymentId: null,
     }));
 
     expect(mocks.paymentPollDelayMs).toHaveBeenLastCalledWith(0, 5);
     await act(async () => vi.advanceTimersByTime(10));
-    expect(mocks.refresh).toHaveBeenCalledOnce();
-
-    view.rerender(createElement(PaymentReturnStatus, {
-      kind: "pending",
-      model: pendingModel(),
-    }));
+    expect(mocks.refresh).toHaveBeenCalledWith({
+      operationId: "operation-1",
+      paymentId: null,
+    });
     expect(mocks.paymentPollDelayMs).toHaveBeenLastCalledWith(1, 5);
 
-    view.rerender(createElement(PaymentReturnStatus, {
+    await act(async () => vi.advanceTimersByTime(10));
+    expect(mocks.refresh).toHaveBeenCalledTimes(2);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("requests one command-side refresh when the local snapshot is still empty", async () => {
+    mocks.refresh.mockReset();
+    mocks.refresh.mockResolvedValue(terminalModel());
+
+    render(createElement(PaymentReturnStatus, {
       kind: "pending",
-      model: terminalModel(),
+      model: {
+        status: "ready",
+        data: { operation: null, payment: null, subscription: null },
+      },
+      operationId: null,
+      paymentId: "11111111-1111-4111-8111-111111111111",
     }));
-    view.rerender(createElement(PaymentReturnStatus, {
+    await act(async () => Promise.resolve());
+
+    expect(mocks.refresh).toHaveBeenCalledOnce();
+    expect(mocks.refresh).toHaveBeenCalledWith({
+      operationId: null,
+      paymentId: "11111111-1111-4111-8111-111111111111",
+    });
+  });
+
+  it("refreshes a stored retry-ready operation once before treating it as terminal", async () => {
+    mocks.refresh.mockReset();
+    mocks.refresh.mockResolvedValue(terminalModel());
+
+    render(createElement(PaymentReturnStatus, {
       kind: "pending",
-      model: pendingModel(),
+      model: retryReadyModel(),
+      operationId: "operation-1",
+      paymentId: null,
     }));
-    expect(mocks.paymentPollDelayMs).toHaveBeenLastCalledWith(0, 5);
+    await act(async () => Promise.resolve());
+
+    expect(mocks.refresh).toHaveBeenCalledOnce();
+    expect(mocks.refresh).toHaveBeenCalledWith({
+      operationId: "operation-1",
+      paymentId: null,
+    });
+    expect(vi.getTimerCount()).toBe(0);
   });
 });

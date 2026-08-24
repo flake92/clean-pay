@@ -1,8 +1,5 @@
 import { loadNavigationShell } from "@/application/navigation/load-navigation";
-import {
-  requestAuthProfileGateway,
-  requestSubscriptionCatalog,
-} from "@/app/_composition/request-scoped-readers";
+import { requestAuthProfileGateway } from "@/app/_composition/request-scoped-readers";
 import { createChatwootWidgetConfig } from "@/backend/integrations/support/chatwoot-widget";
 import {
   ChatwootGuestBoundary,
@@ -11,6 +8,7 @@ import {
 import Layout from "@/frontend/layout/layout";
 import { sessionRefreshPath } from "@/shared/auth/session-navigation";
 import { redirect } from "next/navigation";
+import { connection } from "next/server";
 
 export async function AppShell({
   children,
@@ -21,10 +19,10 @@ export async function AppShell({
   requireAuth?: boolean;
   returnTo?: string;
 }) {
-  const shell = await loadNavigationShell(
-    requestAuthProfileGateway,
-    requestSubscriptionCatalog,
-  );
+  // Session-backed shells are request-scoped and must never be evaluated by
+  // the static prerender worker, where request APIs intentionally bail out.
+  await connection();
+  const shell = await loadNavigationShell(requestAuthProfileGateway);
   if (requireAuth && !shell.navigation.authenticated) {
     redirect(sessionRefreshPath(returnTo));
   }

@@ -16,8 +16,6 @@ export function useCleanPayMenu(navigation: NavigationViewModel) {
 
     const shouldShowVerifyEmail = navigation.emailVerificationRequired;
     const shouldShowLinkAccount = navigation.authenticated;
-    const canRenewSubscription = navigation.canRenewSubscription;
-    const hasSubscription = navigation.hasSubscription;
     const accountItems: AppMenuItem[] = [
         ...(navigation.authenticated
             ? [{ label: "Профиль", icon: "pi pi-fw pi-user", to: "/profile" }]
@@ -38,11 +36,11 @@ export function useCleanPayMenu(navigation: NavigationViewModel) {
             ]
             : []),
         {
-            label: hasSubscription ? "Изменить тариф" : "Тарифы",
+            label: "Тарифы",
             icon: "pi pi-fw pi-tags",
             to: "/tariffs",
         },
-        ...(canRenewSubscription
+        ...(navigation.authenticated
             ? [{ label: "Продлить", icon: "pi pi-fw pi-refresh", to: "/extend" }]
             : []),
     ];

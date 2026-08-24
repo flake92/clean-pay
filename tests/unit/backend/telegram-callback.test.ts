@@ -167,7 +167,7 @@ describe("Telegram callback payment-owner fence", () => {
   it("holds the owner fence before Telegram attach and local relink", async () => {
     const response = await POST(new Request("https://clean-pay.example.com/auth/telegram/callback", {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: { "content-type": "application/json", origin: "https://clean-pay.example.com" },
       body: JSON.stringify({ idToken: "telegram-id-token" }),
     }));
 
@@ -210,7 +210,7 @@ describe("Telegram callback payment-owner fence", () => {
       "https://clean-pay.example.com/auth/telegram/callback",
       {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: { "content-type": "application/json", origin: "https://clean-pay.example.com" },
         body: JSON.stringify({ idToken: "telegram-id-token" }),
       },
     ));
@@ -260,7 +260,7 @@ describe("Telegram callback payment-owner fence", () => {
       "https://clean-pay.example.com/auth/telegram/callback",
       {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: { "content-type": "application/json", origin: "https://clean-pay.example.com" },
         body: JSON.stringify({ idToken: "telegram-id-token" }),
       },
     ));
@@ -270,5 +270,20 @@ describe("Telegram callback payment-owner fence", () => {
     expect(mocks.revokeWebSessionById.mock.invocationCallOrder[0]).toBeLessThan(
       mocks.logTechnicalError.mock.invocationCallOrder.at(-1)!,
     );
+  });
+
+  it("rejects a cross-origin popup callback before consuming credentials", async () => {
+    const response = await POST(new Request(
+      "https://clean-pay.example.com/auth/telegram/callback",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json", origin: "https://evil.example" },
+        body: JSON.stringify({ idToken: "telegram-id-token" }),
+      },
+    ));
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toEqual({ error: "forbidden" });
+    expect(mocks.consumeTelegramPopupToken).not.toHaveBeenCalled();
   });
 });

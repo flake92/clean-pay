@@ -22,6 +22,7 @@ import {
 import { revokeWebSessionById } from "@/backend/integrations/sessions/web-session-revocation";
 import { readTelegramPopupRequest } from "@/backend/integrations/telegram/popup-request";
 import { TelegramAuthStateAlreadyConsumedError } from "@/backend/integrations/telegram/oidc";
+import { validateRequestSource } from "@/backend/security/csrf";
 import {
   logTechnicalError,
   logTechnicalInfo,
@@ -162,6 +163,17 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
+  const source = validateRequestSource({
+    headers: request.headers,
+    trustedAppUrl: getEnv().publicAppUrl,
+  });
+  if (!source.ok) {
+    return NextResponse.json(
+      { error: "forbidden" },
+      { status: source.status, headers: { "cache-control": "no-store" } },
+    );
+  }
+
   try {
     const popupRequest = await readTelegramPopupRequest(request);
     const outcome = await completeTelegramCallback(
@@ -184,7 +196,10 @@ export async function POST(request: Request) {
   } catch (error) {
     logTechnicalError("telegram_popup_callback_failed", error, {});
     if (error instanceof ServiceError && error.status === 413) {
-      return NextResponse.json({ error: "payload_too_large" }, { status: 413 });
+      return NextResponse.json({ error: "payload_too_large" }, { status: error.status });
+    }
+    if (error instanceof ServiceError && error.status === 415) {
+      return NextResponse.json({ error: "unsupported_media_type" }, { status: error.status });
     }
     if (error instanceof TelegramAuthStateAlreadyConsumedError) {
       const session = await getCurrentSession().catch(() => null);

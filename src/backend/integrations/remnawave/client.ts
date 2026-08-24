@@ -1,7 +1,7 @@
 import { getEnv } from "@/backend/config/env";
 import { ServiceError } from "@/backend/errors/service-error";
 import { logger } from "@/backend/observability/logger";
-import { recordUpstreamRequest } from "@/backend/observability/metrics";
+import { recordUpstreamRequest, upstreamOperation } from "@/backend/observability/metrics";
 import { currentRequestTrace, tracedHeaders } from "@/backend/observability/request-trace";
 
 type RemnawaveUser = {
@@ -143,10 +143,11 @@ function unambiguousSubscriptionUrl(users: RemnawaveUser[], input: LiveSubscript
 async function remnawaveRequest<T>(path: string) {
   const endpoint = remnawaveEndpoint(path);
   const token = getEnv().remnawave.token;
+  const operation = upstreamOperation(path);
 
   if (!endpoint || !token) {
     logger.warn("remnawave_live_subscription_skipped", {
-      path,
+      path: operation,
       hasEndpoint: Boolean(endpoint),
       hasToken: Boolean(token),
     }, {
@@ -171,34 +172,34 @@ async function remnawaveRequest<T>(path: string) {
     });
 
     if (response.status === 404) {
-      recordUpstreamRequest({ service: "remnawave", operation: path, outcome: "rejected", durationMs: Date.now() - startedAt });
+      recordUpstreamRequest({ service: "remnawave", operation, outcome: "rejected", durationMs: Date.now() - startedAt });
       return null;
     }
 
     if (!response.ok) {
-      recordUpstreamRequest({ service: "remnawave", operation: path, outcome: "rejected", durationMs: Date.now() - startedAt });
+      recordUpstreamRequest({ service: "remnawave", operation, outcome: "rejected", durationMs: Date.now() - startedAt });
       logger.warn("remnawave_live_subscription_failed", {
-        path,
+        path: operation,
         status: response.status,
       }, {
         category: "upstream",
         source: "remnawave.client",
-        message: `Remnawave lookup failed: GET ${path} -> ${response.status}`,
+        message: `Remnawave lookup failed: GET ${operation} -> ${response.status}`,
       });
       return null;
     }
 
-    recordUpstreamRequest({ service: "remnawave", operation: path, outcome: "success", durationMs: Date.now() - startedAt });
+    recordUpstreamRequest({ service: "remnawave", operation, outcome: "success", durationMs: Date.now() - startedAt });
     return await response.json() as T;
   } catch (error) {
-    recordUpstreamRequest({ service: "remnawave", operation: path, outcome: "unavailable", durationMs: Date.now() - startedAt });
+    recordUpstreamRequest({ service: "remnawave", operation, outcome: "unavailable", durationMs: Date.now() - startedAt });
     logger.warn("remnawave_live_subscription_unavailable", {
-      path,
+      path: operation,
       errorName: error instanceof Error ? error.name : "UnknownError",
     }, {
       category: "upstream",
       source: "remnawave.client",
-      message: `Remnawave lookup unavailable: GET ${path}`,
+      message: `Remnawave lookup unavailable: GET ${operation}`,
     });
     return null;
   }
@@ -226,8 +227,26 @@ export async function synchronizeRemnawaveUserIdentity(input: {
   uuid: string;
   email: string;
   telegramId: string;
-}) {
+}, beforeMutation: () => Promise<void>) {
   const { endpoint, token } = remnawaveIdentitySynchronizationTarget();
+  const current = await getUserByUuid(input.uuid);
+  const uuidMatches = normalizedIdentity(current?.uuid) === normalizedIdentity(input.uuid);
+  const emailMatches = normalizedEmail(current?.email) === normalizedEmail(input.email);
+  const telegramMatches = normalizedIdentity(current?.telegramId) === normalizedIdentity(input.telegramId);
+
+  if (!uuidMatches || (!emailMatches && !telegramMatches)) {
+    throw new ServiceError(
+      "UPSTREAM_UNAVAILABLE",
+      503,
+      "Remnawave subscription owner could not be verified.",
+    );
+  }
+
+  if (emailMatches && telegramMatches) {
+    return;
+  }
+
+  await beforeMutation();
 
   let response: Response;
   const startedAt = Date.now();
@@ -287,7 +306,12 @@ export function assertRemnawaveIdentitySynchronizationConfigured() {
 export async function getLiveRemnawaveSubscriptionUrl(input: LiveSubscriptionUrlInput) {
   if (input.userRemnaId) {
     const user = await getUserByUuid(input.userRemnaId);
-    const isExpectedUser = normalizedIdentity(user?.uuid) === normalizedIdentity(input.userRemnaId);
+    const hasStableIdentity = Boolean(
+      normalizedEmail(input.email) || normalizedIdentity(input.telegramId),
+    );
+    const isExpectedUser = normalizedIdentity(user?.uuid) === normalizedIdentity(input.userRemnaId)
+      && hasStableIdentity
+      && Boolean(user && hasExpectedIdentity([user], input));
     const url = isExpectedUser && user && isLiveUser(user) ? subscriptionUrl(user) : null;
 
     if (url) {

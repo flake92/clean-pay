@@ -51,11 +51,10 @@ export async function synchronizeProviderAccountIdentity(
     throw new ServiceError("ACCOUNT_MERGE_REQUIRED", 409, "Merged subscription owner is incomplete.");
   }
   assertRemnawaveIdentitySynchronizationConfigured();
-  await markPaymentOwnerChangeUpstreamMutationStarted();
   await synchronizeRemnawaveUserIdentity({
     uuid: subscription.user_remna_id,
     email: profile.email,
     telegramId,
-  });
+  }, markPaymentOwnerChangeUpstreamMutationStarted);
   return { hasSubscription: true, profile };
 }

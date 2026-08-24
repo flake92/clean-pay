@@ -571,6 +571,21 @@ export function validateProductionEnvironment(environment) {
     publicPath("NEXT_PUBLIC_BRAND_LOGO_URL", brandLogo);
   }
 
+  const resolvedBrandName = brandName ?? "Clean Pay";
+  const resolvedBrandLogo = brandLogo ?? "/clean-pay-logo.png";
+  const bakedBrandName = optional("CLEAN_PAY_BAKED_BRAND_NAME");
+  const bakedBrandLogo = optional("CLEAN_PAY_BAKED_BRAND_LOGO_URL");
+
+  if (bakedBrandName && bakedBrandName !== resolvedBrandName) {
+    fail("CLEAN_PAY_BAKED_BRAND_NAME must match NEXT_PUBLIC_BRAND_NAME; rebuild the image");
+  }
+  if (bakedBrandLogo) {
+    publicPath("CLEAN_PAY_BAKED_BRAND_LOGO_URL", bakedBrandLogo);
+    if (bakedBrandLogo !== resolvedBrandLogo) {
+      fail("CLEAN_PAY_BAKED_BRAND_LOGO_URL must match NEXT_PUBLIC_BRAND_LOGO_URL; rebuild the image");
+    }
+  }
+
   const bindAddress = optional("CLEAN_PAY_BIND");
 
   if (bindAddress && bindAddress !== "127.0.0.1" && bindAddress !== "::1") {
