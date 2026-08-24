@@ -256,7 +256,7 @@ describe("production env validator", () => {
     expect(prodCommand).toContain("COMPOSE_INTERPOLATION_ENVIRONMENT_NAMES");
     expect(prodCommand).toContain("delete environment[name]");
     expect(prodCommand).toContain("...productionFileEnvironment()");
-    expect(prodCommand.match(/env: productionChildEnvironment\(\)/g)).toHaveLength(7);
+    expect(prodCommand.match(/env: productionChildEnvironment\(\)/g)).toHaveLength(8);
     expect(runValidator({ CLEAN_PAY_BUILD_PHASE: "true" }).stderr).toContain(
       "CLEAN_PAY_BUILD_PHASE is build-only",
     );

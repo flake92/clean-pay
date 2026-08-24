@@ -7,6 +7,8 @@ ENV_EXAMPLE="$ROOT_DIR/deploy/prod/.env.example"
 COMPOSE_PATH="$ROOT_DIR/deploy/prod/docker-compose.yml"
 REMNASHOP_ROLLOUT_SCRIPT="$ROOT_DIR/deploy/prod/prepare-remnashop-rollout.sh"
 
+. "$ROOT_DIR/deploy/prod/redis-host-safety.sh"
+
 die() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
 info() { printf '\n%s\n' "$*"; }
 ok() { printf 'OK: %s\n' "$*"; }
@@ -142,11 +144,9 @@ ensure_network() {
 }
 
 ensure_redis_host_memory_policy() {
-  overcommit_path=/proc/sys/vm/overcommit_memory
-  [ -r "$overcommit_path" ] || return 0
-  overcommit_value=$(tr -d '[:space:]' < "$overcommit_path")
-  [ "$overcommit_value" = 1 ] || die \
-    "Redis requires vm.overcommit_memory=1. Apply 'sysctl -w vm.overcommit_memory=1' and persist it in /etc/sysctl.d before deployment."
+  # redis-host-safety.sh reads /proc/sys/vm/overcommit_memory inside the
+  # selected Docker daemon, rather than from this script's local host.
+  probe_redis_host_memory_policy || die "$REDIS_HOST_MEMORY_POLICY_FAILURE"
 }
 
 prompt_value() {
@@ -430,7 +430,12 @@ case "$command" in
   up) up ;;
   logs) require_env; need_docker; compose logs --tail=100 -f ;;
   ps) require_env; need_docker; compose ps ;;
-  restart) require_env; need_docker; compose restart ;;
+  restart)
+    require_env
+    need_docker
+    ensure_redis_host_memory_policy
+    compose restart
+    ;;
   down) require_env; need_docker; compose down ;;
   help|-h|--help) usage ;;
   *) usage; exit 1 ;;

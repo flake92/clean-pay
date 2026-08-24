@@ -10,7 +10,10 @@ import {
   ProductionEnvironmentError,
   parseProductionEnvironmentFile,
 } from "./production-env-rules.mjs";
-import { assertRedisOvercommitValue } from "./host-safety.mjs";
+import {
+  assertRedisOvercommitProbeResult,
+  redisOvercommitProbeArgs,
+} from "./host-safety.mjs";
 import { assessReadinessResponse } from "./readiness.mjs";
 
 const prodDir = path.dirname(fileURLToPath(import.meta.url));
@@ -301,14 +304,15 @@ function ensureEdgeNetwork() {
 }
 
 function assertRedisHostMemoryPolicy() {
-  const overcommitPath = "/proc/sys/vm/overcommit_memory";
-
-  if (!existsSync(overcommitPath)) {
-    return;
-  }
-
   try {
-    assertRedisOvercommitValue(readFileSync(overcommitPath, "utf8"));
+    const result = spawnSync("docker", redisOvercommitProbeArgs(), {
+      cwd: rootDir,
+      encoding: "utf8",
+      env: productionChildEnvironment(),
+      shell: false,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    assertRedisOvercommitProbeResult(result);
   } catch (error) {
     console.error(error instanceof Error ? error.message : String(error));
     process.exit(1);
