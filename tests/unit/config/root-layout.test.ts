@@ -22,7 +22,6 @@ const allowedRootFiles = [
   "next.config.ts",
   "package-lock.json",
   "package.json",
-  "postcss.config.mjs",
   "prisma.config.ts",
   "README.md",
   "README.ru_RU.md",

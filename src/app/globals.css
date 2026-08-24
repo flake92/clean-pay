@@ -1,15 +1,6 @@
-@import "tailwindcss";
-
 :root {
   --background: #eff3f8;
   --foreground: #111827;
-}
-
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: "Inter var", sans-serif;
-  --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
 }
 
 body {
@@ -17,6 +8,18 @@ body {
   background: var(--background);
   color: var(--foreground);
   overflow-x: hidden;
+}
+
+.break-all {
+  word-break: break-all;
+}
+
+.break-words {
+  overflow-wrap: break-word;
+}
+
+.max-w-4xl {
+  max-width: 56rem;
 }
 
 .layout-topbar-logo img,

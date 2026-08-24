@@ -42,16 +42,22 @@ describe("provider account identity synchronization", () => {
     });
     mocks.getRemnashopUserIdFromAccessToken.mockReturnValue("account-1");
     mocks.remnashopRequest.mockResolvedValue({ user_remna_id: "rw-1" });
+    mocks.synchronizeRemnawaveUserIdentity.mockImplementation(
+      async (_input, beforeMutation: () => Promise<void>) => beforeMutation(),
+    );
   });
 
   it("copies the final Remnashop owner to the preserved Remnawave subscription", async () => {
     await expect(synchronizeProviderAccountIdentity("access-token", expected)).resolves.toMatchObject({ hasSubscription: true });
     expect(mocks.assertRemnawaveIdentitySynchronizationConfigured).toHaveBeenCalledOnce();
     expect(mocks.assertRemnawaveIdentitySynchronizationConfigured.mock.invocationCallOrder[0])
+      .toBeLessThan(mocks.synchronizeRemnawaveUserIdentity.mock.invocationCallOrder[0]!);
+    expect(mocks.synchronizeRemnawaveUserIdentity).toHaveBeenCalledWith(
+      { uuid: "rw-1", email: "owner@example.com", telegramId: "777" },
+      mocks.markPaymentOwnerChangeUpstreamMutationStarted,
+    );
+    expect(mocks.synchronizeRemnawaveUserIdentity.mock.invocationCallOrder[0])
       .toBeLessThan(mocks.markPaymentOwnerChangeUpstreamMutationStarted.mock.invocationCallOrder[0]!);
-    expect(mocks.synchronizeRemnawaveUserIdentity).toHaveBeenCalledWith({
-      uuid: "rw-1", email: "owner@example.com", telegramId: "777",
-    });
   });
 
   it("does not leave a mutation barrier when Remnawave configuration is absent", async () => {

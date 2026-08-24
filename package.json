@@ -54,7 +54,6 @@
     "react-transition-group": "^4.4.5"
   },
   "devDependencies": {
-    "@tailwindcss/postcss": "^4",
     "@testing-library/react": "^16.3.0",
     "@testing-library/user-event": "^14.6.1",
     "@types/node": "^24",
@@ -68,7 +67,6 @@
     "pg-connection-string": "^2.14.0",
     "prisma": "7.9.1",
     "sass": "^1.101.0",
-    "tailwindcss": "^4",
     "typescript": "^5",
     "vitest": "4.1.10"
   },

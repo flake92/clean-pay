@@ -248,6 +248,12 @@ describe("production env validator", () => {
     expect(dockerfile).toContain(
       "ENV CLEAN_PAY_BAKED_PUBLIC_APP_URL=${NEXT_PUBLIC_APP_URL}",
     );
+    expect(dockerfile).toContain(
+      "ENV CLEAN_PAY_BAKED_BRAND_NAME=${NEXT_PUBLIC_BRAND_NAME}",
+    );
+    expect(dockerfile).toContain(
+      "ENV CLEAN_PAY_BAKED_BRAND_LOGO_URL=${NEXT_PUBLIC_BRAND_LOGO_URL}",
+    );
     expect(compose).toContain(
       "NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL:?NEXT_PUBLIC_APP_URL is required}",
     );
@@ -263,12 +269,23 @@ describe("production env validator", () => {
     expect(runValidator({
       CLEAN_PAY_BAKED_PUBLIC_APP_URL: validEnv.NEXT_PUBLIC_APP_URL,
     }).stderr).toContain("is image metadata and must not be set in an env file");
+    expect(runValidator({
+      CLEAN_PAY_BAKED_BRAND_NAME: validEnv.NEXT_PUBLIC_BRAND_NAME,
+    }).stderr).toContain("is image metadata and must not be set in an env file");
     expect(runRuntimeValidator({
       CLEAN_PAY_BAKED_PUBLIC_APP_URL: validEnv.NEXT_PUBLIC_APP_URL,
+      CLEAN_PAY_BAKED_BRAND_NAME: validEnv.NEXT_PUBLIC_BRAND_NAME,
+      CLEAN_PAY_BAKED_BRAND_LOGO_URL: validEnv.NEXT_PUBLIC_BRAND_LOGO_URL,
     }).status).toBe(0);
     expect(runRuntimeValidator({
       CLEAN_PAY_BAKED_PUBLIC_APP_URL: "https://old.clean-pay.dev",
     }).stderr).toContain("rebuild the image");
+    expect(runRuntimeValidator({
+      CLEAN_PAY_BAKED_BRAND_NAME: "Old Brand",
+    }).stderr).toContain("CLEAN_PAY_BAKED_BRAND_NAME must match NEXT_PUBLIC_BRAND_NAME");
+    expect(runRuntimeValidator({
+      CLEAN_PAY_BAKED_BRAND_LOGO_URL: "/old-logo.png",
+    }).stderr).toContain("CLEAN_PAY_BAKED_BRAND_LOGO_URL must match NEXT_PUBLIC_BRAND_LOGO_URL");
   });
 
   it("requires one exact public HTTPS app origin and secure cookies", () => {

@@ -1,8 +1,7 @@
 import { Card } from "primereact/card";
 
-import { loadPaymentStatus } from "@/application/payments/load-payment-status";
+import { loadPaymentStatusSnapshot } from "@/application/payments/load-payment-status";
 import { requestPaymentStatusReader } from "@/app/_composition/request-scoped-readers";
-import { productionPaymentMaintenanceRunner } from "@/backend/integrations/payments/payment-maintenance-runner";
 import { AppShell } from "@/app/_components/app-shell";
 import { PageHeader } from "@/frontend/components/page-header";
 import { PaymentReturnStatus } from "@/frontend/components/payment-return-status";
@@ -23,7 +22,7 @@ export async function PaymentStatusPage({ kind, searchParams }: {
   if (paymentId) returnParams.set("payment_id", paymentId);
   if (operationId) returnParams.set("operation_id", operationId);
   const returnTo = `/payment/${kind}${returnParams.size ? `?${returnParams}` : ""}`;
-  const model = await loadPaymentStatus(requestPaymentStatusReader, productionPaymentMaintenanceRunner, {
+  const model = await loadPaymentStatusSnapshot(requestPaymentStatusReader, {
     paymentId,
     operationId,
   });
@@ -31,7 +30,15 @@ export async function PaymentStatusPage({ kind, searchParams }: {
     <AppShell requireAuth returnTo={returnTo}>
       <div className="flex flex-column gap-6">
         <PageHeader description={intro(kind)} title="Статус платежа" />
-        <Card><PaymentReturnStatus kind={kind} model={model} /></Card>
+        <Card>
+          <PaymentReturnStatus
+            key={`${operationId ?? "latest"}:${paymentId ?? "latest"}`}
+            kind={kind}
+            model={model}
+            operationId={operationId}
+            paymentId={paymentId}
+          />
+        </Card>
       </div>
     </AppShell>
   );

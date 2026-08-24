@@ -48,6 +48,33 @@ function unusedApplicationPorts(
 }
 
 describe("clean architecture boundaries", () => {
+  it("uses PrimeFlex as the only utility CSS system", () => {
+    const manifest = JSON.parse(readFileSync("package.json", "utf8")) as {
+      dependencies?: Record<string, string>;
+      devDependencies?: Record<string, string>;
+    };
+    const dependencies = { ...manifest.dependencies, ...manifest.devDependencies };
+    const globals = readFileSync("src/app/globals.css", "utf8");
+    const layout = readFileSync("src/app/layout.tsx", "utf8");
+    const source = files("src/**/*.{ts,tsx}").map(({ source: contents }) => contents).join("\n");
+
+    expect(dependencies).not.toHaveProperty("tailwindcss");
+    expect(dependencies).not.toHaveProperty("@tailwindcss/postcss");
+    expect(globSync("postcss.config.*")).toEqual([]);
+    expect(globals).not.toContain('@import "tailwindcss"');
+    expect(layout).toContain('import "primeflex/primeflex.css"');
+    expect(source).not.toMatch(/(?:^|[\s"'`])(?:items-start|items-center|justify-between)(?=$|[\s"'`])/);
+  });
+
+  it("keeps navigation shell rendering independent from the subscription provider", () => {
+    const shell = readFileSync("src/app/_components/app-shell.tsx", "utf8");
+    const navigation = readFileSync("src/application/navigation/load-navigation.ts", "utf8");
+
+    expect(shell).not.toContain("requestSubscriptionCatalog");
+    expect(navigation).not.toContain("SubscriptionCatalog");
+    expect(navigation).not.toContain("loadOffers");
+  });
+
   it("resolves alias and relative imports before applying layer rules", () => {
     expect(projectPath("src/shared/domain/value.ts", "../../backend/database/prisma"))
       .toBe("src/backend/database/prisma");

@@ -11,7 +11,7 @@ import { createProductionCheckoutReader } from "@/backend/integrations/payments/
 import { createProductionPaymentHistoryGateway } from "@/backend/integrations/payments/payment-history-reader";
 import { createProductionPaymentStatusReader } from "@/backend/integrations/payments/payment-status-reader";
 import { createReferralProgramReader } from "@/backend/integrations/referral/referral-program-reader";
-import { getAuthorizedRemnashopTokens } from "@/backend/integrations/remnashop/client";
+import { getStoredAuthorizedRemnashopTokens } from "@/backend/integrations/remnashop/stored-session-authorization";
 import { createRemnashopSubscriptionCatalog } from "@/backend/integrations/remnashop/subscription-catalog";
 import { getCurrentSessionReadOnly } from "@/backend/integrations/sessions/web-session-service";
 import { createRemnashopSubscriptionReader } from "@/backend/integrations/remnashop/subscription-reader";
@@ -23,15 +23,12 @@ const skipVerifiedEmailPersistence = async () => undefined;
 const readCurrentUserOnly = async () =>
   (await getCurrentSessionReadOnly())?.user ?? null;
 
-const authorizeVerifiedSession = cache(() => getAuthorizedRemnashopTokens({
-  readSession: getCurrentSessionReadOnly,
-  refreshAccessCookie: skipAccessCookieRefresh,
-}));
+const authorizeVerifiedSession = cache(() =>
+  getStoredAuthorizedRemnashopTokens(),
+);
 const authorizeProfileSession = cache(() =>
-  getAuthorizedRemnashopTokens({
+  getStoredAuthorizedRemnashopTokens({
     allowUnverifiedEmail: true,
-    readSession: getCurrentSessionReadOnly,
-    refreshAccessCookie: skipAccessCookieRefresh,
   }),
 );
 

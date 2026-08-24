@@ -15,6 +15,7 @@ describe("cabinet performance regressions", () => {
     expect(page).toContain("loadRequestCabinetViewModel");
     expect(page).not.toContain("export default async function CabinetPage");
     expect(shell).toContain("loadNavigationShell");
+    expect(shell).toContain("await connection()");
     expect(shell).not.toContain("loadNavigation(");
   });
 
@@ -58,8 +59,8 @@ describe("cabinet performance regressions", () => {
     expect(composition).toContain('import { cache } from "react"');
     expect(composition).toContain("authorizeVerifiedSession");
     expect(composition).toContain("getCurrentSessionReadOnly");
-    expect(composition).toContain("readSession: getCurrentSessionReadOnly");
-    expect(composition).toContain("refreshAccessCookie: skipAccessCookieRefresh");
+    expect(composition).toContain("getStoredAuthorizedRemnashopTokens");
+    expect(composition).not.toContain("getAuthorizedRemnashopTokens");
     expect(composition).toContain("createProductionLinkAccountReader(");
     expect(composition).toContain("createProductionPasskeyManagementGateway(");
     expect(composition).toContain("createProductionCheckoutReader(requestSubscriptions)");
@@ -126,5 +127,42 @@ describe("cabinet performance regressions", () => {
     expect(history).not.toContain("loadCapabilities(");
     expect(history).not.toContain("loadExactTransaction(");
     expect(history).not.toContain("processPaymentHistoryPage(");
+  });
+
+  it("gives render-time Remnashop authorization no mutation capability", () => {
+    const authorizer = source(
+      "src/backend/integrations/remnashop/stored-session-authorization.ts",
+    );
+    const commandGateway = source(
+      "src/backend/integrations/auth/auth-profile-gateway.ts",
+    );
+
+    expect(authorizer).toContain("getCurrentSessionReadOnly");
+    expect(authorizer).toContain("revealRemnashopToken");
+    expect(authorizer).not.toContain("readSession?:");
+    expect(authorizer).not.toContain("getAuthorizedRemnashopTokens");
+    expect(authorizer).not.toContain("acquireRemnashopTokensForSession");
+    expect(authorizer).not.toContain("attachRemnashopTokens");
+    expect(authorizer).not.toContain("remnashopRefreshTokens");
+    expect(authorizer).not.toContain("remnashopCreateServiceSession");
+    expect(authorizer).not.toContain("refreshCurrentAccessCookie");
+    expect(authorizer).not.toContain("protectRemnashopToken");
+    expect(authorizer).not.toContain("@/backend/database/prisma");
+    expect(authorizer).not.toMatch(
+      /\.(create|update|updateMany|delete|deleteMany)\(/,
+    );
+    expect(commandGateway).toContain("getAuthorizedRemnashopTokens");
+  });
+
+  it("keeps payment reconciliation out of Server Component rendering", () => {
+    const page = source("src/app/payment/payment-status-page.tsx");
+    const action = source("src/app/actions/payment-status.ts");
+
+    expect(page).toContain("loadPaymentStatusSnapshot(");
+    expect(page).not.toContain("productionPaymentMaintenanceRunner");
+    expect(page).not.toContain("loadPaymentStatus(requestPaymentStatusReader");
+    expect(action).toContain('"use server"');
+    expect(action).toContain("productionPaymentMaintenanceRunner");
+    expect(action).toContain("loadPaymentStatus(");
   });
 });

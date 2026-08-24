@@ -9,6 +9,7 @@ import {
   openTelegramExternalLink,
   wasOpenedInTelegramWebApp,
 } from "@/frontend/lib/telegram-webapp";
+import { getBranding } from "@/shared/branding";
 
 type BeforeInstallPromptEvent = Event & {
   prompt: () => Promise<void>;
@@ -50,6 +51,7 @@ export function InstallAppButton({
   alwaysVisible?: boolean;
   autoOpenIosGuide?: boolean;
 }) {
+  const branding = getBranding();
   const [installEvent, setInstallEvent] = useState<BeforeInstallPromptEvent | null>(null);
   const [showIosGuide, setShowIosGuide] = useState(false);
   const [showAndroidGuide, setShowAndroidGuide] = useState(false);
@@ -148,9 +150,9 @@ export function InstallAppButton({
     return (
       <div className="flex flex-column align-items-center gap-3 text-center" role="status">
         <i className="pi pi-check-circle text-green-500" style={{ fontSize: "2rem" }} />
-        <strong className="text-900 text-xl">Clean Pay уже установлен</strong>
+        <strong className="text-900 text-xl">{branding.name} уже установлен</strong>
         <span className="text-600 line-height-3">
-          Ярлык уже находится на главном экране. Если хотите установить его заново, сначала удалите существующее приложение Clean Pay.
+          Ярлык уже находится на главном экране. Если хотите установить его заново, сначала удалите существующее приложение {branding.name}.
         </span>
         <Link className="p-button p-component no-underline" href="/cabinet" prefetch={false}>
           <span className="p-button-icon p-c pi pi-home" />

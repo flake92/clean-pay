@@ -336,21 +336,12 @@ describe("application facades", () => {
     await expect(reissueCabinetSubscription(commands)).resolves.toMatchObject({ status: "error" });
   });
 
-  it("uses safe fallbacks for navigation and payment status", async () => {
+  it("loads local navigation and keeps a safe payment-status fallback", async () => {
     const shellGateway = authGateway();
-    const subscriptionCatalog = {
-      loadOffers: vi.fn(async () => ({
-        ...offers,
-        has_current_subscription: true,
-        plans: [{ recommended_purchase_type: "renew" } as never],
-      })),
-    };
-    await expect(loadNavigationShell(shellGateway, subscriptionCatalog)).resolves.toEqual({
+    await expect(loadNavigationShell(shellGateway)).resolves.toEqual({
       navigation: {
         authenticated: true,
         emailVerificationRequired: false,
-        hasSubscription: true,
-        canRenewSubscription: true,
       },
       supportIdentity: {
         userId: "user-1",
@@ -362,7 +353,6 @@ describe("application facades", () => {
         displayName: null,
       },
     });
-    expect(subscriptionCatalog.loadOffers).toHaveBeenCalledOnce();
     expect(shellGateway.authorizeCurrentSession).not.toHaveBeenCalled();
     expect(shellGateway.loadProviderProfile).not.toHaveBeenCalled();
 

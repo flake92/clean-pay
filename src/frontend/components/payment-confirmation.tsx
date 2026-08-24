@@ -262,7 +262,7 @@ export function PaymentConfirmation({
         </Card>
       ) : null}
       <Card>
-        <div className="flex flex-wrap items-start justify-between gap-4">
+        <div className="flex flex-wrap align-items-start justify-content-between gap-4">
           <div>
             <h2 className="text-xl font-semibold">{selection.plan.name}</h2>
             <p className="mt-1 line-height-3 text-600">

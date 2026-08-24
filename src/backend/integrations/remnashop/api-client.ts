@@ -22,7 +22,7 @@ import {
 } from "@/backend/integrations/remnashop/errors";
 import { authDebugLog } from "@/backend/observability/auth-debug-log";
 import { logger } from "@/backend/observability/logger";
-import { recordUpstreamRequest } from "@/backend/observability/metrics";
+import { recordUpstreamRequest, upstreamOperation } from "@/backend/observability/metrics";
 import {
   currentRequestTrace,
   tracedHeaders,
@@ -145,6 +145,7 @@ async function fetchRemnashop(path: string, init: RequestInit) {
   const method = init.method ?? "GET";
   const startedAt = Date.now();
   const safePath = safeRequestPath(path);
+  const operation = upstreamOperation(safePath);
   const trace = await currentRequestTrace();
   const requestInit = {
     ...init,
@@ -168,14 +169,14 @@ async function fetchRemnashop(path: string, init: RequestInit) {
 
   logger.info("remnashop_request_sent", {
     method,
-    path: safePath,
+    path: operation,
     hasBody: Boolean(init.body),
     requestId: trace.requestId,
     traceId: trace.traceId,
   }, {
     category: "upstream",
     source: "remnashop.client",
-    message: `HTTP Request: ${method} ${safePath}`,
+    message: `HTTP Request: ${method} ${operation}`,
   });
 
   try {
@@ -184,13 +185,13 @@ async function fetchRemnashop(path: string, init: RequestInit) {
     const durationMs = Date.now() - startedAt;
     recordUpstreamRequest({
       service: "remnashop",
-      operation: safePath,
+      operation,
       outcome: response.ok ? "success" : "rejected",
       durationMs,
     });
     logger.info("remnashop_response_received", {
       method,
-      path: safePath,
+      path: operation,
       status: response.status,
       ok: response.ok,
       durationMs,
@@ -199,7 +200,7 @@ async function fetchRemnashop(path: string, init: RequestInit) {
     }, {
       category: "upstream",
       source: "remnashop.client",
-      message: `HTTP Response: ${method} ${safePath} -> ${response.status}`,
+      message: `HTTP Response: ${method} ${operation} -> ${response.status}`,
     });
 
     return response;
@@ -207,13 +208,13 @@ async function fetchRemnashop(path: string, init: RequestInit) {
     const durationMs = Date.now() - startedAt;
     recordUpstreamRequest({
       service: "remnashop",
-      operation: safePath,
+      operation,
       outcome: "unavailable",
       durationMs,
     });
     logger.error("remnashop_request_failed", {
       method,
-      path: safePath,
+      path: operation,
       durationMs,
       errorName: error instanceof Error ? error.name : "UnknownError",
       requestId: trace.requestId,
@@ -221,9 +222,9 @@ async function fetchRemnashop(path: string, init: RequestInit) {
     }, {
       category: "upstream",
       source: "remnashop.client",
-      message: `HTTP Request failed: ${method} ${safePath}`,
+      message: `HTTP Request failed: ${method} ${operation}`,
     });
-    throw remnashopUnavailableError(safePath, error);
+    throw remnashopUnavailableError(operation, error);
   }
 }
 
@@ -231,6 +232,7 @@ async function fetchRemnashopAdmin(path: string, init: RequestInit) {
   const method = init.method ?? "GET";
   const startedAt = Date.now();
   const safePath = safeRequestPath(path);
+  const operation = upstreamOperation(safePath);
   const requestUrl = adminEndpoint(path);
   const trace = await currentRequestTrace();
   const requestInit = {
@@ -240,14 +242,14 @@ async function fetchRemnashopAdmin(path: string, init: RequestInit) {
 
   logger.info("remnashop_admin_request_sent", {
     method,
-    path: safePath,
+    path: operation,
     hasBody: Boolean(init.body),
     requestId: trace.requestId,
     traceId: trace.traceId,
   }, {
     category: "upstream",
     source: "remnashop.client",
-    message: `HTTP Request: ${method} admin ${safePath}`,
+    message: `HTTP Request: ${method} admin ${operation}`,
   });
 
   try {
@@ -256,13 +258,13 @@ async function fetchRemnashopAdmin(path: string, init: RequestInit) {
     const durationMs = Date.now() - startedAt;
     recordUpstreamRequest({
       service: "remnashop_admin",
-      operation: safePath,
+      operation,
       outcome: response.ok ? "success" : "rejected",
       durationMs,
     });
     logger.info("remnashop_admin_response_received", {
       method,
-      path: safePath,
+      path: operation,
       status: response.status,
       ok: response.ok,
       durationMs,
@@ -271,7 +273,7 @@ async function fetchRemnashopAdmin(path: string, init: RequestInit) {
     }, {
       category: "upstream",
       source: "remnashop.client",
-      message: `HTTP Response: ${method} admin ${safePath} -> ${response.status}`,
+      message: `HTTP Response: ${method} admin ${operation} -> ${response.status}`,
     });
 
     return response;
@@ -279,13 +281,13 @@ async function fetchRemnashopAdmin(path: string, init: RequestInit) {
     const durationMs = Date.now() - startedAt;
     recordUpstreamRequest({
       service: "remnashop_admin",
-      operation: safePath,
+      operation,
       outcome: "unavailable",
       durationMs,
     });
     logger.error("remnashop_admin_request_failed", {
       method,
-      path: safePath,
+      path: operation,
       durationMs,
       errorName: error instanceof Error ? error.name : "UnknownError",
       requestId: trace.requestId,
@@ -293,9 +295,9 @@ async function fetchRemnashopAdmin(path: string, init: RequestInit) {
     }, {
       category: "upstream",
       source: "remnashop.client",
-      message: `HTTP Admin request failed: ${method} ${safePath}`,
+      message: `HTTP Admin request failed: ${method} ${operation}`,
     });
-    throw remnashopUnavailableError(safePath, error);
+    throw remnashopUnavailableError(operation, error);
   }
 }
 
@@ -405,7 +407,7 @@ export async function remnashopRequestResult<T>(
 
   return {
     status: response.status,
-    data: await parseResponse<T>(response, safeRequestPath(path)),
+    data: await parseResponse<T>(response, upstreamOperation(safeRequestPath(path))),
   };
 }
 

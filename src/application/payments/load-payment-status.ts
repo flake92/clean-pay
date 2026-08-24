@@ -27,13 +27,49 @@ function view(operation: PaymentStatusOperation | null, subscription: PaymentSta
   return { payment, operation: operation ? operationStatus(operation) : null, subscription };
 }
 
-async function execute(reader: PaymentStatusReader, reconciliation: PaymentMaintenanceRunner, input: { paymentId: string | null; operationId: string | null }) {
-  if (input.paymentId && !paymentIdPattern.test(input.paymentId)) throw new PaymentStatusGatewayError("VALIDATION_ERROR");
-  if (input.operationId && !operationIdPattern.test(input.operationId)) throw new PaymentStatusGatewayError("VALIDATION_ERROR");
+function validateInput(input: { paymentId: string | null; operationId: string | null }) {
+  if (input.paymentId && !paymentIdPattern.test(input.paymentId)) {
+    throw new PaymentStatusGatewayError("VALIDATION_ERROR");
+  }
+  if (input.operationId && !operationIdPattern.test(input.operationId)) {
+    throw new PaymentStatusGatewayError("VALIDATION_ERROR");
+  }
+}
+
+async function loadActor(reader: PaymentStatusReader) {
   const actor = await reader.loadActor();
   if (!actor) throw new PaymentStatusGatewayError("UNAUTHORIZED");
   const accessIssue = accountAccessIssue(actor);
   if (accessIssue) throw new PaymentStatusGatewayError(accessIssue);
+  return actor;
+}
+
+async function snapshot(
+  reader: PaymentStatusReader,
+  input: { paymentId: string | null; operationId: string | null },
+) {
+  validateInput(input);
+  const actor = await loadActor(reader);
+  const operation = input.operationId || !input.paymentId
+    ? await reader.findOperation(actor.id, input.operationId)
+    : null;
+  const operationPaymentId = operation?.paymentId ?? null;
+  if (input.paymentId && input.operationId && operationPaymentId && input.paymentId !== operationPaymentId) {
+    throw new PaymentStatusGatewayError("CONFLICT");
+  }
+  const resolvedPaymentId = input.operationId ? operationPaymentId : input.paymentId;
+  const payment = resolvedPaymentId
+    ? await reader.findPayment(actor.id, resolvedPaymentId)
+    : input.operationId
+      ? operation?.payment ?? null
+      : await reader.findLatestPayment(actor.id);
+
+  return view(operation, null, payment);
+}
+
+async function execute(reader: PaymentStatusReader, reconciliation: PaymentMaintenanceRunner, input: { paymentId: string | null; operationId: string | null }) {
+  validateInput(input);
+  const actor = await loadActor(reader);
 
   let operation = input.operationId || !input.paymentId ? await reader.findOperation(actor.id, input.operationId) : null;
   let status = operation ? operationStatus(operation) : null;
@@ -83,5 +119,13 @@ export async function loadPaymentStatus(
   input: { paymentId: string | null; operationId: string | null },
 ): Promise<PaymentStatusPageModel> {
   try { return { status: "ready", data: await execute(reader, reconciliation, input) }; }
+  catch { return { status: "error", message: "Не удалось проверить статус." }; }
+}
+
+export async function loadPaymentStatusSnapshot(
+  reader: PaymentStatusReader,
+  input: { paymentId: string | null; operationId: string | null },
+): Promise<PaymentStatusPageModel> {
+  try { return { status: "ready", data: await snapshot(reader, input) }; }
   catch { return { status: "error", message: "Не удалось проверить статус." }; }
 }

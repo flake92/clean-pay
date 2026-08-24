@@ -34,6 +34,15 @@ function boundedLabel(value: string) {
 export function upstreamOperation(path: string) {
   return boundedLabel(
     path.split("?", 1)[0]!
+      .replace(/\/subscription\/devices\/[^/]+(?=\/|$)/gi, "/subscription/devices/:id")
+      .replace(/\/subscription\/transactions\/by-id\/[^/]+(?=\/|$)/gi, "/subscription/transactions/by-id/:id")
+      .replace(/\/(?:subscription\/)?payment-operations\/[^/]+(?=\/|$)/gi, (match) => (
+        match.replace(/\/[^/]+$/, "/:operation")
+      ))
+      .replace(/\/users\/(?:by-email|by-telegram-id)\/[^/]+(?=\/|$)/gi, (match) => (
+        match.replace(/\/[^/]+$/, "/:identity")
+      ))
+      .replace(/\/users\/(?!by-email(?:\/|$)|by-telegram-id(?:\/|$)|merge(?:\/|$))[^/]+(?=\/|$)/gi, "/users/:id")
       .replace(/[0-9a-f]{8}-[0-9a-f-]{27,}/gi, ":id")
       .replace(/\/(?:by-email|by-telegram-id)\/[^/]+$/i, (match) => (
         match.replace(/\/[^/]+$/, "/:identity")

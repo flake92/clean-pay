@@ -22,15 +22,19 @@ function request(path: string) {
 
 describe("proxy session refresh navigation", () => {
   const previousSecret = process.env.WEB_JWT_SECRET;
+  const previousPublicAppUrl = process.env.NEXT_PUBLIC_APP_URL;
 
   beforeEach(() => {
     vi.clearAllMocks();
     process.env.WEB_JWT_SECRET = "test-secret";
+    process.env.NEXT_PUBLIC_APP_URL = "https://pay.example.com";
   });
 
   afterEach(() => {
     if (previousSecret === undefined) delete process.env.WEB_JWT_SECRET;
     else process.env.WEB_JWT_SECRET = previousSecret;
+    if (previousPublicAppUrl === undefined) delete process.env.NEXT_PUBLIC_APP_URL;
+    else process.env.NEXT_PUBLIC_APP_URL = previousPublicAppUrl;
   });
 
   it.each(["/support", "/tariffs"])(
@@ -110,5 +114,17 @@ describe("proxy session refresh navigation", () => {
     expect(location.searchParams.get("fallback_to")).toBe(
       "/login?redirect_to=%2Fcabinet",
     );
+  });
+
+  it("blocks cross-origin Telegram popup callbacks at the proxy boundary", async () => {
+    const response = await proxy(new NextRequest(
+      "https://pay.example.com/auth/telegram/callback",
+      { method: "POST", headers: { origin: "https://evil.example" } },
+    ));
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toMatchObject({
+      error: { code: "FORBIDDEN" },
+    });
   });
 });

@@ -24,4 +24,21 @@ describe("production Docker network startup", () => {
       startFunction.indexOf("ensure_network"),
     );
   });
+
+  it("boots the built standalone runner image before security scanning", () => {
+    const workflow = readFileSync(".github/workflows/ci.yml", "utf8");
+    const build = workflow.indexOf("Build the exact production runtime image");
+    const smoke = workflow.indexOf("Smoke-test the standalone production runtime");
+    const scan = workflow.indexOf("Generate image SBOM");
+    const smokeStep = workflow.slice(smoke, scan);
+
+    expect(smoke).toBeGreaterThan(build);
+    expect(scan).toBeGreaterThan(smoke);
+    expect(smokeStep).not.toContain("--entrypoint");
+    expect(smokeStep).toContain("--env NEXT_PUBLIC_APP_URL");
+    expect(smokeStep).toContain("clean-pay:ci");
+    expect(smokeStep).toContain("/api/health/liveness");
+    expect(smokeStep).toContain("--retry-all-errors");
+    expect(smokeStep).toContain("event=production_environment_validated");
+  });
 });

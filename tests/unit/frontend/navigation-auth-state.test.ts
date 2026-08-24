@@ -50,8 +50,6 @@ describe("navigation authentication state", () => {
     const result = await renderMenu({
       authenticated: false,
       emailVerificationRequired: false,
-      hasSubscription: false,
-      canRenewSubscription: false,
     });
 
     expect(result.flatItems.map(({ label }) => label)).toEqual(["Тарифы", "Поддержка", "Войти"]);
@@ -63,14 +61,13 @@ describe("navigation authentication state", () => {
     const result = await renderMenu({
       authenticated: true,
       emailVerificationRequired: false,
-      hasSubscription: false,
-      canRenewSubscription: false,
     });
 
     expect(result.flatItems.map(({ label }) => label)).toEqual([
       "Кабинет",
       "Пригласить друзей",
       "Тарифы",
+      "Продлить",
       "Профиль",
       "Связать аккаунт",
       "Поддержка",
@@ -79,18 +76,15 @@ describe("navigation authentication state", () => {
     expect(result.flatItems.some(({ label }) => label === "Войти")).toBe(false);
   });
 
-  it("shows distinct change and renewal actions for an active subscription", async () => {
+  it("keeps tariff and renewal routes available without blocking on provider state", async () => {
     const result = await renderMenu({
       authenticated: true,
       emailVerificationRequired: false,
-      hasSubscription: true,
-      canRenewSubscription: true,
     });
 
     expect(result.flatItems).toEqual(expect.arrayContaining([
-      expect.objectContaining({ label: "Изменить тариф", to: "/tariffs" }),
+      expect.objectContaining({ label: "Тарифы", to: "/tariffs" }),
       expect.objectContaining({ label: "Продлить", to: "/extend" }),
     ]));
-    expect(result.flatItems.some(({ label }) => label === "Тарифы")).toBe(false);
   });
 });

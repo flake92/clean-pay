@@ -84,7 +84,7 @@ function oidcRequest() {
 function popupRequest() {
   return new Request("https://pay.example.com/auth/telegram/callback", {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: { "content-type": "application/json", origin: "https://pay.example.com" },
     body: JSON.stringify({ idToken: "id-token" }),
   });
 }

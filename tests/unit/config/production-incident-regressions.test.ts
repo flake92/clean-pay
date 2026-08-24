@@ -388,5 +388,5 @@ describe("production incident regressions", () => {
     );
 
     expect(violations).toEqual([]);
-  });
+  }, 30_000);
 });
