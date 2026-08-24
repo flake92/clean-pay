@@ -8,6 +8,8 @@ REMNASHOP_ROLLOUT_SCRIPT="$ROOT_DIR/deploy/prod/prepare-remnashop-rollout.sh"
 MODE="${CLEAN_PAY_MODE:-standalone}"
 COMMAND="${1:-start}"
 
+. "$ROOT_DIR/deploy/prod/redis-host-safety.sh"
+
 fail() {
   printf '%s\n' "Clean Pay startup failed: $*" >&2
   exit 1
@@ -140,11 +142,9 @@ ensure_network() {
 }
 
 ensure_redis_host_memory_policy() {
-  overcommit_path=/proc/sys/vm/overcommit_memory
-  [ -r "$overcommit_path" ] || return 0
-  overcommit_value=$(tr -d '[:space:]' < "$overcommit_path")
-  [ "$overcommit_value" = 1 ] || fail \
-    "Redis requires vm.overcommit_memory=1. Apply 'sysctl -w vm.overcommit_memory=1' and persist it in /etc/sysctl.d before deployment."
+  # redis-host-safety.sh reads /proc/sys/vm/overcommit_memory inside the
+  # selected Docker daemon, rather than from this script's local host.
+  probe_redis_host_memory_policy || fail "$REDIS_HOST_MEMORY_POLICY_FAILURE"
 }
 
 compose() (
