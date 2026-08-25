@@ -165,11 +165,27 @@ caddy_mount=$(docker inspect --format \
   '{{range .Mounts}}{{if eq .Destination "/etc/caddy/Caddyfile"}}{{printf "%s|%s|%t" .Type .Source .RW}}{{end}}{{end}}' \
   "$caddy_container")
 test "$caddy_mount" = "bind|$caddy_host|false"
+
+caddy_host_inode=$(stat -c '%d:%i' "$caddy_host")
+caddy_bound_inode=$(docker exec "$caddy_container" \
+  stat -c '%d:%i' /etc/caddy/Caddyfile)
+test "$caddy_bound_inode" = "$caddy_host_inode" || {
+  printf '%s\n' \
+    'Caddy still holds a stale deleted file-bind inode; recreate it under a separately reviewed availability plan before this rollout.' >&2
+  exit 1
+}
+caddy_host_sha=$(sha256sum "$caddy_host" | awk '{print $1}')
+caddy_bound_sha=$(docker exec "$caddy_container" \
+  sha256sum /etc/caddy/Caddyfile | awk '{print $1}')
+test "$caddy_bound_sha" = "$caddy_host_sha"
 ```
 
 Это file bind, поэтому `mv`/atomic rename host-файла запрещён: running
 container продолжил бы читать старый inode. HTTP cutover будет атомарным на
 `caddy reload`, а authoritative bytes записываются durable в тот же inode.
+Проверка identity обязательна даже при совпадающих bytes: удалённый stale inode
+может содержать тот же primary Caddyfile, но перестанет видеть следующую
+same-inode запись.
 
 Подготовьте private backup и candidate, не меняя advertiser route:
 
@@ -197,7 +213,7 @@ test "$(grep -Fc 'reverse_proxy clean-pay-advertiser-cabinet:4100' "$caddy_candi
 
 primary_sha=$(sha256sum "$caddy_backup" | awk '{print $1}')
 candidate_sha=$(sha256sum "$caddy_candidate" | awk '{print $1}')
-caddy_inode=$(stat -c '%d:%i' "$caddy_host")
+caddy_inode=$caddy_host_inode
 
 docker cp "$caddy_backup" "$caddy_container:/tmp/Caddyfile-clean-pay-primary"
 docker cp "$caddy_candidate" "$caddy_container:/tmp/Caddyfile-clean-pay-canary"
@@ -223,6 +239,8 @@ restore_primary_on_failure() {
     node "$caddy_writer" restore "$caddy_host" "$caddy_backup" "$primary_sha" || recovery_failed=1
     test "$(stat -c '%d:%i' "$caddy_host")" = "$caddy_inode" || recovery_failed=1
     test "$(sha256sum "$caddy_host" | awk '{print $1}')" = "$primary_sha" || recovery_failed=1
+    test "$(docker exec "$caddy_container" stat -c '%d:%i' /etc/caddy/Caddyfile)" = "$caddy_inode" || recovery_failed=1
+    test "$(docker exec "$caddy_container" sha256sum /etc/caddy/Caddyfile | awk '{print $1}')" = "$primary_sha" || recovery_failed=1
     docker exec "$caddy_container" caddy validate --config /etc/caddy/Caddyfile || recovery_failed=1
     docker exec "$caddy_container" caddy reload --config /etc/caddy/Caddyfile || recovery_failed=1
     if [ "$recovery_failed" -ne 0 ]; then
@@ -240,6 +258,8 @@ node "$caddy_writer" replace \
   "$caddy_host" "$caddy_candidate" "$primary_sha" "$candidate_sha"
 test "$(stat -c '%d:%i' "$caddy_host")" = "$caddy_inode"
 test "$(sha256sum "$caddy_host" | awk '{print $1}')" = "$candidate_sha"
+test "$(docker exec "$caddy_container" stat -c '%d:%i' /etc/caddy/Caddyfile)" = "$caddy_inode"
+test "$(docker exec "$caddy_container" sha256sum /etc/caddy/Caddyfile | awk '{print $1}')" = "$candidate_sha"
 docker exec "$caddy_container" caddy validate --config /etc/caddy/Caddyfile
 docker exec "$caddy_container" caddy reload --config /etc/caddy/Caddyfile
 candidate_committed=1
@@ -293,6 +313,8 @@ restore_canary_on_failure() {
     node "$caddy_writer" restore "$caddy_host" "$caddy_candidate" "$candidate_sha" || recovery_failed=1
     test "$(stat -c '%d:%i' "$caddy_host")" = "$caddy_inode" || recovery_failed=1
     test "$(sha256sum "$caddy_host" | awk '{print $1}')" = "$candidate_sha" || recovery_failed=1
+    test "$(docker exec "$caddy_container" stat -c '%d:%i' /etc/caddy/Caddyfile)" = "$caddy_inode" || recovery_failed=1
+    test "$(docker exec "$caddy_container" sha256sum /etc/caddy/Caddyfile | awk '{print $1}')" = "$candidate_sha" || recovery_failed=1
     docker exec "$caddy_container" caddy validate --config /etc/caddy/Caddyfile || recovery_failed=1
     docker exec "$caddy_container" caddy reload --config /etc/caddy/Caddyfile || recovery_failed=1
     if [ "$recovery_failed" -ne 0 ]; then
@@ -310,6 +332,8 @@ node "$caddy_writer" replace \
   "$caddy_host" "$caddy_backup" "$candidate_sha" "$primary_sha"
 test "$(stat -c '%d:%i' "$caddy_host")" = "$caddy_inode"
 test "$(sha256sum "$caddy_host" | awk '{print $1}')" = "$primary_sha"
+test "$(docker exec "$caddy_container" stat -c '%d:%i' /etc/caddy/Caddyfile)" = "$caddy_inode"
+test "$(docker exec "$caddy_container" sha256sum /etc/caddy/Caddyfile | awk '{print $1}')" = "$primary_sha"
 docker exec "$caddy_container" caddy validate --config /etc/caddy/Caddyfile
 docker exec "$caddy_container" caddy reload --config /etc/caddy/Caddyfile
 primary_committed=1

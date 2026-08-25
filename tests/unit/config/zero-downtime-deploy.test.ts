@@ -572,6 +572,12 @@ describe("guarded zero-downtime application rollout", () => {
     expect(runbook).toContain("REPLACE_WITH_ABSOLUTE_HOST_CADDYFILE");
     expect(runbook).toContain("REPLACE_WITH_ABSOLUTE_PRIVATE_CADDY_STATE_ROOT");
     expect(runbook).toContain('test "$caddy_mount" = "bind|$caddy_host|false"');
+    expect(runbook).toContain("caddy_host_inode=$(stat -c '%d:%i' \"$caddy_host\")");
+    expect(runbook).toContain(
+      'test "$caddy_bound_inode" = "$caddy_host_inode"',
+    );
+    expect(runbook).toContain("stale deleted file-bind inode");
+    expect(runbook).toContain('test "$caddy_bound_sha" = "$caddy_host_sha"');
     expect(runbook).toContain("/etc/caddy/Caddyfile");
     expect(runbook).toContain("reverse_proxy clean-pay:4000");
     expect(runbook).toContain("reverse_proxy clean-pay-canary:4000");
@@ -579,6 +585,11 @@ describe("guarded zero-downtime application rollout", () => {
     expect(runbook).toContain("caddyfile-same-inode.mjs");
     expect(runbook).toContain('stat -c \'%d:%i\' "$caddy_host"');
     expect(runbook).toContain('sha256sum "$caddy_host"');
+    expect(
+      runbook.match(
+        /docker exec "\$caddy_container" sha256sum \/etc\/caddy\/Caddyfile/g,
+      )?.length ?? 0,
+    ).toBeGreaterThanOrEqual(4);
     expect(runbook).toContain('restore "$caddy_host" "$caddy_backup"');
     expect(runbook).toContain('restore "$caddy_host" "$caddy_candidate"');
     expect(runbook).toContain("caddy validate --config /tmp/Caddyfile-clean-pay-primary");
