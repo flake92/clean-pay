@@ -3,51 +3,32 @@ import { NextResponse } from "next/server";
 import { getEnv } from "@/backend/config/env";
 import { getCurrentSession } from "@/backend/integrations/sessions/web-session-service";
 import { safeRedirectPath } from "@/shared/auth/redirect-policy";
+import { safeAuthenticationFallback } from "@/shared/domain/post-auth-continuation";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 function redirect(path: string) {
-  return NextResponse.redirect(new URL(path, getEnv().publicAppUrl), 303);
-}
-
-function safeAuthFallback(value: string | null, returnTo: string) {
-  if (!value || !value.startsWith("/") || value.startsWith("//")) return null;
-
-  try {
-    const appUrl = new URL(getEnv().publicAppUrl);
-    const fallback = new URL(value, appUrl);
-    if (
-      fallback.origin !== appUrl.origin
-      || (fallback.pathname !== "/login" && fallback.pathname !== "/register")
-    ) {
-      return null;
-    }
-    const redirectTo = safeRedirectPath(fallback.searchParams.get("redirect_to"))
-      ?? returnTo;
-    const canonical = new URL(fallback.pathname, appUrl);
-    canonical.searchParams.set("redirect_to", redirectTo);
-    return `${canonical.pathname}${canonical.search}`;
-  } catch {
-    return null;
-  }
-}
-
-export async function GET(request: Request) {
-  const url = new URL(request.url);
-  const returnTo = safeRedirectPath(url.searchParams.get("return_to")) ?? "/cabinet";
-  const authFallback = safeAuthFallback(
-    url.searchParams.get("fallback_to"),
-    returnTo,
+  const response = NextResponse.redirect(
+    new URL(path, getEnv().publicAppUrl),
+    303,
   );
+  response.headers.set("cache-control", "no-store");
+  return response;
+}
 
-  let session;
-  try {
-    session = await getCurrentSession();
-  } catch {
-    // An infrastructure failure is not evidence that the refresh candidate is
-    // invalid. Preserve both browser credentials so the same token family can
-    // be retried after the dependency recovers.
+function recoveryAttempt(value: string | null) {
+  return value === "1" ? 1 : 0;
+}
+
+function unavailable(
+  request: Request,
+  returnTo: string,
+  authFallback: string | undefined,
+  attempt: number,
+) {
+  const accept = request.headers.get("accept")?.toLowerCase() ?? "";
+  if (accept.includes("application/json") && !accept.includes("text/html")) {
     return NextResponse.json(
       {
         error: {
@@ -63,6 +44,36 @@ export async function GET(request: Request) {
         },
       },
     );
+  }
+
+  const url = new URL("/auth/session/recovery", getEnv().publicAppUrl);
+  url.searchParams.set("return_to", returnTo);
+  url.searchParams.set("retry_after", "1");
+  url.searchParams.set("attempt", String(attempt));
+  url.searchParams.set("kind", "session");
+  if (authFallback) url.searchParams.set("fallback_to", authFallback);
+  const response = redirect(`${url.pathname}${url.search}`);
+  response.headers.set("retry-after", "1");
+  return response;
+}
+
+export async function GET(request: Request) {
+  const url = new URL(request.url);
+  const returnTo = safeRedirectPath(url.searchParams.get("return_to")) ?? "/cabinet";
+  const attempt = recoveryAttempt(url.searchParams.get("attempt"));
+  const authFallback = safeAuthenticationFallback(
+    url.searchParams.get("fallback_to"),
+    returnTo,
+  );
+
+  let session;
+  try {
+    session = await getCurrentSession();
+  } catch {
+    // An infrastructure failure is not evidence that the refresh candidate is
+    // invalid. Preserve both browser credentials so the same token family can
+    // be retried after the dependency recovers.
+    return unavailable(request, returnTo, authFallback, attempt);
   }
 
   if (session) {

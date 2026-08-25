@@ -29,18 +29,76 @@ describe("session refresh route", () => {
     );
   });
 
-  it("preserves cookie candidates and returns a retryable response on infrastructure failure", async () => {
+  it("falls back to the cabinet instead of resuming a nonexistent page", async () => {
+    mocks.getCurrentSession.mockResolvedValue({ id: "session-1" });
+
+    const response = await GET(new Request(
+      "https://pay.example.com/auth/session/refresh?return_to=%2Fmissing",
+    ));
+
+    expect(response.status).toBe(303);
+    expect(response.headers.get("location")).toBe(
+      "https://pay.example.com/cabinet",
+    );
+  });
+
+  it("preserves cookie candidates and opens the recovery UI on browser infrastructure failure", async () => {
     mocks.getCurrentSession.mockRejectedValue(new Error("database unavailable"));
 
     const response = await GET(new Request(
       "https://pay.example.com/auth/session/refresh?return_to=https%3A%2F%2Fevil.example",
     ));
 
-    expect(response.status).toBe(503);
-    expect(response.headers.get("location")).toBeNull();
+    expect(response.status).toBe(303);
+    const location = new URL(response.headers.get("location")!);
+    expect(location.pathname).toBe("/auth/session/recovery");
+    expect(location.searchParams.get("return_to")).toBe("/cabinet");
+    expect(location.searchParams.get("retry_after")).toBe("1");
+    expect(location.searchParams.get("attempt")).toBe("0");
+    expect(location.searchParams.get("kind")).toBe("session");
     expect(response.headers.get("set-cookie")).toBeNull();
     expect(response.headers.get("cache-control")).toBe("no-store");
     expect(response.headers.get("retry-after")).toBe("1");
+  });
+
+  it("preserves a validated registration fallback across a transient recovery step", async () => {
+    mocks.getCurrentSession.mockRejectedValueOnce(new Error("database unavailable"));
+    const fallback = "/register?redirect_to=%2Fpayment%3Fplan%3Dpro";
+    const firstResponse = await GET(new Request(
+      `https://pay.example.com/auth/session/refresh?return_to=%2Fpayment%3Fplan%3Dpro&fallback_to=${encodeURIComponent(fallback)}`,
+    ));
+    const recoveryLocation = new URL(firstResponse.headers.get("location")!);
+
+    expect(recoveryLocation.pathname).toBe("/auth/session/recovery");
+    expect(recoveryLocation.searchParams.get("fallback_to")).toBe(fallback);
+
+    mocks.getCurrentSession.mockResolvedValueOnce(null);
+    const retryParams = new URLSearchParams({
+      return_to: recoveryLocation.searchParams.get("return_to")!,
+      fallback_to: recoveryLocation.searchParams.get("fallback_to")!,
+      attempt: "1",
+    });
+    const retryResponse = await GET(new Request(
+      `https://pay.example.com/auth/session/refresh?${retryParams.toString()}`,
+    ));
+
+    expect(retryResponse.headers.get("location")).toBe(
+      "https://pay.example.com/register?redirect_to=%2Fpayment%3Fplan%3Dpro",
+    );
+  });
+
+  it("keeps structured refresh errors only for explicit JSON clients", async () => {
+    mocks.getCurrentSession.mockRejectedValue(new Error("database unavailable"));
+    const request = new Request(
+      "https://pay.example.com/auth/session/refresh?return_to=%2Fprofile",
+      { headers: { accept: "application/json" } },
+    );
+
+    const response = await GET(request);
+
+    expect(response.status).toBe(503);
+    expect(response.headers.get("location")).toBeNull();
+    expect(response.headers.get("set-cookie")).toBeNull();
     await expect(response.json()).resolves.toEqual({
       error: {
         code: "SESSION_REFRESH_UNAVAILABLE",

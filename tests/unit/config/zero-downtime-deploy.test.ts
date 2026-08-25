@@ -170,6 +170,7 @@ const validProductionEnv: Record<string, string> = {
   PAYMENT_RECONCILIATION_INTERVAL_SECONDS: "30",
   PAYMENT_RECONCILIATION_INTERNAL_URL:
     "http://app:4000/api/internal/payments/reconcile",
+  PAYMENT_REDIRECT_ORIGINS: "https://yoomoney.ru,https://pay.platega.io",
   CLEAN_PAY_READINESS_MAILPIT_URL: "http://mailpit:8025",
   CLEAN_PAY_READINESS_REMNAWAVE_URL: "https://panel.clean-pay.dev",
   NEXT_PUBLIC_BRAND_NAME: "Clean Pay",
