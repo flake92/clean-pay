@@ -18,6 +18,7 @@ const readinessInternalPath = '/api/internal/health/readiness';
 const metricsInternalPath = '/api/internal/metrics';
 const sessionRefreshPath = '/auth/session/refresh';
 const providerSessionRecoveryPath = '/auth/session/recover';
+const providerSessionRecoveryPagePath = '/auth/session/recovery';
 
 type RequestSecurityContext = {
   contentSecurityPolicy: string;
@@ -101,6 +102,7 @@ const publicPagePaths = new Set([
   '/auth/telegram/webapp',
   sessionRefreshPath,
   providerSessionRecoveryPath,
+  providerSessionRecoveryPagePath,
 ]);
 
 const publicApiPaths = new Set([
