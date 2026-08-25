@@ -111,6 +111,60 @@ describe("proxy session refresh navigation", () => {
     expect(response.headers.get("location")).toBeNull();
   });
 
+  it("repairs the observed Cyrillic-c cabinet path without discarding the authenticated session", async () => {
+    const response = await proxy(new NextRequest(
+      "https://pay.example.com/%D1%81abinet?tab=devices",
+      {
+        headers: {
+          cookie: `clean_pay_access=${signedAccessToken()}`,
+        },
+      },
+    ));
+    const location = new URL(response.headers.get("location")!);
+
+    expect(response.status).toBe(307);
+    expect(location.pathname).toBe("/cabinet");
+    expect(location.search).toBe("?tab=devices");
+    expect(response.headers.get("set-cookie")).toBeNull();
+  });
+
+  it("repairs the confusable cabinet path before a refresh candidate can preserve it", async () => {
+    const response = await proxy(request("/%D1%81abinet?tab=payments"));
+    const location = new URL(response.headers.get("location")!);
+
+    expect(response.status).toBe(307);
+    expect(location.pathname).toBe("/cabinet");
+    expect(location.search).toBe("?tab=payments");
+  });
+
+  it("canonicalizes an anonymous confusable link before applying the normal login boundary", async () => {
+    const canonicalResponse = await proxy(anonymousRequest("/%D1%81abinet"));
+    const canonicalLocation = new URL(canonicalResponse.headers.get("location")!);
+
+    expect(canonicalResponse.status).toBe(307);
+    expect(canonicalLocation.pathname).toBe("/cabinet");
+
+    const loginResponse = await proxy(new NextRequest(canonicalLocation));
+    const loginLocation = new URL(loginResponse.headers.get("location")!);
+    expect(loginResponse.status).toBe(307);
+    expect(loginLocation.pathname).toBe("/login");
+    expect(loginLocation.searchParams.get("redirect_to")).toBe("/cabinet");
+  });
+
+  it("does not redirect a mutation from the confusable path", async () => {
+    const response = await proxy(new NextRequest(
+      "https://pay.example.com/%D1%81abinet",
+      {
+        method: "POST",
+        headers: { cookie: `clean_pay_access=${signedAccessToken()}` },
+      },
+    ));
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("x-middleware-next")).toBe("1");
+    expect(response.headers.get("location")).toBeNull();
+  });
+
   it("sends a protected navigation through the cookie-capable refresh route", async () => {
     const response = await proxy(request("/cabinet?tab=payments"));
     const location = new URL(response.headers.get("location")!);

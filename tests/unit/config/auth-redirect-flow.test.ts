@@ -20,9 +20,22 @@ describe("post-auth redirect flow", () => {
       "/login",
       "/register?next=/cabinet",
       "/auth/telegram/start",
+      "/%61uth/session/recover",
+      "/\u0441abinet",
+      "/%D1%81abinet",
+      "/%d1%81abinet",
+      "/%25D1%2581abinet",
+      "/%D1%ZZabinet",
+      "/%0Aabinet",
     ]) {
       expect(safeRedirectPath(unsafe)).toBeUndefined();
     }
+
+    expect(safeRedirectPath(
+      "/cabinet?label=%D0%9F%D1%80%D0%B8%D0%B2%D0%B5%D1%82#active",
+    )).toBe(
+      "/cabinet?label=%D0%9F%D1%80%D0%B8%D0%B2%D0%B5%D1%82#active",
+    );
   });
 
   it("builds provider recovery URLs only for safe local destinations", () => {
@@ -52,7 +65,8 @@ describe("post-auth redirect flow", () => {
     expect(authForms).toContain("redirectAfterAuth(redirectTo)");
     expect(authForms).toContain("redirectTo={redirectTo}");
     expect(authForms).toContain("turnstileEnabled={turnstile.enabled}");
-    expect(passkeys).toContain("navigateTo(redirectTo)");
+    expect(passkeys).toContain("safeRedirectPath(redirectTo)");
+    expect(passkeys).toContain("navigateTo(destination)");
     expect(telegramStart).toContain(
       'safeRedirectPath(url.searchParams.get("redirect_to"))',
     );

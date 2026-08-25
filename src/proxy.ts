@@ -236,6 +236,23 @@ function isBootstrapAllowedPath(pathname: string) {
   );
 }
 
+function canonicalConfusableProtectedPath(pathname: string) {
+  try {
+    const decoded = decodeURIComponent(pathname);
+
+    // Cyrillic small es (U+0441) is visually indistinguishable from the
+    // ASCII "c" in an address bar. Preserve the session and repair this
+    // observed legacy/bookmark typo instead of letting Next.js render a 404.
+    if (decoded === '/\u0441abinet') {
+      return '/cabinet';
+    }
+  } catch {
+    // Malformed paths remain Next.js 404s; never guess a destination.
+  }
+
+  return undefined;
+}
+
 function safeRedirectTarget(request: NextRequest) {
   const target = request.nextUrl.pathname + request.nextUrl.search;
 
@@ -349,6 +366,29 @@ function browserMutationGuard(request: NextRequest) {
 export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
   const security = requestSecurityContext(request);
+  const canonicalPath = canonicalConfusableProtectedPath(pathname);
+
+  if (
+    canonicalPath
+    && (request.method === 'GET' || request.method === 'HEAD')
+  ) {
+    const url = request.nextUrl.clone();
+    url.pathname = canonicalPath;
+    logger.warn("http_request_decision", {
+      pathname,
+      canonicalPath,
+      action: "redirect_confusable_path",
+      status: 307,
+      requestId: security.requestId,
+      traceId: security.traceId,
+    }, {
+      category: "http",
+      source: "http.access",
+      message: `${request.method} ${pathname} -> 307 canonical protected path`,
+    });
+    return secureResponse(NextResponse.redirect(url), security);
+  }
+
   const accessState = await getAccessState(request);
   // Edge middleware cannot validate the opaque database-backed refresh token.
   // Treat it as a session candidate for both pages and APIs and let the first
