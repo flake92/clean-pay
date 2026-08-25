@@ -111,6 +111,16 @@ function hasExpectedIdentity(users: RemnawaveUser[], input: LiveSubscriptionUrlI
     && (!expectedTelegramId || users.some((user) => normalizedIdentity(user.telegramId) === expectedTelegramId));
 }
 
+function hasAnyExpectedIdentity(user: RemnawaveUser, input: LiveSubscriptionUrlInput) {
+  const expectedEmail = normalizedEmail(input.email);
+  const expectedTelegramId = normalizedIdentity(input.telegramId);
+
+  return Boolean(
+    (expectedEmail && normalizedEmail(user.email) === expectedEmail)
+      || (expectedTelegramId && normalizedIdentity(user.telegramId) === expectedTelegramId),
+  );
+}
+
 function unambiguousSubscriptionUrl(users: RemnawaveUser[], input: LiveSubscriptionUrlInput) {
   const expectedUuid = normalizedIdentity(input.userRemnaId);
   const matchingUsers = users.filter((user) => {
@@ -306,12 +316,8 @@ export function assertRemnawaveIdentitySynchronizationConfigured() {
 export async function getLiveRemnawaveSubscriptionUrl(input: LiveSubscriptionUrlInput) {
   if (input.userRemnaId) {
     const user = await getUserByUuid(input.userRemnaId);
-    const hasStableIdentity = Boolean(
-      normalizedEmail(input.email) || normalizedIdentity(input.telegramId),
-    );
     const isExpectedUser = normalizedIdentity(user?.uuid) === normalizedIdentity(input.userRemnaId)
-      && hasStableIdentity
-      && Boolean(user && hasExpectedIdentity([user], input));
+      && Boolean(user && hasAnyExpectedIdentity(user, input));
     const url = isExpectedUser && user && isLiveUser(user) ? subscriptionUrl(user) : null;
 
     if (url) {
