@@ -4,9 +4,15 @@ import { AppShell } from "@/app/_components/app-shell";
 import { loadRequestReferralProgram } from "@/app/_composition/request-scoped-readers";
 import { PageHeader } from "@/frontend/components/page-header";
 import { ReferralProgramPanel } from "@/frontend/components/referral-program-panel";
+import { providerSessionRecoveryPath } from "@/shared/auth/session-navigation";
+import { redirect } from "next/navigation";
 
 async function ReferralContent() {
-  return <ReferralProgramPanel model={await loadRequestReferralProgram()} />;
+  const model = await loadRequestReferralProgram();
+  if (model.status === "error" && model.action === "recover-session") {
+    redirect(providerSessionRecoveryPath("/referral"));
+  }
+  return <ReferralProgramPanel model={model} />;
 }
 
 function ReferralLoading() {

@@ -33,6 +33,7 @@ export type CabinetPaymentViewModel = {
 
 export type CabinetViewModel =
   | { status: "unauthorized" }
+  | { status: "provider-session-recovery-required" }
   | { status: "error"; message: string }
   | {
       status: "ready";

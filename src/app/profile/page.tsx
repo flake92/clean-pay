@@ -9,7 +9,10 @@ import { AppShell } from "@/app/_components/app-shell";
 import { PageHeader } from "@/frontend/components/page-header";
 import { ProfilePanel } from "@/frontend/components/profile-panel";
 import { getBranding } from "@/shared/branding";
-import { sessionRefreshPath } from "@/shared/auth/session-navigation";
+import {
+  providerSessionRecoveryPath,
+  sessionRefreshPath,
+} from "@/shared/auth/session-navigation";
 import { redirect } from "next/navigation";
 
 export const dynamic = "force-dynamic";
@@ -21,11 +24,14 @@ export default async function ProfilePage() {
     requestEmailReminderPreferenceReader,
   );
   if (model.status === "unauthorized") redirect(sessionRefreshPath("/profile"));
+  if (model.status === "provider-session-recovery-required") {
+    redirect(providerSessionRecoveryPath("/profile"));
+  }
   const turnstileEnabled = process.env.TURNSTILE_ENABLED === "true";
   const turnstileSiteKey = process.env.TURNSTILE_SITE_KEY;
 
   return (
-    <AppShell requireAuth>
+    <AppShell requireAuth returnTo="/profile">
       <div className="flex flex-column gap-6">
         <PageHeader
           description={`Данные аккаунта, e-mail и пароль управляются через ${branding.name}.`}

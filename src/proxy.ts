@@ -17,6 +17,7 @@ const paymentReconciliationInternalPath = '/api/internal/payments/reconcile';
 const readinessInternalPath = '/api/internal/health/readiness';
 const metricsInternalPath = '/api/internal/metrics';
 const sessionRefreshPath = '/auth/session/refresh';
+const providerSessionRecoveryPath = '/auth/session/recover';
 
 type RequestSecurityContext = {
   contentSecurityPolicy: string;
@@ -99,6 +100,7 @@ const publicPagePaths = new Set([
   '/auth/telegram/callback',
   '/auth/telegram/webapp',
   sessionRefreshPath,
+  providerSessionRecoveryPath,
 ]);
 
 const publicApiPaths = new Set([
@@ -237,7 +239,7 @@ function isBootstrapAllowedPath(pathname: string) {
 function safeRedirectTarget(request: NextRequest) {
   const target = request.nextUrl.pathname + request.nextUrl.search;
 
-  if (target.startsWith('/login') || target.startsWith('/register')) {
+  if (request.nextUrl.pathname === '/login' || request.nextUrl.pathname === '/register') {
     return '/cabinet';
   }
 

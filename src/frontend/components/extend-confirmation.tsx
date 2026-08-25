@@ -230,6 +230,15 @@ export function ExtendConfirmation({ model = defaultCheckoutModel, requestedDura
     );
   }
 
+  if (state.status === "provider-session-recovery-required") {
+    return (
+      <AccountActionRequired
+        action="recover-session"
+        redirectTo={requestedExtendDestination}
+      />
+    );
+  }
+
   if (state.status === "error") return <Message severity="error" text={state.message} />;
 
   const plan = findRenewPlan(state.offers);

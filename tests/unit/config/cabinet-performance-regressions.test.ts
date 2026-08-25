@@ -41,11 +41,98 @@ describe("cabinet performance regressions", () => {
       "src/app/verify-email/page.tsx",
       "src/app/extend/page.tsx",
       "src/app/payment/page.tsx",
+      "src/app/referral/page.tsx",
       "src/app/payment/payment-status-page.tsx",
     ]) {
       expect(source(file), file).toContain("<AppShell requireAuth");
       expect(source(file), file).not.toMatch(/redirect\(["']\/login/);
     }
+  });
+
+  it("preserves every protected page destination at its database-backed shell boundary", () => {
+    expect(source("src/app/cabinet/page.tsx"))
+      .toContain("<AppShell requireAuth>");
+    expect(source("src/app/profile/page.tsx"))
+      .toContain('<AppShell requireAuth returnTo="/profile">');
+    expect(source("src/app/referral/page.tsx"))
+      .toContain('<AppShell requireAuth returnTo="/referral">');
+    expect(source("src/app/payment/payment-status-page.tsx"))
+      .toContain("<AppShell requireAuth returnTo={returnTo}>");
+
+    for (const [file, returnTo] of [
+      ["src/app/link-account/page.tsx", "linkAccountReturnTo"],
+      ["src/app/verify-email/page.tsx", "verifyEmailReturnTo"],
+      ["src/app/extend/page.tsx", "extendReturnTo"],
+      ["src/app/payment/page.tsx", "paymentRedirectTo"],
+    ]) {
+      const page = source(file);
+      expect(page, file).toContain(
+        `<AppShell requireAuth returnTo={${returnTo}}>`,
+      );
+      expect(page, file).toContain(`sessionRefreshPath(${returnTo})`);
+      expect(page, file).toContain(
+        `providerSessionRecoveryPath(${returnTo})`,
+      );
+    }
+
+    // These two setup pages intentionally use AuthShell, but a cryptographically
+    // valid access cookie is not enough: the database-backed session must still
+    // be checked before either protected form is rendered.
+    for (const file of [
+      "src/app/register/verify-email/page.tsx",
+      "src/app/passkey/setup/page.tsx",
+    ]) {
+      const page = source(file);
+      expect(page, file).toContain("await requireRequestSession(");
+      expect(page, file).not.toMatch(/redirect\(["']\/login/);
+    }
+
+    const setupBoundary = source(
+      "src/app/_composition/require-request-session.ts",
+    );
+    expect(setupBoundary).toContain(
+      "requestAuthProfileGateway.loadCurrentSession()",
+    );
+    expect(setupBoundary).toContain(
+      "redirect(sessionRefreshPath(returnTo))",
+    );
+  });
+
+  it("routes recoverable provider sessions through a cookie-capable recovery handler", () => {
+    const navigation = source("src/shared/auth/session-navigation.ts");
+    expect(navigation).toContain("providerSessionRecoveryPath");
+    expect(navigation).toMatch(/[`"']\/auth\/session\/recover/);
+    expect(navigation).toContain("safeRedirectPath(returnTo)");
+
+    for (const file of [
+      "src/app/cabinet/page.tsx",
+      "src/app/profile/page.tsx",
+      "src/app/link-account/page.tsx",
+      "src/app/verify-email/page.tsx",
+      "src/app/extend/page.tsx",
+      "src/app/payment/page.tsx",
+      "src/app/referral/page.tsx",
+    ]) {
+      expect(source(file), file).toContain("providerSessionRecoveryPath(");
+      expect(source(file), file).not.toMatch(/redirect\(["']\/login/);
+    }
+
+    for (const file of [
+      "src/application/models/referral.ts",
+      "src/application/models/tariffs.ts",
+      "src/application/referral/load-referral-program.ts",
+      "src/application/subscriptions/load-tariffs.ts",
+    ]) {
+      expect(source(file), file).toContain('"recover-session"');
+    }
+    expect(source("src/frontend/components/account-action-required.tsx"))
+      .toContain("providerSessionRecoveryPath(");
+    expect(source("src/frontend/components/account-action-required.tsx"))
+      .toContain("sessionRefreshPath(destination)");
+    expect(source("src/frontend/components/cabinet-panel.tsx"))
+      .not.toContain("/login?redirect_to=%2Fcabinet");
+    expect(source("src/frontend/components/profile-panel.tsx"))
+      .not.toContain('href="/login"');
   });
 
   it("coalesces provider authorization only within the current request", () => {

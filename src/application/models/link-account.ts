@@ -10,6 +10,7 @@ export type LinkAccountViewModel =
       callbackError: string | null;
     }
   | { status: "unauthorized" }
+  | { status: "provider-session-recovery-required" }
   | { status: "error"; message: string };
 
 export type LinkAccountCommandResult =

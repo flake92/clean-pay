@@ -78,6 +78,27 @@ describe("application auth profile policy", () => {
     expect(port.loadProviderProfile).not.toHaveBeenCalled();
   });
 
+  it.each(["authorization", "profile"])(
+    "classifies a provider %s rejection as a recoverable provider session",
+    async (stage) => {
+      const port = gateway(stage === "authorization"
+        ? {
+            authorizeCurrentSession: vi.fn(async () => {
+              throw new AuthProfileError("UNAUTHORIZED");
+            }),
+          }
+        : {
+            loadProviderProfile: vi.fn(async () => {
+              throw new AuthProfileError("UNAUTHORIZED");
+            }),
+          });
+
+      await expect(resolveAuthProfile(port)).rejects.toMatchObject({
+        code: "PROVIDER_SESSION_RECOVERY_REQUIRED",
+      });
+    },
+  );
+
   it("reconciles matching verified provider proof and refreshes access", async () => {
     const port = gateway();
     await expect(resolveAuthProfile(port)).resolves.toMatchObject({
@@ -139,6 +160,8 @@ describe("application auth profile policy", () => {
       .resolves.toEqual({ status: "unauthorized" });
     await expect(safeReadiness(gateway({ authorizeCurrentSession: vi.fn(async () => { throw new AuthProfileError("ACCOUNT_MERGE_REQUIRED"); }) })))
       .resolves.toEqual({ status: "merge-conflict" });
+    await expect(safeReadiness(gateway({ authorizeCurrentSession: vi.fn(async () => { throw new AuthProfileError("PROVIDER_SESSION_RECOVERY_REQUIRED"); }) })))
+      .resolves.toEqual({ status: "provider-session-recovery-required" });
     await expect(safeReadiness(gateway({ authorizeCurrentSession: vi.fn(async () => { throw new Error("offline"); }) })))
       .resolves.toEqual({ status: "unavailable" });
   });

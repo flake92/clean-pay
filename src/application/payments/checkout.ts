@@ -3,6 +3,7 @@ import type { CheckoutViewModel, PaymentCommand, PaymentCommandResult } from "@/
 import type { AuthProfileGateway } from "@/application/auth/ports/auth-profile";
 import { AuthProfileError } from "@/application/auth/ports/auth-profile";
 import { resolveAuthProfile } from "@/application/auth/resolve-auth-profile";
+import { isProviderSessionRecoveryRequired } from "@/shared/domain/provider-session-recovery";
 
 export async function loadCheckout(reader: CheckoutReader, auth: AuthProfileGateway): Promise<CheckoutViewModel> {
   try {
@@ -11,6 +12,9 @@ export async function loadCheckout(reader: CheckoutReader, auth: AuthProfileGate
     if (!account.emailVerified) return { status: "account-action-required", action: "linkEmail", message: "Для оплаты добавьте e-mail и пароль, затем подтвердите адрес кодом из письма." };
     return { status: "ready", offers: await reader.loadOffers() };
   } catch (error) {
+    if (isProviderSessionRecoveryRequired(error)) {
+      return { status: "provider-session-recovery-required" };
+    }
     if (error instanceof AuthProfileError && error.code === "UNAUTHORIZED") {
       return { status: "account-action-required", action: "login", message: "Нужно войти в аккаунт." };
     }

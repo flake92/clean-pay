@@ -9,12 +9,18 @@ import {
   loadRequestReferralProgram,
 } from "@/app/_composition/request-scoped-readers";
 import { ReferralProgramPanel } from "@/frontend/components/referral-program-panel";
-import { sessionRefreshPath } from "@/shared/auth/session-navigation";
+import {
+  providerSessionRecoveryPath,
+  sessionRefreshPath,
+} from "@/shared/auth/session-navigation";
 import { redirect } from "next/navigation";
 
 async function loadAuthenticatedCabinet() {
   const model = await loadRequestCabinetViewModel();
   if (model.status === "unauthorized") redirect(sessionRefreshPath("/cabinet"));
+  if (model.status === "provider-session-recovery-required") {
+    redirect(providerSessionRecoveryPath("/cabinet"));
+  }
   return model;
 }
 
@@ -29,6 +35,9 @@ async function CabinetContent() {
 
 async function CabinetReferralContent() {
   const model = await loadRequestReferralProgram();
+  if (model.status === "error" && model.action === "recover-session") {
+    redirect(providerSessionRecoveryPath("/cabinet"));
+  }
   return model.status === "ready" ? <ReferralProgramPanel model={model} /> : null;
 }
 
