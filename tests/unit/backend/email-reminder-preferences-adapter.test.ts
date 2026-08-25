@@ -2,9 +2,23 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   auditedMutation: vi.fn(),
+  getPreferences: vi.fn(),
   rateLimit: vi.fn(),
+  sessionAuthorize: vi.fn(),
+  storedAuthorize: vi.fn(),
+  updatePreferences: vi.fn(),
 }));
 
+vi.mock("@/backend/integrations/remnashop/api-client", () => ({
+  getRemnashopNotificationPreferences: mocks.getPreferences,
+  updateRemnashopNotificationPreferences: mocks.updatePreferences,
+}));
+vi.mock("@/backend/integrations/remnashop/session-authorization", () => ({
+  getAuthorizedRemnashopTokens: mocks.sessionAuthorize,
+}));
+vi.mock("@/backend/integrations/remnashop/stored-session-authorization", () => ({
+  getStoredAuthorizedRemnashopTokens: mocks.storedAuthorize,
+}));
 vi.mock("@/backend/limits/rate-limit", () => ({
   assertRateLimit: mocks.rateLimit,
 }));
@@ -35,6 +49,32 @@ describe("Remnashop e-mail reminder preference adapter", () => {
     vi.clearAllMocks();
     mocks.rateLimit.mockResolvedValue(undefined);
     mocks.auditedMutation.mockImplementation(async ({ mutate }) => mutate());
+    mocks.getPreferences.mockResolvedValue(response());
+    mocks.sessionAuthorize.mockResolvedValue(authorization);
+    mocks.storedAuthorize.mockResolvedValue(authorization);
+    mocks.updatePreferences.mockImplementation(async (
+      _token: string,
+      input: { subscription_expiration_email_enabled: boolean },
+    ) => response(input.subscription_expiration_email_enabled));
+  });
+
+  it("uses the production authorization and API adapters by default", async () => {
+    const reader = createEmailReminderPreferenceReader();
+    await expect(reader.load()).resolves.toMatchObject({ enabled: false });
+    expect(mocks.storedAuthorize).toHaveBeenCalledWith({
+      allowUnverifiedEmail: true,
+    });
+    expect(mocks.getPreferences).toHaveBeenCalledWith("provider-access");
+
+    const commands = createEmailReminderPreferenceCommands();
+    const actor = await commands.loadActor();
+    await expect(commands.update(actor, true)).resolves.toMatchObject({ enabled: true });
+    expect(mocks.sessionAuthorize).toHaveBeenCalledWith({
+      allowUnverifiedEmail: true,
+    });
+    expect(mocks.updatePreferences).toHaveBeenCalledWith("provider-access", {
+      subscription_expiration_email_enabled: true,
+    });
   });
 
   it("loads and validates the fail-closed preference contract", async () => {

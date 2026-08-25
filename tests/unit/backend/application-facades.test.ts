@@ -507,6 +507,14 @@ describe("application facades", () => {
       status: "ready",
       emailReminders: { status: "ready", enabled: true },
     });
+    await expect(loadProfileViewModel(authGateway(), {
+      load: vi.fn(async () => {
+        throw new Error("Remnashop preference endpoint unavailable");
+      }),
+    })).resolves.toMatchObject({
+      status: "ready",
+      emailReminders: { status: "unavailable" },
+    });
     await expect(loadProfileViewModel(authGateway({ loadCurrentSession: vi.fn(async () => null) }))).resolves.toEqual({ status: "unauthorized" });
     await expect(loadProfileViewModel(authGateway({ loadCurrentSession: vi.fn(async () => { throw new Error(); }) }))).resolves.toMatchObject({ status: "error" });
   });
