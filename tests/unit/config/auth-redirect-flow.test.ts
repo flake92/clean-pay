@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 import { safeRedirectPath } from "@/shared/auth/redirect-policy";
+import { providerSessionRecoveryPath } from "@/shared/auth/session-navigation";
 
 describe("post-auth redirect flow", () => {
   it("accepts only local non-auth destinations", () => {
@@ -22,6 +23,15 @@ describe("post-auth redirect flow", () => {
     ]) {
       expect(safeRedirectPath(unsafe)).toBeUndefined();
     }
+  });
+
+  it("builds provider recovery URLs only for safe local destinations", () => {
+    expect(providerSessionRecoveryPath("/payment?plan=pro&duration=30")).toBe(
+      "/auth/session/recover?return_to=%2Fpayment%3Fplan%3Dpro%26duration%3D30",
+    );
+    expect(providerSessionRecoveryPath("https://evil.example/cabinet")).toBe(
+      "/auth/session/recover?return_to=%2Fcabinet",
+    );
   });
 
   it("threads the validated destination through password, passkey and Telegram login", () => {

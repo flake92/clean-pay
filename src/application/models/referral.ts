@@ -28,5 +28,5 @@ export type ReferralProgramViewModel =
   | {
       status: "error";
       message: string;
-      action?: "login" | "verify-email" | "tariffs";
+      action?: "login" | "recover-session" | "verify-email" | "tariffs";
     };

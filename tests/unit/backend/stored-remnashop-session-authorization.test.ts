@@ -128,6 +128,20 @@ describe("stored-only Remnashop session authorization", () => {
     ],
     ["partial bundle", { remnashopRefreshTokenEncrypted: null }],
     ["corrupt bundle", { remnashopAccessTokenEncrypted: "corrupt" }],
+  ])("marks %s for cookie-capable provider recovery", async (_name, overrides) => {
+    await expect(
+      authorize(session(overrides), {
+        allowUnverifiedEmail: true,
+      }),
+    ).rejects.toMatchObject({
+      code: "PROVIDER_SESSION_RECOVERY_REQUIRED",
+      status: 409,
+    });
+
+    expect(apiMock.getRemnashopMe).not.toHaveBeenCalled();
+  });
+
+  it.each([
     ["active refresh claim", { remnashopRefreshClaimTokenHash: "claim" }],
     [
       "active refresh lease",
@@ -141,7 +155,7 @@ describe("stored-only Remnashop session authorization", () => {
       "pending refresh recovery",
       { remnashopRefreshRecoveryEncrypted: "recovery" },
     ],
-  ])("fails closed for %s without attempting provider recovery", async (_name, overrides) => {
+  ])("keeps %s retryable without starting a second recovery", async (_name, overrides) => {
     await expect(
       authorize(session(overrides), {
         allowUnverifiedEmail: true,
@@ -158,9 +172,25 @@ describe("stored-only Remnashop session authorization", () => {
 
     await expect(
       authorize(session(), { allowUnverifiedEmail: true }),
-    ).rejects.toMatchObject({ code: "UPSTREAM_UNAVAILABLE", status: 503 });
+    ).rejects.toMatchObject({
+      code: "PROVIDER_SESSION_RECOVERY_REQUIRED",
+      status: 409,
+    });
 
     expect(apiMock.getRemnashopUserIdFromAccessToken).not.toHaveBeenCalled();
+  });
+
+  it("marks an invalid stored access identity for provider recovery", async () => {
+    apiMock.getRemnashopUserIdFromAccessToken.mockImplementationOnce(() => {
+      throw new Error("invalid identity");
+    });
+
+    await expect(
+      authorize(session(), { allowUnverifiedEmail: true }),
+    ).rejects.toMatchObject({
+      code: "PROVIDER_SESSION_RECOVERY_REQUIRED",
+      status: 409,
+    });
   });
 
   it.each([

@@ -62,7 +62,9 @@ export async function loadLinkAccount(reader: LinkAccountReader, auth: AuthProfi
     return { status: "ready", profile, passkeys, mergeConfirmation, callbackError: callbackError(status) };
   } catch (error) {
     const code = (error as { code?: unknown })?.code;
-    return code === "UNAUTHORIZED"
+    return code === "PROVIDER_SESSION_RECOVERY_REQUIRED"
+      ? { status: "provider-session-recovery-required" }
+      : code === "UNAUTHORIZED"
       ? { status: "unauthorized" }
       : { status: "error", message: "Не удалось загрузить способы входа." };
   }

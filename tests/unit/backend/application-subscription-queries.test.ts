@@ -22,6 +22,7 @@ describe("loadTariffsViewModel", () => {
 
   it.each([
     ["unauthorized", "login"],
+    ["provider-session-recovery-required", "recover-session"],
     ["email-required", "linkEmail"],
   ] as const)("maps %s without leaking adapter errors", async (reason, action) => {
     const catalog: SubscriptionCatalog = {

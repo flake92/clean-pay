@@ -2,8 +2,10 @@ import { AuthShell } from "@/frontend/components/auth-shell";
 import { PasskeySetupPanel } from "@/frontend/components/passkey-actions";
 import {
   isPaymentDestination,
+  passkeySetupPath,
   safeAccountSetupDestination,
 } from "@/shared/auth/account-setup-flow";
+import { requireRequestSession } from "@/app/_composition/require-request-session";
 
 export const dynamic = "force-dynamic";
 
@@ -17,6 +19,7 @@ export default async function PasskeySetupPage({
     ? params.redirect_to[0]
     : params.redirect_to;
   const redirectTo = safeAccountSetupDestination(rawRedirect);
+  await requireRequestSession(passkeySetupPath(redirectTo));
 
   return (
     <AuthShell

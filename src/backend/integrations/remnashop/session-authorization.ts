@@ -149,10 +149,12 @@ async function attachRemnashopTokensForVerifiedEmailSession(
 
 export async function getAuthorizedRemnashopTokens({
   allowUnverifiedEmail = false,
+  forceRefresh = false,
   readSession = getCurrentSession,
   refreshAccessCookie = refreshCurrentAccessCookie,
 }: {
   allowUnverifiedEmail?: boolean;
+  forceRefresh?: boolean;
   readSession?: typeof getCurrentSession;
   refreshAccessCookie?: typeof refreshCurrentAccessCookie;
 } = {}) {
@@ -216,6 +218,7 @@ export async function getAuthorizedRemnashopTokens({
     authorized = await acquireRemnashopTokensForSession({
       session: localSession,
       refresh: remnashopRefreshTokens,
+      ...(forceRefresh ? { forceRefresh: true } : {}),
     });
     authorizationSource = authorized?.source ?? null;
   }

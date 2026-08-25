@@ -60,7 +60,7 @@ describe("account action continuation", () => {
     expect(container.textContent).toContain("e-mail и пароль");
   });
 
-  it("keeps an anonymous user on the login flow and preserves the destination", async () => {
+  it("validates an anonymous session candidate before login and preserves the destination", async () => {
     await act(async () => {
       root.render(
         createElement(AccountActionRequired, {
@@ -72,7 +72,22 @@ describe("account action continuation", () => {
 
     expect(mocks.replaceWith).not.toHaveBeenCalled();
     expect(container.querySelector("a")?.getAttribute("href")).toBe(
-      "/login?redirect_to=%2Fpayment%3Fplan%3Dpro",
+      "/auth/session/refresh?return_to=%2Fpayment%3Fplan%3Dpro",
     );
+  });
+
+  it("automatically opens cookie-capable provider recovery", async () => {
+    await act(async () => {
+      root.render(
+        createElement(AccountActionRequired, {
+          action: "recover-session",
+          redirectTo: "/payment?plan=pro",
+        }),
+      );
+    });
+
+    const expected = "/auth/session/recover?return_to=%2Fpayment%3Fplan%3Dpro";
+    expect(mocks.replaceWith).toHaveBeenCalledWith(expected);
+    expect(container.querySelector("a")?.getAttribute("href")).toBe(expected);
   });
 });

@@ -38,6 +38,22 @@ function unavailableStoredBundle(
   );
 }
 
+function recoverableStoredBundle(
+  session: ReadOnlySession,
+  reason: string,
+): never {
+  authDebugLog("remnashop_stored_tokens_authorize_failed", {
+    reason,
+    sessionId: session.id,
+    userId: session.userId,
+  });
+  throw new ServiceError(
+    "PROVIDER_SESSION_RECOVERY_REQUIRED",
+    409,
+    "The stored Remnashop session requires cookie-capable recovery",
+  );
+}
+
 function accountOwnerMismatch(
   session: ReadOnlySession,
   reason: string,
@@ -69,7 +85,7 @@ function readStoredBundle(session: ReadOnlySession, now: Date) {
     !refreshExpiresAt ||
     refreshExpiresAt <= now
   ) {
-    return unavailableStoredBundle(session, "missing_or_expired_bundle");
+    return recoverableStoredBundle(session, "missing_or_expired_bundle");
   }
 
   // A claim/recovery fence means a command may be rotating this one-time
@@ -92,7 +108,7 @@ function readStoredBundle(session: ReadOnlySession, now: Date) {
     refreshToken = revealRemnashopToken(refreshTokenEncrypted);
     jwtExpiresAt = getJwtExpiresAt(accessToken);
   } catch {
-    return unavailableStoredBundle(session, "corrupt_bundle");
+    return recoverableStoredBundle(session, "corrupt_bundle");
   }
 
   if (
@@ -100,7 +116,7 @@ function readStoredBundle(session: ReadOnlySession, now: Date) {
     Number.isNaN(jwtExpiresAt.getTime()) ||
     jwtExpiresAt <= accessThreshold
   ) {
-    return unavailableStoredBundle(session, "access_token_expired");
+    return recoverableStoredBundle(session, "access_token_expired");
   }
 
   return { accessToken, refreshToken };
@@ -155,7 +171,7 @@ export async function getStoredAuthorizedRemnashopTokens({
   try {
     remnashopUserId = getRemnashopUserIdFromAccessToken(accessToken);
   } catch {
-    return unavailableStoredBundle(localSession, "invalid_access_identity");
+    return recoverableStoredBundle(localSession, "invalid_access_identity");
   }
 
   if (

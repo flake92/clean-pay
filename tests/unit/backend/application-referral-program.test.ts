@@ -42,6 +42,7 @@ describe("loadReferralProgram", () => {
 
   it.each([
     ["unauthorized", "login"],
+    ["provider-session-recovery-required", "recover-session"],
     ["email-required", "verify-email"],
     ["subscription-required", "tariffs"],
   ] as const)("maps %s to the relevant account action", async (reason, action) => {

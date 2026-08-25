@@ -1,6 +1,8 @@
 import { AuthShell } from "@/frontend/components/auth-shell";
 import { RegisterEmailConfirmForm } from "@/frontend/components/register-email-confirm-form";
 import { safeAccountSetupDestination } from "@/shared/auth/account-setup-flow";
+import { registrationEmailVerificationPath } from "@/shared/auth/account-setup-flow";
+import { requireRequestSession } from "@/app/_composition/require-request-session";
 
 export const dynamic = "force-dynamic";
 
@@ -22,6 +24,10 @@ export default async function RegisterVerifyEmailPage({
   const rawDelivery = Array.isArray(params.delivery)
     ? params.delivery[0]
     : params.delivery;
+  const returnTo = registrationEmailVerificationPath(redirectTo, {
+    deliveryFailed: rawDelivery === "failed",
+  });
+  await requireRequestSession(returnTo);
 
   return (
     <AuthShell

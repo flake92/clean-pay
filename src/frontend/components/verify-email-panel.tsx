@@ -14,6 +14,7 @@ import {
 } from "@/app/actions/email-verification";
 import { TurnstileWidget, type TurnstileHandle, hasTurnstileSiteKey } from "@/frontend/components/turnstile-widget";
 import { LinkButton } from "@/frontend/components/prime/link-button";
+import { sessionRefreshPath } from "@/shared/auth/session-navigation";
 import { navigateTo, replaceWith } from "@/frontend/lib/browser-navigation";
 import {
   accountLinkPath,
@@ -362,9 +363,7 @@ export function VerifyEmailPanel({
           ) : syncProblem === "unauthorized" ? (
             <LinkButton
               className="w-fit"
-              href={`/login?${new URLSearchParams({
-                redirect_to: verificationDestination,
-              }).toString()}`}
+              href={sessionRefreshPath(verificationDestination)}
               label="Войти и продолжить"
             />
           ) : (

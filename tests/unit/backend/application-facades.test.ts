@@ -17,7 +17,7 @@ import type { PasskeyCommands } from "@/application/auth/ports/passkey-commands"
 import type { TelegramWebAppGateway } from "@/application/auth/ports/telegram-webapp";
 import type { EmailVerificationCommands } from "@/application/auth/ports/email-verification";
 import type { TelegramAccountMergeGateway } from "@/application/auth/ports/telegram-account-merge";
-import type { AuthProfileGateway } from "@/application/auth/ports/auth-profile";
+import { AuthProfileError, type AuthProfileGateway } from "@/application/auth/ports/auth-profile";
 import type { PasskeyManagementGateway } from "@/application/auth/ports/passkey-management";
 import {
   activateCabinetPromocode,
@@ -382,6 +382,28 @@ describe("application facades", () => {
     await expect(loadCabinetViewModel(reader, authGateway({ loadCurrentSession: vi.fn(async () => null) }), history)).resolves.toEqual({ status: "unauthorized" });
 
     await expect(loadCabinetViewModel(reader, authGateway({
+      loadCurrentSession: vi.fn(async () => {
+        throw new AuthProfileError("PROVIDER_SESSION_RECOVERY_REQUIRED");
+      }),
+    }), history)).resolves.toEqual({
+      status: "provider-session-recovery-required",
+    });
+
+    const recoveryReader: CabinetReader = {
+      ...reader,
+      loadSubscription: vi.fn(async () => {
+        throw Object.assign(new Error("stored bundle unavailable"), {
+          code: "PROVIDER_SESSION_RECOVERY_REQUIRED",
+        });
+      }),
+    };
+    await expect(loadCabinetViewModel(
+      recoveryReader,
+      authGateway(),
+      history,
+    )).resolves.toEqual({ status: "provider-session-recovery-required" });
+
+    await expect(loadCabinetViewModel(reader, authGateway({
       loadCurrentSession: vi.fn(async () => { throw new Error("database unavailable"); }),
     }), history)).resolves.toMatchObject({ status: "error" });
   });
@@ -516,6 +538,11 @@ describe("application facades", () => {
       emailReminders: { status: "unavailable" },
     });
     await expect(loadProfileViewModel(authGateway({ loadCurrentSession: vi.fn(async () => null) }))).resolves.toEqual({ status: "unauthorized" });
+    await expect(loadProfileViewModel(authGateway({
+      loadCurrentSession: vi.fn(async () => {
+        throw new AuthProfileError("PROVIDER_SESSION_RECOVERY_REQUIRED");
+      }),
+    }))).resolves.toEqual({ status: "provider-session-recovery-required" });
     await expect(loadProfileViewModel(authGateway({ loadCurrentSession: vi.fn(async () => { throw new Error(); }) }))).resolves.toMatchObject({ status: "error" });
   });
 

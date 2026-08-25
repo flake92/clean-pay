@@ -2,6 +2,7 @@ import type { ReferralProgram } from "@/application/models/referral";
 
 export type ReferralProgramAccessReason =
   | "unauthorized"
+  | "provider-session-recovery-required"
   | "email-required"
   | "subscription-required"
   | "disabled"

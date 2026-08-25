@@ -10,9 +10,13 @@ import {
   accountLinkPath,
   safeAccountSetupDestination,
 } from "@/shared/auth/account-setup-flow";
+import {
+  providerSessionRecoveryPath,
+  sessionRefreshPath,
+} from "@/shared/auth/session-navigation";
 
 type AccountActionRequiredProps = {
-  action: "login" | "linkEmail";
+  action: "login" | "recover-session" | "linkEmail";
   message?: string;
   redirectTo?: string;
 };
@@ -24,12 +28,16 @@ export function AccountActionRequired({
 }: AccountActionRequiredProps) {
   const destination = safeAccountSetupDestination(redirectTo);
   const linkEmailHref = accountLinkPath(destination);
+  const recoveryHref = providerSessionRecoveryPath(destination);
 
   useEffect(() => {
     if (action === "linkEmail") {
       replaceWith(linkEmailHref);
     }
-  }, [action, linkEmailHref]);
+    if (action === "recover-session") {
+      replaceWith(recoveryHref);
+    }
+  }, [action, linkEmailHref, recoveryHref]);
 
   if (action === "linkEmail") {
     return (
@@ -48,9 +56,16 @@ export function AccountActionRequired({
     );
   }
 
-  const loginHref = `/login?${new URLSearchParams({
-    redirect_to: destination,
-  }).toString()}`;
+  if (action === "recover-session") {
+    return (
+      <div className="flex flex-column gap-4">
+        <Message severity="info" text="Восстанавливаем защищённую сессию." />
+        <LinkButton className="w-fit" href={recoveryHref} label="Продолжить" />
+      </div>
+    );
+  }
+
+  const loginHref = sessionRefreshPath(destination);
 
   return (
     <div className="flex flex-column gap-4">

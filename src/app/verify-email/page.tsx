@@ -4,9 +4,13 @@ import { VerifyEmailPanel } from "@/frontend/components/verify-email-panel";
 import { safeReadiness } from "@/application/auth/execute-email-verification";
 import { requestAuthProfileGateway } from "@/app/_composition/request-scoped-readers";
 import {
+  emailVerificationPath,
   resolveEmailVerificationSetup,
 } from "@/shared/auth/account-setup-flow";
-import { sessionRefreshPath } from "@/shared/auth/session-navigation";
+import {
+  providerSessionRecoveryPath,
+  sessionRefreshPath,
+} from "@/shared/auth/session-navigation";
 import { redirect } from "next/navigation";
 
 export const dynamic = "force-dynamic";
@@ -30,13 +34,19 @@ export default async function VerifyEmailPage({
     firstSearchParam(params.flow),
     firstSearchParam(params.redirect_to),
   );
+  const verifyEmailReturnTo = guided
+    ? emailVerificationPath(redirectTo)
+    : "/verify-email";
   const initialReadiness = await safeReadiness(requestAuthProfileGateway);
   if (initialReadiness.status === "unauthorized") {
-    redirect(sessionRefreshPath("/verify-email"));
+    redirect(sessionRefreshPath(verifyEmailReturnTo));
+  }
+  if (initialReadiness.status === "provider-session-recovery-required") {
+    redirect(providerSessionRecoveryPath(verifyEmailReturnTo));
   }
 
   return (
-    <AppShell requireAuth>
+    <AppShell requireAuth returnTo={verifyEmailReturnTo}>
       <div className="flex flex-column gap-6">
         <PageHeader
           description={

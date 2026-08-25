@@ -9,7 +9,10 @@ import { AppShell } from "@/app/_components/app-shell";
 import { PageHeader } from "@/frontend/components/page-header";
 import { PaymentConfirmation } from "@/frontend/components/payment-confirmation";
 import { hasAccountSetupNotice } from "@/shared/auth/account-setup-flow";
-import { sessionRefreshPath } from "@/shared/auth/session-navigation";
+import {
+  providerSessionRecoveryPath,
+  sessionRefreshPath,
+} from "@/shared/auth/session-navigation";
 import { redirect } from "next/navigation";
 
 function first(value: string | string[] | undefined) { return Array.isArray(value) ? value[0] : value; }
@@ -28,8 +31,11 @@ export default async function PaymentPage({ searchParams }: { searchParams: Prom
   if (model.status === "account-action-required" && model.action === "login") {
     redirect(sessionRefreshPath(paymentRedirectTo));
   }
+  if (model.status === "provider-session-recovery-required") {
+    redirect(providerSessionRecoveryPath(paymentRedirectTo));
+  }
   return (
-    <AppShell requireAuth>
+    <AppShell requireAuth returnTo={paymentRedirectTo}>
       <div className="flex flex-column gap-6">
         <PageHeader
           description="Проверьте выбранный тариф перед переходом к платёжной странице."

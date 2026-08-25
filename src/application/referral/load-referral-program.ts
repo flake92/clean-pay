@@ -22,6 +22,12 @@ export async function loadReferralProgram(
             message: "Войдите в аккаунт, чтобы открыть реферальную программу.",
             action: "login",
           };
+        case "provider-session-recovery-required":
+          return {
+            status: "error",
+            message: "Восстанавливаем защищённую сессию.",
+            action: "recover-session",
+          };
         case "email-required":
           return {
             status: "error",

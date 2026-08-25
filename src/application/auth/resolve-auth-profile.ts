@@ -98,10 +98,21 @@ export async function resolveAuthProfile(gateway: AuthProfileGateway): Promise<A
       });
       return localProfile(session);
     }
+    if (error instanceof AuthProfileError && error.code === "UNAUTHORIZED") {
+      throw new AuthProfileError("PROVIDER_SESSION_RECOVERY_REQUIRED");
+    }
     throw error;
   }
 
-  const profile = await gateway.loadProviderProfile(authorized);
+  let profile;
+  try {
+    profile = await gateway.loadProviderProfile(authorized);
+  } catch (error) {
+    if (error instanceof AuthProfileError && error.code === "UNAUTHORIZED") {
+      throw new AuthProfileError("PROVIDER_SESSION_RECOVERY_REQUIRED");
+    }
+    throw error;
+  }
   const pendingOwnerMatches = !authorized.session.user.pendingUpstreamUserId ||
     authorized.session.user.pendingUpstreamUserId === authorized.upstreamUserId;
   const unresolvedTelegramMerge = Boolean(
