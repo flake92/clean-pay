@@ -225,17 +225,50 @@ describe("Remnawave live subscription client", () => {
     })).resolves.toBeNull();
   });
 
-  it("requires every supplied fallback identity and the stored UUID to match", async () => {
+  it("accepts an exact stored UUID when Telegram still matches after an e-mail change", async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(jsonResponse({
+      response: {
+        uuid: "rw-1",
+        status: "ACTIVE",
+        email: "legacy@example.com",
+        telegramId: "123",
+        subscriptionUrl: "https://sub3.example.com/current",
+      },
+    }));
+    global.fetch = fetchMock;
+
+    await expect(getLiveRemnawaveSubscriptionUrl({
+      userRemnaId: "rw-1",
+      email: "owner@example.com",
+      telegramId: "123",
+    })).resolves.toBe("https://sub3.example.com/current");
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
+  it("rejects an exact stored UUID when neither supplied identity matches", async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(jsonResponse({
         response: {
           uuid: "rw-1",
           status: "ACTIVE",
           email: "victim@example.com",
-          telegramId: "123",
+          telegramId: "456",
           subscriptionUrl: "https://sub3.example.com/victim-direct",
         },
       }))
+      .mockResolvedValueOnce(jsonResponse({ response: [] }))
+      .mockResolvedValueOnce(jsonResponse({ response: [] }));
+    global.fetch = fetchMock;
+
+    await expect(getLiveRemnawaveSubscriptionUrl({
+      userRemnaId: "rw-1",
+      email: "owner@example.com",
+      telegramId: "123",
+    })).resolves.toBeNull();
+  });
+
+  it("requires every supplied identity to match during fallback lookup", async () => {
+    const fetchMock = vi.fn()
       .mockResolvedValueOnce(jsonResponse({
         response: [{
           uuid: "rw-1",
@@ -249,7 +282,6 @@ describe("Remnawave live subscription client", () => {
     global.fetch = fetchMock;
 
     await expect(getLiveRemnawaveSubscriptionUrl({
-      userRemnaId: "rw-1",
       email: "owner@example.com",
       telegramId: "123",
     })).resolves.toBeNull();
