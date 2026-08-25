@@ -121,6 +121,10 @@ validate_image_id() {
 }
 
 compose() (
+  # Preserve the reviewed path before scrubbing Compose's environment control
+  # variable. Reusing COMPOSE_FILE after `unset COMPOSE_FILE` fails under
+  # `set -u` and prevents every live rollout command from reaching Docker.
+  compose_path=$COMPOSE_FILE
   unset \
     CLEAN_PAY_BIND \
     CLEAN_PAY_EDGE_NETWORK \
@@ -152,10 +156,10 @@ compose() (
   fi
 
   if [ "$(env_value PAYMENT_RECONCILIATION_ENABLED true)" = "true" ]; then
-    docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" \
+    docker compose --env-file "$ENV_FILE" -f "$compose_path" \
       --profile reconciliation "$@"
   else
-    docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" "$@"
+    docker compose --env-file "$ENV_FILE" -f "$compose_path" "$@"
   fi
 )
 

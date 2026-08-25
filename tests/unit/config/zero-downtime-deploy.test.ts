@@ -39,6 +39,14 @@ function shellFunction(name: string) {
   return shellFunctionFrom(script, name);
 }
 
+function shellSubshellFunction(name: string) {
+  const start = script.indexOf(`${name}() (`);
+  expect(start, `${name} subshell function must exist`).toBeGreaterThanOrEqual(0);
+  const end = script.indexOf("\n)\n", start);
+  expect(end, `${name} subshell function must terminate`).toBeGreaterThan(start);
+  return script.slice(start, end + 3);
+}
+
 function sha256(value: string) {
   return createHash("sha256").update(value).digest("hex");
 }
@@ -171,6 +179,17 @@ describe("guarded zero-downtime application rollout", () => {
     expect(script).not.toContain("db push");
     expect(script).not.toMatch(/\bcompose\s+(?:stop|down)\b/);
     expect(script).not.toContain("./deploy.sh install");
+  });
+
+  it("preserves its reviewed Compose path while scrubbing Compose control variables", () => {
+    const compose = shellSubshellFunction("compose");
+    const unsetCommand = compose.indexOf("\n  unset \\");
+
+    expect(compose.indexOf("compose_path=$COMPOSE_FILE")).toBeLessThan(
+      unsetCommand,
+    );
+    expect(compose).toContain('-f "$compose_path"');
+    expect(compose).not.toContain('-f "$COMPOSE_FILE"');
   });
 
   it("keeps the old exact Compose app and workers healthy until a separate canary is ready", () => {
