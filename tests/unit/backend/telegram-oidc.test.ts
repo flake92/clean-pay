@@ -121,6 +121,13 @@ describe("Telegram identity verification adapter", () => {
     expect(response.cookies.get("clean_pay_tg_state")?.value).toBeTruthy();
     expect(response.cookies.get("clean_pay_tg_nonce")?.value).toBeTruthy();
     expect(response.cookies.get("clean_pay_tg_code_verifier")?.value).toBeTruthy();
+    expect(response.headers.get("set-cookie")).toContain(
+      "clean_pay_tg_callback_receipt=",
+    );
+    expect(response.headers.get("set-cookie")).toContain(
+      "Path=/auth/telegram/callback",
+    );
+    expect(response.headers.get("set-cookie")).toContain("Max-Age=0");
   });
 
   it("creates popup metadata from the same one-time state", async () => {
@@ -131,6 +138,13 @@ describe("Telegram identity verification adapter", () => {
       redirectUri: "http://localhost:8080/auth/telegram/callback",
     });
     expect(mocks.prisma.telegramAuthState.create).toHaveBeenCalledOnce();
+    expect(response.headers.get("set-cookie")).toContain(
+      "clean_pay_tg_callback_receipt=",
+    );
+    expect(response.headers.get("set-cookie")).toContain(
+      "Path=/auth/telegram/callback",
+    );
+    expect(response.headers.get("set-cookie")).toContain("Max-Age=0");
   });
 
   it("verifies OIDC state, claims it once and returns identity without local-user decisions", async () => {
