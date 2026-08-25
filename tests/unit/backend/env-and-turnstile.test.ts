@@ -127,6 +127,15 @@ describe("backend env", () => {
     );
   });
 
+  it("uses the closed production payment-origin default when the override is absent", () => {
+    vi.stubEnv("PAYMENT_REDIRECT_ORIGINS", "");
+
+    expect(getEnv().paymentRedirectOrigins).toEqual([
+      "https://yoomoney.ru",
+      "https://pay.platega.io",
+    ]);
+  });
+
   it("throws on missing required values and invalid booleans", () => {
     vi.stubEnv("DATABASE_URL", "");
     expect(() => getEnv()).toThrow("DATABASE_URL is required");

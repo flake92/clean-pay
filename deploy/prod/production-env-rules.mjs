@@ -700,10 +700,13 @@ export function validateProductionEnvironment(environment) {
     }
   }
 
-  publicHttpsOriginList(
-    "PAYMENT_REDIRECT_ORIGINS",
-    required("PAYMENT_REDIRECT_ORIGINS"),
-  );
+  const paymentRedirectOrigins = optional("PAYMENT_REDIRECT_ORIGINS");
+  if (paymentRedirectOrigins) {
+    publicHttpsOriginList(
+      "PAYMENT_REDIRECT_ORIGINS",
+      paymentRedirectOrigins,
+    );
+  }
 
   const turnstileEnabled = bool(
     "TURNSTILE_ENABLED",
