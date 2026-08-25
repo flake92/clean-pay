@@ -264,7 +264,12 @@ function remnawaveSubscriptionOrigins() {
 
 function paymentRedirectOrigins() {
   const raw = optional("PAYMENT_REDIRECT_ORIGINS");
-  if (!raw) return [];
+  if (!raw) {
+    // Keep the first strict allowlist rollout compatible with the immediately
+    // previous production image during zero-downtime rollback. Operators may
+    // override this closed default only with exact validated HTTPS origins.
+    return ["https://yoomoney.ru", "https://pay.platega.io"];
+  }
 
   const values = raw.split(",").map((value) => value.trim());
   if (values.some((value) => !value) || values.length > 32) {
