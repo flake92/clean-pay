@@ -71,10 +71,11 @@ export async function resolveAuthProfile(gateway: AuthProfileGateway): Promise<A
     throw new AuthProfileError("UNAUTHORIZED");
   }
 
-  const canResolveProvider = session.hasUpstreamTokens || Boolean(
-    session.user.upstreamUserId || session.user.telegramId,
-  );
-  if (!canResolveProvider) {
+  // A provider identity is not a provider session. Passkey login can restore
+  // the local account before an upstream token pair is available; in that
+  // state the verified local profile is still authenticated and must not be
+  // presented as a failed login.
+  if (!session.hasUpstreamTokens) {
     gateway.debug("auth_me_local_profile_returned", {
       sessionId: session.id, userId: session.userId, authMethod: session.authMethod,
       hasUpstreamTokens: false,

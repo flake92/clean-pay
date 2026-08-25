@@ -50,6 +50,28 @@ describe("application auth profile policy", () => {
     expect(port.authorizeCurrentSession).not.toHaveBeenCalled();
   });
 
+  it("keeps a passkey session authenticated while its provider tokens are being restored", async () => {
+    const local = session({
+      hasUpstreamTokens: false,
+      authMethod: "PASSKEY",
+      user: {
+        ...session().user,
+        emailVerified: true,
+        upstreamUserId: "upstream-1",
+        telegramId: "777",
+      },
+    });
+    const port = gateway({ loadCurrentSession: vi.fn(async () => local) });
+
+    await expect(resolveAuthProfile(port)).resolves.toMatchObject({
+      authType: "passkey",
+      email: "u@example.com",
+      emailVerified: true,
+      telegramId: "777",
+    });
+    expect(port.authorizeCurrentSession).not.toHaveBeenCalled();
+  });
+
   it.each(["EMAIL_REQUIRED", "PASSKEY_REQUIRED"])("falls back locally on %s", async (code) => {
     const port = gateway({ authorizeCurrentSession: vi.fn(async () => { throw new AuthProfileError(code); }) });
     await expect(resolveAuthProfile(port)).resolves.toMatchObject({ email: "u@example.com", emailVerified: false });

@@ -4,6 +4,7 @@ const mocks = vi.hoisted(() => ({
   generateRegistrationOptions: vi.fn(), verifyRegistrationResponse: vi.fn(),
   generateAuthenticationOptions: vi.fn(), verifyAuthenticationResponse: vi.fn(),
   getCurrentSession: vi.fn(), upgradeCurrentSessionToFull: vi.fn(), createWebSession: vi.fn(),
+  getAuthorizedRemnashopTokens: vi.fn(), authDebugLog: vi.fn(),
   verifyTurnstileToken: vi.fn(), assertRateLimit: vi.fn(), withAuthConcurrency: vi.fn(), auditLog: vi.fn(),
   recordPasskeyUse: vi.fn(),
   headerGet: vi.fn<(name: string) => string | null>(() => "Mozilla/5.0 Windows Chrome/120"),
@@ -25,6 +26,10 @@ vi.mock("@/backend/integrations/sessions/web-session-service", () => ({
   getCurrentSession: mocks.getCurrentSession, upgradeCurrentSessionToFull: mocks.upgradeCurrentSessionToFull,
   createWebSession: mocks.createWebSession,
 }));
+vi.mock("@/backend/integrations/remnashop/client", () => ({
+  getAuthorizedRemnashopTokens: mocks.getAuthorizedRemnashopTokens,
+}));
+vi.mock("@/backend/observability/auth-debug-log", () => ({ authDebugLog: mocks.authDebugLog }));
 vi.mock("@/backend/security/turnstile", () => ({ verifyTurnstileToken: mocks.verifyTurnstileToken }));
 vi.mock("@/backend/limits/rate-limit", () => ({ assertRateLimit: mocks.assertRateLimit, withAuthConcurrency: mocks.withAuthConcurrency }));
 vi.mock("@/backend/observability/audit", () => ({ auditLog: mocks.auditLog }));
@@ -89,6 +94,7 @@ describe("production passkey gateway through application workflows", () => {
     });
     mocks.verifyAuthenticationResponse.mockResolvedValue({ verified: true, authenticationInfo: { newCounter: 2 } });
     mocks.createWebSession.mockResolvedValue({ id: "new-session" });
+    mocks.getAuthorizedRemnashopTokens.mockResolvedValue({});
     mocks.headerGet.mockReturnValue("Mozilla/5.0 Windows Chrome/120");
   });
 
@@ -127,7 +133,21 @@ describe("production passkey gateway through application workflows", () => {
     expect(mocks.verifyAuthenticationResponse).toHaveBeenCalledWith(expect.objectContaining({ expectedChallenge: "authentication" }));
     expect(mocks.recordPasskeyUse).toHaveBeenCalledWith(expect.objectContaining({ oldCounter: 1n, newCounter: 2n }));
     expect(mocks.createWebSession).toHaveBeenCalledWith("user-1", expect.objectContaining({ authMethod: "PASSKEY", assuranceLevel: "FULL" }));
+    expect(mocks.getAuthorizedRemnashopTokens).toHaveBeenCalledWith({ allowUnverifiedEmail: true });
     expect(mocks.auditLog).toHaveBeenCalledWith(expect.objectContaining({ action: "passkey_login" }));
+  });
+
+  it("keeps a valid passkey login when upstream session recovery is temporarily unavailable", async () => {
+    const { ServiceError } = await import("@/backend/errors/service-error");
+    mocks.getAuthorizedRemnashopTokens.mockRejectedValueOnce(
+      new ServiceError("UPSTREAM_UNAVAILABLE", 503),
+    );
+
+    await expect(verifyPasskeyLogin(gateway, authenticationResponse)).resolves.toEqual({ ok: true });
+    expect(mocks.authDebugLog).toHaveBeenCalledWith(
+      "passkey_upstream_session_restore_deferred",
+      { sessionId: "new-session", userId: "user-1", code: "UPSTREAM_UNAVAILABLE" },
+    );
   });
 
   it("maps absent sessions, accounts and invalid cryptographic responses", async () => {
