@@ -201,7 +201,13 @@ describe("cabinet device records", () => {
         devices,
         payments: [],
         paymentHistoryStatus: "current",
-        support: { enabled: false, email: null, telegramUsername: null, faqUrl: null },
+        support: {
+          enabled: false,
+          email: null,
+          telegramUsername: null,
+          faqUrl: null,
+          liveChatEnabled: false,
+        },
       },
     })));
     await settle();

@@ -66,6 +66,55 @@ function gateway(overrides: Partial<TelegramCallbackGateway> = {}): TelegramCall
 const input = { kind: "oidc" as const, code: "code", state: "state" };
 
 describe("completeTelegramCallback", () => {
+  it.each([
+    "https://evil.example/steal",
+    "//evil.example/steal",
+    "javascript:alert(1)",
+    "/missing",
+    "/api/private",
+    "/auth/telegram/start",
+  ])("fails closed for a corrupted stored continuation %s", async (redirectTo) => {
+    const subject = gateway({
+      consume: vi.fn(async () => ({
+        authState: { id: "state-1", targetUserId: "target-local", redirectTo },
+        identity: {
+          telegramId: "777",
+          telegramUsername: "selected",
+          fullName: "Selected User",
+          photoUrl: null,
+          providerSession,
+        },
+      })),
+    });
+
+    await expect(completeTelegramCallback(subject, input)).resolves.toMatchObject({
+      redirectTo: "/cabinet",
+    });
+  });
+
+  it("preserves a valid stored continuation with query and hash", async () => {
+    const subject = gateway({
+      consume: vi.fn(async () => ({
+        authState: {
+          id: "state-1",
+          targetUserId: "target-local",
+          redirectTo: "/payment?plan=pro#checkout",
+        },
+        identity: {
+          telegramId: "777",
+          telegramUsername: "selected",
+          fullName: "Selected User",
+          photoUrl: null,
+          providerSession,
+        },
+      })),
+    });
+
+    await expect(completeTelegramCallback(subject, input)).resolves.toMatchObject({
+      redirectTo: "/payment?plan=pro#checkout",
+    });
+  });
+
   it("links directly when Telegram already resolves to the target provider account", async () => {
     const subject = gateway();
 

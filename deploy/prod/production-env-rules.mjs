@@ -101,6 +101,7 @@ export const PRODUCTION_ENVIRONMENT_FILE_NAMES = Object.freeze([
   "PAYMENT_RECONCILIATION_INTERNAL_URL",
   "PAYMENT_RECONCILIATION_INTERVAL_SECONDS",
   "PAYMENT_RECONCILIATION_SECRET",
+  "PAYMENT_REDIRECT_ORIGINS",
   "POSTGRES_DB",
   "POSTGRES_PASSWORD",
   "POSTGRES_USER",
@@ -698,6 +699,11 @@ export function validateProductionEnvironment(environment) {
       );
     }
   }
+
+  publicHttpsOriginList(
+    "PAYMENT_REDIRECT_ORIGINS",
+    required("PAYMENT_REDIRECT_ORIGINS"),
+  );
 
   const turnstileEnabled = bool(
     "TURNSTILE_ENABLED",

@@ -43,6 +43,7 @@ type AppEnv = {
     fail: string;
     pending: string;
   };
+  paymentRedirectOrigins: string[];
   paymentReconciliation: {
     enabled: boolean;
     secret: string | null;
@@ -60,6 +61,7 @@ type AppEnv = {
     email: string | null;
     telegramUsername: string | null;
     faqUrl: string | null;
+    liveChatEnabled: boolean;
   };
   chatwoot: {
     baseUrl: string;
@@ -260,6 +262,48 @@ function remnawaveSubscriptionOrigins() {
   return origins;
 }
 
+function paymentRedirectOrigins() {
+  const raw = optional("PAYMENT_REDIRECT_ORIGINS");
+  if (!raw) return [];
+
+  const values = raw.split(",").map((value) => value.trim());
+  if (values.some((value) => !value) || values.length > 32) {
+    throw new Error(
+      "PAYMENT_REDIRECT_ORIGINS must contain 1 to 32 comma-separated HTTPS origins",
+    );
+  }
+
+  const origins = values.map((value) => {
+    let parsed: URL;
+    try {
+      parsed = new URL(value);
+    } catch {
+      throw new Error("PAYMENT_REDIRECT_ORIGINS must contain valid HTTPS origins");
+    }
+
+    if (
+      parsed.protocol !== "https:"
+      || parsed.username
+      || parsed.password
+      || parsed.pathname !== "/"
+      || parsed.search
+      || parsed.hash
+    ) {
+      throw new Error(
+        "PAYMENT_REDIRECT_ORIGINS must contain only HTTPS URL origins without credentials",
+      );
+    }
+
+    return parsed.origin;
+  });
+
+  if (new Set(origins).size !== origins.length) {
+    throw new Error("PAYMENT_REDIRECT_ORIGINS must not contain duplicate origins");
+  }
+
+  return origins;
+}
+
 function chatwootToken(name: string, value: string) {
   if (!/^[A-Za-z0-9_-]{16,256}$/.test(value)) {
     throw new Error(`${name} must be a complete Chatwoot token`);
@@ -396,6 +440,7 @@ export function getEnv(): AppEnv {
     optionalUrl("REMNASHOP_ADMIN_API_BASE_URL")?.replace(/\/$/, "")
     ?? deriveRemnashopAdminApiBaseUrl(remnashopApiBaseUrl);
 
+  const chatwoot = chatwootConfig();
   const env = {
     databaseUrl: required("DATABASE_URL"),
     appUrl,
@@ -440,6 +485,7 @@ export function getEnv(): AppEnv {
       fail: joinUrl(appUrl, "/payment/fail"),
       pending: joinUrl(appUrl, "/payment/pending"),
     },
+    paymentRedirectOrigins: paymentRedirectOrigins(),
     paymentReconciliation: {
       enabled: bool("PAYMENT_RECONCILIATION_ENABLED", true),
       secret: optional("PAYMENT_RECONCILIATION_SECRET"),
@@ -462,8 +508,9 @@ export function getEnv(): AppEnv {
       email: optional("SUPPORT_EMAIL"),
       telegramUsername: optional("SUPPORT_TELEGRAM_USERNAME"),
       faqUrl: optionalUrl("SUPPORT_FAQ_URL"),
+      liveChatEnabled: Boolean(chatwoot),
     },
-    chatwoot: chatwootConfig(),
+    chatwoot,
     readiness: {
       internalSecret: required("READINESS_INTERNAL_SECRET"),
       mailpitUrl: optionalUrl("CLEAN_PAY_READINESS_MAILPIT_URL"),

@@ -49,6 +49,12 @@ export async function loadCabinetViewModel(reader: CabinetReader, auth: AuthProf
       : "unavailable",
     support: support.status === "fulfilled"
       ? support.value
-      : { enabled: false, email: null, telegramUsername: null, faqUrl: null },
+      : {
+          enabled: false,
+          email: null,
+          telegramUsername: null,
+          faqUrl: null,
+          liveChatEnabled: false,
+        },
   };
 }

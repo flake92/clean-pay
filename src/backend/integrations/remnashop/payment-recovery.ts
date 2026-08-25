@@ -4,7 +4,9 @@ import {
   remnashopRequestResult,
 } from "@/backend/integrations/remnashop/client";
 import { ServiceError } from "@/backend/errors/service-error";
+import { getEnv } from "@/backend/config/env";
 import { logger } from "@/backend/observability/logger";
+import { isAllowedPaymentRedirectUrl } from "@/backend/payments/payment-redirect-policy";
 import type {
   PaymentInitResponse,
   PaymentTransactionResponse,
@@ -297,14 +299,14 @@ export function parsePaymentInit(
   }
 
   if (paymentUrl !== null) {
-    try {
-      const parsedUrl = new URL(paymentUrl);
-
-      if (parsedUrl.protocol !== "https:") {
-        throw new Error();
-      }
-    } catch {
-      return invalidContract(path, "payment.payment_url must be an https URL or null");
+    if (!isAllowedPaymentRedirectUrl(
+      paymentUrl,
+      getEnv().paymentRedirectOrigins,
+    )) {
+      return invalidContract(
+        path,
+        "payment.payment_url must use an allowed HTTPS payment origin without credentials",
+      );
     }
   }
 

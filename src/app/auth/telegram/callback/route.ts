@@ -29,11 +29,16 @@ import {
   logTechnicalWarning,
 } from "@/backend/observability/audit";
 import { clearReferralAttributionCookieOnResponse } from "@/backend/integrations/referral/referral-attribution";
+import { safeRedirectPath } from "@/shared/auth/redirect-policy";
 
 export const runtime = "nodejs";
 
 function redirectTo(path: string) {
   return NextResponse.redirect(new URL(path, getEnv().publicAppUrl));
+}
+
+function callbackDestination(path: string) {
+  return safeRedirectPath(path) ?? "/cabinet";
 }
 
 function setMergeConfirmationCookie(response: NextResponse, token: string) {
@@ -141,7 +146,8 @@ export async function GET(request: Request) {
       productionTelegramCallbackGateway,
       { kind: "oidc", code, state },
     );
-    const response = redirectTo(outcome.redirectTo);
+    const destination = callbackDestination(outcome.redirectTo);
+    const response = redirectTo(destination);
     await applyCallbackOutcome(response, outcome);
     if (outcome.mergeConfirmation) return response;
     clearReferralAttributionCookieOnResponse(response);
@@ -149,7 +155,7 @@ export async function GET(request: Request) {
     logTechnicalInfo("telegram_callback_success", {
       ...metadata,
       ...outcome.audit,
-      redirectTo: outcome.redirectTo,
+      redirectTo: destination,
     });
 
     return response;
@@ -182,14 +188,15 @@ export async function POST(request: Request) {
         ? { kind: "popup-oidc", idToken: popupRequest.idToken }
         : { kind: "login-widget", authData: popupRequest.authData },
     );
-    const response = NextResponse.json({ redirectTo: outcome.redirectTo });
+    const destination = callbackDestination(outcome.redirectTo);
+    const response = NextResponse.json({ redirectTo: destination });
     await applyCallbackOutcome(response, outcome);
     if (outcome.mergeConfirmation) return response;
     clearReferralAttributionCookieOnResponse(response);
 
     logTechnicalInfo("telegram_popup_callback_success", {
       ...outcome.audit,
-      redirectTo: outcome.redirectTo,
+      redirectTo: destination,
     });
 
     return response;

@@ -6,10 +6,32 @@ import { safeRedirectPath } from "@/shared/auth/redirect-policy";
 import { providerSessionRecoveryPath } from "@/shared/auth/session-navigation";
 
 describe("post-auth redirect flow", () => {
-  it("accepts only local non-auth destinations", () => {
+  it("accepts only existing user-facing destinations", () => {
     expect(safeRedirectPath("/cabinet?tab=devices#active")).toBe(
       "/cabinet?tab=devices#active",
     );
+
+    for (const pathname of [
+      "/",
+      "/cabinet",
+      "/extend",
+      "/install",
+      "/link-account",
+      "/offline",
+      "/passkey/setup",
+      "/payment",
+      "/payment/fail",
+      "/payment/pending",
+      "/payment/success",
+      "/profile",
+      "/referral",
+      "/register/verify-email",
+      "/support",
+      "/tariffs",
+      "/verify-email",
+    ]) {
+      expect(safeRedirectPath(pathname)).toBe(pathname);
+    }
 
     for (const unsafe of [
       null,
@@ -17,9 +39,19 @@ describe("post-auth redirect flow", () => {
       "https://evil.example/path",
       "//evil.example/path",
       "/\\evil.example/path",
+      "/missing",
+      "/api",
+      "/api/health",
+      "/auth",
       "/login",
       "/register?next=/cabinet",
       "/auth/telegram/start",
+      "/Cabinet",
+      "/cabinet/",
+      "/cabinet/missing",
+      "/missing/../cabinet",
+      "/invite/%2e%2e/cabinet",
+      "/%2e/cabinet",
       "/%61uth/session/recover",
       "/\u0441abinet",
       "/%D1%81abinet",
@@ -36,6 +68,29 @@ describe("post-auth redirect flow", () => {
     )).toBe(
       "/cabinet?label=%D0%9F%D1%80%D0%B8%D0%B2%D0%B5%D1%82#active",
     );
+  });
+
+  it("accepts only referral continuations backed by the dynamic invite route", () => {
+    expect(safeRedirectPath("/invite/Friend42?source=email#continue")).toBe(
+      "/invite/Friend42?source=email#continue",
+    );
+    expect(safeRedirectPath(`/invite/${"a".repeat(64)}`)).toBe(
+      `/invite/${"a".repeat(64)}`,
+    );
+
+    for (const unsafe of [
+      "/invite",
+      "/invite/",
+      "/Invite/Friend42",
+      "/invite/ab",
+      `/invite/${"a".repeat(65)}`,
+      "/invite/friend_code",
+      "/invite/Friend42/extra",
+      "/invite/%46riend42",
+      "/invite/\u0421ode42",
+    ]) {
+      expect(safeRedirectPath(unsafe)).toBeUndefined();
+    }
   });
 
   it("builds provider recovery URLs only for safe local destinations", () => {

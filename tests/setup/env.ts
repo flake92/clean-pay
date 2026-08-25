@@ -15,6 +15,7 @@ process.env.AUTH_CONCURRENCY_LIMIT = "64";
 process.env.READINESS_INTERNAL_SECRET = "test-readiness-internal-secret";
 process.env.PAYMENT_RECONCILIATION_ENABLED = "true";
 process.env.PAYMENT_RECONCILIATION_SECRET = "test-payment-reconciliation-secret";
+process.env.PAYMENT_REDIRECT_ORIGINS = "https://pay.example.test,https://pay.example,https://pay.test,https://provider.test";
 process.env.COOKIE_SECURE = "false";
 process.env.COOKIE_SAMESITE = "lax";
 process.env.TELEGRAM_OIDC_CLIENT_ID = "123456";

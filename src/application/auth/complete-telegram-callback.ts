@@ -10,6 +10,7 @@ import {
   type VerifiedTelegramCallback,
 } from "@/application/auth/ports/telegram-callback";
 import { paymentOwnerTransitionKey } from "@/shared/domain/payment-owner-transition";
+import { safePostAuthContinuation } from "@/shared/domain/post-auth-continuation";
 
 function normalizedEmail(value: string | null | undefined) {
   return value?.trim().toLowerCase() || null;
@@ -203,7 +204,7 @@ export async function completeTelegramCallback(
   const consumed = await resolveVerifiedIdentity(gateway, await gateway.consume(input));
   const redirectTo = consumed.mergeConfirmation?.required
     ? "/link-account?auth=telegram_email_replace"
-    : consumed.redirectTo ?? "/cabinet";
+    : safePostAuthContinuation(consumed.redirectTo) ?? "/cabinet";
   const audit = {
     userId: consumed.user.id,
     remnashopLinked: consumed.linked || Boolean(consumed.providerSession),

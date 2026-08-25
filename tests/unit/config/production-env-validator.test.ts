@@ -87,6 +87,7 @@ const validEnv: Record<string, string> = {
   PAYMENT_RECONCILIATION_BATCH_SIZE: "10",
   PAYMENT_RECONCILIATION_INTERVAL_SECONDS: "30",
   PAYMENT_RECONCILIATION_INTERNAL_URL: "http://app:4000/api/internal/payments/reconcile",
+  PAYMENT_REDIRECT_ORIGINS: "https://yoomoney.ru,https://pay.platega.io",
   CLEAN_PAY_READINESS_MAILPIT_URL: "http://mailpit:8025",
   CLEAN_PAY_READINESS_REMNAWAVE_URL: "https://panel.clean-pay.dev",
   NEXT_PUBLIC_BRAND_NAME: "Clean Pay",
@@ -566,6 +567,27 @@ describe("production env validator", () => {
     }).stderr).toContain(
       "PAYMENT_RECONCILIATION_INTERNAL_URL must use an internal service hostname",
     );
+  });
+
+  it("requires an exact public HTTPS allowlist for payment redirects", () => {
+    expect(runValidator({ PAYMENT_REDIRECT_ORIGINS: null }).stderr).toContain(
+      "PAYMENT_REDIRECT_ORIGINS is required",
+    );
+    expect(runValidator({
+      PAYMENT_REDIRECT_ORIGINS: "http://yoomoney.ru",
+    }).stderr).toContain("PAYMENT_REDIRECT_ORIGINS[1] must be a valid https: URL");
+    expect(runValidator({
+      PAYMENT_REDIRECT_ORIGINS: "https://user:password@yoomoney.ru",
+    }).stderr).toContain("must not include URL credentials");
+    expect(runValidator({
+      PAYMENT_REDIRECT_ORIGINS: "https://yoomoney.ru/checkout",
+    }).stderr).toContain("must contain only an origin");
+    expect(runValidator({
+      PAYMENT_REDIRECT_ORIGINS: "https://yoomoney.ru,https://yoomoney.ru",
+    }).stderr).toContain("must not contain duplicate origins");
+    expect(runValidator({
+      PAYMENT_REDIRECT_ORIGINS: "https://yoomoney.ru,https://pay.platega.io",
+    }).status).toBe(0);
   });
 
   it("validates Telegram identity and enabled feature destinations", () => {

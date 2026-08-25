@@ -447,7 +447,10 @@ describe("critical user-flow components", () => {
     expect(resetTurnstile).not.toHaveBeenCalled();
   });
 
-  it("falls back to the real cabinet after Passkey login when a confusable redirect was supplied", async () => {
+  it.each([
+    "/\u0441abinet",
+    "/missing",
+  ])("falls back to the real cabinet after Passkey login for invalid redirect %s", async (invalidRedirect) => {
     mocks.beginPasskeyLoginAction.mockResolvedValue({
       ok: true,
       options: { challenge: "passkey-login" },
@@ -458,13 +461,13 @@ describe("critical user-flow components", () => {
 
     render(createElement(PasskeyLoginButton, {
       email: "user@example.com",
-      redirectTo: "/\u0441abinet",
+      redirectTo: invalidRedirect,
     }));
 
     await waitFor(() => expect(screen.getByRole("button", { name: /Войти быстро/i })).toBeTruthy());
     await user.click(screen.getByRole("button", { name: /Войти быстро/i }));
 
     await waitFor(() => expect(mocks.navigateTo).toHaveBeenCalledWith("/cabinet"));
-    expect(mocks.navigateTo).not.toHaveBeenCalledWith("/\u0441abinet");
+    expect(mocks.navigateTo).not.toHaveBeenCalledWith(invalidRedirect);
   });
 });

@@ -100,7 +100,13 @@ function cabinetModel(
     devices: { devices: [], current_count: 0, max_count: 0 },
     payments: [],
     paymentHistoryStatus,
-    support: { enabled: false, email: null, telegramUsername: null, faqUrl: null },
+    support: {
+      enabled: false,
+      email: null,
+      telegramUsername: null,
+      faqUrl: null,
+      liveChatEnabled: false,
+    },
   };
 }
 

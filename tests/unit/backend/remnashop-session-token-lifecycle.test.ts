@@ -21,6 +21,7 @@ vi.mock("@/backend/observability/auth-debug-log", () => ({
 }));
 
 import { acquireRemnashopTokensForSession } from "@/backend/integrations/remnashop/session-token-lifecycle";
+import { ServiceError } from "@/backend/errors/service-error";
 import {
   protectRemnashopToken,
   revealRemnashopToken,
@@ -789,6 +790,121 @@ describe("Remnashop session token lifecycle", () => {
         data: { remnashopRefreshDispatchedAt: expect.any(Date) },
       }),
     );
+  });
+
+  it("clears the exact dispatched bundle after a terminal provider refresh rejection", async () => {
+    const target = localSession({
+      id: "target",
+      accessToken: "old-access",
+      refreshToken: "already-consumed-refresh",
+      accessExpiresAt: new Date(Date.now() - 1_000),
+    });
+    mocks.tx.$queryRaw.mockResolvedValue([{ id: "target" }]);
+    mocks.tx.webSession.findMany.mockResolvedValue([target]);
+    const terminal = new ServiceError("UNAUTHORIZED", 401, "expired", {
+      upstreamStatus: 401,
+      upstreamPath: "/auth/refresh",
+    });
+    const refresh = vi.fn().mockRejectedValue(terminal);
+
+    await expect(acquireRemnashopTokensForSession({
+      session: target,
+      refresh,
+    })).resolves.toBeNull();
+
+    expect(refresh).toHaveBeenCalledOnce();
+    expect(mocks.tx.webSession.updateMany).toHaveBeenCalledTimes(3);
+    const dispatchWrite = mocks.tx.webSession.updateMany.mock.calls[1]?.[0];
+    expect(mocks.tx.webSession.updateMany).toHaveBeenNthCalledWith(
+      3,
+      expect.objectContaining({
+        where: {
+          id: "target",
+          userId: "user-1",
+          revokedAt: null,
+          remnashopRefreshTokenEncrypted:
+            target.remnashopRefreshTokenEncrypted,
+          remnashopRefreshClaimTokenHash: expect.any(String),
+          remnashopRefreshDispatchedAt:
+            dispatchWrite?.data.remnashopRefreshDispatchedAt,
+          remnashopRefreshRecoveryEncrypted: null,
+        },
+        data: expect.objectContaining({
+          remnashopAccessTokenEncrypted: null,
+          remnashopRefreshTokenEncrypted: null,
+          remnashopRefreshClaimTokenHash: null,
+          remnashopRefreshLeaseExpiresAt: null,
+          remnashopRefreshDispatchedAt: null,
+          remnashopRefreshRecoveryEncrypted: null,
+        }),
+      }),
+    );
+    expect(mocks.authDebugLog).toHaveBeenCalledWith(
+      "remnashop_token_refresh_terminal_rejection",
+      expect.objectContaining({ sessionId: "target", userId: "user-1" }),
+    );
+  });
+
+  it("does not clear a terminal refresh claim after a competing ownership change", async () => {
+    const target = localSession({
+      id: "target",
+      accessToken: "old-access",
+      refreshToken: "already-consumed-refresh",
+      accessExpiresAt: new Date(Date.now() - 1_000),
+    });
+    mocks.tx.$queryRaw.mockResolvedValue([{ id: "target" }]);
+    mocks.tx.webSession.findMany.mockResolvedValue([target]);
+    mocks.tx.webSession.updateMany
+      .mockResolvedValueOnce({ count: 1 })
+      .mockResolvedValueOnce({ count: 1 })
+      .mockResolvedValueOnce({ count: 0 });
+    const refresh = vi.fn().mockRejectedValue(
+      new ServiceError("UNAUTHORIZED", 401, "expired", {
+        upstreamStatus: 401,
+        upstreamPath: "/auth/refresh",
+      }),
+    );
+
+    await expect(acquireRemnashopTokensForSession({
+      session: target,
+      refresh,
+    })).rejects.toMatchObject({ code: "CONFLICT", status: 409 });
+
+    expect(refresh).toHaveBeenCalledOnce();
+  });
+
+  it("keeps the dispatched fence for non-provider and ambiguous failures", async () => {
+    const failures = [
+      new ServiceError("UNAUTHORIZED", 401, "local unauthorized"),
+      new ServiceError("UPSTREAM_UNAVAILABLE", 502, "provider unavailable", {
+        upstreamStatus: 503,
+        upstreamPath: "/auth/refresh",
+      }),
+      new Error("network timeout"),
+    ];
+
+    for (const failure of failures) {
+      vi.clearAllMocks();
+      mocks.prisma.$transaction.mockImplementation(
+        async (callback: (tx: typeof mocks.tx) => unknown) => callback(mocks.tx),
+      );
+      mocks.tx.webSession.updateMany.mockResolvedValue({ count: 1 });
+      const target = localSession({
+        id: "target",
+        accessToken: "old-access",
+        refreshToken: "old-refresh",
+        accessExpiresAt: new Date(Date.now() - 1_000),
+      });
+      mocks.tx.$queryRaw.mockResolvedValue([{ id: "target" }]);
+      mocks.tx.webSession.findMany.mockResolvedValue([target]);
+
+      await expect(acquireRemnashopTokensForSession({
+        session: target,
+        refresh: vi.fn().mockRejectedValue(failure),
+      })).rejects.toBe(failure);
+
+      expect(mocks.tx.webSession.updateMany).toHaveBeenCalledTimes(2);
+    }
   });
 
   it("does not call the provider unless the dispatch marker commits", async () => {

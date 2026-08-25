@@ -37,23 +37,46 @@ function retryAfter(error: ServiceError | null) {
     : "1";
 }
 
-function unavailable(error: ServiceError | null, status = 503) {
-  const code = error?.code ?? "INTERNAL_ERROR";
-  return NextResponse.json(
-    {
-      error: {
-        code,
-        message: "Provider session recovery is temporarily unavailable.",
+function recoveryAttempt(value: string | null) {
+  return value === "1" ? 1 : 0;
+}
+
+function unavailable(
+  request: Request,
+  error: ServiceError | null,
+  returnTo: string,
+  attempt: number,
+  status = 503,
+) {
+  const seconds = retryAfter(error);
+
+  const accept = request.headers.get("accept")?.toLowerCase() ?? "";
+  if (accept.includes("application/json") && !accept.includes("text/html")) {
+    return NextResponse.json(
+      {
+        error: {
+          code: error?.code ?? "INTERNAL_ERROR",
+          message: "Provider session recovery is temporarily unavailable.",
+        },
       },
-    },
-    {
-      status,
-      headers: {
-        "cache-control": "no-store",
-        "retry-after": retryAfter(error),
+      {
+        status,
+        headers: {
+          "cache-control": "no-store",
+          "retry-after": seconds,
+        },
       },
-    },
-  );
+    );
+  }
+
+  const url = new URL("/auth/session/recovery", getEnv().publicAppUrl);
+  url.searchParams.set("return_to", returnTo);
+  url.searchParams.set("retry_after", seconds);
+  url.searchParams.set("attempt", String(attempt));
+  url.searchParams.set("kind", "provider");
+  const response = redirect(`${url.pathname}${url.search}`);
+  response.headers.set("retry-after", seconds);
+  return response;
 }
 
 function mergeRecoveryPath(
@@ -93,6 +116,7 @@ export async function GET(request: Request) {
   const requestUrl = new URL(request.url);
   const returnTo = safeRedirectPath(requestUrl.searchParams.get("return_to"))
     ?? "/cabinet";
+  const attempt = recoveryAttempt(requestUrl.searchParams.get("attempt"));
 
   try {
     await getAuthorizedRemnashopTokens({
@@ -123,14 +147,14 @@ export async function GET(request: Request) {
       return redirect(mergeRecoveryPath(returnTo, code));
     }
     if (code === "RATE_LIMITED") {
-      return unavailable(serviceError, 429);
+      return unavailable(request, serviceError, returnTo, attempt, 429);
     }
     if (transientCodes.has(code)) {
-      return unavailable(serviceError);
+      return unavailable(request, serviceError, returnTo, attempt);
     }
 
     // An unclassified failure is not proof that either browser credential is
     // invalid. Preserve the session and let the caller retry safely.
-    return unavailable(serviceError);
+    return unavailable(request, serviceError, returnTo, attempt);
   }
 }
