@@ -51,6 +51,10 @@ describe("production Docker network startup", () => {
     expect(scan).toBeGreaterThan(smoke);
     expect(smokeStep).not.toContain("--entrypoint");
     expect(smokeStep).toContain("--env NEXT_PUBLIC_APP_URL");
+    expect(workflow).toContain(
+      "PAYMENT_REDIRECT_ORIGINS: https://yoomoney.ru,https://pay.platega.io",
+    );
+    expect(smokeStep).toContain("--env PAYMENT_REDIRECT_ORIGINS");
     expect(smokeStep).toContain("clean-pay:ci");
     expect(smokeStep).toContain("/api/health/liveness");
     expect(smokeStep).toContain("--retry-all-errors");

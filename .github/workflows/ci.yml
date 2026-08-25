@@ -188,6 +188,7 @@ jobs:
       COOKIE_SECURE: "true"
       COOKIE_SAMESITE: lax
       PAYMENT_RECONCILIATION_ENABLED: "false"
+      PAYMENT_REDIRECT_ORIGINS: https://yoomoney.ru,https://pay.platega.io
       TURNSTILE_ENABLED: "true"
       TURNSTILE_SITE_KEY: ci-turnstile-site-key-not-real
       TURNSTILE_SECRET_KEY: ci-turnstile-secret-not-real-and-distinct
@@ -241,6 +242,7 @@ jobs:
             --env COOKIE_SECURE \
             --env COOKIE_SAMESITE \
             --env PAYMENT_RECONCILIATION_ENABLED \
+            --env PAYMENT_REDIRECT_ORIGINS \
             --env TURNSTILE_ENABLED \
             --env TURNSTILE_SITE_KEY \
             --env TURNSTILE_SECRET_KEY \
