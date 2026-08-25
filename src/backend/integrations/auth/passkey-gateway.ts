@@ -30,6 +30,8 @@ import {
   upgradeCurrentSessionToFull,
 } from "@/backend/integrations/sessions/web-session-service";
 import { recordPasskeyUse } from "@/backend/integrations/auth/passkey-service";
+import { getAuthorizedRemnashopTokens } from "@/backend/integrations/remnashop/client";
+import { authDebugLog } from "@/backend/observability/auth-debug-log";
 
 const challengeTtlMs = 5 * 60 * 1000;
 const maxPasskeyNameLength = 80;
@@ -270,7 +272,29 @@ export const productionPasskeyCommands: PasskeyCommands = {
     }));
   },
   async createAuthenticatedSession(userId) {
-    return adapt(() => createWebSession(userId, { authMethod: WebSessionAuthMethod.PASSKEY, assuranceLevel: WebSessionAssuranceLevel.FULL }));
+    const session = await adapt(() => createWebSession(userId, {
+      authMethod: WebSessionAuthMethod.PASSKEY,
+      assuranceLevel: WebSessionAssuranceLevel.FULL,
+    }));
+
+    // A passkey proves the local account but does not itself carry the
+    // Remnashop token pair. Restore that pair while this Server Action is
+    // still allowed to persist tokens, so the first cabinet render is fully
+    // authorized instead of showing a contradictory re-login prompt.
+    try {
+      await getAuthorizedRemnashopTokens({ allowUnverifiedEmail: true });
+    } catch (error) {
+      // The local passkey login remains valid when the provider is temporarily
+      // unavailable. Request-scoped readers will fall back to the local
+      // profile and a later command can retry upstream recovery.
+      authDebugLog("passkey_upstream_session_restore_deferred", {
+        sessionId: session.id,
+        userId,
+        code: error instanceof ServiceError ? error.code : "INTERNAL_ERROR",
+      });
+    }
+
+    return session;
   },
   async auditLogin(credential, sessionId) {
     await adapt(() => auditLog({ action: "passkey_login", userId: credential.userId, metadata: { credentialId: credential.credentialId, sessionId } }));
