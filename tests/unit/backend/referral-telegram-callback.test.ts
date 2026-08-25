@@ -8,6 +8,9 @@ const mocks = vi.hoisted(() => ({
   recoverRemnashopTelegramSession: vi.fn(),
   revokeWebSessionById: vi.fn(),
   readTelegramPopupRequest: vi.fn(),
+  logTechnicalError: vi.fn(),
+  logTechnicalInfo: vi.fn(),
+  logTechnicalWarning: vi.fn(),
 }));
 
 vi.mock("@/application/auth/complete-telegram-callback", () => ({
@@ -26,6 +29,7 @@ vi.mock("@/backend/config/env", () => ({
     publicAppUrl: "https://pay.example.com",
     cookieSecure: true,
     cookieSameSite: "lax",
+    webJwtSecret: "test-web-jwt-secret-with-enough-entropy",
   }),
 }));
 vi.mock("@/backend/integrations/auth/telegram-callback-gateway", () => ({
@@ -56,9 +60,9 @@ vi.mock("@/backend/integrations/telegram/oidc", () => {
   return { TelegramAuthStateAlreadyConsumedError };
 });
 vi.mock("@/backend/observability/audit", () => ({
-  logTechnicalError: vi.fn(),
-  logTechnicalInfo: vi.fn(),
-  logTechnicalWarning: vi.fn(),
+  logTechnicalError: mocks.logTechnicalError,
+  logTechnicalInfo: mocks.logTechnicalInfo,
+  logTechnicalWarning: mocks.logTechnicalWarning,
 }));
 
 import { GET, POST } from "@/app/auth/telegram/callback/route";
@@ -74,10 +78,11 @@ const mergeOutcome = {
   mergeConfirmation: { token: "merge-token" },
   audit: { userId: "user-1", remnashopLinked: false },
 };
+const oidcState = "telegram-state-with-sufficient-entropy";
 
 function oidcRequest() {
   return new Request(
-    "https://pay.example.com/auth/telegram/callback?code=code&state=state",
+    `https://pay.example.com/auth/telegram/callback?code=code&state=${oidcState}`,
   );
 }
 
@@ -109,6 +114,54 @@ describe("referral attribution after Telegram callbacks", () => {
     expect(popup.status).toBe(200);
     expect(mocks.createWebSessionOnResponse).toHaveBeenCalledTimes(2);
     expect(mocks.clearReferralAttributionCookieOnResponse).toHaveBeenCalledTimes(2);
+  });
+
+  it("treats a sequential replay of a completed OIDC callback as the same success", async () => {
+    mocks.completeTelegramCallback.mockResolvedValueOnce(sessionOutcome);
+    const first = await GET(oidcRequest());
+    const receipt = first.cookies.get("clean_pay_tg_callback_receipt")?.value;
+    expect(receipt).toBeTruthy();
+
+    const replay = await GET(new Request(
+      `https://pay.example.com/auth/telegram/callback?code=code&state=${oidcState}`,
+      { headers: { cookie: `clean_pay_tg_callback_receipt=${receipt}` } },
+    ));
+
+    expect(replay.headers.get("location")).toBe("https://pay.example.com/cabinet");
+    expect(mocks.logTechnicalInfo).toHaveBeenCalledWith(
+      "telegram_callback_duplicate_completed",
+      { redirectTo: "/cabinet" },
+    );
+    expect(mocks.logTechnicalError).not.toHaveBeenCalledWith(
+      "telegram_callback_failed",
+      expect.anything(),
+      expect.anything(),
+    );
+    expect(mocks.completeTelegramCallback).toHaveBeenCalledTimes(1);
+    expect(mocks.createWebSessionOnResponse).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not accept a completion receipt for a different callback state", async () => {
+    mocks.completeTelegramCallback.mockResolvedValueOnce(sessionOutcome);
+    const first = await GET(oidcRequest());
+    const receipt = first.cookies.get("clean_pay_tg_callback_receipt")?.value;
+
+    mocks.completeTelegramCallback.mockRejectedValueOnce(
+      new Error("Telegram OIDC state is invalid"),
+    );
+    const forgedReplay = await GET(new Request(
+      "https://pay.example.com/auth/telegram/callback?code=code&state=different-state-value",
+      { headers: { cookie: `clean_pay_tg_callback_receipt=${receipt}` } },
+    ));
+
+    expect(forgedReplay.headers.get("location")).toBe(
+      "https://pay.example.com/login?auth=telegram_failed",
+    );
+    expect(mocks.logTechnicalError).toHaveBeenCalledWith(
+      "telegram_callback_failed",
+      expect.any(Error),
+      expect.any(Object),
+    );
   });
 
   it.each([
@@ -149,6 +202,22 @@ describe("referral attribution after Telegram callbacks", () => {
 
     expect(oidc.status).toBe(307);
     expect(popup.status).toBe(400);
+    expect(mocks.clearReferralAttributionCookieOnResponse).not.toHaveBeenCalled();
+  });
+
+  it("does not issue a completion receipt before post-session recovery succeeds", async () => {
+    mocks.completeTelegramCallback.mockResolvedValueOnce({
+      ...sessionOutcome,
+      session: { userId: "user-1", requiresTelegramRecovery: true },
+    });
+    mocks.recoverRemnashopTelegramSession.mockRejectedValueOnce(
+      new Error("recovery unavailable"),
+    );
+
+    const response = await GET(oidcRequest());
+
+    expect(response.cookies.get("clean_pay_tg_callback_receipt")).toBeUndefined();
+    expect(mocks.revokeWebSessionById).toHaveBeenCalledWith("session-1", "user-1");
     expect(mocks.clearReferralAttributionCookieOnResponse).not.toHaveBeenCalled();
   });
 
