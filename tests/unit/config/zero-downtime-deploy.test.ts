@@ -51,6 +51,69 @@ function sha256(value: string) {
   return createHash("sha256").update(value).digest("hex");
 }
 
+function runRollbackImageResolver({
+  appRole = "",
+  migrationRole = "",
+  previousAppMatches = true,
+}: {
+  appRole?: string;
+  migrationRole?: string;
+  previousAppMatches?: boolean;
+}) {
+  const appImage = `sha256:${"a".repeat(64)}`;
+  const migrationImage = `sha256:${"b".repeat(64)}`;
+  const previousApp = previousAppMatches
+    ? appImage
+    : `sha256:${"c".repeat(64)}`;
+  const harness = `
+set -eu
+${shellFunction("fail")}
+${shellFunction("validate_image_id")}
+${shellFunction("resolve_local_image_id")}
+${shellFunction("image_role_label")}
+${shellFunction("resolve_rollback_image_references")}
+APP_IMAGE=${appImage}
+MIGRATION_IMAGE=${migrationImage}
+PREVIOUS_APP_IMAGE=${previousApp}
+docker() {
+  [ "$1" = image ] && [ "$2" = inspect ] && [ "$3" = --format ] || return 91
+  case "$4" in
+    '{{.Id}}')
+      case "$5" in
+        rollback-app) printf '%s\\n' "$APP_IMAGE" ;;
+        rollback-migration) printf '%s\\n' "$MIGRATION_IMAGE" ;;
+        *) return 92 ;;
+      esac
+      ;;
+    *io.clean-pay.role*)
+      case "$5" in
+        "$APP_IMAGE") printf '%s\\n' "\${MOCK_APP_ROLE:-}" ;;
+        "$MIGRATION_IMAGE") printf '%s\\n' "\${MOCK_MIGRATION_ROLE:-}" ;;
+        *) return 93 ;;
+      esac
+      ;;
+    *) return 94 ;;
+  esac
+}
+resolve_rollback_image_references rollback-app rollback-migration
+printf 'mode=%s\\napp=%s\\nmigration=%s\\n' \\
+  "$ROLLBACK_IMAGE_MODE" \\
+  "$RESOLVED_ROLLBACK_APP_IMAGE" \\
+  "$RESOLVED_ROLLBACK_MIGRATION_IMAGE"
+`;
+
+  return spawnSync(posixShell!, ["-c", harness], {
+    cwd: process.cwd(),
+    encoding: "utf8",
+    env: {
+      NODE_ENV: "test",
+      PATH: process.env.PATH ?? "",
+      MOCK_APP_ROLE: appRole,
+      MOCK_MIGRATION_ROLE: migrationRole,
+    },
+  });
+}
+
 const validProductionEnv: Record<string, string> = {
   CLEAN_PAY_DEPLOY_SOURCE: "build",
   CLEAN_PAY_IMAGE: "clean-pay-prod-app:old",
@@ -212,6 +275,63 @@ describe("guarded zero-downtime application rollout", () => {
     );
     expect(stage).toContain('"$TARGET_APP_IMAGE" >/dev/null');
     expect(stage).toContain("container $CANARY_NAME already exists");
+  });
+
+  it.skipIf(!posixShell)("accepts only an exact label-less legacy rollback pair", () => {
+    const legacy = runRollbackImageResolver({});
+    expect(legacy.status, legacy.stderr).toBe(0);
+    expect(legacy.stdout).toContain("mode=legacy");
+    expect(legacy.stdout).toContain(`app=sha256:${"a".repeat(64)}`);
+    expect(legacy.stdout).toContain(`migration=sha256:${"b".repeat(64)}`);
+
+    const modern = runRollbackImageResolver({
+      appRole: "app",
+      migrationRole: "migration",
+    });
+    expect(modern.status, modern.stderr).toBe(0);
+    expect(modern.stdout).toContain("mode=strict");
+
+    for (const rejected of [
+      runRollbackImageResolver({ appRole: "app" }),
+      runRollbackImageResolver({ appRole: "worker", migrationRole: "migration" }),
+    ]) {
+      expect(rejected.status).not.toBe(0);
+      expect(rejected.stderr).toContain(
+        "rollback images have partial or invalid io.clean-pay.role metadata",
+      );
+    }
+
+    const mismatch = runRollbackImageResolver({ previousAppMatches: false });
+    expect(mismatch.status).not.toBe(0);
+    expect(mismatch.stderr).toContain(
+      "legacy rollback application image does not match the running Compose image",
+    );
+  });
+
+  it("keeps modern target and rollback image pairs under strict provenance preflight", () => {
+    const target = shellFunction("preflight_target_images");
+    const rollback = shellFunction("preflight_rollback_images");
+    const resolver = shellFunction("resolve_rollback_image_references");
+    const legacyValidator = shellFunction("validate_legacy_rollback_environment");
+
+    expect(target).toContain('preflight_image_pair "$ENV_FILE"');
+    expect(resolver).toContain("app:migration");
+    expect(resolver).toContain("ROLLBACK_IMAGE_MODE=strict");
+    expect(resolver).toContain("ROLLBACK_IMAGE_MODE=legacy");
+    expect(rollback).toContain('if [ "$ROLLBACK_IMAGE_MODE" = "strict" ]');
+    expect(rollback).toContain('preflight_image_pair "$ROLLBACK_ENV_FILE"');
+    expect(rollback).toContain("reference changed during preflight");
+    expect(rollback).toContain("validate_legacy_rollback_environment");
+    expect(legacyValidator).toContain("--pull never");
+    expect(legacyValidator).toContain("--network none");
+    expect(legacyValidator).toContain("--read-only");
+    expect(legacyValidator).toContain("--cap-drop ALL");
+    expect(legacyValidator).toContain("--security-opt no-new-privileges");
+    expect(legacyValidator).toContain("--user 0:0");
+    expect(legacyValidator).toContain("readonly");
+    expect(legacyValidator).toContain("--env-file /run/clean-pay-rollback.env");
+    expect(legacyValidator).toContain(">/dev/null 2>&1");
+    expect(legacyValidator).not.toContain("--network host");
   });
 
   it("derives the private network from exact Compose labels and reserves a unique edge alias", () => {

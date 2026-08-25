@@ -362,16 +362,101 @@ preflight_target_images() {
   TARGET_MIGRATION_IMAGE=$PREFLIGHT_MIGRATION_IMAGE
 }
 
+resolve_local_image_id() {
+  image_ref=$1
+  image_label=$2
+  resolved_image=$(docker image inspect --format '{{.Id}}' "$image_ref") \
+    || fail "cannot resolve $image_label image $image_ref to a local immutable ID"
+  validate_image_id "$resolved_image"
+  printf '%s' "$resolved_image"
+}
+
+image_role_label() {
+  image_id=$1
+  role_value=$(docker image inspect --format \
+    '{{with .Config.Labels}}{{index . "io.clean-pay.role"}}{{end}}' \
+    "$image_id") || fail "cannot inspect rollback image ID $image_id"
+
+  case "$role_value" in
+    ''|'<no value>') printf '' ;;
+    *) printf '%s' "$role_value" ;;
+  esac
+}
+
+resolve_rollback_image_references() {
+  rollback_app_ref=$1
+  rollback_migration_ref=$2
+  RESOLVED_ROLLBACK_APP_IMAGE=$(resolve_local_image_id \
+    "$rollback_app_ref" "rollback application")
+  RESOLVED_ROLLBACK_MIGRATION_IMAGE=$(resolve_local_image_id \
+    "$rollback_migration_ref" "rollback migration")
+  [ "$RESOLVED_ROLLBACK_APP_IMAGE" != "$RESOLVED_ROLLBACK_MIGRATION_IMAGE" ] \
+    || fail "rollback application and migration images must be different"
+
+  rollback_app_role=$(image_role_label "$RESOLVED_ROLLBACK_APP_IMAGE")
+  rollback_migration_role=$(image_role_label "$RESOLVED_ROLLBACK_MIGRATION_IMAGE")
+  case "$rollback_app_role:$rollback_migration_role" in
+    app:migration)
+      ROLLBACK_IMAGE_MODE=strict
+      ;;
+    :)
+      # Releases built before role/provenance labels existed cannot pass the
+      # modern pair preflight. They are safe only as a rollback of the exact
+      # healthy app/worker image discovered from running Compose containers.
+      [ "$RESOLVED_ROLLBACK_APP_IMAGE" = "$PREVIOUS_APP_IMAGE" ] \
+        || fail "legacy rollback application image does not match the running Compose image"
+      ROLLBACK_IMAGE_MODE=legacy
+      ;;
+    *)
+      fail "rollback images have partial or invalid io.clean-pay.role metadata"
+      ;;
+  esac
+}
+
+validate_legacy_rollback_environment() {
+  case "$ROLLBACK_ENV_FILE" in
+    *,*) fail "legacy rollback environment path cannot contain a comma" ;;
+  esac
+
+  docker run --rm \
+    --pull never \
+    --network none \
+    --read-only \
+    --cap-drop ALL \
+    --security-opt no-new-privileges \
+    --user 0:0 \
+    --mount "type=bind,src=$ROLLBACK_ENV_FILE,dst=/run/clean-pay-rollback.env,readonly" \
+    --entrypoint node \
+    "$RESOLVED_ROLLBACK_APP_IMAGE" \
+    deploy/prod/validate-env.mjs --env-file /run/clean-pay-rollback.env \
+    >/dev/null 2>&1 \
+    || fail "the running legacy application image rejected the rollback environment"
+}
+
 preflight_rollback_images() {
   [ -n "$ROLLBACK_ENV_FILE" ] \
     || fail "CLEAN_PAY_ZDT_ROLLBACK_ENV_FILE is required for stage"
   validate_absolute_state_path "$ROLLBACK_ENV_FILE" "rollback environment file"
   node "$ENV_GUARD_SCRIPT" verify "$ENV_FILE" "$ROLLBACK_ENV_FILE"
   node "$VALIDATE_ENV_SCRIPT" --clean-pay-env-file "$ROLLBACK_ENV_FILE"
-  preflight_image_pair "$ROLLBACK_ENV_FILE"
-  [ "$PREFLIGHT_APP_IMAGE" = "$PREVIOUS_APP_IMAGE" ] \
+  resolve_rollback_image_references \
+    "$(env_file_value "$ROLLBACK_ENV_FILE" CLEAN_PAY_IMAGE)" \
+    "$(env_file_value "$ROLLBACK_ENV_FILE" CLEAN_PAY_MIGRATION_IMAGE)"
+
+  if [ "$ROLLBACK_IMAGE_MODE" = "strict" ]; then
+    preflight_image_pair "$ROLLBACK_ENV_FILE"
+    [ "$PREFLIGHT_APP_IMAGE" = "$RESOLVED_ROLLBACK_APP_IMAGE" ] \
+      || fail "rollback application image reference changed during preflight"
+    [ "$PREFLIGHT_MIGRATION_IMAGE" = "$RESOLVED_ROLLBACK_MIGRATION_IMAGE" ] \
+      || fail "rollback migration image reference changed during preflight"
+  else
+    validate_legacy_rollback_environment
+    info "accepted a label-less legacy rollback pair pinned to local immutable image IDs"
+  fi
+
+  [ "$RESOLVED_ROLLBACK_APP_IMAGE" = "$PREVIOUS_APP_IMAGE" ] \
     || fail "rollback env application image does not match the running Compose image"
-  PREVIOUS_MIGRATION_IMAGE=$PREFLIGHT_MIGRATION_IMAGE
+  PREVIOUS_MIGRATION_IMAGE=$RESOLVED_ROLLBACK_MIGRATION_IMAGE
 }
 
 compose_container_id() {

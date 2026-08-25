@@ -110,6 +110,13 @@ node deploy/prod/zero-downtime-env.mjs verify "$target_env" "$rollback_env"
 `./deploy.sh build` выполняет prepare/build-or-pull/provenance/image/env
 preflight, но не вызывает `compose stop/down/up` и не запускает миграцию.
 
+Target-пара всегда проходит полный provenance preflight. При первом переходе
+со старого релиза, созданного до появления `io.clean-pay.role`, stage допускает
+rollback-пару только если метки отсутствуют у обоих образов, application ID
+точно совпадает с healthy Compose app/workers, а оба локальных image reference
+однократно разрешены в разные immutable IDs. Legacy migration image при этом не
+запускается; смешанные, частичные или неверные role-метки блокируют rollout.
+
 ## 2. Stage canary
 
 Из immutable `$release_dir` и в том же shell:
