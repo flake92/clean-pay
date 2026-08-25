@@ -70,6 +70,27 @@ describe("proxy session refresh navigation", () => {
     },
   );
 
+  it("keeps the provider session recovery page public", async () => {
+    const response = await proxy(anonymousRequest(
+      "/auth/session/recovery?return_to=%2Fcabinet&kind=provider",
+    ));
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("x-middleware-next")).toBe("1");
+    expect(response.headers.get("location")).toBeNull();
+  });
+
+  it("does not make similarly prefixed recovery paths public", async () => {
+    const response = await proxy(anonymousRequest("/auth/session/recovery-fake"));
+    const location = new URL(response.headers.get("location")!);
+
+    expect(response.status).toBe(307);
+    expect(location.pathname).toBe("/login");
+    expect(location.searchParams.get("redirect_to")).toBe(
+      "/auth/session/recovery-fake",
+    );
+  });
+
   it.each([
     "/",
     "/cabinet",
