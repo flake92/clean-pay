@@ -275,14 +275,14 @@ jobs:
     timeout-minutes: 45
     env:
       REMNASHOP_HOST_SOURCE: ${{ github.workspace }}/.e2e-remnashop
-      REMNASHOP_BUILD_REVISION: 16bfd616a400da9958b6c3442c827514a7b05796
+      REMNASHOP_BUILD_REVISION: 837d964269078142307794ba3566a30d40b7b0b6
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
       - name: Check out the exact Remnashop PR 135 commit
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           repository: flake92/remnashop
-          ref: 16bfd616a400da9958b6c3442c827514a7b05796
+          ref: 837d964269078142307794ba3566a30d40b7b0b6
           path: .e2e-remnashop
           fetch-depth: 1
           persist-credentials: false

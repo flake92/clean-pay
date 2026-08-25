@@ -29,7 +29,7 @@ The referral panel always displays the current points balance. Historical point 
 
 ## Rollout boundary
 
-The current source boundary is PR #135 revision `16bfd61`. Its referral contract includes the
+The current source boundary is PR #135 revision `837d964`. Its referral contract includes the
 durable schema from `0052`, bounded legacy/operator recovery through `0055`,
 permanent Remnapy contract compatibility, serialized recipient claims,
 database-owned reward audit timestamps, graph-derived referral-level statistics,
