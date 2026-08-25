@@ -111,6 +111,24 @@ describe("referral attribution after Telegram callbacks", () => {
     expect(mocks.clearReferralAttributionCookieOnResponse).toHaveBeenCalledTimes(2);
   });
 
+  it.each([
+    "https://evil.example/steal",
+    "//evil.example/steal",
+    "javascript:alert(1)",
+    "/missing",
+  ])("revalidates a corrupted callback destination at both final sinks: %s", async (redirectTo) => {
+    mocks.completeTelegramCallback.mockResolvedValue({
+      ...sessionOutcome,
+      redirectTo,
+    });
+
+    const oidc = await GET(oidcRequest());
+    const popup = await POST(popupRequest());
+
+    expect(oidc.headers.get("location")).toBe("https://pay.example.com/cabinet");
+    await expect(popup.json()).resolves.toEqual({ redirectTo: "/cabinet" });
+  });
+
   it("preserves attribution while an account merge awaits confirmation", async () => {
     mocks.completeTelegramCallback.mockResolvedValue(mergeOutcome);
 

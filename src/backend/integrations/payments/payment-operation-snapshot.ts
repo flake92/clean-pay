@@ -1,5 +1,6 @@
 import { Prisma } from "@prisma/client";
 
+import { getEnv } from "@/backend/config/env";
 import {
   ServiceError,
   isServiceErrorCode,
@@ -9,6 +10,7 @@ import type {
   PaymentOperationErrorSnapshot,
 } from "@/backend/integrations/payments/payment-operation-contract";
 import type { PaymentInitResponse } from "@/backend/integrations/remnashop/contracts";
+import { isAllowedPaymentRedirectUrl } from "@/backend/payments/payment-redirect-policy";
 import { sha256 } from "@/backend/security/crypto";
 
 function isObject(value: unknown): value is Record<string, unknown> {
@@ -37,6 +39,19 @@ export function parsePaymentResponse(value: Prisma.JsonValue | null) {
       "INTERNAL_ERROR",
       500,
       "Stored payment operation response is invalid",
+    );
+  }
+  if (
+    paymentUrl !== null
+    && !isAllowedPaymentRedirectUrl(
+      paymentUrl,
+      getEnv().paymentRedirectOrigins,
+    )
+  ) {
+    throw new ServiceError(
+      "INTERNAL_ERROR",
+      500,
+      "Stored payment operation redirect is not allowed",
     );
   }
   return {

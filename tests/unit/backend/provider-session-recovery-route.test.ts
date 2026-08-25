@@ -60,6 +60,8 @@ describe("provider session recovery route", () => {
   it.each([
     "https://evil.example/steal",
     "//evil.example/steal",
+    "/missing",
+    "/Cabinet",
     "/auth/session/recover?return_to=%2Fprofile",
     "/login",
   ])("rejects unsafe or recursive return target %s", async (returnTo) => {
@@ -119,21 +121,42 @@ describe("provider session recovery route", () => {
 
     const response = await GET(request());
 
-    expect(response.status).toBe(503);
-    expect(response.headers.get("location")).toBeNull();
+    expect(response.status).toBe(303);
+    const target = location(response);
+    expect(target.pathname).toBe("/auth/session/recovery");
+    expect(target.searchParams.get("return_to")).toBe("/cabinet");
+    expect(target.searchParams.get("retry_after")).toBe("3");
+    expect(target.searchParams.get("attempt")).toBe("0");
+    expect(target.searchParams.get("kind")).toBe("provider");
     expect(response.headers.get("set-cookie")).toBeNull();
     expect(response.headers.get("cache-control")).toBe("no-store");
     expect(response.headers.get("retry-after")).toBe("3");
     expect(mocks.clearWebSession).not.toHaveBeenCalled();
+  });
+
+  it("keeps the structured transient response only for explicit JSON clients", async () => {
+    mocks.authorize.mockRejectedValueOnce(
+      new ServiceError("UPSTREAM_UNAVAILABLE", 503, undefined, {
+        retryAfterSeconds: 4,
+      }),
+    );
+    const jsonRequest = request();
+    jsonRequest.headers.set("accept", "application/json");
+
+    const response = await GET(jsonRequest);
+
+    expect(response.status).toBe(503);
+    expect(response.headers.get("location")).toBeNull();
+    expect(response.headers.get("set-cookie")).toBeNull();
     await expect(response.json()).resolves.toEqual({
       error: {
-        code,
+        code: "UPSTREAM_UNAVAILABLE",
         message: "Provider session recovery is temporarily unavailable.",
       },
     });
   });
 
-  it("returns 429 for rate limiting without clearing the session", async () => {
+  it("shows retryable recovery UI for rate limiting without clearing the session", async () => {
     mocks.authorize.mockRejectedValueOnce(
       new ServiceError("RATE_LIMITED", 429, undefined, {
         retryAfterSeconds: 17,
@@ -142,7 +165,10 @@ describe("provider session recovery route", () => {
 
     const response = await GET(request());
 
-    expect(response.status).toBe(429);
+    expect(response.status).toBe(303);
+    const target = location(response);
+    expect(target.pathname).toBe("/auth/session/recovery");
+    expect(target.searchParams.get("retry_after")).toBe("17");
     expect(response.headers.get("retry-after")).toBe("17");
     expect(response.headers.get("set-cookie")).toBeNull();
     expect(mocks.clearWebSession).not.toHaveBeenCalled();
@@ -200,12 +226,26 @@ describe("provider session recovery route", () => {
 
     const response = await GET(request());
 
-    expect(response.status).toBe(503);
+    expect(response.status).toBe(303);
+    const target = location(response);
+    expect(target.pathname).toBe("/auth/session/recovery");
+    expect(target.searchParams.get("retry_after")).toBe("1");
     expect(response.headers.get("set-cookie")).toBeNull();
     expect(response.headers.get("retry-after")).toBe("1");
     expect(mocks.clearWebSession).not.toHaveBeenCalled();
-    await expect(response.json()).resolves.toMatchObject({
-      error: { code: "INTERNAL_ERROR" },
-    });
+  });
+
+  it("preserves the bounded retry attempt without accepting arbitrary values", async () => {
+    mocks.authorize.mockRejectedValue(new ServiceError("UPSTREAM_UNAVAILABLE", 503));
+
+    const retried = await GET(new Request(
+      "https://pay.example.com/auth/session/recover?return_to=%2Fprofile&attempt=1",
+    ));
+    expect(location(retried).searchParams.get("attempt")).toBe("1");
+
+    const crafted = await GET(new Request(
+      "https://pay.example.com/auth/session/recover?return_to=%2Fprofile&attempt=999",
+    ));
+    expect(location(crafted).searchParams.get("attempt")).toBe("0");
   });
 });

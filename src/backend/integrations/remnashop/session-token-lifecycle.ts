@@ -665,6 +665,45 @@ async function prepareTokenAcquisition({
 
 type DispatchedRefreshPlan = RefreshPlan & { dispatchedAt: Date };
 
+function isTerminalProviderRefreshRejection(error: unknown) {
+  return error instanceof ServiceError
+    && (error.code === "UNAUTHORIZED" || error.code === "AUTH_FAILED")
+    && error.debug?.upstreamStatus === 401
+    && error.debug?.upstreamPath === "/auth/refresh";
+}
+
+async function clearTerminalRefreshClaim(plan: DispatchedRefreshPlan) {
+  const cleared = await prisma.$transaction(
+    async (tx) => tx.webSession.updateMany({
+      where: {
+        id: plan.session.id,
+        userId: plan.session.userId,
+        revokedAt: null,
+        remnashopRefreshTokenEncrypted: plan.previousRefreshTokenEncrypted,
+        remnashopRefreshClaimTokenHash: plan.claimTokenHash,
+        remnashopRefreshDispatchedAt: plan.dispatchedAt,
+        remnashopRefreshRecoveryEncrypted: null,
+      },
+      data: clearedTokenBundle,
+    }),
+    shortTransactionOptions,
+  );
+
+  if (cleared.count !== 1) {
+    throw new ServiceError(
+      "CONFLICT",
+      409,
+      "Remnashop terminal refresh cleanup ownership changed",
+    );
+  }
+
+  authDebugLog("remnashop_token_refresh_terminal_rejection", {
+    sessionId: plan.session.id,
+    userId: plan.session.userId,
+    dispatchedAt: plan.dispatchedAt,
+  });
+}
+
 async function markRefreshDispatched(
   plan: RefreshPlan,
 ): Promise<DispatchedRefreshPlan> {
@@ -944,7 +983,22 @@ export async function acquireRemnashopTokensForSession({
   // transaction. Persist the dispatch phase first: once this marker commits,
   // an expired claim can never replay the possibly-consumed provider token.
   const dispatchedPlan = await markRefreshDispatched(prepared.plan);
-  const refreshed = await refresh(dispatchedPlan.refreshToken);
+  let refreshed: RefreshResult;
+  try {
+    refreshed = await refresh(dispatchedPlan.refreshToken);
+  } catch (error) {
+    // A provider-authenticated 401 proves that this one-time refresh token can
+    // never yield a usable response. Clear only our exact dispatched claim so
+    // verified e-mail/Telegram recovery can establish a fresh service session
+    // in the same request. Transport failures and 5xx remain fenced because
+    // their provider outcome is unknown and the token must never be replayed.
+    if (!isTerminalProviderRefreshRejection(error)) {
+      throw error;
+    }
+
+    await clearTerminalRefreshClaim(dispatchedPlan);
+    return null;
+  }
   const recovery = normalizeRefreshResult(refreshed);
   const recoveryEncrypted = encryptedRecovery(recovery);
   const alreadyFinalized = await persistRefreshRecovery({

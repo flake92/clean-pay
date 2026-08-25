@@ -30,6 +30,10 @@ export function SupportPanel({ support }: { support: SupportViewModel }) {
               <LinkButton external href={support.faqUrl} icon="pi pi-book" label="FAQ и инструкции" outlined />
             ) : null}
           </div>
+        ) : support.liveChatEnabled ? (
+          <p className="m-0 line-height-3 text-600">
+            Войдите в аккаунт, чтобы написать нам в чате поддержки.
+          </p>
         ) : (
           <p className="m-0 line-height-3 text-600">Контакты поддержки пока не опубликованы.</p>
         )}

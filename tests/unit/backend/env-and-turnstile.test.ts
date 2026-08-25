@@ -42,6 +42,7 @@ function stubValidProductionEnv() {
     PAYMENT_RECONCILIATION_ENABLED: "false",
     PAYMENT_RECONCILIATION_SECRET: "",
     PAYMENT_RECONCILIATION_INTERNAL_URL: "http://app:4000/api/internal/payments/reconcile",
+    PAYMENT_REDIRECT_ORIGINS: "https://yoomoney.ru,https://pay.platega.io",
     TURNSTILE_ENABLED: "true",
     TURNSTILE_SITE_KEY: "0x4AAAAARuntimeSiteKey8Wp4Jz7Lc2",
     TURNSTILE_SECRET_KEY: "turnstile-runtime-8Xs3Lc7Nm4Wp9Kq5Vr2D6Hz1",
@@ -88,6 +89,42 @@ describe("backend env", () => {
     expect(env.cookieSameSite).toBe("strict");
     expect(env.telegramOidc.redirectUri).toBe("http://localhost:8080/auth/telegram/callback");
     expect(env.paymentReturnUrls.success).toBe("http://localhost:8080/payment/success");
+    expect(env.paymentRedirectOrigins).toEqual([
+      "https://pay.example.test",
+      "https://pay.example",
+      "https://pay.test",
+      "https://provider.test",
+    ]);
+  });
+
+  it("normalizes and validates payment redirect origins", () => {
+    vi.stubEnv(
+      "PAYMENT_REDIRECT_ORIGINS",
+      "https://yoomoney.ru, https://pay.platega.io:443",
+    );
+    expect(getEnv().paymentRedirectOrigins).toEqual([
+      "https://yoomoney.ru",
+      "https://pay.platega.io",
+    ]);
+
+    for (const invalid of [
+      "http://yoomoney.ru",
+      "https://user:password@yoomoney.ru",
+      "https://yoomoney.ru/checkout",
+      "https://yoomoney.ru?next=checkout",
+      "https://yoomoney.ru#checkout",
+    ]) {
+      vi.stubEnv("PAYMENT_REDIRECT_ORIGINS", invalid);
+      expect(() => getEnv()).toThrow("PAYMENT_REDIRECT_ORIGINS");
+    }
+
+    vi.stubEnv(
+      "PAYMENT_REDIRECT_ORIGINS",
+      "https://yoomoney.ru,https://yoomoney.ru:443",
+    );
+    expect(() => getEnv()).toThrow(
+      "PAYMENT_REDIRECT_ORIGINS must not contain duplicate origins",
+    );
   });
 
   it("throws on missing required values and invalid booleans", () => {

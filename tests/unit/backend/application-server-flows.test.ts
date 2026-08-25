@@ -196,7 +196,13 @@ describe("server application flows", () => {
   });
 
   it("loads support through its application port", () => {
-    const support = { enabled: true, email: "help@example.com", telegramUsername: null, faqUrl: null };
+    const support = {
+      enabled: true,
+      email: "help@example.com",
+      telegramUsername: null,
+      faqUrl: null,
+      liveChatEnabled: false,
+    };
 
     expect(loadSupportViewModel({ load: () => support })).toEqual(support);
   });
