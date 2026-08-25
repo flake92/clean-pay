@@ -48,6 +48,7 @@ vi.mock("@/backend/config/env", () => ({
     publicAppUrl: "https://clean-pay.example.com",
     cookieSecure: true,
     cookieSameSite: "lax",
+    webJwtSecret: "test-web-jwt-secret-with-enough-entropy",
   }),
 }));
 

@@ -21,6 +21,7 @@ import { remnashopAuth } from "@/backend/integrations/remnashop/client";
 import { ServiceError } from "@/backend/errors/service-error";
 import { getCurrentSession } from "@/backend/integrations/sessions/web-session-service";
 import type { TelegramAuthRequest } from "@/backend/integrations/remnashop/contracts";
+import { clearTelegramCallbackReceipt } from "@/backend/integrations/telegram/callback-receipt";
 
 const telegramAuthTtlSeconds = 10 * 60;
 const telegramLoginAuthMaxAgeSeconds = 5 * 60;
@@ -110,6 +111,7 @@ export async function createTelegramAuthorizationResponse(
   const response = NextResponse.redirect(authorizationUrl);
   const cookieOptions = temporaryCookieOptions();
 
+  clearTelegramCallbackReceipt(response);
   response.cookies.set(telegramOidcCookieNames.state, state, cookieOptions);
   response.cookies.set(telegramOidcCookieNames.nonce, nonce, cookieOptions);
   response.cookies.set(
@@ -156,6 +158,7 @@ export async function createTelegramPopupStartResponse(
   });
   const cookieOptions = temporaryCookieOptions();
 
+  clearTelegramCallbackReceipt(response);
   response.cookies.set(telegramOidcCookieNames.state, state, cookieOptions);
   response.cookies.set(telegramOidcCookieNames.nonce, nonce, cookieOptions);
   response.cookies.set(

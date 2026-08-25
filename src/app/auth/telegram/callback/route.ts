@@ -10,6 +10,10 @@ import { ServiceError } from "@/backend/errors/service-error";
 import {
   productionTelegramCallbackGateway,
 } from "@/backend/integrations/auth/telegram-callback-gateway";
+import {
+  completedTelegramCallbackDestination,
+  setTelegramCallbackReceipt,
+} from "@/backend/integrations/telegram/callback-receipt";
 import { recoverRemnashopTelegramSession } from "@/backend/integrations/remnashop/client";
 import {
   telegramAccountMergeCookieMaxAgeSeconds,
@@ -141,6 +145,18 @@ export async function GET(request: Request) {
     return redirectAfterTelegramFailure();
   }
 
+  const completedDestination = completedTelegramCallbackDestination(
+    request,
+    state,
+    code,
+  );
+  if (completedDestination) {
+    logTechnicalInfo("telegram_callback_duplicate_completed", {
+      redirectTo: completedDestination,
+    });
+    return redirectTo(completedDestination);
+  }
+
   try {
     const outcome = await completeTelegramCallback(
       productionTelegramCallbackGateway,
@@ -149,6 +165,7 @@ export async function GET(request: Request) {
     const destination = callbackDestination(outcome.redirectTo);
     const response = redirectTo(destination);
     await applyCallbackOutcome(response, outcome);
+    setTelegramCallbackReceipt(response, state, code, destination);
     if (outcome.mergeConfirmation) return response;
     clearReferralAttributionCookieOnResponse(response);
 
