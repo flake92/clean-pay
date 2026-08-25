@@ -18,6 +18,7 @@ import {
   verifyPasskeyRegistrationAction,
 } from "@/app/actions/passkeys";
 import { navigateTo } from "@/frontend/lib/browser-navigation";
+import { safeRedirectPath } from "@/shared/auth/redirect-policy";
 
 function useWebAuthnSupport() {
   const [supported, setSupported] = useState<boolean | null>(null);
@@ -95,6 +96,7 @@ export function PasskeyLoginButton({
   resetTurnstile?: () => void;
   turnstileEnabled?: boolean;
 }) {
+  const destination = safeRedirectPath(redirectTo) ?? "/cabinet";
   const supported = useWebAuthnSupport();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -131,7 +133,7 @@ export function PasskeyLoginButton({
         return;
       }
 
-      window.location.assign(redirectTo);
+      navigateTo(destination);
     } catch (error) {
       resetTurnstile?.();
       setError(
@@ -186,6 +188,7 @@ export function PasskeySetupPanel({
 }: {
   redirectTo?: string;
 }) {
+  const destination = safeRedirectPath(redirectTo) ?? "/cabinet";
   const supported = useWebAuthnSupport();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -196,7 +199,7 @@ export function PasskeySetupPanel({
     if (setupPendingRef.current) {
       return;
     }
-    navigateTo(redirectTo);
+    navigateTo(destination);
   }
 
   async function createPasskey() {
@@ -228,7 +231,7 @@ export function PasskeySetupPanel({
         return;
       }
 
-      navigateTo(redirectTo);
+      navigateTo(destination);
     } catch (error) {
       setError(
         isUserCancelled(error)

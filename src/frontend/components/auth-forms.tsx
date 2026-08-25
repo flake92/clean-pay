@@ -11,6 +11,7 @@ import { executeAuthAction } from "@/app/actions/auth";
 import { PasskeyLoginButton } from "@/frontend/components/passkey-actions";
 import { TurnstileWidget, type TurnstileHandle, hasTurnstileSiteKey } from "@/frontend/components/turnstile-widget";
 import { registrationEmailVerificationPath } from "@/shared/auth/account-setup-flow";
+import { safeRedirectPath } from "@/shared/auth/redirect-policy";
 
 type ApiState = { loading: boolean; error: string | null };
 
@@ -44,7 +45,7 @@ function missingTurnstileTokenMessage(siteKey?: string | null) {
 }
 
 function redirectAfterAuth(redirectTo: string) {
-  window.location.assign(redirectTo);
+  window.location.assign(safeRedirectPath(redirectTo) ?? "/cabinet");
 }
 
 export function AuthTurnstileProvider({
