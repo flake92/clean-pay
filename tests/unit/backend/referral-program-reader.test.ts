@@ -102,6 +102,7 @@ describe("Remnashop referral program reader", () => {
 
   it.each([
     [new ServiceError("UNAUTHORIZED", 401), "unauthorized"],
+    [new ServiceError("PROVIDER_SESSION_RECOVERY_REQUIRED", 409), "provider-session-recovery-required"],
     [new ServiceError("EMAIL_NOT_VERIFIED", 403), "email-required"],
     [new ServiceError("FORBIDDEN", 403, "Referral program is available only for users with active subscription", { message: "active subscription required" }), "subscription-required"],
     [new ServiceError("FORBIDDEN", 403, "Referral program is disabled", { message: "program disabled" }), "disabled"],

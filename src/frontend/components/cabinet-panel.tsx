@@ -268,8 +268,8 @@ export function CabinetPanel({ model }: { model: CabinetViewModel }) {
         <div className="mt-3">
           <LinkButton
             external
-            href="/login?redirect_to=%2Fcabinet"
-            label="Войти"
+            href="/cabinet"
+            label="Повторить"
           />
         </div>
       </div>

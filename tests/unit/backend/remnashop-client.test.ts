@@ -2047,4 +2047,23 @@ describe("remnashop client", () => {
       lifecycleMock.acquireRemnashopTokensForSession.mock.invocationCallOrder[0],
     ).toBeLessThan(fetchMock.mock.invocationCallOrder[0] ?? Number.MAX_SAFE_INTEGER);
   });
+
+  it("forces token rotation for the cookie-capable provider recovery route", async () => {
+    const activeSession = emailSession({ withTokens: true });
+    vi.mocked(getCurrentSession).mockResolvedValueOnce(activeSession as never);
+
+    await expect(getAuthorizedRemnashopTokens({
+      allowUnverifiedEmail: true,
+      forceRefresh: true,
+    })).resolves.toMatchObject({
+      accessToken: "access",
+      refreshToken: "refresh",
+    });
+
+    expect(lifecycleMock.acquireRemnashopTokensForSession).toHaveBeenCalledWith({
+      session: activeSession,
+      refresh: expect.any(Function),
+      forceRefresh: true,
+    });
+  });
 });

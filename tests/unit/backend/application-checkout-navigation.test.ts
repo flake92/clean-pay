@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { executePayment, loadCheckout } from "@/application/payments/checkout";
 import { loadNavigationShell } from "@/application/navigation/load-navigation";
-import type { AuthProfileGateway, AuthProfileSession } from "@/application/auth/ports/auth-profile";
+import { AuthProfileError, type AuthProfileGateway, type AuthProfileSession } from "@/application/auth/ports/auth-profile";
 import type { CheckoutReader, PaymentCommands } from "@/application/payments/ports/checkout";
 
 function session(overrides: Partial<AuthProfileSession["user"]> = {}): AuthProfileSession {
@@ -50,6 +50,32 @@ describe("checkout and navigation application policy", () => {
     const broken = auth();
     vi.mocked(broken.loadCurrentSession).mockRejectedValueOnce(new Error("database detail"));
     await expect(loadCheckout(reader, broken)).resolves.toMatchObject({ status: "error" });
+  });
+
+  it("routes a recoverable provider session without showing a login card", async () => {
+    const recoverable = auth(session({}));
+    vi.mocked(recoverable.loadCurrentSession).mockResolvedValueOnce({
+      ...session({}),
+      hasUpstreamTokens: true,
+    });
+    vi.mocked(recoverable.authorizeCurrentSession).mockRejectedValueOnce(
+      new AuthProfileError("PROVIDER_SESSION_RECOVERY_REQUIRED"),
+    );
+
+    await expect(loadCheckout(reader, recoverable)).resolves.toEqual({
+      status: "provider-session-recovery-required",
+    });
+
+    const recoveryReader: CheckoutReader = {
+      loadOffers: vi.fn(async () => {
+        throw Object.assign(new Error("stored bundle unavailable"), {
+          code: "PROVIDER_SESSION_RECOVERY_REQUIRED",
+        });
+      }),
+    };
+    await expect(loadCheckout(recoveryReader, auth())).resolves.toEqual({
+      status: "provider-session-recovery-required",
+    });
   });
 
   it("refuses payment commands without an idempotency key", async () => {

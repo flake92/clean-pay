@@ -143,6 +143,9 @@ function parseProgram(value: unknown, publicAppUrl: string): ReferralProgram {
 }
 
 function accessReason(error: ServiceError) {
+  if (error.code === "PROVIDER_SESSION_RECOVERY_REQUIRED") {
+    return "provider-session-recovery-required" as const;
+  }
   if (error.status === 401) return "unauthorized" as const;
   if (error.code === "EMAIL_REQUIRED" || error.code === "EMAIL_NOT_VERIFIED") {
     return "email-required" as const;

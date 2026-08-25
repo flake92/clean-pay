@@ -18,6 +18,9 @@ export function createRemnashopSubscriptionCatalog(
         return await remnashopRequest<SubscriptionOffersResponse>("/subscription/offers", { accessToken });
       } catch (error) {
         if (error instanceof ServiceError) {
+          if (error.code === "PROVIDER_SESSION_RECOVERY_REQUIRED") {
+            throw new SubscriptionCatalogAccessError("provider-session-recovery-required");
+          }
           if (error.status === 401) throw new SubscriptionCatalogAccessError("unauthorized");
           if (error.code === "EMAIL_REQUIRED" || error.code === "EMAIL_NOT_VERIFIED") {
             throw new SubscriptionCatalogAccessError("email-required");

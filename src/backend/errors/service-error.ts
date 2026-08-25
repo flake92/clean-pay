@@ -34,6 +34,7 @@ export type ServiceErrorCode =
   | "SUBSCRIPTION_NOT_FOUND"
   | "SUBSCRIPTION_URL_UNAVAILABLE"
   | "DEVICE_DELETE_UNAVAILABLE"
+  | "PROVIDER_SESSION_RECOVERY_REQUIRED"
   | "UPSTREAM_UNAVAILABLE"
   | "UPSTREAM_ERROR"
   | "INTERNAL_ERROR";
@@ -83,6 +84,7 @@ const PROD_MESSAGES: Record<ServiceErrorCode, string> = {
   SUBSCRIPTION_NOT_FOUND: "Активная подписка не найдена.",
   SUBSCRIPTION_URL_UNAVAILABLE: "Ссылка подключения недоступна. Попробуйте позже или обратитесь в поддержку.",
   DEVICE_DELETE_UNAVAILABLE: "Не удалось удалить устройство.",
+  PROVIDER_SESSION_RECOVERY_REQUIRED: "Сессия сервиса требует безопасного восстановления.",
   UPSTREAM_UNAVAILABLE: "Сервис временно недоступен. Попробуйте позже.",
   UPSTREAM_ERROR: "Не удалось выполнить действие. Попробуйте позже.",
   INTERNAL_ERROR: "Внутренняя ошибка сервиса.",

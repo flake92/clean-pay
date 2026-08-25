@@ -20,6 +20,28 @@ function request(path: string) {
   });
 }
 
+function anonymousRequest(path: string) {
+  return new NextRequest(`https://pay.example.com${path}`);
+}
+
+function signedAccessToken(
+  overrides: Record<string, unknown> = {},
+) {
+  const payload = Buffer.from(JSON.stringify({
+    sid: "session-that-must-be-checked-by-the-server",
+    uid: "user-1",
+    exp: Math.floor(Date.now() / 1_000) + 60,
+    ev: true,
+    al: "FULL",
+    ...overrides,
+  })).toString("base64url");
+  const signature = createHmac("sha256", "test-secret")
+    .update(payload)
+    .digest("base64url");
+
+  return `${payload}.${signature}`;
+}
+
 describe("proxy session refresh navigation", () => {
   const previousSecret = process.env.WEB_JWT_SECRET;
   const previousPublicAppUrl = process.env.NEXT_PUBLIC_APP_URL;
@@ -48,6 +70,47 @@ describe("proxy session refresh navigation", () => {
     },
   );
 
+  it.each([
+    "/",
+    "/cabinet",
+    "/profile",
+    "/link-account?reason=email-required&redirect_to=%2Fpayment%3Fplan%3Dpro",
+    "/referral",
+    "/extend?duration=30&gateway=CARD",
+    "/payment?plan=pro&duration=30&gateway=CARD",
+    "/payment/success?operation_id=operation-1",
+    "/payment/pending?operation_id=operation-1",
+    "/payment/fail?operation_id=operation-1",
+    "/verify-email?flow=telegram-email&redirect_to=%2Fpayment%3Fplan%3Dpro",
+    "/register/verify-email?redirect_to=%2Fpayment%3Fplan%3Dpro",
+    "/passkey/setup?redirect_to=%2Fpayment%3Fplan%3Dpro",
+  ])(
+    "redirects anonymous protected navigation %s to login with the exact return target",
+    async (path) => {
+      const response = await proxy(anonymousRequest(path));
+      const location = new URL(response.headers.get("location")!);
+
+      expect(response.status).toBe(307);
+      expect(location.pathname).toBe("/login");
+      expect(location.searchParams.get("redirect_to")).toBe(path);
+    },
+  );
+
+  it("leaves database validation of a signed access session to the server boundary", async () => {
+    const response = await proxy(new NextRequest(
+      "https://pay.example.com/cabinet?tab=devices",
+      {
+        headers: {
+          cookie: `clean_pay_access=${signedAccessToken()}`,
+        },
+      },
+    ));
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("x-middleware-next")).toBe("1");
+    expect(response.headers.get("location")).toBeNull();
+  });
+
   it("sends a protected navigation through the cookie-capable refresh route", async () => {
     const response = await proxy(request("/cabinet?tab=payments"));
     const location = new URL(response.headers.get("location")!);
@@ -67,17 +130,9 @@ describe("proxy session refresh navigation", () => {
   });
 
   it("sends an authenticated invite visitor to tariffs and deletes stale attribution", async () => {
-    const payload = Buffer.from(JSON.stringify({
-      exp: Math.floor(Date.now() / 1_000) + 60,
-      ev: true,
-      al: "FULL",
-    })).toString("base64url");
-    const signature = createHmac("sha256", "test-secret")
-      .update(payload)
-      .digest("base64url");
     const authenticatedRequest = new NextRequest("https://pay.example.com/invite/Friend42", {
       headers: {
-        cookie: `clean_pay_access=${payload}.${signature}; clean_pay_referral=stale-signed-value`,
+        cookie: `clean_pay_access=${signedAccessToken()}; clean_pay_referral=stale-signed-value`,
       },
     });
 

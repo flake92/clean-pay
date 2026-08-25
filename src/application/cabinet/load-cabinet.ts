@@ -5,6 +5,7 @@ import { loadPaymentHistory } from "@/application/payments/load-payment-history"
 import type { AuthProfileGateway } from "@/application/auth/ports/auth-profile";
 import { AuthProfileError } from "@/application/auth/ports/auth-profile";
 import { resolveAuthProfile } from "@/application/auth/resolve-auth-profile";
+import { isProviderSessionRecoveryRequired } from "@/shared/domain/provider-session-recovery";
 
 export async function loadCabinetViewModel(reader: CabinetReader, auth: AuthProfileGateway, history: PaymentHistoryGateway): Promise<CabinetViewModel> {
   let account;
@@ -14,7 +15,10 @@ export async function loadCabinetViewModel(reader: CabinetReader, auth: AuthProf
     if (error instanceof AuthProfileError && error.code === "UNAUTHORIZED") {
       return { status: "unauthorized" };
     }
-    return { status: "error", message: "Нужно войти в аккаунт." };
+    if (error instanceof AuthProfileError && error.code === "PROVIDER_SESSION_RECOVERY_REQUIRED") {
+      return { status: "provider-session-recovery-required" };
+    }
+    return { status: "error", message: "Не удалось загрузить данные аккаунта. Попробуйте позже." };
   }
 
   const [subscription, offers, devices, payments, support] = await Promise.allSettled([
@@ -24,6 +28,13 @@ export async function loadCabinetViewModel(reader: CabinetReader, auth: AuthProf
     loadPaymentHistory(history, account.userId),
     reader.loadSupport(),
   ]);
+
+  if ([subscription, offers, devices].some(
+    (result) => result.status === "rejected"
+      && isProviderSessionRecoveryRequired(result.reason),
+  )) {
+    return { status: "provider-session-recovery-required" };
+  }
 
   return {
     status: "ready",

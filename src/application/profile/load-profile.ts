@@ -43,6 +43,9 @@ export async function loadProfileViewModel(
     if (error instanceof AuthProfileError && error.code === "UNAUTHORIZED") {
       return { status: "unauthorized" };
     }
+    if (error instanceof AuthProfileError && error.code === "PROVIDER_SESSION_RECOVERY_REQUIRED") {
+      return { status: "provider-session-recovery-required" };
+    }
     return { status: "error", message: "Не удалось загрузить профиль." };
   }
 }

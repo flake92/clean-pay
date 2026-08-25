@@ -12,7 +12,10 @@ import {
   ACCOUNT_SETUP_REASON,
   safeAccountSetupDestination,
 } from "@/shared/auth/account-setup-flow";
-import { sessionRefreshPath } from "@/shared/auth/session-navigation";
+import {
+  providerSessionRecoveryPath,
+  sessionRefreshPath,
+} from "@/shared/auth/session-navigation";
 import { redirect } from "next/navigation";
 
 export const dynamic = "force-dynamic";
@@ -41,18 +44,30 @@ export default async function LinkAccountPage({
   const redirectTo = safeAccountSetupDestination(
     firstSearchParam(params.redirect_to),
   );
+  const authStatus = firstSearchParam(params.auth) ?? null;
+  const returnParams = new URLSearchParams();
+  if (guided) returnParams.set("reason", ACCOUNT_SETUP_REASON);
+  if (passwordRequired) returnParams.set("step", ACCOUNT_SETUP_PASSWORD_STEP);
+  if (params.redirect_to !== undefined || guided) {
+    returnParams.set("redirect_to", redirectTo);
+  }
+  if (authStatus && authStatus.length <= 100) returnParams.set("auth", authStatus);
+  const linkAccountReturnTo = `/link-account${returnParams.size ? `?${returnParams}` : ""}`;
   const model = await loadLinkAccount(
     requestLinkAccountReader,
     requestAuthProfileGateway,
     requestPasskeyManagementGateway,
-    firstSearchParam(params.auth) ?? null,
+    authStatus,
   );
   if (model.status === "unauthorized") {
-    redirect(sessionRefreshPath("/link-account"));
+    redirect(sessionRefreshPath(linkAccountReturnTo));
+  }
+  if (model.status === "provider-session-recovery-required") {
+    redirect(providerSessionRecoveryPath(linkAccountReturnTo));
   }
 
   return (
-    <AppShell requireAuth>
+    <AppShell requireAuth returnTo={linkAccountReturnTo}>
       <div className="flex flex-column gap-4">
         <PageHeader
           description={

@@ -199,6 +199,7 @@ export async function safeReadiness(gateway: AuthProfileGateway): Promise<Accoun
     if (error instanceof AuthProfileError) {
       if (error.code === "ACCOUNT_MERGE_REQUIRED" || error.code === "ACCOUNT_MERGE_SUBSCRIPTIONS_CONFLICT") return { status: "merge-conflict" };
       if (error.code === "UNAUTHORIZED") return { status: "unauthorized" };
+      if (error.code === "PROVIDER_SESSION_RECOVERY_REQUIRED") return { status: "provider-session-recovery-required" };
     }
     return { status: "unavailable" };
   }

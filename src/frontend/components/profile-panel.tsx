@@ -251,7 +251,7 @@ function ProfilePanelContent({
     return (
       <div className="flex flex-column gap-4">
         <Message severity="error" text={model.message} />
-        <LinkButton className="w-fit" href="/login" label="Войти" />
+        <LinkButton className="w-fit" href="/profile" label="Повторить" />
       </div>
     );
   }

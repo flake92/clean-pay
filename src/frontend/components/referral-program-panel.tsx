@@ -14,6 +14,10 @@ import type {
 } from "@/application/models/referral";
 import { Metric } from "@/frontend/components/cabinet-view-parts";
 import { LinkButton } from "@/frontend/components/prime/link-button";
+import {
+  providerSessionRecoveryPath,
+  sessionRefreshPath,
+} from "@/shared/auth/session-navigation";
 
 function russianPlural(value: number, one: string, few: string, many: string) {
   const modulo100 = Math.abs(value) % 100;
@@ -67,8 +71,10 @@ async function copyText(value: string) {
 }
 
 function ErrorPanel({ model }: { model: Extract<ReferralProgramViewModel, { status: "error" }> }) {
-  const action = model.action === "login"
-    ? { href: "/login?redirect_to=%2Freferral", label: "Войти" }
+  const action = model.action === "recover-session"
+    ? { href: providerSessionRecoveryPath("/referral"), label: "Продолжить" }
+    : model.action === "login"
+    ? { href: sessionRefreshPath("/referral"), label: "Войти" }
     : model.action === "verify-email"
       ? { href: "/verify-email", label: "Подтвердить e-mail" }
       : model.action === "tariffs"

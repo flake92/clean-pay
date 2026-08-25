@@ -24,6 +24,7 @@ export type ProfileViewModel =
       emailReminders: EmailReminderPreferenceState;
     }
   | { status: "unauthorized" }
+  | { status: "provider-session-recovery-required" }
   | { status: "error"; message: string };
 
 export type ProfileCommandResult =
