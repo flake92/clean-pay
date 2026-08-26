@@ -49,4 +49,23 @@ describe("application security headers", () => {
     expect(invalid).not.toContain("javascript:");
     expect(invalid).not.toContain("alert(1)");
   });
+
+  it("runs the external Server Action source and byte-boundary matrix in CI", () => {
+    const ci = readFileSync(".github/workflows/ci.yml", "utf8");
+    const liveBoundary = readFileSync(
+      "scripts/security/verify-server-action-boundary.mjs",
+      "utf8",
+    );
+
+    expect(ci).toContain("verify-server-action-boundary.mjs");
+    expect(liveBoundary).toContain("BODY_LIMIT = 64 * 1_024");
+    expect(liveBoundary).toContain("PAYLOAD_TOO_LARGE");
+    expect(liveBoundary).toContain("FORBIDDEN");
+    expect(liveBoundary).toContain("application/x-www-form-urlencoded");
+    expect(liveBoundary).toContain("multipart/form-data");
+    expect(liveBoundary).toContain('"x-forwarded-host"');
+    expect(liveBoundary).toContain('duplex: "half"');
+    expect(liveBoundary).toContain('import { request as httpsRequest } from "node:https"');
+    expect(liveBoundary).toContain('upstream.protocol === "https:" ? httpsRequest : httpRequest');
+  });
 });

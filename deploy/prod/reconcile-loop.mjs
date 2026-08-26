@@ -1,12 +1,23 @@
 #!/usr/bin/env node
 
-import { rmSync, writeFileSync } from "node:fs";
+import { randomUUID } from "node:crypto";
+import {
+  closeSync,
+  constants,
+  fsyncSync,
+  openSync,
+  renameSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { dirname } from "node:path";
 
 import { deployLog } from "./deploy-log.mjs";
 import {
   classifyReconciliationBatchHealth,
   parseReconciliationBatch,
 } from "./reconciliation-batch.mjs";
+import { reconciliationSupportHandles } from "./reconciliation-support-handle.mjs";
 import { createWorkerShutdownController } from "./worker-shutdown.mjs";
 
 const enabled = process.env.PAYMENT_RECONCILIATION_ENABLED === "true";
@@ -87,20 +98,23 @@ try {
 
       const counts = parseReconciliationBatch(await response.json());
       const health = classifyReconciliationBatchHealth(counts);
-      const manualOperationIds = counts.manualRequiredOperationIds.join(",");
+      const manualOperationHandles = reconciliationSupportHandles(
+        counts.manualRequiredOperationIds,
+        secret,
+      );
       const history = counts.history;
       const backlog = counts.backlog;
       const severity = !health.healthy || history.failed > 0 || backlog.manualRequired > 0 || backlog.oldestAgeSeconds > 900
         ? "warn"
         : "info";
-      deployLog(severity, "reconciliation_batch_completed", `Payment reconciliation batch completed: health=${health.outcome}, manual_operation_ids=${manualOperationIds || "none"}, history_failed=${history.failed}, history_deferred=${history.deferred}, backlog=${backlog.pending}.`, {
+      deployLog(severity, "reconciliation_batch_completed", "Payment reconciliation batch completed.", {
         health: health.outcome,
         claimed: counts.claimed,
         succeeded: counts.succeeded,
         in_progress: counts.inProgress,
         unknown: counts.unknown,
         manual_required: counts.manualRequired,
-        manual_operation_ids: manualOperationIds || "none",
+        manual_operation_handles: manualOperationHandles,
         failed: counts.failed,
         history_attempted: history.attempted,
         history_applied: history.applied,
@@ -135,7 +149,6 @@ try {
       } else {
         deployLog("error", "reconciliation_batch_failed", "Payment reconciliation batch failed; it will be retried on the next interval.", {
           error: error instanceof Error ? error.name : "UnknownError",
-          reason: error instanceof Error ? error.message.slice(0, 240) : "unknown_failure",
         });
       }
     }
@@ -173,7 +186,48 @@ try {
 }
 
 function writeHeartbeat() {
-  writeFileSync(heartbeatFile, String(Date.now()), { encoding: "utf8" });
+  const temporaryPath = `${heartbeatFile}.${process.pid}.${randomUUID()}.tmp`;
+  let descriptor;
+
+  try {
+    descriptor = openSync(
+      temporaryPath,
+      constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL,
+      0o600,
+    );
+    writeFileSync(descriptor, String(Date.now()), "utf8");
+    fsyncSync(descriptor);
+    closeSync(descriptor);
+    descriptor = undefined;
+    renameSync(temporaryPath, heartbeatFile);
+    fsyncDirectory(dirname(heartbeatFile));
+  } finally {
+    if (descriptor !== undefined) closeSync(descriptor);
+    rmSync(temporaryPath, { force: true });
+  }
+}
+
+function fsyncDirectory(directory) {
+  if (process.platform === "win32") return;
+
+  const directoryOnly = typeof constants.O_DIRECTORY === "number"
+    ? constants.O_DIRECTORY
+    : 0;
+  const descriptor = openSync(directory, constants.O_RDONLY | directoryOnly);
+  try {
+    fsyncSync(descriptor);
+  } catch (error) {
+    if (
+      !error
+      || typeof error !== "object"
+      || !("code" in error)
+      || !["EINVAL", "ENOTSUP"].includes(String(error.code))
+    ) {
+      throw error;
+    }
+  } finally {
+    closeSync(descriptor);
+  }
 }
 
 function boundedInteger(name, fallback, min, max) {

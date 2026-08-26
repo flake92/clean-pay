@@ -21,7 +21,7 @@ export function AuthShell({
   return (
     <>
       <ChatwootGuestBoundary />
-      <div className="surface-ground auth-page flex align-items-center justify-content-center w-full overflow-x-hidden">
+      <main className="surface-ground auth-page flex align-items-center justify-content-center w-full overflow-x-hidden">
         <div className="w-full flex justify-content-center">
           <div
             className="w-full auth-card-frame"
@@ -46,7 +46,7 @@ export function AuthShell({
                     unoptimized
                     width={68}
                   />
-                  <div className="text-900 text-3xl font-medium mb-2 auth-title">{title}</div>
+                  <h1 className="text-900 text-3xl font-medium mb-2 auth-title">{title}</h1>
                   <span className="text-600 font-medium line-height-3 auth-description">{description}</span>
                 </div>
                 {children}
@@ -63,7 +63,7 @@ export function AuthShell({
             </div>
           </div>
         </div>
-      </div>
+      </main>
     </>
   );
 }

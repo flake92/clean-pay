@@ -6,7 +6,7 @@ const AppFooter = () => {
     const branding = getBranding();
 
     return (
-        <div className="layout-footer flex align-items-center">
+        <footer className="layout-footer flex align-items-center">
             <Image
                 src={branding.logoUrl}
                 alt={`${branding.name} logo`}
@@ -24,7 +24,7 @@ const AppFooter = () => {
             <span aria-label={`Версия приложения ${APP_VERSION}`} className="text-600 text-sm ml-2">
                 Версия {APP_VERSION}
             </span>
-        </div>
+        </footer>
     );
 };
 

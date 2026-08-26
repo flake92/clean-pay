@@ -1,4 +1,7 @@
-import { validateProductionEnvironment } from "../../../deploy/prod/production-env-rules.mjs";
+import {
+  validateProductionApplicationRoleEnvironment,
+  validateProductionEnvironment,
+} from "../../../deploy/prod/production-env-rules.mjs";
 
 type SameSite = "lax" | "strict" | "none";
 
@@ -21,6 +24,10 @@ type AppEnv = {
   };
   webJwtSecret: string;
   webRefreshSecret: string;
+  webRefreshKeyring: {
+    primary: { id: string; secret: string };
+    previous: { id: string; secret: string }[];
+  };
   auditIpHashSecret: string;
   trustedProxyHops: number;
   rateLimitIdentitySecret: string;
@@ -166,6 +173,45 @@ function joinUrl(baseUrl: string, path: string) {
 
 function optional(name: string) {
   return process.env[name]?.trim() || null;
+}
+
+function webRefreshKeyring() {
+  const primary = {
+    id: optional("WEB_REFRESH_KEY_ID") ?? "primary",
+    secret: required("WEB_REFRESH_SECRET"),
+  };
+  if (!/^[A-Za-z0-9_-]{1,32}$/.test(primary.id)) {
+    throw new Error("WEB_REFRESH_KEY_ID must contain 1 to 32 safe key-id characters");
+  }
+  const encoded = optional("WEB_REFRESH_PREVIOUS_KEYS");
+  if (!encoded) return { primary, previous: [] };
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(encoded);
+  } catch {
+    throw new Error("WEB_REFRESH_PREVIOUS_KEYS must be a JSON object of key ids to secrets");
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error("WEB_REFRESH_PREVIOUS_KEYS must be a JSON object of key ids to secrets");
+  }
+  const entries = Object.entries(parsed);
+  if (entries.length === 0 || entries.length > 4) {
+    throw new Error("WEB_REFRESH_PREVIOUS_KEYS must contain 1 to 4 previous keys");
+  }
+  const previous = entries.map(([id, secret]) => {
+    if (!/^[A-Za-z0-9_-]{1,32}$/.test(id)) {
+      throw new Error("WEB_REFRESH_PREVIOUS_KEYS contains an invalid key id");
+    }
+    if (typeof secret !== "string" || secret.length < 32) {
+      throw new Error("WEB_REFRESH_PREVIOUS_KEYS values must be secrets of at least 32 characters");
+    }
+    return { id, secret };
+  });
+  if (new Set([primary.secret, ...previous.map(({ secret }) => secret)]).size !== previous.length + 1) {
+    throw new Error("WEB_REFRESH_PREVIOUS_KEYS secrets must be distinct from the current key and each other");
+  }
+  return { primary, previous };
 }
 
 function optionalUrl(name: string) {
@@ -434,7 +480,11 @@ function validateEnv(env: AppEnv) {
   }
 
   if (isProduction && !isBuildPhase) {
-    validateProductionEnvironment(process.env);
+    if (process.env.CLEAN_PAY_RUNTIME_ROLE === "application") {
+      validateProductionApplicationRoleEnvironment(process.env);
+    } else {
+      validateProductionEnvironment(process.env);
+    }
   }
 }
 
@@ -446,6 +496,7 @@ export function getEnv(): AppEnv {
     ?? deriveRemnashopAdminApiBaseUrl(remnashopApiBaseUrl);
 
   const chatwoot = chatwootConfig();
+  const refreshKeyring = webRefreshKeyring();
   const env = {
     databaseUrl: required("DATABASE_URL"),
     appUrl,
@@ -464,7 +515,8 @@ export function getEnv(): AppEnv {
       subscriptionOrigins: remnawaveSubscriptionOrigins(),
     },
     webJwtSecret: required("WEB_JWT_SECRET"),
-    webRefreshSecret: required("WEB_REFRESH_SECRET"),
+    webRefreshSecret: refreshKeyring.primary.secret,
+    webRefreshKeyring: refreshKeyring,
     auditIpHashSecret: optional("AUDIT_IP_HASH_SECRET") ?? required("WEB_JWT_SECRET"),
     trustedProxyHops: integer("TRUSTED_PROXY_HOPS", 0, 0, 8),
     rateLimitIdentitySecret: required("RATE_LIMIT_IDENTITY_SECRET"),

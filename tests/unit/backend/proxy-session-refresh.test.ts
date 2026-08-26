@@ -257,4 +257,103 @@ describe("proxy session refresh navigation", () => {
       error: { code: "FORBIDDEN" },
     });
   });
+
+  it.each([
+    [{}, "missing source"],
+    [{ origin: "https://evil.example" }, "mismatched source"],
+    [{
+      origin: "https://evil.example",
+      host: "pay.example.com",
+      "x-forwarded-host": "pay.example.com",
+    }, "forged forwarding metadata"],
+  ])("blocks Server Actions with $1 metadata before dispatch", async (...[headers]) => {
+    const response = await proxy(new NextRequest(
+      "https://pay.example.com/login",
+      {
+        method: "POST",
+        headers: {
+          "content-type": "text/plain;charset=UTF-8",
+          "next-action": "synthetic-action-id",
+          ...headers,
+        },
+        body: "[null]",
+      },
+    ));
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toMatchObject({
+      error: { code: "FORBIDDEN" },
+    });
+  });
+
+  it("accepts the trusted Referer when Origin is absent without trusting forwarded host", async () => {
+    const response = await proxy(new NextRequest(
+      "https://pay.example.com/login",
+      {
+        method: "POST",
+        headers: {
+          "content-type": "text/plain;charset=UTF-8",
+          "next-action": "synthetic-action-id",
+          referer: "https://pay.example.com/login?redirect_to=%2Fcabinet",
+          host: "attacker.example",
+          "x-forwarded-host": "attacker.example",
+        },
+        body: "[null]",
+      },
+    ));
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("x-middleware-next")).toBe("1");
+  });
+
+  it.each([
+    ["text/plain;charset=UTF-8", true],
+    ["application/x-www-form-urlencoded", false],
+    ["multipart/form-data; boundary=synthetic", false],
+  ])("accepts an exact-limit %s Server Action body", async (contentType, nextAction) => {
+    const response = await proxy(new NextRequest(
+      "https://pay.example.com/login",
+      {
+        method: "POST",
+        headers: {
+          "content-type": contentType,
+          origin: "https://pay.example.com",
+          ...(nextAction ? { "next-action": "synthetic-action-id" } : {}),
+        },
+        body: "x".repeat(64 * 1024),
+      },
+    ));
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("x-middleware-next")).toBe("1");
+  });
+
+  it.each([
+    ["text/plain;charset=UTF-8", true],
+    ["application/x-www-form-urlencoded", false],
+    ["multipart/form-data; boundary=synthetic", false],
+  ])("returns a bounded 413 for an over-limit %s Server Action body", async (contentType, nextAction) => {
+    const response = await proxy(new NextRequest(
+      "https://pay.example.com/login",
+      {
+        method: "POST",
+        headers: {
+          "content-type": contentType,
+          origin: "https://pay.example.com",
+          ...(nextAction ? { "next-action": "synthetic-action-id" } : {}),
+        },
+        body: "x".repeat(64 * 1024 + 1),
+      },
+    ));
+
+    expect(response.status).toBe(413);
+    const payload = await response.json();
+    expect(JSON.stringify(payload).length).toBeLessThan(256);
+    expect(payload).toEqual({
+      error: {
+        code: "PAYLOAD_TOO_LARGE",
+        message: "Размер запроса превышает допустимый предел.",
+      },
+    });
+  });
 });

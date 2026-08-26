@@ -258,6 +258,7 @@ export function LoginForm({
               className="w-full"
               feedback={false}
               inputClassName="w-full"
+              maxLength={256}
               minLength={8}
               name="password"
               required
@@ -274,6 +275,7 @@ export function LoginForm({
                 className="w-full"
                 feedback={false}
                 inputClassName="w-full"
+                maxLength={256}
                 minLength={8}
                 name="passwordConfirmation"
                 required
@@ -337,9 +339,12 @@ export function TelegramLoginButton({ redirectTo = "/cabinet" }: { redirectTo?: 
       url.searchParams.set("redirect_to", redirectTo);
       if (telegramToken) url.searchParams.set("turnstile_token", telegramToken);
       window.location.assign(url.toString());
-    } catch (error) {
+    } catch {
       turnstile.reset();
-      setState({ loading: false, error: error instanceof Error ? error.message : "Telegram login failed." });
+      setState({
+        loading: false,
+        error: "Не удалось открыть вход через Telegram. Повторите попытку.",
+      });
     }
   }
 

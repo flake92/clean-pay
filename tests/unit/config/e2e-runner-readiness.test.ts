@@ -138,7 +138,12 @@ describe("devcontainer e2e runner readiness", () => {
     expect(ciWorkflow).toContain(
       "actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0",
     );
-    expect(ciWorkflow.match(/node-version-file: \.node-version/g)).toHaveLength(3);
+    const setupNodeActions = actionReferences.filter(([, reference]) =>
+      reference.startsWith("actions/setup-node@"));
+    expect(setupNodeActions.length).toBeGreaterThan(0);
+    expect(ciWorkflow.match(/node-version-file: \.node-version/g)).toHaveLength(
+      setupNodeActions.length,
+    );
     expect(ciWorkflow).toContain("workflow_dispatch:");
     expect(ciWorkflow).toContain("sh -n deploy.sh start.sh scripts/*.sh deploy/prod/*.sh");
     expect(ciWorkflow).toContain("docker compose --env-file deploy/prod/.env");

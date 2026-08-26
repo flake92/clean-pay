@@ -18,19 +18,24 @@ import type {
 } from "@/backend/integrations/remnashop/contracts";
 import { hasUnsafeDeviceHwidPathSegment } from "@/shared/domain/device-hwid";
 
-async function authorizedMutation<T>(action: string, mutate: (accessToken: string) => Promise<T>) {
-  try {
-    const { accessToken, session } = await getAuthorizedRemnashopTokens();
-    await auditedMutation({ action, userId: session.userId, mutate: () => mutate(accessToken) });
-  } catch (error) {
-    if (error instanceof ServiceError) {
-      throw new CabinetCommandError(error.prodMessage);
-    }
-    throw error;
-  }
-}
+type CabinetAuthorizer = typeof getAuthorizedRemnashopTokens;
 
-export const productionCabinetCommands: CabinetCommands = {
+export function createProductionCabinetCommands(
+  authorize: CabinetAuthorizer = getAuthorizedRemnashopTokens,
+): CabinetCommands {
+  async function authorizedMutation<T>(action: string, mutate: (accessToken: string) => Promise<T>) {
+    try {
+      const { accessToken, session } = await authorize();
+      await auditedMutation({ action, userId: session.userId, mutate: () => mutate(accessToken) });
+    } catch (error) {
+      if (error instanceof ServiceError) {
+        throw new CabinetCommandError(error.prodMessage);
+      }
+      throw error;
+    }
+  }
+
+  return {
   async deleteDevice(hwid) {
     if (hasUnsafeDeviceHwidPathSegment(hwid)) {
       throw new CabinetCommandError("Это устройство нельзя безопасно удалить отдельно.");
@@ -54,4 +59,7 @@ export const productionCabinetCommands: CabinetCommands = {
     await auditLog({ action: "auth_logout", userId });
     await clearWebSession();
   },
-};
+  };
+}
+
+export const productionCabinetCommands = createProductionCabinetCommands();

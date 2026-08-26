@@ -5,6 +5,10 @@ import { verifyTurnstileToken } from "@/backend/security/turnstile";
 
 function stubValidProductionEnv() {
   const postgresPassword = "pg-runtime-9QvL2xR8mT4pK7sN6cWd";
+  const applicationPassword = "app-runtime-8Nc4Kp2Vr7Xm9Ls5Qw3H";
+  const migrationPassword = "migration-runtime-4Qp8Xs2Ln7Vr5Km9Wc3H";
+  const retentionPassword = "retention-runtime-6Wm3Kq9Vr2Xs8Lc5Np7H";
+  const holdPassword = "hold-runtime-9Vr4Kp7Xs2Lm8Nc5Qw3H";
   const values = {
     NODE_ENV: "production",
     CLEAN_PAY_BUILD_PHASE: "",
@@ -15,9 +19,12 @@ function stubValidProductionEnv() {
     CLEAN_PAY_RELEASE: "local",
     CLEAN_PAY_REVISION: "local",
     POSTGRES_DB: "clean_pay",
-    POSTGRES_USER: "clean_pay",
+    POSTGRES_USER: "clean_pay_bootstrap",
     POSTGRES_PASSWORD: postgresPassword,
-    DATABASE_URL: `postgresql://clean_pay:${postgresPassword}@postgres:5432/clean_pay?schema=public`,
+    DATABASE_URL: `postgresql://clean_pay_app:${applicationPassword}@postgres:5432/clean_pay?schema=public`,
+    MIGRATION_DATABASE_URL: `postgresql://clean_pay_migration:${migrationPassword}@postgres:5432/clean_pay?schema=public`,
+    RETENTION_DATABASE_URL: `postgresql://clean_pay_retention:${retentionPassword}@postgres:5432/clean_pay?schema=public`,
+    HOLD_OPERATOR_DATABASE_URL: `postgresql://clean_pay_hold:${holdPassword}@postgres:5432/clean_pay?schema=public`,
     REDIS_URL: "redis://redis:6379/0",
     APP_URL: "https://pay.runtime-clean.dev",
     NEXT_PUBLIC_APP_URL: "https://pay.runtime-clean.dev",

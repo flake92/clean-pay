@@ -85,8 +85,9 @@ jobs:
       - name: Validate deployment scripts and production Compose
         run: |
           sh -n deploy.sh start.sh scripts/*.sh deploy/prod/*.sh
-          cp deploy/prod/.env.example deploy/prod/.env
-          trap 'rm -f deploy/prod/.env' EXIT
+          node tests/fixtures/write-synthetic-production-env.mjs deploy/prod/.env
+          node deploy/prod/role-env.mjs materialize deploy/prod/.env
+          trap 'rm -f deploy/prod/.env deploy/prod/.env.app deploy/prod/.env.hold-operator deploy/prod/.env.migration deploy/prod/.env.postgres deploy/prod/.env.provision deploy/prod/.env.reconciliation deploy/prod/.env.retention' EXIT
           docker compose --env-file deploy/prod/.env -f deploy/prod/docker-compose.yml config --quiet
       - name: Lint
         run: npm run lint
@@ -108,7 +109,7 @@ jobs:
     timeout-minutes: 15
     services:
       postgres:
-        image: postgres:17-alpine
+        image: postgres:17-alpine@sha256:18cfe3ef5e6815560c98237d6216d1e5119702fb0f3894c8785dd58b8bbe5d73
         env:
           POSTGRES_DB: clean_pay
           POSTGRES_USER: clean_pay
@@ -156,14 +157,70 @@ jobs:
       - name: Run PostgreSQL concurrency and service integration tests
         run: npm run test:services
 
+  database-least-privilege:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:17-alpine@sha256:18cfe3ef5e6815560c98237d6216d1e5119702fb0f3894c8785dd58b8bbe5d73
+        env:
+          POSTGRES_DB: clean_pay
+          POSTGRES_USER: clean_pay_bootstrap
+          POSTGRES_PASSWORD: ci-bootstrap-database-password-8Nm3Kp7Vr2Xs
+          POSTGRES_INITDB_ARGS: --encoding=UTF8 --locale-provider=libc --lc-collate=C --lc-ctype=C.UTF-8
+        ports:
+          - 55432:5432
+        options: >-
+          --health-cmd "pg_isready -U clean_pay_bootstrap -d clean_pay"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      NODE_ENV: production
+      POSTGRES_DB: clean_pay
+      POSTGRES_USER: clean_pay_bootstrap
+      POSTGRES_PASSWORD: ci-bootstrap-database-password-8Nm3Kp7Vr2Xs
+      DATABASE_URL: postgresql://clean_pay_app:ci-application-database-password-2Qx8Lm4Vr9Kp@127.0.0.1:55432/clean_pay?schema=public
+      MIGRATION_DATABASE_URL: postgresql://clean_pay_migration:ci-migration-database-password-4Kp9Xs2Vr7Lm@127.0.0.1:55432/clean_pay?schema=public
+      RETENTION_DATABASE_URL: postgresql://clean_pay_retention:ci-retention-database-password-7Xs3Kp8Vr2Lm@127.0.0.1:55432/clean_pay?schema=public
+      HOLD_OPERATOR_DATABASE_URL: postgresql://clean_pay_hold:ci-hold-database-password-5Vr8Kp2Xm7Nc@127.0.0.1:55432/clean_pay?schema=public
+      CLEAN_PAY_DATABASE_MAINTENANCE_CONFIRMED: "true"
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version-file: .node-version
+          cache: npm
+      - name: Install locked dependencies
+        run: npm ci
+      - name: Reproduce every reviewed PostgreSQL 17.11 public/custom catalog boundary
+        env:
+          DATABASE_CATALOG_ADMIN_URL: postgresql://clean_pay_bootstrap:ci-bootstrap-database-password-8Nm3Kp7Vr2Xs@127.0.0.1:55432/postgres
+        run: node scripts/security/verify-database-catalog-states.mjs
+      - name: Provision, migrate, synchronize, and verify exact database roles
+        run: |
+          node deploy/prod/database-role-provision.mjs prepare
+          CLEAN_PAY_RUNTIME_ROLE=migration \
+            DATABASE_URL="$MIGRATION_DATABASE_URL" \
+            env -u POSTGRES_DB -u POSTGRES_USER -u POSTGRES_PASSWORD \
+              -u MIGRATION_DATABASE_URL -u RETENTION_DATABASE_URL \
+              -u HOLD_OPERATOR_DATABASE_URL \
+              node node_modules/prisma/build/index.js migrate deploy
+          node deploy/prod/database-role-provision.mjs sync
+          node deploy/prod/database-role-provision.mjs verify
+          node scripts/security/verify-database-runtime-privileges.mjs
+
   container-security:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
       POSTGRES_DB: clean_pay
-      POSTGRES_USER: clean_pay
+      POSTGRES_USER: clean_pay_bootstrap
       POSTGRES_PASSWORD: ci-postgres-password-not-real-and-distinct
-      DATABASE_URL: postgresql://clean_pay:ci-postgres-password-not-real-and-distinct@postgres:5432/clean_pay?schema=public
+      DATABASE_URL: postgresql://clean_pay_app:ci-application-database-password-not-real@postgres:5432/clean_pay?schema=public
+      MIGRATION_DATABASE_URL: postgresql://clean_pay_migration:ci-migration-database-password-not-real@postgres:5432/clean_pay?schema=public
+      RETENTION_DATABASE_URL: postgresql://clean_pay_retention:ci-retention-database-password-not-real@postgres:5432/clean_pay?schema=public
+      HOLD_OPERATOR_DATABASE_URL: postgresql://clean_pay_hold:ci-hold-database-password-not-real@postgres:5432/clean_pay?schema=public
       REDIS_URL: redis://redis:6379/0
       APP_URL: https://pay.clean-pay.dev
       NEXT_PUBLIC_APP_URL: https://pay.clean-pay.dev
@@ -199,25 +256,66 @@ jobs:
       CLEAN_PAY_MIGRATION_IMAGE: clean-pay-migration:ci
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
-      - name: Build the exact production runtime image
-        run: >-
-          docker build
-          --target runner
-          --build-arg NEXT_PUBLIC_APP_URL="$NEXT_PUBLIC_APP_URL"
-          --build-arg TURNSTILE_ENABLED="$TURNSTILE_ENABLED"
-          --build-arg TURNSTILE_WIDGET_ID="$TURNSTILE_SITE_KEY"
-          --build-arg NEXT_PUBLIC_BRAND_NAME="$NEXT_PUBLIC_BRAND_NAME"
-          --build-arg NEXT_PUBLIC_BRAND_LOGO_URL="$NEXT_PUBLIC_BRAND_LOGO_URL"
-          --tag clean-pay:ci
-          .
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version-file: .node-version
+      - name: Verify hardened data-service runtime boundaries
+        run: bash scripts/security/verify-data-service-sandbox.sh
+      - name: Build both exact executable container targets
+        run: |
+          public_contract_version="$(node scripts/security/compute-public-build-contract.mjs --version)"
+          public_contract_sha256="$(node scripts/security/compute-public-build-contract.mjs)"
+          docker build \
+            --target runner \
+            --build-arg CLEAN_PAY_RELEASE=ci \
+            --build-arg CLEAN_PAY_REVISION="$GITHUB_SHA" \
+            --build-arg CLEAN_PAY_PUBLIC_BUILD_CONTRACT_VERSION="$public_contract_version" \
+            --build-arg CLEAN_PAY_PUBLIC_BUILD_CONTRACT_SHA256="$public_contract_sha256" \
+            --build-arg NEXT_PUBLIC_APP_URL="$NEXT_PUBLIC_APP_URL" \
+            --build-arg TURNSTILE_ENABLED="$TURNSTILE_ENABLED" \
+            --build-arg TURNSTILE_WIDGET_ID="$TURNSTILE_SITE_KEY" \
+            --build-arg NEXT_PUBLIC_BRAND_NAME="$NEXT_PUBLIC_BRAND_NAME" \
+            --build-arg NEXT_PUBLIC_BRAND_LOGO_URL="$NEXT_PUBLIC_BRAND_LOGO_URL" \
+            --tag clean-pay:ci \
+            .
+          docker build \
+            --target migration \
+            --build-arg CLEAN_PAY_RELEASE=ci \
+            --build-arg CLEAN_PAY_REVISION="$GITHUB_SHA" \
+            --build-arg CLEAN_PAY_PUBLIC_BUILD_CONTRACT_VERSION="$public_contract_version" \
+            --build-arg CLEAN_PAY_PUBLIC_BUILD_CONTRACT_SHA256="$public_contract_sha256" \
+            --tag clean-pay-migration:ci \
+            .
+      - name: Smoke-test migration image environment validation
+        run: |
+          docker run --rm --read-only --cap-drop ALL \
+            --security-opt no-new-privileges:true \
+            --pids-limit 128 --memory 1g --cpus 1 \
+            --tmpfs /tmp:rw,noexec,nosuid,nodev,size=64m,mode=1777 \
+            --env DATABASE_URL="$MIGRATION_DATABASE_URL" \
+            --env CLEAN_PAY_RUNTIME_ROLE=migration \
+            --env CLEAN_PAY_DEPLOY_SOURCE \
+            --env CLEAN_PAY_IMAGE \
+            --env CLEAN_PAY_MIGRATION_IMAGE \
+            clean-pay-migration:ci \
+            node deploy/prod/validate-env.mjs
+          docker run --rm --read-only --cap-drop ALL \
+            --security-opt no-new-privileges:true \
+            --pids-limit 128 --memory 1g --cpus 1 \
+            --tmpfs /tmp:rw,noexec,nosuid,nodev,size=64m,mode=1777 \
+            --entrypoint sh clean-pay-migration:ci -ceu \
+            'if touch /app/clean-pay-write-probe 2>/dev/null; then exit 1; fi; touch /tmp/clean-pay-write-probe; rm /tmp/clean-pay-write-probe'
       - name: Smoke-test the standalone production runtime
         run: |
           docker run --detach --name clean-pay-ci-runtime \
+            --read-only --cap-drop ALL \
+            --security-opt no-new-privileges:true \
+            --pids-limit 256 --memory 1g --cpus 1 \
+            --tmpfs /tmp:rw,noexec,nosuid,nodev,size=64m,mode=1777 \
+            --tmpfs /app/.next/cache:rw,noexec,nosuid,nodev,size=128m,mode=0700,uid=1001,gid=1001 \
             --publish 127.0.0.1:4000:4000 \
-            --env POSTGRES_DB \
-            --env POSTGRES_USER \
-            --env POSTGRES_PASSWORD \
             --env DATABASE_URL \
+            --env CLEAN_PAY_RUNTIME_ROLE=application \
             --env REDIS_URL \
             --env APP_URL \
             --env NEXT_PUBLIC_APP_URL \
@@ -256,21 +354,120 @@ jobs:
           curl --fail --silent --show-error \
             --retry 30 --retry-delay 1 --retry-connrefused --retry-all-errors \
             http://127.0.0.1:4000/api/health/liveness
+          curl --fail --silent --show-error --output /dev/null \
+            'http://127.0.0.1:4000/_next/image?url=%2Fclean-pay-logo.png&w=64&q=75'
+          node scripts/security/verify-server-action-boundary.mjs \
+            http://127.0.0.1:4000 "$NEXT_PUBLIC_APP_URL"
+          docker exec clean-pay-ci-runtime sh -ceu \
+            'if touch /app/clean-pay-write-probe 2>/dev/null; then exit 1; fi; touch /tmp/clean-pay-write-probe; rm /tmp/clean-pay-write-probe; touch /app/.next/cache/clean-pay-write-probe; rm /app/.next/cache/clean-pay-write-probe'
+          test "$(docker inspect --format '{{.HostConfig.ReadonlyRootfs}}' clean-pay-ci-runtime)" = true
+          if docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' clean-pay-ci-runtime \
+            | grep -Eq '^(POSTGRES_(DB|USER|PASSWORD)|MIGRATION_DATABASE_URL|RETENTION_DATABASE_URL|HOLD_OPERATOR_DATABASE_URL)='; then
+            echo 'application container contains bootstrap or peer database credentials' >&2
+            exit 1
+          fi
+          docker inspect --format '{{json .HostConfig.CapDrop}}' clean-pay-ci-runtime | grep --quiet ALL
+          docker inspect --format '{{json .HostConfig.SecurityOpt}}' clean-pay-ci-runtime | grep --quiet no-new-privileges
           docker logs clean-pay-ci-runtime 2>&1 | grep --quiet 'event=production_environment_validated'
-      - name: Generate image SBOM
+      - name: Verify the full hardened migration and worker topology
+        run: bash scripts/security/verify-runtime-sandbox.sh clean-pay:ci clean-pay-migration:ci
+      - name: Generate application image SBOM
         uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
         with:
           image: clean-pay:ci
-          artifact-name: clean-pay-image.spdx.json
+          artifact-name: clean-pay-application-image.spdx.json
           format: spdx-json
-      - name: Scan image packages and application dependencies
+      - name: Generate migration image SBOM
+        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
+        with:
+          image: clean-pay-migration:ci
+          artifact-name: clean-pay-migration-image.spdx.json
+          format: spdx-json
+      - name: Inventory application image High and Critical findings
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           image-ref: clean-pay:ci
-          format: table
-          exit-code: "1"
-          ignore-unfixed: true
+          format: json
+          output: clean-pay-application.trivy.json
+          exit-code: "0"
+          ignore-unfixed: false
           severity: HIGH,CRITICAL
+      - name: Inventory migration image High and Critical findings
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: clean-pay-migration:ci
+          format: json
+          output: clean-pay-migration.trivy.json
+          exit-code: "0"
+          ignore-unfixed: false
+          severity: HIGH,CRITICAL
+      - name: Enforce exact owned and expiring vulnerability exceptions
+        run: |
+          node scripts/security/enforce-container-vulnerability-policy.mjs \
+            --report clean-pay-application.trivy.json \
+            --policy security/container-vulnerability-exceptions.json \
+            --target runner \
+            --mode inventory \
+            --output clean-pay-application.vulnerability-attestation.json
+          node scripts/security/enforce-container-vulnerability-policy.mjs \
+            --report clean-pay-migration.trivy.json \
+            --policy security/container-vulnerability-exceptions.json \
+            --target migration \
+            --mode inventory \
+            --output clean-pay-migration.vulnerability-attestation.json
+      - name: Preserve complete vulnerability evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: container-vulnerability-evidence
+          if-no-files-found: error
+          retention-days: 30
+          path: |
+            clean-pay-application.trivy.json
+            clean-pay-migration.trivy.json
+            clean-pay-application.vulnerability-attestation.json
+            clean-pay-migration.vulnerability-attestation.json
+
+  remnashop-migration-rehearsal:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      REMNASHOP_SOURCE: ${{ github.workspace }}/.migration-remnashop
+      REHEARSAL_OUTPUT_DIR: ${{ github.workspace }}/.migration-rehearsal
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version-file: .node-version
+      - name: Rehearse populated Clean Pay session, payment and rollback migrations
+        shell: bash
+        run: bash scripts/security/rehearse-clean-pay-migrations.sh
+      - name: Check out the exact reviewed Remnashop migration source
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          repository: flake92/remnashop
+          ref: 837d964269078142307794ba3566a30d40b7b0b6
+          path: .migration-remnashop
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Rehearse non-empty forward, no-op, restore, timeout and resume
+        shell: bash
+        run: bash scripts/security/rehearse-remnashop-migrations.sh
+      - name: Preserve sanitized migration recovery evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: remnashop-migration-rehearsal
+          if-no-files-found: warn
+          retention-days: 30
+          include-hidden-files: true
+          path: |
+            .migration-rehearsal/report.json
+            .migration-rehearsal/clean-pay-report.json
+            .migration-rehearsal/*.log
+            .migration-rehearsal/*.list
 
   full-stack-e2e:
     runs-on: ubuntu-latest

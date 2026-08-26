@@ -1,4 +1,11 @@
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
@@ -6,7 +13,16 @@ import { spawnSync } from "node:child_process";
 import { parse as parsePgConnectionString } from "pg-connection-string";
 import { describe, expect, it } from "vitest";
 
-import { PRODUCTION_ENVIRONMENT_FILE_NAMES } from "../../../deploy/prod/production-env-rules.mjs";
+import { getEnv } from "@/backend/config/env";
+import {
+  parseProductionEnvironmentFile,
+  PRODUCTION_ENVIRONMENT_FILE_NAMES,
+  validateProductionEnvironment,
+} from "../../../deploy/prod/production-env-rules.mjs";
+import {
+  materializeProductionRoleEnvironmentFiles,
+  PRODUCTION_ROLE_ENVIRONMENT_NAMES,
+} from "../../../deploy/prod/role-env.mjs";
 
 function envExampleKeys() {
   return readFileSync("deploy/prod/.env.example", "utf8")
@@ -19,6 +35,10 @@ function envExampleKeys() {
 
 const secrets = {
   postgres: "pg-unit-9QvL2xR8mT4pK7sN6cWd",
+  databaseApplication: "db-app-unit-8Nc4Kp2Vr7Xm9Ls5Qw3H",
+  databaseMigration: "db-migration-unit-4Qp8Xs2Ln7Vr5Km9Wc3H",
+  databaseRetention: "db-retention-unit-6Wm3Kq9Vr2Xs8Lc5Np7H",
+  databaseHold: "db-hold-unit-9Vr4Kp7Xs2Lm8Nc5Qw3H",
   remnashop: "shop-unit-8Wp4Jz7Lc2Nq9Vr5Ks3M",
   remnashopAuth: "auth-service-unit-7Vr3Nm8Wp2Kq5Xs9Lc4D",
   remnawave: "wave-unit-7Nq3Kp9Xs4Vm2Lc8Wr6J",
@@ -41,9 +61,14 @@ const validEnv: Record<string, string> = {
   CLEAN_PAY_RELEASE: "local",
   CLEAN_PAY_REVISION: "local",
   POSTGRES_DB: "clean_pay",
-  POSTGRES_USER: "clean_pay",
+  POSTGRES_USER: "clean_pay_bootstrap",
   POSTGRES_PASSWORD: secrets.postgres,
-  DATABASE_URL: `postgresql://clean_pay:${secrets.postgres}@postgres:5432/clean_pay?schema=public`,
+  DATABASE_URL: `postgresql://clean_pay_app:${secrets.databaseApplication}@postgres:5432/clean_pay?schema=public`,
+  MIGRATION_DATABASE_URL: `postgresql://clean_pay_migration:${secrets.databaseMigration}@postgres:5432/clean_pay?schema=public`,
+  RETENTION_DATABASE_URL: `postgresql://clean_pay_retention:${secrets.databaseRetention}@postgres:5432/clean_pay?schema=public`,
+  HOLD_OPERATOR_DATABASE_URL: `postgresql://clean_pay_hold:${secrets.databaseHold}@postgres:5432/clean_pay?schema=public`,
+  CLEAN_PAY_DATABASE_ADOPT_EXISTING: "false",
+  CLEAN_PAY_DATABASE_ADOPTION_BACKUP_CONFIRMED: "false",
   REDIS_URL: "redis://redis:6379/0",
   APP_URL: "https://pay.clean-pay.dev",
   NEXT_PUBLIC_APP_URL: "https://pay.clean-pay.dev",
@@ -94,6 +119,9 @@ const validEnv: Record<string, string> = {
   NEXT_PUBLIC_BRAND_LOGO_URL: "/clean-pay-logo.png",
   CLEAN_PAY_BIND: "127.0.0.1",
   CLEAN_PAY_PORT: "4000",
+  REMNASHOP_ENV_FILE: "/opt/remnashop/.env",
+  REMNASHOP_ENV_EXPECTED_UID: "0",
+  REMNASHOP_ENV_EXPECTED_GID: "0",
 };
 
 type EnvOverride = Record<string, string | null>;
@@ -122,7 +150,8 @@ function runValidatorContent(content: string) {
   const dir = mkdtempSync(path.join(tmpdir(), "clean-pay-env-"));
   const envFile = path.join(dir, ".env");
 
-  writeFileSync(envFile, content);
+  writeFileSync(envFile, content, { mode: 0o600 });
+  chmodSync(envFile, 0o600);
 
   const result = spawnSync(
     process.execPath,
@@ -218,8 +247,341 @@ describe("production env validator", () => {
     expect(result.stdout).toContain("Production environment validation passed.");
   });
 
+  it("rejects unsafe Docker names, invalid rollout revisions and unknown log levels", () => {
+    for (const [name, value, expected] of [
+      ["COMPOSE_PROJECT_NAME", "Clean Pay", "lowercase letters"],
+      ["CLEAN_PAY_EDGE_NETWORK", "--help", "Docker-safe"],
+      ["REMNASHOP_DOCKER_NETWORK", "network/name", "Docker-safe"],
+      ["REMNASHOP_API_CONTAINER", "--format", "Docker-safe"],
+      ["REMNASHOP_WORKER_CONTAINER", "worker name", "Docker-safe"],
+      ["REMNASHOP_SCHEDULER_CONTAINER", ".scheduler", "Docker-safe"],
+      ["REMNASHOP_POSTGRES_CONTAINER", "postgres:name", "Docker-safe"],
+      ["REMNASHOP_MINIMUM_ALEMBIC_REVISION", "58-or-newer", "numeric revision"],
+      ["LOG_LEVEL", "verbose", "debug, info, warn, or error"],
+    ] as const) {
+      expect(
+        () => validateProductionEnvironment({ ...validEnv, [name]: value }),
+        `${name}=${value}`,
+      ).toThrow(expected);
+    }
+
+    expect(() => validateProductionEnvironment({
+      ...validEnv,
+      COMPOSE_PROJECT_NAME: "clean-pay_prod",
+      CLEAN_PAY_EDGE_NETWORK: "remnawave-network",
+      REMNASHOP_API_CONTAINER: "Remnashop.api-1",
+      REMNASHOP_MINIMUM_ALEMBIC_REVISION: "0058",
+      LOG_LEVEL: "DEBUG",
+    })).not.toThrow();
+  });
+
+  it("materializes private role-scoped env sets without unrelated secret families", () => {
+    const directory = mkdtempSync(path.join(tmpdir(), "clean-pay-role-env-"));
+    const authoritative = path.join(directory, ".env");
+
+    try {
+      writeFileSync(authoritative, envContent({
+        PAYMENT_RECONCILIATION_ENABLED: "true",
+        PAYMENT_RECONCILIATION_SECRET: secrets.reconciliation,
+        AUTH_STATE_RETENTION_DAYS: "7",
+        SESSION_RETENTION_DAYS: "91",
+        AUDIT_INFO_RETENTION_DAYS: "181",
+        AUDIT_SECURITY_RETENTION_DAYS: "366",
+        RATE_LIMIT_RETENTION_DAYS: "31",
+        PAYMENT_SENSITIVE_RETENTION_DAYS: "32",
+        PAYMENT_OPERATION_SNAPSHOT_RETENTION_DAYS: "92",
+        PAYMENT_HOLD_DISPOSED_RETENTION_DAYS: "367",
+        DATA_RETENTION_INTERVAL_SECONDS: "21601",
+      }), { mode: 0o600 });
+      chmodSync(authoritative, 0o600);
+      const paths = materializeProductionRoleEnvironmentFiles(authoritative);
+      const roleEnvironment = Object.fromEntries(
+        Object.entries(paths).map(([role, file]) => [
+          role,
+          parseProductionEnvironmentFile(readFileSync(file, "utf8"), file),
+        ]),
+      ) as Record<string, Record<string, string>>;
+
+      expect(Object.keys(roleEnvironment.migration!).sort())
+        .toEqual([...PRODUCTION_ROLE_ENVIRONMENT_NAMES.migration].sort());
+      expect(roleEnvironment.migration!.DATABASE_URL).toContain(secrets.databaseMigration);
+      expect(roleEnvironment.migration).not.toHaveProperty("POSTGRES_PASSWORD");
+      expect(JSON.stringify(roleEnvironment.migration)).not.toContain(secrets.webJwt);
+      expect(JSON.stringify(roleEnvironment.migration)).not.toContain(secrets.remnashop);
+      expect(JSON.stringify(roleEnvironment.migration)).not.toContain(secrets.reconciliation);
+
+      expect(roleEnvironment.retention!.DATABASE_URL).toContain(secrets.databaseRetention);
+      expect(JSON.stringify(roleEnvironment.retention)).not.toContain(secrets.webJwt);
+      expect(JSON.stringify(roleEnvironment.retention)).not.toContain(secrets.remnashop);
+      expect(JSON.stringify(roleEnvironment.retention)).not.toContain(secrets.reconciliation);
+
+      expect(roleEnvironment.reconciliation!.PAYMENT_RECONCILIATION_ENABLED).toBe("true");
+      expect(JSON.stringify(roleEnvironment.reconciliation)).not.toContain(secrets.postgres);
+      expect(JSON.stringify(roleEnvironment.reconciliation)).not.toContain(secrets.webJwt);
+      expect(JSON.stringify(roleEnvironment.reconciliation)).not.toContain(secrets.remnashop);
+
+      expect(roleEnvironment.postgres).toEqual({
+        POSTGRES_DB: "clean_pay",
+        POSTGRES_USER: "clean_pay_bootstrap",
+        POSTGRES_PASSWORD: secrets.postgres,
+      });
+      expect(roleEnvironment.holdOperator!.DATABASE_URL).toContain(secrets.databaseHold);
+      expect(roleEnvironment.provision!.POSTGRES_PASSWORD).toBe(secrets.postgres);
+      expect(roleEnvironment.provision!.DATABASE_URL).toContain(secrets.databaseApplication);
+      expect(roleEnvironment.application!.WEB_JWT_SECRET).toBe(secrets.webJwt);
+      expect(roleEnvironment.application!.DATABASE_URL).toContain(secrets.databaseApplication);
+      expect(roleEnvironment.application).not.toHaveProperty("POSTGRES_DB");
+      expect(roleEnvironment.application).not.toHaveProperty("POSTGRES_USER");
+      expect(roleEnvironment.application).not.toHaveProperty("POSTGRES_PASSWORD");
+
+      const originalEnvironment = process.env;
+      try {
+        process.env = {
+          ...roleEnvironment.application,
+          NODE_ENV: "production",
+          CLEAN_PAY_BUILD_PHASE: "",
+          CLEAN_PAY_BAKED_PUBLIC_APP_URL: validEnv.NEXT_PUBLIC_APP_URL,
+          CLEAN_PAY_BAKED_BRAND_NAME: validEnv.NEXT_PUBLIC_BRAND_NAME,
+          CLEAN_PAY_BAKED_BRAND_LOGO_URL: validEnv.NEXT_PUBLIC_BRAND_LOGO_URL,
+          CLEAN_PAY_BAKED_TURNSTILE_WIDGET_ID: validEnv.TURNSTILE_SITE_KEY,
+        };
+        expect(() => getEnv()).toThrow("POSTGRES_DB is required");
+
+        process.env.CLEAN_PAY_RUNTIME_ROLE = "application";
+        expect(getEnv().appUrl).toBe(validEnv.APP_URL);
+        expect(process.env.POSTGRES_DB).toBeUndefined();
+        expect(process.env.POSTGRES_USER).toBeUndefined();
+        expect(process.env.POSTGRES_PASSWORD).toBeUndefined();
+      } finally {
+        process.env = originalEnvironment;
+      }
+
+      expect(roleEnvironment.retention!.SESSION_RETENTION_DAYS).toBe("91");
+      expect(roleEnvironment.retention!.PAYMENT_HOLD_DISPOSED_RETENTION_DAYS)
+        .toBe("367");
+      expect(roleEnvironment.reconciliation!.PAYMENT_RECONCILIATION_SECRET)
+        .toBe(secrets.reconciliation);
+
+      const rendered = spawnSync(
+        "docker",
+        [
+          "compose",
+          "--env-file",
+          authoritative,
+          "--file",
+          "deploy/prod/docker-compose.yml",
+          "--profile",
+          "reconciliation",
+          "--profile",
+          "operations",
+          "config",
+          "--format",
+          "json",
+        ],
+        {
+          cwd: process.cwd(),
+          encoding: "utf8",
+          env: {
+            ...process.env,
+            CLEAN_PAY_APP_ENV_FILE: paths.application,
+            CLEAN_PAY_HOLD_OPERATOR_ENV_FILE: paths.holdOperator,
+            CLEAN_PAY_MIGRATION_ENV_FILE: paths.migration,
+            CLEAN_PAY_POSTGRES_ENV_FILE: paths.postgres,
+            CLEAN_PAY_PROVISION_ENV_FILE: paths.provision,
+            CLEAN_PAY_RECONCILIATION_ENV_FILE: paths.reconciliation,
+            CLEAN_PAY_RETENTION_ENV_FILE: paths.retention,
+          },
+        },
+      );
+      expect(rendered.status, rendered.stderr).toBe(0);
+      const services = (JSON.parse(rendered.stdout) as {
+        services: Record<string, { environment: Record<string, string> }>;
+      }).services;
+      const applicationContainer = services.app!.environment;
+      const migrationContainer = services.migration!.environment;
+      const postgresContainer = services.postgres!.environment;
+      const reconciliationContainer = services["reconciliation-worker"]!.environment;
+      const retentionContainer = services["retention-worker"]!.environment;
+      const holdContainer = services["retention-hold"]!.environment;
+      const provisionContainer = services["db-role-provision"]!.environment;
+
+      expect(applicationContainer.CLEAN_PAY_RUNTIME_ROLE).toBe("application");
+      expect(applicationContainer.DATABASE_URL).toContain(secrets.databaseApplication);
+      expect(applicationContainer.WEB_JWT_SECRET).toBe(secrets.webJwt);
+      expect(applicationContainer).not.toHaveProperty("POSTGRES_DB");
+      expect(applicationContainer).not.toHaveProperty("POSTGRES_USER");
+      expect(applicationContainer).not.toHaveProperty("POSTGRES_PASSWORD");
+
+      expect(migrationContainer.CLEAN_PAY_RUNTIME_ROLE).toBe("migration");
+      expect(migrationContainer.DATABASE_URL).toContain(secrets.databaseMigration);
+      expect(migrationContainer).not.toHaveProperty("POSTGRES_PASSWORD");
+      expect(JSON.stringify(migrationContainer)).not.toContain(secrets.webJwt);
+      expect(JSON.stringify(migrationContainer)).not.toContain(secrets.remnashop);
+      expect(JSON.stringify(migrationContainer)).not.toContain(secrets.reconciliation);
+
+      expect(postgresContainer).toEqual({
+        POSTGRES_DB: "clean_pay",
+        POSTGRES_INITDB_ARGS:
+          "--encoding=UTF8 --locale-provider=libc --lc-collate=C --lc-ctype=C.UTF-8",
+        POSTGRES_PASSWORD: secrets.postgres,
+        POSTGRES_USER: "clean_pay_bootstrap",
+      });
+
+      expect(reconciliationContainer.PAYMENT_RECONCILIATION_SECRET)
+        .toBe(secrets.reconciliation);
+      expect(reconciliationContainer.CLEAN_PAY_RUNTIME_ROLE)
+        .toBe("reconciliation");
+      expect(reconciliationContainer.PAYMENT_RECONCILIATION_INTERNAL_URL)
+        .toBe(validEnv.PAYMENT_RECONCILIATION_INTERNAL_URL);
+      expect(JSON.stringify(reconciliationContainer)).not.toContain(secrets.postgres);
+      expect(JSON.stringify(reconciliationContainer)).not.toContain(secrets.webJwt);
+      expect(JSON.stringify(reconciliationContainer)).not.toContain(secrets.remnashop);
+
+      expect(retentionContainer.DATABASE_URL).toContain(secrets.databaseRetention);
+      expect(retentionContainer.CLEAN_PAY_RUNTIME_ROLE).toBe("retention");
+      expect(retentionContainer.SESSION_RETENTION_DAYS).toBe("91");
+      expect(JSON.stringify(retentionContainer)).not.toContain(secrets.webJwt);
+      expect(JSON.stringify(retentionContainer)).not.toContain(secrets.remnashop);
+      expect(JSON.stringify(retentionContainer)).not.toContain(secrets.reconciliation);
+      expect(holdContainer.DATABASE_URL).toContain(secrets.databaseHold);
+      expect(holdContainer.CLEAN_PAY_RUNTIME_ROLE).toBe("hold-operator");
+      expect(provisionContainer.POSTGRES_PASSWORD).toBe(secrets.postgres);
+      expect(provisionContainer.CLEAN_PAY_RUNTIME_ROLE).toBe("provision");
+
+      const rootRendered = spawnSync(
+        "docker",
+        [
+          "compose",
+          "--env-file",
+          authoritative,
+          "--file",
+          "docker-compose.yml",
+          "--profile",
+          "reconciliation",
+          "--profile",
+          "operations",
+          "config",
+          "--format",
+          "json",
+        ],
+        {
+          cwd: process.cwd(),
+          encoding: "utf8",
+          env: {
+            ...process.env,
+            CLEAN_PAY_APP_ENV_FILE: paths.application,
+            CLEAN_PAY_HOLD_OPERATOR_ENV_FILE: paths.holdOperator,
+            CLEAN_PAY_MIGRATION_ENV_FILE: paths.migration,
+            CLEAN_PAY_POSTGRES_ENV_FILE: paths.postgres,
+            CLEAN_PAY_PROVISION_ENV_FILE: paths.provision,
+            CLEAN_PAY_RECONCILIATION_ENV_FILE: paths.reconciliation,
+            CLEAN_PAY_RETENTION_ENV_FILE: paths.retention,
+          },
+        },
+      );
+      expect(rootRendered.status, rootRendered.stderr).toBe(0);
+      const rootServices = (JSON.parse(rootRendered.stdout) as {
+        services: Record<string, { environment: Record<string, string> }>;
+      }).services;
+      expect(rootServices.app!.environment.CLEAN_PAY_RUNTIME_ROLE)
+        .toBe("application");
+      expect(rootServices.app!.environment).not.toHaveProperty("POSTGRES_PASSWORD");
+      expect(rootServices.migration!.environment.CLEAN_PAY_RUNTIME_ROLE)
+        .toBe("migration");
+      expect(JSON.stringify(rootServices.migration!.environment))
+        .not.toContain(secrets.webJwt);
+      expect(rootServices["reconciliation-worker"]!.environment.CLEAN_PAY_RUNTIME_ROLE)
+        .toBe("reconciliation");
+      expect(JSON.stringify(rootServices["reconciliation-worker"]!.environment))
+        .not.toContain(secrets.postgres);
+      expect(rootServices["retention-worker"]!.environment.CLEAN_PAY_RUNTIME_ROLE)
+        .toBe("retention");
+      expect(JSON.stringify(rootServices["retention-worker"]!.environment))
+        .not.toContain(secrets.webJwt);
+      expect(rootServices.postgres!.environment).toEqual({
+        POSTGRES_DB: "clean_pay",
+        POSTGRES_INITDB_ARGS:
+          "--encoding=UTF8 --locale-provider=libc --lc-collate=C --lc-ctype=C.UTF-8",
+        POSTGRES_PASSWORD: secrets.postgres,
+        POSTGRES_USER: "clean_pay_bootstrap",
+      });
+
+      if (process.platform !== "win32") {
+        for (const file of Object.values(paths)) {
+          expect(statSync(file).mode & 0o777).toBe(0o600);
+        }
+      }
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  }, process.platform === "win32" ? 45_000 : 15_000);
+
+  it("validates an application role from DATABASE_URL without PostgreSQL bootstrap variables", () => {
+    const result = runRuntimeValidator({
+      CLEAN_PAY_RUNTIME_ROLE: "application",
+      POSTGRES_DB: null,
+      POSTGRES_USER: null,
+      POSTGRES_PASSWORD: null,
+      MIGRATION_DATABASE_URL: null,
+      RETENTION_DATABASE_URL: null,
+      HOLD_OPERATOR_DATABASE_URL: null,
+    });
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toContain("Production environment validation passed.");
+  });
+
+  it("rejects peer and bootstrap database values from every role-scoped runtime", () => {
+    const isolated = {
+      POSTGRES_DB: null,
+      POSTGRES_USER: null,
+      POSTGRES_PASSWORD: null,
+      POSTGRES_INITDB_ARGS: null,
+      MIGRATION_DATABASE_URL: null,
+      RETENTION_DATABASE_URL: null,
+      HOLD_OPERATOR_DATABASE_URL: null,
+    } as const;
+    const roles = [
+      ["application", validEnv.DATABASE_URL],
+      ["migration", validEnv.MIGRATION_DATABASE_URL],
+      ["retention", validEnv.RETENTION_DATABASE_URL],
+      ["hold-operator", validEnv.HOLD_OPERATOR_DATABASE_URL],
+    ] as const;
+
+    for (const [role, databaseUrl] of roles) {
+      const clean = runRuntimeValidator({
+        ...isolated,
+        CLEAN_PAY_RUNTIME_ROLE: role,
+        DATABASE_URL: databaseUrl,
+      });
+      expect(clean.status, `${role}: ${clean.stderr}`).toBe(0);
+
+      for (const exposedName of [
+        "POSTGRES_DB",
+        "POSTGRES_USER",
+        "POSTGRES_PASSWORD",
+        "POSTGRES_INITDB_ARGS",
+        "MIGRATION_DATABASE_URL",
+        "RETENTION_DATABASE_URL",
+        "HOLD_OPERATOR_DATABASE_URL",
+      ]) {
+        const exposed = runRuntimeValidator({
+          ...isolated,
+          CLEAN_PAY_RUNTIME_ROLE: role,
+          DATABASE_URL: databaseUrl,
+          [exposedName]: "unexpected-role-secret",
+        });
+        expect(exposed.status, `${role}/${exposedName}`).toBe(1);
+        expect(exposed.stderr).toContain(
+          `${exposedName} must not be present in a role-scoped runtime environment`,
+        );
+      }
+    }
+  }, process.platform === "win32" ? 45_000 : 15_000);
+
   it("keeps both example files deliberately invalid until placeholders are replaced", () => {
     for (const envFile of ["deploy/prod/.env.example", ".env.example"]) {
+      const example = readFileSync(envFile, "utf8");
       const result = spawnSync(
         process.execPath,
         ["deploy/prod/validate-env.mjs", "--clean-pay-env-file", envFile],
@@ -228,6 +590,7 @@ describe("production env validator", () => {
 
       expect(result.status, envFile).toBe(1);
       expect(result.stderr).toContain("Production environment validation failed:");
+      expect(example).not.toContain("local-development-payment-reconciliation-secret");
     }
   });
 
@@ -426,27 +789,60 @@ describe("production env validator", () => {
     expect(runValidator({ WEB_JWT_SECRET: "change_me_runtime_web_jwt_value_123" }).stderr).toContain(
       "WEB_JWT_SECRET must not use a placeholder",
     );
+    expect(runValidator({
+      PAYMENT_RECONCILIATION_SECRET:
+        "local-development-payment-reconciliation-secret",
+    }).stderr).toContain(
+      "PAYMENT_RECONCILIATION_SECRET must not use a placeholder or known weak value",
+    );
     expect(runValidator({ WEB_JWT_SECRET: "1234567890".repeat(4) }).stderr).toContain(
       "WEB_JWT_SECRET must not use a repeated or low-variety value",
     );
   });
 
-  it("binds DATABASE_URL to the bundled PostgreSQL credentials", () => {
-    expect(runValidator({ POSTGRES_PASSWORD: `${secrets.postgres}-other` }).stderr).toContain(
-      "DATABASE_URL password must match POSTGRES_PASSWORD",
+  it("validates a bounded refresh encryption read keyring", () => {
+    const previous = "previous-refresh-unit-8Wp4Jz7Lc2Nq9Vr5Ks3D6Hz1";
+    expect(runValidator({
+      WEB_REFRESH_KEY_ID: "key-b",
+      WEB_REFRESH_PREVIOUS_KEYS: JSON.stringify({ "key-a": previous }),
+    }).status).toBe(0);
+    expect(runValidator({ WEB_REFRESH_KEY_ID: "invalid.key" }).stderr).toContain(
+      "WEB_REFRESH_KEY_ID must contain 1 to 32 safe key-id characters",
     );
-    expect(runValidator({ POSTGRES_USER: "other_user" }).stderr).toContain(
-      "DATABASE_URL username must match POSTGRES_USER",
+    expect(runValidator({
+      WEB_REFRESH_KEY_ID: "key-a",
+      WEB_REFRESH_PREVIOUS_KEYS: JSON.stringify({ "key-a": previous }),
+    }).status).toBe(0);
+    expect(runValidator({
+      WEB_REFRESH_KEY_ID: "key-b",
+      WEB_REFRESH_PREVIOUS_KEYS: JSON.stringify({ "invalid.key": previous }),
+    }).stderr).toContain("contains an invalid key id");
+    expect(runValidator({
+      WEB_REFRESH_KEY_ID: "key-b",
+      WEB_REFRESH_PREVIOUS_KEYS: JSON.stringify({ "key-a": secrets.webRefresh }),
+    }).stderr).toContain(
+      "WEB_REFRESH_PREVIOUS_KEYS.key-a must be different from WEB_REFRESH_SECRET",
     );
+  });
+
+  it("requires distinct role credentials on one exact database target", () => {
+    expect(runValidator({ POSTGRES_PASSWORD: `${secrets.postgres}-other` }).status).toBe(0);
+    expect(runValidator({ POSTGRES_USER: "other_bootstrap" }).status).toBe(0);
+    expect(runValidator({
+      DATABASE_URL: `postgresql://clean_pay_bootstrap:${secrets.databaseApplication}@postgres:5432/clean_pay?schema=public`,
+    }).stderr).toContain("database usernames must be pairwise distinct");
+    expect(runValidator({
+      DATABASE_URL: `postgresql://clean_pay_app:${secrets.postgres}@postgres:5432/clean_pay?schema=public`,
+    }).stderr).toContain("DATABASE_URL password must be different from POSTGRES_PASSWORD");
     expect(runValidator({ POSTGRES_DB: "other_db" }).stderr).toContain(
       "DATABASE_URL database must match POSTGRES_DB",
     );
     expect(runValidator({
-      DATABASE_URL: `postgresql://clean_pay:${secrets.postgres}@postgres:5433/clean_pay?schema=public`,
+      DATABASE_URL: `postgresql://clean_pay_app:${secrets.databaseApplication}@postgres:5433/clean_pay?schema=public`,
     }).stderr).toContain("DATABASE_URL must use port 5432");
 
     const overrideUrl =
-      `postgresql://clean_pay:${secrets.postgres}@postgres:5432/clean_pay` +
+      `postgresql://clean_pay_app:${secrets.databaseApplication}@postgres:5432/clean_pay` +
       "?host=attacker.clean-pay.dev&user=other&password=other&sslmode=verify-full";
     expect(parsePgConnectionString(overrideUrl)).toMatchObject({
       host: "attacker.clean-pay.dev",
@@ -458,7 +854,7 @@ describe("production env validator", () => {
     );
 
     const duplicateSslModeUrl =
-      `postgresql://clean_pay:${secrets.postgres}@postgres:5432/clean_pay` +
+      `postgresql://clean_pay_app:${secrets.databaseApplication}@postgres:5432/clean_pay` +
       "?sslmode=require&sslmode=disable";
     expect(parsePgConnectionString(duplicateSslModeUrl)).toMatchObject({ ssl: false });
     expect(runValidator({ DATABASE_URL: duplicateSslModeUrl }).stderr).toContain(
@@ -466,8 +862,39 @@ describe("production env validator", () => {
     );
 
     expect(runValidator({
+      DATABASE_URL:
+        `postgresql://clean_pay_app:${secrets.databaseApplication}@postgres:5432/clean_pay?Schema=public`,
+    }).stderr).toContain(
+      "DATABASE_URL query parameter Schema must use canonical lowercase spelling",
+    );
+
+    for (const parameter of [
+      "connection_limit=2",
+      "pool_timeout=3",
+      "connect_timeout=4",
+      "statement_timeout=5000",
+      "idle_in_transaction_session_timeout=5000",
+      "application_name=misleading",
+    ]) {
+      expect(runValidator({
+        DATABASE_URL:
+          `postgresql://clean_pay_app:${secrets.databaseApplication}@postgres:5432/clean_pay?schema=public&${parameter}`,
+      }).stderr).toContain("role-specific environment setting");
+    }
+
+    expect(runValidator({ DATABASE_POOL_MAX: "0" }).stderr).toContain(
+      "DATABASE_POOL_MAX must be an integer between 1 and 50",
+    );
+    expect(runValidator({ DATABASE_CONNECTION_TIMEOUT_MS: "1e3" }).stderr).toContain(
+      "DATABASE_CONNECTION_TIMEOUT_MS must be a canonical decimal integer",
+    );
+    expect(runValidator({ RETENTION_DATABASE_LOCK_TIMEOUT_MS: "300001" }).stderr).toContain(
+      "RETENTION_DATABASE_LOCK_TIMEOUT_MS must be an integer between 250 and 300000",
+    );
+
+    expect(runValidator({
       POSTGRES_DB: "clean;id",
-      DATABASE_URL: `postgresql://clean_pay:${secrets.postgres}@postgres:5432/clean%3Bid?schema=public`,
+      DATABASE_URL: `postgresql://clean_pay_app:${secrets.databaseApplication}@postgres:5432/clean%3Bid?schema=public`,
     }).stderr).toContain("POSTGRES_DB must be a shell-safe PostgreSQL identifier");
 
     for (const composeFile of ["docker-compose.yml", "deploy/prod/docker-compose.yml"]) {
@@ -517,9 +944,23 @@ describe("production env validator", () => {
     expect(runValidator({ DATA_RETENTION_INTERVAL_SECONDS: "299" }).stderr).toContain(
       "DATA_RETENTION_INTERVAL_SECONDS must be an integer between 300 and 86400",
     );
+    expect(runValidator({ PAYMENT_HOLD_DISPOSED_RETENTION_DAYS: "89" }).stderr).toContain(
+      "PAYMENT_HOLD_DISPOSED_RETENTION_DAYS must be an integer between 90 and 2555",
+    );
   });
 
   it("requires compatible Remnashop bases and a single public Remnawave origin", () => {
+    expect(runValidator({ REMNASHOP_ENV_FILE: "relative/.env" }).stderr).toContain(
+      "REMNASHOP_ENV_FILE must be a normalized absolute file path",
+    );
+    expect(runValidator({ REMNASHOP_ENV_FILE: "/opt/remnashop/../shared/.env" }).stderr)
+      .toContain("REMNASHOP_ENV_FILE must be a normalized absolute file path");
+    expect(runValidator({ REMNASHOP_ENV_EXPECTED_UID: "root" }).stderr).toContain(
+      "REMNASHOP_ENV_EXPECTED_UID must be a canonical decimal integer",
+    );
+    expect(runValidator({ REMNASHOP_ENV_EXPECTED_GID: "2147483648" }).stderr).toContain(
+      "REMNASHOP_ENV_EXPECTED_GID must be an integer between 0 and 2147483647",
+    );
     expect(runValidator({
       REMNASHOP_API_BASE_URL: "http://shop.clean-pay.dev/api/v1/public",
     }).stderr).toContain("REMNASHOP_API_BASE_URL must use HTTPS for a public host");

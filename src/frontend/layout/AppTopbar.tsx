@@ -1,7 +1,14 @@
 import Image from "next/image";
 import Link from "next/link";
 import { classNames } from "primereact/utils";
-import { forwardRef, useContext, useImperativeHandle, useRef } from "react";
+import {
+    forwardRef,
+    useContext,
+    useEffect,
+    useImperativeHandle,
+    useRef,
+    useState,
+} from "react";
 import { AppTopbarRef } from "@/frontend/types";
 import { getBranding } from "@/shared/branding";
 import { LayoutContext } from "./context/layoutcontext";
@@ -14,7 +21,15 @@ const AppTopbar = forwardRef<AppTopbarRef, { navigation: NavigationViewModel }>(
     const menubuttonRef = useRef(null);
     const topbarmenuRef = useRef(null);
     const topbarmenubuttonRef = useRef(null);
+    const [desktopViewport, setDesktopViewport] = useState(false);
     const branding = getBranding();
+
+    useEffect(() => {
+        const updateViewport = () => setDesktopViewport(window.innerWidth > 991);
+        updateViewport();
+        window.addEventListener("resize", updateViewport);
+        return () => window.removeEventListener("resize", updateViewport);
+    }, []);
 
     useImperativeHandle(ref, () => ({
         menubutton: menubuttonRef.current,
@@ -23,7 +38,7 @@ const AppTopbar = forwardRef<AppTopbarRef, { navigation: NavigationViewModel }>(
     }));
 
     return (
-        <div className="layout-topbar">
+        <header className="layout-topbar">
             <Link href="/" className="layout-topbar-logo">
                 <Image src={branding.logoUrl} width={40} height={40} alt={`${branding.name} logo`} unoptimized />
                 <span>{branding.name}</span>
@@ -35,7 +50,11 @@ const AppTopbar = forwardRef<AppTopbarRef, { navigation: NavigationViewModel }>(
                 className="p-link layout-menu-button layout-topbar-button"
                 aria-label="Главное меню"
                 aria-controls="app-sidebar"
-                aria-expanded={layoutState.staticMenuMobileActive || !layoutState.staticMenuDesktopInactive}
+                aria-expanded={
+                    desktopViewport
+                        ? !layoutState.staticMenuDesktopInactive
+                        : layoutState.staticMenuMobileActive
+                }
                 onClick={onMenuToggle}
             >
                 <i className="pi pi-bars" aria-hidden="true" />
@@ -58,7 +77,7 @@ const AppTopbar = forwardRef<AppTopbarRef, { navigation: NavigationViewModel }>(
                     if (item.to) {
                         return (
                             <Link key={`${item.label}-${item.to}`} href={item.to} prefetch={false} className="p-link layout-topbar-button" title={item.label}>
-                                <i className={item.icon}></i>
+                                <i aria-hidden="true" className={item.icon}></i>
                                 <span>{item.label}</span>
                             </Link>
                         );
@@ -73,7 +92,7 @@ const AppTopbar = forwardRef<AppTopbarRef, { navigation: NavigationViewModel }>(
                                 title={item.label}
                                 onClick={(event) => item.command?.({ originalEvent: event, item })}
                             >
-                                <i className={item.icon}></i>
+                                <i aria-hidden="true" className={item.icon}></i>
                                 <span>{item.label}</span>
                             </button>
                         );
@@ -82,7 +101,7 @@ const AppTopbar = forwardRef<AppTopbarRef, { navigation: NavigationViewModel }>(
                     return null;
                 })}
             </div>
-        </div>
+        </header>
     );
 });
 

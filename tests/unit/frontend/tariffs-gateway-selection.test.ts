@@ -106,6 +106,8 @@ describe("tariff payment gateway selection", () => {
     expect(container.querySelector('[aria-label="Выбор платёжного шлюза"]')).toBeNull();
     expect(container.querySelector('[data-dropdown-options="2"]')).not.toBeNull();
     expect(container.querySelectorAll(".clean-pay-price-choice")).toHaveLength(2);
+    expect(container.querySelectorAll('[aria-pressed="true"]')).toHaveLength(1);
+    expect(container.querySelectorAll('[aria-pressed="false"]')).toHaveLength(1);
   });
 
   it("allows long tariff descriptions to wrap on narrow screens", async () => {

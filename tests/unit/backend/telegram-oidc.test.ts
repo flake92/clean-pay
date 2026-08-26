@@ -1,4 +1,5 @@
 import { createHash, createHmac } from "node:crypto";
+import { NextResponse } from "next/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const state = vi.hoisted(() => ({
@@ -17,6 +18,8 @@ const mocks = vi.hoisted(() => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
   remnashopAuth: vi.fn(),
   prisma: {
+    $queryRaw: vi.fn(),
+    $transaction: vi.fn(),
     telegramAuthState: {
       create: vi.fn(),
       findFirst: vi.fn(),
@@ -58,11 +61,24 @@ import {
   createTelegramAuthorizationResponse,
   createTelegramPopupStartResponse,
   clearTelegramAuthCookies,
+  clearTelegramAuthCookiesOnResponse,
+  readTelegramCallbackCookieProof,
+  resetTelegramOidcJwksForTests,
+  resumeTelegramOidcCodeExchange,
+  resumeTelegramProviderAuthentication,
   TelegramAuthStateAlreadyConsumedError,
   verifyTelegramCallback,
   verifyTelegramPopupToken,
   verifyTelegramWidgetCallbackPayload,
 } from "@/backend/integrations/telegram/oidc";
+import { sha256 } from "@/backend/security/crypto";
+
+const durableOwnership = {
+  authStateId: "auth-state-1",
+  stateHash: sha256("state"),
+  codeHash: sha256("code"),
+  claimToken: "durable-claim-token",
+};
 
 function setCallbackCookies() {
   state.cookies.set("clean_pay_tg_state", "state");
@@ -83,6 +99,7 @@ function signWidgetPayload(body: Record<string, string | number | undefined>) {
 describe("Telegram identity verification adapter", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    resetTelegramOidcJwksForTests();
     state.cookies.clear();
     state.deleted = [];
     mocks.jwtVerify.mockResolvedValue({
@@ -101,6 +118,13 @@ describe("Telegram identity verification adapter", () => {
       expiresAt: new Date("2099-01-01T00:00:00.000Z"),
     });
     mocks.prisma.telegramAuthState.updateMany.mockResolvedValue({ count: 1 });
+    mocks.prisma.$queryRaw.mockResolvedValue([{
+      id: "auth-state-1",
+      expiresAt: new Date("2099-01-01T00:00:00.000Z"),
+    }]);
+    mocks.prisma.$transaction.mockImplementation(
+      async (work: (tx: typeof mocks.prisma) => unknown) => work(mocks.prisma),
+    );
     mocks.getCurrentSession.mockResolvedValue({ id: "session-1", userId: "target-user" });
     mocks.redisCommand.mockResolvedValue("OK");
     mocks.remnashopAuth.mockResolvedValue({
@@ -113,21 +137,52 @@ describe("Telegram identity verification adapter", () => {
   });
 
   it("creates authorization state and temporary browser cookies", async () => {
-    const response = await createTelegramAuthorizationResponse("/cabinet", "user-1");
-    expect(response.headers.get("location")).toContain("response_type=code");
-    expect(mocks.prisma.telegramAuthState.create).toHaveBeenCalledWith({
-      data: expect.objectContaining({ redirectTo: "/cabinet", userId: "user-1", expiresAt: expect.any(Date) }),
-    });
-    expect(response.cookies.get("clean_pay_tg_state")?.value).toBeTruthy();
-    expect(response.cookies.get("clean_pay_tg_nonce")?.value).toBeTruthy();
-    expect(response.cookies.get("clean_pay_tg_code_verifier")?.value).toBeTruthy();
-    expect(response.headers.get("set-cookie")).toContain(
-      "clean_pay_tg_callback_receipt=",
-    );
-    expect(response.headers.get("set-cookie")).toContain(
-      "Path=/auth/telegram/callback",
-    );
-    expect(response.headers.get("set-cookie")).toContain("Max-Age=0");
+    vi.useFakeTimers();
+    const issuedAt = new Date("2026-08-26T10:00:00.000Z");
+    vi.setSystemTime(issuedAt);
+    try {
+      const response = await createTelegramAuthorizationResponse(
+        "/cabinet",
+        "user-1",
+      );
+      expect(response.headers.get("location")).toContain("response_type=code");
+      expect(mocks.prisma.telegramAuthState.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          redirectTo: "/cabinet",
+          userId: "user-1",
+          expiresAt: new Date("2026-08-26T10:10:00.000Z"),
+        }),
+      });
+      expect(response.cookies.get("clean_pay_tg_state")?.value).toBeTruthy();
+      expect(response.cookies.get("clean_pay_tg_nonce")?.value).toBeTruthy();
+      expect(response.cookies.get("clean_pay_tg_code_verifier")?.value).toBeTruthy();
+      expect(response.headers.get("set-cookie")).toContain("Max-Age=1830");
+      expect(response.headers.get("set-cookie")).toContain(
+        "Expires=Wed, 26 Aug 2026 10:30:30 GMT",
+      );
+      expect(response.headers.get("set-cookie")).toContain(
+        "clean_pay_tg_callback_receipt=",
+      );
+      expect(response.headers.get("set-cookie")).toContain(
+        "Path=/auth/telegram/callback",
+      );
+      expect(response.headers.get("set-cookie")).toContain("Max-Age=0");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps callback proof cookies usable when the global policy is strict", async () => {
+    vi.stubEnv("COOKIE_SAMESITE", "strict");
+    try {
+      const response = await createTelegramAuthorizationResponse();
+
+      expect(response.cookies.get("clean_pay_tg_state")?.sameSite).toBe("lax");
+      expect(response.cookies.get("clean_pay_tg_nonce")?.sameSite).toBe("lax");
+      expect(response.cookies.get("clean_pay_tg_code_verifier")?.sameSite).toBe("lax");
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 
   it("creates popup metadata from the same one-time state", async () => {
@@ -149,19 +204,56 @@ describe("Telegram identity verification adapter", () => {
 
   it("verifies OIDC state, claims it once and returns identity without local-user decisions", async () => {
     setCallbackCookies();
-    await expect(verifyTelegramCallback("code", "state")).resolves.toEqual({
+    await expect(verifyTelegramCallback("code", "state")).resolves.toMatchObject({
       authState: expect.objectContaining({ id: "auth-state-1", redirectTo: "/cabinet" }),
       identity: expect.objectContaining({
         telegramId: "123456",
         telegramUsername: "clean_user",
         fullName: "Clean User",
-        source: "oidc",
         remnashopAuthResult: expect.objectContaining({ cookies: { accessToken: "access", refreshToken: "refresh" } }),
+      }),
+      durable: expect.objectContaining({
+        authStateId: "auth-state-1",
+        claimToken: expect.any(String),
+        codeHash: expect.any(String),
+        stateHash: expect.any(String),
       }),
     });
     expect(mocks.prisma.telegramAuthState.updateMany).toHaveBeenCalledWith(expect.objectContaining({
-      where: expect.objectContaining({ id: "auth-state-1", consumedAt: null }),
+      where: expect.objectContaining({
+        id: "auth-state-1",
+        consumedAt: null,
+        callbackStatus: "READY",
+        nonceHash: expect.any(String),
+        codeVerifierHash: expect.any(String),
+      }),
+      data: expect.objectContaining({
+        consumedAt: expect.any(Date),
+        callbackStatus: "PROVIDER_READY",
+        callbackCodeHash: expect.any(String),
+        callbackLeaseExpiresAt: expect.any(Date),
+      }),
     }));
+    const providerDispatchCall = mocks.prisma.telegramAuthState.updateMany.mock
+      .calls.findIndex((call) =>
+        call[0]?.data?.callbackStatus === "PROVIDER_DISPATCHING"
+      );
+    expect(providerDispatchCall).toBeGreaterThanOrEqual(0);
+    expect(
+      mocks.prisma.telegramAuthState.updateMany.mock.invocationCallOrder[
+        providerDispatchCall
+      ],
+    ).toBeLessThan(vi.mocked(globalThis.fetch).mock.invocationCallOrder[0]!);
+    expect(mocks.prisma.telegramAuthState.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          callbackStatus: "IDENTITY_VERIFIED",
+        }),
+        data: expect.objectContaining({
+          callbackStatus: "REMNASHOP_DISPATCHING",
+        }),
+      }),
+    );
     expect(mocks.prisma.telegramAuthState).not.toHaveProperty("update");
   });
 
@@ -180,6 +272,35 @@ describe("Telegram identity verification adapter", () => {
     expect(globalThis.fetch).not.toHaveBeenCalled();
   });
 
+  it("terminally fences an ambiguous Remnashop auth dispatch for login", async () => {
+    setCallbackCookies();
+    mocks.remnashopAuth.mockRejectedValueOnce(new Error("upstream timeout"));
+
+    await expect(verifyTelegramCallback("code", "state")).rejects.toMatchObject({
+      code: "UPSTREAM_UNAVAILABLE",
+      status: 503,
+    });
+
+    expect(mocks.prisma.telegramAuthState.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          callbackStatus: "REMNASHOP_DISPATCHING",
+        }),
+        data: expect.objectContaining({
+          callbackStatus: "FAILED",
+          callbackFailureCode: "REMNASHOP_AUTH_AMBIGUOUS",
+        }),
+      }),
+    );
+    expect(mocks.prisma.telegramAuthState.updateMany).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          callbackStatus: "PROVIDER_AUTHENTICATED",
+        }),
+      }),
+    );
+  });
+
   it("rejects mismatched state and duplicate claims", async () => {
     await expect(verifyTelegramCallback("code", "state")).rejects.toThrow("Telegram OIDC state is invalid");
     setCallbackCookies();
@@ -194,6 +315,16 @@ describe("Telegram identity verification adapter", () => {
       identity: { telegramId: "123456", source: "oidc" },
     });
     expect(globalThis.fetch).not.toHaveBeenCalled();
+  });
+
+  it("reuses the remote JWKS verifier across token validations", async () => {
+    state.cookies.set("clean_pay_tg_nonce", "nonce");
+
+    await verifyTelegramPopupToken("first-token");
+    await verifyTelegramPopupToken("second-token");
+
+    expect(mocks.createRemoteJWKSet).toHaveBeenCalledOnce();
+    expect(mocks.jwtVerify).toHaveBeenCalledTimes(2);
   });
 
   it("verifies Telegram Login Widget HMAC and returns a provider identity", async () => {
@@ -364,5 +495,181 @@ describe("Telegram identity verification adapter", () => {
     setCallbackCookies();
     vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(new Response(JSON.stringify({}), { status: 200 }));
     await expect(verifyTelegramCallback("code", "state")).rejects.toThrow("does not contain id_token");
+  });
+
+  it("reads the callback proof and clears it on a redirect response", async () => {
+    setCallbackCookies();
+    await expect(readTelegramCallbackCookieProof("state")).resolves.toEqual({
+      stateHash: sha256("state"),
+      nonceHash: sha256("nonce"),
+      codeVerifierHash: sha256("verifier"),
+    });
+
+    const response = NextResponse.redirect("http://localhost/cabinet");
+    clearTelegramAuthCookiesOnResponse(response);
+    for (const name of [
+      "clean_pay_tg_state",
+      "clean_pay_tg_nonce",
+      "clean_pay_tg_code_verifier",
+    ]) {
+      expect(response.cookies.get(name)).toMatchObject({
+        name,
+        value: "",
+        maxAge: 0,
+        expires: new Date(0),
+      });
+    }
+  });
+
+  it("resumes an already claimed code exchange for the exact linking session", async () => {
+    setCallbackCookies();
+    await expect(resumeTelegramOidcCodeExchange(
+      "code",
+      "state",
+      {
+        id: "auth-state-1",
+        targetUserId: "target-user",
+        redirectTo: "/cabinet",
+      },
+      durableOwnership,
+    )).resolves.toMatchObject({
+      authState: {
+        id: "auth-state-1",
+        targetUserId: "target-user",
+        redirectTo: "/cabinet",
+      },
+      identity: {
+        telegramId: "123456",
+        providerSession: expect.objectContaining({
+          context: expect.objectContaining({
+            cookies: { accessToken: "access", refreshToken: "refresh" },
+          }),
+        }),
+      },
+      durable: durableOwnership,
+    });
+    expect(mocks.getCurrentSession).toHaveBeenCalled();
+  });
+
+  it("records a secondary checkpoint failure when the token request is unavailable", async () => {
+    setCallbackCookies();
+    vi.spyOn(globalThis, "fetch").mockRejectedValueOnce("network offline");
+    mocks.prisma.$queryRaw.mockResolvedValueOnce([]);
+
+    await expect(resumeTelegramOidcCodeExchange(
+      "code",
+      "state",
+      {
+        id: "auth-state-1",
+        targetUserId: null,
+        redirectTo: "/cabinet",
+      },
+      durableOwnership,
+    )).rejects.toThrow("token exchange unavailable");
+
+    expect(mocks.logger.error).toHaveBeenCalledWith(
+      "telegram_token_request_failed",
+      expect.objectContaining({ errorName: "UnknownError" }),
+      expect.anything(),
+    );
+    expect(mocks.logTechnicalError).toHaveBeenCalledWith(
+      "telegram_oidc_dispatch_failure_checkpoint_failed",
+      expect.any(Error),
+      { authStateId: "auth-state-1" },
+    );
+  });
+
+  it("preserves the identity error when its fallback failure checkpoint also fails", async () => {
+    setCallbackCookies();
+    mocks.jwtVerify.mockResolvedValueOnce({
+      payload: { nonce: "wrong-nonce", id: "123456" },
+    });
+    mocks.prisma.$queryRaw.mockResolvedValueOnce([]);
+
+    await expect(resumeTelegramOidcCodeExchange(
+      "code",
+      "state",
+      {
+        id: "auth-state-1",
+        targetUserId: null,
+        redirectTo: "/cabinet",
+      },
+      durableOwnership,
+    )).rejects.toThrow("nonce mismatch");
+  });
+
+  it("rejects malformed token JSON and preserves a non-conflict claim error", async () => {
+    setCallbackCookies();
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response("{not-json", { status: 200 }),
+    );
+    await expect(resumeTelegramOidcCodeExchange(
+      "code",
+      "state",
+      {
+        id: "auth-state-1",
+        targetUserId: null,
+        redirectTo: null,
+      },
+      durableOwnership,
+    )).rejects.toThrow("invalid response");
+
+    setCallbackCookies();
+    const databaseError = new Error("claim database unavailable");
+    mocks.prisma.telegramAuthState.updateMany.mockRejectedValueOnce(databaseError);
+    await expect(verifyTelegramCallback("code", "state"))
+      .rejects.toBe(databaseError);
+  });
+
+  it("fails closed when durable provider authentication has no usable result", async () => {
+    const verified = {
+      authState: {
+        id: "auth-state-1",
+        targetUserId: null,
+        redirectTo: "/cabinet",
+      },
+      identity: {
+        telegramId: "123456",
+        telegramUsername: "clean_user",
+        fullName: "Clean User",
+        photoUrl: null,
+        providerSession: null,
+      },
+    };
+
+    vi.stubEnv("TELEGRAM_BOT_TOKEN", "");
+    try {
+      await expect(resumeTelegramProviderAuthentication(
+        verified,
+        durableOwnership,
+      )).rejects.toMatchObject({
+        code: "UPSTREAM_UNAVAILABLE",
+        status: 503,
+      });
+    } finally {
+      vi.unstubAllEnvs();
+    }
+
+    mocks.remnashopAuth.mockRejectedValueOnce(new Error("provider timeout"));
+    mocks.prisma.$queryRaw.mockResolvedValueOnce([]);
+    await expect(resumeTelegramProviderAuthentication(
+      verified,
+      durableOwnership,
+    )).rejects.toMatchObject({
+      code: "UPSTREAM_UNAVAILABLE",
+      status: 503,
+    });
+  });
+
+  it("reports a consumed popup state when the atomic claim loses", async () => {
+    state.cookies.set("clean_pay_tg_nonce", "nonce");
+    mocks.prisma.telegramAuthState.updateMany.mockResolvedValueOnce({ count: 0 });
+
+    await expect(verifyTelegramPopupToken("id-token"))
+      .rejects.toBeInstanceOf(TelegramAuthStateAlreadyConsumedError);
+    expect(mocks.logTechnicalWarning).toHaveBeenCalledWith(
+      "telegram_oidc_state_already_consumed",
+      { authStateId: "auth-state-1" },
+    );
   });
 });

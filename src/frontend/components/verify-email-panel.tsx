@@ -303,50 +303,58 @@ export function VerifyEmailPanel({
     setMessageSeverity("warn");
     setMessage("Проверяем готовность аккаунта...");
 
-    const readiness = await checkAccountReadinessAction();
+    try {
+      const readiness = await checkAccountReadinessAction();
 
-    if (readiness.status === "ready") {
-      setAccountSyncPending(false);
-      setSyncProblem(null);
-      setMessageSeverity("success");
-      setMessage("Аккаунт готов. Возвращаем вас к прерванному действию.");
-      replaceWith(completedDestination);
-      finishAction("continue");
-      return;
-    }
+      if (readiness.status === "ready") {
+        setAccountSyncPending(false);
+        setSyncProblem(null);
+        setMessageSeverity("success");
+        setMessage("Аккаунт готов. Возвращаем вас к прерванному действию.");
+        replaceWith(completedDestination);
+        return;
+      }
 
-    if (
-      readiness.status === "pending" &&
-      !readiness.emailVerified
-    ) {
-      setConfirmed(false);
-      setAccountSyncPending(false);
+      if (
+        readiness.status === "pending" &&
+        !readiness.emailVerified
+      ) {
+        setConfirmed(false);
+        setAccountSyncPending(false);
+        setSyncProblem(null);
+        setMessageSeverity("warn");
+        setMessage(
+          "E-mail ещё не подтверждён. Введите код из письма, чтобы продолжить.",
+        );
+        return;
+      }
+
+      setAccountSyncPending(true);
+      setSyncProblem(
+        readiness.status === "merge-conflict" ||
+          readiness.status === "unauthorized"
+          ? readiness.status
+          : null,
+      );
+      setMessage(
+        readiness.status === "merge-conflict"
+          ? "Автоматическое объединение аккаунтов остановлено из-за конфликта данных. Повторная оплата не создавалась; обратитесь в поддержку."
+          : readiness.status === "unauthorized"
+            ? "Сессия завершилась. Войдите снова, чтобы продолжить с той же оплаты."
+            : readiness.status === "unavailable"
+              ? "Готовность аккаунта сейчас проверить не удалось. Код повторно вводить не нужно; повторите проверку позже."
+              : "E-mail подтверждён, но синхронизация аккаунта ещё не завершена. Подождите немного и повторите проверку; повторная оплата не создавалась.",
+      );
+    } catch {
+      setAccountSyncPending(true);
       setSyncProblem(null);
       setMessageSeverity("warn");
       setMessage(
-        "E-mail ещё не подтверждён. Введите код из письма, чтобы продолжить.",
+        "Не удалось проверить готовность аккаунта. Проверьте соединение и повторите позже; повторная оплата не создавалась.",
       );
+    } finally {
       finishAction("continue");
-      return;
     }
-
-    setAccountSyncPending(true);
-    setSyncProblem(
-      readiness.status === "merge-conflict" ||
-        readiness.status === "unauthorized"
-        ? readiness.status
-        : null,
-    );
-    setMessage(
-      readiness.status === "merge-conflict"
-        ? "Автоматическое объединение аккаунтов остановлено из-за конфликта данных. Повторная оплата не создавалась; обратитесь в поддержку."
-        : readiness.status === "unauthorized"
-          ? "Сессия завершилась. Войдите снова, чтобы продолжить с той же оплаты."
-          : readiness.status === "unavailable"
-            ? "Готовность аккаунта сейчас проверить не удалось. Код повторно вводить не нужно; повторите проверку позже."
-          : "E-mail подтверждён, но синхронизация аккаунта ещё не завершена. Подождите немного и повторите проверку; повторная оплата не создавалась.",
-    );
-    finishAction("continue");
   }
 
   if (confirmed) {

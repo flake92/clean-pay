@@ -65,6 +65,11 @@ export default async function LinkAccountPage({
   if (model.status === "provider-session-recovery-required") {
     redirect(providerSessionRecoveryPath(linkAccountReturnTo));
   }
+  const passwordOnlyReauth =
+    passwordRequired &&
+    model.status === "ready" &&
+    Boolean(model.profile.email) &&
+    model.profile.emailVerified;
 
   return (
     <AppShell requireAuth returnTo={linkAccountReturnTo}>
@@ -72,7 +77,9 @@ export default async function LinkAccountPage({
         <PageHeader
           description={
             guided
-              ? "Добавьте резервный вход, подтвердите e-mail и вернитесь к прерванному действию."
+              ? passwordOnlyReauth
+                ? "Подтвердите вход текущим паролем и вернитесь к прерванному действию."
+                : "Добавьте резервный вход, подтвердите e-mail и вернитесь к прерванному действию."
               : "Управляйте способами входа и восстановления доступа."
           }
           title={guided ? "Сохраните доступ к аккаунту" : "Способы входа"}

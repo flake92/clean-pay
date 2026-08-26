@@ -1,8 +1,12 @@
+import { createCipheriv, createHmac, randomBytes } from "node:crypto";
+
 import { describe, expect, it } from "vitest";
 
 import {
   decryptSecret,
+  decryptKeyringSecret,
   encryptSecret,
+  encryptKeyringSecret,
   hmacSha256,
   jsonBase64Url,
   parseJsonBase64Url,
@@ -11,6 +15,27 @@ import {
   sha256,
 } from "@/backend/security/crypto";
 import { validateRequestSource } from "@/backend/security/csrf";
+
+function encryptV1KeyringSecret(
+  value: string,
+  entry: { id: string; secret: string },
+  purpose: string,
+) {
+  const iv = randomBytes(12);
+  const prefix = `v1.${entry.id}`;
+  const key = createHmac("sha256", entry.secret)
+    .update(`clean-pay:secret-encryption:v1:${purpose}`)
+    .digest();
+  const cipher = createCipheriv("aes-256-gcm", key, iv);
+  cipher.setAAD(Buffer.from(`${prefix}.${purpose}`, "utf8"));
+  const encrypted = Buffer.concat([cipher.update(value, "utf8"), cipher.final()]);
+  return [
+    prefix,
+    iv.toString("base64url"),
+    cipher.getAuthTag().toString("base64url"),
+    encrypted.toString("base64url"),
+  ].join(".");
+}
 
 describe("security crypto helpers", () => {
   it("hashes, signs and compares values", () => {
@@ -35,6 +60,79 @@ describe("security crypto helpers", () => {
     expect(decryptSecret(encrypted, "refresh-secret")).toBe("access-token");
     expect(() => decryptSecret(encrypted, "wrong-secret")).toThrow();
     expect(() => decryptSecret("bad.payload", "refresh-secret")).toThrow("Invalid encrypted secret payload");
+  });
+
+  it("reads legacy and previous-key envelopes and rewrites them for key retirement", () => {
+    const old = { id: "key-a", secret: "synthetic-old-key-A-with-enough-entropy-123" };
+    const current = { id: "key-b", secret: "synthetic-new-key-B-with-enough-entropy-456" };
+    const mixed = { primary: current, previous: [old] };
+    const legacy = encryptSecret("legacy-token", old.secret);
+    const previous = encryptKeyringSecret(
+      "previous-token",
+      { primary: old, previous: [] },
+      "test-purpose",
+    );
+
+    expect(decryptKeyringSecret(legacy, mixed, "test-purpose")).toMatchObject({
+      value: "legacy-token",
+      keyId: "key-a",
+      needsRewrap: true,
+    });
+    expect(decryptKeyringSecret(previous, mixed, "test-purpose")).toMatchObject({
+      value: "previous-token",
+      keyId: "key-a",
+      needsRewrap: true,
+    });
+
+    const rewrapped = encryptKeyringSecret("legacy-token", mixed, "test-purpose");
+    const retired = { primary: current, previous: [] };
+    expect(rewrapped).toMatch(/^v2\.key-b\.[A-Za-z0-9_-]{22}\./);
+    expect(decryptKeyringSecret(rewrapped, retired, "test-purpose")).toMatchObject({
+      value: "legacy-token",
+      keyId: "key-b",
+      needsRewrap: false,
+    });
+  });
+
+  it("keeps same-id v1 rows readable only with the explicitly authorised old secret", () => {
+    const old = { id: "shared-key", secret: "synthetic-old-key-A-with-enough-entropy-123" };
+    const current = { id: "shared-key", secret: "synthetic-new-key-B-with-enough-entropy-456" };
+    const previous = encryptV1KeyringSecret("previous-token", old, "test-purpose");
+    const mixed = { primary: current, previous: [old] };
+
+    expect(decryptKeyringSecret(previous, mixed, "test-purpose")).toMatchObject({
+      value: "previous-token",
+      keyId: "shared-key",
+      needsRewrap: true,
+    });
+    expect(() => decryptKeyringSecret(
+      previous,
+      { primary: current, previous: [] },
+      "test-purpose",
+    )).toThrow("Unknown or invalid encrypted secret key");
+
+    const rewrapped = encryptKeyringSecret("previous-token", mixed, "test-purpose");
+    expect(rewrapped).toMatch(/^v2\.shared-key\.[A-Za-z0-9_-]{22}\./);
+    expect(decryptKeyringSecret(
+      rewrapped,
+      { primary: current, previous: [] },
+      "test-purpose",
+    )).toMatchObject({ value: "previous-token", needsRewrap: false });
+  });
+
+  it("binds versioned envelopes to their key id and purpose", () => {
+    const keyring = {
+      primary: { id: "key-a", secret: "synthetic-key-A-with-enough-entropy-123456" },
+      previous: [],
+    };
+    const encrypted = encryptKeyringSecret("token", keyring, "purpose-a");
+
+    expect(() => decryptKeyringSecret(encrypted, keyring, "purpose-b")).toThrow();
+    expect(() => decryptKeyringSecret(
+      encrypted,
+      { primary: { ...keyring.primary, id: "key-b" }, previous: [] },
+      "purpose-a",
+    )).toThrow("Unknown or invalid encrypted secret key");
   });
 
   it("generates url-safe random tokens", () => {

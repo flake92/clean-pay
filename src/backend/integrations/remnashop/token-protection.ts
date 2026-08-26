@@ -1,10 +1,27 @@
 import { getEnv } from "@/backend/config/env";
-import { decryptSecret, encryptSecret } from "@/backend/security/crypto";
+import {
+  decryptKeyringSecret,
+  encryptKeyringSecret,
+} from "@/backend/security/crypto";
+
+const REMNASHOP_TOKEN_PURPOSE = "remnashop-provider-token";
 
 export function protectRemnashopToken(token: string) {
-  return encryptSecret(token, getEnv().webRefreshSecret);
+  return encryptKeyringSecret(
+    token,
+    getEnv().webRefreshKeyring,
+    REMNASHOP_TOKEN_PURPOSE,
+  );
 }
 
 export function revealRemnashopToken(token: string) {
-  return decryptSecret(token, getEnv().webRefreshSecret);
+  return revealRemnashopTokenEnvelope(token).value;
+}
+
+export function revealRemnashopTokenEnvelope(token: string) {
+  return decryptKeyringSecret(
+    token,
+    getEnv().webRefreshKeyring,
+    REMNASHOP_TOKEN_PURPOSE,
+  );
 }

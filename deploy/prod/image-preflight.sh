@@ -97,6 +97,10 @@ app_custom_release=$(inspect_label "$app_image_id" io.clean-pay.release)
 migration_custom_release=$(inspect_label "$migration_image_id" io.clean-pay.release)
 app_revision=$(inspect_label "$app_image_id" org.opencontainers.image.revision)
 migration_revision=$(inspect_label "$migration_image_id" org.opencontainers.image.revision)
+app_contract_version=$(inspect_label "$app_image_id" io.clean-pay.public-build-contract-version)
+migration_contract_version=$(inspect_label "$migration_image_id" io.clean-pay.public-build-contract-version)
+app_contract_sha256=$(inspect_label "$app_image_id" io.clean-pay.public-build-contract-sha256)
+migration_contract_sha256=$(inspect_label "$migration_image_id" io.clean-pay.public-build-contract-sha256)
 
 validate_metadata release "$app_release"
 validate_metadata release "$migration_release"
@@ -111,10 +115,20 @@ validate_metadata revision "$migration_revision"
   || fail "application and migration images have different releases"
 [ "$app_revision" = "$migration_revision" ] \
   || fail "application and migration images have different revisions"
+[ "$app_contract_version" = "$migration_contract_version" ] \
+  || fail "application and migration images have different public build contract versions"
+[ "$app_contract_sha256" = "$migration_contract_sha256" ] \
+  || fail "application and migration images have different public build contracts"
 
 if [ "$deploy_source" = "pull" ]; then
   reject_unknown_pull_metadata release "$app_release"
   reject_unknown_pull_metadata revision "$app_revision"
+  reject_unknown_pull_metadata public-build-contract-version "$app_contract_version"
+  reject_unknown_pull_metadata public-build-contract-sha256 "$app_contract_sha256"
+  printf '%s' "$app_contract_version" | grep -Eq '^[1-9][0-9]{0,8}$' \
+    || fail "pull mode requires a canonical public build contract version"
+  printf '%s' "$app_contract_sha256" | grep -Eq '^[a-f0-9]{64}$' \
+    || fail "pull mode requires a canonical public build contract SHA-256"
 fi
 
 [ "$app_release" = "$expected_release" ] \
@@ -143,6 +157,10 @@ docker run --rm --interactive \
   --read-only \
   --cap-drop ALL \
   --security-opt no-new-privileges \
+  --pids-limit 64 \
+  --memory 256m \
+  --cpus 0.5 \
+  --tmpfs /tmp:rw,noexec,nosuid,nodev,size=16m,mode=1777 \
   --entrypoint node \
   "$app_image_id" \
   deploy/prod/validate-env.mjs --runtime-env-stdin < "$env_file" \

@@ -1,31 +1,52 @@
 #!/usr/bin/env node
 
-import { writeFileSync } from "node:fs";
-
 import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient } from "@prisma/client";
 
 import { deployLog } from "./deploy-log.mjs";
-import { retentionPolicy, runRetentionCleanup } from "./retention-cleanup.mjs";
+import { validateProductionDatabaseRoleEnvironment } from "./production-env-rules.mjs";
+import {
+  createPostgresPool,
+  postgresPoolMetrics,
+  prismaPgAdapterOptions,
+} from "./database-pool.mjs";
+import {
+  retentionPolicy,
+  RetentionCleanupAggregateError,
+  RetentionProgressError,
+  retentionRetryDelayMs,
+  runRetentionCleanup,
+} from "./retention-cleanup.mjs";
+import {
+  createRetentionHeartbeat,
+  RetentionHeartbeatError,
+  retentionHeartbeatPolicy,
+} from "./retention-heartbeat.mjs";
 import { createWorkerShutdownController } from "./worker-shutdown.mjs";
 
-const connectionString = process.env.DATABASE_URL?.trim();
+const MAX_CONSECUTIVE_CLEANUP_FAILURES = 5;
 
-if (!connectionString) {
-  throw new Error("DATABASE_URL is required");
+if (process.env.CLEAN_PAY_RUNTIME_ROLE !== "retention") {
+  throw new Error("CLEAN_PAY_RUNTIME_ROLE=retention is required");
 }
+validateProductionDatabaseRoleEnvironment(process.env);
+const connectionString = process.env.DATABASE_URL.trim();
 
-const intervalSeconds = boundedInteger(
-  "DATA_RETENTION_INTERVAL_SECONDS",
-  21_600,
-  300,
-  86_400,
-);
-const heartbeatFile = "/tmp/clean-pay-retention-heartbeat";
+const heartbeatPolicy = retentionHeartbeatPolicy();
+const intervalSeconds = heartbeatPolicy.intervalMs / 1_000;
 const policy = retentionPolicy();
+const heartbeat = createRetentionHeartbeat({
+  intervalMs: heartbeatPolicy.intervalMs,
+});
+const retentionPool = createPostgresPool({
+  connectionString,
+  role: "retention",
+});
 const prisma = new PrismaClient({
-  adapter: new PrismaPg({ connectionString }),
-  log: ["error"],
+  adapter: new PrismaPg(retentionPool, {
+    ...prismaPgAdapterOptions(connectionString),
+    disposeExternalPool: true,
+  }),
 });
 
 deployLog("info", "retention_worker_started", "Data retention worker started.", {
@@ -41,28 +62,90 @@ const shutdown = createWorkerShutdownController({
     );
   },
 });
+let consecutiveCleanupFailures = 0;
+let exitAfterWorkerFailure = false;
 
 try {
   while (!shutdown.requested) {
     const startedAt = Date.now();
 
     try {
-      const counts = await runRetentionCleanup(prisma, policy);
-      deployLog("info", "retention_cleanup_completed", "Data retention cleanup completed.", counts);
-      writeFileSync(heartbeatFile, String(Date.now()), { encoding: "utf8" });
-    } catch (error) {
-      deployLog("error", "retention_cleanup_failed", "Data retention cleanup failed; it will be retried on the next interval.", {
-        error: error instanceof Error ? error.name : "UnknownError",
+      heartbeat.running();
+      const counts = await runRetentionCleanup(
+        prisma,
+        policy,
+        new Date(),
+        { onProgress: () => heartbeat.progress() },
+      );
+      consecutiveCleanupFailures = 0;
+      deployLog("info", "retention_cleanup_completed", "Data retention cleanup completed.", {
+        ...counts,
+        ...retentionPoolLogMetadata(),
       });
+      if (counts.retentionBacklog) {
+        heartbeat.sleeping(1_000);
+        await shutdown.sleep(1_000);
+        continue;
+      }
+
+      if (shutdown.requested) break;
+
+      const remainingMs = Math.min(
+        heartbeatPolicy.intervalMs,
+        Math.max(
+          1_000,
+          heartbeatPolicy.intervalMs - (Date.now() - startedAt),
+        ),
+      );
+      heartbeat.sleeping(remainingMs);
+      await shutdown.sleep(remainingMs);
+    } catch (error) {
+      if (
+        error instanceof RetentionHeartbeatError
+        || error instanceof RetentionProgressError
+      ) {
+        deployLog(
+          "error",
+          "retention_heartbeat_failed",
+          "Retention heartbeat reporting failed; the worker will exit for supervisor restart.",
+          {
+            error: error instanceof RetentionHeartbeatError
+              ? "RetentionHeartbeatError"
+              : "RetentionProgressError",
+            supervisorRestartRequired: true,
+            ...retentionPoolLogMetadata(),
+          },
+        );
+        exitAfterWorkerFailure = true;
+        break;
+      }
+
+      consecutiveCleanupFailures += 1;
+      const retryDelayMs = retentionRetryDelayMs(consecutiveCleanupFailures);
+      const exhausted =
+        consecutiveCleanupFailures >= MAX_CONSECUTIVE_CLEANUP_FAILURES;
+      const failedPhases = error instanceof RetentionCleanupAggregateError
+        ? error.phases
+        : ["cleanup"];
+      deployLog("error", "retention_cleanup_failed", exhausted
+        ? "Data retention cleanup repeatedly failed; the worker will exit for supervisor restart."
+        : "Data retention cleanup failed; the worker will retry with bounded backoff.", {
+        error: error instanceof RetentionCleanupAggregateError
+          ? "RetentionCleanupAggregateError"
+          : "RetentionCleanupError",
+        failedPhases,
+        consecutiveFailures: consecutiveCleanupFailures,
+        retryDelayMs: exhausted ? 0 : retryDelayMs,
+        supervisorRestartRequired: exhausted,
+        ...retentionPoolLogMetadata(),
+      });
+      if (exhausted) {
+        exitAfterWorkerFailure = true;
+        break;
+      }
+      await shutdown.sleep(retryDelayMs);
+      continue;
     }
-
-    if (shutdown.requested) break;
-
-    const remainingMs = Math.max(
-      1_000,
-      intervalSeconds * 1_000 - (Date.now() - startedAt),
-    );
-    await shutdown.sleep(remainingMs);
   }
 } finally {
   try {
@@ -78,16 +161,17 @@ try {
   }
 }
 
-function boundedInteger(name, fallback, min, max) {
-  const raw = process.env[name]?.trim();
+if (exitAfterWorkerFailure) {
+  process.exitCode = 1;
+}
 
-  if (!raw) return fallback;
-
-  const value = Number(raw);
-
-  if (!Number.isSafeInteger(value) || value < min || value > max) {
-    throw new Error(`${name} must be an integer between ${min} and ${max}`);
-  }
-
-  return value;
+function retentionPoolLogMetadata() {
+  const snapshot = postgresPoolMetrics(retentionPool, "retention");
+  return {
+    database_pool_active: snapshot.active,
+    database_pool_idle: snapshot.idle,
+    database_pool_waiting: snapshot.waiting,
+    database_pool_maximum: snapshot.maximum,
+    database_pool_exhausted: snapshot.exhausted,
+  };
 }

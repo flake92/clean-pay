@@ -11,7 +11,7 @@ vi.mock("@/application/cabinet/execute-command", () => ({
   clearCabinetSession: vi.fn(),
   endCabinetSession: mocks.endCabinetSession,
 }));
-vi.mock("@/backend/integrations/cabinet/cabinet-commands", () => ({
+vi.mock("@/app/_composition/session-gateways", () => ({
   productionCabinetCommands: { adapter: "cabinet" },
 }));
 vi.mock("@/backend/integrations/referral/referral-attribution", () => ({

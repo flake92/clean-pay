@@ -2,7 +2,7 @@
 
 import { loadPaymentStatus } from "@/application/payments/load-payment-status";
 import { productionPaymentMaintenanceRunner } from "@/backend/integrations/payments/payment-maintenance-runner";
-import { productionPaymentStatusReader } from "@/backend/integrations/payments/payment-status-reader";
+import { productionPaymentStatusReader } from "@/app/_composition/session-gateways";
 
 export async function refreshPaymentStatusAction(input: {
   paymentId: string | null;

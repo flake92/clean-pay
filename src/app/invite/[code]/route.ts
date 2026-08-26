@@ -11,12 +11,18 @@ export async function GET(
   { params }: { params: Promise<{ code: string }> },
 ) {
   const code = normalizeReferralCode((await params).code);
-  if (!code) return new NextResponse("Not found", { status: 404 });
+  if (!code) {
+    return new NextResponse("Not found", {
+      status: 404,
+      headers: { "cache-control": "no-store" },
+    });
+  }
 
   const response = NextResponse.redirect(
     new URL(registrationDestination, getEnv().publicAppUrl),
     303,
   );
+  response.headers.set("cache-control", "no-store");
   setReferralAttributionCookie(response, code);
   return response;
 }

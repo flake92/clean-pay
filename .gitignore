@@ -18,6 +18,7 @@ deploy/prod/.env
 deploy/prod/remnashop.env
 deploy/prod/*.env
 !deploy/prod/*.env.example
+deploy/prod/.production-operation.lock
 
 # next
 .next/

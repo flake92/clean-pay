@@ -25,11 +25,31 @@ on:
         description: Public Cloudflare Turnstile site key baked into the application
         required: true
         type: string
+      mode:
+        description: Stage new candidates, or promote previously staged exact digests after policy approval
+        required: true
+        default: stage
+        type: choice
+        options:
+          - stage
+          - promote
+      application_candidate:
+        description: Promote only; staged ghcr.io/.../clean-pay-app@sha256:... index
+        required: false
+        type: string
+      migration_candidate:
+        description: Promote only; staged ghcr.io/.../clean-pay-migration@sha256:... index
+        required: false
+        type: string
+      candidate_revision:
+        description: Promote only; source commit recorded in both staged images
+        required: false
+        type: string
 
 permissions:
   actions: read
   contents: read
-  packages: write
+  packages: read
 
 concurrency:
   # GHCR tag creation is not conditional/atomic. Serialize every publisher so
@@ -41,9 +61,17 @@ jobs:
   publish:
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    permissions:
+      actions: read
+      contents: read
+      packages: write
     outputs:
-      application-image: ${{ steps.publish.outputs.application_image }}
-      migration-image: ${{ steps.publish.outputs.migration_image }}
+      application-image: ${{ steps.publish.outputs.application_image || steps.reuse.outputs.application_image }}
+      migration-image: ${{ steps.publish.outputs.migration_image || steps.reuse.outputs.migration_image }}
+      source-revision: ${{ steps.phase.outputs.source_revision }}
+      public-build-contract-version: ${{ steps.public-contract.outputs.version }}
+      public-build-contract-sha256: ${{ steps.public-contract.outputs.sha256 }}
+      ci-url: ${{ steps.ci.outputs.run_url }}
     env:
       CLEAN_PAY_RELEASE: ${{ inputs.release }}
       NEXT_PUBLIC_APP_URL: ${{ inputs.public_app_url }}
@@ -55,8 +83,47 @@ jobs:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           ref: ${{ github.sha }}
-          fetch-depth: 1
+          fetch-depth: 0
           persist-credentials: false
+
+      - name: Resolve the two-phase release input
+        id: phase
+        shell: bash
+        env:
+          APPLICATION_CANDIDATE: ${{ inputs.application_candidate }}
+          MIGRATION_CANDIDATE: ${{ inputs.migration_candidate }}
+          CANDIDATE_REVISION: ${{ inputs.candidate_revision }}
+          PUBLISH_MODE: ${{ inputs.mode }}
+        run: |
+          set -euo pipefail
+          owner=${GITHUB_REPOSITORY_OWNER,,}
+          case "$PUBLISH_MODE" in
+            stage)
+              test -z "$APPLICATION_CANDIDATE$MIGRATION_CANDIDATE$CANDIDATE_REVISION" || {
+                printf 'Candidate inputs are forbidden in stage mode.\n' >&2
+                exit 2
+              }
+              source_revision=$GITHUB_SHA
+              ;;
+            promote)
+              [[ "$CANDIDATE_REVISION" =~ ^[a-f0-9]{40}$ ]] || {
+                printf 'candidate_revision must be a complete commit SHA.\n' >&2
+                exit 2
+              }
+              [[ "$APPLICATION_CANDIDATE" =~ ^ghcr\.io/${owner}/clean-pay-app@sha256:[a-f0-9]{64}$ ]] || {
+                printf 'application_candidate must be the exact staged app index in this repository owner.\n' >&2
+                exit 2
+              }
+              [[ "$MIGRATION_CANDIDATE" =~ ^ghcr\.io/${owner}/clean-pay-migration@sha256:[a-f0-9]{64}$ ]] || {
+                printf 'migration_candidate must be the exact staged migration index in this repository owner.\n' >&2
+                exit 2
+              }
+              test "$APPLICATION_CANDIDATE" != "$MIGRATION_CANDIDATE"
+              source_revision=$CANDIDATE_REVISION
+              ;;
+            *) exit 2 ;;
+          esac
+          printf 'source_revision=%s\n' "$source_revision" >> "$GITHUB_OUTPUT"
 
       - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
         with:
@@ -64,8 +131,17 @@ jobs:
 
       - name: Verify the exact clean checkout
         shell: bash
+        env:
+          APPLICATION_CANDIDATE: ${{ inputs.application_candidate }}
+          MIGRATION_CANDIDATE: ${{ inputs.migration_candidate }}
+          SOURCE_REVISION: ${{ steps.phase.outputs.source_revision }}
+          PUBLISH_MODE: ${{ inputs.mode }}
         run: |
           set -euo pipefail
+          case "$PUBLISH_MODE" in
+            stage|promote) ;;
+            *) printf 'Unsupported publish mode.\n' >&2; exit 2 ;;
+          esac
           actual_sha=$(git rev-parse HEAD)
           test "$actual_sha" = "$GITHUB_SHA" || {
             printf 'Checked out %s, expected %s\n' "$actual_sha" "$GITHUB_SHA" >&2
@@ -76,48 +152,104 @@ jobs:
             git status --short >&2
             exit 1
           }
+          if [ "$PUBLISH_MODE" = promote ]; then
+            git cat-file -e "${SOURCE_REVISION}^{commit}"
+            git merge-base --is-ancestor "$SOURCE_REVISION" "$GITHUB_SHA" || {
+              printf 'Candidate revision is not an ancestor of the approval commit.\n' >&2
+              exit 1
+            }
+            changed=$(git diff --name-only "$SOURCE_REVISION" "$GITHUB_SHA")
+            test "$changed" = security/container-vulnerability-exceptions.json || {
+              printf 'Promotion checkout may differ from the staged source only by the exact-image approval policy.\n' >&2
+              printf '%s\n' "$changed" >&2
+              exit 1
+            }
+            git show "${SOURCE_REVISION}:security/container-vulnerability-exceptions.json" \
+              | jq -e \
+                --arg revision "$SOURCE_REVISION" \
+                --arg application "$APPLICATION_CANDIDATE" \
+                --arg migration "$MIGRATION_CANDIDATE" '
+                  [.approvals[]?
+                    | select(.candidateRevision == $revision)
+                    | select(.indexImage == $application or .indexImage == $migration)]
+                  | length == 0
+                ' >/dev/null || {
+                  printf 'The staged source already contains an approval for its own candidate digest; approval must be added only after staged evidence review.\n' >&2
+                  exit 1
+                }
+          fi
 
       - name: Validate public build inputs with the production rules
         shell: bash
         run: node deploy/prod/validate-public-build.mjs
+
+      - name: Compute the canonical public build contract
+        id: public-contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          contract_version=$(node scripts/security/compute-public-build-contract.mjs --version)
+          contract_sha256=$(node scripts/security/compute-public-build-contract.mjs)
+          [[ "$contract_version" =~ ^[1-9][0-9]{0,8}$ ]]
+          [[ "$contract_sha256" =~ ^[a-f0-9]{64}$ ]]
+          printf 'version=%s\n' "$contract_version" >> "$GITHUB_OUTPUT"
+          printf 'sha256=%s\n' "$contract_sha256" >> "$GITHUB_OUTPUT"
 
       - name: Require successful CI for this exact commit
         id: ci
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SOURCE_REVISION: ${{ steps.phase.outputs.source_revision }}
         run: |
           set -euo pipefail
-          response=$(gh api --method GET \
-            -H 'Accept: application/vnd.github+json' \
-            -H 'X-GitHub-Api-Version: 2022-11-28' \
-            "/repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/runs" \
-            -f "head_sha=${GITHUB_SHA}" \
-            -f 'status=success' \
-            -f 'per_page=100')
-          ci_url=$(printf '%s' "$response" | jq -er --arg sha "$GITHUB_SHA" '
-            [.workflow_runs[]
-              | select(.head_sha == $sha)
-              | select(.status == "completed" and .conclusion == "success")]
-            | sort_by(.updated_at)
-            | last
-            | .html_url // empty
-          ')
-          printf 'Verified successful CI for %s: %s\n' "$GITHUB_SHA" "$ci_url"
+          successful_ci_url() {
+            sha=$1
+            gh api --method GET \
+              -H 'Accept: application/vnd.github+json' \
+              -H 'X-GitHub-Api-Version: 2022-11-28' \
+              "/repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/runs" \
+              -f "head_sha=${sha}" \
+              -f 'status=success' \
+              -f 'per_page=100' \
+              | jq -er --arg sha "$sha" '
+                [.workflow_runs[]
+                  | select(.head_sha == $sha)
+                  | select(.status == "completed" and .conclusion == "success")]
+                | sort_by(.updated_at)
+                | last
+                | .html_url // empty
+              '
+          }
+          source_ci_url=$(successful_ci_url "$SOURCE_REVISION")
+          ci_url=$(successful_ci_url "$GITHUB_SHA")
+          printf 'Verified candidate CI for %s: %s\n' "$SOURCE_REVISION" "$source_ci_url"
+          printf 'Verified approval-policy CI for %s: %s\n' "$GITHUB_SHA" "$ci_url"
           printf 'run_url=%s\n' "$ci_url" >> "$GITHUB_OUTPUT"
 
-      - name: Reject existing immutable GHCR tags
+      - name: Guard absent-or-exact immutable GHCR tags
         shell: bash
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SOURCE_REVISION: ${{ steps.phase.outputs.source_revision }}
+          APPLICATION_CANDIDATE: ${{ inputs.application_candidate }}
+          MIGRATION_CANDIDATE: ${{ inputs.migration_candidate }}
+          PUBLISH_MODE: ${{ inputs.mode }}
         run: |
           set -euo pipefail
+          case "$PUBLISH_MODE" in
+            stage|promote) ;;
+            *) printf 'Unsupported publish mode.\n' >&2; exit 2 ;;
+          esac
           owner=${GITHUB_REPOSITORY_OWNER,,}
-          sha_tag="sha-${GITHUB_SHA}"
-          test "$CLEAN_PAY_RELEASE" != "$sha_tag" || {
-            printf 'Release tag must differ from reserved tag %s.\n' "$sha_tag" >&2
-            exit 1
-          }
+          sha_tag="sha-${SOURCE_REVISION}"
+          normalized_release=${CLEAN_PAY_RELEASE,,}
+          case "$normalized_release" in
+            sha-*|candidate-*)
+              printf 'Release tag must not use the reserved sha-* or candidate-* namespace.\n' >&2
+              exit 1
+              ;;
+          esac
 
           response_file=$(mktemp "${RUNNER_TEMP}/clean-pay-ghcr-response.XXXXXX")
           trap 'rm -f "$response_file"' EXIT
@@ -133,13 +265,16 @@ jobs:
               | jq -er '(.token // .access_token) | select(type == "string" and length > 0)'
           }
 
-          assert_tag_absent() {
+          assert_tag_absent_or_exact() {
             repository=$1
             tag=$2
+            expected_digest=$3
             token=$(registry_token "$repository")
+            : > "$response_file"
             if ! status=$(curl --silent --show-error --location \
               --request HEAD \
-              --output "$response_file" \
+              --output /dev/null \
+              --dump-header "$response_file" \
               --write-out '%{http_code}' \
               --header "Authorization: Bearer ${token}" \
               --header 'Accept: application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json, application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json' \
@@ -151,8 +286,23 @@ jobs:
             case "$status" in
               404) ;;
               200)
-                printf 'Refusing to overwrite existing immutable tag ghcr.io/%s:%s.\n' "$repository" "$tag" >&2
-                exit 1
+                observed_digest=$(awk '
+                  tolower($1) == "docker-content-digest:" {
+                    gsub(/\r/, "", $2)
+                    digest = $2
+                  }
+                  END { print digest }
+                ' "$response_file")
+                if [ -z "$expected_digest" ] || [ "$observed_digest" != "$expected_digest" ]; then
+                  expected_description=absent
+                  [ -z "$expected_digest" ] || expected_description="absent or $expected_digest"
+                  printf 'Refusing immutable tag ghcr.io/%s:%s: expected %s, observed %s.\n' \
+                    "$repository" "$tag" "$expected_description" \
+                    "${observed_digest:-an unreadable digest}" >&2
+                  exit 1
+                fi
+                printf 'Immutable tag ghcr.io/%s:%s already has the exact approved digest %s; rerun may continue.\n' \
+                  "$repository" "$tag" "$expected_digest"
                 ;;
               *)
                 printf 'GHCR returned HTTP %s while checking ghcr.io/%s:%s; failing closed.\n' \
@@ -162,12 +312,21 @@ jobs:
             esac
           }
 
-          for repository in "${owner}/clean-pay-app" "${owner}/clean-pay-migration"; do
-            assert_tag_absent "$repository" "$CLEAN_PAY_RELEASE"
-            assert_tag_absent "$repository" "$sha_tag"
-          done
+          app_expected=
+          migration_expected=
+          if [ "$PUBLISH_MODE" = promote ]; then
+            app_expected=${APPLICATION_CANDIDATE##*@}
+            migration_expected=${MIGRATION_CANDIDATE##*@}
+            [[ "$app_expected" =~ ^sha256:[a-f0-9]{64}$ ]]
+            [[ "$migration_expected" =~ ^sha256:[a-f0-9]{64}$ ]]
+          fi
+          assert_tag_absent_or_exact "${owner}/clean-pay-app" "$CLEAN_PAY_RELEASE" "$app_expected"
+          assert_tag_absent_or_exact "${owner}/clean-pay-app" "$sha_tag" "$app_expected"
+          assert_tag_absent_or_exact "${owner}/clean-pay-migration" "$CLEAN_PAY_RELEASE" "$migration_expected"
+          assert_tag_absent_or_exact "${owner}/clean-pay-migration" "$sha_tag" "$migration_expected"
 
       - name: Set up QEMU for cross-platform builds
+        if: inputs.mode == 'stage'
         uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3.7.0
 
       - name: Set up Docker Buildx
@@ -179,15 +338,19 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build and publish both targets from this commit
+      - name: Build and stage both targets from this commit
+        if: inputs.mode == 'stage'
         id: publish
         shell: bash
+        env:
+          CLEAN_PAY_PUBLIC_BUILD_CONTRACT_VERSION: ${{ steps.public-contract.outputs.version }}
+          PUBLIC_BUILD_CONTRACT_SHA256: ${{ steps.public-contract.outputs.sha256 }}
         run: |
           set -euo pipefail
           owner=${GITHUB_REPOSITORY_OWNER,,}
           app_repository="ghcr.io/${owner}/clean-pay-app"
           migration_repository="ghcr.io/${owner}/clean-pay-migration"
-          sha_tag="sha-${GITHUB_SHA}"
+          candidate_tag="candidate-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           app_metadata="${RUNNER_TEMP}/clean-pay-app-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.json"
           migration_metadata="${RUNNER_TEMP}/clean-pay-migration-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.json"
 
@@ -196,13 +359,20 @@ jobs:
             --target runner \
             --build-arg CLEAN_PAY_RELEASE="$CLEAN_PAY_RELEASE" \
             --build-arg CLEAN_PAY_REVISION="$GITHUB_SHA" \
+            --build-arg CLEAN_PAY_PUBLIC_BUILD_CONTRACT_VERSION="$CLEAN_PAY_PUBLIC_BUILD_CONTRACT_VERSION" \
+            --build-arg CLEAN_PAY_PUBLIC_BUILD_CONTRACT_SHA256="$PUBLIC_BUILD_CONTRACT_SHA256" \
             --build-arg NEXT_PUBLIC_APP_URL="$NEXT_PUBLIC_APP_URL" \
             --build-arg TURNSTILE_ENABLED=true \
             --build-arg TURNSTILE_WIDGET_ID="$TURNSTILE_SITE_KEY" \
             --build-arg NEXT_PUBLIC_BRAND_NAME="$NEXT_PUBLIC_BRAND_NAME" \
             --build-arg NEXT_PUBLIC_BRAND_LOGO_URL="$NEXT_PUBLIC_BRAND_LOGO_URL" \
-            --tag "${app_repository}:${CLEAN_PAY_RELEASE}" \
-            --tag "${app_repository}:${sha_tag}" \
+            --annotation "index:org.opencontainers.image.revision=${GITHUB_SHA}" \
+            --annotation "index:org.opencontainers.image.version=${CLEAN_PAY_RELEASE}" \
+            --annotation "index:io.clean-pay.release=${CLEAN_PAY_RELEASE}" \
+            --annotation 'index:io.clean-pay.role=app' \
+            --annotation "index:io.clean-pay.public-build-contract-version=${CLEAN_PAY_PUBLIC_BUILD_CONTRACT_VERSION}" \
+            --annotation "index:io.clean-pay.public-build-contract-sha256=${PUBLIC_BUILD_CONTRACT_SHA256}" \
+            --tag "${app_repository}:${candidate_tag}" \
             --provenance=mode=max \
             --sbom=true \
             --metadata-file "$app_metadata" \
@@ -213,8 +383,15 @@ jobs:
             --target migration \
             --build-arg CLEAN_PAY_RELEASE="$CLEAN_PAY_RELEASE" \
             --build-arg CLEAN_PAY_REVISION="$GITHUB_SHA" \
-            --tag "${migration_repository}:${CLEAN_PAY_RELEASE}" \
-            --tag "${migration_repository}:${sha_tag}" \
+            --build-arg CLEAN_PAY_PUBLIC_BUILD_CONTRACT_VERSION="$CLEAN_PAY_PUBLIC_BUILD_CONTRACT_VERSION" \
+            --build-arg CLEAN_PAY_PUBLIC_BUILD_CONTRACT_SHA256="$PUBLIC_BUILD_CONTRACT_SHA256" \
+            --annotation "index:org.opencontainers.image.revision=${GITHUB_SHA}" \
+            --annotation "index:org.opencontainers.image.version=${CLEAN_PAY_RELEASE}" \
+            --annotation "index:io.clean-pay.release=${CLEAN_PAY_RELEASE}" \
+            --annotation 'index:io.clean-pay.role=migration' \
+            --annotation "index:io.clean-pay.public-build-contract-version=${CLEAN_PAY_PUBLIC_BUILD_CONTRACT_VERSION}" \
+            --annotation "index:io.clean-pay.public-build-contract-sha256=${PUBLIC_BUILD_CONTRACT_SHA256}" \
+            --tag "${migration_repository}:${candidate_tag}" \
             --provenance=mode=max \
             --sbom=true \
             --metadata-file "$migration_metadata" \
@@ -228,18 +405,387 @@ jobs:
           migration_image="${migration_repository}@${migration_digest}"
           printf 'application_image=%s\n' "$application_image" >> "$GITHUB_OUTPUT"
           printf 'migration_image=%s\n' "$migration_image" >> "$GITHUB_OUTPUT"
+          printf 'Staged unpromoted candidates %s and %s for the vulnerability gate.\n' \
+            "$application_image" "$migration_image"
+
+      - name: Verify and reuse only the explicitly approved staged candidates
+        if: inputs.mode == 'promote'
+        id: reuse
+        shell: bash
+        env:
+          APPLICATION_CANDIDATE: ${{ inputs.application_candidate }}
+          MIGRATION_CANDIDATE: ${{ inputs.migration_candidate }}
+          SOURCE_REVISION: ${{ steps.phase.outputs.source_revision }}
+          CLEAN_PAY_PUBLIC_BUILD_CONTRACT_VERSION: ${{ steps.public-contract.outputs.version }}
+          PUBLIC_BUILD_CONTRACT_SHA256: ${{ steps.public-contract.outputs.sha256 }}
+        run: |
+          set -euo pipefail
+          verify_candidate() {
+            image=$1
+            expected_role=$2
+            raw=$(mktemp "${RUNNER_TEMP}/clean-pay-index.XXXXXX")
+            trap 'rm -f "$raw"' RETURN
+            docker buildx imagetools inspect "$image" --raw > "$raw"
+            jq -e \
+              --arg revision "$SOURCE_REVISION" \
+              --arg release "$CLEAN_PAY_RELEASE" \
+              --arg role "$expected_role" \
+              --arg contract_version "$CLEAN_PAY_PUBLIC_BUILD_CONTRACT_VERSION" \
+              --arg contract_sha256 "$PUBLIC_BUILD_CONTRACT_SHA256" '
+                .annotations["org.opencontainers.image.revision"] == $revision
+                  and .annotations["org.opencontainers.image.version"] == $release
+                  and .annotations["io.clean-pay.release"] == $release
+                  and .annotations["io.clean-pay.role"] == $role
+                  and .annotations["io.clean-pay.public-build-contract-version"] == $contract_version
+                  and .annotations["io.clean-pay.public-build-contract-sha256"] == $contract_sha256
+              ' "$raw" >/dev/null || {
+                printf 'Candidate index metadata does not match the exact promotion inputs.\n' >&2
+                exit 1
+              }
+            jq -e '
+              [.manifests[]
+                | select((.platform.os // "unknown") != "unknown")
+                | (.platform.os + "/" + .platform.architecture
+                  + (if (.platform.variant // "") == "" then "" else "/" + .platform.variant end))]
+              | sort == ["linux/amd64", "linux/arm64"]
+            ' "$raw" >/dev/null || {
+              printf 'Candidate index contains an unreviewed runnable platform.\n' >&2
+              exit 1
+            }
+            for architecture in amd64 arm64; do
+              child=$(jq -er --arg architecture "$architecture" '
+                [.manifests[]
+                  | select(.platform.os == "linux" and .platform.architecture == $architecture)
+                  | .digest]
+                | if length == 1 then .[0] else error("missing or duplicate platform manifest") end
+              ' "$raw")
+              repository=${image%@*}
+              labels=$(docker buildx imagetools inspect "${repository}@${child}" \
+                --format '{{json .Image.Config.Labels}}')
+              printf '%s' "$labels" | jq -e \
+                --arg revision "$SOURCE_REVISION" \
+                --arg release "$CLEAN_PAY_RELEASE" \
+                --arg role "$expected_role" \
+                --arg contract_version "$CLEAN_PAY_PUBLIC_BUILD_CONTRACT_VERSION" \
+                --arg contract_sha256 "$PUBLIC_BUILD_CONTRACT_SHA256" \
+                --arg app_url "$NEXT_PUBLIC_APP_URL" \
+                --arg brand_name "$NEXT_PUBLIC_BRAND_NAME" \
+                --arg brand_logo_url "$NEXT_PUBLIC_BRAND_LOGO_URL" \
+                --arg turnstile_site_key "$TURNSTILE_SITE_KEY" \
+                '."org.opencontainers.image.revision" == $revision
+                  and ."org.opencontainers.image.version" == $release
+                  and ."io.clean-pay.release" == $release
+                  and ."io.clean-pay.role" == $role
+                  and ."io.clean-pay.public-build-contract-version" == $contract_version
+                  and ."io.clean-pay.public-build-contract-sha256" == $contract_sha256
+                  and ($role != "app" or (
+                    ."io.clean-pay.baked-public-app-url" == $app_url
+                    and ."io.clean-pay.baked-brand-name" == $brand_name
+                    and ."io.clean-pay.baked-brand-logo-url" == $brand_logo_url
+                    and ."io.clean-pay.baked-turnstile-site-key" == $turnstile_site_key
+                  ))' >/dev/null || {
+                    printf 'Candidate %s child metadata for linux/%s does not match the exact promotion inputs.\n' \
+                      "$expected_role" "$architecture" >&2
+                    exit 1
+                  }
+            done
+            rm -f "$raw"
+            trap - RETURN
+          }
+          verify_candidate "$APPLICATION_CANDIDATE" app
+          verify_candidate "$MIGRATION_CANDIDATE" migration
+          printf 'application_image=%s\n' "$APPLICATION_CANDIDATE" >> "$GITHUB_OUTPUT"
+          printf 'migration_image=%s\n' "$MIGRATION_CANDIDATE" >> "$GITHUB_OUTPUT"
+
+      - name: Log out from GHCR
+        if: always()
+        shell: bash
+        run: docker logout ghcr.io >/dev/null 2>&1 || true
+
+  scan-candidates:
+    needs: publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: runner
+            platform: linux/amd64
+            platform-id: linux-amd64
+          - target: runner
+            platform: linux/arm64
+            platform-id: linux-arm64
+          - target: migration
+            platform: linux/amd64
+            platform-id: linux-amd64
+          - target: migration
+            platform: linux/arm64
+            platform-id: linux-arm64
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Log in to GHCR for digest scan
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: echo "$GITHUB_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+
+      - name: Set up Docker Buildx for exact platform resolution
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+
+      - name: Resolve the immutable platform manifest from the staged index
+        id: image
+        shell: bash
+        env:
+          APPLICATION_IMAGE: ${{ needs.publish.outputs.application-image }}
+          MIGRATION_IMAGE: ${{ needs.publish.outputs.migration-image }}
+        run: |
+          set -euo pipefail
+          case '${{ matrix.target }}' in
+            runner) image=$APPLICATION_IMAGE ;;
+            migration) image=$MIGRATION_IMAGE ;;
+            *) exit 2 ;;
+          esac
+          [[ "$image" =~ @sha256:[a-f0-9]{64}$ ]]
+          repository=${image%@*}
+          architecture='${{ matrix.platform }}'
+          architecture=${architecture#linux/}
+          docker buildx imagetools inspect "$image" --raw > candidate.index.json
+          platform_digest=$(jq -er --arg architecture "$architecture" '
+            [.manifests[]
+              | select(.platform.os == "linux" and .platform.architecture == $architecture)
+              | .digest]
+            | if length == 1 then .[0] else error("missing or duplicate platform manifest") end
+          ' candidate.index.json)
+          [[ "$platform_digest" =~ ^sha256:[a-f0-9]{64}$ ]]
+          printf 'index-reference=%s\n' "$image" >> "$GITHUB_OUTPUT"
+          printf 'platform-reference=%s@%s\n' "$repository" "$platform_digest" >> "$GITHUB_OUTPUT"
+
+      - name: Inventory candidate digest for ${{ matrix.platform }}
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ${{ steps.image.outputs.platform-reference }}
+          format: json
+          output: candidate.trivy.json
+          exit-code: "0"
+          ignore-unfixed: false
+          severity: HIGH,CRITICAL
+
+      - name: Enforce exact exceptions against the candidate digest
+        shell: bash
+        env:
+          PUBLISH_MODE: ${{ inputs.mode }}
+        run: |
+          set -euo pipefail
+          case "$PUBLISH_MODE" in
+            stage) policy_mode=inventory ;;
+            promote) policy_mode=release ;;
+            *) printf 'Unsupported publish mode.\n' >&2; exit 2 ;;
+          esac
+          node scripts/security/enforce-container-vulnerability-policy.mjs \
+            --report candidate.trivy.json \
+            --policy security/container-vulnerability-exceptions.json \
+            --target '${{ matrix.target }}' \
+            --mode "$policy_mode" \
+            --output candidate.vulnerability-attestation.json \
+            --expected-image '${{ steps.image.outputs.index-reference }}' \
+            --platform '${{ matrix.platform }}' \
+            --expected-platform-image '${{ steps.image.outputs.platform-reference }}' \
+            --candidate-revision '${{ needs.publish.outputs.source-revision }}'
+
+      - name: Preserve per-platform digest evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: candidate-${{ matrix.target }}-${{ matrix.platform-id }}-vulnerability-evidence
+          if-no-files-found: error
+          retention-days: 90
+          path: |
+            candidate.trivy.json
+            candidate.index.json
+            candidate.vulnerability-attestation.json
+
+      - name: Log out from GHCR
+        if: always()
+        shell: bash
+        run: docker logout ghcr.io >/dev/null 2>&1 || true
+
+  smoke-candidates:
+    needs: publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: runner
+            platform: linux/amd64
+          - target: runner
+            platform: linux/arm64
+          - target: migration
+            platform: linux/amd64
+          - target: migration
+            platform: linux/arm64
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version-file: .node-version
+
+      - name: Set up QEMU for exact cross-platform candidate execution
+        uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3.7.0
+
+      - name: Log in to GHCR for candidate smoke
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: echo "$GITHUB_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+
+      - name: Smoke exact ${{ matrix.target }} candidate on ${{ matrix.platform }}
+        shell: bash
+        env:
+          APPLICATION_IMAGE: ${{ needs.publish.outputs.application-image }}
+          MIGRATION_IMAGE: ${{ needs.publish.outputs.migration-image }}
+          CLEAN_PAY_FIXTURE_PUBLIC_APP_URL: ${{ inputs.public_app_url }}
+          CLEAN_PAY_FIXTURE_BRAND_NAME: ${{ inputs.brand_name }}
+          CLEAN_PAY_FIXTURE_BRAND_LOGO_URL: ${{ inputs.brand_logo_url }}
+          CLEAN_PAY_FIXTURE_TURNSTILE_SITE_KEY: ${{ inputs.turnstile_site_key }}
+          CLEAN_PAY_FIXTURE_DEPLOY_SOURCE: pull
+          CLEAN_PAY_FIXTURE_APPLICATION_IMAGE: ${{ needs.publish.outputs.application-image }}
+          CLEAN_PAY_FIXTURE_MIGRATION_IMAGE: ${{ needs.publish.outputs.migration-image }}
+          CLEAN_PAY_FIXTURE_RELEASE: ${{ inputs.release }}
+          CLEAN_PAY_FIXTURE_REVISION: ${{ needs.publish.outputs.source-revision }}
+          CLEAN_PAY_EXPECTED_PUBLIC_BUILD_CONTRACT_VERSION: ${{ needs.publish.outputs.public-build-contract-version }}
+          CLEAN_PAY_EXPECTED_PUBLIC_BUILD_CONTRACT_SHA256: ${{ needs.publish.outputs.public-build-contract-sha256 }}
+        run: |
+          set -euo pipefail
+          case '${{ matrix.target }}' in
+            runner) image=$APPLICATION_IMAGE ;;
+            migration) image=$MIGRATION_IMAGE ;;
+            *) exit 2 ;;
+          esac
+          bash scripts/security/smoke-published-candidate.sh \
+            '${{ matrix.target }}' '${{ matrix.platform }}' "$image"
+
+      - name: Log out from GHCR
+        if: always()
+        shell: bash
+        run: docker logout ghcr.io >/dev/null 2>&1 || true
+
+  stage-complete:
+    if: inputs.mode == 'stage'
+    needs: [publish, scan-candidates, smoke-candidates]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Record the unpromoted approval boundary
+        shell: bash
+        env:
+          APPLICATION_IMAGE: ${{ needs.publish.outputs.application-image }}
+          MIGRATION_IMAGE: ${{ needs.publish.outputs.migration-image }}
+          SOURCE_REVISION: ${{ needs.publish.outputs.source-revision }}
+          PUBLIC_BUILD_CONTRACT_VERSION: ${{ needs.publish.outputs.public-build-contract-version }}
+          PUBLIC_BUILD_CONTRACT_SHA256: ${{ needs.publish.outputs.public-build-contract-sha256 }}
+        run: |
+          set -euo pipefail
+          [[ "$APPLICATION_IMAGE" =~ @sha256:[a-f0-9]{64}$ ]]
+          [[ "$MIGRATION_IMAGE" =~ @sha256:[a-f0-9]{64}$ ]]
           {
-            printf '## Digest-pinned deployment pair\n\n'
+            printf '## Staged; not approved or promoted\n\n'
+            printf 'Source revision: `%s`\n\n' "$SOURCE_REVISION"
+            printf 'Public build contract: `v%s:%s`\n\n' \
+              "$PUBLIC_BUILD_CONTRACT_VERSION" "$PUBLIC_BUILD_CONTRACT_SHA256"
+            printf 'Application index: `%s`\n\n' "$APPLICATION_IMAGE"
+            printf 'Migration index: `%s`\n\n' "$MIGRATION_IMAGE"
+            printf 'Download all four per-platform vulnerability evidence artifacts, review each `requestedApproval` (including candidate revision and canonical gated-report SHA-256), and commit only the four reviewed exact scopes to `security/container-vulnerability-exceptions.json`. Empty exception lists are valid only for an exact zero-finding report. Then run this workflow in `promote` mode with these two indexes, source revision, release, and the exact same four public inputs; the public build contract above must match.\n'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  promote:
+    if: inputs.mode == 'promote'
+    needs: [publish, scan-candidates, smoke-candidates]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      packages: write
+    env:
+      CLEAN_PAY_RELEASE: ${{ inputs.release }}
+      APPLICATION_IMAGE: ${{ needs.publish.outputs.application-image }}
+      MIGRATION_IMAGE: ${{ needs.publish.outputs.migration-image }}
+      SOURCE_REVISION: ${{ needs.publish.outputs.source-revision }}
+      PUBLIC_BUILD_CONTRACT_VERSION: ${{ needs.publish.outputs.public-build-contract-version }}
+      PUBLIC_BUILD_CONTRACT_SHA256: ${{ needs.publish.outputs.public-build-contract-sha256 }}
+    steps:
+      - name: Set up Docker Buildx for digest promotion
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+
+      - name: Log in to GHCR
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: echo "$GITHUB_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+
+      - name: Promote only the scanned multi-platform digests
+        shell: bash
+        run: |
+          set -euo pipefail
+          sha_tag="sha-${SOURCE_REVISION}"
+
+          promote_exact_digest() {
+            source=$1
+            repository=${source%@*}
+            expected_digest=${source##*@}
+            [[ "$repository" != "$source" && "$expected_digest" =~ ^sha256:[a-f0-9]{64}$ ]]
+
+            docker buildx imagetools create \
+              --tag "${repository}:${CLEAN_PAY_RELEASE}" \
+              --tag "${repository}:${sha_tag}" \
+              "$source"
+
+            for tag in "$CLEAN_PAY_RELEASE" "$sha_tag"; do
+              observed_digest=$(docker buildx imagetools inspect \
+                "${repository}:${tag}" --format '{{.Manifest.Digest}}')
+              test "$observed_digest" = "$expected_digest" || {
+                printf 'Promotion digest mismatch for %s:%s: expected %s, observed %s.\n' \
+                  "$repository" "$tag" "$expected_digest" "$observed_digest" >&2
+                exit 1
+              }
+            done
+          }
+
+          promote_exact_digest "$APPLICATION_IMAGE"
+          promote_exact_digest "$MIGRATION_IMAGE"
+
+          {
+            printf '## Scanned digest-pinned deployment pair\n\n'
             printf '```dotenv\n'
             printf 'CLEAN_PAY_DEPLOY_SOURCE=pull\n'
-            printf 'CLEAN_PAY_IMAGE=%s\n' "$application_image"
-            printf 'CLEAN_PAY_MIGRATION_IMAGE=%s\n' "$migration_image"
+            printf 'CLEAN_PAY_IMAGE=%s\n' "$APPLICATION_IMAGE"
+            printf 'CLEAN_PAY_MIGRATION_IMAGE=%s\n' "$MIGRATION_IMAGE"
             printf 'CLEAN_PAY_RELEASE=%s\n' "$CLEAN_PAY_RELEASE"
-            printf 'CLEAN_PAY_REVISION=%s\n' "$GITHUB_SHA"
+            printf 'CLEAN_PAY_REVISION=%s\n' "$SOURCE_REVISION"
             printf '```\n'
-            printf '\nRelease `%s`, revision `%s`, platforms `linux/amd64` and `linux/arm64`.\n' \
-              "$CLEAN_PAY_RELEASE" "$GITHUB_SHA"
-            printf 'Exact-SHA CI gate: %s\n' '${{ steps.ci.outputs.run_url }}'
+            printf '\nPublic build contract: `v%s:%s`.\n' \
+              "$PUBLIC_BUILD_CONTRACT_VERSION" "$PUBLIC_BUILD_CONTRACT_SHA256"
+            printf '\nBoth targets were scanned and smoke-executed at this exact index digest on `linux/amd64` and `linux/arm64` before immutable tag promotion.\n'
+            printf 'Exact-SHA CI gate: %s\n' '${{ needs.publish.outputs.ci-url }}'
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Log out from GHCR

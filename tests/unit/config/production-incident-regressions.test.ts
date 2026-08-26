@@ -388,5 +388,5 @@ describe("production incident regressions", () => {
     );
 
     expect(violations).toEqual([]);
-  }, 30_000);
+  }, process.platform === "win32" ? 60_000 : 30_000);
 });

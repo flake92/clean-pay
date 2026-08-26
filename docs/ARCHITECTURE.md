@@ -27,6 +27,14 @@ Server Components load query view models. Server Actions accept explicit command
 
 Each scenario has an explicit input and output. Application use cases depend on ports. Concrete Prisma, Redis, Remnashop, Remnawave, WebAuthn and Telegram implementations live outside the application layer and are wired in `src/app` composition roots. Provider-neutral DTOs in `src/application/models` may be imported as types by the React presentation layer.
 
+Production composition modules live only under `src/app/_composition`. Backend
+integrations never import a backend composition directory or an application
+use-case implementation. When an infrastructure workflow needs an
+application-owned decision (for example Telegram session recovery), the app
+composition root passes the narrow dependency contract explicitly into every
+runtime gateway; the adapter fails closed if that wiring is unavailable. No
+mutable process-global registration is used, so cold entrypoints are safe.
+
 Every application port must be consumed by an application use case. Technical helpers that merely forward a call to one concrete repository are not use cases and must stay in the outer adapter layer. Backend adapters may import application ports and models, but never an application use-case implementation; production use cases are composed only in `src/app`.
 
 Authentication policy belongs to `src/application/auth`: human verification and rate-limit ordering, registration fallback, session establishment, verification dispatch, password-reset session replacement and success auditing are application decisions. The backend authentication gateway exposes granular provider and persistence operations and translates provider failures into application-owned errors.

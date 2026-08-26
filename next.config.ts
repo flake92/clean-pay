@@ -7,6 +7,14 @@ const buildId = process.env.CLEAN_PAY_BUILD_ID?.trim()
 
 const nextConfig: NextConfig = {
   output: "standalone",
+  experimental: {
+    serverActions: {
+      // Keep the mutation envelope aligned with the former BFF contract. The
+      // proxy enforces the same byte limit so oversized actions receive a
+      // stable external 413 instead of Next's generic RSC 500 response.
+      bodySizeLimit: "64kb",
+    },
+  },
   env: {
     CLEAN_PAY_BUILD_ID: buildId,
   },

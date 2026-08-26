@@ -27,7 +27,12 @@ function providerAuth(session: TelegramWebAppProviderSession) {
   return session.context as ProviderAuth;
 }
 
-export const productionTelegramWebAppGateway: TelegramWebAppGateway = {
+type TelegramSessionRecoverer = typeof recoverRemnashopTelegramSession;
+
+export function createProductionTelegramWebAppGateway(
+  recoverSession: TelegramSessionRecoverer = recoverRemnashopTelegramSession,
+): TelegramWebAppGateway {
+  return {
   async preflightCapacity() {
     await assertRateLimitCapacity("telegram_webapp_login");
   },
@@ -84,7 +89,7 @@ export const productionTelegramWebAppGateway: TelegramWebAppGateway = {
   },
 
   async recoverSession(sessionId, userId) {
-    await recoverRemnashopTelegramSession(sessionId, userId);
+    await recoverSession(sessionId, userId);
   },
 
   async revokeSession(sessionId, userId) {
@@ -94,4 +99,7 @@ export const productionTelegramWebAppGateway: TelegramWebAppGateway = {
   async clearSessionCookies() {
     await clearWebSessionCookies();
   },
-};
+  };
+}
+
+export const productionTelegramWebAppGateway = createProductionTelegramWebAppGateway();

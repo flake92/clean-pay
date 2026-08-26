@@ -7,6 +7,16 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("@/backend/config/env", () => ({ getEnv: mocks.getEnv }));
+vi.mock("@/backend/database/pools", () => ({
+  runtimeDatabasePoolMetrics: () => [{
+    role: "application",
+    active: 2,
+    idle: 1,
+    waiting: 0,
+    maximum: 8,
+    exhausted: 0,
+  }],
+}));
 vi.mock("@/backend/observability/audit", () => ({
   logTechnicalError: mocks.logTechnicalError,
 }));
@@ -59,6 +69,9 @@ describe("internal Prometheus metrics route", () => {
     expect(response.headers.get("content-type")).toContain("text/plain");
     expect(body).toContain(
       'clean_pay_payment_reconciliation_backlog{state="pending"} 2',
+    );
+    expect(body).toContain(
+      'clean_pay_database_pool_connections{role="application",state="active"} 2',
     );
     expect(mocks.readReconciliationBacklog).toHaveBeenCalledTimes(1);
   });
