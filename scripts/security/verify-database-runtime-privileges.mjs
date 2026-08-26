@@ -3,7 +3,7 @@
 import { createHash, randomUUID } from "node:crypto";
 
 import { PrismaPg } from "@prisma/adapter-pg";
-import { Prisma, PrismaClient } from "@prisma/client";
+import prismaClientPackage from "@prisma/client";
 import pg from "pg";
 
 import {
@@ -14,6 +14,7 @@ import {
   DATABASE_TABLES,
 } from "../../deploy/prod/database-privilege-manifest.mjs";
 
+const { Prisma, PrismaClient } = prismaClientPackage;
 const { Client } = pg;
 
 function required(name) {

@@ -14,7 +14,7 @@ readonly REMNASHOP_IMAGE="clean-pay-remnashop-rehearsal:${RUN_SUFFIX}"
 readonly DATABASE_USER="remnashop"
 readonly DATABASE_PASSWORD="synthetic-rehearsal-password"
 readonly REHEARSAL_APP_CRYPT_KEY="MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=" # gitleaks:allow -- synthetic rehearsal credential
-readonly REHEARSAL_BOT_TOKEN="1234567890:ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghi" # gitleaks:allow -- synthetic rehearsal credential
+readonly REHEARSAL_BOT_TOKEN="1234567890:ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghi"
 readonly SOURCE_DATABASE="remnashop_source"
 readonly ROLLBACK_DATABASE="remnashop_rollback"
 readonly LOCK_DATABASE="remnashop_lock_retry"

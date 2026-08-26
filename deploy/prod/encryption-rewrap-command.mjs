@@ -4,7 +4,7 @@ import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { PrismaPg } from "@prisma/adapter-pg";
-import { PrismaClient } from "@prisma/client";
+import prismaClientPackage from "@prisma/client";
 
 import {
   prismaPgAdapterOptions,
@@ -16,6 +16,8 @@ import {
   encryptionKeyringFromEnvironment,
   runEncryptionRewrap,
 } from "./encryption-rewrap.mjs";
+
+const { PrismaClient } = prismaClientPackage;
 
 function canonicalInteger(argument, name, minimum, maximum) {
   const value = argument.slice(name.length + 1);

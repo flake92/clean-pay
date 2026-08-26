@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { PrismaPg } from "@prisma/adapter-pg";
-import { PrismaClient } from "@prisma/client";
+import prismaClientPackage from "@prisma/client";
 
 import { deployLog } from "./deploy-log.mjs";
 import { validateProductionDatabaseRoleEnvironment } from "./production-env-rules.mjs";
@@ -23,6 +23,8 @@ import {
   retentionHeartbeatPolicy,
 } from "./retention-heartbeat.mjs";
 import { createWorkerShutdownController } from "./worker-shutdown.mjs";
+
+const { PrismaClient } = prismaClientPackage;
 
 const MAX_CONSECUTIVE_CLEANUP_FAILURES = 5;
 
