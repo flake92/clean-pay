@@ -785,7 +785,7 @@ verify_external_security_headers() {
   script_policy=$(printf '%s' "$csp" | tr ';' '\n' | awk 'BEGIN{IGNORECASE=1} /^[[:space:]]*script-src[[:space:]]/{sub(/^[[:space:]]*script-src[[:space:]]*/, ""); print; exit}')
   printf '%s' "$script_policy" | grep -Eq "'nonce-[^']+'" \
     || die "External HTTPS response is missing a nonce-based script CSP."
-  if printf '%s' "$csp" | grep -Fiq "'unsafe-inline'"; then
+  if printf '%s' "$script_policy" | grep -Fiq "'unsafe-inline'"; then
     die "External script CSP still permits unsafe-inline."
   fi
 
