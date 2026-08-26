@@ -24,7 +24,7 @@ import {
 import { assertRemnashopEnvironmentFile } from "../../../deploy/prod/remnashop-env-preflight.mjs";
 
 const temporaryRoots: string[] = [];
-const powershellIntegrationTimeout = process.platform === "win32" ? 45_000 : 15_000;
+const powershellIntegrationTimeout = 45_000;
 
 function temporaryRoot() {
   const root = mkdtempSync(path.join(tmpdir(), "clean-pay-credential-guard-"));
@@ -192,12 +192,6 @@ describe("credential-file metadata guards", () => {
   );
 
   it("rejects a prohibited Windows plaintext source by metadata only", () => {
-    const available = spawnSync("pwsh", ["-NoProfile", "-Command", "$PSVersionTable.PSVersion.Major"], {
-      encoding: "utf8",
-      shell: false,
-    });
-    if (available.error || available.status !== 0) return;
-
     const root = temporaryRoot();
     const source = path.join(root, "legacy-credential-source.txt");
     const script = path.resolve("deploy/prod/operator-credential-source-preflight.ps1");
@@ -210,6 +204,8 @@ describe("credential-file metadata guards", () => {
       "-ForbiddenPlaintextPath",
       source,
     ], { encoding: "utf8", shell: false });
+    if ((rejected.error as NodeJS.ErrnoException | undefined)?.code === "ENOENT") return;
+    expect(rejected.error).toBeUndefined();
     expect(rejected.status).toBe(1);
     expect(rejected.stderr).not.toContain("SYNTHETIC_CANARY");
     expect(rejected.stderr).toContain("Unapproved plaintext credential source still exists");
