@@ -1195,7 +1195,7 @@ export function validateProductionApplicationRoleEnvironment(environment) {
     CLEAN_PAY_DATABASE_ADOPT_EXISTING: "false",
     POSTGRES_DB: postgresDatabase,
     POSTGRES_USER: "clean_pay_validation_bootstrap",
-    POSTGRES_PASSWORD: "40f3b040a561432b8482d11a7d74901e0c1cf9d92e98c46f",
+    POSTGRES_PASSWORD: "40f3b040a561432b8482d11a7d74901e0c1cf9d92e98c46f", // gitleaks:allow -- synthetic validator-only credential
   });
 }
 
