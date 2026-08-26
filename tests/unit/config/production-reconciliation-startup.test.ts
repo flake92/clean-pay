@@ -94,7 +94,7 @@ describe("production reconciliation startup", () => {
 
   it("logs only non-reversible manual-operation support handles", () => {
     const sentinel = "op_sensitive_marker";
-    const secret = "reconciliation-test-secret-with-at-least-32-characters";
+    const secret = "reconciliation-test-secret-with-at-least-32-characters"; // gitleaks:allow -- synthetic test credential
     const handles = reconciliationSupportHandles([sentinel, "operation-2"], secret);
 
     expect(handles).toHaveLength(2);
