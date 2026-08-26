@@ -4,7 +4,7 @@ import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { PrismaPg } from "@prisma/adapter-pg";
-import { PrismaClient } from "@prisma/client";
+import prismaClientPackage from "@prisma/client";
 
 import {
   prismaPgAdapterOptions,
@@ -17,6 +17,8 @@ import {
   placePaymentRetentionHold,
   releasePaymentRetentionHold,
 } from "./payment-retention-hold.mjs";
+
+const { PrismaClient } = prismaClientPackage;
 
 const MAX_REQUEST_BYTES = 16 * 1_024;
 
