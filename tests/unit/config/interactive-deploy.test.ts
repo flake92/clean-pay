@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 const deploy = readFileSync("deploy.sh", "utf8");
+const credentialFileGuard = readFileSync("deploy/prod/credential-file-guard.mjs", "utf8");
 const readme = readFileSync("README.md", "utf8");
 
 describe("interactive owner deployment", () => {
@@ -20,6 +21,19 @@ describe("interactive owner deployment", () => {
   it("creates secrets safely and does not require Docker before configuration", () => {
     expect(deploy).toContain('chmod 600 "$ENV_FILE"');
     expect(deploy).toContain("stty -echo");
+    expect(deploy).toContain("restore_secret_input_terminal");
+    expect(deploy).toContain("trap cleanup_deploy_state 0");
+    expect(deploy).toContain(
+      'node "$CREDENTIAL_FILE_GUARD_SCRIPT" env-set "$ENV_FILE" "$name"',
+    );
+    expect(credentialFileGuard).toContain("constants.O_CREAT | constants.O_EXCL");
+    expect(credentialFileGuard.indexOf("fsyncSync(temporaryDescriptor)")).toBeLessThan(
+      credentialFileGuard.indexOf("renameSync(temporaryPath, path)"),
+    );
+    expect(credentialFileGuard.indexOf("renameSync(temporaryPath, path)")).toBeLessThan(
+      credentialFileGuard.indexOf("fsyncSync(directoryDescriptor)"),
+    );
+    expect(deploy).not.toContain("sed -i");
     expect(deploy).toContain("ensure_generated_secret REMNASHOP_AUTH_SERVICE_KEY");
     expect(deploy).toMatch(/prepare_compose\(\) \{\s+init\s+need_docker/);
     expect(deploy).toContain('replace_env NEXT_PUBLIC_APP_URL "$(env_value APP_URL)"');

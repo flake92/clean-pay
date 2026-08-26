@@ -124,10 +124,14 @@ release/revision, а также baked URL, название и логотип п
 метаданными `local`/`unknown` не принимаются.
 
 Workflow **Publish paired Clean Pay images** запускается вручную в GitHub
-Actions. Он принимает release и публичные build-time настройки, собирает оба
-target строго из одного `github.sha`, публикует их в GHCR и выводит готовую пару
-digest-pinned ссылок в job summary. Для публикации используется только штатный
-`GITHUB_TOKEN` с ограничением `packages: write`.
+Actions в два этапа. `stage` собирает оба target строго из одного `github.sha`,
+сканирует и smoke-тестирует каждый platform manifest, но не создаёт release
+tags. После review четырёх exact digest scopes отдельный `promote` run повторно
+проверяет те же staged indexes и только затем выводит готовую digest-pinned
+пару. Порядок approval и запрет наследования исключений новым digest описаны в
+[`docs/container-vulnerability-release-gate.md`](docs/container-vulnerability-release-gate.md).
+Для публикации используется только штатный `GITHUB_TOKEN` с ограничением
+`packages: write`.
 
 Точная модель доверия к образам, порядок миграции и восстановление после её
 ошибки описаны в
@@ -271,24 +275,32 @@ headers, включая nonce-based CSP, добавляет Clean Pay.
 ```bash
 ./deploy.sh ps         # состояние контейнеров
 ./deploy.sh logs       # логи, выход — Ctrl+C
-./deploy.sh restart    # перезапуск контейнеров
+./deploy.sh restart    # применить новый role-env, пересоздать runtime и проверить readiness
 ./deploy.sh install    # подготовка образов и обновление после резервной копии
 ./deploy.sh down       # остановка без удаления данных
 ```
+
+`./deploy.sh restart` предназначен в том числе для смены runtime-секретов. Он
+проверяет обновлённый authoritative `.env` текущим application image, фиксирует
+точный уже запущенный image ID, удаляет только stateless-контейнеры приложения и
+workers, пересоздаёт их из новых role-scoped env-файлов и ждёт healthy readiness.
+Обычный `docker compose restart` для этого не подходит: он сохраняет старое
+окружение контейнера. Смену образа или схему базы применяйте через
+`./deploy.sh install`; пароль существующей PostgreSQL-роли требует отдельной
+согласованной DB-процедуры, а не только изменения `POSTGRES_PASSWORD` в `.env`.
 
 Не запускайте `docker compose down -v`, `docker volume prune` или
 `docker system prune --volumes`, если данные нужно сохранить.
 
 ## Обновление
 
-Перед обновлением сохраните конфигурацию и базу:
+Перед обновлением сохраните базу по процедуре из migration runbook и создайте
+зашифрованную резервную копию конфигурации в утверждённом secret manager.
+Не копируйте authoritative `.env` в ещё один plaintext-файл. После проверки
+backup выполните обновление:
 
 ```bash
 cd /opt/clean-pay
-cp -p deploy/prod/.env "deploy/prod/.env.backup-$(date +%Y%m%d-%H%M%S)"
-docker compose --env-file deploy/prod/.env -f deploy/prod/docker-compose.yml \
-  exec -T postgres sh -ec 'exec pg_dump -U "$POSTGRES_USER" -Fc "$POSTGRES_DB"' \
-  > "clean-pay-$(date +%Y%m%d-%H%M%S).dump"
 git pull --ff-only
 ./deploy.sh install
 ```

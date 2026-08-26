@@ -52,6 +52,7 @@ vi.mock("@/backend/integrations/payments/payment-user-merge-service", () => ({
 }));
 
 import { ServiceError } from "@/backend/errors/service-error";
+import { normalizeRemnashopError } from "@/backend/integrations/remnashop/errors";
 import {
   beginPaymentOperation,
   bindPaymentOperationUpstreamOwner,
@@ -151,7 +152,11 @@ describe("payment operation idempotency", () => {
     mocks.paymentRecord.findUnique.mockResolvedValue(null);
     mocks.paymentRecord.create.mockResolvedValue({ id: "record-1" });
     mocks.paymentRecord.updateMany.mockResolvedValue({ count: 1 });
-    mocks.queryRaw.mockResolvedValue([{ id: "user-1" }]);
+    mocks.queryRaw.mockImplementation(async (query: { strings?: string[] }) =>
+      query.strings?.join(" ").includes('FROM "PaymentRetentionHold"')
+        ? [{ retained: false }]
+        : [{ id: "user-1" }]
+    );
     mocks.lockPaymentUpstreamOwner.mockResolvedValue(undefined);
     mocks.lockPaymentOwnerFence.mockImplementation(
       async (_tx: unknown, userIds: string[]) => userIds,
@@ -483,6 +488,71 @@ describe("payment operation idempotency", () => {
     expect(mocks.paymentOperation.updateMany).not.toHaveBeenCalled();
   });
 
+  it("keeps terminal idempotency replay usable after sensitive snapshots are scrubbed", async () => {
+    let operation: ReturnType<typeof storedOperation> | undefined;
+    mocks.paymentOperation.create.mockImplementation(
+      async ({ data }: { data: Record<string, unknown> }) => {
+        operation = storedOperation(data);
+        return operation;
+      },
+    );
+    await beginPaymentOperation(beginInput() as never);
+    vi.clearAllMocks();
+    mocks.paymentOperation.create.mockRejectedValue(uniqueConstraintError());
+    const retainedSuccess = storedOperation(operation ?? {}, {
+      status: "SUCCEEDED",
+      responseStatus: 200,
+      snapshotScrubbedAt: new Date("2026-07-18T00:00:00.000Z"),
+      responseSnapshot: {
+        retention: "scrubbed",
+        version: 2,
+        outcome: "success",
+        payment_id: "payment-retained",
+        payment_url: null,
+        purchase_type: "subscription",
+        status: "completed",
+        is_free: false,
+        final_amount: "100.00",
+        currency: "RUB",
+      },
+    });
+    mocks.paymentOperation.findUnique.mockResolvedValueOnce(retainedSuccess);
+
+    await expect(beginPaymentOperation(beginInput() as never)).resolves.toMatchObject({
+      state: "replay",
+      outcome: "success",
+      response: {
+        payment_id: "payment-retained",
+        payment_url: null,
+      },
+    });
+
+    mocks.paymentOperation.findUnique.mockResolvedValueOnce(storedOperation(operation ?? {}, {
+      status: "FAILED_FINAL",
+      responseStatus: 409,
+      snapshotScrubbedAt: new Date("2026-07-18T00:00:00.000Z"),
+      errorSnapshot: {
+        retention: "scrubbed",
+        version: 2,
+        outcome: "failure",
+        code: "PLAN_UNAVAILABLE",
+        status: 409,
+      },
+    }));
+
+    await expect(beginPaymentOperation(beginInput() as never)).resolves.toMatchObject({
+      state: "replay",
+      outcome: "failure",
+      responseStatus: 409,
+      error: {
+        code: "PLAN_UNAVAILABLE",
+        status: 409,
+        message: expect.any(String),
+      },
+    });
+    expect(mocks.paymentOperation.updateMany).not.toHaveBeenCalled();
+  });
+
   it("moves stale dispatches to unknown but lets their leader finish late", async () => {
     let operation: ReturnType<typeof storedOperation> | undefined;
     mocks.paymentOperation.create.mockImplementation(
@@ -705,6 +775,89 @@ describe("payment operation idempotency", () => {
         }),
       ),
     ).toBe("FINAL");
+  });
+
+  it("keeps prose-derived and upstream-5xx payment failures reconcilable", async () => {
+    const uncertain = [
+      [500, "Plan unavailable while the dependency restarts"],
+      [502, "Payment gateway temporarily unavailable"],
+      [503, "Verification code service unavailable"],
+      [409, "Payment result pending reconciliation; do not retry"],
+      [409, "Результат платежа ещё уточняется"],
+    ] as const;
+
+    for (const [status, detail] of uncertain) {
+      const error = normalizeRemnashopError(status, detail, {
+        path: "/subscription/purchase",
+      });
+      const outcome = paymentOperationDispatchFailureOutcome(error);
+      expect(outcome).toBe("UNKNOWN");
+
+      mocks.paymentOperation.updateMany.mockResolvedValueOnce({ count: 1 });
+      await settlePaymentOperationAfterDispatchFailure({
+        operationId: `operation-${status}-${detail.length}`,
+        claimToken: "claim-uncertain",
+        error,
+        outcome,
+      });
+      expect(mocks.paymentOperation.updateMany).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ status: "OUTCOME_UNKNOWN" }),
+        }),
+      );
+    }
+  });
+
+  it.each([400, 409, 422, 429, 500, 502, 503])(
+    "keeps exact PAYMENT_OUTCOME_UNKNOWN at upstream status %i reconcilable through settlement",
+    async (status) => {
+      const error = normalizeRemnashopError(
+        status,
+        {
+          code: "PAYMENT_OUTCOME_UNKNOWN",
+          detail: `localized detail for ${status}`,
+        },
+        { path: "/subscription/purchase" },
+      );
+      const outcome = paymentOperationDispatchFailureOutcome(error);
+
+      expect(error.debug).toMatchObject({
+        upstreamStatus: status,
+        upstreamCode: "PAYMENT_OUTCOME_UNKNOWN",
+      });
+      expect(outcome).toBe("UNKNOWN");
+
+      mocks.paymentOperation.updateMany.mockResolvedValueOnce({ count: 1 });
+      await settlePaymentOperationAfterDispatchFailure({
+        operationId: `operation-machine-unknown-${status}`,
+        claimToken: "claim-machine-unknown",
+        error,
+        outcome,
+      });
+      expect(mocks.paymentOperation.updateMany).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ status: "OUTCOME_UNKNOWN" }),
+        }),
+      );
+    },
+  );
+
+  it("uses stable payment machine codes without trusting their display text", () => {
+    const unknown = normalizeRemnashopError(
+      409,
+      { code: "PAYMENT_OUTCOME_UNKNOWN", message: "localized wording" },
+      { path: "/subscription/extend" },
+    );
+    const final = normalizeRemnashopError(
+      409,
+      { error_code: "PLAN_UNAVAILABLE", message: "localized wording" },
+      { path: "/subscription/purchase" },
+    );
+
+    expect(unknown.debug?.upstreamCode).toBe("PAYMENT_OUTCOME_UNKNOWN");
+    expect(paymentOperationDispatchFailureOutcome(unknown)).toBe("UNKNOWN");
+    expect(final.debug?.upstreamCode).toBe("PLAN_UNAVAILABLE");
+    expect(paymentOperationDispatchFailureOutcome(final)).toBe("FINAL");
   });
 
   it("releases a definitively retryable post-dispatch operation to READY", async () => {

@@ -17,7 +17,10 @@ function hasValidSecret(request: Request) {
 
 export async function GET(request: Request) {
   if (!hasValidSecret(request)) {
-    return NextResponse.json({ error: { code: "NOT_FOUND", message: "Not found" } }, { status: 404 });
+    return NextResponse.json(
+      { error: { code: "NOT_FOUND", message: "Not found" } },
+      { status: 404, headers: { "cache-control": "no-store" } },
+    );
   }
 
   try {

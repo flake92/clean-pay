@@ -4,9 +4,10 @@ import { prisma } from "@/backend/database/prisma";
 import { ServiceError } from "@/backend/errors/service-error";
 import {
   protectRemnashopToken,
-  revealRemnashopToken,
+  revealRemnashopTokenEnvelope,
 } from "@/backend/integrations/remnashop/token-protection";
 import { authDebugLog } from "@/backend/observability/auth-debug-log";
+import { recordOperationalEvent } from "@/backend/observability/metrics";
 import { randomToken, sha256 } from "@/backend/security/crypto";
 
 type RefreshResult = {
@@ -28,6 +29,17 @@ type TokenCandidate = {
   session: LockedSession;
   accessToken: string;
   refreshToken: string;
+};
+
+type PreparedTokenCandidate = TokenCandidate & {
+  rewrap: {
+    accessTokenEncrypted: string;
+    refreshTokenEncrypted: string;
+    data: {
+      remnashopAccessTokenEncrypted: string;
+      remnashopRefreshTokenEncrypted: string;
+    };
+  } | null;
 };
 
 type TokenResult = TokenCandidate & {
@@ -92,7 +104,10 @@ function encryptedBundle(session: LockedSession) {
   };
 }
 
-function tokenCandidate(session: LockedSession, now: Date) {
+function tokenCandidate(
+  session: LockedSession,
+  now: Date,
+): PreparedTokenCandidate | null {
   const encryptedAccessToken = session.remnashopAccessTokenEncrypted;
   const encryptedRefreshToken = session.remnashopRefreshTokenEncrypted;
 
@@ -108,11 +123,24 @@ function tokenCandidate(session: LockedSession, now: Date) {
   }
 
   try {
+    const access = revealRemnashopTokenEnvelope(encryptedAccessToken);
+    const refresh = revealRemnashopTokenEnvelope(encryptedRefreshToken);
+    const rewrap = access.needsRewrap || refresh.needsRewrap
+      ? {
+          accessTokenEncrypted: encryptedAccessToken,
+          refreshTokenEncrypted: encryptedRefreshToken,
+          data: {
+            remnashopAccessTokenEncrypted: protectRemnashopToken(access.value),
+            remnashopRefreshTokenEncrypted: protectRemnashopToken(refresh.value),
+          },
+        }
+      : null;
     return {
-      session,
-      accessToken: revealRemnashopToken(encryptedAccessToken),
-      refreshToken: revealRemnashopToken(encryptedRefreshToken),
-    } satisfies TokenCandidate;
+      session: rewrap ? { ...session, ...rewrap.data } : session,
+      accessToken: access.value,
+      refreshToken: refresh.value,
+      rewrap,
+    } satisfies PreparedTokenCandidate;
   } catch {
     return null;
   }
@@ -181,6 +209,19 @@ function normalizeRefreshResult(refreshed: RefreshResult): RefreshRecovery {
     "refresh expiry",
   );
 
+  const now = new Date();
+  if (
+    accessExpiresAt <= now ||
+    refreshExpiresAt <= now ||
+    refreshExpiresAt <= accessExpiresAt
+  ) {
+    throw new ServiceError(
+      "UPSTREAM_ERROR",
+      502,
+      "Remnashop refresh returned an unusable token expiry window",
+    );
+  }
+
   return {
     version: 1,
     accessToken,
@@ -191,7 +232,8 @@ function normalizeRefreshResult(refreshed: RefreshResult): RefreshRecovery {
 }
 
 function decodeRefreshRecovery(encrypted: string): RefreshRecovery {
-  const parsed = JSON.parse(revealRemnashopToken(encrypted)) as Partial<RefreshRecovery>;
+  const revealed = revealRemnashopTokenEnvelope(encrypted);
+  const parsed = JSON.parse(revealed.value) as Partial<RefreshRecovery>;
 
   if (
     parsed.version !== 1 ||
@@ -207,14 +249,43 @@ function decodeRefreshRecovery(encrypted: string): RefreshRecovery {
     throw new Error("Invalid Remnashop refresh recovery payload");
   }
 
-  parseRecoveryDate(parsed.accessExpiresAt, "recovery access expiry");
-  parseRecoveryDate(parsed.refreshExpiresAt, "recovery refresh expiry");
+  const accessExpiresAt = parseRecoveryDate(
+    parsed.accessExpiresAt,
+    "recovery access expiry",
+  );
+  const refreshExpiresAt = parseRecoveryDate(
+    parsed.refreshExpiresAt,
+    "recovery refresh expiry",
+  );
+  if (refreshExpiresAt <= new Date() || refreshExpiresAt <= accessExpiresAt) {
+    throw new Error("Invalid Remnashop refresh recovery expiry window");
+  }
+
+  if (revealed.needsRewrap) {
+    // finalizeRecoveryRow writes a fresh current-key token bundle and removes
+    // this recovery envelope in the same transaction.
+    recordOperationalEvent("encrypted_refresh_recovery_rewrapped");
+  }
 
   return parsed as RefreshRecovery;
 }
 
 function encryptedRecovery(recovery: RefreshRecovery) {
   return protectRemnashopToken(JSON.stringify(recovery));
+}
+
+function assertRecoveryUsableForCaller(recovery: RefreshRecovery) {
+  const now = new Date();
+  const accessExpiresAt = new Date(recovery.accessExpiresAt);
+  const refreshExpiresAt = new Date(recovery.refreshExpiresAt);
+
+  if (accessExpiresAt <= now || refreshExpiresAt <= now) {
+    throw new ServiceError(
+      "UPSTREAM_UNAVAILABLE",
+      503,
+      "Remnashop refresh completed with a token bundle that expired during finalization",
+    );
+  }
 }
 
 function refreshedBundle(recovery: RefreshRecovery) {
@@ -469,10 +540,34 @@ async function prepareTokenAcquisition({
     const candidates: TokenCandidate[] = [];
     const invalidOwnerIds = new Set<string>();
 
-    for (const session of sessions) {
+    for (let index = 0; index < sessions.length; index += 1) {
+      const session = sessions[index]!;
       const candidate = tokenCandidate(session, now);
 
       if (candidate) {
+        if (candidate.rewrap) {
+          const rewrapped = await tx.webSession.updateMany({
+            where: {
+              id: session.id,
+              userId,
+              revokedAt: null,
+              remnashopAccessTokenEncrypted:
+                candidate.rewrap.accessTokenEncrypted,
+              remnashopRefreshTokenEncrypted:
+                candidate.rewrap.refreshTokenEncrypted,
+            },
+            data: candidate.rewrap.data,
+          });
+          if (rewrapped.count !== 1) {
+            throw new ServiceError(
+              "CONFLICT",
+              409,
+              "Remnashop token key rotation ownership changed",
+            );
+          }
+          sessions[index] = candidate.session;
+          recordOperationalEvent("encrypted_session_bundle_rewrapped");
+        }
         candidates.push(candidate);
       } else if (hasAnyTokenMaterial(session)) {
         invalidOwnerIds.add(session.id);
@@ -1007,18 +1102,22 @@ export async function acquireRemnashopTokensForSession({
     recoveryEncrypted,
   });
 
-  if (alreadyFinalized) {
-    return {
+  const result = alreadyFinalized
+    ? {
       accessToken: recovery.accessToken,
       refreshToken: recovery.refreshToken,
       session: alreadyFinalized,
       source: "refresh" as const,
-    };
-  }
+    }
+    : await finalizeRefreshClaim({
+        plan: dispatchedPlan,
+        recovery,
+        recoveryEncrypted,
+      });
 
-  return finalizeRefreshClaim({
-    plan: dispatchedPlan,
-    recovery,
-    recoveryEncrypted,
-  });
+  // Finalization can outlive a pathologically short provider access token.
+  // Keep the newly-issued refresh token durable, but never hand an already
+  // expired access token to the caller as an authorized result.
+  assertRecoveryUsableForCaller(recovery);
+  return result;
 }

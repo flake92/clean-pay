@@ -18,9 +18,14 @@ function passwordSession(value: { context: unknown }) { return value.context as 
 function passwordProvider(value: { context: unknown }) { return value.context as PasswordProviderContext; }
 function addDays(date: Date, days: number) { return new Date(date.getTime() + days * 86_400_000); }
 
-export const productionProfileCommands: ProfileCommands = {
+type ProfileAuthorizer = typeof getAuthorizedRemnashopTokens;
+
+export function createProductionProfileCommands(
+  authorize: ProfileAuthorizer = getAuthorizedRemnashopTokens,
+): ProfileCommands {
+  return {
   async loadPasswordSession() {
-    const authorized = await getAuthorizedRemnashopTokens();
+    const authorized = await authorize();
     return { context: authorized, userId: authorized.session.userId };
   },
   async assertPasswordChangeRateLimit(session) {
@@ -74,4 +79,7 @@ export const productionProfileCommands: ProfileCommands = {
   async auditPasswordChanged(userId) {
     await auditLog({ action: "password_changed", userId });
   },
-};
+  };
+}
+
+export const productionProfileCommands = createProductionProfileCommands();

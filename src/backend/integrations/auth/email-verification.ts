@@ -70,11 +70,16 @@ function providerSession(auth: {
   };
 }
 
-export const productionEmailVerificationCommands: EmailVerificationCommands = {
+type EmailVerificationAuthorizer = typeof getAuthorizedRemnashopTokens;
+
+export function createProductionEmailVerificationCommands(
+  authorize: EmailVerificationAuthorizer = getAuthorizedRemnashopTokens,
+): EmailVerificationCommands {
+  return {
   verifyHuman: (token, action) => adapt(() => verifyTurnstileToken(token, action)),
 
   async loadActor(options) {
-    const authorized = await adapt(() => getAuthorizedRemnashopTokens(
+    const authorized = await adapt(() => authorize(
       options?.allowUnverifiedEmail ? { allowUnverifiedEmail: true } : undefined,
     ));
     const { accessToken, session } = authorized;
@@ -333,4 +338,8 @@ export const productionEmailVerificationCommands: EmailVerificationCommands = {
     }));
   },
 
-};
+  };
+}
+
+export const productionEmailVerificationCommands =
+  createProductionEmailVerificationCommands();

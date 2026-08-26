@@ -87,7 +87,7 @@ describe("production host safety", () => {
       "no-new-privileges",
       "--entrypoint",
       "cat",
-      "redis:7-alpine",
+      "redis:7-alpine@sha256:ff02b58f971e7d7d156a1267e283fcbbeee91773b6aa36c49dac28ecfe28eadf",
       "/proc/sys/vm/overcommit_memory",
     ]);
 
@@ -98,7 +98,7 @@ describe("production host safety", () => {
       "--cap-drop ALL",
       "--security-opt no-new-privileges",
       "--entrypoint cat",
-      "redis:7-alpine",
+      "redis:7-alpine@sha256:ff02b58f971e7d7d156a1267e283fcbbeee91773b6aa36c49dac28ecfe28eadf",
       "/proc/sys/vm/overcommit_memory",
     ]) {
       expect(shellProbe, option).toContain(option);
@@ -154,8 +154,8 @@ describe("production host safety", () => {
     expect(restart, "deploy.sh: restart").not.toBe("");
     expectBefore(
       restart,
-      "ensure_redis_host_memory_policy",
-      "compose restart",
+      "prepare_compose",
+      "restart_runtime_services",
       "deploy.sh: restart",
     );
 

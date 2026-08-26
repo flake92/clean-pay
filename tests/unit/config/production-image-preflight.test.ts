@@ -23,6 +23,18 @@ const posixShell = process.platform === "win32"
   ? ["C:/Program Files/Git/bin/sh.exe", "C:/Program Files/Git/usr/bin/sh.exe"]
       .find((candidate) => existsSync(candidate))
   : "sh";
+const shellIntegrationTimeout = process.platform === "win32" ? 45_000 : 15_000;
+const deployScript = readFileSync("deploy.sh", "utf8");
+
+function shellFunctionFrom(source: string, name: string) {
+  const start = source.indexOf(`${name}() {`);
+  expect(start, `${name} must exist`).toBeGreaterThanOrEqual(0);
+  const bodyStart = source.indexOf("\n", start) + 1;
+  const nextFunction = source.slice(bodyStart).search(/^\w+\(\) \{/m);
+  return nextFunction < 0
+    ? source.slice(start)
+    : source.slice(start, bodyStart + nextFunction);
+}
 
 function imageReferences(overrides: Record<string, string> = {}) {
   return {
@@ -149,6 +161,10 @@ describe("deployment image metadata preflight", () => {
       expect(calls.match(/image inspect --format \{\{\.Id\}\} clean-pay-migration:test/g))
         .toHaveLength(1);
       expect(calls).toContain("run --rm --interactive --network none --read-only");
+      expect(calls).toContain("--pids-limit 64 --memory 256m --cpus 0.5");
+      expect(calls).toContain(
+        "--tmpfs /tmp:rw,noexec,nosuid,nodev,size=16m,mode=1777",
+      );
       expect(calls).toContain(
         `--entrypoint node ${fixture.appId} deploy/prod/validate-env.mjs --runtime-env-stdin`,
       );
@@ -161,7 +177,7 @@ describe("deployment image metadata preflight", () => {
     } finally {
       fixture.cleanup();
     }
-  });
+  }, shellIntegrationTimeout);
 
   it.skipIf(!posixShell)("fails before the runtime validator for mismatched or untraceable metadata", () => {
     const fixture = createFakeDockerFixture();
@@ -175,6 +191,14 @@ describe("deployment image metadata preflight", () => {
       expect(readFileSync(fixture.logFile, "utf8")).not.toContain("run --rm");
 
       writeFileSync(fixture.logFile, "");
+      const mismatchedContract = runPreflight(fixture, "build", {
+        FAKE_MIGRATION_CONTRACT_SHA256: "d".repeat(64),
+      });
+      expect(mismatchedContract.status).toBe(1);
+      expect(mismatchedContract.stderr).toContain("different public build contracts");
+      expect(readFileSync(fixture.logFile, "utf8")).not.toContain("run --rm");
+
+      writeFileSync(fixture.logFile, "");
       const localPull = runPreflight(fixture, "pull", {
         FAKE_APP_RELEASE: "local",
         FAKE_MIGRATION_RELEASE: "local",
@@ -185,7 +209,7 @@ describe("deployment image metadata preflight", () => {
     } finally {
       fixture.cleanup();
     }
-  });
+  }, shellIntegrationTimeout);
 });
 
 describe("build provenance guard", () => {
@@ -256,6 +280,79 @@ describe("Compose interpolation isolation", () => {
     expect(functionSource).toContain("min_mb=$(env_value CLEAN_PAY_MIN_FREE_DISK_MB 8192)");
     expect(functionSource).not.toContain("${CLEAN_PAY_MIN_FREE_DISK_MB:-");
   });
+
+  it.skipIf(!posixShell)(
+    "resolves and validates restart preflight source when prepare_images never initialized it",
+    () => {
+      const directory = mkdtempSync(path.join(tmpdir(), "clean-pay-restart-preflight-"));
+      const sourceOutput = path.join(directory, "source.txt");
+      const appId = `sha256:${"a".repeat(64)}`;
+      const migrationId = `sha256:${"b".repeat(64)}`;
+      const harness = `
+set -eu
+verified_image_dir=''
+verified_image_output=''
+CLEAN_PAY_VERIFIED_APP_IMAGE=''
+CLEAN_PAY_VERIFIED_MIGRATION_IMAGE=''
+ENV_FILE=/synthetic/production.env
+IMAGE_PREFLIGHT_SCRIPT=/synthetic/image-preflight.sh
+env_value() {
+  if [ "$1" = CLEAN_PAY_DEPLOY_SOURCE ]; then
+    printf '%s' "$DEPLOY_SOURCE"
+  else
+    printf '%s' "\${2:-}"
+  fi
+}
+die() { printf 'ERROR: %s\\n' "$*" >&2; exit 1; }
+sh() {
+  [ "$1" = "$IMAGE_PREFLIGHT_SCRIPT" ]
+  printf '%s' "$2" > "$SOURCE_OUTPUT"
+  printf '%s\\n%s\\n' \\
+    'CLEAN_PAY_VERIFIED_APP_IMAGE=${appId}' \\
+    'CLEAN_PAY_VERIFIED_MIGRATION_IMAGE=${migrationId}' > "\${12}"
+}
+${shellFunctionFrom(deployScript, "deployment_source")}
+${shellFunctionFrom(deployScript, "cleanup_verified_images")}
+${shellFunctionFrom(deployScript, "preflight_images")}
+unset deploy_source
+preflight_images '${appId}' '${migrationId}'
+printf 'source=%s\\n' "$(cat "$SOURCE_OUTPUT")"
+cleanup_verified_images
+`;
+      const run = (source: string) => spawnSync(posixShell!, ["-c", harness], {
+        cwd: process.cwd(),
+        encoding: "utf8",
+        env: {
+          ...process.env,
+          DEPLOY_SOURCE: source,
+          SOURCE_OUTPUT: sourceOutput.replaceAll("\\", "/"),
+          TMPDIR: directory.replaceAll("\\", "/"),
+        },
+      });
+
+      try {
+        const valid = run("pull");
+        expect(valid.status, valid.stderr).toBe(0);
+        expect(valid.stdout).toContain("source=pull");
+
+        const invalid = run("archive");
+        expect(invalid.status).not.toBe(0);
+        expect(invalid.stderr).toContain(
+          "CLEAN_PAY_DEPLOY_SOURCE must be build or pull",
+        );
+
+        const restartPreflight = shellFunctionFrom(
+          deployScript,
+          "preflight_runtime_restart_image",
+        );
+        expect(restartPreflight).toContain("preflight_images");
+        expect(restartPreflight).not.toContain("prepare_images");
+      } finally {
+        rmSync(directory, { recursive: true, force: true });
+      }
+    },
+    shellIntegrationTimeout,
+  );
 });
 
 function createFakeDockerFixture() {
@@ -288,6 +385,10 @@ if [ "$1" = "image" ] && [ "$2" = "inspect" ]; then
       if [ "$image" = "$FAKE_APP_ID" ]; then printf '%s\\n' "$FAKE_APP_RELEASE"; else printf '%s\\n' "$FAKE_MIGRATION_RELEASE"; fi ;;
     *org.opencontainers.image.revision*)
       if [ "$image" = "$FAKE_APP_ID" ]; then printf '%s\\n' "$FAKE_APP_REVISION"; else printf '%s\\n' "$FAKE_MIGRATION_REVISION"; fi ;;
+    *io.clean-pay.public-build-contract-version*)
+      if [ "$image" = "$FAKE_APP_ID" ]; then printf '%s\\n' "$FAKE_APP_CONTRACT_VERSION"; else printf '%s\\n' "$FAKE_MIGRATION_CONTRACT_VERSION"; fi ;;
+    *io.clean-pay.public-build-contract-sha256*)
+      if [ "$image" = "$FAKE_APP_ID" ]; then printf '%s\\n' "$FAKE_APP_CONTRACT_SHA256"; else printf '%s\\n' "$FAKE_MIGRATION_CONTRACT_SHA256"; fi ;;
     *io.clean-pay.baked-public-app-url*) printf '%s\\n' https://pay.example.test ;;
     *io.clean-pay.baked-brand-name*) printf '%s\\n' 'Clean Pay' ;;
     *io.clean-pay.baked-brand-logo-url*) printf '%s\\n' /clean-pay-logo.png ;;
@@ -351,6 +452,10 @@ function runPreflight(
         FAKE_MIGRATION_RELEASE: "0.1.1",
         FAKE_APP_REVISION: "0123456789abcdef0123456789abcdef01234567",
         FAKE_MIGRATION_REVISION: "0123456789abcdef0123456789abcdef01234567",
+        FAKE_APP_CONTRACT_VERSION: "1",
+        FAKE_MIGRATION_CONTRACT_VERSION: "1",
+        FAKE_APP_CONTRACT_SHA256: "c".repeat(64),
+        FAKE_MIGRATION_CONTRACT_SHA256: "c".repeat(64),
         ...overrides,
       },
     },

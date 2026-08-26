@@ -13,3 +13,13 @@ export async function requireRequestSession(returnTo: string) {
   if (!session) redirect(sessionRefreshPath(returnTo));
   return session;
 }
+
+export function requestSessionRequiresPasskey(session: { context: unknown }) {
+  const context = session.context;
+  return Boolean(
+    context &&
+      typeof context === "object" &&
+      "assuranceLevel" in context &&
+      context.assuranceLevel === "BOOTSTRAP",
+  );
+}

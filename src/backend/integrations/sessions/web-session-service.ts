@@ -3,7 +3,12 @@ import type { NextResponse } from "next/server";
 import { Prisma, WebSessionAssuranceLevel, WebSessionAuthMethod } from "@prisma/client";
 
 import { authDebugLog } from "@/backend/observability/auth-debug-log";
-import { decryptSecret, encryptSecret, sha256, randomToken } from "@/backend/security/crypto";
+import {
+  decryptKeyringSecret,
+  encryptKeyringSecret,
+  sha256,
+  randomToken,
+} from "@/backend/security/crypto";
 import { getEnv } from "@/backend/config/env";
 import { prisma } from "@/backend/database/prisma";
 import { ServiceError } from "@/backend/errors/service-error";
@@ -37,6 +42,24 @@ export {
   assertEmailVerificationPolicy,
   refreshTokenGraceMs,
 } from "@/backend/integrations/sessions/web-session-policy";
+
+const REFRESH_SUCCESSOR_PURPOSE = "web-refresh-successor";
+
+function protectRefreshSuccessor(token: string) {
+  return encryptKeyringSecret(
+    token,
+    getEnv().webRefreshKeyring,
+    REFRESH_SUCCESSOR_PURPOSE,
+  );
+}
+
+function revealRefreshSuccessor(token: string) {
+  return decryptKeyringSecret(
+    token,
+    getEnv().webRefreshKeyring,
+    REFRESH_SUCCESSOR_PURPOSE,
+  );
+}
 
 async function revokeSessionByRefreshToken(refreshToken: string) {
   const tokenHash = sha256(refreshToken);
@@ -102,7 +125,7 @@ export async function rotateRefreshTokenFamily(refreshToken: string, now = new D
         data: {
           sessionId: session.id,
           tokenHash,
-          successorTokenEncrypted: encryptSecret(successorToken, getEnv().webRefreshSecret),
+          successorTokenEncrypted: protectRefreshSuccessor(successorToken),
           graceExpiresAt: new Date(now.getTime() + refreshTokenGraceMs),
           consumedAt: now,
         },
@@ -123,7 +146,18 @@ export async function rotateRefreshTokenFamily(refreshToken: string, now = new D
     const consumed = await tx.webRefreshToken.findUnique({ where: { tokenHash } });
 
     if (consumed && consumed.sessionId === session.id && consumed.graceExpiresAt >= now) {
-      const successorToken = decryptSecret(consumed.successorTokenEncrypted, getEnv().webRefreshSecret);
+      const revealed = revealRefreshSuccessor(consumed.successorTokenEncrypted);
+      const successorToken = revealed.value;
+      if (revealed.needsRewrap) {
+        await tx.webRefreshToken.updateMany({
+          where: {
+            id: consumed.id,
+            successorTokenEncrypted: consumed.successorTokenEncrypted,
+          },
+          data: { successorTokenEncrypted: protectRefreshSuccessor(successorToken) },
+        });
+        recordOperationalEvent("encrypted_refresh_successor_rewrapped");
+      }
       const updatedSession = await tx.webSession.update({
         where: { id: session.id },
         data: { accessTokenExpiresAt },
@@ -561,6 +595,114 @@ export async function createWebSessionOnResponse(
     refreshExpiresAt,
   });
 
+  return session;
+}
+
+export async function createDurableCallbackWebSession(
+  tx: Prisma.TransactionClient,
+  userId: string,
+  options: {
+    authMethod?: WebSessionAuthMethod;
+    remnashopSession?: {
+      accessTokenEncrypted: string;
+      refreshTokenEncrypted: string;
+      accessExpiresAt: Date;
+      refreshExpiresAt: Date;
+    };
+    now?: Date;
+  } = {},
+) {
+  const requestHeaders = await headers();
+  const now = options.now ?? new Date();
+  const accessTokenExpiresAt = addMinutes(
+    now,
+    securityPolicy.accessSessionTtlMinutes,
+  );
+  const refreshExpiresAt = addDays(now, securityPolicy.refreshSessionTtlDays);
+  const refreshToken = randomToken(48);
+  const session = await tx.webSession.create({
+    data: {
+      userId,
+      refreshTokenHash: sha256(refreshToken),
+      remnashopAccessTokenEncrypted: options.remnashopSession?.accessTokenEncrypted,
+      remnashopRefreshTokenEncrypted: options.remnashopSession?.refreshTokenEncrypted,
+      remnashopAccessExpiresAt: options.remnashopSession?.accessExpiresAt,
+      remnashopRefreshExpiresAt: options.remnashopSession?.refreshExpiresAt,
+      authMethod: options.authMethod ?? WebSessionAuthMethod.TELEGRAM,
+      assuranceLevel: WebSessionAssuranceLevel.FULL,
+      userAgent: requestHeaders.get("user-agent"),
+      accessTokenExpiresAt,
+      refreshExpiresAt,
+    },
+    include: { user: true },
+  });
+  return { session, refreshToken };
+}
+
+export function setDurableCallbackWebSessionCookies(
+  response: NextResponse,
+  credentials: Awaited<ReturnType<typeof createDurableCallbackWebSession>>,
+) {
+  const env = getEnv();
+  const { session, refreshToken } = credentials;
+  const accessToken = signAccessToken({
+    sid: session.id,
+    uid: session.userId,
+    exp: Math.floor(session.accessTokenExpiresAt.getTime() / 1000),
+    al: session.assuranceLevel,
+    ev: Boolean(session.user.emailVerified),
+    tg: Boolean(session.user.telegramId),
+  });
+  response.cookies.set(sessionCookieNames.access, accessToken, {
+    httpOnly: true,
+    secure: env.cookieSecure,
+    sameSite: env.cookieSameSite,
+    path: "/",
+    expires: session.accessTokenExpiresAt,
+  });
+  response.cookies.set(sessionCookieNames.refresh, refreshToken, {
+    httpOnly: true,
+    secure: env.cookieSecure,
+    sameSite: env.cookieSameSite,
+    path: "/",
+    expires: session.refreshExpiresAt,
+  });
+}
+
+/**
+ * Replays the exact encrypted callback bootstrap bearer without rotating the
+ * refresh family. Concurrent/lost callback responses therefore carry
+ * byte-identical credentials and cannot overwrite one another out of order.
+ */
+export async function setDurableCallbackReplayCookies(
+  response: NextResponse,
+  sessionId: string,
+  userId: string,
+  bootstrapRefreshToken: string,
+  now = new Date(),
+) {
+  const session = await prisma.webSession.findFirst({
+    where: {
+      id: sessionId,
+      userId,
+      refreshTokenHash: sha256(bootstrapRefreshToken),
+      revokedAt: null,
+      accessTokenExpiresAt: { gt: now },
+      refreshExpiresAt: { gt: now },
+    },
+    include: { user: true },
+  });
+  if (!session) {
+    throw new ServiceError(
+      "UNAUTHORIZED",
+      401,
+      "Telegram callback bootstrap session is no longer replayable",
+    );
+  }
+  setDurableCallbackWebSessionCookies(response, {
+    session,
+    refreshToken: bootstrapRefreshToken,
+  });
   return session;
 }
 

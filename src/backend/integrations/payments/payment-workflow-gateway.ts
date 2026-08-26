@@ -49,7 +49,12 @@ function serviceError(error: unknown) {
   return error;
 }
 
-export const productionPaymentWorkflowGateway: PaymentWorkflowGateway = {
+type PaymentAuthorizer = typeof getAuthorizedRemnashopTokens;
+
+export function createProductionPaymentWorkflowGateway(
+  authorizeSession: PaymentAuthorizer = getAuthorizedRemnashopTokens,
+): PaymentWorkflowGateway {
+  return {
   async loadActor() {
     const session = await getCurrentSession();
     if (!session) return null;
@@ -74,7 +79,7 @@ export const productionPaymentWorkflowGateway: PaymentWorkflowGateway = {
   beginOperation: beginPaymentOperation,
 
   async authorize() {
-    const { accessToken, session } = await getAuthorizedRemnashopTokens();
+    const { accessToken, session } = await authorizeSession();
     const context: ProviderAuthorization = {
       accessToken,
       localUserId: session.userId,
@@ -173,4 +178,7 @@ export const productionPaymentWorkflowGateway: PaymentWorkflowGateway = {
   logSettlementFailure(error, input) {
     logTechnicalError("payment_operation_settlement_failed", error, input);
   },
-};
+  };
+}
+
+export const productionPaymentWorkflowGateway = createProductionPaymentWorkflowGateway();

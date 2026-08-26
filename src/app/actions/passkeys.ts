@@ -13,7 +13,7 @@ import {
   verifyPasskeyLogin,
   verifyPasskeyRegistration,
 } from "@/application/auth/execute-passkey-command";
-import { productionPasskeyCommands } from "@/backend/integrations/auth/passkey-commands";
+import { productionPasskeyCommands } from "@/app/_composition/session-gateways";
 import { clearReferralAttributionCookie } from "@/backend/integrations/referral/referral-attribution";
 
 export async function beginPasskeyLoginAction(input: { email: string; turnstileToken?: string }) {

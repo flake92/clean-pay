@@ -1,5 +1,6 @@
 #!/usr/bin/env sh
 set -eu
+umask 077
 
 ROOT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 ENV_FILE="$ROOT_DIR/deploy/prod/.env"
@@ -8,10 +9,25 @@ COMPOSE_PATH="$ROOT_DIR/deploy/prod/docker-compose.yml"
 REMNASHOP_ROLLOUT_SCRIPT="$ROOT_DIR/deploy/prod/prepare-remnashop-rollout.sh"
 IMAGE_PREFLIGHT_SCRIPT="$ROOT_DIR/deploy/prod/image-preflight.sh"
 BUILD_PROVENANCE_SCRIPT="$ROOT_DIR/deploy/prod/build-provenance.sh"
+ROLE_ENV_SCRIPT="$ROOT_DIR/deploy/prod/role-env.mjs"
+CREDENTIAL_INIT_SCRIPT="$ROOT_DIR/deploy/prod/database-credential-init.mjs"
+CREDENTIAL_FILE_GUARD_SCRIPT="$ROOT_DIR/deploy/prod/credential-file-guard.mjs"
+OPERATION_LOCK_SCRIPT="$ROOT_DIR/deploy/prod/production-operation-lock.mjs"
+OPERATION_LOCK_PATH="$ROOT_DIR/deploy/prod/.production-operation.lock"
+NODE_TOOLING_IMAGE="node:24.18.0-bookworm-slim@sha256:6f7b03f7c2c8e2e784dcf9295400527b9b1270fd37b7e9a7285cf83b6951452d"
+APP_ENV_FILE="${ENV_FILE}.app"
+HOLD_OPERATOR_ENV_FILE="${ENV_FILE}.hold-operator"
+MIGRATION_ENV_FILE="${ENV_FILE}.migration"
+POSTGRES_ENV_FILE="${ENV_FILE}.postgres"
+PROVISION_ENV_FILE="${ENV_FILE}.provision"
+RECONCILIATION_ENV_FILE="${ENV_FILE}.reconciliation"
+RETENTION_ENV_FILE="${ENV_FILE}.retention"
 verified_image_dir=''
 verified_image_output=''
 CLEAN_PAY_VERIFIED_APP_IMAGE=''
 CLEAN_PAY_VERIFIED_MIGRATION_IMAGE=''
+secret_input_stty=''
+operation_lock_token=''
 
 . "$ROOT_DIR/deploy/prod/redis-host-safety.sh"
 
@@ -45,9 +61,30 @@ need_docker() {
   docker compose version >/dev/null 2>&1 || die "Docker Compose v2 plugin is not installed."
 }
 
+assert_private_env_file() {
+  if command -v node >/dev/null 2>&1; then
+    node "$CREDENTIAL_FILE_GUARD_SCRIPT" file "$ENV_FILE"
+    return
+  fi
+
+  [ ! -L "$ENV_FILE" ] && [ -f "$ENV_FILE" ] \
+    || die "Production environment file must be a regular non-symlink file."
+  command -v stat >/dev/null 2>&1 \
+    || die "node or stat is required to validate production environment metadata."
+  [ "$(stat -c '%a' "$ENV_FILE")" = "600" ] \
+    || die "Production environment file permissions must be exactly 600."
+  [ "$(stat -c '%u' "$ENV_FILE")" = "$(id -u)" ] \
+    || die "Production environment file must be owned by the current operator."
+}
+
 env_value() {
   name="$1"
   fallback="${2:-}"
+  if [ ! -e "$ENV_FILE" ] && [ ! -L "$ENV_FILE" ]; then
+    printf '%s' "$fallback"
+    return
+  fi
+  assert_private_env_file
   value=$(
     grep -E "^${name}=" "$ENV_FILE" 2>/dev/null \
       | tail -n 1 \
@@ -66,13 +103,20 @@ compose() (
   # variable used for interpolation so deploy/prod/.env remains authoritative.
   unset \
     CLEAN_PAY_BIND \
+    CLEAN_PAY_APP_ENV_FILE \
     CLEAN_PAY_EDGE_NETWORK \
     CLEAN_PAY_IMAGE \
+    CLEAN_PAY_HOLD_OPERATOR_ENV_FILE \
     CLEAN_PAY_MIGRATION_IMAGE \
+    CLEAN_PAY_MIGRATION_ENV_FILE \
     CLEAN_PAY_MIN_FREE_DISK_MB \
     CLEAN_PAY_PORT \
+    CLEAN_PAY_POSTGRES_ENV_FILE \
+    CLEAN_PAY_PROVISION_ENV_FILE \
+    CLEAN_PAY_RECONCILIATION_ENV_FILE \
     CLEAN_PAY_RELEASE \
     CLEAN_PAY_REVISION \
+    CLEAN_PAY_RETENTION_ENV_FILE \
     COMPOSE_ENV_FILES \
     COMPOSE_FILE \
     COMPOSE_PROFILES \
@@ -88,11 +132,29 @@ compose() (
     TURNSTILE_ENABLED \
     TURNSTILE_SITE_KEY
 
-  if [ -n "$CLEAN_PAY_VERIFIED_APP_IMAGE" ]; then
+  if [ -n "$CLEAN_PAY_VERIFIED_APP_IMAGE" ] || [ -n "$CLEAN_PAY_VERIFIED_MIGRATION_IMAGE" ]; then
+    [ -n "$CLEAN_PAY_VERIFIED_APP_IMAGE" ] && [ -n "$CLEAN_PAY_VERIFIED_MIGRATION_IMAGE" ] \
+      || die 'Verified mode requires both immutable application and migration image IDs.'
     CLEAN_PAY_IMAGE=$CLEAN_PAY_VERIFIED_APP_IMAGE
     CLEAN_PAY_MIGRATION_IMAGE=$CLEAN_PAY_VERIFIED_MIGRATION_IMAGE
     export CLEAN_PAY_IMAGE CLEAN_PAY_MIGRATION_IMAGE
   fi
+
+  CLEAN_PAY_APP_ENV_FILE=$APP_ENV_FILE
+  CLEAN_PAY_HOLD_OPERATOR_ENV_FILE=$HOLD_OPERATOR_ENV_FILE
+  CLEAN_PAY_MIGRATION_ENV_FILE=$MIGRATION_ENV_FILE
+  CLEAN_PAY_POSTGRES_ENV_FILE=$POSTGRES_ENV_FILE
+  CLEAN_PAY_PROVISION_ENV_FILE=$PROVISION_ENV_FILE
+  CLEAN_PAY_RECONCILIATION_ENV_FILE=$RECONCILIATION_ENV_FILE
+  CLEAN_PAY_RETENTION_ENV_FILE=$RETENTION_ENV_FILE
+  export \
+    CLEAN_PAY_APP_ENV_FILE \
+    CLEAN_PAY_HOLD_OPERATOR_ENV_FILE \
+    CLEAN_PAY_MIGRATION_ENV_FILE \
+    CLEAN_PAY_POSTGRES_ENV_FILE \
+    CLEAN_PAY_PROVISION_ENV_FILE \
+    CLEAN_PAY_RECONCILIATION_ENV_FILE \
+    CLEAN_PAY_RETENTION_ENV_FILE
 
   if [ "$(env_value PAYMENT_RECONCILIATION_ENABLED true)" = "true" ]; then
     docker compose --env-file "$ENV_FILE" -f "$COMPOSE_PATH" --profile reconciliation "$@"
@@ -104,15 +166,39 @@ compose() (
 replace_env() {
   name=$1
   value=$2
+  assert_private_env_file
   case "$value" in
-    *'${'*|*'#'*) die "$name contains a value that is unsafe for an env file." ;;
+    *'$'*|*'#'*) die "$name contains a value that is unsafe for an env file." ;;
+    *'
+'*) die "$name contains a newline that is unsafe for an env file." ;;
   esac
-  escaped_value=$(printf '%s' "$value" | sed 's/[\\&|]/\\&/g')
-  if grep -q "^${name}=" "$ENV_FILE" 2>/dev/null; then
-    sed -i "s|^${name}=.*|${name}=${escaped_value}|" "$ENV_FILE"
-  else
-    printf '\n%s=%s\n' "$name" "$value" >> "$ENV_FILE"
+  if printf '%s' "$value" | LC_ALL=C grep -q '[[:cntrl:]]'; then
+    die "$name contains a control character that is unsafe for an env file."
   fi
+
+  if command -v node >/dev/null 2>&1; then
+    printf '%s' "$value" \
+      | node "$CREDENTIAL_FILE_GUARD_SCRIPT" env-set "$ENV_FILE" "$name" \
+      || die "Could not safely update $name in the production environment file."
+  else
+    need_docker
+    printf '%s' "$value" \
+      | docker run --rm --interactive --read-only --network none \
+        --cap-drop ALL \
+        --security-opt no-new-privileges \
+        --pids-limit 64 \
+        --memory 256m \
+        --cpus 0.5 \
+        --tmpfs /tmp:rw,noexec,nosuid,nodev,size=16m,mode=1777 \
+        --user "$(id -u):$(id -g)" \
+        --mount "type=bind,source=$ROOT_DIR,target=/workspace" \
+        --workdir /workspace \
+        "$NODE_TOOLING_IMAGE" \
+        node deploy/prod/credential-file-guard.mjs env-set \
+          deploy/prod/.env "$name" \
+      || die "Could not safely update $name in the production environment file."
+  fi
+  assert_private_env_file
 }
 
 ensure_generated_secret() {
@@ -133,25 +219,50 @@ ensure_internal_secrets() {
   ensure_generated_secret REMNASHOP_AUTH_SERVICE_KEY
 }
 
+initialize_database_credentials() {
+  if command -v node >/dev/null 2>&1; then
+    node "$CREDENTIAL_INIT_SCRIPT" init "$ENV_FILE"
+    return
+  fi
+
+  need_docker
+  docker run --rm --read-only --network none \
+    --cap-drop ALL \
+    --security-opt no-new-privileges \
+    --pids-limit 64 \
+    --memory 256m \
+    --cpus 0.5 \
+    --tmpfs /tmp:rw,noexec,nosuid,nodev,size=16m,mode=1777 \
+    --user "$(id -u):$(id -g)" \
+    --mount "type=bind,source=$ROOT_DIR,target=/workspace" \
+    --workdir /workspace \
+    "$NODE_TOOLING_IMAGE" \
+    node deploy/prod/database-credential-init.mjs init deploy/prod/.env
+}
+
 init() {
   command -v openssl >/dev/null 2>&1 || die "openssl is required to generate secrets."
-  if [ -f "$ENV_FILE" ]; then
-    chmod 600 "$ENV_FILE"
+  if [ -e "$ENV_FILE" ] || [ -L "$ENV_FILE" ]; then
+    assert_private_env_file
+    initialize_database_credentials
     ensure_internal_secrets
     printf 'Configuration already exists: %s\nExisting values were preserved; missing internal secrets were generated.\n' "$ENV_FILE"
     return
   fi
   cp "$ENV_EXAMPLE" "$ENV_FILE"
   chmod 600 "$ENV_FILE"
-  postgres_password=$(openssl rand -hex 24)
-  replace_env POSTGRES_PASSWORD "$postgres_password"
-  sed -i "s|change-me-postgres-password|$postgres_password|g" "$ENV_FILE"
+  assert_private_env_file
+  initialize_database_credentials
   ensure_internal_secrets
   printf '\nCreated %s and generated local secrets.\n' "$ENV_FILE"
   printf 'Run ./deploy.sh setup to continue in the interactive installer.\n'
 }
 
-require_env() { [ -f "$ENV_FILE" ] || die "Configuration is missing. Run ./deploy.sh init first."; }
+require_env() {
+  [ -e "$ENV_FILE" ] || [ -L "$ENV_FILE" ] \
+    || die "Configuration is missing. Run ./deploy.sh init first."
+  assert_private_env_file
+}
 
 ensure_network() {
   network=$(env_value CLEAN_PAY_EDGE_NETWORK)
@@ -189,15 +300,13 @@ prompt_secret() {
   esac
 
   printf '%s%s: ' "$label" "$keep_hint"
-  previous_stty=''
+  secret_input_stty=''
   if command -v stty >/dev/null 2>&1; then
-    previous_stty=$(stty -g 2>/dev/null || true)
+    secret_input_stty=$(stty -g 2>/dev/null || true)
     stty -echo 2>/dev/null || true
   fi
   IFS= read -r answer || answer=''
-  if [ -n "$previous_stty" ]; then
-    stty "$previous_stty" 2>/dev/null || true
-  fi
+  restore_secret_input_terminal
   printf '\n'
 
   if [ -z "$answer" ]; then
@@ -259,7 +368,7 @@ configure() {
     replace_env PAYMENT_RECONCILIATION_ENABLED false
   fi
 
-  chmod 600 "$ENV_FILE"
+  assert_private_env_file
   ok "конфигурация сохранена в $ENV_FILE"
   printf 'Важно: скопируйте REMNASHOP_AUTH_SERVICE_KEY из этого файла в APP_AUTH_SERVICE_KEY Remnashop.\n'
 
@@ -269,6 +378,7 @@ configure() {
       if command -v nano >/dev/null 2>&1; then editor=nano; else editor=vi; fi
     fi
     "$editor" "$ENV_FILE"
+    assert_private_env_file
   fi
 }
 
@@ -289,12 +399,40 @@ validate_env_file() {
     return
   fi
 
-  node_version=$(sed -e 's/\r$//' "$ROOT_DIR/.node-version")
   docker run --rm --read-only --network none \
+    --cap-drop ALL \
+    --security-opt no-new-privileges \
+    --pids-limit 64 \
+    --memory 256m \
+    --cpus 0.5 \
+    --tmpfs /tmp:rw,noexec,nosuid,nodev,size=16m,mode=1777 \
+    --user "$(id -u):$(id -g)" \
     --mount "type=bind,source=$ROOT_DIR,target=/workspace,readonly" \
     --workdir /workspace \
-    "node:${node_version}-bookworm-slim" \
+    "$NODE_TOOLING_IMAGE" \
     node deploy/prod/validate-env.mjs --clean-pay-env-file deploy/prod/.env
+}
+
+materialize_role_env_files() {
+  if command -v node >/dev/null 2>&1; then
+    node "$ROLE_ENV_SCRIPT" materialize "$ENV_FILE"
+    return
+  fi
+
+  operator_uid=$(id -u)
+  operator_gid=$(id -g)
+  docker run --rm --read-only --network none \
+    --cap-drop ALL \
+    --security-opt no-new-privileges \
+    --pids-limit 64 \
+    --memory 256m \
+    --cpus 0.5 \
+    --tmpfs /tmp:rw,noexec,nosuid,nodev,size=16m,mode=1777 \
+    --user "${operator_uid}:${operator_gid}" \
+    --mount "type=bind,source=$ROOT_DIR,target=/workspace" \
+    --workdir /workspace \
+    "$NODE_TOOLING_IMAGE" \
+    node deploy/prod/role-env.mjs materialize deploy/prod/.env
 }
 
 prepare_compose() {
@@ -304,6 +442,7 @@ prepare_compose() {
   info '[2/3] Подготовка Docker Compose'
   [ -f "$COMPOSE_PATH" ] || die "Compose file is missing: $COMPOSE_PATH"
   validate_env_file
+  materialize_role_env_files
   ensure_redis_host_memory_policy
   ensure_network
   compose config --quiet
@@ -376,21 +515,91 @@ cleanup_verified_images() {
   CLEAN_PAY_VERIFIED_MIGRATION_IMAGE=''
 }
 
-trap cleanup_verified_images EXIT
-trap 'cleanup_verified_images; exit 129' HUP
-trap 'cleanup_verified_images; exit 130' INT
-trap 'cleanup_verified_images; exit 143' TERM
+restore_secret_input_terminal() {
+  if [ -n "$secret_input_stty" ]; then
+    stty "$secret_input_stty" 2>/dev/null || true
+    secret_input_stty=''
+  fi
+}
+
+cleanup_deploy_state() {
+  status=$?
+  trap - 0 HUP INT TERM
+  set +e
+  restore_secret_input_terminal
+  cleanup_verified_images
+  if [ -n "$operation_lock_token" ]; then
+    if release_production_operation_lock; then
+      operation_lock_token=''
+    else
+      printf '%s\n' 'WARNING: production operation lock release failed; inspect the fail-closed lock before retrying.' >&2
+      if [ "$status" -eq 0 ]; then
+        status=1
+      fi
+    fi
+  fi
+  exit "$status"
+}
+
+operation_lock_command() {
+  if command -v node >/dev/null 2>&1; then
+    node "$OPERATION_LOCK_SCRIPT" "$@"
+    return
+  fi
+  lock_mode=$1
+  shift
+  shift
+  need_docker
+  docker run --rm --read-only --network none \
+    --cap-drop ALL \
+    --security-opt no-new-privileges \
+    --pids-limit 32 \
+    --memory 128m \
+    --cpus 0.25 \
+    --tmpfs /tmp:rw,noexec,nosuid,nodev,size=8m,mode=1777 \
+    --user "$(id -u):$(id -g)" \
+    --mount "type=bind,source=$ROOT_DIR,target=/workspace" \
+    --workdir /workspace \
+    "$NODE_TOOLING_IMAGE" \
+    node deploy/prod/production-operation-lock.mjs \
+      "$lock_mode" deploy/prod/.production-operation.lock "$@"
+}
+
+acquire_production_operation_lock() {
+  operation_name=$1
+  operation_lock_token=$(operation_lock_command \
+    acquire "$OPERATION_LOCK_PATH" "$operation_name" "$$") \
+    || die 'Another production operation is active or the fail-closed operation lock needs reviewed recovery.'
+  printf '%s\n' "$operation_lock_token" | grep -Eq '^[0-9a-f]{64}$' \
+    || die 'Production operation lock returned an invalid ownership token.'
+}
+
+release_production_operation_lock() {
+  operation_lock_command release "$OPERATION_LOCK_PATH" "$operation_lock_token"
+}
+
+trap cleanup_deploy_state 0
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 preflight_images() {
+  preflight_app_image=${1:-$(env_value CLEAN_PAY_IMAGE)}
+  preflight_migration_image=${2:-$(env_value CLEAN_PAY_MIGRATION_IMAGE)}
+  preflight_deploy_source=$(deployment_source)
+  case "$preflight_deploy_source" in
+    build|pull) ;;
+    *) die 'CLEAN_PAY_DEPLOY_SOURCE must be build or pull.' ;;
+  esac
   cleanup_verified_images
   verified_image_dir=$(mktemp -d "${TMPDIR:-/tmp}/clean-pay-verified.XXXXXX") \
     || die 'Could not create a private verified-image directory.'
   verified_image_output="$verified_image_dir/images.env"
 
   sh "$IMAGE_PREFLIGHT_SCRIPT" \
-    "$deploy_source" \
-    "$(env_value CLEAN_PAY_IMAGE)" \
-    "$(env_value CLEAN_PAY_MIGRATION_IMAGE)" \
+    "$preflight_deploy_source" \
+    "$preflight_app_image" \
+    "$preflight_migration_image" \
     "$ENV_FILE" \
     "$(env_value NEXT_PUBLIC_APP_URL)" \
     "$(env_value NEXT_PUBLIC_BRAND_NAME Clean Pay)" \
@@ -419,13 +628,52 @@ prepare_runtime_dependencies() {
 stop_runtime_services() {
   printf 'Stopping application runtimes for the database migration; PostgreSQL and Redis stay running...\n'
   compose stop reconciliation-worker retention-worker app
+  compose --profile operations rm -f -s retention-hold db-grant-sync db-role-provision migration
+}
+
+prepare_database_roles() {
+  compose rm -f -s db-role-provision || return 1
+  compose run --rm --no-deps --pull never db-role-provision || return 1
+}
+
+fence_database_roles() {
+  compose rm -f -s db-role-provision || return 1
+  compose run --rm --no-deps --pull never db-role-provision \
+    node deploy/prod/database-role-provision.mjs fence || return 1
+}
+
+recovery_preflight_database_roles() {
+  recovery_migration_name=$1
+  compose rm -f -s db-role-provision || return 1
+  compose run --rm --no-deps --pull never db-role-provision \
+    node deploy/prod/database-role-provision.mjs recovery-preflight \
+      "$recovery_migration_name" || return 1
+}
+
+sync_database_privileges() {
+  compose rm -f -s db-grant-sync || return 1
+  compose run --rm --no-deps --pull never db-grant-sync || return 1
 }
 
 run_verified_migration() {
   compose up -d --no-build --pull never --wait --wait-timeout 120 postgres redis \
     || return 1
-  compose rm -f -s migration || return 1
-  compose run --rm --no-deps --pull never migration || return 1
+  migration_status=0
+  prepare_database_roles || migration_status=$?
+  if [ "$migration_status" -eq 0 ]; then
+    compose rm -f -s migration || migration_status=$?
+  fi
+  if [ "$migration_status" -eq 0 ]; then
+    compose run --rm --no-deps --pull never migration || migration_status=$?
+  fi
+  if [ "$migration_status" -eq 0 ]; then
+    sync_database_privileges || migration_status=$?
+  fi
+  [ "$migration_status" -ne 0 ] || return 0
+  printf '%s\n' 'Migration/grant synchronization failed; re-fencing every non-bootstrap database role...' >&2
+  fence_database_roles \
+    || printf '%s\n' 'WARNING: automatic database-role re-fence failed; keep all runtimes stopped and repair the fence before retrying.' >&2
+  return "$migration_status"
 }
 
 start_verified_runtimes() {
@@ -439,6 +687,77 @@ start_verified_runtimes() {
     compose up -d --no-deps --no-build --pull never --wait --wait-timeout 180 \
       retention-worker || return 1
   fi
+}
+
+preflight_runtime_restart_image() {
+  app_container_id=$(compose ps --all --quiet app) \
+    || die 'Could not resolve the existing application container.'
+  [ -n "$app_container_id" ] \
+    || die 'No existing application container was found. Run ./deploy.sh install instead.'
+  [ "$(printf '%s\n' "$app_container_id" | wc -l | tr -d ' ')" = "1" ] \
+    || die 'More than one application container matched the production Compose project.'
+
+  restart_app_image=$(docker inspect --format '{{.Image}}' "$app_container_id") \
+    || die 'Could not resolve the immutable image of the existing application container.'
+  printf '%s\n' "$restart_app_image" | grep -Eq '^sha256:[a-f0-9]{64}$' \
+    || die 'The existing application container has an invalid image ID.'
+  restart_app_role=$(docker image inspect \
+    --format '{{ index .Config.Labels "io.clean-pay.role" }}' \
+    "$restart_app_image") \
+    || die 'Could not inspect the existing application image.'
+  [ "$restart_app_role" = "app" ] \
+    || die 'The existing application image is not a verified Clean Pay app image. Run ./deploy.sh install instead.'
+
+  docker run --rm --interactive \
+    --network none \
+    --read-only \
+    --cap-drop ALL \
+    --security-opt no-new-privileges \
+    --pids-limit 64 \
+    --memory 256m \
+    --cpus 0.5 \
+    --entrypoint node \
+    "$restart_app_image" \
+    deploy/prod/validate-env.mjs --runtime-env-stdin < "$ENV_FILE" \
+    || die 'The running application image rejected the updated production environment.'
+
+  # Validate the configured migration companion against the exact running app
+  # image, then pin both immutable IDs. Role preparation must never fall back to
+  # a mutable/local migration image during a credential-only restart.
+  preflight_images \
+    "$restart_app_image" \
+    "$(env_value CLEAN_PAY_MIGRATION_IMAGE)"
+  [ "$CLEAN_PAY_VERIFIED_APP_IMAGE" = "$restart_app_image" ] \
+    || die 'Restart image preflight did not preserve the exact running application image.'
+}
+
+restart_runtime_services() {
+  info '[restart] Пересоздание runtime с актуальными role-scoped env-файлами'
+  preflight_runtime_restart_image
+  prepare_runtime_dependencies
+  stop_runtime_services
+  compose up -d --no-build --pull never --wait --wait-timeout 120 postgres redis \
+    || die 'PostgreSQL or Redis did not become healthy during runtime recreation.'
+  prepare_database_roles \
+    || die 'Database role credential reconciliation failed; runtimes remain stopped.'
+  sync_database_privileges \
+    || die 'Database privilege verification failed; runtimes remain stopped.'
+
+  # A plain Compose restart preserves the old container configuration and does
+  # not apply env_file changes. Remove only the stateless Clean
+  # Pay runtimes, then recreate them on the exact preflighted application image.
+  # Explicitly include reconciliation-worker so disabling its profile cannot
+  # leave an old container (and its old secret) behind.
+  if ! compose rm -f -s reconciliation-worker retention-worker app \
+    || ! start_verified_runtimes; then
+    printf '\nRuntime recreation failed. Recent logs:\n' >&2
+    compose logs --tail=200 >&2 || true
+    die 'Updated role environments were not applied successfully.'
+  fi
+
+  cleanup_verified_images
+  verify_detailed_readiness
+  printf 'Clean Pay runtime containers were recreated with the updated role environments and are healthy.\n'
 }
 
 cleanup_build_artifacts() {
@@ -463,10 +782,10 @@ verify_external_security_headers() {
   esac
   [ "$hsts_max_age" -ge 31536000 ] \
     || die "External HTTPS response is missing a one-year HSTS policy."
-  script_policy=$(printf '%s' "$csp" | sed -n 's/.*script-src[[:space:]]\([^;]*\).*/\1/p')
+  script_policy=$(printf '%s' "$csp" | tr ';' '\n' | awk 'BEGIN{IGNORECASE=1} /^[[:space:]]*script-src[[:space:]]/{sub(/^[[:space:]]*script-src[[:space:]]*/, ""); print; exit}')
   printf '%s' "$script_policy" | grep -Eq "'nonce-[^']+'" \
     || die "External HTTPS response is missing a nonce-based script CSP."
-  if printf '%s' "$script_policy" | grep -Fiq "'unsafe-inline'"; then
+  if printf '%s' "$csp" | grep -Fiq "'unsafe-inline'"; then
     die "External script CSP still permits unsafe-inline."
   fi
 
@@ -475,7 +794,7 @@ verify_external_security_headers() {
 
 verify_detailed_readiness() {
   printf 'Checking all application dependencies...\n'
-  compose exec -T app node -e "fetch('http://127.0.0.1:4000/api/internal/health/readiness',{headers:{'x-clean-pay-readiness-secret':process.env.READINESS_INTERNAL_SECRET},signal:AbortSignal.timeout(15000)}).then(async r=>{const text=await r.text();let body;try{body=JSON.parse(text)}catch{throw new Error('readiness returned invalid JSON')}const failed=Object.entries(body.checks||{}).filter(([,check])=>check.status!=='ok').map(([name])=>name);if(!r.ok||body.status!=='ok'||failed.length)throw new Error('dependencies are not ready: '+(failed.join(', ')||body.status||r.status));console.log('Detailed readiness is healthy')}).catch(error=>{console.error(error.message);process.exit(1)})"
+  compose exec -T app node -e "fetch('http://127.0.0.1:4000/api/internal/health/readiness',{headers:{'x-clean-pay-readiness-secret':process.env.READINESS_INTERNAL_SECRET},signal:AbortSignal.timeout(15000)}).then(async r=>{const text=await r.text();let body;try{body=JSON.parse(text)}catch{throw new Error('readiness returned invalid JSON')}const checks=body&&body.checks&&typeof body.checks==='object'&&!Array.isArray(body.checks)?Object.entries(body.checks):[];const failed=checks.filter(([,check])=>!check||check.status!=='ok').map(([name])=>name);if(!r.ok||body.status!=='ok'||checks.length===0||failed.length)throw new Error('dependencies are not ready: '+(failed.join(', ')||body.status||r.status));console.log('Detailed readiness is healthy')}).catch(error=>{console.error(error.message);process.exit(1)})"
 }
 
 install_services() {
@@ -514,6 +833,93 @@ build_images_only() {
   printf 'No container was stopped or replaced and no database migration was run.\n'
 }
 
+migrate_only() {
+  info '[migrate] Проверка образа и применение миграций без запуска runtime'
+  prepare_compose
+  sh "$REMNASHOP_ROLLOUT_SCRIPT" "$ENV_FILE" check
+  prepare_images
+  preflight_images
+  prepare_runtime_dependencies
+  stop_runtime_services
+  run_verified_migration \
+    || die 'Verified migration failed; application runtimes remain stopped.'
+  cleanup_verified_images
+  if [ "$deploy_source" = "build" ]; then
+    cleanup_build_artifacts
+  fi
+  printf 'Verified database migration completed; application runtimes remain stopped.\n'
+}
+
+resolve_rolled_back_migration() {
+  [ "$#" -eq 2 ] \
+    || die 'Usage: ./deploy.sh resolve-rolled-back MIGRATION_NAME CONFIRMATION'
+  migration_name=$1
+  confirmation=$2
+  migration_prefix=${migration_name%%_*}
+  migration_suffix=${migration_name#*_}
+  [ "$migration_prefix" != "$migration_name" ] \
+    && [ "${#migration_prefix}" -eq 14 ] \
+    && [ -n "$migration_suffix" ] \
+    || die 'Migration name must use the checked-in 14-digit_timestamp_description format.'
+  case "$migration_prefix" in
+    *[!0-9]*) die 'Migration timestamp must contain only digits.' ;;
+  esac
+  case "$migration_suffix" in
+    *[!a-z0-9_-]*) die 'Migration description contains unsupported characters.' ;;
+  esac
+  [ -f "$ROOT_DIR/prisma/migrations/$migration_name/migration.sql" ] \
+    || die 'The named migration is not present in this reviewed checkout.'
+  case "$migration_name:$confirmation" in
+    20260718141000_drop_redundant_indexes:--confirm-zero-step-indexes-intact)
+      info '[resolve-rolled-back] Проверка zero-step попытки и неизменной топологии индексов'
+      ;;
+    20260825010000_add_durable_telegram_callback:--confirm-atomic-zero-step-rollback|\
+    20260825210000_add_payment_sensitive_retention:--confirm-atomic-zero-step-rollback|\
+    20260825220000_add_payment_retention_hold_lifecycle:--confirm-atomic-zero-step-rollback|\
+    20260825230000_guard_retention_mutations:--confirm-atomic-zero-step-rollback)
+      info '[resolve-rolled-back] Проверка atomic zero-step попытки и точного schema pre-state'
+      ;;
+    *)
+      die 'No matching fail-closed rollback invariant/confirmation is implemented for the named migration.'
+      ;;
+  esac
+  prepare_compose
+  sh "$REMNASHOP_ROLLOUT_SCRIPT" "$ENV_FILE" check
+  prepare_images
+  preflight_images
+  prepare_runtime_dependencies
+  stop_runtime_services
+  compose up -d --no-build --pull never --wait --wait-timeout 120 postgres \
+    || die 'PostgreSQL did not become healthy; application runtimes remain stopped.'
+  fence_database_roles \
+    || die 'Database role fence failed; migration was not resolved.'
+  if ! recovery_preflight_database_roles "$migration_name"; then
+    fence_database_roles \
+      || printf '%s\n' 'WARNING: recovery preflight failed and automatic database-role re-fence also failed; keep runtimes stopped.' >&2
+    die 'Exact recovery predecessor preflight failed; migration was not resolved.'
+  fi
+  recovery_status=0
+  compose rm -f -s migration || recovery_status=$?
+  if [ "$recovery_status" -eq 0 ]; then
+    compose run --rm --no-deps --pull never migration \
+      node deploy/prod/migration-rollback-verifier.mjs resolve \
+        "$migration_name" >/dev/null \
+      || recovery_status=$?
+  fi
+  if ! fence_database_roles; then
+    [ "$recovery_status" -ne 0 ] \
+      || die 'Migration was resolved, but the migration credential could not be re-fenced; keep runtimes stopped.'
+    printf '%s\n' 'WARNING: rollback verification failed and automatic database-role re-fence also failed; keep runtimes stopped.' >&2
+  fi
+  [ "$recovery_status" -eq 0 ] \
+    || die 'Atomic migration recovery verification failed; migration was not resolved.'
+  cleanup_verified_images
+  if [ "$deploy_source" = "build" ]; then
+    cleanup_build_artifacts
+  fi
+  printf 'Verified failed migration was marked rolled back; runtimes remain stopped. Run ./deploy.sh migrate next.\n'
+}
+
 up() {
   prepare_compose
   install_services
@@ -548,6 +954,9 @@ Usage: ./deploy.sh <command>
   init      создать deploy/prod/.env и сгенерировать внутренние секреты
   compose   проверить .env, Compose-файл и подготовить Docker-сеть
   build     подготовить и проверить образы без остановки runtime и миграции БД
+  migrate   проверить migration image и применить миграции, оставив runtime остановленным
+  resolve-rolled-back MIGRATION CONFIRMATION
+            historical: --confirm-zero-step-indexes-intact; atomic: --confirm-atomic-zero-step-rollback
   install   подготовить образы, запустить и полностью проверить Clean Pay
   up        совместимый псевдоним команды install
   logs      follow logs
@@ -563,22 +972,43 @@ else
   command=${1:-help}
 fi
 case "$command" in
+  setup|configure|config|init|compose|check|build|migrate|resolve-rolled-back|install|up|restart|down)
+    acquire_production_operation_lock "$command"
+    ;;
+esac
+case "$command" in
   setup) setup ;;
   configure|config) configure ;;
   init) init ;;
   compose|check) prepare_compose ;;
   build) build_images_only ;;
+  migrate) migrate_only ;;
+  resolve-rolled-back)
+    shift
+    resolve_rolled_back_migration "$@"
+    ;;
   install) up ;;
   up) up ;;
-  logs) require_env; need_docker; compose logs --tail=100 -f ;;
-  ps) require_env; need_docker; compose ps ;;
-  restart)
+  logs)
     require_env
     need_docker
-    ensure_redis_host_memory_policy
-    compose restart
+    compose logs --tail=100 -f
     ;;
-  down) require_env; need_docker; compose down ;;
+  ps)
+    require_env
+    need_docker
+    compose ps
+    ;;
+  restart)
+    prepare_compose
+    restart_runtime_services
+    ;;
+  down)
+    require_env
+    need_docker
+    materialize_role_env_files
+    compose down
+    ;;
   help|-h|--help) usage ;;
   *) usage; exit 1 ;;
 esac

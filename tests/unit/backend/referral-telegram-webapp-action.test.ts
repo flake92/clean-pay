@@ -8,7 +8,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock("@/application/auth/authenticate-telegram-webapp", () => ({
   authenticateTelegramWebApp: mocks.authenticateTelegramWebApp,
 }));
-vi.mock("@/backend/integrations/auth/telegram-webapp-gateway", () => ({
+vi.mock("@/app/_composition/session-gateways", () => ({
   productionTelegramWebAppGateway: { adapter: "telegram-webapp" },
 }));
 vi.mock("@/backend/integrations/referral/referral-attribution", () => ({

@@ -167,9 +167,14 @@ function priceChoiceList(
   onSelect: (value: string) => void,
 ) {
   return (
-    <div className="clean-pay-price-choice-list">
+    <div
+      aria-label="Выбор срока оплаты"
+      className="clean-pay-price-choice-list"
+      role="group"
+    >
       {options.map((option) => (
         <button
+          aria-pressed={option.value === selected}
           className={
             option.value === selected
               ? "clean-pay-price-choice clean-pay-price-choice--selected"

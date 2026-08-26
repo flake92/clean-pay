@@ -9,6 +9,7 @@ import {
   openTelegramExternalLink,
   wasOpenedInTelegramWebApp,
 } from "@/frontend/lib/telegram-webapp";
+import { useModalDialogFocus } from "@/frontend/hooks/use-modal-dialog-focus";
 import { getBranding } from "@/shared/branding";
 
 type BeforeInstallPromptEvent = Event & {
@@ -42,6 +43,39 @@ function androidBrowserName() {
 
 function isStandalone() {
   return window.matchMedia("(display-mode: standalone)").matches || ("standalone" in navigator && (navigator as Navigator & { standalone?: boolean }).standalone === true);
+}
+
+function InstallInstructionsDialog({
+  children,
+  onClose,
+  title,
+  titleId,
+}: {
+  children: React.ReactNode;
+  onClose: () => void;
+  title: string;
+  titleId: string;
+}) {
+  const dialogRef = useModalDialogFocus(onClose);
+
+  return (
+    <div
+      aria-labelledby={titleId}
+      aria-modal="true"
+      ref={dialogRef}
+      role="dialog"
+      tabIndex={-1}
+      style={{ background: "rgba(0, 0, 0, 0.45)", inset: 0, padding: "1rem", position: "fixed", zIndex: 1100 }}
+    >
+      <div style={{ background: "white", borderRadius: "12px", margin: "20vh auto", maxWidth: "28rem", padding: "1.5rem" }}>
+        <h2 className="mt-0" id={titleId}>{title}</h2>
+        {children}
+        <button type="button" className="p-button p-component" onClick={onClose}>
+          <span className="p-button-label">Понятно</span>
+        </button>
+      </div>
+    </div>
+  );
 }
 
 export function InstallAppButton({
@@ -184,23 +218,23 @@ export function InstallAppButton({
       </button>
       {message ? <p className="m-0 text-sm text-600">{message}</p> : null}
       {showEmbeddedGuide ? (
-        <div role="dialog" aria-modal="true" aria-labelledby="install-embedded-title" style={{ background: "rgba(0, 0, 0, 0.45)", inset: 0, padding: "1rem", position: "fixed", zIndex: 1100 }}>
-          <div style={{ background: "white", borderRadius: "12px", margin: "20vh auto", maxWidth: "28rem", padding: "1.5rem" }}>
-            <h2 id="install-embedded-title" className="mt-0">Открыть во внешнем браузере</h2>
-            <p>Telegram не разрешает устанавливать ярлыки внутри встроенного окна. Нажмите меню ⋮ в правом верхнем углу, выберите «Открыть в браузере», затем снова нажмите «Установить приложение».</p>
-            <button type="button" className="p-button p-component" onClick={() => setShowEmbeddedGuide(false)}><span className="p-button-label">Понятно</span></button>
-          </div>
-        </div>
+        <InstallInstructionsDialog
+          onClose={() => setShowEmbeddedGuide(false)}
+          title="Открыть во внешнем браузере"
+          titleId="install-embedded-title"
+        >
+          <p>Telegram не разрешает устанавливать ярлыки внутри встроенного окна. Нажмите меню ⋮ в правом верхнем углу, выберите «Открыть в браузере», затем снова нажмите «Установить приложение».</p>
+        </InstallInstructionsDialog>
       ) : null}
       {showIosGuide ? <IosInstallGuide onClose={() => setShowIosGuide(false)} /> : null}
       {showAndroidGuide ? (
-        <div role="dialog" aria-modal="true" aria-labelledby="install-android-title" style={{ background: "rgba(0, 0, 0, 0.45)", inset: 0, padding: "1rem", position: "fixed", zIndex: 1100 }}>
-          <div style={{ background: "white", borderRadius: "12px", margin: "20vh auto", maxWidth: "28rem", padding: "1.5rem" }}>
-            <h2 id="install-android-title" className="mt-0">Добавить приложение</h2>
-            <p>В {androidBrowserName()} откройте меню браузера и выберите «Установить приложение» или «Добавить на главный экран».</p>
-            <button type="button" className="p-button p-component" onClick={() => setShowAndroidGuide(false)}><span className="p-button-label">Понятно</span></button>
-          </div>
-        </div>
+        <InstallInstructionsDialog
+          onClose={() => setShowAndroidGuide(false)}
+          title="Добавить приложение"
+          titleId="install-android-title"
+        >
+          <p>В {androidBrowserName()} откройте меню браузера и выберите «Установить приложение» или «Добавить на главный экран».</p>
+        </InstallInstructionsDialog>
       ) : null}
     </>
   );

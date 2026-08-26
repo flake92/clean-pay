@@ -20,6 +20,12 @@ try {
     );
   }
 
+  if (/^(?:sha|candidate)-/i.test(release)) {
+    throw new ProductionEnvironmentError(
+      "CLEAN_PAY_RELEASE must not use the reserved sha-* or candidate-* tag namespace",
+    );
+  }
+
   validateProductionPublicBuildConfiguration(process.env);
   process.stdout.write("Production public build inputs are valid.\n");
 } catch (error) {

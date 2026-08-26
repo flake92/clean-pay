@@ -4,8 +4,36 @@ name: ${COMPOSE_PROJECT_NAME:-clean-pay-prod}
 # the rendered configuration makes the production example self-documenting.
 x-clean-pay-min-free-disk-mb: ${CLEAN_PAY_MIN_FREE_DISK_MB:-8192}
 
+x-clean-pay-runtime-sandbox: &clean-pay-runtime-sandbox
+  read_only: true
+  cap_drop: [ALL]
+  security_opt: [no-new-privileges:true]
+
 services:
+  db-role-provision:
+    <<: *clean-pay-runtime-sandbox
+    image: ${CLEAN_PAY_MIGRATION_IMAGE:-clean-pay-prod-migration:local}
+    restart: "no"
+    pids_limit: 64
+    mem_limit: 256m
+    cpus: 0.5
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=32m,mode=1777
+    command: ["node", "deploy/prod/database-role-provision.mjs", "prepare"]
+    env_file:
+      - ${CLEAN_PAY_PROVISION_ENV_FILE:-.env.provision}
+    environment:
+      CLEAN_PAY_DATABASE_MAINTENANCE_CONFIRMED: "true"
+      CLEAN_PAY_RUNTIME_ROLE: provision
+      NODE_ENV: production
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      default:
+
   migration:
+    <<: *clean-pay-runtime-sandbox
     image: ${CLEAN_PAY_MIGRATION_IMAGE:-clean-pay-prod-migration:local}
     build:
       context: ../..
@@ -15,18 +43,47 @@ services:
         CLEAN_PAY_RELEASE: ${CLEAN_PAY_RELEASE:-local}
         CLEAN_PAY_REVISION: ${CLEAN_PAY_REVISION:-local}
     restart: "no"
+    pids_limit: 128
+    mem_limit: 1g
+    cpus: 1.0
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=64m,mode=1777
     env_file:
-      - .env
+      - ${CLEAN_PAY_MIGRATION_ENV_FILE:-.env.migration}
     environment:
+      CLEAN_PAY_RUNTIME_ROLE: migration
       NODE_ENV: production
       NEXT_TELEMETRY_DISABLED: "1"
     depends_on:
-      postgres:
-        condition: service_healthy
+      db-role-provision:
+        condition: service_completed_successfully
+    networks:
+      default:
+
+  db-grant-sync:
+    <<: *clean-pay-runtime-sandbox
+    image: ${CLEAN_PAY_MIGRATION_IMAGE:-clean-pay-prod-migration:local}
+    restart: "no"
+    pids_limit: 64
+    mem_limit: 256m
+    cpus: 0.5
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=32m,mode=1777
+    command: ["node", "deploy/prod/database-role-provision.mjs", "sync"]
+    env_file:
+      - ${CLEAN_PAY_PROVISION_ENV_FILE:-.env.provision}
+    environment:
+      CLEAN_PAY_DATABASE_MAINTENANCE_CONFIRMED: "true"
+      CLEAN_PAY_RUNTIME_ROLE: provision
+      NODE_ENV: production
+    depends_on:
+      migration:
+        condition: service_completed_successfully
     networks:
       default:
 
   app:
+    <<: *clean-pay-runtime-sandbox
     image: ${CLEAN_PAY_IMAGE:-clean-pay-prod-app:local}
     build:
       context: ../..
@@ -41,14 +98,22 @@ services:
         NEXT_PUBLIC_BRAND_NAME: ${NEXT_PUBLIC_BRAND_NAME:-Clean Pay}
         NEXT_PUBLIC_BRAND_LOGO_URL: ${NEXT_PUBLIC_BRAND_LOGO_URL:-/clean-pay-logo.png}
     restart: unless-stopped
+    init: true
+    pids_limit: 256
+    mem_limit: 1g
+    cpus: 1.0
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=64m,mode=1777
+      - /app/.next/cache:rw,noexec,nosuid,nodev,size=128m,mode=0700,uid=1001,gid=1001
     env_file:
-      - .env
+      - ${CLEAN_PAY_APP_ENV_FILE:-.env.app}
     environment:
+      CLEAN_PAY_RUNTIME_ROLE: application
       NODE_ENV: production
       NEXT_TELEMETRY_DISABLED: "1"
       LOG_LEVEL: ${LOG_LEVEL:-info}
     depends_on:
-      migration:
+      db-grant-sync:
         condition: service_completed_successfully
       postgres:
         condition: service_healthy
@@ -74,15 +139,22 @@ services:
         max-file: "3"
 
   reconciliation-worker:
+    <<: *clean-pay-runtime-sandbox
     profiles: ["reconciliation"]
     image: ${CLEAN_PAY_IMAGE:-clean-pay-prod-app:local}
     init: true
+    pids_limit: 128
+    mem_limit: 512m
+    cpus: 0.5
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=64m,mode=1777
     stop_grace_period: 2m
     restart: "on-failure"
     command: ["node", "deploy/prod/reconcile-loop.mjs"]
     env_file:
-      - .env
+      - ${CLEAN_PAY_RECONCILIATION_ENV_FILE:-.env.reconciliation}
     environment:
+      CLEAN_PAY_RUNTIME_ROLE: reconciliation
       NODE_ENV: production
       PAYMENT_RECONCILIATION_INTERNAL_URL: http://app:4000/api/internal/payments/reconcile
     depends_on:
@@ -106,27 +178,31 @@ services:
         max-file: "2"
 
   retention-worker:
+    <<: *clean-pay-runtime-sandbox
     image: ${CLEAN_PAY_IMAGE:-clean-pay-prod-app:local}
     init: true
+    pids_limit: 128
+    mem_limit: 512m
+    cpus: 0.5
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=64m,mode=1777
     stop_grace_period: 2m
     restart: unless-stopped
     command: ["node", "deploy/prod/retention-loop.mjs"]
     env_file:
-      - .env
+      - ${CLEAN_PAY_RETENTION_ENV_FILE:-.env.retention}
     environment:
+      CLEAN_PAY_RUNTIME_ROLE: retention
       NODE_ENV: production
     depends_on:
       app:
         condition: service_healthy
     healthcheck:
-      test:
-        - CMD-SHELL
-        - >-
-          node -e "const fs=require('node:fs');const value=Number(fs.readFileSync('/tmp/clean-pay-retention-heartbeat','utf8'));const interval=Number(process.env.DATA_RETENTION_INTERVAL_SECONDS||21600);const maxAge=(interval+600)*1000;if(!Number.isFinite(value)||Date.now()-value>maxAge)process.exit(1)"
-      interval: 60s
+      test: ["CMD", "node", "deploy/prod/retention-heartbeat.mjs", "check"]
+      interval: 5s
       timeout: 5s
-      retries: 5
-      start_period: 60s
+      retries: 3
+      start_period: 30s
     networks:
       default:
     logging:
@@ -135,15 +211,48 @@ services:
         max-size: "5m"
         max-file: "2"
 
-  postgres:
-    image: postgres:17-alpine
-    restart: unless-stopped
+  retention-hold:
+    <<: *clean-pay-runtime-sandbox
+    profiles: ["operations"]
+    image: ${CLEAN_PAY_IMAGE:-clean-pay-prod-app:local}
+    restart: "no"
+    init: true
+    pids_limit: 64
+    mem_limit: 256m
+    cpus: 0.5
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=32m,mode=1777
+    command: ["node", "deploy/prod/payment-retention-hold-command.mjs"]
+    env_file:
+      - ${CLEAN_PAY_HOLD_OPERATOR_ENV_FILE:-.env.hold-operator}
     environment:
-      POSTGRES_DB: ${POSTGRES_DB:-clean_pay}
-      POSTGRES_USER: ${POSTGRES_USER:-clean_pay}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      CLEAN_PAY_RUNTIME_ROLE: hold-operator
+      NODE_ENV: production
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      default:
+
+  postgres:
+    image: postgres:17-alpine@sha256:18cfe3ef5e6815560c98237d6216d1e5119702fb0f3894c8785dd58b8bbe5d73
+    user: "70:70"
+    restart: unless-stopped
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 256
+    mem_limit: 1g
+    cpus: 1.0
+    env_file:
+      - ${CLEAN_PAY_POSTGRES_ENV_FILE:-.env.postgres}
+    environment:
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale-provider=libc --lc-collate=C --lc-ctype=C.UTF-8"
     volumes:
       - postgres-data:/var/lib/postgresql/data
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=64m,mode=1777
+      - /var/run/postgresql:rw,noexec,nosuid,nodev,size=16m,mode=3777,uid=70,gid=70
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
       interval: 10s
@@ -156,11 +265,20 @@ services:
         max-file: "2"
 
   redis:
-    image: redis:7-alpine
+    image: redis:7-alpine@sha256:ff02b58f971e7d7d156a1267e283fcbbeee91773b6aa36c49dac28ecfe28eadf
+    user: "999:1000"
     restart: unless-stopped
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 128
+    mem_limit: 512m
+    cpus: 0.5
     command: redis-server --appendonly yes
     volumes:
       - redis-data:/data
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=64m,mode=1777
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s

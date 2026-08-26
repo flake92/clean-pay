@@ -1,5 +1,6 @@
 #!/usr/bin/env sh
 set -eu
+umask 077
 
 ROOT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 ENV_FILE="$ROOT_DIR/.env"
@@ -7,12 +8,25 @@ COMPOSE_FILE="$ROOT_DIR/docker-compose.yml"
 REMNASHOP_ROLLOUT_SCRIPT="$ROOT_DIR/deploy/prod/prepare-remnashop-rollout.sh"
 IMAGE_PREFLIGHT_SCRIPT="$ROOT_DIR/deploy/prod/image-preflight.sh"
 BUILD_PROVENANCE_SCRIPT="$ROOT_DIR/deploy/prod/build-provenance.sh"
+ROLE_ENV_SCRIPT="$ROOT_DIR/deploy/prod/role-env.mjs"
+CREDENTIAL_INIT_SCRIPT="$ROOT_DIR/deploy/prod/database-credential-init.mjs"
+CREDENTIAL_FILE_GUARD_SCRIPT="$ROOT_DIR/deploy/prod/credential-file-guard.mjs"
+OPERATION_LOCK_SCRIPT="$ROOT_DIR/deploy/prod/production-operation-lock.mjs"
+OPERATION_LOCK_PATH="$ROOT_DIR/deploy/prod/.production-operation.lock"
+APP_ENV_FILE="${ENV_FILE}.app"
+HOLD_OPERATOR_ENV_FILE="${ENV_FILE}.hold-operator"
+MIGRATION_ENV_FILE="${ENV_FILE}.migration"
+POSTGRES_ENV_FILE="${ENV_FILE}.postgres"
+PROVISION_ENV_FILE="${ENV_FILE}.provision"
+RECONCILIATION_ENV_FILE="${ENV_FILE}.reconciliation"
+RETENTION_ENV_FILE="${ENV_FILE}.retention"
 MODE="${CLEAN_PAY_MODE:-standalone}"
 COMMAND="${1:-start}"
 verified_image_dir=''
 verified_image_output=''
 CLEAN_PAY_VERIFIED_APP_IMAGE=''
 CLEAN_PAY_VERIFIED_MIGRATION_IMAGE=''
+operation_lock_token=''
 
 . "$ROOT_DIR/deploy/prod/redis-host-safety.sh"
 
@@ -29,14 +43,32 @@ require_command() {
   command -v "$1" >/dev/null 2>&1 || fail "$1 is not installed or is not available in PATH"
 }
 
+assert_private_env_file() {
+  if command -v node >/dev/null 2>&1; then
+    node "$CREDENTIAL_FILE_GUARD_SCRIPT" file "$ENV_FILE"
+    return
+  fi
+
+  [ ! -L "$ENV_FILE" ] && [ -f "$ENV_FILE" ] \
+    || fail "production environment file must be a regular non-symlink file"
+  command -v stat >/dev/null 2>&1 \
+    || fail "node or stat is required to validate production environment metadata"
+  [ "$(stat -c '%a' "$ENV_FILE")" = "600" ] \
+    || fail "production environment file permissions must be exactly 600"
+  [ "$(stat -c '%u' "$ENV_FILE")" = "$(id -u)" ] \
+    || fail "production environment file must be owned by the current operator"
+}
+
 env_value() {
   name="$1"
   fallback="${2:-}"
 
-  if [ ! -f "$ENV_FILE" ]; then
+  if [ ! -e "$ENV_FILE" ] && [ ! -L "$ENV_FILE" ]; then
     printf '%s' "$fallback"
     return
   fi
+
+  assert_private_env_file
 
   value=$(
     grep -E "^${name}=" "$ENV_FILE" 2>/dev/null \
@@ -53,6 +85,7 @@ env_value() {
 
 require_env_file() {
   [ -f "$ENV_FILE" ] || fail "missing .env. Create it from .env.example and fill real values"
+  assert_private_env_file
 }
 
 generate_secret() {
@@ -80,28 +113,10 @@ is_placeholder_secret() {
 write_env_value() {
   name="$1"
   value="$2"
-  tmp_file="${ENV_FILE}.tmp.$$"
-
-  awk -v name="$name" -v value="$value" '
-    index($0, name "=") == 1 {
-      if (!done) {
-        print name "=" value
-        done = 1
-      }
-      next
-    }
-    { print }
-    END {
-      if (!done) {
-        print name "=" value
-      }
-    }
-  ' "$ENV_FILE" > "$tmp_file" \
-    && mv "$tmp_file" "$ENV_FILE" \
-    || {
-      rm -f "$tmp_file"
-      fail "failed to update $name in .env"
-    }
+  printf '%s' "$value" \
+    | node "$CREDENTIAL_FILE_GUARD_SCRIPT" env-set "$ENV_FILE" "$name" \
+    || fail "failed to safely update $name in .env"
+  assert_private_env_file
 }
 
 ensure_generated_secret() {
@@ -118,18 +133,21 @@ ensure_generated_secret() {
 
 ensure_generated_secrets() {
   require_env_file
+  node "$CREDENTIAL_INIT_SCRIPT" init "$ENV_FILE"
   ensure_generated_secret WEB_JWT_SECRET
   ensure_generated_secret WEB_REFRESH_SECRET
   ensure_generated_secret AUDIT_IP_HASH_SECRET
   ensure_generated_secret RATE_LIMIT_IDENTITY_SECRET
   ensure_generated_secret READINESS_INTERNAL_SECRET
+  ensure_generated_secret PAYMENT_RECONCILIATION_SECRET
 }
 
 validate_env() {
+  require_command node
   require_env_file
   ensure_generated_secrets
-  require_command node
   node "$ROOT_DIR/deploy/prod/validate-env.mjs" --clean-pay-env-file "$ENV_FILE"
+  node "$ROLE_ENV_SCRIPT" materialize "$ENV_FILE"
   info "production environment file is valid"
 }
 
@@ -166,13 +184,20 @@ ensure_redis_host_memory_policy() {
 compose() (
   unset \
     CLEAN_PAY_BIND \
+    CLEAN_PAY_APP_ENV_FILE \
     CLEAN_PAY_EDGE_NETWORK \
     CLEAN_PAY_IMAGE \
+    CLEAN_PAY_HOLD_OPERATOR_ENV_FILE \
     CLEAN_PAY_MIGRATION_IMAGE \
+    CLEAN_PAY_MIGRATION_ENV_FILE \
     CLEAN_PAY_MIN_FREE_DISK_MB \
     CLEAN_PAY_PORT \
+    CLEAN_PAY_POSTGRES_ENV_FILE \
+    CLEAN_PAY_PROVISION_ENV_FILE \
+    CLEAN_PAY_RECONCILIATION_ENV_FILE \
     CLEAN_PAY_RELEASE \
     CLEAN_PAY_REVISION \
+    CLEAN_PAY_RETENTION_ENV_FILE \
     COMPOSE_ENV_FILES \
     COMPOSE_FILE \
     COMPOSE_PROFILES \
@@ -188,11 +213,29 @@ compose() (
     TURNSTILE_ENABLED \
     TURNSTILE_SITE_KEY
 
-  if [ -n "$CLEAN_PAY_VERIFIED_APP_IMAGE" ]; then
+  if [ -n "$CLEAN_PAY_VERIFIED_APP_IMAGE" ] || [ -n "$CLEAN_PAY_VERIFIED_MIGRATION_IMAGE" ]; then
+    [ -n "$CLEAN_PAY_VERIFIED_APP_IMAGE" ] && [ -n "$CLEAN_PAY_VERIFIED_MIGRATION_IMAGE" ] \
+      || fail "verified mode requires both immutable application and migration image IDs"
     CLEAN_PAY_IMAGE=$CLEAN_PAY_VERIFIED_APP_IMAGE
     CLEAN_PAY_MIGRATION_IMAGE=$CLEAN_PAY_VERIFIED_MIGRATION_IMAGE
     export CLEAN_PAY_IMAGE CLEAN_PAY_MIGRATION_IMAGE
   fi
+
+  CLEAN_PAY_APP_ENV_FILE=$APP_ENV_FILE
+  CLEAN_PAY_HOLD_OPERATOR_ENV_FILE=$HOLD_OPERATOR_ENV_FILE
+  CLEAN_PAY_MIGRATION_ENV_FILE=$MIGRATION_ENV_FILE
+  CLEAN_PAY_POSTGRES_ENV_FILE=$POSTGRES_ENV_FILE
+  CLEAN_PAY_PROVISION_ENV_FILE=$PROVISION_ENV_FILE
+  CLEAN_PAY_RECONCILIATION_ENV_FILE=$RECONCILIATION_ENV_FILE
+  CLEAN_PAY_RETENTION_ENV_FILE=$RETENTION_ENV_FILE
+  export \
+    CLEAN_PAY_APP_ENV_FILE \
+    CLEAN_PAY_HOLD_OPERATOR_ENV_FILE \
+    CLEAN_PAY_MIGRATION_ENV_FILE \
+    CLEAN_PAY_POSTGRES_ENV_FILE \
+    CLEAN_PAY_PROVISION_ENV_FILE \
+    CLEAN_PAY_RECONCILIATION_ENV_FILE \
+    CLEAN_PAY_RETENTION_ENV_FILE
 
   if [ "$MODE" = "remnashop" ]; then
     if [ "$(env_value PAYMENT_RECONCILIATION_ENABLED true)" = "true" ]; then
@@ -249,10 +292,43 @@ cleanup_verified_images() {
   CLEAN_PAY_VERIFIED_MIGRATION_IMAGE=''
 }
 
-trap cleanup_verified_images EXIT
-trap 'cleanup_verified_images; exit 129' HUP
-trap 'cleanup_verified_images; exit 130' INT
-trap 'cleanup_verified_images; exit 143' TERM
+acquire_production_operation_lock() {
+  operation_name=$1
+  require_command node
+  operation_lock_token=$(node "$OPERATION_LOCK_SCRIPT" \
+    acquire "$OPERATION_LOCK_PATH" "$operation_name" "$$") \
+    || fail "another production operation is active or the fail-closed operation lock needs reviewed recovery"
+  printf '%s\n' "$operation_lock_token" | grep -Eq '^[0-9a-f]{64}$' \
+    || fail "production operation lock returned an invalid ownership token"
+}
+
+release_production_operation_lock() {
+  [ -n "$operation_lock_token" ] || return 0
+  if ! node "$OPERATION_LOCK_SCRIPT" \
+    release "$OPERATION_LOCK_PATH" "$operation_lock_token"; then
+    return 1
+  fi
+  operation_lock_token=''
+}
+
+cleanup_start_state() {
+  status=$?
+  trap - 0 HUP INT TERM
+  set +e
+  cleanup_verified_images
+  if ! release_production_operation_lock; then
+    printf '%s\n' "WARNING: production operation lock release failed; inspect the fail-closed lock before retrying." >&2
+    if [ "$status" -eq 0 ]; then
+      status=1
+    fi
+  fi
+  exit "$status"
+}
+
+trap cleanup_start_state 0
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 preflight_images() {
   cleanup_verified_images
@@ -292,13 +368,44 @@ prepare_runtime_dependencies() {
 stop_runtime_services() {
   info "stopping application runtimes for migration; PostgreSQL and Redis stay running"
   compose stop reconciliation-worker retention-worker app
+  compose --profile operations rm -f -s retention-hold db-grant-sync db-role-provision migration
+}
+
+prepare_database_roles() {
+  compose rm -f -s db-role-provision || return 1
+  compose run --rm --no-deps --pull never db-role-provision || return 1
+}
+
+fence_database_roles() {
+  compose rm -f -s db-role-provision || return 1
+  compose run --rm --no-deps --pull never db-role-provision \
+    node deploy/prod/database-role-provision.mjs fence || return 1
+}
+
+sync_database_privileges() {
+  compose rm -f -s db-grant-sync || return 1
+  compose run --rm --no-deps --pull never db-grant-sync || return 1
 }
 
 run_verified_migration() {
   compose up -d --no-build --pull never --wait --wait-timeout 120 postgres redis \
     || return 1
-  compose rm -f -s migration || return 1
-  compose run --rm --no-deps --pull never migration || return 1
+  migration_status=0
+  prepare_database_roles || migration_status=$?
+  if [ "$migration_status" -eq 0 ]; then
+    compose rm -f -s migration || migration_status=$?
+  fi
+  if [ "$migration_status" -eq 0 ]; then
+    compose run --rm --no-deps --pull never migration || migration_status=$?
+  fi
+  if [ "$migration_status" -eq 0 ]; then
+    sync_database_privileges || migration_status=$?
+  fi
+  [ "$migration_status" -ne 0 ] || return 0
+  printf '%s\n' "Migration/grant synchronization failed; re-fencing every non-bootstrap database role..." >&2
+  fence_database_roles \
+    || printf '%s\n' "WARNING: automatic database-role re-fence failed; keep all runtimes stopped and repair the fence before retrying." >&2
+  return "$migration_status"
 }
 
 start_verified_runtimes() {
@@ -390,35 +497,38 @@ start() {
 
 verify() {
   require_env_file
-  port=$(env_value CLEAN_PAY_PORT 4000)
-  url="http://127.0.0.1:${port}/api/internal/health/readiness"
-  readiness_secret=$(env_value READINESS_INTERNAL_SECRET)
+  require_command node
   attempts=0
-  response=""
 
   while [ "$attempts" -lt 60 ]; do
-    if command -v curl >/dev/null 2>&1; then
-      if response=$(curl --fail --show-error --silent --max-time 10 -H "x-clean-pay-readiness-secret: ${readiness_secret}" "$url" 2>/dev/null); then
-        break
-      fi
-    elif command -v wget >/dev/null 2>&1; then
-      if response=$(wget -qO- -T 10 --header="x-clean-pay-readiness-secret: ${readiness_secret}" "$url" 2>/dev/null); then
-        break
-      fi
-    else
-      fail "curl or wget is required to verify ${url}"
+    # Read the credential only inside the already-running app container. A
+    # host-side curl/wget header would expose it in the process argument list.
+    # Treat malformed JSON, an empty checks object and every degraded check as
+    # a failure even if the endpoint accidentally returns HTTP 200.
+    if compose exec -T app node -e "fetch('http://127.0.0.1:4000/api/internal/health/readiness',{headers:{'x-clean-pay-readiness-secret':process.env.READINESS_INTERNAL_SECRET},signal:AbortSignal.timeout(10000)}).then(async response=>{const text=await response.text();let body;try{body=JSON.parse(text)}catch{throw new Error('readiness returned invalid JSON')}const checks=body&&body.checks&&typeof body.checks==='object'&&!Array.isArray(body.checks)?Object.entries(body.checks):[];const failed=checks.filter(([,check])=>!check||check.status!=='ok').map(([name])=>name);if(!response.ok||body.status!=='ok'||checks.length===0||failed.length)throw new Error('dependencies are not ready: '+(failed.join(', ')||body.status||response.status));process.exit(0)}).catch(()=>process.exit(1))" >/dev/null 2>&1; then
+      info "detailed application readiness is healthy"
+      assert_reconciliation_worker
+      assert_retention_worker
+      return 0
     fi
 
     attempts=$((attempts + 1))
     sleep 2
   done
 
-  [ -n "$response" ] || fail "readiness did not become healthy within 120 seconds: ${url}"
-  printf '%s\n' "$response"
-
-  assert_reconciliation_worker
-  assert_retention_worker
+  fail "detailed application readiness did not become healthy within 120 seconds"
 }
+
+case "$MODE" in
+  standalone|remnashop) ;;
+  *) fail "CLEAN_PAY_MODE must be standalone or remnashop" ;;
+esac
+
+case "$COMMAND" in
+  start|up|stop|down|restart|build)
+    acquire_production_operation_lock "$COMMAND"
+    ;;
+esac
 
 case "$COMMAND" in
   start|up)
@@ -426,6 +536,8 @@ case "$COMMAND" in
     ;;
   stop|down)
     require_env_file
+    require_command node
+    node "$ROLE_ENV_SCRIPT" materialize "$ENV_FILE"
     compose down
     ;;
   restart)

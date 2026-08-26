@@ -3,7 +3,7 @@
 import { executePayment } from "@/application/payments/checkout";
 import { executePaymentWorkflow } from "@/application/payments/execute-payment-workflow";
 import type { PaymentCommands } from "@/application/payments/ports/checkout";
-import { productionPaymentWorkflowGateway } from "@/backend/integrations/payments/payment-workflow-gateway";
+import { productionPaymentWorkflowGateway } from "@/app/_composition/session-gateways";
 import type { PaymentCommand } from "@/application/models/checkout";
 
 const productionPaymentCommands: PaymentCommands = {

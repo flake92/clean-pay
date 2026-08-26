@@ -58,30 +58,53 @@ function hashIp(ip: string | null) {
     .digest("hex");
 }
 
-export async function auditLog({
+async function appendAuditLog({
   action,
   userId,
   severity = "INFO",
   metadata,
 }: AuditInput) {
-  try {
-    const requestHeaders = await headers();
-    const sanitized = metadata ? sanitizeValue(metadata) : undefined;
+  const requestHeaders = await headers();
+  const sanitized = metadata ? sanitizeValue(metadata) : undefined;
 
-    await prismaAuditEventRepository.append({
-      userId: userId ?? null,
-      action,
-      severity,
-      ipHash: hashIp(
-        getTrustedClientIp(requestHeaders, getEnv().trustedProxyHops),
-      ),
-      metadata: sanitized as Record<string, unknown> | undefined,
-    });
+  await prismaAuditEventRepository.append({
+    userId: userId ?? null,
+    action,
+    severity,
+    ipHash: hashIp(
+      getTrustedClientIp(requestHeaders, getEnv().trustedProxyHops),
+    ),
+    metadata: sanitized as Record<string, unknown> | undefined,
+  });
+}
+
+function logAuditWriteFailure(action: string, error: unknown) {
+  logger.error("audit_write_failed", {
+    action,
+    ...(isProductionLog()
+      ? {}
+      : { error: error instanceof Error ? error.message : String(error) }),
+  }, { category: "audit" });
+}
+
+export async function auditLog(input: AuditInput) {
+  try {
+    await appendAuditLog(input);
   } catch (error) {
-    logger.error("audit_write_failed", {
-      action,
-      error: error instanceof Error ? error.message : String(error),
-    }, { category: "audit" });
+    logAuditWriteFailure(input.action, error);
+  }
+}
+
+/**
+ * Persist an audit event or reject the caller. Use this for privileged reads
+ * whose sensitive result must never be disclosed without a durable audit row.
+ */
+export async function auditLogRequired(input: AuditInput) {
+  try {
+    await appendAuditLog(input);
+  } catch (error) {
+    logAuditWriteFailure(input.action, error);
+    throw error;
   }
 }
 

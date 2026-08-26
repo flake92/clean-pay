@@ -11,8 +11,199 @@ const rootCompose = readFileSync("docker-compose.yml", "utf8");
 const rootStart = readFileSync("start.sh", "utf8");
 const start = readFileSync("deploy/prod/start.sh", "utf8");
 const nextConfig = readFileSync("next.config.ts", "utf8");
+const dataServiceSandbox = readFileSync(
+  "scripts/security/verify-data-service-sandbox.sh",
+  "utf8",
+);
+const runtimeSandbox = readFileSync(
+  "scripts/security/verify-runtime-sandbox.sh",
+  "utf8",
+);
+const publishedCandidateSmoke = readFileSync(
+  "scripts/security/smoke-published-candidate.sh",
+  "utf8",
+);
+const migrationRehearsals = [
+  "scripts/security/rehearse-clean-pay-migrations.sh",
+  "scripts/security/rehearse-remnashop-migrations.sh",
+].map((path) => [path, readFileSync(path, "utf8")] as const);
+const ci = readFileSync(".github/workflows/ci.yml", "utf8");
+const devcontainerCompose = readFileSync(".devcontainer/docker-compose.yml", "utf8");
+const operationalYamlImageSources = [
+  ".devcontainer/docker-compose.yml",
+  ".github/workflows/ci.yml",
+  "docker-compose.yml",
+  "deploy/prod/docker-compose.yml",
+].map((path) => [path, readFileSync(path, "utf8")] as const);
+const operationalHelperImageSources = [
+  "deploy/prod/host-safety.mjs",
+  "deploy/prod/redis-host-safety.sh",
+].map((path) => [path, readFileSync(path, "utf8")] as const);
 
 describe("production container boundary", () => {
+  it("pins every externally pulled devcontainer image by digest", () => {
+    const literalImageReferences = [...devcontainerCompose.matchAll(
+      /^\s*image:\s*["']?([^\s"']+)/gm,
+    )]
+      .map((match) => match[1]!)
+      .filter((reference) => !reference.startsWith("${"));
+
+    expect(literalImageReferences.length).toBeGreaterThan(0);
+    for (const reference of literalImageReferences) {
+      expect(reference, reference).toMatch(/@sha256:[a-f0-9]{64}$/);
+    }
+  });
+
+  it("pins every PostgreSQL and Redis operational image reference by digest", () => {
+    for (const [path, source] of operationalYamlImageSources) {
+      const references = [...source.matchAll(
+        /^\s*image:\s*["']?((?:postgres|redis|valkey\/valkey):[A-Za-z0-9][A-Za-z0-9._-]*(?:@sha256:[a-f0-9]{64})?)/gm,
+      )].map((match) => match[1]!);
+      expect(references.length, `${path}: data-service images`).toBeGreaterThan(0);
+      for (const reference of references) {
+        expect(reference, `${path}: ${reference}`).toMatch(
+          /@sha256:[a-f0-9]{64}$/,
+        );
+      }
+    }
+    for (const [path, source] of operationalHelperImageSources) {
+      const references = source.match(
+        /(?:postgres|redis):[A-Za-z0-9][A-Za-z0-9._-]*(?:@sha256:[a-f0-9]{64})?/g,
+      ) ?? [];
+      expect(references.length, `${path}: helper image`).toBeGreaterThan(0);
+      for (const reference of references) {
+        expect(reference, `${path}: ${reference}`).toMatch(
+          /@sha256:[a-f0-9]{64}$/,
+        );
+      }
+    }
+  });
+
+  it("sandboxes every application runtime role with explicit resource bounds", () => {
+    for (const [path, source] of [
+      ["docker-compose.yml", rootCompose],
+      ["deploy/prod/docker-compose.yml", compose],
+    ] as const) {
+      const sandbox = source.split(/\nx-clean-pay-runtime-sandbox:/)[1]
+        ?.split(/\nservices:/)[0] ?? "";
+      expect(sandbox, path).toContain("read_only: true");
+      expect(sandbox, path).toContain("cap_drop: [ALL]");
+      expect(sandbox, path).toContain("security_opt: [no-new-privileges:true]");
+
+      for (const [role, nextRole] of [
+        ["migration", "app"],
+        ["app", "reconciliation-worker"],
+        ["reconciliation-worker", "retention-worker"],
+        ["retention-worker", "postgres"],
+      ] as const) {
+        const section = source.split(`\n  ${role}:\n`)[1]
+          ?.split(`\n  ${nextRole}:\n`)[0] ?? "";
+        expect(section, `${path}: ${role}`).toContain("<<: *clean-pay-runtime-sandbox");
+        expect(section, `${path}: ${role}`).toMatch(/pids_limit: \d+/);
+        expect(section, `${path}: ${role}`).toMatch(/mem_limit: (?:512m|1g)/);
+        expect(section, `${path}: ${role}`).toMatch(/cpus: (?:0\.5|1\.0)/);
+        expect(section, `${path}: ${role}`).toContain("/tmp:rw,noexec,nosuid,nodev");
+        if (role === "app") {
+          expect(section, `${path}: writable Next cache ownership`).toContain(
+            "/app/.next/cache:rw,noexec,nosuid,nodev,size=128m,mode=0700,uid=1001,gid=1001",
+          );
+        }
+      }
+
+      for (const [role, nextRole] of [
+        ["postgres", "redis"],
+        ["redis", "volumes"],
+      ] as const) {
+        const section = source.split(`\n  ${role}:\n`)[1]
+          ?.split(`\n${nextRole === "volumes" ? "" : "  "}${nextRole}:\n`)[0] ?? "";
+        expect(section, `${path}: ${role}`).toContain(
+          "security_opt: [no-new-privileges:true]",
+        );
+        expect(section, `${path}: ${role}`).toContain("read_only: true");
+        expect(section, `${path}: ${role}`).toContain("cap_drop: [ALL]");
+        expect(section, `${path}: ${role}`).toMatch(/pids_limit: \d+/);
+        expect(section, `${path}: ${role}`).toMatch(/mem_limit: (?:512m|1g)/);
+        expect(section, `${path}: ${role}`).toMatch(/cpus: (?:0\.5|1\.0)/);
+        expect(section, `${path}: ${role}`).toContain(
+          role === "postgres" ? 'user: "70:70"' : 'user: "999:1000"',
+        );
+        expect(section, `${path}: ${role}`).toContain(
+          "/tmp:rw,noexec,nosuid,nodev",
+        );
+        expect(section, `${path}: ${role}`).toContain(
+          role === "postgres"
+            ? "postgres-data:/var/lib/postgresql/data"
+            : "redis-data:/data",
+        );
+        if (role === "postgres") {
+          expect(section, `${path}: ${role}`).toContain(
+            "/var/run/postgresql:rw,noexec,nosuid,nodev",
+          );
+        }
+      }
+    }
+  });
+
+  it("rehearses data-service health, writable data, and immutable roots in CI", () => {
+    expect(ci).toContain("Verify hardened data-service runtime boundaries");
+    expect(ci).toContain("bash scripts/security/verify-data-service-sandbox.sh");
+    expect(ci).toContain("--read-only --cap-drop ALL");
+    expect(ci).toContain("touch /app/clean-pay-write-probe");
+    expect(ci).toContain("/_next/image?url=%2Fclean-pay-logo.png");
+    expect(ci).toContain("touch /app/.next/cache/clean-pay-write-probe");
+    expect(dataServiceSandbox).toContain("compose up --detach --wait");
+    for (const roleFile of [
+      ".env.app",
+      ".env.migration",
+      ".env.postgres",
+      ".env.reconciliation",
+      ".env.retention",
+    ]) {
+      expect(dataServiceSandbox).toContain(roleFile);
+    }
+    expect(dataServiceSandbox).toContain(".State.Health.Status");
+    expect(dataServiceSandbox).toContain("touch /usr/local/clean-pay-sandbox-write");
+    expect(dataServiceSandbox).toContain("CREATE TABLE sandbox_write_probe");
+    expect(dataServiceSandbox).toContain("redis-cli SET clean-pay-sandbox-probe");
+    expect(dataServiceSandbox).toContain("compose down --volumes --remove-orphans");
+  });
+
+  it("builds both CI images with the canonical public build contract", () => {
+    const buildStep = ci.slice(
+      ci.indexOf("Build both exact executable container targets"),
+      ci.indexOf("Smoke-test migration image environment validation"),
+    );
+
+    expect(buildStep).toContain("compute-public-build-contract.mjs --version");
+    expect(buildStep).toContain('public_contract_sha256="$(node scripts/security/compute-public-build-contract.mjs)"');
+    expect(buildStep.match(/--build-arg CLEAN_PAY_PUBLIC_BUILD_CONTRACT_VERSION=/g))
+      .toHaveLength(2);
+    expect(buildStep.match(/--build-arg CLEAN_PAY_PUBLIC_BUILD_CONTRACT_SHA256=/g))
+      .toHaveLength(2);
+  });
+
+  it("runs the migration, workers, negative capability probe and graceful stop live", () => {
+    expect(ci).toContain("Verify the full hardened migration and worker topology");
+    expect(ci).toContain("scripts/security/verify-runtime-sandbox.sh");
+    expect(runtimeSandbox).toContain("compose up --detach --no-build --pull never --wait");
+    expect(runtimeSandbox).toContain("_prisma_migrations");
+    expect(runtimeSandbox).toContain("reconciliation-worker retention-worker");
+    expect(runtimeSandbox).toContain("mount -t tmpfs");
+    expect(runtimeSandbox).toContain("compose stop --timeout 120");
+    expect(runtimeSandbox).toContain("event=reconciliation_worker_stopped");
+    expect(runtimeSandbox).toContain("event=retention_worker_stopped");
+  });
+
+  it("isolates concurrent security rehearsals and bounds local HTTP probes", () => {
+    expect(runtimeSandbox).toContain('-$$-${RANDOM}');
+    expect(publishedCandidateSmoke).toContain('-$$-${RANDOM}');
+    for (const [path, source] of migrationRehearsals) {
+      expect(source, path).toContain('-$$-${RANDOM}');
+    }
+    expect(publishedCandidateSmoke.match(/--connect-timeout 2/g)).toHaveLength(2);
+    expect(publishedCandidateSmoke.match(/--max-time 10/g)).toHaveLength(2);
+  });
+
   it("generates Prisma once through the npm prebuild lifecycle", () => {
     const builder = dockerfile.slice(
       dockerfile.indexOf("AS builder"),

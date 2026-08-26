@@ -132,12 +132,9 @@ async function parseResponse<T>(response: Response, path: string) {
   }
 
   if (!response.ok) {
-    const detail =
-      data && typeof data === 'object' && 'detail' in data
-        ? (data as { detail: unknown }).detail
-        : data;
-
-    throw normalizeRemnashopError(response.status, detail, { path });
+    // Preserve the complete error object so a stable top-level machine code is
+    // not discarded merely because the provider also supplied `detail`.
+    throw normalizeRemnashopError(response.status, data, { path });
   }
 
   return data as T;

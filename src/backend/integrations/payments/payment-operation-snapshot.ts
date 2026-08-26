@@ -68,12 +68,16 @@ export function parsePaymentResponse(value: Prisma.JsonValue | null) {
 export function parseErrorSnapshot(
   value: Prisma.JsonValue | null,
 ): PaymentOperationErrorSnapshot {
+  const retainedTombstone = isObject(value)
+    && value.retention === "scrubbed"
+    && value.version === 2
+    && value.outcome === "failure";
   if (
     !isObject(value) ||
     !isServiceErrorCode(value.code) ||
     typeof value.status !== "number" ||
     !Number.isInteger(value.status) ||
-    typeof value.message !== "string"
+    (!retainedTombstone && typeof value.message !== "string")
   ) {
     throw new ServiceError(
       "INTERNAL_ERROR",
@@ -81,7 +85,13 @@ export function parseErrorSnapshot(
       "Stored payment operation error is invalid",
     );
   }
-  return { code: value.code, status: value.status, message: value.message };
+  return {
+    code: value.code,
+    status: value.status,
+    message: retainedTombstone
+      ? new ServiceError(value.code, value.status).prodMessage
+      : value.message as string,
+  };
 }
 
 export function secondsUntil(date: Date, now: Date) {
@@ -135,13 +145,38 @@ export function paymentOperationDispatchFailureOutcome(
   error: unknown,
 ): PaymentOperationDispatchFailureOutcome {
   if (!(error instanceof ServiceError)) return "UNKNOWN";
-  if (typeof error.debug?.upstreamStatus !== "number") return "UNKNOWN";
+  const upstreamStatus = error.debug?.upstreamStatus;
+  if (typeof upstreamStatus !== "number") return "UNKNOWN";
+  // Presentation mappings may deliberately turn provider 5xx responses into
+  // local 4xx guidance. The provider status is the dispatch truth: a 5xx can
+  // never prove that the payment was rejected.
+  if (upstreamStatus >= 500 || upstreamStatus === 408) return "UNKNOWN";
   if (
     error.code === "PAYMENT_OPERATION_IN_PROGRESS" ||
     error.code === "PAYMENT_OUTCOME_UNKNOWN" ||
-    error.code === "IDEMPOTENCY_KEY_REUSED"
+    error.debug?.upstreamCode === "PAYMENT_OUTCOME_UNKNOWN" ||
+    (error.code === "IDEMPOTENCY_KEY_REUSED"
+      && error.debug?.upstreamCode !== "IDEMPOTENCY_KEY_REUSED")
   ) {
     return "UNKNOWN";
+  }
+  const paymentConflict = upstreamStatus === 409
+    && ["/subscription/purchase", "/subscription/extend"].some((path) =>
+      error.debug?.upstreamPath?.toLowerCase().includes(path)
+    );
+  if (paymentConflict) {
+    // Only a stable provider code can prove a terminal 409. Prose-derived and
+    // unrecognised conflicts remain reconcilable when wording/localisation
+    // changes.
+    const provenFinalCodes = new Set([
+      "IDEMPOTENCY_KEY_REUSED",
+      "PLAN_UNAVAILABLE",
+      "PAYMENT_GATEWAY_UNAVAILABLE",
+    ]);
+    return error.debug?.upstreamCode
+      && provenFinalCodes.has(error.debug.upstreamCode)
+      ? "FINAL"
+      : "UNKNOWN";
   }
   if (error.status === 429) return "RETRYABLE";
   if (error.status >= 400 && error.status < 500 && error.status !== 408) {

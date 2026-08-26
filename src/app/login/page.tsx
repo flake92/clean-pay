@@ -9,6 +9,12 @@ function firstSearchParam(value: string | string[] | undefined) {
 }
 
 function loginError(auth: string | undefined) {
+  if (auth === "telegram_processing") {
+    return "Вход через Telegram ещё обрабатывается. Подождите немного и повторите переход.";
+  }
+  if (auth === "telegram_recovery_required") {
+    return "Вход через Telegram остановился после безопасной проверки. Повторите вход; если проблема сохраняется, обратитесь в поддержку.";
+  }
   return auth === "telegram_failed"
     ? "Не удалось завершить вход через Telegram. Повторите попытку или войдите по e-mail."
     : null;

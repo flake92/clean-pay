@@ -141,6 +141,18 @@ Canary создаётся с restart policy `unless-stopped`; topology guard п�
 State публикуется атомарно с mode `0600`. Existing container без точных
 ownership labels не удаляется. При ошибке stage удаляется только созданный
 owned canary; recursive delete и Docker volume operations отсутствуют.
+Все команды rollout, включая `verify` и `status`, удерживают тот же
+ownership-token operation lock, что и обычные `deploy.sh`, `start.sh` и
+`prod.mjs`: read-only команды также materialize'ят общие role-env файлы, а
+проверка должна видеть согласованное production-состояние. Поэтому эти
+entrypoint'ы нельзя запускать параллельно. Stale fail-closed lock нельзя удалять
+по возрасту — сначала независимо докажите, что ни один writer не работает.
+Ошибка owner-token release или удаления private state lock завершает даже
+успешную команду с nonzero status и сохраняет проблемный lock для расследования.
+В metadata общего lock `ownerPid`/`pid` — PID живого entrypoint shell, а
+`helperPid` относится только к краткоживущему Node helper. Проверяйте на host
+именно `ownerPid` вместе с `operation` и `startedAt`; завершение `helperPid` не
+доказывает, что rollout закончился.
 
 ## 3. Подготовить persistent Caddy candidate
 

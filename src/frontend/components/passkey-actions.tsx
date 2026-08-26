@@ -17,6 +17,7 @@ import {
   verifyPasskeyLoginAction,
   verifyPasskeyRegistrationAction,
 } from "@/app/actions/passkeys";
+import { clearSessionAction } from "@/app/actions/session";
 import { navigateTo } from "@/frontend/lib/browser-navigation";
 import { safeRedirectPath } from "@/shared/auth/redirect-policy";
 
@@ -185,14 +186,17 @@ export function PasskeyLoginButton({
 
 export function PasskeySetupPanel({
   redirectTo = "/cabinet",
+  required = false,
 }: {
   redirectTo?: string;
+  required?: boolean;
 }) {
   const destination = safeRedirectPath(redirectTo) ?? "/cabinet";
   const supported = useWebAuthnSupport();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [name, setName] = useState("");
+  const [restarting, setRestarting] = useState(false);
   const setupPendingRef = useRef(false);
 
   function continueWithoutPasskey() {
@@ -200,6 +204,31 @@ export function PasskeySetupPanel({
       return;
     }
     navigateTo(destination);
+  }
+
+  async function restartAuthentication() {
+    if (setupPendingRef.current) {
+      return;
+    }
+    setupPendingRef.current = true;
+    setRestarting(true);
+    setError(null);
+
+    try {
+      const result = await clearSessionAction();
+      if (result.status === "error") {
+        setError(result.message);
+        return;
+      }
+      navigateTo(`/login?${new URLSearchParams({
+        redirect_to: destination,
+      }).toString()}`);
+    } catch {
+      setError("Сеть недоступна. Не удалось начать вход заново.");
+    } finally {
+      setupPendingRef.current = false;
+      setRestarting(false);
+    }
   }
 
   async function createPasskey() {
@@ -212,7 +241,11 @@ export function PasskeySetupPanel({
 
     try {
       if (!browserSupportsWebAuthn()) {
-        setError("Это устройство не поддерживает быстрый вход. Продолжите в кабинете или используйте другое устройство.");
+        setError(
+          required
+            ? "Это устройство не поддерживает Passkey. Используйте совместимый браузер или начните вход заново."
+            : "Это устройство не поддерживает быстрый вход. Продолжите в кабинете или используйте другое устройство.",
+        );
         return;
       }
 
@@ -235,11 +268,11 @@ export function PasskeySetupPanel({
     } catch (error) {
       setError(
         isUserCancelled(error)
-          ? "Окно быстрого входа закрыто. Это не проблема, можно продолжить без него."
+          ? required
+            ? "Окно Passkey закрыто. Повторите настройку, чтобы завершить вход."
+            : "Окно быстрого входа закрыто. Это не проблема, можно продолжить без него."
           : isWebAuthnTransportError(error)
             ? "Браузер не смог связаться с ключом. Для ключа на телефоне включите Bluetooth на компьютере и телефоне, держите телефон рядом и повторите попытку."
-            : error instanceof Error
-            ? error.message
             : "Не удалось создать быстрый вход.",
       );
     } finally {
@@ -252,14 +285,30 @@ export function PasskeySetupPanel({
     return (
       <div className="flex flex-column gap-3">
         <Message
-          severity="info"
-          text="Это устройство не поддерживает быстрый вход. Вы можете пользоваться кабинетом через e-mail, пароль или Telegram."
+          severity={required ? "warn" : "info"}
+          text={
+            required
+              ? "Для завершения этого входа нужен Passkey, но устройство его не поддерживает. Откройте страницу в совместимом браузере или начните вход заново."
+              : "Это устройство не поддерживает быстрый вход. Вы можете пользоваться кабинетом через e-mail, пароль или Telegram."
+          }
         />
-        <Button
-          label="Продолжить без быстрого входа"
-          onClick={continueWithoutPasskey}
-          type="button"
-        />
+        {required ? (
+          <Button
+            disabled={restarting}
+            label="Начать вход заново"
+            loading={restarting}
+            onClick={restartAuthentication}
+            outlined
+            type="button"
+          />
+        ) : (
+          <Button
+            label="Продолжить без быстрого входа"
+            onClick={continueWithoutPasskey}
+            type="button"
+          />
+        )}
+        {error ? <Message severity="warn" text={error} /> : null}
       </div>
     );
   }
@@ -272,8 +321,9 @@ export function PasskeySetupPanel({
           <div className="font-medium text-900">Быстрый вход</div>
         </div>
         <div className="text-sm text-600 line-height-3">
-          Это необязательный способ входа через Face ID, отпечаток или PIN-код устройства.
-          Если окно не открылось или вы передумали, просто продолжите в кабинет.
+          {required
+            ? "Passkey через Face ID, отпечаток или PIN-код устройства обязателен для завершения этого безопасного входа."
+            : "Это необязательный способ входа через Face ID, отпечаток или PIN-код устройства. Если окно не открылось или вы передумали, просто продолжите в кабинет."}
         </div>
       </div>
       {error ? <Message severity="warn" text={error} /> : null}
@@ -288,26 +338,40 @@ export function PasskeySetupPanel({
       </label>
       <div className="flex flex-column sm:flex-row gap-2">
         <Button
-          disabled={loading}
+          disabled={loading || restarting}
           icon="pi pi-lock"
           label="Настроить быстрый вход"
           loading={loading}
           onClick={createPasskey}
           type="button"
         />
-        <Button
-          disabled={loading}
-          label="Продолжить без него"
-          onClick={continueWithoutPasskey}
-          outlined
-          severity="secondary"
-          type="button"
-        />
+        {required ? (
+          <Button
+            disabled={loading || restarting}
+            label="Начать вход заново"
+            loading={restarting}
+            onClick={restartAuthentication}
+            outlined
+            severity="secondary"
+            type="button"
+          />
+        ) : (
+          <Button
+            disabled={loading}
+            label="Продолжить без него"
+            onClick={continueWithoutPasskey}
+            outlined
+            severity="secondary"
+            type="button"
+          />
+        )}
       </div>
-      <Message
-        severity="info"
-        text="Быстрый вход можно настроить позже в профиле."
-      />
+      {required ? null : (
+        <Message
+          severity="info"
+          text="Быстрый вход можно настроить позже в профиле."
+        />
+      )}
     </div>
   );
 }

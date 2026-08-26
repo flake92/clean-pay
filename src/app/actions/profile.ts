@@ -7,10 +7,12 @@ import {
   changeProfilePassword,
   requestProfileEmailVerification,
 } from "@/application/profile/execute-profile-command";
-import { productionProfileCommands } from "@/backend/integrations/profile/profile-adapter";
-import { productionEmailVerificationCommands } from "@/backend/integrations/auth/email-verification";
+import {
+  productionEmailVerificationCommands,
+  productionEmailReminderPreferenceCommands,
+  productionProfileCommands,
+} from "@/app/_composition/session-gateways";
 import { updateEmailReminderPreference } from "@/application/profile/update-email-reminder-preference";
-import { productionEmailReminderPreferenceCommands } from "@/backend/integrations/profile/email-reminder-preferences-adapter";
 
 export async function requestProfileEmailVerificationAction(input: { email?: string; turnstileToken?: string }) {
   return requestProfileEmailVerification(productionEmailVerificationCommands, input);

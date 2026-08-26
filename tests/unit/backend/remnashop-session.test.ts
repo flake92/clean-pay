@@ -199,6 +199,49 @@ describe("Remnashop session reconciliation", () => {
     expect(tx.webUser.findUnique).toHaveBeenCalledTimes(3);
   });
 
+  it("fences a target-only upstream owner assignment before updating the user", async () => {
+    const target = {
+      id: "user-1",
+      remnashopUserId: null,
+      email: "user@example.com",
+      emailVerified: false,
+      telegramId: null,
+      telegramUsername: null,
+      fullName: null,
+      displayName: null,
+    };
+    tx.webUser.findUnique
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(target)
+      .mockResolvedValueOnce(null);
+
+    await createSessionFromRemnashopAuth({
+      accessToken: "access",
+      refreshToken: "refresh",
+      auth,
+    });
+
+    expect(mocks.mergeLocalUsersIntoTarget).toHaveBeenCalledWith(tx, {
+      targetUserId: "user-1",
+      targetUpstreamAccountId: "remna-1",
+      sourceUserIds: [],
+      ownerExpectations: [{
+        id: "user-1",
+        remnashopUserId: null,
+        email: "user@example.com",
+        telegramId: null,
+      }],
+    });
+    expect(mocks.assertUserMergeFinalOwner).toHaveBeenCalledWith(
+      tx,
+      expect.objectContaining({
+        targetUserId: "user-1",
+        sourceUserIds: [],
+        expected: expect.objectContaining({ remnashopUserId: "remna-1" }),
+      }),
+    );
+  });
+
   it("replaces prior local sessions for password-reset authentication", async () => {
     await expect(createSessionFromRemnashopAuth({
       accessToken: "access",

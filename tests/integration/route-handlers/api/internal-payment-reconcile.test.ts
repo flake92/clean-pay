@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => ({
   completeHistoryPage: vi.fn(), classifyHistoryError: vi.fn(),
   deferHistory: vi.fn(), failHistory: vi.fn(), now: vi.fn(),
   logTechnicalError: vi.fn(),
+  auditLogRequired: vi.fn(),
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
 }));
 
@@ -36,6 +37,7 @@ vi.mock("@/backend/integrations/payments/payment-maintenance-runner", () => ({
 }));
 vi.mock("@/backend/observability/audit", () => ({
   logTechnicalError: mocks.logTechnicalError,
+  auditLogRequired: mocks.auditLogRequired,
 }));
 vi.mock("@/backend/observability/logger", () => ({ logger: mocks.logger }));
 
@@ -133,6 +135,31 @@ describe("internal payment reconciliation route", () => {
       succeeded: 1,
       history: { applied: 20 },
     });
+    expect(mocks.auditLogRequired).toHaveBeenCalledWith({
+      action: "PAYMENT_RECONCILIATION_INTERNAL_RESULT_ACCESSED",
+      severity: "INFO",
+      metadata: {
+        claimedCount: 1,
+        failedCount: 0,
+        manualRequiredCount: 0,
+      },
+    });
+  });
+
+  it("fails closed without disclosing reconciliation results when audit persistence fails", async () => {
+    mocks.auditLogRequired.mockRejectedValueOnce(new Error("audit store unavailable"));
+
+    const response = await POST(request(secret));
+    const body = await response.text();
+
+    expect(response.status).toBe(500);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(JSON.parse(body)).toEqual({ error: "internal_error" });
+    expect(body).not.toContain("op-1");
+    expect(mocks.logTechnicalError).toHaveBeenCalledWith(
+      "payment_reconciliation_controller_failed",
+      expect.any(Error),
+    );
   });
 
   it("returns a non-success status when every claimed operation fails", async () => {

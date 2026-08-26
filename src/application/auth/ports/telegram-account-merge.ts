@@ -1,3 +1,5 @@
+import { serviceErrorPublicMessage } from "@/shared/domain/service-error-catalog";
+
 export type AccountMergeConfirmation = {
   context: unknown;
   id: string;
@@ -33,7 +35,12 @@ export type AccountMergePreflight = {
 };
 
 export class AccountMergeError extends Error {
-  constructor(public readonly code: string, message?: string) { super(message ?? code); }
+  public readonly prodMessage: string | undefined;
+
+  constructor(public readonly code: string, message?: string) {
+    super(message ?? code);
+    this.prodMessage = serviceErrorPublicMessage(code);
+  }
 }
 
 export interface TelegramAccountMergeGateway {

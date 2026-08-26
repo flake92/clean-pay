@@ -160,13 +160,26 @@ describe("clean architecture boundaries", () => {
 
   it("allows backend adapters to depend only on application contracts", () => {
     for (const { file, source } of files("src/backend/**/*.{ts,tsx}")) {
-      if (file.replaceAll("\\", "/").startsWith("src/backend/composition/")) continue;
       for (const { dependency, resolved } of projectDependencies(file, source)) {
         if (!resolved.startsWith("src/application/")) continue;
         expect(
           resolved.includes("/ports/") || resolved.startsWith("src/application/models/"),
           `${file} composes application implementation ${dependency} (${resolved})`,
         ).toBe(true);
+      }
+    }
+  });
+
+  it("keeps every production composition root in src/app/_composition", () => {
+    expect(globSync("src/backend/composition/**/*.{ts,tsx}"), "backend composition roots")
+      .toEqual([]);
+    for (const file of globSync("src/**/{composition,_composition}/**/*.{ts,tsx}")) {
+      expect(file.replaceAll("\\", "/"), file).toMatch(/^src\/app\/_composition\//);
+    }
+    for (const { file, source } of files("src/backend/integrations/**/*.{ts,tsx}")) {
+      for (const { dependency, resolved } of projectDependencies(file, source)) {
+        expect(resolved, `${file} imports backend composition ${dependency}`)
+          .not.toMatch(/^src\/backend\/composition\//);
       }
     }
   });
@@ -322,9 +335,9 @@ describe("clean architecture boundaries", () => {
     expect(controller).toContain("recoverRemnashopTelegramSession(");
     expect(useCase).toContain("withOwnerChangeFence({");
     expect(useCase).toContain("mergeIntoTelegramAccount(");
-    expect(useCase).toContain("resolveVerifiedIdentity(");
+    expect(useCase).toContain("resolveVerifiedTelegramIdentity(");
     expect(useCase).toContain("stageAccountMerge(");
-    expect(useCase).toContain("preflightAccountMerge(");
+    expect(useCase).toContain("gateway.preflightAccountMerge(");
     expect(useCase).toContain('"/link-account?auth=telegram_email_replace"');
     expect(useCase).not.toMatch(/return gateway\.complete\(input\)/);
     expect(gateway).not.toContain("completeConsumedCallback");
@@ -427,7 +440,13 @@ describe("clean architecture boundaries", () => {
   it("keeps Telegram session-recovery orchestration in the application layer", () => {
     const useCase = readFileSync("src/application/auth/recover-telegram-session.ts", "utf8");
     const adapter = readFileSync("src/backend/integrations/remnashop/telegram-session-recovery.ts", "utf8");
-    const composition = readFileSync("src/backend/composition/telegram-session-recovery.ts", "utf8");
+    const composition = readFileSync("src/app/_composition/telegram-session-recovery.ts", "utf8");
+    const sessionGateways = readFileSync("src/app/_composition/session-gateways.ts", "utf8");
+    const authorization = readFileSync("src/backend/integrations/remnashop/session-authorization.ts", "utf8");
+    const recoveryDependency = readFileSync(
+      "src/backend/integrations/remnashop/telegram-session-recovery-dependency.ts",
+      "utf8",
+    );
     const identitySync = readFileSync("src/backend/integrations/auth/provider-account-identity-sync.ts", "utf8");
 
     expect(useCase).toContain('emailResolution: "KEEP_TARGET"');
@@ -437,6 +456,44 @@ describe("clean architecture boundaries", () => {
     expect(adapter).not.toContain('emailResolution: "KEEP_TARGET"');
     expect(adapter).not.toContain("recoverTelegramSession(");
     expect(composition).toContain("recoverTelegramSession(");
+    expect(composition).toContain(
+      "recoverTelegramSession: attachRemnashopTokensForTelegramSession",
+    );
+    expect(composition).not.toMatch(/registerRemnashop|registeredRecovery/);
+    expect(authorization).toContain(
+      "recoverTelegramSession = missingRemnashopTelegramRecovery",
+    );
+    expect(recoveryDependency).toContain("missingRemnashopTelegramRecovery");
+    expect(recoveryDependency).not.toMatch(/\blet\s+registered|\bregisterRemnashop/);
+    expect(authorization).not.toContain("@/application/auth/recover-telegram-session");
+    expect(globSync("src/backend/composition/**/*.{ts,tsx}")).toEqual([]);
+    for (const factory of [
+      "createProductionAuthProfileGateway",
+      "createProductionEmailVerificationCommands",
+      "createProductionPasskeyCommands",
+      "createProductionTelegramCallbackGateway",
+      "createProductionTelegramWebAppGateway",
+      "createProductionCabinetCommands",
+      "createProductionPaymentStatusReader",
+      "createProductionPaymentWorkflowGateway",
+      "createProductionProfileCommands",
+      "createEmailReminderPreferenceCommands",
+      "createProductionChatwootContextGateway",
+    ]) {
+      expect(sessionGateways, `${factory} must be wired at the app root`)
+        .toContain(`${factory}(`);
+    }
+    for (const { file, source } of files("src/app/**/*.{ts,tsx}")) {
+      if (file.replaceAll("\\", "/").startsWith("src/app/_composition/")) continue;
+      for (const { dependency, resolved } of projectDependencies(file, source)) {
+        expect(
+          resolved,
+          `${file} bypasses the session composition root through ${dependency}`,
+        ).not.toMatch(
+          /^src\/backend\/integrations\/(?:auth\/(?:auth-profile-gateway|email-verification|passkey-commands|telegram-callback-gateway|telegram-webapp-gateway)|cabinet\/cabinet-commands|payments\/(?:payment-status-reader|payment-workflow-gateway)|profile\/(?:profile-adapter|email-reminder-preferences-adapter)|support\/chatwoot-context-gateway|remnashop\/session-authorization)$/,
+        );
+      }
+    }
     expect(identitySync).toContain("@/backend/integrations/remnashop/api-client");
     expect(identitySync).not.toContain("@/backend/integrations/remnashop/client");
   });

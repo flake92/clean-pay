@@ -217,11 +217,34 @@ describe("production Telegram account merge gateway", () => {
     mocks.assertRateLimit.mockRejectedValueOnce(applicationError);
     await expect(gateway.assertRateLimit("777")).rejects.toBe(applicationError);
     mocks.getCurrentSession.mockRejectedValueOnce(new ServiceError("UNAUTHORIZED", 401));
-    await expect(gateway.loadActor()).rejects.toMatchObject({ code: "UNAUTHORIZED" });
+    await expect(gateway.loadActor()).rejects.toMatchObject({
+      code: "UNAUTHORIZED",
+      prodMessage: "Войдите в аккаунт, чтобы продолжить.",
+    });
     mocks.getCurrentSession.mockRejectedValueOnce(new TypeError("broken adapter"));
     await expect(gateway.loadActor()).rejects.toMatchObject({ code: "INTERNAL_ERROR" });
     mocks.prisma.accountMergeConfirmation.findFirst.mockResolvedValueOnce(null);
     await expect(gateway.loadConfirmation("user-1")).rejects.toMatchObject({ code: "NOT_FOUND" });
+  });
+
+  it.each([
+    ["RATE_LIMITED", 429, "Слишком много попыток. Попробуйте позже."],
+    ["NOT_FOUND", 404, "Данные не найдены."],
+    ["CONFLICT", 409, "Не удалось выполнить действие. Проверьте данные и попробуйте снова."],
+    ["ACCOUNT_MERGE_REQUIRED", 409, "Этот Telegram уже привязан к другой почте. Сначала объедините аккаунты через поддержку."],
+    ["ACCOUNT_MERGE_SUBSCRIPTIONS_CONFLICT", 409, "В обеих учётных записях есть подписки. Данные не изменены — обратитесь в службу поддержки."],
+    ["UPSTREAM_UNAVAILABLE", 502, "Сервис временно недоступен. Попробуйте позже."],
+  ] as const)("preserves the safe public message through production translation for %s", async (code, status, message) => {
+    const { ServiceError } = await import("@/backend/errors/service-error");
+    const { confirmLinkedTelegram } = await import("@/application/auth/manage-linked-account");
+    mocks.getCurrentSession.mockRejectedValueOnce(
+      new ServiceError(code, status, "synthetic provider debug detail"),
+    );
+
+    const result = await confirmLinkedTelegram(gateway);
+
+    expect(result).toEqual({ ok: false, code, message });
+    expect(JSON.stringify(result)).not.toContain("synthetic provider debug detail");
   });
 
   it("maps nullable provider identities and subscription outcomes", async () => {

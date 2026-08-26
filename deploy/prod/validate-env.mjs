@@ -1,12 +1,15 @@
 #!/usr/bin/env node
-import { existsSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 
 import {
   ProductionEnvironmentError,
   parseProductionEnvironmentFile,
+  validateProductionApplicationRoleEnvironment,
+  validateProductionDatabaseRoleEnvironment,
   validateProductionEnvironment,
 } from "./production-env-rules.mjs";
 import { deployLog } from "./deploy-log.mjs";
+import { readPrivateCredentialFile } from "./credential-file-guard.mjs";
 
 const IMAGE_METADATA_NAMES = Object.freeze([
   "CLEAN_PAY_BAKED_PUBLIC_APP_URL",
@@ -28,7 +31,21 @@ try {
     );
   }
 
-  validateProductionEnvironment(environment);
+  if (
+    input.mode === "process"
+    && ["migration", "retention", "hold-operator"].includes(
+      process.env.CLEAN_PAY_RUNTIME_ROLE,
+    )
+  ) {
+    validateProductionDatabaseRoleEnvironment(environment);
+  } else if (
+    input.mode === "process"
+    && process.env.CLEAN_PAY_RUNTIME_ROLE === "application"
+  ) {
+    validateProductionApplicationRoleEnvironment(environment);
+  } else {
+    validateProductionEnvironment(environment);
+  }
   deployLog(
     "info",
     "production_environment_validated",
@@ -105,9 +122,9 @@ function readValidationEnvironment(input) {
 }
 
 function readIsolatedEnvironmentFile(file) {
-  if (!existsSync(file)) {
-    throw new ProductionEnvironmentError(`Missing env file: ${file}`);
-  }
-
-  return parseProductionEnvironmentFile(readFileSync(file, "utf8"), file);
+  const { contents } = readPrivateCredentialFile(
+    file,
+    "production environment file",
+  );
+  return parseProductionEnvironmentFile(contents, file);
 }

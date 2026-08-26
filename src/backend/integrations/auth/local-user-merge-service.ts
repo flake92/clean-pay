@@ -76,16 +76,6 @@ export async function mergeLocalUsersIntoTarget(
     invalidatedTelegramStateCount: 0,
   };
 
-  if (sourceUserIds.length === 0) {
-    await transferPaymentOperationsForUserMerge(
-      tx,
-      targetUserId,
-      targetUpstreamAccountId,
-      [],
-    );
-    return emptyResult;
-  }
-
   const lockedUsers = await tx.$queryRaw<LocalUserOwnerExpectation[]>(
     Prisma.sql`
       SELECT "id", "remnashopUserId", "email", "telegramId"
@@ -114,6 +104,16 @@ export async function mergeLocalUsersIntoTarget(
     ) {
       throw mergeStateChangedError();
     }
+  }
+
+  if (sourceUserIds.length === 0) {
+    await transferPaymentOperationsForUserMerge(
+      tx,
+      targetUserId,
+      targetUpstreamAccountId,
+      [],
+    );
+    return emptyResult;
   }
 
   const releasedIdentities = await tx.webUser.updateMany({
@@ -167,6 +167,16 @@ export async function mergeLocalUsersIntoTarget(
   await tx.paymentRecord.updateMany({
     where: { userId: { in: sourceUserIds } },
     data: { userId: targetUserId },
+  });
+  // Legal-hold case ownership is part of the same payment-owner invariant.
+  // Leaving it on a soon-to-be-deleted source user would make an ACTIVE or
+  // RELEASED lifecycle permanently fail its stored-case validation.
+  await tx.paymentRetentionHold.updateMany({
+    where: {
+      caseUserId: { in: sourceUserIds },
+      status: { in: ["ACTIVE", "RELEASED"] },
+    },
+    data: { caseUserId: targetUserId },
   });
 
   const deletedUsers = await tx.webUser.deleteMany({

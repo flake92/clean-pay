@@ -96,6 +96,46 @@ describe("payment return polling", () => {
     vi.useRealTimers();
   });
 
+  it("uses a subordinate heading below the page title", () => {
+    const view = render(createElement(PaymentReturnStatus, {
+      kind: "pending",
+      model: pendingModel(),
+      operationId: "operation-1",
+      paymentId: null,
+    }));
+
+    expect(view.getByRole("heading", { level: 2 }).textContent)
+      .toBe("Платёж обрабатывается");
+    expect(view.queryByRole("heading", { level: 1 })).toBeNull();
+  });
+
+  it("renders a safe fallback instead of crashing on an invalid provider date", () => {
+    const view = render(createElement(PaymentReturnStatus, {
+      kind: "success",
+      model: {
+        status: "ready",
+        data: {
+          operation: null,
+          payment: {
+            gateway_type: "CARD",
+            payment_id: "payment-1",
+            plan_name: null,
+            purchase_type: "NEW",
+            status: "completed",
+            final_amount: "100.00",
+            currency: "RUB",
+            created_at: "not-a-date",
+          },
+          subscription: null,
+        },
+      },
+      operationId: null,
+      paymentId: "payment-1",
+    }));
+
+    expect(view.getByText("Дата не указана")).toBeTruthy();
+  });
+
   it("increments the backoff attempt and stops polling at a terminal state", async () => {
     render(createElement(PaymentReturnStatus, {
       kind: "pending",

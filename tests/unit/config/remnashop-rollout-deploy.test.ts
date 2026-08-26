@@ -43,6 +43,14 @@ describe("Remnashop payment rollout deployment", () => {
   });
 
   it("refuses to open the gate unless every rollout safety check passes", () => {
+    expect(rollout).toContain("remnashop-env-preflight.mjs");
+    expect(rollout).toContain("REMNASHOP_ENV_FILE /opt/remnashop/.env");
+    expect(rollout).toContain("REMNASHOP_ENV_EXPECTED_UID 0");
+    expect(rollout).toContain("REMNASHOP_ENV_EXPECTED_GID 0");
+    expect(rollout.indexOf('node "$script_dir/remnashop-env-preflight.mjs"'))
+      .toBeLessThan(rollout.indexOf("command -v docker"));
+    expect(rollout.indexOf('node "$script_dir/remnashop-env-preflight.mjs"'))
+      .toBeLessThan(rollout.indexOf('docker inspect "$container"'));
     expect(rollout).toContain("API, worker and scheduler must use the same image");
     expect(rollout).toContain("current_revision");
     expect(rollout).toContain('to_regclass(\'public.payment_runtime_control\')');

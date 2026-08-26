@@ -20,6 +20,9 @@ describe("production Docker network startup", () => {
     expect(source).toContain("env_value REMNASHOP_DOCKER_NETWORK remnawave-network");
     expect(source).toContain('docker network inspect "$network_name"');
     expect(source).toContain('docker network create "$network_name"');
+    expect(source).toMatch(
+      /case "\$MODE" in\s+standalone\|remnashop\) ;;\s+\*\) fail "CLEAN_PAY_MODE must be standalone or remnashop"/,
+    );
     const ensureNetwork = source.slice(
       source.indexOf("ensure_network() {"),
       source.indexOf("ensure_redis_host_memory_policy() {"),
@@ -44,7 +47,7 @@ describe("production Docker network startup", () => {
     const workflow = readFileSync(".github/workflows/ci.yml", "utf8");
     const build = workflow.indexOf("Build the exact production runtime image");
     const smoke = workflow.indexOf("Smoke-test the standalone production runtime");
-    const scan = workflow.indexOf("Generate image SBOM");
+    const scan = workflow.indexOf("Generate application image SBOM");
     const smokeStep = workflow.slice(smoke, scan);
 
     expect(smoke).toBeGreaterThan(build);

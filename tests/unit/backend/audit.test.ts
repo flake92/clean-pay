@@ -6,7 +6,7 @@ const state = vi.hoisted(() => ({
 
 const mocks = vi.hoisted(() => ({
   prisma: {
-    auditLog: { create: vi.fn() },
+    auditLog: { createMany: vi.fn() },
   },
   logger: {
     error: vi.fn(),
@@ -31,6 +31,7 @@ vi.mock("@/backend/observability/logger", () => ({
 
 import {
   auditLog,
+  auditLogRequired,
   getTrustedClientIp,
   logTechnicalError,
   logTechnicalInfo,
@@ -66,7 +67,7 @@ describe("audit logging", () => {
     });
 
     expect(mocks.sanitizeLogValue).toHaveBeenCalledWith({ email: "user@example.com" });
-    expect(mocks.prisma.auditLog.create).toHaveBeenCalledWith({
+    expect(mocks.prisma.auditLog.createMany).toHaveBeenCalledWith({
       data: expect.objectContaining({
         userId: "user-1",
         action: "auth_login_success",
@@ -78,12 +79,42 @@ describe("audit logging", () => {
   });
 
   it("logs write failures without throwing", async () => {
-    mocks.prisma.auditLog.create.mockRejectedValueOnce(new Error("db down"));
+    mocks.prisma.auditLog.createMany.mockRejectedValueOnce(new Error("db down"));
 
     await expect(auditLog({ action: "failed" })).resolves.toBeUndefined();
     expect(mocks.logger.error).toHaveBeenCalledWith("audit_write_failed", expect.objectContaining({ action: "failed" }), {
       category: "audit",
     });
+  });
+
+  it("propagates required audit persistence failures", async () => {
+    const failure = new Error("required audit store down");
+    mocks.prisma.auditLog.createMany.mockRejectedValueOnce(failure);
+
+    await expect(auditLogRequired({ action: "privileged_result_read" }))
+      .rejects.toBe(failure);
+    expect(mocks.logger.error).toHaveBeenCalledWith(
+      "audit_write_failed",
+      expect.objectContaining({ action: "privileged_result_read" }),
+      { category: "audit" },
+    );
+  });
+
+  it("does not expose audit persistence error details in production logs", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    mocks.prisma.auditLog.createMany.mockRejectedValueOnce(
+      new Error("query contained user@example.com and token secret-token"),
+    );
+
+    await expect(auditLog({ action: "failed" })).resolves.toBeUndefined();
+
+    expect(mocks.logger.error).toHaveBeenCalledWith(
+      "audit_write_failed",
+      { action: "failed" },
+      { category: "audit" },
+    );
+    expect(JSON.stringify(mocks.logger.error.mock.calls)).not.toContain("user@example.com");
+    expect(JSON.stringify(mocks.logger.error.mock.calls)).not.toContain("secret-token");
   });
 
   it("logs technical errors, warnings and info", () => {

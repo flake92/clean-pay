@@ -17,6 +17,7 @@ function callbackError(status: string | null) {
   if (status === "telegram_merge_subscriptions") return "В обеих учётных записях есть подписки. Данные не изменены — обратитесь в службу поддержки.";
   if (status === "telegram_merge_required") return "Автоматическое объединение остановлено из-за конфликта данных. Ничего не изменено.";
   if (status === "telegram_failed") return "Не удалось завершить привязку Telegram.";
+  if (status === "telegram_recovery_required") return "Привязка Telegram остановилась после безопасной проверки. Повторите привязку; если проблема сохраняется, обратитесь в поддержку.";
   return null;
 }
 

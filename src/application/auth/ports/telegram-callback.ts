@@ -5,6 +5,13 @@ export type TelegramCallbackInput =
 
 export type TelegramProviderSession = { context: unknown };
 
+export type TelegramCallbackDurableOwnership = {
+  authStateId: string;
+  stateHash: string;
+  codeHash: string;
+  claimToken: string;
+};
+
 export type ConsumedTelegramCallback = {
   user: TelegramLocalUser;
   redirectTo: string | null;
@@ -24,6 +31,7 @@ export type VerifiedTelegramCallback = {
     photoUrl: string | null;
     providerSession: TelegramProviderSession | null;
   };
+  durable?: TelegramCallbackDurableOwnership;
 };
 
 export type TelegramLocalUser = {

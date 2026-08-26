@@ -72,7 +72,6 @@ vi.mock("@/backend/integrations/remnashop/session-token-lifecycle", () => ({
 
 import {
   getJwtExpiresAt,
-  getAuthorizedRemnashopTokens,
   getRemnashopUserIdFromAccessToken,
   getRemnashopNotificationPreferences,
   protectRemnashopToken,
@@ -89,10 +88,12 @@ import {
   remnashopRequestPasswordReset,
   remnashopRequestResult,
   updateRemnashopNotificationPreferences,
-  recoverRemnashopTelegramSession,
 } from "@/backend/integrations/remnashop/client";
+import {
+  getAuthorizedRemnashopTokens,
+  recoverRemnashopTelegramSession,
+} from "@/app/_composition/telegram-session-recovery";
 import { ServiceError } from "@/backend/errors/service-error";
-import { decryptSecret } from "@/backend/security/crypto";
 import { getCurrentSession } from "@/backend/integrations/sessions/web-session-service";
 
 function jwt(payload: object) {
@@ -725,6 +726,29 @@ describe("remnashop client", () => {
     );
   });
 
+  it("preserves a top-level payment machine code when detail is also present", async () => {
+    const upstreamDetail = {
+      code: "PAYMENT_OUTCOME_UNKNOWN",
+      detail: "localized provider detail",
+    };
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      response({ status: 400, body: upstreamDetail }),
+    );
+
+    await expect(remnashopRequest("/subscription/purchase", {
+      method: "POST",
+      idempotencyKey: "server-operation-key",
+    })).rejects.toMatchObject({
+      code: "PAYMENT_OUTCOME_UNKNOWN",
+      status: 409,
+      debug: {
+        upstreamStatus: 400,
+        upstreamCode: "PAYMENT_OUTCOME_UNKNOWN",
+        upstreamDetail,
+      },
+    });
+  });
+
   it("uses the derived admin base when the explicit admin URL is absent", async () => {
     vi.stubEnv("REMNASHOP_ADMIN_API_BASE_URL", "");
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
@@ -865,7 +889,8 @@ describe("remnashop client", () => {
     const protectedToken = protectRemnashopToken("plain-token");
 
     expect(protectedToken).not.toBe("plain-token");
-    expect(decryptSecret(protectedToken, process.env.WEB_REFRESH_SECRET ?? "test-web-refresh-secret")).toBe("plain-token");
+    expect(protectedToken).toMatch(/^v2\./);
+    expect(revealRemnashopToken(protectedToken)).toBe("plain-token");
   });
 
   it("authorizes stored Remnashop tokens and rejects missing session states", async () => {
@@ -1029,6 +1054,30 @@ describe("remnashop client", () => {
     await expect(
       recoverRemnashopTelegramSession("session-1", "user-1"),
     ).rejects.toMatchObject({ code: "UPSTREAM_UNAVAILABLE", status: 503 });
+    expect(prismaMock.webSession.deleteMany).not.toHaveBeenCalled();
+  });
+
+  it("does not repeat provider recovery after its exact-session token commit", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+    const committed = {
+      ...telegramSession(),
+      remnashopAccessTokenEncrypted: protectRemnashopToken("committed-access"),
+      remnashopRefreshTokenEncrypted: protectRemnashopToken("committed-refresh"),
+      remnashopAccessExpiresAt: new Date(Date.now() + 10 * 60_000),
+      remnashopRefreshExpiresAt: new Date(Date.now() + 60 * 60_000),
+    };
+    prismaMock.webSession.findFirst.mockResolvedValueOnce(committed);
+
+    await expect(
+      recoverRemnashopTelegramSession("session-1", "user-1"),
+    ).resolves.toMatchObject({
+      accessToken: "committed-access",
+      refreshToken: "committed-refresh",
+      session: { id: "session-1", userId: "user-1" },
+    });
+
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(prismaMock.webSession.updateMany).not.toHaveBeenCalled();
     expect(prismaMock.webSession.deleteMany).not.toHaveBeenCalled();
   });
 

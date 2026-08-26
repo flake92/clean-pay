@@ -159,21 +159,23 @@ async function reconcileRemnashopUser(
       targetUserId: targetCandidate.id,
       sourceUserIds,
     });
-    await mergeLocalUsersIntoTarget(tx, {
-      targetUserId: targetCandidate.id,
-      targetUpstreamAccountId: identity.remnashopUserId,
-      sourceUserIds,
-      ownerExpectations: [
-        ownerExpectation(targetCandidate),
-        ...[linkedByRemnashopId, linkedByEmail, linkedByTelegramId]
-          .filter((matched): matched is NonNullable<typeof matched> => Boolean(matched))
-          .filter((matched, index, matches) =>
-            matched.id !== targetCandidate.id &&
-            matches.findIndex(({ id }) => id === matched.id) === index
-          )
-          .map(ownerExpectation),
-      ],
-    });
+  }
+  await mergeLocalUsersIntoTarget(tx, {
+    targetUserId: targetCandidate.id,
+    targetUpstreamAccountId: identity.remnashopUserId,
+    sourceUserIds,
+    ownerExpectations: [
+      ownerExpectation(targetCandidate),
+      ...[linkedByRemnashopId, linkedByEmail, linkedByTelegramId]
+        .filter((matched): matched is NonNullable<typeof matched> => Boolean(matched))
+        .filter((matched, index, matches) =>
+          matched.id !== targetCandidate.id &&
+          matches.findIndex(({ id }) => id === matched.id) === index
+        )
+        .map(ownerExpectation),
+    ],
+  });
+  if (sourceUserIds.length > 0) {
     authDebugLog("remnashop_user_reconcile_merge_completed", {
       targetUserId: targetCandidate.id,
       sourceUserIds,
@@ -201,17 +203,15 @@ async function reconcileRemnashopUser(
     },
   });
 
-  if (sourceUserIds.length > 0) {
-    await assertUserMergeFinalOwner(tx, {
-      targetUserId: user.id,
-      sourceUserIds,
-      expected: {
-        remnashopUserId: identity.remnashopUserId,
-        ...(identity.email ? { email: identity.email } : {}),
-        ...(identity.telegramId ? { telegramId: identity.telegramId } : {}),
-      },
-    });
-  }
+  await assertUserMergeFinalOwner(tx, {
+    targetUserId: user.id,
+    sourceUserIds,
+    expected: {
+      remnashopUserId: identity.remnashopUserId,
+      ...(identity.email ? { email: identity.email } : {}),
+      ...(identity.telegramId ? { telegramId: identity.telegramId } : {}),
+    },
+  });
   authDebugLog("remnashop_user_reconcile_updated", {
     userId: user.id,
     remnashopUserId: identity.remnashopUserId,

@@ -6,7 +6,10 @@ export async function GET() {
   const buildId = process.env.CLEAN_PAY_BUILD_ID;
 
   if (!buildId) {
-    return new Response("Service worker build ID is unavailable", { status: 503 });
+    return new Response("Service worker build ID is unavailable", {
+      status: 503,
+      headers: { "cache-control": "no-store" },
+    });
   }
 
   return new Response(serviceWorkerSource(buildId), {

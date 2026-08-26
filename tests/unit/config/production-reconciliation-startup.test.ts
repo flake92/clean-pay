@@ -6,6 +6,7 @@ import {
   classifyReconciliationBatchHealth,
   parseReconciliationBatch,
 } from "../../../deploy/prod/reconciliation-batch.mjs";
+import { reconciliationSupportHandles } from "../../../deploy/prod/reconciliation-support-handle.mjs";
 
 const prodCommand = readFileSync("deploy/prod/prod.mjs", "utf8");
 const startScript = readFileSync("start.sh", "utf8");
@@ -71,17 +72,37 @@ describe("production reconciliation startup", () => {
     );
     expect(reconcileLoop).toContain("writeHeartbeat()");
     expect(reconcileLoop).toContain("rmSync(heartbeatFile, { force: true })");
+    expect(reconcileLoop).toContain("constants.O_EXCL");
+    expect(reconcileLoop).toContain("fsyncSync(descriptor)");
+    expect(reconcileLoop).toContain("renameSync(temporaryPath, heartbeatFile)");
+    expect(reconcileLoop).toContain("fsyncDirectory(dirname(heartbeatFile))");
+    expect(reconcileLoop).toContain("rmSync(temporaryPath, { force: true })");
+    expect(reconcileLoop).not.toContain("writeFileSync(heartbeatFile");
     expect(reconcileLoop).toContain("maxConsecutiveFailures");
     expect(reconcileLoop).toContain("process.exitCode = 1");
-    expect(reconcileLoop).toContain("manual_operation_ids=");
-    expect(reconcileLoop).toContain("history_failed=");
-    expect(reconcileLoop).toContain("history_deferred=");
+    expect(reconcileLoop).toContain("manual_operation_handles");
+    expect(reconcileLoop).not.toContain("manual_operation_ids");
+    expect(reconcileLoop).not.toContain("error.message");
     expect(rootDockerfile).toContain("reconciliation-batch.mjs");
+    expect(rootDockerfile).toContain("reconciliation-support-handle.mjs");
     expect(prodCompose).toContain("dockerfile: Dockerfile");
     expect(prodCompose).toContain('restart: "on-failure"');
     expect(rootCompose).toContain('restart: "on-failure"');
     expect(prodCompose).not.toContain('restart: "on-failure:');
     expect(rootCompose).not.toContain('restart: "on-failure:');
+  });
+
+  it("logs only non-reversible manual-operation support handles", () => {
+    const sentinel = "op_sensitive_marker";
+    const secret = "reconciliation-test-secret-with-at-least-32-characters";
+    const handles = reconciliationSupportHandles([sentinel, "operation-2"], secret);
+
+    expect(handles).toHaveLength(2);
+    expect(handles[0]).toMatch(/^[a-f0-9]{16}$/);
+    expect(handles[0]).not.toContain(sentinel);
+    expect(reconciliationSupportHandles([sentinel], secret)).toEqual([handles[0]]);
+    expect(reconciliationSupportHandles([sentinel], `${secret}-rotated`))
+      .not.toEqual([handles[0]]);
   });
 
   it("separates opportunistic history degradation from core payment health", () => {

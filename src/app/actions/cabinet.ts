@@ -8,7 +8,7 @@ import {
   deleteCabinetDevice,
   reissueCabinetSubscription,
 } from "@/application/cabinet/execute-command";
-import { productionCabinetCommands } from "@/backend/integrations/cabinet/cabinet-commands";
+import { productionCabinetCommands } from "@/app/_composition/session-gateways";
 
 export async function deleteDeviceAction(hwid: string) {
   const result = await deleteCabinetDevice(productionCabinetCommands, hwid);

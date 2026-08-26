@@ -34,8 +34,8 @@ function getDetailMessage(detail: unknown): string {
       return value.error;
     }
 
-    if (typeof value.detail === 'string') {
-      return value.detail;
+    if (value.detail !== undefined && value.detail !== detail) {
+      return getDetailMessage(value.detail);
     }
   }
 
@@ -46,6 +46,32 @@ function includesAny(value: string, patterns: string[]) {
   return patterns.some((pattern) => value.includes(pattern));
 }
 
+const PAYMENT_MACHINE_CODES = {
+  PAYMENT_OPERATION_IN_PROGRESS: 'PAYMENT_OPERATION_IN_PROGRESS',
+  PAYMENT_OUTCOME_UNKNOWN: 'PAYMENT_OUTCOME_UNKNOWN',
+  IDEMPOTENCY_KEY_REUSED: 'IDEMPOTENCY_KEY_REUSED',
+  PLAN_UNAVAILABLE: 'PLAN_UNAVAILABLE',
+  PAYMENT_GATEWAY_UNAVAILABLE: 'PAYMENT_GATEWAY_UNAVAILABLE',
+} as const;
+
+function getMachineCode(detail: unknown) {
+  if (!detail || typeof detail !== 'object' || Array.isArray(detail)) return null;
+  const value = detail as {
+    code?: unknown;
+    error_code?: unknown;
+    errorCode?: unknown;
+    detail?: unknown;
+  };
+  const direct = value.code ?? value.error_code ?? value.errorCode;
+  if (typeof direct === 'string' && /^[A-Z][A-Z0-9_]{1,63}$/.test(direct)) {
+    return direct;
+  }
+  if (value.detail && typeof value.detail === 'object' && !Array.isArray(value.detail)) {
+    return getMachineCode(value.detail);
+  }
+  return null;
+}
+
 export function normalizeRemnashopError(
   status: number,
   detail: unknown,
@@ -54,12 +80,28 @@ export function normalizeRemnashopError(
   const message = getDetailMessage(detail);
   const lowerMessage = message.toLowerCase();
   const lowerPath = context.path?.toLowerCase() ?? '';
+  const upstreamCode = getMachineCode(detail);
   const debug: ServiceErrorDebug = {
     message,
     upstreamStatus: status,
     upstreamPath: context.path,
+    ...(upstreamCode ? { upstreamCode } : {}),
     upstreamDetail: detail,
   };
+  const paymentMutationPath = includesAny(lowerPath, [
+    '/subscription/purchase',
+    '/subscription/extend',
+  ]);
+
+  // The provider has explicitly stated that dispatch outcome is unknown.
+  // Preserve that machine truth even when an intermediary changes the HTTP
+  // status or the human-readable detail.
+  if (
+    paymentMutationPath
+    && upstreamCode === PAYMENT_MACHINE_CODES.PAYMENT_OUTCOME_UNKNOWN
+  ) {
+    return new ServiceError('PAYMENT_OUTCOME_UNKNOWN', 409, message, debug);
+  }
 
   if (
     status === 401 &&
@@ -143,8 +185,15 @@ export function normalizeRemnashopError(
 
   if (
     status === 409 &&
-    includesAny(lowerPath, ['/subscription/purchase', '/subscription/extend'])
+    paymentMutationPath
   ) {
+    const paymentCode = upstreamCode
+      ? PAYMENT_MACHINE_CODES[upstreamCode as keyof typeof PAYMENT_MACHINE_CODES]
+      : undefined;
+    if (paymentCode) {
+      return new ServiceError(paymentCode, 409, message, debug);
+    }
+
     if (includesAny(lowerMessage, ['idempotency-key is already in progress'])) {
       return new ServiceError('PAYMENT_OPERATION_IN_PROGRESS', 409, message, debug);
     }

@@ -52,6 +52,9 @@ function mergeTransaction() {
     paymentRecord: {
       updateMany: vi.fn().mockResolvedValue({ count: 8 }),
     },
+    paymentRetentionHold: {
+      updateMany: vi.fn().mockResolvedValue({ count: 2 }),
+    },
   };
 }
 
@@ -116,6 +119,13 @@ describe("local user merge policy", () => {
       "remna-target",
       ["source-b", "source-a"],
     );
+    expect(tx.paymentRetentionHold.updateMany).toHaveBeenCalledWith({
+      where: {
+        caseUserId: { in: ["source-b", "source-a"] },
+        status: { in: ["ACTIVE", "RELEASED"] },
+      },
+      data: { caseUserId: "target-user" },
+    });
     expect(tx.webUser.deleteMany).toHaveBeenCalledWith({
       where: { id: { in: ["source-b", "source-a"] } },
     });
@@ -172,6 +182,32 @@ describe("local user merge policy", () => {
 
     expect(tx.webUser.updateMany).not.toHaveBeenCalled();
     expect(tx.webSession.deleteMany).not.toHaveBeenCalled();
+  });
+
+  it("revalidates a target-only owner before rebinding its payment operations", async () => {
+    const tx = mergeTransaction();
+    tx.$queryRaw.mockResolvedValueOnce([{
+      id: "target-user",
+      remnashopUserId: "concurrent-owner",
+      email: "target@example.com",
+      telegramId: null,
+    }]);
+
+    await expect(
+      mergeLocalUsersIntoTarget(tx as unknown as Prisma.TransactionClient, {
+        targetUserId: "target-user",
+        targetUpstreamAccountId: "verified-owner",
+        sourceUserIds: [],
+        ownerExpectations: [{
+          id: "target-user",
+          remnashopUserId: null,
+          email: "target@example.com",
+          telegramId: null,
+        }],
+      }),
+    ).rejects.toMatchObject({ code: "ACCOUNT_MERGE_REQUIRED", status: 409 });
+
+    expect(mocks.transferPaymentOperationsForUserMerge).not.toHaveBeenCalled();
   });
 
   it("rolls the transaction back when a locked source no longer releases exactly once", async () => {

@@ -22,10 +22,39 @@ import { ServiceError } from "@/backend/errors/service-error";
 import { getCurrentSession } from "@/backend/integrations/sessions/web-session-service";
 import type { TelegramAuthRequest } from "@/backend/integrations/remnashop/contracts";
 import { clearTelegramCallbackReceipt } from "@/backend/integrations/telegram/callback-receipt";
+import type { VerifiedTelegramCallback } from "@/application/auth/ports/telegram-callback";
+import {
+  checkpointDurableTelegramIdentity,
+  checkpointDurableTelegramProvider,
+  claimDurableTelegramProviderReady,
+  DURABLE_TELEGRAM_CALLBACK_MAX_IN_FLIGHT_MS,
+  DURABLE_TELEGRAM_CALLBACK_RESULT_TTL_MS,
+  DurableTelegramCallbackClaimConflictError,
+  failDurableTelegramCallback,
+  markDurableTelegramProviderDispatching,
+  markDurableTelegramRemnashopDispatching,
+  type DurableTelegramCallbackOwnership,
+  type TelegramCallbackCookieProof,
+} from "@/backend/integrations/telegram/durable-callback";
 
 const telegramAuthTtlSeconds = 10 * 60;
+const telegramCallbackProofClockSkewSeconds = 30;
+// READY may be claimed at the end of its 10-minute acceptance window. Durable
+// work then has one bounded 10-minute in-flight window, followed by a full
+// 10-minute lost-response replay window. The proof cookie covers all three
+// windows plus skew; durable transitions enforce the matching absolute work
+// deadline from TelegramAuthState.expiresAt.
+const telegramCallbackProofTtlSeconds = telegramAuthTtlSeconds
+  + DURABLE_TELEGRAM_CALLBACK_MAX_IN_FLIGHT_MS / 1_000
+  + DURABLE_TELEGRAM_CALLBACK_RESULT_TTL_MS / 1_000
+  + telegramCallbackProofClockSkewSeconds;
 const telegramLoginAuthMaxAgeSeconds = 5 * 60;
 const telegramLoginClockSkewSeconds = 30;
+
+let cachedTelegramJwks: {
+  uri: string;
+  value: ReturnType<typeof createRemoteJWKSet>;
+} | null = null;
 
 export class TelegramAuthStateAlreadyConsumedError extends Error {
   constructor() {
@@ -42,6 +71,38 @@ const telegramOidcCookieNames = {
 
 type TelegramCookieStore = Awaited<ReturnType<typeof cookies>>;
 
+async function telegramCallbackCookieContext(state: string) {
+  const cookieStore = await cookies();
+  const cookieState = cookieStore.get(telegramOidcCookieNames.state)?.value;
+  const nonce = cookieStore.get(telegramOidcCookieNames.nonce)?.value;
+  const codeVerifier = cookieStore.get(
+    telegramOidcCookieNames.codeVerifier,
+  )?.value;
+  if (!cookieState || cookieState !== state || !nonce || !codeVerifier) {
+    logTechnicalWarning("telegram_oidc_state_cookie_invalid", {
+      storedStatePresent: Boolean(cookieState),
+      stateMatches: Boolean(cookieState && cookieState === state),
+      hasNonce: Boolean(nonce),
+      verifierPresent: Boolean(codeVerifier),
+    });
+    throw new Error("Telegram OIDC state is invalid");
+  }
+  return {
+    cookieStore,
+    nonce,
+    codeVerifier,
+    proof: {
+      stateHash: sha256(state),
+      nonceHash: sha256(nonce),
+      codeVerifierHash: sha256(codeVerifier),
+    } satisfies TelegramCallbackCookieProof,
+  };
+}
+
+export async function readTelegramCallbackCookieProof(state: string) {
+  return (await telegramCallbackCookieContext(state)).proof;
+}
+
 function clearTemporaryTelegramAuthCookies(cookieStore: TelegramCookieStore) {
   cookieStore.delete(telegramOidcCookieNames.state);
   cookieStore.delete(telegramOidcCookieNames.nonce);
@@ -52,19 +113,32 @@ export async function clearTelegramAuthCookies() {
   clearTemporaryTelegramAuthCookies(await cookies());
 }
 
+export function clearTelegramAuthCookiesOnResponse(response: NextResponse) {
+  for (const name of Object.values(telegramOidcCookieNames)) {
+    response.cookies.set(name, "", {
+      ...temporaryCookieOptions(),
+      maxAge: 0,
+      expires: new Date(0),
+    });
+  }
+}
+
 function addSeconds(date: Date, seconds: number) {
   return new Date(date.getTime() + seconds * 1000);
 }
 
-function temporaryCookieOptions() {
+function temporaryCookieOptions(now = new Date()) {
   const env = getEnv();
 
   return {
     httpOnly: true,
     secure: env.cookieSecure,
-    sameSite: env.cookieSameSite,
+    // Strict cookies are omitted when Telegram redirects back from its OIDC
+    // origin, so they cannot carry the state/nonce proof on the callback.
+    sameSite: env.cookieSameSite === "strict" ? "lax" : env.cookieSameSite,
     path: "/",
-    maxAge: telegramAuthTtlSeconds,
+    maxAge: telegramCallbackProofTtlSeconds,
+    expires: addSeconds(now, telegramCallbackProofTtlSeconds),
   } as const;
 }
 
@@ -73,6 +147,7 @@ export async function createTelegramAuthorizationResponse(
   userId?: string,
 ) {
   const env = getEnv();
+  const now = new Date();
   authDebugLog("telegram_oidc_start_started", {
     hasRedirectTo: Boolean(redirectTo),
     linkUserId: userId,
@@ -89,7 +164,7 @@ export async function createTelegramAuthorizationResponse(
       codeVerifierHash: sha256(codeVerifier),
       redirectTo,
       userId,
-      expiresAt: addSeconds(new Date(), telegramAuthTtlSeconds),
+      expiresAt: addSeconds(now, telegramAuthTtlSeconds),
     },
   });
   authDebugLog("telegram_oidc_state_created", {
@@ -109,7 +184,7 @@ export async function createTelegramAuthorizationResponse(
   authorizationUrl.searchParams.set("code_challenge_method", "S256");
 
   const response = NextResponse.redirect(authorizationUrl);
-  const cookieOptions = temporaryCookieOptions();
+  const cookieOptions = temporaryCookieOptions(now);
 
   clearTelegramCallbackReceipt(response);
   response.cookies.set(telegramOidcCookieNames.state, state, cookieOptions);
@@ -136,6 +211,7 @@ export async function createTelegramPopupStartResponse(
   userId?: string,
 ) {
   const env = getEnv();
+  const now = new Date();
   const state = randomToken();
   const nonce = randomToken();
   const codeVerifier = randomToken(64);
@@ -147,7 +223,7 @@ export async function createTelegramPopupStartResponse(
       codeVerifierHash: sha256(codeVerifier),
       redirectTo,
       userId,
-      expiresAt: addSeconds(new Date(), telegramAuthTtlSeconds),
+      expiresAt: addSeconds(now, telegramAuthTtlSeconds),
     },
   });
 
@@ -156,7 +232,7 @@ export async function createTelegramPopupStartResponse(
     nonce,
     redirectUri: env.telegramOidc.redirectUri,
   });
-  const cookieOptions = temporaryCookieOptions();
+  const cookieOptions = temporaryCookieOptions(now);
 
   clearTelegramCallbackReceipt(response);
   response.cookies.set(telegramOidcCookieNames.state, state, cookieOptions);
@@ -332,7 +408,13 @@ async function verifyTelegramIdToken(idToken: string, nonce: string) {
     audience: env.telegramOidc.clientId,
     jwksUri: env.telegramOidc.jwksUri,
   });
-  const jwks = createRemoteJWKSet(new URL(env.telegramOidc.jwksUri));
+  if (cachedTelegramJwks?.uri !== env.telegramOidc.jwksUri) {
+    cachedTelegramJwks = {
+      uri: env.telegramOidc.jwksUri,
+      value: createRemoteJWKSet(new URL(env.telegramOidc.jwksUri)),
+    };
+  }
+  const jwks = cachedTelegramJwks.value;
   const result = await jwtVerify(idToken, jwks, {
     issuer: env.telegramOidc.issuer,
     audience: env.telegramOidc.clientId,
@@ -350,6 +432,10 @@ async function verifyTelegramIdToken(idToken: string, nonce: string) {
   });
 
   return result.payload;
+}
+
+export function resetTelegramOidcJwksForTests() {
+  cachedTelegramJwks = null;
 }
 
 function getTelegramId(payload: JWTPayload) {
@@ -381,21 +467,6 @@ function getFullName(payload: JWTPayload) {
   );
 
   return parts.length > 0 ? parts.join(" ") : null;
-}
-
-function getTelegramNameParts(payload: JWTPayload, fallbackUsername: string | null) {
-  const firstName =
-    typeof payload.given_name === "string" && payload.given_name.trim()
-      ? payload.given_name.trim()
-      : typeof payload.name === "string" && payload.name.trim()
-        ? payload.name.trim().split(/\s+/)[0] ?? "Telegram"
-        : fallbackUsername ?? "Telegram";
-  const lastName =
-    typeof payload.family_name === "string" && payload.family_name.trim()
-      ? payload.family_name.trim()
-      : undefined;
-
-  return { firstName, lastName };
 }
 
 function signTelegramAuthPayload(body: Omit<TelegramAuthRequest, "hash">, botToken: string) {
@@ -483,24 +554,31 @@ async function claimTelegramLoginWidgetPayload(payload: TelegramAuthRequest) {
   }
 }
 
-async function authenticateRemnashopWithTelegram(payload: JWTPayload, telegramId: string, telegramUsername: string | null) {
+async function authenticateRemnashopWithTelegramIdentity(identity: {
+  telegramId: string;
+  telegramUsername: string | null;
+  fullName: string | null;
+  photoUrl: string | null;
+}, options: { failClosed?: boolean } = {}) {
   const env = getEnv();
 
   if (!env.telegramBotToken) {
     logTechnicalWarning("telegram_remnashop_auth_skipped", {
       reason: "missing_telegram_bot_token",
-      telegramId,
+      telegramId: identity.telegramId,
     });
     return null;
   }
 
-  const { firstName, lastName } = getTelegramNameParts(payload, telegramUsername);
+  const nameParts = identity.fullName?.trim().split(/\s+/).filter(Boolean) ?? [];
+  const firstName = nameParts[0] ?? identity.telegramUsername ?? "Telegram";
+  const lastName = nameParts.length > 1 ? nameParts.slice(1).join(" ") : undefined;
   const bodyWithoutHash: Omit<TelegramAuthRequest, "hash"> = {
-    id: Number(telegramId),
+    id: Number(identity.telegramId),
     first_name: firstName,
     last_name: lastName,
-    username: telegramUsername ?? undefined,
-    photo_url: typeof payload.picture === "string" ? payload.picture : undefined,
+    username: identity.telegramUsername ?? undefined,
+    photo_url: identity.photoUrl ?? undefined,
     auth_date: Math.floor(Date.now() / 1000),
   };
 
@@ -511,9 +589,10 @@ async function authenticateRemnashopWithTelegram(payload: JWTPayload, telegramId
     });
   } catch (error) {
     logTechnicalError("telegram_remnashop_auth_failed", error, {
-      telegramId,
-      hasUsername: Boolean(telegramUsername),
+      telegramId: identity.telegramId,
+      hasUsername: Boolean(identity.telegramUsername),
     });
+    if (options.failClosed) throw error;
     return null;
   }
 }
@@ -531,31 +610,16 @@ async function authenticateRemnashopWithTelegramPayload(payload: TelegramAuthReq
 }
 
 export async function verifyTelegramCallback(code: string, state: string) {
-  const cookieStore = await cookies();
-  const cookieState = cookieStore.get(telegramOidcCookieNames.state)?.value;
-  const nonce = cookieStore.get(telegramOidcCookieNames.nonce)?.value;
-  const codeVerifier = cookieStore.get(
-    telegramOidcCookieNames.codeVerifier,
-  )?.value;
+  const { cookieStore, nonce, codeVerifier, proof } =
+    await telegramCallbackCookieContext(state);
 
   authDebugLog("telegram_oidc_callback_consume_started", {
     hasCode: Boolean(code),
     hasStateParam: Boolean(state),
-    hasStateCookie: Boolean(cookieState),
-    hasNonceCookie: Boolean(nonce),
-    hasCodeVerifierCookie: Boolean(codeVerifier),
+    hasStateCookie: true,
+    hasNonceCookie: true,
+    hasCodeVerifierCookie: true,
   });
-
-  if (!cookieState || cookieState !== state || !nonce || !codeVerifier) {
-    logTechnicalWarning("telegram_oidc_state_cookie_invalid", {
-      storedStatePresent: Boolean(cookieState),
-      stateMatches: Boolean(cookieState && cookieState === state),
-      hasNonce: Boolean(nonce),
-      verifierPresent: Boolean(codeVerifier),
-    });
-
-    throw new Error("Telegram OIDC state is invalid");
-  }
   authDebugLog("telegram_oidc_callback_cookies_valid", {
     stateMatches: true,
     hasNonceCookie: true,
@@ -564,9 +628,9 @@ export async function verifyTelegramCallback(code: string, state: string) {
 
   const authState = await prisma.telegramAuthState.findFirst({
     where: {
-      stateHash: sha256(state),
-      nonceHash: sha256(nonce),
-      codeVerifierHash: sha256(codeVerifier),
+      stateHash: proof.stateHash,
+      nonceHash: proof.nonceHash,
+      codeVerifierHash: proof.codeVerifierHash,
       consumedAt: null,
       expiresAt: { gt: new Date() },
     },
@@ -589,14 +653,140 @@ export async function verifyTelegramCallback(code: string, state: string) {
   });
 
   await assertTelegramLinkSession(authState, cookieStore);
+  let ownership: DurableTelegramCallbackOwnership;
+  try {
+    ownership = await claimDurableTelegramProviderReady({
+      authState,
+      proof,
+      codeHash: sha256(code),
+    });
+  } catch (error) {
+    if (error instanceof DurableTelegramCallbackClaimConflictError) {
+      throw new TelegramAuthStateAlreadyConsumedError();
+    }
+    throw error;
+  }
 
-  const idToken = await exchangeCodeForIdToken(code, codeVerifier);
-
-  return verifyTelegramIdTokenForState(idToken, {
-    authState,
+  const verified = await dispatchClaimedTelegramOidcCode({
+    code,
     nonce,
+    codeVerifier,
     cookieStore,
+    authState: {
+      id: authState.id,
+      targetUserId: authState.userId,
+      redirectTo: authState.redirectTo,
+    },
+    ownership,
   });
+  return {
+    authState,
+    identity: {
+      telegramId: verified.identity.telegramId,
+      telegramUsername: verified.identity.telegramUsername,
+      fullName: verified.identity.fullName,
+      photoUrl: verified.identity.photoUrl,
+      remnashopAuthResult:
+        verified.identity.providerSession?.context ?? null,
+    },
+    durable: ownership,
+  };
+}
+
+export async function resumeTelegramOidcCodeExchange(
+  code: string,
+  state: string,
+  authState: {
+    id: string;
+    targetUserId: string | null;
+    redirectTo: string | null;
+  },
+  ownership: DurableTelegramCallbackOwnership,
+) {
+  const { cookieStore, nonce, codeVerifier } =
+    await telegramCallbackCookieContext(state);
+  await assertTelegramLinkSession(
+    { id: authState.id, userId: authState.targetUserId },
+    cookieStore,
+  );
+  return dispatchClaimedTelegramOidcCode({
+    code,
+    nonce,
+    codeVerifier,
+    cookieStore,
+    authState,
+    ownership,
+  });
+}
+
+async function dispatchClaimedTelegramOidcCode({
+  code,
+  nonce,
+  codeVerifier,
+  cookieStore,
+  authState,
+  ownership,
+}: {
+  code: string;
+  nonce: string;
+  codeVerifier: string;
+  cookieStore: TelegramCookieStore;
+  authState: {
+    id: string;
+    targetUserId: string | null;
+    redirectTo: string | null;
+  };
+  ownership: DurableTelegramCallbackOwnership;
+}) {
+  // This committed marker is the no-redispatch boundary for the one-time
+  // authorization code. A worker may resume PROVIDER_READY, but once this CAS
+  // succeeds no later worker calls the token endpoint if the response is lost.
+  await markDurableTelegramProviderDispatching(
+    ownership,
+    authState,
+  );
+  let idToken: string;
+  try {
+    idToken = await exchangeCodeForIdToken(code, codeVerifier);
+  } catch (error) {
+    await failDurableTelegramCallback(
+      ownership,
+      "PROVIDER_DISPATCHING",
+      "OIDC_CODE_EXCHANGE_FAILED",
+      "/login?auth=telegram_recovery_required",
+    ).catch((failureError) => {
+      logTechnicalError(
+        "telegram_oidc_dispatch_failure_checkpoint_failed",
+        failureError,
+        { authStateId: authState.id },
+      );
+    });
+    throw error;
+  }
+
+  try {
+    return await verifyTelegramIdTokenForState(idToken, {
+      authState: {
+        id: authState.id,
+        userId: authState.targetUserId,
+        redirectTo: authState.redirectTo,
+      },
+      nonce,
+      cookieStore,
+      ownership,
+    }) as VerifiedTelegramCallback;
+  } catch (error) {
+    // This CAS succeeds only while the ambiguous dispatch phase still owns
+    // the row. If identity/provider checkpointing already advanced, its own
+    // retry policy remains authoritative and this attempt is a harmless miss.
+    await failDurableTelegramCallback(
+      ownership,
+      "PROVIDER_DISPATCHING",
+      "OIDC_IDENTITY_CHECKPOINT_FAILED",
+      "/login?auth=telegram_recovery_required",
+    ).catch(() => undefined);
+    throw error;
+  }
 }
 
 export async function verifyTelegramPopupToken(idToken: string) {
@@ -704,15 +894,17 @@ async function verifyTelegramIdTokenForState(
     authState,
     nonce,
     cookieStore,
+    ownership,
   }: {
     authState: {
       id: string;
       userId: string | null;
       redirectTo: string | null;
-      expiresAt: Date;
+      expiresAt?: Date;
     };
     nonce: string;
     cookieStore: TelegramCookieStore;
+    ownership?: DurableTelegramCallbackOwnership;
   },
 ) {
   const payload = await verifyTelegramIdToken(idToken, nonce).catch((error) => {
@@ -732,12 +924,36 @@ async function verifyTelegramIdTokenForState(
   const fullName = getFullName(payload);
   const photoUrl = typeof payload.picture === "string" ? payload.picture : null;
   await assertTelegramLinkSession(authState, cookieStore);
+  if (ownership) {
+    const verified: VerifiedTelegramCallback = {
+      authState: {
+        id: authState.id,
+        targetUserId: authState.userId,
+        redirectTo: authState.redirectTo,
+      },
+      identity: {
+        telegramId,
+        telegramUsername,
+        fullName,
+        photoUrl,
+        providerSession: null,
+      },
+    };
+    await checkpointDurableTelegramIdentity(ownership, verified);
+    const authenticated = await resumeTelegramProviderAuthentication(
+      verified,
+      ownership,
+    );
+    return authenticated;
+  }
+
   await claimTelegramAuthState(authState);
-  const remnashopAuthResult = await authenticateRemnashopWithTelegram(
-    payload,
+  const remnashopAuthResult = await authenticateRemnashopWithTelegramIdentity({
     telegramId,
     telegramUsername,
-  );
+    fullName,
+    photoUrl,
+  });
 
   const identity = {
     telegramId,
@@ -750,7 +966,62 @@ async function verifyTelegramIdTokenForState(
   return { authState, identity };
 }
 
-async function claimTelegramAuthState(authState: { id: string }) {
+export async function resumeTelegramProviderAuthentication(
+  verified: VerifiedTelegramCallback,
+  ownership: DurableTelegramCallbackOwnership,
+) {
+  await markDurableTelegramRemnashopDispatching(ownership, verified);
+  let remnashopAuthResult;
+  try {
+    remnashopAuthResult = await authenticateRemnashopWithTelegramIdentity(
+      verified.identity,
+      { failClosed: true },
+    );
+  } catch (error) {
+    await failDurableTelegramCallback(
+      ownership,
+      "REMNASHOP_DISPATCHING",
+      "REMNASHOP_AUTH_AMBIGUOUS",
+      "/login?auth=telegram_recovery_required",
+    ).catch(() => undefined);
+    throw new ServiceError(
+      "UPSTREAM_UNAVAILABLE",
+      503,
+      "Telegram provider authentication is unavailable",
+      { cause: error },
+    );
+  }
+  if (!remnashopAuthResult) {
+    await failDurableTelegramCallback(
+      ownership,
+      "REMNASHOP_DISPATCHING",
+      "REMNASHOP_AUTH_UNAVAILABLE",
+      "/login?auth=telegram_recovery_required",
+    );
+    throw new ServiceError(
+      "UPSTREAM_UNAVAILABLE",
+      503,
+      "Telegram provider authentication is unavailable",
+    );
+  }
+  const authenticated: VerifiedTelegramCallback = {
+    ...verified,
+    identity: {
+      ...verified.identity,
+      providerSession: { context: remnashopAuthResult },
+    },
+    durable: ownership,
+  };
+  await checkpointDurableTelegramProvider(ownership, {
+    ...authenticated,
+    durable: undefined,
+  });
+  return authenticated;
+}
+
+async function claimTelegramAuthState(
+  authState: { id: string },
+) {
   if (!await claimTelegramAuthStateRecord(authState.id)) {
     logTechnicalWarning("telegram_oidc_state_already_consumed", {
       authStateId: authState.id,

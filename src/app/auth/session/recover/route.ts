@@ -8,7 +8,7 @@ import {
 import { safeRedirectPath } from "@/shared/auth/redirect-policy";
 import { getEnv } from "@/backend/config/env";
 import { ServiceError } from "@/backend/errors/service-error";
-import { getAuthorizedRemnashopTokens } from "@/backend/integrations/remnashop/client";
+import { getAuthorizedRemnashopTokens } from "@/app/_composition/telegram-session-recovery";
 import { clearWebSession } from "@/backend/integrations/sessions/web-session-service";
 
 export const runtime = "nodejs";

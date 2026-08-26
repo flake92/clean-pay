@@ -201,4 +201,39 @@ describe("InstallAppButton", () => {
     expect(button!.disabled).toBe(false);
     expect(container.textContent).toContain("Не удалось открыть системное окно установки");
   });
+
+  it("traps dialog focus, closes on Escape and restores the install trigger", async () => {
+    Object.defineProperty(Navigator.prototype, "userAgent", {
+      configurable: true,
+      value: "Mozilla/5.0 (Linux; Android 15) AppleWebKit/537.36 Chrome/140.0",
+    });
+    root = createRoot(container);
+    await act(async () => {
+      root?.render(createElement(InstallAppButton, {
+        alwaysVisible: true,
+        autoOpenIosGuide: false,
+      }));
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    const installButton = Array.from(container.querySelectorAll("button")).find(
+      (button) => button.textContent === "Установить приложение",
+    );
+    expect(installButton).toBeDefined();
+    installButton?.focus();
+    await act(async () => {
+      installButton?.dispatchEvent(
+        new MouseEvent("click", { bubbles: true, cancelable: true }),
+      );
+    });
+
+    expect(container.querySelector('[role="dialog"]')).not.toBeNull();
+    expect(document.activeElement?.textContent).toBe("Понятно");
+
+    await act(async () => {
+      document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+    });
+    expect(container.querySelector('[role="dialog"]')).toBeNull();
+    expect(document.activeElement).toBe(installButton);
+  });
 });

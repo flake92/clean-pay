@@ -9,6 +9,8 @@ const prodCompose = readFileSync("deploy/prod/docker-compose.yml", "utf8");
 const rootCompose = readFileSync("docker-compose.yml", "utf8");
 const devcontainerCompose = readFileSync(".devcontainer/docker-compose.yml", "utf8");
 const prismaClient = readFileSync("src/backend/database/prisma.ts", "utf8");
+const databasePools = readFileSync("src/backend/database/pools.ts", "utf8");
+const databasePoolConfig = readFileSync("deploy/prod/database-pool.mjs", "utf8");
 const readinessPrismaClient = readFileSync(
   "src/backend/database/readiness-prisma.ts",
   "utf8",
@@ -19,10 +21,21 @@ describe("production readiness startup gate", () => {
     expect(prodCommand).toContain("/api/internal/health/readiness");
     expect(prodCommand).not.toContain("const url = `http://127.0.0.1:${port}/api/health`");
     expect(prodCommand).toContain("assessReadinessResponse(response)");
+    expect(prodCommand).toContain("HTTP_RESPONSE_LIMIT_BYTES = 1_048_576");
+    expect(prodCommand).toContain("HTTP_REQUEST_DEADLINE_MS = 10_000");
+    expect(prodCommand).toContain("bodyBytes > HTTP_RESPONSE_LIMIT_BYTES");
     expect(rootStart).toContain('/api/internal/health/readiness');
     expect(rootStart).toContain('x-clean-pay-readiness-secret');
+    expect(rootStart).toContain("compose exec -T app node -e");
+    expect(rootStart).toContain("process.env.READINESS_INTERNAL_SECRET");
+    expect(rootStart).toContain("checks.length===0");
+    expect(rootStart).not.toContain('readiness_secret=$(env_value READINESS_INTERNAL_SECRET)');
+    expect(rootStart).not.toContain('x-clean-pay-readiness-secret: ${readiness_secret}');
     expect(deployScript).toContain("verify_detailed_readiness");
-    expect(deployScript).toContain("Object.entries(body.checks||{})");
+    expect(deployScript).toContain("checks.length===0");
+    expect(deployScript).toContain("!Array.isArray(body.checks)");
+    expect(deployScript).toContain("tr ';' '\\n'");
+    expect(deployScript).toContain('printf \'%s\' "$csp" | grep -Fiq');
     const install = deployScript.slice(
       deployScript.indexOf("install_services() {"),
       deployScript.indexOf("up() {"),
@@ -33,6 +46,10 @@ describe("production readiness startup gate", () => {
 
   it("fails closed for malformed or degraded readiness payloads", () => {
     expect(assessReadinessResponse({ status: 200, body: "not-json" })).toMatchObject({ ready: false });
+    expect(assessReadinessResponse({
+      status: 200,
+      body: JSON.stringify({ status: "ok", checks: [{ status: "ok" }] }),
+    })).toMatchObject({ ready: false });
     expect(assessReadinessResponse({
       status: 503,
       body: JSON.stringify({
@@ -50,6 +67,30 @@ describe("production readiness startup gate", () => {
         checks: { database: { status: "ok" }, redis: { status: "ok" } },
       }),
     })).toMatchObject({ ready: true, reason: null });
+  });
+
+  it("does not echo internal readiness details to operator output", () => {
+    const sentinel = "database-secret-from-internal-readiness";
+    const assessment = assessReadinessResponse({
+      status: 503,
+      body: JSON.stringify({
+        status: "degraded",
+        checks: { [sentinel]: { status: "down", message: sentinel } },
+      }),
+    });
+    const verify = prodCommand.slice(
+      prodCommand.indexOf("async function verify()"),
+      prodCommand.indexOf("requireEnvFile();\nvalidateProductionEnvFile();"),
+    );
+
+    expect(assessment.reason).toContain(sentinel);
+    expect(verify).not.toContain("console.log(response.body)");
+    expect(verify).not.toContain("${response.body}");
+    expect(verify).not.toContain("assessment.reason");
+    expect(verify).toContain(
+      'lastError = new Error("Detailed readiness checks have not passed")',
+    );
+    expect("Detailed readiness checks have not passed").not.toContain(sentinel);
   });
 
   it("does not report compose up as successful before readiness passes", () => {
@@ -79,19 +120,14 @@ describe("production readiness startup gate", () => {
   });
 
   it("bounds database connection, client-query and server-statement waits", () => {
-    expect(readinessPrismaClient).toContain(
-      "connectionTimeoutMillis: readinessDatabaseTimeoutMs",
+    expect(readinessPrismaClient).toContain("getReadinessDatabasePool");
+    expect(readinessPrismaClient).toContain("disposeExternalPool: true");
+    expect(prismaClient).toContain("getApplicationDatabasePool");
+    expect(prismaClient).toContain("disposeExternalPool: true");
+    expect(databasePools).toContain('"application"');
+    expect(databasePools).toContain('"readiness"');
+    expect(databasePoolConfig).toMatch(
+      /readiness:[\s\S]*poolMax: 1,[\s\S]*connectionTimeoutMs: 4_000,[\s\S]*queryTimeoutMs: 4_000,[\s\S]*statementTimeoutMs: 4_000,[\s\S]*idleTransactionTimeoutMs: 4_000,[\s\S]*lockTimeoutMs: 4_000/,
     );
-    expect(readinessPrismaClient).toContain(
-      "query_timeout: readinessDatabaseTimeoutMs",
-    );
-    expect(readinessPrismaClient).toContain(
-      "statement_timeout: readinessDatabaseTimeoutMs",
-    );
-    expect(readinessPrismaClient).toContain("max: 1");
-    expect(readinessPrismaClient).toContain(
-      "const readinessDatabaseTimeoutMs = 4_000",
-    );
-    expect(prismaClient).not.toContain("query_timeout");
   });
 });

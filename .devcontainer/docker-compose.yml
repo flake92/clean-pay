@@ -183,7 +183,7 @@ services:
       start_period: 180s
 
   postgres:
-    image: postgres:17-alpine
+    image: postgres:17-alpine@sha256:18cfe3ef5e6815560c98237d6216d1e5119702fb0f3894c8785dd58b8bbe5d73
     restart: unless-stopped
     environment:
       POSTGRES_DB: clean_pay
@@ -200,7 +200,7 @@ services:
       - "${CLEAN_PAY_DEVCONTAINER_POSTGRES_HOST_PORT:-5432}:5432"
 
   redis:
-    image: redis:7-alpine
+    image: redis:7-alpine@sha256:ff02b58f971e7d7d156a1267e283fcbbeee91773b6aa36c49dac28ecfe28eadf
     restart: unless-stopped
     command: redis-server --appendonly yes
     volumes:
@@ -280,7 +280,7 @@ services:
         condition: service_healthy
 
   remnashop-postgres:
-    image: postgres:17-alpine
+    image: postgres:17-alpine@sha256:18cfe3ef5e6815560c98237d6216d1e5119702fb0f3894c8785dd58b8bbe5d73
     restart: unless-stopped
     environment:
       POSTGRES_DB: remnashop
@@ -298,7 +298,7 @@ services:
       - "${CLEAN_PAY_DEVCONTAINER_REMNASHOP_POSTGRES_HOST_PORT:-6767}:5432"
 
   remnashop-cache:
-    image: valkey/valkey:9-alpine
+    image: valkey/valkey:9-alpine@sha256:de31910896150d5e754a07d57d227cfdde4e258ddd0d1aa4607f2d2f95843715
     restart: unless-stopped
     command: valkey-server --save "" --appendonly yes --maxmemory 512mb --maxmemory-policy volatile-lru --loglevel warning
     volumes:
@@ -310,7 +310,7 @@ services:
       retries: 20
 
   remnawave-mock:
-    image: node:24-alpine
+    image: node:24-alpine@sha256:d32cdf619f63fe0471182d08996dd516c6275bb5fd31ae06e55a570bd9e1ad43
     restart: unless-stopped
     working_dir: /mock
     command: node server.js
@@ -318,7 +318,7 @@ services:
       - ${CLEAN_PAY_HOST_DEVCONTAINER_DIR:-.}/remnawave-mock:/mock:ro
 
   telegram-mock:
-    image: node:24-alpine
+    image: node:24-alpine@sha256:d32cdf619f63fe0471182d08996dd516c6275bb5fd31ae06e55a570bd9e1ad43
     restart: unless-stopped
     working_dir: /mock
     command: node server.js
@@ -326,7 +326,7 @@ services:
       - ${CLEAN_PAY_HOST_DEVCONTAINER_DIR:-.}/telegram-mock:/mock:ro
 
   telegram-oidc-mock:
-    image: node:24-alpine
+    image: node:24-alpine@sha256:d32cdf619f63fe0471182d08996dd516c6275bb5fd31ae06e55a570bd9e1ad43
     restart: unless-stopped
     working_dir: /mock
     command: node server.js
@@ -341,7 +341,7 @@ services:
       - "${CLEAN_PAY_DEVCONTAINER_TELEGRAM_OIDC_HOST_PORT:-8090}:8090"
 
   smtp:
-    image: axllent/mailpit:latest
+    image: axllent/mailpit:latest@sha256:c96991d9bef73594c246d89ca81411d4e916f03e76a7d2d72fa2ab5dd3c9ce24
     restart: unless-stopped
     environment:
       MP_SMTP_AUTH_ACCEPT_ANY: "true"
@@ -361,7 +361,7 @@ services:
       retries: 20
 
   smtp-log:
-    image: node:24-alpine
+    image: node:24-alpine@sha256:d32cdf619f63fe0471182d08996dd516c6275bb5fd31ae06e55a570bd9e1ad43
     restart: unless-stopped
     working_dir: /logger
     command: node server.js
@@ -372,7 +372,7 @@ services:
       - ${CLEAN_PAY_HOST_DEVCONTAINER_DIR:-.}/mailpit-logger:/logger:ro
 
   caddy:
-    image: caddy:2-alpine
+    image: caddy:2-alpine@sha256:5f5c8640aae01df9654968d946d8f1a56c497f1dd5c5cda4cf95ab7c14d58648
     restart: unless-stopped
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro

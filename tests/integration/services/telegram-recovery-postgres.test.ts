@@ -32,7 +32,7 @@ function jsonResponse(body: unknown, setCookie: string[] = []) {
 
 describeWithPostgres("Telegram recovery PostgreSQL serialization", () => {
   let prisma: typeof import("@/backend/database/prisma")["prisma"];
-  let getAuthorizedRemnashopTokens: typeof import("@/backend/integrations/remnashop/client")["getAuthorizedRemnashopTokens"];
+  let getAuthorizedRemnashopTokens: typeof import("@/app/_composition/telegram-session-recovery")["getAuthorizedRemnashopTokens"];
   let revealRemnashopToken: typeof import("@/backend/integrations/remnashop/token-protection")["revealRemnashopToken"];
   let protectRemnashopToken: typeof import("@/backend/integrations/remnashop/token-protection")["protectRemnashopToken"];
   let paymentUpstreamOwnerHash: typeof import("@/backend/payments/hashes")["paymentUpstreamOwnerHash"];
@@ -47,7 +47,7 @@ describeWithPostgres("Telegram recovery PostgreSQL serialization", () => {
 
     ({ prisma } = await import("@/backend/database/prisma"));
     ({ getAuthorizedRemnashopTokens } = await import(
-      "@/backend/integrations/remnashop/client"
+      "@/app/_composition/telegram-session-recovery"
     ));
     ({ revealRemnashopToken, protectRemnashopToken } = await import(
       "@/backend/integrations/remnashop/token-protection"
