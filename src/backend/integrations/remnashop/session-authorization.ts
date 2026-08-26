@@ -9,8 +9,14 @@ import {
   remnashopRefreshTokens,
 } from "@/backend/integrations/remnashop/api-client";
 import { acquireRemnashopTokensForSession } from "@/backend/integrations/remnashop/session-token-lifecycle";
-import { attachRemnashopTokensForTelegramSession } from "@/backend/composition/telegram-session-recovery";
-import { protectRemnashopToken } from "@/backend/integrations/remnashop/token-protection";
+import {
+  missingRemnashopTelegramRecovery,
+  type RemnashopTelegramRecovery,
+} from "@/backend/integrations/remnashop/telegram-session-recovery-dependency";
+import {
+  protectRemnashopToken,
+  revealRemnashopToken,
+} from "@/backend/integrations/remnashop/token-protection";
 import {
   assertEmailVerificationPolicy,
   getCurrentSession,
@@ -19,11 +25,10 @@ import {
 import { authDebugLog } from "@/backend/observability/auth-debug-log";
 import { normalizeRemnashopError } from "@/backend/integrations/remnashop/errors";
 
-export { attachRemnashopTokensForTelegramSession } from "@/backend/composition/telegram-session-recovery";
-
 export async function recoverRemnashopTelegramSession(
   sessionId: string,
   userId: string,
+  recoverTelegramSession: RemnashopTelegramRecovery = missingRemnashopTelegramRecovery,
 ) {
   const session = await prisma.webSession.findFirst({
     where: {
@@ -42,8 +47,36 @@ export async function recoverRemnashopTelegramSession(
     );
   }
 
+  // Recovery may have committed its provider-token update immediately before
+  // the callback worker crashed. Treat that exact committed session as the
+  // durable recovery checkpoint: a lease retry decrypts the already-stored
+  // bundle and never dispatches a second provider authentication/merge flow.
+  const now = new Date();
+  if (
+    session.remnashopAccessTokenEncrypted
+    && session.remnashopRefreshTokenEncrypted
+    && session.remnashopAccessExpiresAt
+    && session.remnashopAccessExpiresAt > now
+    && session.remnashopRefreshExpiresAt
+    && session.remnashopRefreshExpiresAt > now
+  ) {
+    authDebugLog("telegram_callback_recovery_already_committed", {
+      sessionId: session.id,
+      userId: session.userId,
+    });
+    return {
+      accessToken: revealRemnashopToken(
+        session.remnashopAccessTokenEncrypted,
+      ),
+      refreshToken: revealRemnashopToken(
+        session.remnashopRefreshTokenEncrypted,
+      ),
+      session,
+    };
+  }
+
   try {
-    const recovered = await attachRemnashopTokensForTelegramSession(session);
+    const recovered = await recoverTelegramSession(session);
 
     if (!recovered) {
       throw new ServiceError(
@@ -147,17 +180,21 @@ async function attachRemnashopTokensForVerifiedEmailSession(
   };
 }
 
+export type RemnashopAuthorizationOptions = {
+  allowUnverifiedEmail?: boolean;
+  forceRefresh?: boolean;
+  readSession?: typeof getCurrentSession;
+  refreshAccessCookie?: typeof refreshCurrentAccessCookie;
+  recoverTelegramSession?: RemnashopTelegramRecovery;
+};
+
 export async function getAuthorizedRemnashopTokens({
   allowUnverifiedEmail = false,
   forceRefresh = false,
   readSession = getCurrentSession,
   refreshAccessCookie = refreshCurrentAccessCookie,
-}: {
-  allowUnverifiedEmail?: boolean;
-  forceRefresh?: boolean;
-  readSession?: typeof getCurrentSession;
-  refreshAccessCookie?: typeof refreshCurrentAccessCookie;
-} = {}) {
+  recoverTelegramSession = missingRemnashopTelegramRecovery,
+}: RemnashopAuthorizationOptions = {}) {
   authDebugLog("remnashop_tokens_authorize_started", { allowUnverifiedEmail });
   const localSession = await readSession();
 
@@ -203,7 +240,7 @@ export async function getAuthorizedRemnashopTokens({
     )
   ) {
     const restoredTelegramSession =
-      await attachRemnashopTokensForTelegramSession(localSession);
+      await recoverTelegramSession(localSession);
 
     if (restoredTelegramSession) {
       authorized = {
@@ -266,7 +303,7 @@ export async function getAuthorizedRemnashopTokens({
     let restoredTelegramSession;
     try {
       restoredTelegramSession =
-        await attachRemnashopTokensForTelegramSession(recoverySession);
+        await recoverTelegramSession(recoverySession);
     } catch (error) {
       const concurrentRecoveryWon =
         error instanceof ServiceError &&

@@ -10,7 +10,12 @@ import {
 import { getCurrentSession } from "@/backend/integrations/sessions/web-session-service";
 import type { CurrentSubscriptionResponse } from "@/shared/domain/subscriptions";
 
-export const productionChatwootContextGateway: ChatwootContextGateway = {
+type ChatwootAuthorizer = typeof getAuthorizedRemnashopTokens;
+
+export function createProductionChatwootContextGateway(
+  authorize: ChatwootAuthorizer = getAuthorizedRemnashopTokens,
+): ChatwootContextGateway {
+  return {
   async loadActor() {
     const session = await getCurrentSession();
 
@@ -18,7 +23,7 @@ export const productionChatwootContextGateway: ChatwootContextGateway = {
   },
 
   async loadSubscription(userId) {
-    const { accessToken, session } = await getAuthorizedRemnashopTokens();
+    const { accessToken, session } = await authorize();
 
     if (session.userId !== userId) {
       throw new ServiceError(
@@ -83,4 +88,7 @@ export const productionChatwootContextGateway: ChatwootContextGateway = {
       synchronizedAt: synchronizedAt?.toISOString() ?? null,
     };
   },
-};
+  };
+}
+
+export const productionChatwootContextGateway = createProductionChatwootContextGateway();

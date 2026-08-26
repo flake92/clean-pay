@@ -16,6 +16,9 @@ const mocks = vi.hoisted(() => ({
   linkCurrentUserToRemnashopAuth: vi.fn(),
   reconcileUserFromRemnashopAuth: vi.fn(),
   createWebSessionOnResponse: vi.fn(),
+  setDurableCallbackReplayCookies: vi.fn(),
+  loadDurableTelegramCallback: vi.fn(),
+  completeDurableTelegramCallback: vi.fn(),
   revokeWebSessionById: vi.fn(),
   getCurrentSession: vi.fn(),
   logTechnicalError: vi.fn(),
@@ -25,6 +28,8 @@ const mocks = vi.hoisted(() => ({
   assertRateLimit: vi.fn(),
   stageTelegramAccountMerge: vi.fn(),
   synchronizeProviderAccountIdentity: vi.fn(),
+  mergeLocalUsersIntoTarget: vi.fn(),
+  assertUserMergeFinalOwner: vi.fn(),
   prisma: {
     webUser: { findUnique: vi.fn(), findUniqueOrThrow: vi.fn(), update: vi.fn(), upsert: vi.fn() },
     telegramAuthState: { update: vi.fn() },
@@ -66,13 +71,35 @@ vi.mock("@/backend/integrations/remnashop/client", () => ({
   remnashopLinkTelegram: mocks.remnashopLinkTelegram,
   remnashopMergeUsers: mocks.remnashopMergeUsers,
 }));
+vi.mock("@/app/_composition/telegram-session-recovery", () => ({
+  recoverRemnashopTelegramSession: mocks.recoverRemnashopTelegramSession,
+}));
+vi.mock("@/app/_composition/session-gateways", async () => {
+  const { createProductionTelegramCallbackGateway } = await import(
+    "@/backend/integrations/auth/telegram-callback-gateway"
+  );
+  return {
+    productionTelegramCallbackGateway: createProductionTelegramCallbackGateway(
+      mocks.getAuthorizedRemnashopTokens,
+    ),
+  };
+});
 vi.mock("@/backend/integrations/auth/provider-account-identity-sync", () => ({
   synchronizeProviderAccountIdentity: mocks.synchronizeProviderAccountIdentity,
+}));
+vi.mock("@/backend/integrations/auth/local-user-merge-service", () => ({
+  mergeLocalUsersIntoTarget: mocks.mergeLocalUsersIntoTarget,
+  assertUserMergeFinalOwner: mocks.assertUserMergeFinalOwner,
 }));
 
 vi.mock("@/backend/integrations/sessions/web-session-service", () => ({
   createWebSessionOnResponse: mocks.createWebSessionOnResponse,
+  setDurableCallbackReplayCookies: mocks.setDurableCallbackReplayCookies,
   getCurrentSession: mocks.getCurrentSession,
+}));
+vi.mock("@/backend/integrations/telegram/durable-callback", () => ({
+  loadDurableTelegramCallback: mocks.loadDurableTelegramCallback,
+  completeDurableTelegramCallback: mocks.completeDurableTelegramCallback,
 }));
 vi.mock("@/backend/integrations/sessions/web-session-revocation", () => ({
   revokeWebSessionById: mocks.revokeWebSessionById,
@@ -163,6 +190,9 @@ describe("Telegram callback payment-owner fence", () => {
       user: { id: "local-user" },
     });
     mocks.createWebSessionOnResponse.mockResolvedValue({ id: "new-session" });
+    mocks.setDurableCallbackReplayCookies.mockResolvedValue({ id: "new-session" });
+    mocks.loadDurableTelegramCallback.mockResolvedValue({ status: "none" });
+    mocks.completeDurableTelegramCallback.mockResolvedValue(undefined);
   });
 
   it("holds the owner fence before Telegram attach and local relink", async () => {

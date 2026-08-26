@@ -49,19 +49,28 @@ FROM runtime-base AS migration
 
 ARG CLEAN_PAY_RELEASE=local
 ARG CLEAN_PAY_REVISION=local
+ARG CLEAN_PAY_PUBLIC_BUILD_CONTRACT_VERSION=local
+ARG CLEAN_PAY_PUBLIC_BUILD_CONTRACT_SHA256=local
 
 LABEL org.opencontainers.image.revision="${CLEAN_PAY_REVISION}" \
       org.opencontainers.image.version="${CLEAN_PAY_RELEASE}" \
       io.clean-pay.release="${CLEAN_PAY_RELEASE}" \
-      io.clean-pay.role="migration"
+      io.clean-pay.role="migration" \
+      io.clean-pay.public-build-contract-version="${CLEAN_PAY_PUBLIC_BUILD_CONTRACT_VERSION}" \
+      io.clean-pay.public-build-contract-sha256="${CLEAN_PAY_PUBLIC_BUILD_CONTRACT_SHA256}"
 
 COPY --from=dependencies --chown=cleanpay:nodejs /app/package.json /app/package-lock.json ./
 COPY --from=dependencies --chown=cleanpay:nodejs /app/node_modules ./node_modules
 COPY --chown=cleanpay:nodejs prisma ./prisma
 COPY --chown=cleanpay:nodejs prisma.config.ts ./prisma.config.ts
 COPY --chown=cleanpay:nodejs deploy/prod/deploy-log.mjs ./deploy/prod/deploy-log.mjs
+COPY --chown=cleanpay:nodejs deploy/prod/database-pool.mjs ./deploy/prod/database-pool.mjs
+COPY --chown=cleanpay:nodejs deploy/prod/credential-file-guard.mjs ./deploy/prod/credential-file-guard.mjs
 COPY --chown=cleanpay:nodejs deploy/prod/validate-env.mjs ./deploy/prod/validate-env.mjs
 COPY --chown=cleanpay:nodejs deploy/prod/production-env-rules.mjs ./deploy/prod/production-env-rules.mjs
+COPY --chown=cleanpay:nodejs deploy/prod/migration-rollback-verifier.mjs ./deploy/prod/migration-rollback-verifier.mjs
+COPY --chown=cleanpay:nodejs deploy/prod/database-privilege-manifest.mjs ./deploy/prod/database-privilege-manifest.mjs
+COPY --chown=cleanpay:nodejs deploy/prod/database-role-provision.mjs ./deploy/prod/database-role-provision.mjs
 
 USER cleanpay
 
@@ -71,6 +80,8 @@ FROM runtime-base AS runner
 
 ARG CLEAN_PAY_RELEASE=local
 ARG CLEAN_PAY_REVISION=local
+ARG CLEAN_PAY_PUBLIC_BUILD_CONTRACT_VERSION=local
+ARG CLEAN_PAY_PUBLIC_BUILD_CONTRACT_SHA256=local
 ARG NEXT_PUBLIC_APP_URL
 ARG NEXT_PUBLIC_BRAND_NAME="Clean Pay"
 ARG NEXT_PUBLIC_BRAND_LOGO_URL=/clean-pay-logo.png
@@ -80,6 +91,8 @@ LABEL org.opencontainers.image.revision="${CLEAN_PAY_REVISION}" \
       org.opencontainers.image.version="${CLEAN_PAY_RELEASE}" \
       io.clean-pay.release="${CLEAN_PAY_RELEASE}" \
       io.clean-pay.role="app" \
+      io.clean-pay.public-build-contract-version="${CLEAN_PAY_PUBLIC_BUILD_CONTRACT_VERSION}" \
+      io.clean-pay.public-build-contract-sha256="${CLEAN_PAY_PUBLIC_BUILD_CONTRACT_SHA256}" \
       io.clean-pay.baked-public-app-url="${NEXT_PUBLIC_APP_URL}" \
       io.clean-pay.baked-brand-name="${NEXT_PUBLIC_BRAND_NAME}" \
       io.clean-pay.baked-brand-logo-url="${NEXT_PUBLIC_BRAND_LOGO_URL}" \
@@ -100,16 +113,37 @@ COPY --from=builder --chown=cleanpay:nodejs /app/public ./public
 COPY --from=builder --chown=cleanpay:nodejs /app/node_modules/@prisma/adapter-pg ./node_modules/@prisma/adapter-pg
 COPY --from=builder --chown=cleanpay:nodejs /app/node_modules/@prisma/driver-adapter-utils ./node_modules/@prisma/driver-adapter-utils
 COPY --from=builder --chown=cleanpay:nodejs /app/node_modules/@prisma/debug ./node_modules/@prisma/debug
+COPY --from=builder --chown=cleanpay:nodejs /app/node_modules/pg ./node_modules/pg
+COPY --from=builder --chown=cleanpay:nodejs /app/node_modules/pg-cloudflare ./node_modules/pg-cloudflare
+COPY --from=builder --chown=cleanpay:nodejs /app/node_modules/pg-connection-string ./node_modules/pg-connection-string
+COPY --from=builder --chown=cleanpay:nodejs /app/node_modules/pg-int8 ./node_modules/pg-int8
+COPY --from=builder --chown=cleanpay:nodejs /app/node_modules/pg-pool ./node_modules/pg-pool
+COPY --from=builder --chown=cleanpay:nodejs /app/node_modules/pg-protocol ./node_modules/pg-protocol
+COPY --from=builder --chown=cleanpay:nodejs /app/node_modules/pg-types ./node_modules/pg-types
+COPY --from=builder --chown=cleanpay:nodejs /app/node_modules/pgpass ./node_modules/pgpass
 COPY --from=builder --chown=cleanpay:nodejs /app/node_modules/postgres-array ./node_modules/postgres-array
+COPY --from=builder --chown=cleanpay:nodejs /app/node_modules/postgres-bytea ./node_modules/postgres-bytea
+COPY --from=builder --chown=cleanpay:nodejs /app/node_modules/postgres-date ./node_modules/postgres-date
+COPY --from=builder --chown=cleanpay:nodejs /app/node_modules/postgres-interval ./node_modules/postgres-interval
+COPY --from=builder --chown=cleanpay:nodejs /app/node_modules/split2 ./node_modules/split2
+COPY --from=builder --chown=cleanpay:nodejs /app/node_modules/xtend ./node_modules/xtend
 COPY --chown=cleanpay:nodejs deploy/prod/start.sh ./deploy/prod/start.sh
 COPY --chown=cleanpay:nodejs deploy/prod/deploy-log.mjs ./deploy/prod/deploy-log.mjs
+COPY --chown=cleanpay:nodejs deploy/prod/database-pool.mjs ./deploy/prod/database-pool.mjs
+COPY --chown=cleanpay:nodejs deploy/prod/credential-file-guard.mjs ./deploy/prod/credential-file-guard.mjs
 COPY --chown=cleanpay:nodejs deploy/prod/worker-shutdown.mjs ./deploy/prod/worker-shutdown.mjs
 COPY --chown=cleanpay:nodejs deploy/prod/validate-env.mjs ./deploy/prod/validate-env.mjs
 COPY --chown=cleanpay:nodejs deploy/prod/production-env-rules.mjs ./deploy/prod/production-env-rules.mjs
 COPY --chown=cleanpay:nodejs deploy/prod/reconcile-loop.mjs ./deploy/prod/reconcile-loop.mjs
 COPY --chown=cleanpay:nodejs deploy/prod/reconciliation-batch.mjs ./deploy/prod/reconciliation-batch.mjs
+COPY --chown=cleanpay:nodejs deploy/prod/reconciliation-support-handle.mjs ./deploy/prod/reconciliation-support-handle.mjs
 COPY --chown=cleanpay:nodejs deploy/prod/retention-cleanup.mjs ./deploy/prod/retention-cleanup.mjs
+COPY --chown=cleanpay:nodejs deploy/prod/retention-heartbeat.mjs ./deploy/prod/retention-heartbeat.mjs
 COPY --chown=cleanpay:nodejs deploy/prod/retention-loop.mjs ./deploy/prod/retention-loop.mjs
+COPY --chown=cleanpay:nodejs deploy/prod/payment-retention-hold.mjs ./deploy/prod/payment-retention-hold.mjs
+COPY --chown=cleanpay:nodejs deploy/prod/payment-retention-hold-command.mjs ./deploy/prod/payment-retention-hold-command.mjs
+COPY --chown=cleanpay:nodejs deploy/prod/encryption-rewrap.mjs ./deploy/prod/encryption-rewrap.mjs
+COPY --chown=cleanpay:nodejs deploy/prod/encryption-rewrap-command.mjs ./deploy/prod/encryption-rewrap-command.mjs
 
 RUN sed -i 's/\r$//' ./deploy/prod/start.sh \
     && chmod +x ./deploy/prod/start.sh

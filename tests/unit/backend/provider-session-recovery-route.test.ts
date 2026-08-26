@@ -8,7 +8,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock("@/backend/config/env", () => ({
   getEnv: () => ({ publicAppUrl: "https://pay.example.com" }),
 }));
-vi.mock("@/backend/integrations/remnashop/client", () => ({
+vi.mock("@/app/_composition/telegram-session-recovery", () => ({
   getAuthorizedRemnashopTokens: mocks.authorize,
 }));
 vi.mock("@/backend/integrations/sessions/web-session-service", () => ({

@@ -11,7 +11,7 @@ vi.mock("@/application/auth/execute-passkey-command", () => ({
   verifyPasskeyLogin: mocks.verifyPasskeyLogin,
   verifyPasskeyRegistration: vi.fn(),
 }));
-vi.mock("@/backend/integrations/auth/passkey-commands", () => ({
+vi.mock("@/app/_composition/session-gateways", () => ({
   productionPasskeyCommands: { adapter: "passkey" },
 }));
 vi.mock("@/backend/integrations/referral/referral-attribution", () => ({

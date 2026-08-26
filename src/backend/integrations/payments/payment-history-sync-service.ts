@@ -365,7 +365,7 @@ export async function failPaymentHistorySync(
     });
 
     if (released.count === 1) {
-      await tx.auditLog.create({
+      await tx.auditLog.createMany({
         data: {
           userId: claim.userId,
           action: "payment_history_sync_failed",
@@ -412,7 +412,7 @@ export async function deferPaymentHistorySync(
     });
 
     if (released.count === 1) {
-      await tx.auditLog.create({
+      await tx.auditLog.createMany({
         data: {
           userId: claim.userId,
           action: "payment_history_sync_deferred",

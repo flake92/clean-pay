@@ -4,7 +4,11 @@ import { Prisma } from "@prisma/client";
 const mocks = vi.hoisted(() => ({
   redisCommand: vi.fn(),
   prisma: {
+    $queryRaw: vi.fn(),
     $transaction: vi.fn(),
+    paymentOperation: {
+      findUnique: vi.fn(),
+    },
     paymentRecord: {
       findUnique: vi.fn(),
       create: vi.fn(),
@@ -61,6 +65,11 @@ const upstreamTransaction = {
 describe("rate limiting", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.prisma.paymentOperation.findUnique.mockResolvedValue({
+      retentionHoldAt: null,
+      retentionHoldId: null,
+    });
+    mocks.prisma.$queryRaw.mockResolvedValue([{ retained: false }]);
   });
 
   it("builds normalized Redis keys", () => {
@@ -325,6 +334,11 @@ describe("rate limiting", () => {
 describe("payment records", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.prisma.paymentOperation.findUnique.mockResolvedValue({
+      retentionHoldAt: null,
+      retentionHoldId: null,
+    });
+    mocks.prisma.$queryRaw.mockResolvedValue([{ retained: false }]);
     mocks.lockPaymentUpstreamOwner.mockResolvedValue("upstream-1");
     mocks.prisma.$transaction.mockImplementation(async (work: (tx: typeof mocks.prisma) => Promise<unknown>) => work(mocks.prisma));
   });
@@ -415,6 +429,82 @@ describe("payment records", () => {
         planCode: "basic",
       }),
     });
+  });
+
+  it("fails closed before linking either side of a retained payment case", async () => {
+    mocks.prisma.paymentRecord.findUnique.mockResolvedValue({
+      id: "record-1",
+      userId: "user-1",
+      operationId: null,
+      retentionHoldAt: new Date("2026-08-26T00:00:00.000Z"),
+      retentionHoldId: "hold-row-1",
+    });
+
+    await expect(applyRemnashopTransaction(mocks.prisma as never, {
+      userId: "user-1",
+      operationId: "operation-1",
+      transaction: upstreamTransaction,
+    })).rejects.toMatchObject({ code: "CONFLICT", status: 409 });
+    expect(mocks.prisma.paymentRecord.updateMany).not.toHaveBeenCalled();
+
+    mocks.prisma.paymentRecord.findUnique.mockResolvedValue(null);
+    mocks.prisma.paymentOperation.findUnique.mockResolvedValue({
+      retentionHoldAt: new Date("2026-08-26T00:00:00.000Z"),
+      retentionHoldId: "hold-row-2",
+    });
+    await expect(recordPayment({
+      userId: "user-1",
+      gatewayType: "YOOKASSA",
+      payment: {
+        payment_id: "payment-held-operation",
+        purchase_type: "NEW",
+        status: "pending",
+        final_amount: "100.00",
+        currency: "RUB",
+        payment_url: null,
+        is_free: false,
+      },
+    }, { operationId: "operation-1" })).rejects.toMatchObject({
+      code: "CONFLICT",
+      status: 409,
+    });
+    expect(mocks.prisma.paymentRecord.create).not.toHaveBeenCalled();
+
+    mocks.prisma.paymentRecord.findUnique.mockResolvedValue({
+      id: "record-1",
+      userId: "user-1",
+      operationId: null,
+      retentionHoldAt: null,
+      retentionHoldId: null,
+    });
+    mocks.prisma.paymentOperation.findUnique.mockResolvedValue({
+      retentionHoldAt: null,
+      retentionHoldId: null,
+    });
+    mocks.prisma.$queryRaw.mockResolvedValueOnce([{ retained: true }]);
+    await expect(applyRemnashopTransaction(mocks.prisma as never, {
+      userId: "user-1",
+      operationId: "operation-1",
+      transaction: upstreamTransaction,
+    })).rejects.toMatchObject({ code: "CONFLICT", status: 409 });
+    expect(mocks.prisma.paymentOperation.findUnique).toHaveBeenCalledWith(
+      expect.objectContaining({
+        select: {
+          retentionHoldAt: true,
+          retentionHoldId: true,
+        },
+      }),
+    );
+    const probe = mocks.prisma.$queryRaw.mock.calls.at(-1)?.[0] as {
+      strings?: string[];
+      values?: unknown[];
+    };
+    const probeSql = probe.strings?.join(" ") ?? "";
+    expect(probeSql).toContain("SELECT EXISTS");
+    expect(probeSql).toContain('hold."caseOperationId"');
+    expect(probeSql).toContain('hold."casePaymentRecordId"');
+    expect(probeSql).not.toContain('hold."id"');
+    expect(probe.values).toEqual(["operation-1", "record-1"]);
   });
 
   it("preserves non-unique insert failures", async () => {
@@ -858,6 +948,52 @@ describe("payment records", () => {
     );
   });
 
+  it("never advances the first local terminal observation during routine terminal syncs", async () => {
+    const terminalObservedAt = new Date("2026-06-01T00:00:00.000Z");
+    const currentUpdatedAt = new Date("2026-07-17T10:01:00.000Z");
+    mocks.prisma.paymentRecord.findUnique
+      .mockResolvedValueOnce({
+        id: "record-terminal-clock",
+        userId: "user-1",
+        operationId: null,
+        status: "COMPLETED",
+        terminalObservedAt,
+        sensitiveDataScrubbedAt: null,
+        upstreamCreatedAt: new Date(upstreamTransaction.created_at),
+        upstreamUpdatedAt: currentUpdatedAt,
+        lastSyncedAt: new Date("2026-07-17T10:02:00.000Z"),
+        planCode: "basic",
+        planName: "Basic",
+        durationDays: 30,
+        deviceLimit: 3,
+        trafficLimit: null,
+        paymentUrl: "https://pay.test/checkout",
+        isFree: false,
+        raw: { status: "completed" },
+      })
+      .mockResolvedValueOnce({ id: "record-terminal-clock", status: "REFUNDED" });
+    mocks.prisma.paymentRecord.updateMany.mockResolvedValue({ count: 1 });
+
+    await applyRemnashopTransaction(mocks.prisma as never, {
+      userId: "user-1",
+      transaction: {
+        ...upstreamTransaction,
+        status: "refunded",
+        updated_at: "2026-07-17T10:03:00.000Z",
+      },
+    });
+
+    expect(mocks.prisma.paymentRecord.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          status: "REFUNDED",
+          terminalObservedAt,
+          upstreamUpdatedAt: new Date("2026-07-17T10:03:00.000Z"),
+        }),
+      }),
+    );
+  });
+
   it("corrects migration fallback timestamps and free flag on first authoritative sync", async () => {
     mocks.prisma.paymentRecord.findUnique
       .mockResolvedValueOnce({
@@ -985,6 +1121,113 @@ describe("payment records", () => {
       }),
     ).resolves.toEqual({ id: existing.id });
     expect(mocks.prisma.paymentRecord.updateMany).toHaveBeenCalledOnce();
+  });
+
+  it("never rehydrates scrubbed payment secrets during an authoritative sync", async () => {
+    const scrubbedAt = new Date("2026-08-25T12:00:00.000Z");
+    const existing = {
+      id: "record-scrubbed-sync",
+      userId: "user-1",
+      operationId: null,
+      status: "COMPLETED",
+      upstreamCreatedAt: new Date(upstreamTransaction.created_at),
+      upstreamUpdatedAt: new Date(upstreamTransaction.updated_at),
+      lastSyncedAt: new Date("2026-07-17T10:02:00.000Z"),
+      planCode: "basic",
+      planName: "Basic",
+      durationDays: 30,
+      deviceLimit: 3,
+      trafficLimit: null,
+      paymentUrl: null,
+      isFree: false,
+      raw: { retention: "scrubbed", version: 1 },
+      sensitiveDataScrubbedAt: scrubbedAt,
+    };
+    mocks.prisma.paymentRecord.findUnique
+      .mockResolvedValueOnce(existing)
+      .mockResolvedValueOnce({ ...existing, status: "REFUNDED" });
+    mocks.prisma.paymentRecord.updateMany.mockResolvedValue({ count: 1 });
+
+    await applyRemnashopTransaction(mocks.prisma as never, {
+      userId: "user-1",
+      transaction: {
+        ...upstreamTransaction,
+        status: "refunded",
+        updated_at: "2026-08-26T00:00:00.000Z",
+      },
+      payment: {
+        payment_id: upstreamTransaction.payment_id,
+        payment_url: "https://pay.test/?secret=rehydration-marker",
+        purchase_type: upstreamTransaction.purchase_type,
+        status: "refunded",
+        is_free: false,
+        final_amount: upstreamTransaction.final_amount,
+        currency: upstreamTransaction.currency,
+      },
+    });
+
+    const mutation = mocks.prisma.paymentRecord.updateMany.mock.calls[0]?.[0];
+    expect(mutation?.where).toMatchObject({
+      id: existing.id,
+      sensitiveDataScrubbedAt: scrubbedAt,
+    });
+    expect(mutation?.data).not.toHaveProperty("paymentUrl");
+    expect(mutation?.data).not.toHaveProperty("raw");
+    expect(JSON.stringify(mutation)).not.toContain("rehydration-marker");
+    expect(mutation?.data).toMatchObject({ status: "REFUNDED" });
+  });
+
+  it("never rehydrates scrubbed payment secrets during foreground recording", async () => {
+    const scrubbedAt = new Date("2026-08-25T12:00:00.000Z");
+    const existing = {
+      id: "record-scrubbed-foreground",
+      userId: "user-1",
+      operationId: null,
+      purchaseType: "NEW",
+      status: "COMPLETED",
+      finalAmount: "100.00",
+      currency: "RUB",
+      gatewayType: "YOOKASSA",
+      planCode: "basic",
+      planName: "Basic",
+      durationDays: 30,
+      deviceLimit: 3,
+      trafficLimit: null,
+      paymentUrl: null,
+      isFree: false,
+      raw: { retention: "scrubbed", version: 1 },
+      sensitiveDataScrubbedAt: scrubbedAt,
+      upstreamCreatedAt: new Date("2026-07-17T10:00:00.000Z"),
+      upstreamUpdatedAt: new Date("2026-07-17T10:01:00.000Z"),
+      lastSyncedAt: new Date("2026-07-17T10:02:00.000Z"),
+    };
+    mocks.prisma.paymentRecord.findUnique
+      .mockResolvedValueOnce(existing)
+      .mockResolvedValueOnce(existing);
+    mocks.prisma.paymentRecord.updateMany.mockResolvedValue({ count: 1 });
+
+    await recordPayment({
+      userId: "user-1",
+      gatewayType: "YOOKASSA",
+      payment: {
+        payment_id: upstreamTransaction.payment_id,
+        payment_url: "https://pay.test/?secret=foreground-marker",
+        purchase_type: "NEW",
+        status: "completed",
+        is_free: false,
+        final_amount: "100.00",
+        currency: "RUB",
+      },
+    });
+
+    const mutation = mocks.prisma.paymentRecord.updateMany.mock.calls[0]?.[0];
+    expect(mutation?.where).toMatchObject({
+      id: existing.id,
+      sensitiveDataScrubbedAt: scrubbedAt,
+    });
+    expect(mutation?.data).not.toHaveProperty("paymentUrl");
+    expect(mutation?.data).not.toHaveProperty("raw");
+    expect(JSON.stringify(mutation)).not.toContain("foreground-marker");
   });
 
   it("serializes DB records back to Remnashop-shaped payloads", () => {

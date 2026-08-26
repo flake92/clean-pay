@@ -8,7 +8,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock("@/application/support/verify-chatwoot-identity", () => ({
   verifyChatwootIdentity: mocks.verifyIdentity,
 }));
-vi.mock("@/backend/integrations/support/chatwoot-context-gateway", () => ({
+vi.mock("@/app/_composition/session-gateways", () => ({
   productionChatwootContextGateway: {},
 }));
 vi.mock("@/backend/integrations/support/chatwoot-identity-gateway", () => ({

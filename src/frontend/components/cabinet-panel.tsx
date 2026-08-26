@@ -164,8 +164,8 @@ export function CabinetPanel({ model }: { model: CabinetViewModel }) {
       const result = await deleteDeviceAction(hwid);
       setActionMessage(result.message);
       if (result.status === "success") router.refresh();
-    } catch (err) {
-      setActionMessage(err instanceof Error ? err.message : "Не удалось удалить устройство.");
+    } catch {
+      setActionMessage("Сеть недоступна. Не удалось удалить устройство.");
     } finally {
       finishPendingAction(action);
     }
@@ -192,8 +192,8 @@ export function CabinetPanel({ model }: { model: CabinetViewModel }) {
       const result = await deleteAllDevicesAction();
       setActionMessage(result.message);
       if (result.status === "success") router.refresh();
-    } catch (err) {
-      setActionMessage(err instanceof Error ? err.message : "Не удалось удалить устройства.");
+    } catch {
+      setActionMessage("Сеть недоступна. Не удалось удалить устройства.");
     } finally {
       finishPendingAction(action);
     }
@@ -220,8 +220,8 @@ export function CabinetPanel({ model }: { model: CabinetViewModel }) {
       const result = await reissueSubscriptionAction();
       setActionMessage(result.message);
       if (result.status === "success") router.refresh();
-    } catch (err) {
-      setActionMessage(err instanceof Error ? err.message : "Не удалось перевыпустить подписку.");
+    } catch {
+      setActionMessage("Сеть недоступна. Не удалось перевыпустить подписку.");
     } finally {
       finishPendingAction(action);
     }
@@ -254,8 +254,8 @@ export function CabinetPanel({ model }: { model: CabinetViewModel }) {
         setPromocode("");
         router.refresh();
       }
-    } catch (err) {
-      setPromocodeMessage(err instanceof Error ? err.message : "Не удалось активировать промокод.");
+    } catch {
+      setPromocodeMessage("Сеть недоступна. Не удалось активировать промокод.");
     } finally {
       finishPendingAction(action);
     }

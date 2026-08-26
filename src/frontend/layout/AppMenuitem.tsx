@@ -51,10 +51,15 @@ const AppMenuitem = (props: AppMenuItemProps) => {
     <li className={classNames({ "layout-root-menuitem": props.root, "active-menuitem": active })}>
       {props.root ? <div className="layout-menuitem-root-text">{item.label}</div> : null}
       {!item.to || item.items ? (
-        <button className="p-ripple" onClick={itemClick} type="button">
-          <i className={classNames("layout-menuitem-icon", item.icon)} />
+        <button
+          aria-expanded={item.items ? active : undefined}
+          className="p-ripple"
+          onClick={itemClick}
+          type="button"
+        >
+          <i aria-hidden="true" className={classNames("layout-menuitem-icon", item.icon)} />
           <span className="layout-menuitem-text">{item.label}</span>
-          {item.items ? <i className="pi pi-fw pi-angle-down layout-submenu-toggler" /> : null}
+          {item.items ? <i aria-hidden="true" className="pi pi-fw pi-angle-down layout-submenu-toggler" /> : null}
           <Ripple />
         </button>
       ) : null}
@@ -63,11 +68,12 @@ const AppMenuitem = (props: AppMenuItemProps) => {
         <Link
           className={classNames("p-ripple", { "active-route": isActiveRoute })}
           href={item.to}
+          aria-current={isActiveRoute ? "page" : undefined}
           onClick={itemClick}
           prefetch={false}
           replace={item.replaceUrl}
         >
-          <i className={classNames("layout-menuitem-icon", item.icon)} />
+          <i aria-hidden="true" className={classNames("layout-menuitem-icon", item.icon)} />
           <span className="layout-menuitem-text">{item.label}</span>
           <Ripple />
         </Link>

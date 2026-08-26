@@ -103,7 +103,12 @@ function simpleCredential(credential: StoredCredential): SimpleWebAuthnCredentia
   };
 }
 
-export const productionPasskeyCommands: PasskeyCommands = {
+type PasskeyAuthorizer = typeof getAuthorizedRemnashopTokens;
+
+export function createProductionPasskeyCommands(
+  authorize: PasskeyAuthorizer = getAuthorizedRemnashopTokens,
+): PasskeyCommands {
+  return {
   verifyHuman: (token) => verifyTurnstileToken(token, "auth_login"),
 
   async loadRegistrationActor() {
@@ -282,7 +287,7 @@ export const productionPasskeyCommands: PasskeyCommands = {
     // still allowed to persist tokens, so the first cabinet render is fully
     // authorized instead of showing a contradictory re-login prompt.
     try {
-      await getAuthorizedRemnashopTokens({ allowUnverifiedEmail: true });
+      await authorize({ allowUnverifiedEmail: true });
     } catch (error) {
       // The local passkey login remains valid when the provider is temporarily
       // unavailable. Request-scoped readers will fall back to the local
@@ -299,4 +304,7 @@ export const productionPasskeyCommands: PasskeyCommands = {
   async auditLogin(credential, sessionId) {
     await adapt(() => auditLog({ action: "passkey_login", userId: credential.userId, metadata: { credentialId: credential.credentialId, sessionId } }));
   },
-};
+  };
+}
+
+export const productionPasskeyCommands = createProductionPasskeyCommands();

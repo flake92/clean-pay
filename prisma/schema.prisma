@@ -41,6 +41,23 @@ enum PaymentOperationStatus {
   FAILED_FINAL
 }
 
+enum PaymentRetentionHoldStatus {
+  ACTIVE
+  RELEASED
+  DISPOSED
+}
+
+enum PaymentRetentionHoldSelectorKind {
+  PAYMENT_OPERATION
+  PAYMENT_RECORD
+}
+
+enum PaymentRetentionDisposition {
+  CASE_CLOSED
+  LEGAL_RETENTION_SATISFIED
+  EVIDENCE_TRANSFERRED
+}
+
 enum WebSessionAuthMethod {
   EMAIL
   TELEGRAM
@@ -55,6 +72,21 @@ enum WebSessionAssuranceLevel {
 enum AccountMergeConfirmationStatus {
   PENDING
   PROCESSING
+  COMPLETED
+  FAILED
+}
+
+enum TelegramCallbackStatus {
+  READY
+  PROVIDER_READY
+  PROVIDER_DISPATCHING
+  IDENTITY_VERIFIED
+  REMNASHOP_DISPATCHING
+  PROVIDER_AUTHENTICATED
+  IDENTITY_RESOLVED
+  OUTCOME_READY
+  SESSION_CREATED
+  RECOVERY_DISPATCHING
   COMPLETED
   FAILED
 }
@@ -132,51 +164,72 @@ model AccountMergeConfirmation {
 }
 
 model PaymentRecord {
-  id                String              @id @default(cuid())
-  userId            String
-  paymentId         String              @unique
-  purchaseType      String
-  status            PaymentRecordStatus @default(PENDING)
-  finalAmount       Decimal             @db.Decimal(12, 2)
-  currency          String
-  gatewayType       String
-  planCode          String?
-  planName          String?
-  durationDays      Int?
-  deviceLimit       Int?
-  trafficLimit      Int?
-  paymentUrl        String?
-  isFree            Boolean             @default(false)
-  raw               Json?
-  operationId       String?             @unique
-  upstreamCreatedAt DateTime            @default(now())
-  upstreamUpdatedAt DateTime            @default(now())
-  lastSyncedAt      DateTime?
-  createdAt         DateTime            @default(now())
-  updatedAt         DateTime            @updatedAt
-  user              WebUser             @relation(fields: [userId], references: [id], onDelete: Cascade)
-  operation         PaymentOperation?   @relation(fields: [operationId], references: [id], onDelete: SetNull)
+  id                      String                 @id @default(cuid())
+  userId                  String
+  paymentId               String                 @unique
+  purchaseType            String
+  status                  PaymentRecordStatus    @default(PENDING)
+  finalAmount             Decimal                @db.Decimal(12, 2)
+  currency                String
+  gatewayType             String
+  planCode                String?
+  planName                String?
+  durationDays            Int?
+  deviceLimit             Int?
+  trafficLimit            Int?
+  paymentUrl              String?
+  retentionHoldAt         DateTime?
+  retentionHoldId         String?                @unique
+  terminalObservedAt      DateTime?
+  sensitiveDataScrubbedAt DateTime?
+  isFree                  Boolean                @default(false)
+  raw                     Json?
+  operationId             String?                @unique
+  upstreamCreatedAt       DateTime               @default(now())
+  upstreamUpdatedAt       DateTime               @default(now())
+  lastSyncedAt            DateTime?
+  createdAt               DateTime               @default(now())
+  updatedAt               DateTime               @updatedAt
+  user                    WebUser                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  operation               PaymentOperation?      @relation(fields: [operationId], references: [id], onDelete: SetNull)
+  activeRetentionHold     PaymentRetentionHold?  @relation("PaymentRecordActiveRetentionHold", fields: [retentionHoldId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  retentionCaseHolds      PaymentRetentionHold[] @relation("PaymentRecordRetentionCases")
 
   @@index([userId, createdAt])
   @@index([userId, upstreamCreatedAt, paymentId])
   @@index([status])
+  @@index([status, sensitiveDataScrubbedAt, terminalObservedAt, id], map: "PaymentRecord_retention_scrub_candidates_idx")
+  @@index([retentionHoldAt])
 }
 
 model TelegramAuthState {
-  id               String    @id @default(cuid())
-  stateHash        String    @unique
-  nonceHash        String    @unique
-  codeVerifierHash String    @unique
-  redirectTo       String?
-  userId           String?
-  expiresAt        DateTime
-  consumedAt       DateTime?
-  createdAt        DateTime  @default(now())
-  updatedAt        DateTime  @updatedAt
-  user             WebUser?  @relation(fields: [userId], references: [id], onDelete: SetNull)
+  id                      String                 @id @default(cuid())
+  stateHash               String                 @unique
+  nonceHash               String                 @unique
+  codeVerifierHash        String                 @unique
+  redirectTo              String?
+  userId                  String?
+  expiresAt               DateTime
+  consumedAt              DateTime?
+  callbackStatus          TelegramCallbackStatus @default(READY)
+  callbackCodeHash        String?
+  callbackClaimTokenHash  String?
+  callbackLeaseExpiresAt  DateTime?
+  callbackAttemptCount    Int                    @default(0)
+  callbackResultEncrypted String?
+  callbackResultExpiresAt DateTime?
+  callbackWebSessionId    String?
+  callbackCompletedAt     DateTime?
+  callbackFailureCode     String?
+  createdAt               DateTime               @default(now())
+  updatedAt               DateTime               @updatedAt
+  user                    WebUser?               @relation(fields: [userId], references: [id], onDelete: SetNull)
 
   @@index([expiresAt])
   @@index([consumedAt])
+  @@index([callbackStatus, callbackLeaseExpiresAt])
+  @@index([callbackResultExpiresAt])
+  @@index([callbackWebSessionId])
   @@index([userId])
 }
 
@@ -257,15 +310,59 @@ model PaymentOperation {
   reconcileLastAttemptAt  DateTime?
   reconcileErrorSnapshot  Json?
   reconciledAt            DateTime?
+  retentionHoldAt         DateTime?
+  retentionHoldId         String?                @unique
+  snapshotScrubbedAt      DateTime?
   createdAt               DateTime               @default(now())
   updatedAt               DateTime               @updatedAt
   user                    WebUser                @relation(fields: [userId], references: [id], onDelete: Restrict)
   paymentRecord           PaymentRecord?
+  activeRetentionHold     PaymentRetentionHold?  @relation("PaymentOperationActiveRetentionHold", fields: [retentionHoldId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  retentionCaseHolds      PaymentRetentionHold[] @relation("PaymentOperationRetentionCases")
 
   @@unique([userId, idempotencyKeyHash])
   @@index([status, leaseExpiresAt])
-  @@index([status, reconcileNextAttemptAt, reconcileLeaseExpiresAt])
+  // PostgreSQL truncated the already-published migration identifier to this
+  // exact 63-byte physical name. Keep the Prisma model aligned without
+  // changing historical migration bytes.
+  @@index([status, reconcileNextAttemptAt, reconcileLeaseExpiresAt], map: "PaymentOperation_status_reconcileNextAttemptAt_reconcileLeaseEx")
   @@index([userId, createdAt])
+  @@index([status, snapshotScrubbedAt, completedAt, id], map: "PaymentOperation_status_snapshotScrubbedAt_completedAt_idx")
+  @@index([retentionHoldAt])
+}
+
+model PaymentRetentionHold {
+  id                     String                            @id @default(cuid())
+  holdIdHash             String                            @unique @db.Char(64)
+  status                 PaymentRetentionHoldStatus        @default(ACTIVE)
+  selectorKind           PaymentRetentionHoldSelectorKind?
+  selectorId             String?
+  selectorEvidenceHash   String                            @db.Char(64)
+  activeCaseKey          String?                           @unique @db.Char(64)
+  caseUserId             String?
+  caseOperationId        String?
+  casePaymentRecordId    String?
+  owner                  String?                           @db.VarChar(120)
+  reason                 String?                           @db.VarChar(1000)
+  reviewAt               DateTime?
+  heldAt                 DateTime                          @default(now())
+  releasedBy             String?                           @db.VarChar(120)
+  releaseReason          String?                           @db.VarChar(1000)
+  releasedAt             DateTime?
+  disposedBy             String?                           @db.VarChar(120)
+  disposition            PaymentRetentionDisposition?
+  disposedAt             DateTime?
+  createdAt              DateTime                          @default(now())
+  updatedAt              DateTime                          @updatedAt
+  activePaymentOperation PaymentOperation?                 @relation("PaymentOperationActiveRetentionHold")
+  activePaymentRecord    PaymentRecord?                    @relation("PaymentRecordActiveRetentionHold")
+  caseOperation          PaymentOperation?                 @relation("PaymentOperationRetentionCases", fields: [caseOperationId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  casePaymentRecord      PaymentRecord?                    @relation("PaymentRecordRetentionCases", fields: [casePaymentRecordId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@index([status, reviewAt])
+  @@index([status, disposedAt])
+  @@index([caseOperationId])
+  @@index([casePaymentRecordId])
 }
 
 model PaymentHistorySyncState {
@@ -367,6 +464,7 @@ model RateLimitEvent {
   metadata   Json?
 
   @@index([key, action, occurredAt])
+  @@index([occurredAt], map: "RateLimitEvent_occurredAt_idx")
 }
 
 model AppSetting {

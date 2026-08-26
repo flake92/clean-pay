@@ -10,7 +10,7 @@ const mocks = vi.hoisted(() => ({
       findUnique: vi.fn(),
       updateMany: vi.fn(),
     },
-    auditLog: { create: vi.fn() },
+    auditLog: { createMany: vi.fn() },
   },
   prisma: {
     $transaction: vi.fn(),
@@ -131,7 +131,7 @@ describe("payment history sync fencing", () => {
     mocks.revealRemnashopToken.mockImplementation((value: string) => value);
     mocks.findPendingPaymentIds.mockResolvedValue([]);
     mocks.getLegacyTransactions.mockResolvedValue([]);
-    mocks.tx.auditLog.create.mockResolvedValue({ id: "audit-1" });
+    mocks.tx.auditLog.createMany.mockResolvedValue({ count: 1 });
   });
 
   it("returns cursor from the locked current row, never from a stale upsert result", async () => {
@@ -662,7 +662,7 @@ describe("payment history sync fencing", () => {
         }),
       }),
     );
-    expect(mocks.tx.auditLog.create).toHaveBeenCalledWith({
+    expect(mocks.tx.auditLog.createMany).toHaveBeenCalledWith({
       data: expect.objectContaining({
         userId: "user-1",
         action: "payment_history_sync_failed",
@@ -802,7 +802,7 @@ describe("payment history sync fencing", () => {
       }),
     }));
     expect(deferredUpdate?.data).not.toHaveProperty("failureCount");
-    expect(mocks.tx.auditLog.create).toHaveBeenCalledWith({
+    expect(mocks.tx.auditLog.createMany).toHaveBeenCalledWith({
       data: expect.objectContaining({
         userId: "user-1",
         action: "payment_history_sync_deferred",

@@ -15,7 +15,6 @@ info() {
 
 [ -n "$ENV_FILE" ] || fail "an environment file path is required"
 [ -f "$ENV_FILE" ] || fail "environment file not found: $ENV_FILE"
-command -v docker >/dev/null 2>&1 || fail "docker is not installed or is not available in PATH"
 
 case "$PHASE" in
   check|finalize) ;;
@@ -37,6 +36,31 @@ env_value() {
     printf '%s' "$fallback"
   fi
 }
+
+script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+remnashop_env_file=$(env_value REMNASHOP_ENV_FILE /opt/remnashop/.env)
+remnashop_env_expected_uid=$(env_value REMNASHOP_ENV_EXPECTED_UID 0)
+remnashop_env_expected_gid=$(env_value REMNASHOP_ENV_EXPECTED_GID 0)
+
+case "$remnashop_env_expected_uid:$remnashop_env_expected_gid" in
+  *[!0-9:]*) fail "REMNASHOP_ENV_EXPECTED_UID and REMNASHOP_ENV_EXPECTED_GID must be numeric ids" ;;
+esac
+case "$remnashop_env_file" in
+  /*) ;;
+  *) fail "REMNASHOP_ENV_FILE must be an absolute path" ;;
+esac
+
+# This metadata-only guard deliberately runs before the first Docker access.
+# It rejects a missing, symlinked, non-regular, broadly readable or wrongly
+# owned host credential source without ever printing or reading its contents.
+command -v node >/dev/null 2>&1 || fail "node is required for credential metadata preflight"
+node "$script_dir/remnashop-env-preflight.mjs" \
+  "$remnashop_env_file" \
+  "$remnashop_env_expected_uid" \
+  "$remnashop_env_expected_gid" \
+  || fail "Remnashop environment-file metadata is unsafe"
+
+command -v docker >/dev/null 2>&1 || fail "docker is not installed or is not available in PATH"
 
 container_image() {
   container="$1"

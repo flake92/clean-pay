@@ -460,7 +460,7 @@ export async function releaseReconciliationClaim(
     }
 
     if (input.manualReason) {
-      await tx.auditLog.create({
+      await tx.auditLog.createMany({
         data: {
           userId: claim.userId,
           action: "payment_reconciliation_manual_required",

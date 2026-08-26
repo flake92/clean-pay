@@ -7,15 +7,26 @@ COMPOSE_FILE="$ROOT_DIR/deploy/prod/docker-compose.yml"
 IMAGE_PREFLIGHT_SCRIPT="$ROOT_DIR/deploy/prod/image-preflight.sh"
 VALIDATE_ENV_SCRIPT="$ROOT_DIR/deploy/prod/validate-env.mjs"
 ENV_GUARD_SCRIPT="$ROOT_DIR/deploy/prod/zero-downtime-env.mjs"
+ROLE_ENV_SCRIPT="$ROOT_DIR/deploy/prod/role-env.mjs"
+OPERATION_LOCK_SCRIPT="$ROOT_DIR/deploy/prod/production-operation-lock.mjs"
+OPERATION_LOCK_PATH="$ROOT_DIR/deploy/prod/.production-operation.lock"
 STATE_FILE=${CLEAN_PAY_ZDT_STATE_FILE:-"$ROOT_DIR/deploy/prod/.zero-downtime-state"}
 LOCK_DIR="${STATE_FILE}.lock"
 ROLLBACK_ENV_FILE=${CLEAN_PAY_ZDT_ROLLBACK_ENV_FILE:-}
+APP_ENV_FILE="${ENV_FILE}.app"
+HOLD_OPERATOR_ENV_FILE="${ENV_FILE}.hold-operator"
+MIGRATION_ENV_FILE="${ENV_FILE}.migration"
+POSTGRES_ENV_FILE="${ENV_FILE}.postgres"
+PROVISION_ENV_FILE="${ENV_FILE}.provision"
+RECONCILIATION_ENV_FILE="${ENV_FILE}.reconciliation"
+RETENTION_ENV_FILE="${ENV_FILE}.retention"
 
 OWNER_LABEL='clean-pay-zdt-v1'
 COMMAND=${1:-help}
 ACKNOWLEDGEMENT=${2:-}
 
 lock_held=0
+operation_lock_token=''
 verified_image_dir=''
 verified_image_output=''
 state_temp=''
@@ -127,13 +138,20 @@ compose() (
   compose_path=$COMPOSE_FILE
   unset \
     CLEAN_PAY_BIND \
+    CLEAN_PAY_APP_ENV_FILE \
     CLEAN_PAY_EDGE_NETWORK \
     CLEAN_PAY_IMAGE \
+    CLEAN_PAY_HOLD_OPERATOR_ENV_FILE \
     CLEAN_PAY_MIGRATION_IMAGE \
+    CLEAN_PAY_MIGRATION_ENV_FILE \
     CLEAN_PAY_MIN_FREE_DISK_MB \
     CLEAN_PAY_PORT \
+    CLEAN_PAY_POSTGRES_ENV_FILE \
+    CLEAN_PAY_PROVISION_ENV_FILE \
+    CLEAN_PAY_RECONCILIATION_ENV_FILE \
     CLEAN_PAY_RELEASE \
     CLEAN_PAY_REVISION \
+    CLEAN_PAY_RETENTION_ENV_FILE \
     COMPOSE_ENV_FILES \
     COMPOSE_FILE \
     COMPOSE_PROFILES \
@@ -155,6 +173,22 @@ compose() (
     export CLEAN_PAY_IMAGE CLEAN_PAY_MIGRATION_IMAGE
   fi
 
+  CLEAN_PAY_APP_ENV_FILE=$APP_ENV_FILE
+  CLEAN_PAY_HOLD_OPERATOR_ENV_FILE=$HOLD_OPERATOR_ENV_FILE
+  CLEAN_PAY_MIGRATION_ENV_FILE=$MIGRATION_ENV_FILE
+  CLEAN_PAY_POSTGRES_ENV_FILE=$POSTGRES_ENV_FILE
+  CLEAN_PAY_PROVISION_ENV_FILE=$PROVISION_ENV_FILE
+  CLEAN_PAY_RECONCILIATION_ENV_FILE=$RECONCILIATION_ENV_FILE
+  CLEAN_PAY_RETENTION_ENV_FILE=$RETENTION_ENV_FILE
+  export \
+    CLEAN_PAY_APP_ENV_FILE \
+    CLEAN_PAY_HOLD_OPERATOR_ENV_FILE \
+    CLEAN_PAY_MIGRATION_ENV_FILE \
+    CLEAN_PAY_POSTGRES_ENV_FILE \
+    CLEAN_PAY_PROVISION_ENV_FILE \
+    CLEAN_PAY_RECONCILIATION_ENV_FILE \
+    CLEAN_PAY_RETENTION_ENV_FILE
+
   if [ "$(env_value PAYMENT_RECONCILIATION_ENABLED true)" = "true" ]; then
     docker compose --env-file "$ENV_FILE" -f "$compose_path" \
       --profile reconciliation "$@"
@@ -174,9 +208,29 @@ acquire_lock() {
 
 release_lock() {
   [ "$lock_held" -eq 1 ] || return 0
-  rmdir "$LOCK_DIR" 2>/dev/null \
-    || printf '%s\n' "WARNING: could not remove exact lock directory $LOCK_DIR" >&2
+  if ! rmdir "$LOCK_DIR" 2>/dev/null; then
+    printf '%s\n' "WARNING: could not remove exact lock directory $LOCK_DIR" >&2
+    return 1
+  fi
   lock_held=0
+}
+
+acquire_production_operation_lock() {
+  operation_name=$1
+  operation_lock_token=$(node "$OPERATION_LOCK_SCRIPT" \
+    acquire "$OPERATION_LOCK_PATH" "$operation_name" "$$") \
+    || fail "another production operation is active or the fail-closed operation lock needs reviewed recovery"
+  printf '%s\n' "$operation_lock_token" | grep -Eq '^[0-9a-f]{64}$' \
+    || fail "production operation lock returned an invalid ownership token"
+}
+
+release_production_operation_lock() {
+  [ -n "$operation_lock_token" ] || return 0
+  if ! node "$OPERATION_LOCK_SCRIPT" \
+    release "$OPERATION_LOCK_PATH" "$operation_lock_token"; then
+    return 1
+  fi
+  operation_lock_token=''
 }
 
 cleanup_private_files() {
@@ -249,6 +303,11 @@ restore_previous_compose() {
       "CRITICAL: authoritative image configuration could not be restored; keep Caddy on the canary and investigate" >&2
     return 1
   fi
+  if ! node "$ROLE_ENV_SCRIPT" materialize "$ENV_FILE"; then
+    printf '%s\n' \
+      "CRITICAL: role-scoped environments could not be refreshed after rollback" >&2
+    return 1
+  fi
 
   if ! compose up -d --no-deps --no-build --pull never --wait \
       --wait-timeout 180 app; then
@@ -279,6 +338,7 @@ restore_previous_compose() {
 on_exit() {
   status=$?
   trap - 0 HUP INT TERM
+  set +e
 
   if [ "$status" -ne 0 ] && [ "$rollback_compose_on_failure" -eq 1 ]; then
     (restore_previous_compose) || true
@@ -289,7 +349,18 @@ on_exit() {
   fi
 
   cleanup_private_files
-  release_lock
+  if ! release_lock && [ "$status" -eq 0 ]; then
+    status=1
+  fi
+  if [ -n "$operation_lock_token" ]; then
+    if ! release_production_operation_lock; then
+      printf '%s\n' \
+        "WARNING: production operation lock release failed; inspect the fail-closed lock before retrying." >&2
+      if [ "$status" -eq 0 ]; then
+        status=1
+      fi
+    fi
+  fi
   exit "$status"
 }
 
@@ -308,6 +379,7 @@ require_tools_and_environment() {
   [ ! -L "$ENV_FILE" ] || fail "authoritative environment file must not be a symbolic link"
   validate_absolute_state_path "$ENV_FILE" "authoritative environment file"
   node "$VALIDATE_ENV_SCRIPT" --clean-pay-env-file "$ENV_FILE"
+  node "$ROLE_ENV_SCRIPT" materialize "$ENV_FILE"
 
   PROJECT_NAME=$(env_value COMPOSE_PROJECT_NAME clean-pay-prod)
   EDGE_NETWORK=$(env_value CLEAN_PAY_EDGE_NETWORK remnawave-network)
@@ -550,11 +622,19 @@ discover_internal_network() {
 assert_no_pending_migrations() {
   info "checking that the verified migration image has no pending Prisma migrations"
   docker run --rm \
+    --read-only \
+    --cap-drop ALL \
+    --security-opt no-new-privileges \
+    --pids-limit 128 \
+    --memory 1g \
+    --cpus 1.0 \
+    --tmpfs /tmp:rw,noexec,nosuid,nodev,size=64m,mode=1777 \
     --network "$INTERNAL_NETWORK" \
-    --env-file "$ENV_FILE" \
-    --entrypoint node \
+    --env-file "$MIGRATION_ENV_FILE" \
+    --env CLEAN_PAY_RUNTIME_ROLE=migration \
+    --entrypoint sh \
     "$TARGET_MIGRATION_IMAGE" \
-    node_modules/prisma/build/index.js migrate status \
+    -c 'node deploy/prod/validate-env.mjs && node node_modules/prisma/build/index.js migrate status' \
     || fail "pending, failed, or divergent Prisma migrations block this zero-downtime flow"
 }
 
@@ -604,7 +684,7 @@ wait_for_canary_readiness() {
   attempt=0
   while [ "$attempt" -lt 90 ]; do
     if docker exec "$CANARY_NAME" node -e \
-      "fetch('http://127.0.0.1:4000/api/internal/health/readiness',{headers:{'x-clean-pay-readiness-secret':process.env.READINESS_INTERNAL_SECRET},signal:AbortSignal.timeout(10000)}).then(async response=>{const body=await response.json();const failed=Object.values(body.checks||{}).some(check=>check.status!=='ok');if(!response.ok||body.status!=='ok'||failed)process.exit(1)}).catch(()=>process.exit(1))" \
+      "fetch('http://127.0.0.1:4000/api/internal/health/readiness',{headers:{'x-clean-pay-readiness-secret':process.env.READINESS_INTERNAL_SECRET},signal:AbortSignal.timeout(10000)}).then(async response=>{const body=await response.json();const checks=body&&typeof body.checks==='object'&&!Array.isArray(body.checks)?Object.values(body.checks):[];const valid=checks.length>0&&checks.every(check=>check&&typeof check==='object'&&check.status==='ok');if(!response.ok||body.status!=='ok'||!valid)process.exit(1)}).catch(()=>process.exit(1))" \
       >/dev/null 2>&1; then
       curl --fail --silent --show-error --max-time 10 \
         "http://127.0.0.1:${CANARY_PORT}/api/health/liveness" >/dev/null \
@@ -737,7 +817,17 @@ stage_canary() {
   docker create \
     --name "$CANARY_NAME" \
     --restart unless-stopped \
-    --env-file "$ENV_FILE" \
+    --init \
+    --read-only \
+    --cap-drop ALL \
+    --security-opt no-new-privileges \
+    --pids-limit 256 \
+    --memory 1g \
+    --cpus 1.0 \
+    --tmpfs /tmp:rw,noexec,nosuid,nodev,size=64m,mode=1777 \
+    --tmpfs /app/.next/cache:rw,noexec,nosuid,nodev,size=128m,mode=0700,uid=1001,gid=1001 \
+    --env-file "$APP_ENV_FILE" \
+    --env CLEAN_PAY_RUNTIME_ROLE=application \
     --network "$INTERNAL_NETWORK" \
     --publish "127.0.0.1:${CANARY_PORT}:4000" \
     --label "io.clean-pay.zero-downtime.owner=$OWNER_LABEL" \
@@ -858,6 +948,12 @@ This script never edits or reloads Caddy and never applies a database migration.
 Follow deploy/prod/zero-downtime-production-runbook.md for the guarded proxy switches.
 EOF
 }
+
+case "$COMMAND" in
+  stage|verify|promote|rollback|remove|status)
+    acquire_production_operation_lock "zero-downtime-$COMMAND"
+    ;;
+esac
 
 case "$COMMAND" in
   help|-h|--help)

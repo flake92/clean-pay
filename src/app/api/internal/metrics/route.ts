@@ -1,5 +1,6 @@
 import { loadPaymentReconciliationBacklog } from "@/application/payments/run-payment-maintenance";
 import { getEnv } from "@/backend/config/env";
+import { runtimeDatabasePoolMetrics } from "@/backend/database/pools";
 import { productionPaymentMaintenanceRunner } from "@/backend/integrations/payments/payment-maintenance-runner";
 import { logTechnicalError } from "@/backend/observability/audit";
 import { renderPrometheusMetrics } from "@/backend/observability/metrics";
@@ -28,7 +29,10 @@ export async function GET(request: Request) {
     const backlog = await loadPaymentReconciliationBacklog(
       productionPaymentMaintenanceRunner,
     );
-    return new Response(renderPrometheusMetrics(backlog), {
+    return new Response(renderPrometheusMetrics(
+      backlog,
+      runtimeDatabasePoolMetrics(),
+    ), {
       status: 200,
       headers: {
         "cache-control": "no-store",

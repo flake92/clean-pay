@@ -143,6 +143,14 @@ function parseCachedReadiness(value: unknown) {
   return null;
 }
 
+function isFreshReadinessTimestamp(checkedAtMs: number, now: number) {
+  const ageMs = now - checkedAtMs;
+
+  return Number.isFinite(checkedAtMs)
+    && ageMs >= 0
+    && ageMs <= READINESS_STALE_AFTER_MS;
+}
+
 export async function getPublicReadiness(
   gateway: Pick<ReadinessGateway, "readSharedState">,
   now = Date.now(),
@@ -151,8 +159,7 @@ export async function getPublicReadiness(
   const localCheckedAtMs = cached ? Date.parse(cached.checkedAt) : Number.NaN;
   const localFresh = Boolean(
     cached
-      && Number.isFinite(localCheckedAtMs)
-      && now - localCheckedAtMs <= READINESS_STALE_AFTER_MS,
+      && isFreshReadinessTimestamp(localCheckedAtMs, now),
   );
 
   if (!localFresh) {
@@ -164,7 +171,7 @@ export async function getPublicReadiness(
   }
 
   const checkedAtMs = cached ? Date.parse(cached.checkedAt) : Number.NaN;
-  const stale = !cached || !Number.isFinite(checkedAtMs) || now - checkedAtMs > READINESS_STALE_AFTER_MS;
+  const stale = !cached || !isFreshReadinessTimestamp(checkedAtMs, now);
 
   return {
     status: !stale && cached?.status === "ok" ? "ok" as const : "degraded" as const,

@@ -190,10 +190,23 @@ export function LinkAccountPanel({
   }, []);
 
   useEffect(() => {
-    if (guided && hasEmail && emailVerified && !mergeConfirmation) {
+    if (
+      guided &&
+      hasEmail &&
+      emailVerified &&
+      !mergeConfirmation &&
+      !requiresPasswordReauth
+    ) {
       navigateTo(accountSetupCompletePath(redirectTo));
     }
-  }, [emailVerified, guided, hasEmail, mergeConfirmation, redirectTo]);
+  }, [
+    emailVerified,
+    guided,
+    hasEmail,
+    mergeConfirmation,
+    redirectTo,
+    requiresPasswordReauth,
+  ]);
 
   async function confirmTelegramMerge() {
     const action = "telegram-merge-confirm";
@@ -219,8 +232,8 @@ export function LinkAccountPanel({
       navigateTo(
         guided ? accountSetupCompletePath(redirectTo) : redirectTo,
       );
-    } catch (error) {
-      setError(error instanceof Error ? error.message : "Не удалось объединить аккаунты.");
+    } catch {
+      setError("Сеть недоступна. Не удалось объединить аккаунты.");
     } finally {
       finishAction(action);
     }
@@ -243,8 +256,8 @@ export function LinkAccountPanel({
       setMergeConfirmation(null);
       window.history.replaceState({}, "", "/link-account");
       setMessage("Объединение аккаунтов отменено. Данные не изменены.");
-    } catch (error) {
-      setError(error instanceof Error ? error.message : "Не удалось отменить объединение.");
+    } catch {
+      setError("Сеть недоступна. Не удалось отменить объединение.");
     } finally {
       finishAction(action);
     }
@@ -291,12 +304,8 @@ export function LinkAccountPanel({
 
       setMessage("Ключ быстрого входа удалён.");
       setPasskeys((current) => current.filter((passkey) => passkey.id !== id));
-    } catch (error) {
-      setError(
-        error instanceof Error
-          ? error.message
-          : "Не удалось удалить ключ быстрого входа.",
-      );
+    } catch {
+      setError("Сеть недоступна. Не удалось удалить ключ быстрого входа.");
     } finally {
       finishAction(action);
     }
@@ -384,7 +393,9 @@ export function LinkAccountPanel({
           <p className="line-height-3 text-700">
             {requiresPasswordReauth
                 ? hasEmail
-                  ? "Сессия подтверждения изменилась. Введите пароль личного кабинета, затем подтвердите адрес шестизначным кодом из письма."
+                  ? emailVerified
+                    ? "Сессия подтверждения изменилась. Введите пароль личного кабинета, чтобы безопасно продолжить."
+                    : "Сессия подтверждения изменилась. Введите пароль личного кабинета, затем подтвердите адрес шестизначным кодом из письма."
                   : "Сессия подтверждения изменилась. Снова введите e-mail и пароль личного кабинета, затем подтвердите адрес шестизначным кодом из письма."
                 : hasEmail
                   ? "E-mail сохранён. Осталось подтвердить его шестизначным кодом из письма."
@@ -392,7 +403,7 @@ export function LinkAccountPanel({
           </p>
           <ol className="mb-0 pl-4 line-height-3 text-600">
             {!hasEmail ? <li>Введите e-mail и пароль для входа.</li> : null}
-            {hasEmail && !emailVerified && requiresPasswordReauth ? (
+            {hasEmail && requiresPasswordReauth ? (
               <li>Подтвердите вход паролем личного кабинета.</li>
             ) : null}
             {!emailVerified ? <li>Подтвердите адрес кодом из письма.</li> : null}

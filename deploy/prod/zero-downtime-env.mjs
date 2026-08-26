@@ -3,11 +3,8 @@
 import {
   closeSync,
   constants,
-  existsSync,
   fsyncSync,
-  lstatSync,
   openSync,
-  readFileSync,
   renameSync,
   unlinkSync,
   writeFileSync,
@@ -18,6 +15,11 @@ import {
   parseProductionEnvironmentFile,
   validateProductionEnvironment,
 } from "./production-env-rules.mjs";
+import {
+  assertPrivateCredentialDirectory,
+  readPrivateCredentialFile,
+  sameCredentialFileIdentity,
+} from "./credential-file-guard.mjs";
 
 const IMAGE_CONFIGURATION_NAMES = Object.freeze([
   "CLEAN_PAY_DEPLOY_SOURCE",
@@ -73,28 +75,22 @@ function parseArguments(args) {
   return { command: args[0], currentPath, rollbackPath };
 }
 
-function inspectPrivateRegularFile(path, label) {
-  if (!existsSync(path)) {
-    throw new Error(label + " does not exist");
-  }
-  const stat = lstatSync(path);
-  if (stat.isSymbolicLink() || !stat.isFile()) {
-    throw new Error(label + " must be a regular non-symlink file");
-  }
-  if (process.platform !== "win32" && (stat.mode & 0o077) !== 0) {
-    throw new Error(label + " must not be accessible by group or other users");
-  }
-  if (typeof process.getuid === "function" && stat.uid !== process.getuid()) {
-    throw new Error(label + " must be owned by the current operator");
-  }
-  return stat;
-}
-
 function readAndVerifyPair(currentPath, rollbackPath) {
-  const currentStat = inspectPrivateRegularFile(currentPath, "current env");
-  inspectPrivateRegularFile(rollbackPath, "rollback env");
-  const currentContents = readFileSync(currentPath, "utf8");
-  const rollbackContents = readFileSync(rollbackPath, "utf8");
+  const currentDirectory = dirname(currentPath);
+  const currentDirectoryStat = assertPrivateCredentialDirectory(
+    currentDirectory,
+    "current env directory",
+    { allowedModes: [0o700, 0o750, 0o755] },
+  );
+  assertPrivateCredentialDirectory(
+    dirname(rollbackPath),
+    "rollback env directory",
+    { allowedModes: [0o700, 0o750, 0o755] },
+  );
+  const currentRead = readPrivateCredentialFile(currentPath, "current env");
+  const rollbackRead = readPrivateCredentialFile(rollbackPath, "rollback env");
+  const currentContents = currentRead.contents;
+  const rollbackContents = rollbackRead.contents;
   const current = parseProductionEnvironmentFile(currentContents, "current env");
   const rollback = parseProductionEnvironmentFile(
     rollbackContents,
@@ -125,8 +121,9 @@ function readAndVerifyPair(currentPath, rollbackPath) {
   }
   return {
     currentContents,
+    currentDirectoryStat,
     currentPath,
-    currentStat,
+    currentStat: currentRead.metadata,
     rollback,
     rollbackContents,
   };
@@ -195,16 +192,30 @@ function restoreImageConfiguration(pair) {
     } finally {
       closeSync(descriptor);
     }
-    inspectPrivateRegularFile(temporaryPath, "temporary restored env");
-    const currentBeforePublish = inspectPrivateRegularFile(
+    const temporaryRead = readPrivateCredentialFile(
+      temporaryPath,
+      "temporary restored env",
+    );
+    if (temporaryRead.contents !== restoredContents) {
+      throw new Error("temporary restored env changed before atomic publish");
+    }
+    const currentBeforePublish = readPrivateCredentialFile(
       pair.currentPath,
       "current env before atomic publish",
     );
-    if (
-      currentBeforePublish.dev !== pair.currentStat.dev ||
-      currentBeforePublish.ino !== pair.currentStat.ino
-    ) {
+    if (!sameCredentialFileIdentity(currentBeforePublish.metadata, pair.currentStat)) {
       throw new Error("current env identity changed before atomic publish");
+    }
+    if (currentBeforePublish.contents !== pair.currentContents) {
+      throw new Error("current env contents changed before atomic publish");
+    }
+    const directoryBeforePublish = assertPrivateCredentialDirectory(
+      directory,
+      "current env directory before atomic publish",
+      { allowedModes: [0o700, 0o750, 0o755] },
+    );
+    if (!sameCredentialFileIdentity(directoryBeforePublish, pair.currentDirectoryStat)) {
+      throw new Error("current env directory identity changed before atomic publish");
     }
     renameSync(temporaryPath, pair.currentPath);
     temporaryExists = false;

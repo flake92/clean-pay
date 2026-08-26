@@ -12,7 +12,13 @@ const mocks = vi.hoisted(() => ({
   prisma: {
     webUser: { findUnique: vi.fn(), findUniqueOrThrow: vi.fn(), update: vi.fn(), upsert: vi.fn() },
     telegramAuthState: { update: vi.fn() },
-    accountMergeConfirmation: { updateMany: vi.fn(), create: vi.fn(), findMany: vi.fn(), update: vi.fn() },
+    accountMergeConfirmation: {
+      updateMany: vi.fn(),
+      create: vi.fn(),
+      findFirst: vi.fn(),
+      findMany: vi.fn(),
+      update: vi.fn(),
+    },
     $queryRaw: vi.fn(), $transaction: vi.fn(),
   },
 }));
@@ -79,6 +85,7 @@ describe("production Telegram callback gateway", () => {
     mocks.prisma.$queryRaw.mockResolvedValue([]);
     mocks.prisma.accountMergeConfirmation.updateMany.mockResolvedValue({ count: 1 });
     mocks.prisma.accountMergeConfirmation.create.mockResolvedValue({ id: "confirmation-1" });
+    mocks.prisma.accountMergeConfirmation.findFirst.mockResolvedValue(null);
     mocks.prisma.accountMergeConfirmation.findMany.mockResolvedValue([]);
     mocks.prisma.accountMergeConfirmation.update.mockResolvedValue({ id: "confirmation-1" });
     mocks.synchronizeProviderAccountIdentity.mockResolvedValue({
@@ -221,7 +228,17 @@ describe("production Telegram callback gateway", () => {
       expectedExistingUpstreamAccountId: null, provenProviderAccountId: "account-1",
       telegramUsername: null, fullName: null, photoUrl: null,
     });
-    expect(mocks.mergeLocalUsersIntoTarget).toHaveBeenCalledTimes(1);
+    expect(mocks.mergeLocalUsersIntoTarget).toHaveBeenCalledTimes(2);
+    expect(mocks.mergeLocalUsersIntoTarget).toHaveBeenLastCalledWith(
+      mocks.prisma,
+      expect.objectContaining({
+        targetUserId: "target-user",
+        targetUpstreamAccountId: "account-1",
+        sourceUserIds: [],
+        ownerExpectations: [expect.objectContaining({ id: "target-user" })],
+      }),
+    );
+    expect(mocks.assertUserMergeFinalOwner).toHaveBeenCalledTimes(2);
   });
 
   it("upserts a Telegram-only user and performs state and audit side effects", async () => {

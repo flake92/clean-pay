@@ -13,6 +13,8 @@ export default defineConfig({
       "tests/unit/frontend/chatwoot-client.test.ts",
       "tests/unit/frontend/chatwoot-widget.test.ts",
       "tests/unit/frontend/critical-flow-components.test.ts",
+      "tests/unit/frontend/layout-mobile-focus.test.ts",
+      "tests/unit/frontend/page-shell-accessibility.test.ts",
       "tests/unit/frontend/payment-return-status-component.test.ts",
     ],
     pool: "forks",
@@ -23,6 +25,8 @@ export default defineConfig({
       reportsDirectory: "coverage/frontend",
       include: [
         "src/frontend/layout/AppTopbar.tsx",
+        "src/frontend/layout/layout.tsx",
+        "src/frontend/components/auth-shell.tsx",
         "src/frontend/components/link-account-panel.tsx",
         "src/frontend/components/chatwoot-widget.tsx",
         "src/frontend/components/passkey-actions.tsx",

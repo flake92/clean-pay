@@ -87,6 +87,7 @@ export async function GET(request: Request) {
     : new URL("/login", getEnv().publicAppUrl);
   if (!authFallback) fallback.searchParams.set("redirect_to", returnTo);
   const response = NextResponse.redirect(fallback, 303);
+  response.headers.set("cache-control", "no-store");
   response.cookies.delete("clean_pay_access");
   response.cookies.delete("clean_pay_refresh");
   return response;

@@ -39,13 +39,16 @@ const COMMON_WEAK_VALUES = new Set([
 ]);
 
 const ALLOWED_DATABASE_QUERY_PARAMETERS = new Set([
+  "schema",
+  "sslmode",
+]);
+
+const LEGACY_DATABASE_POOL_QUERY_PARAMETERS = new Set([
   "application_name",
   "connect_timeout",
   "connection_limit",
   "idle_in_transaction_session_timeout",
   "pool_timeout",
-  "schema",
-  "sslmode",
   "statement_timeout",
 ]);
 
@@ -77,6 +80,8 @@ export const PRODUCTION_ENVIRONMENT_FILE_NAMES = Object.freeze([
   "CHATWOOT_HMAC_TOKEN",
   "CHATWOOT_WEBSITE_TOKEN",
   "CLEAN_PAY_BIND",
+  "CLEAN_PAY_DATABASE_ADOPTION_BACKUP_CONFIRMED",
+  "CLEAN_PAY_DATABASE_ADOPT_EXISTING",
   "CLEAN_PAY_DEPLOY_SOURCE",
   "CLEAN_PAY_EDGE_NETWORK",
   "CLEAN_PAY_IMAGE",
@@ -91,8 +96,17 @@ export const PRODUCTION_ENVIRONMENT_FILE_NAMES = Object.freeze([
   "COOKIE_SAMESITE",
   "COOKIE_SECURE",
   "DATABASE_URL",
+  "DATABASE_CONNECTION_TIMEOUT_MS",
+  "DATABASE_IDLE_TIMEOUT_MS",
+  "DATABASE_IDLE_TRANSACTION_TIMEOUT_MS",
+  "DATABASE_LOCK_TIMEOUT_MS",
+  "DATABASE_POOL_MAX",
+  "DATABASE_QUERY_TIMEOUT_MS",
+  "DATABASE_STATEMENT_TIMEOUT_MS",
   "DATA_RETENTION_INTERVAL_SECONDS",
+  "HOLD_OPERATOR_DATABASE_URL",
   "LOG_LEVEL",
+  "MIGRATION_DATABASE_URL",
   "NEXT_PUBLIC_APP_URL",
   "NEXT_PUBLIC_BRAND_LOGO_URL",
   "NEXT_PUBLIC_BRAND_NAME",
@@ -102,6 +116,9 @@ export const PRODUCTION_ENVIRONMENT_FILE_NAMES = Object.freeze([
   "PAYMENT_RECONCILIATION_INTERVAL_SECONDS",
   "PAYMENT_RECONCILIATION_SECRET",
   "PAYMENT_REDIRECT_ORIGINS",
+  "PAYMENT_HOLD_DISPOSED_RETENTION_DAYS",
+  "PAYMENT_OPERATION_SNAPSHOT_RETENTION_DAYS",
+  "PAYMENT_SENSITIVE_RETENTION_DAYS",
   "POSTGRES_DB",
   "POSTGRES_PASSWORD",
   "POSTGRES_USER",
@@ -115,6 +132,9 @@ export const PRODUCTION_ENVIRONMENT_FILE_NAMES = Object.freeze([
   "REMNASHOP_API_KEY",
   "REMNASHOP_AUTH_SERVICE_KEY",
   "REMNASHOP_DOCKER_NETWORK",
+  "REMNASHOP_ENV_EXPECTED_GID",
+  "REMNASHOP_ENV_EXPECTED_UID",
+  "REMNASHOP_ENV_FILE",
   "REMNASHOP_MINIMUM_ALEMBIC_REVISION",
   "REMNASHOP_POSTGRES_CONTAINER",
   "REMNASHOP_SCHEDULER_CONTAINER",
@@ -122,6 +142,14 @@ export const PRODUCTION_ENVIRONMENT_FILE_NAMES = Object.freeze([
   "REMNAWAVE_API_BASE_URL",
   "REMNAWAVE_SUBSCRIPTION_ORIGINS",
   "REMNAWAVE_TOKEN",
+  "RETENTION_DATABASE_CONNECTION_TIMEOUT_MS",
+  "RETENTION_DATABASE_IDLE_TIMEOUT_MS",
+  "RETENTION_DATABASE_IDLE_TRANSACTION_TIMEOUT_MS",
+  "RETENTION_DATABASE_LOCK_TIMEOUT_MS",
+  "RETENTION_DATABASE_POOL_MAX",
+  "RETENTION_DATABASE_QUERY_TIMEOUT_MS",
+  "RETENTION_DATABASE_STATEMENT_TIMEOUT_MS",
+  "RETENTION_DATABASE_URL",
   "SESSION_RETENTION_DAYS",
   "SUPPORT_EMAIL",
   "SUPPORT_ENABLED",
@@ -140,6 +168,8 @@ export const PRODUCTION_ENVIRONMENT_FILE_NAMES = Object.freeze([
   "TURNSTILE_SITE_KEY",
   "TURNSTILE_VERIFY_URL",
   "WEB_JWT_SECRET",
+  "WEB_REFRESH_KEY_ID",
+  "WEB_REFRESH_PREVIOUS_KEYS",
   "WEB_REFRESH_SECRET",
 ]);
 
@@ -148,13 +178,20 @@ const PRODUCTION_ENVIRONMENT_FILE_NAME_SET = new Set(
 );
 
 export const COMPOSE_INTERPOLATION_ENVIRONMENT_NAMES = Object.freeze([
+  "CLEAN_PAY_APP_ENV_FILE",
   "CLEAN_PAY_BIND",
   "CLEAN_PAY_EDGE_NETWORK",
   "CLEAN_PAY_IMAGE",
+  "CLEAN_PAY_HOLD_OPERATOR_ENV_FILE",
+  "CLEAN_PAY_MIGRATION_ENV_FILE",
   "CLEAN_PAY_MIGRATION_IMAGE",
   "CLEAN_PAY_MIN_FREE_DISK_MB",
   "CLEAN_PAY_PORT",
+  "CLEAN_PAY_POSTGRES_ENV_FILE",
+  "CLEAN_PAY_PROVISION_ENV_FILE",
+  "CLEAN_PAY_RECONCILIATION_ENV_FILE",
   "CLEAN_PAY_RELEASE",
+  "CLEAN_PAY_RETENTION_ENV_FILE",
   "CLEAN_PAY_REVISION",
   "COMPOSE_ENV_FILES",
   "COMPOSE_FILE",
@@ -406,25 +443,109 @@ export function validateProductionEnvironment(environment) {
     fail("CLEAN_PAY_BUILD_PHASE is build-only and must not be enabled at runtime");
   }
 
+  const remnashopEnvironmentFile = optional("REMNASHOP_ENV_FILE") ?? "/opt/remnashop/.env";
+  const remnashopPathSegments = remnashopEnvironmentFile.split("/");
+  if (
+    !remnashopEnvironmentFile.startsWith("/")
+    || /[\0\r\n]/.test(remnashopEnvironmentFile)
+    || remnashopPathSegments.some((segment) => segment === "." || segment === "..")
+    || remnashopEnvironmentFile.endsWith("/")
+  ) {
+    fail("REMNASHOP_ENV_FILE must be a normalized absolute file path");
+  }
+  boundedInteger(
+    "REMNASHOP_ENV_EXPECTED_UID",
+    optional("REMNASHOP_ENV_EXPECTED_UID"),
+    0,
+    0,
+    2_147_483_647,
+  );
+  boundedInteger(
+    "REMNASHOP_ENV_EXPECTED_GID",
+    optional("REMNASHOP_ENV_EXPECTED_GID"),
+    0,
+    0,
+    2_147_483_647,
+  );
+
   const postgresDatabase = simpleDatabaseName("POSTGRES_DB", required("POSTGRES_DB"));
   const postgresUser = simpleDatabaseName("POSTGRES_USER", required("POSTGRES_USER"));
-  const postgresPassword = strongSecret(
+  const postgresPassword = databasePassword(
     "POSTGRES_PASSWORD",
     required("POSTGRES_PASSWORD"),
     24,
   );
-  const databaseUrl = parsedUrl(
+  const roleDatabaseUrls = Object.freeze(Object.fromEntries([
     "DATABASE_URL",
-    required("DATABASE_URL"),
-    ["postgresql:", "postgres:"],
+    "MIGRATION_DATABASE_URL",
+    "RETENTION_DATABASE_URL",
+    "HOLD_OPERATOR_DATABASE_URL",
+  ].map((name) => [
+    name,
+    validateRoleDatabaseUrl(name, required(name), postgresDatabase),
+  ])));
+  const databaseIdentities = [
+    ["POSTGRES_USER", postgresUser],
+    ...Object.entries(roleDatabaseUrls).map(([name, value]) => [
+      `${name} username`,
+      value.username,
+    ]),
+  ];
+  if (new Set(databaseIdentities.map(([, value]) => value)).size !== databaseIdentities.length) {
+    fail("bootstrap, migration, application, retention, and hold operator database usernames must be pairwise distinct");
+  }
+  const databaseTargets = new Set(
+    Object.values(roleDatabaseUrls).map(({ url }) => databaseTargetFingerprint(url)),
   );
-
-  validateDatabaseUrl(
-    databaseUrl,
-    postgresDatabase,
-    postgresUser,
-    postgresPassword,
+  if (databaseTargets.size !== 1) {
+    fail("all four database role URLs must target the exact same host, database, schema, and TLS mode");
+  }
+  distinctSecrets([
+    ["POSTGRES_PASSWORD", postgresPassword],
+    ...Object.entries(roleDatabaseUrls).map(([name, value]) => [
+      `${name} password`,
+      value.password,
+    ]),
+  ]);
+  const adoptExisting = bool(
+    "CLEAN_PAY_DATABASE_ADOPT_EXISTING",
+    optional("CLEAN_PAY_DATABASE_ADOPT_EXISTING") ?? "false",
   );
+  const adoptionBackupConfirmed = bool(
+    "CLEAN_PAY_DATABASE_ADOPTION_BACKUP_CONFIRMED",
+    optional("CLEAN_PAY_DATABASE_ADOPTION_BACKUP_CONFIRMED") ?? "false",
+  );
+  if (adoptionBackupConfirmed && !adoptExisting) {
+    fail("CLEAN_PAY_DATABASE_ADOPTION_BACKUP_CONFIRMED=true requires CLEAN_PAY_DATABASE_ADOPT_EXISTING=true");
+  }
+  boundedInteger("DATABASE_POOL_MAX", optional("DATABASE_POOL_MAX"), 8, 1, 50);
+  for (const [name, fallback, minimum, maximum] of [
+    ["DATABASE_CONNECTION_TIMEOUT_MS", 5_000, 250, 60_000],
+    ["DATABASE_IDLE_TIMEOUT_MS", 30_000, 1_000, 600_000],
+    ["DATABASE_QUERY_TIMEOUT_MS", 15_000, 250, 300_000],
+    ["DATABASE_STATEMENT_TIMEOUT_MS", 15_000, 250, 300_000],
+    ["DATABASE_IDLE_TRANSACTION_TIMEOUT_MS", 10_000, 250, 300_000],
+    ["DATABASE_LOCK_TIMEOUT_MS", 5_000, 250, 300_000],
+  ]) {
+    boundedInteger(name, optional(name), fallback, minimum, maximum);
+  }
+  boundedInteger(
+    "RETENTION_DATABASE_POOL_MAX",
+    optional("RETENTION_DATABASE_POOL_MAX"),
+    2,
+    1,
+    50,
+  );
+  for (const [name, fallback, minimum, maximum] of [
+    ["RETENTION_DATABASE_CONNECTION_TIMEOUT_MS", 5_000, 250, 60_000],
+    ["RETENTION_DATABASE_IDLE_TIMEOUT_MS", 30_000, 1_000, 600_000],
+    ["RETENTION_DATABASE_QUERY_TIMEOUT_MS", 120_000, 250, 300_000],
+    ["RETENTION_DATABASE_STATEMENT_TIMEOUT_MS", 120_000, 250, 300_000],
+    ["RETENTION_DATABASE_IDLE_TRANSACTION_TIMEOUT_MS", 15_000, 250, 300_000],
+    ["RETENTION_DATABASE_LOCK_TIMEOUT_MS", 30_000, 250, 300_000],
+  ]) {
+    boundedInteger(name, optional(name), fallback, minimum, maximum);
+  }
   const redisPassword = validateRedisUrl(
     parsedUrl("REDIS_URL", required("REDIS_URL"), ["redis:", "rediss:"]),
   );
@@ -530,6 +651,39 @@ export function validateProductionEnvironment(environment) {
     required("WEB_REFRESH_SECRET"),
     32,
   );
+  const webRefreshKeyId = optional("WEB_REFRESH_KEY_ID") ?? "primary";
+  if (!/^[A-Za-z0-9_-]{1,32}$/.test(webRefreshKeyId)) {
+    fail("WEB_REFRESH_KEY_ID must contain 1 to 32 safe key-id characters");
+  }
+  const previousRefreshKeysRaw = optional("WEB_REFRESH_PREVIOUS_KEYS");
+  const previousRefreshKeys = [];
+  if (previousRefreshKeysRaw) {
+    let parsed;
+    try {
+      parsed = JSON.parse(previousRefreshKeysRaw);
+    } catch {
+      fail("WEB_REFRESH_PREVIOUS_KEYS must be a JSON object of key ids to secrets");
+    }
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      fail("WEB_REFRESH_PREVIOUS_KEYS must be a JSON object of key ids to secrets");
+    }
+    const entries = Object.entries(parsed);
+    if (entries.length === 0 || entries.length > 4) {
+      fail("WEB_REFRESH_PREVIOUS_KEYS must contain 1 to 4 previous keys");
+    }
+    for (const [keyId, secret] of entries) {
+      if (!/^[A-Za-z0-9_-]{1,32}$/.test(keyId)) {
+        fail("WEB_REFRESH_PREVIOUS_KEYS contains an invalid key id");
+      }
+      if (typeof secret !== "string") {
+        fail(`WEB_REFRESH_PREVIOUS_KEYS.${keyId} must be a string`);
+      }
+      previousRefreshKeys.push([
+        `WEB_REFRESH_PREVIOUS_KEYS.${keyId}`,
+        strongSecret(`WEB_REFRESH_PREVIOUS_KEYS.${keyId}`, secret, 32),
+      ]);
+    }
+  }
   const auditIpHashSecret = strongSecret(
     "AUDIT_IP_HASH_SECRET",
     required("AUDIT_IP_HASH_SECRET"),
@@ -670,6 +824,27 @@ export function validateProductionEnvironment(environment) {
     21_600,
     300,
     86_400,
+  );
+  boundedInteger(
+    "PAYMENT_SENSITIVE_RETENTION_DAYS",
+    optional("PAYMENT_SENSITIVE_RETENTION_DAYS"),
+    30,
+    7,
+    365,
+  );
+  boundedInteger(
+    "PAYMENT_OPERATION_SNAPSHOT_RETENTION_DAYS",
+    optional("PAYMENT_OPERATION_SNAPSHOT_RETENTION_DAYS"),
+    90,
+    30,
+    730,
+  );
+  boundedInteger(
+    "PAYMENT_HOLD_DISPOSED_RETENTION_DAYS",
+    optional("PAYMENT_HOLD_DISPOSED_RETENTION_DAYS"),
+    365,
+    90,
+    2_555,
   );
 
   if (auditSecurityRetentionDays < auditInfoRetentionDays) {
@@ -862,13 +1037,47 @@ export function validateProductionEnvironment(environment) {
   }
 
   boundedInteger("CLEAN_PAY_PORT", optional("CLEAN_PAY_PORT"), 4000, 1, 65_535);
+
+  const composeProject = optional("COMPOSE_PROJECT_NAME");
+  if (composeProject) {
+    composeProjectName("COMPOSE_PROJECT_NAME", composeProject);
+  }
+  for (const name of [
+    "CLEAN_PAY_EDGE_NETWORK",
+    "REMNASHOP_DOCKER_NETWORK",
+    "REMNASHOP_API_CONTAINER",
+    "REMNASHOP_WORKER_CONTAINER",
+    "REMNASHOP_SCHEDULER_CONTAINER",
+    "REMNASHOP_POSTGRES_CONTAINER",
+  ]) {
+    const value = optional(name);
+    if (value) {
+      dockerObjectName(name, value);
+    }
+  }
+
+  const minimumAlembicRevision = optional("REMNASHOP_MINIMUM_ALEMBIC_REVISION");
+  if (minimumAlembicRevision && !/^\d{1,18}$/.test(minimumAlembicRevision)) {
+    fail("REMNASHOP_MINIMUM_ALEMBIC_REVISION must be a numeric revision of at most 18 digits");
+  }
+
+  const logLevel = optional("LOG_LEVEL");
+  if (logLevel && !/^(?:debug|info|warn|error)$/i.test(logLevel)) {
+    fail("LOG_LEVEL must be debug, info, warn, or error");
+  }
+
   const secretEntries = [
     ["POSTGRES_PASSWORD", postgresPassword],
+    ...Object.entries(roleDatabaseUrls).map(([name, value]) => [
+      `${name} password`,
+      value.password,
+    ]),
     ["REMNASHOP_API_KEY", remnashopApiKey],
     ["REMNASHOP_AUTH_SERVICE_KEY", remnashopAuthServiceKey],
     ["REMNAWAVE_TOKEN", remnawaveToken],
     ["WEB_JWT_SECRET", webJwtSecret],
     ["WEB_REFRESH_SECRET", webRefreshSecret],
+    ...previousRefreshKeys,
     ["AUDIT_IP_HASH_SECRET", auditIpHashSecret],
     ["RATE_LIMIT_IDENTITY_SECRET", rateLimitIdentitySecret],
     ["READINESS_INTERNAL_SECRET", readinessInternalSecret],
@@ -898,46 +1107,163 @@ export function validateProductionEnvironment(environment) {
   distinctSecrets(secretEntries);
 }
 
-function validateDatabaseUrl(url, expectedDatabase, expectedUser, expectedPassword) {
-  rejectCredentialsInHostname("DATABASE_URL", url);
-  rejectLocalHostname("DATABASE_URL", url.hostname);
+const ROLE_SCOPED_FORBIDDEN_DATABASE_NAMES = Object.freeze([
+  "POSTGRES_DB",
+  "POSTGRES_USER",
+  "POSTGRES_PASSWORD",
+  "POSTGRES_INITDB_ARGS",
+  "MIGRATION_DATABASE_URL",
+  "RETENTION_DATABASE_URL",
+  "HOLD_OPERATOR_DATABASE_URL",
+]);
 
-  const username = decodedUrlComponent("DATABASE_URL username", url.username);
-  const password = decodedUrlComponent("DATABASE_URL password", url.password);
+function rejectPeerAndBootstrapDatabaseEnvironment(environment) {
+  const exposedName = ROLE_SCOPED_FORBIDDEN_DATABASE_NAMES.find((name) =>
+    Object.hasOwn(environment, name)
+  );
+  if (exposedName) {
+    fail(
+      `${exposedName} must not be present in a role-scoped runtime environment`,
+    );
+  }
+}
+
+export function validateProductionDatabaseRoleEnvironment(environment) {
+  rejectPeerAndBootstrapDatabaseEnvironment(environment);
+  const value = (name) => {
+    const result = environment[name];
+    if (typeof result !== "string" || !result || result !== result.trim()) {
+      fail(`${name} is required and must not contain surrounding whitespace`);
+    }
+    return result;
+  };
+  const rawDatabaseUrl = value("DATABASE_URL");
+  const databaseUrl = parsedUrl(
+    "DATABASE_URL",
+    rawDatabaseUrl,
+    ["postgresql:", "postgres:"],
+  );
   const database = decodedUrlComponent(
     "DATABASE_URL database",
-    url.pathname.replace(/^\//, ""),
+    databaseUrl.pathname.replace(/^\//, ""),
   );
+  validateRoleDatabaseUrl("DATABASE_URL", rawDatabaseUrl, database);
+}
 
-  if (username !== expectedUser) {
-    fail("DATABASE_URL username must match POSTGRES_USER");
+export function validateProductionApplicationRoleEnvironment(environment) {
+  rejectPeerAndBootstrapDatabaseEnvironment(environment);
+  const rawDatabaseUrl = environment.DATABASE_URL;
+  if (
+    typeof rawDatabaseUrl !== "string"
+    || !rawDatabaseUrl
+    || rawDatabaseUrl !== rawDatabaseUrl.trim()
+  ) {
+    fail("DATABASE_URL is required and must not contain surrounding whitespace");
   }
+  const databaseUrl = parsedUrl(
+    "DATABASE_URL",
+    rawDatabaseUrl,
+    ["postgresql:", "postgres:"],
+  );
+  const postgresDatabase = simpleDatabaseName(
+    "DATABASE_URL database",
+    decodedUrlComponent(
+      "DATABASE_URL database",
+      databaseUrl.pathname.replace(/^\//, ""),
+    ),
+  );
+  validateRoleDatabaseUrl("DATABASE_URL", rawDatabaseUrl, postgresDatabase);
+  const syntheticUrls = [
+    ["MIGRATION_DATABASE_URL", "clean_pay_validation_migration", "92b5fd62eb1a441083c021323a8088adf1a25e98d9e0ed6c"],
+    ["RETENTION_DATABASE_URL", "clean_pay_validation_retention", "2d90eeb6fde04b8aa3bc03af442192415366a45934f862de"],
+    ["HOLD_OPERATOR_DATABASE_URL", "clean_pay_validation_hold", "b8efb671365f44be85e01a41de9a02023c4238bde75dc5e0"],
+  ];
+  const roleUrls = Object.fromEntries(syntheticUrls.map(([name, username, password]) => {
+    const value = new URL(rawDatabaseUrl);
+    value.username = username;
+    value.password = password;
+    return [name, value.toString()];
+  }));
 
-  if (password !== expectedPassword) {
-    fail("DATABASE_URL password must match POSTGRES_PASSWORD");
+  // Runtime containers intentionally receive one role URL only. Reconstruct a
+  // non-secret synthetic authoritative view to reuse all application checks
+  // without ever injecting bootstrap or peer-role credentials.
+  validateProductionEnvironment({
+    ...environment,
+    ...roleUrls,
+    CLEAN_PAY_DATABASE_ADOPTION_BACKUP_CONFIRMED: "false",
+    CLEAN_PAY_DATABASE_ADOPT_EXISTING: "false",
+    POSTGRES_DB: postgresDatabase,
+    POSTGRES_USER: "clean_pay_validation_bootstrap",
+    POSTGRES_PASSWORD: "40f3b040a561432b8482d11a7d74901e0c1cf9d92e98c46f",
+  });
+}
+
+function validateRoleDatabaseUrl(name, rawValue, expectedDatabase) {
+  const url = parsedUrl(name, rawValue, ["postgresql:", "postgres:"]);
+  rejectCredentialsInHostname(name, url);
+  rejectLocalHostname(name, url.hostname);
+  const username = simpleDatabaseName(
+    `${name} username`,
+    decodedUrlComponent(`${name} username`, url.username),
+  );
+  if (
+    username.toLowerCase() === "postgres"
+    || username.toLowerCase() === "public"
+    || username.toLowerCase().startsWith("pg_")
+  ) {
+    fail(`${name} username uses a reserved PostgreSQL role name`);
   }
-
+  const password = databasePassword(
+    `${name} password`,
+    decodedUrlComponent(`${name} password`, url.password),
+    24,
+  );
+  const database = simpleDatabaseName(
+    `${name} database`,
+    decodedUrlComponent(`${name} database`, url.pathname.replace(/^\//, "")),
+  );
   if (database !== expectedDatabase) {
-    fail("DATABASE_URL database must match POSTGRES_DB");
+    fail(`${name} database must match POSTGRES_DB`);
   }
-
   if (!url.hostname || !database || url.hash) {
-    fail("DATABASE_URL must include a hostname and database without a fragment");
+    fail(`${name} must include a hostname and database without a fragment`);
   }
-
-  validateDatabaseQueryParameters(url);
-
+  validateDatabaseQueryParameters(url, name);
+  const schema = url.searchParams.get("schema") ?? "public";
+  const normalizedSchema = schema.toLowerCase();
+  if (
+    normalizedSchema === "information_schema"
+    || normalizedSchema === "pg_catalog"
+    || normalizedSchema === "pg_toast"
+    || normalizedSchema.startsWith("pg_")
+  ) {
+    fail(`${name} must not target reserved PostgreSQL schema ${schema}`);
+  }
   if (normalizeHostname(url.hostname) === "postgres" && url.port && url.port !== "5432") {
-    fail("DATABASE_URL must use port 5432 for the bundled postgres service");
+    fail(`${name} must use port 5432 for the bundled postgres service`);
   }
-
   if (!isInternalHostname(url.hostname)) {
     const sslMode = url.searchParams.get("sslmode");
-
     if (!sslMode || !["require", "verify-ca", "verify-full"].includes(sslMode)) {
-      fail("DATABASE_URL for a public host must require TLS with sslmode");
+      fail(`${name} for a public host must require TLS with sslmode`);
     }
   }
+  return Object.freeze({ database, password, url, username });
+}
+
+function databaseTargetFingerprint(url) {
+  return JSON.stringify({
+    database: decodedUrlComponent(
+      "database URL database",
+      url.pathname.replace(/^\//, ""),
+    ),
+    hostname: normalizeHostname(url.hostname),
+    port: url.port || "5432",
+    protocol: url.protocol,
+    schema: url.searchParams.get("schema") ?? "public",
+    sslmode: url.searchParams.get("sslmode") ?? "",
+  });
 }
 
 function validateRedisUrl(url) {
@@ -981,24 +1307,36 @@ function validateRedisUrl(url) {
   return externalPassword;
 }
 
-function validateDatabaseQueryParameters(url) {
+function validateDatabaseQueryParameters(url, urlName = "DATABASE_URL") {
   const seenParameters = new Set();
 
   for (const [rawName, value] of url.searchParams) {
     const name = rawName.toLowerCase();
 
+    if (rawName !== name) {
+      fail(
+        `${urlName} query parameter ${rawName} must use canonical lowercase spelling`,
+      );
+    }
+
     if (seenParameters.has(name)) {
-      fail(`DATABASE_URL must not repeat the ${rawName} query parameter`);
+      fail(`${urlName} must not repeat the ${rawName} query parameter`);
     }
 
     seenParameters.add(name);
 
+    if (LEGACY_DATABASE_POOL_QUERY_PARAMETERS.has(name)) {
+      fail(
+        `${urlName} query parameter ${rawName} is not supported by the active PrismaPg pool; use the documented role-specific environment setting`,
+      );
+    }
+
     if (!ALLOWED_DATABASE_QUERY_PARAMETERS.has(name)) {
-      fail(`DATABASE_URL query parameter ${rawName} is not allowed`);
+      fail(`${urlName} query parameter ${rawName} is not allowed`);
     }
 
     if (name === "schema") {
-      simpleDatabaseName("DATABASE_URL schema", value);
+      simpleDatabaseName(`${urlName} schema`, value);
     }
   }
 }
@@ -1289,6 +1627,22 @@ function simpleDatabaseName(name, value) {
   return value;
 }
 
+function composeProjectName(name, value) {
+  if (!/^[a-z0-9][a-z0-9_-]{0,62}$/.test(value)) {
+    fail(`${name} must contain 1 to 63 lowercase letters, digits, dashes, or underscores`);
+  }
+
+  return value;
+}
+
+function dockerObjectName(name, value) {
+  if (!/^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/.test(value)) {
+    fail(`${name} must contain 1 to 128 Docker-safe name characters`);
+  }
+
+  return value;
+}
+
 function chatwootToken(name, value) {
   if (!/^[A-Za-z0-9_-]{16,256}$/.test(value)) {
     fail(`${name} must be a complete Chatwoot token`);
@@ -1317,6 +1671,14 @@ function strongSecret(name, value, minimumLength) {
   return value;
 }
 
+function databasePassword(name, value, minimumLength) {
+  const password = strongSecret(name, value, minimumLength);
+  if (/[^\x20-\x7e]/.test(password)) {
+    fail(`${name} must contain printable ASCII only`);
+  }
+  return password;
+}
+
 function looksLikePlaceholder(value) {
   const normalized = value.trim().toLowerCase();
   const compact = normalized.replace(/[\s_-]+/g, "");
@@ -1326,7 +1688,8 @@ function looksLikePlaceholder(value) {
     compact.includes("changeme") ||
     compact.includes("replaceme") ||
     compact.includes("placeholder") ||
-    /^(?:default|dummy|example|test)(?:[\s_-]|$)/.test(normalized) ||
+    /^(?:default|dummy|example|local(?:[\s_-]+development)?|test)(?:[\s_-]|$)/
+      .test(normalized) ||
     normalized.startsWith("your-") ||
     normalized.startsWith("<") ||
     normalized.endsWith(">")

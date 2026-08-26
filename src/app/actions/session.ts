@@ -6,7 +6,7 @@ import {
   clearCabinetSession,
   endCabinetSession,
 } from "@/application/cabinet/execute-command";
-import { productionCabinetCommands } from "@/backend/integrations/cabinet/cabinet-commands";
+import { productionCabinetCommands } from "@/app/_composition/session-gateways";
 import { clearReferralAttributionCookie } from "@/backend/integrations/referral/referral-attribution";
 
 export async function clearSessionAction() {

@@ -19,6 +19,12 @@ const metricsInternalPath = '/api/internal/metrics';
 const sessionRefreshPath = '/auth/session/refresh';
 const providerSessionRecoveryPath = '/auth/session/recover';
 const providerSessionRecoveryPagePath = '/auth/session/recovery';
+const serverActionBodyLimitBytes = 64 * 1024;
+const opaquePathSegmentPatterns = [
+  /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i,
+  /^c[a-z0-9]{20,}$/i,
+  /^[A-Za-z0-9_-]{24,}$/,
+];
 
 type RequestSecurityContext = {
   contentSecurityPolicy: string;
@@ -265,6 +271,32 @@ function safeRedirectTarget(request: NextRequest) {
   return target;
 }
 
+function accessLogRouteTemplate(value: string) {
+  const routeEnd = value.search(/[?#]/);
+  const pathname = (routeEnd === -1 ? value : value.slice(0, routeEnd)) || '/';
+
+  if (pathname.startsWith('/invite/')) {
+    return '/invite/:code';
+  }
+
+  return pathname
+    .split('/')
+    .map((segment) => {
+      let candidate = segment;
+      try {
+        candidate = decodeURIComponent(segment);
+      } catch {
+        // Keep malformed segments opaque and let the normal route boundary
+        // decide whether they are valid.
+      }
+
+      return opaquePathSegmentPatterns.some((pattern) => pattern.test(candidate))
+        ? ':id'
+        : segment;
+    })
+    .join('/');
+}
+
 function localRedirectUrl(request: NextRequest, target: string) {
   const resolved = new URL(target, request.nextUrl.origin);
   const url = request.nextUrl.clone();
@@ -283,6 +315,7 @@ function loginRedirect(request: NextRequest) {
   url.searchParams.set('redirect_to', safeRedirectTarget(request));
 
   const response = NextResponse.redirect(url);
+  response.headers.set('cache-control', 'no-store');
   response.cookies.delete(accessCookieName);
   response.cookies.delete(refreshCookieName);
 
@@ -297,7 +330,9 @@ function authenticatedRedirect(request: NextRequest, emailVerificationRequired: 
     ? registrationEmailVerificationPath(redirectTo)
     : redirectTo;
 
-  return NextResponse.redirect(localRedirectUrl(request, target));
+  const response = NextResponse.redirect(localRedirectUrl(request, target));
+  response.headers.set('cache-control', 'no-store');
+  return response;
 }
 
 function refreshSessionRedirect(request: NextRequest) {
@@ -315,19 +350,22 @@ function refreshSessionRedirect(request: NextRequest) {
     fallback.searchParams.set('redirect_to', returnTo);
     url.searchParams.set('fallback_to', `${fallback.pathname}${fallback.search}`);
   }
-  return NextResponse.redirect(url);
+  const response = NextResponse.redirect(url);
+  response.headers.set('cache-control', 'no-store');
+  return response;
 }
 
 function requestMetadata(
   request: NextRequest,
   accessState: AccessState,
   security: RequestSecurityContext,
+  accessLogPathname: string,
 ) {
   const { pathname } = request.nextUrl;
 
   return {
     method: request.method,
-    pathname,
+    pathname: accessLogPathname,
     isApi: pathname.startsWith('/api/'),
     authenticated: accessState.authenticated,
     accessAuthenticated: accessState.authenticated,
@@ -340,7 +378,68 @@ function requestMetadata(
   };
 }
 
-function browserMutationGuard(request: NextRequest) {
+function isServerActionRequest(request: NextRequest) {
+  if (request.method !== 'POST') return false;
+
+  const contentType = request.headers.get('content-type')
+    ?.split(';', 1)[0]
+    ?.trim()
+    .toLowerCase();
+  return request.headers.has('next-action')
+    || contentType === 'application/x-www-form-urlencoded'
+    || contentType === 'multipart/form-data';
+}
+
+async function serverActionBodyExceedsLimit(request: NextRequest) {
+  const contentLength = request.headers.get('content-length')?.trim();
+  if (contentLength && /^\d+$/.test(contentLength)) {
+    const declaredLength = Number(contentLength);
+    if (!Number.isSafeInteger(declaredLength) || declaredLength > serverActionBodyLimitBytes) {
+      return true;
+    }
+  }
+
+  const body = request.clone().body;
+  if (!body) return false;
+  const reader = body.getReader();
+  let total = 0;
+  let completed = false;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) {
+        completed = true;
+        return false;
+      }
+      total += value.byteLength;
+      if (total > serverActionBodyLimitBytes) return true;
+    }
+  } finally {
+    // A cloned Request body is a tee. Awaiting cancellation can wait for the
+    // untouched branch that Next still needs, so signal cancellation without
+    // coupling the policy response to downstream consumption.
+    if (!completed) void reader.cancel().catch(() => undefined);
+    reader.releaseLock();
+  }
+}
+
+async function browserMutationGuard(request: NextRequest) {
+  if (isServerActionRequest(request)) {
+    const source = validateRequestSource({
+      headers: request.headers,
+      trustedAppUrl: process.env.NEXT_PUBLIC_APP_URL,
+    });
+    if (!source.ok) return source;
+    if (await serverActionBodyExceedsLimit(request)) {
+      return {
+        ok: false,
+        reason: 'request_body_too_large',
+        status: 413,
+      } as const;
+    }
+    return { ok: true } as const;
+  }
+
   if (
     request.nextUrl.pathname === '/auth/telegram/callback'
     && request.method === 'POST'
@@ -367,6 +466,7 @@ function browserMutationGuard(request: NextRequest) {
 
 export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
+  const accessLogPathname = accessLogRouteTemplate(pathname);
   const security = requestSecurityContext(request);
   const canonicalPath = canonicalConfusableProtectedPath(pathname);
 
@@ -377,8 +477,8 @@ export async function proxy(request: NextRequest) {
     const url = request.nextUrl.clone();
     url.pathname = canonicalPath;
     logger.warn("http_request_decision", {
-      pathname,
-      canonicalPath,
+      pathname: accessLogPathname,
+      canonicalPath: accessLogRouteTemplate(canonicalPath),
       action: "redirect_confusable_path",
       status: 307,
       requestId: security.requestId,
@@ -386,7 +486,7 @@ export async function proxy(request: NextRequest) {
     }, {
       category: "http",
       source: "http.access",
-      message: `${request.method} ${pathname} -> 307 canonical protected path`,
+      message: `${request.method} ${accessLogPathname} -> 307 canonical protected path`,
     });
     return secureResponse(NextResponse.redirect(url), security);
   }
@@ -398,14 +498,14 @@ export async function proxy(request: NextRequest) {
   // destroy a valid session whenever the short-lived access cookie expires.
   const isAuthenticated = accessState.authenticated || accessState.hasRefreshToken;
   const isBootstrapAuthenticated = accessState.bootstrapAuthenticated && !accessState.fullAuthenticated;
-  const metadata = requestMetadata(request, accessState, security);
+  const metadata = requestMetadata(request, accessState, security, accessLogPathname);
   const isRoutineReadinessProbe = pathname === readinessInternalPath && request.method === 'GET';
 
   const logRequest = isRoutineReadinessProbe ? logger.debug : logger.info;
   logRequest("http_request_received", metadata, {
     category: "http",
     source: "http.access",
-    message: `${request.method} ${pathname} received`,
+    message: `${request.method} ${accessLogPathname} received`,
   });
 
   const refreshableNavigation =
@@ -428,11 +528,11 @@ export async function proxy(request: NextRequest) {
       ...metadata,
       action: "redirect_session_refresh",
       status: 307,
-      redirectTo: sessionRefreshPath,
+      redirectTo: accessLogRouteTemplate(sessionRefreshPath),
     }, {
       category: "http",
       source: "http.access",
-      message: `${request.method} ${pathname} -> 307 session refresh`,
+      message: `${request.method} ${accessLogPathname} -> 307 session refresh`,
     });
     return secureResponse(refreshSessionRedirect(request), security);
   }
@@ -461,27 +561,32 @@ export async function proxy(request: NextRequest) {
     }, {
       category: "http",
       source: "http.access",
-      message: `${request.method} ${pathname} -> allow internal service`,
+      message: `${request.method} ${accessLogPathname} -> allow internal service`,
     });
     return continueRequest(security);
   }
 
-  const csrfResult = browserMutationGuard(request);
+  const csrfResult = await browserMutationGuard(request);
 
   if (!csrfResult.ok) {
+    const oversized = csrfResult.status === 413;
     logger.warn("http_request_decision", {
       ...metadata,
-      action: "block_csrf",
+      action: oversized ? "block_oversized_mutation" : "block_csrf",
       reason: csrfResult.reason,
       status: csrfResult.status,
     }, {
       category: "http",
       source: "http.access",
-      message: `${request.method} ${pathname} -> ${csrfResult.status} ${csrfResult.reason}`,
+      message: `${request.method} ${accessLogPathname} -> ${csrfResult.status} ${csrfResult.reason}`,
     });
 
     return secureResponse(NextResponse.json(
-      { error: { code: 'FORBIDDEN', message: 'Источник запроса не разрешён.' } },
+      {
+        error: oversized
+          ? { code: 'PAYLOAD_TOO_LARGE', message: 'Размер запроса превышает допустимый предел.' }
+          : { code: 'FORBIDDEN', message: 'Источник запроса не разрешён.' },
+      },
       { status: csrfResult.status },
     ), security);
   }
@@ -500,12 +605,12 @@ export async function proxy(request: NextRequest) {
         ...metadata,
         action: "redirect_authenticated_user",
         status: 307,
-        redirectTo,
+        redirectTo: accessLogRouteTemplate(redirectTo),
         emailVerificationRequired: accessState.emailVerificationRequired,
       }, {
         category: "http",
         source: "http.access",
-        message: `${request.method} ${pathname} -> 307 redirect authenticated user`,
+        message: `${request.method} ${accessLogPathname} -> 307 redirect authenticated user`,
       });
       if (isBootstrapAuthenticated) {
         return secureResponse(
@@ -527,7 +632,7 @@ export async function proxy(request: NextRequest) {
     }, {
       category: "http",
       source: "http.access",
-      message: `${request.method} ${pathname} -> allow public`,
+      message: `${request.method} ${accessLogPathname} -> allow public`,
     });
     return continueRequest(security);
   }
@@ -549,7 +654,7 @@ export async function proxy(request: NextRequest) {
         }, {
           category: "http",
           source: "http.access",
-          message: `${request.method} ${pathname} -> 403 email not verified`,
+          message: `${request.method} ${accessLogPathname} -> 403 email not verified`,
         });
         return secureResponse(NextResponse.json(
           { error: { code: 'EMAIL_NOT_VERIFIED', message: 'Подтвердите e-mail, чтобы продолжить.' } },
@@ -566,11 +671,11 @@ export async function proxy(request: NextRequest) {
         ...metadata,
         action: "redirect_email_unverified",
         status: 307,
-        redirectTo: redirectTarget,
+        redirectTo: accessLogRouteTemplate(redirectTarget),
       }, {
         category: "http",
         source: "http.access",
-        message: `${request.method} ${pathname} -> 307 email verification required`,
+        message: `${request.method} ${accessLogPathname} -> 307 email verification required`,
       });
       return secureResponse(NextResponse.redirect(url), security);
     }
@@ -582,7 +687,7 @@ export async function proxy(request: NextRequest) {
     }, {
       category: "http",
       source: "http.access",
-      message: `${request.method} ${pathname} -> allow authenticated`,
+      message: `${request.method} ${accessLogPathname} -> allow authenticated`,
     });
     return continueRequest(security);
   }
@@ -596,7 +701,7 @@ export async function proxy(request: NextRequest) {
       }, {
         category: "http",
         source: "http.access",
-        message: `${request.method} ${pathname} -> allow bootstrap`,
+        message: `${request.method} ${accessLogPathname} -> allow bootstrap`,
       });
       return continueRequest(security);
     }
@@ -609,7 +714,7 @@ export async function proxy(request: NextRequest) {
       }, {
         category: "http",
         source: "http.access",
-        message: `${request.method} ${pathname} -> 403 passkey required`,
+        message: `${request.method} ${accessLogPathname} -> 403 passkey required`,
       });
       return secureResponse(NextResponse.json(
         { error: { code: 'PASSKEY_REQUIRED', message: 'Создайте ключ доступа, чтобы продолжить.' } },
@@ -624,11 +729,11 @@ export async function proxy(request: NextRequest) {
       ...metadata,
       action: "redirect_passkey_setup",
       status: 307,
-      redirectTo: redirectTarget,
+      redirectTo: accessLogRouteTemplate(redirectTarget),
     }, {
       category: "http",
       source: "http.access",
-      message: `${request.method} ${pathname} -> 307 passkey setup`,
+      message: `${request.method} ${accessLogPathname} -> 307 passkey setup`,
     });
     return secureResponse(NextResponse.redirect(url), security);
   }
@@ -641,7 +746,7 @@ export async function proxy(request: NextRequest) {
     }, {
       category: "http",
       source: "http.access",
-      message: `${request.method} ${pathname} -> 401 unauthorized`,
+      message: `${request.method} ${accessLogPathname} -> 401 unauthorized`,
     });
     const response = NextResponse.json(
       { error: { code: 'UNAUTHORIZED', message: 'Войдите в аккаунт, чтобы продолжить.' } },
@@ -663,11 +768,11 @@ export async function proxy(request: NextRequest) {
     ...metadata,
     action: "redirect_login",
     status: 307,
-    redirectTo: "/login",
+    redirectTo: accessLogRouteTemplate("/login"),
   }, {
     category: "http",
     source: "http.access",
-    message: `${request.method} ${pathname} -> 307 login`,
+    message: `${request.method} ${accessLogPathname} -> 307 login`,
   });
   return secureResponse(loginRedirect(request), security);
 }

@@ -185,8 +185,8 @@ function ProfilePanelContent({
       }
       showMessage(result.message, "success");
       navigateTo("/verify-email");
-    } catch (err) {
-      showMessage(err instanceof Error ? err.message : "Не удалось изменить e-mail.", "error");
+    } catch {
+      showMessage("Сеть недоступна. Не удалось изменить e-mail.", "error");
     } finally {
       resetTurnstile();
       finishPendingAction("email");
@@ -216,8 +216,8 @@ function ProfilePanelContent({
       setCurrentPassword("");
       setNewPassword("");
       showPasswordMessage(result.message, "success");
-    } catch (err) {
-      showPasswordMessage(err instanceof Error ? err.message : "Не удалось изменить пароль.", "warn");
+    } catch {
+      showPasswordMessage("Сеть недоступна. Не удалось изменить пароль.", "warn");
     } finally {
       finishPendingAction("password");
     }
@@ -378,6 +378,9 @@ function ProfilePanelContent({
             <label className="flex flex-column gap-2">
               <span className="text-sm font-medium text-700">Новый e-mail</span>
               <InputText
+                autoComplete="email"
+                maxLength={255}
+                name="email"
                 onChange={(event) => {
                   const nextEmail = event.target.value;
 
@@ -413,9 +416,12 @@ function ProfilePanelContent({
             <label className="flex flex-column gap-2">
               <span className="text-sm font-medium text-700">Текущий пароль</span>
               <Password
+                autoComplete="current-password"
                 className="w-full"
                 feedback={false}
                 inputClassName="w-full"
+                maxLength={256}
+                name="currentPassword"
                 onChange={(event) => setCurrentPassword(event.target.value)}
                 required
                 toggleMask
@@ -425,9 +431,12 @@ function ProfilePanelContent({
             <label className="flex flex-column gap-2">
               <span className="text-sm font-medium text-700">Новый пароль</span>
               <Password
+                autoComplete="new-password"
                 className="w-full"
                 inputClassName="w-full"
+                maxLength={256}
                 minLength={8}
+                name="newPassword"
                 onChange={(event) => setNewPassword(event.target.value)}
                 required
                 toggleMask

@@ -24,6 +24,7 @@ const posixShell = process.platform === "win32"
   ? ["C:/Program Files/Git/bin/sh.exe", "C:/Program Files/Git/usr/bin/sh.exe"]
       .find((candidate) => existsSync(candidate))
   : "sh";
+const shellIntegrationTimeout = process.platform === "win32" ? 45_000 : 15_000;
 
 function shellFunctionFrom(source: string, name: string) {
   const start = source.indexOf(`${name}() {`);
@@ -121,10 +122,18 @@ const validProductionEnv: Record<string, string> = {
   CLEAN_PAY_RELEASE: "release-old",
   CLEAN_PAY_REVISION: "a".repeat(40),
   POSTGRES_DB: "clean_pay",
-  POSTGRES_USER: "clean_pay",
+  POSTGRES_USER: "clean_pay_bootstrap",
   POSTGRES_PASSWORD: "pg-zdt-9QvL2xR8mT4pK7sN6cWd", // gitleaks:allow -- synthetic validator fixture
   DATABASE_URL:
-    "postgresql://clean_pay:pg-zdt-9QvL2xR8mT4pK7sN6cWd@postgres:5432/clean_pay?schema=public",
+    "postgresql://clean_pay_app:db-app-zdt-7Vr3Nm8Wp2Kq5Xs9Lc4D@postgres:5432/clean_pay?schema=public",
+  MIGRATION_DATABASE_URL:
+    "postgresql://clean_pay_migration:db-migration-zdt-4Qp8Xs2Ln7Vr5Km9Wc3H@postgres:5432/clean_pay?schema=public",
+  RETENTION_DATABASE_URL:
+    "postgresql://clean_pay_retention:db-retention-zdt-6Wm3Kq9Vr2Xs8Lc5Np7H@postgres:5432/clean_pay?schema=public",
+  HOLD_OPERATOR_DATABASE_URL:
+    "postgresql://clean_pay_hold:db-hold-zdt-9Vr4Kp7Xs2Lm8Nc5Qw3H@postgres:5432/clean_pay?schema=public",
+  CLEAN_PAY_DATABASE_ADOPT_EXISTING: "false",
+  CLEAN_PAY_DATABASE_ADOPTION_BACKUP_CONFIRMED: "false",
   REDIS_URL: "redis://redis:6379/0",
   APP_URL: "https://pay.clean-pay.dev",
   NEXT_PUBLIC_APP_URL: "https://pay.clean-pay.dev",
@@ -307,7 +316,7 @@ describe("guarded zero-downtime application rollout", () => {
     expect(mismatch.stderr).toContain(
       "legacy rollback application image does not match the running Compose image",
     );
-  });
+  }, shellIntegrationTimeout);
 
   it("keeps modern target and rollback image pairs under strict provenance preflight", () => {
     const target = shellFunction("preflight_target_images");
@@ -365,10 +374,45 @@ describe("guarded zero-downtime application rollout", () => {
 
     expect(readiness).toContain("process.env.READINESS_INTERNAL_SECRET");
     expect(readiness).toContain("docker exec \"$CANARY_NAME\" node -e");
+    expect(readiness).toContain("checks.length>0");
+    expect(readiness).toContain("!Array.isArray(body.checks)");
+    expect(readiness).toContain("check.status==='ok'");
     expect(readiness).not.toContain("$(env_value READINESS_INTERNAL_SECRET");
-    expect(stage).toContain('--env-file "$ENV_FILE"');
+    expect(stage).toContain('--env-file "$APP_ENV_FILE"');
     expect(stage).not.toMatch(/--env\s+READINESS_INTERNAL_SECRET/);
     expect(script).not.toMatch(/printf[^\n]*READINESS_INTERNAL_SECRET/);
+  });
+
+  it("gives the canary and migration assertion explicit roles and runtime hardening", () => {
+    const stage = shellFunction("stage_canary");
+    const migrationGuard = shellFunction("assert_no_pending_migrations");
+
+    for (const flag of [
+      "--read-only",
+      "--cap-drop ALL",
+      "--security-opt no-new-privileges",
+      "--pids-limit 256",
+      "--memory 1g",
+      "--cpus 1.0",
+      "--tmpfs /tmp:rw,noexec,nosuid,nodev,size=64m,mode=1777",
+      "--tmpfs /app/.next/cache:rw,noexec,nosuid,nodev,size=128m,mode=0700,uid=1001,gid=1001",
+      "--env CLEAN_PAY_RUNTIME_ROLE=application",
+    ]) {
+      expect(stage).toContain(flag);
+    }
+    for (const flag of [
+      "--read-only",
+      "--cap-drop ALL",
+      "--security-opt no-new-privileges",
+      "--pids-limit 128",
+      "--memory 1g",
+      "--cpus 1.0",
+      "--tmpfs /tmp:rw,noexec,nosuid,nodev,size=64m,mode=1777",
+      "--env CLEAN_PAY_RUNTIME_ROLE=migration",
+    ]) {
+      expect(migrationGuard).toContain(flag);
+    }
+    expect(migrationGuard).toContain("node deploy/prod/validate-env.mjs");
   });
 
   it("uses private atomic state and removes only a label-owned exact canary", () => {

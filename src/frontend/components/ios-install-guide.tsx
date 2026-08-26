@@ -2,6 +2,7 @@
 
 import Image from "next/image";
 
+import { useModalDialogFocus } from "@/frontend/hooks/use-modal-dialog-focus";
 import { getBranding } from "@/shared/branding";
 
 type IosInstallGuideProps = {
@@ -82,12 +83,15 @@ function ConfirmationPreview({ brandName }: { brandName: string }) {
 
 export function IosInstallGuide({ onClose }: IosInstallGuideProps) {
   const branding = getBranding();
+  const dialogRef = useModalDialogFocus(onClose);
 
   return (
     <div
       role="dialog"
       aria-modal="true"
       aria-labelledby="install-ios-title"
+      ref={dialogRef}
+      tabIndex={-1}
       style={{
         alignItems: "flex-end",
         background: "rgba(15, 23, 42, 0.55)",
