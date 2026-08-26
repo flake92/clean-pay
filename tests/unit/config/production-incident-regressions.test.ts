@@ -11,6 +11,24 @@ function inlineSource(sourceText: string): TransactionSourceFile[] {
 }
 
 describe("production incident regressions", () => {
+  it("uses the CommonJS-compatible Prisma client import in Node entrypoints", () => {
+    const prismaEntrypoints = globSync([
+      "deploy/prod/**/*.mjs",
+      "scripts/security/**/*.mjs",
+    ]).filter((file) => readFileSync(file, "utf8").includes("@prisma/client"));
+
+    expect(prismaEntrypoints).not.toHaveLength(0);
+    for (const file of prismaEntrypoints) {
+      const source = readFileSync(file, "utf8");
+      expect(source, file).not.toMatch(
+        /import\s*\{[^}]*\}\s*from\s*["']@prisma\/client["']/u,
+      );
+      expect(source, file).toMatch(
+        /import\s+[A-Za-z_$][\w$]*\s+from\s+["']@prisma\/client["']/u,
+      );
+    }
+  });
+
   it("detects concurrent work on one interactive Prisma transaction connection", () => {
     expect(transactionConcurrencyViolations(inlineSource(`
       prisma.$transaction(async (tx) => {
