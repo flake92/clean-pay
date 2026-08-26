@@ -13,6 +13,8 @@ readonly POSTGRES_CONTAINER="clean-pay-remnashop-postgres-${RUN_SUFFIX}"
 readonly REMNASHOP_IMAGE="clean-pay-remnashop-rehearsal:${RUN_SUFFIX}"
 readonly DATABASE_USER="remnashop"
 readonly DATABASE_PASSWORD="synthetic-rehearsal-password"
+readonly REHEARSAL_APP_CRYPT_KEY="MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=" # gitleaks:allow -- synthetic rehearsal credential
+readonly REHEARSAL_BOT_TOKEN="1234567890:ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghi" # gitleaks:allow -- synthetic rehearsal credential
 readonly SOURCE_DATABASE="remnashop_source"
 readonly ROLLBACK_DATABASE="remnashop_rollback"
 readonly LOCK_DATABASE="remnashop_lock_retry"
@@ -50,12 +52,12 @@ remnashop() {
   shift
   docker run --rm --network "$NETWORK" \
     --env APP_DOMAIN=rehearsal.invalid \
-    --env APP_CRYPT_KEY=MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY= \
+    --env APP_CRYPT_KEY="$REHEARSAL_APP_CRYPT_KEY" \
     --env WEB_ENABLED=true \
     --env APP_API_KEY=synthetic-rehearsal-public-api-key \
     --env APP_JWT_SECRET=synthetic-rehearsal-web-jwt-secret \
     --env APP_AUTH_SERVICE_KEY=synthetic-rehearsal-auth-service-key \
-    --env BOT_TOKEN=1234567890:ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghi \
+    --env BOT_TOKEN="$REHEARSAL_BOT_TOKEN" \
     --env BOT_SECRET_TOKEN=synthetic-rehearsal-webhook-token \
     --env BOT_OWNER_ID=900000000001 \
     --env BOT_SUPPORT_USERNAME=rehearsal_support \

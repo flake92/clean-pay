@@ -105,8 +105,8 @@ describe("bounded encryption rewrap", () => {
     );
   });
   it("reports, CAS-rewraps and retires key A for non-empty mixed stores", async () => {
-    const secretA = "synthetic-rotation-secret-A-4Vr8Nm2Kq7Xs5Lp9";
-    const secretB = "synthetic-rotation-secret-B-9Kq3Xs7Vr5Nm2Lp8";
+    const secretA = "synthetic-rotation-secret-A-4Vr8Nm2Kq7Xs5Lp9"; // gitleaks:allow -- synthetic test credential
+    const secretB = "synthetic-rotation-secret-B-9Kq3Xs7Vr5Nm2Lp8"; // gitleaks:allow -- synthetic test credential
     const keyA = {
       primary: { id: "shared-key", secret: secretA },
       previous: [],
@@ -319,14 +319,14 @@ describe("bounded encryption rewrap", () => {
     const keyA = {
       primary: {
         id: "primary",
-        secret: "synthetic-rotation-secret-A-4Vr8Nm2Kq7Xs5Lp9",
+        secret: "synthetic-rotation-secret-A-4Vr8Nm2Kq7Xs5Lp9", // gitleaks:allow -- synthetic test credential
       },
       previous: [],
     };
     const keyB = {
       primary: {
         id: "primary",
-        secret: "synthetic-rotation-secret-B-9Kq3Xs7Vr5Nm2Lp8",
+        secret: "synthetic-rotation-secret-B-9Kq3Xs7Vr5Nm2Lp8", // gitleaks:allow -- synthetic test credential
       },
       previous: [],
     };
@@ -443,14 +443,14 @@ describe("bounded encryption rewrap", () => {
     const keyA = {
       primary: {
         id: "shared-key",
-        secret: "synthetic-rotation-secret-A-4Vr8Nm2Kq7Xs5Lp9",
+        secret: "synthetic-rotation-secret-A-4Vr8Nm2Kq7Xs5Lp9", // gitleaks:allow -- synthetic test credential
       },
       previous: [],
     };
     const mixed = {
       primary: {
         id: "shared-key",
-        secret: "synthetic-rotation-secret-B-9Kq3Xs7Vr5Nm2Lp8",
+        secret: "synthetic-rotation-secret-B-9Kq3Xs7Vr5Nm2Lp8", // gitleaks:allow -- synthetic test credential
       },
       previous: [keyA.primary],
     };
@@ -500,9 +500,9 @@ describe("bounded encryption rewrap", () => {
     expect(encryptionKeyringFromEnvironment({
       NODE_ENV: "test",
       WEB_REFRESH_KEY_ID: "shared-key",
-      WEB_REFRESH_SECRET: "synthetic-rotation-secret-B-9Kq3Xs7Vr5Nm2Lp8",
+      WEB_REFRESH_SECRET: "synthetic-rotation-secret-B-9Kq3Xs7Vr5Nm2Lp8", // gitleaks:allow -- synthetic test credential
       WEB_REFRESH_PREVIOUS_KEYS: JSON.stringify({
-        "shared-key": "synthetic-rotation-secret-A-4Vr8Nm2Kq7Xs5Lp9",
+        "shared-key": "synthetic-rotation-secret-A-4Vr8Nm2Kq7Xs5Lp9", // gitleaks:allow -- synthetic test credential
       }),
     })).toMatchObject({
       primary: { id: "shared-key" },

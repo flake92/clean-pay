@@ -122,7 +122,7 @@ describe("security crypto helpers", () => {
 
   it("binds versioned envelopes to their key id and purpose", () => {
     const keyring = {
-      primary: { id: "key-a", secret: "synthetic-key-A-with-enough-entropy-123456" },
+      primary: { id: "key-a", secret: "synthetic-key-A-with-enough-entropy-123456" }, // gitleaks:allow -- synthetic test credential
       previous: [],
     };
     const encrypted = encryptKeyringSecret("token", keyring, "purpose-a");
