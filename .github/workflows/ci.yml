@@ -193,6 +193,8 @@ jobs:
           cache: npm
       - name: Install locked dependencies
         run: npm ci
+      - name: Generate Prisma client
+        run: npm run prisma:generate
       - name: Reproduce every reviewed PostgreSQL 17.11 public/custom catalog boundary
         env:
           DATABASE_CATALOG_ADMIN_URL: postgresql://clean_pay_bootstrap:ci-bootstrap-database-password-8Nm3Kp7Vr2Xs@127.0.0.1:55432/postgres

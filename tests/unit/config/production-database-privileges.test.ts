@@ -40,6 +40,7 @@ const guardedRetentionMigration = readFileSync(
 const provisioner = readFileSync("deploy/prod/database-role-provision.mjs", "utf8");
 const productionCompose = readFileSync("deploy/prod/docker-compose.yml", "utf8");
 const rootCompose = readFileSync("docker-compose.yml", "utf8");
+const ci = readFileSync(".github/workflows/ci.yml", "utf8");
 
 function schemaObjects() {
   const models = [...schema.matchAll(/model\s+(\w+)\s*\{([\s\S]*?)\n\}/g)]
@@ -80,6 +81,22 @@ function roleEnvironment(overrides: Record<string, string> = {}) {
 }
 
 describe("production database least-privilege contract", () => {
+  it("generates Prisma Client before the CI runtime privilege probe", () => {
+    const job = ci.slice(
+      ci.indexOf("  database-least-privilege:"),
+      ci.indexOf("\n  container-security:"),
+    );
+    const install = job.indexOf("run: npm ci");
+    const generate = job.indexOf("run: npm run prisma:generate");
+    const prepare = job.indexOf("database-role-provision.mjs prepare");
+    const runtimeProbe = job.indexOf("verify-database-runtime-privileges.mjs");
+
+    expect(install).toBeGreaterThan(-1);
+    expect(generate).toBeGreaterThan(install);
+    expect(prepare).toBeGreaterThan(generate);
+    expect(runtimeProbe).toBeGreaterThan(prepare);
+  });
+
   it("keeps the exact manifest aligned with every Prisma model, column, and enum", () => {
     const objects = schemaObjects();
     expect([...DATABASE_TABLES].sort()).toEqual(objects.models.sort());
