@@ -1,4 +1,5 @@
-import { readFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { existsSync, readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { assessReadinessResponse } from "../../../deploy/prod/readiness.mjs";
 
@@ -15,6 +16,43 @@ const readinessPrismaClient = readFileSync(
   "src/backend/database/readiness-prisma.ts",
   "utf8",
 );
+const posixShell = process.platform === "win32"
+  ? ["C:/Program Files/Git/bin/sh.exe", "C:/Program Files/Git/usr/bin/sh.exe"]
+      .find((candidate) => existsSync(candidate))
+  : "sh";
+
+function shellFunction(source: string, name: string) {
+  const start = source.indexOf(`${name}() {`);
+  expect(start, `${name} must exist`).toBeGreaterThanOrEqual(0);
+  const bodyStart = source.indexOf("\n", start) + 1;
+  const nextFunction = source.slice(bodyStart).search(/^\w+\(\) \{/m);
+  return nextFunction < 0
+    ? source.slice(start)
+    : source.slice(start, bodyStart + nextFunction);
+}
+
+function runExternalSecurityHeaderCheck(csp: string) {
+  const harness = `
+set -eu
+${shellFunction(deployScript, "verify_external_security_headers")}
+env_value() { printf '%s\\n' 'https://pay.example'; }
+curl() {
+  printf 'HTTP/2 200\\nstrict-transport-security: max-age=31536000; includeSubDomains\\ncontent-security-policy: %s\\n' "$MOCK_CSP"
+}
+die() { printf '%s\\n' "$*" >&2; exit 1; }
+verify_external_security_headers
+`;
+
+  return spawnSync(posixShell!, ["-c", harness], {
+    cwd: process.cwd(),
+    encoding: "utf8",
+    env: {
+      NODE_ENV: "test",
+      PATH: process.env.PATH ?? "",
+      MOCK_CSP: csp,
+    },
+  });
+}
 
 describe("production readiness startup gate", () => {
   it("verifies the readiness endpoint and its dependency payload", () => {
@@ -35,13 +73,31 @@ describe("production readiness startup gate", () => {
     expect(deployScript).toContain("checks.length===0");
     expect(deployScript).toContain("!Array.isArray(body.checks)");
     expect(deployScript).toContain("tr ';' '\\n'");
-    expect(deployScript).toContain('printf \'%s\' "$csp" | grep -Fiq');
+    expect(deployScript).toContain('printf \'%s\' "$script_policy" | grep -Fiq');
     const install = deployScript.slice(
       deployScript.indexOf("install_services() {"),
       deployScript.indexOf("up() {"),
     );
     expect(install.indexOf("verify_detailed_readiness\n  verify_external_security_headers"))
       .toBeGreaterThan(install.indexOf("start_verified_runtimes"));
+  });
+
+  it.skipIf(!posixShell)("scopes unsafe-inline rejection to script-src", () => {
+    const styleInline = runExternalSecurityHeaderCheck(
+      "default-src 'self'; script-src 'self' 'nonce-test-nonce'; "
+      + "style-src 'self' 'unsafe-inline'; object-src 'none'",
+    );
+    expect(styleInline.status, styleInline.stderr).toBe(0);
+    expect(styleInline.stdout).toContain("External HTTPS security headers are valid.");
+
+    const scriptInline = runExternalSecurityHeaderCheck(
+      "default-src 'self'; script-src 'self' 'nonce-test-nonce' 'unsafe-inline'; "
+      + "style-src 'self'; object-src 'none'",
+    );
+    expect(scriptInline.status).not.toBe(0);
+    expect(scriptInline.stderr).toContain(
+      "External script CSP still permits unsafe-inline.",
+    );
   });
 
   it("fails closed for malformed or degraded readiness payloads", () => {
