@@ -2,7 +2,7 @@
 
 import { createElement, type ComponentType, type ReactNode } from "react";
 import { renderToString } from "react-dom/server";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { LayoutState } from "@/frontend/types";
@@ -109,22 +109,23 @@ describe("public and authentication page shell accessibility", () => {
     expect(screen.queryByRole("img")).toBeNull();
   });
 
-  it("keeps decorative offline fallback geometry without changing hydrated dimensions", async () => {
+  it("keeps CSS-free fallback pixels while hydrating decorative semantics", () => {
     const serverMarkup = renderToString(createElement(AuthLogo, {
       src: "/logo.png",
       unoptimized: true,
     }));
-    expect(serverMarkup).toContain('alt=""');
-    expect(serverMarkup).toContain('height="14"');
-    expect(serverMarkup).toContain('width="14"');
+    expect(serverMarkup).toContain('alt="Clean Pay"');
+    expect(serverMarkup).toContain('aria-hidden="true"');
+    expect(serverMarkup).toContain('height="68"');
+    expect(serverMarkup).toContain('width="68"');
 
     const view = render(createElement(AuthLogo, { src: "/logo.png", unoptimized: true }));
     const image = view.container.querySelector("img");
     expect(image).not.toBeNull();
-    await waitFor(() => {
-      expect(image?.getAttribute("height")).toBe("68");
-      expect(image?.getAttribute("width")).toBe("68");
-    });
+    expect(image?.getAttribute("alt")).toBe("");
+    expect(image?.hasAttribute("aria-hidden")).toBe(false);
+    expect(image?.getAttribute("height")).toBe("68");
+    expect(image?.getAttribute("width")).toBe("68");
     expect(screen.queryByRole("img")).toBeNull();
   });
 
