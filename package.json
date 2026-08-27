@@ -33,6 +33,7 @@
     "test:browser": "node node_modules/playwright/cli.js test --config playwright.config.ts",
     "test:browser:journey": "node node_modules/playwright/cli.js test --config tests/browser/journeys/playwright.config.ts",
     "test:browser:journey:production-image": "node tests/browser/journeys/run-production-image-journey.mjs run",
+    "evidence:served-cabinet-assets": "node scripts/security/prove-served-cabinet-assets.mjs",
     "pretest:coverage": "npm run prisma:generate",
     "test:coverage": "node node_modules/vitest/vitest.mjs run --config config/vitest/base.mts --configLoader native --coverage",
     "pretest:coverage:frontend": "npm run prisma:generate",
