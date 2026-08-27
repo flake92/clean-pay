@@ -1,5 +1,6 @@
 import { defineConfig } from "@playwright/test";
 
+import { projectScopedPlaywrightOutputDirectory } from "../playwright-output-scope";
 import {
   journeyChromiumLaunchArgs,
   journeyConnectProxy,
@@ -14,7 +15,10 @@ const connectProxy = journeyConnectProxy(
 export default defineConfig({
   testDir: ".",
   globalSetup: "./journey-global-setup.ts",
-  outputDir: "../../../test-results/browser-journeys",
+  outputDir: projectScopedPlaywrightOutputDirectory(
+    "../../../test-results/browser-journeys",
+    process.env.CLEAN_PAY_BROWSER_PLAYWRIGHT_OUTPUT_SCOPE,
+  ),
   fullyParallel: false,
   workers: 1,
   forbidOnly: true,
