@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test";
 
 import { projectCharacterizationManifestForComparison } from "./comparison-projection";
+import { canonicalDom, sanitizeAriaUrls } from "./page-characterization";
 
 test.describe("candidate-only accessibility semantic allowlist", () => {
   test("projects only the exact skip target, decorative logos, and cabinet heading", () => {
@@ -18,9 +19,33 @@ test.describe("candidate-only accessibility semantic allowlist", () => {
     });
     expect(project(candidateSkip)).toEqual(project(baselineSkip));
 
+    for (const wrapperClass of [
+      "layout-wrapper layout-static layout-mobile-active p-ripple-disabled",
+      "layout-wrapper layout-static layout-static-inactive p-ripple-disabled",
+    ]) {
+      const baselineState = routeManifest("/tariffs", layoutDom(false, wrapperClass), {
+        ariaSnapshot: "- main:",
+      });
+      const candidateState = routeManifest("/tariffs", layoutDom(true, wrapperClass), {
+        ariaSnapshot: candidateSkip.ariaSnapshot,
+        computedStyles: [skipLinkComputedStyle()],
+        interactiveElements: [skipLinkInteractive()],
+      });
+      expect(project(candidateState), wrapperClass).toEqual(project(baselineState));
+    }
+
     for (const logo of logoCases()) {
       expect(project(logo.candidate), logo.name).toEqual(project(logo.baseline));
     }
+    const shellPair = logoCases()[1]!;
+    const realBrowserShell = structuredClone(shellPair.candidate);
+    realBrowserShell.ariaSnapshot = [
+      "- banner:",
+      '  - link "Clean Pay":',
+      '    - /url: {"origin":"<app-origin>","pathname":"/","query":[],"fragment":null}',
+      "- contentinfo: Clean Pay Версия 0.1.1",
+    ].join("\n");
+    expect(project(realBrowserShell)).toEqual(project(shellPair.baseline));
 
     const baselineHeading = routeManifest(
       "/cabinet",
@@ -88,6 +113,20 @@ test.describe("candidate-only accessibility semantic allowlist", () => {
     setDomAttribute(wrongSkipHref, "a", "href", "/support#<fragment>");
     expect(project(wrongSkipHref)).not.toEqual(project(baselineSkip));
 
+    for (const wrapperClass of [
+      "layout-wrapper layout-static layout-mobile-active p-ripple-disabled extra",
+      "layout-wrapper layout-static p-ripple-disabled layout-mobile-active",
+      "layout-wrapper layout-static layout-mobile-active layout-static-inactive p-ripple-disabled",
+      "layout-wrapper layout-overlay p-ripple-disabled",
+    ]) {
+      const wrongWrapper = routeManifest("/tariffs", layoutDom(true, wrapperClass), {
+        ariaSnapshot: candidateSkipAria("/tariffs"),
+        computedStyles: [skipLinkComputedStyle()],
+        interactiveElements: [skipLinkInteractive()],
+      });
+      expect(project(wrongWrapper), wrapperClass).not.toEqual(project(baselineSkip));
+    }
+
     const wrongSkipStyle = routeManifest("/tariffs", layoutDom(true), {
       ariaSnapshot: [
         '- link "К основному содержимому":',
@@ -103,6 +142,17 @@ test.describe("candidate-only accessibility semantic allowlist", () => {
     const wrongLogo = structuredClone(auth.candidate);
     setDomAttribute(wrongLogo, "img", "src", "/different-logo.png");
     expect(project(wrongLogo)).not.toEqual(project(auth.baseline));
+
+    const shell = logoCases()[1]!;
+    for (const ariaSnapshot of [
+      `${shell.candidate.ariaSnapshot}\n    - button "Unexpected"`,
+      shell.candidate.ariaSnapshot.replace("Версия 0.1.1", "Версия latest"),
+      shell.candidate.ariaSnapshot.replace("    - text: Clean Pay", "    - text: Different"),
+    ]) {
+      const wrongAria = structuredClone(shell.candidate);
+      wrongAria.ariaSnapshot = ariaSnapshot;
+      expect(project(wrongAria)).not.toEqual(project(shell.baseline));
+    }
 
     const baselineHeading = routeManifest(
       "/cabinet",
@@ -148,6 +198,46 @@ test.describe("candidate-only accessibility semantic allowlist", () => {
   });
 });
 
+test.describe("route-relative browser evidence", () => {
+  test("resolves fragment-only DOM links against the current route", async ({ page }) => {
+    await page.route("http://canonical.test/**", async (route) => {
+      await route.fulfill({
+        body: '<!doctype html><html><body><a href="#main-content">Skip</a></body></html>',
+        contentType: "text/html",
+      });
+    });
+    await page.goto("http://canonical.test/tariffs");
+
+    const dom = await canonicalDom(page);
+    const anchor = dom ? findDomElement(dom, "a") : null;
+    expect(anchor?.attributes?.find((entry) => entry.name === "href")?.value)
+      .toBe("/tariffs#<fragment>");
+  });
+
+  test("decodes ARIA URL scalars before route-relative canonicalization", () => {
+    const origin = "https://pay.ci.clean-pay.dev";
+    const documentUrl = `${origin}/tariffs`;
+    const snapshot = [
+      '- link "К основному содержимому":',
+      '  - /url: "#main-content"',
+    ].join("\n");
+    const expected = [
+      '- link "К основному содержимому":',
+      '  - /url: {"origin":"<app-origin>","pathname":"/tariffs","query":[],"fragment":"<sha256:0c1923dd7ec27396>"}',
+    ].join("\n");
+
+    expect(sanitizeAriaUrls(snapshot, origin, documentUrl)).toBe(expected);
+    for (const nearMiss of [
+      snapshot.replace("#main-content", "#different-target"),
+      snapshot.replace('"#main-content"', '"#main-content'),
+      snapshot.replace('"#main-content"', "42"),
+      snapshot.replace('"#main-content"', '"https://outside.invalid/main"'),
+    ]) {
+      expect(sanitizeAriaUrls(nearMiss, origin, documentUrl)).not.toBe(expected);
+    }
+  });
+});
+
 type DomNode = {
   type: "element" | "text";
   tag?: string;
@@ -178,7 +268,10 @@ function routeManifest(
   };
 }
 
-function layoutDom(candidate: boolean) {
+function layoutDom(
+  candidate: boolean,
+  wrapperClass = "layout-wrapper layout-static p-ripple-disabled",
+) {
   const children = [
     element("div", { class: "layout-main-container" }, [
       element("main", candidate
@@ -194,9 +287,17 @@ function layoutDom(candidate: boolean) {
   }
   return documentWith(element(
     "div",
-    { class: "layout-wrapper layout-static p-ripple-disabled" },
+    { class: wrapperClass },
     children,
   ));
+}
+
+function candidateSkipAria(pathname: string) {
+  return [
+    '- link "К основному содержимому":',
+    `  - /url: {"origin":"<app-origin>","pathname":"${pathname}","query":[],"fragment":"<sha256:0c1923dd7ec27396>"}`,
+    "- main:",
+  ].join("\n");
 }
 
 function logoCases() {

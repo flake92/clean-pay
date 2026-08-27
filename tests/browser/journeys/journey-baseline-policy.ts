@@ -196,9 +196,12 @@ export function projectJourneyEvidencePairBytes(
 export function projectJourneyHarEvidenceBytes(value: Uint8Array) {
   const parsed: unknown = JSON.parse(Buffer.from(value).toString("utf8"));
   const rawSource = assertSanitizedHarContract(parsed);
-  const projectedSource = JSON.parse(
-    projectJourneyEvidenceBytes(Buffer.from(JSON.stringify(rawSource))).toString("utf8"),
+  const projectedEnvelope = JSON.parse(
+    projectJourneyEvidenceBytes(Buffer.from(JSON.stringify(
+      journeyHarProjectionEnvelope(rawSource),
+    ))).toString("utf8"),
   );
+  const projectedSource = unwrapJourneyHarProjectionEnvelope(projectedEnvelope);
   return Buffer.from(`${JSON.stringify(createSanitizedHarContract(projectedSource), null, 2)}\n`);
 }
 
@@ -213,11 +216,15 @@ export function projectJourneyHarEvidencePairBytes(
     JSON.parse(Buffer.from(actualValue).toString("utf8")),
   );
   const projected = projectJourneyEvidencePairBytes(
-    Buffer.from(JSON.stringify(expectedSource)),
-    Buffer.from(JSON.stringify(actualSource)),
+    Buffer.from(JSON.stringify(journeyHarProjectionEnvelope(expectedSource))),
+    Buffer.from(JSON.stringify(journeyHarProjectionEnvelope(actualSource))),
   );
-  const expectedProjectedSource = JSON.parse(projected.expected.toString("utf8"));
-  const actualProjectedSource = JSON.parse(projected.actual.toString("utf8"));
+  const expectedProjectedSource = unwrapJourneyHarProjectionEnvelope(
+    JSON.parse(projected.expected.toString("utf8")),
+  );
+  const actualProjectedSource = unwrapJourneyHarProjectionEnvelope(
+    JSON.parse(projected.actual.toString("utf8")),
+  );
   return {
     expected: Buffer.from(`${JSON.stringify(
       createSanitizedHarContract(expectedProjectedSource),
@@ -230,6 +237,30 @@ export function projectJourneyHarEvidencePairBytes(
       2,
     )}\n`),
   };
+}
+
+function journeyHarProjectionEnvelope(source: ReturnType<typeof assertSanitizedHarContract>) {
+  return {
+    schemaVersion: 2,
+    baselineCommit: BEHAVIORAL_BASELINE_COMMIT,
+    ...source,
+  };
+}
+
+function unwrapJourneyHarProjectionEnvelope(value: unknown) {
+  if (
+    !value
+    || typeof value !== "object"
+    || Array.isArray(value)
+    || (value as Record<string, unknown>).schemaVersion !== 2
+    || (value as Record<string, unknown>).baselineCommit !== BEHAVIORAL_BASELINE_COMMIT
+  ) {
+    throw new Error("Projected journey HAR envelope is malformed.");
+  }
+  const source = { ...(value as Record<string, unknown>) };
+  delete source.schemaVersion;
+  delete source.baselineCommit;
+  return source as ReturnType<typeof assertSanitizedHarContract>;
 }
 
 export async function assertJourneyWriteAuthorized() {

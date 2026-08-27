@@ -152,7 +152,11 @@ export async function captureCharacterization(options: {
     serviceWorkerScopes: storage.serviceWorkerScopes
       .map((scope) => canonicalizeUrl(scope, applicationOrigin)),
   };
-  const sanitizedAriaSnapshot = sanitizeAriaUrls(ariaSnapshot, applicationOrigin);
+  const sanitizedAriaSnapshot = sanitizeAriaUrls(
+    ariaSnapshot,
+    applicationOrigin,
+    finalUrl,
+  );
   const serverActions = network
     .filter((entry) => entry.serverAction.present)
     .map((entry, order) => ({
@@ -307,7 +311,7 @@ export async function canonicalDom(page: Page): Promise<CanonicalDomNode | null>
     function safeUrl(value: string) {
       if (/^(?:data|blob|javascript):/i.test(value)) return "<inline-url>";
       try {
-        const parsed = new URL(value, window.location.origin);
+        const parsed = new URL(value, window.location.href);
         if (parsed.origin !== window.location.origin) return "<external-url>";
         const query = Array.from(parsed.searchParams.keys())
           .map((key) => `${encodeURIComponent(key)}=<value>`)
@@ -616,12 +620,35 @@ function normalizeCookieDomain(domain: string, applicationHostname: string) {
   return `<external-domain:${shortDigest(domain)}>`;
 }
 
-export function sanitizeAriaUrls(snapshot: string, applicationOrigin: string) {
+export function sanitizeAriaUrls(
+  snapshot: string,
+  applicationOrigin: string,
+  documentUrl: string,
+) {
   return snapshot.replace(
     /^(\s*-\s*\/url:\s*)(.+)$/gm,
-    (_line, prefix: string, rawUrl: string) => `${prefix}${JSON.stringify(
-      canonicalizeUrl(rawUrl.trim(), applicationOrigin),
-    )}`,
+    (_line, prefix: string, rawUrl: string) => {
+      const encodedUrl = rawUrl.trim();
+      let decodedUrl = encodedUrl;
+      try {
+        const parsed: unknown = JSON.parse(encodedUrl);
+        if (typeof parsed === "string") decodedUrl = parsed;
+      } catch {
+        // Preserve malformed or non-JSON values as observable input below.
+      }
+
+      let resolvedUrl = decodedUrl;
+      try {
+        resolvedUrl = new URL(decodedUrl, documentUrl).href;
+      } catch {
+        // canonicalizeUrl keeps invalid values observable via their digest.
+      }
+
+      return `${prefix}${JSON.stringify(canonicalizeUrl(
+        resolvedUrl,
+        applicationOrigin,
+      ))}`;
+    },
   );
 }
 

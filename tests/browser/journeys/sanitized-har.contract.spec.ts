@@ -5,6 +5,7 @@ import {
   createSanitizedHarContract,
   type SanitizedHarSource,
 } from "./sanitized-har";
+import { projectJourneyHarEvidencePairBytes } from "./journey-baseline-policy";
 
 test("emits an exact redacted HAR 1.2 contract", () => {
   const source = harSource();
@@ -43,6 +44,26 @@ test("rejects every HAR field that does not derive from raw redacted evidence", 
     mutate(har);
     expect(() => assertSanitizedHarContract(har)).toThrow(/do not exactly derive/);
   }
+
+  const widened = createSanitizedHarContract(harSource());
+  Object.assign(widened._cleanPay, { unexpected: true });
+  expect(() => assertSanitizedHarContract(widened)).toThrow(/malformed/);
+});
+
+test("projects exact generated static paths through the HAR envelope", () => {
+  const expected = createSanitizedHarContract(journeyHarSource(
+    "baseline0chunk.js",
+    "1".repeat(40),
+  ));
+  const actual = createSanitizedHarContract(journeyHarSource(
+    "candidate0chunk.js",
+    "2".repeat(40),
+  ));
+  const projected = projectJourneyHarEvidencePairBytes(
+    Buffer.from(JSON.stringify(expected)),
+    Buffer.from(JSON.stringify(actual)),
+  );
+  expect(projected.actual.equals(projected.expected)).toBe(true);
 });
 
 function harSource(): SanitizedHarSource {
@@ -75,6 +96,62 @@ function harSource(): SanitizedHarSource {
       }],
       serverActionCount: 1,
       serverActions: [{ order: 0, requestIndex: 0 }],
+    },
+    providerEffects: { entries: [] },
+  };
+}
+
+function journeyHarSource(chunk: string, revision: string): SanitizedHarSource {
+  return {
+    source: {
+      revision,
+      imageDigest: `sha256:${"1".repeat(64)}`,
+      imageTag: "clean-pay:test",
+      migrationImageDigest: `sha256:${"2".repeat(64)}`,
+      migrationImageTag: "clean-pay-migration:test",
+      publicBuildContract: { version: "1", sha256: "3".repeat(64) },
+      fixtureContract: { version: "journey-v5", sha256: "4".repeat(64) },
+      browser: {},
+    },
+    project: "journey-390x844",
+    journey: "public-responsive-keyboard-install-offline-support",
+    navigations: [],
+    network: {
+      requests: [{
+        index: 0,
+        method: "GET",
+        url: {
+          origin: "<app-origin>",
+          pathname: `/_next/static/chunks/${chunk}`,
+          query: [],
+          fragment: null,
+        },
+        scope: "application",
+        resourceType: "script",
+        navigation: false,
+        serverAction: { present: false, identifier: null },
+        requestHeaders: [{
+          name: "referer",
+          value: {
+            origin: "<app-origin>",
+            pathname: "/install",
+            query: [],
+            fragment: null,
+          },
+        }],
+        postData: null,
+        redirectedFrom: null,
+        response: null,
+        failure: {
+          errorText: {
+            bytes: 3,
+            sha256: "438ced67d76cf3c3bf3e9781a9640ab685b2c877f7cc93b6758cc641efd51bc6",
+          },
+        },
+        externalTransport: null,
+      }],
+      serverActionCount: 0,
+      serverActions: [],
     },
     providerEffects: { entries: [] },
   };
