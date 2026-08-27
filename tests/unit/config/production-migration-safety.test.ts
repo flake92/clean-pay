@@ -180,6 +180,15 @@ describe("production migration safety", () => {
       'test "$CLEAN_PAY_REHEARSAL_EXPECTED_REVISION" = "$CLEAN_PAY_REVISION"',
     );
     expect(cleanPayRehearsal).toContain("verify-rehearsal-migration-image.mjs");
+    expect(cleanPayRehearsal).toContain(
+      'docker image inspect "$CLEAN_PAY_REHEARSAL_EXPECTED_IMAGE_ID"',
+    );
+    expect(cleanPayRehearsal).not.toContain(
+      'docker image inspect "$CLEAN_PAY_REHEARSAL_EXTERNAL_MIGRATION_IMAGE"',
+    );
+    expect(cleanPayRehearsal).toContain(
+      'test "$MIGRATION_IMAGE" = "$CLEAN_PAY_REHEARSAL_EXPECTED_IMAGE_ID"',
+    );
     expect(cleanPayRehearsal).toContain("migration_image_owned=false");
     expect(cleanPayRehearsal).toContain('if [ "$migration_image_owned" = true ]; then');
     expect(cleanPayRehearsal).toContain(
