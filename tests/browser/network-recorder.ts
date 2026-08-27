@@ -60,20 +60,23 @@ type RequestTerminal = {
 export function recordNetwork(
   page: Page,
   applicationOrigin: string,
-  options: { fontTerminalTimeoutMs?: number } = {},
+  options: {
+    fontTerminalTimeoutMs?: number;
+    serverActionTerminalTimeoutMs?: number;
+  } = {},
 ) {
   const fontTerminalTimeoutMs = options.fontTerminalTimeoutMs ?? 5_000;
-  if (
-    !Number.isSafeInteger(fontTerminalTimeoutMs)
-    || fontTerminalTimeoutMs < 1
-    || fontTerminalTimeoutMs > 30_000
-  ) {
-    throw new Error("fontTerminalTimeoutMs must be an integer from 1 to 30000.");
-  }
+  const serverActionTerminalTimeoutMs = options.serverActionTerminalTimeoutMs ?? 5_000;
+  assertTerminalTimeout("fontTerminalTimeoutMs", fontTerminalTimeoutMs);
+  assertTerminalTimeout(
+    "serverActionTerminalTimeoutMs",
+    serverActionTerminalTimeoutMs,
+  );
   let requestIndex = 0;
   const requests = new Map<Request, NetworkManifestEntry>();
   const rawUrlByEntry = new WeakMap<NetworkManifestEntry, string>();
   const fontTerminals = new Map<Request, RequestTerminal>();
+  const serverActionTerminals = new Map<Request, RequestTerminal>();
   const responseHeaders = new Map<Request, Promise<void>>();
   const entries: NetworkManifestEntry[] = [];
   const pending: Promise<void>[] = [];
@@ -109,6 +112,9 @@ export function recordNetwork(
     entries.push(entry);
     if (isExactApplicationFontRequest(request, applicationOrigin)) {
       fontTerminals.set(request, createRequestTerminal());
+    }
+    if (isExactStartedApplicationServerAction(request, applicationOrigin)) {
+      serverActionTerminals.set(request, createRequestTerminal());
     }
     pending.push(captureBoundedHeaders(
       request.allHeaders(),
@@ -162,7 +168,14 @@ export function recordNetwork(
   };
 
   const handleRequestFinished = (request: Request) => {
-    const terminal = fontTerminals.get(request);
+    resolveTerminalAfterResponseHeaders(fontTerminals.get(request), request);
+    resolveTerminalAfterResponseHeaders(serverActionTerminals.get(request), request);
+  };
+
+  const resolveTerminalAfterResponseHeaders = (
+    terminal: RequestTerminal | undefined,
+    request: Request,
+  ) => {
     if (!terminal) return;
     const headerCapture = responseHeaders.get(request);
     if (!headerCapture) return;
@@ -177,6 +190,7 @@ export function recordNetwork(
       errorText: digestValue(failure.errorText),
     };
     fontTerminals.get(request)?.resolve();
+    serverActionTerminals.get(request)?.resolve();
   };
 
   page.on("request", handleRequest);
@@ -185,10 +199,24 @@ export function recordNetwork(
   page.on("requestfailed", handleRequestFailed);
 
   return {
+    async awaitStartedServerActions() {
+      const started = [...serverActionTerminals.values()]
+        .filter((terminal) => !terminal.settled);
+      await waitForTerminalSnapshot(
+        started,
+        serverActionTerminalTimeoutMs,
+        "application Server Action request(s)",
+      );
+    },
     async finish() {
       let terminalError: unknown;
       try {
         await waitForFontTerminals(fontTerminals, fontTerminalTimeoutMs);
+        await waitForObservedTerminals(
+          serverActionTerminals,
+          serverActionTerminalTimeoutMs,
+          "application Server Action request(s)",
+        );
       } catch (error) {
         terminalError = error;
       } finally {
@@ -217,6 +245,16 @@ export function recordNetwork(
   };
 }
 
+function assertTerminalTimeout(name: string, timeoutMs: number) {
+  if (
+    !Number.isSafeInteger(timeoutMs)
+    || timeoutMs < 1
+    || timeoutMs > 30_000
+  ) {
+    throw new Error(`${name} must be an integer from 1 to 30000.`);
+  }
+}
+
 function createRequestTerminal(): RequestTerminal {
   let complete!: () => void;
   const terminal: RequestTerminal = {
@@ -236,6 +274,18 @@ async function waitForFontTerminals(
   terminals: Map<Request, RequestTerminal>,
   timeoutMs: number,
 ) {
+  await waitForObservedTerminals(
+    terminals,
+    timeoutMs,
+    "application font request(s)",
+  );
+}
+
+async function waitForObservedTerminals(
+  terminals: Map<Request, RequestTerminal>,
+  timeoutMs: number,
+  description: string,
+) {
   const deadline = Date.now() + timeoutMs;
   while (true) {
     const pendingTerminals = [...terminals.values()]
@@ -243,28 +293,40 @@ async function waitForFontTerminals(
     if (pendingTerminals.length === 0) return;
     const remainingMs = deadline - Date.now();
     if (remainingMs <= 0) {
-      throw new Error(
-        `Network recorder timed out waiting for ${pendingTerminals.length} `
-        + "application font request(s) to reach a terminal state.",
-      );
+      throw terminalTimeoutError(pendingTerminals.length, description);
     }
-    await new Promise<void>((resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error(
-        `Network recorder timed out waiting for ${pendingTerminals.length} `
-        + "application font request(s) to reach a terminal state.",
-      )), remainingMs);
-      void Promise.all(pendingTerminals.map((terminal) => terminal.promise)).then(
-        () => {
-          clearTimeout(timer);
-          resolve();
-        },
-        (error: unknown) => {
-          clearTimeout(timer);
-          reject(error);
-        },
-      );
-    });
+    await waitForTerminalSnapshot(pendingTerminals, remainingMs, description);
   }
+}
+
+async function waitForTerminalSnapshot(
+  pendingTerminals: RequestTerminal[],
+  timeoutMs: number,
+  description: string,
+) {
+  if (pendingTerminals.length === 0) return;
+  await new Promise<void>((resolve, reject) => {
+    const timer = setTimeout(() => reject(
+      terminalTimeoutError(pendingTerminals.length, description),
+    ), timeoutMs);
+    void Promise.all(pendingTerminals.map((terminal) => terminal.promise)).then(
+      () => {
+        clearTimeout(timer);
+        resolve();
+      },
+      (error: unknown) => {
+        clearTimeout(timer);
+        reject(error);
+      },
+    );
+  });
+}
+
+function terminalTimeoutError(count: number, description: string) {
+  return new Error(
+    `Network recorder timed out waiting for ${count} ${description} `
+    + "to reach a terminal state.",
+  );
 }
 
 function isExactApplicationFontRequest(
@@ -294,6 +356,24 @@ function isExactApplicationFontRequest(
       "proxy-authorization",
       "rsc",
     ].some((name) => typeof headers[name] === "string");
+}
+
+function isExactStartedApplicationServerAction(
+  request: Request,
+  applicationOrigin: string,
+) {
+  let url: URL;
+  try {
+    url = new URL(request.url());
+  } catch {
+    return false;
+  }
+  return url.origin === applicationOrigin
+    && request.method() === "POST"
+    && request.resourceType() === "fetch"
+    && request.isNavigationRequest() === false
+    && request.redirectedFrom() === null
+    && typeof request.headers()["next-action"] === "string";
 }
 
 function captureBoundedHeaders<T>(

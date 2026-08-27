@@ -106,7 +106,12 @@ export const test = guardedTest.extend<{ journey: JourneyProbe }>({
         if (screenshots.some((screenshot) => screenshot.label === label)) {
           throw new Error(`Duplicate journey checkpoint label: ${JSON.stringify(label)}`);
         }
-        const captured = await captureCheckpoint(page, label, baseUrl.origin);
+        const captured = await captureCheckpoint(
+          page,
+          label,
+          baseUrl.origin,
+          recorder.awaitStartedServerActions,
+        );
         checkpoints.push(captured.evidence);
         screenshots.push({ label, bytes: captured.screenshot });
         return captured.evidence;
@@ -264,8 +269,15 @@ export const test = guardedTest.extend<{ journey: JourneyProbe }>({
 
 export { expect } from "@playwright/test";
 
-async function captureCheckpoint(page: Page, label: string, applicationOrigin: string) {
+async function captureCheckpoint(
+  page: Page,
+  label: string,
+  applicationOrigin: string,
+  awaitStartedServerActions: () => Promise<void>,
+) {
   await settleJourneyCapture(page);
+  await awaitStartedServerActions();
+  await settleJourneyRender(page);
   const screenshot = await captureByteIdenticalScreenshotMajority(page);
   await page.evaluate(() => document.fonts.ready);
   const [snapshot, dom, computedStyles, interactiveElements, ariaSnapshot, storage, cookies] = await Promise.all([
@@ -426,6 +438,10 @@ function requiredEnvironmentValue(name: string, pattern: RegExp) {
 async function settleJourneyCapture(page: Page) {
   await page.waitForLoadState("load");
   await page.waitForTimeout(750);
+  await settleJourneyRender(page);
+}
+
+async function settleJourneyRender(page: Page) {
   await page.evaluate(async () => {
     await document.fonts.ready;
     await new Promise<void>((resolve) => {
