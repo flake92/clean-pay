@@ -4,23 +4,54 @@ import path from "node:path";
 import { JOURNEY_SYNTHETIC_HOSTNAMES } from "./journey-network-policy.mjs";
 
 const maximumOutputBytes = 8_192;
+const defaultLifecycleBounds = Object.freeze({
+  killCloseTimeoutMs: 4_000,
+  readinessTimeoutMs: 10_000,
+  shutdownTimeoutMs: 5_000,
+  terminationGraceMs: 1_000,
+});
 
+/**
+ * @param {{
+ *   environment?: Record<string, string | undefined>,
+ *   lifecycleBounds?: {
+ *     killCloseTimeoutMs: number,
+ *     readinessTimeoutMs: number,
+ *     shutdownTimeoutMs: number,
+ *     terminationGraceMs: number,
+ *   },
+ *   listenHost: string,
+ *   listenPort: string,
+ *   repositoryRoot?: string,
+ *   spawnProcess?: (...args: any[]) => any,
+ *   targetHost: string,
+ *   targetPort: string,
+ * }} input
+ * @returns {Promise<any>}
+ */
 export function startJourneyConnectProxy({
   environment = process.env,
+  lifecycleBounds = defaultLifecycleBounds,
   listenHost,
   listenPort,
   repositoryRoot = process.cwd(),
+  spawnProcess = spawn,
   targetHost,
   targetPort,
 }) {
   assertProxyCoordinates({ listenHost, listenPort, targetHost, targetPort });
+  assertLifecycleBounds(lifecycleBounds);
+  if (typeof spawnProcess !== "function") {
+    throw new Error("Journey CONNECT proxy process factory is invalid.");
+  }
   return new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, [
+    const child = spawnProcess(process.execPath, [
       path.join(repositoryRoot, "tests", "browser", "journeys", "journey-connect-proxy.mjs"),
     ], {
       cwd: repositoryRoot,
       env: {
         ...environment,
+        CLEAN_PAY_BROWSER_CONNECT_AUTHORITY_LEDGER: "1",
         CLEAN_PAY_BROWSER_CONNECT_PROXY_BIND: listenHost,
         CLEAN_PAY_BROWSER_CONNECT_PROXY_PORT: listenPort,
         CLEAN_PAY_BROWSER_CONNECT_TARGET_HOST: targetHost,
@@ -39,6 +70,8 @@ export function startJourneyConnectProxy({
     let stdoutBuffer = "";
     let stdoutBytes = 0;
     let stoppedSettled = false;
+    let pendingStartError;
+    let terminationPromise;
     let resolveStopped;
     let rejectStopped;
     const stopped = new Promise((stoppedResolve, stoppedReject) => {
@@ -50,7 +83,14 @@ export function startJourneyConnectProxy({
     const closed = new Promise((closedResolve) => {
       resolveClosed = closedResolve;
     });
-    const handle = { child, closed, expected, stopped, stderr: () => stderr };
+    const handle = {
+      child,
+      closed,
+      expected,
+      lifecycleBounds: Object.freeze({ ...lifecycleBounds }),
+      stopped,
+      stderr: () => stderr,
+    };
     const finishStart = (operation) => {
       if (startSettled) return;
       startSettled = true;
@@ -59,16 +99,24 @@ export function startJourneyConnectProxy({
     };
     const protocolFailure = (message) => {
       const error = new Error(message);
-      if (!ready) finishStart(() => reject(error));
+      if (!ready) pendingStartError ??= error;
       if (!stoppedSettled) {
         stoppedSettled = true;
         rejectStopped(error);
       }
-      if (child.exitCode === null && child.signalCode === null) child.kill();
+      terminationPromise ??= terminateProxyChildAndAwaitClose(child, closed, lifecycleBounds)
+        .catch((terminationError) => {
+          if (!ready) {
+            finishStart(() => reject(new AggregateError(
+              [pendingStartError ?? error, terminationError],
+              "Journey CONNECT proxy readiness failure cleanup did not close.",
+            )));
+          }
+        });
     };
     const readinessTimer = setTimeout(
       () => protocolFailure("Journey CONNECT proxy readiness timed out."),
-      10_000,
+      lifecycleBounds.readinessTimeoutMs,
     );
     child.stdout.setEncoding("utf8");
     child.stderr.setEncoding("utf8");
@@ -116,7 +164,9 @@ export function startJourneyConnectProxy({
     child.once("close", (code, signal) => {
       resolveClosed({ code, signal });
       if (!ready) {
-        finishStart(() => reject(new Error("Journey CONNECT proxy exited before readiness.")));
+        finishStart(() => reject(
+          pendingStartError ?? new Error("Journey CONNECT proxy exited before readiness."),
+        ));
       }
       if (!stoppedSettled) {
         stoppedSettled = true;
@@ -138,7 +188,7 @@ export async function stopJourneyConnectProxy(handle) {
       new Promise((_, reject) => {
         timer = setTimeout(
           () => reject(new Error("Journey CONNECT proxy shutdown timed out.")),
-          5_000,
+          handle.lifecycleBounds.shutdownTimeoutMs,
         );
       }),
     ]);
@@ -153,28 +203,82 @@ export async function stopJourneyConnectProxy(handle) {
     }
     return summary;
   } catch (error) {
-    if (handle.child.exitCode === null && handle.child.signalCode === null) handle.child.kill();
+    try {
+      await terminateProxyChildAndAwaitClose(handle.child, handle.closed, handle.lifecycleBounds);
+    } catch (terminationError) {
+      throw new AggregateError(
+        [error, terminationError],
+        "Journey CONNECT proxy shutdown and bounded termination both failed.",
+      );
+    }
     throw error;
   } finally {
     clearTimeout(timer);
   }
 }
 
-export function assertJourneyConnectProxyGate(summary) {
-  if (!validStopped(summary, { listen: summary?.listen, target: summary?.target })) {
+async function terminateProxyChildAndAwaitClose(child, closed, lifecycleBounds) {
+  if (child.exitCode === null && child.signalCode === null) child.kill("SIGTERM");
+  let escalationTimer;
+  let killRetryTimer;
+  try {
+    escalationTimer = setTimeout(() => {
+      if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
+    }, lifecycleBounds.terminationGraceMs);
+    // A second bounded SIGKILL attempt is allowed, but the promise deliberately
+    // cannot reject before Node reports `close`; otherwise a caller could begin
+    // stack cleanup while a proxy still owns its loopback publication.
+    killRetryTimer = setTimeout(() => {
+      if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
+    }, lifecycleBounds.terminationGraceMs + lifecycleBounds.killCloseTimeoutMs);
+    return await closed;
+  } finally {
+    clearTimeout(escalationTimer);
+    clearTimeout(killRetryTimer);
+  }
+}
+
+function assertLifecycleBounds(value) {
+  if (!exactKeys(value, [
+    "killCloseTimeoutMs", "readinessTimeoutMs", "shutdownTimeoutMs", "terminationGraceMs",
+  ])) {
+    throw new Error("Journey CONNECT proxy lifecycle bounds are invalid.");
+  }
+  for (const [name, maximum] of Object.entries({
+    killCloseTimeoutMs: 4_000,
+    readinessTimeoutMs: 10_000,
+    shutdownTimeoutMs: 5_000,
+    terminationGraceMs: 1_000,
+  })) {
+    const duration = value[name];
+    if (!Number.isSafeInteger(duration) || duration < 1 || duration > maximum) {
+      throw new Error("Journey CONNECT proxy lifecycle bounds are invalid.");
+    }
+  }
+}
+
+export function assertJourneyConnectProxyGate(summary, expected) {
+  if (!exactKeys(expected, ["accepted", "authorityLedger", "listen", "target"])
+    || !Number.isSafeInteger(expected.accepted) || expected.accepted < 1 || expected.accepted > 16
+    || !validAuthorityLedger(expected.authorityLedger, expected.accepted)
+    || !validStopped(summary, expected)) {
     throw new Error("Journey CONNECT proxy summary is invalid.");
   }
   const counters = summary.counters;
   if (
-    counters.accepted <= 0
+    counters.accepted !== expected.accepted
     || counters.rejected !== 0
     || counters.upstreamFailures !== 0
     || counters.upstreamAttempts !== counters.upstreamConnected
     || counters.accepted !== counters.upstreamConnected
+    || JSON.stringify(summary.authorityLedger) !== JSON.stringify(expected.authorityLedger)
   ) {
     throw new Error("Journey CONNECT proxy counters rejected the fail-closed evidence gate.");
   }
-  return Object.freeze({ ...counters });
+  return Object.freeze({
+    authorityLedger: Object.freeze([...summary.authorityLedger]),
+    counters: Object.freeze({ ...counters }),
+  });
 }
 
 function assertProxyCoordinates({ listenHost, listenPort, targetHost, targetPort }) {
@@ -210,6 +314,7 @@ function validReady(value, expected) {
 function validStopped(value, expected) {
   return exactKeys(value, [
     "allowedHostCount",
+    "authorityLedger",
     "counters",
     "listen",
     "outcome",
@@ -221,6 +326,7 @@ function validStopped(value, expected) {
     && value.listen === expected.listen
     && value.target === expected.target
     && value.allowedHostCount === JOURNEY_SYNTHETIC_HOSTNAMES.length
+    && validAuthorityLedger(value.authorityLedger, value.counters?.accepted)
     && exactKeys(value.counters, [
       "accepted",
       "rejected",
@@ -229,6 +335,16 @@ function validStopped(value, expected) {
       "upstreamFailures",
     ])
     && Object.values(value.counters).every((entry) => Number.isSafeInteger(entry) && entry >= 0);
+}
+
+function validAuthorityLedger(value, expectedLength) {
+  if (!Array.isArray(value) || value.length !== expectedLength
+    || value.length < 1 || value.length > 16
+    || value.some((authority) => typeof authority !== "string"
+      || !JOURNEY_SYNTHETIC_HOSTNAMES.some((hostname) => authority === `${hostname}:443`))) {
+    return false;
+  }
+  return JSON.stringify([...value].sort()) === JSON.stringify(value);
 }
 
 function exactKeys(value, keys) {
