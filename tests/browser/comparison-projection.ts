@@ -258,12 +258,21 @@ function projectJourneyProviderReadinessNoise(manifest: Record<string, unknown>)
     isRecord(entry) && Number.isSafeInteger(entry.sequence)
   ))) return;
 
-  providerEffects.entries = providerEffects.entries
-    .filter((entry) => !isExactReadinessLedgerEntry(entry as Record<string, unknown>))
-    .map((entry, index) => ({
-      ...(entry as Record<string, unknown>),
-      sequence: index + 1,
-    }));
+  const entries = providerEffects.entries as Array<Record<string, unknown>>;
+  const retained = [];
+  for (let index = 0; index < entries.length; index += 1) {
+    const entry = entries[index]!;
+    if (isExactReadinessLedgerEntry(entry)) continue;
+    if (isExactEnrichedReadinessCycle(entries, index)) {
+      index += 6;
+      continue;
+    }
+    retained.push(entry);
+  }
+  providerEffects.entries = retained.map((entry, index) => ({
+    ...entry,
+    sequence: index + 1,
+  }));
 }
 
 function isExactReadinessLedgerEntry(entry: Record<string, unknown>) {
@@ -279,19 +288,8 @@ function isExactReadinessLedgerEntry(entry: Record<string, unknown>) {
     "sequence",
     "service",
   ];
-  const journeyKeys = [
-    ...legacyKeys,
-    "body_contract",
-    "credential_contract",
-    "idempotency_key_contract",
-  ];
   if (
-    (!hasExactKeys(entry, legacyKeys) && !(
-      hasExactKeys(entry, journeyKeys)
-      && entry.body_contract === null
-      && entry.idempotency_key_contract === null
-      && isExactReadinessCredentialContract(entry)
-    ))
+    !hasExactKeys(entry, legacyKeys)
     || !Array.isArray(entry.query_keys)
     || entry.query_keys.length !== 0
     || entry.idempotency_key_present !== false
@@ -324,6 +322,120 @@ function isExactReadinessLedgerEntry(entry: Record<string, unknown>) {
     && emptyJsonObject
     && entry.effect === "probe_contract";
   return exactRead || exactProbe;
+}
+
+function isExactEmptyJsonBodyContract(value: unknown) {
+  return isRecord(value)
+    && hasExactKeys(value, ["encoding", "value"])
+    && value.encoding === "json"
+    && isRecord(value.value)
+    && Object.keys(value.value).length === 0;
+}
+
+function isExactEnrichedReadinessCycle(
+  entries: Array<Record<string, unknown>>,
+  startIndex: number,
+) {
+  const cycle = entries.slice(startIndex, startIndex + 7);
+  if (cycle.length !== 7) return false;
+  const firstSequence = cycle[0]?.sequence;
+  if (!Number.isSafeInteger(firstSequence)) return false;
+  if (!cycle.every((entry, index) => entry.sequence === Number(firstSequence) + index)) {
+    return false;
+  }
+  const kinds = cycle.map(exactEnrichedReadinessKind);
+  return kinds.every((kind): kind is string => kind !== null)
+    && new Set(kinds).size === 7;
+}
+
+function exactEnrichedReadinessKind(entry: Record<string, unknown>) {
+  if (isExactEnrichedReadinessRead(
+    entry,
+    "remnashop",
+    "/api/v1/public/plans/public",
+    "read_public_plans",
+  )) return "plans";
+  if (isExactEnrichedReadinessRead(
+    entry,
+    "remnawave",
+    "/api/system/metadata",
+    "read_metadata",
+  )) return "metadata";
+  if (isExactEnrichedReadinessJwks(entry)) return "jwks";
+  for (const pathname of [
+    "/api/v1/public/auth/email/start",
+    "/api/v1/public/auth/identify",
+    "/api/v1/public/auth/service-session",
+    "/api/v1/public/auth/notification-preferences",
+  ]) {
+    if (isExactEnrichedReadinessProbe(entry, pathname)) return pathname;
+  }
+  return null;
+}
+
+function isExactEnrichedReadinessRead(
+  entry: Record<string, unknown>,
+  service: string,
+  pathname: string,
+  effect: string,
+) {
+  return hasExactEnrichedReadinessEnvelope(entry)
+    && entry.service === service
+    && entry.method === "GET"
+    && entry.pathname === pathname
+    && entry.body_bytes === 0
+    && entry.body_sha256 === "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    && entry.body_contract === null
+    && entry.effect === effect;
+}
+
+function isExactEnrichedReadinessJwks(entry: Record<string, unknown>) {
+  return hasExactEnrichedReadinessEnvelope(entry)
+    && entry.service === "telegram-oidc"
+    && entry.method === "GET"
+    && entry.pathname === "/.well-known/jwks.json"
+    && entry.body_bytes === 0
+    && entry.body_sha256 === "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    && entry.body_contract === null
+    && entry.effect === "jwks_read";
+}
+
+function isExactEnrichedReadinessProbe(
+  entry: Record<string, unknown>,
+  pathname: string,
+) {
+  return hasExactEnrichedReadinessEnvelope(entry)
+    && entry.service === "remnashop"
+    && entry.method === "POST"
+    && entry.pathname === pathname
+    && entry.body_bytes === 2
+    && entry.body_sha256 === "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+    && isExactEmptyJsonBodyContract(entry.body_contract)
+    && entry.effect === "probe_contract";
+}
+
+function hasExactEnrichedReadinessEnvelope(entry: Record<string, unknown>) {
+  return hasExactKeys(entry, [
+    "body_bytes",
+    "body_contract",
+    "body_sha256",
+    "credential_contract",
+    "effect",
+    "idempotency_key_contract",
+    "idempotency_key_present",
+    "idempotency_key_sha256",
+    "method",
+    "pathname",
+    "query_keys",
+    "sequence",
+    "service",
+  ])
+    && Array.isArray(entry.query_keys)
+    && entry.query_keys.length === 0
+    && entry.idempotency_key_present === false
+    && entry.idempotency_key_sha256 === null
+    && entry.idempotency_key_contract === null
+    && isExactReadinessCredentialContract(entry);
 }
 
 function isExactReadinessCredentialContract(entry: Record<string, unknown>) {
