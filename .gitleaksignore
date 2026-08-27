@@ -1,2 +1,23 @@
-b388ef7fd76e1478c7f48db6acad5fca676f8cd0:tests/unit/backend/chatwoot-identity-request-guard.test.ts:generic-api-key:116
-b388ef7fd76e1478c7f48db6acad5fca676f8cd0:tests/unit/backend/chatwoot-identity-request-guard.test.ts:generic-api-key:122
+# Exact synthetic UUIDv7 idempotency fixture introduced by the hardening commit.
+5b7d42a733147c85a810d31b4827d325e3d04462:tests/unit/backend/server-action-runtime-validation.test.ts:generic-api-key:46
+
+# Immutable browser evidence stores only SHA-256 digests of synthetic
+# idempotency keys. These exact fingerprints avoid mutating the captured bytes.
+5b7d42a733147c85a810d31b4827d325e3d04462:tests/browser/baselines/f5cb6f543d85256e7733a1ade6a4f451d86cf378-journey-v5/journey-1440x900/tariffs-payment-returns-extend-idempotency/network.har.json:generic-api-key:70016
+5b7d42a733147c85a810d31b4827d325e3d04462:tests/browser/baselines/f5cb6f543d85256e7733a1ade6a4f451d86cf378-journey-v5/journey-1440x900/tariffs-payment-returns-extend-idempotency/network.har.json:generic-api-key:70119
+5b7d42a733147c85a810d31b4827d325e3d04462:tests/browser/baselines/f5cb6f543d85256e7733a1ade6a4f451d86cf378-journey-v5/journey-1440x900/tariffs-payment-returns-extend-idempotency/network.har.json:generic-api-key:71052
+5b7d42a733147c85a810d31b4827d325e3d04462:tests/browser/baselines/f5cb6f543d85256e7733a1ade6a4f451d86cf378-journey-v5/journey-1440x900/tariffs-payment-returns-extend-idempotency/journey.json:generic-api-key:74054
+5b7d42a733147c85a810d31b4827d325e3d04462:tests/browser/baselines/f5cb6f543d85256e7733a1ade6a4f451d86cf378-journey-v5/journey-1440x900/tariffs-payment-returns-extend-idempotency/journey.json:generic-api-key:74157
+5b7d42a733147c85a810d31b4827d325e3d04462:tests/browser/baselines/f5cb6f543d85256e7733a1ade6a4f451d86cf378-journey-v5/journey-1440x900/tariffs-payment-returns-extend-idempotency/journey.json:generic-api-key:75090
+5b7d42a733147c85a810d31b4827d325e3d04462:tests/browser/baselines/f5cb6f543d85256e7733a1ade6a4f451d86cf378-journey-v5/journey-390x844/tariffs-payment-returns-extend-idempotency/network.har.json:generic-api-key:70026
+5b7d42a733147c85a810d31b4827d325e3d04462:tests/browser/baselines/f5cb6f543d85256e7733a1ade6a4f451d86cf378-journey-v5/journey-390x844/tariffs-payment-returns-extend-idempotency/network.har.json:generic-api-key:70129
+5b7d42a733147c85a810d31b4827d325e3d04462:tests/browser/baselines/f5cb6f543d85256e7733a1ade6a4f451d86cf378-journey-v5/journey-390x844/tariffs-payment-returns-extend-idempotency/network.har.json:generic-api-key:71062
+5b7d42a733147c85a810d31b4827d325e3d04462:tests/browser/baselines/f5cb6f543d85256e7733a1ade6a4f451d86cf378-journey-v5/journey-390x844/tariffs-payment-returns-extend-idempotency/journey.json:generic-api-key:74059
+5b7d42a733147c85a810d31b4827d325e3d04462:tests/browser/baselines/f5cb6f543d85256e7733a1ade6a4f451d86cf378-journey-v5/journey-390x844/tariffs-payment-returns-extend-idempotency/journey.json:generic-api-key:74162
+5b7d42a733147c85a810d31b4827d325e3d04462:tests/browser/baselines/f5cb6f543d85256e7733a1ade6a4f451d86cf378-journey-v5/journey-390x844/tariffs-payment-returns-extend-idempotency/journey.json:generic-api-key:75095
+5b7d42a733147c85a810d31b4827d325e3d04462:tests/browser/baselines/f5cb6f543d85256e7733a1ade6a4f451d86cf378-journey-v5/journey-768x1024/tariffs-payment-returns-extend-idempotency/network.har.json:generic-api-key:70141
+5b7d42a733147c85a810d31b4827d325e3d04462:tests/browser/baselines/f5cb6f543d85256e7733a1ade6a4f451d86cf378-journey-v5/journey-768x1024/tariffs-payment-returns-extend-idempotency/network.har.json:generic-api-key:70244
+5b7d42a733147c85a810d31b4827d325e3d04462:tests/browser/baselines/f5cb6f543d85256e7733a1ade6a4f451d86cf378-journey-v5/journey-768x1024/tariffs-payment-returns-extend-idempotency/network.har.json:generic-api-key:71022
+5b7d42a733147c85a810d31b4827d325e3d04462:tests/browser/baselines/f5cb6f543d85256e7733a1ade6a4f451d86cf378-journey-v5/journey-768x1024/tariffs-payment-returns-extend-idempotency/journey.json:generic-api-key:74194
+5b7d42a733147c85a810d31b4827d325e3d04462:tests/browser/baselines/f5cb6f543d85256e7733a1ade6a4f451d86cf378-journey-v5/journey-768x1024/tariffs-payment-returns-extend-idempotency/journey.json:generic-api-key:74297
+5b7d42a733147c85a810d31b4827d325e3d04462:tests/browser/baselines/f5cb6f543d85256e7733a1ade6a4f451d86cf378-journey-v5/journey-768x1024/tariffs-payment-returns-extend-idempotency/journey.json:generic-api-key:75075
