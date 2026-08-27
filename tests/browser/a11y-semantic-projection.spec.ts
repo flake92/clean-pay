@@ -57,7 +57,13 @@ test.describe("candidate-only accessibility semantic allowlist", () => {
       documentWith(element("div", { class: "card" }, [
         element("h5", {}, [text("Профиль")]),
       ])),
-      { ariaSnapshot: '- main:\n  - heading "Профиль" [level=5]' },
+      {
+        ariaSnapshot: [
+          "- main:",
+          "  - region:",
+          '    - heading "Профиль" [level=5]',
+        ].join("\n"),
+      },
     );
     const candidateHeading = routeManifest(
       "/cabinet",
@@ -65,11 +71,26 @@ test.describe("candidate-only accessibility semantic allowlist", () => {
         element("h2", { class: "text-xl" }, [text("Профиль")]),
       ])),
       {
-        ariaSnapshot: '- main:\n  - heading "Профиль" [level=2]',
+        ariaSnapshot: [
+          "- main:",
+          "  - region:",
+          '    - heading "Профиль" [level=2]',
+        ].join("\n"),
         computedStyles: [cabinetHeadingComputedStyle()],
       },
     );
     expect(project(candidateHeading)).toEqual(project(baselineHeading));
+
+    const duplicateNestedHeading = structuredClone(candidateHeading);
+    duplicateNestedHeading.ariaSnapshot += '\n    - heading "Профиль" [level=2]';
+    expect(project(duplicateNestedHeading)).not.toEqual(project(baselineHeading));
+
+    const suffixedNestedHeading = structuredClone(candidateHeading);
+    suffixedNestedHeading.ariaSnapshot = suffixedNestedHeading.ariaSnapshot.replace(
+      '[level=2]',
+      '[level=2] unexpected',
+    );
+    expect(project(suffixedNestedHeading)).not.toEqual(project(baselineHeading));
   });
 
   test("projects only exact PrimeReact and passkey accessible-name changes", () => {
