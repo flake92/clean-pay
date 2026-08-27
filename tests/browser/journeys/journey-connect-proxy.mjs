@@ -31,6 +31,11 @@ const targetPort = portValue(
   String(JOURNEY_CONNECT_TARGET_PORT),
   { allowTlsPort: true },
 );
+const emitAuthorityLedger = exactValue(
+  "CLEAN_PAY_BROWSER_CONNECT_AUTHORITY_LEDGER",
+  "0",
+  /^(?:0|1)$/,
+) === "1";
 const allowedAuthorities = new Set(
   JOURNEY_SYNTHETIC_HOSTNAMES.map((hostname) => `${hostname}:${JOURNEY_CONNECT_TARGET_PORT}`),
 );
@@ -48,6 +53,7 @@ const counters = {
   upstreamConnected: 0,
   upstreamFailures: 0,
 };
+const authorityLedger = [];
 const activeClients = new Set();
 const activeUpstreams = new Set();
 let boundListen = `${listenHost}:${configuredListenPort}`;
@@ -136,6 +142,7 @@ const server = net.createServer({ allowHalfOpen: false }, (client) => {
       upstream.cleanPaySettled = true;
       counters.accepted += 1;
       counters.upstreamConnected += 1;
+      authorityLedger.push(authority);
       client.setTimeout(ESTABLISHED_IDLE_TIMEOUT_MS, closeTunnel);
       upstream.setTimeout(ESTABLISHED_IDLE_TIMEOUT_MS, closeTunnel);
       client.write("HTTP/1.1 200 Connection Established\r\n\r\n");
@@ -246,6 +253,7 @@ function shutdown(exitCode) {
         listen: boundListen,
         target: `${targetHost}:${targetPort}`,
         allowedHostCount: JOURNEY_SYNTHETIC_HOSTNAMES.length,
+        ...(emitAuthorityLedger ? { authorityLedger: [...authorityLedger].sort() } : {}),
         counters: { ...counters },
       }, resolve);
     };
