@@ -43,7 +43,7 @@ import {
 
 const paymentCommand = {
   kind: "purchase" as const,
-  idempotencyKey: "01890f47-a7df-7c2e-8b73-5d4c7f846e12",
+  idempotencyKey: "01890f47-a7df-7c2e-8b73-5d4c7f846e12", // gitleaks:allow -- synthetic UUIDv7 fixture
   request: {
     plan_code: "basic",
     duration_days: 30,
