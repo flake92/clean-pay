@@ -33,7 +33,7 @@ describe("allowed accessibility-only semantic changes", () => {
     for (const path of [
       "src/frontend/layout/AppTopbar.tsx",
       "src/frontend/layout/AppFooter.tsx",
-      "src/frontend/components/auth-shell.tsx",
+      "src/frontend/components/auth-logo.tsx",
     ]) {
       expect(source(path), path).toContain('alt=""');
     }

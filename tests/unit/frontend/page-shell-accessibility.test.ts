@@ -1,7 +1,8 @@
 /** @vitest-environment jsdom */
 
 import { createElement, type ComponentType, type ReactNode } from "react";
-import { cleanup, render, screen } from "@testing-library/react";
+import { renderToString } from "react-dom/server";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { LayoutState } from "@/frontend/types";
@@ -72,6 +73,7 @@ vi.mock("@/frontend/components/support-panel", () => ({
 }));
 
 import { AuthShell } from "@/frontend/components/auth-shell";
+import { AuthLogo } from "@/frontend/components/auth-logo";
 import Layout from "@/frontend/layout/layout";
 import { LayoutContext } from "@/frontend/layout/context/layoutcontext";
 import LoginPage from "@/app/login/page";
@@ -104,6 +106,26 @@ describe("public and authentication page shell accessibility", () => {
     expect(screen.getAllByRole("main")).toHaveLength(1);
     expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1);
     expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("Вход");
+    expect(screen.queryByRole("img")).toBeNull();
+  });
+
+  it("keeps decorative offline fallback geometry without changing hydrated dimensions", async () => {
+    const serverMarkup = renderToString(createElement(AuthLogo, {
+      src: "/logo.png",
+      unoptimized: true,
+    }));
+    expect(serverMarkup).toContain('alt=""');
+    expect(serverMarkup).toContain('height="14"');
+    expect(serverMarkup).toContain('width="14"');
+
+    const view = render(createElement(AuthLogo, { src: "/logo.png", unoptimized: true }));
+    const image = view.container.querySelector("img");
+    expect(image).not.toBeNull();
+    await waitFor(() => {
+      expect(image?.getAttribute("height")).toBe("68");
+      expect(image?.getAttribute("width")).toBe("68");
+    });
+    expect(screen.queryByRole("img")).toBeNull();
   });
 
   it("renders page content inside one primary landmark in the application shell", () => {

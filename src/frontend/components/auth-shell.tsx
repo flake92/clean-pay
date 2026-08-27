@@ -1,9 +1,14 @@
-import Image from "next/image";
+import type { ImageProps } from "next/image";
 import Link from "next/link";
 
 import { APP_VERSION } from "@/shared/app-version";
 import { getBranding } from "@/shared/branding";
 import { ChatwootGuestBoundary } from "@/frontend/components/chatwoot-widget";
+import { AuthLogo } from "@/frontend/components/auth-logo";
+
+const AUTH_LOGO_RENDERING = {
+  unoptimized: true,
+} satisfies Pick<ImageProps, "unoptimized">;
 
 export function AuthShell({
   title,
@@ -38,13 +43,9 @@ export function AuthShell({
             >
               <div className="auth-card-content">
                 <div className="text-center mb-4">
-                  <Image
-                    alt=""
-                    className="mb-3 flex-shrink-0 clean-auth-logo"
-                    height={68}
+                  <AuthLogo
                     src={branding.logoUrl}
-                    unoptimized
-                    width={68}
+                    unoptimized={AUTH_LOGO_RENDERING.unoptimized}
                   />
                   <h1 className="text-900 text-3xl font-medium mb-2 auth-title">{title}</h1>
                   <span className="text-600 font-medium line-height-3 auth-description">{description}</span>
