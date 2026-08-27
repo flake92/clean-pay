@@ -15,9 +15,19 @@ const project = required(
   /^clean-pay-browser-journey-[a-z0-9][a-z0-9-]{5,80}$/,
 );
 const envDirectory = path.resolve(required("CLEAN_PAY_BROWSER_JOURNEY_ENV_DIR", /.+/));
-const composeFiles = [
+const journeyComposeFiles = [
   path.join(repositoryRoot, "deploy", "prod", "docker-compose.yml"),
   path.join(repositoryRoot, "tests", "browser", "journeys", "docker-compose.journey.yml"),
+];
+const publicCharacterizationComposeFiles = [
+  ...journeyComposeFiles,
+  path.join(
+    repositoryRoot,
+    "tests",
+    "browser",
+    "journeys",
+    "docker-compose.public-characterization.yml",
+  ),
 ];
 const composeEnvironment = {
   ...process.env,
@@ -59,6 +69,7 @@ const contract = JSON.parse(await readFile(
 if (
   contract?.project !== project
   || !/^[a-f0-9]{64}$/.test(contract?.publicBuildContract?.sha256 ?? "")
+  || !/^127\.0\.0\.1:\d{4,5}$/.test(contract?.publications?.app ?? "")
   || !/^127\.0\.0\.1:\d{4,5}$/.test(contract?.publications?.providerControl ?? "")
   || !/^127\.0\.0\.1:\d{4,5}$/.test(contract?.publications?.connectProxy ?? "")
   || !/^127\.0\.0\.(?:[2-9]|[1-9]\d|1\d\d|2[0-4]\d|25[0-4]):443$/
@@ -71,13 +82,19 @@ let completed = false;
 let connectProxy;
 let connectProxyCounters;
 try {
-  await compose(["--env-file", envFile, ...composeFileArgs(), "config", "--quiet"]);
-  await compose([
-    "--env-file", envFile,
-    ...composeFileArgs(),
-    "up", "--detach", "--no-build", "--wait", "--wait-timeout", "240",
-  ]);
-  await assertOwnedResources();
+  await startOwnedProject(envFile, publicCharacterizationComposeFiles);
+  const mainBrowserEnvironment = browserTestEnvironment({
+    CLEAN_PAY_BROWSER_BASE_URL: `http://${contract.publications.app}`,
+  });
+  await runPlaywright("playwright.config.ts", mainBrowserEnvironment);
+
+  // The authenticated journey has a deliberately different support/Chatwoot
+  // fixture. Recreate every owned resource so its reset ledger still starts
+  // from a pristine project and the public characterization cannot leak state.
+  await cleanupOwnedProject();
+  await assertProjectAbsent();
+
+  await startOwnedProject(envFile, journeyComposeFiles);
   const [connectProxyHost, connectProxyPort] = contract.publications.connectProxy.split(":");
   const [browserTlsHost, browserTlsPort] = contract.publications.browserTls.split(":");
   connectProxy = await startConnectProxy({
@@ -86,23 +103,17 @@ try {
     targetHost: process.env.CLEAN_PAY_BROWSER_CONNECT_TARGET_HOST?.trim() || browserTlsHost,
     targetPort: process.env.CLEAN_PAY_BROWSER_CONNECT_TARGET_PORT?.trim() || browserTlsPort,
   });
-  const testEnvironment = {
-    ...composeEnvironment,
+  const journeyBrowserEnvironment = browserTestEnvironment({
     CLEAN_PAY_BROWSER_BASE_URL: "https://pay.ci.clean-pay.dev",
     CLEAN_PAY_BROWSER_HOST_RESOLVER_IP: contract.publications.browserTls.slice(0, -4),
     CLEAN_PAY_BROWSER_CONNECT_PROXY: `http://${contract.publications.connectProxy}`,
     CLEAN_PAY_BROWSER_PROVIDER_CONTROL_URL: `http://${contract.publications.providerControl}/`,
     CLEAN_PAY_BROWSER_PUBLIC_BUILD_CONTRACT_SHA256: contract.publicBuildContract.sha256,
-  };
-  delete testEnvironment.CLEAN_PAY_UPDATE_BASELINE;
-  delete testEnvironment.CLEAN_PAY_UPDATE_JOURNEY_BASELINE;
-  delete testEnvironment.CLEAN_PAY_BROWSER_JOURNEY_PROBE;
-  delete testEnvironment.CLEAN_PAY_BROWSER_EXPECTED_CONSOLE_SHA256;
-  await run(process.execPath, [
-    path.join(repositoryRoot, "node_modules", "playwright", "cli.js"),
-    "test",
-    "--config=tests/browser/journeys/playwright.config.ts",
-  ], testEnvironment);
+  });
+  await runPlaywright(
+    "tests/browser/journeys/playwright.config.ts",
+    journeyBrowserEnvironment,
+  );
   const runningConnectProxy = connectProxy;
   connectProxy = undefined;
   const connectProxySummary = await stopConnectProxy(runningConnectProxy);
@@ -110,7 +121,7 @@ try {
   connectProxyCounters = connectProxySummary.counters;
   await run(process.execPath, [
     path.join(repositoryRoot, "tests", "browser", "journeys", "finalize-journey-baseline.mjs"),
-  ], testEnvironment);
+  ], journeyBrowserEnvironment);
   completed = true;
 } finally {
   try {
@@ -132,8 +143,18 @@ function compose(args) {
   return run("docker", ["compose", "--project-name", project, ...args], composeEnvironment);
 }
 
-function composeFileArgs() {
-  return composeFiles.flatMap((file) => ["--file", file]);
+function composeFileArgs(files) {
+  return files.flatMap((file) => ["--file", file]);
+}
+
+async function startOwnedProject(envFile, files) {
+  await compose(["--env-file", envFile, ...composeFileArgs(files), "config", "--quiet"]);
+  await compose([
+    "--env-file", envFile,
+    ...composeFileArgs(files),
+    "up", "--detach", "--no-build", "--wait", "--wait-timeout", "240",
+  ]);
+  await assertOwnedResources();
 }
 
 async function assertProjectAbsent() {
@@ -168,7 +189,7 @@ async function cleanupOwnedProject() {
   const envFile = path.join(envDirectory, ".env");
   const args = [
     ...(await readable(envFile) ? ["--env-file", envFile] : []),
-    ...composeFileArgs(),
+    ...composeFileArgs(publicCharacterizationComposeFiles),
     "down", "--volumes", "--timeout", "120",
   ];
   await compose(args);
@@ -242,6 +263,23 @@ function run(command, args, environment) {
       else reject(new Error(`${path.basename(command)} failed (${code ?? signal ?? "unknown"}).`));
     });
   });
+}
+
+function browserTestEnvironment(overrides) {
+  const environment = { ...composeEnvironment, ...overrides };
+  delete environment.CLEAN_PAY_UPDATE_BASELINE;
+  delete environment.CLEAN_PAY_UPDATE_JOURNEY_BASELINE;
+  delete environment.CLEAN_PAY_BROWSER_JOURNEY_PROBE;
+  delete environment.CLEAN_PAY_BROWSER_EXPECTED_CONSOLE_SHA256;
+  return environment;
+}
+
+function runPlaywright(config, environment) {
+  return run(process.execPath, [
+    path.join(repositoryRoot, "node_modules", "playwright", "cli.js"),
+    "test",
+    `--config=${config}`,
+  ], environment);
 }
 
 function startConnectProxy({ listenHost, listenPort, targetHost, targetPort }) {
