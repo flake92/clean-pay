@@ -40,6 +40,7 @@ const publicCharacterizationComposeFiles = [
 const composeEnvironment = {
   ...process.env,
   COMPOSE_PROJECT_NAME: project,
+  CLEAN_PAY_BROWSER_PLAYWRIGHT_OUTPUT_SCOPE: digest(project).slice(0, 16),
   CLEAN_PAY_BROWSER_CADDYFILE: path.join(repositoryRoot, "tests", "browser", "journeys", "Caddyfile"),
   CLEAN_PAY_BROWSER_PROVIDER_MOCK_FILE: path.join(repositoryRoot, "tests", "browser", "journeys", "provider-mock.mjs"),
   CLEAN_PAY_BROWSER_OIDC_MOCK_FILE: path.join(repositoryRoot, "tests", "browser", "journeys", "oidc-mock.mjs"),

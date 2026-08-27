@@ -1,5 +1,6 @@
 import { defineConfig } from "@playwright/test";
 
+import { projectScopedPlaywrightOutputDirectory } from "./tests/browser/playwright-output-scope";
 import { DETERMINISTIC_CHROMIUM_LAUNCH_ARGS } from "./tests/browser/render-policy";
 
 const configuredBaseUrl = process.env.CLEAN_PAY_BROWSER_BASE_URL?.trim();
@@ -8,7 +9,10 @@ export default defineConfig({
   testDir: "./tests/browser",
   testMatch: "**/*.spec.ts",
   testIgnore: "**/journeys/**",
-  outputDir: "test-results/browser",
+  outputDir: projectScopedPlaywrightOutputDirectory(
+    "test-results/browser",
+    process.env.CLEAN_PAY_BROWSER_PLAYWRIGHT_OUTPUT_SCOPE,
+  ),
   // Pixel and blocked-resource capture is intentionally serial. Chromium's
   // parallel GPU raster can vary antialiasing channels by 1-2 values.
   fullyParallel: false,
