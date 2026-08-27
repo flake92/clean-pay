@@ -257,7 +257,11 @@ export async function captureCharacterization(options: {
         baselineFile: path.join(baselineDirectory, "characterization.json"),
         actual: manifestBytes,
         project: projectCharacterizationManifestBytesForComparison,
-        projectPair: projectCharacterizationManifestPairBytesForComparison,
+        projectPair: (expected, actual) => (
+          projectCharacterizationManifestPairBytesForComparison(expected, actual, {
+            actualApplicationOrigin: applicationOrigin,
+          })
+        ),
       }),
       reconcileBaselineArtifact({
         baselineFile: path.join(baselineDirectory, "viewport.png"),
