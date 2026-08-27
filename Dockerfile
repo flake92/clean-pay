@@ -152,6 +152,7 @@ COPY --from=builder --chown=cleanpay:nodejs /app/node_modules/split2 ./node_modu
 COPY --from=builder --chown=cleanpay:nodejs /app/node_modules/xtend ./node_modules/xtend
 COPY --chown=cleanpay:nodejs runtime/database-pool.mjs ./runtime/database-pool.mjs
 COPY --chown=cleanpay:nodejs runtime/production-env-rules.mjs ./runtime/production-env-rules.mjs
+COPY --chown=cleanpay:nodejs deploy/prod/application-drain-preload.cjs ./deploy/prod/application-drain-preload.cjs
 COPY --chown=cleanpay:nodejs deploy/prod/start.sh ./deploy/prod/start.sh
 COPY --chown=cleanpay:nodejs deploy/prod/deploy-log.mjs ./deploy/prod/deploy-log.mjs
 COPY --chown=cleanpay:nodejs deploy/prod/database-pool.mjs ./deploy/prod/database-pool.mjs

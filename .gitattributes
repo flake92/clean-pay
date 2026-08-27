@@ -3,6 +3,7 @@
 .gitattributes text eol=lf
 .gitleaksignore text eol=lf
 *.css text eol=lf
+*.cjs text eol=lf
 *.env text eol=lf
 *.example text eol=lf
 *.js text eol=lf
