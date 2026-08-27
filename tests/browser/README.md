@@ -112,10 +112,16 @@ selection function accepts no baseline path or baseline bytes.
 This process quorum is restricted to the exact six public and eight anonymous
 protected-route GET characterizations. Before navigation it denies every
 non-GET, every `Next-Action`, and every external request except the exact
-credential-free Turnstile script GET handled by the pinned local stub. The raw
-PNG and manifest from every process are attached, as is each final console
-sidecar and a hashes-only quorum record. All three projected non-PNG manifests
-and all three exact console sidecars must agree before baseline reconciliation.
+credential-free Turnstile script GET handled by the pinned local stub. The
+guard is installed on each fresh context before its only page exists; an extra
+page, WebSocket, Service Worker, or Service-Worker-owned request is a failure.
+After capture, requests drain while the recorder remains attached, then the
+context is sealed against all new traffic and closed with a bounded checked
+teardown before baseline reconciliation. A sanitized raw guard sidecar is
+attached for every process. The raw PNG and manifest from every process are
+attached, as is each final console sidecar and a hashes-only quorum record. All
+three projected non-PNG manifests and all three exact console sidecars must
+agree before baseline reconciliation.
 Authenticated journeys are never replayed by this mechanism. There is no pixel
 tolerance, masking, channel normalization, perceptual comparison, baseline
 lookup, or retry that can turn different pixels into a match.

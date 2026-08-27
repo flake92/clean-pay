@@ -1,4 +1,4 @@
-import type { Page } from "@playwright/test";
+import type { BrowserContext, Page } from "@playwright/test";
 
 import { sha256 } from "./baseline-policy";
 
@@ -54,15 +54,17 @@ export const TURNSTILE_STUB_SOURCE = `(() => {
 
 export const TURNSTILE_STUB_SHA256 = sha256(TURNSTILE_STUB_SOURCE);
 
-export async function installDeterministicTurnstileStub(page: Page) {
-  await page.route(TURNSTILE_SCRIPT_URL, async (route) => {
+export async function installDeterministicTurnstileStub(
+  target: BrowserContext | Page,
+) {
+  await target.route(TURNSTILE_SCRIPT_URL, async (route) => {
     const request = route.request();
     if (
       request.url() !== TURNSTILE_SCRIPT_URL
       || request.method() !== "GET"
       || request.resourceType() !== "script"
     ) {
-      await route.continue();
+      await route.fallback();
       return;
     }
     await route.fulfill({

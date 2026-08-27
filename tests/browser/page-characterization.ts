@@ -3,7 +3,6 @@ import { mkdir, writeFile } from "node:fs/promises";
 
 import type {
   Page,
-  Request as PlaywrightRequest,
   TestInfo,
 } from "@playwright/test";
 
@@ -36,15 +35,12 @@ import {
   registerBaselineReconciliation,
   staticCspConsoleSidecarEvidence,
 } from "./console-policy";
-import { permitsCharacterizationReplayRequest } from "./characterization-replay-policy";
+import type { CharacterizationReplayGuard } from "./characterization-replay-policy";
 import type { CharacterizationPageQuorum } from "./fixtures";
 import {
   requireExactProcessBytesAgreement,
   selectIndependentProcessCharacterizationQuorum,
 } from "./process-quorum";
-import {
-  installDeterministicTurnstileStub,
-} from "./turnstile-stub";
 
 export type CharacterizationRoute = {
   id: string;
@@ -171,11 +167,12 @@ export async function captureCharacterization(options: {
   const baseUrl = requireBrowserBaseUrl();
   const applicationOrigin = baseUrl.origin;
   const samples: Awaited<ReturnType<typeof captureCharacterizationSample>>[] = [];
-  for (const [processIndex, page] of pages.entries()) {
+  for (const [processIndex, guardedPage] of pages.entries()) {
     const sample = await captureCharacterizationSample({
       applicationOrigin,
       baseUrl,
-      page,
+      page: guardedPage.page,
+      replayGuard: guardedPage.replayGuard,
       route,
       testInfo,
     });
@@ -215,10 +212,10 @@ export async function captureCharacterization(options: {
     }),
   ]);
 
-  registerBaselineReconciliation(pages[0], async () => {
+  registerBaselineReconciliation(pages[0].page, async () => {
     const consoleSidecars = await Promise.all(samples.map(async (sample, processIndex) => {
       const normalizedStaticCspViolations = staticCspConsoleSidecarEvidence(
-        pages[processIndex] as Page,
+        pages[processIndex]?.page as Page,
       );
       assertStaticCspSidecarContract(
         new URL(route.requestPath, applicationOrigin).pathname,
@@ -305,7 +302,7 @@ export async function captureCharacterization(options: {
       baselineFile: path.join(baselineDirectory, "console.json"),
       actual: consoleSidecar,
     });
-    await reconcileBrowserBaselineProvenance(pages[0]);
+    await reconcileBrowserBaselineProvenance(pages[0].page);
   });
 
   return {
@@ -318,12 +315,18 @@ async function captureCharacterizationSample(options: {
   applicationOrigin: string;
   baseUrl: URL;
   page: Page;
+  replayGuard: CharacterizationReplayGuard;
   route: CharacterizationRoute;
   testInfo: TestInfo;
 }) {
-  const { applicationOrigin, baseUrl, page, route, testInfo } = options;
-  await installDeterministicTurnstileStub(page);
-  const requestGuard = await installReadOnlyRequestGuard(page, applicationOrigin);
+  const {
+    applicationOrigin,
+    baseUrl,
+    page,
+    replayGuard,
+    route,
+    testInfo,
+  } = options;
   const networkRecorder = recordNetwork(page, applicationOrigin);
 
   const finalResponse = await page.goto(route.requestPath, {
@@ -360,7 +363,28 @@ async function captureCharacterizationSample(options: {
     browserStorage(page),
     navigationChain(finalResponse, applicationOrigin),
   ]);
-  const network = await networkRecorder.finish();
+  let drainFailure: unknown;
+  try {
+    await replayGuard.drain();
+  } catch (error) {
+    drainFailure = error;
+  } finally {
+    replayGuard.seal();
+  }
+  let network: Awaited<ReturnType<typeof networkRecorder.finish>>;
+  try {
+    network = await networkRecorder.finish();
+  } catch (error) {
+    if (drainFailure !== undefined) {
+      throw new AggregateError(
+        [drainFailure, error],
+        "Characterization replay drain and network recorder both failed.",
+      );
+    }
+    throw error;
+  }
+  if (drainFailure !== undefined) throw drainFailure;
+  replayGuard.assertNoViolations();
   const finalUrl = page.url();
   const viewport = page.viewportSize();
   const imageDimensions = pngDimensions(screenshot);
@@ -450,7 +474,7 @@ async function captureCharacterizationSample(options: {
     finalUrl: new URL(finalUrl),
     manifest,
     manifestBytes,
-    requestGuard,
+    replayGuard,
     screenshot,
   };
 }
@@ -500,53 +524,12 @@ function assertExactReadOnlyCharacterizationRoute(route: CharacterizationRoute) 
   }
 }
 
-async function installReadOnlyRequestGuard(page: Page, applicationOrigin: string) {
-  const blocked: Array<{
-    external: boolean;
-    method: string;
-    nextAction: boolean;
-    resourceType: string;
-  }> = [];
-  await page.route("**/*", async (route) => {
-    const request = route.request();
-    const external = requestOrigin(request) !== applicationOrigin;
-    const nextAction = typeof request.headers()["next-action"] === "string";
-    const permitted = permitsCharacterizationReplayRequest({
-      applicationOrigin,
-      headers: request.headers(),
-      method: request.method(),
-      resourceType: request.resourceType(),
-      url: request.url(),
-    });
-    if (permitted) {
-      await route.fallback();
-      return;
-    }
-    blocked.push({
-      external,
-      method: request.method(),
-      nextAction,
-      resourceType: request.resourceType(),
-    });
-    await route.abort("blockedbyclient");
-  });
-  return { blocked };
-}
-
-function requestOrigin(request: PlaywrightRequest) {
-  try {
-    return new URL(request.url()).origin;
-  } catch {
-    return "<invalid-origin>";
-  }
-}
-
 function assertReadOnlyCharacterizationSample(
   sample: Awaited<ReturnType<typeof captureCharacterizationSample>>,
 ) {
   const network = sample.manifest.network;
-  const safe = sample.requestGuard.blocked.length === 0
-    && network.serverActionCount === 0
+  sample.replayGuard.assertNoViolations();
+  const safe = network.serverActionCount === 0
     && network.serverActions.length === 0
     && network.requests.every((request) => (
       request.method === "GET"
