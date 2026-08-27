@@ -8,6 +8,10 @@ import {
   PINNED_JOURNEY_V5_FIXTURE_SHA256,
   currentJourneyFixtureContractSha256,
 } from "./journeys/journey-fixture-contract";
+import { digestValue } from "./redaction";
+
+const IMMUTABLE_PUBLIC_BASELINE_APPLICATION_ORIGIN = "http://127.0.0.1:4000";
+const VALIDATED_LOCAL_APPLICATION_HOST = "<validated-local-application-host>";
 
 const DIGEST_OF_ONE = {
   bytes: 1,
@@ -58,15 +62,16 @@ export function projectCharacterizationManifestForComparison(value: unknown) {
 }
 
 /**
- * Applies the one directional response-header exception that cannot be
- * expressed by projecting each side independently. The immutable baseline
- * disclosed the exact `Next.js` X-Powered-By value, while hardened candidates
- * omit it. Every other header value, direction, duplicate, order, or adjacent
- * response difference remains observable.
+ * Applies exceptions that require evidence from both raw sides. Local Host
+ * digests are projected only after each side proves its pinned/runtime origin;
+ * the one-directional X-Powered-By exception applies only to its exact removal.
+ * Every other header value, direction, duplicate, order, or adjacent difference
+ * remains observable.
  */
 export function projectCharacterizationManifestPairForComparison(
   expectedValue: unknown,
   actualValue: unknown,
+  options: { actualApplicationOrigin?: string } = {},
 ) {
   const fixtureContractPairIsValid = isExactJourneyFixtureContractPair(
     expectedValue,
@@ -83,6 +88,11 @@ export function projectCharacterizationManifestPairForComparison(
   }
   const expected = projectCharacterizationManifestForComparison(expectedPrepared);
   const actual = projectCharacterizationManifestForComparison(actualPrepared);
+  projectExactLocalApplicationHostPair(
+    expected,
+    actual,
+    options.actualApplicationOrigin,
+  );
   projectExactRemovedNextJsPoweredBy(expected, actual);
   if (fixtureContractPairIsValid) {
     projectExactJourneyFixtureContract(expected, actual);
@@ -503,17 +513,237 @@ export function projectCharacterizationManifestBytesForComparison(
 export function projectCharacterizationManifestPairBytesForComparison(
   expectedValue: Uint8Array,
   actualValue: Uint8Array,
+  options: { actualApplicationOrigin?: string } = {},
 ) {
   const expectedParsed: unknown = JSON.parse(Buffer.from(expectedValue).toString("utf8"));
   const actualParsed: unknown = JSON.parse(Buffer.from(actualValue).toString("utf8"));
   const projected = projectCharacterizationManifestPairForComparison(
     expectedParsed,
     actualParsed,
+    options,
   );
   return {
     expected: Buffer.from(`${JSON.stringify(projected.expected, null, 2)}\n`),
     actual: Buffer.from(`${JSON.stringify(projected.actual, null, 2)}\n`),
   };
+}
+
+function projectExactLocalApplicationHostPair(
+  expected: unknown,
+  actual: unknown,
+  actualApplicationOrigin: string | undefined,
+) {
+  const actualHost = exactIsolatedLocalApplicationHost(actualApplicationOrigin);
+  if (
+    !actualHost
+    || !isExactPublicCharacterizationPair(expected, actual)
+  ) {
+    return;
+  }
+
+  const expectedNetwork = (expected as Record<string, unknown>).network as Record<string, unknown>;
+  const actualNetwork = (actual as Record<string, unknown>).network as Record<string, unknown>;
+  const expectedRequests = expectedNetwork.requests as unknown[];
+  const actualRequests = actualNetwork.requests as unknown[];
+  const validatedHeaders: Array<{
+    expected: Record<string, unknown>;
+    actual: Record<string, unknown>;
+  }> = [];
+
+  for (const [position, expectedRequestValue] of expectedRequests.entries()) {
+    const actualRequestValue = actualRequests[position];
+    if (!isRecord(expectedRequestValue) || !isRecord(actualRequestValue)) return;
+    const expectedHeaders = expectedRequestValue.requestHeaders;
+    const actualHeaders = actualRequestValue.requestHeaders;
+    if (!Array.isArray(expectedHeaders) || !Array.isArray(actualHeaders)) return;
+
+    const expectedHostHeaders = namedHeaders(expectedHeaders, "host");
+    const actualHostHeaders = namedHeaders(actualHeaders, "host");
+    if (expectedHostHeaders.length === 0 && actualHostHeaders.length === 0) continue;
+    if (
+      expectedHostHeaders.length !== 1
+      || actualHostHeaders.length !== 1
+      || !isExactApplicationRequestPair(expectedRequestValue, actualRequestValue)
+    ) {
+      return;
+    }
+
+    const expectedHeader = expectedHostHeaders[0];
+    const actualHeader = actualHostHeaders[0];
+    if (
+      !isExactSanitizedHeader(
+        expectedHeader,
+        "host",
+        digestValue(new URL(IMMUTABLE_PUBLIC_BASELINE_APPLICATION_ORIGIN).host),
+      )
+      || !isExactSanitizedHeader(actualHeader, "host", digestValue(actualHost))
+      || !headersMatchAfterValidatedHost(
+        expectedHeaders,
+        actualHeaders,
+        expectedHeader,
+        actualHeader,
+      )
+    ) {
+      return;
+    }
+    validatedHeaders.push({ expected: expectedHeader, actual: actualHeader });
+  }
+
+  for (const pair of validatedHeaders) {
+    pair.expected.value = VALIDATED_LOCAL_APPLICATION_HOST;
+    pair.actual.value = VALIDATED_LOCAL_APPLICATION_HOST;
+  }
+}
+
+function isExactPublicCharacterizationPair(expected: unknown, actual: unknown) {
+  if (!isRecord(expected) || !isRecord(actual)) return false;
+  if (
+    !isExactPublicCharacterizationEnvelope(expected)
+    || !isExactPublicCharacterizationEnvelope(actual)
+    || expected.project !== actual.project
+    || !sameJson(expected.route, actual.route)
+  ) {
+    return false;
+  }
+  const expectedNetwork = expected.network as Record<string, unknown>;
+  const actualNetwork = actual.network as Record<string, unknown>;
+  return (expectedNetwork.requests as unknown[]).length
+    === (actualNetwork.requests as unknown[]).length;
+}
+
+function isExactPublicCharacterizationEnvelope(value: Record<string, unknown>) {
+  if (
+    value.schemaVersion !== 1
+    || value.baselineCommit !== "f5cb6f543d85256e7733a1ade6a4f451d86cf378"
+    || typeof value.project !== "string"
+    || !/^chromium-(?:390x844|768x1024|1440x900)$/.test(value.project)
+    || !isRecord(value.route)
+    || !hasExactKeys(value.route, [
+      "final",
+      "finalStatus",
+      "id",
+      "kind",
+      "redirects",
+      "requested",
+    ])
+    || !isRecord(value.network)
+    || !hasExactKeys(value.network, [
+      "requests",
+      "serverActionCount",
+      "serverActions",
+    ])
+  ) {
+    return false;
+  }
+  return Array.isArray(value.network.requests)
+    && Array.isArray(value.network.serverActions)
+    && Number.isSafeInteger(value.network.serverActionCount);
+}
+
+function exactIsolatedLocalApplicationHost(value: string | undefined) {
+  if (
+    typeof value !== "string"
+    || !/^http:\/\/127\.0\.0\.1:[1-9]\d{0,4}$/.test(value)
+    || value === IMMUTABLE_PUBLIC_BASELINE_APPLICATION_ORIGIN
+  ) {
+    return null;
+  }
+  try {
+    const parsed = new URL(value);
+    if (
+      parsed.origin !== value
+      || parsed.protocol !== "http:"
+      || parsed.hostname !== "127.0.0.1"
+      || !parsed.port
+      || Number(parsed.port) > 65_535
+      || parsed.username
+      || parsed.password
+      || parsed.pathname !== "/"
+      || parsed.search
+      || parsed.hash
+    ) {
+      return null;
+    }
+    return parsed.host;
+  } catch {
+    return null;
+  }
+}
+
+function isExactApplicationRequestPair(
+  expected: Record<string, unknown>,
+  actual: Record<string, unknown>,
+) {
+  const requestKeys = [
+    "externalTransport",
+    "failure",
+    "index",
+    "method",
+    "navigation",
+    "postData",
+    "redirectedFrom",
+    "requestHeaders",
+    "resourceType",
+    "response",
+    "scope",
+    "serverAction",
+    "url",
+  ];
+  if (
+    !hasExactKeys(expected, requestKeys)
+    || !hasExactKeys(actual, requestKeys)
+    || expected.scope !== "application"
+    || actual.scope !== "application"
+    || !isExactApplicationUrl(expected.url)
+    || !isExactApplicationUrl(actual.url)
+  ) {
+    return false;
+  }
+  return equalExceptKeys(expected, actual, ["requestHeaders", "response"]);
+}
+
+function isExactApplicationUrl(value: unknown) {
+  return isRecord(value)
+    && hasExactKeys(value, ["fragment", "origin", "pathname", "query"])
+    && value.origin === "<app-origin>"
+    && typeof value.pathname === "string"
+    && value.pathname.startsWith("/")
+    && Array.isArray(value.query)
+    && (value.fragment === null || typeof value.fragment === "string");
+}
+
+function namedHeaders(headers: unknown[], name: string) {
+  return headers.filter(
+    (header): header is Record<string, unknown> => (
+      isRecord(header) && header.name === name
+    ),
+  );
+}
+
+function isExactSanitizedHeader(
+  value: Record<string, unknown>,
+  name: string,
+  digest: { bytes: number; sha256: string },
+) {
+  return hasExactKeys(value, ["name", "value"])
+    && value.name === name
+    && isExactDigest(value.value, digest);
+}
+
+function headersMatchAfterValidatedHost(
+  expectedHeaders: unknown[],
+  actualHeaders: unknown[],
+  expectedHost: Record<string, unknown>,
+  actualHost: Record<string, unknown>,
+) {
+  if (expectedHeaders.length !== actualHeaders.length) return false;
+  const expectedComparable = expectedHeaders.map((header) => (
+    header === expectedHost ? { name: "host", value: VALIDATED_LOCAL_APPLICATION_HOST } : header
+  ));
+  const actualComparable = actualHeaders.map((header) => (
+    header === actualHost ? { name: "host", value: VALIDATED_LOCAL_APPLICATION_HOST } : header
+  ));
+  return sameJson(expectedComparable, actualComparable);
 }
 
 function projectExactRemovedNextJsPoweredBy(expected: unknown, actual: unknown) {
@@ -583,10 +813,19 @@ function equalExceptKey(
   right: Record<string, unknown>,
   excludedKey: string,
 ) {
-  const withoutExcludedKey = (value: Record<string, unknown>) => Object.fromEntries(
-    Object.entries(value).filter(([key]) => key !== excludedKey),
+  return equalExceptKeys(left, right, [excludedKey]);
+}
+
+function equalExceptKeys(
+  left: Record<string, unknown>,
+  right: Record<string, unknown>,
+  excludedKeys: string[],
+) {
+  const excluded = new Set(excludedKeys);
+  const withoutExcludedKeys = (value: Record<string, unknown>) => Object.fromEntries(
+    Object.entries(value).filter(([key]) => !excluded.has(key)),
   );
-  return JSON.stringify(withoutExcludedKey(left)) === JSON.stringify(withoutExcludedKey(right));
+  return sameJson(withoutExcludedKeys(left), withoutExcludedKeys(right));
 }
 
 function projectNetwork(manifest: Record<string, unknown>) {
