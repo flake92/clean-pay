@@ -4,6 +4,8 @@ import path from "node:path";
 
 import { chromium } from "playwright";
 
+import { validateProductionImageAssetAttestation } from "../../../scripts/security/prove-served-cabinet-assets.mjs";
+
 import {
   journeyChromiumLaunchArgs,
   journeyConnectProxy,
@@ -14,11 +16,15 @@ import {
   stopJourneyConnectProxy,
 } from "./journey-connect-proxy-controller.mjs";
 import { currentJourneyFixtureContractSha256Async } from "./journey-fixture-manifest.mjs";
-import { attestJourneyComposeRuntime } from "./journey-compose-runtime-attestation.mjs";
+import {
+  withJourneyOwnedStackPair,
+} from "./journey-owned-stack-orchestrator.mjs";
 import {
   assertProviderOverlapRedirect,
   classifyProviderOverlapBrowserRequest,
+  createProviderOverlapStaticAssetContract,
   finalizeProviderOverlapBrowserContract,
+  finalizeProviderOverlapHistoryContract,
 } from "./provider-overlap-browser-contract.mjs";
 import {
   PROVIDER_OVERLAP_ACTION,
@@ -50,27 +56,56 @@ try {
   const baselineInput = await readStackInput("baseline");
   const candidateInput = await readStackInput("candidate");
   assertDistinctStackInputs(baselineInput, candidateInput);
-  const [baselinePreflight, candidatePreflight] = await Promise.all([
-    preflightStack(baselineInput, fixtureContractSha256),
-    preflightStack(candidateInput, fixtureContractSha256),
-  ]);
-  assertDualPreflight(baselinePreflight, candidatePreflight);
-  const proxyHandles = await startBothConnectProxies([baselineInput, candidateInput]);
-  let runs;
-  let proxySummaries;
-  try {
-    runs = await Promise.all([
-      proveStack(baselineInput, baselinePreflight, playwrightVersion),
-      proveStack(candidateInput, candidatePreflight, playwrightVersion),
+  const proofSession = await withJourneyOwnedStackPair({
+    baseline: ownedStackInput(baselineInput),
+    candidate: ownedStackInput(candidateInput),
+  }, async (owned) => {
+    const preflightSettlements = await Promise.all([
+      settleEvidence(preflightStack(
+        baselineInput,
+        fixtureContractSha256,
+        owned.baseline.runtime,
+        owned.baseline.inputReceipt,
+      )),
+      settleEvidence(preflightStack(
+        candidateInput,
+        fixtureContractSha256,
+        owned.candidate.runtime,
+        owned.candidate.inputReceipt,
+      )),
     ]);
-  } finally {
-    proxySummaries = await stopBothConnectProxies(proxyHandles);
-  }
-  const [baseline, candidate] = runs.map((run, index) => createProviderOverlapStackReport({
-    ...run,
-    connectProxyCounters: assertJourneyConnectProxyGate(proxySummaries[index]),
-  }));
-  const document = createDualProviderOverlapProof(baseline, candidate);
+    if (preflightSettlements.some(({ status }) => status === "rejected")) {
+      throw new Error("Both dual-image preflights must settle before verifier-owned cleanup.");
+    }
+    const [baselinePreflight, candidatePreflight] = preflightSettlements
+      .map(({ value }) => value);
+    assertDualPreflight(baselinePreflight, candidatePreflight);
+    const proxyHandles = await startBothConnectProxies([baselineInput, candidateInput]);
+    let runSettlements;
+    let proxySummaries;
+    try {
+      runSettlements = await Promise.all([
+        settleEvidence(proveStack(baselineInput, baselinePreflight, playwrightVersion)),
+        settleEvidence(proveStack(candidateInput, candidatePreflight, playwrightVersion)),
+      ]);
+    } finally {
+      proxySummaries = await stopBothConnectProxies(proxyHandles);
+    }
+    if (runSettlements.some(({ status }) => status === "rejected")) {
+      throw new Error("Both concurrent dual-image proofs must settle before exact cleanup.");
+    }
+    const runs = runSettlements.map(({ value }) => value);
+    const [baseline, candidate] = runs.map((run, index) => createProviderOverlapStackReport({
+      ...run,
+      connectProxyCounters: assertJourneyConnectProxyGate(proxySummaries[index]),
+    }));
+    return Object.freeze({ baseline, candidate });
+  });
+  const document = createDualProviderOverlapProof(
+    proofSession.value.baseline,
+    proofSession.value.candidate,
+    proofSession.cleanup,
+  );
   const bytes = Buffer.from(`${JSON.stringify(document, null, 2)}\n`, "utf8");
   await writeFile(outputPath, bytes, { flag: "wx", mode: 0o600 });
   await chmod(outputPath, 0o600).catch(() => undefined);
@@ -118,6 +153,29 @@ async function readStackInput(role) {
     `--${role}-migration-image-digest`,
     /^sha256:[a-f0-9]{64}$/,
   );
+  const assetAttestationPath = await exactExternalFile(
+    requiredArgument(argumentsByName, `--${role}-asset-attestation`, /.+/),
+    `${role} production image asset attestation`,
+  );
+  const assetAttestationDocument = await readBoundedJson(
+    assetAttestationPath,
+    32 * 1024 * 1024,
+    `${role} production image asset attestation`,
+  );
+  const assetAttestation = validateProductionImageAssetAttestation(
+    assetAttestationDocument,
+    {
+      fixtureContract: {
+        version: "journey-v5",
+        sha256: contract.fixtureContract.sha256,
+      },
+      imageDigest: expectedImageDigest,
+      platform: parseAssetPlatform(assetAttestationDocument),
+      publicBuildContract: contract.publicBuildContract,
+      revision: contract.revision,
+    },
+    role,
+  );
   return {
     role,
     contract,
@@ -125,6 +183,8 @@ async function readStackInput(role) {
     resolverIp,
     expectedImageDigest,
     expectedMigrationImageDigest,
+    assetAttestationPath,
+    staticAssetContract: createProviderOverlapStaticAssetContract(assetAttestation),
     contractPath,
     journeyContractSha256: sha256(contractBytes),
   };
@@ -144,6 +204,7 @@ async function proveStack(input, preflight, playwrightVersion) {
     input.resolverIp,
     `http://${input.contract.publications.connectProxy}`,
     playwrightVersion,
+    input.staticAssetContract,
     async () => {
       const armed = await controlJson(input.controlUrl, "/__inject", {
         method: "POST",
@@ -177,7 +238,13 @@ async function proveStack(input, preflight, playwrightVersion) {
   };
 }
 
-async function exerciseCabinet(resolverIp, connectProxyUrl, playwrightVersion, armOverlap) {
+async function exerciseCabinet(
+  resolverIp,
+  connectProxyUrl,
+  playwrightVersion,
+  staticAssetContract,
+  armOverlap,
+) {
   const maximumUnexpectedEvents = 32;
   const browser = await chromium.launch({
     headless: true,
@@ -194,7 +261,44 @@ async function exerciseCabinet(resolverIp, connectProxyUrl, playwrightVersion, a
       ignoreHTTPSErrors: true,
       serviceWorkers: "block",
     });
+    const historyRecords = [];
+    let historyOverflow = false;
+    await context.exposeBinding("__cleanPayProviderHistory", ({ frame }, record) => {
+      if (frame !== frame.page().mainFrame()) {
+        historyOverflow = true;
+        return;
+      }
+      if (historyRecords.length >= 128) {
+        historyOverflow = true;
+        return;
+      }
+      historyRecords.push(record);
+    });
+    await context.addInitScript(() => {
+      const emit = (kind) => {
+        void globalThis.__cleanPayProviderHistory({ kind, url: location.href });
+      };
+      for (const kind of ["pushState", "replaceState"]) {
+        const original = history[kind].bind(history);
+        history[kind] = (...args) => {
+          const result = original(...args);
+          emit(kind);
+          return result;
+        };
+      }
+      addEventListener("hashchange", () => emit("hashchange"));
+      addEventListener("popstate", () => emit("popstate"));
+      emit("document");
+    });
     const page = await context.newPage();
+    page.on("framenavigated", (frame) => {
+      if (frame !== page.mainFrame()) return;
+      if (historyRecords.length >= 128) {
+        historyOverflow = true;
+        return;
+      }
+      historyRecords.push({ kind: "frame-navigation", url: frame.url() });
+    });
     const unexpectedPages = [];
     const unexpectedConsole = [];
     const unexpectedPageErrors = [];
@@ -266,7 +370,7 @@ async function exerciseCabinet(resolverIp, connectProxyUrl, playwrightVersion, a
           resourceType: request.resourceType(),
           isNavigation: request.isNavigationRequest(),
           isMainFrame: request.frame() === page.mainFrame(),
-        }, { cabinetDocumentAllowed });
+        }, { cabinetDocumentAllowed, staticAssetContract });
         if (classification.key === "app-cabinet-document") {
           if (cabinetDocumentConsumed) {
             throw new Error("Synthetic browser requested the cabinet document more than once.");
@@ -333,6 +437,9 @@ async function exerciseCabinet(resolverIp, connectProxyUrl, playwrightVersion, a
     if (unexpectedWebSocketCount > 0 || unexpectedServiceWorkerCount > 0) {
       throw new Error("Synthetic browser opened an unexpected WebSocket or service worker.");
     }
+    await page.evaluate(() => new Promise((resolve) => setTimeout(resolve, 0)));
+    if (historyOverflow) throw new Error("Synthetic browser history ledger overflowed.");
+    const historyContract = finalizeProviderOverlapHistoryContract(historyRecords);
     if (
       unexpectedConsole.length > 0
       || unexpectedPageErrors.length > 0
@@ -346,6 +453,7 @@ async function exerciseCabinet(resolverIp, connectProxyUrl, playwrightVersion, a
     const requestContract = await finishBrowserRequestContract(
       browserRequests,
       browserRequestByIdentity,
+      staticAssetContract,
     );
     return {
       browser: {
@@ -366,6 +474,14 @@ async function exerciseCabinet(resolverIp, connectProxyUrl, playwrightVersion, a
         unexpectedPageErrorCount: unexpectedPageErrors.length,
         requestCount: requestContract.requestCount,
         requestContractSha256: requestContract.requestContractSha256,
+        staticLoadGraph: requestContract.staticLoadGraph,
+        staticLoadGraphContractSha256: requestContract.staticLoadGraphContractSha256,
+        staticRequestContractSha256: requestContract.staticRequestContractSha256,
+        staticRequestCount: requestContract.staticRequestCount,
+        staticRequestLedger: requestContract.staticRequestLedger,
+        historyContractSha256: historyContract.historyContractSha256,
+        historyCount: historyContract.historyCount,
+        historyLedger: historyContract.historyLedger,
       },
     };
   } finally {
@@ -373,21 +489,14 @@ async function exerciseCabinet(resolverIp, connectProxyUrl, playwrightVersion, a
   }
 }
 
-async function preflightStack(input, fixtureContractSha256) {
+async function preflightStack(input, fixtureContractSha256, composeRuntime, inputReceipt) {
   if (
     input.contract.fixtureContract.domain !== "clean-pay-browser-journey-fixture-v5"
     || input.contract.fixtureContract.sha256 !== fixtureContractSha256
   ) {
     throw new Error(`${input.role} live stack contract is not bound to the current fixture bytes.`);
   }
-  const composeRuntime = await attestJourneyComposeRuntime({
-    repositoryRoot,
-    contractPath: input.contractPath,
-    contract: input.contract,
-    expectedApplicationImageDigest: input.expectedImageDigest,
-    expectedMigrationImageDigest: input.expectedMigrationImageDigest,
-    runDocker: docker,
-  });
+  assertOwnedInputReceipt(composeRuntime, inputReceipt, input.role, input.contract.project);
   const serviceNames = [
     "app",
     "browser-provider-mock",
@@ -442,28 +551,72 @@ async function preflightStack(input, fixtureContractSha256) {
       publicationsSha256: sha256(JSON.stringify(input.contract.publications)),
       serviceIdentitySha256: composeRuntime.serviceIdentitySha256,
       fixtureMountContractSha256: composeRuntime.fixtureMountContractSha256,
+      generatedEnvironmentDirectorySha256:
+        inputReceipt.generatedEnvironmentDirectorySha256,
+      ownedInputReceiptSha256: sha256(JSON.stringify(inputReceipt)),
       syntheticEnvironmentContractSha256,
       composeRuntimeContractSha256: composeRuntime.composeRuntimeContractSha256,
+      oneShotLifecycleContractSha256: composeRuntime.oneShotLifecycleContractSha256,
+      staticAssetAttestationSha256: input.staticAssetContract.attestationSha256,
+      staticAssetInventorySha256: input.staticAssetContract.inventorySha256,
+      syntheticRoleEnvironmentContractSha256:
+        composeRuntime.syntheticRoleEnvironmentContractSha256,
+      syntheticRoleEnvironmentPolicySha256:
+        composeRuntime.syntheticRoleEnvironmentPolicySha256,
     }),
   });
 }
 
+function assertOwnedInputReceipt(runtime, receipt, role, project) {
+  const expectedKeys = [
+    "composeSourceSha256",
+    "fixtureSourceContractSha256",
+    "generatedEnvironmentDirectorySha256",
+    "projectSha256",
+    "renderedComposeSha256",
+    "roleEnvironmentContractSha256",
+    "roleEnvironmentPolicySha256",
+  ];
+  if (!receipt || typeof receipt !== "object" || Array.isArray(receipt)
+    || JSON.stringify(Object.keys(receipt).sort()) !== JSON.stringify(expectedKeys.sort())
+    || receipt.composeSourceSha256 !== runtime.composeSourceSha256
+    || receipt.renderedComposeSha256 !== runtime.renderedComposeSha256
+    || receipt.fixtureSourceContractSha256 !== runtime.fixtureMountContractSha256
+    || receipt.roleEnvironmentContractSha256
+      !== runtime.syntheticRoleEnvironmentContractSha256
+    || receipt.roleEnvironmentPolicySha256
+      !== runtime.syntheticRoleEnvironmentPolicySha256
+    || !/^[a-f0-9]{64}$/.test(receipt.generatedEnvironmentDirectorySha256 ?? "")
+    || receipt.projectSha256 !== sha256(project)) {
+    throw new Error(`${role} verifier-owned input receipt differs from live runtime attestation.`);
+  }
+}
+
 function assertDualPreflight(baseline, candidate) {
-  if (
-    baseline.runtimeBinding.projectSha256 === candidate.runtimeBinding.projectSha256
-    || baseline.runtimeBinding.networkSha256 === candidate.runtimeBinding.networkSha256
-    || baseline.runtimeBinding.publicationsSha256 === candidate.runtimeBinding.publicationsSha256
-    || baseline.runtimeBinding.serviceIdentitySha256 === candidate.runtimeBinding.serviceIdentitySha256
-    || baseline.runtimeBinding.composeRuntimeContractSha256
-      === candidate.runtimeBinding.composeRuntimeContractSha256
-  ) {
-    throw new Error("Dual provider proof requires two simultaneously distinct live runtime bindings.");
+  for (const name of [
+    "composeRuntimeContractSha256",
+    "generatedEnvironmentDirectorySha256",
+    "networkSha256",
+    "oneShotLifecycleContractSha256",
+    "ownedInputReceiptSha256",
+    "projectSha256",
+    "publicationsSha256",
+    "serviceIdentitySha256",
+    "staticAssetAttestationSha256",
+    "staticAssetInventorySha256",
+    "syntheticRoleEnvironmentContractSha256",
+  ]) {
+    if (baseline.runtimeBinding[name] === candidate.runtimeBinding[name]) {
+      throw new Error("Dual provider proof requires two distinct live runtime bindings.");
+    }
   }
   if (
     baseline.runtimeBinding.fixtureMountContractSha256
       !== candidate.runtimeBinding.fixtureMountContractSha256
     || baseline.runtimeBinding.syntheticEnvironmentContractSha256
       !== candidate.runtimeBinding.syntheticEnvironmentContractSha256
+    || baseline.runtimeBinding.syntheticRoleEnvironmentPolicySha256
+      !== candidate.runtimeBinding.syntheticRoleEnvironmentPolicySha256
   ) {
     throw new Error("Dual provider proof live fixture and synthetic environment contracts differ.");
   }
@@ -734,9 +887,11 @@ async function boundedResponseBytes(response, maximumBytes) {
   return Buffer.concat(chunks, size);
 }
 
-async function finishBrowserRequestContract(requests, requestByIdentity) {
+async function finishBrowserRequestContract(requests, requestByIdentity, staticAssetContract) {
   const records = [];
   const redirectedSources = new Set();
+  const responseDeclaredStaticPaths = new Set();
+  let declarationBytes = 0;
   for (const { classification, request } of requests) {
     const response = await request.response();
     const redirectedFrom = request.redirectedFrom();
@@ -756,12 +911,25 @@ async function finishBrowserRequestContract(requests, requestByIdentity) {
       });
       redirectedSources.add(redirectedFrom);
     }
+    const responseContentType = response
+      ? normalizeResponseContentType(response.headers()["content-type"])
+      : null;
+    if (response && response.status() === 200
+      && new Set(["text/html", "text/x-component", "text/css"]).has(responseContentType)) {
+      const body = await response.body();
+      declarationBytes += body.byteLength;
+      if (body.byteLength > 2 * 1024 * 1024 || declarationBytes > 8 * 1024 * 1024) {
+        throw new Error("Static response declaration graph exceeded its bounded body contract.");
+      }
+      const source = new TextDecoder("utf-8", { fatal: true }).decode(body);
+      for (const match of source.matchAll(
+        /\/_next\/static\/(?:chunks(?:\/[A-Za-z0-9._-]{1,100}){0,5}|media)\/[A-Za-z0-9._-]{1,200}\.(?:css|js|woff2|png|svg)/g,
+      )) responseDeclaredStaticPaths.add(match[0]);
+    }
     records.push({
       classification,
       redirectEdge,
-      responseContentType: response
-        ? normalizeResponseContentType(response.headers()["content-type"])
-        : null,
+      responseContentType,
       responseStatus: response?.status() ?? null,
     });
   }
@@ -777,7 +945,10 @@ async function finishBrowserRequestContract(requests, requestByIdentity) {
       throw new Error("Synthetic browser redirect response has no exact successor.");
     }
   }
-  return finalizeProviderOverlapBrowserContract(records);
+  return finalizeProviderOverlapBrowserContract(records, {
+    responseDeclaredStaticPaths: [...responseDeclaredStaticPaths].sort(),
+    staticAssetContract,
+  });
 }
 
 function normalizeResponseContentType(value) {
@@ -824,12 +995,15 @@ async function assertRepositoryRoot() {
 
 async function exactExternalFile(rawPath, label) {
   if (!path.isAbsolute(rawPath)) throw new Error(`${label} path must be absolute.`);
+  const requestedMetadata = await lstat(rawPath);
   const resolved = await realpath(rawPath);
   if (isWithin(repositoryRoot, resolved)) {
     throw new Error(`${label} must stay outside the repository and immutable baselines.`);
   }
   const metadata = await lstat(resolved);
-  if (!metadata.isFile() || metadata.isSymbolicLink()) throw new Error(`${label} must be a regular file.`);
+  if (!metadata.isFile() || requestedMetadata.isSymbolicLink()) {
+    throw new Error(`${label} must be a regular file.`);
+  }
   return resolved;
 }
 
@@ -854,12 +1028,14 @@ async function readBoundedJson(target, maximumBytes, label) {
 }
 
 async function readBoundedBytes(target, maximumBytes, label) {
-  const metadata = await stat(target);
-  if (!metadata.isFile() || metadata.size <= 0 || metadata.size > maximumBytes) {
+  const before = await stat(target);
+  if (!before.isFile() || before.size <= 0 || before.size > maximumBytes) {
     throw new Error(`${label} exceeds its bounded file contract.`);
   }
   const bytes = await readFile(target);
-  if (bytes.byteLength !== metadata.size || bytes.byteLength > maximumBytes) {
+  const after = await stat(target);
+  if (bytes.byteLength !== before.size || bytes.byteLength > maximumBytes
+    || after.size !== before.size || after.mtimeMs !== before.mtimeMs) {
     throw new Error(`${label} changed while its bounded bytes were read.`);
   }
   return bytes;
@@ -873,16 +1049,27 @@ function parseJson(bytes, label) {
   }
 }
 
+function parseAssetPlatform(document) {
+  const platform = document?.source?.platform;
+  if (!platform || Object.keys(platform).sort().join(",") !== "architecture,os"
+    || platform.os !== "linux" || !new Set(["amd64", "arm64"]).has(platform.architecture)) {
+    throw new Error("Production image asset attestation platform is invalid.");
+  }
+  return { architecture: platform.architecture, os: platform.os };
+}
+
 function parseArguments(values) {
   if (values.length % 2 !== 0) throw new Error("Provider overlap proof requires exact flag/value pairs.");
   const allowed = new Set([
     "--baseline-contract",
     "--baseline-control-url",
+    "--baseline-asset-attestation",
     "--baseline-image-digest",
     "--baseline-migration-image-digest",
     "--baseline-resolver-ip",
     "--candidate-contract",
     "--candidate-control-url",
+    "--candidate-asset-attestation",
     "--candidate-image-digest",
     "--candidate-migration-image-digest",
     "--candidate-resolver-ip",
@@ -912,6 +1099,14 @@ function requiredArgument(values, name, pattern) {
   return value;
 }
 
+async function settleEvidence(promise) {
+  try {
+    return { status: "fulfilled", value: await promise };
+  } catch {
+    return { status: "rejected" };
+  }
+}
+
 function assertDistinctStackInputs(baseline, candidate) {
   const baselinePublications = Object.values(baseline.contract.publications);
   const candidatePublications = Object.values(candidate.contract.publications);
@@ -923,6 +1118,9 @@ function assertDistinctStackInputs(baseline, candidate) {
     || baseline.expectedMigrationImageDigest === candidate.expectedMigrationImageDigest
     || baseline.contract.revision === candidate.contract.revision
     || baseline.contractPath === candidate.contractPath
+    || baseline.assetAttestationPath === candidate.assetAttestationPath
+    || baseline.staticAssetContract.attestationSha256
+      === candidate.staticAssetContract.attestationSha256
     || baselinePublications.some((publication) => candidatePublications.includes(publication))
   ) {
     throw new Error("Baseline and candidate inputs must identify two distinct isolated image stacks.");
@@ -945,7 +1143,7 @@ async function startBothConnectProxies(inputs) {
   const settled = await Promise.allSettled(inputs.map((input) => {
     const [listenHost, listenPort] = input.contract.publications.connectProxy.split(":");
     return startJourneyConnectProxy({
-      environment: process.env,
+      environment: dockerCliEnvironment(),
       listenHost,
       listenPort,
       repositoryRoot,
@@ -961,6 +1159,17 @@ async function startBothConnectProxies(inputs) {
   return handles;
 }
 
+function ownedStackInput(input) {
+  return {
+    repositoryRoot,
+    contractPath: input.contractPath,
+    contract: input.contract,
+    expectedApplicationImageDigest: input.expectedImageDigest,
+    expectedMigrationImageDigest: input.expectedMigrationImageDigest,
+    runDocker: docker,
+  };
+}
+
 async function stopBothConnectProxies(handles) {
   const settled = await Promise.allSettled(handles.map((handle) => stopJourneyConnectProxy(handle)));
   if (settled.some(({ status }) => status === "rejected")) {
@@ -969,7 +1178,7 @@ async function stopBothConnectProxies(handles) {
   return settled.map(({ value }) => value);
 }
 
-function docker(args, maximumBytes = 64 * 1024, environment = process.env) {
+function docker(args, maximumBytes = 64 * 1024, environment = dockerCliEnvironment()) {
   return new Promise((resolve, reject) => {
     const child = spawn("docker", args, {
       cwd: repositoryRoot,
@@ -988,10 +1197,11 @@ function docker(args, maximumBytes = 64 * 1024, environment = process.env) {
       clearTimeout(timer);
       operation();
     };
+    const timeoutMs = args.includes("up") ? 300_000 : args.includes("down") ? 180_000 : 30_000;
     const timer = setTimeout(() => {
       if (child.exitCode === null && child.signalCode === null) child.kill();
-      finish(() => reject(new Error("Read-only Docker identity query timed out.")));
-    }, 15_000);
+      finish(() => reject(new Error("Bounded Docker operation timed out.")));
+    }, timeoutMs);
     child.stdout.setEncoding("utf8");
     child.stderr.setEncoding("utf8");
     child.stdout.on("data", (chunk) => {
@@ -1008,18 +1218,31 @@ function docker(args, maximumBytes = 64 * 1024, environment = process.env) {
       if (stderr.length < 4 * 1024) stderr += chunk.slice(0, 4 * 1024 - stderr.length);
     });
     child.once("error", () => finish(() => reject(new Error(
-      "Read-only Docker identity query failed to start.",
+      "Bounded Docker operation failed to start.",
     ))));
     child.once("exit", (code) => {
       if (code === 0 && !overflow && stdoutBytes <= maximumBytes) {
         finish(() => resolve(stdout.trim()));
       } else {
         finish(() => reject(new Error(
-          `Read-only Docker identity query failed (${code ?? "unknown"}:${sha256(stderr)}).`,
+          `Bounded Docker operation failed (${code ?? "unknown"}:${sha256(stderr)}).`,
         )));
       }
     });
   });
+}
+
+function dockerCliEnvironment() {
+  const result = {};
+  for (const name of [
+    "APPDATA", "DOCKER_API_VERSION", "DOCKER_CERT_PATH", "DOCKER_CONFIG",
+    "DOCKER_CONTEXT", "DOCKER_HOST", "DOCKER_TLS_VERIFY", "HOME", "LANG",
+    "LC_ALL", "LOCALAPPDATA", "PATH", "Path", "PATHEXT", "SYSTEMROOT",
+    "SystemRoot", "TEMP", "TMP", "USERPROFILE", "WINDIR", "XDG_CONFIG_HOME",
+  ]) {
+    if (typeof process.env[name] === "string") result[name] = process.env[name];
+  }
+  return result;
 }
 
 function splitLines(value) {

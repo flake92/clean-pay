@@ -19,9 +19,52 @@ const exactNavigationFlow = Object.freeze([
   "app-cabinet-document",
 ]);
 
+const exactStaticRoutes = Object.freeze(["/cabinet/page", "/login/page", "/profile/page"]);
+
+export function createProviderOverlapStaticAssetContract(attestation) {
+  if (!attestation || typeof attestation !== "object" || Array.isArray(attestation)
+    || !sha256Pattern.test(attestation.attestationSha256 ?? "")
+    || !sha256Pattern.test(attestation.inventory?.inventorySha256 ?? "")
+    || !Array.isArray(attestation.inventory?.staticChunks)
+    || !Array.isArray(attestation.inventory?.clientReferences)) {
+    fail("Production image static asset attestation is invalid.");
+  }
+  const inventoryByPath = {};
+  for (const asset of attestation.inventory.staticChunks) {
+    if (!asset || !nextStaticPattern.test(asset.servedPath ?? "")
+      || !asset.servedPath.startsWith("/_next/static/chunks/")
+      || !sha256Pattern.test(asset.sha256 ?? "")
+      || Object.hasOwn(inventoryByPath, asset.servedPath)) {
+      fail("Production image static asset inventory is invalid.");
+    }
+    inventoryByPath[asset.servedPath] = asset.sha256;
+  }
+  const routeDeclaredPaths = new Set();
+  for (const route of exactStaticRoutes) {
+    const matches = attestation.inventory.clientReferences.filter((entry) => entry.route === route);
+    if (matches.length !== 1 || !Array.isArray(matches[0].declaredStaticChunks)
+      || matches[0].declaredStaticChunks.length < 1 || matches[0].declaredStaticChunks.length > 64) {
+      fail("Production image route load graph is incomplete.");
+    }
+    for (const servedPath of matches[0].declaredStaticChunks) {
+      if (!Object.hasOwn(inventoryByPath, servedPath)) {
+        fail("Production image route load graph references an absent static asset.");
+      }
+      routeDeclaredPaths.add(servedPath);
+    }
+  }
+  return Object.freeze({
+    attestationSha256: attestation.attestationSha256,
+    inventoryByPath: Object.freeze({ ...inventoryByPath }),
+    inventorySha256: attestation.inventory.inventorySha256,
+    routeDeclaredPaths: Object.freeze([...routeDeclaredPaths].sort()),
+  });
+}
+
 export function classifyProviderOverlapBrowserRequest(input, state) {
   exactKeys(input, ["isMainFrame", "isNavigation", "method", "resourceType", "url"], "request");
-  exactKeys(state, ["cabinetDocumentAllowed"], "request state");
+  exactKeys(state, ["cabinetDocumentAllowed", "staticAssetContract"], "request state");
+  assertStaticAssetContract(state.staticAssetContract);
   const url = exactUrl(input.url);
   if (url.hash || url.username || url.password || url.port) fail("Browser request URL is not exact.");
   const descriptor = {
@@ -29,6 +72,8 @@ export function classifyProviderOverlapBrowserRequest(input, state) {
     expectedStatuses: [200],
     key: undefined,
     navigation: false,
+    staticAssetSha256: null,
+    staticPath: null,
   };
 
   if (url.origin === "https://pay.ci.clean-pay.dev") {
@@ -51,6 +96,8 @@ export function classifyProviderOverlapBrowserRequest(input, state) {
     expectedStatuses: Object.freeze([...descriptor.expectedStatuses]),
     key: descriptor.key,
     navigation: descriptor.navigation,
+    staticAssetSha256: descriptor.staticAssetSha256,
+    staticPath: descriptor.staticPath,
   });
 }
 
@@ -75,9 +122,46 @@ export function assertProviderOverlapRedirect({ from, location, status, to }) {
   return edge;
 }
 
-export function finalizeProviderOverlapBrowserContract(records) {
+export function finalizeProviderOverlapHistoryContract(records) {
+  if (!Array.isArray(records) || records.length < 2 || records.length > 128) {
+    fail("Browser history ledger is outside its bounded contract.");
+  }
+  const allowedKinds = new Set([
+    "document", "frame-navigation", "popstate", "pushState", "replaceState",
+  ]);
+  const historyLedger = records.map((record, index) => {
+    exactKeys(record, ["kind", "url"], `history record ${index}`);
+    if (!allowedKinds.has(record.kind)) fail("Browser history operation kind is invalid.");
+    const location = exactHistoryLocation(record.url);
+    if (["popstate", "pushState", "replaceState"].includes(record.kind)
+        && !["app-login", "app-profile", "app-cabinet"].includes(location)) {
+      fail("Browser history API operation is outside the exact application flow.");
+    }
+    return Object.freeze({ kind: record.kind, location });
+  });
+  const locations = historyLedger.map(({ location }) => location);
+  const profileIndex = locations.lastIndexOf("app-profile");
+  const cabinetIndex = locations.lastIndexOf("app-cabinet");
+  if (profileIndex < 0 || cabinetIndex <= profileIndex
+    || locations.slice(profileIndex + 1, cabinetIndex).some((value) => value.includes("#"))) {
+    fail("Browser history does not preserve the exact profile-to-cabinet transition.");
+  }
+  return Object.freeze({
+    historyContractSha256: sha256(JSON.stringify(historyLedger)),
+    historyCount: historyLedger.length,
+    historyLedger: Object.freeze(historyLedger),
+  });
+}
+
+export function finalizeProviderOverlapBrowserContract(records, loadGraph) {
   if (!Array.isArray(records) || records.length === 0 || records.length > maximumRequests) {
     fail("Browser request ledger is outside its bounded contract.");
+  }
+  exactKeys(loadGraph, ["responseDeclaredStaticPaths", "staticAssetContract"], "static load graph");
+  assertStaticAssetContract(loadGraph.staticAssetContract);
+  if (!Array.isArray(loadGraph.responseDeclaredStaticPaths)
+    || loadGraph.responseDeclaredStaticPaths.length > maximumRequests) {
+    fail("Static response declaration graph is outside its bounded contract.");
   }
   const navigationFlow = records
     .filter(({ classification }) => classification.navigation)
@@ -86,6 +170,8 @@ export function finalizeProviderOverlapBrowserContract(records) {
 
   const counts = {};
   const redirects = [];
+  const staticLedger = [];
+  const observedStaticPaths = new Set();
   for (const [index, record] of records.entries()) {
     exactKeys(
       record,
@@ -95,6 +181,20 @@ export function finalizeProviderOverlapBrowserContract(records) {
     const classification = record.classification;
     if (!classification || typeof classification.key !== "string") {
       fail(`Browser request record ${index} classification is invalid.`);
+    }
+    if (staticKeys.has(classification.key)) {
+      if (!nextStaticPattern.test(classification.staticPath ?? "")
+        || observedStaticPaths.has(classification.staticPath)) {
+        fail("Static request path is invalid or duplicated.");
+      }
+      observedStaticPaths.add(classification.staticPath);
+      staticLedger.push({
+        assetSha256: classification.staticAssetSha256,
+        class: classification.key,
+        pathSha256: sha256(classification.staticPath),
+      });
+    } else if (classification.staticPath !== null || classification.staticAssetSha256 !== null) {
+      fail("Non-static browser request contains a static asset binding.");
     }
     counts[classification.key] = (counts[classification.key] ?? 0) + 1;
     if (classification.disposition === "abort") {
@@ -129,6 +229,40 @@ export function finalizeProviderOverlapBrowserContract(records) {
     fail("Chatwoot replacement widget count is outside its fresh/cache contract.");
   }
 
+  const declaredPaths = [...new Set(loadGraph.responseDeclaredStaticPaths)].sort();
+  if (declaredPaths.length !== loadGraph.responseDeclaredStaticPaths.length
+    || declaredPaths.some((servedPath) => !nextStaticPattern.test(servedPath))) {
+    fail("Static response declaration graph is invalid or duplicated.");
+  }
+  const inventory = loadGraph.staticAssetContract.inventoryByPath;
+  const expectedChunks = new Set(loadGraph.staticAssetContract.routeDeclaredPaths);
+  const declaredMedia = new Set();
+  for (const servedPath of declaredPaths) {
+    if (servedPath.startsWith("/_next/static/chunks/")) {
+      if (!Object.hasOwn(inventory, servedPath)) {
+        fail("Static declaration graph escaped the attested image inventory.");
+      }
+      expectedChunks.add(servedPath);
+    } else {
+      declaredMedia.add(servedPath);
+    }
+  }
+  const observedChunks = [...observedStaticPaths]
+    .filter((servedPath) => servedPath.startsWith("/_next/static/chunks/"))
+    .sort();
+  deepEqual(observedChunks, [...expectedChunks].sort(), "exact static chunk load graph");
+  for (const servedPath of observedStaticPaths) {
+    if (servedPath.startsWith("/_next/static/media/") && !declaredMedia.has(servedPath)) {
+      fail("Static media request is not reachable from an observed stylesheet declaration.");
+    }
+  }
+
+  const staticLoadGraph = Object.freeze({
+    assetAttestationSha256: loadGraph.staticAssetContract.attestationSha256,
+    declaredPathSha256s: Object.freeze(declaredPaths.map(sha256)),
+    expectedChunkPathSha256s: Object.freeze([...expectedChunks].sort().map(sha256)),
+  });
+
   const semanticCounts = Object.fromEntries(Object.entries(counts)
     .filter(([key]) => !staticKeys.has(key))
     .sort(([left], [right]) => left.localeCompare(right)));
@@ -145,6 +279,11 @@ export function finalizeProviderOverlapBrowserContract(records) {
   return Object.freeze({
     requestCount: records.length,
     requestContractSha256: sha256(JSON.stringify(summary)),
+    staticLoadGraph,
+    staticLoadGraphContractSha256: sha256(JSON.stringify(staticLoadGraph)),
+    staticRequestContractSha256: sha256(JSON.stringify(staticLedger)),
+    staticRequestCount: staticLedger.length,
+    staticRequestLedger: Object.freeze(staticLedger.map(Object.freeze)),
   });
 }
 
@@ -200,6 +339,13 @@ function classifyApplicationRequest(descriptor, input, url, state) {
     descriptor.key = extension === "woff2" ? "next-static-font"
       : ["png", "svg"].includes(extension) ? "next-static-image"
         : `next-static-${extension}`;
+    descriptor.staticPath = url.pathname;
+    descriptor.staticAssetSha256 = url.pathname.startsWith("/_next/static/chunks/")
+      ? state.staticAssetContract.inventoryByPath[url.pathname] ?? null
+      : null;
+    if (url.pathname.startsWith("/_next/static/chunks/") && descriptor.staticAssetSha256 === null) {
+      fail("Static chunk is absent from the attested production image inventory.");
+    }
     return;
   }
   if (input.method === "GET" && url.pathname === "/clean-pay-logo.png") {
@@ -321,6 +467,87 @@ function exactRequest(input, method, resourceType, isNavigation, isMainFrame) {
   equal(input.resourceType, resourceType, "browser request resource type");
   equal(input.isNavigation, isNavigation, "browser request navigation flag");
   equal(input.isMainFrame, isMainFrame, "browser request main-frame flag");
+}
+
+function exactHistoryLocation(raw) {
+  if (raw === "about:blank") return "about-blank";
+  const url = exactUrl(raw);
+  if (url.hash) fail("Browser history contains a transient hash.");
+  if (url.origin === "https://pay.ci.clean-pay.dev") {
+    if (url.pathname === "/login") {
+      exactQuery(url, [["redirect_to", "/profile"]]);
+      return "app-login";
+    }
+    if (url.pathname === "/auth/telegram/start") {
+      exactQueryKeys(url, ["redirect_to", "turnstile_token"]);
+      equal(url.searchParams.get("redirect_to"), "/profile", "history Telegram redirect");
+      if (!/^synthetic-turnstile-token:login:synthetic-turnstile-[1-9]\d*:[1-9]\d*$/.test(
+        url.searchParams.get("turnstile_token") ?? "",
+      )) fail("History Telegram Turnstile token is invalid.");
+      return "app-telegram-start";
+    }
+    if (url.pathname === "/auth/telegram/callback") {
+      exactQueryKeys(url, ["code", "state"]);
+      for (const name of ["code", "state"]) {
+        if (!opaquePattern.test(url.searchParams.get(name) ?? "")) fail("History OIDC value is invalid.");
+      }
+      return "app-telegram-callback";
+    }
+    if (url.pathname === "/profile" || url.pathname === "/cabinet") {
+      exactQuery(url, []);
+      return url.pathname === "/profile" ? "app-profile" : "app-cabinet";
+    }
+  }
+  if (url.origin === "https://oauth.telegram.org" && url.pathname === "/auth") {
+    exactQueryKeys(url, [
+      "response_type", "client_id", "redirect_uri", "scope", "state", "nonce",
+      "code_challenge", "code_challenge_method",
+    ]);
+    equal(url.searchParams.get("response_type"), "code", "history OIDC response type");
+    equal(url.searchParams.get("client_id"), "7654321098", "history OIDC client id");
+    equal(
+      url.searchParams.get("redirect_uri"),
+      "https://pay.ci.clean-pay.dev/auth/telegram/callback",
+      "history OIDC redirect URI",
+    );
+    equal(url.searchParams.get("scope"), "openid profile", "history OIDC scope");
+    equal(url.searchParams.get("code_challenge_method"), "S256", "history OIDC PKCE method");
+    for (const name of ["state", "nonce", "code_challenge"]) {
+      if (!opaquePattern.test(url.searchParams.get(name) ?? "")) {
+        fail("History OIDC dynamic value is invalid.");
+      }
+    }
+    return "telegram-oidc-authorize";
+  }
+  fail("Browser history location is outside the exact provider-overlap flow.");
+}
+
+function assertStaticAssetContract(value) {
+  exactKeys(
+    value,
+    ["attestationSha256", "inventoryByPath", "inventorySha256", "routeDeclaredPaths"],
+    "static asset contract",
+  );
+  if (!sha256Pattern.test(value.attestationSha256 ?? "")
+    || !sha256Pattern.test(value.inventorySha256 ?? "")
+    || !value.inventoryByPath || typeof value.inventoryByPath !== "object"
+    || Array.isArray(value.inventoryByPath) || !Array.isArray(value.routeDeclaredPaths)
+    || value.routeDeclaredPaths.length < 1 || value.routeDeclaredPaths.length > maximumRequests) {
+    fail("Static asset contract is invalid.");
+  }
+  const inventoryPaths = Object.keys(value.inventoryByPath).sort();
+  if (inventoryPaths.length < 1 || inventoryPaths.length > 4_096
+    || inventoryPaths.some((servedPath) => !servedPath.startsWith("/_next/static/chunks/")
+      || !nextStaticPattern.test(servedPath)
+      || !sha256Pattern.test(value.inventoryByPath[servedPath]))) {
+    fail("Static asset inventory contract is invalid.");
+  }
+  if (JSON.stringify([...value.routeDeclaredPaths].sort())
+      !== JSON.stringify(value.routeDeclaredPaths)
+    || new Set(value.routeDeclaredPaths).size !== value.routeDeclaredPaths.length
+    || value.routeDeclaredPaths.some((servedPath) => !Object.hasOwn(value.inventoryByPath, servedPath))) {
+    fail("Static route declaration contract is invalid.");
+  }
 }
 
 function exactNonNavigation(input) {
