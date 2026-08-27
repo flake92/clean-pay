@@ -1,5 +1,4 @@
-import { createHash } from "node:crypto";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import type { Frame, Page, Route } from "@playwright/test";
@@ -33,6 +32,7 @@ import {
   reconcileJourneyBaseline,
 } from "./journey-baseline-policy";
 import { createSanitizedHarContract } from "./sanitized-har";
+import { currentJourneyFixtureContractSha256Async } from "./journey-fixture-contract";
 import { sanitizeJourneyBoundary } from "./journey-boundary-contract";
 import {
   JOURNEY_SYNTHETIC_HOSTNAMES,
@@ -330,7 +330,7 @@ async function captureCheckpoint(page: Page, label: string, applicationOrigin: s
     focus: snapshot.focus,
     body: snapshot.body,
     dialogs: snapshot.dialogs,
-    ariaSnapshot: sanitizeAriaUrls(ariaSnapshot, applicationOrigin),
+    ariaSnapshot: sanitizeAriaUrls(ariaSnapshot, applicationOrigin, page.url()),
     cookies: cookies.map((cookie) => ({
       name: /^[A-Za-z0-9_.-]{1,80}$/.test(cookie.name)
         ? cookie.name
@@ -361,8 +361,6 @@ async function captureCheckpoint(page: Page, label: string, applicationOrigin: s
   };
   return { evidence, screenshot };
 }
-
-let fixtureContractPromise: Promise<string> | undefined;
 
 async function journeySourceProvenance(page: Page) {
   const revision = requiredEnvironmentValue(
@@ -403,7 +401,7 @@ async function journeySourceProvenance(page: Page) {
     },
     fixtureContract: {
       version: "journey-v5",
-      sha256: await journeyFixtureContractSha256(),
+      sha256: await currentJourneyFixtureContractSha256Async(),
     },
     browser: {
       engine: "chromium",
@@ -422,70 +420,6 @@ function requiredEnvironmentValue(name: string, pattern: RegExp) {
     throw new Error(`${name} is required and must match ${pattern}.`);
   }
   return value;
-}
-
-function journeyFixtureContractSha256() {
-  fixtureContractPromise ??= (async () => {
-    const filenames = [
-      "../a11y-semantic-projection.ts",
-      "../baseline-policy.ts",
-      "../comparison-projection.ts",
-      "../console-policy.ts",
-      "../fixtures.ts",
-      "../journey-comparison-projection.ts",
-      "../network-recorder.ts",
-      "../page-characterization.ts",
-      "../redaction.ts",
-      "../render-policy.ts",
-      "../screenshot-majority.ts",
-      "../../../deploy/prod/role-env.mjs",
-      "../../../runtime/production-env-rules.mjs",
-      "Caddyfile",
-      "application.journey.spec.ts",
-      "caddy-route-policy.ts",
-      "docker-compose.journey.yml",
-      "docker-tcp-bridge.mjs",
-      "db-observer.mjs",
-      "db-observer-provision.sh",
-      "db-observer.contract.spec.ts",
-      "finalize-journey-baseline.mjs",
-      "journey-baseline-policy.ts",
-      "journey-boundary-contract.contract.spec.ts",
-      "journey-boundary-contract.ts",
-      "journey-comparison-projection.contract.spec.ts",
-      "journey-fixtures.ts",
-      "journey-global-setup.ts",
-      "journey-browser-policy.ts",
-      "journey-connect-proxy.mjs",
-      "journey-network-policy.d.mts",
-      "journey-network-policy.mjs",
-      "journey-skip-link-policy.contract.spec.ts",
-      "journey-skip-link-policy.ts",
-      "journey-staging.contract.spec.ts",
-      "oidc-mock.contract.spec.ts",
-      "oidc-mock.mjs",
-      "playwright.config.ts",
-      "prepare-synthetic-env.mjs",
-      "provider-mock.contract.spec.ts",
-      "provider-mock.mjs",
-      "run-production-image-journey.mjs",
-      "sanitized-har.contract.spec.ts",
-      "sanitized-har.ts",
-      "synthetic-env.contract.spec.ts",
-      "synthetic-logout-storage.contract.spec.ts",
-      "synthetic-logout-storage.ts",
-      "wsl-relay-target.sh",
-    ];
-    const hash = createHash("sha256");
-    hash.update("clean-pay-browser-journey-fixture-v5\0", "utf8");
-    for (const filename of filenames) {
-      const bytes = await readFile(path.join(__dirname, filename));
-      hash.update(`${filename}\0${bytes.byteLength}\0`, "utf8");
-      hash.update(bytes);
-    }
-    return hash.digest("hex");
-  })();
-  return fixtureContractPromise;
 }
 
 async function settleJourneyCapture(page: Page) {

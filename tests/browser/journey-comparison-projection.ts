@@ -21,6 +21,8 @@ const DYNAMIC_COOKIE_NAMES = new Set([
 ]);
 const CUID = /^c[a-z0-9]{20,40}$/i;
 const SHORT_DIGEST = /^<sha256:[a-f0-9]{16}>$/;
+const PWA_SHELL_CACHE_UUID_V4 = /^clean-pay-shell-[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/;
+const PROJECTED_PWA_SHELL_CACHE = "<dynamic:pwa-shell-cache:1>";
 
 /**
  * Normalizes only generated identifiers in the isolated journey schema.
@@ -35,7 +37,97 @@ export function projectExactJourneyGeneratedValues(manifest: Record<string, unkn
   projectServerActions(manifest.network, references);
   projectCheckpointCookies(manifest.checkpoints, references);
   projectBoundaryCookies(manifest.boundaries, references);
+  projectPwaShellCache(manifest);
   projectCanonicalUrls(manifest, references);
+}
+
+function projectPwaShellCache(manifest: Record<string, unknown>) {
+  const source = manifest.source;
+  if (
+    manifest.journey !== "public-responsive-keyboard-install-offline-support"
+    || !Array.isArray(manifest.checkpoints)
+    || !Array.isArray(manifest.boundaries)
+    || !isRecord(source)
+    || typeof source.revision !== "string"
+    || !/^[a-f0-9]{40}$/.test(source.revision)
+  ) {
+    return;
+  }
+
+  const cacheNameLocations: Array<{ values: unknown[]; index: number }> = [];
+  for (const checkpoint of manifest.checkpoints) {
+    if (!isRecord(checkpoint) || !isExactCheckpointStorage(checkpoint.storage)) return;
+    const cacheNames = checkpoint.storage.cacheNames;
+    if (cacheNames.length > 1) return;
+    if (cacheNames.length === 1) cacheNameLocations.push({ values: cacheNames, index: 0 });
+  }
+
+  if (cacheNameLocations.length !== 2) return;
+
+  const pwaBoundaries = manifest.boundaries.filter((entry) => (
+    isRecord(entry) && entry.label === "pwa-service-worker-offline"
+  ));
+  if (pwaBoundaries.length !== 1) return;
+  const boundary = pwaBoundaries[0] as Record<string, unknown>;
+  if (!isExactPwaBoundary(boundary)) return;
+  const boundaryCacheNames = boundary.value.online.cacheNames;
+  cacheNameLocations.push({ values: boundaryCacheNames, index: 0 });
+
+  const cacheNames = cacheNameLocations.map(({ values, index }) => values[index]);
+  const candidateRevisionCache = `clean-pay-shell-${source.revision}`;
+  if (
+    cacheNames.some((name) => typeof name !== "string" || (
+      name !== candidateRevisionCache && !PWA_SHELL_CACHE_UUID_V4.test(name)
+    ))
+    || new Set(cacheNames).size !== 1
+  ) {
+    return;
+  }
+
+  for (const location of cacheNameLocations) {
+    location.values[location.index] = PROJECTED_PWA_SHELL_CACHE;
+  }
+}
+
+function isExactCheckpointStorage(value: unknown): value is Record<string, unknown> & {
+  cacheNames: unknown[];
+} {
+  return isRecord(value)
+    && hasExactKeys(value, ["cacheNames", "local", "serviceWorkerScopes", "session"])
+    && Array.isArray(value.cacheNames)
+    && Array.isArray(value.local)
+    && Array.isArray(value.session)
+    && Array.isArray(value.serviceWorkerScopes);
+}
+
+function isExactPwaBoundary(value: Record<string, unknown>): value is Record<string, unknown> & {
+  value: {
+    online: { cacheNames: unknown[] };
+  };
+} {
+  if (
+    !hasExactKeys(value, ["label", "value"])
+    || value.label !== "pwa-service-worker-offline"
+    || !isRecord(value.value)
+    || !hasExactKeys(value.value, ["offline", "online", "reason", "registrationMode"])
+    || value.value.registrationMode !== "playwright-explicit-production-sw"
+    || value.value.reason !== "pristine-static-csp-blocks-install-page-hydration"
+    || !isRecord(value.value.online)
+    || !hasExactKeys(value.value.online, ["cacheNames", "scopePath", "scriptPath"])
+    || value.value.online.scriptPath !== "/sw.js"
+    || value.value.online.scopePath !== "/"
+    || !Array.isArray(value.value.online.cacheNames)
+    || value.value.online.cacheNames.length !== 1
+    || !isRecord(value.value.offline)
+    || !hasExactKeys(value.value.offline, ["controlled", "pathname", "queryKeys"])
+    || value.value.offline.controlled !== true
+    || value.value.offline.pathname !== "/offline"
+    || !Array.isArray(value.value.offline.queryKeys)
+    || !sameJson(value.value.offline.queryKeys, ["journey_offline"])
+  ) {
+    return false;
+  }
+  return true;
 }
 
 function projectSyntheticResetScope(value: unknown) {

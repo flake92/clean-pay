@@ -2,7 +2,14 @@ import { createHash } from "node:crypto";
 
 import { expect, test } from "@playwright/test";
 
-import { projectCharacterizationManifestForComparison } from "../comparison-projection";
+import {
+  projectCharacterizationManifestForComparison,
+  projectCharacterizationManifestPairForComparison,
+} from "../comparison-projection";
+import {
+  PINNED_JOURNEY_V5_FIXTURE_SHA256,
+  currentJourneyFixtureContractSha256,
+} from "./journey-fixture-contract";
 import {
   JOURNEY_SYNTHETIC_HOSTNAMES,
   JOURNEY_SYNTHETIC_TLS_POLICY,
@@ -31,6 +38,121 @@ test("projects generated journey values by referential symbol while retaining st
   const oidc = projected.boundaries[0]!.value.preCallback[0]!;
   expect(oidc.expiry.epochSeconds).toBe("<bounded-cookie-expiry>");
   expect(oidc.valueBytes).toBe(64);
+});
+
+test("projects only the pinned baseline and recomputed current fixture contracts", () => {
+  const baseline = journeyManifest("baseline");
+  const candidate = journeyManifest("candidate");
+  baseline.source.fixtureContract.sha256 = PINNED_JOURNEY_V5_FIXTURE_SHA256;
+  candidate.source.fixtureContract.sha256 = currentJourneyFixtureContractSha256();
+  const projected = projectCharacterizationManifestPairForComparison(baseline, candidate);
+  expect(projected.actual).toEqual(projected.expected);
+
+  for (const [expectedHash, actualHash] of [
+    ["0".repeat(64), currentJourneyFixtureContractSha256()],
+    [PINNED_JOURNEY_V5_FIXTURE_SHA256, "f".repeat(64)],
+  ]) {
+    const wrongBaseline = journeyManifest("baseline");
+    const wrongCandidate = journeyManifest("candidate");
+    wrongBaseline.source.fixtureContract.sha256 = expectedHash;
+    wrongCandidate.source.fixtureContract.sha256 = actualHash;
+    const wrong = projectCharacterizationManifestPairForComparison(
+      wrongBaseline,
+      wrongCandidate,
+    );
+    expect(wrong.actual).not.toEqual(wrong.expected);
+  }
+
+  const projectedSentinels = journeyManifest("candidate");
+  projectedSentinels.source.fixtureContract.sha256 = currentJourneyFixtureContractSha256();
+  Object.assign(projectedSentinels.source, {
+    revision: "<source-revision>",
+    imageDigest: "sha256:<source-image-digest>",
+    imageTag: "<source-image-tag>",
+    migrationImageDigest: "sha256:<migration-image-digest>",
+    migrationImageTag: "<migration-image-tag>",
+  });
+  const rejectedSentinels = projectCharacterizationManifestPairForComparison(
+    baseline,
+    projectedSentinels,
+  );
+  expect(rejectedSentinels.actual).not.toEqual(rejectedSentinels.expected);
+});
+
+test("projects only a consistent generated PWA shell cache contract", () => {
+  const baseline = journeyManifest("baseline");
+  const candidate = journeyManifest("candidate");
+  setPwaShellCache(baseline, "clean-pay-shell-ff7922ad-71fe-405d-b05f-363392d82108");
+  setPwaShellCache(candidate, pwaRevisionCache(candidate));
+  expect(project(candidate)).toEqual(project(baseline));
+
+  const inconsistent = journeyManifest("candidate");
+  setPwaShellCache(inconsistent, pwaRevisionCache(inconsistent));
+  pwaBoundaryCacheNames(inconsistent)[0] = `clean-pay-shell-${"b".repeat(40)}`;
+  expect(project(inconsistent)).not.toEqual(project(baseline));
+
+  const invalidFormat = journeyManifest("candidate");
+  setPwaShellCache(invalidFormat, "clean-pay-shell-synthetic-build");
+  expect(project(invalidFormat)).not.toEqual(project(baseline));
+
+  const widenedBoundary = journeyManifest("candidate");
+  setPwaShellCache(widenedBoundary, pwaRevisionCache(widenedBoundary));
+  Object.assign(pwaBoundary(widenedBoundary), { unexpected: true });
+  expect(project(widenedBoundary)).not.toEqual(project(baseline));
+
+  const outsideJourney = journeyManifest("candidate");
+  setPwaShellCache(outsideJourney, pwaRevisionCache(outsideJourney));
+  outsideJourney.journey = "tariffs-payment-returns-extend-idempotency";
+  expect(project(outsideJourney)).not.toEqual(project(baseline));
+});
+
+test("projects hashed static references inside journey checkpoints only", () => {
+  const baseline = journeyManifest("baseline");
+  const candidate = journeyManifest("candidate");
+  setCheckpointStylesheet(baseline, "/_next/static/chunks/12345678.css");
+  setCheckpointStylesheet(candidate, "/_next/static/chunks/87654321.css");
+  expect(project(candidate)).toEqual(project(baseline));
+
+  const nearMiss = journeyManifest("candidate");
+  setCheckpointStylesheet(nearMiss, "/_next/static/chunks/not-opaque.css");
+  expect(project(nearMiss)).not.toEqual(project(baseline));
+});
+
+test("projects only exact failed generated static requests in the public journey", () => {
+  const baseline = journeyManifest("baseline");
+  const candidate = journeyManifest("candidate");
+  addFailedStaticRequests(baseline, "baseline");
+  addFailedStaticRequests(candidate, "candidate");
+  expect(project(candidate)).toEqual(project(baseline));
+
+  const nearMisses: Array<(manifest: ReturnType<typeof journeyManifest>) => void> = [
+    (manifest) => {
+      const failure = failedStaticRequest(manifest, 1).failure as { errorText: { sha256: string } };
+      failure.errorText.sha256 = "f".repeat(64);
+    },
+    (manifest) => {
+      const headers = failedStaticRequest(manifest, 1).requestHeaders as Array<Record<string, unknown>>;
+      const referer = headers.at(-1)?.value as Record<string, unknown>;
+      referer.pathname = "/tariffs";
+    },
+    (manifest) => {
+      const headers = failedStaticRequest(manifest, 1).requestHeaders as unknown[];
+      headers.push({ name: "x-near-miss", value: { bytes: 1, sha256: "0".repeat(64) } });
+    },
+    (manifest) => {
+      const url = failedStaticRequest(manifest, 2).url as Record<string, unknown>;
+      url.pathname = "/_next/static/chunks/not-opaque.css";
+    },
+    (manifest) => {
+      Object.assign(failedStaticRequest(manifest, 1), { unexpected: true });
+    },
+  ];
+  for (const mutate of nearMisses) {
+    const nearMiss = journeyManifest("candidate");
+    addFailedStaticRequests(nearMiss, "candidate");
+    mutate(nearMiss);
+    expect(project(nearMiss)).not.toEqual(project(baseline));
+  }
 });
 
 test("keeps stable journey payload fields and dynamic formats observable", () => {
@@ -371,6 +493,162 @@ function setOfflineCssPaths(
     manifest.console.offlineFallbackResourceFailures[index]!
       .diagnostic.location.url.pathname = `/_next/static/chunks/${seed}${index}chunk.css`;
   }
+}
+
+function setPwaShellCache(
+  manifest: ReturnType<typeof journeyManifest>,
+  cacheName: string,
+) {
+  manifest.journey = "public-responsive-keyboard-install-offline-support";
+  const checkpoints = (manifest as unknown as Record<string, unknown>).checkpoints as unknown[];
+  checkpoints.push({
+    label: "offline-recovery-support",
+    cookies: [],
+  });
+  for (const checkpointValue of checkpoints) {
+    const checkpoint = checkpointValue as unknown as Record<string, unknown>;
+    checkpoint.storage = {
+      local: [],
+      session: [],
+      cacheNames: [cacheName],
+      serviceWorkerScopes: [],
+    };
+  }
+  (manifest as unknown as Record<string, unknown>).boundaries = [{
+    label: "pwa-service-worker-offline",
+    value: {
+      registrationMode: "playwright-explicit-production-sw",
+      reason: "pristine-static-csp-blocks-install-page-hydration",
+      online: {
+        scriptPath: "/sw.js",
+        scopePath: "/",
+        cacheNames: [cacheName],
+      },
+      offline: {
+        controlled: true,
+        pathname: "/offline",
+        queryKeys: ["journey_offline"],
+      },
+    },
+  }];
+}
+
+function pwaBoundary(manifest: ReturnType<typeof journeyManifest>) {
+  return ((manifest as unknown as Record<string, unknown>).boundaries as Array<Record<string, unknown>>)[0]!;
+}
+
+function pwaBoundaryCacheNames(manifest: ReturnType<typeof journeyManifest>) {
+  const value = pwaBoundary(manifest).value as Record<string, unknown>;
+  const online = value.online as Record<string, unknown>;
+  return online.cacheNames as string[];
+}
+
+function pwaRevisionCache(manifest: ReturnType<typeof journeyManifest>) {
+  return `clean-pay-shell-${manifest.source.revision}`;
+}
+
+function setCheckpointStylesheet(
+  manifest: ReturnType<typeof journeyManifest>,
+  href: string,
+) {
+  const checkpoint = manifest.checkpoints[0] as unknown as Record<string, unknown>;
+  checkpoint.url = canonicalUrl("/tariffs");
+  checkpoint.dom = {
+    type: "element",
+    tag: "html",
+    attributes: [],
+    children: [{
+      type: "element",
+      tag: "head",
+      attributes: [],
+      children: [{
+        type: "element",
+        tag: "link",
+        attributes: [
+          { name: "href", value: href },
+          { name: "rel", value: "stylesheet" },
+        ],
+        children: [],
+      }],
+    }],
+  };
+}
+
+function addFailedStaticRequests(
+  manifest: ReturnType<typeof journeyManifest>,
+  seed: string,
+) {
+  manifest.journey = "public-responsive-keyboard-install-offline-support";
+  manifest.network.requests.push(
+    {
+      index: 1,
+      method: "GET",
+      url: canonicalUrl(`/_next/static/chunks/${seed}0chunk.js`),
+      scope: "application",
+      resourceType: "script",
+      navigation: false,
+      serverAction: { present: false, identifier: null },
+      requestHeaders: [{
+        name: "referer",
+        value: canonicalUrl("/install"),
+      }],
+      postData: null,
+      redirectedFrom: null,
+      response: null,
+      failure: {
+        errorText: {
+          bytes: 3,
+          sha256: "438ced67d76cf3c3bf3e9781a9640ab685b2c877f7cc93b6758cc641efd51bc6",
+        },
+      },
+      externalTransport: null,
+    } as unknown as ReturnType<typeof journeyManifest>["network"]["requests"][number],
+    {
+      index: 2,
+      method: "GET",
+      url: canonicalUrl(`/_next/static/chunks/${seed}1chunk.css`),
+      scope: "application",
+      resourceType: "stylesheet",
+      navigation: false,
+      serverAction: { present: false, identifier: null },
+      requestHeaders: offlineStylesheetHeaders(),
+      postData: null,
+      redirectedFrom: null,
+      response: null,
+      failure: {
+        errorText: {
+          bytes: 30,
+          sha256: "4b47ef4954a96234348ce9b1a492377dca3fd6bb69b657049ce6cf31071e69a3",
+        },
+      },
+      externalTransport: null,
+    } as unknown as ReturnType<typeof journeyManifest>["network"]["requests"][number],
+  );
+}
+
+function failedStaticRequest(
+  manifest: ReturnType<typeof journeyManifest>,
+  index: number,
+) {
+  return manifest.network.requests[index] as unknown as Record<string, unknown>;
+}
+
+function offlineStylesheetHeaders() {
+  return [
+    { name: "accept", value: { bytes: 18, sha256: "c2ad092018fde14a52b5febd6b403e12f11001eed0aff58f453ab8b621a255d3" } },
+    { name: "accept-language", value: { bytes: 5, sha256: "d3555b890eb35b88d3cb9ce38d8e64de37a39fcb9d8930fa297f454996543a54" } },
+    {
+      name: "referer",
+      value: canonicalUrl("/offline", [{
+        key: "journey_offline",
+        value: "<sha256:6b86b273ff34fce1>",
+      }]),
+    },
+    { name: "sec-ch-ua", value: { bytes: 66, sha256: "27e6edc326b21eb663888a7317cfd4710d559fc9e6c8093ff5016c7aa469d4fd" } },
+    { name: "sec-ch-ua-mobile", value: { bytes: 2, sha256: "36100dcc5adbcee0b8d9480dda9be2a0cd192e33af3a6933caad3a09fd50c1c0" } },
+    { name: "sec-ch-ua-platform", value: { bytes: 9, sha256: "0b1d1e9a36456a50dec652d22d95df7908422c429f91c65e9906ce500aaa2d8b" } },
+    { name: "user-agent", value: { bytes: 123, sha256: "3caf269ff15e9469bb7f47985b75b52aa4c2fd24dbe3118b40ca31edb48c9178" } },
+  ];
 }
 
 function canonicalUrl(

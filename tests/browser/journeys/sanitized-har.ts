@@ -164,10 +164,19 @@ function harString(value: unknown) {
 function assertHarSource(value: unknown): asserts value is SanitizedHarSource {
   if (
     !isRecord(value)
+    || !hasExactKeys(value, [
+      "journey",
+      "navigations",
+      "network",
+      "project",
+      "providerEffects",
+      "source",
+    ])
     || typeof value.project !== "string"
     || typeof value.journey !== "string"
     || !Array.isArray(value.navigations)
     || !isRecord(value.network)
+    || !hasExactKeys(value.network, ["requests", "serverActionCount", "serverActions"])
     || !Array.isArray(value.network.requests)
     || !Number.isSafeInteger(value.network.serverActionCount)
     || !Array.isArray(value.network.serverActions)
@@ -176,6 +185,13 @@ function assertHarSource(value: unknown): asserts value is SanitizedHarSource {
   ) {
     throw new Error("Sanitized HAR source contract is malformed.");
   }
+}
+
+function hasExactKeys(value: JsonRecord, expected: string[]) {
+  const actual = Object.keys(value).sort();
+  const keys = [...expected].sort();
+  return actual.length === keys.length
+    && actual.every((key, index) => key === keys[index]);
 }
 
 function isRecord(value: unknown): value is JsonRecord {

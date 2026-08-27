@@ -1,5 +1,10 @@
 const SKIP_LINK_TEXT = "К основному содержимому";
 const SKIP_LINK_FRAGMENT = "<sha256:0c1923dd7ec27396>";
+const SKIP_LINK_WRAPPER_CLASSES = new Set([
+  "layout-wrapper layout-static p-ripple-disabled",
+  "layout-wrapper layout-static layout-mobile-active p-ripple-disabled",
+  "layout-wrapper layout-static layout-static-inactive p-ripple-disabled",
+]);
 
 const cabinetHeadings = new Map<string, string | null>([
   ["Профиль", null],
@@ -148,7 +153,7 @@ function isExactSkipLink(entry: DomEntry, context: ProjectionContext) {
   return context.skipLinkHref !== null
     && entry.node.tag === "a"
     && /^html > body > div(?::nth-of-type\(\d+\))? > a$/.test(entry.path)
-    && getAttribute(entry.parent, "class") === "layout-wrapper layout-static p-ripple-disabled"
+    && SKIP_LINK_WRAPPER_CLASSES.has(getAttribute(entry.parent, "class") ?? "")
     && hasExactAttributes(entry.node, {
       class: "skip-link",
       href: context.skipLinkHref,
@@ -460,22 +465,40 @@ function projectExactLogoAria(lines: string[], context: ProjectionContext) {
         && projected[index + 3] === "    - text: Clean Pay"
       ) {
         projected[index] = '  - link "Clean Pay":';
+        projected.splice(index + 2, 2);
+        break;
+      }
+      if (
+        projected[index] === '  - link "Clean Pay":'
+        && projected[index + 1]
+          === '    - /url: {"origin":"<app-origin>","pathname":"/","query":[],"fragment":null}'
+        && projected[index + 2] === "    - text: Clean Pay"
+      ) {
         projected.splice(index + 2, 1);
         break;
       }
     }
   }
   if (context.footerLogo) {
-    const contentinfo = projected.indexOf("- contentinfo:");
-    if (
-      contentinfo >= 0
-      && projected[contentinfo + 1] === '  - img "Clean Pay logo"'
-      && projected[contentinfo + 2]?.startsWith("  - text: Clean Pay Версия ")
-    ) {
-      projected.splice(contentinfo + 1, 1);
+    for (let index = 0; index < projected.length; index += 1) {
+      if (projected[index] !== "- contentinfo:") continue;
+      const hasLogo = projected[index + 1] === '  - img "Clean Pay logo"';
+      const textIndex = index + (hasLogo ? 2 : 1);
+      const version = exactFooterVersion(projected[textIndex]);
+      if (!version) continue;
+      projected[index] = `- contentinfo: Clean Pay Версия ${version}`;
+      projected.splice(index + 1, hasLogo ? 2 : 1);
+      break;
     }
   }
   return projected;
+}
+
+function exactFooterVersion(line: string | undefined) {
+  const match = /^  - text: Clean Pay Версия ([0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?)$/.exec(
+    line ?? "",
+  );
+  return match?.[1] ?? null;
 }
 
 function removeExactSkipLinkAria(
