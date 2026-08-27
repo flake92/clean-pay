@@ -18,7 +18,16 @@ esac
 readonly RUN_SUFFIX="${GITHUB_RUN_ID:-local}-${GITHUB_RUN_ATTEMPT:-1}-$$-${RANDOM}"
 readonly NETWORK="clean-pay-migration-rehearsal-${RUN_SUFFIX}"
 readonly POSTGRES_CONTAINER="clean-pay-migration-postgres-${RUN_SUFFIX}"
-readonly MIGRATION_IMAGE="clean-pay-migration-rehearsal:${RUN_SUFFIX}"
+readonly OWNED_MIGRATION_IMAGE="clean-pay-migration-rehearsal:${RUN_SUFFIX}"
+MIGRATION_IMAGE="$OWNED_MIGRATION_IMAGE"
+readonly -a EXACT_IMAGE_INPUT_NAMES=(
+  CLEAN_PAY_REHEARSAL_EXTERNAL_MIGRATION_IMAGE
+  CLEAN_PAY_REHEARSAL_EXPECTED_IMAGE_ID
+  CLEAN_PAY_REHEARSAL_EXPECTED_REVISION
+  CLEAN_PAY_REHEARSAL_EXPECTED_RELEASE
+  CLEAN_PAY_REHEARSAL_EXPECTED_PUBLIC_BUILD_CONTRACT_VERSION
+  CLEAN_PAY_REHEARSAL_EXPECTED_PUBLIC_BUILD_CONTRACT_SHA256
+)
 readonly DATABASE_USER="clean_pay_rehearsal"
 readonly DATABASE_PASSWORD="synthetic-clean-pay-rehearsal-password"
 readonly DATABASE_NAME="clean_pay_populated"
@@ -39,6 +48,11 @@ readonly CLEAN_PAY_HEAD
 encrypted_fixture_file=""
 migration_stage_root=""
 migration_build_log=""
+migration_image_inspect_file=""
+migration_image_owned=true
+migration_deploy_source=build
+migration_contract_application_image=clean-pay-rehearsal-app:synthetic
+migration_contract_migration_image="$MIGRATION_IMAGE"
 
 docker_host_path() {
   if [ "$DOCKER_PATH_CONVERSION_REQUIRED" = true ]; then
@@ -63,13 +77,18 @@ cleanup() {
   if [ -n "$migration_build_log" ] && [ -f "$migration_build_log" ]; then
     rm -f -- "$migration_build_log"
   fi
+  if [ -n "$migration_image_inspect_file" ] && [ -f "$migration_image_inspect_file" ]; then
+    rm -f -- "$migration_image_inspect_file"
+  fi
   case "$migration_stage_root" in
     /tmp/clean-pay-migration-stages.*)
       rm -rf -- "$migration_stage_root"
       ;;
   esac
   docker rm --force --volumes "$POSTGRES_CONTAINER" >/dev/null 2>&1 || true
-  docker image rm "$MIGRATION_IMAGE" >/dev/null 2>&1 || true
+  if [ "$migration_image_owned" = true ]; then
+    docker image rm "$MIGRATION_IMAGE" >/dev/null 2>&1 || true
+  fi
   docker network rm "$NETWORK" >/dev/null 2>&1 || true
 }
 trap cleanup EXIT
@@ -164,9 +183,9 @@ run_exact_migration_image() {
     --tmpfs /tmp:rw,noexec,nosuid,nodev,size=64m,mode=1777 \
     --env DATABASE_URL="$(database_url "$database")" \
     --env CLEAN_PAY_RUNTIME_ROLE=migration \
-    --env CLEAN_PAY_DEPLOY_SOURCE=build \
-    --env CLEAN_PAY_IMAGE=clean-pay-rehearsal-app:synthetic \
-    --env CLEAN_PAY_MIGRATION_IMAGE="$MIGRATION_IMAGE" \
+    --env CLEAN_PAY_DEPLOY_SOURCE="$migration_deploy_source" \
+    --env CLEAN_PAY_IMAGE="$migration_contract_application_image" \
+    --env CLEAN_PAY_MIGRATION_IMAGE="$migration_contract_migration_image" \
     "$MIGRATION_IMAGE"
 }
 
@@ -186,24 +205,76 @@ test -z "$(git -C "$ROOT_DIR" status --porcelain=v1 --untracked-files=all)" ||
 mkdir -p "$REHEARSAL_OUTPUT_DIR"
 migration_stage_root=$(mktemp -d /tmp/clean-pay-migration-stages.XXXXXX)
 chmod 0755 "$migration_stage_root"
-migration_build_log=$(mktemp)
 
-set +e
-docker build --pull --target migration \
-  --build-arg CLEAN_PAY_RELEASE=audit-rehearsal \
-  --build-arg CLEAN_PAY_REVISION="$CLEAN_PAY_REVISION" \
-  --tag "$MIGRATION_IMAGE" "$(docker_host_path "$ROOT_DIR")" \
-  >"$migration_build_log" 2>&1
-migration_build_exit=$?
-set -e
-cp -- "$migration_build_log" "$REHEARSAL_OUTPUT_DIR/clean-pay-migration-image-build.log"
-rm -f -- "$migration_build_log"
-migration_build_log=""
-test "$migration_build_exit" -eq 0 || fail "could not build the exact Clean Pay migration image"
-test "$(docker image inspect --format '{{index .Config.Labels "io.clean-pay.role"}}' "$MIGRATION_IMAGE")" = "migration" ||
-  fail "Clean Pay rehearsal image is not the migration target"
-test "$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$MIGRATION_IMAGE")" = "$CLEAN_PAY_REVISION" ||
-  fail "Clean Pay rehearsal image revision label does not match the checkout"
+exact_image_input_count=0
+for exact_image_input_name in "${EXACT_IMAGE_INPUT_NAMES[@]}"; do
+  if [[ -v "$exact_image_input_name" ]]; then
+    exact_image_input_count=$((exact_image_input_count + 1))
+  fi
+done
+if [ "$exact_image_input_count" -ne 0 ] && [ "$exact_image_input_count" -ne "${#EXACT_IMAGE_INPUT_NAMES[@]}" ]; then
+  fail "exact migration image inputs must be provided together"
+fi
+
+if [ "$exact_image_input_count" -eq "${#EXACT_IMAGE_INPUT_NAMES[@]}" ]; then
+  migration_image_owned=false
+  test "$CLEAN_PAY_REHEARSAL_EXPECTED_REVISION" = "$CLEAN_PAY_REVISION" ||
+    fail "exact migration image revision does not match the clean checkout"
+  migration_image_inspect_file=$(mktemp)
+  chmod 0600 "$migration_image_inspect_file"
+  docker image inspect "$CLEAN_PAY_REHEARSAL_EXTERNAL_MIGRATION_IMAGE" \
+    >"$migration_image_inspect_file" ||
+    fail "could not inspect the caller-owned exact migration image"
+  MIGRATION_IMAGE=$(node "$SCRIPT_DIR/verify-rehearsal-migration-image.mjs" \
+    --inspection "$migration_image_inspect_file" \
+    --image-reference "$CLEAN_PAY_REHEARSAL_EXTERNAL_MIGRATION_IMAGE" \
+    --expected-image-id "$CLEAN_PAY_REHEARSAL_EXPECTED_IMAGE_ID" \
+    --expected-revision "$CLEAN_PAY_REHEARSAL_EXPECTED_REVISION" \
+    --expected-release "$CLEAN_PAY_REHEARSAL_EXPECTED_RELEASE" \
+    --expected-public-build-contract-version \
+      "$CLEAN_PAY_REHEARSAL_EXPECTED_PUBLIC_BUILD_CONTRACT_VERSION" \
+    --expected-public-build-contract-sha256 \
+      "$CLEAN_PAY_REHEARSAL_EXPECTED_PUBLIC_BUILD_CONTRACT_SHA256") ||
+    fail "caller-owned exact migration image failed immutable identity validation"
+  test "$MIGRATION_IMAGE" = "$CLEAN_PAY_REHEARSAL_EXPECTED_IMAGE_ID" ||
+    fail "exact migration image verifier returned an unexpected local image ID"
+  migration_deploy_source=pull
+  migration_contract_migration_image="$CLEAN_PAY_REHEARSAL_EXTERNAL_MIGRATION_IMAGE"
+  external_migration_digest=${CLEAN_PAY_REHEARSAL_EXTERNAL_MIGRATION_IMAGE##*@sha256:}
+  if [ "$external_migration_digest" = "$(printf '0%.0s' {1..64})" ]; then
+    rehearsal_application_digest=$(printf '1%.0s' {1..64})
+  else
+    rehearsal_application_digest=$(printf '0%.0s' {1..64})
+  fi
+  migration_contract_application_image="clean-pay-rehearsal-app@sha256:$rehearsal_application_digest"
+  printf 'mode=caller-owned-exact\nimageReference=%s\nimageId=%s\nrevision=%s\nrelease=%s\npublicBuildContractVersion=%s\npublicBuildContractSha256=%s\n' \
+    "$CLEAN_PAY_REHEARSAL_EXTERNAL_MIGRATION_IMAGE" \
+    "$CLEAN_PAY_REHEARSAL_EXPECTED_IMAGE_ID" \
+    "$CLEAN_PAY_REHEARSAL_EXPECTED_REVISION" \
+    "$CLEAN_PAY_REHEARSAL_EXPECTED_RELEASE" \
+    "$CLEAN_PAY_REHEARSAL_EXPECTED_PUBLIC_BUILD_CONTRACT_VERSION" \
+    "$CLEAN_PAY_REHEARSAL_EXPECTED_PUBLIC_BUILD_CONTRACT_SHA256" \
+    >"$REHEARSAL_OUTPUT_DIR/clean-pay-migration-image-build.log"
+else
+  migration_build_log=$(mktemp)
+
+  set +e
+  docker build --pull --target migration \
+    --build-arg CLEAN_PAY_RELEASE=audit-rehearsal \
+    --build-arg CLEAN_PAY_REVISION="$CLEAN_PAY_REVISION" \
+    --tag "$MIGRATION_IMAGE" "$(docker_host_path "$ROOT_DIR")" \
+    >"$migration_build_log" 2>&1
+  migration_build_exit=$?
+  set -e
+  cp -- "$migration_build_log" "$REHEARSAL_OUTPUT_DIR/clean-pay-migration-image-build.log"
+  rm -f -- "$migration_build_log"
+  migration_build_log=""
+  test "$migration_build_exit" -eq 0 || fail "could not build the exact Clean Pay migration image"
+  test "$(docker image inspect --format '{{index .Config.Labels "io.clean-pay.role"}}' "$MIGRATION_IMAGE")" = "migration" ||
+    fail "Clean Pay rehearsal image is not the migration target"
+  test "$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$MIGRATION_IMAGE")" = "$CLEAN_PAY_REVISION" ||
+    fail "Clean Pay rehearsal image revision label does not match the checkout"
+fi
 
 docker network create "$NETWORK" >/dev/null
 docker run --detach --name "$POSTGRES_CONTAINER" --network "$NETWORK" \
