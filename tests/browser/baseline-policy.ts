@@ -190,6 +190,10 @@ export async function reconcileProjectedJsonBaselineArtifact(options: {
   baselineFile: string;
   actual: Uint8Array;
   project: (value: Uint8Array) => Uint8Array;
+  projectPair?: (
+    expected: Uint8Array,
+    actual: Uint8Array,
+  ) => { expected: Uint8Array; actual: Uint8Array };
   repositoryRoot?: string;
   update?: boolean;
 }): Promise<ArtifactReconciliation> {
@@ -212,8 +216,9 @@ export async function reconcileProjectedJsonBaselineArtifact(options: {
       readCurrentCommit(options.repositoryRoot ?? process.cwd()),
     );
   }
-  const projectedExpected = options.project(expected);
-  const projectedActual = options.project(options.actual);
+  const projectedPair = options.projectPair?.(expected, options.actual);
+  const projectedExpected = projectedPair?.expected ?? options.project(expected);
+  const projectedActual = projectedPair?.actual ?? options.project(options.actual);
   if (!Buffer.from(projectedExpected).equals(Buffer.from(projectedActual))) {
     throw new BaselineMismatchError(
       options.baselineFile,

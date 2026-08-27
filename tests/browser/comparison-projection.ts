@@ -17,6 +17,11 @@ const CSP_REQUEST_FAILURE = {
   sha256: "438ced67d76cf3c3bf3e9781a9640ab685b2c877f7cc93b6758cc641efd51bc6",
 } as const;
 
+const NEXT_JS_POWERED_BY = {
+  bytes: 7,
+  sha256: "30b7f8482c4f570c063e4dff04b91ddc9b2b5f535ac70fedffb1cf34e0d23ec6",
+} as const;
+
 const STATIC_CHUNK_PATH = /^\/_next\/static\/chunks\/(?:turbopack-)?(?=[A-Za-z0-9_-]{8,}\.(?:css|js)$)(?=[A-Za-z0-9_-]*[0-9])[A-Za-z0-9_-]+\.(?:css|js)$/;
 const STATIC_MEDIA_PATH = /^\/_next\/static\/media\/[A-Za-z0-9._-]+\.(?=[A-Za-z0-9_-]{8,}\.[A-Za-z0-9]+$)(?=[A-Za-z0-9_-]*[0-9])[A-Za-z0-9_-]+\.(?:avif|gif|ico|jpeg|jpg|png|svg|webp|woff2)$/;
 
@@ -39,6 +44,23 @@ export function projectCharacterizationManifestForComparison(value: unknown) {
   projectStaticDomAssetReferences(projected);
   projectNetwork(projected);
   return projected;
+}
+
+/**
+ * Applies the one directional response-header exception that cannot be
+ * expressed by projecting each side independently. The immutable baseline
+ * disclosed the exact `Next.js` X-Powered-By value, while hardened candidates
+ * omit it. Every other header value, direction, duplicate, order, or adjacent
+ * response difference remains observable.
+ */
+export function projectCharacterizationManifestPairForComparison(
+  expectedValue: unknown,
+  actualValue: unknown,
+) {
+  const expected = projectCharacterizationManifestForComparison(expectedValue);
+  const actual = projectCharacterizationManifestForComparison(actualValue);
+  projectExactRemovedNextJsPoweredBy(expected, actual);
+  return { expected, actual };
 }
 
 function projectJourneyOfflineFallbackConsole(manifest: Record<string, unknown>) {
@@ -279,6 +301,95 @@ export function projectCharacterizationManifestBytesForComparison(
   return Buffer.from(
     `${JSON.stringify(projectCharacterizationManifestForComparison(parsed), null, 2)}\n`,
   );
+}
+
+export function projectCharacterizationManifestPairBytesForComparison(
+  expectedValue: Uint8Array,
+  actualValue: Uint8Array,
+) {
+  const expectedParsed: unknown = JSON.parse(Buffer.from(expectedValue).toString("utf8"));
+  const actualParsed: unknown = JSON.parse(Buffer.from(actualValue).toString("utf8"));
+  const projected = projectCharacterizationManifestPairForComparison(
+    expectedParsed,
+    actualParsed,
+  );
+  return {
+    expected: Buffer.from(`${JSON.stringify(projected.expected, null, 2)}\n`),
+    actual: Buffer.from(`${JSON.stringify(projected.actual, null, 2)}\n`),
+  };
+}
+
+function projectExactRemovedNextJsPoweredBy(expected: unknown, actual: unknown) {
+  if (!isRecord(expected) || !isRecord(actual)) return;
+  const expectedNetwork = expected.network;
+  const actualNetwork = actual.network;
+  if (
+    !isRecord(expectedNetwork)
+    || !isRecord(actualNetwork)
+    || !Array.isArray(expectedNetwork.requests)
+    || !Array.isArray(actualNetwork.requests)
+    || expectedNetwork.requests.length !== actualNetwork.requests.length
+  ) {
+    return;
+  }
+
+  for (const [position, expectedRequestValue] of expectedNetwork.requests.entries()) {
+    const actualRequestValue = actualNetwork.requests[position];
+    if (
+      !isRecord(expectedRequestValue)
+      || !isRecord(actualRequestValue)
+      || expectedRequestValue.scope !== "application"
+      || actualRequestValue.scope !== "application"
+      || !equalExceptKey(expectedRequestValue, actualRequestValue, "response")
+      || !isRecord(expectedRequestValue.response)
+      || !isRecord(actualRequestValue.response)
+      || !equalExceptKey(expectedRequestValue.response, actualRequestValue.response, "headers")
+      || !Array.isArray(expectedRequestValue.response.headers)
+      || !Array.isArray(actualRequestValue.response.headers)
+    ) {
+      continue;
+    }
+
+    const expectedHeaders = expectedRequestValue.response.headers;
+    const actualHeaders = actualRequestValue.response.headers;
+    const disclosureIndexes = expectedHeaders.flatMap((header, index) => (
+      isExactNextJsPoweredByHeader(header) ? [index] : []
+    ));
+    if (
+      disclosureIndexes.length !== 1
+      || actualHeaders.some((header) => (
+        isRecord(header) && header.name === "x-powered-by"
+      ))
+    ) {
+      continue;
+    }
+
+    const expectedWithoutDisclosure = expectedHeaders.filter(
+      (_, index) => index !== disclosureIndexes[0],
+    );
+    if (JSON.stringify(expectedWithoutDisclosure) !== JSON.stringify(actualHeaders)) {
+      continue;
+    }
+    expectedRequestValue.response.headers = expectedWithoutDisclosure;
+  }
+}
+
+function isExactNextJsPoweredByHeader(value: unknown) {
+  return isRecord(value)
+    && hasExactKeys(value, ["name", "value"])
+    && value.name === "x-powered-by"
+    && isExactDigest(value.value, NEXT_JS_POWERED_BY);
+}
+
+function equalExceptKey(
+  left: Record<string, unknown>,
+  right: Record<string, unknown>,
+  excludedKey: string,
+) {
+  const withoutExcludedKey = (value: Record<string, unknown>) => Object.fromEntries(
+    Object.entries(value).filter(([key]) => key !== excludedKey),
+  );
+  return JSON.stringify(withoutExcludedKey(left)) === JSON.stringify(withoutExcludedKey(right));
 }
 
 function projectNetwork(manifest: Record<string, unknown>) {
