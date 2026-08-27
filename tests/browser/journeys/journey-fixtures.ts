@@ -110,7 +110,7 @@ export const test = guardedTest.extend<{ journey: JourneyProbe }>({
           page,
           label,
           baseUrl.origin,
-          recorder.awaitStartedServerActions,
+          recorder.captureStableServerActionCheckpoint,
         );
         checkpoints.push(captured.evidence);
         screenshots.push({ label, bytes: captured.screenshot });
@@ -273,11 +273,22 @@ async function captureCheckpoint(
   page: Page,
   label: string,
   applicationOrigin: string,
-  awaitStartedServerActions: () => Promise<void>,
+  captureStableServerActionCheckpoint: <T>(
+    capture: () => Promise<T>,
+  ) => Promise<T>,
 ) {
   await settleJourneyCapture(page);
-  await awaitStartedServerActions();
-  await settleJourneyRender(page);
+  return captureStableServerActionCheckpoint(async () => {
+    await settleJourneyRender(page);
+    return captureCheckpointState(page, label, applicationOrigin);
+  });
+}
+
+async function captureCheckpointState(
+  page: Page,
+  label: string,
+  applicationOrigin: string,
+) {
   const screenshot = await captureByteIdenticalScreenshotMajority(page);
   await page.evaluate(() => document.fonts.ready);
   const [snapshot, dom, computedStyles, interactiveElements, ariaSnapshot, storage, cookies] = await Promise.all([
