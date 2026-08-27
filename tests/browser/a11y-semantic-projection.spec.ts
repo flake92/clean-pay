@@ -37,6 +37,11 @@ test.describe("candidate-only accessibility semantic allowlist", () => {
     for (const logo of logoCases()) {
       expect(project(logo.candidate), logo.name).toEqual(project(logo.baseline));
     }
+
+    const cssFreeAuth = structuredClone(logoCases()[0]!);
+    setDomAttribute(cssFreeAuth.candidate, "img", "alt", "Clean Pay");
+    setDomAttribute(cssFreeAuth.candidate, "img", "aria-hidden", "true");
+    expect(project(cssFreeAuth.candidate)).toEqual(project(cssFreeAuth.baseline));
     const shellPair = logoCases()[1]!;
     const realBrowserShell = structuredClone(shellPair.candidate);
     realBrowserShell.ariaSnapshot = [
@@ -142,6 +147,11 @@ test.describe("candidate-only accessibility semantic allowlist", () => {
     const wrongLogo = structuredClone(auth.candidate);
     setDomAttribute(wrongLogo, "img", "src", "/different-logo.png");
     expect(project(wrongLogo)).not.toEqual(project(auth.baseline));
+
+    const visibleCssFreeLogo = structuredClone(auth.candidate);
+    setDomAttribute(visibleCssFreeLogo, "img", "alt", "Clean Pay");
+    setDomAttribute(visibleCssFreeLogo, "img", "aria-hidden", "false");
+    expect(project(visibleCssFreeLogo)).not.toEqual(project(auth.baseline));
 
     const shell = logoCases()[1]!;
     for (const ariaSnapshot of [
@@ -515,7 +525,12 @@ function setDomAttribute(
   const dom = manifest.dom as DomNode;
   const node = findDomElement(dom, tag);
   const attribute = node?.attributes?.find((entry) => entry.name === name);
-  if (attribute) attribute.value = value;
+  if (attribute) {
+    attribute.value = value;
+    return;
+  }
+  node?.attributes?.push({ name, value });
+  node?.attributes?.sort((left, right) => left.name.localeCompare(right.name));
 }
 
 function findDomElement(node: DomNode, tag: string): DomNode | null {
