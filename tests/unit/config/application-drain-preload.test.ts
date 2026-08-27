@@ -108,6 +108,20 @@ describe("production application drain preload", () => {
     expect(gracefulProbe).toContain("active_requests=[1-9]\\d*");
     expect(gracefulProbe).toContain("status === 503 || status >= 500");
   });
+
+  it("completes the probe body without half-closing its TCP response stream", () => {
+    const gracefulProbe = readFileSync(
+      "scripts/security/verify-app-graceful-request.mjs",
+      "utf8",
+    );
+
+    expect(gracefulProbe).toContain(
+      "socket.write(requestBody.subarray(splitAt))",
+    );
+    expect(gracefulProbe).not.toContain(
+      "socket.end(requestBody.subarray(splitAt))",
+    );
+  });
 });
 
 function startFixture(mode: string, timeoutMs: number) {

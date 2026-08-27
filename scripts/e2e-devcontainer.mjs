@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs";
+import { existsSync, statfsSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
@@ -23,6 +23,13 @@ const devcontainerHostPortDefaults = {
   CLEAN_PAY_DEVCONTAINER_CADDY_REMNASHOP_HOST_PORT: "8081",
   CLEAN_PAY_DEVCONTAINER_CADDY_MAILPIT_HOST_PORT: "8026",
 };
+const hostE2eMinimumFreeBytes = 15n * 1024n * 1024n * 1024n;
+const internalDiskPreflightOnlyEnv =
+  "CLEAN_PAY_INTERNAL_E2E_DISK_PREFLIGHT_ONLY";
+const internalHostPlatformEnv = "CLEAN_PAY_INTERNAL_E2E_HOST_PLATFORM";
+const internalMinimumFreeBytesEnv =
+  "CLEAN_PAY_INTERNAL_E2E_MIN_FREE_BYTES";
+const internalRunnerLocationEnv = "CLEAN_PAY_INTERNAL_E2E_RUNNER_LOCATION";
 
 configureDevcontainerIsolation();
 
@@ -203,11 +210,94 @@ function dockerDesktopHostPath(value) {
 }
 
 function isInsideDevcontainer() {
+  if (process.env.NODE_ENV === "test") {
+    const internalLocation = process.env[internalRunnerLocationEnv]?.trim();
+
+    if (internalLocation === "host") return false;
+    if (internalLocation === "inner") return true;
+  }
+
   return (
     process.env.CLEAN_PAY_E2E_RUNNER_INSIDE === "1" ||
     process.env.REMOTE_CONTAINERS === "true" ||
     existsSync("/.dockerenv")
   );
+}
+
+function isCiEnvironment() {
+  return /^(?:1|true)$/iu.test(process.env.CI?.trim() ?? "");
+}
+
+function hostPlatform() {
+  if (process.env.NODE_ENV === "test") {
+    return process.env[internalHostPlatformEnv]?.trim() || process.platform;
+  }
+
+  return process.platform;
+}
+
+function requiredHostFreeBytes() {
+  const internalValue = process.env.NODE_ENV === "test"
+    ? process.env[internalMinimumFreeBytesEnv]?.trim()
+    : undefined;
+
+  if (internalValue === undefined || internalValue === "") {
+    return hostE2eMinimumFreeBytes;
+  }
+
+  if (!/^[1-9][0-9]*$/u.test(internalValue)) {
+    throw new Error(
+      `${internalMinimumFreeBytesEnv} must be a positive integer in test mode.`,
+    );
+  }
+
+  return BigInt(internalValue);
+}
+
+function assertHostDiskSpace() {
+  if (
+    isInsideDevcontainer()
+    || hostPlatform() !== "win32"
+    || isCiEnvironment()
+  ) {
+    return;
+  }
+
+  const requiredBytes = requiredHostFreeBytes();
+  let stats;
+
+  try {
+    stats = statfsSync(rootDir, { bigint: true });
+  } catch (error) {
+    const code = error && typeof error === "object" && "code" in error
+      && typeof error.code === "string" && /^[A-Z0-9_]{1,32}$/u.test(error.code)
+      ? error.code
+      : "UNKNOWN";
+
+    throw new Error(
+      "E2E host disk preflight failed: " +
+      `path=${JSON.stringify(rootDir)} fsType=unavailable ` +
+      `freeBytes=unavailable requiredBytes=${requiredBytes} ` +
+      `statfsCode=${code}.`,
+    );
+  }
+
+  const freeBytes = stats.bavail * stats.bsize;
+
+  if (freeBytes < requiredBytes) {
+    throw new Error(
+      "E2E host disk preflight failed: " +
+      `path=${JSON.stringify(rootDir)} ` +
+      `fsType=0x${stats.type.toString(16)} ` +
+      `blockSizeBytes=${stats.bsize} availableBlocks=${stats.bavail} ` +
+      `freeBytes=${freeBytes} requiredBytes=${requiredBytes}.`,
+    );
+  }
+}
+
+function isInternalDiskPreflightOnly() {
+  return process.env.NODE_ENV === "test"
+    && process.env[internalDiskPreflightOnlyEnv] === "1";
 }
 
 function runShellScript() {
@@ -298,7 +388,20 @@ function runInsideDevcontainer() {
   }
 }
 
-if (isInsideDevcontainer()) {
+const insideDevcontainer = isInsideDevcontainer();
+
+if (!insideDevcontainer) {
+  try {
+    assertHostDiskSpace();
+  } catch (error) {
+    console.error(error instanceof Error ? error.message : "E2E host disk preflight failed.");
+    process.exit(1);
+  }
+}
+
+if (isInternalDiskPreflightOnly()) {
+  process.exitCode = 0;
+} else if (insideDevcontainer) {
   runShellScript();
 } else {
   runInsideDevcontainer();
