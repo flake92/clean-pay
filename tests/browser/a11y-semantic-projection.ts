@@ -72,8 +72,90 @@ const primeAriaEnglishToRussian = new Map<string, string>([
 ]);
 
 const primeAriaRussianToEnglish = new Map(
-  [...primeAriaEnglishToRussian].map(([english, russian]) => [russian, english]),
+  [...primeAriaEnglishToRussian]
+    .map(([english, russian]) => [russian, english] as const),
 );
+
+type PasswordFieldKind = "confirmation" | "current" | "next" | "primary";
+
+type PasswordFieldContext = {
+  fieldLabel: string;
+  inputName: string;
+  kind: PasswordFieldKind;
+  routePathname: string;
+};
+
+const passwordFieldContexts: readonly PasswordFieldContext[] = [
+  { kind: "primary", routePathname: "/login", inputName: "password", fieldLabel: "Пароль" },
+  { kind: "primary", routePathname: "/login", inputName: "password", fieldLabel: "Придумайте пароль" },
+  { kind: "primary", routePathname: "/login", inputName: "password", fieldLabel: "Новый пароль" },
+  { kind: "primary", routePathname: "/register", inputName: "password", fieldLabel: "Пароль" },
+  { kind: "primary", routePathname: "/register", inputName: "password", fieldLabel: "Придумайте пароль" },
+  { kind: "primary", routePathname: "/register", inputName: "password", fieldLabel: "Новый пароль" },
+  {
+    kind: "primary",
+    routePathname: "/link-account",
+    inputName: "password",
+    fieldLabel: "Пароль личного кабинета",
+  },
+  {
+    kind: "primary",
+    routePathname: "/link-account",
+    inputName: "password",
+    fieldLabel: "Пароль для входа",
+  },
+  {
+    kind: "confirmation",
+    routePathname: "/login",
+    inputName: "passwordConfirmation",
+    fieldLabel: "Повторите новый пароль",
+  },
+  {
+    kind: "confirmation",
+    routePathname: "/register",
+    inputName: "passwordConfirmation",
+    fieldLabel: "Повторите новый пароль",
+  },
+  {
+    kind: "confirmation",
+    routePathname: "/link-account",
+    inputName: "confirmPassword",
+    fieldLabel: "Повторите пароль",
+  },
+  {
+    kind: "current",
+    routePathname: "/profile",
+    inputName: "currentPassword",
+    fieldLabel: "Текущий пароль",
+  },
+  {
+    kind: "next",
+    routePathname: "/profile",
+    inputName: "newPassword",
+    fieldLabel: "Новый пароль",
+  },
+];
+
+const contextualPasswordAria = new Map<string, {
+  english: "Hide Password" | "Show Password";
+  kind: PasswordFieldKind;
+  state: "hide" | "show";
+}>([
+  ["Скрыть введённые символы", { english: "Hide Password", kind: "primary", state: "hide" }],
+  ["Показать введённые символы", { english: "Show Password", kind: "primary", state: "show" }],
+  ["Скрыть повторно введённые символы", { english: "Hide Password", kind: "confirmation", state: "hide" }],
+  ["Показать повторно введённые символы", { english: "Show Password", kind: "confirmation", state: "show" }],
+  ["Скрыть текущее введённое значение", { english: "Hide Password", kind: "current", state: "hide" }],
+  ["Показать текущее введённое значение", { english: "Show Password", kind: "current", state: "show" }],
+  ["Скрыть новое введённое значение", { english: "Hide Password", kind: "next", state: "hide" }],
+  ["Показать новое введённое значение", { english: "Show Password", kind: "next", state: "show" }],
+]);
+
+type ContextualPasswordSnapshotEntry = {
+  fieldLabel: string;
+  normalized: "Hide Password" | "Show Password";
+  source: string;
+};
 
 type DomEntry = {
   node: Record<string, unknown>;
@@ -90,7 +172,9 @@ type ProjectionContext = {
   candidateHeadingPaths: Set<string>;
   headingNames: Map<string, number>;
   primeLabelsByPath: Map<string, string>;
+  primeSourceLabelsByPath: Map<string, string>;
   primeSnapshotLabels: Map<string, { count: number; normalized: string }>;
+  contextualPasswordSnapshotEntries: ContextualPasswordSnapshotEntry[];
   passkeyPaths: Set<string>;
   passkeySnapshotLabels: Map<string, number>;
   authLogo: boolean;
@@ -125,7 +209,9 @@ function createContext(manifest: Record<string, unknown>): ProjectionContext {
     candidateHeadingPaths: new Set(),
     headingNames: new Map(),
     primeLabelsByPath: new Map(),
+    primeSourceLabelsByPath: new Map(),
     primeSnapshotLabels: new Map(),
+    contextualPasswordSnapshotEntries: [],
     passkeyPaths: new Set(),
     passkeySnapshotLabels: new Map(),
     authLogo: false,
@@ -135,6 +221,9 @@ function createContext(manifest: Record<string, unknown>): ProjectionContext {
 }
 
 function projectDom(entries: DomEntry[], context: ProjectionContext) {
+  const parentByNode = new Map(
+    entries.map((entry) => [entry.node, entry.parent] as const),
+  );
   for (const entry of entries) {
     if (isExactSkipLink(entry, context)) {
       context.skipLinkPath = entry.path;
@@ -144,7 +233,7 @@ function projectDom(entries: DomEntry[], context: ProjectionContext) {
     projectMainTarget(entry);
     projectDecorativeLogo(entry, context);
     projectCabinetHeading(entry, context);
-    projectPrimeAriaLabel(entry, context);
+    projectPrimeAriaLabel(entry, entries, parentByNode, context);
     projectPasskeyDeleteName(entry, context);
   }
 }
@@ -249,13 +338,35 @@ function projectCabinetHeading(entry: DomEntry, context: ProjectionContext) {
     .sort((left, right) => left.name.localeCompare(right.name));
 }
 
-function projectPrimeAriaLabel(entry: DomEntry, context: ProjectionContext) {
+function projectPrimeAriaLabel(
+  entry: DomEntry,
+  entries: DomEntry[],
+  parentByNode: Map<Record<string, unknown>, Record<string, unknown> | null>,
+  context: ProjectionContext,
+) {
   const current = getAttribute(entry.node, "aria-label");
   if (current === null || !hasPrimeComponentSignature(entry.node)) return;
-  const normalized = normalizePrimeAriaLabel(current);
+  const contextualPassword = exactContextualPasswordProjection(
+    current,
+    entry,
+    entries,
+    parentByNode,
+    context.routePathname,
+  );
+  const normalized = contextualPassword?.normalized
+    ?? normalizePrimeAriaLabel(current);
   if (normalized === null) return;
   setAttribute(entry.node, "aria-label", normalized);
   context.primeLabelsByPath.set(entry.path, normalized);
+  context.primeSourceLabelsByPath.set(entry.path, current);
+  if (contextualPassword) {
+    context.contextualPasswordSnapshotEntries.push({
+      fieldLabel: contextualPassword.fieldLabel,
+      normalized: contextualPassword.normalized,
+      source: current,
+    });
+    return;
+  }
   const snapshotLabel = context.primeSnapshotLabels.get(current);
   context.primeSnapshotLabels.set(current, {
     count: (snapshotLabel?.count ?? 0) + 1,
@@ -400,9 +511,11 @@ function projectInteractiveElements(
   for (const value of interactiveElements) {
     if (!isRecord(value) || typeof value.path !== "string") continue;
     const primeLabel = context.primeLabelsByPath.get(value.path);
-    if (primeLabel && (value.ariaLabel === primeLabel || normalizePrimeAriaLabel(
-      typeof value.ariaLabel === "string" ? value.ariaLabel : "",
-    ) === primeLabel)) {
+    const primeSourceLabel = context.primeSourceLabelsByPath.get(value.path);
+    if (
+      primeLabel
+      && (value.ariaLabel === primeLabel || value.ariaLabel === primeSourceLabel)
+    ) {
       value.ariaLabel = primeLabel;
     }
     if (
@@ -439,12 +552,17 @@ function projectAriaSnapshot(
   lines = projectExactLogoAria(lines, context);
   const eligibleHeadings = eligibleHeadingSnapshotNames(lines, context);
   const eligiblePrimeLabels = eligiblePrimeSnapshotLabels(lines, context);
+  const eligibleContextualPasswordLabels = eligibleContextualPasswordSnapshotLabels(
+    lines,
+    context,
+  );
   const eligiblePasskeyLabels = eligiblePasskeySnapshotLabels(lines, context);
   lines = lines.map((line) => projectAriaLine(
     line,
     context,
     eligibleHeadings,
     eligiblePrimeLabels,
+    eligibleContextualPasswordLabels,
     eligiblePasskeyLabels,
   ));
   manifest.ariaSnapshot = lines.join("\n");
@@ -544,6 +662,10 @@ function projectAriaLine(
   context: ProjectionContext,
   eligibleHeadings: Set<string>,
   eligiblePrimeLabels: Map<string, string>,
+  eligibleContextualPasswordLabels: {
+    composite: Map<string, string>;
+    toggle: Map<string, string>;
+  },
   eligiblePasskeyLabels: Set<string>,
 ) {
   if (context.routePathname === "/cabinet") {
@@ -563,9 +685,17 @@ function projectAriaLine(
       return line.replace(`"${label}"`, '"Удалить ключ"');
     }
   }
-  const roleMatch = /^(\s*- [a-z]+ )"([^"]+)"(.*)$/.exec(line);
+  const roleMatch = /^(\s*- ([a-z]+) )"([^"]+)"(.*)$/.exec(line);
   if (!roleMatch) return line;
-  const [, prefix, label, suffix] = roleMatch;
+  const [, prefix, role, label, suffix] = roleMatch;
+  const contextualPassword = role === "switch"
+    ? eligibleContextualPasswordLabels.toggle.get(label as string)
+    : role === "textbox"
+      ? eligibleContextualPasswordLabels.composite.get(label as string)
+      : null;
+  if (contextualPassword) {
+    return `${prefix}"${contextualPassword}"${suffix}`;
+  }
   const normalized = eligiblePrimeLabels.get(label as string);
   return normalized ? `${prefix}"${normalized}"${suffix}` : line;
 }
@@ -598,6 +728,71 @@ function eligiblePrimeSnapshotLabels(
     if (actualCount === entry.count) result.set(source, entry.normalized);
   }
   return result;
+}
+
+function eligibleContextualPasswordSnapshotLabels(
+  lines: string[],
+  context: ProjectionContext,
+) {
+  const empty = {
+    composite: new Map<string, string>(),
+    toggle: new Map<string, string>(),
+  };
+  if (context.contextualPasswordSnapshotEntries.length === 0) return empty;
+
+  const expectedToggle = new Map<string, { count: number; normalized: string }>();
+  const expectedComposite = new Map<string, { count: number; normalized: string }>();
+  for (const entry of context.contextualPasswordSnapshotEntries) {
+    const toggle = expectedToggle.get(entry.source);
+    if (toggle && toggle.normalized !== entry.normalized) return empty;
+    expectedToggle.set(entry.source, {
+      count: (toggle?.count ?? 0) + 1,
+      normalized: entry.normalized,
+    });
+
+    const source = `${entry.fieldLabel} ${entry.source}`;
+    const normalized = `${entry.fieldLabel} ${entry.normalized}`;
+    const composite = expectedComposite.get(source);
+    if (composite && composite.normalized !== normalized) return empty;
+    expectedComposite.set(source, {
+      count: (composite?.count ?? 0) + 1,
+      normalized,
+    });
+  }
+
+  const toggle = exactEligibleAriaLabels(lines, "switch", expectedToggle);
+  const composite = exactEligibleAriaLabels(lines, "textbox", expectedComposite);
+  const expectedCount = context.contextualPasswordSnapshotEntries.length;
+  if (
+    toggle === null
+    || composite === null
+    || sumCounts(expectedToggle) !== expectedCount
+    || sumCounts(expectedComposite) !== expectedCount
+  ) {
+    return empty;
+  }
+  return { composite, toggle };
+}
+
+function exactEligibleAriaLabels(
+  lines: string[],
+  expectedRole: string,
+  expected: Map<string, { count: number; normalized: string }>,
+) {
+  const result = new Map<string, string>();
+  for (const [source, entry] of expected) {
+    const actualCount = lines.filter((line) => {
+      const match = /^(\s*- ([a-z]+) )"([^"]+)"(.*)$/.exec(line);
+      return match?.[2] === expectedRole && match[3] === source;
+    }).length;
+    if (actualCount !== entry.count) return null;
+    result.set(source, entry.normalized);
+  }
+  return result;
+}
+
+function sumCounts(values: Map<string, { count: number }>) {
+  return [...values.values()].reduce((sum, entry) => sum + entry.count, 0);
 }
 
 function eligiblePasskeySnapshotLabels(
@@ -638,6 +833,145 @@ function normalizePrimeAriaLabel(value: string) {
     if (match) return normalize(match);
   }
   return null;
+}
+
+function exactContextualPasswordProjection(
+  source: string,
+  entry: DomEntry,
+  entries: DomEntry[],
+  parentByNode: Map<Record<string, unknown>, Record<string, unknown> | null>,
+  routePathname: string | null,
+) {
+  const candidate = contextualPasswordAria.get(source);
+  const baselineState = source === "Show Password"
+    ? "show"
+    : source === "Hide Password" ? "hide" : null;
+  const state = candidate?.state ?? baselineState;
+  if (!state || !hasExactPasswordToggleSignature(entry.node, state)) return null;
+
+  const field = exactPasswordFieldContext(
+    entry,
+    entries,
+    parentByNode,
+    routePathname,
+    state,
+  );
+  if (!field || (candidate && candidate.kind !== field.kind)) return null;
+
+  return {
+    fieldLabel: field.fieldLabel,
+    normalized: candidate?.english
+      ?? (state === "show" ? "Show Password" : "Hide Password"),
+  } as const;
+}
+
+function exactPasswordFieldContext(
+  toggleEntry: DomEntry,
+  entries: DomEntry[],
+  parentByNode: Map<Record<string, unknown>, Record<string, unknown> | null>,
+  routePathname: string | null,
+  state: "hide" | "show",
+) {
+  if (routePathname === null) return null;
+
+  let root: Record<string, unknown> | null = toggleEntry.node;
+  while (root && !isExactPasswordRoot(root)) {
+    root = parentByNode.get(root) ?? null;
+  }
+  if (!root) return null;
+
+  const rootEntries = entries.filter((entry) => isDescendantEntry(entry, root as Record<string, unknown>, parentByNode));
+  const inputs = rootEntries.filter(({ node }) => (
+    node.tag === "input"
+    && hasClassToken(node, "p-password-input")
+  ));
+  const toggles = rootEntries.filter(({ node }) => (
+    getAttribute(node, "role") === "switch"
+    && (getAttribute(node, "data-pc-section") === "showicon"
+      || getAttribute(node, "data-pc-section") === "hideicon")
+  ));
+  if (
+    inputs.length !== 1
+    || toggles.length !== 1
+    || toggles[0]?.node !== toggleEntry.node
+  ) {
+    return null;
+  }
+
+  const input = inputs[0]?.node;
+  if (!input || getAttribute(input, "type") !== (state === "show" ? "password" : "text")) {
+    return null;
+  }
+
+  const label = parentByNode.get(root) ?? null;
+  if (
+    label?.tag !== "label"
+    || getAttribute(label, "class") !== "flex flex-column gap-2"
+  ) {
+    return null;
+  }
+  const directElements = Array.isArray(label.children)
+    ? label.children.filter(isDomElement)
+    : [];
+  const passwordRoots = directElements.filter(isExactPasswordRoot);
+  const fieldLabels = directElements.filter((node) => (
+    node.tag === "span"
+    && getAttribute(node, "class") === "text-sm font-medium text-700"
+    && exactText(node) !== null
+  ));
+  if (
+    passwordRoots.length !== 1
+    || passwordRoots[0] !== root
+    || fieldLabels.length !== 1
+  ) {
+    return null;
+  }
+
+  const fieldLabel = exactText(fieldLabels[0] as Record<string, unknown>);
+  const inputName = getAttribute(input, "name");
+  return passwordFieldContexts.find((context) => (
+    context.routePathname === routePathname
+    && context.inputName === inputName
+    && context.fieldLabel === fieldLabel
+  )) ?? null;
+}
+
+function isExactPasswordRoot(node: Record<string, unknown>) {
+  return node.tag === "div"
+    && getAttribute(node, "data-pc-name") === "password"
+    && getAttribute(node, "data-pc-section") === "root"
+    && hasClassToken(node, "p-password");
+}
+
+function isDescendantEntry(
+  entry: DomEntry,
+  ancestor: Record<string, unknown>,
+  parentByNode: Map<Record<string, unknown>, Record<string, unknown> | null>,
+) {
+  let parent = entry.parent;
+  while (parent) {
+    if (parent === ancestor) return true;
+    parent = parentByNode.get(parent) ?? null;
+  }
+  return false;
+}
+
+function hasClassToken(node: Record<string, unknown>, expected: string) {
+  return (getAttribute(node, "class") ?? "")
+    .split(/\s+/)
+    .includes(expected);
+}
+
+function hasExactPasswordToggleSignature(
+  node: Record<string, unknown>,
+  state: "hide" | "show",
+) {
+  return getAttribute(node, "role") === "switch"
+    && getAttribute(node, "aria-checked") === (state === "show" ? "true" : "false")
+    && getAttribute(node, "data-pc-section") === `${state}icon`
+    && (getAttribute(node, "class") ?? "")
+      .split(/\s+/)
+      .includes(`p-password-${state}-icon`);
 }
 
 function hasPrimeComponentSignature(node: Record<string, unknown>) {

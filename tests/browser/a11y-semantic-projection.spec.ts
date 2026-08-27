@@ -103,6 +103,178 @@ test.describe("candidate-only accessibility semantic allowlist", () => {
     );
     expect(project(primeCandidate)).toEqual(project(primeBaseline));
 
+    for (const passwordCase of [
+      {
+        baselineLabel: "Show Password",
+        candidateLabel: "Показать введённые символы",
+        fieldLabel: "Пароль",
+        inputName: "password",
+        pathname: "/login",
+        state: "show",
+      },
+      {
+        baselineLabel: "Hide Password",
+        candidateLabel: "Скрыть введённые символы",
+        fieldLabel: "Пароль личного кабинета",
+        inputName: "password",
+        pathname: "/link-account",
+        state: "hide",
+      },
+      {
+        baselineLabel: "Show Password",
+        candidateLabel: "Показать повторно введённые символы",
+        fieldLabel: "Повторите новый пароль",
+        inputName: "passwordConfirmation",
+        pathname: "/register",
+        state: "show",
+      },
+      {
+        baselineLabel: "Hide Password",
+        candidateLabel: "Скрыть повторно введённые символы",
+        fieldLabel: "Повторите пароль",
+        inputName: "confirmPassword",
+        pathname: "/link-account",
+        state: "hide",
+      },
+      {
+        baselineLabel: "Show Password",
+        candidateLabel: "Показать текущее введённое значение",
+        fieldLabel: "Текущий пароль",
+        inputName: "currentPassword",
+        pathname: "/profile",
+        state: "show",
+      },
+      {
+        baselineLabel: "Hide Password",
+        candidateLabel: "Скрыть текущее введённое значение",
+        fieldLabel: "Текущий пароль",
+        inputName: "currentPassword",
+        pathname: "/profile",
+        state: "hide",
+      },
+      {
+        baselineLabel: "Show Password",
+        candidateLabel: "Показать новое введённое значение",
+        fieldLabel: "Новый пароль",
+        inputName: "newPassword",
+        pathname: "/profile",
+        state: "show",
+      },
+      {
+        baselineLabel: "Hide Password",
+        candidateLabel: "Скрыть новое введённое значение",
+        fieldLabel: "Новый пароль",
+        inputName: "newPassword",
+        pathname: "/profile",
+        state: "hide",
+      },
+    ] as const) {
+      const contextualBaseline = passwordToggleManifest({
+        ...passwordCase,
+        toggleLabel: passwordCase.baselineLabel,
+      });
+      const contextualCandidate = passwordToggleManifest({
+        ...passwordCase,
+        toggleLabel: passwordCase.candidateLabel,
+      });
+      expect(project(contextualCandidate), passwordCase.candidateLabel)
+        .toEqual(project(contextualBaseline));
+    }
+
+    expect(project(passwordProfileManifest(
+      "Показать текущее введённое значение",
+      "Показать новое введённое значение",
+    ))).toEqual(project(passwordProfileManifest(
+      "Show Password",
+      "Show Password",
+    )));
+    expect(project(passwordProfileManifest(
+      "Показать новое введённое значение",
+      "Показать текущее введённое значение",
+    ))).not.toEqual(project(passwordProfileManifest(
+      "Show Password",
+      "Show Password",
+    )));
+
+    for (const nearMiss of [
+      {
+        candidateLabel: "Показать новое введённое значение",
+        fieldLabel: "Текущий пароль",
+        inputName: "currentPassword",
+        pathname: "/profile",
+        state: "show",
+      },
+      {
+        candidateLabel: "Показать введённые символы",
+        fieldLabel: "Повторите новый пароль",
+        inputName: "passwordConfirmation",
+        pathname: "/register",
+        state: "show",
+      },
+      {
+        candidateLabel: "Показать текущее введённое значение",
+        fieldLabel: "Текущий пароль",
+        inputName: "currentPassword",
+        pathname: "/support",
+        state: "show",
+      },
+      {
+        candidateLabel: "Показать текущее введённое значение",
+        fieldLabel: "Текущий пароль",
+        inputName: "unexpectedPassword",
+        pathname: "/profile",
+        state: "show",
+      },
+      {
+        candidateLabel: "Показать текущее введённое значение",
+        fieldLabel: "Неверная метка",
+        inputName: "currentPassword",
+        pathname: "/profile",
+        state: "show",
+      },
+      {
+        candidateLabel: "Показать текущее введённое значение",
+        fieldLabel: "Текущий пароль",
+        inputName: "currentPassword",
+        pathname: "/profile",
+        state: "hide",
+      },
+    ] as const) {
+      const baselineLabel = nearMiss.candidateLabel.startsWith("Показать")
+        ? "Show Password"
+        : "Hide Password";
+      expect(project(passwordToggleManifest({
+        ...nearMiss,
+        toggleLabel: nearMiss.candidateLabel,
+      })), JSON.stringify(nearMiss)).not.toEqual(project(passwordToggleManifest({
+        ...nearMiss,
+        toggleLabel: baselineLabel,
+      })));
+    }
+
+    const incompleteBaseline = passwordToggleManifest({
+      fieldLabel: "Текущий пароль",
+      inputName: "currentPassword",
+      pathname: "/profile",
+      state: "show",
+      toggleLabel: "Show Password",
+    });
+    const incompleteCandidate = passwordToggleManifest({
+      fieldLabel: "Текущий пароль",
+      inputName: "currentPassword",
+      pathname: "/profile",
+      state: "show",
+      toggleLabel: "Показать текущее введённое значение",
+    });
+    incompleteBaseline.ariaSnapshot = '- switch "Show Password" [checked]';
+    incompleteCandidate.ariaSnapshot = '- switch "Показать текущее введённое значение" [checked]';
+    const projectedIncompleteCandidate = project(incompleteCandidate) as {
+      ariaSnapshot: string;
+    };
+    expect(projectedIncompleteCandidate.ariaSnapshot)
+      .toContain('- switch "Показать текущее введённое значение" [checked]');
+    expect(projectedIncompleteCandidate).not.toEqual(project(incompleteBaseline));
+
     const baselinePasskey = passkeyManifest("Удалить ключ");
     const candidatePasskey = passkeyManifest("Удалить ключ Рабочий ноутбук 1");
     expect(project(candidatePasskey)).toEqual(project(baselinePasskey));
@@ -435,6 +607,123 @@ function interactiveButton(path: string, ariaLabel: string) {
     disabled: false,
     loading: false,
   };
+}
+
+function passwordToggleManifest({
+  fieldLabel,
+  inputName,
+  pathname,
+  state,
+  toggleLabel,
+}: {
+  fieldLabel: string;
+  inputName: string;
+  pathname: string;
+  state: "hide" | "show";
+  toggleLabel: string;
+}) {
+  const togglePath = "html > body > label > div > div > span > svg";
+  return routeManifest(
+    pathname,
+    documentWith(passwordFieldDom({ fieldLabel, inputName, state, toggleLabel })),
+    {
+      ariaSnapshot: [
+        `- textbox "${fieldLabel} ${toggleLabel}"`,
+        `- switch "${toggleLabel}"${state === "show" ? " [checked]" : ""}`,
+      ].join("\n"),
+      interactiveElements: [{
+        ...interactiveButton(togglePath, toggleLabel),
+        role: "switch",
+        tag: "svg",
+      }],
+    },
+  );
+}
+
+function passwordProfileManifest(currentLabel: string, nextLabel: string) {
+  const controls = [
+    {
+      fieldLabel: "Текущий пароль",
+      inputName: "currentPassword",
+      toggleLabel: currentLabel,
+    },
+    {
+      fieldLabel: "Новый пароль",
+      inputName: "newPassword",
+      toggleLabel: nextLabel,
+    },
+  ];
+  return routeManifest(
+    "/profile",
+    documentWith(...controls.map((control) => passwordFieldDom({
+      ...control,
+      state: "show",
+    }))),
+    {
+      ariaSnapshot: controls.flatMap((control) => [
+        `- textbox "${control.fieldLabel} ${control.toggleLabel}"`,
+        `- switch "${control.toggleLabel}" [checked]`,
+      ]).join("\n"),
+      interactiveElements: controls.map((control, index) => ({
+        ...interactiveButton(
+          `html > body > label:nth-of-type(${index + 1}) > div > div > span > svg`,
+          control.toggleLabel,
+        ),
+        role: "switch",
+        tag: "svg",
+      })),
+    },
+  );
+}
+
+function passwordFieldDom({
+  fieldLabel,
+  inputName,
+  state,
+  toggleLabel,
+}: {
+  fieldLabel: string;
+  inputName: string;
+  state: "hide" | "show";
+  toggleLabel: string;
+}) {
+  return element("label", { class: "flex flex-column gap-2" }, [
+    element("span", { class: "text-sm font-medium text-700" }, [
+      text(fieldLabel),
+    ]),
+    element("div", {
+      class: "w-full p-password p-component p-inputwrapper p-input-icon-right",
+      "data-pc-name": "password",
+      "data-pc-section": "root",
+    }, [
+      element("div", {
+        class: "p-icon-field p-icon-field-right",
+        "data-pc-name": "iconfield",
+        "data-pc-section": "root",
+      }, [
+        element("input", {
+          class: "w-full p-password-input p-inputtext p-component",
+          "data-pc-name": "inputtext",
+          "data-pc-section": "root",
+          name: inputName,
+          type: state === "show" ? "password" : "text",
+        }),
+        element("span", {
+          class: "p-input-icon",
+          "data-pc-name": "inputicon",
+          "data-pc-section": "root",
+        }, [
+          element("svg", {
+            "aria-checked": state === "show" ? "true" : "false",
+            "aria-label": toggleLabel,
+            class: `p-icon p-password-${state}-icon`,
+            "data-pc-section": `${state}icon`,
+            role: "switch",
+          }),
+        ]),
+      ]),
+    ]),
+  ]);
 }
 
 function cabinetHeadingComputedStyle(fontWeight = "500") {
