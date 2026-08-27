@@ -669,10 +669,13 @@ function projectAriaLine(
   eligiblePasskeyLabels: Set<string>,
 ) {
   if (context.routePathname === "/cabinet") {
-    for (const name of eligibleHeadings) {
-      if (line === `  - heading "${name}" [level=5]`) {
-        return `  - heading "${name}" [level=2]`;
-      }
+    const heading = exactAriaHeading(line);
+    if (
+      heading
+      && heading.level === "5"
+      && eligibleHeadings.has(heading.name)
+    ) {
+      return `${heading.prefix}"${heading.name}" [level=2]`;
     }
   }
   if (
@@ -706,13 +709,21 @@ function eligibleHeadingSnapshotNames(
 ) {
   const result = new Set<string>();
   for (const [name, expectedCount] of context.headingNames) {
-    const actualCount = lines.filter((line) => (
-      line === `  - heading "${name}" [level=5]`
-      || line === `  - heading "${name}" [level=2]`
-    )).length;
+    const actualCount = lines.filter((line) => {
+      const heading = exactAriaHeading(line);
+      return heading?.name === name
+        && (heading.level === "5" || heading.level === "2");
+    }).length;
     if (actualCount === expectedCount) result.add(name);
   }
   return result;
+}
+
+function exactAriaHeading(line: string) {
+  const match = /^(\s*- heading )"([^"\r\n]+)" \[level=([0-9]+)\]$/.exec(line);
+  return match
+    ? { prefix: match[1] as string, name: match[2] as string, level: match[3] as string }
+    : null;
 }
 
 function eligiblePrimeSnapshotLabels(
