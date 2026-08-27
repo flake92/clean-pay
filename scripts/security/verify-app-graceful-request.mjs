@@ -56,7 +56,7 @@ function wait(milliseconds) {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
-function runDocker(args, timeoutMs) {
+function runDocker(args, timeoutMs, { mergeStderr = false } = {}) {
   return new Promise((resolve, reject) => {
     const output = { stdout: "", stderr: "" };
     const controller = new AbortController();
@@ -86,9 +86,38 @@ function runDocker(args, timeoutMs) {
         reject(new Error(`docker ${args[0]} failed (${code ?? signal ?? "unknown"})`));
         return;
       }
-      resolve(output.stdout.trim());
+      resolve(
+        (mergeStderr ? `${output.stdout}\n${output.stderr}` : output.stdout).trim(),
+      );
     });
   });
+}
+
+async function waitForLifecycleStart(container, since, timeoutMs) {
+  const deadline = Date.now() + timeoutMs;
+
+  while (Date.now() < deadline) {
+    const logs = await runDocker([
+      "logs",
+      "--since",
+      since,
+      "--tail",
+      "200",
+      container,
+    ], 5_000, {
+      mergeStderr: true,
+    });
+    if (/^event=application_drain_started active_requests=[1-9]\d*\b/m.test(logs)) {
+      return;
+    }
+    await wait(100);
+  }
+
+  throw new Error("application did not confirm admission before its drain deadline");
+}
+
+function eventCount(logs, event) {
+  return logs.match(new RegExp(`^event=${event}\\b`, "gm"))?.length ?? 0;
 }
 
 function openSlowMutation({ baseUrl, trustedOrigin }) {
@@ -156,6 +185,7 @@ function openSlowMutation({ baseUrl, trustedOrigin }) {
 
 const inputs = parseInputs();
 const startedAt = Date.now();
+const lifecycleLogSince = new Date(startedAt - 1_000).toISOString();
 const request = openSlowMutation(inputs);
 
 // Give Next.js enough time to admit the request and block on its bounded body
@@ -170,18 +200,40 @@ const stop = runDocker(
   (graceSeconds + 10) * 1_000,
 );
 
-// The body completes only after Docker has begun graceful termination. A server
-// that tears down admitted sockets on SIGTERM will fail before producing a full
-// response; Next's graceful close must instead drain it.
-await wait(1_500);
+// The lifecycle marker proves both that Docker delivered SIGTERM and that the
+// request listener admitted this exact partial-body request. Only then may the
+// probe complete the body.
+await waitForLifecycleStart(containerName, lifecycleLogSince, 10_000);
 request.finishRequest();
 const [rawResponse] = await Promise.all([request.response, stop]);
 
 const statusMatch = /^HTTP\/1\.[01] (\d{3})\b/.exec(rawResponse);
 if (!statusMatch) throw new Error("graceful request did not receive a complete HTTP response");
 const status = Number(statusMatch[1]);
-if (status === 403 || status === 413) {
+if (status === 403 || status === 413 || status === 503 || status >= 500) {
   throw new Error(`admitted graceful request was rejected by the boundary (${status})`);
+}
+
+const lifecycleLogs = await runDocker([
+  "logs",
+  "--since",
+  lifecycleLogSince,
+  "--tail",
+  "200",
+  containerName,
+], 10_000, {
+  mergeStderr: true,
+});
+if (
+  eventCount(lifecycleLogs, "application_drain_started") !== 1
+  || eventCount(lifecycleLogs, "application_http_drain_completed") !== 1
+  || eventCount(lifecycleLogs, "application_drain_completed") !== 1
+  || eventCount(lifecycleLogs, "application_drain_timeout") !== 0
+  || !/^event=application_http_drain_completed external_close=true\b/m.test(
+    lifecycleLogs,
+  )
+) {
+  throw new Error("application lifecycle evidence was incomplete or inconsistent");
 }
 
 const state = await runDocker(
