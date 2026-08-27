@@ -4,6 +4,7 @@ import {
   chmod,
   lstat,
   mkdtemp,
+  open,
   readFile,
   readdir,
   realpath,
@@ -39,6 +40,8 @@ const fixtureSnapshotNames = Object.freeze({
 });
 const contractFilename = "browser-journey-contract.json";
 const automaticDockerTimeout = Number.NaN;
+export const JOURNEY_SYNTHETIC_CONFIDENTIALITY_CONTRACT =
+  "synthetic-only-no-external-credential-material-v1";
 const preparedHandles = new WeakSet();
 const startedHandles = new WeakSet();
 const cleanedHandles = new WeakSet();
@@ -55,6 +58,14 @@ const ownedFileSystemOperations = Object.freeze({
   unlink,
   writeFile,
 });
+const sanitizedOutputFileSystemOperations = Object.freeze({
+  chmod,
+  lstat,
+  open,
+  readFile,
+  realpath,
+  unlink,
+});
 
 export function journeyDockerCliEnvironment(source = process.env) {
   const result = Object.create(null);
@@ -67,6 +78,170 @@ export function journeyDockerCliEnvironment(source = process.env) {
     if (typeof source[name] === "string") result[name] = source[name];
   }
   return result;
+}
+
+export async function enforceJourneySyntheticPrivateMode(target, mode, options = {}) {
+  const allowedKeys = ["chmodPath", "lstatPath", "materialContract", "platform"];
+  if (!options || typeof options !== "object" || Array.isArray(options)
+    || Object.keys(options).some((name) => !allowedKeys.includes(name))) {
+    fail("Synthetic private-mode options are invalid.");
+  }
+  const {
+    chmodPath = chmod,
+    lstatPath = lstat,
+    materialContract = JOURNEY_SYNTHETIC_CONFIDENTIALITY_CONTRACT,
+    platform = process.platform,
+  } = options;
+  if (!path.isAbsolute(target) || ![0o600, 0o700].includes(mode)
+    || typeof chmodPath !== "function" || typeof lstatPath !== "function"
+    || materialContract !== JOURNEY_SYNTHETIC_CONFIDENTIALITY_CONTRACT
+    || typeof platform !== "string" || platform.length < 1) {
+    fail("Synthetic private-mode contract is invalid.");
+  }
+  if (platform !== "win32") {
+    await chmodPath(target, mode);
+    const details = await lstatPath(target, { bigint: true });
+    const expectedType = mode === 0o700 ? details.isDirectory() : details.isFile();
+    if (!expectedType || details.isSymbolicLink()
+      || (Number(details.mode) & 0o777) !== mode) {
+      fail("Synthetic POSIX private mode was not enforced exactly.");
+    }
+  }
+  return Object.freeze({
+    materialContract: JOURNEY_SYNTHETIC_CONFIDENTIALITY_CONTRACT,
+    status: platform === "win32"
+      ? "synthetic-material-no-windows-owner-only-claim"
+      : "synthetic-material-posix-mode-enforced",
+  });
+}
+
+export async function writeJourneySanitizedOutput(
+  target,
+  bytes,
+  options = {},
+) {
+  if (!options || typeof options !== "object" || Array.isArray(options)
+    || Object.keys(options).some((name) => !["fileSystem", "platform"].includes(name))) {
+    fail("Sanitized proof output writer options are invalid.");
+  }
+  const {
+    fileSystem = sanitizedOutputFileSystemOperations,
+    platform = process.platform,
+  } = options;
+  const operationNames = Object.keys(sanitizedOutputFileSystemOperations).sort();
+  if (!path.isAbsolute(target) || !(bytes instanceof Uint8Array)
+    || bytes.byteLength < 1 || bytes.byteLength > 16 * 1024 * 1024
+    || !fileSystem || typeof fileSystem !== "object" || Array.isArray(fileSystem)
+    || JSON.stringify(Object.keys(fileSystem).sort()) !== JSON.stringify(operationNames)
+    || operationNames.some((name) => typeof fileSystem[name] !== "function")
+    || typeof platform !== "string" || platform.length < 1) {
+    fail("Sanitized proof output writer contract is invalid.");
+  }
+  let handle;
+  let handleIdentity;
+  let primaryError;
+  try {
+    handle = await fileSystem.open(target, "wx", 0o600);
+    const empty = await handle.stat({ bigint: true });
+    handleIdentity = sanitizedOutputHandleIdentity(empty);
+    if (!empty.isFile() || empty.isSymbolicLink() || empty.size !== 0n) {
+      fail("Create-only proof output handle identity is invalid.");
+    }
+    await handle.writeFile(bytes);
+    await handle.sync();
+    const written = await handle.stat({ bigint: true });
+    if (!written.isFile() || written.isSymbolicLink()
+      || written.dev !== handleIdentity.device || written.ino !== handleIdentity.inode
+      || written.size !== BigInt(bytes.byteLength)) {
+      fail("Create-only proof output handle changed while writing.");
+    }
+    await handle.close();
+    handle = undefined;
+    await enforceJourneySyntheticPrivateMode(target, 0o600, {
+      chmodPath: fileSystem.chmod,
+      lstatPath: fileSystem.lstat,
+      platform,
+    });
+    const requested = await fileSystem.lstat(target, { bigint: true });
+    const resolvedPath = await fileSystem.realpath(target);
+    const resolved = await fileSystem.lstat(resolvedPath, { bigint: true });
+    const observed = await fileSystem.readFile(resolvedPath);
+    const after = await fileSystem.lstat(resolvedPath, { bigint: true });
+    if (normalizePath(path.resolve(target)) !== normalizePath(path.resolve(resolvedPath))
+      || !requested.isFile() || requested.isSymbolicLink()
+      || !resolved.isFile() || resolved.isSymbolicLink()
+      || requested.dev !== handleIdentity.device || requested.ino !== handleIdentity.inode
+      || resolved.dev !== handleIdentity.device || resolved.ino !== handleIdentity.inode
+      || after.dev !== resolved.dev || after.ino !== resolved.ino
+      || after.size !== resolved.size || after.mtimeNs !== resolved.mtimeNs
+      || observed.byteLength !== bytes.byteLength
+      || sha256(observed) !== sha256(bytes)) {
+      fail("Create-only proof output path or bytes changed after its FileHandle write.");
+    }
+    return Object.freeze({
+      bytes: bytes.byteLength,
+      materialContract: JOURNEY_SYNTHETIC_CONFIDENTIALITY_CONTRACT,
+      sha256: sha256(bytes),
+      status: "sanitized-create-only-output-written",
+    });
+  } catch (error) {
+    primaryError = error;
+  } finally {
+    if (handle) {
+      if (!handleIdentity) {
+        try {
+          handleIdentity = sanitizedOutputHandleIdentity(
+            await handle.stat({ bigint: true }),
+          );
+        } catch (identityError) {
+          primaryError = primaryError
+            ? new AggregateError(
+              [primaryError, identityError],
+              "Sanitized output write failed before its recovery identity was proven.",
+            )
+            : identityError;
+        }
+      }
+      try {
+        await handle.close();
+      } catch (closeError) {
+        primaryError = primaryError
+          ? new AggregateError([primaryError, closeError], "Sanitized output write and close failed.")
+          : closeError;
+      }
+    }
+  }
+  if (handleIdentity) {
+    try {
+      const owned = await fileSystem.lstat(target, { bigint: true });
+      if (!owned.isFile() || owned.isSymbolicLink()
+        || owned.dev !== handleIdentity.device || owned.ino !== handleIdentity.inode) {
+        fail("Refusing cleanup of a changed sanitized output identity.");
+      }
+      await fileSystem.unlink(target);
+      try {
+        await fileSystem.lstat(target);
+        fail("Sanitized output remained after exact failure cleanup.");
+      } catch (error) {
+        if (error?.code !== "ENOENT") throw error;
+      }
+    } catch (cleanupError) {
+      throw new AggregateError(
+        [primaryError, cleanupError],
+        "Sanitized output failed and exact cleanup was not proven.",
+      );
+    }
+  }
+  if (!primaryError) fail("Sanitized output writer failed without an exact error.");
+  throw primaryError;
+}
+
+function sanitizedOutputHandleIdentity(details) {
+  if (!details || typeof details !== "object"
+    || typeof details.dev !== "bigint" || typeof details.ino !== "bigint") {
+    fail("Create-only proof output handle has no exact recovery identity.");
+  }
+  return Object.freeze({ device: details.dev, inode: details.ino });
 }
 
 export function runJourneyDockerCommand(
@@ -299,6 +474,7 @@ export async function withJourneyOwnedStackPair({ baseline, candidate }, callbac
 export async function createJourneyOwnedInputSnapshot(
   { directoryPrefix, expectedFilenames, populate },
   operations = ownedFileSystemOperations,
+  platform = process.platform,
 ) {
   exactKeys(arguments[0], ["directoryPrefix", "expectedFilenames", "populate"]);
   const operationNames = Object.keys(ownedFileSystemOperations).sort();
@@ -306,6 +482,7 @@ export async function createJourneyOwnedInputSnapshot(
     || JSON.stringify(Object.keys(operations).sort()) !== JSON.stringify(operationNames)
     || operationNames.some((name) => typeof operations[name] !== "function")
     || typeof populate !== "function"
+    || typeof platform !== "string" || platform.length < 1
     || !path.isAbsolute(directoryPrefix)) {
     fail("Owned input snapshot factory input is invalid.");
   }
@@ -333,7 +510,11 @@ export async function createJourneyOwnedInputSnapshot(
       fail("Owned input snapshot factory returned an unexpected directory.");
     }
     directory = createdDirectory;
-    await operations.chmod(directory, 0o700);
+    await enforceJourneySyntheticPrivateMode(directory, 0o700, {
+      chmodPath: operations.chmod,
+      lstatPath: operations.lstat,
+      platform,
+    });
     directoryIdentity = await captureOwnedPathIdentity(directory, "directory", operations);
     const writeOwnedFile = async (filename, bytes) => {
       if (!expectedFilenames.includes(filename) || begunFiles.has(filename)
@@ -871,6 +1052,7 @@ async function deriveJourneyImageConfigDigest({
       `${role} image`,
     ),
     expectedAssetImageDigest,
+    reference,
     `${role} image reference`,
   );
 
@@ -959,6 +1141,7 @@ async function deriveJourneyImageConfigDigest({
     assertAssetRootInspection(
       selectedConfigInspection,
       expectedAssetImageDigest,
+      reference,
       `${role} selected config image`,
     );
     const referenceRecheck = parseSingleInspection(
@@ -968,6 +1151,7 @@ async function deriveJourneyImageConfigDigest({
     assertAssetRootInspection(
       referenceRecheck,
       expectedAssetImageDigest,
+      reference,
       `${role} image reference recheck`,
     );
   } catch (error) {
@@ -1267,7 +1451,10 @@ async function fixtureHashContract(sources) {
 
 async function privateWrite(target, bytes, operations = ownedFileSystemOperations) {
   await operations.writeFile(target, bytes, { flag: "wx", mode: 0o600 });
-  await operations.chmod(target, 0o600);
+  await enforceJourneySyntheticPrivateMode(target, 0o600, {
+    chmodPath: operations.chmod,
+    lstatPath: operations.lstat,
+  });
   const identity = await captureOwnedPathIdentity(target, "file", operations);
   if (identity.sha256 !== sha256(bytes)) fail("Owned input bytes changed after create-only write.");
   return identity;
@@ -1518,25 +1705,63 @@ function assertImageConfigProbe(probe, expected) {
   return Object.freeze({ configDigest });
 }
 
-function assertAssetRootInspection(inspection, expectedDigest, label) {
-  const candidates = [];
-  if (inspection?.Descriptor?.digest !== undefined) {
-    candidates.push(inspection.Descriptor.digest);
+function assertAssetRootInspection(inspection, expectedDigest, reference, label) {
+  const descriptorAvailable = inspection?.Descriptor !== undefined
+    && inspection.Descriptor !== null;
+  const descriptorDigest = descriptorAvailable ? inspection.Descriptor?.digest : undefined;
+  if (descriptorAvailable
+    && (!inspection.Descriptor || typeof inspection.Descriptor !== "object"
+      || Array.isArray(inspection.Descriptor)
+      || !/^sha256:[a-f0-9]{64}$/.test(descriptorDigest ?? "")
+      || descriptorDigest !== expectedDigest)) {
+    fail(`${label} authoritative OCI root descriptor differs from its attested root digest.`);
   }
   if (!Array.isArray(inspection?.RepoDigests ?? [])) {
     fail(`${label} repository digest set is invalid.`);
   }
+  const repositories = imageRepositories(reference);
+  const repositoryDigests = new Map();
   for (const entry of inspection.RepoDigests ?? []) {
-    const match = /@(?<digest>sha256:[a-f0-9]{64})$/.exec(entry ?? "");
+    const match = /^(?<repository>[A-Za-z0-9][A-Za-z0-9._/:\-]{0,240})@(?<digest>sha256:[a-f0-9]{64})$/.exec(
+      entry ?? "",
+    );
     if (!match) fail(`${label} repository digest is invalid.`);
-    candidates.push(match.groups.digest);
+    if (repositoryDigests.has(match.groups.repository)) {
+      fail(`${label} repository digest set repeats one repository identity.`);
+    }
+    repositoryDigests.set(match.groups.repository, match.groups.digest);
   }
-  if (candidates.length < 1
-    || candidates.some((digest) => !/^sha256:[a-f0-9]{64}$/.test(digest))
-    || !candidates.includes(expectedDigest)) {
+  if (!descriptorAvailable
+    && ![...repositories].some((repository) => (
+      repositoryDigests.get(repository) === expectedDigest
+    ))) {
     fail(`${label} is not bound to its attested OCI root digest.`);
   }
   return inspection;
+}
+
+function imageRepositories(reference) {
+  if (typeof reference !== "string" || reference.length < 2 || reference.length > 241) {
+    fail("Verifier-owned image repository reference is invalid.");
+  }
+  const withoutDigest = reference.split("@", 1)[0];
+  const lastSlash = withoutDigest.lastIndexOf("/");
+  const lastColon = withoutDigest.lastIndexOf(":");
+  const repository = lastColon > lastSlash
+    ? withoutDigest.slice(0, lastColon)
+    : withoutDigest;
+  if (!/^[A-Za-z0-9][A-Za-z0-9._/:\-]{0,240}$/.test(repository)) {
+    fail("Verifier-owned image repository reference is invalid.");
+  }
+  const repositories = new Set([repository]);
+  const firstSegment = repository.split("/", 1)[0];
+  if (!repository.includes("/")) {
+    repositories.add(`docker.io/library/${repository}`);
+  } else if (!firstSegment.includes(".") && !firstSegment.includes(":")
+    && firstSegment !== "localhost") {
+    repositories.add(`docker.io/${repository}`);
+  }
+  return repositories;
 }
 
 function exactDigestList(value, label) {

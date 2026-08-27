@@ -26,6 +26,7 @@ const defaultLifecycleBounds = Object.freeze({
  *   spawnProcess?: (...args: any[]) => any,
  *   targetHost: string,
  *   targetPort: string,
+ *   verifyProcessTerminated?: (pid: number | undefined) => Promise<boolean>,
  * }} input
  * @returns {Promise<any>}
  */
@@ -38,10 +39,11 @@ export function startJourneyConnectProxy({
   spawnProcess = spawn,
   targetHost,
   targetPort,
+  verifyProcessTerminated = verifyJourneyProcessTerminated,
 }) {
   assertProxyCoordinates({ listenHost, listenPort, targetHost, targetPort });
   assertLifecycleBounds(lifecycleBounds);
-  if (typeof spawnProcess !== "function") {
+  if (typeof spawnProcess !== "function" || typeof verifyProcessTerminated !== "function") {
     throw new Error("Journey CONNECT proxy process factory is invalid.");
   }
   return new Promise((resolve, reject) => {
@@ -90,6 +92,7 @@ export function startJourneyConnectProxy({
       lifecycleBounds: Object.freeze({ ...lifecycleBounds }),
       stopped,
       stderr: () => stderr,
+      verifyProcessTerminated,
     };
     const finishStart = (operation) => {
       if (startSettled) return;
@@ -104,7 +107,15 @@ export function startJourneyConnectProxy({
         stoppedSettled = true;
         rejectStopped(error);
       }
-      terminationPromise ??= terminateProxyChildAndAwaitClose(child, closed, lifecycleBounds)
+      terminationPromise ??= terminateProxyChildAndAwaitClose(
+        child,
+        closed,
+        lifecycleBounds,
+        verifyProcessTerminated,
+      )
+        .then(() => {
+          if (!ready) finishStart(() => reject(pendingStartError ?? error));
+        })
         .catch((terminationError) => {
           if (!ready) {
             finishStart(() => reject(new AggregateError(
@@ -204,7 +215,12 @@ export async function stopJourneyConnectProxy(handle) {
     return summary;
   } catch (error) {
     try {
-      await terminateProxyChildAndAwaitClose(handle.child, handle.closed, handle.lifecycleBounds);
+      await terminateProxyChildAndAwaitClose(
+        handle.child,
+        handle.closed,
+        handle.lifecycleBounds,
+        handle.verifyProcessTerminated,
+      );
     } catch (terminationError) {
       throw new AggregateError(
         [error, terminationError],
@@ -217,24 +233,69 @@ export async function stopJourneyConnectProxy(handle) {
   }
 }
 
-async function terminateProxyChildAndAwaitClose(child, closed, lifecycleBounds) {
+async function terminateProxyChildAndAwaitClose(
+  child,
+  closed,
+  lifecycleBounds,
+  verifyProcessTerminated,
+) {
   if (child.exitCode === null && child.signalCode === null) child.kill("SIGTERM");
   let escalationTimer;
-  let killRetryTimer;
+  let closeVerificationTimer;
+  let finished = false;
+  let resolveVerifiedAbsence;
+  const verifiedAbsence = new Promise((resolve) => {
+    resolveVerifiedAbsence = resolve;
+  });
+  const verifyClosedAfterKill = async () => {
+    if (finished) return;
+    let absent = false;
+    try {
+      absent = await verifyProcessTerminated(child.pid);
+    } catch {
+      absent = false;
+    }
+    if (finished) return;
+    if (absent === true) {
+      resolveVerifiedAbsence(Object.freeze({
+        code: null,
+        signal: "SIGKILL",
+        status: "os-pid-absence-proven-without-close",
+      }));
+      return;
+    }
+    if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
+    closeVerificationTimer = setTimeout(
+      verifyClosedAfterKill,
+      lifecycleBounds.killCloseTimeoutMs,
+    );
+  };
   try {
     escalationTimer = setTimeout(() => {
       if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
+      closeVerificationTimer = setTimeout(
+        verifyClosedAfterKill,
+        lifecycleBounds.killCloseTimeoutMs,
+      );
     }, lifecycleBounds.terminationGraceMs);
-    // A second bounded SIGKILL attempt is allowed, but the promise deliberately
-    // cannot reject before Node reports `close`; otherwise a caller could begin
-    // stack cleanup while a proxy still owns its loopback publication.
-    killRetryTimer = setTimeout(() => {
-      if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
-    }, lifecycleBounds.terminationGraceMs + lifecycleBounds.killCloseTimeoutMs);
-    return await closed;
+    // Cleanup may resume only after Node reports `close` or the OS proves that
+    // the exact child PID is absent. A still-live/unverifiable child deliberately
+    // remains fail-stop while bounded checks and SIGKILL retries continue.
+    return await Promise.race([closed, verifiedAbsence]);
   } finally {
+    finished = true;
     clearTimeout(escalationTimer);
-    clearTimeout(killRetryTimer);
+    clearTimeout(closeVerificationTimer);
+  }
+}
+
+async function verifyJourneyProcessTerminated(pid) {
+  if (!Number.isSafeInteger(pid) || pid < 1) return false;
+  try {
+    process.kill(pid, 0);
+    return false;
+  } catch (error) {
+    return error?.code === "ESRCH";
   }
 }
 

@@ -37,9 +37,14 @@ authoritative `.env` files and every role-scoped environment file against a
 deterministic allowlist and exact bytes, rejects external PostgreSQL/Redis
 targets, hashes the exact repository-contained fixture and Compose sources,
 renders both Compose models with a deny-by-default child environment, and proves
-both project container/network/volume sets absent. It creates owner-only,
-run-specific input snapshots and revalidates them immediately before starting
-both projects concurrently. No caller-prestarted stack is accepted.
+both project container/network/volume sets absent. It creates unpredictable,
+create-only, run-specific synthetic input snapshots and revalidates them
+immediately before starting both projects concurrently. POSIX mode `0700/0600`
+is enforced where mode bits are authoritative. On Windows the verifier does not
+misrepresent `chmod` as an owner-only DACL: confidentiality instead relies on
+the exact synthetic-only/no-external-credential contract, create-only writes,
+FileHandle/path identity, and exact cleanup. No caller-prestarted stack is
+accepted.
 
 The application asset digest is the OCI root/index digest already bound by the
 production asset attestation; its selected-platform config digest comes from
@@ -48,17 +53,19 @@ not the value of `docker image inspect <tag> .Id` treated as a config digest.
 For both references, before `compose up`, the verifier creates one uniquely
 named and labelled container with `--entrypoint /bin/true`, never starts it,
 reads the selected config from the container's `.Image`, checks that exact
-config back to the expected Descriptor/RepoDigest root, rechecks the mutable
+config back to the expected authoritative Descriptor root, rechecks the mutable
 tag, and removes only that probe. Every probe name and ownership label includes
 a cryptographically unpredictable per-run nonce; only its SHA-256 ownership
 contract enters the sanitized input receipt. Thus a concurrent verifier with
 the same project contract cannot be adopted or removed during create-error
 recovery. The generated launch snapshot replaces both
 tags with those verified config IDs, so a later tag retarget cannot change what
-Compose starts. A Docker store that exposes neither a Descriptor digest nor a
-RepoDigest is an explicit fail-closed platform blocker; `.Id` is never accepted
-as an OCI root substitute. The resulting root/config/reference contracts are
-bound into runtime evidence.
+Compose starts. A present Descriptor must equal the attested root and cannot be
+masked by a stale RepoDigest. If a classic store exposes no Descriptor, only an
+exact validated RepoDigest for the inspected repository/reference may establish
+the root. A store exposing neither authority is an explicit fail-closed platform
+blocker; `.Id` is never accepted as an OCI root substitute. The resulting
+root/config/reference contracts are bound into runtime evidence.
 
 After startup, a reusable import-safe reader matches
 all 13 services, four volumes, and the single project network to live Docker
@@ -98,12 +105,29 @@ document navigation. The pinned Chromium launch arguments, resolver, and
 established CONNECT proxy are shared with the journey runner. Only exact
 synthetic HTTPS origins and scenario-specific method/resource/path/ordered-
 query/hash/status/content-type/redirect classes are allowed; every request is
-counted. Each image has its exact ordered, duplicate-free static request ledger
-bound to the validated OCI inventory and the deterministic route/response/CSS
-load graph. Raw chunk names and partition counts are intentionally not compared
+counted. Each image has an exact raw semantic/static request-order ledger and
+three fixed document-generation ledgers for login, profile, and cabinet. A
+static path may legitimately recur once in each generation, but cannot be
+duplicated within a generation, omitted, moved to a different generation, or
+added outside that document's attested route/response graph. Every occurrence
+is bound byte-for-byte to the validated OCI inventory. After each occurrence's
+response finishes, its actual decoded body bytes, byte length,
+extension-specific content type, and path are independently observed and must
+equal the OCI inventory. Repeated CSS bodies are parsed independently; every
+later extraction must equal the first extraction for that source, while the
+sanitized global CSS closure records the unique source contract once. The
+bounded inventory
+accepts only CSS/JavaScript chunks and canonical EOT/ICO/PNG/SVG/TTF/WOFF/WOFF2
+media. All eight current bounded CSS `url(...)` fallbacks are resolved from the
+exact served CSS path with the exact EOT/SVG/TTF/WOFF/WOFF2 cardinalities;
+external, data, absolute, escaping, unknown, or absent-in-inventory references
+fail closed. All declared fallbacks remain attested, while each document must
+load the same exact two distinct CSS-declared WOFF2 targets selected by pinned
+Chromium. Raw chunk names and
+partition counts are intentionally not compared
 between different images, but no inventory-only or undeclared extra chunk can
-pass. Navigation, RSC/action, OIDC,
-Turnstile, and Chatwoot semantic counts and order remain exact across images.
+pass. Navigation, RSC/action, OIDC, the exact `auth_login` Turnstile action, and
+Chatwoot semantic counts and order remain exact across images.
 Unexpected popup, WebSocket, service worker, request, console output, page
 error, proxy failure, extra CONNECT/reconnect, history/query/hash mutation, or
 unbounded lifecycle counter fails the proof. The exact four CONNECT authorities
@@ -113,11 +137,37 @@ cardinality are recorded and recomputed, not only an aggregate counter. The
 browser first drains every mutable source to a quiet barrier, seals routing,
 builds the request projection, snapshots all raw ledgers, closes Chromium while
 listeners remain attached, and rejects any late close event before detaching.
-CONNECT counters and the complete profile-to-cabinet history operation ledger
-must be identical across images. The two referenced offers/devices records must
+The successful sealed event count is recomputed as exactly three observations
+per request (`request`, route begin, and exactly one finished/failed event) plus
+the four fixed history observations. The runner uses a bounded 1,024-event seal,
+which covers the declared 256-request maximum (772 causal events) without
+weakening overflow handling. A rejected page binding is retained as sticky
+failure state even after its Promise settles; no mirrored unhandled rejection
+or empty pending-set snapshot can make the explicit drain pass.
+History evidence is taken from pinned Chromium CDP `Page.frameNavigated` and
+`Page.navigatedWithinDocument`, correlated to the final `Page.getFrameTree`
+main-frame/loader identity and the exact cabinet document response. The raw
+profile checkpoint, changed-loader cabinet document navigation, one Next
+`replaceState` state transition, and its paired `historyApi` same-document
+signal canonicalize to exactly four entries; only the delivery order of the
+last two signals may vary. The sole cabinet document navigation must add exactly
+one session-history entry relative to the profile checkpoint, and hydration must
+then preserve that length. Query/hash mutations, extra history calls, a reused
+loader, a different frame, replaced/decremented history length, or an unmarked
+Next state fail closed. CONNECT counters and that canonical history operation ledger must
+be identical across images. The two referenced offers/devices records must
 be adjacent, enriched, sanitized ledger entries.
 
-The output is create-only and requests POSIX mode `0600` where supported. It
+The import-safe output writer uses a create-only `FileHandle`, fsync, stable
+device/inode/path/byte checks, and exact failure cleanup. If the first post-open
+identity read fails, cleanup retries identity through the still-open handle and
+unlinks only that proven device/inode/path; if identity remains unknowable it
+fails stop and preserves the residue rather than deleting by pathname. It
+enforces POSIX mode
+`0600` where mode bits are
+authoritative. Windows makes no owner-only DACL claim; the output has already
+passed the exact serialized sanitized schema and contains only the synthetic
+evidence projection before its create-only write. It
 contains no cookie values, tokens, request bodies, image references, container
 IDs, raw user agent, credentials, host paths, caller-chosen names, or PII. Project,
 network, service, fixture-mount, environment, publication, image-reference,
@@ -137,12 +187,14 @@ failure paths. It then removes only the exact files it created and only its empt
 owner-specific directories—never a glob, recursive target, caller-owned input,
 or unrelated resource. Directory setup and create-only file writes are journaled
 before their fallible identity postchecks; a transient setup/post-write failure
-recovers only allowlisted entries from that unpredictable owner-only directory.
+recovers only allowlisted entries from that unpredictable create-only directory.
 If exact directory/file identity cannot be re-established, cleanup fails closed
 and preserves the residue for diagnosis. Docker CLI timeout/overflow handling
 sends bounded TERM/KILL signals but never releases stack cleanup merely because
 a timer elapsed: it waits for stream close or repeated OS confirmation that the
-exact child PID no longer exists. The create-only proof is written only after both absence
+exact child PID no longer exists. CONNECT proxy termination uses the same
+close-or-exact-PID-absence rule; an unverifiably live child remains fail-stop
+while bounded checks and kill retries continue. The create-only proof is written only after both absence
 checks and directory cleanups succeed. Its lifecycle section includes sanitized
 per-role project and generated-directory hashes plus the exact cleanup receipts;
 the serialized reader recomputes their association with each stack.

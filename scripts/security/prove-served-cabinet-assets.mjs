@@ -12,6 +12,9 @@ const PROOF_SCHEMA_VERSION = 1;
 const CABINET_ROUTE = "/cabinet/page";
 const CABINET_CLIENT_MODULE_COUNT = 16;
 const MAX_ATTESTATION_BYTES = 32 * 1024 * 1024;
+const MAX_INVENTORY_ASSETS = 4_096;
+const MAX_INVENTORY_ASSET_BYTES = 128 * 1024 * 1024;
+const MAX_INVENTORY_TOTAL_BYTES = 1024 * 1024 * 1024;
 const MAX_ROUTE_CHUNKS = 64;
 const MAX_CHUNK_BYTES = 32 * 1024 * 1024;
 const MAX_ROUTE_BYTES = 256 * 1024 * 1024;
@@ -21,6 +24,7 @@ const SHA256_DIGEST = /^sha256:[a-f0-9]{64}$/;
 const REVISION = /^[a-f0-9]{40}$/;
 const SAFE_VERSION = /^[A-Za-z0-9._-]{1,32}$/;
 const STATIC_CHUNK = /^\/_next\/static\/chunks\/[A-Za-z0-9._/-]+$/;
+const STATIC_MEDIA = /^\/_next\/static\/media\/[A-Za-z0-9._-]{1,200}\.(?:eot|ico|png|svg|ttf|woff|woff2)$/;
 
 export async function proveServedCabinetAssets({ baseline, candidate, fetchImpl = fetch }) {
   const baselineInput = validateSideInput(baseline, "baseline");
@@ -416,6 +420,8 @@ function validateInventory(value, label) {
     !Array.isArray(value.clientReferences)
     || !Array.isArray(value.manifests)
     || !Array.isArray(value.staticChunks)
+    || value.staticChunks.length < 1
+    || value.staticChunks.length > MAX_INVENTORY_ASSETS
     || value.clientReferenceCount !== value.clientReferences.length
     || value.manifestCount !== value.manifests.length
     || value.staticChunkCount !== value.staticChunks.length
@@ -424,16 +430,22 @@ function validateInventory(value, label) {
   ) throw new Error(`${label} asset inventory shape is invalid.`);
 
   const staticPaths = new Set();
+  let staticAssetBytes = 0;
   for (const entry of value.staticChunks) {
     assertExactKeys(entry, ["imagePath", "servedPath", "sha256", "size"], `${label} static chunk`);
     if (
       !safeStaticInventoryPath(entry.servedPath)
       || entry.imagePath !== `/app/.next${entry.servedPath.slice("/_next".length)}`
       || !SHA256.test(entry.sha256 ?? "")
-      || !boundedSize(entry.size, 2 * 1024 * 1024 * 1024)
+      || !boundedSize(entry.size, MAX_INVENTORY_ASSET_BYTES)
       || staticPaths.has(entry.servedPath)
     ) throw new Error(`${label} static chunk inventory is invalid.`);
     staticPaths.add(entry.servedPath);
+    staticAssetBytes += entry.size;
+  }
+  if (!Number.isSafeInteger(staticAssetBytes)
+    || staticAssetBytes > MAX_INVENTORY_TOTAL_BYTES) {
+    throw new Error(`${label} static asset inventory exceeds its aggregate byte limit.`);
   }
   assertSorted(value.staticChunks.map((entry) => entry.servedPath), `${label} static chunks`);
 
@@ -512,7 +524,7 @@ function validateClientReference(value, { label, manifestByPath, staticPaths }) 
       !SHA256.test(binding.moduleIdentitySha256 ?? "")
       || moduleIds.has(binding.moduleIdentitySha256)
       || !Array.isArray(binding.chunks)
-      || binding.chunks.some((servedPath) => !safeStaticInventoryPath(servedPath))
+      || binding.chunks.some((servedPath) => !safeStaticChunk(servedPath))
     ) throw new Error(`${label} client module binding is invalid.`);
     moduleIds.add(binding.moduleIdentitySha256);
   }
@@ -815,18 +827,24 @@ function expectedAccept(servedPath) {
 }
 
 function assertUniqueSortedStaticChunks(values, label) {
-  if (values.some((value) => !safeStaticInventoryPath(value)) || new Set(values).size !== values.length) {
+  if (values.some((value) => !safeStaticChunk(value)) || new Set(values).size !== values.length) {
     throw new Error(`${label} are invalid or repeated.`);
   }
   assertSorted(values, label);
 }
 
 function safeStaticChunk(value) {
-  return safeStaticInventoryPath(value)
+  return safeStaticChunkPath(value)
     && (value.endsWith(".js") || value.endsWith(".css"));
 }
 
 function safeStaticInventoryPath(value) {
+  return safeStaticChunk(value)
+    || (typeof value === "string" && STATIC_MEDIA.test(value)
+      && !value.includes("..") && !value.includes("//"));
+}
+
+function safeStaticChunkPath(value) {
   return typeof value === "string"
     && STATIC_CHUNK.test(value)
     && !value.includes("..")

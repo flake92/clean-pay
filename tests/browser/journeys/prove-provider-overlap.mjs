@@ -1,4 +1,4 @@
-import { chmod, lstat, readFile, realpath, stat, writeFile } from "node:fs/promises";
+import { lstat, readFile, realpath, stat } from "node:fs/promises";
 import path from "node:path";
 
 import { chromium } from "playwright";
@@ -24,15 +24,19 @@ import {
   journeyDockerCliEnvironment,
   runJourneyDockerCommand,
   withJourneyOwnedStackPair,
+  writeJourneySanitizedOutput,
 } from "./journey-owned-stack-orchestrator.mjs";
 import {
   assertProviderOverlapRedirect,
   classifyProviderOverlapBrowserRequest,
   createProviderOverlapEventSeal,
   createProviderOverlapStaticAssetContract,
+  extractProviderOverlapCssMediaReferences,
   finalizeProviderOverlapBrowserContract,
   finalizeProviderOverlapEventLifecycle,
   finalizeProviderOverlapHistoryContract,
+  installProviderOverlapHistoryInstrumentation,
+  readProviderOverlapStaticResponseEvidence,
 } from "./provider-overlap-browser-contract.mjs";
 import {
   PROVIDER_OVERLAP_ACTION,
@@ -50,6 +54,11 @@ import {
 } from "./provider-overlap-proof-contract.mjs";
 
 const repositoryRoot = path.resolve(process.cwd());
+const providerStaticDocumentKeys = Object.freeze([
+  "app-login-document",
+  "app-profile-document",
+  "app-cabinet-document",
+]);
 const providerOverlapConnectAuthorityLedger = Object.freeze([
   "challenges.cloudflare.com:443",
   "chatwoot.browser.clean-pay.dev:443",
@@ -137,8 +146,7 @@ try {
     proofSession.launch,
   );
   const bytes = Buffer.from(`${JSON.stringify(document, null, 2)}\n`, "utf8");
-  await writeFile(outputPath, bytes, { flag: "wx", mode: 0o600 });
-  await chmod(outputPath, 0o600).catch(() => undefined);
+  await writeJourneySanitizedOutput(outputPath, bytes);
   process.stdout.write(`${JSON.stringify({
     status: "dual_image_provider_overlap_proven",
     schemaVersion: document.schemaVersion,
@@ -297,10 +305,15 @@ async function exerciseCabinet(
       ignoreHTTPSErrors: true,
       serviceWorkers: "block",
     });
-    const eventSeal = createProviderOverlapEventSeal();
+    // A successful 256-request proof records exactly three lifecycle events per
+    // request plus four history events, so 1,024 retains a bounded safety margin
+    // above the maximum valid 772-event ledger.
+    const eventSeal = createProviderOverlapEventSeal(1_024);
     const historyRecords = [];
     let historyOverflow = false;
+    let historyCaptureActive = false;
     await context.exposeBinding("__cleanPayProviderHistory", ({ frame }, record) => {
+      if (!historyCaptureActive) return;
       eventSeal.record();
       if (frame !== frame.page().mainFrame()) {
         historyOverflow = true;
@@ -312,31 +325,46 @@ async function exerciseCabinet(
       }
       historyRecords.push(record);
     });
-    await context.addInitScript(() => {
-      const emit = (kind) => {
-        void globalThis.__cleanPayProviderHistory({ kind, url: location.href });
-      };
-      for (const kind of ["pushState", "replaceState"]) {
-        const original = history[kind].bind(history);
-        history[kind] = (...args) => {
-          const result = original(...args);
-          emit(kind);
-          return result;
-        };
-      }
-      addEventListener("hashchange", () => emit("hashchange"));
-      addEventListener("popstate", () => emit("popstate"));
-    });
+    await context.addInitScript(installProviderOverlapHistoryInstrumentation);
     const page = await context.newPage();
-    page.on("framenavigated", (frame) => {
+    const cdp = await context.newCDPSession(page);
+    await cdp.send("Page.enable");
+    /**
+     * @param {{frame: {id: string, loaderId: string, parentId?: string, url: string}, type: string}}
+     * event
+     */
+    const handleFrameNavigated = ({ frame, type }) => {
+      if (!historyCaptureActive || frame.parentId !== undefined) return;
       eventSeal.record();
-      if (frame !== page.mainFrame()) return;
       if (historyRecords.length >= 128) {
         historyOverflow = true;
         return;
       }
-      historyRecords.push({ kind: "frame-navigation", url: frame.url() });
-    });
+      historyRecords.push({
+        frameId: frame.id,
+        kind: "document-navigation",
+        loaderId: frame.loaderId,
+        navigationType: type,
+        url: frame.url,
+      });
+    };
+    /** @param {{frameId: string, navigationType: string, url: string}} event */
+    const handleNavigatedWithinDocument = ({ frameId, navigationType, url }) => {
+      if (!historyCaptureActive) return;
+      eventSeal.record();
+      if (historyRecords.length >= 128) {
+        historyOverflow = true;
+        return;
+      }
+      historyRecords.push({
+        frameId,
+        kind: "same-document-navigation",
+        navigationType,
+        url,
+      });
+    };
+    cdp.on("Page.frameNavigated", handleFrameNavigated);
+    cdp.on("Page.navigatedWithinDocument", handleNavigatedWithinDocument);
     const unexpectedPages = [];
     const unexpectedConsole = [];
     const unexpectedPageErrors = [];
@@ -372,6 +400,7 @@ async function exerciseCabinet(
     let unexpectedRequestOverflow = false;
     const browserRequests = [];
     const browserRequestByIdentity = new Map();
+    let currentStaticDocumentKey = null;
     let cabinetDocumentAllowed = false;
     let cabinetDocumentConsumed = false;
     let unexpectedWebSocketCount = 0;
@@ -440,7 +469,10 @@ async function exerciseCabinet(
           }
           cabinetDocumentConsumed = true;
         }
-        const entry = { classification, request };
+        if (providerStaticDocumentKeys.includes(classification.key)) {
+          currentStaticDocumentKey = classification.key;
+        }
+        const entry = { classification, documentKey: currentStaticDocumentKey, request };
         browserRequests.push(entry);
         browserRequestByIdentity.set(request, entry);
         if (browserRequests.length > 256) {
@@ -482,25 +514,46 @@ async function exerciseCabinet(
     await page.getByRole("heading", { name: "Профиль", level: 1 })
       .waitFor({ state: "visible", timeout: 15_000 });
     await page.evaluate(() => new Promise((resolve) => setTimeout(resolve, 50)));
+    await drainProviderOverlapHistoryBindings(page);
+    const profileFrameTree = await cdp.send("Page.getFrameTree");
+    const profileFrame = profileFrameTree.frameTree.frame;
+    const profileHistoryLength = await page.evaluate(() => history.length);
     historyRecords.length = 0;
     eventSeal.record();
-    historyRecords.push({ kind: "checkpoint", url: page.url() });
+    historyRecords.push({
+      frameId: profileFrame.id,
+      historyLength: profileHistoryLength,
+      kind: "checkpoint",
+      loaderId: profileFrame.loaderId,
+      url: profileFrame.url,
+    });
+    historyCaptureActive = true;
     await armOverlap();
     cabinetDocumentAllowed = true;
-    await page.goto("https://pay.ci.clean-pay.dev/cabinet", {
+    const cabinetResponse = await page.goto("https://pay.ci.clean-pay.dev/cabinet", {
       waitUntil: "domcontentloaded",
       timeout: 30_000,
     });
+    const cabinetRequest = cabinetResponse?.request();
+    if (!cabinetRequest
+      || browserRequestByIdentity.get(cabinetRequest)?.classification.key
+        !== "app-cabinet-document") {
+      throw new Error("Cabinet navigation response is not bound to its exact browser request.");
+    }
     await page.waitForURL(
       (url) => url.href === "https://pay.ci.clean-pay.dev/cabinet",
       { timeout: 30_000 },
     );
     const heading = page.getByRole("heading", { name: "Личный кабинет", level: 1 });
     await heading.waitFor({ state: "visible", timeout: 15_000 });
+    await drainProviderOverlapHistoryBindings(page);
     const userAgent = await page.evaluate(() => navigator.userAgent);
     const chromiumVersion = browser.version();
     const mutableSourceContractSha256 = () => sha256(JSON.stringify({
-      browserRequestClassifications: browserRequests.map(({ classification }) => classification),
+      browserRequestClassifications: browserRequests.map(({ classification, documentKey }) => ({
+        classification,
+        documentKey,
+      })),
       browserRequestIdentityCount: browserRequestByIdentity.size,
       cabinetDocumentAllowed,
       cabinetDocumentConsumed,
@@ -529,6 +582,8 @@ async function exerciseCabinet(
         browserClosed = true;
       },
       detach: async () => {
+        cdp.removeListener("Page.frameNavigated", handleFrameNavigated);
+        cdp.removeListener("Page.navigatedWithinDocument", handleNavigatedWithinDocument);
         await page.removeAllListeners();
         await context.removeAllListeners();
       },
@@ -569,10 +624,17 @@ async function exerciseCabinet(
         if (!headingVisible) {
           throw new Error("Synthetic cabinet heading changed before its close barrier.");
         }
+        await drainProviderOverlapHistoryBindings(page);
+        const finalFrameTree = await cdp.send("Page.getFrameTree");
+        const finalFrame = finalFrameTree.frameTree.frame;
         return Object.freeze({
           finalUrl,
           headingVisible,
-          historyContract: finalizeProviderOverlapHistoryContract(historyRecords),
+          historyContract: finalizeProviderOverlapHistoryContract(historyRecords, {
+            frameId: finalFrame.id,
+            loaderId: finalFrame.loaderId,
+            url: finalFrame.url,
+          }),
           mutableSourceContractSha256: mutableSourceContractSha256(),
         });
       },
@@ -603,6 +665,8 @@ async function exerciseCabinet(
         unexpectedPageErrorCount: unexpectedPageErrors.length,
         requestCount: requestContract.requestCount,
         requestContractSha256: requestContract.requestContractSha256,
+        requestOrderContractSha256: requestContract.requestOrderContractSha256,
+        requestOrderLedger: requestContract.requestOrderLedger,
         semanticRequestLedger: requestContract.semanticRequestLedger,
         staticLoadGraph: requestContract.staticLoadGraph,
         staticLoadGraphContractSha256: requestContract.staticLoadGraphContractSha256,
@@ -1200,6 +1264,16 @@ async function controlJson(baseUrl, pathname, options = {}, maximumBytes = 1024 
   }
 }
 
+async function drainProviderOverlapHistoryBindings(page) {
+  await boundedBrowserEvidenceOperation(page.evaluate(async () => {
+    const drain = globalThis.__cleanPayProviderHistoryDrain;
+    if (typeof drain !== "function") {
+      throw new Error("Synthetic history binding drain is unavailable.");
+    }
+    await drain();
+  }), 2_000, "browser history binding drain");
+}
+
 async function boundedResponseBytes(response, maximumBytes) {
   if (!response.body) throw new Error("Fixture control response has no body.");
   const reader = response.body.getReader();
@@ -1225,9 +1299,14 @@ async function boundedResponseBytes(response, maximumBytes) {
 async function finishBrowserRequestContract(requests, requestByIdentity, staticAssetContract) {
   const records = [];
   const redirectedSources = new Set();
-  const responseDeclaredStaticPaths = new Set();
+  const responseDeclarationsByDocument = new Map(providerStaticDocumentKeys.map((documentKey) => [
+    documentKey,
+    new Set(),
+  ]));
+  const cssMediaReferencesBySource = new Map();
   let declarationBytes = 0;
-  for (const { classification, request } of requests) {
+  let staticResponseBytes = 0;
+  for (const { classification, documentKey, request } of requests) {
     const response = await boundedBrowserEvidenceOperation(
       request.response(),
       2_000,
@@ -1257,8 +1336,54 @@ async function finishBrowserRequestContract(requests, requestByIdentity, staticA
     const responseContentType = response
       ? normalizeResponseContentType(response.headers()["content-type"])
       : null;
+    let responseBody;
+    let staticObservation = {
+      staticResponseBytes: null,
+      staticResponseSha256: null,
+    };
+    if (classification.staticPath !== null) {
+      const staticEvidence = await readProviderOverlapStaticResponseEvidence({
+        classification,
+        response,
+        responseContentType,
+      }, staticAssetContract);
+      responseBody = staticEvidence.body;
+      staticResponseBytes += responseBody.byteLength;
+      if (!Number.isSafeInteger(staticResponseBytes)
+        || staticResponseBytes > 1024 * 1024 * 1024) {
+        throw new Error("Static browser response bytes exceeded their aggregate bound.");
+      }
+      staticObservation = staticEvidence.observation;
+      if (responseContentType === "text/css") {
+        declarationBytes += responseBody.byteLength;
+        if (responseBody.byteLength > 2 * 1024 * 1024
+          || declarationBytes > 8 * 1024 * 1024) {
+          throw new Error("Static response declaration graph exceeded its bounded body contract.");
+        }
+        const references = extractProviderOverlapCssMediaReferences(
+          responseBody,
+          classification.staticPath,
+          staticAssetContract,
+        );
+        const priorReferences = cssMediaReferencesBySource.get(classification.staticPath);
+        if (priorReferences !== undefined
+          && JSON.stringify(priorReferences) !== JSON.stringify(references)) {
+          throw new Error("Repeated CSS response changed its exact media reference closure.");
+        }
+        if (priorReferences === undefined) {
+          cssMediaReferencesBySource.set(classification.staticPath, references);
+        }
+        const documentDeclarations = responseDeclarationsByDocument.get(documentKey);
+        if (!documentDeclarations) {
+          throw new Error("CSS response escaped its exact document generation.");
+        }
+        for (const reference of references) {
+          documentDeclarations.add(reference.targetPath);
+        }
+      }
+    }
     if (response && response.status() === 200
-      && new Set(["text/html", "text/x-component", "text/css"]).has(responseContentType)) {
+      && new Set(["text/html", "text/x-component"]).has(responseContentType)) {
       const body = await boundedBrowserEvidenceOperation(
         response.body(),
         5_000,
@@ -1269,15 +1394,23 @@ async function finishBrowserRequestContract(requests, requestByIdentity, staticA
         throw new Error("Static response declaration graph exceeded its bounded body contract.");
       }
       const source = new TextDecoder("utf-8", { fatal: true }).decode(body);
+      const documentDeclarations = responseDeclarationsByDocument.get(documentKey);
       for (const match of source.matchAll(
-        /\/_next\/static\/(?:chunks(?:\/[A-Za-z0-9._-]{1,100}){0,5}|media)\/[A-Za-z0-9._-]{1,200}\.(?:css|js|woff2|png|svg)/g,
-      )) responseDeclaredStaticPaths.add(match[0]);
+        /\/_next\/static\/(?:chunks(?:\/[A-Za-z0-9._-]{1,100}){0,5}\/[A-Za-z0-9._-]{1,200}\.(?:css|js)|media\/[A-Za-z0-9._-]{1,200}\.(?:eot|ico|png|svg|ttf|woff|woff2))/g,
+      )) {
+        if (!documentDeclarations) {
+          throw new Error("Static response declaration escaped its exact document generation.");
+        }
+        documentDeclarations.add(match[0]);
+      }
     }
     records.push({
       classification,
+      documentKey,
       redirectEdge,
       responseContentType,
       responseStatus: response?.status() ?? null,
+      ...staticObservation,
     });
   }
   for (const { classification, request } of requests) {
@@ -1297,7 +1430,11 @@ async function finishBrowserRequestContract(requests, requestByIdentity, staticA
     }
   }
   return finalizeProviderOverlapBrowserContract(records, {
-    responseDeclaredStaticPaths: [...responseDeclaredStaticPaths].sort(),
+    cssMediaReferences: [...cssMediaReferencesBySource.values()].flat(),
+    responseDeclarationsByDocument: providerStaticDocumentKeys.map((documentKey) => ({
+      documentKey,
+      paths: [...responseDeclarationsByDocument.get(documentKey)].sort(),
+    })),
     staticAssetContract,
   });
 }
