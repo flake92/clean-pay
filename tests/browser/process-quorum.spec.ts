@@ -1,7 +1,21 @@
 import { createHash } from "node:crypto";
 
-import { expect, test } from "./fixtures";
-import { permitsCharacterizationReplayRequest } from "./characterization-replay-policy";
+import type {
+  BrowserContext,
+  Page,
+  Request as PlaywrightRequest,
+} from "@playwright/test";
+
+import {
+  characterizationContextOptions,
+  closeOwnedResources,
+  expect,
+  test,
+} from "./fixtures";
+import {
+  installCharacterizationReplayGuard,
+  permitsCharacterizationReplayRequest,
+} from "./characterization-replay-policy";
 import {
   requireExactProcessBytesAgreement,
   selectIndependentProcessCharacterizationQuorum,
@@ -51,8 +65,10 @@ test.describe("independent Chromium process quorum", () => {
     for (const nearMiss of [
       { ...local, method: "POST" },
       { ...local, headers: { "next-action": "opaque" } },
+      { ...local, url: "http://user:password@127.0.0.1:4000/login" },
       { ...turnstile, resourceType: "fetch" },
       { ...turnstile, headers: { authorization: "credential" } },
+      { ...turnstile, headers: { "x-api-key": "credential" } },
       { ...turnstile, url: `${turnstile.url}&near_miss=1` },
       { ...turnstile, url: "https://provider.invalid/resource.js" },
       { ...turnstile, url: "not a url" },
@@ -103,4 +119,203 @@ test.describe("independent Chromium process quorum", () => {
       "console sidecars",
     )).toThrow(/exactly 3 independent process values/);
   });
+
+  test("pins the complete anonymous browser context policy", ({}, testInfo) => {
+    const configured = testInfo.project.use as Record<string, unknown>;
+    expect(characterizationContextOptions(configured)).toEqual({
+      acceptDownloads: true,
+      baseURL: configured.baseURL,
+      bypassCSP: false,
+      colorScheme: "light",
+      deviceScaleFactor: 1,
+      hasTouch: configured.hasTouch,
+      ignoreHTTPSErrors: false,
+      isMobile: configured.isMobile,
+      javaScriptEnabled: true,
+      locale: "ru-RU",
+      offline: false,
+      reducedMotion: "reduce",
+      serviceWorkers: "allow",
+      timezoneId: "Europe/Moscow",
+      viewport: configured.viewport,
+    });
+
+    expect(() => characterizationContextOptions({
+      ...configured,
+      storageState: "credential-bearing-state.json",
+    })).toThrow(/keys do not match/);
+    expect(() => characterizationContextOptions({
+      ...configured,
+      contextOptions: {
+        ...(configured.contextOptions as Record<string, unknown>),
+        extraHTTPHeaders: { authorization: "secret" },
+      },
+    })).toThrow(/contextOptions keys do not match/);
+    expect(() => characterizationContextOptions({
+      ...configured,
+      viewport: {
+        ...(configured.viewport as Record<string, unknown>),
+        screen: { width: 390, height: 844 },
+      },
+    })).toThrow(/viewport keys do not match/);
+    expect(() => characterizationContextOptions({
+      ...configured,
+      launchOptions: {
+        ...(configured.launchOptions as Record<string, unknown>),
+        channel: "chrome",
+      },
+    })).toThrow(/launchOptions keys do not match/);
+  });
+
+  test("attempts every owned close and surfaces rejection plus timeout", async () => {
+    const attempts: number[] = [];
+    await expect(closeOwnedResources({
+      close: async (_resource, index) => {
+        attempts.push(index);
+        if (index === 0) throw new Error("close rejected");
+        if (index === 1) await new Promise<never>(() => {});
+      },
+      label: "test resource",
+      resources: ["first", "second", "third"],
+      timeoutMs: 10,
+    })).rejects.toThrow(/2 of 3 owned test resource/);
+    expect(attempts.sort()).toEqual([0, 1, 2]);
+  });
+
+  test("seals late HTTP and denies popup, worker, and WebSocket transports", async () => {
+    const harness = replayGuardHarness();
+    const guard = await installCharacterizationReplayGuard({
+      applicationOrigin: "http://127.0.0.1:4000",
+      context: harness.context,
+    });
+    guard.bindPrimaryPage(harness.primaryPage);
+
+    const popupRequest = harness.request({ page: harness.extraPage, url: "/popup" });
+    harness.emit("request", popupRequest);
+    await harness.route(popupRequest);
+    harness.emit("requestfailed", popupRequest);
+    const serviceWorkerRequest = harness.request({
+      serviceWorker: {},
+      url: "/service-worker-owned",
+    });
+    harness.emit("request", serviceWorkerRequest);
+    await harness.route(serviceWorkerRequest);
+    harness.emit("requestfailed", serviceWorkerRequest);
+    harness.emit("serviceworker", {});
+    harness.emit("page", harness.extraPage);
+    await harness.websocket();
+
+    await guard.drain({ quietMs: 10, timeoutMs: 50 });
+    guard.seal();
+
+    const lateRequest = harness.request();
+    harness.emit("request", lateRequest);
+    await harness.route(lateRequest);
+    harness.emit("requestfailed", lateRequest);
+    guard.markContextClosed();
+
+    expect(harness.aborted).toBe(3);
+    expect(harness.closedExtraPages).toBe(1);
+    expect(harness.closedWebSockets).toBe(1);
+    expect(harness.connectedWebSockets).toBe(0);
+    expect(guard.evidence()).toMatchObject({
+      phase: "closed",
+      serviceWorkerRequestCount: 1,
+      serviceWorkerCount: 1,
+      extraPageCount: 1,
+      websocketCount: 1,
+      blockedRequestCount: 3,
+      activeRequestCount: 0,
+    });
+    expect(() => guard.assertNoViolations()).toThrow(/transport violation/);
+    guard.detach();
+  });
 });
+
+function replayGuardHarness() {
+  const listeners = new Map<string, Set<(...args: never[]) => unknown>>();
+  let routeHandler: ((route: {
+    abort: () => Promise<void>;
+    fallback: () => Promise<void>;
+    request: () => PlaywrightRequest;
+  }) => Promise<void>) | null = null;
+  let websocketHandler: ((websocket: {
+    close: () => Promise<void>;
+    connectToServer: () => void;
+  }) => Promise<void>) | null = null;
+  let aborted = 0;
+  let closedExtraPages = 0;
+  let closedWebSockets = 0;
+  let connectedWebSockets = 0;
+  const context = {
+    on(event: string, handler: (...args: never[]) => unknown) {
+      const eventListeners = listeners.get(event) ?? new Set();
+      eventListeners.add(handler);
+      listeners.set(event, eventListeners);
+    },
+    off(event: string, handler: (...args: never[]) => unknown) {
+      listeners.get(event)?.delete(handler);
+    },
+    async route(_pattern: unknown, handler: typeof routeHandler) {
+      routeHandler = handler;
+    },
+    async routeWebSocket(_pattern: unknown, handler: typeof websocketHandler) {
+      websocketHandler = handler;
+    },
+  } as unknown as BrowserContext;
+  const primaryPage = {
+    context: () => context,
+  } as unknown as Page;
+  const extraPage = {
+    context: () => context,
+    async close() {
+      closedExtraPages += 1;
+    },
+  } as unknown as Page;
+  return {
+    context,
+    primaryPage,
+    extraPage,
+    get aborted() { return aborted; },
+    get closedExtraPages() { return closedExtraPages; },
+    get closedWebSockets() { return closedWebSockets; },
+    get connectedWebSockets() { return connectedWebSockets; },
+    emit(event: string, value: unknown) {
+      for (const handler of listeners.get(event) ?? []) {
+        handler(value as never);
+      }
+    },
+    request(options: {
+      page?: Page;
+      serviceWorker?: object | null;
+      url?: string;
+    } = {}) {
+      return {
+        frame: () => ({ page: () => options.page ?? primaryPage }),
+        headers: () => ({}),
+        method: () => "GET",
+        resourceType: () => "fetch",
+        serviceWorker: () => options.serviceWorker ?? null,
+        url: () => new URL(
+          options.url ?? "/late",
+          "http://127.0.0.1:4000",
+        ).href,
+      } as unknown as PlaywrightRequest;
+    },
+    async route(request: PlaywrightRequest) {
+      if (!routeHandler) throw new Error("HTTP route was not installed.");
+      await routeHandler({
+        abort: async () => { aborted += 1; },
+        fallback: async () => {},
+        request: () => request,
+      });
+    },
+    async websocket() {
+      if (!websocketHandler) throw new Error("WebSocket route was not installed.");
+      await websocketHandler({
+        close: async () => { closedWebSockets += 1; },
+        connectToServer: () => { connectedWebSockets += 1; },
+      });
+    },
+  };
+}
