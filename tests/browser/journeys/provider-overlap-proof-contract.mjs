@@ -496,6 +496,8 @@ export function createProviderOverlapStackReport(input) {
       "historyLedger",
       "requestContractSha256",
       "requestCount",
+      "requestOrderContractSha256",
+      "requestOrderLedger",
       "semanticRequestLedger",
       "staticLoadGraph",
       "staticLoadGraphContractSha256",
@@ -510,16 +512,22 @@ export function createProviderOverlapStackReport(input) {
   );
   equal(navigation.finalUrl, "https://pay.ci.clean-pay.dev/cabinet", `${role} navigation final URL`);
   equal(navigation.headingVisible, true, `${role} cabinet heading`);
-  assertEventLifecycle(navigation.eventLifecycle, role);
-  boundedInteger(navigation.requestCount, 1, 256, `${role} browser request count`);
+  const eventLifecycle = assertEventLifecycle(navigation.eventLifecycle, role);
+  boundedInteger(navigation.requestCount, 18, 256, `${role} browser request count`);
   stringMatch(
     navigation.requestContractSha256,
     /^[a-f0-9]{64}$/,
     `${role} browser request contract sha256`,
   );
   const historyLedger = assertHistoryLedger(navigation.historyLedger, role);
-  boundedInteger(navigation.historyCount, 2, 128, `${role} browser history count`);
+  boundedInteger(navigation.historyCount, 4, 4, `${role} browser history count`);
   equal(navigation.historyCount, historyLedger.length, `${role} browser history ledger count`);
+  assertEventLifecycleCausality(
+    eventLifecycle,
+    navigation.requestCount,
+    navigation.historyCount,
+    role,
+  );
   stringMatch(
     navigation.historyContractSha256,
     /^[a-f0-9]{64}$/,
@@ -531,7 +539,7 @@ export function createProviderOverlapStackReport(input) {
     `${role} browser history contract digest`,
   );
   const staticLedger = assertStaticRequestLedger(navigation.staticRequestLedger, role);
-  boundedInteger(navigation.staticRequestCount, 3, 256, `${role} static request count`);
+  boundedInteger(navigation.staticRequestCount, 9, 256, `${role} static request count`);
   equal(navigation.staticRequestCount, staticLedger.length, `${role} static request ledger count`);
   stringMatch(
     navigation.staticRequestContractSha256,
@@ -1240,6 +1248,8 @@ function assertStackReport(value, label) {
       "historyLedger",
       "requestContractSha256",
       "requestCount",
+      "requestOrderContractSha256",
+      "requestOrderLedger",
       "semanticRequestLedger",
       "staticLoadGraph",
       "staticLoadGraphContractSha256",
@@ -1258,8 +1268,8 @@ function assertStackReport(value, label) {
     `${label} final navigation URL`,
   );
   equal(navigation.headingVisible, true, `${label} cabinet heading visibility`);
-  assertEventLifecycle(navigation.eventLifecycle, label);
-  boundedInteger(navigation.requestCount, 1, 256, `${label} browser request count`);
+  const eventLifecycle = assertEventLifecycle(navigation.eventLifecycle, label);
+  boundedInteger(navigation.requestCount, 18, 256, `${label} browser request count`);
   stringMatch(
     navigation.requestContractSha256,
     /^[a-f0-9]{64}$/,
@@ -1267,6 +1277,12 @@ function assertStackReport(value, label) {
   );
   const historyLedger = assertHistoryLedger(navigation.historyLedger, label);
   equal(navigation.historyCount, historyLedger.length, `${label} browser history count`);
+  assertEventLifecycleCausality(
+    eventLifecycle,
+    navigation.requestCount,
+    navigation.historyCount,
+    label,
+  );
   equal(
     navigation.historyContractSha256,
     sha256(JSON.stringify(historyLedger)),
@@ -1413,42 +1429,72 @@ function assertRuntimeBinding(value, label, report) {
 }
 
 function assertHistoryLedger(value, label) {
-  if (!Array.isArray(value) || value.length !== 2) {
+  if (!Array.isArray(value) || value.length !== 4) {
     fail(`${label} browser history ledger is invalid.`);
   }
-  for (const entry of value) {
-    exactKeys(entry, ["kind", "location"], `${label} browser history entry`);
-  }
-  const projected = value.map(({ kind, location }) => ({ kind, location }));
-  deepEqual(projected, [
+  const expected = [
     { kind: "checkpoint", location: "app-profile" },
-    { kind: "frame-navigation", location: "app-cabinet" },
-  ], `${label} exact browser history transition`);
-  return projected;
+    {
+      frameRelation: "same-main-frame",
+      kind: "document-navigation",
+      loaderRelation: "changed",
+      location: "app-cabinet",
+      navigationType: "Navigation",
+    },
+    {
+      historyLengthRelation: "unchanged",
+      kind: "replaceState",
+      location: "app-cabinet",
+      operationSequence: 1,
+      stateTransition: "unmarked-to-next-app-router",
+      urlRelation: "unchanged",
+    },
+    {
+      frameRelation: "same-main-frame",
+      kind: "same-document-navigation",
+      location: "app-cabinet",
+      navigationType: "historyApi",
+      pairedOperationSequence: 1,
+    },
+  ];
+  for (const [index, entry] of value.entries()) {
+    exactKeys(entry, Object.keys(expected[index]), `${label} browser history entry`);
+  }
+  deepEqual(value, expected, `${label} exact browser history transition`);
+  return expected;
 }
 
 function assertStaticRequestLedger(value, label) {
-  if (!Array.isArray(value) || value.length < 3 || value.length > 256) {
+  if (!Array.isArray(value) || value.length < 9 || value.length > 256) {
     fail(`${label} static request ledger is invalid.`);
   }
   const classes = new Set([
     "next-static-css", "next-static-font", "next-static-image", "next-static-js",
   ]);
-  const paths = new Set();
   for (const entry of value) {
-    exactKeys(entry, ["assetSha256", "class", "pathSha256"], `${label} static request entry`);
+    exactKeys(entry, [
+      "assetBytes", "assetSha256", "class", "contentType", "documentKey", "pathSha256",
+    ], `${label} static request entry`);
     if (!classes.has(entry.class) || !/^[a-f0-9]{64}$/.test(entry.pathSha256 ?? "")
-      || paths.has(entry.pathSha256)
-      || (entry.assetSha256 !== null && !/^[a-f0-9]{64}$/.test(entry.assetSha256 ?? ""))
-      || (["next-static-css", "next-static-js"].includes(entry.class)
-        && entry.assetSha256 === null)) {
-      fail(`${label} static request entry is invalid, duplicated, or unbound.`);
+      || !/^[a-f0-9]{64}$/.test(entry.assetSha256 ?? "")
+      || !new Set([
+        "app-login-document", "app-profile-document", "app-cabinet-document",
+      ]).has(entry.documentKey)
+      || !Number.isSafeInteger(entry.assetBytes) || entry.assetBytes < 1
+      || entry.assetBytes > 128 * 1024 * 1024
+      || typeof entry.contentType !== "string" || entry.contentType.length < 3
+      || entry.contentType.length > 64) {
+      fail(`${label} static request entry is invalid or unbound.`);
     }
-    paths.add(entry.pathSha256);
   }
-  return value.map(({ assetSha256, class: resourceClass, pathSha256 }) => ({
+  return value.map(({
+    assetBytes, assetSha256, class: resourceClass, contentType, documentKey, pathSha256,
+  }) => ({
+    assetBytes,
     assetSha256,
     class: resourceClass,
+    contentType,
+    documentKey,
     pathSha256,
   }));
 }
@@ -1460,8 +1506,10 @@ function assertStaticLoadGraph(value, label) {
     [
       "assetAttestationSha256",
       "assetInventorySha256",
+      "cssMediaReferenceLedger",
       "declaredPathLedger",
       "declaredPathSha256s",
+      "documentLoadLedger",
       "expectedChunkPathSha256s",
       "inventoryLedger",
       "inventoryLedgerContractSha256",
@@ -1472,6 +1520,25 @@ function assertStaticLoadGraph(value, label) {
   );
   stringMatch(graph.assetAttestationSha256, /^[a-f0-9]{64}$/, `${label} asset attestation`);
   stringMatch(graph.assetInventorySha256, /^[a-f0-9]{64}$/, `${label} asset inventory`);
+  if (!Array.isArray(graph.cssMediaReferenceLedger)
+    || graph.cssMediaReferenceLedger.length !== 8) {
+    fail(`${label} CSS media reference ledger is invalid.`);
+  }
+  const cssMediaReferences = graph.cssMediaReferenceLedger.map((entry, index) => {
+    exactKeys(entry, [
+      "occurrence", "sourcePathSha256", "targetPathSha256",
+    ], `${label} CSS media reference`);
+    if (entry.occurrence !== index + 1
+      || !/^[a-f0-9]{64}$/.test(entry.sourcePathSha256 ?? "")
+      || !/^[a-f0-9]{64}$/.test(entry.targetPathSha256 ?? "")) {
+      fail(`${label} CSS media reference is invalid or out of order.`);
+    }
+    return {
+      occurrence: entry.occurrence,
+      sourcePathSha256: entry.sourcePathSha256,
+      targetPathSha256: entry.targetPathSha256,
+    };
+  });
   for (const [name, values] of [
     ["declared", graph.declaredPathSha256s],
     ["expected chunk", graph.expectedChunkPathSha256s],
@@ -1479,24 +1546,114 @@ function assertStaticLoadGraph(value, label) {
   ]) {
     if (!Array.isArray(values) || values.length < 1 || values.length > 256
       || values.some((digest) => !/^[a-f0-9]{64}$/.test(digest))
-      || new Set(values).size !== values.length) {
+      || new Set(values).size !== values.length
+      || JSON.stringify([...values].sort()) !== JSON.stringify(values)) {
       fail(`${label} static ${name} graph is invalid.`);
     }
   }
+  if (!Array.isArray(graph.documentLoadLedger) || graph.documentLoadLedger.length !== 3) {
+    fail(`${label} static document load ledger is invalid.`);
+  }
+  const expectedDocumentKeys = [
+    "app-login-document", "app-profile-document", "app-cabinet-document",
+  ];
+  const routeRequestPaths = new Set();
+  const expectedChunkPaths = new Set();
+  let negotiatedMediaPaths;
+  let sharedResponseChunkPaths;
+  const documentLoadLedger = graph.documentLoadLedger.map((entry, index) => {
+    exactKeys(entry, [
+      "documentKey", "expectedChunkPathSha256s", "expectedMediaPathSha256s",
+      "routeDeclaredPathSha256s",
+    ], `${label} static document load entry`);
+    if (entry.documentKey !== expectedDocumentKeys[index]) {
+      fail(`${label} static document load order is invalid.`);
+    }
+    for (const [name, values, minimum, maximum] of [
+      ["expected chunk", entry.expectedChunkPathSha256s, 1, 256],
+      ["expected media", entry.expectedMediaPathSha256s, 2, 2],
+      ["route-declared", entry.routeDeclaredPathSha256s, 1, 64],
+    ]) {
+      if (!Array.isArray(values) || values.length < minimum || values.length > maximum
+        || values.some((digest) => !/^[a-f0-9]{64}$/.test(digest))
+        || new Set(values).size !== values.length
+        || JSON.stringify([...values].sort()) !== JSON.stringify(values)) {
+        fail(`${label} document ${name} path ledger is invalid.`);
+      }
+    }
+    if (entry.routeDeclaredPathSha256s.some((digest) => (
+      !entry.expectedChunkPathSha256s.includes(digest)
+    ))) fail(`${label} document route graph escaped its expected chunks.`);
+    for (const digest of entry.routeDeclaredPathSha256s) routeRequestPaths.add(digest);
+    for (const digest of entry.expectedChunkPathSha256s) expectedChunkPaths.add(digest);
+    if (negotiatedMediaPaths === undefined) {
+      negotiatedMediaPaths = entry.expectedMediaPathSha256s;
+    } else {
+      deepEqual(
+        entry.expectedMediaPathSha256s,
+        negotiatedMediaPaths,
+        `${label} cross-document negotiated media paths`,
+      );
+    }
+    const responseOnlyChunks = entry.expectedChunkPathSha256s
+      .filter((digest) => !entry.routeDeclaredPathSha256s.includes(digest))
+      .sort();
+    if (sharedResponseChunkPaths === undefined) {
+      sharedResponseChunkPaths = responseOnlyChunks;
+    } else {
+      deepEqual(
+        responseOnlyChunks,
+        sharedResponseChunkPaths,
+        `${label} cross-document response-declared shared chunks`,
+      );
+    }
+    return {
+      documentKey: entry.documentKey,
+      expectedChunkPathSha256s: [...entry.expectedChunkPathSha256s],
+      expectedMediaPathSha256s: [...entry.expectedMediaPathSha256s],
+      routeDeclaredPathSha256s: [...entry.routeDeclaredPathSha256s],
+    };
+  });
+  deepEqual(
+    [...routeRequestPaths].sort(),
+    [...graph.routeDeclaredPathSha256s].sort(),
+    `${label} static route document union`,
+  );
+  deepEqual(
+    [...expectedChunkPaths].sort(),
+    [...graph.expectedChunkPathSha256s].sort(),
+    `${label} static expected document chunk union`,
+  );
   if (!Array.isArray(graph.inventoryLedger) || graph.inventoryLedger.length < 1
     || graph.inventoryLedger.length > 4_096) {
     fail(`${label} static inventory ledger is invalid.`);
   }
   const inventoryPaths = new Set();
+  let inventoryBytes = 0;
   const inventory = graph.inventoryLedger.map((entry) => {
-    exactKeys(entry, ["assetSha256", "pathSha256"], `${label} static inventory entry`);
+    exactKeys(entry, [
+      "assetBytes", "assetSha256", "extension", "pathSha256",
+    ], `${label} static inventory entry`);
     if (!/^[a-f0-9]{64}$/.test(entry.assetSha256 ?? "")
       || !/^[a-f0-9]{64}$/.test(entry.pathSha256 ?? "")
+      || !new Set(["css", "eot", "ico", "js", "png", "svg", "ttf", "woff", "woff2"])
+        .has(entry.extension)
+      || !Number.isSafeInteger(entry.assetBytes) || entry.assetBytes < 1
+      || entry.assetBytes > 128 * 1024 * 1024
       || inventoryPaths.has(entry.pathSha256)) {
       fail(`${label} static inventory entry is invalid or duplicated.`);
     }
+    inventoryBytes += entry.assetBytes;
+    if (!Number.isSafeInteger(inventoryBytes) || inventoryBytes > 1024 * 1024 * 1024) {
+      fail(`${label} static inventory exceeds its aggregate byte bound.`);
+    }
     inventoryPaths.add(entry.pathSha256);
-    return { assetSha256: entry.assetSha256, pathSha256: entry.pathSha256 };
+    return {
+      assetBytes: entry.assetBytes,
+      assetSha256: entry.assetSha256,
+      extension: entry.extension,
+      pathSha256: entry.pathSha256,
+    };
   });
   const sortedInventory = [...inventory].sort((left, right) => (
     left.pathSha256.localeCompare(right.pathSha256)
@@ -1524,8 +1681,8 @@ function assertStaticLoadGraph(value, label) {
     `${label} static declaration ordering`,
   );
   deepEqual(
-    declarations.map(({ pathSha256 }) => pathSha256).sort(),
-    [...graph.declaredPathSha256s].sort(),
+    declarations.map(({ pathSha256 }) => pathSha256),
+    graph.declaredPathSha256s,
     `${label} static declaration digest association`,
   );
   equal(
@@ -1535,7 +1692,10 @@ function assertStaticLoadGraph(value, label) {
   );
   equal(
     graph.routeDeclaredPathContractSha256,
-    sha256(JSON.stringify(graph.routeDeclaredPathSha256s)),
+    sha256(JSON.stringify(documentLoadLedger.map((entry) => ({
+      documentKey: entry.documentKey,
+      routeDeclaredPathSha256s: entry.routeDeclaredPathSha256s,
+    })))),
     `${label} static route projection digest`,
   );
   if (graph.routeDeclaredPathSha256s.some((digest) => (
@@ -1544,8 +1704,10 @@ function assertStaticLoadGraph(value, label) {
   return {
     assetAttestationSha256: graph.assetAttestationSha256,
     assetInventorySha256: graph.assetInventorySha256,
+    cssMediaReferenceLedger: cssMediaReferences,
     declaredPathLedger: declarations,
     declaredPathSha256s: [...graph.declaredPathSha256s],
+    documentLoadLedger,
     expectedChunkPathSha256s: [...graph.expectedChunkPathSha256s],
     inventoryLedger: inventory,
     inventoryLedgerContractSha256: graph.inventoryLedgerContractSha256,
@@ -1561,14 +1723,53 @@ function assertEventLifecycle(value, label) {
     ["drainedEventCount", "lateEventCount", "status"],
     `${label} browser event lifecycle`,
   );
-  boundedInteger(lifecycle.drainedEventCount, 1, 4_096, `${label} drained browser events`);
+  boundedInteger(lifecycle.drainedEventCount, 58, 772, `${label} drained browser events`);
   equal(lifecycle.lateEventCount, 0, `${label} late browser events`);
   equal(lifecycle.status, "sealed-clean", `${label} browser event lifecycle status`);
   return lifecycle;
 }
 
+function assertEventLifecycleCausality(lifecycle, requestCount, historyCount, label) {
+  equal(historyCount, 4, `${label} causal browser history event count`);
+  equal(
+    lifecycle.drainedEventCount,
+    requestCount * 3 + historyCount,
+    `${label} causal browser event count`,
+  );
+}
+
 function assertSemanticRequestLedger(value, label) {
   return validateProviderOverlapSemanticLedger(value, `${label} semantic browser request ledger`);
+}
+
+function assertSerializedRequestOrder(navigation, semanticCount, staticCount, label) {
+  if (!Array.isArray(navigation.requestOrderLedger)
+    || navigation.requestOrderLedger.length !== navigation.requestCount) {
+    fail(`${label} browser request order ledger is invalid.`);
+  }
+  const nextOccurrence = { semantic: 1, static: 1 };
+  const ledger = navigation.requestOrderLedger.map((entry) => {
+    exactKeys(entry, ["kind", "occurrence"], `${label} browser request order entry`);
+    if (!Object.hasOwn(nextOccurrence, entry.kind)
+      || entry.occurrence !== nextOccurrence[entry.kind]) {
+      fail(`${label} browser request order occurrence is invalid.`);
+    }
+    nextOccurrence[entry.kind] += 1;
+    return { kind: entry.kind, occurrence: entry.occurrence };
+  });
+  equal(nextOccurrence.semantic - 1, semanticCount, `${label} ordered semantic request count`);
+  equal(nextOccurrence.static - 1, staticCount, `${label} ordered static request count`);
+  stringMatch(
+    navigation.requestOrderContractSha256,
+    /^[a-f0-9]{64}$/,
+    `${label} browser request order digest`,
+  );
+  equal(
+    navigation.requestOrderContractSha256,
+    sha256(JSON.stringify(ledger)),
+    `${label} browser request order contract`,
+  );
+  return ledger;
 }
 
 function assertSerializedRequestAndStaticBinding(
@@ -1583,6 +1784,27 @@ function assertSerializedRequestAndStaticBinding(
     semanticLedger.length + staticLedger.length,
     `${label} total browser request count`,
   );
+  const requestOrderLedger = assertSerializedRequestOrder(
+    navigation,
+    semanticLedger.length,
+    staticLedger.length,
+    label,
+  );
+  const documentKeys = new Set([
+    "app-login-document", "app-profile-document", "app-cabinet-document",
+  ]);
+  let activeDocumentKey = null;
+  for (const entry of requestOrderLedger) {
+    if (entry.kind === "semantic") {
+      const semantic = semanticLedger[entry.occurrence - 1];
+      if (documentKeys.has(semantic.key)) activeDocumentKey = semantic.key;
+    } else {
+      const staticEntry = staticLedger[entry.occurrence - 1];
+      if (staticEntry.documentKey !== activeDocumentKey) {
+        fail(`${label} serialized static occurrence escaped its active document generation.`);
+      }
+    }
+  }
   const staticClasses = [...new Set(staticLedger.map((entry) => entry.class))].sort();
   for (const required of ["next-static-css", "next-static-font", "next-static-js"]) {
     if (!staticClasses.includes(required)) fail(`${label} static class closure is incomplete.`);
@@ -1613,7 +1835,7 @@ function assertSerializedRequestAndStaticBinding(
   }
   const inventoryByPath = new Map(staticLoadGraph.inventoryLedger.map((entry) => [
     entry.pathSha256,
-    entry.assetSha256,
+    entry,
   ]));
   const declaredChunkPaths = staticLoadGraph.declaredPathLedger
     .filter(({ class: resourceClass }) => resourceClass === "chunk")
@@ -1621,8 +1843,27 @@ function assertSerializedRequestAndStaticBinding(
   const declaredMediaPaths = staticLoadGraph.declaredPathLedger
     .filter(({ class: resourceClass }) => resourceClass === "media")
     .map(({ pathSha256 }) => pathSha256);
-  if (declaredChunkPaths.some((digest) => !inventoryByPath.has(digest))) {
-    fail(`${label} declared static chunk escaped its attested image inventory.`);
+  if ([...declaredChunkPaths, ...declaredMediaPaths].some((digest) => (
+    !inventoryByPath.has(digest)
+  ))) {
+    fail(`${label} declared static asset escaped its attested image inventory.`);
+  }
+  for (const declaration of staticLoadGraph.declaredPathLedger) {
+    const inventoryEntry = inventoryByPath.get(declaration.pathSha256);
+    const expectedClass = ["css", "js"].includes(inventoryEntry?.extension)
+      ? "chunk"
+      : "media";
+    if (declaration.class !== expectedClass) {
+      fail(`${label} static declaration class differs from its attested extension.`);
+    }
+  }
+  for (const digest of [
+    ...staticLoadGraph.routeDeclaredPathSha256s,
+    ...staticLoadGraph.expectedChunkPathSha256s,
+  ]) {
+    if (!["css", "js"].includes(inventoryByPath.get(digest)?.extension)) {
+      fail(`${label} static chunk graph contains a non-chunk inventory extension.`);
+    }
   }
   const reachableChunkPaths = new Set([
     ...staticLoadGraph.routeDeclaredPathSha256s,
@@ -1633,31 +1874,110 @@ function assertSerializedRequestAndStaticBinding(
     [...reachableChunkPaths].sort(),
     `${label} exact serialized route and response-declared static closure`,
   );
-  const observedChunkPaths = [];
+  const observedChunkPaths = new Set();
   const observedMediaPaths = [];
+  const observedByDocument = new Map(staticLoadGraph.documentLoadLedger.map((entry) => [
+    entry.documentKey,
+    { chunks: new Set(), media: new Set(), paths: new Set() },
+  ]));
   for (const entry of staticLedger) {
-    if (entry.assetSha256 === null) {
+    const inventoryEntry = inventoryByPath.get(entry.pathSha256);
+    const expectedClass = {
+      css: "next-static-css",
+      eot: "next-static-font",
+      ico: "next-static-image",
+      js: "next-static-js",
+      png: "next-static-image",
+      svg: "next-static-image",
+      ttf: "next-static-font",
+      woff: "next-static-font",
+      woff2: "next-static-font",
+    }[inventoryEntry?.extension];
+    if (!inventoryEntry || inventoryEntry.assetSha256 !== entry.assetSha256
+      || inventoryEntry.assetBytes !== entry.assetBytes
+      || entry.class !== expectedClass
+      || !expectedSerializedStaticContentTypes(inventoryEntry.extension)
+        .includes(entry.contentType)) {
+      fail(`${label} static request differs from the attested image inventory.`);
+    }
+    const documentObservation = observedByDocument.get(entry.documentKey);
+    if (!documentObservation || documentObservation.paths.has(entry.pathSha256)) {
+      fail(`${label} static request is duplicated within one document generation.`);
+    }
+    documentObservation.paths.add(entry.pathSha256);
+    if (["next-static-font", "next-static-image"].includes(entry.class)) {
       if (!declaredMediaPaths.includes(entry.pathSha256)) {
         fail(`${label} static media is unreachable from the sealed response graph.`);
       }
       observedMediaPaths.push(entry.pathSha256);
-      continue;
+      documentObservation.media.add(entry.pathSha256);
+    } else {
+      observedChunkPaths.add(entry.pathSha256);
+      documentObservation.chunks.add(entry.pathSha256);
     }
-    if (inventoryByPath.get(entry.pathSha256) !== entry.assetSha256) {
-      fail(`${label} static request differs from the attested image inventory.`);
-    }
-    observedChunkPaths.push(entry.pathSha256);
   }
   deepEqual(
     [...observedChunkPaths].sort(),
     [...staticLoadGraph.expectedChunkPathSha256s].sort(),
     `${label} exact serialized static chunk closure`,
   );
+  for (const documentLoad of staticLoadGraph.documentLoadLedger) {
+    const observation = observedByDocument.get(documentLoad.documentKey);
+    deepEqual(
+      [...observation.chunks].sort(),
+      documentLoad.expectedChunkPathSha256s,
+      `${label} serialized document static chunk closure`,
+    );
+    deepEqual(
+      [...observation.media].sort(),
+      documentLoad.expectedMediaPathSha256s,
+      `${label} serialized document negotiated media closure`,
+    );
+    if (documentLoad.expectedMediaPathSha256s.some((pathSha256) => (
+      inventoryByPath.get(pathSha256)?.extension !== "woff2"
+      || !declaredMediaPaths.includes(pathSha256)
+    ))) fail(`${label} serialized negotiated media is not an exact declared WOFF2 asset.`);
+  }
+  if (observedMediaPaths.some((pathSha256) => !declaredMediaPaths.includes(pathSha256))) {
+    fail(`${label} observed static media escaped its serialized declaration closure.`);
+  }
+  const observedCssPaths = new Set(staticLedger
+    .filter(({ class: resourceClass }) => resourceClass === "next-static-css")
+    .map(({ pathSha256 }) => pathSha256));
+  const cssMediaExtensionCounts = Object.create(null);
+  for (const reference of staticLoadGraph.cssMediaReferenceLedger) {
+    if (!observedCssPaths.has(reference.sourcePathSha256)
+      || inventoryByPath.get(reference.sourcePathSha256)?.extension !== "css"
+      || !new Set(["eot", "ico", "png", "svg", "ttf", "woff", "woff2"])
+        .has(inventoryByPath.get(reference.targetPathSha256)?.extension)
+      || !declaredMediaPaths.includes(reference.targetPathSha256)
+      || !inventoryByPath.has(reference.targetPathSha256)) {
+      fail(`${label} CSS media reference escaped its observed and attested closure.`);
+    }
+    const extension = inventoryByPath.get(reference.targetPathSha256).extension;
+    cssMediaExtensionCounts[extension] = (cssMediaExtensionCounts[extension] ?? 0) + 1;
+  }
   deepEqual(
-    [...observedMediaPaths].sort(),
-    [...declaredMediaPaths].sort(),
-    `${label} exact serialized static media declaration closure`,
+    Object.fromEntries(Object.entries(cssMediaExtensionCounts).sort()),
+    { eot: 2, svg: 1, ttf: 1, woff: 1, woff2: 3 },
+    `${label} exact current CSS media fallback extension closure`,
   );
+}
+
+function expectedSerializedStaticContentTypes(extension) {
+  const values = {
+    css: ["text/css"],
+    eot: ["application/vnd.ms-fontobject"],
+    ico: ["image/vnd.microsoft.icon", "image/x-icon"],
+    js: ["application/javascript", "text/javascript"],
+    png: ["image/png"],
+    svg: ["image/svg+xml"],
+    ttf: ["font/ttf"],
+    woff: ["font/woff"],
+    woff2: ["font/woff2"],
+  }[extension];
+  if (!values) fail("Serialized static extension has no content-type contract.");
+  return values;
 }
 
 function assertConnectProxyCounters(value, label) {

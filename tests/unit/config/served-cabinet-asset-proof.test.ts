@@ -132,6 +132,48 @@ describe("served cabinet production-image asset proof", () => {
     )).toThrow("exact expected fields");
   });
 
+  it("accepts only bounded canonical static media in the OCI byte inventory", () => {
+    const side = createSide("baseline");
+    const withFont = structuredClone(side.attestation);
+    for (const [index, extension] of [
+      "eot", "ico", "png", "svg", "ttf", "woff", "woff2",
+    ].entries()) {
+      withFont.inventory.staticChunks.push({
+        imagePath: `/app/.next/static/media/asset-${index}.${extension}`,
+        servedPath: `/_next/static/media/asset-${index}.${extension}`,
+        sha256: index.toString(16).repeat(64),
+        size: 128 + index,
+      });
+    }
+    resignInventory(withFont);
+    expect(validateProductionImageAssetAttestation(
+      withFont,
+      side.expected,
+      "baseline",
+    )).toBe(withFont);
+
+    for (const [servedPath, size] of [
+      ["/_next/static/chunks/cabinet.map", 128],
+      ["/_next/static/media/inter.txt", 128],
+      ["/_next/static/media/nested/inter.woff2", 128],
+      ["/_next/static/media/inter.woff2", 128 * 1024 * 1024 + 1],
+    ] as const) {
+      const invalid = structuredClone(side.attestation);
+      invalid.inventory.staticChunks.push({
+        imagePath: `/app/.next${servedPath.slice("/_next".length)}`,
+        servedPath,
+        sha256: "f".repeat(64),
+        size,
+      });
+      resignInventory(invalid);
+      expect(() => validateProductionImageAssetAttestation(
+        invalid,
+        side.expected,
+        "baseline",
+      ), servedPath).toThrow(/static chunk inventory/);
+    }
+  });
+
   it("rejects a served body that differs from the attested image bytes", async () => {
     const fixture = await createLiveFixture({ baseline: { wrongBody: "/_next/static/chunks/base-a.js" } });
     await expect(proveFixture(fixture)).rejects.toThrow(
@@ -422,6 +464,27 @@ function resign(attestation: SyntheticSide["attestation"]) {
   const unsigned = { ...attestation };
   Reflect.deleteProperty(unsigned, "attestationSha256");
   attestation.attestationSha256 = digestCanonical(unsigned);
+}
+
+function resignInventory(attestation: SyntheticSide["attestation"]) {
+  attestation.inventory.staticChunks.sort((left, right) => (
+    left.servedPath.localeCompare(right.servedPath)
+  ));
+  attestation.inventory.staticChunkCount = attestation.inventory.staticChunks.length;
+  attestation.inventory.staticChunkSetSha256 = digestCanonical(
+    attestation.inventory.staticChunks.map(({ servedPath, sha256: digest, size }) => ({
+      servedPath,
+      sha256: digest,
+      size,
+    })),
+  );
+  attestation.inventory.inventorySha256 = digestCanonical({
+    clientReferences: attestation.inventory.clientReferences,
+    manifests: attestation.inventory.manifests,
+    staticChunks: attestation.inventory.staticChunks,
+  });
+  attestation.correlation.staticChunkCount = attestation.inventory.staticChunks.length;
+  resign(attestation);
 }
 
 function runCli(args: string[]) {

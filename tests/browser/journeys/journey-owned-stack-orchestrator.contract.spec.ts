@@ -3,6 +3,7 @@ import {
   chmod,
   lstat,
   mkdtemp,
+  open,
   readFile,
   readdir,
   realpath,
@@ -25,10 +26,13 @@ import {
   deriveJourneyApplicationImageConfigDigest,
   deriveJourneyMigrationImageConfigDigest,
   dispatchJourneyOwnedStackPair,
+  enforceJourneySyntheticPrivateMode,
+  JOURNEY_SYNTHETIC_CONFIDENTIALITY_CONTRACT,
   prepareJourneyOwnedStackLaunch,
   prepareJourneyOwnedStack,
   runJourneyDockerCommand,
   withJourneyOwnedStackPair,
+  writeJourneySanitizedOutput,
 } from "./journey-owned-stack-orchestrator.mjs";
 import {
   JOURNEY_COMPOSE_SERVICE_NAMES,
@@ -57,6 +61,7 @@ test("is import-safe and refuses a non-isolated pair before its first Docker que
   expect(typeof cleanupJourneyOwnedStack).toBe("function");
   expect(typeof assertJourneyProjectAbsent).toBe("function");
   expect(typeof createJourneyOwnedInputSnapshot).toBe("function");
+  expect(typeof writeJourneySanitizedOutput).toBe("function");
 
   let dockerCalls = 0;
   const aliased = {
@@ -120,7 +125,7 @@ test("removes its exact temporary snapshot after directory identity setup fails"
       populate: async ({ writeOwnedFile }: {
         writeOwnedFile: (filename: string, bytes: string) => Promise<string>;
       }) => writeOwnedFile("one.txt", "one"),
-    }, operations), stage).rejects.toThrow(new RegExp(stage));
+    }, operations, "linux"), stage).rejects.toThrow(new RegExp(stage));
     expect(failed, stage).toBe(true);
     await expect(lstat(directory), stage).rejects.toMatchObject({ code: "ENOENT" });
   }
@@ -152,6 +157,181 @@ test("removes a create-only file when its post-write identity check fails", asyn
   expect(failed).toBe(true);
   await expect(lstat(path.join(directory, "one.txt"))).rejects.toMatchObject({ code: "ENOENT" });
   await expect(lstat(directory)).rejects.toMatchObject({ code: "ENOENT" });
+});
+
+test("binds synthetic-only material without claiming a Windows owner-only DACL", async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "clean-pay-private-mode-test-"));
+  const target = path.join(directory, "sanitized-proof.json");
+  await writeFile(target, "{}\n", { flag: "wx" });
+  try {
+    let chmodCalls = 0;
+    let lstatCalls = 0;
+    await expect(enforceJourneySyntheticPrivateMode(target, 0o600, {
+      chmodPath: async () => {
+        chmodCalls += 1;
+        throw new Error("Windows chmod must not be treated as a DACL control");
+      },
+      lstatPath: async () => {
+        lstatCalls += 1;
+        throw new Error("Windows DACL must not be inferred from POSIX mode bits");
+      },
+      materialContract: JOURNEY_SYNTHETIC_CONFIDENTIALITY_CONTRACT,
+      platform: "win32",
+    })).resolves.toEqual({
+      materialContract: JOURNEY_SYNTHETIC_CONFIDENTIALITY_CONTRACT,
+      status: "synthetic-material-no-windows-owner-only-claim",
+    });
+    expect(chmodCalls).toBe(0);
+    expect(lstatCalls).toBe(0);
+    await expect(enforceJourneySyntheticPrivateMode(target, 0o600, {
+      chmodPath: async () => { throw new Error("synthetic chmod failure"); },
+      lstatPath: lstat,
+      platform: "linux",
+    })).rejects.toThrow("synthetic chmod failure");
+    const cli = await readFile(path.resolve(__dirname, "prove-provider-overlap.mjs"), "utf8");
+    expect(cli).toContain("await writeJourneySanitizedOutput(outputPath, bytes)");
+    expect(cli).not.toMatch(/writeJourneySanitizedOutput\([^\n]+catch/);
+  } finally {
+    await unlink(target);
+    await rmdir(directory);
+  }
+});
+
+test("writes sanitized output through a create-only FileHandle and rejects identity failures", async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "clean-pay-sanitized-output-test-"));
+  const bytes = Buffer.from("{\"status\":\"synthetic\"}\n", "utf8");
+  const defaultOperations = {
+    chmod,
+    lstat,
+    open,
+    readFile,
+    realpath,
+    unlink,
+  };
+  try {
+    const success = path.join(directory, "success.json");
+    await expect(writeJourneySanitizedOutput(success, bytes)).resolves.toMatchObject({
+      bytes: bytes.byteLength,
+      materialContract: JOURNEY_SYNTHETIC_CONFIDENTIALITY_CONTRACT,
+      status: "sanitized-create-only-output-written",
+    });
+    expect(await readFile(success)).toEqual(bytes);
+    await expect(writeJourneySanitizedOutput(success, bytes)).rejects.toMatchObject({ code: "EEXIST" });
+
+    const chmodFailure = path.join(directory, "chmod-failure.json");
+    await expect(writeJourneySanitizedOutput(chmodFailure, bytes, {
+      fileSystem: {
+        ...defaultOperations,
+        chmod: async () => { throw new Error("synthetic chmod failure"); },
+      },
+      platform: "linux",
+    })).rejects.toThrow("synthetic chmod failure");
+    await expect(lstat(chmodFailure)).rejects.toMatchObject({ code: "ENOENT" });
+
+    const modeMismatch = path.join(directory, "mode-mismatch.json");
+    let injectWrongMode = true;
+    await expect(writeJourneySanitizedOutput(modeMismatch, bytes, {
+      fileSystem: {
+        ...defaultOperations,
+        lstat: (async (...args: Parameters<typeof lstat>) => {
+          const details = await lstat(...args);
+          if (!injectWrongMode) return details;
+          injectWrongMode = false;
+          return new Proxy(details, {
+            get(target, property, receiver) {
+              if (property === "mode") return 0o644n;
+              return Reflect.get(target, property, receiver);
+            },
+          });
+        }) as typeof lstat,
+      },
+      platform: "linux",
+    })).rejects.toThrow(/POSIX private mode/);
+    await expect(lstat(modeMismatch)).rejects.toMatchObject({ code: "ENOENT" });
+
+    const shortWrite = path.join(directory, "short-write.json");
+    await expect(writeJourneySanitizedOutput(shortWrite, bytes, {
+      fileSystem: {
+        ...defaultOperations,
+        open: (async (...args: Parameters<typeof open>) => {
+          const handle = await open(...args);
+          return {
+            close: () => handle.close(),
+            stat: (options: { bigint: true }) => handle.stat(options),
+            sync: () => handle.sync(),
+            writeFile: async (value: Uint8Array) => {
+              await handle.write(value.subarray(0, 1));
+              throw new Error("synthetic short write");
+            },
+          };
+        }) as unknown as typeof open,
+      },
+    })).rejects.toThrow("synthetic short write");
+    await expect(lstat(shortWrite)).rejects.toMatchObject({ code: "ENOENT" });
+
+    const initialStatFailure = path.join(directory, "initial-stat-failure.json");
+    await expect(writeJourneySanitizedOutput(initialStatFailure, bytes, {
+      fileSystem: {
+        ...defaultOperations,
+        open: (async (...args: Parameters<typeof open>) => {
+          const handle = await open(...args);
+          let statCalls = 0;
+          return {
+            close: () => handle.close(),
+            stat: (options: { bigint: true }) => {
+              statCalls += 1;
+              if (statCalls === 1) throw new Error("synthetic initial fstat failure");
+              return handle.stat(options);
+            },
+            sync: () => handle.sync(),
+            writeFile: (value: Uint8Array) => handle.writeFile(value),
+          };
+        }) as unknown as typeof open,
+      },
+    })).rejects.toThrow("synthetic initial fstat failure");
+    await expect(lstat(initialStatFailure)).rejects.toMatchObject({ code: "ENOENT" });
+
+    const unprovenStatFailure = path.join(directory, "unproven-stat-failure.json");
+    await expect(writeJourneySanitizedOutput(unprovenStatFailure, bytes, {
+      fileSystem: {
+        ...defaultOperations,
+        open: (async (...args: Parameters<typeof open>) => {
+          const handle = await open(...args);
+          return {
+            close: () => handle.close(),
+            stat: () => { throw new Error("synthetic persistent fstat failure"); },
+            sync: () => handle.sync(),
+            writeFile: (value: Uint8Array) => handle.writeFile(value),
+          };
+        }) as unknown as typeof open,
+      },
+    })).rejects.toThrow(/recovery identity was proven/);
+    expect((await lstat(unprovenStatFailure)).size).toBe(0);
+    await unlink(unprovenStatFailure);
+
+    const alternate = path.join(directory, "alternate.json");
+    await writeFile(alternate, "alternate\n", { flag: "wx" });
+    const substituted = path.join(directory, "substituted.json");
+    await expect(writeJourneySanitizedOutput(substituted, bytes, {
+      fileSystem: {
+        ...defaultOperations,
+        realpath: (async (target: Parameters<typeof realpath>[0]) => (
+          path.resolve(String(target)) === path.resolve(substituted)
+            ? alternate
+            : realpath(target)
+        )) as unknown as typeof realpath,
+      },
+    })).rejects.toThrow(/path or bytes changed/);
+    await expect(lstat(substituted)).rejects.toMatchObject({ code: "ENOENT" });
+    expect(await readFile(alternate, "utf8")).toBe("alternate\n");
+  } finally {
+    for (const filename of [
+      "success.json", "alternate.json", "unproven-stat-failure.json",
+    ]) {
+      await unlink(path.join(directory, filename)).catch(() => undefined);
+    }
+    await rmdir(directory);
+  }
 });
 
 test("contains no top-level runner or broad cleanup primitive", async () => {
@@ -281,6 +461,81 @@ test("rejects an image Id masquerading as an OCI root before creating a probe", 
     runDocker: run,
   })).rejects.toThrow(/OCI root/);
   expect(docker.calls.some((args) => args.slice(0, 2).join(" ") === "container create"))
+    .toBe(false);
+});
+
+test("rejects a wrong authoritative descriptor even when a stale RepoDigest matches", async () => {
+  const contract = ownedContract("baseline");
+  const assetDigest = `sha256:${"2".repeat(64)}`;
+  const docker = createOwnedDockerMock(contract, assetDigest, `sha256:${"3".repeat(64)}`);
+  const run = async (args: string[], maximumBytes?: number, environment: Record<string, string> = {}) => {
+    if (args[0] === "image" && args[1] === "inspect") {
+      return JSON.stringify([{
+        Descriptor: { digest: `sha256:${"f".repeat(64)}` },
+        Id: `sha256:${"3".repeat(64)}`,
+        RepoDigests: [`clean-pay-migration@${assetDigest}`],
+      }]);
+    }
+    return docker.run(args, maximumBytes, environment);
+  };
+  await expect(deriveJourneyMigrationImageConfigDigest({
+    contract,
+    environment: {},
+    expectedMigrationAssetImageDigest: assetDigest,
+    probeNonce: "d".repeat(32),
+    runDocker: run,
+  })).rejects.toThrow(/authoritative OCI root descriptor/);
+  expect(docker.calls.some((args) => args.slice(0, 2).join(" ") === "container create"))
+    .toBe(false);
+});
+
+test("uses only an exact reference RepoDigest when an OCI descriptor is unavailable", async () => {
+  const contract = ownedContract("baseline");
+  const assetDigest = `sha256:${"2".repeat(64)}`;
+  const configDigest = `sha256:${"3".repeat(64)}`;
+  const docker = createOwnedDockerMock(contract, assetDigest, configDigest);
+  const run = async (args: string[], maximumBytes?: number, environment: Record<string, string> = {}) => {
+    const output = await docker.run(args, maximumBytes, environment);
+    if (args[0] === "image" && args[1] === "inspect") {
+      const [inspection] = JSON.parse(output);
+      delete inspection.Descriptor;
+      inspection.RepoDigests = [`clean-pay-migration@${assetDigest}`];
+      return JSON.stringify([inspection]);
+    }
+    return output;
+  };
+  await expect(deriveJourneyMigrationImageConfigDigest({
+    contract,
+    environment: {},
+    expectedMigrationAssetImageDigest: assetDigest,
+    probeNonce: "e".repeat(32),
+    runDocker: run,
+  })).resolves.toMatchObject({ configDigest });
+  expect(docker.activeProbeCount).toBe(0);
+
+  const unboundDocker = createOwnedDockerMock(contract, assetDigest, configDigest);
+  const unboundRun = async (
+    args: string[],
+    maximumBytes?: number,
+    environment: Record<string, string> = {},
+  ) => {
+    const output = await unboundDocker.run(args, maximumBytes, environment);
+    if (args[0] === "image" && args[1] === "inspect") {
+      const [inspection] = JSON.parse(output);
+      delete inspection.Descriptor;
+      inspection.RepoDigests = [`unrelated.example/clean-pay@${assetDigest}`];
+      return JSON.stringify([inspection]);
+    }
+    return output;
+  };
+  await expect(deriveJourneyMigrationImageConfigDigest({
+    contract,
+    environment: {},
+    expectedMigrationAssetImageDigest: assetDigest,
+    probeNonce: "f".repeat(32),
+    runDocker: unboundRun,
+  })).rejects.toThrow(/attested OCI root/);
+  expect(unboundDocker.calls.some((args) => args.slice(0, 2).join(" ") === "container create"))
     .toBe(false);
 });
 
@@ -556,6 +811,60 @@ test("waits for CONNECT proxy close after a bounded stop timeout", async () => {
   expect(child.closed).toBe(true);
 });
 
+test("settles a CONNECT termination without close only after exact PID absence", async () => {
+  const child = fakeProxyChild(null);
+  let checks = 0;
+  const outcome = startJourneyConnectProxy({
+    environment: process.env,
+    lifecycleBounds: { ...shortProxyLifecycleBounds(), killCloseTimeoutMs: 5 },
+    listenHost: "127.0.0.1",
+    listenPort: "14446",
+    repositoryRoot: path.resolve(__dirname, "../../.."),
+    spawnProcess: () => child,
+    targetHost: "127.0.0.4",
+    targetPort: "443",
+    verifyProcessTerminated: async (pid: number | undefined) => {
+      expect(pid).toBe(child.pid);
+      checks += 1;
+      return checks >= 2;
+    },
+  }).then(() => "fulfilled", () => "rejected");
+  child.stdout.write('{"status":"unexpected"}\n');
+  await expect(outcome).resolves.toBe("rejected");
+  expect(checks).toBe(2);
+  expect(child.closed).toBe(false);
+  expect(child.killSignals).toContain("SIGKILL");
+});
+
+test("keeps CONNECT cleanup fail-stop while an exact child PID may still be live", async () => {
+  const child = fakeProxyChild(null);
+  let absent = false;
+  let checks = 0;
+  const outcome = startJourneyConnectProxy({
+    environment: process.env,
+    lifecycleBounds: { ...shortProxyLifecycleBounds(), killCloseTimeoutMs: 5 },
+    listenHost: "127.0.0.1",
+    listenPort: "14447",
+    repositoryRoot: path.resolve(__dirname, "../../.."),
+    spawnProcess: () => child,
+    targetHost: "127.0.0.5",
+    targetPort: "443",
+    verifyProcessTerminated: async () => {
+      checks += 1;
+      return absent;
+    },
+  }).then(() => "fulfilled", () => "rejected");
+  child.stdout.write('{"status":"unexpected"}\n');
+  await expect(Promise.race([
+    outcome,
+    new Promise((resolve) => setTimeout(() => resolve("pending"), 25)),
+  ])).resolves.toBe("pending");
+  expect(checks).toBeGreaterThan(0);
+  expect(child.closed).toBe(false);
+  absent = true;
+  await expect(outcome).resolves.toBe("rejected");
+});
+
 function shortProxyLifecycleBounds() {
   return {
     killCloseTimeoutMs: 40,
@@ -565,11 +874,12 @@ function shortProxyLifecycleBounds() {
   };
 }
 
-function fakeProxyChild(closeDelayMs: number) {
+function fakeProxyChild(closeDelayMs: number | null) {
   const child = new EventEmitter() as EventEmitter & {
     closed: boolean;
     exitCode: number | null;
     killSignals: NodeJS.Signals[];
+    pid: number;
     signalCode: NodeJS.Signals | null;
     stdin: PassThrough;
     stdout: PassThrough;
@@ -579,13 +889,14 @@ function fakeProxyChild(closeDelayMs: number) {
   child.closed = false;
   child.exitCode = null;
   child.killSignals = [];
+  child.pid = 454545;
   child.signalCode = null;
   child.stdin = new PassThrough();
   child.stdout = new PassThrough();
   child.stderr = new PassThrough();
   child.kill = (signal = "SIGTERM") => {
     child.killSignals.push(signal);
-    if (child.killSignals.length === 1) {
+    if (child.killSignals.length === 1 && closeDelayMs !== null) {
       setTimeout(() => {
         child.closed = true;
         child.signalCode = signal;
