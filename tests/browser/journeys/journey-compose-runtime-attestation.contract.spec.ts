@@ -1,10 +1,12 @@
 import { test, expect } from "@playwright/test";
+import { createHash } from "node:crypto";
 
 import {
   JOURNEY_COMPOSE_SERVICE_NAMES,
   JOURNEY_COMPOSE_VOLUME_NAMES,
   assertJourneyComposeRuntimeInspection,
   attestJourneyComposeRuntime,
+  normalizeJourneyHostPath,
 } from "./journey-compose-runtime-attestation.mjs";
 
 type ComposeMountFixture = {
@@ -29,7 +31,7 @@ type ContainerFixture = Record<string, unknown> & {
   };
   Mounts: Array<{ Name?: string; [name: string]: unknown }>;
   NetworkSettings: { Networks: Record<string, { Aliases: string[] }>; Ports: object };
-  State: { Status: string; Running: boolean; ExitCode: number };
+  State: { Status: string; Running: boolean; ExitCode: number; [name: string]: unknown };
 };
 
 type ImageFixture = Record<string, unknown> & { RepoDigests: string[] };
@@ -38,6 +40,10 @@ type VolumeFixture = Record<string, unknown> & { Labels: Record<string, string> 
 test("is import-safe and attests the exact full journey Compose runtime", () => {
   expect(typeof attestJourneyComposeRuntime).toBe("function");
   const fixture = runtimeFixture();
+  expect(() => assertJourneyComposeRuntimeInspection(fixture)).not.toThrow();
+  for (const container of Object.values(fixture.containersByService)) {
+    (container.HostConfig as { LogConfig: { Type: string; Config: object } }).LogConfig.Type = "";
+  }
   expect(() => assertJourneyComposeRuntimeInspection(fixture)).not.toThrow();
 });
 
@@ -85,12 +91,43 @@ test("rejects image, command, mount, data, network, volume, alias, and environme
     ["missing one-shot completion", (value) => {
       value.containersByService.migration.State.ExitCode = 1;
     }],
+    ["manual one-shot rerun", (value) => {
+      value.oneShotLifecycles.migration.events.push({
+        ...value.oneShotLifecycles.migration.events[1],
+        timeNano: "1767225600300000000",
+      });
+    }],
+    ["one-shot restart count", (value) => {
+      value.containersByService.migration.RestartCount = 1;
+    }],
+    ["one-shot timestamp inversion", (value) => {
+      value.oneShotLifecycles.migration.finishedAt = "2025-12-31T23:59:59.000Z";
+    }],
+    ["one-shot predates verifier launch", (value) => {
+      value.oneShotLifecycles.migration.lifecycleNotBefore = "2026-01-01T00:00:00.050Z";
+    }],
   ];
   for (const [label, mutate] of mutations) {
     const nearMiss = structuredClone(runtimeFixture());
     mutate(nearMiss);
     expect(() => assertJourneyComposeRuntimeInspection(nearMiss), label).toThrow();
   }
+});
+
+test("keeps Linux host paths case-sensitive and binds the actual daemon logging default", () => {
+  expect(normalizeJourneyHostPath("/Repo/Fixture.mjs", "linux"))
+    .not.toBe(normalizeJourneyHostPath("/repo/fixture.mjs", "linux"));
+  expect(normalizeJourneyHostPath("C:\\Repo\\Fixture.mjs", "win32"))
+    .toBe(normalizeJourneyHostPath("c:/repo/fixture.mjs", "win32"));
+  const fixture = runtimeFixture();
+  fixture.daemonLoggingDriver = "local";
+  for (const container of Object.values(fixture.containersByService)) {
+    (container.HostConfig as { LogConfig: { Type: string; Config: object } }).LogConfig = {
+      Type: "local",
+      Config: {},
+    };
+  }
+  expect(() => assertJourneyComposeRuntimeInspection(fixture)).not.toThrow();
 });
 
 function runtimeFixture() {
@@ -127,6 +164,11 @@ function runtimeFixture() {
     "browser-ca-ready", "browser-db-observer-provision", "db-grant-sync",
     "db-role-provision", "migration",
   ]);
+  const createdAt = "2026-01-01T00:00:00.000Z";
+  const lifecycleNotBefore = "2025-12-31T23:59:59.000Z";
+  const startedAt = "2026-01-01T00:00:00.100Z";
+  const finishedAt = "2026-01-01T00:00:00.200Z";
+  const attestedAt = "2026-01-01T00:00:01.000Z";
   const helperReferences: Record<string, string> = {};
   for (const service of JOURNEY_COMPOSE_SERVICE_NAMES) {
     if (!appServices.has(service) && !migrationServices.has(service)) {
@@ -174,6 +216,7 @@ function runtimeFixture() {
     const aliases = [`${project}-${serviceName}-1`, serviceName];
     containersByService[serviceName] = {
       Id: id,
+      Created: createdAt,
       Image: imageId,
       Name: `/${project}-${serviceName}-1`,
       RestartCount: 0,
@@ -217,7 +260,11 @@ function runtimeFixture() {
         Ports: {},
       },
       State: oneShots.has(serviceName)
-        ? { Status: "exited", Running: false, ExitCode: 0 }
+        ? {
+          Status: "exited", Running: false, ExitCode: 0,
+          Dead: false, Paused: false, Restarting: false, OOMKilled: false,
+          Pid: 0, Error: "", StartedAt: startedAt, FinishedAt: finishedAt,
+        }
         : { Status: "running", Running: true, ExitCode: 0 },
     };
     if (!oneShots.has(serviceName)) {
@@ -255,7 +302,24 @@ function runtimeFixture() {
       "com.docker.compose.volume": name,
     },
   }));
+  const oneShotLifecycles = Object.fromEntries([...oneShots].map((serviceName) => {
+    const id = containersByService[serviceName].Id as string;
+    const containerIdSha256 = hash(id);
+    return [serviceName, {
+      attestedAt,
+      createdAt,
+      lifecycleNotBefore,
+      startedAt,
+      finishedAt,
+      events: [
+        { action: "create", containerIdSha256, timeNano: "1767225600000000000" },
+        { action: "start", containerIdSha256, timeNano: "1767225600100000000" },
+        { action: "die", containerIdSha256, timeNano: "1767225600200000000" },
+      ],
+    }];
+  }));
   return {
+    attestedAt,
     bindSources,
     compose: {
       name: project,
@@ -267,6 +331,7 @@ function runtimeFixture() {
     },
     containersByService,
     contract,
+    daemonLoggingDriver: "json-file",
     expectedApplicationImageDigest: appDigest,
     expectedMigrationImageDigest: migrationDigest,
     imagesById,
@@ -282,10 +347,16 @@ function runtimeFixture() {
         "com.docker.compose.network": "default",
       },
     },
+    oneShotLifecycles,
+    lifecycleNotBefore,
     volumes,
   };
 }
 
 function hexFor(value: string) {
   return (value.charCodeAt(0) % 16).toString(16);
+}
+
+function hash(value: string) {
+  return createHash("sha256").update(value).digest("hex");
 }

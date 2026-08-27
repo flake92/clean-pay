@@ -4,6 +4,7 @@ import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
 import net from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 import { createInterface } from "node:readline";
 
 import { expect, test } from "@playwright/test";
@@ -13,6 +14,26 @@ import { currentJourneyFixtureContractSha256 } from "./journey-fixture-contract"
 
 const script = path.resolve(__dirname, "prepare-synthetic-env.mjs");
 const revision = "f5cb6f543d85256e7733a1ade6a4f451d86cf378";
+
+test("keeps synthetic role allowlists byte-for-byte aligned with production role policy", () => {
+  const journeyModule = pathToFileURL(path.resolve(
+    __dirname,
+    "journey-synthetic-environment-contract.mjs",
+  )).href;
+  const productionModule = pathToFileURL(path.resolve(
+    __dirname,
+    "../../../deploy/prod/role-env.mjs",
+  )).href;
+  const result = spawnSync(process.execPath, [
+    "--input-type=module",
+    "--eval",
+    `import { JOURNEY_PRODUCTION_ROLE_ENVIRONMENT_NAMES as journey } from ${JSON.stringify(journeyModule)};`
+      + `import { PRODUCTION_ROLE_ENVIRONMENT_NAMES as production } from ${JSON.stringify(productionModule)};`
+      + "if (JSON.stringify(journey) !== JSON.stringify(production)) process.exit(1);",
+  ], { encoding: "utf8", env: { ...process.env, NO_COLOR: "1" } });
+  expect(result.status, result.stderr).toBe(0);
+  expect(result.stdout).toBe("");
+});
 
 test("materializes two deterministic self-contained role environments", async () => {
   const first = await mkdtemp(path.join(tmpdir(), "clean-pay-browser-env-first-"));

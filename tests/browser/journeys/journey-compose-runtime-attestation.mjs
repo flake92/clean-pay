@@ -2,6 +2,12 @@ import { createHash } from "node:crypto";
 import { lstat, readFile, realpath, stat } from "node:fs/promises";
 import path from "node:path";
 
+import {
+  JOURNEY_SYNTHETIC_ENVIRONMENT_FILENAMES,
+  buildJourneySyntheticEnvironment,
+  parseJourneyEnvironmentAssignments,
+} from "./journey-synthetic-environment-contract.mjs";
+
 export const JOURNEY_COMPOSE_SERVICE_NAMES = Object.freeze([
   "app",
   "browser-ca-ready",
@@ -56,63 +62,59 @@ const fixtureEnvironmentNames = Object.freeze({
   CLEAN_PAY_BROWSER_PROVIDER_MOCK_FILE: "/mock/provider-mock.mjs",
 });
 
-/**
- * Build the exact journey Compose model from its authoritative external env,
- * then bind every project-owned container, image, network, volume and fixture
- * mount to that model. The caller supplies a bounded, read-only Docker runner.
- */
-export async function attestJourneyComposeRuntime({
+export async function prepareJourneyComposeInputs({
   repositoryRoot,
   contractPath,
   contract,
-  expectedApplicationImageDigest,
-  expectedMigrationImageDigest,
+  fixtureSourceOverrides,
   runDocker,
 }) {
-  exactObjectKeys(arguments[0], [
-    "contract",
-    "contractPath",
-    "expectedApplicationImageDigest",
-    "expectedMigrationImageDigest",
-    "repositoryRoot",
-    "runDocker",
-  ], "journey runtime attestation input");
+  exactOptionalObjectKeys(arguments[0], [
+    "contract", "contractPath", "repositoryRoot", "runDocker",
+  ], ["fixtureSourceOverrides"], "journey Compose preparation input");
   if (typeof runDocker !== "function") fail("Journey runtime Docker reader is invalid.");
-  exactDigest(expectedApplicationImageDigest, "expected application image digest");
-  exactDigest(expectedMigrationImageDigest, "expected migration image digest");
-  if (
-    contract.images?.application === contract.images?.migration
-    || expectedApplicationImageDigest === expectedMigrationImageDigest
-  ) fail("Journey application and migration image identities must be distinct.");
-
   const root = await realpath(repositoryRoot);
   const authoritativeEnvironmentPath = await exactExternalFile(
     path.join(path.dirname(contractPath), ".env"),
     root,
     "authoritative journey environment",
   );
-  const assignments = parseEnvironmentAssignments(
-    await readBoundedBytes(authoritativeEnvironmentPath, 128 * 1024),
+  const syntheticEnvironment = await assertSyntheticRoleEnvironment(
+    authoritativeEnvironmentPath,
+    root,
+    contract,
   );
-  assertAuthoritativeEnvironment(assignments, contract);
-
+  if (fixtureSourceOverrides !== undefined) {
+    exactObjectKeys(
+      fixtureSourceOverrides,
+      Object.keys(fixtureBindSources),
+      "journey fixture source overrides",
+    );
+  }
   const bindSources = {};
   for (const [destination, relativeParts] of Object.entries(fixtureBindSources)) {
-    const source = await realpath(path.join(root, ...relativeParts));
+    const requested = fixtureSourceOverrides?.[destination] ?? path.join(root, ...relativeParts);
+    const requestedMetadata = await lstat(requested);
+    const source = await realpath(requested);
     const metadata = await lstat(source);
-    if (!metadata.isFile() || metadata.isSymbolicLink()) {
-      fail("Journey fixture source is not an exact regular file.");
+    const expectedContainment = fixtureSourceOverrides === undefined
+      ? isWithin(root, source)
+      : !isWithin(root, source) && isWithin(path.dirname(authoritativeEnvironmentPath), source);
+    if (!metadata.isFile() || requestedMetadata.isSymbolicLink() || !expectedContainment) {
+      fail("Journey fixture source is not an exact repository-contained regular file.");
     }
     bindSources[destination] = source;
   }
   const queryEnvironment = composeQueryEnvironment(
-    assignments,
+    syntheticEnvironment.environment,
     contract.project,
     bindSources,
   );
-  const composeFiles = await Promise.all(composeFileRelativePaths.map((parts) => (
-    realpath(path.join(root, ...parts))
-  )));
+  const composeFiles = await Promise.all(composeFileRelativePaths.map(async (parts) => {
+    const file = await realpath(path.join(root, ...parts));
+    if (!isWithin(root, file)) fail("Journey Compose source escaped the repository.");
+    return file;
+  }));
   const composeSourceSha256 = hashJson(await Promise.all(composeFiles.map(async (file) => ({
     relative: path.relative(root, file).replace(/\\/g, "/"),
     sha256: sha256(await readBoundedBytes(file, 512 * 1024)),
@@ -127,6 +129,66 @@ export async function attestJourneyComposeRuntime({
   ], 2 * 1024 * 1024, queryEnvironment);
   const compose = parseJson(composeOutput, "rendered journey Compose model");
   assertJourneyComposeModel(compose, contract);
+  return Object.freeze({
+    authoritativeEnvironmentPath,
+    bindSources: Object.freeze({ ...bindSources }),
+    compose,
+    composeFiles: Object.freeze([...composeFiles]),
+    composeSourceSha256,
+    renderedComposeSha256: hashJson(compose),
+    queryEnvironment: Object.freeze({ ...queryEnvironment }),
+    repositoryRoot: root,
+    syntheticEnvironment,
+  });
+}
+
+/**
+ * Build the exact journey Compose model from its authoritative external env,
+ * then bind every project-owned container, image, network, volume and fixture
+ * mount to that model. The caller supplies a bounded, read-only Docker runner.
+ */
+export async function attestJourneyComposeRuntime({
+  repositoryRoot,
+  contractPath,
+  contract,
+  expectedApplicationImageDigest,
+  expectedMigrationImageDigest,
+  fixtureSourceOverrides,
+  lifecycleNotBefore,
+  runDocker,
+}) {
+  exactOptionalObjectKeys(arguments[0], [
+    "contract",
+    "contractPath",
+    "expectedApplicationImageDigest",
+    "expectedMigrationImageDigest",
+    "repositoryRoot",
+    "runDocker",
+  ], ["fixtureSourceOverrides", "lifecycleNotBefore"], "journey runtime attestation input");
+  if (typeof runDocker !== "function") fail("Journey runtime Docker reader is invalid.");
+  exactDigest(expectedApplicationImageDigest, "expected application image digest");
+  exactDigest(expectedMigrationImageDigest, "expected migration image digest");
+  if (
+    contract.images?.application === contract.images?.migration
+    || expectedApplicationImageDigest === expectedMigrationImageDigest
+  ) fail("Journey application and migration image identities must be distinct.");
+
+  const prepared = await prepareJourneyComposeInputs({
+    repositoryRoot,
+    contractPath,
+    contract,
+    fixtureSourceOverrides,
+    runDocker,
+  });
+  const {
+    bindSources,
+    compose,
+    composeSourceSha256,
+    syntheticEnvironment,
+  } = prepared;
+  if (lifecycleNotBefore !== undefined) {
+    exactTimestamp(lifecycleNotBefore, "journey lifecycle lower bound");
+  }
 
   const containerIds = exactDockerIds(await runDocker([
     "ps", "--all", "--no-trunc", "--quiet",
@@ -150,16 +212,50 @@ export async function attestJourneyComposeRuntime({
     "--filter", `label=com.docker.compose.project=${contract.project}`,
   ], 4 * 1024), JOURNEY_COMPOSE_VOLUME_NAMES.length, "journey volumes");
   const volumes = await inspectMany(runDocker, "volume", volumeIds, 256 * 1024);
+  const daemonLoggingDriver = String(await runDocker([
+    "info", "--format", "{{.LoggingDriver}}",
+  ], 128, composeQueryEnvironment({}, contract.project, {}))).trim();
+  if (!/^[a-z0-9][a-z0-9._-]{0,63}$/.test(daemonLoggingDriver)) {
+    fail("Docker daemon logging driver is invalid.");
+  }
+  const attestedAt = new Date().toISOString();
+  const oneShotLifecycles = {};
+  await Promise.all([...oneShotServices].map(async (serviceName) => {
+    const container = containersByService[serviceName];
+    const since = lifecycleSince(container.Created);
+    const output = await runDocker([
+      "events",
+      "--since", since,
+      "--until", attestedAt,
+      "--filter", "type=container",
+      "--filter", `container=${container.Id}`,
+      "--filter", "event=create",
+      "--filter", "event=start",
+      "--filter", "event=die",
+      "--filter", "event=restart",
+      "--format", "{{.TimeNano}} {{.Action}} {{.Actor.ID}}",
+    ], 4 * 1024, composeQueryEnvironment({}, contract.project, {}));
+    oneShotLifecycles[serviceName] = parseOneShotLifecycleEvents(
+      output,
+      container,
+      attestedAt,
+      lifecycleNotBefore,
+    );
+  }));
 
   const runtime = assertJourneyComposeRuntimeInspection({
+    attestedAt,
     bindSources,
     compose,
     containersByService,
     contract,
+    daemonLoggingDriver,
     expectedApplicationImageDigest,
     expectedMigrationImageDigest,
     imagesById,
     network,
+    oneShotLifecycles,
+    lifecycleNotBefore,
     volumes,
   });
 
@@ -183,14 +279,20 @@ export async function attestJourneyComposeRuntime({
   }
 
   return Object.freeze({
+    composeSourceSha256,
     composeRuntimeContractSha256: hashJson({
       composeSourceSha256,
       renderedComposeSha256: hashJson(compose),
       runtime,
+      syntheticRoleEnvironmentContractSha256: syntheticEnvironment.fileContractSha256,
     }),
     fixtureMountContractSha256: hashJson(liveFixtureMounts.sort(byDestination)),
     serviceIdentitySha256: runtime.serviceIdentitySha256,
     networkSha256: runtime.networkSha256,
+    oneShotLifecycleContractSha256: hashJson(oneShotLifecycles),
+    renderedComposeSha256: hashJson(compose),
+    syntheticRoleEnvironmentContractSha256: syntheticEnvironment.fileContractSha256,
+    syntheticRoleEnvironmentPolicySha256: syntheticEnvironment.policyContractSha256,
   });
 }
 
@@ -234,29 +336,44 @@ export function assertJourneyComposeModel(compose, contract) {
 
 export function assertJourneyComposeRuntimeInspection(input) {
   exactObjectKeys(input, [
+    "attestedAt",
     "bindSources",
     "compose",
     "containersByService",
     "contract",
+    "daemonLoggingDriver",
     "expectedApplicationImageDigest",
     "expectedMigrationImageDigest",
     "imagesById",
     "network",
+    "oneShotLifecycles",
+    "lifecycleNotBefore",
     "volumes",
   ], "journey runtime inspection input");
   const {
+    attestedAt,
     bindSources,
     compose,
     containersByService,
     contract,
+    daemonLoggingDriver,
     expectedApplicationImageDigest,
     expectedMigrationImageDigest,
     imagesById,
     network,
+    oneShotLifecycles,
+    lifecycleNotBefore,
     volumes,
   } = input;
   exactDigest(expectedApplicationImageDigest, "expected application image digest");
   exactDigest(expectedMigrationImageDigest, "expected migration image digest");
+  exactTimestamp(attestedAt, "runtime attestation timestamp");
+  if (lifecycleNotBefore !== undefined) {
+    exactTimestamp(lifecycleNotBefore, "journey lifecycle lower bound");
+  }
+  if (!/^[a-z0-9][a-z0-9._-]{0,63}$/.test(daemonLoggingDriver)) {
+    fail("Docker daemon logging driver is invalid.");
+  }
   if (
     contract.images?.application === contract.images?.migration
     || expectedApplicationImageDigest === expectedMigrationImageDigest
@@ -268,6 +385,7 @@ export function assertJourneyComposeRuntimeInspection(input) {
     "project-owned journey containers",
   );
   exactObjectKeys(bindSources, Object.keys(fixtureBindSources), "journey fixture bind sources");
+  exactObjectKeys(oneShotLifecycles, [...oneShotServices], "journey one-shot lifecycles");
 
   const expectedNetworkName = compose.networks.default?.name ?? `${contract.project}_default`;
   const expectedVolumeNames = Object.fromEntries(JOURNEY_COMPOSE_VOLUME_NAMES.map((name) => [
@@ -283,11 +401,14 @@ export function assertJourneyComposeRuntimeInspection(input) {
       bindSources,
       container,
       contract,
+      daemonLoggingDriver,
       expectedApplicationImageDigest,
       expectedMigrationImageDigest,
       expectedNetworkName,
       expectedVolumeNames,
       image,
+      lifecycleNotBefore,
+      oneShotLifecycle: oneShotLifecycles[serviceName],
       service,
       serviceName,
     });
@@ -308,6 +429,7 @@ export function assertJourneyComposeRuntimeInspection(input) {
 
   return Object.freeze({
     networkSha256: sha256(expectedNetworkName),
+    oneShotLifecycleContractSha256: hashJson(oneShotLifecycles),
     serviceIdentitySha256: hashJson(serviceIdentity),
   });
 }
@@ -317,11 +439,14 @@ function assertServiceRuntime(input) {
     bindSources,
     container,
     contract,
+    daemonLoggingDriver,
     expectedApplicationImageDigest,
     expectedMigrationImageDigest,
     expectedNetworkName,
     expectedVolumeNames,
     image,
+    lifecycleNotBefore,
+    oneShotLifecycle,
     service,
     serviceName,
   } = input;
@@ -379,12 +504,12 @@ function assertServiceRuntime(input) {
   exactValue(host.NetworkMode, expectedNetworkName);
   exactValue(host.RestartPolicy?.Name ?? "", normalizeRestart(service.restart));
   exactValue(Number(host.RestartPolicy?.MaximumRetryCount ?? 0), 0);
-  assertLogging(host.LogConfig, service.logging);
+  assertLogging(host.LogConfig, service.logging, daemonLoggingDriver);
   assertTmpfs(host.Tmpfs, service.tmpfs);
   assertMounts(container.Mounts, service.volumes, bindSources, expectedVolumeNames);
   assertPublishedPorts(container.NetworkSettings?.Ports, service.ports);
   assertServiceNetwork(container, service, serviceName, contract.project, expectedNetworkName);
-  assertServiceState(container, service, serviceName);
+  assertServiceState(container, service, serviceName, oneShotLifecycle, lifecycleNotBefore);
 
   for (const destination of Object.keys(bindSources)) {
     if ((service.volumes ?? []).some((mount) => mount.target === destination)
@@ -536,16 +661,25 @@ function assertServiceNetwork(container, service, serviceName, project, networkN
   exactJson(actualAliases, [...new Set(expectedAliases)].sort());
 }
 
-function assertServiceState(container, service, serviceName) {
+function assertServiceState(container, service, serviceName, oneShotLifecycle, lifecycleNotBefore) {
   const oneShot = oneShotServices.has(serviceName);
   if (oneShot) {
     if (
       container.State?.Status !== "exited"
       || container.State?.Running !== false
       || container.State?.ExitCode !== 0
+      || Number(container.RestartCount ?? 0) !== 0
+      || container.State?.Dead !== false
+      || container.State?.Paused !== false
+      || container.State?.Restarting !== false
+      || container.State?.OOMKilled !== false
+      || Number(container.State?.Pid ?? 0) !== 0
+      || (container.State?.Error ?? "") !== ""
     ) fail("Journey one-shot service did not complete exactly once.");
+    assertOneShotLifecycleRecord(oneShotLifecycle, container, lifecycleNotBefore);
   } else if (
-    container.State?.Status !== "running"
+    oneShotLifecycle !== undefined
+    || container.State?.Status !== "running"
     || container.State?.Running !== true
     || Number(container.RestartCount ?? 0) !== 0
     || (service.healthcheck && container.State?.Health?.Status !== "healthy")
@@ -586,8 +720,8 @@ function assertVolumeRuntime(volumes, project, expectedNames) {
   }
 }
 
-function assertLogging(actual, expected) {
-  exactValue(actual?.Type ?? "json-file", expected?.driver ?? "json-file");
+function assertLogging(actual, expected, daemonLoggingDriver) {
+  exactValue(actual?.Type || daemonLoggingDriver, expected?.driver ?? daemonLoggingDriver);
   exactJson(actual?.Config ?? {}, expected?.options ?? {});
 }
 
@@ -611,28 +745,111 @@ function assertHealthcheck(actual, override, inherited) {
   exactJson(normalize(actual), normalize(expected));
 }
 
-function assertAuthoritativeEnvironment(environment, contract) {
-  const expected = {
-    CLEAN_PAY_IMAGE: contract.images.application,
-    CLEAN_PAY_MIGRATION_IMAGE: contract.images.migration,
-    CLEAN_PAY_REVISION: contract.revision,
-    COMPOSE_PROJECT_NAME: contract.project,
-  };
-  for (const [name, value] of Object.entries(expected)) {
-    if (environment[name] !== value) fail("Authoritative journey environment differs from contract.");
-  }
-}
-
 function composeQueryEnvironment(assignments, project, bindSources) {
-  const environment = { ...process.env };
-  for (const name of Object.keys(environment)) {
-    if (name.startsWith("COMPOSE_") || Object.hasOwn(assignments, name)) delete environment[name];
+  const environment = {};
+  for (const name of [
+    "APPDATA", "DOCKER_API_VERSION", "DOCKER_CERT_PATH", "DOCKER_CONFIG",
+    "DOCKER_CONTEXT", "DOCKER_HOST", "DOCKER_TLS_VERIFY", "HOME", "LANG",
+    "LC_ALL", "LOCALAPPDATA", "PATH", "Path", "PATHEXT", "SYSTEMROOT",
+    "SystemRoot", "TEMP", "TMP", "USERPROFILE", "WINDIR", "XDG_CONFIG_HOME",
+  ]) {
+    if (typeof process.env[name] === "string") environment[name] = process.env[name];
   }
   environment.COMPOSE_PROJECT_NAME = project;
   for (const [name, destination] of Object.entries(fixtureEnvironmentNames)) {
-    environment[name] = bindSources[destination];
+    if (bindSources[destination] !== undefined) environment[name] = bindSources[destination];
+  }
+  for (const [name, value] of Object.entries(assignments)) {
+    if (name.startsWith("COMPOSE_") || Object.hasOwn(environment, name)) {
+      fail("Synthetic Compose render environment contains a forbidden override.");
+    }
+    // Values are supplied only by --env-file. Keeping them out of the child
+    // environment prevents an inherited or caller-added value from winning
+    // Compose interpolation precedence.
+    void value;
   }
   return environment;
+}
+
+async function assertSyntheticRoleEnvironment(authoritativePath, repositoryRoot, contract) {
+  const directory = await realpath(path.dirname(authoritativePath));
+  if (isWithin(repositoryRoot, directory)) {
+    fail("Synthetic role environment directory must stay outside the repository.");
+  }
+  const authoritativeBytes = await readBoundedBytes(authoritativePath, 128 * 1024);
+  const observed = parseJourneyEnvironmentAssignments(authoritativeBytes);
+  const publications = exactSyntheticPublications(contract.publications);
+  const expected = buildJourneySyntheticEnvironment({
+    appImage: contract.images.application,
+    appPort: publications.appPort,
+    connectProxyPort: publications.connectProxyPort,
+    directory,
+    migrationImage: contract.images.migration,
+    project: contract.project,
+    providerPort: publications.providerPort,
+    proxyBind: publications.proxyBind,
+    revision: contract.revision,
+    turnstileSiteKey: observed.TURNSTILE_SITE_KEY,
+  });
+  if (expected.publicBuildContractSha256 !== contract.publicBuildContract?.sha256) {
+    fail("Synthetic public build environment differs from its contract.");
+  }
+  const observedFileHashes = [];
+  for (const filename of JOURNEY_SYNTHETIC_ENVIRONMENT_FILENAMES) {
+    const requested = path.join(directory, filename);
+    const resolved = await realpath(requested);
+    if (normalizeHostPath(resolved) !== normalizeHostPath(requested)) {
+      fail("Synthetic role environment realpath differs from its exact destination.");
+    }
+    const metadata = await lstat(resolved);
+    if (!metadata.isFile() || metadata.isSymbolicLink()) {
+      fail("Synthetic role environment is not an exact regular file.");
+    }
+    const bytes = await readBoundedBytes(resolved, 128 * 1024);
+    if (!bytes.equals(Buffer.from(expected.files[filename], "utf8"))) {
+      fail("Synthetic role environment bytes differ from the deterministic contract.");
+    }
+    observedFileHashes.push({ name: filename, sha256: sha256(bytes) });
+  }
+  if (hashJson(observedFileHashes) !== expected.fileContractSha256) {
+    fail("Synthetic role environment hash contract differs.");
+  }
+  for (const [name, value] of Object.entries(observed)) {
+    if (expected.environment[name] !== value) {
+      fail("Authoritative synthetic environment contains an unexpected assignment.");
+    }
+  }
+  exactObjectKeys(observed, Object.keys(expected.environment), "authoritative synthetic environment");
+  return expected;
+}
+
+function exactSyntheticPublications(publications) {
+  exactObjectKeys(
+    publications,
+    ["app", "browserTls", "connectProxy", "providerControl"],
+    "synthetic publications",
+  );
+  const split = (value, hostPattern, label) => {
+    const match = new RegExp(`^(?<host>${hostPattern}):(?<port>\\d{4,5})$`).exec(value ?? "");
+    if (!match || String(Number(match.groups.port)) !== match.groups.port
+      || Number(match.groups.port) > 65_535) fail(`${label} publication is invalid.`);
+    return match.groups;
+  };
+  const app = split(publications.app, "127\\.0\\.0\\.1", "application");
+  const provider = split(publications.providerControl, "127\\.0\\.0\\.1", "provider");
+  const connect = split(publications.connectProxy, "127\\.0\\.0\\.1", "CONNECT proxy");
+  const tls = split(
+    publications.browserTls,
+    "127\\.0\\.0\\.(?:[2-9]|[1-9]\\d|1\\d\\d|2[0-4]\\d|25[0-4])",
+    "browser TLS",
+  );
+  if (tls.port !== "443") fail("Browser TLS publication port differs.");
+  return {
+    appPort: app.port,
+    connectProxyPort: connect.port,
+    providerPort: provider.port,
+    proxyBind: tls.host,
+  };
 }
 
 async function inspectMany(runDocker, kind, ids, maximumBytes) {
@@ -677,10 +894,14 @@ function commandConsumesDestination(container, destination) {
 }
 
 async function exactExternalFile(target, repositoryRoot, label) {
+  const requested = path.resolve(target);
+  const requestedMetadata = await lstat(requested);
   const resolved = await realpath(target);
   if (isWithin(repositoryRoot, resolved)) fail(`${label} must stay outside the repository.`);
   const metadata = await lstat(resolved);
-  if (!metadata.isFile() || metadata.isSymbolicLink()) fail(`${label} must be a regular file.`);
+  if (!metadata.isFile() || requestedMetadata.isSymbolicLink()) {
+    fail(`${label} must be a regular file.`);
+  }
   return resolved;
 }
 
@@ -697,20 +918,97 @@ async function readBoundedBytes(target, maximumBytes) {
   return bytes;
 }
 
-function parseEnvironmentAssignments(bytes) {
-  const source = bytes.toString("utf8");
-  if (!source.endsWith("\n") || source.includes("\r") || source.startsWith("\uFEFF")) {
-    fail("Authoritative journey environment has non-canonical bytes.");
-  }
-  const result = {};
-  for (const line of source.slice(0, -1).split("\n")) {
-    const match = /^([A-Z][A-Z0-9_]*)=(.*)$/.exec(line);
-    if (!match || Object.hasOwn(result, match[1])) {
-      fail("Authoritative journey environment contains an invalid assignment.");
+export function assertJourneyOneShotLifecycle(value, container) {
+  return assertOneShotLifecycleRecord(value, container);
+}
+
+function parseOneShotLifecycleEvents(output, container, attestedAt, lifecycleNotBefore) {
+  const events = splitLines(output).map((line) => {
+    const match = /^(?<timeNano>[1-9]\d{15,24}) (?<action>create|start|die|restart) (?<id>[a-f0-9]{64})$/.exec(line);
+    if (!match || match.groups.id !== container.Id) {
+      fail("Journey one-shot Docker event is invalid or unbound.");
     }
-    result[match[1]] = match[2];
+    return {
+      action: match.groups.action,
+      containerIdSha256: sha256(match.groups.id),
+      timeNano: match.groups.timeNano,
+    };
+  });
+  const record = {
+    attestedAt,
+    createdAt: container.Created,
+    events,
+    finishedAt: container.State?.FinishedAt,
+    lifecycleNotBefore: lifecycleNotBefore ?? container.Created,
+    startedAt: container.State?.StartedAt,
+  };
+  assertOneShotLifecycleRecord(record, container, lifecycleNotBefore);
+  return Object.freeze(record);
+}
+
+function assertOneShotLifecycleRecord(value, container, expectedLifecycleNotBefore) {
+  exactObjectKeys(
+    value,
+    ["attestedAt", "createdAt", "events", "finishedAt", "lifecycleNotBefore", "startedAt"],
+    "journey one-shot lifecycle",
+  );
+  const lifecycleNotBefore = exactTimestamp(
+    value.lifecycleNotBefore,
+    "one-shot lifecycle lower bound",
+  );
+  const createdAt = exactTimestamp(value.createdAt, "one-shot created timestamp");
+  const startedAt = exactTimestamp(value.startedAt, "one-shot started timestamp");
+  const finishedAt = exactTimestamp(value.finishedAt, "one-shot finished timestamp");
+  const attestedAt = exactTimestamp(value.attestedAt, "one-shot attested timestamp");
+  if (!(lifecycleNotBefore <= createdAt
+    && createdAt <= startedAt && startedAt <= finishedAt && finishedAt <= attestedAt)) {
+    fail("Journey one-shot state timestamp order is invalid.");
   }
-  return result;
+  if (expectedLifecycleNotBefore !== undefined
+    && value.lifecycleNotBefore !== expectedLifecycleNotBefore) {
+    fail("Journey one-shot lifecycle lower bound differs from its verifier launch receipt.");
+  }
+  if (!Array.isArray(value.events) || value.events.length !== 3) {
+    fail("Journey one-shot event history is missing, truncated, or repeated.");
+  }
+  const expectedActions = ["create", "start", "die"];
+  const idSha256 = sha256(container.Id);
+  let previous = 0n;
+  for (const [index, event] of value.events.entries()) {
+    exactObjectKeys(
+      event,
+      ["action", "containerIdSha256", "timeNano"],
+      "journey one-shot event",
+    );
+    if (event.action !== expectedActions[index] || event.containerIdSha256 !== idSha256
+      || !/^[1-9]\d{15,24}$/.test(event.timeNano)) {
+      fail("Journey one-shot event sequence differs from create-start-die exactly once.");
+    }
+    const current = BigInt(event.timeNano);
+    if (current <= previous) fail("Journey one-shot event timestamps are not strictly ordered.");
+    previous = current;
+  }
+  const startEventMs = Number(BigInt(value.events[1].timeNano) / 1_000_000n);
+  const dieEventMs = Number(BigInt(value.events[2].timeNano) / 1_000_000n);
+  if (Math.abs(startEventMs - startedAt) > 10_000 || Math.abs(dieEventMs - finishedAt) > 10_000) {
+    fail("Journey one-shot event history differs from inspected state timestamps.");
+  }
+  return value;
+}
+
+function lifecycleSince(createdAt) {
+  const created = exactTimestamp(createdAt, "container created timestamp");
+  return new Date(created - 1_000).toISOString();
+}
+
+function exactTimestamp(value, label) {
+  if (typeof value !== "string"
+    || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?Z$/.test(value)) {
+    fail(`${label} is invalid.`);
+  }
+  const milliseconds = Date.parse(value);
+  if (!Number.isFinite(milliseconds) || milliseconds <= 0) fail(`${label} is invalid.`);
+  return milliseconds;
 }
 
 function exactDockerIds(value, expectedCount, label) {
@@ -756,10 +1054,18 @@ function normalizeSecurity(value) {
   )).sort();
 }
 
+export function normalizeJourneyHostPath(value, platform = process.platform) {
+  let normalized = String(value);
+  if (platform === "win32") {
+    normalized = normalized.replace(/\\/g, "/");
+    normalized = normalized.replace(/^\/run\/desktop\/mnt\/host\/([a-z])\//i, "$1:/");
+    return normalized.replace(/\/$/, "").toLowerCase();
+  }
+  return normalized.length > 1 ? normalized.replace(/\/$/, "") : normalized;
+}
+
 function normalizeHostPath(value) {
-  let normalized = String(value).replace(/\\/g, "/");
-  normalized = normalized.replace(/^\/run\/desktop\/mnt\/host\/([a-z])\//i, "$1:/");
-  return normalized.replace(/\/$/, "").toLowerCase();
+  return normalizeJourneyHostPath(value);
 }
 
 function parseBytes(value) {
@@ -825,6 +1131,15 @@ function exactObjectKeys(value, keys, label) {
   exactJson(Object.keys(value).sort(), [...keys].sort());
 }
 
+function exactOptionalObjectKeys(value, required, optional, label) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) fail(`${label} is invalid.`);
+  const actual = Object.keys(value).filter((name) => value[name] !== undefined).sort();
+  if (required.some((name) => !actual.includes(name))
+    || actual.some((name) => !required.includes(name) && !optional.includes(name))) {
+    fail(`${label} keys are not exact.`);
+  }
+}
+
 function exactDigest(value, label) {
   if (!/^sha256:[a-f0-9]{64}$/.test(value)) fail(`${label} is invalid.`);
 }
@@ -838,7 +1153,7 @@ function exactValue(actual, expected) {
 }
 
 function isWithin(parent, child) {
-  const relative = path.relative(parent, child);
+  const relative = path.relative(normalizeHostPath(parent), normalizeHostPath(child));
   return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
 }
 

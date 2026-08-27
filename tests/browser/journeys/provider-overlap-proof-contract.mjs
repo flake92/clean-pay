@@ -438,8 +438,16 @@ export function createProviderOverlapStackReport(input) {
     [
       "finalUrl",
       "headingVisible",
+      "historyContractSha256",
+      "historyCount",
+      "historyLedger",
       "requestContractSha256",
       "requestCount",
+      "staticLoadGraph",
+      "staticLoadGraphContractSha256",
+      "staticRequestContractSha256",
+      "staticRequestCount",
+      "staticRequestLedger",
       "unexpectedConsoleCount",
       "unexpectedPageErrorCount",
       "unexpectedRequestCount",
@@ -453,6 +461,48 @@ export function createProviderOverlapStackReport(input) {
     navigation.requestContractSha256,
     /^[a-f0-9]{64}$/,
     `${role} browser request contract sha256`,
+  );
+  const historyLedger = assertHistoryLedger(navigation.historyLedger, label);
+  boundedInteger(navigation.historyCount, 2, 128, `${label} browser history count`);
+  equal(navigation.historyCount, historyLedger.length, `${label} browser history ledger count`);
+  stringMatch(
+    navigation.historyContractSha256,
+    /^[a-f0-9]{64}$/,
+    `${label} browser history contract sha256`,
+  );
+  equal(
+    navigation.historyContractSha256,
+    sha256(JSON.stringify(historyLedger)),
+    `${label} browser history contract digest`,
+  );
+  const staticLedger = assertStaticRequestLedger(navigation.staticRequestLedger, label);
+  boundedInteger(navigation.staticRequestCount, 1, 256, `${label} static request count`);
+  equal(navigation.staticRequestCount, staticLedger.length, `${label} static request ledger count`);
+  stringMatch(
+    navigation.staticRequestContractSha256,
+    /^[a-f0-9]{64}$/,
+    `${label} static request contract sha256`,
+  );
+  equal(
+    navigation.staticRequestContractSha256,
+    sha256(JSON.stringify(staticLedger)),
+    `${label} static request contract digest`,
+  );
+  const staticLoadGraph = assertStaticLoadGraph(navigation.staticLoadGraph, label);
+  stringMatch(
+    navigation.staticLoadGraphContractSha256,
+    /^[a-f0-9]{64}$/,
+    `${label} static load graph sha256`,
+  );
+  equal(
+    navigation.staticLoadGraphContractSha256,
+    sha256(JSON.stringify(staticLoadGraph)),
+    `${label} static load graph digest`,
+  );
+  equal(
+    staticLoadGraph.assetAttestationSha256,
+    input.runtimeBinding.staticAssetAttestationSha256,
+    `${label} static load graph image attestation binding`,
   );
   equal(navigation.unexpectedRequestCount, 0, `${role} unexpected browser requests`);
   equal(navigation.unexpectedConsoleCount, 0, `${role} unexpected browser console`);
@@ -490,7 +540,7 @@ export function createProviderOverlapStackReport(input) {
   });
 }
 
-export function createDualProviderOverlapProof(baseline, candidate) {
+export function createDualProviderOverlapProof(baseline, candidate, cleanupReceipt) {
   assertStackReport(baseline, "baseline");
   assertStackReport(candidate, "candidate");
   equal(baseline.role, "baseline", "baseline report role");
@@ -502,7 +552,7 @@ export function createDualProviderOverlapProof(baseline, candidate) {
     kind: PROVIDER_OVERLAP_PROOF_KIND,
     stacks: { baseline, candidate },
     comparison: expectedComparison(baseline, candidate),
-    lifecycle: expectedLifecycle(baseline, candidate),
+    lifecycle: expectedLifecycle(baseline, candidate, cleanupReceipt),
   };
   assertDualProviderOverlapProof(document);
   return Object.freeze(document);
@@ -530,7 +580,9 @@ export function assertDualProviderOverlapProof(value) {
     "distinctSourceRevisions",
     "eachOneShotOverlapProven",
     "sameBrowserProject",
+    "sameConnectProxyCounters",
     "sameFixtureContract",
+    "sameHistoryContract",
     "sameOwnedResetContract",
     "sameProviderRecordSet",
     "samePublicBuildContract",
@@ -546,7 +598,12 @@ export function assertDualProviderOverlapProof(value) {
     fail("Proof arrival order relationship is invalid.");
   }
   deepEqual(comparison, expectedComparison(stacks.baseline, stacks.candidate), "proof comparison");
-  deepEqual(document.lifecycle, expectedLifecycle(stacks.baseline, stacks.candidate), "proof lifecycle");
+  const lifecycle = record(document.lifecycle, "proof lifecycle");
+  deepEqual(
+    lifecycle,
+    expectedLifecycle(stacks.baseline, stacks.candidate, lifecycle.cleanup),
+    "proof lifecycle",
+  );
   return document;
 }
 
@@ -569,6 +626,12 @@ function assertCrossStackInvariants(baseline, candidate) {
     "publicationsSha256",
     "serviceIdentitySha256",
     "composeRuntimeContractSha256",
+    "oneShotLifecycleContractSha256",
+    "generatedEnvironmentDirectorySha256",
+    "ownedInputReceiptSha256",
+    "staticAssetAttestationSha256",
+    "staticAssetInventorySha256",
+    "syntheticRoleEnvironmentContractSha256",
   ]) {
     if (baseline.runtimeBinding[name] === candidate.runtimeBinding[name]) {
       fail(`Dual-image proof requires distinct ${name} runtime bindings.`);
@@ -581,6 +644,21 @@ function assertCrossStackInvariants(baseline, candidate) {
     baseline.navigation.requestContractSha256,
     candidate.navigation.requestContractSha256,
     "browser request contract binding",
+  );
+  deepEqual(
+    baseline.navigation.historyLedger,
+    candidate.navigation.historyLedger,
+    "browser history operation sequence",
+  );
+  equal(
+    baseline.navigation.historyContractSha256,
+    candidate.navigation.historyContractSha256,
+    "browser history contract binding",
+  );
+  deepEqual(
+    baseline.connectProxyCounters,
+    candidate.connectProxyCounters,
+    "normalized CONNECT proxy counters",
   );
   deepEqual(
     normalizedReset(baseline.reset),
@@ -601,6 +679,11 @@ function assertCrossStackInvariants(baseline, candidate) {
     baseline.runtimeBinding.syntheticEnvironmentContractSha256,
     candidate.runtimeBinding.syntheticEnvironmentContractSha256,
     "synthetic application environment binding",
+  );
+  deepEqual(
+    baseline.runtimeBinding.syntheticRoleEnvironmentPolicySha256,
+    candidate.runtimeBinding.syntheticRoleEnvironmentPolicySha256,
+    "synthetic role environment policy binding",
   );
   deepEqual(
     normalizedOverlap(baseline.providerOverlap),
@@ -624,6 +707,8 @@ function expectedComparison(baseline, candidate) {
     sameFixtureContract: true,
     sameScenarioAndSeed: true,
     sameBrowserProject: true,
+    sameConnectProxyCounters: true,
+    sameHistoryContract: true,
     sameOwnedResetContract: true,
     sameProviderRecordSet: true,
     eachOneShotOverlapProven: true,
@@ -634,28 +719,72 @@ function expectedComparison(baseline, candidate) {
   };
 }
 
-function expectedLifecycle(baseline, candidate) {
+function expectedLifecycle(baseline, candidate, cleanupReceipt) {
+  const cleanup = normalizeCleanupReceipt(cleanupReceipt, baseline, candidate);
   return {
-    status: "retained-for-follow-up-evidence",
-    automaticCleanup: false,
-    cleanupMode: "exact-owned-project-handoff-v1",
-    cleanupHelper: "tests/browser/journeys/run-production-image-journey.mjs cleanup",
-    ownershipGate: "compose-project-labels-before-down-volumes",
+    status: "verifier-owned-cleanup-completed-before-evidence-write",
+    automaticCleanup: true,
+    cleanupMode: "exact-verifier-owned-stack-pair-v1",
+    cleanupHelper: "tests/browser/journeys/journey-owned-stack-orchestrator.mjs",
+    ownershipGate: "absence-before-up-and-compose-project-labels-before-down-volumes",
+    cleanup,
     projects: [
       {
         role: "baseline",
         composeProject: baseline.composeProject,
         projectSha256: baseline.runtimeBinding.projectSha256,
         journeyContractSha256: baseline.journeyContractSha256,
+        generatedEnvironmentDirectorySha256:
+          baseline.runtimeBinding.generatedEnvironmentDirectorySha256,
       },
       {
         role: "candidate",
         composeProject: candidate.composeProject,
         projectSha256: candidate.runtimeBinding.projectSha256,
         journeyContractSha256: candidate.journeyContractSha256,
+        generatedEnvironmentDirectorySha256:
+          candidate.runtimeBinding.generatedEnvironmentDirectorySha256,
       },
     ],
   };
+}
+
+function normalizeCleanupReceipt(value, baseline, candidate) {
+  const cleanup = record(value, "verifier-owned cleanup receipt");
+  exactKeys(cleanup, ["stacks", "status"], "verifier-owned cleanup receipt");
+  equal(cleanup.status, "verifier-owned-stack-pair-cleaned", "cleanup receipt status");
+  if (!Array.isArray(cleanup.stacks) || cleanup.stacks.length !== 2) {
+    fail("Verifier-owned cleanup receipt stack set is invalid.");
+  }
+  const reports = [baseline, candidate];
+  const stacks = cleanup.stacks.map((entry, index) => {
+    const role = index === 0 ? "baseline" : "candidate";
+    const receipt = record(entry, `${role} cleanup receipt`);
+    exactKeys(
+      receipt,
+      ["generatedEnvironmentDirectorySha256", "projectSha256", "role", "status"],
+      `${role} cleanup receipt`,
+    );
+    equal(receipt.role, role, `${role} cleanup receipt role`);
+    equal(receipt.status, "verifier-owned-stack-cleaned", `${role} cleanup receipt status`);
+    equal(
+      receipt.projectSha256,
+      reports[index].runtimeBinding.projectSha256,
+      `${role} cleanup project binding`,
+    );
+    equal(
+      receipt.generatedEnvironmentDirectorySha256,
+      reports[index].runtimeBinding.generatedEnvironmentDirectorySha256,
+      `${role} cleanup environment binding`,
+    );
+    return {
+      role,
+      generatedEnvironmentDirectorySha256: receipt.generatedEnvironmentDirectorySha256,
+      projectSha256: receipt.projectSha256,
+      status: receipt.status,
+    };
+  });
+  return { stacks, status: cleanup.status };
 }
 
 export function sha256(value) {
@@ -775,8 +904,16 @@ function assertStackReport(value, label) {
     [
       "finalUrl",
       "headingVisible",
+      "historyContractSha256",
+      "historyCount",
+      "historyLedger",
       "requestContractSha256",
       "requestCount",
+      "staticLoadGraph",
+      "staticLoadGraphContractSha256",
+      "staticRequestContractSha256",
+      "staticRequestCount",
+      "staticRequestLedger",
       "unexpectedConsoleCount",
       "unexpectedPageErrorCount",
       "unexpectedRequestCount",
@@ -795,6 +932,31 @@ function assertStackReport(value, label) {
     /^[a-f0-9]{64}$/,
     `${label} browser request contract sha256`,
   );
+  const historyLedger = assertHistoryLedger(navigation.historyLedger, label);
+  equal(navigation.historyCount, historyLedger.length, `${label} browser history count`);
+  equal(
+    navigation.historyContractSha256,
+    sha256(JSON.stringify(historyLedger)),
+    `${label} browser history digest`,
+  );
+  const staticLedger = assertStaticRequestLedger(navigation.staticRequestLedger, label);
+  equal(navigation.staticRequestCount, staticLedger.length, `${label} static request count`);
+  equal(
+    navigation.staticRequestContractSha256,
+    sha256(JSON.stringify(staticLedger)),
+    `${label} static request digest`,
+  );
+  const staticLoadGraph = assertStaticLoadGraph(navigation.staticLoadGraph, label);
+  equal(
+    navigation.staticLoadGraphContractSha256,
+    sha256(JSON.stringify(staticLoadGraph)),
+    `${label} static load graph digest`,
+  );
+  equal(
+    staticLoadGraph.assetAttestationSha256,
+    report.runtimeBinding.staticAssetAttestationSha256,
+    `${label} static load graph image binding`,
+  );
   equal(navigation.unexpectedRequestCount, 0, `${label} unexpected browser requests`);
   equal(navigation.unexpectedConsoleCount, 0, `${label} unexpected browser console`);
   equal(navigation.unexpectedPageErrorCount, 0, `${label} unexpected browser pageerror`);
@@ -810,13 +972,20 @@ function assertRuntimeBinding(value, label, report) {
   exactKeys(binding, [
     "composeRuntimeContractSha256",
     "fixtureMountContractSha256",
+    "generatedEnvironmentDirectorySha256",
     "journeyContractSha256",
     "networkSha256",
+    "oneShotLifecycleContractSha256",
+    "ownedInputReceiptSha256",
     "projectSha256",
     "publicationsSha256",
     "serviceIdentitySha256",
+    "staticAssetAttestationSha256",
+    "staticAssetInventorySha256",
     "status",
     "syntheticEnvironmentContractSha256",
+    "syntheticRoleEnvironmentContractSha256",
+    "syntheticRoleEnvironmentPolicySha256",
   ], `${label} runtime binding`);
   equal(binding.status, "preflight-proven", `${label} runtime preflight status`);
   for (const name of Object.keys(binding).filter((name) => name !== "status")) {
@@ -836,6 +1005,81 @@ function assertRuntimeBinding(value, label, report) {
     );
   }
   return binding;
+}
+
+function assertHistoryLedger(value, label) {
+  if (!Array.isArray(value) || value.length < 2 || value.length > 128) {
+    fail(`${label} browser history ledger is invalid.`);
+  }
+  const kinds = new Set([
+    "document", "frame-navigation", "popstate", "pushState", "replaceState",
+  ]);
+  const locations = new Set([
+    "about-blank", "app-login", "app-telegram-start", "telegram-oidc-authorize",
+    "app-telegram-callback", "app-profile", "app-cabinet",
+  ]);
+  for (const entry of value) {
+    exactKeys(entry, ["kind", "location"], `${label} browser history entry`);
+    if (!kinds.has(entry.kind) || !locations.has(entry.location)) {
+      fail(`${label} browser history entry is outside the exact flow.`);
+    }
+  }
+  const projected = value.map(({ kind, location }) => ({ kind, location }));
+  const profile = projected.map(({ location }) => location).lastIndexOf("app-profile");
+  const cabinet = projected.map(({ location }) => location).lastIndexOf("app-cabinet");
+  if (profile < 0 || cabinet <= profile) fail(`${label} browser history transition is invalid.`);
+  return projected;
+}
+
+function assertStaticRequestLedger(value, label) {
+  if (!Array.isArray(value) || value.length < 1 || value.length > 256) {
+    fail(`${label} static request ledger is invalid.`);
+  }
+  const classes = new Set([
+    "next-static-css", "next-static-font", "next-static-image", "next-static-js",
+  ]);
+  const paths = new Set();
+  for (const entry of value) {
+    exactKeys(entry, ["assetSha256", "class", "pathSha256"], `${label} static request entry`);
+    if (!classes.has(entry.class) || !/^[a-f0-9]{64}$/.test(entry.pathSha256 ?? "")
+      || paths.has(entry.pathSha256)
+      || (entry.assetSha256 !== null && !/^[a-f0-9]{64}$/.test(entry.assetSha256 ?? ""))
+      || (["next-static-css", "next-static-js"].includes(entry.class)
+        && entry.assetSha256 === null)) {
+      fail(`${label} static request entry is invalid, duplicated, or unbound.`);
+    }
+    paths.add(entry.pathSha256);
+  }
+  return value.map(({ assetSha256, class: resourceClass, pathSha256 }) => ({
+    assetSha256,
+    class: resourceClass,
+    pathSha256,
+  }));
+}
+
+function assertStaticLoadGraph(value, label) {
+  const graph = record(value, `${label} static load graph`);
+  exactKeys(
+    graph,
+    ["assetAttestationSha256", "declaredPathSha256s", "expectedChunkPathSha256s"],
+    `${label} static load graph`,
+  );
+  stringMatch(graph.assetAttestationSha256, /^[a-f0-9]{64}$/, `${label} asset attestation`);
+  for (const [name, values] of [
+    ["declared", graph.declaredPathSha256s],
+    ["expected chunk", graph.expectedChunkPathSha256s],
+  ]) {
+    if (!Array.isArray(values) || values.length < 1 || values.length > 256
+      || values.some((digest) => !/^[a-f0-9]{64}$/.test(digest))
+      || new Set(values).size !== values.length) {
+      fail(`${label} static ${name} graph is invalid.`);
+    }
+  }
+  return {
+    assetAttestationSha256: graph.assetAttestationSha256,
+    declaredPathSha256s: [...graph.declaredPathSha256s],
+    expectedChunkPathSha256s: [...graph.expectedChunkPathSha256s],
+  };
 }
 
 function assertConnectProxyCounters(value, label) {
