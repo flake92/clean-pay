@@ -1,6 +1,10 @@
 import { projectAllowlistedA11ySemantics } from "./a11y-semantic-projection";
 import { projectExactJourneyGeneratedValues } from "./journey-comparison-projection";
 import { projectExactJourneyKeyboardSkipLink } from "./journeys/journey-skip-link-policy";
+import {
+  PINNED_JOURNEY_V5_FIXTURE_SHA256,
+  currentJourneyFixtureContractSha256,
+} from "./journeys/journey-fixture-contract";
 
 const DIGEST_OF_ONE = {
   bytes: 1,
@@ -15,6 +19,11 @@ const NET_ERR_ABORTED = {
 const CSP_REQUEST_FAILURE = {
   bytes: 3,
   sha256: "438ced67d76cf3c3bf3e9781a9640ab685b2c877f7cc93b6758cc641efd51bc6",
+} as const;
+
+const OFFLINE_RESOURCE_FAILURE = {
+  bytes: 30,
+  sha256: "4b47ef4954a96234348ce9b1a492377dca3fd6bb69b657049ce6cf31071e69a3",
 } as const;
 
 const NEXT_JS_POWERED_BY = {
@@ -34,8 +43,8 @@ export function projectCharacterizationManifestForComparison(value: unknown) {
   const projected = cloneJson(value);
   if (!isRecord(projected)) return projected;
 
-  projectJourneySourceProvenance(projected);
   projectExactJourneyGeneratedValues(projected);
+  projectJourneySourceProvenance(projected);
   projectExactJourneyKeyboardSkipLink(projected);
   projectJourneyCheckpointA11y(projected);
   projectJourneyProviderReadinessNoise(projected);
@@ -57,10 +66,67 @@ export function projectCharacterizationManifestPairForComparison(
   expectedValue: unknown,
   actualValue: unknown,
 ) {
+  const fixtureContractPairIsValid = isExactJourneyFixtureContractPair(
+    expectedValue,
+    actualValue,
+  );
   const expected = projectCharacterizationManifestForComparison(expectedValue);
   const actual = projectCharacterizationManifestForComparison(actualValue);
   projectExactRemovedNextJsPoweredBy(expected, actual);
+  if (fixtureContractPairIsValid) {
+    projectExactJourneyFixtureContract(expected, actual);
+  }
   return { expected, actual };
+}
+
+function isExactJourneyFixtureContractPair(expected: unknown, actual: unknown) {
+  const expectedFixture = exactRawJourneyFixtureContract(expected);
+  const actualFixture = exactRawJourneyFixtureContract(actual);
+  return expectedFixture?.sha256 === PINNED_JOURNEY_V5_FIXTURE_SHA256
+    && actualFixture?.sha256 === currentJourneyFixtureContractSha256();
+}
+
+function exactRawJourneyFixtureContract(value: unknown) {
+  if (!isRecord(value) || !hasExactJourneyManifestEnvelope(value)) return null;
+  const source = value.source;
+  if (!isExactJourneySourceProvenance(source)) return null;
+  return source.fixtureContract;
+}
+
+function projectExactJourneyFixtureContract(expected: unknown, actual: unknown) {
+  if (!isRecord(expected) || !isRecord(actual)) return;
+  const expectedFixture = exactJourneyFixtureContract(expected);
+  const actualFixture = exactJourneyFixtureContract(actual);
+  if (
+    !expectedFixture
+    || !actualFixture
+    || expectedFixture.sha256 !== PINNED_JOURNEY_V5_FIXTURE_SHA256
+    || actualFixture.sha256 !== currentJourneyFixtureContractSha256()
+  ) {
+    return;
+  }
+  expectedFixture.sha256 = "<validated-journey-v5-fixture-sha256>";
+  actualFixture.sha256 = "<validated-journey-v5-fixture-sha256>";
+}
+
+function exactJourneyFixtureContract(manifest: Record<string, unknown>) {
+  const source = manifest.source;
+  if (
+    !hasExactJourneyManifestEnvelope(manifest)
+    || !isRecord(source)
+    || !isVersionedSha256Contract(source.fixtureContract, "journey-v5")
+  ) {
+    return null;
+  }
+  return source.fixtureContract;
+}
+
+function hasExactJourneyManifestEnvelope(manifest: Record<string, unknown>) {
+  return manifest.schemaVersion === 2
+    && manifest.baselineCommit === "f5cb6f543d85256e7733a1ade6a4f451d86cf378"
+    && typeof manifest.project === "string"
+    && /^journey-(?:390x844|768x1024|1440x900)$/.test(manifest.project)
+    && typeof manifest.journey === "string";
 }
 
 function projectJourneyOfflineFallbackConsole(manifest: Record<string, unknown>) {
@@ -135,9 +201,21 @@ function projectJourneyOfflineFallbackConsole(manifest: Record<string, unknown>)
 
 function projectJourneySourceProvenance(manifest: Record<string, unknown>) {
   const source = manifest.source;
-  if (
-    !isRecord(source)
-    || !hasExactKeys(source, [
+  if (!isExactJourneySourceProvenance(source)) return;
+  source.revision = "<source-revision>";
+  source.imageDigest = "sha256:<source-image-digest>";
+  source.imageTag = "<source-image-tag>";
+  source.migrationImageDigest = "sha256:<migration-image-digest>";
+  source.migrationImageTag = "<migration-image-tag>";
+}
+
+function isExactJourneySourceProvenance(
+  source: unknown,
+): source is Record<string, unknown> & {
+  fixtureContract: { sha256: string; version: string };
+} {
+  return isRecord(source)
+    && hasExactKeys(source, [
       "browser",
       "fixtureContract",
       "imageDigest",
@@ -147,30 +225,25 @@ function projectJourneySourceProvenance(manifest: Record<string, unknown>) {
       "publicBuildContract",
       "revision",
     ])
-    || typeof source.revision !== "string"
-    || !/^[a-f0-9]{40}$/.test(source.revision)
-    || typeof source.imageDigest !== "string"
-    || !/^sha256:[a-f0-9]{64}$/.test(source.imageDigest)
-    || typeof source.imageTag !== "string"
-    || !/^[A-Za-z0-9][A-Za-z0-9._/:@-]{0,199}$/.test(source.imageTag)
-    || typeof source.migrationImageDigest !== "string"
-    || !/^sha256:[a-f0-9]{64}$/.test(source.migrationImageDigest)
-    || typeof source.migrationImageTag !== "string"
-    || !/^[A-Za-z0-9][A-Za-z0-9._/:@-]{0,199}$/.test(source.migrationImageTag)
-    || !isVersionedSha256Contract(source.publicBuildContract, "1")
-    || !isVersionedSha256Contract(source.fixtureContract, "journey-v5")
-    || !isRecord(source.browser)
-  ) {
-    return;
-  }
-  source.revision = "<source-revision>";
-  source.imageDigest = "sha256:<source-image-digest>";
-  source.imageTag = "<source-image-tag>";
-  source.migrationImageDigest = "sha256:<migration-image-digest>";
-  source.migrationImageTag = "<migration-image-tag>";
+    && typeof source.revision === "string"
+    && /^[a-f0-9]{40}$/.test(source.revision)
+    && typeof source.imageDigest === "string"
+    && /^sha256:[a-f0-9]{64}$/.test(source.imageDigest)
+    && typeof source.imageTag === "string"
+    && /^[A-Za-z0-9][A-Za-z0-9._/:@-]{0,199}$/.test(source.imageTag)
+    && typeof source.migrationImageDigest === "string"
+    && /^sha256:[a-f0-9]{64}$/.test(source.migrationImageDigest)
+    && typeof source.migrationImageTag === "string"
+    && /^[A-Za-z0-9][A-Za-z0-9._/:@-]{0,199}$/.test(source.migrationImageTag)
+    && isVersionedSha256Contract(source.publicBuildContract, "1")
+    && isVersionedSha256Contract(source.fixtureContract, "journey-v5")
+    && isRecord(source.browser);
 }
 
-function isVersionedSha256Contract(value: unknown, version: string) {
+function isVersionedSha256Contract(
+  value: unknown,
+  version: string,
+): value is { sha256: string; version: string } {
   return isRecord(value)
     && hasExactKeys(value, ["sha256", "version"])
     && value.version === version
@@ -287,6 +360,7 @@ function projectJourneyCheckpointA11y(manifest: Record<string, unknown>) {
       ariaSnapshot: checkpoint.ariaSnapshot,
     };
     projectAllowlistedA11ySemantics(checkpointManifest);
+    projectStaticDomAssetReferences(checkpointManifest);
     checkpoint.dom = checkpointManifest.dom;
     checkpoint.computedStyles = checkpointManifest.computedStyles;
     checkpoint.interactiveElements = checkpointManifest.interactiveElements;
@@ -444,6 +518,7 @@ function projectNetwork(manifest: Record<string, unknown>) {
     if (isKnownResponseBackedAbort(request)) {
       request.failure = null;
     }
+    projectJourneyFailedHashedStaticAsset(manifest, request);
     projectSuccessfulHashedStaticAsset(request);
   }
   for (const actionValue of serverActions) {
@@ -491,6 +566,141 @@ function projectSuccessfulHashedStaticAsset(request: Record<string, unknown>) {
       headerValue.value = "<compiled-static-etag>";
     }
   }
+}
+
+function projectJourneyFailedHashedStaticAsset(
+  manifest: Record<string, unknown>,
+  request: Record<string, unknown>,
+) {
+  if (!isExactPublicJourneyEnvelope(manifest) || !isExactFailedStaticRequest(request)) return;
+  const url = request.url as Record<string, unknown>;
+  url.pathname = projectHashedStaticPath(url.pathname as string) as string;
+}
+
+function isExactPublicJourneyEnvelope(manifest: Record<string, unknown>) {
+  const source = manifest.source;
+  return manifest.schemaVersion === 2
+    && manifest.baselineCommit === "f5cb6f543d85256e7733a1ade6a4f451d86cf378"
+    && manifest.journey === "public-responsive-keyboard-install-offline-support"
+    && typeof manifest.project === "string"
+    && /^journey-(?:390x844|768x1024|1440x900)$/.test(manifest.project)
+    && isRecord(source)
+    && isVersionedSha256Contract(source.fixtureContract, "journey-v5");
+}
+
+function isExactFailedStaticRequest(request: Record<string, unknown>) {
+  if (
+    !hasExactKeys(request, [
+      "externalTransport",
+      "failure",
+      "index",
+      "method",
+      "navigation",
+      "postData",
+      "redirectedFrom",
+      "requestHeaders",
+      "resourceType",
+      "response",
+      "scope",
+      "serverAction",
+      "url",
+    ])
+    || request.scope !== "application"
+    || request.method !== "GET"
+    || request.navigation !== false
+    || !isNoServerAction(request.serverAction)
+    || request.postData !== null
+    || request.redirectedFrom !== null
+    || request.response !== null
+    || request.externalTransport !== null
+    || !isRecord(request.url)
+    || request.url.origin !== "<app-origin>"
+    || typeof request.url.pathname !== "string"
+    || !projectHashedStaticPath(request.url.pathname)
+    || !Array.isArray(request.url.query)
+    || request.url.query.length !== 0
+    || request.url.fragment !== null
+    || !Array.isArray(request.requestHeaders)
+    || !isRecord(request.failure)
+    || !hasExactKeys(request.failure, ["errorText"])
+  ) {
+    return false;
+  }
+
+  if (request.resourceType === "script") {
+    return request.url.pathname.endsWith(".js")
+      && isExactDigest(request.failure.errorText, CSP_REQUEST_FAILURE)
+      && isExactFailedScriptHeaders(request.requestHeaders);
+  }
+  return request.resourceType === "stylesheet"
+    && request.url.pathname.endsWith(".css")
+    && isExactDigest(request.failure.errorText, OFFLINE_RESOURCE_FAILURE)
+    && isExactOfflineStylesheetHeaders(request.requestHeaders);
+}
+
+function isExactFailedScriptHeaders(headers: unknown[]) {
+  if (headers.length !== 1 && headers.length !== 2) return false;
+  const referer = headers.at(-1);
+  if (!isExactRefererHeader(referer)) return false;
+  return headers.length === 1 || isExactOriginHeader(headers[0]);
+}
+
+function isExactOriginHeader(value: unknown) {
+  return isRecord(value)
+    && hasExactKeys(value, ["name", "value"])
+    && value.name === "origin"
+    && sameJson(value.value, {
+      origin: "<app-origin>",
+      pathname: "/",
+      query: [],
+      fragment: null,
+    });
+}
+
+function isExactRefererHeader(value: unknown) {
+  if (
+    !isRecord(value)
+    || !hasExactKeys(value, ["name", "value"])
+    || value.name !== "referer"
+    || !isRecord(value.value)
+    || !hasExactKeys(value.value, ["fragment", "origin", "pathname", "query"])
+    || value.value.origin !== "<app-origin>"
+    || value.value.fragment !== null
+    || !Array.isArray(value.value.query)
+  ) {
+    return false;
+  }
+  if (value.value.pathname === "/install") {
+    return value.value.query.length === 0 || sameJson(value.value.query, [{
+      key: "platform",
+      value: "<sha256:48ee046028069a9c>",
+    }]);
+  }
+  return value.value.pathname === "/offline"
+    && (value.value.query.length === 0 || sameJson(value.value.query, [{
+      key: "journey_offline",
+      value: "<sha256:6b86b273ff34fce1>",
+    }]));
+}
+
+function isExactOfflineStylesheetHeaders(headers: unknown[]) {
+  return sameJson(headers, [
+    { name: "accept", value: { bytes: 18, sha256: "c2ad092018fde14a52b5febd6b403e12f11001eed0aff58f453ab8b621a255d3" } },
+    { name: "accept-language", value: { bytes: 5, sha256: "d3555b890eb35b88d3cb9ce38d8e64de37a39fcb9d8930fa297f454996543a54" } },
+    {
+      name: "referer",
+      value: {
+        origin: "<app-origin>",
+        pathname: "/offline",
+        query: [{ key: "journey_offline", value: "<sha256:6b86b273ff34fce1>" }],
+        fragment: null,
+      },
+    },
+    { name: "sec-ch-ua", value: { bytes: 66, sha256: "27e6edc326b21eb663888a7317cfd4710d559fc9e6c8093ff5016c7aa469d4fd" } },
+    { name: "sec-ch-ua-mobile", value: { bytes: 2, sha256: "36100dcc5adbcee0b8d9480dda9be2a0cd192e33af3a6933caad3a09fd50c1c0" } },
+    { name: "sec-ch-ua-platform", value: { bytes: 9, sha256: "0b1d1e9a36456a50dec652d22d95df7908422c429f91c65e9906ce500aaa2d8b" } },
+    { name: "user-agent", value: { bytes: 123, sha256: "3caf269ff15e9469bb7f47985b75b52aa4c2fd24dbe3118b40ca31edb48c9178" } },
+  ]);
 }
 
 function isSuccessfulHashedStaticAsset(request: Record<string, unknown>) {
@@ -755,6 +965,10 @@ function hasExactKeys(value: Record<string, unknown>, expected: string[]) {
 
 function cloneJson(value: unknown): unknown {
   return JSON.parse(JSON.stringify(value));
+}
+
+function sameJson(left: unknown, right: unknown) {
+  return JSON.stringify(left) === JSON.stringify(right);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
