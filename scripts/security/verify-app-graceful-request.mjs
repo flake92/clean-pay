@@ -178,7 +178,12 @@ function openSlowMutation({ baseUrl, trustedOrigin }) {
     hasResponse: () => responseBytes > 0,
     finishRequest: () => {
       if (socket.destroyed) throw new Error("request socket closed before its body completed");
-      socket.end(requestBody.subarray(splitAt));
+      // Completing an HTTP request body is not the same as half-closing the
+      // underlying TCP stream. A real HTTP client keeps its readable side open
+      // until the server responds; sending FIN here lets Node's default
+      // allowHalfOpen=false behavior close an asynchronously handled request
+      // before Next.js can write its response.
+      socket.write(requestBody.subarray(splitAt));
     },
   };
 }
