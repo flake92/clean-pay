@@ -199,6 +199,9 @@ function projectDecorativeLogo(entry: DomEntry, context: ProjectionContext) {
     && getAttribute(entry.node, "width") === "14"
     && (alt === "Clean Pay logo" || alt === "");
   if (!auth && !topbar && !footer) return;
+  if (auth && alt === "Clean Pay" && getAttribute(entry.node, "aria-hidden") === "true") {
+    removeAttribute(entry.node, "aria-hidden");
+  }
   setAttribute(entry.node, "alt", "");
   context.authLogo ||= auth;
   context.topbarLogo ||= topbar;
@@ -716,6 +719,13 @@ function setAttribute(node: Record<string, unknown>, name: string, value: string
     (candidate) => isRecord(candidate) && candidate.name === name,
   );
   if (isRecord(attribute)) attribute.value = value;
+}
+
+function removeAttribute(node: Record<string, unknown>, name: string) {
+  if (!Array.isArray(node.attributes)) return;
+  node.attributes = node.attributes.filter(
+    (candidate) => !isRecord(candidate) || candidate.name !== name,
+  );
 }
 
 function hasExactAttributes(
