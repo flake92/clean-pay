@@ -49,11 +49,11 @@ const protectedRoutes: CharacterizationRoute[] = [
 
 test.describe("anonymous protected-route characterization", () => {
   for (const route of protectedRoutes) {
-    test(`${route.id} preserves the login redirect`, async ({ guardedPage }, testInfo) => {
+    test(`${route.id} preserves the login redirect`, async ({ guardedPageQuorum }, testInfo) => {
       const requested = new URL(route.requestPath, "https://characterization.invalid");
       const expectedRedirectTarget = `${requested.pathname}${requested.search}`;
       await captureCharacterization({
-        page: guardedPage,
+        pages: guardedPageQuorum,
         route,
         testInfo,
         validateNavigation(finalUrl) {
