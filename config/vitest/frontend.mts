@@ -61,6 +61,7 @@ export default defineConfig({
         "src/frontend/layout/AppTopbar.tsx",
         "src/frontend/layout/layout.tsx",
         "src/frontend/components/auth-shell.tsx",
+        "src/frontend/components/auth-logo.tsx",
         "src/frontend/components/auth-form-transitions.ts",
         "src/frontend/components/link-account-panel.tsx",
         "src/frontend/components/link-account-presentation.ts",
