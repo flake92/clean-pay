@@ -1,0 +1,326 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://clean-pay.dev/schemas/dual-image-provider-overlap-proof-v1.json",
+  "title": "Clean Pay dual-image provider overlap proof",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "kind", "stacks", "comparison"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "kind": { "const": "clean-pay-dual-image-provider-overlap-proof" },
+    "stacks": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["baseline", "candidate"],
+      "properties": {
+        "baseline": { "$ref": "#/$defs/stack" },
+        "candidate": { "$ref": "#/$defs/stack" }
+      }
+    },
+    "comparison": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "distinctComposeProjects",
+        "distinctApplicationImages",
+        "distinctSourceRevisions",
+        "samePublicBuildContract",
+        "sameFixtureContract",
+        "sameScenarioAndSeed",
+        "sameBrowserProject",
+        "sameOwnedResetContract",
+        "sameProviderRecordSet",
+        "eachOneShotOverlapProven",
+        "arrivalOrderRelationship"
+      ],
+      "properties": {
+        "status": { "const": "proven" },
+        "distinctComposeProjects": { "const": true },
+        "distinctApplicationImages": { "const": true },
+        "distinctSourceRevisions": { "const": true },
+        "samePublicBuildContract": { "const": true },
+        "sameFixtureContract": { "const": true },
+        "sameScenarioAndSeed": { "const": true },
+        "sameBrowserProject": { "const": true },
+        "sameOwnedResetContract": { "const": true },
+        "sameProviderRecordSet": { "const": true },
+        "eachOneShotOverlapProven": { "const": true },
+        "arrivalOrderRelationship": { "enum": ["same", "reordered"] }
+      }
+    }
+  },
+  "$defs": {
+    "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "imageDigest": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+    "stack": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "role",
+        "composeProject",
+        "fixtureContract",
+        "scenario",
+        "browser",
+        "applicationImage",
+        "reset",
+        "navigation",
+        "providerOverlap"
+      ],
+      "properties": {
+        "role": { "enum": ["baseline", "candidate"] },
+        "composeProject": {
+          "type": "string",
+          "pattern": "^clean-pay-browser-journey-[a-z0-9][a-z0-9-]{5,80}$"
+        },
+        "fixtureContract": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["domain", "sha256"],
+          "properties": {
+            "domain": { "const": "clean-pay-browser-journey-fixture-v5" },
+            "sha256": { "$ref": "#/$defs/sha256" }
+          }
+        },
+        "scenario": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["label", "scenarioSha256", "seedSha256"],
+          "properties": {
+            "label": { "type": "string", "pattern": "^[a-z0-9][a-z0-9:-]{1,180}$" },
+            "scenarioSha256": { "$ref": "#/$defs/sha256" },
+            "seedSha256": { "$ref": "#/$defs/sha256" }
+          }
+        },
+        "browser": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "project",
+            "playwrightVersion",
+            "chromiumVersion",
+            "userAgentSha256",
+            "viewport",
+            "locale",
+            "timezoneId",
+            "colorScheme"
+          ],
+          "properties": {
+            "project": { "const": "provider-overlap-1440x900" },
+            "playwrightVersion": { "type": "string", "pattern": "^\\d+\\.\\d+\\.\\d+$" },
+            "chromiumVersion": { "type": "string", "pattern": "^\\d+\\.\\d+\\.\\d+\\.\\d+$" },
+            "userAgentSha256": { "$ref": "#/$defs/sha256" },
+            "viewport": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["width", "height"],
+              "properties": { "width": { "const": 1440 }, "height": { "const": 900 } }
+            },
+            "locale": { "const": "ru-RU" },
+            "timezoneId": { "const": "Europe/Moscow" },
+            "colorScheme": { "const": "light" }
+          }
+        },
+        "applicationImage": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["digest", "referenceSha256", "revision", "role", "publicBuildContract"],
+          "properties": {
+            "digest": { "$ref": "#/$defs/imageDigest" },
+            "referenceSha256": { "$ref": "#/$defs/sha256" },
+            "revision": { "type": "string", "pattern": "^[a-f0-9]{40}$" },
+            "role": { "const": "app" },
+            "publicBuildContract": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["version", "sha256"],
+              "properties": {
+                "version": { "const": "1" },
+                "sha256": { "$ref": "#/$defs/sha256" }
+              }
+            }
+          }
+        },
+        "reset": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["database"],
+          "properties": { "database": { "$ref": "#/$defs/databaseReset" } }
+        },
+        "navigation": { "$ref": "#/$defs/navigation" },
+        "providerOverlap": { "$ref": "#/$defs/providerOverlap" }
+      }
+    },
+    "databaseReset": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "scopeSha256",
+        "schemaSha256",
+        "tableCount",
+        "sequenceCount",
+        "resetSequence",
+        "transaction",
+        "redis"
+      ],
+      "properties": {
+        "scopeSha256": { "$ref": "#/$defs/sha256" },
+        "schemaSha256": { "$ref": "#/$defs/sha256" },
+        "tableCount": { "type": "integer", "minimum": 1 },
+        "sequenceCount": { "const": 0 },
+        "resetSequence": { "type": "integer", "minimum": 1 },
+        "transaction": { "const": "truncate-public-application-tables-cascade-no-sequences" },
+        "redis": { "const": "flush-owned-db-0" }
+      }
+    },
+    "navigation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["finalPath", "headingVisible", "unexpectedRequestCount"],
+      "properties": {
+        "finalPath": { "const": "/cabinet" },
+        "headingVisible": { "const": true },
+        "unexpectedRequestCount": { "const": 0 }
+      }
+    },
+    "participantBase": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["service", "method", "pathname", "entered", "ledgerSequence"],
+      "properties": {
+        "service": { "const": "remnashop" },
+        "method": { "const": "GET" },
+        "pathname": { "type": "string" },
+        "entered": { "const": true },
+        "ledgerSequence": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "devicesParticipant": {
+      "allOf": [
+        { "$ref": "#/$defs/participantBase" },
+        { "properties": { "pathname": { "const": "/api/v1/public/subscription/devices" } } }
+      ]
+    },
+    "offersParticipant": {
+      "allOf": [
+        { "$ref": "#/$defs/participantBase" },
+        { "properties": { "pathname": { "const": "/api/v1/public/subscription/offers" } } }
+      ]
+    },
+    "credentialContract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["header_names", "authorization_scheme", "cookie_names"],
+      "properties": {
+        "header_names": { "const": [] },
+        "authorization_scheme": { "const": null },
+        "cookie_names": { "const": ["access_token", "refresh_token"] }
+      }
+    },
+    "readRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "ledgerIndex",
+        "sequence",
+        "service",
+        "method",
+        "pathname",
+        "query_keys",
+        "body_bytes",
+        "body_sha256",
+        "body_contract",
+        "idempotency_key_present",
+        "idempotency_key_sha256",
+        "idempotency_key_contract",
+        "credential_contract",
+        "effect"
+      ],
+      "properties": {
+        "ledgerIndex": { "type": "integer", "minimum": 0 },
+        "sequence": { "type": "integer", "minimum": 1 },
+        "service": { "const": "remnashop" },
+        "method": { "const": "GET" },
+        "pathname": {
+          "enum": [
+            "/api/v1/public/subscription/devices",
+            "/api/v1/public/subscription/offers"
+          ]
+        },
+        "query_keys": { "const": [] },
+        "body_bytes": { "const": 0 },
+        "body_sha256": {
+          "const": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        "body_contract": { "const": null },
+        "idempotency_key_present": { "const": false },
+        "idempotency_key_sha256": { "const": null },
+        "idempotency_key_contract": { "const": null },
+        "credential_contract": { "$ref": "#/$defs/credentialContract" },
+        "effect": { "enum": ["read_devices", "read_offers"] }
+      }
+    },
+    "providerOverlap": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "contractVersion",
+        "probe",
+        "occurrence",
+        "timeoutMs",
+        "participants",
+        "duplicates",
+        "enteredCount",
+        "maxInFlight",
+        "release",
+        "outcome",
+        "arrivalOrder",
+        "ledgerRange",
+        "records"
+      ],
+      "properties": {
+        "contractVersion": { "const": 1 },
+        "probe": { "const": "cabinet-offers-devices-overlap" },
+        "occurrence": { "const": 1 },
+        "timeoutMs": { "type": "integer", "minimum": 100, "maximum": 10000 },
+        "participants": {
+          "type": "array",
+          "prefixItems": [
+            { "$ref": "#/$defs/devicesParticipant" },
+            { "$ref": "#/$defs/offersParticipant" }
+          ],
+          "minItems": 2,
+          "maxItems": 2
+        },
+        "duplicates": { "const": [] },
+        "enteredCount": { "const": 2 },
+        "maxInFlight": { "const": 2 },
+        "release": { "const": "all-entered" },
+        "outcome": { "const": "proven" },
+        "arrivalOrder": {
+          "type": "array",
+          "items": { "enum": ["read_devices", "read_offers"] },
+          "minItems": 2,
+          "maxItems": 2,
+          "uniqueItems": true
+        },
+        "ledgerRange": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["firstSequence", "lastSequence", "adjacent"],
+          "properties": {
+            "firstSequence": { "type": "integer", "minimum": 1 },
+            "lastSequence": { "type": "integer", "minimum": 2 },
+            "adjacent": { "const": true }
+          }
+        },
+        "records": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/readRecord" },
+          "minItems": 2,
+          "maxItems": 2
+        }
+      }
+    }
+  }
+}
