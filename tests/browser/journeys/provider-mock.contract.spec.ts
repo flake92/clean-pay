@@ -10,6 +10,290 @@ const journeyDirectory = path.resolve(__dirname);
 const authServiceKey = digest("clean-pay-browser-journey:remnashop-auth");
 const apiKey = digest("clean-pay-browser-journey:remnashop-api");
 const remnawaveToken = digest("clean-pay-browser-journey:remnawave");
+const cabinetReadOverlapAction = "cabinet_read_overlap_once";
+const cabinetReadOverlapProbe = "cabinet-offers-devices-overlap";
+const cabinetReadOverlapTimeoutMs = 250;
+const cabinetReadParticipants = [
+  {
+    service: "remnashop",
+    method: "GET",
+    pathname: "/api/v1/public/subscription/devices",
+  },
+  {
+    service: "remnashop",
+    method: "GET",
+    pathname: "/api/v1/public/subscription/offers",
+  },
+] as const;
+
+type CabinetReadParticipant = {
+  service: string;
+  method: string;
+  pathname: string;
+  entered: boolean;
+  ledgerSequence: number | null;
+};
+
+type CabinetReadWindow = {
+  probe: string;
+  occurrence: number;
+  timeoutMs: number;
+  participants: CabinetReadParticipant[];
+  duplicates: Array<{
+    service: string;
+    method: string;
+    pathname: string;
+    ledgerSequence: number;
+  }>;
+  enteredCount: number;
+  maxInFlight: number;
+  release: string;
+  outcome: string;
+};
+
+type CabinetReadEvidence = {
+  contractVersion: number;
+  active: null | Omit<CabinetReadWindow, "duplicates" | "release" | "outcome">;
+  windows: CabinetReadWindow[];
+};
+
+test("records a bounded one-shot offers/devices overlap proof without changing disabled semantics", async () => {
+  const [oidcPort, remnashopPort, remnawavePort, controlPort] = await freePorts(4);
+  const children: ChildProcess[] = [];
+  try {
+    children.push(spawnFixture("oidc-mock.mjs", {
+      PORT: String(oidcPort),
+      OIDC_ISSUER: `http://127.0.0.1:${oidcPort}`,
+      OIDC_PUBLIC_ISSUER: `http://127.0.0.1:${oidcPort}`,
+    }));
+    children.push(spawnFixture("provider-mock.mjs", {
+      REMNASHOP_PORT: String(remnashopPort),
+      REMNAWAVE_PORT: String(remnawavePort),
+      CONTROL_PORT: String(controlPort),
+      OIDC_RESET_URL: `http://127.0.0.1:${oidcPort}/__reset`,
+      CLEAN_PAY_BROWSER_CABINET_READ_OVERLAP_TIMEOUT_MS:
+        String(cabinetReadOverlapTimeoutMs),
+    }));
+
+    const control = `http://127.0.0.1:${controlPort}`;
+    const shop = `http://127.0.0.1:${remnashopPort}/api/v1/public`;
+    await Promise.all([
+      waitForOk(`${control}/__health`),
+      waitForOk(`http://127.0.0.1:${oidcPort}/.well-known/jwks.json`),
+    ]);
+    expect(await concurrencyEvidence(control)).toEqual({
+      contractVersion: 1,
+      active: null,
+      windows: [],
+    });
+
+    const login = await postSession(`${shop}/auth/login`, {
+      email: "synthetic.browser@clean-pay.dev",
+      password: "synthetic-password",
+    });
+    const [ordinaryOffers, ordinaryDevices] = await Promise.all([
+      subscriptionRead(`${shop}/subscription/offers`, login.cookie),
+      subscriptionRead(`${shop}/subscription/devices`, login.cookie),
+    ]);
+    const ordinaryLedger = await fetchJson(`${control}/__ledger`) as {
+      entries: Array<{ effect: string }>;
+    };
+    expect(Object.keys(ordinaryLedger)).toEqual(["entries"]);
+    expect(ordinaryLedger.entries.filter(({ effect }) => (
+      effect === "read_offers" || effect === "read_devices"
+    )).map(({ effect }) => effect).sort()).toEqual(["read_devices", "read_offers"]);
+    expect(await concurrencyEvidence(control)).toEqual({
+      contractVersion: 1,
+      active: null,
+      windows: [],
+    });
+
+    const widenedInjection = await fetch(`${control}/__inject`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ action: cabinetReadOverlapAction, timeoutMs: 1 }),
+    });
+    expect(widenedInjection.status).toBe(422);
+    await expect(widenedInjection.json()).resolves.toEqual({
+      error: "unsupported_injection",
+    });
+
+    await armCabinetReadOverlap(control);
+    const repeatedArm = await fetch(`${control}/__inject`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ action: cabinetReadOverlapAction }),
+    });
+    expect(repeatedArm.status).toBe(409);
+    await expect(repeatedArm.json()).resolves.toEqual({
+      error: "concurrency_probe_already_armed",
+    });
+
+    let firstDeviceSettled = false;
+    const firstDevice = subscriptionRead(
+      `${shop}/subscription/devices`,
+      login.cookie,
+    ).finally(() => { firstDeviceSettled = true; });
+    const deviceActive = await waitForConcurrencyEvidence(
+      control,
+      (evidence) => evidence.active?.enteredCount === 1,
+    );
+    expect(deviceActive.active).toEqual({
+      probe: cabinetReadOverlapProbe,
+      occurrence: 1,
+      timeoutMs: cabinetReadOverlapTimeoutMs,
+      participants: [
+        { ...cabinetReadParticipants[0], entered: true, ledgerSequence: expect.any(Number) },
+        { ...cabinetReadParticipants[1], entered: false, ledgerSequence: null },
+      ],
+      enteredCount: 1,
+      maxInFlight: 1,
+    });
+    await subscriptionRead(`${shop}/subscription/current`, login.cookie);
+    expect(firstDeviceSettled).toBe(false);
+    const firstOffer = subscriptionRead(`${shop}/subscription/offers`, login.cookie);
+    const [provenDevices, provenOffers] = await Promise.all([firstDevice, firstOffer]);
+    expect(provenDevices).toEqual(ordinaryDevices);
+    expect(provenOffers).toEqual(ordinaryOffers);
+
+    const firstProof = await concurrencyEvidence(control);
+    expect(firstProof).toEqual({
+      contractVersion: 1,
+      active: null,
+      windows: [provenWindow(1)],
+    });
+    await expectConcurrencyLedgerReferences(control, firstProof.windows);
+
+    await armCabinetReadOverlap(control);
+    const secondOffer = subscriptionRead(`${shop}/subscription/offers`, login.cookie);
+    await waitForConcurrencyEvidence(
+      control,
+      (evidence) => evidence.active?.participants[1]?.entered === true,
+    );
+    const secondDevice = subscriptionRead(`${shop}/subscription/devices`, login.cookie);
+    const [reverseOffers, reverseDevices] = await Promise.all([secondOffer, secondDevice]);
+    expect(reverseOffers).toEqual(ordinaryOffers);
+    expect(reverseDevices).toEqual(ordinaryDevices);
+    const reverseProof = await concurrencyEvidence(control);
+    expect(reverseProof.windows).toEqual([provenWindow(1), provenWindow(2)]);
+    await expectConcurrencyLedgerReferences(control, reverseProof.windows);
+
+    await armCabinetReadOverlap(control);
+    const originalOffer = subscriptionRead(`${shop}/subscription/offers`, login.cookie);
+    const duplicateActive = await waitForConcurrencyEvidence(
+      control,
+      (evidence) => evidence.active?.participants[1]?.entered === true,
+    );
+    const originalOfferSequence = duplicateActive.active?.participants[1]?.ledgerSequence;
+    expect(originalOfferSequence).toEqual(expect.any(Number));
+    const duplicateOffer = subscriptionRead(`${shop}/subscription/offers`, login.cookie);
+    const [originalOfferBody, duplicateOfferBody] = await Promise.all([
+      originalOffer,
+      duplicateOffer,
+    ]);
+    expect(originalOfferBody).toEqual(ordinaryOffers);
+    expect(duplicateOfferBody).toEqual(ordinaryOffers);
+    const duplicateProof = await concurrencyEvidence(control);
+    expect(duplicateProof.windows[2]).toEqual({
+      probe: cabinetReadOverlapProbe,
+      occurrence: 3,
+      timeoutMs: cabinetReadOverlapTimeoutMs,
+      participants: [
+        { ...cabinetReadParticipants[0], entered: false, ledgerSequence: null },
+        {
+          ...cabinetReadParticipants[1],
+          entered: true,
+          ledgerSequence: originalOfferSequence,
+        },
+      ],
+      duplicates: [{
+        ...cabinetReadParticipants[1],
+        ledgerSequence: expect.any(Number),
+      }],
+      enteredCount: 1,
+      maxInFlight: 2,
+      release: "invalid-duplicate",
+      outcome: "invalid",
+    });
+    await expectConcurrencyLedgerReferences(control, duplicateProof.windows);
+
+    await armCabinetReadOverlap(control);
+    const timedOutDevice = await subscriptionRead(
+      `${shop}/subscription/devices`,
+      login.cookie,
+    );
+    expect(timedOutDevice).toEqual(ordinaryDevices);
+    const timeoutProof = await concurrencyEvidence(control);
+    expect(timeoutProof.windows[3]).toEqual({
+      probe: cabinetReadOverlapProbe,
+      occurrence: 4,
+      timeoutMs: cabinetReadOverlapTimeoutMs,
+      participants: [
+        { ...cabinetReadParticipants[0], entered: true, ledgerSequence: expect.any(Number) },
+        { ...cabinetReadParticipants[1], entered: false, ledgerSequence: null },
+      ],
+      duplicates: [],
+      enteredCount: 1,
+      maxInFlight: 1,
+      release: "bounded-timeout",
+      outcome: "timeout",
+    });
+    await expectConcurrencyLedgerReferences(control, timeoutProof.windows);
+
+    await armCabinetReadOverlap(control);
+    const absentProof = await waitForConcurrencyEvidence(
+      control,
+      (evidence) => evidence.windows.length === 5,
+    );
+    expect(absentProof.windows[4]).toEqual({
+      probe: cabinetReadOverlapProbe,
+      occurrence: 5,
+      timeoutMs: cabinetReadOverlapTimeoutMs,
+      participants: cabinetReadParticipants.map((participant) => ({
+        ...participant,
+        entered: false,
+        ledgerSequence: null,
+      })),
+      duplicates: [],
+      enteredCount: 0,
+      maxInFlight: 0,
+      release: "bounded-timeout",
+      outcome: "timeout",
+    });
+
+    await armCabinetReadOverlap(control);
+    const resetOffer = subscriptionRead(`${shop}/subscription/offers`, login.cookie);
+    await waitForConcurrencyEvidence(
+      control,
+      (evidence) => evidence.active?.enteredCount === 1,
+    );
+    await postJson(`${control}/__reset`, { scenario: "contract-overlap-reset" });
+    expect(await resetOffer).toEqual(ordinaryOffers);
+    expect(await concurrencyEvidence(control)).toEqual({
+      contractVersion: 1,
+      active: null,
+      windows: [],
+    });
+
+    const loginAfterReset = await postSession(`${shop}/auth/login`, {
+      email: "synthetic.browser@clean-pay.dev",
+      password: "synthetic-password",
+    });
+    const [resetOffers, resetDevices] = await Promise.all([
+      subscriptionRead(`${shop}/subscription/offers`, loginAfterReset.cookie),
+      subscriptionRead(`${shop}/subscription/devices`, loginAfterReset.cookie),
+    ]);
+    expect(resetOffers).toEqual(ordinaryOffers);
+    expect(resetDevices).toEqual(ordinaryDevices);
+    expect(await concurrencyEvidence(control)).toEqual({
+      contractVersion: 1,
+      active: null,
+      windows: [],
+    });
+  } finally {
+    await Promise.all(children.map(stopChild));
+  }
+});
 
 test("two reset/seed cycles restore every mutable provider and OIDC state", async () => {
   const [oidcPort, remnashopPort, remnawavePort, controlPort] = await freePorts(4);
@@ -507,6 +791,117 @@ test("Chatwoot contact probe validates the synthetic inbox and records only cred
     await Promise.all(children.map(stopChild));
   }
 });
+
+function provenWindow(occurrence: number) {
+  return {
+    probe: cabinetReadOverlapProbe,
+    occurrence,
+    timeoutMs: cabinetReadOverlapTimeoutMs,
+    participants: cabinetReadParticipants.map((participant) => ({
+      ...participant,
+      entered: true,
+      ledgerSequence: expect.any(Number),
+    })),
+    duplicates: [],
+    enteredCount: 2,
+    maxInFlight: 2,
+    release: "all-entered",
+    outcome: "proven",
+  };
+}
+
+async function armCabinetReadOverlap(control: string) {
+  await expect(postJson(`${control}/__inject`, {
+    action: cabinetReadOverlapAction,
+  })).resolves.toEqual({
+    status: "armed",
+    action: cabinetReadOverlapAction,
+  });
+}
+
+async function concurrencyEvidence(control: string) {
+  return fetchJson(`${control}/__concurrency`) as Promise<CabinetReadEvidence>;
+}
+
+async function waitForConcurrencyEvidence(
+  control: string,
+  predicate: (evidence: CabinetReadEvidence) => boolean,
+) {
+  const deadline = Date.now() + 2_000;
+  let latest: CabinetReadEvidence | null = null;
+  while (Date.now() < deadline) {
+    latest = await concurrencyEvidence(control);
+    if (predicate(latest)) return latest;
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  throw new Error(
+    `Concurrency evidence did not reach the expected state: ${JSON.stringify(latest)}`,
+  );
+}
+
+async function subscriptionRead(url: string, cookie: string) {
+  const response = await fetch(url, { headers: { cookie } });
+  expect(response.status).toBe(200);
+  return response.json();
+}
+
+async function expectConcurrencyLedgerReferences(
+  control: string,
+  windows: CabinetReadWindow[],
+) {
+  const value = await fetchJson(`${control}/__ledger`) as {
+    entries: Array<Record<string, unknown>>;
+  };
+  const referenced = windows.flatMap((window) => [
+    ...window.participants.filter((participant) => participant.entered),
+    ...window.duplicates.map((duplicate) => ({ ...duplicate, entered: true })),
+  ]);
+  const referencedSequences = referenced.map(({ ledgerSequence }) => ledgerSequence);
+  expect(new Set(referencedSequences).size).toBe(referencedSequences.length);
+  for (const participant of referenced) {
+    expect(participant.ledgerSequence).toEqual(expect.any(Number));
+    const entry = value.entries.find(
+      (candidate) => candidate.sequence === participant.ledgerSequence,
+    );
+    expect(entry).toBeDefined();
+    expect(Object.keys(entry ?? {}).sort()).toEqual([
+      "body_bytes",
+      "body_contract",
+      "body_sha256",
+      "credential_contract",
+      "effect",
+      "idempotency_key_contract",
+      "idempotency_key_present",
+      "idempotency_key_sha256",
+      "method",
+      "pathname",
+      "query_keys",
+      "sequence",
+      "service",
+    ]);
+    expect(entry).toEqual({
+      sequence: participant.ledgerSequence,
+      service: participant.service,
+      method: participant.method,
+      pathname: participant.pathname,
+      query_keys: [],
+      body_bytes: 0,
+      body_sha256: digest(""),
+      body_contract: null,
+      idempotency_key_present: false,
+      idempotency_key_sha256: null,
+      idempotency_key_contract: null,
+      credential_contract: {
+        header_names: [],
+        authorization_scheme: null,
+        cookie_names: ["access_token", "refresh_token"],
+      },
+      effect: participant.pathname.endsWith("/devices")
+        ? "read_devices"
+        : "read_offers",
+    });
+  }
+}
 
 async function mutateAndReset(options: { control: string; shop: string; oidc: string }) {
   await oidcAuthorizeLocation(options.oidc);

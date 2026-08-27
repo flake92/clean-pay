@@ -24,6 +24,28 @@ const remnawaveToken = sha256("clean-pay-browser-journey:remnawave");
 const oidcLedgerKey = sha256("clean-pay-browser-journey:oidc-ledger");
 const turnstileSecret = sha256("clean-pay-browser-journey:turnstile");
 const chatwootWebsiteToken = sha256("clean-pay-browser-journey:chatwoot-website");
+const cabinetReadOverlapTimeoutMs = boundedIntegerEnvironment(
+  "CLEAN_PAY_BROWSER_CABINET_READ_OVERLAP_TIMEOUT_MS",
+  5_000,
+  100,
+  10_000,
+);
+const cabinetReadOverlapAction = "cabinet_read_overlap_once";
+const cabinetReadOverlapProbe = "cabinet-offers-devices-overlap";
+const cabinetReadParticipants = Object.freeze([
+  Object.freeze({
+    key: "devices",
+    service: "remnashop",
+    method: "GET",
+    pathname: "/api/v1/public/subscription/devices",
+  }),
+  Object.freeze({
+    key: "offers",
+    service: "remnashop",
+    method: "GET",
+    pathname: "/api/v1/public/subscription/offers",
+  }),
+]);
 
 let sequence = 0;
 let paymentSequence = 0;
@@ -42,6 +64,9 @@ const remnawaveUsers = new Map();
 const consumedTurnstileTokens = new Set();
 let disconnectCommittedPaymentOnce = false;
 let rateLimitCommittedPaymentOnce = false;
+let cabinetReadOverlapOccurrence = 0;
+let activeCabinetReadOverlap = null;
+const cabinetReadOverlapWindows = [];
 
 function sha256(value) {
   return crypto.createHash("sha256").update(value, "utf8").digest("hex");
@@ -213,9 +238,129 @@ function queryKeys(url) {
   return [...new Set(url.searchParams.keys())].sort();
 }
 
+function armCabinetReadOverlap() {
+  if (activeCabinetReadOverlap) return false;
+
+  const probe = {
+    occurrence: ++cabinetReadOverlapOccurrence,
+    entered: new Map(),
+    duplicates: [],
+    waiters: [],
+    maxInFlight: 0,
+    settled: false,
+    timer: null,
+  };
+  activeCabinetReadOverlap = probe;
+  probe.timer = setTimeout(() => {
+    finishCabinetReadOverlap(probe, "timeout", "bounded-timeout");
+  }, cabinetReadOverlapTimeoutMs);
+  return true;
+}
+
+function enterCabinetReadOverlap(participantKey, ledgerSequence) {
+  const probe = activeCabinetReadOverlap;
+  if (!probe || probe.settled) return null;
+
+  return new Promise((resolve) => {
+    if (activeCabinetReadOverlap !== probe || probe.settled) {
+      resolve();
+      return;
+    }
+
+    probe.waiters.push(resolve);
+    probe.maxInFlight = Math.max(probe.maxInFlight, probe.waiters.length);
+    if (probe.entered.has(participantKey)) {
+      probe.duplicates.push({ participantKey, ledgerSequence });
+      finishCabinetReadOverlap(probe, "invalid", "invalid-duplicate");
+      return;
+    }
+
+    probe.entered.set(participantKey, ledgerSequence);
+    if (probe.entered.size === cabinetReadParticipants.length) {
+      finishCabinetReadOverlap(probe, "proven", "all-entered");
+    }
+  });
+}
+
+function finishCabinetReadOverlap(probe, outcome, release) {
+  if (
+    activeCabinetReadOverlap !== probe
+    || probe.settled
+  ) {
+    return;
+  }
+
+  probe.settled = true;
+  clearTimeout(probe.timer);
+  cabinetReadOverlapWindows.push({
+    probe: cabinetReadOverlapProbe,
+    occurrence: probe.occurrence,
+    timeoutMs: cabinetReadOverlapTimeoutMs,
+    participants: cabinetReadParticipants.map((participant) => ({
+      service: participant.service,
+      method: participant.method,
+      pathname: participant.pathname,
+      entered: probe.entered.has(participant.key),
+      ledgerSequence: probe.entered.get(participant.key) ?? null,
+    })),
+    duplicates: probe.duplicates.map(({ participantKey, ledgerSequence }) => {
+      const participant = cabinetReadParticipants.find(({ key }) => key === participantKey);
+      if (!participant) throw new Error("Unknown cabinet read overlap participant.");
+      return {
+        service: participant.service,
+        method: participant.method,
+        pathname: participant.pathname,
+        ledgerSequence,
+      };
+    }),
+    enteredCount: probe.entered.size,
+    maxInFlight: probe.maxInFlight,
+    release,
+    outcome,
+  });
+  activeCabinetReadOverlap = null;
+  for (const resolve of probe.waiters) resolve();
+}
+
+function clearCabinetReadOverlapEvidence() {
+  const probe = activeCabinetReadOverlap;
+  if (probe) {
+    probe.settled = true;
+    clearTimeout(probe.timer);
+    activeCabinetReadOverlap = null;
+    for (const resolve of probe.waiters) resolve();
+  }
+  cabinetReadOverlapOccurrence = 0;
+  cabinetReadOverlapWindows.length = 0;
+}
+
+function cabinetReadOverlapEvidence() {
+  const probe = activeCabinetReadOverlap;
+  return {
+    contractVersion: 1,
+    active: probe
+      ? {
+          probe: cabinetReadOverlapProbe,
+          occurrence: probe.occurrence,
+          timeoutMs: cabinetReadOverlapTimeoutMs,
+          participants: cabinetReadParticipants.map((participant) => ({
+            service: participant.service,
+            method: participant.method,
+            pathname: participant.pathname,
+            entered: probe.entered.has(participant.key),
+            ledgerSequence: probe.entered.get(participant.key) ?? null,
+          })),
+          enteredCount: probe.entered.size,
+          maxInFlight: probe.maxInFlight,
+        }
+      : null,
+    windows: cabinetReadOverlapWindows,
+  };
+}
+
 function record(service, request, url, body, effect) {
   const idempotencyKey = request.headers["idempotency-key"];
-  ledger.push({
+  const entry = {
     sequence: ++sequence,
     service,
     method: request.method ?? "GET",
@@ -233,7 +378,9 @@ function record(service, request, url, body, effect) {
       : null,
     credential_contract: credentialContract(request),
     effect,
-  });
+  };
+  ledger.push(entry);
+  return entry.sequence;
 }
 
 function credentialContract(request) {
@@ -719,14 +866,18 @@ async function handleRemnashop(request, response) {
 
   if (path === "/subscription/offers" && method === "GET") {
     if (!authorized(request, response)) return;
-    record("remnashop", request, url, body, "read_offers");
+    const ledgerSequence = record("remnashop", request, url, body, "read_offers");
+    const overlap = enterCabinetReadOverlap("offers", ledgerSequence);
+    if (overlap) await overlap;
     sendJson(response, 200, offers);
     return;
   }
 
   if (path === "/subscription/devices" && method === "GET") {
     if (!authorized(request, response)) return;
-    record("remnashop", request, url, body, "read_devices");
+    const ledgerSequence = record("remnashop", request, url, body, "read_devices");
+    const overlap = enterCabinetReadOverlap("devices", ledgerSequence);
+    if (overlap) await overlap;
     sendJson(response, 200, {
       devices: [{ hwid: "synthetic-device-1", platform: "ios", device_model: null, os_version: "18", user_agent: null }],
       current_count: 1,
@@ -990,12 +1141,21 @@ async function handleControl(request, response) {
     sendJson(response, 200, { entries: ledger, ...(database ? { database } : {}) });
     return;
   }
+  if (url.pathname === "/__concurrency" && request.method === "GET") {
+    sendJson(response, 200, cabinetReadOverlapEvidence());
+    return;
+  }
   if (url.pathname === "/__inject" && request.method === "POST") {
     const input = parseJson(body);
     if (JSON.stringify(input) === JSON.stringify({ action: "payment_commit_disconnect_once" })) {
       disconnectCommittedPaymentOnce = true;
     } else if (JSON.stringify(input) === JSON.stringify({ action: "payment_commit_rate_limit_once" })) {
       rateLimitCommittedPaymentOnce = true;
+    } else if (JSON.stringify(input) === JSON.stringify({ action: cabinetReadOverlapAction })) {
+      if (!armCabinetReadOverlap()) {
+        sendJson(response, 409, { error: "concurrency_probe_already_armed" });
+        return;
+      }
     } else {
       sendJson(response, 422, { error: "unsupported_injection" });
       return;
@@ -1010,6 +1170,7 @@ async function handleControl(request, response) {
       sendJson(response, 422, { error: "invalid_scenario" });
       return;
     }
+    clearCabinetReadOverlapEvidence();
     activeScenario = scenario;
     const database = dbObserverUrl
       ? await fetchObserverJson("/__reset", {
@@ -1171,6 +1332,19 @@ function safeOidcContract(value) {
 
 function clientSecretLikeSentinel() {
   return sha256("clean-pay-browser-journey:telegram-oidc");
+}
+
+function boundedIntegerEnvironment(name, fallback, minimum, maximum) {
+  const raw = process.env[name];
+  if (raw === undefined) return fallback;
+  if (!/^[1-9]\d*$/.test(raw)) {
+    throw new Error(`${name} must be a canonical positive integer.`);
+  }
+  const value = Number(raw);
+  if (!Number.isSafeInteger(value) || value < minimum || value > maximum) {
+    throw new Error(`${name} must be between ${minimum} and ${maximum}.`);
+  }
+  return value;
 }
 
 function escapeHtml(value) {
