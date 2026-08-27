@@ -105,4 +105,16 @@ describe("production-image browser runner phases", () => {
       '"docker-compose.public-characterization.yml",',
     );
   });
+
+  it("does not leak outer publication overrides into nested contract probes", () => {
+    for (const name of [
+      "CLEAN_PAY_BROWSER_APP_PORT",
+      "CLEAN_PAY_BROWSER_PROVIDER_PORT",
+      "CLEAN_PAY_BROWSER_CONNECT_PROXY_PORT",
+      "CLEAN_PAY_BROWSER_PROXY_BIND",
+      "CLEAN_PAY_BROWSER_TURNSTILE_SITE_KEY",
+    ]) {
+      expect(runner).toContain(`delete environment.${name};`);
+    }
+  });
 });

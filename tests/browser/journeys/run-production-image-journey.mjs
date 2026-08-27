@@ -271,6 +271,14 @@ function browserTestEnvironment(overrides) {
   delete environment.CLEAN_PAY_UPDATE_JOURNEY_BASELINE;
   delete environment.CLEAN_PAY_BROWSER_JOURNEY_PROBE;
   delete environment.CLEAN_PAY_BROWSER_EXPECTED_CONSOLE_SHA256;
+  // These inputs have already been materialized into the authoritative
+  // synthetic contract. Do not leak them into contract tests that invoke the
+  // generator again to verify its documented defaults.
+  delete environment.CLEAN_PAY_BROWSER_APP_PORT;
+  delete environment.CLEAN_PAY_BROWSER_PROVIDER_PORT;
+  delete environment.CLEAN_PAY_BROWSER_CONNECT_PROXY_PORT;
+  delete environment.CLEAN_PAY_BROWSER_PROXY_BIND;
+  delete environment.CLEAN_PAY_BROWSER_TURNSTILE_SITE_KEY;
   return environment;
 }
 
