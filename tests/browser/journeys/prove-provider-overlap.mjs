@@ -5,7 +5,6 @@ import path from "node:path";
 import { chromium } from "playwright";
 
 import {
-  isJourneyBrowserRequestAllowed,
   journeyChromiumLaunchArgs,
   journeyConnectProxy,
 } from "./journey-browser-policy.mjs";
@@ -15,6 +14,12 @@ import {
   stopJourneyConnectProxy,
 } from "./journey-connect-proxy-controller.mjs";
 import { currentJourneyFixtureContractSha256Async } from "./journey-fixture-manifest.mjs";
+import { attestJourneyComposeRuntime } from "./journey-compose-runtime-attestation.mjs";
+import {
+  assertProviderOverlapRedirect,
+  classifyProviderOverlapBrowserRequest,
+  finalizeProviderOverlapBrowserContract,
+} from "./provider-overlap-browser-contract.mjs";
 import {
   PROVIDER_OVERLAP_ACTION,
   PROVIDER_OVERLAP_BROWSER_PROJECT,
@@ -108,12 +113,18 @@ async function readStackInput(role) {
     `--${role}-image-digest`,
     /^sha256:[a-f0-9]{64}$/,
   );
+  const expectedMigrationImageDigest = requiredArgument(
+    argumentsByName,
+    `--${role}-migration-image-digest`,
+    /^sha256:[a-f0-9]{64}$/,
+  );
   return {
     role,
     contract,
     controlUrl,
     resolverIp,
     expectedImageDigest,
+    expectedMigrationImageDigest,
     contractPath,
     journeyContractSha256: sha256(contractBytes),
   };
@@ -214,14 +225,28 @@ async function exerciseCabinet(resolverIp, connectProxyUrl, playwrightVersion, a
     });
     const unexpectedRequests = [];
     let unexpectedRequestOverflow = false;
+    const browserRequests = [];
+    const browserRequestByIdentity = new Map();
     let cabinetDocumentAllowed = false;
     let cabinetDocumentConsumed = false;
+    let unexpectedWebSocketCount = 0;
+    let unexpectedServiceWorkerCount = 0;
+    await context.routeWebSocket("**/*", async (webSocket) => {
+      unexpectedWebSocketCount = Math.min(unexpectedWebSocketCount + 1, maximumUnexpectedEvents + 1);
+      await webSocket.close({ code: 1008, reason: "provider-overlap-contract" });
+    });
+    context.on("serviceworker", () => {
+      unexpectedServiceWorkerCount = Math.min(
+        unexpectedServiceWorkerCount + 1,
+        maximumUnexpectedEvents + 1,
+      );
+    });
     await context.route("**/*", async (route) => {
-      const rawUrl = route.request().url();
-      const parsed = safeUrl(rawUrl);
+      const request = route.request();
+      const rawUrl = request.url();
       let requestPage;
       try {
-        requestPage = route.request().frame().page();
+        requestPage = request.frame().page();
       } catch {
         requestPage = undefined;
       }
@@ -234,35 +259,43 @@ async function exerciseCabinet(resolverIp, connectProxyUrl, playwrightVersion, a
         await route.abort("blockedbyclient");
         return;
       }
-      if (
-        parsed?.origin === "https://pay.ci.clean-pay.dev"
-        && parsed.pathname === "/cabinet"
-      ) {
-        const exactDocument = cabinetDocumentAllowed
-          && !cabinetDocumentConsumed
-          && route.request().method() === "GET"
-          && route.request().isNavigationRequest()
-          && route.request().frame() === page.mainFrame()
-          && parsed.search === ""
-          && parsed.hash === "";
-        if (exactDocument) {
+      try {
+        const classification = classifyProviderOverlapBrowserRequest({
+          url: rawUrl,
+          method: request.method(),
+          resourceType: request.resourceType(),
+          isNavigation: request.isNavigationRequest(),
+          isMainFrame: request.frame() === page.mainFrame(),
+        }, { cabinetDocumentAllowed });
+        if (classification.key === "app-cabinet-document") {
+          if (cabinetDocumentConsumed) {
+            throw new Error("Synthetic browser requested the cabinet document more than once.");
+          }
           cabinetDocumentConsumed = true;
-          await route.continue();
-        } else {
-          await route.abort("blockedbyclient");
         }
-        return;
-      }
-      if (isJourneyBrowserRequestAllowed(rawUrl)) {
+        const entry = { classification, request };
+        browserRequests.push(entry);
+        browserRequestByIdentity.set(request, entry);
+        if (browserRequests.length > 256) {
+          throw new Error("Synthetic browser request ledger exceeded its bounded contract.");
+        }
+        if (classification.disposition === "abort") {
+          await route.abort("blockedbyclient");
+          return;
+        }
         await route.continue();
         return;
+      } catch {
+        // The emitted report never contains the rejected URL. Retain only its
+        // digest for bounded local failure diagnosis.
+        if (unexpectedRequests.length < maximumUnexpectedEvents) {
+          unexpectedRequests.push(sha256(rawUrl));
+        } else {
+          unexpectedRequestOverflow = true;
+        }
+        await route.abort("blockedbyclient");
+        return;
       }
-      if (unexpectedRequests.length < maximumUnexpectedEvents) {
-        unexpectedRequests.push(sha256(rawUrl));
-      } else {
-        unexpectedRequestOverflow = true;
-      }
-      await route.abort("blockedbyclient");
     });
     await page.goto(
       "https://pay.ci.clean-pay.dev/login?redirect_to=%2Fprofile",
@@ -297,6 +330,9 @@ async function exerciseCabinet(resolverIp, connectProxyUrl, playwrightVersion, a
     if (unexpectedRequests.length > 0 || unexpectedRequestOverflow) {
       throw new Error("Synthetic browser isolation blocked an unexpected request.");
     }
+    if (unexpectedWebSocketCount > 0 || unexpectedServiceWorkerCount > 0) {
+      throw new Error("Synthetic browser opened an unexpected WebSocket or service worker.");
+    }
     if (
       unexpectedConsole.length > 0
       || unexpectedPageErrors.length > 0
@@ -307,6 +343,10 @@ async function exerciseCabinet(resolverIp, connectProxyUrl, playwrightVersion, a
     ) {
       throw new Error("Synthetic browser emitted unexpected console or pageerror diagnostics.");
     }
+    const requestContract = await finishBrowserRequestContract(
+      browserRequests,
+      browserRequestByIdentity,
+    );
     return {
       browser: {
         project: PROVIDER_OVERLAP_BROWSER_PROJECT,
@@ -324,6 +364,8 @@ async function exerciseCabinet(resolverIp, connectProxyUrl, playwrightVersion, a
         unexpectedRequestCount: unexpectedRequests.length,
         unexpectedConsoleCount: unexpectedConsole.length,
         unexpectedPageErrorCount: unexpectedPageErrors.length,
+        requestCount: requestContract.requestCount,
+        requestContractSha256: requestContract.requestContractSha256,
       },
     };
   } finally {
@@ -338,6 +380,14 @@ async function preflightStack(input, fixtureContractSha256) {
   ) {
     throw new Error(`${input.role} live stack contract is not bound to the current fixture bytes.`);
   }
+  const composeRuntime = await attestJourneyComposeRuntime({
+    repositoryRoot,
+    contractPath: input.contractPath,
+    contract: input.contract,
+    expectedApplicationImageDigest: input.expectedImageDigest,
+    expectedMigrationImageDigest: input.expectedMigrationImageDigest,
+    runDocker: docker,
+  });
   const serviceNames = [
     "app",
     "browser-provider-mock",
@@ -370,45 +420,11 @@ async function preflightStack(input, fixtureContractSha256) {
   assertNoPublishedPorts(containers["browser-oidc-mock"], input.role);
   assertNoPublishedPorts(containers["browser-db-observer"], input.role);
 
-  const fixtureMounts = await Promise.all([
-    assertFixtureMount(
-      containers["browser-provider-mock"],
-      "/mock/provider-mock.mjs",
-      path.join(repositoryRoot, "tests", "browser", "journeys", "provider-mock.mjs"),
-      input.role,
-    ),
-    assertFixtureMount(
-      containers["browser-proxy"],
-      "/etc/caddy/Caddyfile",
-      path.join(repositoryRoot, "tests", "browser", "journeys", "Caddyfile"),
-      input.role,
-    ),
-    assertFixtureMount(
-      containers["browser-oidc-mock"],
-      "/mock/oidc-mock.mjs",
-      path.join(repositoryRoot, "tests", "browser", "journeys", "oidc-mock.mjs"),
-      input.role,
-    ),
-    assertFixtureMount(
-      containers["browser-db-observer"],
-      "/app/browser-db-observer.mjs",
-      path.join(repositoryRoot, "tests", "browser", "journeys", "db-observer.mjs"),
-      input.role,
-    ),
-  ]);
   const syntheticEnvironmentContractSha256 = await assertSyntheticApplicationEnvironment(
     containers.app.Config.Env,
     input.contract,
     input.role,
     input.contractPath,
-  );
-  assertExactEnvironment(
-    containers["browser-provider-mock"].Config.Env,
-    {
-      CLEAN_PAY_BROWSER_DB_SCOPE: input.contract.project,
-      DB_OBSERVER_URL: "http://browser-db-observer:3200",
-    },
-    `${input.role} provider fixture`,
   );
   const imageIdentity = assertApplicationImageIdentity(
     await inspectRunningApplicationImage(input.contract, containers.app),
@@ -416,22 +432,18 @@ async function preflightStack(input, fixtureContractSha256) {
     input.expectedImageDigest,
     input.role,
   );
-  const serviceIdentity = serviceNames.map((service) => ({
-    service,
-    containerIdSha256: sha256(containers[service].Id),
-    imageDigest: containers[service].Image,
-  }));
   return Object.freeze({
     imageIdentity,
     runtimeBinding: Object.freeze({
       status: "preflight-proven",
       projectSha256: sha256(input.contract.project),
       journeyContractSha256: input.journeyContractSha256,
-      networkSha256: sha256(`${input.contract.project}_default`),
+      networkSha256: composeRuntime.networkSha256,
       publicationsSha256: sha256(JSON.stringify(input.contract.publications)),
-      serviceIdentitySha256: sha256(JSON.stringify(serviceIdentity)),
-      fixtureMountContractSha256: sha256(JSON.stringify(fixtureMounts)),
+      serviceIdentitySha256: composeRuntime.serviceIdentitySha256,
+      fixtureMountContractSha256: composeRuntime.fixtureMountContractSha256,
       syntheticEnvironmentContractSha256,
+      composeRuntimeContractSha256: composeRuntime.composeRuntimeContractSha256,
     }),
   });
 }
@@ -442,6 +454,8 @@ function assertDualPreflight(baseline, candidate) {
     || baseline.runtimeBinding.networkSha256 === candidate.runtimeBinding.networkSha256
     || baseline.runtimeBinding.publicationsSha256 === candidate.runtimeBinding.publicationsSha256
     || baseline.runtimeBinding.serviceIdentitySha256 === candidate.runtimeBinding.serviceIdentitySha256
+    || baseline.runtimeBinding.composeRuntimeContractSha256
+      === candidate.runtimeBinding.composeRuntimeContractSha256
   ) {
     throw new Error("Dual provider proof requires two simultaneously distinct live runtime bindings.");
   }
@@ -518,36 +532,6 @@ function assertNoPublishedPorts(container, label) {
   }
 }
 
-async function assertFixtureMount(container, destination, expectedSource, label) {
-  const mounts = (container.Mounts ?? []).filter((mount) => mount.Destination === destination);
-  if (mounts.length !== 1 || mounts[0].Type !== "bind" || mounts[0].RW !== false) {
-    throw new Error(`${label} fixture mount ${destination} is not the exact read-only bind.`);
-  }
-  const expectedRealpath = await realpath(expectedSource);
-  if (!sameHostPath(mounts[0].Source, expectedRealpath)) {
-    throw new Error(`${label} fixture mount ${destination} has an unexpected host source.`);
-  }
-  const expectedBytes = await readFile(expectedRealpath);
-  const observed = await docker([
-    "container", "exec", container.Id, "sha256sum", destination,
-  ]);
-  const match = /^([a-f0-9]{64})\s+/.exec(observed);
-  const expectedSha256 = sha256(expectedBytes);
-  if (!match || match[1] !== expectedSha256) {
-    throw new Error(`${label} fixture mount ${destination} bytes differ from the current fixture.`);
-  }
-  return Object.freeze({ destination, sha256: expectedSha256, readOnly: true });
-}
-
-function sameHostPath(observed, expected) {
-  const normalize = (value) => {
-    let normalized = String(value).replace(/\\/g, "/");
-    normalized = normalized.replace(/^\/run\/desktop\/mnt\/host\/([a-z])\//i, "$1:/");
-    return normalized.replace(/\/$/, "").toLowerCase();
-  };
-  return normalize(observed) === normalize(expected);
-}
-
 async function assertSyntheticApplicationEnvironment(environment, contract, label, contractPath) {
   const digest = (value) => sha256(value);
   const secret = (name) => `browser-journey-${name}-${digest(`secret:${name}`)}`;
@@ -616,7 +600,7 @@ async function assertSyntheticApplicationEnvironment(environment, contract, labe
     WEB_REFRESH_KEY_ID: "browser-journey-primary",
     WEB_REFRESH_SECRET: secret("web-refresh"),
   };
-  assertExactEnvironment(environment, {
+  assertRequiredEnvironmentProjection(environment, {
     ...expected,
     CLEAN_PAY_RUNTIME_ROLE: "application",
     NODE_ENV: "production",
@@ -662,7 +646,7 @@ function parseExactEnvironmentAssignments(bytes, label) {
   )));
 }
 
-function assertExactEnvironment(environment, expected, label) {
+function assertRequiredEnvironmentProjection(environment, expected, label) {
   const actual = new Map();
   for (const assignment of environment ?? []) {
     const separator = assignment.indexOf("=");
@@ -750,12 +734,59 @@ async function boundedResponseBytes(response, maximumBytes) {
   return Buffer.concat(chunks, size);
 }
 
-function safeUrl(rawUrl) {
-  try {
-    return new URL(rawUrl);
-  } catch {
-    return null;
+async function finishBrowserRequestContract(requests, requestByIdentity) {
+  const records = [];
+  const redirectedSources = new Set();
+  for (const { classification, request } of requests) {
+    const response = await request.response();
+    const redirectedFrom = request.redirectedFrom();
+    let redirectEdge = null;
+    if (redirectedFrom) {
+      const source = requestByIdentity.get(redirectedFrom);
+      const sourceResponse = await redirectedFrom.response();
+      const location = sourceResponse?.headers()?.location;
+      if (!source || !sourceResponse || typeof location !== "string") {
+        throw new Error("Synthetic browser redirect chain is incomplete.");
+      }
+      redirectEdge = assertProviderOverlapRedirect({
+        from: { classification: source.classification, url: redirectedFrom.url() },
+        to: { classification, url: request.url() },
+        status: sourceResponse.status(),
+        location,
+      });
+      redirectedSources.add(redirectedFrom);
+    }
+    records.push({
+      classification,
+      redirectEdge,
+      responseContentType: response
+        ? normalizeResponseContentType(response.headers()["content-type"])
+        : null,
+      responseStatus: response?.status() ?? null,
+    });
   }
+  for (const { classification, request } of requests) {
+    const response = await request.response();
+    if (
+      response
+      && response.status() >= 300
+      && response.status() <= 399
+      && !redirectedSources.has(request)
+      && classification.disposition !== "abort"
+    ) {
+      throw new Error("Synthetic browser redirect response has no exact successor.");
+    }
+  }
+  return finalizeProviderOverlapBrowserContract(records);
+}
+
+function normalizeResponseContentType(value) {
+  if (value === undefined) return null;
+  const normalized = String(value).split(";", 1)[0].trim().toLowerCase();
+  if (!/^[a-z0-9.+-]+\/[a-z0-9.+-]+$/.test(normalized)) {
+    throw new Error("Synthetic browser response content type is invalid.");
+  }
+  return normalized;
 }
 
 async function installedPlaywrightVersion() {
@@ -848,10 +879,12 @@ function parseArguments(values) {
     "--baseline-contract",
     "--baseline-control-url",
     "--baseline-image-digest",
+    "--baseline-migration-image-digest",
     "--baseline-resolver-ip",
     "--candidate-contract",
     "--candidate-control-url",
     "--candidate-image-digest",
+    "--candidate-migration-image-digest",
     "--candidate-resolver-ip",
     "--output",
     "--scenario",
@@ -887,6 +920,7 @@ function assertDistinctStackInputs(baseline, candidate) {
     || baseline.controlUrl.href === candidate.controlUrl.href
     || baseline.resolverIp === candidate.resolverIp
     || baseline.expectedImageDigest === candidate.expectedImageDigest
+    || baseline.expectedMigrationImageDigest === candidate.expectedMigrationImageDigest
     || baseline.contract.revision === candidate.contract.revision
     || baseline.contractPath === candidate.contractPath
     || baselinePublications.some((publication) => candidatePublications.includes(publication))
@@ -935,11 +969,11 @@ async function stopBothConnectProxies(handles) {
   return settled.map(({ value }) => value);
 }
 
-function docker(args, maximumBytes = 64 * 1024) {
+function docker(args, maximumBytes = 64 * 1024, environment = process.env) {
   return new Promise((resolve, reject) => {
     const child = spawn("docker", args, {
       cwd: repositoryRoot,
-      env: process.env,
+      env: environment,
       stdio: ["ignore", "pipe", "pipe"],
       windowsHide: true,
     });
