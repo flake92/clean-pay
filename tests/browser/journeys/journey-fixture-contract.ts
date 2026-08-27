@@ -23,6 +23,7 @@ const filenames = [
   "application.journey.spec.ts",
   "caddy-route-policy.ts",
   "docker-compose.journey.yml",
+  "docker-compose.public-characterization.yml",
   "docker-tcp-bridge.mjs",
   "db-observer.mjs",
   "db-observer-provision.sh",
