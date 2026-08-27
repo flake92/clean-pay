@@ -212,6 +212,8 @@
       "required": [
         "finalUrl",
         "headingVisible",
+        "requestCount",
+        "requestContractSha256",
         "unexpectedRequestCount",
         "unexpectedConsoleCount",
         "unexpectedPageErrorCount"
@@ -219,6 +221,8 @@
       "properties": {
         "finalUrl": { "const": "https://pay.ci.clean-pay.dev/cabinet" },
         "headingVisible": { "const": true },
+        "requestCount": { "type": "integer", "minimum": 1, "maximum": 256 },
+        "requestContractSha256": { "$ref": "#/$defs/sha256" },
         "unexpectedRequestCount": { "const": 0 },
         "unexpectedConsoleCount": { "const": 0 },
         "unexpectedPageErrorCount": { "const": 0 }
@@ -234,6 +238,7 @@
         "networkSha256",
         "publicationsSha256",
         "serviceIdentitySha256",
+        "composeRuntimeContractSha256",
         "fixtureMountContractSha256",
         "syntheticEnvironmentContractSha256"
       ],
@@ -244,6 +249,7 @@
         "networkSha256": { "$ref": "#/$defs/sha256" },
         "publicationsSha256": { "$ref": "#/$defs/sha256" },
         "serviceIdentitySha256": { "$ref": "#/$defs/sha256" },
+        "composeRuntimeContractSha256": { "$ref": "#/$defs/sha256" },
         "fixtureMountContractSha256": { "$ref": "#/$defs/sha256" },
         "syntheticEnvironmentContractSha256": { "$ref": "#/$defs/sha256" }
       }

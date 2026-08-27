@@ -15,6 +15,11 @@ import {
   extractProviderOverlapProof,
   sha256,
 } from "./provider-overlap-proof-contract.mjs";
+import {
+  assertProviderOverlapRedirect,
+  classifyProviderOverlapBrowserRequest,
+  finalizeProviderOverlapBrowserContract,
+} from "./provider-overlap-browser-contract.mjs";
 
 const baselineRevision = "f5cb6f543d85256e7733a1ade6a4f451d86cf378";
 const candidateRevision = "6edb677dafbb16bb49899ae40cc406d3c71e1a1b";
@@ -153,6 +158,10 @@ test("recomputes serialized cross-stack, lifecycle, and runtime invariants", () 
     ["runtime contract mismatch", (value) => {
       value.stacks.candidate.runtimeBinding.fixtureMountContractSha256 = "0".repeat(64);
     }],
+    ["same Compose runtime", (value) => {
+      value.stacks.candidate.runtimeBinding.composeRuntimeContractSha256
+        = value.stacks.baseline.runtimeBinding.composeRuntimeContractSha256;
+    }],
     ["journey contract mismatch", (value) => {
       value.stacks.candidate.runtimeBinding.journeyContractSha256 = "0".repeat(64);
     }],
@@ -161,6 +170,9 @@ test("recomputes serialized cross-stack, lifecycle, and runtime invariants", () 
     ["reset sequence", (value) => { value.stacks.candidate.reset.database.resetSequence = 2; }],
     ["navigation query", (value) => {
       value.stacks.candidate.navigation.finalUrl = "https://pay.ci.clean-pay.dev/cabinet?adjacent=1";
+    }],
+    ["request contract", (value) => {
+      value.stacks.candidate.navigation.requestContractSha256 = "0".repeat(64);
     }],
     ["role swap", (value) => { value.stacks.baseline.role = "candidate"; }],
     ["cleanup association", (value) => {
@@ -273,6 +285,155 @@ test("binds exact running image labels and a pristine deterministic reset", () =
   }
 });
 
+test("rejects arbitrary same-host paths, queries, redirects, methods, and transports", async () => {
+  const opaque = "opaque-state_1";
+  const valid = [
+    browserClassification("https://pay.ci.clean-pay.dev/login?redirect_to=%2Fprofile", {
+      resourceType: "document", isNavigation: true, isMainFrame: true,
+    }),
+    browserClassification(
+      "https://pay.ci.clean-pay.dev/auth/telegram/start?redirect_to=%2Fprofile"
+        + "&turnstile_token=synthetic-turnstile-token%3Alogin%3Asynthetic-turnstile-1%3A1",
+      { resourceType: "document", isNavigation: true, isMainFrame: true },
+    ),
+    browserClassification(
+      "https://oauth.telegram.org/auth?response_type=code&client_id=7654321098"
+        + "&redirect_uri=https%3A%2F%2Fpay.ci.clean-pay.dev%2Fauth%2Ftelegram%2Fcallback"
+        + `&scope=openid%20profile&state=${opaque}&nonce=${opaque}`
+        + `&code_challenge=${opaque}&code_challenge_method=S256`,
+      { resourceType: "document", isNavigation: true, isMainFrame: true },
+    ),
+    browserClassification(
+      `https://pay.ci.clean-pay.dev/auth/telegram/callback?code=${opaque}&state=${opaque}`,
+      { resourceType: "document", isNavigation: true, isMainFrame: true },
+    ),
+    browserClassification("https://pay.ci.clean-pay.dev/profile", {
+      resourceType: "document", isNavigation: true, isMainFrame: true,
+    }),
+    browserClassification("https://pay.ci.clean-pay.dev/cabinet", {
+      resourceType: "document", isNavigation: true, isMainFrame: true,
+    }, true),
+    browserClassification("https://pay.ci.clean-pay.dev/_next/static/chunks/app-123.js", {
+      resourceType: "script",
+    }),
+    browserClassification("https://pay.ci.clean-pay.dev/_next/static/chunks/app/layout-123.css", {
+      resourceType: "stylesheet",
+    }),
+    browserClassification("https://pay.ci.clean-pay.dev/_next/static/media/inter-123.woff2", {
+      resourceType: "font",
+    }),
+    browserClassification(
+      "https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit",
+      { resourceType: "script" },
+    ),
+    browserClassification("https://chatwoot.browser.clean-pay.dev/packs/js/sdk.js", {
+      resourceType: "script",
+    }),
+    browserClassification(
+      `https://chatwoot.browser.clean-pay.dev/widget?website_token=${"a".repeat(64)}`,
+      { resourceType: "document", isNavigation: true },
+    ),
+  ];
+  const statuses = [200, 307, 302, 307, 200, 200, 200, 200, 200, 200, 200, 200];
+  const contentTypes = [
+    "text/html",
+    "application/octet-stream",
+    null,
+    "application/octet-stream",
+    "text/html",
+    "text/html",
+    "application/javascript",
+    "text/css",
+    "font/woff2",
+    "application/javascript",
+    "application/javascript",
+    "text/html",
+  ];
+  const redirectEdges = [
+    null,
+    null,
+    "app-telegram-start:307->telegram-oidc-authorize",
+    "telegram-oidc-authorize:302->app-telegram-callback",
+    "app-telegram-callback:307->app-profile-document",
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+  ];
+  const validRecords = valid.map((classification, index) => ({
+    classification,
+    redirectEdge: redirectEdges[index],
+    responseContentType: contentTypes[index],
+    responseStatus: statuses[index],
+  }));
+  const exactBrowserContract = finalizeProviderOverlapBrowserContract(validRecords);
+  expect(exactBrowserContract).toMatchObject({
+    requestCount: 12,
+    requestContractSha256: expect.stringMatching(/^[a-f0-9]{64}$/),
+  });
+  const repartitionedStaticRecords = structuredClone(validRecords);
+  repartitionedStaticRecords.splice(7, 0, structuredClone(validRecords[6]));
+  expect(finalizeProviderOverlapBrowserContract(repartitionedStaticRecords)).toMatchObject({
+    requestCount: 13,
+    requestContractSha256: exactBrowserContract.requestContractSha256,
+  });
+  expect(browserClassification(
+    `https://chatwoot.browser.clean-pay.dev/widget?website_token=${"a".repeat(64)}`
+      + "&cw_conversation=synthetic-conversation",
+    { resourceType: "document", isNavigation: true },
+  ).key).toBe("chatwoot-widget-conversation-frame");
+  const wrongContentType = structuredClone(validRecords);
+  wrongContentType[6].responseContentType = "text/html";
+  expect(() => finalizeProviderOverlapBrowserContract(wrongContentType)).toThrow();
+
+  for (const [label, url, overrides, cabinetAllowed] of [
+    ["path", "https://pay.ci.clean-pay.dev/admin", {}, false],
+    ["query", "https://pay.ci.clean-pay.dev/profile?extra=1", {
+      resourceType: "document", isNavigation: true, isMainFrame: true,
+    }, false],
+    ["hash", "https://pay.ci.clean-pay.dev/profile#extra", {
+      resourceType: "document", isNavigation: true, isMainFrame: true,
+    }, false],
+    ["method", "https://pay.ci.clean-pay.dev/profile", {
+      method: "DELETE", resourceType: "fetch",
+    }, false],
+    ["resource", "https://pay.ci.clean-pay.dev/_next/static/chunks/app-123.js", {
+      resourceType: "fetch",
+    }, false],
+    ["early cabinet", "https://pay.ci.clean-pay.dev/cabinet", {
+      resourceType: "document", isNavigation: true, isMainFrame: true,
+    }, false],
+    ["external", "https://example.com/profile", {
+      resourceType: "document", isNavigation: true, isMainFrame: true,
+    }, false],
+    ["chatwoot query", `https://chatwoot.browser.clean-pay.dev/widget?website_token=${"a".repeat(64)}&extra=1`, {
+      resourceType: "document", isNavigation: true,
+    }, false],
+  ] as const) {
+    expect(() => browserClassification(url, overrides, cabinetAllowed), label).toThrow();
+  }
+  expect(() => assertProviderOverlapRedirect({
+    from: { classification: valid[1], url: "https://pay.ci.clean-pay.dev/auth/telegram/start" },
+    to: { classification: valid[2], url: "https://oauth.telegram.org/auth" },
+    status: 308,
+    location: "https://oauth.telegram.org/auth",
+  })).toThrow();
+  expect(() => assertProviderOverlapRedirect({
+    from: { classification: valid[1], url: "https://pay.ci.clean-pay.dev/auth/telegram/start" },
+    to: { classification: valid[2], url: "https://oauth.telegram.org/auth" },
+    status: 307,
+    location: "https://oauth.telegram.org/other",
+  })).toThrow();
+
+  const scriptSource = await readFile(path.resolve(__dirname, "prove-provider-overlap.mjs"), "utf8");
+  expect(scriptSource).toContain('await context.routeWebSocket("**/*"');
+  expect(scriptSource).toContain('context.on("serviceworker"');
+  expect(scriptSource).toContain('serviceWorkers: "block"');
+});
+
 test("keeps the schema write-once sidecar-only and free of comparison projection", async () => {
   const directory = path.resolve(__dirname);
   const [
@@ -282,6 +443,7 @@ test("keeps the schema write-once sidecar-only and free of comparison projection
     connectProxyController,
     browserPolicy,
     renderPolicy,
+    runtimeAttestation,
   ] = await Promise.all([
     readFile(path.join(directory, "provider-overlap-proof.schema.json"), "utf8"),
     readFile(path.join(directory, "prove-provider-overlap.mjs"), "utf8"),
@@ -289,6 +451,7 @@ test("keeps the schema write-once sidecar-only and free of comparison projection
     readFile(path.join(directory, "journey-connect-proxy-controller.mjs"), "utf8"),
     readFile(path.join(directory, "journey-browser-policy.mjs"), "utf8"),
     readFile(path.join(directory, "..", "render-policy.mjs"), "utf8"),
+    readFile(path.join(directory, "journey-compose-runtime-attestation.mjs"), "utf8"),
   ]);
   const schema = JSON.parse(schemaSource);
   expect(schema).toMatchObject({
@@ -314,9 +477,13 @@ test("keeps the schema write-once sidecar-only and free of comparison projection
   ]));
   expect(schema.$defs.navigation.properties).toMatchObject({
     finalUrl: { const: "https://pay.ci.clean-pay.dev/cabinet" },
+    requestCount: { type: "integer", minimum: 1, maximum: 256 },
+    requestContractSha256: { $ref: "#/$defs/sha256" },
     unexpectedConsoleCount: { const: 0 },
     unexpectedPageErrorCount: { const: 0 },
   });
+  expect(schema.$defs.runtimeBinding.properties.composeRuntimeContractSha256)
+    .toEqual({ $ref: "#/$defs/sha256" });
   expect(schema.$defs.lifecycle.properties).toMatchObject({
     automaticCleanup: { const: false },
     cleanupMode: { const: "exact-owned-project-handoff-v1" },
@@ -371,8 +538,10 @@ test("keeps the schema write-once sidecar-only and free of comparison projection
   }
   expect(scriptSource).toContain('path.join(path.dirname(contractPath), ".env.app")');
   expect(scriptSource).toContain("containers.app.Config.Env");
-  expect(scriptSource).toContain("sameHostPath(mounts[0].Source, expectedRealpath)");
-  expect(scriptSource).toContain('"container", "exec", container.Id, "sha256sum"');
+  expect(runtimeAttestation).toContain("normalizeHostPath(mount.Source)");
+  expect(runtimeAttestation).toContain('"container", "exec", container.Id, "sha256sum"');
+  expect(runtimeAttestation).toContain('"compose",');
+  expect(runtimeAttestation).toContain('"config",');
   expect(scriptSource).toContain("Buffer.byteLength(chunk, \"utf8\")");
   expect(scriptSource).toContain("maximumUnexpectedEvents = 32");
   expect(scriptSource).toContain('await context.route("**/*"');
@@ -538,6 +707,7 @@ function stackReport(role: "baseline" | "candidate", providerOverlap: ReturnType
       networkSha256: sha256(`${composeProject}_default`),
       publicationsSha256: baseline ? "a".repeat(64) : "b".repeat(64),
       serviceIdentitySha256: baseline ? "c".repeat(64) : "d".repeat(64),
+      composeRuntimeContractSha256: baseline ? "1".repeat(64) : "2".repeat(64),
       fixtureMountContractSha256: "e".repeat(64),
       syntheticEnvironmentContractSha256: "f".repeat(64),
     },
@@ -562,6 +732,8 @@ function stackReport(role: "baseline" | "candidate", providerOverlap: ReturnType
     navigation: {
       finalUrl: "https://pay.ci.clean-pay.dev/cabinet",
       headingVisible: true,
+      requestCount: baseline ? 42 : 43,
+      requestContractSha256: "a".repeat(64),
       unexpectedRequestCount: 0,
       unexpectedConsoleCount: 0,
       unexpectedPageErrorCount: 0,
@@ -647,4 +819,23 @@ function resetEvidence(scenario: string, project: string) {
       resetSequence: 1,
     },
   };
+}
+
+function browserClassification(
+  url: string,
+  overrides: Partial<{
+    method: string;
+    resourceType: string;
+    isNavigation: boolean;
+    isMainFrame: boolean;
+  }> = {},
+  cabinetDocumentAllowed = false,
+) {
+  return classifyProviderOverlapBrowserRequest({
+    url,
+    method: overrides.method ?? "GET",
+    resourceType: overrides.resourceType ?? "fetch",
+    isNavigation: overrides.isNavigation ?? false,
+    isMainFrame: overrides.isMainFrame ?? false,
+  }, { cabinetDocumentAllowed });
 }
