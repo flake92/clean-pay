@@ -31,6 +31,7 @@
 !deploy/prod/database-privilege-manifest.mjs
 !deploy/prod/database-role-provision.mjs
 !deploy/prod/deploy-log.mjs
+!deploy/prod/application-drain-preload.cjs
 !deploy/prod/encryption-rewrap-command.mjs
 !deploy/prod/encryption-rewrap.mjs
 !deploy/prod/migration-rollback-verifier.mjs
