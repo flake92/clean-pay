@@ -163,6 +163,29 @@ describe("production migration safety", () => {
     expect(cleanPayRehearsal).toContain("20260813090000_add_payment_owner_change_fence");
     expect(cleanPayRehearsal).toContain("20260813091000_add_remnashop_refresh_recovery");
     expect(cleanPayRehearsal).toContain("docker build --pull --target migration");
+    for (const exactImageInput of [
+      "CLEAN_PAY_REHEARSAL_EXTERNAL_MIGRATION_IMAGE",
+      "CLEAN_PAY_REHEARSAL_EXPECTED_IMAGE_ID",
+      "CLEAN_PAY_REHEARSAL_EXPECTED_REVISION",
+      "CLEAN_PAY_REHEARSAL_EXPECTED_RELEASE",
+      "CLEAN_PAY_REHEARSAL_EXPECTED_PUBLIC_BUILD_CONTRACT_VERSION",
+      "CLEAN_PAY_REHEARSAL_EXPECTED_PUBLIC_BUILD_CONTRACT_SHA256",
+    ]) {
+      expect(cleanPayRehearsal).toContain(exactImageInput);
+    }
+    expect(cleanPayRehearsal).toContain(
+      'fail "exact migration image inputs must be provided together"',
+    );
+    expect(cleanPayRehearsal).toContain(
+      'test "$CLEAN_PAY_REHEARSAL_EXPECTED_REVISION" = "$CLEAN_PAY_REVISION"',
+    );
+    expect(cleanPayRehearsal).toContain("verify-rehearsal-migration-image.mjs");
+    expect(cleanPayRehearsal).toContain("migration_image_owned=false");
+    expect(cleanPayRehearsal).toContain('if [ "$migration_image_owned" = true ]; then');
+    expect(cleanPayRehearsal).toContain(
+      'migration_contract_migration_image="$CLEAN_PAY_REHEARSAL_EXTERNAL_MIGRATION_IMAGE"',
+    );
+    expect(cleanPayRehearsal).toContain('migration_deploy_source=pull');
     expect(cleanPayRehearsal).toContain(
       'docker rm --force --volumes "$POSTGRES_CONTAINER"',
     );

@@ -452,6 +452,22 @@ inserted before the reconciliation migration and must receive its queue
     environment guard, and migrates a separately restored pre-session backup
     through head; `prisma migrate status` must finish up to date.
 
+For a final evidence run, the same rehearsal can consume an already-built,
+caller-owned migration image instead of rebuilding it. Set all six variables
+`CLEAN_PAY_REHEARSAL_EXTERNAL_MIGRATION_IMAGE` (a digest-pinned reference),
+`CLEAN_PAY_REHEARSAL_EXPECTED_IMAGE_ID`,
+`CLEAN_PAY_REHEARSAL_EXPECTED_REVISION`,
+`CLEAN_PAY_REHEARSAL_EXPECTED_RELEASE`,
+`CLEAN_PAY_REHEARSAL_EXPECTED_PUBLIC_BUILD_CONTRACT_VERSION`, and
+`CLEAN_PAY_REHEARSAL_EXPECTED_PUBLIC_BUILD_CONTRACT_SHA256`. Partial input is
+rejected. The expected revision must equal the clean checkout, and the local
+image ID, immutable RepoDigest, migration role, revision, both release labels,
+and both public-build-contract labels must all match before PostgreSQL starts.
+The rehearsal runs the image by its verified local ID and never deletes that
+caller-owned image; its disposable container and network cleanup is unchanged.
+With none of these variables set, CI retains the existing local build-and-delete
+path.
+
 ## Remnashop migration boundary
 
 Remnashop follows the same release invariant: run its one-shot `migration`
