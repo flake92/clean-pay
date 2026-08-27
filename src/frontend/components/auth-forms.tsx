@@ -13,6 +13,7 @@ import {
 } from "@/frontend/components/auth-form-presentation";
 import { selectAuthFormView } from "@/frontend/components/auth-form-transitions";
 import { PasskeyLoginButton } from "@/frontend/components/passkey-actions";
+import { passwordToggleA11y } from "@/frontend/components/password-toggle-a11y";
 import { TurnstileWidget } from "@/frontend/components/turnstile-widget";
 import {
   useAuthFormController,
@@ -143,6 +144,7 @@ export function LoginForm({
               maxLength={256}
               minLength={8}
               name="password"
+              pt={passwordToggleA11y.primary}
               required
               toggleMask
               value={password}
@@ -160,6 +162,7 @@ export function LoginForm({
                 maxLength={256}
                 minLength={8}
                 name="passwordConfirmation"
+                pt={passwordToggleA11y.confirmation}
                 required
                 toggleMask
                 value={passwordConfirmation}

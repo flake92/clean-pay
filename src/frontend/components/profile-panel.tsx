@@ -7,6 +7,7 @@ import { Message } from "primereact/message";
 import { Password } from "primereact/password";
 import { Tag } from "primereact/tag";
 
+import { passwordToggleA11y } from "@/frontend/components/password-toggle-a11y";
 import { LinkButton } from "@/frontend/components/prime/link-button";
 import { TurnstileWidget } from "@/frontend/components/turnstile-widget";
 import type { ProfileViewModel } from "@/application/models/profile";
@@ -231,6 +232,7 @@ function ProfilePanelContent({
                 maxLength={256}
                 name="currentPassword"
                 onChange={changeCurrentPassword}
+                pt={passwordToggleA11y.current}
                 required
                 toggleMask
                 value={currentPassword}
@@ -246,6 +248,7 @@ function ProfilePanelContent({
                 minLength={8}
                 name="newPassword"
                 onChange={changeNewPassword}
+                pt={passwordToggleA11y.next}
                 required
                 toggleMask
                 value={newPassword}

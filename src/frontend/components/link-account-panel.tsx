@@ -6,6 +6,7 @@ import { Message } from "primereact/message";
 import { Password } from "primereact/password";
 import { Tag } from "primereact/tag";
 
+import { passwordToggleA11y } from "@/frontend/components/password-toggle-a11y";
 import { TurnstileWidget } from "@/frontend/components/turnstile-widget";
 import { LinkButton } from "@/frontend/components/prime/link-button";
 import type { LinkAccountViewModel } from "@/application/models/link-account";
@@ -253,6 +254,7 @@ export function LinkAccountPanel({
                   minLength={usesCurrentPassword ? 1 : 8}
                   name="password"
                   placeholder="Пароль"
+                  pt={passwordToggleA11y.primary}
                   required
                   toggleMask
                 />
@@ -271,6 +273,7 @@ export function LinkAccountPanel({
                     minLength={1}
                     name="confirmPassword"
                     placeholder="Повторите пароль"
+                    pt={passwordToggleA11y.confirmation}
                     required
                     toggleMask
                   />
