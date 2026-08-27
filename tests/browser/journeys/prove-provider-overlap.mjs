@@ -4,8 +4,17 @@ import path from "node:path";
 
 import { chromium } from "playwright";
 
+import {
+  isJourneyBrowserRequestAllowed,
+  journeyChromiumLaunchArgs,
+  journeyConnectProxy,
+} from "./journey-browser-policy.mjs";
+import {
+  assertJourneyConnectProxyGate,
+  startJourneyConnectProxy,
+  stopJourneyConnectProxy,
+} from "./journey-connect-proxy-controller.mjs";
 import { currentJourneyFixtureContractSha256Async } from "./journey-fixture-manifest.mjs";
-import { JOURNEY_SYNTHETIC_HOSTNAMES } from "./journey-network-policy.mjs";
 import {
   PROVIDER_OVERLAP_ACTION,
   PROVIDER_OVERLAP_BROWSER_PROJECT,
@@ -27,7 +36,7 @@ let outputPath;
 
 try {
   argumentsByName = parseArguments(process.argv.slice(2));
-  scenario = requiredArgument(argumentsByName, "--scenario", /^[a-z0-9][a-z0-9:-]{1,180}$/);
+  scenario = requiredArgument(argumentsByName, "--scenario", /^provider-overlap-v1$/);
   outputPath = path.resolve(requiredArgument(argumentsByName, "--output", /.+/));
   await assertRepositoryRoot();
   await assertNewPrivateOutput(outputPath);
@@ -36,9 +45,26 @@ try {
   const baselineInput = await readStackInput("baseline");
   const candidateInput = await readStackInput("candidate");
   assertDistinctStackInputs(baselineInput, candidateInput);
-
-  const baseline = await proveStack(baselineInput, fixtureContractSha256, playwrightVersion);
-  const candidate = await proveStack(candidateInput, fixtureContractSha256, playwrightVersion);
+  const [baselinePreflight, candidatePreflight] = await Promise.all([
+    preflightStack(baselineInput, fixtureContractSha256),
+    preflightStack(candidateInput, fixtureContractSha256),
+  ]);
+  assertDualPreflight(baselinePreflight, candidatePreflight);
+  const proxyHandles = await startBothConnectProxies([baselineInput, candidateInput]);
+  let runs;
+  let proxySummaries;
+  try {
+    runs = await Promise.all([
+      proveStack(baselineInput, baselinePreflight, playwrightVersion),
+      proveStack(candidateInput, candidatePreflight, playwrightVersion),
+    ]);
+  } finally {
+    proxySummaries = await stopBothConnectProxies(proxyHandles);
+  }
+  const [baseline, candidate] = runs.map((run, index) => createProviderOverlapStackReport({
+    ...run,
+    connectProxyCounters: assertJourneyConnectProxyGate(proxySummaries[index]),
+  }));
   const document = createDualProviderOverlapProof(baseline, candidate);
   const bytes = Buffer.from(`${JSON.stringify(document, null, 2)}\n`, "utf8");
   await writeFile(outputPath, bytes, { flag: "wx", mode: 0o600 });
@@ -65,10 +91,8 @@ async function readStackInput(role) {
     requiredArgument(argumentsByName, `--${role}-contract`, /.+/),
     `${role} contract`,
   );
-  const contract = assertJourneyStackContract(
-    await readBoundedJson(contractPath, 64 * 1024, `${role} contract`),
-    role,
-  );
+  const contractBytes = await readBoundedBytes(contractPath, 64 * 1024, `${role} contract`);
+  const contract = assertJourneyStackContract(parseJson(contractBytes, `${role} contract`), role);
   const controlUrl = assertLoopbackControlUrl(
     requiredArgument(argumentsByName, `--${role}-control-url`, /.+/),
     contract.publications.providerControl,
@@ -90,16 +114,12 @@ async function readStackInput(role) {
     controlUrl,
     resolverIp,
     expectedImageDigest,
+    contractPath,
+    journeyContractSha256: sha256(contractBytes),
   };
 }
 
-async function proveStack(input, fixtureContractSha256, playwrightVersion) {
-  const imageIdentity = assertApplicationImageIdentity(
-    await inspectRunningApplicationImage(input.contract),
-    input.contract,
-    input.expectedImageDigest,
-    input.role,
-  );
+async function proveStack(input, preflight, playwrightVersion) {
   const reset = assertDeterministicReset(
     await controlJson(input.controlUrl, "/__reset", {
       method: "POST",
@@ -111,6 +131,7 @@ async function proveStack(input, fixtureContractSha256, playwrightVersion) {
   );
   const browserRun = await exerciseCabinet(
     input.resolverIp,
+    `http://${input.contract.publications.connectProxy}`,
     playwrightVersion,
     async () => {
       const armed = await controlJson(input.controlUrl, "/__inject", {
@@ -130,29 +151,27 @@ async function proveStack(input, fixtureContractSha256, playwrightVersion) {
     await controlJson(input.controlUrl, "/__ledger", {}, 2 * 1024 * 1024),
     input.role,
   );
-  return createProviderOverlapStackReport({
+  return {
     role: input.role,
     contract: input.contract,
-    fixtureContractSha256,
+    journeyContractSha256: input.journeyContractSha256,
+    fixtureContractSha256: input.contract.fixtureContract.sha256,
     scenario,
-    imageIdentity,
+    imageIdentity: preflight.imageIdentity,
+    runtimeBinding: preflight.runtimeBinding,
     reset,
     browser: browserRun.browser,
     navigation: browserRun.navigation,
     providerOverlap,
-  });
+  };
 }
 
-async function exerciseCabinet(resolverIp, playwrightVersion, armOverlap) {
-  const resolverRules = JOURNEY_SYNTHETIC_HOSTNAMES
-    .map((hostname) => `MAP ${hostname} ${resolverIp}`)
-    .join(", ");
+async function exerciseCabinet(resolverIp, connectProxyUrl, playwrightVersion, armOverlap) {
+  const maximumUnexpectedEvents = 32;
   const browser = await chromium.launch({
     headless: true,
-    args: [
-      "--ignore-certificate-errors",
-      `--host-resolver-rules=${resolverRules}, MAP * ~NOTFOUND`,
-    ],
+    args: journeyChromiumLaunchArgs(resolverIp),
+    proxy: journeyConnectProxy(connectProxyUrl),
   });
   try {
     const context = await browser.newContext({
@@ -165,12 +184,56 @@ async function exerciseCabinet(resolverIp, playwrightVersion, armOverlap) {
       serviceWorkers: "block",
     });
     const page = await context.newPage();
+    const unexpectedPages = [];
+    const unexpectedConsole = [];
+    const unexpectedPageErrors = [];
+    let unexpectedPageOverflow = false;
+    let unexpectedConsoleOverflow = false;
+    let unexpectedPageErrorOverflow = false;
+    context.on("page", (candidate) => {
+      if (candidate === page) return;
+      if (unexpectedPages.length < maximumUnexpectedEvents) {
+        unexpectedPages.push(sha256(candidate.url()));
+      } else {
+        unexpectedPageOverflow = true;
+      }
+    });
+    page.on("console", (message) => {
+      if (unexpectedConsole.length < maximumUnexpectedEvents) {
+        unexpectedConsole.push({ type: message.type(), sha256: sha256(message.text()) });
+      } else {
+        unexpectedConsoleOverflow = true;
+      }
+    });
+    page.on("pageerror", (error) => {
+      if (unexpectedPageErrors.length < maximumUnexpectedEvents) {
+        unexpectedPageErrors.push(sha256(String(error?.message ?? error)));
+      } else {
+        unexpectedPageErrorOverflow = true;
+      }
+    });
     const unexpectedRequests = [];
+    let unexpectedRequestOverflow = false;
     let cabinetDocumentAllowed = false;
     let cabinetDocumentConsumed = false;
-    await page.route("**/*", async (route) => {
+    await context.route("**/*", async (route) => {
       const rawUrl = route.request().url();
       const parsed = safeUrl(rawUrl);
+      let requestPage;
+      try {
+        requestPage = route.request().frame().page();
+      } catch {
+        requestPage = undefined;
+      }
+      if (requestPage !== page) {
+        if (unexpectedRequests.length < maximumUnexpectedEvents) {
+          unexpectedRequests.push(sha256(rawUrl));
+        } else {
+          unexpectedRequestOverflow = true;
+        }
+        await route.abort("blockedbyclient");
+        return;
+      }
       if (
         parsed?.origin === "https://pay.ci.clean-pay.dev"
         && parsed.pathname === "/cabinet"
@@ -190,11 +253,15 @@ async function exerciseCabinet(resolverIp, playwrightVersion, armOverlap) {
         }
         return;
       }
-      if (allowedBrowserUrl(rawUrl)) {
+      if (isJourneyBrowserRequestAllowed(rawUrl)) {
         await route.continue();
         return;
       }
-      unexpectedRequests.push(sha256(rawUrl));
+      if (unexpectedRequests.length < maximumUnexpectedEvents) {
+        unexpectedRequests.push(sha256(rawUrl));
+      } else {
+        unexpectedRequestOverflow = true;
+      }
       await route.abort("blockedbyclient");
     });
     await page.goto(
@@ -205,7 +272,10 @@ async function exerciseCabinet(resolverIp, playwrightVersion, armOverlap) {
     await telegram.waitFor({ state: "visible", timeout: 15_000 });
     await waitUntil(async () => telegram.isEnabled(), 15_000);
     await telegram.click();
-    await page.waitForURL((url) => url.pathname === "/profile", { timeout: 30_000 });
+    await page.waitForURL(
+      (url) => url.href === "https://pay.ci.clean-pay.dev/profile",
+      { timeout: 30_000 },
+    );
     await page.getByRole("heading", { name: "Профиль", level: 1 })
       .waitFor({ state: "visible", timeout: 15_000 });
     await armOverlap();
@@ -214,15 +284,28 @@ async function exerciseCabinet(resolverIp, playwrightVersion, armOverlap) {
       waitUntil: "domcontentloaded",
       timeout: 30_000,
     });
-    await page.waitForURL((url) => url.pathname === "/cabinet", { timeout: 30_000 });
+    await page.waitForURL(
+      (url) => url.href === "https://pay.ci.clean-pay.dev/cabinet",
+      { timeout: 30_000 },
+    );
     const heading = page.getByRole("heading", { name: "Личный кабинет", level: 1 });
     await heading.waitFor({ state: "visible", timeout: 15_000 });
     const userAgent = await page.evaluate(() => navigator.userAgent);
     if (!cabinetDocumentConsumed) {
       throw new Error("Synthetic browser did not consume the exact cabinet proof navigation.");
     }
-    if (unexpectedRequests.length > 0) {
+    if (unexpectedRequests.length > 0 || unexpectedRequestOverflow) {
       throw new Error("Synthetic browser isolation blocked an unexpected request.");
+    }
+    if (
+      unexpectedConsole.length > 0
+      || unexpectedPageErrors.length > 0
+      || unexpectedPages.length > 0
+      || unexpectedPageOverflow
+      || unexpectedConsoleOverflow
+      || unexpectedPageErrorOverflow
+    ) {
+      throw new Error("Synthetic browser emitted unexpected console or pageerror diagnostics.");
     }
     return {
       browser: {
@@ -236,9 +319,11 @@ async function exerciseCabinet(resolverIp, playwrightVersion, armOverlap) {
         colorScheme: "light",
       },
       navigation: {
-        finalPath: new URL(page.url()).pathname,
+        finalUrl: page.url(),
         headingVisible: await heading.isVisible(),
         unexpectedRequestCount: unexpectedRequests.length,
+        unexpectedConsoleCount: unexpectedConsole.length,
+        unexpectedPageErrorCount: unexpectedPageErrors.length,
       },
     };
   } finally {
@@ -246,33 +331,361 @@ async function exerciseCabinet(resolverIp, playwrightVersion, armOverlap) {
   }
 }
 
-async function inspectRunningApplicationImage(contract) {
-  const filters = [
-    `label=com.docker.compose.project=${contract.project}`,
-    "label=com.docker.compose.service=app",
-    "status=running",
+async function preflightStack(input, fixtureContractSha256) {
+  if (
+    input.contract.fixtureContract.domain !== "clean-pay-browser-journey-fixture-v5"
+    || input.contract.fixtureContract.sha256 !== fixtureContractSha256
+  ) {
+    throw new Error(`${input.role} live stack contract is not bound to the current fixture bytes.`);
+  }
+  const serviceNames = [
+    "app",
+    "browser-provider-mock",
+    "browser-proxy",
+    "browser-oidc-mock",
+    "browser-db-observer",
   ];
-  const containerIds = splitLines(await docker([
+  const containers = Object.fromEntries(await Promise.all(serviceNames.map(async (service) => [
+    service,
+    await inspectProjectService(input.contract.project, service),
+  ])));
+  for (const [service, container] of Object.entries(containers)) {
+    assertRunningService(container, input.contract.project, service, {
+      healthRequired: service !== "browser-proxy",
+    });
+  }
+  assertExactPublication(containers.app, "4000/tcp", input.contract.publications.app, input.role);
+  assertExactPublication(
+    containers["browser-provider-mock"],
+    "3100/tcp",
+    input.contract.publications.providerControl,
+    input.role,
+  );
+  assertExactPublication(
+    containers["browser-proxy"],
+    "443/tcp",
+    input.contract.publications.browserTls,
+    input.role,
+  );
+  assertNoPublishedPorts(containers["browser-oidc-mock"], input.role);
+  assertNoPublishedPorts(containers["browser-db-observer"], input.role);
+
+  const fixtureMounts = await Promise.all([
+    assertFixtureMount(
+      containers["browser-provider-mock"],
+      "/mock/provider-mock.mjs",
+      path.join(repositoryRoot, "tests", "browser", "journeys", "provider-mock.mjs"),
+      input.role,
+    ),
+    assertFixtureMount(
+      containers["browser-proxy"],
+      "/etc/caddy/Caddyfile",
+      path.join(repositoryRoot, "tests", "browser", "journeys", "Caddyfile"),
+      input.role,
+    ),
+    assertFixtureMount(
+      containers["browser-oidc-mock"],
+      "/mock/oidc-mock.mjs",
+      path.join(repositoryRoot, "tests", "browser", "journeys", "oidc-mock.mjs"),
+      input.role,
+    ),
+    assertFixtureMount(
+      containers["browser-db-observer"],
+      "/app/browser-db-observer.mjs",
+      path.join(repositoryRoot, "tests", "browser", "journeys", "db-observer.mjs"),
+      input.role,
+    ),
+  ]);
+  const syntheticEnvironmentContractSha256 = await assertSyntheticApplicationEnvironment(
+    containers.app.Config.Env,
+    input.contract,
+    input.role,
+    input.contractPath,
+  );
+  assertExactEnvironment(
+    containers["browser-provider-mock"].Config.Env,
+    {
+      CLEAN_PAY_BROWSER_DB_SCOPE: input.contract.project,
+      DB_OBSERVER_URL: "http://browser-db-observer:3200",
+    },
+    `${input.role} provider fixture`,
+  );
+  const imageIdentity = assertApplicationImageIdentity(
+    await inspectRunningApplicationImage(input.contract, containers.app),
+    input.contract,
+    input.expectedImageDigest,
+    input.role,
+  );
+  const serviceIdentity = serviceNames.map((service) => ({
+    service,
+    containerIdSha256: sha256(containers[service].Id),
+    imageDigest: containers[service].Image,
+  }));
+  return Object.freeze({
+    imageIdentity,
+    runtimeBinding: Object.freeze({
+      status: "preflight-proven",
+      projectSha256: sha256(input.contract.project),
+      journeyContractSha256: input.journeyContractSha256,
+      networkSha256: sha256(`${input.contract.project}_default`),
+      publicationsSha256: sha256(JSON.stringify(input.contract.publications)),
+      serviceIdentitySha256: sha256(JSON.stringify(serviceIdentity)),
+      fixtureMountContractSha256: sha256(JSON.stringify(fixtureMounts)),
+      syntheticEnvironmentContractSha256,
+    }),
+  });
+}
+
+function assertDualPreflight(baseline, candidate) {
+  if (
+    baseline.runtimeBinding.projectSha256 === candidate.runtimeBinding.projectSha256
+    || baseline.runtimeBinding.networkSha256 === candidate.runtimeBinding.networkSha256
+    || baseline.runtimeBinding.publicationsSha256 === candidate.runtimeBinding.publicationsSha256
+    || baseline.runtimeBinding.serviceIdentitySha256 === candidate.runtimeBinding.serviceIdentitySha256
+  ) {
+    throw new Error("Dual provider proof requires two simultaneously distinct live runtime bindings.");
+  }
+  if (
+    baseline.runtimeBinding.fixtureMountContractSha256
+      !== candidate.runtimeBinding.fixtureMountContractSha256
+    || baseline.runtimeBinding.syntheticEnvironmentContractSha256
+      !== candidate.runtimeBinding.syntheticEnvironmentContractSha256
+  ) {
+    throw new Error("Dual provider proof live fixture and synthetic environment contracts differ.");
+  }
+}
+
+async function inspectProjectService(project, service) {
+  const ids = splitLines(await docker([
     "ps",
+    "--all",
     "--no-trunc",
     "--quiet",
-    ...filters.flatMap((filter) => ["--filter", filter]),
+    "--filter", `label=com.docker.compose.project=${project}`,
+    "--filter", `label=com.docker.compose.service=${service}`,
   ]));
-  if (containerIds.length !== 1 || !/^[a-f0-9]{64}$/.test(containerIds[0])) {
-    throw new Error("Expected exactly one running project-owned application container.");
+  if (ids.length !== 1 || !/^[a-f0-9]{64}$/.test(ids[0])) {
+    throw new Error(`Expected exactly one project-owned ${service} container.`);
   }
-  const containerId = containerIds[0];
-  const [digest, reference, labelsBytes, localImageDigest] = await Promise.all([
-    docker(["container", "inspect", "--format", "{{.Image}}", containerId]),
-    docker(["container", "inspect", "--format", "{{.Config.Image}}", containerId]),
-    docker(["container", "inspect", "--format", "{{json .Config.Labels}}", containerId]),
+  const inspected = parseJson(
+    Buffer.from(await docker(["container", "inspect", ids[0]], 256 * 1024), "utf8"),
+    `${service} Docker inspection`,
+  );
+  if (!Array.isArray(inspected) || inspected.length !== 1) {
+    throw new Error(`${service} Docker inspection returned an invalid contract.`);
+  }
+  return inspected[0];
+}
+
+function assertRunningService(container, project, service, { healthRequired }) {
+  if (
+    container?.Id?.length !== 64
+    || container.Config?.Labels?.["com.docker.compose.project"] !== project
+    || container.Config?.Labels?.["com.docker.compose.service"] !== service
+    || container.State?.Status !== "running"
+    || container.HostConfig?.ReadonlyRootfs !== true
+    || JSON.stringify(Object.keys(container.NetworkSettings?.Networks ?? {}))
+      !== JSON.stringify([`${project}_default`])
+    || (healthRequired && container.State?.Health?.Status !== "healthy")
+  ) {
+    throw new Error(`${service} does not match the exact project-owned running sandbox contract.`);
+  }
+}
+
+function assertExactPublication(container, target, publication, label) {
+  const [hostIp, hostPort] = publication.split(":");
+  const published = Object.entries(container.NetworkSettings?.Ports ?? {})
+    .flatMap(([containerPort, bindings]) => (bindings ?? []).map((binding) => ({
+      containerPort,
+      hostIp: binding.HostIp,
+      hostPort: binding.HostPort,
+    })));
+  if (
+    published.length !== 1
+    || published[0].containerPort !== target
+    || published[0].hostIp !== hostIp
+    || published[0].hostPort !== hostPort
+  ) {
+    throw new Error(`${label} ${target} publication is not bound to its exact project service.`);
+  }
+}
+
+function assertNoPublishedPorts(container, label) {
+  const published = Object.values(container.NetworkSettings?.Ports ?? {})
+    .flatMap((bindings) => bindings ?? []);
+  if (published.length !== 0) {
+    throw new Error(`${label} internal fixture service unexpectedly publishes a host port.`);
+  }
+}
+
+async function assertFixtureMount(container, destination, expectedSource, label) {
+  const mounts = (container.Mounts ?? []).filter((mount) => mount.Destination === destination);
+  if (mounts.length !== 1 || mounts[0].Type !== "bind" || mounts[0].RW !== false) {
+    throw new Error(`${label} fixture mount ${destination} is not the exact read-only bind.`);
+  }
+  const expectedRealpath = await realpath(expectedSource);
+  if (!sameHostPath(mounts[0].Source, expectedRealpath)) {
+    throw new Error(`${label} fixture mount ${destination} has an unexpected host source.`);
+  }
+  const expectedBytes = await readFile(expectedRealpath);
+  const observed = await docker([
+    "container", "exec", container.Id, "sha256sum", destination,
+  ]);
+  const match = /^([a-f0-9]{64})\s+/.exec(observed);
+  const expectedSha256 = sha256(expectedBytes);
+  if (!match || match[1] !== expectedSha256) {
+    throw new Error(`${label} fixture mount ${destination} bytes differ from the current fixture.`);
+  }
+  return Object.freeze({ destination, sha256: expectedSha256, readOnly: true });
+}
+
+function sameHostPath(observed, expected) {
+  const normalize = (value) => {
+    let normalized = String(value).replace(/\\/g, "/");
+    normalized = normalized.replace(/^\/run\/desktop\/mnt\/host\/([a-z])\//i, "$1:/");
+    return normalized.replace(/\/$/, "").toLowerCase();
+  };
+  return normalize(observed) === normalize(expected);
+}
+
+async function assertSyntheticApplicationEnvironment(environment, contract, label, contractPath) {
+  const digest = (value) => sha256(value);
+  const secret = (name) => `browser-journey-${name}-${digest(`secret:${name}`)}`;
+  const expected = {
+    APP_URL: "https://pay.ci.clean-pay.dev",
+    AUDIT_IP_HASH_SECRET: secret("audit-ip"),
+    AUTH_CONCURRENCY_LIMIT: "64",
+    AUTH_RATE_LIMIT_CAPACITY: "1000",
+    CHATWOOT_BASE_URL: "https://chatwoot.browser.clean-pay.dev",
+    CHATWOOT_HMAC_TOKEN: digest("clean-pay-browser-journey:chatwoot-hmac"),
+    CHATWOOT_WEBSITE_TOKEN: digest("clean-pay-browser-journey:chatwoot-website"),
+    CLEAN_PAY_DEPLOY_SOURCE: "build",
+    CLEAN_PAY_IMAGE: contract.images.application,
+    CLEAN_PAY_MIGRATION_IMAGE: contract.images.migration,
+    CLEAN_PAY_READINESS_MAILPIT_URL: "",
+    CLEAN_PAY_READINESS_REMNAWAVE_URL: "https://panel.ci.clean-pay.dev",
+    CLEAN_PAY_RELEASE: `browser-journey-${contract.revision.slice(0, 12)}`,
+    CLEAN_PAY_REVISION: contract.revision,
+    COOKIE_SAMESITE: "lax",
+    COOKIE_SECURE: "true",
+    DATABASE_CONNECTION_TIMEOUT_MS: "5000",
+    DATABASE_IDLE_TIMEOUT_MS: "30000",
+    DATABASE_IDLE_TRANSACTION_TIMEOUT_MS: "10000",
+    DATABASE_LOCK_TIMEOUT_MS: "5000",
+    DATABASE_POOL_MAX: "8",
+    DATABASE_QUERY_TIMEOUT_MS: "15000",
+    DATABASE_STATEMENT_TIMEOUT_MS: "15000",
+    DATABASE_URL: `postgresql://clean_pay_app:${secret("database-application")}@postgres:5432/clean_pay?schema=public`,
+    LOG_LEVEL: "error",
+    NEXT_PUBLIC_APP_URL: "https://pay.ci.clean-pay.dev",
+    NEXT_PUBLIC_BRAND_LOGO_URL: "/clean-pay-logo.png",
+    NEXT_PUBLIC_BRAND_NAME: "Clean Pay",
+    PAYMENT_RECONCILIATION_BATCH_SIZE: "10",
+    PAYMENT_RECONCILIATION_ENABLED: "false",
+    PAYMENT_RECONCILIATION_INTERNAL_URL: "http://app:4000/api/internal/payments/reconcile",
+    PAYMENT_RECONCILIATION_INTERVAL_SECONDS: "30",
+    PAYMENT_RECONCILIATION_SECRET: "",
+    PAYMENT_REDIRECT_ORIGINS: "https://checkout.browser.clean-pay.dev",
+    RATE_LIMIT_IDENTITY_SECRET: secret("rate-limit"),
+    READINESS_INTERNAL_SECRET: secret("readiness"),
+    REDIS_URL: "redis://redis:6379/0",
+    REMNASHOP_ADMIN_API_BASE_URL: "https://remnashop.browser.clean-pay.dev/api/v1/admin",
+    REMNASHOP_API_BASE_URL: "https://remnashop.browser.clean-pay.dev/api/v1/public",
+    REMNASHOP_API_KEY: digest("clean-pay-browser-journey:remnashop-api"),
+    REMNASHOP_AUTH_SERVICE_KEY: digest("clean-pay-browser-journey:remnashop-auth"),
+    REMNAWAVE_API_BASE_URL: "https://panel.ci.clean-pay.dev",
+    REMNAWAVE_SUBSCRIPTION_ORIGINS: "https://subscription.ci.clean-pay.dev",
+    REMNAWAVE_TOKEN: digest("clean-pay-browser-journey:remnawave"),
+    SUPPORT_EMAIL: "support@clean-pay.dev",
+    SUPPORT_ENABLED: "true",
+    SUPPORT_FAQ_URL: "https://pay.ci.clean-pay.dev/support",
+    SUPPORT_TELEGRAM_USERNAME: "cleanpay_support",
+    TELEGRAM_BOT_TOKEN: `7654321098:${digest("clean-pay-browser-journey:telegram-bot")}`,
+    TELEGRAM_OIDC_AUTHORIZATION_ENDPOINT: "https://oauth.telegram.org/auth",
+    TELEGRAM_OIDC_CLIENT_ID: "7654321098",
+    TELEGRAM_OIDC_CLIENT_SECRET: digest("clean-pay-browser-journey:telegram-oidc"),
+    TELEGRAM_OIDC_ISSUER: "https://oauth.telegram.org",
+    TELEGRAM_OIDC_JWKS_URI: "https://oauth.telegram.org/.well-known/jwks.json",
+    TELEGRAM_OIDC_TOKEN_ENDPOINT: "https://oauth.telegram.org/token",
+    TRUSTED_PROXY_HOPS: "1",
+    TURNSTILE_ENABLED: "true",
+    TURNSTILE_SECRET_KEY: digest("clean-pay-browser-journey:turnstile"),
+    TURNSTILE_SITE_KEY: "0x4AAAAABrowserJourneyOnly8Wp4Jz7Lc2",
+    TURNSTILE_VERIFY_URL: "https://challenges.cloudflare.com/turnstile/v0/siteverify",
+    WEB_JWT_SECRET: secret("web-jwt"),
+    WEB_REFRESH_KEY_ID: "browser-journey-primary",
+    WEB_REFRESH_SECRET: secret("web-refresh"),
+  };
+  assertExactEnvironment(environment, {
+    ...expected,
+    CLEAN_PAY_RUNTIME_ROLE: "application",
+    NODE_ENV: "production",
+  }, `${label} application`);
+  const roleSource = await exactExternalFile(
+    path.join(path.dirname(contractPath), ".env.app"),
+    `${label} synthetic application role source`,
+  );
+  const roleAssignments = parseExactEnvironmentAssignments(
+    await readBoundedBytes(roleSource, 64 * 1024, `${label} synthetic application role source`),
+    `${label} synthetic application role source`,
+  );
+  const sortedExpected = Object.fromEntries(Object.entries(expected).sort(([left], [right]) => (
+    left.localeCompare(right)
+  )));
+  if (JSON.stringify(roleAssignments) !== JSON.stringify(sortedExpected)) {
+    throw new Error(`${label} application role source is not the exact deterministic fixture.`);
+  }
+  const sharedProjection = Object.fromEntries(Object.entries(roleAssignments).filter(([name]) => ![
+    "CLEAN_PAY_IMAGE",
+    "CLEAN_PAY_MIGRATION_IMAGE",
+    "CLEAN_PAY_RELEASE",
+    "CLEAN_PAY_REVISION",
+  ].includes(name)));
+  return sha256(JSON.stringify(sharedProjection));
+}
+
+function parseExactEnvironmentAssignments(bytes, label) {
+  const source = bytes.toString("utf8");
+  if (!source.endsWith("\n") || source.includes("\r") || source.startsWith("\uFEFF")) {
+    throw new Error(`${label} has non-canonical bytes.`);
+  }
+  const result = {};
+  for (const line of source.slice(0, -1).split("\n")) {
+    const match = /^([A-Z][A-Z0-9_]*)=(.*)$/.exec(line);
+    if (!match || Object.hasOwn(result, match[1])) {
+      throw new Error(`${label} contains an invalid or duplicate assignment.`);
+    }
+    result[match[1]] = match[2];
+  }
+  return Object.fromEntries(Object.entries(result).sort(([left], [right]) => (
+    left.localeCompare(right)
+  )));
+}
+
+function assertExactEnvironment(environment, expected, label) {
+  const actual = new Map();
+  for (const assignment of environment ?? []) {
+    const separator = assignment.indexOf("=");
+    const name = assignment.slice(0, separator);
+    if (separator < 1 || actual.has(name)) {
+      throw new Error(`${label} environment contains an invalid or duplicate assignment.`);
+    }
+    actual.set(name, assignment.slice(separator + 1));
+  }
+  if (Object.entries(expected).some(([name, value]) => actual.get(name) !== value)) {
+    throw new Error(`${label} environment is not the deterministic synthetic contract.`);
+  }
+}
+
+async function inspectRunningApplicationImage(contract, appContainer) {
+  const [localImageDigest] = await Promise.all([
     docker(["image", "inspect", "--format", "{{.Id}}", contract.images.application]),
   ]);
-  const labels = JSON.parse(labelsBytes);
+  const labels = appContainer.Config.Labels;
   if (!labels || typeof labels !== "object" || Array.isArray(labels)) {
     throw new Error("Application container labels are invalid.");
   }
-  const exactDigest = digest.trim();
+  const exactDigest = appContainer.Image;
   if (localImageDigest.trim() !== exactDigest) {
     throw new Error("Running container and referenced local image digests differ.");
   }
@@ -284,7 +697,7 @@ async function inspectRunningApplicationImage(contract) {
   }
   return {
     digest: exactDigest,
-    reference: reference.trim(),
+    reference: appContainer.Config.Image,
     revision: labels["org.opencontainers.image.revision"],
     role: labels["io.clean-pay.role"],
     publicBuildContract: {
@@ -335,17 +748,6 @@ async function boundedResponseBytes(response, maximumBytes) {
     reader.releaseLock();
   }
   return Buffer.concat(chunks, size);
-}
-
-function allowedBrowserUrl(rawUrl) {
-  const url = safeUrl(rawUrl);
-  if (!url) return false;
-  if (new Set(["about:", "blob:", "data:"]).has(url.protocol)) return true;
-  return url.protocol === "https:"
-    && url.port === ""
-    && !url.username
-    && !url.password
-    && JOURNEY_SYNTHETIC_HOSTNAMES.includes(url.hostname);
 }
 
 function safeUrl(rawUrl) {
@@ -417,12 +819,24 @@ async function assertNewPrivateOutput(target) {
 }
 
 async function readBoundedJson(target, maximumBytes, label) {
+  return parseJson(await readBoundedBytes(target, maximumBytes, label), label);
+}
+
+async function readBoundedBytes(target, maximumBytes, label) {
   const metadata = await stat(target);
   if (!metadata.isFile() || metadata.size <= 0 || metadata.size > maximumBytes) {
     throw new Error(`${label} exceeds its bounded file contract.`);
   }
+  const bytes = await readFile(target);
+  if (bytes.byteLength !== metadata.size || bytes.byteLength > maximumBytes) {
+    throw new Error(`${label} changed while its bounded bytes were read.`);
+  }
+  return bytes;
+}
+
+function parseJson(bytes, label) {
   try {
-    return JSON.parse(await readFile(target, "utf8"));
+    return JSON.parse(bytes.toString("utf8"));
   } catch {
     throw new Error(`${label} is not valid JSON.`);
   }
@@ -466,12 +880,16 @@ function requiredArgument(values, name, pattern) {
 }
 
 function assertDistinctStackInputs(baseline, candidate) {
+  const baselinePublications = Object.values(baseline.contract.publications);
+  const candidatePublications = Object.values(candidate.contract.publications);
   if (
     baseline.contract.project === candidate.contract.project
     || baseline.controlUrl.href === candidate.controlUrl.href
     || baseline.resolverIp === candidate.resolverIp
     || baseline.expectedImageDigest === candidate.expectedImageDigest
     || baseline.contract.revision === candidate.contract.revision
+    || baseline.contractPath === candidate.contractPath
+    || baselinePublications.some((publication) => candidatePublications.includes(publication))
   ) {
     throw new Error("Baseline and candidate inputs must identify two distinct isolated image stacks.");
   }
@@ -481,9 +899,43 @@ function assertDistinctStackInputs(baseline, candidate) {
   ) {
     throw new Error("Baseline and candidate public build contracts must be byte-identical.");
   }
+  if (
+    JSON.stringify(baseline.contract.fixtureContract)
+      !== JSON.stringify(candidate.contract.fixtureContract)
+  ) {
+    throw new Error("Baseline and candidate fixture contracts must be byte-identical.");
+  }
 }
 
-function docker(args) {
+async function startBothConnectProxies(inputs) {
+  const settled = await Promise.allSettled(inputs.map((input) => {
+    const [listenHost, listenPort] = input.contract.publications.connectProxy.split(":");
+    return startJourneyConnectProxy({
+      environment: process.env,
+      listenHost,
+      listenPort,
+      repositoryRoot,
+      targetHost: input.resolverIp,
+      targetPort: "443",
+    });
+  }));
+  const handles = settled.filter(({ status }) => status === "fulfilled").map(({ value }) => value);
+  if (settled.some(({ status }) => status === "rejected")) {
+    await Promise.allSettled(handles.map((handle) => stopJourneyConnectProxy(handle)));
+    throw new Error("Both isolated CONNECT proxies must become ready before browser actions.");
+  }
+  return handles;
+}
+
+async function stopBothConnectProxies(handles) {
+  const settled = await Promise.allSettled(handles.map((handle) => stopJourneyConnectProxy(handle)));
+  if (settled.some(({ status }) => status === "rejected")) {
+    throw new Error("Both isolated CONNECT proxies must stop with exact sanitized summaries.");
+  }
+  return settled.map(({ value }) => value);
+}
+
+function docker(args, maximumBytes = 64 * 1024) {
   return new Promise((resolve, reject) => {
     const child = spawn("docker", args, {
       cwd: repositoryRoot,
@@ -492,23 +944,46 @@ function docker(args) {
       windowsHide: true,
     });
     let stdout = "";
+    let stdoutBytes = 0;
     let stderr = "";
+    let overflow = false;
+    let settled = false;
+    const finish = (operation) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      operation();
+    };
+    const timer = setTimeout(() => {
+      if (child.exitCode === null && child.signalCode === null) child.kill();
+      finish(() => reject(new Error("Read-only Docker identity query timed out.")));
+    }, 15_000);
     child.stdout.setEncoding("utf8");
     child.stderr.setEncoding("utf8");
     child.stdout.on("data", (chunk) => {
-      if (stdout.length + chunk.length > 64 * 1024) {
+      const chunkBytes = Buffer.byteLength(chunk, "utf8");
+      if (stdoutBytes + chunkBytes > maximumBytes) {
+        overflow = true;
         child.kill();
         return;
       }
       stdout += chunk;
+      stdoutBytes += chunkBytes;
     });
     child.stderr.on("data", (chunk) => {
       if (stderr.length < 4 * 1024) stderr += chunk.slice(0, 4 * 1024 - stderr.length);
     });
-    child.once("error", reject);
+    child.once("error", () => finish(() => reject(new Error(
+      "Read-only Docker identity query failed to start.",
+    ))));
     child.once("exit", (code) => {
-      if (code === 0 && stdout.length <= 64 * 1024) resolve(stdout.trim());
-      else reject(new Error(`Read-only Docker identity query failed (${code ?? "unknown"}:${sha256(stderr)}).`));
+      if (code === 0 && !overflow && stdoutBytes <= maximumBytes) {
+        finish(() => resolve(stdout.trim()));
+      } else {
+        finish(() => reject(new Error(
+          `Read-only Docker identity query failed (${code ?? "unknown"}:${sha256(stderr)}).`,
+        )));
+      }
     });
   });
 }

@@ -11,7 +11,11 @@ const publicCharacterizationOverride = readFileSync(
   "utf8",
 );
 const fixtureContract = readFileSync(
-  "tests/browser/journeys/journey-fixture-contract.ts",
+  "tests/browser/journeys/journey-fixture-manifest.mjs",
+  "utf8",
+);
+const generatedEnvironmentLifecycle = readFileSync(
+  "tests/browser/journeys/journey-generated-environment-lifecycle.mjs",
   "utf8",
 );
 
@@ -116,5 +120,44 @@ describe("production-image browser runner phases", () => {
     ]) {
       expect(runner).toContain(`delete environment.${name};`);
     }
+  });
+
+  it("cleans only exact generated environment files and retains hash-only evidence", () => {
+    expect(runner).toContain("prepareGeneratedEnvironmentDirectory({");
+    expect(runner).toContain("writeSanitizedJourneyContractEvidence({");
+    expect(runner).toContain("await cleanupGeneratedEnvironment(generatedEnvironmentState);");
+    expect(runner).toContain("cleanupRetainedGeneratedEnvironment({");
+    expect(runner).toContain('projectSha256: digest(project)');
+    expect(runner).not.toContain("project,\n    publicBuildContractSha256");
+
+    for (const filename of [
+      ".env",
+      ".env.app",
+      ".env.browser-observer",
+      ".env.browser-observer-provision",
+      ".env.hold-operator",
+      ".env.migration",
+      ".env.postgres",
+      ".env.provision",
+      ".env.reconciliation",
+      ".env.retention",
+      "browser-journey-contract.json",
+    ]) {
+      expect(generatedEnvironmentLifecycle).toContain(`"${filename}"`);
+    }
+    const exactCleanup = generatedEnvironmentLifecycle.slice(
+      generatedEnvironmentLifecycle.indexOf("async function removeExactGeneratedFiles"),
+      generatedEnvironmentLifecycle.indexOf("function assertSyntheticJourneyContract"),
+    );
+    expect(exactCleanup).toContain("await unlink(path.join(directory, filename))");
+    expect(exactCleanup).not.toContain("recursive");
+    expect(exactCleanup).not.toContain("glob");
+    expect(exactCleanup).not.toMatch(/\brm\s*\(/u);
+    expect(generatedEnvironmentLifecycle).toContain(
+      "if (state.directoryCreatedByRun) await rmdir(realDirectory);",
+    );
+    expect(generatedEnvironmentLifecycle).toContain(
+      "Journey environment contains an unexpected entry; exact files were cleaned only.",
+    );
   });
 });

@@ -4,7 +4,7 @@
   "title": "Clean Pay dual-image provider overlap proof",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schemaVersion", "kind", "stacks", "comparison"],
+  "required": ["schemaVersion", "kind", "stacks", "comparison", "lifecycle"],
   "properties": {
     "schemaVersion": { "const": 1 },
     "kind": { "const": "clean-pay-dual-image-provider-overlap-proof" },
@@ -13,8 +13,8 @@
       "additionalProperties": false,
       "required": ["baseline", "candidate"],
       "properties": {
-        "baseline": { "$ref": "#/$defs/stack" },
-        "candidate": { "$ref": "#/$defs/stack" }
+        "baseline": { "$ref": "#/$defs/baselineStack" },
+        "candidate": { "$ref": "#/$defs/candidateStack" }
       }
     },
     "comparison": {
@@ -48,21 +48,51 @@
         "eachOneShotOverlapProven": { "const": true },
         "arrivalOrderRelationship": { "enum": ["same", "reordered"] }
       }
-    }
+    },
+    "lifecycle": { "$ref": "#/$defs/lifecycle" }
   },
   "$defs": {
     "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
     "imageDigest": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+    "baselineStack": {
+      "allOf": [
+        { "$ref": "#/$defs/stack" },
+        {
+          "properties": {
+            "role": { "const": "baseline" },
+            "composeProject": {
+              "pattern": "^clean-pay-browser-journey-provider-proof-baseline-[a-f0-9]{12}$"
+            }
+          }
+        }
+      ]
+    },
+    "candidateStack": {
+      "allOf": [
+        { "$ref": "#/$defs/stack" },
+        {
+          "properties": {
+            "role": { "const": "candidate" },
+            "composeProject": {
+              "pattern": "^clean-pay-browser-journey-provider-proof-candidate-[a-f0-9]{12}$"
+            }
+          }
+        }
+      ]
+    },
     "stack": {
       "type": "object",
       "additionalProperties": false,
       "required": [
         "role",
         "composeProject",
+        "journeyContractSha256",
         "fixtureContract",
         "scenario",
         "browser",
         "applicationImage",
+        "runtimeBinding",
+        "connectProxyCounters",
         "reset",
         "navigation",
         "providerOverlap"
@@ -71,8 +101,9 @@
         "role": { "enum": ["baseline", "candidate"] },
         "composeProject": {
           "type": "string",
-          "pattern": "^clean-pay-browser-journey-[a-z0-9][a-z0-9-]{5,80}$"
+          "pattern": "^clean-pay-browser-journey-provider-proof-(?:baseline|candidate)-[a-f0-9]{12}$"
         },
+        "journeyContractSha256": { "$ref": "#/$defs/sha256" },
         "fixtureContract": {
           "type": "object",
           "additionalProperties": false,
@@ -87,7 +118,7 @@
           "additionalProperties": false,
           "required": ["label", "scenarioSha256", "seedSha256"],
           "properties": {
-            "label": { "type": "string", "pattern": "^[a-z0-9][a-z0-9:-]{1,180}$" },
+            "label": { "const": "provider-overlap-v1" },
             "scenarioSha256": { "$ref": "#/$defs/sha256" },
             "seedSha256": { "$ref": "#/$defs/sha256" }
           }
@@ -141,6 +172,8 @@
             }
           }
         },
+        "runtimeBinding": { "$ref": "#/$defs/runtimeBinding" },
+        "connectProxyCounters": { "$ref": "#/$defs/connectProxyCounters" },
         "reset": {
           "type": "object",
           "additionalProperties": false,
@@ -168,7 +201,7 @@
         "schemaSha256": { "$ref": "#/$defs/sha256" },
         "tableCount": { "type": "integer", "minimum": 1 },
         "sequenceCount": { "const": 0 },
-        "resetSequence": { "type": "integer", "minimum": 1 },
+        "resetSequence": { "const": 1 },
         "transaction": { "const": "truncate-public-application-tables-cascade-no-sequences" },
         "redis": { "const": "flush-owned-db-0" }
       }
@@ -176,12 +209,132 @@
     "navigation": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["finalPath", "headingVisible", "unexpectedRequestCount"],
+      "required": [
+        "finalUrl",
+        "headingVisible",
+        "unexpectedRequestCount",
+        "unexpectedConsoleCount",
+        "unexpectedPageErrorCount"
+      ],
       "properties": {
-        "finalPath": { "const": "/cabinet" },
+        "finalUrl": { "const": "https://pay.ci.clean-pay.dev/cabinet" },
         "headingVisible": { "const": true },
-        "unexpectedRequestCount": { "const": 0 }
+        "unexpectedRequestCount": { "const": 0 },
+        "unexpectedConsoleCount": { "const": 0 },
+        "unexpectedPageErrorCount": { "const": 0 }
       }
+    },
+    "runtimeBinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "projectSha256",
+        "journeyContractSha256",
+        "networkSha256",
+        "publicationsSha256",
+        "serviceIdentitySha256",
+        "fixtureMountContractSha256",
+        "syntheticEnvironmentContractSha256"
+      ],
+      "properties": {
+        "status": { "const": "preflight-proven" },
+        "projectSha256": { "$ref": "#/$defs/sha256" },
+        "journeyContractSha256": { "$ref": "#/$defs/sha256" },
+        "networkSha256": { "$ref": "#/$defs/sha256" },
+        "publicationsSha256": { "$ref": "#/$defs/sha256" },
+        "serviceIdentitySha256": { "$ref": "#/$defs/sha256" },
+        "fixtureMountContractSha256": { "$ref": "#/$defs/sha256" },
+        "syntheticEnvironmentContractSha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "connectProxyCounters": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "accepted",
+        "rejected",
+        "upstreamAttempts",
+        "upstreamConnected",
+        "upstreamFailures"
+      ],
+      "properties": {
+        "accepted": { "type": "integer", "minimum": 1 },
+        "rejected": { "const": 0 },
+        "upstreamAttempts": { "type": "integer", "minimum": 1 },
+        "upstreamConnected": { "type": "integer", "minimum": 1 },
+        "upstreamFailures": { "const": 0 }
+      }
+    },
+    "lifecycle": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "automaticCleanup",
+        "cleanupMode",
+        "cleanupHelper",
+        "ownershipGate",
+        "projects"
+      ],
+      "properties": {
+        "status": { "const": "retained-for-follow-up-evidence" },
+        "automaticCleanup": { "const": false },
+        "cleanupMode": { "const": "exact-owned-project-handoff-v1" },
+        "cleanupHelper": {
+          "const": "tests/browser/journeys/run-production-image-journey.mjs cleanup"
+        },
+        "ownershipGate": { "const": "compose-project-labels-before-down-volumes" },
+        "projects": {
+          "type": "array",
+          "prefixItems": [
+            { "$ref": "#/$defs/baselineLifecycleProject" },
+            { "$ref": "#/$defs/candidateLifecycleProject" }
+          ],
+          "minItems": 2,
+          "maxItems": 2
+        }
+      }
+    },
+    "lifecycleProject": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["role", "composeProject", "projectSha256", "journeyContractSha256"],
+      "properties": {
+        "role": { "enum": ["baseline", "candidate"] },
+        "composeProject": {
+          "type": "string",
+          "pattern": "^clean-pay-browser-journey-provider-proof-(?:baseline|candidate)-[a-f0-9]{12}$"
+        },
+        "projectSha256": { "$ref": "#/$defs/sha256" },
+        "journeyContractSha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "baselineLifecycleProject": {
+      "allOf": [
+        { "$ref": "#/$defs/lifecycleProject" },
+        {
+          "properties": {
+            "role": { "const": "baseline" },
+            "composeProject": {
+              "pattern": "^clean-pay-browser-journey-provider-proof-baseline-[a-f0-9]{12}$"
+            }
+          }
+        }
+      ]
+    },
+    "candidateLifecycleProject": {
+      "allOf": [
+        { "$ref": "#/$defs/lifecycleProject" },
+        {
+          "properties": {
+            "role": { "const": "candidate" },
+            "composeProject": {
+              "pattern": "^clean-pay-browser-journey-provider-proof-candidate-[a-f0-9]{12}$"
+            }
+          }
+        }
+      ]
     },
     "participantBase": {
       "type": "object",
