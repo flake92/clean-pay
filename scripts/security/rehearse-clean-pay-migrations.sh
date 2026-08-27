@@ -222,7 +222,7 @@ if [ "$exact_image_input_count" -eq "${#EXACT_IMAGE_INPUT_NAMES[@]}" ]; then
     fail "exact migration image revision does not match the clean checkout"
   migration_image_inspect_file=$(mktemp)
   chmod 0600 "$migration_image_inspect_file"
-  docker image inspect "$CLEAN_PAY_REHEARSAL_EXTERNAL_MIGRATION_IMAGE" \
+  docker image inspect "$CLEAN_PAY_REHEARSAL_EXPECTED_IMAGE_ID" \
     >"$migration_image_inspect_file" ||
     fail "could not inspect the caller-owned exact migration image"
   MIGRATION_IMAGE=$(node "$SCRIPT_DIR/verify-rehearsal-migration-image.mjs" \
