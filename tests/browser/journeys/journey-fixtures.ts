@@ -267,6 +267,7 @@ export { expect } from "@playwright/test";
 async function captureCheckpoint(page: Page, label: string, applicationOrigin: string) {
   await settleJourneyCapture(page);
   const screenshot = await captureByteIdenticalScreenshotMajority(page);
+  await page.evaluate(() => document.fonts.ready);
   const [snapshot, dom, computedStyles, interactiveElements, ariaSnapshot, storage, cookies] = await Promise.all([
     page.evaluate(() => {
       const visible = (element: Element) => {

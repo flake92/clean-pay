@@ -875,10 +875,13 @@ function sortSuccessfulFontSubset(requests: unknown[]) {
       fonts.push(request);
     }
   });
-  const paths = fonts.map((request) => (
-    (request.url as Record<string, unknown>).pathname as string
-  ));
-  if (new Set(paths).size !== paths.length) return;
+  const firstByPath = new Map<string, Record<string, unknown>>();
+  for (const request of fonts) {
+    const pathname = (request.url as Record<string, unknown>).pathname as string;
+    const first = firstByPath.get(pathname);
+    if (first && !equalExceptKey(first, request, "index")) return;
+    firstByPath.set(pathname, request);
+  }
   fonts.sort((left, right) => (
     ((left.url as Record<string, unknown>).pathname as string)
       .localeCompare((right.url as Record<string, unknown>).pathname as string)
@@ -911,7 +914,13 @@ function isSuccessfulFontResource(value: unknown): value is Record<string, unkno
     && Array.isArray(value.requestHeaders)
     && !value.requestHeaders.some(
       (header) => isRecord(header)
-        && (header.name === "rsc" || header.name === "next-router-prefetch"),
+        && [
+          "authorization",
+          "cookie",
+          "next-router-prefetch",
+          "proxy-authorization",
+          "rsc",
+        ].includes(String(header.name).toLowerCase()),
     );
 }
 

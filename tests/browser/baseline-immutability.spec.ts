@@ -20,6 +20,7 @@ import { normalizeStaticRouteCspConsole } from "./csp-console-normalizer";
 import { projectCharacterizationManifestForComparison } from "./comparison-projection";
 import {
   isExactDeterministicTurnstileTransport,
+  recordNetwork,
   type NetworkManifestEntry,
 } from "./network-recorder";
 import { canonicalizeUrl } from "./redaction";
@@ -41,6 +42,142 @@ import {
 } from "./baseline-provenance";
 
 test.describe("immutable browser baseline policy", () => {
+  test("waits for a delayed application font request to finish", async ({ page }) => {
+    const origin = "http://font-recorder.test";
+    const fontPath = "/_next/static/media/delayed-font.abcdefgh.woff2";
+    await page.route(`${origin}/**`, async (route) => {
+      if (new URL(route.request().url()).pathname === fontPath) {
+        await new Promise((resolve) => setTimeout(resolve, 75));
+        await route.fulfill({
+          body: Buffer.from([0, 1, 2, 3]),
+          contentType: "font/woff2",
+          status: 200,
+        });
+        return;
+      }
+      await route.fulfill({ body: "<!doctype html><title>font recorder</title>", contentType: "text/html" });
+    });
+    const recorder = recordNetwork(page, origin, { fontTerminalTimeoutMs: 1_000 });
+    await page.goto(origin, { waitUntil: "domcontentloaded" });
+    const requestStarted = page.waitForRequest((request) => (
+      new URL(request.url()).pathname === fontPath
+    ));
+    await page.evaluate((url) => {
+      const face = new FontFace("RecorderDelayed", `url(${url})`);
+      document.fonts.add(face);
+      void face.load().catch(() => {});
+    }, `${origin}${fontPath}`);
+    await requestStarted;
+
+    const entries = await recorder.finish();
+    const font = entries.find((entry) => requestUrlPathname(entry) === fontPath);
+    expect(font?.response?.status).toBe(200);
+    expect(font?.failure).toBeNull();
+  });
+
+  test("records a delayed application font failure as terminal", async ({ page }) => {
+    const origin = "http://font-failure.test";
+    const fontPath = "/_next/static/media/failed-font.abcdefgh.woff2";
+    await page.route(`${origin}/**`, async (route) => {
+      if (new URL(route.request().url()).pathname === fontPath) {
+        await new Promise((resolve) => setTimeout(resolve, 75));
+        await route.abort("failed");
+        return;
+      }
+      await route.fulfill({ body: "<!doctype html><title>font recorder</title>", contentType: "text/html" });
+    });
+    const recorder = recordNetwork(page, origin, { fontTerminalTimeoutMs: 1_000 });
+    await page.goto(origin, { waitUntil: "domcontentloaded" });
+    const requestStarted = page.waitForRequest((request) => (
+      new URL(request.url()).pathname === fontPath
+    ));
+    await page.evaluate((url) => {
+      const face = new FontFace("RecorderFailed", `url(${url})`);
+      document.fonts.add(face);
+      void face.load().catch(() => {});
+    }, `${origin}${fontPath}`);
+    await requestStarted;
+
+    const entries = await recorder.finish();
+    const font = entries.find((entry) => requestUrlPathname(entry) === fontPath);
+    expect(font?.response).toBeNull();
+    expect(font?.failure?.errorText.bytes).toBeGreaterThan(0);
+  });
+
+  test("fails closed when an application font request never becomes terminal", async ({ page }) => {
+    const origin = "http://font-timeout.test";
+    const fontPath = "/_next/static/media/pending-font.abcdefgh.woff2";
+    let releaseRoute!: () => void;
+    const routeBlocked = new Promise<void>((resolve) => { releaseRoute = resolve; });
+    await page.route(`${origin}/**`, async (route) => {
+      if (new URL(route.request().url()).pathname === fontPath) {
+        await routeBlocked;
+        await route.abort("failed");
+        return;
+      }
+      await route.fulfill({ body: "<!doctype html><title>font recorder</title>", contentType: "text/html" });
+    });
+    try {
+      const recorder = recordNetwork(page, origin, { fontTerminalTimeoutMs: 50 });
+      await page.goto(origin, { waitUntil: "domcontentloaded" });
+      const requestStarted = page.waitForRequest((request) => (
+        new URL(request.url()).pathname === fontPath
+      ));
+      await page.evaluate((url) => {
+        const face = new FontFace("RecorderPending", `url(${url})`);
+        document.fonts.add(face);
+        void face.load().catch(() => {});
+      }, `${origin}${fontPath}`);
+      await requestStarted;
+
+      await expect(recorder.finish()).rejects.toThrow(
+        "application font request(s) to reach a terminal state",
+      );
+    } finally {
+      releaseRoute();
+      await page.waitForTimeout(25);
+    }
+  });
+
+  test("does not wait for an external font transport", async ({ page }) => {
+    const origin = "http://font-external.test";
+    const externalOrigin = "http://external-font.test";
+    const fontPath = "/_next/static/media/external-font.abcdefgh.woff2";
+    let releaseRoute!: () => void;
+    const routeBlocked = new Promise<void>((resolve) => { releaseRoute = resolve; });
+    await page.route("**/*", async (route) => {
+      const url = new URL(route.request().url());
+      if (url.origin === externalOrigin && url.pathname === fontPath) {
+        await routeBlocked;
+        await route.abort("failed");
+        return;
+      }
+      await route.fulfill({ body: "<!doctype html><title>font recorder</title>", contentType: "text/html" });
+    });
+    try {
+      const recorder = recordNetwork(page, origin, { fontTerminalTimeoutMs: 50 });
+      await page.goto(origin, { waitUntil: "domcontentloaded" });
+      const requestStarted = page.waitForRequest((request) => (
+        new URL(request.url()).origin === externalOrigin
+        && new URL(request.url()).pathname === fontPath
+      ));
+      await page.evaluate((url) => {
+        const face = new FontFace("RecorderExternal", `url(${url})`);
+        document.fonts.add(face);
+        void face.load().catch(() => {});
+      }, `${externalOrigin}${fontPath}`);
+      await requestStarted;
+
+      const entries = await recorder.finish();
+      expect(entries.some((entry) => (
+        entry.scope === "external" && entry.resourceType === "font"
+      ))).toBe(true);
+    } finally {
+      releaseRoute();
+      await page.waitForTimeout(25);
+    }
+  });
+
   test("refuses to overwrite an existing baseline artifact", async () => {
     const temporaryDirectory = await mkdtemp(
       path.join(tmpdir(), "clean-pay-browser-baseline-"),
@@ -500,6 +637,47 @@ test.describe("immutable browser baseline policy", () => {
     expect(projected.network.requests.map((request) => request.index)).toEqual([0, 1, 2]);
   });
 
+  test("sorts repeated fonts only when same-path requests are identical except index", () => {
+    const firstIcon = fontRequest("z-icons.woff2", 0);
+    const middle = requestRecord("api", 1);
+    const secondIcon = fontRequest("z-icons.woff2", 2);
+    const firstText = fontRequest("a-text.woff2", 3);
+    const secondText = fontRequest("a-text.woff2", 4);
+    const manifest = {
+      network: {
+        requests: [firstIcon, middle, secondIcon, firstText, secondText],
+        serverActions: [],
+      },
+    };
+    const projected = projectCharacterizationManifestForComparison(manifest) as typeof manifest;
+    expect(projected.network.requests.map(requestUrlPathname)).toEqual([
+      requestUrlPathname(firstText),
+      requestUrlPathname(middle),
+      requestUrlPathname(secondText),
+      requestUrlPathname(firstIcon),
+      requestUrlPathname(secondIcon),
+    ]);
+
+    const conflictingDuplicate = structuredClone(manifest);
+    const conflictingFont = conflictingDuplicate.network.requests[2] as ReturnType<
+      typeof fontRequest
+    >;
+    conflictingFont.requestHeaders.push({
+      name: "x-font-variant",
+      value: "different",
+    });
+    const retained = projectCharacterizationManifestForComparison(
+      conflictingDuplicate,
+    ) as typeof manifest;
+    expect(retained.network.requests.map(requestUrlPathname)).toEqual([
+      requestUrlPathname(firstIcon),
+      requestUrlPathname(middle),
+      requestUrlPathname(secondIcon),
+      requestUrlPathname(firstText),
+      requestUrlPathname(secondText),
+    ]);
+  });
+
   test("keeps every font-order near miss in capture order", () => {
     const mutations: Array<(request: ReturnType<typeof fontRequest>) => void> = [
       (request) => { request.method = "POST"; },
@@ -507,6 +685,7 @@ test.describe("immutable browser baseline policy", () => {
       (request) => { request.navigation = true; },
       (request) => { request.serverAction = { present: true, identifier: null }; },
       (request) => { request.requestHeaders.push({ name: "rsc", value: null }); },
+      (request) => { request.requestHeaders.push({ name: "authorization", value: null }); },
       (request) => { request.redirectedFrom = 0; },
       (request) => { request.failure = netErrAborted(); },
       (request) => { request.response = { status: 404 }; },
@@ -1043,6 +1222,19 @@ function fontRequest(filename: string, index: number) {
     failure: null as ReturnType<typeof netErrAborted> | null,
     externalTransport: null,
   };
+}
+
+function requestUrlPathname(request: { url: unknown }) {
+  if (typeof request.url === "string") return request.url;
+  if (
+    request.url
+    && typeof request.url === "object"
+    && !Array.isArray(request.url)
+    && typeof (request.url as Record<string, unknown>).pathname === "string"
+  ) {
+    return (request.url as Record<string, unknown>).pathname as string;
+  }
+  return "<missing-pathname>";
 }
 
 function externalTurnstileRequest(index: number): NetworkManifestEntry {
