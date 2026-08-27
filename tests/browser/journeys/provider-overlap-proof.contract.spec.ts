@@ -19,17 +19,37 @@ import {
   assertProviderOverlapRedirect,
   classifyProviderOverlapBrowserRequest,
   finalizeProviderOverlapBrowserContract,
+  finalizeProviderOverlapHistoryContract,
 } from "./provider-overlap-browser-contract.mjs";
+import { currentJourneyFixtureContractSha256 } from "./journey-fixture-manifest.mjs";
 
 const baselineRevision = "f5cb6f543d85256e7733a1ade6a4f451d86cf378";
 const candidateRevision = "6edb677dafbb16bb49899ae40cc406d3c71e1a1b";
 const publicBuildContractSha256 = "5dc1c21d1db2b433736d50c008065d9dfa3adc1ff338fb403569913881b80673";
-const fixtureContractSha256 = "7b62f993647d20582018297505f8557d201962a9bd768a5438dd3b8fa06cb5f9";
+const fixtureContractSha256 = currentJourneyFixtureContractSha256();
+const staticJavascriptPath = "/_next/static/chunks/app-123.js";
+const staticStylesheetPath = "/_next/static/chunks/app/layout-123.css";
+const staticFontPath = "/_next/static/media/inter-123.woff2";
+const staticAssetContract = Object.freeze({
+  attestationSha256: "a".repeat(64),
+  inventoryByPath: Object.freeze({
+    [staticJavascriptPath]: "b".repeat(64),
+    [staticStylesheetPath]: "c".repeat(64),
+  }),
+  inventorySha256: "d".repeat(64),
+  routeDeclaredPaths: Object.freeze([staticStylesheetPath, staticJavascriptPath].sort()),
+});
+const staticLoadGraph = Object.freeze({
+  responseDeclaredStaticPaths: Object.freeze([
+    staticFontPath, staticJavascriptPath, staticStylesheetPath,
+  ].sort()),
+  staticAssetContract,
+});
 
 test("compares two exact one-shot overlap reports while retaining observed arrival order", () => {
   const baselineOverlap = extractedOverlap("offers-first");
   const candidateOverlap = extractedOverlap("devices-first");
-  const proof = createDualProviderOverlapProof(
+  const proof = dualProof(
     stackReport("baseline", baselineOverlap),
     stackReport("candidate", candidateOverlap),
   );
@@ -43,6 +63,8 @@ test("compares two exact one-shot overlap reports while retaining observed arriv
     sameFixtureContract: true,
     sameScenarioAndSeed: true,
     sameBrowserProject: true,
+    sameConnectProxyCounters: true,
+    sameHistoryContract: true,
     sameOwnedResetContract: true,
     sameProviderRecordSet: true,
     eachOneShotOverlapProven: true,
@@ -132,12 +154,12 @@ test("rejects dual-image identity, fixture, browser, and semantic comparison nea
   for (const [label, mutate] of mutations) {
     const nearMiss = structuredClone(candidate);
     mutate(nearMiss);
-    expect(() => createDualProviderOverlapProof(baseline, nearMiss), label).toThrow();
+    expect(() => dualProof(baseline, nearMiss), label).toThrow();
   }
 });
 
 test("recomputes serialized cross-stack, lifecycle, and runtime invariants", () => {
-  const exact = createDualProviderOverlapProof(
+  const exact = dualProof(
     stackReport("baseline", extractedOverlap("offers-first")),
     stackReport("candidate", extractedOverlap("devices-first")),
   );
@@ -166,6 +188,11 @@ test("recomputes serialized cross-stack, lifecycle, and runtime invariants", () 
       value.stacks.candidate.runtimeBinding.journeyContractSha256 = "0".repeat(64);
     }],
     ["proxy failure", (value) => { value.stacks.candidate.connectProxyCounters.rejected = 1; }],
+    ["extra CONNECT reconnect", (value) => {
+      value.stacks.candidate.connectProxyCounters.accepted += 1;
+      value.stacks.candidate.connectProxyCounters.upstreamAttempts += 1;
+      value.stacks.candidate.connectProxyCounters.upstreamConnected += 1;
+    }],
     ["reset scope", (value) => { value.stacks.candidate.reset.database.scopeSha256 = "0".repeat(64); }],
     ["reset sequence", (value) => { value.stacks.candidate.reset.database.resetSequence = 2; }],
     ["navigation query", (value) => {
@@ -174,9 +201,28 @@ test("recomputes serialized cross-stack, lifecycle, and runtime invariants", () 
     ["request contract", (value) => {
       value.stacks.candidate.navigation.requestContractSha256 = "0".repeat(64);
     }],
+    ["history mutation", (value) => {
+      value.stacks.candidate.navigation.historyLedger[1].location = "app-login";
+    }],
+    ["static duplicate", (value) => {
+      value.stacks.candidate.navigation.staticRequestLedger.push(
+        structuredClone(value.stacks.candidate.navigation.staticRequestLedger[0]),
+      );
+      value.stacks.candidate.navigation.staticRequestCount += 1;
+      value.stacks.candidate.navigation.staticRequestContractSha256 = sha256(
+        JSON.stringify(value.stacks.candidate.navigation.staticRequestLedger),
+      );
+    }],
     ["role swap", (value) => { value.stacks.baseline.role = "candidate"; }],
     ["cleanup association", (value) => {
       value.lifecycle.projects[0].projectSha256 = "0".repeat(64);
+    }],
+    ["cleanup receipt association", (value) => {
+      value.lifecycle.cleanup.stacks[1].generatedEnvironmentDirectorySha256 = "0".repeat(64);
+    }],
+    ["owned input receipt alias", (value) => {
+      value.stacks.candidate.runtimeBinding.ownedInputReceiptSha256
+        = value.stacks.baseline.runtimeBinding.ownedInputReceiptSha256;
     }],
   ];
   for (const [label, mutate] of mutations) {
@@ -369,17 +415,17 @@ test("rejects arbitrary same-host paths, queries, redirects, methods, and transp
     responseContentType: contentTypes[index],
     responseStatus: statuses[index],
   }));
-  const exactBrowserContract = finalizeProviderOverlapBrowserContract(validRecords);
+  const exactBrowserContract = finalizeProviderOverlapBrowserContract(validRecords, staticLoadGraph);
   expect(exactBrowserContract).toMatchObject({
     requestCount: 12,
     requestContractSha256: expect.stringMatching(/^[a-f0-9]{64}$/),
   });
   const repartitionedStaticRecords = structuredClone(validRecords);
   repartitionedStaticRecords.splice(7, 0, structuredClone(validRecords[6]));
-  expect(finalizeProviderOverlapBrowserContract(repartitionedStaticRecords)).toMatchObject({
-    requestCount: 13,
-    requestContractSha256: exactBrowserContract.requestContractSha256,
-  });
+  expect(() => finalizeProviderOverlapBrowserContract(
+    repartitionedStaticRecords,
+    staticLoadGraph,
+  )).toThrow();
   expect(browserClassification(
     `https://chatwoot.browser.clean-pay.dev/widget?website_token=${"a".repeat(64)}`
       + "&cw_conversation=synthetic-conversation",
@@ -387,7 +433,51 @@ test("rejects arbitrary same-host paths, queries, redirects, methods, and transp
   ).key).toBe("chatwoot-widget-conversation-frame");
   const wrongContentType = structuredClone(validRecords);
   wrongContentType[6].responseContentType = "text/html";
-  expect(() => finalizeProviderOverlapBrowserContract(wrongContentType)).toThrow();
+  expect(() => finalizeProviderOverlapBrowserContract(wrongContentType, staticLoadGraph)).toThrow();
+
+  const unreachableExistingChunk = "/_next/static/chunks/unused-existing.js";
+  const expandedStaticContract = {
+    ...staticAssetContract,
+    inventoryByPath: {
+      ...staticAssetContract.inventoryByPath,
+      [unreachableExistingChunk]: "e".repeat(64),
+    },
+  };
+  const extraUnique = structuredClone(validRecords);
+  extraUnique.push({
+    classification: classifyProviderOverlapBrowserRequest({
+      url: `https://pay.ci.clean-pay.dev${unreachableExistingChunk}`,
+      method: "GET",
+      resourceType: "script",
+      isNavigation: false,
+      isMainFrame: false,
+    }, { cabinetDocumentAllowed: false, staticAssetContract: expandedStaticContract }),
+    redirectEdge: null,
+    responseContentType: "application/javascript",
+    responseStatus: 200,
+  });
+  expect(() => finalizeProviderOverlapBrowserContract(extraUnique, {
+    responseDeclaredStaticPaths: staticLoadGraph.responseDeclaredStaticPaths,
+    staticAssetContract: expandedStaticContract,
+  })).toThrow();
+
+  const history = finalizeProviderOverlapHistoryContract([
+    { kind: "document", url: "about:blank" },
+    { kind: "frame-navigation", url: "https://pay.ci.clean-pay.dev/profile" },
+    { kind: "replaceState", url: "https://pay.ci.clean-pay.dev/profile" },
+    { kind: "frame-navigation", url: "https://pay.ci.clean-pay.dev/cabinet" },
+  ]);
+  expect(history.historyContractSha256).toMatch(/^[a-f0-9]{64}$/);
+  expect(() => finalizeProviderOverlapHistoryContract([
+    { kind: "frame-navigation", url: "https://pay.ci.clean-pay.dev/profile" },
+    { kind: "hashchange", url: "https://pay.ci.clean-pay.dev/profile#transient" },
+    { kind: "frame-navigation", url: "https://pay.ci.clean-pay.dev/cabinet" },
+  ])).toThrow();
+  expect(() => finalizeProviderOverlapHistoryContract([
+    { kind: "frame-navigation", url: "https://pay.ci.clean-pay.dev/profile" },
+    { kind: "pushState", url: "https://pay.ci.clean-pay.dev/profile?transient=1" },
+    { kind: "frame-navigation", url: "https://pay.ci.clean-pay.dev/cabinet" },
+  ])).toThrow();
 
   for (const [label, url, overrides, cabinetAllowed] of [
     ["path", "https://pay.ci.clean-pay.dev/admin", {}, false],
@@ -479,15 +569,31 @@ test("keeps the schema write-once sidecar-only and free of comparison projection
     finalUrl: { const: "https://pay.ci.clean-pay.dev/cabinet" },
     requestCount: { type: "integer", minimum: 1, maximum: 256 },
     requestContractSha256: { $ref: "#/$defs/sha256" },
+    historyContractSha256: { $ref: "#/$defs/sha256" },
+    staticLoadGraph: { $ref: "#/$defs/staticLoadGraph" },
+    staticRequestContractSha256: { $ref: "#/$defs/sha256" },
     unexpectedConsoleCount: { const: 0 },
     unexpectedPageErrorCount: { const: 0 },
   });
+  expect(schema.$defs.navigation.required).toEqual(expect.arrayContaining([
+    "historyLedger",
+    "staticLoadGraph",
+    "staticRequestLedger",
+  ]));
+  expect(schema.$defs.navigation.additionalProperties).toBe(false);
+  expect(schema.$defs.staticRequestEntry.additionalProperties).toBe(false);
+  expect(schema.$defs.staticLoadGraph.additionalProperties).toBe(false);
   expect(schema.$defs.runtimeBinding.properties.composeRuntimeContractSha256)
     .toEqual({ $ref: "#/$defs/sha256" });
+  expect(schema.$defs.runtimeBinding.properties.ownedInputReceiptSha256)
+    .toEqual({ $ref: "#/$defs/sha256" });
   expect(schema.$defs.lifecycle.properties).toMatchObject({
-    automaticCleanup: { const: false },
-    cleanupMode: { const: "exact-owned-project-handoff-v1" },
+    automaticCleanup: { const: true },
+    cleanupMode: { const: "exact-verifier-owned-stack-pair-v1" },
+    cleanup: { $ref: "#/$defs/cleanupReceipt" },
   });
+  expect(schema.$defs.cleanupReceipt.additionalProperties).toBe(false);
+  expect(schema.$defs.cleanupStackReceipt.additionalProperties).toBe(false);
   expect(schema.$defs.baselineStack.allOf[1].properties).toMatchObject({
     role: { const: "baseline" },
     composeProject: {
@@ -519,7 +625,7 @@ test("keeps the schema write-once sidecar-only and free of comparison projection
   expect(scriptSource.indexOf("try {")).toBeLessThan(scriptSource.indexOf("parseArguments(process.argv.slice(2))"));
   const dualPreflight = scriptSource.indexOf("assertDualPreflight(baselinePreflight, candidatePreflight);");
   const proxyReadiness = scriptSource.indexOf("await startBothConnectProxies");
-  const parallelProof = scriptSource.indexOf("runs = await Promise.all([");
+  const parallelProof = scriptSource.indexOf("runSettlements = await Promise.all([");
   const firstControlPost = scriptSource.indexOf('await controlJson(input.controlUrl, "/__reset"');
   const browserLaunch = scriptSource.indexOf("await chromium.launch");
   expect(dualPreflight).toBeGreaterThanOrEqual(0);
@@ -670,6 +776,23 @@ function stackReport(role: "baseline" | "candidate", providerOverlap: ReturnType
   const revision = baseline ? baselineRevision : candidateRevision;
   const composeProject = `clean-pay-browser-journey-provider-proof-${role}-${(baseline ? "1" : "2").repeat(12)}`;
   const journeyContractSha256 = baseline ? "8".repeat(64) : "9".repeat(64);
+  const historyLedger = [
+    { kind: "document", location: "about-blank" },
+    { kind: "frame-navigation", location: "app-profile" },
+    { kind: "replaceState", location: "app-profile" },
+    { kind: "frame-navigation", location: "app-cabinet" },
+  ];
+  const staticLedger = [
+    { assetSha256: baseline ? "1".repeat(64) : "2".repeat(64), class: "next-static-js", pathSha256: baseline ? "3".repeat(64) : "4".repeat(64) },
+    { assetSha256: baseline ? "5".repeat(64) : "6".repeat(64), class: "next-static-css", pathSha256: baseline ? "7".repeat(64) : "8".repeat(64) },
+    { assetSha256: null, class: "next-static-font", pathSha256: baseline ? "9".repeat(64) : "a".repeat(64) },
+  ];
+  const staticAssetAttestationSha256 = baseline ? "b".repeat(64) : "c".repeat(64);
+  const staticLoadGraph = {
+    assetAttestationSha256: staticAssetAttestationSha256,
+    declaredPathSha256s: baseline ? ["d".repeat(64)] : ["e".repeat(64)],
+    expectedChunkPathSha256s: baseline ? ["f".repeat(64)] : ["0".repeat(64)],
+  };
   return {
     role,
     composeProject,
@@ -708,8 +831,15 @@ function stackReport(role: "baseline" | "candidate", providerOverlap: ReturnType
       publicationsSha256: baseline ? "a".repeat(64) : "b".repeat(64),
       serviceIdentitySha256: baseline ? "c".repeat(64) : "d".repeat(64),
       composeRuntimeContractSha256: baseline ? "1".repeat(64) : "2".repeat(64),
+      oneShotLifecycleContractSha256: baseline ? "5".repeat(64) : "6".repeat(64),
+      staticAssetAttestationSha256,
+      staticAssetInventorySha256: baseline ? "7".repeat(64) : "8".repeat(64),
       fixtureMountContractSha256: "e".repeat(64),
+      generatedEnvironmentDirectorySha256: baseline ? "c".repeat(64) : "d".repeat(64),
+      ownedInputReceiptSha256: baseline ? "e".repeat(64) : "f".repeat(64),
       syntheticEnvironmentContractSha256: "f".repeat(64),
+      syntheticRoleEnvironmentContractSha256: baseline ? "9".repeat(64) : "a".repeat(64),
+      syntheticRoleEnvironmentPolicySha256: "b".repeat(64),
     },
     connectProxyCounters: {
       accepted: 7,
@@ -734,11 +864,46 @@ function stackReport(role: "baseline" | "candidate", providerOverlap: ReturnType
       headingVisible: true,
       requestCount: baseline ? 42 : 43,
       requestContractSha256: "a".repeat(64),
+      historyContractSha256: sha256(JSON.stringify(historyLedger)),
+      historyCount: historyLedger.length,
+      historyLedger,
+      staticLoadGraph,
+      staticLoadGraphContractSha256: sha256(JSON.stringify(staticLoadGraph)),
+      staticRequestContractSha256: sha256(JSON.stringify(staticLedger)),
+      staticRequestCount: staticLedger.length,
+      staticRequestLedger: staticLedger,
       unexpectedRequestCount: 0,
       unexpectedConsoleCount: 0,
       unexpectedPageErrorCount: 0,
     },
     providerOverlap,
+  };
+}
+
+function dualProof(
+  baseline: ReturnType<typeof stackReport>,
+  candidate: ReturnType<typeof stackReport>,
+) {
+  return createDualProviderOverlapProof(
+    baseline,
+    candidate,
+    cleanupReceipt(baseline, candidate),
+  );
+}
+
+function cleanupReceipt(
+  baseline: ReturnType<typeof stackReport>,
+  candidate: ReturnType<typeof stackReport>,
+) {
+  return {
+    status: "verifier-owned-stack-pair-cleaned",
+    stacks: [baseline, candidate].map((report) => ({
+      role: report.role,
+      generatedEnvironmentDirectorySha256:
+        report.runtimeBinding.generatedEnvironmentDirectorySha256,
+      projectSha256: report.runtimeBinding.projectSha256,
+      status: "verifier-owned-stack-cleaned",
+    })),
   };
 }
 
@@ -837,5 +1002,5 @@ function browserClassification(
     resourceType: overrides.resourceType ?? "fetch",
     isNavigation: overrides.isNavigation ?? false,
     isMainFrame: overrides.isMainFrame ?? false,
-  }, { cabinetDocumentAllowed });
+  }, { cabinetDocumentAllowed, staticAssetContract });
 }
