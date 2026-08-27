@@ -1,4 +1,5 @@
 import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -332,7 +333,8 @@ test.describe("immutable browser baseline policy", () => {
         void fetch("/ordinary", { method: "POST", body: "ordinary" }).catch(() => {});
       });
       await ordinaryStarted;
-      await expect(recorder.awaitStartedServerActions()).resolves.toBeUndefined();
+      const ordinaryGeneration = await recorder.awaitStartedServerActions();
+      expect(recorder.isServerActionGenerationCurrent(ordinaryGeneration)).toBe(true);
 
       const externalStarted = page.waitForRequest((request) => (
         request.method() === "POST" && new URL(request.url()).origin
@@ -346,7 +348,8 @@ test.describe("immutable browser baseline policy", () => {
         }).catch(() => {});
       }, `${externalOrigin}/action`);
       await externalStarted;
-      await expect(recorder.awaitStartedServerActions()).resolves.toBeUndefined();
+      const externalGeneration = await recorder.awaitStartedServerActions();
+      expect(recorder.isServerActionGenerationCurrent(externalGeneration)).toBe(true);
     } finally {
       releaseBlocked();
       await page.waitForTimeout(25);
@@ -394,14 +397,129 @@ test.describe("immutable browser baseline policy", () => {
         method: "POST",
         headers: { "next-action": "second-action" },
         body: "second",
+      }).then(async (response) => {
+        document.body.dataset.serverActionResult = await response.text();
       });
     });
     await secondStarted;
     releaseFirst();
-    await checkpointWait;
+    const checkpointGeneration = await checkpointWait;
+    expect(recorder.isServerActionGenerationCurrent(checkpointGeneration)).toBe(false);
     releaseSecond();
+    await page.waitForFunction(() => document.body.dataset.serverActionResult === "/second");
     const entries = await recorder.finish();
     expect(entries.filter((entry) => entry.serverAction.present)).toHaveLength(2);
+  });
+
+  test("tracks a redirect descendant of a started Server Action", async ({ page }) => {
+    let releaseDescendant!: () => void;
+    const descendantBlocked = new Promise<void>((resolve) => { releaseDescendant = resolve; });
+    const server = createServer(async (request, response) => {
+      if (request.url === "/action") {
+        response.writeHead(307, { location: "/redirected-action" });
+        response.end();
+        return;
+      }
+      if (request.url === "/redirected-action") {
+        await descendantBlocked;
+        response.writeHead(200, { "content-type": "text/plain" });
+        response.end("redirected-result");
+        return;
+      }
+      response.writeHead(200, { "content-type": "text/html" });
+      response.end("<!doctype html><title>action recorder</title>");
+    });
+    await new Promise<void>((resolve, reject) => {
+      server.once("error", reject);
+      server.listen(0, "127.0.0.1", resolve);
+    });
+    try {
+      const address = server.address();
+      if (!address || typeof address === "string") throw new Error("Loopback server did not bind.");
+      const origin = `http://127.0.0.1:${address.port}`;
+      const recorder = recordNetwork(page, origin, {
+        serverActionTerminalTimeoutMs: 1_000,
+      });
+      await page.goto(origin, { waitUntil: "domcontentloaded" });
+      const generationBeforeAction = await recorder.awaitStartedServerActions();
+      const descendantStarted = page.waitForRequest((request) => (
+        new URL(request.url()).pathname === "/redirected-action"
+      ));
+      await page.evaluate(() => {
+        void fetch("/action", {
+          method: "POST",
+          headers: { "next-action": "redirect-action" },
+          body: "redirect-payload",
+        });
+      });
+      await descendantStarted;
+      expect(recorder.isServerActionGenerationCurrent(generationBeforeAction)).toBe(false);
+
+      let finishObserved = false;
+      const finishing = recorder.finish().then((entries) => {
+        finishObserved = true;
+        return entries;
+      });
+      await page.waitForTimeout(25);
+      expect(finishObserved).toBe(false);
+      releaseDescendant();
+      const entries = await finishing;
+      const initial = entries.find((entry) => requestUrlPathname(entry) === "/action");
+      const descendant = entries.find((entry) => (
+        requestUrlPathname(entry) === "/redirected-action"
+      ));
+      expect(initial?.response?.status).toBe(307);
+      expect(descendant?.response?.status).toBe(200);
+      expect(descendant?.redirectedFrom).toBe(initial?.index);
+    } finally {
+      releaseDescendant();
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  test("retries a checkpoint changed by a newly started Server Action", async ({ page }) => {
+    const origin = "http://server-action-recapture.test";
+    let releaseAction!: () => void;
+    const actionBlocked = new Promise<void>((resolve) => { releaseAction = resolve; });
+    await page.route(`${origin}/**`, async (route) => {
+      if (new URL(route.request().url()).pathname === "/action") {
+        await actionBlocked;
+        await route.fulfill({ body: "terminal-ui", status: 200 });
+        return;
+      }
+      await route.fulfill({ body: "<!doctype html><body>initial-ui</body>", contentType: "text/html" });
+    });
+    const recorder = recordNetwork(page, origin, {
+      serverActionTerminalTimeoutMs: 1_000,
+    });
+    await page.goto(origin, { waitUntil: "domcontentloaded" });
+    let captureAttempts = 0;
+    const captured = await recorder.captureStableServerActionCheckpoint(async () => {
+      captureAttempts += 1;
+      if (captureAttempts === 1) {
+        const actionStarted = page.waitForRequest((request) => (
+          new URL(request.url()).pathname === "/action"
+        ));
+        await page.evaluate(() => {
+          void fetch("/action", {
+            method: "POST",
+            headers: { "next-action": "recapture-action" },
+            body: "recapture-payload",
+          }).then(async (response) => {
+            document.body.textContent = await response.text();
+          });
+        });
+        await actionStarted;
+        releaseAction();
+        await page.waitForFunction(() => document.body.textContent === "terminal-ui");
+      }
+      return page.textContent("body");
+    });
+
+    expect(captureAttempts).toBe(2);
+    expect(captured).toBe("terminal-ui");
+    const entries = await recorder.finish();
+    expect(entries.filter((entry) => entry.serverAction.present)).toHaveLength(1);
   });
 
   test("refuses to overwrite an existing baseline artifact", async () => {

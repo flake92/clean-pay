@@ -80,6 +80,7 @@ export function recordNetwork(
   const responseHeaders = new Map<Request, Promise<void>>();
   const entries: NetworkManifestEntry[] = [];
   const pending: Promise<void>[] = [];
+  let serverActionGeneration = 0;
 
   const handleRequest = (request: Request) => {
     const previous = request.redirectedFrom();
@@ -113,8 +114,20 @@ export function recordNetwork(
     if (isExactApplicationFontRequest(request, applicationOrigin)) {
       fontTerminals.set(request, createRequestTerminal());
     }
-    if (isExactStartedApplicationServerAction(request, applicationOrigin)) {
+    const redirectedServerAction = previous !== null
+      && serverActionTerminals.has(previous);
+    if (redirectedServerAction) {
+      // The descendant request proves the preceding redirect hop reached its
+      // terminal transition even when Playwright defers requestfinished until
+      // the full redirect chain completes.
+      serverActionTerminals.get(previous)?.resolve();
+    }
+    if (
+      isExactStartedApplicationServerAction(request, applicationOrigin)
+      || redirectedServerAction
+    ) {
       serverActionTerminals.set(request, createRequestTerminal());
+      serverActionGeneration += 1;
     }
     pending.push(captureBoundedHeaders(
       request.allHeaders(),
@@ -169,7 +182,7 @@ export function recordNetwork(
 
   const handleRequestFinished = (request: Request) => {
     resolveTerminalAfterResponseHeaders(fontTerminals.get(request), request);
-    resolveTerminalAfterResponseHeaders(serverActionTerminals.get(request), request);
+    serverActionTerminals.get(request)?.resolve();
   };
 
   const resolveTerminalAfterResponseHeaders = (
@@ -198,16 +211,40 @@ export function recordNetwork(
   page.on("requestfinished", handleRequestFinished);
   page.on("requestfailed", handleRequestFailed);
 
+  const awaitStartedServerActions = async () => {
+    const generation = serverActionGeneration;
+    const started = [...serverActionTerminals.values()]
+      .filter((terminal) => !terminal.settled);
+    await waitForTerminalSnapshot(
+      started,
+      serverActionTerminalTimeoutMs,
+      "application Server Action request(s)",
+    );
+    return generation;
+  };
+  const isServerActionGenerationCurrent = (generation: number) => (
+    Number.isSafeInteger(generation)
+      && generation >= 0
+      && generation === serverActionGeneration
+  );
+  const captureStableServerActionCheckpoint = async <T>(
+    capture: () => Promise<T>,
+  ) => {
+    for (let attempt = 1; attempt <= 3; attempt += 1) {
+      const generation = await awaitStartedServerActions();
+      const captured = await capture();
+      if (isServerActionGenerationCurrent(generation)) return captured;
+    }
+    throw new Error(
+      "Journey checkpoint observed a changing Server Action generation during "
+      + "three bounded capture attempts.",
+    );
+  };
+
   return {
-    async awaitStartedServerActions() {
-      const started = [...serverActionTerminals.values()]
-        .filter((terminal) => !terminal.settled);
-      await waitForTerminalSnapshot(
-        started,
-        serverActionTerminalTimeoutMs,
-        "application Server Action request(s)",
-      );
-    },
+    awaitStartedServerActions,
+    captureStableServerActionCheckpoint,
+    isServerActionGenerationCurrent,
     async finish() {
       let terminalError: unknown;
       try {
