@@ -1,0 +1,38 @@
+{
+  "schemaVersion": 1,
+  "status": "invalid_for_journey_gate",
+  "attempt": "pristine-f5-journey-db-observer-v3",
+  "source": {
+    "revision": "f5cb6f543d85256e7733a1ade6a4f451d86cf378",
+    "applicationImageDigest": "sha256:6909a1b980f72038c732d02f1e29074b16be2c2ce333e8c02ba569d3f2324ded",
+    "migrationImageDigest": "sha256:5092b1aaf6cbc61722cf9ddbfb17a99dc0c1011b3734865b04931eb40adabc3b",
+    "publicBuildContractSha256": "5dc1c21d1db2b433736d50c008065d9dfa3adc1ff338fb403569913881b80673"
+  },
+  "isolatedProject": {
+    "name": "clean-pay-browser-journey-baseline-ad8f-5dc1c21d1db2-v3",
+    "ownedResourceCountsBeforeCleanup": {
+      "containers": 12,
+      "networks": 1,
+      "volumes": 4
+    },
+    "forbiddenPreexistingProjectsTouched": false
+  },
+  "failure": {
+    "phase": "synthetic-db-observer-health",
+    "class": "DatabaseError",
+    "postgresCode": "28000",
+    "messageSha256": "bfee59d75d93a28226955f3aa5e71c8087d549e2158871f24b6eeee0be41bf08",
+    "cause": "observer attempted to open a new session through the production migration role after that role was intentionally changed to NOLOGIN",
+    "migrationCompleted": true,
+    "applicationStarted": false,
+    "browserProbeStarted": false,
+    "canonicalArtifactsWritten": false,
+    "stagingArtifactsWritten": false
+  },
+  "scope": {
+    "publicDeterministicV5BaselineUnaffected": true,
+    "productionRolePolicyChanged": false,
+    "databaseRowsCaptured": false,
+    "credentialsCaptured": false
+  }
+}

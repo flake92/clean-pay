@@ -13,8 +13,10 @@ import { ServiceError } from "@/backend/errors/service-error";
 import type { ReferralProgramResponse } from "@/backend/integrations/remnashop/contracts";
 import {
   getAuthorizedRemnashopTokens,
-  remnashopRequest,
 } from "@/backend/integrations/remnashop/client";
+import { remnashopValidatedRequest } from "@/backend/integrations/remnashop/api-client-runtime";
+import { bindRemnashopResponseContract } from "@/backend/integrations/remnashop/request-transport";
+import { decodeRemnashopEndpointResponse } from "@/backend/integrations/remnashop/response-decoders";
 import {
   canonicalReferralPath,
   normalizeReferralCode,
@@ -142,6 +144,19 @@ function parseProgram(value: unknown, publicAppUrl: string): ReferralProgram {
   };
 }
 
+function validateAndProjectReferralResponse(
+  publicAppUrl: string,
+  value: unknown,
+) {
+  const projected = decodeRemnashopEndpointResponse(
+    "/referral/program",
+    "GET",
+    value,
+  ) as ReferralProgramResponse;
+  parseProgram(projected, publicAppUrl);
+  return projected;
+}
+
 function accessReason(error: ServiceError) {
   if (error.code === "PROVIDER_SESSION_RECOVERY_REQUIRED") {
     return "provider-session-recovery-required" as const;
@@ -167,11 +182,22 @@ export function createReferralProgramReader(
     async loadProgram() {
       try {
         const { accessToken } = await authorize();
-        const response = await remnashopRequest<ReferralProgramResponse>(
+        const response = await remnashopValidatedRequest<ReferralProgramResponse>(
           "/referral/program",
-          { accessToken },
+          bindRemnashopResponseContract(
+            { accessToken },
+            {
+              decodeResponse: validateAndProjectReferralResponse.bind(
+                null,
+                publicAppUrl,
+              ),
+            },
+          ),
         );
-        return parseProgram(response, publicAppUrl);
+        return parseProgram(
+          validateAndProjectReferralResponse(publicAppUrl, response),
+          publicAppUrl,
+        );
       } catch (error) {
         if (error instanceof ServiceError) {
           throw new ReferralProgramAccessError(accessReason(error));

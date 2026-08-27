@@ -1,0 +1,54 @@
+{
+  "schemaVersion": 1,
+  "baselineId": "f5cb6f543d85256e7733a1ade6a4f451d86cf378-deterministic-v3",
+  "status": "invalid_for_gate",
+  "retainedAs": "immutable_single_flag_software_capture",
+  "reason": [
+    "--disable-gpu alone did not eliminate cross-process font and Skia raster variance",
+    "the byte-identical majority remained internally stable within each failing process, so no PNG tolerance or normalization is justified"
+  ],
+  "source": {
+    "commit": "f5cb6f543d85256e7733a1ade6a4f451d86cf378",
+    "tree": "6647fc51c61018ba46aae95da21e534434028fbe",
+    "pristineArchiveSha256": "8f424f5d4839d2aa421849bb2c7f8f48420ee675",
+    "productionImage": {
+      "tag": "clean-pay:baseline-f5cb6f543d85-prod-pristine",
+      "digest": "sha256:e0640e36c6221ba8f2dc174ebbea3961fda59f6320aad56d2f071b1c51a75ffc"
+    }
+  },
+  "runtime": {
+    "engine": "chromium",
+    "browserVersion": "151.0.7922.34",
+    "playwrightVersion": "1.62.1",
+    "chromiumRevision": "1234"
+  },
+  "artifactSet": {
+    "artifactCount": 126,
+    "aggregateSha256": "7fff96da71cbedb8f3492f727e0fa9abc0921ab964c2e249a0300a8bb608c7df",
+    "aggregateFormat": "sorted path\\0bytes\\0sha256\\n"
+  },
+  "immutableFiles": {
+    "metadataSha256": "18eb5c0f86973987689af327721f1deb90da17ff0ef4286c7315847346efeb66",
+    "artifactInventorySha256": "d314eb8d3133176d9415bfac9b962f0532fd89106e7a5910bfe793c599960e87"
+  },
+  "sanitizedReadOnlyEvidence": [
+    {
+      "project": "chromium-768x1024",
+      "routes": [
+        "protected-cabinet",
+        "protected-profile"
+      ],
+      "expectedPngSha256": "dec783392fe4be448ad8dabed9c7fa5b62f5096094e78827a332d2c6fde570f5",
+      "observedPngSha256": "8ff3ca0e38a27a88ec7e2949a6883cd71c4f0e824f442fc0eb72bd7aa613475f"
+    },
+    {
+      "project": "chromium-1440x900",
+      "routes": [
+        "protected-passkey-setup"
+      ],
+      "expectedPngSha256": "05f933b14befeb9567984236508da0ec1998ba2a32a433b2570d54243893b8c2",
+      "observedPngSha256": "5ba38281b5943b9f7c2a9bba52e561dc062f1fc62c1b0e0aa29b2684293dc983"
+    }
+  ],
+  "canonicalReplacement": "f5cb6f543d85256e7733a1ade6a4f451d86cf378-deterministic-v4"
+}

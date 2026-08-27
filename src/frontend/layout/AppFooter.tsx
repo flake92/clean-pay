@@ -9,7 +9,7 @@ const AppFooter = () => {
         <footer className="layout-footer flex align-items-center">
             <Image
                 src={branding.logoUrl}
-                alt={`${branding.name} logo`}
+                alt=""
                 width={14}
                 height={14}
                 unoptimized

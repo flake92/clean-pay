@@ -2,8 +2,13 @@ import type { ReadinessGateway } from "@/application/health/ports/readiness-gate
 import { redisCommand } from "@/backend/cache/redis";
 import { getEnv } from "@/backend/config/env";
 import { prismaDatabaseHealthCheck } from "@/backend/integrations/health/prisma-database-health-check";
+import {
+  credentialedFetch,
+  readBoundedJsonFromUnknown,
+} from "@/backend/integrations/http/upstream-http";
 
 const READINESS_CACHE_KEY = "clean-pay:health:readiness:v1";
+const MAX_READINESS_JSON_BYTES = 1024 * 1024;
 
 async function cancelResponseBody(response: Response) {
   try {
@@ -28,7 +33,7 @@ export function createProductionReadinessGateway(): ReadinessGateway {
       if (pong !== "PONG") throw new Error("Redis did not return PONG");
     },
     async checkRemnashop(signal) {
-      const plansResponse = await fetch(`${env.remnashopApiBaseUrl}/plans/public`, {
+      const plansResponse = await credentialedFetch(`${env.remnashopApiBaseUrl}/plans/public`, {
         cache: "no-store",
         signal,
       });
@@ -46,7 +51,7 @@ export function createProductionReadinessGateway(): ReadinessGateway {
       }
 
       for (const path of ["/auth/email/start", "/auth/identify", "/auth/service-session"]) {
-        const response = await fetch(`${env.remnashopApiBaseUrl}${path}`, {
+        const response = await credentialedFetch(`${env.remnashopApiBaseUrl}${path}`, {
           method: "POST",
           headers: {
             "content-type": "application/json",
@@ -73,7 +78,7 @@ export function createProductionReadinessGateway(): ReadinessGateway {
       // No user cookie is available to readiness. An unsupported method checks
       // the exact path without changing state: FastAPI returns 405 when the
       // PR #135 route exists and 404 on an older Remnashop image.
-      const notificationPreferencesResponse = await fetch(
+      const notificationPreferencesResponse = await credentialedFetch(
         `${env.remnashopApiBaseUrl}/auth/notification-preferences`,
         {
           method: "POST",
@@ -101,14 +106,22 @@ export function createProductionReadinessGateway(): ReadinessGateway {
       }
     },
     async checkTelegramOidc(signal) {
-      const response = await fetch(env.telegramOidc.jwksUri, {
+      const response = await credentialedFetch(env.telegramOidc.jwksUri, {
         cache: "no-store",
         signal,
       });
 
-      if (!response.ok) throw new Error(`Telegram OIDC returned ${response.status}`);
-      const body = await response.json() as { keys?: unknown[] };
-      if (!Array.isArray(body.keys) || body.keys.length === 0) {
+      if (!response.ok) {
+        await cancelResponseBody(response);
+        throw new Error(`Telegram OIDC returned ${response.status}`);
+      }
+      const value = await readBoundedJsonFromUnknown(response, {
+        maxBytes: MAX_READINESS_JSON_BYTES,
+      });
+      const keys = value && typeof value === "object" && !Array.isArray(value)
+        ? (value as Record<string, unknown>).keys
+        : undefined;
+      if (!Array.isArray(keys) || keys.length === 0) {
         throw new Error("Telegram OIDC JWKS did not include keys");
       }
     },
@@ -128,7 +141,7 @@ export function createProductionReadinessGateway(): ReadinessGateway {
     ...(remnawaveUrl ? {
       async checkRemnawave(signal: AbortSignal) {
         if (!remnawaveToken) throw new Error("Remnawave token is not configured");
-        const response = await fetch(new URL("/api/system/metadata", remnawaveUrl), {
+        const response = await credentialedFetch(new URL("/api/system/metadata", remnawaveUrl), {
           headers: {
             accept: "application/json",
             authorization: remnawaveToken.startsWith("Bearer ")

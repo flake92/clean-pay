@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 const sessionMock = vi.hoisted(() => ({
   getCurrentSession: vi.fn(),
@@ -40,8 +40,6 @@ describeWithPostgres("Telegram recovery PostgreSQL serialization", () => {
   let sessionId = "";
 
   beforeAll(async () => {
-    vi.stubEnv("REMNAWAVE_API_BASE_URL", "https://remnawave.test");
-    vi.stubEnv("REMNAWAVE_TOKEN", "test-remnawave-token");
     process.env.DATABASE_URL = realDatabaseUrl as string;
     delete (globalThis as typeof globalThis & { prisma?: unknown }).prisma;
 
@@ -126,6 +124,11 @@ describeWithPostgres("Telegram recovery PostgreSQL serialization", () => {
       }),
     );
   }, 120_000);
+
+  beforeEach(() => {
+    vi.stubEnv("REMNAWAVE_API_BASE_URL", "https://remnawave.test");
+    vi.stubEnv("REMNAWAVE_TOKEN", "test-remnawave-token");
+  });
 
   afterAll(async () => {
     vi.unstubAllGlobals();

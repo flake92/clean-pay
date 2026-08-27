@@ -1,7 +1,5 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-import type { FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "primereact/button";
 import { InputText } from "primereact/inputtext";
@@ -15,17 +13,7 @@ import {
   CabinetPaymentHistorySection,
 } from "@/frontend/components/cabinet-responsive-sections";
 import { hasRenewOffer } from "@/frontend/lib/subscription-offers";
-import type {
-  DevicesResponse,
-  SubscriptionOffersResponse,
-} from "@/shared/domain/subscriptions";
 import type { CabinetViewModel } from "@/application/models/cabinet";
-import {
-  activatePromocodeAction,
-  deleteAllDevicesAction,
-  deleteDeviceAction,
-  reissueSubscriptionAction,
-} from "@/app/actions/cabinet";
 import { logoutAction } from "@/app/actions/session";
 import {
   detailValue,
@@ -36,229 +24,49 @@ import {
   statusLabel,
   statusSeverity,
   trafficLimitStrategyLabel,
-  type CabinetUser,
-  type CurrentSubscription,
-  type SupportSettings,
 } from "@/frontend/components/cabinet-presentation";
+import {
+  selectCabinetPanelData,
+  selectCabinetPanelPresentation,
+} from "@/frontend/components/cabinet-panel-transitions";
 import { DetailLine, Metric } from "@/frontend/components/cabinet-view-parts";
+import { useCabinetPanelController } from "@/frontend/hooks/use-cabinet-panel-controller";
 import { resetChatwootSession } from "@/frontend/lib/chatwoot";
-
-const PAYMENT_HISTORY_REFRESH_INTERVAL_MS = 10_000;
-const PAYMENT_HISTORY_REFRESH_ATTEMPT_LIMIT = 4;
-const REISSUE_SUBSCRIPTION_CONFIRMATION = [
-  "Перевыпуск подписки отключит все текущие устройства.",
-  "",
-  "После перевыпуска старая ссылка перестанет работать, и все устройства придётся заново переподключить.",
-  "",
-  "Вам потребуется:",
-  "• Удалить старую подписку из приложения",
-  "• Добавить новую ссылку из раздела «Подключиться»",
-  "",
-  "Вы уверены, что хотите перевыпустить подписку?",
-].join("\n");
 
 export function CabinetPanel({ model }: { model: CabinetViewModel }) {
   const router = useRouter();
-  const initial = model.status === "ready" ? model : null;
-  const user: CabinetUser | null = initial?.user ?? null;
-  const subscription: CurrentSubscription | null = initial?.subscription ?? null;
-  const offers: SubscriptionOffersResponse | null = initial?.offers ?? null;
-  const devices: DevicesResponse | null = initial?.devices ?? null;
-  const payments = initial?.payments ?? [];
-  const paymentHistoryStatus = initial?.paymentHistoryStatus ?? "current";
-  const support: SupportSettings | null = initial?.support ?? null;
-  const error = model.status === "error" ? model.message : null;
-  const subscriptionError = initial?.subscriptionError ?? null;
-  const [copyStatus, setCopyStatus] = useState<string | null>(null);
-  const [actionMessage, setActionMessage] = useState<string | null>(null);
-  const [promocodeMessage, setPromocodeMessage] = useState<string | null>(null);
-  const [pendingAction, setPendingAction] = useState<string | null>(null);
-  const pendingActionRef = useRef<string | null>(null);
-  const paymentHistoryRefreshAttempts = useRef(0);
-  const [promocode, setPromocode] = useState("");
-
-  useEffect(() => {
-    if (paymentHistoryStatus !== "refreshing") {
-      paymentHistoryRefreshAttempts.current = 0;
-      return;
-    }
-
-    let timeoutId: ReturnType<typeof setTimeout> | null = null;
-    const scheduleRefresh = () => {
-      if (
-        paymentHistoryRefreshAttempts.current >=
-        PAYMENT_HISTORY_REFRESH_ATTEMPT_LIMIT
-      ) {
-        return;
-      }
-
-      timeoutId = setTimeout(() => {
-        paymentHistoryRefreshAttempts.current += 1;
-        router.refresh();
-        scheduleRefresh();
-      }, PAYMENT_HISTORY_REFRESH_INTERVAL_MS);
-    };
-
-    scheduleRefresh();
-
-    return () => {
-      if (timeoutId !== null) clearTimeout(timeoutId);
-    };
-  }, [paymentHistoryStatus, router]);
-
-  function beginPendingAction(action: string) {
-    if (pendingActionRef.current) {
-      return false;
-    }
-
-    pendingActionRef.current = action;
-    setPendingAction(action);
-    return true;
-  }
-
-  function finishPendingAction(action: string) {
-    if (pendingActionRef.current !== action) {
-      return;
-    }
-
-    pendingActionRef.current = null;
-    setPendingAction(null);
-  }
+  const {
+    devices,
+    error,
+    offers,
+    paymentHistoryStatus,
+    payments,
+    subscription,
+    subscriptionError,
+    support,
+    user,
+  } = selectCabinetPanelData(model);
+  const {
+    actionMessage,
+    activatePromocode,
+    copyStatus,
+    copySubscriptionUrl,
+    deleteAllDevices,
+    deleteDevice,
+    pendingAction,
+    promocode,
+    promocodeMessage,
+    reissueSubscription,
+    setPromocode,
+  } = useCabinetPanelController({
+    paymentHistoryStatus,
+    router,
+    subscription,
+  });
 
   async function logout() {
     resetChatwootSession();
     await logoutAction();
-  }
-
-  async function copySubscriptionUrl() {
-    if (!subscription?.url) {
-      return;
-    }
-
-    try {
-      await navigator.clipboard.writeText(subscription.url);
-      setCopyStatus("Ссылка скопирована");
-    } catch {
-      setCopyStatus("Не удалось скопировать");
-    }
-  }
-
-  async function deleteDevice(hwid: string) {
-    if (pendingActionRef.current) {
-      return;
-    }
-
-    const confirmed = window.confirm("Удалить это устройство из подписки?");
-
-    if (!confirmed) {
-      return;
-    }
-
-    const action = `delete-device-${hwid}`;
-    if (!beginPendingAction(action)) {
-      return;
-    }
-    setActionMessage(null);
-
-    try {
-      const result = await deleteDeviceAction(hwid);
-      setActionMessage(result.message);
-      if (result.status === "success") router.refresh();
-    } catch {
-      setActionMessage("Сеть недоступна. Не удалось удалить устройство.");
-    } finally {
-      finishPendingAction(action);
-    }
-  }
-
-  async function deleteAllDevices() {
-    if (pendingActionRef.current) {
-      return;
-    }
-
-    const confirmed = window.confirm("Удалить все устройства из подписки?");
-
-    if (!confirmed) {
-      return;
-    }
-
-    const action = "delete-all-devices";
-    if (!beginPendingAction(action)) {
-      return;
-    }
-    setActionMessage(null);
-
-    try {
-      const result = await deleteAllDevicesAction();
-      setActionMessage(result.message);
-      if (result.status === "success") router.refresh();
-    } catch {
-      setActionMessage("Сеть недоступна. Не удалось удалить устройства.");
-    } finally {
-      finishPendingAction(action);
-    }
-  }
-
-  async function reissueSubscription() {
-    if (pendingActionRef.current) {
-      return;
-    }
-
-    const confirmed = window.confirm(REISSUE_SUBSCRIPTION_CONFIRMATION);
-
-    if (!confirmed) {
-      return;
-    }
-
-    const action = "reissue";
-    if (!beginPendingAction(action)) {
-      return;
-    }
-    setActionMessage(null);
-
-    try {
-      const result = await reissueSubscriptionAction();
-      setActionMessage(result.message);
-      if (result.status === "success") router.refresh();
-    } catch {
-      setActionMessage("Сеть недоступна. Не удалось перевыпустить подписку.");
-    } finally {
-      finishPendingAction(action);
-    }
-  }
-
-  async function activatePromocode(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-
-    if (pendingActionRef.current) {
-      return;
-    }
-
-    const code = promocode.trim();
-
-    if (!code) {
-      setPromocodeMessage("Введите промокод.");
-      return;
-    }
-
-    const action = "promocode";
-    if (!beginPendingAction(action)) {
-      return;
-    }
-    setPromocodeMessage(null);
-
-    try {
-      const result = await activatePromocodeAction(code);
-      setPromocodeMessage(result.message);
-      if (result.status === "success") {
-        setPromocode("");
-        router.refresh();
-      }
-    } catch {
-      setPromocodeMessage("Сеть недоступна. Не удалось активировать промокод.");
-    } finally {
-      finishPendingAction(action);
-    }
   }
 
   if (error) {
@@ -280,18 +88,16 @@ export function CabinetPanel({ model }: { model: CabinetViewModel }) {
     return <Message severity="info" text="Загрузка кабинета..." />;
   }
 
-  const usedTraffic = subscription?.used_traffic_bytes ?? null;
-  const trafficLimit = subscription?.traffic_limit ?? 0;
-  const usagePercent =
-    usedTraffic !== null && trafficLimit > 0
-      ? Math.min(100, Math.round((usedTraffic / trafficLimit) * 100))
-      : null;
-  const deviceCount = devices?.current_count ?? null;
-  const maxDevices = devices?.max_count ?? subscription?.device_limit ?? null;
-  const hasEmail = Boolean(user.email);
-  const isEmailVerified = hasEmail && Boolean(user.emailVerified ?? user.is_email_verified);
-  const shouldShowVerifyEmail = hasEmail && !isEmailVerified;
-  const shouldShowLinkAccount = !user.email || !user.telegramId;
+  const {
+    deviceCount,
+    hasEmail,
+    isEmailVerified,
+    maxDevices,
+    shouldShowLinkAccount,
+    shouldShowVerifyEmail,
+    usagePercent,
+    usedTraffic,
+  } = selectCabinetPanelPresentation({ devices, subscription, user });
 
   return (
     <div className="grid">
@@ -404,7 +210,7 @@ export function CabinetPanel({ model }: { model: CabinetViewModel }) {
 
       <div className="col-12 xl:col-4">
         <div className="card">
-          <h5>Профиль</h5>
+          <h2 className="text-xl">Профиль</h2>
           <div className="grid">
             <div className="col-12">
               <DetailLine label="E-mail" value={user.email ?? "Не привязан"} />
@@ -434,7 +240,7 @@ export function CabinetPanel({ model }: { model: CabinetViewModel }) {
 
       <div className="col-12">
         <div className="card">
-          <h5>Промокод</h5>
+          <h2 className="text-xl">Промокод</h2>
           {promocodeMessage ? <Message severity="info" text={promocodeMessage} /> : null}
           <form className="mt-3 flex w-full flex-column gap-2 md:w-30rem" onSubmit={activatePromocode}>
             <label className="text-sm font-medium text-700" htmlFor="promocode">
@@ -461,7 +267,7 @@ export function CabinetPanel({ model }: { model: CabinetViewModel }) {
       {subscription ? (
       <div className="col-12 xl:col-6">
           <div className="card">
-            <h5>Детали подписки</h5>
+            <h2 className="text-xl">Детали подписки</h2>
             {actionMessage ? <Message severity="info" text={actionMessage} /> : null}
             <div className="grid">
               <div className="col-12 md:col-6">
@@ -504,7 +310,7 @@ export function CabinetPanel({ model }: { model: CabinetViewModel }) {
       (support.email || support.telegramUsername || support.faqUrl) ? (
       <div className="col-12">
         <div className="card">
-          <h5>Поддержка</h5>
+          <h2 className="text-xl">Поддержка</h2>
           <div className="flex flex-wrap gap-2">
             {support.email ? (
               <LinkButton href={`mailto:${support.email}`} label="Написать на почту" outlined />

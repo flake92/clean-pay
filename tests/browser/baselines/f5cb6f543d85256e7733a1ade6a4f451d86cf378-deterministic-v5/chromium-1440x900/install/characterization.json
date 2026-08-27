@@ -1,0 +1,2830 @@
+{
+  "schemaVersion": 1,
+  "baselineCommit": "f5cb6f543d85256e7733a1ade6a4f451d86cf378",
+  "project": "chromium-1440x900",
+  "route": {
+    "id": "install",
+    "kind": "public",
+    "requested": {
+      "origin": "<app-origin>",
+      "pathname": "/install",
+      "query": [
+        {
+          "key": "source",
+          "value": "<sha256:730e6329d252b9cf>"
+        }
+      ],
+      "fragment": "<sha256:1e142e6277b12b7e>"
+    },
+    "final": {
+      "origin": "<app-origin>",
+      "pathname": "/install",
+      "query": [
+        {
+          "key": "source",
+          "value": "<sha256:730e6329d252b9cf>"
+        }
+      ],
+      "fragment": "<sha256:1e142e6277b12b7e>"
+    },
+    "redirects": [
+      {
+        "method": "GET",
+        "url": {
+          "origin": "<app-origin>",
+          "pathname": "/install",
+          "query": [
+            {
+              "key": "source",
+              "value": "<sha256:730e6329d252b9cf>"
+            }
+          ],
+          "fragment": null
+        },
+        "status": 200
+      }
+    ],
+    "finalStatus": 200
+  },
+  "viewport": {
+    "width": 1440,
+    "height": 900
+  },
+  "screenshot": {
+    "width": 1440,
+    "height": 900,
+    "sha256": "69af7cda97c1a4ac764fc932a0ccb7551a335b6976e581aa4e3d8671480e4bed"
+  },
+  "dom": {
+    "type": "element",
+    "tag": "html",
+    "attributes": [
+      {
+        "name": "lang",
+        "value": "ru"
+      }
+    ],
+    "children": [
+      {
+        "type": "element",
+        "tag": "head",
+        "attributes": [],
+        "children": [
+          {
+            "type": "element",
+            "tag": "meta",
+            "attributes": [
+              {
+                "name": "charset",
+                "value": "utf-8"
+              }
+            ],
+            "children": []
+          },
+          {
+            "type": "element",
+            "tag": "link",
+            "attributes": [
+              {
+                "name": "crossorigin",
+                "value": ""
+              },
+              {
+                "name": "href",
+                "value": "/"
+              },
+              {
+                "name": "rel",
+                "value": "preconnect"
+              }
+            ],
+            "children": []
+          },
+          {
+            "type": "element",
+            "tag": "meta",
+            "attributes": [
+              {
+                "name": "content",
+                "value": "width=device-width, initial-scale=1"
+              },
+              {
+                "name": "name",
+                "value": "viewport"
+              }
+            ],
+            "children": []
+          },
+          {
+            "type": "element",
+            "tag": "link",
+            "attributes": [
+              {
+                "name": "data-precedence",
+                "value": "<present>"
+              },
+              {
+                "name": "href",
+                "value": "/_next/static/chunks/3cuj-ir52ggp-.css"
+              },
+              {
+                "name": "rel",
+                "value": "stylesheet"
+              }
+            ],
+            "children": []
+          },
+          {
+            "type": "element",
+            "tag": "link",
+            "attributes": [
+              {
+                "name": "data-precedence",
+                "value": "<present>"
+              },
+              {
+                "name": "href",
+                "value": "/_next/static/chunks/2z3aja1hv4j-4.css"
+              },
+              {
+                "name": "rel",
+                "value": "stylesheet"
+              }
+            ],
+            "children": []
+          },
+          {
+            "type": "element",
+            "tag": "link",
+            "attributes": [
+              {
+                "name": "data-precedence",
+                "value": "<present>"
+              },
+              {
+                "name": "href",
+                "value": "/_next/static/chunks/1nr_6t1jagido.css"
+              },
+              {
+                "name": "rel",
+                "value": "stylesheet"
+              }
+            ],
+            "children": []
+          },
+          {
+            "type": "element",
+            "tag": "link",
+            "attributes": [
+              {
+                "name": "data-precedence",
+                "value": "<present>"
+              },
+              {
+                "name": "href",
+                "value": "/_next/static/chunks/0ef2bgoi-qvq4.css"
+              },
+              {
+                "name": "rel",
+                "value": "stylesheet"
+              }
+            ],
+            "children": []
+          },
+          {
+            "type": "element",
+            "tag": "link",
+            "attributes": [
+              {
+                "name": "as",
+                "value": "script"
+              },
+              {
+                "name": "fetchpriority",
+                "value": "low"
+              },
+              {
+                "name": "href",
+                "value": "/_next/static/chunks/3_pz_xyhj63hd.js"
+              },
+              {
+                "name": "rel",
+                "value": "preload"
+              }
+            ],
+            "children": []
+          },
+          {
+            "type": "element",
+            "tag": "title",
+            "attributes": [],
+            "children": [
+              {
+                "type": "text",
+                "value": "Clean Pay"
+              }
+            ]
+          },
+          {
+            "type": "element",
+            "tag": "meta",
+            "attributes": [
+              {
+                "name": "content",
+                "value": "Clean Pay payment and subscription cabinet"
+              },
+              {
+                "name": "name",
+                "value": "description"
+              }
+            ],
+            "children": []
+          },
+          {
+            "type": "element",
+            "tag": "link",
+            "attributes": [
+              {
+                "name": "href",
+                "value": "/manifest.webmanifest"
+              },
+              {
+                "name": "rel",
+                "value": "manifest"
+              }
+            ],
+            "children": []
+          },
+          {
+            "type": "element",
+            "tag": "meta",
+            "attributes": [
+              {
+                "name": "content",
+                "value": "yes"
+              },
+              {
+                "name": "name",
+                "value": "mobile-web-app-capable"
+              }
+            ],
+            "children": []
+          },
+          {
+            "type": "element",
+            "tag": "meta",
+            "attributes": [
+              {
+                "name": "content",
+                "value": "Clean Pay"
+              },
+              {
+                "name": "name",
+                "value": "apple-mobile-web-app-title"
+              }
+            ],
+            "children": []
+          },
+          {
+            "type": "element",
+            "tag": "meta",
+            "attributes": [
+              {
+                "name": "content",
+                "value": "default"
+              },
+              {
+                "name": "name",
+                "value": "apple-mobile-web-app-status-bar-style"
+              }
+            ],
+            "children": []
+          },
+          {
+            "type": "element",
+            "tag": "link",
+            "attributes": [
+              {
+                "name": "href",
+                "value": "/favicon.ico?favicon.2vob68tjqpejf.ico=<value>"
+              },
+              {
+                "name": "rel",
+                "value": "icon"
+              },
+              {
+                "name": "sizes",
+                "value": "256x256"
+              },
+              {
+                "name": "type",
+                "value": "image/x-icon"
+              }
+            ],
+            "children": []
+          },
+          {
+            "type": "element",
+            "tag": "link",
+            "attributes": [
+              {
+                "name": "href",
+                "value": "/clean-pay-icon-192.png?v=<value>"
+              },
+              {
+                "name": "rel",
+                "value": "apple-touch-icon"
+              },
+              {
+                "name": "sizes",
+                "value": "192x192"
+              },
+              {
+                "name": "type",
+                "value": "image/png"
+              }
+            ],
+            "children": []
+          }
+        ]
+      },
+      {
+        "type": "element",
+        "tag": "body",
+        "attributes": [],
+        "children": [
+          {
+            "type": "element",
+            "tag": "div",
+            "attributes": [
+              {
+                "name": "hidden",
+                "value": ""
+              }
+            ],
+            "children": []
+          },
+          {
+            "type": "element",
+            "tag": "main",
+            "attributes": [
+              {
+                "name": "class",
+                "value": "surface-ground auth-page flex align-items-center justify-content-center w-full overflow-x-hidden"
+              }
+            ],
+            "children": [
+              {
+                "type": "element",
+                "tag": "div",
+                "attributes": [
+                  {
+                    "name": "class",
+                    "value": "w-full flex justify-content-center"
+                  }
+                ],
+                "children": [
+                  {
+                    "type": "element",
+                    "tag": "div",
+                    "attributes": [
+                      {
+                        "name": "class",
+                        "value": "w-full auth-card-frame"
+                      },
+                      {
+                        "name": "style",
+                        "value": "border:1px solid var(--surface-border);border-radius:24px;padding:0.25rem;background:var(--surface-card)"
+                      }
+                    ],
+                    "children": [
+                      {
+                        "type": "element",
+                        "tag": "div",
+                        "attributes": [
+                          {
+                            "name": "class",
+                            "value": "w-full surface-card auth-card"
+                          },
+                          {
+                            "name": "style",
+                            "value": "border-radius:20px"
+                          }
+                        ],
+                        "children": [
+                          {
+                            "type": "element",
+                            "tag": "div",
+                            "attributes": [
+                              {
+                                "name": "class",
+                                "value": "auth-card-content"
+                              }
+                            ],
+                            "children": [
+                              {
+                                "type": "element",
+                                "tag": "div",
+                                "attributes": [
+                                  {
+                                    "name": "class",
+                                    "value": "text-center mb-4"
+                                  }
+                                ],
+                                "children": [
+                                  {
+                                    "type": "element",
+                                    "tag": "img",
+                                    "attributes": [
+                                      {
+                                        "name": "alt",
+                                        "value": "Clean Pay"
+                                      },
+                                      {
+                                        "name": "class",
+                                        "value": "mb-3 flex-shrink-0 clean-auth-logo"
+                                      },
+                                      {
+                                        "name": "data-nimg",
+                                        "value": "<present>"
+                                      },
+                                      {
+                                        "name": "decoding",
+                                        "value": "async"
+                                      },
+                                      {
+                                        "name": "height",
+                                        "value": "68"
+                                      },
+                                      {
+                                        "name": "loading",
+                                        "value": "lazy"
+                                      },
+                                      {
+                                        "name": "src",
+                                        "value": "/clean-pay-logo.png"
+                                      },
+                                      {
+                                        "name": "style",
+                                        "value": "color:transparent"
+                                      },
+                                      {
+                                        "name": "width",
+                                        "value": "68"
+                                      }
+                                    ],
+                                    "children": []
+                                  },
+                                  {
+                                    "type": "element",
+                                    "tag": "h1",
+                                    "attributes": [
+                                      {
+                                        "name": "class",
+                                        "value": "text-900 text-3xl font-medium mb-2 auth-title"
+                                      }
+                                    ],
+                                    "children": [
+                                      {
+                                        "type": "text",
+                                        "value": "Установить Clean Pay"
+                                      }
+                                    ]
+                                  },
+                                  {
+                                    "type": "element",
+                                    "tag": "span",
+                                    "attributes": [
+                                      {
+                                        "name": "class",
+                                        "value": "text-600 font-medium line-height-3 auth-description"
+                                      }
+                                    ],
+                                    "children": [
+                                      {
+                                        "type": "text",
+                                        "value": "Добавьте кабинет на главный экран с названием и логотипом Clean Pay."
+                                      }
+                                    ]
+                                  }
+                                ]
+                              },
+                              {
+                                "type": "element",
+                                "tag": "div",
+                                "attributes": [
+                                  {
+                                    "name": "class",
+                                    "value": "flex flex-column gap-3 align-items-center text-center"
+                                  }
+                                ],
+                                "children": [
+                                  {
+                                    "type": "element",
+                                    "tag": "p",
+                                    "attributes": [
+                                      {
+                                        "name": "class",
+                                        "value": "m-0 text-600 line-height-3"
+                                      }
+                                    ],
+                                    "children": [
+                                      {
+                                        "type": "text",
+                                        "value": "На Android нажмите кнопку ниже и подтвердите установку. На iPhone подробная инструкция откроется автоматически и покажет все действия в Safari."
+                                      }
+                                    ]
+                                  },
+                                  {
+                                    "type": "element",
+                                    "tag": "button",
+                                    "attributes": [
+                                      {
+                                        "name": "aria-busy",
+                                        "value": "false"
+                                      },
+                                      {
+                                        "name": "class",
+                                        "value": "p-button p-component p-button-outlined"
+                                      },
+                                      {
+                                        "name": "type",
+                                        "value": "button"
+                                      }
+                                    ],
+                                    "children": [
+                                      {
+                                        "type": "element",
+                                        "tag": "span",
+                                        "attributes": [
+                                          {
+                                            "name": "class",
+                                            "value": "p-button-icon p-c pi pi-mobile"
+                                          }
+                                        ],
+                                        "children": []
+                                      },
+                                      {
+                                        "type": "element",
+                                        "tag": "span",
+                                        "attributes": [
+                                          {
+                                            "name": "class",
+                                            "value": "p-button-label"
+                                          }
+                                        ],
+                                        "children": [
+                                          {
+                                            "type": "text",
+                                            "value": "Установить приложение"
+                                          }
+                                        ]
+                                      }
+                                    ]
+                                  }
+                                ]
+                              },
+                              {
+                                "type": "element",
+                                "tag": "div",
+                                "attributes": [
+                                  {
+                                    "name": "class",
+                                    "value": "text-center mt-3"
+                                  }
+                                ],
+                                "children": [
+                                  {
+                                    "type": "element",
+                                    "tag": "a",
+                                    "attributes": [
+                                      {
+                                        "name": "class",
+                                        "value": "font-medium no-underline"
+                                      },
+                                      {
+                                        "name": "href",
+                                        "value": "/"
+                                      },
+                                      {
+                                        "name": "style",
+                                        "value": "color:var(--primary-color)"
+                                      }
+                                    ],
+                                    "children": [
+                                      {
+                                        "type": "text",
+                                        "value": "Clean Pay"
+                                      }
+                                    ]
+                                  },
+                                  {
+                                    "type": "element",
+                                    "tag": "div",
+                                    "attributes": [
+                                      {
+                                        "name": "aria-label",
+                                        "value": "Версия приложения 0.1.1"
+                                      },
+                                      {
+                                        "name": "class",
+                                        "value": "text-600 text-sm mt-2"
+                                      }
+                                    ],
+                                    "children": [
+                                      {
+                                        "type": "text",
+                                        "value": "Версия"
+                                      },
+                                      {
+                                        "type": "text",
+                                        "value": "0.1.1"
+                                      }
+                                    ]
+                                  }
+                                ]
+                              }
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "computedStyles": [
+    {
+      "path": "html > body",
+      "tag": "body",
+      "visible": true,
+      "box": {
+        "x": 0,
+        "y": 0,
+        "width": 1440,
+        "height": 900
+      },
+      "style": {
+        "align-items": "normal",
+        "background-color": "rgb(239, 243, 248)",
+        "border-bottom-color": "rgb(17, 24, 39)",
+        "border-bottom-left-radius": "0px",
+        "border-bottom-right-radius": "0px",
+        "border-bottom-style": "none",
+        "border-bottom-width": "0px",
+        "border-left-color": "rgb(17, 24, 39)",
+        "border-left-style": "none",
+        "border-left-width": "0px",
+        "border-right-color": "rgb(17, 24, 39)",
+        "border-right-style": "none",
+        "border-right-width": "0px",
+        "border-top-color": "rgb(17, 24, 39)",
+        "border-top-left-radius": "0px",
+        "border-top-right-radius": "0px",
+        "border-top-style": "none",
+        "border-top-width": "0px",
+        "box-shadow": "none",
+        "color": "rgb(17, 24, 39)",
+        "display": "block",
+        "flex-direction": "row",
+        "font-family": "\"Inter var\", sans-serif",
+        "font-size": "16px",
+        "font-weight": "400",
+        "gap": "normal",
+        "justify-content": "normal",
+        "line-height": "normal",
+        "margin-bottom": "0px",
+        "margin-left": "0px",
+        "margin-right": "0px",
+        "margin-top": "0px",
+        "max-width": "none",
+        "min-height": "100%",
+        "opacity": "1",
+        "overflow": "hidden auto",
+        "padding-bottom": "0px",
+        "padding-left": "0px",
+        "padding-right": "0px",
+        "padding-top": "0px",
+        "position": "static",
+        "text-align": "start",
+        "visibility": "visible",
+        "white-space": "normal",
+        "z-index": "auto"
+      }
+    },
+    {
+      "path": "html > body > main",
+      "tag": "main",
+      "visible": true,
+      "box": {
+        "x": 0,
+        "y": 0,
+        "width": 1440,
+        "height": 900
+      },
+      "style": {
+        "align-items": "center",
+        "background-color": "rgba(0, 0, 0, 0)",
+        "border-bottom-color": "rgb(17, 24, 39)",
+        "border-bottom-left-radius": "0px",
+        "border-bottom-right-radius": "0px",
+        "border-bottom-style": "none",
+        "border-bottom-width": "0px",
+        "border-left-color": "rgb(17, 24, 39)",
+        "border-left-style": "none",
+        "border-left-width": "0px",
+        "border-right-color": "rgb(17, 24, 39)",
+        "border-right-style": "none",
+        "border-right-width": "0px",
+        "border-top-color": "rgb(17, 24, 39)",
+        "border-top-left-radius": "0px",
+        "border-top-right-radius": "0px",
+        "border-top-style": "none",
+        "border-top-width": "0px",
+        "box-shadow": "none",
+        "color": "rgb(17, 24, 39)",
+        "display": "flex",
+        "flex-direction": "row",
+        "font-family": "\"Inter var\", sans-serif",
+        "font-size": "16px",
+        "font-weight": "400",
+        "gap": "normal",
+        "justify-content": "center",
+        "line-height": "normal",
+        "margin-bottom": "0px",
+        "margin-left": "0px",
+        "margin-right": "0px",
+        "margin-top": "0px",
+        "max-width": "none",
+        "min-height": "900px",
+        "opacity": "1",
+        "overflow": "hidden auto",
+        "padding-bottom": "16px",
+        "padding-left": "16px",
+        "padding-right": "16px",
+        "padding-top": "16px",
+        "position": "static",
+        "text-align": "start",
+        "visibility": "visible",
+        "white-space": "normal",
+        "z-index": "auto"
+      }
+    },
+    {
+      "path": "html > body > main > div > div > div > div > div:nth-of-type(1) > h1",
+      "tag": "h1",
+      "visible": true,
+      "box": {
+        "x": 448,
+        "y": 339.7,
+        "width": 544,
+        "height": 33.59
+      },
+      "style": {
+        "align-items": "normal",
+        "background-color": "rgba(0, 0, 0, 0)",
+        "border-bottom-color": "rgb(17, 24, 39)",
+        "border-bottom-left-radius": "0px",
+        "border-bottom-right-radius": "0px",
+        "border-bottom-style": "none",
+        "border-bottom-width": "0px",
+        "border-left-color": "rgb(17, 24, 39)",
+        "border-left-style": "none",
+        "border-left-width": "0px",
+        "border-right-color": "rgb(17, 24, 39)",
+        "border-right-style": "none",
+        "border-right-width": "0px",
+        "border-top-color": "rgb(17, 24, 39)",
+        "border-top-left-radius": "0px",
+        "border-top-right-radius": "0px",
+        "border-top-style": "none",
+        "border-top-width": "0px",
+        "box-shadow": "none",
+        "color": "rgb(17, 24, 39)",
+        "display": "block",
+        "flex-direction": "row",
+        "font-family": "\"Inter var\", sans-serif",
+        "font-size": "28px",
+        "font-weight": "500",
+        "gap": "normal",
+        "justify-content": "normal",
+        "line-height": "33.6px",
+        "margin-bottom": "8px",
+        "margin-left": "0px",
+        "margin-right": "0px",
+        "margin-top": "24px",
+        "max-width": "none",
+        "min-height": "0px",
+        "opacity": "1",
+        "overflow": "visible",
+        "padding-bottom": "0px",
+        "padding-left": "0px",
+        "padding-right": "0px",
+        "padding-top": "0px",
+        "position": "static",
+        "text-align": "center",
+        "visibility": "visible",
+        "white-space": "normal",
+        "z-index": "auto"
+      }
+    },
+    {
+      "path": "html > body > main > div > div > div > div > div:nth-of-type(2) > button",
+      "tag": "button",
+      "visible": true,
+      "box": {
+        "x": 448,
+        "y": 541.3,
+        "width": 544,
+        "height": 50
+      },
+      "style": {
+        "align-items": "center",
+        "background-color": "rgba(0, 0, 0, 0)",
+        "border-bottom-color": "rgb(99, 102, 241)",
+        "border-bottom-left-radius": "6px",
+        "border-bottom-right-radius": "6px",
+        "border-bottom-style": "solid",
+        "border-bottom-width": "1px",
+        "border-left-color": "rgb(99, 102, 241)",
+        "border-left-style": "solid",
+        "border-left-width": "1px",
+        "border-right-color": "rgb(99, 102, 241)",
+        "border-right-style": "solid",
+        "border-right-width": "1px",
+        "border-top-color": "rgb(99, 102, 241)",
+        "border-top-left-radius": "6px",
+        "border-top-right-radius": "6px",
+        "border-top-style": "solid",
+        "border-top-width": "1px",
+        "box-shadow": "none",
+        "color": "rgb(99, 102, 241)",
+        "display": "flex",
+        "flex-direction": "row",
+        "font-family": "\"Inter var\", sans-serif",
+        "font-size": "16px",
+        "font-weight": "700",
+        "gap": "8px",
+        "justify-content": "center",
+        "line-height": "20px",
+        "margin-bottom": "0px",
+        "margin-left": "0px",
+        "margin-right": "0px",
+        "margin-top": "0px",
+        "max-width": "100%",
+        "min-height": "50px",
+        "opacity": "1",
+        "overflow": "visible",
+        "padding-bottom": "14px",
+        "padding-left": "20px",
+        "padding-right": "20px",
+        "padding-top": "14px",
+        "position": "static",
+        "text-align": "center",
+        "visibility": "visible",
+        "white-space": "nowrap",
+        "z-index": "auto"
+      }
+    },
+    {
+      "path": "html > body > main > div > div > div > div > div:nth-of-type(3) > a",
+      "tag": "a",
+      "visible": true,
+      "box": {
+        "x": 680.92,
+        "y": 607.3,
+        "width": 78.16,
+        "height": 20
+      },
+      "style": {
+        "align-items": "normal",
+        "background-color": "rgba(0, 0, 0, 0)",
+        "border-bottom-color": "rgb(99, 102, 241)",
+        "border-bottom-left-radius": "0px",
+        "border-bottom-right-radius": "0px",
+        "border-bottom-style": "none",
+        "border-bottom-width": "0px",
+        "border-left-color": "rgb(99, 102, 241)",
+        "border-left-style": "none",
+        "border-left-width": "0px",
+        "border-right-color": "rgb(99, 102, 241)",
+        "border-right-style": "none",
+        "border-right-width": "0px",
+        "border-top-color": "rgb(99, 102, 241)",
+        "border-top-left-radius": "0px",
+        "border-top-right-radius": "0px",
+        "border-top-style": "none",
+        "border-top-width": "0px",
+        "box-shadow": "none",
+        "color": "rgb(99, 102, 241)",
+        "display": "inline",
+        "flex-direction": "row",
+        "font-family": "\"Inter var\", sans-serif",
+        "font-size": "16px",
+        "font-weight": "500",
+        "gap": "normal",
+        "justify-content": "normal",
+        "line-height": "normal",
+        "margin-bottom": "0px",
+        "margin-left": "0px",
+        "margin-right": "0px",
+        "margin-top": "0px",
+        "max-width": "none",
+        "min-height": "0px",
+        "opacity": "1",
+        "overflow": "visible",
+        "padding-bottom": "0px",
+        "padding-left": "0px",
+        "padding-right": "0px",
+        "padding-top": "0px",
+        "position": "static",
+        "text-align": "center",
+        "visibility": "visible",
+        "white-space": "normal",
+        "z-index": "auto"
+      }
+    }
+  ],
+  "ariaSnapshot": "- main:\n  - img \"Clean Pay\"\n  - heading \"Установить Clean Pay\" [level=1]\n  - text: Добавьте кабинет на главный экран с названием и логотипом Clean Pay.\n  - paragraph: На Android нажмите кнопку ниже и подтвердите установку. На iPhone подробная инструкция откроется автоматически и покажет все действия в Safari.\n  - button \" Установить приложение\"\n  - link \"Clean Pay\":\n    - /url: {\"origin\":\"<app-origin>\",\"pathname\":\"/\",\"query\":[],\"fragment\":null}\n  - text: Версия 0.1.1",
+  "interactiveElements": [
+    {
+      "path": "html > body > main > div > div > div > div > div:nth-of-type(2) > button",
+      "tag": "button",
+      "role": null,
+      "text": "Установить приложение",
+      "ariaLabel": null,
+      "href": null,
+      "visible": true,
+      "disabled": false,
+      "loading": false
+    },
+    {
+      "path": "html > body > main > div > div > div > div > div:nth-of-type(3) > a",
+      "tag": "a",
+      "role": null,
+      "text": "Clean Pay",
+      "ariaLabel": null,
+      "href": "/",
+      "visible": true,
+      "disabled": false,
+      "loading": false
+    }
+  ],
+  "consolePolicy": {
+    "expectedFingerprints": [],
+    "observedExpected": []
+  },
+  "browserState": {
+    "cookies": [],
+    "storage": {
+      "local": [],
+      "session": [],
+      "cacheNames": [],
+      "serviceWorkerScopes": []
+    }
+  },
+  "network": {
+    "requests": [
+      {
+        "index": 0,
+        "method": "GET",
+        "url": {
+          "origin": "<app-origin>",
+          "pathname": "/install",
+          "query": [
+            {
+              "key": "source",
+              "value": "<sha256:730e6329d252b9cf>"
+            }
+          ],
+          "fragment": null
+        },
+        "scope": "application",
+        "resourceType": "document",
+        "navigation": true,
+        "serverAction": {
+          "present": false,
+          "identifier": null
+        },
+        "requestHeaders": [
+          {
+            "name": "accept",
+            "value": {
+              "bytes": 135,
+              "sha256": "f2dc86899f6d0ab65c244825bbe60c0d8c267385ccb5204812d5f8b07f79ec6c"
+            }
+          },
+          {
+            "name": "accept-language",
+            "value": {
+              "bytes": 5,
+              "sha256": "d3555b890eb35b88d3cb9ce38d8e64de37a39fcb9d8930fa297f454996543a54"
+            }
+          },
+          {
+            "name": "sec-ch-ua",
+            "value": {
+              "bytes": 66,
+              "sha256": "27e6edc326b21eb663888a7317cfd4710d559fc9e6c8093ff5016c7aa469d4fd"
+            }
+          },
+          {
+            "name": "sec-ch-ua-mobile",
+            "value": {
+              "bytes": 2,
+              "sha256": "36100dcc5adbcee0b8d9480dda9be2a0cd192e33af3a6933caad3a09fd50c1c0"
+            }
+          },
+          {
+            "name": "sec-ch-ua-platform",
+            "value": {
+              "bytes": 9,
+              "sha256": "0b1d1e9a36456a50dec652d22d95df7908422c429f91c65e9906ce500aaa2d8b"
+            }
+          },
+          {
+            "name": "upgrade-insecure-requests",
+            "value": "1"
+          },
+          {
+            "name": "user-agent",
+            "value": {
+              "bytes": 123,
+              "sha256": "3caf269ff15e9469bb7f47985b75b52aa4c2fd24dbe3118b40ca31edb48c9178"
+            }
+          }
+        ],
+        "postData": null,
+        "redirectedFrom": null,
+        "response": {
+          "status": 200,
+          "statusText": "OK",
+          "fromServiceWorker": false,
+          "headers": [
+            {
+              "name": "cache-control",
+              "value": "s-maxage=31536000"
+            },
+            {
+              "name": "connection",
+              "value": {
+                "bytes": 10,
+                "sha256": "ef4f616f9b068e6b527a81c47581f91cfea5f381da967bedb52ea8c53500328f"
+              }
+            },
+            {
+              "name": "content-encoding",
+              "value": "gzip"
+            },
+            {
+              "name": "content-security-policy",
+              "value": "<volatile>"
+            },
+            {
+              "name": "content-type",
+              "value": "text/html; charset=utf-8"
+            },
+            {
+              "name": "date",
+              "value": "<volatile>"
+            },
+            {
+              "name": "etag",
+              "value": "<volatile>"
+            },
+            {
+              "name": "keep-alive",
+              "value": {
+                "bytes": 9,
+                "sha256": "7ad43e6c952e60c5ec9b2f5db10e097ba3b7e8de249e219aa4f8625eeb75931b"
+              }
+            },
+            {
+              "name": "permissions-policy",
+              "value": {
+                "bytes": 127,
+                "sha256": "9340b8ed7677bf190f14a1e727bb89d321038e4c130ee2c7d9105f6dcdb7e43a"
+              }
+            },
+            {
+              "name": "referrer-policy",
+              "value": "strict-origin-when-cross-origin"
+            },
+            {
+              "name": "strict-transport-security",
+              "value": "max-age=31536000; includeSubDomains"
+            },
+            {
+              "name": "transfer-encoding",
+              "value": {
+                "bytes": 7,
+                "sha256": "59fdd34a0b323f6044e147b843d8ca246a9414d2c7a06c8e95a7e04c3cdaf395"
+              }
+            },
+            {
+              "name": "vary",
+              "value": "rsc, next-router-state-tree, next-router-prefetch, next-router-segment-prefetch, Accept-Encoding"
+            },
+            {
+              "name": "x-clean-pay-trace-id",
+              "value": "<volatile>"
+            },
+            {
+              "name": "x-content-type-options",
+              "value": "nosniff"
+            },
+            {
+              "name": "x-nextjs-cache",
+              "value": "HIT"
+            },
+            {
+              "name": "x-nextjs-prerender",
+              "value": {
+                "bytes": 4,
+                "sha256": "ae8e35be22878fde22dbdefb2b3a0ce4ec2d977873cf7958b75d83393c7100bf"
+              }
+            },
+            {
+              "name": "x-nextjs-stale-time",
+              "value": {
+                "bytes": 3,
+                "sha256": "983bd614bb5afece5ab3b6023f71147cd7b6bc2314f9d27af7422541c6558389"
+              }
+            },
+            {
+              "name": "x-powered-by",
+              "value": {
+                "bytes": 7,
+                "sha256": "30b7f8482c4f570c063e4dff04b91ddc9b2b5f535ac70fedffb1cf34e0d23ec6"
+              }
+            },
+            {
+              "name": "x-request-id",
+              "value": "<volatile>"
+            }
+          ]
+        },
+        "failure": null,
+        "externalTransport": null
+      },
+      {
+        "index": 1,
+        "method": "GET",
+        "url": {
+          "origin": "<app-origin>",
+          "pathname": "/_next/static/chunks/3cuj-ir52ggp-.css",
+          "query": [],
+          "fragment": null
+        },
+        "scope": "application",
+        "resourceType": "stylesheet",
+        "navigation": false,
+        "serverAction": {
+          "present": false,
+          "identifier": null
+        },
+        "requestHeaders": [
+          {
+            "name": "accept",
+            "value": {
+              "bytes": 18,
+              "sha256": "c2ad092018fde14a52b5febd6b403e12f11001eed0aff58f453ab8b621a255d3"
+            }
+          },
+          {
+            "name": "accept-language",
+            "value": {
+              "bytes": 5,
+              "sha256": "d3555b890eb35b88d3cb9ce38d8e64de37a39fcb9d8930fa297f454996543a54"
+            }
+          },
+          {
+            "name": "referer",
+            "value": {
+              "origin": "<app-origin>",
+              "pathname": "/install",
+              "query": [
+                {
+                  "key": "source",
+                  "value": "<sha256:730e6329d252b9cf>"
+                }
+              ],
+              "fragment": null
+            }
+          },
+          {
+            "name": "sec-ch-ua",
+            "value": {
+              "bytes": 66,
+              "sha256": "27e6edc326b21eb663888a7317cfd4710d559fc9e6c8093ff5016c7aa469d4fd"
+            }
+          },
+          {
+            "name": "sec-ch-ua-mobile",
+            "value": {
+              "bytes": 2,
+              "sha256": "36100dcc5adbcee0b8d9480dda9be2a0cd192e33af3a6933caad3a09fd50c1c0"
+            }
+          },
+          {
+            "name": "sec-ch-ua-platform",
+            "value": {
+              "bytes": 9,
+              "sha256": "0b1d1e9a36456a50dec652d22d95df7908422c429f91c65e9906ce500aaa2d8b"
+            }
+          },
+          {
+            "name": "user-agent",
+            "value": {
+              "bytes": 123,
+              "sha256": "3caf269ff15e9469bb7f47985b75b52aa4c2fd24dbe3118b40ca31edb48c9178"
+            }
+          }
+        ],
+        "postData": null,
+        "redirectedFrom": null,
+        "response": {
+          "status": 200,
+          "statusText": "OK",
+          "fromServiceWorker": false,
+          "headers": [
+            {
+              "name": "accept-ranges",
+              "value": "bytes"
+            },
+            {
+              "name": "cache-control",
+              "value": "public, max-age=31536000, immutable"
+            },
+            {
+              "name": "connection",
+              "value": {
+                "bytes": 10,
+                "sha256": "ef4f616f9b068e6b527a81c47581f91cfea5f381da967bedb52ea8c53500328f"
+              }
+            },
+            {
+              "name": "content-encoding",
+              "value": "gzip"
+            },
+            {
+              "name": "content-type",
+              "value": "text/css; charset=UTF-8"
+            },
+            {
+              "name": "date",
+              "value": "<volatile>"
+            },
+            {
+              "name": "etag",
+              "value": "<volatile>"
+            },
+            {
+              "name": "keep-alive",
+              "value": {
+                "bytes": 9,
+                "sha256": "7ad43e6c952e60c5ec9b2f5db10e097ba3b7e8de249e219aa4f8625eeb75931b"
+              }
+            },
+            {
+              "name": "last-modified",
+              "value": "<volatile>"
+            },
+            {
+              "name": "permissions-policy",
+              "value": {
+                "bytes": 127,
+                "sha256": "9340b8ed7677bf190f14a1e727bb89d321038e4c130ee2c7d9105f6dcdb7e43a"
+              }
+            },
+            {
+              "name": "referrer-policy",
+              "value": "strict-origin-when-cross-origin"
+            },
+            {
+              "name": "strict-transport-security",
+              "value": "max-age=31536000; includeSubDomains"
+            },
+            {
+              "name": "transfer-encoding",
+              "value": {
+                "bytes": 7,
+                "sha256": "59fdd34a0b323f6044e147b843d8ca246a9414d2c7a06c8e95a7e04c3cdaf395"
+              }
+            },
+            {
+              "name": "vary",
+              "value": "Accept-Encoding"
+            },
+            {
+              "name": "x-content-type-options",
+              "value": "nosniff"
+            }
+          ]
+        },
+        "failure": null,
+        "externalTransport": null
+      },
+      {
+        "index": 2,
+        "method": "GET",
+        "url": {
+          "origin": "<app-origin>",
+          "pathname": "/_next/static/chunks/2z3aja1hv4j-4.css",
+          "query": [],
+          "fragment": null
+        },
+        "scope": "application",
+        "resourceType": "stylesheet",
+        "navigation": false,
+        "serverAction": {
+          "present": false,
+          "identifier": null
+        },
+        "requestHeaders": [
+          {
+            "name": "accept",
+            "value": {
+              "bytes": 18,
+              "sha256": "c2ad092018fde14a52b5febd6b403e12f11001eed0aff58f453ab8b621a255d3"
+            }
+          },
+          {
+            "name": "accept-language",
+            "value": {
+              "bytes": 5,
+              "sha256": "d3555b890eb35b88d3cb9ce38d8e64de37a39fcb9d8930fa297f454996543a54"
+            }
+          },
+          {
+            "name": "referer",
+            "value": {
+              "origin": "<app-origin>",
+              "pathname": "/install",
+              "query": [
+                {
+                  "key": "source",
+                  "value": "<sha256:730e6329d252b9cf>"
+                }
+              ],
+              "fragment": null
+            }
+          },
+          {
+            "name": "sec-ch-ua",
+            "value": {
+              "bytes": 66,
+              "sha256": "27e6edc326b21eb663888a7317cfd4710d559fc9e6c8093ff5016c7aa469d4fd"
+            }
+          },
+          {
+            "name": "sec-ch-ua-mobile",
+            "value": {
+              "bytes": 2,
+              "sha256": "36100dcc5adbcee0b8d9480dda9be2a0cd192e33af3a6933caad3a09fd50c1c0"
+            }
+          },
+          {
+            "name": "sec-ch-ua-platform",
+            "value": {
+              "bytes": 9,
+              "sha256": "0b1d1e9a36456a50dec652d22d95df7908422c429f91c65e9906ce500aaa2d8b"
+            }
+          },
+          {
+            "name": "user-agent",
+            "value": {
+              "bytes": 123,
+              "sha256": "3caf269ff15e9469bb7f47985b75b52aa4c2fd24dbe3118b40ca31edb48c9178"
+            }
+          }
+        ],
+        "postData": null,
+        "redirectedFrom": null,
+        "response": {
+          "status": 200,
+          "statusText": "OK",
+          "fromServiceWorker": false,
+          "headers": [
+            {
+              "name": "accept-ranges",
+              "value": "bytes"
+            },
+            {
+              "name": "cache-control",
+              "value": "public, max-age=31536000, immutable"
+            },
+            {
+              "name": "connection",
+              "value": {
+                "bytes": 10,
+                "sha256": "ef4f616f9b068e6b527a81c47581f91cfea5f381da967bedb52ea8c53500328f"
+              }
+            },
+            {
+              "name": "content-encoding",
+              "value": "gzip"
+            },
+            {
+              "name": "content-type",
+              "value": "text/css; charset=UTF-8"
+            },
+            {
+              "name": "date",
+              "value": "<volatile>"
+            },
+            {
+              "name": "etag",
+              "value": "<volatile>"
+            },
+            {
+              "name": "keep-alive",
+              "value": {
+                "bytes": 9,
+                "sha256": "7ad43e6c952e60c5ec9b2f5db10e097ba3b7e8de249e219aa4f8625eeb75931b"
+              }
+            },
+            {
+              "name": "last-modified",
+              "value": "<volatile>"
+            },
+            {
+              "name": "permissions-policy",
+              "value": {
+                "bytes": 127,
+                "sha256": "9340b8ed7677bf190f14a1e727bb89d321038e4c130ee2c7d9105f6dcdb7e43a"
+              }
+            },
+            {
+              "name": "referrer-policy",
+              "value": "strict-origin-when-cross-origin"
+            },
+            {
+              "name": "strict-transport-security",
+              "value": "max-age=31536000; includeSubDomains"
+            },
+            {
+              "name": "transfer-encoding",
+              "value": {
+                "bytes": 7,
+                "sha256": "59fdd34a0b323f6044e147b843d8ca246a9414d2c7a06c8e95a7e04c3cdaf395"
+              }
+            },
+            {
+              "name": "vary",
+              "value": "Accept-Encoding"
+            },
+            {
+              "name": "x-content-type-options",
+              "value": "nosniff"
+            }
+          ]
+        },
+        "failure": null,
+        "externalTransport": null
+      },
+      {
+        "index": 3,
+        "method": "GET",
+        "url": {
+          "origin": "<app-origin>",
+          "pathname": "/_next/static/chunks/1nr_6t1jagido.css",
+          "query": [],
+          "fragment": null
+        },
+        "scope": "application",
+        "resourceType": "stylesheet",
+        "navigation": false,
+        "serverAction": {
+          "present": false,
+          "identifier": null
+        },
+        "requestHeaders": [
+          {
+            "name": "accept",
+            "value": {
+              "bytes": 18,
+              "sha256": "c2ad092018fde14a52b5febd6b403e12f11001eed0aff58f453ab8b621a255d3"
+            }
+          },
+          {
+            "name": "accept-language",
+            "value": {
+              "bytes": 5,
+              "sha256": "d3555b890eb35b88d3cb9ce38d8e64de37a39fcb9d8930fa297f454996543a54"
+            }
+          },
+          {
+            "name": "referer",
+            "value": {
+              "origin": "<app-origin>",
+              "pathname": "/install",
+              "query": [
+                {
+                  "key": "source",
+                  "value": "<sha256:730e6329d252b9cf>"
+                }
+              ],
+              "fragment": null
+            }
+          },
+          {
+            "name": "sec-ch-ua",
+            "value": {
+              "bytes": 66,
+              "sha256": "27e6edc326b21eb663888a7317cfd4710d559fc9e6c8093ff5016c7aa469d4fd"
+            }
+          },
+          {
+            "name": "sec-ch-ua-mobile",
+            "value": {
+              "bytes": 2,
+              "sha256": "36100dcc5adbcee0b8d9480dda9be2a0cd192e33af3a6933caad3a09fd50c1c0"
+            }
+          },
+          {
+            "name": "sec-ch-ua-platform",
+            "value": {
+              "bytes": 9,
+              "sha256": "0b1d1e9a36456a50dec652d22d95df7908422c429f91c65e9906ce500aaa2d8b"
+            }
+          },
+          {
+            "name": "user-agent",
+            "value": {
+              "bytes": 123,
+              "sha256": "3caf269ff15e9469bb7f47985b75b52aa4c2fd24dbe3118b40ca31edb48c9178"
+            }
+          }
+        ],
+        "postData": null,
+        "redirectedFrom": null,
+        "response": {
+          "status": 200,
+          "statusText": "OK",
+          "fromServiceWorker": false,
+          "headers": [
+            {
+              "name": "accept-ranges",
+              "value": "bytes"
+            },
+            {
+              "name": "cache-control",
+              "value": "public, max-age=31536000, immutable"
+            },
+            {
+              "name": "connection",
+              "value": {
+                "bytes": 10,
+                "sha256": "ef4f616f9b068e6b527a81c47581f91cfea5f381da967bedb52ea8c53500328f"
+              }
+            },
+            {
+              "name": "content-encoding",
+              "value": "gzip"
+            },
+            {
+              "name": "content-type",
+              "value": "text/css; charset=UTF-8"
+            },
+            {
+              "name": "date",
+              "value": "<volatile>"
+            },
+            {
+              "name": "etag",
+              "value": "<volatile>"
+            },
+            {
+              "name": "keep-alive",
+              "value": {
+                "bytes": 9,
+                "sha256": "7ad43e6c952e60c5ec9b2f5db10e097ba3b7e8de249e219aa4f8625eeb75931b"
+              }
+            },
+            {
+              "name": "last-modified",
+              "value": "<volatile>"
+            },
+            {
+              "name": "permissions-policy",
+              "value": {
+                "bytes": 127,
+                "sha256": "9340b8ed7677bf190f14a1e727bb89d321038e4c130ee2c7d9105f6dcdb7e43a"
+              }
+            },
+            {
+              "name": "referrer-policy",
+              "value": "strict-origin-when-cross-origin"
+            },
+            {
+              "name": "strict-transport-security",
+              "value": "max-age=31536000; includeSubDomains"
+            },
+            {
+              "name": "transfer-encoding",
+              "value": {
+                "bytes": 7,
+                "sha256": "59fdd34a0b323f6044e147b843d8ca246a9414d2c7a06c8e95a7e04c3cdaf395"
+              }
+            },
+            {
+              "name": "vary",
+              "value": "Accept-Encoding"
+            },
+            {
+              "name": "x-content-type-options",
+              "value": "nosniff"
+            }
+          ]
+        },
+        "failure": null,
+        "externalTransport": null
+      },
+      {
+        "index": 4,
+        "method": "GET",
+        "url": {
+          "origin": "<app-origin>",
+          "pathname": "/_next/static/chunks/0ef2bgoi-qvq4.css",
+          "query": [],
+          "fragment": null
+        },
+        "scope": "application",
+        "resourceType": "stylesheet",
+        "navigation": false,
+        "serverAction": {
+          "present": false,
+          "identifier": null
+        },
+        "requestHeaders": [
+          {
+            "name": "accept",
+            "value": {
+              "bytes": 18,
+              "sha256": "c2ad092018fde14a52b5febd6b403e12f11001eed0aff58f453ab8b621a255d3"
+            }
+          },
+          {
+            "name": "accept-language",
+            "value": {
+              "bytes": 5,
+              "sha256": "d3555b890eb35b88d3cb9ce38d8e64de37a39fcb9d8930fa297f454996543a54"
+            }
+          },
+          {
+            "name": "referer",
+            "value": {
+              "origin": "<app-origin>",
+              "pathname": "/install",
+              "query": [
+                {
+                  "key": "source",
+                  "value": "<sha256:730e6329d252b9cf>"
+                }
+              ],
+              "fragment": null
+            }
+          },
+          {
+            "name": "sec-ch-ua",
+            "value": {
+              "bytes": 66,
+              "sha256": "27e6edc326b21eb663888a7317cfd4710d559fc9e6c8093ff5016c7aa469d4fd"
+            }
+          },
+          {
+            "name": "sec-ch-ua-mobile",
+            "value": {
+              "bytes": 2,
+              "sha256": "36100dcc5adbcee0b8d9480dda9be2a0cd192e33af3a6933caad3a09fd50c1c0"
+            }
+          },
+          {
+            "name": "sec-ch-ua-platform",
+            "value": {
+              "bytes": 9,
+              "sha256": "0b1d1e9a36456a50dec652d22d95df7908422c429f91c65e9906ce500aaa2d8b"
+            }
+          },
+          {
+            "name": "user-agent",
+            "value": {
+              "bytes": 123,
+              "sha256": "3caf269ff15e9469bb7f47985b75b52aa4c2fd24dbe3118b40ca31edb48c9178"
+            }
+          }
+        ],
+        "postData": null,
+        "redirectedFrom": null,
+        "response": {
+          "status": 200,
+          "statusText": "OK",
+          "fromServiceWorker": false,
+          "headers": [
+            {
+              "name": "accept-ranges",
+              "value": "bytes"
+            },
+            {
+              "name": "cache-control",
+              "value": "public, max-age=31536000, immutable"
+            },
+            {
+              "name": "connection",
+              "value": {
+                "bytes": 10,
+                "sha256": "ef4f616f9b068e6b527a81c47581f91cfea5f381da967bedb52ea8c53500328f"
+              }
+            },
+            {
+              "name": "content-encoding",
+              "value": "gzip"
+            },
+            {
+              "name": "content-type",
+              "value": "text/css; charset=UTF-8"
+            },
+            {
+              "name": "date",
+              "value": "<volatile>"
+            },
+            {
+              "name": "etag",
+              "value": "<volatile>"
+            },
+            {
+              "name": "keep-alive",
+              "value": {
+                "bytes": 9,
+                "sha256": "7ad43e6c952e60c5ec9b2f5db10e097ba3b7e8de249e219aa4f8625eeb75931b"
+              }
+            },
+            {
+              "name": "last-modified",
+              "value": "<volatile>"
+            },
+            {
+              "name": "permissions-policy",
+              "value": {
+                "bytes": 127,
+                "sha256": "9340b8ed7677bf190f14a1e727bb89d321038e4c130ee2c7d9105f6dcdb7e43a"
+              }
+            },
+            {
+              "name": "referrer-policy",
+              "value": "strict-origin-when-cross-origin"
+            },
+            {
+              "name": "strict-transport-security",
+              "value": "max-age=31536000; includeSubDomains"
+            },
+            {
+              "name": "transfer-encoding",
+              "value": {
+                "bytes": 7,
+                "sha256": "59fdd34a0b323f6044e147b843d8ca246a9414d2c7a06c8e95a7e04c3cdaf395"
+              }
+            },
+            {
+              "name": "vary",
+              "value": "Accept-Encoding"
+            },
+            {
+              "name": "x-content-type-options",
+              "value": "nosniff"
+            }
+          ]
+        },
+        "failure": null,
+        "externalTransport": null
+      },
+      {
+        "index": 5,
+        "method": "GET",
+        "url": {
+          "origin": "<app-origin>",
+          "pathname": "/_next/static/chunks/3_pz_xyhj63hd.js",
+          "query": [],
+          "fragment": null
+        },
+        "scope": "application",
+        "resourceType": "script",
+        "navigation": false,
+        "serverAction": {
+          "present": false,
+          "identifier": null
+        },
+        "requestHeaders": [
+          {
+            "name": "referer",
+            "value": {
+              "origin": "<app-origin>",
+              "pathname": "/install",
+              "query": [
+                {
+                  "key": "source",
+                  "value": "<sha256:730e6329d252b9cf>"
+                }
+              ],
+              "fragment": null
+            }
+          }
+        ],
+        "postData": null,
+        "redirectedFrom": null,
+        "response": null,
+        "failure": {
+          "errorText": {
+            "bytes": 3,
+            "sha256": "438ced67d76cf3c3bf3e9781a9640ab685b2c877f7cc93b6758cc641efd51bc6"
+          }
+        },
+        "externalTransport": null
+      },
+      {
+        "index": 6,
+        "method": "GET",
+        "url": {
+          "origin": "<app-origin>",
+          "pathname": "/_next/static/chunks/2rnab1cp5_yib.js",
+          "query": [],
+          "fragment": null
+        },
+        "scope": "application",
+        "resourceType": "script",
+        "navigation": false,
+        "serverAction": {
+          "present": false,
+          "identifier": null
+        },
+        "requestHeaders": [
+          {
+            "name": "referer",
+            "value": {
+              "origin": "<app-origin>",
+              "pathname": "/install",
+              "query": [
+                {
+                  "key": "source",
+                  "value": "<sha256:730e6329d252b9cf>"
+                }
+              ],
+              "fragment": null
+            }
+          }
+        ],
+        "postData": null,
+        "redirectedFrom": null,
+        "response": null,
+        "failure": {
+          "errorText": {
+            "bytes": 3,
+            "sha256": "438ced67d76cf3c3bf3e9781a9640ab685b2c877f7cc93b6758cc641efd51bc6"
+          }
+        },
+        "externalTransport": null
+      },
+      {
+        "index": 7,
+        "method": "GET",
+        "url": {
+          "origin": "<app-origin>",
+          "pathname": "/_next/static/chunks/1n90bxfp2c3c-.js",
+          "query": [],
+          "fragment": null
+        },
+        "scope": "application",
+        "resourceType": "script",
+        "navigation": false,
+        "serverAction": {
+          "present": false,
+          "identifier": null
+        },
+        "requestHeaders": [
+          {
+            "name": "referer",
+            "value": {
+              "origin": "<app-origin>",
+              "pathname": "/install",
+              "query": [
+                {
+                  "key": "source",
+                  "value": "<sha256:730e6329d252b9cf>"
+                }
+              ],
+              "fragment": null
+            }
+          }
+        ],
+        "postData": null,
+        "redirectedFrom": null,
+        "response": null,
+        "failure": {
+          "errorText": {
+            "bytes": 3,
+            "sha256": "438ced67d76cf3c3bf3e9781a9640ab685b2c877f7cc93b6758cc641efd51bc6"
+          }
+        },
+        "externalTransport": null
+      },
+      {
+        "index": 8,
+        "method": "GET",
+        "url": {
+          "origin": "<app-origin>",
+          "pathname": "/_next/static/chunks/0c_ecv_es_fsv.js",
+          "query": [],
+          "fragment": null
+        },
+        "scope": "application",
+        "resourceType": "script",
+        "navigation": false,
+        "serverAction": {
+          "present": false,
+          "identifier": null
+        },
+        "requestHeaders": [
+          {
+            "name": "referer",
+            "value": {
+              "origin": "<app-origin>",
+              "pathname": "/install",
+              "query": [
+                {
+                  "key": "source",
+                  "value": "<sha256:730e6329d252b9cf>"
+                }
+              ],
+              "fragment": null
+            }
+          }
+        ],
+        "postData": null,
+        "redirectedFrom": null,
+        "response": null,
+        "failure": {
+          "errorText": {
+            "bytes": 3,
+            "sha256": "438ced67d76cf3c3bf3e9781a9640ab685b2c877f7cc93b6758cc641efd51bc6"
+          }
+        },
+        "externalTransport": null
+      },
+      {
+        "index": 9,
+        "method": "GET",
+        "url": {
+          "origin": "<app-origin>",
+          "pathname": "/_next/static/chunks/turbopack-1bseuyg_9epqc.js",
+          "query": [],
+          "fragment": null
+        },
+        "scope": "application",
+        "resourceType": "script",
+        "navigation": false,
+        "serverAction": {
+          "present": false,
+          "identifier": null
+        },
+        "requestHeaders": [
+          {
+            "name": "referer",
+            "value": {
+              "origin": "<app-origin>",
+              "pathname": "/install",
+              "query": [
+                {
+                  "key": "source",
+                  "value": "<sha256:730e6329d252b9cf>"
+                }
+              ],
+              "fragment": null
+            }
+          }
+        ],
+        "postData": null,
+        "redirectedFrom": null,
+        "response": null,
+        "failure": {
+          "errorText": {
+            "bytes": 3,
+            "sha256": "438ced67d76cf3c3bf3e9781a9640ab685b2c877f7cc93b6758cc641efd51bc6"
+          }
+        },
+        "externalTransport": null
+      },
+      {
+        "index": 10,
+        "method": "GET",
+        "url": {
+          "origin": "<app-origin>",
+          "pathname": "/_next/static/chunks/417epfe8zu9l9.js",
+          "query": [],
+          "fragment": null
+        },
+        "scope": "application",
+        "resourceType": "script",
+        "navigation": false,
+        "serverAction": {
+          "present": false,
+          "identifier": null
+        },
+        "requestHeaders": [
+          {
+            "name": "origin",
+            "value": {
+              "origin": "<app-origin>",
+              "pathname": "/",
+              "query": [],
+              "fragment": null
+            }
+          },
+          {
+            "name": "referer",
+            "value": {
+              "origin": "<app-origin>",
+              "pathname": "/install",
+              "query": [
+                {
+                  "key": "source",
+                  "value": "<sha256:730e6329d252b9cf>"
+                }
+              ],
+              "fragment": null
+            }
+          }
+        ],
+        "postData": null,
+        "redirectedFrom": null,
+        "response": null,
+        "failure": {
+          "errorText": {
+            "bytes": 3,
+            "sha256": "438ced67d76cf3c3bf3e9781a9640ab685b2c877f7cc93b6758cc641efd51bc6"
+          }
+        },
+        "externalTransport": null
+      },
+      {
+        "index": 11,
+        "method": "GET",
+        "url": {
+          "origin": "<app-origin>",
+          "pathname": "/_next/static/chunks/0o576gw47zmho.js",
+          "query": [],
+          "fragment": null
+        },
+        "scope": "application",
+        "resourceType": "script",
+        "navigation": false,
+        "serverAction": {
+          "present": false,
+          "identifier": null
+        },
+        "requestHeaders": [
+          {
+            "name": "origin",
+            "value": {
+              "origin": "<app-origin>",
+              "pathname": "/",
+              "query": [],
+              "fragment": null
+            }
+          },
+          {
+            "name": "referer",
+            "value": {
+              "origin": "<app-origin>",
+              "pathname": "/install",
+              "query": [
+                {
+                  "key": "source",
+                  "value": "<sha256:730e6329d252b9cf>"
+                }
+              ],
+              "fragment": null
+            }
+          }
+        ],
+        "postData": null,
+        "redirectedFrom": null,
+        "response": null,
+        "failure": {
+          "errorText": {
+            "bytes": 3,
+            "sha256": "438ced67d76cf3c3bf3e9781a9640ab685b2c877f7cc93b6758cc641efd51bc6"
+          }
+        },
+        "externalTransport": null
+      },
+      {
+        "index": 12,
+        "method": "GET",
+        "url": {
+          "origin": "<app-origin>",
+          "pathname": "/_next/static/chunks/3puecak3dlhhc.js",
+          "query": [],
+          "fragment": null
+        },
+        "scope": "application",
+        "resourceType": "script",
+        "navigation": false,
+        "serverAction": {
+          "present": false,
+          "identifier": null
+        },
+        "requestHeaders": [
+          {
+            "name": "origin",
+            "value": {
+              "origin": "<app-origin>",
+              "pathname": "/",
+              "query": [],
+              "fragment": null
+            }
+          },
+          {
+            "name": "referer",
+            "value": {
+              "origin": "<app-origin>",
+              "pathname": "/install",
+              "query": [
+                {
+                  "key": "source",
+                  "value": "<sha256:730e6329d252b9cf>"
+                }
+              ],
+              "fragment": null
+            }
+          }
+        ],
+        "postData": null,
+        "redirectedFrom": null,
+        "response": null,
+        "failure": {
+          "errorText": {
+            "bytes": 3,
+            "sha256": "438ced67d76cf3c3bf3e9781a9640ab685b2c877f7cc93b6758cc641efd51bc6"
+          }
+        },
+        "externalTransport": null
+      },
+      {
+        "index": 13,
+        "method": "GET",
+        "url": {
+          "origin": "<app-origin>",
+          "pathname": "/_next/static/chunks/0jtqdqswl_2bx.js",
+          "query": [],
+          "fragment": null
+        },
+        "scope": "application",
+        "resourceType": "script",
+        "navigation": false,
+        "serverAction": {
+          "present": false,
+          "identifier": null
+        },
+        "requestHeaders": [
+          {
+            "name": "origin",
+            "value": {
+              "origin": "<app-origin>",
+              "pathname": "/",
+              "query": [],
+              "fragment": null
+            }
+          },
+          {
+            "name": "referer",
+            "value": {
+              "origin": "<app-origin>",
+              "pathname": "/install",
+              "query": [
+                {
+                  "key": "source",
+                  "value": "<sha256:730e6329d252b9cf>"
+                }
+              ],
+              "fragment": null
+            }
+          }
+        ],
+        "postData": null,
+        "redirectedFrom": null,
+        "response": null,
+        "failure": {
+          "errorText": {
+            "bytes": 3,
+            "sha256": "438ced67d76cf3c3bf3e9781a9640ab685b2c877f7cc93b6758cc641efd51bc6"
+          }
+        },
+        "externalTransport": null
+      },
+      {
+        "index": 14,
+        "method": "GET",
+        "url": {
+          "origin": "<app-origin>",
+          "pathname": "/_next/static/chunks/42p1bzxdfz_z-.js",
+          "query": [],
+          "fragment": null
+        },
+        "scope": "application",
+        "resourceType": "script",
+        "navigation": false,
+        "serverAction": {
+          "present": false,
+          "identifier": null
+        },
+        "requestHeaders": [
+          {
+            "name": "origin",
+            "value": {
+              "origin": "<app-origin>",
+              "pathname": "/",
+              "query": [],
+              "fragment": null
+            }
+          },
+          {
+            "name": "referer",
+            "value": {
+              "origin": "<app-origin>",
+              "pathname": "/install",
+              "query": [
+                {
+                  "key": "source",
+                  "value": "<sha256:730e6329d252b9cf>"
+                }
+              ],
+              "fragment": null
+            }
+          }
+        ],
+        "postData": null,
+        "redirectedFrom": null,
+        "response": null,
+        "failure": {
+          "errorText": {
+            "bytes": 3,
+            "sha256": "438ced67d76cf3c3bf3e9781a9640ab685b2c877f7cc93b6758cc641efd51bc6"
+          }
+        },
+        "externalTransport": null
+      },
+      {
+        "index": 15,
+        "method": "GET",
+        "url": {
+          "origin": "<app-origin>",
+          "pathname": "/_next/static/chunks/2s_lt_pd3i_ln.js",
+          "query": [],
+          "fragment": null
+        },
+        "scope": "application",
+        "resourceType": "script",
+        "navigation": false,
+        "serverAction": {
+          "present": false,
+          "identifier": null
+        },
+        "requestHeaders": [
+          {
+            "name": "origin",
+            "value": {
+              "origin": "<app-origin>",
+              "pathname": "/",
+              "query": [],
+              "fragment": null
+            }
+          },
+          {
+            "name": "referer",
+            "value": {
+              "origin": "<app-origin>",
+              "pathname": "/install",
+              "query": [
+                {
+                  "key": "source",
+                  "value": "<sha256:730e6329d252b9cf>"
+                }
+              ],
+              "fragment": null
+            }
+          }
+        ],
+        "postData": null,
+        "redirectedFrom": null,
+        "response": null,
+        "failure": {
+          "errorText": {
+            "bytes": 3,
+            "sha256": "438ced67d76cf3c3bf3e9781a9640ab685b2c877f7cc93b6758cc641efd51bc6"
+          }
+        },
+        "externalTransport": null
+      },
+      {
+        "index": 16,
+        "method": "GET",
+        "url": {
+          "origin": "<app-origin>",
+          "pathname": "/_next/static/chunks/3_pz_xyhj63hd.js",
+          "query": [],
+          "fragment": null
+        },
+        "scope": "application",
+        "resourceType": "script",
+        "navigation": false,
+        "serverAction": {
+          "present": false,
+          "identifier": null
+        },
+        "requestHeaders": [
+          {
+            "name": "referer",
+            "value": {
+              "origin": "<app-origin>",
+              "pathname": "/install",
+              "query": [
+                {
+                  "key": "source",
+                  "value": "<sha256:730e6329d252b9cf>"
+                }
+              ],
+              "fragment": null
+            }
+          }
+        ],
+        "postData": null,
+        "redirectedFrom": null,
+        "response": null,
+        "failure": {
+          "errorText": {
+            "bytes": 3,
+            "sha256": "438ced67d76cf3c3bf3e9781a9640ab685b2c877f7cc93b6758cc641efd51bc6"
+          }
+        },
+        "externalTransport": null
+      },
+      {
+        "index": 17,
+        "method": "GET",
+        "url": {
+          "origin": "<app-origin>",
+          "pathname": "/_next/static/media/Inter-roman.var.3k898k3j8e4kz.woff2",
+          "query": [],
+          "fragment": null
+        },
+        "scope": "application",
+        "resourceType": "font",
+        "navigation": false,
+        "serverAction": {
+          "present": false,
+          "identifier": null
+        },
+        "requestHeaders": [
+          {
+            "name": "accept",
+            "value": {
+              "bytes": 3,
+              "sha256": "7994750c119d1c03615dde46677ccae5429cdbfc2687b51224f0ae6c5609a63d"
+            }
+          },
+          {
+            "name": "accept-language",
+            "value": {
+              "bytes": 5,
+              "sha256": "d3555b890eb35b88d3cb9ce38d8e64de37a39fcb9d8930fa297f454996543a54"
+            }
+          },
+          {
+            "name": "origin",
+            "value": {
+              "origin": "<app-origin>",
+              "pathname": "/",
+              "query": [],
+              "fragment": null
+            }
+          },
+          {
+            "name": "referer",
+            "value": {
+              "origin": "<app-origin>",
+              "pathname": "/_next/static/chunks/1nr_6t1jagido.css",
+              "query": [],
+              "fragment": null
+            }
+          },
+          {
+            "name": "sec-ch-ua",
+            "value": {
+              "bytes": 66,
+              "sha256": "27e6edc326b21eb663888a7317cfd4710d559fc9e6c8093ff5016c7aa469d4fd"
+            }
+          },
+          {
+            "name": "sec-ch-ua-mobile",
+            "value": {
+              "bytes": 2,
+              "sha256": "36100dcc5adbcee0b8d9480dda9be2a0cd192e33af3a6933caad3a09fd50c1c0"
+            }
+          },
+          {
+            "name": "sec-ch-ua-platform",
+            "value": {
+              "bytes": 9,
+              "sha256": "0b1d1e9a36456a50dec652d22d95df7908422c429f91c65e9906ce500aaa2d8b"
+            }
+          },
+          {
+            "name": "user-agent",
+            "value": {
+              "bytes": 123,
+              "sha256": "3caf269ff15e9469bb7f47985b75b52aa4c2fd24dbe3118b40ca31edb48c9178"
+            }
+          }
+        ],
+        "postData": null,
+        "redirectedFrom": null,
+        "response": {
+          "status": 200,
+          "statusText": "OK",
+          "fromServiceWorker": false,
+          "headers": [
+            {
+              "name": "accept-ranges",
+              "value": "bytes"
+            },
+            {
+              "name": "cache-control",
+              "value": "public, max-age=31536000, immutable"
+            },
+            {
+              "name": "connection",
+              "value": {
+                "bytes": 10,
+                "sha256": "ef4f616f9b068e6b527a81c47581f91cfea5f381da967bedb52ea8c53500328f"
+              }
+            },
+            {
+              "name": "content-length",
+              "value": "227180"
+            },
+            {
+              "name": "content-type",
+              "value": "font/woff2"
+            },
+            {
+              "name": "date",
+              "value": "<volatile>"
+            },
+            {
+              "name": "etag",
+              "value": "<volatile>"
+            },
+            {
+              "name": "keep-alive",
+              "value": {
+                "bytes": 9,
+                "sha256": "7ad43e6c952e60c5ec9b2f5db10e097ba3b7e8de249e219aa4f8625eeb75931b"
+              }
+            },
+            {
+              "name": "last-modified",
+              "value": "<volatile>"
+            },
+            {
+              "name": "permissions-policy",
+              "value": {
+                "bytes": 127,
+                "sha256": "9340b8ed7677bf190f14a1e727bb89d321038e4c130ee2c7d9105f6dcdb7e43a"
+              }
+            },
+            {
+              "name": "referrer-policy",
+              "value": "strict-origin-when-cross-origin"
+            },
+            {
+              "name": "strict-transport-security",
+              "value": "max-age=31536000; includeSubDomains"
+            },
+            {
+              "name": "x-content-type-options",
+              "value": "nosniff"
+            }
+          ]
+        },
+        "failure": null,
+        "externalTransport": null
+      },
+      {
+        "index": 18,
+        "method": "GET",
+        "url": {
+          "origin": "<app-origin>",
+          "pathname": "/_next/static/media/primeicons.1hfnri_l28a5_.woff2",
+          "query": [],
+          "fragment": null
+        },
+        "scope": "application",
+        "resourceType": "font",
+        "navigation": false,
+        "serverAction": {
+          "present": false,
+          "identifier": null
+        },
+        "requestHeaders": [
+          {
+            "name": "accept",
+            "value": {
+              "bytes": 3,
+              "sha256": "7994750c119d1c03615dde46677ccae5429cdbfc2687b51224f0ae6c5609a63d"
+            }
+          },
+          {
+            "name": "accept-language",
+            "value": {
+              "bytes": 5,
+              "sha256": "d3555b890eb35b88d3cb9ce38d8e64de37a39fcb9d8930fa297f454996543a54"
+            }
+          },
+          {
+            "name": "origin",
+            "value": {
+              "origin": "<app-origin>",
+              "pathname": "/",
+              "query": [],
+              "fragment": null
+            }
+          },
+          {
+            "name": "referer",
+            "value": {
+              "origin": "<app-origin>",
+              "pathname": "/_next/static/chunks/3cuj-ir52ggp-.css",
+              "query": [],
+              "fragment": null
+            }
+          },
+          {
+            "name": "sec-ch-ua",
+            "value": {
+              "bytes": 66,
+              "sha256": "27e6edc326b21eb663888a7317cfd4710d559fc9e6c8093ff5016c7aa469d4fd"
+            }
+          },
+          {
+            "name": "sec-ch-ua-mobile",
+            "value": {
+              "bytes": 2,
+              "sha256": "36100dcc5adbcee0b8d9480dda9be2a0cd192e33af3a6933caad3a09fd50c1c0"
+            }
+          },
+          {
+            "name": "sec-ch-ua-platform",
+            "value": {
+              "bytes": 9,
+              "sha256": "0b1d1e9a36456a50dec652d22d95df7908422c429f91c65e9906ce500aaa2d8b"
+            }
+          },
+          {
+            "name": "user-agent",
+            "value": {
+              "bytes": 123,
+              "sha256": "3caf269ff15e9469bb7f47985b75b52aa4c2fd24dbe3118b40ca31edb48c9178"
+            }
+          }
+        ],
+        "postData": null,
+        "redirectedFrom": null,
+        "response": {
+          "status": 200,
+          "statusText": "OK",
+          "fromServiceWorker": false,
+          "headers": [
+            {
+              "name": "accept-ranges",
+              "value": "bytes"
+            },
+            {
+              "name": "cache-control",
+              "value": "public, max-age=31536000, immutable"
+            },
+            {
+              "name": "connection",
+              "value": {
+                "bytes": 10,
+                "sha256": "ef4f616f9b068e6b527a81c47581f91cfea5f381da967bedb52ea8c53500328f"
+              }
+            },
+            {
+              "name": "content-length",
+              "value": "35148"
+            },
+            {
+              "name": "content-type",
+              "value": "font/woff2"
+            },
+            {
+              "name": "date",
+              "value": "<volatile>"
+            },
+            {
+              "name": "etag",
+              "value": "<volatile>"
+            },
+            {
+              "name": "keep-alive",
+              "value": {
+                "bytes": 9,
+                "sha256": "7ad43e6c952e60c5ec9b2f5db10e097ba3b7e8de249e219aa4f8625eeb75931b"
+              }
+            },
+            {
+              "name": "last-modified",
+              "value": "<volatile>"
+            },
+            {
+              "name": "permissions-policy",
+              "value": {
+                "bytes": 127,
+                "sha256": "9340b8ed7677bf190f14a1e727bb89d321038e4c130ee2c7d9105f6dcdb7e43a"
+              }
+            },
+            {
+              "name": "referrer-policy",
+              "value": "strict-origin-when-cross-origin"
+            },
+            {
+              "name": "strict-transport-security",
+              "value": "max-age=31536000; includeSubDomains"
+            },
+            {
+              "name": "x-content-type-options",
+              "value": "nosniff"
+            }
+          ]
+        },
+        "failure": null,
+        "externalTransport": null
+      },
+      {
+        "index": 19,
+        "method": "GET",
+        "url": {
+          "origin": "<app-origin>",
+          "pathname": "/clean-pay-logo.png",
+          "query": [],
+          "fragment": null
+        },
+        "scope": "application",
+        "resourceType": "image",
+        "navigation": false,
+        "serverAction": {
+          "present": false,
+          "identifier": null
+        },
+        "requestHeaders": [
+          {
+            "name": "accept",
+            "value": {
+              "bytes": 64,
+              "sha256": "54f235f31b3873cee918ef5abfe8cd3aa4ac55eb21d5bbd9fe8ef2e0a8cf0bc7"
+            }
+          },
+          {
+            "name": "accept-language",
+            "value": {
+              "bytes": 5,
+              "sha256": "d3555b890eb35b88d3cb9ce38d8e64de37a39fcb9d8930fa297f454996543a54"
+            }
+          },
+          {
+            "name": "referer",
+            "value": {
+              "origin": "<app-origin>",
+              "pathname": "/install",
+              "query": [
+                {
+                  "key": "source",
+                  "value": "<sha256:730e6329d252b9cf>"
+                }
+              ],
+              "fragment": null
+            }
+          },
+          {
+            "name": "sec-ch-ua",
+            "value": {
+              "bytes": 66,
+              "sha256": "27e6edc326b21eb663888a7317cfd4710d559fc9e6c8093ff5016c7aa469d4fd"
+            }
+          },
+          {
+            "name": "sec-ch-ua-mobile",
+            "value": {
+              "bytes": 2,
+              "sha256": "36100dcc5adbcee0b8d9480dda9be2a0cd192e33af3a6933caad3a09fd50c1c0"
+            }
+          },
+          {
+            "name": "sec-ch-ua-platform",
+            "value": {
+              "bytes": 9,
+              "sha256": "0b1d1e9a36456a50dec652d22d95df7908422c429f91c65e9906ce500aaa2d8b"
+            }
+          },
+          {
+            "name": "user-agent",
+            "value": {
+              "bytes": 123,
+              "sha256": "3caf269ff15e9469bb7f47985b75b52aa4c2fd24dbe3118b40ca31edb48c9178"
+            }
+          }
+        ],
+        "postData": null,
+        "redirectedFrom": null,
+        "response": {
+          "status": 200,
+          "statusText": "OK",
+          "fromServiceWorker": false,
+          "headers": [
+            {
+              "name": "accept-ranges",
+              "value": "bytes"
+            },
+            {
+              "name": "cache-control",
+              "value": "public, max-age=0"
+            },
+            {
+              "name": "connection",
+              "value": {
+                "bytes": 10,
+                "sha256": "ef4f616f9b068e6b527a81c47581f91cfea5f381da967bedb52ea8c53500328f"
+              }
+            },
+            {
+              "name": "content-length",
+              "value": "69539"
+            },
+            {
+              "name": "content-type",
+              "value": "image/png"
+            },
+            {
+              "name": "date",
+              "value": "<volatile>"
+            },
+            {
+              "name": "etag",
+              "value": "<volatile>"
+            },
+            {
+              "name": "keep-alive",
+              "value": {
+                "bytes": 9,
+                "sha256": "7ad43e6c952e60c5ec9b2f5db10e097ba3b7e8de249e219aa4f8625eeb75931b"
+              }
+            },
+            {
+              "name": "last-modified",
+              "value": "<volatile>"
+            },
+            {
+              "name": "permissions-policy",
+              "value": {
+                "bytes": 127,
+                "sha256": "9340b8ed7677bf190f14a1e727bb89d321038e4c130ee2c7d9105f6dcdb7e43a"
+              }
+            },
+            {
+              "name": "referrer-policy",
+              "value": "strict-origin-when-cross-origin"
+            },
+            {
+              "name": "strict-transport-security",
+              "value": "max-age=31536000; includeSubDomains"
+            },
+            {
+              "name": "x-content-type-options",
+              "value": "nosniff"
+            }
+          ]
+        },
+        "failure": null,
+        "externalTransport": null
+      }
+    ],
+    "serverActionCount": 0,
+    "serverActions": []
+  }
+}

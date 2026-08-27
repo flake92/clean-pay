@@ -48,7 +48,10 @@ describe("Chatwoot integration boundaries", () => {
   });
 
   it("opens CSP only when the complete server configuration is present", () => {
-    const proxy = source("src/proxy.ts");
+    const proxy = [
+      source("src/proxy.ts"),
+      source("src/shared/edge/proxy-security-policy.ts"),
+    ].join("\n");
 
     expect(proxy).toContain("process.env.CHATWOOT_BASE_URL?.trim()");
     expect(proxy).toContain("process.env.CHATWOOT_WEBSITE_TOKEN?.trim()");
@@ -90,6 +93,60 @@ describe("Chatwoot integration boundaries", () => {
       '\"src/frontend/components/chatwoot-widget.tsx\": {',
     );
     expect(coverage).toContain('\"src/frontend/lib/chatwoot.ts\": {');
+  });
+
+  it("keeps extracted Chatwoot modules inside equivalent coverage gates", () => {
+    const coverage = source("config/vitest/frontend.mts");
+    const componentModules = [
+      "src/frontend/components/chatwoot-widget-controller.ts",
+      "src/frontend/components/chatwoot-widget-state.ts",
+    ];
+    const clientModules = [
+      "src/frontend/lib/chatwoot-context-cache.ts",
+      "src/frontend/lib/chatwoot-contract.ts",
+      "src/frontend/lib/chatwoot-storage.ts",
+      "src/frontend/lib/chatwoot-transitions.ts",
+      "src/frontend/lib/chatwoot-transport.ts",
+    ];
+
+    for (const path of [...componentModules, ...clientModules]) {
+      expect(existsSync(path), path).toBe(true);
+      expect(coverage, path).toContain(`\"${path}\"`);
+      expect(coverage, `${path} threshold`).toContain(`\"${path}\": {`);
+    }
+
+    for (const path of componentModules) {
+      const threshold = coverage.slice(coverage.indexOf(`\"${path}\": {`));
+      expect(threshold).toContain("statements: 83");
+      expect(threshold).toContain("branches: 80");
+      expect(threshold).toContain("functions: 85");
+      expect(threshold).toContain("lines: 83");
+    }
+    for (const path of clientModules) {
+      const threshold = coverage.slice(coverage.indexOf(`\"${path}\": {`));
+      expect(threshold).toContain("statements: 85");
+      expect(threshold).toContain("branches: 78");
+      expect(threshold).toContain("functions: 96");
+      expect(threshold).toContain("lines: 85");
+    }
+  });
+
+  it("keeps transport, storage, and pure Chatwoot transitions separated", () => {
+    const component = source("src/frontend/components/chatwoot-widget.tsx");
+    const controller = source(
+      "src/frontend/components/chatwoot-widget-controller.ts",
+    );
+    const transitions = source("src/frontend/lib/chatwoot-transitions.ts");
+    const transport = source("src/frontend/lib/chatwoot-transport.ts");
+    const storage = source("src/frontend/lib/chatwoot-storage.ts");
+
+    expect(component).toContain("useChatwootWidgetController(config");
+    expect(component).not.toContain("setInterval(");
+    expect(component).not.toContain("addEventListener(");
+    expect(controller).toContain('window.addEventListener("message"');
+    expect(transitions).not.toMatch(/\b(?:window|document|localStorage)\b/);
+    expect(transport).toContain('document.createElement("script")');
+    expect(storage).toContain("window.localStorage");
   });
 
   it("uses only the official Chatwoot launcher", () => {

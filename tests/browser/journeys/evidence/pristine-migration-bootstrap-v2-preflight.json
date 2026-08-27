@@ -1,0 +1,41 @@
+{
+  "schemaVersion": 1,
+  "status": "accepted_for_journey_preflight",
+  "supersedesForJourneyBootstrap": {
+    "failureRecord": {
+      "file": "pristine-migration-bootstrap-failure-v1.json",
+      "sha256": "9477f99ae9ec57a622bcca0582fffa0de9cfea0819a4332d6689d4e90199226c"
+    },
+    "scopeClarification": {
+      "file": "pristine-migration-bootstrap-failure-v1-scope.json",
+      "sha256": "5a8886b78b77827a581c63bcadddeaf26c5241f250fe884ee511e43f3bb160a7"
+    }
+  },
+  "source": {
+    "revision": "f5cb6f543d85256e7733a1ade6a4f451d86cf378",
+    "tree": "6647fc51c61018ba46aae95da21e534434028fbe",
+    "archive": {
+      "format": "git archive --format=tar",
+      "bytes": 7587840,
+      "sha256": "6ccdccdd162ede951850759392a72376792988080307b4e29ae0cffef2397a03"
+    },
+    "publicBuildContractSha256": "5dc1c21d1db2b433736d50c008065d9dfa3adc1ff338fb403569913881b80673",
+    "migrationImage": {
+      "tagAtBuild": "clean-pay-migration:baseline-f5cb6f543d85-journey-synthetic-v1-v2-pristine",
+      "digest": "sha256:5092b1aaf6cbc61722cf9ddbfb17a99dc0c1011b3734865b04931eb40adabc3b",
+      "bytes": 325360966
+    }
+  },
+  "preflight": {
+    "containerNetwork": "none",
+    "containerRootFilesystem": "read-only",
+    "containerRemovedAfterProbe": true,
+    "schemaEngineCliVersion": "e922089b7d7502aff4249d5da3420f6fa55fc6ad",
+    "result": "executable"
+  },
+  "privacy": {
+    "containsEnvironmentValues": false,
+    "containsCredentials": false,
+    "containsDatabaseRows": false
+  }
+}

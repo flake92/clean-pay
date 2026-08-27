@@ -1,10 +1,11 @@
 import type { Pool } from "pg";
 
 import { getEnv } from "@/backend/config/env";
+import { logger } from "@/backend/observability/logger";
 import {
   createPostgresPool,
   postgresPoolMetrics,
-} from "../../../deploy/prod/database-pool.mjs";
+} from "../../../runtime/database-pool.mjs";
 
 type DatabasePoolGlobals = typeof globalThis & {
   cleanPayApplicationDatabasePool?: Pool;
@@ -17,11 +18,22 @@ function sharedPool(
   key: "cleanPayApplicationDatabasePool" | "cleanPayReadinessDatabasePool",
   role: "application" | "readiness",
 ) {
-  databasePoolGlobals[key] ??= createPostgresPool({
+  const existing = databasePoolGlobals[key];
+  if (existing) return existing;
+
+  const pool = createPostgresPool({
     connectionString: getEnv().databaseUrl,
     role,
+    onError(metadata: Record<string, unknown>) {
+      logger.error(
+        "database_pool_error",
+        metadata,
+        { source: "database.pool" },
+      );
+    },
   });
-  return databasePoolGlobals[key];
+  databasePoolGlobals[key] = pool;
+  return pool;
 }
 
 export function getApplicationDatabasePool() {

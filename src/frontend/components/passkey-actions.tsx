@@ -1,88 +1,13 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-
-import {
-  browserSupportsWebAuthn,
-  startAuthentication,
-  startRegistration,
-} from "@simplewebauthn/browser";
 import { Button } from "primereact/button";
 import { InputText } from "primereact/inputtext";
 import { Message } from "primereact/message";
 
 import {
-  beginPasskeyLoginAction,
-  beginPasskeyRegistrationAction,
-  verifyPasskeyLoginAction,
-  verifyPasskeyRegistrationAction,
-} from "@/app/actions/passkeys";
-import { clearSessionAction } from "@/app/actions/session";
-import { navigateTo } from "@/frontend/lib/browser-navigation";
-import { safeRedirectPath } from "@/shared/auth/redirect-policy";
-
-function useWebAuthnSupport() {
-  const [supported, setSupported] = useState<boolean | null>(null);
-
-  useEffect(() => {
-    const timer = window.setTimeout(() => {
-      setSupported(browserSupportsWebAuthn());
-    }, 0);
-
-    return () => window.clearTimeout(timer);
-  }, []);
-
-  return supported;
-}
-
-function isUserCancelled(error: unknown) {
-  if (!(error instanceof Error)) {
-    return false;
-  }
-
-  const name = error.name.toLowerCase();
-  const message = error.message.toLowerCase();
-
-  return (
-    name.includes("notallowed") ||
-    name.includes("abort") ||
-    message.includes("not allowed") ||
-    message.includes("timed out") ||
-    message.includes("cancel")
-  );
-}
-
-function isWebAuthnTransportError(error: unknown) {
-  if (!(error instanceof Error)) {
-    return false;
-  }
-
-  const name = error.name.toLowerCase();
-  const message = error.message.toLowerCase();
-
-  return (
-    (name.includes("typeerror") && message.includes("failed to fetch")) ||
-    message.includes("bluetooth") ||
-    message.includes("networkerror")
-  );
-}
-
-function isUnavailableCredential(error: unknown) {
-  if (!(error instanceof Error)) {
-    return false;
-  }
-
-  const name = error.name.toLowerCase();
-  const message = error.message.toLowerCase();
-
-  return (
-    name.includes("unknownerror") ||
-    name.includes("notreadable") ||
-    message.includes("credential manager") ||
-    message.includes("credential not found") ||
-    message.includes("no credentials")
-  );
-}
+  usePasskeyLoginController,
+  usePasskeySetupController,
+} from "@/frontend/hooks/use-passkey-actions-controller";
 
 export function PasskeyLoginButton({
   consumeTurnstileToken,
@@ -97,60 +22,13 @@ export function PasskeyLoginButton({
   resetTurnstile?: () => void;
   turnstileEnabled?: boolean;
 }) {
-  const destination = safeRedirectPath(redirectTo) ?? "/cabinet";
-  const supported = useWebAuthnSupport();
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const loginPendingRef = useRef(false);
-
-  async function login() {
-    if (loginPendingRef.current) {
-      return;
-    }
-
-    const turnstileToken = turnstileEnabled ? consumeTurnstileToken?.() ?? null : null;
-    if (turnstileEnabled && !turnstileToken) {
-      setError("Пройдите единую проверку безопасности.");
-      return;
-    }
-    loginPendingRef.current = true;
-    setLoading(true);
-    setError(null);
-
-    try {
-      const optionsResult = await beginPasskeyLoginAction({ email, ...(turnstileToken ? { turnstileToken } : {}) });
-      resetTurnstile?.();
-
-      if (!optionsResult.ok) {
-        setError(optionsResult.message);
-        return;
-      }
-
-      const assertion = await startAuthentication({ optionsJSON: optionsResult.options });
-      const verifyResult = await verifyPasskeyLoginAction(assertion);
-
-      if (!verifyResult.ok) {
-        setError(verifyResult.message);
-        return;
-      }
-
-      navigateTo(destination);
-    } catch (error) {
-      resetTurnstile?.();
-      setError(
-        isUserCancelled(error)
-          ? "Окно быстрого входа закрыто. Можно войти по паролю."
-          : isUnavailableCredential(error)
-            ? "Сохранённый на устройстве ключ больше не связан с этим стендом. Войдите через e-mail или Telegram и создайте новый ключ в профиле."
-          : isWebAuthnTransportError(error)
-            ? "Браузер не смог связаться с ключом. Для входа через телефон включите Bluetooth на компьютере и телефоне, затем повторите попытку."
-            : "Не удалось войти быстрым способом.",
-      );
-    } finally {
-      loginPendingRef.current = false;
-      setLoading(false);
-    }
-  }
+  const { error, loading, login, supported } = usePasskeyLoginController({
+    consumeTurnstileToken,
+    email,
+    redirectTo,
+    resetTurnstile,
+    turnstileEnabled,
+  });
 
   if (supported !== true) {
     return null;
@@ -191,95 +69,17 @@ export function PasskeySetupPanel({
   redirectTo?: string;
   required?: boolean;
 }) {
-  const destination = safeRedirectPath(redirectTo) ?? "/cabinet";
-  const supported = useWebAuthnSupport();
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [name, setName] = useState("");
-  const [restarting, setRestarting] = useState(false);
-  const setupPendingRef = useRef(false);
-
-  function continueWithoutPasskey() {
-    if (setupPendingRef.current) {
-      return;
-    }
-    navigateTo(destination);
-  }
-
-  async function restartAuthentication() {
-    if (setupPendingRef.current) {
-      return;
-    }
-    setupPendingRef.current = true;
-    setRestarting(true);
-    setError(null);
-
-    try {
-      const result = await clearSessionAction();
-      if (result.status === "error") {
-        setError(result.message);
-        return;
-      }
-      navigateTo(`/login?${new URLSearchParams({
-        redirect_to: destination,
-      }).toString()}`);
-    } catch {
-      setError("Сеть недоступна. Не удалось начать вход заново.");
-    } finally {
-      setupPendingRef.current = false;
-      setRestarting(false);
-    }
-  }
-
-  async function createPasskey() {
-    if (setupPendingRef.current) {
-      return;
-    }
-    setupPendingRef.current = true;
-    setLoading(true);
-    setError(null);
-
-    try {
-      if (!browserSupportsWebAuthn()) {
-        setError(
-          required
-            ? "Это устройство не поддерживает Passkey. Используйте совместимый браузер или начните вход заново."
-            : "Это устройство не поддерживает быстрый вход. Продолжите в кабинете или используйте другое устройство.",
-        );
-        return;
-      }
-
-      const optionsResult = await beginPasskeyRegistrationAction();
-
-      if (!optionsResult.ok) {
-        setError(optionsResult.message);
-        return;
-      }
-
-      const attestation = await startRegistration({ optionsJSON: optionsResult.options });
-      const verifyResult = await verifyPasskeyRegistrationAction({ ...attestation, name: name.trim() || undefined });
-
-      if (!verifyResult.ok) {
-        setError(verifyResult.message);
-        return;
-      }
-
-      navigateTo(destination);
-    } catch (error) {
-      setError(
-        isUserCancelled(error)
-          ? required
-            ? "Окно Passkey закрыто. Повторите настройку, чтобы завершить вход."
-            : "Окно быстрого входа закрыто. Это не проблема, можно продолжить без него."
-          : isWebAuthnTransportError(error)
-            ? "Браузер не смог связаться с ключом. Для ключа на телефоне включите Bluetooth на компьютере и телефоне, держите телефон рядом и повторите попытку."
-            : "Не удалось создать быстрый вход.",
-      );
-    } finally {
-      setupPendingRef.current = false;
-      setLoading(false);
-    }
-  }
+  const {
+    changeName,
+    continueWithoutPasskey,
+    createPasskey,
+    error,
+    loading,
+    name,
+    restarting,
+    restartAuthentication,
+    supported,
+  } = usePasskeySetupController({ redirectTo, required });
 
   if (supported === false) {
     return (
@@ -331,7 +131,7 @@ export function PasskeySetupPanel({
         <span className="text-sm font-medium text-700">Название ключа</span>
         <InputText
           maxLength={80}
-          onChange={(event) => setName(event.target.value)}
+          onChange={changeName}
           placeholder="Например: Android Chrome или ноутбук"
           value={name}
         />

@@ -709,12 +709,12 @@ jobs:
           [[ "$MIGRATION_IMAGE" =~ @sha256:[a-f0-9]{64}$ ]]
           {
             printf '## Staged; not approved or promoted\n\n'
-            printf 'Source revision: `%s`\n\n' "$SOURCE_REVISION"
-            printf 'Public build contract: `v%s:%s`\n\n' \
+            printf "Source revision: \`%s\`\n\n" "$SOURCE_REVISION"
+            printf "Public build contract: \`v%s:%s\`\n\n" \
               "$PUBLIC_BUILD_CONTRACT_VERSION" "$PUBLIC_BUILD_CONTRACT_SHA256"
-            printf 'Application index: `%s`\n\n' "$APPLICATION_IMAGE"
-            printf 'Migration index: `%s`\n\n' "$MIGRATION_IMAGE"
-            printf 'Download all four per-platform vulnerability evidence artifacts, review each `requestedApproval` (including candidate revision and canonical gated-report SHA-256), and commit only the four reviewed exact scopes to `security/container-vulnerability-exceptions.json`. Empty exception lists are valid only for an exact zero-finding report. Then run this workflow in `promote` mode with these two indexes, source revision, release, and the exact same four public inputs; the public build contract above must match.\n'
+            printf "Application index: \`%s\`\n\n" "$APPLICATION_IMAGE"
+            printf "Migration index: \`%s\`\n\n" "$MIGRATION_IMAGE"
+            printf "Download all four per-platform vulnerability evidence artifacts, review each \`requestedApproval\` (including candidate revision and canonical gated-report SHA-256), and commit only the four reviewed exact scopes to \`security/container-vulnerability-exceptions.json\`. Empty exception lists are valid only for an exact zero-finding report. Then run this workflow in \`promote\` mode with these two indexes, source revision, release, and the exact same four public inputs; the public build contract above must match.\n"
           } >> "$GITHUB_STEP_SUMMARY"
 
   promote:
@@ -782,10 +782,10 @@ jobs:
             printf 'CLEAN_PAY_RELEASE=%s\n' "$CLEAN_PAY_RELEASE"
             printf 'CLEAN_PAY_REVISION=%s\n' "$SOURCE_REVISION"
             printf '```\n'
-            printf '\nPublic build contract: `v%s:%s`.\n' \
+            printf "\nPublic build contract: \`v%s:%s\`.\n" \
               "$PUBLIC_BUILD_CONTRACT_VERSION" "$PUBLIC_BUILD_CONTRACT_SHA256"
-            printf '\nBoth targets were scanned and smoke-executed at this exact index digest on `linux/amd64` and `linux/arm64` before immutable tag promotion.\n'
-            printf 'Exact-SHA CI gate: %s\n' '${{ needs.publish.outputs.ci-url }}'
+            printf "\nBoth targets were scanned and smoke-executed at this exact index digest on \`linux/amd64\` and \`linux/arm64\` before immutable tag promotion.\n"
+            printf 'Exact-SHA CI gate: %s\n' "${{ needs.publish.outputs.ci-url }}"
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Log out from GHCR

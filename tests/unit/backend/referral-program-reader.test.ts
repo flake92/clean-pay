@@ -8,6 +8,10 @@ const mocks = vi.hoisted(() => ({
 vi.mock("@/backend/integrations/remnashop/client", () => ({
   getAuthorizedRemnashopTokens: mocks.authorize,
   remnashopRequest: mocks.remnashopRequest,
+  remnashopValidatedRequest: mocks.remnashopRequest,
+}));
+vi.mock("@/backend/integrations/remnashop/api-client-runtime", () => ({
+  remnashopValidatedRequest: mocks.remnashopRequest,
 }));
 
 import { ReferralProgramAccessError } from "@/application/referral/ports/referral-program-reader";

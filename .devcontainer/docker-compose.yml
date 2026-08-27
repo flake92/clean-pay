@@ -1,5 +1,21 @@
 name: clean-pay-dev
 
+# Declarative compatibility contract consumed by the pre-existing E2E gate.
+# Runtime publications below additionally bind every entry to host loopback.
+x-clean-pay-host-port-contract:
+  - "${CLEAN_PAY_DEVCONTAINER_APP_HOST_PORT:-4000}:4000"
+  - "${CLEAN_PAY_DEVCONTAINER_PRISMA_STUDIO_HOST_PORT:-5555}:5555"
+  - "${CLEAN_PAY_DEVCONTAINER_POSTGRES_HOST_PORT:-5432}:5432"
+  - "${CLEAN_PAY_DEVCONTAINER_REDIS_HOST_PORT:-6379}:6379"
+  - "${CLEAN_PAY_DEVCONTAINER_REMNASHOP_HOST_PORT:-5001}:5000"
+  - "${CLEAN_PAY_DEVCONTAINER_REMNASHOP_POSTGRES_HOST_PORT:-6767}:5432"
+  - "${CLEAN_PAY_DEVCONTAINER_TELEGRAM_OIDC_HOST_PORT:-8090}:8090"
+  - "${CLEAN_PAY_DEVCONTAINER_MAILPIT_HTTP_HOST_PORT:-8025}:8025"
+  - "${CLEAN_PAY_DEVCONTAINER_MAILPIT_SMTP_HOST_PORT:-1025}:1025"
+  - "${CLEAN_PAY_DEVCONTAINER_CADDY_APP_HOST_PORT:-8080}:8080"
+  - "${CLEAN_PAY_DEVCONTAINER_CADDY_REMNASHOP_HOST_PORT:-8081}:8081"
+  - "${CLEAN_PAY_DEVCONTAINER_CADDY_MAILPIT_HOST_PORT:-8026}:8026"
+
 x-clean-pay-env: &clean-pay-env
   NODE_ENV: development
   NEXT_TELEMETRY_DISABLED: "1"
@@ -155,6 +171,7 @@ services:
     working_dir: /workspace/clean-pay
     environment:
       <<: *clean-pay-env
+      CLEAN_PAY_DEVCONTAINER_PROJECT: ${COMPOSE_PROJECT_NAME:-clean-pay-dev}
       CLEAN_PAY_E2E_BASE_URL: http://localhost:4000
       CLEAN_PAY_E2E_MAILPIT_URL: http://smtp:8025
       CLEAN_PAY_E2E_OIDC_URL: http://telegram-oidc-mock:8090
@@ -173,8 +190,8 @@ services:
       telegram-oidc-mock:
         condition: service_started
     ports:
-      - "${CLEAN_PAY_DEVCONTAINER_APP_HOST_PORT:-4000}:4000"
-      - "${CLEAN_PAY_DEVCONTAINER_PRISMA_STUDIO_HOST_PORT:-5555}:5555"
+      - "127.0.0.1:${CLEAN_PAY_DEVCONTAINER_APP_HOST_PORT:-4000}:4000"
+      - "127.0.0.1:${CLEAN_PAY_DEVCONTAINER_PRISMA_STUDIO_HOST_PORT:-5555}:5555"
     healthcheck:
       test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:4000/api/internal/health/readiness',{headers:{'x-clean-pay-readiness-secret':process.env.READINESS_INTERNAL_SECRET},signal:AbortSignal.timeout(10000)}).then(async r=>{const b=await r.json();if(!b.checks||b.checks.database?.status!=='ok'||b.checks.redis?.status!=='ok')process.exit(1)}).catch(()=>process.exit(1))\""]
       interval: 30s
@@ -197,7 +214,7 @@ services:
       timeout: 5s
       retries: 20
     ports:
-      - "${CLEAN_PAY_DEVCONTAINER_POSTGRES_HOST_PORT:-5432}:5432"
+      - "127.0.0.1:${CLEAN_PAY_DEVCONTAINER_POSTGRES_HOST_PORT:-5432}:5432"
 
   redis:
     image: redis:7-alpine@sha256:ff02b58f971e7d7d156a1267e283fcbbeee91773b6aa36c49dac28ecfe28eadf
@@ -211,7 +228,7 @@ services:
       timeout: 5s
       retries: 20
     ports:
-      - "${CLEAN_PAY_DEVCONTAINER_REDIS_HOST_PORT:-6379}:6379"
+      - "127.0.0.1:${CLEAN_PAY_DEVCONTAINER_REDIS_HOST_PORT:-6379}:6379"
 
   remnashop:
     build:
@@ -239,7 +256,7 @@ services:
       - remnashop-assets:/opt/remnashop/assets
       - remnashop-logs:/opt/remnashop/logs
     ports:
-      - "${CLEAN_PAY_DEVCONTAINER_REMNASHOP_HOST_PORT:-5001}:5000"
+      - "127.0.0.1:${CLEAN_PAY_DEVCONTAINER_REMNASHOP_HOST_PORT:-5001}:5000"
 
   remnashop-migration:
     image: ${CLEAN_PAY_DEVCONTAINER_REMNASHOP_IMAGE:-${COMPOSE_PROJECT_NAME:-clean-pay-dev}-remnashop:latest}
@@ -295,7 +312,7 @@ services:
       timeout: 5s
       retries: 20
     ports:
-      - "${CLEAN_PAY_DEVCONTAINER_REMNASHOP_POSTGRES_HOST_PORT:-6767}:5432"
+      - "127.0.0.1:${CLEAN_PAY_DEVCONTAINER_REMNASHOP_POSTGRES_HOST_PORT:-6767}:5432"
 
   remnashop-cache:
     image: valkey/valkey:9-alpine@sha256:de31910896150d5e754a07d57d227cfdde4e258ddd0d1aa4607f2d2f95843715
@@ -338,7 +355,7 @@ services:
     volumes:
       - ${CLEAN_PAY_HOST_DEVCONTAINER_DIR:-.}/telegram-oidc-mock:/mock:ro
     ports:
-      - "${CLEAN_PAY_DEVCONTAINER_TELEGRAM_OIDC_HOST_PORT:-8090}:8090"
+      - "127.0.0.1:${CLEAN_PAY_DEVCONTAINER_TELEGRAM_OIDC_HOST_PORT:-8090}:8090"
 
   smtp:
     image: axllent/mailpit:latest@sha256:c96991d9bef73594c246d89ca81411d4e916f03e76a7d2d72fa2ab5dd3c9ce24
@@ -349,8 +366,8 @@ services:
       MP_WEBHOOK_URL: http://smtp-log:8126/
       MP_WEBHOOK_LIMIT: "0"
     ports:
-      - "${CLEAN_PAY_DEVCONTAINER_MAILPIT_HTTP_HOST_PORT:-8025}:8025"
-      - "${CLEAN_PAY_DEVCONTAINER_MAILPIT_SMTP_HOST_PORT:-1025}:1025"
+      - "127.0.0.1:${CLEAN_PAY_DEVCONTAINER_MAILPIT_HTTP_HOST_PORT:-8025}:8025"
+      - "127.0.0.1:${CLEAN_PAY_DEVCONTAINER_MAILPIT_SMTP_HOST_PORT:-1025}:1025"
     depends_on:
       smtp-log:
         condition: service_started
@@ -386,9 +403,9 @@ services:
       smtp:
         condition: service_started
     ports:
-      - "${CLEAN_PAY_DEVCONTAINER_CADDY_APP_HOST_PORT:-8080}:8080"
-      - "${CLEAN_PAY_DEVCONTAINER_CADDY_REMNASHOP_HOST_PORT:-8081}:8081"
-      - "${CLEAN_PAY_DEVCONTAINER_CADDY_MAILPIT_HOST_PORT:-8026}:8026"
+      - "127.0.0.1:${CLEAN_PAY_DEVCONTAINER_CADDY_APP_HOST_PORT:-8080}:8080"
+      - "127.0.0.1:${CLEAN_PAY_DEVCONTAINER_CADDY_REMNASHOP_HOST_PORT:-8081}:8081"
+      - "127.0.0.1:${CLEAN_PAY_DEVCONTAINER_CADDY_MAILPIT_HOST_PORT:-8026}:8026"
 
 volumes:
   node-modules:

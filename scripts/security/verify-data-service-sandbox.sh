@@ -9,7 +9,8 @@ if [[ ! -f "$SOURCE_COMPOSE_FILE" || -L "$SOURCE_COMPOSE_FILE" ]]; then
   exit 1
 fi
 
-readonly TEMPORARY_PROJECT_DIR="$(mktemp -d ./.clean-pay-data-sandbox.XXXXXX)"
+TEMPORARY_PROJECT_DIR="$(mktemp -d ./.clean-pay-data-sandbox.XXXXXX)"
+readonly TEMPORARY_PROJECT_DIR
 readonly COMPOSE_FILE="$TEMPORARY_PROJECT_DIR/docker-compose.yml"
 
 # Compose validates env_file paths for unselected services too. Work from an

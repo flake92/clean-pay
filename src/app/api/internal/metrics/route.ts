@@ -1,10 +1,13 @@
 import { loadPaymentReconciliationBacklog } from "@/application/payments/run-payment-maintenance";
-import { getEnv } from "@/backend/config/env";
-import { runtimeDatabasePoolMetrics } from "@/backend/database/pools";
-import { productionPaymentMaintenanceRunner } from "@/backend/integrations/payments/payment-maintenance-runner";
-import { logTechnicalError } from "@/backend/observability/audit";
-import { renderPrometheusMetrics } from "@/backend/observability/metrics";
-import { safeEqual, sha256 } from "@/backend/security/crypto";
+import { productionPaymentMaintenanceRunner } from "@/app/_composition/payment-operations-runtime";
+import {
+  getEnv,
+  logTechnicalError,
+  renderPrometheusMetrics,
+  runtimeDatabasePoolMetrics,
+  safeEqual,
+  sha256,
+} from "@/app/_composition/platform-runtime";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

@@ -2,7 +2,7 @@
 set -eu
 umask 077
 
-ROOT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+ROOT_DIR=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 ENV_FILE="$ROOT_DIR/.env"
 COMPOSE_FILE="$ROOT_DIR/docker-compose.yml"
 REMNASHOP_ROLLOUT_SCRIPT="$ROOT_DIR/deploy/prod/prepare-remnashop-rollout.sh"
@@ -49,8 +49,9 @@ assert_private_env_file() {
     return
   fi
 
-  [ ! -L "$ENV_FILE" ] && [ -f "$ENV_FILE" ] \
-    || fail "production environment file must be a regular non-symlink file"
+  if [ -L "$ENV_FILE" ] || [ ! -f "$ENV_FILE" ]; then
+    fail "production environment file must be a regular non-symlink file"
+  fi
   command -v stat >/dev/null 2>&1 \
     || fail "node or stat is required to validate production environment metadata"
   [ "$(stat -c '%a' "$ENV_FILE")" = "600" ] \
@@ -214,8 +215,9 @@ compose() (
     TURNSTILE_SITE_KEY
 
   if [ -n "$CLEAN_PAY_VERIFIED_APP_IMAGE" ] || [ -n "$CLEAN_PAY_VERIFIED_MIGRATION_IMAGE" ]; then
-    [ -n "$CLEAN_PAY_VERIFIED_APP_IMAGE" ] && [ -n "$CLEAN_PAY_VERIFIED_MIGRATION_IMAGE" ] \
-      || fail "verified mode requires both immutable application and migration image IDs"
+    if [ -z "$CLEAN_PAY_VERIFIED_APP_IMAGE" ] || [ -z "$CLEAN_PAY_VERIFIED_MIGRATION_IMAGE" ]; then
+      fail "verified mode requires both immutable application and migration image IDs"
+    fi
     CLEAN_PAY_IMAGE=$CLEAN_PAY_VERIFIED_APP_IMAGE
     CLEAN_PAY_MIGRATION_IMAGE=$CLEAN_PAY_VERIFIED_MIGRATION_IMAGE
     export CLEAN_PAY_IMAGE CLEAN_PAY_MIGRATION_IMAGE
