@@ -13,6 +13,10 @@ vi.mock("@/backend/integrations/remnashop/client", () => ({
   getAuthorizedRemnashopTokens: mocks.getAuthorizedRemnashopTokens,
   getRemnashopUserIdFromAccessToken: mocks.getRemnashopUserIdFromAccessToken,
   remnashopRequest: mocks.remnashopRequest,
+  remnashopValidatedRequest: mocks.remnashopRequest,
+}));
+vi.mock("@/backend/integrations/remnashop/api-client-runtime", () => ({
+  remnashopValidatedRequest: mocks.remnashopRequest,
 }));
 vi.mock("@/backend/integrations/payments/prisma-payment-query-repository", () => ({
   prismaPaymentQueryRepository: {

@@ -1,0 +1,193 @@
+{
+  admin off
+}
+
+https://pay.ci.clean-pay.dev {
+  tls internal
+  reverse_proxy app:4000
+}
+
+https://oauth.telegram.org {
+  tls internal
+  reverse_proxy browser-oidc-mock:8090
+}
+
+https://panel.ci.clean-pay.dev {
+  tls internal
+  reverse_proxy browser-provider-mock:3000
+}
+
+https://remnashop.browser.clean-pay.dev {
+  tls internal
+  reverse_proxy browser-provider-mock:5000
+}
+
+https://checkout.browser.clean-pay.dev {
+  tls internal
+  reverse_proxy browser-provider-mock:3100
+}
+
+https://challenges.cloudflare.com {
+  tls internal
+
+  @verify {
+    method POST
+    path /turnstile/v0/siteverify
+  }
+  @widgetScript path /turnstile/v0/api.js
+  route {
+    reverse_proxy @verify browser-provider-mock:3100
+    header @widgetScript Content-Type application/javascript
+    respond @widgetScript `(() => {
+    "use strict";
+    const storageKey = "clean-pay:browser-journey:turnstile-boundary";
+    let stored = {};
+    try { stored = JSON.parse(sessionStorage.getItem(storageKey) || "{}"); } catch {}
+    let sequence = Number.isSafeInteger(stored.sequence) ? stored.sequence : 0;
+    let issueSequence = Number.isSafeInteger(stored.issueSequence) ? stored.issueSequence : 0;
+    const widgets = new Map();
+    const calls = Array.isArray(stored.calls) ? stored.calls : [];
+    const documentChallenges = [];
+    const persist = () => sessionStorage.setItem(storageKey, JSON.stringify({ sequence, issueSequence, calls }));
+    const record = (entry) => { calls.push(entry); persist(); };
+    window.__cleanPayTurnstileBoundaryCalls = calls;
+    window.__cleanPayTurnstileDocumentChallenges = documentChallenges;
+    const complete = (widgetId) => {
+      const options = widgets.get(widgetId);
+      if (!options) return;
+      const action = String(options.action || "");
+      issueSequence += 1;
+      const issue = issueSequence;
+      record({ method: "challenge", widgetId, action, issue });
+      queueMicrotask(() => {
+        if (widgets.get(widgetId) === options) {
+          options.callback?.("synthetic-turnstile-token:" + action + ":" + widgetId + ":" + issue);
+          documentChallenges.push({ action, widgetId, issue });
+        }
+      });
+    };
+    window.turnstile = Object.freeze({
+      render(_container, options) {
+        sequence += 1;
+        const widgetId = "synthetic-turnstile-" + sequence;
+        widgets.set(widgetId, options || {});
+        record({ method: "render", widgetId, action: String(options?.action || "") });
+        complete(widgetId);
+        return widgetId;
+      },
+      reset(widgetId) {
+        record({ method: "reset", widgetId });
+        complete(widgetId);
+      },
+      remove(widgetId) {
+        record({ method: "remove", widgetId });
+        widgets.delete(widgetId);
+      },
+      execute(widgetId) {
+        record({ method: "execute", widgetId });
+        complete(widgetId);
+      },
+    });
+    })();` 200
+    respond 404
+  }
+}
+
+https://chatwoot.browser.clean-pay.dev {
+  tls internal
+
+  @contact {
+    method GET
+    path /api/v1/widget/contact
+  }
+  @widget path /widget
+  @sdk path /packs/js/sdk.js
+  route {
+    reverse_proxy @contact browser-provider-mock:3100
+    header @widget Content-Type text/html
+    respond @widget `<!doctype html><html><head><meta charset="utf-8"></head><body><script>
+    "use strict";
+    const parentOrigin = "https://pay.ci.clean-pay.dev";
+    const send = (message) => parent.postMessage("chatwoot-widget:" + JSON.stringify(message), parentOrigin);
+    addEventListener("message", (event) => {
+      if (event.origin !== parentOrigin || event.source !== parent || event.data?.method !== "identify") return;
+      setTimeout(() => send({ event: "setAuthCookie", data: { widgetAuthToken: "synthetic-widget-auth" } }), 1200);
+    });
+    send({ event: "loaded" });
+    </script></body></html>` 200
+
+    header @sdk Content-Type application/javascript
+    respond @sdk `(() => {
+    "use strict";
+    const calls = [];
+    window.__cleanPayChatwootBoundaryCalls = calls;
+    window.chatwootSDK = Object.freeze({
+      run(config) {
+        calls.push({ method: "run", baseUrl: config.baseUrl, websiteTokenBytes: String(config.websiteToken || "").length });
+        const frame = document.createElement("iframe");
+        frame.id = "chatwoot_live_chat_widget";
+        frame.src = config.baseUrl.replace(/\/$/, "") + "/widget?website_token=" + encodeURIComponent(config.websiteToken);
+        frame.title = "Chatwoot synthetic fixture";
+        frame.style.display = "none";
+        let pendingIdentity = null;
+        let frameLoadedAtBaseUrl = false;
+        const deliverIdentity = () => {
+          if (!pendingIdentity || !frameLoadedAtBaseUrl || !frame.contentWindow) return;
+          frame.contentWindow.postMessage({ method: "identify" }, config.baseUrl);
+        };
+        addEventListener("message", (event) => {
+          if (event.origin !== config.baseUrl || event.source !== frame.contentWindow || typeof event.data !== "string") return;
+          if (!event.data.startsWith("chatwoot-widget:")) return;
+          try {
+            const message = JSON.parse(event.data.slice("chatwoot-widget:".length));
+            if (message.event === "loaded") {
+              calls.push({ method: "frame.loaded" });
+              frameLoadedAtBaseUrl = true;
+              deliverIdentity();
+            }
+            if (message.event === "setAuthCookie") calls.push({ method: "identity.confirmed" });
+          } catch {}
+        });
+        document.body.appendChild(frame);
+        const api = {
+          baseUrl: config.baseUrl,
+          websiteToken: config.websiteToken,
+          hasLoaded: true,
+          resetTriggered: false,
+          setUser(identifier, attributes) {
+            calls.push({ method: "setUser", identifierBytes: String(identifier || "").length, attributeKeys: Object.keys(attributes || {}).sort() });
+            api.identifier = identifier;
+            api.user = attributes;
+            pendingIdentity = { identifier };
+            document.cookie = "cw_conversation=" + encodeURIComponent(String(identifier)) + "; Path=/; SameSite=Lax; Secure";
+            document.cookie = "cw_user_" + encodeURIComponent(config.websiteToken) + "=synthetic-chatwoot-user; Path=/; SameSite=Lax; Secure";
+            deliverIdentity();
+          },
+          setCustomAttributes(attributes) {
+            calls.push({ method: "setCustomAttributes", attributeKeys: Object.keys(attributes || {}).sort() });
+          },
+          toggleBubbleVisibility(value) {
+            calls.push({ method: "toggleBubbleVisibility", value });
+          },
+          toggle(value) {
+            calls.push({ method: "toggle", value: Boolean(value) });
+          },
+          setLabel(label) {
+            calls.push({ method: "setLabel", label: String(label) });
+          },
+          removeLabel(label) {
+            calls.push({ method: "removeLabel", label: String(label) });
+          },
+          reset() {
+            calls.push({ method: "reset" });
+            api.resetTriggered = true;
+          },
+        };
+        window.$chatwoot = api;
+        queueMicrotask(() => window.dispatchEvent(new CustomEvent("chatwoot:ready")));
+      },
+    });
+    })();` 200
+    respond 404
+  }
+}

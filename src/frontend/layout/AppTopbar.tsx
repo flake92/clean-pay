@@ -40,7 +40,7 @@ const AppTopbar = forwardRef<AppTopbarRef, { navigation: NavigationViewModel }>(
     return (
         <header className="layout-topbar">
             <Link href="/" className="layout-topbar-logo">
-                <Image src={branding.logoUrl} width={40} height={40} alt={`${branding.name} logo`} unoptimized />
+                <Image src={branding.logoUrl} width={40} height={40} alt="" unoptimized />
                 <span>{branding.name}</span>
             </Link>
 

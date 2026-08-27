@@ -7,8 +7,9 @@ import { ServiceError, isServiceErrorCode } from "@/backend/errors/service-error
 import {
   getAuthorizedRemnashopTokens,
   getRemnashopUserIdFromAccessToken,
-  remnashopRequest,
 } from "@/backend/integrations/remnashop/client";
+import { remnashopValidatedRequest } from "@/backend/integrations/remnashop/api-client-runtime";
+import { bindRemnashopResponseContract } from "@/backend/integrations/remnashop/request-transport";
 import { parsePaymentInit } from "@/backend/integrations/remnashop/payment-recovery";
 import { assertRateLimit } from "@/backend/limits/rate-limit";
 import { auditLog, logTechnicalError } from "@/backend/observability/audit";
@@ -34,6 +35,16 @@ type ProviderAuthorization = {
 
 function providerAuthorization(authorization: PaymentAuthorization) {
   return authorization.context as ProviderAuthorization;
+}
+
+function decodeDispatchedPayment(
+  endpoint: string,
+  expectedReturnUrl: string,
+  value: unknown,
+) {
+  const payment = parsePaymentInit(value, endpoint);
+  assertPaymentReturnUrl(expectedReturnUrl, payment.return_url);
+  return payment;
 }
 
 function serviceError(error: unknown) {
@@ -95,7 +106,7 @@ export function createProductionPaymentWorkflowGateway(
   bindUpstreamOwner: bindPaymentOperationUpstreamOwner,
 
   async loadOffers(authorization) {
-    return remnashopRequest<SubscriptionOffersResponse>("/subscription/offers", {
+    return remnashopValidatedRequest<SubscriptionOffersResponse>("/subscription/offers", {
       accessToken: providerAuthorization(authorization).accessToken,
     });
   },
@@ -116,14 +127,28 @@ export function createProductionPaymentWorkflowGateway(
           gateway_type: operation.request.gateway_type,
           return_url: paymentReturnUrl(operationId),
         };
-    const payment = parsePaymentInit(await remnashopRequest<unknown>(endpoint, {
-      method: "POST",
-      accessToken: providerAuthorization(authorization).accessToken,
-      idempotencyKey: upstreamKey,
-      body: upstreamBody,
-    }), endpoint);
-    assertPaymentReturnUrl(paymentReturnUrl(operationId), payment.return_url);
-    return payment;
+    return decodeDispatchedPayment(
+      endpoint,
+      paymentReturnUrl(operationId),
+      await remnashopValidatedRequest<unknown>(
+        endpoint,
+        bindRemnashopResponseContract(
+          {
+            method: "POST" as const,
+            accessToken: providerAuthorization(authorization).accessToken,
+            idempotencyKey: upstreamKey,
+            body: upstreamBody,
+          },
+          {
+            decodeResponse: decodeDispatchedPayment.bind(
+              null,
+              endpoint,
+              upstreamBody.return_url,
+            ),
+          },
+        ),
+      ),
+    );
   },
 
   markDispatched: markPaymentOperationDispatched,

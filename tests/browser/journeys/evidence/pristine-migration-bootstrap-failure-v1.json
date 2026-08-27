@@ -1,0 +1,37 @@
+{
+  "schemaVersion": 1,
+  "status": "invalid_for_gate",
+  "attempt": "pristine-f5-journey-migration-bootstrap-v1",
+  "source": {
+    "revision": "f5cb6f543d85256e7733a1ade6a4f451d86cf378",
+    "tree": "6647fc51c61018ba46aae95da21e534434028fbe",
+    "archive": {
+      "format": "git archive --format=tar",
+      "bytes": 7587840,
+      "sha256": "6ccdccdd162ede951850759392a72376792988080307b4e29ae0cffef2397a03"
+    },
+    "applicationImage": {
+      "tagAtBuild": "clean-pay:baseline-f5cb6f543d85-journey-synthetic-v1-pristine",
+      "digest": "sha256:6909a1b980f72038c732d02f1e29074b16be2c2ce333e8c02ba569d3f2324ded",
+      "bytes": 101989117
+    },
+    "migrationImage": {
+      "tagAtBuild": "clean-pay-migration:baseline-f5cb6f543d85-journey-synthetic-v1-pristine",
+      "digest": "sha256:4116ac21757014016b168297f50afd351579e73da4c20883ece92332d911ceff",
+      "bytes": 316184545
+    }
+  },
+  "failure": {
+    "phase": "prisma-migrate-deploy-preflight",
+    "class": "missing-prisma-schema-engine-binary",
+    "applicationStarted": false,
+    "schemaMigrationCompleted": false,
+    "canonicalArtifactsWritten": false,
+    "stagingArtifactsWritten": false
+  },
+  "privacy": {
+    "containsEnvironmentValues": false,
+    "containsCredentials": false,
+    "containsDatabaseRows": false
+  }
+}

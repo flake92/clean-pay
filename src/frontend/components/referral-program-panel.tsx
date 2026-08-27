@@ -1,85 +1,28 @@
 "use client";
 
-import { useState } from "react";
-
 import { Button } from "primereact/button";
 import { InputText } from "primereact/inputtext";
 import { Message } from "primereact/message";
 import { Tag } from "primereact/tag";
 
-import type {
-  ReferralProgram,
-  ReferralProgramViewModel,
-  ReferralRewardLevel,
-} from "@/application/models/referral";
+import type { ReferralProgramViewModel } from "@/application/models/referral";
 import { Metric } from "@/frontend/components/cabinet-view-parts";
 import { LinkButton } from "@/frontend/components/prime/link-button";
 import {
-  providerSessionRecoveryPath,
-  sessionRefreshPath,
-} from "@/shared/auth/session-navigation";
+  referralAccrualDescription,
+  referralErrorAction,
+  referralRewardDescription,
+  referralUsesPoints,
+} from "@/frontend/components/referral-program-presentation";
+import { useReferralProgramController } from "@/frontend/hooks/use-referral-program-controller";
 
-function russianPlural(value: number, one: string, few: string, many: string) {
-  const modulo100 = Math.abs(value) % 100;
-  const modulo10 = modulo100 % 10;
-  if (modulo100 > 10 && modulo100 < 20) return many;
-  if (modulo10 === 1) return one;
-  if (modulo10 >= 2 && modulo10 <= 4) return few;
-  return many;
-}
-
-export function referralAccrualDescription(program: ReferralProgram) {
-  return program.accrualStrategy === "ON_FIRST_PAYMENT"
-    ? "Награда начисляется после первого успешного платежа приглашённого пользователя."
-    : "Награда начисляется после каждого успешного платежа или продления приглашённого пользователя.";
-}
-
-export function referralRewardDescription(
-  program: ReferralProgram,
-  reward: ReferralRewardLevel,
-) {
-  const audience = reward.level === 1
-    ? "За приглашённого вами пользователя"
-    : "За пользователя, приглашённого вашим другом";
-  if (program.rewardStrategy === "PERCENT") {
-    const basis = program.rewardType === "POINTS" ? "стоимости платежа" : "оплаченного срока";
-    return `${audience}: ${reward.value}% от ${basis}.`;
-  }
-  if (program.rewardType === "POINTS") {
-    const unit = russianPlural(reward.value, "балл", "балла", "баллов");
-    return `${audience}: ${reward.value} ${unit}.`;
-  }
-  const unit = russianPlural(reward.value, "дополнительный день", "дополнительных дня", "дополнительных дней");
-  return `${audience}: ${reward.value} ${unit}.`;
-}
-
-async function copyText(value: string) {
-  if (navigator.clipboard?.writeText) {
-    await navigator.clipboard.writeText(value);
-    return;
-  }
-
-  const input = document.createElement("textarea");
-  input.value = value;
-  input.style.position = "fixed";
-  input.style.opacity = "0";
-  document.body.append(input);
-  input.select();
-  const copied = document.execCommand("copy");
-  input.remove();
-  if (!copied) throw new Error("Copy failed");
-}
+export {
+  referralAccrualDescription,
+  referralRewardDescription,
+};
 
 function ErrorPanel({ model }: { model: Extract<ReferralProgramViewModel, { status: "error" }> }) {
-  const action = model.action === "recover-session"
-    ? { href: providerSessionRecoveryPath("/referral"), label: "Продолжить" }
-    : model.action === "login"
-    ? { href: sessionRefreshPath("/referral"), label: "Войти" }
-    : model.action === "verify-email"
-      ? { href: "/verify-email", label: "Подтвердить e-mail" }
-      : model.action === "tariffs"
-        ? { href: "/tariffs", label: "Выбрать тариф" }
-        : null;
+  const action = referralErrorAction(model);
 
   return (
     <div className="card flex flex-column gap-3">
@@ -90,39 +33,13 @@ function ErrorPanel({ model }: { model: Extract<ReferralProgramViewModel, { stat
 }
 
 export function ReferralProgramPanel({ model }: { model: ReferralProgramViewModel }) {
-  const [feedback, setFeedback] = useState<string | null>(null);
+  const { copyLink, feedback, shareLink } = useReferralProgramController({
+    referralUrl: model.status === "ready" ? model.program.webReferralUrl : null,
+  });
   if (model.status === "error") return <ErrorPanel model={model} />;
 
   const { program } = model;
-  const points = program.rewardType === "POINTS";
-
-  async function copyLink() {
-    try {
-      await copyText(program.webReferralUrl);
-      setFeedback("Ссылка скопирована.");
-    } catch {
-      setFeedback("Не удалось скопировать ссылку. Выделите её вручную.");
-    }
-  }
-
-  async function shareLink() {
-    try {
-      if (navigator.share) {
-        await navigator.share({
-          title: "Приглашение",
-          text: "Присоединяйтесь по моей ссылке",
-          url: program.webReferralUrl,
-        });
-        setFeedback("Ссылка отправлена.");
-        return;
-      }
-      await copyText(program.webReferralUrl);
-      setFeedback("Функция отправки недоступна — ссылка скопирована.");
-    } catch (error) {
-      if (error instanceof DOMException && error.name === "AbortError") return;
-      setFeedback("Не удалось отправить ссылку.");
-    }
-  }
+  const points = referralUsesPoints(program);
 
   return (
     <div className="flex flex-column gap-4">

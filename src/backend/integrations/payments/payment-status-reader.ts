@@ -5,7 +5,8 @@ import {
   type PaymentStatusTransaction,
 } from "@/application/payments/ports/payment-status-reader";
 import { prismaPaymentQueryRepository } from "@/backend/integrations/payments/prisma-payment-query-repository";
-import { getAuthorizedRemnashopTokens, getRemnashopUserIdFromAccessToken, remnashopRequest } from "@/backend/integrations/remnashop/client";
+import { remnashopValidatedRequest } from "@/backend/integrations/remnashop/api-client-runtime";
+import { getAuthorizedRemnashopTokens, getRemnashopUserIdFromAccessToken } from "@/backend/integrations/remnashop/client";
 import { ServiceError } from "@/backend/errors/service-error";
 import { getExactTransaction, getLegacyTransactions, getPaymentCapabilities } from "@/backend/integrations/remnashop/payment-recovery";
 import { isPaymentManualRequired } from "@/backend/payments/manual-review";
@@ -76,7 +77,7 @@ export function createProductionPaymentStatusReader(
     await adapt(() => syncPaymentRecordsFromRemnashopTransactions({ userId, upstreamAccountId, transactions: values.map(transaction) }));
   },
   async loadSubscription(value) {
-    return adapt(() => remnashopRequest<CurrentSubscriptionResponse | null>("/subscription/current", { accessToken: authorization(value).accessToken }));
+    return adapt(() => remnashopValidatedRequest<CurrentSubscriptionResponse | null>("/subscription/current", { accessToken: authorization(value).accessToken }));
   },
   async findPayment(userId, paymentId) {
     const record = await prismaPaymentQueryRepository.findRecord(userId, paymentId);

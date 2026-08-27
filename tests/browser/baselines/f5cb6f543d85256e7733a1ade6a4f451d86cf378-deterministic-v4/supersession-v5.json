@@ -1,0 +1,97 @@
+{
+  "schemaVersion": 1,
+  "baselineId": "f5cb6f543d85256e7733a1ade6a4f451d86cf378-deterministic-v4",
+  "status": "invalid_for_gate",
+  "retainedAs": "immutable_seven_flag_renderer_capture",
+  "reason": [
+    "a second independent full read-only pass produced cross-process Skia antialias variance with the exact seven-flag renderer",
+    "DOM, bounding boxes, computed styles, ARIA, route, browser state, and projected network remained byte-exact; no pixel tolerance, masking, or CSS injection is permitted",
+    "the variance is confined to out-of-process rasterization and is removed by the exact additional --disable-oop-rasterization launch flag"
+  ],
+  "source": {
+    "commit": "f5cb6f543d85256e7733a1ade6a4f451d86cf378",
+    "tree": "6647fc51c61018ba46aae95da21e534434028fbe",
+    "pristineArchiveSha256": "8f424f5d4839d2aa421849bb2c7f8f48420ee675",
+    "productionImage": {
+      "tag": "clean-pay:baseline-f5cb6f543d85-prod-pristine",
+      "digest": "sha256:e0640e36c6221ba8f2dc174ebbea3961fda59f6320aad56d2f071b1c51a75ffc"
+    }
+  },
+  "runtime": {
+    "engine": "chromium",
+    "browserVersion": "151.0.7922.34",
+    "playwrightVersion": "1.62.1",
+    "chromiumRevision": "1234"
+  },
+  "artifactSet": {
+    "artifactCount": 126,
+    "aggregateSha256": "6a07c966ca2fca8cc71c913e3a084067f645072ad8105d5894f4899f114f040c",
+    "aggregateFormat": "sorted path\\0bytes\\0sha256\\n"
+  },
+  "immutableFiles": {
+    "metadataSha256": "40cfa07e476fe6b04c5ad6b2389ceb54a65115e9f241129ef44759af9672e200",
+    "artifactInventorySha256": "481c2bf5f0b2ab95c653c2ca372a90af44c8fe90edb1b275a6829f506ec71c76"
+  },
+  "sanitizedReadOnlyEvidence": {
+    "fullPass": {
+      "passed": 106,
+      "failed": 2,
+      "total": 108
+    },
+    "sharedRedirectScreen": {
+      "project": "chromium-768x1024",
+      "routes": [
+        "login",
+        "protected-payment"
+      ],
+      "expectedPngSha256": "57651acfbc72c6ba6d7bd1db876e2b3f67d6a67bdb21aff43ac8a1cbcc236918",
+      "observedPngSha256": "6e34d524e71c12c7a61c78349aea12aa9e10af79e71112f82336c8b044cb6df0",
+      "changedPixels": 33,
+      "totalPixels": 786432,
+      "changedChannels": 60,
+      "maxChannelDelta": 2,
+      "deltaHistogram": {
+        "1": 58,
+        "2": 2
+      },
+      "bounds": {
+        "minX": 48,
+        "minY": 840,
+        "maxX": 719,
+        "maxY": 848
+      },
+      "differingManifestPaths": [
+        "$.screenshot.sha256"
+      ]
+    }
+  },
+  "rendererProbe": {
+    "selectedAdditionalFlag": "--disable-oop-rasterization",
+    "independentChromiumProcesses": {
+      "chromium-390x844": 12,
+      "chromium-768x1024": 24,
+      "chromium-1440x900": 12
+    },
+    "uniquePngHashesPerViewport": 1,
+    "hashes": {
+      "chromium-390x844": "61a60e477a248da65d9f0b6d4f01b867d9e1c63471c52b7be2c50f1b77dc7031",
+      "chromium-768x1024": "57651acfbc72c6ba6d7bd1db876e2b3f67d6a67bdb21aff43ac8a1cbcc236918",
+      "chromium-1440x900": "11ca971282d7ca9dbdae888b1b7659de3859d9208fd0b97414b2e7c9e6982d5f"
+    },
+    "rejectedControl": {
+      "additionalFlag": "--num-raster-threads=1",
+      "project": "chromium-768x1024",
+      "processDistribution": [
+        {
+          "sha256": "57651acfbc72c6ba6d7bd1db876e2b3f67d6a67bdb21aff43ac8a1cbcc236918",
+          "count": 6
+        },
+        {
+          "sha256": "6e34d524e71c12c7a61c78349aea12aa9e10af79e71112f82336c8b044cb6df0",
+          "count": 2
+        }
+      ]
+    }
+  },
+  "canonicalReplacement": "f5cb6f543d85256e7733a1ade6a4f451d86cf378-deterministic-v5"
+}

@@ -4,13 +4,12 @@ import {
   prepareTelegramAuthStart,
   TelegramAuthStartFailure,
 } from "@/application/auth/prepare-telegram-auth-start";
-import { getEnv } from "@/backend/config/env";
-import { productionTelegramAuthStartSecurity } from "@/backend/integrations/auth/telegram-auth-start-security";
+import { getEnv, logTechnicalError } from "@/app/_composition/platform-runtime";
 import {
   createTelegramAuthorizationResponse,
   createTelegramPopupStartResponse,
-} from "@/backend/integrations/telegram/oidc";
-import { logTechnicalError } from "@/backend/observability/audit";
+  productionTelegramAuthStartSecurity,
+} from "@/app/_composition/telegram-start-runtime";
 import { safeRedirectPath } from "@/shared/auth/redirect-policy";
 
 export const runtime = "nodejs";

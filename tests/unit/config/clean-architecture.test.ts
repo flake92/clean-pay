@@ -1,6 +1,7 @@
 import { globSync, readFileSync } from "node:fs";
 import path from "node:path";
 
+import ts from "typescript";
 import { describe, expect, it } from "vitest";
 
 function files(pattern: string) {
@@ -10,6 +11,55 @@ function files(pattern: string) {
 function importedModules(source: string) {
   return [...source.matchAll(/\b(?:from|import|require)\s*(?:\(\s*)?["']([^"']+)["']/g)]
     .map((match) => match[1]!);
+}
+
+function astImportedModules(source: string) {
+  const sourceFile = ts.createSourceFile(
+    "architecture-boundary.tsx",
+    source,
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.TSX,
+  );
+  const modules: string[] = [];
+
+  function stringArgument(node: ts.CallExpression) {
+    const [argument] = node.arguments;
+    return argument && ts.isStringLiteralLike(argument) ? argument.text : null;
+  }
+
+  function visit(node: ts.Node) {
+    if (
+      (ts.isImportDeclaration(node) || ts.isExportDeclaration(node))
+      && node.moduleSpecifier
+      && ts.isStringLiteralLike(node.moduleSpecifier)
+    ) {
+      modules.push(node.moduleSpecifier.text);
+    } else if (ts.isImportEqualsDeclaration(node)) {
+      const reference = node.moduleReference;
+      if (
+        ts.isExternalModuleReference(reference)
+        && reference.expression
+        && ts.isStringLiteralLike(reference.expression)
+      ) {
+        modules.push(reference.expression.text);
+      }
+    } else if (
+      ts.isCallExpression(node)
+      && (
+        node.expression.kind === ts.SyntaxKind.ImportKeyword
+        || (ts.isIdentifier(node.expression) && node.expression.text === "require")
+      )
+    ) {
+      const dependency = stringArgument(node);
+      if (dependency) modules.push(dependency);
+    }
+
+    ts.forEachChild(node, visit);
+  }
+
+  visit(sourceFile);
+  return modules;
 }
 
 function projectPath(importer: string, dependency: string) {
@@ -30,8 +80,82 @@ function projectDependencies(file: string, source: string) {
     .filter((item): item is { dependency: string; resolved: string } => item.resolved !== null);
 }
 
+function astProjectDependencies(file: string, source: string) {
+  return astImportedModules(source)
+    .map((dependency) => ({ dependency, resolved: projectPath(file, dependency) }))
+    .filter((item): item is { dependency: string; resolved: string } => item.resolved !== null);
+}
+
 function modulePath(file: string) {
   return file.replaceAll("\\", "/").replace(/\.(?:ts|tsx)$/, "");
+}
+
+function dependencyCycles(entries: Array<{ file: string; source: string }>) {
+  const filesByModule = new Map(
+    entries.map(({ file }) => [modulePath(file), file.replaceAll("\\", "/")]),
+  );
+  const graph = new Map<string, string[]>();
+
+  for (const { file, source } of entries) {
+    const importer = modulePath(file);
+    const dependencies = astProjectDependencies(file, source).flatMap(({ resolved }) => {
+      const candidate = modulePath(resolved);
+      for (const moduleId of [candidate, `${candidate}/index`]) {
+        if (filesByModule.has(moduleId)) return [moduleId];
+      }
+      return [];
+    });
+    graph.set(importer, [...new Set(dependencies)].sort());
+  }
+
+  const indexByModule = new Map<string, number>();
+  const lowLinkByModule = new Map<string, number>();
+  const stack: string[] = [];
+  const onStack = new Set<string>();
+  const cycles: string[][] = [];
+  let nextIndex = 0;
+
+  function connect(module: string) {
+    const index = nextIndex++;
+    indexByModule.set(module, index);
+    lowLinkByModule.set(module, index);
+    stack.push(module);
+    onStack.add(module);
+
+    for (const dependency of graph.get(module) ?? []) {
+      if (!indexByModule.has(dependency)) {
+        connect(dependency);
+        lowLinkByModule.set(
+          module,
+          Math.min(lowLinkByModule.get(module)!, lowLinkByModule.get(dependency)!),
+        );
+      } else if (onStack.has(dependency)) {
+        lowLinkByModule.set(
+          module,
+          Math.min(lowLinkByModule.get(module)!, indexByModule.get(dependency)!),
+        );
+      }
+    }
+
+    if (lowLinkByModule.get(module) !== indexByModule.get(module)) return;
+
+    const component: string[] = [];
+    while (stack.length > 0) {
+      const current = stack.pop()!;
+      onStack.delete(current);
+      component.push(current);
+      if (current === module) break;
+    }
+    const selfCycle = component.length === 1
+      && (graph.get(component[0]!) ?? []).includes(component[0]!);
+    if (component.length > 1 || selfCycle) cycles.push(component.sort());
+  }
+
+  for (const moduleId of [...graph.keys()].sort()) {
+    if (!indexByModule.has(moduleId)) connect(moduleId);
+  }
+
+  return cycles.sort((left, right) => left.join("\0").localeCompare(right.join("\0")));
 }
 
 function unusedApplicationPorts(
@@ -83,6 +207,47 @@ describe("clean architecture boundaries", () => {
     expect(projectPath("src/application/payments/use-case.ts", "node:crypto")).toBeNull();
     expect(importedModules('const adapter = require("@/backend/database/prisma")'))
       .toEqual(["@/backend/database/prisma"]);
+    expect(astImportedModules([
+      'import type { Actor } from "@/application/models/actor";',
+      'export { policy } from "@/shared/domain/policy";',
+      'const lazy = import("@/backend/integrations/provider");',
+      '// require("@/backend/ignored-comment")',
+    ].join("\n"))).toEqual([
+      "@/application/models/actor",
+      "@/shared/domain/policy",
+      "@/backend/integrations/provider",
+    ]);
+  });
+
+  it("keeps the production TypeScript module graph acyclic", () => {
+    expect(dependencyCycles(files("src/**/*.{ts,tsx}"))).toEqual([]);
+  });
+
+  it("keeps production source independent from deployment tooling", () => {
+    for (const { file, source } of files("src/**/*.{ts,tsx}")) {
+      for (const { dependency, resolved } of astProjectDependencies(file, source)) {
+        expect(
+          resolved,
+          `${file} imports deployment module ${dependency} (${resolved})`,
+        ).not.toMatch(/^deploy\//);
+      }
+    }
+  });
+
+  it("detects cycles through both alias and relative imports", () => {
+    expect(dependencyCycles([
+      {
+        file: "src/application/orders/place-order.ts",
+        source: 'import { reserve } from "./reserve";',
+      },
+      {
+        file: "src/application/orders/reserve.ts",
+        source: 'export { place } from "@/application/orders/place-order";',
+      },
+    ])).toEqual([[
+      "src/application/orders/place-order",
+      "src/application/orders/reserve",
+    ]]);
   });
 
   it("keeps application use cases independent from frameworks and adapters", () => {
@@ -121,6 +286,374 @@ describe("clean architecture boundaries", () => {
     }
   });
 
+  it("keeps proxy policies Edge-compatible behind the stable proxy facade", () => {
+    const policyFiles = files("src/shared/edge/proxy-*.ts");
+
+    expect(policyFiles.map(({ file }) => file.replaceAll("\\", "/")).sort()).toEqual([
+      "src/shared/edge/proxy-auth-policy.ts",
+      "src/shared/edge/proxy-mutation-policy.ts",
+      "src/shared/edge/proxy-route-policy.ts",
+      "src/shared/edge/proxy-security-policy.ts",
+    ]);
+
+    for (const { file, source } of policyFiles) {
+      for (const { dependency, resolved } of astProjectDependencies(file, source)) {
+        expect(
+          resolved.startsWith("src/shared/"),
+          `${file} imports a non-shared dependency ${dependency} (${resolved})`,
+        ).toBe(true);
+      }
+      expect(source, `${file} imports a Node-only module`).not.toMatch(/from ["']node:/);
+      expect(source, `${file} imports Next.js`).not.toMatch(/from ["']next(?:\/|["'])/);
+      expect(source, `${file} reads process globals`).not.toContain("process.");
+      expect(source, `${file} depends on backend`).not.toContain("@/backend/");
+    }
+
+    const facade = readFileSync("src/proxy.ts", "utf8");
+    const sourceFile = ts.createSourceFile(
+      "src/proxy.ts",
+      facade,
+      ts.ScriptTarget.Latest,
+      true,
+      ts.ScriptKind.TS,
+    );
+    const exports = sourceFile.statements
+      .filter((statement) => ts.canHaveModifiers(statement) && ts.getModifiers(statement)?.some(
+        (modifier) => modifier.kind === ts.SyntaxKind.ExportKeyword,
+      ))
+      .flatMap((statement) => {
+        if (ts.isFunctionDeclaration(statement) && statement.name) {
+          return [statement.name.text];
+        }
+        if (ts.isVariableStatement(statement)) {
+          return statement.declarationList.declarations.flatMap((declaration) =>
+            ts.isIdentifier(declaration.name) ? [declaration.name.text] : []
+          );
+        }
+        return [];
+      });
+
+    expect(exports).toEqual(["proxy", "config"]);
+  });
+
+  it("isolates durable Telegram callback persistence behind its repository", () => {
+    const modules = files(
+      "src/backend/integrations/telegram/durable-callback*.ts",
+    );
+    expect(modules.map(({ file }) => file.replaceAll("\\", "/")).sort()).toEqual([
+      "src/backend/integrations/telegram/durable-callback-contract.ts",
+      "src/backend/integrations/telegram/durable-callback-decoder.ts",
+      "src/backend/integrations/telegram/durable-callback-orchestrator.ts",
+      "src/backend/integrations/telegram/durable-callback-repository.ts",
+      "src/backend/integrations/telegram/durable-callback-transitions.ts",
+      "src/backend/integrations/telegram/durable-callback-transport.ts",
+      "src/backend/integrations/telegram/durable-callback.ts",
+    ]);
+
+    for (const { file, source } of modules) {
+      const normalized = file.replaceAll("\\", "/");
+      if (normalized.endsWith("durable-callback-repository.ts")) continue;
+      expect(source, `${normalized} bypasses the callback repository`)
+        .not.toContain("@/backend/database/prisma");
+      expect(source, `${normalized} imports the Prisma runtime`)
+        .not.toContain("@prisma/client");
+    }
+
+    const facade = readFileSync(
+      "src/backend/integrations/telegram/durable-callback.ts",
+      "utf8",
+    );
+    const sourceFile = ts.createSourceFile(
+      "durable-callback.ts",
+      facade,
+      ts.ScriptTarget.Latest,
+      true,
+      ts.ScriptKind.TS,
+    );
+    expect(sourceFile.statements.every(ts.isExportDeclaration)).toBe(true);
+    const exports = sourceFile.statements.flatMap((statement) => {
+      if (!ts.isExportDeclaration(statement) || !statement.exportClause) return [];
+      if (!ts.isNamedExports(statement.exportClause)) return [];
+      return statement.exportClause.elements.map((element) => element.name.text);
+    });
+    expect(exports.sort()).toEqual([
+      "DURABLE_TELEGRAM_CALLBACK_MAX_IN_FLIGHT_MS",
+      "DURABLE_TELEGRAM_CALLBACK_RESULT_TTL_MS",
+      "DurableTelegramCallbackCheckpoint",
+      "DurableTelegramCallbackClaimConflictError",
+      "DurableTelegramCallbackOwnership",
+      "DurableTelegramCallbackReplay",
+      "TelegramCallbackCookieProof",
+      "checkpointDurableTelegramIdentity",
+      "checkpointDurableTelegramIdentityResolved",
+      "checkpointDurableTelegramOutcome",
+      "checkpointDurableTelegramProvider",
+      "checkpointDurableTelegramRecoveryCommitted",
+      "claimDurableTelegramProviderReady",
+      "completeDurableTelegramMerge",
+      "completeDurableTelegramSession",
+      "createDurableTelegramCallbackSession",
+      "failDurableTelegramCallback",
+      "loadDurableTelegramCallback",
+      "markDurableTelegramProviderDispatching",
+      "markDurableTelegramRecoveryDispatching",
+      "markDurableTelegramRemnashopDispatching",
+      "releaseDurableTelegramCallback",
+      "runWithDurableTelegramCallbackLease",
+    ].sort());
+  });
+
+  it("keeps Telegram OIDC behind a stable facade and a single repository", () => {
+    const modules = files("src/backend/integrations/telegram/oidc*.ts");
+    expect(modules.map(({ file }) => file.replaceAll("\\", "/")).sort()).toEqual([
+      "src/backend/integrations/telegram/oidc-codec.ts",
+      "src/backend/integrations/telegram/oidc-orchestrator.ts",
+      "src/backend/integrations/telegram/oidc-repository.ts",
+      "src/backend/integrations/telegram/oidc-transport.ts",
+      "src/backend/integrations/telegram/oidc.ts",
+    ]);
+
+    for (const { file, source } of modules) {
+      const normalized = file.replaceAll("\\", "/");
+      if (normalized.endsWith("oidc-repository.ts")) continue;
+      expect(source, `${normalized} bypasses the OIDC repository`)
+        .not.toContain("@/backend/database/prisma");
+      expect(source, `${normalized} imports the Prisma runtime`)
+        .not.toContain("@prisma/client");
+    }
+
+    const facade = readFileSync(
+      "src/backend/integrations/telegram/oidc.ts",
+      "utf8",
+    );
+    const sourceFile = ts.createSourceFile(
+      "oidc.ts",
+      facade,
+      ts.ScriptTarget.Latest,
+      true,
+      ts.ScriptKind.TS,
+    );
+    expect(sourceFile.statements.every(ts.isExportDeclaration)).toBe(true);
+    const exports = sourceFile.statements.flatMap((statement) => {
+      if (!ts.isExportDeclaration(statement) || !statement.exportClause) return [];
+      if (!ts.isNamedExports(statement.exportClause)) return [];
+      return statement.exportClause.elements.map((element) => element.name.text);
+    });
+    expect(exports.sort()).toEqual([
+      "TelegramAuthStateAlreadyConsumedError",
+      "clearTelegramAuthCookies",
+      "clearTelegramAuthCookiesOnResponse",
+      "createTelegramAuthorizationResponse",
+      "createTelegramPopupStartResponse",
+      "readTelegramCallbackCookieProof",
+      "resetTelegramOidcJwksForTests",
+      "resumeTelegramOidcCodeExchange",
+      "resumeTelegramProviderAuthentication",
+      "verifyTelegramCallback",
+      "verifyTelegramPopupToken",
+      "verifyTelegramWidgetCallbackPayload",
+    ].sort());
+  });
+
+  it("keeps Remnawave decoding, identity policy and credential transport isolated", () => {
+    const modules = files("src/backend/integrations/remnawave/*.ts");
+    expect(modules.map(({ file }) => file.replaceAll("\\", "/")).sort())
+      .toEqual([
+        "src/backend/integrations/remnawave/client.ts",
+        "src/backend/integrations/remnawave/decoders.ts",
+        "src/backend/integrations/remnawave/identity-transitions.ts",
+        "src/backend/integrations/remnawave/orchestrator.ts",
+        "src/backend/integrations/remnawave/transport.ts",
+      ]);
+
+    const facadePath = "src/backend/integrations/remnawave/client.ts";
+    const facade = readFileSync(facadePath, "utf8");
+    const sourceFile = ts.createSourceFile(
+      facadePath,
+      facade,
+      ts.ScriptTarget.Latest,
+      true,
+      ts.ScriptKind.TS,
+    );
+    expect(sourceFile.statements.every(ts.isExportDeclaration)).toBe(true);
+    const exports = sourceFile.statements.flatMap((statement) => {
+      if (!ts.isExportDeclaration(statement) || !statement.exportClause) return [];
+      if (!ts.isNamedExports(statement.exportClause)) return [];
+      return statement.exportClause.elements.map((element) => element.name.text);
+    });
+    expect(exports.sort()).toEqual([
+      "assertRemnawaveIdentitySynchronizationConfigured",
+      "getLiveRemnawaveSubscriptionUrl",
+      "synchronizeRemnawaveUserIdentity",
+    ]);
+
+    const decoders = readFileSync(
+      "src/backend/integrations/remnawave/decoders.ts",
+      "utf8",
+    );
+    const transitions = readFileSync(
+      "src/backend/integrations/remnawave/identity-transitions.ts",
+      "utf8",
+    );
+    const orchestrator = readFileSync(
+      "src/backend/integrations/remnawave/orchestrator.ts",
+      "utf8",
+    );
+    const transport = readFileSync(
+      "src/backend/integrations/remnawave/transport.ts",
+      "utf8",
+    );
+
+    for (const [file, source] of [
+      ["decoders.ts", decoders],
+      ["identity-transitions.ts", transitions],
+    ]) {
+      expect(source, `${file} reaches runtime configuration or transport`)
+        .not.toMatch(
+          /@\/backend\/(?:config|observability|integrations\/http)|\bfetch\(|process\.|next\//,
+        );
+    }
+    expect(orchestrator).not.toMatch(
+      /credentialedFetch|readBoundedJsonFromUnknown|recordUpstreamRequest/,
+    );
+    expect(transport).toContain("credentialedFetch");
+    expect(transport).toContain("readBoundedJsonFromUnknown");
+    expect(transport).toContain("recordUpstreamRequest");
+    expect(transport).toContain("cancelUpstreamResponseBody");
+  });
+
+  it("keeps web-session orchestration behind transport and repository boundaries", () => {
+    const facadePath =
+      "src/backend/integrations/sessions/web-session-service.ts";
+    const orchestrator = readFileSync(
+      "src/backend/integrations/sessions/web-session-orchestrator.ts",
+      "utf8",
+    );
+    const repository = readFileSync(
+      "src/backend/integrations/sessions/web-session-repository.ts",
+      "utf8",
+    );
+    const transitions = readFileSync(
+      "src/backend/integrations/sessions/web-session-transitions.ts",
+      "utf8",
+    );
+    const transport = readFileSync(
+      "src/backend/integrations/sessions/web-session-transport.ts",
+      "utf8",
+    );
+
+    expect(orchestrator).toContain(
+      "@/backend/integrations/sessions/web-session-repository",
+    );
+    expect(orchestrator).toContain(
+      "@/backend/integrations/sessions/web-session-transitions",
+    );
+    expect(orchestrator).toContain(
+      "@/backend/integrations/sessions/web-session-transport",
+    );
+    expect(orchestrator).not.toContain("@/backend/database/prisma");
+    expect(orchestrator).not.toMatch(
+      /\bprisma\.|next\/headers|next\/server|@prisma\/client/,
+    );
+    expect(repository).toContain("@/backend/database/prisma");
+    expect(repository).not.toContain(
+      "@/backend/integrations/sessions/web-session-revocation",
+    );
+    expect(repository).not.toMatch(/next\/headers|next\/server/);
+    expect(transitions).not.toMatch(
+      /@\/backend\/database|next\/headers|next\/server|\bprisma\.|\$transaction/,
+    );
+    expect(transport).toContain('from "next/headers"');
+    expect(transport).not.toMatch(/@\/backend\/database|\bprisma\.|\$transaction/);
+
+    const facade = readFileSync(facadePath, "utf8");
+    const sourceFile = ts.createSourceFile(
+      facadePath,
+      facade,
+      ts.ScriptTarget.Latest,
+      true,
+      ts.ScriptKind.TS,
+    );
+    expect(sourceFile.statements.every(ts.isExportDeclaration)).toBe(true);
+    const exports = sourceFile.statements.flatMap((statement) => {
+      if (!ts.isExportDeclaration(statement) || !statement.exportClause) return [];
+      if (!ts.isNamedExports(statement.exportClause)) return [];
+      return statement.exportClause.elements.map((element) => element.name.text);
+    });
+    expect(exports.sort()).toEqual([
+      "assertEmailVerificationPolicy",
+      "clearWebSession",
+      "clearWebSessionCookies",
+      "createDurableCallbackWebSession",
+      "createWebSession",
+      "createWebSessionForRemnashopUser",
+      "createWebSessionOnResponse",
+      "getCurrentRefreshSessionCandidateReadOnly",
+      "getCurrentSession",
+      "getCurrentSessionReadOnly",
+      "getCurrentUser",
+      "getWebSessionUserIdFromAccessCookie",
+      "refreshCurrentAccessCookie",
+      "refreshTokenGraceMs",
+      "replaceWebSessionAfterPasswordChange",
+      "revokeAllWebSessionsForUser",
+      "rotateRefreshTokenFamily",
+      "setDurableCallbackReplayCookies",
+      "setDurableCallbackWebSessionCookies",
+      "upgradeCurrentSessionToFull",
+    ].sort());
+  });
+
+  it("isolates payment user-merge persistence behind its stable facade", () => {
+    const modules = files(
+      "src/backend/integrations/payments/payment-user-merge*.ts",
+    );
+    expect(modules.map(({ file }) => file.replaceAll("\\", "/")).sort()).toEqual([
+      "src/backend/integrations/payments/payment-user-merge-orchestrator.ts",
+      "src/backend/integrations/payments/payment-user-merge-repository.ts",
+      "src/backend/integrations/payments/payment-user-merge-service.ts",
+      "src/backend/integrations/payments/payment-user-merge-transitions.ts",
+    ]);
+
+    for (const { file, source } of modules) {
+      const normalized = file.replaceAll("\\", "/");
+      if (normalized.endsWith("payment-user-merge-repository.ts")) continue;
+      expect(source, `${normalized} bypasses the payment merge repository`)
+        .not.toContain("@/backend/database/prisma");
+      expect(source, `${normalized} imports the Prisma runtime`)
+        .not.toContain("@prisma/client");
+    }
+
+    const facade = readFileSync(
+      "src/backend/integrations/payments/payment-user-merge-service.ts",
+      "utf8",
+    );
+    const sourceFile = ts.createSourceFile(
+      "payment-user-merge-service.ts",
+      facade,
+      ts.ScriptTarget.Latest,
+      true,
+      ts.ScriptKind.TS,
+    );
+    expect(sourceFile.statements.every(ts.isExportDeclaration)).toBe(true);
+    const exports = sourceFile.statements.flatMap((statement) => {
+      if (!ts.isExportDeclaration(statement) || !statement.exportClause) return [];
+      if (!ts.isNamedExports(statement.exportClause)) return [];
+      return statement.exportClause.elements.map((element) => element.name.text);
+    });
+    expect(exports.sort()).toEqual([
+      "assertNoActivePaymentDispatches",
+      "assertPaymentOwnerChangeFenceHeld",
+      "lockPaymentOwnerFence",
+      "markPaymentOwnerChangeLocalFinalized",
+      "markPaymentOwnerChangeUpstreamMutationStarted",
+      "preflightPaymentOperationsForUserMerge",
+      "reconcileCompletedPaymentOwnerChange",
+      "transferPaymentOperationsForUserMerge",
+      "withPaymentOwnerChangeFence",
+    ]);
+  });
+
   it("does not leak provider contracts into the application boundary", () => {
     for (const pattern of [
       "src/application/**/*.{ts,tsx}",
@@ -132,6 +665,297 @@ describe("clean architecture boundaries", () => {
         expect(source, file).not.toContain("@prisma/client");
       }
     }
+  });
+
+  it("keeps verify-email view, controller and pure transitions separated", () => {
+    const panelPath = "src/frontend/components/verify-email-panel.tsx";
+    const panel = readFileSync(panelPath, "utf8");
+    const controller = readFileSync(
+      "src/frontend/hooks/use-verify-email-controller.ts",
+      "utf8",
+    );
+    const state = readFileSync(
+      "src/frontend/components/verify-email-state.ts",
+      "utf8",
+    );
+
+    expect(panel).toContain("@/frontend/hooks/use-verify-email-controller");
+    expect(panel).not.toContain("@/app/actions/email-verification");
+    expect(panel).not.toMatch(/\buse(?:Effect|Ref|State)\b/);
+    expect(controller).toContain("@/app/actions/email-verification");
+    expect(controller).toContain("@/frontend/components/verify-email-state");
+    expect(controller).not.toContain("primereact/");
+    expect(state).not.toMatch(
+      /@\/app\/actions|browser-navigation|primereact\/|\buse(?:Effect|Ref|State)\b/,
+    );
+
+    const sourceFile = ts.createSourceFile(
+      panelPath,
+      panel,
+      ts.ScriptTarget.Latest,
+      true,
+      ts.ScriptKind.TSX,
+    );
+    const exports = sourceFile.statements.flatMap((statement) => {
+      if (
+        ts.isFunctionDeclaration(statement)
+        && statement.name
+        && ts.canHaveModifiers(statement)
+        && ts.getModifiers(statement)?.some(
+          (modifier) => modifier.kind === ts.SyntaxKind.ExportKeyword,
+        )
+      ) {
+        return [statement.name.text];
+      }
+      if (ts.isExportDeclaration(statement) && statement.exportClause) {
+        return ts.isNamedExports(statement.exportClause)
+          ? statement.exportClause.elements.map((element) => element.name.text)
+          : [];
+      }
+      return [];
+    });
+    expect(exports).toEqual(["VerifyEmailPanel"]);
+  });
+
+  it("keeps purchase and extension views behind thin controller boundaries", () => {
+    for (const {
+      componentName,
+      controllerPath,
+      panelPath,
+      presentationPath,
+    } of [
+      {
+        componentName: "PaymentConfirmation",
+        controllerPath:
+          "src/frontend/hooks/use-payment-confirmation-controller.ts",
+        panelPath: "src/frontend/components/payment-confirmation.tsx",
+        presentationPath:
+          "src/frontend/components/payment-confirmation-presentation.ts",
+      },
+      {
+        componentName: "ExtendConfirmation",
+        controllerPath:
+          "src/frontend/hooks/use-extend-confirmation-controller.ts",
+        panelPath: "src/frontend/components/extend-confirmation.tsx",
+        presentationPath:
+          "src/frontend/components/extend-confirmation-presentation.ts",
+      },
+    ]) {
+      const panel = readFileSync(panelPath, "utf8");
+      const controller = readFileSync(controllerPath, "utf8");
+      const presentation = readFileSync(presentationPath, "utf8");
+
+      expect(panel).toContain(controllerPath
+        .replace(/^src\//, "@/")
+        .replace(/\.ts$/, ""));
+      expect(panel).not.toMatch(
+        /@\/app\/actions\/payments|payment-idempotency|confirmedPaymentOffer|\buse(?:Effect|Memo|Ref|State)\b/,
+      );
+      expect(controller).toContain("@/app/actions/payments");
+      expect(controller).toContain("@/frontend/lib/payment-idempotency");
+      expect(controller).toContain(presentationPath
+        .replace(/^src\//, "@/")
+        .replace(/\.ts$/, ""));
+      expect(controller).not.toContain("primereact/");
+      expect(presentation).not.toMatch(
+        /@\/app\/actions|browser-navigation|payment-idempotency|primereact\/|\buse(?:Effect|Memo|Ref|State)\b/,
+      );
+
+      const sourceFile = ts.createSourceFile(
+        panelPath,
+        panel,
+        ts.ScriptTarget.Latest,
+        true,
+        ts.ScriptKind.TSX,
+      );
+      const exports = sourceFile.statements.flatMap((statement) => {
+        if (
+          ts.isFunctionDeclaration(statement)
+          && statement.name
+          && ts.canHaveModifiers(statement)
+          && ts.getModifiers(statement)?.some(
+            (modifier) => modifier.kind === ts.SyntaxKind.ExportKeyword,
+          )
+        ) {
+          return [statement.name.text];
+        }
+        if (ts.isExportDeclaration(statement) && statement.exportClause) {
+          return ts.isNamedExports(statement.exportClause)
+            ? statement.exportClause.elements.map((element) => element.name.text)
+            : [];
+        }
+        return [];
+      });
+      expect(exports).toEqual([componentName]);
+    }
+  });
+
+  it("keeps payment-return presentation, browser lifecycle and pure state separated", () => {
+    const panelPath = "src/frontend/components/payment-return-status.tsx";
+    const controllerPath =
+      "src/frontend/hooks/use-payment-return-status-controller.ts";
+    const statePath =
+      "src/frontend/components/payment-return-status-state.ts";
+    const panel = readFileSync(panelPath, "utf8");
+    const controller = readFileSync(controllerPath, "utf8");
+    const state = readFileSync(statePath, "utf8");
+
+    expect(panel).toContain(
+      "@/frontend/hooks/use-payment-return-status-controller",
+    );
+    expect(panel).toContain(
+      "@/frontend/components/payment-return-status-state",
+    );
+    expect(panel).not.toMatch(
+      /@\/app\/actions\/payment-status|\buse(?:Callback|Effect|Ref|State|Transition)\b|\b(?:document|navigator|window)\.|setTimeout|clearTimeout/,
+    );
+    expect(controller).toContain("@/app/actions/payment-status");
+    expect(controller).toContain(
+      "@/frontend/components/payment-return-status-state",
+    );
+    expect(controller).toMatch(/\bdocument\.|\bnavigator\.|\bwindow\./);
+    expect(controller).not.toContain("primereact/");
+    expect(state).not.toMatch(
+      /@\/app\/actions|primereact\/|\buse(?:Callback|Effect|Ref|State|Transition)\b|\b(?:document|navigator|window)\.|setTimeout|clearTimeout/,
+    );
+
+    const sourceFile = ts.createSourceFile(
+      panelPath,
+      panel,
+      ts.ScriptTarget.Latest,
+      true,
+      ts.ScriptKind.TSX,
+    );
+    const exports = sourceFile.statements.flatMap((statement) => {
+      if (
+        ts.isFunctionDeclaration(statement)
+        && statement.name
+        && ts.canHaveModifiers(statement)
+        && ts.getModifiers(statement)?.some(
+          (modifier) => modifier.kind === ts.SyntaxKind.ExportKeyword,
+        )
+      ) {
+        return [statement.name.text];
+      }
+      if (ts.isExportDeclaration(statement) && statement.exportClause) {
+        return ts.isNamedExports(statement.exportClause)
+          ? statement.exportClause.elements.map((element) => element.name.text)
+          : [];
+      }
+      return [];
+    });
+    expect(exports).toEqual(["PaymentReturnStatus"]);
+  });
+
+  it("keeps install-app presentation, browser integration and pure state separated", () => {
+    const panelPath = "src/frontend/components/install-app-button.tsx";
+    const controllerPath = "src/frontend/hooks/use-install-app-controller.ts";
+    const statePath = "src/frontend/components/install-app-button-state.ts";
+    const panel = readFileSync(panelPath, "utf8");
+    const controller = readFileSync(controllerPath, "utf8");
+    const state = readFileSync(statePath, "utf8");
+
+    expect(panel).toContain("@/frontend/hooks/use-install-app-controller");
+    expect(panel).not.toMatch(
+      /\buse(?:Effect|Ref|State)\b|beforeinstallprompt|appinstalled|serviceWorker|telegram-webapp|\b(?:navigator|window)\./,
+    );
+    expect(controller).toContain('window.addEventListener("beforeinstallprompt"');
+    expect(controller).toContain('window.addEventListener("appinstalled"');
+    expect(controller).toContain('.register("/sw.js", { scope: "/", updateViaCache: "none" })');
+    expect(controller).toContain("@/frontend/lib/telegram-webapp");
+    expect(controller).toContain("@/frontend/components/install-app-button-state");
+    expect(controller).not.toMatch(/next\/link|primereact\/|@\/shared\/branding/);
+    expect(state).toContain("@/frontend/lib/install-app-transitions");
+    expect(state).not.toMatch(
+      /\buse(?:Effect|Ref|State)\b|\b(?:navigator|window|document)\.|beforeinstallprompt|appinstalled|serviceWorker|telegram-webapp|next\/|primereact\//,
+    );
+
+    const sourceFile = ts.createSourceFile(
+      panelPath,
+      panel,
+      ts.ScriptTarget.Latest,
+      true,
+      ts.ScriptKind.TSX,
+    );
+    const exports = sourceFile.statements.flatMap((statement) => {
+      if (
+        ts.isFunctionDeclaration(statement)
+        && statement.name
+        && ts.canHaveModifiers(statement)
+        && ts.getModifiers(statement)?.some(
+          (modifier) => modifier.kind === ts.SyntaxKind.ExportKeyword,
+        )
+      ) {
+        return [statement.name.text];
+      }
+      if (ts.isExportDeclaration(statement) && statement.exportClause) {
+        return ts.isNamedExports(statement.exportClause)
+          ? statement.exportClause.elements.map((element) => element.name.text)
+          : [];
+      }
+      return [];
+    });
+    expect(exports).toEqual(["InstallAppButton"]);
+  });
+
+  it("keeps referral presentation and browser integrations behind exact boundaries", () => {
+    const panelPath = "src/frontend/components/referral-program-panel.tsx";
+    const controllerPath =
+      "src/frontend/hooks/use-referral-program-controller.ts";
+    const presentationPath =
+      "src/frontend/components/referral-program-presentation.ts";
+    const panel = readFileSync(panelPath, "utf8");
+    const controller = readFileSync(controllerPath, "utf8");
+    const presentation = readFileSync(presentationPath, "utf8");
+
+    expect(panel).toContain("@/frontend/hooks/use-referral-program-controller");
+    expect(panel).toContain(
+      "@/frontend/components/referral-program-presentation",
+    );
+    expect(panel).not.toMatch(
+      /\buseState\b|\b(?:navigator|document|window)\.|clipboard|execCommand|\.share\b/,
+    );
+    expect(controller).toContain("navigator.clipboard");
+    expect(controller).toContain('document.createElement("textarea")');
+    expect(controller).toContain('document.execCommand("copy")');
+    expect(controller).toContain("navigator.share");
+    expect(controller).not.toMatch(
+      /primereact\/|@\/application\/|@\/shared\/auth\/session-navigation/,
+    );
+    expect(presentation).not.toMatch(
+      /\buseState\b|\b(?:navigator|document|window)\.|clipboard|execCommand|\.share\b|primereact\/|@\/app\/actions|@\/backend\//,
+    );
+
+    const sourceFile = ts.createSourceFile(
+      panelPath,
+      panel,
+      ts.ScriptTarget.Latest,
+      true,
+      ts.ScriptKind.TSX,
+    );
+    const exports = sourceFile.statements.flatMap((statement) => {
+      if (
+        ts.isFunctionDeclaration(statement)
+        && statement.name
+        && ts.canHaveModifiers(statement)
+        && ts.getModifiers(statement)?.some(
+          (modifier) => modifier.kind === ts.SyntaxKind.ExportKeyword,
+        )
+      ) {
+        return [statement.name.text];
+      }
+      if (ts.isExportDeclaration(statement) && statement.exportClause) {
+        return ts.isNamedExports(statement.exportClause)
+          ? statement.exportClause.elements.map((element) => element.name.text)
+          : [];
+      }
+      return [];
+    });
+    expect(exports.sort()).toEqual([
+      "ReferralProgramPanel",
+      "referralAccrualDescription",
+      "referralRewardDescription",
+    ].sort());
   });
 
   it("keeps the complete React layer free from transport and backend concerns", () => {
@@ -180,6 +1004,29 @@ describe("clean architecture boundaries", () => {
       for (const { dependency, resolved } of projectDependencies(file, source)) {
         expect(resolved, `${file} imports backend composition ${dependency}`)
           .not.toMatch(/^src\/backend\/composition\//);
+      }
+    }
+  });
+
+  it("routes every Server Action adapter dependency through app composition", () => {
+    for (const { file, source } of files("src/app/actions/**/*.{ts,tsx}")) {
+      for (const { dependency, resolved } of astProjectDependencies(file, source)) {
+        expect(
+          resolved,
+          `${file} imports adapter ${dependency} outside app composition`,
+        ).not.toMatch(/^src\/backend\//);
+      }
+    }
+  });
+
+  it("routes every Next.js controller adapter dependency through app composition", () => {
+    for (const { file, source } of files("src/app/**/*.{ts,tsx}")) {
+      if (file.replaceAll("\\", "/").startsWith("src/app/_composition/")) continue;
+      for (const { dependency, resolved } of astProjectDependencies(file, source)) {
+        expect(
+          resolved,
+          `${file} imports adapter ${dependency} outside app composition`,
+        ).not.toMatch(/^src\/backend\//);
       }
     }
   });
@@ -298,7 +1145,10 @@ describe("clean architecture boundaries", () => {
 
   it("does not expose the removed internal browser transport", () => {
     expect(globSync("src/app/api/bff/**/route.ts")).toEqual([]);
-    const proxy = readFileSync("src/proxy.ts", "utf8");
+    const proxy = [
+      readFileSync("src/proxy.ts", "utf8"),
+      readFileSync("src/shared/edge/proxy-route-policy.ts", "utf8"),
+    ].join("\n");
     expect(proxy).toContain("removedBrowserTransportPaths");
     expect(proxy).toContain("'/api/bff/payments/status'");
     expect(proxy).toContain("isRoutineReadinessProbe ? logger.debug : logger.info");
@@ -551,5 +1401,63 @@ describe("clean architecture boundaries", () => {
       if (!source.includes("@/backend/database/") && !source.includes("@prisma/client")) continue;
       expect(file.replaceAll("\\", "/"), file).toMatch(/^src\/backend\/(?:database|integrations)\//);
     }
+  });
+
+  it("keeps every transactional web-session cookie effect inside the post-commit scope", () => {
+    const transactionalCalls: Array<{ file: string; postCommitScoped: boolean }> = [];
+
+    for (const { file, source } of files("src/**/*.{ts,tsx}")) {
+      const sourceFile = ts.createSourceFile(
+        file,
+        source,
+        ts.ScriptTarget.Latest,
+        true,
+        file.endsWith(".tsx") ? ts.ScriptKind.TSX : ts.ScriptKind.TS,
+      );
+      const visit = (node: ts.Node) => {
+        if (
+          ts.isCallExpression(node)
+          && ts.isIdentifier(node.expression)
+          && node.expression.text === "createWebSessionForRemnashopUser"
+        ) {
+          const [argument] = node.arguments;
+          const hasTransaction = argument
+            && ts.isObjectLiteralExpression(argument)
+            && argument.properties.some((property) =>
+              (ts.isShorthandPropertyAssignment(property)
+                && property.name.text === "tx")
+              || (ts.isPropertyAssignment(property)
+                && ((ts.isIdentifier(property.name) && property.name.text === "tx")
+                  || (ts.isStringLiteralLike(property.name) && property.name.text === "tx")))
+            );
+          if (hasTransaction) {
+            let ancestor: ts.Node | undefined = node.parent;
+            let postCommitScoped = false;
+            while (ancestor) {
+              if (
+                ts.isCallExpression(ancestor)
+                && ts.isIdentifier(ancestor.expression)
+                && ancestor.expression.text === "runWithPostCommitWebSessionCookieEffects"
+              ) {
+                postCommitScoped = true;
+                break;
+              }
+              ancestor = ancestor.parent;
+            }
+            transactionalCalls.push({
+              file: file.replaceAll("\\", "/"),
+              postCommitScoped,
+            });
+          }
+        }
+        ts.forEachChild(node, visit);
+      };
+      visit(sourceFile);
+    }
+
+    expect(transactionalCalls).toEqual([{
+      file: "src/backend/integrations/remnashop/session.ts",
+      postCommitScoped: true,
+    }]);
   });
 });

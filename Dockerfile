@@ -4,6 +4,10 @@ WORKDIR /app
 
 ENV NEXT_TELEMETRY_DISABLED=1
 
+# Runtime packages receive security fixes from the digest-pinned Debian base and
+# are covered by the image vulnerability gate; exact apt versions would prevent
+# those fixes from being selected on a rebuild.
+# hadolint ignore=DL3008
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates openssl \
     && rm -rf /var/lib/apt/lists/*
@@ -13,14 +17,21 @@ RUN npm ci
 
 FROM dependencies AS builder
 
+ARG CLEAN_PAY_REVISION=local
 ARG NEXT_PUBLIC_APP_URL
 ARG TURNSTILE_ENABLED=true
 ARG TURNSTILE_WIDGET_ID=build-time-placeholder-site-key
 ARG NEXT_PUBLIC_BRAND_NAME="Clean Pay"
 ARG NEXT_PUBLIC_BRAND_LOGO_URL=/clean-pay-logo.png
 
-COPY . .
+COPY next.config.ts prisma.config.ts tsconfig.json ./
+COPY scripts/next-command.mjs scripts/prisma-generate.mjs ./scripts/
+COPY runtime/database-pool.mjs runtime/production-env-rules.mjs ./runtime/
+COPY prisma ./prisma
+COPY public ./public
+COPY src ./src
 RUN NEXT_PUBLIC_APP_URL="${NEXT_PUBLIC_APP_URL}" \
+    CLEAN_PAY_BUILD_ID="${CLEAN_PAY_REVISION}" \
     NEXT_PUBLIC_BRAND_NAME="${NEXT_PUBLIC_BRAND_NAME}" \
     NEXT_PUBLIC_BRAND_LOGO_URL="${NEXT_PUBLIC_BRAND_LOGO_URL}" \
     TURNSTILE_ENABLED="${TURNSTILE_ENABLED}" \
@@ -34,6 +45,10 @@ WORKDIR /app
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
 
+# Runtime packages receive security fixes from the digest-pinned Debian base and
+# are covered by the image vulnerability gate; exact apt versions would prevent
+# those fixes from being selected on a rebuild.
+# hadolint ignore=DL3008
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates openssl \
     && rm -rf /var/lib/apt/lists/* \
@@ -63,6 +78,8 @@ COPY --from=dependencies --chown=cleanpay:nodejs /app/package.json /app/package-
 COPY --from=dependencies --chown=cleanpay:nodejs /app/node_modules ./node_modules
 COPY --chown=cleanpay:nodejs prisma ./prisma
 COPY --chown=cleanpay:nodejs prisma.config.ts ./prisma.config.ts
+COPY --chown=cleanpay:nodejs runtime/database-pool.mjs ./runtime/database-pool.mjs
+COPY --chown=cleanpay:nodejs runtime/production-env-rules.mjs ./runtime/production-env-rules.mjs
 COPY --chown=cleanpay:nodejs deploy/prod/deploy-log.mjs ./deploy/prod/deploy-log.mjs
 COPY --chown=cleanpay:nodejs deploy/prod/database-pool.mjs ./deploy/prod/database-pool.mjs
 COPY --chown=cleanpay:nodejs deploy/prod/credential-file-guard.mjs ./deploy/prod/credential-file-guard.mjs
@@ -71,6 +88,12 @@ COPY --chown=cleanpay:nodejs deploy/prod/production-env-rules.mjs ./deploy/prod/
 COPY --chown=cleanpay:nodejs deploy/prod/migration-rollback-verifier.mjs ./deploy/prod/migration-rollback-verifier.mjs
 COPY --chown=cleanpay:nodejs deploy/prod/database-privilege-manifest.mjs ./deploy/prod/database-privilege-manifest.mjs
 COPY --chown=cleanpay:nodejs deploy/prod/database-role-provision.mjs ./deploy/prod/database-role-provision.mjs
+
+# Exercise the migration CLI and its platform engine while the image is still
+# being built. A syntactically valid placeholder URL is sufficient for schema
+# validation and cannot open a database connection.
+RUN DATABASE_URL=postgresql://build:build@127.0.0.1:5432/build \
+    node node_modules/prisma/build/index.js validate
 
 USER cleanpay
 
@@ -127,6 +150,8 @@ COPY --from=builder --chown=cleanpay:nodejs /app/node_modules/postgres-date ./no
 COPY --from=builder --chown=cleanpay:nodejs /app/node_modules/postgres-interval ./node_modules/postgres-interval
 COPY --from=builder --chown=cleanpay:nodejs /app/node_modules/split2 ./node_modules/split2
 COPY --from=builder --chown=cleanpay:nodejs /app/node_modules/xtend ./node_modules/xtend
+COPY --chown=cleanpay:nodejs runtime/database-pool.mjs ./runtime/database-pool.mjs
+COPY --chown=cleanpay:nodejs runtime/production-env-rules.mjs ./runtime/production-env-rules.mjs
 COPY --chown=cleanpay:nodejs deploy/prod/start.sh ./deploy/prod/start.sh
 COPY --chown=cleanpay:nodejs deploy/prod/deploy-log.mjs ./deploy/prod/deploy-log.mjs
 COPY --chown=cleanpay:nodejs deploy/prod/database-pool.mjs ./deploy/prod/database-pool.mjs

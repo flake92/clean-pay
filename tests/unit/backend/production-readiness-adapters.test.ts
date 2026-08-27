@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   adapterConstructor: vi.fn(),
   getEnv: vi.fn(),
+  loggerError: vi.fn(),
   prismaConstructor: vi.fn(),
 }));
 
@@ -24,6 +25,9 @@ vi.mock("@prisma/client", () => ({
 }));
 vi.mock("@/backend/config/env", () => ({
   getEnv: mocks.getEnv,
+}));
+vi.mock("@/backend/observability/logger", () => ({
+  logger: { error: mocks.loggerError },
 }));
 
 describe("production readiness adapters", () => {
@@ -146,5 +150,18 @@ describe("production readiness adapters", () => {
         exhausted: 0,
       },
     ]);
+
+    (application as { emit(event: string, error: Error): boolean }).emit(
+      "error",
+      Object.assign(new Error("must-not-log"), {
+        code: "57P01",
+        connectionString: "postgresql://must-not-log",
+      }),
+    );
+    expect(mocks.loggerError).toHaveBeenCalledWith(
+      "database_pool_error",
+      { role: "application", errorName: "Error", code: "57P01" },
+      { source: "database.pool" },
+    );
   });
 });

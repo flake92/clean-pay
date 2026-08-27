@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 
-import { getEnv } from "@/backend/config/env";
-import { getCurrentSession } from "@/backend/integrations/sessions/web-session-service";
+import { getEnv } from "@/app/_composition/platform-runtime";
+import { getCurrentSession } from "@/app/_composition/web-session-runtime";
 import { safeRedirectPath } from "@/shared/auth/redirect-policy";
 import { safeAuthenticationFallback } from "@/shared/domain/post-auth-continuation";
 

@@ -1,0 +1,38 @@
+{
+  "schemaVersion": 1,
+  "baselineId": "f5cb6f543d85256e7733a1ade6a4f451d86cf378-deterministic-v5",
+  "status": "additive_provenance_correction",
+  "immutableBaselineFilesChanged": false,
+  "legacyForensicRecord": {
+    "file": "metadata.json",
+    "field": "source.pristineArchiveSha256",
+    "retainedValue": "8f424f5d4839d2aa421849bb2c7f8f48420ee675",
+    "verification": "unverified_legacy_value",
+    "classification": "40-hex Git-like value; not a SHA-256 digest"
+  },
+  "recomputation": {
+    "command": [
+      "git",
+      "archive",
+      "--format=tar",
+      "f5cb6f543d85256e7733a1ade6a4f451d86cf378"
+    ],
+    "archiveFormat": "git archive tar stream",
+    "bytes": 7587840,
+    "sha256": "6ccdccdd162ede951850759392a72376792988080307b4e29ae0cffef2397a03",
+    "repeatedResult": "byte-identical"
+  },
+  "sourceIdentity": {
+    "commit": "f5cb6f543d85256e7733a1ade6a4f451d86cf378",
+    "tree": "6647fc51c61018ba46aae95da21e534434028fbe",
+    "productionImage": {
+      "tag": "clean-pay:baseline-f5cb6f543d85-prod-pristine",
+      "digest": "sha256:e0640e36c6221ba8f2dc174ebbea3961fda59f6320aad56d2f071b1c51a75ffc"
+    }
+  },
+  "inventoryContract": {
+    "rawArtifactCount": 126,
+    "correctionSidecarExcludedFromRawAggregate": true,
+    "rawAggregateRemains": "bf449337e7222adc093f9adb7c1b3d7f2c122af74720bf1e1dfacb34fb69f4c3"
+  }
+}

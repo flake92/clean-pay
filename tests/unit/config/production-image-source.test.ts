@@ -6,7 +6,7 @@ import { describe, expect, it } from "vitest";
 const deploy = readFileSync("deploy.sh", "utf8");
 const rootStart = readFileSync("start.sh", "utf8");
 const prodCommand = readFileSync("deploy/prod/prod.mjs", "utf8");
-const productionRules = readFileSync("deploy/prod/production-env-rules.mjs", "utf8");
+const productionRules = readFileSync("runtime/production-env-rules.mjs", "utf8");
 const imagePreflight = readFileSync("deploy/prod/image-preflight.sh", "utf8");
 const dockerfile = readFileSync("Dockerfile", "utf8");
 const publicBuildContract = readFileSync(

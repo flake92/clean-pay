@@ -39,7 +39,7 @@ export function AuthShell({
               <div className="auth-card-content">
                 <div className="text-center mb-4">
                   <Image
-                    alt={branding.name}
+                    alt=""
                     className="mb-3 flex-shrink-0 clean-auth-logo"
                     height={68}
                     src={branding.logoUrl}

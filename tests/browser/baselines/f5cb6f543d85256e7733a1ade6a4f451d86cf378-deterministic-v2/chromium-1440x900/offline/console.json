@@ -1,0 +1,519 @@
+{
+  "schemaVersion": 1,
+  "baselineCommit": "f5cb6f543d85256e7733a1ade6a4f451d86cf378",
+  "project": "chromium-1440x900",
+  "route": {
+    "id": "offline",
+    "kind": "public"
+  },
+  "normalizedStaticCspViolations": [
+    {
+      "type": "error",
+      "kind": "blocked-static-chunk",
+      "messageTemplate": "Loading the script '<app-origin>/_next/static/chunks/<opaque>.js' violates the following Content Security Policy directive: \"script-src 'self' 'nonce-<volatile>' 'strict-dynamic' https://challenges.cloudflare.com https://telegram.org\". Note that 'strict-dynamic' is present, so host-based allowlisting is disabled. Note that 'script-src-elem' was not explicitly set, so 'script-src' is used as a fallback. The action has been blocked.",
+      "blockedResource": {
+        "origin": "<app-origin>",
+        "pathname": "/_next/static/chunks/<opaque>.js",
+        "query": [],
+        "fragment": null
+      },
+      "directive": {
+        "name": "script-src",
+        "sources": [
+          "'self'",
+          "'nonce-<volatile>'",
+          "'strict-dynamic'",
+          "https://challenges.cloudflare.com",
+          "https://telegram.org"
+        ]
+      },
+      "order": 0,
+      "location": {
+        "url": {
+          "origin": "<app-origin>",
+          "pathname": "/offline",
+          "query": [
+            {
+              "key": "source",
+              "value": "<sha256:730e6329d252b9cf>"
+            }
+          ],
+          "fragment": "<sha256:8e2c7ac508139a02>"
+        },
+        "lineNumber": 0,
+        "columnNumber": 0
+      }
+    },
+    {
+      "type": "error",
+      "kind": "blocked-static-chunk",
+      "messageTemplate": "Loading the script '<app-origin>/_next/static/chunks/<opaque>.js' violates the following Content Security Policy directive: \"script-src 'self' 'nonce-<volatile>' 'strict-dynamic' https://challenges.cloudflare.com https://telegram.org\". Note that 'strict-dynamic' is present, so host-based allowlisting is disabled. Note that 'script-src-elem' was not explicitly set, so 'script-src' is used as a fallback. The action has been blocked.",
+      "blockedResource": {
+        "origin": "<app-origin>",
+        "pathname": "/_next/static/chunks/<opaque>.js",
+        "query": [],
+        "fragment": null
+      },
+      "directive": {
+        "name": "script-src",
+        "sources": [
+          "'self'",
+          "'nonce-<volatile>'",
+          "'strict-dynamic'",
+          "https://challenges.cloudflare.com",
+          "https://telegram.org"
+        ]
+      },
+      "order": 1,
+      "location": {
+        "url": {
+          "origin": "<app-origin>",
+          "pathname": "/offline",
+          "query": [
+            {
+              "key": "source",
+              "value": "<sha256:730e6329d252b9cf>"
+            }
+          ],
+          "fragment": "<sha256:8e2c7ac508139a02>"
+        },
+        "lineNumber": 0,
+        "columnNumber": 0
+      }
+    },
+    {
+      "type": "error",
+      "kind": "blocked-static-chunk",
+      "messageTemplate": "Loading the script '<app-origin>/_next/static/chunks/<opaque>.js' violates the following Content Security Policy directive: \"script-src 'self' 'nonce-<volatile>' 'strict-dynamic' https://challenges.cloudflare.com https://telegram.org\". Note that 'strict-dynamic' is present, so host-based allowlisting is disabled. Note that 'script-src-elem' was not explicitly set, so 'script-src' is used as a fallback. The action has been blocked.",
+      "blockedResource": {
+        "origin": "<app-origin>",
+        "pathname": "/_next/static/chunks/<opaque>.js",
+        "query": [],
+        "fragment": null
+      },
+      "directive": {
+        "name": "script-src",
+        "sources": [
+          "'self'",
+          "'nonce-<volatile>'",
+          "'strict-dynamic'",
+          "https://challenges.cloudflare.com",
+          "https://telegram.org"
+        ]
+      },
+      "order": 2,
+      "location": {
+        "url": {
+          "origin": "<app-origin>",
+          "pathname": "/offline",
+          "query": [
+            {
+              "key": "source",
+              "value": "<sha256:730e6329d252b9cf>"
+            }
+          ],
+          "fragment": "<sha256:8e2c7ac508139a02>"
+        },
+        "lineNumber": 0,
+        "columnNumber": 0
+      }
+    },
+    {
+      "type": "error",
+      "kind": "blocked-static-chunk",
+      "messageTemplate": "Loading the script '<app-origin>/_next/static/chunks/<opaque>.js' violates the following Content Security Policy directive: \"script-src 'self' 'nonce-<volatile>' 'strict-dynamic' https://challenges.cloudflare.com https://telegram.org\". Note that 'strict-dynamic' is present, so host-based allowlisting is disabled. Note that 'script-src-elem' was not explicitly set, so 'script-src' is used as a fallback. The action has been blocked.",
+      "blockedResource": {
+        "origin": "<app-origin>",
+        "pathname": "/_next/static/chunks/<opaque>.js",
+        "query": [],
+        "fragment": null
+      },
+      "directive": {
+        "name": "script-src",
+        "sources": [
+          "'self'",
+          "'nonce-<volatile>'",
+          "'strict-dynamic'",
+          "https://challenges.cloudflare.com",
+          "https://telegram.org"
+        ]
+      },
+      "order": 3,
+      "location": {
+        "url": {
+          "origin": "<app-origin>",
+          "pathname": "/offline",
+          "query": [
+            {
+              "key": "source",
+              "value": "<sha256:730e6329d252b9cf>"
+            }
+          ],
+          "fragment": "<sha256:8e2c7ac508139a02>"
+        },
+        "lineNumber": 0,
+        "columnNumber": 0
+      }
+    },
+    {
+      "type": "error",
+      "kind": "blocked-static-chunk",
+      "messageTemplate": "Loading the script '<app-origin>/_next/static/chunks/<opaque>.js' violates the following Content Security Policy directive: \"script-src 'self' 'nonce-<volatile>' 'strict-dynamic' https://challenges.cloudflare.com https://telegram.org\". Note that 'strict-dynamic' is present, so host-based allowlisting is disabled. Note that 'script-src-elem' was not explicitly set, so 'script-src' is used as a fallback. The action has been blocked.",
+      "blockedResource": {
+        "origin": "<app-origin>",
+        "pathname": "/_next/static/chunks/<opaque>.js",
+        "query": [],
+        "fragment": null
+      },
+      "directive": {
+        "name": "script-src",
+        "sources": [
+          "'self'",
+          "'nonce-<volatile>'",
+          "'strict-dynamic'",
+          "https://challenges.cloudflare.com",
+          "https://telegram.org"
+        ]
+      },
+      "order": 4,
+      "location": {
+        "url": {
+          "origin": "<app-origin>",
+          "pathname": "/offline",
+          "query": [
+            {
+              "key": "source",
+              "value": "<sha256:730e6329d252b9cf>"
+            }
+          ],
+          "fragment": "<sha256:8e2c7ac508139a02>"
+        },
+        "lineNumber": 0,
+        "columnNumber": 0
+      }
+    },
+    {
+      "type": "error",
+      "kind": "blocked-static-chunk",
+      "messageTemplate": "Loading the script '<app-origin>/_next/static/chunks/<opaque>.js' violates the following Content Security Policy directive: \"script-src 'self' 'nonce-<volatile>' 'strict-dynamic' https://challenges.cloudflare.com https://telegram.org\". Note that 'strict-dynamic' is present, so host-based allowlisting is disabled. Note that 'script-src-elem' was not explicitly set, so 'script-src' is used as a fallback. The action has been blocked.",
+      "blockedResource": {
+        "origin": "<app-origin>",
+        "pathname": "/_next/static/chunks/<opaque>.js",
+        "query": [],
+        "fragment": null
+      },
+      "directive": {
+        "name": "script-src",
+        "sources": [
+          "'self'",
+          "'nonce-<volatile>'",
+          "'strict-dynamic'",
+          "https://challenges.cloudflare.com",
+          "https://telegram.org"
+        ]
+      },
+      "order": 5,
+      "location": {
+        "url": {
+          "origin": "<app-origin>",
+          "pathname": "/offline",
+          "query": [
+            {
+              "key": "source",
+              "value": "<sha256:730e6329d252b9cf>"
+            }
+          ],
+          "fragment": "<sha256:8e2c7ac508139a02>"
+        },
+        "lineNumber": 0,
+        "columnNumber": 0
+      }
+    },
+    {
+      "type": "error",
+      "kind": "blocked-static-chunk",
+      "messageTemplate": "Loading the script '<app-origin>/_next/static/chunks/<opaque>.js' violates the following Content Security Policy directive: \"script-src 'self' 'nonce-<volatile>' 'strict-dynamic' https://challenges.cloudflare.com https://telegram.org\". Note that 'strict-dynamic' is present, so host-based allowlisting is disabled. Note that 'script-src-elem' was not explicitly set, so 'script-src' is used as a fallback. The action has been blocked.",
+      "blockedResource": {
+        "origin": "<app-origin>",
+        "pathname": "/_next/static/chunks/<opaque>.js",
+        "query": [],
+        "fragment": null
+      },
+      "directive": {
+        "name": "script-src",
+        "sources": [
+          "'self'",
+          "'nonce-<volatile>'",
+          "'strict-dynamic'",
+          "https://challenges.cloudflare.com",
+          "https://telegram.org"
+        ]
+      },
+      "order": 6,
+      "location": {
+        "url": {
+          "origin": "<app-origin>",
+          "pathname": "/offline",
+          "query": [
+            {
+              "key": "source",
+              "value": "<sha256:730e6329d252b9cf>"
+            }
+          ],
+          "fragment": "<sha256:8e2c7ac508139a02>"
+        },
+        "lineNumber": 0,
+        "columnNumber": 0
+      }
+    },
+    {
+      "type": "error",
+      "kind": "blocked-static-chunk",
+      "messageTemplate": "Loading the script '<app-origin>/_next/static/chunks/<opaque>.js' violates the following Content Security Policy directive: \"script-src 'self' 'nonce-<volatile>' 'strict-dynamic' https://challenges.cloudflare.com https://telegram.org\". Note that 'strict-dynamic' is present, so host-based allowlisting is disabled. Note that 'script-src-elem' was not explicitly set, so 'script-src' is used as a fallback. The action has been blocked.",
+      "blockedResource": {
+        "origin": "<app-origin>",
+        "pathname": "/_next/static/chunks/<opaque>.js",
+        "query": [],
+        "fragment": null
+      },
+      "directive": {
+        "name": "script-src",
+        "sources": [
+          "'self'",
+          "'nonce-<volatile>'",
+          "'strict-dynamic'",
+          "https://challenges.cloudflare.com",
+          "https://telegram.org"
+        ]
+      },
+      "order": 7,
+      "location": {
+        "url": {
+          "origin": "<app-origin>",
+          "pathname": "/offline",
+          "query": [
+            {
+              "key": "source",
+              "value": "<sha256:730e6329d252b9cf>"
+            }
+          ],
+          "fragment": "<sha256:8e2c7ac508139a02>"
+        },
+        "lineNumber": 0,
+        "columnNumber": 0
+      }
+    },
+    {
+      "type": "error",
+      "kind": "blocked-static-chunk",
+      "messageTemplate": "Loading the script '<app-origin>/_next/static/chunks/<opaque>.js' violates the following Content Security Policy directive: \"script-src 'self' 'nonce-<volatile>' 'strict-dynamic' https://challenges.cloudflare.com https://telegram.org\". Note that 'strict-dynamic' is present, so host-based allowlisting is disabled. Note that 'script-src-elem' was not explicitly set, so 'script-src' is used as a fallback. The action has been blocked.",
+      "blockedResource": {
+        "origin": "<app-origin>",
+        "pathname": "/_next/static/chunks/<opaque>.js",
+        "query": [],
+        "fragment": null
+      },
+      "directive": {
+        "name": "script-src",
+        "sources": [
+          "'self'",
+          "'nonce-<volatile>'",
+          "'strict-dynamic'",
+          "https://challenges.cloudflare.com",
+          "https://telegram.org"
+        ]
+      },
+      "order": 8,
+      "location": {
+        "url": {
+          "origin": "<app-origin>",
+          "pathname": "/offline",
+          "query": [
+            {
+              "key": "source",
+              "value": "<sha256:730e6329d252b9cf>"
+            }
+          ],
+          "fragment": "<sha256:8e2c7ac508139a02>"
+        },
+        "lineNumber": 0,
+        "columnNumber": 0
+      }
+    },
+    {
+      "type": "error",
+      "kind": "blocked-static-chunk",
+      "messageTemplate": "Loading the script '<app-origin>/_next/static/chunks/<opaque>.js' violates the following Content Security Policy directive: \"script-src 'self' 'nonce-<volatile>' 'strict-dynamic' https://challenges.cloudflare.com https://telegram.org\". Note that 'strict-dynamic' is present, so host-based allowlisting is disabled. Note that 'script-src-elem' was not explicitly set, so 'script-src' is used as a fallback. The action has been blocked.",
+      "blockedResource": {
+        "origin": "<app-origin>",
+        "pathname": "/_next/static/chunks/<opaque>.js",
+        "query": [],
+        "fragment": null
+      },
+      "directive": {
+        "name": "script-src",
+        "sources": [
+          "'self'",
+          "'nonce-<volatile>'",
+          "'strict-dynamic'",
+          "https://challenges.cloudflare.com",
+          "https://telegram.org"
+        ]
+      },
+      "order": 9,
+      "location": {
+        "url": {
+          "origin": "<app-origin>",
+          "pathname": "/offline",
+          "query": [
+            {
+              "key": "source",
+              "value": "<sha256:730e6329d252b9cf>"
+            }
+          ],
+          "fragment": "<sha256:8e2c7ac508139a02>"
+        },
+        "lineNumber": 0,
+        "columnNumber": 0
+      }
+    },
+    {
+      "type": "error",
+      "kind": "blocked-static-chunk",
+      "messageTemplate": "Loading the script '<app-origin>/_next/static/chunks/<opaque>.js' violates the following Content Security Policy directive: \"script-src 'self' 'nonce-<volatile>' 'strict-dynamic' https://challenges.cloudflare.com https://telegram.org\". Note that 'strict-dynamic' is present, so host-based allowlisting is disabled. Note that 'script-src-elem' was not explicitly set, so 'script-src' is used as a fallback. The action has been blocked.",
+      "blockedResource": {
+        "origin": "<app-origin>",
+        "pathname": "/_next/static/chunks/<opaque>.js",
+        "query": [],
+        "fragment": null
+      },
+      "directive": {
+        "name": "script-src",
+        "sources": [
+          "'self'",
+          "'nonce-<volatile>'",
+          "'strict-dynamic'",
+          "https://challenges.cloudflare.com",
+          "https://telegram.org"
+        ]
+      },
+      "order": 10,
+      "location": {
+        "url": {
+          "origin": "<app-origin>",
+          "pathname": "/offline",
+          "query": [
+            {
+              "key": "source",
+              "value": "<sha256:730e6329d252b9cf>"
+            }
+          ],
+          "fragment": "<sha256:8e2c7ac508139a02>"
+        },
+        "lineNumber": 0,
+        "columnNumber": 0
+      }
+    },
+    {
+      "type": "error",
+      "kind": "blocked-static-chunk",
+      "messageTemplate": "Loading the script '<app-origin>/_next/static/chunks/<opaque>.js' violates the following Content Security Policy directive: \"script-src 'self' 'nonce-<volatile>' 'strict-dynamic' https://challenges.cloudflare.com https://telegram.org\". Note that 'strict-dynamic' is present, so host-based allowlisting is disabled. Note that 'script-src-elem' was not explicitly set, so 'script-src' is used as a fallback. The action has been blocked.",
+      "blockedResource": {
+        "origin": "<app-origin>",
+        "pathname": "/_next/static/chunks/<opaque>.js",
+        "query": [],
+        "fragment": null
+      },
+      "directive": {
+        "name": "script-src",
+        "sources": [
+          "'self'",
+          "'nonce-<volatile>'",
+          "'strict-dynamic'",
+          "https://challenges.cloudflare.com",
+          "https://telegram.org"
+        ]
+      },
+      "order": 11,
+      "location": {
+        "url": {
+          "origin": "<app-origin>",
+          "pathname": "/offline",
+          "query": [
+            {
+              "key": "source",
+              "value": "<sha256:730e6329d252b9cf>"
+            }
+          ],
+          "fragment": "<sha256:8e2c7ac508139a02>"
+        },
+        "lineNumber": 0,
+        "columnNumber": 0
+      }
+    },
+    {
+      "type": "error",
+      "kind": "blocked-inline-script",
+      "messageTemplate": "Executing inline script violates the following Content Security Policy directive 'script-src 'self' 'nonce-<volatile>' 'strict-dynamic' https://challenges.cloudflare.com https://telegram.org'. Either the 'unsafe-inline' keyword, a hash ('sha256-<volatile>'), or a nonce ('nonce-...') is required to enable inline execution. The action has been blocked.",
+      "blockedResource": "<inline>",
+      "directive": {
+        "name": "script-src",
+        "sources": [
+          "'self'",
+          "'nonce-<volatile>'",
+          "'strict-dynamic'",
+          "https://challenges.cloudflare.com",
+          "https://telegram.org"
+        ]
+      },
+      "order": 12,
+      "location": {
+        "url": {
+          "origin": "<app-origin>",
+          "pathname": "/offline",
+          "query": [
+            {
+              "key": "source",
+              "value": "<sha256:730e6329d252b9cf>"
+            }
+          ],
+          "fragment": "<sha256:8e2c7ac508139a02>"
+        },
+        "lineNumber": 0,
+        "columnNumber": 0
+      }
+    },
+    {
+      "type": "error",
+      "kind": "blocked-inline-script",
+      "messageTemplate": "Executing inline script violates the following Content Security Policy directive 'script-src 'self' 'nonce-<volatile>' 'strict-dynamic' https://challenges.cloudflare.com https://telegram.org'. Either the 'unsafe-inline' keyword, a hash ('sha256-<volatile>'), or a nonce ('nonce-...') is required to enable inline execution. The action has been blocked.",
+      "blockedResource": "<inline>",
+      "directive": {
+        "name": "script-src",
+        "sources": [
+          "'self'",
+          "'nonce-<volatile>'",
+          "'strict-dynamic'",
+          "https://challenges.cloudflare.com",
+          "https://telegram.org"
+        ]
+      },
+      "order": 13,
+      "location": {
+        "url": {
+          "origin": "<app-origin>",
+          "pathname": "/offline",
+          "query": [
+            {
+              "key": "source",
+              "value": "<sha256:730e6329d252b9cf>"
+            }
+          ],
+          "fragment": "<sha256:8e2c7ac508139a02>"
+        },
+        "lineNumber": 0,
+        "columnNumber": 0
+      }
+    }
+  ]
+}

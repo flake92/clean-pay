@@ -9,6 +9,7 @@ const state = vi.hoisted(() => ({
 
 const mocks = vi.hoisted(() => ({
   createRemoteJWKSet: vi.fn(() => "jwks"),
+  customFetch: Symbol("customFetch"),
   jwtVerify: vi.fn(),
   logTechnicalError: vi.fn(),
   logTechnicalWarning: vi.fn(),
@@ -16,6 +17,7 @@ const mocks = vi.hoisted(() => ({
   getCurrentSession: vi.fn(),
   redisCommand: vi.fn(),
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+  recordUpstreamRequest: vi.fn(),
   remnashopAuth: vi.fn(),
   prisma: {
     $queryRaw: vi.fn(),
@@ -30,6 +32,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("jose", () => ({
   createRemoteJWKSet: mocks.createRemoteJWKSet,
+  customFetch: mocks.customFetch,
   jwtVerify: mocks.jwtVerify,
 }));
 
@@ -52,6 +55,9 @@ vi.mock("@/backend/observability/audit", () => ({
 }));
 vi.mock("@/backend/observability/auth-debug-log", () => ({ authDebugLog: mocks.authDebugLog }));
 vi.mock("@/backend/observability/logger", () => ({ logger: mocks.logger }));
+vi.mock("@/backend/observability/metrics", () => ({
+  recordUpstreamRequest: mocks.recordUpstreamRequest,
+}));
 vi.mock("@/backend/integrations/remnashop/client", () => ({ remnashopAuth: mocks.remnashopAuth }));
 vi.mock("@/backend/database/prisma", () => ({ prisma: mocks.prisma }));
 vi.mock("@/backend/integrations/sessions/web-session-service", () => ({ getCurrentSession: mocks.getCurrentSession }));
@@ -71,6 +77,7 @@ import {
   verifyTelegramPopupToken,
   verifyTelegramWidgetCallbackPayload,
 } from "@/backend/integrations/telegram/oidc";
+import { resetEnvForTests } from "@/backend/config/env";
 import { sha256 } from "@/backend/security/crypto";
 
 const durableOwnership = {
@@ -98,6 +105,8 @@ function signWidgetPayload(body: Record<string, string | number | undefined>) {
 
 describe("Telegram identity verification adapter", () => {
   beforeEach(() => {
+    vi.unstubAllEnvs();
+    resetEnvForTests();
     vi.clearAllMocks();
     resetTelegramOidcJwksForTests();
     state.cookies.clear();
@@ -182,6 +191,7 @@ describe("Telegram identity verification adapter", () => {
       expect(response.cookies.get("clean_pay_tg_code_verifier")?.sameSite).toBe("lax");
     } finally {
       vi.unstubAllEnvs();
+      resetEnvForTests();
     }
   });
 
@@ -255,6 +265,47 @@ describe("Telegram identity verification adapter", () => {
       }),
     );
     expect(mocks.prisma.telegramAuthState).not.toHaveProperty("update");
+    expect(globalThis.fetch).toHaveBeenCalledOnce();
+    expect(vi.mocked(globalThis.fetch).mock.calls[0]?.[1])
+      .toMatchObject({ redirect: "error" });
+    expect(mocks.recordUpstreamRequest).toHaveBeenCalledOnce();
+    expect(mocks.recordUpstreamRequest).toHaveBeenCalledWith({
+      service: "telegram_oidc",
+      operation: "/token",
+      outcome: "success",
+      durationMs: expect.any(Number),
+    });
+  });
+
+  it("fails closed once for malformed and oversized token responses", async () => {
+    setCallbackCookies();
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response(JSON.stringify({
+        id_token: 123,
+        access_token: "must-not-project",
+      }), { status: 200 }),
+    );
+    await expect(verifyTelegramCallback("code", "state"))
+      .rejects.toThrow("invalid response");
+    expect(mocks.recordUpstreamRequest).toHaveBeenCalledTimes(1);
+    expect(mocks.recordUpstreamRequest).toHaveBeenLastCalledWith(
+      expect.objectContaining({ outcome: "unavailable" }),
+    );
+
+    vi.clearAllMocks();
+    setCallbackCookies();
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response("{}", {
+        status: 200,
+        headers: { "content-length": String(128 * 1024) },
+      }),
+    );
+    await expect(verifyTelegramCallback("code", "state"))
+      .rejects.toThrow("invalid response");
+    expect(mocks.recordUpstreamRequest).toHaveBeenCalledTimes(1);
+    expect(mocks.recordUpstreamRequest).toHaveBeenLastCalledWith(
+      expect.objectContaining({ outcome: "unavailable" }),
+    );
   });
 
   it("requires the original linking session before consuming linked state", async () => {
@@ -325,6 +376,35 @@ describe("Telegram identity verification adapter", () => {
 
     expect(mocks.createRemoteJWKSet).toHaveBeenCalledOnce();
     expect(mocks.jwtVerify).toHaveBeenCalledTimes(2);
+  });
+
+  it("forces redirect rejection for the JOSE JWKS transport", async () => {
+    state.cookies.set("clean_pay_tg_nonce", "nonce");
+    await verifyTelegramPopupToken("id-token");
+    const createJwksCall = mocks.createRemoteJWKSet.mock.calls[0] as unknown as
+      | [URL, Record<PropertyKey, unknown>]
+      | undefined;
+    const options = createJwksCall?.[1];
+    const fetchJwks = options?.[mocks.customFetch] as
+      | ((url: string, init: never) => Promise<Response>)
+      | undefined;
+    expect(fetchJwks).toBeTypeOf("function");
+
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response(null, {
+        status: 302,
+        headers: { location: "https://redirect.example/jwks" },
+      }),
+    );
+    await expect(fetchJwks!("https://oauth.telegram.org/.well-known/jwks.json", {
+      method: "GET",
+      headers: new Headers({ accept: "application/json" }),
+      redirect: "follow",
+      signal: AbortSignal.timeout(1_000),
+    } as never)).resolves.toMatchObject({ status: 302 });
+
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({ redirect: "error" });
   });
 
   it("verifies Telegram Login Widget HMAC and returns a provider identity", async () => {
@@ -467,6 +547,7 @@ describe("Telegram identity verification adapter", () => {
     });
     expect(mocks.logTechnicalWarning).toHaveBeenCalledWith("telegram_remnashop_auth_skipped", expect.anything());
     vi.unstubAllEnvs();
+    resetEnvForTests();
   });
 
   it("requires a bot token for widget verification and tolerates OIDC provider auth failure", async () => {
@@ -475,6 +556,7 @@ describe("Telegram identity verification adapter", () => {
     await expect(verifyTelegramWidgetCallbackPayload({}))
       .rejects.toThrow("TELEGRAM_BOT_TOKEN is required");
     vi.unstubAllEnvs();
+    resetEnvForTests();
 
     state.cookies.set("clean_pay_tg_nonce", "nonce");
     mocks.remnashopAuth.mockRejectedValueOnce(new Error("provider offline"));
@@ -648,6 +730,7 @@ describe("Telegram identity verification adapter", () => {
       });
     } finally {
       vi.unstubAllEnvs();
+      resetEnvForTests();
     }
 
     mocks.remnashopAuth.mockRejectedValueOnce(new Error("provider timeout"));

@@ -1,9 +1,13 @@
 import { paymentMaintenanceBatchIsHealthy, runPaymentMaintenance } from "@/application/payments/run-payment-maintenance";
-import { getEnv } from "@/backend/config/env";
-import { ServiceError } from "@/backend/errors/service-error";
-import { productionPaymentMaintenanceRunner } from "@/backend/integrations/payments/payment-maintenance-runner";
-import { safeEqual, sha256 } from "@/backend/security/crypto";
-import { auditLogRequired, logTechnicalError } from "@/backend/observability/audit";
+import {
+  getEnv,
+  ServiceError,
+  safeEqual,
+  sha256,
+  auditLogRequired,
+  logTechnicalError,
+} from "@/app/_composition/platform-runtime";
+import { productionPaymentMaintenanceRunner } from "@/app/_composition/payment-operations-runtime";
 import { NextResponse } from "next/server";
 
 export const runtime = "nodejs";
