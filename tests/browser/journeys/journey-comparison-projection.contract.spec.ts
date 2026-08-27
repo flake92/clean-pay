@@ -34,6 +34,8 @@ test("projects generated journey values by referential symbol while retaining st
   expect(projected.providerEffects.entries[0]!.body_sha256)
     .toBe("<derived-from-redacted-body-contract>");
   expect(projected.network.serverActions[0]!.payload.bytes).toBe(240);
+  expect(projected.network.requests[0]!.requestHeaders[0]!.value)
+    .toEqual(projected.network.serverActions[0]!.identifier);
   expect(projected.checkpoints[0]!.cookies[0]!.value.bytes).toBe(256);
   const oidc = projected.boundaries[0]!.value.preCallback[0]!;
   expect(oidc.expiry.epochSeconds).toBe("<bounded-cookie-expiry>");
@@ -82,28 +84,118 @@ test("projects only the pinned baseline and recomputed current fixture contracts
 test("projects only a consistent generated PWA shell cache contract", () => {
   const baseline = journeyManifest("baseline");
   const candidate = journeyManifest("candidate");
-  setPwaShellCache(baseline, "clean-pay-shell-ff7922ad-71fe-405d-b05f-363392d82108");
+  const legacyCache = "clean-pay-shell-ff7922ad-71fe-405d-b05f-363392d82108";
+  setPwaShellCache(baseline, legacyCache);
   setPwaShellCache(candidate, pwaRevisionCache(candidate));
-  expect(project(candidate)).toEqual(project(baseline));
+  const projected = projectPair(baseline, candidate);
+  expect(projected.actual).toEqual(projected.expected);
+
+  const candidateUuid = journeyManifest("candidate");
+  setPwaShellCache(candidateUuid, legacyCache);
+  const uuidNearMiss = projectPair(baseline, candidateUuid);
+  expect(uuidNearMiss.actual).not.toEqual(uuidNearMiss.expected);
 
   const inconsistent = journeyManifest("candidate");
   setPwaShellCache(inconsistent, pwaRevisionCache(inconsistent));
   pwaBoundaryCacheNames(inconsistent)[0] = `clean-pay-shell-${"b".repeat(40)}`;
-  expect(project(inconsistent)).not.toEqual(project(baseline));
+  const inconsistentProjection = projectPair(baseline, inconsistent);
+  expect(inconsistentProjection.actual).not.toEqual(inconsistentProjection.expected);
 
   const invalidFormat = journeyManifest("candidate");
   setPwaShellCache(invalidFormat, "clean-pay-shell-synthetic-build");
-  expect(project(invalidFormat)).not.toEqual(project(baseline));
+  const invalidFormatProjection = projectPair(baseline, invalidFormat);
+  expect(invalidFormatProjection.actual).not.toEqual(invalidFormatProjection.expected);
 
   const widenedBoundary = journeyManifest("candidate");
   setPwaShellCache(widenedBoundary, pwaRevisionCache(widenedBoundary));
   Object.assign(pwaBoundary(widenedBoundary), { unexpected: true });
-  expect(project(widenedBoundary)).not.toEqual(project(baseline));
+  const widenedProjection = projectPair(baseline, widenedBoundary);
+  expect(widenedProjection.actual).not.toEqual(widenedProjection.expected);
 
   const outsideJourney = journeyManifest("candidate");
   setPwaShellCache(outsideJourney, pwaRevisionCache(outsideJourney));
   outsideJourney.journey = "tariffs-payment-returns-extend-idempotency";
-  expect(project(outsideJourney)).not.toEqual(project(baseline));
+  const outsideProjection = projectPair(baseline, outsideJourney);
+  expect(outsideProjection.actual).not.toEqual(outsideProjection.expected);
+});
+
+test("projects a consistent generated PWA shell cache in non-public journey checkpoints", () => {
+  const baseline = journeyManifest("baseline");
+  const candidate = journeyManifest("candidate");
+  setCheckpointCacheNames(
+    baseline,
+    ["clean-pay-shell-ff7922ad-71fe-405d-b05f-363392d82108"],
+  );
+  setCheckpointCacheNames(candidate, [pwaRevisionCache(candidate)]);
+  const projected = projectPair(baseline, candidate);
+  expect(projected.actual).toEqual(projected.expected);
+
+  const candidateUuid = journeyManifest("candidate");
+  setCheckpointCacheNames(
+    candidateUuid,
+    ["clean-pay-shell-ff7922ad-71fe-405d-b05f-363392d82108"],
+  );
+  const uuidNearMiss = projectPair(baseline, candidateUuid);
+  expect(uuidNearMiss.actual).not.toEqual(uuidNearMiss.expected);
+
+  const inconsistent = journeyManifest("candidate");
+  appendMatchingCheckpoint(inconsistent, "second-checkpoint");
+  setCheckpointCacheNames(inconsistent, [
+    pwaRevisionCache(inconsistent),
+    "clean-pay-shell-ff7922ad-71fe-405d-b05f-363392d82108",
+  ]);
+  const repeatedBaseline = journeyManifest("baseline");
+  appendMatchingCheckpoint(repeatedBaseline, "second-checkpoint");
+  setCheckpointCacheNames(repeatedBaseline, [
+    "clean-pay-shell-ff7922ad-71fe-405d-b05f-363392d82108",
+    "clean-pay-shell-ff7922ad-71fe-405d-b05f-363392d82108",
+  ]);
+  const inconsistentProjection = projectPair(repeatedBaseline, inconsistent);
+  expect(inconsistentProjection.actual).not.toEqual(inconsistentProjection.expected);
+
+  const tooMany = journeyManifest("candidate");
+  setCheckpointCacheNames(tooMany, [[
+    pwaRevisionCache(tooMany),
+    pwaRevisionCache(tooMany),
+  ]]);
+  const tooManyProjection = projectPair(baseline, tooMany);
+  expect(tooManyProjection.actual).not.toEqual(tooManyProjection.expected);
+
+  const addedPresence = journeyManifest("candidate");
+  setCheckpointCacheNames(addedPresence, [pwaRevisionCache(addedPresence)]);
+  const emptyBaseline = journeyManifest("baseline");
+  setCheckpointCacheNames(emptyBaseline, [[]]);
+  const presenceProjection = projectPair(emptyBaseline, addedPresence);
+  expect(presenceProjection.actual).not.toEqual(presenceProjection.expected);
+});
+
+test("projects only exactly correlated Next-Action request headers", () => {
+  const baseline = journeyManifest("baseline");
+  const candidate = journeyManifest("candidate");
+  expect(project(candidate)).toEqual(project(baseline));
+
+  const mutations: Array<(manifest: ReturnType<typeof journeyManifest>) => void> = [
+    (manifest) => {
+      manifest.network.requests[0]!.requestHeaders[0]!.value.sha256 = "f".repeat(64);
+    },
+    (manifest) => {
+      manifest.network.requests[0]!.requestHeaders.push({
+        name: "next-action",
+        value: { ...manifest.network.requests[0]!.serverAction.identifier },
+      });
+    },
+    (manifest) => {
+      Object.assign(manifest.network.requests[0]!.requestHeaders[0]!, { unexpected: true });
+    },
+    (manifest) => {
+      manifest.network.requests[0]!.requestHeaders.length = 0;
+    },
+  ];
+  for (const mutate of mutations) {
+    const nearMiss = journeyManifest("candidate");
+    mutate(nearMiss);
+    expect(project(nearMiss)).not.toEqual(project(baseline));
+  }
 });
 
 test("projects hashed static references inside journey checkpoints only", () => {
@@ -333,6 +425,14 @@ function project(value: unknown) {
   return projectCharacterizationManifestForComparison(value);
 }
 
+function projectPair(
+  expected: ReturnType<typeof journeyManifest>,
+  actual: ReturnType<typeof journeyManifest>,
+) {
+  pinJourneyFixturePair(expected, actual);
+  return projectCharacterizationManifestPairForComparison(expected, actual);
+}
+
 function journeyManifest(seed: string) {
   const cuid = (seed === "baseline" ? "cmfbase" : "cmfcandidate").padEnd(28, "0");
   const idempotency = seed === "baseline"
@@ -431,7 +531,10 @@ function journeyManifest(seed: string) {
         resourceType: "fetch",
         navigation: false,
         serverAction: { present: true, identifier: { ...requestIdentifier } },
-        requestHeaders: [],
+        requestHeaders: [{
+          name: "next-action",
+          value: { ...requestIdentifier },
+        }],
         postData: { ...requestPayload },
         redirectedFrom: null,
         response: { status: 200, headers: [] },
@@ -545,6 +648,42 @@ function pwaBoundaryCacheNames(manifest: ReturnType<typeof journeyManifest>) {
 
 function pwaRevisionCache(manifest: ReturnType<typeof journeyManifest>) {
   return `clean-pay-shell-${manifest.source.revision}`;
+}
+
+function setCheckpointCacheNames(
+  manifest: ReturnType<typeof journeyManifest>,
+  values: Array<string | string[]>,
+) {
+  const checkpoints = (manifest as unknown as Record<string, unknown>).checkpoints as unknown[];
+  for (const [index, value] of values.entries()) {
+    const checkpoint = checkpoints[index] as Record<string, unknown>;
+    checkpoint.storage = {
+      local: [],
+      session: [],
+      cacheNames: Array.isArray(value) ? [...value] : [value],
+      serviceWorkerScopes: [],
+    };
+  }
+}
+
+function appendMatchingCheckpoint(
+  manifest: ReturnType<typeof journeyManifest>,
+  label: string,
+) {
+  const checkpoints = (manifest as unknown as Record<string, unknown>).checkpoints as Array<
+    Record<string, unknown>
+  >;
+  const checkpoint = structuredClone(checkpoints[0]!);
+  checkpoint.label = label;
+  checkpoints.push(checkpoint);
+}
+
+function pinJourneyFixturePair(
+  baseline: ReturnType<typeof journeyManifest>,
+  candidate: ReturnType<typeof journeyManifest>,
+) {
+  baseline.source.fixtureContract.sha256 = PINNED_JOURNEY_V5_FIXTURE_SHA256;
+  candidate.source.fixtureContract.sha256 = currentJourneyFixtureContractSha256();
 }
 
 function setCheckpointStylesheet(

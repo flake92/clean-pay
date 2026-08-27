@@ -22,7 +22,9 @@ const DYNAMIC_COOKIE_NAMES = new Set([
 const CUID = /^c[a-z0-9]{20,40}$/i;
 const SHORT_DIGEST = /^<sha256:[a-f0-9]{16}>$/;
 const PWA_SHELL_CACHE_UUID_V4 = /^clean-pay-shell-[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/;
-const PROJECTED_PWA_SHELL_CACHE = "<dynamic:pwa-shell-cache:1>";
+const PROJECTED_PWA_SHELL_CACHE = Object.freeze({
+  kind: "<validated:pwa-shell-cache>",
+});
 
 /**
  * Normalizes only generated identifiers in the isolated journey schema.
@@ -37,54 +39,110 @@ export function projectExactJourneyGeneratedValues(manifest: Record<string, unkn
   projectServerActions(manifest.network, references);
   projectCheckpointCookies(manifest.checkpoints, references);
   projectBoundaryCookies(manifest.boundaries, references);
-  projectPwaShellCache(manifest);
   projectCanonicalUrls(manifest, references);
 }
 
-function projectPwaShellCache(manifest: Record<string, unknown>) {
-  const source = manifest.source;
+export function projectExactJourneyPwaShellCachePair(
+  expected: Record<string, unknown>,
+  actual: Record<string, unknown>,
+) {
   if (
-    manifest.journey !== "public-responsive-keyboard-install-offline-support"
-    || !Array.isArray(manifest.checkpoints)
-    || !Array.isArray(manifest.boundaries)
-    || !isRecord(source)
-    || typeof source.revision !== "string"
-    || !/^[a-f0-9]{40}$/.test(source.revision)
+    !isExactJourneyManifest(expected)
+    || !isExactJourneyManifest(actual)
+    || expected.project !== actual.project
+    || expected.journey !== actual.journey
+  ) {
+    return;
+  }
+  const expectedSource = expected.source as Record<string, unknown>;
+  const actualSource = actual.source as Record<string, unknown>;
+  if (
+    typeof expectedSource.revision !== "string"
+    || !/^[a-f0-9]{40}$/.test(expectedSource.revision)
+    || typeof actualSource.revision !== "string"
+    || !/^[a-f0-9]{40}$/.test(actualSource.revision)
   ) {
     return;
   }
 
-  const cacheNameLocations: Array<{ values: unknown[]; index: number }> = [];
-  for (const checkpoint of manifest.checkpoints) {
-    if (!isRecord(checkpoint) || !isExactCheckpointStorage(checkpoint.storage)) return;
+  const expectedLocations = exactPwaShellCacheLocations(expected);
+  if (
+    !expectedLocations
+    || !allLocationsMatch(expectedLocations, (value) => (
+      typeof value === "string" && PWA_SHELL_CACHE_UUID_V4.test(value)
+    ))
+  ) {
+    return;
+  }
+  projectPwaLocations(expectedLocations);
+
+  const actualLocations = exactPwaShellCacheLocations(actual);
+  const actualRevisionCache = `clean-pay-shell-${actualSource.revision}`;
+  if (
+    !actualLocations
+    || !sameJson(
+      actualLocations.map(({ key }) => key),
+      expectedLocations.map(({ key }) => key),
+    )
+    || !allLocationsMatch(actualLocations, (value) => value === actualRevisionCache)
+  ) {
+    return;
+  }
+  projectPwaLocations(actualLocations);
+}
+
+type PwaCacheLocation = {
+  key: string;
+  values: unknown[];
+  index: number;
+};
+
+function exactPwaShellCacheLocations(
+  manifest: Record<string, unknown>,
+): PwaCacheLocation[] | null {
+  if (!Array.isArray(manifest.checkpoints)) return null;
+  const locations: PwaCacheLocation[] = [];
+  for (const [checkpointIndex, checkpoint] of manifest.checkpoints.entries()) {
+    if (!isRecord(checkpoint) || !isExactCheckpointStorage(checkpoint.storage)) return null;
     const cacheNames = checkpoint.storage.cacheNames;
-    if (cacheNames.length > 1) return;
-    if (cacheNames.length === 1) cacheNameLocations.push({ values: cacheNames, index: 0 });
+    if (cacheNames.length > 1) return null;
+    if (cacheNames.length === 1) {
+      locations.push({
+        key: `checkpoint:${checkpointIndex}`,
+        values: cacheNames,
+        index: 0,
+      });
+    }
   }
 
-  if (cacheNameLocations.length !== 2) return;
-
+  if (manifest.journey !== "public-responsive-keyboard-install-offline-support") {
+    return locations.length > 0 ? locations : null;
+  }
+  if (!Array.isArray(manifest.boundaries) || locations.length !== 2) return null;
   const pwaBoundaries = manifest.boundaries.filter((entry) => (
     isRecord(entry) && entry.label === "pwa-service-worker-offline"
   ));
-  if (pwaBoundaries.length !== 1) return;
+  if (pwaBoundaries.length !== 1) return null;
   const boundary = pwaBoundaries[0] as Record<string, unknown>;
-  if (!isExactPwaBoundary(boundary)) return;
-  const boundaryCacheNames = boundary.value.online.cacheNames;
-  cacheNameLocations.push({ values: boundaryCacheNames, index: 0 });
+  if (!isExactPwaBoundary(boundary)) return null;
+  locations.push({
+    key: "boundary:pwa-service-worker-offline:online",
+    values: boundary.value.online.cacheNames,
+    index: 0,
+  });
+  return locations;
+}
 
-  const cacheNames = cacheNameLocations.map(({ values, index }) => values[index]);
-  const candidateRevisionCache = `clean-pay-shell-${source.revision}`;
-  if (
-    cacheNames.some((name) => typeof name !== "string" || (
-      name !== candidateRevisionCache && !PWA_SHELL_CACHE_UUID_V4.test(name)
-    ))
-    || new Set(cacheNames).size !== 1
-  ) {
-    return;
-  }
+function allLocationsMatch(
+  locations: PwaCacheLocation[],
+  predicate: (value: unknown) => boolean,
+) {
+  const values = locations.map(({ values, index }) => values[index]);
+  return values.every(predicate) && new Set(values).size === 1;
+}
 
-  for (const location of cacheNameLocations) {
+function projectPwaLocations(locations: PwaCacheLocation[]) {
+  for (const location of locations) {
     location.values[location.index] = PROJECTED_PWA_SHELL_CACHE;
   }
 }
@@ -370,6 +428,7 @@ function projectServerActions(value: unknown, references: DynamicReferences) {
       || !sameJson(request.postData, actionValue.payload)
       || !isDigest(request.serverAction.identifier)
       || !isDigest(request.postData)
+      || !exactNextActionHeader(request.requestHeaders, request.serverAction.identifier)
     ) {
       return;
     }
@@ -382,12 +441,15 @@ function projectServerActions(value: unknown, references: DynamicReferences) {
     const request = value.requests[action.requestIndex as number] as Record<string, unknown>;
     const identifier = action.identifier as Record<string, unknown>;
     const payload = action.payload as Record<string, unknown>;
+    const nextActionHeader = exactNextActionHeader(request.requestHeaders, identifier);
+    if (!nextActionHeader) return;
     const idSymbol = sequenceSymbol(actionIds, "server-action-id", identifier.sha256 as string);
     const payloadSymbol = sequenceSymbol(payloads, "server-action-payload", payload.sha256 as string);
     identifier.sha256 = idSymbol;
     payload.sha256 = payloadSymbol;
     (request.serverAction as Record<string, unknown>).identifier = { ...identifier };
     request.postData = { ...payload };
+    nextActionHeader.value = { ...identifier };
   }
 
   function sequenceSymbol(values: Map<string, string>, format: string, digest: string) {
@@ -397,6 +459,24 @@ function projectServerActions(value: unknown, references: DynamicReferences) {
     values.set(digest, symbol);
     return symbol;
   }
+}
+
+function exactNextActionHeader(
+  value: unknown,
+  identifier: unknown,
+): (Record<string, unknown> & { value: unknown }) | null {
+  if (!Array.isArray(value) || !isDigest(identifier)) return null;
+  const matches = value.filter((header) => (
+    isRecord(header) && header.name === "next-action"
+  ));
+  if (matches.length !== 1) return null;
+  const header = matches[0];
+  return isRecord(header)
+    && hasExactKeys(header, ["name", "value"])
+    && isDigest(header.value)
+    && sameJson(header.value, identifier)
+    ? header as Record<string, unknown> & { value: unknown }
+    : null;
 }
 
 function projectCheckpointCookies(value: unknown, references: DynamicReferences) {
