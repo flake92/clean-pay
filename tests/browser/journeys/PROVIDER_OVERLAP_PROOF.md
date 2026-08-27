@@ -5,10 +5,13 @@ comparison projection. It never writes under `tests/browser/baselines` and it
 does not make a provider-ledger order difference acceptable on its own.
 
 Start two complete, isolated journey Compose stacks with the same current
-fixture sources, deterministic build contract, and different project names,
-ports, loopback TLS resolver addresses, application image digests, and source
-revisions. Keep each generated `browser-journey-contract.json` outside the
-repository. Then run:
+fixture sources and deterministic build contract. The baseline and candidate
+projects must respectively match
+`clean-pay-browser-journey-provider-proof-baseline-<12 lowercase hex>` and
+`clean-pay-browser-journey-provider-proof-candidate-<12 lowercase hex>`.
+Their app, provider-control, CONNECT-proxy, and loopback TLS publications,
+application image digests, and source revisions must be distinct. Keep each
+generated `browser-journey-contract.json` outside the repository. Then run:
 
 ```text
 node tests/browser/journeys/prove-provider-overlap.mjs \
@@ -24,19 +27,55 @@ node tests/browser/journeys/prove-provider-overlap.mjs \
   --output <absolute-new-path-outside-the-repository>.json
 ```
 
-The orchestrator performs read-only Docker inspection to bind each running
-Compose `app` container to the expected exact local image config digest, image
-reference, OCI revision, role, and public-build-contract labels. It resets only
-each fixture's project-owned disposable data, completes the synthetic Telegram
-login to a non-cabinet route in the pinned Chromium project, blocks cabinet
-prefetch, then arms the exact one-shot `cabinet_read_overlap_once` barrier only
-for one explicit cabinet document navigation. It validates the two referenced
-offers/devices records as adjacent, enriched, sanitized ledger entries.
+Before either reset POST or either browser action, the orchestrator validates
+both stacks concurrently. Read-only, bounded Docker inspection binds the exact
+project labels, running/healthy state, one project network, and loopback-only
+publications of `app`, `browser-provider-mock`, `browser-proxy`,
+`browser-oidc-mock`, and `browser-db-observer`. It also binds the app image
+config digest, image-reference hash, OCI revision, role, public-build-contract
+label, exact synthetic environment contract, and read-only realpath plus live
+container SHA-256 for each mounted fixture source. The generated contract's
+current fixture SHA-256 must equal those live sources in both stacks. A dual
+preflight rejects project, network, image, or publication aliasing and proves
+both stacks coexist before execution.
 
-The output is create-only and requests POSIX mode `0600` where supported. It contains no cookie
-values, tokens, request bodies, image references, container IDs, raw user
-agent, credentials, or PII. Image references and the user agent are represented
-only by SHA-256 digests. Failure output is digest-only.
+After that single barrier, baseline and candidate execute via `Promise.all`.
+Each stack resets only its project-owned disposable data, completes the
+synthetic Telegram login to `/profile`, blocks cabinet prefetch, then arms the
+exact one-shot `cabinet_read_overlap_once` barrier for one explicit `/cabinet`
+document navigation. The pinned Chromium launch arguments, resolver, and
+established CONNECT proxy are shared with the journey runner. Only exact
+synthetic HTTPS origins are allowed; unexpected requests, console output,
+page errors, redirects, paths, queries, hashes, proxy failures, or unbounded
+lifecycle counters fail the proof. The two referenced offers/devices records
+must be adjacent, enriched, sanitized ledger entries.
+
+The output is create-only and requests POSIX mode `0600` where supported. It
+contains no cookie values, tokens, request bodies, image references, container
+IDs, raw user agent, credentials, host paths, caller-chosen names, or PII. Project,
+network, service, fixture-mount, environment, publication, image-reference,
+contract, and user-agent identities are represented only by SHA-256 digests,
+apart from the two required non-PII role-specific project identifiers.
+The serialized reader recomputes all cross-stack and lifecycle invariants; it
+does not trust claimed comparison booleans. Failure output is digest-only.
+
+The proof intentionally retains both externally started stacks for subsequent
+served-assets and SIGTERM evidence. Its machine-readable lifecycle section has
+`automaticCleanup: false` and names the exact ownership-gated handoff:
+
+```text
+CLEAN_PAY_BROWSER_COMPOSE_PROJECT=<exact-role-project> \
+CLEAN_PAY_BROWSER_JOURNEY_ENV_DIR=<that-project-contract-directory> \
+node tests/browser/journeys/run-production-image-journey.mjs cleanup
+```
+
+Run the handoff once for each reported role. It inspects exact Compose project
+labels before `down --volumes`; it never performs a broad or glob cleanup. The
+normal production-image runner separately removes only its known generated
+role files in `finally`, removes an empty environment directory only when that
+same run created it, and retains a hash-only sanitized contract under
+`test-results/browser-journey-contract-evidence`. Caller-owned directories and
+unexpected entries are never removed.
 
 Limits: this proof establishes that the offers and devices reads overlapped in
 both exact images for one deterministic scenario and browser project. It does

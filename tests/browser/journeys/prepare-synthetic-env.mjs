@@ -4,6 +4,7 @@ import path from "node:path";
 
 import { PRODUCTION_ROLE_ENVIRONMENT_NAMES } from "../../../deploy/prod/role-env.mjs";
 import { validateProductionEnvironment } from "../../../runtime/production-env-rules.mjs";
+import { currentJourneyFixtureContractSha256Async } from "./journey-fixture-manifest.mjs";
 
 const destination = requiredPath("CLEAN_PAY_BROWSER_JOURNEY_ENV_DIR");
 const repositoryRoot = path.resolve(process.cwd());
@@ -209,6 +210,7 @@ await privateWrite(observerProvisionEnvironmentPath, assignmentBytes({
 }));
 
 const publicBuildContractSha256 = publicBuildContract(environment);
+const fixtureContractSha256 = await currentJourneyFixtureContractSha256Async();
 await privateWrite(path.join(destination, "browser-journey-contract.json"), `${JSON.stringify({
   schemaVersion: 1,
   kind: "self-contained-synthetic-browser-journey",
@@ -219,6 +221,10 @@ await privateWrite(path.join(destination, "browser-journey-contract.json"), `${J
     migration: migrationImage,
   },
   publicBuildContract: { version: "1", sha256: publicBuildContractSha256 },
+  fixtureContract: {
+    domain: "clean-pay-browser-journey-fixture-v5",
+    sha256: fixtureContractSha256,
+  },
   publications: {
     app: `127.0.0.1:${appPort}`,
     providerControl: `127.0.0.1:${providerPort}`,
@@ -237,6 +243,7 @@ process.stdout.write(`${JSON.stringify({
   status: "prepared",
   project,
   publicBuildContractSha256,
+  fixtureContractSha256,
   roleFileCount: Object.keys(PRODUCTION_ROLE_ENVIRONMENT_NAMES).length,
 })}\n`);
 

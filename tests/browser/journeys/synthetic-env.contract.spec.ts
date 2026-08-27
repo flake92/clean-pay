@@ -9,6 +9,7 @@ import { createInterface } from "node:readline";
 import { expect, test } from "@playwright/test";
 
 import { assertSyntheticCaddyRouteOrder } from "./caddy-route-policy";
+import { currentJourneyFixtureContractSha256 } from "./journey-fixture-contract";
 
 const script = path.resolve(__dirname, "prepare-synthetic-env.mjs");
 const revision = "f5cb6f543d85256e7733a1ade6a4f451d86cf378";
@@ -23,6 +24,7 @@ test("materializes two deterministic self-contained role environments", async ()
     expect(secondResult.status, secondResult.stderr).toBe(0);
     expect(JSON.parse(firstResult.stdout)).toMatchObject({
       status: "prepared",
+      fixtureContractSha256: currentJourneyFixtureContractSha256(),
       publicBuildContractSha256: "5dc1c21d1db2b433736d50c008065d9dfa3adc1ff338fb403569913881b80673",
       roleFileCount: 7,
     });
@@ -63,6 +65,10 @@ test("materializes two deterministic self-contained role environments", async ()
       "PGUSER",
     ]);
     expect(JSON.parse(firstFiles.get("browser-journey-contract.json") ?? "null")).toMatchObject({
+      fixtureContract: {
+        domain: "clean-pay-browser-journey-fixture-v5",
+        sha256: currentJourneyFixtureContractSha256(),
+      },
       images: {
         application: "clean-pay:synthetic-app",
         migration: "clean-pay:synthetic-migration",

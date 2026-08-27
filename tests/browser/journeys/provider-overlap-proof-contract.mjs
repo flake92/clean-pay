@@ -24,8 +24,10 @@ const participantContracts = Object.freeze([
 ]);
 
 export function assertJourneyStackContract(value, label) {
+  if (label !== "baseline" && label !== "candidate") fail("Journey stack role is invalid.");
   const contract = record(value, `${label} journey contract`);
   exactKeys(contract, [
+    "fixtureContract",
     "images",
     "kind",
     "ownedStateReset",
@@ -44,10 +46,19 @@ export function assertJourneyStackContract(value, label) {
   );
   stringMatch(
     contract.project,
-    /^clean-pay-browser-journey-[a-z0-9][a-z0-9-]{5,80}$/,
+    new RegExp(`^clean-pay-browser-journey-provider-proof-${label}-[a-f0-9]{12}$`),
     `${label} compose project`,
   );
   stringMatch(contract.revision, /^[a-f0-9]{40}$/, `${label} revision`);
+
+  const fixtureContract = record(contract.fixtureContract, `${label} fixture contract`);
+  exactKeys(fixtureContract, ["domain", "sha256"], `${label} fixture contract`);
+  equal(
+    fixtureContract.domain,
+    "clean-pay-browser-journey-fixture-v5",
+    `${label} fixture contract domain`,
+  );
+  stringMatch(fixtureContract.sha256, /^[a-f0-9]{64}$/, `${label} fixture contract sha256`);
 
   const images = record(contract.images, `${label} images`);
   exactKeys(images, ["application", "migration"], `${label} images`);
@@ -190,7 +201,7 @@ export function assertApplicationImageIdentity(value, contract, expectedDigest, 
 }
 
 export function assertDeterministicReset(value, scenario, project, label) {
-  stringMatch(scenario, /^[a-z0-9][a-z0-9:-]{1,180}$/, `${label} scenario`);
+  equal(scenario, "provider-overlap-v1", `${label} scenario`);
   const reset = record(value, `${label} reset evidence`);
   exactKeys(reset, [
     "database",
@@ -286,7 +297,7 @@ export function assertDeterministicReset(value, scenario, project, label) {
   stringMatch(database.schemaSha256, /^[a-f0-9]{64}$/, `${label} database schema digest`);
   positiveInteger(database.tableCount, `${label} database table count`);
   equal(database.sequenceCount, 0, `${label} database sequence count`);
-  positiveInteger(database.resetSequence, `${label} database reset sequence`);
+  equal(database.resetSequence, 1, `${label} database reset sequence`);
   equal(
     database.transaction,
     "truncate-public-application-tables-cascade-no-sequences",
@@ -424,16 +435,28 @@ export function createProviderOverlapStackReport(input) {
   const navigation = record(input.navigation, `${role} navigation`);
   exactKeys(
     navigation,
-    ["finalPath", "headingVisible", "unexpectedRequestCount"],
+    [
+      "finalUrl",
+      "headingVisible",
+      "unexpectedConsoleCount",
+      "unexpectedPageErrorCount",
+      "unexpectedRequestCount",
+    ],
     `${role} navigation`,
   );
-  equal(navigation.finalPath, "/cabinet", `${role} navigation final path`);
+  equal(navigation.finalUrl, "https://pay.ci.clean-pay.dev/cabinet", `${role} navigation final URL`);
   equal(navigation.headingVisible, true, `${role} cabinet heading`);
   equal(navigation.unexpectedRequestCount, 0, `${role} unexpected browser requests`);
+  equal(navigation.unexpectedConsoleCount, 0, `${role} unexpected browser console`);
+  equal(navigation.unexpectedPageErrorCount, 0, `${role} unexpected browser pageerror`);
+  stringMatch(input.journeyContractSha256, /^[a-f0-9]{64}$/, `${role} journey contract sha256`);
+  const runtimeBinding = assertRuntimeBinding(input.runtimeBinding, role);
+  const connectProxyCounters = assertConnectProxyCounters(input.connectProxyCounters, role);
 
   return Object.freeze({
     role,
     composeProject: input.contract.project,
+    journeyContractSha256: input.journeyContractSha256,
     fixtureContract: Object.freeze({
       domain: "clean-pay-browser-journey-fixture-v5",
       sha256: input.fixtureContractSha256,
@@ -451,6 +474,8 @@ export function createProviderOverlapStackReport(input) {
       role: input.imageIdentity.role,
       publicBuildContract: input.imageIdentity.publicBuildContract,
     }),
+    runtimeBinding,
+    connectProxyCounters,
     reset: Object.freeze({ database: input.reset.database }),
     navigation,
     providerOverlap: input.providerOverlap,
@@ -462,64 +487,14 @@ export function createDualProviderOverlapProof(baseline, candidate) {
   assertStackReport(candidate, "candidate");
   equal(baseline.role, "baseline", "baseline report role");
   equal(candidate.role, "candidate", "candidate report role");
-  if (baseline.composeProject === candidate.composeProject) {
-    fail("Dual-image proof requires distinct isolated Compose projects.");
-  }
-  if (baseline.applicationImage.digest === candidate.applicationImage.digest) {
-    fail("Dual-image proof requires distinct application image digests.");
-  }
-  if (baseline.applicationImage.revision === candidate.applicationImage.revision) {
-    fail("Dual-image proof requires distinct source revisions.");
-  }
-  deepEqual(
-    baseline.fixtureContract,
-    candidate.fixtureContract,
-    "fixture contract binding",
-  );
-  deepEqual(baseline.scenario, candidate.scenario, "scenario and seed binding");
-  deepEqual(baseline.browser, candidate.browser, "browser project binding");
-  deepEqual(
-    normalizedReset(baseline.reset),
-    normalizedReset(candidate.reset),
-    "owned reset contract binding",
-  );
-  deepEqual(
-    baseline.applicationImage.publicBuildContract,
-    candidate.applicationImage.publicBuildContract,
-    "public build contract binding",
-  );
-  deepEqual(
-    normalizedOverlap(baseline.providerOverlap),
-    normalizedOverlap(candidate.providerOverlap),
-    "provider overlap semantics",
-  );
-  deepEqual(
-    normalizedRecords(baseline.providerOverlap.records),
-    normalizedRecords(candidate.providerOverlap.records),
-    "provider read record set",
-  );
+  assertCrossStackInvariants(baseline, candidate);
 
   const document = {
     schemaVersion: PROVIDER_OVERLAP_PROOF_SCHEMA_VERSION,
     kind: PROVIDER_OVERLAP_PROOF_KIND,
     stacks: { baseline, candidate },
-    comparison: {
-      status: "proven",
-      distinctComposeProjects: true,
-      distinctApplicationImages: true,
-      distinctSourceRevisions: true,
-      samePublicBuildContract: true,
-      sameFixtureContract: true,
-      sameScenarioAndSeed: true,
-      sameBrowserProject: true,
-      sameOwnedResetContract: true,
-      sameProviderRecordSet: true,
-      eachOneShotOverlapProven: true,
-      arrivalOrderRelationship: deepJson(
-        baseline.providerOverlap.arrivalOrder,
-        candidate.providerOverlap.arrivalOrder,
-      ) ? "same" : "reordered",
-    },
+    comparison: expectedComparison(baseline, candidate),
+    lifecycle: expectedLifecycle(baseline, candidate),
   };
   assertDualProviderOverlapProof(document);
   return Object.freeze(document);
@@ -527,13 +502,18 @@ export function createDualProviderOverlapProof(baseline, candidate) {
 
 export function assertDualProviderOverlapProof(value) {
   const document = record(value, "dual provider overlap proof");
-  exactKeys(document, ["comparison", "kind", "schemaVersion", "stacks"], "dual provider overlap proof");
+  exactKeys(
+    document,
+    ["comparison", "kind", "lifecycle", "schemaVersion", "stacks"],
+    "dual provider overlap proof",
+  );
   equal(document.schemaVersion, PROVIDER_OVERLAP_PROOF_SCHEMA_VERSION, "proof schema version");
   equal(document.kind, PROVIDER_OVERLAP_PROOF_KIND, "proof kind");
   const stacks = record(document.stacks, "proof stacks");
   exactKeys(stacks, ["baseline", "candidate"], "proof stacks");
   assertStackReport(stacks.baseline, "baseline");
   assertStackReport(stacks.candidate, "candidate");
+  assertCrossStackInvariants(stacks.baseline, stacks.candidate);
   const comparison = record(document.comparison, "proof comparison");
   exactKeys(comparison, [
     "arrivalOrderRelationship",
@@ -557,7 +537,111 @@ export function assertDualProviderOverlapProof(value) {
   if (!new Set(["same", "reordered"]).has(comparison.arrivalOrderRelationship)) {
     fail("Proof arrival order relationship is invalid.");
   }
+  deepEqual(comparison, expectedComparison(stacks.baseline, stacks.candidate), "proof comparison");
+  deepEqual(document.lifecycle, expectedLifecycle(stacks.baseline, stacks.candidate), "proof lifecycle");
   return document;
+}
+
+function assertCrossStackInvariants(baseline, candidate) {
+  if (baseline.composeProject === candidate.composeProject) {
+    fail("Dual-image proof requires distinct isolated Compose projects.");
+  }
+  if (baseline.journeyContractSha256 === candidate.journeyContractSha256) {
+    fail("Dual-image proof requires distinct role-bound journey contracts.");
+  }
+  if (baseline.applicationImage.digest === candidate.applicationImage.digest) {
+    fail("Dual-image proof requires distinct application image digests.");
+  }
+  if (baseline.applicationImage.revision === candidate.applicationImage.revision) {
+    fail("Dual-image proof requires distinct source revisions.");
+  }
+  for (const name of [
+    "projectSha256",
+    "networkSha256",
+    "publicationsSha256",
+    "serviceIdentitySha256",
+  ]) {
+    if (baseline.runtimeBinding[name] === candidate.runtimeBinding[name]) {
+      fail(`Dual-image proof requires distinct ${name} runtime bindings.`);
+    }
+  }
+  deepEqual(baseline.fixtureContract, candidate.fixtureContract, "fixture contract binding");
+  deepEqual(baseline.scenario, candidate.scenario, "scenario and seed binding");
+  deepEqual(baseline.browser, candidate.browser, "browser project binding");
+  deepEqual(
+    normalizedReset(baseline.reset),
+    normalizedReset(candidate.reset),
+    "owned reset contract binding",
+  );
+  deepEqual(
+    baseline.applicationImage.publicBuildContract,
+    candidate.applicationImage.publicBuildContract,
+    "public build contract binding",
+  );
+  deepEqual(
+    baseline.runtimeBinding.fixtureMountContractSha256,
+    candidate.runtimeBinding.fixtureMountContractSha256,
+    "live fixture mount binding",
+  );
+  deepEqual(
+    baseline.runtimeBinding.syntheticEnvironmentContractSha256,
+    candidate.runtimeBinding.syntheticEnvironmentContractSha256,
+    "synthetic application environment binding",
+  );
+  deepEqual(
+    normalizedOverlap(baseline.providerOverlap),
+    normalizedOverlap(candidate.providerOverlap),
+    "provider overlap semantics",
+  );
+  deepEqual(
+    normalizedRecords(baseline.providerOverlap.records),
+    normalizedRecords(candidate.providerOverlap.records),
+    "provider read record set",
+  );
+}
+
+function expectedComparison(baseline, candidate) {
+  return {
+    status: "proven",
+    distinctComposeProjects: true,
+    distinctApplicationImages: true,
+    distinctSourceRevisions: true,
+    samePublicBuildContract: true,
+    sameFixtureContract: true,
+    sameScenarioAndSeed: true,
+    sameBrowserProject: true,
+    sameOwnedResetContract: true,
+    sameProviderRecordSet: true,
+    eachOneShotOverlapProven: true,
+    arrivalOrderRelationship: deepJson(
+      baseline.providerOverlap.arrivalOrder,
+      candidate.providerOverlap.arrivalOrder,
+    ) ? "same" : "reordered",
+  };
+}
+
+function expectedLifecycle(baseline, candidate) {
+  return {
+    status: "retained-for-follow-up-evidence",
+    automaticCleanup: false,
+    cleanupMode: "exact-owned-project-handoff-v1",
+    cleanupHelper: "tests/browser/journeys/run-production-image-journey.mjs cleanup",
+    ownershipGate: "compose-project-labels-before-down-volumes",
+    projects: [
+      {
+        role: "baseline",
+        composeProject: baseline.composeProject,
+        projectSha256: baseline.runtimeBinding.projectSha256,
+        journeyContractSha256: baseline.journeyContractSha256,
+      },
+      {
+        role: "candidate",
+        composeProject: candidate.composeProject,
+        projectSha256: candidate.runtimeBinding.projectSha256,
+        journeyContractSha256: candidate.journeyContractSha256,
+      },
+    ],
+  };
 }
 
 export function sha256(value) {
@@ -570,18 +654,26 @@ function assertStackReport(value, label) {
     "applicationImage",
     "browser",
     "composeProject",
+    "connectProxyCounters",
     "fixtureContract",
+    "journeyContractSha256",
     "navigation",
     "providerOverlap",
     "reset",
     "role",
+    "runtimeBinding",
     "scenario",
   ], `${label} stack report`);
   equal(report.role, label, `${label} stack report role`);
   stringMatch(
     report.composeProject,
-    /^clean-pay-browser-journey-[a-z0-9][a-z0-9-]{5,80}$/,
+    new RegExp(`^clean-pay-browser-journey-provider-proof-${label}-[a-f0-9]{12}$`),
     `${label} compose project`,
+  );
+  stringMatch(
+    report.journeyContractSha256,
+    /^[a-f0-9]{64}$/,
+    `${label} journey contract sha256`,
   );
   const fixtureContract = record(report.fixtureContract, `${label} fixture contract`);
   exactKeys(fixtureContract, ["domain", "sha256"], `${label} fixture contract`);
@@ -598,7 +690,7 @@ function assertStackReport(value, label) {
     ["label", "scenarioSha256", "seedSha256"],
     `${label} scenario evidence`,
   );
-  stringMatch(scenario.label, /^[a-z0-9][a-z0-9:-]{1,180}$/, `${label} scenario label`);
+  equal(scenario.label, "provider-overlap-v1", `${label} scenario label`);
   equal(scenario.scenarioSha256, sha256(scenario.label), `${label} scenario sha256`);
   equal(
     scenario.seedSha256,
@@ -647,10 +739,15 @@ function assertStackReport(value, label) {
     "transaction",
   ], `${label} database reset report`);
   stringMatch(database.scopeSha256, /^[a-f0-9]{64}$/, `${label} database scope sha256`);
+  equal(
+    database.scopeSha256,
+    sha256(report.composeProject),
+    `${label} database project scope binding`,
+  );
   stringMatch(database.schemaSha256, /^[a-f0-9]{64}$/, `${label} database schema sha256`);
   positiveInteger(database.tableCount, `${label} database table count`);
   equal(database.sequenceCount, 0, `${label} database sequence count`);
-  positiveInteger(database.resetSequence, `${label} database reset sequence`);
+  equal(database.resetSequence, 1, `${label} database reset sequence`);
   equal(
     database.transaction,
     "truncate-public-application-tables-cascade-no-sequences",
@@ -661,15 +758,81 @@ function assertStackReport(value, label) {
   const navigation = record(report.navigation, `${label} navigation report`);
   exactKeys(
     navigation,
-    ["finalPath", "headingVisible", "unexpectedRequestCount"],
+    [
+      "finalUrl",
+      "headingVisible",
+      "unexpectedConsoleCount",
+      "unexpectedPageErrorCount",
+      "unexpectedRequestCount",
+    ],
     `${label} navigation report`,
   );
-  equal(navigation.finalPath, "/cabinet", `${label} final navigation path`);
+  equal(
+    navigation.finalUrl,
+    "https://pay.ci.clean-pay.dev/cabinet",
+    `${label} final navigation URL`,
+  );
   equal(navigation.headingVisible, true, `${label} cabinet heading visibility`);
   equal(navigation.unexpectedRequestCount, 0, `${label} unexpected browser requests`);
+  equal(navigation.unexpectedConsoleCount, 0, `${label} unexpected browser console`);
+  equal(navigation.unexpectedPageErrorCount, 0, `${label} unexpected browser pageerror`);
 
+  assertRuntimeBinding(report.runtimeBinding, label, report);
+  assertConnectProxyCounters(report.connectProxyCounters, label);
   assertOverlapReport(report.providerOverlap, label);
   return report;
+}
+
+function assertRuntimeBinding(value, label, report) {
+  const binding = record(value, `${label} runtime binding`);
+  exactKeys(binding, [
+    "fixtureMountContractSha256",
+    "journeyContractSha256",
+    "networkSha256",
+    "projectSha256",
+    "publicationsSha256",
+    "serviceIdentitySha256",
+    "status",
+    "syntheticEnvironmentContractSha256",
+  ], `${label} runtime binding`);
+  equal(binding.status, "preflight-proven", `${label} runtime preflight status`);
+  for (const name of Object.keys(binding).filter((name) => name !== "status")) {
+    stringMatch(binding[name], /^[a-f0-9]{64}$/, `${label} runtime ${name}`);
+  }
+  if (report) {
+    equal(binding.projectSha256, sha256(report.composeProject), `${label} live project binding`);
+    equal(
+      binding.journeyContractSha256,
+      report.journeyContractSha256,
+      `${label} live journey contract binding`,
+    );
+    equal(
+      binding.networkSha256,
+      sha256(`${report.composeProject}_default`),
+      `${label} live network binding`,
+    );
+  }
+  return binding;
+}
+
+function assertConnectProxyCounters(value, label) {
+  const counters = record(value, `${label} CONNECT proxy counters`);
+  exactKeys(counters, [
+    "accepted",
+    "rejected",
+    "upstreamAttempts",
+    "upstreamConnected",
+    "upstreamFailures",
+  ], `${label} CONNECT proxy counters`);
+  for (const [name, count] of Object.entries(counters)) {
+    boundedInteger(count, 0, Number.MAX_SAFE_INTEGER, `${label} CONNECT proxy ${name}`);
+  }
+  positiveInteger(counters.accepted, `${label} CONNECT proxy accepted`);
+  equal(counters.rejected, 0, `${label} CONNECT proxy rejected`);
+  equal(counters.upstreamFailures, 0, `${label} CONNECT proxy failures`);
+  equal(counters.upstreamAttempts, counters.upstreamConnected, `${label} CONNECT upstream attempts`);
+  equal(counters.accepted, counters.upstreamConnected, `${label} CONNECT accepted`);
+  return counters;
 }
 
 function assertOverlapReport(value, label) {

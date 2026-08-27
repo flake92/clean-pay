@@ -7,6 +7,7 @@ import {
   PROVIDER_OVERLAP_BROWSER_PROJECT,
   assertApplicationImageIdentity,
   assertDeterministicReset,
+  assertDualProviderOverlapProof,
   assertJourneyStackContract,
   assertLoopbackControlUrl,
   assertLoopbackResolver,
@@ -130,6 +131,49 @@ test("rejects dual-image identity, fixture, browser, and semantic comparison nea
   }
 });
 
+test("recomputes serialized cross-stack, lifecycle, and runtime invariants", () => {
+  const exact = createDualProviderOverlapProof(
+    stackReport("baseline", extractedOverlap("offers-first")),
+    stackReport("candidate", extractedOverlap("devices-first")),
+  );
+  expect(assertDualProviderOverlapProof(structuredClone(exact))).toEqual(exact);
+  const mutations: Array<[string, (value: typeof exact) => void]> = [
+    ["claimed comparison", (value) => { value.comparison.arrivalOrderRelationship = "same"; }],
+    ["same project", (value) => {
+      value.stacks.candidate.composeProject = value.stacks.baseline.composeProject;
+      value.stacks.candidate.runtimeBinding.projectSha256 = value.stacks.baseline.runtimeBinding.projectSha256;
+      value.stacks.candidate.runtimeBinding.networkSha256 = value.stacks.baseline.runtimeBinding.networkSha256;
+    }],
+    ["same image", (value) => {
+      value.stacks.candidate.applicationImage.digest = value.stacks.baseline.applicationImage.digest;
+    }],
+    ["fixture mismatch", (value) => {
+      value.stacks.candidate.fixtureContract.sha256 = "0".repeat(64);
+    }],
+    ["runtime contract mismatch", (value) => {
+      value.stacks.candidate.runtimeBinding.fixtureMountContractSha256 = "0".repeat(64);
+    }],
+    ["journey contract mismatch", (value) => {
+      value.stacks.candidate.runtimeBinding.journeyContractSha256 = "0".repeat(64);
+    }],
+    ["proxy failure", (value) => { value.stacks.candidate.connectProxyCounters.rejected = 1; }],
+    ["reset scope", (value) => { value.stacks.candidate.reset.database.scopeSha256 = "0".repeat(64); }],
+    ["reset sequence", (value) => { value.stacks.candidate.reset.database.resetSequence = 2; }],
+    ["navigation query", (value) => {
+      value.stacks.candidate.navigation.finalUrl = "https://pay.ci.clean-pay.dev/cabinet?adjacent=1";
+    }],
+    ["role swap", (value) => { value.stacks.baseline.role = "candidate"; }],
+    ["cleanup association", (value) => {
+      value.lifecycle.projects[0].projectSha256 = "0".repeat(64);
+    }],
+  ];
+  for (const [label, mutate] of mutations) {
+    const nearMiss = structuredClone(exact);
+    mutate(nearMiss);
+    expect(() => assertDualProviderOverlapProof(nearMiss), label).toThrow();
+  }
+});
+
 test("binds contracts to exact loopback endpoints and rejects adjacent inputs", () => {
   const contract = stackContract("baseline");
   assertJourneyStackContract(contract, "baseline");
@@ -231,10 +275,20 @@ test("binds exact running image labels and a pristine deterministic reset", () =
 
 test("keeps the schema write-once sidecar-only and free of comparison projection", async () => {
   const directory = path.resolve(__dirname);
-  const [schemaSource, scriptSource, documentation] = await Promise.all([
+  const [
+    schemaSource,
+    scriptSource,
+    documentation,
+    connectProxyController,
+    browserPolicy,
+    renderPolicy,
+  ] = await Promise.all([
     readFile(path.join(directory, "provider-overlap-proof.schema.json"), "utf8"),
     readFile(path.join(directory, "prove-provider-overlap.mjs"), "utf8"),
     readFile(path.join(directory, "PROVIDER_OVERLAP_PROOF.md"), "utf8"),
+    readFile(path.join(directory, "journey-connect-proxy-controller.mjs"), "utf8"),
+    readFile(path.join(directory, "journey-browser-policy.mjs"), "utf8"),
+    readFile(path.join(directory, "..", "render-policy.mjs"), "utf8"),
   ]);
   const schema = JSON.parse(schemaSource);
   expect(schema).toMatchObject({
@@ -242,20 +296,102 @@ test("keeps the schema write-once sidecar-only and free of comparison projection
     properties: {
       schemaVersion: { const: 1 },
       kind: { const: "clean-pay-dual-image-provider-overlap-proof" },
+      lifecycle: { $ref: "#/$defs/lifecycle" },
+      stacks: {
+        properties: {
+          baseline: { $ref: "#/$defs/baselineStack" },
+          candidate: { $ref: "#/$defs/candidateStack" },
+        },
+      },
     },
   });
   expect(schema.additionalProperties).toBe(false);
+  expect(schema.required).toEqual(["schemaVersion", "kind", "stacks", "comparison", "lifecycle"]);
+  expect(schema.$defs.stack.required).toEqual(expect.arrayContaining([
+    "journeyContractSha256",
+    "runtimeBinding",
+    "connectProxyCounters",
+  ]));
+  expect(schema.$defs.navigation.properties).toMatchObject({
+    finalUrl: { const: "https://pay.ci.clean-pay.dev/cabinet" },
+    unexpectedConsoleCount: { const: 0 },
+    unexpectedPageErrorCount: { const: 0 },
+  });
+  expect(schema.$defs.lifecycle.properties).toMatchObject({
+    automaticCleanup: { const: false },
+    cleanupMode: { const: "exact-owned-project-handoff-v1" },
+  });
+  expect(schema.$defs.baselineStack.allOf[1].properties).toMatchObject({
+    role: { const: "baseline" },
+    composeProject: {
+      pattern: "^clean-pay-browser-journey-provider-proof-baseline-[a-f0-9]{12}$",
+    },
+  });
+  expect(schema.$defs.candidateStack.allOf[1].properties).toMatchObject({
+    role: { const: "candidate" },
+    composeProject: {
+      pattern: "^clean-pay-browser-journey-provider-proof-candidate-[a-f0-9]{12}$",
+    },
+  });
+  expect(schema.$defs.stack.properties.scenario.properties.label)
+    .toEqual({ const: "provider-overlap-v1" });
+  expect(schema.$defs.databaseReset.properties.resetSequence).toEqual({ const: 1 });
+  expect(schema.$defs.baselineLifecycleProject.allOf[1].properties.composeProject)
+    .toEqual({
+      pattern: "^clean-pay-browser-journey-provider-proof-baseline-[a-f0-9]{12}$",
+    });
+  expect(schema.$defs.candidateLifecycleProject.allOf[1].properties.composeProject)
+    .toEqual({
+      pattern: "^clean-pay-browser-journey-provider-proof-candidate-[a-f0-9]{12}$",
+    });
   expect(scriptSource).toContain('flag: "wx"');
   expect(scriptSource).toContain('mode: 0o600');
   expect(scriptSource).toContain('redirect: "error"');
   expect(scriptSource).toContain('"container", "inspect"');
   expect(scriptSource).toContain('"image", "inspect"');
   expect(scriptSource.indexOf("try {")).toBeLessThan(scriptSource.indexOf("parseArguments(process.argv.slice(2))"));
-  expect(scriptSource.indexOf('url.pathname === "/profile"'))
-    .toBeLessThan(scriptSource.indexOf("await armOverlap();"));
+  const dualPreflight = scriptSource.indexOf("assertDualPreflight(baselinePreflight, candidatePreflight);");
+  const proxyReadiness = scriptSource.indexOf("await startBothConnectProxies");
+  const parallelProof = scriptSource.indexOf("runs = await Promise.all([");
+  const firstControlPost = scriptSource.indexOf('await controlJson(input.controlUrl, "/__reset"');
+  const browserLaunch = scriptSource.indexOf("await chromium.launch");
+  expect(dualPreflight).toBeGreaterThanOrEqual(0);
+  expect(proxyReadiness).toBeGreaterThan(dualPreflight);
+  expect(parallelProof).toBeGreaterThan(proxyReadiness);
+  expect(firstControlPost).toBeGreaterThan(parallelProof);
+  expect(browserLaunch).toBeGreaterThan(firstControlPost);
+  for (const service of [
+    "app",
+    "browser-provider-mock",
+    "browser-proxy",
+    "browser-oidc-mock",
+    "browser-db-observer",
+  ]) {
+    expect(scriptSource).toContain(`"${service}"`);
+  }
+  expect(scriptSource).toContain('path.join(path.dirname(contractPath), ".env.app")');
+  expect(scriptSource).toContain("containers.app.Config.Env");
+  expect(scriptSource).toContain("sameHostPath(mounts[0].Source, expectedRealpath)");
+  expect(scriptSource).toContain('"container", "exec", container.Id, "sha256sum"');
+  expect(scriptSource).toContain("Buffer.byteLength(chunk, \"utf8\")");
+  expect(scriptSource).toContain("maximumUnexpectedEvents = 32");
+  expect(scriptSource).toContain('await context.route("**/*"');
+  expect(scriptSource).toContain('context.on("page"');
+  const exactProfileNavigation = scriptSource.indexOf(
+    'url.href === "https://pay.ci.clean-pay.dev/profile"',
+  );
+  expect(exactProfileNavigation).toBeGreaterThanOrEqual(0);
+  expect(exactProfileNavigation).toBeLessThan(scriptSource.indexOf("await armOverlap();"));
   expect(scriptSource.indexOf("await armOverlap();"))
     .toBeLessThan(scriptSource.indexOf('page.goto("https://pay.ci.clean-pay.dev/cabinet"'));
   expect(scriptSource).toContain("cabinetDocumentConsumed");
+  expect(connectProxyController).toContain("maximumOutputBytes = 8_192");
+  expect(connectProxyController).toContain("counters.accepted <= 0");
+  expect(connectProxyController).toContain('targetPort !== "443"');
+  expect(browserPolicy).toContain("DETERMINISTIC_CHROMIUM_LAUNCH_ARGS");
+  expect(browserPolicy).toContain("!url.username");
+  expect(browserPolicy).toContain("!url.password");
+  expect(renderPolicy).toContain('"--disable-gpu"');
   expect(scriptSource).not.toContain("tests/browser/baselines/");
   expect(scriptSource).not.toContain("comparison-projection");
   const normalizedDocumentation = documentation.replace(/\s+/g, " ");
@@ -363,9 +499,12 @@ function fillerRecord(sequence: number) {
 function stackReport(role: "baseline" | "candidate", providerOverlap: ReturnType<typeof extractedOverlap>) {
   const baseline = role === "baseline";
   const revision = baseline ? baselineRevision : candidateRevision;
+  const composeProject = `clean-pay-browser-journey-provider-proof-${role}-${(baseline ? "1" : "2").repeat(12)}`;
+  const journeyContractSha256 = baseline ? "8".repeat(64) : "9".repeat(64);
   return {
     role,
-    composeProject: `clean-pay-browser-journey-proof-${role}`,
+    composeProject,
+    journeyContractSha256,
     fixtureContract: {
       domain: "clean-pay-browser-journey-fixture-v5",
       sha256: fixtureContractSha256,
@@ -392,9 +531,26 @@ function stackReport(role: "baseline" | "candidate", providerOverlap: ReturnType
       role: "app",
       publicBuildContract: { version: "1", sha256: publicBuildContractSha256 },
     },
+    runtimeBinding: {
+      status: "preflight-proven",
+      projectSha256: sha256(composeProject),
+      journeyContractSha256,
+      networkSha256: sha256(`${composeProject}_default`),
+      publicationsSha256: baseline ? "a".repeat(64) : "b".repeat(64),
+      serviceIdentitySha256: baseline ? "c".repeat(64) : "d".repeat(64),
+      fixtureMountContractSha256: "e".repeat(64),
+      syntheticEnvironmentContractSha256: "f".repeat(64),
+    },
+    connectProxyCounters: {
+      accepted: 7,
+      rejected: 0,
+      upstreamAttempts: 7,
+      upstreamConnected: 7,
+      upstreamFailures: 0,
+    },
     reset: {
       database: {
-        scopeSha256: baseline ? "5".repeat(64) : "6".repeat(64),
+        scopeSha256: sha256(composeProject),
         schemaSha256: "7".repeat(64),
         tableCount: 12,
         sequenceCount: 0,
@@ -403,7 +559,13 @@ function stackReport(role: "baseline" | "candidate", providerOverlap: ReturnType
         redis: "flush-owned-db-0",
       },
     },
-    navigation: { finalPath: "/cabinet", headingVisible: true, unexpectedRequestCount: 0 },
+    navigation: {
+      finalUrl: "https://pay.ci.clean-pay.dev/cabinet",
+      headingVisible: true,
+      unexpectedRequestCount: 0,
+      unexpectedConsoleCount: 0,
+      unexpectedPageErrorCount: 0,
+    },
     providerOverlap,
   };
 }
@@ -413,13 +575,17 @@ function stackContract(role: "baseline" | "candidate") {
   return {
     schemaVersion: 1,
     kind: "self-contained-synthetic-browser-journey",
-    project: `clean-pay-browser-journey-proof-${role}`,
+    project: `clean-pay-browser-journey-provider-proof-${role}-${(baseline ? "1" : "2").repeat(12)}`,
     revision: baseline ? baselineRevision : candidateRevision,
     images: {
       application: `clean-pay:${role}`,
       migration: `clean-pay-migration:${role}`,
     },
     publicBuildContract: { version: "1", sha256: publicBuildContractSha256 },
+    fixtureContract: {
+      domain: "clean-pay-browser-journey-fixture-v5",
+      sha256: fixtureContractSha256,
+    },
     publications: {
       app: baseline ? "127.0.0.1:4100" : "127.0.0.1:4200",
       providerControl: baseline ? "127.0.0.1:13100" : "127.0.0.1:13200",
