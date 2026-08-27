@@ -438,6 +438,8 @@ export function createProviderOverlapStackReport(input) {
     [
       "finalUrl",
       "headingVisible",
+      "requestContractSha256",
+      "requestCount",
       "unexpectedConsoleCount",
       "unexpectedPageErrorCount",
       "unexpectedRequestCount",
@@ -446,6 +448,12 @@ export function createProviderOverlapStackReport(input) {
   );
   equal(navigation.finalUrl, "https://pay.ci.clean-pay.dev/cabinet", `${role} navigation final URL`);
   equal(navigation.headingVisible, true, `${role} cabinet heading`);
+  boundedInteger(navigation.requestCount, 1, 256, `${role} browser request count`);
+  stringMatch(
+    navigation.requestContractSha256,
+    /^[a-f0-9]{64}$/,
+    `${role} browser request contract sha256`,
+  );
   equal(navigation.unexpectedRequestCount, 0, `${role} unexpected browser requests`);
   equal(navigation.unexpectedConsoleCount, 0, `${role} unexpected browser console`);
   equal(navigation.unexpectedPageErrorCount, 0, `${role} unexpected browser pageerror`);
@@ -560,6 +568,7 @@ function assertCrossStackInvariants(baseline, candidate) {
     "networkSha256",
     "publicationsSha256",
     "serviceIdentitySha256",
+    "composeRuntimeContractSha256",
   ]) {
     if (baseline.runtimeBinding[name] === candidate.runtimeBinding[name]) {
       fail(`Dual-image proof requires distinct ${name} runtime bindings.`);
@@ -568,6 +577,11 @@ function assertCrossStackInvariants(baseline, candidate) {
   deepEqual(baseline.fixtureContract, candidate.fixtureContract, "fixture contract binding");
   deepEqual(baseline.scenario, candidate.scenario, "scenario and seed binding");
   deepEqual(baseline.browser, candidate.browser, "browser project binding");
+  equal(
+    baseline.navigation.requestContractSha256,
+    candidate.navigation.requestContractSha256,
+    "browser request contract binding",
+  );
   deepEqual(
     normalizedReset(baseline.reset),
     normalizedReset(candidate.reset),
@@ -761,6 +775,8 @@ function assertStackReport(value, label) {
     [
       "finalUrl",
       "headingVisible",
+      "requestContractSha256",
+      "requestCount",
       "unexpectedConsoleCount",
       "unexpectedPageErrorCount",
       "unexpectedRequestCount",
@@ -773,6 +789,12 @@ function assertStackReport(value, label) {
     `${label} final navigation URL`,
   );
   equal(navigation.headingVisible, true, `${label} cabinet heading visibility`);
+  boundedInteger(navigation.requestCount, 1, 256, `${label} browser request count`);
+  stringMatch(
+    navigation.requestContractSha256,
+    /^[a-f0-9]{64}$/,
+    `${label} browser request contract sha256`,
+  );
   equal(navigation.unexpectedRequestCount, 0, `${label} unexpected browser requests`);
   equal(navigation.unexpectedConsoleCount, 0, `${label} unexpected browser console`);
   equal(navigation.unexpectedPageErrorCount, 0, `${label} unexpected browser pageerror`);
@@ -786,6 +808,7 @@ function assertStackReport(value, label) {
 function assertRuntimeBinding(value, label, report) {
   const binding = record(value, `${label} runtime binding`);
   exactKeys(binding, [
+    "composeRuntimeContractSha256",
     "fixtureMountContractSha256",
     "journeyContractSha256",
     "networkSha256",
