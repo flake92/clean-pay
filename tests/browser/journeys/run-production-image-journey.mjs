@@ -1,8 +1,16 @@
 import { spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 
 import { JOURNEY_SYNTHETIC_HOSTNAMES } from "./journey-network-policy.mjs";
+import { currentJourneyFixtureContractSha256Async } from "./journey-fixture-manifest.mjs";
+import {
+  cleanupGeneratedEnvironment,
+  cleanupRetainedGeneratedEnvironment,
+  prepareGeneratedEnvironmentDirectory,
+  writeSanitizedJourneyContractEvidence,
+} from "./journey-generated-environment-lifecycle.mjs";
 
 const mode = process.argv[2] ?? "run";
 if (!new Set(["run", "cleanup"]).has(mode) || process.argv.length > 3) {
@@ -47,7 +55,12 @@ const composeEnvironment = {
 
 if (mode === "cleanup") {
   await cleanupOwnedProject();
-  process.stdout.write(`${JSON.stringify({ status: "owned_project_cleaned", project })}\n`);
+  const generatedEnvironment = await cleanupRetainedEnvironmentIfPresent();
+  process.stdout.write(`${JSON.stringify({
+    status: "owned_project_cleaned",
+    projectSha256: digest(project),
+    generatedEnvironment,
+  })}\n`);
   process.exit(0);
 }
 
@@ -57,90 +70,131 @@ required("CLEAN_PAY_BROWSER_SOURCE_IMAGE_TAG", /^[A-Za-z0-9][A-Za-z0-9._/:@-]{0,
 required("CLEAN_PAY_BROWSER_MIGRATION_IMAGE_DIGEST", /^sha256:[a-f0-9]{64}$/);
 required("CLEAN_PAY_BROWSER_MIGRATION_IMAGE_TAG", /^[A-Za-z0-9][A-Za-z0-9._/:@-]{0,199}$/);
 
-await assertProjectAbsent();
-await run(process.execPath, [
-  path.join(repositoryRoot, "tests", "browser", "journeys", "prepare-synthetic-env.mjs"),
-], { ...composeEnvironment, CLEAN_PAY_BROWSER_JOURNEY_ENV_DIR: envDirectory });
-const envFile = path.join(envDirectory, ".env");
-const contract = JSON.parse(await readFile(
-  path.join(envDirectory, "browser-journey-contract.json"),
-  "utf8",
-));
-if (
-  contract?.project !== project
-  || !/^[a-f0-9]{64}$/.test(contract?.publicBuildContract?.sha256 ?? "")
-  || !/^127\.0\.0\.1:\d{4,5}$/.test(contract?.publications?.app ?? "")
-  || !/^127\.0\.0\.1:\d{4,5}$/.test(contract?.publications?.providerControl ?? "")
-  || !/^127\.0\.0\.1:\d{4,5}$/.test(contract?.publications?.connectProxy ?? "")
-  || !/^127\.0\.0\.(?:[2-9]|[1-9]\d|1\d\d|2[0-4]\d|25[0-4]):443$/
-    .test(contract?.publications?.browserTls ?? "")
-) {
-  throw new Error("Synthetic journey environment returned an invalid public contract.");
-}
-
-let completed = false;
-let connectProxy;
-let connectProxyCounters;
+let generatedEnvironmentState;
+let finalSummary;
 try {
-  await startOwnedProject(envFile, publicCharacterizationComposeFiles);
-  const mainBrowserEnvironment = browserTestEnvironment({
-    CLEAN_PAY_BROWSER_BASE_URL: `http://${contract.publications.app}`,
+  generatedEnvironmentState = await prepareGeneratedEnvironmentDirectory({
+    directory: envDirectory,
+    project,
   });
-  await runPlaywright("playwright.config.ts", mainBrowserEnvironment);
-
-  // The authenticated journey has a deliberately different support/Chatwoot
-  // fixture. Recreate every owned resource so its reset ledger still starts
-  // from a pristine project and the public characterization cannot leak state.
-  await cleanupOwnedProject();
   await assertProjectAbsent();
+  await runPrivate(process.execPath, [
+    path.join(repositoryRoot, "tests", "browser", "journeys", "prepare-synthetic-env.mjs"),
+  ], { ...composeEnvironment, CLEAN_PAY_BROWSER_JOURNEY_ENV_DIR: envDirectory });
+  const envFile = path.join(envDirectory, ".env");
+  const contract = JSON.parse(await readFile(
+    path.join(envDirectory, "browser-journey-contract.json"),
+    "utf8",
+  ));
+  const currentFixtureContractSha256 = await currentJourneyFixtureContractSha256Async();
+  if (
+    contract?.project !== project
+    || contract?.fixtureContract?.domain !== "clean-pay-browser-journey-fixture-v5"
+    || contract?.fixtureContract?.sha256 !== currentFixtureContractSha256
+    || !/^[a-f0-9]{64}$/.test(contract?.publicBuildContract?.sha256 ?? "")
+    || !/^127\.0\.0\.1:\d{4,5}$/.test(contract?.publications?.app ?? "")
+    || !/^127\.0\.0\.1:\d{4,5}$/.test(contract?.publications?.providerControl ?? "")
+    || !/^127\.0\.0\.1:\d{4,5}$/.test(contract?.publications?.connectProxy ?? "")
+    || !/^127\.0\.0\.(?:[2-9]|[1-9]\d|1\d\d|2[0-4]\d|25[0-4]):443$/
+      .test(contract?.publications?.browserTls ?? "")
+  ) {
+    throw new Error("Synthetic journey environment returned an invalid public contract.");
+  }
+  const { evidence: sanitizedContractEvidence } = await writeSanitizedJourneyContractEvidence({
+    contract,
+    repositoryRoot,
+  });
 
-  await startOwnedProject(envFile, journeyComposeFiles);
-  const [connectProxyHost, connectProxyPort] = contract.publications.connectProxy.split(":");
-  const [browserTlsHost, browserTlsPort] = contract.publications.browserTls.split(":");
-  connectProxy = await startConnectProxy({
-    listenHost: connectProxyHost,
-    listenPort: connectProxyPort,
-    targetHost: process.env.CLEAN_PAY_BROWSER_CONNECT_TARGET_HOST?.trim() || browserTlsHost,
-    targetPort: process.env.CLEAN_PAY_BROWSER_CONNECT_TARGET_PORT?.trim() || browserTlsPort,
-  });
-  const journeyBrowserEnvironment = browserTestEnvironment({
-    CLEAN_PAY_BROWSER_BASE_URL: "https://pay.ci.clean-pay.dev",
-    CLEAN_PAY_BROWSER_HOST_RESOLVER_IP: contract.publications.browserTls.slice(0, -4),
-    CLEAN_PAY_BROWSER_CONNECT_PROXY: `http://${contract.publications.connectProxy}`,
-    CLEAN_PAY_BROWSER_PROVIDER_CONTROL_URL: `http://${contract.publications.providerControl}/`,
-    CLEAN_PAY_BROWSER_PUBLIC_BUILD_CONTRACT_SHA256: contract.publicBuildContract.sha256,
-  });
-  await runPlaywright(
-    "tests/browser/journeys/playwright.config.ts",
-    journeyBrowserEnvironment,
-  );
-  const runningConnectProxy = connectProxy;
-  connectProxy = undefined;
-  const connectProxySummary = await stopConnectProxy(runningConnectProxy);
-  assertConnectProxyGate(connectProxySummary);
-  connectProxyCounters = connectProxySummary.counters;
-  await run(process.execPath, [
-    path.join(repositoryRoot, "tests", "browser", "journeys", "finalize-journey-baseline.mjs"),
-  ], journeyBrowserEnvironment);
-  completed = true;
-} finally {
+  let completed = false;
+  let connectProxy;
+  let connectProxyCounters;
   try {
-    if (connectProxy) await stopConnectProxy(connectProxy);
-  } finally {
+    await startOwnedProject(envFile, publicCharacterizationComposeFiles);
+    const mainBrowserEnvironment = browserTestEnvironment({
+      CLEAN_PAY_BROWSER_BASE_URL: `http://${contract.publications.app}`,
+    });
+    await runPlaywright("playwright.config.ts", mainBrowserEnvironment);
+
+    // The authenticated journey has a deliberately different support/Chatwoot
+    // fixture. Recreate every owned resource so its reset ledger still starts
+    // from a pristine project and the public characterization cannot leak state.
     await cleanupOwnedProject();
+    await assertProjectAbsent();
+
+    await startOwnedProject(envFile, journeyComposeFiles);
+    const [connectProxyHost, connectProxyPort] = contract.publications.connectProxy.split(":");
+    const [browserTlsHost, browserTlsPort] = contract.publications.browserTls.split(":");
+    connectProxy = await startConnectProxy({
+      listenHost: connectProxyHost,
+      listenPort: connectProxyPort,
+      targetHost: process.env.CLEAN_PAY_BROWSER_CONNECT_TARGET_HOST?.trim() || browserTlsHost,
+      targetPort: process.env.CLEAN_PAY_BROWSER_CONNECT_TARGET_PORT?.trim() || browserTlsPort,
+    });
+    const journeyBrowserEnvironment = browserTestEnvironment({
+      CLEAN_PAY_BROWSER_BASE_URL: "https://pay.ci.clean-pay.dev",
+      CLEAN_PAY_BROWSER_HOST_RESOLVER_IP: contract.publications.browserTls.slice(0, -4),
+      CLEAN_PAY_BROWSER_CONNECT_PROXY: `http://${contract.publications.connectProxy}`,
+      CLEAN_PAY_BROWSER_PROVIDER_CONTROL_URL: `http://${contract.publications.providerControl}/`,
+      CLEAN_PAY_BROWSER_PUBLIC_BUILD_CONTRACT_SHA256: contract.publicBuildContract.sha256,
+    });
+    await runPlaywright(
+      "tests/browser/journeys/playwright.config.ts",
+      journeyBrowserEnvironment,
+    );
+    const runningConnectProxy = connectProxy;
+    connectProxy = undefined;
+    const connectProxySummary = await stopConnectProxy(runningConnectProxy);
+    assertConnectProxyGate(connectProxySummary);
+    connectProxyCounters = connectProxySummary.counters;
+    await run(process.execPath, [
+      path.join(repositoryRoot, "tests", "browser", "journeys", "finalize-journey-baseline.mjs"),
+    ], journeyBrowserEnvironment);
+    completed = true;
+  } finally {
+    try {
+      if (connectProxy) await stopConnectProxy(connectProxy);
+    } finally {
+      await cleanupOwnedProject();
+    }
+  }
+
+  if (!completed) throw new Error("Production-image journey did not complete.");
+  finalSummary = {
+    status: "production_image_journey_matched",
+    projectSha256: sanitizedContractEvidence.projectSha256,
+    publicBuildContractSha256: contract.publicBuildContract.sha256,
+    fixtureContractSha256: contract.fixtureContract.sha256,
+    connectProxyCounters,
+    generatedEnvironment: "exact-files-removed",
+  };
+} finally {
+  if (generatedEnvironmentState) {
+    await cleanupGeneratedEnvironment(generatedEnvironmentState);
   }
 }
 
-if (!completed) process.exitCode = 1;
-else process.stdout.write(`${JSON.stringify({
-  status: "production_image_journey_matched",
-  project,
-  publicBuildContractSha256: contract.publicBuildContract.sha256,
-  connectProxyCounters,
-})}\n`);
+process.stdout.write(`${JSON.stringify(finalSummary)}\n`);
 
 function compose(args) {
   return run("docker", ["compose", "--project-name", project, ...args], composeEnvironment);
+}
+
+async function cleanupRetainedEnvironmentIfPresent() {
+  try {
+    return await cleanupRetainedGeneratedEnvironment({
+      directory: envDirectory,
+      project,
+    });
+  } catch (error) {
+    if (error?.code === "ENOENT") {
+      return Object.freeze({
+        status: "generated_environment_not_present",
+        projectSha256: digest(project),
+        directoryRemoved: false,
+      });
+    }
+    throw error;
+  }
 }
 
 function composeFileArgs(files) {
@@ -231,20 +285,56 @@ function output(command, args) {
   return new Promise((resolve, reject) => {
     let stdout = "";
     let stderr = "";
+    let stdoutBytes = 0;
+    let stderrBytes = 0;
+    let overflow = false;
+    let settled = false;
     const child = spawn(command, args, {
       cwd: repositoryRoot,
       env: composeEnvironment,
       stdio: ["ignore", "pipe", "pipe"],
       windowsHide: true,
     });
+    const finish = (operation) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      operation();
+    };
+    const timer = setTimeout(() => {
+      if (child.exitCode === null && child.signalCode === null) child.kill();
+      finish(() => reject(new Error("Read-only owned-resource query timed out.")));
+    }, 15_000);
     child.stdout.setEncoding("utf8");
     child.stderr.setEncoding("utf8");
-    child.stdout.on("data", (chunk) => { if (stdout.length < 1024 * 1024) stdout += chunk; });
-    child.stderr.on("data", (chunk) => { if (stderr.length < 16 * 1024) stderr += chunk; });
-    child.once("error", reject);
+    child.stdout.on("data", (chunk) => {
+      const chunkBytes = Buffer.byteLength(chunk, "utf8");
+      if (stdoutBytes + chunkBytes > 1024 * 1024) {
+        overflow = true;
+        child.kill();
+        return;
+      }
+      stdout += chunk;
+      stdoutBytes += chunkBytes;
+    });
+    child.stderr.on("data", (chunk) => {
+      const chunkBytes = Buffer.byteLength(chunk, "utf8");
+      if (stderrBytes + chunkBytes > 16 * 1024) {
+        overflow = true;
+        child.kill();
+        return;
+      }
+      stderr += chunk;
+      stderrBytes += chunkBytes;
+    });
+    child.once("error", () => finish(() => reject(new Error(
+      "Read-only owned-resource query failed to start.",
+    ))));
     child.once("exit", (code) => {
-      if (code === 0) resolve(stdout);
-      else reject(new Error(`${command} read-only resource query failed (${code}): ${sanitize(stderr)}`));
+      if (code === 0 && !overflow) finish(() => resolve(stdout));
+      else finish(() => reject(new Error(
+        `Read-only owned-resource query failed (${code ?? "unknown"}:${digest(stderr)}).`,
+      )));
     });
   });
 }
@@ -261,6 +351,51 @@ function run(command, args, environment) {
     child.once("exit", (code, signal) => {
       if (code === 0) resolve();
       else reject(new Error(`${path.basename(command)} failed (${code ?? signal ?? "unknown"}).`));
+    });
+  });
+}
+
+function runPrivate(command, args, environment) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, args, {
+      cwd: repositoryRoot,
+      env: environment,
+      stdio: ["ignore", "ignore", "pipe"],
+      windowsHide: true,
+    });
+    let stderr = "";
+    let stderrBytes = 0;
+    let overflow = false;
+    let settled = false;
+    const finish = (operation) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      operation();
+    };
+    const timer = setTimeout(() => {
+      if (child.exitCode === null && child.signalCode === null) child.kill();
+      finish(() => reject(new Error("Private synthetic environment generation timed out.")));
+    }, 30_000);
+    child.stderr.setEncoding("utf8");
+    child.stderr.on("data", (chunk) => {
+      const chunkBytes = Buffer.byteLength(chunk, "utf8");
+      if (stderrBytes + chunkBytes > 16 * 1024) {
+        overflow = true;
+        child.kill();
+        return;
+      }
+      stderr += chunk;
+      stderrBytes += chunkBytes;
+    });
+    child.once("error", () => finish(() => reject(new Error(
+      "Private synthetic environment generation failed to start.",
+    ))));
+    child.once("exit", (code) => {
+      if (code === 0 && !overflow) finish(resolve);
+      else finish(() => reject(new Error(
+        `Private synthetic environment generation failed (${code ?? "unknown"}:${digest(stderr)}).`,
+      )));
     });
   });
 }
@@ -542,4 +677,8 @@ function required(name, pattern) {
   const value = process.env[name]?.trim();
   if (!value || !pattern.test(value)) throw new Error(`${name} is required and invalid.`);
   return value;
+}
+
+function digest(value) {
+  return createHash("sha256").update(value, "utf8").digest("hex");
 }
