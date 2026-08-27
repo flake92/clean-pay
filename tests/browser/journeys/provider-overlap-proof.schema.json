@@ -253,6 +253,8 @@
         "headingVisible",
         "requestCount",
         "requestContractSha256",
+        "requestOrderContractSha256",
+        "requestOrderLedger",
         "semanticRequestLedger",
         "historyContractSha256",
         "historyCount",
@@ -270,16 +272,31 @@
         "eventLifecycle": { "$ref": "#/$defs/eventLifecycle" },
         "finalUrl": { "const": "https://pay.ci.clean-pay.dev/cabinet" },
         "headingVisible": { "const": true },
-        "requestCount": { "type": "integer", "minimum": 1, "maximum": 256 },
+        "requestCount": { "type": "integer", "minimum": 18, "maximum": 256 },
         "requestContractSha256": { "$ref": "#/$defs/sha256" },
+        "requestOrderContractSha256": { "$ref": "#/$defs/sha256" },
+        "requestOrderLedger": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["kind", "occurrence"],
+            "properties": {
+              "kind": { "enum": ["semantic", "static"] },
+              "occurrence": { "type": "integer", "minimum": 1, "maximum": 256 }
+            }
+          },
+          "minItems": 1,
+          "maxItems": 256
+        },
         "semanticRequestLedger": {
           "type": "array",
           "items": { "$ref": "#/$defs/semanticRequestEntry" },
-          "minItems": 6,
+          "minItems": 9,
           "maxItems": 256
         },
         "historyContractSha256": { "$ref": "#/$defs/sha256" },
-        "historyCount": { "const": 2 },
+        "historyCount": { "const": 4 },
         "historyLedger": {
           "type": "array",
           "prefixItems": [
@@ -295,57 +312,64 @@
             {
               "type": "object",
               "additionalProperties": false,
-              "required": ["kind", "location"],
+              "required": [
+                "frameRelation", "kind", "loaderRelation", "location", "navigationType"
+              ],
               "properties": {
-                "kind": { "const": "frame-navigation" },
-                "location": { "const": "app-cabinet" }
+                "frameRelation": { "const": "same-main-frame" },
+                "kind": { "const": "document-navigation" },
+                "loaderRelation": { "const": "changed" },
+                "location": { "const": "app-cabinet" },
+                "navigationType": { "const": "Navigation" }
+              }
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "historyLengthRelation", "kind", "location", "operationSequence",
+                "stateTransition", "urlRelation"
+              ],
+              "properties": {
+                "historyLengthRelation": { "const": "unchanged" },
+                "kind": { "const": "replaceState" },
+                "location": { "const": "app-cabinet" },
+                "operationSequence": { "const": 1 },
+                "stateTransition": { "const": "unmarked-to-next-app-router" },
+                "urlRelation": { "const": "unchanged" }
+              }
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "frameRelation", "kind", "location", "navigationType", "pairedOperationSequence"
+              ],
+              "properties": {
+                "frameRelation": { "const": "same-main-frame" },
+                "kind": { "const": "same-document-navigation" },
+                "location": { "const": "app-cabinet" },
+                "navigationType": { "const": "historyApi" },
+                "pairedOperationSequence": { "const": 1 }
               }
             }
           ],
-          "minItems": 2,
-          "maxItems": 2
+          "minItems": 4,
+          "maxItems": 4
         },
         "staticLoadGraph": { "$ref": "#/$defs/staticLoadGraph" },
         "staticLoadGraphContractSha256": { "$ref": "#/$defs/sha256" },
         "staticRequestContractSha256": { "$ref": "#/$defs/sha256" },
-        "staticRequestCount": { "type": "integer", "minimum": 3, "maximum": 256 },
+        "staticRequestCount": { "type": "integer", "minimum": 9, "maximum": 256 },
         "staticRequestLedger": {
           "type": "array",
           "items": { "$ref": "#/$defs/staticRequestEntry" },
-          "minItems": 3,
-          "maxItems": 256,
-          "uniqueItems": true
+          "minItems": 9,
+          "maxItems": 256
         },
         "unexpectedRequestCount": { "const": 0 },
         "unexpectedConsoleCount": { "const": 0 },
         "unexpectedPageErrorCount": { "const": 0 }
-      }
-    },
-    "historyEntry": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["kind", "location"],
-      "properties": {
-        "kind": {
-          "enum": [
-            "checkpoint",
-            "frame-navigation",
-            "popstate",
-            "pushState",
-            "replaceState"
-          ]
-        },
-        "location": {
-          "enum": [
-            "about-blank",
-            "app-login",
-            "app-telegram-start",
-            "telegram-oidc-authorize",
-            "app-telegram-callback",
-            "app-profile",
-            "app-cabinet"
-          ]
-        }
       }
     },
     "eventLifecycle": {
@@ -353,7 +377,7 @@
       "additionalProperties": false,
       "required": ["drainedEventCount", "lateEventCount", "status"],
       "properties": {
-        "drainedEventCount": { "type": "integer", "minimum": 1, "maximum": 4096 },
+        "drainedEventCount": { "type": "integer", "minimum": 58, "maximum": 772 },
         "lateEventCount": { "const": 0 },
         "status": { "const": "sealed-clean" }
       }
@@ -402,14 +426,12 @@
     "staticRequestEntry": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["assetSha256", "class", "pathSha256"],
+      "required": [
+        "assetBytes", "assetSha256", "class", "contentType", "documentKey", "pathSha256"
+      ],
       "properties": {
-        "assetSha256": {
-          "oneOf": [
-            { "$ref": "#/$defs/sha256" },
-            { "type": "null" }
-          ]
-        },
+        "assetBytes": { "type": "integer", "minimum": 1, "maximum": 134217728 },
+        "assetSha256": { "$ref": "#/$defs/sha256" },
         "class": {
           "enum": [
             "next-static-css",
@@ -417,6 +439,24 @@
             "next-static-image",
             "next-static-js"
           ]
+        },
+        "contentType": {
+          "enum": [
+            "application/javascript",
+            "application/vnd.ms-fontobject",
+            "font/ttf",
+            "font/woff",
+            "font/woff2",
+            "image/png",
+            "image/svg+xml",
+            "image/vnd.microsoft.icon",
+            "image/x-icon",
+            "text/css",
+            "text/javascript"
+          ]
+        },
+        "documentKey": {
+          "enum": ["app-login-document", "app-profile-document", "app-cabinet-document"]
         },
         "pathSha256": { "$ref": "#/$defs/sha256" }
       }
@@ -427,8 +467,10 @@
       "required": [
         "assetAttestationSha256",
         "assetInventorySha256",
+        "cssMediaReferenceLedger",
         "declaredPathLedger",
         "declaredPathSha256s",
+        "documentLoadLedger",
         "expectedChunkPathSha256s",
         "inventoryLedger",
         "inventoryLedgerContractSha256",
@@ -438,6 +480,22 @@
       "properties": {
         "assetAttestationSha256": { "$ref": "#/$defs/sha256" },
         "assetInventorySha256": { "$ref": "#/$defs/sha256" },
+        "cssMediaReferenceLedger": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["occurrence", "sourcePathSha256", "targetPathSha256"],
+            "properties": {
+              "occurrence": { "type": "integer", "minimum": 1, "maximum": 256 },
+              "sourcePathSha256": { "$ref": "#/$defs/sha256" },
+              "targetPathSha256": { "$ref": "#/$defs/sha256" }
+            }
+          },
+          "minItems": 8,
+          "maxItems": 8,
+          "uniqueItems": true
+        },
         "declaredPathLedger": {
           "type": "array",
           "items": {
@@ -460,6 +518,16 @@
           "maxItems": 256,
           "uniqueItems": true
         },
+        "documentLoadLedger": {
+          "type": "array",
+          "prefixItems": [
+            { "$ref": "#/$defs/loginDocumentLoad" },
+            { "$ref": "#/$defs/profileDocumentLoad" },
+            { "$ref": "#/$defs/cabinetDocumentLoad" }
+          ],
+          "minItems": 3,
+          "maxItems": 3
+        },
         "expectedChunkPathSha256s": {
           "type": "array",
           "items": { "$ref": "#/$defs/sha256" },
@@ -472,9 +540,13 @@
           "items": {
             "type": "object",
             "additionalProperties": false,
-            "required": ["assetSha256", "pathSha256"],
+            "required": ["assetBytes", "assetSha256", "extension", "pathSha256"],
             "properties": {
+              "assetBytes": { "type": "integer", "minimum": 1, "maximum": 134217728 },
               "assetSha256": { "$ref": "#/$defs/sha256" },
+              "extension": {
+                "enum": ["css", "eot", "ico", "js", "png", "svg", "ttf", "woff", "woff2"]
+              },
               "pathSha256": { "$ref": "#/$defs/sha256" }
             }
           },
@@ -492,6 +564,56 @@
           "uniqueItems": true
         }
       }
+    },
+    "documentLoad": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "documentKey", "expectedChunkPathSha256s", "expectedMediaPathSha256s",
+        "routeDeclaredPathSha256s"
+      ],
+      "properties": {
+        "documentKey": { "type": "string" },
+        "expectedChunkPathSha256s": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/sha256" },
+          "minItems": 1,
+          "maxItems": 256,
+          "uniqueItems": true
+        },
+        "expectedMediaPathSha256s": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/sha256" },
+          "minItems": 2,
+          "maxItems": 2,
+          "uniqueItems": true
+        },
+        "routeDeclaredPathSha256s": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/sha256" },
+          "minItems": 1,
+          "maxItems": 64,
+          "uniqueItems": true
+        }
+      }
+    },
+    "loginDocumentLoad": {
+      "allOf": [
+        { "$ref": "#/$defs/documentLoad" },
+        { "properties": { "documentKey": { "const": "app-login-document" } } }
+      ]
+    },
+    "profileDocumentLoad": {
+      "allOf": [
+        { "$ref": "#/$defs/documentLoad" },
+        { "properties": { "documentKey": { "const": "app-profile-document" } } }
+      ]
+    },
+    "cabinetDocumentLoad": {
+      "allOf": [
+        { "$ref": "#/$defs/documentLoad" },
+        { "properties": { "documentKey": { "const": "app-cabinet-document" } } }
+      ]
     },
     "runtimeBinding": {
       "type": "object",

@@ -26,11 +26,16 @@ import {
 } from "./provider-overlap-proof-contract.mjs";
 import {
   assertProviderOverlapRedirect,
+  attestProviderOverlapStaticResponse,
   classifyProviderOverlapBrowserRequest,
   createProviderOverlapEventSeal,
+  createProviderOverlapStaticAssetContract,
+  extractProviderOverlapCssMediaReferences,
   finalizeProviderOverlapBrowserContract,
   finalizeProviderOverlapEventLifecycle,
   finalizeProviderOverlapHistoryContract,
+  installProviderOverlapHistoryInstrumentation,
+  readProviderOverlapStaticResponseEvidence,
 } from "./provider-overlap-browser-contract.mjs";
 import { currentJourneyFixtureContractSha256 } from "./journey-fixture-manifest.mjs";
 import {
@@ -51,35 +56,122 @@ const publicBuildContractSha256 = "5dc1c21d1db2b433736d50c008065d9dfa3adc1ff338f
 const fixtureContractSha256 = currentJourneyFixtureContractSha256();
 const staticJavascriptPath = "/_next/static/chunks/app-123.js";
 const staticStylesheetPath = "/_next/static/chunks/app/layout-123.css";
+const staticEotPath = "/_next/static/media/primeicons-123.eot";
 const staticFontPath = "/_next/static/media/inter-123.woff2";
-const staticInventoryByPath = Object.freeze({
-  [staticJavascriptPath]: "b".repeat(64),
-  [staticStylesheetPath]: "c".repeat(64),
+const staticSecondFontPath = "/_next/static/media/primeicons-123.woff2";
+const staticImagePath = "/_next/static/media/brand-123.svg";
+const staticTtfPath = "/_next/static/media/primeicons-123.ttf";
+const staticWoffPath = "/_next/static/media/primeicons-123.woff";
+const staticBodyByPath = Object.freeze({
+  [staticJavascriptPath]: "self.__cleanPay = 'provider-overlap';\n",
+  [staticStylesheetPath]: "@font-face{src:url(../../media/primeicons-123.eot);"
+    + "src:url(../../media/primeicons-123.eot),url(../../media/inter-123.woff2),"
+    + "url(../../media/primeicons-123.woff),url(../../media/primeicons-123.ttf),"
+    + "url(../../media/brand-123.svg)}"
+    + "@font-face{src:url(../../media/inter-123.woff2)}"
+    + "@font-face{src:url(../../media/primeicons-123.woff2)}\n",
+  [staticEotPath]: "synthetic-eot-body",
+  [staticFontPath]: "synthetic-woff2-body",
+  [staticSecondFontPath]: "synthetic-primeicons-woff2-body",
+  [staticImagePath]: "<svg xmlns=\"http://www.w3.org/2000/svg\"/>\n",
+  [staticTtfPath]: "synthetic-ttf-body",
+  [staticWoffPath]: "synthetic-woff-body",
+});
+const staticInventoryByPath: Readonly<Record<string, string>> = Object.freeze({
+  [staticJavascriptPath]: sha256(staticBodyByPath[staticJavascriptPath]),
+  [staticStylesheetPath]: sha256(staticBodyByPath[staticStylesheetPath]),
+  [staticEotPath]: sha256(staticBodyByPath[staticEotPath]),
+  [staticFontPath]: sha256(staticBodyByPath[staticFontPath]),
+  [staticSecondFontPath]: sha256(staticBodyByPath[staticSecondFontPath]),
+  [staticImagePath]: sha256(staticBodyByPath[staticImagePath]),
+  [staticTtfPath]: sha256(staticBodyByPath[staticTtfPath]),
+  [staticWoffPath]: sha256(staticBodyByPath[staticWoffPath]),
+});
+const staticInventoryMetadataByPath: Readonly<Record<
+string, { assetBytes: number; extension: string }
+>> = Object.freeze({
+  [staticJavascriptPath]: Object.freeze({
+    assetBytes: Buffer.byteLength(staticBodyByPath[staticJavascriptPath]), extension: "js",
+  }),
+  [staticStylesheetPath]: Object.freeze({
+    assetBytes: Buffer.byteLength(staticBodyByPath[staticStylesheetPath]), extension: "css",
+  }),
+  [staticEotPath]: Object.freeze({
+    assetBytes: Buffer.byteLength(staticBodyByPath[staticEotPath]), extension: "eot",
+  }),
+  [staticFontPath]: Object.freeze({
+    assetBytes: Buffer.byteLength(staticBodyByPath[staticFontPath]), extension: "woff2",
+  }),
+  [staticSecondFontPath]: Object.freeze({
+    assetBytes: Buffer.byteLength(staticBodyByPath[staticSecondFontPath]), extension: "woff2",
+  }),
+  [staticImagePath]: Object.freeze({
+    assetBytes: Buffer.byteLength(staticBodyByPath[staticImagePath]), extension: "svg",
+  }),
+  [staticTtfPath]: Object.freeze({
+    assetBytes: Buffer.byteLength(staticBodyByPath[staticTtfPath]), extension: "ttf",
+  }),
+  [staticWoffPath]: Object.freeze({
+    assetBytes: Buffer.byteLength(staticBodyByPath[staticWoffPath]), extension: "woff",
+  }),
 });
 const staticRouteDeclaredPaths = Object.freeze([
   staticStylesheetPath, staticJavascriptPath,
 ].sort());
+const staticDocumentRouteContracts = Object.freeze([
+  "app-login-document", "app-profile-document", "app-cabinet-document",
+].map((documentKey) => Object.freeze({
+  documentKey,
+  routeDeclaredPaths: staticRouteDeclaredPaths,
+})));
+const staticDocumentRouteLedger = staticDocumentRouteContracts.map(({
+  documentKey, routeDeclaredPaths,
+}) => ({
+  documentKey,
+  routeDeclaredPathSha256s: routeDeclaredPaths.map(sha256).sort(),
+}));
 const staticInventoryLedger = Object.entries(staticInventoryByPath).map(([
   servedPath, assetSha256,
-]) => ({ assetSha256, pathSha256: sha256(servedPath) }))
+]) => ({
+  assetBytes: staticInventoryMetadataByPath[servedPath].assetBytes,
+  assetSha256,
+  extension: staticInventoryMetadataByPath[servedPath].extension,
+  pathSha256: sha256(servedPath),
+}))
   .sort((left, right) => left.pathSha256.localeCompare(right.pathSha256));
 const staticAssetContract = Object.freeze({
   attestationSha256: "a".repeat(64),
   configDigest: `sha256:${"1".repeat(64)}`,
+  documentRouteContracts: staticDocumentRouteContracts,
   imageDigest: `sha256:${"2".repeat(64)}`,
   inventoryByPath: staticInventoryByPath,
+  inventoryMetadataByPath: staticInventoryMetadataByPath,
   inventoryLedgerContractSha256: sha256(JSON.stringify(staticInventoryLedger)),
   inventorySha256: "d".repeat(64),
   manifestDigest: `sha256:${"3".repeat(64)}`,
   routeDeclaredPaths: staticRouteDeclaredPaths,
-  routeDeclaredPathContractSha256: sha256(JSON.stringify(
-    staticRouteDeclaredPaths.map(sha256),
-  )),
+  routeDeclaredPathContractSha256: sha256(JSON.stringify(staticDocumentRouteLedger)),
 });
 const staticLoadGraph = Object.freeze({
-  responseDeclaredStaticPaths: Object.freeze([
-    staticFontPath, staticJavascriptPath, staticStylesheetPath,
-  ].sort()),
+  cssMediaReferences: Object.freeze([
+    Object.freeze({ sourcePath: staticStylesheetPath, targetPath: staticEotPath }),
+    Object.freeze({ sourcePath: staticStylesheetPath, targetPath: staticEotPath }),
+    Object.freeze({ sourcePath: staticStylesheetPath, targetPath: staticFontPath }),
+    Object.freeze({ sourcePath: staticStylesheetPath, targetPath: staticFontPath }),
+    Object.freeze({ sourcePath: staticStylesheetPath, targetPath: staticSecondFontPath }),
+    Object.freeze({ sourcePath: staticStylesheetPath, targetPath: staticTtfPath }),
+    Object.freeze({ sourcePath: staticStylesheetPath, targetPath: staticWoffPath }),
+    Object.freeze({ sourcePath: staticStylesheetPath, targetPath: staticImagePath }),
+  ]),
+  responseDeclarationsByDocument: Object.freeze([
+    "app-login-document", "app-profile-document", "app-cabinet-document",
+  ].map((documentKey) => Object.freeze({
+    documentKey,
+    paths: Object.freeze([
+      staticEotPath, staticFontPath, staticSecondFontPath, staticImagePath,
+      staticJavascriptPath, staticStylesheetPath, staticTtfPath, staticWoffPath,
+    ].sort()),
+  }))),
   staticAssetContract,
 });
 
@@ -361,6 +453,11 @@ test("recomputes serialized cross-stack, lifecycle, and runtime invariants", () 
     ["navigation query", (value) => {
       value.stacks.candidate.navigation.finalUrl = "https://pay.ci.clean-pay.dev/cabinet?adjacent=1";
     }],
+    ["symmetric impossible drained event count", (value) => {
+      for (const stack of [value.stacks.baseline, value.stacks.candidate]) {
+        stack.navigation.eventLifecycle.drainedEventCount += 1;
+      }
+    }],
     ["request contract", (value) => {
       value.stacks.candidate.navigation.requestContractSha256 = "0".repeat(64);
     }],
@@ -398,6 +495,15 @@ test("recomputes serialized cross-stack, lifecycle, and runtime invariants", () 
     ["history mutation", (value) => {
       value.stacks.candidate.navigation.historyLedger[1].location = "app-login";
     }],
+    ["symmetric extra canonical history event", (value) => {
+      for (const stack of [value.stacks.baseline, value.stacks.candidate]) {
+        stack.navigation.historyLedger.push(structuredClone(stack.navigation.historyLedger[3]));
+        stack.navigation.historyCount += 1;
+        stack.navigation.historyContractSha256 = sha256(JSON.stringify(
+          stack.navigation.historyLedger,
+        ));
+      }
+    }],
     ["static duplicate", (value) => {
       value.stacks.candidate.navigation.staticRequestLedger.push(
         structuredClone(value.stacks.candidate.navigation.staticRequestLedger[0]),
@@ -407,11 +513,67 @@ test("recomputes serialized cross-stack, lifecycle, and runtime invariants", () 
         JSON.stringify(value.stacks.candidate.navigation.staticRequestLedger),
       );
     }],
+    ["symmetric fully rehashed duplicate static occurrence", (value) => {
+      for (const stack of [value.stacks.baseline, value.stacks.candidate]) {
+        const navigation = stack.navigation;
+        navigation.staticRequestLedger.push(structuredClone(
+          navigation.staticRequestLedger.at(-1),
+        ));
+        navigation.staticRequestCount += 1;
+        navigation.staticRequestContractSha256 = sha256(JSON.stringify(
+          navigation.staticRequestLedger,
+        ));
+        navigation.requestCount += 1;
+        navigation.requestOrderLedger.push({ kind: "static", occurrence: 13 });
+        navigation.requestOrderContractSha256 = sha256(JSON.stringify(
+          navigation.requestOrderLedger,
+        ));
+      }
+    }],
+    ["symmetric static occurrence before its document generation", (value) => {
+      for (const stack of [value.stacks.baseline, value.stacks.candidate]) {
+        const order = stack.navigation.requestOrderLedger;
+        const [profileStatic] = order.splice(12, 1);
+        order.splice(11, 0, profileStatic);
+        stack.navigation.requestOrderContractSha256 = sha256(JSON.stringify(order));
+      }
+    }],
+    ["static response class differs from attested extension", (value) => {
+      const navigation = value.stacks.candidate.navigation;
+      const stylesheet = navigation.staticRequestLedger.find((entry: { contentType: string }) => (
+        entry.contentType === "text/css"
+      ));
+      if (!stylesheet) throw new Error("Synthetic stylesheet fixture is missing.");
+      stylesheet.class = "next-static-font";
+      navigation.staticRequestContractSha256 = sha256(
+        JSON.stringify(navigation.staticRequestLedger),
+      );
+      navigation.requestContractSha256 = sha256(JSON.stringify({
+        version: 1,
+        semanticLedger: navigation.semanticRequestLedger,
+        staticClasses: [...new Set(navigation.staticRequestLedger.map((entry: {
+          class: string;
+        }) => entry.class))].sort(),
+      }));
+    }],
+    ["static declaration class differs from attested extension", (value) => {
+      const navigation = value.stacks.candidate.navigation;
+      const declaration = navigation.staticLoadGraph.declaredPathLedger.find((entry: {
+        class: string;
+      }) => entry.class === "chunk");
+      if (!declaration) throw new Error("Synthetic chunk declaration fixture is missing.");
+      declaration.class = "media";
+      navigation.staticLoadGraphContractSha256 = sha256(
+        JSON.stringify(navigation.staticLoadGraph),
+      );
+    }],
     ["response-declared inventory chunk omitted from request closure", (value) => {
       const navigation = value.stacks.candidate.navigation;
       const pathSha256 = sha256("/_next/static/chunks/declared-but-omitted.js");
       navigation.staticLoadGraph.inventoryLedger.push({
+        assetBytes: 128,
         assetSha256: "f".repeat(64),
+        extension: "js",
         pathSha256,
       });
       navigation.staticLoadGraph.inventoryLedger.sort((left: { pathSha256: string }, right: {
@@ -617,115 +779,270 @@ test("binds exact running image labels and a pristine deterministic reset", () =
 
 test("rejects arbitrary same-host paths, queries, redirects, methods, and transports", async () => {
   const opaque = "opaque-state_1";
-  const valid = [
-    browserClassification("https://pay.ci.clean-pay.dev/login?redirect_to=%2Fprofile", {
-      resourceType: "document", isNavigation: true, isMainFrame: true,
-    }),
-    browserClassification(
+  const loginDocument = browserClassification(
+    "https://pay.ci.clean-pay.dev/login?redirect_to=%2Fprofile",
+    { resourceType: "document", isNavigation: true, isMainFrame: true },
+  );
+  const telegramStart = browserClassification(
       "https://pay.ci.clean-pay.dev/auth/telegram/start?redirect_to=%2Fprofile"
-        + "&turnstile_token=synthetic-turnstile-token%3Alogin%3Asynthetic-turnstile-1%3A1",
+        + "&turnstile_token=synthetic-turnstile-token%3Aauth_login%3Asynthetic-turnstile-1%3A1",
       { resourceType: "document", isNavigation: true, isMainFrame: true },
-    ),
-    browserClassification(
+    );
+  const oidcAuthorize = browserClassification(
       "https://oauth.telegram.org/auth?response_type=code&client_id=7654321098"
         + "&redirect_uri=https%3A%2F%2Fpay.ci.clean-pay.dev%2Fauth%2Ftelegram%2Fcallback"
         + `&scope=openid%20profile&state=${opaque}&nonce=${opaque}`
         + `&code_challenge=${opaque}&code_challenge_method=S256`,
       { resourceType: "document", isNavigation: true, isMainFrame: true },
-    ),
-    browserClassification(
+    );
+  const telegramCallback = browserClassification(
       `https://pay.ci.clean-pay.dev/auth/telegram/callback?code=${opaque}&state=${opaque}`,
       { resourceType: "document", isNavigation: true, isMainFrame: true },
-    ),
-    browserClassification("https://pay.ci.clean-pay.dev/profile", {
-      resourceType: "document", isNavigation: true, isMainFrame: true,
-    }),
-    browserClassification("https://pay.ci.clean-pay.dev/cabinet", {
-      resourceType: "document", isNavigation: true, isMainFrame: true,
-    }, true),
-    browserClassification("https://pay.ci.clean-pay.dev/_next/static/chunks/app-123.js", {
+    );
+  const profileDocument = browserClassification("https://pay.ci.clean-pay.dev/profile", {
+    resourceType: "document", isNavigation: true, isMainFrame: true,
+  });
+  const cabinetDocument = browserClassification("https://pay.ci.clean-pay.dev/cabinet", {
+    resourceType: "document", isNavigation: true, isMainFrame: true,
+  }, true);
+  const staticClassifications = [
+    browserClassification(`https://pay.ci.clean-pay.dev${staticJavascriptPath}`, {
       resourceType: "script",
     }),
-    browserClassification("https://pay.ci.clean-pay.dev/_next/static/chunks/app/layout-123.css", {
+    browserClassification(`https://pay.ci.clean-pay.dev${staticStylesheetPath}`, {
       resourceType: "stylesheet",
     }),
-    browserClassification("https://pay.ci.clean-pay.dev/_next/static/media/inter-123.woff2", {
+    browserClassification(`https://pay.ci.clean-pay.dev${staticFontPath}`, {
       resourceType: "font",
     }),
-    browserClassification(
+    browserClassification(`https://pay.ci.clean-pay.dev${staticSecondFontPath}`, {
+      resourceType: "font",
+    }),
+  ];
+  const turnstile = browserClassification(
       "https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit",
       { resourceType: "script" },
-    ),
-    browserClassification("https://chatwoot.browser.clean-pay.dev/packs/js/sdk.js", {
-      resourceType: "script",
-    }),
-    browserClassification(
+    );
+  const chatwootSdk = browserClassification(
+    "https://chatwoot.browser.clean-pay.dev/packs/js/sdk.js",
+    { resourceType: "script" },
+  );
+  const chatwootWidget = browserClassification(
       `https://chatwoot.browser.clean-pay.dev/widget?website_token=${"a".repeat(64)}`,
       { resourceType: "document", isNavigation: true },
-    ),
-  ];
-  const statuses = [200, 307, 302, 307, 200, 200, 200, 200, 200, 200, 200, 200];
-  const contentTypes = [
-    "text/html",
-    "application/octet-stream",
-    null,
-    "application/octet-stream",
-    "text/html",
-    "text/html",
-    "application/javascript",
-    "text/css",
-    "font/woff2",
-    "application/javascript",
-    "application/javascript",
-    "text/html",
-  ];
-  const redirectEdges = [
-    null,
-    null,
-    "app-telegram-start:307->telegram-oidc-authorize",
-    "telegram-oidc-authorize:302->app-telegram-callback",
-    "app-telegram-callback:307->app-profile-document",
-    null,
-    null,
-    null,
-    null,
-    null,
-    null,
-    null,
-  ];
-  const validRecords = valid.map((classification, index) => ({
+    );
+  expect(() => browserClassification(
+    "https://pay.ci.clean-pay.dev/auth/telegram/start?redirect_to=%2Fprofile"
+      + "&turnstile_token=synthetic-turnstile-token%3Alogin%3Asynthetic-turnstile-1%3A1",
+    { resourceType: "document", isNavigation: true, isMainFrame: true },
+  )).toThrow(/Turnstile token/);
+  const requestRecord = (
+    classification: ProviderBrowserClassification,
+    documentKey: "app-login-document" | "app-profile-document" | "app-cabinet-document",
+    responseStatus: number | null,
+    responseContentType: string | null,
+    redirectEdge: string | null = null,
+  ) => ({
     classification,
-    redirectEdge: redirectEdges[index],
-    responseContentType: contentTypes[index],
-    responseStatus: statuses[index],
-  }));
+    documentKey,
+    redirectEdge,
+    responseContentType,
+    responseStatus,
+    staticResponseBytes: classification.staticPath === null
+      ? null
+      : staticInventoryMetadataByPath[classification.staticPath].assetBytes,
+    staticResponseSha256: classification.staticPath === null
+      ? null
+      : staticInventoryByPath[classification.staticPath],
+  });
+  const staticRecords = (documentKey: Parameters<typeof requestRecord>[1]) => (
+    staticClassifications.map((classification) => requestRecord(
+      classification,
+      documentKey,
+      200,
+      classification.key === "next-static-js" ? "application/javascript"
+        : classification.key === "next-static-css" ? "text/css" : "font/woff2",
+    ))
+  );
+  const validRecords = [
+    requestRecord(loginDocument, "app-login-document", 200, "text/html"),
+    ...staticRecords("app-login-document"),
+    requestRecord(turnstile, "app-login-document", 200, "application/javascript"),
+    requestRecord(chatwootSdk, "app-login-document", 200, "application/javascript"),
+    requestRecord(chatwootWidget, "app-login-document", 200, "text/html"),
+    requestRecord(telegramStart, "app-login-document", 307, "application/octet-stream"),
+    requestRecord(
+      oidcAuthorize,
+      "app-login-document",
+      302,
+      null,
+      "app-telegram-start:307->telegram-oidc-authorize",
+    ),
+    requestRecord(
+      telegramCallback,
+      "app-login-document",
+      307,
+      "application/octet-stream",
+      "telegram-oidc-authorize:302->app-telegram-callback",
+    ),
+    requestRecord(
+      profileDocument,
+      "app-profile-document",
+      200,
+      "text/html",
+      "app-telegram-callback:307->app-profile-document",
+    ),
+    ...staticRecords("app-profile-document"),
+    requestRecord(cabinetDocument, "app-cabinet-document", 200, "text/html"),
+    ...staticRecords("app-cabinet-document"),
+  ];
   const exactBrowserContract = finalizeProviderOverlapBrowserContract(validRecords, staticLoadGraph);
   expect(exactBrowserContract).toMatchObject({
-    requestCount: 12,
+    requestCount: validRecords.length,
     requestContractSha256: expect.stringMatching(/^[a-f0-9]{64}$/),
+    staticRequestCount: 12,
   });
+  expect(exactBrowserContract.requestOrderLedger).toHaveLength(validRecords.length);
+  expect(exactBrowserContract.staticLoadGraph.documentLoadLedger).toHaveLength(3);
+  expect(exactBrowserContract.staticLoadGraph.cssMediaReferenceLedger).toHaveLength(8);
+  expect(() => finalizeProviderOverlapBrowserContract(validRecords, {
+    ...staticLoadGraph,
+    cssMediaReferences: staticLoadGraph.cssMediaReferences.slice(0, -1),
+  })).toThrow(/CSS media fallback extension closure/);
+  expect(() => finalizeProviderOverlapBrowserContract(validRecords, {
+    ...staticLoadGraph,
+    cssMediaReferences: [
+      ...staticLoadGraph.cssMediaReferences,
+      staticLoadGraph.cssMediaReferences[0],
+    ],
+  })).toThrow(/CSS media fallback extension closure/);
+  const staticRecordIndexes = validRecords.flatMap((record, index) => (
+    record.classification.staticPath === null ? [] : [index]
+  ));
+  for (const index of [staticRecordIndexes[2], staticRecordIndexes[6]]) {
+    const tamperedStaticBody = JSON.parse(JSON.stringify(validRecords));
+    tamperedStaticBody[index] = {
+      ...tamperedStaticBody[index],
+      classification: {
+        ...tamperedStaticBody[index].classification,
+        staticAssetSha256: "0".repeat(64),
+      },
+    };
+    expect(() => finalizeProviderOverlapBrowserContract(
+      tamperedStaticBody,
+      staticLoadGraph,
+    ), `static body ${index}`).toThrow(/attested image inventory/);
+  }
+  const tamperedObservedBody = structuredClone(validRecords);
+  tamperedObservedBody[staticRecordIndexes[6]].staticResponseSha256 = "0".repeat(64);
+  expect(() => finalizeProviderOverlapBrowserContract(
+    tamperedObservedBody,
+    staticLoadGraph,
+  )).toThrow(/attested image inventory/);
+  const missingObservedBody = structuredClone(validRecords);
+  missingObservedBody[staticRecordIndexes[10]].staticResponseBytes = null;
+  missingObservedBody[staticRecordIndexes[10]].staticResponseSha256 = null;
+  expect(() => finalizeProviderOverlapBrowserContract(
+    missingObservedBody,
+    staticLoadGraph,
+  )).toThrow(/attested image inventory/);
+  const missingFontInventory = Object.fromEntries(Object.entries(
+    staticAssetContract.inventoryByPath,
+  ).filter(([servedPath]) => servedPath !== staticFontPath));
+  const missingFontMetadata = Object.fromEntries(Object.entries(
+    staticAssetContract.inventoryMetadataByPath,
+  ).filter(([servedPath]) => servedPath !== staticFontPath));
+  const missingFontLedger = staticInventoryLedgerFor(missingFontInventory, missingFontMetadata);
+  const missingFontContract = {
+    ...staticAssetContract,
+    inventoryByPath: missingFontInventory,
+    inventoryMetadataByPath: missingFontMetadata,
+    inventoryLedgerContractSha256: sha256(JSON.stringify(missingFontLedger)),
+  };
+  expect(() => browserClassification(
+    `https://pay.ci.clean-pay.dev${staticFontPath}`,
+    { resourceType: "font" },
+    false,
+    missingFontContract as unknown as typeof staticAssetContract,
+  )).toThrow(/absent from the attested production image inventory/);
+
+  const extraImagePath = "/_next/static/media/unexpected.svg";
+  const extraImageInventory = {
+    ...staticAssetContract.inventoryByPath,
+    [extraImagePath]: "f".repeat(64),
+  };
+  const extraImageMetadata = {
+    ...staticAssetContract.inventoryMetadataByPath,
+    [extraImagePath]: { assetBytes: 17, extension: "svg" },
+  };
+  const extraImageLedger = staticInventoryLedgerFor(extraImageInventory, extraImageMetadata);
+  const extraImageContract = {
+    ...staticAssetContract,
+    inventoryByPath: extraImageInventory,
+    inventoryMetadataByPath: extraImageMetadata,
+    inventoryLedgerContractSha256: sha256(JSON.stringify(extraImageLedger)),
+  };
+  const extraImageRecords = structuredClone(validRecords);
+  extraImageRecords.push({
+    classification: browserClassification(
+      `https://pay.ci.clean-pay.dev${extraImagePath}`,
+      { resourceType: "image" },
+      false,
+      extraImageContract,
+    ),
+    documentKey: "app-cabinet-document",
+    redirectEdge: null,
+    responseContentType: "image/svg+xml",
+    responseStatus: 200,
+    staticResponseBytes: 17,
+    staticResponseSha256: "f".repeat(64),
+  });
+  expect(() => finalizeProviderOverlapBrowserContract(extraImageRecords, {
+    cssMediaReferences: staticLoadGraph.cssMediaReferences,
+    responseDeclarationsByDocument: staticLoadGraph.responseDeclarationsByDocument,
+    staticAssetContract: extraImageContract,
+  })).toThrow(/negotiated media|static media declaration closure/);
   const repartitionedStaticRecords = structuredClone(validRecords);
-  repartitionedStaticRecords.splice(7, 0, structuredClone(validRecords[6]));
+  repartitionedStaticRecords.splice(
+    staticRecordIndexes[0] + 1,
+    0,
+    structuredClone(validRecords[staticRecordIndexes[0]]),
+  );
   expect(() => finalizeProviderOverlapBrowserContract(
     repartitionedStaticRecords,
     staticLoadGraph,
   )).toThrow();
+  const missingProfileOccurrence = structuredClone(validRecords);
+  missingProfileOccurrence.splice(staticRecordIndexes[4], 1);
+  expect(() => finalizeProviderOverlapBrowserContract(
+    missingProfileOccurrence,
+    staticLoadGraph,
+  )).toThrow(/app-profile-document static chunk load graph/);
+  const movedProfileOccurrence = structuredClone(validRecords);
+  movedProfileOccurrence[staticRecordIndexes[4]].documentKey = "app-cabinet-document";
+  expect(() => finalizeProviderOverlapBrowserContract(
+    movedProfileOccurrence,
+    staticLoadGraph,
+  )).toThrow(/exact static generation/);
   expect(browserClassification(
     `https://chatwoot.browser.clean-pay.dev/widget?website_token=${"a".repeat(64)}`
       + "&cw_conversation=synthetic-conversation",
     { resourceType: "document", isNavigation: true },
   ).key).toBe("chatwoot-widget-conversation-frame");
   const wrongContentType = structuredClone(validRecords);
-  wrongContentType[6].responseContentType = "text/html";
+  wrongContentType[staticRecordIndexes[0]].responseContentType = "text/html";
   expect(() => finalizeProviderOverlapBrowserContract(wrongContentType, staticLoadGraph)).toThrow();
   const orphanedRedirect = structuredClone(validRecords);
   orphanedRedirect.push({
     classification: browserClassification("https://pay.ci.clean-pay.dev/?_rsc=opaque-state_1", {
       resourceType: "fetch",
     }),
+    documentKey: "app-cabinet-document",
     redirectEdge: null,
     responseContentType: "application/octet-stream",
     responseStatus: 307,
+    staticResponseBytes: null,
+    staticResponseSha256: null,
   });
   expect(() => finalizeProviderOverlapBrowserContract(orphanedRedirect, staticLoadGraph)).toThrow();
 
@@ -734,48 +1051,122 @@ test("rejects arbitrary same-host paths, queries, redirects, methods, and transp
     ...staticAssetContract.inventoryByPath,
     [unreachableExistingChunk]: "e".repeat(64),
   };
-  const expandedInventoryLedger = Object.entries(expandedInventoryByPath).map(([
-    servedPath, assetSha256,
-  ]) => ({ assetSha256, pathSha256: sha256(servedPath) }))
-    .sort((left, right) => left.pathSha256.localeCompare(right.pathSha256));
+  const expandedInventoryMetadata = {
+    ...staticAssetContract.inventoryMetadataByPath,
+    [unreachableExistingChunk]: { assetBytes: 19, extension: "js" },
+  };
+  const expandedInventoryLedger = staticInventoryLedgerFor(
+    expandedInventoryByPath,
+    expandedInventoryMetadata,
+  );
   const expandedStaticContract = {
     ...staticAssetContract,
     inventoryByPath: expandedInventoryByPath,
+    inventoryMetadataByPath: expandedInventoryMetadata,
     inventoryLedgerContractSha256: sha256(JSON.stringify(expandedInventoryLedger)),
   };
   const extraUnique = structuredClone(validRecords);
   extraUnique.push({
-    classification: classifyProviderOverlapBrowserRequest({
-      url: `https://pay.ci.clean-pay.dev${unreachableExistingChunk}`,
-      method: "GET",
-      resourceType: "script",
-      isNavigation: false,
-      isMainFrame: false,
-    }, { cabinetDocumentAllowed: false, staticAssetContract: expandedStaticContract }),
+    classification: browserClassification(
+      `https://pay.ci.clean-pay.dev${unreachableExistingChunk}`,
+      { resourceType: "script" },
+      false,
+      expandedStaticContract,
+    ),
+    documentKey: "app-cabinet-document",
     redirectEdge: null,
     responseContentType: "application/javascript",
     responseStatus: 200,
+    staticResponseBytes: 19,
+    staticResponseSha256: "e".repeat(64),
   });
   expect(() => finalizeProviderOverlapBrowserContract(extraUnique, {
-    responseDeclaredStaticPaths: staticLoadGraph.responseDeclaredStaticPaths,
+    cssMediaReferences: staticLoadGraph.cssMediaReferences,
+    responseDeclarationsByDocument: staticLoadGraph.responseDeclarationsByDocument,
     staticAssetContract: expandedStaticContract,
   })).toThrow();
 
+  const checkpoint = {
+    frameId: "main-frame-1",
+    historyLength: 4,
+    kind: "checkpoint",
+    loaderId: "profile-loader-1",
+    url: "https://pay.ci.clean-pay.dev/profile",
+  };
+  const documentNavigation = {
+    frameId: "main-frame-1",
+    kind: "document-navigation",
+    loaderId: "cabinet-loader-2",
+    navigationType: "Navigation",
+    url: "https://pay.ci.clean-pay.dev/cabinet",
+  };
+  const replaceState = {
+    afterNextAppRouterState: true,
+    argumentUrl: "https://pay.ci.clean-pay.dev/cabinet",
+    beforeHistoryLength: 5,
+    beforeNextAppRouterState: false,
+    beforeUrl: "https://pay.ci.clean-pay.dev/cabinet",
+    historyLength: 5,
+    kind: "replaceState",
+    operationSequence: 1,
+    url: "https://pay.ci.clean-pay.dev/cabinet",
+  };
+  const sameDocumentNavigation = {
+    frameId: "main-frame-1",
+    kind: "same-document-navigation",
+    navigationType: "historyApi",
+    url: "https://pay.ci.clean-pay.dev/cabinet",
+  };
+  const finalFrame = {
+    frameId: "main-frame-1",
+    loaderId: "cabinet-loader-2",
+    url: "https://pay.ci.clean-pay.dev/cabinet",
+  };
   const history = finalizeProviderOverlapHistoryContract([
-    { kind: "checkpoint", url: "https://pay.ci.clean-pay.dev/profile" },
-    { kind: "frame-navigation", url: "https://pay.ci.clean-pay.dev/cabinet" },
-  ]);
+    checkpoint, documentNavigation, replaceState, sameDocumentNavigation,
+  ], finalFrame);
+  const reversedDelivery = finalizeProviderOverlapHistoryContract([
+    checkpoint, documentNavigation, sameDocumentNavigation, replaceState,
+  ], finalFrame);
   expect(history.historyContractSha256).toMatch(/^[a-f0-9]{64}$/);
-  expect(() => finalizeProviderOverlapHistoryContract([
-    { kind: "checkpoint", url: "https://pay.ci.clean-pay.dev/profile" },
-    { kind: "hashchange", url: "https://pay.ci.clean-pay.dev/profile#transient" },
-    { kind: "frame-navigation", url: "https://pay.ci.clean-pay.dev/cabinet" },
-  ])).toThrow();
-  expect(() => finalizeProviderOverlapHistoryContract([
-    { kind: "checkpoint", url: "https://pay.ci.clean-pay.dev/profile" },
-    { kind: "pushState", url: "https://pay.ci.clean-pay.dev/profile?transient=1" },
-    { kind: "frame-navigation", url: "https://pay.ci.clean-pay.dev/cabinet" },
-  ])).toThrow();
+  expect(reversedDelivery).toEqual(history);
+  const historyMutations: Array<[
+    string,
+    (
+      records: Array<Record<string, boolean | number | string>>,
+      barrier: Record<string, string>,
+    ) => void,
+  ]> = [
+    ["missing signal", (records) => { records.pop(); }],
+    ["duplicate signal", (records) => { records[3] = structuredClone(records[2]); }],
+    ["reused loader", (records) => { records[1].loaderId = records[0].loaderId; }],
+    ["BFCache", (records) => { records[1].navigationType = "BackForwardCacheRestore"; }],
+    ["query mutation", (records) => {
+      records[2].url = "https://pay.ci.clean-pay.dev/cabinet?transient=1";
+    }],
+    ["state mismatch", (records) => { records[2].afterNextAppRouterState = false; }],
+    ["history length", (records) => { records[2].historyLength = 6; }],
+    ["cabinet document replaced history entry", (records) => {
+      records[2].beforeHistoryLength = 4;
+      records[2].historyLength = 4;
+    }],
+    ["cabinet document decremented history entry", (records) => {
+      records[2].beforeHistoryLength = 3;
+      records[2].historyLength = 3;
+    }],
+    ["frame mismatch", (records) => { records[3].frameId = "other-frame"; }],
+    ["fragment navigation", (records) => { records[3].navigationType = "fragment"; }],
+    ["final loader", (_records, barrier) => { barrier.loaderId = "other-loader"; }],
+    ["extra raw field", (records) => { records[2].extra = true; }],
+  ];
+  for (const [label, mutate] of historyMutations) {
+    const records = structuredClone([
+      checkpoint, documentNavigation, replaceState, sameDocumentNavigation,
+    ]);
+    const barrier = structuredClone(finalFrame);
+    mutate(records, barrier);
+    expect(() => finalizeProviderOverlapHistoryContract(records, barrier), label).toThrow();
+  }
 
   for (const [label, url, overrides, cabinetAllowed] of [
     ["path", "https://pay.ci.clean-pay.dev/admin", {}, false],
@@ -804,14 +1195,14 @@ test("rejects arbitrary same-host paths, queries, redirects, methods, and transp
     expect(() => browserClassification(url, overrides, cabinetAllowed), label).toThrow();
   }
   expect(() => assertProviderOverlapRedirect({
-    from: { classification: valid[1], url: "https://pay.ci.clean-pay.dev/auth/telegram/start" },
-    to: { classification: valid[2], url: "https://oauth.telegram.org/auth" },
+    from: { classification: telegramStart, url: "https://pay.ci.clean-pay.dev/auth/telegram/start" },
+    to: { classification: oidcAuthorize, url: "https://oauth.telegram.org/auth" },
     status: 308,
     location: "https://oauth.telegram.org/auth",
   })).toThrow();
   expect(() => assertProviderOverlapRedirect({
-    from: { classification: valid[1], url: "https://pay.ci.clean-pay.dev/auth/telegram/start" },
-    to: { classification: valid[2], url: "https://oauth.telegram.org/auth" },
+    from: { classification: telegramStart, url: "https://pay.ci.clean-pay.dev/auth/telegram/start" },
+    to: { classification: oidcAuthorize, url: "https://oauth.telegram.org/auth" },
     status: 307,
     location: "https://oauth.telegram.org/other",
   })).toThrow();
@@ -820,9 +1211,285 @@ test("rejects arbitrary same-host paths, queries, redirects, methods, and transp
   expect(scriptSource).toContain('await context.routeWebSocket("**/*"');
   expect(scriptSource).toContain('context.on("serviceworker"');
   expect(scriptSource).toContain('serviceWorkers: "block"');
+  expect(scriptSource).toContain("createProviderOverlapEventSeal(1_024)");
+  expect(installProviderOverlapHistoryInstrumentation.toString()).toContain(
+    "historyBindingRejected = true",
+  );
+  expect(installProviderOverlapHistoryInstrumentation.toString()).not.toContain(
+    "binding.finally",
+  );
+});
+
+test("binds every completed static response to independent attested bytes and MIME", async () => {
+  for (const [servedPath, resourceType, responseContentType] of [
+    [staticJavascriptPath, "script", "application/javascript"],
+    [staticStylesheetPath, "stylesheet", "text/css"],
+    [staticFontPath, "font", "font/woff2"],
+    [staticImagePath, "image", "image/svg+xml"],
+  ] as const) {
+    const classification = browserClassification(
+      `https://pay.ci.clean-pay.dev${servedPath}`,
+      { resourceType },
+    );
+    const body = Buffer.from(staticBodyByPath[servedPath], "utf8");
+    expect(attestProviderOverlapStaticResponse({
+      body,
+      classification,
+      responseContentType,
+      responseStatus: 200,
+    }, staticAssetContract)).toEqual({
+      staticResponseBytes: body.byteLength,
+      staticResponseSha256: staticInventoryByPath[servedPath],
+    });
+    const lifecycle: string[] = [];
+    await expect(readProviderOverlapStaticResponseEvidence({
+      classification,
+      response: {
+        body: async () => {
+          lifecycle.push("body");
+          return body;
+        },
+        finished: async () => {
+          lifecycle.push("finished");
+          return null;
+        },
+        status: () => 200,
+      },
+      responseContentType,
+    }, staticAssetContract)).resolves.toMatchObject({
+      observation: { staticResponseSha256: staticInventoryByPath[servedPath] },
+    });
+    expect(lifecycle).toEqual(["finished", "body"]);
+
+    const tampered = Buffer.from(body);
+    tampered[0] ^= 1;
+    expect(() => attestProviderOverlapStaticResponse({
+      body: tampered,
+      classification,
+      responseContentType,
+      responseStatus: 200,
+    }, staticAssetContract)).toThrow(/response bytes/);
+  }
+
+  const scriptClassification = browserClassification(
+    `https://pay.ci.clean-pay.dev${staticJavascriptPath}`,
+    { resourceType: "script" },
+  );
+  expect(() => attestProviderOverlapStaticResponse({
+    body: undefined as unknown as Uint8Array,
+    classification: scriptClassification,
+    responseContentType: "application/javascript",
+    responseStatus: 200,
+  }, staticAssetContract)).toThrow(/incomplete/);
+  await expect(readProviderOverlapStaticResponseEvidence({
+    classification: scriptClassification,
+    response: null,
+    responseContentType: "application/javascript",
+  }, staticAssetContract)).rejects.toThrow(/no readable response/);
+  const oversized = Object.create(Uint8Array.prototype) as Uint8Array;
+  Object.defineProperty(oversized, "byteLength", { value: 128 * 1024 * 1024 + 1 });
+  expect(() => attestProviderOverlapStaticResponse({
+    body: oversized,
+    classification: scriptClassification,
+    responseContentType: "application/javascript",
+    responseStatus: 200,
+  }, staticAssetContract)).toThrow(/byte length/);
+});
+
+test("keeps rejected history bindings sticky across early and close-adjacent drains", async () => {
+  type InstrumentationGlobal = typeof globalThis & {
+    __cleanPayProviderHistory: (record: unknown) => Promise<void>;
+    __cleanPayProviderHistoryDrain?: () => Promise<void>;
+    addEventListener: (name: string, listener: () => void) => void;
+    history: {
+      length: number;
+      pushState: (state: unknown, unused: string, url?: string | URL | null) => void;
+      replaceState: (state: unknown, unused: string, url?: string | URL | null) => void;
+      state: unknown;
+    };
+    location: { href: string };
+  };
+  const runScenario = async (rejectBeforeDrain: boolean) => {
+    const target = globalThis as InstrumentationGlobal;
+    const names = [
+      "__cleanPayProviderHistory", "__cleanPayProviderHistoryDrain",
+      "addEventListener", "history", "location",
+    ] as const;
+    const descriptors = Object.fromEntries(names.map((name) => [
+      name,
+      Object.getOwnPropertyDescriptor(target, name),
+    ]));
+    let rejectBinding: ((reason?: unknown) => void) | undefined;
+    const location = { href: "https://pay.ci.clean-pay.dev/cabinet" };
+    const history = {
+      length: 5,
+      state: null as unknown,
+      pushState(state: unknown, _unused: string, url?: string | URL | null) {
+        this.state = state;
+        this.length += 1;
+        if (url !== undefined && url !== null) location.href = new URL(url, location.href).href;
+      },
+      replaceState(state: unknown, _unused: string, url?: string | URL | null) {
+        this.state = state;
+        if (url !== undefined && url !== null) location.href = new URL(url, location.href).href;
+      },
+    };
+    try {
+      Object.defineProperties(target, {
+        __cleanPayProviderHistory: {
+          configurable: true,
+          value: () => new Promise<void>((_resolve, reject) => { rejectBinding = reject; }),
+        },
+        addEventListener: { configurable: true, value: () => undefined },
+        history: { configurable: true, value: history },
+        location: { configurable: true, value: location },
+      });
+      installProviderOverlapHistoryInstrumentation();
+      history.replaceState({
+        __NA: true,
+        __PRIVATE_NEXTJS_INTERNALS_TREE: {},
+      }, "", location.href);
+      if (!rejectBinding || !target.__cleanPayProviderHistoryDrain) {
+        throw new Error("Synthetic history binding fixture was not installed.");
+      }
+      if (rejectBeforeDrain) {
+        rejectBinding(new Error("synthetic-early-binding-rejection"));
+        await Promise.resolve();
+      }
+      const draining = target.__cleanPayProviderHistoryDrain();
+      if (!rejectBeforeDrain) rejectBinding(new Error("synthetic-close-adjacent-rejection"));
+      await expect(draining).rejects.toThrow(/rejected an event/);
+    } finally {
+      for (const name of names) {
+        const descriptor = descriptors[name];
+        if (descriptor) Object.defineProperty(target, name, descriptor);
+        else delete target[name];
+      }
+    }
+  };
+
+  await runScenario(true);
+  await runScenario(false);
+});
+
+test("derives the exact bounded static response contract from attested OCI inventory bytes", () => {
+  const attestation = {
+    attestationSha256: staticAssetContract.attestationSha256,
+    source: {
+      configDigest: staticAssetContract.configDigest,
+      imageDigest: staticAssetContract.imageDigest,
+      manifestDigest: staticAssetContract.manifestDigest,
+    },
+    inventory: {
+      inventorySha256: staticAssetContract.inventorySha256,
+      staticChunks: Object.entries(staticInventoryByPath).map(([servedPath, digest]) => ({
+        imagePath: `/app/.next${servedPath.slice("/_next".length)}`,
+        servedPath,
+        sha256: digest,
+        size: staticInventoryMetadataByPath[servedPath].assetBytes,
+      })),
+      clientReferences: ["/cabinet/page", "/login/page", "/profile/page"].map((route) => ({
+        route,
+        declaredStaticChunks: [...staticRouteDeclaredPaths],
+      })),
+    },
+  };
+  expect(createProviderOverlapStaticAssetContract(attestation)).toMatchObject({
+    inventoryByPath: staticInventoryByPath,
+    inventoryMetadataByPath: staticInventoryMetadataByPath,
+    routeDeclaredPaths: staticRouteDeclaredPaths,
+    documentRouteContracts: staticDocumentRouteContracts,
+  });
+  const missingSize = structuredClone(attestation);
+  delete (missingSize.inventory.staticChunks[0] as Partial<{
+    size: number;
+  }>).size;
+  expect(() => createProviderOverlapStaticAssetContract(missingSize))
+    .toThrow(/static asset inventory/);
+});
+
+test("canonicalizes all current relative CSS media references without broadening URLs", () => {
+  const sourcePath = "/_next/static/chunks/current-media.css";
+  const references = [
+    "primeicons.current.eot",
+    "primeicons.current.eot",
+    "primeicons.current.woff2",
+    "primeicons.current.woff",
+    "primeicons.current.ttf",
+    "primeicons.current.svg",
+    "Inter-roman.current.woff2",
+    "Inter-italic.current.woff2",
+  ];
+  const cssBody = Buffer.from(references.map((filename) => (
+    `url(../media/${filename})`
+  )).join(","), "utf8");
+  const inventoryByPath: Record<string, string> = {
+    ...staticAssetContract.inventoryByPath,
+    [sourcePath]: sha256(cssBody.toString("utf8")),
+  };
+  const inventoryMetadataByPath: Record<string, { assetBytes: number; extension: string }> = {
+    ...staticAssetContract.inventoryMetadataByPath,
+    [sourcePath]: { assetBytes: cssBody.byteLength, extension: "css" },
+  };
+  for (const filename of new Set(references)) {
+    const servedPath = `/_next/static/media/${filename}`;
+    inventoryByPath[servedPath] = sha256(`synthetic:${filename}`);
+    inventoryMetadataByPath[servedPath] = {
+      assetBytes: Buffer.byteLength(`synthetic:${filename}`),
+      extension: filename.slice(filename.lastIndexOf(".") + 1),
+    };
+  }
+  const contract = {
+    ...staticAssetContract,
+    inventoryByPath,
+    inventoryMetadataByPath,
+    inventoryLedgerContractSha256: sha256(JSON.stringify(staticInventoryLedgerFor(
+      inventoryByPath,
+      inventoryMetadataByPath,
+    ))),
+  };
+  const observed = extractProviderOverlapCssMediaReferences(cssBody, sourcePath, contract);
+  expect(observed).toHaveLength(8);
+  expect(observed.map(({ targetPath }) => targetPath)).toEqual(
+    references.map((filename) => `/_next/static/media/${filename}`),
+  );
+  for (const unsafe of [
+    "url(data:font/woff2;base64,AAAA)",
+    "url(https://example.invalid/font.woff2)",
+    "url(../../../../media/primeicons.current.woff2)",
+    "url(/_next/static/media/primeicons.current.woff2)",
+  ]) {
+    expect(() => extractProviderOverlapCssMediaReferences(
+      Buffer.from(unsafe, "utf8"),
+      sourcePath,
+      contract,
+    ), unsafe).toThrow(/noncanonical|escaped/);
+  }
+  const missing = structuredClone(contract);
+  delete missing.inventoryByPath["/_next/static/media/primeicons.current.ttf"];
+  delete missing.inventoryMetadataByPath["/_next/static/media/primeicons.current.ttf"];
+  missing.inventoryLedgerContractSha256 = sha256(JSON.stringify(staticInventoryLedgerFor(
+    missing.inventoryByPath,
+    missing.inventoryMetadataByPath,
+  )));
+  expect(() => extractProviderOverlapCssMediaReferences(cssBody, sourcePath, missing))
+    .toThrow(/escaped its attested image inventory/);
 });
 
 test("seals browser events only after a bounded quiet drain and rejects late events", async () => {
+  const fullContractSeal = createProviderOverlapEventSeal();
+  for (let index = 0; index < 772; index += 1) fullContractSeal.record();
+  await expect(fullContractSeal.drainAndSeal(() => true, {
+    pollMs: 1,
+    quietMs: 1,
+    timeoutMs: 100,
+  })).resolves.toEqual({ eventCount: 772, status: "drained-and-sealed" });
+  expect(fullContractSeal.assertClean()).toEqual({
+    eventCount: 772,
+    lateEventCount: 0,
+    status: "sealed-clean",
+  });
+
   const seal = createProviderOverlapEventSeal(32);
   const finish = seal.begin();
   let settled = false;
@@ -838,7 +1505,9 @@ test("seals browser events only after a bounded quiet drain and rejects late eve
   seal.record();
   expect(() => seal.assertClean()).toThrow(/changed after/);
 
-  for (const source of ["console", "history", "request", "pageerror", "provider", "load"]) {
+  for (const source of [
+    "console", "history", "request", "response", "pageerror", "provider", "load",
+  ]) {
     const sourceSeal = createProviderOverlapEventSeal(32);
     const observed: string[] = [];
     await expect(finalizeProviderOverlapEventLifecycle({
@@ -943,36 +1612,70 @@ test("keeps the schema write-once sidecar-only and free of comparison projection
   ]));
   expect(schema.$defs.navigation.properties).toMatchObject({
     finalUrl: { const: "https://pay.ci.clean-pay.dev/cabinet" },
-    requestCount: { type: "integer", minimum: 1, maximum: 256 },
+    requestCount: { type: "integer", minimum: 18, maximum: 256 },
     requestContractSha256: { $ref: "#/$defs/sha256" },
+    requestOrderContractSha256: { $ref: "#/$defs/sha256" },
     historyContractSha256: { $ref: "#/$defs/sha256" },
     staticLoadGraph: { $ref: "#/$defs/staticLoadGraph" },
     staticRequestContractSha256: { $ref: "#/$defs/sha256" },
-    staticRequestCount: { type: "integer", minimum: 3, maximum: 256 },
+    staticRequestCount: { type: "integer", minimum: 9, maximum: 256 },
     staticRequestLedger: {
       type: "array",
       items: { $ref: "#/$defs/staticRequestEntry" },
-      minItems: 3,
+      minItems: 9,
       maxItems: 256,
-      uniqueItems: true,
     },
     unexpectedConsoleCount: { const: 0 },
     unexpectedPageErrorCount: { const: 0 },
   });
   expect(schema.$defs.navigation.required).toEqual(expect.arrayContaining([
     "historyLedger",
+    "requestOrderContractSha256",
+    "requestOrderLedger",
     "staticLoadGraph",
     "staticRequestLedger",
   ]));
+  expect(schema.$defs.navigation.properties.historyLedger).toMatchObject({
+    minItems: 4,
+    maxItems: 4,
+  });
+  expect(schema.$defs.navigation.properties.historyLedger.prefixItems).toHaveLength(4);
+  expect(schema.$defs.navigation.properties.requestOrderLedger.items).toMatchObject({
+    additionalProperties: false,
+    required: ["kind", "occurrence"],
+  });
   expect(schema.$defs.navigation.additionalProperties).toBe(false);
+  expect(schema.$defs.eventLifecycle.properties.drainedEventCount).toEqual({
+    type: "integer",
+    minimum: 58,
+    maximum: 772,
+  });
   expect(schema.$defs.staticRequestEntry.additionalProperties).toBe(false);
+  expect(schema.$defs.staticRequestEntry.required).toEqual([
+    "assetBytes", "assetSha256", "class", "contentType", "documentKey", "pathSha256",
+  ]);
+  expect(schema.$defs.staticRequestEntry.properties.assetBytes)
+    .toEqual({ type: "integer", minimum: 1, maximum: 128 * 1024 * 1024 });
+  expect(schema.$defs.navigation.properties.staticRequestLedger.uniqueItems).toBeUndefined();
   expect(schema.$defs.staticLoadGraph.additionalProperties).toBe(false);
+  expect(schema.$defs.staticLoadGraph.properties.cssMediaReferenceLedger).toMatchObject({
+    type: "array",
+    minItems: 8,
+    maxItems: 8,
+    uniqueItems: true,
+  });
+  expect(schema.$defs.staticLoadGraph.properties.inventoryLedger.items.properties.extension.enum)
+    .toEqual(["css", "eot", "ico", "js", "png", "svg", "ttf", "woff", "woff2"]);
   expect(schema.$defs.staticLoadGraph.properties.declaredPathLedger).toMatchObject({
     type: "array",
     minItems: 1,
     maxItems: 256,
     uniqueItems: true,
   });
+  expect(schema.$defs.staticLoadGraph.properties.documentLoadLedger)
+    .toMatchObject({ type: "array", minItems: 3, maxItems: 3 });
+  expect(schema.$defs.staticLoadGraph.properties.routeExpectedChunkRequestLedger)
+    .toBeUndefined();
   expect(schema.$defs.runtimeBinding.properties.composeRuntimeContractSha256)
     .toEqual({ $ref: "#/$defs/sha256" });
   expect(schema.$defs.runtimeBinding.properties.ownedInputReceiptSha256)
@@ -1016,8 +1719,9 @@ test("keeps the schema write-once sidecar-only and free of comparison projection
     .toEqual({
       pattern: "^clean-pay-browser-journey-provider-proof-candidate-[a-f0-9]{12}$",
     });
-  expect(scriptSource).toContain('flag: "wx"');
-  expect(scriptSource).toContain('mode: 0o600');
+  expect(scriptSource).toContain("await writeJourneySanitizedOutput(outputPath, bytes)");
+  expect(stackOrchestrator).toContain('fileSystem.open(target, "wx", 0o600)');
+  expect(stackOrchestrator).toContain("await enforceJourneySyntheticPrivateMode(target, 0o600");
   expect(scriptSource).toContain('redirect: "error"');
   expect(scriptSource).toContain('"container", "inspect"');
   expect(scriptSource).toContain('"image", "inspect"');
@@ -1177,40 +1881,103 @@ function stackReport(role: "baseline" | "candidate", providerOverlap: ReturnType
   const journeyContractSha256 = baseline ? "8".repeat(64) : "9".repeat(64);
   const historyLedger = [
     { kind: "checkpoint", location: "app-profile" },
-    { kind: "frame-navigation", location: "app-cabinet" },
+    {
+      frameRelation: "same-main-frame",
+      kind: "document-navigation",
+      loaderRelation: "changed",
+      location: "app-cabinet",
+      navigationType: "Navigation",
+    },
+    {
+      historyLengthRelation: "unchanged",
+      kind: "replaceState",
+      location: "app-cabinet",
+      operationSequence: 1,
+      stateTransition: "unmarked-to-next-app-router",
+      urlRelation: "unchanged",
+    },
+    {
+      frameRelation: "same-main-frame",
+      kind: "same-document-navigation",
+      location: "app-cabinet",
+      navigationType: "historyApi",
+      pairedOperationSequence: 1,
+    },
   ];
-  const staticLedger = [
-    { assetSha256: "1".repeat(64), class: "next-static-js", pathSha256: sha256(staticJavascriptPath) },
-    { assetSha256: "2".repeat(64), class: "next-static-css", pathSha256: sha256(staticStylesheetPath) },
-    { assetSha256: null, class: "next-static-font", pathSha256: sha256(staticFontPath) },
-  ];
+  const staticDocuments = [
+    "app-login-document", "app-profile-document", "app-cabinet-document",
+  ] as const;
+  const staticLedger = staticDocuments.flatMap((documentKey) => ([
+    { assetBytes: 101, assetSha256: "1".repeat(64), class: "next-static-js", contentType: "application/javascript", documentKey, pathSha256: sha256(staticJavascriptPath) },
+    { assetBytes: 102, assetSha256: "2".repeat(64), class: "next-static-css", contentType: "text/css", documentKey, pathSha256: sha256(staticStylesheetPath) },
+    { assetBytes: 103, assetSha256: "3".repeat(64), class: "next-static-font", contentType: "font/woff2", documentKey, pathSha256: sha256(staticFontPath) },
+    { assetBytes: 108, assetSha256: "8".repeat(64), class: "next-static-font", contentType: "font/woff2", documentKey, pathSha256: sha256(staticSecondFontPath) },
+  ]));
   const staticAssetAttestationSha256 = baseline ? "b".repeat(64) : "c".repeat(64);
   const inventoryLedger = [
-    { assetSha256: "1".repeat(64), pathSha256: sha256(staticJavascriptPath) },
-    { assetSha256: "2".repeat(64), pathSha256: sha256(staticStylesheetPath) },
+    { assetBytes: 101, assetSha256: "1".repeat(64), extension: "js", pathSha256: sha256(staticJavascriptPath) },
+    { assetBytes: 102, assetSha256: "2".repeat(64), extension: "css", pathSha256: sha256(staticStylesheetPath) },
+    { assetBytes: 103, assetSha256: "3".repeat(64), extension: "woff2", pathSha256: sha256(staticFontPath) },
+    { assetBytes: 108, assetSha256: "8".repeat(64), extension: "woff2", pathSha256: sha256(staticSecondFontPath) },
+    { assetBytes: 104, assetSha256: "4".repeat(64), extension: "svg", pathSha256: sha256(staticImagePath) },
+    { assetBytes: 105, assetSha256: "5".repeat(64), extension: "eot", pathSha256: sha256(staticEotPath) },
+    { assetBytes: 106, assetSha256: "6".repeat(64), extension: "ttf", pathSha256: sha256(staticTtfPath) },
+    { assetBytes: 107, assetSha256: "a".repeat(64), extension: "woff", pathSha256: sha256(staticWoffPath) },
   ].sort((left, right) => left.pathSha256.localeCompare(right.pathSha256));
   const routeDeclaredPathSha256s = [
     sha256(staticJavascriptPath), sha256(staticStylesheetPath),
-  ];
+  ].sort();
+  const documentLoadLedger = staticDocuments.map((documentKey) => ({
+    documentKey,
+    expectedChunkPathSha256s: [...routeDeclaredPathSha256s].sort(),
+    expectedMediaPathSha256s: [
+      sha256(staticFontPath), sha256(staticSecondFontPath),
+    ].sort(),
+    routeDeclaredPathSha256s: [...routeDeclaredPathSha256s].sort(),
+  }));
   const staticLoadGraph = {
     assetAttestationSha256: staticAssetAttestationSha256,
     assetInventorySha256: "7".repeat(64),
+    cssMediaReferenceLedger: [
+      { occurrence: 1, sourcePathSha256: sha256(staticStylesheetPath), targetPathSha256: sha256(staticEotPath) },
+      { occurrence: 2, sourcePathSha256: sha256(staticStylesheetPath), targetPathSha256: sha256(staticEotPath) },
+      { occurrence: 3, sourcePathSha256: sha256(staticStylesheetPath), targetPathSha256: sha256(staticFontPath) },
+      { occurrence: 4, sourcePathSha256: sha256(staticStylesheetPath), targetPathSha256: sha256(staticFontPath) },
+      { occurrence: 5, sourcePathSha256: sha256(staticStylesheetPath), targetPathSha256: sha256(staticSecondFontPath) },
+      { occurrence: 6, sourcePathSha256: sha256(staticStylesheetPath), targetPathSha256: sha256(staticTtfPath) },
+      { occurrence: 7, sourcePathSha256: sha256(staticStylesheetPath), targetPathSha256: sha256(staticWoffPath) },
+      { occurrence: 8, sourcePathSha256: sha256(staticStylesheetPath), targetPathSha256: sha256(staticImagePath) },
+    ],
     declaredPathLedger: [
+      { class: "media", pathSha256: sha256(staticEotPath) },
       { class: "media", pathSha256: sha256(staticFontPath) },
+      { class: "media", pathSha256: sha256(staticSecondFontPath) },
+      { class: "media", pathSha256: sha256(staticImagePath) },
+      { class: "media", pathSha256: sha256(staticTtfPath) },
+      { class: "media", pathSha256: sha256(staticWoffPath) },
       { class: "chunk", pathSha256: sha256(staticJavascriptPath) },
       { class: "chunk", pathSha256: sha256(staticStylesheetPath) },
     ].sort((left, right) => left.pathSha256.localeCompare(right.pathSha256)),
     declaredPathSha256s: [
-      sha256(staticFontPath), sha256(staticJavascriptPath), sha256(staticStylesheetPath),
-    ],
+      sha256(staticEotPath), sha256(staticFontPath), sha256(staticSecondFontPath), sha256(staticImagePath),
+      sha256(staticTtfPath), sha256(staticWoffPath),
+      sha256(staticJavascriptPath), sha256(staticStylesheetPath),
+    ].sort(),
+    documentLoadLedger,
     expectedChunkPathSha256s: [sha256(staticJavascriptPath), sha256(staticStylesheetPath)],
     inventoryLedger,
     inventoryLedgerContractSha256: sha256(JSON.stringify(inventoryLedger)),
-    routeDeclaredPathContractSha256: sha256(JSON.stringify(routeDeclaredPathSha256s)),
+    routeDeclaredPathContractSha256: sha256(JSON.stringify(documentLoadLedger.map((entry) => ({
+      documentKey: entry.documentKey,
+      routeDeclaredPathSha256s: entry.routeDeclaredPathSha256s,
+    })))),
     routeDeclaredPathSha256s,
   };
   const semanticRequestLedger = [
     semantic("app-login-document", 200, "text/html"),
+    semantic("turnstile-widget-script", 200, "application/javascript"),
+    semantic("chatwoot-sdk-script", 200, "application/javascript"),
+    semantic("chatwoot-widget-frame", 200, "text/html"),
     semantic("app-telegram-start", 307, "application/octet-stream"),
     semantic(
       "telegram-oidc-authorize",
@@ -1231,14 +1998,21 @@ function stackReport(role: "baseline" | "candidate", providerOverlap: ReturnType
       "app-telegram-callback:307->app-profile-document",
     ),
     semantic("app-cabinet-document", 200, "text/html"),
-    semantic("turnstile-widget-script", 200, "application/javascript"),
-    semantic("chatwoot-sdk-script", 200, "application/javascript"),
-    semantic("chatwoot-widget-frame", 200, "text/html"),
+  ];
+  const requestOrderLedger = [
+    { kind: "semantic", occurrence: 1 },
+    ...[1, 2, 3, 4].map((occurrence) => ({ kind: "static", occurrence })),
+    ...[2, 3, 4, 5, 6, 7, 8].map((occurrence) => ({ kind: "semantic", occurrence })),
+    ...[5, 6, 7, 8].map((occurrence) => ({ kind: "static", occurrence })),
+    { kind: "semantic", occurrence: 9 },
+    ...[9, 10, 11, 12].map((occurrence) => ({ kind: "static", occurrence })),
   ];
   const requestContractSha256 = sha256(JSON.stringify({
     version: 1,
     semanticLedger: semanticRequestLedger,
-    staticClasses: ["next-static-css", "next-static-font", "next-static-js"],
+    staticClasses: [
+      "next-static-css", "next-static-font", "next-static-js",
+    ],
   }));
   const fixtureMountContractSha256 = "e".repeat(64);
   const fixtureBindingContractSha256 = sha256(JSON.stringify({
@@ -1347,7 +2121,7 @@ function stackReport(role: "baseline" | "candidate", providerOverlap: ReturnType
     },
     navigation: {
       eventLifecycle: {
-        drainedEventCount: 24,
+        drainedEventCount: 67,
         lateEventCount: 0,
         status: "sealed-clean",
       },
@@ -1355,6 +2129,8 @@ function stackReport(role: "baseline" | "candidate", providerOverlap: ReturnType
       headingVisible: true,
       requestCount: semanticRequestLedger.length + staticLedger.length,
       requestContractSha256,
+      requestOrderContractSha256: sha256(JSON.stringify(requestOrderLedger)),
+      requestOrderLedger,
       semanticRequestLedger,
       historyContractSha256: sha256(JSON.stringify(historyLedger)),
       historyCount: historyLedger.length,
@@ -1421,6 +2197,18 @@ function semantic(
     responseContentType,
     responseStatus,
   };
+}
+
+function staticInventoryLedgerFor(
+  inventoryByPath: Record<string, string>,
+  metadataByPath: Record<string, { assetBytes: number; extension: string }>,
+) {
+  return Object.entries(inventoryByPath).map(([servedPath, assetSha256]) => ({
+    assetBytes: metadataByPath[servedPath].assetBytes,
+    assetSha256,
+    extension: metadataByPath[servedPath].extension,
+    pathSha256: sha256(servedPath),
+  })).sort((left, right) => left.pathSha256.localeCompare(right.pathSha256));
 }
 
 function dualProof(
@@ -1591,15 +2379,26 @@ function browserClassification(
     isMainFrame: boolean;
   }> = {},
   cabinetDocumentAllowed = false,
-) {
-  return classifyProviderOverlapBrowserRequest({
+  assetContract = staticAssetContract,
+): ProviderBrowserClassification {
+  const classification: unknown = classifyProviderOverlapBrowserRequest({
     url,
     method: overrides.method ?? "GET",
     resourceType: overrides.resourceType ?? "fetch",
     isNavigation: overrides.isNavigation ?? false,
     isMainFrame: overrides.isMainFrame ?? false,
-  }, { cabinetDocumentAllowed, staticAssetContract });
+  }, { cabinetDocumentAllowed, staticAssetContract: assetContract });
+  return classification as ProviderBrowserClassification;
 }
+
+type ProviderBrowserClassification = Readonly<{
+  disposition: string;
+  expectedStatuses: readonly number[];
+  key: string;
+  navigation: boolean;
+  staticAssetSha256: string | null;
+  staticPath: string | null;
+}>;
 
 type MockProviderRole = "baseline" | "candidate";
 

@@ -24,6 +24,9 @@ const ATTESTATION_SCHEMA_VERSION = 1;
 const MAX_ARCHIVE_BYTES = 2 * 1024 * 1024 * 1024;
 const MAX_JSON_BYTES = 4 * 1024 * 1024;
 const MAX_MANIFEST_BYTES = 32 * 1024 * 1024;
+const MAX_STATIC_ASSET_BYTES = 128 * 1024 * 1024;
+const MAX_STATIC_ASSET_COUNT = 4_096;
+const MAX_STATIC_ASSET_TOTAL_BYTES = 1024 * 1024 * 1024;
 const MAX_TAR_ENTRIES = 250_000;
 const MAX_TAR_TRAILER_BYTES = 1024 * 1024;
 const TAR_BLOCK_BYTES = 512;
@@ -32,6 +35,7 @@ const SHA256_DIGEST = /^sha256:[a-f0-9]{64}$/;
 const REVISION = /^[a-f0-9]{40}$/;
 const PLATFORM = /^(?<os>linux)\/(?<architecture>amd64|arm64)$/;
 const STATIC_CHUNK_PREFIX = "app/.next/static/chunks/";
+const STATIC_MEDIA_PREFIX = "app/.next/static/media/";
 const NEXT_PREFIX = "app/.next/";
 const CLIENT_REFERENCE_SUFFIX = "_client-reference-manifest.js";
 const CLIENT_REFERENCE_KEYS = [
@@ -495,6 +499,9 @@ async function collectLayerOperations(stream, label) {
       if (relevant === "manifest" && contentSize > MAX_MANIFEST_BYTES) {
         throw new Error(`${label} Next.js manifest exceeds its bounded size contract.`);
       }
+      if (relevant !== "manifest" && contentSize > MAX_STATIC_ASSET_BYTES) {
+        throw new Error(`${label} Next.js static asset exceeds its bounded size contract.`);
+      }
       const hash = createHash("sha256");
       const buffers = relevant === "manifest" ? [] : undefined;
       await reader.consume(contentSize, (chunk) => {
@@ -597,14 +604,22 @@ function applyLayerOperations(files, operations) {
 
 function buildNextInventory(files) {
   const staticChunks = [...files.entries()]
-    .filter(([, details]) => details.kind === "static-chunk")
+    .filter(([, details]) => ["static-chunk", "static-media"].includes(details.kind))
     .map(([file, details]) => ({
       imagePath: `/${file}`,
-      servedPath: `/_next/static/chunks/${file.slice(STATIC_CHUNK_PREFIX.length)}`,
+      servedPath: details.kind === "static-chunk"
+        ? `/_next/static/chunks/${file.slice(STATIC_CHUNK_PREFIX.length)}`
+        : `/_next/static/media/${file.slice(STATIC_MEDIA_PREFIX.length)}`,
       sha256: details.sha256,
       size: details.size,
     }))
     .sort(comparePath("servedPath"));
+  const staticAssetBytes = staticChunks.reduce((total, entry) => total + entry.size, 0);
+  if (staticChunks.length > MAX_STATIC_ASSET_COUNT
+    || !Number.isSafeInteger(staticAssetBytes)
+    || staticAssetBytes > MAX_STATIC_ASSET_TOTAL_BYTES) {
+    throw new Error("Production image static asset inventory exceeds its bounded contract.");
+  }
   const manifests = [...files.entries()]
     .filter(([, details]) => details.kind === "manifest")
     .map(([file, details]) => ({
@@ -779,10 +794,18 @@ function safeManifestKey(value) {
 
 function relevantFileKind(file) {
   if (file.startsWith(STATIC_CHUNK_PREFIX) && file.length > STATIC_CHUNK_PREFIX.length) {
-    if (!/^app\/\.next\/static\/chunks\/[A-Za-z0-9._/-]+$/.test(file) || file.includes("..")) {
-      throw new Error("Production image contains an unsafe Next.js static chunk path.");
+    if (!/^app\/\.next\/static\/chunks\/[A-Za-z0-9._/-]+\.(?:css|js)$/.test(file)
+      || file.includes("..")) {
+      throw new Error("Production image contains an unsafe or unsupported Next.js static chunk path.");
     }
     return "static-chunk";
+  }
+  if (file.startsWith(STATIC_MEDIA_PREFIX) && file.length > STATIC_MEDIA_PREFIX.length) {
+    if (!/^app\/\.next\/static\/media\/[A-Za-z0-9._-]{1,200}\.(?:eot|ico|png|svg|ttf|woff|woff2)$/.test(file)
+      || file.includes("..")) {
+      throw new Error("Production image contains an unsupported Next.js static media path.");
+    }
+    return "static-media";
   }
   if (
     file.startsWith(NEXT_PREFIX)
@@ -900,7 +923,9 @@ function parseTarNumber(bytes, label) {
   return parsed;
 }
 
+/** @returns {{path?: string, size?: string}} */
 function parsePax(bytes, label) {
+  /** @type {{path?: string, size?: string}} */
   const fields = {};
   let offset = 0;
   while (offset < bytes.length) {

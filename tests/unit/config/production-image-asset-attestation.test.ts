@@ -41,6 +41,48 @@ describe("production image static asset attestation", () => {
         sha256: sha256(fixture.javascriptBytes),
         size: fixture.javascriptBytes.length,
       },
+      {
+        imagePath: "/app/.next/static/media/brand.png",
+        servedPath: "/_next/static/media/brand.png",
+        sha256: sha256(fixture.pngBytes),
+        size: fixture.pngBytes.length,
+      },
+      {
+        imagePath: "/app/.next/static/media/favicon.ico",
+        servedPath: "/_next/static/media/favicon.ico",
+        sha256: sha256(fixture.icoBytes),
+        size: fixture.icoBytes.length,
+      },
+      {
+        imagePath: "/app/.next/static/media/inter.woff2",
+        servedPath: "/_next/static/media/inter.woff2",
+        sha256: sha256(fixture.fontBytes),
+        size: fixture.fontBytes.length,
+      },
+      {
+        imagePath: "/app/.next/static/media/mark.svg",
+        servedPath: "/_next/static/media/mark.svg",
+        sha256: sha256(fixture.svgBytes),
+        size: fixture.svgBytes.length,
+      },
+      {
+        imagePath: "/app/.next/static/media/primeicons.eot",
+        servedPath: "/_next/static/media/primeicons.eot",
+        sha256: sha256(fixture.eotBytes),
+        size: fixture.eotBytes.length,
+      },
+      {
+        imagePath: "/app/.next/static/media/primeicons.ttf",
+        servedPath: "/_next/static/media/primeicons.ttf",
+        sha256: sha256(fixture.ttfBytes),
+        size: fixture.ttfBytes.length,
+      },
+      {
+        imagePath: "/app/.next/static/media/primeicons.woff",
+        servedPath: "/_next/static/media/primeicons.woff",
+        sha256: sha256(fixture.woffBytes),
+        size: fixture.woffBytes.length,
+      },
     ]);
     const clientReference = result.inventory.clientReferences.find(
       (entry: { route: string }) => entry.route === "/cabinet/page",
@@ -65,7 +107,7 @@ describe("production image static asset attestation", () => {
       bodyDigestAlgorithm: "sha256",
       bodyDigestInput: "decoded response body bytes",
       key: "servedPath",
-      staticChunkCount: 2,
+      staticChunkCount: 9,
     });
     expect(result.attestationSha256).toMatch(/^[a-f0-9]{64}$/);
   });
@@ -127,19 +169,62 @@ describe("production image static asset attestation", () => {
     await expect(attestProductionImageArchive(fixture.expected))
       .rejects.toThrow("compressed bytes do not match their descriptor");
   });
+
+  it("rejects an unsupported or nested static media path", async () => {
+    for (const mediaFilename of ["unexpected.txt", "nested/unexpected.woff2"]) {
+      const fixture = await createOciFixture({ mediaFilename });
+      await expect(attestProductionImageArchive(fixture.expected), mediaFilename)
+        .rejects.toThrow("unsupported Next.js static media path");
+    }
+  });
+
+  it("rejects an unsupported static chunk extension", async () => {
+    const fixture = await createOciFixture({ javascriptFilename: "unexpected.map" });
+    await expect(attestProductionImageArchive(fixture.expected))
+      .rejects.toThrow("unsupported Next.js static chunk path");
+  });
+
+  it("keeps a historical CSS/JavaScript-only inventory projection exact", async () => {
+    const fixture = await createOciFixture({ includeMedia: false });
+    const result = await attestProductionImageArchive(fixture.expected);
+    expect(result.inventory.staticChunks).toEqual([
+      {
+        imagePath: "/app/.next/static/chunks/cabinet.css",
+        servedPath: "/_next/static/chunks/cabinet.css",
+        sha256: sha256(fixture.cssBytes),
+        size: fixture.cssBytes.length,
+      },
+      {
+        imagePath: "/app/.next/static/chunks/cabinet.js",
+        servedPath: "/_next/static/chunks/cabinet.js",
+        sha256: sha256(fixture.javascriptBytes),
+        size: fixture.javascriptBytes.length,
+      },
+    ]);
+    expect(result.inventory.staticChunkCount).toBe(2);
+  });
 });
 
 async function createOciFixture(options: {
   corruptLayerDescriptor?: boolean;
   declaredJavascript?: string;
   executablePrefix?: string;
+  includeMedia?: boolean;
   javascriptFilename?: string;
+  mediaFilename?: string;
 } = {}) {
   const root = await mkdtemp(path.join(tmpdir(), "clean-pay-image-asset-attestation-test-"));
   temporaryRoots.push(root);
   const archivePath = path.join(root, "image.oci.tar");
   const javascriptBytes = Buffer.from("self.__cleanPayChunk = 'cabinet';\n", "utf8");
   const cssBytes = Buffer.from(".cabinet{display:block}\n", "utf8");
+  const fontBytes = Buffer.from("synthetic-font-bytes", "utf8");
+  const eotBytes = Buffer.from("synthetic-eot-bytes", "utf8");
+  const icoBytes = Buffer.from("synthetic-ico-bytes", "utf8");
+  const pngBytes = Buffer.from("synthetic-png-bytes", "utf8");
+  const svgBytes = Buffer.from("<svg xmlns=\"http://www.w3.org/2000/svg\"/>\n", "utf8");
+  const ttfBytes = Buffer.from("synthetic-ttf-bytes", "utf8");
+  const woffBytes = Buffer.from("synthetic-woff-bytes", "utf8");
   const javascriptFilename = options.javascriptFilename ?? "cabinet.js";
   const declaredJavascript = options.declaredJavascript ?? javascriptFilename;
   const clientReference = Buffer.from(
@@ -157,6 +242,18 @@ async function createOciFixture(options: {
     ),
     fileEntry("app/.next/static/chunks/cabinet.css", cssBytes),
     fileEntry(`app/.next/static/chunks/${javascriptFilename}`, javascriptBytes),
+    ...(options.includeMedia === false ? [] : [
+      fileEntry("app/.next/static/media/brand.png", pngBytes),
+      fileEntry("app/.next/static/media/favicon.ico", icoBytes),
+      fileEntry("app/.next/static/media/primeicons.eot", eotBytes),
+      fileEntry("app/.next/static/media/inter.woff2", fontBytes),
+      fileEntry("app/.next/static/media/primeicons.woff", woffBytes),
+      fileEntry("app/.next/static/media/primeicons.ttf", ttfBytes),
+      fileEntry("app/.next/static/media/mark.svg", svgBytes),
+    ]),
+    ...(options.mediaFilename
+      ? [fileEntry(`app/.next/static/media/${options.mediaFilename}`, fontBytes)]
+      : []),
   ]);
   const compressedLayer = gzipSync(layerTar, { level: 9 });
   const realLayerDigest = sha256(compressedLayer);
@@ -215,7 +312,14 @@ async function createOciFixture(options: {
   await writeFile(archivePath, archive, { flag: "wx" });
   return {
     cssBytes,
+    eotBytes,
+    fontBytes,
+    icoBytes,
     javascriptBytes,
+    pngBytes,
+    svgBytes,
+    ttfBytes,
+    woffBytes,
     expected: {
       archivePath,
       expectedImageDigest: sourceDescriptor.digest,

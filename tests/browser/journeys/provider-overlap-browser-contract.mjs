@@ -1,9 +1,12 @@
 import { createHash } from "node:crypto";
 
 const maximumRequests = 256;
+const maximumStaticAssetBytes = 128 * 1024 * 1024;
+const maximumStaticAssetTotalBytes = 1024 * 1024 * 1024;
 const sha256Pattern = /^[a-f0-9]{64}$/;
 const opaquePattern = /^[A-Za-z0-9._~-]{1,256}$/;
-const nextStaticPattern = /^\/_next\/static\/(?:chunks(?:\/[A-Za-z0-9._-]{1,100}){0,5}|media)\/[A-Za-z0-9._-]{1,200}\.(?:css|js|woff2|png|svg)$/;
+const nextStaticPattern = /^\/_next\/static\/(?:chunks(?:\/[A-Za-z0-9._-]{1,100}){0,5}\/[A-Za-z0-9._-]{1,200}\.(?:css|js)|media\/[A-Za-z0-9._-]{1,200}\.(?:eot|ico|png|svg|ttf|woff|woff2))$/;
+const nextStaticMediaPattern = /^\/_next\/static\/media\/[A-Za-z0-9._-]{1,200}\.(?:eot|ico|png|svg|ttf|woff|woff2)$/;
 const staticKeys = new Set([
   "next-static-css",
   "next-static-font",
@@ -35,9 +38,77 @@ const exactRedirectEdges = new Set([
   "app-login-rsc:307->app-login-rsc",
 ]);
 
-const exactStaticRoutes = Object.freeze(["/cabinet/page", "/login/page", "/profile/page"]);
+const exactStaticDocuments = Object.freeze([
+  Object.freeze({ documentKey: "app-login-document", route: "/login/page" }),
+  Object.freeze({ documentKey: "app-profile-document", route: "/profile/page" }),
+  Object.freeze({ documentKey: "app-cabinet-document", route: "/cabinet/page" }),
+]);
+const exactStaticDocumentKeys = new Set(exactStaticDocuments.map(({ documentKey }) => documentKey));
+const exactCssMediaExtensionCounts = Object.freeze({
+  eot: 2,
+  svg: 1,
+  ttf: 1,
+  woff: 1,
+  woff2: 3,
+});
 
-export function createProviderOverlapEventSeal(maximumEvents = 512) {
+// This function is serialized by Playwright into every new document. Keep it
+// self-contained: imported module bindings are not available in page context.
+export function installProviderOverlapHistoryInstrumentation() {
+  const pending = new Set();
+  let historyBindingRejected = false;
+  let operationSequence = 0;
+  const isNextAppRouterState = (value) => Boolean(
+    value && typeof value === "object" && value.__NA === true
+    && Object.prototype.hasOwnProperty.call(value, "__PRIVATE_NEXTJS_INTERNALS_TREE"),
+  );
+  const emit = (record) => {
+    const binding = globalThis.__cleanPayProviderHistory(record);
+    pending.add(binding);
+    void binding.then(
+      () => pending.delete(binding),
+      () => {
+        historyBindingRejected = true;
+        pending.delete(binding);
+      },
+    );
+  };
+  globalThis.__cleanPayProviderHistoryDrain = async () => {
+    const results = await Promise.allSettled([...pending]);
+    if (historyBindingRejected || results.some(({ status }) => status === "rejected")) {
+      throw new Error("Synthetic history binding rejected an event.");
+    }
+  };
+  for (const kind of ["pushState", "replaceState"]) {
+    const original = history[kind].bind(history);
+    history[kind] = (...args) => {
+      const beforeUrl = location.href;
+      const beforeHistoryLength = history.length;
+      const beforeNextAppRouterState = isNextAppRouterState(history.state);
+      const argumentUrl = args[2] === undefined || args[2] === null
+        ? beforeUrl
+        : new URL(String(args[2]), beforeUrl).href;
+      const result = original(...args);
+      operationSequence += 1;
+      emit({
+        afterNextAppRouterState: isNextAppRouterState(history.state),
+        argumentUrl,
+        beforeHistoryLength,
+        beforeNextAppRouterState,
+        beforeUrl,
+        historyLength: history.length,
+        kind,
+        operationSequence,
+        url: location.href,
+      });
+      return result;
+    };
+  }
+  addEventListener("hashchange", () => emit({ kind: "hashchange", url: location.href }));
+  addEventListener("popstate", () => emit({ kind: "popstate", url: location.href }));
+}
+
+export function createProviderOverlapEventSeal(maximumEvents = 1_024) {
   if (!Number.isSafeInteger(maximumEvents) || maximumEvents < 32 || maximumEvents > 4_096) {
     fail("Browser event seal bound is invalid.");
   }
@@ -176,46 +247,77 @@ export function createProviderOverlapStaticAssetContract(attestation) {
     fail("Production image static asset attestation is invalid.");
   }
   const inventoryByPath = {};
+  const inventoryMetadataByPath = {};
+  let inventoryBytes = 0;
   for (const asset of attestation.inventory.staticChunks) {
     if (!asset || !nextStaticPattern.test(asset.servedPath ?? "")
-      || !asset.servedPath.startsWith("/_next/static/chunks/")
       || !sha256Pattern.test(asset.sha256 ?? "")
+      || !Number.isSafeInteger(asset.size) || asset.size < 1
+      || asset.size > maximumStaticAssetBytes
       || Object.hasOwn(inventoryByPath, asset.servedPath)) {
       fail("Production image static asset inventory is invalid.");
     }
+    inventoryBytes += asset.size;
+    if (!Number.isSafeInteger(inventoryBytes)
+      || inventoryBytes > maximumStaticAssetTotalBytes) {
+      fail("Production image static asset inventory exceeds its byte bound.");
+    }
     inventoryByPath[asset.servedPath] = asset.sha256;
+    inventoryMetadataByPath[asset.servedPath] = Object.freeze({
+      assetBytes: asset.size,
+      extension: staticExtension(asset.servedPath),
+    });
   }
   const routeDeclaredPaths = new Set();
-  for (const route of exactStaticRoutes) {
+  const documentRouteContracts = [];
+  for (const { documentKey, route } of exactStaticDocuments) {
     const matches = attestation.inventory.clientReferences.filter((entry) => entry.route === route);
     if (matches.length !== 1 || !Array.isArray(matches[0].declaredStaticChunks)
       || matches[0].declaredStaticChunks.length < 1 || matches[0].declaredStaticChunks.length > 64) {
       fail("Production image route load graph is incomplete.");
     }
-    for (const servedPath of matches[0].declaredStaticChunks) {
+    const documentRouteDeclaredPaths = [...matches[0].declaredStaticChunks].sort();
+    if (new Set(documentRouteDeclaredPaths).size !== documentRouteDeclaredPaths.length) {
+      fail("Production image route load graph contains duplicate chunks.");
+    }
+    for (const servedPath of documentRouteDeclaredPaths) {
       if (!Object.hasOwn(inventoryByPath, servedPath)) {
         fail("Production image route load graph references an absent static asset.");
       }
+      if (!servedPath.startsWith("/_next/static/chunks/")) {
+        fail("Production image route load graph contains a non-chunk asset.");
+      }
       routeDeclaredPaths.add(servedPath);
     }
+    documentRouteContracts.push(Object.freeze({
+      documentKey,
+      routeDeclaredPaths: Object.freeze(documentRouteDeclaredPaths),
+    }));
   }
   const inventoryLedger = Object.entries(inventoryByPath)
     .map(([servedPath, assetSha256]) => ({
+      assetBytes: inventoryMetadataByPath[servedPath].assetBytes,
       assetSha256,
+      extension: inventoryMetadataByPath[servedPath].extension,
       pathSha256: sha256(servedPath),
     }))
     .sort((left, right) => left.pathSha256.localeCompare(right.pathSha256));
-  const routeDeclaredPathSha256s = [...routeDeclaredPaths].sort().map(sha256);
+  const documentRouteLedger = documentRouteContracts.map(({ documentKey, routeDeclaredPaths }) => ({
+    documentKey,
+    routeDeclaredPathSha256s: routeDeclaredPaths.map(sha256).sort(),
+  }));
   return Object.freeze({
     attestationSha256: attestation.attestationSha256,
     configDigest: attestation.source.configDigest,
+    documentRouteContracts: Object.freeze(documentRouteContracts),
     imageDigest: attestation.source.imageDigest,
     inventoryByPath: Object.freeze({ ...inventoryByPath }),
+    inventoryMetadataByPath: Object.freeze({ ...inventoryMetadataByPath }),
     inventoryLedgerContractSha256: sha256(JSON.stringify(inventoryLedger)),
     inventorySha256: attestation.inventory.inventorySha256,
     manifestDigest: attestation.source.manifestDigest,
     routeDeclaredPaths: Object.freeze([...routeDeclaredPaths].sort()),
-    routeDeclaredPathContractSha256: sha256(JSON.stringify(routeDeclaredPathSha256s)),
+    routeDeclaredPathContractSha256: sha256(JSON.stringify(documentRouteLedger)),
   });
 }
 
@@ -257,6 +359,114 @@ export function classifyProviderOverlapBrowserRequest(input, state) {
     staticAssetSha256: descriptor.staticAssetSha256,
     staticPath: descriptor.staticPath,
   });
+}
+
+export function attestProviderOverlapStaticResponse(input, staticAssetContract) {
+  exactKeys(input, [
+    "body", "classification", "responseContentType", "responseStatus",
+  ], "static response observation");
+  assertStaticAssetContract(staticAssetContract);
+  const classification = input.classification;
+  if (!classification || !staticKeys.has(classification.key)
+    || !nextStaticPattern.test(classification.staticPath ?? "")
+    || !(input.body instanceof Uint8Array)
+    || input.responseStatus !== 200) {
+    fail("Static response observation is incomplete.");
+  }
+  const metadata = staticAssetContract.inventoryMetadataByPath[classification.staticPath];
+  const expectedSha256 = staticAssetContract.inventoryByPath[classification.staticPath];
+  if (!metadata || !sha256Pattern.test(expectedSha256 ?? "")
+    || input.body.byteLength < 1 || input.body.byteLength > maximumStaticAssetBytes
+    || input.body.byteLength !== metadata.assetBytes) {
+    fail("Static response byte length differs from its attested image asset.");
+  }
+  const observedSha256 = sha256Bytes(input.body);
+  if (observedSha256 !== expectedSha256) {
+    fail("Static response bytes differ from their attested image asset.");
+  }
+  if (!expectedStaticContentTypes(metadata.extension).includes(input.responseContentType)) {
+    fail("Static response content type differs from its exact asset extension contract.");
+  }
+  return Object.freeze({
+    staticResponseBytes: input.body.byteLength,
+    staticResponseSha256: observedSha256,
+  });
+}
+
+export async function readProviderOverlapStaticResponseEvidence(input, staticAssetContract) {
+  exactKeys(input, [
+    "classification", "response", "responseContentType",
+  ], "static response reader");
+  const response = input.response;
+  if (!response || typeof response.finished !== "function"
+    || typeof response.body !== "function" || typeof response.status !== "function") {
+    fail("Attested static browser request has no readable response.");
+  }
+  const responseFailure = await boundedLifecycleOperation(
+    response.finished(),
+    5_000,
+    "static response completion",
+  );
+  if (responseFailure !== null) {
+    fail("Attested static browser response did not finish cleanly.");
+  }
+  const body = await boundedLifecycleOperation(
+    response.body(),
+    5_000,
+    "attested static response body",
+  );
+  return Object.freeze({
+    body,
+    observation: attestProviderOverlapStaticResponse({
+      body,
+      classification: input.classification,
+      responseContentType: input.responseContentType,
+      responseStatus: response.status(),
+    }, staticAssetContract),
+  });
+}
+
+export function extractProviderOverlapCssMediaReferences(
+  body,
+  sourcePath,
+  staticAssetContract,
+) {
+  assertStaticAssetContract(staticAssetContract);
+  if (!(body instanceof Uint8Array)
+    || body.byteLength < 1 || body.byteLength > maximumStaticAssetBytes
+    || !/^\/_next\/static\/chunks(?:\/[A-Za-z0-9._-]{1,100}){0,5}\/[A-Za-z0-9._-]{1,200}\.css$/.test(
+      sourcePath ?? "",
+    )) {
+    fail("Static CSS declaration source is invalid.");
+  }
+  let source;
+  try {
+    source = new TextDecoder("utf-8", { fatal: true }).decode(body);
+  } catch {
+    fail("Static CSS response is not valid UTF-8.");
+  }
+  const references = [];
+  const expression = /url\(\s*(?:(['"])([^'"()]*)\1|([^'"()\s][^()]*?))\s*\)/g;
+  const declaredUrlCount = [...source.matchAll(/url\s*\(/gi)].length;
+  let match;
+  while ((match = expression.exec(source)) !== null) {
+    if (references.length >= maximumRequests) fail("Static CSS reference count exceeds its bound.");
+    const raw = (match[2] ?? match[3] ?? "").trim();
+    if (!/^(?:\.\.\/){1,6}media\/[A-Za-z0-9._-]{1,200}\.(?:eot|ico|png|svg|ttf|woff|woff2)$/.test(raw)) {
+      fail("Static CSS contains a noncanonical, external, or unsafe url() reference.");
+    }
+    const resolved = new URL(raw, `https://pay.ci.clean-pay.dev${sourcePath}`);
+    if (resolved.origin !== "https://pay.ci.clean-pay.dev"
+      || resolved.search || resolved.hash || !nextStaticMediaPattern.test(resolved.pathname)
+      || !Object.hasOwn(staticAssetContract.inventoryByPath, resolved.pathname)) {
+      fail("Static CSS media reference escaped its attested image inventory.");
+    }
+    references.push(Object.freeze({ sourcePath, targetPath: resolved.pathname }));
+  }
+  if (references.length !== declaredUrlCount) {
+    fail("Static CSS url() declarations were not parsed exactly.");
+  }
+  return Object.freeze(references);
 }
 
 export function assertProviderOverlapRedirect({ from, location, status, to }) {
@@ -321,7 +531,7 @@ export function normalizeProviderOverlapSemanticEntry(entry, label = "semantic b
 }
 
 export function validateProviderOverlapSemanticLedger(value, label = "semantic browser ledger") {
-  if (!Array.isArray(value) || value.length < 6 || value.length > maximumRequests) {
+  if (!Array.isArray(value) || value.length < 9 || value.length > maximumRequests) {
     fail(`${label} is outside its bounded contract.`);
   }
   const ledger = value.map((entry, index) => normalizeProviderOverlapSemanticEntry(
@@ -368,31 +578,103 @@ export function validateProviderOverlapSemanticLedger(value, label = "semantic b
   return Object.freeze(ledger);
 }
 
-export function finalizeProviderOverlapHistoryContract(records) {
-  if (!Array.isArray(records) || records.length !== 2) {
+export function finalizeProviderOverlapHistoryContract(records, finalFrame) {
+  if (!Array.isArray(records) || records.length !== 4) {
     fail("Browser history ledger is outside its bounded contract.");
   }
-  const allowedKinds = new Set([
-    "checkpoint", "frame-navigation", "popstate", "pushState", "replaceState",
+  exactKeys(finalFrame, ["frameId", "loaderId", "url"], "final history frame");
+  const [checkpoint, documentNavigation, ...deliveryPair] = records;
+  exactKeys(
+    checkpoint,
+    ["frameId", "historyLength", "kind", "loaderId", "url"],
+    "history checkpoint",
+  );
+  exactKeys(
+    documentNavigation,
+    ["frameId", "kind", "loaderId", "navigationType", "url"],
+    "history document navigation",
+  );
+  if (checkpoint.kind !== "checkpoint"
+    || documentNavigation.kind !== "document-navigation"
+    || exactHistoryLocation(checkpoint.url) !== "app-profile"
+    || exactHistoryLocation(documentNavigation.url) !== "app-cabinet"
+    || documentNavigation.navigationType !== "Navigation"
+    || !exactCdpIdentity(checkpoint.frameId) || !exactCdpIdentity(checkpoint.loaderId)
+    || !exactCdpIdentity(documentNavigation.frameId)
+    || !exactCdpIdentity(documentNavigation.loaderId)
+    || checkpoint.frameId !== documentNavigation.frameId
+    || checkpoint.loaderId === documentNavigation.loaderId
+    || !Number.isSafeInteger(checkpoint.historyLength)
+    || checkpoint.historyLength < 1 || checkpoint.historyLength > 128) {
+    fail("Browser document history transition is invalid.");
+  }
+  const replaceState = deliveryPair.find(({ kind }) => kind === "replaceState");
+  const sameDocument = deliveryPair.find(({ kind }) => kind === "same-document-navigation");
+  if (!replaceState || !sameDocument || new Set(deliveryPair.map(({ kind }) => kind)).size !== 2) {
+    fail("Browser history hydration delivery pair is invalid.");
+  }
+  exactKeys(replaceState, [
+    "afterNextAppRouterState", "argumentUrl", "beforeHistoryLength",
+    "beforeNextAppRouterState", "beforeUrl", "historyLength", "kind",
+    "operationSequence", "url",
+  ], "history replaceState operation");
+  exactKeys(sameDocument, [
+    "frameId", "kind", "navigationType", "url",
+  ], "same-document history navigation");
+  if (exactHistoryLocation(replaceState.beforeUrl) !== "app-cabinet"
+    || exactHistoryLocation(replaceState.url) !== "app-cabinet"
+    || exactHistoryLocation(replaceState.argumentUrl) !== "app-cabinet"
+    || replaceState.beforeUrl !== replaceState.url
+    || replaceState.argumentUrl !== replaceState.url
+    || replaceState.operationSequence !== 1
+    || !Number.isSafeInteger(replaceState.beforeHistoryLength)
+    || replaceState.beforeHistoryLength < 1 || replaceState.beforeHistoryLength > 128
+    || replaceState.beforeHistoryLength !== checkpoint.historyLength + 1
+    || replaceState.historyLength !== replaceState.beforeHistoryLength
+    || replaceState.beforeNextAppRouterState !== false
+    || replaceState.afterNextAppRouterState !== true
+    || exactHistoryLocation(sameDocument.url) !== "app-cabinet"
+    || sameDocument.url !== replaceState.url
+    || sameDocument.frameId !== checkpoint.frameId
+    || sameDocument.navigationType !== "historyApi") {
+    fail("Browser Next hydration history transition is invalid.");
+  }
+  if (!exactCdpIdentity(finalFrame.frameId) || !exactCdpIdentity(finalFrame.loaderId)
+    || exactHistoryLocation(finalFrame.url) !== "app-cabinet"
+    || finalFrame.frameId !== checkpoint.frameId
+    || finalFrame.loaderId !== documentNavigation.loaderId
+    || finalFrame.url !== documentNavigation.url) {
+    fail("Final browser frame tree differs from the exact cabinet document transition.");
+  }
+  const historyLedger = Object.freeze([
+    Object.freeze({ kind: "checkpoint", location: "app-profile" }),
+    Object.freeze({
+      frameRelation: "same-main-frame",
+      kind: "document-navigation",
+      loaderRelation: "changed",
+      location: "app-cabinet",
+      navigationType: "Navigation",
+    }),
+    Object.freeze({
+      historyLengthRelation: "unchanged",
+      kind: "replaceState",
+      location: "app-cabinet",
+      operationSequence: 1,
+      stateTransition: "unmarked-to-next-app-router",
+      urlRelation: "unchanged",
+    }),
+    Object.freeze({
+      frameRelation: "same-main-frame",
+      kind: "same-document-navigation",
+      location: "app-cabinet",
+      navigationType: "historyApi",
+      pairedOperationSequence: 1,
+    }),
   ]);
-  const historyLedger = records.map((record, index) => {
-    exactKeys(record, ["kind", "url"], `history record ${index}`);
-    if (!allowedKinds.has(record.kind)) fail("Browser history operation kind is invalid.");
-    const location = exactHistoryLocation(record.url);
-    if (["popstate", "pushState", "replaceState"].includes(record.kind)
-        && !["app-login", "app-profile", "app-cabinet"].includes(location)) {
-      fail("Browser history API operation is outside the exact application flow.");
-    }
-    return Object.freeze({ kind: record.kind, location });
-  });
-  deepEqual(historyLedger, [
-    { kind: "checkpoint", location: "app-profile" },
-    { kind: "frame-navigation", location: "app-cabinet" },
-  ], "exact profile-to-cabinet browser history transition");
   return Object.freeze({
     historyContractSha256: sha256(JSON.stringify(historyLedger)),
     historyCount: historyLedger.length,
-    historyLedger: Object.freeze(historyLedger),
+    historyLedger,
   });
 }
 
@@ -400,11 +682,28 @@ export function finalizeProviderOverlapBrowserContract(records, loadGraph) {
   if (!Array.isArray(records) || records.length === 0 || records.length > maximumRequests) {
     fail("Browser request ledger is outside its bounded contract.");
   }
-  exactKeys(loadGraph, ["responseDeclaredStaticPaths", "staticAssetContract"], "static load graph");
+  exactKeys(loadGraph, [
+    "cssMediaReferences", "responseDeclarationsByDocument", "staticAssetContract",
+  ], "static load graph");
   assertStaticAssetContract(loadGraph.staticAssetContract);
-  if (!Array.isArray(loadGraph.responseDeclaredStaticPaths)
-    || loadGraph.responseDeclaredStaticPaths.length > maximumRequests) {
+  if (!Array.isArray(loadGraph.responseDeclarationsByDocument)
+    || loadGraph.responseDeclarationsByDocument.length !== exactStaticDocuments.length
+    || !Array.isArray(loadGraph.cssMediaReferences)
+    || loadGraph.cssMediaReferences.length > maximumRequests) {
     fail("Static response declaration graph is outside its bounded contract.");
+  }
+  const responseDeclarationsByDocument = new Map();
+  for (const [index, entry] of loadGraph.responseDeclarationsByDocument.entries()) {
+    exactKeys(entry, ["documentKey", "paths"], `static document declaration ${index}`);
+    const expectedDocumentKey = exactStaticDocuments[index].documentKey;
+    if (entry.documentKey !== expectedDocumentKey || !Array.isArray(entry.paths)
+      || entry.paths.length > maximumRequests
+      || new Set(entry.paths).size !== entry.paths.length
+      || JSON.stringify([...entry.paths].sort()) !== JSON.stringify(entry.paths)
+      || entry.paths.some((servedPath) => !nextStaticPattern.test(servedPath))) {
+      fail("Static document response declaration graph is invalid.");
+    }
+    responseDeclarationsByDocument.set(entry.documentKey, entry.paths);
   }
   const navigationFlow = records
     .filter(({ classification }) => classification.navigation)
@@ -415,31 +714,77 @@ export function finalizeProviderOverlapBrowserContract(records, loadGraph) {
   const redirects = [];
   const semanticLedger = [];
   const staticLedger = [];
+  const requestOrderLedger = [];
+  const requestOccurrences = { semantic: 0, static: 0 };
   const observedStaticPaths = new Set();
+  const observedByDocument = new Map(exactStaticDocuments.map(({ documentKey }) => [
+    documentKey,
+    { chunks: new Set(), media: new Set(), paths: new Set() },
+  ]));
+  let activeDocumentKey = null;
   for (const [index, record] of records.entries()) {
     exactKeys(
       record,
-      ["classification", "redirectEdge", "responseContentType", "responseStatus"],
+      [
+        "classification", "documentKey", "redirectEdge", "responseContentType", "responseStatus",
+        "staticResponseBytes", "staticResponseSha256",
+      ],
       `browser request record ${index}`,
     );
     const classification = record.classification;
     if (!classification || typeof classification.key !== "string") {
       fail(`Browser request record ${index} classification is invalid.`);
     }
+    if (record.documentKey !== null && !exactStaticDocumentKeys.has(record.documentKey)) {
+      fail(`Browser request record ${index} document generation is invalid.`);
+    }
+    if (exactStaticDocumentKeys.has(classification.key)) activeDocumentKey = classification.key;
+    if (record.documentKey !== activeDocumentKey
+      || (exactStaticDocumentKeys.has(classification.key)
+        && record.documentKey !== classification.key)) {
+      fail("Application document request is outside its exact static generation.");
+    }
     if (staticKeys.has(classification.key)) {
       if (!nextStaticPattern.test(classification.staticPath ?? "")
-        || observedStaticPaths.has(classification.staticPath)) {
-        fail("Static request path is invalid or duplicated.");
+        || !exactStaticDocumentKeys.has(record.documentKey)) {
+        fail("Static request path or document generation is invalid.");
+      }
+      const documentObservation = observedByDocument.get(record.documentKey);
+      if (documentObservation.paths.has(classification.staticPath)) {
+        fail("Static request is duplicated within one document generation.");
+      }
+      const metadata = loadGraph.staticAssetContract
+        .inventoryMetadataByPath[classification.staticPath];
+      if (loadGraph.staticAssetContract.inventoryByPath[classification.staticPath]
+          !== classification.staticAssetSha256
+        || record.staticResponseSha256 !== classification.staticAssetSha256
+        || record.staticResponseBytes !== metadata?.assetBytes
+        || !expectedStaticContentTypes(metadata?.extension).includes(record.responseContentType)) {
+        fail("Static request differs from its attested image inventory.");
       }
       observedStaticPaths.add(classification.staticPath);
+      if (classification.staticPath.startsWith("/_next/static/chunks/")) {
+        documentObservation.chunks.add(classification.staticPath);
+      } else {
+        documentObservation.media.add(classification.staticPath);
+      }
+      documentObservation.paths.add(classification.staticPath);
       staticLedger.push({
+        assetBytes: record.staticResponseBytes,
         assetSha256: classification.staticAssetSha256,
         class: classification.key,
+        contentType: record.responseContentType,
+        documentKey: record.documentKey,
         pathSha256: sha256(classification.staticPath),
       });
+      requestOccurrences.static += 1;
+      requestOrderLedger.push({ kind: "static", occurrence: requestOccurrences.static });
     } else if (classification.staticPath !== null || classification.staticAssetSha256 !== null) {
       fail("Non-static browser request contains a static asset binding.");
     } else {
+      if (record.staticResponseBytes !== null || record.staticResponseSha256 !== null) {
+        fail("Non-static browser request contains static response bytes.");
+      }
       semanticLedger.push(normalizeProviderOverlapSemanticEntry({
         disposition: classification.disposition,
         key: classification.key,
@@ -447,6 +792,8 @@ export function finalizeProviderOverlapBrowserContract(records, loadGraph) {
         responseContentType: record.responseContentType,
         responseStatus: record.responseStatus,
       }, `browser semantic request ${index}`));
+      requestOccurrences.semantic += 1;
+      requestOrderLedger.push({ kind: "semantic", occurrence: requestOccurrences.semantic });
     }
     counts[classification.key] = (counts[classification.key] ?? 0) + 1;
     if (classification.disposition === "abort") {
@@ -481,24 +828,95 @@ export function finalizeProviderOverlapBrowserContract(records, loadGraph) {
     fail("Chatwoot replacement widget count is outside its fresh/cache contract.");
   }
   validateProviderOverlapSemanticLedger(semanticLedger, "browser semantic request ledger");
-
-  const declaredPaths = [...new Set(loadGraph.responseDeclaredStaticPaths)].sort();
-  if (declaredPaths.length !== loadGraph.responseDeclaredStaticPaths.length
-    || declaredPaths.some((servedPath) => !nextStaticPattern.test(servedPath))) {
-    fail("Static response declaration graph is invalid or duplicated.");
-  }
   const inventory = loadGraph.staticAssetContract.inventoryByPath;
-  const expectedChunks = new Set(loadGraph.staticAssetContract.routeDeclaredPaths);
+  const inventoryMetadata = loadGraph.staticAssetContract.inventoryMetadataByPath;
+  const expectedChunks = new Set();
+  const declaredPaths = new Set();
   const declaredMedia = new Set();
-  for (const servedPath of declaredPaths) {
-    if (servedPath.startsWith("/_next/static/chunks/")) {
+  const validatedCssMediaReferences = loadGraph.cssMediaReferences.map((entry, index) => {
+    exactKeys(entry, ["sourcePath", "targetPath"], `CSS media reference ${index}`);
+    if (!/^\/_next\/static\/chunks(?:\/[A-Za-z0-9._-]{1,100}){0,5}\/[A-Za-z0-9._-]{1,200}\.css$/.test(
+      entry.sourcePath ?? "",
+    ) || !nextStaticMediaPattern.test(entry.targetPath ?? "")
+      || !observedStaticPaths.has(entry.sourcePath)
+      || !Object.hasOwn(inventory, entry.targetPath)) {
+      fail("CSS media reference is outside its observed and attested closure.");
+    }
+    return { sourcePath: entry.sourcePath, targetPath: entry.targetPath };
+  }).sort((left, right) => (
+    left.sourcePath.localeCompare(right.sourcePath)
+      || left.targetPath.localeCompare(right.targetPath)
+  ));
+  const cssMediaExtensionCounts = Object.create(null);
+  for (const { targetPath } of validatedCssMediaReferences) {
+    const extension = staticExtension(targetPath);
+    cssMediaExtensionCounts[extension] = (cssMediaExtensionCounts[extension] ?? 0) + 1;
+  }
+  deepEqual(
+    Object.fromEntries(Object.entries(cssMediaExtensionCounts).sort()),
+    exactCssMediaExtensionCounts,
+    "exact current CSS media fallback extension closure",
+  );
+  const cssMediaTargets = new Set(validatedCssMediaReferences.map(({ targetPath }) => targetPath));
+  const documentLoadLedger = [];
+  let negotiatedMediaPaths;
+  let sharedResponseChunkPaths;
+  for (const documentRoute of loadGraph.staticAssetContract.documentRouteContracts) {
+    const responseDeclarations = responseDeclarationsByDocument.get(documentRoute.documentKey);
+    const routeDeclaredPaths = new Set(documentRoute.routeDeclaredPaths);
+    const documentExpectedChunks = new Set(routeDeclaredPaths);
+    const documentDeclaredMedia = new Set();
+    for (const servedPath of responseDeclarations) {
       if (!Object.hasOwn(inventory, servedPath)) {
         fail("Static declaration graph escaped the attested image inventory.");
       }
-      expectedChunks.add(servedPath);
-    } else {
-      declaredMedia.add(servedPath);
+      declaredPaths.add(servedPath);
+      if (servedPath.startsWith("/_next/static/chunks/")) {
+        documentExpectedChunks.add(servedPath);
+      } else {
+        documentDeclaredMedia.add(servedPath);
+        declaredMedia.add(servedPath);
+      }
     }
+    for (const servedPath of routeDeclaredPaths) expectedChunks.add(servedPath);
+    for (const servedPath of documentExpectedChunks) expectedChunks.add(servedPath);
+    const observation = observedByDocument.get(documentRoute.documentKey);
+    deepEqual(
+      [...observation.chunks].sort(),
+      [...documentExpectedChunks].sort(),
+      `exact ${documentRoute.documentKey} static chunk load graph`,
+    );
+    const observedMedia = [...observation.media].sort();
+    if (observedMedia.length !== 2 || observedMedia.some((servedPath) => (
+      inventoryMetadata[servedPath]?.extension !== "woff2"
+      || !documentDeclaredMedia.has(servedPath)
+      || !cssMediaTargets.has(servedPath)
+    ))) {
+      fail("Document negotiated media differs from the exact pinned WOFF2 subset.");
+    }
+    if (negotiatedMediaPaths === undefined) {
+      negotiatedMediaPaths = observedMedia;
+    } else {
+      deepEqual(observedMedia, negotiatedMediaPaths, "cross-document negotiated media paths");
+    }
+    const responseOnlyChunks = [...documentExpectedChunks]
+      .filter((servedPath) => !routeDeclaredPaths.has(servedPath))
+      .sort();
+    if (sharedResponseChunkPaths === undefined) {
+      sharedResponseChunkPaths = responseOnlyChunks;
+    } else {
+      deepEqual(
+        responseOnlyChunks,
+        sharedResponseChunkPaths,
+        "cross-document response-declared shared chunk paths",
+      );
+    }
+    documentLoadLedger.push(Object.freeze({
+      documentKey: documentRoute.documentKey,
+      expectedChunkPathSha256s: Object.freeze([...documentExpectedChunks].map(sha256).sort()),
+      expectedMediaPathSha256s: Object.freeze(observedMedia.map(sha256).sort()),
+      routeDeclaredPathSha256s: Object.freeze([...routeDeclaredPaths].map(sha256).sort()),
+    }));
   }
   const observedChunks = [...observedStaticPaths]
     .filter((servedPath) => servedPath.startsWith("/_next/static/chunks/"))
@@ -507,9 +925,20 @@ export function finalizeProviderOverlapBrowserContract(records, loadGraph) {
   const observedMedia = [...observedStaticPaths]
     .filter((servedPath) => servedPath.startsWith("/_next/static/media/"))
     .sort();
-  deepEqual(observedMedia, [...declaredMedia].sort(), "exact static media declaration closure");
+  if (observedMedia.some((servedPath) => !declaredMedia.has(servedPath))) {
+    fail("Observed static media escaped the exact static media declaration closure.");
+  }
+  const cssMediaReferences = validatedCssMediaReferences.map((entry, index) => ({
+    occurrence: index + 1,
+    sourcePathSha256: sha256(entry.sourcePath),
+    targetPathSha256: sha256(entry.targetPath),
+  }));
+  if (declaredMedia.size > 0 && cssMediaReferences.length === 0) {
+    fail("Static media declarations have no exact CSS reference ledger.");
+  }
 
-  const declaredPathLedger = declaredPaths.map((servedPath) => ({
+  const sortedDeclaredPaths = [...declaredPaths].sort();
+  const declaredPathLedger = sortedDeclaredPaths.map((servedPath) => ({
     class: servedPath.startsWith("/_next/static/chunks/") ? "chunk" : "media",
     pathSha256: sha256(servedPath),
   })).sort((left, right) => left.pathSha256.localeCompare(right.pathSha256));
@@ -517,12 +946,16 @@ export function finalizeProviderOverlapBrowserContract(records, loadGraph) {
   const staticLoadGraph = Object.freeze({
     assetAttestationSha256: loadGraph.staticAssetContract.attestationSha256,
     assetInventorySha256: loadGraph.staticAssetContract.inventorySha256,
+    cssMediaReferenceLedger: Object.freeze(cssMediaReferences.map(Object.freeze)),
     declaredPathLedger: Object.freeze(declaredPathLedger.map(Object.freeze)),
-    declaredPathSha256s: Object.freeze(declaredPaths.map(sha256)),
-    expectedChunkPathSha256s: Object.freeze([...expectedChunks].sort().map(sha256)),
+    declaredPathSha256s: Object.freeze(declaredPathLedger.map(({ pathSha256 }) => pathSha256)),
+    documentLoadLedger: Object.freeze(documentLoadLedger),
+    expectedChunkPathSha256s: Object.freeze([...expectedChunks].map(sha256).sort()),
     inventoryLedger: Object.freeze(Object.entries(inventory)
       .map(([servedPath, assetSha256]) => Object.freeze({
+        assetBytes: inventoryMetadata[servedPath].assetBytes,
         assetSha256,
+        extension: inventoryMetadata[servedPath].extension,
         pathSha256: sha256(servedPath),
       }))
       .sort((left, right) => left.pathSha256.localeCompare(right.pathSha256))),
@@ -531,7 +964,7 @@ export function finalizeProviderOverlapBrowserContract(records, loadGraph) {
     routeDeclaredPathContractSha256:
       loadGraph.staticAssetContract.routeDeclaredPathContractSha256,
     routeDeclaredPathSha256s: Object.freeze(
-      loadGraph.staticAssetContract.routeDeclaredPaths.map(sha256),
+      loadGraph.staticAssetContract.routeDeclaredPaths.map(sha256).sort(),
     ),
   });
 
@@ -543,6 +976,8 @@ export function finalizeProviderOverlapBrowserContract(records, loadGraph) {
   return Object.freeze({
     requestCount: records.length,
     requestContractSha256: sha256(JSON.stringify(summary)),
+    requestOrderContractSha256: sha256(JSON.stringify(requestOrderLedger)),
+    requestOrderLedger: Object.freeze(requestOrderLedger.map(Object.freeze)),
     semanticRequestLedger: Object.freeze(semanticLedger.map(Object.freeze)),
     staticLoadGraph,
     staticLoadGraphContractSha256: sha256(JSON.stringify(staticLoadGraph)),
@@ -561,7 +996,7 @@ function classifyApplicationRequest(descriptor, input, url, state) {
     } else if (url.pathname === "/auth/telegram/start") {
       exactQueryKeys(url, ["redirect_to", "turnstile_token"]);
       equal(url.searchParams.get("redirect_to"), "/profile", "Telegram start redirect");
-      if (!/^synthetic-turnstile-token:login:synthetic-turnstile-[1-9]\d*:[1-9]\d*$/.test(
+      if (!/^synthetic-turnstile-token:auth_login:synthetic-turnstile-[1-9]\d*:[1-9]\d*$/.test(
         url.searchParams.get("turnstile_token") ?? "",
       )) fail("Telegram start Turnstile token is invalid.");
       descriptor.key = "app-telegram-start";
@@ -594,22 +1029,25 @@ function classifyApplicationRequest(descriptor, input, url, state) {
     const extension = url.pathname.slice(url.pathname.lastIndexOf(".") + 1);
     const resourceByExtension = {
       css: ["stylesheet"],
+      eot: ["font"],
+      ico: ["image"],
       js: ["script"],
       png: ["image"],
       svg: ["image"],
+      ttf: ["font"],
+      woff: ["font"],
       woff2: ["font"],
     };
     exactResourceType(input.resourceType, resourceByExtension[extension]);
     exactNonNavigation(input);
-    descriptor.key = extension === "woff2" ? "next-static-font"
-      : ["png", "svg"].includes(extension) ? "next-static-image"
+    descriptor.key = ["eot", "ttf", "woff", "woff2"].includes(extension)
+      ? "next-static-font"
+      : ["ico", "png", "svg"].includes(extension) ? "next-static-image"
         : `next-static-${extension}`;
     descriptor.staticPath = url.pathname;
-    descriptor.staticAssetSha256 = url.pathname.startsWith("/_next/static/chunks/")
-      ? state.staticAssetContract.inventoryByPath[url.pathname] ?? null
-      : null;
-    if (url.pathname.startsWith("/_next/static/chunks/") && descriptor.staticAssetSha256 === null) {
-      fail("Static chunk is absent from the attested production image inventory.");
+    descriptor.staticAssetSha256 = state.staticAssetContract.inventoryByPath[url.pathname] ?? null;
+    if (descriptor.staticAssetSha256 === null) {
+      fail("Static asset is absent from the attested production image inventory.");
     }
     return;
   }
@@ -746,7 +1184,7 @@ function exactHistoryLocation(raw) {
     if (url.pathname === "/auth/telegram/start") {
       exactQueryKeys(url, ["redirect_to", "turnstile_token"]);
       equal(url.searchParams.get("redirect_to"), "/profile", "history Telegram redirect");
-      if (!/^synthetic-turnstile-token:login:synthetic-turnstile-[1-9]\d*:[1-9]\d*$/.test(
+      if (!/^synthetic-turnstile-token:auth_login:synthetic-turnstile-[1-9]\d*:[1-9]\d*$/.test(
         url.searchParams.get("turnstile_token") ?? "",
       )) fail("History Telegram Turnstile token is invalid.");
       return "app-telegram-start";
@@ -787,14 +1225,20 @@ function exactHistoryLocation(raw) {
   fail("Browser history location is outside the exact provider-overlap flow.");
 }
 
+function exactCdpIdentity(value) {
+  return typeof value === "string" && /^[^\s]{1,256}$/.test(value);
+}
+
 function assertStaticAssetContract(value) {
   exactKeys(
     value,
     [
       "attestationSha256",
       "configDigest",
+      "documentRouteContracts",
       "imageDigest",
       "inventoryByPath",
+      "inventoryMetadataByPath",
       "inventoryLedgerContractSha256",
       "inventorySha256",
       "manifestDigest",
@@ -813,16 +1257,29 @@ function assertStaticAssetContract(value) {
     || !sha256Pattern.test(value.inventorySha256 ?? "")
     || !sha256Pattern.test(value.routeDeclaredPathContractSha256 ?? "")
     || !value.inventoryByPath || typeof value.inventoryByPath !== "object"
-    || Array.isArray(value.inventoryByPath) || !Array.isArray(value.routeDeclaredPaths)
-    || value.routeDeclaredPaths.length < 1 || value.routeDeclaredPaths.length > maximumRequests) {
+    || Array.isArray(value.inventoryByPath)
+    || !value.inventoryMetadataByPath || typeof value.inventoryMetadataByPath !== "object"
+    || Array.isArray(value.inventoryMetadataByPath) || !Array.isArray(value.routeDeclaredPaths)
+    || value.routeDeclaredPaths.length < 1 || value.routeDeclaredPaths.length > maximumRequests
+    || !Array.isArray(value.documentRouteContracts)
+    || value.documentRouteContracts.length !== exactStaticDocuments.length) {
     fail("Static asset contract is invalid.");
   }
   const inventoryPaths = Object.keys(value.inventoryByPath).sort();
+  const metadataPaths = Object.keys(value.inventoryMetadataByPath).sort();
   if (inventoryPaths.length < 1 || inventoryPaths.length > 4_096
-    || inventoryPaths.some((servedPath) => !servedPath.startsWith("/_next/static/chunks/")
-      || !nextStaticPattern.test(servedPath)
-      || !sha256Pattern.test(value.inventoryByPath[servedPath]))) {
+    || JSON.stringify(metadataPaths) !== JSON.stringify(inventoryPaths)
+    || inventoryPaths.some((servedPath) => !nextStaticPattern.test(servedPath)
+      || !sha256Pattern.test(value.inventoryByPath[servedPath])
+      || !exactStaticMetadata(value.inventoryMetadataByPath[servedPath], servedPath))) {
     fail("Static asset inventory contract is invalid.");
+  }
+  const inventoryBytes = inventoryPaths.reduce((total, servedPath) => (
+    total + value.inventoryMetadataByPath[servedPath].assetBytes
+  ), 0);
+  if (!Number.isSafeInteger(inventoryBytes)
+    || inventoryBytes > maximumStaticAssetTotalBytes) {
+    fail("Static asset inventory contract exceeds its aggregate byte bound.");
   }
   if (JSON.stringify([...value.routeDeclaredPaths].sort())
       !== JSON.stringify(value.routeDeclaredPaths)
@@ -830,14 +1287,40 @@ function assertStaticAssetContract(value) {
     || value.routeDeclaredPaths.some((servedPath) => !Object.hasOwn(value.inventoryByPath, servedPath))) {
     fail("Static route declaration contract is invalid.");
   }
+  const routePathUnion = new Set();
+  const documentRouteLedger = value.documentRouteContracts.map((entry, index) => {
+    exactKeys(entry, ["documentKey", "routeDeclaredPaths"], "static document route contract");
+    const expectedDocumentKey = exactStaticDocuments[index].documentKey;
+    if (entry.documentKey !== expectedDocumentKey || !Array.isArray(entry.routeDeclaredPaths)
+      || entry.routeDeclaredPaths.length < 1 || entry.routeDeclaredPaths.length > 64
+      || new Set(entry.routeDeclaredPaths).size !== entry.routeDeclaredPaths.length
+      || JSON.stringify([...entry.routeDeclaredPaths].sort())
+        !== JSON.stringify(entry.routeDeclaredPaths)
+      || entry.routeDeclaredPaths.some((servedPath) => (
+        !servedPath.startsWith("/_next/static/chunks/")
+        || !value.routeDeclaredPaths.includes(servedPath)
+        || !Object.hasOwn(value.inventoryByPath, servedPath)
+      ))) {
+      fail("Static document route contract is invalid.");
+    }
+    for (const servedPath of entry.routeDeclaredPaths) routePathUnion.add(servedPath);
+    return {
+      documentKey: entry.documentKey,
+      routeDeclaredPathSha256s: entry.routeDeclaredPaths.map(sha256).sort(),
+    };
+  });
+  if (JSON.stringify([...routePathUnion].sort()) !== JSON.stringify(value.routeDeclaredPaths)) {
+    fail("Static document route contracts do not close over the route union.");
+  }
   const inventoryLedger = inventoryPaths.map((servedPath) => ({
+    assetBytes: value.inventoryMetadataByPath[servedPath].assetBytes,
     assetSha256: value.inventoryByPath[servedPath],
+    extension: value.inventoryMetadataByPath[servedPath].extension,
     pathSha256: sha256(servedPath),
   })).sort((left, right) => left.pathSha256.localeCompare(right.pathSha256));
-  const routeDeclaredPathSha256s = value.routeDeclaredPaths.map(sha256);
   if (value.inventoryLedgerContractSha256 !== sha256(JSON.stringify(inventoryLedger))
     || value.routeDeclaredPathContractSha256
-      !== sha256(JSON.stringify(routeDeclaredPathSha256s))) {
+      !== sha256(JSON.stringify(documentRouteLedger))) {
     fail("Static asset projection hash differs from its attested graph.");
   }
 }
@@ -876,9 +1359,11 @@ function expectedContentTypes(key, status) {
   if (key === "next-static-js" || key === "chatwoot-sdk-script"
     || key === "turnstile-widget-script") return ["application/javascript", "text/javascript"];
   if (key === "next-static-css") return ["text/css"];
-  if (key === "next-static-font") return ["font/woff2"];
+  if (key === "next-static-font") {
+    return ["application/vnd.ms-fontobject", "font/ttf", "font/woff", "font/woff2"];
+  }
   if (key === "next-static-image" || key === "app-brand-logo") {
-    return ["image/png", "image/svg+xml"];
+    return ["image/png", "image/svg+xml", "image/vnd.microsoft.icon", "image/x-icon"];
   }
   if (key === "app-web-manifest") return ["application/manifest+json"];
   if (key.startsWith("chatwoot-widget-")) return ["text/html"];
@@ -913,6 +1398,43 @@ function deepEqual(actual, expected, label) {
 
 function sha256(value) {
   return createHash("sha256").update(value, "utf8").digest("hex");
+}
+
+function sha256Bytes(value) {
+  return createHash("sha256").update(value).digest("hex");
+}
+
+function staticExtension(servedPath) {
+  const extension = servedPath.slice(servedPath.lastIndexOf(".") + 1);
+  if (!new Set(["css", "eot", "ico", "js", "png", "svg", "ttf", "woff", "woff2"])
+    .has(extension)) {
+    fail("Static asset extension is outside its exact contract.");
+  }
+  return extension;
+}
+
+function exactStaticMetadata(value, servedPath) {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value)
+    && JSON.stringify(Object.keys(value).sort()) === JSON.stringify(["assetBytes", "extension"])
+    && Number.isSafeInteger(value.assetBytes) && value.assetBytes >= 1
+    && value.assetBytes <= maximumStaticAssetBytes
+    && value.extension === staticExtension(servedPath));
+}
+
+function expectedStaticContentTypes(extension) {
+  const values = {
+    css: ["text/css"],
+    eot: ["application/vnd.ms-fontobject"],
+    ico: ["image/vnd.microsoft.icon", "image/x-icon"],
+    js: ["application/javascript", "text/javascript"],
+    png: ["image/png"],
+    svg: ["image/svg+xml"],
+    ttf: ["font/ttf"],
+    woff: ["font/woff"],
+    woff2: ["font/woff2"],
+  }[extension];
+  if (!values) fail("Static response extension has no content-type contract.");
+  return values;
 }
 
 /** @returns {never} */
