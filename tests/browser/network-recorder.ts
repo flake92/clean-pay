@@ -51,10 +51,30 @@ export type NavigationHop = {
   status: number | null;
 };
 
-export function recordNetwork(page: Page, applicationOrigin: string) {
+type RequestTerminal = {
+  promise: Promise<void>;
+  resolve: () => void;
+  settled: boolean;
+};
+
+export function recordNetwork(
+  page: Page,
+  applicationOrigin: string,
+  options: { fontTerminalTimeoutMs?: number } = {},
+) {
+  const fontTerminalTimeoutMs = options.fontTerminalTimeoutMs ?? 5_000;
+  if (
+    !Number.isSafeInteger(fontTerminalTimeoutMs)
+    || fontTerminalTimeoutMs < 1
+    || fontTerminalTimeoutMs > 30_000
+  ) {
+    throw new Error("fontTerminalTimeoutMs must be an integer from 1 to 30000.");
+  }
   let requestIndex = 0;
   const requests = new Map<Request, NetworkManifestEntry>();
   const rawUrlByEntry = new WeakMap<NetworkManifestEntry, string>();
+  const fontTerminals = new Map<Request, RequestTerminal>();
+  const responseHeaders = new Map<Request, Promise<void>>();
   const entries: NetworkManifestEntry[] = [];
   const pending: Promise<void>[] = [];
 
@@ -87,6 +107,9 @@ export function recordNetwork(page: Page, applicationOrigin: string) {
     requests.set(request, entry);
     rawUrlByEntry.set(entry, request.url());
     entries.push(entry);
+    if (isExactApplicationFontRequest(request, applicationOrigin)) {
+      fontTerminals.set(request, createRequestTerminal());
+    }
     pending.push(captureBoundedHeaders(
       request.allHeaders(),
       (headers) => {
@@ -108,7 +131,7 @@ export function recordNetwork(page: Page, applicationOrigin: string) {
   const handleResponse = (response: Response) => {
     const entry = requests.get(response.request());
     if (!entry) return;
-    pending.push(captureBoundedHeaders(
+    const headerCapture = captureBoundedHeaders(
       response.allHeaders(),
       (headers) => {
           entry.response = {
@@ -133,7 +156,17 @@ export function recordNetwork(page: Page, applicationOrigin: string) {
           }],
         };
       },
-    ));
+    );
+    responseHeaders.set(response.request(), headerCapture);
+    pending.push(headerCapture);
+  };
+
+  const handleRequestFinished = (request: Request) => {
+    const terminal = fontTerminals.get(request);
+    if (!terminal) return;
+    const headerCapture = responseHeaders.get(request);
+    if (!headerCapture) return;
+    void headerCapture.finally(terminal.resolve);
   };
 
   const handleRequestFailed = (request: Request) => {
@@ -143,18 +176,29 @@ export function recordNetwork(page: Page, applicationOrigin: string) {
     entry.failure = {
       errorText: digestValue(failure.errorText),
     };
+    fontTerminals.get(request)?.resolve();
   };
 
   page.on("request", handleRequest);
   page.on("response", handleResponse);
+  page.on("requestfinished", handleRequestFinished);
   page.on("requestfailed", handleRequestFailed);
 
   return {
     async finish() {
-      page.off("request", handleRequest);
-      page.off("response", handleResponse);
-      page.off("requestfailed", handleRequestFailed);
+      let terminalError: unknown;
+      try {
+        await waitForFontTerminals(fontTerminals, fontTerminalTimeoutMs);
+      } catch (error) {
+        terminalError = error;
+      } finally {
+        page.off("request", handleRequest);
+        page.off("response", handleResponse);
+        page.off("requestfinished", handleRequestFinished);
+        page.off("requestfailed", handleRequestFailed);
+      }
       await Promise.allSettled(pending);
+      if (terminalError) throw terminalError;
       for (const entry of entries) {
         if (isExactDeterministicTurnstileTransport(
           entry,
@@ -171,6 +215,85 @@ export function recordNetwork(page: Page, applicationOrigin: string) {
       return entries.sort((left, right) => left.index - right.index);
     },
   };
+}
+
+function createRequestTerminal(): RequestTerminal {
+  let complete!: () => void;
+  const terminal: RequestTerminal = {
+    promise: new Promise<void>((resolve) => { complete = resolve; }),
+    resolve: () => {},
+    settled: false,
+  };
+  terminal.resolve = () => {
+    if (terminal.settled) return;
+    terminal.settled = true;
+    complete();
+  };
+  return terminal;
+}
+
+async function waitForFontTerminals(
+  terminals: Map<Request, RequestTerminal>,
+  timeoutMs: number,
+) {
+  const deadline = Date.now() + timeoutMs;
+  while (true) {
+    const pendingTerminals = [...terminals.values()]
+      .filter((terminal) => !terminal.settled);
+    if (pendingTerminals.length === 0) return;
+    const remainingMs = deadline - Date.now();
+    if (remainingMs <= 0) {
+      throw new Error(
+        `Network recorder timed out waiting for ${pendingTerminals.length} `
+        + "application font request(s) to reach a terminal state.",
+      );
+    }
+    await new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error(
+        `Network recorder timed out waiting for ${pendingTerminals.length} `
+        + "application font request(s) to reach a terminal state.",
+      )), remainingMs);
+      void Promise.all(pendingTerminals.map((terminal) => terminal.promise)).then(
+        () => {
+          clearTimeout(timer);
+          resolve();
+        },
+        (error: unknown) => {
+          clearTimeout(timer);
+          reject(error);
+        },
+      );
+    });
+  }
+}
+
+function isExactApplicationFontRequest(
+  request: Request,
+  applicationOrigin: string,
+) {
+  let url: URL;
+  try {
+    url = new URL(request.url());
+  } catch {
+    return false;
+  }
+  const headers = request.headers();
+  return url.origin === applicationOrigin
+    && /^\/_next\/static\/media\/[A-Za-z0-9._-]+\.woff2$/.test(url.pathname)
+    && url.search === ""
+    && url.hash === ""
+    && request.method() === "GET"
+    && request.resourceType() === "font"
+    && request.isNavigationRequest() === false
+    && request.postDataBuffer() === null
+    && request.redirectedFrom() === null
+    && ![
+      "authorization",
+      "cookie",
+      "next-action",
+      "proxy-authorization",
+      "rsc",
+    ].some((name) => typeof headers[name] === "string");
 }
 
 function captureBoundedHeaders<T>(
