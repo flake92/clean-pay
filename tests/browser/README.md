@@ -184,6 +184,37 @@ and verifies exact labels before its `down --volumes` cleanup. CI uses this
 same command after building the runner and migration targets; it does not use
 `npx`.
 
+An additive cabinet asset sidecar can be generated while the exact baseline
+and candidate application images are live on two distinct loopback ports.
+First generate one immutable static-asset attestation for each image with
+`scripts/security/attest-production-image-assets.mjs`. Then run:
+
+```powershell
+npm run evidence:served-cabinet-assets -- `
+  --baseline-attestation <baseline-attestation.json> `
+  --baseline-base-url http://127.0.0.1:<baseline-port>/ `
+  --baseline-image-digest <baseline-sha256-digest> `
+  --baseline-revision <baseline-40-hex-revision> `
+  --baseline-fixture-sha256 <pinned-journey-v5-fixture-sha256> `
+  --candidate-attestation <candidate-attestation.json> `
+  --candidate-base-url http://127.0.0.1:<candidate-port>/ `
+  --candidate-image-digest <candidate-sha256-digest> `
+  --candidate-revision <candidate-40-hex-revision> `
+  --candidate-fixture-sha256 <candidate-journey-v5-fixture-sha256> `
+  --fixture-version journey-v5 `
+  --public-build-contract-version 1 `
+  --public-build-contract-sha256 <exact-common-contract-sha256> `
+  --platform linux/amd64 `
+  --output <new-proof.json>
+```
+
+The command accepts only loopback origins, refuses redirects, omits browser
+credentials, and fetches only the bounded chunk paths declared by the exact
+`/cabinet/page` image manifests. Its create-only JSON contains paths, status,
+content type, sizes, and SHA-256 values, never response bodies. It proves the
+identical 16-module closure and different chunk partition but is deliberately
+not a behavioral-comparison projection.
+
 Read-only candidate A/B from this repository on Windows PowerShell:
 
 ```powershell
