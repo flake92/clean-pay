@@ -100,13 +100,25 @@ projected only after its complete captured 20px/500/24px visual contract
 matches. PNG bytes remain exact in the normal state; only keyboard focus may
 make the exact skip link visible. Every near miss remains observable.
 
-After the existing load, `document.fonts.ready`, double-animation-frame, and
-network-idle settling sequence, screenshot acquisition takes exactly three
-immediate PNGs. At least two must be fully byte-identical; those unchanged
-majority bytes become the manifest hash and compared artifact. Three distinct
-PNGs fail closed before reconciliation. There is no pixel tolerance, channel
-normalization, perceptual comparison, baseline lookup, or retry that can turn
-different pixels into a match.
+The retained canonical capture used three immediate PNGs after the existing
+load, `document.fonts.ready`, double-animation-frame, and network-idle settling
+sequence. The read-only candidate gate now acquires one raw PNG in each of
+exactly three independently launched Chromium processes. Each route receives a
+fresh context in every process. At least two full PNG files must be
+byte-identical; those unchanged majority bytes become the manifest hash and
+compared artifact. Three distinct PNGs fail closed before reconciliation. The
+selection function accepts no baseline path or baseline bytes.
+
+This process quorum is restricted to the exact six public and eight anonymous
+protected-route GET characterizations. Before navigation it denies every
+non-GET, every `Next-Action`, and every external request except the exact
+credential-free Turnstile script GET handled by the pinned local stub. The raw
+PNG and manifest from every process are attached, as is each final console
+sidecar and a hashes-only quorum record. All three projected non-PNG manifests
+and all three exact console sidecars must agree before baseline reconciliation.
+Authenticated journeys are never replayed by this mechanism. There is no pixel
+tolerance, masking, channel normalization, perceptual comparison, baseline
+lookup, or retry that can turn different pixels into a match.
 
 Normal mode is read-only. Missing or different canonical artifacts fail and
 leave both sets untouched. Initial canonical creation additionally requires

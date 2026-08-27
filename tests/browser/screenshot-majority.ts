@@ -1,6 +1,6 @@
 import type { Page } from "@playwright/test";
 
-const SCREENSHOT_COUNT = 3;
+export const EXACT_SCREENSHOT_QUORUM_PROCESS_COUNT = 3;
 
 /**
  * Captures three settled-state PNGs and returns only a byte-identical 2/3
@@ -9,7 +9,7 @@ const SCREENSHOT_COUNT = 3;
  */
 export async function captureByteIdenticalScreenshotMajority(page: Page) {
   const screenshots: Buffer[] = [];
-  for (let index = 0; index < SCREENSHOT_COUNT; index += 1) {
+  for (let index = 0; index < EXACT_SCREENSHOT_QUORUM_PROCESS_COUNT; index += 1) {
     screenshots.push(await page.screenshot({
       animations: "disabled",
       caret: "hide",
@@ -21,8 +21,10 @@ export async function captureByteIdenticalScreenshotMajority(page: Page) {
 }
 
 export function selectByteIdenticalMajority(values: readonly Uint8Array[]) {
-  if (values.length !== SCREENSHOT_COUNT) {
-    throw new Error(`Screenshot majority requires exactly ${SCREENSHOT_COUNT} PNGs.`);
+  if (values.length !== EXACT_SCREENSHOT_QUORUM_PROCESS_COUNT) {
+    throw new Error(
+      `Screenshot majority requires exactly ${EXACT_SCREENSHOT_QUORUM_PROCESS_COUNT} PNGs.`,
+    );
   }
   const buffers = values.map((value) => Buffer.from(value));
   for (let left = 0; left < buffers.length; left += 1) {

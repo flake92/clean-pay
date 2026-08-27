@@ -3,6 +3,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 
 import type {
   Page,
+  Request as PlaywrightRequest,
   TestInfo,
 } from "@playwright/test";
 
@@ -35,14 +36,94 @@ import {
   registerBaselineReconciliation,
   staticCspConsoleSidecarEvidence,
 } from "./console-policy";
-import { installDeterministicTurnstileStub } from "./turnstile-stub";
-import { captureByteIdenticalScreenshotMajority } from "./screenshot-majority";
+import { permitsCharacterizationReplayRequest } from "./characterization-replay-policy";
+import type { CharacterizationPageQuorum } from "./fixtures";
+import {
+  requireExactProcessBytesAgreement,
+  selectIndependentProcessCharacterizationQuorum,
+} from "./process-quorum";
+import {
+  installDeterministicTurnstileStub,
+} from "./turnstile-stub";
 
 export type CharacterizationRoute = {
   id: string;
   requestPath: string;
   kind: "public" | "protected-redirect";
 };
+
+const EXACT_READ_ONLY_CHARACTERIZATION_ROUTES: readonly CharacterizationRoute[] = [
+  {
+    id: "login",
+    requestPath: "/login?redirect_to=%2Ftariffs%3Fsource%3Dcharacterization#auth-entry",
+    kind: "public",
+  },
+  {
+    id: "register",
+    requestPath: "/register?redirect_to=%2Ftariffs%3Fsource%3Dcharacterization#registration-entry",
+    kind: "public",
+  },
+  {
+    id: "tariffs",
+    requestPath: "/tariffs?source=characterization#plans",
+    kind: "public",
+  },
+  {
+    id: "support",
+    requestPath: "/support?source=characterization#support",
+    kind: "public",
+  },
+  {
+    id: "install",
+    requestPath: "/install?source=characterization#install",
+    kind: "public",
+  },
+  {
+    id: "offline",
+    requestPath: "/offline?source=characterization#offline",
+    kind: "public",
+  },
+  {
+    id: "protected-cabinet",
+    requestPath: "/cabinet?view=subscriptions#active",
+    kind: "protected-redirect",
+  },
+  {
+    id: "protected-profile",
+    requestPath: "/profile?panel=security#passkeys",
+    kind: "protected-redirect",
+  },
+  {
+    id: "protected-referral",
+    requestPath: "/referral?source=characterization#program",
+    kind: "protected-redirect",
+  },
+  {
+    id: "protected-extend",
+    requestPath: "/extend?subscription_id=00000000-0000-4000-8000-000000000001#offer",
+    kind: "protected-redirect",
+  },
+  {
+    id: "protected-link-account",
+    requestPath: "/link-account?provider=telegram#confirm",
+    kind: "protected-redirect",
+  },
+  {
+    id: "protected-verify-email",
+    requestPath: "/verify-email?redirect_to=%2Fcabinet#status",
+    kind: "protected-redirect",
+  },
+  {
+    id: "protected-passkey-setup",
+    requestPath: "/passkey/setup?redirect_to=%2Fcabinet#setup",
+    kind: "protected-redirect",
+  },
+  {
+    id: "protected-payment",
+    requestPath: "/payment?payment_id=00000000-0000-4000-8000-000000000002#status",
+    kind: "protected-redirect",
+  },
+];
 
 type CanonicalDomNode = {
   type: "element" | "text";
@@ -80,15 +161,169 @@ type RawBrowserStorage = {
 };
 
 export async function captureCharacterization(options: {
-  page: Page;
+  pages: CharacterizationPageQuorum;
   route: CharacterizationRoute;
   testInfo: TestInfo;
   validateNavigation?: (finalUrl: URL) => void;
 }) {
-  const { page, route, testInfo, validateNavigation } = options;
+  const { pages, route, testInfo, validateNavigation } = options;
+  assertExactReadOnlyCharacterizationRoute(route);
   const baseUrl = requireBrowserBaseUrl();
   const applicationOrigin = baseUrl.origin;
+  const samples: Awaited<ReturnType<typeof captureCharacterizationSample>>[] = [];
+  for (const [processIndex, page] of pages.entries()) {
+    const sample = await captureCharacterizationSample({
+      applicationOrigin,
+      baseUrl,
+      page,
+      route,
+      testInfo,
+    });
+    samples.push(sample);
+    await persistRawProcessSample({ processIndex, sample, testInfo });
+    assertReadOnlyCharacterizationSample(sample);
+    validateNavigation?.(sample.finalUrl);
+  }
+
+  const quorum = selectIndependentProcessCharacterizationQuorum(
+    samples.map((sample) => ({
+      manifest: sample.manifestBytes,
+      screenshot: sample.screenshot,
+    })),
+    projectCharacterizationManifestBytesForComparison,
+  );
+  const selected = samples[quorum.selectedProcessIndex];
+  if (!selected) {
+    throw new Error("Independent Chromium process quorum selected no evidence.");
+  }
+
+  const actualManifestPath = testInfo.outputPath("characterization.actual.json");
+  const actualScreenshotPath = testInfo.outputPath("viewport.actual.png");
+  await mkdir(path.dirname(actualManifestPath), { recursive: true });
+  await Promise.all([
+    writeFile(actualManifestPath, selected.manifestBytes),
+    writeFile(actualScreenshotPath, quorum.selectedScreenshot),
+  ]);
+  await Promise.all([
+    testInfo.attach("characterization.json", {
+      path: actualManifestPath,
+      contentType: "application/json",
+    }),
+    testInfo.attach("viewport.png", {
+      path: actualScreenshotPath,
+      contentType: "image/png",
+    }),
+  ]);
+
+  registerBaselineReconciliation(pages[0], async () => {
+    const consoleSidecars = await Promise.all(samples.map(async (sample, processIndex) => {
+      const normalizedStaticCspViolations = staticCspConsoleSidecarEvidence(
+        pages[processIndex] as Page,
+      );
+      assertStaticCspSidecarContract(
+        new URL(route.requestPath, applicationOrigin).pathname,
+        normalizedStaticCspViolations,
+      );
+      const sidecar = Buffer.from(`${JSON.stringify({
+        schemaVersion: 1,
+        baselineCommit: BEHAVIORAL_BASELINE_COMMIT,
+        project: testInfo.project.name,
+        route: { id: route.id, kind: route.kind },
+        normalizedStaticCspViolations,
+      }, null, 2)}\n`);
+      const rawConsolePath = testInfo.outputPath(
+        "process-quorum",
+        `process-${processIndex + 1}.console.raw.json`,
+      );
+      await writeFile(rawConsolePath, sidecar);
+      await testInfo.attach(`process-quorum/process-${processIndex + 1}/console.json`, {
+        path: rawConsolePath,
+        contentType: "application/json",
+      });
+      return sidecar;
+    }));
+    const consoleSidecar = requireExactProcessBytesAgreement(
+      consoleSidecars,
+      "console sidecars",
+    );
+    const actualConsolePath = testInfo.outputPath("console.actual.json");
+    await writeFile(actualConsolePath, consoleSidecar);
+    await testInfo.attach("console.json", {
+      path: actualConsolePath,
+      contentType: "application/json",
+    });
+
+    const quorumSidecar = Buffer.from(`${JSON.stringify({
+      schemaVersion: 1,
+      processCount: pages.length,
+      selectionPolicy: "exact-full-png-byte-majority",
+      selectedProcessIndexes: quorum.selectedProcessIndexes,
+      selectedPngSha256: sha256(quorum.selectedScreenshot),
+      projectedManifestSha256: quorum.projectedManifestSha256,
+      consoleSidecarSha256: sha256(consoleSidecar),
+      processes: quorum.processes,
+    }, null, 2)}\n`);
+    const quorumSidecarPath = testInfo.outputPath("process-quorum", "quorum.json");
+    await writeFile(quorumSidecarPath, quorumSidecar);
+    await testInfo.attach("process-quorum/quorum.json", {
+      path: quorumSidecarPath,
+      contentType: "application/json",
+    });
+
+    const baselineDirectory = path.join(
+      browserBaselineRoot,
+      testInfo.project.name,
+      route.id,
+    );
+    const primaryReconciliations = await Promise.allSettled([
+      reconcileProjectedJsonBaselineArtifact({
+        baselineFile: path.join(baselineDirectory, "characterization.json"),
+        actual: selected.manifestBytes,
+        project: projectCharacterizationManifestBytesForComparison,
+        projectPair: (expected, actual) => (
+          projectCharacterizationManifestPairBytesForComparison(expected, actual, {
+            actualApplicationOrigin: applicationOrigin,
+          })
+        ),
+      }),
+      reconcileBaselineArtifact({
+        baselineFile: path.join(baselineDirectory, "viewport.png"),
+        actual: quorum.selectedScreenshot,
+      }),
+    ]);
+    const primaryFailures = primaryReconciliations
+      .filter((result): result is PromiseRejectedResult => result.status === "rejected")
+      .map((result) => result.reason);
+    if (primaryFailures.length) {
+      throw new AggregateError(
+        primaryFailures,
+        `Browser characterization did not match for ${testInfo.project.name}/${route.id}.`,
+      );
+    }
+
+    await reconcileBaselineArtifact({
+      baselineFile: path.join(baselineDirectory, "console.json"),
+      actual: consoleSidecar,
+    });
+    await reconcileBrowserBaselineProvenance(pages[0]);
+  });
+
+  return {
+    finalUrl: selected.finalUrl,
+    manifest: selected.manifest,
+  };
+}
+
+async function captureCharacterizationSample(options: {
+  applicationOrigin: string;
+  baseUrl: URL;
+  page: Page;
+  route: CharacterizationRoute;
+  testInfo: TestInfo;
+}) {
+  const { applicationOrigin, baseUrl, page, route, testInfo } = options;
   await installDeterministicTurnstileStub(page);
+  const requestGuard = await installReadOnlyRequestGuard(page, applicationOrigin);
   const networkRecorder = recordNetwork(page, applicationOrigin);
 
   const finalResponse = await page.goto(route.requestPath, {
@@ -103,7 +338,12 @@ export async function captureCharacterization(options: {
   });
   await page.waitForLoadState("networkidle", { timeout: 3_000 }).catch(() => undefined);
 
-  const screenshot = await captureByteIdenticalScreenshotMajority(page);
+  const screenshot = await page.screenshot({
+    animations: "disabled",
+    caret: "hide",
+    fullPage: false,
+    type: "png",
+  });
 
   const [
     dom,
@@ -206,95 +446,118 @@ export async function captureCharacterization(options: {
     },
   };
   const manifestBytes = Buffer.from(`${JSON.stringify(manifest, null, 2)}\n`);
-  const actualManifestPath = testInfo.outputPath("characterization.actual.json");
-  const actualScreenshotPath = testInfo.outputPath("viewport.actual.png");
-  await mkdir(path.dirname(actualManifestPath), { recursive: true });
-  await Promise.all([
-    writeFile(actualManifestPath, manifestBytes),
-    writeFile(actualScreenshotPath, screenshot),
-  ]);
-
-  await Promise.all([
-    testInfo.attach("characterization.json", {
-      path: actualManifestPath,
-      contentType: "application/json",
-    }),
-    testInfo.attach("viewport.png", {
-      path: actualScreenshotPath,
-      contentType: "image/png",
-    }),
-  ]);
-
-  validateNavigation?.(new URL(finalUrl));
-
-  registerBaselineReconciliation(page, async () => {
-    const normalizedStaticCspViolations = staticCspConsoleSidecarEvidence(page);
-    assertStaticCspSidecarContract(
-      new URL(route.requestPath, applicationOrigin).pathname,
-      normalizedStaticCspViolations,
-    );
-    const consoleSidecar = Buffer.from(`${JSON.stringify({
-      schemaVersion: 1,
-      baselineCommit: BEHAVIORAL_BASELINE_COMMIT,
-      project: testInfo.project.name,
-      route: { id: route.id, kind: route.kind },
-      normalizedStaticCspViolations,
-    }, null, 2)}\n`);
-    const actualConsolePath = testInfo.outputPath("console.actual.json");
-    await writeFile(actualConsolePath, consoleSidecar);
-    await testInfo.attach("console.json", {
-      path: actualConsolePath,
-      contentType: "application/json",
-    });
-
-    const baselineDirectory = path.join(
-      browserBaselineRoot,
-      testInfo.project.name,
-      route.id,
-    );
-    const primaryReconciliations = await Promise.allSettled([
-      reconcileProjectedJsonBaselineArtifact({
-        baselineFile: path.join(baselineDirectory, "characterization.json"),
-        actual: manifestBytes,
-        project: projectCharacterizationManifestBytesForComparison,
-        projectPair: (expected, actual) => (
-          projectCharacterizationManifestPairBytesForComparison(expected, actual, {
-            actualApplicationOrigin: applicationOrigin,
-          })
-        ),
-      }),
-      reconcileBaselineArtifact({
-        baselineFile: path.join(baselineDirectory, "viewport.png"),
-        actual: screenshot,
-      }),
-    ]);
-    const primaryFailures = primaryReconciliations
-      .filter((result): result is PromiseRejectedResult => result.status === "rejected")
-      .map((result) => result.reason);
-    if (primaryFailures.length) {
-      throw new AggregateError(
-        primaryFailures,
-        `Browser characterization did not match for ${testInfo.project.name}/${route.id}.`,
-      );
-    }
-
-    // Never publish a new sidecar next to a primary artifact that failed its
-    // immutable comparison. This keeps a partial retry distinguishable from
-    // an accepted three-part baseline.
-    await reconcileBaselineArtifact({
-      baselineFile: path.join(baselineDirectory, "console.json"),
-      actual: consoleSidecar,
-    });
-    // Provenance includes the aggregate raw-artifact digest. Reconcile it
-    // only after the current route's three immutable artifacts exist so the
-    // final route can publish a complete inventory on first capture.
-    await reconcileBrowserBaselineProvenance(page);
-  });
-
   return {
     finalUrl: new URL(finalUrl),
     manifest,
+    manifestBytes,
+    requestGuard,
+    screenshot,
   };
+}
+
+async function persistRawProcessSample(options: {
+  processIndex: number;
+  sample: Awaited<ReturnType<typeof captureCharacterizationSample>>;
+  testInfo: TestInfo;
+}) {
+  const { processIndex, sample, testInfo } = options;
+  const rawDirectory = testInfo.outputPath("process-quorum");
+  await mkdir(rawDirectory, { recursive: true });
+  const manifestPath = path.join(
+    rawDirectory,
+    `process-${processIndex + 1}.characterization.raw.json`,
+  );
+  const screenshotPath = path.join(
+    rawDirectory,
+    `process-${processIndex + 1}.viewport.raw.png`,
+  );
+  await Promise.all([
+    writeFile(manifestPath, sample.manifestBytes),
+    writeFile(screenshotPath, sample.screenshot),
+  ]);
+  await Promise.all([
+    testInfo.attach(`process-quorum/process-${processIndex + 1}/characterization.json`, {
+      path: manifestPath,
+      contentType: "application/json",
+    }),
+    testInfo.attach(`process-quorum/process-${processIndex + 1}/viewport.png`, {
+      path: screenshotPath,
+      contentType: "image/png",
+    }),
+  ]);
+}
+
+function assertExactReadOnlyCharacterizationRoute(route: CharacterizationRoute) {
+  const exact = EXACT_READ_ONLY_CHARACTERIZATION_ROUTES.some((expected) => (
+    route.id === expected.id
+    && route.kind === expected.kind
+    && route.requestPath === expected.requestPath
+  ));
+  if (!exact) {
+    throw new Error(
+      "Independent Chromium process replay is restricted to the exact 14 read-only characterization routes.",
+    );
+  }
+}
+
+async function installReadOnlyRequestGuard(page: Page, applicationOrigin: string) {
+  const blocked: Array<{
+    external: boolean;
+    method: string;
+    nextAction: boolean;
+    resourceType: string;
+  }> = [];
+  await page.route("**/*", async (route) => {
+    const request = route.request();
+    const external = requestOrigin(request) !== applicationOrigin;
+    const nextAction = typeof request.headers()["next-action"] === "string";
+    const permitted = permitsCharacterizationReplayRequest({
+      applicationOrigin,
+      headers: request.headers(),
+      method: request.method(),
+      resourceType: request.resourceType(),
+      url: request.url(),
+    });
+    if (permitted) {
+      await route.fallback();
+      return;
+    }
+    blocked.push({
+      external,
+      method: request.method(),
+      nextAction,
+      resourceType: request.resourceType(),
+    });
+    await route.abort("blockedbyclient");
+  });
+  return { blocked };
+}
+
+function requestOrigin(request: PlaywrightRequest) {
+  try {
+    return new URL(request.url()).origin;
+  } catch {
+    return "<invalid-origin>";
+  }
+}
+
+function assertReadOnlyCharacterizationSample(
+  sample: Awaited<ReturnType<typeof captureCharacterizationSample>>,
+) {
+  const network = sample.manifest.network;
+  const safe = sample.requestGuard.blocked.length === 0
+    && network.serverActionCount === 0
+    && network.serverActions.length === 0
+    && network.requests.every((request) => (
+      request.method === "GET"
+      && request.serverAction.present === false
+      && request.postData === null
+    ));
+  if (!safe) {
+    throw new Error(
+      "Public characterization process replay was blocked because the route emitted a side-effecting, Server Action, credential-bearing external, or non-GET request.",
+    );
+  }
 }
 
 export async function canonicalDom(page: Page): Promise<CanonicalDomNode | null> {

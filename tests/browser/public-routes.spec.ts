@@ -39,10 +39,10 @@ const publicRoutes: CharacterizationRoute[] = [
 
 test.describe("public route characterization", () => {
   for (const route of publicRoutes) {
-    test(`${route.id} preserves its public route`, async ({ guardedPage }, testInfo) => {
+    test(`${route.id} preserves its public route`, async ({ guardedPageQuorum }, testInfo) => {
       const requested = new URL(route.requestPath, "https://characterization.invalid");
       await captureCharacterization({
-        page: guardedPage,
+        pages: guardedPageQuorum,
         route,
         testInfo,
         validateNavigation(finalUrl) {
