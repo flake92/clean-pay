@@ -178,6 +178,232 @@ test.describe("immutable browser baseline policy", () => {
     }
   });
 
+  test("waits for an already-started application Server Action to finish", async ({ page }) => {
+    const origin = "http://server-action-finish.test";
+    let releaseAction!: () => void;
+    const actionBlocked = new Promise<void>((resolve) => { releaseAction = resolve; });
+    await page.route(`${origin}/**`, async (route) => {
+      if (new URL(route.request().url()).pathname === "/action") {
+        await actionBlocked;
+        await route.fulfill({ body: "action-result", status: 200 });
+        return;
+      }
+      await route.fulfill({ body: "<!doctype html><title>action recorder</title>", contentType: "text/html" });
+    });
+    const recorder = recordNetwork(page, origin, {
+      serverActionTerminalTimeoutMs: 1_000,
+    });
+    await page.goto(origin, { waitUntil: "domcontentloaded" });
+    const requestStarted = page.waitForRequest((request) => (
+      request.method() === "POST" && new URL(request.url()).pathname === "/action"
+    ));
+    await page.evaluate(() => {
+      void fetch("/action", {
+        method: "POST",
+        headers: { "next-action": "synthetic-action" },
+        body: "synthetic-payload",
+      });
+    });
+    await requestStarted;
+
+    let terminalObserved = false;
+    const waiting = recorder.awaitStartedServerActions().then(() => {
+      terminalObserved = true;
+    });
+    await page.waitForTimeout(25);
+    expect(terminalObserved).toBe(false);
+    releaseAction();
+    await waiting;
+
+    const entries = await recorder.finish();
+    const action = entries.find((entry) => requestUrlPathname(entry) === "/action");
+    expect(action?.serverAction.present).toBe(true);
+    expect(action?.response?.status).toBe(200);
+    expect(action?.failure).toBeNull();
+  });
+
+  test("records a failed application Server Action as terminal", async ({ page }) => {
+    const origin = "http://server-action-failure.test";
+    await page.route(`${origin}/**`, async (route) => {
+      if (new URL(route.request().url()).pathname === "/action") {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+        await route.abort("failed");
+        return;
+      }
+      await route.fulfill({ body: "<!doctype html><title>action recorder</title>", contentType: "text/html" });
+    });
+    const recorder = recordNetwork(page, origin, {
+      serverActionTerminalTimeoutMs: 1_000,
+    });
+    await page.goto(origin, { waitUntil: "domcontentloaded" });
+    const requestStarted = page.waitForRequest((request) => (
+      request.method() === "POST" && new URL(request.url()).pathname === "/action"
+    ));
+    await page.evaluate(() => {
+      void fetch("/action", {
+        method: "POST",
+        headers: { "next-action": "synthetic-action" },
+        body: "synthetic-payload",
+      }).catch(() => {});
+    });
+    await requestStarted;
+    await recorder.awaitStartedServerActions();
+
+    const entries = await recorder.finish();
+    const action = entries.find((entry) => requestUrlPathname(entry) === "/action");
+    expect(action?.response).toBeNull();
+    expect(action?.failure?.errorText.bytes).toBeGreaterThan(0);
+  });
+
+  test("fails closed when an application Server Action never becomes terminal", async ({ page }) => {
+    const origin = "http://server-action-timeout.test";
+    let releaseAction!: () => void;
+    const actionBlocked = new Promise<void>((resolve) => { releaseAction = resolve; });
+    await page.route(`${origin}/**`, async (route) => {
+      if (new URL(route.request().url()).pathname === "/action") {
+        await actionBlocked;
+        await route.abort("failed");
+        return;
+      }
+      await route.fulfill({ body: "<!doctype html><title>action recorder</title>", contentType: "text/html" });
+    });
+    const recorder = recordNetwork(page, origin, {
+      serverActionTerminalTimeoutMs: 50,
+    });
+    try {
+      await page.goto(origin, { waitUntil: "domcontentloaded" });
+      const requestStarted = page.waitForRequest((request) => (
+        request.method() === "POST" && new URL(request.url()).pathname === "/action"
+      ));
+      await page.evaluate(() => {
+        void fetch("/action", {
+          method: "POST",
+          headers: { "next-action": "synthetic-action" },
+          body: "synthetic-payload",
+        }).catch(() => {});
+      });
+      await requestStarted;
+
+      await expect(recorder.awaitStartedServerActions()).rejects.toThrow(
+        "application Server Action request(s) to reach a terminal state",
+      );
+    } finally {
+      releaseAction();
+      await page.waitForTimeout(25);
+      await recorder.finish();
+    }
+  });
+
+  test("does not await ordinary or external POST transports", async ({ page }) => {
+    const origin = "http://server-action-scope.test";
+    const externalOrigin = "http://server-action-external.test";
+    let releaseBlocked!: () => void;
+    const blocked = new Promise<void>((resolve) => { releaseBlocked = resolve; });
+    await page.route("**/*", async (route) => {
+      const request = route.request();
+      const url = new URL(request.url());
+      if (url.origin === externalOrigin && request.method() === "OPTIONS") {
+        await route.fulfill({
+          status: 204,
+          headers: {
+            "access-control-allow-headers": "next-action",
+            "access-control-allow-methods": "POST",
+            "access-control-allow-origin": origin,
+          },
+        });
+        return;
+      }
+      if (url.pathname === "/ordinary" || url.origin === externalOrigin) {
+        await blocked;
+        await route.abort("failed");
+        return;
+      }
+      await route.fulfill({ body: "<!doctype html><title>action recorder</title>", contentType: "text/html" });
+    });
+    const recorder = recordNetwork(page, origin, {
+      serverActionTerminalTimeoutMs: 50,
+    });
+    try {
+      await page.goto(origin, { waitUntil: "domcontentloaded" });
+      const ordinaryStarted = page.waitForRequest((request) => (
+        request.method() === "POST" && new URL(request.url()).pathname === "/ordinary"
+      ));
+      await page.evaluate(() => {
+        void fetch("/ordinary", { method: "POST", body: "ordinary" }).catch(() => {});
+      });
+      await ordinaryStarted;
+      await expect(recorder.awaitStartedServerActions()).resolves.toBeUndefined();
+
+      const externalStarted = page.waitForRequest((request) => (
+        request.method() === "POST" && new URL(request.url()).origin
+          === "http://server-action-external.test"
+      ));
+      await page.evaluate((externalUrl) => {
+        void fetch(externalUrl, {
+          method: "POST",
+          headers: { "next-action": "synthetic-action" },
+          body: "external",
+        }).catch(() => {});
+      }, `${externalOrigin}/action`);
+      await externalStarted;
+      await expect(recorder.awaitStartedServerActions()).resolves.toBeUndefined();
+    } finally {
+      releaseBlocked();
+      await page.waitForTimeout(25);
+      await recorder.finish();
+    }
+  });
+
+  test("awaits only Server Actions started before the checkpoint snapshot", async ({ page }) => {
+    const origin = "http://server-action-snapshot.test";
+    let releaseFirst!: () => void;
+    let releaseSecond!: () => void;
+    const firstBlocked = new Promise<void>((resolve) => { releaseFirst = resolve; });
+    const secondBlocked = new Promise<void>((resolve) => { releaseSecond = resolve; });
+    await page.route(`${origin}/**`, async (route) => {
+      const pathname = new URL(route.request().url()).pathname;
+      if (pathname === "/first" || pathname === "/second") {
+        await (pathname === "/first" ? firstBlocked : secondBlocked);
+        await route.fulfill({ body: pathname, status: 200 });
+        return;
+      }
+      await route.fulfill({ body: "<!doctype html><title>action recorder</title>", contentType: "text/html" });
+    });
+    const recorder = recordNetwork(page, origin, {
+      serverActionTerminalTimeoutMs: 1_000,
+    });
+    await page.goto(origin, { waitUntil: "domcontentloaded" });
+    const firstStarted = page.waitForRequest((request) => (
+      new URL(request.url()).pathname === "/first"
+    ));
+    await page.evaluate(() => {
+      void fetch("/first", {
+        method: "POST",
+        headers: { "next-action": "first-action" },
+        body: "first",
+      });
+    });
+    await firstStarted;
+    const checkpointWait = recorder.awaitStartedServerActions();
+
+    const secondStarted = page.waitForRequest((request) => (
+      new URL(request.url()).pathname === "/second"
+    ));
+    await page.evaluate(() => {
+      void fetch("/second", {
+        method: "POST",
+        headers: { "next-action": "second-action" },
+        body: "second",
+      });
+    });
+    await secondStarted;
+    releaseFirst();
+    await checkpointWait;
+    releaseSecond();
+    const entries = await recorder.finish();
+    expect(entries.filter((entry) => entry.serverAction.present)).toHaveLength(2);
+  });
+
   test("refuses to overwrite an existing baseline artifact", async () => {
     const temporaryDirectory = await mkdtemp(
       path.join(tmpdir(), "clean-pay-browser-baseline-"),
