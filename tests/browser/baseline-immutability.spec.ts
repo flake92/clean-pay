@@ -245,6 +245,109 @@ test.describe("immutable browser baseline policy", () => {
     ]);
   });
 
+  test("projects repeated exact enriched readiness cycles and nothing adjacent", () => {
+    const cycle = enrichedReadinessCycle();
+    const mutation = enrichedReadinessLedgerEntry({
+      effect: "purchase_initialized",
+      method: "POST",
+      pathname: "/api/v1/public/subscription/purchase",
+      sequence: 1,
+    });
+    const secondCycleOrder = [0, 3, 1, 2, 4, 5, 6];
+    const repeated = [
+      mutation,
+      ...cycle.map((entry) => ({ ...entry, sequence: Number(entry.sequence) + 1 })),
+      ...secondCycleOrder.map((cycleIndex, index) => ({
+        ...cycle[cycleIndex]!,
+        sequence: index + 9,
+      })),
+      { ...mutation, sequence: 16 },
+    ];
+
+    expect(projectCharacterizationManifestForComparison({
+      providerEffects: { entries: repeated },
+    })).toEqual({ providerEffects: { entries: [
+      mutation,
+      { ...mutation, sequence: 2 },
+    ] } });
+  });
+
+  test("keeps enriched readiness contract near misses fail-closed", () => {
+    const nearMisses = [
+      enrichedReadinessLedgerEntry(),
+      enrichedReadinessLedgerEntry({ body_contract: { encoding: "json", value: {} } }),
+      enrichedReadinessLedgerEntry({ idempotency_key_contract: {} }),
+      enrichedReadinessLedgerEntry({
+        credential_contract: {
+          authorization_scheme: null,
+          cookie_names: [],
+          header_names: ["authorization"],
+        },
+      }),
+      enrichedReadinessLedgerEntry({
+        body_bytes: 2,
+        body_contract: { encoding: "json", value: { unexpected: true } },
+        body_sha256: "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+        credential_contract: {
+          authorization_scheme: null,
+          cookie_names: [],
+          header_names: ["x-remnashop-auth-service-key"],
+        },
+        effect: "probe_contract",
+        method: "POST",
+        pathname: "/api/v1/public/auth/identify",
+      }),
+      enrichedReadinessLedgerEntry({
+        effect: "jwks_read",
+        pathname: "/.well-known/jwks.json?unexpected=1",
+        service: "telegram-oidc",
+      }),
+      enrichedReadinessLedgerEntry({
+        effect: "jwks_read",
+        pathname: "/.well-known/jwks.json",
+        service: "telegram-oidc",
+      }),
+      enrichedReadinessLedgerEntry({
+        body_bytes: 2,
+        body_contract: { encoding: "json", value: {} },
+        body_sha256: "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+        credential_contract: {
+          authorization_scheme: null,
+          cookie_names: [],
+          header_names: ["x-remnashop-auth-service-key"],
+        },
+        effect: "probe_contract",
+        method: "POST",
+        pathname: "/api/v1/public/auth/identify",
+      }),
+    ];
+
+    for (const entry of nearMisses) {
+      expect(projectCharacterizationManifestForComparison({
+        providerEffects: { entries: [entry] },
+      })).toEqual({ providerEffects: { entries: [entry] } });
+    }
+  });
+
+  test("keeps an exact enriched readiness tail or corrupted full cycle", () => {
+    const cycle = enrichedReadinessCycle();
+    const tailWithoutHead = cycle.slice(2).map((entry, index) => ({
+      ...entry,
+      sequence: index + 1,
+    }));
+    const corruptedCycle = cycle.map((entry) => ({ ...entry }));
+    corruptedCycle[1] = {
+      ...corruptedCycle[1]!,
+      effect: "unexpected_read_metadata",
+    };
+
+    for (const entries of [tailWithoutHead, corruptedCycle]) {
+      expect(projectCharacterizationManifestForComparison({
+        providerEffects: { entries },
+      })).toEqual({ providerEffects: { entries } });
+    }
+  });
+
   test("projects only validated journey source identity while pinning contracts", () => {
     const baseline = { source: journeySourceProvenance("a", "b", "baseline:tag") };
     const candidate = { source: journeySourceProvenance("c", "d", "candidate:tag") };
@@ -775,6 +878,73 @@ function readinessLedgerEntry(overrides: Partial<{
     service: "remnashop",
     ...overrides,
   };
+}
+
+function enrichedReadinessLedgerEntry(overrides: Partial<{
+  body_bytes: number;
+  body_contract: unknown;
+  body_sha256: string;
+  credential_contract: unknown;
+  effect: string;
+  idempotency_key_contract: unknown;
+  method: string;
+  pathname: string;
+  sequence: number;
+  service: string;
+}> = {}) {
+  return {
+    ...readinessLedgerEntry(),
+    body_contract: null as unknown,
+    credential_contract: {
+      authorization_scheme: null,
+      cookie_names: [],
+      header_names: [],
+    } as unknown,
+    idempotency_key_contract: null as unknown,
+    ...overrides,
+  };
+}
+
+function enrichedReadinessCycle() {
+  return [
+    enrichedReadinessLedgerEntry({ sequence: 1 }),
+    enrichedReadinessLedgerEntry({
+      credential_contract: {
+        authorization_scheme: "Bearer",
+        cookie_names: [],
+        header_names: ["authorization"],
+      },
+      effect: "read_metadata",
+      pathname: "/api/system/metadata",
+      sequence: 2,
+      service: "remnawave",
+    }),
+    enrichedReadinessLedgerEntry({
+      effect: "jwks_read",
+      pathname: "/.well-known/jwks.json",
+      sequence: 3,
+      service: "telegram-oidc",
+    }),
+    ...[
+      "/api/v1/public/auth/email/start",
+      "/api/v1/public/auth/identify",
+      "/api/v1/public/auth/service-session",
+      "/api/v1/public/auth/notification-preferences",
+    ].map((pathname, index) => enrichedReadinessLedgerEntry({
+      body_bytes: 2,
+      body_contract: { encoding: "json", value: {} },
+      body_sha256: "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+      credential_contract: {
+        authorization_scheme: null,
+        cookie_names: [],
+        header_names: ["x-remnashop-auth-service-key"],
+      },
+      effect: "probe_contract",
+      method: "POST",
+      pathname,
+      sequence: index + 4,
+    })),
+  ];
 }
 
 function journeySourceProvenance(
