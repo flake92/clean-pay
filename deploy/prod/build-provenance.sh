@@ -16,8 +16,9 @@ revision=$4
 [ "$deploy_source" = "build" ] || exit 0
 
 if [ "$release" = "local" ] || [ "$revision" = "local" ]; then
-  [ "$release" = "local" ] && [ "$revision" = "local" ] \
-    || fail "CLEAN_PAY_RELEASE and CLEAN_PAY_REVISION must both be local"
+  if [ "$release" != "local" ] || [ "$revision" != "local" ]; then
+    fail "CLEAN_PAY_RELEASE and CLEAN_PAY_REVISION must both be local"
+  fi
   printf '%s\n' \
     "WARNING: building local/local images with UNVERIFIED provenance; do not publish or treat them as reviewed artifacts." >&2
   exit 0

@@ -4,7 +4,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   createPostgresPool,
   postgresPoolMetrics,
-} from "../../../deploy/prod/database-pool.mjs";
+} from "../../../runtime/database-pool.mjs";
 
 const realDatabaseUrl = process.env.REAL_DATABASE_URL;
 const describeWithPostgres = realDatabaseUrl ? describe : describe.skip;

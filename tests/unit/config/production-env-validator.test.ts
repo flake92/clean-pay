@@ -13,12 +13,12 @@ import { spawnSync } from "node:child_process";
 import { parse as parsePgConnectionString } from "pg-connection-string";
 import { describe, expect, it } from "vitest";
 
-import { getEnv } from "@/backend/config/env";
+import { createEnvForTests as getEnv } from "@/backend/config/env";
 import {
   parseProductionEnvironmentFile,
   PRODUCTION_ENVIRONMENT_FILE_NAMES,
   validateProductionEnvironment,
-} from "../../../deploy/prod/production-env-rules.mjs";
+} from "../../../runtime/production-env-rules.mjs";
 import {
   materializeProductionRoleEnvironmentFiles,
   PRODUCTION_ROLE_ENVIRONMENT_NAMES,
@@ -214,7 +214,7 @@ describe("production env validator", () => {
   it("keeps the production env example limited to variables used by production code", () => {
     const source = [
       "deploy/prod/docker-compose.yml",
-      "deploy/prod/production-env-rules.mjs",
+      "runtime/production-env-rules.mjs",
       "deploy/prod/validate-env.mjs",
       "deploy/prod/prod.mjs",
       "deploy/prod/prepare-remnashop-rollout.sh",

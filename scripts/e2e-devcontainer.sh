@@ -5,7 +5,7 @@ root_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 compose_file="$root_dir/.devcontainer/docker-compose.yml"
 host_devcontainer_dir="${CLEAN_PAY_HOST_DEVCONTAINER_DIR:-}"
 
-project="${CLEAN_PAY_DEVCONTAINER_PROJECT:-clean-pay-dev}"
+project="${CLEAN_PAY_DEVCONTAINER_PROJECT:?CLEAN_PAY_DEVCONTAINER_PROJECT must be set by the E2E runner}"
 base_url="${CLEAN_PAY_E2E_BASE_URL:-http://localhost:4000}"
 mailpit_default_url="http://localhost:8025"
 oidc_default_url="http://localhost:8090"
@@ -201,7 +201,7 @@ prepare_remnashop_payment_rollout_gate() {
   worker_image="$(container_image_id remnashop-worker)"
   scheduler_image="$(container_image_id remnashop-scheduler)"
 
-  if [[ "$api_image" != "$worker_image" || "$api_image" != "$scheduler_image" ]]; then
+  if [[ "$api_image" != "$worker_image" ]] || [[ "$api_image" != "$scheduler_image" ]]; then
     echo "Remnashop API, worker and scheduler must use the same image before the payment rollout gate is opened" >&2
     echo "API image: $api_image" >&2
     echo "Worker image: $worker_image" >&2
@@ -290,7 +290,10 @@ install_node_dependencies() {
 is_valid_host_devcontainer_dir() {
   local candidate="$1"
 
-  docker run --rm -v "$candidate/telegram-oidc-mock:/mock:ro" node:24-alpine ls /mock/server.js >/dev/null 2>&1
+  docker run --rm \
+    -v "$candidate/telegram-oidc-mock:/mock:ro" \
+    node:24-alpine@sha256:d32cdf619f63fe0471182d08996dd516c6275bb5fd31ae06e55a570bd9e1ad43 \
+    ls /mock/server.js >/dev/null 2>&1
 }
 
 workspace_mount_sources() {
@@ -443,7 +446,7 @@ prepare_remnashop_payment_rollout_gate
 log_step "Preparing Clean Pay application"
 install_node_dependencies
 npm run prisma:generate
-npx prisma migrate deploy
+node "$root_dir/node_modules/prisma/build/index.js" migrate deploy
 
 log_step "Resetting e2e rate-limit counters"
 redis-cli -h redis --scan --pattern 'clean-pay:rate-limit:*' | while IFS= read -r key; do
@@ -471,4 +474,6 @@ timeout --signal=TERM --kill-after=10s 360s \
   env CLEAN_PAY_E2E_BASE_URL="$base_url" \
   CLEAN_PAY_E2E_MAILPIT_URL="$mailpit_url" \
   CLEAN_PAY_E2E_OIDC_URL="$oidc_url" \
-  npx vitest run --config "$root_dir/config/vitest/vitest.e2e.config.mts" --configLoader native
+  node "$root_dir/node_modules/vitest/vitest.mjs" run \
+    --config "$root_dir/config/vitest/vitest.e2e.config.mts" \
+    --configLoader native

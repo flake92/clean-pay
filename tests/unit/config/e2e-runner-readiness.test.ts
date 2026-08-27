@@ -62,6 +62,14 @@ describe("devcontainer e2e runner readiness", () => {
     }
   });
 
+  it("binds every configurable development publication to host loopback", () => {
+    const configuredPorts = [...compose.matchAll(
+      /^\s+- "127\.0\.0\.1:\$\{(CLEAN_PAY_DEVCONTAINER_[A-Z_]+):-([0-9]+)\}:([0-9]+)"$/gm,
+    )].map((match) => [match[1], match[2], match[3]]).sort();
+
+    expect(configuredPorts).toEqual([...hostPortContract].sort());
+  });
+
   it("keeps service URLs container-local when host ports are isolated", () => {
     expect(runner).toContain('name === "CLEAN_PAY_E2E_BASE_URL"');
     expect(runner).toContain('? "http://localhost:4000"');
@@ -69,6 +77,19 @@ describe("devcontainer e2e runner readiness", () => {
     expect(runner).toContain('? "http://smtp:8025"');
     expect(runner).toContain('name === "CLEAN_PAY_E2E_OIDC_URL"');
     expect(runner).toContain('? "http://telegram-oidc-mock:8090"');
+  });
+
+  it("uses a unique one-shot project and ephemeral ports by default", () => {
+    expect(runner).toContain("`clean-pay-e2e-${process.pid}-${randomUUID().slice(0, 8)}`");
+    expect(runner).toContain('(explicitProjectName ? fallback : "0")');
+    expect(runner).not.toContain('?? "clean-pay-dev"');
+    expect(shellRunner).toContain(
+      "CLEAN_PAY_DEVCONTAINER_PROJECT:?CLEAN_PAY_DEVCONTAINER_PROJECT must be set by the E2E runner",
+    );
+    expect(ciWorkflow).toContain(
+      "CLEAN_PAY_DEVCONTAINER_PROJECT: clean-pay-e2e-${{ github.run_id }}-${{ github.run_attempt }}",
+    );
+    expect(ciWorkflow).toContain('-p "$CLEAN_PAY_DEVCONTAINER_PROJECT"');
   });
 
   it("allows plaintext SMTP only inside the explicit Mailpit fixture", () => {

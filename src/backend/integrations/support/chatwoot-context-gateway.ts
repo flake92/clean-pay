@@ -5,8 +5,8 @@ import { prisma } from "@/backend/database/prisma";
 import { ServiceError } from "@/backend/errors/service-error";
 import {
   getAuthorizedRemnashopTokens,
-  remnashopRequest,
 } from "@/backend/integrations/remnashop/client";
+import { remnashopValidatedRequest } from "@/backend/integrations/remnashop/api-client-runtime";
 import { getCurrentSession } from "@/backend/integrations/sessions/web-session-service";
 import type { CurrentSubscriptionResponse } from "@/shared/domain/subscriptions";
 
@@ -33,7 +33,7 @@ export function createProductionChatwootContextGateway(
       );
     }
 
-    const subscription = await remnashopRequest<CurrentSubscriptionResponse | null>(
+    const subscription = await remnashopValidatedRequest<CurrentSubscriptionResponse | null>(
       "/subscription/current",
       { accessToken },
     );

@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "baselineId": "f5cb6f543d85256e7733a1ade6a4f451d86cf378-deterministic-v1",
+  "status": "invalid_for_gate",
+  "retainedAs": "immutable_parallel_capture",
+  "reason": [
+    "parallel Chromium GPU raster varied 60 color channels by at most 2 values",
+    "parallel initial capture admitted timing-dependent static-route request state"
+  ],
+  "source": {
+    "commit": "f5cb6f543d85256e7733a1ade6a4f451d86cf378",
+    "tree": "6647fc51c61018ba46aae95da21e534434028fbe",
+    "pristineArchiveSha256": "8f424f5d4839d2aa421849bb2c7f8f48420ee675",
+    "productionImage": {
+      "tag": "clean-pay:baseline-f5cb6f543d85-prod-pristine",
+      "digest": "sha256:e0640e36c6221ba8f2dc174ebbea3961fda59f6320aad56d2f071b1c51a75ffc"
+    }
+  },
+  "runtime": {
+    "engine": "chromium",
+    "browserVersion": "151.0.7922.34",
+    "playwrightVersion": "1.62.1",
+    "chromiumRevision": "1234"
+  },
+  "artifactSet": {
+    "artifactCount": 126,
+    "aggregateSha256": "2c8eb89a6e5e7e5a1ae3d9abe55ec0ab8cf03498f95ec4ecd72418facbae30f2",
+    "aggregateFormat": "sorted path\\0bytes\\0sha256\\n"
+  },
+  "canonicalReplacement": "f5cb6f543d85256e7733a1ade6a4f451d86cf378-deterministic-v2"
+}

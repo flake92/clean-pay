@@ -7,6 +7,7 @@ const buildId = process.env.CLEAN_PAY_BUILD_ID?.trim()
 
 const nextConfig: NextConfig = {
   output: "standalone",
+  poweredByHeader: false,
   experimental: {
     serverActions: {
       // Keep the mutation envelope aligned with the former BFF contract. The

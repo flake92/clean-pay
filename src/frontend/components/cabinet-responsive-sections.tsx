@@ -46,7 +46,7 @@ export function CabinetDevicesSection({
   return (
     <div className="col-12 xl:col-6">
       <section className="card cabinet-devices-section" aria-labelledby="cabinet-devices-title">
-        <h5 id="cabinet-devices-title">Устройства</h5>
+        <h2 className="text-xl" id="cabinet-devices-title">Устройства</h2>
         {deviceViews.length > 0 ? (
           <div className="cabinet-device-list">
             {deviceViews.map(({ device, presentation, deleteLabel }) => (
@@ -110,7 +110,7 @@ export function CabinetPaymentHistorySection({
   return (
     <div className="col-12">
       <section className="card" aria-labelledby="cabinet-payments-title">
-        <h5 id="cabinet-payments-title">История платежей</h5>
+        <h2 className="text-xl" id="cabinet-payments-title">История платежей</h2>
         {notice ? <Message severity={notice.severity} text={notice.text} /> : null}
         {payments.length > 0 ? (
           <div className="cabinet-mobile-list cabinet-payment-list">

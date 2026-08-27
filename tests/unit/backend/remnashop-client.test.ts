@@ -6,6 +6,10 @@ const loggerMock = vi.hoisted(() => ({
   error: vi.fn(),
 }));
 
+const metricsMock = vi.hoisted(() => ({
+  recordUpstreamRequest: vi.fn(),
+}));
+
 const lifecycleMock = vi.hoisted(() => ({
   acquireRemnashopTokensForSession: vi.fn(),
 }));
@@ -53,6 +57,11 @@ vi.mock("@/backend/observability/auth-debug-log", () => ({
   authDebugLog: vi.fn(),
 }));
 
+vi.mock("@/backend/observability/metrics", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@/backend/observability/metrics")>(),
+  recordUpstreamRequest: metricsMock.recordUpstreamRequest,
+}));
+
 vi.mock("@/backend/database/prisma", () => ({ prisma: prismaMock }));
 
 vi.mock("@/backend/integrations/auth/local-user-merge-service", () => userMergeMock);
@@ -72,6 +81,7 @@ vi.mock("@/backend/integrations/remnashop/session-token-lifecycle", () => ({
 
 import {
   getJwtExpiresAt,
+  getRemnashopMe,
   getRemnashopUserIdFromAccessToken,
   getRemnashopNotificationPreferences,
   protectRemnashopToken,
@@ -93,7 +103,10 @@ import {
   getAuthorizedRemnashopTokens,
   recoverRemnashopTelegramSession,
 } from "@/app/_composition/telegram-session-recovery";
+import { resetEnvForTests } from "@/backend/config/env";
 import { ServiceError } from "@/backend/errors/service-error";
+import { remnashopValidatedRequest } from "@/backend/integrations/remnashop/api-client-runtime";
+import { decodeRemnashopSubscriptionIdentity } from "@/backend/integrations/remnashop/response-decoders";
 import { getCurrentSession } from "@/backend/integrations/sessions/web-session-service";
 
 function jwt(payload: object) {
@@ -286,6 +299,8 @@ function mergeResponse({
 
 describe("remnashop client", () => {
   beforeEach(() => {
+    vi.unstubAllEnvs();
+    resetEnvForTests();
     vi.clearAllMocks();
     prismaMock.$queryRaw.mockReset();
     prismaMock.$transaction.mockReset();
@@ -509,6 +524,7 @@ describe("remnashop client", () => {
       .rejects.toMatchObject({ code: "INTERNAL_ERROR" });
 
     vi.stubEnv("REMNASHOP_API_KEY", "");
+    resetEnvForTests();
     await expect(remnashopMergeUsers({
       sourceUserId: "1",
       targetUserId: "2",
@@ -820,6 +836,147 @@ describe("remnashop client", () => {
         refreshToken: "refresh.jwt",
       },
     });
+  });
+
+  it("projects a validated profile and records one outcome after decoding", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      response({
+        body: {
+          telegram_id: 123456,
+          auth_type: "telegram",
+          email: "owner@example.com",
+          is_email_verified: true,
+          pending_email: null,
+          name: "Owner",
+          username: "clean_user",
+          language: "ru",
+          provider_secret: "must-not-project",
+        },
+      }),
+    );
+
+    await expect(getRemnashopMe("access-token")).resolves.toEqual({
+      telegram_id: 123456,
+      auth_type: "telegram",
+      email: "owner@example.com",
+      is_email_verified: true,
+      pending_email: null,
+      name: "Owner",
+      username: "clean_user",
+      language: "ru",
+    });
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({ redirect: "error" });
+    expect(metricsMock.recordUpstreamRequest).toHaveBeenCalledOnce();
+    expect(metricsMock.recordUpstreamRequest).toHaveBeenCalledWith({
+      service: "remnashop",
+      operation: "/auth/me",
+      outcome: "success",
+      durationMs: expect.any(Number),
+    });
+  });
+
+  it("fails closed on a malformed validated profile and records one outcome", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      response({
+        body: {
+          telegram_id: "not-a-number",
+          auth_type: "telegram",
+          email: "owner@example.com",
+          is_email_verified: true,
+          pending_email: null,
+          name: "Owner",
+          username: "clean_user",
+          language: "ru",
+        },
+      }),
+    );
+
+    await expect(getRemnashopMe("access-token")).rejects.toMatchObject({
+      code: "UPSTREAM_UNAVAILABLE",
+      status: 502,
+    });
+    expect(metricsMock.recordUpstreamRequest).toHaveBeenCalledOnce();
+    expect(metricsMock.recordUpstreamRequest).toHaveBeenCalledWith(
+      expect.objectContaining({
+        service: "remnashop",
+        operation: "/auth/me",
+        outcome: "unavailable",
+      }),
+    );
+  });
+
+  it("projects a partial subscription identity and records one outcome after decoding", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      response({
+        body: {
+          user_remna_id: "rw-1",
+          status: "ACTIVE",
+          provider_secret: "must-not-project",
+        },
+      }),
+    );
+
+    await expect(remnashopValidatedRequest(
+      "/subscription/current",
+      { accessToken: "access-token" },
+      decodeRemnashopSubscriptionIdentity,
+    )).resolves.toEqual({ user_remna_id: "rw-1" });
+    expect(metricsMock.recordUpstreamRequest).toHaveBeenCalledOnce();
+    expect(metricsMock.recordUpstreamRequest).toHaveBeenCalledWith(
+      expect.objectContaining({
+        service: "remnashop",
+        operation: "/subscription/current",
+        outcome: "success",
+      }),
+    );
+  });
+
+  it("fails closed once for malformed and oversized subscription identities", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      response({ body: {} }),
+    );
+
+    await expect(remnashopValidatedRequest(
+      "/subscription/current",
+      { accessToken: "access-token" },
+      decodeRemnashopSubscriptionIdentity,
+    )).rejects.toMatchObject({
+      code: "UPSTREAM_UNAVAILABLE",
+      status: 502,
+    });
+    expect(metricsMock.recordUpstreamRequest).toHaveBeenCalledOnce();
+    expect(metricsMock.recordUpstreamRequest).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        service: "remnashop",
+        operation: "/subscription/current",
+        outcome: "unavailable",
+      }),
+    );
+
+    metricsMock.recordUpstreamRequest.mockClear();
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response("{}", {
+        status: 200,
+        headers: { "content-length": String(3 * 1024 * 1024) },
+      }),
+    );
+    await expect(remnashopValidatedRequest(
+      "/subscription/current",
+      { accessToken: "access-token" },
+      decodeRemnashopSubscriptionIdentity,
+    )).rejects.toMatchObject({
+      code: "UPSTREAM_UNAVAILABLE",
+      status: 502,
+    });
+    expect(metricsMock.recordUpstreamRequest).toHaveBeenCalledOnce();
+    expect(metricsMock.recordUpstreamRequest).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        service: "remnashop",
+        operation: "/subscription/current",
+        outcome: "unavailable",
+      }),
+    );
   });
 
   it("turns invalid JSON and upstream errors into service errors", async () => {

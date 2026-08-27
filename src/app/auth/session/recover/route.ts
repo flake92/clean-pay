@@ -6,10 +6,9 @@ import {
   passkeySetupPath,
 } from "@/shared/auth/account-setup-flow";
 import { safeRedirectPath } from "@/shared/auth/redirect-policy";
-import { getEnv } from "@/backend/config/env";
-import { ServiceError } from "@/backend/errors/service-error";
+import { getEnv, ServiceError } from "@/app/_composition/platform-runtime";
 import { getAuthorizedRemnashopTokens } from "@/app/_composition/telegram-session-recovery";
-import { clearWebSession } from "@/backend/integrations/sessions/web-session-service";
+import { clearWebSession } from "@/app/_composition/web-session-runtime";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

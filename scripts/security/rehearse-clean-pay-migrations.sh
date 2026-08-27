@@ -7,8 +7,10 @@ export LC_ALL=C
 # back cleanly on both malformed data and a locked populated row.
 readonly POSTGRES_IMAGE="postgres:17-alpine@sha256:18cfe3ef5e6815560c98237d6216d1e5119702fb0f3894c8785dd58b8bbe5d73"
 readonly REHEARSAL_OUTPUT_DIR="${REHEARSAL_OUTPUT_DIR:?REHEARSAL_OUTPUT_DIR must be explicit}"
-readonly SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-readonly ROOT_DIR="$(cd -- "$SCRIPT_DIR/../.." && pwd)"
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+readonly SCRIPT_DIR
+ROOT_DIR="$(cd -- "$SCRIPT_DIR/../.." && pwd)"
+readonly ROOT_DIR
 case "$(uname -s)" in
   CYGWIN*|MINGW*|MSYS*) readonly DOCKER_PATH_CONVERSION_REQUIRED=true ;;
   *) readonly DOCKER_PATH_CONVERSION_REQUIRED=false ;;
@@ -32,7 +34,8 @@ readonly PAYMENT_RECONCILIATION_REVISION="20260718000000_add_payment_reconciliat
 readonly REFRESH_ROTATION_REVISION="20260720233000_add_refresh_token_rotation"
 readonly OWNER_FENCE_REVISION="20260813090000_add_payment_owner_change_fence"
 readonly REFRESH_RECOVERY_REVISION="20260813091000_add_remnashop_refresh_recovery"
-readonly CLEAN_PAY_HEAD="$(find "$ROOT_DIR/prisma/migrations" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' | LC_ALL=C sort | tail -n 1)"
+CLEAN_PAY_HEAD="$(find "$ROOT_DIR/prisma/migrations" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' | LC_ALL=C sort | tail -n 1)"
+readonly CLEAN_PAY_HEAD
 encrypted_fixture_file=""
 migration_stage_root=""
 migration_build_log=""
@@ -65,7 +68,7 @@ cleanup() {
       rm -rf -- "$migration_stage_root"
       ;;
   esac
-  docker rm --force "$POSTGRES_CONTAINER" >/dev/null 2>&1 || true
+  docker rm --force --volumes "$POSTGRES_CONTAINER" >/dev/null 2>&1 || true
   docker image rm "$MIGRATION_IMAGE" >/dev/null 2>&1 || true
   docker network rm "$NETWORK" >/dev/null 2>&1 || true
 }
@@ -174,7 +177,8 @@ encrypted_session_state() {
 }
 
 test -e "$ROOT_DIR/.git" || fail "Clean Pay source is not a Git checkout"
-readonly CLEAN_PAY_REVISION="$(git -C "$ROOT_DIR" rev-parse HEAD)"
+CLEAN_PAY_REVISION="$(git -C "$ROOT_DIR" rev-parse HEAD)"
+readonly CLEAN_PAY_REVISION
 [[ "$CLEAN_PAY_REVISION" =~ ^[0-9a-f]{40}$ ]] || fail "invalid Clean Pay Git revision"
 [[ "$CLEAN_PAY_HEAD" =~ ^[0-9]{14}_[a-z0-9_]+$ ]] || fail "invalid Clean Pay migration head"
 test -z "$(git -C "$ROOT_DIR" status --porcelain=v1 --untracked-files=all)" ||

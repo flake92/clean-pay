@@ -12,6 +12,10 @@ const mocks = vi.hoisted(() => ({
 vi.mock("@/backend/integrations/remnashop/client", () => ({
   getAuthorizedRemnashopTokens: mocks.getAuthorizedRemnashopTokens,
   remnashopRequest: mocks.remnashopRequest,
+  remnashopValidatedRequest: mocks.remnashopRequest,
+}));
+vi.mock("@/backend/integrations/remnashop/api-client-runtime", () => ({
+  remnashopValidatedRequest: mocks.remnashopRequest,
 }));
 
 vi.mock("@/backend/observability/audit", () => ({

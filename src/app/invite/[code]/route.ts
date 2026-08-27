@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 
-import { getEnv } from "@/backend/config/env";
-import { setReferralAttributionCookie } from "@/backend/integrations/referral/referral-attribution";
+import { getEnv } from "@/app/_composition/platform-runtime";
+import { setReferralAttributionCookie } from "@/app/_composition/referral-runtime";
 import { normalizeReferralCode } from "@/shared/domain/referrals";
 
 const registrationDestination = "/register?redirect_to=%2Ftariffs";

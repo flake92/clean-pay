@@ -5,10 +5,11 @@ import { describe, expect, it } from "vitest";
 import {
   assertNoLegacyDatabasePoolUrlParameters,
   createPostgresPool,
+  postgresPoolErrorTelemetry,
   postgresPoolMetrics,
   prismaPgAdapterOptions,
   prismaPgPoolOptions,
-} from "../../../deploy/prod/database-pool.mjs";
+} from "../../../runtime/database-pool.mjs";
 
 const connectionString = "postgresql://user:password@db.example/app?sslmode=require";
 
@@ -120,6 +121,51 @@ describe("production PrismaPg pool configuration", () => {
     });
     expect(() => postgresPoolMetrics(counters, "tenant-controlled"))
       .toThrow("Unsupported observable database role");
+  });
+
+  it("reports idle-client pool errors through an exact sanitized projection", async () => {
+    const reports: Array<Record<string, unknown>> = [];
+    const pool = createPostgresPool({
+      connectionString,
+      role: "application",
+      env: { NODE_ENV: "test" },
+      onError(metadata: Record<string, unknown>) {
+        reports.push(metadata);
+      },
+    });
+    const error = Object.assign(
+      new Error("password=private query=SELECT-private-customer"),
+      {
+        name: "DatabaseError",
+        code: "ECONNRESET",
+        connectionString: "postgresql://private:credential@database/private",
+        query: "SELECT private_customer_email FROM users",
+      },
+    );
+
+    pool.emit("error", error);
+
+    expect(reports).toEqual([{
+      role: "application",
+      errorName: "DatabaseError",
+      code: "ECONNRESET",
+    }]);
+    expect(Object.keys(reports[0]!).sort()).toEqual(["code", "errorName", "role"]);
+    expect(JSON.stringify(reports)).not.toMatch(
+      /private|credential|customer|select/iu,
+    );
+    expect(() => postgresPoolErrorTelemetry("tenant-controlled", error))
+      .toThrow("Unsupported database role");
+    expect(postgresPoolErrorTelemetry("readiness", {
+      name: "PrivateCustomerError",
+      code: "PRIVATE_CUSTOMER_CODE",
+    })).toEqual({
+      role: "readiness",
+      errorName: "Error",
+      code: "UNKNOWN",
+    });
+
+    await pool.end();
   });
 
   it.each([

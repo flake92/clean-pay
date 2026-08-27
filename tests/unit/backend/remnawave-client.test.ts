@@ -2,10 +2,16 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+  recordUpstreamRequest: vi.fn(),
 }));
 
 vi.mock("@/backend/observability/logger", () => ({
   logger: mocks.logger,
+}));
+
+vi.mock("@/backend/observability/metrics", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@/backend/observability/metrics")>(),
+  recordUpstreamRequest: mocks.recordUpstreamRequest,
 }));
 
 import {
@@ -13,6 +19,10 @@ import {
   getLiveRemnawaveSubscriptionUrl,
   synchronizeRemnawaveUserIdentity,
 } from "@/backend/integrations/remnawave/client";
+import {
+  patchRemnawaveUserIdentity,
+  requestRemnawave,
+} from "@/backend/integrations/remnawave/transport";
 
 const originalFetch = global.fetch;
 
@@ -60,6 +70,133 @@ describe("Remnawave live subscription client", () => {
       headers: expect.objectContaining({ authorization: "Bearer test-token" }),
       cache: "no-store",
     }));
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://panel.example.com/api/users/rw-1",
+      expect.objectContaining({ redirect: "error" }),
+    );
+    expect(mocks.recordUpstreamRequest).toHaveBeenCalledOnce();
+    expect(mocks.recordUpstreamRequest).toHaveBeenCalledWith({
+      service: "remnawave",
+      operation: "/users/:id",
+      outcome: "success",
+      durationMs: expect.any(Number),
+    });
+  });
+
+  it("records one success metric only after endpoint decoding", async () => {
+    global.fetch = vi.fn().mockResolvedValue(jsonResponse({
+      response: { uuid: "rw-1" },
+    }));
+    const decode = vi.fn((value: unknown) => value);
+
+    await expect(requestRemnawave("/users/rw-1", decode)).resolves.toEqual({
+      response: { uuid: "rw-1" },
+    });
+
+    expect(decode).toHaveBeenCalledOnce();
+    expect(mocks.recordUpstreamRequest).toHaveBeenCalledOnce();
+    expect(decode.mock.invocationCallOrder[0])
+      .toBeLessThan(mocks.recordUpstreamRequest.mock.invocationCallOrder[0]!);
+  });
+
+  it.each([301, 302, 307, 308])(
+    "does not replay credentials for redirect status %s and measures after cancellation",
+    async (status) => {
+      const cancel = vi.fn();
+      const response = new Response(new ReadableStream({ cancel }), {
+        status,
+        headers: { location: "https://redirect.example/credential-target" },
+      });
+      const fetchMock = vi.fn().mockResolvedValue(response);
+      global.fetch = fetchMock;
+
+      await expect(getLiveRemnawaveSubscriptionUrl({ userRemnaId: "rw-1" }))
+        .resolves.toBeNull();
+
+      expect(fetchMock).toHaveBeenCalledOnce();
+      expect(fetchMock).toHaveBeenCalledWith(
+        "https://panel.example.com/api/users/rw-1",
+        expect.objectContaining({ redirect: "error" }),
+      );
+      expect(cancel).toHaveBeenCalledOnce();
+      expect(mocks.recordUpstreamRequest).toHaveBeenCalledOnce();
+      expect(mocks.recordUpstreamRequest).toHaveBeenCalledWith(
+        expect.objectContaining({ outcome: "rejected" }),
+      );
+      expect(cancel.mock.invocationCallOrder[0])
+        .toBeLessThan(mocks.recordUpstreamRequest.mock.invocationCallOrder[0]!);
+    },
+  );
+
+  it("measures the credentialed identity PATCH once after body cancellation", async () => {
+    const cancel = vi.fn();
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(new ReadableStream({ cancel }), { status: 200 }),
+    );
+    global.fetch = fetchMock;
+
+    await expect(patchRemnawaveUserIdentity(
+      { endpoint: "https://panel.example.com/api/users", token: "test-token" },
+      { uuid: "rw-1", email: "owner@example.com", telegramId: "777" },
+    )).resolves.toEqual({ kind: "success" });
+
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://panel.example.com/api/users",
+      expect.objectContaining({
+        method: "PATCH",
+        redirect: "error",
+        body: JSON.stringify({
+          uuid: "rw-1",
+          email: "owner@example.com",
+          telegramId: 777,
+        }),
+      }),
+    );
+    expect(cancel).toHaveBeenCalledOnce();
+    expect(mocks.recordUpstreamRequest).toHaveBeenCalledOnce();
+    expect(mocks.recordUpstreamRequest).toHaveBeenCalledWith({
+      service: "remnawave",
+      operation: "/users",
+      outcome: "success",
+      durationMs: expect.any(Number),
+    });
+    expect(cancel.mock.invocationCallOrder[0])
+      .toBeLessThan(mocks.recordUpstreamRequest.mock.invocationCallOrder[0]!);
+  });
+
+  it("fails closed once for malformed and oversized user payloads", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({
+        response: {
+          uuid: ["rw-1"],
+          status: "ACTIVE",
+          subscriptionUrl: "https://sub3.example.com/leak",
+          provider_secret: "must-not-project",
+        },
+      }))
+      .mockResolvedValueOnce(new Response("{}", {
+        status: 200,
+        headers: { "content-length": String(2 * 1024 * 1024) },
+      }));
+    global.fetch = fetchMock;
+
+    await expect(getLiveRemnawaveSubscriptionUrl({ userRemnaId: "rw-1" }))
+      .resolves.toBeNull();
+    expect(mocks.recordUpstreamRequest).toHaveBeenCalledTimes(1);
+    expect(mocks.recordUpstreamRequest).toHaveBeenLastCalledWith(
+      expect.objectContaining({ outcome: "unavailable" }),
+    );
+    expect(JSON.stringify(mocks.logger.warn.mock.calls))
+      .not.toContain("must-not-project");
+
+    vi.clearAllMocks();
+    await expect(getLiveRemnawaveSubscriptionUrl({ userRemnaId: "rw-1" }))
+      .resolves.toBeNull();
+    expect(mocks.recordUpstreamRequest).toHaveBeenCalledTimes(1);
+    expect(mocks.recordUpstreamRequest).toHaveBeenLastCalledWith(
+      expect.objectContaining({ outcome: "unavailable" }),
+    );
   });
 
   it("falls back to Telegram and e-mail lookup when the stored UUID is not live", async () => {

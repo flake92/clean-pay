@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "baselineId": "f5cb6f543d85256e7733a1ade6a4f451d86cf378-deterministic-v3",
+  "status": "immutable_canonical_artifact_inventory",
+  "source": {
+    "commit": "f5cb6f543d85256e7733a1ade6a4f451d86cf378",
+    "tree": "6647fc51c61018ba46aae95da21e534434028fbe",
+    "pristineArchiveSha256": "8f424f5d4839d2aa421849bb2c7f8f48420ee675",
+    "productionImage": {
+      "tag": "clean-pay:baseline-f5cb6f543d85-prod-pristine",
+      "digest": "sha256:e0640e36c6221ba8f2dc174ebbea3961fda59f6320aad56d2f071b1c51a75ffc"
+    }
+  },
+  "runtime": {
+    "engine": "chromium",
+    "browserVersion": "151.0.7922.34",
+    "playwrightVersion": "1.62.1",
+    "chromiumRevision": "1234"
+  },
+  "renderer": {
+    "launchArgs": [
+      "--disable-gpu"
+    ],
+    "screenshotAcceptance": "byte-identical majority of at least two of three PNGs"
+  },
+  "artifactSet": {
+    "artifactCount": 126,
+    "aggregateSha256": "7fff96da71cbedb8f3492f727e0fa9abc0921ab964c2e249a0300a8bb608c7df",
+    "aggregateFormat": "sorted path\\0bytes\\0sha256\\n"
+  }
+}

@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 
 const logEvents = [
   {
-    file: "src/backend/integrations/remnashop/api-client.ts",
+    file: "src/backend/integrations/remnashop/api-client-runtime.ts",
     events: [
       "remnashop_request_sent",
       "remnashop_response_received",
@@ -12,7 +12,7 @@ const logEvents = [
     ],
   },
   {
-    file: "src/backend/integrations/telegram/oidc.ts",
+    file: "src/backend/integrations/telegram/oidc-transport.ts",
     events: [
       "telegram_token_request_sent",
       "telegram_token_response_received",

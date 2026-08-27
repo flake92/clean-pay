@@ -1,11 +1,14 @@
 import { existsSync } from "node:fs";
+import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const composeFile = path.join(rootDir, ".devcontainer", "docker-compose.yml");
-const projectName = process.env.CLEAN_PAY_DEVCONTAINER_PROJECT ?? "clean-pay-dev";
+const explicitProjectName = process.env.CLEAN_PAY_DEVCONTAINER_PROJECT?.trim();
+const projectName = explicitProjectName
+  || `clean-pay-e2e-${process.pid}-${randomUUID().slice(0, 8)}`;
 const devcontainerHostPortDefaults = {
   CLEAN_PAY_DEVCONTAINER_APP_HOST_PORT: "4000",
   CLEAN_PAY_DEVCONTAINER_PRISMA_STUDIO_HOST_PORT: "5555",
@@ -35,21 +38,27 @@ function configureDevcontainerIsolation() {
   const allocatedPorts = new Map();
 
   for (const [name, fallback] of Object.entries(devcontainerHostPortDefaults)) {
-    const value = process.env[name]?.trim() || fallback;
+    // An automatically named, one-shot E2E project does not need stable host
+    // publications. Ask Docker for ephemeral loopback ports so parallel runs
+    // cannot collide; explicit devcontainer projects keep their documented
+    // development defaults.
+    const value = process.env[name]?.trim() || (explicitProjectName ? fallback : "0");
 
-    if (!/^[1-9][0-9]{0,4}$/.test(value) || Number(value) > 65_535) {
-      console.error(`${name} must be an integer between 1 and 65535.`);
+    if (!/^(?:0|[1-9][0-9]{0,4})$/.test(value) || Number(value) > 65_535) {
+      console.error(`${name} must be an integer between 0 and 65535.`);
       process.exit(1);
     }
 
-    const previous = allocatedPorts.get(value);
+    const previous = value === "0" ? undefined : allocatedPorts.get(value);
 
     if (previous) {
       console.error(`${name} and ${previous} cannot publish the same host port ${value}.`);
       process.exit(1);
     }
 
-    allocatedPorts.set(value, name);
+    if (value !== "0") {
+      allocatedPorts.set(value, name);
+    }
     process.env[name] = value;
   }
 

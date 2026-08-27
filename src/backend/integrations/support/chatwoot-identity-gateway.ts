@@ -9,6 +9,11 @@ import {
 import { productionChatwootIdentityRequestGuard } from "@/backend/integrations/support/chatwoot-identity-request-guard";
 import { logger } from "@/backend/observability/logger";
 import { recordUpstreamRequest } from "@/backend/observability/metrics";
+import {
+  credentialedFetch,
+  readBoundedResponseText,
+  UpstreamResponseTooLargeError,
+} from "@/backend/integrations/http/upstream-http";
 
 const conversationCookieName = "cw_conversation";
 const contactProbeTimeoutMs = 3_000;
@@ -29,43 +34,17 @@ function validConversationToken(value: string | undefined) {
   return token;
 }
 
-async function readBoundedResponseText(response: Response) {
-  if (!response.body) {
-    return "";
-  }
-
-  const reader = response.body.getReader();
-  const decoder = new TextDecoder();
-  let bytesRead = 0;
-  let body = "";
-
-  try {
-    while (true) {
-      const chunk = await reader.read();
-
-      if (chunk.done) {
-        body += decoder.decode();
-        return body;
-      }
-
-      bytesRead += chunk.value.byteLength;
-      if (bytesRead > maxContactResponseBytes) {
-        await reader.cancel();
-        return null;
-      }
-
-      body += decoder.decode(chunk.value, { stream: true });
-    }
-  } finally {
-    reader.releaseLock();
-  }
-}
-
 async function readContactIdentifier(response: Response) {
-  const body = await readBoundedResponseText(response);
-
-  if (body === null) {
-    return { status: "pending" } as const;
+  let body: string;
+  try {
+    body = await readBoundedResponseText(response, {
+      maxBytes: maxContactResponseBytes,
+    });
+  } catch (error) {
+    if (error instanceof UpstreamResponseTooLargeError) {
+      return { status: "pending" } as const;
+    }
+    throw error;
   }
 
   try {
@@ -131,14 +110,13 @@ export const productionChatwootIdentityGateway: ChatwootIdentityGateway = {
           const startedAt = Date.now();
 
           try {
-            const response = await fetch(endpoint, {
+            const response = await credentialedFetch(endpoint, {
               method: "GET",
               headers: {
                 Accept: "application/json",
                 "X-Auth-Token": conversationToken,
               },
               cache: "no-store",
-              redirect: "error",
               signal: AbortSignal.timeout(contactProbeTimeoutMs),
             });
 

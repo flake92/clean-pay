@@ -90,6 +90,7 @@ const UPSTREAM_SERVICES = new Set([
 ]);
 
 const UPSTREAM_OPERATIONS = new Set([
+  "/.well-known/jwks.json",
   "/api/users",
   "/api/v1/widget/contact",
   "/auth/change-password",

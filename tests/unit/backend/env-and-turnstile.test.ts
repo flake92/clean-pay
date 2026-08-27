@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { getEnv } from "@/backend/config/env";
+import { createEnvForTests as getEnv } from "@/backend/config/env";
 import { verifyTurnstileToken } from "@/backend/security/turnstile";
 
 function stubValidProductionEnv() {

@@ -1,49 +1,11 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useRef, useState } from "react";
 
 import { IosInstallGuide } from "@/frontend/components/ios-install-guide";
-import {
-  loadTelegramWebAppScript,
-  openTelegramExternalLink,
-  wasOpenedInTelegramWebApp,
-} from "@/frontend/lib/telegram-webapp";
+import { useInstallAppController } from "@/frontend/hooks/use-install-app-controller";
 import { useModalDialogFocus } from "@/frontend/hooks/use-modal-dialog-focus";
 import { getBranding } from "@/shared/branding";
-
-type BeforeInstallPromptEvent = Event & {
-  prompt: () => Promise<void>;
-  userChoice: Promise<{ outcome: "accepted" | "dismissed" }>;
-};
-
-function isAppleMobileDevice() {
-  if (typeof navigator === "undefined") return false;
-  return /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.userAgent.includes("Mac") && navigator.maxTouchPoints > 1);
-}
-
-function isAndroidDevice() {
-  if (typeof navigator === "undefined") return false;
-  return /Android/i.test(navigator.userAgent);
-}
-
-function isEmbeddedMobileBrowser() {
-  if (typeof navigator === "undefined") return false;
-
-  return wasOpenedInTelegramWebApp() || /Telegram|FBAN|FBAV|Instagram|Line\/|; wv\)|\bwv\b/i.test(navigator.userAgent);
-}
-
-function androidBrowserName() {
-  if (/SamsungBrowser/i.test(navigator.userAgent)) return "Samsung Internet";
-  if (/YaBrowser/i.test(navigator.userAgent)) return "Яндекс Браузер";
-  if (/OPR|Opera/i.test(navigator.userAgent)) return "Opera";
-  if (/Firefox/i.test(navigator.userAgent)) return "Firefox";
-  return "браузер";
-}
-
-function isStandalone() {
-  return window.matchMedia("(display-mode: standalone)").matches || ("standalone" in navigator && (navigator as Navigator & { standalone?: boolean }).standalone === true);
-}
 
 function InstallInstructionsDialog({
   children,
@@ -86,97 +48,22 @@ export function InstallAppButton({
   autoOpenIosGuide?: boolean;
 }) {
   const branding = getBranding();
-  const [installEvent, setInstallEvent] = useState<BeforeInstallPromptEvent | null>(null);
-  const [showIosGuide, setShowIosGuide] = useState(false);
-  const [showAndroidGuide, setShowAndroidGuide] = useState(false);
-  const [showEmbeddedGuide, setShowEmbeddedGuide] = useState(false);
-  const [message, setMessage] = useState<string | null>(null);
-  const [installed, setInstalled] = useState(false);
-  const [mobilePlatform, setMobilePlatform] = useState<"android" | "ios" | "other" | null>(null);
-  const [embeddedBrowser, setEmbeddedBrowser] = useState(false);
-  const [installPending, setInstallPending] = useState(false);
-  const installPendingRef = useRef(false);
-
-  useEffect(() => {
-    const platformTimer = window.setTimeout(() => {
-      const isIos = isAppleMobileDevice();
-      const requestedPlatform = new URLSearchParams(window.location.search).get("platform");
-      setInstalled((current) => current || isStandalone());
-      setMobilePlatform(isIos ? "ios" : isAndroidDevice() ? "android" : "other");
-      const embedded = isEmbeddedMobileBrowser();
-      setEmbeddedBrowser(embedded);
-
-      if (
-        autoOpenIosGuide &&
-        (isIos || requestedPlatform === "ios") &&
-        !embedded &&
-        !isStandalone()
-      ) {
-        setShowIosGuide(true);
-      }
-
-      if (embedded) {
-        void loadTelegramWebAppScript().catch(() => undefined);
-      }
-    }, 0);
-    const onBeforeInstallPrompt = (event: Event) => {
-      event.preventDefault();
-      setMessage(null);
-      setInstallEvent(event as BeforeInstallPromptEvent);
-    };
-    const onInstalled = () => {
-      setMessage(null);
-      setInstallEvent(null);
-      setInstalled(true);
-    };
-    window.addEventListener("beforeinstallprompt", onBeforeInstallPrompt);
-    window.addEventListener("appinstalled", onInstalled);
-
-    if ("serviceWorker" in navigator) {
-      void navigator.serviceWorker
-        .register("/sw.js", { scope: "/", updateViaCache: "none" })
-        .then((registration) => registration.update())
-        .catch(() => undefined);
-    }
-
-    return () => { window.clearTimeout(platformTimer); window.removeEventListener("beforeinstallprompt", onBeforeInstallPrompt); window.removeEventListener("appinstalled", onInstalled); };
-  }, [autoOpenIosGuide]);
-
-  function openExternalInstallPage() {
-    const installUrl = new URL("/install", window.location.origin);
-    installUrl.searchParams.set("source", "telegram");
-    installUrl.searchParams.set("platform", isAppleMobileDevice() ? "ios" : isAndroidDevice() ? "android" : "other");
-
-    if (!openTelegramExternalLink(installUrl.toString())) {
-      setShowEmbeddedGuide(true);
-    }
-  }
-
-  async function install() {
-    if (installPendingRef.current) return;
-    setMessage(null);
-    if (embeddedBrowser) { openExternalInstallPage(); return; }
-    if (isAppleMobileDevice()) { setShowIosGuide(true); return; }
-    if (!installEvent && isAndroidDevice()) { setShowAndroidGuide(true); return; }
-    if (!installEvent) {
-      setMessage("Если системное окно установки не появилось, откройте меню браузера и выберите «Установить приложение».");
-      return;
-    }
-    installPendingRef.current = true;
-    setInstallPending(true);
-    try {
-      await installEvent.prompt();
-      const choice = await installEvent.userChoice;
-      setInstallEvent(null);
-      if (choice.outcome === "dismissed") setMessage(null);
-    } catch {
-      setInstallEvent(null);
-      setMessage("Не удалось открыть системное окно установки. Попробуйте ещё раз через меню браузера.");
-    } finally {
-      installPendingRef.current = false;
-      setInstallPending(false);
-    }
-  }
+  const {
+    androidBrowserName,
+    embeddedBrowser,
+    install,
+    installEvent,
+    installPending,
+    installed,
+    message,
+    mobilePlatform,
+    setShowAndroidGuide,
+    setShowEmbeddedGuide,
+    setShowIosGuide,
+    showAndroidGuide,
+    showEmbeddedGuide,
+    showIosGuide,
+  } = useInstallAppController({ autoOpenIosGuide });
 
   if (installed) {
     if (!alwaysVisible) return null;

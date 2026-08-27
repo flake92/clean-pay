@@ -84,6 +84,8 @@ import {
   setDurableCallbackWebSessionCookies,
   upgradeCurrentSessionToFull,
 } from "@/backend/integrations/sessions/web-session-service";
+import { runWithPostCommitWebSessionCookieEffects } from "@/backend/integrations/sessions/web-session-cookie-effects";
+import { cookies as requestCookies } from "next/headers";
 import {
   decryptKeyringSecret,
   encryptSecret,
@@ -218,6 +220,99 @@ describe("web session lifecycle", () => {
     });
   });
 
+  it("publishes no cookies when a transaction fails after its callback completes", async () => {
+    const commitError = new Error("transaction commit failed");
+
+    await expect(
+      runWithPostCommitWebSessionCookieEffects(async () => {
+        await createWebSessionForRemnashopUser({
+          userId: "user-1",
+          remnashopAccessTokenEncrypted: "protected-access",
+          remnashopRefreshTokenEncrypted: "protected-refresh",
+          remnashopAccessExpiresAt: new Date("2099-01-02T00:00:00.000Z"),
+          remnashopRefreshExpiresAt: new Date("2099-02-02T00:00:00.000Z"),
+          tx: mocks.prisma as never,
+        });
+
+        expect(mocks.prisma.webSession.create).toHaveBeenCalledOnce();
+        expect(requestCookies).not.toHaveBeenCalled();
+        expect(state.setCalls).toEqual([]);
+        throw commitError;
+      }),
+    ).rejects.toBe(commitError);
+
+    expect(requestCookies).not.toHaveBeenCalled();
+    expect(state.setCalls).toEqual([]);
+  });
+
+  it("publishes byte-identical Remnashop session cookies in access-then-refresh order after commit", async () => {
+    const now = new Date("2026-08-27T12:34:56.789Z");
+    const accessExpiresAt = new Date("2026-08-27T12:49:56.789Z");
+    const refreshExpiresAt = new Date("2026-09-26T12:34:56.789Z");
+
+    vi.useFakeTimers();
+    vi.setSystemTime(now);
+    try {
+      await runWithPostCommitWebSessionCookieEffects(async () => {
+        await createWebSessionForRemnashopUser({
+          userId: "user-1",
+          remnashopAccessTokenEncrypted: "protected-access",
+          remnashopRefreshTokenEncrypted: "protected-refresh",
+          remnashopAccessExpiresAt: new Date("2099-01-02T00:00:00.000Z"),
+          remnashopRefreshExpiresAt: new Date("2099-02-02T00:00:00.000Z"),
+          tx: mocks.prisma as never,
+        });
+
+        expect(requestCookies).not.toHaveBeenCalled();
+        expect(state.setCalls).toEqual([]);
+      });
+
+      const refreshCookie = state.setCalls[1];
+      expect(refreshCookie?.value).toBeTruthy();
+      expect(state.setCalls).toEqual([
+        {
+          name: "clean_pay_access",
+          value: accessToken({
+            sid: "session-1",
+            uid: "user-1",
+            exp: Math.floor(accessExpiresAt.getTime() / 1000),
+            al: "FULL",
+            ev: true,
+            tg: true,
+          }),
+          options: {
+            httpOnly: true,
+            secure: false,
+            sameSite: "lax",
+            path: "/",
+            expires: accessExpiresAt,
+          },
+        },
+        {
+          name: "clean_pay_refresh",
+          value: refreshCookie?.value,
+          options: {
+            httpOnly: true,
+            secure: false,
+            sameSite: "lax",
+            path: "/",
+            expires: refreshExpiresAt,
+          },
+        },
+      ]);
+      expect(requestCookies).toHaveBeenCalledTimes(2);
+      expect(mocks.prisma.webSession.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          refreshTokenHash: sha256(refreshCookie?.value ?? ""),
+          accessTokenExpiresAt: accessExpiresAt,
+          refreshExpiresAt,
+        }),
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("atomically revokes prior sessions before a password-reset session is created", async () => {
     const transactionClient = {
       $queryRaw: vi.fn().mockResolvedValue([{ id: "user-1" }]),
@@ -270,6 +365,10 @@ describe("web session lifecycle", () => {
     });
     expect(mocks.prisma.webSession.updateMany).not.toHaveBeenCalled();
     expect(mocks.prisma.webSession.create).not.toHaveBeenCalled();
+    expect(state.setCalls.map(({ name }) => name)).toEqual([
+      "clean_pay_access",
+      "clean_pay_refresh",
+    ]);
   });
 
   it("loads current session and current user from a valid access cookie", async () => {

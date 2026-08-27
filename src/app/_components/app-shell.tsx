@@ -1,6 +1,6 @@
 import { loadNavigationShell } from "@/application/navigation/load-navigation";
 import { requestAuthProfileGateway } from "@/app/_composition/request-scoped-readers";
-import { createChatwootWidgetConfig } from "@/backend/integrations/support/chatwoot-widget";
+import { createChatwootWidgetConfig } from "@/app/_composition/support-runtime";
 import {
   ChatwootGuestBoundary,
   ChatwootWidget,

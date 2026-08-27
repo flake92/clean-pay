@@ -89,6 +89,7 @@ services:
         NEXT_PUBLIC_BRAND_LOGO_URL: ${NEXT_PUBLIC_BRAND_LOGO_URL:-/clean-pay-logo.png}
     restart: unless-stopped
     init: true
+    stop_grace_period: 2m
     pids_limit: 256
     mem_limit: 1g
     cpus: 1.0

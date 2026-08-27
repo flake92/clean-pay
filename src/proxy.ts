@@ -1,37 +1,37 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { logger } from "@/backend/observability/logger";
-import { validateRequestSource } from "@/backend/security/csrf";
 import {
-  passkeySetupPath,
-  registrationEmailVerificationPath,
-} from "@/shared/auth/account-setup-flow";
-import { safeRedirectPath } from "@/shared/auth/redirect-policy";
-import { buildContentSecurityPolicy } from "@/shared/security/content-security-policy";
+  accessCookieName,
+  type AccessState,
+  authenticatedEntryRedirectPolicy,
+  authenticatedInviteRedirectPolicy,
+  emailVerificationRedirectPolicy,
+  getAccessState,
+  passkeySetupRedirectPolicy,
+  refreshCookieName,
+  refreshSessionRedirectPolicy,
+  safeRedirectTarget,
+} from "@/shared/edge/proxy-auth-policy";
+import { browserMutationPolicy } from "@/shared/edge/proxy-mutation-policy";
+import {
+  accessLogRouteTemplate,
+  canonicalConfusableProtectedPath,
+  isBootstrapAllowedPath,
+  isEmailVerificationAllowedPath,
+  isInternalServiceRequest,
+  isInvitePath,
+  isPublicPath,
+  isRefreshableNavigation,
+  isRemovedBrowserTransportPath,
+  isRoutineReadinessProbe as matchesRoutineReadinessProbe,
+  sessionRefreshPath,
+} from "@/shared/edge/proxy-route-policy";
+import {
+  createProxyRequestSecurity,
+  type ProxyRequestSecurity,
+} from "@/shared/edge/proxy-security-policy";
 import { REFERRAL_ATTRIBUTION_COOKIE_NAME } from "@/shared/domain/referrals";
-
-const accessCookieName = 'clean_pay_access';
-const refreshCookieName = 'clean_pay_refresh';
-
-const paymentReconciliationInternalPath = '/api/internal/payments/reconcile';
-const readinessInternalPath = '/api/internal/health/readiness';
-const metricsInternalPath = '/api/internal/metrics';
-const sessionRefreshPath = '/auth/session/refresh';
-const providerSessionRecoveryPath = '/auth/session/recover';
-const providerSessionRecoveryPagePath = '/auth/session/recovery';
-const serverActionBodyLimitBytes = 64 * 1024;
-const opaquePathSegmentPatterns = [
-  /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i,
-  /^c[a-z0-9]{20,}$/i,
-  /^[A-Za-z0-9_-]{24,}$/,
-];
-
-type RequestSecurityContext = {
-  contentSecurityPolicy: string;
-  requestHeaders: Headers;
-  requestId: string;
-  traceId: string;
-};
 
 function randomHex(byteLength: number) {
   const bytes = new Uint8Array(byteLength);
@@ -39,48 +39,25 @@ function randomHex(byteLength: number) {
   return Array.from(bytes, (value) => value.toString(16).padStart(2, '0')).join('');
 }
 
-function requestSecurityContext(request: NextRequest): RequestSecurityContext {
-  const suppliedRequestId = request.headers.get('x-request-id')?.trim() ?? '';
-  const requestId = /^[A-Za-z0-9._:-]{8,128}$/.test(suppliedRequestId)
-    ? suppliedRequestId
-    : crypto.randomUUID();
-  const suppliedTraceparent = request.headers.get('traceparent')?.trim().toLowerCase() ?? '';
-  const traceMatch = suppliedTraceparent.match(
-    /^00-([0-9a-f]{32})-([0-9a-f]{16})-([0-9a-f]{2})$/,
-  );
-  const suppliedTraceId = traceMatch?.[1];
-  const traceId = suppliedTraceId && !/^0+$/.test(suppliedTraceId)
-    ? suppliedTraceId
-    : randomHex(16);
-  const traceFlags = traceMatch?.[3] ?? '01';
-  const nonce = randomHex(16);
+function requestSecurityContext(request: NextRequest): ProxyRequestSecurity {
+  const chatwootBaseUrl = process.env.CHATWOOT_BASE_URL?.trim();
   const chatwootConfigured = Boolean(
-    process.env.CHATWOOT_BASE_URL?.trim()
+    chatwootBaseUrl
     && process.env.CHATWOOT_WEBSITE_TOKEN?.trim()
     && process.env.CHATWOOT_HMAC_TOKEN?.trim(),
   );
-  const contentSecurityPolicy = buildContentSecurityPolicy({
-    nonce,
-    chatwootBaseUrl: chatwootConfigured
-      ? process.env.CHATWOOT_BASE_URL?.trim()
-      : null,
+  return createProxyRequestSecurity({
+    headers: request.headers,
+    chatwootBaseUrl,
+    chatwootConfigured,
+    randomHex,
+    randomUuid: () => crypto.randomUUID(),
   });
-  const requestHeaders = new Headers(request.headers);
-  requestHeaders.set('content-security-policy', contentSecurityPolicy);
-  requestHeaders.set('x-nonce', nonce);
-  requestHeaders.set('x-request-id', requestId);
-  requestHeaders.set(
-    'traceparent',
-    `00-${traceId}-${randomHex(8)}-${traceFlags}`,
-  );
-  requestHeaders.set('x-clean-pay-trace-id', traceId);
-
-  return { contentSecurityPolicy, requestHeaders, requestId, traceId };
 }
 
 function secureResponse<T extends NextResponse>(
   response: T,
-  context: RequestSecurityContext,
+  context: ProxyRequestSecurity,
 ) {
   response.headers.set('content-security-policy', context.contentSecurityPolicy);
   response.headers.set('strict-transport-security', 'max-age=31536000; includeSubDomains');
@@ -89,212 +66,10 @@ function secureResponse<T extends NextResponse>(
   return response;
 }
 
-function continueRequest(context: RequestSecurityContext) {
+function continueRequest(context: ProxyRequestSecurity) {
   return secureResponse(NextResponse.next({
     request: { headers: context.requestHeaders },
   }), context);
-}
-
-const publicPagePaths = new Set([
-  '/manifest.webmanifest',
-  '/install',
-  '/offline',
-  '/login',
-  '/register',
-  '/support',
-  '/tariffs',
-  '/auth/telegram/start',
-  '/auth/telegram/callback',
-  '/auth/telegram/webapp',
-  sessionRefreshPath,
-  providerSessionRecoveryPath,
-  providerSessionRecoveryPagePath,
-]);
-
-const publicApiPaths = new Set([
-  '/api/health',
-  '/api/health/liveness',
-  '/api/health/readiness',
-]);
-
-// These legacy browser endpoints were removed. Let Next.js resolve them to a
-// real 404 instead of turning a nonexistent transport into an authentication
-// oracle at the proxy boundary.
-const removedBrowserTransportPaths = new Set([
-  '/api/me',
-  '/api/logout',
-  '/api/bff/auth/me',
-  '/api/bff/subscription/current',
-  '/api/bff/payments/status',
-]);
-
-const emailVerificationPagePaths = new Set([
-  '/verify-email',
-  '/register/verify-email',
-]);
-
-function decodeBase64Url(value: string) {
-  const normalized = value.replace(/-/g, '+').replace(/_/g, '/');
-  const padded = normalized.padEnd(Math.ceil(normalized.length / 4) * 4, '=');
-
-  return atob(padded);
-}
-
-function encodeBase64Url(bytes: ArrayBuffer) {
-  const binary = String.fromCharCode(...new Uint8Array(bytes));
-
-  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-}
-
-async function hmacSha256(value: string, secret: string) {
-  const encoder = new TextEncoder();
-  const key = await crypto.subtle.importKey(
-    'raw',
-    encoder.encode(secret),
-    { name: 'HMAC', hash: 'SHA-256' },
-    false,
-    ['sign'],
-  );
-  const signature = await crypto.subtle.sign('HMAC', key, encoder.encode(value));
-
-  return encodeBase64Url(signature);
-}
-
-function safeEqual(left: string, right: string) {
-  if (left.length !== right.length) {
-    return false;
-  }
-
-  let mismatch = 0;
-
-  for (let index = 0; index < left.length; index += 1) {
-    mismatch |= left.charCodeAt(index) ^ right.charCodeAt(index);
-  }
-
-  return mismatch === 0;
-}
-
-type AccessState = {
-  authenticated: boolean;
-  fullAuthenticated: boolean;
-  bootstrapAuthenticated: boolean;
-  emailVerificationRequired: boolean;
-  hasRefreshToken: boolean;
-};
-
-async function getAccessState(request: NextRequest): Promise<AccessState> {
-  const token = request.cookies.get(accessCookieName)?.value;
-  const hasRefreshToken = Boolean(request.cookies.get(refreshCookieName)?.value);
-
-  if (!token) {
-    return { authenticated: false, fullAuthenticated: false, bootstrapAuthenticated: false, emailVerificationRequired: false, hasRefreshToken };
-  }
-
-  const [payload, signature] = token.split('.');
-
-  if (!payload || !signature) {
-    return { authenticated: false, fullAuthenticated: false, bootstrapAuthenticated: false, emailVerificationRequired: false, hasRefreshToken };
-  }
-
-  try {
-    const parsed = JSON.parse(decodeBase64Url(payload)) as { exp?: unknown; ev?: unknown; tg?: unknown; al?: unknown };
-
-    if (typeof parsed.exp !== 'number' || parsed.exp <= Math.floor(Date.now() / 1000)) {
-      return { authenticated: false, fullAuthenticated: false, bootstrapAuthenticated: false, emailVerificationRequired: false, hasRefreshToken };
-    }
-
-    const secret = process.env.WEB_JWT_SECRET;
-
-    if (!secret) {
-      return { authenticated: false, fullAuthenticated: false, bootstrapAuthenticated: false, emailVerificationRequired: false, hasRefreshToken };
-    }
-
-    const authenticated = safeEqual(signature, await hmacSha256(payload, secret));
-    const assuranceLevel = parsed.al === "BOOTSTRAP" ? "BOOTSTRAP" : "FULL";
-
-    return {
-      authenticated,
-      fullAuthenticated: authenticated && assuranceLevel === "FULL",
-      bootstrapAuthenticated: authenticated && assuranceLevel === "BOOTSTRAP",
-      emailVerificationRequired: authenticated && parsed.ev === false && parsed.tg !== true,
-      hasRefreshToken,
-    };
-  } catch {
-    return { authenticated: false, fullAuthenticated: false, bootstrapAuthenticated: false, emailVerificationRequired: false, hasRefreshToken };
-  }
-}
-
-function isPublicPath(pathname: string) {
-  return publicPagePaths.has(pathname)
-    || publicApiPaths.has(pathname)
-    || pathname.startsWith('/invite/');
-}
-
-function isInvitePath(pathname: string) {
-  return pathname.startsWith('/invite/');
-}
-
-function isEmailVerificationAllowedPath(pathname: string) {
-  return emailVerificationPagePaths.has(pathname);
-}
-
-function isBootstrapAllowedPath(pathname: string) {
-  return (
-    pathname === '/passkey/setup'
-  );
-}
-
-function canonicalConfusableProtectedPath(pathname: string) {
-  try {
-    const decoded = decodeURIComponent(pathname);
-
-    // Cyrillic small es (U+0441) is visually indistinguishable from the
-    // ASCII "c" in an address bar. Preserve the session and repair this
-    // observed legacy/bookmark typo instead of letting Next.js render a 404.
-    if (decoded === '/\u0441abinet') {
-      return '/cabinet';
-    }
-  } catch {
-    // Malformed paths remain Next.js 404s; never guess a destination.
-  }
-
-  return undefined;
-}
-
-function safeRedirectTarget(request: NextRequest) {
-  const target = request.nextUrl.pathname + request.nextUrl.search;
-
-  if (request.nextUrl.pathname === '/login' || request.nextUrl.pathname === '/register') {
-    return '/cabinet';
-  }
-
-  return target;
-}
-
-function accessLogRouteTemplate(value: string) {
-  const routeEnd = value.search(/[?#]/);
-  const pathname = (routeEnd === -1 ? value : value.slice(0, routeEnd)) || '/';
-
-  if (pathname.startsWith('/invite/')) {
-    return '/invite/:code';
-  }
-
-  return pathname
-    .split('/')
-    .map((segment) => {
-      let candidate = segment;
-      try {
-        candidate = decodeURIComponent(segment);
-      } catch {
-        // Keep malformed segments opaque and let the normal route boundary
-        // decide whether they are valid.
-      }
-
-      return opaquePathSegmentPatterns.some((pattern) => pattern.test(candidate))
-        ? ':id'
-        : segment;
-    })
-    .join('/');
 }
 
 function localRedirectUrl(request: NextRequest, target: string) {
@@ -312,7 +87,10 @@ function loginRedirect(request: NextRequest) {
   const url = request.nextUrl.clone();
   url.pathname = '/login';
   url.search = '';
-  url.searchParams.set('redirect_to', safeRedirectTarget(request));
+  url.searchParams.set(
+    'redirect_to',
+    safeRedirectTarget(request.nextUrl.pathname, request.nextUrl.search),
+  );
 
   const response = NextResponse.redirect(url);
   response.headers.set('cache-control', 'no-store');
@@ -323,12 +101,11 @@ function loginRedirect(request: NextRequest) {
 }
 
 function authenticatedRedirect(request: NextRequest, emailVerificationRequired: boolean) {
-  const redirectTo = safeRedirectPath(
-    request.nextUrl.searchParams.get('redirect_to'),
-  ) ?? '/cabinet';
-  const target = emailVerificationRequired
-    ? registrationEmailVerificationPath(redirectTo)
-    : redirectTo;
+  const target = authenticatedEntryRedirectPolicy({
+    requestedRedirect: request.nextUrl.searchParams.get('redirect_to'),
+    bootstrapAuthenticated: false,
+    emailVerificationRequired,
+  });
 
   const response = NextResponse.redirect(localRedirectUrl(request, target));
   response.headers.set('cache-control', 'no-store');
@@ -339,16 +116,15 @@ function refreshSessionRedirect(request: NextRequest) {
   const url = request.nextUrl.clone();
   url.pathname = sessionRefreshPath;
   url.search = '';
-  const isAuthEntry = request.nextUrl.pathname === '/login'
-    || request.nextUrl.pathname === '/register';
-  const returnTo = isAuthEntry
-    ? safeRedirectPath(request.nextUrl.searchParams.get('redirect_to')) ?? '/cabinet'
-    : safeRedirectTarget(request);
+  const { returnTo, fallbackTo } = refreshSessionRedirectPolicy({
+    pathname: request.nextUrl.pathname,
+    search: request.nextUrl.search,
+    origin: request.nextUrl.origin,
+    requestedRedirect: request.nextUrl.searchParams.get('redirect_to'),
+  });
   url.searchParams.set('return_to', returnTo);
-  if (isAuthEntry) {
-    const fallback = new URL(request.nextUrl.pathname, request.nextUrl.origin);
-    fallback.searchParams.set('redirect_to', returnTo);
-    url.searchParams.set('fallback_to', `${fallback.pathname}${fallback.search}`);
+  if (fallbackTo) {
+    url.searchParams.set('fallback_to', fallbackTo);
   }
   const response = NextResponse.redirect(url);
   response.headers.set('cache-control', 'no-store');
@@ -358,7 +134,7 @@ function refreshSessionRedirect(request: NextRequest) {
 function requestMetadata(
   request: NextRequest,
   accessState: AccessState,
-  security: RequestSecurityContext,
+  security: ProxyRequestSecurity,
   accessLogPathname: string,
 ) {
   const { pathname } = request.nextUrl;
@@ -378,90 +154,16 @@ function requestMetadata(
   };
 }
 
-function isServerActionRequest(request: NextRequest) {
-  if (request.method !== 'POST') return false;
-
-  const contentType = request.headers.get('content-type')
-    ?.split(';', 1)[0]
-    ?.trim()
-    .toLowerCase();
-  return request.headers.has('next-action')
-    || contentType === 'application/x-www-form-urlencoded'
-    || contentType === 'multipart/form-data';
-}
-
-async function serverActionBodyExceedsLimit(request: NextRequest) {
-  const contentLength = request.headers.get('content-length')?.trim();
-  if (contentLength && /^\d+$/.test(contentLength)) {
-    const declaredLength = Number(contentLength);
-    if (!Number.isSafeInteger(declaredLength) || declaredLength > serverActionBodyLimitBytes) {
-      return true;
-    }
-  }
-
-  const body = request.clone().body;
-  if (!body) return false;
-  const reader = body.getReader();
-  let total = 0;
-  let completed = false;
-  try {
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) {
-        completed = true;
-        return false;
-      }
-      total += value.byteLength;
-      if (total > serverActionBodyLimitBytes) return true;
-    }
-  } finally {
-    // A cloned Request body is a tee. Awaiting cancellation can wait for the
-    // untouched branch that Next still needs, so signal cancellation without
-    // coupling the policy response to downstream consumption.
-    if (!completed) void reader.cancel().catch(() => undefined);
-    reader.releaseLock();
-  }
-}
-
 async function browserMutationGuard(request: NextRequest) {
-  if (isServerActionRequest(request)) {
-    const source = validateRequestSource({
-      headers: request.headers,
-      trustedAppUrl: process.env.NEXT_PUBLIC_APP_URL,
-    });
-    if (!source.ok) return source;
-    if (await serverActionBodyExceedsLimit(request)) {
-      return {
-        ok: false,
-        reason: 'request_body_too_large',
-        status: 413,
-      } as const;
-    }
-    return { ok: true } as const;
-  }
-
-  if (
-    request.nextUrl.pathname === '/auth/telegram/callback'
-    && request.method === 'POST'
-  ) {
-    return validateRequestSource({
-      headers: request.headers,
-      trustedAppUrl: process.env.NEXT_PUBLIC_APP_URL,
-    });
-  }
-
-  if (request.nextUrl.pathname === '/auth/telegram/start') {
-    if (!request.cookies.has(accessCookieName) && !request.cookies.has(refreshCookieName)) {
-      return { ok: true } as const;
-    }
-
-    return validateRequestSource({
-      headers: request.headers,
-      trustedAppUrl: process.env.NEXT_PUBLIC_APP_URL,
-    });
-  }
-
-  return { ok: true } as const;
+  return browserMutationPolicy({
+    method: request.method,
+    pathname: request.nextUrl.pathname,
+    headers: request.headers,
+    trustedAppUrl: process.env.NEXT_PUBLIC_APP_URL,
+    hasAccessCookie: request.cookies.has(accessCookieName),
+    hasRefreshCookie: request.cookies.has(refreshCookieName),
+    cloneBody: () => request.clone().body,
+  });
 }
 
 export async function proxy(request: NextRequest) {
@@ -491,7 +193,11 @@ export async function proxy(request: NextRequest) {
     return secureResponse(NextResponse.redirect(url), security);
   }
 
-  const accessState = await getAccessState(request);
+  const accessState = await getAccessState({
+    token: request.cookies.get(accessCookieName)?.value,
+    hasRefreshToken: Boolean(request.cookies.get(refreshCookieName)?.value),
+    jwtSecret: () => process.env.WEB_JWT_SECRET,
+  });
   // Edge middleware cannot validate the opaque database-backed refresh token.
   // Treat it as a session candidate for both pages and APIs and let the first
   // server handler validate it. Deleting it here on ordinary navigation would
@@ -499,7 +205,7 @@ export async function proxy(request: NextRequest) {
   const isAuthenticated = accessState.authenticated || accessState.hasRefreshToken;
   const isBootstrapAuthenticated = accessState.bootstrapAuthenticated && !accessState.fullAuthenticated;
   const metadata = requestMetadata(request, accessState, security, accessLogPathname);
-  const isRoutineReadinessProbe = pathname === readinessInternalPath && request.method === 'GET';
+  const isRoutineReadinessProbe = matchesRoutineReadinessProbe(pathname, request.method);
 
   const logRequest = isRoutineReadinessProbe ? logger.debug : logger.info;
   logRequest("http_request_received", metadata, {
@@ -508,16 +214,7 @@ export async function proxy(request: NextRequest) {
     message: `${request.method} ${accessLogPathname} received`,
   });
 
-  const refreshableNavigation =
-    (request.method === 'GET' || request.method === 'HEAD')
-    && !pathname.startsWith('/api/')
-    && !pathname.startsWith('/auth/')
-    && (
-      pathname === '/login'
-      || pathname === '/register'
-      || isInvitePath(pathname)
-      || !isPublicPath(pathname)
-    );
+  const refreshableNavigation = isRefreshableNavigation(pathname, request.method);
 
   if (
     refreshableNavigation
@@ -538,21 +235,16 @@ export async function proxy(request: NextRequest) {
   }
 
   if (isInvitePath(pathname) && (accessState.authenticated || isBootstrapAuthenticated)) {
-    const redirectTo = isBootstrapAuthenticated
-      ? passkeySetupPath('/tariffs')
-      : accessState.emailVerificationRequired
-        ? registrationEmailVerificationPath('/tariffs')
-        : '/tariffs';
+    const redirectTo = authenticatedInviteRedirectPolicy({
+      bootstrapAuthenticated: isBootstrapAuthenticated,
+      emailVerificationRequired: accessState.emailVerificationRequired,
+    });
     const response = NextResponse.redirect(localRedirectUrl(request, redirectTo));
     response.cookies.delete(REFERRAL_ATTRIBUTION_COOKIE_NAME);
     return secureResponse(response, security);
   }
 
-  if (
-    (pathname === paymentReconciliationInternalPath && request.method === 'POST') ||
-    (pathname === readinessInternalPath && request.method === 'GET') ||
-    (pathname === metricsInternalPath && request.method === 'GET')
-  ) {
+  if (isInternalServiceRequest(pathname, request.method)) {
     const logDecision = isRoutineReadinessProbe ? logger.debug : logger.info;
     logDecision("http_request_decision", {
       ...metadata,
@@ -593,14 +285,11 @@ export async function proxy(request: NextRequest) {
 
   if (isPublicPath(pathname)) {
     if ((accessState.authenticated || isBootstrapAuthenticated) && (pathname === '/login' || pathname === '/register')) {
-      const requestedRedirect = safeRedirectPath(
-        request.nextUrl.searchParams.get('redirect_to'),
-      ) ?? '/cabinet';
-      const redirectTo = isBootstrapAuthenticated
-        ? passkeySetupPath(requestedRedirect)
-        : accessState.emailVerificationRequired
-          ? registrationEmailVerificationPath(requestedRedirect)
-          : requestedRedirect;
+      const redirectTo = authenticatedEntryRedirectPolicy({
+        requestedRedirect: request.nextUrl.searchParams.get('redirect_to'),
+        bootstrapAuthenticated: isBootstrapAuthenticated,
+        emailVerificationRequired: accessState.emailVerificationRequired,
+      });
       logger.info("http_request_decision", {
         ...metadata,
         action: "redirect_authenticated_user",
@@ -637,7 +326,7 @@ export async function proxy(request: NextRequest) {
     return continueRequest(security);
   }
 
-  if (removedBrowserTransportPaths.has(pathname)) {
+  if (isRemovedBrowserTransportPath(pathname)) {
     return continueRequest(security);
   }
 
@@ -662,8 +351,9 @@ export async function proxy(request: NextRequest) {
         ), security);
       }
 
-      const redirectTarget = registrationEmailVerificationPath(
-        safeRedirectTarget(request),
+      const redirectTarget = emailVerificationRedirectPolicy(
+        request.nextUrl.pathname,
+        request.nextUrl.search,
       );
       const url = localRedirectUrl(request, redirectTarget);
 
@@ -722,7 +412,10 @@ export async function proxy(request: NextRequest) {
       ), security);
     }
 
-    const redirectTarget = passkeySetupPath(safeRedirectTarget(request));
+    const redirectTarget = passkeySetupRedirectPolicy(
+      request.nextUrl.pathname,
+      request.nextUrl.search,
+    );
     const url = localRedirectUrl(request, redirectTarget);
 
     logger.info("http_request_decision", {

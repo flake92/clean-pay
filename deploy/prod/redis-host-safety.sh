@@ -26,3 +26,9 @@ probe_redis_host_memory_policy() {
     return 1
   fi
 }
+
+# The probe is sourced by both operator entrypoints; keep the message in the
+# parent shell without making it part of a child process environment.
+redis_host_memory_policy_failure() {
+  printf '%s' "$REDIS_HOST_MEMORY_POLICY_FAILURE"
+}

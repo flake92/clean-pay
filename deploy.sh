@@ -2,7 +2,7 @@
 set -eu
 umask 077
 
-ROOT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+ROOT_DIR=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 ENV_FILE="$ROOT_DIR/deploy/prod/.env"
 ENV_EXAMPLE="$ROOT_DIR/deploy/prod/.env.example"
 COMPOSE_PATH="$ROOT_DIR/deploy/prod/docker-compose.yml"
@@ -67,8 +67,9 @@ assert_private_env_file() {
     return
   fi
 
-  [ ! -L "$ENV_FILE" ] && [ -f "$ENV_FILE" ] \
-    || die "Production environment file must be a regular non-symlink file."
+  if [ -L "$ENV_FILE" ] || [ ! -f "$ENV_FILE" ]; then
+    die "Production environment file must be a regular non-symlink file."
+  fi
   command -v stat >/dev/null 2>&1 \
     || die "node or stat is required to validate production environment metadata."
   [ "$(stat -c '%a' "$ENV_FILE")" = "600" ] \
@@ -133,8 +134,9 @@ compose() (
     TURNSTILE_SITE_KEY
 
   if [ -n "$CLEAN_PAY_VERIFIED_APP_IMAGE" ] || [ -n "$CLEAN_PAY_VERIFIED_MIGRATION_IMAGE" ]; then
-    [ -n "$CLEAN_PAY_VERIFIED_APP_IMAGE" ] && [ -n "$CLEAN_PAY_VERIFIED_MIGRATION_IMAGE" ] \
-      || die 'Verified mode requires both immutable application and migration image IDs.'
+    if [ -z "$CLEAN_PAY_VERIFIED_APP_IMAGE" ] || [ -z "$CLEAN_PAY_VERIFIED_MIGRATION_IMAGE" ]; then
+      die 'Verified mode requires both immutable application and migration image IDs.'
+    fi
     CLEAN_PAY_IMAGE=$CLEAN_PAY_VERIFIED_APP_IMAGE
     CLEAN_PAY_MIGRATION_IMAGE=$CLEAN_PAY_VERIFIED_MIGRATION_IMAGE
     export CLEAN_PAY_IMAGE CLEAN_PAY_MIGRATION_IMAGE
@@ -375,7 +377,11 @@ configure() {
   if confirm 'Открыть расширенные настройки в текстовом редакторе?' no; then
     editor=${EDITOR:-}
     if [ -z "$editor" ]; then
-      if command -v nano >/dev/null 2>&1; then editor=nano; else editor=vi; fi
+      if command -v nano >/dev/null 2>&1; then
+        editor=$(command -v nano)
+      else
+        editor=$(command -v vi)
+      fi
     fi
     "$editor" "$ENV_FILE"
     assert_private_env_file
@@ -857,10 +863,11 @@ resolve_rolled_back_migration() {
   confirmation=$2
   migration_prefix=${migration_name%%_*}
   migration_suffix=${migration_name#*_}
-  [ "$migration_prefix" != "$migration_name" ] \
-    && [ "${#migration_prefix}" -eq 14 ] \
-    && [ -n "$migration_suffix" ] \
-    || die 'Migration name must use the checked-in 14-digit_timestamp_description format.'
+  if [ "$migration_prefix" = "$migration_name" ] \
+    || [ "${#migration_prefix}" -ne 14 ] \
+    || [ -z "$migration_suffix" ]; then
+    die 'Migration name must use the checked-in 14-digit_timestamp_description format.'
+  fi
   case "$migration_prefix" in
     *[!0-9]*) die 'Migration timestamp must contain only digits.' ;;
   esac

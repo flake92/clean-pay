@@ -1,0 +1,93 @@
+{
+  "schemaVersion": 1,
+  "baselineId": "f5cb6f543d85256e7733a1ade6a4f451d86cf378-deterministic-v2",
+  "status": "active",
+  "policyVersion": 4,
+  "supersedesEmbeddedProjectionVersion": 2,
+  "reason": [
+    "preserve the immutable v2 raw capture while documenting exact post-capture comparison rules",
+    "make approved accessibility-only candidate semantics explicit without changing baseline evidence"
+  ],
+  "source": {
+    "commit": "f5cb6f543d85256e7733a1ade6a4f451d86cf378",
+    "tree": "6647fc51c61018ba46aae95da21e534434028fbe",
+    "pristineArchiveSha256": "8f424f5d4839d2aa421849bb2c7f8f48420ee675",
+    "productionImage": {
+      "tag": "clean-pay:baseline-f5cb6f543d85-prod-pristine",
+      "digest": "sha256:e0640e36c6221ba8f2dc174ebbea3961fda59f6320aad56d2f071b1c51a75ffc"
+    }
+  },
+  "rawArtifactSet": {
+    "artifactCount": 126,
+    "aggregateSha256": "04f89e738e2695c6c810925297cf06cc5c4f1647da28e64981ceeef7bba315ca",
+    "aggregateFormat": "sorted path\\0bytes\\0sha256\\n"
+  },
+  "invariants": {
+    "rawArtifactsPreserved": true,
+    "pngEquality": "byte-exact in the normal unfocused state",
+    "stableJsonFields": "exact unless named below",
+    "serverActions": "count, order, identifier, payload, and effects remain exact",
+    "focusVisibleException": "only the exact skip link may become visible after keyboard focus"
+  },
+  "networkProjection": {
+    "exactExclusions": [
+      "scope=external request records",
+      "observed expected diagnostics with an exact canonical external origin",
+      "non-navigation application GET fetch records with no Server Action and exact next-router-prefetch=1 plus rsc=1 digests",
+      "GET same-origin non-navigation non-action non-RSC /_next/static/chunks/*.js records on requested /install or /offline only when the immutable CSP sidecar contract matches"
+    ],
+    "exactNormalization": [
+      "the known sha256 net::ERR_ABORTED failure on a response-backed non-navigation application GET resource",
+      "sort values only within existing successful same-origin /_next/static/media/[A-Za-z0-9._-]+.woff2 font positions by pathname, then deterministically reindex",
+      "retained request indexes and exact redirect or Server Action references after exclusions"
+    ]
+  },
+  "candidateSemanticAllowlist": [
+    {
+      "change": "skip-link and main target",
+      "path": "html > body > div[:nth-of-type(n)] > a",
+      "exactContract": [
+        "parent class layout-wrapper layout-static p-ripple-disabled",
+        "a.skip-link[href=<exact final route>#<fragment>] with exact Russian text",
+        "main.layout-main direct child of .layout-main-container gains only id=main-content and tabindex=-1",
+        "offscreen computed style, interactive record, and exact ARIA URL block are projected only when all signatures match"
+      ]
+    },
+    {
+      "change": "cabinet heading levels",
+      "requestedPath": "/cabinet",
+      "exactContract": [
+        "six named card headings only; devices/payments retain their exact ids and aria-labelledby parents",
+        "h5 becomes h2.text-xl",
+        "newly selected h2 computed-style record is projected only with the complete 20px/500/24px visual contract and 24px box height"
+      ]
+    },
+    {
+      "change": "three decorative logo alternatives",
+      "source": "/clean-pay-logo.png",
+      "exactContract": [
+        "auth 68x68 .clean-auth-logo under .text-center.mb-4",
+        "topbar 40x40 direct child of a.layout-topbar-logo",
+        "footer 14x14 .mr-2 direct child of footer.layout-footer.flex.align-items-center",
+        "only the prior Clean Pay alternative is projected to the candidate empty alternative"
+      ]
+    },
+    {
+      "change": "passkey delete accessible names",
+      "requestedPath": "/link-account",
+      "exactContract": [
+        "button is a direct child of .passkey-list-item and contains .pi.pi-trash",
+        "only Russian baseline label or Russian name-plus-positive-index label is projected",
+        "ARIA snapshot counts must equal the exact DOM target count"
+      ]
+    },
+    {
+      "change": "PrimeReact Russian ARIA locale",
+      "exactContract": [
+        "only elements with data-pc-* or p-* component signatures",
+        "only the exact PrimeReact English/Russian static labels and bounded dynamic OTP/page/slide/star grammars",
+        "ARIA snapshot label counts must equal the exact DOM target counts"
+      ]
+    }
+  ]
+}

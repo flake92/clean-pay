@@ -1,3 +1,7 @@
+import { afterEach, vi } from "vitest";
+
+import { resetEnvForTests } from "@/backend/config/env";
+
 process.env.DATABASE_URL = "postgresql://clean_pay:clean_pay@postgres:5432/clean_pay?schema=public";
 process.env.APP_URL = "http://localhost:8080";
 process.env.NEXT_PUBLIC_APP_URL = "http://localhost:8080";
@@ -32,3 +36,8 @@ process.env.SUPPORT_FAQ_URL = "http://localhost:8080/support";
 process.env.CHATWOOT_BASE_URL = "";
 process.env.CHATWOOT_WEBSITE_TOKEN = "";
 process.env.CHATWOOT_HMAC_TOKEN = "";
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+  resetEnvForTests();
+});

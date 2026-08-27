@@ -1,30 +1,20 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
-
-import { browserSupportsWebAuthn } from "@simplewebauthn/browser";
 import { Button } from "primereact/button";
 import { InputText } from "primereact/inputtext";
 import { Message } from "primereact/message";
 import { Password } from "primereact/password";
 import { Tag } from "primereact/tag";
 
-import {
-  cancelLinkedTelegramAction,
-  confirmLinkedTelegramAction,
-  linkAccountEmailAction,
-  removeLinkedPasskeyAction,
-} from "@/app/actions/link-account";
-import { TurnstileWidget, type TurnstileHandle, hasTurnstileSiteKey } from "@/frontend/components/turnstile-widget";
+import { TurnstileWidget } from "@/frontend/components/turnstile-widget";
 import { LinkButton } from "@/frontend/components/prime/link-button";
-import { navigateTo, replaceWith } from "@/frontend/lib/browser-navigation";
+import type { LinkAccountViewModel } from "@/application/models/link-account";
 import {
-  accountLinkPath,
-  accountSetupCompletePath,
-  emailVerificationPath,
-  isPaymentDestination,
-} from "@/shared/auth/account-setup-flow";
-import type { LinkAccountViewModel, TelegramMergeViewModel } from "@/application/models/link-account";
+  authMethodStatusLabel,
+  authMethodStatusSeverity,
+  telegramMergeConfirmationMessage,
+} from "@/frontend/components/link-account-presentation";
+import { useLinkAccountController } from "@/frontend/hooks/use-link-account-controller";
 
 const defaultLinkAccountModel: LinkAccountViewModel = {
   status: "ready",
@@ -33,42 +23,6 @@ const defaultLinkAccountModel: LinkAccountViewModel = {
   mergeConfirmation: null,
   callbackError: null,
 };
-
-function telegramMergeConfirmationMessage(confirmation: TelegramMergeViewModel) {
-  // Keep the old payload compatible during a rolling deployment: previously
-  // sourceEmailMasked was only returned when the source account had an e-mail.
-  const emailWillBeReplaced = confirmation.emailWillBeReplaced
-    ?? Boolean(confirmation.sourceEmailMasked);
-
-  if (emailWillBeReplaced) {
-    const sourceEmail = confirmation.sourceEmailMasked ?? "другой e-mail";
-    return `Этот Telegram принадлежит отдельной учётной записи с e-mail ${sourceEmail}. После объединения ${confirmation.targetEmail} останется основным e-mail для входа, а ${sourceEmail} больше нельзя будет использовать для входа в объединённый аккаунт. Подписки, платежи и остальные данные будут перенесены. Продолжить?`;
-  }
-
-  return `Этот Telegram принадлежит отдельной учётной записи. После объединения текущий e-mail ${confirmation.targetEmail} останется без изменений, а подписки, платежи и остальные данные из Telegram-учётной записи будут перенесены. Продолжить?`;
-}
-
-function missingTurnstileTokenMessage(siteKey?: string | null) {
-  return hasTurnstileSiteKey(siteKey)
-    ? "Пройдите проверку Cloudflare Turnstile."
-    : "Cloudflare Turnstile site key is not configured.";
-}
-
-function statusSeverity(active: boolean, pending = false) {
-  if (active) {
-    return "success" as const;
-  }
-
-  return pending ? ("warning" as const) : ("secondary" as const);
-}
-
-function statusLabel(active: boolean, pending = false) {
-  if (active) {
-    return "Подключено";
-  }
-
-  return pending ? "Нужно подтвердить" : "Не подключено";
-}
 
 function AuthMethodTile({
   icon,
@@ -97,7 +51,7 @@ function AuthMethodTile({
           <h3 className="account-method-title">{title}</h3>
           <p className="account-method-description">{description}</p>
         </div>
-        <Tag className="account-method-status" severity={statusSeverity(active, pending)} value={statusLabel(active, pending)} />
+        <Tag className="account-method-status" severity={authMethodStatusSeverity(active, pending)} value={authMethodStatusLabel(active, pending)} />
       </div>
       {meta ? <div className="account-method-meta">{meta}</div> : null}
       {children ? <div className="account-method-actions">{children}</div> : null}
@@ -120,248 +74,43 @@ export function LinkAccountPanel({
   turnstileEnabled?: boolean;
   turnstileSiteKey?: string | null;
 }) {
-  const [actionLoading, setActionLoading] = useState<string | null>(null);
-  const profile = model.status === "ready" ? model.profile : null;
-  const [passkeys, setPasskeys] = useState(model.status === "ready" ? model.passkeys : []);
-  const [message, setMessage] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(model.status === "error" ? model.message : model.status === "ready" ? model.callbackError : null);
-  const sessionExpired = model.status === "unauthorized";
-  const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
-  const [turnstile, setTurnstile] = useState<TurnstileHandle | null>(null);
-  const [webAuthnSupported, setWebAuthnSupported] = useState<boolean | null>(null);
-  const [mergeConfirmation, setMergeConfirmation] = useState<TelegramMergeViewModel | null>(model.status === "ready" ? model.mergeConfirmation : null);
-  const actionLoadingRef = useRef<string | null>(null);
-
-  function beginAction(action: string) {
-    if (actionLoadingRef.current !== null) {
-      return false;
-    }
-
-    actionLoadingRef.current = action;
-    setActionLoading(action);
-    return true;
-  }
-
-  function finishAction(action: string) {
-    if (actionLoadingRef.current !== action) {
-      return;
-    }
-
-    actionLoadingRef.current = null;
-    setActionLoading(null);
-  }
-
-  const emailVerified = Boolean(profile?.emailVerified);
-  const telegramId = profile?.telegramId ?? null;
-  const hasEmail = Boolean(profile?.email);
-  const hasTelegram = Boolean(telegramId);
-  const hasPasskey = passkeys.length > 0;
-  const requiresPasswordReauth = guided && passwordRequired;
-  const usesCurrentPassword = hasEmail || requiresPasswordReauth;
-  const returnsToPayment = isPaymentDestination(redirectTo);
-  const verificationDestination = guided
-    ? emailVerificationPath(redirectTo)
-    : "/verify-email";
-  const setupDestination = guided
-    ? accountLinkPath(redirectTo, {
-        passwordRequired: requiresPasswordReauth,
-      })
-    : "/link-account";
-  const loginDestination = `/login?${new URLSearchParams({
-    redirect_to: setupDestination,
-  }).toString()}`;
-
-  const passkeyDescription = useMemo(() => {
-    if (webAuthnSupported === false) {
-      return "На этом устройстве быстрый вход недоступен. Можно пользоваться e-mail, паролем или Telegram.";
-    }
-
-    return hasPasskey
-      ? "Быстрый вход уже настроен для этого аккаунта."
-      : "Можно добавить вход по Face ID, отпечатку или PIN-коду устройства.";
-  }, [hasPasskey, webAuthnSupported]);
-
-  useEffect(() => {
-    const timer = window.setTimeout(() => {
-      setWebAuthnSupported(browserSupportsWebAuthn());
-    }, 0);
-
-    return () => window.clearTimeout(timer);
-  }, []);
-
-  useEffect(() => {
-    if (
-      guided &&
-      hasEmail &&
-      emailVerified &&
-      !mergeConfirmation &&
-      !requiresPasswordReauth
-    ) {
-      navigateTo(accountSetupCompletePath(redirectTo));
-    }
-  }, [
+  const {
+    actionLoading,
+    cancelTelegramMerge,
+    confirmTelegramMerge,
+    deletePasskey,
     emailVerified,
-    guided,
+    error,
     hasEmail,
+    hasPasskey,
+    hasTelegram,
+    loginDestination,
+    linkTelegram,
     mergeConfirmation,
-    redirectTo,
+    message,
+    onSubmit,
+    passkeyDescription,
+    passkeys,
+    profile,
     requiresPasswordReauth,
-  ]);
-
-  async function confirmTelegramMerge() {
-    const action = "telegram-merge-confirm";
-    if (!beginAction(action)) {
-      return;
-    }
-    setError(null);
-
-    try {
-      const result = await confirmLinkedTelegramAction();
-      if (!result.ok) {
-        setError(result.message);
-        if (
-          result.code === "ACCOUNT_MERGE_SUBSCRIPTIONS_CONFLICT" ||
-          result.code === "ACCOUNT_MERGE_REQUIRED"
-        ) {
-          setMergeConfirmation(null);
-          window.history.replaceState({}, "", "/link-account");
-        }
-        return;
-      }
-
-      navigateTo(
-        guided ? accountSetupCompletePath(redirectTo) : redirectTo,
-      );
-    } catch {
-      setError("Сеть недоступна. Не удалось объединить аккаунты.");
-    } finally {
-      finishAction(action);
-    }
-  }
-
-  async function cancelTelegramMerge() {
-    const action = "telegram-merge-cancel";
-    if (!beginAction(action)) {
-      return;
-    }
-    setError(null);
-
-    try {
-      const result = await cancelLinkedTelegramAction();
-      if (!result.ok) {
-        setError(result.message);
-        return;
-      }
-
-      setMergeConfirmation(null);
-      window.history.replaceState({}, "", "/link-account");
-      setMessage("Объединение аккаунтов отменено. Данные не изменены.");
-    } catch {
-      setError("Сеть недоступна. Не удалось отменить объединение.");
-    } finally {
-      finishAction(action);
-    }
-  }
-
-  function linkTelegram() {
-    if (actionLoadingRef.current !== null) {
-      return;
-    }
-    setMessage(null);
-    setError(null);
-
-    if (turnstileEnabled && !turnstileToken) {
-      setError(missingTurnstileTokenMessage(turnstileSiteKey));
-      return;
-    }
-
-    if (!beginAction("telegram")) {
-      return;
-    }
-    const url = new URL("/auth/telegram/start", window.location.origin);
-    url.searchParams.set("redirect_to", setupDestination);
-    if (turnstileToken) {
-      url.searchParams.set("turnstile_token", turnstileToken);
-      url.searchParams.set("cf-turnstile-response", turnstileToken);
-    }
-    window.location.assign(url.toString());
-  }
-
-  async function deletePasskey(id: string) {
-    const action = `passkey-${id}`;
-    if (!beginAction(action)) {
-      return;
-    }
-    setMessage(null);
-    setError(null);
-
-    try {
-      const result = await removeLinkedPasskeyAction(id);
-      if (!result.ok) {
-        setError(result.message);
-        return;
-      }
-
-      setMessage("Ключ быстрого входа удалён.");
-      setPasskeys((current) => current.filter((passkey) => passkey.id !== id));
-    } catch {
-      setError("Сеть недоступна. Не удалось удалить ключ быстрого входа.");
-    } finally {
-      finishAction(action);
-    }
-  }
-
-  async function onSubmit(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (actionLoadingRef.current !== null) {
-      return;
-    }
-    setMessage(null);
-    setError(null);
-
-    const formData = new FormData(event.currentTarget);
-    const email = String(formData.get("email") ?? "").trim();
-    const password = String(formData.get("password") ?? "");
-    const confirmPassword = String(formData.get("confirmPassword") ?? "");
-
-    if (!hasEmail && password !== confirmPassword) {
-      setError("Пароли не совпадают.");
-      return;
-    }
-
-    if (!beginAction("email")) {
-      return;
-    }
-
-    try {
-      const result = await linkAccountEmailAction({ email, password });
-      if (!result.ok) {
-        if (result.code === "UNAUTHORIZED") {
-          setError(null);
-          replaceWith(loginDestination);
-          return;
-        }
-
-        turnstile?.reset();
-        setTurnstileToken(null);
-        setError(result.message);
-        return;
-      }
-      if (result.kind === "linked") {
-        setMessage("E-mail и пароль подключены.");
-        navigateTo(accountSetupCompletePath(redirectTo));
-        return;
-      }
-
-      navigateTo(verificationDestination);
-    } catch {
-      turnstile?.reset();
-      setTurnstileToken(null);
-      setError("Сеть недоступна. Не удалось связать e-mail с аккаунтом.");
-    } finally {
-      finishAction("email");
-    }
-  }
+    returnsToPayment,
+    sessionExpired,
+    setTurnstile,
+    setTurnstileToken,
+    setupPasskey,
+    skipPasskey,
+    telegramId,
+    usesCurrentPassword,
+    verifyEmail,
+    webAuthnSupported,
+  } = useLinkAccountController({
+    guided,
+    model,
+    passwordRequired,
+    redirectTo,
+    turnstileEnabled,
+    turnstileSiteKey,
+  });
 
   if (sessionExpired) {
     return (
@@ -460,7 +209,7 @@ export function LinkAccountPanel({
             <Button
               disabled={actionLoading !== null}
               label="Подтвердить e-mail"
-              onClick={() => navigateTo(verificationDestination)}
+              onClick={verifyEmail}
               outlined
               type="button"
             />
@@ -605,13 +354,13 @@ export function LinkAccountPanel({
                   disabled={actionLoading !== null}
                   icon="pi pi-lock"
                   label="Настроить"
-                  onClick={() => navigateTo("/passkey/setup")}
+                  onClick={setupPasskey}
                   type="button"
                 />
                 <Button
                   disabled={actionLoading !== null}
                   label="Позже"
-                  onClick={() => navigateTo("/cabinet")}
+                  onClick={skipPasskey}
                   outlined
                   severity="secondary"
                   type="button"
@@ -626,7 +375,7 @@ export function LinkAccountPanel({
 
             {passkeys.length > 0 ? (
               <div className="passkey-list">
-                {passkeys.map((credential) => (
+                {passkeys.map((credential, index) => (
                   <div className="passkey-list-item" key={credential.id}>
                     <div className="passkey-list-item__body">
                       <span className="passkey-list-item__name">{credential.name ?? "Ключ доступа"}</span>
@@ -635,7 +384,7 @@ export function LinkAccountPanel({
                       </span>
                     </div>
                     <Button
-                      aria-label="Удалить ключ"
+                      aria-label={`Удалить ключ ${credential.name ?? "Ключ доступа"} ${index + 1}`}
                       disabled={passkeys.length <= 1 || actionLoading !== null}
                       icon="pi pi-trash"
                       loading={actionLoading === `passkey-${credential.id}`}

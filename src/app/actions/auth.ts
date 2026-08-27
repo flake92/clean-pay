@@ -1,15 +1,15 @@
 "use server";
 
 import { executeAuthCommand } from "@/application/auth/execute-auth-command";
-import { productionAuthCommands } from "@/backend/integrations/auth/auth-commands";
 import type {
   AuthCommandResult,
   AuthExecutionResult,
 } from "@/application/models/auth-actions";
 import {
   clearReferralAttributionCookie,
+  productionAuthCommands,
   readReferralAttributionCookie,
-} from "@/backend/integrations/referral/referral-attribution";
+} from "@/app/_composition/action-runtime";
 
 function publicResult(result: AuthExecutionResult): AuthCommandResult {
   if (!result.ok || result.kind !== "authenticated") return result;

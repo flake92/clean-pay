@@ -37,7 +37,7 @@ env_value() {
   fi
 }
 
-script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+script_dir=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 remnashop_env_file=$(env_value REMNASHOP_ENV_FILE /opt/remnashop/.env)
 remnashop_env_expected_uid=$(env_value REMNASHOP_ENV_EXPECTED_UID 0)
 remnashop_env_expected_gid=$(env_value REMNASHOP_ENV_EXPECTED_GID 0)

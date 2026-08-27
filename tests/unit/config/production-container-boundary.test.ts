@@ -23,6 +23,10 @@ const publishedCandidateSmoke = readFileSync(
   "scripts/security/smoke-published-candidate.sh",
   "utf8",
 );
+const gracefulRequestProbe = readFileSync(
+  "scripts/security/verify-app-graceful-request.mjs",
+  "utf8",
+);
 const migrationRehearsals = [
   "scripts/security/rehearse-clean-pay-migrations.sh",
   "scripts/security/rehearse-remnashop-migrations.sh",
@@ -192,6 +196,16 @@ describe("production container boundary", () => {
     expect(runtimeSandbox).toContain("compose stop --timeout 120");
     expect(runtimeSandbox).toContain("event=reconciliation_worker_stopped");
     expect(runtimeSandbox).toContain("event=retention_worker_stopped");
+  });
+
+  it("drains an admitted long application request during the 120 second SIGTERM window", () => {
+    expect(ci).toContain("verify-app-graceful-request.mjs");
+    expect(ci).toContain("clean-pay-ci-runtime 120");
+    expect(gracefulRequestProbe).toContain('["stop", "--time", String(graceSeconds), containerName]');
+    expect(gracefulRequestProbe).toContain("request.finishRequest()");
+    expect(gracefulRequestProbe).toContain("await Promise.all([request.response, stop])");
+    expect(gracefulRequestProbe).toContain('stateMatch[1] !== "false"');
+    expect(gracefulRequestProbe).toContain('Number(stateMatch[2]) === 137');
   });
 
   it("isolates concurrent security rehearsals and bounds local HTTP probes", () => {

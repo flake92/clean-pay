@@ -2,7 +2,8 @@ import {
   SubscriptionCatalogAccessError,
   type SubscriptionCatalog,
 } from "@/application/subscriptions/ports/subscription-catalog";
-import { getAuthorizedRemnashopTokens, remnashopRequest } from "@/backend/integrations/remnashop/client";
+import { remnashopValidatedRequest } from "@/backend/integrations/remnashop/api-client-runtime";
+import { getAuthorizedRemnashopTokens } from "@/backend/integrations/remnashop/client";
 import { ServiceError } from "@/backend/errors/service-error";
 import type { SubscriptionOffersResponse } from "@/backend/integrations/remnashop/contracts";
 
@@ -15,7 +16,7 @@ export function createRemnashopSubscriptionCatalog(
     async loadOffers() {
       try {
         const { accessToken } = await authorize();
-        return await remnashopRequest<SubscriptionOffersResponse>("/subscription/offers", { accessToken });
+        return await remnashopValidatedRequest<SubscriptionOffersResponse>("/subscription/offers", { accessToken });
       } catch (error) {
         if (error instanceof ServiceError) {
           if (error.code === "PROVIDER_SESSION_RECOVERY_REQUIRED") {

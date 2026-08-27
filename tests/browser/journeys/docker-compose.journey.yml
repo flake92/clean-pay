@@ -1,0 +1,173 @@
+services:
+  app:
+    environment:
+      NODE_EXTRA_CA_CERTS: /browser-ca/root.crt
+      TZ: Europe/Moscow
+    volumes:
+      - journey-trusted-ca:/browser-ca:ro
+    depends_on:
+      browser-ca-ready:
+        condition: service_completed_successfully
+      browser-provider-mock:
+        condition: service_healthy
+    networks: !override
+      - default
+
+  browser-proxy:
+    image: caddy:2-alpine@sha256:5f5c8640aae01df9654968d946d8f1a56c497f1dd5c5cda4cf95ab7c14d58648
+    restart: unless-stopped
+    read_only: true
+    cap_drop: [ALL]
+    cap_add: [NET_BIND_SERVICE]
+    security_opt: [no-new-privileges:true]
+    tmpfs:
+      - /config:rw,noexec,nosuid,nodev,size=16m,mode=0700
+      - /tmp:rw,noexec,nosuid,nodev,size=16m,mode=1777
+    volumes:
+      - ${CLEAN_PAY_BROWSER_CADDYFILE:?CLEAN_PAY_BROWSER_CADDYFILE is required}:/etc/caddy/Caddyfile:ro
+      - journey-caddy-data:/data
+    ports:
+      - "${CLEAN_PAY_BROWSER_PROXY_BIND:-127.0.0.2}:443:443"
+    networks:
+      default:
+        aliases:
+          - pay.ci.clean-pay.dev
+          - oauth.telegram.org
+          - panel.ci.clean-pay.dev
+          - remnashop.browser.clean-pay.dev
+          - checkout.browser.clean-pay.dev
+          - challenges.cloudflare.com
+          - chatwoot.browser.clean-pay.dev
+
+  browser-provider-mock:
+    image: node:24-alpine@sha256:d32cdf619f63fe0471182d08996dd516c6275bb5fd31ae06e55a570bd9e1ad43
+    restart: unless-stopped
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 64
+    mem_limit: 128m
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=16m,mode=1777
+    command: ["node", "/mock/provider-mock.mjs"]
+    environment:
+      DB_OBSERVER_URL: http://browser-db-observer:3200
+      CLEAN_PAY_BROWSER_DB_SCOPE: ${COMPOSE_PROJECT_NAME:?COMPOSE_PROJECT_NAME is required}
+    volumes:
+      - ${CLEAN_PAY_BROWSER_PROVIDER_MOCK_FILE:?CLEAN_PAY_BROWSER_PROVIDER_MOCK_FILE is required}:/mock/provider-mock.mjs:ro
+    ports:
+      - "${CLEAN_PAY_BROWSER_PROVIDER_BIND:-127.0.0.1}:${CLEAN_PAY_BROWSER_PROVIDER_PORT:-13100}:3100"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3100/__health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 2s
+      timeout: 2s
+      retries: 20
+    depends_on:
+      browser-oidc-mock:
+        condition: service_healthy
+      browser-db-observer:
+        condition: service_healthy
+
+  browser-db-observer:
+    image: ${CLEAN_PAY_MIGRATION_IMAGE:?CLEAN_PAY_MIGRATION_IMAGE is required}
+    entrypoint: ["node", "/app/browser-db-observer.mjs"]
+    restart: unless-stopped
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 64
+    mem_limit: 256m
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=16m,mode=1777
+    env_file:
+      - ${CLEAN_PAY_BROWSER_DB_OBSERVER_ENV_FILE:?CLEAN_PAY_BROWSER_DB_OBSERVER_ENV_FILE is required}
+    environment:
+      CLEAN_PAY_BROWSER_DB_SCOPE: ${COMPOSE_PROJECT_NAME:?COMPOSE_PROJECT_NAME is required}
+      PORT: "3200"
+    volumes:
+      - ${CLEAN_PAY_BROWSER_DB_OBSERVER_FILE:?CLEAN_PAY_BROWSER_DB_OBSERVER_FILE is required}:/app/browser-db-observer.mjs:ro
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3200/__health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    depends_on:
+      browser-db-observer-provision:
+        condition: service_completed_successfully
+
+  browser-db-observer-provision:
+    image: postgres:17-alpine@sha256:18cfe3ef5e6815560c98237d6216d1e5119702fb0f3894c8785dd58b8bbe5d73
+    entrypoint: ["/bin/sh", "/fixture/db-observer-provision.sh"]
+    restart: "no"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 32
+    mem_limit: 128m
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=8m,mode=1777
+    env_file:
+      - ${CLEAN_PAY_BROWSER_DB_OBSERVER_PROVISION_ENV_FILE:?CLEAN_PAY_BROWSER_DB_OBSERVER_PROVISION_ENV_FILE is required}
+    volumes:
+      - ${CLEAN_PAY_BROWSER_DB_OBSERVER_PROVISION_FILE:?CLEAN_PAY_BROWSER_DB_OBSERVER_PROVISION_FILE is required}:/fixture/db-observer-provision.sh:ro
+    depends_on:
+      db-grant-sync:
+        condition: service_completed_successfully
+    networks:
+      default:
+
+  browser-ca-ready:
+    image: node:24-alpine@sha256:d32cdf619f63fe0471182d08996dd516c6275bb5fd31ae06e55a570bd9e1ad43
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    command:
+      - /bin/sh
+      - -euc
+      - >-
+        for attempt in $$(seq 1 100); do
+          if test -r /caddy-data/caddy/pki/authorities/local/root.crt; then
+            cp /caddy-data/caddy/pki/authorities/local/root.crt /trusted/root.crt;
+            chmod 0444 /trusted/root.crt;
+            exit 0;
+          fi;
+          sleep 0.1;
+        done;
+        exit 1
+    volumes:
+      - journey-caddy-data:/caddy-data:ro
+      - journey-trusted-ca:/trusted
+    depends_on:
+      browser-proxy:
+        condition: service_started
+
+  browser-oidc-mock:
+    image: node:24-alpine@sha256:d32cdf619f63fe0471182d08996dd516c6275bb5fd31ae06e55a570bd9e1ad43
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 64
+    mem_limit: 128m
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=16m,mode=1777
+    command: ["node", "/mock/oidc-mock.mjs"]
+    environment:
+      OIDC_ISSUER: https://oauth.telegram.org
+      OIDC_PUBLIC_ISSUER: https://oauth.telegram.org
+      OIDC_LEDGER_URL: http://browser-provider-mock:3100/__oidc-event
+      PORT: "8090"
+    volumes:
+      - ${CLEAN_PAY_BROWSER_OIDC_MOCK_FILE:?CLEAN_PAY_BROWSER_OIDC_MOCK_FILE is required}:/mock/oidc-mock.mjs:ro
+    healthcheck:
+      test: ["CMD", "node", "-e", "const s=require('node:net').connect(8090,'127.0.0.1',()=>{s.end();process.exit(0)});s.setTimeout(1500,()=>process.exit(1));s.on('error',()=>process.exit(1))"]
+      interval: 2s
+      timeout: 2s
+      retries: 20
+    networks:
+      default:
+        aliases:
+          - telegram-oidc-browser-mock
+
+volumes:
+  journey-caddy-data:
+  journey-trusted-ca:

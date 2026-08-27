@@ -3,7 +3,7 @@ import { PrismaPg } from "@prisma/adapter-pg";
 
 import { getEnv } from "@/backend/config/env";
 import { getReadinessDatabasePool } from "@/backend/database/pools";
-import { prismaPgAdapterOptions } from "../../../deploy/prod/database-pool.mjs";
+import { prismaPgAdapterOptions } from "../../../runtime/database-pool.mjs";
 
 const globalForReadinessPrisma = globalThis as unknown as {
   readinessPrisma?: PrismaClient;

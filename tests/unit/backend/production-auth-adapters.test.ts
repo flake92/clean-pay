@@ -55,6 +55,7 @@ vi.mock("@/backend/integrations/remnashop/client", () => ({
   getRemnashopUserIdFromAccessToken: mocks.getRemnashopUserIdFromAccessToken,
   getRemnashopMe: mocks.getRemnashopMe,
   remnashopRequest: mocks.remnashopRequest,
+  remnashopValidatedRequest: mocks.remnashopRequest,
   remnashopChangePassword: mocks.remnashopChangePassword,
   remnashopRefreshTokens: mocks.remnashopRefreshTokens,
   protectRemnashopToken: mocks.protectRemnashopToken,
@@ -62,6 +63,9 @@ vi.mock("@/backend/integrations/remnashop/client", () => ({
   remnashopAuthTelegramIdentity: mocks.remnashopAuthTelegramIdentity,
   remnashopLinkTelegram: mocks.remnashopLinkTelegram,
   remnashopMergeUsers: mocks.remnashopMergeUsers,
+}));
+vi.mock("@/backend/integrations/remnashop/api-client-runtime", () => ({
+  remnashopValidatedRequest: mocks.remnashopRequest,
 }));
 vi.mock("@/backend/integrations/remnashop/session", () => ({
   createSessionFromRemnashopAuth: mocks.createSessionFromRemnashopAuth,

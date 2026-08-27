@@ -54,4 +54,13 @@ describe("Chatwoot identity Server Action", () => {
     await expect(verifyChatwootIdentityAction("user-1"))
       .rejects.toThrow("database unavailable");
   });
+
+  it("rejects malformed identity input before entering the shared request guard", async () => {
+    await expect(verifyChatwootIdentityAction(""))
+      .resolves.toBe("rejected");
+    await expect(verifyChatwootIdentityAction("x".repeat(256)))
+      .resolves.toBe("rejected");
+    expect(mocks.runAction).not.toHaveBeenCalled();
+    expect(mocks.verifyIdentity).not.toHaveBeenCalled();
+  });
 });

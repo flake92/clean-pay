@@ -104,8 +104,14 @@ describe("post-auth redirect flow", () => {
 
   it("threads the validated destination through password, passkey and Telegram login", () => {
     const loginPage = readFileSync("src/app/login/page.tsx", "utf8");
-    const authForms = readFileSync("src/frontend/components/auth-forms.tsx", "utf8");
-    const passkeys = readFileSync("src/frontend/components/passkey-actions.tsx", "utf8");
+    const authForms = [
+      readFileSync("src/frontend/components/auth-forms.tsx", "utf8"),
+      readFileSync("src/frontend/hooks/use-auth-form-controller.ts", "utf8"),
+    ].join("\n");
+    const passkeys = [
+      readFileSync("src/frontend/components/passkey-actions.tsx", "utf8"),
+      readFileSync("src/frontend/hooks/use-passkey-actions-controller.ts", "utf8"),
+    ].join("\n");
     const telegramStart = readFileSync("src/app/auth/telegram/start/route.ts", "utf8");
     const telegramWebApp = readFileSync("src/frontend/components/telegram-webapp-login.tsx", "utf8");
     const telegramWebAppPage = readFileSync(

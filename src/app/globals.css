@@ -10,6 +10,26 @@ body {
   overflow-x: hidden;
 }
 
+.skip-link {
+  background: #ffffff;
+  border: 2px solid #6366f1;
+  border-radius: 6px;
+  color: #312e81;
+  font-weight: 700;
+  left: 1rem;
+  padding: 0.75rem 1rem;
+  position: fixed;
+  top: 1rem;
+  transform: translateY(calc(-100% - 2rem));
+  z-index: 10000;
+}
+
+.skip-link:focus-visible {
+  box-shadow: 0 0 0 0.2rem rgba(99, 102, 241, 0.22);
+  outline: 0;
+  transform: translateY(0);
+}
+
 .break-all {
   word-break: break-all;
 }

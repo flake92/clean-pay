@@ -22,7 +22,7 @@ readonly INVALID_OWNER_DATABASE="remnashop_invalid_owner"
 readonly ROW_LOCK_DATABASE="remnashop_row_lock_retry"
 
 cleanup() {
-  docker rm --force "$POSTGRES_CONTAINER" >/dev/null 2>&1 || true
+  docker rm --force --volumes "$POSTGRES_CONTAINER" >/dev/null 2>&1 || true
   docker image rm "$REMNASHOP_IMAGE" >/dev/null 2>&1 || true
   docker network rm "$NETWORK" >/dev/null 2>&1 || true
 }

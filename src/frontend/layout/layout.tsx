@@ -198,6 +198,9 @@ const Layout = ({
 
   return (
     <div className={containerClass}>
+      <a className="skip-link" href="#main-content">
+        К основному содержимому
+      </a>
       <AppTopbar navigation={navigation} ref={topbarRef} />
       <nav
         aria-label="Основная навигация"
@@ -208,7 +211,7 @@ const Layout = ({
         <AppMenu navigation={navigation} />
       </nav>
       <div className="layout-main-container">
-        <main className="layout-main">{children}</main>
+        <main className="layout-main" id="main-content" tabIndex={-1}>{children}</main>
         <AppFooter />
       </div>
       <div className="layout-mask" />

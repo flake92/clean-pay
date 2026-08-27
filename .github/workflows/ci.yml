@@ -20,6 +20,7 @@ jobs:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           fetch-depth: 0
+          persist-credentials: false
       - name: Scan changed commits for secrets and PII-like credentials
         uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2.3.9
         env:
@@ -33,6 +34,8 @@ jobs:
       security-events: write
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
       - name: Initialize CodeQL
         uses: github/codeql-action/init@5595ccaf912efad79be6eef63a5619ff05969be3 # v4.37.6
         with:
@@ -40,6 +43,56 @@ jobs:
           queries: security-extended
       - name: Analyze application source
         uses: github/codeql-action/analyze@5595ccaf912efad79be6eef63a5619ff05969be3 # v4.37.6
+
+  static-analysis:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    env:
+      SHELLCHECK_IMAGE: koalaman/shellcheck-alpine:v0.11.0@sha256:9955be09ea7f0dbf7ae942ac1f2094355bb30d96fffba0ec09f5432207544002
+      HADOLINT_IMAGE: hadolint/hadolint:v2.14.0-alpine@sha256:7aba693c1442eb31c0b015c129697cb3b6cb7da589d85c7562f9deb435a6657c
+      ACTIONLINT_IMAGE: rhysd/actionlint:1.7.7@sha256:887a259a5a534f3c4f36cb02dca341673c6089431057242cdc931e9f133147e9
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+      - name: Lint tracked shell scripts
+        shell: bash
+        run: |
+          mapfile -d '' -t shell_files < <(git ls-files -z -- '*.sh')
+          test "${#shell_files[@]}" -gt 0
+          docker run --rm --network none --read-only --cap-drop ALL \
+            --security-opt no-new-privileges:true \
+            --volume "$PWD:/repo:ro" --workdir /repo \
+            --entrypoint shellcheck \
+            "$SHELLCHECK_IMAGE" "${shell_files[@]}"
+      - name: Lint container build definitions
+        run: |
+          docker run --rm --network none --read-only --cap-drop ALL \
+            --security-opt no-new-privileges:true \
+            --volume "$PWD:/repo:ro" --workdir /repo \
+            --entrypoint /bin/hadolint \
+            "$HADOLINT_IMAGE" Dockerfile .devcontainer/Dockerfile
+      - name: Lint GitHub Actions workflows
+        run: |
+          docker run --rm --network none --read-only --cap-drop ALL \
+            --security-opt no-new-privileges:true \
+            --volume "$PWD:/repo:ro" --workdir /repo \
+            "$ACTIONLINT_IMAGE" -no-color
+
+  dependency-review:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+      - name: Review dependency changes
+        uses: actions/dependency-review-action@2031cfc080254a8a887f58cffee85186f0e49e48 # v4.9.0
 
   validate:
     runs-on: ubuntu-latest
@@ -70,6 +123,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
 
       - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
         with:
@@ -144,6 +199,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
       - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
         with:
           node-version-file: .node-version
@@ -187,6 +244,8 @@ jobs:
       CLEAN_PAY_DATABASE_MAINTENANCE_CONFIRMED: "true"
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
       - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
         with:
           node-version-file: .node-version
@@ -258,6 +317,8 @@ jobs:
       CLEAN_PAY_MIGRATION_IMAGE: clean-pay-migration:ci
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
       - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
         with:
           node-version-file: .node-version
@@ -371,6 +432,8 @@ jobs:
           docker inspect --format '{{json .HostConfig.CapDrop}}' clean-pay-ci-runtime | grep --quiet ALL
           docker inspect --format '{{json .HostConfig.SecurityOpt}}' clean-pay-ci-runtime | grep --quiet no-new-privileges
           docker logs clean-pay-ci-runtime 2>&1 | grep --quiet 'event=production_environment_validated'
+          node scripts/security/verify-app-graceful-request.mjs \
+            http://127.0.0.1:4000 "$NEXT_PUBLIC_APP_URL" clean-pay-ci-runtime 120
       - name: Verify the full hardened migration and worker topology
         run: bash scripts/security/verify-runtime-sandbox.sh clean-pay:ci clean-pay-migration:ci
       - name: Generate application image SBOM
@@ -430,6 +493,89 @@ jobs:
             clean-pay-application.vulnerability-attestation.json
             clean-pay-migration.vulnerability-attestation.json
 
+  production-image-browser-journey:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      CLEAN_PAY_BROWSER_COMPOSE_PROJECT: clean-pay-browser-journey-ci-${{ github.run_id }}-${{ github.run_attempt }}
+      CLEAN_PAY_BROWSER_APP_IMAGE: clean-pay:journey-ci
+      CLEAN_PAY_BROWSER_MIGRATION_IMAGE: clean-pay-migration:journey-ci
+      CLEAN_PAY_BROWSER_SOURCE_REVISION: ${{ github.sha }}
+      CLEAN_PAY_BROWSER_SOURCE_IMAGE_TAG: clean-pay:journey-ci
+      CLEAN_PAY_BROWSER_MIGRATION_IMAGE_TAG: clean-pay-migration:journey-ci
+      CLEAN_PAY_BROWSER_APP_PORT: "4100"
+      CLEAN_PAY_BROWSER_PROVIDER_PORT: "13100"
+      CLEAN_PAY_BROWSER_PROXY_BIND: 127.0.0.2
+      NEXT_PUBLIC_APP_URL: https://pay.ci.clean-pay.dev
+      NEXT_PUBLIC_BRAND_NAME: Clean Pay
+      NEXT_PUBLIC_BRAND_LOGO_URL: /clean-pay-logo.png
+      TURNSTILE_ENABLED: "true"
+      TURNSTILE_SITE_KEY: 0x4AAAAABrowserJourneyOnly8Wp4Jz7Lc2
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version-file: .node-version
+          cache: npm
+      - name: Install locked dependencies and pinned Chromium
+        run: |
+          npm ci
+          node node_modules/playwright/cli.js install --with-deps chromium
+      - name: Build synthetic production-image targets
+        run: |
+          public_contract_version="$(node scripts/security/compute-public-build-contract.mjs --version)"
+          public_contract_sha256="$(node scripts/security/compute-public-build-contract.mjs)"
+          test "$public_contract_version" = "1"
+          docker build \
+            --target runner \
+            --build-arg CLEAN_PAY_RELEASE=journey-ci \
+            --build-arg CLEAN_PAY_REVISION="$GITHUB_SHA" \
+            --build-arg CLEAN_PAY_PUBLIC_BUILD_CONTRACT_VERSION="$public_contract_version" \
+            --build-arg CLEAN_PAY_PUBLIC_BUILD_CONTRACT_SHA256="$public_contract_sha256" \
+            --build-arg NEXT_PUBLIC_APP_URL="$NEXT_PUBLIC_APP_URL" \
+            --build-arg TURNSTILE_ENABLED="$TURNSTILE_ENABLED" \
+            --build-arg TURNSTILE_WIDGET_ID="$TURNSTILE_SITE_KEY" \
+            --build-arg NEXT_PUBLIC_BRAND_NAME="$NEXT_PUBLIC_BRAND_NAME" \
+            --build-arg NEXT_PUBLIC_BRAND_LOGO_URL="$NEXT_PUBLIC_BRAND_LOGO_URL" \
+            --tag "$CLEAN_PAY_BROWSER_APP_IMAGE" \
+            .
+          docker build \
+            --target migration \
+            --build-arg CLEAN_PAY_RELEASE=journey-ci \
+            --build-arg CLEAN_PAY_REVISION="$GITHUB_SHA" \
+            --build-arg CLEAN_PAY_PUBLIC_BUILD_CONTRACT_VERSION="$public_contract_version" \
+            --build-arg CLEAN_PAY_PUBLIC_BUILD_CONTRACT_SHA256="$public_contract_sha256" \
+            --tag "$CLEAN_PAY_BROWSER_MIGRATION_IMAGE" \
+            .
+          image_digest="$(docker image inspect --format '{{.Id}}' "$CLEAN_PAY_BROWSER_APP_IMAGE")"
+          migration_image_digest="$(docker image inspect --format '{{.Id}}' "$CLEAN_PAY_BROWSER_MIGRATION_IMAGE")"
+          printf '%s\n' "$image_digest" | grep -Eq '^sha256:[0-9a-f]{64}$'
+          printf '%s\n' "$migration_image_digest" | grep -Eq '^sha256:[0-9a-f]{64}$'
+          {
+            printf 'CLEAN_PAY_BROWSER_SOURCE_IMAGE_DIGEST=%s\n' "$image_digest"
+            printf 'CLEAN_PAY_BROWSER_MIGRATION_IMAGE_DIGEST=%s\n' "$migration_image_digest"
+            printf 'CLEAN_PAY_BROWSER_PUBLIC_BUILD_CONTRACT_SHA256=%s\n' "$public_contract_sha256"
+          } >> "$GITHUB_ENV"
+      - name: Run read-only production-image journey gate
+        env:
+          CLEAN_PAY_BROWSER_JOURNEY_ENV_DIR: ${{ runner.temp }}/clean-pay-browser-journey-${{ github.run_id }}-${{ github.run_attempt }}
+        run: npm run test:browser:journey:production-image
+      - name: Preserve sanitized browser journey evidence
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: production-image-browser-journey-${{ github.run_id }}-${{ github.run_attempt }}
+          if-no-files-found: warn
+          retention-days: 30
+          path: test-results/browser-journeys
+      - name: Clean up only the owned browser journey project
+        if: always()
+        env:
+          CLEAN_PAY_BROWSER_JOURNEY_ENV_DIR: ${{ runner.temp }}/clean-pay-browser-journey-${{ github.run_id }}-${{ github.run_attempt }}
+        run: node tests/browser/journeys/run-production-image-journey.mjs cleanup
+
   remnashop-migration-rehearsal:
     runs-on: ubuntu-latest
     timeout-minutes: 45
@@ -475,10 +621,13 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     env:
+      CLEAN_PAY_DEVCONTAINER_PROJECT: clean-pay-e2e-${{ github.run_id }}-${{ github.run_attempt }}
       REMNASHOP_HOST_SOURCE: ${{ github.workspace }}/.e2e-remnashop
       REMNASHOP_BUILD_REVISION: 837d964269078142307794ba3566a30d40b7b0b6
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
       - name: Check out the exact Remnashop PR 135 commit
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
@@ -498,7 +647,7 @@ jobs:
           CLEAN_PAY_E2E_DIAGNOSTICS: "1"
       - name: Collect Docker diagnostics
         if: failure()
-        run: docker compose -p clean-pay-dev -f .devcontainer/docker-compose.yml logs --tail=200
+        run: docker compose -p "$CLEAN_PAY_DEVCONTAINER_PROJECT" -f .devcontainer/docker-compose.yml logs --tail=200
       - name: Clean up E2E stack
         if: always()
-        run: docker compose -p clean-pay-dev -f .devcontainer/docker-compose.yml down --remove-orphans --volumes
+        run: docker compose -p "$CLEAN_PAY_DEVCONTAINER_PROJECT" -f .devcontainer/docker-compose.yml down --remove-orphans --volumes

@@ -11,7 +11,7 @@ const rootCompose = readFileSync("docker-compose.yml", "utf8");
 const devcontainerCompose = readFileSync(".devcontainer/docker-compose.yml", "utf8");
 const prismaClient = readFileSync("src/backend/database/prisma.ts", "utf8");
 const databasePools = readFileSync("src/backend/database/pools.ts", "utf8");
-const databasePoolConfig = readFileSync("deploy/prod/database-pool.mjs", "utf8");
+const databasePoolConfig = readFileSync("runtime/database-pool.mjs", "utf8");
 const readinessPrismaClient = readFileSync(
   "src/backend/database/readiness-prisma.ts",
   "utf8",

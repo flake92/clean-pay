@@ -40,6 +40,23 @@ describe("operational metrics", () => {
     expect(upstreamOperation("/users/merge?dry_run=true")).toBe("/users/merge");
   });
 
+  it("keeps the Telegram JWKS metric on its exact allowlisted series", () => {
+    recordUpstreamRequest({
+      service: "telegram_oidc",
+      operation: "/.well-known/jwks.json",
+      outcome: "success",
+      durationMs: 1,
+    });
+
+    const metrics = renderPrometheusMetrics(backlog);
+    expect(metrics).toContain(
+      'clean_pay_upstream_requests_total{service="telegram_oidc",operation="/.well-known/jwks.json",outcome="success"} 1',
+    );
+    expect(metrics).not.toContain(
+      'clean_pay_upstream_requests_total{service="other",operation="other",outcome="success"}',
+    );
+  });
+
   it("exports bounded counters, durations, readiness and backlog gauges", () => {
     setReadinessMetric("degraded");
     recordOperationalEvent("rate_limit_target_rejected", "auth");

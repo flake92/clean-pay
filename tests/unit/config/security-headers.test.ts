@@ -6,6 +6,10 @@ import nextConfig from "../../../next.config";
 import { buildContentSecurityPolicy } from "@/shared/security/content-security-policy";
 
 describe("application security headers", () => {
+  it("does not disclose the Next.js runtime through X-Powered-By", () => {
+    expect(nextConfig.poweredByHeader).toBe(false);
+  });
+
   it("keeps transport security headers on every response", async () => {
     const rules = await nextConfig.headers?.();
     const headers = Object.fromEntries(

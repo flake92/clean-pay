@@ -1,4 +1,5 @@
-import { getAuthorizedRemnashopTokens, remnashopRequest } from "@/backend/integrations/remnashop/client";
+import { remnashopValidatedRequest } from "@/backend/integrations/remnashop/api-client-runtime";
+import { getAuthorizedRemnashopTokens } from "@/backend/integrations/remnashop/client";
 import { ServiceError } from "@/backend/errors/service-error";
 import { getLiveRemnawaveSubscriptionUrl } from "@/backend/integrations/remnawave/client";
 import type {
@@ -12,9 +13,9 @@ type SubscriptionAuthorizer = () => Promise<Authorized>;
 
 async function loadCurrentSubscription(authorize: SubscriptionAuthorizer) {
   const { accessToken, session } = await authorize();
-  const subscription = await remnashopRequest<CurrentSubscriptionResponse | null>(
+  const subscription = await remnashopValidatedRequest<CurrentSubscriptionResponse | null>(
     "/subscription/current",
-    { accessToken },
+      { accessToken },
   );
 
   if (!subscription) return null;
@@ -37,12 +38,12 @@ async function loadCurrentSubscription(authorize: SubscriptionAuthorizer) {
 
 async function loadSubscriptionDevices(authorize: SubscriptionAuthorizer) {
   const { accessToken } = await authorize();
-  return remnashopRequest<DevicesResponse>("/subscription/devices", { accessToken });
+  return remnashopValidatedRequest<DevicesResponse>("/subscription/devices", { accessToken });
 }
 
 async function loadSubscriptionOffers(authorize: SubscriptionAuthorizer) {
   const { accessToken } = await authorize();
-  return remnashopRequest<SubscriptionOffersResponse>("/subscription/offers", { accessToken });
+  return remnashopValidatedRequest<SubscriptionOffersResponse>("/subscription/offers", { accessToken });
 }
 
 export function createRemnashopSubscriptionReader(

@@ -14,8 +14,8 @@ import {
   remnashopAuthTelegramIdentity,
   remnashopLinkTelegram,
   remnashopMergeUsers,
-  remnashopRequest,
 } from "@/backend/integrations/remnashop/client";
+import { remnashopValidatedRequest } from "@/backend/integrations/remnashop/api-client-runtime";
 import { linkCurrentUserToRemnashopAuth } from "@/backend/integrations/remnashop/session";
 import { refreshCurrentAccessCookie } from "@/backend/integrations/sessions/web-session-service";
 import {
@@ -148,7 +148,7 @@ export function createProductionEmailVerificationCommands(
 
   async confirmProviderCode(actor, input) {
     if (input.alreadyVerified) return { email: input.email! };
-    return adapt(() => remnashopRequest<ConfirmEmailVerificationResponse>(
+    return adapt(() => remnashopValidatedRequest<ConfirmEmailVerificationResponse>(
       "/auth/email/confirm",
       {
         method: "POST",
@@ -306,9 +306,13 @@ export function createProductionEmailVerificationCommands(
   },
 
   async changeProviderEmail(actor, email) {
-    const result = await adapt(() => remnashopRequest<ChangeEmailResponse>(
+    const result = await adapt(() => remnashopValidatedRequest<ChangeEmailResponse>(
       "/auth/email/change",
-      { method: "POST", accessToken: actorContext(actor).accessToken, body: { email } },
+      {
+        method: "POST",
+        accessToken: actorContext(actor).accessToken,
+        body: { email },
+      },
     ));
     return { pendingEmail: result.pending_email };
   },

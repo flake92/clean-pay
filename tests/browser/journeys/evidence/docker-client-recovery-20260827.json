@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "observedAt": "2026-08-27T02:19:00+03:00",
+  "scope": "stale Docker CLI clients only",
+  "daemonProcessTouched": false,
+  "containersTouchedByRecovery": false,
+  "clients": [
+    { "pid": 35392, "startedAt": "2026-08-27T01:18:25+03:00", "command": "docker ps --format <sanitized>" },
+    { "pid": 30792, "startedAt": "2026-08-27T01:29:37+03:00", "command": "docker version --format <sanitized>" },
+    { "pid": 38840, "startedAt": "2026-08-27T01:30:48+03:00", "command": "docker images --format <sanitized>" },
+    { "pid": 15396, "startedAt": "2026-08-27T01:53:41+03:00", "command": "docker image inspect <baseline-migration-image> --format <sanitized>" },
+    { "pid": 40928, "startedAt": "2026-08-27T01:53:41+03:00", "command": "docker image inspect <baseline-migration-image> --format <sanitized>" },
+    { "pid": 39172, "startedAt": "2026-08-27T01:53:41+03:00", "command": "docker images --format <sanitized>" },
+    { "pid": 15156, "startedAt": "2026-08-27T02:17:42+03:00", "command": "docker ps --format <sanitized>" }
+  ],
+  "postconditions": {
+    "baselineUrl": "http://127.0.0.1:4000/login",
+    "baselineExpectedStatus": 200,
+    "baselineObservedStatus": 200,
+    "journeyOwnershipLabel": "com.docker.compose.project=clean-pay-browser-journey-baseline-ad8f",
+    "journeyOwnedContainerCount": 11,
+    "unexpectedJourneyOwners": 0
+  }
+}

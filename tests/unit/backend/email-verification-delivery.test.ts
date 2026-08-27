@@ -7,6 +7,10 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("@/backend/integrations/remnashop/client", () => ({
   remnashopRequest: mocks.remnashopRequest,
+  remnashopValidatedRequest: mocks.remnashopRequest,
+}));
+vi.mock("@/backend/integrations/remnashop/api-client-runtime", () => ({
+  remnashopValidatedRequest: mocks.remnashopRequest,
 }));
 vi.mock("@/backend/observability/auth-debug-log", () => ({
   authDebugLog: mocks.authDebugLog,

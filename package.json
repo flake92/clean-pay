@@ -30,6 +30,9 @@
     "test:postgres-concurrency": "node node_modules/vitest/vitest.mjs run --config config/vitest/vitest.integration.config.mts --configLoader native tests/integration/services/passkey-deletion-postgres.test.ts tests/integration/services/refresh-token-rotation-postgres.test.ts tests/integration/services/account-merge-postgres.test.ts tests/integration/services/one-time-state-postgres.test.ts tests/integration/services/telegram-recovery-postgres.test.ts tests/integration/services/telegram-callback-durability-postgres.test.ts",
     "test:e2e:devcontainer": "node scripts/e2e-devcontainer.mjs",
     "test:e2e": "node scripts/e2e-devcontainer.mjs",
+    "test:browser": "node node_modules/playwright/cli.js test --config playwright.config.ts",
+    "test:browser:journey": "node node_modules/playwright/cli.js test --config tests/browser/journeys/playwright.config.ts",
+    "test:browser:journey:production-image": "node tests/browser/journeys/run-production-image-journey.mjs run",
     "pretest:coverage": "npm run prisma:generate",
     "test:coverage": "node node_modules/vitest/vitest.mjs run --config config/vitest/base.mts --configLoader native --coverage",
     "pretest:coverage:frontend": "npm run prisma:generate",
@@ -55,6 +58,7 @@
     "react-transition-group": "^4.4.5"
   },
   "devDependencies": {
+    "@playwright/test": "1.62.1",
     "@testing-library/react": "^16.3.0",
     "@testing-library/user-event": "^14.6.1",
     "@types/node": "^24",
@@ -93,6 +97,7 @@
   "allowScripts": {
     "@parcel/watcher@2.6.0": true,
     "@prisma/engines@7.9.1": true,
+    "fsevents@2.3.2": false,
     "fsevents@2.3.3": true,
     "prisma@7.9.1": true,
     "unrs-resolver@1.12.2": true

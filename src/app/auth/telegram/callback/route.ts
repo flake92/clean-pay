@@ -11,16 +11,19 @@ import {
   type TelegramCallbackOutcome,
   type VerifiedTelegramCallback,
 } from "@/application/auth/ports/telegram-callback";
-import { getEnv } from "@/backend/config/env";
-import { ServiceError } from "@/backend/errors/service-error";
+import {
+  getEnv,
+  logTechnicalError,
+  logTechnicalInfo,
+  logTechnicalWarning,
+  ServiceError,
+} from "@/app/_composition/platform-runtime";
 import {
   productionTelegramCallbackGateway,
 } from "@/app/_composition/session-gateways";
 import {
   completedTelegramCallbackDestination,
   setTelegramCallbackReceipt,
-} from "@/backend/integrations/telegram/callback-receipt";
-import {
   checkpointDurableTelegramIdentityResolved,
   checkpointDurableTelegramOutcome,
   checkpointDurableTelegramRecoveryCommitted,
@@ -35,33 +38,22 @@ import {
   type DurableTelegramCallbackCheckpoint,
   type DurableTelegramCallbackOwnership,
   type DurableTelegramCallbackReplay,
-} from "@/backend/integrations/telegram/durable-callback";
-import { recoverRemnashopTelegramSession } from "@/app/_composition/telegram-session-recovery";
-import {
   telegramAccountMergeCookieMaxAgeSeconds,
   telegramAccountMergeCookieName,
-} from "@/backend/integrations/auth/telegram-account-merge-store";
-import {
   createWebSessionOnResponse,
   getCurrentSession,
   setDurableCallbackReplayCookies,
-} from "@/backend/integrations/sessions/web-session-service";
-import { revokeWebSessionById } from "@/backend/integrations/sessions/web-session-revocation";
-import { readTelegramPopupRequest } from "@/backend/integrations/telegram/popup-request";
-import {
+  revokeWebSessionById,
+  readTelegramPopupRequest,
   clearTelegramAuthCookiesOnResponse,
   readTelegramCallbackCookieProof,
   resumeTelegramOidcCodeExchange,
   resumeTelegramProviderAuthentication,
   TelegramAuthStateAlreadyConsumedError,
-} from "@/backend/integrations/telegram/oidc";
-import { validateRequestSource } from "@/backend/security/csrf";
-import {
-  logTechnicalError,
-  logTechnicalInfo,
-  logTechnicalWarning,
-} from "@/backend/observability/audit";
-import { clearReferralAttributionCookieOnResponse } from "@/backend/integrations/referral/referral-attribution";
+  validateRequestSource,
+} from "@/app/_composition/telegram-runtime";
+import { recoverRemnashopTelegramSession } from "@/app/_composition/telegram-session-recovery";
+import { clearReferralAttributionCookieOnResponse } from "@/app/_composition/referral-runtime";
 import { safeRedirectPath } from "@/shared/auth/redirect-policy";
 
 export const runtime = "nodejs";

@@ -1,7 +1,7 @@
 #!/usr/bin/env sh
 set -eu
 
-ROOT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
+ROOT_DIR=$(CDPATH='' cd -- "$(dirname -- "$0")/../.." && pwd)
 ENV_FILE=${CLEAN_PAY_ZDT_ENV_FILE:-"$ROOT_DIR/deploy/prod/.env"}
 COMPOSE_FILE="$ROOT_DIR/deploy/prod/docker-compose.yml"
 IMAGE_PREFLIGHT_SCRIPT="$ROOT_DIR/deploy/prod/image-preflight.sh"
@@ -576,7 +576,6 @@ assert_compose_service() {
   fi
 
   ASSERTED_CONTAINER_ID=$container_id
-  ASSERTED_CONTAINER_NAME=$container_name
   ASSERTED_IMAGE_ID=$image_id
 }
 
@@ -659,7 +658,7 @@ assert_canary_topology() {
     '{{ index .Config.Labels "io.clean-pay.zero-downtime.previous-image" }}') \
     || fail "could not inspect canary previous-image label"
   network_names=$(owned_canary_value "$CANARY_NAME" \
-    '{{range $name, $network := .NetworkSettings.Networks}}{{println $name}}{{end}}') \
+    "{{range \$name, \$network := .NetworkSettings.Networks}}{{println \$name}}{{end}}") \
     || fail "could not inspect canary networks"
 
   [ "$running" = "true" ] || fail "canary is not running"
@@ -708,8 +707,9 @@ wait_for_canary_readiness() {
 write_state() {
   promoted_value=$1
   state_temp="${STATE_FILE}.tmp.$$"
-  [ ! -e "$state_temp" ] && [ ! -L "$state_temp" ] \
-    || fail "refusing to overwrite existing state temp file: $state_temp"
+  if [ -e "$state_temp" ] || [ -L "$state_temp" ]; then
+    fail "refusing to overwrite existing state temp file: $state_temp"
+  fi
   umask 077
   (
     set -C
@@ -796,8 +796,9 @@ load_state() {
 stage_canary() {
   [ "$ACKNOWLEDGEMENT" = "--require-no-pending-migrations" ] \
     || fail "stage requires --require-no-pending-migrations"
-  [ ! -e "$STATE_FILE" ] && [ ! -L "$STATE_FILE" ] \
-    || fail "zero-downtime state already exists; finish or abort the active rollout"
+  if [ -e "$STATE_FILE" ] || [ -L "$STATE_FILE" ]; then
+    fail "zero-downtime state already exists; finish or abort the active rollout"
+  fi
   if docker inspect "$CANARY_NAME" >/dev/null 2>&1; then
     fail "container $CANARY_NAME already exists; refusing to replace an unverified canary"
   fi

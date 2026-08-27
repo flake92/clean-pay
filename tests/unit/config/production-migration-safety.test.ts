@@ -120,6 +120,9 @@ describe("production migration safety", () => {
     expect(remnashopRehearsal).toContain('migrate "$SOURCE_DATABASE" 0058');
     expect(remnashopRehearsal).toContain("pre-0040-backup.list");
     expect(remnashopRehearsal).toContain("post-0058-backup.list");
+    expect(remnashopRehearsal).toContain(
+      'docker rm --force --volumes "$POSTGRES_CONTAINER"',
+    );
     expect(remnashopRehearsal).toContain('test "$(revision "$ROLLBACK_DATABASE")" = "0040"');
     expect(remnashopRehearsal).toContain("lock_timeout = '1500ms'");
     expect(remnashopRehearsal).toContain('test "$(revision "$LOCK_DATABASE")" = "0044"');
@@ -160,6 +163,9 @@ describe("production migration safety", () => {
     expect(cleanPayRehearsal).toContain("20260813090000_add_payment_owner_change_fence");
     expect(cleanPayRehearsal).toContain("20260813091000_add_remnashop_refresh_recovery");
     expect(cleanPayRehearsal).toContain("docker build --pull --target migration");
+    expect(cleanPayRehearsal).toContain(
+      'docker rm --force --volumes "$POSTGRES_CONTAINER"',
+    );
     expect(cleanPayRehearsal).toContain('node node_modules/prisma/build/index.js "$@"');
     expect(cleanPayRehearsal).toContain("MSYS_NO_PATHCONV=1 command docker");
     expect(cleanPayRehearsal).toContain('cygpath -w -- "$1"');

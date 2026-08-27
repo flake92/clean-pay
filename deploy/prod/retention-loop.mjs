@@ -43,6 +43,14 @@ const heartbeat = createRetentionHeartbeat({
 const retentionPool = createPostgresPool({
   connectionString,
   role: "retention",
+  onError(metadata) {
+    deployLog(
+      "error",
+      "database_pool_error",
+      "Database pool emitted an idle-client error.",
+      metadata,
+    );
+  },
 });
 const prisma = new PrismaClient({
   adapter: new PrismaPg(retentionPool, {

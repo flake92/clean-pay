@@ -1,0 +1,765 @@
+{
+  "schemaVersion": 1,
+  "baselineId": "f5cb6f543d85256e7733a1ade6a4f451d86cf378-journey-v5",
+  "status": "immutable_accepted_artifact_inventory",
+  "source": {
+    "revision": "f5cb6f543d85256e7733a1ade6a4f451d86cf378",
+    "imageDigest": "sha256:6909a1b980f72038c732d02f1e29074b16be2c2ce333e8c02ba569d3f2324ded",
+    "imageTag": "clean-pay:baseline-f5cb6f543d85-journey-synthetic-v1-pristine",
+    "migrationImageDigest": "sha256:5092b1aaf6cbc61722cf9ddbfb17a99dc0c1011b3734865b04931eb40adabc3b",
+    "migrationImageTag": "clean-pay-migration:baseline-f5cb6f543d85-journey-synthetic-v1-v2-pristine",
+    "publicBuildContract": {
+      "version": "1",
+      "sha256": "5dc1c21d1db2b433736d50c008065d9dfa3adc1ff338fb403569913881b80673"
+    },
+    "fixtureContract": {
+      "version": "journey-v5",
+      "sha256": "7b62f993647d20582018297505f8557d201962a9bd768a5438dd3b8fa06cb5f9"
+    },
+    "browser": {
+      "engine": "chromium",
+      "version": "151.0.7922.34",
+      "playwright": "1.62.1",
+      "launchArgs": [
+        "--disable-gpu",
+        "--disable-gpu-compositing",
+        "--disable-gpu-rasterization",
+        "--disable-skia-runtime-opts",
+        "--disable-lcd-text",
+        "--disable-font-subpixel-positioning",
+        "--font-render-hinting=none",
+        "--disable-oop-rasterization",
+        "--ignore-certificate-errors",
+        "--host-resolver-rules=MAP challenges.cloudflare.com <isolated-loopback>, MAP chatwoot.browser.clean-pay.dev <isolated-loopback>, MAP checkout.browser.clean-pay.dev <isolated-loopback>, MAP oauth.telegram.org <isolated-loopback>, MAP panel.ci.clean-pay.dev <isolated-loopback>, MAP pay.ci.clean-pay.dev <isolated-loopback>, MAP remnashop.browser.clean-pay.dev <isolated-loopback>, MAP subscription.ci.clean-pay.dev <isolated-loopback>, EXCLUDE 127.0.0.1, MAP * ~NOTFOUND"
+      ],
+      "syntheticHostnames": [
+        "challenges.cloudflare.com",
+        "chatwoot.browser.clean-pay.dev",
+        "checkout.browser.clean-pay.dev",
+        "oauth.telegram.org",
+        "panel.ci.clean-pay.dev",
+        "pay.ci.clean-pay.dev",
+        "remnashop.browser.clean-pay.dev",
+        "subscription.ci.clean-pay.dev"
+      ],
+      "tlsPolicy": {
+        "connectProxy": "loopback-only-exact-host-connect-443",
+        "mode": "ignore-ephemeral-caddy-ca-errors",
+        "scope": "isolated-synthetic-hostnames",
+        "unexpectedDns": "fail-closed"
+      }
+    }
+  },
+  "artifactSet": {
+    "artifactCount": 141,
+    "aggregateSha256": "948ba842ca0832972ba71abeb151c3d6d0d1f9a3c83e7b8d10b6fb0b7d9c4e2e",
+    "aggregateFormat": "sorted path\\0bytes\\0sha256\\n"
+  },
+  "entries": [
+    {
+      "path": "journey-1440x900/email-account-links-and-merges-telegram/journey.json",
+      "bytes": 1758374,
+      "sha256": "0803066f77b31685f1219f93e762566ba48371757ba484d9627d77382f4aac04"
+    },
+    {
+      "path": "journey-1440x900/email-account-links-and-merges-telegram/network.har.json",
+      "bytes": 1878460,
+      "sha256": "f06d1ff01c29b07cf7d890f8a22edd23c091813301bda34b4473c76bc59ca6bd"
+    },
+    {
+      "path": "journey-1440x900/email-account-links-and-merges-telegram/screenshots/link-account-merge-confirmation.png",
+      "bytes": 129807,
+      "sha256": "c4c4bf6d6497696d82e56f52438f1a2a8b371bfef4f69f4f7c45954ef8599b50"
+    },
+    {
+      "path": "journey-1440x900/email-account-links-and-merges-telegram/screenshots/link-account-merged-cabinet.png",
+      "bytes": 128201,
+      "sha256": "2c3f05af8ed5905f8d7f46b5aea763c5d6e350bae3b2a2bdfffc3719c71be242"
+    },
+    {
+      "path": "journey-1440x900/email-register-verify-and-login/journey.json",
+      "bytes": 1932196,
+      "sha256": "5cb54b94bbed57d3dc58416100ab66e0b6198aeac72f83e798a7f2d1acd4106d"
+    },
+    {
+      "path": "journey-1440x900/email-register-verify-and-login/network.har.json",
+      "bytes": 1606229,
+      "sha256": "f1799afade163fd50adcb1fc8abe60e0b724f7d1a688974b3b550e0b42a41177"
+    },
+    {
+      "path": "journey-1440x900/email-register-verify-and-login/screenshots/email-login-cabinet.png",
+      "bytes": 114238,
+      "sha256": "bd3e4e460f13252a9bca2b16c50d38f0acd77668c0199ae2fbb2a9d97c8dd843"
+    },
+    {
+      "path": "journey-1440x900/email-register-verify-and-login/screenshots/register-cabinet.png",
+      "bytes": 114238,
+      "sha256": "bd3e4e460f13252a9bca2b16c50d38f0acd77668c0199ae2fbb2a9d97c8dd843"
+    },
+    {
+      "path": "journey-1440x900/email-register-verify-and-login/screenshots/register-email-verified.png",
+      "bytes": 72091,
+      "sha256": "065bb3279687ccfe13e10881d16f7173547406d7925dad8ffc95b02806f167d2"
+    },
+    {
+      "path": "journey-1440x900/email-register-verify-and-login/screenshots/register-verification-required.png",
+      "bytes": 42404,
+      "sha256": "db650e6ed55445d961f880084d3cf7968944aeb0d242e9690a5c669b04ff6c82"
+    },
+    {
+      "path": "journey-1440x900/public-responsive-keyboard-install-offline-support/journey.json",
+      "bytes": 2025714,
+      "sha256": "25cab44e0f5d1bca2dd3790b9a471630a9509aabfacdd554e97bdb972a891364"
+    },
+    {
+      "path": "journey-1440x900/public-responsive-keyboard-install-offline-support/network.har.json",
+      "bytes": 2300428,
+      "sha256": "d86a97dfd1b1b7d4aadbc846b8720f2094f5a48f868a99b95a6c07447755817a"
+    },
+    {
+      "path": "journey-1440x900/public-responsive-keyboard-install-offline-support/screenshots/install-ios-pristine-csp-client-boundary.png",
+      "bytes": 54149,
+      "sha256": "69af7cda97c1a4ac764fc932a0ccb7551a335b6976e581aa4e3d8671480e4bed"
+    },
+    {
+      "path": "journey-1440x900/public-responsive-keyboard-install-offline-support/screenshots/install-pristine-csp-client-boundary.png",
+      "bytes": 54149,
+      "sha256": "69af7cda97c1a4ac764fc932a0ccb7551a335b6976e581aa4e3d8671480e4bed"
+    },
+    {
+      "path": "journey-1440x900/public-responsive-keyboard-install-offline-support/screenshots/keyboard-login-first-tab.png",
+      "bytes": 48691,
+      "sha256": "af877f648ac5a6e4d3068e4c6dc21dbd9ccccae146145f936c1ea851492536da"
+    },
+    {
+      "path": "journey-1440x900/public-responsive-keyboard-install-offline-support/screenshots/offline-direct-route.png",
+      "bytes": 38370,
+      "sha256": "4ac57b889e16609db72f035a763384e9a9bc0468d825cf775cc60a0cad42f93c"
+    },
+    {
+      "path": "journey-1440x900/public-responsive-keyboard-install-offline-support/screenshots/offline-recovery-support.png",
+      "bytes": 101484,
+      "sha256": "f2e353cfcebcdee513439f83b17e087d0def896b1beb1212262745d66a9639b1"
+    },
+    {
+      "path": "journey-1440x900/public-responsive-keyboard-install-offline-support/screenshots/offline-service-worker-fallback.png",
+      "bytes": 18549,
+      "sha256": "caea11f2a553cc194022e9ebd7bb821a528ffcdd0a6d9443a2937de77ffcc607"
+    },
+    {
+      "path": "journey-1440x900/public-responsive-keyboard-install-offline-support/screenshots/public-login.png",
+      "bytes": 48355,
+      "sha256": "591cacc9792597b97aabe8254915d1767d54a130e2de9b4e4a30b788383edc7a"
+    },
+    {
+      "path": "journey-1440x900/public-responsive-keyboard-install-offline-support/screenshots/public-register.png",
+      "bytes": 40612,
+      "sha256": "5cdf2c65f9e8ac676bb231ef0fd6e1e022b35642c4cf1e5e036ac4c751b5eb4a"
+    },
+    {
+      "path": "journey-1440x900/public-responsive-keyboard-install-offline-support/screenshots/public-support.png",
+      "bytes": 101484,
+      "sha256": "f2e353cfcebcdee513439f83b17e087d0def896b1beb1212262745d66a9639b1"
+    },
+    {
+      "path": "journey-1440x900/public-responsive-keyboard-install-offline-support/screenshots/public-tariffs.png",
+      "bytes": 52432,
+      "sha256": "ef9ade693440307864e5273a25d644c0affadddd0d8bb5f21984642c842283c9"
+    },
+    {
+      "path": "journey-1440x900/public-responsive-keyboard-install-offline-support/screenshots/responsive-main-menu-open.png",
+      "bytes": 38096,
+      "sha256": "a92471a909322aa1aff274e22ae7af416dcfdc35890bb1cae7b7494be6b5e548"
+    },
+    {
+      "path": "journey-1440x900/tariffs-payment-returns-extend-idempotency/journey.json",
+      "bytes": 2666250,
+      "sha256": "1d1e42b795180024873c5b9a04c11cc64927bf4f0d8a3c84433584a4724113b9"
+    },
+    {
+      "path": "journey-1440x900/tariffs-payment-returns-extend-idempotency/network.har.json",
+      "bytes": 2285376,
+      "sha256": "06ea6a0d4f40eff2993b66266f18f24b3a8b65cc04ab9886a3fe6e9e6866b55c"
+    },
+    {
+      "path": "journey-1440x900/tariffs-payment-returns-extend-idempotency/screenshots/extend-confirmation.png",
+      "bytes": 86016,
+      "sha256": "2f782bf9ba88b534c9db7e1969c1656dda5275381f09b2514ffa89b3a8c8c93a"
+    },
+    {
+      "path": "journey-1440x900/tariffs-payment-returns-extend-idempotency/screenshots/extend-provider-checkout.png",
+      "bytes": 15000,
+      "sha256": "9b4bb144ad48ef9404b9a5436a88dae34f8b8758e00a031fbac62760ab31fe96"
+    },
+    {
+      "path": "journey-1440x900/tariffs-payment-returns-extend-idempotency/screenshots/payment-confirmation.png",
+      "bytes": 88041,
+      "sha256": "7b145b8a549b94d2f355f2c1b38e815c97238ae69ba99fe2c28a52f3e6feb026"
+    },
+    {
+      "path": "journey-1440x900/tariffs-payment-returns-extend-idempotency/screenshots/payment-provider-checkout.png",
+      "bytes": 15000,
+      "sha256": "9b4bb144ad48ef9404b9a5436a88dae34f8b8758e00a031fbac62760ab31fe96"
+    },
+    {
+      "path": "journey-1440x900/tariffs-payment-returns-extend-idempotency/screenshots/payment-return-fail.png",
+      "bytes": 96409,
+      "sha256": "3aa0e7a86d8f73b370856891eb4098887da4f095d952e750a6be5c99b773e02e"
+    },
+    {
+      "path": "journey-1440x900/tariffs-payment-returns-extend-idempotency/screenshots/payment-return-from-provider.png",
+      "bytes": 93293,
+      "sha256": "e2d4d287fc9b05ab1a21413ec0bac946dd8884802daf92746e4a5a9411bd8bad"
+    },
+    {
+      "path": "journey-1440x900/tariffs-payment-returns-extend-idempotency/screenshots/payment-return-pending.png",
+      "bytes": 93266,
+      "sha256": "51b04d3a5261b3449df405308576950cf9e53eaf78b88181acf0d8f63a510eae"
+    },
+    {
+      "path": "journey-1440x900/tariffs-payment-returns-extend-idempotency/screenshots/payment-return-success.png",
+      "bytes": 93266,
+      "sha256": "51b04d3a5261b3449df405308576950cf9e53eaf78b88181acf0d8f63a510eae"
+    },
+    {
+      "path": "journey-1440x900/tariffs-payment-returns-extend-idempotency/screenshots/tariffs-authenticated.png",
+      "bytes": 106082,
+      "sha256": "a0bdc5bcbef5362f12ae93b97334afbdab220de27828a0ce1faad49eac91826c"
+    },
+    {
+      "path": "journey-1440x900/telegram-oidc-cabinet-profile-link-referral-passkey/journey.json",
+      "bytes": 4005715,
+      "sha256": "b5fbf921f62257898aef979a9a1caaa5aef4fd09d3bc82545a848e3b4c7aa4e5"
+    },
+    {
+      "path": "journey-1440x900/telegram-oidc-cabinet-profile-link-referral-passkey/network.har.json",
+      "bytes": 2546536,
+      "sha256": "09333a5f5c0f6eab9539251c2c566e87b60daf43481b0bd019031a01fc1096d5"
+    },
+    {
+      "path": "journey-1440x900/telegram-oidc-cabinet-profile-link-referral-passkey/screenshots/cabinet-pwa-installed.png",
+      "bytes": 128376,
+      "sha256": "423fb5ea1e7617ef677740e5d8d76265a58defdaa6e75ff515fb965c643b6159"
+    },
+    {
+      "path": "journey-1440x900/telegram-oidc-cabinet-profile-link-referral-passkey/screenshots/link-account-with-passkey.png",
+      "bytes": 114012,
+      "sha256": "790e72b0437b401f813ed94a876b6edd344ea7b298cacb1b595b7a708bb0bf1b"
+    },
+    {
+      "path": "journey-1440x900/telegram-oidc-cabinet-profile-link-referral-passkey/screenshots/passkey-login-cabinet.png",
+      "bytes": 127660,
+      "sha256": "9ecf2aa6a5078ea89ccb5e5f4ec58685c131fa94090a1f24f9d9d0426c96d3b8"
+    },
+    {
+      "path": "journey-1440x900/telegram-oidc-cabinet-profile-link-referral-passkey/screenshots/passkey-login-ready.png",
+      "bytes": 67084,
+      "sha256": "ccbc47d9570db74c2ade49f89aa44edf486f1fd5f777630174ca0b29b61c18e3"
+    },
+    {
+      "path": "journey-1440x900/telegram-oidc-cabinet-profile-link-referral-passkey/screenshots/profile.png",
+      "bytes": 121991,
+      "sha256": "dbf5457d364c8ab9c5d3b0121d68090400e2ef619af02262d3e8344c031e273f"
+    },
+    {
+      "path": "journey-1440x900/telegram-oidc-cabinet-profile-link-referral-passkey/screenshots/referral.png",
+      "bytes": 102458,
+      "sha256": "1b44424121ba0e66b76097935358ebb994889ac6e356760911dab3c6abac0887"
+    },
+    {
+      "path": "journey-1440x900/telegram-oidc-cabinet-profile-link-referral-passkey/screenshots/telegram-oidc-cabinet.png",
+      "bytes": 127660,
+      "sha256": "9ecf2aa6a5078ea89ccb5e5f4ec58685c131fa94090a1f24f9d9d0426c96d3b8"
+    },
+    {
+      "path": "journey-1440x900/telegram-oidc-cabinet-profile-link-referral-passkey/screenshots/verify-email.png",
+      "bytes": 77495,
+      "sha256": "59fb8bc639d20a7399ab4d816add880e3f49b3ecc3f0ed28dd942426a26ad5f7"
+    },
+    {
+      "path": "journey-1440x900/telegram-webapp-browser-boundary/journey.json",
+      "bytes": 823796,
+      "sha256": "031850b175ade93bc63eb8165388e505d70ce4e7708c8f707a312ccb840a325f"
+    },
+    {
+      "path": "journey-1440x900/telegram-webapp-browser-boundary/network.har.json",
+      "bytes": 524340,
+      "sha256": "617a6727482280ec5512448edf853386cc106e633b4c07a00f44068d8d5376a6"
+    },
+    {
+      "path": "journey-1440x900/telegram-webapp-browser-boundary/screenshots/telegram-webapp-cabinet.png",
+      "bytes": 127091,
+      "sha256": "35eba7ac9c7552545cf4839e2091a5559c2cb3aae22848a74bcfd5e240b3f49f"
+    },
+    {
+      "path": "journey-390x844/email-account-links-and-merges-telegram/journey.json",
+      "bytes": 1753009,
+      "sha256": "eee15a2db40f37fe6f6cc286f38607f6b33dc5f08abc4ecc0b430f6352f3c248"
+    },
+    {
+      "path": "journey-390x844/email-account-links-and-merges-telegram/network.har.json",
+      "bytes": 1879285,
+      "sha256": "991531c4fa28230bb61f6c0fef0cd2447d2e876af8964cb758a9171d4ceaf55f"
+    },
+    {
+      "path": "journey-390x844/email-account-links-and-merges-telegram/screenshots/link-account-merge-confirmation.png",
+      "bytes": 64934,
+      "sha256": "b9eafaba3b2e0406c2ffec4290f39eb970900686346ad02e99147fa4152586c3"
+    },
+    {
+      "path": "journey-390x844/email-account-links-and-merges-telegram/screenshots/link-account-merged-cabinet.png",
+      "bytes": 43207,
+      "sha256": "0d62b52384b9aa5d96352a9461ba5f8a334c643f5a56f350841f34c2bcb6da41"
+    },
+    {
+      "path": "journey-390x844/email-register-verify-and-login/journey.json",
+      "bytes": 1924892,
+      "sha256": "55b6b8433338627364662500e977a8794e479d6a86e6276191690e66927b2f0e"
+    },
+    {
+      "path": "journey-390x844/email-register-verify-and-login/network.har.json",
+      "bytes": 1605723,
+      "sha256": "dd679a9233f3101aebc644eea5506a96d75b4998d9e0ab3487f76d54985ba6eb"
+    },
+    {
+      "path": "journey-390x844/email-register-verify-and-login/screenshots/email-login-cabinet.png",
+      "bytes": 40727,
+      "sha256": "9a2c3e0fa133a93f2b9426e253dd20f65868776049af32173b8a3fc40c175744"
+    },
+    {
+      "path": "journey-390x844/email-register-verify-and-login/screenshots/register-cabinet.png",
+      "bytes": 40727,
+      "sha256": "9a2c3e0fa133a93f2b9426e253dd20f65868776049af32173b8a3fc40c175744"
+    },
+    {
+      "path": "journey-390x844/email-register-verify-and-login/screenshots/register-email-verified.png",
+      "bytes": 58341,
+      "sha256": "a634057765e67bd8dc11e7a81743030ef767965bdfb8d8ddcaaa1d6c8dc172d3"
+    },
+    {
+      "path": "journey-390x844/email-register-verify-and-login/screenshots/register-verification-required.png",
+      "bytes": 35566,
+      "sha256": "4dc733ece0c6c6d5bf5a756654993932601f4a9e726ed9b42a369ddd35b9f3a5"
+    },
+    {
+      "path": "journey-390x844/public-responsive-keyboard-install-offline-support/journey.json",
+      "bytes": 2023239,
+      "sha256": "525df4563e81767e4cea43c19a3d0628f7dd8a359afad2c5d38a428c93bdb9cb"
+    },
+    {
+      "path": "journey-390x844/public-responsive-keyboard-install-offline-support/network.har.json",
+      "bytes": 2300799,
+      "sha256": "02c2e2dadff8d424c754e93be7a53659cbdeed84a75220e67ab9e6f1cc9a827b"
+    },
+    {
+      "path": "journey-390x844/public-responsive-keyboard-install-offline-support/screenshots/install-ios-pristine-csp-client-boundary.png",
+      "bytes": 43383,
+      "sha256": "7d76398744f16423d7ec3d04e273859953dfd795aaeffcd1020059ad14253afd"
+    },
+    {
+      "path": "journey-390x844/public-responsive-keyboard-install-offline-support/screenshots/install-pristine-csp-client-boundary.png",
+      "bytes": 43383,
+      "sha256": "7d76398744f16423d7ec3d04e273859953dfd795aaeffcd1020059ad14253afd"
+    },
+    {
+      "path": "journey-390x844/public-responsive-keyboard-install-offline-support/screenshots/keyboard-login-first-tab.png",
+      "bytes": 40417,
+      "sha256": "1cd557cb5b2e9403eb6a9c142ed340e36dd6a1f0d09f7a8dabbae18244b88bad"
+    },
+    {
+      "path": "journey-390x844/public-responsive-keyboard-install-offline-support/screenshots/offline-direct-route.png",
+      "bytes": 30735,
+      "sha256": "85172e1ecd142cd054d9b21faba6c5ef8d3e694199983ebbf4302db54e526409"
+    },
+    {
+      "path": "journey-390x844/public-responsive-keyboard-install-offline-support/screenshots/offline-recovery-support.png",
+      "bytes": 49615,
+      "sha256": "ecadffd3fe8a567d0ad309d845f346444265daf72352d467871c7836be555edf"
+    },
+    {
+      "path": "journey-390x844/public-responsive-keyboard-install-offline-support/screenshots/offline-service-worker-fallback.png",
+      "bytes": 14804,
+      "sha256": "3436e7541a25d5c2082c0e742850f9ff02640d7b602b5a43c03df3a2778d4e29"
+    },
+    {
+      "path": "journey-390x844/public-responsive-keyboard-install-offline-support/screenshots/public-login.png",
+      "bytes": 40091,
+      "sha256": "b4abde4d1cf13887f1d411cb13b6c9567b7c939137da7b3ee38b1bd6a0580d8f"
+    },
+    {
+      "path": "journey-390x844/public-responsive-keyboard-install-offline-support/screenshots/public-register.png",
+      "bytes": 33402,
+      "sha256": "6eb3d875a87b6a3322ce1ddf6d7b3cefe400a23f9651fac372c55c5640afb17e"
+    },
+    {
+      "path": "journey-390x844/public-responsive-keyboard-install-offline-support/screenshots/public-support.png",
+      "bytes": 49615,
+      "sha256": "ecadffd3fe8a567d0ad309d845f346444265daf72352d467871c7836be555edf"
+    },
+    {
+      "path": "journey-390x844/public-responsive-keyboard-install-offline-support/screenshots/public-tariffs.png",
+      "bytes": 30157,
+      "sha256": "d9ef7197cd425a7a38dab47418501e088f082fe7529603a83b9cb2f2604cd235"
+    },
+    {
+      "path": "journey-390x844/public-responsive-keyboard-install-offline-support/screenshots/responsive-main-menu-open.png",
+      "bytes": 19834,
+      "sha256": "6b35ec15c2a319d753e509791f71cb56319e7047cc16325e44d9a52bf5b5d259"
+    },
+    {
+      "path": "journey-390x844/tariffs-payment-returns-extend-idempotency/journey.json",
+      "bytes": 2648681,
+      "sha256": "7a164cb2eed136beb0db4f99acf5ffdc0d406927ce9ba0bcc82ffe8e350a36ad"
+    },
+    {
+      "path": "journey-390x844/tariffs-payment-returns-extend-idempotency/network.har.json",
+      "bytes": 2285467,
+      "sha256": "a37855588dab0b000a1ea3aac82be075df9ba2084c6e6d097fb622bc488c3f9c"
+    },
+    {
+      "path": "journey-390x844/tariffs-payment-returns-extend-idempotency/screenshots/extend-confirmation.png",
+      "bytes": 42671,
+      "sha256": "e873990e666c04413b60faf02976a4db0a87925fe1bc419defeb1cfcad700d85"
+    },
+    {
+      "path": "journey-390x844/tariffs-payment-returns-extend-idempotency/screenshots/extend-provider-checkout.png",
+      "bytes": 5482,
+      "sha256": "da6341903a65697f0632fc515e5ad8e340b562abd41e86bcf0ad66167f47d122"
+    },
+    {
+      "path": "journey-390x844/tariffs-payment-returns-extend-idempotency/screenshots/payment-confirmation.png",
+      "bytes": 39236,
+      "sha256": "e38d98ed785aae59344991835151e1bcf8cbff0f95adccc7001c3789bbcb2fbc"
+    },
+    {
+      "path": "journey-390x844/tariffs-payment-returns-extend-idempotency/screenshots/payment-provider-checkout.png",
+      "bytes": 5482,
+      "sha256": "da6341903a65697f0632fc515e5ad8e340b562abd41e86bcf0ad66167f47d122"
+    },
+    {
+      "path": "journey-390x844/tariffs-payment-returns-extend-idempotency/screenshots/payment-return-fail.png",
+      "bytes": 52004,
+      "sha256": "c3be295973ba2fb1ce1bc9ef587a69ba9028e12421594c764d083e38b2574fe0"
+    },
+    {
+      "path": "journey-390x844/tariffs-payment-returns-extend-idempotency/screenshots/payment-return-from-provider.png",
+      "bytes": 44786,
+      "sha256": "762fb57c8eea3e50bb9b9be0862081e0717236771db2c7472c9e1dbf085c7469"
+    },
+    {
+      "path": "journey-390x844/tariffs-payment-returns-extend-idempotency/screenshots/payment-return-pending.png",
+      "bytes": 51311,
+      "sha256": "e9e6e365a56f16fff0a88fa747eac4013a6e89a11526822f32ea3f11c71fce9b"
+    },
+    {
+      "path": "journey-390x844/tariffs-payment-returns-extend-idempotency/screenshots/payment-return-success.png",
+      "bytes": 51311,
+      "sha256": "e9e6e365a56f16fff0a88fa747eac4013a6e89a11526822f32ea3f11c71fce9b"
+    },
+    {
+      "path": "journey-390x844/tariffs-payment-returns-extend-idempotency/screenshots/tariffs-authenticated.png",
+      "bytes": 54040,
+      "sha256": "c24884f542b7b4ee70f47af86a75927adcb891e46183e28ada45a8cbd88bb92f"
+    },
+    {
+      "path": "journey-390x844/telegram-oidc-cabinet-profile-link-referral-passkey/journey.json",
+      "bytes": 3985961,
+      "sha256": "70f130d3e9883d0fb5a57a0143d4a422ca93b40ca91f5a6d020fbdfa285bc11a"
+    },
+    {
+      "path": "journey-390x844/telegram-oidc-cabinet-profile-link-referral-passkey/network.har.json",
+      "bytes": 2546579,
+      "sha256": "79750beb7a17eba590938ad318d59f9822eb61f5c716d25ee5e2d0dc1541f6b9"
+    },
+    {
+      "path": "journey-390x844/telegram-oidc-cabinet-profile-link-referral-passkey/screenshots/cabinet-pwa-installed.png",
+      "bytes": 43246,
+      "sha256": "82e69b515bdd864e60256da2f315cd2b8ac2cf0db95a5d31a0c8c11e8f504cd2"
+    },
+    {
+      "path": "journey-390x844/telegram-oidc-cabinet-profile-link-referral-passkey/screenshots/link-account-with-passkey.png",
+      "bytes": 49719,
+      "sha256": "efcab1c7151c94cf72d7090a7783505393c95301b464316357b7dad27de6d204"
+    },
+    {
+      "path": "journey-390x844/telegram-oidc-cabinet-profile-link-referral-passkey/screenshots/passkey-login-cabinet.png",
+      "bytes": 43207,
+      "sha256": "0d62b52384b9aa5d96352a9461ba5f8a334c643f5a56f350841f34c2bcb6da41"
+    },
+    {
+      "path": "journey-390x844/telegram-oidc-cabinet-profile-link-referral-passkey/screenshots/passkey-login-ready.png",
+      "bytes": 53984,
+      "sha256": "00550e0d841c18371186a7461c48da52648c6ebc564bfe71831f3f537d678f90"
+    },
+    {
+      "path": "journey-390x844/telegram-oidc-cabinet-profile-link-referral-passkey/screenshots/profile.png",
+      "bytes": 39598,
+      "sha256": "43585931e39160b348f20e952ad9203d0f289da5b67a56d5450a1f9ce604f986"
+    },
+    {
+      "path": "journey-390x844/telegram-oidc-cabinet-profile-link-referral-passkey/screenshots/referral.png",
+      "bytes": 44922,
+      "sha256": "404142fa8df6d9f6bee32f25d64ca88709c06193b64dd003e573411b033ed87c"
+    },
+    {
+      "path": "journey-390x844/telegram-oidc-cabinet-profile-link-referral-passkey/screenshots/telegram-oidc-cabinet.png",
+      "bytes": 43207,
+      "sha256": "0d62b52384b9aa5d96352a9461ba5f8a334c643f5a56f350841f34c2bcb6da41"
+    },
+    {
+      "path": "journey-390x844/telegram-oidc-cabinet-profile-link-referral-passkey/screenshots/verify-email.png",
+      "bytes": 37895,
+      "sha256": "905aed1bb626b400eb7ede8a1e176fd4de817f50c380bbd9789fdebb5b1a90e9"
+    },
+    {
+      "path": "journey-390x844/telegram-webapp-browser-boundary/journey.json",
+      "bytes": 820322,
+      "sha256": "2e4fae5b64edea30bd86867afb1a2fae0d445d916b56036d79d7611dd02dbddb"
+    },
+    {
+      "path": "journey-390x844/telegram-webapp-browser-boundary/network.har.json",
+      "bytes": 524083,
+      "sha256": "e8f5c8c6b992e07ed61af4f45fbdb634370360821b91d895263b435989d4da0c"
+    },
+    {
+      "path": "journey-390x844/telegram-webapp-browser-boundary/screenshots/telegram-webapp-cabinet.png",
+      "bytes": 43207,
+      "sha256": "0d62b52384b9aa5d96352a9461ba5f8a334c643f5a56f350841f34c2bcb6da41"
+    },
+    {
+      "path": "journey-768x1024/email-account-links-and-merges-telegram/journey.json",
+      "bytes": 1744679,
+      "sha256": "6fa38a56aaf94d8895f8e38d461df3a9a9282f551f91f775537b160a6e4b4ed5"
+    },
+    {
+      "path": "journey-768x1024/email-account-links-and-merges-telegram/network.har.json",
+      "bytes": 1865499,
+      "sha256": "da17537e6d9f91ca136afc20031babdada579c6846ccba7e08f6563c361fe599"
+    },
+    {
+      "path": "journey-768x1024/email-account-links-and-merges-telegram/screenshots/link-account-merge-confirmation.png",
+      "bytes": 93290,
+      "sha256": "bd3045f01f8bcbebc88eac41d8f8d69a5bfa875f5838dc4c30405d7ea001138a"
+    },
+    {
+      "path": "journey-768x1024/email-account-links-and-merges-telegram/screenshots/link-account-merged-cabinet.png",
+      "bytes": 63048,
+      "sha256": "9d683e936ef1d38610244be9900869e8c896099a9986c8d9551f3ad5fdc3de63"
+    },
+    {
+      "path": "journey-768x1024/email-register-verify-and-login/journey.json",
+      "bytes": 1922116,
+      "sha256": "97ae5bbd88703e5db0ce585940eaa8fdaf6bc67362102c98247f8bbd76ebdefb"
+    },
+    {
+      "path": "journey-768x1024/email-register-verify-and-login/network.har.json",
+      "bytes": 1600697,
+      "sha256": "8bce0f13fdccad10f279b8abe0d1c159c7f70e8b74344334a70810f34b3216f8"
+    },
+    {
+      "path": "journey-768x1024/email-register-verify-and-login/screenshots/email-login-cabinet.png",
+      "bytes": 60351,
+      "sha256": "76bb935dfa4070c6d50b7c82074353151b359c52e094d7cd3322ce620e9dd3e1"
+    },
+    {
+      "path": "journey-768x1024/email-register-verify-and-login/screenshots/register-cabinet.png",
+      "bytes": 60351,
+      "sha256": "76bb935dfa4070c6d50b7c82074353151b359c52e094d7cd3322ce620e9dd3e1"
+    },
+    {
+      "path": "journey-768x1024/email-register-verify-and-login/screenshots/register-email-verified.png",
+      "bytes": 68343,
+      "sha256": "4bd4e33fb55b1e60b221dc5b4a37f78b04342097f70dab6c80fb8994ad474b5f"
+    },
+    {
+      "path": "journey-768x1024/email-register-verify-and-login/screenshots/register-verification-required.png",
+      "bytes": 39897,
+      "sha256": "611086268e58dd859c841c204f361076d09fb2703b785e1ae187876abe9140d7"
+    },
+    {
+      "path": "journey-768x1024/public-responsive-keyboard-install-offline-support/journey.json",
+      "bytes": 2022905,
+      "sha256": "1f0086a9f8e1a49b2acdf26a221553a667bcc789a8c60f23c7b3c4e3a36ea7ac"
+    },
+    {
+      "path": "journey-768x1024/public-responsive-keyboard-install-offline-support/network.har.json",
+      "bytes": 2300292,
+      "sha256": "5a8b5424fa0d5bc633763e6c0c8ebbc31cb5894db8f7a28db266b446e75fe4e7"
+    },
+    {
+      "path": "journey-768x1024/public-responsive-keyboard-install-offline-support/screenshots/install-ios-pristine-csp-client-boundary.png",
+      "bytes": 50846,
+      "sha256": "9b65cf08259eb2792aa2cadd6e93f674fc7fe96c9d007f770d46a59c6c15d402"
+    },
+    {
+      "path": "journey-768x1024/public-responsive-keyboard-install-offline-support/screenshots/install-pristine-csp-client-boundary.png",
+      "bytes": 50846,
+      "sha256": "9b65cf08259eb2792aa2cadd6e93f674fc7fe96c9d007f770d46a59c6c15d402"
+    },
+    {
+      "path": "journey-768x1024/public-responsive-keyboard-install-offline-support/screenshots/keyboard-login-first-tab.png",
+      "bytes": 46045,
+      "sha256": "6e4039e434bd4096cce6c994eca7a3362bd5674dab4a8c503e26c49d930364fc"
+    },
+    {
+      "path": "journey-768x1024/public-responsive-keyboard-install-offline-support/screenshots/offline-direct-route.png",
+      "bytes": 36447,
+      "sha256": "73584575a4801297bee54f51a146984a4e3e12376498c1292d21a5e795266c2d"
+    },
+    {
+      "path": "journey-768x1024/public-responsive-keyboard-install-offline-support/screenshots/offline-recovery-support.png",
+      "bytes": 83681,
+      "sha256": "0e1ff712158ad2a4c3da939d216ebbbc9cc3a90ab92938117aad2dd811659689"
+    },
+    {
+      "path": "journey-768x1024/public-responsive-keyboard-install-offline-support/screenshots/offline-service-worker-fallback.png",
+      "bytes": 16771,
+      "sha256": "f51f4cba28f29dcae5ccbf539858f31b3de5e75c67f0019e4c0f41f2074e344a"
+    },
+    {
+      "path": "journey-768x1024/public-responsive-keyboard-install-offline-support/screenshots/public-login.png",
+      "bytes": 45688,
+      "sha256": "57651acfbc72c6ba6d7bd1db876e2b3f67d6a67bdb21aff43ac8a1cbcc236918"
+    },
+    {
+      "path": "journey-768x1024/public-responsive-keyboard-install-offline-support/screenshots/public-register.png",
+      "bytes": 38297,
+      "sha256": "6f866a19c9344dc9539fdaae804644f5618a065a2677ab08128fa3961717ef67"
+    },
+    {
+      "path": "journey-768x1024/public-responsive-keyboard-install-offline-support/screenshots/public-support.png",
+      "bytes": 83681,
+      "sha256": "0e1ff712158ad2a4c3da939d216ebbbc9cc3a90ab92938117aad2dd811659689"
+    },
+    {
+      "path": "journey-768x1024/public-responsive-keyboard-install-offline-support/screenshots/public-tariffs.png",
+      "bytes": 31832,
+      "sha256": "fa0c8e3e435867439aedfbc003229bee279f570b09b7fa9067902210f278ed15"
+    },
+    {
+      "path": "journey-768x1024/public-responsive-keyboard-install-offline-support/screenshots/responsive-main-menu-open.png",
+      "bytes": 38655,
+      "sha256": "146b87bffb6623e69d695f729ed23902a71881c0dec5adc34fb3fae6cbf06c09"
+    },
+    {
+      "path": "journey-768x1024/tariffs-payment-returns-extend-idempotency/journey.json",
+      "bytes": 2648235,
+      "sha256": "bf0d922b8fabe37d041ee32ced1c583cdf9f73ab7f5895c78d1f0eb1d99427f8"
+    },
+    {
+      "path": "journey-768x1024/tariffs-payment-returns-extend-idempotency/network.har.json",
+      "bytes": 2284368,
+      "sha256": "345cda827443a513abc7b8e8d5a66878ee9230c5faa92c35decd05a657e45c9c"
+    },
+    {
+      "path": "journey-768x1024/tariffs-payment-returns-extend-idempotency/screenshots/extend-confirmation.png",
+      "bytes": 49143,
+      "sha256": "1c072cd045601fdb701a00fd960c937907d150428db3b876bbc1ef06a1549e8a"
+    },
+    {
+      "path": "journey-768x1024/tariffs-payment-returns-extend-idempotency/screenshots/extend-provider-checkout.png",
+      "bytes": 11080,
+      "sha256": "c5e58e27c30af33b7b1bde2170ccdc5841cc63158d60e9033223ba355b44206b"
+    },
+    {
+      "path": "journey-768x1024/tariffs-payment-returns-extend-idempotency/screenshots/payment-confirmation.png",
+      "bytes": 50634,
+      "sha256": "c661be54f8274f20386214c85bf363ff6075bf8e20770fad2d31f4211c8aa4f4"
+    },
+    {
+      "path": "journey-768x1024/tariffs-payment-returns-extend-idempotency/screenshots/payment-provider-checkout.png",
+      "bytes": 11080,
+      "sha256": "c5e58e27c30af33b7b1bde2170ccdc5841cc63158d60e9033223ba355b44206b"
+    },
+    {
+      "path": "journey-768x1024/tariffs-payment-returns-extend-idempotency/screenshots/payment-return-fail.png",
+      "bytes": 60606,
+      "sha256": "2583a8b20466048b6de5fc866b356549264abfad1365975676b565936ffb8076"
+    },
+    {
+      "path": "journey-768x1024/tariffs-payment-returns-extend-idempotency/screenshots/payment-return-from-provider.png",
+      "bytes": 56621,
+      "sha256": "7f74840097c470cf695fed98c1a69fadc3ebe57cab3d58d1c99bfd7f77020482"
+    },
+    {
+      "path": "journey-768x1024/tariffs-payment-returns-extend-idempotency/screenshots/payment-return-pending.png",
+      "bytes": 55674,
+      "sha256": "e7cfe1a68552b0e04456e39973c9961110257cd9341cfda22a061c25f9f12ec8"
+    },
+    {
+      "path": "journey-768x1024/tariffs-payment-returns-extend-idempotency/screenshots/payment-return-success.png",
+      "bytes": 55674,
+      "sha256": "e7cfe1a68552b0e04456e39973c9961110257cd9341cfda22a061c25f9f12ec8"
+    },
+    {
+      "path": "journey-768x1024/tariffs-payment-returns-extend-idempotency/screenshots/tariffs-authenticated.png",
+      "bytes": 70022,
+      "sha256": "0696e21fe224083d8f73edf1f5bfdd389587898549a79b0bc2f36c3cdc820e9d"
+    },
+    {
+      "path": "journey-768x1024/telegram-oidc-cabinet-profile-link-referral-passkey/journey.json",
+      "bytes": 3988053,
+      "sha256": "3cd16f52b1e03e204674cc72b7aef3172075318720d64b1102d597b6ddcc29b9"
+    },
+    {
+      "path": "journey-768x1024/telegram-oidc-cabinet-profile-link-referral-passkey/network.har.json",
+      "bytes": 2546536,
+      "sha256": "b0082c67ba8f086335754f537f396d29cf75c53b6bb4912b580a058a6df1937e"
+    },
+    {
+      "path": "journey-768x1024/telegram-oidc-cabinet-profile-link-referral-passkey/screenshots/cabinet-pwa-installed.png",
+      "bytes": 63137,
+      "sha256": "d101582efc9fc42881fbf5bed1daac8986986244b3daea22f08ca859faac0cdc"
+    },
+    {
+      "path": "journey-768x1024/telegram-oidc-cabinet-profile-link-referral-passkey/screenshots/link-account-with-passkey.png",
+      "bytes": 77250,
+      "sha256": "929591536491721ae9a78ae737df66651b937f2edc98ed6cdaacc1c9c221edac"
+    },
+    {
+      "path": "journey-768x1024/telegram-oidc-cabinet-profile-link-referral-passkey/screenshots/passkey-login-cabinet.png",
+      "bytes": 63048,
+      "sha256": "9d683e936ef1d38610244be9900869e8c896099a9986c8d9551f3ad5fdc3de63"
+    },
+    {
+      "path": "journey-768x1024/telegram-oidc-cabinet-profile-link-referral-passkey/screenshots/passkey-login-ready.png",
+      "bytes": 70116,
+      "sha256": "9f87b7613a047b435ad8db13338293e83a3dcde39f61dcf9e4b63701daad8638"
+    },
+    {
+      "path": "journey-768x1024/telegram-oidc-cabinet-profile-link-referral-passkey/screenshots/profile.png",
+      "bytes": 88871,
+      "sha256": "83436da0771e98a24045bbdd6072525beec80b1dca9253ea3eb017a550e06d20"
+    },
+    {
+      "path": "journey-768x1024/telegram-oidc-cabinet-profile-link-referral-passkey/screenshots/referral.png",
+      "bytes": 70145,
+      "sha256": "e0c1ef88bb3b9aca16486cff8147f8640d894ee40aec52c180a1fdc9387711b1"
+    },
+    {
+      "path": "journey-768x1024/telegram-oidc-cabinet-profile-link-referral-passkey/screenshots/telegram-oidc-cabinet.png",
+      "bytes": 63048,
+      "sha256": "9d683e936ef1d38610244be9900869e8c896099a9986c8d9551f3ad5fdc3de63"
+    },
+    {
+      "path": "journey-768x1024/telegram-oidc-cabinet-profile-link-referral-passkey/screenshots/verify-email.png",
+      "bytes": 40770,
+      "sha256": "3bec05e78d821f4e76006c6a9d94a7eb961c9c1d5b06d4ec8545730be62d8897"
+    },
+    {
+      "path": "journey-768x1024/telegram-webapp-browser-boundary/journey.json",
+      "bytes": 826361,
+      "sha256": "8f58076abecf50ad6854cf7a25a0b71f2a1768e842922b16a4cfab5dd79979f2"
+    },
+    {
+      "path": "journey-768x1024/telegram-webapp-browser-boundary/network.har.json",
+      "bytes": 530008,
+      "sha256": "0c634db799bf780ca334a395608b508a1e581cd632f9aae57c0fb199a32a061e"
+    },
+    {
+      "path": "journey-768x1024/telegram-webapp-browser-boundary/screenshots/telegram-webapp-cabinet.png",
+      "bytes": 63048,
+      "sha256": "9d683e936ef1d38610244be9900869e8c896099a9986c8d9551f3ad5fdc3de63"
+    }
+  ]
+}

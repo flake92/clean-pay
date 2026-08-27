@@ -1,81 +1,29 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-
-import type {
-  DurationGatewayPrice,
-  PlanOffer,
-} from "@/shared/domain/subscriptions";
-import { executePaymentAction } from "@/app/actions/payments";
 import { AccountActionRequired } from "@/frontend/components/account-action-required";
 import { LinkButton } from "@/frontend/components/prime/link-button";
-import { navigateTo, replaceWith } from "@/frontend/lib/browser-navigation";
 import { paymentGatewayLabel } from "@/frontend/lib/payment-gateway";
-import {
-  clearPaymentIdempotencyKey,
-  getOrCreatePaymentIdempotencyKey,
-} from "@/frontend/lib/payment-idempotency";
-import { findRenewPlan } from "@/frontend/lib/subscription-offers";
-import {
-  confirmedPaymentOffer,
-} from "@/shared/domain/payment-offer";
-import {
-  accountLinkPath,
-  emailVerificationPath,
-} from "@/shared/auth/account-setup-flow";
+import { useExtendConfirmationController } from "@/frontend/hooks/use-extend-confirmation-controller";
 import { Button } from "primereact/button";
 import { Card } from "primereact/card";
 import { Dropdown } from "primereact/dropdown";
 import { Message } from "primereact/message";
 import type { CheckoutViewModel } from "@/application/models/checkout";
+import {
+  type ExtendPriceOption,
+} from "@/frontend/components/extend-confirmation-presentation";
 
 const defaultCheckoutModel: CheckoutViewModel = { status: "error", message: "Не удалось загрузить предложения продления." };
 
-type PriceOption = {
-  amount: string;
-  currency: string;
-  days: number;
-  duration: string;
-  gateway: string;
-  label: string;
-  value: string;
-};
-
-function selectionValue(days: number | string, gateway: string) {
-  return JSON.stringify([String(days), gateway]);
+function pendingOperationDestination(operationId: string) {
+  return `/payment/pending?operation_id=${encodeURIComponent(operationId)}`;
 }
 
-function parseSelection(value: string): [string, string] {
-  try {
-    const parsed: unknown = JSON.parse(value);
-    if (
-      Array.isArray(parsed) &&
-      parsed.length === 2 &&
-      typeof parsed[0] === "string" &&
-      typeof parsed[1] === "string"
-    ) {
-      return [parsed[0], parsed[1]];
-    }
-  } catch {
-    // Invalid UI state is handled as no selection below.
-  }
-
-  return ["", ""];
+function pendingPaymentDestination(paymentId: string) {
+  return `/payment/pending?payment_id=${encodeURIComponent(paymentId)}`;
 }
 
-function formatDuration(days: number) {
-  if (days <= 0) {
-    return "∞";
-  }
-
-  if (days % 30 === 0) {
-    return `${days / 30} мес.`;
-  }
-
-  return `${days} дн.`;
-}
-
-function priceOptionTemplate(option?: PriceOption) {
+function priceOptionTemplate(option?: ExtendPriceOption) {
   if (!option) {
     return <span>Выберите срок и способ оплаты</span>;
   }
@@ -95,71 +43,8 @@ function priceOptionTemplate(option?: PriceOption) {
   );
 }
 
-function buildPriceOptions(plan: PlanOffer | undefined) {
-  if (!plan) {
-    return [];
-  }
-
-  return plan.durations
-    .flatMap((duration) =>
-      duration.prices.map((price) => ({
-        amount: String(price.final_amount),
-        currency: price.currency_symbol,
-        days: duration.days,
-        duration: formatDuration(duration.days),
-        gateway: price.gateway_type,
-        label: `${formatDuration(duration.days)} - ${price.final_amount} ${price.currency_symbol} - ${paymentGatewayLabel(price.gateway_type)}`,
-        value: selectionValue(duration.days, price.gateway_type),
-      })),
-    )
-    .sort(
-      (left, right) =>
-        Number(left.amount) - Number(right.amount) ||
-        left.days - right.days ||
-        left.gateway.localeCompare(right.gateway),
-    );
-}
-
-function firstSelection(plan: PlanOffer | undefined) {
-  return buildPriceOptions(plan)[0]?.value ?? "";
-}
-
-function extensionDestination(
-  duration: string | number | null | undefined,
-  gateway: string | null | undefined,
-) {
-  const normalizedDuration =
-    duration === null || duration === undefined ? "" : String(duration);
-  const normalizedGateway = gateway ?? "";
-
-  if (
-    !/^(?:0|[1-9]\d{0,5})$/.test(normalizedDuration) ||
-    !normalizedGateway ||
-    normalizedGateway.length > 100
-  ) {
-    return "/extend";
-  }
-
-  return `/extend?${new URLSearchParams({
-    duration: normalizedDuration,
-    gateway: normalizedGateway,
-  }).toString()}`;
-}
-
-function initialSelection(
-  plan: PlanOffer | undefined,
-  duration: string | null,
-  gateway: string | null,
-) {
-  const requested = duration && gateway ? selectionValue(duration, gateway) : "";
-
-  return buildPriceOptions(plan).some(({ value }) => value === requested)
-    ? requested
-    : firstSelection(plan);
-}
-
 function priceChoiceList(
-  options: PriceOption[],
+  options: ExtendPriceOption[],
   selected: string,
   onSelect: (value: string) => void,
   disabled = false,
@@ -195,47 +80,45 @@ export function ExtendConfirmation({ model = defaultCheckoutModel, requestedDura
   requestedDuration?: string | null;
   requestedGateway?: string | null;
 }) {
-  const state = model;
-  const initialPlan = state.status === "ready" ? findRenewPlan(state.offers) : undefined;
-  const [selection, setSelection] = useState(() => initialSelection(initialPlan, requestedDuration, requestedGateway));
-  const [submitError, setSubmitError] = useState<string | null>(null);
-  const [submitting, setSubmitting] = useState(false);
-  const submittingRef = useRef(false);
-  const requestedExtendDestination = extensionDestination(
+  const {
+    extendSubscription,
+    priceOptions,
+    requestedExtendDestination,
+    selectedPrice,
+    selection,
+    setSelection,
+    submitError,
+    submitting,
+    view,
+  } = useExtendConfirmationController({
+    model,
+    pendingOperationDestination,
+    pendingPaymentDestination,
     requestedDuration,
     requestedGateway,
-  );
-  const verifyEmailRequired =
-    state.status === "account-action-required" && state.action === "verifyEmail";
+  });
 
-  useEffect(() => {
-    if (verifyEmailRequired) {
-      replaceWith(emailVerificationPath(requestedExtendDestination));
-    }
-  }, [requestedExtendDestination, verifyEmailRequired]);
+  if (view.kind === "verify-email") return null;
 
-  if (state.status === "account-action-required") {
-    if (state.action === "verifyEmail") {
-      return null;
-    }
-    if (state.action) {
-      return (
-        <AccountActionRequired
-          action={state.action}
-          message={state.message}
-          redirectTo={requestedExtendDestination}
-        />
-      );
-    }
+  if (view.kind === "account-action") {
+    return (
+      <AccountActionRequired
+        action={view.action}
+        message={view.message}
+        redirectTo={requestedExtendDestination}
+      />
+    );
+  }
 
+  if (view.kind === "account-error") {
     return (
       <div className="flex flex-column gap-4">
-        <Message severity="error" text={state.message} />
+        <Message severity="error" text={view.message} />
       </div>
     );
   }
 
-  if (state.status === "provider-session-recovery-required") {
+  if (view.kind === "provider-session-recovery") {
     return (
       <AccountActionRequired
         action="recover-session"
@@ -244,11 +127,9 @@ export function ExtendConfirmation({ model = defaultCheckoutModel, requestedDura
     );
   }
 
-  if (state.status === "error") return <Message severity="error" text={state.message} />;
+  if (view.kind === "error") return <Message severity="error" text={view.message} />;
 
-  const plan = findRenewPlan(state.offers);
-
-  if (!state.offers.has_current_subscription) {
+  if (view.kind === "no-subscription") {
     return (
       <div className="flex flex-column gap-4">
         <Message severity="info" text="Действующая подписка не найдена. Сначала выберите тариф." />
@@ -257,7 +138,7 @@ export function ExtendConfirmation({ model = defaultCheckoutModel, requestedDura
     );
   }
 
-  if (!plan) {
+  if (view.kind === "renew-unavailable") {
     return (
       <div className="flex flex-column gap-4">
         <Message
@@ -269,103 +150,7 @@ export function ExtendConfirmation({ model = defaultCheckoutModel, requestedDura
     );
   }
 
-  const [selectedDays, selectedGateway] = parseSelection(selection);
-  const selectedDuration = plan.durations.find(
-    (duration) => String(duration.days) === selectedDays,
-  );
-  const selectedPrice = selectedDuration?.prices.find(
-    (price): price is DurationGatewayPrice => price.gateway_type === selectedGateway,
-  );
-  const priceOptions = buildPriceOptions(plan);
-  const selectedExtendDestination = extensionDestination(
-    selectedDuration?.days,
-    selectedPrice?.gateway_type,
-  );
-
-  function finishSubmitting() {
-    submittingRef.current = false;
-    setSubmitting(false);
-  }
-
-  async function extendSubscription() {
-    if (
-      !plan ||
-      !selectedDuration ||
-      !selectedPrice ||
-      submittingRef.current
-    ) {
-      return;
-    }
-
-    submittingRef.current = true;
-    setSubmitting(true);
-    setSubmitError(null);
-    const payload = {
-      duration_days: selectedDuration.days,
-      gateway_type: selectedPrice.gateway_type,
-      ...confirmedPaymentOffer(plan, selectedDuration.days, selectedPrice),
-    };
-
-    let idempotencyKey: string;
-
-    try {
-      idempotencyKey = getOrCreatePaymentIdempotencyKey("extend", payload);
-    } catch {
-      finishSubmitting();
-      setSubmitError(
-        "Браузер не смог безопасно подготовить продление. Обновите страницу или используйте другой браузер.",
-      );
-      return;
-    }
-
-    let paymentConfirmed = false;
-
-    try {
-      const result = await executePaymentAction({ kind: "extend", request: payload, idempotencyKey });
-      if (!result.ok) {
-        if (result.code === "EMAIL_REQUIRED" || result.code === "EMAIL_NOT_VERIFIED") {
-          replaceWith(accountLinkPath(selectedExtendDestination));
-          return;
-        }
-        if (!result.retainIdempotencyKey) clearPaymentIdempotencyKey("extend", payload, idempotencyKey);
-        setSubmitError(result.message);
-        return;
-      }
-      if (result.status === "pending") {
-        paymentConfirmed = true;
-        navigateTo(`/payment/pending?operation_id=${encodeURIComponent(result.operationId)}`);
-        return;
-      }
-      if (result.status === "manual-review") {
-        setSubmitError(`Статус продления требует ручной проверки. Сообщите поддержке номер операции ${result.operationId}.`);
-        return;
-      }
-
-      clearPaymentIdempotencyKey("extend", payload, idempotencyKey);
-      paymentConfirmed = true;
-      if (result.payment.is_free) {
-        navigateTo("/cabinet");
-        return;
-      }
-
-      if (result.payment.payment_url) {
-        navigateTo(result.payment.payment_url);
-        return;
-      }
-
-      navigateTo(
-        `/payment/pending?payment_id=${encodeURIComponent(result.payment.payment_id)}`,
-      );
-    } catch {
-      setSubmitError(
-        "Не удалось определить результат продления. Повторите попытку — будет использован тот же запрос и новая оплата не будет создана.",
-      );
-    } finally {
-      if (!paymentConfirmed) {
-        finishSubmitting();
-      }
-    }
-  }
+  const { model: readyModel, plan } = view;
 
   return (
     <div className="flex flex-column gap-4">
@@ -378,7 +163,7 @@ export function ExtendConfirmation({ model = defaultCheckoutModel, requestedDura
       <Card className="w-full md:w-30rem">
         <h2 className="text-xl font-semibold">{plan.name}</h2>
         <p className="text-sm text-600">
-          Текущий статус: {state.offers.current_subscription_status ?? "-"}
+          Текущий статус: {readyModel.offers.current_subscription_status ?? "-"}
         </p>
         <div className="flex flex-column gap-2 text-sm font-medium text-700">
           <span>Длительность и способ оплаты</span>

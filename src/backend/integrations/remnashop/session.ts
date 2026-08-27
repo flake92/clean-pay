@@ -13,6 +13,7 @@ import {
   createWebSessionForRemnashopUser,
   getCurrentSession,
 } from "@/backend/integrations/sessions/web-session-service";
+import { runWithPostCommitWebSessionCookieEffects } from "@/backend/integrations/sessions/web-session-cookie-effects";
 import {
   assertUserMergeFinalOwner,
   mergeLocalUsersIntoTarget,
@@ -263,33 +264,35 @@ export async function createSessionFromRemnashopAuth({
       authType: profile.auth_type,
     });
 
-    user = await prisma.$transaction(async (tx) => {
-      const reconciledUser = await reconcileRemnashopUser(
-        tx,
-        profileIdentity({ remnashopUserId: parsedRemnashopUserId, profile }),
-        replaceExistingSessions
-          ? (userIds) => {
-              for (const userId of userIds) {
-                replacementOwnerIds.add(userId);
+    user = await runWithPostCommitWebSessionCookieEffects(() =>
+      prisma.$transaction(async (tx) => {
+        const reconciledUser = await reconcileRemnashopUser(
+          tx,
+          profileIdentity({ remnashopUserId: parsedRemnashopUserId, profile }),
+          replaceExistingSessions
+            ? (userIds) => {
+                for (const userId of userIds) {
+                  replacementOwnerIds.add(userId);
+                }
               }
-            }
-          : undefined,
-      );
-      replacementOwnerIds.add(reconciledUser.id);
+            : undefined,
+        );
+        replacementOwnerIds.add(reconciledUser.id);
 
-      await createWebSessionForRemnashopUser({
-        userId: reconciledUser.id,
-        remnashopAccessTokenEncrypted: protectRemnashopToken(accessToken),
-        remnashopRefreshTokenEncrypted: protectRemnashopToken(refreshToken),
-        remnashopAccessExpiresAt: new Date(auth.expires_at),
-        remnashopRefreshExpiresAt: new Date(auth.refresh_expires_at),
-        assuranceLevel: WebSessionAssuranceLevel.FULL,
-        replaceExistingSessions,
-        tx,
-      });
+        await createWebSessionForRemnashopUser({
+          userId: reconciledUser.id,
+          remnashopAccessTokenEncrypted: protectRemnashopToken(accessToken),
+          remnashopRefreshTokenEncrypted: protectRemnashopToken(refreshToken),
+          remnashopAccessExpiresAt: new Date(auth.expires_at),
+          remnashopRefreshExpiresAt: new Date(auth.refresh_expires_at),
+          assuranceLevel: WebSessionAssuranceLevel.FULL,
+          replaceExistingSessions,
+          tx,
+        });
 
-      return reconciledUser;
-    });
+        return reconciledUser;
+      }),
+    );
   } catch (error) {
     if (replaceExistingSessions) {
       await cleanupFailedSessionReplacement({

@@ -1,7 +1,7 @@
 import {
   validateProductionApplicationRoleEnvironment,
   validateProductionEnvironment,
-} from "../../../deploy/prod/production-env-rules.mjs";
+} from "../../../runtime/production-env-rules.mjs";
 
 type SameSite = "lax" | "strict" | "none";
 
@@ -82,6 +82,8 @@ type AppEnv = {
   };
 };
 
+type EnvironmentSource = Readonly<Record<string, string | undefined>>;
+
 const telegramOidcDefaults = {
   issuer: "https://oauth.telegram.org",
   authorizationEndpoint: "https://oauth.telegram.org/auth",
@@ -89,8 +91,8 @@ const telegramOidcDefaults = {
   jwksUri: "https://oauth.telegram.org/.well-known/jwks.json",
 } as const;
 
-function required(name: string) {
-  const value = process.env[name];
+function required(name: string, environment: EnvironmentSource) {
+  const value = environment[name];
 
   if (!value) {
     throw new Error(`${name} is required`);
@@ -99,8 +101,8 @@ function required(name: string) {
   return value;
 }
 
-function url(name: string) {
-  const value = required(name);
+function url(name: string, environment: EnvironmentSource) {
+  const value = required(name, environment);
 
   return httpUrlValue(name, value).replace(/\/$/, "");
 }
@@ -119,8 +121,12 @@ function httpUrlValue(name: string, value: string) {
   }
 }
 
-function bool(name: string, defaultValue: boolean) {
-  const value = process.env[name];
+function bool(
+  name: string,
+  defaultValue: boolean,
+  environment: EnvironmentSource,
+) {
+  const value = environment[name];
 
   if (!value) {
     return defaultValue;
@@ -137,8 +143,12 @@ function bool(name: string, defaultValue: boolean) {
   throw new Error(`${name} must be "true" or "false"`);
 }
 
-function sameSite(name: string, defaultValue: SameSite) {
-  const value = process.env[name]?.toLowerCase();
+function sameSite(
+  name: string,
+  defaultValue: SameSite,
+  environment: EnvironmentSource,
+) {
+  const value = environment[name]?.toLowerCase();
 
   if (!value) {
     return defaultValue;
@@ -151,8 +161,14 @@ function sameSite(name: string, defaultValue: SameSite) {
   throw new Error(`${name} must be "lax", "strict", or "none"`);
 }
 
-function integer(name: string, defaultValue: number, min: number, max: number) {
-  const value = process.env[name]?.trim();
+function integer(
+  name: string,
+  defaultValue: number,
+  min: number,
+  max: number,
+  environment: EnvironmentSource,
+) {
+  const value = environment[name]?.trim();
 
   if (!value) {
     return defaultValue;
@@ -171,19 +187,19 @@ function joinUrl(baseUrl: string, path: string) {
   return new URL(path, `${baseUrl}/`).toString();
 }
 
-function optional(name: string) {
-  return process.env[name]?.trim() || null;
+function optional(name: string, environment: EnvironmentSource) {
+  return environment[name]?.trim() || null;
 }
 
-function webRefreshKeyring() {
+function webRefreshKeyring(environment: EnvironmentSource) {
   const primary = {
-    id: optional("WEB_REFRESH_KEY_ID") ?? "primary",
-    secret: required("WEB_REFRESH_SECRET"),
+    id: optional("WEB_REFRESH_KEY_ID", environment) ?? "primary",
+    secret: required("WEB_REFRESH_SECRET", environment),
   };
   if (!/^[A-Za-z0-9_-]{1,32}$/.test(primary.id)) {
     throw new Error("WEB_REFRESH_KEY_ID must contain 1 to 32 safe key-id characters");
   }
-  const encoded = optional("WEB_REFRESH_PREVIOUS_KEYS");
+  const encoded = optional("WEB_REFRESH_PREVIOUS_KEYS", environment);
   if (!encoded) return { primary, previous: [] };
 
   let parsed: unknown;
@@ -214,8 +230,8 @@ function webRefreshKeyring() {
   return { primary, previous };
 }
 
-function optionalUrl(name: string) {
-  const value = optional(name);
+function optionalUrl(name: string, environment: EnvironmentSource) {
+  const value = optional(name, environment);
 
   if (!value) {
     return null;
@@ -264,8 +280,8 @@ function isLoopbackHostname(hostname: string) {
     || ipv4Loopback;
 }
 
-function remnawaveSubscriptionOrigins() {
-  const raw = optional("REMNAWAVE_SUBSCRIPTION_ORIGINS");
+function remnawaveSubscriptionOrigins(environment: EnvironmentSource) {
+  const raw = optional("REMNAWAVE_SUBSCRIPTION_ORIGINS", environment);
   if (!raw) return [];
 
   const values = raw.split(",").map((value) => value.trim());
@@ -291,7 +307,7 @@ function remnawaveSubscriptionOrigins() {
       throw new Error("REMNAWAVE_SUBSCRIPTION_ORIGINS must contain only URL origins without credentials");
     }
 
-    const developmentLoopbackHttp = process.env.NODE_ENV !== "production"
+    const developmentLoopbackHttp = environment.NODE_ENV !== "production"
       && parsed.protocol === "http:"
       && isLoopbackHostname(parsed.hostname);
     if (parsed.protocol !== "https:" && !developmentLoopbackHttp) {
@@ -308,8 +324,8 @@ function remnawaveSubscriptionOrigins() {
   return origins;
 }
 
-function paymentRedirectOrigins() {
-  const raw = optional("PAYMENT_REDIRECT_ORIGINS");
+function paymentRedirectOrigins(environment: EnvironmentSource) {
+  const raw = optional("PAYMENT_REDIRECT_ORIGINS", environment);
   if (!raw) {
     // Keep the first strict allowlist rollout compatible with the immediately
     // previous production image during zero-downtime rollback. Operators may
@@ -363,10 +379,10 @@ function chatwootToken(name: string, value: string) {
   return value;
 }
 
-function chatwootConfig(): AppEnv["chatwoot"] {
-  const baseUrl = optional("CHATWOOT_BASE_URL");
-  const websiteToken = optional("CHATWOOT_WEBSITE_TOKEN");
-  const hmacToken = optional("CHATWOOT_HMAC_TOKEN");
+function chatwootConfig(environment: EnvironmentSource): AppEnv["chatwoot"] {
+  const baseUrl = optional("CHATWOOT_BASE_URL", environment);
+  const websiteToken = optional("CHATWOOT_WEBSITE_TOKEN", environment);
+  const hmacToken = optional("CHATWOOT_HMAC_TOKEN", environment);
   const configuredCount = [baseUrl, websiteToken, hmacToken].filter(Boolean).length;
 
   if (configuredCount === 0) {
@@ -400,8 +416,12 @@ function deriveRemnashopAdminApiBaseUrl(publicApiBaseUrl: string) {
   return parsed.toString().replace(/\/$/, "");
 }
 
-function optionalPublicPath(name: string, fallback: string) {
-  const value = optional(name);
+function optionalPublicPath(
+  name: string,
+  fallback: string,
+  environment: EnvironmentSource,
+) {
+  const value = optional(name, environment);
 
   if (!value) {
     return fallback;
@@ -421,19 +441,20 @@ function telegramOidcUrl(
     | "TELEGRAM_OIDC_TOKEN_ENDPOINT"
     | "TELEGRAM_OIDC_JWKS_URI",
   fallback: string,
+  environment: EnvironmentSource,
 ) {
-  const value = optional(name);
+  const value = optional(name, environment);
 
-  if (process.env.NODE_ENV !== "production" && value) {
+  if (environment.NODE_ENV !== "production" && value) {
     return httpUrlValue(name, value).replace(/\/$/, "");
   }
 
   return fallback;
 }
 
-function validateEnv(env: AppEnv) {
-  const isProduction = process.env.NODE_ENV === "production";
-  const isBuildPhase = process.env.CLEAN_PAY_BUILD_PHASE === "true";
+function validateEnv(env: AppEnv, environment: EnvironmentSource) {
+  const isProduction = environment.NODE_ENV === "production";
+  const isBuildPhase = environment.CLEAN_PAY_BUILD_PHASE === "true";
 
   if (env.turnstile.enabled) {
     if (!env.turnstile.siteKey) {
@@ -480,102 +501,203 @@ function validateEnv(env: AppEnv) {
   }
 
   if (isProduction && !isBuildPhase) {
-    if (process.env.CLEAN_PAY_RUNTIME_ROLE === "application") {
-      validateProductionApplicationRoleEnvironment(process.env);
+    if (environment.CLEAN_PAY_RUNTIME_ROLE === "application") {
+      validateProductionApplicationRoleEnvironment(environment);
     } else {
-      validateProductionEnvironment(process.env);
+      validateProductionEnvironment(environment);
     }
   }
 }
 
-export function getEnv(): AppEnv {
-  const appUrl = url("APP_URL");
-  const remnashopApiBaseUrl = url("REMNASHOP_API_BASE_URL");
+function createEnv(environment: EnvironmentSource): AppEnv {
+  const appUrl = url("APP_URL", environment);
+  const remnashopApiBaseUrl = url("REMNASHOP_API_BASE_URL", environment);
   const remnashopAdminApiBaseUrl =
-    optionalUrl("REMNASHOP_ADMIN_API_BASE_URL")?.replace(/\/$/, "")
+    optionalUrl("REMNASHOP_ADMIN_API_BASE_URL", environment)?.replace(/\/$/, "")
     ?? deriveRemnashopAdminApiBaseUrl(remnashopApiBaseUrl);
 
-  const chatwoot = chatwootConfig();
-  const refreshKeyring = webRefreshKeyring();
+  const chatwoot = chatwootConfig(environment);
+  const refreshKeyring = webRefreshKeyring(environment);
   const env = {
-    databaseUrl: required("DATABASE_URL"),
+    databaseUrl: required("DATABASE_URL", environment),
     appUrl,
-    publicAppUrl: url("NEXT_PUBLIC_APP_URL"),
+    publicAppUrl: url("NEXT_PUBLIC_APP_URL", environment),
     branding: {
-      name: optional("NEXT_PUBLIC_BRAND_NAME") ?? "Clean Pay",
-      logoUrl: optionalPublicPath("NEXT_PUBLIC_BRAND_LOGO_URL", "/clean-pay-logo.png"),
+      name: optional("NEXT_PUBLIC_BRAND_NAME", environment) ?? "Clean Pay",
+      logoUrl: optionalPublicPath(
+        "NEXT_PUBLIC_BRAND_LOGO_URL",
+        "/clean-pay-logo.png",
+        environment,
+      ),
     },
     remnashopApiBaseUrl,
     remnashopAdminApiBaseUrl,
-    remnashopApiKey: optional("REMNASHOP_API_KEY"),
-    remnashopAuthServiceKey: optional("REMNASHOP_AUTH_SERVICE_KEY"),
+    remnashopApiKey: optional("REMNASHOP_API_KEY", environment),
+    remnashopAuthServiceKey: optional("REMNASHOP_AUTH_SERVICE_KEY", environment),
     remnawave: {
-      apiBaseUrl: optionalUrl("REMNAWAVE_API_BASE_URL"),
-      token: optional("REMNAWAVE_TOKEN"),
-      subscriptionOrigins: remnawaveSubscriptionOrigins(),
+      apiBaseUrl: optionalUrl("REMNAWAVE_API_BASE_URL", environment),
+      token: optional("REMNAWAVE_TOKEN", environment),
+      subscriptionOrigins: remnawaveSubscriptionOrigins(environment),
     },
-    webJwtSecret: required("WEB_JWT_SECRET"),
+    webJwtSecret: required("WEB_JWT_SECRET", environment),
     webRefreshSecret: refreshKeyring.primary.secret,
     webRefreshKeyring: refreshKeyring,
-    auditIpHashSecret: optional("AUDIT_IP_HASH_SECRET") ?? required("WEB_JWT_SECRET"),
-    trustedProxyHops: integer("TRUSTED_PROXY_HOPS", 0, 0, 8),
-    rateLimitIdentitySecret: required("RATE_LIMIT_IDENTITY_SECRET"),
-    authRateLimitCapacity: integer("AUTH_RATE_LIMIT_CAPACITY", 1000, 100, 1_000_000),
-    authConcurrencyLimit: integer("AUTH_CONCURRENCY_LIMIT", 64, 1, 10_000),
-    cookieSecure: bool("COOKIE_SECURE", true),
-    cookieSameSite: sameSite("COOKIE_SAMESITE", "lax"),
+    auditIpHashSecret: optional("AUDIT_IP_HASH_SECRET", environment)
+      ?? required("WEB_JWT_SECRET", environment),
+    trustedProxyHops: integer("TRUSTED_PROXY_HOPS", 0, 0, 8, environment),
+    rateLimitIdentitySecret: required("RATE_LIMIT_IDENTITY_SECRET", environment),
+    authRateLimitCapacity: integer(
+      "AUTH_RATE_LIMIT_CAPACITY",
+      1000,
+      100,
+      1_000_000,
+      environment,
+    ),
+    authConcurrencyLimit: integer(
+      "AUTH_CONCURRENCY_LIMIT",
+      64,
+      1,
+      10_000,
+      environment,
+    ),
+    cookieSecure: bool("COOKIE_SECURE", true, environment),
+    cookieSameSite: sameSite("COOKIE_SAMESITE", "lax", environment),
     telegramOidc: {
-      issuer: telegramOidcUrl("TELEGRAM_OIDC_ISSUER", telegramOidcDefaults.issuer),
+      issuer: telegramOidcUrl(
+        "TELEGRAM_OIDC_ISSUER",
+        telegramOidcDefaults.issuer,
+        environment,
+      ),
       authorizationEndpoint: telegramOidcUrl(
         "TELEGRAM_OIDC_AUTHORIZATION_ENDPOINT",
         telegramOidcDefaults.authorizationEndpoint,
+        environment,
       ),
-      tokenEndpoint: telegramOidcUrl("TELEGRAM_OIDC_TOKEN_ENDPOINT", telegramOidcDefaults.tokenEndpoint),
-      jwksUri: telegramOidcUrl("TELEGRAM_OIDC_JWKS_URI", telegramOidcDefaults.jwksUri),
-      clientId: required("TELEGRAM_OIDC_CLIENT_ID"),
-      clientSecret: required("TELEGRAM_OIDC_CLIENT_SECRET"),
+      tokenEndpoint: telegramOidcUrl(
+        "TELEGRAM_OIDC_TOKEN_ENDPOINT",
+        telegramOidcDefaults.tokenEndpoint,
+        environment,
+      ),
+      jwksUri: telegramOidcUrl(
+        "TELEGRAM_OIDC_JWKS_URI",
+        telegramOidcDefaults.jwksUri,
+        environment,
+      ),
+      clientId: required("TELEGRAM_OIDC_CLIENT_ID", environment),
+      clientSecret: required("TELEGRAM_OIDC_CLIENT_SECRET", environment),
       redirectUri: joinUrl(appUrl, "/auth/telegram/callback"),
     },
-    telegramBotToken: optional("TELEGRAM_BOT_TOKEN"),
+    telegramBotToken: optional("TELEGRAM_BOT_TOKEN", environment),
     paymentReturnUrls: {
       success: joinUrl(appUrl, "/payment/success"),
       fail: joinUrl(appUrl, "/payment/fail"),
       pending: joinUrl(appUrl, "/payment/pending"),
     },
-    paymentRedirectOrigins: paymentRedirectOrigins(),
+    paymentRedirectOrigins: paymentRedirectOrigins(environment),
     paymentReconciliation: {
-      enabled: bool("PAYMENT_RECONCILIATION_ENABLED", true),
-      secret: optional("PAYMENT_RECONCILIATION_SECRET"),
-      batchSize: integer("PAYMENT_RECONCILIATION_BATCH_SIZE", 10, 1, 100),
+      enabled: bool("PAYMENT_RECONCILIATION_ENABLED", true, environment),
+      secret: optional("PAYMENT_RECONCILIATION_SECRET", environment),
+      batchSize: integer(
+        "PAYMENT_RECONCILIATION_BATCH_SIZE",
+        10,
+        1,
+        100,
+        environment,
+      ),
       intervalSeconds: integer(
         "PAYMENT_RECONCILIATION_INTERVAL_SECONDS",
         30,
         5,
         3_600,
+        environment,
       ),
     },
     turnstile: {
-      enabled: bool("TURNSTILE_ENABLED", false),
-      siteKey: optional("TURNSTILE_SITE_KEY"),
-      secretKey: optional("TURNSTILE_SECRET_KEY"),
-      verifyUrl: optionalUrl("TURNSTILE_VERIFY_URL") ?? "https://challenges.cloudflare.com/turnstile/v0/siteverify",
+      enabled: bool("TURNSTILE_ENABLED", false, environment),
+      siteKey: optional("TURNSTILE_SITE_KEY", environment),
+      secretKey: optional("TURNSTILE_SECRET_KEY", environment),
+      verifyUrl: optionalUrl("TURNSTILE_VERIFY_URL", environment)
+        ?? "https://challenges.cloudflare.com/turnstile/v0/siteverify",
     },
     support: {
-      enabled: bool("SUPPORT_ENABLED", false),
-      email: optional("SUPPORT_EMAIL"),
-      telegramUsername: optional("SUPPORT_TELEGRAM_USERNAME"),
-      faqUrl: optionalUrl("SUPPORT_FAQ_URL"),
+      enabled: bool("SUPPORT_ENABLED", false, environment),
+      email: optional("SUPPORT_EMAIL", environment),
+      telegramUsername: optional("SUPPORT_TELEGRAM_USERNAME", environment),
+      faqUrl: optionalUrl("SUPPORT_FAQ_URL", environment),
       liveChatEnabled: Boolean(chatwoot),
     },
     chatwoot,
     readiness: {
-      internalSecret: required("READINESS_INTERNAL_SECRET"),
-      mailpitUrl: optionalUrl("CLEAN_PAY_READINESS_MAILPIT_URL"),
-      remnawaveUrl: optionalUrl("CLEAN_PAY_READINESS_REMNAWAVE_URL"),
+      internalSecret: required("READINESS_INTERNAL_SECRET", environment),
+      mailpitUrl: optionalUrl("CLEAN_PAY_READINESS_MAILPIT_URL", environment),
+      remnawaveUrl: optionalUrl("CLEAN_PAY_READINESS_REMNAWAVE_URL", environment),
     },
   };
 
-  validateEnv(env);
+  validateEnv(env, environment);
 
   return env;
+}
+
+function deepFreeze<T>(value: T, seen = new WeakSet<object>()): T {
+  if (value === null || typeof value !== "object" || seen.has(value)) {
+    return value;
+  }
+
+  seen.add(value);
+  for (const nested of Object.values(value)) {
+    deepFreeze(nested, seen);
+  }
+  return Object.freeze(value);
+}
+
+const testOnlyRuntime = process.env.NODE_ENV === "test";
+
+function assertTestEnvironment(operation: string) {
+  if (!testOnlyRuntime) {
+    throw new Error(`${operation} is available only when NODE_ENV=test`);
+  }
+}
+
+let cachedEnv: AppEnv | undefined;
+let cachedTestRefreshKeyringFingerprint: string | undefined;
+
+function testRefreshKeyringFingerprint(environment: EnvironmentSource) {
+  return JSON.stringify([
+    environment.WEB_REFRESH_KEY_ID ?? null,
+    environment.WEB_REFRESH_SECRET ?? null,
+    environment.WEB_REFRESH_PREVIOUS_KEYS ?? null,
+  ]);
+}
+
+export function getEnv(): AppEnv {
+  if (testOnlyRuntime) {
+    const fingerprint = testRefreshKeyringFingerprint(process.env);
+    if (
+      cachedEnv
+      && cachedTestRefreshKeyringFingerprint !== fingerprint
+    ) {
+      cachedEnv = undefined;
+    }
+
+    cachedEnv ??= deepFreeze(createEnv(process.env));
+    cachedTestRefreshKeyringFingerprint = fingerprint;
+    return cachedEnv;
+  }
+
+  cachedEnv ??= deepFreeze(createEnv(process.env));
+  return cachedEnv;
+}
+
+export function createEnvForTests(
+  environment: EnvironmentSource = process.env,
+): AppEnv {
+  assertTestEnvironment("createEnvForTests");
+  return deepFreeze(createEnv(environment));
+}
+
+export function resetEnvForTests() {
+  assertTestEnvironment("resetEnvForTests");
+  cachedEnv = undefined;
+  cachedTestRefreshKeyringFingerprint = undefined;
 }

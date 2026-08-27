@@ -2,9 +2,9 @@ import { ServiceError } from "@/backend/errors/service-error";
 import {
   getRemnashopMe,
   getRemnashopUserIdFromAccessToken,
-  remnashopRequest,
 } from "@/backend/integrations/remnashop/api-client";
-import type { CurrentSubscriptionResponse } from "@/backend/integrations/remnashop/contracts";
+import { remnashopValidatedRequest } from "@/backend/integrations/remnashop/api-client-runtime";
+import { decodeRemnashopSubscriptionIdentity } from "@/backend/integrations/remnashop/response-decoders";
 import {
   assertRemnawaveIdentitySynchronizationConfigured,
   synchronizeRemnawaveUserIdentity,
@@ -25,10 +25,14 @@ export async function synchronizeProviderAccountIdentity(
 ) {
   const [profile, subscription] = await Promise.all([
     options?.verifiedProfile ?? getRemnashopMe(accessToken),
-    remnashopRequest<CurrentSubscriptionResponse | null>("/subscription/current", {
-      accessToken,
-      ...(options?.timeoutMs ? { timeoutMs: options.timeoutMs } : {}),
-    }),
+    remnashopValidatedRequest(
+      "/subscription/current",
+      {
+        accessToken,
+        ...(options?.timeoutMs ? { timeoutMs: options.timeoutMs } : {}),
+      },
+      decodeRemnashopSubscriptionIdentity,
+    ),
   ]);
   const telegramId = profile.telegram_id === null ? null : String(profile.telegram_id);
   const mismatch = providerAccountIdentityMismatch({

@@ -1,16 +1,19 @@
 "use server";
 
 import { loadPaymentStatus } from "@/application/payments/load-payment-status";
-import { productionPaymentMaintenanceRunner } from "@/backend/integrations/payments/payment-maintenance-runner";
 import { productionPaymentStatusReader } from "@/app/_composition/session-gateways";
+import { productionPaymentMaintenanceRunner } from "@/app/_composition/action-runtime";
+import { parsePaymentStatusPayload } from "@/app/actions/runtime-payload";
 
 export async function refreshPaymentStatusAction(input: {
   paymentId: string | null;
   operationId: string | null;
 }) {
+  const parsed = parsePaymentStatusPayload(input);
+  if (!parsed) return { status: "error" as const, message: "Не удалось проверить статус." };
   return loadPaymentStatus(
     productionPaymentStatusReader,
     productionPaymentMaintenanceRunner,
-    input,
+    parsed,
   );
 }

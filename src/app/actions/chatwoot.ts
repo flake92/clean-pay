@@ -3,11 +3,11 @@
 import { loadChatwootSupportContext } from "@/application/support/load-chatwoot-context";
 import { verifyChatwootIdentity } from "@/application/support/verify-chatwoot-identity";
 import { productionChatwootContextGateway } from "@/app/_composition/session-gateways";
-import { productionChatwootIdentityGateway } from "@/backend/integrations/support/chatwoot-identity-gateway";
 import {
   ChatwootIdentityCapacityError,
+  productionChatwootIdentityGateway,
   productionChatwootIdentityRequestGuard,
-} from "@/backend/integrations/support/chatwoot-identity-request-guard";
+} from "@/app/_composition/action-runtime";
 
 export async function loadChatwootSupportContextAction(expectedUserId: string) {
   if (
@@ -26,6 +26,13 @@ export async function loadChatwootSupportContextAction(expectedUserId: string) {
 }
 
 export async function verifyChatwootIdentityAction(expectedUserId: string) {
+  if (
+    typeof expectedUserId !== "string"
+    || expectedUserId.length === 0
+    || expectedUserId.length > 255
+  ) {
+    return "rejected";
+  }
   try {
     return await productionChatwootIdentityRequestGuard.runAction(() => (
       verifyChatwootIdentity(
