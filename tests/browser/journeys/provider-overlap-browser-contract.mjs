@@ -18,12 +18,158 @@ const exactNavigationFlow = Object.freeze([
   "app-profile-document",
   "app-cabinet-document",
 ]);
+const semanticKeys = new Set([
+  "app-brand-logo", "app-cabinet-action", "app-cabinet-document",
+  "app-cabinet-prefetch-blocked", "app-cabinet-rsc", "app-login-action",
+  "app-login-document", "app-login-rsc", "app-profile-action",
+  "app-profile-document", "app-profile-rsc", "app-root-rsc",
+  "app-telegram-callback", "app-telegram-start", "app-web-manifest",
+  "chatwoot-sdk-script", "chatwoot-widget-conversation-frame",
+  "chatwoot-widget-frame", "telegram-oidc-authorize", "turnstile-widget-script",
+]);
+const exactRedirectEdges = new Set([
+  "app-telegram-start:307->telegram-oidc-authorize",
+  "telegram-oidc-authorize:302->app-telegram-callback",
+  "app-telegram-callback:307->app-profile-document",
+  "app-root-rsc:307->app-login-rsc",
+  "app-login-rsc:307->app-login-rsc",
+]);
 
 const exactStaticRoutes = Object.freeze(["/cabinet/page", "/login/page", "/profile/page"]);
+
+export function createProviderOverlapEventSeal(maximumEvents = 512) {
+  if (!Number.isSafeInteger(maximumEvents) || maximumEvents < 32 || maximumEvents > 4_096) {
+    fail("Browser event seal bound is invalid.");
+  }
+  let eventCount = 0;
+  let inFlight = 0;
+  let lateEventCount = 0;
+  let overflow = false;
+  let sealed = false;
+  let version = 0;
+  const record = () => {
+    version += 1;
+    if (sealed) lateEventCount += 1;
+    else eventCount += 1;
+    if (eventCount > maximumEvents || lateEventCount > maximumEvents) overflow = true;
+  };
+  return Object.freeze({
+    begin() {
+      record();
+      if (sealed) return () => undefined;
+      inFlight += 1;
+      let finished = false;
+      return () => {
+        if (finished) fail("Browser event operation completed more than once.");
+        finished = true;
+        inFlight -= 1;
+        version += 1;
+      };
+    },
+    record,
+    async drainAndSeal(isIdle, {
+      pollMs = 10,
+      quietMs = 200,
+      timeoutMs = 5_000,
+    } = {}) {
+      if (typeof isIdle !== "function" || sealed
+        || ![pollMs, quietMs, timeoutMs].every(Number.isSafeInteger)
+        || pollMs < 1 || quietMs < pollMs || timeoutMs < quietMs || timeoutMs > 30_000) {
+        fail("Browser event drain contract is invalid.");
+      }
+      const deadline = Date.now() + timeoutMs;
+      let quietSince = Date.now();
+      let observedVersion = version;
+      while (Date.now() <= deadline) {
+        if (overflow) fail("Browser event ledger overflowed before sealing.");
+        if (version !== observedVersion || inFlight !== 0 || !isIdle()) {
+          observedVersion = version;
+          quietSince = Date.now();
+        } else if (Date.now() - quietSince >= quietMs) {
+          sealed = true;
+          return Object.freeze({ eventCount, status: "drained-and-sealed" });
+        }
+        await new Promise((resolve) => setTimeout(resolve, pollMs));
+      }
+      fail("Browser event sources did not drain within their bounded lifecycle.");
+    },
+    assertClean() {
+      if (!sealed || overflow || lateEventCount !== 0 || inFlight !== 0) {
+        fail("Browser event source changed after the sealed drain barrier.");
+      }
+      return Object.freeze({ eventCount, lateEventCount, status: "sealed-clean" });
+    },
+  });
+}
+
+export async function finalizeProviderOverlapEventLifecycle(input) {
+  exactKeys(input, [
+    "assertUnchanged", "close", "detach", "eventSeal", "finish", "isIdle", "snapshot",
+  ], "browser event lifecycle finalizer");
+  for (const name of ["assertUnchanged", "close", "detach", "finish", "isIdle", "snapshot"]) {
+    if (typeof input[name] !== "function") fail(`Browser event lifecycle ${name} is invalid.`);
+  }
+  if (!input.eventSeal || typeof input.eventSeal.drainAndSeal !== "function"
+    || typeof input.eventSeal.assertClean !== "function") {
+    fail("Browser event lifecycle seal is invalid.");
+  }
+  const drained = await input.eventSeal.drainAndSeal(input.isIdle);
+  // Freeze every routed/evented source first. The projection is intentionally
+  // built only after this barrier so no allowed request can arrive between the
+  // projected ledger and the sealed raw ledger.
+  const value = await boundedLifecycleOperation(input.finish(), 15_000, "browser projection");
+  const snapshot = await boundedLifecycleOperation(input.snapshot(), 5_000, "browser snapshot");
+  await boundedLifecycleOperation(input.close(), 15_000, "browser close");
+  // Let close-triggered request, frame, console, popup and error callbacks run
+  // while every listener is still attached to the sealed ledger.
+  await new Promise((resolve) => setTimeout(resolve, 25));
+  await boundedLifecycleOperation(
+    input.assertUnchanged(snapshot),
+    5_000,
+    "browser source revalidation",
+  );
+  await boundedLifecycleOperation(input.detach(), 5_000, "browser listener detach");
+  const sealed = input.eventSeal.assertClean();
+  if (sealed.eventCount !== drained.eventCount) {
+    fail("Browser event count changed across its close barrier.");
+  }
+  return Object.freeze({
+    eventLifecycle: Object.freeze({
+      drainedEventCount: drained.eventCount,
+      lateEventCount: sealed.lateEventCount,
+      status: sealed.status,
+    }),
+    snapshot,
+    value,
+  });
+}
+
+async function boundedLifecycleOperation(operation, timeoutMs, label) {
+  const promise = Promise.resolve(operation);
+  let timer;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise((_, reject) => {
+        timer = setTimeout(
+          () => reject(new Error(`${label} exceeded its bounded lifecycle.`)),
+          timeoutMs,
+        );
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 export function createProviderOverlapStaticAssetContract(attestation) {
   if (!attestation || typeof attestation !== "object" || Array.isArray(attestation)
     || !sha256Pattern.test(attestation.attestationSha256 ?? "")
+    || !/^sha256:[a-f0-9]{64}$/.test(attestation.source?.configDigest ?? "")
+    || !/^sha256:[a-f0-9]{64}$/.test(attestation.source?.imageDigest ?? "")
+    || !/^sha256:[a-f0-9]{64}$/.test(attestation.source?.manifestDigest ?? "")
+    || attestation.source.configDigest === attestation.source.manifestDigest
+    || attestation.source.configDigest === attestation.source.imageDigest
     || !sha256Pattern.test(attestation.inventory?.inventorySha256 ?? "")
     || !Array.isArray(attestation.inventory?.staticChunks)
     || !Array.isArray(attestation.inventory?.clientReferences)) {
@@ -53,11 +199,23 @@ export function createProviderOverlapStaticAssetContract(attestation) {
       routeDeclaredPaths.add(servedPath);
     }
   }
+  const inventoryLedger = Object.entries(inventoryByPath)
+    .map(([servedPath, assetSha256]) => ({
+      assetSha256,
+      pathSha256: sha256(servedPath),
+    }))
+    .sort((left, right) => left.pathSha256.localeCompare(right.pathSha256));
+  const routeDeclaredPathSha256s = [...routeDeclaredPaths].sort().map(sha256);
   return Object.freeze({
     attestationSha256: attestation.attestationSha256,
+    configDigest: attestation.source.configDigest,
+    imageDigest: attestation.source.imageDigest,
     inventoryByPath: Object.freeze({ ...inventoryByPath }),
+    inventoryLedgerContractSha256: sha256(JSON.stringify(inventoryLedger)),
     inventorySha256: attestation.inventory.inventorySha256,
+    manifestDigest: attestation.source.manifestDigest,
     routeDeclaredPaths: Object.freeze([...routeDeclaredPaths].sort()),
+    routeDeclaredPathContractSha256: sha256(JSON.stringify(routeDeclaredPathSha256s)),
   });
 }
 
@@ -110,24 +268,112 @@ export function assertProviderOverlapRedirect({ from, location, status, to }) {
     fail("Redirect location does not match the exact next request.");
   }
   const edge = `${from.classification.key}:${status}->${to.classification.key}`;
-  if (!new Set([
-    "app-telegram-start:307->telegram-oidc-authorize",
-    "telegram-oidc-authorize:302->app-telegram-callback",
-    "app-telegram-callback:307->app-profile-document",
-    "app-root-rsc:307->app-login-rsc",
-    "app-login-rsc:307->app-login-rsc",
-  ]).has(edge)) {
+  if (!exactRedirectEdges.has(edge)) {
     fail("Redirect edge is outside the exact provider-overlap contract.");
   }
   return edge;
 }
 
+export function normalizeProviderOverlapSemanticEntry(entry, label = "semantic browser request") {
+  exactKeys(
+    entry,
+    ["disposition", "key", "redirectEdge", "responseContentType", "responseStatus"],
+    label,
+  );
+  if (!semanticKeys.has(entry.key)) fail(`${label} key is outside the exact contract.`);
+  const expectedDisposition = entry.key === "app-cabinet-prefetch-blocked"
+    ? "abort"
+    : "continue";
+  equal(entry.disposition, expectedDisposition, `${label} disposition`);
+  const statuses = expectedDisposition === "abort" ? [null]
+    : entry.key === "telegram-oidc-authorize" ? [302]
+      : ["app-telegram-start", "app-telegram-callback"].includes(entry.key) ? [307]
+        : ["app-root-rsc", "app-login-rsc"].includes(entry.key) ? [200, 307]
+          : [200];
+  if (!statuses.includes(entry.responseStatus)) fail(`${label} response status is not exact.`);
+  const contentTypes = expectedDisposition === "abort"
+    ? [null]
+    : expectedContentTypes(entry.key, entry.responseStatus);
+  if (!contentTypes.includes(entry.responseContentType)) {
+    fail(`${label} response content type is not exact.`);
+  }
+  const mandatoryRedirectByTarget = {
+    "telegram-oidc-authorize": "app-telegram-start:307->telegram-oidc-authorize",
+    "app-telegram-callback": "telegram-oidc-authorize:302->app-telegram-callback",
+    "app-profile-document": "app-telegram-callback:307->app-profile-document",
+  };
+  const mandatoryRedirect = mandatoryRedirectByTarget[entry.key];
+  if (mandatoryRedirect !== undefined) {
+    equal(entry.redirectEdge, mandatoryRedirect, `${label} redirect edge`);
+  } else if (entry.redirectEdge !== null) {
+    if (entry.key !== "app-login-rsc" || !exactRedirectEdges.has(entry.redirectEdge)
+      || !entry.redirectEdge.endsWith(`->${entry.key}`)) {
+      fail(`${label} redirect edge is outside the exact contract.`);
+    }
+  }
+  return Object.freeze({
+    disposition: entry.disposition,
+    key: entry.key,
+    redirectEdge: entry.redirectEdge,
+    responseContentType: entry.responseContentType,
+    responseStatus: entry.responseStatus,
+  });
+}
+
+export function validateProviderOverlapSemanticLedger(value, label = "semantic browser ledger") {
+  if (!Array.isArray(value) || value.length < 6 || value.length > maximumRequests) {
+    fail(`${label} is outside its bounded contract.`);
+  }
+  const ledger = value.map((entry, index) => normalizeProviderOverlapSemanticEntry(
+    entry,
+    `${label} entry ${index}`,
+  ));
+  const navigationKeys = new Set(exactNavigationFlow);
+  deepEqual(
+    ledger.map(({ key }) => key).filter((key) => navigationKeys.has(key)),
+    exactNavigationFlow,
+    `${label} navigation flow`,
+  );
+  const counts = Object.create(null);
+  const pendingRedirectSources = new Map();
+  for (const [index, entry] of ledger.entries()) {
+    counts[entry.key] = (counts[entry.key] ?? 0) + 1;
+    if (entry.redirectEdge !== null) {
+      const match = /^(?<source>[a-z0-9-]+):(?<status>30[1278])->(?<target>[a-z0-9-]+)$/.exec(
+        entry.redirectEdge,
+      );
+      const sourceKey = match ? `${match.groups.source}:${match.groups.status}` : "";
+      if (!match || match.groups.target !== entry.key
+        || (pendingRedirectSources.get(sourceKey) ?? 0) < 1) {
+        fail(`${label} redirect successor ${index} has no exact prior source.`);
+      }
+      pendingRedirectSources.set(sourceKey, pendingRedirectSources.get(sourceKey) - 1);
+    }
+    if (Number.isSafeInteger(entry.responseStatus)
+      && entry.responseStatus >= 300 && entry.responseStatus <= 399) {
+      const sourceKey = `${entry.key}:${entry.responseStatus}`;
+      pendingRedirectSources.set(sourceKey, (pendingRedirectSources.get(sourceKey) ?? 0) + 1);
+    }
+  }
+  if ([...pendingRedirectSources.values()].some((count) => count !== 0)) {
+    fail(`${label} contains a redirect source without one exact successor.`);
+  }
+  if ((counts["turnstile-widget-script"] ?? 0) < 1
+    || (counts["chatwoot-sdk-script"] ?? 0) < 1
+    || counts["chatwoot-widget-frame"] !== counts["chatwoot-sdk-script"]
+    || (counts["chatwoot-widget-conversation-frame"] ?? 0)
+      > counts["chatwoot-sdk-script"]) {
+    fail(`${label} external request relation is invalid.`);
+  }
+  return Object.freeze(ledger);
+}
+
 export function finalizeProviderOverlapHistoryContract(records) {
-  if (!Array.isArray(records) || records.length < 2 || records.length > 128) {
+  if (!Array.isArray(records) || records.length !== 2) {
     fail("Browser history ledger is outside its bounded contract.");
   }
   const allowedKinds = new Set([
-    "document", "frame-navigation", "popstate", "pushState", "replaceState",
+    "checkpoint", "frame-navigation", "popstate", "pushState", "replaceState",
   ]);
   const historyLedger = records.map((record, index) => {
     exactKeys(record, ["kind", "url"], `history record ${index}`);
@@ -139,13 +385,10 @@ export function finalizeProviderOverlapHistoryContract(records) {
     }
     return Object.freeze({ kind: record.kind, location });
   });
-  const locations = historyLedger.map(({ location }) => location);
-  const profileIndex = locations.lastIndexOf("app-profile");
-  const cabinetIndex = locations.lastIndexOf("app-cabinet");
-  if (profileIndex < 0 || cabinetIndex <= profileIndex
-    || locations.slice(profileIndex + 1, cabinetIndex).some((value) => value.includes("#"))) {
-    fail("Browser history does not preserve the exact profile-to-cabinet transition.");
-  }
+  deepEqual(historyLedger, [
+    { kind: "checkpoint", location: "app-profile" },
+    { kind: "frame-navigation", location: "app-cabinet" },
+  ], "exact profile-to-cabinet browser history transition");
   return Object.freeze({
     historyContractSha256: sha256(JSON.stringify(historyLedger)),
     historyCount: historyLedger.length,
@@ -170,6 +413,7 @@ export function finalizeProviderOverlapBrowserContract(records, loadGraph) {
 
   const counts = {};
   const redirects = [];
+  const semanticLedger = [];
   const staticLedger = [];
   const observedStaticPaths = new Set();
   for (const [index, record] of records.entries()) {
@@ -195,6 +439,14 @@ export function finalizeProviderOverlapBrowserContract(records, loadGraph) {
       });
     } else if (classification.staticPath !== null || classification.staticAssetSha256 !== null) {
       fail("Non-static browser request contains a static asset binding.");
+    } else {
+      semanticLedger.push(normalizeProviderOverlapSemanticEntry({
+        disposition: classification.disposition,
+        key: classification.key,
+        redirectEdge: record.redirectEdge,
+        responseContentType: record.responseContentType,
+        responseStatus: record.responseStatus,
+      }, `browser semantic request ${index}`));
     }
     counts[classification.key] = (counts[classification.key] ?? 0) + 1;
     if (classification.disposition === "abort") {
@@ -228,6 +480,7 @@ export function finalizeProviderOverlapBrowserContract(records, loadGraph) {
   if ((counts["chatwoot-widget-conversation-frame"] ?? 0) > counts["chatwoot-sdk-script"]) {
     fail("Chatwoot replacement widget count is outside its fresh/cache contract.");
   }
+  validateProviderOverlapSemanticLedger(semanticLedger, "browser semantic request ledger");
 
   const declaredPaths = [...new Set(loadGraph.responseDeclaredStaticPaths)].sort();
   if (declaredPaths.length !== loadGraph.responseDeclaredStaticPaths.length
@@ -251,34 +504,46 @@ export function finalizeProviderOverlapBrowserContract(records, loadGraph) {
     .filter((servedPath) => servedPath.startsWith("/_next/static/chunks/"))
     .sort();
   deepEqual(observedChunks, [...expectedChunks].sort(), "exact static chunk load graph");
-  for (const servedPath of observedStaticPaths) {
-    if (servedPath.startsWith("/_next/static/media/") && !declaredMedia.has(servedPath)) {
-      fail("Static media request is not reachable from an observed stylesheet declaration.");
-    }
-  }
+  const observedMedia = [...observedStaticPaths]
+    .filter((servedPath) => servedPath.startsWith("/_next/static/media/"))
+    .sort();
+  deepEqual(observedMedia, [...declaredMedia].sort(), "exact static media declaration closure");
+
+  const declaredPathLedger = declaredPaths.map((servedPath) => ({
+    class: servedPath.startsWith("/_next/static/chunks/") ? "chunk" : "media",
+    pathSha256: sha256(servedPath),
+  })).sort((left, right) => left.pathSha256.localeCompare(right.pathSha256));
 
   const staticLoadGraph = Object.freeze({
     assetAttestationSha256: loadGraph.staticAssetContract.attestationSha256,
+    assetInventorySha256: loadGraph.staticAssetContract.inventorySha256,
+    declaredPathLedger: Object.freeze(declaredPathLedger.map(Object.freeze)),
     declaredPathSha256s: Object.freeze(declaredPaths.map(sha256)),
     expectedChunkPathSha256s: Object.freeze([...expectedChunks].sort().map(sha256)),
+    inventoryLedger: Object.freeze(Object.entries(inventory)
+      .map(([servedPath, assetSha256]) => Object.freeze({
+        assetSha256,
+        pathSha256: sha256(servedPath),
+      }))
+      .sort((left, right) => left.pathSha256.localeCompare(right.pathSha256))),
+    inventoryLedgerContractSha256:
+      loadGraph.staticAssetContract.inventoryLedgerContractSha256,
+    routeDeclaredPathContractSha256:
+      loadGraph.staticAssetContract.routeDeclaredPathContractSha256,
+    routeDeclaredPathSha256s: Object.freeze(
+      loadGraph.staticAssetContract.routeDeclaredPaths.map(sha256),
+    ),
   });
 
-  const semanticCounts = Object.fromEntries(Object.entries(counts)
-    .filter(([key]) => !staticKeys.has(key))
-    .sort(([left], [right]) => left.localeCompare(right)));
   const summary = {
     version: 1,
-    counts: semanticCounts,
-    navigationFlow,
-    redirects,
-    semanticFlow: records
-      .map(({ classification }) => classification.key)
-      .filter((key) => !staticKeys.has(key)),
+    semanticLedger,
     staticClasses: [...staticKeys].filter((key) => counts[key] > 0).sort(),
   };
   return Object.freeze({
     requestCount: records.length,
     requestContractSha256: sha256(JSON.stringify(summary)),
+    semanticRequestLedger: Object.freeze(semanticLedger.map(Object.freeze)),
     staticLoadGraph,
     staticLoadGraphContractSha256: sha256(JSON.stringify(staticLoadGraph)),
     staticRequestContractSha256: sha256(JSON.stringify(staticLedger)),
@@ -525,11 +790,28 @@ function exactHistoryLocation(raw) {
 function assertStaticAssetContract(value) {
   exactKeys(
     value,
-    ["attestationSha256", "inventoryByPath", "inventorySha256", "routeDeclaredPaths"],
+    [
+      "attestationSha256",
+      "configDigest",
+      "imageDigest",
+      "inventoryByPath",
+      "inventoryLedgerContractSha256",
+      "inventorySha256",
+      "manifestDigest",
+      "routeDeclaredPaths",
+      "routeDeclaredPathContractSha256",
+    ],
     "static asset contract",
   );
   if (!sha256Pattern.test(value.attestationSha256 ?? "")
+    || !/^sha256:[a-f0-9]{64}$/.test(value.configDigest ?? "")
+    || !/^sha256:[a-f0-9]{64}$/.test(value.imageDigest ?? "")
+    || !/^sha256:[a-f0-9]{64}$/.test(value.manifestDigest ?? "")
+    || value.configDigest === value.manifestDigest
+    || value.configDigest === value.imageDigest
+    || !sha256Pattern.test(value.inventoryLedgerContractSha256 ?? "")
     || !sha256Pattern.test(value.inventorySha256 ?? "")
+    || !sha256Pattern.test(value.routeDeclaredPathContractSha256 ?? "")
     || !value.inventoryByPath || typeof value.inventoryByPath !== "object"
     || Array.isArray(value.inventoryByPath) || !Array.isArray(value.routeDeclaredPaths)
     || value.routeDeclaredPaths.length < 1 || value.routeDeclaredPaths.length > maximumRequests) {
@@ -547,6 +829,16 @@ function assertStaticAssetContract(value) {
     || new Set(value.routeDeclaredPaths).size !== value.routeDeclaredPaths.length
     || value.routeDeclaredPaths.some((servedPath) => !Object.hasOwn(value.inventoryByPath, servedPath))) {
     fail("Static route declaration contract is invalid.");
+  }
+  const inventoryLedger = inventoryPaths.map((servedPath) => ({
+    assetSha256: value.inventoryByPath[servedPath],
+    pathSha256: sha256(servedPath),
+  })).sort((left, right) => left.pathSha256.localeCompare(right.pathSha256));
+  const routeDeclaredPathSha256s = value.routeDeclaredPaths.map(sha256);
+  if (value.inventoryLedgerContractSha256 !== sha256(JSON.stringify(inventoryLedger))
+    || value.routeDeclaredPathContractSha256
+      !== sha256(JSON.stringify(routeDeclaredPathSha256s))) {
+    fail("Static asset projection hash differs from its attested graph.");
   }
 }
 

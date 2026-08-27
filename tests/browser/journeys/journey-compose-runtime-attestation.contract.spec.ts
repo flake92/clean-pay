@@ -55,8 +55,17 @@ test("rejects image, command, mount, data, network, volume, alias, and environme
     ["fake helper image digest", (value) => {
       value.imagesById[value.containersByService.redis.Image].RepoDigests = [];
     }],
+    ["unattested application repository digest", (value) => {
+      value.imagesById[value.containersByService.app.Image].RepoDigests = [
+        `registry.example/clean-pay@sha256:${"9".repeat(64)}`,
+      ];
+    }],
+    ["OCI root masquerading as selected config ID", (value) => {
+      value.imagesById[value.containersByService.app.Image].Id
+        = value.expectedApplicationAssetImageDigest;
+    }],
     ["aliased role image", (value) => {
-      value.expectedMigrationImageDigest = value.expectedApplicationImageDigest;
+      value.expectedMigrationRuntimeImageDigest = value.expectedApplicationImageConfigDigest;
     }],
     ["fake command", (value) => {
       value.containersByService["browser-provider-mock"].Config.Cmd = ["node", "/fake.mjs"];
@@ -130,11 +139,21 @@ test("keeps Linux host paths case-sensitive and binds the actual daemon logging 
   expect(() => assertJourneyComposeRuntimeInspection(fixture)).not.toThrow();
 });
 
+test("normalizes a valid single-manifest OCI root without weakening config identity", () => {
+  const fixture = runtimeFixture();
+  fixture.expectedApplicationRepoDigests = [
+    fixture.expectedApplicationAssetImageDigest,
+    fixture.expectedApplicationAssetImageDigest,
+  ];
+  expect(() => assertJourneyComposeRuntimeInspection(fixture)).not.toThrow();
+});
+
 function runtimeFixture() {
   const project = "clean-pay-browser-journey-provider-proof-baseline-aaaaaaaaaaaa";
   const appReference = "clean-pay-app:attestation";
   const migrationReference = "clean-pay-migration:attestation";
   const appDigest = `sha256:${"1".repeat(64)}`;
+  const migrationAssetDigest = `sha256:${"5".repeat(64)}`;
   const migrationDigest = `sha256:${"2".repeat(64)}`;
   const contract = {
     project,
@@ -276,7 +295,11 @@ function runtimeFixture() {
           : undefined;
       imagesById[imageId] = {
         Id: imageId,
-        RepoDigests: role ? [] : [imageReference.replace(/:[^/@]+@/, "@")],
+        RepoDigests: role === "app"
+          ? [`registry.example/clean-pay@sha256:${"3".repeat(64)}`]
+          : role === "migration"
+            ? [`registry.example/clean-pay-migration@${migrationAssetDigest}`]
+            : [imageReference.replace(/:[^/@]+@/, "@")],
         Config: {
           Cmd: null,
           Entrypoint: null,
@@ -332,8 +355,16 @@ function runtimeFixture() {
     containersByService,
     contract,
     daemonLoggingDriver: "json-file",
-    expectedApplicationImageDigest: appDigest,
-    expectedMigrationImageDigest: migrationDigest,
+    expectedApplicationAssetImageDigest: `sha256:${"3".repeat(64)}`,
+    expectedApplicationImageConfigDigest: appDigest,
+    expectedApplicationReference: contract.images.application,
+    expectedApplicationRepoDigests: [
+      `sha256:${"3".repeat(64)}`,
+      `sha256:${"4".repeat(64)}`,
+    ],
+    expectedMigrationAssetImageDigest: migrationAssetDigest,
+    expectedMigrationReference: contract.images.migration,
+    expectedMigrationRuntimeImageDigest: migrationDigest,
     imagesById,
     network: {
       Name: `${project}_default`,
