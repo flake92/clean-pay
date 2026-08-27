@@ -1,5 +1,8 @@
 import { projectAllowlistedA11ySemantics } from "./a11y-semantic-projection";
-import { projectExactJourneyGeneratedValues } from "./journey-comparison-projection";
+import {
+  projectExactJourneyGeneratedValues,
+  projectExactJourneyPwaShellCachePair,
+} from "./journey-comparison-projection";
 import { projectExactJourneyKeyboardSkipLink } from "./journeys/journey-skip-link-policy";
 import {
   PINNED_JOURNEY_V5_FIXTURE_SHA256,
@@ -33,7 +36,6 @@ const NEXT_JS_POWERED_BY = {
 
 const STATIC_CHUNK_PATH = /^\/_next\/static\/chunks\/(?:turbopack-)?(?=[A-Za-z0-9_-]{8,}\.(?:css|js)$)(?=[A-Za-z0-9_-]*[0-9])[A-Za-z0-9_-]+\.(?:css|js)$/;
 const STATIC_MEDIA_PATH = /^\/_next\/static\/media\/[A-Za-z0-9._-]+\.(?=[A-Za-z0-9_-]{8,}\.[A-Za-z0-9]+$)(?=[A-Za-z0-9_-]*[0-9])[A-Za-z0-9_-]+\.(?:avif|gif|ico|jpeg|jpg|png|svg|webp|woff2)$/;
-
 /**
  * Projects only explicitly classified browser noise out of a raw manifest.
  * The raw artifact remains the evidence file; this copy is used exclusively
@@ -70,8 +72,17 @@ export function projectCharacterizationManifestPairForComparison(
     expectedValue,
     actualValue,
   );
-  const expected = projectCharacterizationManifestForComparison(expectedValue);
-  const actual = projectCharacterizationManifestForComparison(actualValue);
+  const expectedPrepared = cloneJson(expectedValue);
+  const actualPrepared = cloneJson(actualValue);
+  if (
+    fixtureContractPairIsValid
+    && isRecord(expectedPrepared)
+    && isRecord(actualPrepared)
+  ) {
+    projectExactJourneyPwaShellCachePair(expectedPrepared, actualPrepared);
+  }
+  const expected = projectCharacterizationManifestForComparison(expectedPrepared);
+  const actual = projectCharacterizationManifestForComparison(actualPrepared);
   projectExactRemovedNextJsPoweredBy(expected, actual);
   if (fixtureContractPairIsValid) {
     projectExactJourneyFixtureContract(expected, actual);
