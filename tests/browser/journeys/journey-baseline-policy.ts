@@ -9,7 +9,10 @@ import {
   BaselineMismatchError,
   sha256,
 } from "../baseline-policy";
-import { projectCharacterizationManifestBytesForComparison } from "../comparison-projection";
+import {
+  projectCharacterizationManifestBytesForComparison,
+  projectCharacterizationManifestPairBytesForComparison,
+} from "../comparison-projection";
 import {
   assertSanitizedHarContract,
   createSanitizedHarContract,
@@ -72,9 +75,7 @@ export async function reconcileJourneyBaseline(options: {
     safeSegment(options.journeyId),
     "journey.json",
   );
-  const actualProjection = projectJourneyEvidenceBytes(options.rawEvidence);
   const networkDestination = path.join(path.dirname(destination), "network.har.json");
-  const actualNetworkProjection = projectJourneyHarEvidenceBytes(options.networkEvidence);
   const screenshotDestinations = options.screenshots.map((screenshot) => ({
     ...screenshot,
     destination: path.join(
@@ -91,25 +92,29 @@ export async function reconcileJourneyBaseline(options: {
       );
     }
     const expectedRaw = await readFile(destination);
-    const expectedProjection = projectJourneyEvidenceBytes(expectedRaw);
-    if (!expectedProjection.equals(actualProjection)) {
+    const evidenceProjection = projectJourneyEvidencePairBytes(
+      expectedRaw,
+      options.rawEvidence,
+    );
+    if (!evidenceProjection.expected.equals(evidenceProjection.actual)) {
       throw new BaselineMismatchError(
         destination,
-        sha256(expectedProjection),
-        sha256(actualProjection),
+        sha256(evidenceProjection.expected),
+        sha256(evidenceProjection.actual),
       );
     }
     if (!await exists(networkDestination)) {
       throw new Error(`Immutable journey baseline is incomplete: ${networkDestination} is missing.`);
     }
-    const expectedNetworkProjection = projectJourneyHarEvidenceBytes(
+    const networkProjection = projectJourneyHarEvidencePairBytes(
       await readFile(networkDestination),
+      options.networkEvidence,
     );
-    if (!expectedNetworkProjection.equals(actualNetworkProjection)) {
+    if (!networkProjection.expected.equals(networkProjection.actual)) {
       throw new BaselineMismatchError(
         networkDestination,
-        sha256(expectedNetworkProjection),
-        sha256(actualNetworkProjection),
+        sha256(networkProjection.expected),
+        sha256(networkProjection.actual),
       );
     }
     for (const screenshot of screenshotDestinations) {
@@ -178,6 +183,16 @@ export function projectJourneyEvidenceBytes(value: Uint8Array) {
   return projectCharacterizationManifestBytesForComparison(value);
 }
 
+export function projectJourneyEvidencePairBytes(
+  expectedValue: Uint8Array,
+  actualValue: Uint8Array,
+) {
+  return projectCharacterizationManifestPairBytesForComparison(
+    expectedValue,
+    actualValue,
+  );
+}
+
 export function projectJourneyHarEvidenceBytes(value: Uint8Array) {
   const parsed: unknown = JSON.parse(Buffer.from(value).toString("utf8"));
   const rawSource = assertSanitizedHarContract(parsed);
@@ -185,6 +200,36 @@ export function projectJourneyHarEvidenceBytes(value: Uint8Array) {
     projectJourneyEvidenceBytes(Buffer.from(JSON.stringify(rawSource))).toString("utf8"),
   );
   return Buffer.from(`${JSON.stringify(createSanitizedHarContract(projectedSource), null, 2)}\n`);
+}
+
+export function projectJourneyHarEvidencePairBytes(
+  expectedValue: Uint8Array,
+  actualValue: Uint8Array,
+) {
+  const expectedSource = assertSanitizedHarContract(
+    JSON.parse(Buffer.from(expectedValue).toString("utf8")),
+  );
+  const actualSource = assertSanitizedHarContract(
+    JSON.parse(Buffer.from(actualValue).toString("utf8")),
+  );
+  const projected = projectJourneyEvidencePairBytes(
+    Buffer.from(JSON.stringify(expectedSource)),
+    Buffer.from(JSON.stringify(actualSource)),
+  );
+  const expectedProjectedSource = JSON.parse(projected.expected.toString("utf8"));
+  const actualProjectedSource = JSON.parse(projected.actual.toString("utf8"));
+  return {
+    expected: Buffer.from(`${JSON.stringify(
+      createSanitizedHarContract(expectedProjectedSource),
+      null,
+      2,
+    )}\n`),
+    actual: Buffer.from(`${JSON.stringify(
+      createSanitizedHarContract(actualProjectedSource),
+      null,
+      2,
+    )}\n`),
+  };
 }
 
 export async function assertJourneyWriteAuthorized() {

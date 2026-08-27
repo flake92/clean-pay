@@ -13,7 +13,10 @@ import {
   reconcileProjectedJsonBaselineArtifact,
   sha256,
 } from "./baseline-policy";
-import { projectCharacterizationManifestBytesForComparison } from "./comparison-projection";
+import {
+  projectCharacterizationManifestBytesForComparison,
+  projectCharacterizationManifestPairBytesForComparison,
+} from "./comparison-projection";
 import { reconcileBrowserBaselineProvenance } from "./baseline-provenance";
 import {
   navigationChain,
@@ -250,6 +253,7 @@ export async function captureCharacterization(options: {
         baselineFile: path.join(baselineDirectory, "characterization.json"),
         actual: manifestBytes,
         project: projectCharacterizationManifestBytesForComparison,
+        projectPair: projectCharacterizationManifestPairBytesForComparison,
       }),
       reconcileBaselineArtifact({
         baselineFile: path.join(baselineDirectory, "viewport.png"),
