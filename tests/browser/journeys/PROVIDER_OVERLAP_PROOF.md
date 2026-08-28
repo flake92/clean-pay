@@ -105,7 +105,11 @@ document navigation. The pinned Chromium launch arguments, resolver, and
 established CONNECT proxy are shared with the journey runner. Only exact
 synthetic HTTPS origins and scenario-specific method/resource/path/ordered-
 query/hash/status/content-type/redirect classes are allowed; every request is
-counted. Each image has an exact raw semantic/static request-order ledger and
+counted. A shared pure envelope helper treats Playwright `Request.frame()` as
+the initiating frame: `isMainFrame` is true only for a navigation request whose
+target is the page main frame. CSS, JavaScript, RSC, and fetch requests initiated
+by that frame remain non-navigation resources and cannot be rejected as false
+main-frame navigations. Each image has an exact raw semantic/static request-order ledger and
 three fixed document-generation ledgers for login, profile, and cabinet. A
 static path may legitimately recur once in each generation, but cannot be
 duplicated within a generation, omitted, moved to a different generation, or

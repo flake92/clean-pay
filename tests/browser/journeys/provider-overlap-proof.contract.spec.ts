@@ -8,7 +8,7 @@ import {
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import { expect, test } from "@playwright/test";
+import { chromium, expect, test } from "@playwright/test";
 
 import {
   PROVIDER_OVERLAP_BROWSER_PROJECT,
@@ -28,6 +28,7 @@ import {
   assertProviderOverlapRedirect,
   attestProviderOverlapStaticResponse,
   classifyProviderOverlapBrowserRequest,
+  createJourneyBrowserRequestEnvelope,
   createProviderOverlapEventSeal,
   createProviderOverlapStaticAssetContract,
   extractProviderOverlapCssMediaReferences,
@@ -774,6 +775,131 @@ test("binds exact running image labels and a pristine deterministic reset", () =
     const nearMiss = structuredClone(reset);
     mutate(nearMiss);
     expect(() => assertDeterministicReset(nearMiss, scenario, contract.project, label)).toThrow();
+  }
+});
+
+test("derives the classifier main-frame flag only for a navigation target", async () => {
+  const mainFrame = {};
+  const childFrame = {};
+  const request = (isNavigation: boolean, frame: object) => ({
+    frame: () => frame,
+    isNavigationRequest: () => isNavigation,
+    method: () => "GET",
+    resourceType: () => isNavigation ? "document" : "script",
+    url: () => "https://request-envelope.clean-pay.test/resource",
+  });
+
+  expect(createJourneyBrowserRequestEnvelope(request(true, mainFrame), mainFrame)).toEqual({
+    isMainFrame: true,
+    isNavigation: true,
+    method: "GET",
+    resourceType: "document",
+    url: "https://request-envelope.clean-pay.test/resource",
+  });
+  expect(createJourneyBrowserRequestEnvelope(request(true, childFrame), mainFrame)).toEqual({
+    isMainFrame: false,
+    isNavigation: true,
+    method: "GET",
+    resourceType: "document",
+    url: "https://request-envelope.clean-pay.test/resource",
+  });
+  let nonNavigationFrameReads = 0;
+  const nonNavigationRequest = request(false, mainFrame);
+  nonNavigationRequest.frame = () => {
+    nonNavigationFrameReads += 1;
+    return mainFrame;
+  };
+  expect(createJourneyBrowserRequestEnvelope(nonNavigationRequest, mainFrame)).toEqual({
+    isMainFrame: false,
+    isNavigation: false,
+    method: "GET",
+    resourceType: "script",
+    url: "https://request-envelope.clean-pay.test/resource",
+  });
+  expect(nonNavigationFrameReads).toBe(0);
+  expect(() => createJourneyBrowserRequestEnvelope({
+    ...request(true, mainFrame),
+    isNavigationRequest: () => "true",
+  }, mainFrame)).toThrow(/navigation flag/);
+
+  const captureSource = await readFile(path.resolve(__dirname, "prove-provider-overlap.mjs"), "utf8");
+  expect(captureSource).toContain(
+    "createJourneyBrowserRequestEnvelope(request, page.mainFrame())",
+  );
+  expect(captureSource).not.toContain("isMainFrame: request.frame() === page.mainFrame()");
+});
+
+test("characterizes navigation targets in pinned local Chromium", async () => {
+  const browser = await chromium.launch({ headless: true });
+  try {
+    const context = await browser.newContext({ serviceWorkers: "block" });
+    const page = await context.newPage();
+    const observed: Array<{
+      envelope: ReturnType<typeof createJourneyBrowserRequestEnvelope>;
+      pathname: string;
+    }> = [];
+    const fixtures = new Map([
+      ["/main", {
+        body: "<!doctype html><html><head>"
+          + '<link rel="stylesheet" href="/style.css">'
+          + '<script defer src="/app.js"></script>'
+          + "</head><body>"
+          + '<iframe src="/frame"></iframe>'
+          + "</body></html>",
+        contentType: "text/html",
+      }],
+      ["/style.css", { body: "body{color:#111}", contentType: "text/css" }],
+      ["/app.js", {
+        body: "globalThis.__scriptLoaded=true;"
+          + "fetch('/data').then(response=>response.text())"
+          + ".then(()=>document.body.dataset.fetch='done');",
+        contentType: "application/javascript",
+      }],
+      ["/data", { body: "synthetic-data", contentType: "text/plain" }],
+      ["/frame", { body: "<!doctype html><p>synthetic-frame</p>", contentType: "text/html" }],
+    ]);
+    await context.route("**/*", async (route) => {
+      const request = route.request();
+      const pathname = new URL(request.url()).pathname;
+      observed.push({
+        envelope: createJourneyBrowserRequestEnvelope(request, page.mainFrame()),
+        pathname,
+      });
+      const fixture = fixtures.get(pathname);
+      if (!fixture) throw new Error(`Unexpected local characterization request: ${pathname}`);
+      await route.fulfill({ status: 200, ...fixture });
+    });
+
+    await page.goto("https://request-envelope.clean-pay.test/main", {
+      waitUntil: "load",
+    });
+    await page.waitForFunction(() => (
+      Reflect.get(globalThis, "__scriptLoaded") === true
+        && document.body.dataset.fetch === "done"
+    ));
+    expect(observed).toHaveLength(5);
+    expect(observed.map(({ pathname }) => pathname).sort()).toEqual(
+      ["/app.js", "/data", "/frame", "/main", "/style.css"],
+    );
+    const byPath = new Map(observed.map(({ envelope, pathname }) => [pathname, envelope]));
+    expect(byPath.get("/main")).toMatchObject({
+      isMainFrame: true, isNavigation: true, resourceType: "document",
+    });
+    expect(byPath.get("/frame")).toMatchObject({
+      isMainFrame: false, isNavigation: true, resourceType: "document",
+    });
+    for (const [pathname, resourceType] of [
+      ["/style.css", "stylesheet"],
+      ["/app.js", "script"],
+      ["/data", "fetch"],
+    ] as const) {
+      expect(byPath.get(pathname)).toMatchObject({
+        isMainFrame: false, isNavigation: false, resourceType,
+      });
+    }
+    await context.close();
+  } finally {
+    await browser.close();
   }
 });
 
