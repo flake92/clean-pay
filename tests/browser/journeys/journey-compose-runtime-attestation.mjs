@@ -58,6 +58,14 @@ const platformImageManifestMediaTypes = new Set([
   "application/vnd.docker.distribution.manifest.v2+json",
   "application/vnd.oci.image.manifest.v1+json",
 ]);
+const indexImageManifestMediaTypes = new Set([
+  "application/vnd.docker.distribution.manifest.list.v2+json",
+  "application/vnd.oci.image.index.v1+json",
+]);
+const rootImageManifestMediaTypes = new Set([
+  ...indexImageManifestMediaTypes,
+  ...platformImageManifestMediaTypes,
+]);
 export const JOURNEY_COMPOSE_ONE_SHOT_SERVICE_NAMES = Object.freeze(
   [...oneShotServices].sort(),
 );
@@ -784,14 +792,18 @@ function assertImageIdentity(
 ) {
   const runtimeImageDigest = container.Image;
   let role;
+  let containerdRootDescriptor;
   if (image?.Id !== runtimeImageDigest) {
     fail("Journey image inspection ID differs from the container-selected runtime digest.");
   }
   if (expectedImageSelectionMode === "containerd-root-manifest") {
-    assertContainerdRootInspection(
+    containerdRootDescriptor = assertContainerdRootInspection(
       image,
       runtimeImageDigest,
       container.ImageManifestDescriptor?.digest,
+      reference === contract.images.application
+        ? expectedApplicationImageConfigDigest
+        : undefined,
     );
   } else if (Object.hasOwn(container, "ImageManifestDescriptor")) {
     fail("Classic image selection contains mixed containerd descriptor state.");
@@ -807,6 +819,11 @@ function assertImageIdentity(
         expectedApplicationManifestDigest,
         "application",
         expectedImagePlatform,
+        {
+          expectedAnnotationConfigDigest: expectedApplicationImageConfigDigest,
+          expectedRootDigest: runtimeImageDigest,
+          rootDescriptor: containerdRootDescriptor,
+        },
       );
     } else {
       if (runtimeImageDigest !== expectedApplicationImageConfigDigest) {
@@ -826,6 +843,10 @@ function assertImageIdentity(
         expectedMigrationManifestDigest,
         "migration",
         expectedImagePlatform,
+        {
+          expectedRootDigest: runtimeImageDigest,
+          rootDescriptor: containerdRootDescriptor,
+        },
       );
     } else {
       if (runtimeImageDigest !== expectedMigrationRuntimeImageDigest) {
@@ -846,6 +867,10 @@ function assertImageIdentity(
         undefined,
         "helper",
         expectedImagePlatform,
+        {
+          expectedRootDigest: runtimeImageDigest,
+          rootDescriptor: containerdRootDescriptor,
+        },
       );
     } else {
       assertClassicRootDescriptor(image, match.groups.digest, "helper");
@@ -941,23 +966,26 @@ function assertExpectedImageSelection({
   });
 }
 
-function assertContainerdRootInspection(image, expectedRootDigest, selectedManifestDigest) {
+function assertContainerdRootInspection(
+  image,
+  expectedRootDigest,
+  selectedManifestDigest,
+  expectedAnnotationConfigDigest,
+) {
   const descriptor = image?.Descriptor;
   if (!descriptor || typeof descriptor !== "object" || Array.isArray(descriptor)
     || descriptor.digest !== expectedRootDigest) {
     fail("Containerd image inspection is not bound to its authoritative OCI root descriptor.");
   }
+  const annotationsPresent = Object.hasOwn(descriptor, "annotations");
   exactObjectKeys(
     descriptor,
-    ["digest", "mediaType", "size"],
+    annotationsPresent
+      ? ["annotations", "digest", "mediaType", "size"]
+      : ["digest", "mediaType", "size"],
     "containerd authoritative OCI root descriptor",
   );
-  if (!new Set([
-    "application/vnd.docker.distribution.manifest.list.v2+json",
-    "application/vnd.docker.distribution.manifest.v2+json",
-    "application/vnd.oci.image.index.v1+json",
-    "application/vnd.oci.image.manifest.v1+json",
-  ]).has(descriptor.mediaType)
+  if (!rootImageManifestMediaTypes.has(descriptor.mediaType)
     || !Number.isSafeInteger(descriptor.size)
     || descriptor.size <= 0
     || descriptor.size > 16 * 1024 * 1024) {
@@ -968,6 +996,26 @@ function assertContainerdRootInspection(image, expectedRootDigest, selectedManif
       && selectedManifestDigest !== expectedRootDigest)) {
     fail("Containerd single-manifest OCI root differs from its selected platform manifest.");
   }
+  if (indexImageManifestMediaTypes.has(descriptor.mediaType)
+    && selectedManifestDigest === expectedRootDigest) {
+    fail("Containerd index/list OCI root aliases its selected platform manifest.");
+  }
+  if (annotationsPresent) {
+    exactObjectKeys(
+      descriptor.annotations,
+      ["config.digest"],
+      "containerd authoritative OCI root annotations",
+    );
+    const configDigest = descriptor.annotations["config.digest"];
+    if (!/^sha256:[a-f0-9]{64}$/.test(configDigest ?? "")
+      || !platformImageManifestMediaTypes.has(descriptor.mediaType)
+      || selectedManifestDigest !== expectedRootDigest
+      || (expectedAnnotationConfigDigest !== undefined
+        && configDigest !== expectedAnnotationConfigDigest)) {
+      fail("Containerd authoritative OCI root annotations differ from their exact contract.");
+    }
+  }
+  return descriptor;
 }
 
 function assertClassicRootDescriptor(image, expectedRootDigest, role) {
@@ -979,7 +1027,17 @@ function assertClassicRootDescriptor(image, expectedRootDigest, role) {
   }
 }
 
-function assertContainerdManifestDescriptor(descriptor, expectedDigest, role, expectedPlatform) {
+function assertContainerdManifestDescriptor(
+  descriptor,
+  expectedDigest,
+  role,
+  expectedPlatform,
+  {
+    expectedAnnotationConfigDigest = undefined,
+    expectedRootDigest,
+    rootDescriptor,
+  },
+) {
   const platform = exactImagePlatform(
     expectedPlatform,
     `containerd ${role} expected image platform`,
@@ -987,9 +1045,12 @@ function assertContainerdManifestDescriptor(descriptor, expectedDigest, role, ex
   if (!descriptor || typeof descriptor !== "object" || Array.isArray(descriptor)) {
     fail(`Containerd ${role} platform manifest descriptor is missing or malformed.`);
   }
+  const annotationsPresent = Object.hasOwn(descriptor, "annotations");
   exactObjectKeys(
     descriptor,
-    ["digest", "mediaType", "platform", "size"],
+    annotationsPresent
+      ? ["annotations", "digest", "mediaType", "platform", "size"]
+      : ["digest", "mediaType", "platform", "size"],
     `containerd ${role} platform manifest descriptor`,
   );
   const observedPlatformKeys = Object.keys(descriptor.platform ?? {}).sort();
@@ -1012,6 +1073,38 @@ function assertContainerdManifestDescriptor(descriptor, expectedDigest, role, ex
     || (descriptor.platform.variant !== undefined
       && (platform.architecture !== "arm64" || descriptor.platform.variant !== "v8"))) {
     fail(`Containerd ${role} platform manifest descriptor differs from its exact contract.`);
+  }
+  if (platformImageManifestMediaTypes.has(rootDescriptor?.mediaType)
+    && (rootDescriptor.digest !== expectedRootDigest
+      || descriptor.digest !== expectedRootDigest
+      || descriptor.mediaType !== rootDescriptor.mediaType)) {
+    fail(`Containerd ${role} platform manifest differs from its single-manifest root.`);
+  }
+  if (annotationsPresent) {
+    exactObjectKeys(
+      descriptor.annotations,
+      ["config.digest"],
+      `containerd ${role} platform manifest annotations`,
+    );
+    const configDigest = descriptor.annotations["config.digest"];
+    if (!/^sha256:[a-f0-9]{64}$/.test(configDigest ?? "")
+      || (expectedAnnotationConfigDigest !== undefined
+        && configDigest !== expectedAnnotationConfigDigest)) {
+      fail(`Containerd ${role} platform manifest annotations differ from their exact contract.`);
+    }
+  }
+  const rootAnnotationsPresent = Object.hasOwn(rootDescriptor ?? {}, "annotations");
+  if ((rootAnnotationsPresent || annotationsPresent)
+    && (!rootDescriptor || typeof rootDescriptor !== "object" || Array.isArray(rootDescriptor)
+      || !platformImageManifestMediaTypes.has(rootDescriptor.mediaType)
+      || rootDescriptor.digest !== expectedRootDigest
+      || descriptor.digest !== expectedRootDigest
+      || descriptor.mediaType !== rootDescriptor.mediaType
+      || descriptor.size !== rootDescriptor.size
+      || (rootAnnotationsPresent && annotationsPresent
+        && rootDescriptor.annotations["config.digest"]
+          !== descriptor.annotations["config.digest"]))) {
+    fail(`Containerd ${role} root and platform manifest annotations are not consistently bound.`);
   }
   return descriptor;
 }
