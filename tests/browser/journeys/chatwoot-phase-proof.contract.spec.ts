@@ -26,6 +26,7 @@ import {
   assertChatwootJourneyContract,
   assertChatwootPhaseInput,
   assertChatwootPhaseProof,
+  createChatwootPhaseComposeProjectName,
   createChatwootPhaseProof,
   readExactChatwootExternalPlan,
   readExactChatwootExternalPlanForTest,
@@ -69,6 +70,7 @@ import {
   JOURNEY_COMPOSE_EXPECTED_SERVICE_STATES,
   JOURNEY_COMPOSE_SERVICE_NAMES,
 } from "./journey-compose-runtime-attestation.mjs";
+import { buildJourneySyntheticEnvironment } from "./journey-synthetic-environment-contract.mjs";
 import { JOURNEY_FIXTURE_FILENAMES } from "./journey-fixture-manifest.mjs";
 import { withJourneyOwnedStackPair } from "./journey-owned-stack-orchestrator.mjs";
 import {
@@ -1069,6 +1071,32 @@ test("binds exact role/pair journey contracts and pristine deterministic resets"
     expect(() => assertChatwootDeterministicReset(nearMiss, contract.project, label), label)
       .toThrow();
   }
+});
+
+test("keeps all six Chatwoot Compose projects inside the production environment contract", () => {
+  for (let pairIndex = 1; pairIndex <= CHATWOOT_PHASE_PROOF_PAIR_COUNT; pairIndex += 1) {
+    for (const role of ["baseline", "candidate"] as const) {
+      const contract = journeyContract(role, pairIndex);
+      expect(contract.project.length).toBeLessThanOrEqual(63);
+      expect(assertChatwootJourneyContract(contract, role, pairIndex)).toEqual(contract);
+      const generated = buildJourneySyntheticEnvironment({
+        appImage: contract.images.application,
+        appPort: String(14_100 + pairIndex),
+        connectProxyPort: String(16_100 + pairIndex),
+        directory: path.join(tmpdir(), "clean-pay-chatwoot-project-contract", contract.project),
+        migrationImage: contract.images.migration,
+        project: contract.project,
+        providerPort: String(15_100 + pairIndex),
+        proxyBind: `127.0.0.${20 + pairIndex}`,
+        revision: contract.revision,
+        turnstileSiteKey: "0x4AAAAABrowserJourneyOnly8Wp4Jz7Lc2",
+      });
+      expect(generated.environment.COMPOSE_PROJECT_NAME).toBe(contract.project);
+    }
+  }
+
+  expect(() => createChatwootPhaseComposeProjectName("baseline", 1, "a".repeat(11)))
+    .toThrow(/project identity is invalid/);
 });
 
 test("seals complete ordered evidence with one in-memory HMAC scope", () => {
@@ -4469,11 +4497,11 @@ function journeyContract(role: "baseline" | "candidate", pairIndex: number) {
   return {
     schemaVersion: 1,
     kind: "self-contained-synthetic-browser-journey",
-    project: `clean-pay-browser-journey-chatwoot-phase-${role}-p${pairIndex}-${role === "baseline" ? "1" : "2"}`
-      .padEnd(
-        `clean-pay-browser-journey-chatwoot-phase-${role}-p${pairIndex}-`.length + 12,
-        role === "baseline" ? "1" : "2",
-      ),
+    project: createChatwootPhaseComposeProjectName(
+      role,
+      pairIndex,
+      (role === "baseline" ? "1" : "2").repeat(12),
+    ),
     revision: role === "baseline" ? baselineRevision : candidateRevision,
     images: {
       application: `clean-pay:${role}`,
