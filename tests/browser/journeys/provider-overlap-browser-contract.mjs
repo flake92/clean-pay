@@ -173,6 +173,29 @@ export function createProviderOverlapEventSeal(maximumEvents = 1_024) {
   });
 }
 
+export function createJourneyBrowserRequestEnvelope(request, mainFrame) {
+  if (!request || typeof request !== "object" || !mainFrame || typeof mainFrame !== "object"
+    || typeof request.url !== "function" || typeof request.method !== "function"
+    || typeof request.resourceType !== "function"
+    || typeof request.isNavigationRequest !== "function" || typeof request.frame !== "function") {
+    fail("Browser request envelope source is invalid.");
+  }
+  const isNavigation = request.isNavigationRequest();
+  if (typeof isNavigation !== "boolean") {
+    fail("Browser request navigation flag is invalid.");
+  }
+  return Object.freeze({
+    url: request.url(),
+    method: request.method(),
+    resourceType: request.resourceType(),
+    isNavigation,
+    // Playwright Request.frame() is the initiating frame. It identifies the
+    // navigation target only for navigation requests; main-page resources must
+    // therefore remain non-main-frame in the classifier envelope.
+    isMainFrame: isNavigation && request.frame() === mainFrame,
+  });
+}
+
 export async function finalizeProviderOverlapEventLifecycle(input) {
   exactKeys(input, [
     "assertUnchanged", "close", "detach", "eventSeal", "finish", "isIdle", "snapshot",

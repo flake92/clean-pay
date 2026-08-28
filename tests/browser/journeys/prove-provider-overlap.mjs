@@ -29,6 +29,7 @@ import {
 import {
   assertProviderOverlapRedirect,
   classifyProviderOverlapBrowserRequest,
+  createJourneyBrowserRequestEnvelope,
   createProviderOverlapEventSeal,
   createProviderOverlapStaticAssetContract,
   extractProviderOverlapCssMediaReferences,
@@ -456,13 +457,10 @@ async function exerciseCabinet(
         return;
       }
       try {
-        const classification = classifyProviderOverlapBrowserRequest({
-          url: rawUrl,
-          method: request.method(),
-          resourceType: request.resourceType(),
-          isNavigation: request.isNavigationRequest(),
-          isMainFrame: request.frame() === page.mainFrame(),
-        }, { cabinetDocumentAllowed, staticAssetContract });
+        const classification = classifyProviderOverlapBrowserRequest(
+          createJourneyBrowserRequestEnvelope(request, page.mainFrame()),
+          { cabinetDocumentAllowed, staticAssetContract },
+        );
         if (classification.key === "app-cabinet-document") {
           if (cabinetDocumentConsumed) {
             throw new Error("Synthetic browser requested the cabinet document more than once.");
