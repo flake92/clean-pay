@@ -11,6 +11,7 @@
 *.md text eol=lf
 *.mjs text eol=lf
 *.mts text eol=lf
+*.prisma text eol=lf
 *.sh text eol=lf
 *.sql text eol=lf
 *.ts text eol=lf

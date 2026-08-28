@@ -40,6 +40,10 @@ const currentSecurityMigrations = [
 ));
 
 describe("production migration safety", () => {
+  it("keeps Prisma schema formatting stable across Windows checkouts", () => {
+    expect(gitAttributes).toMatch(/^\*\.prisma text eol=lf$/mu);
+  });
+
   it("makes every new security migration atomic and bounds PostgreSQL waits", () => {
     expect(gitAttributes).toMatch(/^\*\.sql text eol=lf$/mu);
     for (const migration of currentSecurityMigrations) {
