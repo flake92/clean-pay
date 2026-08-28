@@ -24,6 +24,11 @@ snapshot directories absent, creates the exact role-environment bytes,
 validates the
 Compose model, starts baseline and candidate concurrently, and issues a
 non-transferable pre-start receipt bound to the resulting live attestation.
+Every project uses the exact
+`clean-pay-browser-journey-chatwoot-{baseline|candidate}-p{1..3}-<12hex>`
+identity. The longest form is 60 characters, within the production environment
+limit of 63; a contract regression runs all six names through the approved
+synthetic environment builder before any live proof is permitted.
 Only that receipt can authorize reset and capture. Both exact owned projects
 are cleaned in the launcher's `finally` before the next pair starts. At most
 two stacks are live at once, while the final proof still requires six distinct

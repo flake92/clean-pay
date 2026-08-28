@@ -71,6 +71,7 @@ const fixtureSeed = "clean-pay-browser-journey-v1";
 const maximumEventSealCount = 4_096;
 const maximumFixtureStorageBytes = 64 * 1024;
 const maximumScreenshotBytes = 5 * 1024 * 1024;
+const maximumComposeProjectNameLength = 63;
 
 export function createChatwootPhaseProof(pairReports) {
   if (!Array.isArray(pairReports) || pairReports.length !== CHATWOOT_PHASE_PROOF_PAIR_COUNT) {
@@ -341,7 +342,7 @@ export function assertChatwootJourneyContract(value, role, pairIndex) {
   stringMatch(
     contract.project,
     new RegExp(
-      `^clean-pay-browser-journey-chatwoot-phase-${role}-p${pairIndex}-[a-f0-9]{12}$`,
+      `^clean-pay-browser-journey-chatwoot-${role}-p${pairIndex}-[a-f0-9]{12}$`,
     ),
     `${role} pair ${pairIndex} compose project`,
   );
@@ -404,6 +405,20 @@ export function assertChatwootJourneyContract(value, role, pairIndex) {
     `${role} reset scope`,
   );
   return contract;
+}
+
+export function createChatwootPhaseComposeProjectName(role, pairIndex, runScope) {
+  if (!roles.includes(role)
+    || !integerInRange(pairIndex, 1, CHATWOOT_PHASE_PROOF_PAIR_COUNT)
+    || typeof runScope !== "string"
+    || !/^[a-f0-9]{12}$/.test(runScope)) {
+    fail("Chatwoot Compose project identity is invalid.");
+  }
+  const project = `clean-pay-browser-journey-chatwoot-${role}-p${pairIndex}-${runScope}`;
+  if (project.length > maximumComposeProjectNameLength) {
+    fail("Chatwoot Compose project exceeds the production environment limit.");
+  }
+  return project;
 }
 
 export function assertChatwootDeterministicReset(value, project, label) {
