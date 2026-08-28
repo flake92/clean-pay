@@ -33,6 +33,7 @@ import {
   createProviderOverlapEventSeal,
   createProviderOverlapStaticAssetContract,
   extractProviderOverlapCssMediaReferences,
+  extractProviderOverlapResponseStaticDeclarations,
   finalizeProviderOverlapBrowserContract,
   finalizeProviderOverlapEventLifecycle,
   finalizeProviderOverlapHistoryContract,
@@ -1391,15 +1392,15 @@ async function finishBrowserRequestContract(requests, requestByIdentity, staticA
       if (body.byteLength > 2 * 1024 * 1024 || declarationBytes > 8 * 1024 * 1024) {
         throw new Error("Static response declaration graph exceeded its bounded body contract.");
       }
-      const source = new TextDecoder("utf-8", { fatal: true }).decode(body);
       const documentDeclarations = responseDeclarationsByDocument.get(documentKey);
-      for (const match of source.matchAll(
-        /\/_next\/static\/(?:chunks(?:\/[A-Za-z0-9._-]{1,100}){0,5}\/[A-Za-z0-9._-]{1,200}\.(?:css|js)|media\/[A-Za-z0-9._-]{1,200}\.(?:eot|ico|png|svg|ttf|woff|woff2))/g,
+      if (!documentDeclarations) {
+        throw new Error("Static response declaration escaped its exact document generation.");
+      }
+      for (const servedPath of extractProviderOverlapResponseStaticDeclarations(
+        body,
+        staticAssetContract,
       )) {
-        if (!documentDeclarations) {
-          throw new Error("Static response declaration escaped its exact document generation.");
-        }
-        documentDeclarations.add(match[0]);
+        documentDeclarations.add(servedPath);
       }
     }
     records.push({
