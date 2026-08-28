@@ -52,25 +52,39 @@ that attestation. The migration argument is likewise an OCI root/index digest,
 not the value of `docker image inspect <tag> .Id` treated as a config digest.
 For both references, before `compose up`, the verifier creates one uniquely
 named and labelled container with `--entrypoint /bin/true`, never starts it,
-reads the selected config from the container's `.Image`, checks that exact
-config back to the expected authoritative Descriptor root, rechecks the mutable
-tag, and removes only that probe. Every probe name and ownership label includes
+classifies the Docker store without conflating its identities, rechecks the
+mutable tag, and removes only that probe. A classic store must expose the
+selected config in the container's `.Image` and is launched by that config. A
+containerd store must expose the attested OCI root in `.Image` plus an exact
+attested Linux/amd64 or Linux/arm64 image manifest in `.ImageManifestDescriptor`;
+an arm64 descriptor may additionally carry only `variant: v8`. Both A/B images
+must use the same attested platform, and each is launched only by its OCI root.
+When that root is itself a single-image manifest, its digest must equal the
+selected manifest digest. The application manifest must equal the production asset
+attestation, while the migration root/manifest pair is captured by the first
+probe and must be reproduced by the pre-launch probe and live runtime. A
+containerd migration root is never reported as a config digest. Every probe
+name and ownership label includes
 a cryptographically unpredictable per-run nonce; only its SHA-256 ownership
 contract enters the sanitized input receipt. Thus a concurrent verifier with
 the same project contract cannot be adopted or removed during create-error
 recovery. The generated launch snapshot replaces both
-tags with those verified config IDs, so a later tag retarget cannot change what
-Compose starts. A present Descriptor must equal the attested root and cannot be
+tags with the verified classic config IDs or containerd OCI roots, so a later
+tag retarget cannot change what Compose starts. A present Descriptor must equal
+the attested root and cannot be
 masked by a stale RepoDigest. If a classic store exposes no Descriptor, only an
 exact validated RepoDigest for the inspected repository/reference may establish
 the root. A store exposing neither authority is an explicit fail-closed platform
 blocker; `.Id` is never accepted as an OCI root substitute. The resulting
-root/config/reference contracts are bound into runtime evidence.
+mode/root/manifest/config/reference contracts are bound into runtime evidence.
+All application/migration and baseline/candidate pre-launch rechecks settle and
+remove their exact probes before any failure can begin stack or snapshot cleanup.
 
 After startup, a reusable import-safe reader matches
 all 13 services, four volumes, and the single project network to live Docker
 inspection. It binds exact project/service labels, container cardinality,
-names, app and migration config digests, helper RepoDigests, OCI revision/role/
+names, exact classic-config or containerd-root/manifest selections, helper
+RepoDigests, OCI revision/role/
 public-build labels, commands, entrypoints, base-image-plus-Compose environment,
 user, working directory, healthcheck, restart/one-shot state, sandbox/security,
 resource limits, tmpfs, the actual daemon default or explicit logging policy,

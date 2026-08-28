@@ -15,7 +15,41 @@
       "properties": {
         "baseline": { "$ref": "#/$defs/baselineStack" },
         "candidate": { "$ref": "#/$defs/candidateStack" }
-      }
+      },
+      "allOf": [
+        {
+          "oneOf": [
+            {
+              "properties": {
+                "baseline": {
+                  "properties": {
+                    "applicationImage": { "$ref": "#/$defs/applicationImageClassic" }
+                  }
+                },
+                "candidate": {
+                  "properties": {
+                    "applicationImage": { "$ref": "#/$defs/applicationImageClassic" }
+                  }
+                }
+              }
+            },
+            {
+              "properties": {
+                "baseline": {
+                  "properties": {
+                    "applicationImage": { "$ref": "#/$defs/applicationImageContainerd" }
+                  }
+                },
+                "candidate": {
+                  "properties": {
+                    "applicationImage": { "$ref": "#/$defs/applicationImageContainerd" }
+                  }
+                }
+              }
+            }
+          ]
+        }
+      ]
     },
     "comparison": {
       "type": "object",
@@ -162,40 +196,7 @@
             "colorScheme": { "const": "light" }
           }
         },
-        "applicationImage": {
-          "type": "object",
-          "additionalProperties": false,
-          "required": [
-            "assetImageDigest",
-            "configDigest",
-            "manifestDigest",
-            "publicBuildContract",
-            "referenceSha256",
-            "repoDigestContractSha256",
-            "revision",
-            "role",
-            "runtimeImageDigest"
-          ],
-          "properties": {
-            "assetImageDigest": { "$ref": "#/$defs/imageDigest" },
-            "configDigest": { "$ref": "#/$defs/imageDigest" },
-            "manifestDigest": { "$ref": "#/$defs/imageDigest" },
-            "referenceSha256": { "$ref": "#/$defs/sha256" },
-            "repoDigestContractSha256": { "$ref": "#/$defs/sha256" },
-            "revision": { "type": "string", "pattern": "^[a-f0-9]{40}$" },
-            "role": { "const": "app" },
-            "runtimeImageDigest": { "$ref": "#/$defs/imageDigest" },
-            "publicBuildContract": {
-              "type": "object",
-              "additionalProperties": false,
-              "required": ["version", "sha256"],
-              "properties": {
-                "version": { "const": "1" },
-                "sha256": { "$ref": "#/$defs/sha256" }
-              }
-            }
-          }
-        },
+        "applicationImage": { "$ref": "#/$defs/applicationImage" },
         "runtimeBinding": { "$ref": "#/$defs/runtimeBinding" },
         "connectProxyAuthorityLedger": {
           "type": "array",
@@ -220,6 +221,82 @@
         },
         "navigation": { "$ref": "#/$defs/navigation" },
         "providerOverlap": { "$ref": "#/$defs/providerOverlap" }
+      }
+    },
+    "applicationImage": {
+      "oneOf": [
+        { "$ref": "#/$defs/applicationImageClassic" },
+        { "$ref": "#/$defs/applicationImageContainerd" }
+      ]
+    },
+    "applicationImageClassic": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "assetImageDigest",
+        "configDigest",
+        "manifestDigest",
+        "publicBuildContract",
+        "referenceSha256",
+        "repoDigestContractSha256",
+        "revision",
+        "role",
+        "runtimeImageDigest"
+      ],
+      "properties": {
+        "assetImageDigest": { "$ref": "#/$defs/imageDigest" },
+        "configDigest": { "$ref": "#/$defs/imageDigest" },
+        "manifestDigest": { "$ref": "#/$defs/imageDigest" },
+        "referenceSha256": { "$ref": "#/$defs/sha256" },
+        "repoDigestContractSha256": { "$ref": "#/$defs/sha256" },
+        "revision": { "type": "string", "pattern": "^[a-f0-9]{40}$" },
+        "role": { "const": "app" },
+        "runtimeImageDigest": { "$ref": "#/$defs/imageDigest" },
+        "publicBuildContract": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["version", "sha256"],
+          "properties": {
+            "version": { "const": "1" },
+            "sha256": { "$ref": "#/$defs/sha256" }
+          }
+        }
+      }
+    },
+    "applicationImageContainerd": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "assetImageDigest",
+        "configDigest",
+        "imageSelectionMode",
+        "manifestDigest",
+        "publicBuildContract",
+        "referenceSha256",
+        "repoDigestContractSha256",
+        "revision",
+        "role",
+        "runtimeImageDigest"
+      ],
+      "properties": {
+        "assetImageDigest": { "$ref": "#/$defs/imageDigest" },
+        "configDigest": { "$ref": "#/$defs/imageDigest" },
+        "imageSelectionMode": { "const": "containerd-root-manifest" },
+        "manifestDigest": { "$ref": "#/$defs/imageDigest" },
+        "referenceSha256": { "$ref": "#/$defs/sha256" },
+        "repoDigestContractSha256": { "$ref": "#/$defs/sha256" },
+        "revision": { "type": "string", "pattern": "^[a-f0-9]{40}$" },
+        "role": { "const": "app" },
+        "runtimeImageDigest": { "$ref": "#/$defs/imageDigest" },
+        "publicBuildContract": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["version", "sha256"],
+          "properties": {
+            "version": { "const": "1" },
+            "sha256": { "$ref": "#/$defs/sha256" }
+          }
+        }
       }
     },
     "databaseReset": {

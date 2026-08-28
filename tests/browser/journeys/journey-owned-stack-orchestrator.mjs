@@ -40,6 +40,19 @@ const fixtureSnapshotNames = Object.freeze({
 });
 const contractFilename = "browser-journey-contract.json";
 const automaticDockerTimeout = Number.NaN;
+const containerdImageSelectionMode = "containerd-root-manifest";
+const defaultImagePlatform = Object.freeze({ architecture: "amd64", os: "linux" });
+const optionalInputValue = Reflect.get(Object.freeze({}), "optional");
+const platformImageManifestMediaTypes = new Set([
+  "application/vnd.docker.distribution.manifest.v2+json",
+  "application/vnd.oci.image.manifest.v1+json",
+]);
+const rootImageManifestMediaTypes = new Set([
+  "application/vnd.docker.distribution.manifest.list.v2+json",
+  "application/vnd.docker.distribution.manifest.v2+json",
+  "application/vnd.oci.image.index.v1+json",
+  "application/vnd.oci.image.manifest.v1+json",
+]);
 export const JOURNEY_SYNTHETIC_CONFIDENTIALITY_CONTRACT =
   "synthetic-only-no-external-credential-material-v1";
 const preparedHandles = new WeakSet();
@@ -67,13 +80,16 @@ const sanitizedOutputFileSystemOperations = Object.freeze({
   unlink,
 });
 
-export function journeyDockerCliEnvironment(source = process.env) {
+export function journeyDockerCliEnvironment(
+  source = Object.assign(Object.create(null), process.env),
+) {
   const result = Object.create(null);
   for (const name of [
-    "APPDATA", "DOCKER_API_VERSION", "DOCKER_CERT_PATH", "DOCKER_CONFIG",
+    "APPDATA", "DOCKER_CERT_PATH", "DOCKER_CONFIG",
     "DOCKER_CONTEXT", "DOCKER_HOST", "DOCKER_TLS_VERIFY", "HOME", "LANG",
     "LC_ALL", "LOCALAPPDATA", "PATH", "Path", "PATHEXT", "SYSTEMROOT",
     "SystemRoot", "TEMP", "TMP", "USERPROFILE", "WINDIR", "XDG_CONFIG_HOME",
+    "ProgramFiles", "ProgramW6432",
   ]) {
     if (typeof source[name] === "string") result[name] = source[name];
   }
@@ -410,7 +426,26 @@ export async function withJourneyOwnedStackPair({ baseline, candidate }, callbac
   let launchReceipt;
   let cleanupReceipts;
   try {
-    const launchPlans = await Promise.all(handles.map(prepareJourneyOwnedStackLaunch));
+    const launchSettlements = await settleOwnedStackLaunches(
+      handles,
+      async (handle) => {
+        try {
+          return { status: "fulfilled", value: await prepareJourneyOwnedStackLaunch(handle) };
+        } catch {
+          return { status: "rejected" };
+        }
+      },
+    );
+    if (launchSettlements.some(({ status }) => status === "rejected")) {
+      fail("Both verifier-owned pre-launch rechecks must settle before cleanup.");
+    }
+    const launchPlans = [];
+    for (const result of launchSettlements) {
+      if (result.status === "fulfilled") launchPlans.push(result.value);
+    }
+    if (launchPlans.length !== handles.length) {
+      fail("Verifier-owned pre-launch recheck ledger is incomplete.");
+    }
     launchReceipt = await dispatchJourneyOwnedStackPair(handles, launchPlans);
     const runtimeSettlements = await Promise.allSettled(
       handles.map((handle) => attestJourneyOwnedStack(handle)),
@@ -557,17 +592,24 @@ export async function createJourneyOwnedInputSnapshot(
   }
 }
 
+async function settleOwnedStackLaunches(handles, prepareJourneyOwnedStackLaunch) {
+  const launchPlans = await Promise.all(handles.map(prepareJourneyOwnedStackLaunch));
+  return launchPlans;
+}
+
 export async function prepareJourneyOwnedStack({
   repositoryRoot,
   contractPath,
   contract,
   expectedApplicationAssetImageDigest,
   expectedApplicationImageConfigDigest,
+  expectedApplicationManifestDigest = optionalInputValue,
   expectedApplicationRepoDigests,
+  expectedImagePlatform = optionalInputValue,
   expectedMigrationAssetImageDigest,
   runDocker,
 }) {
-  exactKeys(arguments[0], [
+  exactOptionalKeys(arguments[0], [
     "contract",
     "contractPath",
     "expectedApplicationAssetImageDigest",
@@ -576,8 +618,12 @@ export async function prepareJourneyOwnedStack({
     "expectedMigrationAssetImageDigest",
     "repositoryRoot",
     "runDocker",
-  ]);
+  ], ["expectedApplicationManifestDigest", "expectedImagePlatform"]);
   if (typeof runDocker !== "function") fail("Owned-stack Docker runner is invalid.");
+  const imagePlatform = exactImagePlatform(
+    expectedImagePlatform === undefined ? defaultImagePlatform : expectedImagePlatform,
+    "expected image platform",
+  );
   const fixtureBefore = await readFreshJourneyFixtureContract(repositoryRoot);
   if (contract.fixtureContract?.domain !== JOURNEY_FIXTURE_CONTRACT_DOMAIN
     || contract.fixtureContract.sha256 !== fixtureBefore.sha256) {
@@ -602,7 +648,11 @@ export async function prepareJourneyOwnedStack({
     environment: source.queryEnvironment,
     expectedApplicationAssetImageDigest,
     expectedApplicationImageConfigDigest,
+    ...(expectedApplicationManifestDigest === undefined
+      ? {}
+      : { expectedApplicationManifestDigest }),
     expectedApplicationRepoDigests,
+    expectedImagePlatform: imagePlatform,
     probeNonce: probeNonces.initialApplication,
     runDocker,
   });
@@ -610,13 +660,20 @@ export async function prepareJourneyOwnedStack({
     contract,
     environment: source.queryEnvironment,
     expectedMigrationAssetImageDigest,
+    expectedImagePlatform: imagePlatform,
     probeNonce: probeNonces.initialMigration,
     runDocker,
   });
+  const imageSelectionMode = assertCompatibleImageSelection(
+    applicationIdentity,
+    migrationIdentity,
+  );
+  const applicationImageRuntimeDigest = runtimeImageDigestOf(applicationIdentity);
+  const migrationImageRuntimeDigest = runtimeImageDigestOf(migrationIdentity);
   const launchContract = createImmutableLaunchContract(
     contract,
-    applicationIdentity.configDigest,
-    migrationIdentity.configDigest,
+    applicationImageRuntimeDigest,
+    migrationImageRuntimeDigest,
   );
 
   let snapshot;
@@ -695,6 +752,82 @@ export async function prepareJourneyOwnedStack({
       globalFixtureContractSha256: fixtureBefore.sha256,
       mountSubsetContractSha256: fixtureMountSubsetContractSha256,
     }));
+    const imageProbeOwnershipContractSha256 = sha256(JSON.stringify({
+      initialApplication: applicationIdentity.probeOwnershipSha256,
+      initialMigration: migrationIdentity.probeOwnershipSha256,
+      launchApplication: probeOwnershipSha256(
+        contract.project,
+        "application",
+        probeNonces.launchApplication,
+      ),
+      launchMigration: probeOwnershipSha256(
+        contract.project,
+        "migration",
+        probeNonces.launchMigration,
+      ),
+    }));
+    const sharedReceipt = {
+      composeSourceSha256: prepared.composeSourceSha256,
+      applicationImageBindingContractSha256: applicationIdentity.contractSha256,
+      fixtureBindingContractSha256,
+      fixtureMountSubsetContractSha256,
+      fixtureSourceContractSha256: await fixtureHashContract(fixtureSourceOverrides),
+      generatedEnvironmentDirectorySha256: sha256(JSON.stringify(directoryIdentity)),
+      globalFixtureContractSha256: fixtureBefore.sha256,
+      migrationImageBindingContractSha256: migrationIdentity.contractSha256,
+      imageProbeOwnershipContractSha256,
+      projectSha256: sha256(contract.project),
+      roleEnvironmentContractSha256: generated.fileContractSha256,
+      roleEnvironmentPolicySha256: generated.policyContractSha256,
+      renderedComposeSha256: prepared.renderedComposeSha256,
+    };
+    const inputReceipt = imageSelectionMode === "classic-config"
+      ? Object.freeze({
+        applicationImageConfigDigest: applicationIdentity.configDigest,
+        composeSourceSha256: sharedReceipt.composeSourceSha256,
+        applicationImageBindingContractSha256:
+          sharedReceipt.applicationImageBindingContractSha256,
+        fixtureBindingContractSha256: sharedReceipt.fixtureBindingContractSha256,
+        fixtureMountSubsetContractSha256: sharedReceipt.fixtureMountSubsetContractSha256,
+        fixtureSourceContractSha256: sharedReceipt.fixtureSourceContractSha256,
+        generatedEnvironmentDirectorySha256:
+          sharedReceipt.generatedEnvironmentDirectorySha256,
+        globalFixtureContractSha256: sharedReceipt.globalFixtureContractSha256,
+        migrationImageBindingContractSha256:
+          sharedReceipt.migrationImageBindingContractSha256,
+        migrationImageConfigDigest: migrationIdentity.configDigest,
+        imageProbeOwnershipContractSha256:
+          sharedReceipt.imageProbeOwnershipContractSha256,
+        projectSha256: sharedReceipt.projectSha256,
+        roleEnvironmentContractSha256: sharedReceipt.roleEnvironmentContractSha256,
+        roleEnvironmentPolicySha256: sharedReceipt.roleEnvironmentPolicySha256,
+        renderedComposeSha256: sharedReceipt.renderedComposeSha256,
+      })
+      : Object.freeze({
+        applicationImageConfigDigest: applicationIdentity.configDigest,
+        applicationImageRuntimeDigest,
+        applicationImageManifestDigest: applicationIdentity.manifestDigest,
+        composeSourceSha256: sharedReceipt.composeSourceSha256,
+        applicationImageBindingContractSha256:
+          sharedReceipt.applicationImageBindingContractSha256,
+        fixtureBindingContractSha256: sharedReceipt.fixtureBindingContractSha256,
+        fixtureMountSubsetContractSha256: sharedReceipt.fixtureMountSubsetContractSha256,
+        fixtureSourceContractSha256: sharedReceipt.fixtureSourceContractSha256,
+        generatedEnvironmentDirectorySha256:
+          sharedReceipt.generatedEnvironmentDirectorySha256,
+        globalFixtureContractSha256: sharedReceipt.globalFixtureContractSha256,
+        migrationImageBindingContractSha256:
+          sharedReceipt.migrationImageBindingContractSha256,
+        migrationImageRuntimeDigest,
+        migrationImageManifestDigest: migrationIdentity.manifestDigest,
+        imageProbeOwnershipContractSha256:
+          sharedReceipt.imageProbeOwnershipContractSha256,
+        imageSelectionMode,
+        projectSha256: sharedReceipt.projectSha256,
+        roleEnvironmentContractSha256: sharedReceipt.roleEnvironmentContractSha256,
+        roleEnvironmentPolicySha256: sharedReceipt.roleEnvironmentPolicySha256,
+        renderedComposeSha256: sharedReceipt.renderedComposeSha256,
+      });
     const handle = Object.freeze({
       contract: launchContract,
       contractPath: snapshotContractPath,
@@ -703,40 +836,18 @@ export async function prepareJourneyOwnedStack({
       directoryIdentity,
       expectedApplicationAssetImageDigest,
       expectedApplicationImageConfigDigest,
+      ...(imageSelectionMode === "containerd-root-manifest" ? {
+        expectedApplicationManifestDigest: applicationIdentity.manifestDigest,
+        expectedApplicationRuntimeImageDigest: applicationImageRuntimeDigest,
+        expectedImageSelectionMode: imageSelectionMode,
+        expectedMigrationManifestDigest: migrationIdentity.manifestDigest,
+      } : {}),
       expectedApplicationRepoDigests: Object.freeze([...expectedApplicationRepoDigests]),
+      expectedImagePlatform: imagePlatform,
       expectedMigrationAssetImageDigest,
-      expectedMigrationRuntimeImageDigest: migrationIdentity.configDigest,
+      expectedMigrationRuntimeImageDigest: migrationImageRuntimeDigest,
       fixtureSourceOverrides: Object.freeze({ ...fixtureSourceOverrides }),
-      inputReceipt: Object.freeze({
-        applicationImageConfigDigest: applicationIdentity.configDigest,
-        composeSourceSha256: prepared.composeSourceSha256,
-        applicationImageBindingContractSha256: applicationIdentity.contractSha256,
-        fixtureBindingContractSha256,
-        fixtureMountSubsetContractSha256,
-        fixtureSourceContractSha256: await fixtureHashContract(fixtureSourceOverrides),
-        generatedEnvironmentDirectorySha256: sha256(JSON.stringify(directoryIdentity)),
-        globalFixtureContractSha256: fixtureBefore.sha256,
-        migrationImageBindingContractSha256: migrationIdentity.contractSha256,
-        migrationImageConfigDigest: migrationIdentity.configDigest,
-        imageProbeOwnershipContractSha256: sha256(JSON.stringify({
-          initialApplication: applicationIdentity.probeOwnershipSha256,
-          initialMigration: migrationIdentity.probeOwnershipSha256,
-          launchApplication: probeOwnershipSha256(
-            contract.project,
-            "application",
-            probeNonces.launchApplication,
-          ),
-          launchMigration: probeOwnershipSha256(
-            contract.project,
-            "migration",
-            probeNonces.launchMigration,
-          ),
-        })),
-        projectSha256: sha256(contract.project),
-        roleEnvironmentContractSha256: generated.fileContractSha256,
-        roleEnvironmentPolicySha256: generated.policyContractSha256,
-        renderedComposeSha256: prepared.renderedComposeSha256,
-      }),
+      inputReceipt,
       prepared,
       probeNonces,
       repositoryRoot,
@@ -789,13 +900,17 @@ export async function prepareJourneyOwnedStackLaunch(handle) {
     runDocker: handle.runDocker,
   });
   await assertPreparedInputsUnchanged(handle, current);
-  const [applicationIdentity, migrationIdentity] = await Promise.all([
+  const identitySettlements = await Promise.allSettled([
     deriveJourneyApplicationImageConfigDigest({
       contract: handle.sourceContract,
       environment: handle.prepared.queryEnvironment,
       expectedApplicationAssetImageDigest: handle.expectedApplicationAssetImageDigest,
       expectedApplicationImageConfigDigest: handle.expectedApplicationImageConfigDigest,
+      ...(handle.expectedApplicationManifestDigest === undefined
+        ? {}
+        : { expectedApplicationManifestDigest: handle.expectedApplicationManifestDigest }),
       expectedApplicationRepoDigests: handle.expectedApplicationRepoDigests,
+      expectedImagePlatform: handle.expectedImagePlatform,
       probeNonce: handle.probeNonces.launchApplication,
       runDocker: handle.runDocker,
     }),
@@ -803,15 +918,40 @@ export async function prepareJourneyOwnedStackLaunch(handle) {
       contract: handle.sourceContract,
       environment: handle.prepared.queryEnvironment,
       expectedMigrationAssetImageDigest: handle.expectedMigrationAssetImageDigest,
+      expectedImagePlatform: handle.expectedImagePlatform,
+      ...(handle.expectedMigrationManifestDigest === undefined
+        ? {}
+        : { expectedMigrationManifestDigest: handle.expectedMigrationManifestDigest }),
       probeNonce: handle.probeNonces.launchMigration,
       runDocker: handle.runDocker,
     }),
   ]);
+  if (identitySettlements.some(({ status }) => status === "rejected")) {
+    fail("Both verifier-owned image rechecks must settle before cleanup.");
+  }
+  const identities = [];
+  for (const result of identitySettlements) {
+    if (result.status === "fulfilled") identities.push(result.value);
+  }
+  if (identities.length !== 2) fail("Verifier-owned image recheck ledger is incomplete.");
+  const [applicationIdentity, migrationIdentity] = identities;
+  const currentImageSelectionMode = assertCompatibleImageSelection(
+    applicationIdentity,
+    migrationIdentity,
+  );
   if (applicationIdentity.contractSha256
       !== handle.inputReceipt.applicationImageBindingContractSha256
     || migrationIdentity.contractSha256
       !== handle.inputReceipt.migrationImageBindingContractSha256
-    || migrationIdentity.configDigest !== handle.expectedMigrationRuntimeImageDigest
+    || runtimeImageDigestOf(applicationIdentity)
+      !== (handle.expectedApplicationRuntimeImageDigest
+        ?? handle.expectedApplicationImageConfigDigest)
+    || runtimeImageDigestOf(migrationIdentity) !== handle.expectedMigrationRuntimeImageDigest
+    || imageSelectionModeOf(applicationIdentity)
+      !== (handle.expectedImageSelectionMode ?? "classic-config")
+    || imageSelectionModeOf(migrationIdentity)
+      !== (handle.expectedImageSelectionMode ?? "classic-config")
+    || currentImageSelectionMode !== (handle.expectedImageSelectionMode ?? "classic-config")
     || handle.inputReceipt.imageProbeOwnershipContractSha256 !== sha256(JSON.stringify({
       initialApplication: probeOwnershipSha256(
         handle.sourceContract.project,
@@ -901,8 +1041,15 @@ export async function attestJourneyOwnedStack(handle) {
     contract: handle.contract,
     expectedApplicationAssetImageDigest: handle.expectedApplicationAssetImageDigest,
     expectedApplicationImageConfigDigest: handle.expectedApplicationImageConfigDigest,
+    ...(handle.expectedImageSelectionMode === undefined ? {} : {
+      expectedApplicationManifestDigest: handle.expectedApplicationManifestDigest,
+      expectedApplicationRuntimeImageDigest: handle.expectedApplicationRuntimeImageDigest,
+      expectedImageSelectionMode: handle.expectedImageSelectionMode,
+      expectedMigrationManifestDigest: handle.expectedMigrationManifestDigest,
+    }),
     expectedApplicationReference: handle.sourceContract.images.application,
     expectedApplicationRepoDigests: handle.expectedApplicationRepoDigests,
+    expectedImagePlatform: handle.expectedImagePlatform,
     expectedMigrationAssetImageDigest: handle.expectedMigrationAssetImageDigest,
     expectedMigrationReference: handle.sourceContract.images.migration,
     expectedMigrationRuntimeImageDigest: handle.expectedMigrationRuntimeImageDigest,
@@ -972,11 +1119,13 @@ export async function deriveJourneyApplicationImageConfigDigest({
   environment,
   expectedApplicationAssetImageDigest,
   expectedApplicationImageConfigDigest,
+  expectedApplicationManifestDigest = optionalInputValue,
   expectedApplicationRepoDigests,
+  expectedImagePlatform = optionalInputValue,
   probeNonce,
   runDocker,
 }) {
-  exactKeys(arguments[0], [
+  exactOptionalKeys(arguments[0], [
     "contract",
     "environment",
     "expectedApplicationAssetImageDigest",
@@ -984,13 +1133,17 @@ export async function deriveJourneyApplicationImageConfigDigest({
     "expectedApplicationRepoDigests",
     "probeNonce",
     "runDocker",
-  ]);
+  ], ["expectedApplicationManifestDigest", "expectedImagePlatform"]);
   return deriveJourneyImageConfigDigest({
     contract,
     environment,
     expectedAssetImageDigest: expectedApplicationAssetImageDigest,
     expectedConfigDigest: expectedApplicationImageConfigDigest,
+    expectedManifestDigest: expectedApplicationManifestDigest,
     expectedRepoDigests: expectedApplicationRepoDigests,
+    expectedImagePlatform: expectedImagePlatform === undefined
+      ? defaultImagePlatform
+      : expectedImagePlatform,
     probeNonce,
     role: "application",
     runDocker,
@@ -1001,18 +1154,24 @@ export async function deriveJourneyMigrationImageConfigDigest({
   contract,
   environment,
   expectedMigrationAssetImageDigest,
+  expectedMigrationManifestDigest = optionalInputValue,
+  expectedImagePlatform = optionalInputValue,
   probeNonce,
   runDocker,
 }) {
-  exactKeys(arguments[0], [
+  exactOptionalKeys(arguments[0], [
     "contract", "environment", "expectedMigrationAssetImageDigest", "probeNonce", "runDocker",
-  ]);
+  ], ["expectedImagePlatform", "expectedMigrationManifestDigest"]);
   return deriveJourneyImageConfigDigest({
     contract,
     environment,
     expectedAssetImageDigest: expectedMigrationAssetImageDigest,
     expectedConfigDigest: undefined,
+    expectedManifestDigest: expectedMigrationManifestDigest,
     expectedRepoDigests: [expectedMigrationAssetImageDigest],
+    expectedImagePlatform: expectedImagePlatform === undefined
+      ? defaultImagePlatform
+      : expectedImagePlatform,
     probeNonce,
     role: "migration",
     runDocker,
@@ -1024,7 +1183,9 @@ async function deriveJourneyImageConfigDigest({
   environment,
   expectedAssetImageDigest,
   expectedConfigDigest,
+  expectedManifestDigest,
   expectedRepoDigests,
+  expectedImagePlatform,
   probeNonce,
   role,
   runDocker,
@@ -1034,9 +1195,12 @@ async function deriveJourneyImageConfigDigest({
     || !/^[a-f0-9]{32}$/.test(probeNonce ?? "")
     || !/^sha256:[a-f0-9]{64}$/.test(expectedAssetImageDigest ?? "")
     || (expectedConfigDigest !== undefined
-      && !/^sha256:[a-f0-9]{64}$/.test(expectedConfigDigest))) {
+      && !/^sha256:[a-f0-9]{64}$/.test(expectedConfigDigest))
+    || (expectedManifestDigest !== undefined
+      && !/^sha256:[a-f0-9]{64}$/.test(expectedManifestDigest))) {
     fail("Verifier-owned image derivation input is invalid.");
   }
+  const imagePlatform = exactImagePlatform(expectedImagePlatform, `${role} expected image platform`);
   const repoDigests = exactDigestList(expectedRepoDigests, `${role} repository digest set`);
   if (!repoDigests.includes(expectedAssetImageDigest)) {
     fail("Verifier-owned image repository set omits its OCI root digest.");
@@ -1069,6 +1233,7 @@ async function deriveJourneyImageConfigDigest({
 
   let probeId;
   let probeIdentity;
+  let probeSelectionVerified = false;
   let derivationError;
   try {
     let created;
@@ -1119,30 +1284,47 @@ async function deriveJourneyImageConfigDigest({
       `${role} config probe`,
     );
     probeIdentity = assertImageConfigProbe(probe, {
+      expectedAssetImageDigest,
+      expectedManifestDigest,
+      expectedImagePlatform: imagePlatform,
       probeId,
       probeName,
       probeOwner,
       reference,
       role,
     });
-    if (expectedConfigDigest !== undefined
+    if (imageSelectionModeOf(probeIdentity) === "classic-config"
+      && expectedConfigDigest !== undefined
       && probeIdentity.configDigest !== expectedConfigDigest) {
       fail(`${role} probe selected a config outside its asset attestation.`);
     }
+    if (imageSelectionModeOf(probeIdentity) === containerdImageSelectionMode
+      && role === "application"
+      && (expectedConfigDigest === undefined
+        || expectedConfigDigest === expectedAssetImageDigest
+        || expectedConfigDigest === probeIdentity.manifestDigest)) {
+      fail("Application containerd config attestation is absent or aliases a runtime image digest.");
+    }
+    const selectedRuntimeImageDigest = runtimeImageDigestOf(probeIdentity);
     const selectedConfigInspection = parseSingleInspection(
         await runDocker([
-          "image", "inspect", probeIdentity.configDigest,
+          "image", "inspect", selectedRuntimeImageDigest,
         ], 512 * 1024, environment),
-        `${role} selected config image`,
+        `${role} selected runtime image`,
       );
-    if (selectedConfigInspection.Id !== probeIdentity.configDigest) {
-      fail(`${role} selected config inspection returned a different config ID.`);
+    if (selectedConfigInspection.Id !== selectedRuntimeImageDigest) {
+      fail(`${role} selected runtime inspection returned a different image ID.`);
     }
     assertAssetRootInspection(
       selectedConfigInspection,
       expectedAssetImageDigest,
       reference,
-      `${role} selected config image`,
+      `${role} selected runtime image`,
+      {
+        requireContainerdRootDescriptor: imageSelectionModeOf(probeIdentity)
+          === containerdImageSelectionMode,
+        selectedManifestDigest: probeIdentity.manifestDigest,
+      },
     );
     const referenceRecheck = parseSingleInspection(
         await runDocker(["image", "inspect", reference], 512 * 1024, environment),
@@ -1153,7 +1335,13 @@ async function deriveJourneyImageConfigDigest({
       expectedAssetImageDigest,
       reference,
       `${role} image reference recheck`,
+      {
+        requireContainerdRootDescriptor: imageSelectionModeOf(probeIdentity)
+          === containerdImageSelectionMode,
+        selectedManifestDigest: probeIdentity.manifestDigest,
+      },
     );
+    probeSelectionVerified = true;
   } catch (error) {
     derivationError = error;
   }
@@ -1164,13 +1352,24 @@ async function deriveJourneyImageConfigDigest({
         await runDocker(["container", "inspect", probeId], 256 * 1024, environment),
         `${role} config probe cleanup`,
       );
-      assertImageConfigProbe(current, {
+      const cleanupExpectation = {
+        expectedAssetImageDigest,
+        expectedManifestDigest,
+        expectedImagePlatform: imagePlatform,
         probeId,
         probeName,
         probeOwner,
         reference,
         role,
-      });
+      };
+      assertImageProbeOwnership(current, cleanupExpectation);
+      if (probeSelectionVerified) {
+        const currentIdentity = assertImageConfigProbe(current, cleanupExpectation);
+        if (selectionContractSha256(currentIdentity)
+            !== selectionContractSha256(probeIdentity)) {
+          fail(`${role} config probe selection changed before exact cleanup.`);
+        }
+      }
       const removed = splitLines(await runDocker([
         "container", "rm", probeId,
       ], 4 * 1024, environment));
@@ -1196,19 +1395,32 @@ async function deriveJourneyImageConfigDigest({
     throw derivationError;
   }
   if (cleanupError !== undefined) throw cleanupError;
-  if (probeIdentity === undefined) fail("Config probe did not yield a selected image config.");
-  const binding = {
-    assetImageDigest: expectedAssetImageDigest,
-    configDigest: probeIdentity.configDigest,
-    referenceSha256: sha256(reference),
-    repoDigests,
-    role,
-  };
+  if (probeIdentity === undefined) fail("Image probe did not yield one selected runtime identity.");
+  const binding = imageSelectionModeOf(probeIdentity) === "classic-config"
+    ? {
+      assetImageDigest: expectedAssetImageDigest,
+      configDigest: probeIdentity.configDigest,
+      referenceSha256: sha256(reference),
+      repoDigests,
+      role,
+    }
+    : {
+      assetImageDigest: expectedAssetImageDigest,
+      ...(expectedConfigDigest === undefined ? {} : { configDigest: expectedConfigDigest }),
+      imageSelectionMode: probeIdentity.imageSelectionMode,
+      manifestDigest: probeIdentity.manifestDigest,
+      referenceSha256: sha256(reference),
+      repoDigests,
+      role,
+      runtimeImageDigest: probeIdentity.runtimeImageDigest,
+    };
   return Object.freeze({
     ...binding,
     contractSha256: sha256(JSON.stringify(binding)),
     probeOwnershipSha256: sha256(probeOwner),
-    status: "verifier-owned-unstarted-config-probe-cleaned",
+    status: imageSelectionModeOf(probeIdentity) === "classic-config"
+      ? "verifier-owned-unstarted-config-probe-cleaned"
+      : "verifier-owned-unstarted-root-manifest-probe-cleaned",
   });
 }
 
@@ -1645,19 +1857,19 @@ function publicationPort(publication, host) {
   return match.groups.port;
 }
 
-function createImmutableLaunchContract(contract, applicationConfigDigest, migrationConfigDigest) {
+function createImmutableLaunchContract(contract, applicationRuntimeDigest, migrationRuntimeDigest) {
   if (!contract || typeof contract !== "object" || Array.isArray(contract)
-    || !/^sha256:[a-f0-9]{64}$/.test(applicationConfigDigest)
-    || !/^sha256:[a-f0-9]{64}$/.test(migrationConfigDigest)
-    || applicationConfigDigest === migrationConfigDigest) {
+    || !/^sha256:[a-f0-9]{64}$/.test(applicationRuntimeDigest)
+    || !/^sha256:[a-f0-9]{64}$/.test(migrationRuntimeDigest)
+    || applicationRuntimeDigest === migrationRuntimeDigest) {
     fail("Immutable launch contract image identities are invalid.");
   }
   return Object.freeze({
     ...contract,
     images: Object.freeze({
       ...contract.images,
-      application: applicationConfigDigest,
-      migration: migrationConfigDigest,
+      application: applicationRuntimeDigest,
+      migration: migrationRuntimeDigest,
     }),
   });
 }
@@ -1690,22 +1902,161 @@ function parseSingleInspection(value, label) {
 }
 
 function assertImageConfigProbe(probe, expected) {
-  const configDigest = probe?.Image;
+  const selectedImageDigest = assertImageProbeOwnership(probe, expected);
+  const descriptorPresent = Object.hasOwn(probe, "ImageManifestDescriptor");
+  if (!descriptorPresent) {
+    if (selectedImageDigest === expected.expectedAssetImageDigest
+      || (expected.role === "migration" && expected.expectedManifestDigest !== undefined)) {
+      fail(`${expected.role} OCI root selection has no exact platform manifest descriptor.`);
+    }
+    return Object.freeze({ configDigest: selectedImageDigest });
+  }
+  const manifestDescriptor = exactImageManifestDescriptor(
+    probe.ImageManifestDescriptor,
+    `${expected.role} config probe platform manifest`,
+    expected.expectedImagePlatform,
+  );
+  if (selectedImageDigest !== expected.expectedAssetImageDigest) {
+    fail(`${expected.role} containerd probe did not select its attested OCI root.`);
+  }
+  if (expected.role === "application" && expected.expectedManifestDigest === undefined) {
+    fail("Application containerd selection is not bound to its asset manifest attestation.");
+  }
+  if (expected.expectedManifestDigest !== undefined
+    && manifestDescriptor.digest !== expected.expectedManifestDigest) {
+    fail(`${expected.role} containerd platform manifest differs from its expected digest.`);
+  }
+  return Object.freeze({
+    imageSelectionMode: containerdImageSelectionMode,
+    manifestDigest: manifestDescriptor.digest,
+    runtimeImageDigest: selectedImageDigest,
+  });
+}
+
+function assertImageProbeOwnership(probe, expected) {
+  const selectedImageDigest = probe?.Image;
   if (probe?.Id !== expected.probeId
     || probe?.Name !== `/${expected.probeName}`
     || probe?.Config?.Image !== expected.reference
     || probe?.Config?.Labels?.["io.clean-pay.verifier-probe"] !== expected.probeOwner
     || JSON.stringify(probe?.Config?.Entrypoint) !== JSON.stringify(["/bin/true"])
-    || !/^sha256:[a-f0-9]{64}$/.test(configDigest ?? "")
+    || !/^sha256:[a-f0-9]{64}$/.test(selectedImageDigest ?? "")
     || probe?.State?.Status !== "created"
     || probe?.State?.Running !== false
     || Number(probe?.RestartCount ?? 0) !== 0) {
     fail(`${expected.role} config probe ownership, state, or selected config is invalid.`);
   }
-  return Object.freeze({ configDigest });
+  return selectedImageDigest;
 }
 
-function assertAssetRootInspection(inspection, expectedDigest, reference, label) {
+function exactImageManifestDescriptor(value, label, expectedPlatform) {
+  const platform = exactImagePlatform(expectedPlatform, `${label} expected platform`);
+  const observedPlatformKeys = Object.keys(value?.platform ?? {}).sort();
+  const platformKeysValid = JSON.stringify(observedPlatformKeys)
+      === JSON.stringify(["architecture", "os"])
+    || JSON.stringify(observedPlatformKeys)
+      === JSON.stringify(["architecture", "os", "variant"]);
+  if (!value || typeof value !== "object" || Array.isArray(value)
+    || JSON.stringify(Object.keys(value).sort())
+      !== JSON.stringify(["digest", "mediaType", "platform", "size"])
+    || !platformImageManifestMediaTypes.has(value.mediaType)
+    || !/^sha256:[a-f0-9]{64}$/.test(value.digest ?? "")
+    || !Number.isSafeInteger(value.size) || value.size < 1 || value.size > 16 * 1024 * 1024
+    || !value.platform || typeof value.platform !== "object" || Array.isArray(value.platform)
+    || !platformKeysValid
+    || value.platform.architecture !== platform.architecture
+    || value.platform.os !== platform.os
+    || (value.platform.variant !== undefined
+      && (platform.architecture !== "arm64" || value.platform.variant !== "v8"))) {
+    fail(`${label} is invalid.`);
+  }
+  return Object.freeze({
+    digest: value.digest,
+    mediaType: value.mediaType,
+    platform,
+    size: value.size,
+  });
+}
+
+function imageSelectionModeOf(identity) {
+  if (identity?.imageSelectionMode === containerdImageSelectionMode) {
+    return containerdImageSelectionMode;
+  }
+  if (/^sha256:[a-f0-9]{64}$/.test(identity?.configDigest ?? "")) {
+    return "classic-config";
+  }
+  fail("Verifier-owned image selection mode is invalid.");
+}
+
+function assertCompatibleImageSelection(applicationIdentity, migrationIdentity) {
+  const mode = imageSelectionModeOf(applicationIdentity);
+  if (mode !== imageSelectionModeOf(migrationIdentity)) {
+    fail("Application and migration images use different Docker selection modes.");
+  }
+  if (mode === "classic-config") return mode;
+  if (!applicationIdentity.repoDigests.includes(applicationIdentity.manifestDigest)) {
+    fail("Application repository digest set omits its selected platform manifest.");
+  }
+  if (applicationIdentity.configDigest === applicationIdentity.assetImageDigest
+    || applicationIdentity.configDigest === applicationIdentity.manifestDigest) {
+    fail("Application containerd config attestation aliases a runtime image digest.");
+  }
+  const applicationIdentities = new Set([
+    applicationIdentity.assetImageDigest,
+    applicationIdentity.configDigest,
+    applicationIdentity.manifestDigest,
+  ]);
+  if ([migrationIdentity.assetImageDigest, migrationIdentity.manifestDigest]
+    .some((digest) => applicationIdentities.has(digest))) {
+    fail("Application and migration containerd image identities overlap.");
+  }
+  return mode;
+}
+
+function exactImagePlatform(value, label) {
+  if (!value || typeof value !== "object" || Array.isArray(value)
+    || JSON.stringify(Object.keys(value).sort())
+      !== JSON.stringify(["architecture", "os"])
+    || value.os !== "linux"
+    || !new Set(["amd64", "arm64"]).has(value.architecture)) {
+    fail(`${label} is invalid.`);
+  }
+  return Object.freeze({ architecture: value.architecture, os: value.os });
+}
+
+function runtimeImageDigestOf(identity) {
+  const mode = imageSelectionModeOf(identity);
+  const digest = mode === "classic-config"
+    ? identity.configDigest
+    : identity.runtimeImageDigest;
+  if (!/^sha256:[a-f0-9]{64}$/.test(digest ?? "")) {
+    fail("Verifier-owned runtime image digest is invalid.");
+  }
+  return digest;
+}
+
+function selectionContractSha256(identity) {
+  const mode = imageSelectionModeOf(identity);
+  return sha256(JSON.stringify(mode === "classic-config" ? {
+    configDigest: identity.configDigest,
+    imageSelectionMode: mode,
+  } : {
+    imageSelectionMode: mode,
+    manifestDigest: identity.manifestDigest,
+    runtimeImageDigest: identity.runtimeImageDigest,
+  }));
+}
+
+function assertAssetRootInspection(
+  inspection,
+  expectedDigest,
+  reference,
+  label,
+  {
+    requireContainerdRootDescriptor = false,
+    selectedManifestDigest = undefined,
+  } = {},
+) {
   const descriptorAvailable = inspection?.Descriptor !== undefined
     && inspection.Descriptor !== null;
   const descriptorDigest = descriptorAvailable ? inspection.Descriptor?.digest : undefined;
@@ -1715,6 +2066,20 @@ function assertAssetRootInspection(inspection, expectedDigest, reference, label)
       || !/^sha256:[a-f0-9]{64}$/.test(descriptorDigest ?? "")
       || descriptorDigest !== expectedDigest)) {
     fail(`${label} authoritative OCI root descriptor differs from its attested root digest.`);
+  }
+  if (requireContainerdRootDescriptor
+    && (!descriptorAvailable
+      || !rootImageManifestMediaTypes.has(inspection.Descriptor.mediaType)
+      || !Number.isSafeInteger(inspection.Descriptor.size)
+      || inspection.Descriptor.size < 1
+      || inspection.Descriptor.size > 16 * 1024 * 1024)) {
+    fail(`${label} authoritative OCI root descriptor metadata is invalid.`);
+  }
+  if (requireContainerdRootDescriptor
+    && (!/^sha256:[a-f0-9]{64}$/.test(selectedManifestDigest ?? "")
+      || (platformImageManifestMediaTypes.has(inspection.Descriptor.mediaType)
+        && selectedManifestDigest !== expectedDigest))) {
+    fail(`${label} authoritative single-manifest OCI root has a different selected manifest.`);
   }
   if (!Array.isArray(inspection?.RepoDigests ?? [])) {
     fail(`${label} repository digest set is invalid.`);
@@ -1775,6 +2140,16 @@ function exactDigestList(value, label) {
 function exactKeys(value, keys) {
   if (!value || typeof value !== "object" || Array.isArray(value)
     || JSON.stringify(Object.keys(value).sort()) !== JSON.stringify([...keys].sort())) {
+    fail("Owned journey stack input keys are not exact.");
+  }
+}
+
+function exactOptionalKeys(value, requiredKeys, optionalKeys) {
+  if (!value || typeof value !== "object" || Array.isArray(value)
+    || requiredKeys.some((name) => !Object.hasOwn(value, name))
+    || Object.keys(value).some((name) => (
+      !requiredKeys.includes(name) && !optionalKeys.includes(name)
+    ))) {
     fail("Owned journey stack input keys are not exact.");
   }
 }

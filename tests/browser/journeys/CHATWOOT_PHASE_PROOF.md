@@ -39,6 +39,21 @@ identities, OCI revisions, generated role environments, and the live read-only
 bytes of every fixture mount. Any shared project, network, publication,
 resolver address, container, environment directory, prior report binding, or
 unexpected same-host browser route fails closed before reset or capture.
+Image identity has two exact, non-interchangeable representations. The legacy
+Docker graph-driver branch remains byte-for-byte `classic-config`: the runtime
+application and migration digests are their selected config digests and the
+legacy receipt, runtime, report, and binding-hash shapes are unchanged. The
+containerd image-store branch is explicitly `containerd-root-manifest`: the
+runtime digest is the attested OCI root, the selected attested linux/amd64 or
+linux/arm64 manifest is recorded separately (`variant: v8` is the only optional
+arm64 variant), and the application config remains independently bound to
+the production asset attestation. Because Docker does not expose a trustworthy
+migration config digest in this branch, the containerd migration report and
+receipt omit `migrationImageConfigDigest`/`configDigest` instead of relabelling
+the OCI root as a config. Exact `oneOf` schema branches reject extra legacy
+config fields, missing manifests, wrong roots, or any mixed selection mode.
+All six A/B stacks must use the same attested platform, and a single-manifest
+OCI root must have the same digest as its selected platform manifest.
 The immutable pre-start receipt and live runtime binding also carry the exact
 Compose source/rendered model, fixture-mount bytes, one-shot lifecycle,
 role-environment contract and policy, generated directory, project, network,

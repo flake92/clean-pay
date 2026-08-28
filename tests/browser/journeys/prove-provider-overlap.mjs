@@ -48,6 +48,9 @@ import {
   assertJourneyStackContract,
   assertLoopbackControlUrl,
   assertLoopbackResolver,
+  assertProviderOverlapClassicImageDescriptor,
+  assertProviderOverlapContainerdImageDescriptorChain,
+  assertProviderOverlapImagePlatformParity,
   createDualProviderOverlapProof,
   createProviderOverlapStackReport,
   extractProviderOverlapProof,
@@ -202,6 +205,7 @@ async function readStackInput(role) {
     32 * 1024 * 1024,
     `${role} production image asset attestation`,
   );
+  const expectedPlatform = Object.freeze(parseAssetPlatform(assetAttestationDocument));
   const assetAttestation = validateProductionImageAssetAttestation(
     assetAttestationDocument,
     {
@@ -210,7 +214,7 @@ async function readStackInput(role) {
         sha256: contract.fixtureContract.sha256,
       },
       imageDigest: expectedAssetImageDigest,
-      platform: parseAssetPlatform(assetAttestationDocument),
+      platform: expectedPlatform,
       publicBuildContract: contract.publicBuildContract,
       revision: contract.revision,
     },
@@ -223,10 +227,12 @@ async function readStackInput(role) {
     resolverIp,
     expectedAssetImageDigest,
     expectedApplicationImageConfigDigest: assetAttestation.source.configDigest,
+    expectedApplicationManifestDigest: assetAttestation.source.manifestDigest,
     expectedApplicationRepoDigests: Object.freeze([...new Set([
       assetAttestation.source.imageDigest,
       assetAttestation.source.manifestDigest,
     ])].sort()),
+    expectedPlatform,
     expectedMigrationAssetImageDigest,
     assetAttestationPath,
     staticAssetContract: createProviderOverlapStaticAssetContract(assetAttestation),
@@ -740,21 +746,28 @@ async function preflightStack(
   assertNoPublishedPorts(containers["browser-oidc-mock"], input.role);
   assertNoPublishedPorts(containers["browser-db-observer"], input.role);
 
+  const launchImages = inputReceipt.imageSelectionMode === "containerd-root-manifest"
+    ? {
+      application: inputReceipt.applicationImageRuntimeDigest,
+      migration: inputReceipt.migrationImageRuntimeDigest,
+    }
+    : {
+      application: inputReceipt.applicationImageConfigDigest,
+      migration: inputReceipt.migrationImageConfigDigest,
+    };
   const syntheticEnvironmentContractSha256 = await assertSyntheticApplicationEnvironment(
     containers.app.Config.Env,
     input.contract,
     input.role,
     input.contractPath,
-    {
-      application: inputReceipt.applicationImageConfigDigest,
-      migration: inputReceipt.migrationImageConfigDigest,
-    },
+    launchImages,
   );
   const imageIdentity = assertApplicationImageIdentity(
     await inspectRunningApplicationImage(
       input.contract,
       containers.app,
       input.staticAssetContract,
+      input.expectedPlatform,
     ),
     input.contract,
     {
@@ -807,7 +820,7 @@ async function preflightStack(
 }
 
 function assertOwnedInputReceipt(runtime, receipt, role, project, fixtureContractSha256) {
-  const expectedKeys = [
+  const legacyKeys = [
     "applicationImageConfigDigest",
     "applicationImageBindingContractSha256",
     "composeSourceSha256",
@@ -824,6 +837,39 @@ function assertOwnedInputReceipt(runtime, receipt, role, project, fixtureContrac
     "roleEnvironmentContractSha256",
     "roleEnvironmentPolicySha256",
   ];
+  const containerdKeys = [
+    "applicationImageBindingContractSha256",
+    "applicationImageConfigDigest",
+    "applicationImageManifestDigest",
+    "applicationImageRuntimeDigest",
+    "composeSourceSha256",
+    "fixtureBindingContractSha256",
+    "fixtureMountSubsetContractSha256",
+    "fixtureSourceContractSha256",
+    "generatedEnvironmentDirectorySha256",
+    "globalFixtureContractSha256",
+    "imageProbeOwnershipContractSha256",
+    "imageSelectionMode",
+    "migrationImageBindingContractSha256",
+    "migrationImageManifestDigest",
+    "migrationImageRuntimeDigest",
+    "projectSha256",
+    "renderedComposeSha256",
+    "roleEnvironmentContractSha256",
+    "roleEnvironmentPolicySha256",
+  ];
+  const containerd = receipt?.imageSelectionMode === "containerd-root-manifest";
+  const expectedKeys = containerd ? containerdKeys : legacyKeys;
+  const runtimeIdentityMatches = containerd
+    ? runtime.imageSelectionMode === "containerd-root-manifest"
+      && receipt.applicationImageRuntimeDigest === runtime.applicationRuntimeImageDigest
+      && receipt.applicationImageManifestDigest === runtime.applicationManifestDigest
+      && receipt.migrationImageRuntimeDigest === runtime.migrationRuntimeImageDigest
+      && receipt.migrationImageManifestDigest === runtime.migrationManifestDigest
+    : receipt?.imageSelectionMode === undefined
+      && runtime.imageSelectionMode === undefined
+      && receipt.applicationImageConfigDigest === runtime.applicationRuntimeImageDigest
+      && receipt.migrationImageConfigDigest === runtime.migrationRuntimeImageDigest;
   if (!receipt || typeof receipt !== "object" || Array.isArray(receipt)
     || JSON.stringify(Object.keys(receipt).sort()) !== JSON.stringify(expectedKeys.sort())
     || receipt.composeSourceSha256 !== runtime.composeSourceSha256
@@ -839,8 +885,7 @@ function assertOwnedInputReceipt(runtime, receipt, role, project, fixtureContrac
       !== runtime.syntheticRoleEnvironmentContractSha256
     || receipt.roleEnvironmentPolicySha256
       !== runtime.syntheticRoleEnvironmentPolicySha256
-    || receipt.applicationImageConfigDigest !== runtime.applicationRuntimeImageDigest
-    || receipt.migrationImageConfigDigest !== runtime.migrationRuntimeImageDigest
+    || !runtimeIdentityMatches
     || receipt.applicationImageBindingContractSha256
       !== runtime.applicationImageBindingContractSha256
     || receipt.migrationImageBindingContractSha256
@@ -935,6 +980,10 @@ function assertOwnedPairLaunchReceipt(receipt, role, project, inputReceipt) {
 }
 
 function assertDualPreflight(baseline, candidate) {
+  if (normalizedApplicationImageSelectionMode(baseline.imageIdentity, "baseline")
+    !== normalizedApplicationImageSelectionMode(candidate.imageIdentity, "candidate")) {
+    throw new Error("Dual provider proof application image selection modes differ.");
+  }
   for (const name of [
     "applicationImageBindingContractSha256",
     "composeRuntimeContractSha256",
@@ -968,6 +1017,14 @@ function assertDualPreflight(baseline, candidate) {
   ) {
     throw new Error("Dual provider proof live fixture and synthetic environment contracts differ.");
   }
+}
+
+function normalizedApplicationImageSelectionMode(identity, label) {
+  if (identity?.imageSelectionMode === undefined) return "classic-config";
+  if (identity.imageSelectionMode !== "containerd-root-manifest") {
+    throw new Error(`${label} application image selection mode is invalid.`);
+  }
+  return identity.imageSelectionMode;
 }
 
 async function inspectProjectService(project, service) {
@@ -1182,7 +1239,12 @@ function assertRequiredEnvironmentProjection(environment, expected, label) {
   }
 }
 
-async function inspectRunningApplicationImage(contract, appContainer, assetIdentity) {
+async function inspectRunningApplicationImage(
+  contract,
+  appContainer,
+  assetIdentity,
+  expectedPlatform,
+) {
   const inspected = parseJson(
     Buffer.from(await docker([
       "image", "inspect", appContainer.Image,
@@ -1198,9 +1260,30 @@ async function inspectRunningApplicationImage(contract, appContainer, assetIdent
     throw new Error("Application container labels are invalid.");
   }
   const runtimeImageDigest = appContainer.Image;
-  if (runtimeImageDigest !== assetIdentity.configDigest
-    || localImage.Id !== assetIdentity.configDigest) {
-    throw new Error("Running container and referenced local image digests differ.");
+  const classic = runtimeImageDigest === assetIdentity.configDigest
+    && localImage.Id === assetIdentity.configDigest
+    && !Object.hasOwn(appContainer, "ImageManifestDescriptor");
+  const containerd = runtimeImageDigest === assetIdentity.imageDigest
+    && localImage.Id === assetIdentity.imageDigest;
+  if (!classic && !containerd) {
+    throw new Error("Running container and referenced local image identities are incoherent.");
+  }
+  if (classic && Object.hasOwn(localImage, "Descriptor")) {
+    assertProviderOverlapClassicImageDescriptor(
+      localImage.Descriptor,
+      assetIdentity.imageDigest,
+      "running application",
+    );
+  }
+  if (containerd) {
+    assertProviderOverlapContainerdImageDescriptorChain(
+      localImage.Descriptor,
+      appContainer.ImageManifestDescriptor,
+      assetIdentity.imageDigest,
+      assetIdentity.manifestDigest,
+      expectedPlatform,
+      "running application",
+    );
   }
   const expectedRepoDigests = new Set([
     assetIdentity.imageDigest,
@@ -1229,6 +1312,7 @@ async function inspectRunningApplicationImage(contract, appContainer, assetIdent
   return {
     assetImageDigest: assetIdentity.imageDigest,
     configDigest: assetIdentity.configDigest,
+    ...(containerd ? { imageSelectionMode: "containerd-root-manifest" } : {}),
     manifestDigest: assetIdentity.manifestDigest,
     reference: contract.images.application,
     repoDigestContractSha256: sha256(JSON.stringify(normalizedRepoDigests)),
@@ -1616,6 +1700,10 @@ async function settleEvidence(promise) {
 }
 
 function assertDistinctStackInputs(baseline, candidate) {
+  assertProviderOverlapImagePlatformParity(
+    baseline.expectedPlatform,
+    candidate.expectedPlatform,
+  );
   const baselinePublications = Object.values(baseline.contract.publications);
   const candidatePublications = Object.values(candidate.contract.publications);
   if (
@@ -1680,7 +1768,9 @@ function ownedStackInput(input) {
     contract: input.contract,
     expectedApplicationAssetImageDigest: input.expectedAssetImageDigest,
     expectedApplicationImageConfigDigest: input.expectedApplicationImageConfigDigest,
+    expectedApplicationManifestDigest: input.expectedApplicationManifestDigest,
     expectedApplicationRepoDigests: input.expectedApplicationRepoDigests,
+    expectedImagePlatform: input.expectedPlatform,
     expectedMigrationAssetImageDigest: input.expectedMigrationAssetImageDigest,
     runDocker: docker,
   };

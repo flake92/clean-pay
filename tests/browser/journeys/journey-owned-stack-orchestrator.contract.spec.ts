@@ -1,4 +1,5 @@
 import { EventEmitter } from "node:events";
+import { createHash } from "node:crypto";
 import {
   chmod,
   lstat,
@@ -28,6 +29,7 @@ import {
   dispatchJourneyOwnedStackPair,
   enforceJourneySyntheticPrivateMode,
   JOURNEY_SYNTHETIC_CONFIDENTIALITY_CONTRACT,
+  journeyDockerCliEnvironment,
   prepareJourneyOwnedStackLaunch,
   prepareJourneyOwnedStack,
   runJourneyDockerCommand,
@@ -93,6 +95,28 @@ test("is import-safe and refuses a non-isolated pair before its first Docker que
     async () => undefined,
   )).rejects.toThrow(/not isolated/);
   expect(dockerCalls).toBe(0);
+});
+
+test("keeps the Docker child environment deny-by-default while exposing Windows CLI roots", () => {
+  const environment = journeyDockerCliEnvironment({
+    COMPOSE_FILE: "forbidden-compose.yml",
+    DOCKER_API_VERSION: "1.52",
+    PATH: "C:\\synthetic\\bin",
+    ProgramFiles: "C:\\Program Files",
+    ProgramW6432: "C:\\Program Files",
+    TOKEN_SHADOW: "forbidden",
+    USERPROFILE: "C:\\Users\\Synthetic",
+  });
+  expect(Object.getPrototypeOf(environment)).toBeNull();
+  expect({ ...environment }).toEqual({
+    PATH: "C:\\synthetic\\bin",
+    ProgramFiles: "C:\\Program Files",
+    ProgramW6432: "C:\\Program Files",
+    USERPROFILE: "C:\\Users\\Synthetic",
+  });
+  expect(environment.COMPOSE_FILE).toBeUndefined();
+  expect(environment.DOCKER_API_VERSION).toBeUndefined();
+  expect(environment.TOKEN_SHADOW).toBeUndefined();
 });
 
 test("removes its exact temporary snapshot after directory identity setup fails", async () => {
@@ -370,6 +394,325 @@ test("derives a migration config through an unstarted owned probe and removes it
     .toBe(true);
 });
 
+test("preserves the exact classic config binding shape and digest contract", async () => {
+  const contract = ownedContract("baseline");
+  const assetImageDigest = `sha256:${"2".repeat(64)}`;
+  const configDigest = `sha256:${"3".repeat(64)}`;
+  const probeNonce = "7".repeat(32);
+  const docker = createOwnedDockerMock(contract, assetImageDigest, configDigest);
+  const binding = {
+    assetImageDigest,
+    configDigest,
+    referenceSha256: testSha256(contract.images.migration),
+    repoDigests: [assetImageDigest],
+    role: "migration",
+  };
+  const expected = {
+    ...binding,
+    contractSha256: testSha256(JSON.stringify(binding)),
+    probeOwnershipSha256: testSha256(
+      `${testSha256(contract.project)}:migration:${probeNonce}`,
+    ),
+    status: "verifier-owned-unstarted-config-probe-cleaned",
+  };
+  const identity = await deriveJourneyMigrationImageConfigDigest({
+    contract,
+    environment: {},
+    expectedMigrationAssetImageDigest: assetImageDigest,
+    probeNonce,
+    runDocker: docker.run,
+  });
+  expect(identity).toEqual(expected);
+  expect(JSON.stringify(identity)).toBe(JSON.stringify(expected));
+  expect(docker.activeProbeCount).toBe(0);
+});
+
+test("binds containerd root plus platform manifest without inspecting child digests", async () => {
+  const contract = ownedContract("baseline");
+  const applicationAssetImageDigest = `sha256:${"a".repeat(64)}`;
+  const applicationConfigDigest = `sha256:${"4".repeat(64)}`;
+  const applicationManifestDigest = `sha256:${"b".repeat(64)}`;
+  const migrationAssetImageDigest = `sha256:${"2".repeat(64)}`;
+  const migrationConfigDigest = `sha256:${"3".repeat(64)}`;
+  const migrationManifestDigest = `sha256:${"5".repeat(64)}`;
+  const docker = createOwnedDockerMock(
+    contract,
+    migrationAssetImageDigest,
+    migrationConfigDigest,
+    {
+      applicationManifestDigest,
+      applicationManifestMediaType:
+        "application/vnd.docker.distribution.manifest.v2+json",
+      migrationManifestDigest,
+      mode: "containerd",
+    },
+  );
+  const application = await deriveJourneyApplicationImageConfigDigest({
+    contract,
+    environment: {},
+    expectedApplicationAssetImageDigest: applicationAssetImageDigest,
+    expectedApplicationImageConfigDigest: applicationConfigDigest,
+    expectedApplicationManifestDigest: applicationManifestDigest,
+    expectedApplicationRepoDigests: [
+      applicationAssetImageDigest,
+      applicationManifestDigest,
+    ],
+    probeNonce: "8".repeat(32),
+    runDocker: docker.run,
+  });
+  const migration = await deriveJourneyMigrationImageConfigDigest({
+    contract,
+    environment: {},
+    expectedMigrationAssetImageDigest: migrationAssetImageDigest,
+    probeNonce: "9".repeat(32),
+    runDocker: docker.run,
+  });
+  expect(application).toMatchObject({
+    assetImageDigest: applicationAssetImageDigest,
+    configDigest: applicationConfigDigest,
+    imageSelectionMode: "containerd-root-manifest",
+    manifestDigest: applicationManifestDigest,
+    runtimeImageDigest: applicationAssetImageDigest,
+    status: "verifier-owned-unstarted-root-manifest-probe-cleaned",
+  });
+  expect(migration).toMatchObject({
+    assetImageDigest: migrationAssetImageDigest,
+    imageSelectionMode: "containerd-root-manifest",
+    manifestDigest: migrationManifestDigest,
+    runtimeImageDigest: migrationAssetImageDigest,
+    status: "verifier-owned-unstarted-root-manifest-probe-cleaned",
+  });
+  expect(Object.hasOwn(migration, "configDigest")).toBe(false);
+  const imageInspectionTargets = docker.calls
+    .filter((args) => args.slice(0, 2).join(" ") === "image inspect")
+    .map((args) => args[2]);
+  expect(imageInspectionTargets).not.toContain(applicationConfigDigest);
+  expect(imageInspectionTargets).not.toContain(applicationManifestDigest);
+  expect(imageInspectionTargets).not.toContain(migrationConfigDigest);
+  expect(imageInspectionTargets).not.toContain(migrationManifestDigest);
+  expect(docker.activeProbeCount).toBe(0);
+});
+
+test("binds a containerd single-manifest root only to the same selected digest", async () => {
+  const contract = ownedContract("baseline");
+  const applicationRoot = `sha256:${"a".repeat(64)}`;
+  const applicationConfig = `sha256:${"4".repeat(64)}`;
+  const docker = createOwnedDockerMock(
+    contract,
+    `sha256:${"2".repeat(64)}`,
+    `sha256:${"3".repeat(64)}`,
+    {
+      applicationManifestDigest: applicationRoot,
+      applicationRootMediaType: "application/vnd.oci.image.manifest.v1+json",
+      mode: "containerd",
+    },
+  );
+  const identity = await deriveJourneyApplicationImageConfigDigest({
+    contract,
+    environment: {},
+    expectedApplicationAssetImageDigest: applicationRoot,
+    expectedApplicationImageConfigDigest: applicationConfig,
+    expectedApplicationManifestDigest: applicationRoot,
+    expectedApplicationRepoDigests: [applicationRoot],
+    probeNonce: "d".repeat(32),
+    runDocker: docker.run,
+  });
+  expect(identity).toMatchObject({
+    assetImageDigest: applicationRoot,
+    configDigest: applicationConfig,
+    manifestDigest: applicationRoot,
+    runtimeImageDigest: applicationRoot,
+  });
+  expect(docker.activeProbeCount).toBe(0);
+});
+
+test("rejects a containerd single-manifest root with a different selected manifest", async () => {
+  const contract = ownedContract("baseline");
+  const applicationRoot = `sha256:${"a".repeat(64)}`;
+  const applicationManifest = `sha256:${"b".repeat(64)}`;
+  const docker = createOwnedDockerMock(
+    contract,
+    `sha256:${"2".repeat(64)}`,
+    `sha256:${"3".repeat(64)}`,
+    {
+      applicationManifestDigest: applicationManifest,
+      applicationRootMediaType: "application/vnd.oci.image.manifest.v1+json",
+      mode: "containerd",
+    },
+  );
+  await expect(deriveJourneyApplicationImageConfigDigest({
+    contract,
+    environment: {},
+    expectedApplicationAssetImageDigest: applicationRoot,
+    expectedApplicationImageConfigDigest: `sha256:${"4".repeat(64)}`,
+    expectedApplicationManifestDigest: applicationManifest,
+    expectedApplicationRepoDigests: [applicationRoot, applicationManifest],
+    probeNonce: "e".repeat(32),
+    runDocker: docker.run,
+  })).rejects.toThrow(/single-manifest/);
+  expect(docker.activeProbeCount).toBe(0);
+});
+
+test("binds containerd descriptors to an attested linux arm64 platform", async () => {
+  const contract = ownedContract("baseline");
+  const applicationRoot = `sha256:${"a".repeat(64)}`;
+  const applicationManifest = `sha256:${"b".repeat(64)}`;
+  const docker = createOwnedDockerMock(
+    contract,
+    `sha256:${"2".repeat(64)}`,
+    `sha256:${"3".repeat(64)}`,
+    {
+      applicationManifestDigest: applicationManifest,
+      imagePlatformArchitecture: "arm64",
+      mode: "containerd",
+    },
+  );
+  await expect(deriveJourneyApplicationImageConfigDigest({
+    contract,
+    environment: {},
+    expectedApplicationAssetImageDigest: applicationRoot,
+    expectedApplicationImageConfigDigest: `sha256:${"4".repeat(64)}`,
+    expectedApplicationManifestDigest: applicationManifest,
+    expectedApplicationRepoDigests: [applicationRoot, applicationManifest],
+    expectedImagePlatform: { architecture: "arm64", os: "linux" },
+    probeNonce: "f".repeat(32),
+    runDocker: docker.run,
+  })).resolves.toMatchObject({ manifestDigest: applicationManifest });
+  expect(docker.activeProbeCount).toBe(0);
+});
+
+test("rejects an explicit null image platform before the first Docker query", async () => {
+  const contract = ownedContract("baseline");
+  const docker = createOwnedDockerMock(
+    contract,
+    `sha256:${"2".repeat(64)}`,
+    `sha256:${"3".repeat(64)}`,
+  );
+  await expect(deriveJourneyApplicationImageConfigDigest({
+    contract,
+    environment: {},
+    expectedApplicationAssetImageDigest: `sha256:${"a".repeat(64)}`,
+    expectedApplicationImageConfigDigest: `sha256:${"4".repeat(64)}`,
+    expectedApplicationRepoDigests: [`sha256:${"a".repeat(64)}`],
+    expectedImagePlatform: null,
+    probeNonce: "0".repeat(32),
+    runDocker: docker.run,
+  })).rejects.toThrow(/expected image platform/);
+  expect(docker.calls).toEqual([]);
+});
+
+test("rejects malformed or unattested containerd descriptors and still removes its probe", async () => {
+  const mutations: Array<[string, (probe: Record<string, unknown>) => void]> = [
+    ["absent", (probe) => { delete probe.ImageManifestDescriptor; }],
+    ["present null", (probe) => { probe.ImageManifestDescriptor = null; }],
+    ["extra field", (probe) => {
+      (probe.ImageManifestDescriptor as Record<string, unknown>).unexpected = true;
+    }],
+    ["media type", (probe) => {
+      (probe.ImageManifestDescriptor as Record<string, unknown>).mediaType = "text/plain";
+    }],
+    ["size", (probe) => {
+      (probe.ImageManifestDescriptor as Record<string, unknown>).size = 0;
+    }],
+    ["platform", (probe) => {
+      const descriptor = probe.ImageManifestDescriptor as Record<string, unknown>;
+      (descriptor.platform as Record<string, unknown>).architecture = "arm64";
+    }],
+    ["digest", (probe) => {
+      (probe.ImageManifestDescriptor as Record<string, unknown>).digest =
+        `sha256:${"f".repeat(64)}`;
+    }],
+  ];
+  for (const [label, mutate] of mutations) {
+    const contract = ownedContract("baseline");
+    const assetDigest = `sha256:${"a".repeat(64)}`;
+    const configDigest = `sha256:${"4".repeat(64)}`;
+    const manifestDigest = `sha256:${"b".repeat(64)}`;
+    const docker = createOwnedDockerMock(
+      contract,
+      `sha256:${"2".repeat(64)}`,
+      `sha256:${"3".repeat(64)}`,
+      { mode: "containerd", applicationManifestDigest: manifestDigest },
+    );
+    let injected = false;
+    const run = async (
+      args: string[],
+      maximumBytes?: number,
+      environment: Record<string, string> = {},
+    ) => {
+      const output = await docker.run(args, maximumBytes, environment);
+      if (!injected && args[0] === "container" && args[1] === "inspect") {
+        injected = true;
+        const [probe] = JSON.parse(output) as [Record<string, unknown>];
+        mutate(probe);
+        return JSON.stringify([probe]);
+      }
+      return output;
+    };
+    await expect(deriveJourneyApplicationImageConfigDigest({
+      contract,
+      environment: {},
+      expectedApplicationAssetImageDigest: assetDigest,
+      expectedApplicationImageConfigDigest: configDigest,
+      expectedApplicationManifestDigest: manifestDigest,
+      expectedApplicationRepoDigests: [assetDigest, manifestDigest],
+      probeNonce: "a".repeat(32),
+      runDocker: run,
+    }), label).rejects.toThrow(/manifest|OCI root selection/);
+    expect(docker.activeProbeCount, label).toBe(0);
+    expect(docker.calls.some((args) => args.slice(0, 2).join(" ") === "container rm"), label)
+      .toBe(true);
+  }
+});
+
+test("requires an app attestation whenever containerd exposes a platform manifest", async () => {
+  const contract = ownedContract("baseline");
+  const assetDigest = `sha256:${"a".repeat(64)}`;
+  const configDigest = `sha256:${"4".repeat(64)}`;
+  const manifestDigest = `sha256:${"b".repeat(64)}`;
+  const docker = createOwnedDockerMock(
+    contract,
+    `sha256:${"2".repeat(64)}`,
+    `sha256:${"3".repeat(64)}`,
+    { mode: "containerd", applicationManifestDigest: manifestDigest },
+  );
+  await expect(deriveJourneyApplicationImageConfigDigest({
+    contract,
+    environment: {},
+    expectedApplicationAssetImageDigest: assetDigest,
+    expectedApplicationImageConfigDigest: configDigest,
+    expectedApplicationRepoDigests: [assetDigest, manifestDigest],
+    probeNonce: "b".repeat(32),
+    runDocker: docker.run,
+  })).rejects.toThrow(/asset manifest attestation/);
+  expect(docker.activeProbeCount).toBe(0);
+});
+
+test("rejects an app config attestation that aliases a containerd root or manifest", async () => {
+  const contract = ownedContract("baseline");
+  const assetDigest = `sha256:${"a".repeat(64)}`;
+  const manifestDigest = `sha256:${"b".repeat(64)}`;
+  for (const configDigest of [assetDigest, manifestDigest]) {
+    const docker = createOwnedDockerMock(
+      contract,
+      `sha256:${"2".repeat(64)}`,
+      `sha256:${"3".repeat(64)}`,
+      { mode: "containerd", applicationManifestDigest: manifestDigest },
+    );
+    await expect(deriveJourneyApplicationImageConfigDigest({
+      contract,
+      environment: {},
+      expectedApplicationAssetImageDigest: assetDigest,
+      expectedApplicationImageConfigDigest: configDigest,
+      expectedApplicationManifestDigest: manifestDigest,
+      expectedApplicationRepoDigests: [assetDigest, manifestDigest],
+      probeNonce: "c".repeat(32),
+      runDocker: docker.run,
+    })).rejects.toThrow(/config attestation/);
+    expect(docker.activeProbeCount).toBe(0);
+  }
+});
+
 test("cleans an owned probe after malformed first inspection without masking the failure", async () => {
   const contract = ownedContract("baseline");
   const assetDigest = `sha256:${"2".repeat(64)}`;
@@ -608,6 +951,346 @@ test("rejects a wrong application tag mapping before any Compose up", async () =
   }
 });
 
+test("prepares an exact containerd receipt and pins both launch images to OCI roots", async () => {
+  const repositoryRoot = path.resolve(__dirname, "../../..");
+  const fixture = await createOwnedInput("baseline", repositoryRoot, { mode: "containerd" });
+  let handle: Awaited<ReturnType<typeof prepareJourneyOwnedStack>> | undefined;
+  try {
+    handle = await prepareJourneyOwnedStack(fixture.input);
+    expect(handle.contract.images).toEqual({
+      application: fixture.input.expectedApplicationAssetImageDigest,
+      migration: fixture.input.expectedMigrationAssetImageDigest,
+    });
+    expect(Object.keys(handle.inputReceipt).sort()).toEqual([
+      "applicationImageBindingContractSha256",
+      "applicationImageConfigDigest",
+      "applicationImageManifestDigest",
+      "applicationImageRuntimeDigest",
+      "composeSourceSha256",
+      "fixtureBindingContractSha256",
+      "fixtureMountSubsetContractSha256",
+      "fixtureSourceContractSha256",
+      "generatedEnvironmentDirectorySha256",
+      "globalFixtureContractSha256",
+      "imageProbeOwnershipContractSha256",
+      "imageSelectionMode",
+      "migrationImageBindingContractSha256",
+      "migrationImageManifestDigest",
+      "migrationImageRuntimeDigest",
+      "projectSha256",
+      "renderedComposeSha256",
+      "roleEnvironmentContractSha256",
+      "roleEnvironmentPolicySha256",
+    ].sort());
+    expect(handle.inputReceipt).toMatchObject({
+      applicationImageConfigDigest: fixture.input.expectedApplicationImageConfigDigest,
+      applicationImageManifestDigest: fixture.input.expectedApplicationManifestDigest,
+      applicationImageRuntimeDigest: fixture.input.expectedApplicationAssetImageDigest,
+      imageSelectionMode: "containerd-root-manifest",
+      migrationImageRuntimeDigest: fixture.input.expectedMigrationAssetImageDigest,
+    });
+    expect(Object.hasOwn(handle.inputReceipt, "migrationImageConfigDigest")).toBe(false);
+    const launchEnvironment = await readFile(path.join(handle.directory, ".env"), "utf8");
+    expect(launchEnvironment).toContain(
+      `CLEAN_PAY_IMAGE=${fixture.input.expectedApplicationAssetImageDigest}`,
+    );
+    expect(launchEnvironment).toContain(
+      `CLEAN_PAY_MIGRATION_IMAGE=${fixture.input.expectedMigrationAssetImageDigest}`,
+    );
+    await expect(prepareJourneyOwnedStackLaunch(handle)).resolves.toMatchObject({
+      projectSha256: expect.stringMatching(/^[a-f0-9]{64}$/),
+    });
+    await expect(cleanupJourneyOwnedStack(handle)).resolves.toMatchObject({
+      status: "verifier-owned-stack-cleaned",
+    });
+    handle = undefined;
+  } finally {
+    if (handle !== undefined) {
+      await cleanupJourneyOwnedStack(handle).catch(() => undefined);
+    }
+    await removeSyntheticInputDirectory(fixture.directory);
+  }
+});
+
+test("rejects mixed Docker image selection modes before creating a launch snapshot", async () => {
+  const repositoryRoot = path.resolve(__dirname, "../../..");
+  const fixture = await createOwnedInput("baseline", repositoryRoot, {
+    applicationMode: "containerd",
+    migrationMode: "classic",
+  });
+  try {
+    await expect(prepareJourneyOwnedStack(fixture.input)).rejects.toThrow(/selection modes/);
+    expect(fixture.docker.activeProbeCount).toBe(0);
+    expect(fixture.docker.upCalls).toBe(0);
+  } finally {
+    await removeSyntheticInputDirectory(fixture.directory);
+  }
+});
+
+test("rejects incomplete or overlapping containerd identities before Compose up", async () => {
+  const repositoryRoot = path.resolve(__dirname, "../../..");
+  const incomplete = await createOwnedInput("baseline", repositoryRoot, { mode: "containerd" });
+  const overlapping = await createOwnedInput("baseline", repositoryRoot, {
+    migrationManifestDigest: `sha256:${"4".repeat(64)}`,
+    mode: "containerd",
+  });
+  incomplete.input.expectedApplicationRepoDigests = [
+    incomplete.input.expectedApplicationAssetImageDigest,
+  ];
+  try {
+    await expect(prepareJourneyOwnedStack(incomplete.input)).rejects.toThrow(
+      /omits its selected platform manifest/,
+    );
+    await expect(prepareJourneyOwnedStack(overlapping.input)).rejects.toThrow(
+      /identities overlap/,
+    );
+    for (const fixture of [incomplete, overlapping]) {
+      expect(fixture.docker.upCalls).toBe(0);
+      expect(fixture.docker.activeProbeCount).toBe(0);
+    }
+  } finally {
+    await Promise.all([
+      removeSyntheticInputDirectory(incomplete.directory),
+      removeSyntheticInputDirectory(overlapping.directory),
+    ]);
+  }
+});
+
+test("rejects a containerd-to-classic mode drift during the pre-launch recheck", async () => {
+  const repositoryRoot = path.resolve(__dirname, "../../..");
+  const fixture = await createOwnedInput("baseline", repositoryRoot, { mode: "containerd" });
+  const baseRun = fixture.docker.run;
+  const applicationConfigDigest = fixture.input.expectedApplicationImageConfigDigest;
+  let drift = false;
+  fixture.input.runDocker = async (
+    args: string[],
+    maximumBytes?: number,
+    environment: Record<string, string> = {},
+  ) => {
+    const output = await baseRun(args, maximumBytes, environment);
+    if (drift && args[0] === "container" && args[1] === "inspect") {
+      const [probe] = JSON.parse(output);
+      if (probe?.Config?.Image === fixture.input.contract.images.application) {
+        probe.Image = applicationConfigDigest;
+        delete probe.ImageManifestDescriptor;
+        return JSON.stringify([probe]);
+      }
+    }
+    return output;
+  };
+  let handle: Awaited<ReturnType<typeof prepareJourneyOwnedStack>> | undefined;
+  try {
+    handle = await prepareJourneyOwnedStack(fixture.input);
+    drift = true;
+    await expect(prepareJourneyOwnedStackLaunch(handle)).rejects.toThrow();
+    expect(fixture.docker.upCalls).toBe(0);
+    expect(fixture.docker.activeProbeCount).toBe(0);
+    await expect(cleanupJourneyOwnedStack(handle)).resolves.toMatchObject({
+      status: "verifier-owned-stack-cleaned",
+    });
+    handle = undefined;
+  } finally {
+    if (handle !== undefined) {
+      await cleanupJourneyOwnedStack(handle).catch(() => undefined);
+    }
+    await removeSyntheticInputDirectory(fixture.directory);
+  }
+});
+
+test("settles both delayed image rechecks before rejecting and cleaning a launch", async () => {
+  const repositoryRoot = path.resolve(__dirname, "../../..");
+  const fixture = await createOwnedInput("baseline", repositoryRoot);
+  const baseRun = fixture.docker.run;
+  let launchRecheck = false;
+  let appFailureInjected = false;
+  let migrationBlocked = false;
+  let resolveApplicationCleanup: () => void = () => undefined;
+  let releaseMigration: () => void = () => undefined;
+  const applicationCleanup = new Promise<void>((resolve) => {
+    resolveApplicationCleanup = resolve;
+  });
+  const migrationBarrier = new Promise<void>((resolve) => {
+    releaseMigration = resolve;
+  });
+  let resolveMigrationBlocked: () => void = () => undefined;
+  const migrationReachedBarrier = new Promise<void>((resolve) => {
+    resolveMigrationBlocked = resolve;
+  });
+  fixture.input.runDocker = async (
+    args: string[],
+    maximumBytes?: number,
+    environment: Record<string, string> = {},
+  ) => {
+    const output = await baseRun(args, maximumBytes, environment);
+    if (!launchRecheck) return output;
+    if (args[0] === "container" && args[1] === "inspect") {
+      const [probe] = JSON.parse(output);
+      if (!appFailureInjected && probe?.Config?.Image === fixture.input.contract.images.application) {
+        appFailureInjected = true;
+        probe.Image = `sha256:${"f".repeat(64)}`;
+        return JSON.stringify([probe]);
+      }
+      if (!migrationBlocked && probe?.Config?.Image === fixture.input.contract.images.migration) {
+        migrationBlocked = true;
+        resolveMigrationBlocked();
+        await migrationBarrier;
+      }
+    }
+    if (appFailureInjected && args[0] === "container" && args[1] === "rm") {
+      resolveApplicationCleanup();
+    }
+    return output;
+  };
+  let handle: Awaited<ReturnType<typeof prepareJourneyOwnedStack>> | undefined;
+  try {
+    handle = await prepareJourneyOwnedStack(fixture.input);
+    launchRecheck = true;
+    let launchSettled = false;
+    let launchError: unknown;
+    const launch = prepareJourneyOwnedStackLaunch(handle).then(
+      () => { launchSettled = true; },
+      (error) => {
+        launchSettled = true;
+        launchError = error;
+      },
+    );
+    await Promise.all([applicationCleanup, migrationReachedBarrier]);
+    expect(launchSettled).toBe(false);
+    expect(fixture.docker.activeProbeCount).toBe(1);
+    releaseMigration();
+    await launch;
+    expect(String((launchError as Error)?.message)).toContain(
+      "Both verifier-owned image rechecks must settle before cleanup.",
+    );
+    expect(fixture.docker.activeProbeCount).toBe(0);
+    expect(fixture.docker.upCalls).toBe(0);
+    await cleanupJourneyOwnedStack(handle);
+    handle = undefined;
+  } finally {
+    releaseMigration();
+    if (handle !== undefined) {
+      await cleanupJourneyOwnedStack(handle).catch(() => undefined);
+    }
+    await removeSyntheticInputDirectory(fixture.directory);
+  }
+});
+
+test("settles both delayed stack launch rechecks before pair cleanup", async () => {
+  const repositoryRoot = path.resolve(__dirname, "../../..");
+  const [baseline, candidate] = await Promise.all([
+    createOwnedInput("baseline", repositoryRoot),
+    createOwnedInput("candidate", repositoryRoot),
+  ]);
+  let releaseCandidateMigration: () => void = () => undefined;
+  const candidateMigrationBarrier = new Promise<void>((resolve) => {
+    releaseCandidateMigration = resolve;
+  });
+  let resolveCandidateBlocked: () => void = () => undefined;
+  const candidateBlocked = new Promise<void>((resolve) => {
+    resolveCandidateBlocked = resolve;
+  });
+  let resolveBaselineCleanup: () => void = () => undefined;
+  const baselineCleanup = new Promise<void>((resolve) => {
+    resolveBaselineCleanup = resolve;
+  });
+  let resolveCandidateApplicationCleanup: () => void = () => undefined;
+  const candidateApplicationCleanup = new Promise<void>((resolve) => {
+    resolveCandidateApplicationCleanup = resolve;
+  });
+
+  const wrap = (
+    fixture: typeof baseline,
+    behavior: "fail-application" | "block-migration",
+  ) => {
+    const baseRun = fixture.docker.run;
+    let applicationCreates = 0;
+    let migrationCreates = 0;
+    let launchApplicationId: string | undefined;
+    let failureInjected = false;
+    let migrationBlocked = false;
+    return async (
+      args: string[],
+      maximumBytes?: number,
+      environment: Record<string, string> = {},
+    ) => {
+      const isCreate = args[0] === "container" && args[1] === "create";
+      const name = isCreate ? args[args.indexOf("--name") + 1] : "";
+      if (name.includes("-application-")) applicationCreates += 1;
+      if (name.includes("-migration-")) migrationCreates += 1;
+      const output = await baseRun(args, maximumBytes, environment);
+      if (isCreate && name.includes("-application-") && applicationCreates === 2) {
+        launchApplicationId = String(output).trim();
+      }
+      if (args[0] === "container" && args[1] === "inspect") {
+        const [probe] = JSON.parse(output);
+        if (behavior === "fail-application" && applicationCreates === 2
+          && !failureInjected
+          && probe?.Config?.Image === fixture.input.contract.images.application) {
+          failureInjected = true;
+          probe.Image = `sha256:${"f".repeat(64)}`;
+          return JSON.stringify([probe]);
+        }
+        if (behavior === "block-migration" && migrationCreates === 2
+          && !migrationBlocked
+          && probe?.Config?.Image === fixture.input.contract.images.migration) {
+          migrationBlocked = true;
+          resolveCandidateBlocked();
+          await candidateMigrationBarrier;
+        }
+      }
+      if (behavior === "fail-application"
+        && args[0] === "container" && args[1] === "rm"
+        && args[2] === launchApplicationId) {
+        resolveBaselineCleanup();
+      }
+      if (behavior === "block-migration"
+        && args[0] === "container" && args[1] === "rm"
+        && args[2] === launchApplicationId) {
+        resolveCandidateApplicationCleanup();
+      }
+      return output;
+    };
+  };
+  baseline.input.runDocker = wrap(baseline, "fail-application");
+  candidate.input.runDocker = wrap(candidate, "block-migration");
+
+  try {
+    let callbackCalled = false;
+    let pairSettled = false;
+    let pairError: unknown;
+    const pairOperation = withJourneyOwnedStackPair({
+      baseline: baseline.input,
+      candidate: candidate.input,
+    }, async () => {
+      callbackCalled = true;
+    }).then(
+      () => { pairSettled = true; },
+      (error) => {
+        pairSettled = true;
+        pairError = error;
+      },
+    );
+    await Promise.all([baselineCleanup, candidateApplicationCleanup, candidateBlocked]);
+    expect(pairSettled).toBe(false);
+    expect(callbackCalled).toBe(false);
+    expect(candidate.docker.activeProbeCount).toBe(1);
+    releaseCandidateMigration();
+    await pairOperation;
+    expect(String((pairError as Error)?.message)).toContain(
+      "Both verifier-owned pre-launch rechecks must settle before cleanup.",
+    );
+    expect(baseline.docker.activeProbeCount).toBe(0);
+    expect(candidate.docker.activeProbeCount).toBe(0);
+    expect(baseline.docker.upCalls + candidate.docker.upCalls).toBe(0);
+  } finally {
+    releaseCandidateMigration();
+    await Promise.all([
+      removeSyntheticInputDirectory(baseline.directory),
+      removeSyntheticInputDirectory(candidate.directory),
+    ]);
+  }
+});
+
 test("prepares both immutable stacks before same-turn launch dispatch and cleans exact snapshots", async () => {
   const repositoryRoot = path.resolve(__dirname, "../../..");
   const fixtures = await Promise.all([
@@ -625,6 +1308,23 @@ test("prepares both immutable stacks before same-turn launch dispatch and cleans
       }
       expect(handles.at(-1)?.inputReceipt.migrationImageBindingContractSha256)
         .toMatch(/^[a-f0-9]{64}$/);
+      expect(Object.keys(handles.at(-1)!.inputReceipt)).toEqual([
+        "applicationImageConfigDigest",
+        "composeSourceSha256",
+        "applicationImageBindingContractSha256",
+        "fixtureBindingContractSha256",
+        "fixtureMountSubsetContractSha256",
+        "fixtureSourceContractSha256",
+        "generatedEnvironmentDirectorySha256",
+        "globalFixtureContractSha256",
+        "migrationImageBindingContractSha256",
+        "migrationImageConfigDigest",
+        "imageProbeOwnershipContractSha256",
+        "projectSha256",
+        "roleEnvironmentContractSha256",
+        "roleEnvironmentPolicySha256",
+        "renderedComposeSha256",
+      ]);
       expect(handles.at(-1)?.contract.images).toEqual({
         application: fixture.input.expectedApplicationImageConfigDigest,
         migration: handles.at(-1)?.expectedMigrationRuntimeImageDigest,
@@ -910,7 +1610,11 @@ function fakeProxyChild(closeDelayMs: number | null) {
   return child;
 }
 
-async function createOwnedInput(role: "baseline" | "candidate", repositoryRoot: string) {
+async function createOwnedInput(
+  role: "baseline" | "candidate",
+  repositoryRoot: string,
+  dockerOptions: Parameters<typeof createOwnedDockerMock>[3] = {},
+) {
   const contract = ownedContract(role);
   contract.fixtureContract.sha256 = await currentJourneyFixtureContractSha256Async();
   const directory = await mkdtemp(path.join(tmpdir(), `clean-pay-owned-input-${role}-`));
@@ -939,7 +1643,11 @@ async function createOwnedInput(role: "baseline" | "candidate", repositoryRoot: 
   await writeFile(contractPath, `${JSON.stringify(contract)}\n`, { flag: "wx" });
   const assetDigest = `sha256:${(role === "baseline" ? "2" : "6").repeat(64)}`;
   const configDigest = `sha256:${(role === "baseline" ? "3" : "7").repeat(64)}`;
-  const docker = createOwnedDockerMock(contract, assetDigest, configDigest);
+  const docker = createOwnedDockerMock(contract, assetDigest, configDigest, dockerOptions);
+  const applicationManifestDigest = dockerOptions.applicationManifestDigest
+    ?? `sha256:${(role === "baseline" ? "b" : "d").repeat(64)}`;
+  const applicationUsesContainerd = (dockerOptions.applicationMode ?? dockerOptions.mode)
+    === "containerd";
   return {
     directory,
     docker,
@@ -951,10 +1659,19 @@ async function createOwnedInput(role: "baseline" | "candidate", repositoryRoot: 
         `sha256:${(role === "baseline" ? "a" : "c").repeat(64)}`,
       expectedApplicationImageConfigDigest:
         `sha256:${(role === "baseline" ? "4" : "8").repeat(64)}`,
+      ...(applicationUsesContainerd
+        ? { expectedApplicationManifestDigest: applicationManifestDigest }
+        : {}),
       expectedApplicationRepoDigests: [
         `sha256:${(role === "baseline" ? "a" : "c").repeat(64)}`,
         `sha256:${(role === "baseline" ? "b" : "d").repeat(64)}`,
       ],
+      ...(dockerOptions.imagePlatformArchitecture === undefined ? {} : {
+        expectedImagePlatform: {
+          architecture: dockerOptions.imagePlatformArchitecture,
+          os: "linux",
+        },
+      }),
       expectedMigrationAssetImageDigest: assetDigest,
       runDocker: docker.run,
     },
@@ -984,21 +1701,46 @@ function ownedContract(role: "baseline" | "candidate") {
   };
 }
 
-function createOwnedDockerMock(contract: ReturnType<typeof ownedContract>, asset: string, config: string) {
+function createOwnedDockerMock(
+  contract: ReturnType<typeof ownedContract>,
+  asset: string,
+  config: string,
+  options: {
+    applicationMode?: "classic" | "containerd";
+    applicationManifestDigest?: string;
+    applicationManifestMediaType?: string;
+    applicationRootMediaType?: string;
+    imagePlatformArchitecture?: "amd64" | "arm64";
+    migrationMode?: "classic" | "containerd";
+    migrationManifestDigest?: string;
+    migrationManifestMediaType?: string;
+    migrationRootMediaType?: string;
+    mode?: "classic" | "containerd";
+  } = {},
+) {
   const calls: string[][] = [];
   const composeEnvironments: Array<Record<string, string>> = [];
   const baseline = contract.project.includes("baseline");
+  const mode = options.mode ?? "classic";
   const identities = {
     application: {
       asset: `sha256:${(baseline ? "a" : "c").repeat(64)}`,
       config: `sha256:${(baseline ? "4" : "8").repeat(64)}`,
+      manifest: options.applicationManifestDigest
+        ?? `sha256:${(baseline ? "b" : "d").repeat(64)}`,
       reference: contract.images.application,
     },
     migration: {
       asset,
       config,
+      manifest: options.migrationManifestDigest
+        ?? `sha256:${(baseline ? "5" : "9").repeat(64)}`,
       reference: contract.images.migration,
     },
+  } as const;
+  const selectionModes = {
+    application: options.applicationMode ?? mode,
+    migration: options.migrationMode ?? mode,
   } as const;
   const active = new Map<string, {
     name: string;
@@ -1036,13 +1778,26 @@ function createOwnedDockerMock(contract: ReturnType<typeof ownedContract>, asset
       return "";
     }
     if (args[0] === "image" && args[1] === "inspect") {
-      const identity = Object.values(identities).find(({ reference, config: selected }) => (
-        args[2] === reference || args[2] === selected
+      const matched = Object.entries(identities).find(([role, entry]) => (
+        args[2] === entry.reference
+          || args[2] === (selectionModes[role as keyof typeof selectionModes] === "containerd"
+            ? entry.asset
+            : entry.config)
       ));
-      if (!identity) throw new Error(`Unexpected image inspection: ${args[2]}`);
+      if (!matched) throw new Error(`Unexpected image inspection: ${args[2]}`);
+      const [role, identity] = matched as [keyof typeof identities, (typeof identities)[keyof typeof identities]];
+      const containerd = selectionModes[role] === "containerd";
       return JSON.stringify([{
-        Id: identity.config,
-        Descriptor: { digest: identity.asset },
+        Id: containerd ? identity.asset : identity.config,
+        Descriptor: containerd ? {
+          digest: identity.asset,
+          mediaType: role === "application"
+            ? (options.applicationRootMediaType
+              ?? "application/vnd.oci.image.index.v1+json")
+            : (options.migrationRootMediaType
+              ?? "application/vnd.oci.image.index.v1+json"),
+          size: 4096,
+        } : { digest: identity.asset },
         RepoDigests: [`registry.example/clean-pay@${identity.asset}`],
       }]);
     }
@@ -1064,9 +1819,26 @@ function createOwnedDockerMock(contract: ReturnType<typeof ownedContract>, asset
       if (!probe) throw new Error(`Unexpected probe inspection: ${args[2]}`);
       const { name, owner, role } = probe;
       const identity = identities[role];
+      const selectionMode = selectionModes[role];
       return JSON.stringify([{
         Id: args[2],
-        Image: identity.config,
+        Image: selectionMode === "containerd" ? identity.asset : identity.config,
+        ...(selectionMode === "containerd" ? {
+          ImageManifestDescriptor: {
+            digest: identity.manifest,
+            mediaType: role === "application"
+              ? (options.applicationManifestMediaType
+                ?? "application/vnd.oci.image.manifest.v1+json")
+              : (options.migrationManifestMediaType
+                ?? "application/vnd.oci.image.manifest.v1+json"),
+            platform: {
+              architecture: options.imagePlatformArchitecture ?? "amd64",
+              os: "linux",
+              ...(options.imagePlatformArchitecture === "arm64" ? { variant: "v8" } : {}),
+            },
+            size: 2048,
+          },
+        } : {}),
         Name: `/${name}`,
         RestartCount: 0,
         Config: {
@@ -1139,6 +1911,10 @@ function snapshotFileSystem(overrides: Record<string, unknown> = {}) {
     writeFile,
     ...overrides,
   };
+}
+
+function testSha256(value: string) {
+  return createHash("sha256").update(value).digest("hex");
 }
 
 async function removeSyntheticInputDirectory(directory: string) {

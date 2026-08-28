@@ -23,6 +23,14 @@ export function resolveProviderOverlapOutputPath(raw) {
 
 const fixtureSeed = "clean-pay-browser-journey-v1";
 const emptyBodySha256 = sha256("");
+const containerdIndexMediaTypes = new Set([
+  "application/vnd.oci.image.index.v1+json",
+  "application/vnd.docker.distribution.manifest.list.v2+json",
+]);
+const containerdManifestMediaTypes = new Set([
+  "application/vnd.oci.image.manifest.v1+json",
+  "application/vnd.docker.distribution.manifest.v2+json",
+]);
 const participantContracts = Object.freeze([
   Object.freeze({
     service: "remnashop",
@@ -181,13 +189,136 @@ export function assertLoopbackResolver(raw, expectedPublication, label) {
   return raw;
 }
 
+export function assertProviderOverlapClassicImageDescriptor(value, expectedDigest, label) {
+  const descriptor = record(value, `${label} classic application image Descriptor`);
+  stringMatch(
+    expectedDigest,
+    /^sha256:[a-f0-9]{64}$/,
+    `${label} expected classic application OCI root digest`,
+  );
+  equal(
+    descriptor.digest,
+    expectedDigest,
+    `${label} classic application image Descriptor digest`,
+  );
+  return descriptor;
+}
+
+export function assertProviderOverlapImagePlatformParity(baselineValue, candidateValue) {
+  const platforms = [baselineValue, candidateValue].map((value, index) => {
+    const label = index === 0 ? "baseline" : "candidate";
+    const platform = record(value, `${label} provider image platform`);
+    exactKeys(platform, ["architecture", "os"], `${label} provider image platform`);
+    if (platform.os !== "linux" || !new Set(["amd64", "arm64"]).has(platform.architecture)) {
+      fail(`${label} provider image platform is invalid.`);
+    }
+    return platform;
+  });
+  deepEqual(platforms[0], platforms[1], "provider image platform parity");
+  return platforms[0];
+}
+
+export function assertProviderOverlapContainerdImageDescriptorChain(
+  rootValue,
+  manifestValue,
+  expectedRootDigest,
+  expectedManifestDigest,
+  expectedPlatform,
+  label,
+) {
+  stringMatch(
+    expectedRootDigest,
+    /^sha256:[a-f0-9]{64}$/,
+    `${label} expected OCI root digest`,
+  );
+  stringMatch(
+    expectedManifestDigest,
+    /^sha256:[a-f0-9]{64}$/,
+    `${label} expected platform manifest digest`,
+  );
+  const platform = record(expectedPlatform, `${label} expected platform`);
+  exactKeys(platform, ["architecture", "os"], `${label} expected platform`);
+  if (platform.os !== "linux" || !new Set(["amd64", "arm64"]).has(platform.architecture)) {
+    fail(`${label} expected platform is invalid.`);
+  }
+
+  const rootDescriptor = record(rootValue, `${label} authoritative OCI root descriptor`);
+  exactKeys(
+    rootDescriptor,
+    ["digest", "mediaType", "size"],
+    `${label} authoritative OCI root descriptor`,
+  );
+  if (!containerdIndexMediaTypes.has(rootDescriptor.mediaType)
+    && !containerdManifestMediaTypes.has(rootDescriptor.mediaType)) {
+    fail(`${label} authoritative OCI root descriptor media type is invalid.`);
+  }
+  equal(rootDescriptor.digest, expectedRootDigest, `${label} authoritative OCI root digest`);
+  boundedInteger(
+    rootDescriptor.size,
+    1,
+    64 * 1024 * 1024,
+    `${label} authoritative OCI root descriptor size`,
+  );
+
+  const manifestDescriptor = record(
+    manifestValue,
+    `${label} selected platform manifest descriptor`,
+  );
+  exactKeys(
+    manifestDescriptor,
+    ["digest", "mediaType", "platform", "size"],
+    `${label} selected platform manifest descriptor`,
+  );
+  if (!containerdManifestMediaTypes.has(manifestDescriptor.mediaType)) {
+    fail(`${label} selected platform manifest media type is invalid.`);
+  }
+  equal(
+    manifestDescriptor.digest,
+    expectedManifestDigest,
+    `${label} selected platform manifest digest`,
+  );
+  boundedInteger(
+    manifestDescriptor.size,
+    1,
+    64 * 1024 * 1024,
+    `${label} selected platform manifest descriptor size`,
+  );
+  const selectedPlatform = record(
+    manifestDescriptor.platform,
+    `${label} selected platform manifest platform`,
+  );
+  const selectedPlatformKeys = Object.keys(selectedPlatform).sort();
+  if (JSON.stringify(selectedPlatformKeys) !== JSON.stringify(["architecture", "os"])
+    && JSON.stringify(selectedPlatformKeys)
+      !== JSON.stringify(["architecture", "os", "variant"])) {
+    fail(`${label} selected platform manifest platform keys are invalid.`);
+  }
+  equal(
+    selectedPlatform.architecture,
+    platform.architecture,
+    `${label} selected platform manifest platform architecture`,
+  );
+  equal(selectedPlatform.os, platform.os, `${label} selected platform manifest platform OS`);
+  if (selectedPlatform.variant !== undefined
+    && (platform.architecture !== "arm64" || selectedPlatform.variant !== "v8")) {
+    fail(`${label} selected platform manifest variant is invalid.`);
+  }
+  if (containerdManifestMediaTypes.has(rootDescriptor.mediaType)
+    && rootDescriptor.digest !== manifestDescriptor.digest) {
+    fail(`${label} single-manifest OCI root differs from the selected manifest.`);
+  }
+  return { manifestDescriptor, rootDescriptor };
+}
+
 export function assertApplicationImageIdentity(value, contract, expected, label) {
   const identity = record(value, `${label} application image identity`);
+  const containerd = identity.imageSelectionMode === "containerd-root-manifest";
   exactKeys(
     identity,
     [
       "assetImageDigest",
       "configDigest",
+      ...(containerd ? ["imageSelectionMode"] : []),
       "manifestDigest",
       "publicBuildContract",
       "reference",
@@ -217,11 +348,19 @@ export function assertApplicationImageIdentity(value, contract, expected, label)
     /^sha256:[a-f0-9]{64}$/,
     `${label} runtime image digest`,
   );
-  equal(
-    identity.runtimeImageDigest,
-    identity.configDigest,
-    `${label} runtime selected config digest`,
-  );
+  if (!containerd) {
+    equal(
+      identity.runtimeImageDigest,
+      identity.configDigest,
+      `${label} runtime selected config digest`,
+    );
+  } else {
+    equal(
+      identity.runtimeImageDigest,
+      identity.assetImageDigest,
+      `${label} runtime selected OCI root digest`,
+    );
+  }
   stringMatch(
     identity.repoDigestContractSha256,
     /^[a-f0-9]{64}$/,
@@ -618,6 +757,9 @@ export function createProviderOverlapStackReport(input) {
     applicationImage: Object.freeze({
       assetImageDigest: input.imageIdentity.assetImageDigest,
       configDigest: input.imageIdentity.configDigest,
+      ...(input.imageIdentity.imageSelectionMode === "containerd-root-manifest"
+        ? { imageSelectionMode: "containerd-root-manifest" }
+        : {}),
       manifestDigest: input.imageIdentity.manifestDigest,
       referenceSha256: sha256(input.imageIdentity.reference),
       repoDigestContractSha256: input.imageIdentity.repoDigestContractSha256,
@@ -723,6 +865,11 @@ function assertCrossStackInvariants(baseline, candidate) {
     || baseline.applicationImage.configDigest === candidate.applicationImage.configDigest) {
     fail("Dual-image proof requires distinct OCI source and config image digests.");
   }
+  equal(
+    normalizedApplicationImageSelectionMode(baseline.applicationImage, "baseline"),
+    normalizedApplicationImageSelectionMode(candidate.applicationImage, "candidate"),
+    "application image selection mode",
+  );
   if (baseline.applicationImage.revision === candidate.applicationImage.revision) {
     fail("Dual-image proof requires distinct source revisions.");
   }
@@ -1160,11 +1307,13 @@ function assertStackReport(value, label) {
   assertBrowserIdentity(report.browser, label);
 
   const image = record(report.applicationImage, `${label} application image`);
+  const containerd = image.imageSelectionMode === "containerd-root-manifest";
   exactKeys(
     image,
     [
       "assetImageDigest",
       "configDigest",
+      ...(containerd ? ["imageSelectionMode"] : []),
       "manifestDigest",
       "publicBuildContract",
       "referenceSha256",
@@ -1182,7 +1331,11 @@ function assertStackReport(value, label) {
     fail(`${label} application config and OCI source digests are conflated.`);
   }
   stringMatch(image.runtimeImageDigest, /^sha256:[a-f0-9]{64}$/, `${label} runtime image digest`);
-  equal(image.runtimeImageDigest, image.configDigest, `${label} runtime selected config digest`);
+  if (!containerd) {
+    equal(image.runtimeImageDigest, image.configDigest, `${label} runtime selected config digest`);
+  } else {
+    equal(image.runtimeImageDigest, image.assetImageDigest, `${label} runtime selected OCI root digest`);
+  }
   stringMatch(
     image.repoDigestContractSha256,
     /^[a-f0-9]{64}$/,
@@ -1412,16 +1565,32 @@ function assertRuntimeBinding(value, label, report) {
     );
     equal(
       binding.applicationImageBindingContractSha256,
-      sha256(JSON.stringify({
-        assetImageDigest: report.applicationImage.assetImageDigest,
-        configDigest: report.applicationImage.configDigest,
-        referenceSha256: report.applicationImage.referenceSha256,
-        repoDigests: [...new Set([
-          report.applicationImage.assetImageDigest,
-          report.applicationImage.manifestDigest,
-        ])].sort(),
-        role: "application",
-      })),
+      sha256(JSON.stringify(
+        report.applicationImage.imageSelectionMode === "containerd-root-manifest"
+          ? {
+            assetImageDigest: report.applicationImage.assetImageDigest,
+            configDigest: report.applicationImage.configDigest,
+            imageSelectionMode: "containerd-root-manifest",
+            manifestDigest: report.applicationImage.manifestDigest,
+            referenceSha256: report.applicationImage.referenceSha256,
+            repoDigests: [...new Set([
+              report.applicationImage.assetImageDigest,
+              report.applicationImage.manifestDigest,
+            ])].sort(),
+            role: "application",
+            runtimeImageDigest: report.applicationImage.runtimeImageDigest,
+          }
+          : {
+            assetImageDigest: report.applicationImage.assetImageDigest,
+            configDigest: report.applicationImage.configDigest,
+            referenceSha256: report.applicationImage.referenceSha256,
+            repoDigests: [...new Set([
+              report.applicationImage.assetImageDigest,
+              report.applicationImage.manifestDigest,
+            ])].sort(),
+            role: "application",
+          },
+      )),
       `${label} pre-start application image binding`,
     );
   }
@@ -2247,6 +2416,16 @@ function exactUrl(raw, label) {
   } catch {
     fail(`${label} must be an exact URL.`);
   }
+}
+
+function normalizedApplicationImageSelectionMode(image, label) {
+  if (image.imageSelectionMode === undefined) return "classic-config";
+  equal(
+    image.imageSelectionMode,
+    "containerd-root-manifest",
+    `${label} application image selection mode`,
+  );
+  return image.imageSelectionMode;
 }
 
 function assertPublicationPort(publication, label) {
