@@ -823,6 +823,318 @@ test("validates classic Descriptor identity and the complete containerd descript
   )).toThrow(/variant/);
 });
 
+test("binds exact root and selected config annotations without exposing either", () => {
+  const rootDigest = `sha256:${"1".repeat(64)}`;
+  const configDigest = `sha256:${"3".repeat(64)}`;
+  const mediaType = "application/vnd.oci.image.manifest.v1+json";
+  const platform = { architecture: "amd64", os: "linux" };
+  const rootDescriptor = {
+    annotations: { "config.digest": configDigest },
+    digest: rootDigest,
+    mediaType,
+    size: 2_048,
+  };
+  const annotatedManifest = {
+    annotations: { "config.digest": configDigest },
+    digest: rootDigest,
+    mediaType,
+    platform,
+    size: 2_048,
+  };
+  const result = assertProviderOverlapContainerdImageDescriptorChain(
+    rootDescriptor,
+    annotatedManifest,
+    rootDigest,
+    rootDigest,
+    platform,
+    "annotated single-manifest",
+    configDigest,
+  );
+  expect(result).toEqual({
+    manifestDescriptor: {
+      digest: rootDigest,
+      mediaType,
+      platform,
+      size: 2_048,
+    },
+    rootDescriptor: {
+      digest: rootDigest,
+      mediaType,
+      size: 2_048,
+    },
+  });
+  expect(Object.hasOwn(result.manifestDescriptor, "annotations")).toBe(false);
+  expect(Object.hasOwn(result.rootDescriptor, "annotations")).toBe(false);
+
+  const unannotatedRoot = {
+    digest: rootDigest,
+    mediaType,
+    size: 2_048,
+  };
+  const unannotatedManifest = {
+    digest: rootDigest,
+    mediaType,
+    platform,
+    size: 2_048,
+  };
+  const rootOnly = assertProviderOverlapContainerdImageDescriptorChain(
+    rootDescriptor,
+    unannotatedManifest,
+    rootDigest,
+    rootDigest,
+    platform,
+    "root-only annotation",
+    configDigest,
+  );
+  expect(Object.hasOwn(rootOnly.rootDescriptor, "annotations")).toBe(false);
+  expect(rootOnly.manifestDescriptor).toBe(unannotatedManifest);
+
+  const selectedOnly = assertProviderOverlapContainerdImageDescriptorChain(
+    unannotatedRoot,
+    annotatedManifest,
+    rootDigest,
+    rootDigest,
+    platform,
+    "selected-only annotation",
+    configDigest,
+  );
+  expect(selectedOnly.rootDescriptor).toBe(unannotatedRoot);
+  expect(Object.hasOwn(selectedOnly.manifestDescriptor, "annotations")).toBe(false);
+
+  const unannotated = assertProviderOverlapContainerdImageDescriptorChain(
+    unannotatedRoot,
+    unannotatedManifest,
+    rootDigest,
+    rootDigest,
+    platform,
+    "unannotated identity",
+  );
+  expect(unannotated.rootDescriptor).toBe(unannotatedRoot);
+  expect(unannotated.manifestDescriptor).toBe(unannotatedManifest);
+});
+
+test("rejects an unannotated selected media type that differs from its single root", () => {
+  const rootDigest = `sha256:${"1".repeat(64)}`;
+  const platform = { architecture: "amd64", os: "linux" };
+  expect(() => assertProviderOverlapContainerdImageDescriptorChain(
+    {
+      digest: rootDigest,
+      mediaType: "application/vnd.oci.image.manifest.v1+json",
+      size: 1_024,
+    },
+    {
+      digest: rootDigest,
+      mediaType: "application/vnd.docker.distribution.manifest.v2+json",
+      platform,
+      size: 2_048,
+    },
+    rootDigest,
+    rootDigest,
+    platform,
+    "unannotated media mismatch",
+  )).toThrow(/media type differs/);
+});
+
+test("passes the attested application config into live provider descriptor validation", async () => {
+  const runnerSource = await readFile(path.resolve(__dirname, "prove-provider-overlap.mjs"), "utf8");
+  expect(runnerSource).toMatch(
+    /assertProviderOverlapContainerdImageDescriptorChain\([\s\S]{1,512}assetIdentity\.configDigest,\s*\);/,
+  );
+});
+
+test("rejects malformed or unbound provider manifest config annotations", () => {
+  const rootDigest = `sha256:${"1".repeat(64)}`;
+  const childDigest = `sha256:${"2".repeat(64)}`;
+  const configDigest = `sha256:${"3".repeat(64)}`;
+  const wrongConfigDigest = `sha256:${"4".repeat(64)}`;
+  const manifestMediaType = "application/vnd.oci.image.manifest.v1+json";
+  const platform = { architecture: "amd64", os: "linux" };
+  const singleRoot = {
+    digest: rootDigest,
+    mediaType: manifestMediaType,
+    size: 2_048,
+  };
+  const baseManifest = {
+    digest: rootDigest,
+    mediaType: manifestMediaType,
+    platform,
+    size: 2_048,
+  };
+  const cases: Array<{
+    annotations: unknown;
+    expectedConfigDigest?: string;
+    expectedManifestDigest?: string;
+    label: string;
+    manifestDigest?: string;
+    manifestMediaType?: string;
+    root?: typeof singleRoot;
+  }> = [
+    { annotations: null, expectedConfigDigest: configDigest, label: "null annotations" },
+    { annotations: [], expectedConfigDigest: configDigest, label: "array annotations" },
+    { annotations: {}, expectedConfigDigest: configDigest, label: "empty annotations" },
+    {
+      annotations: { "config.digest": "not-a-digest" },
+      expectedConfigDigest: configDigest,
+      label: "malformed config digest",
+    },
+    {
+      annotations: { "config.digest": configDigest, unexpected: configDigest },
+      expectedConfigDigest: configDigest,
+      label: "extra annotation",
+    },
+    {
+      annotations: { "config.digest": wrongConfigDigest },
+      expectedConfigDigest: configDigest,
+      label: "wrong attested config digest",
+    },
+    { annotations: { "config.digest": configDigest }, label: "missing config attestation" },
+    {
+      annotations: { "config.digest": configDigest },
+      expectedConfigDigest: configDigest,
+      label: "different single-root media type",
+      manifestMediaType: "application/vnd.docker.distribution.manifest.v2+json",
+    },
+    {
+      annotations: { "config.digest": configDigest },
+      expectedConfigDigest: configDigest,
+      expectedManifestDigest: childDigest,
+      label: "annotation on index child",
+      manifestDigest: childDigest,
+      root: {
+        digest: rootDigest,
+        mediaType: "application/vnd.oci.image.index.v1+json",
+        size: 1_024,
+      },
+    },
+  ];
+  for (const testCase of cases) {
+    expect(() => assertProviderOverlapContainerdImageDescriptorChain(
+      testCase.root ?? singleRoot,
+      {
+        ...baseManifest,
+        annotations: testCase.annotations,
+        digest: testCase.manifestDigest ?? rootDigest,
+        mediaType: testCase.manifestMediaType ?? manifestMediaType,
+      },
+      rootDigest,
+      testCase.expectedManifestDigest ?? rootDigest,
+      platform,
+      testCase.label,
+      testCase.expectedConfigDigest,
+    ), testCase.label).toThrow(/annotation|single-root/);
+  }
+});
+
+test("rejects malformed or unbound provider root config annotations", () => {
+  const rootDigest = `sha256:${"1".repeat(64)}`;
+  const childDigest = `sha256:${"2".repeat(64)}`;
+  const configDigest = `sha256:${"3".repeat(64)}`;
+  const wrongConfigDigest = `sha256:${"4".repeat(64)}`;
+  const mediaType = "application/vnd.oci.image.manifest.v1+json";
+  const platform = { architecture: "amd64", os: "linux" };
+  const manifest = {
+    digest: rootDigest,
+    mediaType,
+    platform,
+    size: 2_048,
+  };
+  const cases: Array<{
+    annotations: unknown;
+    expectedConfigDigest?: string;
+    expectedManifestDigest?: string;
+    label: string;
+    manifest?: typeof manifest & { annotations?: unknown };
+    rootMediaType?: string;
+    rootSize?: number;
+  }> = [
+    { annotations: null, expectedConfigDigest: configDigest, label: "null root annotations" },
+    { annotations: [], expectedConfigDigest: configDigest, label: "array root annotations" },
+    { annotations: {}, expectedConfigDigest: configDigest, label: "empty root annotations" },
+    {
+      annotations: { "config.digest": "not-a-digest" },
+      expectedConfigDigest: configDigest,
+      label: "malformed root config digest",
+    },
+    {
+      annotations: { "config.digest": configDigest, unexpected: configDigest },
+      expectedConfigDigest: configDigest,
+      label: "extra root annotation",
+    },
+    {
+      annotations: { "config.digest": wrongConfigDigest },
+      expectedConfigDigest: configDigest,
+      label: "wrong attested root config digest",
+    },
+    {
+      annotations: { "config.digest": configDigest },
+      label: "missing root config attestation",
+    },
+    {
+      annotations: { "config.digest": configDigest },
+      expectedConfigDigest: configDigest,
+      expectedManifestDigest: childDigest,
+      label: "root annotation on index",
+      manifest: { ...manifest, digest: childDigest },
+      rootMediaType: "application/vnd.oci.image.index.v1+json",
+    },
+    {
+      annotations: { "config.digest": configDigest },
+      expectedConfigDigest: configDigest,
+      label: "annotated descriptor size mismatch",
+      rootSize: 1_024,
+    },
+    {
+      annotations: { "config.digest": configDigest },
+      expectedConfigDigest: configDigest,
+      label: "different root and selected config annotations",
+      manifest: {
+        ...manifest,
+        annotations: { "config.digest": wrongConfigDigest },
+      },
+    },
+  ];
+  for (const testCase of cases) {
+    expect(() => assertProviderOverlapContainerdImageDescriptorChain(
+      {
+        annotations: testCase.annotations,
+        digest: rootDigest,
+        mediaType: testCase.rootMediaType ?? mediaType,
+        size: testCase.rootSize ?? 2_048,
+      },
+      testCase.manifest ?? manifest,
+      rootDigest,
+      testCase.expectedManifestDigest ?? rootDigest,
+      platform,
+      testCase.label,
+      testCase.expectedConfigDigest,
+    ), testCase.label).toThrow(/annotation|single-root/);
+  }
+});
+
+test("rejects an OCI index or manifest-list root aliasing its selected manifest", () => {
+  const rootDigest = `sha256:${"1".repeat(64)}`;
+  const platform = { architecture: "amd64", os: "linux" };
+  const manifestDescriptor = {
+    digest: rootDigest,
+    mediaType: "application/vnd.oci.image.manifest.v1+json",
+    platform,
+    size: 2_048,
+  };
+  for (const mediaType of [
+    "application/vnd.oci.image.index.v1+json",
+    "application/vnd.docker.distribution.manifest.list.v2+json",
+  ]) {
+    expect(() => assertProviderOverlapContainerdImageDescriptorChain(
+      { digest: rootDigest, mediaType, size: 1_024 },
+      manifestDescriptor,
+      rootDigest,
+      rootDigest,
+      platform,
+      "aliased index root",
+    ), mediaType).toThrow(/index root aliases/);
+  }
+});
+
 test("requires one attested linux platform across both provider proof images", () => {
   const arm64 = { architecture: "arm64", os: "linux" };
   expect(assertProviderOverlapImagePlatformParity(arm64, { ...arm64 })).toBe(arm64);

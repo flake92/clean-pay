@@ -1210,15 +1210,25 @@ async function deriveJourneyImageConfigDigest({
     || !/^[A-Za-z0-9][A-Za-z0-9._/:@-]{1,240}$/.test(reference)) {
     fail("Verifier-owned image derivation reference is invalid.");
   }
+  const referenceInspection = parseSingleInspection(
+    await runDocker(["image", "inspect", reference], 512 * 1024, environment),
+    `${role} image`,
+  );
   assertAssetRootInspection(
-    parseSingleInspection(
-      await runDocker(["image", "inspect", reference], 512 * 1024, environment),
-      `${role} image`,
-    ),
+    referenceInspection,
     expectedAssetImageDigest,
     reference,
     `${role} image reference`,
   );
+  const expectedRootMediaType = referenceInspection?.Descriptor?.mediaType;
+  const expectedRootSize = referenceInspection?.Descriptor?.size;
+  const expectedRootAnnotationsPresent = Object.hasOwn(
+    referenceInspection?.Descriptor ?? {},
+    "annotations",
+  );
+  const expectedRootAnnotationConfigDigest = expectedRootAnnotationsPresent
+    ? referenceInspection?.Descriptor?.annotations?.["config.digest"]
+    : undefined;
 
   const projectSha256 = sha256(contract.project);
   const probeName = `clean-pay-${role}-config-${projectSha256.slice(0, 12)}-${probeNonce}`;
@@ -1285,14 +1295,39 @@ async function deriveJourneyImageConfigDigest({
     );
     probeIdentity = assertImageConfigProbe(probe, {
       expectedAssetImageDigest,
+      expectedConfigDigest,
       expectedManifestDigest,
       expectedImagePlatform: imagePlatform,
+      expectedRootAnnotationConfigDigest,
+      expectedRootAnnotationsPresent,
+      expectedRootMediaType,
+      expectedRootSize,
       probeId,
       probeName,
       probeOwner,
       reference,
       role,
     });
+    if (imageSelectionModeOf(probeIdentity) === containerdImageSelectionMode) {
+      assertAssetRootInspection(
+        referenceInspection,
+        expectedAssetImageDigest,
+        reference,
+        `${role} initial image reference`,
+        {
+          expectedConfigDigest,
+          expectedRootAnnotationConfigDigest,
+          expectedRootAnnotationsPresent,
+          expectedRootMediaType,
+          expectedRootSize,
+          requireContainerdRootDescriptor: true,
+          selectedManifestConfigDigest: probeIdentity.manifestConfigDigest,
+          selectedManifestDigest: probeIdentity.manifestDigest,
+          selectedManifestMediaType: probeIdentity.manifestMediaType,
+          selectedManifestSize: probeIdentity.manifestSize,
+        },
+      );
+    }
     if (imageSelectionModeOf(probeIdentity) === "classic-config"
       && expectedConfigDigest !== undefined
       && probeIdentity.configDigest !== expectedConfigDigest) {
@@ -1323,6 +1358,18 @@ async function deriveJourneyImageConfigDigest({
       {
         requireContainerdRootDescriptor: imageSelectionModeOf(probeIdentity)
           === containerdImageSelectionMode,
+        ...(imageSelectionModeOf(probeIdentity) === containerdImageSelectionMode
+          ? {
+            expectedConfigDigest,
+            expectedRootAnnotationConfigDigest,
+            expectedRootAnnotationsPresent,
+            expectedRootMediaType,
+            expectedRootSize,
+            selectedManifestConfigDigest: probeIdentity.manifestConfigDigest,
+            selectedManifestMediaType: probeIdentity.manifestMediaType,
+            selectedManifestSize: probeIdentity.manifestSize,
+          }
+          : {}),
         selectedManifestDigest: probeIdentity.manifestDigest,
       },
     );
@@ -1338,6 +1385,18 @@ async function deriveJourneyImageConfigDigest({
       {
         requireContainerdRootDescriptor: imageSelectionModeOf(probeIdentity)
           === containerdImageSelectionMode,
+        ...(imageSelectionModeOf(probeIdentity) === containerdImageSelectionMode
+          ? {
+            expectedConfigDigest,
+            expectedRootAnnotationConfigDigest,
+            expectedRootAnnotationsPresent,
+            expectedRootMediaType,
+            expectedRootSize,
+            selectedManifestConfigDigest: probeIdentity.manifestConfigDigest,
+            selectedManifestMediaType: probeIdentity.manifestMediaType,
+            selectedManifestSize: probeIdentity.manifestSize,
+          }
+          : {}),
         selectedManifestDigest: probeIdentity.manifestDigest,
       },
     );
@@ -1347,6 +1406,7 @@ async function deriveJourneyImageConfigDigest({
   }
   let cleanupError;
   if (probeId !== undefined) {
+    let selectionError;
     try {
       const current = parseSingleInspection(
         await runDocker(["container", "inspect", probeId], 256 * 1024, environment),
@@ -1354,8 +1414,13 @@ async function deriveJourneyImageConfigDigest({
       );
       const cleanupExpectation = {
         expectedAssetImageDigest,
+        expectedConfigDigest,
         expectedManifestDigest,
         expectedImagePlatform: imagePlatform,
+        expectedRootAnnotationConfigDigest,
+        expectedRootAnnotationsPresent,
+        expectedRootMediaType,
+        expectedRootSize,
         probeId,
         probeName,
         probeOwner,
@@ -1364,10 +1429,14 @@ async function deriveJourneyImageConfigDigest({
       };
       assertImageProbeOwnership(current, cleanupExpectation);
       if (probeSelectionVerified) {
-        const currentIdentity = assertImageConfigProbe(current, cleanupExpectation);
-        if (selectionContractSha256(currentIdentity)
-            !== selectionContractSha256(probeIdentity)) {
-          fail(`${role} config probe selection changed before exact cleanup.`);
+        try {
+          const currentIdentity = assertImageConfigProbe(current, cleanupExpectation);
+          if (selectionContractSha256(currentIdentity)
+              !== selectionContractSha256(probeIdentity)) {
+            fail(`${role} config probe selection changed before exact cleanup.`);
+          }
+        } catch (error) {
+          selectionError = error;
         }
       }
       const removed = splitLines(await runDocker([
@@ -1381,8 +1450,14 @@ async function deriveJourneyImageConfigDigest({
         "--filter", `name=^/${probeName}$`,
       ], 4 * 1024, environment));
       if (absentAfter.length !== 0) fail("Verifier-owned config probe survived exact cleanup.");
+      if (selectionError !== undefined) throw selectionError;
     } catch (error) {
-      cleanupError = error;
+      cleanupError = selectionError !== undefined && error !== selectionError
+        ? new AggregateError(
+          [selectionError, error],
+          "Image selection drift and exact probe cleanup both failed.",
+        )
+        : error;
     }
   }
   if (derivationError !== undefined) {
@@ -1911,14 +1986,20 @@ function assertImageConfigProbe(probe, expected) {
     }
     return Object.freeze({ configDigest: selectedImageDigest });
   }
+  if (selectedImageDigest !== expected.expectedAssetImageDigest) {
+    fail(`${expected.role} containerd probe did not select its attested OCI root.`);
+  }
   const manifestDescriptor = exactImageManifestDescriptor(
     probe.ImageManifestDescriptor,
     `${expected.role} config probe platform manifest`,
     expected.expectedImagePlatform,
+    {
+      expectedConfigDigest: expected.expectedConfigDigest,
+      expectedRootDigest: expected.expectedAssetImageDigest,
+      expectedRootMediaType: expected.expectedRootMediaType,
+      expectedRootSize: expected.expectedRootSize,
+    },
   );
-  if (selectedImageDigest !== expected.expectedAssetImageDigest) {
-    fail(`${expected.role} containerd probe did not select its attested OCI root.`);
-  }
   if (expected.role === "application" && expected.expectedManifestDigest === undefined) {
     fail("Application containerd selection is not bound to its asset manifest attestation.");
   }
@@ -1927,8 +2008,17 @@ function assertImageConfigProbe(probe, expected) {
     fail(`${expected.role} containerd platform manifest differs from its expected digest.`);
   }
   return Object.freeze({
+    ...(manifestDescriptor.configDigest === undefined
+      ? {}
+      : { manifestConfigDigest: manifestDescriptor.configDigest }),
     imageSelectionMode: containerdImageSelectionMode,
     manifestDigest: manifestDescriptor.digest,
+    manifestMediaType: manifestDescriptor.mediaType,
+    manifestSize: manifestDescriptor.size,
+    ...(expected.expectedRootAnnotationConfigDigest === undefined
+      ? {}
+      : { rootAnnotationConfigDigest: expected.expectedRootAnnotationConfigDigest }),
+    rootAnnotationsPresent: expected.expectedRootAnnotationsPresent,
     runtimeImageDigest: selectedImageDigest,
   });
 }
@@ -1949,8 +2039,17 @@ function assertImageProbeOwnership(probe, expected) {
   return selectedImageDigest;
 }
 
-function exactImageManifestDescriptor(value, label, expectedPlatform) {
+function exactImageManifestDescriptor(
+  value,
+  label,
+  expectedPlatform,
+  { expectedConfigDigest, expectedRootDigest, expectedRootMediaType, expectedRootSize },
+) {
   const platform = exactImagePlatform(expectedPlatform, `${label} expected platform`);
+  const annotationsPresent = Object.hasOwn(value ?? {}, "annotations");
+  const descriptorKeys = annotationsPresent
+    ? ["annotations", "digest", "mediaType", "platform", "size"]
+    : ["digest", "mediaType", "platform", "size"];
   const observedPlatformKeys = Object.keys(value?.platform ?? {}).sort();
   const platformKeysValid = JSON.stringify(observedPlatformKeys)
       === JSON.stringify(["architecture", "os"])
@@ -1958,7 +2057,7 @@ function exactImageManifestDescriptor(value, label, expectedPlatform) {
       === JSON.stringify(["architecture", "os", "variant"]);
   if (!value || typeof value !== "object" || Array.isArray(value)
     || JSON.stringify(Object.keys(value).sort())
-      !== JSON.stringify(["digest", "mediaType", "platform", "size"])
+      !== JSON.stringify(descriptorKeys)
     || !platformImageManifestMediaTypes.has(value.mediaType)
     || !/^sha256:[a-f0-9]{64}$/.test(value.digest ?? "")
     || !Number.isSafeInteger(value.size) || value.size < 1 || value.size > 16 * 1024 * 1024
@@ -1970,7 +2069,26 @@ function exactImageManifestDescriptor(value, label, expectedPlatform) {
       && (platform.architecture !== "arm64" || value.platform.variant !== "v8"))) {
     fail(`${label} is invalid.`);
   }
+  if (platformImageManifestMediaTypes.has(expectedRootMediaType)
+    && value.digest === expectedRootDigest
+    && value.mediaType !== expectedRootMediaType) {
+    fail(`${label} differs from its authoritative single-manifest root media type.`);
+  }
+  const configDigest = value.annotations?.["config.digest"];
+  if (annotationsPresent
+    && (!value.annotations || typeof value.annotations !== "object"
+      || Array.isArray(value.annotations)
+      || JSON.stringify(Object.keys(value.annotations).sort())
+        !== JSON.stringify(["config.digest"])
+      || !/^sha256:[a-f0-9]{64}$/.test(configDigest ?? "")
+      || value.digest !== expectedRootDigest
+      || value.mediaType !== expectedRootMediaType
+      || value.size !== expectedRootSize
+      || (expectedConfigDigest !== undefined && configDigest !== expectedConfigDigest))) {
+    fail(`${label} annotations are invalid.`);
+  }
   return Object.freeze({
+    ...(annotationsPresent ? { configDigest } : {}),
     digest: value.digest,
     mediaType: value.mediaType,
     platform,
@@ -2042,7 +2160,16 @@ function selectionContractSha256(identity) {
     imageSelectionMode: mode,
   } : {
     imageSelectionMode: mode,
+    ...(identity.manifestConfigDigest === undefined
+      ? {}
+      : { manifestConfigDigest: identity.manifestConfigDigest }),
     manifestDigest: identity.manifestDigest,
+    manifestMediaType: identity.manifestMediaType,
+    manifestSize: identity.manifestSize,
+    ...(identity.rootAnnotationConfigDigest === undefined
+      ? {}
+      : { rootAnnotationConfigDigest: identity.rootAnnotationConfigDigest }),
+    rootAnnotationsPresent: identity.rootAnnotationsPresent,
     runtimeImageDigest: identity.runtimeImageDigest,
   }));
 }
@@ -2053,13 +2180,31 @@ function assertAssetRootInspection(
   reference,
   label,
   {
+    expectedConfigDigest = undefined,
+    expectedRootAnnotationConfigDigest = undefined,
+    expectedRootAnnotationsPresent = undefined,
+    expectedRootMediaType = undefined,
+    expectedRootSize = undefined,
     requireContainerdRootDescriptor = false,
+    selectedManifestConfigDigest = undefined,
     selectedManifestDigest = undefined,
+    selectedManifestMediaType = undefined,
+    selectedManifestSize = undefined,
   } = {},
 ) {
   const descriptorAvailable = inspection?.Descriptor !== undefined
     && inspection.Descriptor !== null;
   const descriptorDigest = descriptorAvailable ? inspection.Descriptor?.digest : undefined;
+  const rootAnnotationsPresent = descriptorAvailable
+    && Object.hasOwn(inspection.Descriptor, "annotations");
+  if (requireContainerdRootDescriptor
+    && (typeof expectedRootAnnotationsPresent !== "boolean"
+      || (expectedRootAnnotationsPresent
+        && !/^sha256:[a-f0-9]{64}$/.test(expectedRootAnnotationConfigDigest ?? ""))
+      || (!expectedRootAnnotationsPresent
+        && expectedRootAnnotationConfigDigest !== undefined))) {
+    fail(`${label} expected authoritative OCI root annotation contract is invalid.`);
+  }
   if (descriptorAvailable
     && (!inspection.Descriptor || typeof inspection.Descriptor !== "object"
       || Array.isArray(inspection.Descriptor)
@@ -2069,17 +2214,55 @@ function assertAssetRootInspection(
   }
   if (requireContainerdRootDescriptor
     && (!descriptorAvailable
+      || JSON.stringify(Object.keys(inspection.Descriptor).sort())
+        !== JSON.stringify(rootAnnotationsPresent
+          ? ["annotations", "digest", "mediaType", "size"]
+          : ["digest", "mediaType", "size"])
       || !rootImageManifestMediaTypes.has(inspection.Descriptor.mediaType)
       || !Number.isSafeInteger(inspection.Descriptor.size)
       || inspection.Descriptor.size < 1
       || inspection.Descriptor.size > 16 * 1024 * 1024)) {
     fail(`${label} authoritative OCI root descriptor metadata is invalid.`);
   }
+  if (expectedRootMediaType !== undefined
+    && inspection.Descriptor?.mediaType !== expectedRootMediaType) {
+    fail(`${label} authoritative OCI root media type changed.`);
+  }
+  if (expectedRootSize !== undefined && inspection.Descriptor?.size !== expectedRootSize) {
+    fail(`${label} authoritative OCI root size changed.`);
+  }
+  if (requireContainerdRootDescriptor
+    && rootAnnotationsPresent !== expectedRootAnnotationsPresent) {
+    fail(`${label} authoritative OCI root annotation presence changed.`);
+  }
   if (requireContainerdRootDescriptor
     && (!/^sha256:[a-f0-9]{64}$/.test(selectedManifestDigest ?? "")
       || (platformImageManifestMediaTypes.has(inspection.Descriptor.mediaType)
         && selectedManifestDigest !== expectedDigest))) {
     fail(`${label} authoritative single-manifest OCI root has a different selected manifest.`);
+  }
+  if (requireContainerdRootDescriptor
+    && !platformImageManifestMediaTypes.has(inspection.Descriptor.mediaType)
+    && selectedManifestDigest === expectedDigest) {
+    fail(`${label} authoritative OCI index root aliases its selected platform manifest.`);
+  }
+  const rootConfigDigest = inspection.Descriptor?.annotations?.["config.digest"];
+  if (requireContainerdRootDescriptor && rootAnnotationsPresent
+    && (!inspection.Descriptor.annotations
+      || typeof inspection.Descriptor.annotations !== "object"
+      || Array.isArray(inspection.Descriptor.annotations)
+      || JSON.stringify(Object.keys(inspection.Descriptor.annotations).sort())
+        !== JSON.stringify(["config.digest"])
+      || !/^sha256:[a-f0-9]{64}$/.test(rootConfigDigest ?? "")
+      || !platformImageManifestMediaTypes.has(inspection.Descriptor.mediaType)
+      || selectedManifestDigest !== expectedDigest
+      || selectedManifestMediaType !== inspection.Descriptor.mediaType
+      || selectedManifestSize !== inspection.Descriptor.size
+      || (expectedConfigDigest !== undefined && rootConfigDigest !== expectedConfigDigest)
+      || rootConfigDigest !== expectedRootAnnotationConfigDigest
+      || (selectedManifestConfigDigest !== undefined
+        && rootConfigDigest !== selectedManifestConfigDigest))) {
+    fail(`${label} authoritative OCI root annotations are invalid.`);
   }
   if (!Array.isArray(inspection?.RepoDigests ?? [])) {
     fail(`${label} repository digest set is invalid.`);

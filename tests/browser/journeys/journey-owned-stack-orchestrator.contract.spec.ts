@@ -526,6 +526,916 @@ test("binds a containerd single-manifest root only to the same selected digest",
   expect(docker.activeProbeCount).toBe(0);
 });
 
+test("binds Docker's exact config annotation on a containerd single-manifest root", async () => {
+  const contract = ownedContract("baseline");
+  const applicationRoot = `sha256:${"a".repeat(64)}`;
+  const applicationConfig = `sha256:${"4".repeat(64)}`;
+  const docker = createOwnedDockerMock(
+    contract,
+    `sha256:${"2".repeat(64)}`,
+    `sha256:${"3".repeat(64)}`,
+    {
+      applicationManifestAnnotations: { "config.digest": applicationConfig },
+      applicationManifestDigest: applicationRoot,
+      applicationRootAnnotations: { "config.digest": applicationConfig },
+      applicationRootMediaType: "application/vnd.oci.image.manifest.v1+json",
+      mode: "containerd",
+    },
+  );
+  const identity = await deriveJourneyApplicationImageConfigDigest({
+    contract,
+    environment: {},
+    expectedApplicationAssetImageDigest: applicationRoot,
+    expectedApplicationImageConfigDigest: applicationConfig,
+    expectedApplicationManifestDigest: applicationRoot,
+    expectedApplicationRepoDigests: [applicationRoot],
+    probeNonce: "1".repeat(32),
+    runDocker: docker.run,
+  });
+  expect(identity).toMatchObject({
+    assetImageDigest: applicationRoot,
+    configDigest: applicationConfig,
+    manifestDigest: applicationRoot,
+    runtimeImageDigest: applicationRoot,
+  });
+  expect(Object.hasOwn(identity, "manifestConfigDigest")).toBe(false);
+  expect(docker.activeProbeCount).toBe(0);
+});
+
+test("keeps root-only and selected-only annotations validation-only and byte-stable", async () => {
+  const contract = ownedContract("baseline");
+  const applicationRoot = `sha256:${"a".repeat(64)}`;
+  const applicationConfig = `sha256:${"4".repeat(64)}`;
+  const annotation = { "config.digest": applicationConfig };
+  const identities = [];
+  for (const annotationOptions of [
+    {},
+    { applicationRootAnnotations: annotation },
+    { applicationManifestAnnotations: annotation },
+    {
+      applicationManifestAnnotations: annotation,
+      applicationRootAnnotations: annotation,
+    },
+  ]) {
+    const docker = createOwnedDockerMock(
+      contract,
+      `sha256:${"2".repeat(64)}`,
+      `sha256:${"3".repeat(64)}`,
+      {
+        ...annotationOptions,
+        applicationManifestDigest: applicationRoot,
+        applicationRootMediaType: "application/vnd.oci.image.manifest.v1+json",
+        mode: "containerd",
+      },
+    );
+    identities.push(await deriveJourneyApplicationImageConfigDigest({
+      contract,
+      environment: {},
+      expectedApplicationAssetImageDigest: applicationRoot,
+      expectedApplicationImageConfigDigest: applicationConfig,
+      expectedApplicationManifestDigest: applicationRoot,
+      expectedApplicationRepoDigests: [applicationRoot],
+      probeNonce: "e".repeat(32),
+      runDocker: docker.run,
+    }));
+    expect(docker.activeProbeCount).toBe(0);
+  }
+  for (const identity of identities.slice(1)) {
+    expect(identity).toEqual(identities[0]);
+    expect(JSON.stringify(identity)).toBe(JSON.stringify(identities[0]));
+  }
+  expect(Object.keys(identities[0]).sort()).toEqual([
+    "assetImageDigest",
+    "configDigest",
+    "contractSha256",
+    "imageSelectionMode",
+    "manifestDigest",
+    "probeOwnershipSha256",
+    "referenceSha256",
+    "repoDigests",
+    "role",
+    "runtimeImageDigest",
+    "status",
+  ]);
+});
+
+test("binds an exact migration config annotation without exposing it in the receipt", async () => {
+  const contract = ownedContract("baseline");
+  const migrationRoot = `sha256:${"2".repeat(64)}`;
+  const migrationConfig = `sha256:${"3".repeat(64)}`;
+  const docker = createOwnedDockerMock(
+    contract,
+    migrationRoot,
+    migrationConfig,
+    {
+      migrationManifestAnnotations: { "config.digest": migrationConfig },
+      migrationManifestDigest: migrationRoot,
+      migrationRootAnnotations: { "config.digest": migrationConfig },
+      migrationRootMediaType: "application/vnd.oci.image.manifest.v1+json",
+      migrationMode: "containerd",
+    },
+  );
+  const identity = await deriveJourneyMigrationImageConfigDigest({
+    contract,
+    environment: {},
+    expectedMigrationAssetImageDigest: migrationRoot,
+    expectedMigrationManifestDigest: migrationRoot,
+    probeNonce: "6".repeat(32),
+    runDocker: docker.run,
+  });
+  expect(identity).toMatchObject({
+    assetImageDigest: migrationRoot,
+    manifestDigest: migrationRoot,
+    runtimeImageDigest: migrationRoot,
+  });
+  expect(Object.hasOwn(identity, "configDigest")).toBe(false);
+  expect(Object.hasOwn(identity, "manifestConfigDigest")).toBe(false);
+  expect(docker.activeProbeCount).toBe(0);
+});
+
+test("rejects malformed or unbound authoritative root config annotations", async () => {
+  const cases = [
+    {
+      label: "wrong root config digest",
+      rootAnnotations: { "config.digest": `sha256:${"5".repeat(64)}` },
+      singleRoot: true,
+    },
+    {
+      label: "extra root annotation",
+      rootAnnotations: {
+        "config.digest": `sha256:${"4".repeat(64)}`,
+        unexpected: `sha256:${"5".repeat(64)}`,
+      },
+      singleRoot: true,
+    },
+    {
+      label: "annotation on index root",
+      rootAnnotations: { "config.digest": `sha256:${"4".repeat(64)}` },
+      singleRoot: false,
+    },
+  ] as const;
+  for (const { label, rootAnnotations, singleRoot } of cases) {
+    const contract = ownedContract("baseline");
+    const applicationRoot = `sha256:${"a".repeat(64)}`;
+    const applicationManifest = singleRoot
+      ? applicationRoot
+      : `sha256:${"b".repeat(64)}`;
+    const docker = createOwnedDockerMock(
+      contract,
+      `sha256:${"2".repeat(64)}`,
+      `sha256:${"3".repeat(64)}`,
+      {
+        ...(singleRoot ? {
+          applicationManifestAnnotations: {
+            "config.digest": `sha256:${"4".repeat(64)}`,
+          },
+          applicationRootMediaType: "application/vnd.oci.image.manifest.v1+json",
+        } : {}),
+        applicationManifestDigest: applicationManifest,
+        applicationRootAnnotations: { ...rootAnnotations },
+        mode: "containerd",
+      },
+    );
+    await expect(deriveJourneyApplicationImageConfigDigest({
+      contract,
+      environment: {},
+      expectedApplicationAssetImageDigest: applicationRoot,
+      expectedApplicationImageConfigDigest: `sha256:${"4".repeat(64)}`,
+      expectedApplicationManifestDigest: applicationManifest,
+      expectedApplicationRepoDigests: singleRoot
+        ? [applicationRoot]
+        : [applicationRoot, applicationManifest],
+      probeNonce: "d".repeat(32),
+      runDocker: docker.run,
+    }), label).rejects.toThrow(/root/);
+    expect(docker.activeProbeCount, label).toBe(0);
+  }
+});
+
+test("revalidates the initial root annotation snapshot after containerd selection", async () => {
+  const cases: Array<{
+    annotations: unknown;
+    initialRootSize?: number;
+    label: string;
+    singleRoot: boolean;
+  }> = [
+    { annotations: null, label: "null annotations", singleRoot: true },
+    { annotations: [], label: "array annotations", singleRoot: true },
+    { annotations: {}, label: "empty annotations", singleRoot: true },
+    {
+      annotations: { "config.digest": "not-a-digest" },
+      label: "malformed config digest",
+      singleRoot: true,
+    },
+    {
+      annotations: { "config.digest": `sha256:${"5".repeat(64)}` },
+      label: "wrong config digest",
+      singleRoot: true,
+    },
+    {
+      annotations: { "config.digest": `sha256:${"4".repeat(64)}` },
+      initialRootSize: 4096,
+      label: "annotated root and selected size mismatch",
+      singleRoot: true,
+    },
+    {
+      annotations: { "config.digest": `sha256:${"4".repeat(64)}` },
+      label: "annotation on index root",
+      singleRoot: false,
+    },
+  ];
+  for (const { annotations, initialRootSize = 2048, label, singleRoot } of cases) {
+    const contract = ownedContract("baseline");
+    const applicationRoot = `sha256:${"a".repeat(64)}`;
+    const applicationManifest = singleRoot
+      ? applicationRoot
+      : `sha256:${"b".repeat(64)}`;
+    const docker = createOwnedDockerMock(
+      contract,
+      `sha256:${"2".repeat(64)}`,
+      `sha256:${"3".repeat(64)}`,
+      {
+        applicationManifestDigest: applicationManifest,
+        ...(singleRoot ? {
+          applicationRootMediaType: "application/vnd.oci.image.manifest.v1+json",
+        } : {}),
+        mode: "containerd",
+      },
+    );
+    let imageInspections = 0;
+    const run = async (
+      args: string[],
+      maximumBytes?: number,
+      environment: Record<string, string> = {},
+    ) => {
+      const output = await docker.run(args, maximumBytes, environment);
+      if (args[0] === "image" && args[1] === "inspect") {
+        imageInspections += 1;
+        if (imageInspections === 1) {
+          const [image] = JSON.parse(output) as [Record<string, unknown>];
+          const descriptor = image.Descriptor as Record<string, unknown>;
+          descriptor.annotations = annotations;
+          descriptor.size = initialRootSize;
+          return JSON.stringify([image]);
+        }
+      }
+      return output;
+    };
+    await expect(deriveJourneyApplicationImageConfigDigest({
+      contract,
+      environment: {},
+      expectedApplicationAssetImageDigest: applicationRoot,
+      expectedApplicationImageConfigDigest: `sha256:${"4".repeat(64)}`,
+      expectedApplicationManifestDigest: applicationManifest,
+      expectedApplicationRepoDigests: singleRoot
+        ? [applicationRoot]
+        : [applicationRoot, applicationManifest],
+      probeNonce: "f".repeat(32),
+      runDocker: run,
+    }), label).rejects.toThrow(/root/);
+    expect(docker.activeProbeCount, label).toBe(0);
+  }
+});
+
+test("rejects initial root annotation disappearance without leaking it into cleanup", async () => {
+  const contract = ownedContract("baseline");
+  const applicationRoot = `sha256:${"a".repeat(64)}`;
+  const applicationConfig = `sha256:${"4".repeat(64)}`;
+  const docker = createOwnedDockerMock(
+    contract,
+    `sha256:${"2".repeat(64)}`,
+    `sha256:${"3".repeat(64)}`,
+    {
+      applicationManifestDigest: applicationRoot,
+      applicationRootMediaType: "application/vnd.oci.image.manifest.v1+json",
+      mode: "containerd",
+    },
+  );
+  let imageInspections = 0;
+  const run = async (
+    args: string[],
+    maximumBytes?: number,
+    environment: Record<string, string> = {},
+  ) => {
+    const output = await docker.run(args, maximumBytes, environment);
+    if (args[0] === "image" && args[1] === "inspect") {
+      imageInspections += 1;
+      const [image] = JSON.parse(output) as [Record<string, unknown>];
+      (image.Descriptor as Record<string, unknown>).size = 2048;
+      if (imageInspections === 1) {
+        (image.Descriptor as Record<string, unknown>).annotations = {
+          "config.digest": applicationConfig,
+        };
+      }
+      return JSON.stringify([image]);
+    }
+    return output;
+  };
+  await expect(deriveJourneyApplicationImageConfigDigest({
+    contract,
+    environment: {},
+    expectedApplicationAssetImageDigest: applicationRoot,
+    expectedApplicationImageConfigDigest: applicationConfig,
+    expectedApplicationManifestDigest: applicationRoot,
+    expectedApplicationRepoDigests: [applicationRoot],
+    probeNonce: "0".repeat(32),
+    runDocker: run,
+  })).rejects.toThrow(/annotation presence changed/);
+  expect(docker.activeProbeCount).toBe(0);
+});
+
+test("rejects authoritative root config and size drift on the first recheck", async () => {
+  for (const drift of ["config", "size"] as const) {
+    const contract = ownedContract("baseline");
+    const applicationRoot = `sha256:${"a".repeat(64)}`;
+    const applicationConfig = `sha256:${"4".repeat(64)}`;
+    const docker = createOwnedDockerMock(
+      contract,
+      `sha256:${"2".repeat(64)}`,
+      `sha256:${"3".repeat(64)}`,
+      {
+        applicationManifestAnnotations: { "config.digest": applicationConfig },
+        applicationManifestDigest: applicationRoot,
+        applicationRootAnnotations: { "config.digest": applicationConfig },
+        applicationRootMediaType: "application/vnd.oci.image.manifest.v1+json",
+        mode: "containerd",
+      },
+    );
+    let imageInspections = 0;
+    const run = async (
+      args: string[],
+      maximumBytes?: number,
+      environment: Record<string, string> = {},
+    ) => {
+      const output = await docker.run(args, maximumBytes, environment);
+      if (args[0] === "image" && args[1] === "inspect") {
+        imageInspections += 1;
+        if (imageInspections === 2) {
+          const [image] = JSON.parse(output) as [Record<string, unknown>];
+          const descriptor = image.Descriptor as Record<string, unknown>;
+          if (drift === "config") {
+            descriptor.annotations = { "config.digest": `sha256:${"5".repeat(64)}` };
+          } else {
+            descriptor.size = 2049;
+          }
+          return JSON.stringify([image]);
+        }
+      }
+      return output;
+    };
+    await expect(deriveJourneyApplicationImageConfigDigest({
+      contract,
+      environment: {},
+      expectedApplicationAssetImageDigest: applicationRoot,
+      expectedApplicationImageConfigDigest: applicationConfig,
+      expectedApplicationManifestDigest: applicationRoot,
+      expectedApplicationRepoDigests: [applicationRoot],
+      probeNonce: "1".repeat(32),
+      runDocker: run,
+    }), drift).rejects.toThrow(drift === "config" ? /root annotations/ : /root size changed/);
+    expect(docker.activeProbeCount, drift).toBe(0);
+  }
+});
+
+test("freezes a migration root-only config annotation across root rechecks", async () => {
+  const contract = ownedContract("baseline");
+  const migrationRoot = `sha256:${"2".repeat(64)}`;
+  const initialConfig = `sha256:${"3".repeat(64)}`;
+  const docker = createOwnedDockerMock(
+    contract,
+    migrationRoot,
+    initialConfig,
+    {
+      migrationManifestDigest: migrationRoot,
+      migrationRootAnnotations: { "config.digest": initialConfig },
+      migrationRootMediaType: "application/vnd.oci.image.manifest.v1+json",
+      migrationMode: "containerd",
+    },
+  );
+  let imageInspections = 0;
+  const run = async (
+    args: string[],
+    maximumBytes?: number,
+    environment: Record<string, string> = {},
+  ) => {
+    const output = await docker.run(args, maximumBytes, environment);
+    if (args[0] === "image" && args[1] === "inspect") {
+      imageInspections += 1;
+      if (imageInspections === 2) {
+        const [image] = JSON.parse(output) as [Record<string, unknown>];
+        (image.Descriptor as Record<string, unknown>).annotations = {
+          "config.digest": `sha256:${"5".repeat(64)}`,
+        };
+        return JSON.stringify([image]);
+      }
+    }
+    return output;
+  };
+  await expect(deriveJourneyMigrationImageConfigDigest({
+    contract,
+    environment: {},
+    expectedMigrationAssetImageDigest: migrationRoot,
+    expectedMigrationManifestDigest: migrationRoot,
+    probeNonce: "3".repeat(32),
+    runDocker: run,
+  })).rejects.toThrow(/root annotations are invalid/);
+  expect(docker.activeProbeCount).toBe(0);
+});
+
+test("rejects a config annotation when the authoritative OCI root is an index", async () => {
+  const contract = ownedContract("baseline");
+  const applicationRoot = `sha256:${"a".repeat(64)}`;
+  const applicationConfig = `sha256:${"4".repeat(64)}`;
+  const docker = createOwnedDockerMock(
+    contract,
+    `sha256:${"2".repeat(64)}`,
+    `sha256:${"3".repeat(64)}`,
+    {
+      applicationManifestAnnotations: { "config.digest": applicationConfig },
+      applicationManifestDigest: applicationRoot,
+      mode: "containerd",
+    },
+  );
+  await expect(deriveJourneyApplicationImageConfigDigest({
+    contract,
+    environment: {},
+    expectedApplicationAssetImageDigest: applicationRoot,
+    expectedApplicationImageConfigDigest: applicationConfig,
+    expectedApplicationManifestDigest: applicationRoot,
+    expectedApplicationRepoDigests: [applicationRoot],
+    probeNonce: "7".repeat(32),
+    runDocker: docker.run,
+  })).rejects.toThrow(/manifest/);
+  expect(docker.activeProbeCount).toBe(0);
+});
+
+test("rejects an OCI index root that aliases its selected manifest without annotations", async () => {
+  const contract = ownedContract("baseline");
+  const applicationRoot = `sha256:${"a".repeat(64)}`;
+  const docker = createOwnedDockerMock(
+    contract,
+    `sha256:${"2".repeat(64)}`,
+    `sha256:${"3".repeat(64)}`,
+    {
+      applicationManifestDigest: applicationRoot,
+      mode: "containerd",
+    },
+  );
+  await expect(deriveJourneyApplicationImageConfigDigest({
+    contract,
+    environment: {},
+    expectedApplicationAssetImageDigest: applicationRoot,
+    expectedApplicationImageConfigDigest: `sha256:${"4".repeat(64)}`,
+    expectedApplicationManifestDigest: applicationRoot,
+    expectedApplicationRepoDigests: [applicationRoot],
+    probeNonce: "9".repeat(32),
+    runDocker: docker.run,
+  })).rejects.toThrow(/index root aliases/);
+  expect(docker.activeProbeCount).toBe(0);
+});
+
+test("rejects an annotated manifest media type that differs from its authoritative root", async () => {
+  const contract = ownedContract("baseline");
+  const applicationRoot = `sha256:${"a".repeat(64)}`;
+  const applicationConfig = `sha256:${"4".repeat(64)}`;
+  const docker = createOwnedDockerMock(
+    contract,
+    `sha256:${"2".repeat(64)}`,
+    `sha256:${"3".repeat(64)}`,
+    {
+      applicationManifestAnnotations: { "config.digest": applicationConfig },
+      applicationManifestDigest: applicationRoot,
+      applicationManifestMediaType: "application/vnd.docker.distribution.manifest.v2+json",
+      applicationRootMediaType: "application/vnd.oci.image.manifest.v1+json",
+      mode: "containerd",
+    },
+  );
+  await expect(deriveJourneyApplicationImageConfigDigest({
+    contract,
+    environment: {},
+    expectedApplicationAssetImageDigest: applicationRoot,
+    expectedApplicationImageConfigDigest: applicationConfig,
+    expectedApplicationManifestDigest: applicationRoot,
+    expectedApplicationRepoDigests: [applicationRoot],
+    probeNonce: "8".repeat(32),
+    runDocker: docker.run,
+  })).rejects.toThrow(/manifest/);
+  expect(docker.activeProbeCount).toBe(0);
+});
+
+test("rejects an unannotated manifest media type that differs from a single root", async () => {
+  const contract = ownedContract("baseline");
+  const applicationRoot = `sha256:${"a".repeat(64)}`;
+  const docker = createOwnedDockerMock(
+    contract,
+    `sha256:${"2".repeat(64)}`,
+    `sha256:${"3".repeat(64)}`,
+    {
+      applicationManifestDigest: applicationRoot,
+      applicationManifestMediaType: "application/vnd.docker.distribution.manifest.v2+json",
+      applicationRootMediaType: "application/vnd.oci.image.manifest.v1+json",
+      mode: "containerd",
+    },
+  );
+  await expect(deriveJourneyApplicationImageConfigDigest({
+    contract,
+    environment: {},
+    expectedApplicationAssetImageDigest: applicationRoot,
+    expectedApplicationImageConfigDigest: `sha256:${"4".repeat(64)}`,
+    expectedApplicationManifestDigest: applicationRoot,
+    expectedApplicationRepoDigests: [applicationRoot],
+    probeNonce: "b".repeat(32),
+    runDocker: docker.run,
+  })).rejects.toThrow(/single-manifest root media type/);
+  expect(docker.activeProbeCount).toBe(0);
+});
+
+test("rejects config annotations outside the exact single-manifest attestation", async () => {
+  const cases = [
+    {
+      annotations: { "config.digest": `sha256:${"5".repeat(64)}` },
+      label: "wrong config digest",
+      manifestIsRoot: true,
+    },
+    {
+      annotations: {
+        "config.digest": `sha256:${"4".repeat(64)}`,
+        unexpected: `sha256:${"5".repeat(64)}`,
+      },
+      label: "extra annotation",
+      manifestIsRoot: true,
+    },
+    {
+      annotations: { "config.digest": `sha256:${"4".repeat(64)}` },
+      label: "annotation on index child",
+      manifestIsRoot: false,
+    },
+  ] as const;
+  for (const { annotations, label, manifestIsRoot } of cases) {
+    const contract = ownedContract("baseline");
+    const applicationRoot = `sha256:${"a".repeat(64)}`;
+    const applicationManifest = manifestIsRoot
+      ? applicationRoot
+      : `sha256:${"b".repeat(64)}`;
+    const docker = createOwnedDockerMock(
+      contract,
+      `sha256:${"2".repeat(64)}`,
+      `sha256:${"3".repeat(64)}`,
+      {
+        applicationManifestAnnotations: { ...annotations },
+        applicationManifestDigest: applicationManifest,
+        ...(manifestIsRoot ? {
+          applicationRootMediaType: "application/vnd.oci.image.manifest.v1+json",
+        } : {}),
+        mode: "containerd",
+      },
+    );
+    await expect(deriveJourneyApplicationImageConfigDigest({
+      contract,
+      environment: {},
+      expectedApplicationAssetImageDigest: applicationRoot,
+      expectedApplicationImageConfigDigest: `sha256:${"4".repeat(64)}`,
+      expectedApplicationManifestDigest: applicationManifest,
+      expectedApplicationRepoDigests: manifestIsRoot
+        ? [applicationRoot]
+        : [applicationRoot, applicationManifest],
+      probeNonce: "2".repeat(32),
+      runDocker: docker.run,
+    }), label).rejects.toThrow(/manifest/);
+    expect(docker.activeProbeCount, label).toBe(0);
+  }
+});
+
+test("rejects malformed config annotations on a true single-manifest root", async () => {
+  const malformedAnnotations: Array<[string, unknown]> = [
+    ["null", null],
+    ["array", []],
+    ["empty", {}],
+    ["non-digest", { "config.digest": "not-a-digest" }],
+  ];
+  for (const [label, annotations] of malformedAnnotations) {
+    const contract = ownedContract("baseline");
+    const applicationRoot = `sha256:${"a".repeat(64)}`;
+    const applicationConfig = `sha256:${"4".repeat(64)}`;
+    const docker = createOwnedDockerMock(
+      contract,
+      `sha256:${"2".repeat(64)}`,
+      `sha256:${"3".repeat(64)}`,
+      {
+        applicationManifestAnnotations: { "config.digest": applicationConfig },
+        applicationManifestDigest: applicationRoot,
+        applicationRootMediaType: "application/vnd.oci.image.manifest.v1+json",
+        mode: "containerd",
+      },
+    );
+    let injected = false;
+    const run = async (
+      args: string[],
+      maximumBytes?: number,
+      environment: Record<string, string> = {},
+    ) => {
+      const output = await docker.run(args, maximumBytes, environment);
+      if (!injected && args[0] === "container" && args[1] === "inspect") {
+        injected = true;
+        const [probe] = JSON.parse(output) as [Record<string, unknown>];
+        (probe.ImageManifestDescriptor as Record<string, unknown>).annotations = annotations;
+        return JSON.stringify([probe]);
+      }
+      return output;
+    };
+    await expect(deriveJourneyApplicationImageConfigDigest({
+      contract,
+      environment: {},
+      expectedApplicationAssetImageDigest: applicationRoot,
+      expectedApplicationImageConfigDigest: applicationConfig,
+      expectedApplicationManifestDigest: applicationRoot,
+      expectedApplicationRepoDigests: [applicationRoot],
+      probeNonce: "3".repeat(32),
+      runDocker: run,
+    }), label).rejects.toThrow(/manifest/);
+    expect(docker.activeProbeCount, label).toBe(0);
+  }
+});
+
+test("detects migration annotation drift and still removes its exact owned probe", async () => {
+  const contract = ownedContract("baseline");
+  const migrationRoot = `sha256:${"2".repeat(64)}`;
+  const migrationConfig = `sha256:${"3".repeat(64)}`;
+  const docker = createOwnedDockerMock(
+    contract,
+    migrationRoot,
+    migrationConfig,
+    {
+      migrationManifestAnnotations: { "config.digest": migrationConfig },
+      migrationManifestDigest: migrationRoot,
+      migrationRootAnnotations: { "config.digest": migrationConfig },
+      migrationRootMediaType: "application/vnd.oci.image.manifest.v1+json",
+      migrationMode: "containerd",
+    },
+  );
+  let probeInspections = 0;
+  const run = async (
+    args: string[],
+    maximumBytes?: number,
+    environment: Record<string, string> = {},
+  ) => {
+    const output = await docker.run(args, maximumBytes, environment);
+    if (args[0] === "container" && args[1] === "inspect") {
+      probeInspections += 1;
+      if (probeInspections === 2) {
+        const [probe] = JSON.parse(output) as [Record<string, unknown>];
+        delete (probe.ImageManifestDescriptor as Record<string, unknown>).annotations;
+        return JSON.stringify([probe]);
+      }
+    }
+    return output;
+  };
+  await expect(deriveJourneyMigrationImageConfigDigest({
+    contract,
+    environment: {},
+    expectedMigrationAssetImageDigest: migrationRoot,
+    expectedMigrationManifestDigest: migrationRoot,
+    probeNonce: "4".repeat(32),
+    runDocker: run,
+  })).rejects.toThrow(/selection changed/);
+  expect(docker.activeProbeCount).toBe(0);
+  expect(docker.calls.some((args) => args.slice(0, 2).join(" ") === "container rm"))
+    .toBe(true);
+});
+
+test("detects unannotated platform manifest media-type drift before exact cleanup", async () => {
+  const contract = ownedContract("baseline");
+  const applicationRoot = `sha256:${"a".repeat(64)}`;
+  const applicationManifest = `sha256:${"b".repeat(64)}`;
+  const docker = createOwnedDockerMock(
+    contract,
+    `sha256:${"2".repeat(64)}`,
+    `sha256:${"3".repeat(64)}`,
+    {
+      applicationManifestDigest: applicationManifest,
+      mode: "containerd",
+    },
+  );
+  let probeInspections = 0;
+  const run = async (
+    args: string[],
+    maximumBytes?: number,
+    environment: Record<string, string> = {},
+  ) => {
+    const output = await docker.run(args, maximumBytes, environment);
+    if (args[0] === "container" && args[1] === "inspect") {
+      probeInspections += 1;
+      if (probeInspections === 2) {
+        const [probe] = JSON.parse(output) as [Record<string, unknown>];
+        (probe.ImageManifestDescriptor as Record<string, unknown>).mediaType =
+          "application/vnd.docker.distribution.manifest.v2+json";
+        return JSON.stringify([probe]);
+      }
+    }
+    return output;
+  };
+  await expect(deriveJourneyApplicationImageConfigDigest({
+    contract,
+    environment: {},
+    expectedApplicationAssetImageDigest: applicationRoot,
+    expectedApplicationImageConfigDigest: `sha256:${"4".repeat(64)}`,
+    expectedApplicationManifestDigest: applicationManifest,
+    expectedApplicationRepoDigests: [applicationRoot, applicationManifest],
+    probeNonce: "c".repeat(32),
+    runDocker: run,
+  })).rejects.toThrow(/selection changed/);
+  expect(docker.activeProbeCount).toBe(0);
+});
+
+test("detects annotated platform manifest size drift before exact cleanup", async () => {
+  const contract = ownedContract("baseline");
+  const migrationRoot = `sha256:${"2".repeat(64)}`;
+  const migrationConfig = `sha256:${"3".repeat(64)}`;
+  const docker = createOwnedDockerMock(
+    contract,
+    migrationRoot,
+    migrationConfig,
+    {
+      migrationManifestAnnotations: { "config.digest": migrationConfig },
+      migrationManifestDigest: migrationRoot,
+      migrationRootAnnotations: { "config.digest": migrationConfig },
+      migrationRootMediaType: "application/vnd.oci.image.manifest.v1+json",
+      migrationMode: "containerd",
+    },
+  );
+  let probeInspections = 0;
+  const run = async (
+    args: string[],
+    maximumBytes?: number,
+    environment: Record<string, string> = {},
+  ) => {
+    const output = await docker.run(args, maximumBytes, environment);
+    if (args[0] === "container" && args[1] === "inspect") {
+      probeInspections += 1;
+      if (probeInspections === 2) {
+        const [probe] = JSON.parse(output) as [Record<string, unknown>];
+        (probe.ImageManifestDescriptor as Record<string, unknown>).size = 2049;
+        return JSON.stringify([probe]);
+      }
+    }
+    return output;
+  };
+  await expect(deriveJourneyMigrationImageConfigDigest({
+    contract,
+    environment: {},
+    expectedMigrationAssetImageDigest: migrationRoot,
+    expectedMigrationManifestDigest: migrationRoot,
+    probeNonce: "4".repeat(32),
+    runDocker: run,
+  })).rejects.toThrow(/annotations are invalid/);
+  expect(docker.activeProbeCount).toBe(0);
+});
+
+test("binds unannotated manifest size into cleanup selection and removes on drift", async () => {
+  const contract = ownedContract("baseline");
+  const applicationRoot = `sha256:${"a".repeat(64)}`;
+  const applicationManifest = `sha256:${"b".repeat(64)}`;
+  const docker = createOwnedDockerMock(
+    contract,
+    `sha256:${"2".repeat(64)}`,
+    `sha256:${"3".repeat(64)}`,
+    {
+      applicationManifestDigest: applicationManifest,
+      mode: "containerd",
+    },
+  );
+  let probeInspections = 0;
+  const run = async (
+    args: string[],
+    maximumBytes?: number,
+    environment: Record<string, string> = {},
+  ) => {
+    const output = await docker.run(args, maximumBytes, environment);
+    if (args[0] === "container" && args[1] === "inspect") {
+      probeInspections += 1;
+      if (probeInspections === 2) {
+        const [probe] = JSON.parse(output) as [Record<string, unknown>];
+        (probe.ImageManifestDescriptor as Record<string, unknown>).size = 2049;
+        return JSON.stringify([probe]);
+      }
+    }
+    return output;
+  };
+  await expect(deriveJourneyApplicationImageConfigDigest({
+    contract,
+    environment: {},
+    expectedApplicationAssetImageDigest: applicationRoot,
+    expectedApplicationImageConfigDigest: `sha256:${"4".repeat(64)}`,
+    expectedApplicationManifestDigest: applicationManifest,
+    expectedApplicationRepoDigests: [applicationRoot, applicationManifest],
+    probeNonce: "2".repeat(32),
+    runDocker: run,
+  })).rejects.toThrow(/selection changed/);
+  expect(docker.activeProbeCount).toBe(0);
+});
+
+test("preserves annotation drift and exact removal failures in one AggregateError", async () => {
+  const contract = ownedContract("baseline");
+  const migrationRoot = `sha256:${"2".repeat(64)}`;
+  const migrationConfig = `sha256:${"3".repeat(64)}`;
+  const docker = createOwnedDockerMock(
+    contract,
+    migrationRoot,
+    migrationConfig,
+    {
+      migrationManifestAnnotations: { "config.digest": migrationConfig },
+      migrationManifestDigest: migrationRoot,
+      migrationRootAnnotations: { "config.digest": migrationConfig },
+      migrationRootMediaType: "application/vnd.oci.image.manifest.v1+json",
+      migrationMode: "containerd",
+    },
+  );
+  let probeInspections = 0;
+  const run = async (
+    args: string[],
+    maximumBytes?: number,
+    environment: Record<string, string> = {},
+  ) => {
+    if (args[0] === "container" && args[1] === "rm") {
+      throw new Error("synthetic exact removal failure");
+    }
+    const output = await docker.run(args, maximumBytes, environment);
+    if (args[0] === "container" && args[1] === "inspect") {
+      probeInspections += 1;
+      if (probeInspections === 2) {
+        const [probe] = JSON.parse(output) as [Record<string, unknown>];
+        delete (probe.ImageManifestDescriptor as Record<string, unknown>).annotations;
+        return JSON.stringify([probe]);
+      }
+    }
+    return output;
+  };
+  let captured: unknown;
+  try {
+    await deriveJourneyMigrationImageConfigDigest({
+      contract,
+      environment: {},
+      expectedMigrationAssetImageDigest: migrationRoot,
+      expectedMigrationManifestDigest: migrationRoot,
+      probeNonce: "5".repeat(32),
+      runDocker: run,
+    });
+  } catch (error) {
+    captured = error;
+  }
+  expect(captured).toBeInstanceOf(AggregateError);
+  const messages = (captured as AggregateError).errors.map((error) => String(error));
+  expect(messages).toEqual([
+    expect.stringMatching(/selection changed/),
+    expect.stringMatching(/synthetic exact removal failure/),
+  ]);
+  expect(docker.activeProbeCount).toBe(1);
+});
+
+test("rejects authoritative root media-type drift and removes the exact probe", async () => {
+  const contract = ownedContract("baseline");
+  const applicationRoot = `sha256:${"a".repeat(64)}`;
+  const docker = createOwnedDockerMock(
+    contract,
+    `sha256:${"2".repeat(64)}`,
+    `sha256:${"3".repeat(64)}`,
+    {
+      applicationManifestDigest: applicationRoot,
+      applicationRootMediaType: "application/vnd.oci.image.manifest.v1+json",
+      mode: "containerd",
+    },
+  );
+  let imageInspections = 0;
+  const run = async (
+    args: string[],
+    maximumBytes?: number,
+    environment: Record<string, string> = {},
+  ) => {
+    const output = await docker.run(args, maximumBytes, environment);
+    if (args[0] === "image" && args[1] === "inspect") {
+      imageInspections += 1;
+      if (imageInspections === 2) {
+        const [image] = JSON.parse(output) as [Record<string, unknown>];
+        (image.Descriptor as Record<string, unknown>).mediaType =
+          "application/vnd.oci.image.index.v1+json";
+        return JSON.stringify([image]);
+      }
+    }
+    return output;
+  };
+  await expect(deriveJourneyApplicationImageConfigDigest({
+    contract,
+    environment: {},
+    expectedApplicationAssetImageDigest: applicationRoot,
+    expectedApplicationImageConfigDigest: `sha256:${"4".repeat(64)}`,
+    expectedApplicationManifestDigest: applicationRoot,
+    expectedApplicationRepoDigests: [applicationRoot],
+    probeNonce: "a".repeat(32),
+    runDocker: run,
+  })).rejects.toThrow(/media type changed/);
+  expect(docker.activeProbeCount).toBe(0);
+});
+
 test("rejects a containerd single-manifest root with a different selected manifest", async () => {
   const contract = ownedContract("baseline");
   const applicationRoot = `sha256:${"a".repeat(64)}`;
@@ -1707,13 +2617,17 @@ function createOwnedDockerMock(
   config: string,
   options: {
     applicationMode?: "classic" | "containerd";
+    applicationManifestAnnotations?: Record<string, string>;
     applicationManifestDigest?: string;
     applicationManifestMediaType?: string;
+    applicationRootAnnotations?: Record<string, string>;
     applicationRootMediaType?: string;
     imagePlatformArchitecture?: "amd64" | "arm64";
     migrationMode?: "classic" | "containerd";
+    migrationManifestAnnotations?: Record<string, string>;
     migrationManifestDigest?: string;
     migrationManifestMediaType?: string;
+    migrationRootAnnotations?: Record<string, string>;
     migrationRootMediaType?: string;
     mode?: "classic" | "containerd";
   } = {},
@@ -1787,6 +2701,12 @@ function createOwnedDockerMock(
       if (!matched) throw new Error(`Unexpected image inspection: ${args[2]}`);
       const [role, identity] = matched as [keyof typeof identities, (typeof identities)[keyof typeof identities]];
       const containerd = selectionModes[role] === "containerd";
+      const manifestAnnotations = role === "application"
+        ? options.applicationManifestAnnotations
+        : options.migrationManifestAnnotations;
+      const rootAnnotations = role === "application"
+        ? options.applicationRootAnnotations
+        : options.migrationRootAnnotations;
       return JSON.stringify([{
         Id: containerd ? identity.asset : identity.config,
         Descriptor: containerd ? {
@@ -1796,7 +2716,10 @@ function createOwnedDockerMock(
               ?? "application/vnd.oci.image.index.v1+json")
             : (options.migrationRootMediaType
               ?? "application/vnd.oci.image.index.v1+json"),
-          size: 4096,
+          ...(rootAnnotations === undefined
+            ? {}
+            : { annotations: { ...rootAnnotations } }),
+          size: rootAnnotations === undefined && manifestAnnotations === undefined ? 4096 : 2048,
         } : { digest: identity.asset },
         RepoDigests: [`registry.example/clean-pay@${identity.asset}`],
       }]);
@@ -1820,6 +2743,9 @@ function createOwnedDockerMock(
       const { name, owner, role } = probe;
       const identity = identities[role];
       const selectionMode = selectionModes[role];
+      const manifestAnnotations = role === "application"
+        ? options.applicationManifestAnnotations
+        : options.migrationManifestAnnotations;
       return JSON.stringify([{
         Id: args[2],
         Image: selectionMode === "containerd" ? identity.asset : identity.config,
@@ -1836,6 +2762,9 @@ function createOwnedDockerMock(
               os: "linux",
               ...(options.imagePlatformArchitecture === "arm64" ? { variant: "v8" } : {}),
             },
+            ...(manifestAnnotations === undefined
+              ? {}
+              : { annotations: { ...manifestAnnotations } }),
             size: 2048,
           },
         } : {}),

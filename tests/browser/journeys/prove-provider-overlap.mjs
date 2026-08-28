@@ -1283,6 +1283,7 @@ async function inspectRunningApplicationImage(
       assetIdentity.manifestDigest,
       expectedPlatform,
       "running application",
+      assetIdentity.configDigest,
     );
   }
   const expectedRepoDigests = new Set([
