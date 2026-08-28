@@ -225,6 +225,7 @@ export function assertProviderOverlapContainerdImageDescriptorChain(
   expectedManifestDigest,
   expectedPlatform,
   label,
+  expectedConfigDigest = /** @type {string | undefined} */ (undefined),
 ) {
   stringMatch(
     expectedRootDigest,
@@ -236,6 +237,13 @@ export function assertProviderOverlapContainerdImageDescriptorChain(
     /^sha256:[a-f0-9]{64}$/,
     `${label} expected platform manifest digest`,
   );
+  if (expectedConfigDigest !== undefined) {
+    stringMatch(
+      expectedConfigDigest,
+      /^sha256:[a-f0-9]{64}$/,
+      `${label} expected selected config digest`,
+    );
+  }
   const platform = record(expectedPlatform, `${label} expected platform`);
   exactKeys(platform, ["architecture", "os"], `${label} expected platform`);
   if (platform.os !== "linux" || !new Set(["amd64", "arm64"]).has(platform.architecture)) {
@@ -243,9 +251,15 @@ export function assertProviderOverlapContainerdImageDescriptorChain(
   }
 
   const rootDescriptor = record(rootValue, `${label} authoritative OCI root descriptor`);
+  const rootAnnotationsPresent = Object.hasOwn(rootDescriptor, "annotations");
   exactKeys(
     rootDescriptor,
-    ["digest", "mediaType", "size"],
+    [
+      ...(rootAnnotationsPresent ? ["annotations"] : []),
+      "digest",
+      "mediaType",
+      "size",
+    ],
     `${label} authoritative OCI root descriptor`,
   );
   if (!containerdIndexMediaTypes.has(rootDescriptor.mediaType)
@@ -264,9 +278,16 @@ export function assertProviderOverlapContainerdImageDescriptorChain(
     manifestValue,
     `${label} selected platform manifest descriptor`,
   );
+  const manifestAnnotationsPresent = Object.hasOwn(manifestDescriptor, "annotations");
   exactKeys(
     manifestDescriptor,
-    ["digest", "mediaType", "platform", "size"],
+    [
+      ...(manifestAnnotationsPresent ? ["annotations"] : []),
+      "digest",
+      "mediaType",
+      "platform",
+      "size",
+    ],
     `${label} selected platform manifest descriptor`,
   );
   if (!containerdManifestMediaTypes.has(manifestDescriptor.mediaType)) {
@@ -303,11 +324,99 @@ export function assertProviderOverlapContainerdImageDescriptorChain(
     && (platform.architecture !== "arm64" || selectedPlatform.variant !== "v8")) {
     fail(`${label} selected platform manifest variant is invalid.`);
   }
-  if (containerdManifestMediaTypes.has(rootDescriptor.mediaType)
-    && rootDescriptor.digest !== manifestDescriptor.digest) {
+  const singleManifestRoot = containerdManifestMediaTypes.has(rootDescriptor.mediaType);
+  if (singleManifestRoot && rootDescriptor.digest !== manifestDescriptor.digest) {
     fail(`${label} single-manifest OCI root differs from the selected manifest.`);
   }
-  return { manifestDescriptor, rootDescriptor };
+  if (singleManifestRoot && rootDescriptor.mediaType !== manifestDescriptor.mediaType) {
+    fail(`${label} single-manifest OCI root media type differs from the selected manifest.`);
+  }
+  if (!singleManifestRoot && rootDescriptor.digest === manifestDescriptor.digest) {
+    fail(`${label} OCI index root aliases the selected platform manifest.`);
+  }
+  let rootConfigDigest;
+  if (rootAnnotationsPresent) {
+    const annotations = record(
+      rootDescriptor.annotations,
+      `${label} authoritative OCI root annotations`,
+    );
+    exactKeys(
+      annotations,
+      ["config.digest"],
+      `${label} authoritative OCI root annotations`,
+    );
+    stringMatch(
+      annotations["config.digest"],
+      /^sha256:[a-f0-9]{64}$/,
+      `${label} authoritative OCI root config annotation`,
+    );
+    rootConfigDigest = annotations["config.digest"];
+  }
+  let manifestConfigDigest;
+  if (manifestAnnotationsPresent) {
+    const annotations = record(
+      manifestDescriptor.annotations,
+      `${label} selected platform manifest annotations`,
+    );
+    exactKeys(
+      annotations,
+      ["config.digest"],
+      `${label} selected platform manifest annotations`,
+    );
+    stringMatch(
+      annotations["config.digest"],
+      /^sha256:[a-f0-9]{64}$/,
+      `${label} selected platform manifest config annotation`,
+    );
+    manifestConfigDigest = annotations["config.digest"];
+  }
+  if (rootAnnotationsPresent || manifestAnnotationsPresent) {
+    if (!singleManifestRoot
+      || rootDescriptor.digest !== manifestDescriptor.digest
+      || rootDescriptor.mediaType !== manifestDescriptor.mediaType
+      || rootDescriptor.size !== manifestDescriptor.size
+      || expectedConfigDigest === undefined) {
+      fail(`${label} descriptor config annotation is not single-root bound.`);
+    }
+    if (rootConfigDigest !== undefined) {
+      equal(
+        rootConfigDigest,
+        expectedConfigDigest,
+        `${label} authoritative OCI root config annotation`,
+      );
+    }
+    if (manifestConfigDigest !== undefined) {
+      equal(
+        manifestConfigDigest,
+        expectedConfigDigest,
+        `${label} selected platform manifest config annotation`,
+      );
+    }
+    if (rootConfigDigest !== undefined && manifestConfigDigest !== undefined) {
+      equal(
+        rootConfigDigest,
+        manifestConfigDigest,
+        `${label} root and selected manifest config annotations`,
+      );
+    }
+  }
+  return {
+    manifestDescriptor: manifestAnnotationsPresent
+      ? {
+        digest: manifestDescriptor.digest,
+        mediaType: manifestDescriptor.mediaType,
+        platform: selectedPlatform,
+        size: manifestDescriptor.size,
+      }
+      : manifestDescriptor,
+    rootDescriptor: rootAnnotationsPresent
+      ? {
+        digest: rootDescriptor.digest,
+        mediaType: rootDescriptor.mediaType,
+        size: rootDescriptor.size,
+      }
+      : rootDescriptor,
+  };
 }
 
 export function assertApplicationImageIdentity(value, contract, expected, label) {

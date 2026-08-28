@@ -170,6 +170,264 @@ test("attests a containerd single-manifest root with one identical root and mani
   });
 });
 
+test("accepts exact single-manifest config annotations without exposing them in the result", () => {
+  const fixture = containerdRuntimeFixture();
+  const applicationContainers = makeContainerdRoleSingleManifest(
+    fixture,
+    "application",
+    "application/vnd.oci.image.manifest.v1+json",
+  );
+  const migrationContainers = makeContainerdRoleSingleManifest(
+    fixture,
+    "migration",
+    "application/vnd.docker.distribution.manifest.v2+json",
+  );
+  const redisContainer = matchContainerdRootAndSelectedDescriptor(fixture, "redis");
+  const expected = assertJourneyComposeRuntimeInspection(fixture);
+
+  fixture.imagesById[fixture.expectedApplicationAssetImageDigest].Descriptor!.annotations = {
+    "config.digest": fixture.expectedApplicationImageConfigDigest,
+  };
+  for (const container of applicationContainers) {
+    container.ImageManifestDescriptor!.annotations = {
+      "config.digest": fixture.expectedApplicationImageConfigDigest,
+    };
+  }
+  fixture.imagesById[fixture.expectedMigrationAssetImageDigest].Descriptor!.annotations = {
+    "config.digest": `sha256:${"7".repeat(64)}`,
+  };
+  for (const container of migrationContainers) {
+    container.ImageManifestDescriptor!.annotations = {
+      "config.digest": `sha256:${"7".repeat(64)}`,
+    };
+  }
+  fixture.imagesById[redisContainer.Image].Descriptor!.annotations = {
+    "config.digest": `sha256:${"8".repeat(64)}`,
+  };
+  redisContainer.ImageManifestDescriptor!.annotations = {
+    "config.digest": `sha256:${"8".repeat(64)}`,
+  };
+
+  const actual = assertJourneyComposeRuntimeInspection(fixture);
+  expect(actual).toEqual(expected);
+  expect(Object.keys(actual)).toEqual(Object.keys(expected));
+});
+
+test("accepts one-sided exact root or selected annotations without changing the result", () => {
+  const fixture = containerdRuntimeFixture();
+  makeContainerdRoleSingleManifest(
+    fixture,
+    "application",
+    "application/vnd.oci.image.manifest.v1+json",
+  );
+  const migrationContainers = makeContainerdRoleSingleManifest(
+    fixture,
+    "migration",
+    "application/vnd.docker.distribution.manifest.v2+json",
+  );
+  const redisContainer = matchContainerdRootAndSelectedDescriptor(fixture, "redis");
+  const expected = assertJourneyComposeRuntimeInspection(fixture);
+
+  fixture.imagesById[fixture.expectedApplicationAssetImageDigest].Descriptor!.annotations = {
+    "config.digest": fixture.expectedApplicationImageConfigDigest,
+  };
+  migrationContainers[0].ImageManifestDescriptor!.annotations = {
+    "config.digest": `sha256:${"7".repeat(64)}`,
+  };
+  fixture.imagesById[redisContainer.Image].Descriptor!.annotations = {
+    "config.digest": `sha256:${"8".repeat(64)}`,
+  };
+
+  expect(assertJourneyComposeRuntimeInspection(fixture)).toEqual(expected);
+});
+
+test("rejects an unannotated platform media type that differs from its single root", () => {
+  const fixture = containerdRuntimeFixture();
+  const [container] = makeContainerdRoleSingleManifest(
+    fixture,
+    "application",
+    "application/vnd.oci.image.manifest.v1+json",
+  );
+  container.ImageManifestDescriptor!.mediaType =
+    "application/vnd.docker.distribution.manifest.v2+json";
+  expect(() => assertJourneyComposeRuntimeInspection(fixture))
+    .toThrow(/differs from its single-manifest root/);
+});
+
+test("rejects config annotations outside the exact single-manifest root contract", () => {
+  const mutations: Array<[
+    string,
+    (value: ReturnType<typeof containerdRuntimeFixture>) => void,
+  ]> = [
+    ["application index root", (value) => {
+      value.containersByService.app.ImageManifestDescriptor!.annotations = {
+        "config.digest": value.expectedApplicationImageConfigDigest,
+      };
+    }],
+    ["annotated application index root", (value) => {
+      value.imagesById[value.expectedApplicationAssetImageDigest].Descriptor!.annotations = {
+        "config.digest": value.expectedApplicationImageConfigDigest,
+      };
+    }],
+    ["wrong application config digest", (value) => {
+      const [container] = makeContainerdRoleSingleManifest(
+        value,
+        "application",
+        "application/vnd.oci.image.manifest.v1+json",
+      );
+      container.ImageManifestDescriptor!.annotations = {
+        "config.digest": `sha256:${"9".repeat(64)}`,
+      };
+    }],
+    ["wrong application root config digest", (value) => {
+      makeContainerdRoleSingleManifest(
+        value,
+        "application",
+        "application/vnd.oci.image.manifest.v1+json",
+      );
+      value.imagesById[value.expectedApplicationAssetImageDigest].Descriptor!.annotations = {
+        "config.digest": `sha256:${"9".repeat(64)}`,
+      };
+    }],
+    ["extra annotation", (value) => {
+      const [container] = makeContainerdRoleSingleManifest(
+        value,
+        "application",
+        "application/vnd.oci.image.manifest.v1+json",
+      );
+      container.ImageManifestDescriptor!.annotations = {
+        "config.digest": value.expectedApplicationImageConfigDigest,
+        unexpected: `sha256:${"9".repeat(64)}`,
+      };
+    }],
+    ["extra root annotation", (value) => {
+      makeContainerdRoleSingleManifest(
+        value,
+        "application",
+        "application/vnd.oci.image.manifest.v1+json",
+      );
+      value.imagesById[value.expectedApplicationAssetImageDigest].Descriptor!.annotations = {
+        "config.digest": value.expectedApplicationImageConfigDigest,
+        unexpected: `sha256:${"9".repeat(64)}`,
+      };
+    }],
+    ["malformed annotation object", (value) => {
+      const [container] = makeContainerdRoleSingleManifest(
+        value,
+        "application",
+        "application/vnd.oci.image.manifest.v1+json",
+      );
+      container.ImageManifestDescriptor!.annotations = null;
+    }],
+    ["malformed root annotation object", (value) => {
+      makeContainerdRoleSingleManifest(
+        value,
+        "application",
+        "application/vnd.oci.image.manifest.v1+json",
+      );
+      value.imagesById[value.expectedApplicationAssetImageDigest].Descriptor!.annotations = null;
+    }],
+    ["array root annotation object", (value) => {
+      makeContainerdRoleSingleManifest(
+        value,
+        "application",
+        "application/vnd.oci.image.manifest.v1+json",
+      );
+      value.imagesById[value.expectedApplicationAssetImageDigest].Descriptor!.annotations =
+        [] as never;
+    }],
+    ["empty root annotation object", (value) => {
+      makeContainerdRoleSingleManifest(
+        value,
+        "application",
+        "application/vnd.oci.image.manifest.v1+json",
+      );
+      value.imagesById[value.expectedApplicationAssetImageDigest].Descriptor!.annotations = {};
+    }],
+    ["malformed root annotation digest", (value) => {
+      makeContainerdRoleSingleManifest(
+        value,
+        "application",
+        "application/vnd.oci.image.manifest.v1+json",
+      );
+      value.imagesById[value.expectedApplicationAssetImageDigest].Descriptor!.annotations = {
+        "config.digest": "not-a-digest",
+      };
+    }],
+    ["malformed annotation digest", (value) => {
+      const [container] = makeContainerdRoleSingleManifest(
+        value,
+        "application",
+        "application/vnd.oci.image.manifest.v1+json",
+      );
+      container.ImageManifestDescriptor!.annotations = { "config.digest": "not-a-digest" };
+    }],
+    ["single-manifest media type mismatch", (value) => {
+      const [container] = makeContainerdRoleSingleManifest(
+        value,
+        "application",
+        "application/vnd.oci.image.manifest.v1+json",
+      );
+      container.ImageManifestDescriptor!.mediaType =
+        "application/vnd.docker.distribution.manifest.v2+json";
+      container.ImageManifestDescriptor!.annotations = {
+        "config.digest": value.expectedApplicationImageConfigDigest,
+      };
+    }],
+    ["annotated descriptor size mismatch", (value) => {
+      const [container] = makeContainerdRoleSingleManifest(
+        value,
+        "application",
+        "application/vnd.oci.image.manifest.v1+json",
+      );
+      value.imagesById[value.expectedApplicationAssetImageDigest].Descriptor!.annotations = {
+        "config.digest": value.expectedApplicationImageConfigDigest,
+      };
+      container.ImageManifestDescriptor!.size += 1;
+    }],
+    ["root and selected config mismatch", (value) => {
+      const [container] = makeContainerdRoleSingleManifest(
+        value,
+        "migration",
+        "application/vnd.docker.distribution.manifest.v2+json",
+      );
+      value.imagesById[value.expectedMigrationAssetImageDigest].Descriptor!.annotations = {
+        "config.digest": `sha256:${"7".repeat(64)}`,
+      };
+      container.ImageManifestDescriptor!.annotations = {
+        "config.digest": `sha256:${"8".repeat(64)}`,
+      };
+    }],
+    ["helper index root", (value) => {
+      const container = value.containersByService.redis;
+      const rootDigest = container.Image;
+      value.imagesById[rootDigest].Descriptor!.mediaType =
+        "application/vnd.oci.image.index.v1+json";
+      container.ImageManifestDescriptor!.digest = `sha256:${"e".repeat(64)}`;
+      container.ImageManifestDescriptor!.annotations = {
+        "config.digest": `sha256:${"8".repeat(64)}`,
+      };
+    }],
+  ];
+  for (const [label, mutate] of mutations) {
+    const nearMiss = containerdRuntimeFixture();
+    mutate(nearMiss);
+    expect(() => assertJourneyComposeRuntimeInspection(nearMiss), label).toThrow();
+  }
+});
+
+test("requires index and list roots to select a distinct platform manifest digest", () => {
+  for (const serviceName of ["app", "migration"] as const) {
+    const fixture = containerdRuntimeFixture();
+    const container = fixture.containersByService[serviceName];
+    container.ImageManifestDescriptor!.digest = container.Image;
+    expect(
+      () => assertJourneyComposeRuntimeInspection(fixture),
+      serviceName,
+    ).toThrow(/index\/list OCI root aliases/);
+  }
+});
+
 test("attests containerd descriptors for an exact linux arm64 platform", () => {
   const fixture = Object.assign(containerdRuntimeFixture(), {
     expectedImagePlatform: { architecture: "arm64", os: "linux" },
@@ -715,6 +973,61 @@ function containerdRuntimeFixture() {
     expectedImageSelectionMode: "containerd-root-manifest" as const,
     expectedMigrationManifestDigest: migrationManifest,
   });
+}
+
+function makeContainerdRoleSingleManifest(
+  fixture: ReturnType<typeof containerdRuntimeFixture>,
+  role: "application" | "migration",
+  mediaType:
+    | "application/vnd.docker.distribution.manifest.v2+json"
+    | "application/vnd.oci.image.manifest.v1+json",
+) {
+  const reference = fixture.contract.images[role];
+  const rootDigest = role === "application"
+    ? fixture.expectedApplicationAssetImageDigest
+    : fixture.expectedMigrationAssetImageDigest;
+  const image = fixture.imagesById[rootDigest];
+  if (!image?.Descriptor) throw new Error(`Synthetic ${role} root descriptor is absent.`);
+  image.Descriptor.mediaType = mediaType;
+  const rootSize = image.Descriptor.size;
+  if (typeof rootSize !== "number") throw new Error(`Synthetic ${role} root size is absent.`);
+  if (role === "application") {
+    fixture.expectedApplicationManifestDigest = rootDigest;
+    fixture.expectedApplicationRepoDigests = [rootDigest];
+  } else {
+    fixture.expectedMigrationManifestDigest = rootDigest;
+  }
+  const containers = Object.values(fixture.containersByService).filter(
+    (container) => container.Config.Image === reference,
+  );
+  if (containers.length === 0) throw new Error(`Synthetic ${role} containers are absent.`);
+  for (const container of containers) {
+    if (!container.ImageManifestDescriptor) {
+      throw new Error(`Synthetic ${role} manifest descriptor is absent.`);
+    }
+    container.ImageManifestDescriptor.digest = rootDigest;
+    container.ImageManifestDescriptor.mediaType = mediaType;
+    container.ImageManifestDescriptor.size = rootSize;
+  }
+  return containers;
+}
+
+function matchContainerdRootAndSelectedDescriptor(
+  fixture: ReturnType<typeof containerdRuntimeFixture>,
+  serviceName: keyof ReturnType<typeof containerdRuntimeFixture>["containersByService"],
+) {
+  const container = fixture.containersByService[serviceName];
+  const rootDescriptor = fixture.imagesById[container.Image]?.Descriptor;
+  const selectedDescriptor = container.ImageManifestDescriptor;
+  if (!rootDescriptor || !selectedDescriptor
+    || typeof rootDescriptor.mediaType !== "string"
+    || typeof rootDescriptor.size !== "number") {
+    throw new Error(`Synthetic ${String(serviceName)} descriptor identity is incomplete.`);
+  }
+  selectedDescriptor.digest = rootDescriptor.digest;
+  selectedDescriptor.mediaType = rootDescriptor.mediaType;
+  selectedDescriptor.size = rootDescriptor.size;
+  return container;
 }
 
 function hexFor(value: string) {

@@ -59,10 +59,26 @@ containerd store must expose the attested OCI root in `.Image` plus an exact
 attested Linux/amd64 or Linux/arm64 image manifest in `.ImageManifestDescriptor`;
 an arm64 descriptor may additionally carry only `variant: v8`. Both A/B images
 must use the same attested platform, and each is launched only by its OCI root.
-When that root is itself a single-image manifest, its digest must equal the
-selected manifest digest. The application manifest must equal the production asset
-attestation, while the migration root/manifest pair is captured by the first
-probe and must be reproduced by the pre-launch probe and live runtime. A
+When that root is itself a single-image manifest, its digest and media type must
+equal the selected manifest descriptor; an OCI index or manifest-list root must
+instead select a distinct child-manifest digest. Docker may omit descriptor
+annotations or include them on the authoritative root, the selected descriptor,
+or both for a single-manifest image. Each present annotation object must contain
+only one `config.digest` SHA-256 value. An application annotation must equal the
+production asset attestation's config digest; migration and helper annotations
+are syntax- and consistency-checked without being promoted to a config identity.
+If either descriptor is annotated, the root and selected digest, media type, and
+size must be identical; if both are annotated, their config digests must also be
+identical. An annotation on an index child, an unknown or malformed annotation,
+or an unattested application config digest fails closed. The owned probe retains
+the initial root annotation presence and digest, revalidates that saved snapshot
+after containerd selection, and requires the same contract on both root rechecks;
+the cleanup selection hash also binds that internal root annotation state.
+Annotations are validation-only and are removed from both sanitized descriptor
+projections before return or serialized evidence. The application manifest must equal
+the production asset attestation, while the migration root/manifest pair is
+captured by the first probe and must be reproduced by the pre-launch probe and
+live runtime. A
 containerd migration root is never reported as a config digest. Every probe
 name and ownership label includes
 a cryptographically unpredictable per-run nonce; only its SHA-256 ownership
