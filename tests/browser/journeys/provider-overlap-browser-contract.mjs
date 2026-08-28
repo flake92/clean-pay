@@ -3,10 +3,21 @@ import { createHash } from "node:crypto";
 const maximumRequests = 256;
 const maximumStaticAssetBytes = 128 * 1024 * 1024;
 const maximumStaticAssetTotalBytes = 1024 * 1024 * 1024;
+const maximumStaticDeclarationBodyBytes = 2 * 1024 * 1024;
 const sha256Pattern = /^[a-f0-9]{64}$/;
 const opaquePattern = /^[A-Za-z0-9._~-]{1,256}$/;
-const nextStaticPattern = /^\/_next\/static\/(?:chunks(?:\/[A-Za-z0-9._-]{1,100}){0,5}\/[A-Za-z0-9._-]{1,200}\.(?:css|js)|media\/[A-Za-z0-9._-]{1,200}\.(?:eot|ico|png|svg|ttf|woff|woff2))$/;
-const nextStaticMediaPattern = /^\/_next\/static\/media\/[A-Za-z0-9._-]{1,200}\.(?:eot|ico|png|svg|ttf|woff|woff2)$/;
+const nextStaticMediaExtensionExpression = "(?:eot|ico|png|svg|ttf|woff2|woff)";
+const nextStaticPathExpression = "\\/_next\\/static\\/(?:chunks"
+  + "(?:\\/[A-Za-z0-9._-]{1,100}){0,5}\\/[A-Za-z0-9._-]{1,200}\\.(?:css|js)"
+  + `|media\\/[A-Za-z0-9._-]{1,200}\\.${nextStaticMediaExtensionExpression})`;
+const nextStaticPattern = new RegExp(`^${nextStaticPathExpression}$`);
+const nextStaticMediaPattern = new RegExp(
+  `^\\/_next\\/static\\/media\\/[A-Za-z0-9._-]{1,200}\\.${nextStaticMediaExtensionExpression}$`,
+);
+const nextStaticDeclarationPattern = new RegExp(
+  `${nextStaticPathExpression}(?![A-Za-z0-9._-])`,
+  "y",
+);
 const staticKeys = new Set([
   "next-static-css",
   "next-static-font",
@@ -449,6 +460,56 @@ export async function readProviderOverlapStaticResponseEvidence(input, staticAss
   });
 }
 
+export function extractProviderOverlapResponseStaticDeclarations(body, staticAssetContract) {
+  assertStaticAssetContract(staticAssetContract);
+  if (!(body instanceof Uint8Array)
+    || body.byteLength < 1 || body.byteLength > maximumStaticDeclarationBodyBytes) {
+    fail("Static response declaration body is outside its bounded byte contract.");
+  }
+  let source;
+  try {
+    source = new TextDecoder("utf-8", { fatal: true }).decode(body);
+  } catch {
+    fail("Static response declaration body is not valid UTF-8.");
+  }
+  const declarations = [];
+  let cursor = 0;
+  while (cursor < source.length) {
+    const prefixIndex = source.indexOf("/_next/static/", cursor);
+    if (prefixIndex === -1) break;
+    const openingQuote = source[prefixIndex - 1];
+    const openingEscape = source[prefixIndex - 2];
+    const escapedQuote = openingQuote === '"' && openingEscape === "\\";
+    const rawQuote = openingQuote === '"' && openingEscape !== "\\";
+    if ((!rawQuote && !escapedQuote)
+      || (escapedQuote && source[prefixIndex - 3] === "\\")) {
+      fail("Static response declaration has no exact paired opening quote.");
+    }
+    nextStaticDeclarationPattern.lastIndex = prefixIndex;
+    const match = nextStaticDeclarationPattern.exec(source);
+    if (!match || match.index !== prefixIndex) {
+      fail("Static response contains an unknown, partial, or unsafe declaration.");
+    }
+    const servedPath = match[0];
+    const declarationEnd = nextStaticDeclarationPattern.lastIndex;
+    const hasPairedClosingQuote = escapedQuote
+      ? source.slice(declarationEnd, declarationEnd + 2) === '\\"'
+      : source[declarationEnd] === '"';
+    if (!nextStaticPattern.test(servedPath)
+      || new URL(servedPath, "https://pay.ci.clean-pay.dev").pathname !== servedPath
+      || !hasPairedClosingQuote
+      || !Object.hasOwn(staticAssetContract.inventoryByPath, servedPath)) {
+      fail("Static response declaration escaped its paired canonical attested inventory.");
+    }
+    if (declarations.length >= maximumRequests) {
+      fail("Static response declaration count exceeds its bound.");
+    }
+    declarations.push(servedPath);
+    cursor = declarationEnd + (escapedQuote ? 2 : 1);
+  }
+  return Object.freeze(declarations);
+}
+
 export function extractProviderOverlapCssMediaReferences(
   body,
   sourcePath,
@@ -475,7 +536,7 @@ export function extractProviderOverlapCssMediaReferences(
   while ((match = expression.exec(source)) !== null) {
     if (references.length >= maximumRequests) fail("Static CSS reference count exceeds its bound.");
     const raw = (match[2] ?? match[3] ?? "").trim();
-    if (!/^(?:\.\.\/){1,6}media\/[A-Za-z0-9._-]{1,200}\.(?:eot|ico|png|svg|ttf|woff|woff2)$/.test(raw)) {
+    if (!/^(?:\.\.\/){1,6}media\/[A-Za-z0-9._-]{1,200}\.(?:eot|ico|png|svg|ttf|woff2|woff)$/.test(raw)) {
       fail("Static CSS contains a noncanonical, external, or unsafe url() reference.");
     }
     const resolved = new URL(raw, `https://pay.ci.clean-pay.dev${sourcePath}`);

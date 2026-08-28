@@ -120,7 +120,11 @@ extension-specific content type, and path are independently observed and must
 equal the OCI inventory. Repeated CSS bodies are parsed independently; every
 later extraction must equal the first extraction for that source, while the
 sanitized global CSS closure records the unique source contract once. The
-bounded inventory
+bounded HTML/RSC declaration parser uses fatal UTF-8 decoding, exact byte/count
+bounds, longest-first WOFF2/WOFF matching, a canonical token boundary, path
+normalization, exact inventory membership, and paired raw `"path"` or Next
+inline-Flight `\"path\"` quotes. Unknown, external, prefixed, partial, suffixed,
+entity-encoded, mixed-quote, or otherwise unsafe declarations fail closed. The bounded inventory
 accepts only CSS/JavaScript chunks and canonical EOT/ICO/PNG/SVG/TTF/WOFF/WOFF2
 media. All eight current bounded CSS `url(...)` fallbacks are resolved from the
 exact served CSS path with the exact EOT/SVG/TTF/WOFF/WOFF2 cardinalities;

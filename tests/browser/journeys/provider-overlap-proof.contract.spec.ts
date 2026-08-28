@@ -32,6 +32,7 @@ import {
   createProviderOverlapEventSeal,
   createProviderOverlapStaticAssetContract,
   extractProviderOverlapCssMediaReferences,
+  extractProviderOverlapResponseStaticDeclarations,
   finalizeProviderOverlapBrowserContract,
   finalizeProviderOverlapEventLifecycle,
   finalizeProviderOverlapHistoryContract,
@@ -1532,6 +1533,126 @@ test("derives the exact bounded static response contract from attested OCI inven
   }>).size;
   expect(() => createProviderOverlapStaticAssetContract(missingSize))
     .toThrow(/static asset inventory/);
+});
+
+test("extracts every exact HTML and RSC static declaration without partial suffixes", async () => {
+  const extraPaths = [
+    "/_next/static/media/favicon.current.ico",
+    "/_next/static/media/brand.current.png",
+  ];
+  const inventoryByPath: Record<string, string> = {
+    ...staticAssetContract.inventoryByPath,
+  };
+  const inventoryMetadataByPath: Record<string, { assetBytes: number; extension: string }> = {
+    ...staticAssetContract.inventoryMetadataByPath,
+  };
+  for (const servedPath of extraPaths) {
+    const extension = servedPath.slice(servedPath.lastIndexOf(".") + 1);
+    inventoryByPath[servedPath] = sha256(`synthetic:${servedPath}`);
+    inventoryMetadataByPath[servedPath] = { assetBytes: servedPath.length, extension };
+  }
+  const contract = {
+    ...staticAssetContract,
+    inventoryByPath,
+    inventoryMetadataByPath,
+    inventoryLedgerContractSha256: sha256(JSON.stringify(staticInventoryLedgerFor(
+      inventoryByPath,
+      inventoryMetadataByPath,
+    ))),
+  };
+  const declarations = [
+    staticJavascriptPath,
+    staticStylesheetPath,
+    staticEotPath,
+    extraPaths[0],
+    extraPaths[1],
+    staticImagePath,
+    staticTtfPath,
+    staticFontPath,
+    staticWoffPath,
+  ];
+  const body = Buffer.from(declarations.map((servedPath) => `"${servedPath}"`).join(","), "utf8");
+  expect(extractProviderOverlapResponseStaticDeclarations(body, contract)).toEqual(declarations);
+  expect(declarations[7]).toMatch(/\.woff2$/);
+  expect(declarations[8]).toMatch(/\.woff$/);
+  const directHtml = Buffer.from(`<script src="${staticJavascriptPath}"></script>`, "utf8");
+  const rawRsc = Buffer.from(`1:I["${staticJavascriptPath}","default"]\n`, "utf8");
+  const flightChunk = `1:I["${staticJavascriptPath}","default"]\n`;
+  const inlineFlight = Buffer.from(
+    `<script>self.__next_f.push(${JSON.stringify([1, flightChunk])})</script>`,
+    "utf8",
+  );
+  for (const [label, nextBody] of [
+    ["direct HTML attribute", directHtml],
+    ["raw text/x-component import", rawRsc],
+    ["JSON-escaped inline Flight import", inlineFlight],
+  ] as const) {
+    expect(
+      extractProviderOverlapResponseStaticDeclarations(nextBody, contract),
+      label,
+    ).toEqual([staticJavascriptPath]);
+  }
+
+  for (const [label, declaration] of [
+    ["woff2 alphanumeric suffix", `${staticFontPath}evil`],
+    ["woff2 dotted suffix", `${staticFontPath}.cache`],
+    ["woff2 path suffix", `${staticFontPath}/evil`],
+    ["query suffix", `${staticFontPath}?v=1`],
+    ["external absolute prefix", `https://evil.example${staticJavascriptPath}`],
+    ["local path prefix", `/prefix${staticJavascriptPath}`],
+    ["semicolon pchar suffix", `${staticJavascriptPath};evil`],
+    ["colon pchar suffix", `${staticJavascriptPath}:evil`],
+    ["at pchar suffix", `${staticJavascriptPath}@evil`],
+    ["bang pchar suffix", `${staticJavascriptPath}!evil`],
+    ["tilde pchar suffix", `${staticJavascriptPath}~evil`],
+    ["plus pchar suffix", `${staticJavascriptPath}+evil`],
+    ["dollar pchar suffix", `${staticJavascriptPath}$evil`],
+    ["comma pchar suffix", `${staticJavascriptPath},evil`],
+    ["equals pchar suffix", `${staticJavascriptPath}=evil`],
+    ["HTML entity suffix", `${staticJavascriptPath}&amp;evil`],
+    ["unsafe traversal", "/_next/static/media/../inter-123.woff2"],
+    ["unknown extension", "/_next/static/media/inter-123.webp"],
+    ["unknown chunk extension", "/_next/static/chunks/app-123.mjs"],
+  ] as const) {
+    expect(() => extractProviderOverlapResponseStaticDeclarations(
+      Buffer.from(`"${declaration}"`, "utf8"),
+      contract,
+    ), label).toThrow(/unknown, partial, or unsafe|paired.*inventory|paired opening/);
+  }
+  for (const [label, unsafeBody] of [
+    ["entity quote pair", `&quot;${staticJavascriptPath}&quot;`],
+    ["single quote pair", `'${staticJavascriptPath}'`],
+    ["raw-open escaped-close", `"${staticJavascriptPath}\\"`],
+    ["escaped-open raw-close", `\\"${staticJavascriptPath}"`],
+  ] as const) {
+    expect(() => extractProviderOverlapResponseStaticDeclarations(
+      Buffer.from(unsafeBody, "utf8"),
+      contract,
+    ), label).toThrow(/paired/);
+  }
+  expect(() => extractProviderOverlapResponseStaticDeclarations(
+    Buffer.from('"/_next/static/media/not-attested.woff2"', "utf8"),
+    contract,
+  )).toThrow(/attested inventory/);
+  expect(() => extractProviderOverlapResponseStaticDeclarations(
+    Buffer.from([0xc3, 0x28]),
+    contract,
+  )).toThrow(/valid UTF-8/);
+  expect(() => extractProviderOverlapResponseStaticDeclarations(Buffer.alloc(0), contract))
+    .toThrow(/bounded byte contract/);
+  expect(() => extractProviderOverlapResponseStaticDeclarations(
+    Buffer.alloc(2 * 1024 * 1024 + 1, 0x20),
+    contract,
+  )).toThrow(/bounded byte contract/);
+  expect(() => extractProviderOverlapResponseStaticDeclarations(
+    Buffer.from(Array.from({ length: 257 }, () => `"${staticFontPath}"`).join(","), "utf8"),
+    contract,
+  )).toThrow(/count exceeds/);
+
+  const runnerSource = await readFile(path.resolve(__dirname, "prove-provider-overlap.mjs"), "utf8");
+  expect(runnerSource).toContain("extractProviderOverlapResponseStaticDeclarations(");
+  expect(runnerSource).not.toContain("source.matchAll(");
+  expect(runnerSource).not.toContain("(?:eot|ico|png|svg|ttf|woff|woff2)");
 });
 
 test("canonicalizes all current relative CSS media references without broadening URLs", () => {
