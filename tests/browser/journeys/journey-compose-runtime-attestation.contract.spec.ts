@@ -1,5 +1,7 @@
 import { test, expect } from "@playwright/test";
 import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
+import path from "node:path";
 
 import {
   JOURNEY_COMPOSE_SERVICE_NAMES,
@@ -23,6 +25,13 @@ type ServiceFixture = Record<string, unknown> & {
 
 type ContainerFixture = Record<string, unknown> & {
   Image: string;
+  ImageManifestDescriptor?: {
+    digest: string;
+    mediaType: string;
+    platform: { architecture: string; os: string };
+    size: number;
+    [name: string]: unknown;
+  };
   Config: {
     Cmd: string[];
     Env: string[];
@@ -34,7 +43,16 @@ type ContainerFixture = Record<string, unknown> & {
   State: { Status: string; Running: boolean; ExitCode: number; [name: string]: unknown };
 };
 
-type ImageFixture = Record<string, unknown> & { RepoDigests: string[] };
+type ImageFixture = Record<string, unknown> & {
+  Descriptor?: {
+    digest: string;
+    mediaType?: string;
+    size?: number;
+    [name: string]: unknown;
+  };
+  Id?: string;
+  RepoDigests: string[];
+};
 type VolumeFixture = Record<string, unknown> & { Labels: Record<string, string> };
 
 test("is import-safe and attests the exact full journey Compose runtime", () => {
@@ -45,6 +63,214 @@ test("is import-safe and attests the exact full journey Compose runtime", () => 
     (container.HostConfig as { LogConfig: { Type: string; Config: object } }).LogConfig.Type = "";
   }
   expect(() => assertJourneyComposeRuntimeInspection(fixture)).not.toThrow();
+});
+
+test("keeps the classic config-selection output and binding hashes byte-for-byte stable", () => {
+  const fixture = runtimeFixture();
+  const result = assertJourneyComposeRuntimeInspection(fixture);
+  expect(Object.keys(result).sort()).toEqual([
+    "applicationImageBindingContractSha256",
+    "applicationRepoDigestContractSha256",
+    "migrationImageBindingContractSha256",
+    "networkSha256",
+    "oneShotLifecycleContractSha256",
+    "serviceIdentitySha256",
+  ]);
+  expect(result.applicationImageBindingContractSha256).toBe(hash(JSON.stringify({
+    assetImageDigest: fixture.expectedApplicationAssetImageDigest,
+    configDigest: fixture.expectedApplicationImageConfigDigest,
+    referenceSha256: hash(fixture.expectedApplicationReference),
+    repoDigests: [...new Set(fixture.expectedApplicationRepoDigests)].sort(),
+    role: "application",
+  })));
+  expect(result.migrationImageBindingContractSha256).toBe(hash(JSON.stringify({
+    assetImageDigest: fixture.expectedMigrationAssetImageDigest,
+    configDigest: fixture.expectedMigrationRuntimeImageDigest,
+    referenceSha256: hash(fixture.expectedMigrationReference),
+    repoDigests: [fixture.expectedMigrationAssetImageDigest],
+    role: "migration",
+  })));
+
+  const legacyDescriptorFixture = runtimeFixture();
+  legacyDescriptorFixture.imagesById[
+    legacyDescriptorFixture.containersByService.app.Image
+  ].Descriptor = { digest: legacyDescriptorFixture.expectedApplicationAssetImageDigest };
+  legacyDescriptorFixture.imagesById[
+    legacyDescriptorFixture.containersByService.migration.Image
+  ].Descriptor = { digest: legacyDescriptorFixture.expectedMigrationAssetImageDigest };
+  const helperReference = legacyDescriptorFixture.compose.services.redis.image;
+  if (typeof helperReference !== "string") {
+    throw new Error("Synthetic helper reference is not a string.");
+  }
+  const helperDigest = /@(sha256:[a-f0-9]{64})$/.exec(helperReference)?.[1];
+  if (!helperDigest) throw new Error("Synthetic helper reference is not digest-pinned.");
+  legacyDescriptorFixture.imagesById[
+    legacyDescriptorFixture.containersByService.redis.Image
+  ].Descriptor = { digest: helperDigest };
+  expect(assertJourneyComposeRuntimeInspection(legacyDescriptorFixture)).toEqual(result);
+});
+
+test("attests containerd OCI roots and exact platform manifests without child references", () => {
+  const fixture = containerdRuntimeFixture();
+  const result = assertJourneyComposeRuntimeInspection(fixture);
+  expect(result).toMatchObject({
+    applicationManifestDigest: fixture.expectedApplicationManifestDigest,
+    applicationRuntimeImageDigest: fixture.expectedApplicationRuntimeImageDigest,
+    imageSelectionMode: "containerd-root-manifest",
+    migrationManifestDigest: fixture.expectedMigrationManifestDigest,
+    migrationRuntimeImageDigest: fixture.expectedMigrationRuntimeImageDigest,
+  });
+  expect(Object.keys(result).sort()).toEqual([
+    "applicationImageBindingContractSha256",
+    "applicationManifestDigest",
+    "applicationRepoDigestContractSha256",
+    "applicationRuntimeImageDigest",
+    "imageSelectionMode",
+    "migrationImageBindingContractSha256",
+    "migrationManifestDigest",
+    "migrationRuntimeImageDigest",
+    "networkSha256",
+    "oneShotLifecycleContractSha256",
+    "serviceIdentitySha256",
+  ]);
+  expect(result.applicationImageBindingContractSha256).toBe(hash(JSON.stringify({
+    assetImageDigest: fixture.expectedApplicationAssetImageDigest,
+    configDigest: fixture.expectedApplicationImageConfigDigest,
+    imageSelectionMode: "containerd-root-manifest",
+    manifestDigest: fixture.expectedApplicationManifestDigest,
+    referenceSha256: hash(fixture.expectedApplicationReference),
+    repoDigests: [...new Set(fixture.expectedApplicationRepoDigests)].sort(),
+    role: "application",
+    runtimeImageDigest: fixture.expectedApplicationRuntimeImageDigest,
+  })));
+  expect(result.migrationImageBindingContractSha256).toBe(hash(JSON.stringify({
+    assetImageDigest: fixture.expectedMigrationAssetImageDigest,
+    imageSelectionMode: "containerd-root-manifest",
+    manifestDigest: fixture.expectedMigrationManifestDigest,
+    referenceSha256: hash(fixture.expectedMigrationReference),
+    repoDigests: [fixture.expectedMigrationAssetImageDigest],
+    role: "migration",
+    runtimeImageDigest: fixture.expectedMigrationRuntimeImageDigest,
+  })));
+});
+
+test("attests a containerd single-manifest root with one identical root and manifest digest", () => {
+  const fixture = containerdRuntimeFixture();
+  const applicationRoot = fixture.expectedApplicationAssetImageDigest;
+  fixture.expectedApplicationManifestDigest = applicationRoot;
+  fixture.expectedApplicationRepoDigests = [applicationRoot];
+  fixture.imagesById[applicationRoot].Descriptor!.mediaType =
+    "application/vnd.oci.image.manifest.v1+json";
+  for (const serviceName of ["app", "retention-worker"]) {
+    fixture.containersByService[serviceName].ImageManifestDescriptor!.digest = applicationRoot;
+  }
+  expect(assertJourneyComposeRuntimeInspection(fixture)).toMatchObject({
+    applicationManifestDigest: applicationRoot,
+    applicationRuntimeImageDigest: applicationRoot,
+  });
+});
+
+test("attests containerd descriptors for an exact linux arm64 platform", () => {
+  const fixture = Object.assign(containerdRuntimeFixture(), {
+    expectedImagePlatform: { architecture: "arm64", os: "linux" },
+  });
+  for (const container of Object.values(fixture.containersByService)) {
+    if (container.ImageManifestDescriptor) {
+      container.ImageManifestDescriptor.platform.architecture = "arm64";
+      Object.assign(container.ImageManifestDescriptor.platform, { variant: "v8" });
+    }
+  }
+  expect(() => assertJourneyComposeRuntimeInspection(fixture)).not.toThrow();
+});
+
+test("rejects malformed, unbound, third-digest, or mixed containerd selections", () => {
+  const mutations: Array<[string, (value: ReturnType<typeof containerdRuntimeFixture>) => void]> = [
+    ["missing role manifest", (value) => {
+      delete value.containersByService.app.ImageManifestDescriptor;
+    }],
+    ["wrong role manifest", (value) => {
+      value.containersByService.app.ImageManifestDescriptor!.digest = `sha256:${"e".repeat(64)}`;
+    }],
+    ["malformed manifest media type", (value) => {
+      value.containersByService.app.ImageManifestDescriptor!.mediaType = "application/json";
+    }],
+    ["malformed manifest size", (value) => {
+      value.containersByService.app.ImageManifestDescriptor!.size = 0;
+    }],
+    ["oversized manifest", (value) => {
+      value.containersByService.app.ImageManifestDescriptor!.size = 16 * 1024 * 1024 + 1;
+    }],
+    ["malformed manifest platform", (value) => {
+      value.containersByService.app.ImageManifestDescriptor!.platform.architecture = "arm64";
+    }],
+    ["extended manifest descriptor", (value) => {
+      value.containersByService.app.ImageManifestDescriptor!.unexpected = true;
+    }],
+    ["wrong authoritative root", (value) => {
+      value.imagesById[value.containersByService.app.Image].Descriptor!.digest
+        = `sha256:${"e".repeat(64)}`;
+    }],
+    ["wrong authoritative root media type", (value) => {
+      value.imagesById[value.containersByService.app.Image].Descriptor!.mediaType
+        = "application/json";
+    }],
+    ["single-manifest root with a different selected manifest", (value) => {
+      value.imagesById[value.containersByService.app.Image].Descriptor!.mediaType
+        = "application/vnd.oci.image.manifest.v1+json";
+    }],
+    ["empty authoritative root", (value) => {
+      value.imagesById[value.containersByService.app.Image].Descriptor!.size = 0;
+    }],
+    ["oversized authoritative root", (value) => {
+      value.imagesById[value.containersByService.app.Image].Descriptor!.size
+        = 16 * 1024 * 1024 + 1;
+    }],
+    ["extended authoritative root", (value) => {
+      value.imagesById[value.containersByService.app.Image].Descriptor!.unexpected = true;
+    }],
+    ["missing authoritative root", (value) => {
+      delete value.imagesById[value.containersByService.app.Image].Descriptor;
+    }],
+    ["malformed authoritative root", (value) => {
+      value.imagesById[value.containersByService.app.Image].Descriptor = [] as never;
+    }],
+    ["wrong inspected root ID", (value) => {
+      value.imagesById[value.containersByService.app.Image].Id = `sha256:${"e".repeat(64)}`;
+    }],
+    ["third runtime digest", (value) => {
+      const root = value.containersByService.app.Image;
+      const third = `sha256:${"e".repeat(64)}`;
+      value.imagesById[third] = structuredClone(value.imagesById[root]);
+      value.imagesById[third].Id = third;
+      value.imagesById[third].Descriptor = {
+        digest: third,
+        mediaType: "application/vnd.oci.image.index.v1+json",
+        size: 1024,
+      };
+      value.containersByService.app.Image = third;
+    }],
+    ["mixed classic helper", (value) => {
+      const helper = Object.entries(value.containersByService)
+        .find(([name]) => !new Set(["app", "retention-worker", "browser-db-observer",
+          "db-grant-sync", "db-role-provision", "migration"]).has(name))?.[1];
+      if (!helper) throw new Error("Synthetic helper container is absent.");
+      delete helper.ImageManifestDescriptor;
+    }],
+    ["missing expected manifest", (value) => {
+      delete (value as Partial<typeof value>).expectedMigrationManifestDigest;
+    }],
+    ["application config aliases root", (value) => {
+      value.expectedApplicationImageConfigDigest = value.expectedApplicationAssetImageDigest;
+    }],
+    ["application config aliases manifest", (value) => {
+      value.expectedApplicationImageConfigDigest = value.expectedApplicationManifestDigest;
+    }],
+  ];
+  for (const [label, mutate] of mutations) {
+    const nearMiss = structuredClone(containerdRuntimeFixture());
+    mutate(nearMiss);
+    expect(() => assertJourneyComposeRuntimeInspection(nearMiss), label).toThrow();
+  }
 });
 
 test("rejects image, command, mount, data, network, volume, alias, and environment near-misses", () => {
@@ -66,6 +292,20 @@ test("rejects image, command, mount, data, network, volume, alias, and environme
     }],
     ["aliased role image", (value) => {
       value.expectedMigrationRuntimeImageDigest = value.expectedApplicationImageConfigDigest;
+    }],
+    ["mixed containerd manifest descriptor", (value) => {
+      value.containersByService.app.ImageManifestDescriptor = {
+        digest: `sha256:${"4".repeat(64)}`,
+        mediaType: "application/vnd.oci.image.manifest.v1+json",
+        platform: { architecture: "amd64", os: "linux" },
+        size: 512,
+      };
+    }],
+    ["wrong classic root descriptor", (value) => {
+      const selectedConfigDigest = value.containersByService.app.Image;
+      value.imagesById[selectedConfigDigest].Descriptor = {
+        digest: selectedConfigDigest,
+      };
     }],
     ["fake command", (value) => {
       value.containersByService["browser-provider-mock"].Config.Cmd = ["node", "/fake.mjs"];
@@ -137,6 +377,29 @@ test("keeps Linux host paths case-sensitive and binds the actual daemon logging 
     };
   }
   expect(() => assertJourneyComposeRuntimeInspection(fixture)).not.toThrow();
+});
+
+test("keeps the Compose Docker environment allowlist exact and deny-by-default", () => {
+  const source = readFileSync(
+    pathForRuntimeAttestationSource(),
+    "utf8",
+  );
+  const match = /function composeQueryEnvironment[\s\S]*?for \(const name of \[([\s\S]*?)\]\)/
+    .exec(source);
+  expect(match).not.toBeNull();
+  const names = [...(match?.[1] ?? "").matchAll(/"([A-Za-z0-9_]+)"/g)]
+    .map((entry) => entry[1]);
+  expect(names).toEqual([
+    "APPDATA", "DOCKER_CERT_PATH", "DOCKER_CONFIG", "DOCKER_CONTEXT",
+    "DOCKER_HOST", "DOCKER_TLS_VERIFY", "HOME", "LANG",
+    "LC_ALL", "LOCALAPPDATA", "PATH", "Path", "PATHEXT", "SYSTEMROOT",
+    "ProgramFiles", "ProgramW6432", "SystemRoot", "TEMP", "TMP", "USERPROFILE",
+    "WINDIR", "XDG_CONFIG_HOME",
+  ]);
+  expect(names).not.toContain("COMPOSE_PROJECT_NAME");
+  expect(names).not.toContain("DOCKER_API_VERSION");
+  expect(names).not.toContain("CLEAN_PAY_IMAGE");
+  expect(names).not.toContain("TOKEN");
 });
 
 test("normalizes a valid single-manifest OCI root without weakening config identity", () => {
@@ -384,10 +647,87 @@ function runtimeFixture() {
   };
 }
 
+function containerdRuntimeFixture() {
+  const fixture = runtimeFixture();
+  const originalApplicationReference = fixture.contract.images.application;
+  const originalMigrationReference = fixture.contract.images.migration;
+  const applicationRoot = fixture.expectedApplicationAssetImageDigest;
+  const applicationManifest = `sha256:${"4".repeat(64)}`;
+  const migrationRoot = fixture.expectedMigrationAssetImageDigest;
+  const migrationManifest = `sha256:${"6".repeat(64)}`;
+  fixture.contract.images.application = applicationRoot;
+  fixture.contract.images.migration = migrationRoot;
+
+  const imagesById: Record<string, ImageFixture> = {};
+  for (const [index, [serviceName, service]] of Object.entries(fixture.compose.services).entries()) {
+    const container = fixture.containersByService[serviceName];
+    const originalImage = fixture.imagesById[container.Image];
+    if (!originalImage) throw new Error(`Synthetic source image is absent for ${serviceName}.`);
+    let manifestDigest;
+    let rootDigest;
+    let rootMediaType;
+    let immutableReference;
+    if (service.image === originalApplicationReference) {
+      manifestDigest = applicationManifest;
+      rootDigest = applicationRoot;
+      rootMediaType = "application/vnd.oci.image.index.v1+json";
+      immutableReference = applicationRoot;
+    } else if (service.image === originalMigrationReference) {
+      manifestDigest = migrationManifest;
+      rootDigest = migrationRoot;
+      rootMediaType = "application/vnd.docker.distribution.manifest.list.v2+json";
+      immutableReference = migrationRoot;
+    } else {
+      rootDigest = `sha256:${hash(`containerd-helper-root:${index}:${serviceName}`)}`;
+      rootMediaType = index % 2 === 0
+        ? "application/vnd.oci.image.manifest.v1+json"
+        : "application/vnd.docker.distribution.manifest.v2+json";
+      manifestDigest = rootDigest;
+      immutableReference = `fixture/${serviceName}@${rootDigest}`;
+    }
+    service.image = immutableReference;
+    container.Config.Image = immutableReference;
+    container.Image = rootDigest;
+    container.ImageManifestDescriptor = {
+      digest: manifestDigest,
+      mediaType: index % 2 === 0
+        ? "application/vnd.oci.image.manifest.v1+json"
+        : "application/vnd.docker.distribution.manifest.v2+json",
+      platform: { architecture: "amd64", os: "linux" },
+      size: 512 + index,
+    };
+    if (!imagesById[rootDigest]) {
+      imagesById[rootDigest] = {
+        ...structuredClone(originalImage),
+        Descriptor: { digest: rootDigest, mediaType: rootMediaType, size: 768 + index },
+        Id: rootDigest,
+        RepoDigests: immutableReference.includes("@")
+          ? [immutableReference]
+          : [...originalImage.RepoDigests],
+      };
+    }
+  }
+  fixture.imagesById = imagesById;
+  fixture.expectedMigrationRuntimeImageDigest = migrationRoot;
+  return Object.assign(fixture, {
+    expectedApplicationManifestDigest: applicationManifest,
+    expectedApplicationRuntimeImageDigest: applicationRoot,
+    expectedImageSelectionMode: "containerd-root-manifest" as const,
+    expectedMigrationManifestDigest: migrationManifest,
+  });
+}
+
 function hexFor(value: string) {
   return (value.charCodeAt(0) % 16).toString(16);
 }
 
 function hash(value: string) {
   return createHash("sha256").update(value).digest("hex");
+}
+
+function pathForRuntimeAttestationSource() {
+  return path.resolve(
+    process.cwd(),
+    "tests/browser/journeys/journey-compose-runtime-attestation.mjs",
+  );
 }

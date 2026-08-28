@@ -66,6 +66,7 @@ const connectAuthorityLedgerSha256 = createHash("sha256").update(JSON.stringify(
   "pay.ci.clean-pay.dev:443",
 ])).digest("hex");
 const imageDigestPattern = /^sha256:[a-f0-9]{64}$/;
+const containerdImageSelectionMode = "containerd-root-manifest";
 const fixtureSeed = "clean-pay-browser-journey-v1";
 const maximumEventSealCount = 4_096;
 const maximumFixtureStorageBytes = 64 * 1024;
@@ -843,9 +844,21 @@ function assertStackReport(value, expectedRole, pairIndex) {
   const image = assertApplicationImage(stack.applicationImage, expectedRole);
   const migrationImage = assertMigrationImage(stack.migrationImage, expectedRole);
   if (image.assetImageDigest === migrationImage.assetImageDigest
-    || image.configDigest === migrationImage.configDigest
+    || (migrationImage.configDigest !== undefined
+      && image.configDigest === migrationImage.configDigest)
     || image.referenceSha256 === migrationImage.referenceSha256) {
     fail(`${expectedRole} application and migration image identities are conflated.`);
+  }
+  if (image.manifestDigest !== undefined && migrationImage.manifestDigest !== undefined) {
+    const applicationIdentities = new Set([
+      image.assetImageDigest,
+      image.configDigest,
+      image.manifestDigest,
+    ]);
+    if ([migrationImage.assetImageDigest, migrationImage.manifestDigest]
+      .some((digest) => applicationIdentities.has(digest))) {
+      fail(`${expectedRole} application and migration containerd image identities overlap.`);
+    }
   }
   equal(image.revision, migrationImage.revision,
     `${expectedRole} application/migration source revision`);
@@ -857,6 +870,18 @@ function assertStackReport(value, expectedRole, pairIndex) {
     expectedRole,
   );
   const runtime = assertRuntimeBinding(stack.runtimeBinding, expectedRole);
+  const imageSelectionMode = selectionModeOf(image, `${expectedRole} application image`);
+  for (const [value, valueLabel] of [
+    [migrationImage, "migration image"],
+    [inputReceipt, "input receipt"],
+    [runtimeAttestation, "runtime attestation"],
+  ]) {
+    equal(
+      selectionModeOf(value, `${expectedRole} ${valueLabel}`),
+      imageSelectionMode,
+      `${expectedRole} ${valueLabel} selection mode`,
+    );
+  }
   const reset = assertResetReport(stack.reset, expectedRole);
   const browser = assertBrowser(stack.browser, expectedRole);
   const phases = assertPhases(stack.phases, expectedRole);
@@ -877,6 +902,12 @@ function assertStackReport(value, expectedRole, pairIndex) {
     `${expectedRole} application config image binding`);
   equal(image.configDigest, inputReceipt.applicationImageConfigDigest,
     `${expectedRole} application config receipt binding`);
+  if (imageSelectionMode === containerdImageSelectionMode) {
+    equal(image.runtimeImageDigest, inputReceipt.applicationImageRuntimeDigest,
+      `${expectedRole} application runtime receipt binding`);
+    equal(image.manifestDigest, inputReceipt.applicationImageManifestDigest,
+      `${expectedRole} application manifest receipt binding`);
+  }
   equal(runtime.staticAssetManifestDigest, image.manifestDigest,
     `${expectedRole} application manifest image binding`);
   equal(runtime.applicationRepoDigestContractSha256, image.repoDigestContractSha256,
@@ -885,8 +916,15 @@ function assertStackReport(value, expectedRole, pairIndex) {
     `${expectedRole} application image binding contract`);
   equal(runtime.migrationAssetImageDigest, migrationImage.assetImageDigest,
     `${expectedRole} migration asset image binding`);
-  equal(migrationImage.configDigest, inputReceipt.migrationImageConfigDigest,
-    `${expectedRole} migration config receipt binding`);
+  if (imageSelectionMode === "classic-config") {
+    equal(migrationImage.configDigest, inputReceipt.migrationImageConfigDigest,
+      `${expectedRole} migration config receipt binding`);
+  } else {
+    equal(migrationImage.runtimeImageDigest, inputReceipt.migrationImageRuntimeDigest,
+      `${expectedRole} migration runtime receipt binding`);
+    equal(migrationImage.manifestDigest, inputReceipt.migrationImageManifestDigest,
+      `${expectedRole} migration manifest receipt binding`);
+  }
   equal(runtime.migrationImageBindingContractSha256, migrationImage.bindingContractSha256,
     `${expectedRole} migration image binding contract`);
   equal(migrationImage.bindingContractSha256, migrationImageBindingSha256(migrationImage),
@@ -913,7 +951,8 @@ function assertStackReport(value, expectedRole, pairIndex) {
 
 function assertApplicationImage(value, label) {
   const image = record(value, `${label} application image`);
-  exactKeys(image, [
+  const mode = selectionModeOf(image, `${label} application image`);
+  const classicKeys = [
     "assetImageDigest",
     "configDigest",
     "manifestDigest",
@@ -923,14 +962,21 @@ function assertApplicationImage(value, label) {
     "revision",
     "role",
     "runtimeImageDigest",
-  ], `${label} application image`);
+  ];
+  exactKeys(image, mode === "classic-config"
+    ? classicKeys
+    : [...classicKeys, "imageSelectionMode"], `${label} application image`);
   for (const name of ["assetImageDigest", "configDigest", "manifestDigest", "runtimeImageDigest"]) {
     stringMatch(image[name], imageDigestPattern, `${label} application ${name}`);
   }
   if (image.configDigest === image.assetImageDigest || image.configDigest === image.manifestDigest) {
     fail(`${label} application config and OCI source digests are conflated.`);
   }
-  equal(image.runtimeImageDigest, image.configDigest, `${label} application runtime config`);
+  equal(
+    image.runtimeImageDigest,
+    mode === "classic-config" ? image.configDigest : image.assetImageDigest,
+    `${label} application runtime ${mode === "classic-config" ? "config" : "OCI root"}`,
+  );
   stringMatch(image.referenceSha256, sha256Pattern, `${label} application reference`);
   stringMatch(image.repoDigestContractSha256, sha256Pattern,
     `${label} application repository digest contract`);
@@ -946,7 +992,8 @@ function assertApplicationImage(value, label) {
 
 function assertMigrationImage(value, label) {
   const image = record(value, `${label} migration image`);
-  exactKeys(image, [
+  const mode = selectionModeOf(image, `${label} migration image`);
+  const classicKeys = [
     "assetImageDigest",
     "bindingContractSha256",
     "configDigest",
@@ -954,14 +1001,32 @@ function assertMigrationImage(value, label) {
     "revision",
     "role",
     "runtimeImageDigest",
-  ], `${label} migration image`);
-  for (const name of ["assetImageDigest", "configDigest", "runtimeImageDigest"]) {
+  ];
+  exactKeys(image, mode === "classic-config"
+    ? classicKeys
+    : [
+      "assetImageDigest",
+      "bindingContractSha256",
+      "imageSelectionMode",
+      "manifestDigest",
+      "referenceSha256",
+      "revision",
+      "role",
+      "runtimeImageDigest",
+    ], `${label} migration image`);
+  for (const name of mode === "classic-config"
+    ? ["assetImageDigest", "configDigest", "runtimeImageDigest"]
+    : ["assetImageDigest", "manifestDigest", "runtimeImageDigest"]) {
     stringMatch(image[name], imageDigestPattern, `${label} migration ${name}`);
   }
-  if (image.configDigest === image.assetImageDigest) {
+  if (mode === "classic-config" && image.configDigest === image.assetImageDigest) {
     fail(`${label} migration config and OCI source digests are conflated.`);
   }
-  equal(image.runtimeImageDigest, image.configDigest, `${label} migration runtime config`);
+  equal(
+    image.runtimeImageDigest,
+    mode === "classic-config" ? image.configDigest : image.assetImageDigest,
+    `${label} migration runtime ${mode === "classic-config" ? "config" : "OCI root"}`,
+  );
   stringMatch(image.bindingContractSha256, sha256Pattern, `${label} migration binding`);
   stringMatch(image.referenceSha256, sha256Pattern, `${label} migration reference`);
   stringMatch(image.revision, /^[a-f0-9]{40}$/, `${label} migration image revision`);
@@ -970,23 +1035,44 @@ function assertMigrationImage(value, label) {
 }
 
 function applicationImageBindingSha256(image) {
-  return sha256(JSON.stringify({
+  const classic = {
     assetImageDigest: image.assetImageDigest,
     configDigest: image.configDigest,
     referenceSha256: image.referenceSha256,
     repoDigests: [...new Set([image.assetImageDigest, image.manifestDigest])].sort(),
     role: "application",
-  }));
+  };
+  return sha256(JSON.stringify(selectionModeOf(image, "application image binding")
+    === "classic-config" ? classic : {
+      assetImageDigest: image.assetImageDigest,
+      configDigest: image.configDigest,
+      imageSelectionMode: image.imageSelectionMode,
+      manifestDigest: image.manifestDigest,
+      referenceSha256: image.referenceSha256,
+      repoDigests: classic.repoDigests,
+      role: "application",
+      runtimeImageDigest: image.runtimeImageDigest,
+    }));
 }
 
 function migrationImageBindingSha256(image) {
-  return sha256(JSON.stringify({
+  const classic = {
     assetImageDigest: image.assetImageDigest,
     configDigest: image.configDigest,
     referenceSha256: image.referenceSha256,
     repoDigests: [image.assetImageDigest],
     role: "migration",
-  }));
+  };
+  return sha256(JSON.stringify(selectionModeOf(image, "migration image binding")
+    === "classic-config" ? classic : {
+      assetImageDigest: image.assetImageDigest,
+      imageSelectionMode: image.imageSelectionMode,
+      manifestDigest: image.manifestDigest,
+      referenceSha256: image.referenceSha256,
+      repoDigests: classic.repoDigests,
+      role: "migration",
+      runtimeImageDigest: image.runtimeImageDigest,
+    }));
 }
 
 function assertVersionedDigest(value, label, kind) {
@@ -999,7 +1085,8 @@ function assertVersionedDigest(value, label, kind) {
 
 function assertInputReceipt(value, label) {
   const receipt = record(value, `${label} input receipt`);
-  exactKeys(receipt, [
+  const mode = selectionModeOf(receipt, `${label} input receipt`);
+  const sharedKeys = [
     "applicationImageBindingContractSha256",
     "applicationImageConfigDigest",
     "composeSourceSha256",
@@ -1010,16 +1097,27 @@ function assertInputReceipt(value, label) {
     "globalFixtureContractSha256",
     "imageProbeOwnershipContractSha256",
     "migrationImageBindingContractSha256",
-    "migrationImageConfigDigest",
     "projectSha256",
     "renderedComposeSha256",
     "roleEnvironmentContractSha256",
     "roleEnvironmentPolicySha256",
-  ], `${label} input receipt`);
+  ];
+  exactKeys(receipt, mode === "classic-config"
+    ? [...sharedKeys, "migrationImageConfigDigest"]
+    : [
+      ...sharedKeys,
+      "applicationImageManifestDigest",
+      "applicationImageRuntimeDigest",
+      "imageSelectionMode",
+      "migrationImageManifestDigest",
+      "migrationImageRuntimeDigest",
+    ], `${label} input receipt`);
   for (const [name, digest] of Object.entries(receipt)) {
+    if (name === "imageSelectionMode") continue;
     stringMatch(
       digest,
-      name.endsWith("ConfigDigest") ? imageDigestPattern : sha256Pattern,
+      name.endsWith("ConfigDigest") || name.endsWith("RuntimeDigest")
+        || name.endsWith("ManifestDigest") ? imageDigestPattern : sha256Pattern,
       `${label} input receipt ${name}`,
     );
   }
@@ -1028,7 +1126,8 @@ function assertInputReceipt(value, label) {
 
 function assertRuntimeAttestation(value, label) {
   const runtime = record(value, `${label} runtime attestation`);
-  exactKeys(runtime, [
+  const mode = selectionModeOf(runtime, `${label} runtime attestation`);
+  const sharedKeys = [
     "applicationImageBindingContractSha256",
     "applicationRepoDigestContractSha256",
     "applicationRuntimeImageDigest",
@@ -1044,11 +1143,17 @@ function assertRuntimeAttestation(value, label) {
     "serviceIdentitySha256",
     "syntheticRoleEnvironmentContractSha256",
     "syntheticRoleEnvironmentPolicySha256",
-  ], `${label} runtime attestation`);
+  ];
+  exactKeys(runtime, mode === "classic-config"
+    ? sharedKeys
+    : [...sharedKeys, "applicationManifestDigest", "imageSelectionMode", "migrationManifestDigest"],
+  `${label} runtime attestation`);
   for (const [name, digest] of Object.entries(runtime)) {
+    if (name === "imageSelectionMode") continue;
     stringMatch(
       digest,
-      name.endsWith("ImageDigest") ? imageDigestPattern : sha256Pattern,
+      name.endsWith("ImageDigest") || name.endsWith("ManifestDigest")
+        ? imageDigestPattern : sha256Pattern,
       `${label} runtime attestation ${name}`,
     );
   }
@@ -1111,10 +1216,25 @@ function assertReceiptRuntimeBinding(receipt, attestation, runtime, fixture, lab
     ["roleEnvironmentPolicySha256", "syntheticRoleEnvironmentPolicySha256"],
     ["applicationImageBindingContractSha256", "applicationImageBindingContractSha256"],
     ["migrationImageBindingContractSha256", "migrationImageBindingContractSha256"],
-    ["applicationImageConfigDigest", "applicationRuntimeImageDigest"],
-    ["migrationImageConfigDigest", "migrationRuntimeImageDigest"],
   ]) {
     equal(receipt[receiptName], attestation[runtimeName], `${label} receipt/runtime ${receiptName}`);
+  }
+  const mode = selectionModeOf(receipt, `${label} receipt/runtime binding`);
+  if (mode === "classic-config") {
+    equal(receipt.applicationImageConfigDigest, attestation.applicationRuntimeImageDigest,
+      `${label} receipt/runtime applicationImageConfigDigest`);
+    equal(receipt.migrationImageConfigDigest, attestation.migrationRuntimeImageDigest,
+      `${label} receipt/runtime migrationImageConfigDigest`);
+  } else {
+    for (const [receiptName, runtimeName] of [
+      ["applicationImageRuntimeDigest", "applicationRuntimeImageDigest"],
+      ["applicationImageManifestDigest", "applicationManifestDigest"],
+      ["migrationImageRuntimeDigest", "migrationRuntimeImageDigest"],
+      ["migrationImageManifestDigest", "migrationManifestDigest"],
+    ]) {
+      equal(receipt[receiptName], attestation[runtimeName],
+        `${label} receipt/runtime ${receiptName}`);
+    }
   }
   equal(receipt.fixtureMountSubsetContractSha256, attestation.fixtureMountContractSha256,
     `${label} receipt/runtime fixture subset`);
@@ -1153,6 +1273,12 @@ function assertReceiptRuntimeBinding(receipt, attestation, runtime, fixture, lab
     sha256(JSON.stringify(receipt)),
     `${label} owned input receipt digest`,
   );
+}
+
+function selectionModeOf(value, label) {
+  if (value?.imageSelectionMode === undefined) return "classic-config";
+  equal(value.imageSelectionMode, containerdImageSelectionMode, `${label} image selection mode`);
+  return containerdImageSelectionMode;
 }
 
 function assertResetReport(value, label) {
@@ -2609,6 +2735,14 @@ function assertGlobalStackContract(stacks) {
     stacks.map((stack) => stack.runtimeAttestation.fixtureExecutionContractSha256),
     "fixture execution contracts",
   );
+  requireSame(
+    stacks.map((stack) => selectionModeOf(stack.applicationImage, "global application image")),
+    "image selection mode",
+  );
+  const imageSelectionMode = selectionModeOf(
+    stacks[0].applicationImage,
+    "global application image",
+  );
   requireSame(baseline.map((stack) => stack.applicationImage.assetImageDigest), "baseline image digest");
   requireSame(candidate.map((stack) => stack.applicationImage.assetImageDigest), "candidate image digest");
   if (baseline[0].applicationImage.assetImageDigest
@@ -2631,10 +2765,25 @@ function assertGlobalStackContract(stacks) {
     === candidate[0].migrationImage.assetImageDigest) {
     fail("Baseline and candidate migration images must be distinct.");
   }
-  requireSame(baseline.map((stack) => stack.migrationImage.configDigest), "baseline migration config");
-  requireSame(candidate.map((stack) => stack.migrationImage.configDigest), "candidate migration config");
-  if (baseline[0].migrationImage.configDigest === candidate[0].migrationImage.configDigest) {
-    fail("Baseline and candidate migration config digests must be distinct.");
+  if (imageSelectionMode === "classic-config") {
+    requireSame(baseline.map((stack) => stack.migrationImage.configDigest), "baseline migration config");
+    requireSame(candidate.map((stack) => stack.migrationImage.configDigest), "candidate migration config");
+    if (baseline[0].migrationImage.configDigest === candidate[0].migrationImage.configDigest) {
+      fail("Baseline and candidate migration config digests must be distinct.");
+    }
+  } else {
+    requireSame(
+      baseline.map((stack) => stack.migrationImage.manifestDigest),
+      "baseline migration manifest",
+    );
+    requireSame(
+      candidate.map((stack) => stack.migrationImage.manifestDigest),
+      "candidate migration manifest",
+    );
+    if (baseline[0].migrationImage.manifestDigest
+      === candidate[0].migrationImage.manifestDigest) {
+      fail("Baseline and candidate migration manifest digests must be distinct.");
+    }
   }
   requireSame(baseline.map((stack) => stack.migrationImage.revision), "baseline migration revision");
   requireSame(candidate.map((stack) => stack.migrationImage.revision), "candidate migration revision");

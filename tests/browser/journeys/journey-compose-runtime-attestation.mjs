@@ -53,6 +53,11 @@ const oneShotServices = new Set([
   "db-role-provision",
   "migration",
 ]);
+const defaultImagePlatform = Object.freeze({ architecture: "amd64", os: "linux" });
+const platformImageManifestMediaTypes = new Set([
+  "application/vnd.docker.distribution.manifest.v2+json",
+  "application/vnd.oci.image.manifest.v1+json",
+]);
 export const JOURNEY_COMPOSE_ONE_SHOT_SERVICE_NAMES = Object.freeze(
   [...oneShotServices].sort(),
 );
@@ -171,9 +176,14 @@ export async function attestJourneyComposeRuntime({
   contract,
   expectedApplicationAssetImageDigest,
   expectedApplicationImageConfigDigest,
+  expectedApplicationManifestDigest,
   expectedApplicationReference,
   expectedApplicationRepoDigests,
+  expectedApplicationRuntimeImageDigest,
+  expectedImageSelectionMode,
+  expectedImagePlatform = defaultImagePlatform,
   expectedMigrationAssetImageDigest,
+  expectedMigrationManifestDigest,
   expectedMigrationReference,
   expectedMigrationRuntimeImageDigest,
   fixtureSourceOverrides,
@@ -192,18 +202,39 @@ export async function attestJourneyComposeRuntime({
     "expectedMigrationRuntimeImageDigest",
     "repositoryRoot",
     "runDocker",
-  ], ["fixtureSourceOverrides", "lifecycleNotBefore"], "journey runtime attestation input");
+  ], [
+    "expectedApplicationManifestDigest",
+    "expectedApplicationRuntimeImageDigest",
+    "expectedImageSelectionMode",
+    "expectedImagePlatform",
+    "expectedMigrationManifestDigest",
+    "fixtureSourceOverrides",
+    "lifecycleNotBefore",
+  ], "journey runtime attestation input");
   if (typeof runDocker !== "function") fail("Journey runtime Docker reader is invalid.");
   exactImageReference(expectedApplicationReference, "expected application image reference");
   exactImageReference(expectedMigrationReference, "expected migration image reference");
   exactDigest(expectedApplicationAssetImageDigest, "expected application asset image digest");
   exactDigest(expectedApplicationImageConfigDigest, "expected application image config digest");
+  const imagePlatform = exactImagePlatform(expectedImagePlatform, "expected image platform");
   const applicationRepoDigests = exactRepoDigestSet(expectedApplicationRepoDigests);
   if (!applicationRepoDigests.includes(expectedApplicationAssetImageDigest)) {
     fail("Expected application repository digests omit the attested OCI root.");
   }
   exactDigest(expectedMigrationAssetImageDigest, "expected migration asset image digest");
   exactDigest(expectedMigrationRuntimeImageDigest, "expected migration runtime image digest");
+  const imageSelection = assertExpectedImageSelection({
+    contract,
+    expectedApplicationAssetImageDigest,
+    expectedApplicationImageConfigDigest,
+    expectedApplicationManifestDigest,
+    expectedApplicationRepoDigests: applicationRepoDigests,
+    expectedApplicationRuntimeImageDigest,
+    expectedImageSelectionMode,
+    expectedMigrationAssetImageDigest,
+    expectedMigrationManifestDigest,
+    expectedMigrationRuntimeImageDigest,
+  });
   if (
     contract.images?.application === contract.images?.migration
     || [expectedApplicationImageConfigDigest, ...applicationRepoDigests]
@@ -235,11 +266,13 @@ export async function attestJourneyComposeRuntime({
   const containers = await inspectMany(runDocker, "container", containerIds, 512 * 1024);
   const containersByService = indexProjectContainers(containers, contract.project);
 
-  const imageIds = [...new Set(containers.map((container) => container.Image))].sort();
-  const imagesById = Object.fromEntries(await Promise.all(imageIds.map(async (imageId) => [
-    imageId,
-    (await inspectMany(runDocker, "image", [imageId], 512 * 1024))[0],
-  ])));
+  const imageReferencesByRuntimeDigest = runtimeImageReferences(containers);
+  const imagesById = Object.fromEntries(await Promise.all(
+    [...imageReferencesByRuntimeDigest.entries()].map(async ([runtimeDigest, reference]) => [
+      runtimeDigest,
+      (await inspectMany(runDocker, "image", [reference], 512 * 1024))[0],
+    ]),
+  ));
 
   const networkIds = exactDockerIds(await runDocker([
     "network", "ls", "--no-trunc", "--quiet",
@@ -292,9 +325,18 @@ export async function attestJourneyComposeRuntime({
     daemonLoggingDriver,
     expectedApplicationAssetImageDigest,
     expectedApplicationImageConfigDigest,
+    ...(imageSelection.mode === "containerd-root-manifest" ? {
+      expectedApplicationManifestDigest: imageSelection.applicationManifestDigest,
+      expectedImageSelectionMode: imageSelection.mode,
+      expectedApplicationRuntimeImageDigest: imageSelection.applicationRuntimeImageDigest,
+    } : {}),
     expectedApplicationReference,
     expectedApplicationRepoDigests: applicationRepoDigests,
+    expectedImagePlatform: imagePlatform,
     expectedMigrationAssetImageDigest,
+    ...(imageSelection.mode === "containerd-root-manifest" ? {
+      expectedMigrationManifestDigest: imageSelection.migrationManifestDigest,
+    } : {}),
     expectedMigrationReference,
     expectedMigrationRuntimeImageDigest,
     imagesById,
@@ -351,7 +393,7 @@ export async function attestJourneyComposeRuntime({
   }
 
   return Object.freeze({
-    applicationRuntimeImageDigest: expectedApplicationImageConfigDigest,
+    applicationRuntimeImageDigest: imageSelection.applicationRuntimeImageDigest,
     applicationRepoDigestContractSha256: runtime.applicationRepoDigestContractSha256,
     composeSourceSha256,
     composeRuntimeContractSha256: hashJson({
@@ -363,8 +405,15 @@ export async function attestJourneyComposeRuntime({
     fixtureMountContractSha256: hashJson(liveFixtureMounts.sort(byDestination)),
     fixtureExecutionContractSha256: hashJson(fixtureExecutions.sort(byDestination)),
     applicationImageBindingContractSha256: runtime.applicationImageBindingContractSha256,
+    ...(imageSelection.mode === "containerd-root-manifest" ? {
+      applicationManifestDigest: imageSelection.applicationManifestDigest,
+      imageSelectionMode: imageSelection.mode,
+    } : {}),
     migrationImageBindingContractSha256: runtime.migrationImageBindingContractSha256,
-    migrationRuntimeImageDigest: expectedMigrationRuntimeImageDigest,
+    ...(imageSelection.mode === "containerd-root-manifest" ? {
+      migrationManifestDigest: imageSelection.migrationManifestDigest,
+    } : {}),
+    migrationRuntimeImageDigest: imageSelection.migrationRuntimeImageDigest,
     serviceIdentitySha256: runtime.serviceIdentitySha256,
     networkSha256: runtime.networkSha256,
     oneShotLifecycleContractSha256: hashJson(oneShotLifecycles),
@@ -413,7 +462,7 @@ export function assertJourneyComposeModel(compose, contract) {
 }
 
 export function assertJourneyComposeRuntimeInspection(input) {
-  exactObjectKeys(input, [
+  exactOptionalObjectKeys(input, [
     "attestedAt",
     "bindSources",
     "compose",
@@ -432,6 +481,12 @@ export function assertJourneyComposeRuntimeInspection(input) {
     "oneShotLifecycles",
     "lifecycleNotBefore",
     "volumes",
+  ], [
+    "expectedApplicationManifestDigest",
+    "expectedApplicationRuntimeImageDigest",
+    "expectedImageSelectionMode",
+    "expectedImagePlatform",
+    "expectedMigrationManifestDigest",
   ], "journey runtime inspection input");
   const {
     attestedAt,
@@ -442,9 +497,14 @@ export function assertJourneyComposeRuntimeInspection(input) {
     daemonLoggingDriver,
     expectedApplicationAssetImageDigest,
     expectedApplicationImageConfigDigest,
+    expectedApplicationManifestDigest,
     expectedApplicationReference,
     expectedApplicationRepoDigests,
+    expectedApplicationRuntimeImageDigest,
+    expectedImageSelectionMode,
+    expectedImagePlatform = defaultImagePlatform,
     expectedMigrationAssetImageDigest,
+    expectedMigrationManifestDigest,
     expectedMigrationReference,
     expectedMigrationRuntimeImageDigest,
     imagesById,
@@ -455,6 +515,7 @@ export function assertJourneyComposeRuntimeInspection(input) {
   } = input;
   exactDigest(expectedApplicationAssetImageDigest, "expected application asset image digest");
   exactDigest(expectedApplicationImageConfigDigest, "expected application image config digest");
+  const imagePlatform = exactImagePlatform(expectedImagePlatform, "expected image platform");
   exactImageReference(expectedApplicationReference, "expected application image reference");
   exactImageReference(expectedMigrationReference, "expected migration image reference");
   const applicationRepoDigests = exactRepoDigestSet(expectedApplicationRepoDigests);
@@ -463,6 +524,18 @@ export function assertJourneyComposeRuntimeInspection(input) {
   }
   exactDigest(expectedMigrationAssetImageDigest, "expected migration asset image digest");
   exactDigest(expectedMigrationRuntimeImageDigest, "expected migration runtime image digest");
+  const imageSelection = assertExpectedImageSelection({
+    contract,
+    expectedApplicationAssetImageDigest,
+    expectedApplicationImageConfigDigest,
+    expectedApplicationManifestDigest,
+    expectedApplicationRepoDigests: applicationRepoDigests,
+    expectedApplicationRuntimeImageDigest,
+    expectedImageSelectionMode,
+    expectedMigrationAssetImageDigest,
+    expectedMigrationManifestDigest,
+    expectedMigrationRuntimeImageDigest,
+  });
   exactTimestamp(attestedAt, "runtime attestation timestamp");
   if (lifecycleNotBefore !== undefined) {
     exactTimestamp(lifecycleNotBefore, "journey lifecycle lower bound");
@@ -502,11 +575,16 @@ export function assertJourneyComposeRuntimeInspection(input) {
       daemonLoggingDriver,
       expectedApplicationAssetImageDigest,
       expectedApplicationImageConfigDigest,
+      expectedApplicationManifestDigest: imageSelection.applicationManifestDigest,
       expectedApplicationReference,
       expectedApplicationRepoDigests: applicationRepoDigests,
+      expectedApplicationRuntimeImageDigest: imageSelection.applicationRuntimeImageDigest,
+      expectedImageSelectionMode: imageSelection.mode,
+      expectedImagePlatform: imagePlatform,
       expectedMigrationAssetImageDigest,
+      expectedMigrationManifestDigest: imageSelection.migrationManifestDigest,
       expectedMigrationReference,
-      expectedMigrationRuntimeImageDigest,
+      expectedMigrationRuntimeImageDigest: imageSelection.migrationRuntimeImageDigest,
       expectedNetworkName,
       expectedVolumeNames,
       image,
@@ -534,22 +612,52 @@ export function assertJourneyComposeRuntimeInspection(input) {
     applicationRepoDigests,
   );
 
+  const classicApplicationBinding = {
+    assetImageDigest: expectedApplicationAssetImageDigest,
+    configDigest: expectedApplicationImageConfigDigest,
+    referenceSha256: sha256(expectedApplicationReference),
+    repoDigests: applicationRepoDigests,
+    role: "application",
+  };
+  const classicMigrationBinding = {
+    assetImageDigest: expectedMigrationAssetImageDigest,
+    configDigest: expectedMigrationRuntimeImageDigest,
+    referenceSha256: sha256(expectedMigrationReference),
+    repoDigests: [expectedMigrationAssetImageDigest],
+    role: "migration",
+  };
+  const applicationBinding = imageSelection.mode === "containerd-root-manifest" ? {
+    assetImageDigest: expectedApplicationAssetImageDigest,
+    configDigest: expectedApplicationImageConfigDigest,
+    imageSelectionMode: imageSelection.mode,
+    manifestDigest: imageSelection.applicationManifestDigest,
+    referenceSha256: sha256(expectedApplicationReference),
+    repoDigests: applicationRepoDigests,
+    role: "application",
+    runtimeImageDigest: imageSelection.applicationRuntimeImageDigest,
+  } : classicApplicationBinding;
+  const migrationBinding = imageSelection.mode === "containerd-root-manifest" ? {
+    assetImageDigest: expectedMigrationAssetImageDigest,
+    imageSelectionMode: imageSelection.mode,
+    manifestDigest: imageSelection.migrationManifestDigest,
+    referenceSha256: sha256(expectedMigrationReference),
+    repoDigests: [expectedMigrationAssetImageDigest],
+    role: "migration",
+    runtimeImageDigest: imageSelection.migrationRuntimeImageDigest,
+  } : classicMigrationBinding;
   return Object.freeze({
     applicationRepoDigestContractSha256,
-    applicationImageBindingContractSha256: hashJson({
-      assetImageDigest: expectedApplicationAssetImageDigest,
-      configDigest: expectedApplicationImageConfigDigest,
-      referenceSha256: sha256(expectedApplicationReference),
-      repoDigests: applicationRepoDigests,
-      role: "application",
-    }),
-    migrationImageBindingContractSha256: hashJson({
-      assetImageDigest: expectedMigrationAssetImageDigest,
-      configDigest: expectedMigrationRuntimeImageDigest,
-      referenceSha256: sha256(expectedMigrationReference),
-      repoDigests: [expectedMigrationAssetImageDigest],
-      role: "migration",
-    }),
+    applicationImageBindingContractSha256: hashJson(applicationBinding),
+    ...(imageSelection.mode === "containerd-root-manifest" ? {
+      applicationManifestDigest: imageSelection.applicationManifestDigest,
+      applicationRuntimeImageDigest: imageSelection.applicationRuntimeImageDigest,
+      imageSelectionMode: imageSelection.mode,
+    } : {}),
+    migrationImageBindingContractSha256: hashJson(migrationBinding),
+    ...(imageSelection.mode === "containerd-root-manifest" ? {
+      migrationManifestDigest: imageSelection.migrationManifestDigest,
+      migrationRuntimeImageDigest: imageSelection.migrationRuntimeImageDigest,
+    } : {}),
     networkSha256: sha256(expectedNetworkName),
     oneShotLifecycleContractSha256: hashJson(oneShotLifecycles),
     serviceIdentitySha256: hashJson(serviceIdentity),
@@ -562,9 +670,15 @@ function assertServiceRuntime(input) {
     container,
     contract,
     daemonLoggingDriver,
+    expectedApplicationAssetImageDigest,
     expectedApplicationImageConfigDigest,
+    expectedApplicationManifestDigest,
     expectedApplicationRepoDigests,
+    expectedApplicationRuntimeImageDigest,
+    expectedImageSelectionMode,
+    expectedImagePlatform,
     expectedMigrationAssetImageDigest,
+    expectedMigrationManifestDigest,
     expectedMigrationRuntimeImageDigest,
     expectedNetworkName,
     expectedVolumeNames,
@@ -586,13 +700,19 @@ function assertServiceRuntime(input) {
   }
   assertImageIdentity(
     image,
+    container,
     service.image,
     contract,
+    expectedApplicationAssetImageDigest,
     expectedApplicationImageConfigDigest,
+    expectedApplicationManifestDigest,
     expectedApplicationRepoDigests,
+    expectedApplicationRuntimeImageDigest,
+    expectedImageSelectionMode,
+    expectedImagePlatform,
     expectedMigrationAssetImageDigest,
+    expectedMigrationManifestDigest,
     expectedMigrationRuntimeImageDigest,
-    container.Image,
   );
   assertExactEnvironment(container.Config.Env, effectiveEnvironment(image, service));
   exactJson(container.Config.Entrypoint ?? null, effectiveList(service.entrypoint, image.Config?.Entrypoint));
@@ -648,31 +768,88 @@ function assertServiceRuntime(input) {
 
 function assertImageIdentity(
   image,
+  container,
   reference,
   contract,
+  expectedApplicationAssetImageDigest,
   expectedApplicationImageConfigDigest,
+  expectedApplicationManifestDigest,
   expectedApplicationRepoDigests,
+  expectedApplicationRuntimeImageDigest,
+  expectedImageSelectionMode,
+  expectedImagePlatform,
   expectedMigrationAssetImageDigest,
+  expectedMigrationManifestDigest,
   expectedMigrationRuntimeImageDigest,
-  runtimeImageDigest,
 ) {
+  const runtimeImageDigest = container.Image;
   let role;
   if (image?.Id !== runtimeImageDigest) {
-    fail("Journey image inspection ID differs from the container selected config digest.");
+    fail("Journey image inspection ID differs from the container-selected runtime digest.");
+  }
+  if (expectedImageSelectionMode === "containerd-root-manifest") {
+    assertContainerdRootInspection(
+      image,
+      runtimeImageDigest,
+      container.ImageManifestDescriptor?.digest,
+    );
+  } else if (Object.hasOwn(container, "ImageManifestDescriptor")) {
+    fail("Classic image selection contains mixed containerd descriptor state.");
   }
   if (reference === contract.images.application) {
-    if (runtimeImageDigest !== expectedApplicationImageConfigDigest) {
-      fail("Journey application container is not bound to the attested selected config digest.");
+    if (expectedImageSelectionMode === "containerd-root-manifest") {
+      if (runtimeImageDigest !== expectedApplicationAssetImageDigest
+        || runtimeImageDigest !== expectedApplicationRuntimeImageDigest) {
+        fail("Journey application container is not bound to its attested OCI root.");
+      }
+      assertContainerdManifestDescriptor(
+        container.ImageManifestDescriptor,
+        expectedApplicationManifestDigest,
+        "application",
+        expectedImagePlatform,
+      );
+    } else {
+      if (runtimeImageDigest !== expectedApplicationImageConfigDigest) {
+        fail("Journey application container is not bound to the attested selected config digest.");
+      }
+      assertClassicRootDescriptor(image, expectedApplicationAssetImageDigest, "application");
     }
     role = "app";
   } else if (reference === contract.images.migration) {
-    if (runtimeImageDigest !== expectedMigrationRuntimeImageDigest) {
-      fail("Journey migration container is not bound to the verifier-derived config digest.");
+    if (expectedImageSelectionMode === "containerd-root-manifest") {
+      if (runtimeImageDigest !== expectedMigrationAssetImageDigest
+        || runtimeImageDigest !== expectedMigrationRuntimeImageDigest) {
+        fail("Journey migration container is not bound to its attested OCI root.");
+      }
+      assertContainerdManifestDescriptor(
+        container.ImageManifestDescriptor,
+        expectedMigrationManifestDigest,
+        "migration",
+        expectedImagePlatform,
+      );
+    } else {
+      if (runtimeImageDigest !== expectedMigrationRuntimeImageDigest) {
+        fail("Journey migration container is not bound to the verifier-derived config digest.");
+      }
+      assertClassicRootDescriptor(image, expectedMigrationAssetImageDigest, "migration");
     }
     role = "migration";
   } else {
     const match = /@(?<digest>sha256:[a-f0-9]{64})$/.exec(reference);
     if (!match) fail("Journey helper image is not digest-pinned.");
+    if (expectedImageSelectionMode === "containerd-root-manifest") {
+      if (runtimeImageDigest !== match.groups.digest) {
+        fail("Journey helper container is not bound to its digest-pinned OCI root.");
+      }
+      assertContainerdManifestDescriptor(
+        container.ImageManifestDescriptor,
+        undefined,
+        "helper",
+        expectedImagePlatform,
+      );
+    } else {
+      assertClassicRootDescriptor(image, match.groups.digest, "helper");
+    }
     const expectedRepoDigest = canonicalRepoDigest(reference);
     if (!(image.RepoDigests ?? []).includes(expectedRepoDigest)) {
       fail("Journey helper image digest reference differs from Compose.");
@@ -697,6 +874,175 @@ function assertImageIdentity(
   ) {
     fail("Journey role image public-build identity differs.");
   }
+}
+
+function assertExpectedImageSelection({
+  contract,
+  expectedApplicationAssetImageDigest,
+  expectedApplicationImageConfigDigest,
+  expectedApplicationManifestDigest,
+  expectedApplicationRepoDigests,
+  expectedApplicationRuntimeImageDigest,
+  expectedImageSelectionMode,
+  expectedMigrationAssetImageDigest,
+  expectedMigrationManifestDigest,
+  expectedMigrationRuntimeImageDigest,
+}) {
+  if (expectedImageSelectionMode === undefined) {
+    if (expectedApplicationManifestDigest !== undefined
+      || expectedApplicationRuntimeImageDigest !== undefined
+      || expectedMigrationManifestDigest !== undefined) {
+      fail("Classic image selection cannot carry containerd-only identities.");
+    }
+    return Object.freeze({
+      applicationManifestDigest: undefined,
+      applicationRuntimeImageDigest: expectedApplicationImageConfigDigest,
+      migrationManifestDigest: undefined,
+      migrationRuntimeImageDigest: expectedMigrationRuntimeImageDigest,
+      mode: "classic-config",
+    });
+  }
+  if (expectedImageSelectionMode !== "containerd-root-manifest") {
+    fail("Journey image selection mode is invalid.");
+  }
+  exactDigest(expectedApplicationManifestDigest, "expected application platform manifest digest");
+  exactDigest(expectedApplicationRuntimeImageDigest, "expected application runtime image digest");
+  exactDigest(expectedMigrationManifestDigest, "expected migration platform manifest digest");
+  if (expectedApplicationRuntimeImageDigest !== expectedApplicationAssetImageDigest
+    || expectedMigrationRuntimeImageDigest !== expectedMigrationAssetImageDigest
+    || contract.images?.application !== expectedApplicationAssetImageDigest
+    || contract.images?.migration !== expectedMigrationAssetImageDigest) {
+    fail("Containerd journey images are not bound to their attested OCI roots.");
+  }
+  if (!expectedApplicationRepoDigests.includes(expectedApplicationManifestDigest)) {
+    fail("Expected application repository digests omit its platform manifest.");
+  }
+  if (expectedApplicationImageConfigDigest === expectedApplicationAssetImageDigest
+    || expectedApplicationImageConfigDigest === expectedApplicationManifestDigest) {
+    fail("Expected application config digest aliases a containerd runtime image identity.");
+  }
+  const applicationIdentities = new Set([
+    expectedApplicationAssetImageDigest,
+    expectedApplicationImageConfigDigest,
+    expectedApplicationManifestDigest,
+  ]);
+  if ([
+    expectedMigrationAssetImageDigest,
+    expectedMigrationManifestDigest,
+  ].some((digest) => applicationIdentities.has(digest))) {
+    fail("Containerd application and migration image identities overlap.");
+  }
+  return Object.freeze({
+    applicationManifestDigest: expectedApplicationManifestDigest,
+    applicationRuntimeImageDigest: expectedApplicationRuntimeImageDigest,
+    migrationManifestDigest: expectedMigrationManifestDigest,
+    migrationRuntimeImageDigest: expectedMigrationRuntimeImageDigest,
+    mode: expectedImageSelectionMode,
+  });
+}
+
+function assertContainerdRootInspection(image, expectedRootDigest, selectedManifestDigest) {
+  const descriptor = image?.Descriptor;
+  if (!descriptor || typeof descriptor !== "object" || Array.isArray(descriptor)
+    || descriptor.digest !== expectedRootDigest) {
+    fail("Containerd image inspection is not bound to its authoritative OCI root descriptor.");
+  }
+  exactObjectKeys(
+    descriptor,
+    ["digest", "mediaType", "size"],
+    "containerd authoritative OCI root descriptor",
+  );
+  if (!new Set([
+    "application/vnd.docker.distribution.manifest.list.v2+json",
+    "application/vnd.docker.distribution.manifest.v2+json",
+    "application/vnd.oci.image.index.v1+json",
+    "application/vnd.oci.image.manifest.v1+json",
+  ]).has(descriptor.mediaType)
+    || !Number.isSafeInteger(descriptor.size)
+    || descriptor.size <= 0
+    || descriptor.size > 16 * 1024 * 1024) {
+    fail("Containerd authoritative OCI root descriptor differs from its exact contract.");
+  }
+  if (!/^sha256:[a-f0-9]{64}$/.test(selectedManifestDigest ?? "")
+    || (platformImageManifestMediaTypes.has(descriptor.mediaType)
+      && selectedManifestDigest !== expectedRootDigest)) {
+    fail("Containerd single-manifest OCI root differs from its selected platform manifest.");
+  }
+}
+
+function assertClassicRootDescriptor(image, expectedRootDigest, role) {
+  if (!Object.hasOwn(image, "Descriptor")) return;
+  const descriptor = image.Descriptor;
+  if (!descriptor || typeof descriptor !== "object" || Array.isArray(descriptor)
+    || descriptor.digest !== expectedRootDigest) {
+    fail(`Classic ${role} image root descriptor differs from its attested asset digest.`);
+  }
+}
+
+function assertContainerdManifestDescriptor(descriptor, expectedDigest, role, expectedPlatform) {
+  const platform = exactImagePlatform(
+    expectedPlatform,
+    `containerd ${role} expected image platform`,
+  );
+  if (!descriptor || typeof descriptor !== "object" || Array.isArray(descriptor)) {
+    fail(`Containerd ${role} platform manifest descriptor is missing or malformed.`);
+  }
+  exactObjectKeys(
+    descriptor,
+    ["digest", "mediaType", "platform", "size"],
+    `containerd ${role} platform manifest descriptor`,
+  );
+  const observedPlatformKeys = Object.keys(descriptor.platform ?? {}).sort();
+  if (JSON.stringify(observedPlatformKeys) !== JSON.stringify(["architecture", "os"])
+    && JSON.stringify(observedPlatformKeys)
+      !== JSON.stringify(["architecture", "os", "variant"])) {
+    fail(`Containerd ${role} platform manifest platform keys are invalid.`);
+  }
+  if (!/^sha256:[a-f0-9]{64}$/.test(descriptor.digest ?? "")
+    || (expectedDigest !== undefined && descriptor.digest !== expectedDigest)
+    || !new Set([
+      "application/vnd.docker.distribution.manifest.v2+json",
+      "application/vnd.oci.image.manifest.v1+json",
+    ]).has(descriptor.mediaType)
+    || !Number.isSafeInteger(descriptor.size)
+    || descriptor.size <= 0
+    || descriptor.size > 16 * 1024 * 1024
+    || descriptor.platform.architecture !== platform.architecture
+    || descriptor.platform.os !== platform.os
+    || (descriptor.platform.variant !== undefined
+      && (platform.architecture !== "arm64" || descriptor.platform.variant !== "v8"))) {
+    fail(`Containerd ${role} platform manifest descriptor differs from its exact contract.`);
+  }
+  return descriptor;
+}
+
+function exactImagePlatform(value, label) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    fail(`${label} is invalid.`);
+  }
+  exactObjectKeys(value, ["architecture", "os"], label);
+  if (value.os !== "linux" || !new Set(["amd64", "arm64"]).has(value.architecture)) {
+    fail(`${label} is invalid.`);
+  }
+  return Object.freeze({ architecture: value.architecture, os: value.os });
+}
+
+function runtimeImageReferences(containers) {
+  const references = new Map();
+  for (const container of containers) {
+    const runtimeDigest = container?.Image;
+    const reference = container?.Config?.Image;
+    if (!/^sha256:[a-f0-9]{64}$/.test(runtimeDigest ?? "")
+      || typeof reference !== "string" || reference.length < 2 || reference.length > 512) {
+      fail("Journey runtime image selection is invalid.");
+    }
+    const current = references.get(runtimeDigest);
+    if (current !== undefined && current !== reference) {
+      fail("Journey runtime digest maps to multiple immutable image references.");
+    }
+    references.set(runtimeDigest, reference);
+  }
+  return new Map([...references].sort(([left], [right]) => left.localeCompare(right)));
 }
 
 function effectiveEnvironment(image, service) {
@@ -887,10 +1233,11 @@ function assertHealthcheck(actual, override, inherited) {
 function composeQueryEnvironment(assignments, project, bindSources) {
   const environment = {};
   for (const name of [
-    "APPDATA", "DOCKER_API_VERSION", "DOCKER_CERT_PATH", "DOCKER_CONFIG",
-    "DOCKER_CONTEXT", "DOCKER_HOST", "DOCKER_TLS_VERIFY", "HOME", "LANG",
+    "APPDATA", "DOCKER_CERT_PATH", "DOCKER_CONFIG", "DOCKER_CONTEXT",
+    "DOCKER_HOST", "DOCKER_TLS_VERIFY", "HOME", "LANG",
     "LC_ALL", "LOCALAPPDATA", "PATH", "Path", "PATHEXT", "SYSTEMROOT",
-    "SystemRoot", "TEMP", "TMP", "USERPROFILE", "WINDIR", "XDG_CONFIG_HOME",
+    "ProgramFiles", "ProgramW6432", "SystemRoot", "TEMP", "TMP", "USERPROFILE",
+    "WINDIR", "XDG_CONFIG_HOME",
   ]) {
     if (typeof process.env[name] === "string") environment[name] = process.env[name];
   }
