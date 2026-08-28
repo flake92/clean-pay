@@ -15,6 +15,7 @@ import {
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { performance } from "node:perf_hooks";
 import { PassThrough } from "node:stream";
 
 import { expect, test } from "@playwright/test";
@@ -117,6 +118,18 @@ test("keeps the Docker child environment deny-by-default while exposing Windows 
   expect(environment.COMPOSE_FILE).toBeUndefined();
   expect(environment.DOCKER_API_VERSION).toBeUndefined();
   expect(environment.TOKEN_SHADOW).toBeUndefined();
+});
+
+test("passes bounded cleanup-query timeouts through both live proof runners", async () => {
+  const [provider, chatwoot] = await Promise.all([
+    readFile(path.resolve(__dirname, "prove-provider-overlap.mjs"), "utf8"),
+    readFile(path.resolve(__dirname, "chatwoot-phase-proof-orchestrator.mjs"), "utf8"),
+  ]);
+  for (const source of [provider, chatwoot]) {
+    expect(source).toContain("commandOptions = {}");
+    expect(source).toContain("...commandOptions");
+    expect(source).toContain('name !== "timeoutMs"');
+  }
 });
 
 test("removes its exact temporary snapshot after directory identity setup fails", async () => {
@@ -2201,6 +2214,375 @@ test("settles both delayed stack launch rechecks before pair cleanup", async () 
   }
 });
 
+test("waits for two empty post-down observations and keeps Compose progress quiet", async () => {
+  const repositoryRoot = path.resolve(__dirname, "../../..");
+  const fixture = await createOwnedInput("baseline", repositoryRoot);
+  const project = fixture.input.contract.project;
+  const projectFilter = `label=com.docker.compose.project=${project}`;
+  const resourceId = "e".repeat(64);
+  const baseRun = fixture.docker.run;
+  let resourceVisible = false;
+  let downIssued = false;
+  let postDownPsObservations = 0;
+  let downArgs: string[] | undefined;
+  const cleanupQueryTimeouts: number[] = [];
+  fixture.input.runDocker = async (
+    args: string[],
+    maximumBytes?: number,
+    environment: Record<string, string> = {},
+    commandOptions?: { timeoutMs?: number },
+  ) => {
+    const projectQuery = args.includes(projectFilter);
+    if (args[0] === "compose" && args.includes("down")) {
+      downArgs = [...args];
+      downIssued = true;
+      return "";
+    }
+    if (args[0] === "ps" && projectQuery && resourceVisible) {
+      if (!downIssued) return resourceId;
+      postDownPsObservations += 1;
+      if (commandOptions?.timeoutMs !== undefined) {
+        cleanupQueryTimeouts.push(commandOptions.timeoutMs);
+      }
+      return postDownPsObservations === 1 ? resourceId : "";
+    }
+    if (args[0] === "container" && args[1] === "inspect" && args[2] === resourceId) {
+      return JSON.stringify([{
+        Id: resourceId,
+        Name: `/${project}-app-1`,
+        Config: {
+          Labels: {
+            "com.docker.compose.project": project,
+            "com.docker.compose.service": "app",
+          },
+        },
+      }]);
+    }
+    return baseRun(args, maximumBytes, environment);
+  };
+
+  let handle: Awaited<ReturnType<typeof prepareJourneyOwnedStack>> | undefined;
+  try {
+    handle = await prepareJourneyOwnedStack(fixture.input);
+    const plan = await prepareJourneyOwnedStackLaunch(handle);
+    expect(plan.args.slice(0, 3)).toEqual(["compose", "--progress", "quiet"]);
+    resourceVisible = true;
+    await expect(cleanupJourneyOwnedStack(handle)).resolves.toMatchObject({
+      status: "verifier-owned-stack-cleaned",
+    });
+    handle = undefined;
+    expect(downArgs?.slice(0, 3)).toEqual(["compose", "--progress", "quiet"]);
+    expect(postDownPsObservations).toBe(3);
+    expect(cleanupQueryTimeouts).toHaveLength(3);
+    expect(cleanupQueryTimeouts.every((timeout) => timeout > 0 && timeout <= 2_000)).toBe(true);
+  } finally {
+    resourceVisible = false;
+    if (handle !== undefined) {
+      await cleanupJourneyOwnedStack(handle).catch(() => undefined);
+    }
+    await removeSyntheticInputDirectory(fixture.directory);
+  }
+});
+
+test("preserves Compose launch and cleanup failures in rejection order", async () => {
+  const repositoryRoot = path.resolve(__dirname, "../../..");
+  const [baseline, candidate] = await Promise.all([
+    createOwnedInput("baseline", repositoryRoot),
+    createOwnedInput("candidate", repositoryRoot),
+  ]);
+  const primaryError = new Error("synthetic Compose launch failure");
+  const cleanupError = new Error("synthetic cleanup query failure");
+  const snapshotDirectories = new Set<string>();
+  let rejectBaselineCleanup = false;
+  let baselineCleanupQueryAttempts = 0;
+  const wrap = (fixture: typeof baseline, rejectLaunch: boolean) => {
+    const baseRun = fixture.docker.run;
+    return async (
+      args: string[],
+      maximumBytes?: number,
+      environment: Record<string, string> = {},
+    ) => {
+      if (args[0] === "compose" && args.includes("config")) {
+        const envFile = args[args.indexOf("--env-file") + 1];
+        const directory = path.dirname(envFile);
+        if (path.basename(directory).startsWith("clean-pay-provider-")) {
+          snapshotDirectories.add(directory);
+        }
+      }
+      if (rejectLaunch && args[0] === "compose" && args.includes("up")) {
+        rejectBaselineCleanup = true;
+        throw primaryError;
+      }
+      if (rejectLaunch && rejectBaselineCleanup && args[0] === "ps"
+        && args.includes(`label=com.docker.compose.project=${fixture.input.contract.project}`)) {
+        baselineCleanupQueryAttempts += 1;
+        throw cleanupError;
+      }
+      return baseRun(args, maximumBytes, environment);
+    };
+  };
+  baseline.input.runDocker = wrap(baseline, true);
+  candidate.input.runDocker = wrap(candidate, false);
+
+  try {
+    let captured: unknown;
+    const operation = withJourneyOwnedStackPair({
+      baseline: baseline.input,
+      candidate: candidate.input,
+    }, async () => undefined).catch((error) => {
+      captured = error;
+    });
+    await expect.poll(() => candidate.docker.upCalls).toBe(1);
+    candidate.docker.releaseUp();
+    await operation;
+    expect(captured).toBeInstanceOf(AggregateError);
+    expect((captured as AggregateError).message).toBe(
+      "Verifier-owned dual-stack operation failed and exact cleanup was not proven.",
+    );
+    const [primary, cleanup] = (captured as AggregateError).errors;
+    expect(primary).toBeInstanceOf(AggregateError);
+    expect((primary as AggregateError).message).toBe(
+      "Both verifier-owned stacks must start from one completed launch barrier.",
+    );
+    expect((primary as AggregateError).errors).toEqual([primaryError]);
+    expect(cleanup).toBe(cleanupError);
+    expect(baselineCleanupQueryAttempts).toBe(1);
+  } finally {
+    rejectBaselineCleanup = false;
+    for (const directory of snapshotDirectories) {
+      await removeOwnedSnapshotDirectory(directory);
+    }
+    await Promise.all([
+      removeSyntheticInputDirectory(baseline.directory),
+      removeSyntheticInputDirectory(candidate.directory),
+    ]);
+  }
+});
+
+test("keeps a rejected Compose down fail-closed even after resources disappear", async () => {
+  const repositoryRoot = path.resolve(__dirname, "../../..");
+  const fixture = await createOwnedInput("baseline", repositoryRoot);
+  const project = fixture.input.contract.project;
+  const projectFilter = `label=com.docker.compose.project=${project}`;
+  const resourceId = "f".repeat(64);
+  const downError = new Error("synthetic rejected down");
+  const baseRun = fixture.docker.run;
+  let resourceVisible = false;
+  let rejectDown = true;
+  fixture.input.runDocker = async (
+    args: string[],
+    maximumBytes?: number,
+    environment: Record<string, string> = {},
+  ) => {
+    if (args[0] === "compose" && args.includes("down")) {
+      resourceVisible = false;
+      if (rejectDown) throw downError;
+      return "";
+    }
+    if (args[0] === "ps" && args.includes(projectFilter) && resourceVisible) {
+      return resourceId;
+    }
+    if (args[0] === "container" && args[1] === "inspect" && args[2] === resourceId) {
+      return JSON.stringify([{
+        Id: resourceId,
+        Name: `/${project}-app-1`,
+        Config: {
+          Labels: {
+            "com.docker.compose.project": project,
+            "com.docker.compose.service": "app",
+          },
+        },
+      }]);
+    }
+    return baseRun(args, maximumBytes, environment);
+  };
+
+  let handle: Awaited<ReturnType<typeof prepareJourneyOwnedStack>> | undefined;
+  try {
+    handle = await prepareJourneyOwnedStack(fixture.input);
+    resourceVisible = true;
+    let captured: unknown;
+    await cleanupJourneyOwnedStack(handle).catch((error) => { captured = error; });
+    expect(captured).toBe(downError);
+    rejectDown = false;
+    await expect(cleanupJourneyOwnedStack(handle)).resolves.toMatchObject({
+      status: "verifier-owned-stack-cleaned",
+    });
+    handle = undefined;
+  } finally {
+    resourceVisible = false;
+    rejectDown = false;
+    if (handle !== undefined) {
+      await cleanupJourneyOwnedStack(handle).catch(() => undefined);
+    }
+    await removeSyntheticInputDirectory(fixture.directory);
+  }
+});
+
+test("does not retry a rejected post-down Docker query", async () => {
+  const repositoryRoot = path.resolve(__dirname, "../../..");
+  const fixture = await createOwnedInput("baseline", repositoryRoot);
+  const project = fixture.input.contract.project;
+  const projectFilter = `label=com.docker.compose.project=${project}`;
+  const resourceId = "1".repeat(64);
+  const queryError = new Error("synthetic post-down query failure");
+  const baseRun = fixture.docker.run;
+  let afterDown = false;
+  let rejectQuery = true;
+  let resourceVisible = false;
+  let queryAttempts = 0;
+  let observedQueryTimeout: number | undefined;
+  fixture.input.runDocker = async (
+    args: string[],
+    maximumBytes?: number,
+    environment: Record<string, string> = {},
+    commandOptions?: { timeoutMs?: number },
+  ) => {
+    if (args[0] === "compose" && args.includes("down")) {
+      afterDown = true;
+      return "";
+    }
+    if (args[0] === "ps" && args.includes(projectFilter) && resourceVisible) {
+      if (!afterDown) return resourceId;
+      queryAttempts += 1;
+      observedQueryTimeout = commandOptions?.timeoutMs;
+      if (rejectQuery) throw queryError;
+      return "";
+    }
+    if (args[0] === "container" && args[1] === "inspect" && args[2] === resourceId) {
+      return JSON.stringify([{
+        Id: resourceId,
+        Name: `/${project}-app-1`,
+        Config: {
+          Labels: {
+            "com.docker.compose.project": project,
+            "com.docker.compose.service": "app",
+          },
+        },
+      }]);
+    }
+    return baseRun(args, maximumBytes, environment);
+  };
+
+  let handle: Awaited<ReturnType<typeof prepareJourneyOwnedStack>> | undefined;
+  try {
+    handle = await prepareJourneyOwnedStack(fixture.input);
+    resourceVisible = true;
+    let captured: unknown;
+    await cleanupJourneyOwnedStack(handle).catch((error) => { captured = error; });
+    expect(captured).toBe(queryError);
+    expect(queryAttempts).toBe(1);
+    expect(observedQueryTimeout).toBeGreaterThan(0);
+    expect(observedQueryTimeout).toBeLessThanOrEqual(2_000);
+    afterDown = false;
+    rejectQuery = false;
+    resourceVisible = false;
+    await expect(cleanupJourneyOwnedStack(handle)).resolves.toMatchObject({
+      status: "verifier-owned-stack-cleaned",
+    });
+    handle = undefined;
+  } finally {
+    afterDown = false;
+    rejectQuery = false;
+    resourceVisible = false;
+    if (handle !== undefined) {
+      await cleanupJourneyOwnedStack(handle).catch(() => undefined);
+    }
+    await removeSyntheticInputDirectory(fixture.directory);
+  }
+});
+
+test("enforces the monotonic post-down deadline and leaves cleanup retryable", async () => {
+  const repositoryRoot = path.resolve(__dirname, "../../..");
+  const fixture = await createOwnedInput("baseline", repositoryRoot);
+  const project = fixture.input.contract.project;
+  const projectFilter = `label=com.docker.compose.project=${project}`;
+  const resourceId = "2".repeat(64);
+  const baseRun = fixture.docker.run;
+  const originalNow = performance.now.bind(performance);
+  const originalOwnNow = Object.getOwnPropertyDescriptor(performance, "now");
+  let afterDown = false;
+  let clockCalls = 0;
+  let resourceVisible = false;
+  let restored = false;
+  let postDownQueries = 0;
+  let observedQueryTimeout: number | undefined;
+  const restoreClock = () => {
+    if (restored) return;
+    restored = true;
+    if (originalOwnNow === undefined) Reflect.deleteProperty(performance, "now");
+    else Object.defineProperty(performance, "now", originalOwnNow);
+  };
+  Object.defineProperty(performance, "now", {
+    configurable: true,
+    value: () => {
+      if (!afterDown) return originalNow();
+      clockCalls += 1;
+      if (clockCalls === 1) return 0;
+      if (clockCalls === 2) return 1;
+      return 20_000;
+    },
+  });
+  fixture.input.runDocker = async (
+    args: string[],
+    maximumBytes?: number,
+    environment: Record<string, string> = {},
+    commandOptions?: { timeoutMs?: number },
+  ) => {
+    if (args[0] === "compose" && args.includes("down")) {
+      afterDown = true;
+      return "";
+    }
+    if (args[0] === "ps" && args.includes(projectFilter) && resourceVisible) {
+      if (!afterDown) return resourceId;
+      postDownQueries += 1;
+      observedQueryTimeout = commandOptions?.timeoutMs;
+      return resourceId;
+    }
+    if (args[0] === "container" && args[1] === "inspect" && args[2] === resourceId) {
+      return JSON.stringify([{
+        Id: resourceId,
+        Name: `/${project}-app-1`,
+        Config: {
+          Labels: {
+            "com.docker.compose.project": project,
+            "com.docker.compose.service": "app",
+          },
+        },
+      }]);
+    }
+    return baseRun(args, maximumBytes, environment);
+  };
+
+  let handle: Awaited<ReturnType<typeof prepareJourneyOwnedStack>> | undefined;
+  try {
+    handle = await prepareJourneyOwnedStack(fixture.input);
+    resourceVisible = true;
+    let captured: unknown;
+    await cleanupJourneyOwnedStack(handle).catch((error) => { captured = error; });
+    expect(String((captured as Error)?.message)).toContain(
+      "project is not absent before creation or after cleanup",
+    );
+    expect(postDownQueries).toBe(1);
+    expect(observedQueryTimeout).toBe(2_000);
+    afterDown = false;
+    resourceVisible = false;
+    restoreClock();
+    await expect(cleanupJourneyOwnedStack(handle)).resolves.toMatchObject({
+      status: "verifier-owned-stack-cleaned",
+    });
+    handle = undefined;
+  } finally {
+    afterDown = false;
+    resourceVisible = false;
+    restoreClock();
+    if (handle !== undefined) {
+      await cleanupJourneyOwnedStack(handle).catch(() => undefined);
+    }
+    await removeSyntheticInputDirectory(fixture.directory);
+  }
+});
+
 test("prepares both immutable stacks before same-turn launch dispatch and cleans exact snapshots", async () => {
   const repositoryRoot = path.resolve(__dirname, "../../..");
   const fixtures = await Promise.all([
@@ -2854,4 +3236,27 @@ async function removeSyntheticInputDirectory(directory: string) {
     await unlink(path.join(directory, filename)).catch(() => undefined);
   }
   await rmdir(directory).catch(() => undefined);
+}
+
+async function removeOwnedSnapshotDirectory(directory: string) {
+  try {
+    await lstat(directory);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException)?.code === "ENOENT") return;
+    throw error;
+  }
+  for (const filename of [
+    ...JOURNEY_SYNTHETIC_ENVIRONMENT_FILENAMES,
+    "fixture-browser-db-observer.mjs",
+    "fixture-Caddyfile",
+    "fixture-db-observer-provision.sh",
+    "fixture-oidc-mock.mjs",
+    "fixture-provider-mock.mjs",
+    "browser-journey-contract.json",
+  ]) {
+    await unlink(path.join(directory, filename)).catch((error) => {
+      if ((error as NodeJS.ErrnoException)?.code !== "ENOENT") throw error;
+    });
+  }
+  await rmdir(directory);
 }

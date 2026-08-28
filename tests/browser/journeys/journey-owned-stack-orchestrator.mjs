@@ -14,6 +14,7 @@ import {
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { performance } from "node:perf_hooks";
 
 import {
   JOURNEY_COMPOSE_EXPECTED_SERVICE_STATES,
@@ -40,6 +41,11 @@ const fixtureSnapshotNames = Object.freeze({
 });
 const contractFilename = "browser-journey-contract.json";
 const automaticDockerTimeout = Number.NaN;
+const cleanupAbsenceConsecutiveObservations = 2;
+const cleanupAbsenceMaximumObservations = 41;
+const cleanupAbsencePollIntervalMs = 250;
+const cleanupAbsenceQueryTimeoutMs = 2_000;
+const cleanupAbsenceTimeoutMs = 10_000;
 const containerdImageSelectionMode = "containerd-root-manifest";
 const defaultImagePlatform = Object.freeze({ architecture: "amd64", os: "linux" });
 const optionalInputValue = Reflect.get(Object.freeze({}), "optional");
@@ -417,27 +423,39 @@ export async function withJourneyOwnedStackPair({ baseline, candidate }, callbac
     const cleanup = await Promise.allSettled(
       handles.map((handle) => cleanupJourneyOwnedStack(handle)),
     );
-    if (cleanup.some(({ status }) => status === "rejected")) {
-      fail("Verifier-owned preparation failure cleanup did not complete exactly.");
+    const preparationErrors = rejectionReasons(settled);
+    const cleanupErrors = rejectionReasons(cleanup);
+    if (cleanupErrors.length > 0) {
+      throw new AggregateError(
+        [...preparationErrors, ...cleanupErrors],
+        "Verifier-owned preparation failure cleanup did not complete exactly.",
+      );
     }
-    fail("Both verifier-owned stacks must prepare before any Compose creation.");
+    throw new AggregateError(
+      preparationErrors,
+      "Both verifier-owned stacks must prepare before any Compose creation.",
+    );
   }
   let value;
   let launchReceipt;
   let cleanupReceipts;
+  let primaryFailure;
   try {
     const launchSettlements = await settleOwnedStackLaunches(
       handles,
       async (handle) => {
         try {
           return { status: "fulfilled", value: await prepareJourneyOwnedStackLaunch(handle) };
-        } catch {
-          return { status: "rejected" };
+        } catch (reason) {
+          return { reason, status: "rejected" };
         }
       },
     );
     if (launchSettlements.some(({ status }) => status === "rejected")) {
-      fail("Both verifier-owned pre-launch rechecks must settle before cleanup.");
+      throw new AggregateError(
+        rejectionReasons(launchSettlements),
+        "Both verifier-owned pre-launch rechecks must settle before cleanup.",
+      );
     }
     const launchPlans = [];
     for (const result of launchSettlements) {
@@ -451,7 +469,10 @@ export async function withJourneyOwnedStackPair({ baseline, candidate }, callbac
       handles.map((handle) => attestJourneyOwnedStack(handle)),
     );
     if (runtimeSettlements.some(({ status }) => status === "rejected")) {
-      fail("Both verifier-owned stack runtime attestations must settle before cleanup.");
+      throw new AggregateError(
+        rejectionReasons(runtimeSettlements),
+        "Both verifier-owned stack runtime attestations must settle before cleanup.",
+      );
     }
     const runtimes = [];
     for (const result of runtimeSettlements) {
@@ -480,18 +501,30 @@ export async function withJourneyOwnedStackPair({ baseline, candidate }, callbac
       launch: launchReceipt,
     }));
     await Promise.all(handles.map(assertOwnedInputsUnchanged));
-  } finally {
-    const cleanup = await Promise.allSettled(
-      handles.filter((handle) => !cleanedHandles.has(handle))
-        .map((handle) => cleanupJourneyOwnedStack(handle)),
+  } catch (reason) {
+    primaryFailure = { reason };
+  }
+  const cleanup = await Promise.allSettled(
+    handles.filter((handle) => !cleanedHandles.has(handle))
+      .map((handle) => cleanupJourneyOwnedStack(handle)),
+  );
+  const cleanupErrors = rejectionReasons(cleanup);
+  if (cleanupErrors.length > 0) {
+    if (primaryFailure !== undefined) {
+      throw new AggregateError(
+        [primaryFailure.reason, ...cleanupErrors],
+        "Verifier-owned dual-stack operation failed and exact cleanup was not proven.",
+      );
+    }
+    throw new AggregateError(
+      cleanupErrors,
+      "Verifier-owned dual stacks did not pass exact cleanup.",
     );
-    if (cleanup.some(({ status }) => status === "rejected")) {
-      fail("Verifier-owned dual stacks did not pass exact cleanup.");
-    }
-    cleanupReceipts = [];
-    for (const result of cleanup) {
-      if (result.status === "fulfilled") cleanupReceipts.push(result.value);
-    }
+  }
+  if (primaryFailure !== undefined) throw primaryFailure.reason;
+  cleanupReceipts = [];
+  for (const result of cleanup) {
+    if (result.status === "fulfilled") cleanupReceipts.push(result.value);
   }
   return Object.freeze({
     cleanup: Object.freeze({
@@ -595,6 +628,12 @@ export async function createJourneyOwnedInputSnapshot(
 async function settleOwnedStackLaunches(handles, prepareJourneyOwnedStackLaunch) {
   const launchPlans = await Promise.all(handles.map(prepareJourneyOwnedStackLaunch));
   return launchPlans;
+}
+
+function rejectionReasons(settlements) {
+  return settlements
+    .filter(({ status }) => status === "rejected")
+    .map(({ reason }) => reason);
 }
 
 export async function prepareJourneyOwnedStack({
@@ -927,7 +966,10 @@ export async function prepareJourneyOwnedStackLaunch(handle) {
     }),
   ]);
   if (identitySettlements.some(({ status }) => status === "rejected")) {
-    fail("Both verifier-owned image rechecks must settle before cleanup.");
+    throw new AggregateError(
+      rejectionReasons(identitySettlements),
+      "Both verifier-owned image rechecks must settle before cleanup.",
+    );
   }
   const identities = [];
   for (const result of identitySettlements) {
@@ -971,6 +1013,7 @@ export async function prepareJourneyOwnedStackLaunch(handle) {
   return Object.freeze({
     args: Object.freeze([
       "compose",
+      "--progress", "quiet",
       "--project-name", handle.contract.project,
       "--env-file", handle.prepared.authoritativeEnvironmentPath,
       ...handle.prepared.composeFiles.flatMap((file) => ["--file", file]),
@@ -1019,7 +1062,10 @@ export async function dispatchJourneyOwnedStackPair(handles, plans) {
     if (start.status === "fulfilled") startedHandles.add(handles[index]);
   });
   if (starts.some(({ status }) => status === "rejected")) {
-    fail("Both verifier-owned stacks must start from one completed launch barrier.");
+    throw new AggregateError(
+      rejectionReasons(starts),
+      "Both verifier-owned stacks must start from one completed launch barrier.",
+    );
   }
   return Object.freeze({
     barrierSha256,
@@ -1078,17 +1124,24 @@ export async function cleanupJourneyOwnedStack(handle) {
     await assertPreparedInputsUnchanged(handle, current);
     await handle.runDocker([
       "compose",
+      "--progress", "quiet",
       "--project-name", handle.contract.project,
       "--env-file", handle.prepared.authoritativeEnvironmentPath,
       ...handle.prepared.composeFiles.flatMap((file) => ["--file", file]),
       "down", "--volumes", "--timeout", "120",
     ], 64 * 1024, handle.prepared.queryEnvironment);
+    await assertJourneyProjectAbsentAfterCleanup(
+      handle.contract.project,
+      handle.runDocker,
+      handle.prepared.queryEnvironment,
+    );
+  } else {
+    await assertJourneyProjectAbsent(
+      handle.contract.project,
+      handle.runDocker,
+      handle.prepared.queryEnvironment,
+    );
   }
-  await assertJourneyProjectAbsent(
-    handle.contract.project,
-    handle.runDocker,
-    handle.prepared.queryEnvironment,
-  );
   await cleanupExactDirectory(
     handle.directory,
     handle.directoryIdentity,
@@ -1103,15 +1156,55 @@ export async function cleanupJourneyOwnedStack(handle) {
 }
 
 export async function assertJourneyProjectAbsent(project, runDocker, environment) {
-  const filter = `label=com.docker.compose.project=${project}`;
-  const outputs = await Promise.all([
-    runDocker(["ps", "--all", "--no-trunc", "--quiet", "--filter", filter], 4 * 1024, environment),
-    runDocker(["network", "ls", "--no-trunc", "--quiet", "--filter", filter], 4 * 1024, environment),
-    runDocker(["volume", "ls", "--quiet", "--filter", filter], 4 * 1024, environment),
-  ]);
-  if (outputs.some((output) => splitLines(output).length !== 0)) {
+  if (!await observeJourneyProjectAbsent(project, runDocker, environment)) {
     fail("Verifier-owned journey project is not absent before creation or after cleanup.");
   }
+}
+
+async function observeJourneyProjectAbsent(project, runDocker, environment, commandOptions) {
+  const filter = `label=com.docker.compose.project=${project}`;
+  const query = (args, maximumBytes) => commandOptions === undefined
+    ? runDocker(args, maximumBytes, environment)
+    : runDocker(args, maximumBytes, environment, commandOptions);
+  const outputs = await Promise.all([
+    query(["ps", "--all", "--no-trunc", "--quiet", "--filter", filter], 4 * 1024),
+    query(["network", "ls", "--no-trunc", "--quiet", "--filter", filter], 4 * 1024),
+    query(["volume", "ls", "--quiet", "--filter", filter], 4 * 1024),
+  ]);
+  return outputs.every((output) => splitLines(output).length === 0);
+}
+
+async function assertJourneyProjectAbsentAfterCleanup(project, runDocker, environment) {
+  const deadline = performance.now() + cleanupAbsenceTimeoutMs;
+  let consecutiveAbsent = 0;
+  for (let observation = 0; observation < cleanupAbsenceMaximumObservations; observation += 1) {
+    const remainingBeforeQuery = deadline - performance.now();
+    if (remainingBeforeQuery <= 0) break;
+    const timeoutMs = Math.max(
+      1,
+      Math.min(cleanupAbsenceQueryTimeoutMs, Math.floor(remainingBeforeQuery)),
+    );
+    if (await observeJourneyProjectAbsent(
+      project,
+      runDocker,
+      environment,
+      Object.freeze({ timeoutMs }),
+    )) {
+      consecutiveAbsent += 1;
+      if (consecutiveAbsent === cleanupAbsenceConsecutiveObservations) return;
+    } else {
+      consecutiveAbsent = 0;
+    }
+    if (observation + 1 < cleanupAbsenceMaximumObservations) {
+      const remainingBeforePoll = deadline - performance.now();
+      if (remainingBeforePoll <= 0) break;
+      await new Promise((resolve) => setTimeout(
+        resolve,
+        Math.min(cleanupAbsencePollIntervalMs, Math.floor(remainingBeforePoll)),
+      ));
+    }
+  }
+  fail("Verifier-owned journey project is not absent before creation or after cleanup.");
 }
 
 export async function deriveJourneyApplicationImageConfigDigest({
