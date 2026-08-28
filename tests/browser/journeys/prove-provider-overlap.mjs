@@ -26,6 +26,7 @@ import {
   withJourneyOwnedStackPair,
   writeJourneySanitizedOutput,
 } from "./journey-owned-stack-orchestrator.mjs";
+import { createJourneySanitizedErrorEvidence } from "./journey-error-evidence.mjs";
 import {
   assertProviderOverlapRedirect,
   classifyProviderOverlapBrowserRequest,
@@ -108,24 +109,50 @@ try {
       )),
     ]);
     if (preflightSettlements.some(({ status }) => status === "rejected")) {
-      throw new Error("Both dual-image preflights must settle before verifier-owned cleanup.");
+      throw new AggregateError(
+        rejectionReasons(preflightSettlements),
+        "Both dual-image preflights must settle before verifier-owned cleanup.",
+      );
     }
     const [baselinePreflight, candidatePreflight] = preflightSettlements
       .map(({ value }) => value);
     assertDualPreflight(baselinePreflight, candidatePreflight);
     const proxyHandles = await startBothConnectProxies([baselineInput, candidateInput]);
-    let runSettlements;
+    let runSettlements = [];
+    let proofOperationFailure;
+    let proxyCleanupFailure;
     let proxySummaries;
     try {
       runSettlements = await Promise.all([
         settleEvidence(proveStack(baselineInput, baselinePreflight, playwrightVersion)),
         settleEvidence(proveStack(candidateInput, candidatePreflight, playwrightVersion)),
       ]);
+    } catch (reason) {
+      proofOperationFailure = { reason };
     } finally {
-      proxySummaries = await stopBothConnectProxies(proxyHandles);
+      try {
+        proxySummaries = await stopBothConnectProxies(proxyHandles);
+      } catch (reason) {
+        proxyCleanupFailure = { reason };
+      }
     }
-    if (runSettlements.some(({ status }) => status === "rejected")) {
-      throw new Error("Both concurrent dual-image proofs must settle before exact cleanup.");
+    const runErrors = proofOperationFailure === undefined
+      ? rejectionReasons(runSettlements)
+      : [proofOperationFailure.reason];
+    if (proxyCleanupFailure !== undefined) {
+      if (runErrors.length > 0) {
+        throw new AggregateError(
+          [...runErrors, proxyCleanupFailure.reason],
+          "Dual-image proof and CONNECT cleanup both failed.",
+        );
+      }
+      throw proxyCleanupFailure.reason;
+    }
+    if (runErrors.length > 0) {
+      throw new AggregateError(
+        runErrors,
+        "Both concurrent dual-image proofs must settle before exact cleanup.",
+      );
     }
     const runs = runSettlements.map(({ value }) => value);
     const proofInputs = [baselineInput, candidateInput];
@@ -163,8 +190,7 @@ try {
 } catch (error) {
   process.stderr.write(`${JSON.stringify({
     status: "dual_image_provider_overlap_failed",
-    errorClass: error?.constructor?.name ?? "Error",
-    messageSha256: sha256(String(error?.message ?? "unknown")),
+    ...createJourneySanitizedErrorEvidence(error),
   })}\n`);
   process.exitCode = 1;
 }
@@ -1695,9 +1721,15 @@ function requiredArgument(values, name, pattern) {
 async function settleEvidence(promise) {
   try {
     return { status: "fulfilled", value: await promise };
-  } catch {
-    return { status: "rejected" };
+  } catch (reason) {
+    return { reason, status: "rejected" };
   }
+}
+
+function rejectionReasons(settlements) {
+  return settlements
+    .filter(({ status }) => status === "rejected")
+    .map(({ reason }) => reason);
 }
 
 function assertDistinctStackInputs(baseline, candidate) {
@@ -1756,8 +1788,21 @@ async function startBothConnectProxies(inputs) {
     if (result.status === "fulfilled") handles.push(result.value);
   }
   if (settled.some(({ status }) => status === "rejected")) {
-    await Promise.allSettled(handles.map((handle) => stopJourneyConnectProxy(handle)));
-    throw new Error("Both isolated CONNECT proxies must become ready before browser actions.");
+    const cleanup = await Promise.allSettled(
+      handles.map((handle) => stopJourneyConnectProxy(handle)),
+    );
+    const preparationErrors = rejectionReasons(settled);
+    const cleanupErrors = rejectionReasons(cleanup);
+    if (cleanupErrors.length > 0) {
+      throw new AggregateError(
+        [...preparationErrors, ...cleanupErrors],
+        "CONNECT proxy preparation and exact cleanup both failed.",
+      );
+    }
+    throw new AggregateError(
+      preparationErrors,
+      "Both isolated CONNECT proxies must become ready before browser actions.",
+    );
   }
   return handles;
 }
@@ -1780,7 +1825,10 @@ function ownedStackInput(input) {
 async function stopBothConnectProxies(handles) {
   const settled = await Promise.allSettled(handles.map((handle) => stopJourneyConnectProxy(handle)));
   if (settled.some(({ status }) => status === "rejected")) {
-    throw new Error("Both isolated CONNECT proxies must stop with exact sanitized summaries.");
+    throw new AggregateError(
+      rejectionReasons(settled),
+      "Both isolated CONNECT proxies must stop with exact sanitized summaries.",
+    );
   }
   const summaries = [];
   for (const result of settled) {
@@ -1789,8 +1837,23 @@ async function stopBothConnectProxies(handles) {
   return summaries;
 }
 
-function docker(args, maximumBytes = 64 * 1024, environment = journeyDockerCliEnvironment()) {
-  return runJourneyDockerCommand(args, maximumBytes, environment, { repositoryRoot });
+function docker(
+  args,
+  maximumBytes = 64 * 1024,
+  environment = journeyDockerCliEnvironment(),
+  commandOptions = {},
+) {
+  if (!commandOptions || typeof commandOptions !== "object" || Array.isArray(commandOptions)
+    || Object.keys(commandOptions).some((name) => name !== "timeoutMs")
+    || (commandOptions.timeoutMs !== undefined
+      && (!Number.isSafeInteger(commandOptions.timeoutMs)
+        || commandOptions.timeoutMs < 1 || commandOptions.timeoutMs > 600_000))) {
+    throw new Error("Provider overlap Docker command options are invalid.");
+  }
+  return runJourneyDockerCommand(args, maximumBytes, environment, {
+    repositoryRoot,
+    ...commandOptions,
+  });
 }
 
 function splitLines(value) {

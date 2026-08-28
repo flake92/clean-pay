@@ -212,18 +212,27 @@ network, service, fixture-mount, environment, publication, image-reference,
 contract, and user-agent identities are represented only by SHA-256 digests,
 apart from the two required non-PII role-specific project identifiers.
 The serialized reader recomputes all cross-stack and lifecycle invariants; it
-does not trust claimed comparison booleans. Failure output is digest-only.
+does not trust claimed comparison booleans. Failure output is digest-only: a
+bounded cause tree exposes only normalized error classes, topology ordinals, and
+SHA-256 message digests, never raw messages or paths.
 The contract suite also drives the real pair entry point through two complete
 13-service Docker API mocks: both immutable preparations cross one same-turn
 launch barrier, both runtime/coexistence receipts feed the real report factory
 and serialized reader, and both exact project/snapshot cleanups must finish.
 That test exercises orchestration without starting Docker or a live stack.
 
-The pair orchestrator always performs ownership-gated `down --volumes` for the
-two exact projects in its internal `finally`, including partial-start and proof
-failure paths. It then removes only the exact files it created and only its empty
-owner-specific directories—never a glob, recursive target, caller-owned input,
-or unrelated resource. Directory setup and create-only file writes are journaled
+The pair orchestrator always reaches an unconditional cleanup epilogue and
+performs ownership-gated `down --volumes` for the two exact projects, including
+partial-start and proof failure paths. A primary failure and any cleanup failures
+remain ordered causes in one `AggregateError`; cleanup cannot replace the primary
+diagnosis. Successful `down` uses quiet Compose progress and must converge through
+two consecutive empty project-resource observations within both an observation
+bound and a monotonic ten-second deadline; every cleanup query has its own
+two-second process timeout. A
+rejected `down` or a persistent resource remains fail-closed. The orchestrator then
+removes only the exact files it created and only its empty owner-specific
+directories—never a glob, recursive target, caller-owned input, or unrelated
+resource. Directory setup and create-only file writes are journaled
 before their fallible identity postchecks; a transient setup/post-write failure
 recovers only allowlisted entries from that unpredictable create-only directory.
 If exact directory/file identity cannot be re-established, cleanup fails closed

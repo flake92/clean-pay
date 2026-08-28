@@ -43,7 +43,10 @@ import {
   installProviderOverlapHistoryInstrumentation,
   readProviderOverlapStaticResponseEvidence,
 } from "./provider-overlap-browser-contract.mjs";
-import { currentJourneyFixtureContractSha256 } from "./journey-fixture-manifest.mjs";
+import {
+  JOURNEY_FIXTURE_FILENAMES,
+  currentJourneyFixtureContractSha256,
+} from "./journey-fixture-manifest.mjs";
 import {
   JOURNEY_COMPOSE_EXPECTED_SERVICE_STATES,
   JOURNEY_COMPOSE_ONE_SHOT_SERVICE_NAMES,
@@ -329,6 +332,37 @@ test("executes mocked dual prepare, barrier, factory, serialized reader, and cle
         .toBeGreaterThan(launchGate.timeline.indexOf(`factory:${role}`));
       expect(launchGate.timeline.indexOf(`down:${role}`))
         .toBeLessThan(launchGate.timeline.indexOf("reader:serialized"));
+    }
+  } finally {
+    await Promise.all(fixtures.map(({ directory }) => removeMockOwnedInput(directory)));
+  }
+});
+
+test("keeps an undefined callback rejection fail-closed after exact dual cleanup", async () => {
+  const repositoryRoot = path.resolve(__dirname, "../../..");
+  const launchGate = createMockPairLaunchGate();
+  const fixtures = await Promise.all([
+    createMockOwnedStackInput("baseline", repositoryRoot, launchGate),
+    createMockOwnedStackInput("candidate", repositoryRoot, launchGate),
+  ]);
+  try {
+    let rejectedValue: unknown = Symbol("not-rejected");
+    const outcome = await withJourneyOwnedStackPair({
+      baseline: fixtures[0].input,
+      candidate: fixtures[1].input,
+    }, async () => Promise.reject()).then(
+      () => "fulfilled",
+      (reason) => {
+        rejectedValue = reason;
+        return "rejected";
+      },
+    );
+    expect(outcome).toBe("rejected");
+    expect(rejectedValue).toBeUndefined();
+    for (const fixture of fixtures) {
+      expect(fixture.docker.activeProbeCount).toBe(0);
+      expect(fixture.docker.activeResourceCount).toBe(0);
+      expect(fixture.docker.downCalls).toBe(1);
     }
   } finally {
     await Promise.all(fixtures.map(({ directory }) => removeMockOwnedInput(directory)));
@@ -940,6 +974,38 @@ test("passes the attested application config into live provider descriptor valid
   expect(runnerSource).toMatch(
     /assertProviderOverlapContainerdImageDescriptorChain\([\s\S]{1,512}assetIdentity\.configDigest,\s*\);/,
   );
+});
+
+test("binds provider failure sanitization into the immutable fixture contract", () => {
+  const required = [
+    "journey-error-evidence.contract.spec.ts",
+    "journey-error-evidence.mjs",
+    "prove-provider-overlap.mjs",
+  ];
+  expect(new Set(JOURNEY_FIXTURE_FILENAMES).size).toBe(JOURNEY_FIXTURE_FILENAMES.length);
+  expect(JOURNEY_FIXTURE_FILENAMES.filter((entry) => required.includes(entry)))
+    .toEqual(required);
+});
+
+test("retains image, preflight, proof, and CONNECT rejection causes for sanitization", async () => {
+  const [orchestrator, runner] = await Promise.all([
+    readFile(path.resolve(__dirname, "journey-owned-stack-orchestrator.mjs"), "utf8"),
+    readFile(path.resolve(__dirname, "prove-provider-overlap.mjs"), "utf8"),
+  ]);
+  expect(orchestrator).toMatch(
+    /new AggregateError\(\s*rejectionReasons\(identitySettlements\),\s*"Both verifier-owned image rechecks/,
+  );
+  expect(runner).toContain('return { reason, status: "rejected" }');
+  expect(runner).toMatch(
+    /new AggregateError\(\s*rejectionReasons\(preflightSettlements\),\s*"Both dual-image preflights/,
+  );
+  expect(runner).toMatch(
+    /new AggregateError\(\s*runErrors,\s*"Both concurrent dual-image proofs/,
+  );
+  expect(runner).toMatch(
+    /new AggregateError\(\s*rejectionReasons\(settled\),\s*"Both isolated CONNECT proxies must stop/,
+  );
+  expect(runner).not.toMatch(/catch\s*\{\s*return \{ status: "rejected" \}/);
 });
 
 test("rejects malformed or unbound provider manifest config annotations", () => {
