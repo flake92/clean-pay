@@ -884,13 +884,24 @@ function ownedStackInput(stack, repositoryRoot) {
     expectedApplicationRepoDigests: stack.expectedApplicationRepoDigests,
     expectedImagePlatform: stack.expectedImagePlatform,
     expectedMigrationAssetImageDigest: stack.migrationImageDigest,
-    runDocker: (args, maximumBytes, environment) => runJourneyDockerCommand(
-      args,
-      maximumBytes,
-      environment,
-      { repositoryRoot },
-    ),
+    runDocker: (args, maximumBytes, environment, commandOptions = {}) => {
+      assertOwnedDockerCommandOptions(commandOptions);
+      return runJourneyDockerCommand(args, maximumBytes, environment, {
+        repositoryRoot,
+        ...commandOptions,
+      });
+    },
   };
+}
+
+function assertOwnedDockerCommandOptions(commandOptions) {
+  if (!commandOptions || typeof commandOptions !== "object" || Array.isArray(commandOptions)
+    || Object.keys(commandOptions).some((name) => name !== "timeoutMs")
+    || (commandOptions.timeoutMs !== undefined
+      && (!Number.isSafeInteger(commandOptions.timeoutMs)
+        || commandOptions.timeoutMs < 1 || commandOptions.timeoutMs > 600_000))) {
+    throw new Error("Chatwoot owned-stack Docker command options are invalid.");
+  }
 }
 
 async function assertStackPlanInputsUnchanged(stack, status) {

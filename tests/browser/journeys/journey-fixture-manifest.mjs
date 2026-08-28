@@ -69,6 +69,8 @@ export const JOURNEY_FIXTURE_FILENAMES = Object.freeze([
   "journey-connect-proxy.mjs",
   "journey-compose-runtime-attestation.contract.spec.ts",
   "journey-compose-runtime-attestation.mjs",
+  "journey-error-evidence.contract.spec.ts",
+  "journey-error-evidence.mjs",
   "journey-network-policy.d.mts",
   "journey-network-policy.mjs",
   "journey-owned-stack-orchestrator.contract.spec.ts",
