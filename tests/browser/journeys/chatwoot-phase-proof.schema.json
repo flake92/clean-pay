@@ -1,0 +1,1790 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://clean-pay.dev/schemas/dual-image-chatwoot-phase-stability-proof-v1.json",
+  "title": "Clean Pay dual-image Chatwoot phase stability proof",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "kind",
+    "scenario",
+    "execution",
+    "pairs",
+    "quorum",
+    "comparison",
+    "lifecycle"
+  ],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "kind": { "const": "clean-pay-dual-image-chatwoot-phase-stability-proof" },
+    "scenario": { "$ref": "#/$defs/scenario" },
+    "execution": { "$ref": "#/$defs/execution" },
+    "pairs": {
+      "type": "array",
+      "minItems": 3,
+      "maxItems": 3,
+      "items": [
+        { "$ref": "#/$defs/pair1" },
+        { "$ref": "#/$defs/pair2" },
+        { "$ref": "#/$defs/pair3" }
+      ],
+      "additionalItems": false
+    },
+    "quorum": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "independentPairCount",
+        "requiredByteIdenticalProcesses",
+        "semanticAgreementRequired",
+        "screenshots"
+      ],
+      "properties": {
+        "independentPairCount": { "const": 3 },
+        "requiredByteIdenticalProcesses": { "const": 2 },
+        "semanticAgreementRequired": { "const": 6 },
+        "screenshots": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["gap", "stable", "recreated"],
+          "properties": {
+            "gap": { "$ref": "#/$defs/crossImageScreenshotQuorum" },
+            "stable": { "$ref": "#/$defs/crossImageScreenshotQuorum" },
+            "recreated": { "$ref": "#/$defs/crossImageScreenshotQuorum" }
+          }
+        }
+      }
+    },
+    "comparison": { "$ref": "#/$defs/comparison" },
+    "lifecycle": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "automaticCleanup",
+        "cleanupMode",
+        "expectedStackCount",
+        "cleanedStackCount",
+        "allOwnedResourcesRemoved"
+      ],
+      "properties": {
+        "automaticCleanup": { "const": true },
+        "cleanupMode": { "const": "exact-owned-project-v1" },
+        "expectedStackCount": { "const": 6 },
+        "cleanedStackCount": { "const": 6 },
+        "allOwnedResourcesRemoved": { "const": true }
+      }
+    }
+  },
+  "$defs": {
+    "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "imageDigest": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+    "nonNegativeInteger": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "positiveInteger": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 9007199254740991
+    },
+    "scenario": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["label", "sha256", "seedSha256"],
+      "properties": {
+        "label": { "const": "chatwoot-phase-stability-v1" },
+        "sha256": { "const": "03a7c2a81a4244579e97f5f197b94ef7440684427e871d7a9120e6c316600f3d" },
+        "seedSha256": { "const": "944738df339e096e60ccfc5403742a02b60210f3b1246980334d80ad2e83d32a" }
+      }
+    },
+    "execution": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "mode",
+        "independentPairCount",
+        "peakLiveStackCount",
+        "chromiumProcessCount",
+        "chromiumContextCount",
+        "ledgerEntryCount",
+        "pairSerialCleanupProven",
+        "dualStackConcurrencyProven"
+      ],
+      "properties": {
+        "mode": { "const": "pair-serial-dual-concurrent-v1" },
+        "independentPairCount": { "const": 3 },
+        "peakLiveStackCount": { "const": 2 },
+        "chromiumProcessCount": { "const": 6 },
+        "chromiumContextCount": { "const": 6 },
+        "ledgerEntryCount": { "const": 24 },
+        "pairSerialCleanupProven": { "const": true },
+        "dualStackConcurrencyProven": { "const": true }
+      }
+    },
+    "pair1": {
+      "allOf": [
+        { "$ref": "#/$defs/pair" },
+        {
+          "properties": {
+            "pairIndex": { "const": 1 },
+            "execution": {
+              "properties": {
+                "pairIndex": { "const": 1 },
+                "events": { "items": { "properties": { "pairIndex": { "const": 1 } } } }
+              }
+            },
+            "stacks": {
+              "properties": {
+                "baseline": { "properties": { "pairIndex": { "const": 1 } } },
+                "candidate": { "properties": { "pairIndex": { "const": 1 } } }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "pair2": {
+      "allOf": [
+        { "$ref": "#/$defs/pair" },
+        {
+          "properties": {
+            "pairIndex": { "const": 2 },
+            "execution": {
+              "properties": {
+                "pairIndex": { "const": 2 },
+                "events": { "items": { "properties": { "pairIndex": { "const": 2 } } } }
+              }
+            },
+            "stacks": {
+              "properties": {
+                "baseline": { "properties": { "pairIndex": { "const": 2 } } },
+                "candidate": { "properties": { "pairIndex": { "const": 2 } } }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "pair3": {
+      "allOf": [
+        { "$ref": "#/$defs/pair" },
+        {
+          "properties": {
+            "pairIndex": { "const": 3 },
+            "execution": {
+              "properties": {
+                "pairIndex": { "const": 3 },
+                "events": { "items": { "properties": { "pairIndex": { "const": 3 } } } }
+              }
+            },
+            "stacks": {
+              "properties": {
+                "baseline": { "properties": { "pairIndex": { "const": 3 } } },
+                "candidate": { "properties": { "pairIndex": { "const": 3 } } }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "pair": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["pairIndex", "cleanup", "execution", "stacks"],
+      "properties": {
+        "pairIndex": { "type": "integer", "minimum": 1, "maximum": 3 },
+        "cleanup": { "$ref": "#/$defs/pairCleanup" },
+        "execution": { "$ref": "#/$defs/pairExecution" },
+        "stacks": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["baseline", "candidate"],
+          "properties": {
+            "baseline": {
+              "allOf": [
+                { "$ref": "#/$defs/stack" },
+                { "properties": { "role": { "const": "baseline" } } }
+              ]
+            },
+            "candidate": {
+              "allOf": [
+                { "$ref": "#/$defs/stack" },
+                { "properties": { "role": { "const": "candidate" } } }
+              ]
+            }
+          }
+        }
+      }
+    },
+    "pairExecution": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "pairIndex",
+        "peakLiveStackCount",
+        "baselineCandidateConcurrent",
+        "bindings",
+        "dualPreflightBeforeMutation",
+        "cleanupCompletedWithinPair",
+        "events",
+        "launch"
+      ],
+      "properties": {
+        "pairIndex": { "type": "integer", "minimum": 1, "maximum": 3 },
+        "peakLiveStackCount": { "const": 2 },
+        "baselineCandidateConcurrent": { "const": true },
+        "bindings": { "$ref": "#/$defs/executionBindings" },
+        "dualPreflightBeforeMutation": { "const": true },
+        "cleanupCompletedWithinPair": { "const": true },
+        "events": {
+          "type": "array",
+          "minItems": 8,
+          "maxItems": 8,
+          "items": { "$ref": "#/$defs/executionEvent" }
+        },
+        "launch": { "$ref": "#/$defs/pairLaunch" }
+      }
+    },
+    "executionEvent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "pairIndex",
+        "globalOrdinal",
+        "event",
+        "evidenceSha256",
+        "liveStackCount",
+        "destructiveResetCount"
+      ],
+      "properties": {
+        "pairIndex": { "type": "integer", "minimum": 1, "maximum": 3 },
+        "globalOrdinal": { "type": "integer", "minimum": 1, "maximum": 24 },
+        "event": {
+          "enum": [
+            "pre_start_inputs_validated",
+            "concurrent_pair_started",
+            "runtime_attestation_completed",
+            "concurrent_dual_reset_started",
+            "concurrent_dual_reset_completed",
+            "concurrent_dual_capture_started",
+            "concurrent_dual_capture_completed",
+            "exact_dual_cleanup_completed"
+          ]
+        },
+        "evidenceSha256": { "$ref": "#/$defs/sha256" },
+        "liveStackCount": { "type": "integer", "minimum": 0, "maximum": 2 },
+        "destructiveResetCount": { "type": "integer", "minimum": 0, "maximum": 2 }
+      }
+    },
+    "executionBindings": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "browserCaptureContractSha256s",
+        "cleanupContractSha256",
+        "finalInputChecks",
+        "finalInputContractSha256s",
+        "inputReceiptContractSha256s",
+        "resetContractSha256s",
+        "runtimeAttestationContractSha256s"
+      ],
+      "properties": {
+        "browserCaptureContractSha256s": { "$ref": "#/$defs/digestPair" },
+        "cleanupContractSha256": { "$ref": "#/$defs/sha256" },
+        "finalInputChecks": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 2,
+          "items": { "$ref": "#/$defs/finalInputCheck" }
+        },
+        "finalInputContractSha256s": { "$ref": "#/$defs/digestPair" },
+        "inputReceiptContractSha256s": { "$ref": "#/$defs/digestPair" },
+        "resetContractSha256s": { "$ref": "#/$defs/digestPair" },
+        "runtimeAttestationContractSha256s": { "$ref": "#/$defs/digestPair" }
+      }
+    },
+    "digestPair": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 2,
+      "items": { "$ref": "#/$defs/sha256" }
+    },
+    "finalInputCheck": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["assetFileSha256", "contractFileSha256", "status"],
+      "properties": {
+        "assetFileSha256": { "$ref": "#/$defs/sha256" },
+        "contractFileSha256": { "$ref": "#/$defs/sha256" },
+        "status": { "const": "post-capture-inputs-unchanged" }
+      }
+    },
+    "pairLaunch": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "barrierSha256",
+        "coexistence",
+        "dispatches",
+        "inputReceiptContractSha256s",
+        "lifecycleNotBefore",
+        "status"
+      ],
+      "properties": {
+        "barrierSha256": { "$ref": "#/$defs/sha256" },
+        "coexistence": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["observations", "status"],
+          "properties": {
+            "observations": {
+              "type": "array",
+              "minItems": 2,
+              "maxItems": 2,
+              "items": { "$ref": "#/$defs/coexistenceObservation" }
+            },
+            "status": { "const": "both-project-container-sets-coexisted" }
+          }
+        },
+        "dispatches": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 2,
+          "items": { "$ref": "#/$defs/launchDispatch" }
+        },
+        "inputReceiptContractSha256s": { "$ref": "#/$defs/digestPair" },
+        "lifecycleNotBefore": {
+          "type": "string",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z$"
+        },
+        "status": { "const": "dual-compose-up-dispatched-after-shared-barrier" }
+      }
+    },
+    "launchDispatch": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["barrierSha256", "ordinal", "projectSha256"],
+      "properties": {
+        "barrierSha256": { "$ref": "#/$defs/sha256" },
+        "ordinal": { "type": "integer", "minimum": 0, "maximum": 1 },
+        "projectSha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "coexistenceObservation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["containerSetSha256", "projectSha256", "serviceCount", "services"],
+      "properties": {
+        "containerSetSha256": { "$ref": "#/$defs/sha256" },
+        "projectSha256": { "$ref": "#/$defs/sha256" },
+        "serviceCount": { "const": 13 },
+        "services": {
+          "type": "array",
+          "minItems": 13,
+          "maxItems": 13,
+          "items": { "$ref": "#/$defs/coexistenceService" }
+        }
+      }
+    },
+    "coexistenceService": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["containerIdSha256", "service", "state"],
+      "properties": {
+        "containerIdSha256": { "$ref": "#/$defs/sha256" },
+        "service": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "state": { "enum": ["exited-zero", "running", "running-healthy"] }
+      }
+    },
+    "stack": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "role",
+        "pairIndex",
+        "proofHmacScopeSha256",
+        "runScopeSha256",
+        "applicationImage",
+        "migrationImage",
+        "fixtureContract",
+        "publicBuildContract",
+        "inputReceipt",
+        "runtimeAttestation",
+        "runtimeBinding",
+        "reset",
+        "browser",
+        "phases",
+        "connectProxy",
+        "cleanup"
+      ],
+      "properties": {
+        "role": { "enum": ["baseline", "candidate"] },
+        "pairIndex": { "type": "integer", "minimum": 1, "maximum": 3 },
+        "proofHmacScopeSha256": { "$ref": "#/$defs/sha256" },
+        "runScopeSha256": { "$ref": "#/$defs/sha256" },
+        "applicationImage": { "$ref": "#/$defs/applicationImage" },
+        "migrationImage": { "$ref": "#/$defs/migrationImage" },
+        "fixtureContract": { "$ref": "#/$defs/fixtureContract" },
+        "publicBuildContract": { "$ref": "#/$defs/publicBuildContract" },
+        "inputReceipt": { "$ref": "#/$defs/inputReceipt" },
+        "runtimeAttestation": { "$ref": "#/$defs/runtimeAttestation" },
+        "runtimeBinding": { "$ref": "#/$defs/runtimeBinding" },
+        "reset": { "$ref": "#/$defs/reset" },
+        "browser": { "$ref": "#/$defs/browser" },
+        "phases": { "$ref": "#/$defs/phases" },
+        "connectProxy": { "$ref": "#/$defs/connectProxy" },
+        "cleanup": { "$ref": "#/$defs/cleanup" }
+      }
+    },
+    "applicationImage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "assetImageDigest",
+        "configDigest",
+        "manifestDigest",
+        "publicBuildContract",
+        "referenceSha256",
+        "repoDigestContractSha256",
+        "revision",
+        "role",
+        "runtimeImageDigest"
+      ],
+      "properties": {
+        "assetImageDigest": { "$ref": "#/$defs/imageDigest" },
+        "configDigest": { "$ref": "#/$defs/imageDigest" },
+        "manifestDigest": { "$ref": "#/$defs/imageDigest" },
+        "publicBuildContract": { "$ref": "#/$defs/publicBuildContract" },
+        "referenceSha256": { "$ref": "#/$defs/sha256" },
+        "repoDigestContractSha256": { "$ref": "#/$defs/sha256" },
+        "revision": { "type": "string", "pattern": "^[a-f0-9]{40}$" },
+        "role": { "const": "app" },
+        "runtimeImageDigest": { "$ref": "#/$defs/imageDigest" }
+      }
+    },
+    "migrationImage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "assetImageDigest",
+        "bindingContractSha256",
+        "configDigest",
+        "referenceSha256",
+        "revision",
+        "role",
+        "runtimeImageDigest"
+      ],
+      "properties": {
+        "assetImageDigest": { "$ref": "#/$defs/imageDigest" },
+        "bindingContractSha256": { "$ref": "#/$defs/sha256" },
+        "configDigest": { "$ref": "#/$defs/imageDigest" },
+        "referenceSha256": { "$ref": "#/$defs/sha256" },
+        "revision": { "type": "string", "pattern": "^[a-f0-9]{40}$" },
+        "role": { "const": "migration" },
+        "runtimeImageDigest": { "$ref": "#/$defs/imageDigest" }
+      }
+    },
+    "fixtureContract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "sha256"],
+      "properties": {
+        "version": { "const": "journey-v5" },
+        "sha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "publicBuildContract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "sha256"],
+      "properties": {
+        "version": { "const": "1" },
+        "sha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "inputReceipt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "applicationImageBindingContractSha256",
+        "applicationImageConfigDigest",
+        "composeSourceSha256",
+        "fixtureBindingContractSha256",
+        "fixtureMountSubsetContractSha256",
+        "fixtureSourceContractSha256",
+        "generatedEnvironmentDirectorySha256",
+        "globalFixtureContractSha256",
+        "imageProbeOwnershipContractSha256",
+        "migrationImageBindingContractSha256",
+        "migrationImageConfigDigest",
+        "projectSha256",
+        "renderedComposeSha256",
+        "roleEnvironmentContractSha256",
+        "roleEnvironmentPolicySha256"
+      ],
+      "properties": {
+        "applicationImageBindingContractSha256": { "$ref": "#/$defs/sha256" },
+        "applicationImageConfigDigest": { "$ref": "#/$defs/imageDigest" },
+        "composeSourceSha256": { "$ref": "#/$defs/sha256" },
+        "fixtureBindingContractSha256": { "$ref": "#/$defs/sha256" },
+        "fixtureMountSubsetContractSha256": { "$ref": "#/$defs/sha256" },
+        "fixtureSourceContractSha256": { "$ref": "#/$defs/sha256" },
+        "generatedEnvironmentDirectorySha256": { "$ref": "#/$defs/sha256" },
+        "globalFixtureContractSha256": { "$ref": "#/$defs/sha256" },
+        "imageProbeOwnershipContractSha256": { "$ref": "#/$defs/sha256" },
+        "migrationImageBindingContractSha256": { "$ref": "#/$defs/sha256" },
+        "migrationImageConfigDigest": { "$ref": "#/$defs/imageDigest" },
+        "projectSha256": { "$ref": "#/$defs/sha256" },
+        "renderedComposeSha256": { "$ref": "#/$defs/sha256" },
+        "roleEnvironmentContractSha256": { "$ref": "#/$defs/sha256" },
+        "roleEnvironmentPolicySha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "runtimeAttestation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "applicationImageBindingContractSha256",
+        "applicationRepoDigestContractSha256",
+        "applicationRuntimeImageDigest",
+        "composeRuntimeContractSha256",
+        "composeSourceSha256",
+        "fixtureExecutionContractSha256",
+        "fixtureMountContractSha256",
+        "migrationImageBindingContractSha256",
+        "migrationRuntimeImageDigest",
+        "networkSha256",
+        "oneShotLifecycleContractSha256",
+        "renderedComposeSha256",
+        "serviceIdentitySha256",
+        "syntheticRoleEnvironmentContractSha256",
+        "syntheticRoleEnvironmentPolicySha256"
+      ],
+      "properties": {
+        "applicationImageBindingContractSha256": { "$ref": "#/$defs/sha256" },
+        "applicationRepoDigestContractSha256": { "$ref": "#/$defs/sha256" },
+        "applicationRuntimeImageDigest": { "$ref": "#/$defs/imageDigest" },
+        "composeRuntimeContractSha256": { "$ref": "#/$defs/sha256" },
+        "composeSourceSha256": { "$ref": "#/$defs/sha256" },
+        "fixtureExecutionContractSha256": { "$ref": "#/$defs/sha256" },
+        "fixtureMountContractSha256": { "$ref": "#/$defs/sha256" },
+        "migrationImageBindingContractSha256": { "$ref": "#/$defs/sha256" },
+        "migrationRuntimeImageDigest": { "$ref": "#/$defs/imageDigest" },
+        "networkSha256": { "$ref": "#/$defs/sha256" },
+        "oneShotLifecycleContractSha256": { "$ref": "#/$defs/sha256" },
+        "renderedComposeSha256": { "$ref": "#/$defs/sha256" },
+        "serviceIdentitySha256": { "$ref": "#/$defs/sha256" },
+        "syntheticRoleEnvironmentContractSha256": { "$ref": "#/$defs/sha256" },
+        "syntheticRoleEnvironmentPolicySha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "runtimeBinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "applicationImageBindingContractSha256",
+        "applicationRepoDigestContractSha256",
+        "composeRuntimeContractSha256",
+        "composeSourceSha256",
+        "connectProxyBindingSha256",
+        "fixtureMountContractSha256",
+        "fixtureBindingContractSha256",
+        "fixtureExecutionContractSha256",
+        "globalFixtureContractSha256",
+        "generatedEnvironmentDirectorySha256",
+        "journeyContractSha256",
+        "migrationAssetImageDigest",
+        "migrationImageBindingContractSha256",
+        "networkSha256",
+        "oneShotLifecycleContractSha256",
+        "ownedInputReceiptSha256",
+        "projectSha256",
+        "publicationsSha256",
+        "renderedComposeSha256",
+        "serviceIdentitySha256",
+        "staticAssetAttestationSha256",
+        "staticAssetConfigDigest",
+        "staticAssetImageDigest",
+        "staticAssetInventorySha256",
+        "staticAssetInventoryProjectionSha256",
+        "staticAssetRouteGraphSha256",
+        "staticAssetManifestDigest",
+        "staticAssetSourceFileSha256",
+        "syntheticRoleEnvironmentContractSha256",
+        "syntheticRoleEnvironmentPolicySha256"
+      ],
+      "properties": {
+        "status": { "const": "verifier-owned-runtime-bound" },
+        "applicationImageBindingContractSha256": { "$ref": "#/$defs/sha256" },
+        "applicationRepoDigestContractSha256": { "$ref": "#/$defs/sha256" },
+        "composeRuntimeContractSha256": { "$ref": "#/$defs/sha256" },
+        "composeSourceSha256": { "$ref": "#/$defs/sha256" },
+        "connectProxyBindingSha256": { "$ref": "#/$defs/sha256" },
+        "fixtureMountContractSha256": { "$ref": "#/$defs/sha256" },
+        "fixtureBindingContractSha256": { "$ref": "#/$defs/sha256" },
+        "fixtureExecutionContractSha256": { "$ref": "#/$defs/sha256" },
+        "globalFixtureContractSha256": { "$ref": "#/$defs/sha256" },
+        "generatedEnvironmentDirectorySha256": { "$ref": "#/$defs/sha256" },
+        "journeyContractSha256": { "$ref": "#/$defs/sha256" },
+        "migrationAssetImageDigest": { "$ref": "#/$defs/imageDigest" },
+        "migrationImageBindingContractSha256": { "$ref": "#/$defs/sha256" },
+        "networkSha256": { "$ref": "#/$defs/sha256" },
+        "oneShotLifecycleContractSha256": { "$ref": "#/$defs/sha256" },
+        "ownedInputReceiptSha256": { "$ref": "#/$defs/sha256" },
+        "projectSha256": { "$ref": "#/$defs/sha256" },
+        "publicationsSha256": { "$ref": "#/$defs/sha256" },
+        "renderedComposeSha256": { "$ref": "#/$defs/sha256" },
+        "serviceIdentitySha256": { "$ref": "#/$defs/sha256" },
+        "staticAssetAttestationSha256": { "$ref": "#/$defs/sha256" },
+        "staticAssetConfigDigest": { "$ref": "#/$defs/imageDigest" },
+        "staticAssetImageDigest": { "$ref": "#/$defs/imageDigest" },
+        "staticAssetInventorySha256": { "$ref": "#/$defs/sha256" },
+        "staticAssetInventoryProjectionSha256": { "$ref": "#/$defs/sha256" },
+        "staticAssetRouteGraphSha256": { "$ref": "#/$defs/sha256" },
+        "staticAssetManifestDigest": { "$ref": "#/$defs/imageDigest" },
+        "staticAssetSourceFileSha256": { "$ref": "#/$defs/sha256" },
+        "syntheticRoleEnvironmentContractSha256": { "$ref": "#/$defs/sha256" },
+        "syntheticRoleEnvironmentPolicySha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "reset": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["scenarioSha256", "seedSha256", "database"],
+      "properties": {
+        "scenarioSha256": { "$ref": "#/$defs/sha256" },
+        "seedSha256": { "$ref": "#/$defs/sha256" },
+        "database": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "scopeSha256",
+            "schemaSha256",
+            "tableCount",
+            "sequenceCount",
+            "resetSequence",
+            "transaction",
+            "redis"
+          ],
+          "properties": {
+            "scopeSha256": { "$ref": "#/$defs/sha256" },
+            "schemaSha256": { "$ref": "#/$defs/sha256" },
+            "tableCount": { "$ref": "#/$defs/positiveInteger" },
+            "sequenceCount": { "const": 0 },
+            "resetSequence": { "const": 1 },
+            "transaction": {
+              "const": "truncate-public-application-tables-cascade-no-sequences"
+            },
+            "redis": { "const": "flush-owned-db-0" }
+          }
+        }
+      }
+    },
+    "browser": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "playwrightVersion",
+        "chromiumVersion",
+        "connectProxyBindingSha256",
+        "contextScopeSha256",
+        "eventSeal",
+        "historySemantics",
+        "launchPolicySha256",
+        "launchScopeSha256",
+        "processScopeSha256",
+        "projectBindingSha256",
+        "userAgentSha256",
+        "viewport",
+        "locale",
+        "timezoneId",
+        "colorScheme",
+        "serviceWorkers",
+        "staticProvenance",
+        "unexpectedRequestCount",
+        "unexpectedConsoleCount",
+        "unexpectedPageErrorCount",
+        "unexpectedPageCount"
+      ],
+      "properties": {
+        "playwrightVersion": { "type": "string", "pattern": "^\\d+\\.\\d+\\.\\d+$" },
+        "chromiumVersion": { "type": "string", "pattern": "^\\d+\\.\\d+\\.\\d+\\.\\d+$" },
+        "connectProxyBindingSha256": { "$ref": "#/$defs/sha256" },
+        "contextScopeSha256": { "$ref": "#/$defs/sha256" },
+        "eventSeal": { "$ref": "#/$defs/eventSeal" },
+        "historySemantics": { "$ref": "#/$defs/historySemantics" },
+        "launchPolicySha256": { "$ref": "#/$defs/sha256" },
+        "launchScopeSha256": { "$ref": "#/$defs/sha256" },
+        "processScopeSha256": { "$ref": "#/$defs/sha256" },
+        "projectBindingSha256": { "$ref": "#/$defs/sha256" },
+        "userAgentSha256": { "$ref": "#/$defs/sha256" },
+        "viewport": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["width", "height"],
+          "properties": {
+            "width": { "const": 1440 },
+            "height": { "const": 900 }
+          }
+        },
+        "locale": { "const": "ru-RU" },
+        "timezoneId": { "const": "Europe/Moscow" },
+        "colorScheme": { "const": "light" },
+        "serviceWorkers": { "const": "block" },
+        "staticProvenance": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "assetAttestationSha256",
+            "assetInventorySha256",
+            "assetInventoryProjectionSha256",
+            "assetRouteGraphSha256",
+            "initial",
+            "recreated"
+          ],
+          "properties": {
+            "assetAttestationSha256": { "$ref": "#/$defs/sha256" },
+            "assetInventorySha256": { "$ref": "#/$defs/sha256" },
+            "assetInventoryProjectionSha256": { "$ref": "#/$defs/sha256" },
+            "assetRouteGraphSha256": { "$ref": "#/$defs/sha256" },
+            "initial": { "$ref": "#/$defs/staticInitialGenerationProvenance" },
+            "recreated": { "$ref": "#/$defs/staticRecreatedGenerationProvenance" }
+          }
+        },
+        "unexpectedRequestCount": { "const": 0 },
+        "unexpectedConsoleCount": { "const": 0 },
+        "unexpectedPageErrorCount": { "const": 0 },
+        "unexpectedPageCount": { "const": 0 }
+      }
+    },
+    "staticGenerationProvenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "documentGenerationCount",
+        "requestCount",
+        "requestContractSha256",
+        "requestOrderContractSha256",
+        "requestOrderLedger",
+        "responseDeclarationContractSha256",
+        "responseDeclarationLedger",
+        "semanticRequestLedger",
+        "staticLoadGraph",
+        "staticLoadGraphContractSha256",
+        "staticRequestContractSha256",
+        "staticRequestCount",
+        "staticRequestLedger",
+        "staticResponseByteLength"
+      ],
+      "properties": {
+        "documentGenerationCount": { "type": "integer", "minimum": 2, "maximum": 3 },
+        "requestCount": { "type": "integer", "minimum": 1, "maximum": 256 },
+        "requestContractSha256": { "$ref": "#/$defs/sha256" },
+        "requestOrderContractSha256": { "$ref": "#/$defs/sha256" },
+        "requestOrderLedger": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 256,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["kind", "occurrence"],
+            "properties": {
+              "kind": { "enum": ["semantic", "static"] },
+              "occurrence": { "type": "integer", "minimum": 1, "maximum": 256 }
+            }
+          }
+        },
+        "responseDeclarationContractSha256": { "$ref": "#/$defs/sha256" },
+        "responseDeclarationLedger": {
+          "oneOf": [
+            { "$ref": "#/$defs/staticInitialResponseDeclarationLedger" },
+            { "$ref": "#/$defs/staticRecreatedResponseDeclarationLedger" }
+          ]
+        },
+        "semanticRequestLedger": { "$ref": "#/$defs/staticSemanticRequestLedger" },
+        "staticLoadGraph": {
+          "oneOf": [
+            { "$ref": "#/$defs/staticInitialLoadGraph" },
+            { "$ref": "#/$defs/staticRecreatedLoadGraph" }
+          ]
+        },
+        "staticLoadGraphContractSha256": { "$ref": "#/$defs/sha256" },
+        "staticRequestContractSha256": { "$ref": "#/$defs/sha256" },
+        "staticRequestCount": { "type": "integer", "minimum": 1, "maximum": 256 },
+        "staticRequestLedger": { "$ref": "#/$defs/staticRequestLedger" },
+        "staticResponseByteLength": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1073741824
+        }
+      }
+    },
+    "staticInitialGenerationProvenance": {
+      "allOf": [
+        { "$ref": "#/$defs/staticGenerationProvenance" },
+        {
+          "properties": {
+            "documentGenerationCount": { "const": 3 },
+            "responseDeclarationLedger": {
+              "$ref": "#/$defs/staticInitialResponseDeclarationLedger"
+            },
+            "staticLoadGraph": { "$ref": "#/$defs/staticInitialLoadGraph" }
+          }
+        }
+      ]
+    },
+    "staticRecreatedGenerationProvenance": {
+      "allOf": [
+        { "$ref": "#/$defs/staticGenerationProvenance" },
+        {
+          "properties": {
+            "documentGenerationCount": { "const": 2 },
+            "responseDeclarationLedger": {
+              "$ref": "#/$defs/staticRecreatedResponseDeclarationLedger"
+            },
+            "staticLoadGraph": { "$ref": "#/$defs/staticRecreatedLoadGraph" }
+          }
+        }
+      ]
+    },
+    "staticSemanticRequestLedger": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 256,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "disposition", "key", "redirectEdge", "responseContentType", "responseStatus"
+        ],
+        "properties": {
+          "disposition": { "enum": ["abort", "continue"] },
+          "key": {
+            "enum": [
+              "app-brand-logo", "app-cabinet-action", "app-cabinet-document",
+              "app-cabinet-prefetch-blocked", "app-cabinet-rsc", "app-login-action",
+              "app-login-document", "app-login-rsc", "app-profile-action",
+              "app-profile-document", "app-profile-rsc", "app-root-rsc",
+              "app-telegram-callback", "app-telegram-start", "app-web-manifest",
+              "chatwoot-sdk-script", "chatwoot-widget-conversation-frame",
+              "chatwoot-widget-frame", "telegram-oidc-authorize", "turnstile-widget-script"
+            ]
+          },
+          "redirectEdge": { "type": ["string", "null"], "maxLength": 160 },
+          "responseContentType": { "type": ["string", "null"], "maxLength": 128 },
+          "responseStatus": {
+            "anyOf": [
+              { "type": "integer", "minimum": 100, "maximum": 599 },
+              { "type": "null" }
+            ]
+          }
+        }
+      }
+    },
+    "staticRequestLedger": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 256,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "assetBytes", "assetSha256", "class", "contentType", "documentKey", "pathSha256"
+        ],
+        "properties": {
+          "assetBytes": { "type": "integer", "minimum": 1, "maximum": 134217728 },
+          "assetSha256": { "$ref": "#/$defs/sha256" },
+          "class": {
+            "enum": ["next-static-css", "next-static-font", "next-static-image", "next-static-js"]
+          },
+          "contentType": { "type": "string", "minLength": 1, "maxLength": 128 },
+          "documentKey": {
+            "enum": ["app-login-document", "app-profile-document", "app-cabinet-document"]
+          },
+          "pathSha256": { "$ref": "#/$defs/sha256" }
+        }
+      }
+    },
+    "staticResponseDeclaration": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["documentKey", "pathSha256s"],
+      "properties": {
+        "documentKey": {
+          "enum": ["app-login-document", "app-profile-document", "app-cabinet-document"]
+        },
+        "pathSha256s": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 256,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/sha256" }
+        }
+      }
+    },
+    "staticLoginResponseDeclaration": {
+      "allOf": [
+        { "$ref": "#/$defs/staticResponseDeclaration" },
+        { "properties": { "documentKey": { "const": "app-login-document" } } }
+      ]
+    },
+    "staticProfileResponseDeclaration": {
+      "allOf": [
+        { "$ref": "#/$defs/staticResponseDeclaration" },
+        { "properties": { "documentKey": { "const": "app-profile-document" } } }
+      ]
+    },
+    "staticCabinetResponseDeclaration": {
+      "allOf": [
+        { "$ref": "#/$defs/staticResponseDeclaration" },
+        { "properties": { "documentKey": { "const": "app-cabinet-document" } } }
+      ]
+    },
+    "staticInitialResponseDeclarationLedger": {
+      "type": "array",
+      "minItems": 3,
+      "maxItems": 3,
+      "items": [
+        { "$ref": "#/$defs/staticLoginResponseDeclaration" },
+        { "$ref": "#/$defs/staticProfileResponseDeclaration" },
+        { "$ref": "#/$defs/staticCabinetResponseDeclaration" }
+      ],
+      "additionalItems": false
+    },
+    "staticRecreatedResponseDeclarationLedger": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 2,
+      "items": [
+        { "$ref": "#/$defs/staticLoginResponseDeclaration" },
+        { "$ref": "#/$defs/staticCabinetResponseDeclaration" }
+      ],
+      "additionalItems": false
+    },
+    "staticCssMediaReferenceLedger": {
+      "type": "array",
+      "minItems": 8,
+      "maxItems": 8,
+      "items": [
+        { "$ref": "#/$defs/staticCssMediaReference1" },
+        { "$ref": "#/$defs/staticCssMediaReference2" },
+        { "$ref": "#/$defs/staticCssMediaReference3" },
+        { "$ref": "#/$defs/staticCssMediaReference4" },
+        { "$ref": "#/$defs/staticCssMediaReference5" },
+        { "$ref": "#/$defs/staticCssMediaReference6" },
+        { "$ref": "#/$defs/staticCssMediaReference7" },
+        { "$ref": "#/$defs/staticCssMediaReference8" }
+      ],
+      "additionalItems": false
+    },
+    "staticCssMediaReference": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["occurrence", "sourcePathSha256", "targetPathSha256"],
+      "properties": {
+        "occurrence": { "type": "integer", "minimum": 1, "maximum": 8 },
+        "sourcePathSha256": { "$ref": "#/$defs/sha256" },
+        "targetPathSha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "staticCssMediaReference1": {
+      "allOf": [{ "$ref": "#/$defs/staticCssMediaReference" }, { "properties": { "occurrence": { "const": 1 } } }]
+    },
+    "staticCssMediaReference2": {
+      "allOf": [{ "$ref": "#/$defs/staticCssMediaReference" }, { "properties": { "occurrence": { "const": 2 } } }]
+    },
+    "staticCssMediaReference3": {
+      "allOf": [{ "$ref": "#/$defs/staticCssMediaReference" }, { "properties": { "occurrence": { "const": 3 } } }]
+    },
+    "staticCssMediaReference4": {
+      "allOf": [{ "$ref": "#/$defs/staticCssMediaReference" }, { "properties": { "occurrence": { "const": 4 } } }]
+    },
+    "staticCssMediaReference5": {
+      "allOf": [{ "$ref": "#/$defs/staticCssMediaReference" }, { "properties": { "occurrence": { "const": 5 } } }]
+    },
+    "staticCssMediaReference6": {
+      "allOf": [{ "$ref": "#/$defs/staticCssMediaReference" }, { "properties": { "occurrence": { "const": 6 } } }]
+    },
+    "staticCssMediaReference7": {
+      "allOf": [{ "$ref": "#/$defs/staticCssMediaReference" }, { "properties": { "occurrence": { "const": 7 } } }]
+    },
+    "staticCssMediaReference8": {
+      "allOf": [{ "$ref": "#/$defs/staticCssMediaReference" }, { "properties": { "occurrence": { "const": 8 } } }]
+    },
+    "staticDigestArray": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 256,
+      "uniqueItems": true,
+      "items": { "$ref": "#/$defs/sha256" }
+    },
+    "staticDocumentLoad": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "documentKey", "expectedChunkPathSha256s", "expectedMediaPathSha256s",
+        "routeDeclaredPathSha256s"
+      ],
+      "properties": {
+        "documentKey": {
+          "enum": ["app-login-document", "app-profile-document", "app-cabinet-document"]
+        },
+        "expectedChunkPathSha256s": { "$ref": "#/$defs/staticDigestArray" },
+        "expectedMediaPathSha256s": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 2,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/sha256" }
+        },
+        "routeDeclaredPathSha256s": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 64,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/sha256" }
+        }
+      }
+    },
+    "staticLoginDocumentLoad": {
+      "allOf": [{ "$ref": "#/$defs/staticDocumentLoad" }, { "properties": { "documentKey": { "const": "app-login-document" } } }]
+    },
+    "staticProfileDocumentLoad": {
+      "allOf": [{ "$ref": "#/$defs/staticDocumentLoad" }, { "properties": { "documentKey": { "const": "app-profile-document" } } }]
+    },
+    "staticCabinetDocumentLoad": {
+      "allOf": [{ "$ref": "#/$defs/staticDocumentLoad" }, { "properties": { "documentKey": { "const": "app-cabinet-document" } } }]
+    },
+    "staticInitialLoadGraph": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "assetAttestationSha256", "assetInventorySha256", "cssMediaReferenceLedger",
+        "declaredPathLedger", "declaredPathSha256s", "documentLoadLedger",
+        "expectedChunkPathSha256s", "inventoryLedger", "inventoryLedgerContractSha256",
+        "routeDeclaredPathContractSha256", "routeDeclaredPathSha256s"
+      ],
+      "properties": {
+        "assetAttestationSha256": { "$ref": "#/$defs/sha256" },
+        "assetInventorySha256": { "$ref": "#/$defs/sha256" },
+        "cssMediaReferenceLedger": { "$ref": "#/$defs/staticCssMediaReferenceLedger" },
+        "declaredPathLedger": {
+          "type": "array", "minItems": 1, "maxItems": 256,
+          "items": {
+            "type": "object", "additionalProperties": false,
+            "required": ["class", "pathSha256"],
+            "properties": {
+              "class": { "enum": ["chunk", "media"] },
+              "pathSha256": { "$ref": "#/$defs/sha256" }
+            }
+          }
+        },
+        "declaredPathSha256s": { "$ref": "#/$defs/staticDigestArray" },
+        "documentLoadLedger": {
+          "type": "array", "minItems": 3, "maxItems": 3,
+          "items": [
+            { "$ref": "#/$defs/staticLoginDocumentLoad" },
+            { "$ref": "#/$defs/staticProfileDocumentLoad" },
+            { "$ref": "#/$defs/staticCabinetDocumentLoad" }
+          ],
+          "additionalItems": false
+        },
+        "expectedChunkPathSha256s": { "$ref": "#/$defs/staticDigestArray" },
+        "inventoryLedger": {
+          "type": "array", "minItems": 1, "maxItems": 4096,
+          "items": {
+            "type": "object", "additionalProperties": false,
+            "required": ["assetBytes", "assetSha256", "extension", "pathSha256"],
+            "properties": {
+              "assetBytes": { "type": "integer", "minimum": 1, "maximum": 134217728 },
+              "assetSha256": { "$ref": "#/$defs/sha256" },
+              "extension": {
+                "enum": ["css", "eot", "ico", "js", "png", "svg", "ttf", "woff", "woff2"]
+              },
+              "pathSha256": { "$ref": "#/$defs/sha256" }
+            }
+          }
+        },
+        "inventoryLedgerContractSha256": { "$ref": "#/$defs/sha256" },
+        "routeDeclaredPathContractSha256": { "$ref": "#/$defs/sha256" },
+        "routeDeclaredPathSha256s": { "$ref": "#/$defs/staticDigestArray" }
+      }
+    },
+    "staticRecreatedLoadGraph": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "assetAttestationSha256", "assetInventorySha256", "cssMediaReferenceLedger",
+        "declaredPathSha256s", "documentLoadLedger", "inventoryLedgerContractSha256",
+        "referenceStaticLoadGraphContractSha256", "routeDeclaredPathContractSha256"
+      ],
+      "properties": {
+        "assetAttestationSha256": { "$ref": "#/$defs/sha256" },
+        "assetInventorySha256": { "$ref": "#/$defs/sha256" },
+        "cssMediaReferenceLedger": { "$ref": "#/$defs/staticCssMediaReferenceLedger" },
+        "declaredPathSha256s": { "$ref": "#/$defs/staticDigestArray" },
+        "documentLoadLedger": {
+          "type": "array", "minItems": 2, "maxItems": 2,
+          "items": [
+            { "$ref": "#/$defs/staticLoginDocumentLoad" },
+            { "$ref": "#/$defs/staticCabinetDocumentLoad" }
+          ],
+          "additionalItems": false
+        },
+        "inventoryLedgerContractSha256": { "$ref": "#/$defs/sha256" },
+        "referenceStaticLoadGraphContractSha256": { "$ref": "#/$defs/sha256" },
+        "routeDeclaredPathContractSha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "historySemantics": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "contractSha256",
+        "entryCount",
+        "generationBoundaryCount",
+        "initialEntryCount",
+        "recreatedEntryCount"
+      ],
+      "properties": {
+        "contractSha256": { "$ref": "#/$defs/sha256" },
+        "entryCount": { "type": "integer", "minimum": 2, "maximum": 256 },
+        "generationBoundaryCount": { "const": 1 },
+        "initialEntryCount": { "type": "integer", "minimum": 1, "maximum": 256 },
+        "recreatedEntryCount": { "type": "integer", "minimum": 1, "maximum": 256 }
+      }
+    },
+    "eventSeal": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "eventCount",
+        "lateEventCount",
+        "sourceCounts",
+        "sourceDigestsPresent",
+        "stateSha256",
+        "status"
+      ],
+      "properties": {
+        "eventCount": { "type": "integer", "minimum": 1, "maximum": 4096 },
+        "lateEventCount": { "const": 0 },
+        "sourceCounts": { "$ref": "#/$defs/eventSourceCounts" },
+        "sourceDigestsPresent": { "$ref": "#/$defs/eventSourcePresence" },
+        "stateSha256": { "$ref": "#/$defs/sha256" },
+        "status": { "const": "sealed-clean" }
+      }
+    },
+    "eventSourceCounts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "boundary",
+        "browserRequests",
+        "browserResponses",
+        "diagnostics",
+        "history",
+        "network",
+        "provider"
+      ],
+      "properties": {
+        "boundary": { "type": "integer", "minimum": 1, "maximum": 4096 },
+        "browserRequests": { "type": "integer", "minimum": 1, "maximum": 4096 },
+        "browserResponses": { "type": "integer", "minimum": 1, "maximum": 4096 },
+        "diagnostics": { "type": "integer", "minimum": 1, "maximum": 4096 },
+        "history": { "type": "integer", "minimum": 1, "maximum": 4096 },
+        "network": { "type": "integer", "minimum": 1, "maximum": 4096 },
+        "provider": { "type": "integer", "minimum": 1, "maximum": 4096 }
+      }
+    },
+    "eventSourcePresence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "boundary",
+        "browserRequests",
+        "browserResponses",
+        "diagnostics",
+        "history",
+        "network",
+        "provider"
+      ],
+      "properties": {
+        "boundary": { "const": true },
+        "browserRequests": { "const": true },
+        "browserResponses": { "const": true },
+        "diagnostics": { "const": true },
+        "history": { "const": true },
+        "network": { "const": true },
+        "provider": { "const": true }
+      }
+    },
+    "phases": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["gap", "stable", "cleared", "recreated"],
+      "properties": {
+        "gap": { "$ref": "#/$defs/gapPhase" },
+        "stable": { "$ref": "#/$defs/stablePhase" },
+        "cleared": { "$ref": "#/$defs/clearedPhase" },
+        "recreated": { "$ref": "#/$defs/recreatedPhase" }
+      }
+    },
+    "visiblePhase": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "authorized",
+        "boundaryCallCount",
+        "contactProbeCount",
+        "cookieDescriptorByteLength",
+        "cookieDescriptorCount",
+        "cookieValueByteLength",
+        "conversationCookieByteLength",
+        "conversationCookieCount",
+        "conversationEqualsInMemoryOwnership",
+        "conversationEqualsSdkIdentifier",
+        "conversationSameAsPriorPhase",
+        "evidenceCounts",
+        "evidenceRanges",
+        "finalCabinetRoute",
+        "frameLoadedCount",
+        "hashes",
+        "identityConfirmedCount",
+        "localStorageKeyCount",
+        "newSetUserObserved",
+        "ownershipFingerprintMatchesConversation",
+        "pendingAbsent",
+        "pendingWaitingForFrame",
+        "rejectedContactProbeCount",
+        "replacementRequestHeld",
+        "replacementRequestReleased",
+        "recreationCausality",
+        "screenshot",
+        "sdkIdentifierPresent",
+        "sessionStorageKeyCount",
+        "serverActionCount",
+        "setUserCount",
+        "storedIdentityPresent",
+        "storedOwnershipPresent",
+        "totalCookieCount",
+        "userCookieByteLength",
+        "userCookieCount",
+        "userCookieSameAsPriorSettledPhase"
+      ],
+      "properties": {
+        "authorized": { "const": true },
+        "boundaryCallCount": { "type": "integer", "minimum": 1, "maximum": 64 },
+        "contactProbeCount": { "type": "integer", "minimum": 1, "maximum": 5000 },
+        "cookieDescriptorByteLength": { "type": "integer", "minimum": 1, "maximum": 1048576 },
+        "cookieDescriptorCount": { "type": "integer", "minimum": 1, "maximum": 32 },
+        "cookieValueByteLength": { "type": "integer", "minimum": 1, "maximum": 131072 },
+        "conversationCookieByteLength": { "type": "integer", "minimum": 21, "maximum": 41 },
+        "conversationCookieCount": { "const": 1 },
+        "conversationEqualsInMemoryOwnership": { "type": "boolean" },
+        "conversationEqualsSdkIdentifier": { "type": "boolean" },
+        "conversationSameAsPriorPhase": { "type": "boolean" },
+        "evidenceCounts": { "$ref": "#/$defs/evidenceCounts" },
+        "evidenceRanges": { "$ref": "#/$defs/evidenceRanges" },
+        "finalCabinetRoute": { "const": true },
+        "frameLoadedCount": { "type": "integer", "minimum": 1, "maximum": 64 },
+        "hashes": { "$ref": "#/$defs/phaseHashes" },
+        "identityConfirmedCount": { "type": "integer", "minimum": 0, "maximum": 64 },
+        "localStorageKeyCount": { "type": "integer", "minimum": 0, "maximum": 128 },
+        "newSetUserObserved": { "const": true },
+        "ownershipFingerprintMatchesConversation": { "type": "boolean" },
+        "pendingAbsent": { "type": "boolean" },
+        "pendingWaitingForFrame": { "type": "boolean" },
+        "rejectedContactProbeCount": { "const": 0 },
+        "replacementRequestHeld": { "type": "boolean" },
+        "replacementRequestReleased": { "type": "boolean" },
+        "recreationCausality": {
+          "oneOf": [
+            { "type": "null" },
+            { "$ref": "#/$defs/recreationCausality" }
+          ]
+        },
+        "screenshot": { "$ref": "#/$defs/screenshot" },
+        "sdkIdentifierPresent": { "type": "boolean" },
+        "sessionStorageKeyCount": { "type": "integer", "minimum": 0, "maximum": 128 },
+        "serverActionCount": { "type": "integer", "minimum": 0, "maximum": 200 },
+        "setUserCount": { "type": "integer", "minimum": 1, "maximum": 64 },
+        "storedIdentityPresent": { "type": "boolean" },
+        "storedOwnershipPresent": { "type": "boolean" },
+        "totalCookieCount": { "type": "integer", "minimum": 1, "maximum": 32 },
+        "userCookieByteLength": { "type": "integer", "minimum": 0, "maximum": 4096 },
+        "userCookieCount": { "type": "integer", "minimum": 0, "maximum": 1 },
+        "userCookieSameAsPriorSettledPhase": { "type": "boolean" }
+      }
+    },
+    "gapPhase": {
+      "allOf": [
+        { "$ref": "#/$defs/visiblePhase" },
+        {
+          "properties": {
+            "contactProbeCount": { "const": 1 },
+            "replacementRequestHeld": { "const": true },
+            "replacementRequestReleased": { "const": false },
+            "pendingWaitingForFrame": { "const": true },
+            "pendingAbsent": { "const": false },
+            "userCookieCount": { "const": 0 },
+            "userCookieByteLength": { "const": 0 },
+            "totalCookieCount": { "const": 3 },
+            "localStorageKeyCount": { "const": 1 },
+            "sessionStorageKeyCount": { "const": 1 },
+            "storedIdentityPresent": { "const": false },
+            "storedOwnershipPresent": { "const": true },
+            "conversationEqualsInMemoryOwnership": { "const": true },
+            "ownershipFingerprintMatchesConversation": { "const": true },
+            "sdkIdentifierPresent": { "const": false },
+            "conversationEqualsSdkIdentifier": { "const": false },
+            "conversationSameAsPriorPhase": { "const": false },
+            "recreationCausality": { "type": "null" },
+            "hashes": {
+              "properties": {
+                "userCookieHmacSha256": { "type": "null" }
+              }
+            },
+            "userCookieSameAsPriorSettledPhase": { "const": false }
+          }
+        }
+      ]
+    },
+    "stablePhase": {
+      "allOf": [
+        { "$ref": "#/$defs/settledPhase" },
+        {
+          "properties": {
+            "contactProbeCount": { "const": 1 },
+            "conversationSameAsPriorPhase": { "const": true },
+            "recreationCausality": { "type": "null" },
+            "userCookieSameAsPriorSettledPhase": { "const": false }
+          }
+        }
+      ]
+    },
+    "recreatedPhase": {
+      "allOf": [
+        { "$ref": "#/$defs/settledPhase" },
+        {
+          "properties": {
+            "contactProbeCount": { "const": 2 },
+            "conversationSameAsPriorPhase": { "const": true },
+            "recreationCausality": { "$ref": "#/$defs/recreationCausality" },
+            "userCookieSameAsPriorSettledPhase": { "const": true }
+          }
+        }
+      ]
+    },
+    "settledPhase": {
+      "allOf": [
+        { "$ref": "#/$defs/visiblePhase" },
+        {
+          "properties": {
+            "replacementRequestHeld": { "const": false },
+            "replacementRequestReleased": { "const": true },
+            "pendingWaitingForFrame": { "const": false },
+            "pendingAbsent": { "const": true },
+            "userCookieCount": { "const": 1 },
+            "userCookieByteLength": { "$ref": "#/$defs/positiveInteger" },
+            "totalCookieCount": { "const": 4 },
+            "localStorageKeyCount": { "const": 1 },
+            "sessionStorageKeyCount": { "const": 1 },
+            "storedIdentityPresent": { "const": true },
+            "storedOwnershipPresent": { "const": false },
+            "conversationEqualsInMemoryOwnership": { "const": true },
+            "ownershipFingerprintMatchesConversation": { "const": false },
+            "sdkIdentifierPresent": { "const": true },
+            "conversationEqualsSdkIdentifier": { "const": true }
+          }
+        }
+      ]
+    },
+    "clearedPhase": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "exactApplicationOrigin",
+        "beforeCookieCount",
+        "beforeLocalStorageKeyCount",
+        "beforeSessionStorageKeyCount",
+        "afterCookieCount",
+        "afterLocalStorageKeyCount",
+        "afterSessionStorageKeyCount",
+        "conversationCookieAbsent",
+        "preservedFixtureStorageByteExact",
+        "preservedFixtureStorageByteLength",
+        "preservedFixtureStorageHmacSha256",
+        "userCookieAbsent"
+      ],
+      "properties": {
+        "exactApplicationOrigin": { "const": true },
+        "beforeCookieCount": { "const": 5 },
+        "beforeLocalStorageKeyCount": { "const": 1 },
+        "beforeSessionStorageKeyCount": { "const": 1 },
+        "afterCookieCount": { "const": 0 },
+        "afterLocalStorageKeyCount": { "const": 0 },
+        "afterSessionStorageKeyCount": { "const": 1 },
+        "conversationCookieAbsent": { "const": true },
+        "preservedFixtureStorageByteExact": { "const": true },
+        "preservedFixtureStorageByteLength": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65536
+        },
+        "preservedFixtureStorageHmacSha256": { "$ref": "#/$defs/sha256" },
+        "userCookieAbsent": { "const": true }
+      }
+    },
+    "evidenceCounts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "accessibility",
+        "boundaryCalls",
+        "computedStyles",
+        "dom",
+        "interactive",
+        "providerEffects",
+        "providerLedger",
+        "requestSequence",
+        "serverActions",
+        "storage"
+      ],
+      "properties": {
+        "accessibility": { "type": "integer", "minimum": 1, "maximum": 50000 },
+        "boundaryCalls": { "type": "integer", "minimum": 1, "maximum": 1000 },
+        "computedStyles": { "type": "integer", "minimum": 1, "maximum": 50000 },
+        "dom": { "type": "integer", "minimum": 1, "maximum": 50000 },
+        "interactive": { "type": "integer", "minimum": 1, "maximum": 5000 },
+        "providerEffects": { "type": "integer", "minimum": 1, "maximum": 5000 },
+        "providerLedger": { "type": "integer", "minimum": 1, "maximum": 5000 },
+        "requestSequence": { "type": "integer", "minimum": 1, "maximum": 10000 },
+        "serverActions": { "type": "integer", "minimum": 1, "maximum": 200 },
+        "storage": { "type": "integer", "minimum": 1, "maximum": 2000 }
+      }
+    },
+    "evidenceRanges": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "accessibility",
+        "boundaryCalls",
+        "computedStyles",
+        "dom",
+        "interactive",
+        "providerEffects",
+        "providerLedger",
+        "requestSequence",
+        "serverActions",
+        "storage"
+      ],
+      "properties": {
+        "accessibility": { "$ref": "#/$defs/evidenceRange" },
+        "boundaryCalls": { "$ref": "#/$defs/evidenceRange" },
+        "computedStyles": { "$ref": "#/$defs/evidenceRange" },
+        "dom": { "$ref": "#/$defs/evidenceRange" },
+        "interactive": { "$ref": "#/$defs/evidenceRange" },
+        "providerEffects": { "$ref": "#/$defs/evidenceRange" },
+        "providerLedger": { "$ref": "#/$defs/evidenceRange" },
+        "requestSequence": { "$ref": "#/$defs/evidenceRange" },
+        "serverActions": { "$ref": "#/$defs/evidenceRange" },
+        "storage": { "$ref": "#/$defs/evidenceRange" }
+      }
+    },
+    "evidenceRange": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["firstHmacSha256", "lastHmacSha256"],
+      "properties": {
+        "firstHmacSha256": { "$ref": "#/$defs/sha256" },
+        "lastHmacSha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "recreationCausality": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "postClearLoginCount",
+        "postClearCabinetNavigationCount",
+        "negativeLoginSetUserCount",
+        "negativeLoginConversationCookieAbsent",
+        "negativeLoginUserCookieAbsent",
+        "firstCabinetSetUserBeforeConversationCookiePresent",
+        "firstCabinetSetUserBeforeUserCookieAbsent",
+        "cabinetIdentityConfirmedObservedAfterSetUser",
+        "cabinetIdentityConfirmedConversationCookiePresent",
+        "cabinetIdentityConfirmedUserCookiePresent",
+        "cabinetConversationCookieObservedAfterSetUser",
+        "cabinetUserCookieObservedAfterSetUser",
+        "finalCookiePairPresent",
+        "postClearSetUserCount",
+        "cabinetSetUserCount",
+        "cabinetIdentityConfirmedCount",
+        "eventOrdinals"
+      ],
+      "properties": {
+        "postClearLoginCount": { "const": 1 },
+        "postClearCabinetNavigationCount": { "const": 1 },
+        "negativeLoginSetUserCount": { "const": 0 },
+        "negativeLoginConversationCookieAbsent": { "const": true },
+        "negativeLoginUserCookieAbsent": { "const": true },
+        "firstCabinetSetUserBeforeConversationCookiePresent": { "type": "boolean" },
+        "firstCabinetSetUserBeforeUserCookieAbsent": { "const": true },
+        "cabinetIdentityConfirmedObservedAfterSetUser": { "const": true },
+        "cabinetIdentityConfirmedConversationCookiePresent": { "const": true },
+        "cabinetIdentityConfirmedUserCookiePresent": { "const": true },
+        "cabinetConversationCookieObservedAfterSetUser": { "const": true },
+        "cabinetUserCookieObservedAfterSetUser": { "const": true },
+        "finalCookiePairPresent": { "const": true },
+        "postClearSetUserCount": { "$ref": "#/$defs/positiveInteger" },
+        "cabinetSetUserCount": { "const": 1 },
+        "cabinetIdentityConfirmedCount": { "const": 1 },
+        "eventOrdinals": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "clearVerified",
+            "loginDocumentReached",
+            "negativeLoginCheckpoint",
+            "cabinetDocumentReached",
+            "cabinetSetUserObserved",
+            "cabinetIdentityConfirmedObserved",
+            "cabinetCookiePairObserved",
+            "cabinetCompleted",
+            "finalCookiePairObserved"
+          ],
+          "properties": {
+            "clearVerified": { "$ref": "#/$defs/positiveInteger" },
+            "loginDocumentReached": { "$ref": "#/$defs/positiveInteger" },
+            "negativeLoginCheckpoint": { "$ref": "#/$defs/positiveInteger" },
+            "cabinetDocumentReached": { "$ref": "#/$defs/positiveInteger" },
+            "cabinetSetUserObserved": { "$ref": "#/$defs/positiveInteger" },
+            "cabinetIdentityConfirmedObserved": { "$ref": "#/$defs/positiveInteger" },
+            "cabinetCookiePairObserved": { "$ref": "#/$defs/positiveInteger" },
+            "cabinetCompleted": { "$ref": "#/$defs/positiveInteger" },
+            "finalCookiePairObserved": { "$ref": "#/$defs/positiveInteger" }
+          }
+        }
+      }
+    },
+    "phaseHashes": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "accessibilityHmacSha256",
+        "boundaryCallsHmacSha256",
+        "computedStylesHmacSha256",
+        "conversationHmacSha256",
+        "cookieDescriptorHmacSha256",
+        "cookieJarHmacSha256",
+        "domHmacSha256",
+        "interactiveHmacSha256",
+        "providerEffectsHmacSha256",
+        "providerLedgerHmacSha256",
+        "requestSequenceHmacSha256",
+        "serverActionsHmacSha256",
+        "storageHmacSha256",
+        "userCookieHmacSha256"
+      ],
+      "properties": {
+        "accessibilityHmacSha256": { "$ref": "#/$defs/sha256" },
+        "boundaryCallsHmacSha256": { "$ref": "#/$defs/sha256" },
+        "computedStylesHmacSha256": { "$ref": "#/$defs/sha256" },
+        "conversationHmacSha256": { "$ref": "#/$defs/sha256" },
+        "cookieDescriptorHmacSha256": { "$ref": "#/$defs/sha256" },
+        "cookieJarHmacSha256": { "$ref": "#/$defs/sha256" },
+        "domHmacSha256": { "$ref": "#/$defs/sha256" },
+        "interactiveHmacSha256": { "$ref": "#/$defs/sha256" },
+        "providerEffectsHmacSha256": { "$ref": "#/$defs/sha256" },
+        "providerLedgerHmacSha256": { "$ref": "#/$defs/sha256" },
+        "requestSequenceHmacSha256": { "$ref": "#/$defs/sha256" },
+        "serverActionsHmacSha256": { "$ref": "#/$defs/sha256" },
+        "storageHmacSha256": { "$ref": "#/$defs/sha256" },
+        "userCookieHmacSha256": {
+          "oneOf": [
+            { "$ref": "#/$defs/sha256" },
+            { "type": "null" }
+          ]
+        }
+      }
+    },
+    "screenshot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["byteLength", "sha256"],
+      "properties": {
+        "byteLength": { "type": "integer", "minimum": 1, "maximum": 5242880 },
+        "sha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "connectProxy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "authorityLedgerCount",
+        "authorityLedgerSha256",
+        "bindingSha256",
+        "counters",
+        "listenSha256",
+        "targetSha256"
+      ],
+      "properties": {
+        "authorityLedgerCount": { "const": 4 },
+        "authorityLedgerSha256": { "$ref": "#/$defs/sha256" },
+        "bindingSha256": { "$ref": "#/$defs/sha256" },
+        "counters": { "$ref": "#/$defs/connectProxyCounters" },
+        "listenSha256": { "$ref": "#/$defs/sha256" },
+        "targetSha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "connectProxyCounters": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "accepted",
+        "rejected",
+        "upstreamAttempts",
+        "upstreamConnected",
+        "upstreamFailures"
+      ],
+      "properties": {
+        "accepted": { "const": 4 },
+        "rejected": { "const": 0 },
+        "upstreamAttempts": { "const": 4 },
+        "upstreamConnected": { "const": 4 },
+        "upstreamFailures": { "const": 0 }
+      }
+    },
+    "cleanup": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "role",
+        "projectSha256",
+        "generatedEnvironmentDirectorySha256"
+      ],
+      "properties": {
+        "status": { "const": "verifier-owned-stack-cleaned" },
+        "role": { "enum": ["baseline", "candidate"] },
+        "projectSha256": { "$ref": "#/$defs/sha256" },
+        "generatedEnvironmentDirectorySha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "pairCleanup": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "stacks"],
+      "properties": {
+        "status": { "const": "verifier-owned-stack-pair-cleaned" },
+        "stacks": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 2,
+          "items": [
+            {
+              "allOf": [
+                { "$ref": "#/$defs/cleanup" },
+                { "properties": { "role": { "const": "baseline" } } }
+              ]
+            },
+            {
+              "allOf": [
+                { "$ref": "#/$defs/cleanup" },
+                { "properties": { "role": { "const": "candidate" } } }
+              ]
+            }
+          ],
+          "additionalItems": false
+        }
+      }
+    },
+    "screenshotQuorum": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "selectedSha256",
+        "selectedByteLength",
+        "agreeingPairIndexes",
+        "dissentingPairIndexes",
+        "rawArtifactCount"
+      ],
+      "properties": {
+        "selectedSha256": { "$ref": "#/$defs/sha256" },
+        "selectedByteLength": { "type": "integer", "minimum": 1, "maximum": 5242880 },
+        "agreeingPairIndexes": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 3,
+          "uniqueItems": true,
+          "items": { "type": "integer", "minimum": 1, "maximum": 3 }
+        },
+        "dissentingPairIndexes": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 1,
+          "uniqueItems": true,
+          "items": { "type": "integer", "minimum": 1, "maximum": 3 }
+        },
+        "rawArtifactCount": { "const": 3 }
+      }
+    },
+    "crossImageScreenshotQuorum": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["baseline", "candidate", "crossImageByteExact"],
+      "properties": {
+        "baseline": { "$ref": "#/$defs/screenshotQuorum" },
+        "candidate": { "$ref": "#/$defs/screenshotQuorum" },
+        "crossImageByteExact": { "const": true }
+      }
+    },
+    "comparison": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "distinctComposeProjects",
+        "distinctRuntimeBindings",
+        "distinctApplicationImages",
+        "distinctSourceRevisions",
+        "sameBaselineImageAcrossPairs",
+        "sameCandidateImageAcrossPairs",
+        "samePublicBuildContract",
+        "sameFixtureContract",
+        "sameSyntheticEnvironmentPolicy",
+        "sameScenarioAndSeed",
+        "sameBrowserPolicy",
+        "sameProofHmacScope",
+        "allPhaseSemanticsExact",
+        "allCanonicalPhaseEvidenceExact",
+        "allScreenshotsCrossImageByteExact",
+        "baselineImageDigest",
+        "candidateImageDigest"
+      ],
+      "properties": {
+        "status": { "const": "proven" },
+        "distinctComposeProjects": { "const": true },
+        "distinctRuntimeBindings": { "const": true },
+        "distinctApplicationImages": { "const": true },
+        "distinctSourceRevisions": { "const": true },
+        "sameBaselineImageAcrossPairs": { "const": true },
+        "sameCandidateImageAcrossPairs": { "const": true },
+        "samePublicBuildContract": { "const": true },
+        "sameFixtureContract": { "const": true },
+        "sameSyntheticEnvironmentPolicy": { "const": true },
+        "sameScenarioAndSeed": { "const": true },
+        "sameBrowserPolicy": { "const": true },
+        "sameProofHmacScope": { "const": true },
+        "allPhaseSemanticsExact": { "const": true },
+        "allCanonicalPhaseEvidenceExact": { "const": true },
+        "allScreenshotsCrossImageByteExact": { "const": true },
+        "baselineImageDigest": { "$ref": "#/$defs/imageDigest" },
+        "candidateImageDigest": { "$ref": "#/$defs/imageDigest" }
+      }
+    }
+  }
+}
