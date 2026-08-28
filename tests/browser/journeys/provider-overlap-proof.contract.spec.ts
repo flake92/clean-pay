@@ -9,6 +9,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 
 import { chromium, expect, test } from "@playwright/test";
+import Ajv from "ajv";
 
 import {
   PROVIDER_OVERLAP_BROWSER_PROJECT,
@@ -18,6 +19,9 @@ import {
   assertJourneyStackContract,
   assertLoopbackControlUrl,
   assertLoopbackResolver,
+  assertProviderOverlapClassicImageDescriptor,
+  assertProviderOverlapContainerdImageDescriptorChain,
+  assertProviderOverlapImagePlatformParity,
   createDualProviderOverlapProof,
   createProviderOverlapStackReport,
   extractProviderOverlapProof,
@@ -409,6 +413,37 @@ test("rejects dual-image identity, fixture, browser, and semantic comparison nea
   }
 });
 
+test("requires one normalized application image selection mode across the full proof", () => {
+  const containerd = dualProof(
+    useContainerdApplicationImage(
+      stackReport("baseline", extractedOverlap("offers-first")),
+    ),
+    useContainerdApplicationImage(
+      stackReport("candidate", extractedOverlap("devices-first")),
+    ),
+  );
+  expect(assertDualProviderOverlapProof(structuredClone(containerd))).toEqual(containerd);
+
+  expect(() => dualProof(
+    stackReport("baseline", extractedOverlap("offers-first")),
+    useContainerdApplicationImage(
+      stackReport("candidate", extractedOverlap("devices-first")),
+    ),
+  )).toThrow(/application image selection mode/);
+
+  const serializedMixed = dualProof(
+    stackReport("baseline", extractedOverlap("offers-first")),
+    stackReport("candidate", extractedOverlap("devices-first")),
+  );
+  serializedMixed.stacks.candidate.applicationImage = structuredClone(
+    containerd.stacks.candidate.applicationImage,
+  );
+  serializedMixed.stacks.candidate.runtimeBinding.applicationImageBindingContractSha256
+    = containerd.stacks.candidate.runtimeBinding.applicationImageBindingContractSha256;
+  expect(() => assertDualProviderOverlapProof(serializedMixed))
+    .toThrow(/application image selection mode/);
+});
+
 test("recomputes serialized cross-stack, lifecycle, and runtime invariants", () => {
   const exact = dualProof(
     stackReport("baseline", extractedOverlap("offers-first")),
@@ -710,6 +745,93 @@ test("binds contracts to exact loopback endpoints and rejects adjacent inputs", 
   expect(() => assertJourneyStackContract(adjacentContract, "near-miss")).toThrow();
 });
 
+test("validates classic Descriptor identity and the complete containerd descriptor chain", () => {
+  const rootDigest = `sha256:${"1".repeat(64)}`;
+  const manifestDigest = `sha256:${"2".repeat(64)}`;
+  const platform = { architecture: "arm64", os: "linux" };
+  const selectedPlatform = { ...platform, variant: "v8" };
+  const classicDescriptor = {
+    digest: rootDigest,
+    mediaType: "application/vnd.oci.image.index.v1+json",
+    size: 1_024,
+  };
+  expect(assertProviderOverlapClassicImageDescriptor(
+    classicDescriptor,
+    rootDigest,
+    "classic",
+  )).toBe(classicDescriptor);
+  expect(() => assertProviderOverlapClassicImageDescriptor(
+    { ...classicDescriptor, digest: manifestDigest },
+    rootDigest,
+    "classic",
+  )).toThrow(/Descriptor digest/);
+
+  const selectedManifest = {
+    digest: manifestDigest,
+    mediaType: "application/vnd.oci.image.manifest.v1+json",
+    platform: selectedPlatform,
+    size: 2_048,
+  };
+  expect(assertProviderOverlapContainerdImageDescriptorChain(
+    classicDescriptor,
+    selectedManifest,
+    rootDigest,
+    manifestDigest,
+    platform,
+    "multi-platform",
+  )).toEqual({
+    manifestDescriptor: selectedManifest,
+    rootDescriptor: classicDescriptor,
+  });
+
+  const singleManifestRoot = {
+    digest: manifestDigest,
+    mediaType: "application/vnd.oci.image.manifest.v1+json",
+    size: 2_048,
+  };
+  expect(() => assertProviderOverlapContainerdImageDescriptorChain(
+    singleManifestRoot,
+    selectedManifest,
+    manifestDigest,
+    manifestDigest,
+    platform,
+    "single-manifest",
+  )).not.toThrow();
+  expect(() => assertProviderOverlapContainerdImageDescriptorChain(
+    { ...singleManifestRoot, digest: rootDigest },
+    selectedManifest,
+    rootDigest,
+    manifestDigest,
+    platform,
+    "single-manifest",
+  )).toThrow(/single-manifest OCI root differs/);
+  expect(() => assertProviderOverlapContainerdImageDescriptorChain(
+    classicDescriptor,
+    selectedManifest,
+    rootDigest,
+    manifestDigest,
+    { architecture: "amd64", os: "linux" },
+    "wrong-platform",
+  )).toThrow(/selected platform manifest platform/);
+  expect(() => assertProviderOverlapContainerdImageDescriptorChain(
+    classicDescriptor,
+    { ...selectedManifest, platform: { ...platform, variant: "v9" } },
+    rootDigest,
+    manifestDigest,
+    platform,
+    "wrong-variant",
+  )).toThrow(/variant/);
+});
+
+test("requires one attested linux platform across both provider proof images", () => {
+  const arm64 = { architecture: "arm64", os: "linux" };
+  expect(assertProviderOverlapImagePlatformParity(arm64, { ...arm64 })).toBe(arm64);
+  expect(() => assertProviderOverlapImagePlatformParity(
+    { architecture: "amd64", os: "linux" },
+    arm64,
+  )).toThrow(/platform parity/);
+});
+
 test("binds exact running image labels and a pristine deterministic reset", () => {
   const contract = stackContract("baseline");
   assertJourneyStackContract(contract, "baseline");
@@ -734,6 +856,21 @@ test("binds exact running image labels and a pristine deterministic reset", () =
     },
     "baseline",
   )).toEqual(imageIdentity);
+  const containerdIdentity = {
+    ...imageIdentity,
+    imageSelectionMode: "containerd-root-manifest",
+    runtimeImageDigest: imageIdentity.assetImageDigest,
+  };
+  expect(assertApplicationImageIdentity(
+    containerdIdentity,
+    contract,
+    {
+      assetImageDigest: imageIdentity.assetImageDigest,
+      configDigest: imageIdentity.configDigest,
+      manifestDigest: imageIdentity.manifestDigest,
+    },
+    "containerd",
+  )).toEqual(containerdIdentity);
   for (const mutate of [
     (value: typeof imageIdentity) => { value.runtimeImageDigest = value.assetImageDigest; },
     (value: typeof imageIdentity) => { value.revision = candidateRevision; },
@@ -1857,6 +1994,93 @@ test("keeps the schema write-once sidecar-only and free of comparison projection
     "runtimeBinding",
     "connectProxyCounters",
   ]));
+  expect(schema.$defs.stack.properties.applicationImage)
+    .toEqual({ $ref: "#/$defs/applicationImage" });
+  expect(schema.$defs.applicationImage.oneOf).toEqual([
+    { $ref: "#/$defs/applicationImageClassic" },
+    { $ref: "#/$defs/applicationImageContainerd" },
+  ]);
+  expect(schema.$defs.applicationImageClassic.required).toEqual([
+    "assetImageDigest",
+    "configDigest",
+    "manifestDigest",
+    "publicBuildContract",
+    "referenceSha256",
+    "repoDigestContractSha256",
+    "revision",
+    "role",
+    "runtimeImageDigest",
+  ]);
+  expect(Object.hasOwn(
+    schema.$defs.applicationImageClassic.properties,
+    "imageSelectionMode",
+  )).toBe(false);
+  expect(schema.$defs.applicationImageContainerd.required)
+    .toEqual(expect.arrayContaining(["imageSelectionMode"]));
+  expect(schema.$defs.applicationImageContainerd.properties.imageSelectionMode)
+    .toEqual({ const: "containerd-root-manifest" });
+  expect(schema.properties.stacks.allOf[0].oneOf).toHaveLength(2);
+
+  const imageSelectionSchema = {
+    type: "object",
+    additionalProperties: false,
+    required: ["baseline", "candidate"],
+    properties: {
+      baseline: {
+        type: "object",
+        required: ["applicationImage"],
+        properties: {
+          applicationImage: { $ref: "#/$defs/applicationImage" },
+        },
+      },
+      candidate: {
+        type: "object",
+        required: ["applicationImage"],
+        properties: {
+          applicationImage: { $ref: "#/$defs/applicationImage" },
+        },
+      },
+    },
+    allOf: structuredClone(schema.properties.stacks.allOf),
+    $defs: {
+      sha256: structuredClone(schema.$defs.sha256),
+      imageDigest: structuredClone(schema.$defs.imageDigest),
+      applicationImage: structuredClone(schema.$defs.applicationImage),
+      applicationImageClassic: structuredClone(schema.$defs.applicationImageClassic),
+      applicationImageContainerd: structuredClone(schema.$defs.applicationImageContainerd),
+    },
+  };
+  const validate = new Ajv({
+    allErrors: true,
+    schemaId: "auto",
+    validateSchema: false,
+  }).compile(imageSelectionSchema);
+  const classicSchemaProof = dualProof(
+    stackReport("baseline", extractedOverlap("offers-first")),
+    stackReport("candidate", extractedOverlap("devices-first")),
+  );
+  const containerdSchemaProof = dualProof(
+    useContainerdApplicationImage(
+      stackReport("baseline", extractedOverlap("offers-first")),
+    ),
+    useContainerdApplicationImage(
+      stackReport("candidate", extractedOverlap("devices-first")),
+    ),
+  );
+  expect(validate(classicSchemaProof.stacks), JSON.stringify(validate.errors)).toBe(true);
+  expect(validate(containerdSchemaProof.stacks), JSON.stringify(validate.errors)).toBe(true);
+
+  const mixedSchemaProof = structuredClone(classicSchemaProof);
+  mixedSchemaProof.stacks.candidate.applicationImage = structuredClone(
+    containerdSchemaProof.stacks.candidate.applicationImage,
+  );
+  expect(validate(mixedSchemaProof.stacks)).toBe(false);
+
+  const malformedModeProof = structuredClone(classicSchemaProof);
+  Object.assign(malformedModeProof.stacks.candidate.applicationImage, {
+    imageSelectionMode: "classic-config",
+  });
+  expect(validate(malformedModeProof.stacks)).toBe(false);
   expect(schema.$defs.navigation.properties).toMatchObject({
     finalUrl: { const: "https://pay.ci.clean-pay.dev/cabinet" },
     requestCount: { type: "integer", minimum: 18, maximum: 256 },
@@ -1972,6 +2196,9 @@ test("keeps the schema write-once sidecar-only and free of comparison projection
   expect(scriptSource).toContain('redirect: "error"');
   expect(scriptSource).toContain('"container", "inspect"');
   expect(scriptSource).toContain('"image", "inspect"');
+  expect(scriptSource).toContain("Dual provider proof application image selection modes differ.");
+  expect(scriptSource).toContain("expectedImagePlatform: input.expectedPlatform");
+  expect(scriptSource).not.toContain('value.platform.architecture !== "amd64"');
   expect(scriptSource.indexOf("try {")).toBeLessThan(scriptSource.indexOf("parseArguments(process.argv.slice(2))"));
   const dualPreflight = scriptSource.indexOf("assertDualPreflight(baselinePreflight, candidatePreflight);");
   const proxyReadiness = scriptSource.indexOf("await startBothConnectProxies");
@@ -2393,6 +2620,25 @@ function stackReport(role: "baseline" | "candidate", providerOverlap: ReturnType
     },
     providerOverlap,
   };
+}
+
+function useContainerdApplicationImage(report: ReturnType<typeof stackReport>) {
+  const image = report.applicationImage as typeof report.applicationImage & {
+    imageSelectionMode?: "containerd-root-manifest";
+  };
+  image.imageSelectionMode = "containerd-root-manifest";
+  image.runtimeImageDigest = image.assetImageDigest;
+  report.runtimeBinding.applicationImageBindingContractSha256 = sha256(JSON.stringify({
+    assetImageDigest: image.assetImageDigest,
+    configDigest: image.configDigest,
+    imageSelectionMode: "containerd-root-manifest",
+    manifestDigest: image.manifestDigest,
+    referenceSha256: image.referenceSha256,
+    repoDigests: [image.assetImageDigest, image.manifestDigest].sort(),
+    role: "application",
+    runtimeImageDigest: image.runtimeImageDigest,
+  }));
+  return report;
 }
 
 function createStackReportThroughFactory(

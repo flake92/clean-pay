@@ -28,6 +28,7 @@ import {
   writeRawChatwootPhaseScreenshot,
 } from "./chatwoot-phase-evidence-writer.mjs";
 import {
+  CHATWOOT_PHASE_PROOF_PAIR_COUNT,
   CHATWOOT_PHASE_PROOF_SCENARIO,
   assertChatwootDeterministicReset,
   assertChatwootJourneyContract,
@@ -56,6 +57,7 @@ const eventContract = Object.freeze([
 ]);
 const sha256Pattern = /^[a-f0-9]{64}$/;
 const MAXIMUM_CONTROL_BYTES = 2 * 1024 * 1024;
+const containerdImageSelectionMode = "containerd-root-manifest";
 
 export async function orchestrateChatwootPhaseProof({
   input,
@@ -163,6 +165,24 @@ export async function preflightChatwootOutputDirectoryForTest(
 
 export async function recheckChatwootOutputDirectoryForTest(receipt) {
   return recheckChatwootOutputPreflight(receipt);
+}
+
+export function assertChatwootImagePlatformParityForTest(platforms) {
+  if (!Array.isArray(platforms)
+    || platforms.length !== CHATWOOT_PHASE_PROOF_PAIR_COUNT * roles.length) {
+    throw new Error("Chatwoot image platform ledger is incomplete.");
+  }
+  const normalized = platforms.map((value) => {
+    if (!value || typeof value !== "object" || Array.isArray(value)
+      || stableJson(Object.keys(value).sort()) !== stableJson(["architecture", "os"])
+      || value.os !== "linux"
+      || !new Set(["amd64", "arm64"]).has(value.architecture)) {
+      throw new Error("Chatwoot image platform ledger is invalid.");
+    }
+    return Object.freeze({ architecture: value.architecture, os: value.os });
+  });
+  requireSame(normalized.map(stableJson), "image platform");
+  return normalized[0];
 }
 
 async function preflightChatwootOutputDirectory({
@@ -386,6 +406,9 @@ async function executeOwnedPair({
       applicationImage: Object.freeze({
         assetImageDigest: pair[role].imageDigest,
         configDigest: pair[role].expectedApplicationImageConfigDigest,
+        ...(value.bound[role].runtimeAttestation.imageSelectionMode === undefined ? {} : {
+          imageSelectionMode: value.bound[role].runtimeAttestation.imageSelectionMode,
+        }),
         manifestDigest: pair[role].staticAssetContract.providerContract.manifestDigest,
         publicBuildContract: Object.freeze({ ...pair[role].contract.publicBuildContract }),
         referenceSha256: sha256(pair[role].contract.images.application),
@@ -395,16 +418,30 @@ async function executeOwnedPair({
         role: "app",
         runtimeImageDigest: value.bound[role].runtimeAttestation.applicationRuntimeImageDigest,
       }),
-      migrationImage: Object.freeze({
-        assetImageDigest: pair[role].migrationImageDigest,
-        bindingContractSha256:
-          value.bound[role].runtimeBinding.migrationImageBindingContractSha256,
-        configDigest: value.bound[role].runtimeAttestation.migrationRuntimeImageDigest,
-        referenceSha256: sha256(pair[role].contract.images.migration),
-        revision: pair[role].contract.revision,
-        role: "migration",
-        runtimeImageDigest: value.bound[role].runtimeAttestation.migrationRuntimeImageDigest,
-      }),
+      migrationImage: Object.freeze(
+        value.bound[role].runtimeAttestation.imageSelectionMode === containerdImageSelectionMode
+          ? {
+            assetImageDigest: pair[role].migrationImageDigest,
+            bindingContractSha256:
+              value.bound[role].runtimeBinding.migrationImageBindingContractSha256,
+            imageSelectionMode: value.bound[role].runtimeAttestation.imageSelectionMode,
+            manifestDigest: value.bound[role].runtimeAttestation.migrationManifestDigest,
+            referenceSha256: sha256(pair[role].contract.images.migration),
+            revision: pair[role].contract.revision,
+            role: "migration",
+            runtimeImageDigest: value.bound[role].runtimeAttestation.migrationRuntimeImageDigest,
+          }
+          : {
+            assetImageDigest: pair[role].migrationImageDigest,
+            bindingContractSha256:
+              value.bound[role].runtimeBinding.migrationImageBindingContractSha256,
+            configDigest: value.bound[role].runtimeAttestation.migrationRuntimeImageDigest,
+            referenceSha256: sha256(pair[role].contract.images.migration),
+            revision: pair[role].contract.revision,
+            role: "migration",
+            runtimeImageDigest: value.bound[role].runtimeAttestation.migrationRuntimeImageDigest,
+          },
+      ),
       fixtureContract: Object.freeze({
         version: "journey-v5",
         sha256: pair[role].contract.fixtureContract.sha256,
@@ -453,7 +490,13 @@ function bindOwnedRuntime(stack, owned) {
     throw new Error(`${stack.role} owned runtime status is invalid.`);
   }
   const receipt = owned.inputReceipt;
-  exactKeys(receipt, [
+  const receiptMode = receipt?.imageSelectionMode === undefined
+    ? "classic-config"
+    : receipt.imageSelectionMode;
+  if (!new Set(["classic-config", containerdImageSelectionMode]).has(receiptMode)) {
+    throw new Error(`${stack.role} owned input receipt image selection mode is invalid.`);
+  }
+  const sharedReceiptKeys = [
     "applicationImageBindingContractSha256",
     "applicationImageConfigDigest",
     "composeSourceSha256",
@@ -464,18 +507,37 @@ function bindOwnedRuntime(stack, owned) {
     "globalFixtureContractSha256",
     "imageProbeOwnershipContractSha256",
     "migrationImageBindingContractSha256",
-    "migrationImageConfigDigest",
     "projectSha256",
     "renderedComposeSha256",
     "roleEnvironmentContractSha256",
     "roleEnvironmentPolicySha256",
-  ], `${stack.role} owned input receipt`);
+  ];
+  exactKeys(receipt, receiptMode === "classic-config"
+    ? [...sharedReceiptKeys, "migrationImageConfigDigest"]
+    : [
+      ...sharedReceiptKeys,
+      "applicationImageManifestDigest",
+      "applicationImageRuntimeDigest",
+      "imageSelectionMode",
+      "migrationImageManifestDigest",
+      "migrationImageRuntimeDigest",
+    ], `${stack.role} owned input receipt`);
   for (const [name, value] of Object.entries(receipt)) {
-    if (name.endsWith("ConfigDigest")) assertImageDigest(value, `${stack.role} receipt ${name}`);
+    if (name === "imageSelectionMode") {
+      if (value !== containerdImageSelectionMode) {
+        throw new Error(`${stack.role} receipt image selection mode is invalid.`);
+      }
+    } else if (name.endsWith("ConfigDigest")
+      || name.endsWith("RuntimeDigest") || name.endsWith("ManifestDigest")) {
+      assertImageDigest(value, `${stack.role} receipt ${name}`);
+    }
     else assertSha256(value, `${stack.role} receipt ${name}`);
   }
   const runtime = owned.runtime;
-  exactKeys(runtime, [
+  const runtimeMode = runtime?.imageSelectionMode === undefined
+    ? "classic-config"
+    : runtime.imageSelectionMode;
+  const sharedRuntimeKeys = [
     "applicationImageBindingContractSha256",
     "applicationRepoDigestContractSha256",
     "applicationRuntimeImageDigest",
@@ -491,11 +553,41 @@ function bindOwnedRuntime(stack, owned) {
     "serviceIdentitySha256",
     "syntheticRoleEnvironmentContractSha256",
     "syntheticRoleEnvironmentPolicySha256",
-  ], `${stack.role} owned runtime attestation`);
+  ];
+  exactKeys(runtime, runtimeMode === "classic-config"
+    ? sharedRuntimeKeys
+    : [
+      ...sharedRuntimeKeys,
+      "applicationManifestDigest",
+      "imageSelectionMode",
+      "migrationManifestDigest",
+    ], `${stack.role} owned runtime attestation`);
   for (const [name, value] of Object.entries(runtime)) {
-    if (name.endsWith("ImageDigest")) assertImageDigest(value, `${stack.role} runtime ${name}`);
+    if (name === "imageSelectionMode") {
+      if (value !== containerdImageSelectionMode) {
+        throw new Error(`${stack.role} runtime image selection mode is invalid.`);
+      }
+    } else if (name.endsWith("ImageDigest") || name.endsWith("ManifestDigest")) {
+      assertImageDigest(value, `${stack.role} runtime ${name}`);
+    }
     else assertSha256(value, `${stack.role} runtime ${name}`);
   }
+  if (receiptMode !== runtimeMode) {
+    throw new Error(`${stack.role} receipt and runtime image selection modes differ.`);
+  }
+  const imageSelectionMatches = receiptMode === "classic-config"
+    ? receipt.applicationImageConfigDigest === runtime.applicationRuntimeImageDigest
+      && receipt.migrationImageConfigDigest === runtime.migrationRuntimeImageDigest
+    : receipt.applicationImageRuntimeDigest === runtime.applicationRuntimeImageDigest
+      && receipt.applicationImageManifestDigest === runtime.applicationManifestDigest
+      && receipt.migrationImageRuntimeDigest === runtime.migrationRuntimeImageDigest
+      && receipt.migrationImageManifestDigest === runtime.migrationManifestDigest
+      && receipt.applicationImageConfigDigest
+        === stack.staticAssetContract.providerContract.configDigest
+      && receipt.applicationImageRuntimeDigest === stack.imageDigest
+      && receipt.applicationImageManifestDigest
+        === stack.staticAssetContract.providerContract.manifestDigest
+      && receipt.migrationImageRuntimeDigest === stack.migrationImageDigest;
   if (
     receipt.projectSha256 !== sha256(stack.contract.project)
     || receipt.composeSourceSha256 !== runtime.composeSourceSha256
@@ -511,8 +603,7 @@ function bindOwnedRuntime(stack, owned) {
       !== runtime.syntheticRoleEnvironmentContractSha256
     || receipt.roleEnvironmentPolicySha256
       !== runtime.syntheticRoleEnvironmentPolicySha256
-    || receipt.applicationImageConfigDigest !== runtime.applicationRuntimeImageDigest
-    || receipt.migrationImageConfigDigest !== runtime.migrationRuntimeImageDigest
+    || !imageSelectionMatches
     || receipt.applicationImageBindingContractSha256
       !== runtime.applicationImageBindingContractSha256
     || receipt.migrationImageBindingContractSha256
@@ -579,6 +670,10 @@ export function bindChatwootOwnedRuntimeForTest(stack, owned) {
 }
 
 function assertDualRuntime(baseline, candidate) {
+  if ((baseline.inputReceipt.imageSelectionMode ?? "classic-config")
+    !== (candidate.inputReceipt.imageSelectionMode ?? "classic-config")) {
+    throw new Error("Chatwoot dual runtime image selection modes differ across images.");
+  }
   for (const name of [
     "projectSha256",
     "networkSha256",
@@ -654,6 +749,9 @@ async function loadCompleteLaunchPlan({ exactInput, fixtureContractSha256, repos
   requireUnique(stacks.map((stack) => stack.resolverIp), "Chatwoot resolver addresses");
   requireSame(stacks.map((stack) => stack.contract.fixtureContract.sha256), "fixture contract");
   requireSame(stacks.map((stack) => stableJson(stack.contract.publicBuildContract)), "public build");
+  assertChatwootImagePlatformParityForTest(
+    stacks.map((stack) => stack.expectedImagePlatform),
+  );
   for (const role of roles) {
     const roleStacks = stacks.filter((stack) => stack.role === role);
     requireSame(roleStacks.map((stack) => stack.imageDigest), `${role} image digest`);
@@ -723,12 +821,13 @@ async function loadStackPlan({
     throw new Error(`${role} launch input differs from its exact journey contract.`);
   }
   const assetDocument = parseJson(assetBytes, `${role} asset attestation`);
+  const expectedImagePlatform = parseAssetPlatform(assetDocument);
   const assetAttestation = validateProductionImageAssetAttestation(
     assetDocument,
     {
       fixtureContract: { version: "journey-v5", sha256: fixtureContractSha256 },
       imageDigest: input.imageDigest,
-      platform: parseAssetPlatform(assetDocument),
+      platform: expectedImagePlatform,
       publicBuildContract: contract.publicBuildContract,
       revision: contract.revision,
     },
@@ -749,10 +848,12 @@ async function loadStackPlan({
     assetRealpath: assetFile.realpath,
     assetAttestationRealpathSha256: sha256(normalizePath(assetFile.realpath)),
     expectedApplicationImageConfigDigest: assetAttestation.source.configDigest,
+    expectedApplicationManifestDigest: assetAttestation.source.manifestDigest,
     expectedApplicationRepoDigests: Object.freeze([...new Set([
       assetAttestation.source.imageDigest,
       assetAttestation.source.manifestDigest,
     ])].sort()),
+    expectedImagePlatform: Object.freeze(expectedImagePlatform),
     journeyContractSha256: sha256(contractBytes),
     staticAssetContract: createChatwootPhaseStaticAssetContract(assetAttestation),
   });
@@ -779,7 +880,9 @@ function ownedStackInput(stack, repositoryRoot) {
     contract: stack.contract,
     expectedApplicationAssetImageDigest: stack.imageDigest,
     expectedApplicationImageConfigDigest: stack.expectedApplicationImageConfigDigest,
+    expectedApplicationManifestDigest: stack.expectedApplicationManifestDigest,
     expectedApplicationRepoDigests: stack.expectedApplicationRepoDigests,
+    expectedImagePlatform: stack.expectedImagePlatform,
     expectedMigrationAssetImageDigest: stack.migrationImageDigest,
     runDocker: (args, maximumBytes, environment) => runJourneyDockerCommand(
       args,

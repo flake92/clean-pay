@@ -28,7 +28,11 @@
         { "$ref": "#/$defs/pair2" },
         { "$ref": "#/$defs/pair3" }
       ],
-      "additionalItems": false
+      "additionalItems": false,
+      "oneOf": [
+        { "items": { "$ref": "#/$defs/pairClassicMode" } },
+        { "items": { "$ref": "#/$defs/pairContainerdMode" } }
+      ]
     },
     "quorum": {
       "type": "object",
@@ -217,6 +221,30 @@
         }
       }
     },
+    "pairClassicMode": {
+      "type": "object",
+      "properties": {
+        "stacks": {
+          "type": "object",
+          "properties": {
+            "baseline": { "$ref": "#/$defs/stackClassic" },
+            "candidate": { "$ref": "#/$defs/stackClassic" }
+          }
+        }
+      }
+    },
+    "pairContainerdMode": {
+      "type": "object",
+      "properties": {
+        "stacks": {
+          "type": "object",
+          "properties": {
+            "baseline": { "$ref": "#/$defs/stackContainerd" },
+            "candidate": { "$ref": "#/$defs/stackContainerd" }
+          }
+        }
+      }
+    },
     "pairExecution": {
       "type": "object",
       "additionalProperties": false,
@@ -398,6 +426,12 @@
       }
     },
     "stack": {
+      "oneOf": [
+        { "$ref": "#/$defs/stackClassic" },
+        { "$ref": "#/$defs/stackContainerd" }
+      ]
+    },
+    "stackClassic": {
       "type": "object",
       "additionalProperties": false,
       "required": [
@@ -423,12 +457,52 @@
         "pairIndex": { "type": "integer", "minimum": 1, "maximum": 3 },
         "proofHmacScopeSha256": { "$ref": "#/$defs/sha256" },
         "runScopeSha256": { "$ref": "#/$defs/sha256" },
-        "applicationImage": { "$ref": "#/$defs/applicationImage" },
-        "migrationImage": { "$ref": "#/$defs/migrationImage" },
+        "applicationImage": { "$ref": "#/$defs/applicationImageClassic" },
+        "migrationImage": { "$ref": "#/$defs/migrationImageClassic" },
         "fixtureContract": { "$ref": "#/$defs/fixtureContract" },
         "publicBuildContract": { "$ref": "#/$defs/publicBuildContract" },
-        "inputReceipt": { "$ref": "#/$defs/inputReceipt" },
-        "runtimeAttestation": { "$ref": "#/$defs/runtimeAttestation" },
+        "inputReceipt": { "$ref": "#/$defs/inputReceiptClassic" },
+        "runtimeAttestation": { "$ref": "#/$defs/runtimeAttestationClassic" },
+        "runtimeBinding": { "$ref": "#/$defs/runtimeBinding" },
+        "reset": { "$ref": "#/$defs/reset" },
+        "browser": { "$ref": "#/$defs/browser" },
+        "phases": { "$ref": "#/$defs/phases" },
+        "connectProxy": { "$ref": "#/$defs/connectProxy" },
+        "cleanup": { "$ref": "#/$defs/cleanup" }
+      }
+    },
+    "stackContainerd": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "role",
+        "pairIndex",
+        "proofHmacScopeSha256",
+        "runScopeSha256",
+        "applicationImage",
+        "migrationImage",
+        "fixtureContract",
+        "publicBuildContract",
+        "inputReceipt",
+        "runtimeAttestation",
+        "runtimeBinding",
+        "reset",
+        "browser",
+        "phases",
+        "connectProxy",
+        "cleanup"
+      ],
+      "properties": {
+        "role": { "enum": ["baseline", "candidate"] },
+        "pairIndex": { "type": "integer", "minimum": 1, "maximum": 3 },
+        "proofHmacScopeSha256": { "$ref": "#/$defs/sha256" },
+        "runScopeSha256": { "$ref": "#/$defs/sha256" },
+        "applicationImage": { "$ref": "#/$defs/applicationImageContainerd" },
+        "migrationImage": { "$ref": "#/$defs/migrationImageContainerd" },
+        "fixtureContract": { "$ref": "#/$defs/fixtureContract" },
+        "publicBuildContract": { "$ref": "#/$defs/publicBuildContract" },
+        "inputReceipt": { "$ref": "#/$defs/inputReceiptContainerd" },
+        "runtimeAttestation": { "$ref": "#/$defs/runtimeAttestationContainerd" },
         "runtimeBinding": { "$ref": "#/$defs/runtimeBinding" },
         "reset": { "$ref": "#/$defs/reset" },
         "browser": { "$ref": "#/$defs/browser" },
@@ -438,6 +512,12 @@
       }
     },
     "applicationImage": {
+      "oneOf": [
+        { "$ref": "#/$defs/applicationImageClassic" },
+        { "$ref": "#/$defs/applicationImageContainerd" }
+      ]
+    },
+    "applicationImageClassic": {
       "type": "object",
       "additionalProperties": false,
       "required": [
@@ -463,7 +543,41 @@
         "runtimeImageDigest": { "$ref": "#/$defs/imageDigest" }
       }
     },
+    "applicationImageContainerd": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "assetImageDigest",
+        "configDigest",
+        "imageSelectionMode",
+        "manifestDigest",
+        "publicBuildContract",
+        "referenceSha256",
+        "repoDigestContractSha256",
+        "revision",
+        "role",
+        "runtimeImageDigest"
+      ],
+      "properties": {
+        "assetImageDigest": { "$ref": "#/$defs/imageDigest" },
+        "configDigest": { "$ref": "#/$defs/imageDigest" },
+        "imageSelectionMode": { "const": "containerd-root-manifest" },
+        "manifestDigest": { "$ref": "#/$defs/imageDigest" },
+        "publicBuildContract": { "$ref": "#/$defs/publicBuildContract" },
+        "referenceSha256": { "$ref": "#/$defs/sha256" },
+        "repoDigestContractSha256": { "$ref": "#/$defs/sha256" },
+        "revision": { "type": "string", "pattern": "^[a-f0-9]{40}$" },
+        "role": { "const": "app" },
+        "runtimeImageDigest": { "$ref": "#/$defs/imageDigest" }
+      }
+    },
     "migrationImage": {
+      "oneOf": [
+        { "$ref": "#/$defs/migrationImageClassic" },
+        { "$ref": "#/$defs/migrationImageContainerd" }
+      ]
+    },
+    "migrationImageClassic": {
       "type": "object",
       "additionalProperties": false,
       "required": [
@@ -479,6 +593,30 @@
         "assetImageDigest": { "$ref": "#/$defs/imageDigest" },
         "bindingContractSha256": { "$ref": "#/$defs/sha256" },
         "configDigest": { "$ref": "#/$defs/imageDigest" },
+        "referenceSha256": { "$ref": "#/$defs/sha256" },
+        "revision": { "type": "string", "pattern": "^[a-f0-9]{40}$" },
+        "role": { "const": "migration" },
+        "runtimeImageDigest": { "$ref": "#/$defs/imageDigest" }
+      }
+    },
+    "migrationImageContainerd": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "assetImageDigest",
+        "bindingContractSha256",
+        "imageSelectionMode",
+        "manifestDigest",
+        "referenceSha256",
+        "revision",
+        "role",
+        "runtimeImageDigest"
+      ],
+      "properties": {
+        "assetImageDigest": { "$ref": "#/$defs/imageDigest" },
+        "bindingContractSha256": { "$ref": "#/$defs/sha256" },
+        "imageSelectionMode": { "const": "containerd-root-manifest" },
+        "manifestDigest": { "$ref": "#/$defs/imageDigest" },
         "referenceSha256": { "$ref": "#/$defs/sha256" },
         "revision": { "type": "string", "pattern": "^[a-f0-9]{40}$" },
         "role": { "const": "migration" },
@@ -504,6 +642,12 @@
       }
     },
     "inputReceipt": {
+      "oneOf": [
+        { "$ref": "#/$defs/inputReceiptClassic" },
+        { "$ref": "#/$defs/inputReceiptContainerd" }
+      ]
+    },
+    "inputReceiptClassic": {
       "type": "object",
       "additionalProperties": false,
       "required": [
@@ -541,7 +685,59 @@
         "roleEnvironmentPolicySha256": { "$ref": "#/$defs/sha256" }
       }
     },
+    "inputReceiptContainerd": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "applicationImageBindingContractSha256",
+        "applicationImageConfigDigest",
+        "applicationImageManifestDigest",
+        "applicationImageRuntimeDigest",
+        "composeSourceSha256",
+        "fixtureBindingContractSha256",
+        "fixtureMountSubsetContractSha256",
+        "fixtureSourceContractSha256",
+        "generatedEnvironmentDirectorySha256",
+        "globalFixtureContractSha256",
+        "imageProbeOwnershipContractSha256",
+        "imageSelectionMode",
+        "migrationImageBindingContractSha256",
+        "migrationImageManifestDigest",
+        "migrationImageRuntimeDigest",
+        "projectSha256",
+        "renderedComposeSha256",
+        "roleEnvironmentContractSha256",
+        "roleEnvironmentPolicySha256"
+      ],
+      "properties": {
+        "applicationImageBindingContractSha256": { "$ref": "#/$defs/sha256" },
+        "applicationImageConfigDigest": { "$ref": "#/$defs/imageDigest" },
+        "applicationImageManifestDigest": { "$ref": "#/$defs/imageDigest" },
+        "applicationImageRuntimeDigest": { "$ref": "#/$defs/imageDigest" },
+        "composeSourceSha256": { "$ref": "#/$defs/sha256" },
+        "fixtureBindingContractSha256": { "$ref": "#/$defs/sha256" },
+        "fixtureMountSubsetContractSha256": { "$ref": "#/$defs/sha256" },
+        "fixtureSourceContractSha256": { "$ref": "#/$defs/sha256" },
+        "generatedEnvironmentDirectorySha256": { "$ref": "#/$defs/sha256" },
+        "globalFixtureContractSha256": { "$ref": "#/$defs/sha256" },
+        "imageProbeOwnershipContractSha256": { "$ref": "#/$defs/sha256" },
+        "imageSelectionMode": { "const": "containerd-root-manifest" },
+        "migrationImageBindingContractSha256": { "$ref": "#/$defs/sha256" },
+        "migrationImageManifestDigest": { "$ref": "#/$defs/imageDigest" },
+        "migrationImageRuntimeDigest": { "$ref": "#/$defs/imageDigest" },
+        "projectSha256": { "$ref": "#/$defs/sha256" },
+        "renderedComposeSha256": { "$ref": "#/$defs/sha256" },
+        "roleEnvironmentContractSha256": { "$ref": "#/$defs/sha256" },
+        "roleEnvironmentPolicySha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
     "runtimeAttestation": {
+      "oneOf": [
+        { "$ref": "#/$defs/runtimeAttestationClassic" },
+        { "$ref": "#/$defs/runtimeAttestationContainerd" }
+      ]
+    },
+    "runtimeAttestationClassic": {
       "type": "object",
       "additionalProperties": false,
       "required": [
@@ -570,6 +766,50 @@
         "fixtureExecutionContractSha256": { "$ref": "#/$defs/sha256" },
         "fixtureMountContractSha256": { "$ref": "#/$defs/sha256" },
         "migrationImageBindingContractSha256": { "$ref": "#/$defs/sha256" },
+        "migrationRuntimeImageDigest": { "$ref": "#/$defs/imageDigest" },
+        "networkSha256": { "$ref": "#/$defs/sha256" },
+        "oneShotLifecycleContractSha256": { "$ref": "#/$defs/sha256" },
+        "renderedComposeSha256": { "$ref": "#/$defs/sha256" },
+        "serviceIdentitySha256": { "$ref": "#/$defs/sha256" },
+        "syntheticRoleEnvironmentContractSha256": { "$ref": "#/$defs/sha256" },
+        "syntheticRoleEnvironmentPolicySha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "runtimeAttestationContainerd": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "applicationImageBindingContractSha256",
+        "applicationManifestDigest",
+        "applicationRepoDigestContractSha256",
+        "applicationRuntimeImageDigest",
+        "composeRuntimeContractSha256",
+        "composeSourceSha256",
+        "fixtureExecutionContractSha256",
+        "fixtureMountContractSha256",
+        "imageSelectionMode",
+        "migrationImageBindingContractSha256",
+        "migrationManifestDigest",
+        "migrationRuntimeImageDigest",
+        "networkSha256",
+        "oneShotLifecycleContractSha256",
+        "renderedComposeSha256",
+        "serviceIdentitySha256",
+        "syntheticRoleEnvironmentContractSha256",
+        "syntheticRoleEnvironmentPolicySha256"
+      ],
+      "properties": {
+        "applicationImageBindingContractSha256": { "$ref": "#/$defs/sha256" },
+        "applicationManifestDigest": { "$ref": "#/$defs/imageDigest" },
+        "applicationRepoDigestContractSha256": { "$ref": "#/$defs/sha256" },
+        "applicationRuntimeImageDigest": { "$ref": "#/$defs/imageDigest" },
+        "composeRuntimeContractSha256": { "$ref": "#/$defs/sha256" },
+        "composeSourceSha256": { "$ref": "#/$defs/sha256" },
+        "fixtureExecutionContractSha256": { "$ref": "#/$defs/sha256" },
+        "fixtureMountContractSha256": { "$ref": "#/$defs/sha256" },
+        "imageSelectionMode": { "const": "containerd-root-manifest" },
+        "migrationImageBindingContractSha256": { "$ref": "#/$defs/sha256" },
+        "migrationManifestDigest": { "$ref": "#/$defs/imageDigest" },
         "migrationRuntimeImageDigest": { "$ref": "#/$defs/imageDigest" },
         "networkSha256": { "$ref": "#/$defs/sha256" },
         "oneShotLifecycleContractSha256": { "$ref": "#/$defs/sha256" },

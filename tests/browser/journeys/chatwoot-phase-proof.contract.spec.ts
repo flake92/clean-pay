@@ -83,6 +83,7 @@ import {
 } from "./chatwoot-phase-evidence-writer.mjs";
 import {
   assertChatwootOutputDirectoryDisjointForTest,
+  assertChatwootImagePlatformParityForTest,
   assertChatwootPairCleanupReceiptForTest,
   bindChatwootOwnedRuntimeForTest,
   createChatwootExecutionEvidenceForTest,
@@ -233,6 +234,91 @@ test("requires three independent A/B pairs and exact cross-image PNG quorums", (
     "browser-journey-contract.json",
     "C:\\",
   ]) expect(serialized).not.toContain(forbidden);
+});
+
+test("accepts the exact containerd root-manifest image identity union", () => {
+  const proof = createChatwootPhaseProof(containerdPairReports());
+  expect(proof.pairs[0].stacks.baseline).toMatchObject({
+    applicationImage: {
+      imageSelectionMode: "containerd-root-manifest",
+      runtimeImageDigest: `sha256:${"1".repeat(64)}`,
+    },
+    migrationImage: {
+      imageSelectionMode: "containerd-root-manifest",
+      runtimeImageDigest: `sha256:${"3".repeat(64)}`,
+    },
+    inputReceipt: { imageSelectionMode: "containerd-root-manifest" },
+    runtimeAttestation: { imageSelectionMode: "containerd-root-manifest" },
+  });
+  expect(proof.pairs[0].stacks.baseline.migrationImage).not.toHaveProperty("configDigest");
+  expect(proof.pairs[0].stacks.baseline.inputReceipt)
+    .not.toHaveProperty("migrationImageConfigDigest");
+  expect(assertChatwootPhaseProof(structuredClone(proof))).toEqual(proof);
+});
+
+test("requires one attested linux platform across all six Chatwoot A/B stacks", () => {
+  const arm64Platforms = Array.from(
+    { length: CHATWOOT_PHASE_PROOF_PAIR_COUNT * 2 },
+    () => ({ architecture: "arm64", os: "linux" }),
+  );
+  expect(assertChatwootImagePlatformParityForTest(arm64Platforms)).toEqual(
+    arm64Platforms[0],
+  );
+  const mixed = structuredClone(arm64Platforms);
+  mixed[1].architecture = "amd64";
+  expect(() => assertChatwootImagePlatformParityForTest(mixed))
+    .toThrow(/image platform differs/);
+});
+
+test("rejects containerd config masquerades, wrong manifests, and mixed selection modes", () => {
+  const rootNamedConfig = containerdPairReports();
+  Object.assign(rootNamedConfig[0].stacks.baseline.migrationImage, {
+    configDigest: rootNamedConfig[0].stacks.baseline.migrationImage.assetImageDigest,
+  });
+  expect(() => createChatwootPhaseProof(rootNamedConfig)).toThrow(/unexpected fields/);
+
+  const wrongManifest = containerdPairReports();
+  const wrongManifestStack = wrongManifest[0].stacks.baseline;
+  const forgedManifestDigest = `sha256:${"f".repeat(64)}`;
+  wrongManifestStack.applicationImage.manifestDigest = forgedManifestDigest;
+  wrongManifestStack.inputReceipt.applicationImageManifestDigest = forgedManifestDigest;
+  wrongManifestStack.runtimeAttestation.applicationManifestDigest = forgedManifestDigest;
+  const forgedBinding = sha256(JSON.stringify({
+    assetImageDigest: wrongManifestStack.applicationImage.assetImageDigest,
+    configDigest: wrongManifestStack.applicationImage.configDigest,
+    imageSelectionMode: "containerd-root-manifest",
+    manifestDigest: forgedManifestDigest,
+    referenceSha256: wrongManifestStack.applicationImage.referenceSha256,
+    repoDigests: [
+      wrongManifestStack.applicationImage.assetImageDigest,
+      forgedManifestDigest,
+    ].sort(),
+    role: "application",
+    runtimeImageDigest: wrongManifestStack.applicationImage.runtimeImageDigest,
+  }));
+  wrongManifestStack.inputReceipt.applicationImageBindingContractSha256 = forgedBinding;
+  wrongManifestStack.runtimeAttestation.applicationImageBindingContractSha256 = forgedBinding;
+  wrongManifestStack.runtimeBinding.applicationImageBindingContractSha256 = forgedBinding;
+  wrongManifestStack.runtimeBinding.ownedInputReceiptSha256 = sha256(JSON.stringify(
+    wrongManifestStack.inputReceipt,
+  ));
+  wrongManifest[0].execution = executionEvidence(
+    wrongManifest[0].pairIndex,
+    wrongManifest[0].stacks,
+    wrongManifest[0].cleanup,
+  );
+  expect(() => createChatwootPhaseProof(wrongManifest)).toThrow(/manifest image binding/);
+
+  const mixedMode = containerdPairReports();
+  const migration = mixedMode[0].stacks.baseline.migrationImage;
+  Reflect.deleteProperty(migration, "imageSelectionMode");
+  Reflect.deleteProperty(migration, "manifestDigest");
+  const classicConfigDigest = `sha256:${"d".repeat(64)}`;
+  Object.assign(migration, {
+    configDigest: classicConfigDigest,
+    runtimeImageDigest: classicConfigDigest,
+  });
+  expect(() => createChatwootPhaseProof(mixedMode)).toThrow(/selection mode/);
 });
 
 test("fails closed on phase, clearing, recreation, and browser near misses", () => {
@@ -750,6 +836,42 @@ test("rejects symmetric application and migration image identity conflation", ()
   );
 });
 
+test("rejects recomputed containerd application and migration identity overlap", () => {
+  const collisions: Array<[
+    string,
+    (stack: ContainerdStackReport) => void,
+  ]> = [
+    ["migration root aliases application config", (stack) => {
+      stack.migrationImage.assetImageDigest = stack.applicationImage.configDigest;
+      stack.migrationImage.runtimeImageDigest = stack.applicationImage.configDigest;
+    }],
+    ["migration root aliases application manifest", (stack) => {
+      stack.migrationImage.assetImageDigest = stack.applicationImage.manifestDigest;
+      stack.migrationImage.runtimeImageDigest = stack.applicationImage.manifestDigest;
+    }],
+    ["migration manifest aliases application root", (stack) => {
+      stack.migrationImage.manifestDigest = stack.applicationImage.assetImageDigest;
+    }],
+    ["migration manifest aliases application config", (stack) => {
+      stack.migrationImage.manifestDigest = stack.applicationImage.configDigest;
+    }],
+    ["migration manifest aliases application manifest", (stack) => {
+      stack.migrationImage.manifestDigest = stack.applicationImage.manifestDigest;
+    }],
+  ];
+  for (const [label, collide] of collisions) {
+    const overlapped = containerdPairReports();
+    const pair = overlapped[0];
+    const stack = pair.stacks.baseline;
+    collide(stack);
+    rebindContainerdMigrationImage(stack);
+    pair.execution = executionEvidence(pair.pairIndex, pair.stacks, pair.cleanup);
+    expect(() => createChatwootPhaseProof(overlapped), label).toThrow(
+      /application and migration containerd image identities overlap/,
+    );
+  }
+});
+
 test("accepts only the exact three-pair external input envelope", () => {
   const exact = inputDocument();
   expect(assertChatwootPhaseInput(exact)).toEqual(exact);
@@ -1201,6 +1323,7 @@ test("executes the committed owned-stack API and exact Chatwoot callback adapter
     contractPath: "C:/synthetic/chatwoot-contract.json",
     expectedApplicationAssetImageDigest: `sha256:${"1".repeat(64)}`,
     expectedApplicationImageConfigDigest: `sha256:${"5".repeat(64)}`,
+    expectedApplicationManifestDigest: `sha256:${"9".repeat(64)}`,
     expectedApplicationRepoDigests: [
       `sha256:${"1".repeat(64)}`,
       `sha256:${"9".repeat(64)}`,
@@ -1252,6 +1375,35 @@ test("executes the committed owned-stack API and exact Chatwoot callback adapter
     ...owned,
     inputReceipt: { ...inputReceipt, adjacent: sha256("adjacent") },
   })).toThrow(/owned input receipt has unexpected fields/);
+
+  const containerdReport = containerdPairReports()[0].stacks.baseline;
+  const containerdReceipt = {
+    ...containerdReport.inputReceipt,
+    projectSha256: sha256(contract.project),
+  };
+  const containerdStack = {
+    ...stack,
+    imageDigest: containerdReport.applicationImage.assetImageDigest,
+    migrationImageDigest: containerdReport.migrationImage.assetImageDigest,
+  };
+  const containerdBound = bindChatwootOwnedRuntimeForTest(containerdStack, {
+    inputReceipt: containerdReceipt,
+    runtime: containerdReport.runtimeAttestation,
+    status: "verifier-owned-runtime-attested",
+  });
+  expect(containerdBound).toMatchObject({
+    inputReceipt: {
+      imageSelectionMode: "containerd-root-manifest",
+      applicationImageRuntimeDigest: containerdReport.applicationImage.assetImageDigest,
+      migrationImageRuntimeDigest: containerdReport.migrationImage.assetImageDigest,
+    },
+    runtimeAttestation: {
+      imageSelectionMode: "containerd-root-manifest",
+      applicationManifestDigest: containerdReport.applicationImage.manifestDigest,
+      migrationManifestDigest: containerdReport.migrationImage.manifestDigest,
+    },
+  });
+  expect(containerdBound.inputReceipt).not.toHaveProperty("migrationImageConfigDigest");
 });
 
 test("binds every Chatwoot runtime and toolchain input into the global fixture manifest", () => {
@@ -2918,8 +3070,36 @@ test("keeps the sidecar contract separate from baselines, projection, and fixtur
   });
   const validate = new Ajv({ allErrors: true }).compile(schema);
   const schemaProof = createChatwootPhaseProof(pairReports());
+  const containerdSchemaProof = createChatwootPhaseProof(containerdPairReports());
   type MutableSchemaProof = DeepMutable<typeof schemaProof>;
   expect(validate(schemaProof), JSON.stringify(validate.errors)).toBe(true);
+  expect(validate(containerdSchemaProof), JSON.stringify(validate.errors)).toBe(true);
+  const containerdRootNamedConfig = structuredClone(containerdSchemaProof) as unknown as {
+    pairs: ContainerdPairReport[];
+  };
+  Object.assign(containerdRootNamedConfig.pairs[0].stacks.baseline.migrationImage, {
+    configDigest: containerdRootNamedConfig.pairs[0].stacks.baseline.migrationImage.assetImageDigest,
+  });
+  expect(validate(containerdRootNamedConfig), "containerd root named as config").toBe(false);
+  const mixedModeSchemaProof = structuredClone(containerdSchemaProof) as unknown as {
+    pairs: ContainerdPairReport[];
+  };
+  Reflect.set(
+    mixedModeSchemaProof.pairs[0].stacks.baseline,
+    "migrationImage",
+    structuredClone(schemaProof.pairs[0].stacks.baseline.migrationImage),
+  );
+  expect(validate(mixedModeSchemaProof), "mixed image selection modes").toBe(false);
+  const crossStackMixedModeSchemaProof = structuredClone(containerdSchemaProof) as unknown as {
+    pairs: ContainerdPairReport[];
+  };
+  Reflect.set(
+    crossStackMixedModeSchemaProof.pairs[0].stacks,
+    "baseline",
+    structuredClone(schemaProof.pairs[0].stacks.baseline),
+  );
+  expect(validate(crossStackMixedModeSchemaProof), "cross-stack mixed selection modes")
+    .toBe(false);
   for (const [label, mutate] of [
     ["stack pair index", (value: MutableSchemaProof) => {
       value.pairs[0].stacks.baseline.pairIndex = 2;
@@ -3145,9 +3325,145 @@ function pairReports() {
   });
 }
 
+type ClassicStackReport = DeepMutable<ReturnType<typeof stackReport>>;
+type ContainerdApplicationImage = ClassicStackReport["applicationImage"] & {
+  imageSelectionMode: "containerd-root-manifest";
+};
+type ContainerdMigrationImage = Omit<ClassicStackReport["migrationImage"], "configDigest"> & {
+  imageSelectionMode: "containerd-root-manifest";
+  manifestDigest: string;
+};
+type ContainerdInputReceipt = Omit<
+  ClassicStackReport["inputReceipt"],
+  "migrationImageConfigDigest"
+> & {
+  applicationImageManifestDigest: string;
+  applicationImageRuntimeDigest: string;
+  imageSelectionMode: "containerd-root-manifest";
+  migrationImageManifestDigest: string;
+  migrationImageRuntimeDigest: string;
+};
+type ContainerdRuntimeAttestation = ClassicStackReport["runtimeAttestation"] & {
+  applicationManifestDigest: string;
+  imageSelectionMode: "containerd-root-manifest";
+  migrationManifestDigest: string;
+};
+type ContainerdStackReport = Omit<
+  ClassicStackReport,
+  "applicationImage" | "inputReceipt" | "migrationImage" | "runtimeAttestation"
+> & {
+  applicationImage: ContainerdApplicationImage;
+  inputReceipt: ContainerdInputReceipt;
+  migrationImage: ContainerdMigrationImage;
+  runtimeAttestation: ContainerdRuntimeAttestation;
+};
+type ClassicPairReport = DeepMutable<ReturnType<typeof pairReports>[number]>;
+type ChatwootExecutionEvidence = ReturnType<typeof createChatwootExecutionEvidenceForTest>;
+type ContainerdPairReport = Omit<ClassicPairReport, "execution" | "stacks"> & {
+  execution: ChatwootExecutionEvidence;
+  stacks: Record<"baseline" | "candidate", ContainerdStackReport>;
+};
+
+function containerdPairReports(): ContainerdPairReport[] {
+  const pairs = structuredClone(pairReports()) as unknown as ContainerdPairReport[];
+  for (const pair of pairs) {
+    for (const role of ["baseline", "candidate"] as const) {
+      const stack = pair.stacks[role];
+      const application = stack.applicationImage;
+      const migration = stack.migrationImage;
+      const migrationManifestDigest = `sha256:${role === "baseline" ? "d" : "e"}`.padEnd(
+        71,
+        role === "baseline" ? "d" : "e",
+      );
+      application.imageSelectionMode = "containerd-root-manifest";
+      application.runtimeImageDigest = application.assetImageDigest;
+      application.repoDigestContractSha256 = stack.runtimeAttestation
+        .applicationRepoDigestContractSha256;
+      const applicationBindingContractSha256 = sha256(JSON.stringify({
+        assetImageDigest: application.assetImageDigest,
+        configDigest: application.configDigest,
+        imageSelectionMode: application.imageSelectionMode,
+        manifestDigest: application.manifestDigest,
+        referenceSha256: application.referenceSha256,
+        repoDigests: [application.assetImageDigest, application.manifestDigest].sort(),
+        role: "application",
+        runtimeImageDigest: application.runtimeImageDigest,
+      }));
+      Reflect.deleteProperty(migration, "configDigest");
+      migration.imageSelectionMode = "containerd-root-manifest";
+      migration.manifestDigest = migrationManifestDigest;
+      migration.runtimeImageDigest = migration.assetImageDigest;
+      migration.bindingContractSha256 = sha256(JSON.stringify({
+        assetImageDigest: migration.assetImageDigest,
+        imageSelectionMode: migration.imageSelectionMode,
+        manifestDigest: migration.manifestDigest,
+        referenceSha256: migration.referenceSha256,
+        repoDigests: [migration.assetImageDigest],
+        role: "migration",
+        runtimeImageDigest: migration.runtimeImageDigest,
+      }));
+
+      const receipt = stack.inputReceipt;
+      Reflect.deleteProperty(receipt, "migrationImageConfigDigest");
+      receipt.applicationImageBindingContractSha256 = applicationBindingContractSha256;
+      receipt.applicationImageManifestDigest = application.manifestDigest;
+      receipt.applicationImageRuntimeDigest = application.runtimeImageDigest;
+      receipt.imageSelectionMode = "containerd-root-manifest";
+      receipt.migrationImageBindingContractSha256 = migration.bindingContractSha256;
+      receipt.migrationImageManifestDigest = migration.manifestDigest;
+      receipt.migrationImageRuntimeDigest = migration.runtimeImageDigest;
+
+      const runtime = stack.runtimeAttestation;
+      runtime.applicationImageBindingContractSha256 = applicationBindingContractSha256;
+      runtime.applicationManifestDigest = application.manifestDigest;
+      runtime.applicationRuntimeImageDigest = application.runtimeImageDigest;
+      runtime.imageSelectionMode = "containerd-root-manifest";
+      runtime.migrationImageBindingContractSha256 = migration.bindingContractSha256;
+      runtime.migrationManifestDigest = migration.manifestDigest;
+      runtime.migrationRuntimeImageDigest = migration.runtimeImageDigest;
+
+      stack.runtimeBinding.applicationImageBindingContractSha256 =
+        applicationBindingContractSha256;
+      stack.runtimeBinding.migrationImageBindingContractSha256 = migration.bindingContractSha256;
+      stack.runtimeBinding.ownedInputReceiptSha256 = sha256(JSON.stringify(receipt));
+    }
+    pair.execution = executionEvidence(
+      pair.pairIndex,
+      pair.stacks,
+      pair.cleanup,
+    );
+  }
+  return pairs;
+}
+
+function rebindContainerdMigrationImage(stack: ContainerdStackReport) {
+  const migration = stack.migrationImage;
+  migration.bindingContractSha256 = sha256(JSON.stringify({
+    assetImageDigest: migration.assetImageDigest,
+    imageSelectionMode: migration.imageSelectionMode,
+    manifestDigest: migration.manifestDigest,
+    referenceSha256: migration.referenceSha256,
+    repoDigests: [migration.assetImageDigest],
+    role: "migration",
+    runtimeImageDigest: migration.runtimeImageDigest,
+  }));
+  stack.inputReceipt.migrationImageBindingContractSha256 = migration.bindingContractSha256;
+  stack.inputReceipt.migrationImageManifestDigest = migration.manifestDigest;
+  stack.inputReceipt.migrationImageRuntimeDigest = migration.runtimeImageDigest;
+  stack.runtimeAttestation.migrationImageBindingContractSha256 = migration.bindingContractSha256;
+  stack.runtimeAttestation.migrationManifestDigest = migration.manifestDigest;
+  stack.runtimeAttestation.migrationRuntimeImageDigest = migration.runtimeImageDigest;
+  stack.runtimeBinding.migrationAssetImageDigest = migration.assetImageDigest;
+  stack.runtimeBinding.migrationImageBindingContractSha256 = migration.bindingContractSha256;
+  stack.runtimeBinding.ownedInputReceiptSha256 = sha256(JSON.stringify(stack.inputReceipt));
+}
+
 function executionEvidence(
   pairIndex: number,
-  stacks: Record<"baseline" | "candidate", ReturnType<typeof stackReport>>,
+  stacks: Record<
+    "baseline" | "candidate",
+    ReturnType<typeof stackReport> | ContainerdStackReport
+  >,
   cleanup: {
     readonly status: "verifier-owned-stack-pair-cleaned";
     readonly stacks: readonly unknown[];
