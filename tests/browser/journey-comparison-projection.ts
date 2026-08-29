@@ -91,6 +91,182 @@ export function projectExactJourneyPwaShellCachePair(
   projectPwaLocations(actualLocations);
 }
 
+export function projectExactAuthenticatedChatwootGeneratedPair(
+  expected: Record<string, unknown>,
+  actual: Record<string, unknown>,
+) {
+  if (
+    !isExactJourneyManifest(expected)
+    || !isExactJourneyManifest(actual)
+    || expected.project !== actual.project
+    || expected.journey !== "email-register-verify-and-login"
+    || actual.journey !== expected.journey
+  ) {
+    return;
+  }
+
+  const expectedState = exactAuthenticatedChatwootGeneratedState(expected);
+  const actualState = exactAuthenticatedChatwootGeneratedState(actual);
+  if (
+    !expectedState
+    || !actualState
+    || !sameJson(expectedState.presence, actualState.presence)
+    || !exactChatwootIdentityCookiesMatch(
+      expectedState.identityCookies,
+      actualState.identityCookies,
+    )
+    || expectedState.conversationBytes !== actualState.conversationBytes
+    || expectedState.ownershipBytes !== actualState.ownershipBytes
+  ) {
+    return;
+  }
+
+  for (const state of [expectedState, actualState]) {
+    for (const digest of state.conversationDigests) {
+      digest.sha256 = "<dynamic:chatwoot-conversation:1>";
+    }
+    for (const digest of state.ownershipDigests) {
+      digest.sha256 = "<dynamic:chatwoot-ownership:1>";
+    }
+    for (const identity of state.identityCookies) {
+      if (identity) {
+        identity.name = "cw_user_<dynamic:chatwoot-website-token:1>";
+      }
+    }
+  }
+}
+
+function exactChatwootIdentityCookiesMatch(
+  expected: ChatwootGeneratedState["identityCookies"],
+  actual: ChatwootGeneratedState["identityCookies"],
+) {
+  return expected.length === actual.length && expected.every((expectedCookie, index) => {
+    const actualCookie = actual[index];
+    if (expectedCookie === null || actualCookie === null) {
+      return expectedCookie === actualCookie;
+    }
+    return expectedCookie.name === actualCookie.name
+      && sameJson(expectedCookie, actualCookie);
+  });
+}
+
+type ChatwootGeneratedState = {
+  conversationBytes: number;
+  conversationDigests: Array<{ bytes: number; sha256: string }>;
+  identityCookies: Array<(Record<string, unknown> & { name: string }) | null>;
+  ownershipBytes: number;
+  ownershipDigests: Array<{ bytes: number; sha256: string }>;
+  presence: boolean[];
+};
+
+function exactAuthenticatedChatwootGeneratedState(
+  manifest: Record<string, unknown>,
+): ChatwootGeneratedState | null {
+  const checkpointValues = manifest.checkpoints;
+  if (!Array.isArray(checkpointValues)) return null;
+  const labels = ["register-cabinet", "email-login-cabinet"];
+  const checkpoints = labels.map((label) => checkpointValues.filter((checkpoint: unknown) => (
+    isRecord(checkpoint) && checkpoint.label === label
+  )));
+  if (checkpoints.some((matches) => matches.length !== 1)) return null;
+
+  const conversationDigests: ChatwootGeneratedState["conversationDigests"] = [];
+  const ownershipDigests: ChatwootGeneratedState["ownershipDigests"] = [];
+  const identityCookies: ChatwootGeneratedState["identityCookies"] = [];
+  const presence: boolean[] = [];
+  for (const [checkpoint] of checkpoints) {
+    if (
+      !isRecord(checkpoint)
+      || !Array.isArray(checkpoint.cookies)
+      || !isExactCheckpointStorage(checkpoint.storage)
+    ) {
+      return null;
+    }
+    const conversations = checkpoint.cookies.filter(isExactChatwootConversationCookie);
+    const identities = checkpoint.cookies.filter(isExactChatwootIdentityCookie);
+    const ownership = checkpoint.storage.local.filter(isExactChatwootOwnershipStorage);
+    const unexpectedChatwootCookies = checkpoint.cookies.filter((cookie) => (
+      isRecord(cookie)
+      && typeof cookie.name === "string"
+      && cookie.name.startsWith("cw_")
+      && !isExactChatwootConversationCookie(cookie)
+      && !isExactChatwootIdentityCookie(cookie)
+    ));
+    if (
+      conversations.length !== 1
+      || identities.length > 1
+      || ownership.length !== 1
+      || unexpectedChatwootCookies.length !== 0
+    ) {
+      return null;
+    }
+    conversationDigests.push(conversations[0]!.value);
+    ownershipDigests.push(ownership[0]!.value);
+    identityCookies.push(identities[0] ?? null);
+    presence.push(identities.length === 1);
+  }
+
+  if (
+    conversationDigests[0]!.sha256 !== conversationDigests[1]!.sha256
+    || ownershipDigests[0]!.sha256 !== ownershipDigests[1]!.sha256
+    || conversationDigests[0]!.bytes !== conversationDigests[1]!.bytes
+    || ownershipDigests[0]!.bytes !== ownershipDigests[1]!.bytes
+    || new Set(identityCookies.flatMap((cookie) => cookie ? [cookie.name] : [])).size > 1
+  ) {
+    return null;
+  }
+  return {
+    conversationBytes: conversationDigests[0]!.bytes,
+    conversationDigests,
+    identityCookies,
+    ownershipBytes: ownershipDigests[0]!.bytes,
+    ownershipDigests,
+    presence,
+  };
+}
+
+function isExactChatwootConversationCookie(value: unknown): value is {
+  value: { bytes: number; sha256: string };
+} {
+  return isRecord(value)
+    && hasExactKeys(value, ["domain", "httpOnly", "name", "path", "sameSite", "secure", "value"])
+    && value.name === "cw_conversation"
+    && value.domain === "<app-host>"
+    && value.path === "/"
+    && value.httpOnly === false
+    && value.secure === true
+    && value.sameSite === "Lax"
+    && isDigest(value.value)
+    && value.value.bytes === 25;
+}
+
+function isExactChatwootIdentityCookie(
+  value: unknown,
+): value is Record<string, unknown> & { name: string } {
+  return isRecord(value)
+    && hasExactKeys(value, ["domain", "httpOnly", "name", "path", "sameSite", "secure", "value"])
+    && typeof value.name === "string"
+    && /^cw_user_[a-f0-9]{64}$/.test(value.name)
+    && value.domain === "<app-host>"
+    && value.path === "/"
+    && value.httpOnly === false
+    && value.secure === true
+    && value.sameSite === "Lax"
+    && isDigest(value.value)
+    && value.value.bytes === 23;
+}
+
+function isExactChatwootOwnershipStorage(value: unknown): value is {
+  value: { bytes: number; sha256: string };
+} {
+  return isRecord(value)
+    && hasExactKeys(value, ["key", "value"])
+    && value.key === "clean-pay:chatwoot-ownership:v1"
+    && isDigest(value.value)
+    && value.value.bytes >= 80
+    && value.value.bytes <= 96;
+}
+
 type PwaCacheLocation = {
   key: string;
   values: unknown[];
@@ -149,6 +325,7 @@ function projectPwaLocations(locations: PwaCacheLocation[]) {
 
 function isExactCheckpointStorage(value: unknown): value is Record<string, unknown> & {
   cacheNames: unknown[];
+  local: unknown[];
 } {
   return isRecord(value)
     && hasExactKeys(value, ["cacheNames", "local", "serviceWorkerScopes", "session"])

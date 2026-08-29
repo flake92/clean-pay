@@ -33,6 +33,67 @@ test("projects only the pair-proven local application Host header", () => {
   expect(candidate).toEqual(rawCandidate);
 });
 
+test("projects an ephemeral pair only after both distinct loopback origins are proven", () => {
+  const ephemeralBaselineOrigin = "http://127.0.0.1:4201";
+  const ephemeralCandidateOrigin = "http://127.0.0.1:4202";
+  const projected = projectCharacterizationManifestPairForComparison(
+    manifest(ephemeralBaselineOrigin),
+    manifest(ephemeralCandidateOrigin),
+    {
+      expectedApplicationOrigin: ephemeralBaselineOrigin,
+      actualApplicationOrigin: ephemeralCandidateOrigin,
+    },
+  );
+
+  expect(projected.expected).toEqual(projected.actual);
+  expect(requestHeaders(projected.expected)[1]).toEqual({
+    name: "host",
+    value: "<validated-local-application-host>",
+  });
+});
+
+test("accepts port 4000 when it is explicitly bound as one side of a live pair", () => {
+  const liveCandidateOrigin = "http://127.0.0.1:4202";
+  const projected = projectCharacterizationManifestPairForComparison(
+    manifest(BASELINE_ORIGIN),
+    manifest(liveCandidateOrigin),
+    {
+      expectedApplicationOrigin: BASELINE_ORIGIN,
+      actualApplicationOrigin: liveCandidateOrigin,
+    },
+  );
+
+  expect(projected.expected).toEqual(projected.actual);
+});
+
+test("keeps ephemeral Host digests exact unless both origins are strict and distinct", () => {
+  const ephemeralBaselineOrigin = "http://127.0.0.1:4201";
+  const ephemeralCandidateOrigin = "http://127.0.0.1:4202";
+  const nearMisses = [
+    { expectedApplicationOrigin: undefined, actualApplicationOrigin: ephemeralCandidateOrigin },
+    { expectedApplicationOrigin: "http://localhost:4201", actualApplicationOrigin: ephemeralCandidateOrigin },
+    { expectedApplicationOrigin: ephemeralBaselineOrigin, actualApplicationOrigin: ephemeralBaselineOrigin },
+    { expectedApplicationOrigin: ephemeralBaselineOrigin, actualApplicationOrigin: "http://127.0.0.1:4203" },
+  ];
+
+  for (const options of nearMisses) {
+    const baseline = manifest(ephemeralBaselineOrigin);
+    const candidate = manifest(ephemeralCandidateOrigin);
+    const projected = projectCharacterizationManifestPairForComparison(
+      baseline,
+      candidate,
+      options,
+    );
+    expect(projected.expected, JSON.stringify(options)).not.toEqual(projected.actual);
+    expect(requestHeaders(projected.expected), JSON.stringify(options)).toEqual(
+      requestHeaders(baseline),
+    );
+    expect(requestHeaders(projected.actual), JSON.stringify(options)).toEqual(
+      requestHeaders(candidate),
+    );
+  }
+});
+
 test("preserves both raw byte artifacts while comparing their projections", () => {
   const baseline = Buffer.from(`${JSON.stringify(manifest(BASELINE_ORIGIN))}\n`);
   const candidate = Buffer.from(`${JSON.stringify(manifest(CANDIDATE_ORIGIN))}\n`);

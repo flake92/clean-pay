@@ -1,9 +1,15 @@
 import { access, mkdir } from "node:fs/promises";
 import path from "node:path";
 
+import { authenticatedJourneyLivePairCaptureEnabled } from "./authenticated-journey-capture-mode";
 import { journeyBaselineRoot, journeyBaselineUpdateRequested } from "./journey-baseline-policy";
+import { assertJourneyLivePairCaptureReady } from "./journey-live-pair-evidence";
 
 export default async function journeyGlobalSetup() {
+  if (authenticatedJourneyLivePairCaptureEnabled(process.env)) {
+    await assertJourneyLivePairCaptureReady();
+    return;
+  }
   if (!journeyBaselineUpdateRequested()) return;
 
   await prepareJourneyCaptureStaging();

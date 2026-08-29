@@ -6,6 +6,7 @@ import {
   beginJourneyOfflineFallbackConsoleCapture,
   finishJourneyOfflineFallbackConsoleCapture,
 } from "../console-policy";
+import { authenticatedJourneyLivePairCaptureEnabled } from "./authenticated-journey-capture-mode";
 import { test, expect } from "./journey-fixtures";
 import { clearSyntheticLogoutState } from "./synthetic-logout-storage";
 
@@ -93,6 +94,9 @@ test("email-register-verify-and-login", async ({ journey }, testInfo) => {
   await journey.checkpoint("register-email-verified");
   await page.getByRole("button", { name: "Продолжить без него" }).click();
   await page.waitForURL((url) => url.pathname === "/cabinet");
+  if (authenticatedJourneyLivePairCaptureEnabled(process.env)) {
+    await waitForAuthenticatedChatwootFixture(page);
+  }
   await journey.checkpoint("register-cabinet");
 
   await clearSyntheticLogoutState(page);
@@ -104,6 +108,9 @@ test("email-register-verify-and-login", async ({ journey }, testInfo) => {
   await page.getByLabel("Пароль").fill(password);
   await page.getByRole("button", { name: "Продолжить" }).click();
   await page.waitForURL((url) => url.pathname === "/cabinet");
+  if (authenticatedJourneyLivePairCaptureEnabled(process.env)) {
+    await waitForAuthenticatedChatwootFixture(page);
+  }
   await journey.checkpoint("email-login-cabinet");
   journey.boundary("turnstile-lifecycle", await readTurnstileBoundary(page));
 });
@@ -456,6 +463,148 @@ async function waitForChatwootBoundary(page: Page) {
     (window as unknown as { __cleanPayChatwootBoundaryCalls?: unknown[] })
       .__cleanPayChatwootBoundaryCalls ?? []
   ));
+}
+
+async function waitForAuthenticatedChatwootFixture(page: Page) {
+  await expect.poll(async () => {
+    const browserState = await page.evaluate(() => {
+      const calls = (
+        window as unknown as {
+          __cleanPayChatwootBoundaryCalls?: unknown[];
+          cleanPayChatwootOwnership?: unknown;
+        }
+      ).__cleanPayChatwootBoundaryCalls;
+      const cookieEntries = document.cookie
+        .split(";")
+        .map((entry) => entry.trim())
+        .filter(Boolean)
+        .map((entry) => {
+          const separator = entry.indexOf("=");
+          return separator === -1
+            ? [entry, ""] as const
+            : [entry.slice(0, separator), decodeURIComponent(entry.slice(separator + 1))] as const;
+        });
+      const conversationEntries = cookieEntries.filter(([name]) => name === "cw_conversation");
+      const identityEntries = cookieEntries.filter(([name]) => /^cw_user_[a-f0-9]{64}$/.test(name));
+      const ownershipRaw = localStorage.getItem("clean-pay:chatwoot-ownership:v1");
+
+      let ownership: unknown = null;
+      try {
+        ownership = ownershipRaw === null ? null : JSON.parse(ownershipRaw);
+      } catch {
+        ownership = null;
+      }
+
+      const fingerprint = (value: string) => {
+        let hash = 0x811c9dc5;
+        for (let index = 0; index < value.length; index += 1) {
+          hash ^= value.charCodeAt(index);
+          hash = Math.imul(hash, 0x01000193);
+        }
+        return `${value.length}:${(hash >>> 0).toString(16)}`;
+      };
+      const exactKeys = (value: unknown, keys: string[]) => (
+        typeof value === "object"
+        && value !== null
+        && !Array.isArray(value)
+        && JSON.stringify(Object.keys(value).sort()) === JSON.stringify([...keys].sort())
+      );
+      const conversation = conversationEntries[0]?.[1] ?? "";
+      const ownershipRecord = ownership as Record<string, unknown> | null;
+      const inMemoryOwnership = (
+        window as unknown as { cleanPayChatwootOwnership?: unknown }
+      ).cleanPayChatwootOwnership;
+      const inMemoryRecord = inMemoryOwnership as Record<string, unknown> | null;
+      const fingerprintPattern = /^[1-9][0-9]{0,4}:[a-f0-9]{1,8}$/;
+
+      return {
+        calls: Array.isArray(calls) ? calls : [],
+        conversation,
+        conversationCount: conversationEntries.length,
+        identityCookie: identityEntries[0]
+          ? { name: identityEntries[0][0], value: identityEntries[0][1] }
+          : null,
+        identityCookieCount: identityEntries.length,
+        ownershipValid: exactKeys(ownership, ["conversation", "core", "customAttributes"])
+          && typeof ownershipRecord?.core === "string"
+          && fingerprintPattern.test(ownershipRecord.core)
+          && typeof ownershipRecord.customAttributes === "string"
+          && fingerprintPattern.test(ownershipRecord.customAttributes)
+          && ownershipRecord.conversation === fingerprint(conversation),
+        inMemoryOwnershipValid: exactKeys(
+          inMemoryOwnership,
+          ["conversation", "core", "customAttributes"],
+        )
+          && inMemoryRecord?.conversation === conversation
+          && inMemoryRecord.core === ownershipRecord?.core
+          && inMemoryRecord.customAttributes === ownershipRecord?.customAttributes,
+        pathname: location.pathname,
+      };
+    });
+    const chatwootCookies = (await page.context().cookies(page.url()))
+      .filter((cookie) => cookie.name === "cw_conversation" || cookie.name.startsWith("cw_user_"))
+      .map(({ domain, httpOnly, name, path, sameSite, secure, value }) => ({
+        domain,
+        httpOnly,
+        name,
+        path,
+        sameSite,
+        secure,
+        value,
+      }));
+    return { browserState, chatwootCookies };
+  }, { timeout: 15_000 }).toEqual({
+    browserState: {
+      calls: [
+        {
+          method: "run",
+          baseUrl: "https://chatwoot.browser.clean-pay.dev",
+          websiteTokenBytes: 64,
+        },
+        { method: "toggleBubbleVisibility", value: "show" },
+        { method: "frame.loaded" },
+        { method: "toggleBubbleVisibility", value: "show" },
+        {
+          method: "setUser",
+          identifierBytes: 25,
+          attributeKeys: ["custom_attributes", "email", "identifier_hash", "name"],
+        },
+        { method: "toggleBubbleVisibility", value: "show" },
+        { method: "removeLabel", label: "subscription_expired" },
+        { method: "identity.confirmed" },
+      ],
+      conversation: expect.stringMatching(/^c[a-z0-9]{24}$/),
+      conversationCount: 1,
+      identityCookie: {
+        name: expect.stringMatching(/^cw_user_[a-f0-9]{64}$/),
+        value: "synthetic-chatwoot-user",
+      },
+      identityCookieCount: 1,
+      ownershipValid: true,
+      inMemoryOwnershipValid: true,
+      pathname: "/cabinet",
+    },
+    chatwootCookies: [
+      {
+        domain: "pay.ci.clean-pay.dev",
+        httpOnly: false,
+        name: "cw_conversation",
+        path: "/",
+        sameSite: "Lax",
+        secure: true,
+        value: expect.stringMatching(/^c[a-z0-9]{24}$/),
+      },
+      {
+        domain: "pay.ci.clean-pay.dev",
+        httpOnly: false,
+        name: expect.stringMatching(/^cw_user_[a-f0-9]{64}$/),
+        path: "/",
+        sameSite: "Lax",
+        secure: true,
+        value: "synthetic-chatwoot-user",
+      },
+    ],
+  });
 }
 
 async function exerciseProductionServiceWorker(page: Page) {
