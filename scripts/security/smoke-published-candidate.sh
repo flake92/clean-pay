@@ -33,7 +33,7 @@ cleanup() {
     docker logs "$RUNTIME_CONTAINER" >&2 2>/dev/null || true
     docker logs "$POSTGRES_CONTAINER" >&2 2>/dev/null || true
   fi
-  docker rm --force "$RUNTIME_CONTAINER" "$PROBE_CONTAINER" "$METADATA_CONTAINER" "$POSTGRES_CONTAINER" >/dev/null 2>&1 || true
+  docker rm --force --volumes "$RUNTIME_CONTAINER" "$PROBE_CONTAINER" "$METADATA_CONTAINER" "$POSTGRES_CONTAINER" >/dev/null 2>&1 || true
   docker network rm "$NETWORK" >/dev/null 2>&1 || true
   rm -rf -- "$TEMPORARY_DIR"
   exit "$status"
