@@ -38,6 +38,33 @@ const NEXT_JS_POWERED_BY = {
   sha256: "30b7f8482c4f570c063e4dff04b91ddc9b2b5f535ac70fedffb1cf34e0d23ec6",
 } as const;
 
+const WINDOWS_CHROMIUM_TRANSPORT_IDENTITY = {
+  "sec-ch-ua-platform": {
+    bytes: 9,
+    sha256: "0b1d1e9a36456a50dec652d22d95df7908422c429f91c65e9906ce500aaa2d8b",
+  },
+  "user-agent": {
+    bytes: 123,
+    sha256: "3caf269ff15e9469bb7f47985b75b52aa4c2fd24dbe3118b40ca31edb48c9178",
+  },
+} as const;
+
+const LINUX_CHROMIUM_TRANSPORT_IDENTITY = {
+  "sec-ch-ua-platform": {
+    bytes: 7,
+    sha256: "1ca133af50fd8cbddcc9d46be6688e37475554a0232ccd9fa0d0c7a2dee2c05a",
+  },
+  "user-agent": {
+    bytes: 113,
+    sha256: "0f34eb7ad038e5b57298b9e4dad50c722158f41844142c1e5b6ce6140cbfba26",
+  },
+} as const;
+
+const CHROMIUM_TRANSPORT_IDENTITY_HEADER_NAMES = [
+  "sec-ch-ua-platform",
+  "user-agent",
+] as const;
+
 const STATIC_CHUNK_PATH = /^\/_next\/static\/chunks\/(?:turbopack-)?(?=[A-Za-z0-9_-]{8,}\.(?:css|js)$)(?=[A-Za-z0-9_-]*[0-9])[A-Za-z0-9_-]+\.(?:css|js)$/;
 const STATIC_MEDIA_PATH = /^\/_next\/static\/media\/[A-Za-z0-9._-]+\.(?=[A-Za-z0-9_-]{8,}\.[A-Za-z0-9]+$)(?=[A-Za-z0-9_-]*[0-9])[A-Za-z0-9_-]+\.(?:avif|gif|ico|jpeg|jpg|png|svg|webp|woff2)$/;
 /**
@@ -79,6 +106,11 @@ export function projectCharacterizationManifestPairForComparison(
   );
   const expectedPrepared = cloneJson(expectedValue);
   const actualPrepared = cloneJson(actualValue);
+  projectExactChromiumTransportIdentityPair(
+    expectedPrepared,
+    actualPrepared,
+    fixtureContractPairIsValid,
+  );
   if (
     fixtureContractPairIsValid
     && isRecord(expectedPrepared)
@@ -98,6 +130,137 @@ export function projectCharacterizationManifestPairForComparison(
     projectExactJourneyFixtureContract(expected, actual);
   }
   return { expected, actual };
+}
+
+function projectExactChromiumTransportIdentityPair(
+  expected: unknown,
+  actual: unknown,
+  fixtureContractPairIsValid: boolean,
+) {
+  if (
+    !isExactChromiumTransportIdentityEnvelopePair(
+      expected,
+      actual,
+      fixtureContractPairIsValid,
+    )
+  ) {
+    return;
+  }
+
+  const expectedNetwork = (expected as Record<string, unknown>).network as Record<string, unknown>;
+  const actualNetwork = (actual as Record<string, unknown>).network as Record<string, unknown>;
+  const expectedRequests = expectedNetwork.requests as unknown[];
+  const actualRequests = actualNetwork.requests as unknown[];
+  const replacements: Array<{
+    actual: Record<string, unknown>;
+    expected: Record<string, unknown>;
+  }> = [];
+
+  for (const [position, expectedRequestValue] of expectedRequests.entries()) {
+    const actualRequestValue = actualRequests[position];
+    if (
+      !isRecord(expectedRequestValue)
+      || !isRecord(actualRequestValue)
+      || expectedRequestValue.index !== position
+      || actualRequestValue.index !== position
+    ) {
+      return;
+    }
+    const expectedHeaders = expectedRequestValue.requestHeaders;
+    const actualHeaders = actualRequestValue.requestHeaders;
+    if (
+      !Array.isArray(expectedHeaders)
+      || !Array.isArray(actualHeaders)
+      || expectedHeaders.length !== actualHeaders.length
+    ) {
+      return;
+    }
+
+    for (const name of CHROMIUM_TRANSPORT_IDENTITY_HEADER_NAMES) {
+      const expectedIndexes = namedHeaderIndexes(expectedHeaders, name);
+      const actualIndexes = namedHeaderIndexes(actualHeaders, name);
+      if (expectedIndexes.length === 0 && actualIndexes.length === 0) continue;
+      if (
+        expectedIndexes.length !== 1
+        || actualIndexes.length !== 1
+        || expectedIndexes[0] !== actualIndexes[0]
+      ) {
+        return;
+      }
+
+      const expectedHeader = expectedHeaders[expectedIndexes[0]!] as Record<string, unknown>;
+      const actualHeader = actualHeaders[actualIndexes[0]!] as Record<string, unknown>;
+      if (!isExactSanitizedHeader(
+        expectedHeader,
+        name,
+        WINDOWS_CHROMIUM_TRANSPORT_IDENTITY[name],
+      )) {
+        return;
+      }
+      if (isExactSanitizedHeader(
+        actualHeader,
+        name,
+        WINDOWS_CHROMIUM_TRANSPORT_IDENTITY[name],
+      )) {
+        continue;
+      }
+      if (!isExactSanitizedHeader(
+        actualHeader,
+        name,
+        LINUX_CHROMIUM_TRANSPORT_IDENTITY[name],
+      )) {
+        return;
+      }
+      replacements.push({ actual: actualHeader, expected: expectedHeader });
+    }
+  }
+
+  for (const replacement of replacements) {
+    replacement.actual.value = cloneJson(replacement.expected.value);
+  }
+}
+
+function isExactChromiumTransportIdentityEnvelopePair(
+  expected: unknown,
+  actual: unknown,
+  fixtureContractPairIsValid: boolean,
+) {
+  if (!isRecord(expected) || !isRecord(actual)) return false;
+  if (isExactPublicCharacterizationPair(expected, actual)) return true;
+  if (
+    !fixtureContractPairIsValid
+    || !hasExactJourneyManifestEnvelope(expected)
+    || !hasExactJourneyManifestEnvelope(actual)
+    || expected.project !== actual.project
+    || expected.journey !== actual.journey
+    || !isRecord(expected.network)
+    || !isRecord(actual.network)
+    || !hasExactKeys(expected.network, [
+      "requests",
+      "serverActionCount",
+      "serverActions",
+    ])
+    || !hasExactKeys(actual.network, [
+      "requests",
+      "serverActionCount",
+      "serverActions",
+    ])
+    || !Array.isArray(expected.network.requests)
+    || !Array.isArray(actual.network.requests)
+    || !Array.isArray(expected.network.serverActions)
+    || !Array.isArray(actual.network.serverActions)
+    || !Number.isSafeInteger(expected.network.serverActionCount)
+    || !Number.isSafeInteger(actual.network.serverActionCount)
+  ) {
+    return false;
+  }
+  return expected.network.requests.length === actual.network.requests.length;
+}
+
+function namedHeaderIndexes(headers: unknown[], name: string) {
+  return headers.flatMap((header, index) => (
+    isRecord(header) && header.name === name ? [index] : []
+  ));
 }
 
 function isExactJourneyFixtureContractPair(expected: unknown, actual: unknown) {

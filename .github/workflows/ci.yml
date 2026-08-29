@@ -569,7 +569,10 @@ jobs:
           name: production-image-browser-journey-${{ github.run_id }}-${{ github.run_attempt }}
           if-no-files-found: warn
           retention-days: 30
-          path: test-results/browser-journeys
+          path: |
+            test-results/browser
+            test-results/browser-journeys
+            test-results/browser-journey-contract-evidence
       - name: Clean up only the owned browser journey project
         if: always()
         env:
