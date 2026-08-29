@@ -218,6 +218,37 @@ describe("production container boundary", () => {
     expect(publishedCandidateSmoke.match(/--max-time 10/g)).toHaveLength(2);
   });
 
+  it("waits for the final PostgreSQL TCP listener in every disposable security flow", () => {
+    const sources = [
+      ["scripts/security/smoke-published-candidate.sh", publishedCandidateSmoke, 2],
+      ...migrationRehearsals.map(([path, source]) => [path, source, 1] as const),
+    ] as const;
+
+    for (const [path, source, expectedProbeCount] of sources) {
+      const logicalLines = source
+        .replace(/\\\r?\n[ \t]*/gu, " ")
+        .split(/\r?\n/u);
+      const allReadinessLines = logicalLines.filter((line) => (
+        !line.trimStart().startsWith("#") && /\bpg_isready\b/u.test(line)
+      ));
+      const ownedContainerProbes = allReadinessLines.filter((line) => (
+        line.includes('docker exec "$POSTGRES_CONTAINER" pg_isready')
+      ));
+
+      expect(allReadinessLines, `${path}: only exact owned-container probes`)
+        .toEqual(ownedContainerProbes);
+      expect(ownedContainerProbes, `${path}: exact readiness probe count`)
+        .toHaveLength(expectedProbeCount);
+      for (const probe of ownedContainerProbes) {
+        const hostOptions = probe.match(
+          /(?:^|\s)(?:--host(?:=[^\s;&|]+|\s+[^\s;&|]+)|-h(?:[^\s;&|]+|\s+[^\s;&|]+))/gu,
+        )?.map((option) => option.trim()) ?? [];
+        expect(hostOptions, `${path}: one authoritative final-server host`)
+          .toEqual(["--host 127.0.0.1"]);
+      }
+    }
+  });
+
   it("generates Prisma once through the npm prebuild lifecycle", () => {
     const builder = dockerfile.slice(
       dockerfile.indexOf("AS builder"),
