@@ -9,7 +9,6 @@ import type { AccountReadiness } from "@/application/models/email-verification";
 import { LinkButton } from "@/frontend/components/prime/link-button";
 import { TurnstileWidget } from "@/frontend/components/turnstile-widget";
 import { useVerifyEmailController } from "@/frontend/hooks/use-verify-email-controller";
-import { navigateTo } from "@/frontend/lib/browser-navigation";
 import { sessionRefreshPath } from "@/shared/auth/session-navigation";
 
 const defaultReadiness: AccountReadiness = {
@@ -32,10 +31,9 @@ export function VerifyEmailPanel({
 }) {
   const {
     accountSyncPending,
-    completedDestination,
     confirmed,
     confirmCode,
-    continueAfterSynchronization,
+    continueFromConfirmation,
     error,
     loading,
     message,
@@ -82,14 +80,7 @@ export function VerifyEmailPanel({
                   : "Перейти в профиль"
               }
               loading={loading === "continue"}
-              onClick={() => {
-                if (autoContinue && accountSyncPending) {
-                  void continueAfterSynchronization();
-                  return;
-                }
-
-                navigateTo(autoContinue ? completedDestination : "/profile");
-              }}
+              onClick={continueFromConfirmation}
               type="button"
             />
           )}
