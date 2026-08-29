@@ -19,6 +19,7 @@ const fixtureManifest = readFileSync(
   "tests/browser/journeys/journey-fixture-manifest.mjs",
   "utf8",
 );
+const ciWorkflow = readFileSync(".github/workflows/ci.yml", "utf8");
 
 describe("production-image Playwright output isolation", () => {
   it("preserves both default output directories when no project scope is provided", () => {
@@ -96,5 +97,16 @@ describe("production-image Playwright output isolation", () => {
     }
     expect(fixtureManifest).toContain('"../playwright-output-scope.ts"');
     expect(fixtureManifest).toContain('"../../../playwright.config.ts"');
+  });
+
+  it("preserves failure evidence from both Playwright phases and the sanitized contract", () => {
+    const artifactStep = ciWorkflow.slice(
+      ciWorkflow.indexOf("Preserve sanitized browser journey evidence"),
+      ciWorkflow.indexOf("Clean up only the owned browser journey project"),
+    );
+
+    expect(artifactStep).toContain("test-results/browser\n");
+    expect(artifactStep).toContain("test-results/browser-journeys\n");
+    expect(artifactStep).toContain("test-results/browser-journey-contract-evidence\n");
   });
 });
