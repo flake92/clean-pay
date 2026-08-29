@@ -1,12 +1,16 @@
 "use client";
 
-import { useState } from "react";
 import { Button } from "primereact/button";
 import { Column } from "primereact/column";
 import { DataTable } from "primereact/datatable";
 import { Message } from "primereact/message";
 import { Tag } from "primereact/tag";
 
+import type { PaymentHistorySnapshotStatus } from "@/application/models/cabinet";
+import {
+  CABINET_MOBILE_PAYMENT_PREVIEW_COUNT,
+  selectCabinetPaymentHistoryPresentation,
+} from "@/frontend/components/cabinet-payment-history-presentation";
 import {
   deviceDeleteLabel,
   formatDate,
@@ -15,12 +19,12 @@ import {
   type PaymentRecord,
 } from "@/frontend/components/cabinet-presentation";
 import { SubscriptionDeviceDetails } from "@/frontend/components/subscription-device-details";
+import { useCabinetPaymentHistoryController } from "@/frontend/hooks/use-cabinet-payment-history-controller";
 import { formatSubscriptionDevice } from "@/frontend/lib/device-display";
 import { paymentGatewayLabel } from "@/frontend/lib/payment-gateway";
 import type { DevicesResponse } from "@/shared/domain/subscriptions";
-import type { PaymentHistorySnapshotStatus } from "@/application/models/cabinet";
 
-export const MOBILE_PAYMENT_PREVIEW_COUNT = 5;
+export const MOBILE_PAYMENT_PREVIEW_COUNT = CABINET_MOBILE_PAYMENT_PREVIEW_COUNT;
 
 type CabinetDevicesSectionProps = {
   devices: DevicesResponse;
@@ -90,22 +94,19 @@ export function CabinetPaymentHistorySection({
   payments,
   status,
 }: CabinetPaymentHistorySectionProps) {
-  const [isExpanded, setIsExpanded] = useState(false);
-  const hiddenPaymentCount = Math.max(0, payments.length - MOBILE_PAYMENT_PREVIEW_COUNT);
-  const mobilePayments = isExpanded
-    ? payments
-    : payments.slice(0, MOBILE_PAYMENT_PREVIEW_COUNT);
-  const notice = status === "refreshing"
-    ? {
-        severity: "info" as const,
-        text: "История платежей обновляется. Пока показаны сохранённые данные.",
-      }
-    : status === "unavailable"
-      ? {
-          severity: "warn" as const,
-          text: "Не удалось обновить статусы платежей. Показаны сохранённые данные.",
-        }
-      : null;
+  const {
+    isExpanded,
+    toggleExpanded,
+  } = useCabinetPaymentHistoryController();
+  const {
+    hiddenPaymentCount,
+    mobilePayments,
+    notice,
+  } = selectCabinetPaymentHistoryPresentation({
+    isExpanded,
+    payments,
+    status,
+  });
 
   return (
     <div className="col-12">
@@ -162,7 +163,7 @@ export function CabinetPaymentHistorySection({
                     ? "Свернуть историю"
                     : `Показать ещё (${hiddenPaymentCount})`
                 }
-                onClick={() => setIsExpanded((expanded) => !expanded)}
+                onClick={toggleExpanded}
                 outlined
                 type="button"
               />

@@ -27,7 +27,10 @@ import type {
   VerificationMessageSeverity,
   VerificationSyncProblem,
 } from "@/frontend/components/verify-email-state";
-import { replaceWith } from "@/frontend/lib/browser-navigation";
+import {
+  navigateTo,
+  replaceWith,
+} from "@/frontend/lib/browser-navigation";
 import {
   accountLinkPath,
   accountSetupCompletePath,
@@ -273,6 +276,15 @@ export function useVerifyEmailController({
     }
   }
 
+  function continueFromConfirmation() {
+    if (autoContinue && accountSyncPending) {
+      void continueAfterSynchronization();
+      return;
+    }
+
+    navigateTo(autoContinue ? completedDestination : "/profile");
+  }
+
   const viewState = selectVerificationViewState({
     confirmed,
     accountSyncPending,
@@ -284,9 +296,8 @@ export function useVerifyEmailController({
 
   return {
     accountSyncPending,
-    completedDestination,
     confirmed: viewState.kind === "confirmed",
-    continueAfterSynchronization,
+    continueFromConfirmation,
     error,
     loading,
     message,

@@ -1,11 +1,9 @@
 "use client";
 
-import { useEffect } from "react";
-
 import { Message } from "primereact/message";
 
 import { LinkButton } from "@/frontend/components/prime/link-button";
-import { replaceWith } from "@/frontend/lib/browser-navigation";
+import { useAccountActionRequiredController } from "@/frontend/hooks/use-account-action-required-controller";
 import {
   accountLinkPath,
   safeAccountSetupDestination,
@@ -30,14 +28,11 @@ export function AccountActionRequired({
   const linkEmailHref = accountLinkPath(destination);
   const recoveryHref = providerSessionRecoveryPath(destination);
 
-  useEffect(() => {
-    if (action === "linkEmail") {
-      replaceWith(linkEmailHref);
-    }
-    if (action === "recover-session") {
-      replaceWith(recoveryHref);
-    }
-  }, [action, linkEmailHref, recoveryHref]);
+  useAccountActionRequiredController({
+    action,
+    linkEmailHref,
+    recoveryHref,
+  });
 
   if (action === "linkEmail") {
     return (
