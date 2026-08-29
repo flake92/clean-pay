@@ -216,6 +216,9 @@ describe("production container boundary", () => {
     }
     expect(publishedCandidateSmoke.match(/--connect-timeout 2/g)).toHaveLength(2);
     expect(publishedCandidateSmoke.match(/--max-time 10/g)).toHaveLength(2);
+    expect(publishedCandidateSmoke).toContain(
+      'docker rm --force --volumes "$RUNTIME_CONTAINER" "$PROBE_CONTAINER" "$METADATA_CONTAINER" "$POSTGRES_CONTAINER"',
+    );
   });
 
   it("waits for the final PostgreSQL TCP listener in every disposable security flow", () => {
