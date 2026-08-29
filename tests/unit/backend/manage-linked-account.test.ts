@@ -351,6 +351,24 @@ describe("failed() error message mapping", () => {
     });
   });
 
+  it("does not trust a duck-typed public message from an unknown failure", async () => {
+    const commands = mockCommands({
+      confirmTelegramMerge: vi.fn(async () => {
+        throw {
+          code: "UPSTREAM_ERROR",
+          publicMessage: "provider debug secret",
+        };
+      }),
+    });
+
+    const result = await confirmLinkedTelegram(commands);
+    expect(result).toEqual({
+      ok: false,
+      code: "UPSTREAM_ERROR",
+      message: "Не удалось объединить аккаунты.",
+    });
+  });
+
   it("uses ServiceError.prodMessage for ACCOUNT_MERGE_SUBSCRIPTIONS_CONFLICT", async () => {
     const commands = mockCommands({
       confirmTelegramMerge: vi.fn(async () => {

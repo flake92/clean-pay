@@ -73,8 +73,11 @@ export async function loadLinkAccount(reader: LinkAccountReader, auth: AuthProfi
 
 function failed(error: unknown, fallback: string): LinkAccountCommandResult {
   const code = typeof (error as { code?: unknown })?.code === "string" ? String((error as { code: string }).code) : "INTERNAL_ERROR";
+  const publicMessage = error instanceof LinkAccountGatewayError
+    ? error.publicMessage ?? null
+    : null;
   const prodMessage = typeof (error as { prodMessage?: unknown })?.prodMessage === "string" ? (error as { prodMessage: string }).prodMessage : null;
-  const message = code === "AUTH_FAILED" ? "Неверный e-mail или пароль." : code === "UNAUTHORIZED" ? "Сессия завершилась. Войдите снова." : prodMessage ?? fallback;
+  const message = code === "AUTH_FAILED" ? "Неверный e-mail или пароль." : code === "UNAUTHORIZED" ? "Сессия завершилась. Войдите снова." : publicMessage ?? prodMessage ?? fallback;
   return { ok: false, code, message };
 }
 

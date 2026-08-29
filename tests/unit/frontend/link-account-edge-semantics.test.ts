@@ -211,6 +211,47 @@ describe("link-account deferred edge semantics", () => {
     expect(mocks.linkAccountEmailAction).toHaveBeenCalledOnce();
   });
 
+  it.each([
+    ["AUTH_FAILED", "Неверный e-mail или пароль."],
+    ["RATE_LIMITED", "Слишком много попыток. Попробуйте позже."],
+  ] as const)("renders the exact %s link failure instead of a generic fallback", async (code, message) => {
+    mocks.linkAccountEmailAction.mockResolvedValue({
+      ok: false,
+      code,
+      message,
+    });
+    const user = userEvent.setup();
+    const view = render(
+      createElement(LinkAccountPanel, {
+        guided: true,
+        model: emailRequiredModel,
+        redirectTo: "/payment?plan=pro",
+      }),
+    );
+
+    await user.type(
+      view.container.querySelector<HTMLInputElement>('input[name="email"]')!,
+      "existing@example.com",
+    );
+    await user.type(
+      view.container.querySelector<HTMLInputElement>('input[name="password"]')!,
+      "wrong-password",
+    );
+    await user.type(
+      view.container.querySelector<HTMLInputElement>('input[name="confirmPassword"]')!,
+      "wrong-password",
+    );
+    fireEvent.submit(view.container.querySelector<HTMLFormElement>("form")!);
+
+    await waitFor(() =>
+      expect(view.container.querySelector('[data-severity="error"]')?.textContent)
+        .toBe(message),
+    );
+    expect(mocks.linkAccountEmailAction).toHaveBeenCalledOnce();
+    expect(screen.queryByText("Не удалось связать e-mail с аккаунтом.")).toBeNull();
+    expect(screen.queryByText("Сеть недоступна. Не удалось связать e-mail с аккаунтом.")).toBeNull();
+  });
+
   it("removes only the requested passkey with one Server Action call", async () => {
     mocks.removeLinkedPasskeyAction.mockResolvedValue({
       ok: true,

@@ -118,6 +118,7 @@ import { productionAuthCommands } from "@/backend/integrations/auth/auth-command
 import { productionEmailVerificationCommands } from "@/backend/integrations/auth/email-verification";
 import { productionLinkAccountCommands, productionLinkAccountReader } from "@/backend/integrations/auth/link-account";
 import { productionProfileCommands } from "@/backend/integrations/profile/profile-adapter";
+import { linkAccountEmail } from "@/application/auth/manage-linked-account";
 
 describe("production auth and profile adapters", () => {
   beforeEach(() => {
@@ -550,6 +551,76 @@ describe("production auth and profile adapters", () => {
     const expected = { context: { id: "session-1", userId: "user-1", user: { remnashopUserId: null, email: null, emailVerified: false, telegramId: null, telegramUsername: null } } };
     mocks.getCurrentSession.mockResolvedValueOnce(null);
     await expect(productionLinkAccountCommands.linkActorIsCurrent(expected)).resolves.toBe(false);
+  });
+
+  it("preserves the wrong-password reason through the linked-account production boundary", async () => {
+    mocks.getCurrentSession.mockResolvedValue({
+      id: "session-1",
+      userId: "user-1",
+      assuranceLevel: "FULL",
+      user: {
+        email: null,
+        emailVerified: false,
+        telegramId: "777",
+        telegramUsername: null,
+        remnashopUserId: "telegram-account",
+      },
+    });
+    mocks.remnashopAuth
+      .mockRejectedValueOnce(new ServiceError("AUTH_FAILED", 401, "bad credentials"))
+      .mockRejectedValueOnce(new ServiceError("CONFLICT", 409, "email already exists"));
+
+    await expect(linkAccountEmail(productionLinkAccountCommands, {
+      email: "existing@example.com",
+      password: "wrong-password",
+    })).resolves.toEqual({
+      ok: false,
+      code: "AUTH_FAILED",
+      message: "Неверный e-mail или пароль.",
+    });
+    expect(mocks.remnashopAuth).toHaveBeenNthCalledWith(1, "/auth/login", {
+      email: "existing@example.com",
+      password: "wrong-password",
+    });
+    expect(mocks.remnashopAuth).toHaveBeenNthCalledWith(2, "/auth/register", {
+      email: "existing@example.com",
+      password: "wrong-password",
+    });
+  });
+
+  it("preserves the rate-limit reason through the linked-account production boundary", async () => {
+    mocks.getCurrentSession.mockResolvedValue({
+      id: "session-1",
+      userId: "user-1",
+      assuranceLevel: "FULL",
+      user: {
+        email: null,
+        emailVerified: false,
+        telegramId: "777",
+        telegramUsername: null,
+        remnashopUserId: "telegram-account",
+      },
+    });
+    mocks.assertRateLimit.mockRejectedValue(
+      new ServiceError("RATE_LIMITED", 429, "too many attempts"),
+    );
+
+    await expect(productionLinkAccountCommands.assertLinkRateLimit(
+      "existing@example.com",
+    )).rejects.toMatchObject({
+      code: "RATE_LIMITED",
+      publicMessage: "Слишком много попыток. Попробуйте позже.",
+    });
+
+    await expect(linkAccountEmail(productionLinkAccountCommands, {
+      email: "existing@example.com",
+      password: "wrong-password",
+    })).resolves.toEqual({
+      ok: false,
+      code: "RATE_LIMITED",
+      message: "Слишком много попыток. Попробуйте позже.",
+    });
+    expect(mocks.remnashopAuth).not.toHaveBeenCalled();
   });
 
   it("stages a verified owner transition only under its fence and exact actor snapshot", async () => {
