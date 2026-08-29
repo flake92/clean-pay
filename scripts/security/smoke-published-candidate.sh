@@ -217,12 +217,12 @@ docker run --detach --name "$POSTGRES_CONTAINER" \
   >/dev/null
 
 for _ in $(seq 1 60); do
-  if docker exec "$POSTGRES_CONTAINER" pg_isready -U clean_pay_bootstrap -d clean_pay >/dev/null 2>&1; then
+  if docker exec "$POSTGRES_CONTAINER" pg_isready --host 127.0.0.1 -U clean_pay_bootstrap -d clean_pay >/dev/null 2>&1; then
     break
   fi
   sleep 1
 done
-docker exec "$POSTGRES_CONTAINER" pg_isready -U clean_pay_bootstrap -d clean_pay >/dev/null
+docker exec "$POSTGRES_CONTAINER" pg_isready --host 127.0.0.1 -U clean_pay_bootstrap -d clean_pay >/dev/null
 
 run_role_provision() {
   mode=$1

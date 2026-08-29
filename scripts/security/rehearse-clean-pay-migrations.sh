@@ -285,6 +285,7 @@ docker run --detach --name "$POSTGRES_CONTAINER" --network "$NETWORK" \
 
 for attempt in $(seq 1 60); do
   if docker exec "$POSTGRES_CONTAINER" pg_isready \
+    --host 127.0.0.1 \
     --username "$DATABASE_USER" --dbname "$DATABASE_NAME" >/dev/null 2>&1; then
     break
   fi
