@@ -717,6 +717,220 @@ describe("clean architecture boundaries", () => {
     expect(exports).toEqual(["VerifyEmailPanel"]);
   });
 
+  it("keeps scenario views behind explicit controller and presentation boundaries", () => {
+    type ViewBoundary = {
+      path: string;
+      boundaryImports: string[];
+      runtimeExports: string[];
+      allowedInfrastructureBindings?: Record<string, string[]>;
+      allowedInfrastructureCallCounts?: Record<string, number>;
+      allowedViewHookCounts?: Record<string, number>;
+      allowedBrowserGlobalCounts?: Record<string, number>;
+    };
+
+    const views: ViewBoundary[] = [
+      {
+        path: "src/frontend/components/verify-email-panel.tsx",
+        boundaryImports: ["@/frontend/hooks/use-verify-email-controller"],
+        runtimeExports: ["VerifyEmailPanel"],
+      },
+      {
+        path: "src/frontend/components/account-action-required.tsx",
+        boundaryImports: ["@/frontend/hooks/use-account-action-required-controller"],
+        runtimeExports: ["AccountActionRequired"],
+      },
+      {
+        path: "src/frontend/components/tariffs-panel.tsx",
+        boundaryImports: [
+          "@/frontend/components/tariffs-panel-presentation",
+          "@/frontend/hooks/use-tariffs-panel-controller",
+        ],
+        runtimeExports: ["TariffsPanel"],
+      },
+      {
+        path: "src/frontend/components/cabinet-responsive-sections.tsx",
+        boundaryImports: [
+          "@/frontend/components/cabinet-payment-history-presentation",
+          "@/frontend/hooks/use-cabinet-payment-history-controller",
+        ],
+        runtimeExports: [
+          "MOBILE_PAYMENT_PREVIEW_COUNT",
+          "CabinetDevicesSection",
+          "CabinetPaymentHistorySection",
+        ],
+      },
+      {
+        path: "src/frontend/components/cabinet-panel.tsx",
+        boundaryImports: ["@/frontend/hooks/use-cabinet-panel-controller"],
+        runtimeExports: ["CabinetPanel"],
+        allowedInfrastructureBindings: {
+          "next/navigation": ["useRouter"],
+          "@/app/actions/session": ["logoutAction"],
+          "@/frontend/lib/chatwoot": ["resetChatwootSession"],
+        },
+        allowedInfrastructureCallCounts: {
+          logoutAction: 1,
+          resetChatwootSession: 1,
+        },
+        allowedViewHookCounts: { useRouter: 1 },
+      },
+      {
+        path: "src/frontend/components/chatwoot-widget.tsx",
+        boundaryImports: ["@/frontend/components/chatwoot-widget-controller"],
+        runtimeExports: ["ChatwootWidget", "ChatwootGuestBoundary"],
+        allowedInfrastructureBindings: {
+          react: ["useEffect"],
+          "@/app/actions/chatwoot": ["loadChatwootSupportContextAction"],
+          "@/frontend/lib/chatwoot": [
+            "enterChatwootGuestMode",
+            "loadChatwootSupportContextCached",
+          ],
+        },
+        allowedInfrastructureCallCounts: {
+          enterChatwootGuestMode: 1,
+          loadChatwootSupportContextAction: 1,
+          loadChatwootSupportContextCached: 1,
+        },
+        allowedViewHookCounts: { useEffect: 1 },
+      },
+      {
+        path: "src/frontend/components/telegram-webapp-login.tsx",
+        boundaryImports: ["@/frontend/hooks/use-telegram-webapp-login-controller"],
+        runtimeExports: ["TelegramWebAppLogin"],
+        allowedBrowserGlobalCounts: { window: 1 },
+      },
+    ];
+
+    for (const view of views) {
+      const source = readFileSync(view.path, "utf8");
+      const imports = astImportedModules(source);
+      const infrastructureImports = imports.filter((dependency) =>
+        dependency === "react"
+        || dependency === "next/navigation"
+        || dependency.startsWith("@/app/actions")
+        || dependency.startsWith("@/backend")
+        || dependency === "@/frontend/lib/browser-navigation"
+        || dependency === "@/frontend/lib/chatwoot"
+      );
+      expect(
+        infrastructureImports,
+        `${view.path} changed its exact legacy infrastructure-import allowlist`,
+      ).toEqual(Object.keys(view.allowedInfrastructureBindings ?? {}));
+      for (const dependency of view.boundaryImports) {
+        expect(imports, `${view.path} is missing ${dependency}`)
+          .toContain(dependency);
+      }
+
+      const sourceFile = ts.createSourceFile(
+        view.path,
+        source,
+        ts.ScriptTarget.Latest,
+        true,
+        ts.ScriptKind.TSX,
+      );
+      const runtimeExports: string[] = [];
+      const infrastructureBindings: Record<string, string[]> = {};
+      const callCounts = new Map<string, number>();
+      const viewHookCounts = new Map<string, number>();
+      const browserGlobalCounts = new Map<string, number>();
+      const browserGlobalNames = new Set(["document", "globalThis", "navigator", "window"]);
+      const statefulViewHooks = new Set([
+        "useCallback",
+        "useEffect",
+        "useMemo",
+        "useReducer",
+        "useRef",
+        "useRouter",
+        "useState",
+      ]);
+
+      for (const statement of sourceFile.statements) {
+        if (
+          ts.isImportDeclaration(statement)
+          && ts.isStringLiteralLike(statement.moduleSpecifier)
+          && infrastructureImports.includes(statement.moduleSpecifier.text)
+        ) {
+          const bindings: string[] = [];
+          const importClause = statement.importClause;
+          if (importClause?.name) bindings.push(importClause.name.text);
+          if (importClause?.namedBindings) {
+            if (ts.isNamespaceImport(importClause.namedBindings)) {
+              bindings.push(`* as ${importClause.namedBindings.name.text}`);
+            } else {
+              bindings.push(...importClause.namedBindings.elements.map(
+                (element) => element.name.text,
+              ));
+            }
+          }
+          infrastructureBindings[statement.moduleSpecifier.text] = bindings;
+        }
+
+        const exported = ts.canHaveModifiers(statement)
+          && ts.getModifiers(statement)?.some(
+            (modifier) => modifier.kind === ts.SyntaxKind.ExportKeyword,
+          );
+        if (!exported) continue;
+        if (ts.isFunctionDeclaration(statement) && statement.name) {
+          runtimeExports.push(statement.name.text);
+        }
+        if (ts.isVariableStatement(statement)) {
+          for (const declaration of statement.declarationList.declarations) {
+            if (ts.isIdentifier(declaration.name)) {
+              runtimeExports.push(declaration.name.text);
+            }
+          }
+        }
+      }
+
+      function visit(node: ts.Node) {
+        if (
+          ts.isCallExpression(node)
+          && ts.isIdentifier(node.expression)
+        ) {
+          const callName = node.expression.text;
+          callCounts.set(callName, (callCounts.get(callName) ?? 0) + 1);
+          if (statefulViewHooks.has(callName)) {
+            viewHookCounts.set(
+              callName,
+              (viewHookCounts.get(callName) ?? 0) + 1,
+            );
+          }
+        }
+        if (
+          ts.isPropertyAccessExpression(node)
+          && ts.isIdentifier(node.expression)
+          && browserGlobalNames.has(node.expression.text)
+        ) {
+          const globalName = node.expression.text;
+          browserGlobalCounts.set(
+            globalName,
+            (browserGlobalCounts.get(globalName) ?? 0) + 1,
+          );
+        }
+        ts.forEachChild(node, visit);
+      }
+      visit(sourceFile);
+
+      expect(infrastructureBindings).toEqual(
+        view.allowedInfrastructureBindings ?? {},
+      );
+      const allowedInfrastructureCalls = view.allowedInfrastructureCallCounts ?? {};
+      expect(Object.fromEntries(
+        Object.keys(allowedInfrastructureCalls).map((callName) => [
+          callName,
+          callCounts.get(callName) ?? 0,
+        ]),
+      )).toEqual(allowedInfrastructureCalls);
+      expect(Object.fromEntries(viewHookCounts)).toEqual(
+        view.allowedViewHookCounts ?? {},
+      );
+      expect(Object.fromEntries(browserGlobalCounts)).toEqual(
+        view.allowedBrowserGlobalCounts ?? {},
+      );
+      expect(runtimeExports).toEqual(view.runtimeExports);
+    }
+  });
+
   it("keeps purchase and extension views behind thin controller boundaries", () => {
     for (const {
       componentName,
