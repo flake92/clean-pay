@@ -51,5 +51,10 @@ export interface LinkAccountCommands {
 }
 
 export class LinkAccountGatewayError extends Error {
-  constructor(public readonly code: string) { super(code); }
+  constructor(
+    public readonly code: string,
+    public readonly publicMessage?: string,
+  ) {
+    super(code);
+  }
 }

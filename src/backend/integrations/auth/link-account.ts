@@ -58,7 +58,7 @@ function gatewayError(error: unknown): LinkAccountGatewayError {
   if (error.code === "CONFLICT" && message.includes("both users have current subscriptions")) {
     return new LinkAccountGatewayError("ACCOUNT_MERGE_SUBSCRIPTIONS_CONFLICT");
   }
-  return new LinkAccountGatewayError(error.code);
+  return new LinkAccountGatewayError(error.code, error.prodMessage);
 }
 
 async function adapt<T>(work: () => Promise<T>) {
