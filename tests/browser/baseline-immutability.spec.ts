@@ -753,6 +753,65 @@ test.describe("immutable browser baseline policy", () => {
     ] } });
   });
 
+  test("canonicalizes only an exact adjacent concurrent cabinet read pair", () => {
+    const mutation = enrichedReadinessLedgerEntry({
+      effect: "purchase_initialized",
+      method: "POST",
+      pathname: "/api/v1/public/subscription/purchase",
+      sequence: 1,
+    });
+    const devices = cabinetReadLedgerEntry("devices", 2);
+    const offers = cabinetReadLedgerEntry("offers", 3);
+    const manifest = journeyProviderLedgerManifest([mutation, devices, offers]);
+    const projected = projectCharacterizationManifestForComparison(manifest) as typeof manifest;
+    expect(projected.providerEffects.entries).toEqual([
+      mutation,
+      { ...offers, sequence: 2 },
+      { ...devices, sequence: 3 },
+    ]);
+  });
+
+  test("keeps concurrent cabinet read near misses in observed order", () => {
+    const mutations: Array<(entries: Array<Record<string, unknown>>) => void> = [
+      (entries) => { entries[0]!.sequence = 8; },
+      (entries) => { entries[0]!.body_contract = {}; },
+      (entries) => { entries[0]!.credential_contract = {
+        authorization_scheme: null,
+        cookie_names: ["refresh_token"],
+        header_names: [],
+      }; },
+      (entries) => { entries[0]!.effect = "read_offers"; },
+      (entries) => { entries[0]!.unexpected = true; },
+    ];
+    for (const mutate of mutations) {
+      const entries: Array<Record<string, unknown>> = [
+        cabinetReadLedgerEntry("devices", 1),
+        cabinetReadLedgerEntry("offers", 2),
+      ];
+      mutate(entries);
+      const projected = projectCharacterizationManifestForComparison(
+        journeyProviderLedgerManifest(entries),
+      ) as { providerEffects: { entries: Array<Record<string, unknown>> } };
+      expect(projected.providerEffects.entries.map((entry) => entry.pathname))
+        .toEqual([
+          "/api/v1/public/subscription/devices",
+          "/api/v1/public/subscription/offers",
+        ]);
+    }
+
+    const outsideJourney = projectCharacterizationManifestForComparison({
+      providerEffects: { entries: [
+        cabinetReadLedgerEntry("devices", 1),
+        cabinetReadLedgerEntry("offers", 2),
+      ] },
+    }) as { providerEffects: { entries: Array<Record<string, unknown>> } };
+    expect(outsideJourney.providerEffects.entries.map((entry) => entry.pathname))
+      .toEqual([
+        "/api/v1/public/subscription/devices",
+        "/api/v1/public/subscription/offers",
+      ]);
+  });
+
   test("keeps enriched readiness contract near misses fail-closed", () => {
     const nearMisses = [
       enrichedReadinessLedgerEntry(),
@@ -1425,6 +1484,32 @@ function enrichedReadinessLedgerEntry(overrides: Partial<{
     } as unknown,
     idempotency_key_contract: null as unknown,
     ...overrides,
+  };
+}
+
+function cabinetReadLedgerEntry(kind: "devices" | "offers", sequence: number) {
+  return enrichedReadinessLedgerEntry({
+    credential_contract: {
+      authorization_scheme: null,
+      cookie_names: ["access_token"],
+      header_names: [],
+    },
+    effect: kind === "devices" ? "read_devices" : "read_offers",
+    pathname: `/api/v1/public/subscription/${kind}`,
+    sequence,
+  });
+}
+
+function journeyProviderLedgerManifest(entries: Array<Record<string, unknown>>) {
+  return {
+    schemaVersion: 2,
+    baselineCommit: "f5cb6f543d85256e7733a1ade6a4f451d86cf378",
+    project: "journey-390x844",
+    journey: "email-register-verify-and-login",
+    source: {
+      fixtureContract: { version: "journey-v5", sha256: "2".repeat(64) },
+    },
+    providerEffects: { entries },
   };
 }
 

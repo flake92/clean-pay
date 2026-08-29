@@ -15,6 +15,7 @@ const connectProxy = journeyConnectProxy(
 export default defineConfig({
   testDir: ".",
   globalSetup: "./journey-global-setup.ts",
+  globalTeardown: "./journey-global-teardown.ts",
   outputDir: projectScopedPlaywrightOutputDirectory(
     "../../../test-results/browser-journeys",
     process.env.CLEAN_PAY_BROWSER_PLAYWRIGHT_OUTPUT_SCOPE,
