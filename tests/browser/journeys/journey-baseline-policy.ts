@@ -18,6 +18,8 @@ import {
   createSanitizedHarContract,
 } from "./sanitized-har";
 import { assertExactJourneyKeyboardSkipLinkScreenshot } from "./journey-skip-link-policy";
+import { authenticatedJourneyLivePairCaptureEnabled } from "./authenticated-journey-capture-mode";
+import { writeJourneyLivePairCase } from "./journey-live-pair-evidence";
 
 const execFileAsync = promisify(execFile);
 
@@ -67,6 +69,18 @@ export async function reconcileJourneyBaseline(options: {
   screenshots: Array<{ label: string; bytes: Uint8Array }>;
   update?: boolean;
 }) {
+  if (authenticatedJourneyLivePairCaptureEnabled(process.env)) {
+    if (options.update !== undefined) {
+      throw new Error("Journey live-pair capture does not accept immutable baseline update options.");
+    }
+    return writeJourneyLivePairCase({
+      project: options.project,
+      journeyId: options.journeyId,
+      networkEvidence: options.networkEvidence,
+      rawEvidence: options.rawEvidence,
+      screenshots: options.screenshots,
+    });
+  }
   const update = options.update ?? journeyBaselineUpdateRequested();
   const artifactRoot = update ? journeyBaselineStagingRoot() : journeyBaselineRoot;
   const destination = path.join(

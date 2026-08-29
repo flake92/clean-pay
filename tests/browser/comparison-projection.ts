@@ -1,5 +1,6 @@
 import { projectAllowlistedA11ySemantics } from "./a11y-semantic-projection";
 import {
+  projectExactAuthenticatedChatwootGeneratedPair,
   projectExactJourneyGeneratedValues,
   projectExactJourneyPwaShellCachePair,
 } from "./journey-comparison-projection";
@@ -98,7 +99,10 @@ export function projectCharacterizationManifestForComparison(value: unknown) {
 export function projectCharacterizationManifestPairForComparison(
   expectedValue: unknown,
   actualValue: unknown,
-  options: { actualApplicationOrigin?: string } = {},
+  options: {
+    actualApplicationOrigin?: string;
+    expectedApplicationOrigin?: string;
+  } = {},
 ) {
   const fixtureContractPairIsValid = isExactJourneyFixtureContractPair(
     expectedValue,
@@ -116,6 +120,7 @@ export function projectCharacterizationManifestPairForComparison(
     && isRecord(expectedPrepared)
     && isRecord(actualPrepared)
   ) {
+    projectExactAuthenticatedChatwootGeneratedPair(expectedPrepared, actualPrepared);
     projectExactJourneyPwaShellCachePair(expectedPrepared, actualPrepared);
   }
   const expected = projectCharacterizationManifestForComparison(expectedPrepared);
@@ -123,13 +128,319 @@ export function projectCharacterizationManifestPairForComparison(
   projectExactLocalApplicationHostPair(
     expected,
     actual,
+    options.expectedApplicationOrigin,
     options.actualApplicationOrigin,
+  );
+  projectExactHashedNextStaticTopologyPair(
+    expected,
+    actual,
+    fixtureContractPairIsValid,
   );
   projectExactRemovedNextJsPoweredBy(expected, actual);
   if (fixtureContractPairIsValid) {
     projectExactJourneyFixtureContract(expected, actual);
   }
   return { expected, actual };
+}
+
+function projectExactHashedNextStaticTopologyPair(
+  expected: unknown,
+  actual: unknown,
+  fixtureContractPairIsValid: boolean,
+) {
+  if (
+    !fixtureContractPairIsValid
+    || !isRecord(expected)
+    || !isRecord(actual)
+    || !hasExactJourneyManifestEnvelope(expected)
+    || !hasExactJourneyManifestEnvelope(actual)
+    || expected.project !== actual.project
+    || expected.journey !== actual.journey
+    || !isRecord(expected.network)
+    || !isRecord(actual.network)
+    || !Array.isArray(expected.network.requests)
+    || !Array.isArray(actual.network.requests)
+    || expected.network.requests.length === actual.network.requests.length
+  ) {
+    return;
+  }
+
+  const expectedTrial = cloneJson(expected);
+  const actualTrial = cloneJson(actual);
+  if (!isRecord(expectedTrial) || !isRecord(actualTrial)) return;
+  const expectedCollapsed = collapseExactProjectedNextStaticTopology(expectedTrial);
+  const actualCollapsed = collapseExactProjectedNextStaticTopology(actualTrial);
+  if (expectedCollapsed !== true || actualCollapsed !== true) return;
+
+  projectExactHashedStaticDocumentLinkPair(expectedTrial, actualTrial);
+  projectExactRemovedNextJsPoweredBy(expectedTrial, actualTrial);
+  projectExactJourneyFixtureContract(expectedTrial, actualTrial);
+  if (!sameJson(expectedTrial, actualTrial)) return;
+
+  expected.network = expectedTrial.network;
+  actual.network = actualTrial.network;
+}
+
+function collapseExactProjectedNextStaticTopology(
+  manifest: Record<string, unknown>,
+) {
+  const network = manifest.network;
+  if (
+    !isRecord(network)
+    || !hasExactKeys(network, ["requests", "serverActionCount", "serverActions"])
+    || !Array.isArray(network.requests)
+    || !Array.isArray(network.serverActions)
+    || network.serverActionCount !== network.serverActions.length
+    || !hasSafeRequestIndexes(network.requests)
+  ) {
+    return null;
+  }
+
+  const removedIndexes = new Set<number>();
+  const retained: unknown[] = [];
+  let documentEpoch = 0;
+  let seen = new Set<string>();
+  for (const requestValue of network.requests) {
+    const request = requestValue as Record<string, unknown>;
+    if (isExactProjectedApplicationDocument(request)) {
+      documentEpoch += 1;
+      seen = new Set<string>();
+    }
+    if (documentEpoch > 0 && isExactProjectedNextStaticChunk(request)) {
+      const signature = JSON.stringify({ ...request, index: 0 });
+      if (seen.has(signature)) {
+        removedIndexes.add(request.index as number);
+        continue;
+      }
+      seen.add(signature);
+    }
+    retained.push(request);
+  }
+  if (removedIndexes.size === 0) return false;
+
+  const oldToNewIndex = new Map<number, number>();
+  retained.forEach((request, index) => {
+    oldToNewIndex.set((request as Record<string, unknown>).index as number, index);
+  });
+  if (
+    retained.some((request) => redirectCannotBeReindexed(
+      request as Record<string, unknown>,
+      removedIndexes,
+      oldToNewIndex,
+    ))
+    || network.serverActions.some((action) => actionCannotBeReindexed(
+      action,
+      removedIndexes,
+      oldToNewIndex,
+    ))
+  ) {
+    return null;
+  }
+
+  for (const [index, requestValue] of retained.entries()) {
+    const request = requestValue as Record<string, unknown>;
+    request.index = index;
+    if (typeof request.redirectedFrom === "number") {
+      request.redirectedFrom = oldToNewIndex.get(request.redirectedFrom) as number;
+    }
+  }
+  for (const actionValue of network.serverActions) {
+    const action = actionValue as Record<string, unknown>;
+    action.requestIndex = oldToNewIndex.get(action.requestIndex as number) as number;
+  }
+  network.requests = retained;
+  return true;
+}
+
+function isExactProjectedApplicationDocument(request: Record<string, unknown>) {
+  return hasExactKeys(request, [
+    "externalTransport",
+    "failure",
+    "index",
+    "method",
+    "navigation",
+    "postData",
+    "redirectedFrom",
+    "requestHeaders",
+    "resourceType",
+    "response",
+    "scope",
+    "serverAction",
+    "url",
+  ])
+    && request.scope === "application"
+    && request.method === "GET"
+    && request.resourceType === "document"
+    && request.navigation === true
+    && isNoServerAction(request.serverAction)
+    && request.postData === null
+    && request.failure === null
+    && request.externalTransport === null
+    && isRecord(request.url)
+    && request.url.origin === "<app-origin>"
+    && Array.isArray(request.url.query)
+    && request.url.fragment === null
+    && Array.isArray(request.requestHeaders)
+    && isRecord(request.response)
+    && Number.isInteger(request.response.status);
+}
+
+function isExactProjectedNextStaticChunk(request: Record<string, unknown>) {
+  if (
+    !hasExactKeys(request, [
+      "externalTransport",
+      "failure",
+      "index",
+      "method",
+      "navigation",
+      "postData",
+      "redirectedFrom",
+      "requestHeaders",
+      "resourceType",
+      "response",
+      "scope",
+      "serverAction",
+      "url",
+    ])
+    || request.scope !== "application"
+    || request.method !== "GET"
+    || request.navigation !== false
+    || !isNoServerAction(request.serverAction)
+    || request.postData !== null
+    || request.redirectedFrom !== null
+    || request.failure !== null
+    || request.externalTransport !== null
+    || !isRecord(request.url)
+    || request.url.origin !== "<app-origin>"
+    || !Array.isArray(request.url.query)
+    || request.url.query.length !== 0
+    || request.url.fragment !== null
+    || !Array.isArray(request.requestHeaders)
+    || request.requestHeaders.some((header) => (
+      isRecord(header)
+      && ["authorization", "next-action", "proxy-authorization", "rsc"]
+        .includes(String(header.name).toLowerCase())
+    ))
+    || !isRecord(request.response)
+    || request.response.status !== 200
+    || !Array.isArray(request.response.headers)
+  ) {
+    return false;
+  }
+  const pathname = request.url.pathname;
+  const expectedResourceType = pathname === "/_next/static/chunks/<compiled-content-hash>.css"
+    ? "stylesheet"
+    : /^\/_next\/static\/chunks\/(?:turbopack-)?<compiled-content-hash>\.js$/.test(
+      String(pathname),
+    )
+      ? "script"
+      : null;
+  if (request.resourceType !== expectedResourceType) return false;
+  const etags = request.response.headers.filter((header) => (
+    isRecord(header)
+    && hasExactKeys(header, ["name", "value"])
+    && header.name === "etag"
+    && header.value === "<compiled-static-etag>"
+  ));
+  return etags.length === 1;
+}
+
+function projectExactHashedStaticDocumentLinkPair(
+  expected: Record<string, unknown>,
+  actual: Record<string, unknown>,
+) {
+  const expectedNetwork = expected.network;
+  const actualNetwork = actual.network;
+  if (
+    !isRecord(expectedNetwork)
+    || !isRecord(actualNetwork)
+    || !Array.isArray(expectedNetwork.requests)
+    || !Array.isArray(actualNetwork.requests)
+    || expectedNetwork.requests.length !== actualNetwork.requests.length
+  ) {
+    return;
+  }
+  for (const [index, expectedValue] of expectedNetwork.requests.entries()) {
+    const actualValue = actualNetwork.requests[index];
+    if (
+      !isRecord(expectedValue)
+      || !isRecord(actualValue)
+      || !isExactProjectedApplicationDocument(expectedValue)
+      || !isExactProjectedApplicationDocument(actualValue)
+      || !equalExceptKey(expectedValue, actualValue, "response")
+      || !isRecord(expectedValue.response)
+      || !isRecord(actualValue.response)
+      || !equalExceptKey(expectedValue.response, actualValue.response, "headers")
+      || !Array.isArray(expectedValue.response.headers)
+      || !Array.isArray(actualValue.response.headers)
+    ) {
+      continue;
+    }
+    const expectedHeaders = expectedValue.response.headers;
+    const actualHeaders = actualValue.response.headers;
+    const expectedWithoutDisclosure = expectedHeaders.filter((header) => (
+      !isExactNextJsPoweredByHeader(header)
+    ));
+    if (
+      expectedHeaders.length - expectedWithoutDisclosure.length > 1
+      || actualHeaders.some((header) => (
+        isRecord(header) && header.name === "x-powered-by"
+      ))
+      || expectedWithoutDisclosure.length !== actualHeaders.length
+    ) {
+      continue;
+    }
+    const expectedLinkIndexes = namedHeaderIndexes(expectedWithoutDisclosure, "link");
+    const actualLinkIndexes = namedHeaderIndexes(actualHeaders, "link");
+    if (
+      expectedLinkIndexes.length !== 1
+      || actualLinkIndexes.length !== 1
+      || expectedLinkIndexes[0] !== actualLinkIndexes[0]
+    ) {
+      continue;
+    }
+    const linkIndex = expectedLinkIndexes[0]!;
+    const expectedLink = expectedWithoutDisclosure[linkIndex];
+    const actualLink = actualHeaders[linkIndex];
+    if (
+      !isExactBoundedSha256Header(expectedLink, "link")
+      || !isExactBoundedSha256Header(actualLink, "link")
+      || expectedLink.value.bytes !== actualLink.value.bytes
+      || expectedLink.value.sha256 === actualLink.value.sha256
+    ) {
+      continue;
+    }
+    const expectedComparable = cloneJson(expectedWithoutDisclosure);
+    const actualComparable = cloneJson(actualHeaders);
+    if (!Array.isArray(expectedComparable) || !Array.isArray(actualComparable)) continue;
+    (expectedComparable[linkIndex] as Record<string, unknown>).value = {
+      bytes: expectedLink.value.bytes,
+      sha256: "<validated:next-static-link-topology>",
+    };
+    (actualComparable[linkIndex] as Record<string, unknown>).value = {
+      bytes: actualLink.value.bytes,
+      sha256: "<validated:next-static-link-topology>",
+    };
+    if (!sameJson(expectedComparable, actualComparable)) continue;
+    expectedLink.value.sha256 = "<validated:next-static-link-topology>";
+    actualLink.value.sha256 = "<validated:next-static-link-topology>";
+  }
+}
+
+function isExactBoundedSha256Header(
+  value: unknown,
+  name: string,
+): value is { name: string; value: { bytes: number; sha256: string } } {
+  return isRecord(value)
+    && hasExactKeys(value, ["name", "value"])
+    && value.name === name
+    && isRecord(value.value)
+    && hasExactKeys(value.value, ["bytes", "sha256"])
+    && Number.isSafeInteger(value.value.bytes)
+    && Number(value.value.bytes) > 0
+    && Number(value.value.bytes) <= 8_192
+    && typeof value.value.sha256 === "string"
+    && /^[a-f0-9]{64}$/.test(value.value.sha256);
 }
 
 function projectExactChromiumTransportIdentityPair(
@@ -443,7 +754,7 @@ function projectJourneyProviderReadinessNoise(manifest: Record<string, unknown>)
   ))) return;
 
   const entries = providerEffects.entries as Array<Record<string, unknown>>;
-  const retained = [];
+  const retained: Array<Record<string, unknown>> = [];
   for (let index = 0; index < entries.length; index += 1) {
     const entry = entries[index]!;
     if (isExactReadinessLedgerEntry(entry)) continue;
@@ -453,10 +764,105 @@ function projectJourneyProviderReadinessNoise(manifest: Record<string, unknown>)
     }
     retained.push(entry);
   }
+  canonicalizeExactConcurrentCabinetReads(manifest, retained);
   providerEffects.entries = retained.map((entry, index) => ({
     ...entry,
     sequence: index + 1,
   }));
+}
+
+function canonicalizeExactConcurrentCabinetReads(
+  manifest: Record<string, unknown>,
+  entries: Array<Record<string, unknown>>,
+) {
+  if (
+    !hasExactJourneyManifestEnvelope(manifest)
+    || !exactJourneyFixtureContract(manifest)
+    || ![
+      "email-account-links-and-merges-telegram",
+      "email-register-verify-and-login",
+      "tariffs-payment-returns-extend-idempotency",
+      "telegram-oidc-cabinet-profile-link-referral-passkey",
+      "telegram-webapp-browser-boundary",
+    ].includes(String(manifest.journey))
+  ) {
+    return;
+  }
+  for (let index = 0; index < entries.length - 1; index += 1) {
+    const first = entries[index]!;
+    const second = entries[index + 1]!;
+    const firstKind = exactConcurrentCabinetReadKind(first);
+    const secondKind = exactConcurrentCabinetReadKind(second);
+    if (
+      firstKind === null
+      || secondKind === null
+      || firstKind === secondKind
+      || Number(first.sequence) + 1 !== second.sequence
+    ) {
+      continue;
+    }
+    if (firstKind === "devices" && secondKind === "offers") {
+      entries[index] = second;
+      entries[index + 1] = first;
+    }
+    index += 1;
+  }
+}
+
+function exactConcurrentCabinetReadKind(entry: Record<string, unknown>) {
+  if (
+    !hasExactKeys(entry, [
+      "body_bytes",
+      "body_contract",
+      "body_sha256",
+      "credential_contract",
+      "effect",
+      "idempotency_key_contract",
+      "idempotency_key_present",
+      "idempotency_key_sha256",
+      "method",
+      "pathname",
+      "query_keys",
+      "sequence",
+      "service",
+    ])
+    || !Number.isSafeInteger(entry.sequence)
+    || entry.service !== "remnashop"
+    || entry.method !== "GET"
+    || !Array.isArray(entry.query_keys)
+    || entry.query_keys.length !== 0
+    || entry.body_bytes !== 0
+    || entry.body_sha256
+      !== "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    || entry.body_contract !== null
+    || entry.idempotency_key_present !== false
+    || entry.idempotency_key_sha256 !== null
+    || entry.idempotency_key_contract !== null
+    || !isExactCabinetReadCredential(entry.credential_contract)
+  ) {
+    return null;
+  }
+  if (
+    entry.pathname === "/api/v1/public/subscription/offers"
+    && entry.effect === "read_offers"
+  ) {
+    return "offers";
+  }
+  if (
+    entry.pathname === "/api/v1/public/subscription/devices"
+    && entry.effect === "read_devices"
+  ) {
+    return "devices";
+  }
+  return null;
+}
+
+function isExactCabinetReadCredential(value: unknown) {
+  return isRecord(value)
+    && hasExactKeys(value, ["authorization_scheme", "cookie_names", "header_names"])
+    && value.authorization_scheme === null
+    && sameJson(value.cookie_names, ["access_token"])
+    && sameJson(value.header_names, []);
 }
 
 function isExactReadinessLedgerEntry(entry: Record<string, unknown>) {
@@ -676,7 +1082,10 @@ export function projectCharacterizationManifestBytesForComparison(
 export function projectCharacterizationManifestPairBytesForComparison(
   expectedValue: Uint8Array,
   actualValue: Uint8Array,
-  options: { actualApplicationOrigin?: string } = {},
+  options: {
+    actualApplicationOrigin?: string;
+    expectedApplicationOrigin?: string;
+  } = {},
 ) {
   const expectedParsed: unknown = JSON.parse(Buffer.from(expectedValue).toString("utf8"));
   const actualParsed: unknown = JSON.parse(Buffer.from(actualValue).toString("utf8"));
@@ -694,11 +1103,22 @@ export function projectCharacterizationManifestPairBytesForComparison(
 function projectExactLocalApplicationHostPair(
   expected: unknown,
   actual: unknown,
+  expectedApplicationOrigin: string | undefined,
   actualApplicationOrigin: string | undefined,
 ) {
-  const actualHost = exactIsolatedLocalApplicationHost(actualApplicationOrigin);
+  const explicitLivePair = expectedApplicationOrigin !== undefined;
+  const expectedHost = expectedApplicationOrigin === undefined
+    ? new URL(IMMUTABLE_PUBLIC_BASELINE_APPLICATION_ORIGIN).host
+    : exactIsolatedLocalApplicationHost(expectedApplicationOrigin, true);
+  const actualHost = exactIsolatedLocalApplicationHost(
+    actualApplicationOrigin,
+    explicitLivePair,
+  );
   if (
-    !actualHost
+    !expectedHost
+    || !actualHost
+    || (expectedApplicationOrigin !== undefined
+      && expectedApplicationOrigin === actualApplicationOrigin)
     || !isExactPublicCharacterizationPair(expected, actual)
   ) {
     return;
@@ -737,7 +1157,7 @@ function projectExactLocalApplicationHostPair(
       !isExactSanitizedHeader(
         expectedHeader,
         "host",
-        digestValue(new URL(IMMUTABLE_PUBLIC_BASELINE_APPLICATION_ORIGIN).host),
+        digestValue(expectedHost),
       )
       || !isExactSanitizedHeader(actualHeader, "host", digestValue(actualHost))
       || !headersMatchAfterValidatedHost(
@@ -803,11 +1223,15 @@ function isExactPublicCharacterizationEnvelope(value: Record<string, unknown>) {
     && Number.isSafeInteger(value.network.serverActionCount);
 }
 
-function exactIsolatedLocalApplicationHost(value: string | undefined) {
+function exactIsolatedLocalApplicationHost(
+  value: string | undefined,
+  allowImmutableBaselineOrigin = false,
+) {
   if (
     typeof value !== "string"
     || !/^http:\/\/127\.0\.0\.1:[1-9]\d{0,4}$/.test(value)
-    || value === IMMUTABLE_PUBLIC_BASELINE_APPLICATION_ORIGIN
+    || (!allowImmutableBaselineOrigin
+      && value === IMMUTABLE_PUBLIC_BASELINE_APPLICATION_ORIGIN)
   ) {
     return null;
   }
@@ -1040,7 +1464,7 @@ function projectNetwork(manifest: Record<string, unknown>) {
     if (typeof request.redirectedFrom === "number") {
       request.redirectedFrom = oldToNewIndex.get(request.redirectedFrom) as number;
     }
-    if (isKnownResponseBackedAbort(request)) {
+    if (isKnownResponseBackedAbort(manifest, request)) {
       request.failure = null;
     }
     projectJourneyFailedHashedStaticAsset(manifest, request);
@@ -1456,14 +1880,15 @@ function hasExactlyOneHeaderWithDigest(
   return isExactDigest(header.value, expectedValue);
 }
 
-function isKnownResponseBackedAbort(request: Record<string, unknown>) {
+function isKnownResponseBackedAbort(
+  manifest: Record<string, unknown>,
+  request: Record<string, unknown>,
+) {
   if (
     request.scope !== "application"
-    || request.method !== "GET"
     || request.navigation !== false
     || request.resourceType === "document"
     || typeof request.resourceType !== "string"
-    || !isNoServerAction(request.serverAction)
     || !isRecord(request.response)
     || !Number.isInteger(request.response.status)
     || !isRecord(request.failure)
@@ -1471,7 +1896,122 @@ function isKnownResponseBackedAbort(request: Record<string, unknown>) {
   ) {
     return false;
   }
-  return isExactDigest(request.failure.errorText, NET_ERR_ABORTED);
+  if (!isExactDigest(request.failure.errorText, NET_ERR_ABORTED)) return false;
+  if (request.method === "GET" && isNoServerAction(request.serverAction)) return true;
+  return isExactResponseBackedJourneyServerAction(manifest, request);
+}
+
+function isExactResponseBackedJourneyServerAction(
+  manifest: Record<string, unknown>,
+  request: Record<string, unknown>,
+) {
+  const network = manifest.network;
+  if (
+    !hasExactJourneyManifestEnvelope(manifest)
+    || !exactJourneyFixtureContract(manifest)
+    || !isRecord(network)
+    || !hasExactKeys(network, ["requests", "serverActionCount", "serverActions"])
+    || !Array.isArray(network.requests)
+    || !Array.isArray(network.serverActions)
+    || network.serverActionCount !== network.serverActions.length
+    || request.method !== "POST"
+    || request.resourceType !== "fetch"
+    || !isRecord(request.serverAction)
+    || request.serverAction.present !== true
+  ) {
+    return false;
+  }
+
+  let matched = false;
+  for (const [order, actionValue] of network.serverActions.entries()) {
+    if (
+      !isRecord(actionValue)
+      || !hasExactKeys(actionValue, [
+        "identifier",
+        "method",
+        "order",
+        "payload",
+        "requestIndex",
+        "status",
+        "url",
+      ])
+      || actionValue.order !== order
+      || !Number.isSafeInteger(actionValue.requestIndex)
+      || !Number.isInteger(actionValue.status)
+      || !isExactJourneyActionDigest(actionValue.identifier, "server-action-id")
+      || !isExactJourneyActionDigest(actionValue.payload, "server-action-payload")
+    ) {
+      return false;
+    }
+    const actionRequest = network.requests[actionValue.requestIndex as number];
+    if (
+      !isRecord(actionRequest)
+      || !hasExactKeys(actionRequest, [
+        "externalTransport",
+        "failure",
+        "index",
+        "method",
+        "navigation",
+        "postData",
+        "redirectedFrom",
+        "requestHeaders",
+        "resourceType",
+        "response",
+        "scope",
+        "serverAction",
+        "url",
+      ])
+      || actionRequest.index !== actionValue.requestIndex
+      || actionRequest.scope !== "application"
+      || actionRequest.method !== "POST"
+      || actionRequest.resourceType !== "fetch"
+      || actionRequest.navigation !== false
+      || actionRequest.redirectedFrom !== null
+      || actionRequest.externalTransport !== null
+      || !isRecord(actionRequest.serverAction)
+      || actionRequest.serverAction.present !== true
+      || !sameJson(actionRequest.serverAction.identifier, actionValue.identifier)
+      || !sameJson(actionRequest.postData, actionValue.payload)
+      || !sameJson(actionRequest.url, actionValue.url)
+      || actionValue.method !== actionRequest.method
+      || !isRecord(actionRequest.response)
+      || actionRequest.response.status !== actionValue.status
+      || !hasExactJourneyNextActionHeader(
+        actionRequest.requestHeaders,
+        actionValue.identifier,
+      )
+    ) {
+      return false;
+    }
+    if (actionRequest === request) {
+      if (matched) return false;
+      matched = true;
+    }
+  }
+  return matched;
+}
+
+function isExactJourneyActionDigest(value: unknown, format: string) {
+  return isRecord(value)
+    && hasExactKeys(value, ["bytes", "sha256"])
+    && Number.isSafeInteger(value.bytes)
+    && Number(value.bytes) >= 0
+    && typeof value.sha256 === "string"
+    && (
+      /^[a-f0-9]{64}$/.test(value.sha256)
+      || new RegExp(`^<dynamic:${format}:[1-9][0-9]*>$`).test(value.sha256)
+    );
+}
+
+function hasExactJourneyNextActionHeader(headers: unknown, identifier: unknown) {
+  if (!Array.isArray(headers)) return false;
+  const matches = headers.filter((header) => (
+    isRecord(header) && header.name === "next-action"
+  ));
+  return matches.length === 1
+    && isRecord(matches[0])
+    && hasExactKeys(matches[0], ["name", "value"])
+    && sameJson(matches[0].value, identifier);
 }
 
 function isNoServerAction(value: unknown) {

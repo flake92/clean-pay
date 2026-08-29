@@ -42,6 +42,40 @@ test("projects generated journey values by referential symbol while retaining st
   expect(oidc.valueBytes).toBe(64);
 });
 
+test("projects only an exactly ledger-backed Server Action ERR_ABORTED schedule", () => {
+  const baseline = responseBackedActionAbortManifest();
+  const candidate = journeyManifest("candidate");
+  expect(projectPair(baseline, candidate).actual)
+    .toEqual(projectPair(baseline, candidate).expected);
+
+  const nearMisses: Array<(
+    manifest: ReturnType<typeof responseBackedActionAbortManifest>,
+  ) => void> = [
+    (manifest) => { manifest.network.serverActionCount = 2; },
+    (manifest) => { manifest.network.serverActions[0]!.status = 201; },
+    (manifest) => { manifest.network.serverActions[0]!.requestIndex = 1; },
+    (manifest) => { manifest.network.requests[0]!.method = "GET"; },
+    (manifest) => { manifest.network.requests[0]!.response.status = 201; },
+    (manifest) => { manifest.network.requests[0]!.requestHeaders.push({
+      ...manifest.network.requests[0]!.requestHeaders[0]!,
+    }); },
+    (manifest) => { Object.assign(manifest.network.requests[0]!.failure!, {
+      unexpected: true,
+    }); },
+    (manifest) => { Object.assign(manifest.network.requests[0]!, {
+      unexpected: true,
+    }); },
+    (manifest) => { manifest.source.fixtureContract.sha256 = "invalid"; },
+  ];
+  for (const mutate of nearMisses) {
+    const nearMiss = responseBackedActionAbortManifest();
+    mutate(nearMiss);
+    const projected = project(nearMiss) as typeof nearMiss;
+    expect(projected.network.requests[0]!.failure, JSON.stringify(nearMiss))
+      .not.toBeNull();
+  }
+});
+
 test("projects only the pinned baseline and recomputed current fixture contracts", () => {
   const baseline = journeyManifest("baseline");
   const candidate = journeyManifest("candidate");
@@ -117,6 +151,115 @@ test("projects only a consistent generated PWA shell cache contract", () => {
   outsideJourney.journey = "tariffs-payment-returns-extend-idempotency";
   const outsideProjection = projectPair(baseline, outsideJourney);
   expect(outsideProjection.actual).not.toEqual(outsideProjection.expected);
+});
+
+test("projects authenticated Chatwoot identifiers only with exact matched presence", () => {
+  const baseline = journeyManifest("baseline");
+  const candidate = journeyManifest("candidate");
+  setAuthenticatedChatwootGeneratedState(baseline, "baseline", [true, true]);
+  setAuthenticatedChatwootGeneratedState(candidate, "candidate", [true, true]);
+  expect(projectPair(baseline, candidate).actual)
+    .toEqual(projectPair(baseline, candidate).expected);
+
+  const identityName = journeyManifest("candidate");
+  setAuthenticatedChatwootGeneratedState(identityName, "candidate", [true, true]);
+  for (const index of [0, 1]) {
+    const cookie = authenticatedChatwootCheckpoint(identityName, index).cookies[2] as {
+      name: string;
+    };
+    cookie.name = `cw_user_${digest("unexpected-chatwoot-website-token")}`;
+  }
+  expect(projectPair(baseline, identityName).actual)
+    .not.toEqual(projectPair(baseline, identityName).expected);
+
+  const presenceNearMiss = journeyManifest("candidate");
+  setAuthenticatedChatwootGeneratedState(presenceNearMiss, "candidate", [true, false]);
+  expect(projectPair(baseline, presenceNearMiss).actual)
+    .not.toEqual(projectPair(baseline, presenceNearMiss).expected);
+
+  const ownershipDrift = journeyManifest("candidate");
+  setAuthenticatedChatwootGeneratedState(ownershipDrift, "candidate", [true, true]);
+  const ownership = authenticatedChatwootCheckpoint(ownershipDrift, 1)
+    .storage.local[0]!.value;
+  ownership.sha256 = digest("candidate:other-ownership");
+  expect(projectPair(baseline, ownershipDrift).actual)
+    .not.toEqual(projectPair(baseline, ownershipDrift).expected);
+
+  const ownershipBytes = journeyManifest("candidate");
+  setAuthenticatedChatwootGeneratedState(ownershipBytes, "candidate", [true, true]);
+  for (const index of [0, 1]) {
+    authenticatedChatwootCheckpoint(ownershipBytes, index)
+      .storage.local[0]!.value.bytes = 86;
+  }
+  expect(projectPair(baseline, ownershipBytes).actual)
+    .not.toEqual(projectPair(baseline, ownershipBytes).expected);
+
+  const ownershipShape = journeyManifest("candidate");
+  setAuthenticatedChatwootGeneratedState(ownershipShape, "candidate", [true, true]);
+  for (const index of [0, 1]) {
+    Object.assign(
+      authenticatedChatwootCheckpoint(ownershipShape, index).storage.local[0]!,
+      { unexpected: true },
+    );
+  }
+  expect(projectPair(baseline, ownershipShape).actual)
+    .not.toEqual(projectPair(baseline, ownershipShape).expected);
+
+  const identityValue = journeyManifest("candidate");
+  setAuthenticatedChatwootGeneratedState(identityValue, "candidate", [true, true]);
+  for (const index of [0, 1]) {
+    const cookie = authenticatedChatwootCheckpoint(identityValue, index).cookies[2] as {
+      value: { sha256: string };
+    };
+    cookie.value.sha256 = digest("unexpected-chatwoot-user");
+  }
+  expect(projectPair(baseline, identityValue).actual)
+    .not.toEqual(projectPair(baseline, identityValue).expected);
+
+  const widenedCookie = journeyManifest("candidate");
+  setAuthenticatedChatwootGeneratedState(widenedCookie, "candidate", [true, true]);
+  authenticatedChatwootCheckpoint(widenedCookie, 0).cookies.push({
+    ...authenticatedChatwootCheckpoint(widenedCookie, 0).cookies[1]!,
+    name: "cw_unexpected",
+  });
+  expect(projectPair(baseline, widenedCookie).actual)
+    .not.toEqual(projectPair(baseline, widenedCookie).expected);
+});
+
+test("projects hashed Next topology only after complete journey semantic proof", () => {
+  const baseline = journeyManifest("baseline");
+  const candidate = journeyManifest("candidate");
+  setHashedNextTopology(baseline, "baseline", 3, true);
+  setHashedNextTopology(candidate, "candidate", 2, false);
+  const projected = projectPair(baseline, candidate);
+  expect(projected.actual).toEqual(projected.expected);
+  const projectedNetwork = (projected.actual as typeof candidate).network;
+  expect(projectedNetwork.requests).toHaveLength(3);
+  expect(projectedNetwork.serverActions).toHaveLength(1);
+  expect(projectedNetwork.serverActionCount).toBe(1);
+  expect(projectedNetwork.serverActions[0]!.requestIndex).toBe(2);
+  expect(projectedNetwork.serverActions[0]!.order).toBe(0);
+  expect(projectedNetwork.serverActions[0]!.payload.bytes).toBe(240);
+
+  const semanticNearMiss = journeyManifest("candidate");
+  setHashedNextTopology(semanticNearMiss, "candidate", 2, false);
+  semanticNearMiss.checkpoints[0]!.label = "unexpected-checkpoint";
+  const retainedSemantic = projectPair(baseline, semanticNearMiss);
+  expect((retainedSemantic.expected as typeof baseline).network.requests).toHaveLength(5);
+  expect((retainedSemantic.actual as typeof semanticNearMiss).network.requests).toHaveLength(4);
+
+  const staticNearMiss = journeyManifest("candidate");
+  setHashedNextTopology(staticNearMiss, "candidate", 2, false);
+  staticNearMiss.network.requests[2]!.response.status = 404;
+  const retainedStatic = projectPair(baseline, staticNearMiss);
+  expect((retainedStatic.expected as typeof baseline).network.requests).toHaveLength(5);
+  expect((retainedStatic.actual as typeof staticNearMiss).network.requests).toHaveLength(4);
+
+  const linkNearMiss = journeyManifest("candidate");
+  setHashedNextTopology(linkNearMiss, "candidate", 2, false, 472);
+  const retainedLink = projectPair(baseline, linkNearMiss);
+  expect((retainedLink.expected as typeof baseline).network.requests).toHaveLength(5);
+  expect((retainedLink.actual as typeof linkNearMiss).network.requests).toHaveLength(4);
 });
 
 test("projects a consistent generated PWA shell cache in non-public journey checkpoints", () => {
@@ -538,7 +681,10 @@ function journeyManifest(seed: string) {
         postData: { ...requestPayload },
         redirectedFrom: null,
         response: { status: 200, headers: [] },
-        failure: null,
+        failure: null as {
+          errorText: { bytes: number; sha256: string };
+          unexpected?: boolean;
+        } | null,
         externalTransport: null,
       }],
       serverActionCount: 1,
@@ -588,6 +734,84 @@ function journeyManifest(seed: string) {
   };
 }
 
+function responseBackedActionAbortManifest() {
+  const manifest = journeyManifest("baseline");
+  manifest.network.requests[0]!.failure = {
+    errorText: {
+      bytes: 16,
+      sha256: "7ba7a1709a2d7d220e120c927e0a7e90adf45c88b09ba912b237d705090d1d4e",
+    },
+  };
+  return manifest;
+}
+
+function setHashedNextTopology(
+  manifest: ReturnType<typeof journeyManifest>,
+  seed: string,
+  scriptCount: number,
+  poweredBy: boolean,
+  linkBytes = 471,
+) {
+  const action = structuredClone(manifest.network.requests[0]!);
+  const linkHeader = {
+    name: "link",
+    value: { bytes: linkBytes, sha256: digest(`${seed}:next-link`) },
+  };
+  const headers = [
+    linkHeader,
+    ...(poweredBy ? [{
+      name: "x-powered-by",
+      value: {
+        bytes: 7,
+        sha256: "30b7f8482c4f570c063e4dff04b91ddc9b2b5f535ac70fedffb1cf34e0d23ec6",
+      },
+    }] : []),
+  ];
+  const document = {
+    index: 0,
+    method: "GET",
+    url: canonicalUrl("/cabinet"),
+    scope: "application",
+    resourceType: "document",
+    navigation: true,
+    serverAction: { present: false, identifier: null },
+    requestHeaders: [],
+    postData: null,
+    redirectedFrom: null,
+    response: { status: 200, headers },
+    failure: null,
+    externalTransport: null,
+  };
+  const scripts = Array.from({ length: scriptCount }, (_, offset) => ({
+    index: offset + 1,
+    method: "GET",
+    url: canonicalUrl(`/_next/static/chunks/${seed}${offset}12345678.js`),
+    scope: "application",
+    resourceType: "script",
+    navigation: false,
+    serverAction: { present: false, identifier: null },
+    requestHeaders: [],
+    postData: null,
+    redirectedFrom: null,
+    response: {
+      status: 200,
+      headers: [{
+        name: "etag",
+        value: { bytes: 20, sha256: digest(`${seed}:${offset}:etag`) },
+      }],
+    },
+    failure: null,
+    externalTransport: null,
+  }));
+  action.index = scripts.length + 1;
+  manifest.network.requests = [
+    document,
+    ...scripts,
+    action,
+  ] as unknown as typeof manifest.network.requests;
+  manifest.network.serverActions[0]!.requestIndex = action.index;
+}
+
 function setOfflineCssPaths(
   manifest: ReturnType<typeof journeyManifest>,
   seed: string,
@@ -634,6 +858,65 @@ function setPwaShellCache(
       },
     },
   }];
+}
+
+function setAuthenticatedChatwootGeneratedState(
+  manifest: ReturnType<typeof journeyManifest>,
+  seed: string,
+  identityPresence: [boolean, boolean],
+) {
+  manifest.journey = "email-register-verify-and-login";
+  const access = manifest.checkpoints[0]!.cookies[0]!;
+  const conversation = {
+    name: "cw_conversation",
+    value: { bytes: 25, sha256: digest(`${seed}:chatwoot-conversation`) },
+    domain: "<app-host>",
+    path: "/",
+    httpOnly: false,
+    secure: true,
+    sameSite: "Lax",
+  };
+  const identity = {
+    name: `cw_user_${digest("synthetic-chatwoot-website-token")}`,
+    value: { bytes: 23, sha256: digest("synthetic-chatwoot-user") },
+    domain: "<app-host>",
+    path: "/",
+    httpOnly: false,
+    secure: true,
+    sameSite: "Lax",
+  };
+  const ownership = {
+    key: "clean-pay:chatwoot-ownership:v1",
+    value: { bytes: 85, sha256: digest(`${seed}:chatwoot-ownership`) },
+  };
+  manifest.checkpoints = (["register-cabinet", "email-login-cabinet"] as const)
+    .map((label, index) => ({
+      label,
+      url: canonicalUrl("/cabinet"),
+      cookies: [
+        structuredClone(access),
+        structuredClone(conversation),
+        ...(identityPresence[index] ? [structuredClone(identity)] : []),
+      ],
+      storage: {
+        local: [structuredClone(ownership)],
+        session: [],
+        cacheNames: [],
+        serviceWorkerScopes: [],
+      },
+    })) as unknown as typeof manifest.checkpoints;
+}
+
+function authenticatedChatwootCheckpoint(
+  manifest: ReturnType<typeof journeyManifest>,
+  index: number,
+) {
+  return manifest.checkpoints[index] as unknown as {
+    cookies: Array<Record<string, unknown>>;
+    storage: {
+      local: Array<{ value: { bytes: number; sha256: string } }>;
+    };
+  };
 }
 
 function pwaBoundary(manifest: ReturnType<typeof journeyManifest>) {
