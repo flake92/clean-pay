@@ -21,6 +21,7 @@ import {
   JOURNEY_COMPOSE_SERVICE_NAMES,
 } from "./journey-compose-runtime-attestation.mjs";
 import {
+  collectJourneyDockerFailureEvidence,
   journeyDockerCliEnvironment,
   runJourneyDockerCommand,
   withJourneyOwnedStackPair,
@@ -188,8 +189,10 @@ try {
     proofSha256: sha256(bytes),
   })}\n`);
 } catch (error) {
+  const dockerFailures = collectJourneyDockerFailureEvidence(error);
   process.stderr.write(`${JSON.stringify({
     status: "dual_image_provider_overlap_failed",
+    ...(dockerFailures.length === 0 ? {} : { dockerFailures }),
     ...createJourneySanitizedErrorEvidence(error),
   })}\n`);
   process.exitCode = 1;
@@ -537,11 +540,16 @@ async function exerciseCabinet(
     const telegram = page.getByRole("button", { name: "Войти через Telegram" });
     await telegram.waitFor({ state: "visible", timeout: 15_000 });
     await waitUntil(async () => telegram.isEnabled(), 15_000);
-    await telegram.click();
-    await page.waitForURL(
+    const profileNavigation = page.waitForURL(
       (url) => url.href === "https://pay.ci.clean-pay.dev/profile",
-      { timeout: 30_000 },
-    );
+      { waitUntil: "load", timeout: 30_000 },
+    ).catch((error) => {
+      throw new Error("Provider profile navigation barrier failed.", { cause: error });
+    });
+    await Promise.all([
+      profileNavigation,
+      telegram.click(),
+    ]);
     await page.getByRole("heading", { name: "Профиль", level: 1 })
       .waitFor({ state: "visible", timeout: 15_000 });
     await page.evaluate(() => new Promise((resolve) => setTimeout(resolve, 50)));
@@ -571,10 +579,7 @@ async function exerciseCabinet(
         !== "app-cabinet-document") {
       throw new Error("Cabinet navigation response is not bound to its exact browser request.");
     }
-    await page.waitForURL(
-      (url) => url.href === "https://pay.ci.clean-pay.dev/cabinet",
-      { timeout: 30_000 },
-    );
+    await waitForProviderCabinetNavigation(page);
     const heading = page.getByRole("heading", { name: "Личный кабинет", level: 1 });
     await heading.waitFor({ state: "visible", timeout: 15_000 });
     await drainProviderOverlapHistoryBindings(page);
@@ -1863,6 +1868,17 @@ function splitLines(value) {
 function isWithin(parent, child) {
   const relative = path.relative(parent, child);
   return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
+}
+
+async function waitForProviderCabinetNavigation(page) {
+  try {
+    await page.waitForURL(
+      (url) => url.href === "https://pay.ci.clean-pay.dev/cabinet",
+      { waitUntil: "domcontentloaded", timeout: 30_000 },
+    );
+  } catch (error) {
+    throw new Error("Provider cabinet navigation barrier failed.", { cause: error });
+  }
 }
 
 async function waitUntil(predicate, timeoutMs) {
