@@ -1288,11 +1288,11 @@ function assertTmpfs(actualTmpfs, expectedTmpfs) {
   const actual = Object.entries(actualTmpfs ?? {}).map(([target, options]) => ({
     options: normalizeTmpfsOptions(options),
     target,
-  })).sort(byDestination);
+  })).sort(byTarget);
   const expected = (expectedTmpfs ?? []).map((entry) => {
     const [target, ...options] = String(entry).split(":");
     return { options: normalizeTmpfsOptions(options.join(":")), target };
-  }).sort(byDestination);
+  }).sort(byTarget);
   exactJson(actual, expected);
 }
 
@@ -1974,6 +1974,10 @@ function sha256(value) {
 
 function byDestination(left, right) {
   return left.destination.localeCompare(right.destination);
+}
+
+function byTarget(left, right) {
+  return left.target.localeCompare(right.target);
 }
 
 function byName(left, right) {
