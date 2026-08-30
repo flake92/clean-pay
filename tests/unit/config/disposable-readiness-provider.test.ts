@@ -1,11 +1,11 @@
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { once } from "node:events";
 import {
   request as httpRequest,
   type Server,
 } from "node:http";
-import { connect, type AddressInfo } from "node:net";
+import { connect, createServer as createTcpServer, type AddressInfo } from "node:net";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -20,6 +20,10 @@ const syntheticServiceKey = "synthetic-disposable-readiness-key";
 const expectedServiceKeySha256 = createHash("sha256")
   .update(syntheticServiceKey)
   .digest("hex");
+const providerScriptPath = path.resolve(
+  process.cwd(),
+  "scripts/security/disposable-readiness-provider.mjs",
+);
 const authHeaders = Object.freeze({
   "content-type": "application/json",
   "x-remnashop-auth-service-key": syntheticServiceKey,
@@ -208,11 +212,106 @@ describe("disposable readiness provider", () => {
 });
 
 describe("disposable readiness provider module loading", () => {
+  it("publishes one fixed ready marker after the CLI listener is bound", async () => {
+    const reservation = createTcpServer();
+    reservation.listen(0, "127.0.0.1");
+    await once(reservation, "listening");
+    const reservedAddress = reservation.address();
+    if (reservedAddress === null || typeof reservedAddress === "string") {
+      throw new Error("disposable readiness provider test did not reserve a TCP port");
+    }
+    const port = reservedAddress.port;
+    await new Promise<void>((resolve, reject) => {
+      reservation.close((error) => {
+        if (error) reject(error);
+        else resolve();
+      });
+    });
+
+    const child = spawn(process.execPath, [providerScriptPath, String(port)], {
+      env: {
+        CLEAN_PAY_SYNTHETIC_PROVIDER_KEY_SHA256: expectedServiceKeySha256,
+        NODE_ENV: "test",
+      },
+      stdio: ["ignore", "pipe", "pipe"] as const,
+      windowsHide: true,
+    });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (chunk: Buffer) => { stdout += chunk.toString("utf8"); });
+    child.stderr.on("data", (chunk: Buffer) => { stderr += chunk.toString("utf8"); });
+    let exit: [number | null, NodeJS.Signals | null] | undefined;
+    try {
+      const [marker] = await once(child.stdout, "data", {
+        signal: AbortSignal.timeout(5_000),
+      });
+      expect(Buffer.from(marker).toString("utf8"))
+        .toBe("clean-pay-disposable-readiness-provider-ready-v1\n");
+
+      const response = await fetch(`http://127.0.0.1:${port}/healthz`, {
+        signal: AbortSignal.timeout(2_000),
+      });
+      expect(response.status).toBe(200);
+      expect(response.headers.get("content-type")).toBe("application/json");
+      expect(await response.text()).toBe('{"status":"ok"}\n');
+    } finally {
+      child.kill("SIGTERM");
+      if (child.exitCode === null && child.signalCode === null) {
+        exit = await once(child, "exit", {
+          signal: AbortSignal.timeout(5_000),
+        }) as [number | null, NodeJS.Signals | null];
+      } else {
+        exit = [child.exitCode, child.signalCode];
+      }
+    }
+    expect(exit).toEqual(process.platform === "win32"
+      ? [null, "SIGTERM"]
+      : [0, null]);
+    expect(stdout).toBe("clean-pay-disposable-readiness-provider-ready-v1\n");
+    expect(stderr).toBe("");
+  });
+
+  it("does not publish the ready marker when the CLI port is occupied", async () => {
+    const blocker = createTcpServer();
+    blocker.listen(0, "0.0.0.0");
+    await once(blocker, "listening");
+    const address = blocker.address();
+    if (address === null || typeof address === "string") {
+      throw new Error("disposable readiness provider test did not bind its blocker");
+    }
+    const child = spawn(process.execPath, [providerScriptPath, String(address.port)], {
+      env: {
+        CLEAN_PAY_SYNTHETIC_PROVIDER_KEY_SHA256: expectedServiceKeySha256,
+        NODE_ENV: "test",
+      },
+      stdio: ["ignore", "pipe", "pipe"] as const,
+      windowsHide: true,
+    });
+    const exitPromise = once(child, "exit", {
+      signal: AbortSignal.timeout(5_000),
+    });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (chunk: Buffer) => { stdout += chunk.toString("utf8"); });
+    child.stderr.on("data", (chunk: Buffer) => { stderr += chunk.toString("utf8"); });
+    try {
+      const exit = await exitPromise;
+      expect(exit).toEqual([1, null]);
+      expect(stdout).toBe("");
+      expect(stderr).toBe("");
+    } finally {
+      if (child.exitCode === null && child.signalCode === null) child.kill();
+      await new Promise<void>((resolve, reject) => {
+        blocker.close((error) => {
+          if (error) reject(error);
+          else resolve();
+        });
+      });
+    }
+  });
+
   it("is import-safe and does not install process lifecycle handlers", () => {
-    const moduleUrl = pathToFileURL(path.resolve(
-      process.cwd(),
-      "scripts/security/disposable-readiness-provider.mjs",
-    )).href;
+    const moduleUrl = pathToFileURL(providerScriptPath).href;
     const program = `
       const before = {
         sigint: process.listenerCount("SIGINT"),

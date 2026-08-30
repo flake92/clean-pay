@@ -469,6 +469,7 @@ cleanup_auxiliary_container() {
 
 start_readiness_provider() {
   local attempt
+  local logs
   local operator_identity
   local service_key_sha256
   [[ -z $(docker ps --all --quiet --no-trunc \
@@ -511,16 +512,17 @@ start_readiness_provider() {
     "$READINESS_PROVIDER_CONTAINER_ID" "$READINESS_PROVIDER_CONTAINER_NAME" \
     readiness-provider "$EDGE_NETWORK"
   for ((attempt = 0; attempt < 200; attempt += 1)); do
-    if docker exec "$READINESS_PROVIDER_CONTAINER_ID" node -e '
-      fetch(`http://127.0.0.1:${process.argv[1]}/healthz`,{signal:AbortSignal.timeout(1000)})
-        .then(async(response)=>{
-          const text=await response.text();
-          if(response.status!==200||response.headers.get("content-type")!=="application/json"||text!=="{\"status\":\"ok\"}\n")process.exit(1);
-        }).catch(()=>process.exit(1));
-    ' "$READINESS_PROVIDER_PORT" >/dev/null 2>&1; then
+    logs=$(docker logs "$READINESS_PROVIDER_CONTAINER_ID" 2>&1) \
+      || fail "disposable readiness provider logs could not be inspected"
+    if [[ "$logs" == clean-pay-disposable-readiness-provider-ready-v1 ]]; then
+      assert_auxiliary_container \
+        "$READINESS_PROVIDER_CONTAINER_ID" "$READINESS_PROVIDER_CONTAINER_NAME" \
+        readiness-provider "$EDGE_NETWORK"
       READINESS_PROVIDER_USED=true
       return
     fi
+    [[ -z "$logs" ]] \
+      || fail "disposable readiness provider emitted unexpected startup output"
     assert_auxiliary_container \
       "$READINESS_PROVIDER_CONTAINER_ID" "$READINESS_PROVIDER_CONTAINER_NAME" \
       readiness-provider "$EDGE_NETWORK"
@@ -533,7 +535,8 @@ prove_readiness_provider_contract() {
   assert_auxiliary_container \
     "$READINESS_PROVIDER_CONTAINER_ID" "$READINESS_PROVIDER_CONTAINER_NAME" \
     readiness-provider "$EDGE_NETWORK"
-  docker exec "$READINESS_PROVIDER_CONTAINER_ID" node -e '
+  timeout --signal=TERM --kill-after=5s 20s \
+    docker exec "$READINESS_PROVIDER_CONTAINER_ID" node -e '
     fetch(`http://127.0.0.1:${process.argv[1]}/contract`,{signal:AbortSignal.timeout(5000)})
       .then(async(response)=>{
         if(response.status!==200||response.headers.get("content-type")!=="application/json")process.exit(1);
