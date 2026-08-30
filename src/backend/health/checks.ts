@@ -22,6 +22,8 @@ export function createProductionReadinessGateway(): ReadinessGateway {
   const env = getEnv();
   const mailpitUrl = env.readiness.mailpitUrl;
   const remnawaveUrl = env.readiness.remnawaveUrl;
+  const telegramOidcJwksUrl = env.readiness.telegramOidcJwksUrl
+    ?? env.telegramOidc.jwksUri;
   const remnawaveToken = env.remnawave.token;
 
   return {
@@ -106,7 +108,7 @@ export function createProductionReadinessGateway(): ReadinessGateway {
       }
     },
     async checkTelegramOidc(signal) {
-      const response = await credentialedFetch(env.telegramOidc.jwksUri, {
+      const response = await credentialedFetch(telegramOidcJwksUrl, {
         cache: "no-store",
         signal,
       });

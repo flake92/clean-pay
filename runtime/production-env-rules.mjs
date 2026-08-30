@@ -603,6 +603,16 @@ export function validateProductionEnvironment(environment) {
     );
   }
 
+  const telegramReadinessJwksValue = optional(
+    "CLEAN_PAY_READINESS_TELEGRAM_OIDC_JWKS_URL",
+  );
+  if (telegramReadinessJwksValue) {
+    disposableTelegramReadinessJwksUrl(
+      telegramReadinessJwksValue,
+      remnashopPublicUrl,
+    );
+  }
+
   const remnawaveUrl = publicHttpsOrigin(
     "REMNAWAVE_API_BASE_URL",
     required("REMNAWAVE_API_BASE_URL"),
@@ -1353,6 +1363,26 @@ function remnashopBaseUrl(name, value, scope) {
     fail(`${name} must end with /api/v1/${scope}`);
   }
 
+  return url;
+}
+
+function disposableTelegramReadinessJwksUrl(value, remnashopPublicUrl) {
+  const name = "CLEAN_PAY_READINESS_TELEGRAM_OIDC_JWKS_URL";
+  const url = serviceUrl(name, value);
+  const hostnameMatch = /^zdt-readiness-([a-f0-9]{16})$/.exec(url.hostname);
+  const expected = hostnameMatch
+    ? `http://${url.hostname}:4190/.well-known/jwks.json`
+    : null;
+
+  if (
+    expected === null
+    || value !== expected
+    || url.origin !== remnashopPublicUrl.origin
+  ) {
+    fail(
+      `${name} is restricted to the exact disposable readiness provider origin`,
+    );
+  }
   return url;
 }
 

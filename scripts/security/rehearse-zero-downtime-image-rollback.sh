@@ -406,6 +406,7 @@ run_zero_downtime() {
       CLEAN_PAY_ZDT_CANARY_NAME="$CANARY_NAME" \
       CLEAN_PAY_ZDT_CANARY_ALIAS="$CANARY_ALIAS" \
       CLEAN_PAY_ZDT_CANARY_PORT="$CANARY_PORT" \
+      CLEAN_PAY_ZDT_CANARY_READINESS_TELEGRAM_OIDC_JWKS_URL="http://$READINESS_PROVIDER_ALIAS:$READINESS_PROVIDER_PORT/.well-known/jwks.json" \
       sh "$ZERO_DOWNTIME_SCRIPT" "$@"
 }
 
@@ -543,7 +544,7 @@ prove_readiness_provider_contract() {
         const text=await response.text();
         if(Buffer.byteLength(text)>1024)process.exit(1);
         const value=JSON.parse(text);
-        const keys=["emailStart","identify","notificationPreferences","plans","serviceSession"];
+        const keys=["emailStart","identify","jwks","notificationPreferences","plans","serviceSession"];
         if(!value||typeof value!=="object"||Array.isArray(value)
           ||JSON.stringify(Object.keys(value).sort())!==JSON.stringify(keys)
           ||keys.some((key)=>!Number.isSafeInteger(value[key])||value[key]<3||value[key]>1000))process.exit(1);
