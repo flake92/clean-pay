@@ -18,6 +18,8 @@ const applicationOrigin = "https://pay.ci.clean-pay.dev";
 const redirectTo = "/payment?plan=pro&duration=30";
 const expectedFinalRoute =
   "/register/verify-email?redirect_to=%2Fpayment%3Fplan%3Dpro%26duration%3D30";
+const expectedDirectCabinetFinalRoute =
+  "/register/verify-email?redirect_to=%2Fcabinet";
 const authServiceKey = createHash("sha256")
   .update("clean-pay-browser-journey:remnashop-auth", "utf8")
   .digest("hex");
@@ -110,8 +112,47 @@ test("authorized existing unverified e-mail login is gated before cabinet reads"
   expect(cabinetNavigationCount).toBe(0);
   expect(blockedRequests).toEqual([]);
 
+  const accessClaims = await currentAccessClaims(page);
+  expect(accessClaims).toEqual({
+    emailVerified: false,
+    telegramLinked: true,
+  });
+  const sequenceBeforeDirectCabinet =
+    ledgerAfterLogin.entries.at(-1)?.sequence ?? sequenceBeforeLogin;
+  const navigationCountBeforeDirectCabinet = navigationPathnames.length;
+  await page.goto("/cabinet", { waitUntil: "load" });
+  await page.waitForURL(
+    (url) => `${url.pathname}${url.search}` === expectedDirectCabinetFinalRoute,
+  );
+  await expect(page.getByRole("heading", {
+    name: "Подтверждение e-mail",
+    level: 1,
+  })).toBeVisible();
+  const genericCabinetErrorCount = await page.getByText(
+    "Не удалось загрузить подписку.",
+    { exact: true },
+  ).count();
+  const directCabinetNavigationAttemptCount = navigationPathnames
+    .slice(navigationCountBeforeDirectCabinet)
+    .filter((pathname) => pathname === "/cabinet")
+    .length;
+  const ledgerAfterDirectCabinet = await providerLedger(
+    environment.providerControlUrl,
+  );
+  const directProviderRequests = ledgerAfterDirectCabinet.entries.filter(
+    ({ sequence }) => sequence > sequenceBeforeDirectCabinet,
+  );
+  const directCabinetReads = directProviderRequests.filter(({ effect }) => (
+    forbiddenCabinetEffects.has(effect)
+  ));
+  expect(directCabinetNavigationAttemptCount).toBe(1);
+  expect(directProviderRequests).toEqual([]);
+  expect(directCabinetReads).toEqual([]);
+  expect(genericCabinetErrorCount).toBe(0);
+  expect(blockedRequests).toEqual([]);
+
   const proof = assertUnverifiedEmailLoginProof({
-    schemaVersion: 1,
+    schemaVersion: 2,
     kind: "clean-pay-authorized-unverified-email-login-proof",
     status: "existing-unverified-email-login-gated",
     authorizedSemanticDiff: AUTHORIZED_UNVERIFIED_EMAIL_SEMANTIC_DIFF,
@@ -124,6 +165,13 @@ test("authorized existing unverified e-mail login is gated before cabinet reads"
     providerRequestCount: loginEntries.length,
     cabinetNavigationCount,
     cabinetReadCount: cabinetReads.length,
+    directCabinetFinalRoute: expectedDirectCabinetFinalRoute,
+    directCabinetNavigationAttemptCount,
+    directCabinetReadCount: directCabinetReads.length,
+    directProviderRequestCount: directProviderRequests.length,
+    emailVerifiedAccessClaim: accessClaims.emailVerified,
+    genericCabinetErrorCount,
+    telegramLinkedAccessClaim: accessClaims.telegramLinked,
   }, environment);
   await writeCreateOnlyProof(environment.proofOutput, proof);
 });
@@ -220,6 +268,33 @@ async function providerLedger(providerControlUrl: string) {
     throw new Error("Synthetic provider ledger differs from its exact projection.");
   }
   return value as { entries: Array<{ effect: string; sequence: number }> };
+}
+
+async function currentAccessClaims(page: Page) {
+  const accessCookie = (await page.context().cookies(applicationOrigin))
+    .find(({ name }) => name === "clean_pay_access");
+  if (!accessCookie || accessCookie.value.length > 4_096) {
+    throw new Error("Candidate access claim is absent or outside its byte bound.");
+  }
+  const segments = accessCookie.value.split(".");
+  if (segments.length !== 2 || !segments[0] || !segments[1]) {
+    throw new Error("Candidate access claim has an invalid envelope.");
+  }
+  let value: unknown;
+  try {
+    value = JSON.parse(Buffer.from(segments[0], "base64url").toString("utf8"));
+  } catch {
+    throw new Error("Candidate access claim has an invalid payload.");
+  }
+  if (!isRecord(value)
+    || typeof value.ev !== "boolean"
+    || typeof value.tg !== "boolean") {
+    throw new Error("Candidate access claim differs from its bounded projection.");
+  }
+  return {
+    emailVerified: value.ev,
+    telegramLinked: value.tg,
+  };
 }
 
 async function readBoundedJsonResponse(response: Response, maximumBytes: number) {

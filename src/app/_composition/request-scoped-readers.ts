@@ -21,8 +21,9 @@ import { createRemnashopSubscriptionReader } from "@/backend/integrations/remnas
 // authorization work without allowing credentials to leak between requests.
 const skipAccessCookieRefresh = async () => null;
 const skipVerifiedEmailPersistence = async () => undefined;
+const loadRequestCurrentSession = cache(() => getCurrentSessionReadOnly());
 const readCurrentUserOnly = async () =>
-  (await getCurrentSessionReadOnly())?.user ?? null;
+  (await loadRequestCurrentSession())?.user ?? null;
 
 const authorizeVerifiedSession = cache(() =>
   getStoredAuthorizedRemnashopTokens(),
@@ -50,16 +51,16 @@ const requestReferralProgramReader = createReferralProgramReader(
 
 export const requestAuthProfileGateway = createProductionAuthProfileGateway(
   authorizeProfileSession,
-  getCurrentSessionReadOnly,
+  loadRequestCurrentSession,
   skipAccessCookieRefresh,
   skipVerifiedEmailPersistence,
   false,
 );
 export const requestLinkAccountReader = createProductionLinkAccountReader(
-  getCurrentSessionReadOnly,
+  loadRequestCurrentSession,
 );
 export const requestPasskeyManagementGateway =
-  createProductionPasskeyManagementGateway(getCurrentSessionReadOnly);
+  createProductionPasskeyManagementGateway(loadRequestCurrentSession);
 const requestCabinetReader = createProductionCabinetReader(requestSubscriptions);
 export const requestCheckoutReader = createProductionCheckoutReader(requestSubscriptions);
 const requestPaymentHistoryGateway = createProductionPaymentHistoryGateway();

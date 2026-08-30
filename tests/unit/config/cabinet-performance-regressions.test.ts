@@ -14,6 +14,14 @@ describe("cabinet performance regressions", () => {
     expect(page).toContain("<Suspense");
     expect(page).toContain("loadRequestCabinetViewModel");
     expect(page).not.toContain("export default async function CabinetPage");
+    expect(page).toContain("<CabinetAccessBoundary>");
+    expect(page.indexOf("<CabinetAccessBoundary>")).toBeLessThan(
+      page.indexOf("<AppShell requireAuth>"),
+    );
+    expect(page).toContain("await connection()");
+    expect(page.indexOf("await connection()"))
+      .toBeLessThan(page.indexOf('await requireCabinetEntrySession("/cabinet")'));
+    expect(page).toContain('await requireCabinetEntrySession("/cabinet")');
     expect(shell).toContain("loadNavigationShell");
     expect(shell).toContain("await connection()");
     expect(shell).not.toContain("loadNavigation(");
@@ -144,6 +152,9 @@ describe("cabinet performance regressions", () => {
     ];
 
     expect(composition).toContain('import { cache } from "react"');
+    expect(composition).toContain(
+      "loadRequestCurrentSession = cache(() => getCurrentSessionReadOnly())",
+    );
     expect(composition).toContain("authorizeVerifiedSession");
     expect(composition).toContain("getCurrentSessionReadOnly");
     expect(composition).toContain("getStoredAuthorizedRemnashopTokens");
