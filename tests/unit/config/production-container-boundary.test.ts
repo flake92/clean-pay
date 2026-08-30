@@ -330,6 +330,12 @@ describe("production container boundary", () => {
       'docker compose --project-name "$PROJECT_NAME"',
     );
     expect(imageRollbackRehearsal).toContain(
+      'readonly COMPOSE_MANIFEST="$ROOT_DIR/deploy/prod/docker-compose.yml"',
+    );
+    expect(imageRollbackRehearsal).toContain('    COMPOSE_FILE \\');
+    expect(imageRollbackRehearsal).toContain('-f "$COMPOSE_MANIFEST" "$@"');
+    expect(imageRollbackRehearsal).not.toContain("readonly COMPOSE_FILE=");
+    expect(imageRollbackRehearsal).toContain(
       'cmp --silent -- "$TARGET_ENV_FILE" "$ROLLBACK_ENV_FILE"',
     );
     expect(imageRollbackRehearsal).toContain("assert_canary_absent");
