@@ -3,6 +3,10 @@ import type { Page } from "@playwright/test";
 export const EXACT_SCREENSHOT_QUORUM_PROCESS_COUNT = 3;
 export const EXACT_TERMINAL_SCREENSHOT_CAPTURE_COUNT = 3;
 
+export type PublicOverlapScreenshotRole = "baseline" | "candidate";
+
+type TerminalScreenshotCapture = (page: Page) => Promise<Buffer>;
+
 const exactScreenshotOptions = Object.freeze({
   animations: "disabled" as const,
   caret: "hide" as const,
@@ -35,6 +39,52 @@ export async function captureByteIdenticalTerminalScreenshot(page: Page) {
     screenshots.push(await page.screenshot(exactScreenshotOptions));
   }
   return selectByteIdenticalTerminalScreenshot(screenshots);
+}
+
+/**
+ * Keeps paired navigation and resource settlement concurrent while ensuring
+ * that two contexts in the same Chromium process never read the compositor at
+ * the same time. Exact PNG equality remains the only accepted result.
+ */
+export function createSerializedPairTerminalScreenshotCapture(
+  capture: TerminalScreenshotCapture = captureByteIdenticalTerminalScreenshot,
+) {
+  let releaseBaseline!: () => void;
+  let baselineReleased = false;
+  const baselineFinished = new Promise<void>((resolve) => {
+    releaseBaseline = resolve;
+  });
+  const started = new Set<PublicOverlapScreenshotRole>();
+
+  function release() {
+    if (baselineReleased) return;
+    baselineReleased = true;
+    releaseBaseline();
+  }
+
+  return Object.freeze({
+    async capture(role: PublicOverlapScreenshotRole, page: Page) {
+      if (role !== "baseline" && role !== "candidate") {
+        throw new Error("Paired terminal screenshot role is invalid.");
+      }
+      if (started.has(role)) {
+        throw new Error("Paired terminal screenshot role was captured more than once.");
+      }
+      started.add(role);
+      if (role === "candidate") await baselineFinished;
+      try {
+        return await capture(page);
+      } finally {
+        if (role === "baseline") release();
+      }
+    },
+    complete(role: PublicOverlapScreenshotRole) {
+      if (role !== "baseline" && role !== "candidate") {
+        throw new Error("Paired terminal screenshot completion role is invalid.");
+      }
+      if (role === "baseline") release();
+    },
+  });
 }
 
 export function selectByteIdenticalTerminalScreenshot(
