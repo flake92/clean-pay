@@ -7,6 +7,7 @@ import { expect, test } from "@playwright/test";
 
 import {
   assertPublicOverlapProcessFailureEvidence,
+  createPublicOverlapProcessFailureBundle,
   createPublicOverlapProcessFailureEvidence,
   publicOverlapProcessFailureFilename,
 } from "./public-overlap-process-evidence.mjs";
@@ -117,6 +118,48 @@ test("drops adversarial traversal and URL-like source locations", () => {
   expect(evidence.sourceLocations).toEqual([]);
   expect(JSON.stringify(evidence)).not.toContain("private-token");
   expect(JSON.stringify(evidence)).not.toContain("person.example.invalid");
+});
+
+test("orders and freezes an exact unique post-cleanup failure bundle", () => {
+  const candidate = createPublicOverlapProcessFailureEvidence({
+    code: 1,
+    mode: "capture",
+    role: "candidate",
+    signal: null,
+    stderr,
+    stderrBytes: stderr.byteLength,
+    stdout,
+    stdoutBytes: stdout.byteLength,
+    terminationReason: null,
+  });
+  const baseline = createPublicOverlapProcessFailureEvidence({
+    code: 1,
+    mode: "capture",
+    role: "baseline",
+    signal: null,
+    stderr,
+    stderrBytes: stderr.byteLength,
+    stdout,
+    stdoutBytes: stdout.byteLength,
+    terminationReason: null,
+  });
+  const bundle = createPublicOverlapProcessFailureBundle(
+    "0123456789abcdef",
+    [candidate, baseline],
+  );
+
+  expect(bundle).toMatchObject({
+    schemaVersion: 1,
+    status: "public_overlap_playwright_process_failures",
+    captureId: "0123456789abcdef",
+  });
+  expect(bundle.failures.map(({ role }) => role)).toEqual(["baseline", "candidate"]);
+  expect(Object.isFrozen(bundle)).toBe(true);
+  expect(Object.isFrozen(bundle.failures)).toBe(true);
+  expect(() => createPublicOverlapProcessFailureBundle(
+    "0123456789abcdef",
+    [baseline, baseline],
+  )).toThrow("scope is not unique");
 });
 
 test("seals concurrent role failures as exactly two schema-valid private-free files", async () => {
