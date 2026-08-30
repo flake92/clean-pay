@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
 
 import { describe, expect, it } from "vitest";
@@ -23,6 +24,7 @@ import {
 const baselineRevision = "f5cb6f543d85256e7733a1ade6a4f451d86cf378";
 const candidateRevision = "b0cbdddbbbbc537b9f15bcfdbf4a0fa86d3c65b4";
 const captureId = "0123456789abcdef";
+const externalTemporaryRoot = path.join(tmpdir(), "clean-pay-external-ci-temp");
 const runner = readFileSync(
   "tests/browser/journeys/run-production-image-live-overlap.mjs",
   "utf8",
@@ -58,23 +60,23 @@ function plan() {
   return createLiveOverlapPlan({
     captureId,
     candidateRevision,
-    temporaryRoot: path.resolve("C:/external-ci-temp"),
+    temporaryRoot: externalTemporaryRoot,
   });
 }
 
 function proofInputs() {
   return {
     baseline: {
-      contractPath: path.resolve("C:/external-ci-temp/baseline-contract.json"),
-      assetAttestationPath: path.resolve("C:/external-ci-temp/baseline-assets.json"),
+      contractPath: path.join(externalTemporaryRoot, "baseline-contract.json"),
+      assetAttestationPath: path.join(externalTemporaryRoot, "baseline-assets.json"),
       assetImageDigest: `sha256:${"1".repeat(64)}`,
       controlUrl: "http://127.0.0.1:43100/",
       migrationAssetImageDigest: `sha256:${"2".repeat(64)}`,
       resolverIp: "127.0.0.21",
     },
     candidate: {
-      contractPath: path.resolve("C:/external-ci-temp/candidate-contract.json"),
-      assetAttestationPath: path.resolve("C:/external-ci-temp/candidate-assets.json"),
+      contractPath: path.join(externalTemporaryRoot, "candidate-contract.json"),
+      assetAttestationPath: path.join(externalTemporaryRoot, "candidate-assets.json"),
       assetImageDigest: `sha256:${"3".repeat(64)}`,
       controlUrl: "http://127.0.0.1:43200/",
       migrationAssetImageDigest: `sha256:${"4".repeat(64)}`,
