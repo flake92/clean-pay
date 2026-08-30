@@ -27,7 +27,10 @@ import {
   selectIndependentProcessCharacterizationPairQuorum,
   selectIndependentProcessCharacterizationQuorum,
 } from "./process-quorum";
-import { captureByteIdenticalTerminalScreenshot } from "./screenshot-majority";
+import {
+  captureByteIdenticalTerminalScreenshot,
+  createSerializedPairTerminalScreenshotCapture,
+} from "./screenshot-majority";
 import {
   PUBLIC_OVERLAP_CAPTURE_POLICY,
   PUBLIC_OVERLAP_PROJECTS,
@@ -146,15 +149,23 @@ export async function capturePublicOverlapCharacterizationPair(options: {
     candidate: [],
   };
   for (const [processIndex, pair] of pagePairs.entries()) {
+    const screenshotCapture = createSerializedPairTerminalScreenshotCapture();
     const settlements = await Promise.allSettled(
-      (["baseline", "candidate"] as const).map(async (role) => captureSample({
-        applicationOrigin: environment.roles[role].applicationOrigin,
-        baseUrl: new URL(environment.roles[role].applicationOrigin),
-        page: pair[role].page,
-        replayGuard: pair[role].replayGuard,
-        route,
-        testInfo,
-      })),
+      (["baseline", "candidate"] as const).map(async (role) => {
+        try {
+          return await captureSample({
+            applicationOrigin: environment.roles[role].applicationOrigin,
+            baseUrl: new URL(environment.roles[role].applicationOrigin),
+            captureScreenshot: (page) => screenshotCapture.capture(role, page),
+            page: pair[role].page,
+            replayGuard: pair[role].replayGuard,
+            route,
+            testInfo,
+          });
+        } finally {
+          screenshotCapture.complete(role);
+        }
+      }),
     );
     const failures = settlements.flatMap((result) => (
       result.status === "rejected" ? [result.reason] : []
@@ -293,6 +304,7 @@ function registerPublicOverlapRoleArtifacts(options: {
 async function captureSample(options: {
   applicationOrigin: string;
   baseUrl: URL;
+  captureScreenshot?: (page: Page) => Promise<Buffer>;
   page: Page;
   replayGuard: CharacterizationPageQuorum[number]["replayGuard"];
   route: PublicOverlapRoute;
@@ -310,7 +322,9 @@ async function captureSample(options: {
   });
   await page.waitForLoadState("networkidle", { timeout: 3_000 }).catch(() => undefined);
 
-  const screenshot = await captureByteIdenticalTerminalScreenshot(page);
+  const screenshot = options.captureScreenshot
+    ? await options.captureScreenshot(page)
+    : await captureByteIdenticalTerminalScreenshot(page);
   const [dom, computedStyles, interactiveElements, ariaSnapshot, storage, redirects] = (
     await Promise.all([
       canonicalDom(page),

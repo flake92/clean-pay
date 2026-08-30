@@ -263,6 +263,9 @@ test("pins the local capture tool and publishes proof only after owned-stack cle
   expect(source).not.toContain('runCapture("candidate"');
   expect(captureSource).toContain("const settlements = await Promise.allSettled(");
   expect(captureSource).toContain('(["baseline", "candidate"] as const).map');
+  expect(captureSource).toContain("createSerializedPairTerminalScreenshotCapture()");
+  expect(captureSource).toContain("screenshotCapture.capture(role, page)");
+  expect(captureSource).toContain("screenshotCapture.complete(role)");
   expect(captureSource).toContain("selectIndependentProcessCharacterizationPairQuorum(");
   expect(fixturesSource).toContain(
     "for (const [processIndex, browser] of independentChromiumBrowsers.entries())",

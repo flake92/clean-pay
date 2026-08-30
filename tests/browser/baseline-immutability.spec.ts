@@ -3,7 +3,7 @@ import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 
 import {
   BEHAVIORAL_BASELINE_COMMIT,
@@ -31,6 +31,7 @@ import {
   TURNSTILE_STUB_SOURCE,
 } from "./turnstile-stub";
 import {
+  createSerializedPairTerminalScreenshotCapture,
   selectByteIdenticalMajority,
   selectByteIdenticalTerminalScreenshot,
 } from "./screenshot-majority";
@@ -1359,6 +1360,58 @@ test.describe("immutable browser baseline policy", () => {
       stable,
       stable,
     ])).toThrow(/exactly 3 PNGs/);
+  });
+
+  test("serializes paired terminal screenshots without weakening exact evidence", async () => {
+    const calls: string[] = [];
+    let concurrent = 0;
+    let maximumConcurrent = 0;
+    let releaseBaseline!: () => void;
+    const baselineBlocked = new Promise<void>((resolve) => {
+      releaseBaseline = resolve;
+    });
+    const capture = createSerializedPairTerminalScreenshotCapture(async (page) => {
+      const label = page as unknown as string;
+      calls.push(label);
+      concurrent += 1;
+      maximumConcurrent = Math.max(maximumConcurrent, concurrent);
+      try {
+        if (label === "baseline") await baselineBlocked;
+        return Buffer.from(label);
+      } finally {
+        concurrent -= 1;
+      }
+    });
+
+    const baseline = capture.capture("baseline", "baseline" as unknown as Page);
+    const candidate = capture.capture("candidate", "candidate" as unknown as Page);
+    await Promise.resolve();
+    expect(calls).toEqual(["baseline"]);
+    releaseBaseline();
+
+    await expect(Promise.all([baseline, candidate])).resolves.toEqual([
+      Buffer.from("baseline"),
+      Buffer.from("candidate"),
+    ]);
+    expect(calls).toEqual(["baseline", "candidate"]);
+    expect(maximumConcurrent).toBe(1);
+  });
+
+  test("releases a paired candidate when baseline fails before screenshot capture", async () => {
+    const calls: string[] = [];
+    const capture = createSerializedPairTerminalScreenshotCapture(async (page) => {
+      const label = page as unknown as string;
+      calls.push(label);
+      return Buffer.from(label);
+    });
+
+    const candidate = capture.capture("candidate", "candidate" as unknown as Page);
+    await Promise.resolve();
+    expect(calls).toEqual([]);
+    capture.complete("baseline");
+
+    await expect(candidate).resolves.toEqual(Buffer.from("candidate"));
+    expect(calls).toEqual(["candidate"]);
   });
 
   test("pins the canonical Chromium software-render launch policy", () => {
