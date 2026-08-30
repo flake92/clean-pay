@@ -289,6 +289,28 @@ describe("health checks", () => {
     }));
   });
 
+  it("uses the isolated canary JWKS only for Telegram readiness", async () => {
+    const origin = "http://zdt-readiness-0123456789abcdef:4190";
+    vi.stubEnv("REMNASHOP_API_BASE_URL", `${origin}/api/v1/public`);
+    vi.stubEnv(
+      "CLEAN_PAY_READINESS_TELEGRAM_OIDC_JWKS_URL",
+      `${origin}/.well-known/jwks.json`,
+    );
+    const fetch = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response(JSON.stringify({ keys: [{ kid: "synthetic-readiness" }] }), {
+        status: 200,
+      }),
+    );
+
+    const gateway = createProductionReadinessGateway();
+    await expect(measuredCheck("Telegram OIDC", gateway.checkTelegramOidc))
+      .resolves.toMatchObject({ status: "ok" });
+    expect(fetch).toHaveBeenCalledWith(
+      `${origin}/.well-known/jwks.json`,
+      expect.objectContaining({ cache: "no-store", signal: expect.any(Object) }),
+    );
+  });
+
   it("reports a missing Remnawave readiness token without making a request", async () => {
     vi.stubEnv("CLEAN_PAY_READINESS_REMNAWAVE_URL", "http://remnawave.test:3000");
     vi.stubEnv("REMNAWAVE_API_BASE_URL", "");

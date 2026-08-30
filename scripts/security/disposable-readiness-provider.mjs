@@ -10,6 +10,7 @@ const authPaths = new Set([
 ]);
 const notificationPath = "/api/v1/public/auth/notification-preferences";
 const plansPath = "/api/v1/public/plans/public";
+const telegramJwksPath = "/.well-known/jwks.json";
 const maximumBodyBytes = 1024;
 const forbiddenCredentialHeaders = Object.freeze([
   "authorization",
@@ -18,6 +19,16 @@ const forbiddenCredentialHeaders = Object.freeze([
   "x-api-key",
 ]);
 const readyMarker = "clean-pay-disposable-readiness-provider-ready-v1";
+const telegramJwksBody = `${JSON.stringify({
+  keys: [{
+    alg: "RS256",
+    e: "AQAB",
+    kid: "clean-pay-disposable-readiness-v1",
+    kty: "RSA",
+    n: "18fSwKb9WqwEfyN4YqW2voolU3cu3Fj1j-rG2ea8wAla6x1W0zH68DqblvH_76djMbKXk_9lfGuYXNuHA3oD_GlPQwQvBjiXKDMGtrnYprOCtk44uxIn4gUkVkrQLl_dzEa3rr0Oh2M6M62y27Mlgj8fwvqz57OkztpW31Ov03godkpaEYfrAkpwTOqnlGl-8lsG1pmRUbBJKegIcsi7Fkq8mnK-Txanyk8XbNXzCszRDJzJ_yGvHF_YRCnIqssEqJiEG1sq_IsX9ulZD8KyOBRb7u_NNBPtrW0JMXisyCEKl0SB95HgrYBjKURm2UdJ5EDtej6lIxfFmBlzAoPREQ",
+    use: "sig",
+  }],
+})}\n`;
 
 export function createDisposableReadinessProvider(options) {
   const expectedHash = exactExpectedHash(options?.expectedServiceKeySha256);
@@ -27,6 +38,7 @@ export function createDisposableReadinessProvider(options) {
     identify: 0,
     serviceSession: 0,
     notificationPreferences: 0,
+    jwks: 0,
   });
 
   return createServer((request, response) => {
@@ -77,6 +89,15 @@ export function createDisposableReadinessProvider(options) {
           return;
         }
         send(response, 200, `${JSON.stringify(counters)}\n`);
+        return;
+      }
+      if (method === "GET" && requestPath === telegramJwksPath) {
+        if (bodyBytes !== 0) {
+          send(response, 400, '{"detail":"invalid body"}\n');
+          return;
+        }
+        counters.jwks += 1;
+        send(response, 200, telegramJwksBody);
         return;
       }
       if (method === "GET" && requestPath === plansPath) {

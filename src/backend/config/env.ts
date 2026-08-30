@@ -79,6 +79,7 @@ type AppEnv = {
     internalSecret: string;
     mailpitUrl: string | null;
     remnawaveUrl: string | null;
+    telegramOidcJwksUrl: string | null;
   };
 };
 
@@ -518,6 +519,22 @@ function createEnv(environment: EnvironmentSource): AppEnv {
 
   const chatwoot = chatwootConfig(environment);
   const refreshKeyring = webRefreshKeyring(environment);
+  const telegramReadinessJwksUrl = optionalUrl(
+    "CLEAN_PAY_READINESS_TELEGRAM_OIDC_JWKS_URL",
+    environment,
+  );
+  if (telegramReadinessJwksUrl) {
+    const expectedMatch = /^http:\/\/(zdt-readiness-[a-f0-9]{16}):4190\/\.well-known\/jwks\.json$/
+      .exec(telegramReadinessJwksUrl);
+    if (
+      expectedMatch === null
+      || new URL(telegramReadinessJwksUrl).origin !== new URL(remnashopApiBaseUrl).origin
+    ) {
+      throw new Error(
+        "CLEAN_PAY_READINESS_TELEGRAM_OIDC_JWKS_URL is restricted to the exact disposable readiness provider origin",
+      );
+    }
+  }
   const env = {
     databaseUrl: required("DATABASE_URL", environment),
     appUrl,
@@ -631,6 +648,7 @@ function createEnv(environment: EnvironmentSource): AppEnv {
       internalSecret: required("READINESS_INTERNAL_SECRET", environment),
       mailpitUrl: optionalUrl("CLEAN_PAY_READINESS_MAILPIT_URL", environment),
       remnawaveUrl: optionalUrl("CLEAN_PAY_READINESS_REMNAWAVE_URL", environment),
+      telegramOidcJwksUrl: telegramReadinessJwksUrl,
     },
   };
 

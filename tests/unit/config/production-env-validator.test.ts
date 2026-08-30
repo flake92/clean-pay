@@ -238,6 +238,12 @@ describe("production env validator", () => {
     expect(PRODUCTION_ENVIRONMENT_FILE_NAMES).not.toContain(
       "CLEAN_PAY_BAKED_TURNSTILE_WIDGET_ID",
     );
+    expect(PRODUCTION_ENVIRONMENT_FILE_NAMES).not.toContain(
+      "CLEAN_PAY_READINESS_TELEGRAM_OIDC_JWKS_URL",
+    );
+    for (const names of Object.values(PRODUCTION_ROLE_ENVIRONMENT_NAMES)) {
+      expect(names).not.toContain("CLEAN_PAY_READINESS_TELEGRAM_OIDC_JWKS_URL");
+    }
   });
 
   it("accepts a complete strong configuration including internal HTTP Remnashop", () => {
@@ -991,6 +997,47 @@ describe("production env validator", () => {
     expect(runValidator({
       CLEAN_PAY_READINESS_REMNAWAVE_URL: "https://status.clean-pay.dev",
     }).stderr).toContain("must use the REMNAWAVE_API_BASE_URL origin");
+  });
+
+  it("restricts the canary-only Telegram readiness URL to its owned Remnashop provider", () => {
+    const alias = "zdt-readiness-0123456789abcdef";
+    const origin = `http://${alias}:4190`;
+    const environment = {
+      ...validEnv,
+      REMNASHOP_API_BASE_URL: `${origin}/api/v1/public`,
+      REMNASHOP_ADMIN_API_BASE_URL: `${origin}/api/v1/admin`,
+      CLEAN_PAY_READINESS_TELEGRAM_OIDC_JWKS_URL:
+        `${origin}/.well-known/jwks.json`,
+    };
+
+    expect(() => validateProductionEnvironment(environment)).not.toThrow();
+    const parsed = getEnv(environment);
+    expect(parsed.readiness.telegramOidcJwksUrl)
+      .toBe(`${origin}/.well-known/jwks.json`);
+    expect(parsed.telegramOidc.jwksUri)
+      .toBe("https://oauth.telegram.org/.well-known/jwks.json");
+
+    for (const invalid of [
+      "https://oauth.telegram.org/.well-known/jwks.json",
+      "http://127.0.0.1:4190/.well-known/jwks.json",
+      "http://zdt-readiness-0123456789abcdeg:4190/.well-known/jwks.json",
+      "http://zdt-readiness-0123456789abcdef:4191/.well-known/jwks.json",
+      "http://zdt-readiness-0123456789abcdef:4190/.well-known/jwks.json/",
+      "http://zdt-readiness-0123456789abcdef:4190/.well-known/%6awks.json",
+      "http://zdt-readiness-0123456789abcdef:4190/.well-known/jwks.json?probe=1",
+      "http://zdt-readiness-0123456789abcdef:4190/.well-known/jwks.json#probe",
+      "http://user:password@zdt-readiness-0123456789abcdef:4190/.well-known/jwks.json",
+    ]) {
+      expect(() => validateProductionEnvironment({
+        ...environment,
+        CLEAN_PAY_READINESS_TELEGRAM_OIDC_JWKS_URL: invalid,
+      }), invalid).toThrow();
+    }
+    expect(() => validateProductionEnvironment({
+      ...environment,
+      REMNASHOP_API_BASE_URL: "http://zdt-readiness-fedcba9876543210:4190/api/v1/public",
+      REMNASHOP_ADMIN_API_BASE_URL: "http://zdt-readiness-fedcba9876543210:4190/api/v1/admin",
+    })).toThrow("restricted to the exact disposable readiness provider origin");
   });
 
   it("derives the admin URL when it is omitted, including for reconciliation", () => {

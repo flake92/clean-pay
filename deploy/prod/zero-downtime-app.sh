@@ -13,6 +13,7 @@ OPERATION_LOCK_PATH="$ROOT_DIR/deploy/prod/.production-operation.lock"
 STATE_FILE=${CLEAN_PAY_ZDT_STATE_FILE:-"$ROOT_DIR/deploy/prod/.zero-downtime-state"}
 LOCK_DIR="${STATE_FILE}.lock"
 ROLLBACK_ENV_FILE=${CLEAN_PAY_ZDT_ROLLBACK_ENV_FILE:-}
+CANARY_READINESS_TELEGRAM_OIDC_JWKS_URL=${CLEAN_PAY_ZDT_CANARY_READINESS_TELEGRAM_OIDC_JWKS_URL:-}
 APP_ENV_FILE="${ENV_FILE}.app"
 HOLD_OPERATOR_ENV_FILE="${ENV_FILE}.hold-operator"
 MIGRATION_ENV_FILE="${ENV_FILE}.migration"
@@ -123,6 +124,20 @@ validate_port() {
   printf '%s' "$port" | grep -Eq '^[1-9][0-9]{0,4}$' \
     || fail "canary port must be a canonical integer"
   [ "$port" -le 65535 ] || fail "canary port must be at most 65535"
+}
+
+validate_canary_readiness_telegram_oidc_jwks_url() {
+  [ -n "$CANARY_READINESS_TELEGRAM_OIDC_JWKS_URL" ] || return 0
+  printf '%s' "$PROJECT_NAME" | grep -Eq '^clean-pay-zdt-[a-f0-9]{16}$' \
+    || fail "canary Telegram readiness override requires the disposable rehearsal project"
+  suffix=${PROJECT_NAME#clean-pay-zdt-}
+  expected_origin="http://zdt-readiness-${suffix}:4190"
+  [ "$EDGE_NETWORK" = "clean-pay-zdt-edge-${suffix}" ] \
+    || fail "canary Telegram readiness override requires the disposable rehearsal network"
+  [ "$CANARY_READINESS_TELEGRAM_OIDC_JWKS_URL" = "$expected_origin/.well-known/jwks.json" ] \
+    || fail "canary Telegram readiness override does not match the owned provider"
+  [ "$(env_value REMNASHOP_API_BASE_URL)" = "$expected_origin/api/v1/public" ] \
+    || fail "canary Telegram readiness override must share the Remnashop provider origin"
 }
 
 validate_image_id() {
@@ -393,6 +408,7 @@ require_tools_and_environment() {
   validate_container_name "$CANARY_NAME"
   validate_alias "$CANARY_ALIAS"
   validate_port "$CANARY_PORT"
+  validate_canary_readiness_telegram_oidc_jwks_url
   case "$RECONCILIATION_ENABLED" in true|false) ;; *) fail "invalid reconciliation setting" ;; esac
 }
 
@@ -701,15 +717,54 @@ assert_canary_topology() {
 
 wait_for_canary_readiness() {
   attempt=0
+  last_readiness_result=request-failed
   while [ "$attempt" -lt 90 ]; do
-    if docker exec "$CANARY_NAME" node -e \
-      "fetch('http://127.0.0.1:4000/api/internal/health/readiness',{headers:{'x-clean-pay-readiness-secret':process.env.READINESS_INTERNAL_SECRET},signal:AbortSignal.timeout(10000)}).then(async response=>{const body=await response.json();const checks=body&&typeof body.checks==='object'&&!Array.isArray(body.checks)?Object.values(body.checks):[];const valid=checks.length>0&&checks.every(check=>check&&typeof check==='object'&&check.status==='ok');if(!response.ok||body.status!=='ok'||!valid)process.exit(1)}).catch(()=>process.exit(1))" \
-      >/dev/null 2>&1; then
+    if readiness_result=$(docker exec "$CANARY_NAME" node -e '
+      const maximumBytes=65536;
+      const allowed=["database","redis","remnashop","telegramOidc","mailpit","remnawave"];
+      const required=["database","redis","remnashop","telegramOidc"];
+      const emit=(value,ok)=>{process.stdout.write(value+"\n");if(!ok)process.exitCode=1};
+      const readBounded=async(response)=>{
+        const declared=response.headers.get("content-length");
+        if(declared!==null&&(!/^\d+$/.test(declared)||Number(declared)>maximumBytes))throw new Error();
+        if(!response.body)return "";
+        const reader=response.body.getReader();const chunks=[];let bytes=0;
+        try{for(;;){const {done,value}=await reader.read();if(done)break;bytes+=value.byteLength;
+          if(bytes>maximumBytes){await reader.cancel();throw new Error()}chunks.push(Buffer.from(value))}
+        }finally{reader.releaseLock()}
+        return new TextDecoder("utf-8",{fatal:true}).decode(Buffer.concat(chunks,bytes));
+      };
+      fetch("http://127.0.0.1:4000/api/internal/health/readiness",{
+        cache:"no-store",redirect:"error",
+        headers:{"x-clean-pay-readiness-secret":process.env.READINESS_INTERNAL_SECRET},
+        signal:AbortSignal.timeout(10000),
+      }).then(async(response)=>{
+        let body;try{body=JSON.parse(await readBounded(response))}catch{return emit("invalid-response",false)}
+        const entries=body&&body.checks!==null&&typeof body.checks==='object'&&!Array.isArray(body.checks)
+          ?Object.entries(body.checks):[];
+        const checks=entries.map(([,check])=>check);
+        const shaped=entries.length>0&&required.every((name)=>Object.hasOwn(body.checks,name))
+          &&entries.every(([name,check])=>allowed.includes(name)&&check&&typeof check==='object'
+            &&(check.status==="ok"||check.status==="down"));
+        const valid=checks.length>0&&checks.every(check=>check&&typeof check==='object'&&check.status==='ok');
+        if(response.status===200&&body.status==="ok"&&shaped&&valid)return emit("ready",true);
+        const failed=shaped?allowed.find((name)=>body.checks[name]?.status==="down"):undefined;
+        return emit(failed?"not-ready:"+failed:"invalid-response",false);
+      }).catch(()=>emit("request-failed",false));
+    ' 2>/dev/null); then
+      [ "$readiness_result" = ready ] \
+        || fail "canary readiness probe returned an invalid success result"
       curl --fail --silent --show-error --max-time 10 \
         "http://127.0.0.1:${CANARY_PORT}/api/health/liveness" >/dev/null \
         || fail "canary is ready internally but its dedicated host port is unavailable"
       return 0
     fi
+    case "$readiness_result" in
+      not-ready:database|not-ready:redis|not-ready:remnashop|not-ready:telegramOidc|not-ready:mailpit|not-ready:remnawave|invalid-response|request-failed)
+        last_readiness_result=$readiness_result
+        ;;
+      *) last_readiness_result=invalid-response ;;
+    esac
 
     running=$(owned_canary_value "$CANARY_NAME" '{{.State.Running}}' 2>/dev/null || true)
     [ "$running" = "true" ] || {
@@ -721,7 +776,7 @@ wait_for_canary_readiness() {
   done
 
   docker logs --tail=100 "$CANARY_NAME" >&2 || true
-  fail "canary did not become ready within 180 seconds"
+  fail "canary did not become ready within 180 seconds ($last_readiness_result)"
 }
 
 write_state() {
@@ -849,6 +904,7 @@ stage_canary() {
     --tmpfs /app/.next/cache:rw,noexec,nosuid,nodev,size=128m,mode=0700,uid=1001,gid=1001 \
     --env-file "$APP_ENV_FILE" \
     --env CLEAN_PAY_RUNTIME_ROLE=application \
+    --env "CLEAN_PAY_READINESS_TELEGRAM_OIDC_JWKS_URL=$CANARY_READINESS_TELEGRAM_OIDC_JWKS_URL" \
     --network "$INTERNAL_NETWORK" \
     --publish "127.0.0.1:${CANARY_PORT}:4000" \
     --label "io.clean-pay.zero-downtime.owner=$OWNER_LABEL" \
