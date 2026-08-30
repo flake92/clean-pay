@@ -1,7 +1,14 @@
 import { createHash } from "node:crypto";
+import { types } from "node:util";
 
 const allowedModes = new Set(["capture", "cleanup", "compare", "prepare", "verify"]);
 const allowedRoles = new Set([null, "baseline", "candidate"]);
+const allowedInvocationStages = new Set([
+  "capture-input",
+  "environment-policy",
+  "invocation-policy",
+  "process-construction",
+]);
 const maximumLocations = 16;
 const classificationRules = Object.freeze([
   Object.freeze(["browser-executable-missing", /Executable doesn't exist/i]),
@@ -144,6 +151,67 @@ export function createPublicOverlapProcessFailureBundle(captureId, failures) {
   });
 }
 
+export function createPublicOverlapInvocationFailureEvidence(input) {
+  exactKeys(input, ["error", "mode", "role", "stage"]);
+  if (!allowedInvocationStages.has(input.stage)) {
+    throw new Error("Public overlap invocation failure stage is invalid.");
+  }
+  publicOverlapProcessFailureFilename(input.mode, input.role);
+  const sanitized = sanitizeInvocationError(input.error);
+  return Object.freeze({
+    schemaVersion: 1,
+    status: "public_overlap_playwright_invocation_failed",
+    mode: input.mode,
+    role: input.role,
+    stage: input.stage,
+    errorClass: sanitized.errorClass,
+    errorCode: sanitized.errorCode,
+    messageSha256: sha256(sanitized.message),
+    sourceLocations: Object.freeze(sourceLocations(sanitized.stack)),
+  });
+}
+
+function sanitizeInvocationError(value) {
+  try {
+    if (!types.isNativeError(value)) {
+      return { errorClass: "NonError", errorCode: null, message: "non-error", stack: "" };
+    }
+    const errorClass = new Set([
+      "AggregateError", "Error", "RangeError", "ReferenceError", "SyntaxError", "TypeError",
+    ]).has(value.name) ? value.name : "Error";
+    const message = exactOwnString(value, "message", 4_096) ?? "";
+    const stack = safeNativeErrorStack(value);
+    const rawCode = ownDataValue(value, "code");
+    const errorCode = typeof rawCode === "string" && /^[A-Z][A-Z0-9_]{0,39}$/.test(rawCode)
+      ? rawCode
+      : null;
+    return { errorClass, errorCode, message, stack };
+  } catch {
+    return { errorClass: "Error", errorCode: null, message: "unreadable-error", stack: "" };
+  }
+}
+
+function safeNativeErrorStack(value) {
+  try {
+    const observed = value.stack;
+    return typeof observed === "string" && observed.length <= 64 * 1024 ? observed : "";
+  } catch {
+    return "";
+  }
+}
+
+function exactOwnString(value, name, maximumCodeUnits) {
+  const observed = ownDataValue(value, name);
+  return typeof observed === "string" && observed.length <= maximumCodeUnits
+    ? observed
+    : undefined;
+}
+
+function ownDataValue(value, name) {
+  const descriptor = Object.getOwnPropertyDescriptor(value, name);
+  return descriptor && Object.hasOwn(descriptor, "value") ? descriptor.value : undefined;
+}
+
 export function publicOverlapProcessFailureFilename(mode, role) {
   if (!allowedModes.has(mode) || !allowedRoles.has(role)
     || (mode === "capture") !== (role !== null)) {
@@ -154,7 +222,7 @@ export function publicOverlapProcessFailureFilename(mode, role) {
 
 function sourceLocations(value) {
   const locations = new Map();
-  const pattern = /(?:^|[\s(])((?:tests[\\/])browser[\\/][A-Za-z0-9_.\\/-]+\.(?:mjs|ts|tsx)):(\d{1,7}):(\d{1,5})/gm;
+  const pattern = /(?:^|[\s(])(?:(?:file:\/\/\/|\/|[A-Za-z]:[\\/])(?:[A-Za-z0-9_.-]+[\\/])*)?((?:tests[\\/])browser[\\/][A-Za-z0-9_.\\/-]+\.(?:mjs|ts|tsx)):(\d{1,7}):(\d{1,5})/gm;
   for (const match of value.matchAll(pattern)) {
     const file = match[1].replaceAll("\\", "/");
     const line = Number(match[2]);
