@@ -100,7 +100,7 @@ describe("zero-downtime sanitized readiness diagnostics", () => {
     expect(result.status).toBe(1);
     expect(result.stdout).toBe("request-failed\n");
     expect(`${result.stdout}${result.stderr}`).not.toContain(injected);
-    expect(probeSource).toContain('redirect:"error"');
+    expect(probeSource).toContain("redirect:'error'");
     expect(probeSource).toContain("const maximumBytes=65536");
   });
 
@@ -164,7 +164,7 @@ function runNode(program: string) {
 }
 
 function extractProbeSource(source: string) {
-  const match = /if readiness_result=\$\(docker exec "\$CANARY_NAME" node -e '\n([\s\S]*?)\n    ' 2>\/dev\/null\); then/u.exec(
+  const match = /if readiness_result=\$\(docker exec "\$CANARY_NAME" node -e "\n([\s\S]*?)\n    " 2>\/dev\/null\); then/u.exec(
     source,
   );
   if (!match?.[1]) throw new Error("zero-downtime readiness probe source is unavailable");
