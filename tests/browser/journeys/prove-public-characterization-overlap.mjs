@@ -26,6 +26,7 @@ import {
 } from "./public-overlap-proof-contract.mjs";
 import {
   createPublicOverlapProcessFailureEvidence,
+  createPublicOverlapProcessFailureBundle,
   publicOverlapProcessFailureFilename,
 } from "./public-overlap-process-evidence.mjs";
 
@@ -42,6 +43,7 @@ let argumentsByName;
 let captureId;
 let completed = false;
 let failureOutputRoot;
+const processFailureEvidence = [];
 
 try {
   argumentsByName = parseArguments(process.argv.slice(2));
@@ -175,8 +177,36 @@ try {
       );
     }
   }
+  let failureBundle;
+  if (processFailureEvidence.length > 0 && captureId && failureOutputRoot) {
+    try {
+      failureBundle = createPublicOverlapProcessFailureBundle(
+        captureId,
+        processFailureEvidence,
+      );
+      const failureBundleBytes = Buffer.from(
+        `${JSON.stringify(failureBundle, null, 2)}\n`,
+        "utf8",
+      );
+      const receipt = await writeJourneySanitizedOutput(
+        path.join(failureOutputRoot, "public-process-failures.json"),
+        failureBundleBytes,
+      );
+      if (receipt.bytes !== failureBundleBytes.byteLength
+        || receipt.sha256 !== sha256(failureBundleBytes)
+        || receipt.status !== "sanitized-create-only-output-written") {
+        throw new Error("Public overlap process failure bundle receipt is invalid.");
+      }
+    } catch (bundleError) {
+      failure = new AggregateError(
+        [failure, bundleError],
+        "Public overlap proof failed and its sanitized process bundle was not sealed.",
+      );
+    }
+  }
   process.stderr.write(`${JSON.stringify({
     status: "live_public_characterization_overlap_failed",
+    processFailures: failureBundle?.failures ?? [],
     ...createJourneySanitizedErrorEvidence(failure),
   })}\n`);
   process.exitCode = 1;
@@ -280,6 +310,7 @@ function boundedProcess(command, args, environment, timeoutMs, scope) {
           stdoutBytes,
           terminationReason,
         });
+        processFailureEvidence.push(evidence);
         evidenceBytes = Buffer.from(`${JSON.stringify(evidence)}\n`, "utf8");
       } catch (evidenceError) {
         reject(new AggregateError(
