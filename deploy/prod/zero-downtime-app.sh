@@ -620,6 +620,10 @@ discover_internal_network() {
 
 assert_no_pending_migrations() {
   info "checking that the verified migration image has no pending Prisma migrations"
+  # The wrapper replaces the former `node deploy/prod/validate-env.mjs` shell
+  # chain: it parses the provision role contract, verifies the exact reviewed
+  # database state, and then runs pinned Prisma `migrate status` with a minimal
+  # child environment. The fenced migration role remains NOLOGIN.
   docker run --rm \
     --read-only \
     --cap-drop ALL \
@@ -629,11 +633,11 @@ assert_no_pending_migrations() {
     --cpus 1.0 \
     --tmpfs /tmp:rw,noexec,nosuid,nodev,size=64m,mode=1777 \
     --network "$INTERNAL_NETWORK" \
-    --env-file "$MIGRATION_ENV_FILE" \
+    --env-file "$PROVISION_ENV_FILE" \
     --env CLEAN_PAY_RUNTIME_ROLE=migration \
-    --entrypoint sh \
+    --entrypoint node \
     "$TARGET_MIGRATION_IMAGE" \
-    -c 'node deploy/prod/validate-env.mjs && node node_modules/prisma/build/index.js migrate status' \
+    deploy/prod/prisma-migration-status.mjs migrate status \
     || fail "pending, failed, or divergent Prisma migrations block this zero-downtime flow"
 }
 
