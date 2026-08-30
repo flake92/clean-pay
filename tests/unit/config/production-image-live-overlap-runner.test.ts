@@ -485,7 +485,7 @@ describe("ephemeral production-image live overlap runner", () => {
       candidateMigrationImageDigest: `sha256:${"4".repeat(64)}`,
     };
     const proof = {
-      schemaVersion: 1,
+      schemaVersion: 2,
       kind: "clean-pay-authorized-unverified-email-login-proof",
       status: "existing-unverified-email-login-gated",
       authorizedSemanticDiff: AUTHORIZED_UNVERIFIED_EMAIL_SEMANTIC_DIFF,
@@ -497,13 +497,28 @@ describe("ephemeral production-image live overlap runner", () => {
       providerRequestCount: 6,
       cabinetNavigationCount: 0,
       cabinetReadCount: 0,
+      directCabinetFinalRoute:
+        "/register/verify-email?redirect_to=%2Fcabinet",
+      directCabinetNavigationAttemptCount: 1,
+      directCabinetReadCount: 0,
+      directProviderRequestCount: 0,
+      emailVerifiedAccessClaim: false,
+      genericCabinetErrorCount: 0,
+      telegramLinkedAccessClaim: true,
     };
 
     expect(assertUnverifiedEmailLoginProof(proof, expected)).toEqual(proof);
     for (const mutation of [
       { cabinetReadCount: 1 },
       { cabinetNavigationCount: 1 },
+      { directCabinetFinalRoute: "/cabinet" },
+      { directCabinetNavigationAttemptCount: 0 },
+      { directCabinetReadCount: 1 },
+      { directProviderRequestCount: 1 },
+      { emailVerifiedAccessClaim: true },
+      { genericCabinetErrorCount: 1 },
       { serverActionCount: 3 },
+      { telegramLinkedAccessClaim: false },
       { telegramLinkedFixture: false },
       { authorizedSemanticDiff: "broader-diff" },
     ]) {
@@ -526,6 +541,8 @@ describe("ephemeral production-image live overlap runner", () => {
     expect(unverifiedEmailRegression).toContain(
       "readBoundedJsonResponse(linked, 16_384)",
     );
+    expect(unverifiedEmailRegression).toContain('await page.goto("/cabinet"');
+    expect(unverifiedEmailRegression).toContain("currentAccessClaims(page)");
   });
 
   it("uses only exact project labels, image tags and allowlisted files for cleanup", () => {

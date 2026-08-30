@@ -2,7 +2,7 @@ const sha256Pattern = /^sha256:[a-f0-9]{64}$/;
 const revisionPattern = /^[a-f0-9]{40}$/;
 
 export const AUTHORIZED_UNVERIFIED_EMAIL_SEMANTIC_DIFF =
-  "existing-unverified-email-login-verification-gate-v1";
+  "existing-unverified-email-login-and-direct-cabinet-gate-v2";
 
 export const UNVERIFIED_EMAIL_PROOF_FILENAME =
   "unverified-email-login.json";
@@ -21,15 +21,22 @@ export function assertUnverifiedEmailLoginProof(value, expected = {}) {
     "candidateApplicationImageDigest",
     "candidateMigrationImageDigest",
     "candidateRevision",
+    "directCabinetFinalRoute",
+    "directCabinetNavigationAttemptCount",
+    "directCabinetReadCount",
+    "directProviderRequestCount",
+    "emailVerifiedAccessClaim",
     "finalRoute",
+    "genericCabinetErrorCount",
     "kind",
     "providerRequestCount",
     "schemaVersion",
     "serverActionCount",
     "status",
+    "telegramLinkedAccessClaim",
     "telegramLinkedFixture",
   ]);
-  if (value.schemaVersion !== 1
+  if (value.schemaVersion !== 2
     || value.kind !== "clean-pay-authorized-unverified-email-login-proof"
     || value.status !== "existing-unverified-email-login-gated"
     || value.authorizedSemanticDiff !== AUTHORIZED_UNVERIFIED_EMAIL_SEMANTIC_DIFF
@@ -38,6 +45,14 @@ export function assertUnverifiedEmailLoginProof(value, expected = {}) {
     || value.telegramLinkedFixture !== true
     || value.cabinetNavigationCount !== 0
     || value.cabinetReadCount !== 0
+    || value.directCabinetFinalRoute
+      !== "/register/verify-email?redirect_to=%2Fcabinet"
+    || value.directCabinetNavigationAttemptCount !== 1
+    || value.directCabinetReadCount !== 0
+    || value.directProviderRequestCount !== 0
+    || value.emailVerifiedAccessClaim !== false
+    || value.genericCabinetErrorCount !== 0
+    || value.telegramLinkedAccessClaim !== true
     || value.serverActionCount !== 2
     || !Number.isSafeInteger(value.providerRequestCount)
     || value.providerRequestCount < 4
