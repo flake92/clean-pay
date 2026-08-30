@@ -1,8 +1,16 @@
 import { createHash } from "node:crypto";
+import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 
 import { expect, test } from "@playwright/test";
 
-import { createPublicOverlapProcessFailureEvidence } from "./public-overlap-process-evidence.mjs";
+import {
+  assertPublicOverlapProcessFailureEvidence,
+  createPublicOverlapProcessFailureEvidence,
+  publicOverlapProcessFailureFilename,
+} from "./public-overlap-process-evidence.mjs";
+import { writeJourneySanitizedOutput } from "./journey-owned-stack-orchestrator.mjs";
 
 const privateMarker = "person@example.invalid bearer-private-marker";
 const stdout = Buffer.from([
@@ -74,6 +82,81 @@ test("rejects extra fields, invalid scope and dishonest byte counts", () => {
     ...valid,
     stdoutBytes: stdout.byteLength - 1,
   })).toThrow("stdout byte count is invalid");
+});
+
+test("derives exact non-aliasing create-only artifact names for process scope", () => {
+  expect(publicOverlapProcessFailureFilename("capture", "baseline"))
+    .toBe("public-capture-baseline-failure.json");
+  expect(publicOverlapProcessFailureFilename("capture", "candidate"))
+    .toBe("public-capture-candidate-failure.json");
+  expect(publicOverlapProcessFailureFilename("compare", null))
+    .toBe("public-compare-pair-failure.json");
+  expect(() => publicOverlapProcessFailureFilename("capture", null))
+    .toThrow("filename scope is invalid");
+  expect(() => publicOverlapProcessFailureFilename("verify", "baseline"))
+    .toThrow("filename scope is invalid");
+});
+
+test("drops adversarial traversal and URL-like source locations", () => {
+  const adversarialStdout = Buffer.from([
+    "at tests/browser/../../private-token.ts:7:1",
+    "at https://person.example.invalid/tests/browser/private.ts:8:2",
+  ].join("\n"), "utf8");
+  const evidence = createPublicOverlapProcessFailureEvidence({
+    code: 1,
+    mode: "capture",
+    role: "baseline",
+    signal: null,
+    stderr: Buffer.alloc(0),
+    stderrBytes: 0,
+    stdout: adversarialStdout,
+    stdoutBytes: adversarialStdout.byteLength,
+    terminationReason: null,
+  });
+
+  expect(evidence.sourceLocations).toEqual([]);
+  expect(JSON.stringify(evidence)).not.toContain("private-token");
+  expect(JSON.stringify(evidence)).not.toContain("person.example.invalid");
+});
+
+test("seals concurrent role failures as exactly two schema-valid private-free files", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "clean-pay-public-overlap-process-"));
+  const entries = (["baseline", "candidate"] as const).map((role) => {
+    const evidence = createPublicOverlapProcessFailureEvidence({
+      code: 1,
+      mode: "capture",
+      role,
+      signal: null,
+      stderr,
+      stderrBytes: stderr.byteLength,
+      stdout,
+      stdoutBytes: stdout.byteLength,
+      terminationReason: null,
+    });
+    const filename = publicOverlapProcessFailureFilename("capture", role);
+    return { evidence, filename, bytes: Buffer.from(`${JSON.stringify(evidence)}\n`, "utf8") };
+  });
+  try {
+    await Promise.all(entries.map(({ bytes, filename }) => (
+      writeJourneySanitizedOutput(path.join(root, filename), bytes)
+    )));
+    expect((await readdir(root)).sort()).toEqual(entries.map(({ filename }) => filename).sort());
+    for (const { filename } of entries) {
+      const bytes = await readFile(path.join(root, filename));
+      expect(bytes.toString("utf8")).not.toContain(privateMarker);
+      expect(assertPublicOverlapProcessFailureEvidence(JSON.parse(bytes.toString("utf8"))))
+        .toMatchObject({ mode: "capture", status: "public_overlap_playwright_process_failed" });
+    }
+    const sealedBefore = await readFile(path.join(root, entries[0].filename));
+    await expect(writeJourneySanitizedOutput(
+      path.join(root, entries[0].filename),
+      entries[0].bytes,
+    )).rejects.toMatchObject({ code: "EEXIST" });
+    const sealedAfter = await readFile(path.join(root, entries[0].filename));
+    expect(sha256(sealedAfter)).toBe(sha256(sealedBefore));
+  } finally {
+    await rm(root, { force: true, recursive: true });
+  }
 });
 
 function sha256(value: Uint8Array) {
