@@ -8,10 +8,13 @@ import {
   deleteCabinetDevice,
   reissueCabinetSubscription,
 } from "@/application/cabinet/execute-command";
+import type { CabinetCommandResult } from "@/application/models/cabinet-actions";
 import { productionCabinetCommands } from "@/app/_composition/session-gateways";
 import { parseBoundedIdentifier } from "@/app/actions/runtime-payload";
 
-export async function deleteDeviceAction(hwid: string) {
+export async function deleteDeviceAction(
+  hwid: string,
+): Promise<CabinetCommandResult> {
   const parsed = parseBoundedIdentifier(hwid, 512);
   if (!parsed) {
     return { status: "error" as const, message: "Некорректный идентификатор устройства." };
