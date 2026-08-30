@@ -106,6 +106,8 @@ export const JOURNEY_FIXTURE_FILENAMES = Object.freeze([
   "prove-authenticated-journey-live-pair.mjs",
   "prove-public-characterization-overlap.mjs",
   "prove-provider-overlap.mjs",
+  "public-overlap-process-evidence.contract.spec.ts",
+  "public-overlap-process-evidence.mjs",
   "public-overlap-proof-contract.mjs",
   "public-overlap-proof.contract.spec.ts",
   "provider-mock.contract.spec.ts",
