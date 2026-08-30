@@ -625,6 +625,8 @@ jobs:
             test-results/browser-journeys
             test-results/browser-journey-contract-evidence
             test-results/browser-public-overlap
+            test-results/browser-public-overlap-playwright/pair/${{ env.CLEAN_PAY_BROWSER_LIVE_PAIR_CAPTURE_ID }}/**/paired-png-quorum-failure/evidence.json
+            test-results/browser-public-overlap-playwright/pair/${{ env.CLEAN_PAY_BROWSER_LIVE_PAIR_CAPTURE_ID }}/**/paired-png-quorum-failure/*.png
             test-results/browser-authenticated-journey-live-pair
             test-results/browser-live-pair-ci/${{ env.CLEAN_PAY_BROWSER_LIVE_PAIR_CAPTURE_ID }}/completion.json
             test-results/browser-live-pair-ci/${{ env.CLEAN_PAY_BROWSER_LIVE_PAIR_CAPTURE_ID }}/failure.json

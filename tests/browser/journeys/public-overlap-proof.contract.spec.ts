@@ -204,7 +204,7 @@ test("keeps the staged pair digest authoritative when full ownership validation 
 });
 
 test("pins the local capture tool and publishes proof only after owned-stack cleanup", async () => {
-  const [source, captureSource, teardownSource, fixturesSource] = await Promise.all([
+  const [source, captureSource, teardownSource, fixturesSource, workflowSource] = await Promise.all([
     readFile(path.join(
       process.cwd(),
       "tests",
@@ -230,6 +230,7 @@ test("pins the local capture tool and publishes proof only after owned-stack cle
       "browser",
       "fixtures.ts",
     ), "utf8"),
+    readFile(path.join(process.cwd(), ".github", "workflows", "ci.yml"), "utf8"),
   ]);
   const pairStart = source.indexOf("const session = await withJourneyOwnedStackPair(");
   const pairOwnershipRead = source.indexOf(
@@ -263,10 +264,21 @@ test("pins the local capture tool and publishes proof only after owned-stack cle
   expect(source).not.toContain('runCapture("candidate"');
   expect(captureSource).toContain("const settlements = await Promise.allSettled(");
   expect(captureSource).toContain('(["baseline", "candidate"] as const).map');
+  expect(captureSource).toContain("createSerializedPairCaptureTaskLifecycle()");
+  expect(captureSource).toContain("prepareCaptureSample({");
+  expect(captureSource).toContain("capturePreparedSample(prepared)");
   expect(captureSource).toContain("createSerializedPairTerminalScreenshotCapture()");
   expect(captureSource).toContain("screenshotCapture.capture(role, page)");
   expect(captureSource).toContain("screenshotCapture.complete(role)");
   expect(captureSource).toContain("selectIndependentProcessCharacterizationPairQuorum(");
+  expect(captureSource).toContain(
+    "if (!(error instanceof PairedPngQuorumError)) throw error;",
+  );
+  expect(captureSource).toContain("await persistPairedPngQuorumFailureEvidence({");
+  expect(captureSource).toContain("[error, diagnosticError]");
+  expect(captureSource).toContain(
+    "Paired PNG quorum failed and its exact diagnostic evidence could not be sealed.",
+  );
   expect(fixturesSource).toContain(
     "for (const [processIndex, browser] of independentChromiumBrowsers.entries())",
   );
@@ -287,6 +299,18 @@ test("pins the local capture tool and publishes proof only after owned-stack cle
   expect(source).toContain("cleanupPairOwnershipSha256");
   expect(source).toContain("preparedPairOwnership?.pairOwnershipSha256");
   expect(source).not.toContain("preparedOwnership?.pairOwnershipSha256");
+  const workflowLines = workflowSource.split(/\r?\n/);
+  expect(workflowLines).toContain(
+    "            test-results/browser-public-overlap-playwright/pair/${{ env.CLEAN_PAY_BROWSER_LIVE_PAIR_CAPTURE_ID }}/**/paired-png-quorum-failure/evidence.json",
+  );
+  expect(workflowLines).toContain(
+    "            test-results/browser-public-overlap-playwright/pair/${{ env.CLEAN_PAY_BROWSER_LIVE_PAIR_CAPTURE_ID }}/**/paired-png-quorum-failure/*.png",
+  );
+  expect(workflowLines).not.toContain(
+    "            test-results/browser-public-overlap-playwright",
+  );
+  expect(workflowLines.filter((line) => line.includes("paired-png-quorum-failure")))
+    .toHaveLength(2);
 });
 
 function expectedPair() {

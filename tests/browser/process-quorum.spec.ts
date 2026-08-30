@@ -17,6 +17,7 @@ import {
   permitsCharacterizationReplayRequest,
 } from "./characterization-replay-policy";
 import {
+  PairedPngQuorumError,
   requireExactProcessBytesAgreement,
   selectIndependentProcessCharacterizationPairQuorum,
   selectIndependentProcessCharacterizationQuorum,
@@ -124,6 +125,46 @@ test.describe("independent Chromium process quorum", () => {
       { baseline: sample(first), candidate: sample(second) },
       { baseline: sample(second), candidate: sample(first) },
     ], identity)).toThrow(/no exact byte-identical paired PNG quorum/);
+  });
+
+  test("brands absent paired PNG quorum with six immutable records and three tuple digests", () => {
+    const first = Buffer.from([137, 80, 78, 71, 1]);
+    const second = Buffer.from([137, 80, 78, 71, 2, 0]);
+    let observed: unknown;
+    try {
+      selectIndependentProcessCharacterizationPairQuorum([
+        { baseline: sample(first), candidate: sample(first) },
+        { baseline: sample(first), candidate: sample(second) },
+        { baseline: sample(second), candidate: sample(first) },
+      ], identity);
+    } catch (error) {
+      observed = error;
+    }
+
+    expect(observed).toBeInstanceOf(PairedPngQuorumError);
+    const branded = observed as PairedPngQuorumError;
+    expect(branded.records).toHaveLength(6);
+    expect(branded.records.map(({ processIndex, role }) => ({ processIndex, role }))).toEqual([
+      { processIndex: 0, role: "baseline" },
+      { processIndex: 0, role: "candidate" },
+      { processIndex: 1, role: "baseline" },
+      { processIndex: 1, role: "candidate" },
+      { processIndex: 2, role: "baseline" },
+      { processIndex: 2, role: "candidate" },
+    ]);
+    expect(branded.records.map(({ bytes }) => bytes)).toEqual([5, 5, 5, 6, 6, 5]);
+    expect(branded.records.every(({ sha256: digest }) => /^[a-f0-9]{64}$/.test(digest)))
+      .toBe(true);
+    expect(branded.tupleDigests).toHaveLength(3);
+    expect(branded.tupleDigests.map(({ processIndex }) => processIndex)).toEqual([0, 1, 2]);
+    expect(branded.tupleDigests.every(({ sha256: digest }) => /^[a-f0-9]{64}$/.test(digest)))
+      .toBe(true);
+    expect(new Set(branded.tupleDigests.map(({ sha256: digest }) => digest)).size).toBe(3);
+    expect(Object.isFrozen(branded)).toBe(true);
+    expect(Object.isFrozen(branded.records)).toBe(true);
+    expect(Object.isFrozen(branded.tupleDigests)).toBe(true);
+    expect(branded.records.every(Object.isFrozen)).toBe(true);
+    expect(branded.tupleDigests.every(Object.isFrozen)).toBe(true);
   });
 
   test("fails paired selection on role evidence drift, bad attestation, or wrong count", () => {
