@@ -439,6 +439,7 @@ async function exerciseCabinet(
     let unexpectedRequestOverflow = false;
     const browserRequests = [];
     const browserRequestByIdentity = new Map();
+    const browserRequestPreparationByIdentity = new Map();
     const browserResponseEvidenceByIdentity = new Map();
     const browserTerminalRequestIdentities = new Set();
     let browserResponseCaptureFailure = null;
@@ -467,9 +468,77 @@ async function exerciseCabinet(
       );
     });
     const pendingRequests = new Set();
+    const recordUnexpectedRequest = (rawUrl) => {
+      if (unexpectedRequests.length < maximumUnexpectedEvents) {
+        unexpectedRequests.push(sha256(rawUrl));
+      } else {
+        unexpectedRequestOverflow = true;
+      }
+    };
+    const prepareBrowserRequest = (request) => {
+      const existing = browserRequestPreparationByIdentity.get(request);
+      if (existing) return existing;
+
+      const rawUrl = request.url();
+      let requestPage;
+      try {
+        requestPage = request.frame().page();
+      } catch {
+        requestPage = undefined;
+      }
+      if (requestPage !== page) {
+        recordUnexpectedRequest(rawUrl);
+        const preparation = Object.freeze({ disposition: "abort", entry: null });
+        browserRequestPreparationByIdentity.set(request, preparation);
+        return preparation;
+      }
+
+      try {
+        const classification = classifyProviderOverlapBrowserRequest(
+          createJourneyBrowserRequestEnvelope(request, page.mainFrame()),
+          { cabinetDocumentAllowed, staticAssetContract },
+        );
+        if (classification.key === "app-cabinet-document") {
+          if (cabinetDocumentConsumed) {
+            throw new Error("Synthetic browser requested the cabinet document more than once.");
+          }
+          cabinetDocumentConsumed = true;
+        }
+        if (providerStaticDocumentKeys.includes(classification.key)) {
+          currentStaticDocumentKey = classification.key;
+        }
+        const entry = Object.freeze({
+          classification,
+          documentKey: currentStaticDocumentKey,
+          request,
+        });
+        browserRequests.push(entry);
+        browserRequestByIdentity.set(request, entry);
+        if (browserRequests.length > 256) {
+          throw new Error("Synthetic browser request ledger exceeded its bounded contract.");
+        }
+        const preparation = Object.freeze({
+          disposition: classification.disposition,
+          entry,
+        });
+        browserRequestPreparationByIdentity.set(request, preparation);
+        return preparation;
+      } catch {
+        // The emitted report never contains the rejected URL. Retain only its
+        // digest for bounded local failure diagnosis.
+        recordUnexpectedRequest(rawUrl);
+        const preparation = Object.freeze({ disposition: "abort", entry: null });
+        browserRequestPreparationByIdentity.set(request, preparation);
+        return preparation;
+      }
+    };
     context.on("request", (request) => {
       eventSeal.record();
       pendingRequests.add(request);
+      // Playwright guarantees request before response, while route callbacks
+      // may still be awaiting when response is emitted. Register the exact
+      // Request identity synchronously so response capture cannot outrun it.
+      prepareBrowserRequest(request);
     });
     context.on("response", (response) => {
       let evidence;
@@ -556,60 +625,23 @@ async function exerciseCabinet(
     await context.route("**/*", async (route) => {
       const finishRoute = eventSeal.begin();
       try {
-      const request = route.request();
-      const rawUrl = request.url();
-      let requestPage;
-      try {
-        requestPage = request.frame().page();
-      } catch {
-        requestPage = undefined;
-      }
-      if (requestPage !== page) {
-        if (unexpectedRequests.length < maximumUnexpectedEvents) {
-          unexpectedRequests.push(sha256(rawUrl));
-        } else {
-          unexpectedRequestOverflow = true;
+        const request = route.request();
+        const preparation = browserRequestPreparationByIdentity.get(request);
+        if (!preparation
+          || (preparation.entry !== null && preparation.entry.request !== request)) {
+          recordUnexpectedRequest(request.url());
+          browserRequestPreparationByIdentity.set(
+            request,
+            Object.freeze({ disposition: "abort", entry: null }),
+          );
+          await route.abort("blockedbyclient");
+          return;
         }
-        await route.abort("blockedbyclient");
-        return;
-      }
-      try {
-        const classification = classifyProviderOverlapBrowserRequest(
-          createJourneyBrowserRequestEnvelope(request, page.mainFrame()),
-          { cabinetDocumentAllowed, staticAssetContract },
-        );
-        if (classification.key === "app-cabinet-document") {
-          if (cabinetDocumentConsumed) {
-            throw new Error("Synthetic browser requested the cabinet document more than once.");
-          }
-          cabinetDocumentConsumed = true;
-        }
-        if (providerStaticDocumentKeys.includes(classification.key)) {
-          currentStaticDocumentKey = classification.key;
-        }
-        const entry = { classification, documentKey: currentStaticDocumentKey, request };
-        browserRequests.push(entry);
-        browserRequestByIdentity.set(request, entry);
-        if (browserRequests.length > 256) {
-          throw new Error("Synthetic browser request ledger exceeded its bounded contract.");
-        }
-        if (classification.disposition === "abort") {
+        if (preparation.disposition === "abort") {
           await route.abort("blockedbyclient");
           return;
         }
         await route.continue();
-        return;
-      } catch {
-        // The emitted report never contains the rejected URL. Retain only its
-        // digest for bounded local failure diagnosis.
-        if (unexpectedRequests.length < maximumUnexpectedEvents) {
-          unexpectedRequests.push(sha256(rawUrl));
-        } else {
-          unexpectedRequestOverflow = true;
-        }
-        await route.abort("blockedbyclient");
-        return;
-      }
       } finally {
         finishRoute();
       }
@@ -673,6 +705,7 @@ async function exerciseCabinet(
         documentKey,
       })),
       browserRequestIdentityCount: browserRequestByIdentity.size,
+      browserRequestPreparationIdentityCount: browserRequestPreparationByIdentity.size,
       browserResponseEvidenceIdentityCount: browserResponseEvidenceByIdentity.size,
       browserTerminalRequestIdentityCount: browserTerminalRequestIdentities.size,
       cabinetDocumentAllowed,
@@ -767,6 +800,7 @@ async function exerciseCabinet(
     const browserSnapshot = finalized.snapshot;
     if (requestContract.requestCount !== browserRequests.length
       || browserRequestByIdentity.size !== browserRequests.length
+      || browserRequestPreparationByIdentity.size !== browserRequests.length
       || browserResponseEvidenceByIdentity.size !== browserRequests.length
       || browserTerminalRequestIdentities.size !== browserRequests.length) {
       throw new Error("Sealed browser projection differs from its final raw request ledger.");
