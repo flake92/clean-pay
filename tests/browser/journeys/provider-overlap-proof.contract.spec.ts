@@ -1988,6 +1988,197 @@ test("prearms profile load and keeps the exact cabinet URL at DOM content", asyn
   }
 });
 
+test("registers exact request identities before response capture and routed continuation", async () => {
+  const runnerSource = await readFile(
+    path.resolve(__dirname, "prove-provider-overlap.mjs"),
+    "utf8",
+  );
+  const proofContractSource = await readFile(
+    path.resolve(__dirname, "provider-overlap-proof-contract.mjs"),
+    "utf8",
+  );
+  const requestListenerIndex = runnerSource.indexOf('context.on("request"');
+  const responseListenerIndex = runnerSource.indexOf('context.on("response"');
+  const terminalHandlerIndex = runnerSource.indexOf(
+    "const completeRequest = (request, finished) =>",
+    responseListenerIndex,
+  );
+  const routeHandlerIndex = runnerSource.indexOf('await context.route("**/*"');
+  const firstNavigationIndex = runnerSource.indexOf("await page.goto(", routeHandlerIndex);
+
+  expect(requestListenerIndex).toBeGreaterThan(-1);
+  expect(responseListenerIndex).toBeGreaterThan(requestListenerIndex);
+  expect(terminalHandlerIndex).toBeGreaterThan(responseListenerIndex);
+  expect(routeHandlerIndex).toBeGreaterThan(terminalHandlerIndex);
+  expect(firstNavigationIndex).toBeGreaterThan(routeHandlerIndex);
+
+  const preparationIndex = runnerSource.indexOf("const prepareBrowserRequest = (request) =>");
+  expect(preparationIndex).toBeGreaterThan(-1);
+  expect(preparationIndex).toBeLessThan(requestListenerIndex);
+  const preparation = runnerSource.slice(preparationIndex, requestListenerIndex);
+  const requestListener = runnerSource.slice(requestListenerIndex, responseListenerIndex);
+  const responseListener = runnerSource.slice(responseListenerIndex, terminalHandlerIndex);
+  const routeHandler = runnerSource.slice(routeHandlerIndex, firstNavigationIndex);
+
+  expect(preparation).toContain("classifyProviderOverlapBrowserRequest(");
+  expect(preparation).toContain("browserRequestByIdentity.set(request, entry);");
+  expect(preparation).toContain("browserRequestPreparationByIdentity.set(request, preparation);");
+  expect(preparation).toContain("browserRequests.push(entry);");
+  expect(preparation).toContain("browserRequests.length > 256");
+  expect(preparation).toContain("recordUnexpectedRequest(rawUrl);");
+  expect(requestListener).toContain("prepareBrowserRequest(request);");
+  expect(responseListener).toContain("browserRequestByIdentity.get(request)");
+  expect(responseListener).not.toMatch(/eventSeal\.(?:begin|record)\(/);
+  expect(routeHandler).toContain("browserRequestPreparationByIdentity.get(request)");
+  expect(routeHandler).not.toContain("prepareBrowserRequest(");
+  expect(routeHandler).not.toContain("classifyProviderOverlapBrowserRequest(");
+  expect(routeHandler).toMatch(
+    /if \(!preparation\s*\|\| \(preparation\.entry !== null\s*&& preparation\.entry\.request !== request\)\)[\s\S]{1,384}route\.abort/,
+  );
+  expect(routeHandler.indexOf("browserRequestPreparationByIdentity.get(request)"))
+    .toBeLessThan(routeHandler.indexOf("await route.continue()"));
+  expect(routeHandler).toContain('await route.abort("blockedbyclient")');
+  const classifiedAbortBranch = routeHandler.slice(
+    routeHandler.indexOf('if (preparation.disposition === "abort")'),
+    routeHandler.indexOf("await route.continue()"),
+  );
+  expect(classifiedAbortBranch).not.toContain("recordUnexpectedRequest(");
+  expect(classifiedAbortBranch.match(/route\.abort\(/g)).toHaveLength(1);
+  expect(proofContractSource).toContain("requestCount * 3 + historyCount");
+});
+
+test("keeps one exact request identity across a held route, response, and terminal event", async () => {
+  const browser = await chromium.launch({ headless: true });
+  let releaseRoute: () => void = () => undefined;
+  try {
+    const context = await browser.newContext({ serviceWorkers: "block" });
+    const page = await context.newPage();
+    const eventSeal = createProviderOverlapEventSeal(32);
+    const browserRequestByIdentity = new Map<object, {
+      classification: ProviderBrowserClassification;
+      request: object;
+    }>();
+    const browserResponseEvidenceByIdentity = new Map<object, Promise<unknown>>();
+    const pendingRequests = new Set<object>();
+    let observedFailure: unknown = null;
+    let responseCapturePrearmed = false;
+    let routeReturned = false;
+    const routeGate = new Promise<void>((resolve) => {
+      releaseRoute = resolve;
+    });
+
+    context.on("request", (request) => {
+      try {
+        eventSeal.record();
+        pendingRequests.add(request);
+        const classification: unknown = classifyProviderOverlapBrowserRequest(
+          createJourneyBrowserRequestEnvelope(request, page.mainFrame()),
+          { cabinetDocumentAllowed: false, staticAssetContract },
+        );
+        const entry = {
+          classification: classification as ProviderBrowserClassification,
+          request,
+        };
+        browserRequestByIdentity.set(request, entry);
+      } catch (error) {
+        observedFailure ??= error;
+      }
+    });
+    context.on("response", (response) => {
+      try {
+        const request = response.request();
+        const entry = browserRequestByIdentity.get(request);
+        if (!entry || entry.request !== request) {
+          throw new Error("Synthetic response crossed its exact request identity.");
+        }
+        const evidence = captureProviderOverlapResponseEvidence({
+          classification: entry.classification,
+          request,
+          response,
+        });
+        browserResponseEvidenceByIdentity.set(request, evidence);
+        responseCapturePrearmed = true;
+      } catch (error) {
+        observedFailure ??= error;
+      }
+    });
+    const completeRequest = (request: object) => {
+      const finishRequest = eventSeal.begin();
+      const evidence = browserResponseEvidenceByIdentity.get(request);
+      if (!evidence) {
+        observedFailure ??= new Error("Terminal request has no prearmed evidence.");
+        pendingRequests.delete(request);
+        finishRequest();
+        return;
+      }
+      void evidence.then(
+        () => {
+          pendingRequests.delete(request);
+          finishRequest();
+        },
+        (error) => {
+          observedFailure ??= error;
+          pendingRequests.delete(request);
+          finishRequest();
+        },
+      );
+    };
+    context.on("requestfinished", completeRequest);
+    context.on("requestfailed", completeRequest);
+    await context.route("**/*", async (route) => {
+      const finishRoute = eventSeal.begin();
+      try {
+        const request = route.request();
+        const entry = browserRequestByIdentity.get(request);
+        if (!entry || entry.request !== request) {
+          throw new Error("Synthetic route crossed its exact request identity.");
+        }
+        await route.fulfill({
+          body: "<!doctype html><html><head><link rel=\"icon\" href=\"data:,\"></head>"
+            + "<body><h1>Login</h1></body></html>",
+          contentType: "text/html",
+          status: 200,
+        });
+        await routeGate;
+      } finally {
+        routeReturned = true;
+        finishRoute();
+      }
+    });
+
+    try {
+      const navigation = page.goto(
+        "https://pay.ci.clean-pay.dev/login?redirect_to=%2Fprofile",
+        { waitUntil: "domcontentloaded", timeout: 5_000 },
+      );
+      await expect.poll(() => responseCapturePrearmed, { timeout: 5_000 }).toBe(true);
+      expect(routeReturned).toBe(false);
+      releaseRoute();
+      await navigation;
+      await expect.poll(() => pendingRequests.size, { timeout: 5_000 }).toBe(0);
+      if (observedFailure) throw observedFailure;
+
+      await expect(eventSeal.drainAndSeal(() => pendingRequests.size === 0, {
+        pollMs: 1,
+        quietMs: 3,
+        timeoutMs: 100,
+      })).resolves.toEqual({ eventCount: 3, status: "drained-and-sealed" });
+      expect(eventSeal.assertClean()).toEqual({
+        eventCount: 3,
+        lateEventCount: 0,
+        status: "sealed-clean",
+      });
+      expect(browserRequestByIdentity.size).toBe(1);
+      expect(browserResponseEvidenceByIdentity.size).toBe(1);
+    } finally {
+      releaseRoute();
+      await context.close();
+    }
+  } finally {
+    await browser.close();
+  }
+});
+
 test("prearms response body capture before request completion and navigation", async () => {
   const request = {};
   const classification = browserClassification(
