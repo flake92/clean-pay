@@ -46,6 +46,7 @@ TARGET_APP_IMAGE=''
 TARGET_MIGRATION_IMAGE=''
 RECONCILIATION_ENABLED=''
 PROMOTED='false'
+DISPOSABLE_CANARY_PROVIDER_VALIDATED=false
 
 fail() {
   printf '%s\n' "Zero-downtime deployment failed: $*" >&2
@@ -127,6 +128,7 @@ validate_port() {
 }
 
 validate_canary_readiness_telegram_oidc_jwks_url() {
+  DISPOSABLE_CANARY_PROVIDER_VALIDATED=false
   [ -n "$CANARY_READINESS_TELEGRAM_OIDC_JWKS_URL" ] || return 0
   printf '%s' "$PROJECT_NAME" | grep -Eq '^clean-pay-zdt-[a-f0-9]{16}$' \
     || fail "canary Telegram readiness override requires the disposable rehearsal project"
@@ -138,6 +140,7 @@ validate_canary_readiness_telegram_oidc_jwks_url() {
     || fail "canary Telegram readiness override does not match the owned provider"
   [ "$(env_value REMNASHOP_API_BASE_URL)" = "$expected_origin/api/v1/public" ] \
     || fail "canary Telegram readiness override must share the Remnashop provider origin"
+  DISPOSABLE_CANARY_PROVIDER_VALIDATED=true
 }
 
 validate_image_id() {
@@ -715,6 +718,77 @@ assert_canary_topology() {
   return 0
 }
 
+diagnose_disposable_canary_provider() {
+  [ "$DISPOSABLE_CANARY_PROVIDER_VALIDATED" = true ] || return 0
+  if provider_contract_result=$(timeout --signal=TERM --kill-after=2s 8s \
+    docker exec "$CANARY_NAME" node -e "
+    (async()=>{
+      const emit=(value)=>process.stdout.write(value+'\n');
+      const override=process.env.CLEAN_PAY_READINESS_TELEGRAM_OIDC_JWKS_URL;
+      const base=process.env.REMNASHOP_API_BASE_URL;
+      const key=process.env.REMNASHOP_AUTH_SERVICE_KEY;
+      const prefix='http://zdt-readiness-';
+      const portSuffix=':4190';
+      const jwksSuffix='/.well-known/jwks.json';
+      const origin=typeof override==='string'&&override.endsWith(jwksSuffix)
+        ?override.slice(0,-jwksSuffix.length):'';
+      const resource=origin.startsWith(prefix)&&origin.endsWith(portSuffix)
+        ?origin.slice(prefix.length,-portSuffix.length):'';
+      const exactResource=resource.length===16
+        &&Array.from(resource).every((value)=>'0123456789abcdef'.includes(value));
+      if(!exactResource||override!==prefix+resource+portSuffix+jwksSuffix
+        ||base!==origin+'/api/v1/public')return emit('provider-env-mismatch');
+      if(typeof key!=='string'||key.length<24)return emit('provider-key-missing');
+      const signal=AbortSignal.timeout(5000);
+      const maximumJwksBytes=1048576;
+      const readBounded=async(response)=>{
+        const declared=response.headers.get('content-length');
+        if(declared!==null&&/^\d+$/.test(declared)&&Number(declared)>maximumJwksBytes)throw new Error();
+        if(!response.body)return '';
+        const reader=response.body.getReader();const chunks=[];let bytes=0;
+        try{for(;;){const {done,value}=await reader.read();if(done)break;bytes+=value.byteLength;
+          if(bytes>maximumJwksBytes){await reader.cancel();throw new Error()}chunks.push(Buffer.from(value))}}
+        finally{reader.releaseLock()}
+        return new TextDecoder('utf-8',{fatal:true}).decode(Buffer.concat(chunks,bytes));
+      };
+      const probe=async(input,expected,init)=>{
+        const response=await fetch(input,{...(init??{}),cache:'no-store',redirect:'error',signal});
+        const matches=response.status===expected;
+        try{await response.body?.cancel()}catch{}
+        return matches;
+      };
+      if(!await probe(base+'/plans/public',200))return emit('provider-plans-contract');
+      const auth={method:'POST',headers:{'content-type':'application/json','x-remnashop-auth-service-key':key},body:'{}'};
+      if(!await probe(base+'/auth/email/start',422,auth))return emit('provider-email-start-contract');
+      if(!await probe(base+'/auth/identify',422,auth))return emit('provider-identify-contract');
+      if(!await probe(base+'/auth/service-session',422,auth))return emit('provider-service-session-contract');
+      if(!await probe(base+'/auth/notification-preferences',405,auth))return emit('provider-notification-contract');
+      const jwksResponse=await fetch(override,{cache:'no-store',redirect:'error',signal});
+      let jwks;
+      try{
+        if(jwksResponse.status!==200)throw new Error();
+        jwks=JSON.parse(await readBounded(jwksResponse));
+      }catch{
+        try{await jwksResponse.body?.cancel()}catch{}
+        return emit('provider-jwks-contract');
+      }
+      if(!jwks||typeof jwks!=='object'||Array.isArray(jwks)
+        ||!Array.isArray(jwks.keys)||jwks.keys.length===0)return emit('provider-jwks-contract');
+      return emit('provider-contract-ok');
+    })().catch(()=>process.stdout.write('provider-transport-failed\n'));
+  " 2>/dev/null); then
+    :
+  else
+    provider_contract_result=provider-probe-failed
+  fi
+  case "$provider_contract_result" in
+    provider-contract-ok|provider-env-mismatch|provider-key-missing|provider-plans-contract|provider-email-start-contract|provider-identify-contract|provider-service-session-contract|provider-notification-contract|provider-jwks-contract|provider-transport-failed|provider-probe-failed) ;;
+    *) provider_contract_result=provider-probe-invalid ;;
+  esac
+  printf '%s\n' "$provider_contract_result" >&2
+  return 0
+}
+
 wait_for_canary_readiness() {
   attempt=0
   last_readiness_result=request-failed
@@ -775,6 +849,11 @@ wait_for_canary_readiness() {
     sleep 2
   done
 
+  case "$last_readiness_result" in
+    not-ready:remnashop|not-ready:telegramOidc)
+      diagnose_disposable_canary_provider
+      ;;
+  esac
   docker logs --tail=100 "$CANARY_NAME" >&2 || true
   fail "canary did not become ready within 180 seconds ($last_readiness_result)"
 }
