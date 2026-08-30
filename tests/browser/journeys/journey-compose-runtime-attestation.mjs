@@ -53,6 +53,9 @@ const oneShotServices = new Set([
   "db-role-provision",
   "migration",
 ]);
+const oneShotLifecycleFailureEvidenceByError = new WeakMap();
+const oneShotLifecycleFailureTraversalMaximumDepth = 8;
+const oneShotLifecycleFailureTraversalMaximumNodes = 64;
 const defaultImagePlatform = Object.freeze({ architecture: "amd64", os: "linux" });
 const platformImageManifestMediaTypes = new Set([
   "application/vnd.docker.distribution.manifest.v2+json",
@@ -69,6 +72,41 @@ const rootImageManifestMediaTypes = new Set([
 export const JOURNEY_COMPOSE_ONE_SHOT_SERVICE_NAMES = Object.freeze(
   [...oneShotServices].sort(),
 );
+
+export function collectJourneyOneShotLifecycleFailureEvidence(error) {
+  try {
+    const evidence = [];
+    const pending = [{ depth: 0, value: error }];
+    const seen = new Set();
+    let visited = 0;
+    while (pending.length > 0 && evidence.length < 16
+      && visited < oneShotLifecycleFailureTraversalMaximumNodes) {
+      const { depth, value } = pending.shift();
+      if (value === null || (typeof value !== "object" && typeof value !== "function")
+        || seen.has(value)) {
+        continue;
+      }
+      seen.add(value);
+      visited += 1;
+      const direct = oneShotLifecycleFailureEvidenceByError.get(value);
+      if (direct) evidence.push(direct);
+      if (depth >= oneShotLifecycleFailureTraversalMaximumDepth) continue;
+      const errors = Object.getOwnPropertyDescriptor(value, "errors");
+      if (errors && Object.hasOwn(errors, "value") && Array.isArray(errors.value)) {
+        for (const child of errors.value.slice(0, 8)) {
+          pending.push({ depth: depth + 1, value: child });
+        }
+      }
+      const cause = Object.getOwnPropertyDescriptor(value, "cause");
+      if (cause && Object.hasOwn(cause, "value")) {
+        pending.push({ depth: depth + 1, value: cause.value });
+      }
+    }
+    return Object.freeze(evidence);
+  } catch {
+    return Object.freeze([]);
+  }
+}
 export const JOURNEY_COMPOSE_EXPECTED_SERVICE_STATES = Object.freeze({
   app: "running-healthy",
   "browser-ca-ready": "exited-zero",
@@ -1557,7 +1595,12 @@ function assertOneShotLifecycleRecord(value, container, expectedLifecycleNotBefo
     fail("Journey one-shot lifecycle lower bound differs from its verifier launch receipt.");
   }
   if (!Array.isArray(value.events) || value.events.length !== 3) {
-    fail("Journey one-shot event history is missing, truncated, or repeated.");
+    const error = new Error("Journey one-shot event history is missing, truncated, or repeated.");
+    oneShotLifecycleFailureEvidenceByError.set(
+      error,
+      createOneShotLifecycleFailureEvidence(value, container),
+    );
+    throw error;
   }
   const expectedActions = ["create", "start", "die"];
   const idSha256 = sha256(container.Id);
@@ -1587,6 +1630,43 @@ function assertOneShotLifecycleRecord(value, container, expectedLifecycleNotBefo
 function lifecycleSince(createdAt) {
   const created = exactTimestamp(createdAt, "container created timestamp");
   return new Date(created - 1_000).toISOString();
+}
+
+function createOneShotLifecycleFailureEvidence(value, container) {
+  const events = Array.isArray(value.events) ? value.events : [];
+  const labels = container?.Config?.Labels;
+  const rawService = labels && typeof labels === "object"
+    ? labels["com.docker.compose.service"]
+    : undefined;
+  const service = oneShotServices.has(rawService) ? rawService : "unknown";
+  const actionSet = new Set(["create", "die", "restart", "start"]);
+  const actions = events.slice(0, 8).map((event) => (
+    actionSet.has(event?.action) ? event.action : "invalid"
+  ));
+  const observedEventCount = Number.isSafeInteger(events.length) && events.length >= 0
+    ? Math.min(events.length, 9)
+    : -1;
+  const exitCode = Number.isSafeInteger(container?.State?.ExitCode)
+    ? container.State.ExitCode
+    : null;
+  const restartCount = Number.isSafeInteger(container?.RestartCount)
+    ? container.RestartCount
+    : null;
+  const allowedStates = new Set([
+    "created", "dead", "exited", "paused", "removing", "restarting", "running",
+  ]);
+  const stateStatus = allowedStates.has(container?.State?.Status)
+    ? container.State.Status
+    : "invalid";
+  return Object.freeze({
+    actions: Object.freeze(actions),
+    eventCountTruncated: events.length > 8,
+    exitCode,
+    observedEventCount,
+    restartCount,
+    service,
+    stateStatus,
+  });
 }
 
 function exactTimestamp(value, label) {

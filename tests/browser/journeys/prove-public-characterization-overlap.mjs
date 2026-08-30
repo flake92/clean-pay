@@ -6,6 +6,9 @@ import path from "node:path";
 import { validateProductionImageAssetAttestation } from "../../../scripts/security/prove-served-cabinet-assets.mjs";
 
 import {
+  collectJourneyOneShotLifecycleFailureEvidence,
+} from "./journey-compose-runtime-attestation.mjs";
+import {
   collectJourneyDockerFailureEvidence,
   journeyDockerCliEnvironment,
   runJourneyDockerCommand,
@@ -212,6 +215,7 @@ try {
     dockerFailures: collectJourneyDockerFailureEvidence(failure),
     invocationFailures: invocationFailureEvidence,
     processFailures: failureBundle?.failures ?? [],
+    runtimeFailures: collectJourneyOneShotLifecycleFailureEvidence(failure),
     ...createJourneySanitizedErrorEvidence(failure),
   })}\n`);
   process.exitCode = 1;
