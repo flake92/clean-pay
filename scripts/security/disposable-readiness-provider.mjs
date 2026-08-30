@@ -17,6 +17,7 @@ const forbiddenCredentialHeaders = Object.freeze([
   "proxy-authorization",
   "x-api-key",
 ]);
+const readyMarker = "clean-pay-disposable-readiness-provider-ready-v1";
 
 export function createDisposableReadinessProvider(options) {
   const expectedHash = exactExpectedHash(options?.expectedServiceKeySha256);
@@ -171,6 +172,9 @@ function runCli() {
   const port = exactPort(process.argv[2]);
   const server = createDisposableReadinessProvider({
     expectedServiceKeySha256: process.env.CLEAN_PAY_SYNTHETIC_PROVIDER_KEY_SHA256,
+  });
+  server.once("listening", () => {
+    process.stdout.write(`${readyMarker}\n`);
   });
   server.listen(port, "0.0.0.0");
   server.on("error", () => { process.exitCode = 1; });
