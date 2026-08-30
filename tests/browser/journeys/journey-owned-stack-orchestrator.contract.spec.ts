@@ -2798,6 +2798,131 @@ test("prepares both immutable stacks before same-turn launch dispatch and cleans
   }
 });
 
+test("stops a ready peer when the second event listener fails before any Compose dispatch", async () => {
+  const repositoryRoot = path.resolve(__dirname, "../../..");
+  const [baseline, candidate] = await Promise.all([
+    createOwnedInput("baseline", repositoryRoot),
+    createOwnedInput("candidate", repositoryRoot),
+  ]);
+  const listenerFailure = new Error("synthetic candidate listener failure");
+  candidate.input.startDockerEventCapture = () => { throw listenerFailure; };
+  try {
+    await expect(withJourneyOwnedStackPair({
+      baseline: baseline.input,
+      candidate: candidate.input,
+    }, async () => undefined)).rejects.toThrow(
+      /Both verifier-owned pre-launch rechecks must settle before cleanup/,
+    );
+    expect(baseline.docker.upCalls + candidate.docker.upCalls).toBe(0);
+    expect(baseline.docker.activeEventCaptureCount).toBe(0);
+    expect(candidate.docker.activeEventCaptureCount).toBe(0);
+    expect(baseline.docker.activeBarrierCount + candidate.docker.activeBarrierCount).toBe(0);
+  } finally {
+    await Promise.all([
+      removeSyntheticInputDirectory(baseline.directory),
+      removeSyntheticInputDirectory(candidate.directory),
+    ]);
+  }
+});
+
+test("dispatches the peer synchronously and settles both captures after a synchronous launch throw", async () => {
+  const repositoryRoot = path.resolve(__dirname, "../../..");
+  const fixtures = await Promise.all([
+    createOwnedInput("baseline", repositoryRoot),
+    createOwnedInput("candidate", repositoryRoot),
+  ]);
+  const primaryError = new Error("synthetic synchronous Compose launch failure");
+  const baselineRun = fixtures[0].docker.run;
+  let synchronousLaunchCalls = 0;
+  fixtures[0].input.runDocker = (args, maximumBytes, environment) => {
+    if (args[0] === "compose" && args.includes("up")) {
+      synchronousLaunchCalls += 1;
+      throw primaryError;
+    }
+    return baselineRun(args, maximumBytes, environment);
+  };
+  const handles = [];
+  try {
+    handles.push(...await Promise.all(fixtures.map(({ input }) => prepareJourneyOwnedStack(input))));
+    const plans = await Promise.all(handles.map(prepareJourneyOwnedStackLaunch));
+    const dispatch = dispatchJourneyOwnedStackPair(handles, plans);
+    expect(synchronousLaunchCalls).toBe(1);
+    expect(fixtures[1].docker.upCalls).toBe(1);
+    fixtures[1].docker.releaseUp();
+    let captured: unknown;
+    await dispatch.catch((error) => { captured = error; });
+    expect(captured).toBeInstanceOf(AggregateError);
+    expect((captured as AggregateError).errors).toEqual([primaryError]);
+    expect(fixtures.map(({ docker }) => docker.activeEventCaptureCount)).toEqual([0, 0]);
+    await Promise.all(handles.map(cleanupJourneyOwnedStack));
+    handles.length = 0;
+  } finally {
+    await Promise.all(handles.map((handle) => cleanupJourneyOwnedStack(handle).catch(() => undefined)));
+    await Promise.all(fixtures.map(({ directory }) => removeSyntheticInputDirectory(directory)));
+  }
+});
+
+test("proves an event barrier absent when remove side-effects before rejecting", async () => {
+  const repositoryRoot = path.resolve(__dirname, "../../..");
+  const fixture = await createOwnedInput("baseline", repositoryRoot);
+  const baseRun = fixture.docker.run;
+  const removalFailure = new Error("synthetic barrier remove response failure");
+  let barrierId: string | undefined;
+  let failureInjected = false;
+  fixture.input.runDocker = async (args, maximumBytes, environment) => {
+    if (args[0] === "container" && args[1] === "create"
+      && args.some((entry) => entry.startsWith("io.clean-pay.event-barrier="))) {
+      const output = await baseRun(args, maximumBytes, environment);
+      barrierId = output;
+      return output;
+    }
+    if (!failureInjected && args[0] === "container" && args[1] === "rm"
+      && args[2] === barrierId) {
+      failureInjected = true;
+      await baseRun(args, maximumBytes, environment);
+      throw removalFailure;
+    }
+    return baseRun(args, maximumBytes, environment);
+  };
+  let handle: Awaited<ReturnType<typeof prepareJourneyOwnedStack>> | undefined;
+  try {
+    handle = await prepareJourneyOwnedStack(fixture.input);
+    await expect(prepareJourneyOwnedStackLaunch(handle)).rejects.toBe(removalFailure);
+    expect(fixture.docker.activeBarrierCount).toBe(0);
+    expect(fixture.docker.activeEventCaptureCount).toBe(0);
+    await expect(cleanupJourneyOwnedStack(handle)).resolves.toMatchObject({
+      status: "verifier-owned-stack-cleaned",
+    });
+    handle = undefined;
+  } finally {
+    if (handle !== undefined) await cleanupJourneyOwnedStack(handle).catch(() => undefined);
+    await removeSyntheticInputDirectory(fixture.directory);
+  }
+});
+
+test("keeps snapshot cleanup retryable until event-capture termination is proven", async () => {
+  const repositoryRoot = path.resolve(__dirname, "../../..");
+  const fixture = await createOwnedInput("baseline", repositoryRoot, {
+    eventCaptureUnprovenStopAttempts: 1,
+  });
+  const handle = await prepareJourneyOwnedStack(fixture.input);
+  try {
+    await prepareJourneyOwnedStackLaunch(handle);
+    await expect(cleanupJourneyOwnedStack(handle)).rejects.toThrow(/termination unproven/);
+    expect(fixture.docker.activeEventCaptureCount).toBe(1);
+    expect(fixture.docker.eventCaptureStopAttempts).toBe(1);
+    await expect(lstat(handle.directory)).resolves.toBeDefined();
+    await expect(cleanupJourneyOwnedStack(handle)).resolves.toMatchObject({
+      status: "verifier-owned-stack-cleaned",
+    });
+    expect(fixture.docker.activeEventCaptureCount).toBe(0);
+    expect(fixture.docker.eventCaptureStopAttempts).toBe(2);
+    await expect(lstat(handle.directory)).rejects.toMatchObject({ code: "ENOENT" });
+  } finally {
+    await removeSyntheticInputDirectory(fixture.directory);
+  }
+});
+
 test("kills a timed-out Docker child but settles only after stdio close", async () => {
   const child = new EventEmitter() as EventEmitter & {
     exitCode: number | null;
@@ -3215,6 +3340,7 @@ async function createOwnedInput(
       }),
       expectedMigrationAssetImageDigest: assetDigest,
       runDocker: docker.run,
+      startDockerEventCapture: docker.startEventCapture,
     },
   };
 }
@@ -3253,6 +3379,7 @@ function createOwnedDockerMock(
     applicationManifestMediaType?: string;
     applicationRootAnnotations?: Record<string, string>;
     applicationRootMediaType?: string;
+    eventCaptureUnprovenStopAttempts?: number;
     imagePlatformArchitecture?: "amd64" | "arm64";
     migrationMode?: "classic" | "containerd";
     migrationManifestAnnotations?: Record<string, string>;
@@ -3292,6 +3419,15 @@ function createOwnedDockerMock(
     owner: string;
     role: keyof typeof identities;
   }>();
+  const barriers = new Map<string, {
+    image: string;
+    name: string;
+    nonce: string;
+    project: string;
+  }>();
+  let activeEventCapture: ReturnType<typeof startEventCapture> | undefined;
+  let eventOrdinal = 0n;
+  let eventCaptureStopAttempts = 0;
   let upCalls = 0;
   let probeOrdinal = 0;
   let releaseUp: () => void = () => undefined;
@@ -3357,6 +3493,21 @@ function createOwnedDockerMock(
     }
     if (args[0] === "container" && args[1] === "create") {
       const name = args[args.indexOf("--name") + 1];
+      const barrierOwner = args.find((entry) => entry.startsWith("io.clean-pay.event-barrier="));
+      if (barrierOwner !== undefined) {
+        const nonce = barrierOwner.slice("io.clean-pay.event-barrier=".length);
+        const projectLabel = args.find((entry) => entry.startsWith("com.docker.compose.project="));
+        probeOrdinal += 1;
+        const barrierId = probeOrdinal.toString(16).padStart(64, "0");
+        barriers.set(barrierId, {
+          image: args.at(-1)!,
+          name,
+          nonce,
+          project: projectLabel!.slice("com.docker.compose.project=".length),
+        });
+        activeEventCapture?.observeBarrier(barrierId, nonce);
+        return barrierId;
+      }
       const role = name.includes("-application-") ? "application" : "migration";
       const label = args[args.indexOf("--label") + 1];
       probeOrdinal += 1;
@@ -3369,6 +3520,26 @@ function createOwnedDockerMock(
       return probeId;
     }
     if (args[0] === "container" && args[1] === "inspect") {
+      const barrier = barriers.get(args[2]);
+      if (barrier) {
+        return JSON.stringify([{
+          Id: args[2],
+          Image: barrier.image,
+          Name: `/${barrier.name}`,
+          RestartCount: 0,
+          Config: {
+            Entrypoint: ["/bin/true"],
+            Image: barrier.image,
+            Labels: {
+              "com.docker.compose.project": barrier.project,
+              "com.docker.compose.service": "journey-event-barrier",
+              "io.clean-pay.event-barrier": barrier.nonce,
+            },
+          },
+          HostConfig: { NetworkMode: "none" },
+          State: { Running: false, Status: "created" },
+        }]);
+      }
       const probe = active.get(args[2]);
       if (!probe) throw new Error(`Unexpected probe inspection: ${args[2]}`);
       const { name, owner, role } = probe;
@@ -3410,8 +3581,22 @@ function createOwnedDockerMock(
       }]);
     }
     if (args[0] === "container" && args[1] === "rm") {
+      if (barriers.delete(args[2])) return args[2];
       active.delete(args[2]);
       return args[2];
+    }
+    if (args[0] === "ps"
+      && args.some((entry) => entry.includes("io.clean-pay.event-barrier"))) {
+      const labelFilter = args.find((entry) => entry.startsWith(
+        "label=io.clean-pay.event-barrier=",
+      ));
+      const nameFilter = args.find((entry) => entry.startsWith("name=^/"));
+      const nonce = labelFilter?.slice("label=io.clean-pay.event-barrier=".length);
+      const expectedName = nameFilter?.slice("name=^/".length, -1);
+      return [...barriers.entries()]
+        .filter(([, barrier]) => barrier.nonce === nonce && barrier.name === expectedName)
+        .map(([id]) => id)
+        .join("\n");
     }
     if (args[0] === "ps"
       && args.some((entry) => entry.includes("io.clean-pay.verifier-probe"))) {
@@ -3429,13 +3614,56 @@ function createOwnedDockerMock(
     if (["ps", "network", "volume"].includes(args[0])) return "";
     throw new Error(`Unexpected mocked Docker command: ${args.join(" ")}`);
   };
+  function startEventCapture() {
+    type BarrierEventReceipt = Readonly<{ containerId: string; timeNano: string }>;
+    const observed = new Map<string, BarrierEventReceipt>();
+    const waiters = new Map<string, Array<(value: BarrierEventReceipt) => void>>();
+    const lines: string[] = [];
+    let stopped = false;
+    const capture = {
+      observeBarrier: (id: string, nonce: string) => {
+        eventOrdinal += 1n;
+        const timeNano = (BigInt(Date.now()) * 1_000_000n + eventOrdinal).toString();
+        const receipt = Object.freeze({ containerId: id, timeNano });
+        observed.set(nonce, receipt);
+        lines.push(`${timeNano}|create|${id}|journey-event-barrier|${nonce}`);
+        for (const resolve of waiters.get(nonce) ?? []) resolve(receipt);
+        waiters.delete(nonce);
+      },
+      stop: async () => {
+        if (stopped) throw new Error("synthetic event capture stopped twice");
+        eventCaptureStopAttempts += 1;
+        if (eventCaptureStopAttempts <= (options.eventCaptureUnprovenStopAttempts ?? 0)) {
+          throw new Error("synthetic event capture termination unproven");
+        }
+        stopped = true;
+        if (activeEventCapture === capture) activeEventCapture = undefined;
+        return lines.join("\n");
+      },
+      terminationProven: () => stopped,
+      waitForBarrier: (nonce: string) => {
+        if (observed.has(nonce)) return Promise.resolve(observed.get(nonce)!);
+        return new Promise<BarrierEventReceipt>((resolve) => {
+          const current = waiters.get(nonce) ?? [];
+          current.push(resolve);
+          waiters.set(nonce, current);
+        });
+      },
+    };
+    activeEventCapture = capture;
+    return capture;
+  }
   return {
     calls,
     composeEnvironments,
+    get activeBarrierCount() { return barriers.size; },
+    get activeEventCaptureCount() { return activeEventCapture === undefined ? 0 : 1; },
     get activeProbeCount() { return active.size; },
+    get eventCaptureStopAttempts() { return eventCaptureStopAttempts; },
     get upCalls() { return upCalls; },
     releaseUp: () => releaseUp(),
     run,
+    startEventCapture,
   };
 }
 

@@ -3371,6 +3371,7 @@ async function createMockOwnedStackInput(
       ].sort(),
       expectedMigrationAssetImageDigest: identities.migration.asset,
       runDocker: docker.run,
+      startDockerEventCapture: docker.startEventCapture,
     },
     journeyContractSha256: sha256(contractBytes),
     sharedSyntheticEnvironmentContractSha256:
@@ -3474,6 +3475,13 @@ function createFullJourneyDockerMock(
     owner: string;
     role: "application" | "migration";
   }>();
+  const barriers = new Map<string, {
+    image: string;
+    name: string;
+    nonce: string;
+  }>();
+  let activeEventCapture: ReturnType<typeof startEventCapture> | undefined;
+  let eventNano = BigInt(Date.now()) * 1_000_000n;
   let downCalls = 0;
   let probeOrdinal = 0;
   let resourcesActive = false;
@@ -3502,6 +3510,7 @@ function createFullJourneyDockerMock(
       }, environment);
       runtime = createFullMockRuntime(contract, identities, compose);
       resourcesActive = true;
+      activeEventCapture?.observeRuntime(runtime);
       await launchGate.arrive(role);
       return "";
     }
@@ -3525,6 +3534,14 @@ function createFullJourneyDockerMock(
     if (args[0] === "container" && args[1] === "create") {
       const name = args[args.indexOf("--name") + 1];
       const ownerLabel = args[args.indexOf("--label") + 1];
+      if (ownerLabel.startsWith("io.clean-pay.event-barrier=")) {
+        const nonce = ownerLabel.slice("io.clean-pay.event-barrier=".length);
+        probeOrdinal += 1;
+        const barrierId = sha256(`${contract.project}:barrier:${probeOrdinal}:${name}`);
+        barriers.set(barrierId, { image: args.at(-1)!, name, nonce });
+        activeEventCapture?.observeBarrier(barrierId, nonce);
+        return barrierId;
+      }
       const imageRole = name.includes("-application-") ? "application" : "migration";
       probeOrdinal += 1;
       const probeId = sha256(`${contract.project}:probe:${probeOrdinal}:${name}`);
@@ -3536,6 +3553,26 @@ function createFullJourneyDockerMock(
       return probeId;
     }
     if (args[0] === "container" && args[1] === "inspect") {
+      const barrier = barriers.get(args[2]);
+      if (barrier) {
+        return JSON.stringify([{
+          Id: args[2],
+          Image: barrier.image,
+          Name: `/${barrier.name}`,
+          RestartCount: 0,
+          Config: {
+            Entrypoint: ["/bin/true"],
+            Image: barrier.image,
+            Labels: {
+              "com.docker.compose.project": contract.project,
+              "com.docker.compose.service": "journey-event-barrier",
+              "io.clean-pay.event-barrier": barrier.nonce,
+            },
+          },
+          HostConfig: { NetworkMode: "none" },
+          State: { Running: false, Status: "created" },
+        }]);
+      }
       const probe = probes.get(args[2]);
       if (probe) {
         const identity = identities[probe.role];
@@ -3559,6 +3596,7 @@ function createFullJourneyDockerMock(
       return JSON.stringify([container]);
     }
     if (args[0] === "container" && args[1] === "rm") {
+      if (barriers.delete(args[2])) return args[2];
       if (!probes.delete(args[2])) throw new Error("Mock probe cleanup identity differs.");
       return args[2];
     }
@@ -3572,6 +3610,18 @@ function createFullJourneyDockerMock(
       return `${sha256(await readFile(mount.Source))}  ${destination}\n`;
     }
     if (args[0] === "ps") {
+      if (args.some((entry) => entry.startsWith("label=io.clean-pay.event-barrier="))) {
+        const label = args.find((entry) => entry.startsWith(
+          "label=io.clean-pay.event-barrier=",
+        ));
+        const name = args.find((entry) => entry.startsWith("name=^/"));
+        const expectedNonce = label?.slice("label=io.clean-pay.event-barrier=".length);
+        const expectedName = name?.slice("name=^/".length, -1);
+        return [...barriers.entries()]
+          .filter(([, barrier]) => barrier.nonce === expectedNonce && barrier.name === expectedName)
+          .map(([identity]) => identity)
+          .join("\n");
+      }
       if (args.some((entry) => entry.startsWith("label=io.clean-pay.verifier-probe="))) {
         const label = args.find((entry) => entry.startsWith(
           "label=io.clean-pay.verifier-probe=",
@@ -3613,18 +3663,59 @@ function createFullJourneyDockerMock(
       if (!resourcesActive || !volume) throw new Error("Unexpected mock volume inspection.");
       return JSON.stringify([volume]);
     }
-    if (args[0] === "events") {
-      const filter = args.find((entry) => entry.startsWith("container="));
-      const identity = filter?.slice("container=".length) ?? "";
-      const events = runtime?.eventLinesByContainerId[identity];
-      if (!resourcesActive || events === undefined) {
-        throw new Error("Unexpected mock one-shot event query.");
-      }
-      return events;
-    }
+    if (args[0] === "events") throw new Error("Retrospective mock event query is forbidden.");
     if (args[0] === "info") return "json-file";
     throw new Error(`Unexpected full-runtime mock Docker command: ${args.join(" ")}`);
   };
+
+  function startEventCapture() {
+    type BarrierReceipt = Readonly<{ containerId: string; timeNano: string }>;
+    const observed = new Map<string, BarrierReceipt>();
+    const waiters = new Map<string, Array<(receipt: BarrierReceipt) => void>>();
+    const lines: string[] = [];
+    let stopped = false;
+    const nextTimeNano = () => {
+      const wallClock = BigInt(Date.now()) * 1_000_000n;
+      eventNano = (wallClock > eventNano ? wallClock : eventNano) + 1n;
+      return eventNano.toString();
+    };
+    const capture = {
+      observeBarrier(id: string, nonce: string) {
+        const receipt = Object.freeze({ containerId: id, timeNano: nextTimeNano() });
+        observed.set(nonce, receipt);
+        lines.push(`${receipt.timeNano}|create|${id}|journey-event-barrier|${nonce}`);
+        for (const resolve of waiters.get(nonce) ?? []) resolve(receipt);
+        waiters.delete(nonce);
+      },
+      observeRuntime(value: ReturnType<typeof createFullMockRuntime>) {
+        for (const service of JOURNEY_COMPOSE_SERVICE_NAMES) {
+          const id = value.containerIdsByService[service];
+          const actions = JOURNEY_COMPOSE_ONE_SHOT_SERVICE_NAMES.includes(service)
+            ? ["create", "start", "die"] : ["create", "start"];
+          for (const action of actions) {
+            lines.push(`${nextTimeNano()}|${action}|${id}|${service}|-`);
+          }
+        }
+      },
+      async stop() {
+        if (stopped) throw new Error("Mock event capture stopped twice.");
+        stopped = true;
+        if (activeEventCapture === capture) activeEventCapture = undefined;
+        return lines.join("\n");
+      },
+      terminationProven: () => stopped,
+      waitForBarrier(nonce: string) {
+        if (observed.has(nonce)) return Promise.resolve(observed.get(nonce)!);
+        return new Promise<BarrierReceipt>((resolve) => {
+          const current = waiters.get(nonce) ?? [];
+          current.push(resolve);
+          waiters.set(nonce, current);
+        });
+      },
+    };
+    activeEventCapture = capture;
+    return capture;
+  }
 
   return {
     calls,
@@ -3635,6 +3726,7 @@ function createFullJourneyDockerMock(
     },
     get downCalls() { return downCalls; },
     run,
+    startEventCapture,
   };
 }
 
