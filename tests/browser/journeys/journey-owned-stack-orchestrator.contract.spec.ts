@@ -2744,9 +2744,10 @@ test("keeps Docker failure projection total, bounded and fixed-vocabulary", asyn
 
   const overlappingFailure = await failedDockerOperation(
     ["compose", "up"],
-    "container private-browser-db-observer-provision-1 is unhealthy",
+    'service "browser-db-observer-provision" didn\'t complete successfully: exit 23\n',
   );
   expect(collectJourneyDockerFailureEvidence(overlappingFailure)).toMatchObject([{
+    classifications: ["container-exited"],
     services: ["browser-db-observer-provision"],
   }]);
 
@@ -2756,6 +2757,21 @@ test("keeps Docker failure projection total, bounded and fixed-vocabulary", asyn
   let deep: object = {};
   for (let depth = 0; depth < 20_000; depth += 1) deep = { cause: deep };
   expect(collectJourneyDockerFailureEvidence(deep)).toEqual([]);
+});
+
+test("keeps observer provisioning failures fixed-code and output-silent", async () => {
+  const source = await readFile(
+    path.resolve(__dirname, "db-observer-provision.sh"),
+    "utf8",
+  );
+  expect(source).toContain("--command='SELECT 1'");
+  expect(source).toContain("unset PGOPTIONS");
+  expect(source).toContain(">/dev/null 2>&1 || base_status=$?");
+  expect(source).toContain("<<SQL || provision_status=$?");
+  expect(source).toContain(">/dev/null 2>&1 <<SQL");
+  expect(source).toContain("statement_timeout=15000 -c lock_timeout=5000");
+  for (const code of [20, 21, 22, 23, 24]) expect(source).toContain(`exit ${code}`);
+  expect(source).not.toMatch(/\b(?:cat|tee)\b|set\s+-x/);
 });
 
 test("rejects a killed Docker child without close only after OS absence is proven", async () => {
