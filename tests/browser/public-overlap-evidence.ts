@@ -1,14 +1,19 @@
 import { createHash } from "node:crypto";
+import { constants as fsConstants, type BigIntStats } from "node:fs";
 import {
   lstat,
   mkdir,
   open,
-  readFile,
   readdir,
   realpath,
   rm,
 } from "node:fs/promises";
 import path from "node:path";
+
+import {
+  PUBLIC_OVERLAP_OWNERSHIP_DIRECTORY_PATHS as runtimeOwnershipDirectoryPaths,
+  derivePublicOverlapOwnershipDirectoryPaths,
+} from "./public-overlap-directory-policy.mjs";
 
 export const PUBLIC_OVERLAP_SUITE = "public-characterization-v1";
 export const PUBLIC_OVERLAP_PROJECTS = Object.freeze([
@@ -93,6 +98,8 @@ export const PUBLIC_OVERLAP_ARTIFACT_NAMES = Object.freeze([
   "console.json",
   "viewport.png",
 ] as const);
+const PUBLIC_OVERLAP_OWNERSHIP_DIRECTORY_PATHS =
+  runtimeOwnershipDirectoryPaths as readonly string[];
 
 export type PublicOverlapRole = "baseline" | "candidate";
 export type PublicOverlapRoute = (typeof PUBLIC_OVERLAP_ROUTES)[number];
@@ -159,6 +166,11 @@ export const PUBLIC_OVERLAP_CAPTURE_POLICY = createExactEphemeralCapturePolicy({
   maximumArtifactBytes: 4 * 1024 * 1024,
   suite: PUBLIC_OVERLAP_SUITE,
 });
+if (JSON.stringify(derivePublicOverlapOwnershipDirectoryPaths(
+  PUBLIC_OVERLAP_CAPTURE_POLICY.artifactPaths,
+)) !== JSON.stringify(PUBLIC_OVERLAP_OWNERSHIP_DIRECTORY_PATHS)) {
+  throw new Error("Public overlap ownership policy differs from its canonical directory ledger.");
+}
 
 export function createExactEphemeralCapturePolicy(input: {
   artifactPaths: readonly string[];
@@ -183,6 +195,7 @@ export function createExactEphemeralCapturePolicy(input: {
     throw new Error("Ephemeral browser capture artifact paths must be unique.");
   }
   for (const artifactPath of artifactPaths) assertSafeRelativeArtifactPath(artifactPath);
+  derivePublicOverlapOwnershipDirectoryPaths(artifactPaths);
   return Object.freeze({
     artifactPaths: Object.freeze(artifactPaths),
     caseCount: input.caseCount,
@@ -743,19 +756,7 @@ async function assertRegularExactDirectory(target: string, label: string) {
 }
 
 function expectedOwnershipDirectoryPaths(policy: ExactEphemeralCapturePolicy) {
-  const result = new Set([".", "artifacts"]);
-  for (const artifactPath of policy.artifactPaths) {
-    const segments = artifactPath.split("/").slice(0, -1);
-    let current = "artifacts";
-    for (const segment of segments) {
-      current = `${current}/${segment}`;
-      result.add(current);
-    }
-  }
-  return [...result].sort((left, right) => {
-    const depth = left.split("/").length - right.split("/").length;
-    return depth || left.localeCompare(right);
-  });
+  return derivePublicOverlapOwnershipDirectoryPaths(policy.artifactPaths);
 }
 
 async function exactDirectoryIdentity(target: string, relativePath: string) {
@@ -973,15 +974,65 @@ async function listRegularFilesRecursively(root: string, maximumFiles: number) {
 }
 
 async function readBoundedRegularFile(target: string, maximumBytes: number) {
-  const details = await lstat(target);
-  if (!details.isFile() || details.isSymbolicLink() || details.size < 1 || details.size > maximumBytes) {
+  if (!Number.isSafeInteger(maximumBytes) || maximumBytes < 1) {
+    throw new Error("Ephemeral browser capture file limit is invalid.");
+  }
+  const expectedParent = path.resolve(path.dirname(target));
+  const [before, parentResolved] = await Promise.all([
+    lstat(target, { bigint: true }),
+    realpath(expectedParent),
+  ]);
+  if (!before.isFile() || before.isSymbolicLink()
+    || before.size < 1n || before.size > BigInt(maximumBytes)
+    || parentResolved !== expectedParent) {
     throw new Error("Ephemeral browser capture file is not a bounded regular file.");
   }
-  const bytes = await readFile(target);
-  if (bytes.byteLength !== details.size) {
+  const noFollow = process.platform === "win32" ? 0 : (fsConstants.O_NOFOLLOW ?? 0);
+  const handle = await open(target, fsConstants.O_RDONLY | noFollow);
+  let afterHandle: BigIntStats = before;
+  let bytes = Buffer.alloc(0);
+  try {
+    const opened = await handle.stat({ bigint: true });
+    if (!opened.isFile() || !sameRegularFileIdentity(before, opened)) {
+      throw new Error("Ephemeral browser capture file identity changed before it was read.");
+    }
+    const buffer = Buffer.allocUnsafe(Number(opened.size) + 1);
+    let offset = 0;
+    while (offset < buffer.byteLength) {
+      const { bytesRead } = await handle.read(
+        buffer,
+        offset,
+        buffer.byteLength - offset,
+        offset,
+      );
+      if (bytesRead === 0) break;
+      offset += bytesRead;
+    }
+    bytes = buffer.subarray(0, offset);
+    afterHandle = await handle.stat({ bigint: true });
+  } finally {
+    await handle.close();
+  }
+  const [afterPath, afterParentResolved] = await Promise.all([
+    lstat(target, { bigint: true }),
+    realpath(expectedParent),
+  ]);
+  if (!sameRegularFileIdentity(before, afterHandle)
+    || !sameRegularFileIdentity(before, afterPath)
+    || afterPath.isSymbolicLink()
+    || afterParentResolved !== expectedParent
+    || BigInt(bytes.byteLength) !== before.size) {
     throw new Error("Ephemeral browser capture file changed while being read.");
   }
-  return bytes;
+  return Buffer.from(bytes);
+}
+
+function sameRegularFileIdentity(left: BigIntStats, right: BigIntStats) {
+  return left.dev === right.dev
+    && left.ino === right.ino
+    && left.ctimeNs === right.ctimeNs
+    && left.mtimeNs === right.mtimeNs
+    && left.size === right.size;
 }
 
 function assertExactCaptureReceipt(

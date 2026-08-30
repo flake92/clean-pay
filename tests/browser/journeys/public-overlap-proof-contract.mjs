@@ -1,6 +1,11 @@
 import { createHash } from "node:crypto";
-import { lstat, readFile, realpath } from "node:fs/promises";
+import { constants as fsConstants } from "node:fs";
+import { lstat, open, realpath } from "node:fs/promises";
 import path from "node:path";
+
+import {
+  PUBLIC_OVERLAP_OWNERSHIP_DIRECTORY_PATHS,
+} from "../public-overlap-directory-policy.mjs";
 
 export const PUBLIC_OVERLAP_PROOF_KIND =
   "clean-pay-live-public-characterization-overlap-proof";
@@ -39,42 +44,31 @@ export function resolvePublicOverlapProofPath(repositoryRoot, captureId) {
   return path.join(resolvePublicOverlapPairRoot(repositoryRoot, captureId), "proof.json");
 }
 
+export async function readPublicOverlapPairOwnership(options) {
+  const { pairOwnershipSha256, root } = await readPublicOverlapPairOwnershipReceipt(options);
+  return Object.freeze({ pairOwnershipSha256, root });
+}
+
 export async function readPublicOverlapOwnership(options) {
   exactKeys(options, [
     "baselineBindingSha256",
     "candidateBindingSha256",
     "captureId",
+    "expectedPairOwnershipSha256",
     "repositoryRoot",
   ]);
-  const root = resolvePublicOverlapPairRoot(options.repositoryRoot, options.captureId);
-  const pairBytes = await readBoundedRegularFile(
-    path.join(root, "pair-ownership.json"),
-    64 * 1024,
+  const { pair, pairOwnershipSha256, root } = await readPublicOverlapPairOwnershipReceipt({
+    captureId: options.captureId,
+    repositoryRoot: options.repositoryRoot,
+  });
+  equal(
+    pairOwnershipSha256,
+    digest(options.expectedPairOwnershipSha256, "expected pair ownership digest"),
+    "pair ownership staged digest",
   );
-  const pair = parseJson(pairBytes, "public overlap pair ownership");
-  exactKeys(pair, [
-    "captureId",
-    "kind",
-    "pairDirectory",
-    "roles",
-    "schemaVersion",
-    "suite",
-  ]);
-  equal(pair.schemaVersion, 1, "pair ownership schemaVersion");
-  equal(pair.kind, "clean-pay-ephemeral-browser-pair-ownership", "pair ownership kind");
-  equal(pair.suite, "public-characterization-v1", "pair ownership suite");
-  equal(pair.captureId, options.captureId, "pair ownership captureId");
-  assertDirectoryIdentity(pair.pairDirectory, ".", "pair ownership directory");
-  await assertCurrentDirectoryIdentity(root, pair.pairDirectory);
-  if (!Array.isArray(pair.roles) || pair.roles.length !== 2) {
-    fail("Public overlap pair ownership roles are invalid.");
-  }
   const roles = {};
   for (const [index, role] of ["baseline", "candidate"].entries()) {
     const ledger = record(pair.roles[index], `${role} pair ownership ledger`);
-    exactKeys(ledger, ["ownershipSha256", "role"]);
-    equal(ledger.role, role, `${role} pair ownership role`);
-    digest(ledger.ownershipSha256, `${role} pair ownership digest`);
     const roleRoot = path.join(root, role);
     const roleBytes = await readBoundedRegularFile(
       path.join(roleRoot, "capture-ownership.json"),
@@ -105,23 +99,25 @@ export async function readPublicOverlapOwnership(options) {
       options[`${role}BindingSha256`],
       `${role} owned-stack binding digest`,
     );
-    if (!Array.isArray(receipt.directories) || receipt.directories.length !== 46) {
-      fail(`${role} ownership directory ledger is invalid.`);
-    }
-    const paths = receipt.directories.map((identity, directoryIndex) => {
-      const relativePath = assertDirectoryIdentity(
+    if (!Array.isArray(receipt.directories)) fail(`${role} ownership directory ledger is invalid.`);
+    const relativePaths = receipt.directories.map((identity, directoryIndex) => (
+      assertDirectoryIdentity(
         identity,
         undefined,
         `${role} ownership directory ${directoryIndex}`,
-      );
+      )
+    ));
+    assertPublicOverlapOwnershipDirectoryPaths(relativePaths);
+    const paths = receipt.directories.map((identity, directoryIndex) => {
+      const relativePath = relativePaths[directoryIndex];
       const target = relativePath === "."
         ? roleRoot
         : path.join(roleRoot, ...relativePath.split("/"));
       return assertCurrentDirectoryIdentity(target, identity).then(() => relativePath);
     });
     const resolvedPaths = await Promise.all(paths);
-    if (new Set(resolvedPaths).size !== resolvedPaths.length
-      || resolvedPaths[0] !== "." || resolvedPaths[1] !== "artifacts") {
+    if (JSON.stringify(resolvedPaths)
+      !== JSON.stringify(PUBLIC_OVERLAP_OWNERSHIP_DIRECTORY_PATHS)) {
       fail(`${role} ownership directory ledger is not exact.`);
     }
     roles[role] = Object.freeze({
@@ -130,10 +126,21 @@ export async function readPublicOverlapOwnership(options) {
     });
   }
   return Object.freeze({
-    pairOwnershipSha256: sha256(pairBytes),
-    roles: Object.freeze(roles),
+    pairOwnershipSha256,
+    roles: Object.freeze({
+      baseline: roles.baseline,
+      candidate: roles.candidate,
+    }),
     root,
   });
+}
+
+export function assertPublicOverlapOwnershipDirectoryPaths(value) {
+  if (!Array.isArray(value)
+    || JSON.stringify(value) !== JSON.stringify(PUBLIC_OVERLAP_OWNERSHIP_DIRECTORY_PATHS)) {
+    fail("Public overlap ownership directory ledger is not exact.");
+  }
+  return Object.freeze([...value]);
 }
 
 export function assertPublicOverlapPairReceipt(value, expected) {
@@ -252,19 +259,103 @@ export function sha256(value) {
 }
 
 async function readBoundedRegularFile(target, maximumBytes) {
-  const details = await lstat(target, { bigint: true });
-  if (!details.isFile() || details.isSymbolicLink()
-    || details.size < 1n || details.size > BigInt(maximumBytes)) {
+  if (!Number.isSafeInteger(maximumBytes) || maximumBytes < 1) {
+    fail("Public overlap bounded file limit is invalid.");
+  }
+  const expectedParent = path.resolve(path.dirname(target));
+  const [before, parentResolved] = await Promise.all([
+    lstat(target, { bigint: true }),
+    realpath(expectedParent),
+  ]);
+  if (!before.isFile() || before.isSymbolicLink()
+    || before.size < 1n || before.size > BigInt(maximumBytes)
+    || parentResolved !== expectedParent) {
     fail("Public overlap evidence is not a bounded regular file.");
   }
-  if (await realpath(path.dirname(target)) !== path.resolve(path.dirname(target))) {
-    fail("Public overlap evidence parent resolved through an unexpected path.");
+  const noFollow = process.platform === "win32" ? 0 : (fsConstants.O_NOFOLLOW ?? 0);
+  const handle = await open(target, fsConstants.O_RDONLY | noFollow);
+  let afterHandle;
+  let bytes;
+  try {
+    const opened = await handle.stat({ bigint: true });
+    if (!opened.isFile() || !sameRegularFileIdentity(before, opened)) {
+      fail("Public overlap evidence identity changed before it was read.");
+    }
+    const buffer = Buffer.allocUnsafe(Number(opened.size) + 1);
+    let offset = 0;
+    while (offset < buffer.byteLength) {
+      const { bytesRead } = await handle.read(
+        buffer,
+        offset,
+        buffer.byteLength - offset,
+        offset,
+      );
+      if (bytesRead === 0) break;
+      offset += bytesRead;
+    }
+    bytes = buffer.subarray(0, offset);
+    afterHandle = await handle.stat({ bigint: true });
+  } finally {
+    await handle.close();
   }
-  const bytes = await readFile(target);
-  if (BigInt(bytes.byteLength) !== details.size) {
+  const [afterPath, afterParentResolved] = await Promise.all([
+    lstat(target, { bigint: true }),
+    realpath(expectedParent),
+  ]);
+  if (!sameRegularFileIdentity(before, afterHandle)
+    || !sameRegularFileIdentity(before, afterPath)
+    || afterPath.isSymbolicLink()
+    || afterParentResolved !== expectedParent
+    || BigInt(bytes.byteLength) !== before.size) {
     fail("Public overlap evidence changed while being read.");
   }
-  return bytes;
+  return Buffer.from(bytes);
+}
+
+function sameRegularFileIdentity(left, right) {
+  return left.dev === right?.dev
+    && left.ino === right.ino
+    && left.ctimeNs === right.ctimeNs
+    && left.mtimeNs === right.mtimeNs
+    && left.size === right.size;
+}
+
+async function readPublicOverlapPairOwnershipReceipt(options) {
+  exactKeys(options, ["captureId", "repositoryRoot"]);
+  const root = resolvePublicOverlapPairRoot(options.repositoryRoot, options.captureId);
+  const pairBytes = await readBoundedRegularFile(
+    path.join(root, "pair-ownership.json"),
+    64 * 1024,
+  );
+  const pair = parseJson(pairBytes, "public overlap pair ownership");
+  exactKeys(pair, [
+    "captureId",
+    "kind",
+    "pairDirectory",
+    "roles",
+    "schemaVersion",
+    "suite",
+  ]);
+  equal(pair.schemaVersion, 1, "pair ownership schemaVersion");
+  equal(pair.kind, "clean-pay-ephemeral-browser-pair-ownership", "pair ownership kind");
+  equal(pair.suite, "public-characterization-v1", "pair ownership suite");
+  equal(pair.captureId, options.captureId, "pair ownership captureId");
+  assertDirectoryIdentity(pair.pairDirectory, ".", "pair ownership directory");
+  await assertCurrentDirectoryIdentity(root, pair.pairDirectory);
+  if (!Array.isArray(pair.roles) || pair.roles.length !== 2) {
+    fail("Public overlap pair ownership roles are invalid.");
+  }
+  for (const [index, role] of ["baseline", "candidate"].entries()) {
+    const ledger = record(pair.roles[index], `${role} pair ownership ledger`);
+    exactKeys(ledger, ["ownershipSha256", "role"]);
+    equal(ledger.role, role, `${role} pair ownership role`);
+    digest(ledger.ownershipSha256, `${role} pair ownership digest`);
+  }
+  return Object.freeze({
+    pair,
+    pairOwnershipSha256: sha256(pairBytes),
+    root,
+  });
 }
 
 async function assertCurrentDirectoryIdentity(target, expected) {
