@@ -239,7 +239,13 @@ export async function executeAuthCommand(commands: AuthCommands, input: unknown)
           () => commands.establishSession(providerSession),
         );
         await commands.audit({ action: "auth_login_success", userId: session.userId });
-        return { ok: true, kind: "authenticated", emailVerified: session.emailVerified, verificationRequired: false, verificationDeliveryFailed: false };
+        return {
+          ok: true,
+          kind: "authenticated",
+          emailVerified: session.emailVerified,
+          verificationRequired: !session.emailVerified,
+          verificationDeliveryFailed: false,
+        };
       }
       case "register": {
         await commands.rateLimit({ action: "auth_register", email, limit: 5, windowSeconds: 15 * 60 });
@@ -275,7 +281,13 @@ export async function executeAuthCommand(commands: AuthCommands, input: unknown)
           }),
         );
         await commands.audit({ action: "password_reset_success", userId: session.userId });
-        return { ok: true, kind: "authenticated", emailVerified: session.emailVerified, verificationRequired: false, verificationDeliveryFailed: false };
+        return {
+          ok: true,
+          kind: "authenticated",
+          emailVerified: session.emailVerified,
+          verificationRequired: !session.emailVerified,
+          verificationDeliveryFailed: false,
+        };
       }
     }
   } catch (error) {

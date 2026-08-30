@@ -397,6 +397,56 @@ describe("server application flows", () => {
     expect(commands.audit).toHaveBeenCalledWith({ action: "auth_login_success", userId: "user-1" });
   });
 
+  it("marks an established unverified e-mail login as verification-required", async () => {
+    const providerSession = { context: { token: "unverified-login-session" } };
+    const commands = authCommands({
+      authenticate: vi.fn(async () => providerSession),
+      establishSession: vi.fn(async () => ({
+        userId: "user-1",
+        emailVerified: false,
+      })),
+    });
+
+    await expect(executeAuthCommand(commands, {
+      kind: "login",
+      email: "unverified@example.com",
+      password: "secret123",
+    })).resolves.toEqual({
+      ok: true,
+      kind: "authenticated",
+      emailVerified: false,
+      verificationRequired: true,
+      verificationDeliveryFailed: false,
+    });
+    expect(commands.requestEmailVerification).not.toHaveBeenCalled();
+    expect(commands.audit).toHaveBeenCalledWith({
+      action: "auth_login_success",
+      userId: "user-1",
+    });
+  });
+
+  it("keeps an unverified password-reset session in verification-required state", async () => {
+    const commands = authCommands({
+      establishSession: vi.fn(async () => ({
+        userId: "user-1",
+        emailVerified: false,
+      })),
+    });
+
+    await expect(executeAuthCommand(commands, {
+      kind: "confirm-password-reset",
+      email: "unverified@example.com",
+      code: "123456",
+      newPassword: "new-password",
+    })).resolves.toMatchObject({
+      ok: true,
+      kind: "authenticated",
+      emailVerified: false,
+      verificationRequired: true,
+      verificationDeliveryFailed: false,
+    });
+  });
+
   it("owns indistinguishable password-reset request policy", async () => {
     const commands = authCommands();
 

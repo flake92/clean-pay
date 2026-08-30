@@ -132,6 +132,39 @@ describe("proxy session refresh navigation", () => {
     expect(response.headers.get("location")).toBeNull();
   });
 
+  it("redirects direct unverified e-mail cabinet access before cabinet reads", async () => {
+    const response = await proxy(new NextRequest(
+      "https://pay.example.com/cabinet?tab=payments",
+      {
+        headers: {
+          cookie: `clean_pay_access=${signedAccessToken({ ev: false, tg: false })}`,
+        },
+      },
+    ));
+    const location = new URL(response.headers.get("location")!);
+
+    expect(response.status).toBe(307);
+    expect(location.pathname).toBe("/register/verify-email");
+    expect(location.searchParams.get("redirect_to")).toBe(
+      "/cabinet?tab=payments",
+    );
+  });
+
+  it("preserves direct cabinet access for a Telegram-only session", async () => {
+    const response = await proxy(new NextRequest(
+      "https://pay.example.com/cabinet?tab=devices",
+      {
+        headers: {
+          cookie: `clean_pay_access=${signedAccessToken({ ev: false, tg: true })}`,
+        },
+      },
+    ));
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("x-middleware-next")).toBe("1");
+    expect(response.headers.get("location")).toBeNull();
+  });
+
   it("repairs the observed Cyrillic-c cabinet path without discarding the authenticated session", async () => {
     const response = await proxy(new NextRequest(
       "https://pay.example.com/%D1%81abinet?tab=devices",
