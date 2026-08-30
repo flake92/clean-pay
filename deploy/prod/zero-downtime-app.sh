@@ -133,13 +133,21 @@ validate_canary_readiness_telegram_oidc_jwks_url() {
   printf '%s' "$PROJECT_NAME" | grep -Eq '^clean-pay-zdt-[a-f0-9]{16}$' \
     || fail "canary Telegram readiness override requires the disposable rehearsal project"
   suffix=${PROJECT_NAME#clean-pay-zdt-}
-  expected_origin="http://zdt-readiness-${suffix}:4190"
+  # 4190 remains accepted for sealed legacy evidence only. New rehearsals use
+  # 4191 because standards-compliant Fetch implementations block port 4190.
+  legacy_origin="http://zdt-readiness-${suffix}:4190"
+  current_origin="http://zdt-readiness-${suffix}:4191"
   [ "$EDGE_NETWORK" = "clean-pay-zdt-edge-${suffix}" ] \
     || fail "canary Telegram readiness override requires the disposable rehearsal network"
-  [ "$CANARY_READINESS_TELEGRAM_OIDC_JWKS_URL" = "$expected_origin/.well-known/jwks.json" ] \
-    || fail "canary Telegram readiness override does not match the owned provider"
+  case "$(env_value REMNASHOP_API_BASE_URL)" in
+    "$legacy_origin/api/v1/public") expected_origin=$legacy_origin ;;
+    "$current_origin/api/v1/public") expected_origin=$current_origin ;;
+    *) fail "canary Telegram readiness override must share the Remnashop provider origin" ;;
+  esac
   [ "$(env_value REMNASHOP_API_BASE_URL)" = "$expected_origin/api/v1/public" ] \
     || fail "canary Telegram readiness override must share the Remnashop provider origin"
+  [ "$CANARY_READINESS_TELEGRAM_OIDC_JWKS_URL" = "$expected_origin/.well-known/jwks.json" ] \
+    || fail "canary Telegram readiness override does not match the owned provider"
   DISPOSABLE_CANARY_PROVIDER_VALIDATED=true
 }
 
@@ -728,11 +736,11 @@ diagnose_disposable_canary_provider() {
       const base=process.env.REMNASHOP_API_BASE_URL;
       const key=process.env.REMNASHOP_AUTH_SERVICE_KEY;
       const prefix='http://zdt-readiness-';
-      const portSuffix=':4190';
       const jwksSuffix='/.well-known/jwks.json';
       const origin=typeof override==='string'&&override.endsWith(jwksSuffix)
         ?override.slice(0,-jwksSuffix.length):'';
-      const resource=origin.startsWith(prefix)&&origin.endsWith(portSuffix)
+      const portSuffix=[':4190',':4191'].find((value)=>origin.endsWith(value))??null;
+      const resource=origin.startsWith(prefix)&&portSuffix!==null
         ?origin.slice(prefix.length,-portSuffix.length):'';
       const exactResource=resource.length===16
         &&Array.from(resource).every((value)=>'0123456789abcdef'.includes(value));

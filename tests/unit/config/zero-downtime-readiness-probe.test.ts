@@ -256,6 +256,17 @@ describe("zero-downtime sanitized readiness diagnostics", () => {
     expect(valid.status, valid.stderr).toBe(0);
     expect(valid.stdout).toBe("accepted\n");
 
+    const currentOrigin = `http://zdt-readiness-${suffix}:4191`;
+    const current = runJwksGuard({
+      projectName: `clean-pay-zdt-${suffix}`,
+      edgeNetwork: `clean-pay-zdt-edge-${suffix}`,
+      jwksUrl: `${currentOrigin}/.well-known/jwks.json`,
+      remnashopBaseUrl: `${currentOrigin}/api/v1/public`,
+    });
+    expect(current.status, current.stderr).toBe(0);
+    expect(current.stdout).toBe("accepted\n");
+    expect(rehearsal).toContain("readonly READINESS_PROVIDER_PORT=4191");
+
     for (const invalid of [
       { projectName: `clean-pay-zdt-${suffix.slice(0, -1)}g` },
       { edgeNetwork: `clean-pay-zdt-edge-${suffix}-other` },
