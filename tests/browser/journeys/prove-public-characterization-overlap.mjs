@@ -6,6 +6,7 @@ import path from "node:path";
 import { validateProductionImageAssetAttestation } from "../../../scripts/security/prove-served-cabinet-assets.mjs";
 
 import {
+  collectJourneyDockerFailureEvidence,
   journeyDockerCliEnvironment,
   runJourneyDockerCommand,
   withJourneyOwnedStackPair,
@@ -208,6 +209,7 @@ try {
   }
   process.stderr.write(`${JSON.stringify({
     status: "live_public_characterization_overlap_failed",
+    dockerFailures: collectJourneyDockerFailureEvidence(failure),
     invocationFailures: invocationFailureEvidence,
     processFailures: failureBundle?.failures ?? [],
     ...createJourneySanitizedErrorEvidence(failure),
