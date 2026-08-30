@@ -3,7 +3,7 @@ set -euo pipefail
 
 ROOT_DIR=$(CDPATH='' cd -- "$(dirname -- "$0")/../.." && pwd)
 readonly ROOT_DIR
-readonly COMPOSE_FILE="$ROOT_DIR/deploy/prod/docker-compose.yml"
+readonly COMPOSE_MANIFEST="$ROOT_DIR/deploy/prod/docker-compose.yml"
 readonly ZERO_DOWNTIME_SCRIPT="$ROOT_DIR/deploy/prod/zero-downtime-app.sh"
 readonly IMAGE_PREFLIGHT_SCRIPT="$ROOT_DIR/deploy/prod/image-preflight.sh"
 readonly ROLE_ENV_SCRIPT="$ROOT_DIR/deploy/prod/role-env.mjs"
@@ -347,7 +347,7 @@ compose_for_env() (
   export CLEAN_PAY_RETENTION_ENV_FILE="$env_file.retention"
   timeout --signal=TERM --kill-after=20s 600s \
     docker compose --project-name "$PROJECT_NAME" \
-      --env-file "$env_file" -f "$COMPOSE_FILE" "$@"
+      --env-file "$env_file" -f "$COMPOSE_MANIFEST" "$@"
 )
 
 assert_compose_service_image() {
