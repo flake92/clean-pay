@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 import {
+  authenticatedAuthDestination,
   authFormControllerReducer,
   authPasswordsMatch,
   createInitialAuthFormControllerState,
@@ -157,6 +158,30 @@ describe("auth form controller transitions", () => {
       null,
     )).toBe(
       "https://pay.example/auth/telegram/start?redirect_to=%2Fcabinet",
+    );
+  });
+
+  it("keeps every successful unverified e-mail auth outcome in the registration verification flow", () => {
+    const redirectTo = "/cabinet?tab=devices#active";
+
+    expect(authenticatedAuthDestination({
+      emailVerified: true,
+      verificationRequired: false,
+      verificationDeliveryFailed: false,
+    }, redirectTo)).toBe(redirectTo);
+    expect(authenticatedAuthDestination({
+      emailVerified: false,
+      verificationRequired: true,
+      verificationDeliveryFailed: false,
+    }, redirectTo)).toBe(
+      "/register/verify-email?redirect_to=%2Fcabinet%3Ftab%3Ddevices%23active",
+    );
+    expect(authenticatedAuthDestination({
+      emailVerified: false,
+      verificationRequired: false,
+      verificationDeliveryFailed: true,
+    }, redirectTo)).toBe(
+      "/register/verify-email?delivery=failed&redirect_to=%2Fcabinet%3Ftab%3Ddevices%23active",
     );
   });
 

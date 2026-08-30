@@ -50,6 +50,29 @@ describe("proxy auth and redirect policy", () => {
     });
   });
 
+  it("requires verification for a direct e-mail cabinet session without restricting Telegram-only access", async () => {
+    const common = {
+      hasRefreshToken: false,
+      jwtSecret: () => "test-secret",
+      nowEpochSeconds: () => 1_000,
+    };
+
+    await expect(getAccessState({
+      ...common,
+      token: signedAccessToken({ exp: 2_000, al: "FULL", ev: false, tg: false }),
+    })).resolves.toMatchObject({
+      authenticated: true,
+      emailVerificationRequired: true,
+    });
+    await expect(getAccessState({
+      ...common,
+      token: signedAccessToken({ exp: 2_000, al: "FULL", ev: false, tg: true }),
+    })).resolves.toMatchObject({
+      authenticated: true,
+      emailVerificationRequired: false,
+    });
+  });
+
   it("fails closed for expired, malformed, missing-secret, and invalid-signature tokens", async () => {
     const secret = vi.fn(() => "test-secret");
     const expired = await getAccessState({
