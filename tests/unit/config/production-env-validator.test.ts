@@ -1017,6 +1017,15 @@ describe("production env validator", () => {
     expect(parsed.telegramOidc.jwksUri)
       .toBe("https://oauth.telegram.org/.well-known/jwks.json");
 
+    const currentOrigin = `http://${alias}:4191`;
+    expect(() => validateProductionEnvironment({
+      ...environment,
+      REMNASHOP_API_BASE_URL: `${currentOrigin}/api/v1/public`,
+      REMNASHOP_ADMIN_API_BASE_URL: `${currentOrigin}/api/v1/admin`,
+      CLEAN_PAY_READINESS_TELEGRAM_OIDC_JWKS_URL:
+        `${currentOrigin}/.well-known/jwks.json`,
+    })).not.toThrow();
+
     for (const invalid of [
       "https://oauth.telegram.org/.well-known/jwks.json",
       "http://127.0.0.1:4190/.well-known/jwks.json",
