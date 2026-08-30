@@ -53,6 +53,12 @@ import {
 import { JOURNEY_SYNTHETIC_HOSTNAMES } from "./journey-network-policy.mjs";
 import { currentJourneyFixtureContractSha256Async } from "./journey-fixture-manifest.mjs";
 
+type SnapshotWriter = (filename: string, bytes: string | Buffer) => Promise<string>;
+type SnapshotWriters = {
+  writeContainerReadonlyFixture: SnapshotWriter;
+  writeOwnedFile: SnapshotWriter;
+};
+
 test("is import-safe and refuses a non-isolated pair before its first Docker query", async () => {
   expect(typeof withJourneyOwnedStackPair).toBe("function");
   expect(typeof prepareJourneyOwnedStack).toBe("function");
@@ -195,6 +201,117 @@ test("removes a create-only file when its post-write identity check fails", asyn
   expect(failed).toBe(true);
   await expect(lstat(path.join(directory, "one.txt"))).rejects.toMatchObject({ code: "ENOENT" });
   await expect(lstat(directory)).rejects.toMatchObject({ code: "ENOENT" });
+});
+
+test("keeps private snapshot bytes at 0600 and exact container fixtures at 0444", async () => {
+  const fixtureName = "fixture-db-observer-provision.sh";
+  const privateName = "private.env";
+  const tracked = modeTrackingSnapshotFileSystem();
+  let directory = "";
+  try {
+    const snapshot = await createJourneyOwnedInputSnapshot({
+      directoryPrefix: path.join(tmpdir(), "clean-pay-provider-mode-contract-"),
+      expectedFilenames: [fixtureName, privateName],
+      populate: async ({
+        writeContainerReadonlyFixture,
+        writeOwnedFile,
+      }: SnapshotWriters) => {
+        await writeOwnedFile(privateName, "PRIVATE=synthetic\n");
+        await writeContainerReadonlyFixture(fixtureName, "#!/bin/sh\nexit 20\n");
+      },
+    }, tracked.operations, "linux");
+    directory = snapshot.directory;
+    expect(tracked.writeModesByFilename).toEqual(new Map([
+      [fixtureName, 0o444],
+      [privateName, 0o600],
+    ]));
+    expect(snapshot.directoryIdentity.permissionBits).toBe(0o700);
+    const createdFiles = snapshot.createdFiles as Readonly<Record<
+      string,
+      { permissionBits: number }
+    >>;
+    expect(createdFiles[fixtureName].permissionBits).toBe(0o444);
+    expect(createdFiles[privateName].permissionBits).toBe(0o600);
+  } finally {
+    if (directory) {
+      await unlink(path.join(directory, fixtureName)).catch(() => undefined);
+      await unlink(path.join(directory, privateName)).catch(() => undefined);
+      await rmdir(directory).catch(() => undefined);
+    }
+  }
+});
+
+test("rejects snapshot access-class mismatches before creating a file", async () => {
+  const cases = [
+    {
+      filename: "private.env",
+      write: "container" as const,
+    },
+    {
+      filename: "fixture-db-observer-provision.sh",
+      write: "private" as const,
+    },
+  ];
+  for (const fixture of cases) {
+    let directory = "";
+    const operations = snapshotFileSystem({
+      mkdtemp: async (prefix: string) => {
+        directory = await mkdtemp(prefix);
+        return directory;
+      },
+    });
+    await expect(createJourneyOwnedInputSnapshot({
+      directoryPrefix: path.join(tmpdir(), `clean-pay-provider-access-${fixture.write}-`),
+      expectedFilenames: [fixture.filename],
+      populate: async ({
+        writeContainerReadonlyFixture,
+        writeOwnedFile,
+      }: SnapshotWriters) => {
+        if (fixture.write === "container") {
+          return writeContainerReadonlyFixture(fixture.filename, "synthetic");
+        }
+        return writeOwnedFile(fixture.filename, "synthetic");
+      },
+    }, operations, "win32")).rejects.toThrow(/access class/);
+    await expect(lstat(directory)).rejects.toMatchObject({ code: "ENOENT" });
+  }
+});
+
+test("rejects chmod-only drift even when owned snapshot bytes and inode are unchanged", async () => {
+  const filename = "private.env";
+  let directory = "";
+  const tracked = modeTrackingSnapshotFileSystem({
+    mkdtemp: async (prefix: string) => {
+      directory = await mkdtemp(prefix);
+      return directory;
+    },
+  });
+  let observed: unknown;
+  try {
+    await createJourneyOwnedInputSnapshot({
+      directoryPrefix: path.join(tmpdir(), "clean-pay-provider-mode-drift-"),
+      expectedFilenames: [filename],
+      populate: async ({ writeOwnedFile }: SnapshotWriters) => {
+        const target = await writeOwnedFile(filename, "PRIVATE=synthetic\n");
+        tracked.permissionBitsByPath.set(path.resolve(target), 0o644);
+        throw new Error("synthetic primary failure");
+      },
+    }, tracked.operations, "linux");
+  } catch (error) {
+    observed = error;
+  }
+  try {
+    expect(observed).toBeInstanceOf(AggregateError);
+    expect((observed as AggregateError).errors).toHaveLength(2);
+    expect((observed as AggregateError).errors[1]).toMatchObject({
+      message: expect.stringContaining("permissions"),
+    });
+  } finally {
+    if (directory) {
+      await unlink(path.join(directory, filename)).catch(() => undefined);
+      await rmdir(directory).catch(() => undefined);
+    }
+  }
 });
 
 test("binds synthetic-only material without claiming a Windows owner-only DACL", async () => {
@@ -3330,6 +3447,44 @@ function snapshotFileSystem(overrides: Record<string, unknown> = {}) {
     writeFile,
     ...overrides,
   };
+}
+
+function modeTrackingSnapshotFileSystem(overrides: Record<string, unknown> = {}) {
+  const permissionBitsByPath = new Map<string, number>();
+  const writeModesByFilename = new Map<string, number>();
+  const operations = snapshotFileSystem({
+    chmod: async (...args: Parameters<typeof chmod>) => {
+      await chmod(...args);
+      if (typeof args[1] !== "number") throw new Error("Synthetic chmod mode must be numeric.");
+      permissionBitsByPath.set(path.resolve(String(args[0])), args[1]);
+    },
+    lstat: async (...args: Parameters<typeof lstat>) => {
+      const details = await lstat(...args);
+      const permissionBits = permissionBitsByPath.get(path.resolve(String(args[0])));
+      if (permissionBits !== undefined) {
+        const currentMode = details.mode;
+        const nextMode = typeof currentMode === "bigint"
+          ? (currentMode & ~0o777n) | BigInt(permissionBits)
+          : (currentMode & ~0o777) | permissionBits;
+        Reflect.set(details, "mode", nextMode);
+      }
+      return details;
+    },
+    writeFile: async (...args: Parameters<typeof writeFile>) => {
+      await writeFile(...args);
+      const options = args[2];
+      const mode = options && typeof options === "object" && "mode" in options
+        ? options.mode
+        : undefined;
+      if (typeof mode === "number") {
+        const target = path.resolve(String(args[0]));
+        permissionBitsByPath.set(target, mode);
+        writeModesByFilename.set(path.basename(target), mode);
+      }
+    },
+    ...overrides,
+  });
+  return { operations, permissionBitsByPath, writeModesByFilename };
 }
 
 function testSha256(value: string) {
