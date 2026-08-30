@@ -1370,8 +1370,11 @@ function disposableTelegramReadinessJwksUrl(value, remnashopPublicUrl) {
   const name = "CLEAN_PAY_READINESS_TELEGRAM_OIDC_JWKS_URL";
   const url = serviceUrl(name, value);
   const hostnameMatch = /^zdt-readiness-([a-f0-9]{16})$/.exec(url.hostname);
-  const expected = hostnameMatch
-    ? `http://${url.hostname}:4190/.well-known/jwks.json`
+  // Port 4190 is retained only for committed legacy evidence. New disposable
+  // rehearsals use 4191 because Fetch blocks the registered ManageSieve port.
+  const supportedPort = url.port === "4190" || url.port === "4191";
+  const expected = hostnameMatch && supportedPort
+    ? `http://${url.hostname}:${url.port}/.well-known/jwks.json`
     : null;
 
   if (

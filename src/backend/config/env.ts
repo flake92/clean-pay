@@ -524,7 +524,9 @@ function createEnv(environment: EnvironmentSource): AppEnv {
     environment,
   );
   if (telegramReadinessJwksUrl) {
-    const expectedMatch = /^http:\/\/(zdt-readiness-[a-f0-9]{16}):4190\/\.well-known\/jwks\.json$/
+    // Keep legacy sealed evidence readable while new rehearsals avoid the
+    // Fetch-standard blocked ManageSieve port (4190).
+    const expectedMatch = /^http:\/\/(zdt-readiness-[a-f0-9]{16}):(?:4190|4191)\/\.well-known\/jwks\.json$/
       .exec(telegramReadinessJwksUrl);
     if (
       expectedMatch === null
