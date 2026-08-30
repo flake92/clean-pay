@@ -495,6 +495,10 @@ describe("production container boundary", () => {
     );
     expect(disposableReadinessProvider).toContain("timingSafeEqual(observedHash, expectedHash)");
     expect(disposableReadinessProvider).toContain('const maximumBodyBytes = 1024');
+    expect(disposableReadinessProvider).toContain(
+      'const readyMarker = "clean-pay-disposable-readiness-provider-ready-v1"',
+    );
+    expect(disposableReadinessProvider).toContain('server.once("listening"');
     expect(disposableRollbackReport).toContain(
       'value.schemaVersion !== "clean-pay.disposable-image-rollback.v3"',
     );
@@ -508,6 +512,22 @@ describe("production container boundary", () => {
     expect(readinessProviderLaunch).toContain('--network-alias "$READINESS_PROVIDER_ALIAS"');
     expect(readinessProviderLaunch).toContain('--pull never');
     expect(readinessProviderLaunch).not.toContain("--env-file");
+    expect(readinessProviderLaunch).toContain(
+      'logs=$(docker logs "$READINESS_PROVIDER_CONTAINER_ID" 2>&1)',
+    );
+    expect(readinessProviderLaunch).toContain(
+      '[[ "$logs" == clean-pay-disposable-readiness-provider-ready-v1 ]]',
+    );
+    expect(readinessProviderLaunch).not.toContain(
+      'docker exec "$READINESS_PROVIDER_CONTAINER_ID" node -e',
+    );
+    const readinessProviderProof = imageRollbackRehearsal.slice(
+      imageRollbackRehearsal.indexOf("prove_readiness_provider_contract()"),
+      imageRollbackRehearsal.indexOf("stop_readiness_provider()"),
+    );
+    expect(readinessProviderProof).toContain(
+      "timeout --signal=TERM --kill-after=5s 20s",
+    );
     expect(imageRollbackRehearsal).not.toMatch(/\bcaddy\b/iu);
     expect(imageRollbackRehearsal).not.toMatch(/docker\s+system\s+prune/u);
   });
