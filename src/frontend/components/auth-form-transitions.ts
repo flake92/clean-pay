@@ -4,6 +4,7 @@ import {
   type AuthFormStage,
 } from "@/frontend/components/auth-form-presentation";
 import { hasTurnstileSiteKey } from "@/frontend/lib/turnstile-transitions";
+import { registrationEmailVerificationPath } from "@/shared/auth/account-setup-flow";
 
 export type AuthApiState = {
   loading: boolean;
@@ -167,6 +168,24 @@ export function missingAuthTurnstileTokenMessage(siteKey?: string | null) {
   return hasTurnstileSiteKey(siteKey)
     ? "Пройдите единую проверку безопасности."
     : "Проверка безопасности временно недоступна.";
+}
+
+export function authenticatedAuthDestination(
+  result: {
+    emailVerified: boolean;
+    verificationRequired: boolean;
+    verificationDeliveryFailed: boolean;
+  },
+  redirectTo: string,
+) {
+  // The verified bit is the fail-safe source of truth. In particular, an
+  // inconsistent successful response must never send an unverified e-mail
+  // account into verified-only cabinet reads.
+  return result.emailVerified
+    ? redirectTo
+    : registrationEmailVerificationPath(redirectTo, {
+        deliveryFailed: result.verificationDeliveryFailed,
+      });
 }
 
 export function createTelegramAuthStartUrl(

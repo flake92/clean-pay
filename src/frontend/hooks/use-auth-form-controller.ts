@@ -11,6 +11,7 @@ import {
 import { executeAuthAction } from "@/app/actions/auth";
 import { authCommandForStage } from "@/frontend/components/auth-form-presentation";
 import {
+  authenticatedAuthDestination,
   authFormControllerReducer,
   authPasswordsMatch,
   createInitialAuthFormControllerState,
@@ -18,7 +19,6 @@ import {
   missingAuthTurnstileTokenMessage,
   normalizeAuthCode,
 } from "@/frontend/components/auth-form-transitions";
-import { registrationEmailVerificationPath } from "@/shared/auth/account-setup-flow";
 import { safeRedirectPath } from "@/shared/auth/redirect-policy";
 
 type AuthTurnstileHandle = {
@@ -186,21 +186,11 @@ export function useAuthFormController({
         dispatch({ type: "password-reset-requested" });
         return;
       }
-      if (state.stage === "register") {
-        if (result.kind !== "authenticated") {
-          dispatch({ type: "request-failed", message: unknownLoginResultMessage });
-          return;
-        }
-        if (result.emailVerified || !result.verificationRequired) {
-          redirectAfterAuth(redirectTo);
-        } else {
-          redirectAfterAuth(registrationEmailVerificationPath(redirectTo, {
-            deliveryFailed: result.verificationDeliveryFailed,
-          }));
-        }
+      if (result.kind !== "authenticated") {
+        dispatch({ type: "request-failed", message: unknownLoginResultMessage });
         return;
       }
-      redirectAfterAuth(redirectTo);
+      redirectAfterAuth(authenticatedAuthDestination(result, redirectTo));
     } catch {
       turnstile.reset();
       dispatch({ type: "request-failed", message: unknownLoginResultMessage });

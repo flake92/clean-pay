@@ -254,6 +254,53 @@ describe("auth form controller characterization", () => {
     expect(turnstile.reset).toHaveBeenCalledTimes(2);
   });
 
+  it("sends an existing unverified e-mail account to verification after successful login", async () => {
+    const navigateAfterAuth = vi.fn();
+    const turnstile = turnstileController();
+    mocks.executeAuthAction
+      .mockResolvedValueOnce({
+        ok: true,
+        kind: "identified",
+        exists: true,
+        hasPasskey: false,
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        kind: "authenticated",
+        emailVerified: false,
+        verificationRequired: true,
+        verificationDeliveryFailed: false,
+      });
+    const hook = renderHook(() => useAuthFormController({
+      initialError: null,
+      navigateAfterAuth,
+      redirectTo: "/cabinet?tab=payments#history",
+      turnstile,
+    }));
+
+    act(() => hook.result.current.changeEmailInput(inputChange("existing@example.test")));
+    await act(async () => hook.result.current.submit(submitEvent()));
+    expect(hook.result.current.stage).toBe("password");
+    act(() => hook.result.current.changePasswordInput(inputChange("existing password")));
+    await act(async () => hook.result.current.submit(submitEvent()));
+
+    expect(mocks.executeAuthAction.mock.calls).toEqual([
+      [{ kind: "identify", email: "existing@example.test" }],
+      [{
+        kind: "login",
+        email: "existing@example.test",
+        password: "existing password",
+      }],
+    ]);
+    expect(navigateAfterAuth).toHaveBeenCalledOnce();
+    expect(navigateAfterAuth).toHaveBeenCalledWith(
+      "/register/verify-email?redirect_to=%2Fcabinet%3Ftab%3Dpayments%23history",
+    );
+    expect(navigateAfterAuth).not.toHaveBeenCalledWith(
+      "/cabinet?tab=payments#history",
+    );
+  });
+
   it("preserves password recovery payloads, code filtering and terminal destination", async () => {
     const navigateAfterAuth = vi.fn();
     const turnstile = turnstileController();
