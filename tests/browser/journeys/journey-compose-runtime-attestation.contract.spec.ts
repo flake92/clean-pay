@@ -71,6 +71,28 @@ test("is import-safe and attests the exact full journey Compose runtime", () => 
   expect(() => assertJourneyComposeRuntimeInspection(fixture)).not.toThrow();
 });
 
+test("matches multiple tmpfs entries by target and rejects an option near-miss", () => {
+  const fixture = runtimeFixture();
+  fixture.compose.services["browser-proxy"].tmpfs = [
+    "/tmp:rw,noexec,size=16m",
+    "/config:rw,size=8m",
+  ];
+  (fixture.containersByService["browser-proxy"].HostConfig as {
+    Tmpfs: Record<string, string>;
+  }).Tmpfs = {
+    "/config": "rw,size=8388608",
+    "/tmp": "size=16777216,noexec,rw",
+  };
+
+  expect(() => assertJourneyComposeRuntimeInspection(fixture)).not.toThrow();
+
+  const nearMiss = structuredClone(fixture);
+  (nearMiss.containersByService["browser-proxy"].HostConfig as {
+    Tmpfs: Record<string, string>;
+  }).Tmpfs["/config"] = "rw,size=16777216";
+  expect(() => assertJourneyComposeRuntimeInspection(nearMiss)).toThrow();
+});
+
 test("emits bounded sanitized evidence when retrospective one-shot events are incomplete", () => {
   const fixture = runtimeFixture();
   const container = fixture.containersByService.migration;
