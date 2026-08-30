@@ -20,6 +20,10 @@ const classificationRules = Object.freeze([
   Object.freeze(["assertion", /expect\(received\)|Expected:|Received:/i]),
   Object.freeze(["no-tests", /No tests found/i]),
 ]);
+const allowedClassifications = new Set([
+  ...classificationRules.map(([classification]) => classification),
+  "unclassified",
+]);
 
 export function createPublicOverlapProcessFailureEvidence(input) {
   exactKeys(input, [
@@ -49,7 +53,7 @@ export function createPublicOverlapProcessFailureEvidence(input) {
     classifications.push("unclassified");
   }
 
-  return Object.freeze({
+  return assertPublicOverlapProcessFailureEvidence({
     schemaVersion: 1,
     status: "public_overlap_playwright_process_failed",
     mode: input.mode,
@@ -61,10 +65,67 @@ export function createPublicOverlapProcessFailureEvidence(input) {
     stderrBytes,
     stdoutSha256: sha256(stdout),
     stderrSha256: sha256(stderr),
-    classifications: Object.freeze(classifications),
-    sourceLocations: Object.freeze(sourceLocations(combined)),
-    testSummary: Object.freeze(testSummary(combined)),
+    classifications,
+    sourceLocations: sourceLocations(combined),
+    testSummary: testSummary(combined),
   });
+}
+
+export function assertPublicOverlapProcessFailureEvidence(value) {
+  exactKeys(value, [
+    "classifications",
+    "exitCode",
+    "mode",
+    "role",
+    "schemaVersion",
+    "signal",
+    "sourceLocations",
+    "status",
+    "stderrBytes",
+    "stderrSha256",
+    "stdoutBytes",
+    "stdoutSha256",
+    "terminationReason",
+    "testSummary",
+  ]);
+  if (value.schemaVersion !== 1
+    || value.status !== "public_overlap_playwright_process_failed") {
+    throw new Error("Public overlap process evidence header is invalid.");
+  }
+  publicOverlapProcessFailureFilename(value.mode, value.role);
+  exactOptionalToken(value.terminationReason, "termination reason");
+  exactExitCode(value.exitCode);
+  exactOptionalToken(value.signal, "signal");
+  exactObservedByteCount(value.stdoutBytes, "stdout");
+  exactObservedByteCount(value.stderrBytes, "stderr");
+  if (!/^[a-f0-9]{64}$/.test(value.stdoutSha256)
+    || !/^[a-f0-9]{64}$/.test(value.stderrSha256)) {
+    throw new Error("Public overlap process evidence digest is invalid.");
+  }
+  if (!Array.isArray(value.classifications)
+    || value.classifications.length > allowedClassifications.size
+    || value.classifications.some((entry) => !allowedClassifications.has(entry))
+    || JSON.stringify(value.classifications) !== JSON.stringify(
+      [...new Set(value.classifications)].sort(),
+    )) {
+    throw new Error("Public overlap process evidence classifications are invalid.");
+  }
+  const locations = exactSourceLocations(value.sourceLocations);
+  const summary = exactTestSummary(value.testSummary);
+  return Object.freeze({
+    ...value,
+    classifications: Object.freeze([...value.classifications]),
+    sourceLocations: Object.freeze(locations),
+    testSummary: Object.freeze(summary),
+  });
+}
+
+export function publicOverlapProcessFailureFilename(mode, role) {
+  if (!allowedModes.has(mode) || !allowedRoles.has(role)
+    || (mode === "capture") !== (role !== null)) {
+    throw new Error("Public overlap process evidence filename scope is invalid.");
+  }
+  return `public-${mode}-${role ?? "pair"}-failure.json`;
 }
 
 function sourceLocations(value) {
@@ -74,7 +135,9 @@ function sourceLocations(value) {
     const file = match[1].replaceAll("\\", "/");
     const line = Number(match[2]);
     const column = Number(match[3]);
-    if (!Number.isSafeInteger(line) || line < 1 || !Number.isSafeInteger(column) || column < 1) {
+    if (!isExactSourceFile(file)
+      || !Number.isSafeInteger(line) || line < 1
+      || !Number.isSafeInteger(column) || column < 1) {
       continue;
     }
     const key = `${file}:${line}:${column}`;
@@ -88,6 +151,38 @@ function sourceLocations(value) {
   ));
 }
 
+function exactSourceLocations(value) {
+  if (!Array.isArray(value) || value.length > maximumLocations) {
+    throw new Error("Public overlap process evidence source locations are invalid.");
+  }
+  const locations = value.map((entry) => {
+    exactKeys(entry, ["column", "file", "line"]);
+    if (!isExactSourceFile(entry.file)
+      || !Number.isSafeInteger(entry.line) || entry.line < 1
+      || !Number.isSafeInteger(entry.column) || entry.column < 1) {
+      throw new Error("Public overlap process evidence source location is invalid.");
+    }
+    return Object.freeze({ file: entry.file, line: entry.line, column: entry.column });
+  });
+  const sorted = [...locations].sort((left, right) => (
+    left.file.localeCompare(right.file)
+    || left.line - right.line
+    || left.column - right.column
+  ));
+  if (JSON.stringify(locations) !== JSON.stringify(sorted)
+    || new Set(locations.map(({ file, line, column }) => `${file}:${line}:${column}`)).size
+      !== locations.length) {
+    throw new Error("Public overlap process evidence source location order is invalid.");
+  }
+  return locations;
+}
+
+function isExactSourceFile(value) {
+  return typeof value === "string"
+    && /^tests\/browser\/(?:[A-Za-z0-9_.-]+\/)*[A-Za-z0-9_.-]+\.(?:mjs|ts|tsx)$/.test(value)
+    && !value.split("/").some((segment) => segment === "." || segment === "..");
+}
+
 function testSummary(value) {
   const summary = { failed: null, passed: null, skipped: null };
   const pattern = /(?:^|\s)(\d{1,7})\s+(failed|passed|skipped)(?:\s|$)/gim;
@@ -97,6 +192,16 @@ function testSummary(value) {
     if (Number.isSafeInteger(count) && count >= 0) summary[status] = count;
   }
   return summary;
+}
+
+function exactTestSummary(value) {
+  exactKeys(value, ["failed", "passed", "skipped"]);
+  for (const entry of Object.values(value)) {
+    if (entry !== null && (!Number.isSafeInteger(entry) || entry < 0)) {
+      throw new Error("Public overlap process evidence test summary is invalid.");
+    }
+  }
+  return { failed: value.failed, passed: value.passed, skipped: value.skipped };
 }
 
 function stripAnsi(value) {
@@ -113,6 +218,13 @@ function exactBytes(value, label) {
 function exactByteCount(value, captured, label) {
   if (!Number.isSafeInteger(value) || value < captured.byteLength) {
     throw new Error(`Public overlap process ${label} byte count is invalid.`);
+  }
+  return value;
+}
+
+function exactObservedByteCount(value, label) {
+  if (!Number.isSafeInteger(value) || value < 0) {
+    throw new Error(`Public overlap process ${label} observed byte count is invalid.`);
   }
   return value;
 }
