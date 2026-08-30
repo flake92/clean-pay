@@ -116,7 +116,9 @@ describe("zero-downtime sanitized readiness diagnostics", () => {
     );
   });
 
-  it.skipIf(!posixShell)("executes the disposable JWKS guard before accepting an override", () => {
+  it("executes the disposable JWKS guard before accepting an override", () => {
+    expect(posixShell, "a POSIX shell is required for the production guard contract")
+      .toBeDefined();
     const suffix = "0123456789abcdef";
     const expectedOrigin = `http://zdt-readiness-${suffix}:4190`;
     const valid = runJwksGuard({
