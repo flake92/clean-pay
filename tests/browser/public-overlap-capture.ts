@@ -23,6 +23,7 @@ import {
   requireExactProcessBytesAgreement,
   selectIndependentProcessCharacterizationQuorum,
 } from "./process-quorum";
+import { captureByteIdenticalTerminalScreenshot } from "./screenshot-majority";
 import {
   PUBLIC_OVERLAP_CAPTURE_POLICY,
   PUBLIC_OVERLAP_PROJECTS,
@@ -157,12 +158,7 @@ async function captureSample(options: {
   });
   await page.waitForLoadState("networkidle", { timeout: 3_000 }).catch(() => undefined);
 
-  const screenshot = await page.screenshot({
-    animations: "disabled",
-    caret: "hide",
-    fullPage: false,
-    type: "png",
-  });
+  const screenshot = await captureByteIdenticalTerminalScreenshot(page);
   const [dom, computedStyles, interactiveElements, ariaSnapshot, storage, redirects] = (
     await Promise.all([
       canonicalDom(page),
