@@ -15,6 +15,7 @@ import {
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { performance } from "node:perf_hooks";
+import { types } from "node:util";
 
 import {
   JOURNEY_COMPOSE_EXPECTED_SERVICE_STATES,
@@ -31,6 +32,8 @@ import {
   JOURNEY_SYNTHETIC_ENVIRONMENT_FILENAMES,
   buildJourneySyntheticEnvironment,
 } from "./journey-synthetic-environment-contract.mjs";
+import { dockerEventNanosecondsToIso } from "./journey-compose-lifecycle-capture.mjs";
+import { createJourneyDockerEventCaptureOwner } from "./journey-docker-event-capture.mjs";
 
 const fixtureSnapshotNames = Object.freeze({
   "/app/browser-db-observer.mjs": "fixture-browser-db-observer.mjs",
@@ -73,6 +76,9 @@ const startedHandles = new WeakSet();
 const cleanedHandles = new WeakSet();
 const launchPreparedHandles = new WeakSet();
 const lifecycleBounds = new WeakMap();
+const lifecycleEventCaptureFactories = new WeakMap();
+const lifecycleEventCaptures = new WeakMap();
+const lifecycleEventStartReceipts = new WeakMap();
 const ownedFileSystemOperations = Object.freeze({
   chmod,
   lstat,
@@ -845,6 +851,50 @@ function rejectionReasons(settlements) {
     .map(({ reason }) => reason);
 }
 
+function stopOwnedJourneyDockerEventCapture(capture) {
+  if (capture === null || typeof capture !== "object" || types.isProxy(capture)) {
+    fail("Journey Docker event capture owner is invalid.");
+  }
+  const descriptor = Object.getOwnPropertyDescriptor(capture, "stop");
+  if (!descriptor || !Object.hasOwn(descriptor, "value")
+    || typeof descriptor.value !== "function") {
+    fail("Journey Docker event capture owner is invalid.");
+  }
+  return descriptor.value.call(capture);
+}
+
+function waitForOwnedJourneyDockerEventBarrier(capture, nonce) {
+  if (capture === null || typeof capture !== "object" || types.isProxy(capture)) {
+    fail("Journey Docker event capture owner is invalid.");
+  }
+  const descriptor = Object.getOwnPropertyDescriptor(capture, "waitForBarrier");
+  if (!descriptor || !Object.hasOwn(descriptor, "value")
+    || typeof descriptor.value !== "function") {
+    fail("Journey Docker event capture owner is invalid.");
+  }
+  return descriptor.value.call(capture, nonce);
+}
+
+function releaseProvenJourneyDockerEventCapture(handle, capture, settlement) {
+  let proven = settlement?.status === "fulfilled";
+  if (!proven && capture !== null && typeof capture === "object" && !types.isProxy(capture)) {
+    const descriptor = Object.getOwnPropertyDescriptor(capture, "terminationProven");
+    if (descriptor && Object.hasOwn(descriptor, "value")
+      && typeof descriptor.value === "function") {
+      try {
+        proven = descriptor.value.call(capture) === true;
+      } catch {
+        proven = false;
+      }
+    }
+  }
+  if (proven) {
+    lifecycleEventCaptures.delete(handle);
+    lifecycleEventStartReceipts.delete(handle);
+  }
+  return proven;
+}
+
 export async function prepareJourneyOwnedStack({
   repositoryRoot,
   contractPath,
@@ -856,6 +906,7 @@ export async function prepareJourneyOwnedStack({
   expectedImagePlatform = optionalInputValue,
   expectedMigrationAssetImageDigest,
   runDocker,
+  startDockerEventCapture = createJourneyDockerEventCaptureOwner,
 }) {
   exactOptionalKeys(arguments[0], [
     "contract",
@@ -866,8 +917,10 @@ export async function prepareJourneyOwnedStack({
     "expectedMigrationAssetImageDigest",
     "repositoryRoot",
     "runDocker",
-  ], ["expectedApplicationManifestDigest", "expectedImagePlatform"]);
-  if (typeof runDocker !== "function") fail("Owned-stack Docker runner is invalid.");
+  ], ["expectedApplicationManifestDigest", "expectedImagePlatform", "startDockerEventCapture"]);
+  if (typeof runDocker !== "function" || typeof startDockerEventCapture !== "function") {
+    fail("Owned-stack Docker runner is invalid.");
+  }
   const imagePlatform = exactImagePlatform(
     expectedImagePlatform === undefined ? defaultImagePlatform : expectedImagePlatform,
     "expected image platform",
@@ -1109,6 +1162,7 @@ export async function prepareJourneyOwnedStack({
       }),
     });
     preparedHandles.add(handle);
+    lifecycleEventCaptureFactories.set(handle, startDockerEventCapture);
     return handle;
   } catch (error) {
     if (snapshot === undefined) throw error;
@@ -1219,6 +1273,32 @@ export async function prepareJourneyOwnedStackLaunch(handle) {
     }))) {
     fail("Verifier-owned image reference changed after its pre-start receipt.");
   }
+  const startDockerEventCapture = lifecycleEventCaptureFactories.get(handle);
+  if (typeof startDockerEventCapture !== "function") {
+    fail("Verifier-owned Docker event capture factory is unavailable.");
+  }
+  const capture = startDockerEventCapture({
+    environment: handle.prepared.queryEnvironment,
+    lifecycleNotBefore: new Date().toISOString(),
+    project: handle.contract.project,
+    repositoryRoot: handle.repositoryRoot,
+  });
+  lifecycleEventCaptures.set(handle, capture);
+  try {
+    const startReceipt = await createJourneyDockerEventBarrier(handle, capture, "start");
+    lifecycleEventStartReceipts.set(handle, startReceipt);
+  } catch (error) {
+    const stops = await Promise.allSettled([stopOwnedJourneyDockerEventCapture(capture)]);
+    releaseProvenJourneyDockerEventCapture(handle, capture, stops[0]);
+    const stopFailures = rejectionReasons(stops);
+    if (stopFailures.length > 0) {
+      throw new AggregateError(
+        [error, ...stopFailures],
+        "Verifier-owned Docker event capture preparation and exact stop both failed.",
+      );
+    }
+    throw error;
+  }
   return Object.freeze({
     args: Object.freeze([
       "compose",
@@ -1232,6 +1312,146 @@ export async function prepareJourneyOwnedStackLaunch(handle) {
     handle,
     projectSha256: sha256(handle.contract.project),
   });
+}
+
+async function createJourneyDockerEventBarrier(handle, capture, phase) {
+  if (!new Set(["end", "start"]).has(phase)) {
+    fail("Journey Docker event barrier phase is invalid.");
+  }
+  const nonce = randomBytes(16).toString("hex");
+  const name = `clean-pay-event-barrier-${sha256(handle.contract.project).slice(0, 12)}-${phase}-${nonce}`;
+  const ownerLabel = `io.clean-pay.event-barrier=${nonce}`;
+  const projectLabel = `com.docker.compose.project=${handle.contract.project}`;
+  const serviceLabel = "com.docker.compose.service=journey-event-barrier";
+  const filter = `label=${ownerLabel}`;
+  const nameFilter = `name=^/${name}$`;
+  const environment = handle.prepared.queryEnvironment;
+  const absentBefore = splitLines(await handle.runDocker([
+    "ps", "--all", "--no-trunc", "--quiet", "--filter", filter, "--filter", nameFilter,
+  ], 4 * 1024, environment));
+  if (absentBefore.length !== 0) fail("Journey Docker event barrier name is not unique.");
+  let barrierId;
+  let primaryError;
+  try {
+    const created = splitLines(await handle.runDocker([
+      "container", "create",
+      "--name", name,
+      "--label", ownerLabel,
+      "--label", projectLabel,
+      "--label", serviceLabel,
+      "--network", "none",
+      "--entrypoint", "/bin/true",
+      handle.contract.images.migration,
+    ], 4 * 1024, environment));
+    if (created.length !== 1 || !/^[a-f0-9]{64}$/.test(created[0])) {
+      fail("Journey Docker event barrier creation returned an invalid identity.");
+    }
+    [barrierId] = created;
+    const barrier = parseSingleInspection(
+      await handle.runDocker(["container", "inspect", barrierId], 256 * 1024, environment),
+      "journey Docker event barrier",
+    );
+    if (barrier?.Id !== barrierId || barrier?.Name !== `/${name}`
+      || barrier?.Config?.Image !== handle.contract.images.migration
+      || barrier?.Config?.Labels?.["io.clean-pay.event-barrier"] !== nonce
+      || barrier?.Config?.Labels?.["com.docker.compose.project"] !== handle.contract.project
+      || barrier?.Config?.Labels?.["com.docker.compose.service"] !== "journey-event-barrier"
+      || JSON.stringify(barrier?.Config?.Entrypoint) !== JSON.stringify(["/bin/true"])
+      || barrier?.HostConfig?.NetworkMode !== "none"
+      || barrier?.State?.Status !== "created" || barrier?.State?.Running !== false
+      || Number(barrier?.RestartCount ?? 0) !== 0) {
+      fail("Journey Docker event barrier inspection differs from its exact owner.");
+    }
+    const eventReceipt = assertJourneyDockerBarrierEventReceipt(
+      await waitForOwnedJourneyDockerEventBarrier(capture, nonce),
+      barrierId,
+    );
+    const removed = splitLines(await handle.runDocker(
+      ["container", "rm", barrierId],
+      4 * 1024,
+      environment,
+    ));
+    if (removed.length !== 1 || removed[0] !== barrierId) {
+      fail("Journey Docker event barrier removal did not return its exact identity.");
+    }
+    barrierId = undefined;
+    const absentAfter = splitLines(await handle.runDocker([
+      "ps", "--all", "--no-trunc", "--quiet", "--filter", filter, "--filter", nameFilter,
+    ], 4 * 1024, environment));
+    if (absentAfter.length !== 0) fail("Journey Docker event barrier remains after exact removal.");
+    return Object.freeze({
+      containerId: eventReceipt.containerId,
+      nonce,
+      phase,
+      timeNano: eventReceipt.timeNano,
+    });
+  } catch (error) {
+    primaryError = error;
+  }
+  let cleanupError;
+  try {
+    const recovered = splitLines(await handle.runDocker([
+      "ps", "--all", "--no-trunc", "--quiet", "--filter", filter, "--filter", nameFilter,
+    ], 4 * 1024, environment));
+    if (recovered.length > 1 || (recovered.length === 1 && !/^[a-f0-9]{64}$/.test(recovered[0]))
+      || (recovered.length === 1 && barrierId !== undefined && recovered[0] !== barrierId)) {
+      fail("Journey Docker event barrier recovery returned an invalid identity set.");
+    }
+    [barrierId] = recovered;
+    if (barrierId !== undefined) {
+      const barrier = parseSingleInspection(
+        await handle.runDocker(["container", "inspect", barrierId], 256 * 1024, environment),
+        "journey Docker event barrier recovery",
+      );
+      if (barrier?.Id !== barrierId || barrier?.Name !== `/${name}`
+        || barrier?.Config?.Image !== handle.contract.images.migration
+        || barrier?.Config?.Labels?.["io.clean-pay.event-barrier"] !== nonce
+        || barrier?.Config?.Labels?.["com.docker.compose.project"] !== handle.contract.project
+        || barrier?.Config?.Labels?.["com.docker.compose.service"] !== "journey-event-barrier"
+        || JSON.stringify(barrier?.Config?.Entrypoint) !== JSON.stringify(["/bin/true"])
+        || barrier?.HostConfig?.NetworkMode !== "none"
+        || barrier?.State?.Status !== "created" || barrier?.State?.Running !== false
+        || Number(barrier?.RestartCount ?? 0) !== 0) {
+        fail("Journey Docker event barrier recovery refused an unowned container.");
+      }
+      const removed = splitLines(await handle.runDocker(
+        ["container", "rm", barrierId],
+        4 * 1024,
+        environment,
+      ));
+      if (removed.length !== 1 || removed[0] !== barrierId) {
+        fail("Journey Docker event barrier recovery removal was not exact.");
+      }
+    }
+    const absent = splitLines(await handle.runDocker([
+      "ps", "--all", "--no-trunc", "--quiet", "--filter", filter, "--filter", nameFilter,
+    ], 4 * 1024, environment));
+    if (absent.length !== 0) fail("Journey Docker event barrier recovery did not prove absence.");
+  } catch (error) {
+    cleanupError = error;
+  }
+  if (cleanupError !== undefined) {
+    throw new AggregateError(
+      [primaryError, cleanupError],
+      "Journey Docker event barrier failed and exact recovery was not proven.",
+    );
+  }
+  throw primaryError;
+}
+
+function assertJourneyDockerBarrierEventReceipt(value, expectedContainerId) {
+  if (value === null || typeof value !== "object" || Array.isArray(value) || types.isProxy(value)
+    || Object.keys(value).sort().join(",") !== "containerId,timeNano") {
+    fail("Journey Docker event barrier timestamp is invalid.");
+  }
+  const id = Object.getOwnPropertyDescriptor(value, "containerId");
+  const time = Object.getOwnPropertyDescriptor(value, "timeNano");
+  if (!id || !Object.hasOwn(id, "value") || id.value !== expectedContainerId
+    || !time || !Object.hasOwn(time, "value")
+    || !/^[1-9]\d{15,24}$/.test(time.value)) {
+    fail("Journey Docker event barrier timestamp is invalid.");
+  }
+  return Object.freeze({ containerId: id.value, timeNano: time.value });
 }
 
 export async function dispatchJourneyOwnedStackPair(handles, plans) {
@@ -1248,7 +1468,16 @@ export async function dispatchJourneyOwnedStackPair(handles, plans) {
     projects: plans.map(({ projectSha256 }) => projectSha256),
     version: 1,
   }));
-  const lifecycleNotBefore = new Date().toISOString();
+  const captures = handles.map((handle) => lifecycleEventCaptures.get(handle));
+  const startReceipts = handles.map((handle) => lifecycleEventStartReceipts.get(handle));
+  if (captures.some((capture) => capture === undefined)
+    || startReceipts.some((receipt) => receipt === undefined)) {
+    fail("Both verifier-owned Docker event captures must be ready before Compose dispatch.");
+  }
+  const lifecycleNotBefore = dockerEventNanosecondsToIso(startReceipts
+    .map(({ timeNano }) => BigInt(timeNano))
+    .reduce((latest, current) => current > latest ? current : latest)
+    .toString());
   const dispatches = [];
   const operations = plans.map((plan, ordinal) => {
     lifecycleBounds.set(plan.handle, lifecycleNotBefore);
@@ -1259,11 +1488,15 @@ export async function dispatchJourneyOwnedStackPair(handles, plans) {
     }));
     // No await occurs in this map: both Compose processes are dispatched from
     // the same JavaScript turn after both immutable plans crossed the barrier.
-    return plan.handle.runDocker(
-      [...plan.args],
-      64 * 1024,
-      plan.environment,
-    );
+    try {
+      return Promise.resolve(plan.handle.runDocker(
+        [...plan.args],
+        64 * 1024,
+        plan.environment,
+      ));
+    } catch (reason) {
+      return Promise.reject(reason);
+    }
   });
   if (dispatches.length !== 2) fail("Verifier-owned pair dispatch ledger is incomplete.");
   const starts = await Promise.allSettled(operations);
@@ -1271,6 +1504,17 @@ export async function dispatchJourneyOwnedStackPair(handles, plans) {
     if (start.status === "fulfilled") startedHandles.add(handles[index]);
   });
   if (starts.some(({ status }) => status === "rejected")) {
+    const captureStops = await Promise.allSettled(captures.map(stopOwnedJourneyDockerEventCapture));
+    for (const [index, handle] of handles.entries()) {
+      releaseProvenJourneyDockerEventCapture(handle, captures[index], captureStops[index]);
+    }
+    const captureFailures = rejectionReasons(captureStops);
+    if (captureFailures.length > 0) {
+      throw new AggregateError(
+        [...rejectionReasons(starts), ...captureFailures],
+        "Verifier-owned stack launch and Docker event capture sealing both failed.",
+      );
+    }
     throw new AggregateError(
       rejectionReasons(starts),
       "Both verifier-owned stacks must start from one completed launch barrier.",
@@ -1282,6 +1526,38 @@ export async function dispatchJourneyOwnedStackPair(handles, plans) {
     inputReceiptContractSha256s: Object.freeze(inputReceiptContractSha256s),
     lifecycleNotBefore,
     status: "dual-compose-up-dispatched-after-shared-barrier",
+  });
+}
+
+async function sealJourneyDockerEventCapture(handle) {
+  const capture = lifecycleEventCaptures.get(handle);
+  const startReceipt = lifecycleEventStartReceipts.get(handle);
+  if (capture === undefined || startReceipt === undefined) {
+    fail("Verifier-owned Docker event capture is unavailable at runtime sealing.");
+  }
+  let endReceipt;
+  let barrierFailure;
+  try {
+    endReceipt = await createJourneyDockerEventBarrier(handle, capture, "end");
+  } catch (error) {
+    barrierFailure = error;
+  }
+  const stops = await Promise.allSettled([stopOwnedJourneyDockerEventCapture(capture)]);
+  releaseProvenJourneyDockerEventCapture(handle, capture, stops[0]);
+  const stopFailures = rejectionReasons(stops);
+  if (barrierFailure !== undefined || stopFailures.length > 0) {
+    throw new AggregateError(
+      [...(barrierFailure === undefined ? [] : [barrierFailure]), ...stopFailures],
+      "Verifier-owned Docker event capture did not cross and seal its end barrier.",
+    );
+  }
+  if (endReceipt === undefined || stops[0].status !== "fulfilled") {
+    fail("Verifier-owned Docker event capture seal ledger is incomplete.");
+  }
+  return Object.freeze({
+    endReceipt,
+    output: stops[0].value,
+    startReceipt,
   });
 }
 
@@ -1311,53 +1587,98 @@ export async function attestJourneyOwnedStack(handle) {
     fixtureSourceOverrides: handle.fixtureSourceOverrides,
     lifecycleNotBefore: lifecycleBounds.get(handle),
     runDocker: handle.runDocker,
+    sealLifecycleEvents: () => sealJourneyDockerEventCapture(handle),
   });
 }
 
 export async function cleanupJourneyOwnedStack(handle) {
   assertHandle(handle);
   if (cleanedHandles.has(handle)) fail("Owned journey stack cleanup is exactly once.");
-  const resources = await inspectOwnedResources(
-    handle.contract.project,
-    handle.runDocker,
-    handle.prepared.queryEnvironment,
-  );
-  if (resources.count > 0) {
-    const current = await prepareJourneyComposeInputs({
-      repositoryRoot: handle.repositoryRoot,
-      contractPath: handle.contractPath,
-      contract: handle.contract,
-      fixtureSourceOverrides: handle.fixtureSourceOverrides,
-      runDocker: handle.runDocker,
-    });
-    await assertPreparedInputsUnchanged(handle, current);
-    await handle.runDocker([
-      "compose",
-      "--progress", "quiet",
-      "--project-name", handle.contract.project,
-      "--env-file", handle.prepared.authoritativeEnvironmentPath,
-      ...handle.prepared.composeFiles.flatMap((file) => ["--file", file]),
-      "down", "--volumes", "--timeout",
-      String(JOURNEY_DOCKER_TIMEOUT_CONTRACT.composeStopSeconds),
-    ], 64 * 1024, handle.prepared.queryEnvironment);
-    await assertJourneyProjectAbsentAfterCleanup(
-      handle.contract.project,
-      handle.runDocker,
-      handle.prepared.queryEnvironment,
-    );
-  } else {
-    await assertJourneyProjectAbsent(
-      handle.contract.project,
-      handle.runDocker,
-      handle.prepared.queryEnvironment,
+  let captureFailure;
+  let captureTerminationProven = true;
+  const activeCapture = lifecycleEventCaptures.get(handle);
+  if (activeCapture !== undefined) {
+    let stopSettlement;
+    try {
+      const value = await stopOwnedJourneyDockerEventCapture(activeCapture);
+      stopSettlement = { status: "fulfilled", value };
+    } catch (error) {
+      captureFailure = error;
+      stopSettlement = { reason: error, status: "rejected" };
+    }
+    captureTerminationProven = releaseProvenJourneyDockerEventCapture(
+      handle,
+      activeCapture,
+      stopSettlement,
     );
   }
-  await cleanupExactDirectory(
-    handle.directory,
-    handle.directoryIdentity,
-    handle.createdFiles,
-  );
+  try {
+    const resources = await inspectOwnedResources(
+      handle.contract.project,
+      handle.runDocker,
+      handle.prepared.queryEnvironment,
+    );
+    if (resources.count > 0) {
+      const current = await prepareJourneyComposeInputs({
+        repositoryRoot: handle.repositoryRoot,
+        contractPath: handle.contractPath,
+        contract: handle.contract,
+        fixtureSourceOverrides: handle.fixtureSourceOverrides,
+        runDocker: handle.runDocker,
+      });
+      await assertPreparedInputsUnchanged(handle, current);
+      await handle.runDocker([
+        "compose",
+        "--progress", "quiet",
+        "--project-name", handle.contract.project,
+        "--env-file", handle.prepared.authoritativeEnvironmentPath,
+        ...handle.prepared.composeFiles.flatMap((file) => ["--file", file]),
+        "down", "--volumes", "--timeout",
+        String(JOURNEY_DOCKER_TIMEOUT_CONTRACT.composeStopSeconds),
+      ], 64 * 1024, handle.prepared.queryEnvironment);
+      await assertJourneyProjectAbsentAfterCleanup(
+        handle.contract.project,
+        handle.runDocker,
+        handle.prepared.queryEnvironment,
+      );
+    } else {
+      await assertJourneyProjectAbsent(
+        handle.contract.project,
+        handle.runDocker,
+        handle.prepared.queryEnvironment,
+      );
+    }
+  } catch (error) {
+    if (captureFailure !== undefined) {
+      throw new AggregateError(
+        [captureFailure, error],
+        "Docker event capture and verifier-owned stack cleanup both failed.",
+      );
+    }
+    throw error;
+  }
+  if (!captureTerminationProven) {
+    throw captureFailure ?? new Error(
+      "Journey Docker event capture termination remains unproven after stack cleanup.",
+    );
+  }
+  try {
+    await cleanupExactDirectory(
+      handle.directory,
+      handle.directoryIdentity,
+      handle.createdFiles,
+    );
+  } catch (error) {
+    if (captureFailure !== undefined) {
+      throw new AggregateError(
+        [captureFailure, error],
+        "Docker event capture and exact snapshot cleanup both failed.",
+      );
+    }
+    throw error;
+  }
   cleanedHandles.add(handle);
+  if (captureFailure !== undefined) throw captureFailure;
   return Object.freeze({
     generatedEnvironmentDirectorySha256: handle.inputReceipt.generatedEnvironmentDirectorySha256,
     projectSha256: sha256(handle.contract.project),

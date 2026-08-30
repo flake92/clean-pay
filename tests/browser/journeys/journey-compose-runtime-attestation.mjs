@@ -1,12 +1,14 @@
 import { createHash } from "node:crypto";
 import { lstat, readFile, realpath, stat } from "node:fs/promises";
 import path from "node:path";
+import { types } from "node:util";
 
 import {
   JOURNEY_SYNTHETIC_ENVIRONMENT_FILENAMES,
   buildJourneySyntheticEnvironment,
   parseJourneyEnvironmentAssignments,
 } from "./journey-synthetic-environment-contract.mjs";
+import { attestJourneyCapturedLifecycle } from "./journey-compose-lifecycle-capture.mjs";
 
 export const JOURNEY_COMPOSE_SERVICE_NAMES = Object.freeze([
   "app",
@@ -83,28 +85,57 @@ export function collectJourneyOneShotLifecycleFailureEvidence(error) {
       && visited < oneShotLifecycleFailureTraversalMaximumNodes) {
       const { depth, value } = pending.shift();
       if (value === null || (typeof value !== "object" && typeof value !== "function")
-        || seen.has(value)) {
+        || isProxy(value) || seen.has(value)) {
         continue;
       }
       seen.add(value);
       visited += 1;
       const direct = oneShotLifecycleFailureEvidenceByError.get(value);
       if (direct) evidence.push(direct);
-      if (depth >= oneShotLifecycleFailureTraversalMaximumDepth) continue;
-      const errors = Object.getOwnPropertyDescriptor(value, "errors");
-      if (errors && Object.hasOwn(errors, "value") && Array.isArray(errors.value)) {
-        for (const child of errors.value.slice(0, 8)) {
-          pending.push({ depth: depth + 1, value: child });
+      if (depth >= oneShotLifecycleFailureTraversalMaximumDepth || !types.isNativeError(value)) {
+        continue;
+      }
+      const errors = ownDataProperty(value, "errors");
+      if (errors.status === "present" && !isProxy(errors.value) && Array.isArray(errors.value)) {
+        const length = ownDataProperty(errors.value, "length");
+        if (length.status === "present" && Number.isSafeInteger(length.value)
+          && length.value >= 0) {
+          for (let index = 0; index < Math.min(length.value, 8); index += 1) {
+            const child = ownDataProperty(errors.value, String(index));
+            if (child.status === "present") {
+              pending.push({ depth: depth + 1, value: child.value });
+            }
+          }
         }
       }
-      const cause = Object.getOwnPropertyDescriptor(value, "cause");
-      if (cause && Object.hasOwn(cause, "value")) {
+      const cause = ownDataProperty(value, "cause");
+      if (cause.status === "present") {
         pending.push({ depth: depth + 1, value: cause.value });
       }
     }
     return Object.freeze(evidence);
   } catch {
     return Object.freeze([]);
+  }
+}
+
+function ownDataProperty(value, name) {
+  try {
+    const descriptor = Object.getOwnPropertyDescriptor(value, name);
+    if (descriptor === undefined) return { status: "absent" };
+    return Object.hasOwn(descriptor, "value")
+      ? { status: "present", value: descriptor.value }
+      : { status: "unreadable" };
+  } catch {
+    return { status: "unreadable" };
+  }
+}
+
+function isProxy(value) {
+  try {
+    return types.isProxy(value);
+  } catch {
+    return true;
   }
 }
 export const JOURNEY_COMPOSE_EXPECTED_SERVICE_STATES = Object.freeze({
@@ -235,6 +266,7 @@ export async function attestJourneyComposeRuntime({
   fixtureSourceOverrides,
   lifecycleNotBefore,
   runDocker,
+  sealLifecycleEvents,
 }) {
   exactOptionalObjectKeys(arguments[0], [
     "contract",
@@ -256,8 +288,12 @@ export async function attestJourneyComposeRuntime({
     "expectedMigrationManifestDigest",
     "fixtureSourceOverrides",
     "lifecycleNotBefore",
+    "sealLifecycleEvents",
   ], "journey runtime attestation input");
-  if (typeof runDocker !== "function") fail("Journey runtime Docker reader is invalid.");
+  if (typeof runDocker !== "function"
+    || (sealLifecycleEvents !== undefined && typeof sealLifecycleEvents !== "function")) {
+    fail("Journey runtime Docker reader is invalid.");
+  }
   exactImageReference(expectedApplicationReference, "expected application image reference");
   exactImageReference(expectedMigrationReference, "expected migration image reference");
   exactDigest(expectedApplicationAssetImageDigest, "expected application asset image digest");
@@ -337,23 +373,36 @@ export async function attestJourneyComposeRuntime({
   if (!/^[a-z0-9][a-z0-9._-]{0,63}$/.test(daemonLoggingDriver)) {
     fail("Docker daemon logging driver is invalid.");
   }
-  const attestedAt = new Date().toISOString();
+  const capturedLifecycle = sealLifecycleEvents === undefined
+    ? undefined
+    : attestJourneyCapturedLifecycle({
+      containersByService,
+      lifecycleNotBefore,
+      oneShotServiceNames: oneShotServices,
+      sealed: await sealLifecycleEvents(),
+      serviceNames: JOURNEY_COMPOSE_SERVICE_NAMES,
+    });
+  const attestedAt = capturedLifecycle === undefined
+    ? new Date().toISOString()
+    : capturedLifecycle.attestedAt;
+  const capturedEventsByContainer = capturedLifecycle?.eventsByContainer;
   const oneShotLifecycles = {};
-  await Promise.all([...oneShotServices].map(async (serviceName) => {
+  const lifecycleSettlements = await Promise.allSettled([...oneShotServices].map(async (serviceName) => {
     const container = containersByService[serviceName];
-    const since = lifecycleSince(container.Created);
-    const output = await runDocker([
-      "events",
-      "--since", since,
-      "--until", attestedAt,
-      "--filter", "type=container",
-      "--filter", `container=${container.Id}`,
-      "--filter", "event=create",
-      "--filter", "event=start",
-      "--filter", "event=die",
-      "--filter", "event=restart",
-      "--format", "{{.TimeNano}} {{.Action}} {{.Actor.ID}}",
-    ], 4 * 1024, composeQueryEnvironment({}, contract.project, {}));
+    const output = capturedEventsByContainer === undefined
+      ? await runDocker([
+        "events",
+        "--since", lifecycleSince(container.Created),
+        "--until", attestedAt,
+        "--filter", "type=container",
+        "--filter", `container=${container.Id}`,
+        "--filter", "event=create",
+        "--filter", "event=start",
+        "--filter", "event=die",
+        "--filter", "event=restart",
+        "--format", "{{.TimeNano}} {{.Action}} {{.Actor.ID}}",
+      ], 4 * 1024, composeQueryEnvironment({}, contract.project, {}))
+      : (capturedEventsByContainer.get(container.Id) ?? []).join("\n");
     oneShotLifecycles[serviceName] = parseOneShotLifecycleEvents(
       output,
       container,
@@ -361,6 +410,15 @@ export async function attestJourneyComposeRuntime({
       lifecycleNotBefore,
     );
   }));
+  const lifecycleFailures = lifecycleSettlements
+    .filter(({ status }) => status === "rejected")
+    .map(({ reason }) => reason);
+  if (lifecycleFailures.length > 0) {
+    throw new AggregateError(
+      lifecycleFailures,
+      "Every journey one-shot lifecycle must settle before runtime cleanup.",
+    );
+  }
 
   const runtime = assertJourneyComposeRuntimeInspection({
     attestedAt,
@@ -1596,9 +1654,15 @@ function assertOneShotLifecycleRecord(value, container, expectedLifecycleNotBefo
   }
   if (!Array.isArray(value.events) || value.events.length !== 3) {
     const error = new Error("Journey one-shot event history is missing, truncated, or repeated.");
+    let evidence = emptyOneShotLifecycleFailureEvidence();
+    try {
+      evidence = createOneShotLifecycleFailureEvidence(value, container);
+    } catch {
+      // The exact lifecycle failure remains authoritative if diagnostic projection is poisoned.
+    }
     oneShotLifecycleFailureEvidenceByError.set(
       error,
-      createOneShotLifecycleFailureEvidence(value, container),
+      evidence,
     );
     throw error;
   }
@@ -1633,40 +1697,82 @@ function lifecycleSince(createdAt) {
 }
 
 function createOneShotLifecycleFailureEvidence(value, container) {
-  const events = Array.isArray(value.events) ? value.events : [];
-  const labels = container?.Config?.Labels;
-  const rawService = labels && typeof labels === "object"
-    ? labels["com.docker.compose.service"]
+  if (isProxy(value) || isProxy(container)) return emptyOneShotLifecycleFailureEvidence();
+  const eventsProperty = ownDataProperty(value, "events");
+  const events = eventsProperty.status === "present"
+    && !isProxy(eventsProperty.value) && Array.isArray(eventsProperty.value)
+    ? eventsProperty.value
     : undefined;
-  const service = oneShotServices.has(rawService) ? rawService : "unknown";
+  const length = events === undefined ? undefined : ownDataProperty(events, "length");
+  if (length?.status !== "present" || !Number.isSafeInteger(length.value) || length.value < 0) {
+    return emptyOneShotLifecycleFailureEvidence();
+  }
+  const actions = [];
   const actionSet = new Set(["create", "die", "restart", "start"]);
-  const actions = events.slice(0, 8).map((event) => (
-    actionSet.has(event?.action) ? event.action : "invalid"
-  ));
-  const observedEventCount = Number.isSafeInteger(events.length) && events.length >= 0
-    ? Math.min(events.length, 9)
-    : -1;
-  const exitCode = Number.isSafeInteger(container?.State?.ExitCode)
-    ? container.State.ExitCode
+  for (let index = 0; index < Math.min(length.value, 8); index += 1) {
+    const event = ownDataProperty(events, String(index));
+    if (event.status !== "present" || isProxy(event.value)) {
+      return emptyOneShotLifecycleFailureEvidence();
+    }
+    const action = ownDataProperty(event.value, "action");
+    if (action.status !== "present") return emptyOneShotLifecycleFailureEvidence();
+    actions.push(actionSet.has(action.value) ? action.value : "invalid");
+  }
+  const config = ownObjectDataProperty(container, "Config");
+  const labels = ownObjectDataProperty(config, "Labels");
+  const rawServiceProperty = ownDataProperty(labels, "com.docker.compose.service");
+  const rawService = rawServiceProperty.status === "present" ? rawServiceProperty.value : undefined;
+  const service = oneShotServices.has(rawService) ? rawService : "unknown";
+  const state = ownObjectDataProperty(container, "State");
+  const rawExitCodeProperty = ownDataProperty(state, "ExitCode");
+  const rawExitCode = rawExitCodeProperty.status === "present"
+    ? rawExitCodeProperty.value
+    : undefined;
+  const exitCode = Number.isSafeInteger(rawExitCode) ? rawExitCode
     : null;
-  const restartCount = Number.isSafeInteger(container?.RestartCount)
-    ? container.RestartCount
+  const rawRestartCountProperty = ownDataProperty(container, "RestartCount");
+  const rawRestartCount = rawRestartCountProperty.status === "present"
+    ? rawRestartCountProperty.value
+    : undefined;
+  const restartCount = Number.isSafeInteger(rawRestartCount) ? rawRestartCount
     : null;
   const allowedStates = new Set([
     "created", "dead", "exited", "paused", "removing", "restarting", "running",
   ]);
-  const stateStatus = allowedStates.has(container?.State?.Status)
-    ? container.State.Status
-    : "invalid";
+  const rawStateStatusProperty = ownDataProperty(state, "Status");
+  const rawStateStatus = rawStateStatusProperty.status === "present"
+    ? rawStateStatusProperty.value
+    : undefined;
+  const stateStatus = allowedStates.has(rawStateStatus) ? rawStateStatus : "invalid";
   return Object.freeze({
     actions: Object.freeze(actions),
-    eventCountTruncated: events.length > 8,
+    eventCountTruncated: length.value > 8,
     exitCode,
-    observedEventCount,
+    observedEventCount: Math.min(length.value, 9),
     restartCount,
     service,
     stateStatus,
   });
+}
+
+function emptyOneShotLifecycleFailureEvidence() {
+  return Object.freeze({
+    actions: Object.freeze([]),
+    eventCountTruncated: false,
+    exitCode: null,
+    observedEventCount: -1,
+    restartCount: null,
+    service: "unknown",
+    stateStatus: "invalid",
+  });
+}
+
+function ownObjectDataProperty(value, name) {
+  const property = ownDataProperty(value, name);
+  return property.status === "present" && property.value !== null
+    && typeof property.value === "object" && !isProxy(property.value)
+    ? property.value
+    : Object.freeze({});
 }
 
 function exactTimestamp(value, label) {

@@ -12,6 +12,10 @@ import {
   collectJourneyOneShotLifecycleFailureEvidence,
   normalizeJourneyHostPath,
 } from "./journey-compose-runtime-attestation.mjs";
+import {
+  attestJourneyCapturedLifecycle,
+  dockerEventNanosecondsToIso,
+} from "./journey-compose-lifecycle-capture.mjs";
 
 type ComposeMountFixture = {
   type: "bind" | "volume";
@@ -93,6 +97,137 @@ test("emits bounded sanitized evidence when retrospective one-shot events are in
   const revoked = Proxy.revocable(new Error("secret"), {});
   revoked.revoke();
   expect(collectJourneyOneShotLifecycleFailureEvidence(revoked.proxy)).toEqual([]);
+
+  let proxyTraps = 0;
+  const trapped = new Proxy(new Error("secret"), {
+    getOwnPropertyDescriptor: () => {
+      proxyTraps += 1;
+      return undefined;
+    },
+  });
+  expect(collectJourneyOneShotLifecycleFailureEvidence(new AggregateError([trapped])))
+    .toEqual([]);
+  expect(proxyTraps).toBe(0);
+
+  let accessorReads = 0;
+  const accessorChildren: unknown[] = [];
+  Object.defineProperty(accessorChildren, "0", {
+    configurable: true,
+    get: () => {
+      accessorReads += 1;
+      return new Error("secret");
+    },
+  });
+  const accessorAggregate = new AggregateError([]);
+  Object.defineProperty(accessorAggregate, "errors", { value: accessorChildren });
+  expect(collectJourneyOneShotLifecycleFailureEvidence(accessorAggregate)).toEqual([]);
+  expect(accessorReads).toBe(0);
+
+  let poisonedEventTraps = 0;
+  const poisonedEvent = new Proxy({}, {
+    getOwnPropertyDescriptor: () => {
+      poisonedEventTraps += 1;
+      return undefined;
+    },
+  });
+  lifecycle.events = [poisonedEvent as never];
+  let poisonedFailure: unknown;
+  try {
+    assertJourneyOneShotLifecycle(lifecycle, container);
+  } catch (error) {
+    poisonedFailure = error;
+  }
+  expect((poisonedFailure as Error).message)
+    .toBe("Journey one-shot event history is missing, truncated, or repeated.");
+  expect(collectJourneyOneShotLifecycleFailureEvidence(poisonedFailure)).toEqual([{
+    actions: [],
+    eventCountTruncated: false,
+    exitCode: null,
+    observedEventCount: -1,
+    restartCount: null,
+    service: "unknown",
+    stateStatus: "invalid",
+  }]);
+  expect(poisonedEventTraps).toBe(0);
+});
+
+test("binds a live lifecycle stream to exact barriers, current IDs and service transitions", () => {
+  const startReceipt = Object.freeze({
+    containerId: "a".repeat(64),
+    nonce: "1".repeat(32),
+    phase: "start",
+    timeNano: "1767225599000000000",
+  });
+  const endReceipt = Object.freeze({
+    containerId: "b".repeat(64),
+    nonce: "2".repeat(32),
+    phase: "end",
+    timeNano: "1767225601000000000",
+  });
+  const jobId = "c".repeat(64);
+  const webId = "d".repeat(64);
+  const validLines = [
+    `${startReceipt.timeNano}|create|${startReceipt.containerId}|journey-event-barrier|${startReceipt.nonce}`,
+    `1767225600000000001|create|${jobId}|job|-`,
+    `1767225600100000001|start|${jobId}|job|-`,
+    `1767225600200000001|die|${jobId}|job|-`,
+    `1767225600300000001|create|${webId}|web|-`,
+    `1767225600400000001|start|${webId}|web|-`,
+    `${endReceipt.timeNano}|create|${endReceipt.containerId}|journey-event-barrier|${endReceipt.nonce}`,
+  ];
+  const input = (lines = validLines, sealedOverrides: Record<string, unknown> = {}) => ({
+    containersByService: { job: { Id: jobId }, web: { Id: webId } },
+    lifecycleNotBefore: "2025-12-31T23:59:59.000Z",
+    oneShotServiceNames: new Set(["job"]),
+    sealed: Object.freeze({
+      endReceipt,
+      output: lines.join("\n"),
+      startReceipt,
+      ...sealedOverrides,
+    }),
+    serviceNames: ["job", "web"],
+  });
+
+  const result = attestJourneyCapturedLifecycle(input());
+  expect(result.attestedAt).toBe("2026-01-01T00:00:01.000Z");
+  expect(result.eventsByContainer.get(jobId)?.map((line: string) => line.split(" ")[1]))
+    .toEqual(["create", "start", "die"]);
+  expect(result.eventsByContainer.get(webId)?.map((line: string) => line.split(" ")[1]))
+    .toEqual(["create", "start"]);
+
+  const invalidStreams = [
+    validLines.filter((line) => !line.includes(`|die|${jobId}|`)),
+    validLines.toSpliced(5, 0, `1767225600350000001|restart|${webId}|web|-`),
+    validLines.toSpliced(5, 0, `1767225600350000001|start|${webId}|web|-`),
+    validLines.map((line) => line.includes(`|create|${jobId}|job|`)
+      ? line.replace(jobId, "e".repeat(64)) : line),
+    validLines.map((line) => line.includes(`|start|${jobId}|job|`)
+      ? line.replace("1767225600100000001", "1767225598000000001") : line),
+    validLines.toSpliced(3, 0, `1767225600150000001|create|${"f".repeat(64)}|journey-event-barrier|${"3".repeat(32)}`),
+  ];
+  for (const lines of invalidStreams) {
+    expect(() => attestJourneyCapturedLifecycle(input(lines))).toThrow();
+  }
+  expect(() => attestJourneyCapturedLifecycle(input(
+    validLines.map((line) => `${line}\r`),
+  ))).toThrow(/line boundary/);
+  expect(() => attestJourneyCapturedLifecycle(input(validLines, {
+    output: "x".repeat(64 * 1024 + 1),
+  }))).toThrow(/bounded/);
+
+  let proxyTraps = 0;
+  const poisoned = new Proxy({}, {
+    ownKeys: () => {
+      proxyTraps += 1;
+      return [];
+    },
+  });
+  expect(() => attestJourneyCapturedLifecycle(input(validLines, {
+    startReceipt: poisoned,
+  }))).toThrow(/invalid/);
+  expect(proxyTraps).toBe(0);
+  expect(() => dockerEventNanosecondsToIso("8640000000000001000000"))
+    .toThrow(/date range/);
 });
 
 test("keeps the classic config-selection output and binding hashes byte-for-byte stable", () => {
