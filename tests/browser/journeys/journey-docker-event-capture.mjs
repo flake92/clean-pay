@@ -76,6 +76,19 @@ function startJourneyDockerEventCapture({
   let closedSummary;
   let resolveClosed;
   const closed = new Promise((resolve) => { resolveClosed = resolve; });
+  const acceptedStopSignals = [];
+  const stopSignalLedger = Object.freeze({
+    record: (signal) => {
+      const expected = acceptedStopSignals.length === 0
+        ? "SIGTERM"
+        : acceptedStopSignals.length === 1 && acceptedStopSignals[0] === "SIGTERM"
+          ? "SIGKILL"
+          : undefined;
+      if (signal !== expected) fail("Journey Docker event capture stop signal ledger is invalid.");
+      acceptedStopSignals.push(signal);
+    },
+    snapshot: () => Object.freeze([...acceptedStopSignals]),
+  });
 
   const rejectBarrierWaiters = (error) => {
     for (const waiters of barrierWaiters.values()) {
@@ -173,6 +186,7 @@ function startJourneyDockerEventCapture({
     project,
     stderr: () => stderr,
     stderrBytes: () => stderrBytes,
+    stopSignalLedger,
     stop: () => {
       if (stopPromise !== undefined) return stopPromise;
       stopPromise = stopJourneyDockerEventCapture(handle);
@@ -239,12 +253,19 @@ async function stopJourneyDockerEventCapture(handle) {
     fail("Journey Docker event capture handle is invalid.");
   }
   const initial = handle.beginStop();
-  const closed = initial.closedSummary ?? await terminateDockerEventCaptureChildAndAwaitClose(
-    handle.child,
-    handle.closed,
-    handle.lifecycleBounds,
-    handle.verifyProcessTerminated,
-  );
+  const termination = initial.closedSummary === undefined
+    ? await terminateDockerEventCaptureChildAndAwaitClose(
+      handle.child,
+      handle.closed,
+      handle.lifecycleBounds,
+      handle.stopSignalLedger,
+      handle.verifyProcessTerminated,
+    )
+    : Object.freeze({
+      acceptedSignals: handle.stopSignalLedger.snapshot(),
+      closedSummary: initial.closedSummary,
+    });
+  const { acceptedSignals, closedSummary: closed } = termination;
   handle.markTerminationProven();
   if (handle.failure()) throw handle.failure();
   if (handle.stderrBytes() !== 0) {
@@ -253,8 +274,16 @@ async function stopJourneyDockerEventCapture(handle) {
   if (closed?.status === "os-pid-absence-proven-without-close") {
     fail("Journey Docker event capture output was not sealed through stdio close.");
   }
-  if (!((closed?.code === null && new Set(["SIGKILL", "SIGTERM"]).has(closed?.signal))
-    || (closed?.code === 0 && closed?.signal === null))) {
+  const exactSignals = (...signals) => signals.length === acceptedSignals.length
+    && signals.every((signal, index) => acceptedSignals[index] === signal);
+  const exactSigtermStop = exactSignals("SIGTERM") && (
+    (closed?.code === null && closed?.signal === "SIGTERM")
+    || (closed?.code === 0 && closed?.signal === null)
+    || (closed?.code === 128 + 15 && closed?.signal === null)
+  );
+  const exactSigkillStop = exactSignals("SIGTERM", "SIGKILL")
+    && closed?.code === null && closed?.signal === "SIGKILL";
+  if (!(exactSigtermStop || exactSigkillStop)) {
     fail("Journey Docker event capture did not close through its exact stop contract.");
   }
   return handle.output();
@@ -264,15 +293,33 @@ async function terminateDockerEventCaptureChildAndAwaitClose(
   child,
   closed,
   lifecycleBounds,
+  stopSignalLedger,
   verifyProcessTerminated,
 ) {
-  if (child.exitCode === null && child.signalCode === null) child.kill("SIGTERM");
+  const requestSignal = (signal) => {
+    const acceptedSignals = stopSignalLedger.snapshot();
+    const expected = acceptedSignals.length === 0
+      ? "SIGTERM"
+      : acceptedSignals.length === 1 && acceptedSignals[0] === "SIGTERM"
+        ? "SIGKILL"
+        : undefined;
+    if (signal === expected
+      && child.exitCode === null && child.signalCode === null
+      && child.kill(signal) === true) {
+      stopSignalLedger.record(signal);
+    }
+  };
+  const result = (closedSummary) => Object.freeze({
+    acceptedSignals: stopSignalLedger.snapshot(),
+    closedSummary,
+  });
+  requestSignal("SIGTERM");
   const graceful = await Promise.race([
     closed,
     boundedDelay(lifecycleBounds.terminationGraceMs, "grace-expired"),
   ]);
-  if (graceful !== "grace-expired") return graceful;
-  if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
+  if (graceful !== "grace-expired") return result(graceful);
+  requestSignal("SIGKILL");
   const deadline = performance.now() + lifecycleBounds.shutdownTimeoutMs;
   while (performance.now() < deadline) {
     const remaining = Math.max(1, Math.floor(deadline - performance.now()));
@@ -280,7 +327,7 @@ async function terminateDockerEventCaptureChildAndAwaitClose(
       closed,
       boundedDelay(Math.min(lifecycleBounds.killCloseTimeoutMs, remaining), "poll"),
     ]);
-    if (closeOrPoll !== "poll") return closeOrPoll;
+    if (closeOrPoll !== "poll") return result(closeOrPoll);
     let absent = false;
     try {
       absent = await Promise.race([
@@ -291,13 +338,13 @@ async function terminateDockerEventCaptureChildAndAwaitClose(
       absent = false;
     }
     if (absent === true) {
-      return Object.freeze({
+      return result(Object.freeze({
         code: null,
         signal: "SIGKILL",
         status: "os-pid-absence-proven-without-close",
-      });
+      }));
     }
-    if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
+    requestSignal("SIGKILL");
   }
   fail("Journey Docker event capture termination was not proven before its deadline.");
 }
