@@ -4,7 +4,10 @@ import { executePayment } from "@/application/payments/checkout";
 import { executePaymentWorkflow } from "@/application/payments/execute-payment-workflow";
 import type { PaymentCommands } from "@/application/payments/ports/checkout";
 import { productionPaymentWorkflowGateway } from "@/app/_composition/session-gateways";
-import type { PaymentCommand } from "@/application/models/checkout";
+import type {
+  PaymentCommand,
+  PaymentCommandResult,
+} from "@/application/models/checkout";
 import { parsePaymentCommandPayload } from "@/app/actions/runtime-payload";
 
 const productionPaymentCommands: PaymentCommands = {
@@ -20,7 +23,9 @@ const productionPaymentCommands: PaymentCommands = {
   ),
 };
 
-export async function executePaymentAction(command: PaymentCommand) {
+export async function executePaymentAction(
+  command: PaymentCommand,
+): Promise<PaymentCommandResult> {
   const parsed = parsePaymentCommandPayload(command);
   return parsed
     ? executePayment(productionPaymentCommands, parsed)

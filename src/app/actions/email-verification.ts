@@ -5,6 +5,7 @@ import {
   requestEmailVerificationCode,
   safeReadiness,
 } from "@/application/auth/execute-email-verification";
+import type { EmailVerificationResult } from "@/application/models/email-verification";
 import {
   productionAuthProfileGateway,
   productionEmailVerificationCommands,
@@ -17,14 +18,18 @@ const malformed = {
   message: "Проверьте введённые данные.",
 };
 
-export async function requestEmailVerificationCodeAction(input: { email?: string; turnstileToken?: string }) {
+export async function requestEmailVerificationCodeAction(
+  input: { email?: string; turnstileToken?: string },
+): Promise<EmailVerificationResult> {
   const parsed = parseEmailActionPayload(input);
   return parsed
     ? requestEmailVerificationCode(productionEmailVerificationCommands, parsed)
     : malformed;
 }
 
-export async function confirmEmailVerificationCodeAction(input: { email?: string; code: string; turnstileToken?: string }) {
+export async function confirmEmailVerificationCodeAction(
+  input: { email?: string; code: string; turnstileToken?: string },
+): Promise<EmailVerificationResult> {
   const parsed = parseEmailActionPayload(input, { codeRequired: true });
   return parsed?.code
     ? confirmEmailVerificationCode(productionEmailVerificationCommands, {

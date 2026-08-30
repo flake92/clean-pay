@@ -13,6 +13,7 @@ import {
   verifyPasskeyLogin,
   verifyPasskeyRegistration,
 } from "@/application/auth/execute-passkey-command";
+import type { PasskeyVerificationResult } from "@/application/models/passkey-actions";
 import { productionPasskeyCommands } from "@/app/_composition/session-gateways";
 import { clearReferralAttributionCookie } from "@/app/_composition/action-runtime";
 import {
@@ -32,7 +33,9 @@ export async function beginPasskeyLoginAction(input: { email: string; turnstileT
   >;
 }
 
-export async function verifyPasskeyLoginAction(response: AuthenticationResponseJSON) {
+export async function verifyPasskeyLoginAction(
+  response: AuthenticationResponseJSON,
+): Promise<PasskeyVerificationResult> {
   const parsed = parseAuthenticationResponsePayload(response);
   if (!parsed) {
     return { ok: false as const, code: "VALIDATION_ERROR", message: "Быстрый вход не подошёл. Войдите по паролю." };
@@ -49,7 +52,9 @@ export async function beginPasskeyRegistrationAction() {
   >;
 }
 
-export async function verifyPasskeyRegistrationAction(response: RegistrationResponseJSON & { name?: string }) {
+export async function verifyPasskeyRegistrationAction(
+  response: RegistrationResponseJSON & { name?: string },
+): Promise<PasskeyVerificationResult> {
   const parsed = parseRegistrationResponsePayload(response);
   return parsed
     ? verifyPasskeyRegistration(productionPasskeyCommands, parsed)
