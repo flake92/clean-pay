@@ -61,6 +61,19 @@ describe("disposable readiness provider", () => {
     });
     expect(plans).toMatchObject({ status: 200, body: '{"items":[]}\n' });
 
+    const jwks = await requestProvider(server, { path: "/.well-known/jwks.json" });
+    expect(jwks.status).toBe(200);
+    expect(JSON.parse(jwks.body)).toEqual({
+      keys: [{
+        alg: "RS256",
+        e: "AQAB",
+        kid: "clean-pay-disposable-readiness-v1",
+        kty: "RSA",
+        n: expect.stringMatching(/^[A-Za-z0-9_-]{300,}$/),
+        use: "sig",
+      }],
+    });
+
     const expectedStatuses = [422, 422, 422, 405];
     const paths = [
       "/api/v1/public/auth/email/start",
@@ -86,7 +99,29 @@ describe("disposable readiness provider", () => {
       identify: 1,
       serviceSession: 1,
       notificationPreferences: 1,
+      jwks: 1,
     });
+  });
+
+  it.each([
+    ["request body", { headers: { "content-length": "2" }, body: "{}" }],
+    ["authorization", { headers: { authorization: "synthetic-unexpected-value" } }],
+    ["cookie", { headers: { cookie: "synthetic-unexpected-value" } }],
+    ["proxy authorization", {
+      headers: { "proxy-authorization": "synthetic-unexpected-value" },
+    }],
+    ["API key", { headers: { "x-api-key": "synthetic-unexpected-value" } }],
+    ["service key", {
+      headers: { "x-remnashop-auth-service-key": syntheticServiceKey },
+    }],
+  ])("rejects a JWKS probe carrying an unexpected %s", async (_label, input) => {
+    const response = await requestProvider(server, {
+      path: "/.well-known/jwks.json",
+      ...input,
+    });
+
+    expect(response.status).toBe("body" in input ? 400 : 403);
+    expect(await readCounters(server)).toEqual(emptyCounters());
   });
 
   it.each([
@@ -168,7 +203,9 @@ describe("disposable readiness provider", () => {
   it.each([
     ["unknown path", { path: "/api/v1/public/unknown" }, 404],
     ["query-bearing known path", { path: "/api/v1/public/plans/public?probe=1" }, 404],
+    ["query-bearing JWKS path", { path: "/.well-known/jwks.json?probe=1" }, 404],
     ["wrong method", { method: "PATCH", path: "/api/v1/public/plans/public" }, 404],
+    ["wrong JWKS method", { method: "POST", path: "/.well-known/jwks.json" }, 404],
     ["body on health probe", { path: "/healthz", body: "{}" }, 400],
     ["body on counter probe", { path: "/contract", body: "{}" }, 400],
   ])("fails closed for an %s", async (_label, input, status) => {
@@ -409,5 +446,6 @@ function emptyCounters() {
     identify: 0,
     serviceSession: 0,
     notificationPreferences: 0,
+    jwks: 0,
   };
 }
