@@ -719,39 +719,39 @@ wait_for_canary_readiness() {
   attempt=0
   last_readiness_result=request-failed
   while [ "$attempt" -lt 90 ]; do
-    if readiness_result=$(docker exec "$CANARY_NAME" node -e '
+    if readiness_result=$(docker exec "$CANARY_NAME" node -e "
       const maximumBytes=65536;
-      const allowed=["database","redis","remnashop","telegramOidc","mailpit","remnawave"];
-      const required=["database","redis","remnashop","telegramOidc"];
-      const emit=(value,ok)=>{process.stdout.write(value+"\n");if(!ok)process.exitCode=1};
+      const allowed=['database','redis','remnashop','telegramOidc','mailpit','remnawave'];
+      const required=['database','redis','remnashop','telegramOidc'];
+      const emit=(value,ok)=>{process.stdout.write(value+'\n');if(!ok)process.exitCode=1};
       const readBounded=async(response)=>{
-        const declared=response.headers.get("content-length");
+        const declared=response.headers.get('content-length');
         if(declared!==null&&(!/^\d+$/.test(declared)||Number(declared)>maximumBytes))throw new Error();
-        if(!response.body)return "";
+        if(!response.body)return '';
         const reader=response.body.getReader();const chunks=[];let bytes=0;
         try{for(;;){const {done,value}=await reader.read();if(done)break;bytes+=value.byteLength;
           if(bytes>maximumBytes){await reader.cancel();throw new Error()}chunks.push(Buffer.from(value))}
         }finally{reader.releaseLock()}
-        return new TextDecoder("utf-8",{fatal:true}).decode(Buffer.concat(chunks,bytes));
+        return new TextDecoder('utf-8',{fatal:true}).decode(Buffer.concat(chunks,bytes));
       };
-      fetch("http://127.0.0.1:4000/api/internal/health/readiness",{
-        cache:"no-store",redirect:"error",
-        headers:{"x-clean-pay-readiness-secret":process.env.READINESS_INTERNAL_SECRET},
+      fetch('http://127.0.0.1:4000/api/internal/health/readiness',{
+        cache:'no-store',redirect:'error',
+        headers:{'x-clean-pay-readiness-secret':process.env.READINESS_INTERNAL_SECRET},
         signal:AbortSignal.timeout(10000),
       }).then(async(response)=>{
-        let body;try{body=JSON.parse(await readBounded(response))}catch{return emit("invalid-response",false)}
+        let body;try{body=JSON.parse(await readBounded(response))}catch{return emit('invalid-response',false)}
         const entries=body&&body.checks!==null&&typeof body.checks==='object'&&!Array.isArray(body.checks)
           ?Object.entries(body.checks):[];
         const checks=entries.map(([,check])=>check);
         const shaped=entries.length>0&&required.every((name)=>Object.hasOwn(body.checks,name))
           &&entries.every(([name,check])=>allowed.includes(name)&&check&&typeof check==='object'
-            &&(check.status==="ok"||check.status==="down"));
+            &&(check.status==='ok'||check.status==='down'));
         const valid=checks.length>0&&checks.every(check=>check&&typeof check==='object'&&check.status==='ok');
-        if(response.status===200&&body.status==="ok"&&shaped&&valid)return emit("ready",true);
-        const failed=shaped?allowed.find((name)=>body.checks[name]?.status==="down"):undefined;
-        return emit(failed?"not-ready:"+failed:"invalid-response",false);
-      }).catch(()=>emit("request-failed",false));
-    ' 2>/dev/null); then
+        if(response.status===200&&body.status==='ok'&&shaped&&valid)return emit('ready',true);
+        const failed=shaped?allowed.find((name)=>body.checks[name]?.status==='down'):undefined;
+        return emit(failed?'not-ready:'+failed:'invalid-response',false);
+      }).catch(()=>emit('request-failed',false));
+    " 2>/dev/null); then
       [ "$readiness_result" = ready ] \
         || fail "canary readiness probe returned an invalid success result"
       curl --fail --silent --show-error --max-time 10 \
