@@ -427,6 +427,81 @@ export function attestProviderOverlapStaticResponse(input, staticAssetContract) 
   });
 }
 
+export async function captureProviderOverlapResponseEvidence(input) {
+  exactKeys(input, ["classification", "request", "response"], "browser response capture");
+  const { classification, request, response } = input;
+  exactKeys(classification, [
+    "disposition", "expectedStatuses", "key", "navigation", "staticAssetSha256", "staticPath",
+  ], "browser response capture classification");
+  if (!request || typeof request !== "object" || !response || typeof response !== "object"
+    || typeof response.request !== "function" || response.request() !== request
+    || typeof response.status !== "function" || typeof response.headers !== "function"
+    || typeof response.body !== "function" || typeof response.finished !== "function") {
+    fail("Browser response capture identity is invalid.");
+  }
+  const responseStatus = response.status();
+  const responseContentType = normalizeProviderOverlapResponseContentType(
+    response.headers()["content-type"],
+  );
+  const bodyKind = classification.staticPath !== null
+    ? "static"
+    : responseStatus === 200
+        && new Set(["text/html", "text/x-component"]).has(responseContentType)
+      ? "declaration"
+      : null;
+  if (bodyKind === null) {
+    return Object.freeze({
+      body: null,
+      classification,
+      request,
+      response,
+      responseContentType,
+      responseStatus,
+    });
+  }
+
+  // Start body retrieval before awaiting completion. Chromium evicts a
+  // navigated document body even though its Response metadata remains usable.
+  const bodyPromise = boundedLifecycleOperation(
+    response.body(),
+    5_000,
+    bodyKind === "static" ? "attested static response body" : "static declaration response body",
+  );
+  const finishedPromise = boundedLifecycleOperation(
+    response.finished(),
+    5_000,
+    bodyKind === "static" ? "static response completion" : "browser response completion",
+  );
+  const [body, responseFailure] = await Promise.all([bodyPromise, finishedPromise]);
+  if (responseFailure !== null) {
+    fail(bodyKind === "static"
+      ? "Attested static browser response did not finish cleanly."
+      : "Browser declaration response did not finish cleanly.");
+  }
+  if (!(body instanceof Uint8Array)
+    || (bodyKind === "declaration"
+      && (body.byteLength < 1 || body.byteLength > maximumStaticDeclarationBodyBytes))) {
+    fail("Browser response capture body is outside its bounded contract.");
+  }
+  return Object.freeze({
+    body,
+    classification,
+    request,
+    response,
+    responseContentType,
+    responseStatus,
+  });
+}
+
+export function normalizeProviderOverlapResponseContentType(value) {
+  if (value === undefined) return null;
+  const normalized = String(value).split(";", 1)[0].trim().toLowerCase();
+  if (!/^[a-z0-9.+-]+\/[a-z0-9.+-]+$/.test(normalized)) {
+    fail("Synthetic browser response content type is invalid.");
+  }
+  return normalized;
+}
+
 export async function readProviderOverlapStaticResponseEvidence(input, staticAssetContract) {
   exactKeys(input, [
     "classification", "response", "responseContentType",

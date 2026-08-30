@@ -79,6 +79,17 @@ test("keeps the Compose down watchdog beyond two ordered graceful-stop budgets",
   expect(resolveJourneyDockerCommandTimeoutMs(["compose", "down"], 17_000)).toBe(17_000);
 });
 
+test("gives exact pair cleanup a dedicated bounded outer watchdog", async () => {
+  const source = await readFile(
+    path.resolve(__dirname, "journey-owned-stack-orchestrator.mjs"),
+    "utf8",
+  );
+  expect(source).toContain("const journeyComposeDownCleanupTimeoutMs = 420_000;");
+  expect(source).toContain("timeoutMs: journeyComposeDownCleanupTimeoutMs");
+  expect(source).toContain('String(JOURNEY_DOCKER_TIMEOUT_CONTRACT.composeStopSeconds)');
+  expect(JOURNEY_DOCKER_TIMEOUT_CONTRACT.composeStopSeconds).toBe(120);
+});
+
 test("is import-safe and refuses a non-isolated pair before its first Docker query", async () => {
   expect(typeof withJourneyOwnedStackPair).toBe("function");
   expect(typeof prepareJourneyOwnedStack).toBe("function");
@@ -2363,6 +2374,7 @@ test("waits for two empty post-down observations and keeps Compose progress quie
   let downIssued = false;
   let postDownPsObservations = 0;
   let downArgs: string[] | undefined;
+  let downTimeoutMs: number | undefined;
   const cleanupQueryTimeouts: number[] = [];
   fixture.input.runDocker = async (
     args: string[],
@@ -2373,6 +2385,7 @@ test("waits for two empty post-down observations and keeps Compose progress quie
     const projectQuery = args.includes(projectFilter);
     if (args[0] === "compose" && args.includes("down")) {
       downArgs = [...args];
+      downTimeoutMs = commandOptions?.timeoutMs;
       downIssued = true;
       return "";
     }
@@ -2414,6 +2427,7 @@ test("waits for two empty post-down observations and keeps Compose progress quie
       "down", "--volumes", "--timeout",
       String(JOURNEY_DOCKER_TIMEOUT_CONTRACT.composeStopSeconds),
     ]);
+    expect(downTimeoutMs).toBe(420_000);
     expect(postDownPsObservations).toBe(3);
     expect(cleanupQueryTimeouts).toHaveLength(3);
     expect(cleanupQueryTimeouts.every((timeout) => timeout > 0 && timeout <= 2_000)).toBe(true);

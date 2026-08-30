@@ -55,6 +55,7 @@ const cleanupAbsenceConsecutiveObservations = 2;
 const cleanupAbsenceMaximumObservations = 41;
 const cleanupAbsencePollIntervalMs = 250;
 const cleanupAbsenceQueryTimeoutMs = 2_000;
+const journeyComposeDownCleanupTimeoutMs = 420_000;
 const cleanupAbsenceTimeoutMs = 10_000;
 const containerdImageSelectionMode = "containerd-root-manifest";
 const defaultImagePlatform = Object.freeze({ architecture: "amd64", os: "linux" });
@@ -1623,7 +1624,9 @@ export async function cleanupJourneyOwnedStack(handle) {
         ...handle.prepared.composeFiles.flatMap((file) => ["--file", file]),
         "down", "--volumes", "--timeout",
         String(JOURNEY_DOCKER_TIMEOUT_CONTRACT.composeStopSeconds),
-      ], 64 * 1024, handle.prepared.queryEnvironment);
+      ], 64 * 1024, handle.prepared.queryEnvironment, {
+        timeoutMs: journeyComposeDownCleanupTimeoutMs,
+      });
       await assertJourneyProjectAbsentAfterCleanup(
         handle.contract.project,
         handle.runDocker,
