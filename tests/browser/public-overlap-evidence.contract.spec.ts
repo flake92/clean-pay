@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { unlink, writeFile } from "node:fs/promises";
+import { readFile, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import { expect, test } from "@playwright/test";
@@ -51,6 +51,21 @@ test("defines the exact reusable 42-case/126-artifact public capture ledger", ()
     maximumArtifactBytes: 1024,
     suite: "journey-pair-v1",
   })).toThrow("ownership artifact path ledger is invalid");
+});
+
+test("requires consecutive terminal PNG evidence in canonical and live capture", async () => {
+  for (const sourcePath of [
+    "tests/browser/page-characterization.ts",
+    "tests/browser/public-overlap-capture.ts",
+  ]) {
+    const source = await readFile(sourcePath, "utf8");
+    expect(source, sourcePath).toContain(
+      "captureByteIdenticalTerminalScreenshot(page)",
+    );
+    expect(source, sourcePath).not.toContain(
+      "const screenshot = await page.screenshot",
+    );
+  }
 });
 
 test("seals and proves exact dual-origin public evidence without baseline writes", async () => {
