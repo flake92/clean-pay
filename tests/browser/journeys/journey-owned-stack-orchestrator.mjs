@@ -875,24 +875,13 @@ function waitForOwnedJourneyDockerEventBarrier(capture, nonce) {
   return descriptor.value.call(capture, nonce);
 }
 
-function releaseProvenJourneyDockerEventCapture(handle, capture, settlement) {
-  let proven = settlement?.status === "fulfilled";
-  if (!proven && capture !== null && typeof capture === "object" && !types.isProxy(capture)) {
-    const descriptor = Object.getOwnPropertyDescriptor(capture, "terminationProven");
-    if (descriptor && Object.hasOwn(descriptor, "value")
-      && typeof descriptor.value === "function") {
-      try {
-        proven = descriptor.value.call(capture) === true;
-      } catch {
-        proven = false;
-      }
-    }
-  }
-  if (proven) {
+function releaseProvenJourneyDockerEventCapture(handle, settlement) {
+  const sealed = settlement?.status === "fulfilled";
+  if (sealed) {
     lifecycleEventCaptures.delete(handle);
     lifecycleEventStartReceipts.delete(handle);
   }
-  return proven;
+  return sealed;
 }
 
 export async function prepareJourneyOwnedStack({
@@ -1289,7 +1278,7 @@ export async function prepareJourneyOwnedStackLaunch(handle) {
     lifecycleEventStartReceipts.set(handle, startReceipt);
   } catch (error) {
     const stops = await Promise.allSettled([stopOwnedJourneyDockerEventCapture(capture)]);
-    releaseProvenJourneyDockerEventCapture(handle, capture, stops[0]);
+    releaseProvenJourneyDockerEventCapture(handle, stops[0]);
     const stopFailures = rejectionReasons(stops);
     if (stopFailures.length > 0) {
       throw new AggregateError(
@@ -1506,7 +1495,7 @@ export async function dispatchJourneyOwnedStackPair(handles, plans) {
   if (starts.some(({ status }) => status === "rejected")) {
     const captureStops = await Promise.allSettled(captures.map(stopOwnedJourneyDockerEventCapture));
     for (const [index, handle] of handles.entries()) {
-      releaseProvenJourneyDockerEventCapture(handle, captures[index], captureStops[index]);
+      releaseProvenJourneyDockerEventCapture(handle, captureStops[index]);
     }
     const captureFailures = rejectionReasons(captureStops);
     if (captureFailures.length > 0) {
@@ -1543,7 +1532,7 @@ async function sealJourneyDockerEventCapture(handle) {
     barrierFailure = error;
   }
   const stops = await Promise.allSettled([stopOwnedJourneyDockerEventCapture(capture)]);
-  releaseProvenJourneyDockerEventCapture(handle, capture, stops[0]);
+  releaseProvenJourneyDockerEventCapture(handle, stops[0]);
   const stopFailures = rejectionReasons(stops);
   if (barrierFailure !== undefined || stopFailures.length > 0) {
     throw new AggregateError(
@@ -1608,7 +1597,6 @@ export async function cleanupJourneyOwnedStack(handle) {
     }
     captureTerminationProven = releaseProvenJourneyDockerEventCapture(
       handle,
-      activeCapture,
       stopSettlement,
     );
   }

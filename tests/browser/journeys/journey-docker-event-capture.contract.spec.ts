@@ -109,6 +109,61 @@ test("accepts escalation only after the killed child emits exact stdio close", a
   expect(owner.terminationProven()).toBe(true);
 });
 
+test("accepts the exact POSIX SIGTERM exit only after its signal request was accepted", async () => {
+  const accepted = fakeDockerEventChild({ closeCode: 143, closeOn: "SIGTERM" });
+  await expect(captureOwner(accepted).stop()).resolves.toBe("");
+  expect(accepted.kills).toEqual(["SIGTERM"]);
+
+  const wrongCode = fakeDockerEventChild({ closeCode: 142, closeOn: "SIGTERM" });
+  await expect(captureOwner(wrongCode).stop()).rejects.toThrow(/exact stop contract/);
+
+  const rejectedSignal = fakeDockerEventChild({
+    closeCode: 143,
+    closeOn: "SIGTERM",
+    killAccepted: false,
+  });
+  await expect(captureOwner(rejectedSignal).stop()).rejects.toThrow(/exact stop contract/);
+});
+
+test("binds every accepted close tuple to the exact requested signal sequence", async () => {
+  const rejectedNativeSigterm = fakeDockerEventChild({
+    closeOn: "SIGTERM",
+    killAccepted: false,
+  });
+  await expect(captureOwner(rejectedNativeSigterm).stop()).rejects.toThrow(/exact stop contract/);
+
+  const spontaneousCleanExit = fakeDockerEventChild({ closeOn: undefined });
+  const spontaneousOwner = captureOwner(spontaneousCleanExit);
+  spontaneousCleanExit.child.exitCode = 0;
+  const spontaneousStop = spontaneousOwner.stop();
+  queueMicrotask(() => spontaneousCleanExit.child.emit("close", 0, null));
+  await expect(spontaneousStop).rejects.toThrow(/exact stop contract/);
+
+  const rejectedSigkill = fakeDockerEventChild({
+    closeOn: "SIGKILL",
+    killAccepted: (signal) => signal === "SIGTERM",
+  });
+  await expect(captureOwner(rejectedSigkill).stop()).rejects.toThrow(/exact stop contract/);
+});
+
+test("retains the accepted signal ledger until a delayed stdio close is sealed", async () => {
+  const fixture = fakeDockerEventChild({ closeOn: undefined });
+  const owner = captureOwner(fixture, async () => true);
+  fixture.child.kill = (signal = "SIGTERM") => {
+    fixture.kills.push(signal);
+    if (signal === "SIGTERM") fixture.child.exitCode = 143;
+    return true;
+  };
+
+  await expect(owner.stop()).rejects.toThrow(/not sealed through stdio close/);
+  expect(fixture.kills).toEqual(["SIGTERM"]);
+  fixture.child.signalCode = null;
+  fixture.child.emit("close", 143, null);
+
+  await expect(owner.stop()).resolves.toBe("");
+  expect(fixture.kills).toEqual(["SIGTERM"]);
+});
+
 function captureOwner(
   fixture: ReturnType<typeof fakeDockerEventChild>,
   verifyProcessTerminated: (pid: number) => Promise<boolean> = async () => false,
@@ -125,10 +180,14 @@ function captureOwner(
 }
 
 function fakeDockerEventChild({
+  closeCode,
   closeOn,
+  killAccepted = true,
   pid = 4_242,
 }: {
+  closeCode?: number;
   closeOn: "SIGKILL" | "SIGTERM" | undefined;
+  killAccepted?: boolean | ((signal: NodeJS.Signals) => boolean);
   pid?: number;
 }) {
   const stdout = new PassThrough();
@@ -151,11 +210,12 @@ function fakeDockerEventChild({
     kills.push(signal);
     if (signal === closeOn) {
       queueMicrotask(() => {
-        child.signalCode = signal;
-        child.emit("close", null, signal);
+        child.exitCode = closeCode ?? null;
+        child.signalCode = closeCode === undefined ? signal : null;
+        child.emit("close", child.exitCode, child.signalCode);
       });
     }
-    return true;
+    return typeof killAccepted === "function" ? killAccepted(signal) : killAccepted;
   };
   return { child, kills, stderr, stdout };
 }

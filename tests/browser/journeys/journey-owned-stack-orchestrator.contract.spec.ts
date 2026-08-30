@@ -2923,6 +2923,30 @@ test("keeps snapshot cleanup retryable until event-capture termination is proven
   }
 });
 
+test("keeps a terminated but unsealed event capture retryable until exact sealing", async () => {
+  const repositoryRoot = path.resolve(__dirname, "../../..");
+  const fixture = await createOwnedInput("baseline", repositoryRoot, {
+    eventCaptureRejectedStopTerminationProven: true,
+    eventCaptureUnprovenStopAttempts: 1,
+  });
+  const handle = await prepareJourneyOwnedStack(fixture.input);
+  try {
+    await prepareJourneyOwnedStackLaunch(handle);
+    await expect(cleanupJourneyOwnedStack(handle)).rejects.toThrow(/termination unproven/);
+    expect(fixture.docker.activeEventCaptureCount).toBe(1);
+    expect(fixture.docker.eventCaptureStopAttempts).toBe(1);
+    await expect(lstat(handle.directory)).resolves.toBeDefined();
+    await expect(cleanupJourneyOwnedStack(handle)).resolves.toMatchObject({
+      status: "verifier-owned-stack-cleaned",
+    });
+    expect(fixture.docker.activeEventCaptureCount).toBe(0);
+    expect(fixture.docker.eventCaptureStopAttempts).toBe(2);
+    await expect(lstat(handle.directory)).rejects.toMatchObject({ code: "ENOENT" });
+  } finally {
+    await removeSyntheticInputDirectory(fixture.directory);
+  }
+});
+
 test("kills a timed-out Docker child but settles only after stdio close", async () => {
   const child = new EventEmitter() as EventEmitter & {
     exitCode: number | null;
@@ -3380,6 +3404,7 @@ function createOwnedDockerMock(
     applicationRootAnnotations?: Record<string, string>;
     applicationRootMediaType?: string;
     eventCaptureUnprovenStopAttempts?: number;
+    eventCaptureRejectedStopTerminationProven?: boolean;
     imagePlatformArchitecture?: "amd64" | "arm64";
     migrationMode?: "classic" | "containerd";
     migrationManifestAnnotations?: Record<string, string>;
@@ -3640,7 +3665,10 @@ function createOwnedDockerMock(
         if (activeEventCapture === capture) activeEventCapture = undefined;
         return lines.join("\n");
       },
-      terminationProven: () => stopped,
+      terminationProven: () => stopped || (
+        options.eventCaptureRejectedStopTerminationProven === true
+        && eventCaptureStopAttempts > 0
+      ),
       waitForBarrier: (nonce: string) => {
         if (observed.has(nonce)) return Promise.resolve(observed.get(nonce)!);
         return new Promise<BarrierEventReceipt>((resolve) => {
