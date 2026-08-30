@@ -29,7 +29,9 @@ import {
 } from "./journey-owned-stack-orchestrator.mjs";
 import { createJourneySanitizedErrorEvidence } from "./journey-error-evidence.mjs";
 import {
+  attestProviderOverlapStaticResponse,
   assertProviderOverlapRedirect,
+  captureProviderOverlapResponseEvidence,
   classifyProviderOverlapBrowserRequest,
   createJourneyBrowserRequestEnvelope,
   createProviderOverlapEventSeal,
@@ -40,7 +42,7 @@ import {
   finalizeProviderOverlapEventLifecycle,
   finalizeProviderOverlapHistoryContract,
   installProviderOverlapHistoryInstrumentation,
-  readProviderOverlapStaticResponseEvidence,
+  normalizeProviderOverlapResponseContentType,
 } from "./provider-overlap-browser-contract.mjs";
 import {
   PROVIDER_OVERLAP_ACTION,
@@ -437,6 +439,9 @@ async function exerciseCabinet(
     let unexpectedRequestOverflow = false;
     const browserRequests = [];
     const browserRequestByIdentity = new Map();
+    const browserResponseEvidenceByIdentity = new Map();
+    const browserTerminalRequestIdentities = new Set();
+    let browserResponseCaptureFailure = null;
     let currentStaticDocumentKey = null;
     let cabinetDocumentAllowed = false;
     let cabinetDocumentConsumed = false;
@@ -466,12 +471,88 @@ async function exerciseCabinet(
       eventSeal.record();
       pendingRequests.add(request);
     });
-    const completeRequest = (request) => {
-      eventSeal.record();
-      pendingRequests.delete(request);
+    context.on("response", (response) => {
+      let evidence;
+      let request;
+      try {
+        if (!response || typeof response !== "object"
+          || typeof response.request !== "function") {
+          throw new Error("Synthetic browser response event identity is invalid.");
+        }
+        request = response.request();
+        const entry = browserRequestByIdentity.get(request);
+        if (!entry) {
+          throw new Error("Synthetic browser response escaped its request identity ledger.");
+        }
+        if (browserResponseEvidenceByIdentity.has(request)) {
+          throw new Error("Synthetic browser response evidence was registered more than once.");
+        }
+        // captureProviderOverlapResponseEvidence starts body retrieval
+        // synchronously before its first await. Starting it on response keeps
+        // navigation from evicting an earlier document body.
+        evidence = captureProviderOverlapResponseEvidence({
+          classification: entry.classification,
+          request,
+          response,
+        });
+        browserResponseEvidenceByIdentity.set(request, evidence);
+      } catch (error) {
+        evidence = Promise.reject(error);
+        if (request && typeof request === "object") {
+          browserResponseEvidenceByIdentity.set(request, evidence);
+        }
+      }
+      void evidence.then(
+        () => undefined,
+        (error) => {
+          browserResponseCaptureFailure ??= error;
+        },
+      );
+    });
+    const completeRequest = (request, finished) => {
+      const finishRequest = eventSeal.begin();
+      const entry = browserRequestByIdentity.get(request);
+      let evidence = Promise.resolve(null);
+      if (entry) {
+        if (browserTerminalRequestIdentities.has(request)) {
+          evidence = Promise.reject(
+            new Error("Synthetic browser request reached a terminal event more than once."),
+          );
+        } else {
+          browserTerminalRequestIdentities.add(request);
+          evidence = browserResponseEvidenceByIdentity.get(request);
+        }
+        if (!evidence && !finished) {
+          evidence = Promise.resolve(Object.freeze({
+            body: null,
+            classification: entry.classification,
+            request,
+            response: null,
+            responseContentType: null,
+            responseStatus: null,
+          }));
+          browserResponseEvidenceByIdentity.set(request, evidence);
+        } else if (!evidence) {
+          evidence = Promise.reject(
+            new Error("Completed synthetic browser request has no prearmed response evidence."),
+          );
+          browserResponseEvidenceByIdentity.set(request, evidence);
+        }
+      }
+      void evidence.then(
+        () => {
+          pendingRequests.delete(request);
+          finishRequest();
+        },
+        (error) => {
+          browserResponseCaptureFailure ??= error;
+          pendingRequests.delete(request);
+          finishRequest();
+        },
+      );
     };
-    context.on("requestfinished", completeRequest);
-    context.on("requestfailed", completeRequest);
+    context.on("requestfinished", (request) => completeRequest(request, true));
+    context.on("requestfailed", (request) => completeRequest(request, false));
     await context.route("**/*", async (route) => {
       const finishRoute = eventSeal.begin();
       try {
@@ -539,6 +620,7 @@ async function exerciseCabinet(
     );
     const telegram = page.getByRole("button", { name: "Войти через Telegram" });
     await telegram.waitFor({ state: "visible", timeout: 15_000 });
+    await waitForProviderTurnstileToken(page);
     await waitUntil(async () => telegram.isEnabled(), 15_000);
     const profileNavigation = page.waitForURL(
       (url) => url.href === "https://pay.ci.clean-pay.dev/profile",
@@ -591,6 +673,8 @@ async function exerciseCabinet(
         documentKey,
       })),
       browserRequestIdentityCount: browserRequestByIdentity.size,
+      browserResponseEvidenceIdentityCount: browserResponseEvidenceByIdentity.size,
+      browserTerminalRequestIdentityCount: browserTerminalRequestIdentities.size,
       cabinetDocumentAllowed,
       cabinetDocumentConsumed,
       historyOverflow,
@@ -624,11 +708,15 @@ async function exerciseCabinet(
         await context.removeAllListeners();
       },
       eventSeal,
-      finish: () => finishBrowserRequestContract(
-        browserRequests,
-        browserRequestByIdentity,
-        staticAssetContract,
-      ),
+      finish: () => {
+        if (browserResponseCaptureFailure) throw browserResponseCaptureFailure;
+        return finishBrowserRequestContract(
+          browserRequests,
+          browserRequestByIdentity,
+          browserResponseEvidenceByIdentity,
+          staticAssetContract,
+        );
+      },
       isIdle: () => pendingRequests.size === 0,
       snapshot: async () => {
         if (!cabinetDocumentConsumed) {
@@ -678,7 +766,9 @@ async function exerciseCabinet(
     const requestContract = finalized.value;
     const browserSnapshot = finalized.snapshot;
     if (requestContract.requestCount !== browserRequests.length
-      || browserRequestByIdentity.size !== browserRequests.length) {
+      || browserRequestByIdentity.size !== browserRequests.length
+      || browserResponseEvidenceByIdentity.size !== browserRequests.length
+      || browserTerminalRequestIdentities.size !== browserRequests.length) {
       throw new Error("Sealed browser projection differs from its final raw request ledger.");
     }
     return {
@@ -1411,9 +1501,19 @@ async function boundedResponseBytes(response, maximumBytes) {
   return Buffer.concat(chunks, size);
 }
 
-async function finishBrowserRequestContract(requests, requestByIdentity, staticAssetContract) {
+async function finishBrowserRequestContract(
+  requests,
+  requestByIdentity,
+  responseEvidenceByIdentity,
+  staticAssetContract,
+) {
+  if (!(responseEvidenceByIdentity instanceof Map)
+    || responseEvidenceByIdentity.size !== requests.length) {
+    throw new Error("Synthetic browser response evidence ledger is incomplete.");
+  }
   const records = [];
   const redirectedSources = new Set();
+  const capturedResponses = new Map();
   const responseDeclarationsByDocument = new Map(providerStaticDocumentKeys.map((documentKey) => [
     documentKey,
     new Set(),
@@ -1422,20 +1522,18 @@ async function finishBrowserRequestContract(requests, requestByIdentity, staticA
   let declarationBytes = 0;
   let staticResponseBytes = 0;
   for (const { classification, documentKey, request } of requests) {
-    const response = await boundedBrowserEvidenceOperation(
-      request.response(),
-      2_000,
-      "browser response lookup",
+    const captured = await readBrowserResponseCapture(
+      responseEvidenceByIdentity,
+      request,
+      classification,
     );
+    const { body: responseBody, response, responseContentType, responseStatus } = captured;
+    capturedResponses.set(request, response);
     const redirectedFrom = request.redirectedFrom();
     let redirectEdge = null;
     if (redirectedFrom) {
       const source = requestByIdentity.get(redirectedFrom);
-      const sourceResponse = await boundedBrowserEvidenceOperation(
-        redirectedFrom.response(),
-        2_000,
-        "redirect source response lookup",
-      );
+      const sourceResponse = capturedResponses.get(redirectedFrom);
       const location = sourceResponse?.headers()?.location;
       if (!source || !sourceResponse || typeof location !== "string") {
         throw new Error("Synthetic browser redirect chain is incomplete.");
@@ -1448,27 +1546,25 @@ async function finishBrowserRequestContract(requests, requestByIdentity, staticA
       });
       redirectedSources.add(redirectedFrom);
     }
-    const responseContentType = response
-      ? normalizeResponseContentType(response.headers()["content-type"])
-      : null;
-    let responseBody;
     let staticObservation = {
       staticResponseBytes: null,
       staticResponseSha256: null,
     };
     if (classification.staticPath !== null) {
-      const staticEvidence = await readProviderOverlapStaticResponseEvidence({
-        classification,
-        response,
-        responseContentType,
-      }, staticAssetContract);
-      responseBody = staticEvidence.body;
+      if (!response || !(responseBody instanceof Uint8Array)) {
+        throw new Error("Attested static browser request has no captured response body.");
+      }
       staticResponseBytes += responseBody.byteLength;
       if (!Number.isSafeInteger(staticResponseBytes)
         || staticResponseBytes > 1024 * 1024 * 1024) {
         throw new Error("Static browser response bytes exceeded their aggregate bound.");
       }
-      staticObservation = staticEvidence.observation;
+      staticObservation = attestProviderOverlapStaticResponse({
+        body: responseBody,
+        classification,
+        responseContentType,
+        responseStatus,
+      }, staticAssetContract);
       if (responseContentType === "text/css") {
         declarationBytes += responseBody.byteLength;
         if (responseBody.byteLength > 2 * 1024 * 1024
@@ -1497,13 +1593,12 @@ async function finishBrowserRequestContract(requests, requestByIdentity, staticA
         }
       }
     }
-    if (response && response.status() === 200
+    if (response && responseStatus === 200
       && new Set(["text/html", "text/x-component"]).has(responseContentType)) {
-      const body = await boundedBrowserEvidenceOperation(
-        response.body(),
-        5_000,
-        "static declaration response body",
-      );
+      const body = responseBody;
+      if (!(body instanceof Uint8Array)) {
+        throw new Error("Browser declaration response has no captured body.");
+      }
       declarationBytes += body.byteLength;
       if (body.byteLength > 2 * 1024 * 1024 || declarationBytes > 8 * 1024 * 1024) {
         throw new Error("Static response declaration graph exceeded its bounded body contract.");
@@ -1524,16 +1619,12 @@ async function finishBrowserRequestContract(requests, requestByIdentity, staticA
       documentKey,
       redirectEdge,
       responseContentType,
-      responseStatus: response?.status() ?? null,
+      responseStatus,
       ...staticObservation,
     });
   }
   for (const { classification, request } of requests) {
-    const response = await boundedBrowserEvidenceOperation(
-      request.response(),
-      2_000,
-      "redirect terminal response lookup",
-    );
+    const response = capturedResponses.get(request) ?? null;
     if (
       response
       && response.status() >= 300
@@ -1544,6 +1635,10 @@ async function finishBrowserRequestContract(requests, requestByIdentity, staticA
       throw new Error("Synthetic browser redirect response has no exact successor.");
     }
   }
+  if (capturedResponses.size !== requests.length
+    || [...responseEvidenceByIdentity.keys()].some((request) => !requestByIdentity.has(request))) {
+    throw new Error("Synthetic browser response evidence escaped its request identity ledger.");
+  }
   return finalizeProviderOverlapBrowserContract(records, {
     cssMediaReferences: [...cssMediaReferencesBySource.values()].flat(),
     responseDeclarationsByDocument: providerStaticDocumentKeys.map((documentKey) => ({
@@ -1552,6 +1647,46 @@ async function finishBrowserRequestContract(requests, requestByIdentity, staticA
     })),
     staticAssetContract,
   });
+}
+
+async function readBrowserResponseCapture(registry, request, classification) {
+  const capturePromise = registry.get(request);
+  if (!capturePromise || typeof capturePromise.then !== "function") {
+    throw new Error("Synthetic browser response evidence is missing for a request identity.");
+  }
+  const capture = await boundedBrowserEvidenceOperation(
+    capturePromise,
+    5_000,
+    "browser response capture",
+  );
+  if (!capture || typeof capture !== "object" || Array.isArray(capture)
+    || JSON.stringify(Object.keys(capture).sort()) !== JSON.stringify([
+      "body", "classification", "request", "response", "responseContentType", "responseStatus",
+    ])) {
+    throw new Error("Synthetic browser response evidence has an invalid field set.");
+  }
+  if (capture.request !== request || capture.classification !== classification
+    || (capture.body !== null && !(capture.body instanceof Uint8Array))) {
+    throw new Error("Synthetic browser response evidence crossed a request identity.");
+  }
+  if (capture.response === null) {
+    if (capture.body !== null || capture.responseContentType !== null
+      || capture.responseStatus !== null) {
+      throw new Error("Failed browser response evidence is not exact.");
+    }
+    return capture;
+  }
+  if (typeof capture.response.request !== "function"
+    || capture.response.request() !== request
+    || typeof capture.response.status !== "function"
+    || capture.response.status() !== capture.responseStatus
+    || typeof capture.response.headers !== "function"
+    || normalizeProviderOverlapResponseContentType(
+      capture.response.headers()["content-type"],
+    ) !== capture.responseContentType) {
+    throw new Error("Captured browser response metadata changed after its body barrier.");
+  }
+  return capture;
 }
 
 async function boundedBrowserEvidenceOperation(operation, timeoutMs, label) {
@@ -1573,15 +1708,6 @@ async function boundedBrowserEvidenceOperation(operation, timeoutMs, label) {
   } finally {
     clearTimeout(timer);
   }
-}
-
-function normalizeResponseContentType(value) {
-  if (value === undefined) return null;
-  const normalized = String(value).split(";", 1)[0].trim().toLowerCase();
-  if (!/^[a-z0-9.+-]+\/[a-z0-9.+-]+$/.test(normalized)) {
-    throw new Error("Synthetic browser response content type is invalid.");
-  }
-  return normalized;
 }
 
 async function installedPlaywrightVersion() {
@@ -1879,6 +2005,21 @@ async function waitForProviderCabinetNavigation(page) {
   } catch (error) {
     throw new Error("Provider cabinet navigation barrier failed.", { cause: error });
   }
+}
+
+async function waitForProviderTurnstileToken(page) {
+  await page.waitForFunction(() => {
+    const challenges = globalThis.__cleanPayTurnstileDocumentChallenges;
+    if (!Array.isArray(challenges) || challenges.length !== 1) return false;
+    const challenge = challenges[0];
+    return challenge !== null
+      && typeof challenge === "object"
+      && Object.keys(challenge).sort().join(",") === "action,issue,widgetId"
+      && challenge.action === "auth_login"
+      && /^synthetic-turnstile-[1-9]\d*$/.test(challenge.widgetId)
+      && Number.isSafeInteger(challenge.issue)
+      && challenge.issue > 0;
+  }, undefined, { timeout: 15_000 });
 }
 
 async function waitUntil(predicate, timeoutMs) {

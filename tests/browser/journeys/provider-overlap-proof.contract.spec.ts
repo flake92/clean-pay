@@ -31,6 +31,7 @@ import {
 import {
   assertProviderOverlapRedirect,
   attestProviderOverlapStaticResponse,
+  captureProviderOverlapResponseEvidence,
   classifyProviderOverlapBrowserRequest,
   createJourneyBrowserRequestEnvelope,
   createProviderOverlapEventSeal,
@@ -1555,6 +1556,11 @@ test("rejects arbitrary same-host paths, queries, redirects, methods, and transp
     requestContractSha256: expect.stringMatching(/^[a-f0-9]{64}$/),
     staticRequestCount: 12,
   });
+  const exactSemanticKeys = exactBrowserContract.semanticRequestLedger.map((entry) => (
+    entry as Readonly<{ key: string }>
+  ).key);
+  expect(exactSemanticKeys).not.toContain("app-profile-action");
+  expect(exactSemanticKeys).not.toContain("app-root-rsc");
   expect(exactBrowserContract.requestOrderLedger).toHaveLength(validRecords.length);
   expect(exactBrowserContract.staticLoadGraph.documentLoadLedger).toHaveLength(3);
   expect(exactBrowserContract.staticLoadGraph.cssMediaReferenceLedger).toHaveLength(8);
@@ -1890,6 +1896,41 @@ test("prearms profile load and keeps the exact cabinet URL at DOM content", asyn
   expect(runnerSource).toMatch(
     /const profileNavigation = page\.waitForURL\([\s\S]{1,384}await Promise\.all\(\[\s*profileNavigation,\s*telegram\.click\(\),\s*\]\);/,
   );
+  expect(runnerSource).toMatch(
+    /await waitForProviderTurnstileToken\(page\);[\s\S]{1,512}const profileNavigation/,
+  );
+  expect(runnerSource).toContain(
+    'Object.keys(challenge).sort().join(",") === "action,issue,widgetId"',
+  );
+  expect(runnerSource).not.toContain("waitForProviderProfileBackgroundRequests");
+  expect(runnerSource).toContain("const finishRequest = eventSeal.begin();");
+  expect(runnerSource).toContain("browserResponseEvidenceByIdentity.set(request, evidence);");
+  const responseListenerIndex = runnerSource.indexOf('context.on("response"');
+  const captureIndex = runnerSource.indexOf(
+    "evidence = captureProviderOverlapResponseEvidence",
+    responseListenerIndex,
+  );
+  const terminalHandlerIndex = runnerSource.indexOf(
+    "const completeRequest = (request, finished) =>",
+    captureIndex,
+  );
+  const requestFinishedIndex = runnerSource.indexOf('context.on("requestfinished"');
+  const firstNavigationIndex = runnerSource.indexOf("await page.goto(");
+  expect(responseListenerIndex).toBeGreaterThan(-1);
+  expect(captureIndex).toBeGreaterThan(responseListenerIndex);
+  expect(terminalHandlerIndex).toBeGreaterThan(captureIndex);
+  expect(requestFinishedIndex).toBeGreaterThan(terminalHandlerIndex);
+  expect(firstNavigationIndex).toBeGreaterThan(requestFinishedIndex);
+  expect(runnerSource.slice(responseListenerIndex, terminalHandlerIndex))
+    .not.toContain("eventSeal.begin()");
+  expect(runnerSource).toContain(
+    'context.on("requestfinished", (request) => completeRequest(request, true));',
+  );
+  expect(runnerSource).toContain(
+    'context.on("requestfailed", (request) => completeRequest(request, false));',
+  );
+  expect(runnerSource.match(/request\.response\(\)/g) ?? []).toHaveLength(0);
+  expect(runnerSource).not.toContain("response.body()");
   expect(runnerSource).toContain("await waitForProviderCabinetNavigation(page);");
   expect(runnerSource).toContain("Provider profile navigation barrier failed.");
   expect(runnerSource).toContain("Provider cabinet navigation barrier failed.");
@@ -1945,6 +1986,108 @@ test("prearms profile load and keeps the exact cabinet URL at DOM content", asyn
   } finally {
     await browser.close();
   }
+});
+
+test("prearms response body capture before request completion and navigation", async () => {
+  const request = {};
+  const classification = browserClassification(
+    "https://pay.ci.clean-pay.dev/login?redirect_to=%2Fprofile",
+    { resourceType: "document", isNavigation: true, isMainFrame: true },
+  );
+  let navigatedAway = false;
+  let requestFinished = false;
+  let bodyCalls = 0;
+  const lifecycle: string[] = [];
+  const body = Buffer.from("<!doctype html><h1>Login</h1>");
+  const response = {
+    body: async () => {
+      lifecycle.push("body-prearmed");
+      bodyCalls += 1;
+      expect(requestFinished).toBe(false);
+      if (navigatedAway) throw new Error("body was read after navigation");
+      return body;
+    },
+    finished: async () => {
+      lifecycle.push("response-completion-observed");
+      return null;
+    },
+    headers: () => ({ "content-type": "text/html; charset=utf-8" }),
+    request: () => request,
+    status: () => 200,
+  };
+
+  const capturePromise = captureProviderOverlapResponseEvidence({
+    classification,
+    request,
+    response,
+  });
+  expect(lifecycle).toEqual(["body-prearmed", "response-completion-observed"]);
+  requestFinished = true;
+  navigatedAway = true;
+
+  await expect(capturePromise).resolves.toMatchObject({
+    body,
+    classification,
+    request,
+    response,
+    responseContentType: "text/html",
+    responseStatus: 200,
+  });
+  expect(bodyCalls).toBe(1);
+
+  const crossedRequest = {};
+  await expect(captureProviderOverlapResponseEvidence({
+    classification,
+    request: crossedRequest,
+    response,
+  })).rejects.toThrow(/identity/);
+});
+
+test("never reads redirect bodies and rejects failed or oversized declaration capture", async () => {
+  const request = {};
+  const redirectClassification = browserClassification(
+    "https://pay.ci.clean-pay.dev/?_rsc=opaque-state_1",
+  );
+  let redirectBodyCalls = 0;
+  await expect(captureProviderOverlapResponseEvidence({
+    classification: redirectClassification,
+    request,
+    response: {
+      body: async () => {
+        redirectBodyCalls += 1;
+        return Buffer.alloc(0);
+      },
+      finished: async () => null,
+      headers: () => ({ "content-type": "application/octet-stream" }),
+      request: () => request,
+      status: () => 307,
+    },
+  })).resolves.toMatchObject({ body: null, responseStatus: 307 });
+  expect(redirectBodyCalls).toBe(0);
+
+  const declarationClassification = browserClassification(
+    "https://pay.ci.clean-pay.dev/profile",
+    { resourceType: "document", isNavigation: true, isMainFrame: true },
+  );
+  const declarationResponse = (body: () => Promise<Buffer>) => ({
+    body,
+    finished: async () => null,
+    headers: () => ({ "content-type": "text/x-component" }),
+    request: () => request,
+    status: () => 200,
+  });
+  await expect(captureProviderOverlapResponseEvidence({
+    classification: declarationClassification,
+    request,
+    response: declarationResponse(async () => Buffer.alloc(2 * 1024 * 1024 + 1)),
+  })).rejects.toThrow(/bounded contract/);
+  await expect(captureProviderOverlapResponseEvidence({
+    classification: declarationClassification,
+    request,
+    response: declarationResponse(async () => {
+      throw new Error("synthetic body failure");
+    }),
+  })).rejects.toThrow(/synthetic body failure/);
 });
 
 test("binds every completed static response to independent attested bytes and MIME", async () => {
