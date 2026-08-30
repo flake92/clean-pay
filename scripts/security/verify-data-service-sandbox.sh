@@ -74,7 +74,7 @@ pull_data_service_image() {
       return 0
     fi
   done
-  printf 'bounded data-service image pull failed after two attempts\n' >&2
+  printf 'bounded data-service image pull failed after %d attempts\n' "$attempt" >&2
   return 1
 }
 
@@ -224,6 +224,6 @@ docker_bounded exec "$postgres_id" psql \
   --set ON_ERROR_STOP=1 \
   --command 'CREATE TABLE sandbox_write_probe (id integer PRIMARY KEY); INSERT INTO sandbox_write_probe VALUES (1); DROP TABLE sandbox_write_probe;'
 docker_bounded exec "$redis_id" sh -ceu \
-  'redis-cli SET clean-pay-sandbox-probe writable | grep -qx OK; test "$(redis-cli GET clean-pay-sandbox-probe)" = writable; redis-cli DEL clean-pay-sandbox-probe >/dev/null'
+  "redis-cli SET clean-pay-sandbox-probe writable | grep -qx OK; test \"\$(redis-cli GET clean-pay-sandbox-probe)\" = writable; redis-cli DEL clean-pay-sandbox-probe >/dev/null"
 
 printf 'PostgreSQL and Redis sandbox runtime verification passed.\n'
