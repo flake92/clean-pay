@@ -30,7 +30,10 @@ import {
   TURNSTILE_STUB_CONTRACT,
   TURNSTILE_STUB_SOURCE,
 } from "./turnstile-stub";
-import { selectByteIdenticalMajority } from "./screenshot-majority";
+import {
+  selectByteIdenticalMajority,
+  selectByteIdenticalTerminalScreenshot,
+} from "./screenshot-majority";
 import { DETERMINISTIC_CHROMIUM_LAUNCH_ARGS } from "./render-policy";
 import {
   JOURNEY_SYNTHETIC_HOSTNAMES,
@@ -1330,6 +1333,31 @@ test.describe("immutable browser baseline policy", () => {
     expect(() => selectByteIdenticalMajority([
       Buffer.from([1]),
       Buffer.from([1]),
+    ])).toThrow(/exactly 3 PNGs/);
+  });
+
+  test("selects only consecutive byte-identical terminal screenshot evidence", () => {
+    const warmup = Buffer.from([137, 80, 78, 71, 1]);
+    const stable = Buffer.from([137, 80, 78, 71, 2]);
+    const changed = Buffer.from([137, 80, 78, 71, 3]);
+
+    expect(selectByteIdenticalTerminalScreenshot([
+      warmup,
+      stable,
+      stable,
+    ])).toEqual(stable);
+    for (const values of [
+      [stable, stable, changed],
+      [stable, changed, stable],
+      [warmup, stable, changed],
+    ]) {
+      expect(() => selectByteIdenticalTerminalScreenshot(values)).toThrow(
+        /not byte-identical/,
+      );
+    }
+    expect(() => selectByteIdenticalTerminalScreenshot([
+      stable,
+      stable,
     ])).toThrow(/exactly 3 PNGs/);
   });
 

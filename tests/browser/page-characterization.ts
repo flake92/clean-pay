@@ -41,6 +41,7 @@ import {
   requireExactProcessBytesAgreement,
   selectIndependentProcessCharacterizationQuorum,
 } from "./process-quorum";
+import { captureByteIdenticalTerminalScreenshot } from "./screenshot-majority";
 
 export type CharacterizationRoute = {
   id: string;
@@ -341,12 +342,7 @@ async function captureCharacterizationSample(options: {
   });
   await page.waitForLoadState("networkidle", { timeout: 3_000 }).catch(() => undefined);
 
-  const screenshot = await page.screenshot({
-    animations: "disabled",
-    caret: "hide",
-    fullPage: false,
-    type: "png",
-  });
+  const screenshot = await captureByteIdenticalTerminalScreenshot(page);
 
   const [
     dom,
