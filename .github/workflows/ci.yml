@@ -564,7 +564,7 @@ jobs:
             --env CLEAN_PAY_BROWSER_DB_SCOPE=clean-pay-browser-journey-ci-mode-proof \
             --env CLEAN_PAY_BROWSER_DB_OBSERVER_USER=clean_pay_browser_observer \
             --env CLEAN_PAY_BROWSER_DB_OBSERVER_PASSWORD=browser-journey-database-browser-observer-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
-            --env PGHOST=127.0.0.1 \
+            --env PGHOST=postgres \
             --env PGPORT=5432 \
             --env PGDATABASE=clean_pay \
             --env PGUSER=clean_pay_bootstrap \
