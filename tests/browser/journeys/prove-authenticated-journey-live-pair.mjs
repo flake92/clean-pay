@@ -17,6 +17,10 @@ import {
   assertJourneyStackContract,
   assertProviderOverlapImagePlatformParity,
 } from "./provider-overlap-proof-contract.mjs";
+import {
+  UNVERIFIED_EMAIL_PROOF_FILENAME,
+  assertUnverifiedEmailLoginProof,
+} from "./unverified-email-login-proof-contract.mjs";
 
 const repositoryRoot = path.resolve(process.cwd());
 const localPlaywrightCli = path.join(repositoryRoot, "node_modules", "playwright", "cli.js");
@@ -26,6 +30,13 @@ const journeyConfig = path.join(
   "browser",
   "journeys",
   "playwright.config.ts",
+);
+const unverifiedEmailConfig = path.join(
+  repositoryRoot,
+  "tests",
+  "browser",
+  "journeys",
+  "unverified-email-login.playwright.config.ts",
 );
 const connectProxyTerminationGraceMs = 2_000;
 const connectProxyForceKillGraceMs = 2_000;
@@ -48,6 +59,9 @@ class AuthenticatedJourneyConnectStartError extends Error {
 try {
   const argumentsByName = parseArguments(process.argv.slice(2));
   captureId = requiredArgument(argumentsByName, "--capture-id", /^[a-f0-9]{16}$/);
+  const unverifiedEmailProofOutput = await exactUnverifiedEmailProofOutput(
+    requiredArgument(argumentsByName, "--candidate-unverified-email-proof-output", /.+/),
+  );
   await assertRepositoryRoot();
   const [baselineInput, candidateInput, livePair] = await Promise.all([
     readStackInput(argumentsByName, "baseline"),
@@ -80,6 +94,7 @@ try {
     const proxies = await startProxyPair(baselineInput, candidateInput);
     let proxySummaries;
     let captureFailure;
+    let candidateUnverifiedEmail;
     try {
       const captureSettlements = await Promise.allSettled(
         ["baseline", "candidate"].map(async (role) => {
@@ -97,6 +112,17 @@ try {
           failures,
           "Both authenticated live-pair browser captures must settle before cleanup.",
         );
+      }
+      if (!captureFailure) {
+        try {
+          candidateUnverifiedEmail = await runCandidateUnverifiedEmailRegression({
+            binding: candidateBinding,
+            input: candidateInput,
+            output: unverifiedEmailProofOutput,
+          });
+        } catch (error) {
+          captureFailure = error;
+        }
       }
     } finally {
       const stopped = await Promise.allSettled([
@@ -130,6 +156,7 @@ try {
         candidateOwnershipSha256: evidence.roles.candidate.receiptSha256,
       }),
       proxySummaries: Object.freeze(proxySummaries),
+      candidateUnverifiedEmail,
     });
   });
 
@@ -170,6 +197,9 @@ try {
     browserCasesPerRole: 18,
     checkpointPngsPerRole: 105,
     rawArtifactsPerRole: 141,
+    candidateAuthorizedRegressionCases: 1,
+    candidateUnverifiedEmailProofSha256:
+      session.value.candidateUnverifiedEmail.proofSha256,
     proofSha256: proof.proofSha256,
     completionSha256: proof.completionSha256,
   })}\n`);
@@ -213,6 +243,45 @@ async function runJourneyCapture({ input, binding, ownership, livePair }) {
     "--config",
     journeyConfig,
   ], environment, 1_800_000);
+}
+
+async function runCandidateUnverifiedEmailRegression({ binding, input, output }) {
+  const [resolverIp] = input.contract.publications.browserTls.split(":");
+  const environment = journeyDockerCliEnvironment();
+  Object.assign(environment, {
+    CI: "1",
+    NODE_ENV: "test",
+    CLEAN_PAY_BROWSER_BASE_URL: "https://pay.ci.clean-pay.dev",
+    CLEAN_PAY_BROWSER_CONNECT_PROXY: `http://${input.contract.publications.connectProxy}`,
+    CLEAN_PAY_BROWSER_HOST_RESOLVER_IP: resolverIp,
+    CLEAN_PAY_BROWSER_MIGRATION_IMAGE_DIGEST: binding.source.migrationImageDigest,
+    CLEAN_PAY_BROWSER_PLAYWRIGHT_OUTPUT_SCOPE: sha256(
+      `${captureId}:candidate-unverified-email`,
+    ).slice(0, 16),
+    CLEAN_PAY_BROWSER_PROVIDER_CONTROL_URL:
+      `http://${input.contract.publications.providerControl}/`,
+    CLEAN_PAY_BROWSER_SOURCE_IMAGE_DIGEST: binding.source.imageDigest,
+    CLEAN_PAY_BROWSER_SOURCE_REVISION: binding.source.revision,
+    CLEAN_PAY_BROWSER_UNVERIFIED_EMAIL_PROOF_OUTPUT: output,
+  });
+  await boundedProcess(process.execPath, [
+    localPlaywrightCli,
+    "test",
+    "--config",
+    unverifiedEmailConfig,
+  ], environment, 180_000);
+  const document = assertUnverifiedEmailLoginProof(
+    await readBoundedJson(output, 16_384, "candidate unverified e-mail proof"),
+    {
+      candidateApplicationImageDigest: binding.source.imageDigest,
+      candidateMigrationImageDigest: binding.source.migrationImageDigest,
+      candidateRevision: binding.source.revision,
+    },
+  );
+  return Object.freeze({
+    status: document.status,
+    proofSha256: sha256(JSON.stringify(document)),
+  });
 }
 
 async function startProxyPair(baselineInput, candidateInput) {
@@ -758,6 +827,7 @@ function parseArguments(values) {
     "--candidate-asset-image-digest",
     "--candidate-migration-asset-image-digest",
     "--capture-id",
+    "--candidate-unverified-email-proof-output",
   ]);
   const result = new Map();
   for (let index = 0; index < values.length; index += 2) {
@@ -772,6 +842,33 @@ function parseArguments(values) {
     throw new Error("Authenticated live-pair proof requires every exact input flag once.");
   }
   return result;
+}
+
+async function exactUnverifiedEmailProofOutput(rawPath) {
+  if (!path.isAbsolute(rawPath)
+    || path.basename(rawPath) !== UNVERIFIED_EMAIL_PROOF_FILENAME
+    || path.dirname(rawPath) !== path.join(
+      repositoryRoot,
+      "test-results",
+      "browser-live-pair-ci",
+      captureId,
+    )) {
+    throw new Error("Candidate unverified e-mail proof output escaped its exact capture root.");
+  }
+  const parent = path.dirname(rawPath);
+  const details = await lstat(parent);
+  if (!details.isDirectory() || details.isSymbolicLink()
+    || path.dirname(await realpath(parent))
+      !== await realpath(path.join(repositoryRoot, "test-results", "browser-live-pair-ci"))) {
+    throw new Error("Candidate unverified e-mail proof output parent is invalid.");
+  }
+  try {
+    await lstat(rawPath);
+    throw new Error("Candidate unverified e-mail proof output already exists.");
+  } catch (error) {
+    if (error?.code !== "ENOENT") throw error;
+  }
+  return rawPath;
 }
 
 function requiredArgument(values, name, pattern) {

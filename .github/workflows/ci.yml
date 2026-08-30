@@ -124,6 +124,7 @@ jobs:
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
+          fetch-depth: 0
           persist-credentials: false
 
       - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
@@ -495,17 +496,8 @@ jobs:
 
   production-image-browser-journey:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 120
     env:
-      CLEAN_PAY_BROWSER_COMPOSE_PROJECT: clean-pay-browser-journey-ci-${{ github.run_id }}-${{ github.run_attempt }}
-      CLEAN_PAY_BROWSER_APP_IMAGE: clean-pay:journey-ci
-      CLEAN_PAY_BROWSER_MIGRATION_IMAGE: clean-pay-migration:journey-ci
-      CLEAN_PAY_BROWSER_SOURCE_REVISION: ${{ github.sha }}
-      CLEAN_PAY_BROWSER_SOURCE_IMAGE_TAG: clean-pay:journey-ci
-      CLEAN_PAY_BROWSER_MIGRATION_IMAGE_TAG: clean-pay-migration:journey-ci
-      CLEAN_PAY_BROWSER_APP_PORT: "4100"
-      CLEAN_PAY_BROWSER_PROVIDER_PORT: "13100"
-      CLEAN_PAY_BROWSER_PROXY_BIND: 127.0.0.2
       NEXT_PUBLIC_APP_URL: https://pay.ci.clean-pay.dev
       NEXT_PUBLIC_BRAND_NAME: Clean Pay
       NEXT_PUBLIC_BRAND_LOGO_URL: /clean-pay-logo.png
@@ -514,56 +506,58 @@ jobs:
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
+          fetch-depth: 0
           persist-credentials: false
       - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
         with:
           node-version-file: .node-version
           cache: npm
+      - name: Require the containerd image identity store
+        shell: bash
+        run: |
+          daemon_config="$(mktemp)"
+          trap 'rm -f "$daemon_config"' EXIT
+          if sudo test -f /etc/docker/daemon.json; then
+            sudo cat /etc/docker/daemon.json \
+              | jq '.features = ((.features // {}) + {"containerd-snapshotter": true})' \
+              > "$daemon_config"
+          else
+            printf '{}\n' \
+              | jq '.features = {"containerd-snapshotter": true}' \
+              > "$daemon_config"
+          fi
+          sudo install -o root -g root -m 0600 "$daemon_config" /etc/docker/daemon.json
+          sudo systemctl restart docker
+          for attempt in $(seq 1 30); do
+            if docker info >/dev/null 2>&1; then
+              break
+            fi
+            if test "$attempt" -eq 30; then
+              echo 'Docker did not become ready after enabling the containerd image store.' >&2
+              exit 1
+            fi
+            sleep 1
+          done
+          docker info --format '{{json .DriverStatus}}' \
+            | grep --fixed-strings '"driver-type","io.containerd.snapshotter.v1"'
       - name: Install locked dependencies and pinned Chromium
         run: |
           npm ci
           node node_modules/playwright/cli.js install --with-deps chromium
-      - name: Build synthetic production-image targets
+      - name: Derive the unique live-pair capture identity
         run: |
-          public_contract_version="$(node scripts/security/compute-public-build-contract.mjs --version)"
-          public_contract_sha256="$(node scripts/security/compute-public-build-contract.mjs)"
-          test "$public_contract_version" = "1"
-          docker build \
-            --target runner \
-            --build-arg CLEAN_PAY_RELEASE=journey-ci \
-            --build-arg CLEAN_PAY_REVISION="$GITHUB_SHA" \
-            --build-arg CLEAN_PAY_PUBLIC_BUILD_CONTRACT_VERSION="$public_contract_version" \
-            --build-arg CLEAN_PAY_PUBLIC_BUILD_CONTRACT_SHA256="$public_contract_sha256" \
-            --build-arg NEXT_PUBLIC_APP_URL="$NEXT_PUBLIC_APP_URL" \
-            --build-arg TURNSTILE_ENABLED="$TURNSTILE_ENABLED" \
-            --build-arg TURNSTILE_WIDGET_ID="$TURNSTILE_SITE_KEY" \
-            --build-arg NEXT_PUBLIC_BRAND_NAME="$NEXT_PUBLIC_BRAND_NAME" \
-            --build-arg NEXT_PUBLIC_BRAND_LOGO_URL="$NEXT_PUBLIC_BRAND_LOGO_URL" \
-            --tag "$CLEAN_PAY_BROWSER_APP_IMAGE" \
-            .
-          docker build \
-            --target migration \
-            --build-arg CLEAN_PAY_RELEASE=journey-ci \
-            --build-arg CLEAN_PAY_REVISION="$GITHUB_SHA" \
-            --build-arg CLEAN_PAY_PUBLIC_BUILD_CONTRACT_VERSION="$public_contract_version" \
-            --build-arg CLEAN_PAY_PUBLIC_BUILD_CONTRACT_SHA256="$public_contract_sha256" \
-            --tag "$CLEAN_PAY_BROWSER_MIGRATION_IMAGE" \
-            .
-          image_digest="$(docker image inspect --format '{{.Id}}' "$CLEAN_PAY_BROWSER_APP_IMAGE")"
-          migration_image_digest="$(docker image inspect --format '{{.Id}}' "$CLEAN_PAY_BROWSER_MIGRATION_IMAGE")"
-          printf '%s\n' "$image_digest" | grep -Eq '^sha256:[0-9a-f]{64}$'
-          printf '%s\n' "$migration_image_digest" | grep -Eq '^sha256:[0-9a-f]{64}$'
-          {
-            printf 'CLEAN_PAY_BROWSER_SOURCE_IMAGE_DIGEST=%s\n' "$image_digest"
-            printf 'CLEAN_PAY_BROWSER_MIGRATION_IMAGE_DIGEST=%s\n' "$migration_image_digest"
-            printf 'CLEAN_PAY_BROWSER_PUBLIC_BUILD_CONTRACT_SHA256=%s\n' "$public_contract_sha256"
-          } >> "$GITHUB_ENV"
-      - name: Run read-only production-image journey gate
-        env:
-          CLEAN_PAY_BROWSER_JOURNEY_ENV_DIR: ${{ runner.temp }}/clean-pay-browser-journey-${{ github.run_id }}-${{ github.run_attempt }}
-        run: npm run test:browser:journey:production-image
+          capture_id="$(printf '%s' "$GITHUB_RUN_ID:$GITHUB_RUN_ATTEMPT:$GITHUB_SHA" \
+            | sha256sum | cut -c 1-16)"
+          printf '%s\n' "$capture_id" | grep -Eq '^[0-9a-f]{16}$'
+          printf 'CLEAN_PAY_BROWSER_LIVE_PAIR_CAPTURE_ID=%s\n' "$capture_id" >> "$GITHUB_ENV"
+      - name: Run ephemeral Linux production-image live A/B gates
+        run: |
+          node tests/browser/journeys/run-production-image-live-overlap.mjs run \
+            --capture-id "$CLEAN_PAY_BROWSER_LIVE_PAIR_CAPTURE_ID" \
+            --candidate-revision "$GITHUB_SHA" \
+            --temporary-root "$RUNNER_TEMP"
       - name: Preserve sanitized browser journey evidence
-        if: failure()
+        if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: production-image-browser-journey-${{ github.run_id }}-${{ github.run_attempt }}
@@ -573,11 +567,22 @@ jobs:
             test-results/browser
             test-results/browser-journeys
             test-results/browser-journey-contract-evidence
+            test-results/browser-public-overlap
+            test-results/browser-authenticated-journey-live-pair
+            test-results/browser-live-pair-ci/${{ env.CLEAN_PAY_BROWSER_LIVE_PAIR_CAPTURE_ID }}/completion.json
+            test-results/browser-live-pair-ci/${{ env.CLEAN_PAY_BROWSER_LIVE_PAIR_CAPTURE_ID }}/failure.json
+            test-results/browser-live-pair-ci/${{ env.CLEAN_PAY_BROWSER_LIVE_PAIR_CAPTURE_ID }}/provider-overlap.json
+            test-results/browser-live-pair-ci/${{ env.CLEAN_PAY_BROWSER_LIVE_PAIR_CAPTURE_ID }}/unverified-email-login.json
+            ${{ runner.temp }}/clean-pay-chatwoot-phase-evidence-${{ env.CLEAN_PAY_BROWSER_LIVE_PAIR_CAPTURE_ID }}/artifact-manifest.json
+            ${{ runner.temp }}/clean-pay-chatwoot-phase-evidence-${{ env.CLEAN_PAY_BROWSER_LIVE_PAIR_CAPTURE_ID }}/proof.json
+            ${{ runner.temp }}/clean-pay-chatwoot-phase-evidence-${{ env.CLEAN_PAY_BROWSER_LIVE_PAIR_CAPTURE_ID }}/raw
       - name: Clean up only the owned browser journey project
         if: always()
-        env:
-          CLEAN_PAY_BROWSER_JOURNEY_ENV_DIR: ${{ runner.temp }}/clean-pay-browser-journey-${{ github.run_id }}-${{ github.run_attempt }}
-        run: node tests/browser/journeys/run-production-image-journey.mjs cleanup
+        run: |
+          node tests/browser/journeys/run-production-image-live-overlap.mjs cleanup \
+            --capture-id "$CLEAN_PAY_BROWSER_LIVE_PAIR_CAPTURE_ID" \
+            --candidate-revision "$GITHUB_SHA" \
+            --temporary-root "$RUNNER_TEMP"
 
   remnashop-migration-rehearsal:
     runs-on: ubuntu-latest
