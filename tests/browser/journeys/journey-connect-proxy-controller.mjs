@@ -273,10 +273,14 @@ async function terminateProxyChildAndAwaitClose(
   try {
     escalationTimer = setTimeout(() => {
       if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
-      closeVerificationTimer = setTimeout(
-        verifyClosedAfterKill,
-        lifecycleBounds.killCloseTimeoutMs,
-      );
+      if (verifyProcessTerminated === verifyJourneyProcessTerminated) {
+        closeVerificationTimer = setTimeout(
+          verifyClosedAfterKill,
+          lifecycleBounds.killCloseTimeoutMs,
+        );
+      } else {
+        void verifyClosedAfterKill();
+      }
     }, lifecycleBounds.terminationGraceMs);
     // Cleanup may resume only after Node reports `close` or the OS proves that
     // the exact child PID is absent. A still-live/unverifiable child deliberately
