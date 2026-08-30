@@ -23,6 +23,7 @@ import {
   resolvePublicOverlapProofPath,
   sha256,
 } from "./public-overlap-proof-contract.mjs";
+import { createPublicOverlapProcessFailureEvidence } from "./public-overlap-process-evidence.mjs";
 
 const repositoryRoot = path.resolve(process.cwd());
 const localPlaywrightCli = path.join(repositoryRoot, "node_modules", "playwright", "cli.js");
@@ -201,10 +202,13 @@ async function runPublicOverlapPlaywright(mode, additions, timeoutMs) {
     "test",
     "--config",
     publicOverlapConfig,
-  ], environment, timeoutMs);
+  ], environment, timeoutMs, {
+    mode,
+    role: additions.CLEAN_PAY_PUBLIC_OVERLAP_ROLE ?? null,
+  });
 }
 
-function boundedProcess(command, args, environment, timeoutMs) {
+function boundedProcess(command, args, environment, timeoutMs, scope) {
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, {
       cwd: repositoryRoot,
@@ -213,6 +217,8 @@ function boundedProcess(command, args, environment, timeoutMs) {
       windowsHide: true,
     });
     let stdoutBytes = 0;
+    let stdout = Buffer.alloc(0);
+    let stderrBytes = 0;
     let stderr = Buffer.alloc(0);
     let terminationReason = null;
     let settled = false;
@@ -225,10 +231,15 @@ function boundedProcess(command, args, environment, timeoutMs) {
       forceTimer.value = setTimeout(() => child.kill("SIGKILL"), 2_000);
     };
     child.stdout.on("data", (chunk) => {
-      stdoutBytes += chunk.byteLength;
+      const bytes = Buffer.from(chunk);
+      stdoutBytes += bytes.byteLength;
+      if (stdout.byteLength < 2 * 1024 * 1024) {
+        stdout = Buffer.concat([stdout, bytes]).subarray(0, 2 * 1024 * 1024);
+      }
       if (stdoutBytes > 2 * 1024 * 1024) terminate("stdout-overflow");
     });
     child.stderr.on("data", (chunk) => {
+      stderrBytes += chunk.byteLength;
       if (stderr.byteLength >= 64 * 1024) return;
       stderr = Buffer.concat([stderr, Buffer.from(chunk)]).subarray(0, 64 * 1024);
     });
@@ -242,6 +253,17 @@ function boundedProcess(command, args, environment, timeoutMs) {
         resolve();
         return;
       }
+      process.stderr.write(`${JSON.stringify(createPublicOverlapProcessFailureEvidence({
+        code,
+        mode: scope.mode,
+        role: scope.role,
+        signal,
+        stderr,
+        stderrBytes,
+        stdout,
+        stdoutBytes,
+        terminationReason,
+      }))}\n`);
       reject(new Error(
         `Bounded public overlap Playwright operation failed (`
         + `${terminationReason ?? "exit"}:${code ?? signal ?? "unknown"}:${sha256(stderr)}).`,
