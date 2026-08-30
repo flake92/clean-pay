@@ -39,6 +39,7 @@ const fixtureSnapshotNames = Object.freeze({
   "/mock/oidc-mock.mjs": "fixture-oidc-mock.mjs",
   "/mock/provider-mock.mjs": "fixture-provider-mock.mjs",
 });
+const containerReadonlyFixtureSnapshotNames = new Set(Object.values(fixtureSnapshotNames));
 const contractFilename = "browser-journey-contract.json";
 const automaticDockerTimeout = Number.NaN;
 const cleanupAbsenceConsecutiveObservations = 2;
@@ -764,17 +765,32 @@ export async function createJourneyOwnedInputSnapshot(
       platform,
     });
     directoryIdentity = await captureOwnedPathIdentity(directory, "directory", operations);
-    const writeOwnedFile = async (filename, bytes) => {
+    const writeSnapshotFile = async (filename, bytes, access) => {
       if (!expectedFilenames.includes(filename) || begunFiles.has(filename)
         || (!Buffer.isBuffer(bytes) && typeof bytes !== "string")) {
         fail("Owned input snapshot write is outside its exact create-only contract.");
       }
+      const isContainerFixture = containerReadonlyFixtureSnapshotNames.has(filename);
+      if ((access === "private" && isContainerFixture)
+        || (access === "container-readonly" && !isContainerFixture)) {
+        fail("Owned input snapshot access class differs from its exact filename policy.");
+      }
       begunFiles.add(filename);
-      const identity = await privateWrite(path.join(directory, filename), bytes, operations);
+      const identity = access === "container-readonly"
+        ? await containerReadonlyWrite(path.join(directory, filename), bytes, operations, platform)
+        : await privateWrite(path.join(directory, filename), bytes, operations, platform);
       createdFiles[filename] = identity;
       return path.join(directory, filename);
     };
-    const value = await populate(Object.freeze({ directory, writeOwnedFile }));
+    const writeOwnedFile = (filename, bytes) => writeSnapshotFile(filename, bytes, "private");
+    const writeContainerReadonlyFixture = (filename, bytes) => (
+      writeSnapshotFile(filename, bytes, "container-readonly")
+    );
+    const value = await populate(Object.freeze({
+      directory,
+      writeContainerReadonlyFixture,
+      writeOwnedFile,
+    }));
     if (begunFiles.size !== expectedFilenames.length
       || Object.keys(createdFiles).length !== expectedFilenames.length) {
       fail("Owned input snapshot population is incomplete.");
@@ -909,7 +925,7 @@ export async function prepareJourneyOwnedStack({
         `clean-pay-provider-${sha256(contract.project).slice(0, 12)}-`,
       ),
       expectedFilenames,
-      populate: async ({ directory, writeOwnedFile }) => {
+      populate: async ({ directory, writeContainerReadonlyFixture, writeOwnedFile }) => {
         const generated = buildJourneySyntheticEnvironment({
           appImage: launchContract.images.application,
           appPort: observed.CLEAN_PAY_PORT,
@@ -933,7 +949,7 @@ export async function prepareJourneyOwnedStack({
           if (!fixtureEntry) {
             fail("Mounted journey fixture is absent from the global fixture manifest.");
           }
-          await writeOwnedFile(filename, fixtureEntry.bytes);
+          await writeContainerReadonlyFixture(filename, fixtureEntry.bytes);
           fixtureSourceOverrides[destination] = path.join(directory, filename);
           mountSubset.push({ destination, sha256: fixtureEntry.sha256 });
         }
@@ -2009,14 +2025,46 @@ async function fixtureHashContract(sources) {
   return sha256(JSON.stringify(records));
 }
 
-async function privateWrite(target, bytes, operations = ownedFileSystemOperations) {
+async function privateWrite(
+  target,
+  bytes,
+  operations = ownedFileSystemOperations,
+  platform = process.platform,
+) {
   await operations.writeFile(target, bytes, { flag: "wx", mode: 0o600 });
   await enforceJourneySyntheticPrivateMode(target, 0o600, {
     chmodPath: operations.chmod,
     lstatPath: operations.lstat,
+    platform,
   });
   const identity = await captureOwnedPathIdentity(target, "file", operations);
   if (identity.sha256 !== sha256(bytes)) fail("Owned input bytes changed after create-only write.");
+  return identity;
+}
+
+async function containerReadonlyWrite(
+  target,
+  bytes,
+  operations = ownedFileSystemOperations,
+  platform = process.platform,
+) {
+  await operations.writeFile(target, bytes, {
+    flag: "wx",
+    mode: platform === "win32" ? 0o600 : 0o444,
+  });
+  if (platform !== "win32") {
+    await operations.chmod(target, 0o444);
+    const details = await operations.lstat(target, { bigint: true });
+    if (!details.isFile() || details.isSymbolicLink()
+      || Number(details.mode & 0o777n) !== 0o444) {
+      fail("Container-readable journey fixture mode was not enforced exactly.");
+    }
+  }
+  const identity = await captureOwnedPathIdentity(target, "file", operations);
+  if (identity.sha256 !== sha256(bytes)
+    || (platform !== "win32" && identity.permissionBits !== 0o444)) {
+    fail("Container-readable journey fixture changed after create-only write.");
+  }
   return identity;
 }
 
@@ -2171,6 +2219,7 @@ async function captureOwnedPathIdentity(
     kind,
     modifiedNanoseconds: undefined,
     normalizedRealPath: normalizePath(resolved),
+    permissionBits: Number(resolvedDetails.mode & 0o777n),
     sha256: undefined,
     size: undefined,
   };
@@ -2193,7 +2242,7 @@ async function assertOwnedPathIdentity(
 ) {
   const observed = await captureOwnedPathIdentity(target, expected.kind, operations);
   if (JSON.stringify(observed) !== JSON.stringify(expected)) {
-    fail("Owned path device, inode, realpath, type, size, or bytes changed.");
+    fail("Owned path device, inode, realpath, type, permissions, size, or bytes changed.");
   }
   return observed;
 }

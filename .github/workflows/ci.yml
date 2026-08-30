@@ -540,6 +540,42 @@ jobs:
           done
           docker info --format '{{json .DriverStatus}}' \
             | grep --fixed-strings '"driver-type","io.containerd.snapshotter.v1"'
+      - name: Prove the capless observer fixture reaches its bounded failure mapping
+        shell: bash
+        run: |
+          fixture_root="$(mktemp -d)"
+          fixture_file="$fixture_root/db-observer-provision.sh"
+          cleanup_fixture() {
+            rm -f "$fixture_file"
+            rmdir "$fixture_root"
+          }
+          trap cleanup_fixture EXIT
+          install -m 0444 tests/browser/journeys/db-observer-provision.sh "$fixture_file"
+          set +e
+          docker run --rm \
+            --network none \
+            --read-only \
+            --cap-drop ALL \
+            --security-opt no-new-privileges:true \
+            --pids-limit 32 \
+            --memory 128m \
+            --tmpfs /tmp:rw,noexec,nosuid,nodev,size=8m,mode=1777 \
+            --entrypoint /bin/sh \
+            --env CLEAN_PAY_BROWSER_DB_SCOPE=clean-pay-browser-journey-ci-mode-proof \
+            --env CLEAN_PAY_BROWSER_DB_OBSERVER_USER=clean_pay_browser_observer \
+            --env CLEAN_PAY_BROWSER_DB_OBSERVER_PASSWORD=browser-journey-database-browser-observer-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
+            --env PGHOST=127.0.0.1 \
+            --env PGPORT=5432 \
+            --env PGDATABASE=clean_pay \
+            --env PGUSER=clean_pay_bootstrap \
+            --env PGPASSWORD=synthetic \
+            --volume "$fixture_file:/fixture/db-observer-provision.sh:ro" \
+            postgres:17-alpine@sha256:18cfe3ef5e6815560c98237d6216d1e5119702fb0f3894c8785dd58b8bbe5d73 \
+            /fixture/db-observer-provision.sh \
+            >/dev/null 2>&1
+          status=$?
+          set -e
+          test "$status" -eq 20
       - name: Install locked dependencies and pinned Chromium
         run: |
           npm ci
