@@ -630,6 +630,7 @@ jobs:
             test-results/browser-live-pair-ci/${{ env.CLEAN_PAY_BROWSER_LIVE_PAIR_CAPTURE_ID }}/failure.json
             test-results/browser-live-pair-ci/${{ env.CLEAN_PAY_BROWSER_LIVE_PAIR_CAPTURE_ID }}/public-capture-baseline-failure.json
             test-results/browser-live-pair-ci/${{ env.CLEAN_PAY_BROWSER_LIVE_PAIR_CAPTURE_ID }}/public-capture-candidate-failure.json
+            test-results/browser-live-pair-ci/${{ env.CLEAN_PAY_BROWSER_LIVE_PAIR_CAPTURE_ID }}/public-capture-pair-failure.json
             test-results/browser-live-pair-ci/${{ env.CLEAN_PAY_BROWSER_LIVE_PAIR_CAPTURE_ID }}/public-cleanup-pair-failure.json
             test-results/browser-live-pair-ci/${{ env.CLEAN_PAY_BROWSER_LIVE_PAIR_CAPTURE_ID }}/public-comparison-mismatch.json
             test-results/browser-live-pair-ci/${{ env.CLEAN_PAY_BROWSER_LIVE_PAIR_CAPTURE_ID }}/public-compare-pair-failure.json

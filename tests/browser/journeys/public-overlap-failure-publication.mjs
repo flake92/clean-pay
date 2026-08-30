@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import path from "node:path";
 
-const baseFilenamePattern = /^public-(?:capture-(?:baseline|candidate)|(?:cleanup|compare|prepare|verify)-pair)-failure\.json$/;
+const baseFilenamePattern = /^public-(?:capture-(?:baseline|candidate|pair)|(?:cleanup|compare|prepare|verify)-pair)-failure\.json$/;
 const mismatchFilename = "public-comparison-mismatch.json";
 
 export async function publishPublicOverlapFailureOutputs(input) {

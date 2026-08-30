@@ -68,6 +68,24 @@ test("rejects mismatch publication outside the exact compare failure scope", asy
   })).rejects.toThrow("escaped compare scope");
 });
 
+test("accepts the exact paired capture failure scope without mismatch projection", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "clean-pay-paired-capture-failure-"));
+  const bytes = Buffer.from('{"status":"paired-capture"}\n', "utf8");
+  try {
+    await expect(publishPublicOverlapFailureOutputs({
+      baseBytes: bytes,
+      baseFilename: "public-capture-pair-failure.json",
+      failureOutputRoot: root,
+      mismatchBytes: null,
+      writeOutput: writeJourneySanitizedOutput,
+    })).resolves.toHaveLength(1);
+    await expect(readFile(path.join(root, "public-capture-pair-failure.json")))
+      .resolves.toEqual(bytes);
+  } finally {
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
 function sha256(value: Uint8Array) {
   return createHash("sha256").update(value).digest("hex");
 }
