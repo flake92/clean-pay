@@ -23,6 +23,7 @@ import {
   readPublicOverlapOwnership,
   readPublicOverlapPairOwnership,
 } from "./public-overlap-proof-contract.mjs";
+import { JOURNEY_FIXTURE_FILENAMES } from "./journey-fixture-manifest.mjs";
 
 const captureId = "0123456789abcdef";
 const baselineOrigin = "http://127.0.0.1:4201";
@@ -203,13 +204,33 @@ test("keeps the staged pair digest authoritative when full ownership validation 
 });
 
 test("pins the local capture tool and publishes proof only after owned-stack cleanup", async () => {
-  const source = await readFile(path.join(
-    process.cwd(),
-    "tests",
-    "browser",
-    "journeys",
-    "prove-public-characterization-overlap.mjs",
-  ), "utf8");
+  const [source, captureSource, teardownSource, fixturesSource] = await Promise.all([
+    readFile(path.join(
+      process.cwd(),
+      "tests",
+      "browser",
+      "journeys",
+      "prove-public-characterization-overlap.mjs",
+    ), "utf8"),
+    readFile(path.join(
+      process.cwd(),
+      "tests",
+      "browser",
+      "public-overlap-capture.ts",
+    ), "utf8"),
+    readFile(path.join(
+      process.cwd(),
+      "tests",
+      "browser",
+      "public-overlap-global-teardown.ts",
+    ), "utf8"),
+    readFile(path.join(
+      process.cwd(),
+      "tests",
+      "browser",
+      "fixtures.ts",
+    ), "utf8"),
+  ]);
   const pairStart = source.indexOf("const session = await withJourneyOwnedStackPair(");
   const pairOwnershipRead = source.indexOf(
     "preparedPairOwnership = await readPublicOverlapPairOwnership(",
@@ -226,6 +247,34 @@ test("pins the local capture tool and publishes proof only after owned-stack cle
   expect(pairOwnershipRead).toBeGreaterThan(pairStart);
   expect(ownershipRead).toBeGreaterThan(pairOwnershipRead);
   expect(source).toContain("const captureSettlements = await Promise.allSettled([");
+  expect(source).toContain("runCapturePair(comparisonEnvironment)");
+  expect(source).toContain('CLEAN_PAY_PUBLIC_OVERLAP_ROLE: "pair"');
+  for (const field of [
+    "CLEAN_PAY_PUBLIC_OVERLAP_BASELINE_ORIGIN",
+    "CLEAN_PAY_PUBLIC_OVERLAP_CANDIDATE_ORIGIN",
+    "CLEAN_PAY_PUBLIC_OVERLAP_BASELINE_BINDING_SHA256",
+    "CLEAN_PAY_PUBLIC_OVERLAP_CANDIDATE_BINDING_SHA256",
+    "CLEAN_PAY_PUBLIC_OVERLAP_BASELINE_OWNERSHIP_SHA256",
+    "CLEAN_PAY_PUBLIC_OVERLAP_CANDIDATE_OWNERSHIP_SHA256",
+  ]) {
+    expect(source).toContain(field);
+  }
+  expect(source).not.toContain('runCapture("baseline"');
+  expect(source).not.toContain('runCapture("candidate"');
+  expect(captureSource).toContain("const settlements = await Promise.allSettled(");
+  expect(captureSource).toContain('(["baseline", "candidate"] as const).map');
+  expect(captureSource).toContain("selectIndependentProcessCharacterizationPairQuorum(");
+  expect(fixturesSource).toContain(
+    "for (const [processIndex, browser] of independentChromiumBrowsers.entries())",
+  );
+  expect(fixturesSource).toContain('for (const role of ["baseline", "candidate"] as const)');
+  expect(fixturesSource).toContain("const context = await browser.newContext({");
+  expect(fixturesSource).toContain("const replayGuard = await installCharacterizationReplayGuard({");
+  expect(fixturesSource).toContain("reconcileRegisteredBaselineArtifacts(primary.baseline.page)");
+  expect(fixturesSource).toContain("reconcileRegisteredBaselineArtifacts(primary.candidate.page)");
+  expect(JOURNEY_FIXTURE_FILENAMES).toContain("../public-overlap-pair-capture.live.ts");
+  expect(teardownSource).toContain("const settlements = await Promise.allSettled(");
+  expect(teardownSource).toContain('(["baseline", "candidate"] as const).map');
   expect(source).toContain("localPlaywrightCli");
   expect(source).toContain("process.execPath");
   expect(source).not.toContain("npx");
