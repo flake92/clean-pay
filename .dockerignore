@@ -37,6 +37,7 @@
 !deploy/prod/migration-rollback-verifier.mjs
 !deploy/prod/payment-retention-hold-command.mjs
 !deploy/prod/payment-retention-hold.mjs
+!deploy/prod/prisma-migration-status.mjs
 !deploy/prod/production-env-rules.mjs
 !deploy/prod/reconcile-loop.mjs
 !deploy/prod/reconciliation-batch.mjs

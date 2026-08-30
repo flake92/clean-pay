@@ -415,6 +415,19 @@ describe("guarded zero-downtime application rollout", () => {
     expect(migrationGuard).toContain("node deploy/prod/validate-env.mjs");
   });
 
+  it("runs the migration status proof through the bootstrap verifier without a shell", () => {
+    const migrationGuard = shellFunction("assert_no_pending_migrations");
+
+    expect(migrationGuard).toContain('--env-file "$PROVISION_ENV_FILE"');
+    expect(migrationGuard).not.toContain('--env-file "$MIGRATION_ENV_FILE"');
+    expect(migrationGuard).toContain("--entrypoint node");
+    expect(migrationGuard).toContain(
+      "deploy/prod/prisma-migration-status.mjs migrate status",
+    );
+    expect(migrationGuard).not.toContain("--entrypoint sh");
+    expect(migrationGuard).not.toMatch(/(?:^|\s)-c(?:\s|$)/u);
+  });
+
   it("uses private atomic state and removes only a label-owned exact canary", () => {
     const writeState = shellFunction("write_state");
     const loadState = shellFunction("load_state");

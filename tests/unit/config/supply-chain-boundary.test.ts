@@ -39,6 +39,7 @@ describe("supply-chain boundary", () => {
       "!scripts/prisma-generate.mjs",
       "!deploy/prod/start.sh",
       "!deploy/prod/validate-env.mjs",
+      "!deploy/prod/prisma-migration-status.mjs",
     ]) {
       expect(dockerignore, input).toContain(input);
     }

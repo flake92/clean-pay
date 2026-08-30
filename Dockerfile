@@ -88,6 +88,7 @@ COPY --chown=cleanpay:nodejs deploy/prod/production-env-rules.mjs ./deploy/prod/
 COPY --chown=cleanpay:nodejs deploy/prod/migration-rollback-verifier.mjs ./deploy/prod/migration-rollback-verifier.mjs
 COPY --chown=cleanpay:nodejs deploy/prod/database-privilege-manifest.mjs ./deploy/prod/database-privilege-manifest.mjs
 COPY --chown=cleanpay:nodejs deploy/prod/database-role-provision.mjs ./deploy/prod/database-role-provision.mjs
+COPY --chown=cleanpay:nodejs deploy/prod/prisma-migration-status.mjs ./deploy/prod/prisma-migration-status.mjs
 
 # Exercise the migration CLI and its platform engine while the image is still
 # being built. A syntactically valid placeholder URL is sufficient for schema

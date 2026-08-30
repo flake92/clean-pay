@@ -537,7 +537,7 @@ prove_readiness_provider_contract() {
     readiness-provider "$EDGE_NETWORK"
   timeout --signal=TERM --kill-after=5s 20s \
     docker exec "$READINESS_PROVIDER_CONTAINER_ID" node -e '
-    fetch(`http://127.0.0.1:${process.argv[1]}/contract`,{signal:AbortSignal.timeout(5000)})
+    fetch("http://127.0.0.1:"+process.argv[1]+"/contract",{signal:AbortSignal.timeout(5000)})
       .then(async(response)=>{
         if(response.status!==200||response.headers.get("content-type")!=="application/json")process.exit(1);
         const text=await response.text();

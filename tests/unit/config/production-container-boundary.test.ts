@@ -625,6 +625,9 @@ describe("production container boundary", () => {
     expect(migration).toContain("deploy/prod/deploy-log.mjs");
     expect(migration).toContain("deploy/prod/validate-env.mjs");
     expect(migration).toContain("deploy/prod/production-env-rules.mjs");
+    expect(migration).toContain("deploy/prod/prisma-migration-status.mjs");
+    const runner = dockerfile.slice(dockerfile.indexOf("AS runner"));
+    expect(runner).not.toContain("deploy/prod/prisma-migration-status.mjs");
     expect(compose).toContain("migration:");
     expect(compose).toContain("target: migration");
     expect(compose).toContain("condition: service_completed_successfully");
