@@ -35,6 +35,7 @@ import {
   classifyProviderOverlapBrowserRequest,
   createJourneyBrowserRequestEnvelope,
   createProviderOverlapEventSeal,
+  createProviderOverlapPendingRequestSeal,
   createProviderOverlapStaticAssetContract,
   extractProviderOverlapCssMediaReferences,
   extractProviderOverlapResponseStaticDeclarations,
@@ -43,6 +44,7 @@ import {
   finalizeProviderOverlapHistoryContract,
   installProviderOverlapHistoryInstrumentation,
   normalizeProviderOverlapResponseContentType,
+  resolveProviderOverlapResponseRequestEntry,
 } from "./provider-overlap-browser-contract.mjs";
 import {
   PROVIDER_OVERLAP_ACTION,
@@ -467,7 +469,7 @@ async function exerciseCabinet(
         maximumUnexpectedEvents + 1,
       );
     });
-    const pendingRequests = new Set();
+    const pendingRequestSeal = createProviderOverlapPendingRequestSeal(256);
     const recordUnexpectedRequest = (rawUrl) => {
       if (unexpectedRequests.length < maximumUnexpectedEvents) {
         unexpectedRequests.push(sha256(rawUrl));
@@ -534,10 +536,10 @@ async function exerciseCabinet(
     };
     context.on("request", (request) => {
       eventSeal.record();
-      pendingRequests.add(request);
-      // Playwright guarantees request before response, while route callbacks
-      // may still be awaiting when response is emitted. Register the exact
-      // Request identity synchronously so response capture cannot outrun it.
+      pendingRequestSeal.observe(request);
+      // Prepare synchronously on the normal request path. The response path
+      // owns a fail-closed fallback for a response identity whose request
+      // preparation was not observable through this listener.
       prepareBrowserRequest(request);
     });
     context.on("response", (response) => {
@@ -549,8 +551,17 @@ async function exerciseCabinet(
           throw new Error("Synthetic browser response event identity is invalid.");
         }
         request = response.request();
-        const entry = browserRequestByIdentity.get(request);
-        if (!entry) {
+        if (!request || typeof request !== "object") {
+          throw new Error("Synthetic browser response request identity is invalid.");
+        }
+        pendingRequestSeal.observe(request);
+        const entry = resolveProviderOverlapResponseRequestEntry({
+          preparationByIdentity: browserRequestPreparationByIdentity,
+          prepare: prepareBrowserRequest,
+          request,
+          requestByIdentity: browserRequestByIdentity,
+        });
+        if (browserRequestByIdentity.get(request) !== entry) {
           throw new Error("Synthetic browser response escaped its request identity ledger.");
         }
         if (browserResponseEvidenceByIdentity.has(request)) {
@@ -610,12 +621,12 @@ async function exerciseCabinet(
       }
       void evidence.then(
         () => {
-          pendingRequests.delete(request);
+          pendingRequestSeal.complete(request);
           finishRequest();
         },
         (error) => {
           browserResponseCaptureFailure ??= error;
-          pendingRequests.delete(request);
+          pendingRequestSeal.complete(request);
           finishRequest();
         },
       );
@@ -712,7 +723,7 @@ async function exerciseCabinet(
       cabinetDocumentConsumed,
       historyOverflow,
       historyRecords,
-      pendingRequestCount: pendingRequests.size,
+      pendingRequestCount: pendingRequestSeal.pendingCount(),
       unexpectedConsole,
       unexpectedConsoleOverflow,
       unexpectedPageErrorOverflow,
@@ -724,8 +735,10 @@ async function exerciseCabinet(
       unexpectedServiceWorkerCount,
       unexpectedWebSocketCount,
     }));
+    const pendingRequestDrain = await pendingRequestSeal.drainAndSeal({ timeoutMs: 15_000 });
     const finalized = await finalizeProviderOverlapEventLifecycle({
       assertUnchanged: (snapshot) => {
+        pendingRequestSeal.assertClean();
         if (mutableSourceContractSha256() !== snapshot.mutableSourceContractSha256) {
           throw new Error("Synthetic browser source ledger changed across close.");
         }
@@ -750,7 +763,7 @@ async function exerciseCabinet(
           staticAssetContract,
         );
       },
-      isIdle: () => pendingRequests.size === 0,
+      isIdle: () => pendingRequestSeal.pendingCount() === 0,
       snapshot: async () => {
         if (!cabinetDocumentConsumed) {
           throw new Error("Synthetic browser did not consume the exact cabinet proof navigation.");
@@ -770,7 +783,7 @@ async function exerciseCabinet(
           || unexpectedPageErrorOverflow) {
           throw new Error("Synthetic browser emitted unexpected console or pageerror diagnostics.");
         }
-        if (pendingRequests.size !== 0) {
+        if (pendingRequestSeal.pendingCount() !== 0) {
           throw new Error("Synthetic browser retained pending requests at its seal barrier.");
         }
         const finalUrl = page.url();
@@ -799,6 +812,8 @@ async function exerciseCabinet(
     const requestContract = finalized.value;
     const browserSnapshot = finalized.snapshot;
     if (requestContract.requestCount !== browserRequests.length
+      || pendingRequestDrain.observedRequestCount !== browserRequests.length
+      || pendingRequestDrain.completedRequestCount !== browserRequests.length
       || browserRequestByIdentity.size !== browserRequests.length
       || browserRequestPreparationByIdentity.size !== browserRequests.length
       || browserResponseEvidenceByIdentity.size !== browserRequests.length
