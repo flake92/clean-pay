@@ -24,6 +24,7 @@ import {
   assertJourneyProjectAbsent,
   attestJourneyOwnedStack,
   cleanupJourneyOwnedStack,
+  collectJourneyDockerFailureEvidence,
   createJourneyOwnedInputSnapshot,
   deriveJourneyApplicationImageConfigDigest,
   deriveJourneyMigrationImageConfigDigest,
@@ -2699,6 +2700,64 @@ test("kills a timed-out Docker child but settles only after stdio close", async 
   await expect(outcome).resolves.toBe("rejected");
 });
 
+test("projects Docker launch stderr to bounded synthetic-service evidence", async () => {
+  const stderrText = "dependency failed to start: container private-project-app-1 is unhealthy";
+  const failure = await failedDockerOperation(
+    ["compose", "--project-name", "private-project", "up", "--detach", "--wait"],
+    stderrText,
+  );
+
+  expect(collectJourneyDockerFailureEvidence(failure)).toEqual([{
+    schemaVersion: 1,
+    status: "journey_docker_operation_failed",
+    operation: "compose-up",
+    terminationReason: "exit",
+    exitCode: 1,
+    signal: null,
+    stdoutBytes: 0,
+    stderrBytes: Buffer.byteLength(stderrText),
+    stdoutSha256: createHash("sha256").update("").digest("hex"),
+    stderrSha256: createHash("sha256").update(stderrText).digest("hex"),
+    classifications: ["container-unhealthy", "dependency-failed"],
+    services: ["app"],
+  }]);
+  expect(JSON.stringify(collectJourneyDockerFailureEvidence(failure)))
+    .not.toContain("private-project");
+});
+
+test("keeps Docker failure projection total, bounded and fixed-vocabulary", async () => {
+  const mutableArgs = ["deploy", "bearer-secret"];
+  const unknownFailure = await failedDockerOperation(
+    mutableArgs,
+    "opaque failure",
+    () => { mutableArgs[1] = "second-secret"; },
+    999,
+    "BEARERSECRET" as NodeJS.Signals,
+  );
+  const unknownEvidence = collectJourneyDockerFailureEvidence(unknownFailure);
+  expect(unknownEvidence).toMatchObject([{
+    exitCode: null,
+    operation: "docker-other",
+    signal: null,
+  }]);
+  expect(JSON.stringify(unknownEvidence)).not.toMatch(/bearer-secret|second-secret/i);
+
+  const overlappingFailure = await failedDockerOperation(
+    ["compose", "up"],
+    "container private-browser-db-observer-provision-1 is unhealthy",
+  );
+  expect(collectJourneyDockerFailureEvidence(overlappingFailure)).toMatchObject([{
+    services: ["browser-db-observer-provision"],
+  }]);
+
+  const revoked = Proxy.revocable({}, {});
+  revoked.revoke();
+  expect(collectJourneyDockerFailureEvidence(revoked.proxy)).toEqual([]);
+  let deep: object = {};
+  for (let depth = 0; depth < 20_000; depth += 1) deep = { cause: deep };
+  expect(collectJourneyDockerFailureEvidence(deep)).toEqual([]);
+});
+
 test("rejects a killed Docker child without close only after OS absence is proven", async () => {
   const child = new EventEmitter() as EventEmitter & {
     exitCode: number | null;
@@ -2856,6 +2915,39 @@ test("keeps CONNECT cleanup fail-stop while an exact child PID may still be live
   absent = true;
   await expect(outcome).resolves.toBe("rejected");
 });
+
+async function failedDockerOperation(
+  args: string[],
+  stderrText: string,
+  beforeClose: () => void = () => undefined,
+  code = 1,
+  signal: NodeJS.Signals | null = null,
+) {
+  const child = new EventEmitter() as EventEmitter & {
+    exitCode: number | null;
+    pid: number;
+    signalCode: NodeJS.Signals | null;
+    stdout: PassThrough;
+    stderr: PassThrough;
+    kill: (requestedSignal?: NodeJS.Signals) => boolean;
+  };
+  child.exitCode = null;
+  child.pid = 454545;
+  child.signalCode = null;
+  child.stdout = new PassThrough();
+  child.stderr = new PassThrough();
+  child.kill = () => true;
+  const outcome = runJourneyDockerCommand(args, 1_024, {}, {
+    repositoryRoot: path.resolve(__dirname, "../../.."),
+    spawnProcess: (() => child) as unknown as typeof import("node:child_process").spawn,
+    timeoutMs: 1_000,
+  });
+  beforeClose();
+  child.stdout.end();
+  child.stderr.end(stderrText);
+  child.emit("close", code, signal);
+  return outcome.catch((error) => error);
+}
 
 function shortProxyLifecycleBounds() {
   return {

@@ -85,6 +85,85 @@ const sanitizedOutputFileSystemOperations = Object.freeze({
   realpath,
   unlink,
 });
+const dockerFailureEvidenceByError = new WeakMap();
+const dockerFailureTraversalMaximumDepth = 8;
+const dockerFailureTraversalMaximumNodes = 64;
+const dockerFailureOperations = new Set([
+  "compose-config", "compose-down", "compose-images", "compose-other", "compose-ps", "compose-up",
+  "container-create", "container-inspect", "container-list", "container-remove", "docker-other",
+  "image-inspect", "network-inspect", "network-list", "volume-inspect", "volume-list",
+]);
+const dockerFailureSignals = new Set([
+  "SIGABRT", "SIGALRM", "SIGBREAK", "SIGBUS", "SIGCHLD", "SIGCONT", "SIGFPE", "SIGHUP",
+  "SIGILL", "SIGINT", "SIGIO", "SIGIOT", "SIGKILL", "SIGPIPE", "SIGPOLL", "SIGPROF",
+  "SIGPWR", "SIGQUIT", "SIGSEGV", "SIGSTKFLT", "SIGSTOP", "SIGSYS", "SIGTERM", "SIGTRAP",
+  "SIGTSTP", "SIGTTIN", "SIGTTOU", "SIGURG", "SIGUSR1", "SIGUSR2", "SIGVTALRM", "SIGWINCH",
+  "SIGXCPU", "SIGXFSZ",
+]);
+const dockerFailureTerminationReasons = new Set([
+  "exit", "spawn-error", "stdout-overflow", "timeout",
+]);
+const dockerFailureClassificationRules = Object.freeze([
+  Object.freeze(["container-unhealthy", /\bunhealthy\b|failed to become healthy|healthcheck/i]),
+  Object.freeze(["dependency-failed", /dependency failed to start|dependency.*failed/i]),
+  Object.freeze(["container-exited", /\bexited \([1-9][0-9]*\)|exit code [1-9][0-9]*\b/i]),
+  Object.freeze(["port-conflict", /port is already allocated|address already in use/i]),
+  Object.freeze(["bind-unavailable", /cannot assign requested address/i]),
+  Object.freeze(["image-unavailable", /no such image|pull access denied|manifest unknown/i]),
+  Object.freeze(["daemon-unavailable", /cannot connect to the docker daemon|daemon is not running/i]),
+  Object.freeze(["filesystem-capacity", /no space left|\bENOSPC\b/i]),
+  Object.freeze(["filesystem-permission", /permission denied|\bEACCES\b/i]),
+  Object.freeze(["compose-validation", /validating .*compose|invalid compose|additional propert/i]),
+  Object.freeze(["timeout", /timed out|context deadline exceeded/i]),
+]);
+const syntheticDockerServices = Object.freeze([
+  "app",
+  "browser-db-observer",
+  "browser-db-observer-provision",
+  "browser-oidc-mock",
+  "browser-provider-mock",
+  "browser-proxy",
+  "db-grant-sync",
+  "db-role-provision",
+  "migration",
+  "postgres",
+  "redis",
+]);
+
+export function collectJourneyDockerFailureEvidence(error) {
+  try {
+    const evidence = [];
+    const pending = [{ depth: 0, value: error }];
+    const seen = new Set();
+    let visited = 0;
+    while (pending.length > 0 && evidence.length < 16
+      && visited < dockerFailureTraversalMaximumNodes) {
+      const { depth, value } = pending.shift();
+      if (value === null || (typeof value !== "object" && typeof value !== "function")
+        || seen.has(value)) {
+        continue;
+      }
+      seen.add(value);
+      visited += 1;
+      const direct = dockerFailureEvidenceByError.get(value);
+      if (direct) evidence.push(direct);
+      if (depth >= dockerFailureTraversalMaximumDepth) continue;
+      const descriptor = Object.getOwnPropertyDescriptor(value, "errors");
+      if (descriptor && Object.hasOwn(descriptor, "value") && Array.isArray(descriptor.value)) {
+        for (const child of descriptor.value.slice(0, 8)) {
+          pending.push({ depth: depth + 1, value: child });
+        }
+      }
+      const cause = Object.getOwnPropertyDescriptor(value, "cause");
+      if (cause && Object.hasOwn(cause, "value")) {
+        pending.push({ depth: depth + 1, value: cause.value });
+      }
+    }
+    return Object.freeze(evidence);
+  } catch {
+    return Object.freeze([]);
+  }
+}
 
 export function journeyDockerCliEnvironment(
   source = Object.assign(Object.create(null), process.env),
@@ -297,6 +376,7 @@ export function runJourneyDockerCommand(
       || typeof spawnProcess !== "function" || !path.isAbsolute(repositoryRoot)) {
     fail("Bounded journey Docker command input is invalid.");
   }
+  const operation = dockerOperation(args);
   return new Promise((resolve, reject) => {
     const child = spawnProcess("docker", args, {
       cwd: repositoryRoot,
@@ -331,10 +411,20 @@ export function runJourneyDockerCommand(
       stderrStream.removeAllListeners("data");
       stdoutStream.destroy();
       stderrStream.destroy();
-      reject(new Error(
-        `Bounded Docker operation failed (${terminationReason ?? "exit"}:`
-        + `os-terminated-without-close:${sha256(stderr)}).`,
-      ));
+      reject(createJourneyDockerFailureError({
+        code: null,
+        operation,
+        signal: child.signalCode,
+        stderr,
+        stderrBytes,
+        stdout,
+        stdoutBytes,
+        terminationReason: terminationReason ?? "exit",
+        message: (
+          `Bounded Docker operation failed (${terminationReason ?? "exit"}:`
+          + `os-terminated-without-close:${sha256(stderr)}).`
+        ),
+      }));
     };
     const verifyClosedAfterKill = async () => {
       if (settled) return;
@@ -399,12 +489,99 @@ export function runJourneyDockerCommand(
         resolve(stdout.trim());
         return;
       }
-      reject(new Error(
-        `Bounded Docker operation failed (${terminationReason ?? "exit"}:`
-        + `${code ?? signal ?? "unknown"}:${sha256(stderr)}).`,
-      ));
+      reject(createJourneyDockerFailureError({
+        code,
+        operation,
+        signal,
+        stderr,
+        stderrBytes,
+        stdout,
+        stdoutBytes,
+        terminationReason: terminationReason ?? "exit",
+        message: (
+          `Bounded Docker operation failed (${terminationReason ?? "exit"}:`
+          + `${code ?? signal ?? "unknown"}:${sha256(stderr)}).`
+        ),
+      }));
     });
   });
+}
+
+function createJourneyDockerFailureError(input) {
+  const error = new Error(input.message);
+  const combined = `${input.stdout}\n${input.stderr}`;
+  const classifications = dockerFailureClassificationRules
+    .filter(([, pattern]) => pattern.test(combined))
+    .map(([classification]) => classification)
+    .sort();
+  if (classifications.length === 0 && combined.trim()) classifications.push("unclassified");
+  const services = classifyDockerServices(combined);
+  dockerFailureEvidenceByError.set(error, Object.freeze({
+    schemaVersion: 1,
+    status: "journey_docker_operation_failed",
+    operation: dockerFailureOperations.has(input.operation) ? input.operation : "docker-other",
+    terminationReason: dockerFailureTerminationReasons.has(input.terminationReason)
+      ? input.terminationReason
+      : "exit",
+    exitCode: Number.isSafeInteger(input.code) && input.code >= 0 && input.code <= 255
+      ? input.code
+      : null,
+    signal: dockerFailureSignals.has(input.signal)
+      ? input.signal
+      : null,
+    stdoutBytes: boundedDockerFailureByteCount(input.stdoutBytes, 2 * 1024 * 1024),
+    stderrBytes: boundedDockerFailureByteCount(input.stderrBytes, 4 * 1024),
+    stdoutSha256: sha256(input.stdout),
+    stderrSha256: sha256(input.stderr),
+    classifications: Object.freeze(classifications),
+    services: Object.freeze(services),
+  }));
+  return error;
+}
+
+function boundedDockerFailureByteCount(value, maximum) {
+  return Number.isSafeInteger(value) && value >= 0 && value <= maximum ? value : null;
+}
+
+function classifyDockerServices(output) {
+  const occurrences = [];
+  for (const service of syntheticDockerServices) {
+    const pattern = new RegExp(`(^|[^a-z0-9])(${service})(?=$|[^a-z0-9])`, "gi");
+    for (const match of output.matchAll(pattern)) {
+      const start = match.index + match[1].length;
+      occurrences.push({ end: start + service.length, service, start });
+    }
+  }
+  occurrences.sort((left, right) => (
+    left.start - right.start || right.end - right.start - (left.end - left.start)
+  ));
+  const selected = [];
+  for (const occurrence of occurrences) {
+    if (selected.some(({ end, start }) => occurrence.start < end && occurrence.end > start)) {
+      continue;
+    }
+    selected.push(occurrence);
+  }
+  return [...new Set(selected.map(({ service }) => service))].sort();
+}
+
+function dockerOperation(args) {
+  if (args[0] === "compose") {
+    for (const operation of ["up", "down", "config", "ps", "images"]) {
+      if (args.includes(operation)) return `compose-${operation}`;
+    }
+    return "compose-other";
+  }
+  if (args[0] === "image" && args[1] === "inspect") return "image-inspect";
+  if (args[0] === "container" && args[1] === "create") return "container-create";
+  if (args[0] === "container" && args[1] === "inspect") return "container-inspect";
+  if (args[0] === "container" && args[1] === "rm") return "container-remove";
+  if (args[0] === "ps") return "container-list";
+  if (args[0] === "network" && args[1] === "ls") return "network-list";
+  if (args[0] === "network" && args[1] === "inspect") return "network-inspect";
+  if (args[0] === "volume" && args[1] === "ls") return "volume-list";
+  if (args[0] === "volume" && args[1] === "inspect") return "volume-inspect";
+  return "docker-other";
 }
 
 export async function withJourneyOwnedStackPair({ baseline, candidate }, callback) {
