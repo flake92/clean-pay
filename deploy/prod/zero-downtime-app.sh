@@ -619,11 +619,27 @@ discover_internal_network() {
 }
 
 assert_no_pending_migrations() {
+  info "validating the verified migration image role environment without network access"
+  docker run --rm \
+    --read-only \
+    --cap-drop ALL \
+    --security-opt no-new-privileges \
+    --pids-limit 128 \
+    --memory 1g \
+    --cpus 1.0 \
+    --tmpfs /tmp:rw,noexec,nosuid,nodev,size=64m,mode=1777 \
+    --network none \
+    --env-file "$MIGRATION_ENV_FILE" \
+    --env CLEAN_PAY_RUNTIME_ROLE=migration \
+    --entrypoint /usr/bin/env \
+    "$TARGET_MIGRATION_IMAGE" \
+    node deploy/prod/validate-env.mjs \
+    || fail "migration image role environment validation failed"
+
   info "checking that the verified migration image has no pending Prisma migrations"
-  # The wrapper replaces the former `node deploy/prod/validate-env.mjs` shell
-  # chain: it parses the provision role contract, verifies the exact reviewed
+  # The wrapper parses the provision role contract, verifies the exact reviewed
   # database state, and then runs pinned Prisma `migrate status` with a minimal
-  # child environment. The fenced migration role remains NOLOGIN.
+  # child environment. The separately validated migration role remains NOLOGIN.
   docker run --rm \
     --read-only \
     --cap-drop ALL \
