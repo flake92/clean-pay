@@ -1008,6 +1008,17 @@ test("retains image, preflight, proof, and CONNECT rejection causes for sanitiza
   expect(runner).not.toMatch(/catch\s*\{\s*return \{ status: "rejected" \}/);
 });
 
+test("emits bounded Docker diagnostics only when a provider failure contains them", async () => {
+  const runner = await readFile(
+    path.resolve(__dirname, "prove-provider-overlap.mjs"),
+    "utf8",
+  );
+  expect(runner).toContain("collectJourneyDockerFailureEvidence(error)");
+  expect(runner).toContain(
+    "...(dockerFailures.length === 0 ? {} : { dockerFailures })",
+  );
+});
+
 test("rejects malformed or unbound provider manifest config annotations", () => {
   const rootDigest = `sha256:${"1".repeat(64)}`;
   const childDigest = `sha256:${"2".repeat(64)}`;
@@ -1860,6 +1871,80 @@ test("rejects arbitrary same-host paths, queries, redirects, methods, and transp
   expect(installProviderOverlapHistoryInstrumentation.toString()).not.toContain(
     "binding.finally",
   );
+});
+
+test("prearms profile load and keeps the exact cabinet URL at DOM content", async () => {
+  const runnerSource = await readFile(
+    path.resolve(__dirname, "prove-provider-overlap.mjs"),
+    "utf8",
+  );
+  expect(runnerSource.match(/page\.waitForURL\(/g)).toHaveLength(2);
+  expect(runnerSource).toContain(
+    '(url) => url.href === "https://pay.ci.clean-pay.dev/profile",\n'
+      + '      { waitUntil: "load", timeout: 30_000 },',
+  );
+  expect(runnerSource).toContain(
+    '(url) => url.href === "https://pay.ci.clean-pay.dev/cabinet",\n'
+      + '      { waitUntil: "domcontentloaded", timeout: 30_000 },',
+  );
+  expect(runnerSource).toMatch(
+    /const profileNavigation = page\.waitForURL\([\s\S]{1,384}await Promise\.all\(\[\s*profileNavigation,\s*telegram\.click\(\),\s*\]\);/,
+  );
+  expect(runnerSource).toContain("await waitForProviderCabinetNavigation(page);");
+  expect(runnerSource).toContain("Provider profile navigation barrier failed.");
+  expect(runnerSource).toContain("Provider cabinet navigation barrier failed.");
+  expect(runnerSource).not.toContain("await telegram.click();");
+
+  const browser = await chromium.launch({ headless: true });
+  try {
+    const context = await browser.newContext({ serviceWorkers: "block" });
+    let releasePendingAsset: (() => void) | undefined;
+    await context.route("**/*", async (route) => {
+      const pathname = new URL(route.request().url()).pathname;
+      if (pathname === "/pending.png") {
+        await new Promise<void>((resolve) => {
+          releasePendingAsset = resolve;
+        });
+        await route.abort("blockedbyclient");
+        return;
+      }
+      if (pathname !== "/cabinet") {
+        throw new Error(`Unexpected DOM-content characterization request: ${pathname}`);
+      }
+      await route.fulfill({
+        body: '<!doctype html><html><body><h1>Cabinet</h1><img src="/pending.png"></body></html>',
+        contentType: "text/html",
+        status: 200,
+      });
+    });
+    const page = await context.newPage();
+    try {
+      const pendingAssetRequest = page.waitForRequest(
+        (request) => new URL(request.url()).pathname === "/pending.png",
+        { timeout: 5_000 },
+      );
+      await Promise.all([
+        pendingAssetRequest,
+        page.goto("https://provider-navigation.clean-pay.test/cabinet", {
+          waitUntil: "domcontentloaded",
+          timeout: 5_000,
+        }),
+      ]);
+      await expect.poll(() => typeof releasePendingAsset, { timeout: 500 })
+        .toBe("function");
+      await expect(page.waitForURL(
+        (url) => url.href === "https://provider-navigation.clean-pay.test/cabinet",
+        { waitUntil: "domcontentloaded", timeout: 500 },
+      )).resolves.toBeUndefined();
+      await expect(page.waitForLoadState("load", { timeout: 100 })).rejects.toThrow(/Timeout/);
+    } finally {
+      releasePendingAsset?.();
+      await page.waitForLoadState("load", { timeout: 1_000 }).catch(() => undefined);
+      await context.close();
+    }
+  } finally {
+    await browser.close();
+  }
 });
 
 test("binds every completed static response to independent attested bytes and MIME", async () => {
