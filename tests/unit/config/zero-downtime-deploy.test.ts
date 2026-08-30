@@ -419,7 +419,9 @@ describe("guarded zero-downtime application rollout", () => {
     const migrationGuard = shellFunction("assert_no_pending_migrations");
 
     expect(migrationGuard).toContain('--env-file "$PROVISION_ENV_FILE"');
-    expect(migrationGuard).not.toContain('--env-file "$MIGRATION_ENV_FILE"');
+    expect(migrationGuard).toContain('--env-file "$MIGRATION_ENV_FILE"');
+    expect(migrationGuard).toContain("--network none");
+    expect(migrationGuard).toContain("deploy/prod/validate-env.mjs");
     expect(migrationGuard).toContain("--entrypoint node");
     expect(migrationGuard).toContain(
       "deploy/prod/prisma-migration-status.mjs migrate status",
