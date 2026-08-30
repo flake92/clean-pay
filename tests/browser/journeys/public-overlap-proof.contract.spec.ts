@@ -265,6 +265,7 @@ test("pins the local capture tool and publishes proof only after owned-stack cle
   expect(captureSource).toContain("const settlements = await Promise.allSettled(");
   expect(captureSource).toContain('(["baseline", "candidate"] as const).map');
   expect(captureSource).toContain("createSerializedPairCaptureTaskLifecycle()");
+  expect(captureSource).toContain("captureLifecycle.captureSerialized(");
   expect(captureSource).toContain("prepareCaptureSample({");
   expect(captureSource).toContain("capturePreparedSample(prepared)");
   expect(captureSource).toContain("createSerializedPairTerminalScreenshotCapture()");
@@ -282,6 +283,12 @@ test("pins the local capture tool and publishes proof only after owned-stack cle
   expect(fixturesSource).toContain(
     "for (const [processIndex, browser] of independentChromiumBrowsers.entries())",
   );
+  expect(fixturesSource).toContain("independentChromiumBrowserPairs: [async (");
+  expect(fixturesSource).toContain(
+    "for (const [processIndex, browserPair] of independentChromiumBrowserPairs.entries())",
+  );
+  expect(fixturesSource).toContain("const browser = browserPair[role]");
+  expect(fixturesSource).toContain('label: "paired independent Chromium browser"');
   expect(fixturesSource).toContain('for (const role of ["baseline", "candidate"] as const)');
   expect(fixturesSource).toContain("const context = await browser.newContext({");
   expect(fixturesSource).toContain("const replayGuard = await installCharacterizationReplayGuard({");

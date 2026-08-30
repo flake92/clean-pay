@@ -66,7 +66,17 @@ type BrowserFixtures = {
 
 type BrowserWorkerFixtures = {
   independentChromiumBrowsers: readonly [Browser, Browser, Browser];
+  independentChromiumBrowserPairs: readonly [
+    CharacterizationBrowserProcessPair,
+    CharacterizationBrowserProcessPair,
+    CharacterizationBrowserProcessPair,
+  ];
 };
+
+type CharacterizationBrowserProcessPair = Readonly<{
+  baseline: Browser;
+  candidate: Browser;
+}>;
 
 type PageGuard = {
   consoleMessages: ReturnType<typeof consoleDiagnostic>[];
@@ -115,6 +125,56 @@ export const test = playwrightTest.extend<BrowserFixtures, BrowserWorkerFixtures
       }
     }
     throwCollectedFailures(failures, "Independent Chromium worker failed.");
+  }, { scope: "worker" }],
+
+  independentChromiumBrowserPairs: [async (
+    { browserName, playwright },
+    provide,
+    workerInfo,
+  ) => {
+    if (browserName !== "chromium") {
+      throw new Error("The paired public characterization quorum requires Chromium.");
+    }
+    const launchOptions = workerInfo.project.use.launchOptions ?? {};
+    assertExactLaunchOptions(launchOptions);
+
+    const browsers: Browser[] = [];
+    const pairs: CharacterizationBrowserProcessPair[] = [];
+    const failures: unknown[] = [];
+    try {
+      for (
+        let processIndex = 0;
+        processIndex < EXACT_SCREENSHOT_QUORUM_PROCESS_COUNT;
+        processIndex += 1
+      ) {
+        const baseline = await playwright.chromium.launch(launchOptions);
+        browsers.push(baseline);
+        const candidate = await playwright.chromium.launch(launchOptions);
+        browsers.push(candidate);
+        pairs.push(Object.freeze({ baseline, candidate }));
+      }
+      await provide(pairs as [
+        CharacterizationBrowserProcessPair,
+        CharacterizationBrowserProcessPair,
+        CharacterizationBrowserProcessPair,
+      ]);
+    } catch (error) {
+      failures.push(error);
+    } finally {
+      try {
+        await closeOwnedResources({
+          close: (browser) => browser.close({
+            reason: "Paired characterization worker ended.",
+          }),
+          label: "paired independent Chromium browser",
+          resources: browsers,
+          timeoutMs: BROWSER_CLOSE_TIMEOUT_MS,
+        });
+      } catch (error) {
+        failures.push(error);
+      }
+    }
+    throwCollectedFailures(failures, "Paired independent Chromium worker failed.");
   }, { scope: "worker" }],
 
   guardedPage: async ({ page }, provide, testInfo) => {
@@ -197,9 +257,9 @@ export const test = playwrightTest.extend<BrowserFixtures, BrowserWorkerFixtures
     const guards: PageGuard[] = [];
     try {
       const contextOptions = characterizationContextOptions(testInfo.project.use);
-      for (const browser of independentChromiumBrowsers) {
+      for (const [processIndex, browser] of independentChromiumBrowsers.entries()) {
         const context = await browser.newContext(contextOptions);
-        contexts.push(context);
+        contexts[processIndex] = context;
         await installDeterministicTurnstileStub(context);
         const replayGuard = await installCharacterizationReplayGuard({
           applicationOrigin,
@@ -207,8 +267,8 @@ export const test = playwrightTest.extend<BrowserFixtures, BrowserWorkerFixtures
         });
         const page = await context.newPage();
         replayGuard.bindPrimaryPage(page);
-        pages.push({ page, replayGuard });
-        guards.push(guardPage(page, applicationOrigin));
+        pages[processIndex] = { page, replayGuard };
+        guards[processIndex] = guardPage(page, applicationOrigin);
       }
       await provide(pages as [
         CharacterizationGuardedPage,
@@ -301,7 +361,7 @@ export const test = playwrightTest.extend<BrowserFixtures, BrowserWorkerFixtures
     await reconcileRegisteredBaselineArtifacts(primary.page);
   },
 
-  pairedGuardedPageQuorum: async ({ independentChromiumBrowsers }, provide, testInfo) => {
+  pairedGuardedPageQuorum: async ({ independentChromiumBrowserPairs }, provide, testInfo) => {
     const environment = requirePublicOverlapPairEnvironment();
     const failures: unknown[] = [];
     const contexts: BrowserContext[] = [];
@@ -317,10 +377,11 @@ export const test = playwrightTest.extend<BrowserFixtures, BrowserWorkerFixtures
       if (baseOptions.baseURL !== environment.roles.baseline.applicationOrigin) {
         throw new Error("Paired characterization config is not bound to the baseline origin.");
       }
-      for (const [processIndex, browser] of independentChromiumBrowsers.entries()) {
+      for (const [processIndex, browserPair] of independentChromiumBrowserPairs.entries()) {
         const pages = {} as Record<PublicOverlapRole, CharacterizationGuardedPage>;
         for (const role of ["baseline", "candidate"] as const) {
           const applicationOrigin = environment.roles[role].applicationOrigin;
+          const browser = browserPair[role];
           const context = await browser.newContext({
             ...baseOptions,
             baseURL: applicationOrigin,

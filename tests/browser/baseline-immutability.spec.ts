@@ -1546,6 +1546,138 @@ test.describe("immutable browser baseline policy", () => {
     });
   });
 
+  test("serializes complete paired preparation and terminal evidence", async () => {
+    const lifecycle = createSerializedPairCaptureTaskLifecycle();
+    const calls: string[] = [];
+    let releaseBaselineTerminal!: () => void;
+    const baselineTerminalBlocked = new Promise<void>((resolve) => {
+      releaseBaselineTerminal = resolve;
+    });
+    const settlements = Promise.allSettled([
+      lifecycle.captureSerialized(
+        "baseline",
+        async () => {
+          calls.push("baseline:prepare");
+          return "baseline-prepared";
+        },
+        async (prepared) => {
+          calls.push(`baseline:terminal:${prepared}`);
+          await baselineTerminalBlocked;
+          return "baseline";
+        },
+      ),
+      lifecycle.captureSerialized(
+        "candidate",
+        async () => {
+          calls.push("candidate:prepare");
+          return "candidate-prepared";
+        },
+        async (prepared) => {
+          calls.push(`candidate:terminal:${prepared}`);
+          return "candidate";
+        },
+      ),
+    ]);
+
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(calls).toEqual([
+      "baseline:prepare",
+      "baseline:terminal:baseline-prepared",
+    ]);
+    releaseBaselineTerminal();
+    await expect(settlements).resolves.toEqual([
+      { status: "fulfilled", value: "baseline" },
+      { status: "fulfilled", value: "candidate" },
+    ]);
+    expect(calls).toEqual([
+      "baseline:prepare",
+      "baseline:terminal:baseline-prepared",
+      "candidate:prepare",
+      "candidate:terminal:candidate-prepared",
+    ]);
+  });
+
+  test("runs serialized candidate evidence after baseline preparation rejection", async () => {
+    const lifecycle = createSerializedPairCaptureTaskLifecycle();
+    const calls: string[] = [];
+    const baselineError = new Error("serialized baseline preparation failed");
+    const settlements = await Promise.allSettled([
+      lifecycle.captureSerialized(
+        "baseline",
+        async () => {
+          calls.push("baseline:prepare");
+          throw baselineError;
+        },
+        async () => {
+          calls.push("baseline:terminal");
+        },
+      ),
+      lifecycle.captureSerialized(
+        "candidate",
+        async () => {
+          calls.push("candidate:prepare");
+          return "candidate-prepared";
+        },
+        async () => {
+          calls.push("candidate:terminal");
+          return "candidate-completed";
+        },
+      ),
+    ]);
+
+    expect(calls).toEqual([
+      "baseline:prepare",
+      "candidate:prepare",
+      "candidate:terminal",
+    ]);
+    expect(settlements).toEqual([
+      { status: "rejected", reason: baselineError },
+      { status: "fulfilled", value: "candidate-completed" },
+    ]);
+  });
+
+  test("runs serialized candidate evidence after baseline terminal rejection", async () => {
+    const lifecycle = createSerializedPairCaptureTaskLifecycle();
+    const calls: string[] = [];
+    const baselineError = new Error("serialized baseline terminal failed");
+    const settlements = await Promise.allSettled([
+      lifecycle.captureSerialized(
+        "baseline",
+        async () => {
+          calls.push("baseline:prepare");
+          return "baseline-prepared";
+        },
+        async () => {
+          calls.push("baseline:terminal");
+          throw baselineError;
+        },
+      ),
+      lifecycle.captureSerialized(
+        "candidate",
+        async () => {
+          calls.push("candidate:prepare");
+          return "candidate-prepared";
+        },
+        async () => {
+          calls.push("candidate:terminal");
+          return "candidate-completed";
+        },
+      ),
+    ]);
+
+    expect(calls).toEqual([
+      "baseline:prepare",
+      "baseline:terminal",
+      "candidate:prepare",
+      "candidate:terminal",
+    ]);
+    expect(settlements).toEqual([
+      { status: "rejected", reason: baselineError },
+      { status: "fulfilled", value: "candidate-completed" },
+    ]);
+  });
+
   test("pins the canonical Chromium software-render launch policy", () => {
     expect(DETERMINISTIC_CHROMIUM_LAUNCH_ARGS).toEqual([
       "--disable-gpu",

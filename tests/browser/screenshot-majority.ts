@@ -113,6 +113,17 @@ export function createSerializedPairCaptureTaskLifecycle() {
   });
   let baselineTerminalReleased = false;
   const started = new Set<PublicOverlapScreenshotRole>();
+  let releaseSerializedStartBarrier!: () => void;
+  const serializedStartBarrier = new Promise<void>((resolve) => {
+    releaseSerializedStartBarrier = resolve;
+  });
+  let serializedStartBarrierReleased = false;
+  const serializedStarted = new Set<PublicOverlapScreenshotRole>();
+  let releaseSerializedBaseline!: () => void;
+  const serializedBaselineFinished = new Promise<void>((resolve) => {
+    releaseSerializedBaseline = resolve;
+  });
+  let serializedBaselineReleased = false;
   const finishBarrier = (outcome: BarrierOutcome) => {
     if (barrierReleased) return;
     barrierReleased = true;
@@ -122,6 +133,16 @@ export function createSerializedPairCaptureTaskLifecycle() {
     if (baselineTerminalReleased) return;
     baselineTerminalReleased = true;
     releaseBaselineTerminal();
+  };
+  const finishSerializedStartBarrier = () => {
+    if (serializedStartBarrierReleased) return;
+    serializedStartBarrierReleased = true;
+    releaseSerializedStartBarrier();
+  };
+  const finishSerializedBaseline = () => {
+    if (serializedBaselineReleased) return;
+    serializedBaselineReleased = true;
+    releaseSerializedBaseline();
   };
 
   return Object.freeze({
@@ -161,6 +182,30 @@ export function createSerializedPairCaptureTaskLifecycle() {
         return await captureTerminal(prepared);
       } finally {
         if (role === "baseline") finishBaselineTerminal();
+      }
+    },
+    async captureSerialized<TPrepared, TResult>(
+      role: PublicOverlapScreenshotRole,
+      prepare: SerializedPairCaptureTask<TPrepared>,
+      captureTerminal: SerializedPairTerminalTask<TPrepared, TResult>,
+    ) {
+      if ((role !== "baseline" && role !== "candidate")
+        || typeof prepare !== "function"
+        || typeof captureTerminal !== "function") {
+        throw new Error("Fully serialized paired characterization task is invalid.");
+      }
+      if (serializedStarted.has(role)) {
+        throw new Error("Fully serialized paired characterization role was started more than once.");
+      }
+      serializedStarted.add(role);
+      if (serializedStarted.size === 2) finishSerializedStartBarrier();
+      await serializedStartBarrier;
+      if (role === "candidate") await serializedBaselineFinished;
+      try {
+        const prepared = await prepare();
+        return await captureTerminal(prepared);
+      } finally {
+        if (role === "baseline") finishSerializedBaseline();
       }
     },
   });
