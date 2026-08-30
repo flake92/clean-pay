@@ -24,6 +24,7 @@ import {
   createPublicOverlapProof,
   createPublicOverlapStackBinding,
   readPublicOverlapOwnership,
+  readPublicOverlapPairOwnership,
   readPublicOverlapPairReceipt,
   resolvePublicOverlapProofPath,
   sha256,
@@ -44,6 +45,7 @@ const publicOverlapConfig = path.join(
   "public-overlap.playwright.config.ts",
 );
 let preparedOwnership;
+let preparedPairOwnership;
 let argumentsByName;
 let captureId;
 let completed = false;
@@ -87,12 +89,18 @@ try {
       CLEAN_PAY_PUBLIC_OVERLAP_BASELINE_BINDING_SHA256: baselineBindingSha256,
       CLEAN_PAY_PUBLIC_OVERLAP_CANDIDATE_BINDING_SHA256: candidateBindingSha256,
     }, 120_000);
-    preparedOwnership = await readPublicOverlapOwnership({
-      baselineBindingSha256,
-      candidateBindingSha256,
+    preparedPairOwnership = await readPublicOverlapPairOwnership({
       captureId,
       repositoryRoot,
     });
+    const ownership = await readPublicOverlapOwnership({
+      baselineBindingSha256,
+      candidateBindingSha256,
+      captureId,
+      expectedPairOwnershipSha256: preparedPairOwnership.pairOwnershipSha256,
+      repositoryRoot,
+    });
+    preparedOwnership = ownership;
 
     const baselineOrigin = exactAppOrigin(baselineInput.contract.publications.app, "baseline");
     const candidateOrigin = exactAppOrigin(candidateInput.contract.publications.app, "candidate");
@@ -169,12 +177,13 @@ try {
   })}\n`);
 } catch (primaryError) {
   let failure = primaryError;
-  if (!completed && preparedOwnership && captureId) {
+  const cleanupPairOwnershipSha256 = preparedPairOwnership?.pairOwnershipSha256;
+  if (!completed && cleanupPairOwnershipSha256 && captureId) {
     try {
       await runPublicOverlapPlaywright("cleanup", {
         CLEAN_PAY_PUBLIC_OVERLAP_CAPTURE_ID: captureId,
         CLEAN_PAY_PUBLIC_OVERLAP_PAIR_OWNERSHIP_SHA256:
-          preparedOwnership.pairOwnershipSha256,
+          cleanupPairOwnershipSha256,
       }, 120_000);
     } catch (cleanupError) {
       failure = new AggregateError(

@@ -71,6 +71,11 @@ const rootImageManifestMediaTypes = new Set([
   ...indexImageManifestMediaTypes,
   ...platformImageManifestMediaTypes,
 ]);
+const registryAnnotationMaximumCount = 32;
+const registryAnnotationMaximumKeyBytes = 128;
+const registryAnnotationMaximumValueBytes = 2 * 1024;
+const registryAnnotationMaximumTotalBytes = 16 * 1024;
+const registryAnnotationKeyPattern = /^[A-Za-z0-9][A-Za-z0-9._/-]*$/;
 export const JOURNEY_COMPOSE_ONE_SHOT_SERVICE_NAMES = Object.freeze(
   [...oneShotServices].sort(),
 );
@@ -819,8 +824,15 @@ function assertServiceRuntime(input) {
     expectedMigrationRuntimeImageDigest,
   );
   assertExactEnvironment(container.Config.Env, effectiveEnvironment(image, service));
-  exactJson(container.Config.Entrypoint ?? null, effectiveList(service.entrypoint, image.Config?.Entrypoint));
-  exactJson(container.Config.Cmd ?? null, effectiveList(service.command, image.Config?.Cmd));
+  exactJson(
+    container.Config.Entrypoint ?? null,
+    effectiveEntrypoint(service.entrypoint, image.Config?.Entrypoint),
+  );
+  const expectedCommand = effectiveCommand(service.command, service.entrypoint, image.Config?.Cmd);
+  exactJson(
+    container.Config.Cmd ?? null,
+    expectedCommand,
+  );
   exactValue(container.Config.User ?? "", service.user ?? image.Config?.User ?? "");
   exactValue(container.Config.WorkingDir ?? "", service.working_dir ?? image.Config?.WorkingDir ?? "");
   assertHealthcheck(container.Config.Healthcheck, service.healthcheck, image.Config?.Healthcheck);
@@ -1176,23 +1188,30 @@ function assertContainerdManifestDescriptor(
       || descriptor.mediaType !== rootDescriptor.mediaType)) {
     fail(`Containerd ${role} platform manifest differs from its single-manifest root.`);
   }
+  const singleManifestRoot = platformImageManifestMediaTypes.has(rootDescriptor?.mediaType);
+  const indexRoot = indexImageManifestMediaTypes.has(rootDescriptor?.mediaType);
   if (annotationsPresent) {
-    exactObjectKeys(
-      descriptor.annotations,
-      ["config.digest"],
-      `containerd ${role} platform manifest annotations`,
-    );
-    const configDigest = descriptor.annotations["config.digest"];
-    if (!/^sha256:[a-f0-9]{64}$/.test(configDigest ?? "")
-      || (expectedAnnotationConfigDigest !== undefined
-        && configDigest !== expectedAnnotationConfigDigest)) {
+    if (singleManifestRoot) {
+      exactObjectKeys(
+        descriptor.annotations,
+        ["config.digest"],
+        `containerd ${role} platform manifest annotations`,
+      );
+      const configDigest = descriptor.annotations["config.digest"];
+      if (!/^sha256:[a-f0-9]{64}$/.test(configDigest ?? "")
+        || (expectedAnnotationConfigDigest !== undefined
+          && configDigest !== expectedAnnotationConfigDigest)) {
+        fail(`Containerd ${role} platform manifest annotations differ from their exact contract.`);
+      }
+    } else if (indexRoot) {
+      assertBoundedRegistryAnnotations(descriptor.annotations, role);
+    } else {
       fail(`Containerd ${role} platform manifest annotations differ from their exact contract.`);
     }
   }
   const rootAnnotationsPresent = Object.hasOwn(rootDescriptor ?? {}, "annotations");
-  if ((rootAnnotationsPresent || annotationsPresent)
+  if (singleManifestRoot && (rootAnnotationsPresent || annotationsPresent)
     && (!rootDescriptor || typeof rootDescriptor !== "object" || Array.isArray(rootDescriptor)
-      || !platformImageManifestMediaTypes.has(rootDescriptor.mediaType)
       || rootDescriptor.digest !== expectedRootDigest
       || descriptor.digest !== expectedRootDigest
       || descriptor.mediaType !== rootDescriptor.mediaType
@@ -1203,6 +1222,34 @@ function assertContainerdManifestDescriptor(
     fail(`Containerd ${role} root and platform manifest annotations are not consistently bound.`);
   }
   return descriptor;
+}
+
+function assertBoundedRegistryAnnotations(value, role) {
+  if (!value || typeof value !== "object" || Array.isArray(value)
+    || ![Object.prototype, null].includes(Object.getPrototypeOf(value))) {
+    fail(`Containerd ${role} index-selected registry annotations are invalid.`);
+  }
+  const entries = Object.entries(value);
+  if (entries.length < 1 || entries.length > registryAnnotationMaximumCount
+    || Object.hasOwn(value, "config.digest")) {
+    fail(`Containerd ${role} index-selected registry annotations are invalid.`);
+  }
+  let totalBytes = 0;
+  for (const [key, annotation] of entries) {
+    const keyBytes = Buffer.byteLength(key);
+    if (!registryAnnotationKeyPattern.test(key)
+      || keyBytes > registryAnnotationMaximumKeyBytes
+      || typeof annotation !== "string"
+      || /[\u0000-\u001f\u007f]/.test(annotation)) {
+      fail(`Containerd ${role} index-selected registry annotations are invalid.`);
+    }
+    const valueBytes = Buffer.byteLength(annotation);
+    totalBytes += keyBytes + valueBytes;
+    if (valueBytes > registryAnnotationMaximumValueBytes
+      || totalBytes > registryAnnotationMaximumTotalBytes) {
+      fail(`Containerd ${role} index-selected registry annotations are invalid.`);
+    }
+  }
 }
 
 function exactImagePlatform(value, label) {
@@ -1238,7 +1285,7 @@ function effectiveEnvironment(image, service) {
   const result = parseEnvironmentList(image.Config?.Env ?? []);
   for (const [name, value] of Object.entries(service.environment ?? {})) {
     if (typeof value !== "string") fail("Rendered Compose environment value is invalid.");
-    result.set(name, value);
+    result.set(name, composeRuntimeString(value));
   }
   return [...result].map(([name, value]) => `${name}=${value}`);
 }
@@ -1401,7 +1448,7 @@ function assertLogging(actual, expected, daemonLoggingDriver) {
 
 function assertHealthcheck(actual, override, inherited) {
   const expected = override === undefined || override === null ? inherited : {
-    Test: override.test,
+    Test: composeRuntimeList(override.test),
     Interval: durationNanoseconds(override.interval),
     Timeout: durationNanoseconds(override.timeout),
     Retries: Number(override.retries ?? 0),
@@ -1814,6 +1861,46 @@ function effectiveList(override, inherited) {
   fail("Journey service command or entrypoint is invalid.");
 }
 
+function effectiveEntrypoint(entrypointOverride, inherited) {
+  if (entrypointOverride === undefined || entrypointOverride === null) {
+    return effectiveList(undefined, inherited);
+  }
+  return composeRuntimeList(entrypointOverride);
+}
+
+function effectiveCommand(commandOverride, entrypointOverride, inherited) {
+  if ((commandOverride === undefined || commandOverride === null)
+    && entrypointOverride !== undefined && entrypointOverride !== null) {
+    return null;
+  }
+  if (commandOverride === undefined || commandOverride === null) {
+    return effectiveList(undefined, inherited);
+  }
+  return composeRuntimeList(commandOverride);
+}
+
+function composeRuntimeList(value) {
+  return effectiveList(value, null)?.map(composeRuntimeString);
+}
+
+function composeRuntimeString(value) {
+  let decoded = "";
+  for (let index = 0; index < value.length;) {
+    if (value[index] !== "$") {
+      decoded += value[index];
+      index += 1;
+      continue;
+    }
+    let end = index;
+    while (value[end] === "$") end += 1;
+    const count = end - index;
+    if (count % 2 !== 0) fail("Rendered Compose dollar escaping is noncanonical.");
+    decoded += "$".repeat(count / 2);
+    index = end;
+  }
+  return decoded;
+}
+
 function normalizeRestart(value) {
   return value === undefined || value === null ? "no" : String(value);
 }
@@ -1952,11 +2039,15 @@ function exactImageReference(value, label) {
 }
 
 function exactJson(actual, expected) {
-  if (JSON.stringify(actual) !== JSON.stringify(expected)) fail("Journey runtime value differs.");
+  if (JSON.stringify(actual) !== JSON.stringify(expected)) {
+    fail("Journey runtime value differs.");
+  }
 }
 
 function exactValue(actual, expected) {
-  if (actual !== expected) fail("Journey runtime value differs.");
+  if (actual !== expected) {
+    fail("Journey runtime value differs.");
+  }
 }
 
 function isWithin(parent, child) {

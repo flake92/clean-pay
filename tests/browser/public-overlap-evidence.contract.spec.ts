@@ -42,6 +42,15 @@ test("defines the exact reusable 42-case/126-artifact public capture ledger", ()
     maximumArtifactBytes: 1024,
     suite: "journey-pair-v1",
   });
+  expect(() => createExactEphemeralCapturePolicy({
+    artifactPaths: Array.from(
+      { length: 513 },
+      (_, index) => `checkpoint-${index}/viewport.png`,
+    ),
+    caseCount: 1,
+    maximumArtifactBytes: 1024,
+    suite: "journey-pair-v1",
+  })).toThrow("ownership artifact path ledger is invalid");
 });
 
 test("seals and proves exact dual-origin public evidence without baseline writes", async () => {

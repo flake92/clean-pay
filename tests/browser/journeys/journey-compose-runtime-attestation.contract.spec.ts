@@ -93,6 +93,197 @@ test("matches multiple tmpfs entries by target and rejects an option near-miss",
   expect(() => assertJourneyComposeRuntimeInspection(nearMiss)).toThrow();
 });
 
+test("shadows the observer provision image VOLUME with bounded tmpfs", () => {
+  const composeSource = readFileSync(
+    path.resolve(process.cwd(), "tests/browser/journeys/docker-compose.journey.yml"),
+    "utf8",
+  );
+  const serviceBlock = /^  browser-db-observer-provision:\r?\n([\s\S]*?)(?=^  [a-z])/m
+    .exec(composeSource)?.[1];
+  expect(serviceBlock).toContain(
+    "- /var/lib/postgresql/data:rw,noexec,nosuid,nodev,size=8m,mode=0700",
+  );
+
+  const fixture = runtimeFixture();
+  fixture.compose.services["browser-db-observer-provision"].tmpfs = [
+    "/tmp:rw,noexec,nosuid,nodev,size=8m,mode=1777",
+    "/var/lib/postgresql/data:rw,noexec,nosuid,nodev,size=8m,mode=0700",
+  ];
+  (fixture.containersByService["browser-db-observer-provision"].HostConfig as {
+    Tmpfs: Record<string, string>;
+  }).Tmpfs = {
+    "/tmp": "rw,noexec,nosuid,nodev,size=8388608,mode=1777",
+    "/var/lib/postgresql/data": "rw,noexec,nosuid,nodev,size=8388608,mode=0700",
+  };
+
+  expect(() => assertJourneyComposeRuntimeInspection(fixture)).not.toThrow();
+
+  const anonymousVolumeNearMiss = structuredClone(fixture);
+  anonymousVolumeNearMiss.containersByService["browser-db-observer-provision"].Mounts.push({
+    Destination: "/var/lib/postgresql/data",
+    Name: "a".repeat(64),
+    RW: true,
+    Source: `/var/lib/docker/volumes/${"a".repeat(64)}/_data`,
+    Type: "volume",
+  });
+  expect(() => assertJourneyComposeRuntimeInspection(anonymousVolumeNearMiss)).toThrow();
+});
+
+test("models Compose entrypoint command-reset semantics without weakening image CMD inheritance", () => {
+  const resetFixture = runtimeFixture();
+  const resetService = resetFixture.compose.services["browser-db-observer"];
+  const resetContainer = resetFixture.containersByService["browser-db-observer"];
+  const resetImage = resetFixture.imagesById[resetContainer.Image] as ImageFixture & {
+    Config: { Cmd: string[] | null };
+  };
+  const observerEntrypoint = ["node", "/app/browser-db-observer.mjs"];
+  const imageDefaultCommand = ["sh", "-c", "node deploy/prod/validate-env.mjs"];
+  resetService.entrypoint = observerEntrypoint;
+  resetService.command = null as never;
+  resetContainer.Config.Entrypoint = observerEntrypoint;
+  resetContainer.Config.Cmd = null as never;
+  resetImage.Config.Cmd = imageDefaultCommand;
+
+  expect(() => assertJourneyComposeRuntimeInspection(resetFixture)).not.toThrow();
+
+  const resetNearMiss = structuredClone(resetFixture);
+  resetNearMiss.containersByService["browser-db-observer"].Config.Cmd = imageDefaultCommand;
+  expect(() => assertJourneyComposeRuntimeInspection(resetNearMiss)).toThrow();
+
+  const inheritedFixture = runtimeFixture();
+  const inheritedService = inheritedFixture.compose.services.redis;
+  const inheritedContainer = inheritedFixture.containersByService.redis;
+  const inheritedImage = inheritedFixture.imagesById[inheritedContainer.Image] as ImageFixture & {
+    Config: { Cmd: string[] | null };
+  };
+  const inheritedCommand = ["redis-server", "--save", ""];
+  inheritedService.command = null as never;
+  inheritedContainer.Config.Cmd = inheritedCommand;
+  inheritedImage.Config.Cmd = inheritedCommand;
+
+  expect(() => assertJourneyComposeRuntimeInspection(inheritedFixture)).not.toThrow();
+
+  const nullEntrypointFixture = runtimeFixture();
+  const nullEntrypointService = nullEntrypointFixture.compose.services.redis;
+  const nullEntrypointContainer = nullEntrypointFixture.containersByService.redis;
+  const nullEntrypointImage = nullEntrypointFixture.imagesById[
+    nullEntrypointContainer.Image
+  ] as ImageFixture & { Config: { Cmd: string[] | null; Entrypoint: string[] | null } };
+  nullEntrypointService.command = null as never;
+  nullEntrypointService.entrypoint = null;
+  nullEntrypointContainer.Config.Cmd = inheritedCommand;
+  nullEntrypointContainer.Config.Entrypoint = ["docker-entrypoint.sh"];
+  nullEntrypointImage.Config.Cmd = inheritedCommand;
+  nullEntrypointImage.Config.Entrypoint = ["docker-entrypoint.sh"];
+
+  expect(() => assertJourneyComposeRuntimeInspection(nullEntrypointFixture)).not.toThrow();
+
+  const emptyEntrypointFixture = runtimeFixture();
+  const emptyEntrypointService = emptyEntrypointFixture.compose.services.redis;
+  const emptyEntrypointContainer = emptyEntrypointFixture.containersByService.redis;
+  const emptyEntrypointImage = emptyEntrypointFixture.imagesById[
+    emptyEntrypointContainer.Image
+  ] as ImageFixture & { Config: { Cmd: string[] | null } };
+  emptyEntrypointService.command = null as never;
+  emptyEntrypointService.entrypoint = [];
+  emptyEntrypointContainer.Config.Cmd = null as never;
+  emptyEntrypointContainer.Config.Entrypoint = [];
+  emptyEntrypointImage.Config.Cmd = inheritedCommand;
+
+  expect(() => assertJourneyComposeRuntimeInspection(emptyEntrypointFixture)).not.toThrow();
+});
+
+test("models Compose dollar escaping only for explicit command and entrypoint overrides", () => {
+  const commandFixture = runtimeFixture();
+  const commandService = commandFixture.compose.services["browser-ca-ready"];
+  const commandContainer = commandFixture.containersByService["browser-ca-ready"];
+  commandService.command = ["/bin/sh", "-euc", "printf '$$HOME' '$$$$HOME'"];
+  commandContainer.Config.Cmd = ["/bin/sh", "-euc", "printf '$HOME' '$$HOME'"];
+
+  expect(() => assertJourneyComposeRuntimeInspection(commandFixture)).not.toThrow();
+
+  const commandNearMiss = structuredClone(commandFixture);
+  commandNearMiss.containersByService["browser-ca-ready"].Config.Cmd
+    = ["/bin/sh", "-euc", "printf '$$HOME' '$$$$HOME'"];
+  expect(() => assertJourneyComposeRuntimeInspection(commandNearMiss)).toThrow();
+
+  const noncanonicalCommand = structuredClone(commandFixture);
+  noncanonicalCommand.compose.services["browser-ca-ready"].command
+    = ["/bin/sh", "-euc", "printf '$$$HOME'"];
+  expect(() => assertJourneyComposeRuntimeInspection(noncanonicalCommand)).toThrow();
+
+  const entrypointFixture = runtimeFixture();
+  const entrypointService = entrypointFixture.compose.services["browser-db-observer"];
+  const entrypointContainer = entrypointFixture.containersByService["browser-db-observer"];
+  entrypointService.entrypoint = [
+    "/bin/sh", "-c", "printf '$$'; exec node /app/browser-db-observer.mjs",
+  ];
+  entrypointService.command = null as never;
+  entrypointContainer.Config.Entrypoint = [
+    "/bin/sh", "-c", "printf '$'; exec node /app/browser-db-observer.mjs",
+  ];
+  entrypointContainer.Config.Cmd = null as never;
+
+  expect(() => assertJourneyComposeRuntimeInspection(entrypointFixture)).not.toThrow();
+
+  const inheritedFixture = runtimeFixture();
+  const inheritedService = inheritedFixture.compose.services.redis;
+  const inheritedContainer = inheritedFixture.containersByService.redis;
+  const inheritedImage = inheritedFixture.imagesById[inheritedContainer.Image] as ImageFixture & {
+    Config: { Cmd: string[] | null };
+  };
+  const inheritedCommand = ["/bin/sh", "-c", "printf '$$HOME'"];
+  inheritedService.command = null as never;
+  inheritedContainer.Config.Cmd = inheritedCommand;
+  inheritedImage.Config.Cmd = inheritedCommand;
+
+  expect(() => assertJourneyComposeRuntimeInspection(inheritedFixture)).not.toThrow();
+
+  const environmentFixture = runtimeFixture();
+  const providerEnvironment = environmentFixture.compose.services[
+    "browser-provider-mock"
+  ].environment as Record<string, string>;
+  providerEnvironment.DOLLAR_TEST = "$${VALUE}-$$$$";
+  environmentFixture.containersByService["browser-provider-mock"].Config.Env
+    .push("DOLLAR_TEST=${VALUE}-$$");
+
+  expect(() => assertJourneyComposeRuntimeInspection(environmentFixture)).not.toThrow();
+
+  const environmentNearMiss = structuredClone(environmentFixture);
+  environmentNearMiss.containersByService["browser-provider-mock"].Config.Env
+    = environmentNearMiss.containersByService["browser-provider-mock"].Config.Env
+      .filter((value) => !value.startsWith("DOLLAR_TEST="));
+  environmentNearMiss.containersByService["browser-provider-mock"].Config.Env
+    .push("DOLLAR_TEST=$${VALUE}-$$$$");
+  expect(() => assertJourneyComposeRuntimeInspection(environmentNearMiss)).toThrow();
+
+  const healthcheckFixture = runtimeFixture();
+  healthcheckFixture.compose.services.postgres.healthcheck = {
+    test: ["CMD-SHELL", "pg_isready -U '$${POSTGRES_USER}' -d '$${POSTGRES_DB}'"],
+  };
+  healthcheckFixture.containersByService.postgres.Config.Healthcheck = {
+    Interval: 0,
+    Retries: 0,
+    StartInterval: 0,
+    StartPeriod: 0,
+    Test: ["CMD-SHELL", "pg_isready -U '${POSTGRES_USER}' -d '${POSTGRES_DB}'"],
+    Timeout: 0,
+  };
+  healthcheckFixture.containersByService.postgres.State.Health = { Status: "healthy" };
+
+  expect(() => assertJourneyComposeRuntimeInspection(healthcheckFixture)).not.toThrow();
+
+  const healthcheckNearMiss = structuredClone(healthcheckFixture);
+  const healthcheck = healthcheckNearMiss.containersByService.postgres.Config.Healthcheck as {
+    Test: string[];
+  };
+  healthcheck.Test = [
+    "CMD-SHELL",
+    "pg_isready -U '$${POSTGRES_USER}' -d '$${POSTGRES_DB}'",
+  ];
+  expect(() => assertJourneyComposeRuntimeInspection(healthcheckNearMiss)).toThrow();
+});
+
 test("emits bounded sanitized evidence when retrospective one-shot events are incomplete", () => {
   const fixture = runtimeFixture();
   const container = fixture.containersByService.migration;
@@ -339,6 +530,48 @@ test("attests containerd OCI roots and exact platform manifests without child re
     role: "migration",
     runtimeImageDigest: fixture.expectedMigrationRuntimeImageDigest,
   })));
+});
+
+test("accepts bounded registry annotations on an index-selected helper manifest", () => {
+  const fixture = annotatedIndexHelperFixture({
+    "com.docker.official-images.bashbrew.arch": "amd64",
+    "org.opencontainers.image.base.digest": `sha256:${"a".repeat(64)}`,
+    "org.opencontainers.image.base.name": "docker.io/library/alpine:3.22",
+    "org.opencontainers.image.created": "2026-08-01T00:00:00Z",
+    "org.opencontainers.image.revision": "b".repeat(40),
+    "org.opencontainers.image.source": "https://github.com/nodejs/docker-node.git",
+    "org.opencontainers.image.url": "https://hub.docker.com/_/node",
+    "org.opencontainers.image.version": "24-alpine",
+  });
+
+  expect(() => assertJourneyComposeRuntimeInspection(fixture)).not.toThrow();
+});
+
+test("rejects malformed or unbounded index-selected registry annotations", () => {
+  const invalidAnnotations: Array<[string, unknown]> = [
+    ["empty", {}],
+    ["null", null],
+    ["array", []],
+    ["non-string value", { "org.opencontainers.image.version": 24 }],
+    ["reserved config digest", { "config.digest": `sha256:${"a".repeat(64)}` }],
+    ["invalid key", { "org.opencontainers image.version": "24-alpine" }],
+    ["oversized key", { [`a${"b".repeat(128)}`]: "value" }],
+    ["control character", { "org.opencontainers.image.version": "24\nalpine" }],
+    ["oversized value", { "org.opencontainers.image.version": "v".repeat(2049) }],
+    ["too many", Object.fromEntries(Array.from(
+      { length: 33 },
+      (_, index) => [`org.example.annotation${index}`, "value"],
+    ))],
+    ["oversized total", Object.fromEntries(Array.from(
+      { length: 9 },
+      (_, index) => [`org.example.annotation${index}`, "v".repeat(2048)],
+    ))],
+  ];
+
+  for (const [label, annotations] of invalidAnnotations) {
+    const fixture = annotatedIndexHelperFixture(annotations);
+    expect(() => assertJourneyComposeRuntimeInspection(fixture), label).toThrow();
+  }
 });
 
 test("attests a containerd single-manifest root with one identical root and manifest digest", () => {
@@ -1160,6 +1393,19 @@ function containerdRuntimeFixture() {
     expectedImageSelectionMode: "containerd-root-manifest" as const,
     expectedMigrationManifestDigest: migrationManifest,
   });
+}
+
+function annotatedIndexHelperFixture(annotations: unknown) {
+  const fixture = containerdRuntimeFixture();
+  const container = fixture.containersByService["browser-ca-ready"];
+  const rootDescriptor = fixture.imagesById[container.Image].Descriptor;
+  if (!rootDescriptor || !container.ImageManifestDescriptor) {
+    throw new Error("Synthetic helper descriptor identity is incomplete.");
+  }
+  rootDescriptor.mediaType = "application/vnd.oci.image.index.v1+json";
+  container.ImageManifestDescriptor.digest = `sha256:${"e".repeat(64)}`;
+  container.ImageManifestDescriptor.annotations = annotations;
+  return fixture;
 }
 
 function makeContainerdRoleSingleManifest(

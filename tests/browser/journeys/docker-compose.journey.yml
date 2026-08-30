@@ -106,6 +106,7 @@ services:
     mem_limit: 128m
     tmpfs:
       - /tmp:rw,noexec,nosuid,nodev,size=8m,mode=1777
+      - /var/lib/postgresql/data:rw,noexec,nosuid,nodev,size=8m,mode=0700
     env_file:
       - ${CLEAN_PAY_BROWSER_DB_OBSERVER_PROVISION_ENV_FILE:?CLEAN_PAY_BROWSER_DB_OBSERVER_PROVISION_ENV_FILE is required}
     volumes:

@@ -1,13 +1,27 @@
+import { randomBytes } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 
 import { expect, test } from "@playwright/test";
 
 import {
+  PUBLIC_OVERLAP_CAPTURE_POLICY,
+  cleanupPreparedCapturePair,
+  prepareExactCapturePair,
+} from "../public-overlap-evidence";
+import {
+  PUBLIC_OVERLAP_OWNERSHIP_DIRECTORY_PATHS,
+  derivePublicOverlapOwnershipDirectoryPaths,
+} from "../public-overlap-directory-policy.mjs";
+
+import {
   PUBLIC_OVERLAP_PROOF_KIND,
+  assertPublicOverlapOwnershipDirectoryPaths,
   assertPublicOverlapPairReceipt,
   createPublicOverlapProof,
   createPublicOverlapStackBinding,
+  readPublicOverlapOwnership,
+  readPublicOverlapPairOwnership,
 } from "./public-overlap-proof-contract.mjs";
 
 const captureId = "0123456789abcdef";
@@ -78,6 +92,116 @@ test("creates a digest-only final proof after exact cleanup receipt binding", ()
   expect(JSON.stringify(proof)).not.toContain("runtime-attested");
 });
 
+test("round-trips the canonical ownership ledger and rejects path-set near-misses", async () => {
+  const ownershipCaptureId = randomBytes(8).toString("hex");
+  const canonicalPaths = [...PUBLIC_OVERLAP_OWNERSHIP_DIRECTORY_PATHS];
+  expect(canonicalPaths).toHaveLength(47);
+  expect(assertPublicOverlapOwnershipDirectoryPaths(canonicalPaths)).toEqual(canonicalPaths);
+  expect(derivePublicOverlapOwnershipDirectoryPaths(
+    PUBLIC_OVERLAP_CAPTURE_POLICY.artifactPaths,
+  )).toEqual(canonicalPaths);
+  expect(derivePublicOverlapOwnershipDirectoryPaths(
+    [...PUBLIC_OVERLAP_CAPTURE_POLICY.artifactPaths].reverse(),
+  )).toEqual(canonicalPaths);
+  expect(derivePublicOverlapOwnershipDirectoryPaths([
+    "case-b/console.json",
+    "case-a/viewport.png",
+  ])).toEqual([
+    ".",
+    "artifacts",
+    "artifacts/case-a",
+    "artifacts/case-b",
+  ]);
+  expect(derivePublicOverlapOwnershipDirectoryPaths([
+    "case-a/viewport.png",
+    "case-b/console.json",
+  ])).toEqual(derivePublicOverlapOwnershipDirectoryPaths([
+    "case-b/console.json",
+    "case-a/viewport.png",
+  ]));
+  for (const nearMiss of [
+    canonicalPaths.slice(0, -1),
+    [...canonicalPaths, "artifacts/unexpected"],
+    [canonicalPaths[0], canonicalPaths[2], canonicalPaths[1], ...canonicalPaths.slice(3)],
+  ]) {
+    expect(() => assertPublicOverlapOwnershipDirectoryPaths(nearMiss)).toThrow();
+  }
+
+  const prepared = await prepareExactCapturePair({
+    baselineBindingSha256,
+    candidateBindingSha256,
+    captureId: ownershipCaptureId,
+  });
+  try {
+    const pair = await readPublicOverlapPairOwnership({
+      captureId: ownershipCaptureId,
+      repositoryRoot: process.cwd(),
+    });
+    expect(pair.pairOwnershipSha256).toBe(prepared.pairReceiptSha256);
+
+    await expect(readPublicOverlapOwnership({
+      baselineBindingSha256,
+      candidateBindingSha256,
+      captureId: ownershipCaptureId,
+      expectedPairOwnershipSha256: "0".repeat(64),
+      repositoryRoot: process.cwd(),
+    })).rejects.toThrow("pair ownership staged digest is invalid");
+
+    const ownership = await readPublicOverlapOwnership({
+      baselineBindingSha256,
+      candidateBindingSha256,
+      captureId: ownershipCaptureId,
+      expectedPairOwnershipSha256: pair.pairOwnershipSha256,
+      repositoryRoot: process.cwd(),
+    });
+    expect(ownership.pairOwnershipSha256).toBe(prepared.pairReceiptSha256);
+    expect(ownership.roles.baseline.ownershipSha256)
+      .toBe(prepared.roles.baseline.receiptSha256);
+    expect(ownership.roles.candidate.ownershipSha256)
+      .toBe(prepared.roles.candidate.receiptSha256);
+  } finally {
+    await cleanupPreparedCapturePair({
+      captureId: ownershipCaptureId,
+      pairReceiptSha256: prepared.pairReceiptSha256,
+    });
+  }
+});
+
+test("keeps the staged pair digest authoritative when full ownership validation fails", async () => {
+  const ownershipCaptureId = randomBytes(8).toString("hex");
+  const prepared = await prepareExactCapturePair({
+    baselineBindingSha256,
+    candidateBindingSha256,
+    captureId: ownershipCaptureId,
+  });
+  let cleaned = false;
+  try {
+    const pair = await readPublicOverlapPairOwnership({
+      captureId: ownershipCaptureId,
+      repositoryRoot: process.cwd(),
+    });
+    await expect(readPublicOverlapOwnership({
+      baselineBindingSha256: "3".repeat(64),
+      candidateBindingSha256,
+      captureId: ownershipCaptureId,
+      expectedPairOwnershipSha256: pair.pairOwnershipSha256,
+      repositoryRoot: process.cwd(),
+    })).rejects.toThrow("baseline owned-stack binding digest is invalid");
+    await cleanupPreparedCapturePair({
+      captureId: ownershipCaptureId,
+      pairReceiptSha256: pair.pairOwnershipSha256,
+    });
+    cleaned = true;
+  } finally {
+    if (!cleaned) {
+      await cleanupPreparedCapturePair({
+        captureId: ownershipCaptureId,
+        pairReceiptSha256: prepared.pairReceiptSha256,
+      });
+    }
+  }
+});
+
 test("pins the local capture tool and publishes proof only after owned-stack cleanup", async () => {
   const source = await readFile(path.join(
     process.cwd(),
@@ -87,12 +211,20 @@ test("pins the local capture tool and publishes proof only after owned-stack cle
     "prove-public-characterization-overlap.mjs",
   ), "utf8");
   const pairStart = source.indexOf("const session = await withJourneyOwnedStackPair(");
+  const pairOwnershipRead = source.indexOf(
+    "preparedPairOwnership = await readPublicOverlapPairOwnership(",
+  );
+  const ownershipRead = source.indexOf(
+    "const ownership = await readPublicOverlapOwnership(",
+  );
   const postCleanupVerify = source.indexOf(
     "await runPublicOverlapPlaywright(\"verify\", session.value.comparisonEnvironment",
   );
   const proofWrite = source.indexOf("await writeJourneySanitizedOutput(proofPath, proofBytes)");
 
   expect(pairStart).toBeGreaterThan(-1);
+  expect(pairOwnershipRead).toBeGreaterThan(pairStart);
+  expect(ownershipRead).toBeGreaterThan(pairOwnershipRead);
   expect(source).toContain("const captureSettlements = await Promise.allSettled([");
   expect(source).toContain("localPlaywrightCli");
   expect(source).toContain("process.execPath");
@@ -100,6 +232,9 @@ test("pins the local capture tool and publishes proof only after owned-stack cle
   expect(postCleanupVerify).toBeGreaterThan(pairStart);
   expect(proofWrite).toBeGreaterThan(postCleanupVerify);
   expect(source).toContain("Public overlap proof failed and exact evidence cleanup was not proven.");
+  expect(source).toContain("cleanupPairOwnershipSha256");
+  expect(source).toContain("preparedPairOwnership?.pairOwnershipSha256");
+  expect(source).not.toContain("preparedOwnership?.pairOwnershipSha256");
 });
 
 function expectedPair() {
