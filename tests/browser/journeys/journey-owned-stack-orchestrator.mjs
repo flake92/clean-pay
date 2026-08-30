@@ -42,6 +42,12 @@ const fixtureSnapshotNames = Object.freeze({
 const containerReadonlyFixtureSnapshotNames = new Set(Object.values(fixtureSnapshotNames));
 const contractFilename = "browser-journey-contract.json";
 const automaticDockerTimeout = Number.NaN;
+export const JOURNEY_DOCKER_TIMEOUT_CONTRACT = Object.freeze({
+  composeDownMs: 300_000,
+  composeStopSeconds: 120,
+  composeUpMs: 300_000,
+  otherMs: 30_000,
+});
 const cleanupAbsenceConsecutiveObservations = 2;
 const cleanupAbsenceMaximumObservations = 41;
 const cleanupAbsencePollIntervalMs = 250;
@@ -362,11 +368,7 @@ export function runJourneyDockerCommand(
     verifyProcessTerminated = verifyJourneyProcessTerminated,
   } = {},
 ) {
-  const effectiveTimeoutMs = Number.isNaN(timeoutMs)
-    ? (Array.isArray(args) && args.includes("up")
-    ? 300_000
-    : Array.isArray(args) && args.includes("down") ? 180_000 : 30_000)
-    : timeoutMs;
+  const effectiveTimeoutMs = resolveJourneyDockerCommandTimeoutMs(args, timeoutMs);
   if (!Array.isArray(args) || args.length < 1
     || args.some((entry) => typeof entry !== "string" || entry.length === 0)
     || !Number.isSafeInteger(maximumBytes) || maximumBytes < 1 || maximumBytes > 2 * 1024 * 1024
@@ -509,6 +511,17 @@ export function runJourneyDockerCommand(
       }));
     });
   });
+}
+
+export function resolveJourneyDockerCommandTimeoutMs(args, timeoutMs = automaticDockerTimeout) {
+  if (!Number.isNaN(timeoutMs)) return timeoutMs;
+  if (Array.isArray(args) && args.includes("up")) {
+    return JOURNEY_DOCKER_TIMEOUT_CONTRACT.composeUpMs;
+  }
+  if (Array.isArray(args) && args.includes("down")) {
+    return JOURNEY_DOCKER_TIMEOUT_CONTRACT.composeDownMs;
+  }
+  return JOURNEY_DOCKER_TIMEOUT_CONTRACT.otherMs;
 }
 
 function createJourneyDockerFailureError(input) {
@@ -1324,7 +1337,8 @@ export async function cleanupJourneyOwnedStack(handle) {
       "--project-name", handle.contract.project,
       "--env-file", handle.prepared.authoritativeEnvironmentPath,
       ...handle.prepared.composeFiles.flatMap((file) => ["--file", file]),
-      "down", "--volumes", "--timeout", "120",
+      "down", "--volumes", "--timeout",
+      String(JOURNEY_DOCKER_TIMEOUT_CONTRACT.composeStopSeconds),
     ], 64 * 1024, handle.prepared.queryEnvironment);
     await assertJourneyProjectAbsentAfterCleanup(
       handle.contract.project,

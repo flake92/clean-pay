@@ -30,10 +30,12 @@ import {
   deriveJourneyMigrationImageConfigDigest,
   dispatchJourneyOwnedStackPair,
   enforceJourneySyntheticPrivateMode,
+  JOURNEY_DOCKER_TIMEOUT_CONTRACT,
   JOURNEY_SYNTHETIC_CONFIDENTIALITY_CONTRACT,
   journeyDockerCliEnvironment,
   prepareJourneyOwnedStackLaunch,
   prepareJourneyOwnedStack,
+  resolveJourneyDockerCommandTimeoutMs,
   runJourneyDockerCommand,
   withJourneyOwnedStackPair,
   writeJourneySanitizedOutput,
@@ -58,6 +60,24 @@ type SnapshotWriters = {
   writeContainerReadonlyFixture: SnapshotWriter;
   writeOwnedFile: SnapshotWriter;
 };
+
+test("keeps the Compose down watchdog beyond two ordered graceful-stop budgets", () => {
+  expect(JOURNEY_DOCKER_TIMEOUT_CONTRACT).toEqual({
+    composeDownMs: 300_000,
+    composeStopSeconds: 120,
+    composeUpMs: 300_000,
+    otherMs: 30_000,
+  });
+  expect(Object.isFrozen(JOURNEY_DOCKER_TIMEOUT_CONTRACT)).toBe(true);
+  expect(JOURNEY_DOCKER_TIMEOUT_CONTRACT.composeDownMs).toBeGreaterThan(
+    JOURNEY_DOCKER_TIMEOUT_CONTRACT.composeStopSeconds * 2 * 1_000,
+  );
+  expect(JOURNEY_DOCKER_TIMEOUT_CONTRACT.composeDownMs).toBeLessThanOrEqual(600_000);
+  expect(resolveJourneyDockerCommandTimeoutMs(["compose", "up"])).toBe(300_000);
+  expect(resolveJourneyDockerCommandTimeoutMs(["compose", "down"])).toBe(300_000);
+  expect(resolveJourneyDockerCommandTimeoutMs(["info"])).toBe(30_000);
+  expect(resolveJourneyDockerCommandTimeoutMs(["compose", "down"], 17_000)).toBe(17_000);
+});
 
 test("is import-safe and refuses a non-isolated pair before its first Docker query", async () => {
   expect(typeof withJourneyOwnedStackPair).toBe("function");
@@ -2390,6 +2410,10 @@ test("waits for two empty post-down observations and keeps Compose progress quie
     });
     handle = undefined;
     expect(downArgs?.slice(0, 3)).toEqual(["compose", "--progress", "quiet"]);
+    expect(downArgs?.slice(-4)).toEqual([
+      "down", "--volumes", "--timeout",
+      String(JOURNEY_DOCKER_TIMEOUT_CONTRACT.composeStopSeconds),
+    ]);
     expect(postDownPsObservations).toBe(3);
     expect(cleanupQueryTimeouts).toHaveLength(3);
     expect(cleanupQueryTimeouts.every((timeout) => timeout > 0 && timeout <= 2_000)).toBe(true);
