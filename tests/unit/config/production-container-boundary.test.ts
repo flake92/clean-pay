@@ -172,6 +172,36 @@ describe("production container boundary", () => {
     expect(dataServiceSandbox).toContain("compose down --volumes --remove-orphans");
   });
 
+  it("bounds pinned data-service pulls before Compose starts without registry access", () => {
+    expect(dataServiceSandbox).toContain(
+      "timeout --signal=TERM --kill-after=10s 180s",
+    );
+    expect(dataServiceSandbox).toContain("compose config --images postgres redis");
+    expect(dataServiceSandbox).toContain("for attempt in 1 2");
+    expect(dataServiceSandbox).toContain("docker_bounded pull --quiet");
+    expect(dataServiceSandbox).toContain("--pull never postgres redis");
+    expect(dataServiceSandbox).toContain(
+      "postgres:17-alpine@sha256:18cfe3ef5e6815560c98237d6216d1e5119702fb0f3894c8785dd58b8bbe5d73",
+    );
+    expect(dataServiceSandbox).toContain(
+      "redis:7-alpine@sha256:ff02b58f971e7d7d156a1267e283fcbbeee91773b6aa36c49dac28ecfe28eadf",
+    );
+    expect(dataServiceSandbox).toContain("postgres_image_count != 1");
+    expect(dataServiceSandbox).toContain("redis_image_count != 1");
+    expect(dataServiceSandbox).toContain("docker_bounded image inspect");
+    expect(dataServiceSandbox).toContain("docker_bounded exec");
+    expect(dataServiceSandbox).toContain(
+      '${RUNNER_TEMP:-${TMPDIR:-/tmp}}',
+    );
+    expect(dataServiceSandbox).toContain(
+      'mktemp --directory "$TEMPORARY_PROJECT_PARENT/clean-pay-data-sandbox.XXXXXX"',
+    );
+    expect(dataServiceSandbox).toContain(
+      'label=com.docker.compose.project=$PROJECT_NAME',
+    );
+    expect(dataServiceSandbox).toContain("data-service sandbox exact cleanup was not proven");
+  });
+
   it("builds both CI images with the canonical public build contract", () => {
     const buildStep = ci.slice(
       ci.indexOf("Build both exact executable container targets"),
