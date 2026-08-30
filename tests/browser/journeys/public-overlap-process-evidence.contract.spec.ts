@@ -7,6 +7,7 @@ import { expect, test } from "@playwright/test";
 
 import {
   assertPublicOverlapProcessFailureEvidence,
+  createPublicOverlapInvocationFailureEvidence,
   createPublicOverlapProcessFailureBundle,
   createPublicOverlapProcessFailureEvidence,
   publicOverlapProcessFailureFilename,
@@ -160,6 +161,37 @@ test("orders and freezes an exact unique post-cleanup failure bundle", () => {
     "0123456789abcdef",
     [baseline, baseline],
   )).toThrow("scope is not unique");
+});
+
+test("projects pre-spawn failures to a bounded code and repository source location", () => {
+  const error = Object.assign(new TypeError(privateMarker), { code: "ERR_INVALID_ARG_TYPE" });
+  error.stack = [
+    `TypeError: ${privateMarker}`,
+    "    at file:///home/runner/work/clean-pay/clean-pay/tests/browser/journeys/prove-public-characterization-overlap.mjs:232:23",
+  ].join("\n");
+  const evidence = createPublicOverlapInvocationFailureEvidence({
+    error,
+    mode: "capture",
+    role: "candidate",
+    stage: "process-construction",
+  });
+
+  expect(evidence).toEqual({
+    schemaVersion: 1,
+    status: "public_overlap_playwright_invocation_failed",
+    mode: "capture",
+    role: "candidate",
+    stage: "process-construction",
+    errorClass: "TypeError",
+    errorCode: "ERR_INVALID_ARG_TYPE",
+    messageSha256: sha256(Buffer.from(privateMarker)),
+    sourceLocations: [{
+      file: "tests/browser/journeys/prove-public-characterization-overlap.mjs",
+      line: 232,
+      column: 23,
+    }],
+  });
+  expect(JSON.stringify(evidence)).not.toContain(privateMarker);
 });
 
 test("seals concurrent role failures as exactly two schema-valid private-free files", async () => {

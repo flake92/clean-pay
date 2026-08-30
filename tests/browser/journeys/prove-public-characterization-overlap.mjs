@@ -25,6 +25,7 @@ import {
   sha256,
 } from "./public-overlap-proof-contract.mjs";
 import {
+  createPublicOverlapInvocationFailureEvidence,
   createPublicOverlapProcessFailureEvidence,
   createPublicOverlapProcessFailureBundle,
   publicOverlapProcessFailureFilename,
@@ -44,6 +45,7 @@ let captureId;
 let completed = false;
 let failureOutputRoot;
 const processFailureEvidence = [];
+const invocationFailureEvidence = [];
 
 try {
   argumentsByName = parseArguments(process.argv.slice(2));
@@ -206,6 +208,7 @@ try {
   }
   process.stderr.write(`${JSON.stringify({
     status: "live_public_characterization_overlap_failed",
+    invocationFailures: invocationFailureEvidence,
     processFailures: failureBundle?.failures ?? [],
     ...createJourneySanitizedErrorEvidence(failure),
   })}\n`);
@@ -213,38 +216,76 @@ try {
 }
 
 async function runCapture(role, origin, bindingSha256) {
-  return runPublicOverlapPlaywright("capture", {
-    CLEAN_PAY_PUBLIC_OVERLAP_CAPTURE_ID: captureId,
-    CLEAN_PAY_PUBLIC_OVERLAP_ROLE: role,
-    CLEAN_PAY_PUBLIC_OVERLAP_BINDING_SHA256: bindingSha256,
-    CLEAN_PAY_PUBLIC_OVERLAP_OWNERSHIP_SHA256:
-      preparedOwnership.roles[role].ownershipSha256,
-    CLEAN_PAY_BROWSER_BASE_URL: origin,
-  }, 1_200_000);
+  const observedFailures = totalObservedFailures();
+  try {
+    return await runPublicOverlapPlaywright("capture", {
+      CLEAN_PAY_PUBLIC_OVERLAP_CAPTURE_ID: captureId,
+      CLEAN_PAY_PUBLIC_OVERLAP_ROLE: role,
+      CLEAN_PAY_PUBLIC_OVERLAP_BINDING_SHA256: bindingSha256,
+      CLEAN_PAY_PUBLIC_OVERLAP_OWNERSHIP_SHA256:
+        preparedOwnership.roles[role].ownershipSha256,
+      CLEAN_PAY_BROWSER_BASE_URL: origin,
+    }, 1_200_000);
+  } catch (error) {
+    if (totalObservedFailures() === observedFailures) {
+      recordInvocationFailure("capture-input", "capture", role, error);
+    }
+    throw error;
+  }
 }
 
 async function runPublicOverlapPlaywright(mode, additions, timeoutMs) {
-  if (!new Set(["capture", "cleanup", "compare", "prepare", "verify"]).has(mode)
-    || !Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 1_200_000
-    || !additions || typeof additions !== "object" || Array.isArray(additions)) {
-    throw new Error("Public overlap Playwright invocation is invalid.");
+  const role = additions?.CLEAN_PAY_PUBLIC_OVERLAP_ROLE ?? null;
+  try {
+    if (!new Set(["capture", "cleanup", "compare", "prepare", "verify"]).has(mode)
+      || !Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 1_200_000
+      || !additions || typeof additions !== "object" || Array.isArray(additions)) {
+      throw new Error("Public overlap Playwright invocation is invalid.");
+    }
+  } catch (error) {
+    recordInvocationFailure("invocation-policy", mode, role, error);
+    throw error;
   }
-  const environment = journeyDockerCliEnvironment();
-  Object.assign(environment, additions, {
-    CLEAN_PAY_PUBLIC_OVERLAP_MODE: mode,
-    CLEAN_PAY_BROWSER_PLAYWRIGHT_OUTPUT_SCOPE: captureId,
-    CI: "1",
-    NODE_ENV: "test",
-  });
-  return boundedProcess(process.execPath, [
-    localPlaywrightCli,
-    "test",
-    "--config",
-    publicOverlapConfig,
-  ], environment, timeoutMs, {
+  let environment;
+  try {
+    environment = journeyDockerCliEnvironment();
+    Object.assign(environment, additions, {
+      CLEAN_PAY_PUBLIC_OVERLAP_MODE: mode,
+      CLEAN_PAY_BROWSER_PLAYWRIGHT_OUTPUT_SCOPE: captureId,
+      CI: "1",
+      NODE_ENV: "test",
+    });
+  } catch (error) {
+    recordInvocationFailure("environment-policy", mode, role, error);
+    throw error;
+  }
+  const observedFailures = totalObservedFailures();
+  try {
+    return await boundedProcess(process.execPath, [
+      localPlaywrightCli,
+      "test",
+      "--config",
+      publicOverlapConfig,
+    ], environment, timeoutMs, { mode, role });
+  } catch (error) {
+    if (totalObservedFailures() === observedFailures) {
+      recordInvocationFailure("process-construction", mode, role, error);
+    }
+    throw error;
+  }
+}
+
+function recordInvocationFailure(stage, mode, role, error) {
+  invocationFailureEvidence.push(createPublicOverlapInvocationFailureEvidence({
+    error,
     mode,
-    role: additions.CLEAN_PAY_PUBLIC_OVERLAP_ROLE ?? null,
-  });
+    role,
+    stage,
+  }));
+}
+
+function totalObservedFailures() {
+  return processFailureEvidence.length + invocationFailureEvidence.length;
 }
 
 function boundedProcess(command, args, environment, timeoutMs, scope) {
