@@ -184,6 +184,129 @@ export function createProviderOverlapEventSeal(maximumEvents = 1_024) {
   });
 }
 
+export function createProviderOverlapPendingRequestSeal(maximumRequestCount = maximumRequests) {
+  if (!Number.isSafeInteger(maximumRequestCount)
+    || maximumRequestCount < 1 || maximumRequestCount > maximumRequests) {
+    fail("Browser pending request seal bound is invalid.");
+  }
+  const pending = new Set();
+  const completed = new WeakSet();
+  let completedRequestCount = 0;
+  let duplicateCompletionCount = 0;
+  let lateRequestEventCount = 0;
+  let observedRequestCount = 0;
+  let overflow = false;
+  let sealed = false;
+  let version = 0;
+  return Object.freeze({
+    assertClean() {
+      if (!sealed || overflow || pending.size !== 0
+        || lateRequestEventCount !== 0 || duplicateCompletionCount !== 0
+        || observedRequestCount !== completedRequestCount) {
+        fail("Browser pending request source changed after its sealed drain barrier.");
+      }
+      return Object.freeze({
+        completedRequestCount,
+        lateRequestEventCount,
+        observedRequestCount,
+        status: "sealed-clean",
+      });
+    },
+    complete(request) {
+      if (!request || typeof request !== "object") {
+        fail("Browser pending request completion identity is invalid.");
+      }
+      version += 1;
+      if (sealed) {
+        lateRequestEventCount += 1;
+        return;
+      }
+      if (!pending.delete(request)) {
+        duplicateCompletionCount += 1;
+        return;
+      }
+      completed.add(request);
+      completedRequestCount += 1;
+    },
+    async drainAndSeal({
+      pollMs = 10,
+      quietMs = 200,
+      timeoutMs = 5_000,
+    } = {}) {
+      if (sealed || ![pollMs, quietMs, timeoutMs].every(Number.isSafeInteger)
+        || pollMs < 1 || quietMs < pollMs || timeoutMs < quietMs || timeoutMs > 30_000) {
+        fail("Browser pending request drain contract is invalid.");
+      }
+      const deadline = Date.now() + timeoutMs;
+      let observedVersion = version;
+      let quietSince = Date.now();
+      while (Date.now() <= deadline) {
+        if (overflow || duplicateCompletionCount !== 0) {
+          fail("Browser pending request ledger became invalid before sealing.");
+        }
+        if (version !== observedVersion || pending.size !== 0) {
+          observedVersion = version;
+          quietSince = Date.now();
+        } else if (Date.now() - quietSince >= quietMs) {
+          sealed = true;
+          return Object.freeze({
+            completedRequestCount,
+            observedRequestCount,
+            status: "drained-and-sealed",
+          });
+        }
+        await new Promise((resolve) => setTimeout(resolve, pollMs));
+      }
+      fail("Browser pending requests did not drain within their bounded lifecycle.");
+    },
+    observe(request) {
+      if (!request || typeof request !== "object") {
+        fail("Browser pending request identity is invalid.");
+      }
+      version += 1;
+      if (sealed || completed.has(request)) {
+        lateRequestEventCount += 1;
+        return;
+      }
+      if (pending.has(request)) return;
+      pending.add(request);
+      observedRequestCount += 1;
+      if (observedRequestCount > maximumRequestCount) overflow = true;
+    },
+    pendingCount() {
+      return pending.size;
+    },
+  });
+}
+
+export function resolveProviderOverlapResponseRequestEntry(input) {
+  exactKeys(input, [
+    "preparationByIdentity", "prepare", "request", "requestByIdentity",
+  ], "browser response request resolver");
+  if (!(input.preparationByIdentity instanceof Map)
+    || !(input.requestByIdentity instanceof Map)
+    || typeof input.prepare !== "function"
+    || !input.request || typeof input.request !== "object") {
+    fail("Browser response request resolver input is invalid.");
+  }
+  const preparationAlreadyExisted = input.preparationByIdentity.has(input.request);
+  const preparation = preparationAlreadyExisted
+    ? input.preparationByIdentity.get(input.request)
+    : input.prepare(input.request);
+  if (!preparation || typeof preparation !== "object" || preparation.entry === null) {
+    fail(preparationAlreadyExisted
+      ? "Browser response belongs to an explicitly rejected request preparation."
+      : "Browser response request preparation failed closed.");
+  }
+  const entry = preparation.entry;
+  if (!entry || typeof entry !== "object" || entry.request !== input.request
+    || input.preparationByIdentity.get(input.request) !== preparation
+    || input.requestByIdentity.get(input.request) !== entry) {
+    fail("Browser response escaped its exact request identity ledger.");
+  }
+  return entry;
+}
+
 export function createJourneyBrowserRequestEnvelope(request, mainFrame) {
   if (!request || typeof request !== "object" || !mainFrame || typeof mainFrame !== "object"
     || typeof request.url !== "function" || typeof request.method !== "function"

@@ -35,6 +35,7 @@ import {
   classifyProviderOverlapBrowserRequest,
   createJourneyBrowserRequestEnvelope,
   createProviderOverlapEventSeal,
+  createProviderOverlapPendingRequestSeal,
   createProviderOverlapStaticAssetContract,
   extractProviderOverlapCssMediaReferences,
   extractProviderOverlapResponseStaticDeclarations,
@@ -43,6 +44,7 @@ import {
   finalizeProviderOverlapHistoryContract,
   installProviderOverlapHistoryInstrumentation,
   readProviderOverlapStaticResponseEvidence,
+  resolveProviderOverlapResponseRequestEntry,
 } from "./provider-overlap-browser-contract.mjs";
 import {
   JOURNEY_FIXTURE_FILENAMES,
@@ -2028,6 +2030,10 @@ test("registers exact request identities before response capture and routed cont
   expect(preparation).toContain("recordUnexpectedRequest(rawUrl);");
   expect(requestListener).toContain("prepareBrowserRequest(request);");
   expect(responseListener).toContain("browserRequestByIdentity.get(request)");
+  expect(requestListener).toContain("pendingRequestSeal.observe(request);");
+  expect(responseListener).toContain("pendingRequestSeal.observe(request);");
+  expect(responseListener).toContain("resolveProviderOverlapResponseRequestEntry({");
+  expect(responseListener).toContain("prepare: prepareBrowserRequest,");
   expect(responseListener).not.toMatch(/eventSeal\.(?:begin|record)\(/);
   expect(routeHandler).toContain("browserRequestPreparationByIdentity.get(request)");
   expect(routeHandler).not.toContain("prepareBrowserRequest(");
@@ -2045,6 +2051,70 @@ test("registers exact request identities before response capture and routed cont
   expect(classifiedAbortBranch).not.toContain("recordUnexpectedRequest(");
   expect(classifiedAbortBranch.match(/route\.abort\(/g)).toHaveLength(1);
   expect(proofContractSource).toContain("requestCount * 3 + historyCount");
+  const pendingDrainIndex = runnerSource.indexOf(
+    "await pendingRequestSeal.drainAndSeal({ timeoutMs: 15_000 })",
+  );
+  const finalizerIndex = runnerSource.indexOf("await finalizeProviderOverlapEventLifecycle({");
+  expect(pendingDrainIndex).toBeGreaterThan(firstNavigationIndex);
+  expect(pendingDrainIndex).toBeLessThan(finalizerIndex);
+});
+
+test("lazily prepares only a response identity that has no prior preparation", () => {
+  const request = {};
+  const requestByIdentity = new Map<object, object>();
+  const preparationByIdentity = new Map<object, { disposition: string; entry: object | null }>();
+  let prepareCount = 0;
+  const prepare = (identity: object) => {
+    prepareCount += 1;
+    const entry = Object.freeze({ classification: Object.freeze({ key: "static" }), request: identity });
+    const preparation = Object.freeze({ disposition: "continue", entry });
+    requestByIdentity.set(identity, entry);
+    preparationByIdentity.set(identity, preparation);
+    return preparation;
+  };
+
+  expect(resolveProviderOverlapResponseRequestEntry({
+    preparationByIdentity,
+    prepare,
+    request,
+    requestByIdentity,
+  })).toBe(requestByIdentity.get(request));
+  expect(prepareCount).toBe(1);
+
+  const rejectedRequest = {};
+  preparationByIdentity.set(
+    rejectedRequest,
+    Object.freeze({ disposition: "abort", entry: null }),
+  );
+  expect(() => resolveProviderOverlapResponseRequestEntry({
+    preparationByIdentity,
+    prepare,
+    request: rejectedRequest,
+    requestByIdentity,
+  })).toThrow(/explicitly rejected/);
+  expect(prepareCount).toBe(1);
+  expect(requestByIdentity.has(rejectedRequest)).toBe(false);
+});
+
+test("rejects a response fallback that does not register the exact prepared identity", () => {
+  const request = {};
+  const differentRequest = {};
+  const requestByIdentity = new Map<object, object>();
+  const preparationByIdentity = new Map<object, { disposition: string; entry: object | null }>();
+  const prepare = (identity: object) => {
+    const entry = Object.freeze({ classification: Object.freeze({ key: "static" }), request: identity });
+    const preparation = Object.freeze({ disposition: "continue", entry });
+    preparationByIdentity.set(identity, preparation);
+    requestByIdentity.set(differentRequest, entry);
+    return preparation;
+  };
+
+  expect(() => resolveProviderOverlapResponseRequestEntry({
+    preparationByIdentity,
+    prepare,
+    request,
+    requestByIdentity,
+  })).toThrow(/exact request identity ledger/);
 });
 
 test("keeps one exact request identity across a held route, response, and terminal event", async () => {
@@ -2655,6 +2725,48 @@ test("canonicalizes all current relative CSS media references without broadening
   )));
   expect(() => extractProviderOverlapCssMediaReferences(cssBody, sourcePath, missing))
     .toThrow(/escaped its attested image inventory/);
+});
+
+test("seals pending request identities through a separate bounded quiet barrier", async () => {
+  const seal = createProviderOverlapPendingRequestSeal(2);
+  const request = {};
+  seal.observe(request);
+  const draining = seal.drainAndSeal({ pollMs: 1, quietMs: 3, timeoutMs: 100 });
+  setTimeout(() => seal.complete(request), 2);
+  await expect(draining).resolves.toEqual({
+    completedRequestCount: 1,
+    observedRequestCount: 1,
+    status: "drained-and-sealed",
+  });
+  expect(seal.pendingCount()).toBe(0);
+  expect(seal.assertClean()).toEqual({
+    completedRequestCount: 1,
+    lateRequestEventCount: 0,
+    observedRequestCount: 1,
+    status: "sealed-clean",
+  });
+
+  seal.observe({});
+  expect(() => seal.assertClean()).toThrow(/changed after/);
+
+  const stuck = createProviderOverlapPendingRequestSeal(1);
+  stuck.observe({});
+  await expect(stuck.drainAndSeal({
+    pollMs: 1,
+    quietMs: 2,
+    timeoutMs: 5,
+  })).rejects.toThrow(/did not drain/);
+
+  const duplicateTerminal = createProviderOverlapPendingRequestSeal(1);
+  const duplicateRequest = {};
+  duplicateTerminal.observe(duplicateRequest);
+  duplicateTerminal.complete(duplicateRequest);
+  duplicateTerminal.complete(duplicateRequest);
+  await expect(duplicateTerminal.drainAndSeal({
+    pollMs: 1,
+    quietMs: 2,
+    timeoutMs: 20,
+  })).rejects.toThrow(/became invalid/);
 });
 
 test("seals browser events only after a bounded quiet drain and rejects late events", async () => {
