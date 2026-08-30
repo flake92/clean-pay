@@ -138,10 +138,28 @@ export const productionLinkAccountCommands: LinkAccountCommands = {
   },
 
   async authenticateEmail(input) {
-    return { context: await adapt(() => remnashopAuth(
-      input.operation === "login" ? "/auth/login" : "/auth/register",
-      { email: input.email, password: input.password },
-    )) };
+    try {
+      return { context: await remnashopAuth(
+        input.operation === "login" ? "/auth/login" : "/auth/register",
+        { email: input.email, password: input.password },
+      ) };
+    } catch (error) {
+      const translatedError = gatewayError(error);
+      // Remnashop's /auth/register contract has a single 409 outcome: the
+      // e-mail already belongs to an account. Classify it by endpoint and
+      // status instead of relying on provider prose, which may be sanitized
+      // or changed independently. The use case can then preserve the original
+      // failed-login reason for an existing account.
+      if (
+        input.operation === "register"
+        && error instanceof ServiceError
+        && error.status === 409
+        && translatedError.code === "CONFLICT"
+      ) {
+        throw new LinkAccountGatewayError("EMAIL_ALREADY_EXISTS");
+      }
+      throw translatedError;
+    }
   },
 
   async linkActorIsCurrent(actor) {
