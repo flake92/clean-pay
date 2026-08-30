@@ -106,7 +106,10 @@ const dockerFailureTerminationReasons = new Set([
 const dockerFailureClassificationRules = Object.freeze([
   Object.freeze(["container-unhealthy", /\bunhealthy\b|failed to become healthy|healthcheck/i]),
   Object.freeze(["dependency-failed", /dependency failed to start|dependency.*failed/i]),
-  Object.freeze(["container-exited", /\bexited \([1-9][0-9]*\)|exit code [1-9][0-9]*\b/i]),
+  Object.freeze([
+    "container-exited",
+    /\bexited \([1-9][0-9]*\)|exit code [1-9][0-9]*\b|didn't complete successfully: exit [1-9][0-9]*\b/i,
+  ]),
   Object.freeze(["port-conflict", /port is already allocated|address already in use/i]),
   Object.freeze(["bind-unavailable", /cannot assign requested address/i]),
   Object.freeze(["image-unavailable", /no such image|pull access denied|manifest unknown/i]),
