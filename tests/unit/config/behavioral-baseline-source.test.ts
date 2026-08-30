@@ -75,7 +75,7 @@ describe("behavioral baseline source", () => {
     const originalReceipt = await readFile(materialized.receiptPath);
     try {
       await expect(cleanupBehavioralBaselineSource({
-        expectedReceiptSha256: `0${materialized.receiptSha256.slice(1)}`,
+        expectedReceiptSha256: `${materialized.receiptSha256[0] === "0" ? "1" : "0"}${materialized.receiptSha256.slice(1)}`,
         root: materialized.root,
         temporaryRoot: isolatedTemporaryRoot,
       })).rejects.toThrow("receipt capability changed");
