@@ -7,6 +7,7 @@ import {
   changeProfilePassword,
   requestProfileEmailVerification,
 } from "@/application/profile/execute-profile-command";
+import type { ProfileCommandResult } from "@/application/models/profile";
 import {
   productionEmailVerificationCommands,
   productionEmailReminderPreferenceCommands,
@@ -24,7 +25,9 @@ const malformed = {
   message: "Проверьте введённые данные.",
 };
 
-export async function requestProfileEmailVerificationAction(input: { email?: string; turnstileToken?: string }) {
+export async function requestProfileEmailVerificationAction(
+  input: { email?: string; turnstileToken?: string },
+): Promise<ProfileCommandResult> {
   const parsed = parseEmailActionPayload(input);
   return parsed
     ? requestProfileEmailVerification(productionEmailVerificationCommands, parsed)
@@ -42,7 +45,9 @@ export async function changeProfileEmailAction(input: { email: string; turnstile
   return result;
 }
 
-export async function changeProfilePasswordAction(input: { currentPassword: string; newPassword: string }) {
+export async function changeProfilePasswordAction(
+  input: { currentPassword: string; newPassword: string },
+): Promise<ProfileCommandResult> {
   const parsed = parseProfilePasswordPayload(input);
   return parsed ? changeProfilePassword(productionProfileCommands, parsed) : malformed;
 }

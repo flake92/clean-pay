@@ -7,6 +7,7 @@ import {
   linkAccountEmail,
   removeLinkedPasskey,
 } from "@/application/auth/manage-linked-account";
+import type { LinkAccountCommandResult } from "@/application/models/link-account";
 import {
   productionLinkAccountCommands,
   productionPasskeyManagementGateway,
@@ -17,7 +18,9 @@ import {
   parseLinkAccountEmailPayload,
 } from "@/app/actions/runtime-payload";
 
-export async function linkAccountEmailAction(input: { email: string; password: string }) {
+export async function linkAccountEmailAction(
+  input: { email: string; password: string },
+): Promise<LinkAccountCommandResult> {
   const parsed = parseLinkAccountEmailPayload(input);
   return parsed
     ? linkAccountEmail(productionLinkAccountCommands, parsed)
