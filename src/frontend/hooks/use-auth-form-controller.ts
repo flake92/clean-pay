@@ -190,7 +190,11 @@ export function useAuthFormController({
         dispatch({ type: "request-failed", message: unknownLoginResultMessage });
         return;
       }
-      redirectAfterAuth(authenticatedAuthDestination(result, redirectTo));
+      if (result.emailVerified) {
+        redirectAfterAuth(redirectTo);
+      } else {
+        redirectAfterAuth(authenticatedAuthDestination(result, redirectTo));
+      }
     } catch {
       turnstile.reset();
       dispatch({ type: "request-failed", message: unknownLoginResultMessage });
