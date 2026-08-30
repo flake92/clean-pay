@@ -1,8 +1,9 @@
-import { Suspense } from "react";
+import { Suspense, type ReactNode } from "react";
 
 import { CabinetHeaderActions } from "@/frontend/components/cabinet-header-actions";
 import { CabinetPanel } from "@/frontend/components/cabinet-panel";
 import { AppShell } from "@/app/_components/app-shell";
+import { requireCabinetEntrySession } from "@/app/_composition/require-request-session";
 import { PageHeader } from "@/frontend/components/page-header";
 import {
   loadRequestCabinetViewModel,
@@ -14,6 +15,13 @@ import {
   sessionRefreshPath,
 } from "@/shared/auth/session-navigation";
 import { redirect } from "next/navigation";
+import { connection } from "next/server";
+
+async function CabinetAccessBoundary({ children }: { children: ReactNode }) {
+  await connection();
+  await requireCabinetEntrySession("/cabinet");
+  return <>{children}</>;
+}
 
 async function loadAuthenticatedCabinet() {
   const model = await loadRequestCabinetViewModel();
@@ -54,26 +62,28 @@ function CabinetLoading() {
 
 export default function CabinetPage() {
   return (
-    <AppShell requireAuth>
-      <div className="grid">
-        <div className="col-12">
-          <PageHeader
-            actions={<Suspense fallback={null}><CabinetActions /></Suspense>}
-            description="Статус подписки, подключение, устройства и платежи в одном рабочем экране."
-            title="Личный кабинет"
-          />
+    <CabinetAccessBoundary>
+      <AppShell requireAuth>
+        <div className="grid">
+          <div className="col-12">
+            <PageHeader
+              actions={<Suspense fallback={null}><CabinetActions /></Suspense>}
+              description="Статус подписки, подключение, устройства и платежи в одном рабочем экране."
+              title="Личный кабинет"
+            />
+          </div>
+          <div className="col-12">
+            <Suspense fallback={<CabinetLoading />}>
+              <CabinetContent />
+            </Suspense>
+          </div>
+          <div className="col-12" id="referral-program">
+            <Suspense fallback={null}>
+              <CabinetReferralContent />
+            </Suspense>
+          </div>
         </div>
-        <div className="col-12">
-          <Suspense fallback={<CabinetLoading />}>
-            <CabinetContent />
-          </Suspense>
-        </div>
-        <div className="col-12" id="referral-program">
-          <Suspense fallback={null}>
-            <CabinetReferralContent />
-          </Suspense>
-        </div>
-      </div>
-    </AppShell>
+      </AppShell>
+    </CabinetAccessBoundary>
   );
 }
