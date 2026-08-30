@@ -21,6 +21,39 @@ type ProjectedProcessSample = {
   rawPngSha256: string;
 };
 
+export type PairedPngQuorumRecord = Readonly<{
+  bytes: number;
+  processIndex: number;
+  role: "baseline" | "candidate";
+  sha256: string;
+}>;
+
+export type PairedPngQuorumTupleDigest = Readonly<{
+  processIndex: number;
+  sha256: string;
+}>;
+
+export type PairedPngQuorumDigestEvidence = Readonly<{
+  records: readonly PairedPngQuorumRecord[];
+  tupleDigests: readonly PairedPngQuorumTupleDigest[];
+}>;
+
+export const MAXIMUM_PAIRED_PNG_QUORUM_BYTES = 4 * 1024 * 1024;
+
+export class PairedPngQuorumError extends Error {
+  readonly records: readonly PairedPngQuorumRecord[];
+  readonly tupleDigests: readonly PairedPngQuorumTupleDigest[];
+
+  constructor(pairs: readonly IndependentProcessCharacterizationPair[]) {
+    const evidence = createPairedPngQuorumDigestEvidence(pairs);
+    super("Independent Chromium processes produced no exact byte-identical paired PNG quorum.");
+    this.name = "PairedPngQuorumError";
+    this.records = evidence.records;
+    this.tupleDigests = evidence.tupleDigests;
+    Object.freeze(this);
+  }
+}
+
 const SCREENSHOT_QUORUM_SHA256_SENTINEL =
   "<selected-only-by-exact-independent-process-png-quorum>";
 
@@ -124,9 +157,65 @@ export function selectIndependentProcessCharacterizationPairQuorum(
       selectedProcessIndexes: Object.freeze([...selectedProcessIndexes]),
     });
   }
-  throw new Error(
-    "Independent Chromium processes produced no exact byte-identical paired PNG quorum.",
-  );
+  throw new PairedPngQuorumError(pairs);
+}
+
+export function createPairedPngQuorumDigestEvidence(
+  pairs: readonly IndependentProcessCharacterizationPair[],
+): PairedPngQuorumDigestEvidence {
+  if (pairs.length !== EXACT_SCREENSHOT_QUORUM_PROCESS_COUNT) {
+    throw new Error(
+      "Paired PNG quorum diagnostics require exactly 3 independent Chromium process pairs.",
+    );
+  }
+  const records: PairedPngQuorumRecord[] = [];
+  const tupleDigests: PairedPngQuorumTupleDigest[] = [];
+  for (const [processIndex, pair] of pairs.entries()) {
+    const screenshots = [pair.baseline.screenshot, pair.candidate.screenshot] as const;
+    for (const [roleIndex, role] of (["baseline", "candidate"] as const).entries()) {
+      const screenshot = screenshots[roleIndex];
+      if (!(screenshot instanceof Uint8Array)
+        || screenshot.byteLength < 1
+        || screenshot.byteLength > MAXIMUM_PAIRED_PNG_QUORUM_BYTES) {
+        throw new Error("Paired PNG quorum diagnostic bytes exceed the exact bounded policy.");
+      }
+      records.push(Object.freeze({
+        bytes: screenshot.byteLength,
+        processIndex,
+        role,
+        sha256: sha256(screenshot),
+      }));
+    }
+    tupleDigests.push(Object.freeze({
+      processIndex,
+      sha256: pairedPngTupleSha256(pair.baseline.screenshot, pair.candidate.screenshot),
+    }));
+  }
+  if (records.length !== 6 || tupleDigests.length !== 3) {
+    throw new Error("Paired PNG quorum diagnostics are incomplete.");
+  }
+  return Object.freeze({
+    records: Object.freeze(records),
+    tupleDigests: Object.freeze(tupleDigests),
+  });
+}
+
+function pairedPngTupleSha256(baseline: Uint8Array, candidate: Uint8Array) {
+  const domain = Buffer.from("clean-pay-public-overlap-paired-png-quorum-v1", "utf8");
+  const baselineBytes = Buffer.from(baseline);
+  const candidateBytes = Buffer.from(candidate);
+  const lengths = [baselineBytes.byteLength, candidateBytes.byteLength].map((length) => {
+    const encoded = Buffer.alloc(8);
+    encoded.writeBigUInt64BE(BigInt(length));
+    return encoded;
+  });
+  return sha256(Buffer.concat([
+    domain,
+    lengths[0] as Buffer,
+    baselineBytes,
+    lengths[1] as Buffer,
+    candidateBytes,
+  ]));
 }
 
 function exactScreenshotPairEquals(

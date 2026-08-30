@@ -31,6 +31,7 @@ import {
   TURNSTILE_STUB_SOURCE,
 } from "./turnstile-stub";
 import {
+  createSerializedPairCaptureTaskLifecycle,
   createSerializedPairTerminalScreenshotCapture,
   selectByteIdenticalMajority,
   selectByteIdenticalTerminalScreenshot,
@@ -1412,6 +1413,137 @@ test.describe("immutable browser baseline policy", () => {
 
     await expect(candidate).resolves.toEqual(Buffer.from("candidate"));
     expect(calls).toEqual(["candidate"]);
+  });
+
+  test("barriers concurrent preparation before serial terminal evidence", async () => {
+    const lifecycle = createSerializedPairCaptureTaskLifecycle();
+    const calls: string[] = [];
+    let releaseBaselineTerminal!: () => void;
+    const baselineTerminalBlocked = new Promise<void>((resolve) => {
+      releaseBaselineTerminal = resolve;
+    });
+    const settlements = Promise.allSettled([
+      lifecycle.capture(
+        "baseline",
+        async () => {
+          calls.push("baseline:prepare");
+          return "baseline-prepared";
+        },
+        async (prepared) => {
+          calls.push(`baseline:terminal:${prepared}`);
+          await baselineTerminalBlocked;
+          return "baseline";
+        },
+      ),
+      lifecycle.capture(
+        "candidate",
+        async () => {
+          calls.push("candidate:prepare");
+          return "candidate-prepared";
+        },
+        async (prepared) => {
+          calls.push(`candidate:terminal:${prepared}`);
+          return "candidate";
+        },
+      ),
+    ]);
+
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(calls).toEqual([
+      "baseline:prepare",
+      "candidate:prepare",
+      "baseline:terminal:baseline-prepared",
+    ]);
+    releaseBaselineTerminal();
+    await expect(settlements).resolves.toEqual([
+      { status: "fulfilled", value: "baseline" },
+      { status: "fulfilled", value: "candidate" },
+    ]);
+    expect(calls).toEqual([
+      "baseline:prepare",
+      "candidate:prepare",
+      "baseline:terminal:baseline-prepared",
+      "candidate:terminal:candidate-prepared",
+    ]);
+  });
+
+  test("releases the candidate terminal lane after baseline terminal rejection", async () => {
+    const lifecycle = createSerializedPairCaptureTaskLifecycle();
+    const calls: string[] = [];
+    const baselineError = new Error("baseline capture failed");
+    const settlements = await Promise.allSettled([
+      lifecycle.capture(
+        "baseline",
+        async () => {
+          calls.push("baseline:prepare");
+          return "baseline-prepared";
+        },
+        async () => {
+          calls.push("baseline:terminal");
+          throw baselineError;
+        },
+      ),
+      lifecycle.capture(
+        "candidate",
+        async () => {
+          calls.push("candidate:prepare");
+          return "candidate-prepared";
+        },
+        async () => {
+          calls.push("candidate:terminal");
+          return "candidate-completed";
+        },
+      ),
+    ]);
+
+    expect(calls).toEqual([
+      "baseline:prepare",
+      "candidate:prepare",
+      "baseline:terminal",
+      "candidate:terminal",
+    ]);
+    expect(settlements).toEqual([
+      { status: "rejected", reason: baselineError },
+      { status: "fulfilled", value: "candidate-completed" },
+    ]);
+  });
+
+  test("releases the preparation barrier after one role fails", async () => {
+    const lifecycle = createSerializedPairCaptureTaskLifecycle();
+    const calls: string[] = [];
+    const baselineError = new Error("baseline preparation failed");
+    const settlements = await Promise.allSettled([
+      lifecycle.capture(
+        "baseline",
+        async () => {
+          calls.push("baseline:prepare");
+          throw baselineError;
+        },
+        async () => {
+          calls.push("baseline:terminal");
+        },
+      ),
+      lifecycle.capture(
+        "candidate",
+        async () => {
+          calls.push("candidate:prepare");
+          return "candidate-prepared";
+        },
+        async () => {
+          calls.push("candidate:terminal");
+        },
+      ),
+    ]);
+
+    expect(calls).toEqual(["baseline:prepare", "candidate:prepare"]);
+    expect(settlements[0]).toEqual({ status: "rejected", reason: baselineError });
+    expect(settlements[1]).toMatchObject({
+      status: "rejected",
+      reason: expect.objectContaining({
+        message: "Paired characterization preparation barrier failed in baseline role.",
+      }),
+    });
   });
 
   test("pins the canonical Chromium software-render launch policy", () => {
