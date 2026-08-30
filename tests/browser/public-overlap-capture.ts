@@ -10,7 +10,10 @@ import {
   staticCspConsoleSidecarEvidence,
 } from "./console-policy";
 import { projectCharacterizationManifestBytesForComparison } from "./comparison-projection";
-import type { CharacterizationPageQuorum } from "./fixtures";
+import type {
+  CharacterizationPagePairQuorum,
+  CharacterizationPageQuorum,
+} from "./fixtures";
 import { navigationChain, recordNetwork } from "./network-recorder";
 import {
   browserStorage,
@@ -21,6 +24,7 @@ import {
 } from "./page-characterization";
 import {
   requireExactProcessBytesAgreement,
+  selectIndependentProcessCharacterizationPairQuorum,
   selectIndependentProcessCharacterizationQuorum,
 } from "./process-quorum";
 import { captureByteIdenticalTerminalScreenshot } from "./screenshot-majority";
@@ -28,9 +32,12 @@ import {
   PUBLIC_OVERLAP_CAPTURE_POLICY,
   PUBLIC_OVERLAP_PROJECTS,
   PUBLIC_OVERLAP_ROUTES,
+  type PreparedCaptureOwnership,
   type PublicOverlapRoute,
+  type PublicOverlapRole,
   readPreparedCaptureOwnership,
   requirePublicOverlapEnvironment,
+  requirePublicOverlapPairEnvironment,
   sha256,
   writeImmutableCaptureArtifact,
 } from "./public-overlap-evidence";
@@ -89,7 +96,157 @@ export async function capturePublicOverlapCharacterization(options: {
   const selected = samples[quorum.selectedProcessIndex];
   if (!selected) throw new Error("Public overlap process quorum selected no evidence.");
 
-  registerBaselineReconciliation(pages[0].page, async () => {
+  registerPublicOverlapRoleArtifacts({
+    applicationOrigin,
+    ownership,
+    pages,
+    route,
+    samples,
+    selected,
+    selectedScreenshot: quorum.selectedScreenshot,
+    testInfo,
+  });
+
+  return Object.freeze({
+    finalUrl: selected.finalUrl,
+    manifest: selected.manifest,
+  });
+}
+
+export async function capturePublicOverlapCharacterizationPair(options: {
+  pagePairs: CharacterizationPagePairQuorum;
+  route: PublicOverlapRoute;
+  testInfo: TestInfo;
+  validateNavigation: (role: PublicOverlapRole, finalUrl: URL) => void;
+}) {
+  const { pagePairs, route, testInfo, validateNavigation } = options;
+  assertExactCaptureCase(testInfo.project.name, route);
+  const environment = requirePublicOverlapPairEnvironment();
+  const ownershipEntries = await Promise.all(
+    (["baseline", "candidate"] as const).map(async (role) => ([
+      role,
+      await readPreparedCaptureOwnership({
+        bindingSha256: environment.roles[role].bindingSha256,
+        captureId: environment.captureId,
+        ownershipSha256: environment.roles[role].ownershipSha256,
+        role,
+      }),
+    ] as const)),
+  );
+  const ownership = Object.fromEntries(ownershipEntries) as Record<
+    PublicOverlapRole,
+    PreparedCaptureOwnership
+  >;
+  if (ownership.baseline.root === ownership.candidate.root) {
+    throw new Error("Paired public overlap ownership roots are not distinct.");
+  }
+
+  const samples: Record<PublicOverlapRole, CapturedSample[]> = {
+    baseline: [],
+    candidate: [],
+  };
+  for (const [processIndex, pair] of pagePairs.entries()) {
+    const settlements = await Promise.allSettled(
+      (["baseline", "candidate"] as const).map(async (role) => captureSample({
+        applicationOrigin: environment.roles[role].applicationOrigin,
+        baseUrl: new URL(environment.roles[role].applicationOrigin),
+        page: pair[role].page,
+        replayGuard: pair[role].replayGuard,
+        route,
+        testInfo,
+      })),
+    );
+    const failures = settlements.flatMap((result) => (
+      result.status === "rejected" ? [result.reason] : []
+    ));
+    if (failures.length > 0) {
+      throw new AggregateError(
+        failures,
+        "Paired public overlap role captures did not both settle successfully.",
+      );
+    }
+    for (const [roleIndex, role] of (["baseline", "candidate"] as const).entries()) {
+      const result = settlements[roleIndex];
+      if (result?.status !== "fulfilled") {
+        throw new Error("Paired public overlap capture settlement is incomplete.");
+      }
+      const sample = result.value;
+      samples[role].push(sample);
+      await persistRawProcessSample(processIndex, sample, testInfo, role);
+      assertReadOnlySample(sample);
+      validateNavigation(role, sample.finalUrl);
+    }
+  }
+
+  const quorum = selectIndependentProcessCharacterizationPairQuorum(
+    pagePairs.map((_pair, processIndex) => ({
+      baseline: {
+        manifest: samples.baseline[processIndex]?.manifestBytes as Uint8Array,
+        screenshot: samples.baseline[processIndex]?.screenshot as Uint8Array,
+      },
+      candidate: {
+        manifest: samples.candidate[processIndex]?.manifestBytes as Uint8Array,
+        screenshot: samples.candidate[processIndex]?.screenshot as Uint8Array,
+      },
+    })),
+    projectCharacterizationManifestBytesForComparison,
+  );
+
+  for (const role of ["baseline", "candidate"] as const) {
+    const selected = samples[role][quorum.selectedProcessIndex];
+    if (!selected) {
+      throw new Error("Paired public overlap quorum selected no role evidence.");
+    }
+    const rolePages: CharacterizationPageQuorum = [
+      pagePairs[0][role],
+      pagePairs[1][role],
+      pagePairs[2][role],
+    ];
+    registerPublicOverlapRoleArtifacts({
+      applicationOrigin: environment.roles[role].applicationOrigin,
+      ownership: ownership[role],
+      pages: rolePages,
+      route,
+      samples: samples[role],
+      selected,
+      selectedScreenshot: quorum[role].selectedScreenshot,
+      testInfo,
+    });
+  }
+
+  return Object.freeze({
+    baseline: samples.baseline[quorum.selectedProcessIndex]?.manifest,
+    candidate: samples.candidate[quorum.selectedProcessIndex]?.manifest,
+    selectedProcessIndex: quorum.selectedProcessIndex,
+    selectedProcessIndexes: quorum.selectedProcessIndexes,
+  });
+}
+
+type CapturedSample = Awaited<ReturnType<typeof captureSample>>;
+
+function registerPublicOverlapRoleArtifacts(options: {
+  applicationOrigin: string;
+  ownership: PreparedCaptureOwnership;
+  pages: CharacterizationPageQuorum;
+  route: PublicOverlapRoute;
+  samples: readonly CapturedSample[];
+  selected: CapturedSample;
+  selectedScreenshot: Uint8Array;
+  testInfo: TestInfo;
+}) {
+  const {
+    applicationOrigin,
+    ownership,
+    pages,
+    route,
+    samples,
+    selected,
+    selectedScreenshot,
+    testInfo,
+  } = options;
+  const primary = pages[0];
+  if (!primary) throw new Error("Public overlap role has no primary evidence page.");
+  registerBaselineReconciliation(primary.page, async () => {
     const consoleSidecars = await Promise.all(samples.map(async (_sample, processIndex) => {
       const page = pages[processIndex]?.page as Page;
       const normalizedStaticCspViolations = staticCspConsoleSidecarEvidence(page);
@@ -115,26 +272,21 @@ export async function capturePublicOverlapCharacterization(options: {
         bytes: selected.manifestBytes,
         ownership,
         relativePath: `${relativeDirectory}/characterization.json`,
-        root: environment.root,
+        root: ownership.root,
       }),
       writeImmutableCaptureArtifact({
         bytes: consoleSidecar,
         ownership,
         relativePath: `${relativeDirectory}/console.json`,
-        root: environment.root,
+        root: ownership.root,
       }),
       writeImmutableCaptureArtifact({
-        bytes: quorum.selectedScreenshot,
+        bytes: selectedScreenshot,
         ownership,
         relativePath: `${relativeDirectory}/viewport.png`,
-        root: environment.root,
+        root: ownership.root,
       }),
     ]);
-  });
-
-  return Object.freeze({
-    finalUrl: selected.finalUrl,
-    manifest: selected.manifest,
   });
 }
 
@@ -282,16 +434,18 @@ async function persistRawProcessSample(
   processIndex: number,
   sample: Awaited<ReturnType<typeof captureSample>>,
   testInfo: TestInfo,
+  role?: PublicOverlapRole,
 ) {
   const outputDirectory = testInfo.outputPath("process-quorum");
   await mkdir(outputDirectory, { recursive: true });
+  const roleSuffix = role === undefined ? "" : `.${role}`;
   const manifestPath = testInfo.outputPath(
     "process-quorum",
-    `process-${processIndex + 1}.characterization.raw.json`,
+    `process-${processIndex + 1}${roleSuffix}.characterization.raw.json`,
   );
   const screenshotPath = testInfo.outputPath(
     "process-quorum",
-    `process-${processIndex + 1}.viewport.raw.png`,
+    `process-${processIndex + 1}${roleSuffix}.viewport.raw.png`,
   );
   await Promise.all([
     writeFile(manifestPath, sample.manifestBytes),

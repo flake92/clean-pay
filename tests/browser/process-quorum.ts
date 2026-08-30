@@ -10,6 +10,11 @@ export type IndependentProcessCharacterizationSample = {
   screenshot: Uint8Array;
 };
 
+export type IndependentProcessCharacterizationPair = Readonly<{
+  baseline: IndependentProcessCharacterizationSample;
+  candidate: IndependentProcessCharacterizationSample;
+}>;
+
 type ProjectedProcessSample = {
   projectedManifest: Buffer;
   rawManifestSha256: string;
@@ -61,6 +66,98 @@ export function selectIndependentProcessCharacterizationQuorum(
       rawPngSha256: sample.rawPngSha256,
     })),
   };
+}
+
+/**
+ * Selects one shared browser-process index for both roles. The quorum key is
+ * the exact `(baseline PNG, candidate PNG)` byte tuple, so a genuine A/B pixel
+ * difference remains intact for the later exact comparison instead of being
+ * normalized or rejected before its sanitized mismatch evidence is produced.
+ */
+export function selectIndependentProcessCharacterizationPairQuorum(
+  pairs: readonly IndependentProcessCharacterizationPair[],
+  projectManifest: (value: Uint8Array) => Uint8Array,
+) {
+  if (pairs.length !== EXACT_SCREENSHOT_QUORUM_PROCESS_COUNT) {
+    throw new Error(
+      "Paired screenshot quorum requires exactly 3 independent Chromium process pairs.",
+    );
+  }
+  const baselineSamples = pairs.map((pair) => pair.baseline);
+  const candidateSamples = pairs.map((pair) => pair.candidate);
+  const baselineProjected = baselineSamples.map((sample) => (
+    projectProcessSample(sample, projectManifest)
+  ));
+  const candidateProjected = candidateSamples.map((sample) => (
+    projectProcessSample(sample, projectManifest)
+  ));
+  requireExactProcessBytesAgreement(
+    baselineProjected.map((sample) => sample.projectedManifest),
+    "baseline projected non-PNG characterization manifests",
+  );
+  requireExactProcessBytesAgreement(
+    candidateProjected.map((sample) => sample.projectedManifest),
+    "candidate projected non-PNG characterization manifests",
+  );
+
+  for (let selectedProcessIndex = 0; selectedProcessIndex < pairs.length;
+    selectedProcessIndex += 1) {
+    const selectedPair = pairs[selectedProcessIndex] as IndependentProcessCharacterizationPair;
+    const selectedProcessIndexes = pairs.flatMap((pair, processIndex) => (
+      exactScreenshotPairEquals(pair, selectedPair) ? [processIndex] : []
+    ));
+    if (selectedProcessIndexes.length < 2) continue;
+    return Object.freeze({
+      baseline: selectedRoleQuorum(
+        baselineSamples,
+        baselineProjected,
+        selectedProcessIndex,
+        selectedProcessIndexes,
+      ),
+      candidate: selectedRoleQuorum(
+        candidateSamples,
+        candidateProjected,
+        selectedProcessIndex,
+        selectedProcessIndexes,
+      ),
+      selectedProcessIndex,
+      selectedProcessIndexes: Object.freeze([...selectedProcessIndexes]),
+    });
+  }
+  throw new Error(
+    "Independent Chromium processes produced no exact byte-identical paired PNG quorum.",
+  );
+}
+
+function exactScreenshotPairEquals(
+  left: IndependentProcessCharacterizationPair,
+  right: IndependentProcessCharacterizationPair,
+) {
+  return Buffer.from(left.baseline.screenshot).equals(Buffer.from(right.baseline.screenshot))
+    && Buffer.from(left.candidate.screenshot).equals(Buffer.from(right.candidate.screenshot));
+}
+
+function selectedRoleQuorum(
+  samples: readonly IndependentProcessCharacterizationSample[],
+  projected: readonly ProjectedProcessSample[],
+  selectedProcessIndex: number,
+  selectedProcessIndexes: readonly number[],
+) {
+  const selected = samples[selectedProcessIndex] as IndependentProcessCharacterizationSample;
+  return Object.freeze({
+    selectedManifest: Buffer.from(selected.manifest),
+    selectedProcessIndex,
+    selectedProcessIndexes: Object.freeze([...selectedProcessIndexes]),
+    selectedScreenshot: Buffer.from(selected.screenshot),
+    projectedManifestSha256: sha256(
+      projected[0]?.projectedManifest as Uint8Array,
+    ),
+    processes: Object.freeze(projected.map((sample, processIndex) => Object.freeze({
+      processIndex,
+      rawManifestSha256: sample.rawManifestSha256,
+      rawPngSha256: sample.rawPngSha256,
+    }))),
+  });
 }
 
 export function requireExactProcessBytesAgreement(

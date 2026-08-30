@@ -31,6 +31,10 @@ import {
 import { DETERMINISTIC_CHROMIUM_LAUNCH_ARGS } from "./render-policy";
 import { EXACT_SCREENSHOT_QUORUM_PROCESS_COUNT } from "./screenshot-majority";
 import { installDeterministicTurnstileStub } from "./turnstile-stub";
+import {
+  requirePublicOverlapPairEnvironment,
+  type PublicOverlapRole,
+} from "./public-overlap-evidence";
 
 export type CharacterizationGuardedPage = {
   page: Page;
@@ -43,9 +47,21 @@ export type CharacterizationPageQuorum = readonly [
   CharacterizationGuardedPage,
 ];
 
+export type CharacterizationGuardedPagePair = Readonly<{
+  baseline: CharacterizationGuardedPage;
+  candidate: CharacterizationGuardedPage;
+}>;
+
+export type CharacterizationPagePairQuorum = readonly [
+  CharacterizationGuardedPagePair,
+  CharacterizationGuardedPagePair,
+  CharacterizationGuardedPagePair,
+];
+
 type BrowserFixtures = {
   guardedPage: Page;
   guardedPageQuorum: CharacterizationPageQuorum;
+  pairedGuardedPageQuorum: CharacterizationPagePairQuorum;
 };
 
 type BrowserWorkerFixtures = {
@@ -284,6 +300,158 @@ export const test = playwrightTest.extend<BrowserFixtures, BrowserWorkerFixtures
     }
     await reconcileRegisteredBaselineArtifacts(primary.page);
   },
+
+  pairedGuardedPageQuorum: async ({ independentChromiumBrowsers }, provide, testInfo) => {
+    const environment = requirePublicOverlapPairEnvironment();
+    const failures: unknown[] = [];
+    const contexts: BrowserContext[] = [];
+    const pairs: CharacterizationGuardedPagePair[] = [];
+    const guarded: Array<{
+      entry: CharacterizationGuardedPage;
+      guard: PageGuard;
+      processIndex: number;
+      role: PublicOverlapRole;
+    }> = [];
+    try {
+      const baseOptions = characterizationContextOptions(testInfo.project.use);
+      if (baseOptions.baseURL !== environment.roles.baseline.applicationOrigin) {
+        throw new Error("Paired characterization config is not bound to the baseline origin.");
+      }
+      for (const [processIndex, browser] of independentChromiumBrowsers.entries()) {
+        const pages = {} as Record<PublicOverlapRole, CharacterizationGuardedPage>;
+        for (const role of ["baseline", "candidate"] as const) {
+          const applicationOrigin = environment.roles[role].applicationOrigin;
+          const context = await browser.newContext({
+            ...baseOptions,
+            baseURL: applicationOrigin,
+          });
+          contexts.push(context);
+          await installDeterministicTurnstileStub(context);
+          const replayGuard = await installCharacterizationReplayGuard({
+            applicationOrigin,
+            context,
+          });
+          const page = await context.newPage();
+          replayGuard.bindPrimaryPage(page);
+          const entry = { page, replayGuard };
+          pages[role] = entry;
+          guarded.push({
+            entry,
+            guard: guardPage(page, applicationOrigin),
+            processIndex,
+            role,
+          });
+        }
+        pairs.push(Object.freeze({
+          baseline: pages.baseline,
+          candidate: pages.candidate,
+        }));
+      }
+      await provide(pairs as [
+        CharacterizationGuardedPagePair,
+        CharacterizationGuardedPagePair,
+        CharacterizationGuardedPagePair,
+      ]);
+    } catch (error) {
+      failures.push(error);
+    }
+
+    let contextsClosed = false;
+    try {
+      await closeOwnedResources({
+        close: (context) => context.close({ reason: "Paired characterization test ended." }),
+        label: "paired characterization browser context",
+        resources: contexts,
+        timeoutMs: CONTEXT_CLOSE_TIMEOUT_MS,
+      });
+      contextsClosed = true;
+    } catch (error) {
+      failures.push(error);
+    }
+
+    for (const item of guarded) item.guard.detach();
+    const unexpectedConsole = guarded.flatMap(({ guard, processIndex, role }) => (
+      guard.consoleMessages.map((diagnostic) => ({ diagnostic, processIndex, role }))
+    ));
+    const unexpectedPageErrors = guarded.flatMap(({ guard, processIndex, role }) => (
+      guard.pageErrors.map((diagnostic) => ({ diagnostic, processIndex, role }))
+    ));
+    if (unexpectedConsole.length || unexpectedPageErrors.length) {
+      try {
+        const diagnostics = Buffer.from(`${JSON.stringify({
+          processes: guarded.map(({ guard, processIndex, role }) => ({
+            processIndex,
+            role,
+            consoleMessages: guard.consoleMessages,
+            pageErrors: guard.pageErrors,
+          })),
+        }, null, 2)}\n`);
+        const diagnosticPath = testInfo.outputPath(
+          "unexpected-browser-paired-process-quorum-diagnostics.json",
+        );
+        await mkdir(path.dirname(diagnosticPath), { recursive: true });
+        await writeFile(diagnosticPath, diagnostics);
+        await testInfo.attach("unexpected-browser-paired-process-quorum-diagnostics.json", {
+          path: diagnosticPath,
+          contentType: "application/json",
+        });
+      } catch (error) {
+        failures.push(error);
+      }
+    }
+    try {
+      expect(
+        unexpectedConsole,
+        "Unexpected browser console output in a paired Chromium process.",
+      ).toEqual([]);
+    } catch (error) {
+      failures.push(error);
+    }
+    try {
+      expect(
+        unexpectedPageErrors,
+        "Unexpected pageerror in a paired Chromium process.",
+      ).toEqual([]);
+    } catch (error) {
+      failures.push(error);
+    }
+
+    for (const item of guarded) {
+      if (contextsClosed) item.entry.replayGuard.markContextClosed();
+      item.entry.replayGuard.detach();
+      try {
+        await persistReplayGuardEvidence({
+          evidence: item.entry.replayGuard.evidence(),
+          processIndex: item.processIndex,
+          role: item.role,
+          testInfo,
+        });
+      } catch (error) {
+        failures.push(error);
+      }
+      try {
+        item.entry.replayGuard.assertNoViolations();
+      } catch (error) {
+        failures.push(error);
+      }
+    }
+
+    throwCollectedFailures(failures, "Paired independent characterization fixture failed.");
+    const primary = pairs[0];
+    if (!primary) {
+      throw new Error("Paired characterization fixture created no primary page pair.");
+    }
+    const reconciliations = await Promise.allSettled([
+      reconcileRegisteredBaselineArtifacts(primary.baseline.page),
+      reconcileRegisteredBaselineArtifacts(primary.candidate.page),
+    ]);
+    throwCollectedFailures(
+      reconciliations.flatMap((result) => (
+        result.status === "rejected" ? [result.reason] : []
+      )),
+      "Paired characterization artifact reconciliation failed.",
+    );
+  },
 });
 
 function guardPage(page: Page, applicationOrigin: string): PageGuard {
@@ -473,12 +641,14 @@ export async function closeOwnedResources<T>(options: {
 async function persistReplayGuardEvidence(options: {
   evidence: CharacterizationReplayGuardEvidence;
   processIndex: number;
+  role?: PublicOverlapRole;
   testInfo: TestInfo;
 }) {
-  const { evidence, processIndex, testInfo } = options;
+  const { evidence, processIndex, role, testInfo } = options;
+  const roleSuffix = role === undefined ? "" : `.${role}`;
   const evidencePath = testInfo.outputPath(
     "process-quorum",
-    `process-${processIndex + 1}.replay-guard.raw.json`,
+    `process-${processIndex + 1}${roleSuffix}.replay-guard.raw.json`,
   );
   await mkdir(path.dirname(evidencePath), { recursive: true });
   await writeFile(evidencePath, `${JSON.stringify(evidence, null, 2)}\n`, {
@@ -486,7 +656,8 @@ async function persistReplayGuardEvidence(options: {
     flag: "wx",
     mode: 0o600,
   });
-  await testInfo.attach(`process-quorum/process-${processIndex + 1}/replay-guard.json`, {
+  await testInfo.attach(
+    `process-quorum/process-${processIndex + 1}${roleSuffix}/replay-guard.json`, {
     path: evidencePath,
     contentType: "application/json",
   });

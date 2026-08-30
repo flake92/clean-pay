@@ -241,6 +241,64 @@ export function requirePublicOverlapEnvironment(
   });
 }
 
+export function requirePublicOverlapPairEnvironment(
+  environment: Readonly<Record<string, string | undefined>> = process.env,
+) {
+  const captureId = exactEnvironmentValue(
+    environment.CLEAN_PAY_PUBLIC_OVERLAP_CAPTURE_ID,
+    captureIdPattern,
+    "capture ID",
+  );
+  exactEnvironmentValue(
+    environment.CLEAN_PAY_PUBLIC_OVERLAP_ROLE,
+    /^pair$/,
+    "paired capture role",
+  );
+  const roles = Object.freeze({
+    baseline: pairedRoleEnvironment(environment, captureId, "baseline"),
+    candidate: pairedRoleEnvironment(environment, captureId, "candidate"),
+  });
+  if (
+    roles.baseline.applicationOrigin === roles.candidate.applicationOrigin
+    || roles.baseline.bindingSha256 === roles.candidate.bindingSha256
+    || roles.baseline.ownershipSha256 === roles.candidate.ownershipSha256
+    || roles.baseline.root === roles.candidate.root
+  ) {
+    throw new Error("Public overlap paired capture roles must be distinct.");
+  }
+  return Object.freeze({ captureId, role: "pair" as const, roles });
+}
+
+function pairedRoleEnvironment(
+  environment: Readonly<Record<string, string | undefined>>,
+  captureId: string,
+  role: PublicOverlapRole,
+) {
+  const prefix = role === "baseline" ? "BASELINE" : "CANDIDATE";
+  const applicationOrigin = assertExactLoopbackApplicationOrigin(
+    environment[`CLEAN_PAY_PUBLIC_OVERLAP_${prefix}_ORIGIN`],
+    `${role} application origin`,
+  );
+  const bindingSha256 = exactEnvironmentValue(
+    environment[`CLEAN_PAY_PUBLIC_OVERLAP_${prefix}_BINDING_SHA256`],
+    digestPattern,
+    `${role} stack binding digest`,
+  );
+  const ownershipSha256 = exactEnvironmentValue(
+    environment[`CLEAN_PAY_PUBLIC_OVERLAP_${prefix}_OWNERSHIP_SHA256`],
+    digestPattern,
+    `${role} ownership digest`,
+  );
+  return Object.freeze({
+    applicationOrigin,
+    bindingSha256,
+    captureId,
+    ownershipSha256,
+    role,
+    root: resolveExactCaptureRoot(captureId, role),
+  });
+}
+
 export async function prepareExactCapturePair(options: {
   baselineBindingSha256: string;
   candidateBindingSha256: string;

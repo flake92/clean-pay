@@ -5,6 +5,7 @@ import { projectScopedPlaywrightOutputDirectory } from "./playwright-output-scop
 import {
   PUBLIC_OVERLAP_PROJECTS,
   requirePublicOverlapEnvironment,
+  requirePublicOverlapPairEnvironment,
 } from "./public-overlap-evidence";
 import { DETERMINISTIC_CHROMIUM_LAUNCH_ARGS } from "./render-policy";
 
@@ -20,8 +21,13 @@ if (typeof captureId !== "string" || !/^[a-f0-9]{16}$/.test(captureId)) {
   throw new Error("CLEAN_PAY_PUBLIC_OVERLAP_CAPTURE_ID is invalid.");
 }
 
-const captureEnvironment = overlapMode === "capture" ? requirePublicOverlapEnvironment() : undefined;
-const outputRole = captureEnvironment?.role ?? overlapMode;
+const pairedCapture = overlapMode === "capture"
+  && process.env.CLEAN_PAY_PUBLIC_OVERLAP_ROLE === "pair";
+const captureEnvironment = overlapMode === "capture" && !pairedCapture
+  ? requirePublicOverlapEnvironment()
+  : undefined;
+const pairEnvironment = pairedCapture ? requirePublicOverlapPairEnvironment() : undefined;
+const outputRole = pairEnvironment?.role ?? captureEnvironment?.role ?? overlapMode;
 const outputDir = projectScopedPlaywrightOutputDirectory(
   path.resolve(
     process.cwd(),
@@ -35,7 +41,9 @@ const outputDir = projectScopedPlaywrightOutputDirectory(
 export default defineConfig({
   testDir: ".",
   testMatch: {
-    capture: "public-overlap-capture.live.ts",
+    capture: pairedCapture
+      ? "public-overlap-pair-capture.live.ts"
+      : "public-overlap-capture.live.ts",
     cleanup: "public-overlap-cleanup.live.ts",
     compare: "public-overlap-proof.live.ts",
     prepare: "public-overlap-prepare.live.ts",
@@ -51,7 +59,9 @@ export default defineConfig({
   expect: { timeout: 5_000 },
   reporter: [["line"]],
   use: {
-    baseURL: captureEnvironment?.applicationOrigin ?? "http://127.0.0.1:1",
+    baseURL: captureEnvironment?.applicationOrigin
+      ?? pairEnvironment?.roles.baseline.applicationOrigin
+      ?? "http://127.0.0.1:1",
     browserName: "chromium",
     launchOptions: { args: [...DETERMINISTIC_CHROMIUM_LAUNCH_ARGS] },
     colorScheme: "light",

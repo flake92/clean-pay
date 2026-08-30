@@ -18,6 +18,7 @@ import {
 } from "./characterization-replay-policy";
 import {
   requireExactProcessBytesAgreement,
+  selectIndependentProcessCharacterizationPairQuorum,
   selectIndependentProcessCharacterizationQuorum,
 } from "./process-quorum";
 
@@ -94,6 +95,57 @@ test.describe("independent Chromium process quorum", () => {
       sha256(cornerRasterVariant),
       sha256(stable),
     ]);
+  });
+
+  test("selects one exact repeated role tuple without masking a genuine A/B raster diff", () => {
+    const baseline = Buffer.from([137, 80, 78, 71, 1]);
+    const candidate = Buffer.from([137, 80, 78, 71, 2]);
+    const dissentBaseline = Buffer.from([137, 80, 78, 71, 3]);
+    const dissentCandidate = Buffer.from([137, 80, 78, 71, 4]);
+    const result = selectIndependentProcessCharacterizationPairQuorum([
+      { baseline: sample(baseline), candidate: sample(candidate) },
+      { baseline: sample(baseline), candidate: sample(candidate) },
+      { baseline: sample(dissentBaseline), candidate: sample(dissentCandidate) },
+    ], identity);
+
+    expect(result.selectedProcessIndex).toBe(0);
+    expect(result.selectedProcessIndexes).toEqual([0, 1]);
+    expect(result.baseline.selectedProcessIndex).toBe(result.candidate.selectedProcessIndex);
+    expect(result.baseline.selectedScreenshot).toEqual(baseline);
+    expect(result.candidate.selectedScreenshot).toEqual(candidate);
+    expect(result.baseline.selectedScreenshot).not.toEqual(result.candidate.selectedScreenshot);
+  });
+
+  test("fails closed when separate role majorities have no repeated exact pair tuple", () => {
+    const first = Buffer.from([137, 80, 78, 71, 1]);
+    const second = Buffer.from([137, 80, 78, 71, 2]);
+    expect(() => selectIndependentProcessCharacterizationPairQuorum([
+      { baseline: sample(first), candidate: sample(first) },
+      { baseline: sample(first), candidate: sample(second) },
+      { baseline: sample(second), candidate: sample(first) },
+    ], identity)).toThrow(/no exact byte-identical paired PNG quorum/);
+  });
+
+  test("fails paired selection on role evidence drift, bad attestation, or wrong count", () => {
+    const stable = Buffer.from([137, 80, 78, 71]);
+    expect(() => selectIndependentProcessCharacterizationPairQuorum([
+      { baseline: sample(stable), candidate: sample(stable) },
+      { baseline: sample(stable), candidate: sample(stable, "/register") },
+      { baseline: sample(stable), candidate: sample(stable) },
+    ], identity)).toThrow(/candidate projected non-PNG characterization manifests disagree/);
+
+    const invalid = sample(stable);
+    invalid.manifest = sample(Buffer.from([1, 2, 3])).manifest;
+    expect(() => selectIndependentProcessCharacterizationPairQuorum([
+      { baseline: invalid, candidate: sample(stable) },
+      { baseline: sample(stable), candidate: sample(stable) },
+      { baseline: sample(stable), candidate: sample(stable) },
+    ], identity)).toThrow(/does not self-attest/);
+
+    expect(() => selectIndependentProcessCharacterizationPairQuorum([
+      { baseline: sample(stable), candidate: sample(stable) },
+      { baseline: sample(stable), candidate: sample(stable) },
+    ], identity)).toThrow(/exactly 3 independent Chromium process pairs/);
   });
 
   test("fails when projected non-PNG evidence disagrees", () => {

@@ -28,6 +28,7 @@ export const JOURNEY_FIXTURE_FILENAMES = Object.freeze([
   "../public-overlap-global-teardown.ts",
   "../public-overlap-mismatch-evidence.contract.spec.ts",
   "../public-overlap-mismatch-evidence.mjs",
+  "../public-overlap-pair-capture.live.ts",
   "../public-overlap-prepare.live.ts",
   "../public-overlap-proof.live.ts",
   "../public-overlap-proof.ts",

@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { types } from "node:util";
 
 const allowedModes = new Set(["capture", "cleanup", "compare", "prepare", "verify"]);
-const allowedRoles = new Set([null, "baseline", "candidate"]);
+const allowedRoles = new Set([null, "baseline", "candidate", "pair"]);
 const allowedInvocationStages = new Set([
   "capture-input",
   "environment-policy",

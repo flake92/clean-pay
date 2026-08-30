@@ -91,6 +91,8 @@ test("derives exact non-aliasing create-only artifact names for process scope", 
     .toBe("public-capture-baseline-failure.json");
   expect(publicOverlapProcessFailureFilename("capture", "candidate"))
     .toBe("public-capture-candidate-failure.json");
+  expect(publicOverlapProcessFailureFilename("capture", "pair"))
+    .toBe("public-capture-pair-failure.json");
   expect(publicOverlapProcessFailureFilename("compare", null))
     .toBe("public-compare-pair-failure.json");
   expect(() => publicOverlapProcessFailureFilename("capture", null))

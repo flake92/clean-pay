@@ -111,18 +111,6 @@ try {
     if (baselineOrigin === candidateOrigin) {
       throw new Error("Public overlap owned stack origins must be distinct.");
     }
-    const captureSettlements = await Promise.allSettled([
-      runCapture("baseline", baselineOrigin, baselineBindingSha256),
-      runCapture("candidate", candidateOrigin, candidateBindingSha256),
-    ]);
-    const captureErrors = rejectionReasons(captureSettlements);
-    if (captureErrors.length > 0) {
-      throw new AggregateError(
-        captureErrors,
-        "Both public characterization captures must settle before exact cleanup.",
-      );
-    }
-
     const comparisonEnvironment = {
       CLEAN_PAY_PUBLIC_OVERLAP_CAPTURE_ID: captureId,
       CLEAN_PAY_PUBLIC_OVERLAP_BASELINE_ORIGIN: baselineOrigin,
@@ -134,6 +122,18 @@ try {
       CLEAN_PAY_PUBLIC_OVERLAP_CANDIDATE_OWNERSHIP_SHA256:
         preparedOwnership.roles.candidate.ownershipSha256,
     };
+    const captureSettlements = await Promise.allSettled([
+      runCapturePair(comparisonEnvironment),
+    ]);
+    const captureErrors = captureSettlements.flatMap((result) => (
+      result.status === "rejected" ? [result.reason] : []
+    ));
+    if (captureErrors.length > 0) {
+      throw new AggregateError(
+        captureErrors,
+        "Paired public characterization capture must settle before exact cleanup.",
+      );
+    }
     await runPublicOverlapPlaywright("compare", comparisonEnvironment, 180_000);
     const expected = {
       baselineBindingSha256,
@@ -234,20 +234,16 @@ try {
   process.exitCode = 1;
 }
 
-async function runCapture(role, origin, bindingSha256) {
+async function runCapturePair(comparisonEnvironment) {
   const observedFailures = totalObservedFailures();
   try {
     return await runPublicOverlapPlaywright("capture", {
-      CLEAN_PAY_PUBLIC_OVERLAP_CAPTURE_ID: captureId,
-      CLEAN_PAY_PUBLIC_OVERLAP_ROLE: role,
-      CLEAN_PAY_PUBLIC_OVERLAP_BINDING_SHA256: bindingSha256,
-      CLEAN_PAY_PUBLIC_OVERLAP_OWNERSHIP_SHA256:
-        preparedOwnership.roles[role].ownershipSha256,
-      CLEAN_PAY_BROWSER_BASE_URL: origin,
+      ...comparisonEnvironment,
+      CLEAN_PAY_PUBLIC_OVERLAP_ROLE: "pair",
     }, 1_200_000);
   } catch (error) {
     if (totalObservedFailures() === observedFailures) {
-      recordInvocationFailure("capture-input", "capture", role, error);
+      recordInvocationFailure("capture-input", "capture", "pair", error);
     }
     throw error;
   }
@@ -660,12 +656,6 @@ function parseAssetPlatform(document) {
     throw new Error("Public overlap asset attestation platform is invalid.");
   }
   return { architecture: platform.architecture, os: platform.os };
-}
-
-function rejectionReasons(settlements) {
-  return settlements
-    .filter(({ status }) => status === "rejected")
-    .map(({ reason }) => reason);
 }
 
 function isWithin(parent, child) {

@@ -13,6 +13,7 @@ import {
   cleanupPreparedCapturePair,
   createExactEphemeralCapturePolicy,
   prepareExactCapturePair,
+  requirePublicOverlapPairEnvironment,
   resolveExactCaptureRoot,
   sealExactCapture,
   sha256,
@@ -51,6 +52,52 @@ test("defines the exact reusable 42-case/126-artifact public capture ledger", ()
     maximumArtifactBytes: 1024,
     suite: "journey-pair-v1",
   })).toThrow("ownership artifact path ledger is invalid");
+});
+
+test("accepts only a distinct exact paired capture environment", () => {
+  const environment = pairedCaptureEnvironment();
+  const parsed = requirePublicOverlapPairEnvironment(environment);
+  expect(parsed).toMatchObject({
+    captureId: "0123456789abcdef",
+    role: "pair",
+    roles: {
+      baseline: {
+        applicationOrigin: "http://127.0.0.1:4201",
+        bindingSha256: "1".repeat(64),
+        ownershipSha256: "3".repeat(64),
+        role: "baseline",
+      },
+      candidate: {
+        applicationOrigin: "http://127.0.0.1:4202",
+        bindingSha256: "2".repeat(64),
+        ownershipSha256: "4".repeat(64),
+        role: "candidate",
+      },
+    },
+  });
+  expect(parsed.roles.baseline.root).not.toBe(parsed.roles.candidate.root);
+
+  for (const nearMiss of [
+    { ...environment, CLEAN_PAY_PUBLIC_OVERLAP_ROLE: "baseline" },
+    {
+      ...environment,
+      CLEAN_PAY_PUBLIC_OVERLAP_CANDIDATE_ORIGIN:
+        environment.CLEAN_PAY_PUBLIC_OVERLAP_BASELINE_ORIGIN,
+    },
+    {
+      ...environment,
+      CLEAN_PAY_PUBLIC_OVERLAP_CANDIDATE_BINDING_SHA256:
+        environment.CLEAN_PAY_PUBLIC_OVERLAP_BASELINE_BINDING_SHA256,
+    },
+    {
+      ...environment,
+      CLEAN_PAY_PUBLIC_OVERLAP_CANDIDATE_OWNERSHIP_SHA256:
+        environment.CLEAN_PAY_PUBLIC_OVERLAP_BASELINE_OWNERSHIP_SHA256,
+    },
+    { ...environment, CLEAN_PAY_PUBLIC_OVERLAP_CANDIDATE_ORIGIN: "https://example.invalid" },
+  ]) {
+    expect(() => requirePublicOverlapPairEnvironment(nearMiss)).toThrow();
+  }
 });
 
 test("requires consecutive terminal PNG evidence in canonical and live capture", async () => {
@@ -297,4 +344,17 @@ function syntheticPng(width: number, height: number) {
   value.writeUInt32BE(width, 16);
   value.writeUInt32BE(height, 20);
   return value;
+}
+
+function pairedCaptureEnvironment() {
+  return {
+    CLEAN_PAY_PUBLIC_OVERLAP_CAPTURE_ID: "0123456789abcdef",
+    CLEAN_PAY_PUBLIC_OVERLAP_ROLE: "pair",
+    CLEAN_PAY_PUBLIC_OVERLAP_BASELINE_ORIGIN: "http://127.0.0.1:4201",
+    CLEAN_PAY_PUBLIC_OVERLAP_CANDIDATE_ORIGIN: "http://127.0.0.1:4202",
+    CLEAN_PAY_PUBLIC_OVERLAP_BASELINE_BINDING_SHA256: "1".repeat(64),
+    CLEAN_PAY_PUBLIC_OVERLAP_CANDIDATE_BINDING_SHA256: "2".repeat(64),
+    CLEAN_PAY_PUBLIC_OVERLAP_BASELINE_OWNERSHIP_SHA256: "3".repeat(64),
+    CLEAN_PAY_PUBLIC_OVERLAP_CANDIDATE_OWNERSHIP_SHA256: "4".repeat(64),
+  };
 }
