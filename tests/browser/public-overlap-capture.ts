@@ -159,7 +159,7 @@ export async function capturePublicOverlapCharacterizationPair(options: {
     const captureLifecycle = createSerializedPairCaptureTaskLifecycle();
     const settlements = await Promise.allSettled(
       (["baseline", "candidate"] as const).map((role) => (
-        captureLifecycle.captureSerialized(
+        captureLifecycle.capture(
           role,
           () => prepareCaptureSample({
             applicationOrigin: environment.roles[role].applicationOrigin,

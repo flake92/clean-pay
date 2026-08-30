@@ -265,7 +265,7 @@ test("pins the local capture tool and publishes proof only after owned-stack cle
   expect(captureSource).toContain("const settlements = await Promise.allSettled(");
   expect(captureSource).toContain('(["baseline", "candidate"] as const).map');
   expect(captureSource).toContain("createSerializedPairCaptureTaskLifecycle()");
-  expect(captureSource).toContain("captureLifecycle.captureSerialized(");
+  expect(captureSource).toContain("captureLifecycle.capture(");
   expect(captureSource).toContain("prepareCaptureSample({");
   expect(captureSource).toContain("capturePreparedSample(prepared)");
   expect(captureSource).toContain("createSerializedPairTerminalScreenshotCapture()");
