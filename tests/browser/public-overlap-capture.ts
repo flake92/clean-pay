@@ -23,14 +23,20 @@ import {
   selectedComputedStyles,
 } from "./page-characterization";
 import {
+  PairedPngQuorumError,
   requireExactProcessBytesAgreement,
   selectIndependentProcessCharacterizationPairQuorum,
   selectIndependentProcessCharacterizationQuorum,
 } from "./process-quorum";
 import {
   captureByteIdenticalTerminalScreenshot,
+  createSerializedPairCaptureTaskLifecycle,
   createSerializedPairTerminalScreenshotCapture,
 } from "./screenshot-majority";
+import {
+  PAIRED_PNG_QUORUM_FAILURE_DIRECTORY,
+  persistPairedPngQuorumFailureEvidence,
+} from "./paired-png-quorum-failure";
 import {
   PUBLIC_OVERLAP_CAPTURE_POLICY,
   PUBLIC_OVERLAP_PROJECTS,
@@ -150,10 +156,12 @@ export async function capturePublicOverlapCharacterizationPair(options: {
   };
   for (const [processIndex, pair] of pagePairs.entries()) {
     const screenshotCapture = createSerializedPairTerminalScreenshotCapture();
+    const captureLifecycle = createSerializedPairCaptureTaskLifecycle();
     const settlements = await Promise.allSettled(
-      (["baseline", "candidate"] as const).map(async (role) => {
-        try {
-          return await captureSample({
+      (["baseline", "candidate"] as const).map((role) => (
+        captureLifecycle.capture(
+          role,
+          () => prepareCaptureSample({
             applicationOrigin: environment.roles[role].applicationOrigin,
             baseUrl: new URL(environment.roles[role].applicationOrigin),
             captureScreenshot: (page) => screenshotCapture.capture(role, page),
@@ -161,11 +169,16 @@ export async function capturePublicOverlapCharacterizationPair(options: {
             replayGuard: pair[role].replayGuard,
             route,
             testInfo,
-          });
-        } finally {
-          screenshotCapture.complete(role);
-        }
-      }),
+          }),
+          async (prepared) => {
+            try {
+              return await capturePreparedSample(prepared);
+            } finally {
+              screenshotCapture.complete(role);
+            }
+          },
+        )
+      )),
     );
     const failures = settlements.flatMap((result) => (
       result.status === "rejected" ? [result.reason] : []
@@ -189,19 +202,40 @@ export async function capturePublicOverlapCharacterizationPair(options: {
     }
   }
 
-  const quorum = selectIndependentProcessCharacterizationPairQuorum(
-    pagePairs.map((_pair, processIndex) => ({
-      baseline: {
-        manifest: samples.baseline[processIndex]?.manifestBytes as Uint8Array,
-        screenshot: samples.baseline[processIndex]?.screenshot as Uint8Array,
-      },
-      candidate: {
-        manifest: samples.candidate[processIndex]?.manifestBytes as Uint8Array,
-        screenshot: samples.candidate[processIndex]?.screenshot as Uint8Array,
-      },
-    })),
-    projectCharacterizationManifestBytesForComparison,
-  );
+  const processPairs = pagePairs.map((_pair, processIndex) => ({
+    baseline: {
+      manifest: samples.baseline[processIndex]?.manifestBytes as Uint8Array,
+      screenshot: samples.baseline[processIndex]?.screenshot as Uint8Array,
+    },
+    candidate: {
+      manifest: samples.candidate[processIndex]?.manifestBytes as Uint8Array,
+      screenshot: samples.candidate[processIndex]?.screenshot as Uint8Array,
+    },
+  }));
+  let quorum: ReturnType<typeof selectIndependentProcessCharacterizationPairQuorum>;
+  try {
+    quorum = selectIndependentProcessCharacterizationPairQuorum(
+      processPairs,
+      projectCharacterizationManifestBytesForComparison,
+    );
+  } catch (error) {
+    if (!(error instanceof PairedPngQuorumError)) throw error;
+    try {
+      await persistPairedPngQuorumFailureEvidence({
+        error,
+        outputRoot: testInfo.outputPath(PAIRED_PNG_QUORUM_FAILURE_DIRECTORY),
+        pairs: processPairs,
+        project: testInfo.project.name,
+        route,
+      });
+    } catch (diagnosticError) {
+      throw new AggregateError(
+        [error, diagnosticError],
+        "Paired PNG quorum failed and its exact diagnostic evidence could not be sealed.",
+      );
+    }
+    throw error;
+  }
 
   for (const role of ["baseline", "candidate"] as const) {
     const selected = samples[role][quorum.selectedProcessIndex];
@@ -301,7 +335,7 @@ function registerPublicOverlapRoleArtifacts(options: {
   });
 }
 
-async function captureSample(options: {
+type CaptureSampleOptions = Readonly<{
   applicationOrigin: string;
   baseUrl: URL;
   captureScreenshot?: (page: Page) => Promise<Buffer>;
@@ -309,8 +343,14 @@ async function captureSample(options: {
   replayGuard: CharacterizationPageQuorum[number]["replayGuard"];
   route: PublicOverlapRoute;
   testInfo: TestInfo;
-}) {
-  const { applicationOrigin, baseUrl, page, replayGuard, route, testInfo } = options;
+}>;
+
+async function captureSample(options: CaptureSampleOptions) {
+  return capturePreparedSample(await prepareCaptureSample(options));
+}
+
+async function prepareCaptureSample(options: CaptureSampleOptions) {
+  const { applicationOrigin, page, route } = options;
   const networkRecorder = recordNetwork(page, applicationOrigin);
   const finalResponse = await page.goto(route.requestPath, { waitUntil: "domcontentloaded" });
   await page.waitForLoadState("load");
@@ -321,9 +361,25 @@ async function captureSample(options: {
     });
   });
   await page.waitForLoadState("networkidle", { timeout: 3_000 }).catch(() => undefined);
+  return Object.freeze({ ...options, finalResponse, networkRecorder });
+}
 
-  const screenshot = options.captureScreenshot
-    ? await options.captureScreenshot(page)
+async function capturePreparedSample(
+  prepared: Awaited<ReturnType<typeof prepareCaptureSample>>,
+) {
+  const {
+    applicationOrigin,
+    baseUrl,
+    captureScreenshot,
+    finalResponse,
+    networkRecorder,
+    page,
+    replayGuard,
+    route,
+    testInfo,
+  } = prepared;
+  const screenshot = captureScreenshot
+    ? await captureScreenshot(page)
     : await captureByteIdenticalTerminalScreenshot(page);
   const [dom, computedStyles, interactiveElements, ariaSnapshot, storage, redirects] = (
     await Promise.all([

@@ -6,6 +6,8 @@ export const EXACT_TERMINAL_SCREENSHOT_CAPTURE_COUNT = 3;
 export type PublicOverlapScreenshotRole = "baseline" | "candidate";
 
 type TerminalScreenshotCapture = (page: Page) => Promise<Buffer>;
+type SerializedPairCaptureTask<T> = () => Promise<T>;
+type SerializedPairTerminalTask<TPrepared, TResult> = (prepared: TPrepared) => Promise<TResult>;
 
 const exactScreenshotOptions = Object.freeze({
   animations: "disabled" as const,
@@ -83,6 +85,83 @@ export function createSerializedPairTerminalScreenshotCapture(
         throw new Error("Paired terminal screenshot completion role is invalid.");
       }
       if (role === "baseline") release();
+    },
+  });
+}
+
+/**
+ * Allows both roles to navigate and settle resources concurrently, waits for
+ * an exact two-role preparation barrier, then serializes the complete terminal
+ * evidence phase baseline -> candidate. Both promises remain compatible with
+ * Promise.allSettled. A preparation failure releases the peer from the barrier,
+ * while a baseline terminal failure releases the candidate terminal lane.
+ */
+export function createSerializedPairCaptureTaskLifecycle() {
+  type BarrierOutcome = Readonly<{
+    failedRole: PublicOverlapScreenshotRole | null;
+    status: "ready" | "failed";
+  }>;
+  let releaseBarrier!: (outcome: BarrierOutcome) => void;
+  const preparationBarrier = new Promise<BarrierOutcome>((resolve) => {
+    releaseBarrier = resolve;
+  });
+  let barrierReleased = false;
+  const preparedRoles = new Set<PublicOverlapScreenshotRole>();
+  let releaseBaselineTerminal!: () => void;
+  const baselineTerminalFinished = new Promise<void>((resolve) => {
+    releaseBaselineTerminal = resolve;
+  });
+  let baselineTerminalReleased = false;
+  const started = new Set<PublicOverlapScreenshotRole>();
+  const finishBarrier = (outcome: BarrierOutcome) => {
+    if (barrierReleased) return;
+    barrierReleased = true;
+    releaseBarrier(Object.freeze(outcome));
+  };
+  const finishBaselineTerminal = () => {
+    if (baselineTerminalReleased) return;
+    baselineTerminalReleased = true;
+    releaseBaselineTerminal();
+  };
+
+  return Object.freeze({
+    async capture<TPrepared, TResult>(
+      role: PublicOverlapScreenshotRole,
+      prepare: SerializedPairCaptureTask<TPrepared>,
+      captureTerminal: SerializedPairTerminalTask<TPrepared, TResult>,
+    ) {
+      if ((role !== "baseline" && role !== "candidate")
+        || typeof prepare !== "function"
+        || typeof captureTerminal !== "function") {
+        throw new Error("Paired characterization capture task is invalid.");
+      }
+      if (started.has(role)) {
+        throw new Error("Paired characterization capture role was started more than once.");
+      }
+      started.add(role);
+      let prepared: TPrepared;
+      try {
+        prepared = await prepare();
+      } catch (error) {
+        finishBarrier({ failedRole: role, status: "failed" });
+        throw error;
+      }
+      preparedRoles.add(role);
+      if (preparedRoles.size === 2) {
+        finishBarrier({ failedRole: null, status: "ready" });
+      }
+      const barrier = await preparationBarrier;
+      if (barrier.status !== "ready") {
+        throw new Error(
+          `Paired characterization preparation barrier failed in ${barrier.failedRole} role.`,
+        );
+      }
+      if (role === "candidate") await baselineTerminalFinished;
+      try {
+        return await captureTerminal(prepared);
+      } finally {
+        if (role === "baseline") finishBaselineTerminal();
+      }
     },
   });
 }
