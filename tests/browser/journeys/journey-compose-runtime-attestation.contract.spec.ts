@@ -7,7 +7,9 @@ import {
   JOURNEY_COMPOSE_SERVICE_NAMES,
   JOURNEY_COMPOSE_VOLUME_NAMES,
   assertJourneyComposeRuntimeInspection,
+  assertJourneyOneShotLifecycle,
   attestJourneyComposeRuntime,
+  collectJourneyOneShotLifecycleFailureEvidence,
   normalizeJourneyHostPath,
 } from "./journey-compose-runtime-attestation.mjs";
 
@@ -63,6 +65,34 @@ test("is import-safe and attests the exact full journey Compose runtime", () => 
     (container.HostConfig as { LogConfig: { Type: string; Config: object } }).LogConfig.Type = "";
   }
   expect(() => assertJourneyComposeRuntimeInspection(fixture)).not.toThrow();
+});
+
+test("emits bounded sanitized evidence when retrospective one-shot events are incomplete", () => {
+  const fixture = runtimeFixture();
+  const container = fixture.containersByService.migration;
+  const lifecycle = structuredClone(fixture.oneShotLifecycles.migration);
+  lifecycle.events.shift();
+  let failure: unknown;
+  try {
+    assertJourneyOneShotLifecycle(lifecycle, container);
+  } catch (error) {
+    failure = new AggregateError([new AggregateError([error])]);
+  }
+  expect(collectJourneyOneShotLifecycleFailureEvidence(failure)).toEqual([{
+    actions: ["start", "die"],
+    eventCountTruncated: false,
+    exitCode: 0,
+    observedEventCount: 2,
+    restartCount: 0,
+    service: "migration",
+    stateStatus: "exited",
+  }]);
+  expect(JSON.stringify(collectJourneyOneShotLifecycleFailureEvidence(failure)))
+    .not.toContain(container.Id);
+
+  const revoked = Proxy.revocable(new Error("secret"), {});
+  revoked.revoke();
+  expect(collectJourneyOneShotLifecycleFailureEvidence(revoked.proxy)).toEqual([]);
 });
 
 test("keeps the classic config-selection output and binding hashes byte-for-byte stable", () => {
