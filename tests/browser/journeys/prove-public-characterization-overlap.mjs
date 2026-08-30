@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { writeSync } from "node:fs";
 import { lstat, readFile, realpath, stat } from "node:fs/promises";
 import path from "node:path";
 
@@ -23,7 +24,10 @@ import {
   resolvePublicOverlapProofPath,
   sha256,
 } from "./public-overlap-proof-contract.mjs";
-import { createPublicOverlapProcessFailureEvidence } from "./public-overlap-process-evidence.mjs";
+import {
+  createPublicOverlapProcessFailureEvidence,
+  publicOverlapProcessFailureFilename,
+} from "./public-overlap-process-evidence.mjs";
 
 const repositoryRoot = path.resolve(process.cwd());
 const localPlaywrightCli = path.join(repositoryRoot, "node_modules", "playwright", "cli.js");
@@ -37,10 +41,15 @@ let preparedOwnership;
 let argumentsByName;
 let captureId;
 let completed = false;
+let failureOutputRoot;
 
 try {
   argumentsByName = parseArguments(process.argv.slice(2));
   captureId = requiredArgument(argumentsByName, "--capture-id", /^[a-f0-9]{16}$/);
+  failureOutputRoot = await exactFailureOutputRoot(
+    process.env.CLEAN_PAY_PUBLIC_OVERLAP_FAILURE_OUTPUT_ROOT,
+    captureId,
+  );
   await assertRepositoryRoot();
   const baselineInput = await readStackInput("baseline");
   const candidateInput = await readStackInput("candidate");
@@ -253,23 +262,80 @@ function boundedProcess(command, args, environment, timeoutMs, scope) {
         resolve();
         return;
       }
-      process.stderr.write(`${JSON.stringify(createPublicOverlapProcessFailureEvidence({
-        code,
-        mode: scope.mode,
-        role: scope.role,
-        signal,
-        stderr,
-        stderrBytes,
-        stdout,
-        stdoutBytes,
-        terminationReason,
-      }))}\n`);
-      reject(new Error(
+      const operationError = new Error(
         `Bounded public overlap Playwright operation failed (`
         + `${terminationReason ?? "exit"}:${code ?? signal ?? "unknown"}:${sha256(stderr)}).`,
-      ));
+      );
+      let evidence;
+      let evidenceBytes;
+      try {
+        evidence = createPublicOverlapProcessFailureEvidence({
+          code,
+          mode: scope.mode,
+          role: scope.role,
+          signal,
+          stderr,
+          stderrBytes,
+          stdout,
+          stdoutBytes,
+          terminationReason,
+        });
+        evidenceBytes = Buffer.from(`${JSON.stringify(evidence)}\n`, "utf8");
+      } catch (evidenceError) {
+        reject(new AggregateError(
+          [operationError, evidenceError],
+          "Public overlap process failed before sanitized evidence could be projected.",
+        ));
+        return;
+      }
+      const evidencePath = path.join(
+        failureOutputRoot,
+        publicOverlapProcessFailureFilename(scope.mode, scope.role),
+      );
+      void writeJourneySanitizedOutput(evidencePath, evidenceBytes).then((receipt) => {
+        if (receipt.bytes !== evidenceBytes.byteLength
+          || receipt.sha256 !== sha256(evidenceBytes)
+          || receipt.status !== "sanitized-create-only-output-written") {
+          throw new Error("Public overlap process failure evidence receipt is invalid.");
+        }
+        try {
+          writeSync(process.stderr.fd, evidenceBytes);
+        } catch {
+          // The sealed create-only artifact remains authoritative when the log pipe is unavailable.
+        }
+        reject(operationError);
+      }).catch((evidenceError) => {
+        reject(new AggregateError(
+          [operationError, evidenceError],
+          "Public overlap process failed and sanitized evidence was not sealed.",
+        ));
+      });
     });
   });
+}
+
+async function exactFailureOutputRoot(rawPath, expectedCaptureId) {
+  const expectedParent = path.join(
+    repositoryRoot,
+    "test-results",
+    "browser-live-pair-ci",
+  );
+  const expected = path.join(expectedParent, expectedCaptureId);
+  if (typeof rawPath !== "string" || !path.isAbsolute(rawPath)
+    || path.resolve(rawPath) !== expected) {
+    throw new Error("Public overlap sanitized failure output root is invalid.");
+  }
+  const [details, resolved, parentResolved] = await Promise.all([
+    lstat(rawPath),
+    realpath(rawPath),
+    realpath(expectedParent),
+  ]);
+  if (!details.isDirectory() || details.isSymbolicLink()
+    || path.resolve(resolved) !== expected
+    || path.dirname(path.resolve(resolved)) !== path.resolve(parentResolved)) {
+    throw new Error("Public overlap sanitized failure output root is not exact.");
+  }
+  return resolved;
 }
 
 async function readStackInput(role) {

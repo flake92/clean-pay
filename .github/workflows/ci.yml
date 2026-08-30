@@ -571,6 +571,12 @@ jobs:
             test-results/browser-authenticated-journey-live-pair
             test-results/browser-live-pair-ci/${{ env.CLEAN_PAY_BROWSER_LIVE_PAIR_CAPTURE_ID }}/completion.json
             test-results/browser-live-pair-ci/${{ env.CLEAN_PAY_BROWSER_LIVE_PAIR_CAPTURE_ID }}/failure.json
+            test-results/browser-live-pair-ci/${{ env.CLEAN_PAY_BROWSER_LIVE_PAIR_CAPTURE_ID }}/public-capture-baseline-failure.json
+            test-results/browser-live-pair-ci/${{ env.CLEAN_PAY_BROWSER_LIVE_PAIR_CAPTURE_ID }}/public-capture-candidate-failure.json
+            test-results/browser-live-pair-ci/${{ env.CLEAN_PAY_BROWSER_LIVE_PAIR_CAPTURE_ID }}/public-cleanup-pair-failure.json
+            test-results/browser-live-pair-ci/${{ env.CLEAN_PAY_BROWSER_LIVE_PAIR_CAPTURE_ID }}/public-compare-pair-failure.json
+            test-results/browser-live-pair-ci/${{ env.CLEAN_PAY_BROWSER_LIVE_PAIR_CAPTURE_ID }}/public-prepare-pair-failure.json
+            test-results/browser-live-pair-ci/${{ env.CLEAN_PAY_BROWSER_LIVE_PAIR_CAPTURE_ID }}/public-verify-pair-failure.json
             test-results/browser-live-pair-ci/${{ env.CLEAN_PAY_BROWSER_LIVE_PAIR_CAPTURE_ID }}/provider-overlap.json
             test-results/browser-live-pair-ci/${{ env.CLEAN_PAY_BROWSER_LIVE_PAIR_CAPTURE_ID }}/unverified-email-login.json
             ${{ runner.temp }}/clean-pay-chatwoot-phase-evidence-${{ env.CLEAN_PAY_BROWSER_LIVE_PAIR_CAPTURE_ID }}/artifact-manifest.json

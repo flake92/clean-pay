@@ -303,7 +303,10 @@ async function run(plan) {
       inputs[roleName] = await prepareRoleInputs(plan, roleName, publicBuildContract);
     }
     const args = proofArguments(plan, inputs);
-    await runInherited(process.execPath, [publicProofCli, ...args], sanitizedProcessEnvironment());
+    const publicProofEnvironment = sanitizedProcessEnvironment();
+    publicProofEnvironment.CLEAN_PAY_PUBLIC_OVERLAP_FAILURE_OUTPUT_ROOT =
+      await ensureSanitizedCaptureRoot(plan);
+    await runInherited(process.execPath, [publicProofCli, ...args], publicProofEnvironment);
     await runInherited(
       process.execPath,
       [providerProofCli, ...providerProofArguments(plan, inputs)],
@@ -329,7 +332,7 @@ async function run(plan) {
       sanitizedProcessEnvironment(),
     );
     const chatwootPhase = await validateChatwootEvidence(plan, inputs);
-    await writeResult(plan, "completion.json", {
+    const completion = {
       schemaVersion: 1,
       status: "production-image-live-overlap-proven",
       captureId: plan.captureId,
@@ -349,12 +352,14 @@ async function run(plan) {
       providerOverlap,
       unverifiedEmailLogin,
       chatwootPhase,
-    });
+    };
+    await writeResult(plan, "completion.json", completion);
     process.stdout.write(`${JSON.stringify({
       status: "production_image_live_overlap_proven",
       captureId: plan.captureId,
       baselineRevision: plan.roles.baseline.revision,
       candidateRevision: plan.roles.candidate.revision,
+      images: completion.images,
     })}\n`);
   } catch (error) {
     await writeFailure(plan, error);
