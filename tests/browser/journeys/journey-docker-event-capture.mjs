@@ -182,7 +182,7 @@ function startJourneyDockerEventCapture({
     child,
     closed,
     lifecycleBounds,
-    output: () => lines.join("\n"),
+    output: () => canonicalizeCapturedLifecycleOutput(lines),
     project,
     stderr: () => stderr,
     stderrBytes: () => stderrBytes,
@@ -237,6 +237,29 @@ function startJourneyDockerEventCapture({
     failure: () => failure,
   });
   return handle;
+}
+
+function canonicalizeCapturedLifecycleOutput(lines) {
+  if (lines.length < 3) return lines.join("\n");
+  const [startBarrier, ...remaining] = lines;
+  const endBarrier = remaining.pop();
+  const lifecycle = remaining.map((line) => {
+    const separator = line.indexOf("|");
+    return Object.freeze({ line, timeNano: BigInt(line.slice(0, separator)) });
+  });
+  lifecycle.sort((left, right) => {
+    if (left.timeNano < right.timeNano) return -1;
+    if (left.timeNano > right.timeNano) return 1;
+    if (left.line < right.line) return -1;
+    if (left.line > right.line) return 1;
+    return 0;
+  });
+  // Docker's event stream may deliver independent container records out of
+  // timestamp order. Keep the two live barrier records pinned and canonicalize
+  // only the enclosed lifecycle records by Docker's authoritative TimeNano.
+  // The downstream attestor still rejects missing, duplicated, out-of-window,
+  // cross-project and per-container transition/timestamp drift.
+  return [startBarrier, ...lifecycle.map(({ line }) => line), endBarrier].join("\n");
 }
 
 export function createJourneyDockerEventCaptureOwner(input) {

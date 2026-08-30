@@ -3,6 +3,7 @@ import { EventEmitter } from "node:events";
 import path from "node:path";
 import { PassThrough } from "node:stream";
 
+import { attestJourneyCapturedLifecycle } from "./journey-compose-lifecycle-capture.mjs";
 import { createJourneyDockerEventCaptureOwner } from "./journey-docker-event-capture.mjs";
 
 const lifecycleBounds = Object.freeze({
@@ -50,6 +51,68 @@ test("captures split exact records with a project-scoped bounded Docker subscrip
     stdio: ["ignore", "pipe", "pipe"],
     windowsHide: true,
   });
+});
+
+test("canonicalizes timestamp order between exact lifecycle barriers", async () => {
+  const fixture = fakeDockerEventChild({ closeOn: "SIGTERM" });
+  const owner = captureOwner(fixture);
+  const startNonce = "1".repeat(32);
+  const endNonce = "2".repeat(32);
+  const startId = "a".repeat(64);
+  const endId = "b".repeat(64);
+  const appId = "c".repeat(64);
+  const postgresId = "d".repeat(64);
+  const records = [
+    `1767225600000000000|create|${startId}|journey-event-barrier|${startNonce}`,
+    `1767225600300000000|start|${postgresId}|postgres|-`,
+    `1767225600100000000|create|${appId}|app|-`,
+    `1767225600200000000|start|${appId}|app|-`,
+    `1767225600400000000|create|${endId}|journey-event-barrier|${endNonce}`,
+  ];
+  fixture.stdout.write(`${records.join("\n")}\n`);
+
+  await expect(owner.waitForBarrier(startNonce)).resolves.toMatchObject({ containerId: startId });
+  await expect(owner.waitForBarrier(endNonce)).resolves.toMatchObject({ containerId: endId });
+  await expect(owner.stop()).resolves.toBe([
+    records[0],
+    records[2],
+    records[3],
+    records[1],
+    records[4],
+  ].join("\n"));
+});
+
+test("does not let canonicalization hide same-container lifecycle drift", async () => {
+  const fixture = fakeDockerEventChild({ closeOn: "SIGTERM" });
+  const owner = captureOwner(fixture);
+  const startReceipt = Object.freeze({
+    containerId: "a".repeat(64),
+    nonce: "1".repeat(32),
+    phase: "start",
+    timeNano: "1767225600000000000",
+  });
+  const endReceipt = Object.freeze({
+    containerId: "b".repeat(64),
+    nonce: "2".repeat(32),
+    phase: "end",
+    timeNano: "1767225600400000000",
+  });
+  const appId = "c".repeat(64);
+  fixture.stdout.write(`${[
+    `${startReceipt.timeNano}|create|${startReceipt.containerId}|journey-event-barrier|${startReceipt.nonce}`,
+    `1767225600300000000|create|${appId}|app|-`,
+    `1767225600200000000|start|${appId}|app|-`,
+    `${endReceipt.timeNano}|create|${endReceipt.containerId}|journey-event-barrier|${endReceipt.nonce}`,
+  ].join("\n")}\n`);
+  const output = await owner.stop();
+
+  expect(() => attestJourneyCapturedLifecycle({
+    containersByService: { app: { Id: appId } },
+    lifecycleNotBefore: "2026-01-01T00:00:00.000Z",
+    oneShotServiceNames: new Set(),
+    sealed: { endReceipt, output, startReceipt },
+    serviceNames: ["app"],
+  })).toThrow(/exact service lifecycle/);
 });
 
 test("fails closed on malformed, overflowing, diagnostic and errored capture streams", async () => {
