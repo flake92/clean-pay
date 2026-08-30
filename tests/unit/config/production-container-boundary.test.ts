@@ -19,6 +19,22 @@ const runtimeSandbox = readFileSync(
   "scripts/security/verify-runtime-sandbox.sh",
   "utf8",
 );
+const imageRollbackRehearsal = readFileSync(
+  "scripts/security/rehearse-zero-downtime-image-rollback.sh",
+  "utf8",
+);
+const disposableTrafficContinuity = readFileSync(
+  "scripts/security/disposable-traffic-continuity.mjs",
+  "utf8",
+);
+const disposableReadinessProvider = readFileSync(
+  "scripts/security/disposable-readiness-provider.mjs",
+  "utf8",
+);
+const disposableRollbackReport = readFileSync(
+  "scripts/security/disposable-image-rollback-report.mjs",
+  "utf8",
+);
 const publishedCandidateSmoke = readFileSync(
   "scripts/security/smoke-published-candidate.sh",
   "utf8",
@@ -226,6 +242,268 @@ describe("production container boundary", () => {
     expect(runtimeSandbox).toContain("compose stop --timeout 120");
     expect(runtimeSandbox).toContain("event=reconciliation_worker_stopped");
     expect(runtimeSandbox).toContain("event=retention_worker_stopped");
+  });
+
+  it("rehearses an actual disposable image promotion and rollback with exact ownership", () => {
+    const containerJob = ci.slice(
+      ci.indexOf("  container-security:"),
+      ci.indexOf("  production-image-browser-journey:"),
+    );
+    const rehearsalStep = containerJob.indexOf(
+      "Rehearse exact disposable image promotion and rollback",
+    );
+    const runtimeStep = containerJob.indexOf(
+      "Verify the full hardened migration and worker topology",
+    );
+    const evidenceStep = containerJob.indexOf(
+      "Preserve sanitized image rollback evidence",
+    );
+
+    expect(containerJob).toContain("timeout-minutes: 60");
+    expect(containerJob).toContain("fetch-depth: 0");
+    expect(runtimeStep).toBeGreaterThan(-1);
+    expect(rehearsalStep).toBeGreaterThan(runtimeStep);
+    expect(evidenceStep).toBeGreaterThan(rehearsalStep);
+    expect(containerJob).toContain(
+      "bash scripts/security/rehearse-zero-downtime-image-rollback.sh",
+    );
+    expect(containerJob).toContain("clean-pay:ci clean-pay-migration:ci");
+    expect(containerJob).toContain("f5cb6f543d85256e7733a1ade6a4f451d86cf378");
+    expect(containerJob).toContain(".image-rollback-rehearsal/report.json");
+    expect(containerJob).toContain(".image-rollback-rehearsal/traffic/result.json");
+    expect(containerJob).toContain("if-no-files-found: error");
+
+    expect(imageRollbackRehearsal).toContain(
+      "tests/fixtures/write-synthetic-production-env.mjs",
+    );
+    expect(imageRollbackRehearsal).toContain(
+      "CLEAN_PAY_FIXTURE_DEPLOY_SOURCE=build",
+    );
+    expect(imageRollbackRehearsal).toContain(
+      'set_env_value "$TARGET_ENV_FILE" CLEAN_PAY_BIND 127.0.0.1',
+    );
+    expect(imageRollbackRehearsal).toContain(
+      'set_env_value "$TARGET_ENV_FILE" PAYMENT_RECONCILIATION_ENABLED false',
+    );
+    expect(imageRollbackRehearsal).toContain(
+      "io.clean-pay.image-rollback.owner=clean-pay-image-rollback-v1",
+    );
+    expect(imageRollbackRehearsal).toContain(
+      "io.clean-pay.image-rollback.role=previous-app",
+    );
+    expect(imageRollbackRehearsal).toContain(
+      "io.clean-pay.image-rollback.role=previous-migration",
+    );
+    expect(imageRollbackRehearsal).toContain(
+      'git -C "$ROOT_DIR" archive --format=tar "$PREVIOUS_REVISION"',
+    );
+    expect(imageRollbackRehearsal).toContain(
+      '-- "${PREVIOUS_ARCHIVE_INPUTS[@]}"',
+    );
+    expect(imageRollbackRehearsal).toContain(
+      'git -C "$ROOT_DIR" ls-tree -r -z --full-tree "$PREVIOUS_REVISION"',
+    );
+    expect(imageRollbackRehearsal).toContain("records.length !== 358");
+    expect(imageRollbackRehearsal).toContain(
+      'cp -- "$ROOT_DIR/.dockerignore" "$PREVIOUS_SOURCE_DIR/.dockerignore"',
+    );
+    expect(imageRollbackRehearsal).toContain('"$PREVIOUS_SOURCE_DIR"');
+    expect(imageRollbackRehearsal).toContain(
+      '--build-arg CLEAN_PAY_REVISION="$PREVIOUS_REVISION"',
+    );
+    expect(imageRollbackRehearsal).toContain(
+      'set_env_value "$ROLLBACK_ENV_FILE" CLEAN_PAY_REVISION "$PREVIOUS_REVISION"',
+    );
+    expect(imageRollbackRehearsal).toContain(
+      'run_zero_downtime stage --require-no-pending-migrations',
+    );
+    expect(imageRollbackRehearsal).toContain(
+      'run_zero_downtime promote --traffic-on-canary',
+    );
+    expect(imageRollbackRehearsal).toContain(
+      'run_zero_downtime rollback --traffic-on-canary',
+    );
+    expect(imageRollbackRehearsal).toContain(
+      'run_zero_downtime remove --traffic-off-canary',
+    );
+    expect(imageRollbackRehearsal).toContain(
+      'docker compose --project-name "$PROJECT_NAME"',
+    );
+    expect(imageRollbackRehearsal).toContain(
+      'cmp --silent -- "$TARGET_ENV_FILE" "$ROLLBACK_ENV_FILE"',
+    );
+    expect(imageRollbackRehearsal).toContain("assert_canary_absent");
+    expect(imageRollbackRehearsal).toContain(
+      'container_id=$(docker ps --all --quiet --no-trunc',
+    );
+    expect(imageRollbackRehearsal).toContain("VERIFIED_IMAGE_STATE_COUNT=3");
+    expect(imageRollbackRehearsal).toContain("start_traffic_continuity");
+    expect(imageRollbackRehearsal).toContain("start_readiness_provider");
+    expect(imageRollbackRehearsal).toContain("prove_readiness_provider_contract");
+    expect(imageRollbackRehearsal).toContain('switch_traffic_route "$route"');
+    expect(imageRollbackRehearsal).toContain("stop_traffic_continuity");
+    expect(imageRollbackRehearsal).toContain("stop_readiness_provider");
+    for (const [phase, route] of [
+      ["stage", "primary"],
+      ["promote", "canary"],
+      ["rollback", "canary"],
+      ["remove", "primary"],
+    ]) {
+      expect(imageRollbackRehearsal).toContain(`begin_traffic_phase ${phase} ${route}`);
+      expect(imageRollbackRehearsal).toContain(`end_traffic_phase ${phase} ${route}`);
+    }
+    const execution = imageRollbackRehearsal.slice(
+      imageRollbackRehearsal.indexOf("PHASE=start-previous-stack"),
+    );
+    const orderedLifecycle = [
+      "start_readiness_provider",
+      "start_traffic_continuity",
+      "begin_traffic_phase stage primary",
+      "run_zero_downtime stage --require-no-pending-migrations",
+      "end_traffic_phase stage primary",
+      "begin_traffic_phase promote canary",
+      "run_zero_downtime promote --traffic-on-canary",
+      "end_traffic_phase promote canary",
+      "begin_traffic_phase rollback canary",
+      "run_zero_downtime rollback --traffic-on-canary",
+      "end_traffic_phase rollback canary",
+      "begin_traffic_phase remove primary",
+      "run_zero_downtime remove --traffic-off-canary",
+      "assert_canary_absent",
+      "end_traffic_phase remove primary",
+      "prove_readiness_provider_contract",
+      "stop_traffic_continuity",
+      "stop_readiness_provider",
+      "cleanup_owned_resources",
+    ];
+    let lifecycleOffset = -1;
+    for (const marker of orderedLifecycle) {
+      const nextOffset = execution.indexOf(marker, lifecycleOffset + 1);
+      expect(nextOffset, marker).toBeGreaterThan(lifecycleOffset);
+      lifecycleOffset = nextOffset;
+    }
+    const beginPhase = imageRollbackRehearsal.slice(
+      imageRollbackRehearsal.indexOf("begin_traffic_phase()"),
+      imageRollbackRehearsal.indexOf("end_traffic_phase()"),
+    );
+    expect(beginPhase.indexOf('switch_traffic_route "$route"')).toBeLessThan(
+      beginPhase.indexOf('traffic_phase_checkpoint "$phase" before "$route"'),
+    );
+    const endPhase = imageRollbackRehearsal.slice(
+      imageRollbackRehearsal.indexOf("end_traffic_phase()"),
+      imageRollbackRehearsal.indexOf("stop_traffic_continuity()"),
+    );
+    expect(endPhase.indexOf('traffic_phase_checkpoint "$phase" after "$route"'))
+      .toBeLessThan(endPhase.indexOf("prove-progress"));
+    expect(endPhase.indexOf("prove-progress"))
+      .toBeLessThan(endPhase.indexOf("VERIFIED_TRAFFIC_PHASE_COUNT="));
+
+    const cleanupStart = imageRollbackRehearsal.indexOf(
+      "cleanup_owned_resources()",
+    );
+    const cleanup = imageRollbackRehearsal.slice(
+      cleanupStart,
+      imageRollbackRehearsal.indexOf("\non_exit()", cleanupStart),
+    );
+    expect(cleanup).toContain("cleanup_canary");
+    expect(cleanup).toContain("cleanup_auxiliary_container");
+    expect(cleanup).toContain('"$TRAFFIC_CONTAINER_NAME" "$TRAFFIC_CONTAINER_ID"');
+    expect(cleanup).toContain(
+      '"$READINESS_PROVIDER_CONTAINER_NAME" "$READINESS_PROVIDER_CONTAINER_ID"',
+    );
+    expect(cleanup).toContain("down --remove-orphans --volumes --timeout 120");
+    expect(cleanup).toContain('label=com.docker.compose.project=$PROJECT_NAME');
+    expect(cleanup).toContain("cleanup_previous_image");
+    expect(cleanup).toContain("io.clean-pay.image-rollback.owner");
+    expect(imageRollbackRehearsal).toContain(
+      '[[ -z "$expected_id" || "$listed_id" == "$expected_id" ]]',
+    );
+    expect(cleanup).toContain("if ! remaining=$(docker ps");
+    expect(cleanup).toContain("if ! remaining=$(docker volume ls");
+    expect(cleanup).toContain("if ! remaining=$(docker network ls");
+    expect(cleanup).not.toMatch(/docker\s+(?:system|volume)\s+prune/u);
+
+    const previousBuilds = imageRollbackRehearsal.slice(
+      imageRollbackRehearsal.indexOf("PHASE=build-previous-images"),
+      imageRollbackRehearsal.indexOf("PHASE=prepare-synthetic-environment"),
+    );
+    expect(previousBuilds.indexOf("PREVIOUS_APP_IMAGE_ID=$(image_id")).toBeGreaterThan(
+      previousBuilds.indexOf("--tag \"$PREVIOUS_APP_REFERENCE\""),
+    );
+    expect(previousBuilds.indexOf("--target migration")).toBeGreaterThan(
+      previousBuilds.indexOf("PREVIOUS_APP_IMAGE_ID=$(image_id"),
+    );
+    expect(previousBuilds.indexOf("PREVIOUS_MIGRATION_IMAGE_ID=$(image_id")).toBeGreaterThan(
+      previousBuilds.indexOf("--tag \"$PREVIOUS_MIGRATION_REFERENCE\""),
+    );
+
+    const reportStart = imageRollbackRehearsal.indexOf("write_report()");
+    const reportWriter = imageRollbackRehearsal.slice(
+      reportStart,
+      imageRollbackRehearsal.indexOf("bootstrap_on_exit()", reportStart),
+    );
+    expect(reportWriter).toContain("set -C");
+    expect(reportWriter).toContain("TARGET_APP_EVIDENCE");
+    expect(reportWriter).toContain("PREVIOUS_APP_EVIDENCE");
+    expect(reportWriter).toContain("TRAFFIC_CONTINUITY_PROVEN");
+    expect(reportWriter).toContain("VERIFIED_IMAGE_STATE_COUNT");
+    expect(reportWriter).toContain("clean-pay.disposable-image-rollback.v3");
+    expect(reportWriter).toContain("READINESS_PROVIDER_CONTRACT_PROVEN");
+    expect(reportWriter).toContain("BASELINE_CONTEXT_ALLOWLIST_PROVEN");
+    expect(reportWriter).toContain("ROLLBACK_IMAGE_PREFLIGHT_PROVEN");
+    expect(reportWriter).toContain('local temporary="$OUTPUT_DIR/.report.tmp"');
+    expect(reportWriter).toContain(
+      'node "$REPORT_VALIDATOR_SCRIPT" validate "$temporary"',
+    );
+    expect(reportWriter).toContain('ln -- "$temporary" "$REPORT_PATH"');
+    expect(reportWriter).not.toContain("TARGET_APP_IMAGE_ID");
+    expect(reportWriter).not.toContain("PREVIOUS_APP_IMAGE_ID");
+    expect(reportWriter).not.toContain("TARGET_ENV_FILE");
+    expect(reportWriter).not.toContain("ROLLBACK_ENV_FILE");
+    const bootstrapTrap = imageRollbackRehearsal.indexOf(
+      "trap bootstrap_on_exit EXIT",
+    );
+    expect(bootstrapTrap).toBeGreaterThan(reportStart);
+    expect(bootstrapTrap).toBeLessThan(
+      imageRollbackRehearsal.indexOf('mkdir -- "$OUTPUT_DIR"'),
+    );
+    expect(imageRollbackRehearsal).toContain(
+      'write_report failed "$bootstrap_cleanup_proven"',
+    );
+    expect(disposableTrafficContinuity).toContain(
+      'const livenessPath = "/api/health/liveness"',
+    );
+    expect(disposableTrafficContinuity).toContain(
+      "server.listen(port, bindAddress",
+    );
+    expect(disposableTrafficContinuity).toContain(
+      'const expectedRouteSequence = Object.freeze([',
+    );
+    expect(disposableTrafficContinuity).toContain(
+      'handle = await open(target, "wx", 0o600)',
+    );
+    expect(disposableTrafficContinuity).toContain("sameIdentity(identity, published)");
+    expect(disposableTrafficContinuity).not.toContain("rm(target, { force: true })");
+    expect(disposableReadinessProvider).toContain(
+      "expectedServiceKeySha256: process.env.CLEAN_PAY_SYNTHETIC_PROVIDER_KEY_SHA256",
+    );
+    expect(disposableReadinessProvider).toContain("timingSafeEqual(observedHash, expectedHash)");
+    expect(disposableReadinessProvider).toContain('const maximumBodyBytes = 1024');
+    expect(disposableRollbackReport).toContain(
+      'value.schemaVersion !== "clean-pay.disposable-image-rollback.v3"',
+    );
+    expect(disposableRollbackReport).toContain("new Set(imageIds).size !== imageIds.length");
+    expect(disposableRollbackReport).toContain('await open(file, "r+")');
+    const readinessProviderLaunch = imageRollbackRehearsal.slice(
+      imageRollbackRehearsal.indexOf("start_readiness_provider()"),
+      imageRollbackRehearsal.indexOf("prove_readiness_provider_contract()"),
+    );
+    expect(readinessProviderLaunch).toContain('--network "$EDGE_NETWORK"');
+    expect(readinessProviderLaunch).toContain('--network-alias "$READINESS_PROVIDER_ALIAS"');
+    expect(readinessProviderLaunch).toContain('--pull never');
+    expect(readinessProviderLaunch).not.toContain("--env-file");
+    expect(imageRollbackRehearsal).not.toMatch(/\bcaddy\b/iu);
+    expect(imageRollbackRehearsal).not.toMatch(/docker\s+system\s+prune/u);
   });
 
   it("drains an admitted long application request during the 120 second SIGTERM window", () => {

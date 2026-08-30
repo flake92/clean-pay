@@ -2,6 +2,7 @@ import path from "node:path";
 
 import { BEHAVIORAL_BASELINE_COMMIT } from "./baseline-policy";
 import { projectCharacterizationManifestPairBytesForComparison } from "./comparison-projection";
+import { createPublicOverlapProjectedMismatchMarker } from "./public-overlap-mismatch-evidence.mjs";
 import {
   PUBLIC_OVERLAP_ARTIFACT_NAMES,
   PUBLIC_OVERLAP_CAPTURE_POLICY,
@@ -128,7 +129,12 @@ async function evaluatePublicCharacterizationOverlap(
         },
       );
       if (!projected.expected.equals(projected.actual)) {
-        throw new Error(`Projected public characterization JSON differs for ${directory}.`);
+        const marker = createPublicOverlapProjectedMismatchMarker(
+          directory,
+          projected.expected,
+          projected.actual,
+        );
+        throw new Error(`Projected public characterization JSON differs. ${marker}`);
       }
       if (!baselinePng.equals(candidatePng)) {
         throw new Error(`Public characterization PNG bytes differ for ${directory}.`);

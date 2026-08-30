@@ -274,7 +274,7 @@ jobs:
 
   container-security:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 60
     env:
       POSTGRES_DB: clean_pay
       POSTGRES_USER: clean_pay_bootstrap
@@ -319,6 +319,7 @@ jobs:
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
+          fetch-depth: 0
           persist-credentials: false
       - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
         with:
@@ -493,6 +494,26 @@ jobs:
             clean-pay-migration.trivy.json
             clean-pay-application.vulnerability-attestation.json
             clean-pay-migration.vulnerability-attestation.json
+      - name: Rehearse exact disposable image promotion and rollback
+        shell: bash
+        env:
+          IMAGE_ROLLBACK_REHEARSAL_OUTPUT_DIR: ${{ github.workspace }}/.image-rollback-rehearsal
+        run: |
+          bash scripts/security/rehearse-zero-downtime-image-rollback.sh \
+            clean-pay:ci clean-pay-migration:ci \
+            f5cb6f543d85256e7733a1ade6a4f451d86cf378 \
+            "$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+      - name: Preserve sanitized image rollback evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: image-rollback-rehearsal-${{ github.run_id }}-${{ github.run_attempt }}
+          if-no-files-found: error
+          retention-days: 30
+          include-hidden-files: true
+          path: |
+            .image-rollback-rehearsal/report.json
+            .image-rollback-rehearsal/traffic/result.json
 
   production-image-browser-journey:
     runs-on: ubuntu-latest
@@ -610,6 +631,7 @@ jobs:
             test-results/browser-live-pair-ci/${{ env.CLEAN_PAY_BROWSER_LIVE_PAIR_CAPTURE_ID }}/public-capture-baseline-failure.json
             test-results/browser-live-pair-ci/${{ env.CLEAN_PAY_BROWSER_LIVE_PAIR_CAPTURE_ID }}/public-capture-candidate-failure.json
             test-results/browser-live-pair-ci/${{ env.CLEAN_PAY_BROWSER_LIVE_PAIR_CAPTURE_ID }}/public-cleanup-pair-failure.json
+            test-results/browser-live-pair-ci/${{ env.CLEAN_PAY_BROWSER_LIVE_PAIR_CAPTURE_ID }}/public-comparison-mismatch.json
             test-results/browser-live-pair-ci/${{ env.CLEAN_PAY_BROWSER_LIVE_PAIR_CAPTURE_ID }}/public-compare-pair-failure.json
             test-results/browser-live-pair-ci/${{ env.CLEAN_PAY_BROWSER_LIVE_PAIR_CAPTURE_ID }}/public-prepare-pair-failure.json
             test-results/browser-live-pair-ci/${{ env.CLEAN_PAY_BROWSER_LIVE_PAIR_CAPTURE_ID }}/public-process-failures.json

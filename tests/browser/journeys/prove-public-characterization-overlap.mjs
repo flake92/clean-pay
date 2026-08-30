@@ -35,6 +35,10 @@ import {
   createPublicOverlapProcessFailureBundle,
   publicOverlapProcessFailureFilename,
 } from "./public-overlap-process-evidence.mjs";
+import {
+  extractPublicOverlapProjectedMismatchEvidence,
+} from "../public-overlap-mismatch-evidence.mjs";
+import { publishPublicOverlapFailureOutputs } from "./public-overlap-failure-publication.mjs";
 
 const repositoryRoot = path.resolve(process.cwd());
 const localPlaywrightCli = path.join(repositoryRoot, "node_modules", "playwright", "cli.js");
@@ -354,6 +358,7 @@ function boundedProcess(command, args, environment, timeoutMs, scope) {
       );
       let evidence;
       let evidenceBytes;
+      let mismatchEvidenceBytes;
       try {
         evidence = createPublicOverlapProcessFailureEvidence({
           code,
@@ -375,25 +380,47 @@ function boundedProcess(command, args, environment, timeoutMs, scope) {
         ));
         return;
       }
-      const evidencePath = path.join(
-        failureOutputRoot,
-        publicOverlapProcessFailureFilename(scope.mode, scope.role),
-      );
-      void writeJourneySanitizedOutput(evidencePath, evidenceBytes).then((receipt) => {
-        if (receipt.bytes !== evidenceBytes.byteLength
-          || receipt.sha256 !== sha256(evidenceBytes)
-          || receipt.status !== "sanitized-create-only-output-written") {
-          throw new Error("Public overlap process failure evidence receipt is invalid.");
+      let mismatchEvidenceError;
+      try {
+        const mismatchEvidence = extractPublicOverlapProjectedMismatchEvidence(stdout, stderr);
+        if (mismatchEvidence !== null) {
+          if (scope.mode !== "compare" || scope.role !== null) {
+            throw new Error("Public overlap projected mismatch escaped compare scope.");
+          }
+          mismatchEvidenceBytes = Buffer.from(
+            `${JSON.stringify(mismatchEvidence, null, 2)}\n`,
+            "utf8",
+          );
         }
+      } catch (error) {
+        mismatchEvidenceError = error;
+      }
+      void publishPublicOverlapFailureOutputs({
+        baseBytes: evidenceBytes,
+        baseFilename: publicOverlapProcessFailureFilename(scope.mode, scope.role),
+        failureOutputRoot,
+        mismatchBytes: mismatchEvidenceBytes ?? null,
+        writeOutput: writeJourneySanitizedOutput,
+      }).then(() => {
         try {
           writeSync(process.stderr.fd, evidenceBytes);
         } catch {
           // The sealed create-only artifact remains authoritative when the log pipe is unavailable.
         }
-        reject(operationError);
-      }).catch((evidenceError) => {
+        if (mismatchEvidenceError !== undefined) {
+          reject(new AggregateError(
+            [operationError, mismatchEvidenceError],
+            "Public overlap process failed with invalid projected mismatch evidence.",
+          ));
+        } else {
+          reject(operationError);
+        }
+      }).catch((publicationError) => {
+        const failures = [operationError];
+        if (mismatchEvidenceError !== undefined) failures.push(mismatchEvidenceError);
+        failures.push(publicationError);
         reject(new AggregateError(
-          [operationError, evidenceError],
+          failures,
           "Public overlap process failed and sanitized evidence was not sealed.",
         ));
       });
