@@ -120,6 +120,30 @@ export function assertPublicOverlapProcessFailureEvidence(value) {
   });
 }
 
+export function createPublicOverlapProcessFailureBundle(captureId, failures) {
+  if (typeof captureId !== "string" || !/^[a-f0-9]{16}$/.test(captureId)
+    || !Array.isArray(failures) || failures.length < 1 || failures.length > 6) {
+    throw new Error("Public overlap process failure bundle input is invalid.");
+  }
+  const validated = failures.map(assertPublicOverlapProcessFailureEvidence);
+  const sorted = [...validated].sort((left, right) => (
+    publicOverlapProcessFailureFilename(left.mode, left.role).localeCompare(
+      publicOverlapProcessFailureFilename(right.mode, right.role),
+    )
+  ));
+  if (new Set(sorted.map(({ mode, role }) => (
+    publicOverlapProcessFailureFilename(mode, role)
+  ))).size !== sorted.length) {
+    throw new Error("Public overlap process failure bundle scope is not unique.");
+  }
+  return Object.freeze({
+    schemaVersion: 1,
+    status: "public_overlap_playwright_process_failures",
+    captureId,
+    failures: Object.freeze(sorted),
+  });
+}
+
 export function publicOverlapProcessFailureFilename(mode, role) {
   if (!allowedModes.has(mode) || !allowedRoles.has(role)
     || (mode === "capture") !== (role !== null)) {
