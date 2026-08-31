@@ -12,6 +12,21 @@
 - Ограничить право запуска promotion и изменения Environment secrets; проверить
   audit log и срок хранения workflow artifacts.
 
+## Требуется отдельное разрешение на major GitHub Actions
+
+- `gitleaks/gitleaks-action` закреплён на последнем `v2.3.9`
+  (`ff98106e4c7b2bc287b24eaf42907196329070c7`), а `actions/upload-artifact` — на
+  последнем `v4.6.2` (`ea165f8d65b6e75b540449e92b4886f43607fa02`). Обе версии объявляют
+  runtime `node20`, поэтому GitHub-hosted runner выдаёт предупреждение и
+  принудительно запускает их на Node.js 24.
+- Same-major версий с `node24` нет. Минимальные закреплённые кандидаты —
+  `gitleaks/gitleaks-action` `v3.0.0`
+  (`e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e`) и
+  `actions/upload-artifact` `v6.0.0`
+  (`b7c566a772e6b6bfb58ed0dc250532a479d7789f`). Их обновление намеренно
+  отложено из-за запрета major dependency upgrades; оно требует отдельного
+  review и GitHub Actions runner версии не ниже `2.327.1`.
+
 ## Требуется отдельное разрешение владельца секретов
 
 - Ротация внешних API-токенов, bot credentials, signing keys и production
