@@ -1,5 +1,6 @@
 import { executeEmailLogin } from "@/application/auth/execute-email-login";
 import { executeEmailRegistration } from "@/application/auth/execute-email-registration";
+import { executePasswordResetStart } from "@/application/auth/execute-password-reset-start";
 import {
   AuthGatewayError,
   type AuthCommands,
@@ -171,6 +172,9 @@ export async function executeAuthCommand(commands: AuthCommands, input: unknown)
         turnstileToken,
       });
     }
+    if (command.kind === "request-password-reset") {
+      return await executePasswordResetStart(commands, { email, turnstileToken });
+    }
     await commands.preflightCapacity("auth_command");
     await commands.withUpstreamConcurrency(
       "turnstile_verify",
@@ -188,13 +192,6 @@ export async function executeAuthCommand(commands: AuthCommands, input: unknown)
         ]);
         return { ok: true, kind: "identified", exists: identity.exists, hasPasskey };
       }
-      case "request-password-reset":
-        await commands.rateLimit({ action: "password_reset_start", email, limit: 5, windowSeconds: 15 * 60 });
-        await commands.withUpstreamConcurrency(
-          "remnashop_auth",
-          () => commands.requestPasswordReset(email),
-        );
-        return { ok: true, kind: "password-reset-requested" };
       case "confirm-password-reset": {
         await commands.rateLimit({ action: "password_reset_confirm", email, limit: 5, windowSeconds: 15 * 60 });
         const providerSession = await commands.withUpstreamConcurrency(
