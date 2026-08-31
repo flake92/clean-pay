@@ -775,6 +775,29 @@ describe("clean architecture boundaries", () => {
         runtimeExports: ["TelegramWebAppLogin"],
       },
       {
+        path: "src/frontend/components/register-email-confirm-form.tsx",
+        boundaryImports: [
+          "@/frontend/hooks/use-register-email-confirm-controller",
+        ],
+        runtimeExports: ["RegisterEmailConfirmForm"],
+      },
+      {
+        path: "src/frontend/components/link-account-panel.tsx",
+        boundaryImports: [
+          "@/frontend/components/link-account-presentation",
+          "@/frontend/hooks/use-link-account-controller",
+        ],
+        runtimeExports: ["LinkAccountPanel"],
+      },
+      {
+        path: "src/frontend/components/profile-panel.tsx",
+        boundaryImports: [
+          "@/frontend/components/profile-presentation",
+          "@/frontend/hooks/use-profile-controller",
+        ],
+        runtimeExports: ["ProfilePanel"],
+      },
+      {
         path: "src/frontend/components/passkey-actions.tsx",
         boundaryImports: ["@/frontend/hooks/use-passkey-actions-controller"],
         runtimeExports: ["PasskeyLoginButton", "PasskeySetupPanel"],
