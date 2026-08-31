@@ -30,11 +30,30 @@ export const telegramWebAppLoginComposition = {
   replaceLocation: (redirectTo: string) => window.location.replace(redirectTo),
 };
 
+function authenticateTelegramWebAppAction(initData: string) {
+  return telegramWebAppLoginComposition.authenticateTelegramWebAppAction(initData);
+}
+
+function replaceLocation(redirectTo: string) {
+  telegramWebAppLoginComposition.replaceLocation(redirectTo);
+}
+
+const productionTelegramWebAppLoginDependencies: TelegramWebAppLoginControllerDependencies = {
+  authenticateTelegramWebAppAction,
+  getLocationOrigin: telegramWebAppLoginComposition.getLocationOrigin,
+  getTelegramWebApp: telegramWebAppLoginComposition.getTelegramWebApp,
+  loadTelegramWebAppScript:
+    telegramWebAppLoginComposition.loadTelegramWebAppScript,
+  markTelegramWebAppSession:
+    telegramWebAppLoginComposition.markTelegramWebAppSession,
+  replaceLocation,
+};
+
 export function useTelegramWebAppLoginController({
-  dependencies,
+  dependencies = productionTelegramWebAppLoginDependencies,
   redirectTo,
 }: {
-  dependencies: TelegramWebAppLoginControllerDependencies;
+  dependencies?: TelegramWebAppLoginControllerDependencies;
   redirectTo: string;
 }) {
   const [error, setError] = useState<string | null>(null);
