@@ -212,6 +212,9 @@ async function preflightChatwootOutputDirectory({
     await lstat(target);
     throw new Error("Chatwoot evidence output must be absent before stack launch.");
   } catch (error) {
+    if (error?.code === "ENOTDIR") {
+      throw new Error("Chatwoot immutable path identity is invalid.");
+    }
     if (error?.code !== "ENOENT") throw error;
   }
   const parent = await captureExactPathIdentity(
