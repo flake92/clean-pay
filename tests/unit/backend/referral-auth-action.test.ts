@@ -10,7 +10,7 @@ vi.mock("@/application/auth/execute-auth-command", () => ({
   executeAuthCommand: mocks.executeAuthCommand,
 }));
 vi.mock("@/backend/integrations/auth/auth-commands", () => ({
-  productionAuthCommands: { adapter: "auth" },
+  createProductionAuthCommands: () => ({ adapter: "auth" }),
 }));
 vi.mock("@/backend/integrations/referral/referral-attribution", () => ({
   readReferralAttributionCookie: mocks.readReferralAttributionCookie,
