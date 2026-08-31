@@ -2,36 +2,14 @@
 
 import { LinkButton } from "@/frontend/components/prime/link-button";
 import {
-  telegramWebAppLoginComposition,
   useTelegramWebAppLoginController,
-  type TelegramWebAppLoginControllerDependencies,
 } from "@/frontend/hooks/use-telegram-webapp-login-controller";
 import { telegramWebAppLoginProgressMessage } from "@/frontend/lib/telegram-webapp-login-transitions";
 import { Message } from "@/frontend/components/sakai/form-foundation";
 import { ProgressSpinner } from "primereact/progressspinner";
 
-function authenticateTelegramWebAppAction(initData: string) {
-  return telegramWebAppLoginComposition.authenticateTelegramWebAppAction(initData);
-}
-
-function replaceLocation(redirectTo: string) {
-  telegramWebAppLoginComposition.replaceLocation(redirectTo);
-}
-
-const controllerDependencies: TelegramWebAppLoginControllerDependencies = {
-  authenticateTelegramWebAppAction,
-  getLocationOrigin: telegramWebAppLoginComposition.getLocationOrigin,
-  getTelegramWebApp: telegramWebAppLoginComposition.getTelegramWebApp,
-  loadTelegramWebAppScript:
-    telegramWebAppLoginComposition.loadTelegramWebAppScript,
-  markTelegramWebAppSession:
-    telegramWebAppLoginComposition.markTelegramWebAppSession,
-  replaceLocation,
-};
-
 export function TelegramWebAppLogin({ redirectTo = "/cabinet" }: { redirectTo?: string }) {
   const { error, fallbackStarted } = useTelegramWebAppLoginController({
-    dependencies: controllerDependencies,
     redirectTo,
   });
 

@@ -288,12 +288,12 @@ describe("Telegram WebApp login architecture", () => {
       "utf8",
     );
     expect(facade).toContain("useTelegramWebAppLoginController({");
-    expect(facade).toContain("authenticateTelegramWebAppAction(initData)");
+    expect(controller).toContain("authenticateTelegramWebAppAction(initData)");
     expect(controller).toContain("window.location.replace(redirectTo)");
-    expect(facade).toContain(
+    expect(controller).toContain(
       "authenticateTelegramWebAppAction,\n  getLocationOrigin:",
     );
-    expect(facade).toContain("replaceLocation,");
+    expect(controller).toContain("replaceLocation,");
     expect(facade).not.toMatch(/@\/app\/actions/);
     expect(facade).not.toMatch(/\b(?:useEffect|useState)\b/);
     expect(facade).not.toMatch(/\bwindow\b/);
