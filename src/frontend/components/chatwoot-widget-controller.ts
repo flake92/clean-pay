@@ -3,6 +3,7 @@
 import { useEffect } from "react";
 
 import {
+  loadChatwootSupportContextAction,
   verifyChatwootIdentityAction,
 } from "@/app/actions/chatwoot";
 import type {
@@ -36,17 +37,25 @@ import {
   isChatwootIdentityConfirmation,
   isUnexpectedChatwootFrameMessage,
   loadChatwootSdk,
+  loadChatwootSupportContextCached,
   resetChatwootSession,
   retainChatwootVerifiedOwnership,
   retryChatwootIdentityAttempt,
 } from "@/frontend/lib/chatwoot";
 import { navigateTo } from "@/frontend/lib/browser-navigation";
 
+function loadProductionSupportContext(config: ChatwootWidgetConfig) {
+  return loadChatwootSupportContextCached(
+    config.user.identifier,
+    () => loadChatwootSupportContextAction(config.user.identifier),
+  );
+}
+
 export function useChatwootWidgetController(
   config: ChatwootWidgetConfig,
   loadSupportContext: (
     config: ChatwootWidgetConfig,
-  ) => Promise<ChatwootSupportContext | null>,
+  ) => Promise<ChatwootSupportContext | null> = loadProductionSupportContext,
 ) {
   useEffect(() => {
     let active = true;
