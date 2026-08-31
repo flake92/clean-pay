@@ -774,6 +774,11 @@ describe("clean architecture boundaries", () => {
         boundaryImports: ["@/frontend/hooks/use-telegram-webapp-login-controller"],
         runtimeExports: ["TelegramWebAppLogin"],
       },
+      {
+        path: "src/frontend/components/passkey-actions.tsx",
+        boundaryImports: ["@/frontend/hooks/use-passkey-actions-controller"],
+        runtimeExports: ["PasskeyLoginButton", "PasskeySetupPanel"],
+      },
     ];
 
     for (const view of views) {
