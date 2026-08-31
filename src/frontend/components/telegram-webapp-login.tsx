@@ -10,14 +10,12 @@ import { telegramWebAppLoginProgressMessage } from "@/frontend/lib/telegram-weba
 import { Message } from "@/frontend/components/sakai/form-foundation";
 import { ProgressSpinner } from "primereact/progressspinner";
 
-const window = telegramWebAppLoginComposition.window;
-
 function authenticateTelegramWebAppAction(initData: string) {
   return telegramWebAppLoginComposition.authenticateTelegramWebAppAction(initData);
 }
 
 function replaceLocation(redirectTo: string) {
-  window.location.replace(redirectTo);
+  telegramWebAppLoginComposition.replaceLocation(redirectTo);
 }
 
 const controllerDependencies: TelegramWebAppLoginControllerDependencies = {

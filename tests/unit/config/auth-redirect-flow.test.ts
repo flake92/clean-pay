@@ -114,6 +114,10 @@ describe("post-auth redirect flow", () => {
     ].join("\n");
     const telegramStart = readFileSync("src/app/auth/telegram/start/route.ts", "utf8");
     const telegramWebApp = readFileSync("src/frontend/components/telegram-webapp-login.tsx", "utf8");
+    const telegramWebAppController = readFileSync(
+      "src/frontend/hooks/use-telegram-webapp-login-controller.ts",
+      "utf8",
+    );
     const telegramWebAppPage = readFileSync(
       "src/app/auth/telegram/webapp/page.tsx",
       "utf8",
@@ -132,7 +136,7 @@ describe("post-auth redirect flow", () => {
       'safeRedirectPath(url.searchParams.get("redirect_to"))',
     );
     expect(telegramWebApp).toContain("authenticateTelegramWebAppAction(initData)");
-    expect(telegramWebApp).toContain("window.location.replace(redirectTo)");
+    expect(telegramWebAppController).toContain("window.location.replace(redirectTo)");
     expect(telegramWebAppPage).toContain("safeRedirectPath(rawRedirect)");
     expect(telegramWebAppPage).toContain(
       "<TelegramWebAppLogin redirectTo={redirectTo} />",

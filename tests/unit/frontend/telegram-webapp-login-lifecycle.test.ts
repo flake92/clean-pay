@@ -283,18 +283,20 @@ describe("Telegram WebApp login architecture", () => {
       "src/frontend/components/telegram-webapp-login.tsx",
       "utf8",
     );
+    const controller = readFileSync(
+      "src/frontend/hooks/use-telegram-webapp-login-controller.ts",
+      "utf8",
+    );
     expect(facade).toContain("useTelegramWebAppLoginController({");
     expect(facade).toContain("authenticateTelegramWebAppAction(initData)");
-    expect(facade).toContain("window.location.replace(redirectTo)");
+    expect(controller).toContain("window.location.replace(redirectTo)");
     expect(facade).toContain(
       "authenticateTelegramWebAppAction,\n  getLocationOrigin:",
     );
     expect(facade).toContain("replaceLocation,");
     expect(facade).not.toMatch(/@\/app\/actions/);
     expect(facade).not.toMatch(/\b(?:useEffect|useState)\b/);
-    expect(facade).toContain(
-      "const window = telegramWebAppLoginComposition.window;",
-    );
+    expect(facade).not.toMatch(/\bwindow\b/);
   });
 
   it("keeps timing in the loader and browser state in the environment boundary", () => {
