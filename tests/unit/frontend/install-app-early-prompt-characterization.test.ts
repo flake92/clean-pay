@@ -1,7 +1,7 @@
 /** @vitest-environment jsdom */
 
 import { createElement } from "react";
-import { cleanup, render, waitFor } from "@testing-library/react";
+import { act, cleanup, render, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/frontend/components/ios-install-guide", () => ({
@@ -55,7 +55,9 @@ describe("InstallAppButton early prompt characterization", () => {
       alwaysVisible: false,
       autoOpenIosGuide: false,
     }));
-    await new Promise((resolve) => window.setTimeout(resolve, 0));
+    await act(async () => {
+      await new Promise((resolve) => window.setTimeout(resolve, 0));
+    });
 
     expect(view.queryByRole("button")).toBeNull();
     expect(prompt).not.toHaveBeenCalled();

@@ -11,6 +11,8 @@ let consoleErrorSpy: ReturnType<typeof vi.spyOn> | null = null;
 let consoleWarnSpy: ReturnType<typeof vi.spyOn> | null = null;
 
 beforeEach(() => {
+  if (typeof document === "undefined") return;
+
   unexpectedConsole = [];
   consoleErrorSpy = vi.spyOn(console, "error").mockImplementation((...arguments_) => {
     unexpectedConsole.push({ level: "error", firstArgument: arguments_[0] });
@@ -21,6 +23,8 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  if (typeof document === "undefined") return;
+
   const observed = unexpectedConsole;
   consoleErrorSpy?.mockRestore();
   consoleWarnSpy?.mockRestore();

@@ -7,7 +7,10 @@ export default defineConfig({
   test: {
     environment: "node",
     globals: true,
-    setupFiles: [path.join(projectRoot, "tests/setup/env.ts")],
+    setupFiles: [
+      path.join(projectRoot, "tests/setup/env.ts"),
+      path.join(projectRoot, "tests/setup/frontend.ts"),
+    ],
     include: ["tests/unit/**/*.test.ts", "tests/integration/route-handlers/**/*.test.ts"],
     pool: "forks",
     testTimeout: 15_000,
