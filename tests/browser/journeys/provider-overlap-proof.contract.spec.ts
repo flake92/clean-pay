@@ -35,6 +35,8 @@ import {
   classifyProviderOverlapBrowserRequest,
   createJourneyBrowserRequestEnvelope,
   createProviderOverlapEventSeal,
+  createProviderOverlapPendingRequestEvidence,
+  createProviderOverlapPendingRequestEvidenceDocument,
   createProviderOverlapPendingRequestSeal,
   createProviderOverlapRejectedRequestProvenance,
   createProviderOverlapRejectionProvenanceDocument,
@@ -1037,6 +1039,25 @@ test("publishes only bounded phase enums for live provider failure diagnosis", a
   expect(runner).toContain('markProviderFailurePhase(role, "navigate-cabinet")');
   expect(runner).toContain('markProviderFailurePhase(role, "finalize-event-lifecycle")');
   expect(runner).toContain('/^[a-z0-9-]{1,64}$/');
+});
+
+test("publishes bounded provider finalization subphase enums", async () => {
+  const runner = await readFile(
+    path.resolve(__dirname, "prove-provider-overlap.mjs"),
+    "utf8",
+  );
+  for (const phase of [
+    "finalize-event-drain",
+    "finalize-response-capture",
+    "finalize-browser-projection",
+    "finalize-browser-snapshot",
+    "finalize-browser-close",
+    "finalize-source-revalidation",
+    "finalize-listener-detach",
+    "finalize-event-seal",
+  ]) {
+    expect(runner).toContain(`markProviderFailurePhase(role, "${phase}")`);
+  }
 });
 
 test("rejects malformed or unbound provider manifest config annotations", () => {
@@ -2170,6 +2191,70 @@ test("drains profile requests before the synthetic cabinet navigation", async ()
   expect(source).toContain("Provider profile network quiescence barrier failed.");
 });
 
+test("checkpoints response capture before each navigation and the final seal", async () => {
+  const source = await readFile(
+    path.resolve(__dirname, "prove-provider-overlap.mjs"),
+    "utf8",
+  );
+  const loginRequestCheckpoint = source.indexOf(
+    'markProviderFailurePhase(role, "drain-login-requests")',
+  );
+  const loginCheckpointCall = source.indexOf(
+    "await waitForResponseCaptureQuiet();",
+    loginRequestCheckpoint,
+  );
+  const profileNavigation = source.indexOf("const profileNavigation =", loginCheckpointCall);
+  const profileHistoryDrain = source.indexOf(
+    "await drainProviderOverlapHistoryBindings(page);",
+    source.indexOf('markProviderFailurePhase(role, "drain-profile-history-after-idle")'),
+  );
+  const profileRequestCheckpoint = source.indexOf(
+    'markProviderFailurePhase(role, "drain-profile-requests")',
+    profileHistoryDrain,
+  );
+  const profileCheckpointCall = source.indexOf(
+    "await waitForResponseCaptureQuiet();",
+    profileRequestCheckpoint,
+  );
+  const cabinetNavigation = source.indexOf(
+    'await page.goto("https://pay.ci.clean-pay.dev/cabinet"',
+    profileCheckpointCall,
+  );
+  const cabinetRequestCheckpoint = source.indexOf(
+    'markProviderFailurePhase(role, "drain-cabinet-requests")',
+    cabinetNavigation,
+  );
+  const cabinetCheckpointCall = source.indexOf(
+    "await waitForResponseCaptureQuiet();",
+    cabinetRequestCheckpoint,
+  );
+  const finalPendingRequestSeal = source.indexOf(
+    "await pendingRequestSeal.drainAndSeal({ timeoutMs: 15_000 })",
+    cabinetCheckpointCall,
+  );
+
+  expect(loginRequestCheckpoint).toBeGreaterThan(-1);
+  expect(loginCheckpointCall).toBeGreaterThan(loginRequestCheckpoint);
+  expect(profileNavigation).toBeGreaterThan(loginCheckpointCall);
+  expect(profileHistoryDrain).toBeGreaterThan(profileNavigation);
+  expect(profileRequestCheckpoint).toBeGreaterThan(profileHistoryDrain);
+  expect(profileCheckpointCall).toBeGreaterThan(profileRequestCheckpoint);
+  expect(cabinetNavigation).toBeGreaterThan(profileCheckpointCall);
+  expect(cabinetRequestCheckpoint).toBeGreaterThan(cabinetNavigation);
+  expect(cabinetCheckpointCall).toBeGreaterThan(cabinetRequestCheckpoint);
+  expect(finalPendingRequestSeal).toBeGreaterThan(cabinetCheckpointCall);
+  expect(source.match(/await waitForResponseCaptureQuiet\(\);/g))
+    .toHaveLength(3);
+  const helperStart = source.indexOf("const waitForResponseCaptureQuiet = async () =>");
+  const helperEnd = source.indexOf("const recordUnexpectedRequest =", helperStart);
+  expect(source.slice(helperStart, helperEnd)).toContain(
+    "await pendingRequestSeal.waitForQuiet({ timeoutMs: 15_000 })",
+  );
+  expect(source.slice(helperStart, helperEnd)).toContain(
+    "if (browserResponseCaptureFailure) throw browserResponseCaptureFailure;",
+  );
+});
+
 test("registers exact request identities before response capture and routed continuation", async () => {
   const runnerSource = await readFile(
     path.resolve(__dirname, "prove-provider-overlap.mjs"),
@@ -2399,6 +2484,66 @@ test("stores rejected preparation provenance and conditionally publishes it on p
   expect(runnerSource).toContain("{ rejectedRequestProvenance }");
 });
 
+test("publishes only bounded hashed identities for requests left pending at failure", async () => {
+  const privateMarker = "pending-private-marker";
+  const pending = createProviderOverlapPendingRequestEvidence({
+    isNavigation: false,
+    method: "POST",
+    resourceType: "fetch",
+    url: `https://fixture-user:${privateMarker}@pay.ci.clean-pay.dev/private/path`
+      + `?token=${privateMarker}#${privateMarker}`,
+  });
+  expect(pending).toEqual({
+    isNavigation: false,
+    methodSha256: sha256("POST"),
+    originSha256: sha256("https://pay.ci.clean-pay.dev"),
+    pathSha256: sha256("/private/path"),
+    resourceTypeSha256: sha256("fetch"),
+  });
+  const document = createProviderOverlapPendingRequestEvidenceDocument({
+    baseline: { entries: [], trackedPendingCount: 0, truncated: false },
+    candidate: { entries: [pending], trackedPendingCount: 1, truncated: false },
+  });
+  expect(document).toEqual({
+    maximumEntriesPerRole: 16,
+    roles: {
+      baseline: { entries: [], trackedPendingCount: 0, truncated: false },
+      candidate: { entries: [pending], trackedPendingCount: 1, truncated: false },
+    },
+    schemaVersion: 1,
+  });
+  const serialized = JSON.stringify(document);
+  expect(serialized).not.toContain(privateMarker);
+  expect(serialized).not.toContain("fixture-user");
+  expect(serialized).not.toContain("https://");
+  expect(serialized).not.toContain("/private/path");
+  expect(serialized).not.toContain("token");
+  expect(createProviderOverlapPendingRequestEvidenceDocument({
+    baseline: { entries: [], trackedPendingCount: 0, truncated: true },
+    candidate: { entries: [], trackedPendingCount: 0, truncated: false },
+  })).toMatchObject({
+    roles: { baseline: { trackedPendingCount: 0, truncated: true } },
+  });
+  expect(() => createProviderOverlapPendingRequestEvidenceDocument({
+    baseline: { entries: [], trackedPendingCount: 0, truncated: false },
+    candidate: { entries: [pending], trackedPendingCount: 17, truncated: true },
+  })).toThrow(/outside its bound/);
+  expect(() => createProviderOverlapPendingRequestEvidenceDocument({
+    baseline: { entries: [], trackedPendingCount: 0, truncated: false },
+    candidate: { entries: [], trackedPendingCount: 0, truncated: false },
+  })).toThrow(/unexpectedly empty/);
+
+  const runnerSource = await readFile(
+    path.resolve(__dirname, "prove-provider-overlap.mjs"),
+    "utf8",
+  );
+  expect(runnerSource).toContain("currentProviderPendingRequestEvidence()");
+  expect(runnerSource).toContain("{ pendingRequestEvidence }");
+  expect(runnerSource).toContain("recordProviderPendingRequest(role, request);");
+  expect(runnerSource).toContain("completeProviderPendingRequest(role, request);");
+  expect(runnerSource).not.toContain("pendingRequestEvidence: request.url()");
+});
+
 test("keeps one exact request identity across a held route, response, and terminal event", async () => {
   const browser = await chromium.launch({ headless: true });
   let releaseRoute: () => void = () => undefined;
@@ -2584,6 +2729,118 @@ test("prearms response body capture before request completion and navigation", a
     request: crossedRequest,
     response,
   })).rejects.toThrow(/identity/);
+});
+
+test("waits for Playwright-deferred response body capture before navigation", async () => {
+  const request = {};
+  const classification = browserClassification(
+    "https://pay.ci.clean-pay.dev/login?redirect_to=%2Fprofile",
+    { resourceType: "document", isNavigation: true, isMainFrame: true },
+  );
+  const seal = createProviderOverlapPendingRequestSeal(1);
+  seal.observe(request);
+  let navigatedAway = false;
+  let captureSettled = false;
+  let releaseResponseCompletion: () => void = () => undefined;
+  const responseCompletion = new Promise<void>((resolve) => {
+    releaseResponseCompletion = resolve;
+  });
+  const lifecycle: string[] = [];
+  const body = Buffer.from("<!doctype html><h1>Login</h1>");
+  const response = {
+    body: async () => {
+      lifecycle.push("body-registered");
+      await responseCompletion;
+      lifecycle.push("body-read-after-completion");
+      if (navigatedAway) throw new Error("body was evicted by navigation");
+      return body;
+    },
+    finished: async () => {
+      lifecycle.push("response-completion-registered");
+      await responseCompletion;
+      lifecycle.push("response-completed");
+      return null;
+    },
+    headers: () => ({ "content-type": "text/html; charset=utf-8" }),
+    request: () => request,
+    status: () => 200,
+  };
+
+  const capturePromise = captureProviderOverlapResponseEvidence({
+    classification,
+    request,
+    response,
+  });
+  const terminalCapture = capturePromise.then(
+    (evidence) => {
+      captureSettled = true;
+      seal.complete(request);
+      return evidence;
+    },
+    (error) => {
+      seal.complete(request);
+      throw error;
+    },
+  );
+  const checkpoint = seal.waitForQuiet({ pollMs: 1, quietMs: 3, timeoutMs: 100 });
+  expect(lifecycle).toEqual(["body-registered", "response-completion-registered"]);
+  expect(captureSettled).toBe(false);
+  expect(seal.pendingCount()).toBe(1);
+
+  releaseResponseCompletion();
+  await expect(checkpoint).resolves.toEqual({
+    completedRequestCount: 1,
+    observedRequestCount: 1,
+    status: "quiet-checkpoint",
+  });
+  expect(captureSettled).toBe(true);
+  await expect(terminalCapture).resolves.toMatchObject({ body, classification, request, response });
+  navigatedAway = true;
+  expect(lifecycle).toEqual([
+    "body-registered",
+    "response-completion-registered",
+    "body-read-after-completion",
+    "response-completed",
+  ]);
+  await expect(seal.drainAndSeal({ pollMs: 1, quietMs: 3, timeoutMs: 100 }))
+    .resolves.toMatchObject({ status: "drained-and-sealed" });
+  expect(seal.assertClean()).toMatchObject({ status: "sealed-clean" });
+});
+
+test("reproduces deferred response body eviction without the quiet checkpoint", async () => {
+  const request = {};
+  const classification = browserClassification(
+    "https://pay.ci.clean-pay.dev/login?redirect_to=%2Fprofile",
+    { resourceType: "document", isNavigation: true, isMainFrame: true },
+  );
+  let navigatedAway = false;
+  let releaseResponseCompletion: () => void = () => undefined;
+  const responseCompletion = new Promise<void>((resolve) => {
+    releaseResponseCompletion = resolve;
+  });
+  const response = {
+    body: async () => {
+      await responseCompletion;
+      if (navigatedAway) throw new Error("body was evicted by navigation");
+      return Buffer.from("<!doctype html><h1>Login</h1>");
+    },
+    finished: async () => {
+      await responseCompletion;
+      return null;
+    },
+    headers: () => ({ "content-type": "text/html; charset=utf-8" }),
+    request: () => request,
+    status: () => 200,
+  };
+
+  const capturePromise = captureProviderOverlapResponseEvidence({
+    classification,
+    request,
+    response,
+  });
+  navigatedAway = true;
+  releaseResponseCompletion();
+  await expect(capturePromise).rejects.toThrow("body was evicted by navigation");
 });
 
 test("never reads redirect bodies and rejects failed or oversized declaration capture", async () => {
@@ -3045,6 +3302,66 @@ test("seals pending request identities through a separate bounded quiet barrier"
   duplicateTerminal.complete(duplicateRequest);
   duplicateTerminal.complete(duplicateRequest);
   await expect(duplicateTerminal.drainAndSeal({
+    pollMs: 1,
+    quietMs: 2,
+    timeoutMs: 20,
+  })).rejects.toThrow(/became invalid/);
+});
+
+test("supports reusable fail-closed pending request quiet checkpoints", async () => {
+  const seal = createProviderOverlapPendingRequestSeal(2);
+  const firstRequest = {};
+  seal.observe(firstRequest);
+  const firstCheckpoint = seal.waitForQuiet({ pollMs: 1, quietMs: 3, timeoutMs: 100 });
+  setTimeout(() => seal.complete(firstRequest), 2);
+  await expect(firstCheckpoint).resolves.toEqual({
+    completedRequestCount: 1,
+    observedRequestCount: 1,
+    status: "quiet-checkpoint",
+  });
+
+  const secondRequest = {};
+  seal.observe(secondRequest);
+  setTimeout(() => seal.complete(secondRequest), 2);
+  await expect(seal.waitForQuiet({ pollMs: 1, quietMs: 3, timeoutMs: 100 }))
+    .resolves.toEqual({
+      completedRequestCount: 2,
+      observedRequestCount: 2,
+      status: "quiet-checkpoint",
+    });
+
+  await expect(seal.drainAndSeal({ pollMs: 1, quietMs: 3, timeoutMs: 100 }))
+    .resolves.toEqual({
+      completedRequestCount: 2,
+      observedRequestCount: 2,
+      status: "drained-and-sealed",
+    });
+  expect(seal.assertClean()).toEqual({
+    completedRequestCount: 2,
+    lateRequestEventCount: 0,
+    observedRequestCount: 2,
+    status: "sealed-clean",
+  });
+
+  const stuck = createProviderOverlapPendingRequestSeal(1);
+  stuck.observe({});
+  await expect(stuck.waitForQuiet({
+    pollMs: 1,
+    quietMs: 2,
+    timeoutMs: 5,
+  })).rejects.toThrow(/quiet checkpoint/);
+  await expect(stuck.drainAndSeal({
+    pollMs: 1,
+    quietMs: 2,
+    timeoutMs: 5,
+  })).rejects.toThrow(/did not drain/);
+
+  const late = createProviderOverlapPendingRequestSeal(1);
+  const lateRequest = {};
+  late.observe(lateRequest);
+  late.complete(lateRequest);
+  late.observe(lateRequest);
+  await expect(late.waitForQuiet({
     pollMs: 1,
     quietMs: 2,
     timeoutMs: 20,
