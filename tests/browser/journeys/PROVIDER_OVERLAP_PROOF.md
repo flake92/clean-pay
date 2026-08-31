@@ -147,7 +147,10 @@ counted. A shared pure envelope helper treats Playwright `Request.frame()` as
 the initiating frame: `isMainFrame` is true only for a navigation request whose
 target is the page main frame. CSS, JavaScript, RSC, and fetch requests initiated
 by that frame remain non-navigation resources and cannot be rejected as false
-main-frame navigations. Each image has an exact raw semantic/static request-order ledger and
+main-frame navigations. The deterministic root prefetch redirect chain is
+classified separately as `app-login-root-rsc`: it admits only exact
+`redirect_to=/` traffic and cannot alias the profile login RSC contract. Each
+image has an exact raw semantic/static request-order ledger and
 three fixed document-generation ledgers for login, profile, and cabinet. A
 static path may legitimately recur once in each generation, but cannot be
 duplicated within a generation, omitted, moved to a different generation, or

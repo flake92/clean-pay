@@ -480,6 +480,7 @@
             "app-cabinet-rsc",
             "app-login-action",
             "app-login-document",
+            "app-login-root-rsc",
             "app-login-rsc",
             "app-profile-action",
             "app-profile-document",
