@@ -1471,6 +1471,113 @@ test.describe("immutable browser baseline policy", () => {
     expect(Object.isFrozen(result)).toBe(true);
   });
 
+  test("keeps paired evidence on one fixed renderer readback phase", async () => {
+    const rawCaptures: string[] = [];
+    let rawCaptureIndex = 0;
+    const pageFor = (role: "baseline" | "candidate") => ({
+      async screenshot(options: unknown) {
+        rawCaptureIndex += 1;
+        rawCaptures.push(`${role}:${rawCaptureIndex}`);
+        expect(options).toEqual({
+          animations: "disabled",
+          caret: "hide",
+          fullPage: false,
+          type: "png",
+        });
+        return Buffer.from(
+          rawCaptureIndex % 2 === 1
+            ? `discarded-uninspected-${rawCaptureIndex}`
+            : "fixed-phase-evidence",
+        );
+      },
+    }) as unknown as Page;
+
+    const result = await captureInterleavedPairTerminalScreenshots(
+      {
+        baseline: pageFor("baseline"),
+        candidate: pageFor("candidate"),
+      },
+      undefined,
+      async () => {},
+    );
+
+    expect(rawCaptures).toEqual([
+      "baseline:1",
+      "baseline:2",
+      "candidate:3",
+      "candidate:4",
+      "baseline:5",
+      "baseline:6",
+      "candidate:7",
+      "candidate:8",
+      "baseline:9",
+      "baseline:10",
+      "candidate:11",
+      "candidate:12",
+    ]);
+    expect(result).toEqual({
+      baseline: Buffer.from("fixed-phase-evidence"),
+      candidate: Buffer.from("fixed-phase-evidence"),
+    });
+  });
+
+  test("propagates every fixed-phase raw read failure without retrying", async () => {
+    for (let failedRawCapture = 1; failedRawCapture <= 12; failedRawCapture += 1) {
+      let rawCaptureCount = 0;
+      let settleCount = 0;
+      const expected = new Error(`raw capture ${failedRawCapture} failed`);
+      const page = () => ({
+        async screenshot() {
+          rawCaptureCount += 1;
+          if (rawCaptureCount === failedRawCapture) throw expected;
+          return Buffer.from("stable");
+        },
+      }) as unknown as Page;
+
+      await expect(captureInterleavedPairTerminalScreenshots(
+        {
+          baseline: page(),
+          candidate: page(),
+        },
+        undefined,
+        async () => { settleCount += 1; },
+      )).rejects.toBe(expected);
+      expect(rawCaptureCount).toBe(failedRawCapture);
+      expect(settleCount).toBe(
+        failedRawCapture <= 4 ? 0 : failedRawCapture <= 8 ? 2 : 4,
+      );
+    }
+  });
+
+  test("retains distinct default-path role evidence without normalization", async () => {
+    const pageFor = (role: "baseline" | "candidate") => {
+      let roleRawCaptureCount = 0;
+      return {
+        async screenshot() {
+          roleRawCaptureCount += 1;
+          return Buffer.from(
+            roleRawCaptureCount % 2 === 1
+              ? `${role}:discarded-uninspected-${roleRawCaptureCount}`
+              : `${role}:evidence`,
+          );
+        },
+      } as unknown as Page;
+    };
+
+    const result = await captureInterleavedPairTerminalScreenshots(
+      {
+        baseline: pageFor("baseline"),
+        candidate: pageFor("candidate"),
+      },
+      undefined,
+      async () => {},
+    );
+
+    expect(result.baseline).toEqual(Buffer.from("baseline:evidence"));
+    expect(result.candidate).toEqual(Buffer.from("candidate:evidence"));
+    expect(result.baseline).not.toEqual(result.candidate);
+  });
+
   test("returns stable distinct paired screenshots without normalizing an A/B diff", async () => {
     const captures = new Map<string, number>();
     const result = await captureInterleavedPairTerminalScreenshots(
