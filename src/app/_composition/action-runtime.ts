@@ -1,6 +1,6 @@
 import { createProductionAuthCommands } from "@/backend/integrations/auth/auth-commands";
 import { productionLinkAccountCommands } from "@/backend/integrations/auth/link-account";
-import { productionPasskeyManagementGateway } from "@/backend/integrations/auth/passkey-management-gateway";
+import { createProductionPasskeyManagementGateway } from "@/backend/integrations/auth/passkey-management-gateway";
 import { productionTelegramAccountMergeGateway } from "@/backend/integrations/auth/telegram-account-merge-gateway";
 import { productionPaymentMaintenanceRunner } from "@/backend/integrations/payments/payment-maintenance-runner";
 import {
@@ -14,6 +14,8 @@ import {
 } from "@/backend/integrations/support/chatwoot-identity-request-guard";
 
 export const productionAuthCommands = createProductionAuthCommands();
+export const productionPasskeyManagementGateway =
+  createProductionPasskeyManagementGateway();
 
 // Server Actions depend only on this framework-level composition root. Adapter
 // construction and process-scoped singletons never leak into action modules.
@@ -23,7 +25,6 @@ export {
   productionChatwootIdentityGateway,
   productionChatwootIdentityRequestGuard,
   productionLinkAccountCommands,
-  productionPasskeyManagementGateway,
   productionPaymentMaintenanceRunner,
   productionTelegramAccountMergeGateway,
   readReferralAttributionCookie,

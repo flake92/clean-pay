@@ -9,7 +9,7 @@ vi.mock("@/backend/integrations/auth/passkey-service", () => ({ deleteOwnedPassk
 vi.mock("@/backend/observability/audit", () => ({ auditLog: mocks.auditLog }));
 vi.mock("@/backend/database/prisma", () => ({ prisma: { webAuthnCredential: { findMany: mocks.findMany } } }));
 
-import { productionPasskeyManagementGateway } from "@/backend/integrations/auth/passkey-management-gateway";
+import { productionPasskeyManagementGateway } from "@/app/_composition/action-runtime";
 
 describe("production passkey management gateway", () => {
   beforeEach(() => { vi.clearAllMocks(); });

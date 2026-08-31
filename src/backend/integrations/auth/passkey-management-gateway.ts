@@ -42,6 +42,3 @@ export function createProductionPasskeyManagementGateway(
     }),
   };
 }
-
-export const productionPasskeyManagementGateway =
-  createProductionPasskeyManagementGateway();

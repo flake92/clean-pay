@@ -1228,6 +1228,19 @@ describe("clean architecture boundaries", () => {
     expect(composition).toContain("export const productionSupportReader");
   });
 
+  it("constructs the passkey management gateway only in app composition", () => {
+    const composition = readFileSync("src/app/_composition/action-runtime.ts", "utf8");
+    const adapter = readFileSync(
+      "src/backend/integrations/auth/passkey-management-gateway.ts",
+      "utf8",
+    );
+
+    expect(adapter).toContain("export function createProductionPasskeyManagementGateway(");
+    expect(adapter).not.toContain("export const productionPasskeyManagementGateway");
+    expect(composition).toContain("createProductionPasskeyManagementGateway()");
+    expect(composition).toContain("export const productionPasskeyManagementGateway");
+  });
+
   it("routes every Next.js controller adapter dependency through app composition", () => {
     for (const { file, source } of files("src/app/**/*.{ts,tsx}")) {
       if (file.replaceAll("\\", "/").startsWith("src/app/_composition/")) continue;
