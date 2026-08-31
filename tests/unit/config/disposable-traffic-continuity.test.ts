@@ -1,4 +1,5 @@
 import { execFileSync } from "node:child_process";
+import { readFileSync } from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -215,6 +216,24 @@ describe("disposable traffic final continuity result", () => {
 });
 
 describe("disposable traffic module loading", () => {
+  it("publishes create-only evidence only after the private staging file is complete", () => {
+    const source = readFileSync(
+      path.resolve(process.cwd(), "scripts/security/disposable-traffic-continuity.mjs"),
+      "utf8",
+    );
+
+    expect(source).toContain('const temporary = `${target}.create-${process.pid}`;');
+    expect(source).toContain("identity = await writePrivateCreateTarget(temporary, value);");
+    expect(source).toContain("await handle.sync();");
+    expect(source).toContain("await link(temporary, target);");
+    expect(source).toContain("await removeOwnedFile(temporary, identity);");
+    const publication = source.slice(
+      source.indexOf("async function writeCreateOnly(target, value)"),
+      source.indexOf("async function writeReplace(target, value"),
+    );
+    expect(publication).not.toContain('open(target, "wx"');
+  });
+
   it("is import-safe and does not install process lifecycle handlers", () => {
     const moduleUrl = pathToFileURL(path.resolve(
       process.cwd(),

@@ -1,5 +1,6 @@
 import { createServer, request as httpRequest } from "node:http";
 import {
+  link,
   lstat,
   open,
   readFile,
@@ -358,7 +359,7 @@ async function writeStatus(statusPath, value) {
   await writeReplace(statusPath, `${JSON.stringify(value)}\n`, { allowMissing: true });
 }
 
-async function writeCreateOnly(target, value) {
+async function writePrivateCreateTarget(target, value) {
   let handle;
   let identity;
   try {
@@ -381,6 +382,47 @@ async function writeCreateOnly(target, value) {
   } catch (error) {
     if (handle !== undefined) await handle.close().catch(() => {});
     if (identity !== undefined) await removeOwnedFile(target, identity);
+    throw error;
+  }
+}
+
+async function writeCreateOnly(target, value) {
+  const temporary = `${target}.create-${process.pid}`;
+  await Promise.all([
+    assertCreateTarget(target, "create-only output"),
+    assertCreateTarget(temporary, "create-only staging"),
+  ]);
+  let identity;
+  let published = false;
+  try {
+    identity = await writePrivateCreateTarget(temporary, value);
+    await link(temporary, target);
+    published = true;
+    await assertPrivateRegularFile(target, "created output");
+    const publishedIdentity = await lstat(target, { bigint: true });
+    if (!sameIdentity(identity, publishedIdentity)) {
+      throw new Error("disposable traffic create-only publication identity changed");
+    }
+    await removeOwnedFile(temporary, identity);
+    return identity;
+  } catch (error) {
+    if (identity !== undefined) {
+      const cleanupFailures = [];
+      if (published) {
+        await removeOwnedFile(target, identity).catch((cleanupError) => {
+          cleanupFailures.push(cleanupError);
+        });
+      }
+      await removeOwnedFile(temporary, identity).catch((cleanupError) => {
+        cleanupFailures.push(cleanupError);
+      });
+      if (cleanupFailures.length > 0) {
+        throw new AggregateError(
+          [error, ...cleanupFailures],
+          "Disposable traffic create-only publication and cleanup both failed.",
+        );
+      }
+    }
     throw error;
   }
 }
