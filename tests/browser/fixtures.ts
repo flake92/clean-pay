@@ -81,6 +81,17 @@ type CharacterizationBrowserProcessPair = Readonly<{
   candidate: Browser;
 }>;
 
+/**
+ * Correlates renderer-only variance inside one A/B pair while each role still
+ * receives its own incognito BrowserContext. Quorum entries remain separate
+ * Chromium processes.
+ */
+export function sharedCharacterizationBrowserProcessPair(
+  browser: Browser,
+): CharacterizationBrowserProcessPair {
+  return Object.freeze({ baseline: browser, candidate: browser });
+}
+
 type PageGuard = {
   consoleMessages: ReturnType<typeof consoleDiagnostic>[];
   detach: () => void;
@@ -152,11 +163,9 @@ export const test = playwrightTest.extend<BrowserFixtures, BrowserWorkerFixtures
         processIndex < EXACT_SCREENSHOT_QUORUM_PROCESS_COUNT;
         processIndex += 1
       ) {
-        const baseline = await playwright.chromium.launch(launchOptions);
-        browsers.push(baseline);
-        const candidate = await playwright.chromium.launch(launchOptions);
-        browsers.push(candidate);
-        pairs.push(Object.freeze({ baseline, candidate }));
+        const browser = await playwright.chromium.launch(launchOptions);
+        browsers.push(browser);
+        pairs.push(sharedCharacterizationBrowserProcessPair(browser));
       }
       await provide(pairs as [
         CharacterizationBrowserProcessPair,
@@ -391,6 +400,11 @@ export const test = playwrightTest.extend<BrowserFixtures, BrowserWorkerFixtures
         throw new Error("Paired characterization config is not bound to the baseline origin.");
       }
       for (const [processIndex, browserPair] of independentChromiumBrowserPairs.entries()) {
+        if (browserPair.baseline !== browserPair.candidate) {
+          throw new Error(
+            "Paired characterization roles must share one isolated renderer process.",
+          );
+        }
         const pages = {} as Record<PublicOverlapRole, CharacterizationGuardedPage>;
         for (const role of ["baseline", "candidate"] as const) {
           const applicationOrigin = environment.roles[role].applicationOrigin;
@@ -415,6 +429,9 @@ export const test = playwrightTest.extend<BrowserFixtures, BrowserWorkerFixtures
             processIndex,
             role,
           });
+        }
+        if (pages.baseline.page.context() === pages.candidate.page.context()) {
+          throw new Error("Paired characterization roles must use distinct browser contexts.");
         }
         pairs.push(Object.freeze({
           baseline: pages.baseline,
