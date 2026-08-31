@@ -12,16 +12,16 @@ vi.mock("@/app/_composition/session-gateways", () => ({
   productionChatwootContextGateway: {},
 }));
 vi.mock("@/backend/integrations/support/chatwoot-identity-gateway", () => ({
-  productionChatwootIdentityGateway: {},
+  createProductionChatwootIdentityGateway: () => ({}),
 }));
 vi.mock("@/backend/integrations/support/chatwoot-identity-request-guard", () => {
   class ChatwootIdentityCapacityError extends Error {}
 
   return {
     ChatwootIdentityCapacityError,
-    productionChatwootIdentityRequestGuard: {
+    createChatwootIdentityRequestGuard: () => ({
       runAction: mocks.runAction,
-    },
+    }),
   };
 });
 
