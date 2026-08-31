@@ -712,6 +712,12 @@ async function exerciseCabinet(
       .waitFor({ state: "visible", timeout: 15_000 });
     await page.evaluate(() => new Promise((resolve) => setTimeout(resolve, 50)));
     await drainProviderOverlapHistoryBindings(page);
+    try {
+      await page.waitForLoadState("networkidle", { timeout: 15_000 });
+    } catch (error) {
+      throw new Error("Provider profile network quiescence barrier failed.", { cause: error });
+    }
+    await drainProviderOverlapHistoryBindings(page);
     const profileFrameTree = await cdp.send("Page.getFrameTree");
     const profileFrame = profileFrameTree.frameTree.frame;
     const profileHistoryLength = await page.evaluate(() => history.length);
