@@ -1,5 +1,6 @@
 import { execFile } from "node:child_process";
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
+import { lstat, mkdir, readFile, rm } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
 
@@ -236,6 +237,56 @@ test("emits one exact digest-only CLI failure record without starting Docker", a
   expect(failure?.stderr?.toLowerCase()).not.toContain(repositoryRoot.toLowerCase());
 });
 
+test("seals the exact provider child failure before Docker and never overwrites it", async () => {
+  const repositoryRoot = path.resolve(__dirname, "../../..");
+  const captureId = randomBytes(8).toString("hex");
+  const captureRoot = path.join(
+    repositoryRoot,
+    "test-results",
+    "browser-live-pair-ci",
+    captureId,
+  );
+  const failureOutput = path.join(captureRoot, "provider-overlap-failure.json");
+  const privateMarker = "synthetic-provider-output-must-not-escape";
+  const args = providerFailureArguments(repositoryRoot, captureId, privateMarker);
+  const environment = {
+    ...childProcessEnvironment(),
+    CLEAN_PAY_PROVIDER_OVERLAP_FAILURE_OUTPUT: failureOutput,
+  };
+  await mkdir(captureRoot, { mode: 0o700, recursive: true });
+  try {
+    const first = await rejectedProviderInvocation(repositoryRoot, args, environment);
+    expect(first.code).toBe(1);
+    expect(first.stdout).toBe("");
+    expect(first.stderr?.endsWith("\n")).toBe(true);
+    expect(first.stderr?.match(/\n/g)).toHaveLength(1);
+    const artifact = await readFile(failureOutput);
+    expect(artifact).toEqual(Buffer.from(first.stderr ?? "", "utf8"));
+    const record = JSON.parse(artifact.toString("utf8"));
+    expect(record).toMatchObject({
+      causeEvidenceTruncated: false,
+      errorClass: "Error",
+      messageSha256: expect.stringMatching(/^[a-f0-9]{64}$/),
+      status: "dual_image_provider_overlap_failed",
+    });
+    expect(record.causeEvidence).toEqual([]);
+    expect(artifact.toString("utf8")).not.toContain(privateMarker);
+    expect(artifact.toString("utf8").toLowerCase()).not.toContain(
+      repositoryRoot.toLowerCase(),
+    );
+    const details = await lstat(failureOutput);
+    expect(details.isFile()).toBe(true);
+    expect(details.isSymbolicLink()).toBe(false);
+    if (process.platform !== "win32") expect(details.mode & 0o777).toBe(0o600);
+
+    const second = await rejectedProviderInvocation(repositoryRoot, args, environment);
+    expect(second.code).toBe(1);
+    expect(await readFile(failureOutput)).toEqual(artifact);
+  } finally {
+    await rm(captureRoot, { force: true, recursive: true });
+  }
+});
+
 function sha256(value: string) {
   return createHash("sha256").update(value).digest("hex");
 }
@@ -248,4 +299,56 @@ function childProcessEnvironment(): NodeJS.ProcessEnv {
     if (typeof process.env[name] === "string") environment[name] = process.env[name];
   }
   return environment;
+}
+
+function providerFailureArguments(
+  repositoryRoot: string,
+  captureId: string,
+  privateMarker: string,
+) {
+  const digest = (digit: string) => `sha256:${digit.repeat(64)}`;
+  return [
+    "--baseline-contract", path.join(repositoryRoot, "missing-baseline-contract.json"),
+    "--baseline-control-url", "http://127.0.0.1:43100/",
+    "--baseline-asset-attestation", path.join(repositoryRoot, "missing-baseline-assets.json"),
+    "--baseline-asset-image-digest", digest("1"),
+    "--baseline-migration-asset-image-digest", digest("2"),
+    "--baseline-resolver-ip", "127.0.0.21",
+    "--candidate-contract", path.join(repositoryRoot, "missing-candidate-contract.json"),
+    "--candidate-control-url", "http://127.0.0.1:43200/",
+    "--candidate-asset-attestation", path.join(repositoryRoot, "missing-candidate-assets.json"),
+    "--candidate-asset-image-digest", digest("3"),
+    "--candidate-migration-asset-image-digest", digest("4"),
+    "--candidate-resolver-ip", "127.0.0.22",
+    "--capture-id", captureId,
+    "--output", `relative-${privateMarker}.json`,
+    "--scenario", "provider-overlap-v1",
+  ];
+}
+
+async function rejectedProviderInvocation(
+  repositoryRoot: string,
+  args: string[],
+  env: NodeJS.ProcessEnv,
+) {
+  try {
+    await execFileAsync(process.execPath, [
+      path.resolve(__dirname, "prove-provider-overlap.mjs"),
+      ...args,
+    ], {
+      cwd: repositoryRoot,
+      encoding: "utf8",
+      env,
+      maxBuffer: 64 * 1024,
+      timeout: 10_000,
+      windowsHide: true,
+    });
+  } catch (error) {
+    return error as Error & {
+      code?: number | string;
+      stderr?: string;
+      stdout?: string;
+    };
+  }
+  throw new Error("Synthetic provider invocation unexpectedly succeeded.");
 }

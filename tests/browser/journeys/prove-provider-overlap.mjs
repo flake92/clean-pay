@@ -77,16 +77,23 @@ const providerOverlapConnectAuthorityLedger = Object.freeze([
   "pay.ci.clean-pay.dev:443",
 ].sort());
 let argumentsByName;
+let captureId;
+let failureOutputPath;
 let scenario;
 let outputPath;
 
 try {
   argumentsByName = parseArguments(process.argv.slice(2));
+  captureId = requiredArgument(argumentsByName, "--capture-id", /^[a-f0-9]{16}$/);
+  await assertRepositoryRoot();
+  failureOutputPath = await exactProviderFailureOutputPath(
+    process.env.CLEAN_PAY_PROVIDER_OVERLAP_FAILURE_OUTPUT,
+    captureId,
+  );
   scenario = requiredArgument(argumentsByName, "--scenario", /^provider-overlap-v1$/);
   outputPath = resolveProviderOverlapOutputPath(
     requiredArgument(argumentsByName, "--output", /.+/),
   );
-  await assertRepositoryRoot();
   await assertNewPrivateOutput(outputPath);
   const fixtureContractSha256 = await currentJourneyFixtureContractSha256Async();
   const playwrightVersion = await installedPlaywrightVersion();
@@ -193,13 +200,39 @@ try {
     proofSha256: sha256(bytes),
   })}\n`);
 } catch (error) {
+  await emitProviderFailure(error);
+  process.exitCode = 1;
+}
+
+async function emitProviderFailure(primaryError) {
+  let failure = primaryError;
+  let bytes = providerFailureBytes(failure);
+  if (failureOutputPath !== undefined) {
+    try {
+      const receipt = await writeJourneySanitizedOutput(failureOutputPath, bytes);
+      if (receipt.status !== "sanitized-create-only-output-written"
+        || receipt.bytes !== bytes.byteLength
+        || receipt.sha256 !== sha256(bytes)) {
+        throw new Error("Provider overlap failure publication receipt is invalid.");
+      }
+    } catch (publicationError) {
+      failure = new AggregateError(
+        [primaryError, publicationError],
+        "Provider overlap proof failed and its sanitized evidence was not sealed.",
+      );
+      bytes = providerFailureBytes(failure);
+    }
+  }
+  process.stderr.write(bytes);
+}
+
+function providerFailureBytes(error) {
   const dockerFailures = collectJourneyDockerFailureEvidence(error);
-  process.stderr.write(`${JSON.stringify({
+  return Buffer.from(`${JSON.stringify({
     status: "dual_image_provider_overlap_failed",
     ...(dockerFailures.length === 0 ? {} : { dockerFailures }),
     ...createJourneySanitizedErrorEvidence(error),
-  })}\n`);
-  process.exitCode = 1;
+  })}\n`, "utf8");
 }
 
 async function readStackInput(role) {
@@ -1792,6 +1825,52 @@ async function assertRepositoryRoot() {
   }
 }
 
+async function exactProviderFailureOutputPath(rawPath, expectedCaptureId) {
+  const expectedOutputParent = path.join(
+    repositoryRoot,
+    "test-results",
+    "browser-live-pair-ci",
+  );
+  const expectedCaptureRoot = path.join(expectedOutputParent, expectedCaptureId);
+  const expected = path.join(expectedCaptureRoot, "provider-overlap-failure.json");
+  if (typeof rawPath !== "string" || !path.isAbsolute(rawPath)
+    || path.resolve(rawPath) !== expected) {
+    throw new Error("Provider overlap sanitized failure output path is invalid.");
+  }
+  const [
+    repositoryDetails,
+    repositoryResolved,
+    outputParentDetails,
+    outputParentResolved,
+    captureRootDetails,
+    captureRootResolved,
+  ] = await Promise.all([
+    lstat(repositoryRoot),
+    realpath(repositoryRoot),
+    lstat(expectedOutputParent),
+    realpath(expectedOutputParent),
+    lstat(expectedCaptureRoot),
+    realpath(expectedCaptureRoot),
+  ]);
+  if (!repositoryDetails.isDirectory() || repositoryDetails.isSymbolicLink()
+    || !outputParentDetails.isDirectory() || outputParentDetails.isSymbolicLink()
+    || !captureRootDetails.isDirectory() || captureRootDetails.isSymbolicLink()
+    || path.resolve(repositoryResolved) !== repositoryRoot
+    || !isWithin(repositoryResolved, outputParentResolved)
+    || path.resolve(outputParentResolved) !== expectedOutputParent
+    || path.resolve(captureRootResolved) !== expectedCaptureRoot
+    || path.dirname(path.resolve(captureRootResolved)) !== path.resolve(outputParentResolved)) {
+    throw new Error("Provider overlap sanitized failure output root is not exact.");
+  }
+  try {
+    await lstat(expected);
+    throw new Error("Provider overlap sanitized failure output must be new.");
+  } catch (error) {
+    if (error?.code !== "ENOENT") throw error;
+  }
+  return expected;
+}
+
 async function exactExternalFile(rawPath, label) {
   if (!path.isAbsolute(rawPath)) throw new Error(`${label} path must be absolute.`);
   const requestedMetadata = await lstat(rawPath);
@@ -1872,6 +1951,7 @@ function parseArguments(values) {
     "--candidate-asset-image-digest",
     "--candidate-migration-asset-image-digest",
     "--candidate-resolver-ip",
+    "--capture-id",
     "--output",
     "--scenario",
   ]);

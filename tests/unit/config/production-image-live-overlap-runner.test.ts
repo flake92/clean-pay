@@ -159,6 +159,8 @@ describe("ephemeral production-image live overlap runner", () => {
       inputs.candidate.migrationAssetImageDigest,
       "--candidate-asset-attestation",
       inputs.candidate.assetAttestationPath,
+      "--capture-id",
+      captureId,
       "--scenario",
       "provider-overlap-v1",
       "--output",
@@ -315,6 +317,12 @@ describe("ephemeral production-image live overlap runner", () => {
     expect(runner).toContain(
       "await unlinkExactProviderProof(providerProofExternalPath(plan), artifact.identity)",
     );
+    expect(runner).toContain(
+      "providerProofEnvironment.CLEAN_PAY_PROVIDER_OVERLAP_FAILURE_OUTPUT =",
+    );
+    expect(runner).toContain(
+      "providerProofFailureSanitizedPath(plan, sanitizedCaptureRoot)",
+    );
     expect(runner).not.toContain("copyFile(");
     expect(workflow).toContain(
       "node tests/browser/journeys/run-production-image-live-overlap.mjs run",
@@ -345,6 +353,9 @@ describe("ephemeral production-image live overlap runner", () => {
     expect(productionImage).toContain("test-results/browser-public-overlap");
     expect(productionImage).toContain(
       "test-results/browser-authenticated-journey-live-pair",
+    );
+    expect(productionImage).toContain(
+      "test-results/browser-live-pair-ci/${{ env.CLEAN_PAY_BROWSER_LIVE_PAIR_CAPTURE_ID }}/provider-overlap-failure.json",
     );
     expect(productionImage).toContain(
       "test-results/browser-live-pair-ci/${{ env.CLEAN_PAY_BROWSER_LIVE_PAIR_CAPTURE_ID }}/provider-overlap.json",

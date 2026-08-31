@@ -41,6 +41,7 @@ const stateFilename = "ownership.json";
 const contractFilename = "browser-journey-contract.json";
 const providerProofExternalFilename = "provider-overlap-proof.json";
 const providerProofSanitizedFilename = "provider-overlap.json";
+const providerProofFailureSanitizedFilename = "provider-overlap-failure.json";
 const maximumProviderProofBytes = 16 * 1024 * 1024;
 const chatwootInputRootName = "chatwoot-live-proof";
 const chatwootPlanFilename = "chatwoot-phase-plan.json";
@@ -187,11 +188,12 @@ export function providerProofArguments(plan, inputs) {
     );
   }
   args.push(
+    "--capture-id", plan.captureId,
     "--scenario", "provider-overlap-v1",
     "--output", providerProofExternalPath(plan),
   );
-  if (args.length !== 28) {
-    throw new Error("Provider overlap proof arguments do not contain exactly fourteen pairs.");
+  if (args.length !== 30) {
+    throw new Error("Provider overlap proof arguments do not contain exactly fifteen pairs.");
   }
   return Object.freeze(args);
 }
@@ -303,14 +305,18 @@ async function run(plan) {
       inputs[roleName] = await prepareRoleInputs(plan, roleName, publicBuildContract);
     }
     const args = proofArguments(plan, inputs);
+    const sanitizedCaptureRoot = await ensureSanitizedCaptureRoot(plan);
     const publicProofEnvironment = sanitizedProcessEnvironment();
     publicProofEnvironment.CLEAN_PAY_PUBLIC_OVERLAP_FAILURE_OUTPUT_ROOT =
-      await ensureSanitizedCaptureRoot(plan);
+      sanitizedCaptureRoot;
     await runInherited(process.execPath, [publicProofCli, ...args], publicProofEnvironment);
+    const providerProofEnvironment = sanitizedProcessEnvironment();
+    providerProofEnvironment.CLEAN_PAY_PROVIDER_OVERLAP_FAILURE_OUTPUT =
+      providerProofFailureSanitizedPath(plan, sanitizedCaptureRoot);
     await runInherited(
       process.execPath,
       [providerProofCli, ...providerProofArguments(plan, inputs)],
-      sanitizedProcessEnvironment(),
+      providerProofEnvironment,
     );
     const providerOverlap = await publishProviderProof(plan);
     const unverifiedEmailProof = unverifiedEmailProofPath(plan);
@@ -1140,6 +1146,17 @@ function providerProofExternalPath(plan) {
   if (path.dirname(target) !== plan.ownedRoot
     || path.basename(target) !== providerProofExternalFilename) {
     throw new Error("Provider overlap output escaped its exact external owned root.");
+  }
+  return target;
+}
+
+function providerProofFailureSanitizedPath(plan, captureRoot) {
+  const expectedRoot = path.join(outputParent, plan.captureId);
+  const target = path.join(expectedRoot, providerProofFailureSanitizedFilename);
+  if (captureRoot !== expectedRoot
+    || path.dirname(target) !== expectedRoot
+    || path.basename(target) !== providerProofFailureSanitizedFilename) {
+    throw new Error("Provider overlap failure output escaped its exact sanitized capture root.");
   }
   return target;
 }
