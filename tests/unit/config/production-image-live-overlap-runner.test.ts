@@ -18,6 +18,7 @@ import {
   validateChatwootEvidenceCleanupCapability,
   validateLiveOverlapImageInspection,
   validateLiveOverlapOwnership,
+  validateLiveOverlapPhaseFailure,
   validateLiveOverlapPhaseReceipt,
 } from "../../../tests/browser/journeys/run-production-image-live-overlap.mjs";
 import { expectedChatwootScreenshotPaths } from "../../../tests/browser/journeys/chatwoot-phase-evidence-writer.mjs";
@@ -1012,6 +1013,95 @@ describe("ephemeral production-image live overlap runner", () => {
       startedReceiptSha256: publicStartedReceiptSha256,
       status: "completed",
     })).toThrow(/exact contract/u);
+  });
+
+  it("settles proof failures without weakening their red CI outcome", () => {
+    const digest = "d".repeat(64);
+    const failure = {
+      schemaVersion: 1,
+      kind: "clean-pay-production-image-live-overlap-phase-failure",
+      status: "failed",
+      captureId,
+      phase: "provider",
+      causeEvidence: [{
+        depth: 1,
+        errorClass: "Error",
+        messageSha256: digest,
+        ordinal: 1,
+        parentOrdinal: 0,
+      }],
+      causeEvidenceTruncated: false,
+      errorClass: "AggregateError",
+      messageSha256: digest,
+    };
+    expect(validateLiveOverlapPhaseFailure(failure, {
+      captureId,
+      phase: "provider",
+    })).toEqual(failure);
+
+    const previousReceiptSha256 = "e".repeat(64);
+    const startedReceiptSha256 = "f".repeat(64);
+    const failedReceipt = {
+      ...phaseReceipt(
+        "provider",
+        "completed",
+        previousReceiptSha256,
+        startedReceiptSha256,
+      ),
+      result: {
+        artifact: "phase-provider-failure.json",
+        sha256: digest,
+        status: "failed",
+      },
+    };
+    expect(validateLiveOverlapPhaseReceipt(failedReceipt, {
+      candidateRevision,
+      captureId,
+      ownershipSha256: phaseOwnershipSha256,
+      phase: "provider",
+      previousReceiptSha256,
+      publicBuildContract: phasePublicBuildContract,
+      startedReceiptSha256,
+      status: "completed",
+    })).toEqual(failedReceipt);
+
+    expect(() => validateLiveOverlapPhaseFailure({
+      ...failure,
+      rawMessage: "forbidden",
+    }, {
+      captureId,
+      phase: "provider",
+    })).toThrow(/exact contract/u);
+    expect(() => validateLiveOverlapPhaseReceipt({
+      ...failedReceipt,
+      result: {
+        ...failedReceipt.result,
+        artifact: "provider-overlap-failure.json",
+      },
+    }, {
+      candidateRevision,
+      captureId,
+      ownershipSha256: phaseOwnershipSha256,
+      phase: "provider",
+      previousReceiptSha256,
+      publicBuildContract: phasePublicBuildContract,
+      startedReceiptSha256,
+      status: "completed",
+    })).toThrow(/sanitized exact projection/u);
+
+    const productionImage = workflow.slice(
+      workflow.indexOf("  production-image-browser-journey:"),
+      workflow.indexOf("  remnashop-migration-rehearsal:"),
+    );
+    expect(productionImage).toContain("id: public_phase");
+    expect(productionImage.match(
+      /if: \$\{\{ !cancelled\(\) && steps\.public_phase\.outcome == 'success' \}\}/g,
+    )).toHaveLength(3);
+    expect(productionImage).not.toContain("continue-on-error:");
+    expect(runner).toContain("await settleProofPhaseFailure(");
+    expect(runner).toContain(
+      "Live overlap evidence cannot finalize while a proof phase is failed.",
+    );
   });
 
   it("reloads persisted proof inputs only from exact plan-owned paths", () => {
