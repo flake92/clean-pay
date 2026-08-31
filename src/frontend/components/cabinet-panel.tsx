@@ -1,6 +1,5 @@
 "use client";
 
-import { useRouter } from "next/navigation";
 import { ProgressBar } from "primereact/progressbar";
 import { Tag } from "primereact/tag";
 
@@ -11,7 +10,6 @@ import {
 } from "@/frontend/components/cabinet-responsive-sections";
 import { hasRenewOffer } from "@/frontend/lib/subscription-offers";
 import type { CabinetViewModel } from "@/application/models/cabinet";
-import { logoutAction } from "@/app/actions/session";
 import {
   detailValue,
   formatBytes,
@@ -33,10 +31,8 @@ import {
 } from "@/frontend/components/sakai/form-foundation";
 import { CabinetPromocodeFields } from "@/frontend/components/cabinet-promocode-fields";
 import { useCabinetPanelController } from "@/frontend/hooks/use-cabinet-panel-controller";
-import { resetChatwootSession } from "@/frontend/lib/chatwoot";
 
 export function CabinetPanel({ model }: { model: CabinetViewModel }) {
-  const router = useRouter();
   const {
     devices,
     error,
@@ -55,6 +51,7 @@ export function CabinetPanel({ model }: { model: CabinetViewModel }) {
     copySubscriptionUrl,
     deleteAllDevices,
     deleteDevice,
+    logout,
     pendingAction,
     promocode,
     promocodeMessage,
@@ -62,14 +59,8 @@ export function CabinetPanel({ model }: { model: CabinetViewModel }) {
     setPromocode,
   } = useCabinetPanelController({
     paymentHistoryStatus,
-    router,
     subscription,
   });
-
-  async function logout() {
-    resetChatwootSession();
-    await logoutAction();
-  }
 
   if (error) {
     return (

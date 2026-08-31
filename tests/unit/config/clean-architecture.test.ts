@@ -763,16 +763,6 @@ describe("clean architecture boundaries", () => {
         path: "src/frontend/components/cabinet-panel.tsx",
         boundaryImports: ["@/frontend/hooks/use-cabinet-panel-controller"],
         runtimeExports: ["CabinetPanel"],
-        allowedInfrastructureBindings: {
-          "next/navigation": ["useRouter"],
-          "@/app/actions/session": ["logoutAction"],
-          "@/frontend/lib/chatwoot": ["resetChatwootSession"],
-        },
-        allowedInfrastructureCallCounts: {
-          logoutAction: 1,
-          resetChatwootSession: 1,
-        },
-        allowedViewHookCounts: { useRouter: 1 },
       },
       {
         path: "src/frontend/components/chatwoot-widget.tsx",

@@ -22,11 +22,11 @@ describe("cabinet deferred edge semantics", () => {
 
   it("continues to let a synchronous Chatwoot reset failure stop logout", () => {
     const source = readFileSync(
-      "src/frontend/components/cabinet-panel.tsx",
+      "src/frontend/hooks/use-cabinet-panel-controller.ts",
       "utf8",
     );
     const logoutStart = source.indexOf("async function logout()");
-    const logoutEnd = source.indexOf("\n\n  if (error)", logoutStart);
+    const logoutEnd = source.indexOf("\n\n  return {", logoutStart);
     const logout = source.slice(logoutStart, logoutEnd);
 
     expect(logout.indexOf("resetChatwootSession()")).toBeGreaterThan(-1);
