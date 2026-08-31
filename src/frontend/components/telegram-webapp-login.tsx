@@ -7,7 +7,7 @@ import {
   type TelegramWebAppLoginControllerDependencies,
 } from "@/frontend/hooks/use-telegram-webapp-login-controller";
 import { telegramWebAppLoginProgressMessage } from "@/frontend/lib/telegram-webapp-login-transitions";
-import { Message } from "primereact/message";
+import { Message } from "@/frontend/components/sakai/form-foundation";
 import { ProgressSpinner } from "primereact/progressspinner";
 
 const window = telegramWebAppLoginComposition.window;

@@ -1,12 +1,14 @@
 "use client";
 
-import { Button } from "primereact/button";
 import { Card } from "primereact/card";
-import { InputText } from "primereact/inputtext";
-import { Message } from "primereact/message";
 
 import type { AccountReadiness } from "@/application/models/email-verification";
 import { LinkButton } from "@/frontend/components/prime/link-button";
+import {
+  Button,
+  InputText,
+  Message,
+} from "@/frontend/components/sakai/form-foundation";
 import { TurnstileWidget } from "@/frontend/components/turnstile-widget";
 import { useVerifyEmailController } from "@/frontend/hooks/use-verify-email-controller";
 import { sessionRefreshPath } from "@/shared/auth/session-navigation";

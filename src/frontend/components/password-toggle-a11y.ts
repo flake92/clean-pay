@@ -1,4 +1,4 @@
-import type { PasswordPassThroughOptions } from "primereact/password";
+import type { PasswordPassThroughOptions } from "@/frontend/components/sakai/form-foundation";
 
 type ToggleLabels = {
   hide: string;

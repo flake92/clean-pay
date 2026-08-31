@@ -1,8 +1,8 @@
 "use client";
 
-import { Button } from "primereact/button";
 import { Card } from "primereact/card";
-import { Message } from "primereact/message";
+
+import { Button, Message } from "@/frontend/components/sakai/form-foundation";
 import { InstallAppButton } from "@/frontend/components/install-app-button";
 import { paymentGatewayLabel } from "@/frontend/lib/payment-gateway";
 import { AccountActionRequired } from "@/frontend/components/account-action-required";

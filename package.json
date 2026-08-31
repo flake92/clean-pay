@@ -17,7 +17,7 @@
     "pretest": "npm run prisma:generate",
     "test": "node node_modules/vitest/vitest.mjs run --config config/vitest/base.mts --configLoader native",
     "pretest:architecture": "npm run prisma:generate",
-    "test:architecture": "node node_modules/vitest/vitest.mjs run --config config/vitest/base.mts --configLoader native tests/unit/config/clean-architecture.test.ts tests/unit/config/dead-code-regressions.test.ts tests/unit/config/cabinet-performance-regressions.test.ts",
+    "test:architecture": "node node_modules/vitest/vitest.mjs run --config config/vitest/base.mts --configLoader native tests/unit/config/clean-architecture.test.ts tests/unit/config/dead-code-regressions.test.ts tests/unit/config/cabinet-performance-regressions.test.ts tests/unit/config/sakai-form-boundary.test.ts",
     "pretest:unit": "npm run prisma:generate",
     "test:unit": "node node_modules/vitest/vitest.mjs run --config config/vitest/base.mts --configLoader native tests/unit",
     "pretest:route-handlers": "npm run prisma:generate",

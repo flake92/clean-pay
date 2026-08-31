@@ -1,10 +1,10 @@
 "use client";
 
-import { Button } from "primereact/button";
 import { Column } from "primereact/column";
 import { DataTable } from "primereact/datatable";
-import { Message } from "primereact/message";
 import { Tag } from "primereact/tag";
+
+import { Button, Message } from "@/frontend/components/sakai/form-foundation";
 
 import type { PaymentHistorySnapshotStatus } from "@/application/models/cabinet";
 import {

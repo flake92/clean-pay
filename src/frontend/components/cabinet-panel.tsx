@@ -1,9 +1,6 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { Button } from "primereact/button";
-import { InputText } from "primereact/inputtext";
-import { Message } from "primereact/message";
 import { ProgressBar } from "primereact/progressbar";
 import { Tag } from "primereact/tag";
 
@@ -30,6 +27,11 @@ import {
   selectCabinetPanelPresentation,
 } from "@/frontend/components/cabinet-panel-transitions";
 import { DetailLine, Metric } from "@/frontend/components/cabinet-view-parts";
+import {
+  Button,
+  InputText,
+  Message,
+} from "@/frontend/components/sakai/form-foundation";
 import { useCabinetPanelController } from "@/frontend/hooks/use-cabinet-panel-controller";
 import { resetChatwootSession } from "@/frontend/lib/chatwoot";
 

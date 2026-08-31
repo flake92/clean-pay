@@ -1,8 +1,8 @@
 "use client";
 
-import { Message } from "primereact/message";
 import { Tag } from "primereact/tag";
-import { Button } from "primereact/button";
+
+import { Button, Message } from "@/frontend/components/sakai/form-foundation";
 
 import { LinkButton } from "@/frontend/components/prime/link-button";
 import {
