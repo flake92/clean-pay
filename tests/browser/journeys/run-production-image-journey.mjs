@@ -114,7 +114,7 @@ try {
     const mainBrowserEnvironment = browserTestEnvironment({
       CLEAN_PAY_BROWSER_BASE_URL: `http://${contract.publications.app}`,
     });
-    await runPlaywright("playwright.config.ts", mainBrowserEnvironment);
+    await runPlaywright("config/playwright.config.ts", mainBrowserEnvironment);
 
     // The authenticated journey has a deliberately different support/Chatwoot
     // fixture. Recreate every owned resource so its reset ledger still starts

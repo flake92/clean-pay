@@ -250,5 +250,5 @@ Read-only candidate A/B from this repository on Windows PowerShell:
 $env:CLEAN_PAY_BROWSER_BASE_URL = "http://127.0.0.1:<candidate-port>"
 Remove-Item Env:CLEAN_PAY_UPDATE_BASELINE -ErrorAction SilentlyContinue
 Remove-Item Env:CLEAN_PAY_BROWSER_EXPECTED_CONSOLE_SHA256 -ErrorAction SilentlyContinue
-node node_modules/playwright/cli.js test --config playwright.config.ts
+node node_modules/playwright/cli.js test --config config/playwright.config.ts
 ```
