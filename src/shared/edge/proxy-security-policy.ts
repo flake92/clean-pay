@@ -14,12 +14,14 @@ export function createProxyRequestSecurity({
   headers,
   chatwootBaseUrl,
   chatwootConfigured,
+  buildContentSecurityPolicy: buildPolicy = buildContentSecurityPolicy,
   randomHex,
   randomUuid,
 }: {
   headers: Headers;
   chatwootBaseUrl: string | undefined;
   chatwootConfigured: boolean;
+  buildContentSecurityPolicy?: typeof buildContentSecurityPolicy;
   randomHex: (byteLength: number) => string;
   randomUuid: () => string;
 }): ProxyRequestSecurity {
@@ -35,7 +37,7 @@ export function createProxyRequestSecurity({
     : randomHex(16);
   const traceFlags = traceMatch?.[3] ?? "01";
   const nonce = randomHex(16);
-  const contentSecurityPolicy = buildContentSecurityPolicy({
+  const contentSecurityPolicy = buildPolicy({
     nonce,
     chatwootBaseUrl: chatwootConfigured ? chatwootBaseUrl : null,
   });
