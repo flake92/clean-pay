@@ -34,6 +34,10 @@ import {
   UNVERIFIED_EMAIL_PROOF_FILENAME,
   assertUnverifiedEmailLoginProof,
 } from "./unverified-email-login-proof-contract.mjs";
+import {
+  LINKED_EMAIL_FAILURE_PROOF_FILENAME,
+  assertLinkedEmailFailureProof,
+} from "./linked-email-failure-proof-contract.mjs";
 
 const repositoryRoot = path.resolve(process.cwd());
 const liveRootPrefix = "clean-pay-production-live-overlap-";
@@ -320,9 +324,12 @@ async function run(plan) {
     );
     const providerOverlap = await publishProviderProof(plan);
     const unverifiedEmailProof = unverifiedEmailProofPath(plan);
+    const linkedEmailFailureProof = linkedEmailFailureProofPath(plan);
     await runInherited(process.execPath, [
       authenticatedProofCli,
       ...args,
+      "--candidate-linked-email-failure-proof-output",
+      linkedEmailFailureProof,
       "--candidate-unverified-email-proof-output",
       unverifiedEmailProof,
     ], sanitizedProcessEnvironment());
@@ -330,6 +337,11 @@ async function run(plan) {
       plan,
       inputs,
       unverifiedEmailProof,
+    );
+    const linkedEmailFailureFeedback = await validateLinkedEmailFailureProof(
+      plan,
+      inputs,
+      linkedEmailFailureProof,
     );
     const chatwoot = await prepareChatwootLiveProofInputs(plan, inputs);
     await runInherited(
@@ -356,6 +368,7 @@ async function run(plan) {
         candidateMigration: inputs.candidate.migrationAssetImageDigest,
       },
       providerOverlap,
+      linkedEmailFailureFeedback,
       unverifiedEmailLogin,
       chatwootPhase,
     };
@@ -1188,6 +1201,15 @@ function unverifiedEmailProofPath(plan) {
   return target;
 }
 
+function linkedEmailFailureProofPath(plan) {
+  const target = path.join(outputParent, plan.captureId, LINKED_EMAIL_FAILURE_PROOF_FILENAME);
+  if (path.dirname(target) !== path.join(outputParent, plan.captureId)
+    || path.basename(target) !== LINKED_EMAIL_FAILURE_PROOF_FILENAME) {
+    throw new Error("Candidate linked e-mail failure proof escaped its sanitized capture root.");
+  }
+  return target;
+}
+
 async function validateUnverifiedEmailProof(plan, inputs, target) {
   const bytes = await readBoundedFile(target, 16_384);
   let document;
@@ -1204,6 +1226,28 @@ async function validateUnverifiedEmailProof(plan, inputs, target) {
   }
   return Object.freeze({
     artifact: UNVERIFIED_EMAIL_PROOF_FILENAME,
+    authorizedSemanticDiff: document.authorizedSemanticDiff,
+    sha256: sha256(bytes),
+    status: document.status,
+  });
+}
+
+async function validateLinkedEmailFailureProof(plan, inputs, target) {
+  const bytes = await readBoundedFile(target, 16_384);
+  let document;
+  try {
+    document = assertLinkedEmailFailureProof(JSON.parse(bytes.toString("utf8")), {
+      candidateApplicationImageDigest: inputs.candidate.assetImageDigest,
+      candidateMigrationImageDigest: inputs.candidate.migrationAssetImageDigest,
+      candidateRevision: plan.candidateRevision,
+    });
+  } catch (error) {
+    throw new Error("Candidate linked e-mail failure proof failed its exact schema.", {
+      cause: error,
+    });
+  }
+  return Object.freeze({
+    artifact: LINKED_EMAIL_FAILURE_PROOF_FILENAME,
     authorizedSemanticDiff: document.authorizedSemanticDiff,
     sha256: sha256(bytes),
     status: document.status,

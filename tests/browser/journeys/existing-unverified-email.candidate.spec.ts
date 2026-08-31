@@ -172,7 +172,11 @@ test("authorized existing unverified e-mail login is gated before cabinet reads"
     emailVerifiedAccessClaim: accessClaims.emailVerified,
     genericCabinetErrorCount,
     telegramLinkedAccessClaim: accessClaims.telegramLinked,
-  }, environment);
+  }, {
+    candidateRevision: environment.candidateRevision,
+    candidateApplicationImageDigest: environment.candidateApplicationImageDigest,
+    candidateMigrationImageDigest: environment.candidateMigrationImageDigest,
+  });
   await writeCreateOnlyProof(environment.proofOutput, proof);
 });
 
