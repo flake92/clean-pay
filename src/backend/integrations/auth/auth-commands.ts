@@ -42,63 +42,65 @@ async function adapt<T>(work: () => Promise<T>): Promise<T> {
   }
 }
 
-export const productionAuthCommands: AuthCommands = {
-  preflightCapacity: (action) => adapt(() => assertRateLimitCapacity(action)),
-  withUpstreamConcurrency: (action, work) => adapt(() => withAuthConcurrency(action, work)),
-  verifyHuman: (token, action) => adapt(() => verifyTurnstileToken(token, action)),
-  rateLimit: (input) => adapt(() => assertTargetRateLimit(input)),
-  identifyEmail: (email) => adapt(() => remnashopIdentifyEmail({ email })),
-  hasPasskey: (email) => adapt(() => prismaPasskeyAccountReader.hasCredential(email)),
-  async authenticate(input) {
-    try {
-      const auth = input.operation === "confirm-password-reset"
-        ? await remnashopAuth(
-            "/auth/password/confirm-reset",
-            { email: input.email, code: input.code!, new_password: input.password! },
-          )
-        : await remnashopAuth(
-            input.operation === "register" ? "/auth/register" : "/auth/login",
-            input.operation === "register"
-              ? {
-                  email: input.email,
-                  password: input.password,
-                  ...(input.referralCode ? { referral_code: input.referralCode } : {}),
-                }
-              : { email: input.email, password: input.password },
-          );
-      return { context: auth };
-    } catch (error) {
-      if (input.operation === "register" && emailAlreadyExists(error)) {
-        throw new AuthGatewayError("EMAIL_ALREADY_EXISTS");
+export function createProductionAuthCommands(): AuthCommands {
+  return {
+    preflightCapacity: (action) => adapt(() => assertRateLimitCapacity(action)),
+    withUpstreamConcurrency: (action, work) => adapt(() => withAuthConcurrency(action, work)),
+    verifyHuman: (token, action) => adapt(() => verifyTurnstileToken(token, action)),
+    rateLimit: (input) => adapt(() => assertTargetRateLimit(input)),
+    identifyEmail: (email) => adapt(() => remnashopIdentifyEmail({ email })),
+    hasPasskey: (email) => adapt(() => prismaPasskeyAccountReader.hasCredential(email)),
+    async authenticate(input) {
+      try {
+        const auth = input.operation === "confirm-password-reset"
+          ? await remnashopAuth(
+              "/auth/password/confirm-reset",
+              { email: input.email, code: input.code!, new_password: input.password! },
+            )
+          : await remnashopAuth(
+              input.operation === "register" ? "/auth/register" : "/auth/login",
+              input.operation === "register"
+                ? {
+                    email: input.email,
+                    password: input.password,
+                    ...(input.referralCode ? { referral_code: input.referralCode } : {}),
+                  }
+                : { email: input.email, password: input.password },
+            );
+        return { context: auth };
+      } catch (error) {
+        if (input.operation === "register" && emailAlreadyExists(error)) {
+          throw new AuthGatewayError("EMAIL_ALREADY_EXISTS");
+        }
+        if (error instanceof ServiceError) throw new AuthGatewayError(error.code);
+        throw new AuthGatewayError("INTERNAL_ERROR");
       }
-      if (error instanceof ServiceError) throw new AuthGatewayError(error.code);
-      throw new AuthGatewayError("INTERNAL_ERROR");
-    }
-  },
-  async establishSession(providerSession, options) {
-    return adapt(async () => {
-      const auth = providerAuth(providerSession);
-      const { user, profile } = await createSessionFromRemnashopAuth({
-        accessToken: auth.cookies.accessToken,
-        refreshToken: auth.cookies.refreshToken,
-        auth: auth.data,
-        ...options,
+    },
+    async establishSession(providerSession, options) {
+      return adapt(async () => {
+        const auth = providerAuth(providerSession);
+        const { user, profile } = await createSessionFromRemnashopAuth({
+          accessToken: auth.cookies.accessToken,
+          refreshToken: auth.cookies.refreshToken,
+          auth: auth.data,
+          ...options,
+        });
+        return { userId: user.id, emailVerified: profile.is_email_verified === true };
       });
-      return { userId: user.id, emailVerified: profile.is_email_verified === true };
-    });
-  },
-  async requestEmailVerification(providerSession, email) {
-    await adapt(async () => {
-      const auth = providerAuth(providerSession);
-      await requestRemnashopEmailVerification({
-        accessToken: auth.cookies.accessToken,
-        body: { email },
-        source: "register",
+    },
+    async requestEmailVerification(providerSession, email) {
+      await adapt(async () => {
+        const auth = providerAuth(providerSession);
+        await requestRemnashopEmailVerification({
+          accessToken: auth.cookies.accessToken,
+          body: { email },
+          source: "register",
+        });
       });
-    });
-  },
-  async requestPasswordReset(email) {
-    await adapt(() => remnashopRequestPasswordReset({ email }));
-  },
-  audit: auditLog,
-};
+    },
+    async requestPasswordReset(email) {
+      await adapt(() => remnashopRequestPasswordReset({ email }));
+    },
+    audit: auditLog,
+  };
+}

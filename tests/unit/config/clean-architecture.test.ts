@@ -1233,6 +1233,16 @@ describe("clean architecture boundaries", () => {
     }
   });
 
+  it("constructs the auth command adapter only in app composition", () => {
+    const composition = readFileSync("src/app/_composition/action-runtime.ts", "utf8");
+    const adapter = readFileSync("src/backend/integrations/auth/auth-commands.ts", "utf8");
+
+    expect(adapter).toContain("export function createProductionAuthCommands()");
+    expect(adapter).not.toContain("export const productionAuthCommands");
+    expect(composition).toContain("createProductionAuthCommands()");
+    expect(composition).toContain("export const productionAuthCommands");
+  });
+
   it("routes every Next.js controller adapter dependency through app composition", () => {
     for (const { file, source } of files("src/app/**/*.{ts,tsx}")) {
       if (file.replaceAll("\\", "/").startsWith("src/app/_composition/")) continue;
