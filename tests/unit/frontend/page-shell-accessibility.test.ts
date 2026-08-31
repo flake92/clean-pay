@@ -65,7 +65,7 @@ vi.mock("@/application/support/load-support", () => ({
   loadSupportViewModel: () => ({ enabled: false }),
   supportPageDescription: () => "Описание поддержки",
 }));
-vi.mock("@/backend/integrations/support/support-reader", () => ({
+vi.mock("@/app/_composition/support-runtime", () => ({
   productionSupportReader: {},
 }));
 vi.mock("@/frontend/components/support-panel", () => ({
