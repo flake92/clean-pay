@@ -44,8 +44,9 @@ function historyPage(value: PaymentHistoryPage) { return value.context as Remnas
 function historyExact(value: PaymentHistoryExact) { return value.context as import("@/backend/integrations/remnashop/contracts").PaymentTransactionResponse; }
 function recovery(value: { context: unknown }) { return value.context as RemnashopPaymentRecovery; }
 
-export const productionPaymentMaintenanceRunner: PaymentMaintenanceRunner = {
-  readReconciliationBacklog: readPaymentReconciliationBacklog,
+export function createProductionPaymentMaintenanceRunner(): PaymentMaintenanceRunner {
+  return {
+    readReconciliationBacklog: readPaymentReconciliationBacklog,
   async claimReconciliation(userId) {
     const claim = await claimUnknownPaymentOperation({ userId });
     return claim ? {
@@ -172,5 +173,6 @@ export const productionPaymentMaintenanceRunner: PaymentMaintenanceRunner = {
       message: "Exact payment-history recovery failed; continuing with the bounded page",
     });
   },
-  now: Date.now,
-};
+    now: Date.now,
+  };
+}

@@ -49,7 +49,7 @@ vi.mock("@/backend/observability/logger", () => ({ logger: { warn: mocks.warn } 
 
 import { ServiceError } from "@/backend/errors/service-error";
 import { PaymentReconciliationManualError } from "@/backend/integrations/payments/payment-reconciliation-service";
-import { productionPaymentMaintenanceRunner as runner } from "@/backend/integrations/payments/payment-maintenance-runner";
+import { productionPaymentMaintenanceRunner as runner } from "@/app/_composition/payment-operations-runtime";
 import { paymentUpstreamOwnerHash } from "@/backend/payments/hashes";
 
 const backendClaim = {

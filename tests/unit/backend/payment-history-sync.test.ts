@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { runPaymentMaintenance } from "@/application/payments/run-payment-maintenance";
-import { productionPaymentMaintenanceRunner } from "@/backend/integrations/payments/payment-maintenance-runner";
+import { productionPaymentMaintenanceRunner } from "@/app/_composition/payment-operations-runtime";
 
 const mocks = vi.hoisted(() => ({
   tx: {
