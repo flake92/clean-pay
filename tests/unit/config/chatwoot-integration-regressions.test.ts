@@ -35,7 +35,7 @@ describe("Chatwoot integration boundaries", () => {
   it("resets the third-party session before every explicit Clean Pay session exit", () => {
     for (const [path, exitCall] of [
       ["src/frontend/layout/useCleanPayMenu.ts", "logoutAction()"],
-      ["src/frontend/components/cabinet-panel.tsx", "logoutAction()"],
+      ["src/frontend/hooks/use-cabinet-panel-controller.ts", "logoutAction()"],
       ["src/frontend/components/register-email-confirm-form.tsx", "clearSessionAction()"],
     ] as const) {
       const file = source(path);
