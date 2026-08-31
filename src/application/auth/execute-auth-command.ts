@@ -1,3 +1,4 @@
+import { executeEmailIdentification } from "@/application/auth/execute-email-identification";
 import { executeEmailLogin } from "@/application/auth/execute-email-login";
 import { executeEmailRegistration } from "@/application/auth/execute-email-registration";
 import { executePasswordResetConfirmation } from "@/application/auth/execute-password-reset-confirmation";
@@ -184,24 +185,7 @@ export async function executeAuthCommand(commands: AuthCommands, input: unknown)
         turnstileToken,
       });
     }
-    await commands.preflightCapacity("auth_command");
-    await commands.withUpstreamConcurrency(
-      "turnstile_verify",
-      () => commands.verifyHuman(turnstileToken, "auth_login"),
-    );
-    switch (command.kind) {
-      case "identify": {
-        await commands.rateLimit({ action: "auth_identify", email, limit: 20, windowSeconds: 15 * 60 });
-        const [identity, hasPasskey] = await Promise.all([
-          commands.withUpstreamConcurrency(
-            "remnashop_auth",
-            () => commands.identifyEmail(email),
-          ),
-          commands.hasPasskey(email),
-        ]);
-        return { ok: true, kind: "identified", exists: identity.exists, hasPasskey };
-      }
-    }
+    return await executeEmailIdentification(commands, { email, turnstileToken });
   } catch (error) {
     return errorResult(error);
   }
