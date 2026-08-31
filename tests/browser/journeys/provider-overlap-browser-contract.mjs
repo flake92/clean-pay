@@ -36,7 +36,7 @@ const exactNavigationFlow = Object.freeze([
 const semanticKeys = new Set([
   "app-brand-logo", "app-cabinet-action", "app-cabinet-document",
   "app-cabinet-prefetch-blocked", "app-cabinet-rsc", "app-login-action",
-  "app-login-document", "app-login-rsc", "app-profile-action",
+  "app-login-document", "app-login-root-rsc", "app-login-rsc", "app-profile-action",
   "app-profile-document", "app-profile-rsc", "app-root-rsc",
   "app-telegram-callback", "app-telegram-start", "app-web-manifest",
   "chatwoot-sdk-script", "chatwoot-widget-conversation-frame",
@@ -46,7 +46,8 @@ const exactRedirectEdges = new Set([
   "app-telegram-start:307->telegram-oidc-authorize",
   "telegram-oidc-authorize:302->app-telegram-callback",
   "app-telegram-callback:307->app-profile-document",
-  "app-root-rsc:307->app-login-rsc",
+  "app-root-rsc:307->app-login-root-rsc",
+  "app-login-root-rsc:307->app-login-root-rsc",
   "app-login-rsc:307->app-login-rsc",
 ]);
 
@@ -874,7 +875,8 @@ export function normalizeProviderOverlapSemanticEntry(entry, label = "semantic b
   const statuses = expectedDisposition === "abort" ? [null]
     : entry.key === "telegram-oidc-authorize" ? [302]
       : ["app-telegram-start", "app-telegram-callback"].includes(entry.key) ? [307]
-        : ["app-root-rsc", "app-login-rsc"].includes(entry.key) ? [200, 307]
+        : ["app-root-rsc", "app-login-root-rsc", "app-login-rsc"].includes(entry.key)
+          ? [200, 307]
           : [200];
   if (!statuses.includes(entry.responseStatus)) fail(`${label} response status is not exact.`);
   const contentTypes = expectedDisposition === "abort"
@@ -892,7 +894,8 @@ export function normalizeProviderOverlapSemanticEntry(entry, label = "semantic b
   if (mandatoryRedirect !== undefined) {
     equal(entry.redirectEdge, mandatoryRedirect, `${label} redirect edge`);
   } else if (entry.redirectEdge !== null) {
-    if (entry.key !== "app-login-rsc" || !exactRedirectEdges.has(entry.redirectEdge)
+    if (!["app-login-root-rsc", "app-login-rsc"].includes(entry.key)
+      || !exactRedirectEdges.has(entry.redirectEdge)
       || !entry.redirectEdge.endsWith(`->${entry.key}`)) {
       fail(`${label} redirect edge is outside the exact contract.`);
     }
@@ -1449,12 +1452,19 @@ function classifyApplicationRequest(descriptor, input, url, state) {
         exactQueryKeys(url, url.searchParams.has("_rsc")
           ? ["redirect_to", "_rsc"]
           : ["redirect_to"]);
-        equal(url.searchParams.get("redirect_to"), "/profile", "login RSC redirect");
+        const redirectTo = url.searchParams.get("redirect_to");
+        if (redirectTo === "/profile") {
+          descriptor.key = "app-login-rsc";
+        } else if (redirectTo === "/") {
+          descriptor.key = "app-login-root-rsc";
+        } else {
+          fail("login RSC redirect does not match.");
+        }
       } else {
         exactQueryKeys(url, ["_rsc"]);
+        descriptor.key = "app-login-rsc";
       }
       if (url.searchParams.has("_rsc")) assertRsc(url.searchParams.get("_rsc"));
-      descriptor.key = "app-login-rsc";
     } else {
       exactQueryKeys(url, ["_rsc"]);
       assertRsc(url.searchParams.get("_rsc"));

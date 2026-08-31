@@ -1106,7 +1106,7 @@
             "enum": [
               "app-brand-logo", "app-cabinet-action", "app-cabinet-document",
               "app-cabinet-prefetch-blocked", "app-cabinet-rsc", "app-login-action",
-              "app-login-document", "app-login-rsc", "app-profile-action",
+              "app-login-document", "app-login-root-rsc", "app-login-rsc", "app-profile-action",
               "app-profile-document", "app-profile-rsc", "app-root-rsc",
               "app-telegram-callback", "app-telegram-start", "app-web-manifest",
               "chatwoot-sdk-script", "chatwoot-widget-conversation-frame",

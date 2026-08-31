@@ -1490,6 +1490,56 @@ test("rejects arbitrary same-host paths, queries, redirects, methods, and transp
       `https://chatwoot.browser.clean-pay.dev/widget?website_token=${"a".repeat(64)}`,
       { resourceType: "document", isNavigation: true },
     );
+  const rootRsc = browserClassification(
+    "https://pay.ci.clean-pay.dev/?_rsc=opaque-state_1",
+    { resourceType: "fetch" },
+  );
+  const loginRootRedirect = browserClassification(
+    "https://pay.ci.clean-pay.dev/login?redirect_to=%2F",
+    { resourceType: "fetch" },
+  );
+  const loginRootRsc = browserClassification(
+    "https://pay.ci.clean-pay.dev/login?redirect_to=%2F&_rsc=opaque-state_1",
+    { resourceType: "fetch" },
+  );
+  const loginProfileRsc = browserClassification(
+    "https://pay.ci.clean-pay.dev/login?redirect_to=%2Fprofile&_rsc=opaque-state_1",
+    { resourceType: "fetch" },
+  );
+  expect(rootRsc.key).toBe("app-root-rsc");
+  expect(loginRootRedirect.key).toBe("app-login-root-rsc");
+  expect(loginRootRsc.key).toBe("app-login-root-rsc");
+  expect(loginProfileRsc.key).toBe("app-login-rsc");
+  expect(assertProviderOverlapRedirect({
+    from: { classification: rootRsc, url: "https://pay.ci.clean-pay.dev/?_rsc=opaque-state_1" },
+    location: "/login?redirect_to=%2F",
+    status: 307,
+    to: {
+      classification: loginRootRedirect,
+      url: "https://pay.ci.clean-pay.dev/login?redirect_to=%2F",
+    },
+  })).toBe("app-root-rsc:307->app-login-root-rsc");
+  expect(assertProviderOverlapRedirect({
+    from: {
+      classification: loginRootRedirect,
+      url: "https://pay.ci.clean-pay.dev/login?redirect_to=%2F",
+    },
+    location: "/login?redirect_to=%2F&_rsc=opaque-state_1",
+    status: 307,
+    to: {
+      classification: loginRootRsc,
+      url: "https://pay.ci.clean-pay.dev/login?redirect_to=%2F&_rsc=opaque-state_1",
+    },
+  })).toBe("app-login-root-rsc:307->app-login-root-rsc");
+  expect(() => assertProviderOverlapRedirect({
+    from: { classification: rootRsc, url: "https://pay.ci.clean-pay.dev/?_rsc=opaque-state_1" },
+    location: "/login?redirect_to=%2Fprofile&_rsc=opaque-state_1",
+    status: 307,
+    to: {
+      classification: loginProfileRsc,
+      url: "https://pay.ci.clean-pay.dev/login?redirect_to=%2Fprofile&_rsc=opaque-state_1",
+    },
+  })).toThrow(/Redirect edge/);
   expect(() => browserClassification(
     "https://pay.ci.clean-pay.dev/auth/telegram/start?redirect_to=%2Fprofile"
       + "&turnstile_token=synthetic-turnstile-token%3Alogin%3Asynthetic-turnstile-1%3A1",
@@ -1569,6 +1619,40 @@ test("rejects arbitrary same-host paths, queries, redirects, methods, and transp
   expect(exactBrowserContract.requestOrderLedger).toHaveLength(validRecords.length);
   expect(exactBrowserContract.staticLoadGraph.documentLoadLedger).toHaveLength(3);
   expect(exactBrowserContract.staticLoadGraph.cssMediaReferenceLedger).toHaveLength(8);
+  const rootPrefetchRecords = structuredClone(validRecords);
+  const telegramStartIndex = rootPrefetchRecords.findIndex((record) => (
+    record.classification.key === "app-telegram-start"
+  ));
+  rootPrefetchRecords.splice(
+    telegramStartIndex,
+    0,
+    requestRecord(rootRsc, "app-login-document", 307, "application/octet-stream"),
+    requestRecord(
+      loginRootRedirect,
+      "app-login-document",
+      307,
+      "application/octet-stream",
+      "app-root-rsc:307->app-login-root-rsc",
+    ),
+    requestRecord(
+      loginRootRsc,
+      "app-login-document",
+      200,
+      "text/x-component",
+      "app-login-root-rsc:307->app-login-root-rsc",
+    ),
+    requestRecord(loginRootRsc, "app-login-document", 200, "text/x-component"),
+  );
+  expect(finalizeProviderOverlapBrowserContract(
+    rootPrefetchRecords,
+    staticLoadGraph,
+  ).semanticRequestLedger.filter((entry) => (
+    (entry as Readonly<{ key: string }>).key === "app-login-root-rsc"
+  ))).toEqual([
+    expect.objectContaining({ redirectEdge: "app-root-rsc:307->app-login-root-rsc" }),
+    expect.objectContaining({ redirectEdge: "app-login-root-rsc:307->app-login-root-rsc" }),
+    expect.objectContaining({ redirectEdge: null }),
+  ]);
   expect(() => finalizeProviderOverlapBrowserContract(validRecords, {
     ...staticLoadGraph,
     cssMediaReferences: staticLoadGraph.cssMediaReferences.slice(0, -1),
@@ -1836,6 +1920,33 @@ test("rejects arbitrary same-host paths, queries, redirects, methods, and transp
     ["path", "https://pay.ci.clean-pay.dev/admin", {}, false],
     ["query", "https://pay.ci.clean-pay.dev/profile?extra=1", {
       resourceType: "document", isNavigation: true, isMainFrame: true,
+    }, false],
+    ["login redirect target", "https://pay.ci.clean-pay.dev/login?redirect_to=%2Fcabinet", {
+      resourceType: "fetch",
+    }, false],
+    ["login redirect adjacent target", "https://pay.ci.clean-pay.dev/login?redirect_to=%2Freferral", {
+      resourceType: "fetch",
+    }, false],
+    ["login redirect query", "https://pay.ci.clean-pay.dev/login?redirect_to=%2F&extra=1", {
+      resourceType: "fetch",
+    }, false],
+    ["login redirect duplicate", "https://pay.ci.clean-pay.dev/login?redirect_to=%2F&redirect_to=%2F", {
+      resourceType: "fetch",
+    }, false],
+    ["login redirect query order", "https://pay.ci.clean-pay.dev/login?_rsc=opaque-state_1&redirect_to=%2F", {
+      resourceType: "fetch",
+    }, false],
+    ["login redirect transport", "https://pay.ci.clean-pay.dev/login?redirect_to=%2F", {
+      resourceType: "xhr",
+    }, false],
+    ["login redirect method", "https://pay.ci.clean-pay.dev/login?redirect_to=%2F", {
+      method: "POST", resourceType: "fetch",
+    }, false],
+    ["login redirect navigation", "https://pay.ci.clean-pay.dev/login?redirect_to=%2F", {
+      isMainFrame: true, isNavigation: true, resourceType: "document",
+    }, false],
+    ["login redirect main frame", "https://pay.ci.clean-pay.dev/login?redirect_to=%2F", {
+      isMainFrame: true, resourceType: "fetch",
     }, false],
     ["hash", "https://pay.ci.clean-pay.dev/profile#extra", {
       resourceType: "document", isNavigation: true, isMainFrame: true,
@@ -3161,6 +3272,10 @@ test("keeps the schema write-once sidecar-only and free of comparison projection
     additionalProperties: false,
     required: ["kind", "occurrence"],
   });
+  expect(schema.$defs.semanticRequestEntry.properties.key.enum)
+    .toContain("app-login-root-rsc");
+  expect(schema.$defs.semanticRequestEntry.properties.key.enum)
+    .not.toContain("app-login-cabinet-rsc");
   expect(schema.$defs.navigation.additionalProperties).toBe(false);
   expect(schema.$defs.eventLifecycle.properties.drainedEventCount).toEqual({
     type: "integer",
