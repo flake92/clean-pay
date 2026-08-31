@@ -29,9 +29,9 @@ import {
 import { DetailLine, Metric } from "@/frontend/components/cabinet-view-parts";
 import {
   Button,
-  InputText,
   Message,
 } from "@/frontend/components/sakai/form-foundation";
+import { CabinetPromocodeFields } from "@/frontend/components/cabinet-promocode-fields";
 import { useCabinetPanelController } from "@/frontend/hooks/use-cabinet-panel-controller";
 import { resetChatwootSession } from "@/frontend/lib/chatwoot";
 
@@ -245,23 +245,12 @@ export function CabinetPanel({ model }: { model: CabinetViewModel }) {
           <h2 className="text-xl">Промокод</h2>
           {promocodeMessage ? <Message severity="info" text={promocodeMessage} /> : null}
           <form className="mt-3 flex w-full flex-column gap-2 md:w-30rem" onSubmit={activatePromocode}>
-            <label className="text-sm font-medium text-700" htmlFor="promocode">
-              Введите промокод
-            </label>
-            <div className="p-inputgroup">
-              <InputText
-                id="promocode"
-                onChange={(event) => setPromocode(event.target.value)}
-                placeholder="Введите код"
-                value={promocode}
-              />
-              <Button
-                disabled={pendingAction !== null}
-                label="Активировать"
-                loading={pendingAction === "promocode"}
-                type="submit"
-              />
-            </div>
+            <CabinetPromocodeFields
+              disabled={pendingAction !== null}
+              loading={pendingAction === "promocode"}
+              onValueChange={setPromocode}
+              value={promocode}
+            />
           </form>
         </div>
       </div>
