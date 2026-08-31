@@ -64,4 +64,27 @@ describe("proxy trace and CSP policy", () => {
     expect(result.contentSecurityPolicy).not.toContain("chat.example.com");
     expect(randomHex.mock.calls).toEqual([[16], [16], [8]]);
   });
+
+  it("uses the facade-injected CSP builder with the exact derived inputs", () => {
+    const buildContentSecurityPolicy = vi.fn(() => "injected-csp");
+    const result = createProxyRequestSecurity({
+      headers: new Headers(),
+      chatwootBaseUrl: "https://chat.example.com",
+      chatwootConfigured: true,
+      buildContentSecurityPolicy,
+      randomHex: vi.fn()
+        .mockReturnValueOnce("a".repeat(32))
+        .mockReturnValueOnce("b".repeat(32))
+        .mockReturnValueOnce("c".repeat(16)),
+      randomUuid: () => "generated-request-id",
+    });
+
+    expect(buildContentSecurityPolicy).toHaveBeenCalledOnce();
+    expect(buildContentSecurityPolicy).toHaveBeenCalledWith({
+      nonce: "b".repeat(32),
+      chatwootBaseUrl: "https://chat.example.com",
+    });
+    expect(result.contentSecurityPolicy).toBe("injected-csp");
+    expect(result.requestHeaders.get("content-security-policy")).toBe("injected-csp");
+  });
 });

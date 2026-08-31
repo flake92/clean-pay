@@ -48,10 +48,7 @@ describe("Chatwoot integration boundaries", () => {
   });
 
   it("opens CSP only when the complete server configuration is present", () => {
-    const proxy = [
-      source("src/proxy.ts"),
-      source("src/shared/edge/proxy-security-policy.ts"),
-    ].join("\n");
+    const proxy = source("src/proxy.ts");
 
     expect(proxy).toContain("process.env.CHATWOOT_BASE_URL?.trim()");
     expect(proxy).toContain("process.env.CHATWOOT_WEBSITE_TOKEN?.trim()");

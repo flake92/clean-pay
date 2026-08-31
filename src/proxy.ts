@@ -25,6 +25,7 @@ import {
   isRefreshableNavigation,
   isRemovedBrowserTransportPath,
   isRoutineReadinessProbe as matchesRoutineReadinessProbe,
+  removedBrowserTransportPaths,
   sessionRefreshPath,
 } from "@/shared/edge/proxy-route-policy";
 import {
@@ -32,6 +33,11 @@ import {
   type ProxyRequestSecurity,
 } from "@/shared/edge/proxy-security-policy";
 import { REFERRAL_ATTRIBUTION_COOKIE_NAME } from "@/shared/domain/referrals";
+import { buildContentSecurityPolicy } from "@/shared/security/content-security-policy";
+
+if (!removedBrowserTransportPaths.includes('/api/bff/payments/status')) {
+  throw new Error('Removed browser transport policy is incomplete');
+}
 
 function randomHex(byteLength: number) {
   const bytes = new Uint8Array(byteLength);
@@ -50,6 +56,7 @@ function requestSecurityContext(request: NextRequest): ProxyRequestSecurity {
     headers: request.headers,
     chatwootBaseUrl,
     chatwootConfigured,
+    buildContentSecurityPolicy,
     randomHex,
     randomUuid: () => crypto.randomUUID(),
   });

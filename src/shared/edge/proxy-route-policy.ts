@@ -36,13 +36,14 @@ const publicApiPaths = new Set([
 // These legacy browser endpoints were removed. Let Next.js resolve them to a
 // real 404 instead of turning a nonexistent transport into an authentication
 // oracle at the proxy boundary.
-const removedBrowserTransportPaths = new Set([
+export const removedBrowserTransportPaths = Object.freeze([
   "/api/me",
   "/api/logout",
   "/api/bff/auth/me",
   "/api/bff/subscription/current",
-  '/api/bff/payments/status',
+  "/api/bff/payments/status",
 ]);
+const removedBrowserTransportPathSet = new Set(removedBrowserTransportPaths);
 
 const emailVerificationPagePaths = new Set([
   "/verify-email",
@@ -68,7 +69,7 @@ export function isBootstrapAllowedPath(pathname: string) {
 }
 
 export function isRemovedBrowserTransportPath(pathname: string) {
-  return removedBrowserTransportPaths.has(pathname);
+  return removedBrowserTransportPathSet.has(pathname);
 }
 
 export function isRoutineReadinessProbe(pathname: string, method: string) {

@@ -13,7 +13,7 @@ import { spawnSync } from "node:child_process";
 import { parse as parsePgConnectionString } from "pg-connection-string";
 import { describe, expect, it } from "vitest";
 
-import { createEnvForTests as getEnv } from "@/backend/config/env";
+import { createEnvForTests, getEnv } from "@/backend/config/env";
 import {
   parseProductionEnvironmentFile,
   PRODUCTION_ENVIRONMENT_FILE_NAMES,
@@ -1011,7 +1011,7 @@ describe("production env validator", () => {
     };
 
     expect(() => validateProductionEnvironment(environment)).not.toThrow();
-    const parsed = getEnv(environment);
+    const parsed = createEnvForTests(environment);
     expect(parsed.readiness.telegramOidcJwksUrl)
       .toBe(`${origin}/.well-known/jwks.json`);
     expect(parsed.telegramOidc.jwksUri)
