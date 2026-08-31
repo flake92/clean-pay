@@ -65,6 +65,11 @@ const phaseReceiptFilenames = Object.freeze(Object.fromEntries(
 const phaseStartedFilenames = Object.freeze(Object.fromEntries(
   liveOverlapPhases.map((phase) => [phase, `phase-${phase}-started.json`]),
 ));
+const independentlySettledProofPhases = Object.freeze([
+  "provider",
+  "authenticated",
+  "chatwoot",
+]);
 const maximumPhaseReceiptBytes = 64 * 1024;
 const contractFilename = "browser-journey-contract.json";
 const providerProofExternalFilename = "provider-overlap-proof.json";
@@ -420,66 +425,147 @@ async function runPublicPhase(plan) {
 
 async function runProviderPhase(plan) {
   await assertRepositoryAndHost(plan);
-  const context = await beginPhase(plan, "provider");
-  const inputs = await readAttestedPhaseInputs(plan, context);
-  assertSamePhaseResult(
-    await validatePublishedPublicProof(plan),
-    context.receipts.public.value.result,
-    "public",
-  );
-  const sanitizedCaptureRoot = await ensureSanitizedCaptureRoot(plan);
-  const providerProofEnvironment = sanitizedProcessEnvironment();
-  providerProofEnvironment.CLEAN_PAY_PROVIDER_OVERLAP_FAILURE_OUTPUT =
-    providerProofFailureSanitizedPath(plan, sanitizedCaptureRoot);
-  await runInherited(
-    process.execPath,
-    [providerProofCli, ...providerProofArguments(plan, inputs)],
-    providerProofEnvironment,
-  );
-  const providerOverlap = await publishProviderProof(plan);
-  await completePhase(plan, "provider", context, providerOverlap);
+  await runSettledProofPhase(plan, "provider", async (context) => {
+    const inputs = await readAttestedPhaseInputs(plan, context);
+    assertSamePhaseResult(
+      await validatePublishedPublicProof(plan),
+      context.receipts.public.value.result,
+      "public",
+    );
+    const sanitizedCaptureRoot = await ensureSanitizedCaptureRoot(plan);
+    const providerProofEnvironment = sanitizedProcessEnvironment();
+    providerProofEnvironment.CLEAN_PAY_PROVIDER_OVERLAP_FAILURE_OUTPUT =
+      providerProofFailureSanitizedPath(plan, sanitizedCaptureRoot);
+    await runInherited(
+      process.execPath,
+      [providerProofCli, ...providerProofArguments(plan, inputs)],
+      providerProofEnvironment,
+    );
+    const providerOverlap = await publishProviderProof(plan);
+    await completePhase(plan, "provider", context, providerOverlap);
+  });
 }
 
 async function runAuthenticatedPhase(plan) {
   await assertRepositoryAndHost(plan);
-  const context = await beginPhase(plan, "authenticated");
-  const inputs = await readAttestedPhaseInputs(plan, context);
-  assertSamePhaseResult(
-    await validatePublishedProviderProof(plan),
-    context.receipts.provider.value.result,
-    "provider",
-  );
-  const args = proofArguments(plan, inputs);
-  const unverifiedEmailProof = unverifiedEmailProofPath(plan);
-  const linkedEmailFailureProof = linkedEmailFailureProofPath(plan);
-  await runInherited(process.execPath, [
-    authenticatedProofCli,
-    ...args,
-    "--candidate-linked-email-failure-proof-output",
-    linkedEmailFailureProof,
-    "--candidate-unverified-email-proof-output",
-    unverifiedEmailProof,
-  ], sanitizedProcessEnvironment());
-  const unverifiedEmailLogin = await validateUnverifiedEmailProof(
-    plan,
-    inputs,
-    unverifiedEmailProof,
-  );
-  const linkedEmailFailureFeedback = await validateLinkedEmailFailureProof(
-    plan,
-    inputs,
-    linkedEmailFailureProof,
-  );
-  await completePhase(plan, "authenticated", context, {
-    linkedEmailFailureFeedback,
-    unverifiedEmailLogin,
+  await runSettledProofPhase(plan, "authenticated", async (context) => {
+    const inputs = await readAttestedPhaseInputs(plan, context);
+    await validatePriorProofPhaseOutcome(plan, "provider", context.receipts.provider);
+    const args = proofArguments(plan, inputs);
+    const unverifiedEmailProof = unverifiedEmailProofPath(plan);
+    const linkedEmailFailureProof = linkedEmailFailureProofPath(plan);
+    await runInherited(process.execPath, [
+      authenticatedProofCli,
+      ...args,
+      "--candidate-linked-email-failure-proof-output",
+      linkedEmailFailureProof,
+      "--candidate-unverified-email-proof-output",
+      unverifiedEmailProof,
+    ], sanitizedProcessEnvironment());
+    const unverifiedEmailLogin = await validateUnverifiedEmailProof(
+      plan,
+      inputs,
+      unverifiedEmailProof,
+    );
+    const linkedEmailFailureFeedback = await validateLinkedEmailFailureProof(
+      plan,
+      inputs,
+      linkedEmailFailureProof,
+    );
+    await completePhase(plan, "authenticated", context, {
+      linkedEmailFailureFeedback,
+      unverifiedEmailLogin,
+    });
   });
 }
 
 async function runChatwootPhase(plan) {
   await assertRepositoryAndHost(plan);
-  const context = await beginPhase(plan, "chatwoot");
-  const inputs = await readAttestedPhaseInputs(plan, context);
+  await runSettledProofPhase(plan, "chatwoot", async (context) => {
+    const inputs = await readAttestedPhaseInputs(plan, context);
+    await validatePriorProofPhaseOutcome(
+      plan,
+      "authenticated",
+      context.receipts.authenticated,
+      inputs,
+    );
+    const chatwoot = await prepareChatwootLiveProofInputs(plan, inputs);
+    await runInherited(
+      process.execPath,
+      [chatwootProofCli, ...chatwootProofArguments(plan, chatwoot.cliPlanPath)],
+      sanitizedProcessEnvironment(),
+    );
+    const chatwootPhase = await validateChatwootEvidence(plan, inputs);
+    await completePhase(plan, "chatwoot", context, chatwootPhase);
+  });
+}
+
+async function runSettledProofPhase(plan, phase, runPhase) {
+  const context = await beginPhase(plan, phase);
+  try {
+    return await runPhase(context);
+  } catch (primaryError) {
+    try {
+      await settleProofPhaseFailure(plan, phase, context, primaryError);
+    } catch (settlementError) {
+      throw new AggregateError(
+        [primaryError, settlementError],
+        "Live overlap proof phase and its sanitized settlement both failed.",
+      );
+    }
+    throw primaryError;
+  }
+}
+
+async function settleProofPhaseFailure(plan, phase, context, error) {
+  const document = validateLiveOverlapPhaseFailure({
+    schemaVersion: 1,
+    kind: "clean-pay-production-image-live-overlap-phase-failure",
+    status: "failed",
+    captureId: plan.captureId,
+    phase,
+    ...createJourneySanitizedErrorEvidence(error),
+  }, {
+    captureId: plan.captureId,
+    phase,
+  });
+  const bytes = Buffer.from(`${JSON.stringify(document, null, 2)}\n`, "utf8");
+  const artifact = phaseFailureFilename(phase);
+  const captureRoot = await ensureSanitizedCaptureRoot(plan);
+  const target = path.join(captureRoot, artifact);
+  if (path.dirname(target) !== captureRoot || path.basename(target) !== artifact) {
+    throw new Error("Live overlap phase failure output escaped its sanitized root.");
+  }
+  const publication = await writeJourneySanitizedOutput(target, bytes);
+  if (publication.bytes !== bytes.byteLength
+    || publication.sha256 !== sha256(bytes)
+    || publication.status !== "sanitized-create-only-output-written") {
+    throw new Error("Live overlap phase failure publication is not byte-bound.");
+  }
+  await completePhase(plan, phase, context, {
+    artifact,
+    sha256: publication.sha256,
+    status: "failed",
+  });
+}
+
+async function validatePriorProofPhaseOutcome(plan, phase, receipt, inputs) {
+  const result = receipt.value.result;
+  if (result.status === "failed") {
+    await validateSettledPhaseFailure(plan, phase, result);
+    return;
+  }
+  if (phase === "provider") {
+    assertSamePhaseResult(
+      await validatePublishedProviderProof(plan),
+      result,
+      "provider",
+    );
+    return;
+  }
+  if (phase !== "authenticated" || !inputs) {
+    throw new Error("Live overlap prior proof phase validation is invalid.");
+  }
   const unverifiedEmailLogin = await validateUnverifiedEmailProof(
     plan,
     inputs,
@@ -492,17 +578,9 @@ async function runChatwootPhase(plan) {
   );
   assertSamePhaseResult(
     { linkedEmailFailureFeedback, unverifiedEmailLogin },
-    context.receipts.authenticated.value.result,
+    result,
     "authenticated",
   );
-  const chatwoot = await prepareChatwootLiveProofInputs(plan, inputs);
-  await runInherited(
-    process.execPath,
-    [chatwootProofCli, ...chatwootProofArguments(plan, chatwoot.cliPlanPath)],
-    sanitizedProcessEnvironment(),
-  );
-  const chatwootPhase = await validateChatwootEvidence(plan, inputs);
-  await completePhase(plan, "chatwoot", context, chatwootPhase);
 }
 
 async function runEvidencePhase(plan) {
@@ -510,6 +588,15 @@ async function runEvidencePhase(plan) {
   const context = await beginPhase(plan, "evidence");
   const inputs = await readAttestedPhaseInputs(plan, context);
   const { publicBuildContract, receipts } = context;
+  const failedProofPhases = independentlySettledProofPhases.filter(
+    (phase) => receipts[phase].value.result.status === "failed",
+  );
+  for (const phase of failedProofPhases) {
+    await validateSettledPhaseFailure(plan, phase, receipts[phase].value.result);
+  }
+  if (failedProofPhases.length > 0) {
+    throw new Error("Live overlap evidence cannot finalize while a proof phase is failed.");
+  }
   assertSamePhaseResult(
     await validatePublishedPublicProof(plan),
     receipts.public.value.result,
@@ -709,6 +796,89 @@ function createPhaseReceipt(plan, phase, context, status, result) {
   });
 }
 
+function phaseFailureFilename(phase) {
+  if (!independentlySettledProofPhases.includes(phase)) {
+    throw new Error("Live overlap independently settled phase is invalid.");
+  }
+  return `phase-${phase}-failure.json`;
+}
+
+export function validateLiveOverlapPhaseFailure(value, expected) {
+  exactKeys(expected, ["captureId", "phase"]);
+  exactKeys(value, [
+    "captureId",
+    "causeEvidence",
+    "causeEvidenceTruncated",
+    "errorClass",
+    "kind",
+    "messageSha256",
+    "phase",
+    "schemaVersion",
+    "status",
+  ]);
+  if (value.schemaVersion !== 1
+    || value.kind !== "clean-pay-production-image-live-overlap-phase-failure"
+    || value.status !== "failed"
+    || value.captureId !== expected.captureId
+    || !/^[a-f0-9]{16}$/.test(value.captureId ?? "")
+    || value.phase !== expected.phase
+    || !independentlySettledProofPhases.includes(value.phase)
+    || typeof value.causeEvidenceTruncated !== "boolean"
+    || !new Set(["AggregateError", "Error", "NonError"]).has(value.errorClass)
+    || !/^[a-f0-9]{64}$/.test(value.messageSha256 ?? "")
+    || !Array.isArray(value.causeEvidence)
+    || value.causeEvidence.length > 16) {
+    throw new Error("Live overlap phase failure differs from its sanitized contract.");
+  }
+  for (const [index, cause] of value.causeEvidence.entries()) {
+    exactKeys(cause, [
+      "depth",
+      "errorClass",
+      "messageSha256",
+      "ordinal",
+      "parentOrdinal",
+    ]);
+    if (!Number.isSafeInteger(cause.depth)
+      || cause.depth < 1
+      || cause.depth > 4
+      || !new Set(["AggregateError", "Error", "NonError"]).has(cause.errorClass)
+      || !/^[a-f0-9]{64}$/.test(cause.messageSha256 ?? "")
+      || cause.ordinal !== index + 1
+      || !Number.isSafeInteger(cause.parentOrdinal)
+      || cause.parentOrdinal < 0
+      || cause.parentOrdinal >= cause.ordinal) {
+      throw new Error("Live overlap phase failure cause is invalid.");
+    }
+  }
+  return Object.freeze(value);
+}
+
+async function validateSettledPhaseFailure(plan, phase, result) {
+  const artifact = phaseFailureFilename(phase);
+  const captureRoot = path.join(outputParent, plan.captureId);
+  const target = path.join(captureRoot, artifact);
+  if (result.artifact !== artifact
+    || path.dirname(target) !== captureRoot
+    || path.basename(target) !== artifact) {
+    throw new Error("Live overlap settled phase failure path is invalid.");
+  }
+  const bytes = await readBoundedFile(target, maximumPhaseReceiptBytes);
+  let document;
+  try {
+    document = JSON.parse(bytes.toString("utf8"));
+  } catch {
+    throw new Error("Live overlap settled phase failure is not valid JSON.");
+  }
+  validateLiveOverlapPhaseFailure(document, {
+    captureId: plan.captureId,
+    phase,
+  });
+  if (sha256(bytes) !== result.sha256) {
+    throw new Error("Live overlap settled phase failure lost its receipt binding.");
+  }
+  return result;
+}
+
 export function validateLiveOverlapPhaseReceipt(value, expected) {
   exactKeys(expected, [
     "candidateRevision",
@@ -771,6 +941,17 @@ export function validateLiveOverlapPhaseReceipt(value, expected) {
 }
 
 function validateLiveOverlapPhaseResult(phase, result) {
+  if (
+    independentlySettledProofPhases.includes(phase)
+    && result?.status === "failed"
+  ) {
+    exactKeys(result, ["artifact", "sha256", "status"]);
+    if (result.artifact !== phaseFailureFilename(phase)
+      || !/^[a-f0-9]{64}$/.test(result.sha256 ?? "")) {
+      phaseResultError();
+    }
+    return result;
+  }
   if (phase === "preparation") {
     exactKeys(result, ["baselineArchiveSha256", "baselineReceiptSha256", "status"]);
     if (result.baselineArchiveSha256 !== BEHAVIORAL_BASELINE_SOURCE.archiveSha256

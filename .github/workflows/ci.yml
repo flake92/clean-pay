@@ -629,6 +629,7 @@ jobs:
             --temporary-root "$RUNNER_TEMP" \
             --phase attestation
       - name: Prove the public exact A/B overlap
+        id: public_phase
         run: |
           node tests/browser/journeys/run-production-image-live-overlap.mjs run \
             --capture-id "$CLEAN_PAY_BROWSER_LIVE_PAIR_CAPTURE_ID" \
@@ -636,6 +637,7 @@ jobs:
             --temporary-root "$RUNNER_TEMP" \
             --phase public
       - name: Prove the concurrent provider overlap
+        id: provider_phase
         run: |
           node tests/browser/journeys/run-production-image-live-overlap.mjs run \
             --capture-id "$CLEAN_PAY_BROWSER_LIVE_PAIR_CAPTURE_ID" \
@@ -643,6 +645,8 @@ jobs:
             --temporary-root "$RUNNER_TEMP" \
             --phase provider
       - name: Prove the authenticated browser journey
+        id: authenticated_phase
+        if: ${{ !cancelled() && steps.public_phase.outcome == 'success' }}
         run: |
           node tests/browser/journeys/run-production-image-live-overlap.mjs run \
             --capture-id "$CLEAN_PAY_BROWSER_LIVE_PAIR_CAPTURE_ID" \
@@ -650,6 +654,8 @@ jobs:
             --temporary-root "$RUNNER_TEMP" \
             --phase authenticated
       - name: Prove the Chatwoot lifecycle
+        id: chatwoot_phase
+        if: ${{ !cancelled() && steps.public_phase.outcome == 'success' }}
         run: |
           node tests/browser/journeys/run-production-image-live-overlap.mjs run \
             --capture-id "$CLEAN_PAY_BROWSER_LIVE_PAIR_CAPTURE_ID" \
@@ -657,6 +663,7 @@ jobs:
             --temporary-root "$RUNNER_TEMP" \
             --phase chatwoot
       - name: Finalize sanitized live-pair evidence
+        if: ${{ !cancelled() && steps.public_phase.outcome == 'success' }}
         run: |
           node tests/browser/journeys/run-production-image-live-overlap.mjs run \
             --capture-id "$CLEAN_PAY_BROWSER_LIVE_PAIR_CAPTURE_ID" \
