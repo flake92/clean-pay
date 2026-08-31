@@ -472,3 +472,9 @@ export function useChatwootWidgetController(
   }, [config, loadSupportContext]);
 
 }
+
+export function useChatwootGuestBoundaryController() {
+  useEffect(() => {
+    enterChatwootGuestMode();
+  }, []);
+}
