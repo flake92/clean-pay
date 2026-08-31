@@ -1272,6 +1272,7 @@ describe("clean architecture boundaries", () => {
     const useCase = [
       "src/application/auth/execute-auth-command.ts",
       "src/application/auth/execute-email-registration.ts",
+      "src/application/auth/execute-password-reset-confirmation.ts",
     ].map((file) => readFileSync(file, "utf8")).join("\n");
     const adapter = readFileSync("src/backend/integrations/auth/auth-commands.ts", "utf8");
 
