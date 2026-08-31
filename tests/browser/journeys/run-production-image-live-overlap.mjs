@@ -31,10 +31,17 @@ import { assertChatwootPhaseProof } from "./chatwoot-phase-proof-contract.mjs";
 import { expectedChatwootScreenshotPaths } from "./chatwoot-phase-evidence-writer.mjs";
 import { assertDualProviderOverlapProof } from "./provider-overlap-proof-contract.mjs";
 import {
+  PUBLIC_OVERLAP_PROOF_KIND,
+  PUBLIC_OVERLAP_PROOF_SCHEMA_VERSION,
+  resolvePublicOverlapProofPath,
+} from "./public-overlap-proof-contract.mjs";
+import {
+  AUTHORIZED_UNVERIFIED_EMAIL_SEMANTIC_DIFF,
   UNVERIFIED_EMAIL_PROOF_FILENAME,
   assertUnverifiedEmailLoginProof,
 } from "./unverified-email-login-proof-contract.mjs";
 import {
+  AUTHORIZED_LINKED_EMAIL_FAILURE_SEMANTIC_DIFF,
   LINKED_EMAIL_FAILURE_PROOF_FILENAME,
   assertLinkedEmailFailureProof,
 } from "./linked-email-failure-proof-contract.mjs";
@@ -42,6 +49,23 @@ import {
 const repositoryRoot = path.resolve(process.cwd());
 const liveRootPrefix = "clean-pay-production-live-overlap-";
 const stateFilename = "ownership.json";
+const liveOverlapPhases = Object.freeze([
+  "preparation",
+  "build",
+  "attestation",
+  "public",
+  "provider",
+  "authenticated",
+  "chatwoot",
+  "evidence",
+]);
+const phaseReceiptFilenames = Object.freeze(Object.fromEntries(
+  liveOverlapPhases.map((phase) => [phase, `phase-${phase}.json`]),
+));
+const phaseStartedFilenames = Object.freeze(Object.fromEntries(
+  liveOverlapPhases.map((phase) => [phase, `phase-${phase}-started.json`]),
+));
+const maximumPhaseReceiptBytes = 64 * 1024;
 const contractFilename = "browser-journey-contract.json";
 const providerProofExternalFilename = "provider-overlap-proof.json";
 const providerProofSanitizedFilename = "provider-overlap.json";
@@ -49,10 +73,12 @@ const providerProofFailureSanitizedFilename = "provider-overlap-failure.json";
 const maximumProviderProofBytes = 16 * 1024 * 1024;
 const chatwootInputRootName = "chatwoot-live-proof";
 const chatwootPlanFilename = "chatwoot-phase-plan.json";
+const chatwootEvidenceCleanupFilename = "chatwoot-evidence-cleanup.json";
 const chatwootEvidencePrefix = "clean-pay-chatwoot-phase-evidence-";
 const maximumChatwootProofBytes = 32 * 1024 * 1024;
 const maximumChatwootManifestBytes = 256 * 1024;
 const maximumChatwootScreenshotBytes = 5 * 1024 * 1024;
+const maximumChatwootCleanupCapabilityBytes = 16 * 1024;
 const pngSignature = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
 const attestationFilenames = Object.freeze({
   baseline: "baseline-application-assets.json",
@@ -264,126 +290,830 @@ function exactRoleProofInput(plan, inputs, name) {
   return input;
 }
 
-async function run(plan) {
-  await assertRepositoryAndHost(plan);
-  await mkdir(plan.ownedRoot, { mode: 0o700, recursive: false });
-  await enforcePrivateDirectory(plan.ownedRoot);
-  let materialized;
+async function run(plan, selectedPhase = null) {
+  let activePhase = selectedPhase;
   try {
-    materialized = await materializeBehavioralBaselineSource({
-      repositoryRoot,
-      temporaryRoot: plan.ownedRoot,
-    });
-    await writeOwnedJson(path.join(plan.ownedRoot, stateFilename), createOwnership(plan, materialized));
-    const baselineArchiveBytes = await readBoundedFile(
-      materialized.archivePath,
-      BEHAVIORAL_BASELINE_SOURCE.archiveBytes,
-    );
-    assertBehavioralBaselineArchive(baselineArchiveBytes);
-    const publicBuildContract = await computePublicBuildContract();
-    const buildArguments = sharedBuildArguments(publicBuildContract);
-
-    for (const roleName of ["baseline", "candidate"]) {
-      const role = plan.roles[roleName];
-      const baselineArchive = roleName === "baseline" ? baselineArchiveBytes : undefined;
-      await buildImage({
-        baselineArchive,
-        buildArguments,
-        release: `live-overlap-${roleName}`,
-        revision: role.revision,
-        tag: role.appImage,
-        target: "runner",
-      });
-      await buildImage({
-        baselineArchive,
-        buildArguments,
-        release: `live-overlap-${roleName}`,
-        revision: role.revision,
-        tag: role.migrationImage,
-        target: "migration",
-      });
+    if (selectedPhase !== null) {
+      await runLiveOverlapPhase(plan, selectedPhase);
+      return;
     }
-
-    const inputs = {};
-    for (const roleName of ["baseline", "candidate"]) {
-      inputs[roleName] = await prepareRoleInputs(plan, roleName, publicBuildContract);
+    for (const phase of liveOverlapPhases) {
+      activePhase = phase;
+      await runLiveOverlapPhase(plan, phase);
     }
-    const args = proofArguments(plan, inputs);
-    const sanitizedCaptureRoot = await ensureSanitizedCaptureRoot(plan);
-    const publicProofEnvironment = sanitizedProcessEnvironment();
-    publicProofEnvironment.CLEAN_PAY_PUBLIC_OVERLAP_FAILURE_OUTPUT_ROOT =
-      sanitizedCaptureRoot;
-    await runInherited(process.execPath, [publicProofCli, ...args], publicProofEnvironment);
-    const providerProofEnvironment = sanitizedProcessEnvironment();
-    providerProofEnvironment.CLEAN_PAY_PROVIDER_OVERLAP_FAILURE_OUTPUT =
-      providerProofFailureSanitizedPath(plan, sanitizedCaptureRoot);
-    await runInherited(
-      process.execPath,
-      [providerProofCli, ...providerProofArguments(plan, inputs)],
-      providerProofEnvironment,
-    );
-    const providerOverlap = await publishProviderProof(plan);
-    const unverifiedEmailProof = unverifiedEmailProofPath(plan);
-    const linkedEmailFailureProof = linkedEmailFailureProofPath(plan);
-    await runInherited(process.execPath, [
-      authenticatedProofCli,
-      ...args,
-      "--candidate-linked-email-failure-proof-output",
-      linkedEmailFailureProof,
-      "--candidate-unverified-email-proof-output",
-      unverifiedEmailProof,
-    ], sanitizedProcessEnvironment());
-    const unverifiedEmailLogin = await validateUnverifiedEmailProof(
-      plan,
-      inputs,
-      unverifiedEmailProof,
-    );
-    const linkedEmailFailureFeedback = await validateLinkedEmailFailureProof(
-      plan,
-      inputs,
-      linkedEmailFailureProof,
-    );
-    const chatwoot = await prepareChatwootLiveProofInputs(plan, inputs);
-    await runInherited(
-      process.execPath,
-      [chatwootProofCli, ...chatwootProofArguments(plan, chatwoot.cliPlanPath)],
-      sanitizedProcessEnvironment(),
-    );
-    const chatwootPhase = await validateChatwootEvidence(plan, inputs);
-    const completion = {
-      schemaVersion: 1,
-      status: "production-image-live-overlap-proven",
-      captureId: plan.captureId,
-      baselineRevision: plan.roles.baseline.revision,
-      candidateRevision: plan.roles.candidate.revision,
-      publicBuildContractSha256: publicBuildContract.sha256,
-      projects: {
-        baselineSha256: sha256(plan.roles.baseline.project),
-        candidateSha256: sha256(plan.roles.candidate.project),
-      },
-      images: {
-        baselineApplication: inputs.baseline.assetImageDigest,
-        baselineMigration: inputs.baseline.migrationAssetImageDigest,
-        candidateApplication: inputs.candidate.assetImageDigest,
-        candidateMigration: inputs.candidate.migrationAssetImageDigest,
-      },
-      providerOverlap,
-      linkedEmailFailureFeedback,
-      unverifiedEmailLogin,
-      chatwootPhase,
-    };
-    await writeResult(plan, "completion.json", completion);
-    process.stdout.write(`${JSON.stringify({
-      status: "production_image_live_overlap_proven",
-      captureId: plan.captureId,
-      baselineRevision: plan.roles.baseline.revision,
-      candidateRevision: plan.roles.candidate.revision,
-      images: completion.images,
-    })}\n`);
   } catch (error) {
-    await writeFailure(plan, error);
+    await writeFailure(plan, error, activePhase);
     throw error;
   }
+}
+
+async function runLiveOverlapPhase(plan, phase) {
+  if (!liveOverlapPhases.includes(phase)) {
+    throw new Error("Live overlap execution phase is invalid.");
+  }
+  if (phase === "preparation") await runPreparationPhase(plan);
+  else if (phase === "build") await runBuildPhase(plan);
+  else if (phase === "attestation") await runAttestationPhase(plan);
+  else if (phase === "public") await runPublicPhase(plan);
+  else if (phase === "provider") await runProviderPhase(plan);
+  else if (phase === "authenticated") await runAuthenticatedPhase(plan);
+  else if (phase === "chatwoot") await runChatwootPhase(plan);
+  else await runEvidencePhase(plan);
+}
+
+async function runPreparationPhase(plan) {
+  await assertRepositoryAndHost(plan);
+  const context = await beginPhase(plan, "preparation");
+  await mkdir(plan.ownedRoot, { mode: 0o700, recursive: false });
+  await enforcePrivateDirectory(plan.ownedRoot);
+  const materialized = await materializeBehavioralBaselineSource({
+    repositoryRoot,
+    temporaryRoot: plan.ownedRoot,
+  });
+  await writeOwnedJson(path.join(plan.ownedRoot, stateFilename), createOwnership(plan, materialized));
+  const ownership = await readOwnershipArtifact(plan);
+  await completePhase(plan, "preparation", context, {
+    baselineArchiveSha256: BEHAVIORAL_BASELINE_SOURCE.archiveSha256,
+    baselineReceiptSha256: ownership.value.behavioralBaseline.receiptSha256,
+    status: "immutable-baseline-owned",
+  }, ownership.sha256);
+}
+
+async function runBuildPhase(plan) {
+  await assertRepositoryAndHost(plan);
+  const context = await beginPhase(plan, "build");
+  const baselineRoot = path.join(
+    plan.ownedRoot,
+    context.ownership.value.behavioralBaseline.rootName,
+  );
+  const baselineArchiveBytes = await readBoundedFile(
+    path.join(baselineRoot, "behavioral-baseline.tar"),
+    BEHAVIORAL_BASELINE_SOURCE.archiveBytes,
+  );
+  assertBehavioralBaselineArchive(baselineArchiveBytes);
+  const buildArguments = sharedBuildArguments(context.publicBuildContract);
+
+  for (const roleName of ["baseline", "candidate"]) {
+    const role = plan.roles[roleName];
+    const baselineArchive = roleName === "baseline" ? baselineArchiveBytes : undefined;
+    await buildImage({
+      baselineArchive,
+      buildArguments,
+      release: `live-overlap-${roleName}`,
+      revision: role.revision,
+      tag: role.appImage,
+      target: "runner",
+    });
+    await buildImage({
+      baselineArchive,
+      buildArguments,
+      release: `live-overlap-${roleName}`,
+      revision: role.revision,
+      tag: role.migrationImage,
+      target: "migration",
+    });
+  }
+  await completePhase(plan, "build", context, {
+    imageCount: 4,
+    imageTagSha256s: {
+      baselineApplication: sha256(plan.roles.baseline.appImage),
+      baselineMigration: sha256(plan.roles.baseline.migrationImage),
+      candidateApplication: sha256(plan.roles.candidate.appImage),
+      candidateMigration: sha256(plan.roles.candidate.migrationImage),
+    },
+    status: "four-production-images-built",
+  });
+}
+
+async function runAttestationPhase(plan) {
+  await assertRepositoryAndHost(plan);
+  const context = await beginPhase(plan, "attestation");
+  const inputs = {};
+  for (const roleName of ["baseline", "candidate"]) {
+    inputs[roleName] = await prepareRoleInputs(plan, roleName, context.publicBuildContract);
+  }
+  await completePhase(
+    plan,
+    "attestation",
+    context,
+    await summarizeAttestedInputs(plan, inputs),
+  );
+}
+
+async function runPublicPhase(plan) {
+  await assertRepositoryAndHost(plan);
+  const context = await beginPhase(plan, "public");
+  const inputs = await readAttestedPhaseInputs(plan, context);
+  const args = proofArguments(plan, inputs);
+  const sanitizedCaptureRoot = await ensureSanitizedCaptureRoot(plan);
+  const publicProofEnvironment = sanitizedProcessEnvironment();
+  publicProofEnvironment.CLEAN_PAY_PUBLIC_OVERLAP_FAILURE_OUTPUT_ROOT =
+    sanitizedCaptureRoot;
+  await runInherited(process.execPath, [publicProofCli, ...args], publicProofEnvironment);
+  await completePhase(
+    plan,
+    "public",
+    context,
+    await validatePublishedPublicProof(plan),
+  );
+}
+
+async function runProviderPhase(plan) {
+  await assertRepositoryAndHost(plan);
+  const context = await beginPhase(plan, "provider");
+  const inputs = await readAttestedPhaseInputs(plan, context);
+  assertSamePhaseResult(
+    await validatePublishedPublicProof(plan),
+    context.receipts.public.value.result,
+    "public",
+  );
+  const sanitizedCaptureRoot = await ensureSanitizedCaptureRoot(plan);
+  const providerProofEnvironment = sanitizedProcessEnvironment();
+  providerProofEnvironment.CLEAN_PAY_PROVIDER_OVERLAP_FAILURE_OUTPUT =
+    providerProofFailureSanitizedPath(plan, sanitizedCaptureRoot);
+  await runInherited(
+    process.execPath,
+    [providerProofCli, ...providerProofArguments(plan, inputs)],
+    providerProofEnvironment,
+  );
+  const providerOverlap = await publishProviderProof(plan);
+  await completePhase(plan, "provider", context, providerOverlap);
+}
+
+async function runAuthenticatedPhase(plan) {
+  await assertRepositoryAndHost(plan);
+  const context = await beginPhase(plan, "authenticated");
+  const inputs = await readAttestedPhaseInputs(plan, context);
+  assertSamePhaseResult(
+    await validatePublishedProviderProof(plan),
+    context.receipts.provider.value.result,
+    "provider",
+  );
+  const args = proofArguments(plan, inputs);
+  const unverifiedEmailProof = unverifiedEmailProofPath(plan);
+  const linkedEmailFailureProof = linkedEmailFailureProofPath(plan);
+  await runInherited(process.execPath, [
+    authenticatedProofCli,
+    ...args,
+    "--candidate-linked-email-failure-proof-output",
+    linkedEmailFailureProof,
+    "--candidate-unverified-email-proof-output",
+    unverifiedEmailProof,
+  ], sanitizedProcessEnvironment());
+  const unverifiedEmailLogin = await validateUnverifiedEmailProof(
+    plan,
+    inputs,
+    unverifiedEmailProof,
+  );
+  const linkedEmailFailureFeedback = await validateLinkedEmailFailureProof(
+    plan,
+    inputs,
+    linkedEmailFailureProof,
+  );
+  await completePhase(plan, "authenticated", context, {
+    linkedEmailFailureFeedback,
+    unverifiedEmailLogin,
+  });
+}
+
+async function runChatwootPhase(plan) {
+  await assertRepositoryAndHost(plan);
+  const context = await beginPhase(plan, "chatwoot");
+  const inputs = await readAttestedPhaseInputs(plan, context);
+  const unverifiedEmailLogin = await validateUnverifiedEmailProof(
+    plan,
+    inputs,
+    unverifiedEmailProofPath(plan),
+  );
+  const linkedEmailFailureFeedback = await validateLinkedEmailFailureProof(
+    plan,
+    inputs,
+    linkedEmailFailureProofPath(plan),
+  );
+  assertSamePhaseResult(
+    { linkedEmailFailureFeedback, unverifiedEmailLogin },
+    context.receipts.authenticated.value.result,
+    "authenticated",
+  );
+  const chatwoot = await prepareChatwootLiveProofInputs(plan, inputs);
+  await runInherited(
+    process.execPath,
+    [chatwootProofCli, ...chatwootProofArguments(plan, chatwoot.cliPlanPath)],
+    sanitizedProcessEnvironment(),
+  );
+  const chatwootPhase = await validateChatwootEvidence(plan, inputs);
+  await completePhase(plan, "chatwoot", context, chatwootPhase);
+}
+
+async function runEvidencePhase(plan) {
+  await assertRepositoryAndHost(plan);
+  const context = await beginPhase(plan, "evidence");
+  const inputs = await readAttestedPhaseInputs(plan, context);
+  const { publicBuildContract, receipts } = context;
+  assertSamePhaseResult(
+    await validatePublishedPublicProof(plan),
+    receipts.public.value.result,
+    "public",
+  );
+  const providerOverlap = await validatePublishedProviderProof(plan);
+  const unverifiedEmailLogin = await validateUnverifiedEmailProof(
+    plan,
+    inputs,
+    unverifiedEmailProofPath(plan),
+  );
+  const linkedEmailFailureFeedback = await validateLinkedEmailFailureProof(
+    plan,
+    inputs,
+    linkedEmailFailureProofPath(plan),
+  );
+  const chatwootPhase = await validateChatwootEvidence(plan, inputs);
+  assertSamePhaseResult(providerOverlap, receipts.provider.value.result, "provider");
+  assertSamePhaseResult(
+    { linkedEmailFailureFeedback, unverifiedEmailLogin },
+    receipts.authenticated.value.result,
+    "authenticated",
+  );
+  assertSamePhaseResult(chatwootPhase, receipts.chatwoot.value.result, "Chatwoot");
+  const completion = {
+    schemaVersion: 1,
+    status: "production-image-live-overlap-proven",
+    captureId: plan.captureId,
+    baselineRevision: plan.roles.baseline.revision,
+    candidateRevision: plan.roles.candidate.revision,
+    publicBuildContractSha256: publicBuildContract.sha256,
+    projects: {
+      baselineSha256: sha256(plan.roles.baseline.project),
+      candidateSha256: sha256(plan.roles.candidate.project),
+    },
+    images: {
+      baselineApplication: inputs.baseline.assetImageDigest,
+      baselineMigration: inputs.baseline.migrationAssetImageDigest,
+      candidateApplication: inputs.candidate.assetImageDigest,
+      candidateMigration: inputs.candidate.migrationAssetImageDigest,
+    },
+    providerOverlap,
+    linkedEmailFailureFeedback,
+    unverifiedEmailLogin,
+    chatwootPhase,
+  };
+  const completionBytes = Buffer.from(`${JSON.stringify(completion, null, 2)}\n`, "utf8");
+  const evidenceReceipt = await completePhase(plan, "evidence", context, {
+    completionSha256: sha256(completionBytes),
+    status: "sanitized-evidence-finalized",
+  }, undefined, false);
+  await writeResult(plan, "completion.json", completion);
+  const publishedCompletion = await readBoundedFile(
+    path.join(await ensureSanitizedCaptureRoot(plan), "completion.json"),
+    64 * 1024,
+  );
+  if (!publishedCompletion.equals(completionBytes)) {
+    throw new Error("Live overlap completion changed after its final create-only commit.");
+  }
+  announceCompletedPhase(plan, "evidence", evidenceReceipt);
+  process.stdout.write(`${JSON.stringify({
+    status: "production_image_live_overlap_proven",
+    captureId: plan.captureId,
+    baselineRevision: plan.roles.baseline.revision,
+    candidateRevision: plan.roles.candidate.revision,
+    images: completion.images,
+  })}\n`);
+}
+
+async function beginPhase(plan, phase) {
+  const context = await readPhaseContext(plan, phase);
+  const started = createPhaseReceipt(plan, phase, context, "started", null);
+  const artifact = await writePhaseDocument(
+    plan,
+    phaseStartedFilenames[phase],
+    started,
+  );
+  return Object.freeze({ ...context, started: artifact });
+}
+
+async function completePhase(
+  plan,
+  phase,
+  context,
+  result,
+  ownershipSha256,
+  announce = true,
+) {
+  const completionContext = ownershipSha256 === undefined
+    ? context
+    : Object.freeze({ ...context, ownershipSha256 });
+  const receipt = createPhaseReceipt(
+    plan,
+    phase,
+    completionContext,
+    "completed",
+    result,
+  );
+  const artifact = await writePhaseDocument(plan, phaseReceiptFilenames[phase], receipt);
+  if (announce) announceCompletedPhase(plan, phase, artifact);
+  return artifact;
+}
+
+function announceCompletedPhase(plan, phase, artifact) {
+  process.stdout.write(JSON.stringify({
+    status: "production_image_live_overlap_phase_completed",
+    captureId: plan.captureId,
+    phase,
+    receiptSha256: artifact.sha256,
+  }) + "\n");
+}
+
+async function readPhaseContext(plan, phase) {
+  const phaseIndex = liveOverlapPhases.indexOf(phase);
+  if (phaseIndex < 0) throw new Error("Live overlap execution phase is invalid.");
+  const publicBuildContract = await computePublicBuildContract();
+  const ownership = phaseIndex === 0 ? null : await readOwnershipArtifact(plan);
+  const ownershipSha256 = ownership?.sha256 ?? null;
+  const receipts = {};
+  let previousReceiptSha256 = null;
+
+  for (const priorPhase of liveOverlapPhases.slice(0, phaseIndex)) {
+    const started = await readPhaseDocument(plan, phaseStartedFilenames[priorPhase]);
+    validateLiveOverlapPhaseReceipt(started.value, {
+      candidateRevision: plan.candidateRevision,
+      captureId: plan.captureId,
+      ownershipSha256: priorPhase === "preparation" ? null : ownershipSha256,
+      phase: priorPhase,
+      previousReceiptSha256,
+      publicBuildContract,
+      startedReceiptSha256: null,
+      status: "started",
+    });
+    const completed = await readPhaseDocument(plan, phaseReceiptFilenames[priorPhase]);
+    validateLiveOverlapPhaseReceipt(completed.value, {
+      candidateRevision: plan.candidateRevision,
+      captureId: plan.captureId,
+      ownershipSha256,
+      phase: priorPhase,
+      previousReceiptSha256,
+      publicBuildContract,
+      startedReceiptSha256: started.sha256,
+      status: "completed",
+    });
+    assertPhaseStartCompletionBinding(started, completed, priorPhase);
+    assertPhaseResultPlanBinding(plan, ownership, priorPhase, completed.value.result);
+    receipts[priorPhase] = completed;
+    previousReceiptSha256 = completed.sha256;
+  }
+
+  for (const pendingPhase of liveOverlapPhases.slice(phaseIndex)) {
+    for (const filename of [
+      phaseStartedFilenames[pendingPhase],
+      phaseReceiptFilenames[pendingPhase],
+    ]) {
+      if (await regularPathExists(phaseDocumentPath(plan, filename))) {
+        throw new Error("Live overlap phase replay, overlap, or forward state is forbidden.");
+      }
+    }
+  }
+
+  return Object.freeze({
+    ownership,
+    ownershipSha256,
+    previousReceiptSha256,
+    publicBuildContract,
+    receipts: Object.freeze(receipts),
+  });
+}
+
+function createPhaseReceipt(plan, phase, context, status, result) {
+  const value = {
+    schemaVersion: 1,
+    kind: "clean-pay-production-image-live-overlap-phase",
+    status,
+    phase,
+    phaseIndex: liveOverlapPhases.indexOf(phase),
+    captureId: plan.captureId,
+    baselineRevision: plan.roles.baseline.revision,
+    candidateRevision: plan.candidateRevision,
+    ownershipSha256: context.ownershipSha256,
+    previousReceiptSha256: context.previousReceiptSha256,
+    publicBuildContractVersion: context.publicBuildContract.version,
+    publicBuildContractSha256: context.publicBuildContract.sha256,
+    startedReceiptSha256: status === "completed" ? context.started.sha256 : null,
+    ...(status === "completed" ? { result } : {}),
+  };
+  return validateLiveOverlapPhaseReceipt(value, {
+    candidateRevision: plan.candidateRevision,
+    captureId: plan.captureId,
+    ownershipSha256: context.ownershipSha256,
+    phase,
+    previousReceiptSha256: context.previousReceiptSha256,
+    publicBuildContract: context.publicBuildContract,
+    startedReceiptSha256: status === "completed" ? context.started.sha256 : null,
+    status,
+  });
+}
+
+export function validateLiveOverlapPhaseReceipt(value, expected) {
+  exactKeys(expected, [
+    "candidateRevision",
+    "captureId",
+    "ownershipSha256",
+    "phase",
+    "previousReceiptSha256",
+    "publicBuildContract",
+    "startedReceiptSha256",
+    "status",
+  ]);
+  exactKeys(expected.publicBuildContract, ["sha256", "version"]);
+  const completed = expected.status === "completed";
+  exactKeys(value, [
+    "baselineRevision",
+    "candidateRevision",
+    "captureId",
+    "kind",
+    "ownershipSha256",
+    "phase",
+    "phaseIndex",
+    "previousReceiptSha256",
+    "publicBuildContractSha256",
+    "publicBuildContractVersion",
+    "schemaVersion",
+    "startedReceiptSha256",
+    "status",
+    ...(completed ? ["result"] : []),
+  ]);
+  const phaseIndex = liveOverlapPhases.indexOf(expected.phase);
+  if (phaseIndex < 0
+    || !new Set(["started", "completed"]).has(expected.status)
+    || value.schemaVersion !== 1
+    || value.kind !== "clean-pay-production-image-live-overlap-phase"
+    || value.status !== expected.status
+    || value.phase !== expected.phase
+    || value.phaseIndex !== phaseIndex
+    || value.captureId !== expected.captureId
+    || !/^[a-f0-9]{16}$/.test(value.captureId ?? "")
+    || value.baselineRevision !== BEHAVIORAL_BASELINE_SOURCE.commit
+    || value.candidateRevision !== expected.candidateRevision
+    || !/^[a-f0-9]{40}$/.test(value.candidateRevision ?? "")
+    || value.ownershipSha256 !== expected.ownershipSha256
+    || value.previousReceiptSha256 !== expected.previousReceiptSha256
+    || value.publicBuildContractVersion !== expected.publicBuildContract.version
+    || value.publicBuildContractSha256 !== expected.publicBuildContract.sha256
+    || value.startedReceiptSha256 !== expected.startedReceiptSha256
+    || value.publicBuildContractVersion !== "1"
+    || !/^[a-f0-9]{64}$/.test(value.publicBuildContractSha256 ?? "")
+    || (value.startedReceiptSha256 !== null
+      && !/^[a-f0-9]{64}$/.test(value.startedReceiptSha256))
+    || (value.ownershipSha256 !== null
+      && !/^[a-f0-9]{64}$/.test(value.ownershipSha256))
+    || (value.previousReceiptSha256 !== null
+      && !/^[a-f0-9]{64}$/.test(value.previousReceiptSha256))) {
+    throw new Error("Live overlap phase receipt differs from its exact chain contract.");
+  }
+  if (completed) validateLiveOverlapPhaseResult(expected.phase, value.result);
+  return Object.freeze(value);
+}
+
+function validateLiveOverlapPhaseResult(phase, result) {
+  if (phase === "preparation") {
+    exactKeys(result, ["baselineArchiveSha256", "baselineReceiptSha256", "status"]);
+    if (result.baselineArchiveSha256 !== BEHAVIORAL_BASELINE_SOURCE.archiveSha256
+      || !/^[a-f0-9]{64}$/.test(result.baselineReceiptSha256 ?? "")
+      || result.status !== "immutable-baseline-owned") phaseResultError();
+  } else if (phase === "build") {
+    exactKeys(result, ["imageCount", "imageTagSha256s", "status"]);
+    exactDigestRecord(result.imageTagSha256s, [
+      "baselineApplication", "baselineMigration", "candidateApplication", "candidateMigration",
+    ], false);
+    if (result.imageCount !== 4 || result.status !== "four-production-images-built") {
+      phaseResultError();
+    }
+  } else if (phase === "attestation") {
+    exactKeys(result, ["assetAttestationSha256s", "contractSha256s", "images", "status"]);
+    exactDigestRecord(result.assetAttestationSha256s, ["baseline", "candidate"], false);
+    exactDigestRecord(result.contractSha256s, ["baseline", "candidate"], false);
+    exactDigestRecord(result.images, [
+      "baselineApplication", "baselineMigration", "candidateApplication", "candidateMigration",
+    ], true);
+    if (result.status !== "four-images-and-static-assets-attested") phaseResultError();
+  } else if (phase === "public") {
+    exactKeys(result, ["artifact", "artifactCountPerSide", "caseCount", "sha256", "status"]);
+    if (result.artifact !== "proof.json"
+      || result.artifactCountPerSide !== 126
+      || result.caseCount !== 42
+      || !/^[a-f0-9]{64}$/.test(result.sha256 ?? "")
+      || result.status !== "live-public-characterization-overlap-proven-after-exact-cleanup") {
+      phaseResultError();
+    }
+  } else if (phase === "provider") {
+    exactKeys(result, ["artifact", "sha256", "status"]);
+    if (result.artifact !== providerProofSanitizedFilename
+      || !/^[a-f0-9]{64}$/.test(result.sha256 ?? "")
+      || result.status !== "proven") phaseResultError();
+  } else if (phase === "authenticated") {
+    exactKeys(result, ["linkedEmailFailureFeedback", "unverifiedEmailLogin"]);
+    validateAuthorizedProofSummary(result.linkedEmailFailureFeedback, {
+      artifact: LINKED_EMAIL_FAILURE_PROOF_FILENAME,
+      authorizedSemanticDiff: AUTHORIZED_LINKED_EMAIL_FAILURE_SEMANTIC_DIFF,
+      status: "linked-email-auth-failure-feedback-specific",
+    });
+    validateAuthorizedProofSummary(result.unverifiedEmailLogin, {
+      artifact: UNVERIFIED_EMAIL_PROOF_FILENAME,
+      authorizedSemanticDiff: AUTHORIZED_UNVERIFIED_EMAIL_SEMANTIC_DIFF,
+      status: "existing-unverified-email-login-gated",
+    });
+  } else if (phase === "chatwoot") {
+    exactKeys(result, [
+      "aggregateSha256", "artifactCount", "artifactRoot", "manifestSha256", "proofSha256", "status",
+    ]);
+    if (![result.aggregateSha256, result.manifestSha256, result.proofSha256]
+      .every((digest) => /^[a-f0-9]{64}$/.test(digest ?? ""))
+      || result.artifactCount !== 19
+      || !/^clean-pay-chatwoot-phase-evidence-[a-f0-9]{16}$/.test(result.artifactRoot ?? "")
+      || result.status !== "proven") phaseResultError();
+  } else if (phase === "evidence") {
+    exactKeys(result, ["completionSha256", "status"]);
+    if (!/^[a-f0-9]{64}$/.test(result.completionSha256 ?? "")
+      || result.status !== "sanitized-evidence-finalized") phaseResultError();
+  } else {
+    phaseResultError();
+  }
+  return result;
+}
+
+function exactDigestRecord(value, keys, imageDigest) {
+  exactKeys(value, keys);
+  const pattern = imageDigest ? /^sha256:[a-f0-9]{64}$/ : /^[a-f0-9]{64}$/;
+  if (!keys.every((key) => pattern.test(value[key] ?? ""))) phaseResultError();
+}
+
+function validateAuthorizedProofSummary(value, expected) {
+  exactKeys(value, ["artifact", "authorizedSemanticDiff", "sha256", "status"]);
+  if (value.artifact !== expected.artifact
+    || value.authorizedSemanticDiff !== expected.authorizedSemanticDiff
+    || value.status !== expected.status
+    || !/^[a-f0-9]{64}$/.test(value.sha256 ?? "")) phaseResultError();
+}
+
+function phaseResultError() {
+  throw new Error("Live overlap phase result is not a sanitized exact projection.");
+}
+
+function assertPhaseStartCompletionBinding(startedArtifact, completedArtifact, phase) {
+  const started = startedArtifact.value;
+  const completed = completedArtifact.value;
+  const comparable = [
+    "baselineRevision",
+    "candidateRevision",
+    "captureId",
+    "kind",
+    "phase",
+    "phaseIndex",
+    "previousReceiptSha256",
+    "publicBuildContractSha256",
+    "publicBuildContractVersion",
+  ];
+  if (comparable.some((key) => started[key] !== completed[key])
+    || completed.startedReceiptSha256 !== startedArtifact.sha256
+    || (phase !== "preparation" && started.ownershipSha256 !== completed.ownershipSha256)
+    || (phase === "preparation" && started.ownershipSha256 !== null)) {
+    throw new Error("Live overlap phase start and completion receipts are not byte-chain compatible.");
+  }
+}
+
+function assertPhaseResultPlanBinding(plan, ownership, phase, result) {
+  if (phase === "preparation"
+    && result.baselineReceiptSha256 !== ownership?.value.behavioralBaseline.receiptSha256) {
+    throw new Error("Live overlap preparation receipt lost its baseline ownership binding.");
+  }
+  if (phase === "build" && JSON.stringify(result.imageTagSha256s) !== JSON.stringify({
+    baselineApplication: sha256(plan.roles.baseline.appImage),
+    baselineMigration: sha256(plan.roles.baseline.migrationImage),
+    candidateApplication: sha256(plan.roles.candidate.appImage),
+    candidateMigration: sha256(plan.roles.candidate.migrationImage),
+  })) {
+    throw new Error("Live overlap build receipt lost its exact image-tag binding.");
+  }
+  if (phase === "chatwoot"
+    && result.artifactRoot !== path.basename(plan.chatwootEvidenceRoot)) {
+    throw new Error("Live overlap Chatwoot receipt lost its exact evidence-root binding.");
+  }
+}
+
+async function writePhaseDocument(plan, filename, value) {
+  const bytes = Buffer.from(JSON.stringify(value, null, 2) + "\n", "utf8");
+  if (bytes.byteLength < 1 || bytes.byteLength > maximumPhaseReceiptBytes) {
+    throw new Error("Live overlap phase receipt exceeds its sanitized bound.");
+  }
+  const target = phaseDocumentPath(plan, filename);
+  await ensureSanitizedCaptureRoot(plan);
+  await writeOwnedBytes(target, bytes);
+  return Object.freeze({ bytes, sha256: sha256(bytes), value });
+}
+
+async function readPhaseDocument(plan, filename) {
+  const bytes = await readBoundedFile(
+    phaseDocumentPath(plan, filename),
+    maximumPhaseReceiptBytes,
+  );
+  let value;
+  try {
+    value = JSON.parse(bytes.toString("utf8"));
+  } catch {
+    throw new Error("Live overlap phase receipt is not valid JSON.");
+  }
+  return Object.freeze({ bytes, sha256: sha256(bytes), value });
+}
+
+function phaseDocumentPath(plan, filename) {
+  if (![...Object.values(phaseStartedFilenames), ...Object.values(phaseReceiptFilenames)]
+    .includes(filename)) {
+    throw new Error("Live overlap phase evidence filename is invalid.");
+  }
+  const root = path.join(outputParent, plan.captureId);
+  const target = path.join(root, filename);
+  if (path.dirname(target) !== root || path.basename(target) !== filename) {
+    throw new Error("Live overlap phase evidence escaped its sanitized capture root.");
+  }
+  return target;
+}
+
+async function regularPathExists(target) {
+  try {
+    await lstat(target);
+    return true;
+  } catch (error) {
+    if (error?.code === "ENOENT") return false;
+    throw error;
+  }
+}
+
+async function readOwnershipArtifact(plan) {
+  const target = path.join(plan.ownedRoot, stateFilename);
+  const bytes = await readBoundedFile(target, 8_192);
+  let value;
+  try {
+    value = JSON.parse(bytes.toString("utf8"));
+  } catch {
+    throw new Error("Live overlap ownership receipt is not valid JSON.");
+  }
+  return Object.freeze({
+    bytes,
+    sha256: sha256(bytes),
+    value: validateLiveOverlapOwnership(value, plan),
+  });
+}
+
+async function summarizeAttestedInputs(plan, inputs) {
+  const assetAttestationSha256s = {};
+  const contractSha256s = {};
+  const images = {};
+  for (const roleName of ["baseline", "candidate"]) {
+    const input = exactPersistedRoleProofInput(plan, inputs, roleName);
+    assetAttestationSha256s[roleName] = sha256(await readBoundedFile(
+      input.assetAttestationPath,
+      32 * 1024 * 1024,
+    ));
+    contractSha256s[roleName] = sha256(await readBoundedFile(
+      input.contractPath,
+      512 * 1024,
+    ));
+    images[roleName + "Application"] = input.assetImageDigest;
+    images[roleName + "Migration"] = input.migrationAssetImageDigest;
+  }
+  return Object.freeze({
+    assetAttestationSha256s: Object.freeze(assetAttestationSha256s),
+    contractSha256s: Object.freeze(contractSha256s),
+    images: Object.freeze(images),
+    status: "four-images-and-static-assets-attested",
+  });
+}
+
+async function readAttestedPhaseInputs(plan, context) {
+  const inputs = {};
+  for (const roleName of ["baseline", "candidate"]) {
+    const role = plan.roles[roleName];
+    const envDirectory = path.join(plan.ownedRoot, role.envDirectoryName);
+    const generatedContract = await assertGeneratedEnvironment(envDirectory, role);
+    const application = await inspectOwnedImage(
+      role.appImage,
+      "app",
+      role.revision,
+      context.publicBuildContract,
+    );
+    const migration = await inspectOwnedImage(
+      role.migrationImage,
+      "migration",
+      role.revision,
+      context.publicBuildContract,
+    );
+    if (application.digest === migration.digest) {
+      throw new Error("Live overlap application and migration image identities alias.");
+    }
+    const input = Object.freeze({
+      assetAttestationPath: path.join(plan.ownedRoot, role.attestationFilename),
+      assetImageDigest: application.digest,
+      contractPath: path.join(envDirectory, contractFilename),
+      controlUrl: generatedContract.controlUrl,
+      migrationAssetImageDigest: migration.digest,
+      resolverIp: generatedContract.resolverIp,
+    });
+    await assertRegularFile(
+      input.assetAttestationPath,
+      32 * 1024 * 1024,
+      "asset attestation",
+    );
+    inputs[roleName] = exactPersistedRoleProofInput(
+      plan,
+      { [roleName]: input },
+      roleName,
+    );
+  }
+  const frozen = Object.freeze(inputs);
+  assertSamePhaseResult(
+    await summarizeAttestedInputs(plan, frozen),
+    context.receipts.attestation.value.result,
+    "attestation",
+  );
+  return frozen;
+}
+
+export function exactPersistedRoleProofInput(plan, inputs, name) {
+  const input = exactRoleProofInput(plan, inputs, name);
+  const role = plan.roles[name];
+  if (input.contractPath !== path.join(plan.ownedRoot, role.envDirectoryName, contractFilename)
+    || input.assetAttestationPath !== path.join(plan.ownedRoot, role.attestationFilename)) {
+    throw new Error("Live overlap persisted " + name
+      + " proof path differs from its exact plan.");
+  }
+  return input;
+}
+
+async function validatePublishedPublicProof(plan) {
+  const target = resolvePublicOverlapProofPath(repositoryRoot, plan.captureId);
+  const bytes = await readBoundedFile(target, 512 * 1024);
+  let value;
+  try {
+    value = JSON.parse(bytes.toString("utf8"));
+  } catch {
+    throw new Error("Public overlap proof is not valid JSON.");
+  }
+  exactKeys(value, [
+    "artifactCountPerSide",
+    "baselineBindingSha256",
+    "candidateBindingSha256",
+    "captureId",
+    "caseCount",
+    "cleanupReceiptSha256",
+    "kind",
+    "launchReceiptSha256",
+    "pairReceiptSha256",
+    "schemaVersion",
+    "status",
+  ]);
+  if (value.schemaVersion !== PUBLIC_OVERLAP_PROOF_SCHEMA_VERSION
+    || value.kind !== PUBLIC_OVERLAP_PROOF_KIND
+    || value.captureId !== plan.captureId
+    || value.status !== "live-public-characterization-overlap-proven-after-exact-cleanup"
+    || value.caseCount !== 42
+    || value.artifactCountPerSide !== 126
+    || [
+      value.baselineBindingSha256,
+      value.candidateBindingSha256,
+      value.cleanupReceiptSha256,
+      value.launchReceiptSha256,
+      value.pairReceiptSha256,
+    ].some((digest) => !/^[a-f0-9]{64}$/.test(digest ?? ""))) {
+    throw new Error("Public overlap proof differs from its exact sanitized contract.");
+  }
+  return Object.freeze({
+    artifact: path.basename(target),
+    artifactCountPerSide: value.artifactCountPerSide,
+    caseCount: value.caseCount,
+    sha256: sha256(bytes),
+    status: value.status,
+  });
+}
+
+async function validatePublishedProviderProof(plan) {
+  const target = path.join(
+    outputParent,
+    plan.captureId,
+    plan.providerProof.sanitizedFilename,
+  );
+  if (path.dirname(target) !== path.join(outputParent, plan.captureId)) {
+    throw new Error("Provider overlap sanitized proof escaped its exact capture root.");
+  }
+  const artifact = await readExactProviderProofArtifact(target);
+  return Object.freeze({
+    artifact: plan.providerProof.sanitizedFilename,
+    sha256: artifact.sha256,
+    status: artifact.document.comparison.status,
+  });
+}
+
+function assertSamePhaseResult(observed, expected, phase) {
+  if (JSON.stringify(observed) !== JSON.stringify(expected)) {
+    throw new Error("Live overlap " + phase
+      + " evidence changed after its completed phase.");
+  }
+  return observed;
 }
 
 async function cleanup(plan) {
@@ -397,6 +1127,7 @@ async function cleanup(plan) {
     })}\n`);
     return;
   }
+  await cleanupFinalizedChatwootEvidence(plan, ownership);
   const errors = [];
   for (const roleName of ["baseline", "candidate"]) {
     try {
@@ -424,10 +1155,12 @@ async function cleanup(plan) {
       }
     }
   }
-  try {
-    await cleanupOwnedInputRoot(plan, ownership);
-  } catch (error) {
-    errors.push(error);
+  if (errors.length === 0) {
+    try {
+      await cleanupOwnedInputRoot(plan, ownership);
+    } catch (error) {
+      errors.push(error);
+    }
   }
   if (errors.length > 0) {
     throw new AggregateError(errors, "Live overlap exact cleanup was not proven.");
@@ -879,24 +1612,239 @@ function chatwootProjectNames(plan) {
   ));
 }
 
-async function cleanupExactImage(tag, revision, expectedRole) {
-  const inspection = await runCaptured(
-    "docker",
-    ["image", "inspect", "--format", "{{json .}}", tag],
-    sanitizedProcessEnvironment(),
-    { allowedExitCodes: [0, 1] },
-  );
-  if (inspection.trim() === "") return;
-  let image;
+async function cleanupFinalizedChatwootEvidence(plan, ownership) {
+  const capabilityTarget = path.join(plan.ownedRoot, chatwootEvidenceCleanupFilename);
+  let capability;
+  if (await regularPathExists(capabilityTarget)) {
+    capability = await readChatwootEvidenceCleanupCapability(plan, capabilityTarget);
+  } else {
+    if (!await regularPathExists(plan.chatwootEvidenceRoot)) return;
+    const inputs = {};
+    for (const roleName of ["baseline", "candidate"]) {
+      const application = await inspectCleanupOwnedImage(
+        ownership.images[roleName + "Application"],
+        plan.roles[roleName].revision,
+        "app",
+      );
+      const migration = await inspectCleanupOwnedImage(
+        ownership.images[roleName + "Migration"],
+        plan.roles[roleName].revision,
+        "migration",
+      );
+      if (!application || !migration || application.Id === migration.Id) {
+        throw new Error("Chatwoot evidence cleanup lost its exact image identities.");
+      }
+      inputs[roleName] = Object.freeze({
+        assetImageDigest: application.Id,
+        migrationAssetImageDigest: migration.Id,
+      });
+    }
+    const inspected = await inspectChatwootEvidence(plan, Object.freeze(inputs));
+    const document = createChatwootEvidenceCleanupCapability(plan, inspected.cleanup.artifacts);
+    await writeOwnedJson(capabilityTarget, document);
+    capability = await readChatwootEvidenceCleanupCapability(plan, capabilityTarget);
+  }
+
+  if (!await assertRestartableChatwootEvidenceInventory(plan, capability)) return;
+  for (const entry of capability.artifacts) {
+    const target = chatwootCleanupArtifactPath(plan, entry.path);
+    let artifact;
+    try {
+      artifact = await readBoundedFileArtifact(
+        target,
+        maximumChatwootCleanupArtifactBytes(entry.path),
+      );
+    } catch (error) {
+      if (error?.code === "ENOENT") continue;
+      throw error;
+    }
+    if (artifact.bytes.byteLength !== entry.byteLength
+      || sha256(artifact.bytes) !== entry.sha256) {
+      throw new Error("Chatwoot evidence artifact changed after cleanup was sealed.");
+    }
+    await unlinkExactChatwootArtifact(target, artifact.identity);
+  }
+  await removeRestartableChatwootEvidenceDirectories(plan);
+}
+
+function createChatwootEvidenceCleanupCapability(plan, artifacts) {
+  const entries = artifacts.map((artifact) => {
+    const relativePath = path.relative(plan.chatwootEvidenceRoot, artifact.target)
+      .split(path.sep)
+      .join("/");
+    return Object.freeze({
+      byteLength: artifact.byteLength,
+      path: relativePath,
+      sha256: artifact.sha256,
+    });
+  }).sort((left, right) => left.path.localeCompare(right.path));
+  return validateChatwootEvidenceCleanupCapability({
+    schemaVersion: 1,
+    kind: "clean-pay-chatwoot-evidence-cleanup-capability",
+    captureId: plan.captureId,
+    evidenceRootName: path.basename(plan.chatwootEvidenceRoot),
+    artifactCount: entries.length,
+    artifacts: entries,
+  }, plan);
+}
+
+async function readChatwootEvidenceCleanupCapability(plan, target) {
+  if (target !== path.join(plan.ownedRoot, chatwootEvidenceCleanupFilename)) {
+    throw new Error("Chatwoot cleanup capability escaped its exact owned root.");
+  }
+  const bytes = await readBoundedFile(target, maximumChatwootCleanupCapabilityBytes);
+  let value;
   try {
-    image = JSON.parse(inspection);
+    value = JSON.parse(bytes.toString("utf8"));
   } catch {
-    throw new Error("Owned cleanup image inspection is invalid.");
+    throw new Error("Chatwoot cleanup capability is not valid JSON.");
   }
-  if (image?.Config?.Labels?.["org.opencontainers.image.revision"] !== revision
-    || image?.Config?.Labels?.["io.clean-pay.role"] !== expectedRole) {
-    throw new Error("Refusing cleanup of an image outside the exact live overlap identity.");
+  return validateChatwootEvidenceCleanupCapability(value, plan);
+}
+
+export function validateChatwootEvidenceCleanupCapability(value, plan) {
+  exactKeys(value, [
+    "artifactCount",
+    "artifacts",
+    "captureId",
+    "evidenceRootName",
+    "kind",
+    "schemaVersion",
+  ]);
+  const expectedPaths = [
+    "artifact-manifest.json",
+    "proof.json",
+    ...expectedChatwootScreenshotPaths(),
+  ].sort();
+  if (value.schemaVersion !== 1
+    || value.kind !== "clean-pay-chatwoot-evidence-cleanup-capability"
+    || value.captureId !== plan.captureId
+    || value.evidenceRootName !== path.basename(plan.chatwootEvidenceRoot)
+    || value.artifactCount !== expectedPaths.length
+    || !Array.isArray(value.artifacts)
+    || value.artifacts.length !== expectedPaths.length) {
+    throw new Error("Chatwoot cleanup capability header differs from its exact plan.");
   }
+  for (const entry of value.artifacts) {
+    exactKeys(entry, ["byteLength", "path", "sha256"]);
+    if (!Number.isSafeInteger(entry.byteLength)
+      || entry.byteLength < 1
+      || entry.byteLength > maximumChatwootCleanupArtifactBytes(entry.path)
+      || !/^[a-f0-9]{64}$/.test(entry.sha256 ?? "")) {
+      throw new Error("Chatwoot cleanup capability artifact is invalid.");
+    }
+  }
+  if (JSON.stringify(value.artifacts.map((entry) => entry.path))
+    !== JSON.stringify(expectedPaths)) {
+    throw new Error("Chatwoot cleanup capability inventory is not exact.");
+  }
+  return Object.freeze(value);
+}
+
+function maximumChatwootCleanupArtifactBytes(relativePath) {
+  if (relativePath === "artifact-manifest.json") return maximumChatwootManifestBytes;
+  if (relativePath === "proof.json") return maximumChatwootProofBytes;
+  if (expectedChatwootScreenshotPaths().includes(relativePath)) {
+    return maximumChatwootScreenshotBytes;
+  }
+  throw new Error("Chatwoot cleanup artifact path is outside the exact inventory.");
+}
+
+function chatwootCleanupArtifactPath(plan, relativePath) {
+  maximumChatwootCleanupArtifactBytes(relativePath);
+  const target = path.join(plan.chatwootEvidenceRoot, ...relativePath.split("/"));
+  if (!isWithin(plan.chatwootEvidenceRoot, target)
+    || path.resolve(target) === path.resolve(plan.chatwootEvidenceRoot)) {
+    throw new Error("Chatwoot cleanup artifact escaped its exact evidence root.");
+  }
+  return target;
+}
+
+async function assertRestartableChatwootEvidenceInventory(plan, capability) {
+  const root = plan.chatwootEvidenceRoot;
+  let rootDetails;
+  try {
+    rootDetails = await lstat(root);
+  } catch (error) {
+    if (error?.code === "ENOENT") return false;
+    throw error;
+  }
+  if (!rootDetails.isDirectory() || rootDetails.isSymbolicLink()
+    || path.resolve(await realpath(root)) !== path.resolve(root)
+    || await realpath(path.dirname(root)) !== await realpath(plan.temporaryRoot)) {
+    throw new Error("Chatwoot restartable cleanup root is not exact.");
+  }
+  const allowedRootNames = new Set(["artifact-manifest.json", "proof.json", "raw"]);
+  const rootEntries = await readdir(root, { withFileTypes: true });
+  if (rootEntries.some((entry) => !allowedRootNames.has(entry.name)
+    || (entry.name === "raw" ? !entry.isDirectory() : !entry.isFile()))) {
+    throw new Error("Chatwoot restartable cleanup root contains an unexpected entry.");
+  }
+  const rawEntry = rootEntries.find((entry) => entry.name === "raw");
+  if (rawEntry) {
+    const rawRoot = path.join(root, "raw");
+    const rawDetails = await lstat(rawRoot);
+    const expectedRawNames = new Set(capability.artifacts
+      .filter((entry) => entry.path.startsWith("raw/"))
+      .map((entry) => path.basename(entry.path)));
+    const rawEntries = await readdir(rawRoot, { withFileTypes: true });
+    if (!rawDetails.isDirectory() || rawDetails.isSymbolicLink()
+      || path.dirname(await realpath(rawRoot)) !== await realpath(root)
+      || rawEntries.some((entry) => !entry.isFile() || !expectedRawNames.has(entry.name))) {
+      throw new Error("Chatwoot restartable raw cleanup inventory is not exact.");
+    }
+  }
+  return true;
+}
+
+async function removeRestartableChatwootEvidenceDirectories(plan) {
+  const root = plan.chatwootEvidenceRoot;
+  const rawRoot = path.join(root, "raw");
+  try {
+    const rawDetails = await lstat(rawRoot);
+    if (!rawDetails.isDirectory() || rawDetails.isSymbolicLink()
+      || path.dirname(await realpath(rawRoot)) !== await realpath(root)
+      || (await readdir(rawRoot)).length !== 0) {
+      throw new Error("Chatwoot raw evidence directory changed before exact cleanup.");
+    }
+    await rmdir(rawRoot);
+  } catch (error) {
+    if (error?.code !== "ENOENT") throw error;
+  }
+  try {
+    const rootDetails = await lstat(root);
+    if (!rootDetails.isDirectory() || rootDetails.isSymbolicLink()
+      || path.resolve(await realpath(root)) !== path.resolve(root)
+      || await realpath(path.dirname(root)) !== await realpath(plan.temporaryRoot)
+      || (await readdir(root)).length !== 0) {
+      throw new Error("Chatwoot evidence root changed before exact cleanup.");
+    }
+    await rmdir(root);
+  } catch (error) {
+    if (error?.code !== "ENOENT") throw error;
+  }
+  if (await regularPathExists(root)) {
+    throw new Error("Chatwoot evidence root survived exact cleanup.");
+  }
+}
+
+async function unlinkExactChatwootArtifact(target, identity) {
+  const current = await lstat(target, { bigint: true });
+  if (!sameProviderProofIdentity(identity, current)) {
+    throw new Error("Refusing cleanup of a changed Chatwoot evidence artifact.");
+  }
+  await unlink(target);
+  try {
+    await lstat(target);
+    throw new Error("Chatwoot evidence artifact survived exact cleanup.");
+  } catch (error) {
+    if (error?.code !== "ENOENT") throw error;
+  }
+}
+
+async function cleanupExactImage(tag, revision, expectedRole) {
+  const image = await inspectCleanupOwnedImage(tag, revision, expectedRole);
+  if (!image) return;
   await runCaptured("docker", ["image", "rm", "--force", tag], sanitizedProcessEnvironment());
   const remaining = await runCaptured(
     "docker",
@@ -905,6 +1853,28 @@ async function cleanupExactImage(tag, revision, expectedRole) {
     { allowedExitCodes: [0, 1] },
   );
   if (remaining.trim() !== "") throw new Error("Owned live overlap image tag remains after cleanup.");
+}
+
+async function inspectCleanupOwnedImage(tag, revision, expectedRole) {
+  const inspection = await runCaptured(
+    "docker",
+    ["image", "inspect", "--format", "{{json .}}", tag],
+    sanitizedProcessEnvironment(),
+    { allowedExitCodes: [0, 1] },
+  );
+  if (inspection.trim() === "") return null;
+  let image;
+  try {
+    image = JSON.parse(inspection);
+  } catch {
+    throw new Error("Owned cleanup image inspection is invalid.");
+  }
+  if (!/^sha256:[a-f0-9]{64}$/.test(image?.Id ?? "")
+    || image?.Config?.Labels?.["org.opencontainers.image.revision"] !== revision
+    || image?.Config?.Labels?.["io.clean-pay.role"] !== expectedRole) {
+    throw new Error("Refusing cleanup of an image outside the exact live overlap identity.");
+  }
+  return Object.freeze(image);
 }
 
 async function readCleanupOwnership(plan) {
@@ -921,9 +1891,43 @@ async function readCleanupOwnership(plan) {
   }
   const names = await readdir(plan.ownedRoot);
   if (!names.includes(stateFilename)) {
-    throw new Error("Live overlap cleanup has no exact ownership receipt; no resources were touched.");
+    await cleanupIncompletePreparationRoot(plan, names);
+    return null;
   }
   return readOwnership(plan, path.join(plan.ownedRoot, stateFilename));
+}
+
+async function cleanupIncompletePreparationRoot(plan, names) {
+  if (names.length === 0) {
+    await rmdir(plan.ownedRoot);
+    return;
+  }
+  if (names.length !== 1
+    || !/^clean-pay-behavioral-baseline-[A-Za-z0-9_-]{6}$/.test(names[0])) {
+    throw new Error("Live overlap cleanup has no exact ownership receipt; no resources were touched.");
+  }
+  const baselineRoot = path.join(plan.ownedRoot, names[0]);
+  if (path.dirname(baselineRoot) !== plan.ownedRoot) {
+    throw new Error("Live overlap incomplete preparation root escaped its exact plan.");
+  }
+  let receiptBytes;
+  try {
+    receiptBytes = await readBoundedFile(path.join(baselineRoot, "receipt.json"), 4_096);
+  } catch (error) {
+    throw new Error(
+      "Live overlap cleanup has no exact ownership receipt; no resources were touched.",
+      { cause: error },
+    );
+  }
+  await cleanupBehavioralBaselineSource({
+    expectedReceiptSha256: sha256(receiptBytes),
+    root: baselineRoot,
+    temporaryRoot: plan.ownedRoot,
+  });
+  if ((await readdir(plan.ownedRoot)).length !== 0) {
+    throw new Error("Live overlap incomplete preparation root retained unexpected entries.");
+  }
+  await rmdir(plan.ownedRoot);
 }
 
 async function cleanupOwnedInputRoot(plan, ownership) {
@@ -969,12 +1973,19 @@ async function cleanupOwnedInputRoot(plan, ownership) {
   for (const roleName of ["baseline", "candidate"]) {
     await cleanupGeneratedEnvironment(path.join(plan.ownedRoot, plan.roles[roleName].envDirectoryName));
   }
-  for (const filename of [...Object.values(attestationFilenames), stateFilename]) {
+  for (const filename of [
+    ...Object.values(attestationFilenames),
+    chatwootEvidenceCleanupFilename,
+  ]) {
     await unlinkRegularIfPresent(path.join(plan.ownedRoot, filename));
   }
   const remaining = await readdir(plan.ownedRoot);
-  if (remaining.length !== 0) {
+  if (JSON.stringify(remaining) !== JSON.stringify([stateFilename])) {
     throw new Error("Live overlap input root contains an unexpected entry; refusing recursive cleanup.");
+  }
+  await unlinkRegularIfPresent(path.join(plan.ownedRoot, stateFilename));
+  if ((await readdir(plan.ownedRoot)).length !== 0) {
+    throw new Error("Live overlap ownership survived exact input cleanup.");
   }
   await rmdir(plan.ownedRoot);
 }
@@ -1114,12 +2125,13 @@ async function unlinkRegularIfPresent(target) {
   }
 }
 
-async function writeFailure(plan, error) {
+async function writeFailure(plan, error, phase) {
   try {
     await writeResult(plan, "failure.json", {
       schemaVersion: 1,
       status: "production-image-live-overlap-failed",
       captureId: plan.captureId,
+      phase: liveOverlapPhases.includes(phase) ? phase : "runner",
       ...createJourneySanitizedErrorEvidence(error),
     });
   } catch {
@@ -1328,6 +2340,10 @@ function sameProviderProofIdentity(left, right) {
 }
 
 async function validateChatwootEvidence(plan, inputs) {
+  return (await inspectChatwootEvidence(plan, inputs)).summary;
+}
+
+async function inspectChatwootEvidence(plan, inputs) {
   const target = plan.chatwootEvidenceRoot;
   const rootBefore = await lstat(target, { bigint: true });
   if (!rootBefore.isDirectory() || rootBefore.isSymbolicLink()
@@ -1347,10 +2363,18 @@ async function validateChatwootEvidence(plan, inputs) {
     throw new Error("Chatwoot raw evidence root is not exact.");
   }
 
-  const proofBytes = await readBoundedFile(
-    path.join(target, "proof.json"),
+  const proofTarget = path.join(target, "proof.json");
+  const proofArtifact = await readBoundedFileArtifact(
+    proofTarget,
     maximumChatwootProofBytes,
   );
+  const proofBytes = proofArtifact.bytes;
+  const cleanupArtifacts = [{
+    byteLength: proofBytes.byteLength,
+    identity: proofArtifact.identity,
+    sha256: sha256(proofBytes),
+    target: proofTarget,
+  }];
   let proof;
   try {
     proof = assertChatwootPhaseProof(JSON.parse(proofBytes.toString("utf8")));
@@ -1381,10 +2405,12 @@ async function validateChatwootEvidence(plan, inputs) {
     sha256: sha256(proofBytes),
   }];
   for (const relativePath of expectedScreenshotPaths) {
-    const screenshot = await readBoundedFile(
-      path.join(target, ...relativePath.split("/")),
+    const screenshotTarget = path.join(target, ...relativePath.split("/"));
+    const screenshotArtifact = await readBoundedFileArtifact(
+      screenshotTarget,
       maximumChatwootScreenshotBytes,
     );
+    const screenshot = screenshotArtifact.bytes;
     if (screenshot.byteLength < pngSignature.byteLength
       || !screenshot.subarray(0, pngSignature.byteLength).equals(pngSignature)) {
       throw new Error("Chatwoot raw screenshot is not an exact PNG artifact.");
@@ -1394,12 +2420,26 @@ async function validateChatwootEvidence(plan, inputs) {
       byteLength: screenshot.byteLength,
       sha256: sha256(screenshot),
     });
+    cleanupArtifacts.push({
+      byteLength: screenshot.byteLength,
+      identity: screenshotArtifact.identity,
+      sha256: sha256(screenshot),
+      target: screenshotTarget,
+    });
   }
   expectedEntries.sort((left, right) => left.path.localeCompare(right.path));
-  const manifestBytes = await readBoundedFile(
-    path.join(target, "artifact-manifest.json"),
+  const manifestTarget = path.join(target, "artifact-manifest.json");
+  const manifestArtifact = await readBoundedFileArtifact(
+    manifestTarget,
     maximumChatwootManifestBytes,
   );
+  const manifestBytes = manifestArtifact.bytes;
+  cleanupArtifacts.push({
+    byteLength: manifestBytes.byteLength,
+    identity: manifestArtifact.identity,
+    sha256: sha256(manifestBytes),
+    target: manifestTarget,
+  });
   let manifest;
   try {
     manifest = validateChatwootArtifactManifest(
@@ -1421,12 +2461,19 @@ async function validateChatwootEvidence(plan, inputs) {
     throw new Error("Chatwoot evidence directory identity changed during validation.");
   }
   return Object.freeze({
-    aggregateSha256: manifest.aggregateSha256,
-    artifactCount: manifest.artifactCount,
-    artifactRoot: path.basename(target),
-    manifestSha256: sha256(manifestBytes),
-    proofSha256: sha256(proofBytes),
-    status: proof.comparison.status,
+    cleanup: Object.freeze({
+      artifacts: Object.freeze(cleanupArtifacts),
+      rawRoot,
+      root: target,
+    }),
+    summary: Object.freeze({
+      aggregateSha256: manifest.aggregateSha256,
+      artifactCount: manifest.artifactCount,
+      artifactRoot: path.basename(target),
+      manifestSha256: sha256(manifestBytes),
+      proofSha256: sha256(proofBytes),
+      status: proof.comparison.status,
+    }),
   });
 }
 
@@ -1691,12 +2738,20 @@ function sha256(value) {
   return createHash("sha256").update(value).digest("hex");
 }
 
-function parseArguments(values) {
+export function parseLiveOverlapArguments(inputValues) {
+  const values = [...inputValues];
   const mode = values.shift();
-  if (!new Set(["run", "cleanup"]).has(mode) || values.length !== 6) {
-    throw new Error("usage: run-production-image-live-overlap.mjs run|cleanup --capture-id ID --candidate-revision SHA --temporary-root PATH");
+  const phaseSelected = mode === "run" && values.length === 8;
+  if (!new Set(["run", "cleanup"]).has(mode)
+    || (values.length !== 6 && !phaseSelected)) {
+    throw new Error("usage: run-production-image-live-overlap.mjs run|cleanup --capture-id ID --candidate-revision SHA --temporary-root PATH [--phase PHASE]");
   }
-  const allowed = new Set(["--capture-id", "--candidate-revision", "--temporary-root"]);
+  const allowed = new Set([
+    "--capture-id",
+    "--candidate-revision",
+    "--temporary-root",
+    ...(mode === "run" ? ["--phase"] : []),
+  ]);
   const parsed = new Map();
   for (let index = 0; index < values.length; index += 2) {
     const name = values[index];
@@ -1706,8 +2761,14 @@ function parseArguments(values) {
     }
     parsed.set(name, value);
   }
+  const phase = parsed.get("--phase") ?? null;
+  if ((phaseSelected && !liveOverlapPhases.includes(phase))
+    || (!phaseSelected && phase !== null)) {
+    throw new Error("Live overlap CLI phase does not match the fixed execution plan.");
+  }
   return Object.freeze({
     mode,
+    phase,
     plan: createLiveOverlapPlan({
       captureId: parsed.get("--capture-id"),
       candidateRevision: parsed.get("--candidate-revision"),
@@ -1717,8 +2778,8 @@ function parseArguments(values) {
 }
 
 async function main() {
-  const { mode, plan } = parseArguments(process.argv.slice(2));
-  if (mode === "run") await run(plan);
+  const { mode, phase, plan } = parseLiveOverlapArguments(process.argv.slice(2));
+  if (mode === "run") await run(plan, phase);
   else await cleanup(plan);
 }
 

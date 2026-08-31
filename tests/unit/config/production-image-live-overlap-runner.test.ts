@@ -10,12 +10,17 @@ import {
   chatwootProofArguments,
   createLiveOverlapPlan,
   createRunnerChatwootLiveProofPlan,
+  exactPersistedRoleProofInput,
+  parseLiveOverlapArguments,
   proofArguments,
   providerProofArguments,
   validateChatwootArtifactManifest,
+  validateChatwootEvidenceCleanupCapability,
   validateLiveOverlapImageInspection,
   validateLiveOverlapOwnership,
+  validateLiveOverlapPhaseReceipt,
 } from "../../../tests/browser/journeys/run-production-image-live-overlap.mjs";
+import { expectedChatwootScreenshotPaths } from "../../../tests/browser/journeys/chatwoot-phase-evidence-writer.mjs";
 import {
   AUTHORIZED_UNVERIFIED_EMAIL_SEMANTIC_DIFF,
   assertUnverifiedEmailLoginProof,
@@ -102,6 +107,131 @@ function proofInputs() {
       migrationAssetImageDigest: `sha256:${"4".repeat(64)}`,
       resolverIp: "127.0.0.22",
     },
+  };
+}
+
+const phaseNames = [
+  "preparation",
+  "build",
+  "attestation",
+  "public",
+  "provider",
+  "authenticated",
+  "chatwoot",
+  "evidence",
+] as const;
+const phaseOwnershipSha256 = "a".repeat(64);
+const phasePublicBuildContract = {
+  sha256: "b".repeat(64),
+  version: "1",
+};
+
+function validPhaseResult(phase: typeof phaseNames[number]) {
+  const digest = "c".repeat(64);
+  const imageDigest = "sha256:" + "d".repeat(64);
+  if (phase === "preparation") {
+    return {
+      baselineArchiveSha256:
+        "6ccdccdd162ede951850759392a72376792988080307b4e29ae0cffef2397a03",
+      baselineReceiptSha256: digest,
+      status: "immutable-baseline-owned",
+    };
+  }
+  if (phase === "build") {
+    return {
+      imageCount: 4,
+      imageTagSha256s: {
+        baselineApplication: digest,
+        baselineMigration: digest,
+        candidateApplication: digest,
+        candidateMigration: digest,
+      },
+      status: "four-production-images-built",
+    };
+  }
+  if (phase === "attestation") {
+    return {
+      assetAttestationSha256s: { baseline: digest, candidate: digest },
+      contractSha256s: { baseline: digest, candidate: digest },
+      images: {
+        baselineApplication: imageDigest,
+        baselineMigration: imageDigest,
+        candidateApplication: imageDigest,
+        candidateMigration: imageDigest,
+      },
+      status: "four-images-and-static-assets-attested",
+    };
+  }
+  if (phase === "public") {
+    return {
+      artifact: "proof.json",
+      artifactCountPerSide: 126,
+      caseCount: 42,
+      sha256: digest,
+      status: "live-public-characterization-overlap-proven-after-exact-cleanup",
+    };
+  }
+  if (phase === "provider") {
+    return {
+      artifact: "provider-overlap.json",
+      sha256: digest,
+      status: "proven",
+    };
+  }
+  if (phase === "authenticated") {
+    return {
+      linkedEmailFailureFeedback: {
+        artifact: "linked-email-failure-feedback.json",
+        authorizedSemanticDiff: AUTHORIZED_LINKED_EMAIL_FAILURE_SEMANTIC_DIFF,
+        sha256: digest,
+        status: "linked-email-auth-failure-feedback-specific",
+      },
+      unverifiedEmailLogin: {
+        artifact: "unverified-email-login.json",
+        authorizedSemanticDiff: AUTHORIZED_UNVERIFIED_EMAIL_SEMANTIC_DIFF,
+        sha256: digest,
+        status: "existing-unverified-email-login-gated",
+      },
+    };
+  }
+  if (phase === "chatwoot") {
+    return {
+      aggregateSha256: digest,
+      artifactCount: 19,
+      artifactRoot: "clean-pay-chatwoot-phase-evidence-" + captureId,
+      manifestSha256: digest,
+      proofSha256: digest,
+      status: "proven",
+    };
+  }
+  return {
+    completionSha256: digest,
+    status: "sanitized-evidence-finalized",
+  };
+}
+
+function phaseReceipt(
+  phase: typeof phaseNames[number],
+  status: "started" | "completed",
+  previousReceiptSha256: string | null,
+  startedReceiptSha256: string | null = null,
+) {
+  return {
+    schemaVersion: 1,
+    kind: "clean-pay-production-image-live-overlap-phase",
+    status,
+    phase,
+    phaseIndex: phaseNames.indexOf(phase),
+    captureId,
+    baselineRevision,
+    candidateRevision,
+    ownershipSha256:
+      status === "started" && phase === "preparation" ? null : phaseOwnershipSha256,
+    previousReceiptSha256,
+    publicBuildContractVersion: phasePublicBuildContract.version,
+    publicBuildContractSha256: phasePublicBuildContract.sha256,
+    startedReceiptSha256: status === "completed" ? startedReceiptSha256 : null,
+    ...(status === "completed" ? { result: validPhaseResult(phase) } : {}),
   };
 }
 
@@ -735,5 +865,305 @@ describe("ephemeral production-image live overlap runner", () => {
     expect(runner).not.toContain("docker system prune");
     expect(runner).not.toContain("docker builder prune");
     expect(runner).not.toContain("docker volume prune");
+  });
+
+  it("accepts only the fixed phase CLI while preserving one-shot run and cleanup", () => {
+    const core = [
+      "--capture-id",
+      captureId,
+      "--candidate-revision",
+      candidateRevision,
+      "--temporary-root",
+      externalTemporaryRoot,
+    ];
+    expect(parseLiveOverlapArguments(["run", ...core])).toMatchObject({
+      mode: "run",
+      phase: null,
+    });
+    expect(parseLiveOverlapArguments(["cleanup", ...core])).toMatchObject({
+      mode: "cleanup",
+      phase: null,
+    });
+    for (const phase of phaseNames) {
+      expect(parseLiveOverlapArguments(["run", ...core, "--phase", phase]))
+        .toMatchObject({ mode: "run", phase });
+    }
+    for (const invalid of [
+      ["run", ...core, "--phase", "unknown"],
+      ["run", ...core, "--phase"],
+      ["cleanup", ...core, "--phase", "build"],
+      ["run", ...core, "--phase=build", "unused"],
+      ["run", ...core, "--capture-id", captureId],
+      ["run", ...core, "--phase", "build", "--extra", "value"],
+    ]) {
+      expect(() => parseLiveOverlapArguments(invalid)).toThrow();
+    }
+    expect(runner).toContain(
+      "const { mode, phase, plan } = parseLiveOverlapArguments(process.argv.slice(2));",
+    );
+    expect(runner).toContain('if (mode === "run") await run(plan, phase);');
+  });
+
+  it("validates the exact create-only phase chain and sanitized projections", () => {
+    let previousReceiptSha256: string | null = null;
+    const completedReceipts = [];
+    for (const phase of phaseNames) {
+      const started = phaseReceipt(phase, "started", previousReceiptSha256);
+      expect(validateLiveOverlapPhaseReceipt(started, {
+        candidateRevision,
+        captureId,
+        ownershipSha256: phase === "preparation" ? null : phaseOwnershipSha256,
+        phase,
+        previousReceiptSha256,
+        publicBuildContract: phasePublicBuildContract,
+        startedReceiptSha256: null,
+        status: "started",
+      })).toEqual(started);
+
+      const startedReceiptSha256 = createHash("sha256")
+        .update(Buffer.from(JSON.stringify(started, null, 2) + "\n", "utf8"))
+        .digest("hex");
+      const completed = phaseReceipt(
+        phase,
+        "completed",
+        previousReceiptSha256,
+        startedReceiptSha256,
+      );
+      expect(validateLiveOverlapPhaseReceipt(completed, {
+        candidateRevision,
+        captureId,
+        ownershipSha256: phaseOwnershipSha256,
+        phase,
+        previousReceiptSha256,
+        publicBuildContract: phasePublicBuildContract,
+        startedReceiptSha256,
+        status: "completed",
+      })).toEqual(completed);
+      completedReceipts.push(completed);
+      previousReceiptSha256 = createHash("sha256")
+        .update(Buffer.from(JSON.stringify(completed, null, 2) + "\n", "utf8"))
+        .digest("hex");
+    }
+
+    const serialized = JSON.stringify(completedReceipts);
+    expect(serialized).not.toContain(externalTemporaryRoot);
+    expect(serialized).not.toContain("clean-pay:live-overlap-");
+    expect(serialized).not.toContain("clean-pay-browser-journey-provider-proof-");
+    expect(serialized).not.toContain("http://127.0.0.1:");
+    expect(serialized).not.toContain('"inputs"');
+    expect(serialized).not.toContain('"imageTags"');
+
+    const publicStartedReceiptSha256 = "1".repeat(64);
+    const publicReceipt = phaseReceipt(
+      "public",
+      "completed",
+      "e".repeat(64),
+      publicStartedReceiptSha256,
+    );
+    expect(() => validateLiveOverlapPhaseReceipt({
+      ...publicReceipt,
+      ambientPath: externalTemporaryRoot,
+    }, {
+      candidateRevision,
+      captureId,
+      ownershipSha256: phaseOwnershipSha256,
+      phase: "public",
+      previousReceiptSha256: "e".repeat(64),
+      publicBuildContract: phasePublicBuildContract,
+      startedReceiptSha256: publicStartedReceiptSha256,
+      status: "completed",
+    })).toThrow(/exact contract/u);
+    expect(() => validateLiveOverlapPhaseReceipt({
+      ...publicReceipt,
+      previousReceiptSha256: "f".repeat(64),
+    }, {
+      candidateRevision,
+      captureId,
+      ownershipSha256: phaseOwnershipSha256,
+      phase: "public",
+      previousReceiptSha256: "e".repeat(64),
+      publicBuildContract: phasePublicBuildContract,
+      startedReceiptSha256: publicStartedReceiptSha256,
+      status: "completed",
+    })).toThrow(/chain contract/u);
+    expect(() => validateLiveOverlapPhaseReceipt({
+      ...publicReceipt,
+      startedReceiptSha256: "2".repeat(64),
+    }, {
+      candidateRevision,
+      captureId,
+      ownershipSha256: phaseOwnershipSha256,
+      phase: "public",
+      previousReceiptSha256: "e".repeat(64),
+      publicBuildContract: phasePublicBuildContract,
+      startedReceiptSha256: publicStartedReceiptSha256,
+      status: "completed",
+    })).toThrow(/chain contract/u);
+    expect(() => validateLiveOverlapPhaseReceipt({
+      ...publicReceipt,
+      result: { ...publicReceipt.result, inputPath: externalTemporaryRoot },
+    }, {
+      candidateRevision,
+      captureId,
+      ownershipSha256: phaseOwnershipSha256,
+      phase: "public",
+      previousReceiptSha256: "e".repeat(64),
+      publicBuildContract: phasePublicBuildContract,
+      startedReceiptSha256: publicStartedReceiptSha256,
+      status: "completed",
+    })).toThrow(/exact contract/u);
+  });
+
+  it("reloads persisted proof inputs only from exact plan-owned paths", () => {
+    const value = plan();
+    const baseline = {
+      ...proofInputs().baseline,
+      contractPath: path.join(
+        value.ownedRoot,
+        value.roles.baseline.envDirectoryName,
+        "browser-journey-contract.json",
+      ),
+      assetAttestationPath: path.join(
+        value.ownedRoot,
+        value.roles.baseline.attestationFilename,
+      ),
+    };
+    expect(exactPersistedRoleProofInput(value, { baseline }, "baseline"))
+      .toEqual(baseline);
+    expect(() => exactPersistedRoleProofInput(value, {
+      baseline: {
+        ...baseline,
+        contractPath: path.join(externalTemporaryRoot, "substituted-contract.json"),
+      },
+    }, "baseline")).toThrow(/persisted baseline proof path/u);
+    expect(() => exactPersistedRoleProofInput(value, {
+      baseline: {
+        ...baseline,
+        assetAttestationPath: path.join(
+          value.ownedRoot,
+          value.roles.candidate.attestationFilename,
+        ),
+      },
+    }, "baseline")).toThrow(/persisted baseline proof path/u);
+    expect(proofArguments(value, proofInputs())).toHaveLength(18);
+  });
+
+  it("seals only the exact restartable Chatwoot cleanup inventory", () => {
+    const value = plan();
+    const paths = [
+      "artifact-manifest.json",
+      "proof.json",
+      ...expectedChatwootScreenshotPaths(),
+    ].sort();
+    const capability = {
+      schemaVersion: 1,
+      kind: "clean-pay-chatwoot-evidence-cleanup-capability",
+      captureId,
+      evidenceRootName: "clean-pay-chatwoot-phase-evidence-" + captureId,
+      artifactCount: paths.length,
+      artifacts: paths.map((artifactPath) => ({
+        byteLength: 1,
+        path: artifactPath,
+        sha256: "a".repeat(64),
+      })),
+    };
+    expect(validateChatwootEvidenceCleanupCapability(capability, value))
+      .toEqual(capability);
+    expect(() => validateChatwootEvidenceCleanupCapability({
+      ...capability,
+      artifacts: capability.artifacts.slice(1),
+    }, value)).toThrow(/header/u);
+    expect(() => validateChatwootEvidenceCleanupCapability({
+      ...capability,
+      artifacts: capability.artifacts.map((entry, index) => (
+        index === 0 ? { ...entry, path: "raw/unowned.png" } : entry
+      )),
+    }, value)).toThrow(/outside the exact inventory/u);
+    expect(() => validateChatwootEvidenceCleanupCapability({
+      ...capability,
+      evidenceRootName: externalTemporaryRoot,
+    }, value)).toThrow(/header/u);
+    expect(() => validateChatwootEvidenceCleanupCapability({
+      ...capability,
+      imageTag: value.roles.candidate.appImage,
+    }, value)).toThrow(/exact contract/u);
+  });
+
+  it("runs eight ordered diagnostic phases before evidence upload and exact cleanup", () => {
+    const productionImage = workflow.slice(
+      workflow.indexOf("  production-image-browser-journey:"),
+      workflow.indexOf("  remnashop-migration-rehearsal:"),
+    );
+    const containerd = productionImage.indexOf(
+      "Require the containerd image identity store",
+    );
+    const browser = productionImage.indexOf(
+      "Install locked dependencies and pinned Chromium",
+    );
+    const capture = productionImage.indexOf(
+      "Derive the unique live-pair capture identity",
+    );
+    let prior = capture;
+    for (const phase of phaseNames) {
+      const marker = "--phase " + phase;
+      const position = productionImage.indexOf(marker);
+      expect(position).toBeGreaterThan(prior);
+      expect(productionImage.split(marker)).toHaveLength(2);
+      prior = position;
+    }
+    const upload = productionImage.indexOf(
+      "Preserve sanitized browser journey evidence",
+    );
+    const cleanup = productionImage.indexOf(
+      "Clean up only the owned browser journey project",
+    );
+    expect(containerd).toBeGreaterThan(-1);
+    expect(browser).toBeGreaterThan(containerd);
+    expect(capture).toBeGreaterThan(browser);
+    expect(upload).toBeGreaterThan(prior);
+    expect(cleanup).toBeGreaterThan(upload);
+    expect(productionImage).toContain("/phase-*.json");
+    expect(productionImage.match(
+      /run-production-image-live-overlap\.mjs run/g,
+    )).toHaveLength(8);
+    expect(productionImage).not.toContain("continue-on-error:");
+    expect(runner).toContain(
+      "Live overlap phase replay, overlap, or forward state is forbidden.",
+    );
+    expect(runner).toContain(
+      'phase: liveOverlapPhases.includes(phase) ? phase : "runner"',
+    );
+    const evidenceSeal = runner.indexOf(
+      'const evidenceReceipt = await completePhase(plan, "evidence"',
+    );
+    const completionCommit = runner.indexOf(
+      'await writeResult(plan, "completion.json", completion)',
+    );
+    expect(evidenceSeal).toBeGreaterThan(-1);
+    expect(completionCommit).toBeGreaterThan(evidenceSeal);
+    expect(runner).toContain(
+      'startedReceiptSha256: status === "completed" ? context.started.sha256 : null',
+    );
+    const chatwootEvidenceCleanup = runner.indexOf(
+      "await cleanupFinalizedChatwootEvidence(plan, ownership)",
+    );
+    const providerProjectCleanup = runner.indexOf(
+      "await cleanupExactProject(ownership.projects.provider[roleName])",
+    );
+    expect(chatwootEvidenceCleanup).toBeGreaterThan(-1);
+    expect(providerProjectCleanup).toBeGreaterThan(chatwootEvidenceCleanup);
+    expect(runner).toContain("await unlinkExactChatwootArtifact(");
+    expect(runner).toContain("Chatwoot evidence root survived exact cleanup.");
+    expect(runner).toContain(
+      "clean-pay-chatwoot-evidence-cleanup-capability",
+    );
+    expect(runner).toContain(
+      "Chatwoot evidence artifact changed after cleanup was sealed.",
+    );
+    expect(runner).toContain("if (errors.length === 0) {");
+    expect(runner.indexOf("const remaining = await readdir(plan.ownedRoot)"))
+      .toBeLessThan(runner.indexOf(
+        "await unlinkRegularIfPresent(path.join(plan.ownedRoot, stateFilename))",
+      ));
   });
 });
