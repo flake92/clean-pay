@@ -1,12 +1,12 @@
 "use client";
 
-import { useEffect } from "react";
-
 import { loadChatwootSupportContextAction } from "@/app/actions/chatwoot";
 import type { ChatwootWidgetConfig } from "@/application/models/chatwoot";
-import { useChatwootWidgetController } from "@/frontend/components/chatwoot-widget-controller";
 import {
-  enterChatwootGuestMode,
+  useChatwootGuestBoundaryController,
+  useChatwootWidgetController,
+} from "@/frontend/components/chatwoot-widget-controller";
+import {
   loadChatwootSupportContextCached,
 } from "@/frontend/lib/chatwoot";
 
@@ -24,9 +24,7 @@ export function ChatwootWidget({ config }: { config: ChatwootWidgetConfig }) {
 }
 
 export function ChatwootGuestBoundary() {
-  useEffect(() => {
-    enterChatwootGuestMode();
-  }, []);
+  useChatwootGuestBoundaryController();
 
   return null;
 }
