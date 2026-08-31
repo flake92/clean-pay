@@ -6,7 +6,7 @@ import { describe, expect, it } from "vitest";
 
 import { projectScopedPlaywrightOutputDirectory } from "../../../tests/browser/playwright-output-scope";
 
-const rootConfig = readFileSync("playwright.config.ts", "utf8");
+const rootConfig = readFileSync("config/playwright.config.ts", "utf8");
 const journeyConfig = readFileSync(
   "tests/browser/journeys/playwright.config.ts",
   "utf8",
@@ -96,7 +96,7 @@ describe("production-image Playwright output isolation", () => {
       expect(config).not.toContain("CLEAN_PAY_BROWSER_PLAYWRIGHT_OUTPUT_DIR");
     }
     expect(fixtureManifest).toContain('"../playwright-output-scope.ts"');
-    expect(fixtureManifest).toContain('"../../../playwright.config.ts"');
+    expect(fixtureManifest).toContain('"../../../config/playwright.config.ts"');
   });
 
   it("preserves failure evidence from both Playwright phases and the sanitized contract", () => {

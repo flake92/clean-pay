@@ -1,17 +1,19 @@
 import { defineConfig } from "@playwright/test";
+import path from "node:path";
 
-import { projectScopedPlaywrightOutputDirectory } from "./tests/browser/playwright-output-scope";
-import { DETERMINISTIC_CHROMIUM_LAUNCH_ARGS } from "./tests/browser/render-policy";
+import { projectScopedPlaywrightOutputDirectory } from "../tests/browser/playwright-output-scope";
+import { DETERMINISTIC_CHROMIUM_LAUNCH_ARGS } from "../tests/browser/render-policy";
 
+const projectRoot = path.resolve(__dirname, "..");
 const configuredBaseUrl = process.env.CLEAN_PAY_BROWSER_BASE_URL?.trim();
 
 export default defineConfig({
   metadata: { cleanPayRendererPolicy: "canonical" },
-  testDir: "./tests/browser",
+  testDir: path.join(projectRoot, "tests", "browser"),
   testMatch: "**/*.spec.ts",
   testIgnore: "**/journeys/**",
   outputDir: projectScopedPlaywrightOutputDirectory(
-    "test-results/browser",
+    path.join(projectRoot, "test-results", "browser"),
     process.env.CLEAN_PAY_BROWSER_PLAYWRIGHT_OUTPUT_SCOPE,
   ),
   // Pixel and blocked-resource capture is intentionally serial. Chromium's
