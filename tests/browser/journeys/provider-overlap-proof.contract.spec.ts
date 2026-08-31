@@ -1990,6 +1990,38 @@ test("prearms profile load and keeps the exact cabinet URL at DOM content", asyn
   }
 });
 
+test("drains profile requests before the synthetic cabinet navigation", async () => {
+  const source = await readFile(
+    path.resolve(__dirname, "prove-provider-overlap.mjs"),
+    "utf8",
+  );
+  const profileHeading = source.indexOf(
+    'page.getByRole("heading", { name: "Профиль", level: 1 })',
+  );
+  const profileNetworkQuiescence = source.indexOf(
+    'await page.waitForLoadState("networkidle", { timeout: 15_000 });',
+    profileHeading,
+  );
+  const quiescentHistoryDrain = source.indexOf(
+    "await drainProviderOverlapHistoryBindings(page);",
+    profileNetworkQuiescence,
+  );
+  const overlapArm = source.indexOf("await armOverlap();", profileNetworkQuiescence);
+  const cabinetNavigation = source.indexOf(
+    'await page.goto("https://pay.ci.clean-pay.dev/cabinet"',
+    overlapArm,
+  );
+
+  expect(profileHeading).toBeGreaterThan(-1);
+  expect(profileNetworkQuiescence).toBeGreaterThan(profileHeading);
+  expect(source.slice(profileHeading, profileNetworkQuiescence))
+    .toContain("await drainProviderOverlapHistoryBindings(page);");
+  expect(quiescentHistoryDrain).toBeGreaterThan(profileNetworkQuiescence);
+  expect(overlapArm).toBeGreaterThan(quiescentHistoryDrain);
+  expect(cabinetNavigation).toBeGreaterThan(overlapArm);
+  expect(source).toContain("Provider profile network quiescence barrier failed.");
+});
+
 test("registers exact request identities before response capture and routed continuation", async () => {
   const runnerSource = await readFile(
     path.resolve(__dirname, "prove-provider-overlap.mjs"),
