@@ -1257,6 +1257,27 @@ describe("clean architecture boundaries", () => {
     expect(composition).toContain("export const productionPaymentMaintenanceRunner");
   });
 
+  it("constructs the shared Chatwoot identity guard and gateway only in app composition", () => {
+    const composition = readFileSync("src/app/_composition/action-runtime.ts", "utf8");
+    const gateway = readFileSync(
+      "src/backend/integrations/support/chatwoot-identity-gateway.ts",
+      "utf8",
+    );
+    const guard = readFileSync(
+      "src/backend/integrations/support/chatwoot-identity-request-guard.ts",
+      "utf8",
+    );
+
+    expect(gateway).toContain("export function createProductionChatwootIdentityGateway(");
+    expect(gateway).not.toContain("productionChatwootIdentityRequestGuard");
+    expect(gateway).not.toContain("export const productionChatwootIdentityGateway");
+    expect(guard).not.toContain("export const productionChatwootIdentityRequestGuard");
+    expect(composition).toContain("createChatwootIdentityRequestGuard()");
+    expect(composition).toContain(
+      "createProductionChatwootIdentityGateway(\n    productionChatwootIdentityRequestGuard,",
+    );
+  });
+
   it("routes every Next.js controller adapter dependency through app composition", () => {
     for (const { file, source } of files("src/app/**/*.{ts,tsx}")) {
       if (file.replaceAll("\\", "/").startsWith("src/app/_composition/")) continue;

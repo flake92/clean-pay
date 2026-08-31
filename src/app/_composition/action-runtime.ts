@@ -7,23 +7,27 @@ import {
   clearReferralAttributionCookie,
   readReferralAttributionCookie,
 } from "@/backend/integrations/referral/referral-attribution";
-import { productionChatwootIdentityGateway } from "@/backend/integrations/support/chatwoot-identity-gateway";
+import { createProductionChatwootIdentityGateway } from "@/backend/integrations/support/chatwoot-identity-gateway";
 import {
   ChatwootIdentityCapacityError,
-  productionChatwootIdentityRequestGuard,
+  createChatwootIdentityRequestGuard,
 } from "@/backend/integrations/support/chatwoot-identity-request-guard";
 
 export const productionAuthCommands = createProductionAuthCommands();
 export const productionPasskeyManagementGateway =
   createProductionPasskeyManagementGateway();
+export const productionChatwootIdentityRequestGuard =
+  createChatwootIdentityRequestGuard();
+export const productionChatwootIdentityGateway =
+  createProductionChatwootIdentityGateway(
+    productionChatwootIdentityRequestGuard,
+  );
 
 // Server Actions depend only on this framework-level composition root. Adapter
 // construction and process-scoped singletons never leak into action modules.
 export {
   ChatwootIdentityCapacityError,
   clearReferralAttributionCookie,
-  productionChatwootIdentityGateway,
-  productionChatwootIdentityRequestGuard,
   productionLinkAccountCommands,
   productionPaymentMaintenanceRunner,
   productionTelegramAccountMergeGateway,

@@ -6,7 +6,7 @@ import {
   getCurrentRefreshSessionCandidateReadOnly,
   getCurrentSessionReadOnly,
 } from "@/backend/integrations/sessions/web-session-service";
-import { productionChatwootIdentityRequestGuard } from "@/backend/integrations/support/chatwoot-identity-request-guard";
+import type { createChatwootIdentityRequestGuard } from "@/backend/integrations/support/chatwoot-identity-request-guard";
 import { logger } from "@/backend/observability/logger";
 import { recordUpstreamRequest } from "@/backend/observability/metrics";
 import {
@@ -62,7 +62,15 @@ async function readContactIdentifier(response: Response) {
   }
 }
 
-export const productionChatwootIdentityGateway: ChatwootIdentityGateway = {
+type ChatwootIdentityRequestGuard = Pick<
+  ReturnType<typeof createChatwootIdentityRequestGuard>,
+  "runProbe"
+>;
+
+export function createProductionChatwootIdentityGateway(
+  requestGuard: ChatwootIdentityRequestGuard,
+): ChatwootIdentityGateway {
+  return {
   async loadActor() {
     // AppShell mounts the widget only after the same read-only access-session
     // check. Do not rotate a one-time refresh token from a bounded polling
@@ -103,7 +111,7 @@ export const productionChatwootIdentityGateway: ChatwootIdentityGateway = {
     endpoint.searchParams.set("website_token", chatwoot.websiteToken);
 
     try {
-      return await productionChatwootIdentityRequestGuard.runProbe({
+      return await requestGuard.runProbe({
         sessionId: actor.sessionId,
         conversationToken,
         work: async () => {
@@ -200,5 +208,6 @@ export const productionChatwootIdentityGateway: ChatwootIdentityGateway = {
     } catch {
       return { status: "pending" };
     }
-  },
-};
+    },
+  };
+}

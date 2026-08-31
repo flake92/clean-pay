@@ -27,13 +27,11 @@ vi.mock("@/backend/observability/logger", () => ({
 vi.mock("@/backend/observability/metrics", () => ({
   recordUpstreamRequest: mocks.recordUpstreamRequest,
 }));
-vi.mock("@/backend/integrations/support/chatwoot-identity-request-guard", () => ({
-  productionChatwootIdentityRequestGuard: {
-    runProbe: mocks.runProbe,
-  },
-}));
+import { createProductionChatwootIdentityGateway } from "@/backend/integrations/support/chatwoot-identity-gateway";
 
-import { productionChatwootIdentityGateway } from "@/backend/integrations/support/chatwoot-identity-gateway";
+const productionChatwootIdentityGateway = createProductionChatwootIdentityGateway({
+  runProbe: mocks.runProbe,
+});
 
 const actor = {
   status: "authenticated" as const,
