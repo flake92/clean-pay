@@ -97,6 +97,41 @@ describe("profile e-mail change feedback", () => {
     vi.clearAllMocks();
   });
 
+  it("keeps the Sakai e-mail form shell and control order exact", async () => {
+    await act(async () => {
+      root.render(createElement(ProfilePanel, {
+        model: {
+          status: "ready",
+          user: {
+            authType: "email",
+            email: "old@example.com",
+            emailVerified: true,
+            pendingEmail: null,
+            telegramId: "777",
+          },
+          emailReminders: { status: "unavailable" },
+        },
+      }));
+    });
+
+    const emailInput = container.querySelector<HTMLInputElement>('input[type="email"]')!;
+    const emailForm = emailInput.closest("form")!;
+    expect([...emailForm.children].map(({ tagName }) => tagName)).toEqual([
+      "LABEL",
+      "DIV",
+    ]);
+    expect(emailInput).toMatchObject({
+      autocomplete: "email",
+      maxLength: 255,
+      name: "email",
+      required: true,
+      value: "old@example.com",
+    });
+    expect(emailForm.querySelector("label")?.textContent).toBe("Новый e-mail");
+    expect(emailForm.querySelector("button")?.textContent).toBe("Сохранить и отправить код");
+    expect(emailForm.querySelector("button")?.type).toBe("submit");
+  });
+
   it("shows a failed change next to the e-mail form and brings it into view", async () => {
     await act(async () => {
       root.render(createElement(ProfilePanel, {
