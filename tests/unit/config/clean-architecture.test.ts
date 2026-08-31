@@ -911,6 +911,39 @@ describe("clean architecture boundaries", () => {
     }
   });
 
+  it("keeps Passkey scenarios split behind the stable controller facade", () => {
+    const facadePath = "src/frontend/hooks/use-passkey-actions-controller.ts";
+    const facade = readFileSync(facadePath, "utf8");
+    const facadeFile = ts.createSourceFile(
+      facadePath,
+      facade,
+      ts.ScriptTarget.Latest,
+      true,
+      ts.ScriptKind.TS,
+    );
+    expect(facadeFile.statements.every(ts.isExportDeclaration)).toBe(true);
+    expect(astImportedModules(facade)).toEqual([
+      "@/frontend/hooks/use-passkey-login-controller",
+      "@/frontend/hooks/use-passkey-setup-controller",
+      "@/frontend/hooks/use-webauthn-support",
+    ]);
+
+    const login = readFileSync(
+      "src/frontend/hooks/use-passkey-login-controller.ts",
+      "utf8",
+    );
+    const setup = readFileSync(
+      "src/frontend/hooks/use-passkey-setup-controller.ts",
+      "utf8",
+    );
+    expect(login).toContain("beginPasskeyLoginAction");
+    expect(login).toContain("verifyPasskeyLoginAction");
+    expect(login).not.toContain("beginPasskeyRegistrationAction");
+    expect(setup).toContain("beginPasskeyRegistrationAction");
+    expect(setup).toContain("verifyPasskeyRegistrationAction");
+    expect(setup).not.toContain("beginPasskeyLoginAction");
+  });
+
   it("keeps purchase and extension views behind thin controller boundaries", () => {
     for (const {
       componentName,
