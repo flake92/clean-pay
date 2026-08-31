@@ -264,13 +264,11 @@ test("pins the local capture tool and publishes proof only after owned-stack cle
   expect(source).not.toContain('runCapture("candidate"');
   expect(captureSource).toContain("const settlements = await Promise.allSettled(");
   expect(captureSource).toContain('(["baseline", "candidate"] as const).map');
-  expect(captureSource).toContain("createSerializedPairCaptureTaskLifecycle()");
-  expect(captureSource).toContain("captureLifecycle.capture(");
+  expect(captureSource).toContain("captureInterleavedPairTerminalScreenshots({");
+  expect(captureSource).toContain("const preparedSettlements = await Promise.allSettled(");
   expect(captureSource).toContain("prepareCaptureSample({");
   expect(captureSource).toContain("capturePreparedSample(prepared)");
-  expect(captureSource).toContain("createSerializedPairTerminalScreenshotCapture()");
-  expect(captureSource).toContain("screenshotCapture.capture(role, page)");
-  expect(captureSource).toContain("screenshotCapture.complete(role)");
+  expect(captureSource).toContain("roleIndex === 0 ? screenshots.baseline : screenshots.candidate");
   expect(captureSource).toContain("selectIndependentProcessCharacterizationPairQuorum(");
   expect(captureSource).toContain(
     "if (!(error instanceof PairedPngQuorumError)) throw error;",

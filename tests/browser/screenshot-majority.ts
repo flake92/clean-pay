@@ -6,6 +6,7 @@ export const EXACT_TERMINAL_SCREENSHOT_CAPTURE_COUNT = 3;
 export type PublicOverlapScreenshotRole = "baseline" | "candidate";
 
 type TerminalScreenshotCapture = (page: Page) => Promise<Buffer>;
+type TerminalScreenshotSettle = (page: Page) => Promise<void>;
 type SerializedPairCaptureTask<T> = () => Promise<T>;
 type SerializedPairTerminalTask<TPrepared, TResult> = (prepared: TPrepared) => Promise<TResult>;
 
@@ -41,6 +42,60 @@ export async function captureByteIdenticalTerminalScreenshot(page: Page) {
     screenshots.push(await page.screenshot(exactScreenshotOptions));
   }
   return selectByteIdenticalTerminalScreenshot(screenshots);
+}
+
+/**
+ * Captures both roles in a fixed interleaved sequence inside their paired
+ * Chromium process. Each page receives exactly one warm-up and two terminal
+ * evidence captures. This correlates compositor ordering without retrying,
+ * consulting baseline bytes, or weakening byte-exact evidence.
+ */
+export async function captureInterleavedPairTerminalScreenshots(
+  pages: Readonly<Record<PublicOverlapScreenshotRole, Page>>,
+  capture: TerminalScreenshotCapture = (page) => page.screenshot(exactScreenshotOptions),
+  settle: TerminalScreenshotSettle = settleLoadedViewportResources,
+) {
+  if (!pages.baseline || !pages.candidate || pages.baseline === pages.candidate) {
+    throw new Error("Interleaved paired screenshots require two distinct pages.");
+  }
+  const settlePair = async (phase: string) => {
+    const results = await Promise.allSettled([
+      settle(pages.baseline),
+      settle(pages.candidate),
+    ]);
+    const failures = results.flatMap((result, roleIndex) => (
+      result.status === "rejected"
+        ? [new Error(
+          `Interleaved ${phase} settle failed for ${roleIndex === 0 ? "baseline" : "candidate"}.`,
+          { cause: result.reason },
+        )]
+        : []
+    ));
+    if (failures.length > 0) {
+      throw new AggregateError(failures, `Interleaved ${phase} settle failed.`);
+    }
+  };
+
+  const warmupBaseline = await capture(pages.baseline);
+  const warmupCandidate = await capture(pages.candidate);
+  await settlePair("post-warm-up");
+  const firstBaseline = await capture(pages.baseline);
+  const firstCandidate = await capture(pages.candidate);
+  await settlePair("pre-terminal");
+  const terminalBaseline = await capture(pages.baseline);
+  const terminalCandidate = await capture(pages.candidate);
+  return Object.freeze({
+    baseline: selectByteIdenticalTerminalScreenshot([
+      warmupBaseline,
+      firstBaseline,
+      terminalBaseline,
+    ]),
+    candidate: selectByteIdenticalTerminalScreenshot([
+      warmupCandidate,
+      firstCandidate,
+      terminalCandidate,
+    ]),
+  });
 }
 
 /**
