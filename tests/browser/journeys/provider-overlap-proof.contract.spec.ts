@@ -1025,6 +1025,20 @@ test("emits bounded Docker diagnostics only when a provider failure contains the
   );
 });
 
+test("publishes only bounded phase enums for live provider failure diagnosis", async () => {
+  const runner = await readFile(
+    path.resolve(__dirname, "prove-provider-overlap.mjs"),
+    "utf8",
+  );
+  expect(runner).toContain("currentProviderFailurePhases()");
+  expect(runner).toContain("{ providerFailurePhases }");
+  expect(runner).toContain('markProviderFailurePhase(role, "navigate-login")');
+  expect(runner).toContain('markProviderFailurePhase(role, "navigate-profile")');
+  expect(runner).toContain('markProviderFailurePhase(role, "navigate-cabinet")');
+  expect(runner).toContain('markProviderFailurePhase(role, "finalize-event-lifecycle")');
+  expect(runner).toContain('/^[a-z0-9-]{1,64}$/');
+});
+
 test("rejects malformed or unbound provider manifest config annotations", () => {
   const rootDigest = `sha256:${"1".repeat(64)}`;
   const childDigest = `sha256:${"2".repeat(64)}`;
