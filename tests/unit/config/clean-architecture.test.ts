@@ -1269,7 +1269,10 @@ describe("clean architecture boundaries", () => {
   });
 
   it("keeps authentication workflow policy in the application layer", () => {
-    const useCase = readFileSync("src/application/auth/execute-auth-command.ts", "utf8");
+    const useCase = [
+      "src/application/auth/execute-auth-command.ts",
+      "src/application/auth/execute-email-registration.ts",
+    ].map((file) => readFileSync(file, "utf8")).join("\n");
     const adapter = readFileSync("src/backend/integrations/auth/auth-commands.ts", "utf8");
 
     expect(useCase).toContain('action: "auth_register"');
