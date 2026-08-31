@@ -31,6 +31,7 @@ import {
   TURNSTILE_STUB_SOURCE,
 } from "./turnstile-stub";
 import {
+  captureInterleavedPairTerminalScreenshots,
   createSerializedPairCaptureTaskLifecycle,
   createSerializedPairTerminalScreenshotCapture,
   selectByteIdenticalMajority,
@@ -1413,6 +1414,156 @@ test.describe("immutable browser baseline policy", () => {
 
     await expect(candidate).resolves.toEqual(Buffer.from("candidate"));
     expect(calls).toEqual(["candidate"]);
+  });
+
+  test("interleaves fixed paired warm-up and terminal evidence without retrying", async () => {
+    const calls: string[] = [];
+    const captures = new Map<string, number>();
+    let concurrentCaptures = 0;
+    let maximumConcurrentCaptures = 0;
+    const result = await captureInterleavedPairTerminalScreenshots(
+      {
+        baseline: "baseline" as unknown as Page,
+        candidate: "candidate" as unknown as Page,
+      },
+      async (page) => {
+        const role = page as unknown as string;
+        const index = (captures.get(role) ?? 0) + 1;
+        captures.set(role, index);
+        calls.push(`${role}:capture:${index}`);
+        concurrentCaptures += 1;
+        maximumConcurrentCaptures = Math.max(
+          maximumConcurrentCaptures,
+          concurrentCaptures,
+        );
+        try {
+          return Buffer.from(index === 1 ? `${role}:warmup` : `${role}:terminal`);
+        } finally {
+          concurrentCaptures -= 1;
+        }
+      },
+      async (page) => {
+        calls.push(`${page as unknown as string}:settle`);
+      },
+    );
+
+    expect(result).toEqual({
+      baseline: Buffer.from("baseline:terminal"),
+      candidate: Buffer.from("candidate:terminal"),
+    });
+    expect(calls).toEqual([
+      "baseline:capture:1",
+      "candidate:capture:1",
+      "baseline:settle",
+      "candidate:settle",
+      "baseline:capture:2",
+      "candidate:capture:2",
+      "baseline:settle",
+      "candidate:settle",
+      "baseline:capture:3",
+      "candidate:capture:3",
+    ]);
+    expect(captures).toEqual(new Map([
+      ["baseline", 3],
+      ["candidate", 3],
+    ]));
+    expect(maximumConcurrentCaptures).toBe(1);
+    expect(Object.isFrozen(result)).toBe(true);
+  });
+
+  test("returns stable distinct paired screenshots without normalizing an A/B diff", async () => {
+    const captures = new Map<string, number>();
+    const result = await captureInterleavedPairTerminalScreenshots(
+      {
+        baseline: "baseline" as unknown as Page,
+        candidate: "candidate" as unknown as Page,
+      },
+      async (page) => {
+        const role = page as unknown as string;
+        captures.set(role, (captures.get(role) ?? 0) + 1);
+        return Buffer.from(role === "baseline" ? "stable-a" : "stable-b");
+      },
+      async () => {},
+    );
+
+    expect(result.baseline).toEqual(Buffer.from("stable-a"));
+    expect(result.candidate).toEqual(Buffer.from("stable-b"));
+    expect(result.baseline).not.toEqual(result.candidate);
+  });
+
+  test("stops after each exact interleaved capture slot failure", async () => {
+    for (let failedCapture = 1; failedCapture <= 6; failedCapture += 1) {
+      let captureCount = 0;
+      let settleCount = 0;
+      const expected = new Error(`capture ${failedCapture} failed`);
+      await expect(captureInterleavedPairTerminalScreenshots(
+        {
+          baseline: "baseline" as unknown as Page,
+          candidate: "candidate" as unknown as Page,
+        },
+        async () => {
+          captureCount += 1;
+          if (captureCount === failedCapture) throw expected;
+          return Buffer.from("stable");
+        },
+        async () => { settleCount += 1; },
+      )).rejects.toBe(expected);
+      expect(captureCount).toBe(failedCapture);
+      expect(settleCount).toBe(failedCapture <= 2 ? 0 : failedCapture <= 4 ? 2 : 4);
+    }
+  });
+
+  test("waits for both settles and stops after every exact settle slot failure", async () => {
+    for (let failedSettle = 1; failedSettle <= 4; failedSettle += 1) {
+      let captureCount = 0;
+      let settleCount = 0;
+      const settledCalls = new Set<number>();
+      await expect(captureInterleavedPairTerminalScreenshots(
+        {
+          baseline: "baseline" as unknown as Page,
+          candidate: "candidate" as unknown as Page,
+        },
+        async () => {
+          captureCount += 1;
+          return Buffer.from("stable");
+        },
+        async () => {
+          settleCount += 1;
+          const current = settleCount;
+          if (current === failedSettle) throw new Error(`settle ${current} failed`);
+          await Promise.resolve();
+          settledCalls.add(current);
+        },
+      )).rejects.toThrow(/Interleaved .* settle failed/);
+      expect(settleCount).toBe(failedSettle <= 2 ? 2 : 4);
+      expect(captureCount).toBe(failedSettle <= 2 ? 2 : 4);
+      expect(settledCalls).toContain(
+        failedSettle % 2 === 1 ? failedSettle + 1 : failedSettle - 1,
+      );
+    }
+  });
+
+  test("fails closed on terminal drift in either interleaved role", async () => {
+    for (const driftRole of ["baseline", "candidate"] as const) {
+      const captures = new Map<string, number>();
+      await expect(captureInterleavedPairTerminalScreenshots(
+        {
+          baseline: "baseline" as unknown as Page,
+          candidate: "candidate" as unknown as Page,
+        },
+        async (page) => {
+          const role = page as unknown as string;
+          const index = (captures.get(role) ?? 0) + 1;
+          captures.set(role, index);
+          return Buffer.from(
+            role === driftRole && index === 3
+              ? `${role}:changed`
+              : `${role}:stable`,
+          );
+        },
+        async () => {},
+      )).rejects.toThrow(/not byte-identical/);
+    }
   });
 
   test("barriers concurrent preparation before serial terminal evidence", async () => {

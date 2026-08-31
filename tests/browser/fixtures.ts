@@ -402,7 +402,7 @@ export const test = playwrightTest.extend<BrowserFixtures, BrowserWorkerFixtures
       for (const [processIndex, browserPair] of independentChromiumBrowserPairs.entries()) {
         if (browserPair.baseline !== browserPair.candidate) {
           throw new Error(
-            "Paired characterization roles must share one isolated renderer process.",
+            "Paired characterization roles must share one isolated browser process.",
           );
         }
         const pages = {} as Record<PublicOverlapRole, CharacterizationGuardedPage>;

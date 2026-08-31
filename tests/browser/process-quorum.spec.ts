@@ -48,7 +48,7 @@ function identity(value: Uint8Array) {
 }
 
 test.describe("independent Chromium process quorum", () => {
-  test("pairs isolated role contexts inside one renderer without sharing processes across quorum entries", async ({
+  test("pairs isolated role contexts inside one browser process without sharing processes across quorum entries", async ({
     independentChromiumBrowserPairs,
   }) => {
     const firstBrowser = {} as Browser;
