@@ -295,11 +295,12 @@ async function captureLocalSnapshot(plan: TelegramRecoveryPlan): Promise<Telegra
   return { context };
 }
 
-export const productionTelegramSessionRecoveryGateway: TelegramSessionRecoveryGateway<{
+export function createProductionTelegramSessionRecoveryGateway(): TelegramSessionRecoveryGateway<{
   accessToken: string;
   refreshToken: string;
   session: CurrentSession;
-}> = {
+}> {
+  return {
   configurationAvailable() {
     return Boolean(getEnv().telegramBotToken);
   },
@@ -536,7 +537,7 @@ export const productionTelegramSessionRecoveryGateway: TelegramSessionRecoveryGa
     };
   },
 
-  recoverySucceeded({ session, provider, upstreamMerged }) {
+    recoverySucceeded({ session, provider, upstreamMerged }) {
     const { auth } = providerContext(provider);
     const accessExpiresAt = new Date(auth.data.expires_at);
     const refreshExpiresAt = new Date(auth.data.refresh_expires_at);
@@ -554,5 +555,6 @@ export const productionTelegramSessionRecoveryGateway: TelegramSessionRecoveryGa
       source: "remnashop.session",
       message: "Restored Remnashop session via Telegram",
     });
-  },
-};
+    },
+  };
+}

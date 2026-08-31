@@ -1607,7 +1607,10 @@ describe("clean architecture boundaries", () => {
       .toBeLessThan(useCase.indexOf("commitLocalRecovery({"));
     expect(adapter).not.toContain('emailResolution: "KEEP_TARGET"');
     expect(adapter).not.toContain("recoverTelegramSession(");
+    expect(adapter).toContain("export function createProductionTelegramSessionRecoveryGateway()");
+    expect(adapter).not.toContain("export const productionTelegramSessionRecoveryGateway");
     expect(composition).toContain("recoverTelegramSession(");
+    expect(composition).toContain("adapter.createProductionTelegramSessionRecoveryGateway()");
     expect(composition).toContain(
       "recoverTelegramSession: attachRemnashopTokensForTelegramSession",
     );

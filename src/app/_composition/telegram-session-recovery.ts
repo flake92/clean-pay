@@ -13,7 +13,7 @@ export const attachRemnashopTokensForTelegramSession: RemnashopTelegramRecovery 
   ]);
   try {
     return await useCase.recoverTelegramSession(
-      adapter.productionTelegramSessionRecoveryGateway,
+      adapter.createProductionTelegramSessionRecoveryGateway(),
       adapter.telegramRecoverySession(session),
     );
   } catch (error) {
