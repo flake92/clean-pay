@@ -1,5 +1,7 @@
+import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 
+import { logoutAction } from "@/app/actions/session";
 import {
   activatePromocodeAction,
   deleteAllDevicesAction,
@@ -15,6 +17,7 @@ import {
   normalizeCabinetPromocode,
   shouldRefreshCabinetAfterAction,
 } from "@/frontend/components/cabinet-panel-transitions";
+import { resetChatwootSession } from "@/frontend/lib/chatwoot";
 
 const PAYMENT_HISTORY_REFRESH_INTERVAL_MS = 10_000;
 const REISSUE_SUBSCRIPTION_CONFIRMATION = [
@@ -29,19 +32,14 @@ const REISSUE_SUBSCRIPTION_CONFIRMATION = [
   "Вы уверены, что хотите перевыпустить подписку?",
 ].join("\n");
 
-type CabinetRouter = {
-  refresh: () => void;
-};
-
 export function useCabinetPanelController({
   paymentHistoryStatus,
-  router,
   subscription,
 }: {
   paymentHistoryStatus: PaymentHistorySnapshotStatus;
-  router: CabinetRouter;
   subscription: CurrentSubscription | null;
 }) {
+  const router = useRouter();
   const [copyStatus, setCopyStatus] = useState<string | null>(null);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
   const [promocodeMessage, setPromocodeMessage] = useState<string | null>(null);
@@ -238,6 +236,11 @@ export function useCabinetPanelController({
     }
   }
 
+  async function logout() {
+    resetChatwootSession();
+    await logoutAction();
+  }
+
   return {
     actionMessage,
     activatePromocode,
@@ -245,6 +248,7 @@ export function useCabinetPanelController({
     copySubscriptionUrl,
     deleteAllDevices,
     deleteDevice,
+    logout,
     pendingAction,
     promocode,
     promocodeMessage,
