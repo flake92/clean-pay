@@ -20,6 +20,10 @@ import {
   AUTHORIZED_UNVERIFIED_EMAIL_SEMANTIC_DIFF,
   assertUnverifiedEmailLoginProof,
 } from "../../../tests/browser/journeys/unverified-email-login-proof-contract.mjs";
+import {
+  AUTHORIZED_LINKED_EMAIL_FAILURE_SEMANTIC_DIFF,
+  assertLinkedEmailFailureProof,
+} from "../../../tests/browser/journeys/linked-email-failure-proof-contract.mjs";
 
 const baselineRevision = "f5cb6f543d85256e7733a1ade6a4f451d86cf378";
 const candidateRevision = "b0cbdddbbbbc537b9f15bcfdbf4a0fa86d3c65b4";
@@ -33,9 +37,25 @@ const fixedRunner = readFileSync(
   "tests/browser/journeys/run-production-image-journey.mjs",
   "utf8",
 );
+const authenticatedRunner = readFileSync(
+  "tests/browser/journeys/prove-authenticated-journey-live-pair.mjs",
+  "utf8",
+);
+const fixtureManifest = readFileSync(
+  "tests/browser/journeys/journey-fixture-manifest.mjs",
+  "utf8",
+);
 const workflow = readFileSync(".github/workflows/ci.yml", "utf8");
 const unverifiedEmailRegression = readFileSync(
   "tests/browser/journeys/existing-unverified-email.candidate.spec.ts",
+  "utf8",
+);
+const linkedEmailFailureRegression = readFileSync(
+  "tests/browser/journeys/linked-email-failure.candidate.spec.ts",
+  "utf8",
+);
+const providerMock = readFileSync(
+  "tests/browser/journeys/provider-mock.mjs",
   "utf8",
 );
 
@@ -308,7 +328,9 @@ describe("ephemeral production-image live overlap runner", () => {
     expect(providerProof).toBeGreaterThan(publicProof);
     expect(providerPublish).toBeGreaterThan(providerProof);
     expect(authenticatedProof).toBeGreaterThan(providerPublish);
+    expect(runner).toContain('"--candidate-linked-email-failure-proof-output"');
     expect(runner).toContain('"--candidate-unverified-email-proof-output"');
+    expect(runner).toContain("const linkedEmailFailureFeedback = await validateLinkedEmailFailureProof(");
     expect(runner).toContain("const unverifiedEmailLogin = await validateUnverifiedEmailProof(");
     expect(runner).toContain("assertDualProviderOverlapProof(JSON.parse(");
     expect(runner).toContain(
@@ -328,6 +350,23 @@ describe("ephemeral production-image live overlap runner", () => {
       "node tests/browser/journeys/run-production-image-live-overlap.mjs run",
     );
     expect(workflow).not.toContain("run: npm run test:browser:journey:production-image");
+    expect(authenticatedRunner).toContain(
+      '"--candidate-linked-email-failure-proof-output"',
+    );
+    expect(authenticatedRunner).toContain(
+      'CLEAN_PAY_BROWSER_LINKED_EMAIL_FAILURE_PROOF_OUTPUT: output',
+    );
+    expect(authenticatedRunner).toContain(
+      '"linked-email-failure.playwright.config.ts"',
+    );
+    expect(authenticatedRunner).toContain("candidateAuthorizedRegressionCases: 2");
+    for (const filename of [
+      "linked-email-failure-proof-contract.mjs",
+      "linked-email-failure.candidate.spec.ts",
+      "linked-email-failure.playwright.config.ts",
+    ]) {
+      expect(fixtureManifest).toContain(`\"${filename}\"`);
+    }
 
     // The immutable Windows-baseline runner remains independently selectable,
     // and its unchanged phase strings stay covered by the pre-existing tests.
@@ -359,6 +398,9 @@ describe("ephemeral production-image live overlap runner", () => {
     );
     expect(productionImage).toContain(
       "test-results/browser-live-pair-ci/${{ env.CLEAN_PAY_BROWSER_LIVE_PAIR_CAPTURE_ID }}/provider-overlap.json",
+    );
+    expect(productionImage).toContain(
+      "test-results/browser-live-pair-ci/${{ env.CLEAN_PAY_BROWSER_LIVE_PAIR_CAPTURE_ID }}/linked-email-failure-feedback.json",
     );
     expect(productionImage).toContain(
       "test-results/browser-live-pair-ci/${{ env.CLEAN_PAY_BROWSER_LIVE_PAIR_CAPTURE_ID }}/unverified-email-login.json",
@@ -519,6 +561,10 @@ describe("ephemeral production-image live overlap runner", () => {
     };
 
     expect(assertUnverifiedEmailLoginProof(proof, expected)).toEqual(proof);
+    expect(() => assertUnverifiedEmailLoginProof(proof, {
+      ...expected,
+      providerControlUrl: "http://127.0.0.1:43100/",
+    })).toThrow(/exact authorized contract/u);
     for (const mutation of [
       { cabinetReadCount: 1 },
       { cabinetNavigationCount: 1 },
@@ -554,6 +600,102 @@ describe("ephemeral production-image live overlap runner", () => {
     );
     expect(unverifiedEmailRegression).toContain('await page.goto("/cabinet"');
     expect(unverifiedEmailRegression).toContain("currentAccessClaims(page)");
+    expect(unverifiedEmailRegression).toContain(
+      "candidateRevision: environment.candidateRevision",
+    );
+    expect(unverifiedEmailRegression).toContain(
+      "candidateApplicationImageDigest: environment.candidateApplicationImageDigest",
+    );
+    expect(unverifiedEmailRegression).toContain(
+      "candidateMigrationImageDigest: environment.candidateMigrationImageDigest",
+    );
+  });
+
+  it("allowlists only the exact candidate linked-email failure feedback correction", () => {
+    const expected = {
+      candidateRevision,
+      candidateApplicationImageDigest: `sha256:${"3".repeat(64)}`,
+      candidateMigrationImageDigest: `sha256:${"4".repeat(64)}`,
+    };
+    const providerEffectOrder = Array.from(
+      { length: 10 },
+      () => ["linked_email_login_auth_failed", "linked_email_register_conflict"],
+    ).flat();
+    const proof = {
+      schemaVersion: 1,
+      kind: "clean-pay-authorized-linked-email-failure-feedback-proof",
+      status: "linked-email-auth-failure-feedback-specific",
+      authorizedSemanticDiff: AUTHORIZED_LINKED_EMAIL_FAILURE_SEMANTIC_DIFF,
+      ...expected,
+      finalRoute: "/link-account?reason=email-required",
+      telegramLinkedFixture: true,
+      emailInitiallyAbsent: true,
+      wrongPasswordAttemptCount: 10,
+      rateLimitedAttemptNumber: 11,
+      wrongPasswordMessage: "Неверный e-mail или пароль.",
+      rateLimitedMessage: "Слишком много попыток. Попробуйте позже.",
+      serverActionCount: 11,
+      serverActionMethodsAllPost: true,
+      serverActionResponsesAllSuccessful: true,
+      serverActionPayloadStable: true,
+      serverActionPayloadContractSha256: "5".repeat(64),
+      authFailedProviderRequestCount: 20,
+      rateLimitedProviderRequestCount: 0,
+      providerEffectOrder,
+      databaseUnchanged: true,
+      formStatePreserved: true,
+      submitButtonEnabled: true,
+      visibleErrorCount: 1,
+      genericFallbackCount: 0,
+      networkFallbackCount: 0,
+    };
+
+    expect(assertLinkedEmailFailureProof(proof, expected)).toEqual(proof);
+    for (const mutation of [
+      { authorizedSemanticDiff: "broader-diff" },
+      { finalRoute: "/cabinet" },
+      { wrongPasswordAttemptCount: 9 },
+      { rateLimitedAttemptNumber: 10 },
+      { wrongPasswordMessage: "Не удалось связать e-mail с аккаунтом." },
+      { rateLimitedMessage: "Не удалось связать e-mail с аккаунтом." },
+      { serverActionCount: 10 },
+      { serverActionPayloadStable: false },
+      { authFailedProviderRequestCount: 19 },
+      { rateLimitedProviderRequestCount: 1 },
+      { providerEffectOrder: providerEffectOrder.slice(1) },
+      { databaseUnchanged: false },
+      { formStatePreserved: false },
+      { genericFallbackCount: 1 },
+      { networkFallbackCount: 1 },
+    ]) {
+      expect(() => assertLinkedEmailFailureProof({
+        ...proof,
+        ...mutation,
+      }, expected)).toThrow(/exact authorized contract/u);
+    }
+    expect(() => assertLinkedEmailFailureProof({
+      ...proof,
+      ambientEvidence: "forbidden",
+    }, expected)).toThrow(/exact authorized contract/u);
+
+    expect(linkedEmailFailureRegression).toContain("for (let attempt = 1; attempt <= 10; attempt += 1)");
+    expect(linkedEmailFailureRegression).toContain("const recorder = recordNetwork(page, applicationOrigin)");
+    expect(linkedEmailFailureRegression).toContain("expect(serverActions).toHaveLength(11)");
+    expect(linkedEmailFailureRegression).toContain("expect(rateLimitedProviderRequests).toEqual([])");
+    expect(linkedEmailFailureRegression).toContain("expect(ledgerAfter.database).toEqual(databaseBefore)");
+    expect(linkedEmailFailureRegression).toContain('name: "Сохраните доступ к аккаунту"');
+    expect(linkedEmailFailureRegression).toContain('name: "Добавьте резервный вход"');
+    expect(linkedEmailFailureRegression).toContain("toHaveCount(0)");
+    expect(linkedEmailFailureRegression).toContain('page.locator(".p-inline-message-error")');
+    expect(linkedEmailFailureRegression).toContain('page.locator(".p-inline-message-error:visible")');
+    expect(linkedEmailFailureRegression).not.toContain('data-severity="error"');
+    expect(linkedEmailFailureRegression).toContain("expect(genericFallbackCount).toBe(0)");
+    expect(linkedEmailFailureRegression).toContain("expect(networkFallbackCount).toBe(0)");
+    expect(linkedEmailFailureRegression).not.toContain("page.screenshot(");
+    expect(providerMock).toContain('const linkedEmailFailureScenarioPrefix = "authorized-linked-email-feedback:"');
+    expect(providerMock).toContain('sendJson(response, 401, { detail: "Request failed" })');
+    expect(providerMock).toContain('sendJson(response, 409, { detail: "Request failed" })');
+    expect(runner).toContain("linkedEmailFailureFeedback,");
   });
 
   it("uses only exact project labels, image tags and allowlisted files for cleanup", () => {

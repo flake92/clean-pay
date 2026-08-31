@@ -553,7 +553,7 @@ describe("production auth and profile adapters", () => {
     await expect(productionLinkAccountCommands.linkActorIsCurrent(expected)).resolves.toBe(false);
   });
 
-  it("preserves an opaque register conflict without inferring provider prose", async () => {
+  it("classifies only an opaque register conflict by the provider endpoint contract", async () => {
     mocks.remnashopAuth
       .mockRejectedValueOnce(new ServiceError("CONFLICT", 409, "Request failed"))
       .mockRejectedValueOnce(new ServiceError("CONFLICT", 409, "Request failed"));
@@ -562,7 +562,7 @@ describe("production auth and profile adapters", () => {
       operation: "register",
       email: "existing@example.com",
       password: "wrong-password",
-    })).rejects.toMatchObject({ code: "CONFLICT" });
+    })).rejects.toMatchObject({ code: "EMAIL_ALREADY_EXISTS" });
 
     await expect(productionLinkAccountCommands.authenticateEmail({
       operation: "login",
@@ -606,7 +606,7 @@ describe("production auth and profile adapters", () => {
     });
   });
 
-  it("preserves the baseline generic conflict when register prose is unavailable", async () => {
+  it("preserves the login failure when register conflict prose is unavailable", async () => {
     mocks.getCurrentSession.mockResolvedValue({
       id: "session-1",
       userId: "user-1",
@@ -628,8 +628,8 @@ describe("production auth and profile adapters", () => {
       password: "wrong-password",
     })).resolves.toEqual({
       ok: false,
-      code: "CONFLICT",
-      message: "Не удалось связать e-mail с аккаунтом.",
+      code: "AUTH_FAILED",
+      message: "Неверный e-mail или пароль.",
     });
 
     expect(mocks.assertRateLimit).toHaveBeenCalledOnce();
@@ -654,7 +654,7 @@ describe("production auth and profile adapters", () => {
     expect(mocks.remnashopMergeUsers).not.toHaveBeenCalled();
   });
 
-  it("preserves the baseline generic link message for a rate limit", async () => {
+  it("preserves actionable link feedback for a rate limit", async () => {
     mocks.getCurrentSession.mockResolvedValue({
       id: "session-1",
       userId: "user-1",
@@ -683,7 +683,7 @@ describe("production auth and profile adapters", () => {
     })).resolves.toEqual({
       ok: false,
       code: "RATE_LIMITED",
-      message: "Не удалось связать e-mail с аккаунтом.",
+      message: "Слишком много попыток. Попробуйте позже.",
     });
     expect(mocks.remnashopAuth).not.toHaveBeenCalled();
   });

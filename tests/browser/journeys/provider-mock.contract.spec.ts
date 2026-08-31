@@ -375,6 +375,79 @@ test("two reset/seed cycles restore every mutable provider and OIDC state", asyn
   }
 });
 
+test("scopes opaque linked-email auth failures to the exact authorized candidate scenario", async () => {
+  const [oidcPort, remnashopPort, remnawavePort, controlPort] = await freePorts(4);
+  const children: ChildProcess[] = [];
+  try {
+    children.push(spawnFixture("oidc-mock.mjs", {
+      PORT: String(oidcPort),
+      OIDC_ISSUER: `http://127.0.0.1:${oidcPort}`,
+      OIDC_PUBLIC_ISSUER: `http://127.0.0.1:${oidcPort}`,
+    }));
+    children.push(spawnFixture("provider-mock.mjs", {
+      REMNASHOP_PORT: String(remnashopPort),
+      REMNAWAVE_PORT: String(remnawavePort),
+      CONTROL_PORT: String(controlPort),
+      OIDC_RESET_URL: `http://127.0.0.1:${oidcPort}/__reset`,
+    }));
+
+    const control = `http://127.0.0.1:${controlPort}`;
+    const shop = `http://127.0.0.1:${remnashopPort}/api/v1/public`;
+    await waitForOk(`${control}/__health`);
+    await postJson(`${control}/__reset`, {
+      scenario: "authorized-linked-email-feedback:contract",
+    });
+
+    const telegram = await postSession(`${shop}/auth/telegram`, {
+      id: 900000777,
+      auth_date: 1_788_000_000,
+      hash: "synthetic",
+    });
+    await expect(fetchJsonWithCookie(`${shop}/auth/me`, telegram.cookie))
+      .resolves.toMatchObject({
+        email: null,
+        is_email_verified: false,
+        telegram_id: 900000777,
+      });
+
+    const target = "linked-email-existing@clean-pay.dev";
+    const authRequest = (pathname: "/auth/login" | "/auth/register") => fetch(
+      `${shop}${pathname}`,
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-remnashop-auth-service-key": authServiceKey,
+        },
+        body: JSON.stringify({ email: target, password: "wrong-password" }),
+      },
+    );
+    const login = await authRequest("/auth/login");
+    expect(login.status).toBe(401);
+    await expect(login.json()).resolves.toEqual({ detail: "Request failed" });
+    const registration = await authRequest("/auth/register");
+    expect(registration.status).toBe(409);
+    await expect(registration.json()).resolves.toEqual({ detail: "Request failed" });
+
+    const ledger = await fetchJson(`${control}/__ledger`) as {
+      entries: Array<{ effect: string }>;
+    };
+    expect(ledger.entries.filter(({ effect }) => effect.startsWith("linked_email_")))
+      .toEqual([
+        expect.objectContaining({ effect: "linked_email_login_auth_failed" }),
+        expect.objectContaining({ effect: "linked_email_register_conflict" }),
+      ]);
+
+    await postJson(`${control}/__reset`, { scenario: "contract-default" });
+    await expect(postSession(`${shop}/auth/login`, {
+      email: target,
+      password: "wrong-password",
+    })).resolves.toMatchObject({ body: expect.any(Object) });
+  } finally {
+    await Promise.all(children.map(stopChild));
+  }
+});
+
 test("preserves a verified email identity across login and isolates Telegram auth", async () => {
   const [oidcPort, remnashopPort, remnawavePort, controlPort] = await freePorts(4);
   const children: ChildProcess[] = [];

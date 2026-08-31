@@ -143,7 +143,64 @@ describe("failed() error message mapping", () => {
     const commands = mockCommands({
       authenticateEmail: vi.fn().mockRejectedValueOnce(loginFailure).mockRejectedValueOnce(new LinkAccountGatewayError("EMAIL_ALREADY_EXISTS")),
     });
-    await expect(linkAccountEmail(commands, { email: "user@example.com", password: "wrong" })).resolves.toMatchObject({ ok: false, code: "AUTH_FAILED" });
+    await expect(linkAccountEmail(commands, { email: "user@example.com", password: "wrong" })).resolves.toEqual({
+      ok: false,
+      code: "AUTH_FAILED",
+      message: "Неверный e-mail или пароль.",
+    });
+    expect(commands.authenticateEmail).toHaveBeenNthCalledWith(1, {
+      operation: "login",
+      email: "user@example.com",
+      password: "wrong",
+    });
+    expect(commands.authenticateEmail).toHaveBeenNthCalledWith(2, {
+      operation: "register",
+      email: "user@example.com",
+      password: "wrong",
+    });
+    expect(commands.authenticateEmail).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not mask a register upstream failure as a wrong password", async () => {
+    const commands = mockCommands({
+      authenticateEmail: vi.fn()
+        .mockRejectedValueOnce(new LinkAccountGatewayError("AUTH_FAILED"))
+        .mockRejectedValueOnce(new LinkAccountGatewayError("UPSTREAM_UNAVAILABLE")),
+    });
+
+    await expect(linkAccountEmail(commands, {
+      email: "user@example.com",
+      password: "wrong",
+    })).resolves.toEqual({
+      ok: false,
+      code: "UPSTREAM_UNAVAILABLE",
+      message: "Не удалось связать e-mail с аккаунтом.",
+    });
+    expect(commands.authenticateEmail).toHaveBeenCalledTimes(2);
+    expect(commands.stagePendingEmail).not.toHaveBeenCalled();
+    expect(commands.requestProviderVerification).not.toHaveBeenCalled();
+    expect(commands.mergeProviderAccounts).not.toHaveBeenCalled();
+  });
+
+  it("returns actionable rate-limit feedback without calling the provider", async () => {
+    const commands = mockCommands({
+      assertLinkRateLimit: vi.fn(async () => {
+        throw new LinkAccountGatewayError("RATE_LIMITED");
+      }),
+    });
+
+    await expect(linkAccountEmail(commands, {
+      email: "user@example.com",
+      password: "wrong",
+    })).resolves.toEqual({
+      ok: false,
+      code: "RATE_LIMITED",
+      message: "Слишком много попыток. Попробуйте позже.",
+    });
+    expect(commands.authenticateEmail).not.toHaveBeenCalled();
+    expect(commands.stagePendingEmail).not.toHaveBeenCalled();
+    expect(commands.requestProviderVerification).not.toHaveBeenCalled();
+    expect(commands.mergeProviderAccounts).not.toHaveBeenCalled();
   });
 
   it("fails closed if the actor changes after provider authentication", async () => {
