@@ -18,6 +18,17 @@ const exactScreenshotOptions = Object.freeze({
 });
 
 /**
+ * Uses a fixed two-read cadence for paired evidence. The first raw PNG is
+ * always discarded without inspection, hashing, or comparison; the second raw
+ * PNG is the evidence. This aligns sequential baseline/candidate evidence to
+ * the same fixed cadence phase without retrying toward any bytes.
+ */
+async function captureFixedPhaseTerminalEvidence(page: Page) {
+  await page.screenshot(exactScreenshotOptions);
+  return page.screenshot(exactScreenshotOptions);
+}
+
+/**
  * Captures three settled-state PNGs and returns only a byte-identical 2/3
  * majority. No pixel tolerance, channel normalization, or baseline lookup is
  * involved; an unstable all-different raster fails closed.
@@ -52,7 +63,7 @@ export async function captureByteIdenticalTerminalScreenshot(page: Page) {
  */
 export async function captureInterleavedPairTerminalScreenshots(
   pages: Readonly<Record<PublicOverlapScreenshotRole, Page>>,
-  capture: TerminalScreenshotCapture = (page) => page.screenshot(exactScreenshotOptions),
+  capture: TerminalScreenshotCapture = captureFixedPhaseTerminalEvidence,
   settle: TerminalScreenshotSettle = settleLoadedViewportResources,
 ) {
   if (!pages.baseline || !pages.candidate || pages.baseline === pages.candidate) {
