@@ -874,16 +874,40 @@ async function exerciseCabinet(
           await route.abort("blockedbyclient");
           return;
         }
+        if (preparation.entry.classification.navigation) {
+          try {
+            await pendingRequestSeal.waitForPriorRequests(
+              request,
+              { timeoutMs: 15_000 },
+            );
+            if (browserResponseCaptureFailure) throw browserResponseCaptureFailure;
+          } catch (error) {
+            browserResponseCaptureFailure ??= error;
+            try {
+              await route.abort("blockedbyclient");
+            } catch {
+              // The primary barrier failure stays authoritative. Returning
+              // without continuing the route remains fail-closed, and the
+              // controlled navigation call below rethrows that primary cause.
+            }
+            return;
+          }
+        }
         await route.continue();
       } finally {
         finishRoute();
       }
     });
     markProviderFailurePhase(role, "navigate-login");
-    await page.goto(
-      "https://pay.ci.clean-pay.dev/login?redirect_to=%2Fprofile",
-      { waitUntil: "domcontentloaded", timeout: 30_000 },
-    );
+    try {
+      await page.goto(
+        "https://pay.ci.clean-pay.dev/login?redirect_to=%2Fprofile",
+        { waitUntil: "domcontentloaded", timeout: 30_000 },
+      );
+    } catch (error) {
+      if (browserResponseCaptureFailure) throw browserResponseCaptureFailure;
+      throw error;
+    }
     const telegram = page.getByRole("button", { name: "Войти через Telegram" });
     markProviderFailurePhase(role, "wait-telegram-visible");
     await telegram.waitFor({ state: "visible", timeout: 15_000 });
@@ -900,10 +924,15 @@ async function exerciseCabinet(
     ).catch((error) => {
       throw new Error("Provider profile navigation barrier failed.", { cause: error });
     });
-    await Promise.all([
-      profileNavigation,
-      telegram.click(),
-    ]);
+    try {
+      await Promise.all([
+        profileNavigation,
+        telegram.click(),
+      ]);
+    } catch (error) {
+      if (browserResponseCaptureFailure) throw browserResponseCaptureFailure;
+      throw error;
+    }
     markProviderFailurePhase(role, "wait-profile-heading");
     await page.getByRole("heading", { name: "Профиль", level: 1 })
       .waitFor({ state: "visible", timeout: 15_000 });
@@ -939,10 +968,16 @@ async function exerciseCabinet(
     await armOverlap();
     cabinetDocumentAllowed = true;
     markProviderFailurePhase(role, "navigate-cabinet");
-    const cabinetResponse = await page.goto("https://pay.ci.clean-pay.dev/cabinet", {
-      waitUntil: "domcontentloaded",
-      timeout: 30_000,
-    });
+    let cabinetResponse;
+    try {
+      cabinetResponse = await page.goto("https://pay.ci.clean-pay.dev/cabinet", {
+        waitUntil: "domcontentloaded",
+        timeout: 30_000,
+      });
+    } catch (error) {
+      if (browserResponseCaptureFailure) throw browserResponseCaptureFailure;
+      throw error;
+    }
     const cabinetRequest = cabinetResponse?.request();
     if (!cabinetRequest
       || browserRequestByIdentity.get(cabinetRequest)?.classification.key
@@ -987,6 +1022,8 @@ async function exerciseCabinet(
     }));
     markProviderFailurePhase(role, "drain-pending-requests");
     const pendingRequestDrain = await pendingRequestSeal.drainAndSeal({ timeoutMs: 15_000 });
+    markProviderFailurePhase(role, "verify-final-response-captures");
+    if (browserResponseCaptureFailure) throw browserResponseCaptureFailure;
     markProviderFailurePhase(role, "finalize-event-lifecycle");
     const finalizerEventSeal = Object.freeze({
       assertClean: () => {
