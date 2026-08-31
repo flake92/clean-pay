@@ -1,5 +1,6 @@
 import { executeEmailLogin } from "@/application/auth/execute-email-login";
 import { executeEmailRegistration } from "@/application/auth/execute-email-registration";
+import { executePasswordResetConfirmation } from "@/application/auth/execute-password-reset-confirmation";
 import { executePasswordResetStart } from "@/application/auth/execute-password-reset-start";
 import {
   AuthGatewayError,
@@ -175,6 +176,14 @@ export async function executeAuthCommand(commands: AuthCommands, input: unknown)
     if (command.kind === "request-password-reset") {
       return await executePasswordResetStart(commands, { email, turnstileToken });
     }
+    if (command.kind === "confirm-password-reset") {
+      return await executePasswordResetConfirmation(commands, {
+        code: command.code,
+        email,
+        newPassword: command.newPassword,
+        turnstileToken,
+      });
+    }
     await commands.preflightCapacity("auth_command");
     await commands.withUpstreamConcurrency(
       "turnstile_verify",
@@ -191,33 +200,6 @@ export async function executeAuthCommand(commands: AuthCommands, input: unknown)
           commands.hasPasskey(email),
         ]);
         return { ok: true, kind: "identified", exists: identity.exists, hasPasskey };
-      }
-      case "confirm-password-reset": {
-        await commands.rateLimit({ action: "password_reset_confirm", email, limit: 5, windowSeconds: 15 * 60 });
-        const providerSession = await commands.withUpstreamConcurrency(
-          "remnashop_auth",
-          () => commands.authenticate({
-            operation: "confirm-password-reset",
-            email,
-            code: command.code,
-            password: command.newPassword,
-          }),
-        );
-        const session = await commands.withUpstreamConcurrency(
-          "remnashop_auth",
-          () => commands.establishSession(providerSession, {
-            replaceExistingSessions: true,
-            replacementIdentityEmail: email,
-          }),
-        );
-        await commands.audit({ action: "password_reset_success", userId: session.userId });
-        return {
-          ok: true,
-          kind: "authenticated",
-          emailVerified: session.emailVerified,
-          verificationRequired: !session.emailVerified,
-          verificationDeliveryFailed: false,
-        };
       }
     }
   } catch (error) {
