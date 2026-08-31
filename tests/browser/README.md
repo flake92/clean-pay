@@ -75,21 +75,31 @@ leaves the challenge pending. Every URL/method/resource-type near miss
 continues to the network.
 
 The immutable v5 baseline and its eight launch arguments remain unchanged.
-The production-image live paired A/B gate additionally pins
-`--num-raster-threads=1` on three independent paired renderer processes. Each
-process owns separate baseline and candidate browser contexts, so cookies,
-storage, service workers, origins, and application stacks remain isolated while
-the renderer is a controlled shared factor inside the pair. This targets a
-later in-process scheduling edge observed in CI run
+The production-image live paired A/B gate additionally pins one raster worker
+and disables partial tile rasterization with `--num-raster-threads=1` and
+`--disable-partial-raster` on three independent Chromium browser processes.
+Each browser process owns separate baseline and candidate browser contexts, so
+cookies, storage, service workers, origins, and application stacks remain
+isolated. The contexts can still receive separate renderer processes; sharing a
+`Browser` object alone does not make the renderer a shared factor. The live
+flags instead pin raster-worker scheduling and disable the partial-raster path
+that correlated with the variance. This targets a later in-process scheduling
+edge observed in CI run
 `33346935619`: the candidate was byte-identical in all three processes and one
 baseline process matched it exactly, while the other two baseline processes
 differed only at 13 and 17 rounded-card edge pixels (maximum channel delta 1
 and 2). A second CI sample (`33351831361`) produced the same two exact rounded
 edge variants cross-paired between six role processes despite identical DOM and
-styles. Pairing isolated role contexts in the same renderer removes that
-arbitrary cross-process pairing variable. The live policy still compares raw
-PNG bytes exactly across three independent renderer pairs; it introduces no
-retry, tolerance, masking, normalization, or baseline update.
+styles. CI run `33391107924` reproduced all-different exact pair tuples at the
+390x844 login route. A focused Linux production-image characterization of that
+exact route and viewport reproduced all four tuples from the two stable
+rounded-edge PNGs; compositor barriers and a renderer-process limit did not
+remove them. On the same focused reproducer, disabling partial raster produced
+one byte-identical tuple across 36 independent browser pairs with zero terminal
+drift, and retained the current policy's majority PNG bytes. This diagnostic
+does not replace the complete pinned-Chromium CI proof. The live policy still
+compares raw PNG bytes exactly across three independent browser pairs; it
+introduces no retry, tolerance, masking, normalization, or baseline update.
 
 The live paired capture also uses a fixed two-read cadence for every evidence
 slot: one unconditional renderer readback is discarded without inspecting its
