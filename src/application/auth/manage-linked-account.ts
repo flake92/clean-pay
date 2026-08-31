@@ -71,10 +71,17 @@ export async function loadLinkAccount(reader: LinkAccountReader, auth: AuthProfi
   }
 }
 
-function failed(error: unknown, fallback: string): LinkAccountCommandResult {
+function failed(
+  error: unknown,
+  fallback: string,
+  messageOverrides: Readonly<Record<string, string>> = {},
+): LinkAccountCommandResult {
   const code = typeof (error as { code?: unknown })?.code === "string" ? String((error as { code: string }).code) : "INTERNAL_ERROR";
   const prodMessage = typeof (error as { prodMessage?: unknown })?.prodMessage === "string" ? (error as { prodMessage: string }).prodMessage : null;
-  const message = code === "AUTH_FAILED" ? "Неверный e-mail или пароль." : code === "UNAUTHORIZED" ? "Сессия завершилась. Войдите снова." : prodMessage ?? fallback;
+  const message = messageOverrides[code]
+    ?? (code === "AUTH_FAILED" ? "Неверный e-mail или пароль."
+      : code === "UNAUTHORIZED" ? "Сессия завершилась. Войдите снова."
+      : prodMessage ?? fallback);
   return { ok: false, code, message };
 }
 
@@ -221,7 +228,9 @@ export async function linkAccountEmail(
       return { ok: true, kind: "linked" };
     }
   } catch (error) {
-    return failed(error, "Не удалось связать e-mail с аккаунтом.");
+    return failed(error, "Не удалось связать e-mail с аккаунтом.", {
+      RATE_LIMITED: "Слишком много попыток. Попробуйте позже.",
+    });
   }
 }
 

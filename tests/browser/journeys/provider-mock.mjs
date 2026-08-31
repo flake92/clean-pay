@@ -15,6 +15,8 @@ const appOrigin = "https://pay.ci.clean-pay.dev";
 const checkoutOrigin = "https://checkout.browser.clean-pay.dev";
 const syntheticEmail = "synthetic.browser@clean-pay.dev";
 const syntheticTelegramId = 900000001;
+const linkedEmailFailureScenarioPrefix = "authorized-linked-email-feedback:";
+const linkedEmailFailureTarget = "linked-email-existing@clean-pay.dev";
 const fixedNow = "2026-08-27T00:00:00.000Z";
 const fixedExpiry = "2030-01-01T00:00:00.000Z";
 const fixedRefreshExpiry = "2031-01-01T00:00:00.000Z";
@@ -93,6 +95,10 @@ function emailOwner(email) {
 function scenarioTelegramId(scenario) {
   if (scenario === "contract-default") return syntheticTelegramId;
   return 900000000 + (Number.parseInt(sha256(`telegram:${scenario}`).slice(0, 8), 16) % 99999999);
+}
+
+function linkedEmailFailureScenario() {
+  return activeScenario.startsWith(linkedEmailFailureScenarioPrefix);
 }
 
 function paymentId(sequenceValue) {
@@ -651,6 +657,21 @@ async function handleRemnashop(request, response) {
   if (["/auth/telegram", "/auth/telegram/webapp", "/auth/register", "/auth/login", "/auth/service-session", "/auth/password/confirm-reset"].includes(path)
       && method === "POST") {
     const isRegistration = path === "/auth/register";
+    const normalizedEmail = typeof input.email === "string"
+      ? input.email.trim().toLowerCase()
+      : "";
+    if (linkedEmailFailureScenario() && normalizedEmail === linkedEmailFailureTarget) {
+      if (path === "/auth/login") {
+        record("remnashop", request, url, body, "linked_email_login_auth_failed");
+        sendJson(response, 401, { detail: "Request failed" });
+        return;
+      }
+      if (path === "/auth/register") {
+        record("remnashop", request, url, body, "linked_email_register_conflict");
+        sendJson(response, 409, { detail: "Request failed" });
+        return;
+      }
+    }
     const telegramId = telegramIdentityFromRequest(path, input);
     const requestedOwner = path === "/auth/service-session" && typeof input.user_id === "string"
       ? input.user_id
@@ -668,7 +689,13 @@ async function handleRemnashop(request, response) {
           username: null,
         })
       : persistedProfile ?? defaultProfile(path.includes("telegram")
-        ? { auth_type: "telegram", telegram_id: telegramId ?? scenarioTelegramId(activeScenario) }
+        ? {
+            auth_type: "telegram",
+            telegram_id: telegramId ?? scenarioTelegramId(activeScenario),
+            ...(linkedEmailFailureScenario()
+              ? { email: null, is_email_verified: false }
+              : {}),
+          }
         : {
             telegram_id: null,
             auth_type: "email",

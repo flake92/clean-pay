@@ -21,6 +21,10 @@ import {
   UNVERIFIED_EMAIL_PROOF_FILENAME,
   assertUnverifiedEmailLoginProof,
 } from "./unverified-email-login-proof-contract.mjs";
+import {
+  LINKED_EMAIL_FAILURE_PROOF_FILENAME,
+  assertLinkedEmailFailureProof,
+} from "./linked-email-failure-proof-contract.mjs";
 
 const repositoryRoot = path.resolve(process.cwd());
 const localPlaywrightCli = path.join(repositoryRoot, "node_modules", "playwright", "cli.js");
@@ -37,6 +41,13 @@ const unverifiedEmailConfig = path.join(
   "browser",
   "journeys",
   "unverified-email-login.playwright.config.ts",
+);
+const linkedEmailFailureConfig = path.join(
+  repositoryRoot,
+  "tests",
+  "browser",
+  "journeys",
+  "linked-email-failure.playwright.config.ts",
 );
 const connectProxyTerminationGraceMs = 2_000;
 const connectProxyForceKillGraceMs = 2_000;
@@ -61,6 +72,9 @@ try {
   captureId = requiredArgument(argumentsByName, "--capture-id", /^[a-f0-9]{16}$/);
   const unverifiedEmailProofOutput = await exactUnverifiedEmailProofOutput(
     requiredArgument(argumentsByName, "--candidate-unverified-email-proof-output", /.+/),
+  );
+  const linkedEmailFailureProofOutput = await exactLinkedEmailFailureProofOutput(
+    requiredArgument(argumentsByName, "--candidate-linked-email-failure-proof-output", /.+/),
   );
   await assertRepositoryRoot();
   const [baselineInput, candidateInput, livePair] = await Promise.all([
@@ -95,6 +109,7 @@ try {
     let proxySummaries;
     let captureFailure;
     let candidateUnverifiedEmail;
+    let candidateLinkedEmailFailure;
     try {
       const captureSettlements = await Promise.allSettled(
         ["baseline", "candidate"].map(async (role) => {
@@ -119,6 +134,17 @@ try {
             binding: candidateBinding,
             input: candidateInput,
             output: unverifiedEmailProofOutput,
+          });
+        } catch (error) {
+          captureFailure = error;
+        }
+      }
+      if (!captureFailure) {
+        try {
+          candidateLinkedEmailFailure = await runCandidateLinkedEmailFailureRegression({
+            binding: candidateBinding,
+            input: candidateInput,
+            output: linkedEmailFailureProofOutput,
           });
         } catch (error) {
           captureFailure = error;
@@ -157,6 +183,7 @@ try {
       }),
       proxySummaries: Object.freeze(proxySummaries),
       candidateUnverifiedEmail,
+      candidateLinkedEmailFailure,
     });
   });
 
@@ -197,9 +224,11 @@ try {
     browserCasesPerRole: 18,
     checkpointPngsPerRole: 105,
     rawArtifactsPerRole: 141,
-    candidateAuthorizedRegressionCases: 1,
+    candidateAuthorizedRegressionCases: 2,
     candidateUnverifiedEmailProofSha256:
       session.value.candidateUnverifiedEmail.proofSha256,
+    candidateLinkedEmailFailureProofSha256:
+      session.value.candidateLinkedEmailFailure.proofSha256,
     proofSha256: proof.proofSha256,
     completionSha256: proof.completionSha256,
   })}\n`);
@@ -272,6 +301,45 @@ async function runCandidateUnverifiedEmailRegression({ binding, input, output })
   ], environment, 180_000);
   const document = assertUnverifiedEmailLoginProof(
     await readBoundedJson(output, 16_384, "candidate unverified e-mail proof"),
+    {
+      candidateApplicationImageDigest: binding.source.imageDigest,
+      candidateMigrationImageDigest: binding.source.migrationImageDigest,
+      candidateRevision: binding.source.revision,
+    },
+  );
+  return Object.freeze({
+    status: document.status,
+    proofSha256: sha256(JSON.stringify(document)),
+  });
+}
+
+async function runCandidateLinkedEmailFailureRegression({ binding, input, output }) {
+  const [resolverIp] = input.contract.publications.browserTls.split(":");
+  const environment = journeyDockerCliEnvironment();
+  Object.assign(environment, {
+    CI: "1",
+    NODE_ENV: "test",
+    CLEAN_PAY_BROWSER_BASE_URL: "https://pay.ci.clean-pay.dev",
+    CLEAN_PAY_BROWSER_CONNECT_PROXY: `http://${input.contract.publications.connectProxy}`,
+    CLEAN_PAY_BROWSER_HOST_RESOLVER_IP: resolverIp,
+    CLEAN_PAY_BROWSER_LINKED_EMAIL_FAILURE_PROOF_OUTPUT: output,
+    CLEAN_PAY_BROWSER_MIGRATION_IMAGE_DIGEST: binding.source.migrationImageDigest,
+    CLEAN_PAY_BROWSER_PLAYWRIGHT_OUTPUT_SCOPE: sha256(
+      `${captureId}:candidate-linked-email-failure`,
+    ).slice(0, 16),
+    CLEAN_PAY_BROWSER_PROVIDER_CONTROL_URL:
+      `http://${input.contract.publications.providerControl}/`,
+    CLEAN_PAY_BROWSER_SOURCE_IMAGE_DIGEST: binding.source.imageDigest,
+    CLEAN_PAY_BROWSER_SOURCE_REVISION: binding.source.revision,
+  });
+  await boundedProcess(process.execPath, [
+    localPlaywrightCli,
+    "test",
+    "--config",
+    linkedEmailFailureConfig,
+  ], environment, 180_000);
+  const document = assertLinkedEmailFailureProof(
+    await readBoundedJson(output, 16_384, "candidate linked e-mail failure proof"),
     {
       candidateApplicationImageDigest: binding.source.imageDigest,
       candidateMigrationImageDigest: binding.source.migrationImageDigest,
@@ -827,6 +895,7 @@ function parseArguments(values) {
     "--candidate-asset-image-digest",
     "--candidate-migration-asset-image-digest",
     "--capture-id",
+    "--candidate-linked-email-failure-proof-output",
     "--candidate-unverified-email-proof-output",
   ]);
   const result = new Map();
@@ -865,6 +934,33 @@ async function exactUnverifiedEmailProofOutput(rawPath) {
   try {
     await lstat(rawPath);
     throw new Error("Candidate unverified e-mail proof output already exists.");
+  } catch (error) {
+    if (error?.code !== "ENOENT") throw error;
+  }
+  return rawPath;
+}
+
+async function exactLinkedEmailFailureProofOutput(rawPath) {
+  if (!path.isAbsolute(rawPath)
+    || path.basename(rawPath) !== LINKED_EMAIL_FAILURE_PROOF_FILENAME
+    || path.dirname(rawPath) !== path.join(
+      repositoryRoot,
+      "test-results",
+      "browser-live-pair-ci",
+      captureId,
+    )) {
+    throw new Error("Candidate linked e-mail failure proof output escaped its exact capture root.");
+  }
+  const parent = path.dirname(rawPath);
+  const details = await lstat(parent);
+  if (!details.isDirectory() || details.isSymbolicLink()
+    || path.dirname(await realpath(parent))
+      !== await realpath(path.join(repositoryRoot, "test-results", "browser-live-pair-ci"))) {
+    throw new Error("Candidate linked e-mail failure proof output parent is invalid.");
+  }
+  try {
+    await lstat(rawPath);
+    throw new Error("Candidate linked e-mail failure proof output already exists.");
   } catch (error) {
     if (error?.code !== "ENOENT") throw error;
   }
