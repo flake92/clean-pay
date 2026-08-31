@@ -5,6 +5,7 @@ import {
   type LinkAccountCommands,
   type LinkAccountReader,
 } from "@/application/auth/ports/link-account";
+import type { TelegramAccountMergeGateway } from "@/application/auth/ports/telegram-account-merge";
 import { prisma } from "@/backend/database/prisma";
 import { ServiceError } from "@/backend/errors/service-error";
 import {
@@ -31,7 +32,6 @@ import {
 import { assertRateLimit } from "@/backend/limits/rate-limit";
 import { auditLog } from "@/backend/observability/audit";
 import { synchronizeProviderAccountIdentity } from "@/backend/integrations/auth/provider-account-identity-sync";
-import { productionTelegramAccountMergeGateway } from "@/backend/integrations/auth/telegram-account-merge-gateway";
 
 type CurrentSession = NonNullable<Awaited<ReturnType<typeof getCurrentSession>>>;
 type ProviderAuth = Awaited<ReturnType<typeof remnashopAuth>>;
@@ -73,6 +73,7 @@ async function mergeToken() {
 }
 
 export function createProductionLinkAccountReader(
+  telegramAccountMergeGateway: TelegramAccountMergeGateway,
   readSession: SessionReader = getCurrentSession,
 ): LinkAccountReader {
   return {
@@ -89,7 +90,7 @@ export function createProductionLinkAccountReader(
         if (code !== "NOT_FOUND") throw error;
         let confirmation;
         try {
-          confirmation = await productionTelegramAccountMergeGateway.loadConfirmation(userId);
+          confirmation = await telegramAccountMergeGateway.loadConfirmation(userId);
         } catch (fallbackError) {
           if ((fallbackError as { code?: unknown })?.code === "NOT_FOUND") {
             throw new ServiceError("NOT_FOUND", 404, "Account merge confirmation has expired.");
@@ -115,9 +116,8 @@ export function createProductionLinkAccountReader(
   };
 }
 
-export const productionLinkAccountReader = createProductionLinkAccountReader();
-
-export const productionLinkAccountCommands: LinkAccountCommands = {
+export function createProductionLinkAccountCommands(): LinkAccountCommands {
+  return {
   async loadLinkActor() {
     const session = await adapt(() => getCurrentSession());
     if (!session) return null;
@@ -296,8 +296,8 @@ export const productionLinkAccountCommands: LinkAccountCommands = {
     return { targetEmail: result.target_email };
   },
 
-  async auditLinkEvent(input) {
-    await adapt(() => auditLog(input));
-  },
-
-};
+    async auditLinkEvent(input) {
+      await adapt(() => auditLog(input));
+    },
+  };
+}

@@ -85,7 +85,8 @@ function confirmationContext(confirmation: AccountMergeConfirmation) {
   };
 }
 
-export const productionTelegramAccountMergeGateway: TelegramAccountMergeGateway = {
+export function createProductionTelegramAccountMergeGateway(): TelegramAccountMergeGateway {
+  return {
   async loadActor() {
     const session = await adapt(() => getCurrentSession());
     return session ? { userId: session.userId, fullAssurance: session.assuranceLevel === "FULL" } : null;
@@ -434,10 +435,11 @@ export const productionTelegramAccountMergeGateway: TelegramAccountMergeGateway 
   },
 
   async refreshLocalSession() { await refreshCurrentAccessCookie(); },
-  async reconcileCompletedOwnerChange(confirmation) {
+    async reconcileCompletedOwnerChange(confirmation) {
     await adapt(() => reconcileCompletedPaymentOwnerChange(
       [confirmation.userId],
       `telegram-account-merge:v1:${confirmation.id}`,
     ));
-  },
-};
+    },
+  };
+}

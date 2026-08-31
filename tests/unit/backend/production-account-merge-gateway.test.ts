@@ -36,7 +36,9 @@ vi.mock("@/backend/integrations/remnashop/client", () => ({
 vi.mock("@/backend/integrations/remnashop/session", () => ({ linkCurrentUserToRemnashopAuth: mocks.linkCurrentUserToRemnashopAuth }));
 vi.mock("@/backend/integrations/auth/provider-account-identity-sync", () => ({ synchronizeProviderAccountIdentity: mocks.synchronizeProviderAccountIdentity }));
 
-import { productionTelegramAccountMergeGateway as gateway } from "@/backend/integrations/auth/telegram-account-merge-gateway";
+import { createProductionTelegramAccountMergeGateway } from "@/backend/integrations/auth/telegram-account-merge-gateway";
+
+const gateway = createProductionTelegramAccountMergeGateway();
 
 describe("production Telegram account merge gateway", () => {
   beforeEach(() => {
