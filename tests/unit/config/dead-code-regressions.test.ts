@@ -123,7 +123,7 @@ describe("dead-code regressions", () => {
     }
 
     const authAdapter = readFileSync("src/backend/integrations/auth/auth-commands.ts", "utf8");
-    const authUseCase = readFileSync("src/application/auth/execute-auth-command.ts", "utf8");
+    const authUseCase = readFileSync("src/application/auth/execute-email-identification.ts", "utf8");
     expect(authAdapter).toContain("remnashopIdentifyEmail");
     expect(authUseCase).toContain("identifyEmail(email)");
 
