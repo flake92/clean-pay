@@ -27,11 +27,7 @@ export const telegramWebAppLoginComposition = {
   getTelegramWebApp,
   loadTelegramWebAppScript,
   markTelegramWebAppSession,
-  window: {
-    location: {
-      replace: (destination: string) => window.location.replace(destination),
-    },
-  },
+  replaceLocation: (redirectTo: string) => window.location.replace(redirectTo),
 };
 
 export function useTelegramWebAppLoginController({
