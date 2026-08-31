@@ -14,6 +14,13 @@ Their app, provider-control, CONNECT-proxy, and loopback TLS publications,
 application image digests, and source revisions must be distinct. Keep each
 generated `browser-journey-contract.json` outside the repository. Then run:
 
+Create the private directory
+`test-results/browser-live-pair-ci/<16-lowercase-hex-capture-id>` first and set
+`CLEAN_PAY_PROVIDER_OVERLAP_FAILURE_OUTPUT` to its exact new
+`provider-overlap-failure.json` path. The production-image runner performs both
+steps automatically. A direct invocation uses the same capture ID in the path
+and argument:
+
 ```text
 node tests/browser/journeys/prove-provider-overlap.mjs \
   --baseline-contract <absolute-baseline-contract-path> \
@@ -28,6 +35,7 @@ node tests/browser/journeys/prove-provider-overlap.mjs \
   --candidate-asset-image-digest sha256:<candidate-app-OCI-root-or-index-digest> \
   --candidate-migration-asset-image-digest sha256:<candidate-migration-OCI-root-or-index-digest> \
   --candidate-asset-attestation <absolute-candidate-production-asset-attestation> \
+  --capture-id <16-lowercase-hex-capture-id> \
   --scenario provider-overlap-v1 \
   --output <absolute-new-path-outside-the-repository>.json
 ```
