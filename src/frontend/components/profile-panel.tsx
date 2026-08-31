@@ -3,14 +3,10 @@
 import { Card } from "primereact/card";
 import { Tag } from "primereact/tag";
 
-import { passwordToggleA11y } from "@/frontend/components/password-toggle-a11y";
 import { LinkButton } from "@/frontend/components/prime/link-button";
 import { ProfileEmailChangeFields } from "@/frontend/components/profile-email-change-fields";
-import {
-  Button,
-  Message,
-  Password,
-} from "@/frontend/components/sakai/form-foundation";
+import { ProfilePasswordChangeFields } from "@/frontend/components/profile-password-change-fields";
+import { Message } from "@/frontend/components/sakai/form-foundation";
 import type { ProfileViewModel } from "@/application/models/profile";
 import {
   profileAuthTypeLabel,
@@ -201,45 +197,14 @@ function ProfilePanelContent({
       {canChangePassword ? (
         <Card title="Смена пароля">
           <form className="flex flex-column gap-3" onSubmit={changePassword}>
-            {passwordMessage ? <Message severity={passwordMessageSeverity} text={passwordMessage} /> : null}
-            <label className="flex flex-column gap-2">
-              <span className="text-sm font-medium text-700">Текущий пароль</span>
-              <Password
-                autoComplete="current-password"
-                className="w-full"
-                feedback={false}
-                inputClassName="w-full"
-                maxLength={256}
-                name="currentPassword"
-                onChange={changeCurrentPassword}
-                pt={passwordToggleA11y.current}
-                required
-                toggleMask
-                value={currentPassword}
-              />
-            </label>
-            <label className="flex flex-column gap-2">
-              <span className="text-sm font-medium text-700">Новый пароль</span>
-              <Password
-                autoComplete="new-password"
-                className="w-full"
-                inputClassName="w-full"
-                maxLength={256}
-                minLength={8}
-                name="newPassword"
-                onChange={changeNewPassword}
-                pt={passwordToggleA11y.next}
-                required
-                toggleMask
-                value={newPassword}
-              />
-            </label>
-            <Button
-              className="w-fit"
-              disabled={pendingAction !== null}
-              label="Изменить пароль"
-              loading={pendingAction === "password"}
-              type="submit"
+            <ProfilePasswordChangeFields
+              currentPassword={currentPassword}
+              newPassword={newPassword}
+              onCurrentPasswordChange={changeCurrentPassword}
+              onNewPasswordChange={changeNewPassword}
+              passwordMessage={passwordMessage}
+              passwordMessageSeverity={passwordMessageSeverity}
+              pendingAction={pendingAction}
             />
           </form>
         </Card>
