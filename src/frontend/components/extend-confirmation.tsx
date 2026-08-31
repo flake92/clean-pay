@@ -2,12 +2,14 @@
 
 import { AccountActionRequired } from "@/frontend/components/account-action-required";
 import { LinkButton } from "@/frontend/components/prime/link-button";
+import {
+  Button,
+  Dropdown,
+  Message,
+} from "@/frontend/components/sakai/form-foundation";
 import { paymentGatewayLabel } from "@/frontend/lib/payment-gateway";
 import { useExtendConfirmationController } from "@/frontend/hooks/use-extend-confirmation-controller";
-import { Button } from "primereact/button";
 import { Card } from "primereact/card";
-import { Dropdown } from "primereact/dropdown";
-import { Message } from "primereact/message";
 import type { CheckoutViewModel } from "@/application/models/checkout";
 import {
   type ExtendPriceOption,

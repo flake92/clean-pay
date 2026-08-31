@@ -1,6 +1,6 @@
 "use client";
 
-import { Message } from "primereact/message";
+import { Message } from "@/frontend/components/sakai/form-foundation";
 import { ProgressSpinner } from "primereact/progressspinner";
 
 import {

@@ -1,14 +1,16 @@
 "use client";
 
-import { Button } from "primereact/button";
 import { Card } from "primereact/card";
-import { InputText } from "primereact/inputtext";
-import { Message } from "primereact/message";
-import { Password } from "primereact/password";
 import { Tag } from "primereact/tag";
 
 import { passwordToggleA11y } from "@/frontend/components/password-toggle-a11y";
 import { LinkButton } from "@/frontend/components/prime/link-button";
+import {
+  Button,
+  InputText,
+  Message,
+  Password,
+} from "@/frontend/components/sakai/form-foundation";
 import { TurnstileWidget } from "@/frontend/components/turnstile-widget";
 import type { ProfileViewModel } from "@/application/models/profile";
 import {

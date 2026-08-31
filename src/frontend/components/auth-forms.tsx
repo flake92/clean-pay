@@ -2,11 +2,6 @@
 
 import { createContext, useContext, type ReactNode } from "react";
 
-import { Button } from "primereact/button";
-import { InputText } from "primereact/inputtext";
-import { Message } from "primereact/message";
-import { Password } from "primereact/password";
-
 import {
   authPasswordLabel,
   authSubmitLabel,
@@ -14,6 +9,12 @@ import {
 import { selectAuthFormView } from "@/frontend/components/auth-form-transitions";
 import { PasskeyLoginButton } from "@/frontend/components/passkey-actions";
 import { passwordToggleA11y } from "@/frontend/components/password-toggle-a11y";
+import {
+  Button,
+  InputText,
+  Message,
+  Password,
+} from "@/frontend/components/sakai/form-foundation";
 import { TurnstileWidget } from "@/frontend/components/turnstile-widget";
 import {
   useAuthFormController,

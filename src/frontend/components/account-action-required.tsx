@@ -1,6 +1,6 @@
 "use client";
 
-import { Message } from "primereact/message";
+import { Message } from "@/frontend/components/sakai/form-foundation";
 
 import { LinkButton } from "@/frontend/components/prime/link-button";
 import { useAccountActionRequiredController } from "@/frontend/hooks/use-account-action-required-controller";
