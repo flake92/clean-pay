@@ -111,6 +111,7 @@ describe("post-auth redirect flow", () => {
     const passkeys = [
       readFileSync("src/frontend/components/passkey-actions.tsx", "utf8"),
       readFileSync("src/frontend/hooks/use-passkey-actions-controller.ts", "utf8"),
+      readFileSync("src/frontend/hooks/use-passkey-login-controller.ts", "utf8"),
     ].join("\n");
     const telegramStart = readFileSync("src/app/auth/telegram/start/route.ts", "utf8");
     const telegramWebAppController = readFileSync(
