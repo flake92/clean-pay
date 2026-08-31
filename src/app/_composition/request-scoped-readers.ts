@@ -5,6 +5,7 @@ import { loadReferralProgram } from "@/application/referral/load-referral-progra
 import { getEnv } from "@/backend/config/env";
 import { createProductionAuthProfileGateway } from "@/backend/integrations/auth/auth-profile-gateway";
 import { createProductionLinkAccountReader } from "@/backend/integrations/auth/link-account";
+import { productionTelegramAccountMergeGateway } from "@/app/_composition/account-link-runtime";
 import { createProductionPasskeyManagementGateway } from "@/backend/integrations/auth/passkey-management-gateway";
 import { createProductionCabinetReader } from "@/backend/integrations/cabinet/cabinet-reader";
 import { createProductionCheckoutReader } from "@/backend/integrations/payments/checkout-reader";
@@ -57,6 +58,7 @@ export const requestAuthProfileGateway = createProductionAuthProfileGateway(
   false,
 );
 export const requestLinkAccountReader = createProductionLinkAccountReader(
+  productionTelegramAccountMergeGateway,
   loadRequestCurrentSession,
 );
 export const requestPasskeyManagementGateway =

@@ -1,7 +1,9 @@
 import { createProductionAuthCommands } from "@/backend/integrations/auth/auth-commands";
-import { productionLinkAccountCommands } from "@/backend/integrations/auth/link-account";
 import { createProductionPasskeyManagementGateway } from "@/backend/integrations/auth/passkey-management-gateway";
-import { productionTelegramAccountMergeGateway } from "@/backend/integrations/auth/telegram-account-merge-gateway";
+import {
+  productionLinkAccountCommands,
+  productionTelegramAccountMergeGateway,
+} from "@/app/_composition/account-link-runtime";
 import { productionPaymentMaintenanceRunner } from "@/app/_composition/payment-operations-runtime";
 import {
   clearReferralAttributionCookie,

@@ -1278,6 +1278,32 @@ describe("clean architecture boundaries", () => {
     );
   });
 
+  it("constructs linked-account and Telegram merge adapters only in app composition", () => {
+    const composition = readFileSync(
+      "src/app/_composition/account-link-runtime.ts",
+      "utf8",
+    );
+    const linkAdapter = readFileSync(
+      "src/backend/integrations/auth/link-account.ts",
+      "utf8",
+    );
+    const mergeAdapter = readFileSync(
+      "src/backend/integrations/auth/telegram-account-merge-gateway.ts",
+      "utf8",
+    );
+
+    expect(linkAdapter).toContain("export function createProductionLinkAccountCommands()");
+    expect(linkAdapter).not.toContain("export const productionLinkAccountCommands");
+    expect(linkAdapter).not.toContain("productionTelegramAccountMergeGateway");
+    expect(mergeAdapter).toContain("export function createProductionTelegramAccountMergeGateway()");
+    expect(mergeAdapter).not.toContain("export const productionTelegramAccountMergeGateway");
+    expect(composition).toContain("createProductionTelegramAccountMergeGateway()");
+    expect(composition).toContain(
+      "createProductionLinkAccountReader(\n  productionTelegramAccountMergeGateway,",
+    );
+    expect(composition).toContain("createProductionLinkAccountCommands()");
+  });
+
   it("routes every Next.js controller adapter dependency through app composition", () => {
     for (const { file, source } of files("src/app/**/*.{ts,tsx}")) {
       if (file.replaceAll("\\", "/").startsWith("src/app/_composition/")) continue;

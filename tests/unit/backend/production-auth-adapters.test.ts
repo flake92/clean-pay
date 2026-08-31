@@ -116,7 +116,10 @@ import { ServiceError } from "@/backend/errors/service-error";
 import { AuthGatewayError } from "@/application/auth/ports/auth-commands";
 import { createProductionAuthCommands } from "@/backend/integrations/auth/auth-commands";
 import { productionEmailVerificationCommands } from "@/backend/integrations/auth/email-verification";
-import { productionLinkAccountCommands, productionLinkAccountReader } from "@/backend/integrations/auth/link-account";
+import {
+  productionLinkAccountCommands,
+  productionLinkAccountReader,
+} from "@/app/_composition/account-link-runtime";
 import { productionProfileCommands } from "@/backend/integrations/profile/profile-adapter";
 import { linkAccountEmail } from "@/application/auth/manage-linked-account";
 
