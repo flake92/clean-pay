@@ -306,5 +306,3 @@ export function createProductionPasskeyCommands(
   },
   };
 }
-
-export const productionPasskeyCommands = createProductionPasskeyCommands();

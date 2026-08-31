@@ -55,7 +55,9 @@ vi.mock("@/backend/payments/return-url", () => ({
 }));
 
 import { ServiceError } from "@/backend/errors/service-error";
-import { productionPaymentWorkflowGateway as gateway } from "@/backend/integrations/payments/payment-workflow-gateway";
+import { createProductionPaymentWorkflowGateway } from "@/backend/integrations/payments/payment-workflow-gateway";
+
+const gateway = createProductionPaymentWorkflowGateway();
 
 const authorization = {
   context: { accessToken: "access-token", localUserId: "user-1", upstreamAccountId: "upstream-1" },

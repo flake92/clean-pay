@@ -90,5 +90,3 @@ export function createProductionChatwootContextGateway(
   },
   };
 }
-
-export const productionChatwootContextGateway = createProductionChatwootContextGateway();

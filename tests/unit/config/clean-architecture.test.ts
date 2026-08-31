@@ -1320,6 +1320,12 @@ describe("clean architecture boundaries", () => {
     expect(composition).toContain("export const productionTelegramAuthStartSecurity");
   });
 
+  it("keeps production adapter instances out of the backend layer", () => {
+    for (const { file, source } of files("src/backend/**/*.{ts,tsx}")) {
+      expect(source, file).not.toMatch(/export\s+const\s+production[A-Z]/);
+    }
+  });
+
   it("routes every Next.js controller adapter dependency through app composition", () => {
     for (const { file, source } of files("src/app/**/*.{ts,tsx}")) {
       if (file.replaceAll("\\", "/").startsWith("src/app/_composition/")) continue;

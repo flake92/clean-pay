@@ -205,5 +205,3 @@ export function createProductionPaymentWorkflowGateway(
   },
   };
 }
-
-export const productionPaymentWorkflowGateway = createProductionPaymentWorkflowGateway();

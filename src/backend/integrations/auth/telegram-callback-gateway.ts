@@ -473,5 +473,3 @@ export function createProductionTelegramCallbackGateway(
   },
   };
 }
-
-export const productionTelegramCallbackGateway = createProductionTelegramCallbackGateway();
