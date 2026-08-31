@@ -6,6 +6,7 @@ import { DETERMINISTIC_CHROMIUM_LAUNCH_ARGS } from "./tests/browser/render-polic
 const configuredBaseUrl = process.env.CLEAN_PAY_BROWSER_BASE_URL?.trim();
 
 export default defineConfig({
+  metadata: { cleanPayRendererPolicy: "canonical" },
   testDir: "./tests/browser",
   testMatch: "**/*.spec.ts",
   testIgnore: "**/journeys/**",

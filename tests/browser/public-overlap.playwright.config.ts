@@ -7,7 +7,7 @@ import {
   requirePublicOverlapEnvironment,
   requirePublicOverlapPairEnvironment,
 } from "./public-overlap-evidence";
-import { DETERMINISTIC_CHROMIUM_LAUNCH_ARGS } from "./render-policy";
+import { LIVE_OVERLAP_CHROMIUM_LAUNCH_ARGS } from "./render-policy";
 
 const mode = process.env.CLEAN_PAY_PUBLIC_OVERLAP_MODE;
 const validModes = ["capture", "cleanup", "compare", "prepare", "verify"] as const;
@@ -39,6 +39,7 @@ const outputDir = projectScopedPlaywrightOutputDirectory(
 );
 
 export default defineConfig({
+  metadata: { cleanPayRendererPolicy: "live-overlap" },
   testDir: ".",
   testMatch: {
     capture: pairedCapture
@@ -63,7 +64,7 @@ export default defineConfig({
       ?? pairEnvironment?.roles.baseline.applicationOrigin
       ?? "http://127.0.0.1:1",
     browserName: "chromium",
-    launchOptions: { args: [...DETERMINISTIC_CHROMIUM_LAUNCH_ARGS] },
+    launchOptions: { args: [...LIVE_OVERLAP_CHROMIUM_LAUNCH_ARGS] },
     colorScheme: "light",
     locale: "ru-RU",
     timezoneId: "Europe/Moscow",
