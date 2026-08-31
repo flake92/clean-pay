@@ -1304,6 +1304,22 @@ describe("clean architecture boundaries", () => {
     expect(composition).toContain("createProductionLinkAccountCommands()");
   });
 
+  it("constructs Telegram start security only in app composition", () => {
+    const composition = readFileSync(
+      "src/app/_composition/telegram-start-runtime.ts",
+      "utf8",
+    );
+    const adapter = readFileSync(
+      "src/backend/integrations/auth/telegram-auth-start-security.ts",
+      "utf8",
+    );
+
+    expect(adapter).toContain("export function createProductionTelegramAuthStartSecurity()");
+    expect(adapter).not.toContain("export const productionTelegramAuthStartSecurity");
+    expect(composition).toContain("createProductionTelegramAuthStartSecurity()");
+    expect(composition).toContain("export const productionTelegramAuthStartSecurity");
+  });
+
   it("routes every Next.js controller adapter dependency through app composition", () => {
     for (const { file, source } of files("src/app/**/*.{ts,tsx}")) {
       if (file.replaceAll("\\", "/").startsWith("src/app/_composition/")) continue;
