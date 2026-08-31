@@ -344,6 +344,3 @@ export function createProductionEmailVerificationCommands(
 
   };
 }
-
-export const productionEmailVerificationCommands =
-  createProductionEmailVerificationCommands();

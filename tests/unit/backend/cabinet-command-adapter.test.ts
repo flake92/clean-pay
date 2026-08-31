@@ -33,7 +33,9 @@ vi.mock("@/backend/integrations/sessions/web-session-service", () => ({
 
 import { CabinetCommandError } from "@/application/cabinet/ports/cabinet-commands";
 import { ServiceError } from "@/backend/errors/service-error";
-import { productionCabinetCommands } from "@/backend/integrations/cabinet/cabinet-commands";
+import { createProductionCabinetCommands } from "@/backend/integrations/cabinet/cabinet-commands";
+
+const productionCabinetCommands = createProductionCabinetCommands();
 
 describe("cabinet command adapter", () => {
   beforeEach(() => {

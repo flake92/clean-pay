@@ -101,5 +101,3 @@ export function createProductionTelegramWebAppGateway(
   },
   };
 }
-
-export const productionTelegramWebAppGateway = createProductionTelegramWebAppGateway();

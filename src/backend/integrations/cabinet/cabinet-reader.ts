@@ -17,5 +17,3 @@ export function createProductionCabinetReader(
     },
   };
 }
-
-export const productionCabinetReader = createProductionCabinetReader();

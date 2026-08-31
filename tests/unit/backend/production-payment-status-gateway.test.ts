@@ -36,7 +36,9 @@ vi.mock("@/backend/integrations/payments/payment-record-service", () => ({
 
 import { PaymentStatusGatewayError } from "@/application/payments/ports/payment-status-reader";
 import { ServiceError } from "@/backend/errors/service-error";
-import { productionPaymentStatusReader as gateway } from "@/backend/integrations/payments/payment-status-reader";
+import { createProductionPaymentStatusReader } from "@/backend/integrations/payments/payment-status-reader";
+
+const gateway = createProductionPaymentStatusReader();
 
 describe("production payment status gateway", () => {
   beforeEach(() => {

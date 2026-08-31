@@ -21,7 +21,9 @@ vi.mock("@/backend/integrations/profile/prisma-profile-account-repository", () =
 vi.mock("@/backend/observability/auth-debug-log", () => ({ authDebugLog: mocks.debug }));
 
 import { ServiceError } from "@/backend/errors/service-error";
-import { productionAuthProfileGateway } from "@/backend/integrations/auth/auth-profile-gateway";
+import { createProductionAuthProfileGateway } from "@/backend/integrations/auth/auth-profile-gateway";
+
+const productionAuthProfileGateway = createProductionAuthProfileGateway();
 
 const session = {
   id: "session-1", userId: "user-1", authMethod: "EMAIL",

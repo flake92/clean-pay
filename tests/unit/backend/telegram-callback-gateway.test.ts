@@ -58,7 +58,9 @@ vi.mock("@/backend/integrations/auth/provider-account-identity-sync", () => ({
 vi.mock("@/backend/security/crypto", () => ({ randomToken: mocks.randomToken, sha256: mocks.sha256 }));
 
 import { ServiceError } from "@/backend/errors/service-error";
-import { productionTelegramCallbackGateway as gateway } from "@/backend/integrations/auth/telegram-callback-gateway";
+import { createProductionTelegramCallbackGateway } from "@/backend/integrations/auth/telegram-callback-gateway";
+
+const gateway = createProductionTelegramCallbackGateway();
 
 const provider = {
   context: {

@@ -71,10 +71,13 @@ vi.mock("@/backend/integrations/sessions/web-session-revocation", () => ({
 }));
 
 import { prismaPasskeyAccountReader } from "@/backend/integrations/auth/prisma-passkey-account-reader";
-import { productionTelegramWebAppGateway } from "@/backend/integrations/auth/telegram-webapp-gateway";
+import { createProductionTelegramWebAppGateway } from "@/backend/integrations/auth/telegram-webapp-gateway";
 import { loadPaymentHistory } from "@/application/payments/load-payment-history";
-import { productionPaymentHistoryGateway } from "@/backend/integrations/payments/payment-history-reader";
+import { createProductionPaymentHistoryGateway } from "@/backend/integrations/payments/payment-history-reader";
 import { prismaPaymentQueryRepository } from "@/backend/integrations/payments/prisma-payment-query-repository";
+
+const productionTelegramWebAppGateway = createProductionTelegramWebAppGateway();
+const productionPaymentHistoryGateway = createProductionPaymentHistoryGateway();
 
 describe("production persistence and Telegram adapters", () => {
   beforeEach(() => {
