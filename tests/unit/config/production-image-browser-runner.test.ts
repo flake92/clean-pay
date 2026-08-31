@@ -26,7 +26,7 @@ describe("production-image browser runner phases", () => {
     )].map((match) => match[1]);
 
     expect(configs).toEqual([
-      "playwright.config.ts",
+      "config/playwright.config.ts",
       "tests/browser/journeys/playwright.config.ts",
     ]);
 
@@ -34,7 +34,7 @@ describe("production-image browser runner phases", () => {
       "await startOwnedProject(envFile, publicCharacterizationComposeFiles);",
     );
     const publicRun = runner.indexOf(
-      'await runPlaywright("playwright.config.ts", mainBrowserEnvironment);',
+      'await runPlaywright("config/playwright.config.ts", mainBrowserEnvironment);',
     );
     const interphaseCleanup = runner.indexOf(
       "await cleanupOwnedProject();",

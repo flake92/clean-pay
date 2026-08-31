@@ -332,7 +332,7 @@ describe("ephemeral production-image live overlap runner", () => {
     // The immutable Windows-baseline runner remains independently selectable,
     // and its unchanged phase strings stay covered by the pre-existing tests.
     expect(fixedRunner).toContain(
-      'await runPlaywright("playwright.config.ts", mainBrowserEnvironment);',
+      'await runPlaywright("config/playwright.config.ts", mainBrowserEnvironment);',
     );
     expect(fixedRunner).toContain("finalize-journey-baseline.mjs");
   });

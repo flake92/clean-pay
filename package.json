@@ -30,7 +30,7 @@
     "test:postgres-concurrency": "node node_modules/vitest/vitest.mjs run --config config/vitest/vitest.integration.config.mts --configLoader native tests/integration/services/passkey-deletion-postgres.test.ts tests/integration/services/refresh-token-rotation-postgres.test.ts tests/integration/services/account-merge-postgres.test.ts tests/integration/services/one-time-state-postgres.test.ts tests/integration/services/telegram-recovery-postgres.test.ts tests/integration/services/telegram-callback-durability-postgres.test.ts",
     "test:e2e:devcontainer": "node scripts/e2e-devcontainer.mjs",
     "test:e2e": "node scripts/e2e-devcontainer.mjs",
-    "test:browser": "node node_modules/playwright/cli.js test --config playwright.config.ts",
+    "test:browser": "node node_modules/playwright/cli.js test --config config/playwright.config.ts",
     "test:browser:journey": "node node_modules/playwright/cli.js test --config tests/browser/journeys/playwright.config.ts",
     "test:browser:journey:production-image": "node tests/browser/journeys/run-production-image-journey.mjs run",
     "evidence:served-cabinet-assets": "node scripts/security/prove-served-cabinet-assets.mjs",
