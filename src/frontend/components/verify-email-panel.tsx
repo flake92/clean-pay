@@ -5,9 +5,9 @@ import { Card } from "primereact/card";
 import type { AccountReadiness } from "@/application/models/email-verification";
 import { LinkButton } from "@/frontend/components/prime/link-button";
 import { VerifyEmailCodeFields } from "@/frontend/components/verify-email-code-fields";
+import { VerifyEmailResendFields } from "@/frontend/components/verify-email-resend-fields";
 import {
   Button,
-  InputText,
   Message,
 } from "@/frontend/components/sakai/form-foundation";
 import { TurnstileWidget } from "@/frontend/components/turnstile-widget";
@@ -119,17 +119,7 @@ export function VerifyEmailPanel({
           Код можно запросить не чаще одного раза в минуту.
         </p>
         <form className="flex flex-column gap-3" onSubmit={requestCode}>
-          <label className="flex flex-column gap-2">
-            <span className="text-sm font-medium text-700">E-mail</span>
-            <InputText name="email" placeholder="user@example.com" type="email" />
-          </label>
-          <Button
-            disabled={loading !== null}
-            label="Отправить код повторно"
-            loading={loading === "request"}
-            severity="info"
-            type="submit"
-          />
+          <VerifyEmailResendFields loading={loading} />
         </form>
       </Card>
     </div>
