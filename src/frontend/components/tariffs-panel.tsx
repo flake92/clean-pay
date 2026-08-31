@@ -13,9 +13,9 @@ import { useTariffsPanelController } from "@/frontend/hooks/use-tariffs-panel-co
 import { paymentGatewayLabel } from "@/frontend/lib/payment-gateway";
 import type { TariffsViewModel } from "@/application/models/tariffs";
 import { Card } from "primereact/card";
-import { Dropdown } from "primereact/dropdown";
-import { Message } from "primereact/message";
 import { Tag } from "primereact/tag";
+
+import { Dropdown, Message } from "@/frontend/components/sakai/form-foundation";
 
 function priceOptionTemplate(option?: TariffPriceOption) {
   if (!option) {

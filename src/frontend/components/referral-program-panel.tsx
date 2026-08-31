@@ -1,13 +1,15 @@
 "use client";
 
-import { Button } from "primereact/button";
-import { InputText } from "primereact/inputtext";
-import { Message } from "primereact/message";
 import { Tag } from "primereact/tag";
 
 import type { ReferralProgramViewModel } from "@/application/models/referral";
 import { Metric } from "@/frontend/components/cabinet-view-parts";
 import { LinkButton } from "@/frontend/components/prime/link-button";
+import {
+  Button,
+  InputText,
+  Message,
+} from "@/frontend/components/sakai/form-foundation";
 import {
   referralAccrualDescription,
   referralErrorAction,
