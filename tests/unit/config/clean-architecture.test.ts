@@ -779,6 +779,11 @@ describe("clean architecture boundaries", () => {
         boundaryImports: ["@/frontend/hooks/use-passkey-actions-controller"],
         runtimeExports: ["PasskeyLoginButton", "PasskeySetupPanel"],
       },
+      {
+        path: "src/frontend/components/turnstile-widget.tsx",
+        boundaryImports: ["@/frontend/hooks/use-turnstile-widget-controller"],
+        runtimeExports: ["TurnstileWidget"],
+      },
     ];
 
     for (const view of views) {
