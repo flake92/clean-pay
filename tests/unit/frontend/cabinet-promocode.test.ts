@@ -149,6 +149,22 @@ describe("cabinet promocode activation", () => {
     ).toBe(true);
   });
 
+  it("keeps the exact Sakai promocode form shell and control order", () => {
+    const form = container.querySelector<HTMLInputElement>("#promocode")?.closest("form");
+    expect(form?.className).toBe("mt-3 flex w-full flex-column gap-2 md:w-30rem");
+    expect(Array.from(form?.children ?? [], (element) => element.tagName)).toEqual([
+      "LABEL",
+      "DIV",
+    ]);
+    expect(form?.children[0]?.className).toBe("text-sm font-medium text-700");
+    expect(form?.children[1]?.className).toBe("p-inputgroup");
+    expect(Array.from(form?.children[1]?.children ?? [], (element) => element.tagName)).toEqual([
+      "INPUT",
+      "BUTTON",
+    ]);
+    expect(form?.querySelector<HTMLButtonElement>("button")?.type).toBe("submit");
+  });
+
   it("shows validation feedback without calling the API for an empty code", async () => {
     const form = container.querySelector<HTMLFormElement>("#promocode")?.closest("form");
     expect(form).not.toBeNull();
