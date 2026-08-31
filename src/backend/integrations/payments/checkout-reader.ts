@@ -13,5 +13,3 @@ export function createProductionCheckoutReader(
     loadOffers: () => subscriptions.loadOffers(),
   };
 }
-
-export const productionCheckoutReader = createProductionCheckoutReader();

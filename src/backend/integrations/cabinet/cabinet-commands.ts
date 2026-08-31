@@ -62,5 +62,3 @@ export function createProductionCabinetCommands(
   },
   };
 }
-
-export const productionCabinetCommands = createProductionCabinetCommands();

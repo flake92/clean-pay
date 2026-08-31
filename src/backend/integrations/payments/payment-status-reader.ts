@@ -92,5 +92,3 @@ export function createProductionPaymentStatusReader(
   },
   };
 }
-
-export const productionPaymentStatusReader = createProductionPaymentStatusReader();

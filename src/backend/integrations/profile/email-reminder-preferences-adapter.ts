@@ -154,6 +154,3 @@ export function createEmailReminderPreferenceCommands(
     },
   };
 }
-
-export const productionEmailReminderPreferenceCommands =
-  createEmailReminderPreferenceCommands();

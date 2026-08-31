@@ -81,5 +81,3 @@ export function createProductionProfileCommands(
   },
   };
 }
-
-export const productionProfileCommands = createProductionProfileCommands();

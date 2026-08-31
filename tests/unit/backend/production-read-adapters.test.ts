@@ -21,8 +21,8 @@ vi.mock("@/backend/integrations/remnawave/client", () => ({
 }));
 
 import { ServiceError } from "@/backend/errors/service-error";
-import { productionCabinetReader } from "@/backend/integrations/cabinet/cabinet-reader";
-import { productionCheckoutReader } from "@/backend/integrations/payments/checkout-reader";
+import { createProductionCabinetReader } from "@/backend/integrations/cabinet/cabinet-reader";
+import { createProductionCheckoutReader } from "@/backend/integrations/payments/checkout-reader";
 import { remnashopSubscriptionCatalog } from "@/backend/integrations/remnashop/subscription-catalog";
 import { remnashopSubscriptionReader } from "@/backend/integrations/remnashop/subscription-reader";
 import { productionSupportReader } from "@/app/_composition/support-runtime";
@@ -33,6 +33,9 @@ const offers = {
   has_current_subscription: true,
   current_subscription_status: "ACTIVE",
 };
+
+const productionCabinetReader = createProductionCabinetReader();
+const productionCheckoutReader = createProductionCheckoutReader();
 
 describe("production read adapters", () => {
   beforeEach(() => {

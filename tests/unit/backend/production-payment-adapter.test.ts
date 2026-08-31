@@ -60,7 +60,9 @@ vi.mock("@/backend/observability/audit", () => ({
   logTechnicalError: mocks.logTechnicalError,
 }));
 
-import { productionPaymentWorkflowGateway } from "@/backend/integrations/payments/payment-workflow-gateway";
+import { createProductionPaymentWorkflowGateway } from "@/backend/integrations/payments/payment-workflow-gateway";
+
+const productionPaymentWorkflowGateway = createProductionPaymentWorkflowGateway();
 
 const productionPaymentCommands = {
   purchase: (request: PurchaseRequest, idempotencyKey: string) => executePaymentWorkflow(

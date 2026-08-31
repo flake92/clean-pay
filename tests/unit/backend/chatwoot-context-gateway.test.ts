@@ -28,7 +28,9 @@ vi.mock("@/backend/database/prisma", () => ({
   },
 }));
 
-import { productionChatwootContextGateway } from "@/backend/integrations/support/chatwoot-context-gateway";
+import { createProductionChatwootContextGateway } from "@/backend/integrations/support/chatwoot-context-gateway";
+
+const productionChatwootContextGateway = createProductionChatwootContextGateway();
 
 describe("Chatwoot context gateway", () => {
   beforeEach(() => {

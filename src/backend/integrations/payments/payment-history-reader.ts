@@ -12,5 +12,3 @@ export function createProductionPaymentHistoryGateway(): PaymentHistoryGateway {
       prismaPaymentQueryRepository.readHistorySnapshotStatus(userId),
   };
 }
-
-export const productionPaymentHistoryGateway = createProductionPaymentHistoryGateway();

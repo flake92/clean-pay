@@ -91,5 +91,3 @@ export function createProductionAuthProfileGateway(
   debug: authDebugLog,
   };
 }
-
-export const productionAuthProfileGateway = createProductionAuthProfileGateway();

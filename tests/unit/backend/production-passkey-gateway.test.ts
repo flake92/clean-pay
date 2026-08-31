@@ -39,7 +39,9 @@ vi.mock("next/headers", () => ({ headers: async () => ({ get: mocks.headerGet })
 import {
   beginPasskeyLogin, beginPasskeyRegistration, verifyPasskeyLogin, verifyPasskeyRegistration,
 } from "@/application/auth/execute-passkey-command";
-import { productionPasskeyCommands as gateway } from "@/backend/integrations/auth/passkey-gateway";
+import { createProductionPasskeyCommands } from "@/backend/integrations/auth/passkey-gateway";
+
+const gateway = createProductionPasskeyCommands();
 
 function clientData(challenge: string) {
   return Buffer.from(JSON.stringify({ challenge })).toString("base64url");
