@@ -1,5 +1,5 @@
 import { remnashopValidatedRequest } from "@/backend/integrations/remnashop/api-client-runtime";
-import { getAuthorizedRemnashopTokens } from "@/backend/integrations/remnashop/client";
+import type { getAuthorizedRemnashopTokens } from "@/backend/integrations/remnashop/client";
 import { ServiceError } from "@/backend/errors/service-error";
 import { getLiveRemnawaveSubscriptionUrl } from "@/backend/integrations/remnawave/client";
 import type {
@@ -47,7 +47,7 @@ async function loadSubscriptionOffers(authorize: SubscriptionAuthorizer) {
 }
 
 export function createRemnashopSubscriptionReader(
-  authorize: SubscriptionAuthorizer = getAuthorizedRemnashopTokens,
+  authorize: SubscriptionAuthorizer,
 ) {
   return {
     loadCurrent: () => loadCurrentSubscription(authorize),
@@ -55,5 +55,3 @@ export function createRemnashopSubscriptionReader(
     loadOffers: () => loadSubscriptionOffers(authorize),
   };
 }
-
-export const remnashopSubscriptionReader = createRemnashopSubscriptionReader();

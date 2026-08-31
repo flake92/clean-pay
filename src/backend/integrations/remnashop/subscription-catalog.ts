@@ -3,14 +3,14 @@ import {
   type SubscriptionCatalog,
 } from "@/application/subscriptions/ports/subscription-catalog";
 import { remnashopValidatedRequest } from "@/backend/integrations/remnashop/api-client-runtime";
-import { getAuthorizedRemnashopTokens } from "@/backend/integrations/remnashop/client";
+import type { getAuthorizedRemnashopTokens } from "@/backend/integrations/remnashop/client";
 import { ServiceError } from "@/backend/errors/service-error";
 import type { SubscriptionOffersResponse } from "@/backend/integrations/remnashop/contracts";
 
 type Authorized = Awaited<ReturnType<typeof getAuthorizedRemnashopTokens>>;
 
 export function createRemnashopSubscriptionCatalog(
-  authorize: () => Promise<Authorized> = getAuthorizedRemnashopTokens,
+  authorize: () => Promise<Authorized>,
 ): SubscriptionCatalog {
   return {
     async loadOffers() {
@@ -32,5 +32,3 @@ export function createRemnashopSubscriptionCatalog(
     },
   };
 }
-
-export const remnashopSubscriptionCatalog = createRemnashopSubscriptionCatalog();
