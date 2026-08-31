@@ -36,6 +36,8 @@ import {
   createJourneyBrowserRequestEnvelope,
   createProviderOverlapEventSeal,
   createProviderOverlapPendingRequestSeal,
+  createProviderOverlapRejectedRequestProvenance,
+  createProviderOverlapRejectionProvenanceDocument,
   createProviderOverlapStaticAssetContract,
   extractProviderOverlapCssMediaReferences,
   extractProviderOverlapResponseStaticDeclarations,
@@ -44,6 +46,7 @@ import {
   finalizeProviderOverlapHistoryContract,
   installProviderOverlapHistoryInstrumentation,
   normalizeProviderOverlapResponseContentType,
+  PROVIDER_OVERLAP_REJECTION_PROVENANCE_MAX_PER_ROLE,
   resolveProviderOverlapResponseRequestEntry,
 } from "./provider-overlap-browser-contract.mjs";
 import {
@@ -81,6 +84,10 @@ let captureId;
 let failureOutputPath;
 let scenario;
 let outputPath;
+const providerRejectionProvenanceState = {
+  baseline: { entries: [], truncated: false },
+  candidate: { entries: [], truncated: false },
+};
 
 try {
   argumentsByName = parseArguments(process.argv.slice(2));
@@ -228,11 +235,33 @@ async function emitProviderFailure(primaryError) {
 
 function providerFailureBytes(error) {
   const dockerFailures = collectJourneyDockerFailureEvidence(error);
+  const rejectedRequestProvenance = currentProviderRejectionProvenance();
   return Buffer.from(`${JSON.stringify({
     status: "dual_image_provider_overlap_failed",
     ...(dockerFailures.length === 0 ? {} : { dockerFailures }),
+    ...(rejectedRequestProvenance === undefined ? {} : { rejectedRequestProvenance }),
     ...createJourneySanitizedErrorEvidence(error),
   })}\n`, "utf8");
+}
+
+function recordProviderRejectionProvenance(role, provenance) {
+  const state = providerRejectionProvenanceState[role];
+  if (!state) return;
+  if (state.entries.length >= PROVIDER_OVERLAP_REJECTION_PROVENANCE_MAX_PER_ROLE) {
+    state.truncated = true;
+    return;
+  }
+  state.entries.push(provenance);
+}
+
+function currentProviderRejectionProvenance() {
+  const hasEvidence = ["baseline", "candidate"].some((role) => {
+    const state = providerRejectionProvenanceState[role];
+    return state.entries.length > 0 || state.truncated;
+  });
+  return hasEvidence
+    ? createProviderOverlapRejectionProvenanceDocument(providerRejectionProvenanceState)
+    : undefined;
 }
 
 async function readStackInput(role) {
@@ -318,6 +347,7 @@ async function proveStack(input, preflight, playwrightVersion) {
     input.role,
   );
   const browserRun = await exerciseCabinet(
+    input.role,
     input.resolverIp,
     `http://${input.contract.publications.connectProxy}`,
     playwrightVersion,
@@ -356,6 +386,7 @@ async function proveStack(input, preflight, playwrightVersion) {
 }
 
 async function exerciseCabinet(
+  role,
   resolverIp,
   connectProxyUrl,
   playwrightVersion,
@@ -510,20 +541,67 @@ async function exerciseCabinet(
         unexpectedRequestOverflow = true;
       }
     };
+    const createRejectedPreparation = (reasonCode, request, rawUrl, rejection) => {
+      let provenance;
+      try {
+        const isNavigation = request.isNavigationRequest();
+        let requestFrame;
+        try {
+          requestFrame = request.frame();
+        } catch {
+          requestFrame = undefined;
+        }
+        provenance = createProviderOverlapRejectedRequestProvenance({
+          reasonCode,
+          rejectionMessage: rejection instanceof Error ? rejection.message : reasonCode,
+          requestEnvelope: {
+            isMainFrame: isNavigation && requestFrame === page.mainFrame(),
+            isNavigation,
+            method: request.method(),
+            resourceType: request.resourceType(),
+            url: rawUrl,
+          },
+        });
+      } catch {
+        provenance = createProviderOverlapRejectedRequestProvenance({
+          reasonCode,
+          rejectionMessage: "provider-rejection-provenance-unavailable",
+          requestEnvelope: {
+            isMainFrame: false,
+            isNavigation: false,
+            method: "UNAVAILABLE",
+            resourceType: "other",
+            url: "https://unavailable.provider-overlap.invalid/",
+          },
+        });
+      }
+      recordProviderRejectionProvenance(role, provenance);
+      return Object.freeze({
+        disposition: "abort",
+        entry: null,
+        rejectionProvenance: provenance,
+      });
+    };
     const prepareBrowserRequest = (request) => {
       const existing = browserRequestPreparationByIdentity.get(request);
       if (existing) return existing;
 
       const rawUrl = request.url();
       let requestPage;
+      let requestPageUnavailable = false;
       try {
         requestPage = request.frame().page();
       } catch {
+        requestPageUnavailable = true;
         requestPage = undefined;
       }
       if (requestPage !== page) {
         recordUnexpectedRequest(rawUrl);
-        const preparation = Object.freeze({ disposition: "abort", entry: null });
+        const preparation = createRejectedPreparation(
+          requestPageUnavailable ? "request-page-unavailable" : "request-page-mismatch",
+          request,
+          rawUrl,
+        );
         browserRequestPreparationByIdentity.set(request, preparation);
         return preparation;
       }
@@ -558,11 +636,16 @@ async function exerciseCabinet(
         });
         browserRequestPreparationByIdentity.set(request, preparation);
         return preparation;
-      } catch {
+      } catch (error) {
         // The emitted report never contains the rejected URL. Retain only its
         // digest for bounded local failure diagnosis.
         recordUnexpectedRequest(rawUrl);
-        const preparation = Object.freeze({ disposition: "abort", entry: null });
+        const preparation = createRejectedPreparation(
+          "request-classification-rejected",
+          request,
+          rawUrl,
+          error,
+        );
         browserRequestPreparationByIdentity.set(request, preparation);
         return preparation;
       }
@@ -674,9 +757,14 @@ async function exerciseCabinet(
         if (!preparation
           || (preparation.entry !== null && preparation.entry.request !== request)) {
           recordUnexpectedRequest(request.url());
+          const rejectedPreparation = createRejectedPreparation(
+            "route-preparation-missing",
+            request,
+            request.url(),
+          );
           browserRequestPreparationByIdentity.set(
             request,
-            Object.freeze({ disposition: "abort", entry: null }),
+            rejectedPreparation,
           );
           await route.abort("blockedbyclient");
           return;

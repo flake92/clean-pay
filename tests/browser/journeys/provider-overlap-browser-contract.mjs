@@ -4,6 +4,7 @@ const maximumRequests = 256;
 const maximumStaticAssetBytes = 128 * 1024 * 1024;
 const maximumStaticAssetTotalBytes = 1024 * 1024 * 1024;
 const maximumStaticDeclarationBodyBytes = 2 * 1024 * 1024;
+export const PROVIDER_OVERLAP_REJECTION_PROVENANCE_MAX_PER_ROLE = 16;
 const sha256Pattern = /^[a-f0-9]{64}$/;
 const opaquePattern = /^[A-Za-z0-9._~-]{1,256}$/;
 const nextStaticMediaExtensionExpression = "(?:eot|ico|png|svg|ttf|woff2|woff)";
@@ -62,6 +63,12 @@ const exactCssMediaExtensionCounts = Object.freeze({
   woff: 1,
   woff2: 3,
 });
+const providerOverlapRejectionReasonCodes = new Set([
+  "request-classification-rejected",
+  "request-page-mismatch",
+  "request-page-unavailable",
+  "route-preparation-missing",
+]);
 
 // This function is serialized by Playwright into every new document. Keep it
 // self-contained: imported module bindings are not available in page context.
@@ -305,6 +312,93 @@ export function resolveProviderOverlapResponseRequestEntry(input) {
     fail("Browser response escaped its exact request identity ledger.");
   }
   return entry;
+}
+
+export function createProviderOverlapRejectedRequestProvenance(input) {
+  exactKeys(input, [
+    "reasonCode", "rejectionMessage", "requestEnvelope",
+  ], "provider rejected request provenance input");
+  if (!providerOverlapRejectionReasonCodes.has(input.reasonCode)) {
+    fail("Provider rejected request reason code is invalid.");
+  }
+  const envelope = input.requestEnvelope;
+  exactKeys(envelope, [
+    "isMainFrame", "isNavigation", "method", "resourceType", "url",
+  ], "provider rejected request envelope");
+  if (typeof envelope.url !== "string" || envelope.url.length < 1
+    || envelope.url.length > 8_192
+    || typeof envelope.method !== "string" || envelope.method.length < 1
+    || envelope.method.length > 64
+    || typeof envelope.resourceType !== "string" || envelope.resourceType.length < 1
+    || envelope.resourceType.length > 64
+    || typeof envelope.isNavigation !== "boolean"
+    || typeof envelope.isMainFrame !== "boolean") {
+    fail("Provider rejected request envelope is invalid.");
+  }
+  const url = exactUrl(envelope.url);
+  const queryKeys = [...url.searchParams.keys()];
+  const queryKeySha256s = queryKeys
+    .slice(0, 64)
+    .map(sha256)
+    .sort();
+  const pathSha256 = sha256(url.pathname);
+  const canonicalEnvelope = {
+    isMainFrame: envelope.isMainFrame,
+    isNavigation: envelope.isNavigation,
+    methodSha256: sha256(envelope.method),
+    originSha256: sha256(url.origin),
+    pathSha256,
+    queryKeyCount: Math.min(queryKeys.length, 65),
+    queryKeySha256s,
+    queryKeysTruncated: queryKeys.length > 64,
+    resourceTypeSha256: sha256(envelope.resourceType),
+  };
+  const rejectionMessage = typeof input.rejectionMessage === "string"
+    && input.rejectionMessage.length <= 4_096
+    ? input.rejectionMessage
+    : "unreadable-or-oversized-provider-rejection";
+  return Object.freeze({
+    reasonCode: input.reasonCode,
+    rejectionMessageSha256: sha256(rejectionMessage),
+    requestEnvelopeSha256: sha256(JSON.stringify(canonicalEnvelope)),
+    requestPathSha256: pathSha256,
+  });
+}
+
+export function createProviderOverlapRejectionProvenanceDocument(input) {
+  exactKeys(input, ["baseline", "candidate"], "provider rejection provenance roles");
+  const roles = {};
+  for (const role of ["baseline", "candidate"]) {
+    const state = input[role];
+    exactKeys(state, ["entries", "truncated"], `${role} provider rejection provenance`);
+    if (!Array.isArray(state.entries)
+      || state.entries.length > PROVIDER_OVERLAP_REJECTION_PROVENANCE_MAX_PER_ROLE
+      || typeof state.truncated !== "boolean") {
+      fail(`${role} provider rejection provenance is outside its bound.`);
+    }
+    const entries = state.entries.map((entry) => {
+      exactKeys(entry, [
+        "reasonCode", "rejectionMessageSha256", "requestEnvelopeSha256",
+        "requestPathSha256",
+      ], `${role} provider rejection provenance entry`);
+      if (!providerOverlapRejectionReasonCodes.has(entry.reasonCode)
+        || !sha256Pattern.test(entry.rejectionMessageSha256 ?? "")
+        || !sha256Pattern.test(entry.requestEnvelopeSha256 ?? "")
+        || !sha256Pattern.test(entry.requestPathSha256 ?? "")) {
+        fail(`${role} provider rejection provenance entry is invalid.`);
+      }
+      return Object.freeze({ ...entry });
+    });
+    roles[role] = Object.freeze({
+      entries: Object.freeze(entries),
+      truncated: state.truncated,
+    });
+  }
+  return Object.freeze({
+    maximumEntriesPerRole: PROVIDER_OVERLAP_REJECTION_PROVENANCE_MAX_PER_ROLE,
+    roles: Object.freeze(roles),
+    schemaVersion: 1,
+  });
 }
 
 export function createJourneyBrowserRequestEnvelope(request, mainFrame) {
