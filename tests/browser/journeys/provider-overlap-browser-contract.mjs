@@ -211,9 +211,15 @@ export function createProviderOverlapPendingRequestSeal(maximumRequestCount = ma
     pollMs = 10,
     quietMs = 200,
     timeoutMs = 5_000,
-  } = {}, sealOnSuccess) => {
-    const operation = sealOnSuccess ? "drain" : "checkpoint";
+  } = {}, sealOnSuccess, excludedRequest = null) => {
+    const excludesCurrentRequest = excludedRequest !== null;
+    const operation = sealOnSuccess
+      ? "drain"
+      : excludesCurrentRequest ? "navigation checkpoint" : "checkpoint";
     if (sealed || quietOperationActive
+      || (excludesCurrentRequest
+        && (!excludedRequest || typeof excludedRequest !== "object"
+          || !pending.has(excludedRequest)))
       || ![pollMs, quietMs, timeoutMs].every(Number.isSafeInteger)
       || pollMs < 1 || quietMs < pollMs || timeoutMs < quietMs || timeoutMs > 30_000) {
       fail(`Browser pending request ${operation} contract is invalid.`);
@@ -227,7 +233,11 @@ export function createProviderOverlapPendingRequestSeal(maximumRequestCount = ma
         if (overflow || duplicateCompletionCount !== 0 || lateRequestEventCount !== 0) {
           fail("Browser pending request ledger became invalid before sealing.");
         }
-        if (version !== observedVersion || pending.size !== 0) {
+        if (excludesCurrentRequest && !pending.has(excludedRequest)) {
+          fail("Browser navigation request changed before its pending request checkpoint.");
+        }
+        const priorPendingRequestCount = pending.size - (excludesCurrentRequest ? 1 : 0);
+        if (version !== observedVersion || priorPendingRequestCount !== 0) {
           observedVersion = version;
           quietSince = Date.now();
         } else if (Date.now() - quietSince >= quietMs) {
@@ -235,7 +245,9 @@ export function createProviderOverlapPendingRequestSeal(maximumRequestCount = ma
           return Object.freeze({
             completedRequestCount,
             observedRequestCount,
-            status: sealOnSuccess ? "drained-and-sealed" : "quiet-checkpoint",
+            status: sealOnSuccess
+              ? "drained-and-sealed"
+              : excludesCurrentRequest ? "prior-requests-quiet" : "quiet-checkpoint",
           });
         }
         await new Promise((resolve) => setTimeout(resolve, pollMs));
@@ -278,7 +290,7 @@ export function createProviderOverlapPendingRequestSeal(maximumRequestCount = ma
       completedRequestCount += 1;
     },
     async drainAndSeal(options = {}) {
-      return waitForQuietState(options, true);
+      return waitForQuietState(options, true, null);
     },
     observe(request) {
       if (!request || typeof request !== "object") {
@@ -298,7 +310,10 @@ export function createProviderOverlapPendingRequestSeal(maximumRequestCount = ma
       return pending.size;
     },
     async waitForQuiet(options = {}) {
-      return waitForQuietState(options, false);
+      return waitForQuietState(options, false, null);
+    },
+    async waitForPriorRequests(request, options = {}) {
+      return waitForQuietState(options, false, request);
     },
   });
 }
