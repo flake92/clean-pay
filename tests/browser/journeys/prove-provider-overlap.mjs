@@ -47,7 +47,7 @@ import {
   finalizeProviderOverlapEventLifecycle,
   finalizeProviderOverlapHistoryContract,
   installProviderOverlapHistoryInstrumentation,
-  normalizeProviderOverlapResponseContentType,
+  normalizeProviderOverlapObservedResponseContentType,
   PROVIDER_OVERLAP_REJECTION_PROVENANCE_MAX_PER_ROLE,
   resolveProviderOverlapResponseRequestEntry,
 } from "./provider-overlap-browser-contract.mjs";
@@ -606,6 +606,7 @@ async function exerciseCabinet(
     const browserRequestByIdentity = new Map();
     const browserRequestPreparationByIdentity = new Map();
     const browserResponseEvidenceByIdentity = new Map();
+    const browserResponseTerminalByIdentity = new WeakMap();
     const browserTerminalRequestIdentities = new Set();
     let browserResponseCaptureFailure = null;
     let currentStaticDocumentKey = null;
@@ -790,6 +791,13 @@ async function exerciseCabinet(
         if (browserResponseEvidenceByIdentity.has(request)) {
           throw new Error("Synthetic browser response evidence was registered more than once.");
         }
+        let releaseTerminal;
+        const terminal = new Promise((resolve) => {
+          releaseTerminal = resolve;
+        });
+        browserResponseTerminalByIdentity.set(request, Object.freeze({
+          release: releaseTerminal,
+        }));
         // Register response capture immediately. Playwright resolves body()
         // only after request completion; the bounded quiet checkpoints below
         // must settle this promise before a later navigation can evict it.
@@ -797,6 +805,7 @@ async function exerciseCabinet(
           classification: entry.classification,
           request,
           response,
+          terminal,
         });
         browserResponseEvidenceByIdentity.set(request, evidence);
       } catch (error) {
@@ -824,6 +833,31 @@ async function exerciseCabinet(
         } else {
           browserTerminalRequestIdentities.add(request);
           evidence = browserResponseEvidenceByIdentity.get(request);
+        }
+        const terminal = browserResponseTerminalByIdentity.get(request);
+        if (evidence && (!terminal || typeof terminal.release !== "function")) {
+          evidence = Promise.resolve(evidence).then(
+            () => {
+              throw new Error("Completed synthetic browser response has no terminal capture gate.");
+            },
+            (error) => {
+              throw error;
+            },
+          );
+          browserResponseEvidenceByIdentity.set(request, evidence);
+        } else if (terminal) {
+          let failureText = null;
+          if (!finished) {
+            try {
+              failureText = request.failure()?.errorText ?? "browser-request-failure-unavailable";
+            } catch {
+              failureText = "browser-request-failure-unavailable";
+            }
+          }
+          terminal.release(Object.freeze({
+            failureSha256: failureText === null ? null : sha256(failureText),
+            finished,
+          }));
         }
         if (!evidence && !finished) {
           evidence = Promise.resolve(Object.freeze({
@@ -2043,14 +2077,22 @@ async function readBrowserResponseCapture(registry, request, classification) {
     }
     return capture;
   }
+  const currentContentType = typeof capture.response.headerValue === "function"
+    ? await boundedBrowserEvidenceOperation(
+        capture.response.headerValue("content-type"),
+        5_000,
+        "browser response metadata",
+      )
+    : capture.response.headers()["content-type"] ?? null;
   if (typeof capture.response.request !== "function"
     || capture.response.request() !== request
     || typeof capture.response.status !== "function"
     || capture.response.status() !== capture.responseStatus
-    || typeof capture.response.headers !== "function"
-    || normalizeProviderOverlapResponseContentType(
-      capture.response.headers()["content-type"],
-    ) !== capture.responseContentType) {
+    || normalizeProviderOverlapObservedResponseContentType({
+      key: classification.key,
+      rawContentType: currentContentType,
+      status: capture.responseStatus,
+    }) !== capture.responseContentType) {
     throw new Error("Captured browser response metadata changed after its body barrier.");
   }
   return capture;

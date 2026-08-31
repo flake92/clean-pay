@@ -744,7 +744,12 @@ export function attestProviderOverlapStaticResponse(input, staticAssetContract) 
 }
 
 export async function captureProviderOverlapResponseEvidence(input) {
-  exactKeys(input, ["classification", "request", "response"], "browser response capture");
+  const hasTerminal = Boolean(input && typeof input === "object" && !Array.isArray(input)
+    && Object.hasOwn(input, "terminal"));
+  const inputKeys = hasTerminal
+    ? ["classification", "request", "response", "terminal"]
+    : ["classification", "request", "response"];
+  exactKeys(input, inputKeys, "browser response capture");
   const { classification, request, response } = input;
   exactKeys(classification, [
     "disposition", "expectedStatuses", "key", "navigation", "staticAssetSha256", "staticPath",
@@ -755,16 +760,66 @@ export async function captureProviderOverlapResponseEvidence(input) {
     || typeof response.body !== "function" || typeof response.finished !== "function") {
     fail("Browser response capture identity is invalid.");
   }
+  const terminal = input.terminal ?? Promise.resolve(Object.freeze({
+    failureSha256: null,
+    finished: true,
+  }));
+  if (!terminal || typeof terminal.then !== "function") {
+    fail("Browser response capture terminal gate is invalid.");
+  }
   const responseStatus = response.status();
-  const responseContentType = normalizeProviderOverlapResponseContentType(
-    response.headers()["content-type"],
-  );
+  // Playwright's synchronous headers() view may still contain provisional
+  // redirect headers. Pre-arm only the exact raw Content-Type lookup at the
+  // response event and settle it after the matching request terminal event.
+  const responseContentTypePromise = typeof response.headerValue === "function"
+    ? Promise.resolve(response.headerValue("content-type"))
+    : Promise.resolve(response.headers()["content-type"] ?? null);
+  void responseContentTypePromise.catch(() => undefined);
   const bodyKind = classification.staticPath !== null
     ? "static"
-    : responseStatus === 200
-        && new Set(["text/html", "text/x-component"]).has(responseContentType)
+    : responseStatus === 200 && classification.disposition === "continue"
+        && expectedContentTypes(classification.key, responseStatus)
+          .some((value) => new Set(["text/html", "text/x-component"]).has(value))
       ? "declaration"
       : null;
+  const bodyPromise = bodyKind === null ? null : Promise.resolve(response.body());
+  // The live harness supplies the exact requestfinished/requestfailed result,
+  // which is Playwright's underlying terminal event. Keep response.finished()
+  // only for import-compatible direct callers that have no terminal gate.
+  const finishedPromise = bodyKind === null || hasTerminal
+    ? null
+    : Promise.resolve(response.finished());
+  void bodyPromise?.catch(() => undefined);
+  void finishedPromise?.catch(() => undefined);
+
+  const terminalResult = await terminal;
+  if (!terminalResult || typeof terminalResult !== "object" || Array.isArray(terminalResult)) {
+    fail("Browser response capture terminal result is invalid.");
+  }
+  exactKeys(terminalResult, ["failureSha256", "finished"], "browser response terminal result");
+  if (typeof terminalResult.finished !== "boolean"
+    || (terminalResult.finished
+      ? terminalResult.failureSha256 !== null
+      : !sha256Pattern.test(terminalResult.failureSha256 ?? ""))) {
+    fail("Browser response capture terminal result is invalid.");
+  }
+  if (!terminalResult.finished) {
+    fail(bodyKind === "static"
+      ? "Attested static browser response did not finish cleanly."
+      : `Browser response did not finish cleanly: key=${classification.key}; `
+        + `status=${String(responseStatus)}; `
+        + `failureSha256=${terminalResult.failureSha256}.`);
+  }
+  const rawResponseContentType = await boundedLifecycleOperation(
+    responseContentTypePromise,
+    5_000,
+    "browser response content type",
+  );
+  const responseContentType = normalizeProviderOverlapObservedResponseContentType({
+    key: classification.key,
+    rawContentType: rawResponseContentType,
+    status: responseStatus,
+  });
   if (bodyKind === null) {
     return Object.freeze({
       body: null,
@@ -776,20 +831,22 @@ export async function captureProviderOverlapResponseEvidence(input) {
     });
   }
 
-  // Register body retrieval on the response event. Playwright resolves it only
-  // after request completion, so the caller must reach a bounded quiet
-  // checkpoint before any navigation can evict the prior document body.
-  const bodyPromise = boundedLifecycleOperation(
-    response.body(),
+  // Body retrieval is registered above at the response event. Its unchanged
+  // settlement bound begins only after the exact request terminal gate, while
+  // the caller retains the independent 15-second request-lifecycle bound.
+  const boundedBodyPromise = boundedLifecycleOperation(
+    bodyPromise,
     5_000,
     bodyKind === "static" ? "attested static response body" : "static declaration response body",
   );
-  const finishedPromise = boundedLifecycleOperation(
-    response.finished(),
-    5_000,
-    bodyKind === "static" ? "static response completion" : "browser response completion",
-  );
-  const [body, responseFailure] = await Promise.all([bodyPromise, finishedPromise]);
+  const boundedFinishedPromise = hasTerminal
+    ? Promise.resolve(null)
+    : boundedLifecycleOperation(
+        finishedPromise,
+        5_000,
+        bodyKind === "static" ? "static response completion" : "browser response completion",
+      );
+  const [body, responseFailure] = await Promise.all([boundedBodyPromise, boundedFinishedPromise]);
   if (responseFailure !== null) {
     fail(bodyKind === "static"
       ? "Attested static browser response did not finish cleanly."
@@ -815,6 +872,22 @@ export function normalizeProviderOverlapResponseContentType(value) {
   const normalized = String(value).split(";", 1)[0].trim().toLowerCase();
   if (!/^[a-z0-9.+-]+\/[a-z0-9.+-]+$/.test(normalized)) {
     fail("Synthetic browser response content type is invalid.");
+  }
+  return normalized;
+}
+
+export function normalizeProviderOverlapObservedResponseContentType(input) {
+  exactKeys(input, ["key", "rawContentType", "status"], "browser response content type");
+  const normalized = normalizeProviderOverlapResponseContentType(
+    input.rawContentType ?? undefined,
+  );
+  // A bodyless Next.js redirect may omit Content-Type on the wire. The pinned
+  // sanitized HAR contract canonically represents that exact empty response as
+  // application/octet-stream, so use the same representation for only the two
+  // fixed Telegram 307 redirect classes. The semantic allowlist stays exact.
+  if (normalized === null && input.status === 307
+    && new Set(["app-telegram-start", "app-telegram-callback"]).has(input.key)) {
+    return "application/octet-stream";
   }
   return normalized;
 }

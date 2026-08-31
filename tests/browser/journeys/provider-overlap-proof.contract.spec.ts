@@ -48,6 +48,7 @@ import {
   finalizeProviderOverlapEventLifecycle,
   finalizeProviderOverlapHistoryContract,
   installProviderOverlapHistoryInstrumentation,
+  normalizeProviderOverlapObservedResponseContentType,
   PROVIDER_OVERLAP_REJECTION_PROVENANCE_MAX_PER_ROLE,
   readProviderOverlapStaticResponseEvidence,
   resolveProviderOverlapResponseRequestEntry,
@@ -2862,6 +2863,123 @@ test("prearms response body capture before request completion and navigation", a
     request: crossedRequest,
     response,
   })).rejects.toThrow(/identity/);
+});
+
+test("uses terminal-gated raw response content type without delaying body prearming", async () => {
+  const request = {};
+  const classification = browserClassification(
+    "https://pay.ci.clean-pay.dev/login?redirect_to=%2Fprofile",
+    { resourceType: "document", isNavigation: true, isMainFrame: true },
+  );
+  type TerminalResult = Readonly<{ failureSha256: string | null; finished: boolean }>;
+  let releaseTerminal: (result: TerminalResult) => void = () => undefined;
+  const terminal = new Promise<TerminalResult>((resolve) => {
+    releaseTerminal = resolve;
+  });
+  const lifecycle: string[] = [];
+  const body = Buffer.from("<!doctype html><h1>Login</h1>");
+  const response = {
+    headerValue: async (name: string) => {
+      expect(name).toBe("content-type");
+      lifecycle.push("raw-content-type-prearmed");
+      return "text/html; charset=utf-8";
+    },
+    body: async () => {
+      lifecycle.push("body-prearmed");
+      await terminal;
+      lifecycle.push("body-completed-after-terminal");
+      return body;
+    },
+    finished: async () => {
+      throw new Error("terminal-gated capture must not duplicate requestfinished");
+    },
+    headers: () => ({ "content-type": "application/octet-stream" }),
+    request: () => request,
+    status: () => 200,
+  };
+
+  let settled = false;
+  const capture = captureProviderOverlapResponseEvidence({
+    classification,
+    request,
+    response,
+    terminal,
+  }).finally(() => {
+    settled = true;
+  });
+  expect(lifecycle).toEqual([
+    "raw-content-type-prearmed",
+    "body-prearmed",
+  ]);
+  // The unchanged five-second evidence bound must not start at the response
+  // headers event; it starts only after the terminal request event below.
+  await new Promise((resolve) => setTimeout(resolve, 5_100));
+  expect(settled).toBe(false);
+
+  releaseTerminal({ failureSha256: null, finished: true });
+  await expect(capture).resolves.toMatchObject({
+    body,
+    responseContentType: "text/html",
+    responseStatus: 200,
+  });
+  expect(lifecycle.slice(2)).toEqual(["body-completed-after-terminal"]);
+});
+
+test("uses the exact raw content type for bodyless Telegram redirects", async () => {
+  const request = {};
+  const classification = browserClassification(
+    "https://pay.ci.clean-pay.dev/auth/telegram/start?redirect_to=%2Fprofile"
+      + "&turnstile_token=synthetic-turnstile-token%3Aauth_login%3Asynthetic-turnstile-1%3A1",
+    { resourceType: "document", isNavigation: true, isMainFrame: true },
+  );
+  let bodyCalls = 0;
+  const response = {
+    headerValue: async (name: string) => {
+      expect(name).toBe("content-type");
+      return null;
+    },
+    body: async () => {
+      bodyCalls += 1;
+      return Buffer.alloc(0);
+    },
+    finished: async () => null,
+    headers: () => ({}),
+    request: () => request,
+    status: () => 307,
+  };
+
+  await expect(captureProviderOverlapResponseEvidence({
+    classification,
+    request,
+    response,
+    terminal: Promise.resolve({ failureSha256: null, finished: true }),
+  })).resolves.toMatchObject({
+    body: null,
+    responseContentType: "application/octet-stream",
+    responseStatus: 307,
+  });
+  expect(bodyCalls).toBe(0);
+  expect(normalizeProviderOverlapObservedResponseContentType({
+    key: "app-telegram-start",
+    rawContentType: "application/octet-stream",
+    status: 307,
+  })).toBe("application/octet-stream");
+  expect(normalizeProviderOverlapObservedResponseContentType({
+    key: "app-root-rsc",
+    rawContentType: null,
+    status: 307,
+  })).toBeNull();
+  expect(normalizeProviderOverlapObservedResponseContentType({
+    key: "app-telegram-start",
+    rawContentType: "text/plain",
+    status: 307,
+  })).toBe("text/plain");
+  await expect(captureProviderOverlapResponseEvidence({
+    classification,
+    request,
+    response,
+    terminal: Promise.resolve({ failureSha256: "a".repeat(64), finished: false }),
+  })).rejects.toThrow(/did not finish cleanly/);
 });
 
 test("waits for Playwright-deferred response body capture before navigation", async () => {
