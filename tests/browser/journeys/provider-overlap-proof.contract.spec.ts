@@ -556,7 +556,7 @@ test("recomputes serialized cross-stack, lifecycle, and runtime invariants", () 
     ["symmetric RSC redirect source without successor", (value) => {
       for (const stack of [value.stacks.baseline, value.stacks.candidate]) {
         stack.navigation.semanticRequestLedger.push(
-          semantic("app-root-rsc", 307, "application/octet-stream"),
+          semantic("app-root-rsc", 307, null),
         );
         stack.navigation.requestCount += 1;
         stack.navigation.requestContractSha256 = sha256(JSON.stringify({
@@ -1626,12 +1626,12 @@ test("rejects arbitrary same-host paths, queries, redirects, methods, and transp
   rootPrefetchRecords.splice(
     telegramStartIndex,
     0,
-    requestRecord(rootRsc, "app-login-document", 307, "application/octet-stream"),
+    requestRecord(rootRsc, "app-login-document", 307, null),
     requestRecord(
       loginRootRedirect,
       "app-login-document",
       307,
-      "application/octet-stream",
+      null,
       "app-root-rsc:307->app-login-root-rsc",
     ),
     requestRecord(
@@ -1653,6 +1653,26 @@ test("rejects arbitrary same-host paths, queries, redirects, methods, and transp
     expect.objectContaining({ redirectEdge: "app-login-root-rsc:307->app-login-root-rsc" }),
     expect.objectContaining({ redirectEdge: null }),
   ]);
+  const rootPrefetchWithInventedContentType = structuredClone(rootPrefetchRecords);
+  const rootRedirectIndex = rootPrefetchWithInventedContentType.findIndex((record) => (
+    record.classification.key === "app-root-rsc"
+  ));
+  rootPrefetchWithInventedContentType[rootRedirectIndex].responseContentType =
+    "application/octet-stream";
+  expect(() => finalizeProviderOverlapBrowserContract(
+    rootPrefetchWithInventedContentType,
+    staticLoadGraph,
+  )).toThrow(/response content type is not exact/);
+  const loginRootPrefetchWithInventedContentType = structuredClone(rootPrefetchRecords);
+  const loginRootRedirectIndex = loginRootPrefetchWithInventedContentType.findIndex((record) => (
+    record.classification.key === "app-login-root-rsc" && record.responseStatus === 307
+  ));
+  loginRootPrefetchWithInventedContentType[loginRootRedirectIndex].responseContentType =
+    "application/octet-stream";
+  expect(() => finalizeProviderOverlapBrowserContract(
+    loginRootPrefetchWithInventedContentType,
+    staticLoadGraph,
+  )).toThrow(/response content type is not exact/);
   expect(() => finalizeProviderOverlapBrowserContract(validRecords, {
     ...staticLoadGraph,
     cssMediaReferences: staticLoadGraph.cssMediaReferences.slice(0, -1),
@@ -1787,7 +1807,7 @@ test("rejects arbitrary same-host paths, queries, redirects, methods, and transp
     }),
     documentKey: "app-cabinet-document",
     redirectEdge: null,
-    responseContentType: "application/octet-stream",
+    responseContentType: null,
     responseStatus: 307,
     staticResponseBytes: null,
     staticResponseSha256: null,
