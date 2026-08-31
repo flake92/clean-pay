@@ -30,8 +30,7 @@ import {
 } from "./process-quorum";
 import {
   captureByteIdenticalTerminalScreenshot,
-  createSerializedPairCaptureTaskLifecycle,
-  createSerializedPairTerminalScreenshotCapture,
+  captureInterleavedPairTerminalScreenshots,
 } from "./screenshot-majority";
 import {
   PAIRED_PNG_QUORUM_FAILURE_DIRECTORY,
@@ -155,37 +154,54 @@ export async function capturePublicOverlapCharacterizationPair(options: {
     candidate: [],
   };
   for (const [processIndex, pair] of pagePairs.entries()) {
-    const screenshotCapture = createSerializedPairTerminalScreenshotCapture();
-    const captureLifecycle = createSerializedPairCaptureTaskLifecycle();
-    const settlements = await Promise.allSettled(
+    const preparedSettlements = await Promise.allSettled(
       (["baseline", "candidate"] as const).map((role) => (
-        captureLifecycle.capture(
-          role,
-          () => prepareCaptureSample({
-            applicationOrigin: environment.roles[role].applicationOrigin,
-            baseUrl: new URL(environment.roles[role].applicationOrigin),
-            captureScreenshot: (page) => screenshotCapture.capture(role, page),
-            page: pair[role].page,
-            replayGuard: pair[role].replayGuard,
-            route,
-            testInfo,
-          }),
-          async (prepared) => {
-            try {
-              return await capturePreparedSample(prepared);
-            } finally {
-              screenshotCapture.complete(role);
-            }
-          },
-        )
+        prepareCaptureSample({
+          applicationOrigin: environment.roles[role].applicationOrigin,
+          baseUrl: new URL(environment.roles[role].applicationOrigin),
+          page: pair[role].page,
+          replayGuard: pair[role].replayGuard,
+          route,
+          testInfo,
+        })
       )),
     );
-    const failures = settlements.flatMap((result) => (
+    const preparationFailures = preparedSettlements.flatMap((result) => (
       result.status === "rejected" ? [result.reason] : []
     ));
-    if (failures.length > 0) {
+    if (preparationFailures.length > 0) {
       throw new AggregateError(
-        failures,
+        preparationFailures,
+        "Paired public overlap role preparations did not both settle successfully.",
+      );
+    }
+    const prepared = preparedSettlements.map((result) => {
+      if (result.status !== "fulfilled") {
+        throw new Error("Paired public overlap preparation settlement is incomplete.");
+      }
+      return result.value;
+    });
+    const screenshots = await captureInterleavedPairTerminalScreenshots({
+      baseline: pair.baseline.page,
+      candidate: pair.candidate.page,
+    });
+    const settlements = await Promise.allSettled(
+      prepared.map((entry, roleIndex) => {
+        const prepared = Object.freeze({
+          ...entry,
+          captureScreenshot: async () => (
+            roleIndex === 0 ? screenshots.baseline : screenshots.candidate
+          ),
+        });
+        return capturePreparedSample(prepared);
+      }),
+    );
+    const captureFailures = settlements.flatMap((result) => (
+      result.status === "rejected" ? [result.reason] : []
+    ));
+    if (captureFailures.length > 0) {
+      throw new AggregateError(
+        captureFailures,
         "Paired public overlap role captures did not both settle successfully.",
       );
     }
