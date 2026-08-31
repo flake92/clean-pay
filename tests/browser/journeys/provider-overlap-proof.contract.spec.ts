@@ -2311,10 +2311,22 @@ test("registers exact request identities before response capture and routed cont
   expect(routeHandler).toContain('await route.abort("blockedbyclient")');
   const classifiedAbortBranch = routeHandler.slice(
     routeHandler.indexOf('if (preparation.disposition === "abort")'),
-    routeHandler.indexOf("await route.continue()"),
+    routeHandler.indexOf("if (preparation.entry.classification.navigation)"),
   );
   expect(classifiedAbortBranch).not.toContain("recordUnexpectedRequest(");
   expect(classifiedAbortBranch.match(/route\.abort\(/g)).toHaveLength(1);
+  const navigationCaptureBarrier = routeHandler.indexOf(
+    "await pendingRequestSeal.waitForPriorRequests(",
+  );
+  expect(routeHandler).toContain("preparation.entry.classification.navigation");
+  expect(navigationCaptureBarrier).toBeGreaterThan(
+    routeHandler.indexOf('if (preparation.disposition === "abort")'),
+  );
+  expect(navigationCaptureBarrier).toBeLessThan(routeHandler.indexOf("await route.continue()"));
+  expect(routeHandler.slice(navigationCaptureBarrier, routeHandler.indexOf("await route.continue()")))
+    .toContain('await route.abort("blockedbyclient")');
+  expect(routeHandler.slice(navigationCaptureBarrier, routeHandler.indexOf("await route.continue()")))
+    .not.toContain("throw error");
   expect(proofContractSource).toContain("requestCount * 3 + historyCount");
   const pendingDrainIndex = runnerSource.indexOf(
     "await pendingRequestSeal.drainAndSeal({ timeoutMs: 15_000 })",
@@ -2322,6 +2334,12 @@ test("registers exact request identities before response capture and routed cont
   const finalizerIndex = runnerSource.indexOf("await finalizeProviderOverlapEventLifecycle({");
   expect(pendingDrainIndex).toBeGreaterThan(firstNavigationIndex);
   expect(pendingDrainIndex).toBeLessThan(finalizerIndex);
+  const finalResponseCaptureBarrier = runnerSource.indexOf(
+    'markProviderFailurePhase(role, "verify-final-response-captures")',
+    pendingDrainIndex,
+  );
+  expect(finalResponseCaptureBarrier).toBeGreaterThan(pendingDrainIndex);
+  expect(finalResponseCaptureBarrier).toBeLessThan(finalizerIndex);
 });
 
 test("lazily prepares only a response identity that has no prior preparation", () => {
@@ -2669,6 +2687,116 @@ test("keeps one exact request identity across a held route, response, and termin
       expect(browserResponseEvidenceByIdentity.size).toBe(1);
     } finally {
       releaseRoute();
+      await context.close();
+    }
+  } finally {
+    await browser.close();
+  }
+});
+
+test("holds an automatic Playwright navigation until prior response bytes are captured", async () => {
+  const browser = await chromium.launch({ headless: true });
+  let releaseLoginCapture: () => void = () => undefined;
+  try {
+    const context = await browser.newContext({ serviceWorkers: "block" });
+    const page = await context.newPage();
+    const pendingRequestSeal = createProviderOverlapPendingRequestSeal(4);
+    const responseEvidenceByIdentity = new Map<object, Promise<{
+      body: Uint8Array | null;
+    }>>();
+    const loginCaptureGate = new Promise<void>((resolve) => {
+      releaseLoginCapture = resolve;
+    });
+    let profileRouteReached = false;
+    let profileRouteReleased = false;
+
+    context.on("request", (request) => pendingRequestSeal.observe(request));
+    context.on("response", (response) => {
+      const request = response.request();
+      const requestPathname = new URL(request.url()).pathname;
+      const classification = browserClassification(request.url(), {
+        isMainFrame: true,
+        isNavigation: true,
+        resourceType: "document",
+      });
+      const capture = captureProviderOverlapResponseEvidence({
+        classification,
+        request,
+        response,
+      });
+      responseEvidenceByIdentity.set(request, requestPathname === "/login"
+        ? capture.then(async (evidence) => {
+            await loginCaptureGate;
+            return evidence;
+          })
+        : capture);
+    });
+    const completeRequest = (request: object) => {
+      const evidence = responseEvidenceByIdentity.get(request) ?? Promise.resolve(null);
+      void evidence.then(
+        () => pendingRequestSeal.complete(request),
+        () => pendingRequestSeal.complete(request),
+      );
+    };
+    context.on("requestfinished", completeRequest);
+    context.on("requestfailed", completeRequest);
+    await context.route("**/*", async (route) => {
+      const request = route.request();
+      const requestPathname = new URL(request.url()).pathname;
+      if (request.isNavigationRequest()) {
+        if (requestPathname === "/profile") profileRouteReached = true;
+        await pendingRequestSeal.waitForPriorRequests(request, {
+          pollMs: 1,
+          quietMs: 3,
+          timeoutMs: 5_000,
+        });
+      }
+      if (requestPathname === "/login") {
+        await route.fulfill({
+          body: "<!doctype html><html><head><link rel=\"icon\" href=\"data:,\"></head>"
+            + "<body><h1>Login</h1><script>setTimeout(() => location.assign('/profile'), 25)"
+            + "</script></body></html>",
+          contentType: "text/html",
+          status: 200,
+        });
+        return;
+      }
+      profileRouteReleased = true;
+      await route.fulfill({
+        body: "<!doctype html><html><head><link rel=\"icon\" href=\"data:,\"></head>"
+          + "<body><h1>Profile</h1></body></html>",
+        contentType: "text/html",
+        status: 200,
+      });
+    });
+
+    try {
+      await page.goto("https://pay.ci.clean-pay.dev/login?redirect_to=%2Fprofile", {
+        waitUntil: "domcontentloaded",
+        timeout: 5_000,
+      });
+      await expect.poll(() => profileRouteReached, { timeout: 5_000 }).toBe(true);
+      expect(profileRouteReleased).toBe(false);
+      expect(page.url()).toBe(
+        "https://pay.ci.clean-pay.dev/login?redirect_to=%2Fprofile",
+      );
+      releaseLoginCapture();
+      await page.waitForURL("https://pay.ci.clean-pay.dev/profile", {
+        waitUntil: "domcontentloaded",
+        timeout: 5_000,
+      });
+      expect(profileRouteReleased).toBe(true);
+      const captures = await Promise.all(responseEvidenceByIdentity.values());
+      expect(Buffer.from(captures[0].body ?? []).toString("utf8"))
+        .toContain("location.assign('/profile')");
+      await pendingRequestSeal.drainAndSeal({
+        pollMs: 1,
+        quietMs: 3,
+        timeoutMs: 100,
+      });
+      expect(pendingRequestSeal.assertClean()).toMatchObject({ status: "sealed-clean" });
+    } finally {
+      releaseLoginCapture();
       await context.close();
     }
   } finally {
@@ -3366,6 +3494,58 @@ test("supports reusable fail-closed pending request quiet checkpoints", async ()
     quietMs: 2,
     timeoutMs: 20,
   })).rejects.toThrow(/became invalid/);
+});
+
+test("holds a navigation identity across later event-loop request generations", async () => {
+  const seal = createProviderOverlapPendingRequestSeal(3);
+  const navigationRequest = {};
+  const priorRequest = {};
+  seal.observe(navigationRequest);
+  let priorCompleted = false;
+  setTimeout(() => {
+    seal.observe(priorRequest);
+    setTimeout(() => {
+      priorCompleted = true;
+      seal.complete(priorRequest);
+    }, 3);
+  }, 0);
+
+  await expect(seal.waitForPriorRequests(navigationRequest, {
+    pollMs: 1,
+    quietMs: 30,
+    timeoutMs: 100,
+  })).resolves.toEqual({
+    completedRequestCount: 1,
+    observedRequestCount: 2,
+    status: "prior-requests-quiet",
+  });
+  expect(priorCompleted).toBe(true);
+  expect(seal.pendingCount()).toBe(1);
+
+  seal.complete(navigationRequest);
+  await expect(seal.drainAndSeal({ pollMs: 1, quietMs: 3, timeoutMs: 100 }))
+    .resolves.toEqual({
+      completedRequestCount: 2,
+      observedRequestCount: 2,
+      status: "drained-and-sealed",
+    });
+
+  const cancelled = createProviderOverlapPendingRequestSeal(1);
+  const cancelledNavigation = {};
+  cancelled.observe(cancelledNavigation);
+  const cancelledBarrier = cancelled.waitForPriorRequests(cancelledNavigation, {
+    pollMs: 1,
+    quietMs: 30,
+    timeoutMs: 100,
+  });
+  cancelled.complete(cancelledNavigation);
+  await expect(cancelledBarrier).rejects.toThrow(/navigation request changed/);
+
+  await expect(createProviderOverlapPendingRequestSeal(1).waitForPriorRequests({}, {
+    pollMs: 1,
+    quietMs: 2,
+    timeoutMs: 20,
+  })).rejects.toThrow(/navigation checkpoint contract is invalid/);
 });
 
 test("seals browser events only after a bounded quiet drain and rejects late events", async () => {
