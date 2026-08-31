@@ -70,6 +70,8 @@ import {
 } from "./provider-overlap-proof-contract.mjs";
 
 const repositoryRoot = path.resolve(process.cwd());
+const providerResponseDurableNetworkBufferBytes = 1024 * 1024 * 1024;
+const providerResponseDurableResourceBufferBytes = 128 * 1024 * 1024;
 const providerStaticDocumentKeys = Object.freeze([
   "app-login-document",
   "app-profile-document",
@@ -523,7 +525,14 @@ async function exerciseCabinet(
     const page = await context.newPage();
     markProviderFailurePhase(role, "create-cdp-session");
     const cdp = await context.newCDPSession(page);
-    await cdp.send("Page.enable");
+    await Promise.all([
+      cdp.send("Network.enable", {
+        enableDurableMessages: true,
+        maxResourceBufferSize: providerResponseDurableResourceBufferBytes,
+        maxTotalBufferSize: providerResponseDurableNetworkBufferBytes,
+      }),
+      cdp.send("Page.enable"),
+    ]);
     /**
      * @param {{frame: {id: string, loaderId: string, parentId?: string, url: string}, type: string}}
      * event

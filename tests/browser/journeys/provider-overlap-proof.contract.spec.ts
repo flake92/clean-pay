@@ -5,6 +5,7 @@ import {
   unlink,
   writeFile,
 } from "node:fs/promises";
+import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -2102,6 +2103,10 @@ test("prearms profile load and keeps the exact cabinet URL at DOM content", asyn
   );
   expect(runnerSource.match(/request\.response\(\)/g) ?? []).toHaveLength(0);
   expect(runnerSource).not.toContain("response.body()");
+  expect(runnerSource).not.toMatch(/\broute\.fetch\s*\(/);
+  expect(runnerSource).not.toContain("Network.loadNetworkResource");
+  expect(runnerSource).not.toContain("Network.streamResourceContent");
+  expect(runnerSource).toContain("enableDurableMessages: true");
   expect(runnerSource).toContain("await waitForProviderCabinetNavigation(page);");
   expect(runnerSource).toContain("Provider profile navigation barrier failed.");
   expect(runnerSource).toContain("Provider cabinet navigation barrier failed.");
@@ -2933,6 +2938,89 @@ test("waits for Playwright-deferred response body capture before navigation", as
   await expect(seal.drainAndSeal({ pollMs: 1, quietMs: 3, timeoutMs: 100 }))
     .resolves.toMatchObject({ status: "drained-and-sealed" });
   expect(seal.assertClean()).toMatchObject({ status: "sealed-clean" });
+});
+
+test("durably captures a prior document across immediate real Chromium navigation", async () => {
+  const loginBody = "<!doctype html><html><head><link rel=\"icon\" href=\"data:,\"></head>"
+    + "<body><h1>Login</h1>"
+    + "<script>location.assign('/profile')</script></body></html>";
+  const profileBody = "<!doctype html><html><head><link rel=\"icon\" href=\"data:,\"></head>"
+    + "<body><h1>Profile</h1></body></html>";
+  const upstreamPaths: string[] = [];
+  const server = createServer((incoming, outgoing) => {
+    const pathname = new URL(incoming.url ?? "/", "http://127.0.0.1").pathname;
+    upstreamPaths.push(pathname);
+    const body = pathname === "/login" ? loginBody : profileBody;
+    outgoing.writeHead(200, {
+      "content-length": Buffer.byteLength(body),
+      "content-type": "text/html; charset=utf-8",
+    });
+    outgoing.end(body);
+  });
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", resolve);
+  });
+  const address = server.address();
+  if (!address || typeof address === "string") {
+    throw new Error("Durable response server address is invalid.");
+  }
+  const origin = "http://provider-durable.clean-pay.test";
+  const browser = await chromium.launch({ args: [], headless: true });
+  try {
+    const context = await browser.newContext({
+      proxy: { server: `http://127.0.0.1:${address.port}` },
+      serviceWorkers: "block",
+    });
+    const page = await context.newPage();
+    const cdp = await context.newCDPSession(page);
+    await cdp.send("Network.enable", {
+      enableDurableMessages: true,
+      maxResourceBufferSize: 128 * 1024 * 1024,
+      maxTotalBufferSize: 1024 * 1024 * 1024,
+    });
+    const captures = new Map<string, Promise<{ body: Uint8Array | null }>>();
+    context.on("response", (response) => {
+      const request = response.request();
+      const pathname = new URL(request.url()).pathname;
+      const capture = captureProviderOverlapResponseEvidence({
+        classification: Object.freeze({
+          disposition: "continue",
+          expectedStatuses: Object.freeze([200]),
+          key: pathname === "/login" ? "app-login-document" : "app-profile-document",
+          navigation: true,
+          staticAssetSha256: null,
+          staticPath: null,
+        }),
+        request,
+        response,
+      });
+      void capture.catch(() => undefined);
+      captures.set(pathname, capture);
+    });
+    try {
+      await page.goto(`${origin}/login`, {
+        timeout: 5_000,
+        waitUntil: "domcontentloaded",
+      }).catch((error) => {
+        if (page.url() !== `${origin}/profile`) throw error;
+      });
+      await page.waitForURL(`${origin}/profile`, { timeout: 5_000, waitUntil: "load" });
+      await expect.poll(() => captures.size, { timeout: 5_000 }).toBe(2);
+      const loginCapture = await captures.get("/login");
+      const profileCapture = await captures.get("/profile");
+      expect(Buffer.from(loginCapture?.body ?? []).toString("utf8")).toBe(loginBody);
+      expect(Buffer.from(profileCapture?.body ?? []).toString("utf8")).toBe(profileBody);
+      expect(upstreamPaths).toEqual(["/login", "/profile"]);
+    } finally {
+      await context.close();
+    }
+  } finally {
+    await browser.close();
+    await new Promise<void>((resolve, reject) => {
+      server.close((error) => (error ? reject(error) : resolve()));
+    });
+  }
 });
 
 test("reproduces deferred response body eviction without the quiet checkpoint", async () => {
