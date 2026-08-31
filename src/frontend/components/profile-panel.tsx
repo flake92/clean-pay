@@ -5,13 +5,12 @@ import { Tag } from "primereact/tag";
 
 import { passwordToggleA11y } from "@/frontend/components/password-toggle-a11y";
 import { LinkButton } from "@/frontend/components/prime/link-button";
+import { ProfileEmailChangeFields } from "@/frontend/components/profile-email-change-fields";
 import {
   Button,
-  InputText,
   Message,
   Password,
 } from "@/frontend/components/sakai/form-foundation";
-import { TurnstileWidget } from "@/frontend/components/turnstile-widget";
 import type { ProfileViewModel } from "@/application/models/profile";
 import {
   profileAuthTypeLabel,
@@ -182,40 +181,19 @@ function ProfilePanelContent({
       {canManageRemnashopEmail ? (
         <Card title="Смена e-mail">
           <form className="flex flex-column gap-3" onSubmit={changeEmail}>
-            {message ? (
-              <div aria-live="assertive" ref={emailFeedbackRef} tabIndex={-1}>
-                <Message severity={messageSeverity} text={message} />
-              </div>
-            ) : null}
-            {turnstileEnabled ? (
-              <TurnstileWidget
-                action={emailTurnstileAction}
-                key={emailTurnstileAction}
-                onReady={setTurnstile}
-                onToken={setTurnstileToken}
-                siteKey={turnstileSiteKey}
-              />
-            ) : null}
-            <label className="flex flex-column gap-2">
-              <span className="text-sm font-medium text-700">Новый e-mail</span>
-              <InputText
-                autoComplete="email"
-                maxLength={255}
-                name="email"
-                onChange={changeEmailInput}
-                required
-                type="email"
-                value={email}
-              />
-            </label>
-            <div className="flex flex-wrap gap-3">
-              <Button
-                disabled={pendingAction !== null}
-                label="Сохранить и отправить код"
-                loading={pendingAction === "email"}
-                type="submit"
-              />
-            </div>
+            <ProfileEmailChangeFields
+              email={email}
+              emailFeedbackRef={emailFeedbackRef}
+              emailTurnstileAction={emailTurnstileAction}
+              message={message}
+              messageSeverity={messageSeverity}
+              onEmailChange={changeEmailInput}
+              onTurnstileReady={setTurnstile}
+              onTurnstileToken={setTurnstileToken}
+              pendingAction={pendingAction}
+              turnstileEnabled={turnstileEnabled}
+              turnstileSiteKey={turnstileSiteKey}
+            />
           </form>
         </Card>
       ) : null}
