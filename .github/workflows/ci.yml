@@ -607,12 +607,62 @@ jobs:
             | sha256sum | cut -c 1-16)"
           printf '%s\n' "$capture_id" | grep -Eq '^[0-9a-f]{16}$'
           printf 'CLEAN_PAY_BROWSER_LIVE_PAIR_CAPTURE_ID=%s\n' "$capture_id" >> "$GITHUB_ENV"
-      - name: Run ephemeral Linux production-image live A/B gates
+      - name: Prepare immutable live-pair capture ownership
         run: |
           node tests/browser/journeys/run-production-image-live-overlap.mjs run \
             --capture-id "$CLEAN_PAY_BROWSER_LIVE_PAIR_CAPTURE_ID" \
             --candidate-revision "$GITHUB_SHA" \
-            --temporary-root "$RUNNER_TEMP"
+            --temporary-root "$RUNNER_TEMP" \
+            --phase preparation
+      - name: Build four production images for the live pair
+        run: |
+          node tests/browser/journeys/run-production-image-live-overlap.mjs run \
+            --capture-id "$CLEAN_PAY_BROWSER_LIVE_PAIR_CAPTURE_ID" \
+            --candidate-revision "$GITHUB_SHA" \
+            --temporary-root "$RUNNER_TEMP" \
+            --phase build
+      - name: Attest image identity and public assets
+        run: |
+          node tests/browser/journeys/run-production-image-live-overlap.mjs run \
+            --capture-id "$CLEAN_PAY_BROWSER_LIVE_PAIR_CAPTURE_ID" \
+            --candidate-revision "$GITHUB_SHA" \
+            --temporary-root "$RUNNER_TEMP" \
+            --phase attestation
+      - name: Prove the public exact A/B overlap
+        run: |
+          node tests/browser/journeys/run-production-image-live-overlap.mjs run \
+            --capture-id "$CLEAN_PAY_BROWSER_LIVE_PAIR_CAPTURE_ID" \
+            --candidate-revision "$GITHUB_SHA" \
+            --temporary-root "$RUNNER_TEMP" \
+            --phase public
+      - name: Prove the concurrent provider overlap
+        run: |
+          node tests/browser/journeys/run-production-image-live-overlap.mjs run \
+            --capture-id "$CLEAN_PAY_BROWSER_LIVE_PAIR_CAPTURE_ID" \
+            --candidate-revision "$GITHUB_SHA" \
+            --temporary-root "$RUNNER_TEMP" \
+            --phase provider
+      - name: Prove the authenticated browser journey
+        run: |
+          node tests/browser/journeys/run-production-image-live-overlap.mjs run \
+            --capture-id "$CLEAN_PAY_BROWSER_LIVE_PAIR_CAPTURE_ID" \
+            --candidate-revision "$GITHUB_SHA" \
+            --temporary-root "$RUNNER_TEMP" \
+            --phase authenticated
+      - name: Prove the Chatwoot lifecycle
+        run: |
+          node tests/browser/journeys/run-production-image-live-overlap.mjs run \
+            --capture-id "$CLEAN_PAY_BROWSER_LIVE_PAIR_CAPTURE_ID" \
+            --candidate-revision "$GITHUB_SHA" \
+            --temporary-root "$RUNNER_TEMP" \
+            --phase chatwoot
+      - name: Finalize sanitized live-pair evidence
+        run: |
+          node tests/browser/journeys/run-production-image-live-overlap.mjs run \
+            --capture-id "$CLEAN_PAY_BROWSER_LIVE_PAIR_CAPTURE_ID" \
+            --candidate-revision "$GITHUB_SHA" \
+            --temporary-root "$RUNNER_TEMP" \
+            --phase evidence
       - name: Preserve sanitized browser journey evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -628,6 +678,7 @@ jobs:
             test-results/browser-public-overlap-playwright/pair/${{ env.CLEAN_PAY_BROWSER_LIVE_PAIR_CAPTURE_ID }}/**/paired-png-quorum-failure/evidence.json
             test-results/browser-public-overlap-playwright/pair/${{ env.CLEAN_PAY_BROWSER_LIVE_PAIR_CAPTURE_ID }}/**/paired-png-quorum-failure/*.png
             test-results/browser-authenticated-journey-live-pair
+            test-results/browser-live-pair-ci/${{ env.CLEAN_PAY_BROWSER_LIVE_PAIR_CAPTURE_ID }}/phase-*.json
             test-results/browser-live-pair-ci/${{ env.CLEAN_PAY_BROWSER_LIVE_PAIR_CAPTURE_ID }}/completion.json
             test-results/browser-live-pair-ci/${{ env.CLEAN_PAY_BROWSER_LIVE_PAIR_CAPTURE_ID }}/failure.json
             test-results/browser-live-pair-ci/${{ env.CLEAN_PAY_BROWSER_LIVE_PAIR_CAPTURE_ID }}/public-capture-baseline-failure.json
