@@ -769,19 +769,13 @@ describe("clean architecture boundaries", () => {
         boundaryImports: ["@/frontend/components/chatwoot-widget-controller"],
         runtimeExports: ["ChatwootWidget", "ChatwootGuestBoundary"],
         allowedInfrastructureBindings: {
-          react: ["useEffect"],
           "@/app/actions/chatwoot": ["loadChatwootSupportContextAction"],
-          "@/frontend/lib/chatwoot": [
-            "enterChatwootGuestMode",
-            "loadChatwootSupportContextCached",
-          ],
+          "@/frontend/lib/chatwoot": ["loadChatwootSupportContextCached"],
         },
         allowedInfrastructureCallCounts: {
-          enterChatwootGuestMode: 1,
           loadChatwootSupportContextAction: 1,
           loadChatwootSupportContextCached: 1,
         },
-        allowedViewHookCounts: { useEffect: 1 },
       },
       {
         path: "src/frontend/components/telegram-webapp-login.tsx",
