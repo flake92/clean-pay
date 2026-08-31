@@ -25,7 +25,7 @@ import { productionCabinetReader } from "@/backend/integrations/cabinet/cabinet-
 import { productionCheckoutReader } from "@/backend/integrations/payments/checkout-reader";
 import { remnashopSubscriptionCatalog } from "@/backend/integrations/remnashop/subscription-catalog";
 import { remnashopSubscriptionReader } from "@/backend/integrations/remnashop/subscription-reader";
-import { productionSupportReader } from "@/backend/integrations/support/support-reader";
+import { productionSupportReader } from "@/app/_composition/support-runtime";
 
 const offers = {
   gateways: [],

@@ -1218,6 +1218,16 @@ describe("clean architecture boundaries", () => {
     expect(composition).toContain("export const productionAuthCommands");
   });
 
+  it("constructs the support reader only in app composition", () => {
+    const composition = readFileSync("src/app/_composition/support-runtime.ts", "utf8");
+    const adapter = readFileSync("src/backend/integrations/support/support-reader.ts", "utf8");
+
+    expect(adapter).toContain("export function createProductionSupportReader()");
+    expect(adapter).not.toContain("export const productionSupportReader");
+    expect(composition).toContain("createProductionSupportReader()");
+    expect(composition).toContain("export const productionSupportReader");
+  });
+
   it("routes every Next.js controller adapter dependency through app composition", () => {
     for (const { file, source } of files("src/app/**/*.{ts,tsx}")) {
       if (file.replaceAll("\\", "/").startsWith("src/app/_composition/")) continue;
