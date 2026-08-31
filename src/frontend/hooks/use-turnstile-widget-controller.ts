@@ -1,9 +1,23 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useReducer, useRef } from "react";
 
 import { loadTurnstileScript } from "@/frontend/lib/turnstile-loader";
+import {
+  createTurnstileWidgetState,
+  turnstileWidgetReducer,
+} from "@/frontend/lib/turnstile-transitions";
 
 export type TurnstileHandle = {
   reset: () => void;
+};
+
+type TurnstileWidgetDependencies = {
+  loadScript: typeof loadTurnstileScript;
+  readApi: () => Window["turnstile"];
+};
+
+const productionTurnstileWidgetDependencies: TurnstileWidgetDependencies = {
+  loadScript: loadTurnstileScript,
+  readApi: () => window.turnstile,
 };
 
 export function useTurnstileWidgetController({
@@ -11,23 +25,29 @@ export function useTurnstileWidgetController({
   onReady,
   siteKey,
   action,
+  dependencies = productionTurnstileWidgetDependencies,
 }: {
   onToken: (token: string | null) => void;
   onReady?: (handle: TurnstileHandle) => void;
   siteKey?: string | null;
   action: string;
+  dependencies?: TurnstileWidgetDependencies;
 }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const widgetIdRef = useRef<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(Boolean(siteKey));
+  const [state, dispatch] = useReducer(
+    turnstileWidgetReducer,
+    siteKey,
+    createTurnstileWidgetState,
+  );
 
   const reset = useCallback(() => {
-    if (widgetIdRef.current && window.turnstile) {
-      window.turnstile.reset(widgetIdRef.current);
+    const turnstile = dependencies.readApi();
+    if (widgetIdRef.current && turnstile) {
+      turnstile.reset(widgetIdRef.current);
     }
     onToken(null);
-  }, [onToken]);
+  }, [dependencies, onToken]);
 
   useEffect(() => {
     if (!siteKey) {
@@ -36,51 +56,52 @@ export function useTurnstileWidgetController({
 
     let mounted = true;
 
-    loadTurnstileScript()
+    dependencies.loadScript()
       .then(() => {
+        const turnstile = dependencies.readApi();
         if (
           !mounted
           || !containerRef.current
-          || !window.turnstile
+          || !turnstile
           || widgetIdRef.current
         ) {
           return;
         }
 
-        widgetIdRef.current = window.turnstile.render(containerRef.current, {
+        widgetIdRef.current = turnstile.render(containerRef.current, {
           sitekey: siteKey,
           action,
           size: "flexible",
           callback: (token) => {
-            setError(null);
+            dispatch({ type: "challenge-accepted" });
             onToken(token);
           },
           "expired-callback": () => onToken(null),
           "error-callback": () => {
             onToken(null);
-            setError("Не удалось пройти проверку Cloudflare Turnstile.");
+            dispatch({ type: "challenge-failed" });
           },
         });
-        setLoading(false);
+        dispatch({ type: "script-loaded" });
         onReady?.({ reset });
       })
       .catch(() => {
         if (!mounted) {
           return;
         }
-        setLoading(false);
-        setError("Не удалось загрузить Cloudflare Turnstile.");
+        dispatch({ type: "script-load-failed" });
       });
 
     return () => {
       mounted = false;
 
-      if (widgetIdRef.current && window.turnstile) {
-        window.turnstile.remove(widgetIdRef.current);
+      const turnstile = dependencies.readApi();
+      if (widgetIdRef.current && turnstile) {
+        turnstile.remove(widgetIdRef.current);
       }
       widgetIdRef.current = null;
     };
-  }, [action, onReady, onToken, reset, siteKey]);
+  }, [action, dependencies, onReady, onToken, reset, siteKey]);
 
-  return { containerRef, error, loading };
+  return { containerRef, ...state };
 }
