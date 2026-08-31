@@ -357,6 +357,3 @@ export function createChatwootIdentityRequestGuard(
     },
   };
 }
-
-export const productionChatwootIdentityRequestGuard =
-  createChatwootIdentityRequestGuard();
