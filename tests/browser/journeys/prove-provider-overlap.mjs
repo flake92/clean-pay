@@ -88,6 +88,10 @@ const providerRejectionProvenanceState = {
   baseline: { entries: [], truncated: false },
   candidate: { entries: [], truncated: false },
 };
+const providerFailurePhaseState = {
+  baseline: null,
+  candidate: null,
+};
 
 try {
   argumentsByName = parseArguments(process.argv.slice(2));
@@ -236,12 +240,30 @@ async function emitProviderFailure(primaryError) {
 function providerFailureBytes(error) {
   const dockerFailures = collectJourneyDockerFailureEvidence(error);
   const rejectedRequestProvenance = currentProviderRejectionProvenance();
+  const providerFailurePhases = currentProviderFailurePhases();
   return Buffer.from(`${JSON.stringify({
     status: "dual_image_provider_overlap_failed",
     ...(dockerFailures.length === 0 ? {} : { dockerFailures }),
     ...(rejectedRequestProvenance === undefined ? {} : { rejectedRequestProvenance }),
+    ...(providerFailurePhases === undefined ? {} : { providerFailurePhases }),
     ...createJourneySanitizedErrorEvidence(error),
   })}\n`, "utf8");
+}
+
+function markProviderFailurePhase(role, phase) {
+  if (!Object.hasOwn(providerFailurePhaseState, role)
+    || typeof phase !== "string" || !/^[a-z0-9-]{1,64}$/.test(phase)) {
+    throw new Error("Provider overlap failure phase is invalid.");
+  }
+  providerFailurePhaseState[role] = phase;
+}
+
+function currentProviderFailurePhases() {
+  const phases = Object.freeze({
+    baseline: providerFailurePhaseState.baseline,
+    candidate: providerFailurePhaseState.candidate,
+  });
+  return Object.values(phases).some((phase) => phase !== null) ? phases : undefined;
 }
 
 function recordProviderRejectionProvenance(role, provenance) {
@@ -337,6 +359,7 @@ async function readStackInput(role) {
 }
 
 async function proveStack(input, preflight, playwrightVersion) {
+  markProviderFailurePhase(input.role, "reset-provider-fixture");
   const reset = assertDeterministicReset(
     await controlJson(input.controlUrl, "/__reset", {
       method: "POST",
@@ -346,6 +369,7 @@ async function proveStack(input, preflight, playwrightVersion) {
     input.contract.project,
     input.role,
   );
+  markProviderFailurePhase(input.role, "exercise-browser-cabinet");
   const browserRun = await exerciseCabinet(
     input.role,
     input.resolverIp,
@@ -365,11 +389,13 @@ async function proveStack(input, preflight, playwrightVersion) {
       }
     },
   );
+  markProviderFailurePhase(input.role, "read-provider-concurrency-ledger");
   const providerOverlap = extractProviderOverlapProof(
     await controlJson(input.controlUrl, "/__concurrency"),
     await controlJson(input.controlUrl, "/__ledger", {}, 2 * 1024 * 1024),
     input.role,
   );
+  markProviderFailurePhase(input.role, "complete-provider-proof");
   return {
     role: input.role,
     contract: input.contract,
@@ -394,6 +420,7 @@ async function exerciseCabinet(
   armOverlap,
 ) {
   const maximumUnexpectedEvents = 32;
+  markProviderFailurePhase(role, "launch-browser");
   const browser = await chromium.launch({
     headless: true,
     args: journeyChromiumLaunchArgs(resolverIp),
@@ -401,6 +428,7 @@ async function exerciseCabinet(
   });
   let browserClosed = false;
   try {
+    markProviderFailurePhase(role, "create-browser-context");
     const context = await browser.newContext({
       viewport: { width: 1440, height: 900 },
       locale: "ru-RU",
@@ -417,6 +445,7 @@ async function exerciseCabinet(
     const historyRecords = [];
     let historyOverflow = false;
     let historyCaptureActive = false;
+    markProviderFailurePhase(role, "install-history-binding");
     await context.exposeBinding("__cleanPayProviderHistory", ({ frame }, record) => {
       if (!historyCaptureActive) return;
       eventSeal.record();
@@ -430,8 +459,11 @@ async function exerciseCabinet(
       }
       historyRecords.push(record);
     });
+    markProviderFailurePhase(role, "install-history-instrumentation");
     await context.addInitScript(installProviderOverlapHistoryInstrumentation);
+    markProviderFailurePhase(role, "create-browser-page");
     const page = await context.newPage();
+    markProviderFailurePhase(role, "create-cdp-session");
     const cdp = await context.newCDPSession(page);
     await cdp.send("Page.enable");
     /**
@@ -514,6 +546,7 @@ async function exerciseCabinet(
     let cabinetDocumentConsumed = false;
     let unexpectedWebSocketCount = 0;
     let unexpectedServiceWorkerCount = 0;
+    markProviderFailurePhase(role, "install-websocket-routing");
     await context.routeWebSocket("**/*", async (webSocket) => {
       const finishWebSocket = eventSeal.begin();
       try {
@@ -749,6 +782,7 @@ async function exerciseCabinet(
     };
     context.on("requestfinished", (request) => completeRequest(request, true));
     context.on("requestfailed", (request) => completeRequest(request, false));
+    markProviderFailurePhase(role, "install-request-routing");
     await context.route("**/*", async (route) => {
       const finishRoute = eventSeal.begin();
       try {
@@ -778,14 +812,19 @@ async function exerciseCabinet(
         finishRoute();
       }
     });
+    markProviderFailurePhase(role, "navigate-login");
     await page.goto(
       "https://pay.ci.clean-pay.dev/login?redirect_to=%2Fprofile",
       { waitUntil: "domcontentloaded", timeout: 30_000 },
     );
     const telegram = page.getByRole("button", { name: "Войти через Telegram" });
+    markProviderFailurePhase(role, "wait-telegram-visible");
     await telegram.waitFor({ state: "visible", timeout: 15_000 });
+    markProviderFailurePhase(role, "wait-turnstile-token");
     await waitForProviderTurnstileToken(page);
+    markProviderFailurePhase(role, "wait-telegram-enabled");
     await waitUntil(async () => telegram.isEnabled(), 15_000);
+    markProviderFailurePhase(role, "navigate-profile");
     const profileNavigation = page.waitForURL(
       (url) => url.href === "https://pay.ci.clean-pay.dev/profile",
       { waitUntil: "load", timeout: 30_000 },
@@ -796,16 +835,22 @@ async function exerciseCabinet(
       profileNavigation,
       telegram.click(),
     ]);
+    markProviderFailurePhase(role, "wait-profile-heading");
     await page.getByRole("heading", { name: "Профиль", level: 1 })
       .waitFor({ state: "visible", timeout: 15_000 });
+    markProviderFailurePhase(role, "settle-profile-dom");
     await page.evaluate(() => new Promise((resolve) => setTimeout(resolve, 50)));
+    markProviderFailurePhase(role, "drain-profile-history-before-idle");
     await drainProviderOverlapHistoryBindings(page);
+    markProviderFailurePhase(role, "wait-profile-network-idle");
     try {
       await page.waitForLoadState("networkidle", { timeout: 15_000 });
     } catch (error) {
       throw new Error("Provider profile network quiescence barrier failed.", { cause: error });
     }
+    markProviderFailurePhase(role, "drain-profile-history-after-idle");
     await drainProviderOverlapHistoryBindings(page);
+    markProviderFailurePhase(role, "inspect-profile-frame");
     const profileFrameTree = await cdp.send("Page.getFrameTree");
     const profileFrame = profileFrameTree.frameTree.frame;
     const profileHistoryLength = await page.evaluate(() => history.length);
@@ -819,8 +864,10 @@ async function exerciseCabinet(
       url: profileFrame.url,
     });
     historyCaptureActive = true;
+    markProviderFailurePhase(role, "arm-provider-overlap");
     await armOverlap();
     cabinetDocumentAllowed = true;
+    markProviderFailurePhase(role, "navigate-cabinet");
     const cabinetResponse = await page.goto("https://pay.ci.clean-pay.dev/cabinet", {
       waitUntil: "domcontentloaded",
       timeout: 30_000,
@@ -831,9 +878,12 @@ async function exerciseCabinet(
         !== "app-cabinet-document") {
       throw new Error("Cabinet navigation response is not bound to its exact browser request.");
     }
+    markProviderFailurePhase(role, "wait-cabinet-navigation");
     await waitForProviderCabinetNavigation(page);
     const heading = page.getByRole("heading", { name: "Личный кабинет", level: 1 });
+    markProviderFailurePhase(role, "wait-cabinet-heading");
     await heading.waitFor({ state: "visible", timeout: 15_000 });
+    markProviderFailurePhase(role, "drain-cabinet-history");
     await drainProviderOverlapHistoryBindings(page);
     const userAgent = await page.evaluate(() => navigator.userAgent);
     const chromiumVersion = browser.version();
@@ -862,7 +912,9 @@ async function exerciseCabinet(
       unexpectedServiceWorkerCount,
       unexpectedWebSocketCount,
     }));
+    markProviderFailurePhase(role, "drain-pending-requests");
     const pendingRequestDrain = await pendingRequestSeal.drainAndSeal({ timeoutMs: 15_000 });
+    markProviderFailurePhase(role, "finalize-event-lifecycle");
     const finalized = await finalizeProviderOverlapEventLifecycle({
       assertUnchanged: (snapshot) => {
         pendingRequestSeal.assertClean();
@@ -938,6 +990,7 @@ async function exerciseCabinet(
     });
     const requestContract = finalized.value;
     const browserSnapshot = finalized.snapshot;
+    markProviderFailurePhase(role, "validate-sealed-ledger");
     if (requestContract.requestCount !== browserRequests.length
       || pendingRequestDrain.observedRequestCount !== browserRequests.length
       || pendingRequestDrain.completedRequestCount !== browserRequests.length
@@ -947,6 +1000,7 @@ async function exerciseCabinet(
       || browserTerminalRequestIdentities.size !== browserRequests.length) {
       throw new Error("Sealed browser projection differs from its final raw request ledger.");
     }
+    markProviderFailurePhase(role, "complete-browser-cabinet");
     return {
       browser: {
         project: PROVIDER_OVERLAP_BROWSER_PROJECT,
