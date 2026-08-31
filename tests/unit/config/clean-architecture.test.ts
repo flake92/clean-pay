@@ -773,7 +773,6 @@ describe("clean architecture boundaries", () => {
         path: "src/frontend/components/telegram-webapp-login.tsx",
         boundaryImports: ["@/frontend/hooks/use-telegram-webapp-login-controller"],
         runtimeExports: ["TelegramWebAppLogin"],
-        allowedBrowserGlobalCounts: { window: 1 },
       },
     ];
 
