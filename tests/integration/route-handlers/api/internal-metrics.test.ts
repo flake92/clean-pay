@@ -20,7 +20,7 @@ vi.mock("@/backend/database/pools", () => ({
 vi.mock("@/backend/observability/audit", () => ({
   logTechnicalError: mocks.logTechnicalError,
 }));
-vi.mock("@/backend/integrations/payments/payment-maintenance-runner", () => ({
+vi.mock("@/app/_composition/payment-operations-runtime", () => ({
   productionPaymentMaintenanceRunner: {
     readReconciliationBacklog: mocks.readReconciliationBacklog,
   },

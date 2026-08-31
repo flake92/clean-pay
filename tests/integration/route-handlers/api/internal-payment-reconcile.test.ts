@@ -17,7 +17,7 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("@/backend/config/env", () => ({ getEnv: mocks.getEnv }));
-vi.mock("@/backend/integrations/payments/payment-maintenance-runner", () => ({
+vi.mock("@/app/_composition/payment-operations-runtime", () => ({
   productionPaymentMaintenanceRunner: {
     claimReconciliation: mocks.claimReconciliation, recoverPayment: mocks.recoverPayment,
     completeRecoveredPayment: mocks.completeRecoveredPayment, resetMissingPayment: mocks.resetMissingPayment,

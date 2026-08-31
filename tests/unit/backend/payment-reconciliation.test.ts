@@ -36,7 +36,7 @@ import {
   completeReconciledPayment,
 } from "@/backend/integrations/payments/payment-reconciliation-service";
 import { processPaymentReconciliation } from "@/application/payments/run-payment-maintenance";
-import { productionPaymentMaintenanceRunner } from "@/backend/integrations/payments/payment-maintenance-runner";
+import { productionPaymentMaintenanceRunner } from "@/app/_composition/payment-operations-runtime";
 import { paymentUpstreamOwnerHash } from "@/backend/payments/hashes";
 import { ServiceError } from "@/backend/errors/service-error";
 import { sha256 } from "@/backend/security/crypto";
