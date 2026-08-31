@@ -149,7 +149,9 @@ target is the page main frame. CSS, JavaScript, RSC, and fetch requests initiate
 by that frame remain non-navigation resources and cannot be rejected as false
 main-frame navigations. The deterministic root prefetch redirect chain is
 classified separately as `app-login-root-rsc`: it admits only exact
-`redirect_to=/` traffic and cannot alias the profile login RSC contract. Each
+`redirect_to=/` traffic and cannot alias the profile login RSC contract. Both
+`307` hops in that chain require the observed absence of `Content-Type`; the
+terminal `200` response requires `text/x-component`. Each
 image has an exact raw semantic/static request-order ledger and
 three fixed document-generation ledgers for login, profile, and cabinet. A
 static path may legitimately recur once in each generation, but cannot be
