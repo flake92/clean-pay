@@ -1387,9 +1387,43 @@ describe("clean architecture boundaries", () => {
   });
 
   it("keeps production adapter instances out of the backend layer", () => {
+    const exportedFactoryInstances: string[] = [];
     for (const { file, source } of files("src/backend/**/*.{ts,tsx}")) {
       expect(source, file).not.toMatch(/export\s+const\s+production[A-Z]/);
+      const sourceFile = ts.createSourceFile(
+        file,
+        source,
+        ts.ScriptTarget.Latest,
+        true,
+        ts.ScriptKind.TS,
+      );
+      for (const statement of sourceFile.statements) {
+        if (
+          !ts.isVariableStatement(statement)
+          || !ts.getModifiers(statement)?.some(
+            (modifier) => modifier.kind === ts.SyntaxKind.ExportKeyword,
+          )
+        ) {
+          continue;
+        }
+        for (const declaration of statement.declarationList.declarations) {
+          if (
+            ts.isIdentifier(declaration.name)
+            && declaration.initializer
+            && ts.isCallExpression(declaration.initializer)
+            && ts.isIdentifier(declaration.initializer.expression)
+            && /^create[A-Z]/.test(declaration.initializer.expression.text)
+          ) {
+            exportedFactoryInstances.push(
+              `${file.replaceAll("\\", "/")}:${declaration.name.text}`,
+            );
+          }
+        }
+      }
     }
+    expect(exportedFactoryInstances.sort()).toEqual([
+      "src/backend/integrations/remnashop/api-client-runtime.ts:remnashopTransport",
+    ]);
   });
 
   it("routes every Next.js controller adapter dependency through app composition", () => {
