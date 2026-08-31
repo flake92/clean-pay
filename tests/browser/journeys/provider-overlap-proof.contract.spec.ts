@@ -36,6 +36,8 @@ import {
   createJourneyBrowserRequestEnvelope,
   createProviderOverlapEventSeal,
   createProviderOverlapPendingRequestSeal,
+  createProviderOverlapRejectedRequestProvenance,
+  createProviderOverlapRejectionProvenanceDocument,
   createProviderOverlapStaticAssetContract,
   extractProviderOverlapCssMediaReferences,
   extractProviderOverlapResponseStaticDeclarations,
@@ -43,6 +45,7 @@ import {
   finalizeProviderOverlapEventLifecycle,
   finalizeProviderOverlapHistoryContract,
   installProviderOverlapHistoryInstrumentation,
+  PROVIDER_OVERLAP_REJECTION_PROVENANCE_MAX_PER_ROLE,
   readProviderOverlapStaticResponseEvidence,
   resolveProviderOverlapResponseRequestEntry,
 } from "./provider-overlap-browser-contract.mjs";
@@ -2147,6 +2150,108 @@ test("rejects a response fallback that does not register the exact prepared iden
     request,
     requestByIdentity,
   })).toThrow(/exact request identity ledger/);
+});
+
+test("publishes bounded rejected request provenance without raw URL or query values", () => {
+  const privateMarker = "private-provider-query-value";
+  const baseline = createProviderOverlapRejectedRequestProvenance({
+    reasonCode: "request-classification-rejected",
+    rejectionMessage: `classifier rejected ${privateMarker}`,
+    requestEnvelope: {
+      isMainFrame: false,
+      isNavigation: false,
+      method: "GET",
+      resourceType: "fetch",
+      url: `https://pay.ci.clean-pay.dev/profile?_rsc=${privateMarker}`,
+    },
+  });
+  const sameShape = createProviderOverlapRejectedRequestProvenance({
+    reasonCode: "request-classification-rejected",
+    rejectionMessage: `classifier rejected ${privateMarker}`,
+    requestEnvelope: {
+      isMainFrame: false,
+      isNavigation: false,
+      method: "GET",
+      resourceType: "fetch",
+      url: "https://pay.ci.clean-pay.dev/profile?_rsc=different-private-value",
+    },
+  });
+  const candidate = createProviderOverlapRejectedRequestProvenance({
+    reasonCode: "request-page-mismatch",
+    rejectionMessage: "request-page-mismatch",
+    requestEnvelope: {
+      isMainFrame: true,
+      isNavigation: true,
+      method: "GET",
+      resourceType: "document",
+      url: "https://pay.ci.clean-pay.dev/cabinet",
+    },
+  });
+
+  expect(baseline).toEqual(sameShape);
+  expect(baseline).toEqual({
+    reasonCode: "request-classification-rejected",
+    rejectionMessageSha256: expect.stringMatching(/^[a-f0-9]{64}$/),
+    requestEnvelopeSha256: expect.stringMatching(/^[a-f0-9]{64}$/),
+    requestPathSha256: sha256("/profile"),
+  });
+  expect(candidate.requestPathSha256).toBe(sha256("/cabinet"));
+  expect(candidate.requestEnvelopeSha256).not.toBe(baseline.requestEnvelopeSha256);
+
+  const document = createProviderOverlapRejectionProvenanceDocument({
+    baseline: { entries: [baseline], truncated: false },
+    candidate: { entries: [candidate], truncated: true },
+  });
+  expect(document).toEqual({
+    maximumEntriesPerRole: PROVIDER_OVERLAP_REJECTION_PROVENANCE_MAX_PER_ROLE,
+    roles: {
+      baseline: { entries: [baseline], truncated: false },
+      candidate: { entries: [candidate], truncated: true },
+    },
+    schemaVersion: 1,
+  });
+  const serialized = JSON.stringify(document);
+  expect(serialized).not.toContain(privateMarker);
+  expect(serialized).not.toContain("different-private-value");
+  expect(serialized).not.toContain("https://");
+  expect(serialized).not.toContain("/profile");
+  expect(serialized).not.toContain("/cabinet");
+  expect(serialized).not.toContain("_rsc");
+  expect(() => createProviderOverlapRejectionProvenanceDocument({
+    baseline: {
+      entries: Array.from(
+        { length: PROVIDER_OVERLAP_REJECTION_PROVENANCE_MAX_PER_ROLE + 1 },
+        () => baseline,
+      ),
+      truncated: true,
+    },
+    candidate: { entries: [], truncated: false },
+  })).toThrow(/outside its bound/);
+  expect(() => createProviderOverlapRejectedRequestProvenance({
+    reasonCode: "unbounded-reason",
+    rejectionMessage: "unbounded-reason",
+    requestEnvelope: {
+      isMainFrame: false,
+      isNavigation: false,
+      method: "GET",
+      resourceType: "fetch",
+      url: "https://pay.ci.clean-pay.dev/profile",
+    },
+  })).toThrow(/reason code is invalid/);
+});
+
+test("stores rejected preparation provenance and conditionally publishes it on provider failure", async () => {
+  const runnerSource = await readFile(
+    path.resolve(__dirname, "prove-provider-overlap.mjs"),
+    "utf8",
+  );
+  expect(runnerSource).toContain("rejectionProvenance: provenance");
+  expect(runnerSource).toContain('"request-page-mismatch"');
+  expect(runnerSource).toContain('"request-page-unavailable"');
+  expect(runnerSource).toContain('"request-classification-rejected"');
+  expect(runnerSource).toContain('"route-preparation-missing"');
+  expect(runnerSource).toContain("currentProviderRejectionProvenance()");
+  expect(runnerSource).toContain("{ rejectedRequestProvenance }");
 });
 
 test("keeps one exact request identity across a held route, response, and terminal event", async () => {
