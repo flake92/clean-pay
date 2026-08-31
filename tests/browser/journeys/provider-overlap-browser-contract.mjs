@@ -203,9 +203,50 @@ export function createProviderOverlapPendingRequestSeal(maximumRequestCount = ma
   let duplicateCompletionCount = 0;
   let lateRequestEventCount = 0;
   let observedRequestCount = 0;
+  let quietOperationActive = false;
   let overflow = false;
   let sealed = false;
   let version = 0;
+  const waitForQuietState = async ({
+    pollMs = 10,
+    quietMs = 200,
+    timeoutMs = 5_000,
+  } = {}, sealOnSuccess) => {
+    const operation = sealOnSuccess ? "drain" : "checkpoint";
+    if (sealed || quietOperationActive
+      || ![pollMs, quietMs, timeoutMs].every(Number.isSafeInteger)
+      || pollMs < 1 || quietMs < pollMs || timeoutMs < quietMs || timeoutMs > 30_000) {
+      fail(`Browser pending request ${operation} contract is invalid.`);
+    }
+    quietOperationActive = true;
+    try {
+      const deadline = Date.now() + timeoutMs;
+      let observedVersion = version;
+      let quietSince = Date.now();
+      while (Date.now() <= deadline) {
+        if (overflow || duplicateCompletionCount !== 0 || lateRequestEventCount !== 0) {
+          fail("Browser pending request ledger became invalid before sealing.");
+        }
+        if (version !== observedVersion || pending.size !== 0) {
+          observedVersion = version;
+          quietSince = Date.now();
+        } else if (Date.now() - quietSince >= quietMs) {
+          if (sealOnSuccess) sealed = true;
+          return Object.freeze({
+            completedRequestCount,
+            observedRequestCount,
+            status: sealOnSuccess ? "drained-and-sealed" : "quiet-checkpoint",
+          });
+        }
+        await new Promise((resolve) => setTimeout(resolve, pollMs));
+      }
+      fail(sealOnSuccess
+        ? "Browser pending requests did not drain within their bounded lifecycle."
+        : "Browser pending requests did not reach their bounded quiet checkpoint.");
+    } finally {
+      quietOperationActive = false;
+    }
+  };
   return Object.freeze({
     assertClean() {
       if (!sealed || overflow || pending.size !== 0
@@ -236,36 +277,8 @@ export function createProviderOverlapPendingRequestSeal(maximumRequestCount = ma
       completed.add(request);
       completedRequestCount += 1;
     },
-    async drainAndSeal({
-      pollMs = 10,
-      quietMs = 200,
-      timeoutMs = 5_000,
-    } = {}) {
-      if (sealed || ![pollMs, quietMs, timeoutMs].every(Number.isSafeInteger)
-        || pollMs < 1 || quietMs < pollMs || timeoutMs < quietMs || timeoutMs > 30_000) {
-        fail("Browser pending request drain contract is invalid.");
-      }
-      const deadline = Date.now() + timeoutMs;
-      let observedVersion = version;
-      let quietSince = Date.now();
-      while (Date.now() <= deadline) {
-        if (overflow || duplicateCompletionCount !== 0) {
-          fail("Browser pending request ledger became invalid before sealing.");
-        }
-        if (version !== observedVersion || pending.size !== 0) {
-          observedVersion = version;
-          quietSince = Date.now();
-        } else if (Date.now() - quietSince >= quietMs) {
-          sealed = true;
-          return Object.freeze({
-            completedRequestCount,
-            observedRequestCount,
-            status: "drained-and-sealed",
-          });
-        }
-        await new Promise((resolve) => setTimeout(resolve, pollMs));
-      }
-      fail("Browser pending requests did not drain within their bounded lifecycle.");
+    async drainAndSeal(options = {}) {
+      return waitForQuietState(options, true);
     },
     observe(request) {
       if (!request || typeof request !== "object") {
@@ -283,6 +296,9 @@ export function createProviderOverlapPendingRequestSeal(maximumRequestCount = ma
     },
     pendingCount() {
       return pending.size;
+    },
+    async waitForQuiet(options = {}) {
+      return waitForQuietState(options, false);
     },
   });
 }
@@ -363,6 +379,73 @@ export function createProviderOverlapRejectedRequestProvenance(input) {
     rejectionMessageSha256: sha256(rejectionMessage),
     requestEnvelopeSha256: sha256(JSON.stringify(canonicalEnvelope)),
     requestPathSha256: pathSha256,
+  });
+}
+
+export function createProviderOverlapPendingRequestEvidence(input) {
+  exactKeys(input, [
+    "isNavigation", "method", "resourceType", "url",
+  ], "provider pending request evidence input");
+  if (typeof input.isNavigation !== "boolean"
+    || typeof input.method !== "string" || input.method.length < 1 || input.method.length > 64
+    || typeof input.resourceType !== "string" || input.resourceType.length < 1
+    || input.resourceType.length > 64
+    || typeof input.url !== "string" || input.url.length < 1 || input.url.length > 8_192) {
+    fail("Provider pending request evidence input is invalid.");
+  }
+  const url = exactUrl(input.url);
+  return Object.freeze({
+    isNavigation: input.isNavigation,
+    methodSha256: sha256(input.method),
+    originSha256: sha256(url.origin),
+    pathSha256: sha256(url.pathname),
+    resourceTypeSha256: sha256(input.resourceType),
+  });
+}
+
+export function createProviderOverlapPendingRequestEvidenceDocument(input) {
+  const maximumEntriesPerRole = 16;
+  exactKeys(input, ["baseline", "candidate"], "provider pending request evidence roles");
+  const roles = {};
+  let hasEvidence = false;
+  for (const role of ["baseline", "candidate"]) {
+    const state = input[role];
+    exactKeys(state, [
+      "entries", "trackedPendingCount", "truncated",
+    ], `${role} provider pending request evidence`);
+    if (!Array.isArray(state.entries)
+      || !Number.isSafeInteger(state.trackedPendingCount) || state.trackedPendingCount < 0
+      || state.trackedPendingCount > maximumRequests
+      || state.entries.length !== Math.min(state.trackedPendingCount, maximumEntriesPerRole)
+      || typeof state.truncated !== "boolean"
+      || (state.trackedPendingCount > maximumEntriesPerRole && !state.truncated)) {
+      fail(`${role} provider pending request evidence is outside its bound.`);
+    }
+    const entries = state.entries.map((entry) => {
+      exactKeys(entry, [
+        "isNavigation", "methodSha256", "originSha256", "pathSha256", "resourceTypeSha256",
+      ], `${role} provider pending request evidence entry`);
+      if (typeof entry.isNavigation !== "boolean"
+        || !sha256Pattern.test(entry.methodSha256 ?? "")
+        || !sha256Pattern.test(entry.originSha256 ?? "")
+        || !sha256Pattern.test(entry.pathSha256 ?? "")
+        || !sha256Pattern.test(entry.resourceTypeSha256 ?? "")) {
+        fail(`${role} provider pending request evidence entry is invalid.`);
+      }
+      return Object.freeze({ ...entry });
+    });
+    hasEvidence ||= state.trackedPendingCount > 0 || state.truncated;
+    roles[role] = Object.freeze({
+      entries: Object.freeze(entries),
+      trackedPendingCount: state.trackedPendingCount,
+      truncated: state.truncated,
+    });
+  }
+  if (!hasEvidence) fail("Provider pending request evidence is unexpectedly empty.");
+  return Object.freeze({
+    maximumEntriesPerRole,
+    roles: Object.freeze(roles),
+    schemaVersion: 1,
   });
 }
 
@@ -678,8 +761,9 @@ export async function captureProviderOverlapResponseEvidence(input) {
     });
   }
 
-  // Start body retrieval before awaiting completion. Chromium evicts a
-  // navigated document body even though its Response metadata remains usable.
+  // Register body retrieval on the response event. Playwright resolves it only
+  // after request completion, so the caller must reach a bounded quiet
+  // checkpoint before any navigation can evict the prior document body.
   const bodyPromise = boundedLifecycleOperation(
     response.body(),
     5_000,

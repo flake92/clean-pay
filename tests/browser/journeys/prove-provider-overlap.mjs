@@ -35,6 +35,8 @@ import {
   classifyProviderOverlapBrowserRequest,
   createJourneyBrowserRequestEnvelope,
   createProviderOverlapEventSeal,
+  createProviderOverlapPendingRequestEvidence,
+  createProviderOverlapPendingRequestEvidenceDocument,
   createProviderOverlapPendingRequestSeal,
   createProviderOverlapRejectedRequestProvenance,
   createProviderOverlapRejectionProvenanceDocument,
@@ -91,6 +93,10 @@ const providerRejectionProvenanceState = {
 const providerFailurePhaseState = {
   baseline: null,
   candidate: null,
+};
+const providerPendingRequestEvidenceState = {
+  baseline: { entries: new Map(), overflow: false },
+  candidate: { entries: new Map(), overflow: false },
 };
 
 try {
@@ -239,11 +245,13 @@ async function emitProviderFailure(primaryError) {
 
 function providerFailureBytes(error) {
   const dockerFailures = collectJourneyDockerFailureEvidence(error);
+  const pendingRequestEvidence = currentProviderPendingRequestEvidence();
   const rejectedRequestProvenance = currentProviderRejectionProvenance();
   const providerFailurePhases = currentProviderFailurePhases();
   return Buffer.from(`${JSON.stringify({
     status: "dual_image_provider_overlap_failed",
     ...(dockerFailures.length === 0 ? {} : { dockerFailures }),
+    ...(pendingRequestEvidence === undefined ? {} : { pendingRequestEvidence }),
     ...(rejectedRequestProvenance === undefined ? {} : { rejectedRequestProvenance }),
     ...(providerFailurePhases === undefined ? {} : { providerFailurePhases }),
     ...createJourneySanitizedErrorEvidence(error),
@@ -264,6 +272,56 @@ function currentProviderFailurePhases() {
     candidate: providerFailurePhaseState.candidate,
   });
   return Object.values(phases).some((phase) => phase !== null) ? phases : undefined;
+}
+
+function recordProviderPendingRequest(role, request) {
+  const state = providerPendingRequestEvidenceState[role];
+  if (!state || !request || typeof request !== "object" || state.entries.has(request)) return;
+  if (state.entries.size >= 256) {
+    state.overflow = true;
+    return;
+  }
+  let evidence;
+  try {
+    evidence = createProviderOverlapPendingRequestEvidence({
+      isNavigation: request.isNavigationRequest(),
+      method: request.method(),
+      resourceType: request.resourceType(),
+      url: request.url(),
+    });
+  } catch {
+    evidence = Object.freeze({
+      isNavigation: false,
+      methodSha256: sha256("UNAVAILABLE"),
+      originSha256: sha256("https://unavailable.provider-overlap.invalid"),
+      pathSha256: sha256("/"),
+      resourceTypeSha256: sha256("other"),
+    });
+  }
+  state.entries.set(request, evidence);
+}
+
+function completeProviderPendingRequest(role, request) {
+  providerPendingRequestEvidenceState[role]?.entries.delete(request);
+}
+
+function currentProviderPendingRequestEvidence() {
+  const maximumEntriesPerRole = 16;
+  const roles = {};
+  let hasEvidence = false;
+  for (const role of ["baseline", "candidate"]) {
+    const state = providerPendingRequestEvidenceState[role];
+    const entries = [...state.entries.values()].slice(0, maximumEntriesPerRole);
+    const trackedPendingCount = state.entries.size;
+    const truncated = state.overflow || trackedPendingCount > maximumEntriesPerRole;
+    hasEvidence ||= trackedPendingCount > 0 || truncated;
+    roles[role] = Object.freeze({
+      entries: Object.freeze(entries),
+      trackedPendingCount,
+      truncated,
+    });
+  }
+  return hasEvidence ? createProviderOverlapPendingRequestEvidenceDocument(roles) : undefined;
 }
 
 function recordProviderRejectionProvenance(role, provenance) {
@@ -567,6 +625,11 @@ async function exerciseCabinet(
       );
     });
     const pendingRequestSeal = createProviderOverlapPendingRequestSeal(256);
+    const waitForResponseCaptureQuiet = async () => {
+      const checkpoint = await pendingRequestSeal.waitForQuiet({ timeoutMs: 15_000 });
+      if (browserResponseCaptureFailure) throw browserResponseCaptureFailure;
+      return checkpoint;
+    };
     const recordUnexpectedRequest = (rawUrl) => {
       if (unexpectedRequests.length < maximumUnexpectedEvents) {
         unexpectedRequests.push(sha256(rawUrl));
@@ -686,6 +749,7 @@ async function exerciseCabinet(
     context.on("request", (request) => {
       eventSeal.record();
       pendingRequestSeal.observe(request);
+      recordProviderPendingRequest(role, request);
       // Prepare synchronously on the normal request path. The response path
       // owns a fail-closed fallback for a response identity whose request
       // preparation was not observable through this listener.
@@ -704,6 +768,7 @@ async function exerciseCabinet(
           throw new Error("Synthetic browser response request identity is invalid.");
         }
         pendingRequestSeal.observe(request);
+        recordProviderPendingRequest(role, request);
         const entry = resolveProviderOverlapResponseRequestEntry({
           preparationByIdentity: browserRequestPreparationByIdentity,
           prepare: prepareBrowserRequest,
@@ -716,9 +781,9 @@ async function exerciseCabinet(
         if (browserResponseEvidenceByIdentity.has(request)) {
           throw new Error("Synthetic browser response evidence was registered more than once.");
         }
-        // captureProviderOverlapResponseEvidence starts body retrieval
-        // synchronously before its first await. Starting it on response keeps
-        // navigation from evicting an earlier document body.
+        // Register response capture immediately. Playwright resolves body()
+        // only after request completion; the bounded quiet checkpoints below
+        // must settle this promise before a later navigation can evict it.
         evidence = captureProviderOverlapResponseEvidence({
           classification: entry.classification,
           request,
@@ -771,11 +836,13 @@ async function exerciseCabinet(
       void evidence.then(
         () => {
           pendingRequestSeal.complete(request);
+          completeProviderPendingRequest(role, request);
           finishRequest();
         },
         (error) => {
           browserResponseCaptureFailure ??= error;
           pendingRequestSeal.complete(request);
+          completeProviderPendingRequest(role, request);
           finishRequest();
         },
       );
@@ -824,6 +891,8 @@ async function exerciseCabinet(
     await waitForProviderTurnstileToken(page);
     markProviderFailurePhase(role, "wait-telegram-enabled");
     await waitUntil(async () => telegram.isEnabled(), 15_000);
+    markProviderFailurePhase(role, "drain-login-requests");
+    await waitForResponseCaptureQuiet();
     markProviderFailurePhase(role, "navigate-profile");
     const profileNavigation = page.waitForURL(
       (url) => url.href === "https://pay.ci.clean-pay.dev/profile",
@@ -850,6 +919,8 @@ async function exerciseCabinet(
     }
     markProviderFailurePhase(role, "drain-profile-history-after-idle");
     await drainProviderOverlapHistoryBindings(page);
+    markProviderFailurePhase(role, "drain-profile-requests");
+    await waitForResponseCaptureQuiet();
     markProviderFailurePhase(role, "inspect-profile-frame");
     const profileFrameTree = await cdp.send("Page.getFrameTree");
     const profileFrame = profileFrameTree.frameTree.frame;
@@ -885,6 +956,8 @@ async function exerciseCabinet(
     await heading.waitFor({ state: "visible", timeout: 15_000 });
     markProviderFailurePhase(role, "drain-cabinet-history");
     await drainProviderOverlapHistoryBindings(page);
+    markProviderFailurePhase(role, "drain-cabinet-requests");
+    await waitForResponseCaptureQuiet();
     const userAgent = await page.evaluate(() => navigator.userAgent);
     const chromiumVersion = browser.version();
     const mutableSourceContractSha256 = () => sha256(JSON.stringify({
@@ -915,26 +988,43 @@ async function exerciseCabinet(
     markProviderFailurePhase(role, "drain-pending-requests");
     const pendingRequestDrain = await pendingRequestSeal.drainAndSeal({ timeoutMs: 15_000 });
     markProviderFailurePhase(role, "finalize-event-lifecycle");
+    const finalizerEventSeal = Object.freeze({
+      assertClean: () => {
+        markProviderFailurePhase(role, "finalize-event-seal");
+        return eventSeal.assertClean();
+      },
+      drainAndSeal: (...args) => {
+        markProviderFailurePhase(role, "finalize-event-drain");
+        return eventSeal.drainAndSeal(...args);
+      },
+    });
     const finalized = await finalizeProviderOverlapEventLifecycle({
       assertUnchanged: (snapshot) => {
+        markProviderFailurePhase(role, "finalize-source-revalidation");
         pendingRequestSeal.assertClean();
         if (mutableSourceContractSha256() !== snapshot.mutableSourceContractSha256) {
           throw new Error("Synthetic browser source ledger changed across close.");
         }
       },
       close: async () => {
+        markProviderFailurePhase(role, "finalize-browser-close");
         await browser.close();
         browserClosed = true;
       },
       detach: async () => {
+        markProviderFailurePhase(role, "finalize-listener-detach");
         cdp.removeListener("Page.frameNavigated", handleFrameNavigated);
         cdp.removeListener("Page.navigatedWithinDocument", handleNavigatedWithinDocument);
         await page.removeAllListeners();
         await context.removeAllListeners();
       },
-      eventSeal,
+      eventSeal: finalizerEventSeal,
       finish: () => {
-        if (browserResponseCaptureFailure) throw browserResponseCaptureFailure;
+        if (browserResponseCaptureFailure) {
+          markProviderFailurePhase(role, "finalize-response-capture");
+          throw browserResponseCaptureFailure;
+        }
+        markProviderFailurePhase(role, "finalize-browser-projection");
         return finishBrowserRequestContract(
           browserRequests,
           browserRequestByIdentity,
@@ -944,6 +1034,7 @@ async function exerciseCabinet(
       },
       isIdle: () => pendingRequestSeal.pendingCount() === 0,
       snapshot: async () => {
+        markProviderFailurePhase(role, "finalize-browser-snapshot");
         if (!cabinetDocumentConsumed) {
           throw new Error("Synthetic browser did not consume the exact cabinet proof navigation.");
         }
