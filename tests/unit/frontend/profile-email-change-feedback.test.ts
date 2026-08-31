@@ -132,6 +132,41 @@ describe("profile e-mail change feedback", () => {
     expect(emailForm.querySelector("button")?.type).toBe("submit");
   });
 
+  it("keeps the Sakai password form shell and control order exact", async () => {
+    await act(async () => {
+      root.render(createElement(ProfilePanel, {
+        model: {
+          status: "ready",
+          user: {
+            authType: "email",
+            email: "old@example.com",
+            emailVerified: true,
+            pendingEmail: null,
+            telegramId: "777",
+          },
+          emailReminders: { status: "unavailable" },
+        },
+      }));
+    });
+
+    const passwordInputs = [...container.querySelectorAll<HTMLInputElement>('input[type="password"]')];
+    expect(passwordInputs).toHaveLength(2);
+    const passwordForm = passwordInputs[0].closest("form");
+    expect(passwordForm).not.toBeNull();
+    if (!passwordForm) throw new Error("Password form is absent.");
+    expect([...passwordForm.children].map(({ tagName }) => tagName)).toEqual([
+      "LABEL",
+      "LABEL",
+      "BUTTON",
+    ]);
+    expect([...passwordForm.querySelectorAll("label")].map(({ textContent }) => textContent)).toEqual([
+      "Текущий пароль",
+      "Новый пароль",
+    ]);
+    expect(passwordForm.querySelector("button")?.textContent).toBe("Изменить пароль");
+    expect(passwordForm.querySelector("button")?.type).toBe("submit");
+  });
+
   it("shows a failed change next to the e-mail form and brings it into view", async () => {
     await act(async () => {
       root.render(createElement(ProfilePanel, {
