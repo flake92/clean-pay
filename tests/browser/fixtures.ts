@@ -28,7 +28,10 @@ import {
   initializeConsolePolicy,
   reconcileRegisteredBaselineArtifacts,
 } from "./console-policy";
-import { DETERMINISTIC_CHROMIUM_LAUNCH_ARGS } from "./render-policy";
+import {
+  DETERMINISTIC_CHROMIUM_LAUNCH_ARGS,
+  LIVE_OVERLAP_CHROMIUM_LAUNCH_ARGS,
+} from "./render-policy";
 import { EXACT_SCREENSHOT_QUORUM_PROCESS_COUNT } from "./screenshot-majority";
 import { installDeterministicTurnstileStub } from "./turnstile-stub";
 import {
@@ -96,8 +99,9 @@ export const test = playwrightTest.extend<BrowserFixtures, BrowserWorkerFixtures
     if (browserName !== "chromium") {
       throw new Error("The public characterization quorum requires Chromium.");
     }
+    const rendererPolicy = characterizationRendererPolicy(workerInfo.project.metadata);
     const launchOptions = workerInfo.project.use.launchOptions ?? {};
-    assertExactLaunchOptions(launchOptions);
+    assertRendererLaunchOptions(launchOptions, rendererPolicy);
 
     const browsers: Browser[] = [];
     const failures: unknown[] = [];
@@ -135,8 +139,9 @@ export const test = playwrightTest.extend<BrowserFixtures, BrowserWorkerFixtures
     if (browserName !== "chromium") {
       throw new Error("The paired public characterization quorum requires Chromium.");
     }
+    const rendererPolicy = characterizationRendererPolicy(workerInfo.project.metadata);
     const launchOptions = workerInfo.project.use.launchOptions ?? {};
-    assertExactLaunchOptions(launchOptions);
+    assertRendererLaunchOptions(launchOptions, rendererPolicy);
 
     const browsers: Browser[] = [];
     const pairs: CharacterizationBrowserProcessPair[] = [];
@@ -256,7 +261,11 @@ export const test = playwrightTest.extend<BrowserFixtures, BrowserWorkerFixtures
     const pages: CharacterizationGuardedPage[] = [];
     const guards: PageGuard[] = [];
     try {
-      const contextOptions = characterizationContextOptions(testInfo.project.use);
+      const rendererPolicy = characterizationRendererPolicy(testInfo.project.metadata);
+      const contextOptions = characterizationContextOptions(
+        testInfo.project.use,
+        rendererPolicy,
+      );
       for (const [processIndex, browser] of independentChromiumBrowsers.entries()) {
         const context = await browser.newContext(contextOptions);
         contexts[processIndex] = context;
@@ -373,7 +382,11 @@ export const test = playwrightTest.extend<BrowserFixtures, BrowserWorkerFixtures
       role: PublicOverlapRole;
     }> = [];
     try {
-      const baseOptions = characterizationContextOptions(testInfo.project.use);
+      const rendererPolicy = characterizationRendererPolicy(testInfo.project.metadata);
+      const baseOptions = characterizationContextOptions(
+        testInfo.project.use,
+        rendererPolicy,
+      );
       if (baseOptions.baseURL !== environment.roles.baseline.applicationOrigin) {
         throw new Error("Paired characterization config is not bound to the baseline origin.");
       }
@@ -586,7 +599,11 @@ const EXACT_PROJECT_USE_KEYS = [
 
 export function characterizationContextOptions(
   configured: Record<string, unknown>,
+  rendererPolicy: "canonical" | "live-overlap" = "canonical",
 ): BrowserContextOptions {
+  if (rendererPolicy !== "canonical" && rendererPolicy !== "live-overlap") {
+    throw new Error("Public characterization renderer policy is invalid.");
+  }
   assertExactObjectKeys(configured, EXACT_PROJECT_USE_KEYS, "project.use");
   if (
     typeof configured.baseURL !== "string"
@@ -619,7 +636,11 @@ export function characterizationContextOptions(
   if (configured.contextOptions.reducedMotion !== "reduce") {
     throw new Error("Public characterization reduced-motion policy must be reduce.");
   }
-  assertExactLaunchOptions(configured.launchOptions);
+  if (rendererPolicy === "live-overlap") {
+    assertExactLiveOverlapLaunchOptions(configured.launchOptions);
+  } else {
+    assertExactLaunchOptions(configured.launchOptions);
+  }
   const viewport = {
     width: configured.viewport.width,
     height: configured.viewport.height,
@@ -654,15 +675,54 @@ export function characterizationContextOptions(
 }
 
 export function assertExactLaunchOptions(value: unknown) {
+  assertLaunchOptions(value, DETERMINISTIC_CHROMIUM_LAUNCH_ARGS);
+}
+
+export function assertExactLiveOverlapLaunchOptions(value: unknown) {
+  assertLaunchOptions(value, LIVE_OVERLAP_CHROMIUM_LAUNCH_ARGS);
+}
+
+export function characterizationRendererPolicy(
+  metadata: unknown,
+): "canonical" | "live-overlap" {
+  if (!isRecord(metadata)) {
+    throw new Error("Public characterization project metadata is missing.");
+  }
+  assertExactObjectKeys(
+    metadata,
+    ["cleanPayRendererPolicy"],
+    "project.metadata",
+  );
+  if (
+    metadata.cleanPayRendererPolicy !== "canonical"
+    && metadata.cleanPayRendererPolicy !== "live-overlap"
+  ) {
+    throw new Error("Public characterization renderer policy is invalid.");
+  }
+  return metadata.cleanPayRendererPolicy;
+}
+
+function assertRendererLaunchOptions(
+  value: unknown,
+  rendererPolicy: "canonical" | "live-overlap",
+) {
+  if (rendererPolicy === "live-overlap") {
+    assertExactLiveOverlapLaunchOptions(value);
+  } else {
+    assertExactLaunchOptions(value);
+  }
+}
+
+function assertLaunchOptions(value: unknown, expectedArgs: readonly string[]) {
   if (!isRecord(value)) {
     throw new Error("Public characterization launchOptions are missing.");
   }
   assertExactObjectKeys(value, ["args"], "project.use.launchOptions");
   if (
     !Array.isArray(value.args)
-    || value.args.length !== DETERMINISTIC_CHROMIUM_LAUNCH_ARGS.length
+    || value.args.length !== expectedArgs.length
     || value.args.some((entry, index) => (
-      entry !== DETERMINISTIC_CHROMIUM_LAUNCH_ARGS[index]
+      entry !== expectedArgs[index]
     ))
   ) {
     throw new Error("Public characterization launch arguments are not pinned.");
