@@ -91,6 +91,13 @@ arbitrary cross-process pairing variable. The live policy still compares raw
 PNG bytes exactly across three independent renderer pairs; it introduces no
 retry, tolerance, masking, normalization, or baseline update.
 
+The live paired capture also uses a fixed two-read cadence for every evidence
+slot: one unconditional renderer readback is discarded without inspecting its
+bytes, and the immediately following raw PNG becomes evidence. This aligns the
+fixed baseline/candidate sequence to the same retained odd/even cadence phase.
+The evidence remains exact, every raw read failure fails closed, and the
+cadence does not consult or select against baseline or candidate bytes.
+
 Raw PNG and JSON evidence is always retained. JSON equality uses a separate
 comparison projection that retains every external request, including the
 exact Turnstile-stub request count and position, while normalizing only its
