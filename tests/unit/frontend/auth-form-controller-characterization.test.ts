@@ -371,6 +371,61 @@ describe("auth form controller characterization", () => {
     expect(turnstile.reset).toHaveBeenCalledTimes(4);
   });
 
+  it("keeps the authorized unverified password-reset redirect explicit", async () => {
+    const navigateAfterAuth = vi.fn();
+    const turnstile = turnstileController();
+    mocks.executeAuthAction
+      .mockResolvedValueOnce({
+        ok: true,
+        kind: "identified",
+        exists: true,
+        hasPasskey: false,
+      })
+      .mockResolvedValueOnce({
+        ok: false,
+        code: "AUTH_FAILED",
+        message: "Неверный e-mail или пароль.",
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        kind: "password-reset-requested",
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        kind: "authenticated",
+        emailVerified: false,
+        verificationRequired: true,
+        verificationDeliveryFailed: false,
+      });
+    const hook = renderHook(() => useAuthFormController({
+      initialError: null,
+      navigateAfterAuth,
+      redirectTo: "/cabinet?tab=devices#active",
+      turnstile,
+    }));
+
+    act(() => hook.result.current.changeEmailInput(inputChange("unverified@example.test")));
+    await act(async () => hook.result.current.submit(submitEvent()));
+    act(() => hook.result.current.changePasswordInput(inputChange("old password")));
+    await act(async () => hook.result.current.submit(submitEvent()));
+    act(() => hook.result.current.requestPasswordRecovery());
+    await act(async () => hook.result.current.submit(submitEvent()));
+    act(() => {
+      hook.result.current.changeCodeInput(inputChange("123456"));
+      hook.result.current.changePasswordInput(inputChange("new password"));
+      hook.result.current.changePasswordConfirmationInput(inputChange("new password"));
+    });
+    await act(async () => hook.result.current.submit(submitEvent()));
+
+    expect(navigateAfterAuth).toHaveBeenCalledOnce();
+    expect(navigateAfterAuth).toHaveBeenCalledWith(
+      "/register/verify-email?redirect_to=%2Fcabinet%3Ftab%3Ddevices%23active",
+    );
+    expect(navigateAfterAuth).not.toHaveBeenCalledWith(
+      "/cabinet?tab=devices#active",
+    );
+  });
+
   it("does not call the Server Action when the enabled shared challenge is absent", async () => {
     const turnstile = turnstileController({
       enabled: true,
