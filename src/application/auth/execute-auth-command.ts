@@ -1,3 +1,4 @@
+import { executeEmailLogin } from "@/application/auth/execute-email-login";
 import {
   AuthGatewayError,
   type AuthCommands,
@@ -214,6 +215,13 @@ export async function executeAuthCommand(commands: AuthCommands, input: unknown)
   const { command, email, turnstileToken } = parsed;
 
   try {
+    if (command.kind === "login") {
+      return await executeEmailLogin(commands, {
+        email,
+        password: command.password,
+        turnstileToken,
+      });
+    }
     await commands.preflightCapacity("auth_command");
     await commands.withUpstreamConcurrency(
       "turnstile_verify",
@@ -230,22 +238,6 @@ export async function executeAuthCommand(commands: AuthCommands, input: unknown)
           commands.hasPasskey(email),
         ]);
         return { ok: true, kind: "identified", exists: identity.exists, hasPasskey };
-      }
-      case "login": {
-        await commands.rateLimit({ action: "auth_login", email, limit: 5, windowSeconds: 15 * 60 });
-        const providerSession = await authenticate(commands, { operation: "login", email, password: command.password });
-        const session = await commands.withUpstreamConcurrency(
-          "remnashop_auth",
-          () => commands.establishSession(providerSession),
-        );
-        await commands.audit({ action: "auth_login_success", userId: session.userId });
-        return {
-          ok: true,
-          kind: "authenticated",
-          emailVerified: session.emailVerified,
-          verificationRequired: !session.emailVerified,
-          verificationDeliveryFailed: false,
-        };
       }
       case "register": {
         await commands.rateLimit({ action: "auth_register", email, limit: 5, windowSeconds: 15 * 60 });
