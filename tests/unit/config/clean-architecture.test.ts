@@ -1241,6 +1241,22 @@ describe("clean architecture boundaries", () => {
     expect(composition).toContain("export const productionPasskeyManagementGateway");
   });
 
+  it("constructs the payment maintenance runner only in app composition", () => {
+    const composition = readFileSync(
+      "src/app/_composition/payment-operations-runtime.ts",
+      "utf8",
+    );
+    const adapter = readFileSync(
+      "src/backend/integrations/payments/payment-maintenance-runner.ts",
+      "utf8",
+    );
+
+    expect(adapter).toContain("export function createProductionPaymentMaintenanceRunner()");
+    expect(adapter).not.toContain("export const productionPaymentMaintenanceRunner");
+    expect(composition).toContain("createProductionPaymentMaintenanceRunner()");
+    expect(composition).toContain("export const productionPaymentMaintenanceRunner");
+  });
+
   it("routes every Next.js controller adapter dependency through app composition", () => {
     for (const { file, source } of files("src/app/**/*.{ts,tsx}")) {
       if (file.replaceAll("\\", "/").startsWith("src/app/_composition/")) continue;
