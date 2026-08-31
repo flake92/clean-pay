@@ -1,8 +1,8 @@
 import { executeEmailLogin } from "@/application/auth/execute-email-login";
+import { executeEmailRegistration } from "@/application/auth/execute-email-registration";
 import {
   AuthGatewayError,
   type AuthCommands,
-  type AuthProviderSession,
 } from "@/application/auth/ports/auth-commands";
 import type {
   AuthCommand,
@@ -150,65 +150,6 @@ function parseAuthCommand(value: unknown): ParsedAuthCommand | AuthCommandFailur
   }
 }
 
-async function authenticate(
-  commands: AuthCommands,
-  input:
-    | { operation: "login"; email: string; password: string }
-    | { operation: "register"; email: string; password: string; referralCode?: string },
-) {
-  return commands.withUpstreamConcurrency("remnashop_auth", () => commands.authenticate(input));
-}
-
-async function register(
-  commands: AuthCommands,
-  email: string,
-  password: string,
-  referralCode?: string,
-) {
-  let providerSession: AuthProviderSession;
-  let flow: "created" | "existing_email_login" = "created";
-  try {
-    providerSession = await authenticate(commands, {
-      operation: "register",
-      email,
-      password,
-      ...(referralCode ? { referralCode } : {}),
-    });
-  } catch (error) {
-    if (!(error instanceof AuthGatewayError) || error.code !== "EMAIL_ALREADY_EXISTS") throw error;
-    flow = "existing_email_login";
-    providerSession = await authenticate(commands, { operation: "login", email, password });
-  }
-
-  const session = await commands.withUpstreamConcurrency(
-    "remnashop_auth",
-    () => commands.establishSession(providerSession),
-  );
-  let verificationDelivery: "not_required" | "sent" | "failed" = "not_required";
-  if (!session.emailVerified) {
-    try {
-      await commands.withUpstreamConcurrency(
-        "remnashop_auth",
-        () => commands.requestEmailVerification(providerSession, email),
-      );
-      verificationDelivery = "sent";
-    } catch {
-      verificationDelivery = "failed";
-    }
-  }
-  await commands.audit({
-    action: "auth_register_success",
-    userId: session.userId,
-    metadata: { flow, verificationDelivery },
-  });
-  return {
-    emailVerified: session.emailVerified,
-    registrationFlow: flow,
-    verificationRequired: !session.emailVerified,
-    verificationDeliveryFailed: verificationDelivery === "failed",
-  };
-}
-
 export async function executeAuthCommand(commands: AuthCommands, input: unknown): Promise<AuthExecutionResult> {
   const parsed = parseAuthCommand(input);
   if ("ok" in parsed) return parsed;
@@ -219,6 +160,14 @@ export async function executeAuthCommand(commands: AuthCommands, input: unknown)
       return await executeEmailLogin(commands, {
         email,
         password: command.password,
+        turnstileToken,
+      });
+    }
+    if (command.kind === "register") {
+      return await executeEmailRegistration(commands, {
+        email,
+        password: command.password,
+        ...(command.referralCode ? { referralCode: command.referralCode } : {}),
         turnstileToken,
       });
     }
@@ -238,14 +187,6 @@ export async function executeAuthCommand(commands: AuthCommands, input: unknown)
           commands.hasPasskey(email),
         ]);
         return { ok: true, kind: "identified", exists: identity.exists, hasPasskey };
-      }
-      case "register": {
-        await commands.rateLimit({ action: "auth_register", email, limit: 5, windowSeconds: 15 * 60 });
-        return {
-          ok: true,
-          kind: "authenticated",
-          ...await register(commands, email, command.password, command.referralCode),
-        };
       }
       case "request-password-reset":
         await commands.rateLimit({ action: "password_reset_start", email, limit: 5, windowSeconds: 15 * 60 });
