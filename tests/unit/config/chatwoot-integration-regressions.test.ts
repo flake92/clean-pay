@@ -57,7 +57,7 @@ describe("Chatwoot integration boundaries", () => {
   });
 
   it("loads extra support context through an authenticated server action", () => {
-    const component = source("src/frontend/components/chatwoot-widget.tsx");
+    const component = source("src/frontend/components/chatwoot-widget-controller.ts");
     const action = source("src/app/actions/chatwoot.ts");
     const adapter = source("src/backend/integrations/support/chatwoot-context-gateway.ts");
 
