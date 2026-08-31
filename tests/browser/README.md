@@ -76,14 +76,20 @@ continues to the network.
 
 The immutable v5 baseline and its eight launch arguments remain unchanged.
 The production-image live paired A/B gate additionally pins
-`--num-raster-threads=1` on both the pristine baseline and candidate browser
-processes. This targets a later in-process scheduling edge observed in CI run
+`--num-raster-threads=1` on three independent paired renderer processes. Each
+process owns separate baseline and candidate browser contexts, so cookies,
+storage, service workers, origins, and application stacks remain isolated while
+the renderer is a controlled shared factor inside the pair. This targets a
+later in-process scheduling edge observed in CI run
 `33346935619`: the candidate was byte-identical in all three processes and one
 baseline process matched it exactly, while the other two baseline processes
 differed only at 13 and 17 rounded-card edge pixels (maximum channel delta 1
-and 2). The live policy still compares raw PNG bytes exactly and retains the
-same three independent process pairs; it introduces no retry, tolerance,
-masking, normalization, or baseline update.
+and 2). A second CI sample (`33351831361`) produced the same two exact rounded
+edge variants cross-paired between six role processes despite identical DOM and
+styles. Pairing isolated role contexts in the same renderer removes that
+arbitrary cross-process pairing variable. The live policy still compares raw
+PNG bytes exactly across three independent renderer pairs; it introduces no
+retry, tolerance, masking, normalization, or baseline update.
 
 Raw PNG and JSON evidence is always retained. JSON equality uses a separate
 comparison projection that retains every external request, including the

@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 
 import type {
+  Browser,
   BrowserContext,
   Page,
   Request as PlaywrightRequest,
@@ -10,6 +11,7 @@ import {
   characterizationContextOptions,
   closeOwnedResources,
   expect,
+  sharedCharacterizationBrowserProcessPair,
   test,
 } from "./fixtures";
 import {
@@ -46,6 +48,33 @@ function identity(value: Uint8Array) {
 }
 
 test.describe("independent Chromium process quorum", () => {
+  test("pairs isolated role contexts inside one renderer without sharing processes across quorum entries", async ({
+    independentChromiumBrowserPairs,
+  }) => {
+    const firstBrowser = {} as Browser;
+    const secondBrowser = {} as Browser;
+    const firstPair = sharedCharacterizationBrowserProcessPair(firstBrowser);
+    const secondPair = sharedCharacterizationBrowserProcessPair(secondBrowser);
+
+    expect(firstPair.baseline).toBe(firstBrowser);
+    expect(firstPair.candidate).toBe(firstBrowser);
+    expect(secondPair.baseline).toBe(secondBrowser);
+    expect(secondPair.candidate).toBe(secondBrowser);
+    expect(firstPair.baseline).not.toBe(secondPair.baseline);
+    expect(Object.isFrozen(firstPair)).toBe(true);
+    expect(Object.isFrozen(secondPair)).toBe(true);
+
+    expect(independentChromiumBrowserPairs).toHaveLength(3);
+    expect(new Set(
+      independentChromiumBrowserPairs.map((pair) => pair.baseline),
+    ).size).toBe(3);
+    for (const pair of independentChromiumBrowserPairs) {
+      expect(pair.baseline).toBe(pair.candidate);
+      expect(Object.isFrozen(pair)).toBe(true);
+      expect(pair.baseline.isConnected()).toBe(true);
+    }
+  });
+
   test("replays only local GETs and the exact credential-free Turnstile stub", () => {
     const applicationOrigin = "http://127.0.0.1:4000";
     const local = {
