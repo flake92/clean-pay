@@ -1002,6 +1002,26 @@ describe("clean architecture boundaries", () => {
     expect(loginController).toContain("safeRedirectPath(redirectTo)");
   });
 
+  it("keeps Passkey login view state in pure transitions", () => {
+    const transitions = readFileSync(
+      "src/frontend/components/passkey-login-transitions.ts",
+      "utf8",
+    );
+    const loginController = readFileSync(
+      "src/frontend/hooks/use-passkey-login-controller.ts",
+      "utf8",
+    );
+
+    expect(astImportedModules(transitions)).toEqual([]);
+    expect(transitions).not.toMatch(/\b(?:useReducer|useRef|window|document)\b/);
+    expect(transitions).toContain('phase: "idle"');
+    expect(transitions).toContain('phase: "loading"');
+    expect(loginController).toContain("useReducer(");
+    expect(loginController).toContain("reducePasskeyLogin");
+    expect(loginController).toContain("selectPasskeyLoginView(state)");
+    expect(loginController).not.toContain("useState(");
+  });
+
   it("keeps purchase and extension views behind thin controller boundaries", () => {
     for (const {
       componentName,
