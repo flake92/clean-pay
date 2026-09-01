@@ -36,39 +36,69 @@ export function assertSyntheticCaddyRouteOrder(source: string) {
   assertOccurrenceCount(chatwoot, "        document.body.appendChild(frame);", 1);
   assertOccurrenceCount(
     chatwoot,
-    "          frame.contentWindow.postMessage({ method: \"identify\" }, config.baseUrl);",
+    "          target.postMessage({ method: \"identify\", deliveryId: delivery.deliveryId }, config.baseUrl);",
     1,
   );
   assertOccurrenceCount(chatwoot, "deliverIdentity();", 2);
+  assertOccurrenceCount(chatwoot, "          pendingIdentity = null;", 2);
+  assertOccurrenceCount(chatwoot, "          inFlightIdentity = null;", 2);
   assertOccurrenceCount(
     chatwoot,
-    "            pendingIdentity = { identifier };\n"
+    "            pendingIdentity = { deliveryId: ++nextDeliveryId, identifier };\n"
       + "            document.cookie = \"cw_conversation=\" + encodeURIComponent(String(identifier)) + \"; Path=/; SameSite=Lax; Secure\";\n"
       + "            document.cookie = \"cw_user_\" + encodeURIComponent(config.websiteToken) + \"=synthetic-chatwoot-user; Path=/; SameSite=Lax; Secure\";\n"
       + "            deliverIdentity();",
     1,
   );
   assertOrderedSingletons(chatwoot, [
+    "      const deliveryId = event.data?.deliveryId;",
+    "        || !Number.isSafeInteger(deliveryId) || deliveryId < 1) return;",
+    "        data: { deliveryId, widgetAuthToken: \"synthetic-widget-auth\" },",
+    "        let readyFrameWindow = null;",
     "        let pendingIdentity = null;",
-    "        let frameLoadedAtBaseUrl = false;",
-    "          if (!pendingIdentity || !frameLoadedAtBaseUrl || !frame.contentWindow) return;",
-    "        addEventListener(\"message\", (event) => {",
-    "          if (event.origin !== config.baseUrl || event.source !== frame.contentWindow || typeof event.data !== \"string\") return;",
-    "            if (message.event === \"loaded\") {\n              calls.push({ method: \"frame.loaded\" });\n              frameLoadedAtBaseUrl = true;\n              deliverIdentity();\n            }",
+    "        let inFlightIdentity = null;",
+    "        let nextDeliveryId = 0;",
+    "        const currentFrameWindow = () => {\n          const current = document.getElementById(\"chatwoot_live_chat_widget\");\n          return current instanceof HTMLIFrameElement ? current.contentWindow : null;\n        };",
+    "        const deliverIdentity = () => {\n          const target = currentFrameWindow();",
+    "          if (!pendingIdentity || !target || readyFrameWindow !== target) return;",
+    "          const delivery = pendingIdentity;\n          pendingIdentity = null;",
+    "          inFlightIdentity = { deliveryId: delivery.deliveryId, frameWindow: target };",
+    "          target.postMessage({ method: \"identify\", deliveryId: delivery.deliveryId }, config.baseUrl);",
+    "        addEventListener(\"message\", (event) => {\n          const target = currentFrameWindow();",
+    "          if (event.origin !== config.baseUrl || !target || event.source !== target || typeof event.data !== \"string\") return;",
+    "              readyFrameWindow = target;\n              if (inFlightIdentity?.frameWindow !== target) inFlightIdentity = null;\n              deliverIdentity();",
+    "              && message.data?.deliveryId === inFlightIdentity.deliveryId) {\n              inFlightIdentity = null;\n              calls.push({ method: \"identity.confirmed\" });",
     "        document.body.appendChild(frame);",
     "        const api = {",
     "          setUser(identifier, attributes) {",
-    "            pendingIdentity = { identifier };",
+    "            pendingIdentity = { deliveryId: ++nextDeliveryId, identifier };",
+    "          reset() {\n            calls.push({ method: \"reset\" });\n            pendingIdentity = null;\n            inFlightIdentity = null;\n            api.resetTriggered = true;",
   ]);
 
   return {
     chatwootIdentityDelivery: {
       aboutBlankLoadDeliveryBlocked: true,
+      confirmation: "matching-current-frame-delivery",
       readinessSignal: "trusted-widget-loaded-message",
-      source: "configured-iframe-content-window",
+      source: "current-configured-iframe-content-window",
       targetOrigin: "https://chatwoot.browser.clean-pay.dev",
     },
   } as const;
+}
+
+export function syntheticChatwootSdkSource(source: string) {
+  const chatwoot = source.slice(source.indexOf("https://chatwoot.browser.clean-pay.dev {"));
+  const prefix = "    respond @sdk `";
+  const start = chatwoot.indexOf(prefix);
+  const end = chatwoot.indexOf("` 200", start + prefix.length);
+  if (start < 0 || end <= start) {
+    throw new Error("Synthetic Chatwoot SDK response body is missing.");
+  }
+  const sdk = chatwoot.slice(start + prefix.length, end);
+  if (!sdk.startsWith("(() => {") || !sdk.endsWith("    })();")) {
+    throw new Error("Synthetic Chatwoot SDK response body framing is invalid.");
+  }
+  return sdk;
 }
 
 function assertOccurrenceCount(source: string, marker: string, expected: number) {

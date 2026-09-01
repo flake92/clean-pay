@@ -110,8 +110,13 @@ https://chatwoot.browser.clean-pay.dev {
     const parentOrigin = "https://pay.ci.clean-pay.dev";
     const send = (message) => parent.postMessage("chatwoot-widget:" + JSON.stringify(message), parentOrigin);
     addEventListener("message", (event) => {
-      if (event.origin !== parentOrigin || event.source !== parent || event.data?.method !== "identify") return;
-      setTimeout(() => send({ event: "setAuthCookie", data: { widgetAuthToken: "synthetic-widget-auth" } }), 1200);
+      const deliveryId = event.data?.deliveryId;
+      if (event.origin !== parentOrigin || event.source !== parent || event.data?.method !== "identify"
+        || !Number.isSafeInteger(deliveryId) || deliveryId < 1) return;
+      setTimeout(() => send({
+        event: "setAuthCookie",
+        data: { deliveryId, widgetAuthToken: "synthetic-widget-auth" },
+      }), 1200);
     });
     send({ event: "loaded" });
     </script></body></html>` 200
@@ -129,23 +134,40 @@ https://chatwoot.browser.clean-pay.dev {
         frame.src = config.baseUrl.replace(/\/$/, "") + "/widget?website_token=" + encodeURIComponent(config.websiteToken);
         frame.title = "Chatwoot synthetic fixture";
         frame.style.display = "none";
+        let readyFrameWindow = null;
         let pendingIdentity = null;
-        let frameLoadedAtBaseUrl = false;
+        let inFlightIdentity = null;
+        let nextDeliveryId = 0;
+        const currentFrameWindow = () => {
+          const current = document.getElementById("chatwoot_live_chat_widget");
+          return current instanceof HTMLIFrameElement ? current.contentWindow : null;
+        };
         const deliverIdentity = () => {
-          if (!pendingIdentity || !frameLoadedAtBaseUrl || !frame.contentWindow) return;
-          frame.contentWindow.postMessage({ method: "identify" }, config.baseUrl);
+          const target = currentFrameWindow();
+          if (!pendingIdentity || !target || readyFrameWindow !== target) return;
+          const delivery = pendingIdentity;
+          pendingIdentity = null;
+          inFlightIdentity = { deliveryId: delivery.deliveryId, frameWindow: target };
+          target.postMessage({ method: "identify", deliveryId: delivery.deliveryId }, config.baseUrl);
         };
         addEventListener("message", (event) => {
-          if (event.origin !== config.baseUrl || event.source !== frame.contentWindow || typeof event.data !== "string") return;
+          const target = currentFrameWindow();
+          if (event.origin !== config.baseUrl || !target || event.source !== target || typeof event.data !== "string") return;
           if (!event.data.startsWith("chatwoot-widget:")) return;
           try {
             const message = JSON.parse(event.data.slice("chatwoot-widget:".length));
             if (message.event === "loaded") {
               calls.push({ method: "frame.loaded" });
-              frameLoadedAtBaseUrl = true;
+              readyFrameWindow = target;
+              if (inFlightIdentity?.frameWindow !== target) inFlightIdentity = null;
               deliverIdentity();
             }
-            if (message.event === "setAuthCookie") calls.push({ method: "identity.confirmed" });
+            if (message.event === "setAuthCookie"
+              && inFlightIdentity?.frameWindow === target
+              && message.data?.deliveryId === inFlightIdentity.deliveryId) {
+              inFlightIdentity = null;
+              calls.push({ method: "identity.confirmed" });
+            }
           } catch {}
         });
         document.body.appendChild(frame);
@@ -158,7 +180,7 @@ https://chatwoot.browser.clean-pay.dev {
             calls.push({ method: "setUser", identifierBytes: String(identifier || "").length, attributeKeys: Object.keys(attributes || {}).sort() });
             api.identifier = identifier;
             api.user = attributes;
-            pendingIdentity = { identifier };
+            pendingIdentity = { deliveryId: ++nextDeliveryId, identifier };
             document.cookie = "cw_conversation=" + encodeURIComponent(String(identifier)) + "; Path=/; SameSite=Lax; Secure";
             document.cookie = "cw_user_" + encodeURIComponent(config.websiteToken) + "=synthetic-chatwoot-user; Path=/; SameSite=Lax; Secure";
             deliverIdentity();
@@ -180,6 +202,8 @@ https://chatwoot.browser.clean-pay.dev {
           },
           reset() {
             calls.push({ method: "reset" });
+            pendingIdentity = null;
+            inFlightIdentity = null;
             api.resetTriggered = true;
           },
         };
