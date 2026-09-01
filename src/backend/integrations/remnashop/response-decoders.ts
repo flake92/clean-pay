@@ -369,5 +369,7 @@ export function decodeRemnashopEndpointResponse(
   if (normalizedPath === "/referral/program") return decodeReferralProgram(value);
   if (normalizedPath === "/users/merge") return decodeMergeResponse(value);
 
-  return value;
+  throw new TypeError(
+    `Remnashop response decoder is not configured for ${method} ${normalizedPath}`,
+  );
 }

@@ -245,4 +245,14 @@ describe("Remnashop response decoders", () => {
       requires_relogin: true,
     });
   });
+
+  it("fails closed when a validated endpoint has no response decoder", () => {
+    expect(() => decodeRemnashopEndpointResponse(
+      "/future/provider-contract?credential=must-not-appear",
+      "POST",
+      { provider_secret: "must-not-project" },
+    )).toThrow(
+      "Remnashop response decoder is not configured for POST /future/provider-contract",
+    );
+  });
 });
