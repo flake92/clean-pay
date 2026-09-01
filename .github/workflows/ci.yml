@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       browser_mode:
-        description: Browser proof mode; diagnostic mode keeps Provider red without running it
+        description: Browser proof mode; diagnostic mode explicitly defers Provider without claiming full evidence
         required: true
         default: full
         type: choice
@@ -675,11 +675,12 @@ jobs:
             --candidate-revision "$GITHUB_SHA" \
             --temporary-root "$RUNNER_TEMP" \
             --phase public
-      - name: Prove the concurrent provider overlap
+      - name: Prove or explicitly defer the concurrent provider overlap
         id: provider_phase
         env:
           CLEAN_PAY_LIVE_OVERLAP_PROVIDER_MODE: ${{ ((github.event_name == 'workflow_dispatch' && inputs.browser_mode == 'chatwoot-diagnostic') || (github.event_name == 'push' && contains(github.event.head_commit.message, '[chatwoot-diagnostic]'))) && 'defer-chatwoot-diagnostic' || 'prove' }}
         run: |
+          printf 'execution_mode=%s\n' "$CLEAN_PAY_LIVE_OVERLAP_PROVIDER_MODE" >> "$GITHUB_OUTPUT"
           node tests/browser/journeys/run-production-image-live-overlap.mjs run \
             --capture-id "$CLEAN_PAY_BROWSER_LIVE_PAIR_CAPTURE_ID" \
             --candidate-revision "$GITHUB_SHA" \
@@ -688,6 +689,8 @@ jobs:
       - name: Prove the authenticated browser journey
         id: authenticated_phase
         if: ${{ !cancelled() && steps.public_phase.outcome == 'success' }}
+        env:
+          CLEAN_PAY_LIVE_OVERLAP_PROVIDER_MODE: ${{ steps.provider_phase.outputs.execution_mode }}
         run: |
           node tests/browser/journeys/run-production-image-live-overlap.mjs run \
             --capture-id "$CLEAN_PAY_BROWSER_LIVE_PAIR_CAPTURE_ID" \
@@ -703,9 +706,15 @@ jobs:
             --candidate-revision "$GITHUB_SHA" \
             --temporary-root "$RUNNER_TEMP" \
             --phase chatwoot
-      - name: Finalize sanitized live-pair evidence
+      - name: Finalize full evidence or confirm the diagnostic boundary
         if: ${{ !cancelled() && steps.public_phase.outcome == 'success' }}
+        env:
+          CLEAN_PAY_LIVE_OVERLAP_PROVIDER_MODE: ${{ steps.provider_phase.outputs.execution_mode }}
         run: |
+          if test "$CLEAN_PAY_LIVE_OVERLAP_PROVIDER_MODE" = 'defer-chatwoot-diagnostic'; then
+            printf '%s\n' '{"status":"chatwoot_diagnostic_complete","provider":"explicitly_deferred","fullEvidenceFinalized":false}'
+            exit 0
+          fi
           node tests/browser/journeys/run-production-image-live-overlap.mjs run \
             --capture-id "$CLEAN_PAY_BROWSER_LIVE_PAIR_CAPTURE_ID" \
             --candidate-revision "$GITHUB_SHA" \
