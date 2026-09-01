@@ -1734,7 +1734,8 @@ function assertStaticSemanticLedger(value, generation, label) {
   const normalized = value.map((raw, index) => {
     const entry = record(raw, `${label} ${index}`);
     exactKeys(entry, [
-      "disposition", "key", "redirectEdge", "responseContentType", "responseStatus",
+      "disposition", "key", "redirectEdge", "responseContentType", "responseFailureSha256",
+      "responseStatus",
     ], `${label} ${index}`);
     if (generation === "recreated" && forbiddenDirectKeys.has(entry.key)) {
       fail(`${label} contains a provider-profile request.`);

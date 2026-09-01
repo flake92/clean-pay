@@ -81,6 +81,7 @@ const providerStaticDocumentKeys = Object.freeze([
   "app-cabinet-document",
 ]);
 const providerPlaywrightBodyKeys = Object.freeze([
+  "app-login-root-rsc",
   "chatwoot-widget-conversation-frame",
   "chatwoot-widget-frame",
 ]);
@@ -917,6 +918,7 @@ async function exerciseCabinet(
             request,
             response: null,
             responseContentType: null,
+            responseFailureSha256: null,
             responseStatus: null,
           }));
           browserResponseEvidenceByIdentity.set(request, evidence);
@@ -1986,7 +1988,13 @@ async function finishBrowserRequestContract(
       request,
       classification,
     );
-    const { body: responseBody, response, responseContentType, responseStatus } = captured;
+    const {
+      body: responseBody,
+      response,
+      responseContentType,
+      responseFailureSha256,
+      responseStatus,
+    } = captured;
     capturedResponses.set(request, response);
     const redirectedFrom = request.redirectedFrom();
     let redirectEdge = null;
@@ -2052,7 +2060,7 @@ async function finishBrowserRequestContract(
         }
       }
     }
-    if (response && responseStatus === 200
+    if (response && responseFailureSha256 === null && responseStatus === 200
       && new Set(["text/html", "text/x-component"]).has(responseContentType)) {
       const body = responseBody;
       if (!(body instanceof Uint8Array)) {
@@ -2078,6 +2086,7 @@ async function finishBrowserRequestContract(
       documentKey,
       redirectEdge,
       responseContentType,
+      responseFailureSha256,
       responseStatus,
       ...staticObservation,
     });
@@ -2120,7 +2129,8 @@ async function readBrowserResponseCapture(registry, request, classification) {
   );
   if (!capture || typeof capture !== "object" || Array.isArray(capture)
     || JSON.stringify(Object.keys(capture).sort()) !== JSON.stringify([
-      "body", "classification", "request", "response", "responseContentType", "responseStatus",
+      "body", "classification", "request", "response", "responseContentType",
+      "responseFailureSha256", "responseStatus",
     ])) {
     throw new Error("Synthetic browser response evidence has an invalid field set.");
   }
@@ -2130,7 +2140,7 @@ async function readBrowserResponseCapture(registry, request, classification) {
   }
   if (capture.response === null) {
     if (capture.body !== null || capture.responseContentType !== null
-      || capture.responseStatus !== null) {
+      || capture.responseFailureSha256 !== null || capture.responseStatus !== null) {
       throw new Error("Failed browser response evidence is not exact.");
     }
     return capture;
@@ -2146,6 +2156,8 @@ async function readBrowserResponseCapture(registry, request, classification) {
     || capture.response.request() !== request
     || typeof capture.response.status !== "function"
     || capture.response.status() !== capture.responseStatus
+    || (capture.responseFailureSha256 !== null
+      && !/^[a-f0-9]{64}$/.test(capture.responseFailureSha256))
     || normalizeProviderOverlapObservedResponseContentType({
       key: classification.key,
       rawContentType: currentContentType,

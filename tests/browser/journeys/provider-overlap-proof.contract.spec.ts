@@ -1591,11 +1591,13 @@ test("rejects arbitrary same-host paths, queries, redirects, methods, and transp
     responseStatus: number | null,
     responseContentType: string | null,
     redirectEdge: string | null = null,
+    responseFailureSha256: string | null = null,
   ) => ({
     classification,
     documentKey,
     redirectEdge,
     responseContentType,
+    responseFailureSha256,
     responseStatus,
     staticResponseBytes: classification.staticPath === null
       ? null
@@ -1693,6 +1695,26 @@ test("rejects arbitrary same-host paths, queries, redirects, methods, and transp
     expect.objectContaining({ redirectEdge: "app-login-root-rsc:307->app-login-root-rsc" }),
     expect.objectContaining({ redirectEdge: null }),
   ]);
+  const exactAbortedRootPrefetchRecords = structuredClone(rootPrefetchRecords);
+  const exactAbortedRootPrefetchIndex = exactAbortedRootPrefetchRecords.findLastIndex((record) => (
+    record.classification.key === "app-login-root-rsc" && record.responseStatus === 200
+  ));
+  exactAbortedRootPrefetchRecords[exactAbortedRootPrefetchIndex].responseFailureSha256 =
+    sha256("net::ERR_ABORTED");
+  expect(finalizeProviderOverlapBrowserContract(
+    exactAbortedRootPrefetchRecords,
+    staticLoadGraph,
+  ).semanticRequestLedger).toContainEqual(expect.objectContaining({
+    key: "app-login-root-rsc",
+    responseFailureSha256: sha256("net::ERR_ABORTED"),
+  }));
+  const forgedAbortedRootPrefetchRecords = structuredClone(exactAbortedRootPrefetchRecords);
+  forgedAbortedRootPrefetchRecords[exactAbortedRootPrefetchIndex].responseFailureSha256 =
+    sha256("net::ERR_FAILED");
+  expect(() => finalizeProviderOverlapBrowserContract(
+    forgedAbortedRootPrefetchRecords,
+    staticLoadGraph,
+  )).toThrow(/response failure is outside the exact contract/);
   const rootPrefetchWithInventedContentType = structuredClone(rootPrefetchRecords);
   const rootRedirectIndex = rootPrefetchWithInventedContentType.findIndex((record) => (
     record.classification.key === "app-root-rsc"
@@ -1801,6 +1823,7 @@ test("rejects arbitrary same-host paths, queries, redirects, methods, and transp
     documentKey: "app-cabinet-document",
     redirectEdge: null,
     responseContentType: "image/svg+xml",
+    responseFailureSha256: null,
     responseStatus: 200,
     staticResponseBytes: 17,
     staticResponseSha256: "f".repeat(64),
@@ -1848,6 +1871,7 @@ test("rejects arbitrary same-host paths, queries, redirects, methods, and transp
     documentKey: "app-cabinet-document",
     redirectEdge: null,
     responseContentType: null,
+    responseFailureSha256: null,
     responseStatus: 307,
     staticResponseBytes: null,
     staticResponseSha256: null,
@@ -1884,6 +1908,7 @@ test("rejects arbitrary same-host paths, queries, redirects, methods, and transp
     documentKey: "app-cabinet-document",
     redirectEdge: null,
     responseContentType: "application/javascript",
+    responseFailureSha256: null,
     responseStatus: 200,
     staticResponseBytes: 19,
     staticResponseSha256: "e".repeat(64),
@@ -3009,6 +3034,59 @@ test("uses the exact raw content type for bodyless Telegram redirects", async ()
     request,
     response,
     terminal: Promise.resolve({ failureSha256: "a".repeat(64), finished: false }),
+  })).rejects.toThrow(/did not finish cleanly/);
+});
+
+test("records only the exact aborted login-root RSC terminal outcome", async () => {
+  const request = {};
+  const classification = browserClassification(
+    "https://pay.ci.clean-pay.dev/login?redirect_to=%2F&_rsc=opaque-state_1",
+    { resourceType: "fetch" },
+  );
+  const exactFailureSha256 = sha256("net::ERR_ABORTED");
+  let bodyCalls = 0;
+  const response = {
+    body: async () => {
+      bodyCalls += 1;
+      throw new Error("aborted response body is unavailable");
+    },
+    finished: async () => {
+      throw new Error("terminal-gated capture must not duplicate requestfailed");
+    },
+    headerValue: async () => "text/x-component; charset=utf-8",
+    headers: () => ({ "content-type": "text/x-component; charset=utf-8" }),
+    request: () => request,
+    status: () => 200,
+  };
+
+  await expect(captureProviderOverlapResponseEvidence({
+    classification,
+    request,
+    response,
+    terminal: Promise.resolve({ failureSha256: exactFailureSha256, finished: false }),
+  })).resolves.toMatchObject({
+    body: null,
+    responseContentType: "text/x-component",
+    responseFailureSha256: exactFailureSha256,
+    responseStatus: 200,
+  });
+  expect(bodyCalls).toBe(1);
+
+  await expect(captureProviderOverlapResponseEvidence({
+    classification,
+    request,
+    response,
+    terminal: Promise.resolve({ failureSha256: sha256("net::ERR_FAILED"), finished: false }),
+  })).rejects.toThrow(/did not finish cleanly/);
+  const otherClassification = browserClassification(
+    "https://pay.ci.clean-pay.dev/profile?_rsc=opaque-state_1",
+    { resourceType: "fetch" },
+  );
+  await expect(captureProviderOverlapResponseEvidence({
+    classification: otherClassification,
+    request,
+    response,
+    terminal: Promise.resolve({ failureSha256: exactFailureSha256, finished: false }),
   })).rejects.toThrow(/did not finish cleanly/);
 });
 
@@ -4513,6 +4591,10 @@ test("keeps the schema write-once sidecar-only and free of comparison projection
     .toContain("app-login-root-rsc");
   expect(schema.$defs.semanticRequestEntry.properties.key.enum)
     .not.toContain("app-login-cabinet-rsc");
+  expect(schema.$defs.semanticRequestEntry.required).toContain("responseFailureSha256");
+  expect(schema.$defs.semanticRequestEntry.properties.responseFailureSha256).toEqual({
+    anyOf: [{ $ref: "#/$defs/sha256" }, { type: "null" }],
+  });
   expect(schema.$defs.navigation.additionalProperties).toBe(false);
   expect(schema.$defs.eventLifecycle.properties.drainedEventCount).toEqual({
     type: "integer",
@@ -5086,6 +5168,7 @@ function semantic(
     key,
     redirectEdge,
     responseContentType,
+    responseFailureSha256: null,
     responseStatus,
   };
 }

@@ -7,6 +7,8 @@ export const PROVIDER_OVERLAP_MAXIMUM_STATIC_RESPONSE_BYTES = 256 * 1024 * 1024;
 const maximumStaticDeclarationBodyBytes = 2 * 1024 * 1024;
 export const PROVIDER_OVERLAP_REJECTION_PROVENANCE_MAX_PER_ROLE = 16;
 const sha256Pattern = /^[a-f0-9]{64}$/;
+const providerOverlapAbortedLoginRootRscFailureSha256 =
+  "7ba7a1709a2d7d220e120c927e0a7e90adf45c88b09ba912b237d705090d1d4e";
 const opaquePattern = /^[A-Za-z0-9._~-]{1,256}$/;
 const nextStaticMediaExtensionExpression = "(?:eot|ico|png|svg|ttf|woff2|woff)";
 const nextStaticPathExpression = "\\/_next\\/static\\/(?:chunks"
@@ -1175,13 +1177,6 @@ export async function captureProviderOverlapResponseEvidence(input) {
       : !sha256Pattern.test(terminalResult.failureSha256 ?? ""))) {
     fail("Browser response capture terminal result is invalid.");
   }
-  if (!terminalResult.finished) {
-    fail(bodyKind === "static"
-      ? "Attested static browser response did not finish cleanly."
-      : `Browser response did not finish cleanly: key=${classification.key}; `
-        + `status=${String(responseStatus)}; `
-        + `failureSha256=${terminalResult.failureSha256}.`);
-  }
   const rawResponseContentType = await boundedLifecycleOperation(
     responseContentTypePromise,
     5_000,
@@ -1192,6 +1187,28 @@ export async function captureProviderOverlapResponseEvidence(input) {
     rawContentType: rawResponseContentType,
     status: responseStatus,
   });
+  if (!terminalResult.finished) {
+    const isExactAbortedLoginRootRsc = classification.key === "app-login-root-rsc"
+      && responseStatus === 200
+      && responseContentType === "text/x-component"
+      && terminalResult.failureSha256 === providerOverlapAbortedLoginRootRscFailureSha256;
+    if (!isExactAbortedLoginRootRsc) {
+      fail(bodyKind === "static"
+        ? "Attested static browser response did not finish cleanly."
+        : `Browser response did not finish cleanly: key=${classification.key}; `
+          + `status=${String(responseStatus)}; `
+          + `failureSha256=${terminalResult.failureSha256}.`);
+    }
+    return Object.freeze({
+      body: null,
+      classification,
+      request,
+      response,
+      responseContentType,
+      responseFailureSha256: terminalResult.failureSha256,
+      responseStatus,
+    });
+  }
   if (bodyKind === null) {
     if (bodyPromise !== null) {
       const skippedBody = await boundedLifecycleOperation(
@@ -1209,6 +1226,7 @@ export async function captureProviderOverlapResponseEvidence(input) {
       request,
       response,
       responseContentType,
+      responseFailureSha256: null,
       responseStatus,
     });
   }
@@ -1244,6 +1262,7 @@ export async function captureProviderOverlapResponseEvidence(input) {
     request,
     response,
     responseContentType,
+    responseFailureSha256: null,
     responseStatus,
   });
 }
@@ -1417,7 +1436,10 @@ export function assertProviderOverlapRedirect({ from, location, status, to }) {
 export function normalizeProviderOverlapSemanticEntry(entry, label = "semantic browser request") {
   exactKeys(
     entry,
-    ["disposition", "key", "redirectEdge", "responseContentType", "responseStatus"],
+    [
+      "disposition", "key", "redirectEdge", "responseContentType", "responseFailureSha256",
+      "responseStatus",
+    ],
     label,
   );
   if (!semanticKeys.has(entry.key)) fail(`${label} key is outside the exact contract.`);
@@ -1437,6 +1459,13 @@ export function normalizeProviderOverlapSemanticEntry(entry, label = "semantic b
     : expectedContentTypes(entry.key, entry.responseStatus);
   if (!contentTypes.includes(entry.responseContentType)) {
     fail(`${label} response content type is not exact.`);
+  }
+  const isExactAbortedLoginRootRsc = entry.key === "app-login-root-rsc"
+    && entry.responseStatus === 200
+    && entry.responseContentType === "text/x-component"
+    && entry.responseFailureSha256 === providerOverlapAbortedLoginRootRscFailureSha256;
+  if (entry.responseFailureSha256 !== null && !isExactAbortedLoginRootRsc) {
+    fail(`${label} response failure is outside the exact contract.`);
   }
   const mandatoryRedirectByTarget = {
     "telegram-oidc-authorize": "app-telegram-start:307->telegram-oidc-authorize",
@@ -1458,6 +1487,7 @@ export function normalizeProviderOverlapSemanticEntry(entry, label = "semantic b
     key: entry.key,
     redirectEdge: entry.redirectEdge,
     responseContentType: entry.responseContentType,
+    responseFailureSha256: entry.responseFailureSha256,
     responseStatus: entry.responseStatus,
   });
 }
@@ -1658,8 +1688,8 @@ export function finalizeProviderOverlapBrowserContract(records, loadGraph) {
     exactKeys(
       record,
       [
-        "classification", "documentKey", "redirectEdge", "responseContentType", "responseStatus",
-        "staticResponseBytes", "staticResponseSha256",
+        "classification", "documentKey", "redirectEdge", "responseContentType",
+        "responseFailureSha256", "responseStatus", "staticResponseBytes", "staticResponseSha256",
       ],
       `browser request record ${index}`,
     );
@@ -1722,6 +1752,7 @@ export function finalizeProviderOverlapBrowserContract(records, loadGraph) {
         key: classification.key,
         redirectEdge: record.redirectEdge,
         responseContentType: record.responseContentType,
+        responseFailureSha256: record.responseFailureSha256,
         responseStatus: record.responseStatus,
       }, `browser semantic request ${index}`));
       requestOccurrences.semantic += 1;
@@ -1731,11 +1762,15 @@ export function finalizeProviderOverlapBrowserContract(records, loadGraph) {
     if (classification.disposition === "abort") {
       equal(record.responseStatus, null, `browser blocked response ${index}`);
       equal(record.responseContentType, null, `browser blocked content type ${index}`);
+      equal(record.responseFailureSha256, null, `browser blocked response failure ${index}`);
     } else if (!classification.expectedStatuses.includes(record.responseStatus)) {
       fail(`Browser response ${index} status is outside its exact contract.`);
     } else if (!expectedContentTypes(classification.key, record.responseStatus)
       .includes(record.responseContentType)) {
       fail(`Browser response ${index} content type is outside its exact contract.`);
+    }
+    if (staticKeys.has(classification.key) && record.responseFailureSha256 !== null) {
+      fail("Static browser request contains a response failure.");
     }
     if (record.redirectEdge !== null) redirects.push(record.redirectEdge);
   }
