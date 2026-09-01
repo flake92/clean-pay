@@ -390,6 +390,7 @@ export function confirmChatwootIdentity(expectedAttemptId?: string) {
     return false;
   }
 
+  const preserveConfirmedOwnership = pending.phase === "ownership_confirmed";
   window.cleanPayChatwootPendingIdentity = undefined;
   window.cleanPayChatwootFailedIdentity = undefined;
   rememberChatwootIdentity({
@@ -401,7 +402,7 @@ export function confirmChatwootIdentity(expectedAttemptId?: string) {
     rememberChatwootOwnership({
       core: pending.core,
       customAttributes: pending.customAttributes,
-    }, conversation, false);
+    }, conversation, preserveConfirmedOwnership);
   }
   return true;
 }
