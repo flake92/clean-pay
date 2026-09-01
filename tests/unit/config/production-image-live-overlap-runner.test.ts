@@ -938,6 +938,63 @@ describe("ephemeral production-image live overlap runner", () => {
     expect(workflow).not.toContain("continue-on-error:");
   });
 
+  it("records an exact Provider diagnostic deferral without sealing full evidence", () => {
+    const previousReceiptSha256 = "e".repeat(64);
+    const startedReceiptSha256 = "1".repeat(64);
+    const message =
+      "Provider live overlap was intentionally deferred for the isolated Chatwoot diagnostic.";
+    const deferredResult = {
+      reasonSha256: createHash("sha256").update(message).digest("hex"),
+      status: "deferred-chatwoot-diagnostic",
+    };
+    const deferredReceipt = {
+      ...phaseReceipt(
+        "provider",
+        "completed",
+        previousReceiptSha256,
+        startedReceiptSha256,
+      ),
+      result: deferredResult,
+    };
+    const expected = {
+      candidateRevision,
+      captureId,
+      ownershipSha256: phaseOwnershipSha256,
+      phase: "provider",
+      previousReceiptSha256,
+      publicBuildContract: phasePublicBuildContract,
+      startedReceiptSha256,
+      status: "completed" as const,
+    };
+
+    expect(validateLiveOverlapPhaseReceipt(deferredReceipt, expected)).toEqual(deferredReceipt);
+    expect(() => validateLiveOverlapPhaseReceipt({
+      ...deferredReceipt,
+      result: { ...deferredResult, reasonSha256: "f".repeat(64) },
+    }, expected)).toThrow(/sanitized exact projection/u);
+    expect(() => validateLiveOverlapPhaseReceipt({
+      ...deferredReceipt,
+      result: { ...deferredResult, artifact: "provider-overlap.json" },
+    }, expected)).toThrow(/exact contract/u);
+
+    const modeGate = runner.indexOf("resolveLiveOverlapProviderExecutionMode()");
+    const deferredCompletion = runner.indexOf(
+      'await completePhase(plan, "provider", context, createProviderDiagnosticDeferral())',
+    );
+    const providerLaunch = runner.indexOf(
+      "[providerProofCli, ...providerProofArguments(plan, inputs)]",
+    );
+    expect(deferredCompletion).toBeGreaterThan(modeGate);
+    expect(providerLaunch).toBeGreaterThan(deferredCompletion);
+    expect(workflow).toContain(
+      "CLEAN_PAY_LIVE_OVERLAP_PROVIDER_MODE: ${{ steps.provider_phase.outputs.execution_mode }}",
+    );
+    expect(workflow).toContain(
+      "if test \"$CLEAN_PAY_LIVE_OVERLAP_PROVIDER_MODE\" = 'defer-chatwoot-diagnostic'; then",
+    );
+    expect(workflow).not.toContain("continue-on-error:");
+  });
+
   it("validates the exact create-only phase chain and sanitized projections", () => {
     let previousReceiptSha256: string | null = null;
     const completedReceipts = [];

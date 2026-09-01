@@ -75,6 +75,9 @@ const contractFilename = "browser-journey-contract.json";
 const providerProofExternalFilename = "provider-overlap-proof.json";
 const providerProofSanitizedFilename = "provider-overlap.json";
 const providerProofFailureSanitizedFilename = "provider-overlap-failure.json";
+const providerDiagnosticDeferralMessage =
+  "Provider live overlap was intentionally deferred for the isolated Chatwoot diagnostic.";
+const providerDiagnosticDeferralStatus = "deferred-chatwoot-diagnostic";
 const maximumProviderProofBytes = 16 * 1024 * 1024;
 const chatwootInputRootName = "chatwoot-live-proof";
 const chatwootPlanFilename = "chatwoot-phase-plan.json";
@@ -432,10 +435,9 @@ async function runProviderPhase(plan) {
       context.receipts.public.value.result,
       "public",
     );
-    if (resolveLiveOverlapProviderExecutionMode() === "defer-chatwoot-diagnostic") {
-      throw new Error(
-        "Provider live overlap was intentionally deferred for the isolated Chatwoot diagnostic.",
-      );
+    if (resolveLiveOverlapProviderExecutionMode() === providerDiagnosticDeferralStatus) {
+      await completePhase(plan, "provider", context, createProviderDiagnosticDeferral());
+      return;
     }
     const sanitizedCaptureRoot = await ensureSanitizedCaptureRoot(plan);
     const providerProofEnvironment = sanitizedProcessEnvironment();
@@ -575,6 +577,13 @@ async function validatePriorProofPhaseOutcome(plan, phase, receipt, inputs) {
     return;
   }
   if (phase === "provider") {
+    if (result.status === providerDiagnosticDeferralStatus) {
+      if (resolveLiveOverlapProviderExecutionMode() !== providerDiagnosticDeferralStatus) {
+        throw new Error("Provider diagnostic deferral is forbidden outside its explicit mode.");
+      }
+      validateProviderDiagnosticDeferral(result);
+      return;
+    }
     assertSamePhaseResult(
       await validatePublishedProviderProof(plan),
       result,
@@ -1002,6 +1011,10 @@ function validateLiveOverlapPhaseResult(phase, result) {
       phaseResultError();
     }
   } else if (phase === "provider") {
+    if (result?.status === providerDiagnosticDeferralStatus) {
+      validateProviderDiagnosticDeferral(result);
+      return result;
+    }
     exactKeys(result, ["artifact", "sha256", "status"]);
     if (result.artifact !== providerProofSanitizedFilename
       || !/^[a-f0-9]{64}$/.test(result.sha256 ?? "")
@@ -1032,6 +1045,22 @@ function validateLiveOverlapPhaseResult(phase, result) {
     if (!/^[a-f0-9]{64}$/.test(result.completionSha256 ?? "")
       || result.status !== "sanitized-evidence-finalized") phaseResultError();
   } else {
+    phaseResultError();
+  }
+  return result;
+}
+
+function createProviderDiagnosticDeferral() {
+  return Object.freeze({
+    reasonSha256: sha256(providerDiagnosticDeferralMessage),
+    status: providerDiagnosticDeferralStatus,
+  });
+}
+
+function validateProviderDiagnosticDeferral(result) {
+  exactKeys(result, ["reasonSha256", "status"]);
+  if (result.reasonSha256 !== sha256(providerDiagnosticDeferralMessage)
+    || result.status !== providerDiagnosticDeferralStatus) {
     phaseResultError();
   }
   return result;
