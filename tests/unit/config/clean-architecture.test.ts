@@ -972,6 +972,36 @@ describe("clean architecture boundaries", () => {
     expect(setup).not.toContain("beginPasskeyLoginAction");
   });
 
+  it("keeps Passkey login sequencing in a framework-free frontend orchestrator", () => {
+    const orchestratorPath =
+      "src/frontend/lib/passkey-login-orchestrator.ts";
+    const orchestrator = readFileSync(orchestratorPath, "utf8");
+    const loginController = readFileSync(
+      "src/frontend/hooks/use-passkey-login-controller.ts",
+      "utf8",
+    );
+
+    expect(astImportedModules(orchestrator)).toEqual([]);
+    expect(orchestrator).not.toMatch(/\b(?:useRef|useState|window|document)\b/);
+    expect(orchestrator.indexOf("dependencies.beginLogin(")).toBeLessThan(
+      orchestrator.indexOf("dependencies.resetTurnstile?.()"),
+    );
+    expect(orchestrator.indexOf("dependencies.resetTurnstile?.()")).toBeLessThan(
+      orchestrator.indexOf("dependencies.startAuthentication("),
+    );
+    expect(orchestrator.indexOf("dependencies.startAuthentication(")).toBeLessThan(
+      orchestrator.indexOf("dependencies.verifyLogin("),
+    );
+    expect(orchestrator.indexOf("dependencies.verifyLogin(")).toBeLessThan(
+      orchestrator.indexOf("dependencies.navigate(destination)"),
+    );
+    expect(loginController).toContain("beginPasskeyLoginAction");
+    expect(loginController).toContain("verifyPasskeyLoginAction");
+    expect(loginController).toContain("executePasskeyLogin({");
+    expect(loginController).toContain("resetTurnstile?.();");
+    expect(loginController).toContain("safeRedirectPath(redirectTo)");
+  });
+
   it("keeps purchase and extension views behind thin controller boundaries", () => {
     for (const {
       componentName,
