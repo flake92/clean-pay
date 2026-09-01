@@ -204,6 +204,28 @@ describe("Chatwoot browser lifecycle", () => {
     expect(api.toggleBubbleVisibility).toHaveBeenLastCalledWith("show");
   });
 
+  it("accepts the correlated SDK success after the ownership probe wins the race", () => {
+    const api = chatwootApi();
+    window.$chatwoot = api;
+    enterChatwootAuthenticatedMode();
+
+    expect(identifyChatwootUser(config)).toBe("pending");
+    const attemptId = getChatwootPendingIdentityAttempt()!.attemptId;
+    document.cookie = "cw_conversation=authenticated; Path=/";
+    document.cookie = `cw_user_${config.websiteToken}=identified; Path=/`;
+
+    expect(confirmChatwootIdentityOwnership(attemptId)).toBe(true);
+    expect(getChatwootPendingIdentityAttempt()).toMatchObject({
+      attemptId,
+      phase: "ownership_confirmed",
+    });
+    expect(confirmChatwootIdentity(attemptId)).toBe(true);
+    expect(getChatwootPendingIdentityAttempt()).toBeUndefined();
+    expect(identifyChatwootUser(config)).toBe("ready");
+    expect(api.setUser).toHaveBeenCalledTimes(1);
+    expect(api.toggleBubbleVisibility).toHaveBeenLastCalledWith("show");
+  });
+
   it("never restores a persisted proof for another conversation or signed actor", () => {
     const api = chatwootApi();
     window.$chatwoot = api;
