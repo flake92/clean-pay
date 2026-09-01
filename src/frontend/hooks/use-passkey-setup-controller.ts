@@ -1,6 +1,6 @@
 import {
+  useReducer,
   useRef,
-  useState,
   type ChangeEvent,
 } from "react";
 
@@ -14,6 +14,11 @@ import {
   verifyPasskeyRegistrationAction,
 } from "@/app/actions/passkeys";
 import { clearSessionAction } from "@/app/actions/session";
+import {
+  initialPasskeySetupState,
+  reducePasskeySetup,
+  selectPasskeySetupView,
+} from "@/frontend/components/passkey-setup-transitions";
 import { passkeySetupErrorMessage } from "@/frontend/components/passkey-presentation";
 import { useWebAuthnSupport } from "@/frontend/hooks/use-webauthn-support";
 import { navigateTo } from "@/frontend/lib/browser-navigation";
@@ -49,10 +54,11 @@ export function usePasskeySetupController({
 }) {
   const destination = safeRedirectPath(redirectTo) ?? "/cabinet";
   const supported = useWebAuthnSupport(dependencies.supportsWebAuthn);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [name, setName] = useState("");
-  const [restarting, setRestarting] = useState(false);
+  const [state, dispatch] = useReducer(
+    reducePasskeySetup,
+    initialPasskeySetupState,
+  );
+  const { error, loading, name, restarting } = selectPasskeySetupView(state);
   const setupPendingRef = useRef(false);
 
   function continueWithoutPasskey() {
@@ -67,23 +73,25 @@ export function usePasskeySetupController({
       return;
     }
     setupPendingRef.current = true;
-    setRestarting(true);
-    setError(null);
+    dispatch({ type: "started", operation: "restart" });
 
     try {
       const result = await dependencies.clearSession();
       if (result.status === "error") {
-        setError(result.message);
+        dispatch({ type: "failed", message: result.message });
         return;
       }
       dependencies.navigateTo(`/login?${new URLSearchParams({
         redirect_to: destination,
       }).toString()}`);
     } catch {
-      setError("Сеть недоступна. Не удалось начать вход заново.");
+      dispatch({
+        type: "failed",
+        message: "Сеть недоступна. Не удалось начать вход заново.",
+      });
     } finally {
       setupPendingRef.current = false;
-      setRestarting(false);
+      dispatch({ type: "settled" });
     }
   }
 
@@ -92,8 +100,7 @@ export function usePasskeySetupController({
       return;
     }
     setupPendingRef.current = true;
-    setLoading(true);
-    setError(null);
+    dispatch({ type: "started", operation: "create" });
 
     try {
       const result = await executePasskeyRegistration({
@@ -110,17 +117,20 @@ export function usePasskeySetupController({
           ? "Это устройство не поддерживает Passkey. Используйте совместимый браузер или начните вход заново."
           : "Это устройство не поддерживает быстрый вход. Продолжите в кабинете или используйте другое устройство.",
       });
-      if (!result.ok) setError(result.message);
+      if (!result.ok) dispatch({ type: "failed", message: result.message });
     } catch (caught) {
-      setError(passkeySetupErrorMessage(caught, required));
+      dispatch({
+        type: "failed",
+        message: passkeySetupErrorMessage(caught, required),
+      });
     } finally {
       setupPendingRef.current = false;
-      setLoading(false);
+      dispatch({ type: "settled" });
     }
   }
 
   function changeName(event: ChangeEvent<HTMLInputElement>) {
-    setName(event.target.value);
+    dispatch({ type: "name-changed", value: event.target.value });
   }
 
   return {

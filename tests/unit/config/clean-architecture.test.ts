@@ -1054,6 +1054,26 @@ describe("clean architecture boundaries", () => {
     expect(setupController).toContain("restartAuthentication");
   });
 
+  it("keeps Passkey setup view state in pure transitions", () => {
+    const transitions = readFileSync(
+      "src/frontend/components/passkey-setup-transitions.ts",
+      "utf8",
+    );
+    const setupController = readFileSync(
+      "src/frontend/hooks/use-passkey-setup-controller.ts",
+      "utf8",
+    );
+
+    expect(astImportedModules(transitions)).toEqual([]);
+    expect(transitions).not.toMatch(/\b(?:useReducer|useRef|window|document)\b/);
+    expect(transitions).toContain('phase: "creating"');
+    expect(transitions).toContain('? "creating" : "restarting"');
+    expect(setupController).toContain("useReducer(");
+    expect(setupController).toContain("reducePasskeySetup");
+    expect(setupController).toContain("selectPasskeySetupView(state)");
+    expect(setupController).not.toContain("useState(");
+  });
+
   it("keeps purchase and extension views behind thin controller boundaries", () => {
     for (const {
       componentName,
