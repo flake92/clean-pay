@@ -48,12 +48,16 @@ export function assertSyntheticCaddyRouteOrder(source: string) {
   assertOccurrenceCount(chatwoot, "deliverIdentity();", 2);
   assertOccurrenceCount(
     chatwoot,
-    "              queueMicrotask(() => {\n"
+    "              const observeAfterIdentityRetry = window.cleanPayChatwootPendingIdentity?.phase === \"waiting_for_frame\";\n"
+      + "              deliverIdentity();\n"
+      + "              const announceFrameLoaded = () => {\n"
       + "                if (announcedFrameWindow !== target && currentFrameWindow() === target) {\n"
       + "                  calls.push({ method: \"frame.loaded\" });\n"
       + "                  announcedFrameWindow = target;\n"
       + "                }\n"
-      + "              });",
+      + "              };\n"
+      + "              if (observeAfterIdentityRetry) queueMicrotask(announceFrameLoaded);\n"
+      + "              else announceFrameLoaded();",
     1,
   );
   assertOccurrenceCount(chatwoot, "          pendingIdentity = null;", 2);
@@ -85,8 +89,9 @@ export function assertSyntheticCaddyRouteOrder(source: string) {
     "        addEventListener(\"message\", (event) => {\n          const target = currentFrameWindow();",
     "          if (event.origin !== config.baseUrl || !target || event.source !== target || typeof event.data !== \"string\") return;",
     "            if (message.event === \"loaded\") {\n              readyFrameWindow = target;",
-    "              readyFrameWindow = target;\n              if (inFlightIdentity?.frameWindow !== target) inFlightIdentity = null;\n              deliverIdentity();\n              queueMicrotask(() => {",
-    "                if (announcedFrameWindow !== target && currentFrameWindow() === target) {\n                  calls.push({ method: \"frame.loaded\" });\n                  announcedFrameWindow = target;",
+    "              readyFrameWindow = target;\n              if (inFlightIdentity?.frameWindow !== target) inFlightIdentity = null;\n              const observeAfterIdentityRetry = window.cleanPayChatwootPendingIdentity?.phase === \"waiting_for_frame\";\n              deliverIdentity();",
+    "              const announceFrameLoaded = () => {\n                if (announcedFrameWindow !== target && currentFrameWindow() === target) {\n                  calls.push({ method: \"frame.loaded\" });\n                  announcedFrameWindow = target;",
+    "              if (observeAfterIdentityRetry) queueMicrotask(announceFrameLoaded);\n              else announceFrameLoaded();",
     "              && message.data?.deliveryId === inFlightIdentity.deliveryId) {\n              inFlightIdentity = null;\n              calls.push({ method: \"identity.confirmed\" });",
     "        document.body.appendChild(frame);",
     "        const api = {",
@@ -100,7 +105,7 @@ export function assertSyntheticCaddyRouteOrder(source: string) {
   return {
     chatwootIdentityDelivery: {
       aboutBlankLoadDeliveryBlocked: true,
-      boundaryObservation: "post-capture-loaded-microtask",
+      boundaryObservation: "retry-aware-trusted-loaded",
       confirmation: "matching-current-frame-delivery",
       identityDeliverySignal: "trusted-widget-loaded-message",
       readinessSignal: "sdk-ready-before-iframe",

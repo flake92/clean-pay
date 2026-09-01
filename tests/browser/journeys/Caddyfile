@@ -160,13 +160,16 @@ https://chatwoot.browser.clean-pay.dev {
             if (message.event === "loaded") {
               readyFrameWindow = target;
               if (inFlightIdentity?.frameWindow !== target) inFlightIdentity = null;
+              const observeAfterIdentityRetry = window.cleanPayChatwootPendingIdentity?.phase === "waiting_for_frame";
               deliverIdentity();
-              queueMicrotask(() => {
+              const announceFrameLoaded = () => {
                 if (announcedFrameWindow !== target && currentFrameWindow() === target) {
                   calls.push({ method: "frame.loaded" });
                   announcedFrameWindow = target;
                 }
-              });
+              };
+              if (observeAfterIdentityRetry) queueMicrotask(announceFrameLoaded);
+              else announceFrameLoaded();
             }
             if (message.event === "setAuthCookie"
               && inFlightIdentity?.frameWindow === target
