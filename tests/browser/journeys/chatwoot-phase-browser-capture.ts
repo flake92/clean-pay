@@ -249,6 +249,19 @@ type PhaseRawState = {
 
 type Barrier = ReturnType<typeof createReplacementBarrier>;
 type EventLedger = ReturnType<typeof createChatwootPhaseEventLedger>;
+type CaptureStage =
+  | "browser-context"
+  | "initial-setup"
+  | "initial-profile-login"
+  | "initial-cabinet-navigation"
+  | "gap-barrier"
+  | "gap-snapshot"
+  | "stable-transition"
+  | "stable-snapshot"
+  | "logout-clear"
+  | "recreated-login"
+  | "recreated-snapshot"
+  | "final-reread";
 type CookiePresence = Readonly<{
   conversationCookiePresent: boolean;
   userCookiePresent: boolean;
@@ -290,6 +303,7 @@ export async function captureChatwootPhaseStack(input: CaptureInput) {
   let browser: Browser | undefined;
   let context: BrowserContext | undefined;
   let captureError: unknown;
+  let captureStage: CaptureStage = "browser-context";
   const barrier = createReplacementBarrier();
   try {
     browser = await chromium.connect(browserServer.wsEndpoint());
@@ -302,6 +316,7 @@ export async function captureChatwootPhaseStack(input: CaptureInput) {
       ignoreHTTPSErrors: true,
       serviceWorkers: "block",
     });
+    captureStage = "initial-setup";
     const contextScopeSha256 = sha256Json({
       kind: "fresh-chatwoot-context",
       runScopeSha256,
@@ -316,7 +331,7 @@ export async function captureChatwootPhaseStack(input: CaptureInput) {
       ...input,
       barrier,
       context,
-    });
+    }, (stage) => { captureStage = stage; });
     return Object.freeze({
       runScopeSha256,
       browser: Object.freeze({
@@ -346,8 +361,11 @@ export async function captureChatwootPhaseStack(input: CaptureInput) {
       screenshots: captured.screenshots,
     });
   } catch (error) {
-    captureError = error;
-    throw error;
+    captureError = new Error(
+      `Chatwoot browser capture failed during ${captureStage}.`,
+      { cause: error },
+    );
+    throw captureError;
   } finally {
     barrier.cancel();
     const cleanupErrors: unknown[] = [];
@@ -377,7 +395,7 @@ export async function captureChatwootPhaseStack(input: CaptureInput) {
 async function exerciseChatwootPhases(input: CaptureInput & {
   barrier: Barrier;
   context: BrowserContext;
-}) {
+}, onStage: (stage: CaptureStage) => void) {
   const eventLedger = createChatwootPhaseEventLedger();
   const diagnostics = installDiagnostics(input.context, eventLedger);
   const history = await installHistoryLedger(input.context, eventLedger);
@@ -492,12 +510,14 @@ async function exerciseChatwootPhases(input: CaptureInput & {
   });
   const requestLifecycle = installChatwootCommonRequestLifecycleForTest(page, eventLedger);
 
+  onStage("initial-profile-login");
   const gapRecorder = recordNetwork(page, SYNTHETIC_APPLICATION_ORIGIN);
   const stableRecorder = recordNetwork(page, SYNTHETIC_APPLICATION_ORIGIN);
   await loginToProfile(page);
   await history.captureInitialProfile(page);
   await initialProviderHistory.captureProfile(page);
   cabinetDocumentAllowed = true;
+  onStage("initial-cabinet-navigation");
   const initialCabinetResponse = await navigateToCabinet(page);
   await history.captureInitialCabinet(page);
   await initialProviderHistory.captureCabinet(
@@ -505,6 +525,7 @@ async function exerciseChatwootPhases(input: CaptureInput & {
     initialCabinetResponse,
     ledgers.initial,
   );
+  onStage("gap-barrier");
   await input.barrier.ready();
   await waitForPhaseState(page, "waiting_for_frame");
   const gapNetwork = networkEvidence(await gapRecorder.finish());
@@ -513,6 +534,7 @@ async function exerciseChatwootPhases(input: CaptureInput & {
     historyEvidence(gapHistory),
     ...provisionalBrowserRecords(ledgers.initial),
   ];
+  onStage("gap-snapshot");
   const gap = await captureVisiblePhase({
     phase: "gap",
     page,
@@ -529,6 +551,7 @@ async function exerciseChatwootPhases(input: CaptureInput & {
     historyEvidence: historyEvidence(gapHistory),
   });
 
+  onStage("stable-transition");
   input.barrier.release();
   await input.barrier.completed();
   await waitForPhaseState(page, null);
@@ -539,6 +562,7 @@ async function exerciseChatwootPhases(input: CaptureInput & {
     "initial",
   );
   const initialHistory = initialProviderHistory.snapshot();
+  onStage("stable-snapshot");
   const stable = await captureVisiblePhase({
     phase: "stable",
     page,
@@ -560,6 +584,7 @@ async function exerciseChatwootPhases(input: CaptureInput & {
   }
   await initialProviderHistory.sealAndDetach(page);
 
+  onStage("logout-clear");
   const clearBefore = await exactClearSnapshot(page);
   const preservedBefore = await page.evaluate((storageKey) => (
     sessionStorage.getItem(storageKey)
@@ -604,6 +629,7 @@ async function exerciseChatwootPhases(input: CaptureInput & {
   }
   await history.markGeneration(page);
   const recreatedRecorder = recordNetwork(page, SYNTHETIC_APPLICATION_ORIGIN);
+  onStage("recreated-login");
   const telegram = await openLogin(page, "/cabinet");
   await history.captureRecreatedLogin(page);
   await recreatedCausality.assertNegativeLoginCheckpoint(page);
@@ -636,6 +662,7 @@ async function exerciseChatwootPhases(input: CaptureInput & {
   if (recreatedHistory.historyCount < 2) {
     throw new Error("Chatwoot recreated browser history contract is incomplete.");
   }
+  onStage("recreated-snapshot");
   const recreated = await captureVisiblePhase({
     phase: "recreated",
     page,
@@ -665,6 +692,7 @@ async function exerciseChatwootPhases(input: CaptureInput & {
     stable: stable.provider,
   });
 
+  onStage("final-reread");
   const userAgent = await page.evaluate(() => navigator.userAgent);
   await recreatedCausality.drainCurrentDocument(page);
   await history.drainCurrentDocument(page);
