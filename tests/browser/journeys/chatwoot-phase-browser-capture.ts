@@ -398,7 +398,7 @@ async function exerciseChatwootPhases(input: CaptureInput & {
   };
   let generation: keyof typeof ledgers = "initial";
   let cabinetDocumentAllowed = false;
-  let initialFreshWidgetCount = 0;
+  let initialCabinetFreshWidgetCount = 0;
   await input.context.routeWebSocket("**/*", async (webSocket) => {
     diagnostics.recordUnexpectedWebSocket();
     await webSocket.close({ code: 1008, reason: "chatwoot-phase-contract" });
@@ -455,8 +455,12 @@ async function exerciseChatwootPhases(input: CaptureInput & {
       await route.abort("blockedbyclient");
       return;
     }
-    if (generation === "initial" && classification.key === "chatwoot-widget-frame") {
-      initialFreshWidgetCount += 1;
+    if (
+      generation === "initial"
+      && ledger.currentDocumentKey === "app-cabinet-document"
+      && classification.key === "chatwoot-widget-frame"
+    ) {
+      initialCabinetFreshWidgetCount += 1;
     }
     if (classification.disposition === "abort") {
       await route.abort("blockedbyclient");
@@ -464,10 +468,11 @@ async function exerciseChatwootPhases(input: CaptureInput & {
     }
     if (
       generation === "initial"
+      && ledger.currentDocumentKey === "app-cabinet-document"
       && classification.key === "chatwoot-widget-conversation-frame"
       && !input.barrier.wasConsumed()
     ) {
-      if (initialFreshWidgetCount < 1) {
+      if (initialCabinetFreshWidgetCount < 1) {
         diagnostics.recordUnexpectedRequest(request.url());
         await route.abort("blockedbyclient");
         return;
