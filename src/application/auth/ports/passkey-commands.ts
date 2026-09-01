@@ -75,3 +75,17 @@ export type PasskeyLoginCommands = Pick<
   | "verifyHuman"
   | "withLoginOptionsConcurrency"
 >;
+
+export type PasskeyRegistrationCommands = Pick<
+  PasskeyCommands,
+  | "auditRegistration"
+  | "consumeRegistrationChallenge"
+  | "generateRegistrationOptions"
+  | "loadRegistrationActor"
+  | "markRegistrationComplete"
+  | "persistRegistration"
+  | "registrationChallenge"
+  | "storeRegistrationChallenge"
+  | "upgradeRegistrationSession"
+  | "verifyRegistration"
+>;
