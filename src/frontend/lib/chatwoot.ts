@@ -383,7 +383,7 @@ export function confirmChatwootIdentity(expectedAttemptId?: string) {
 
   if (
     !pending
-    || pending.phase !== "sent"
+    || (pending.phase !== "sent" && pending.phase !== "ownership_confirmed")
     || (expectedAttemptId && pending.attemptId !== expectedAttemptId)
     || !window.cleanPayChatwootAuthorized
   ) {
