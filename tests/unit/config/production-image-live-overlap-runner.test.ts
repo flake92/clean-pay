@@ -981,10 +981,15 @@ describe("ephemeral production-image live overlap runner", () => {
     const deferredCompletion = runner.indexOf(
       'await completePhase(plan, "provider", context, createProviderDiagnosticDeferral())',
     );
+    const attestedInputInspection = runner.indexOf(
+      "const inputs = await readAttestedPhaseInputs(plan, context);",
+      deferredCompletion,
+    );
     const providerLaunch = runner.indexOf(
       "[providerProofCli, ...providerProofArguments(plan, inputs)]",
     );
     expect(deferredCompletion).toBeGreaterThan(modeGate);
+    expect(attestedInputInspection).toBeGreaterThan(deferredCompletion);
     expect(providerLaunch).toBeGreaterThan(deferredCompletion);
     expect(workflow).toContain(
       "CLEAN_PAY_LIVE_OVERLAP_PROVIDER_MODE: ${{ steps.provider_phase.outputs.execution_mode }}",

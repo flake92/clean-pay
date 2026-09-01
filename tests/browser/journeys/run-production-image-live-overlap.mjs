@@ -429,7 +429,6 @@ async function runPublicPhase(plan) {
 async function runProviderPhase(plan) {
   await assertRepositoryAndHost(plan);
   await runSettledProofPhase(plan, "provider", async (context) => {
-    const inputs = await readAttestedPhaseInputs(plan, context);
     assertSamePhaseResult(
       await validatePublishedPublicProof(plan),
       context.receipts.public.value.result,
@@ -439,6 +438,7 @@ async function runProviderPhase(plan) {
       await completePhase(plan, "provider", context, createProviderDiagnosticDeferral());
       return;
     }
+    const inputs = await readAttestedPhaseInputs(plan, context);
     const sanitizedCaptureRoot = await ensureSanitizedCaptureRoot(plan);
     const providerProofEnvironment = sanitizedProcessEnvironment();
     providerProofEnvironment.CLEAN_PAY_PROVIDER_OVERLAP_FAILURE_OUTPUT =
