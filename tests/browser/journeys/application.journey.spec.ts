@@ -8,6 +8,7 @@ import {
 } from "../console-policy";
 import { authenticatedJourneyLivePairCaptureEnabled } from "./authenticated-journey-capture-mode";
 import { test, expect } from "./journey-fixtures";
+import { enterJourneyOfflineMode } from "./journey-offline-transition";
 import { clearSyntheticLogoutState } from "./synthetic-logout-storage";
 
 test.describe.configure({ mode: "serial" });
@@ -625,7 +626,7 @@ async function exerciseProductionServiceWorker(page: Page) {
   await page.reload({ waitUntil: "load" });
   await expect.poll(() => page.evaluate(() => Boolean(navigator.serviceWorker.controller)))
     .toBe(true);
-  await page.context().setOffline(true);
+  await enterJourneyOfflineMode(page);
   try {
     await page.goto("/offline?journey_offline=1", { waitUntil: "domcontentloaded" });
     await expect(page.getByRole("heading", { name: "Нет подключения", level: 1 })).toBeVisible();

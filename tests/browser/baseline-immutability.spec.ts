@@ -47,6 +47,7 @@ import {
   browserProvenanceCorrectionEvidence,
   PROVENANCE_CORRECTION_FILE,
 } from "./baseline-provenance";
+import { enterJourneyOfflineMode } from "./journeys/journey-offline-transition";
 
 test.describe("immutable browser baseline policy", () => {
   test("waits for a delayed application font request to finish", async ({ page }) => {
@@ -80,6 +81,59 @@ test.describe("immutable browser baseline policy", () => {
     const font = entries.find((entry) => requestUrlPathname(entry) === fontPath);
     expect(font?.response?.status).toBe(200);
     expect(font?.failure).toBeNull();
+  });
+
+  test("settles application fonts before entering journey offline mode", async ({ page }) => {
+    const origin = "http://font-offline-transition.test";
+    const fontPath = "/_next/static/media/offline-font.abcdefgh.woff2";
+    let releaseFont!: () => void;
+    const fontBlocked = new Promise<void>((resolve) => { releaseFont = resolve; });
+    await page.route(`${origin}/**`, async (route) => {
+      if (new URL(route.request().url()).pathname === fontPath) {
+        await fontBlocked;
+        await route.fulfill({
+          body: Buffer.from([0, 1, 2, 3]),
+          contentType: "font/woff2",
+          status: 200,
+        });
+        return;
+      }
+      await route.fulfill({ body: "<!doctype html><title>font recorder</title>", contentType: "text/html" });
+    });
+    const recorder = recordNetwork(page, origin, { fontTerminalTimeoutMs: 1_000 });
+    try {
+      await page.goto(origin, { waitUntil: "domcontentloaded" });
+      const requestStarted = page.waitForRequest((request) => (
+        new URL(request.url()).pathname === fontPath
+      ));
+      await page.evaluate((url) => {
+        const face = new FontFace("RecorderOffline", `url(${url})`);
+        document.fonts.add(face);
+        void face.load().catch(() => {});
+      }, `${origin}${fontPath}`);
+      await requestStarted;
+
+      let transitionSettled = false;
+      const transition = enterJourneyOfflineMode(page).then(() => {
+        transitionSettled = true;
+      });
+      await page.waitForTimeout(25);
+      expect(transitionSettled).toBe(false);
+      expect(await page.evaluate(() => navigator.onLine)).toBe(true);
+
+      releaseFont();
+      await transition;
+      expect(await page.evaluate(() => navigator.onLine)).toBe(false);
+      await page.context().setOffline(false);
+
+      const entries = await recorder.finish();
+      const font = entries.find((entry) => requestUrlPathname(entry) === fontPath);
+      expect(font?.response?.status).toBe(200);
+      expect(font?.failure).toBeNull();
+    } finally {
+      releaseFont();
+      await page.context().setOffline(false);
+    }
   });
 
   test("records a delayed application font failure as terminal", async ({ page }) => {
