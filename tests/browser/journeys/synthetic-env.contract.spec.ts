@@ -106,7 +106,8 @@ test("materializes two deterministic self-contained role environments", async ()
       chatwootIdentityDelivery: {
         aboutBlankLoadDeliveryBlocked: true,
         confirmation: "matching-current-frame-delivery",
-        readinessSignal: "trusted-widget-loaded-message",
+        identityDeliverySignal: "trusted-widget-loaded-message",
+        readinessSignal: "sdk-ready-before-iframe",
         source: "current-configured-iframe-content-window",
         targetOrigin: "https://chatwoot.browser.clean-pay.dev",
       },
@@ -168,6 +169,16 @@ test("materializes two deterministic self-contained role environments", async ()
       caddySource.replace(
         "              inFlightIdentity = null;\n              calls.push({ method: \"identity.confirmed\" });",
         "              calls.push({ method: \"identity.confirmed\" });\n              inFlightIdentity = null;",
+      ),
+      caddySource.replace("    send({ event: \"fixture.frame-loaded\" });\n", ""),
+      caddySource.replace(
+        "    send({ event: \"fixture.frame-loaded\" });\n    send({ event: \"loaded\" });",
+        "    send({ event: \"loaded\" });\n    send({ event: \"fixture.frame-loaded\" });",
+      ),
+      caddySource.replace("          hasLoaded: true,", "          hasLoaded: false,"),
+      caddySource.replace(
+        "        queueMicrotask(() => window.dispatchEvent(new CustomEvent(\"chatwoot:ready\")));",
+        "        queueMicrotask(() => undefined);",
       ),
       caddySource.replace(
         "            pendingIdentity = null;\n            inFlightIdentity = null;\n            api.resetTriggered = true;",

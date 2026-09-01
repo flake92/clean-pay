@@ -34,6 +34,12 @@ export function assertSyntheticCaddyRouteOrder(source: string) {
   assertOccurrenceCount(chatwoot, "</script>", 1);
   assertOccurrenceCount(chatwoot, "frame.addEventListener(\"load\"", 0);
   assertOccurrenceCount(chatwoot, "        document.body.appendChild(frame);", 1);
+  assertOccurrenceCount(chatwoot, "    send({ event: \"fixture.frame-loaded\" });", 1);
+  assertOccurrenceCount(
+    chatwoot,
+    "        queueMicrotask(() => window.dispatchEvent(new CustomEvent(\"chatwoot:ready\")));",
+    1,
+  );
   assertOccurrenceCount(
     chatwoot,
     "          target.postMessage({ method: \"identify\", deliveryId: delivery.deliveryId }, config.baseUrl);",
@@ -54,7 +60,9 @@ export function assertSyntheticCaddyRouteOrder(source: string) {
     "      const deliveryId = event.data?.deliveryId;",
     "        || !Number.isSafeInteger(deliveryId) || deliveryId < 1) return;",
     "        data: { deliveryId, widgetAuthToken: \"synthetic-widget-auth\" },",
+    "    send({ event: \"fixture.frame-loaded\" });\n    send({ event: \"loaded\" });",
     "        let readyFrameWindow = null;",
+    "        let announcedFrameWindow = null;",
     "        let pendingIdentity = null;",
     "        let inFlightIdentity = null;",
     "        let nextDeliveryId = 0;",
@@ -66,20 +74,25 @@ export function assertSyntheticCaddyRouteOrder(source: string) {
     "          target.postMessage({ method: \"identify\", deliveryId: delivery.deliveryId }, config.baseUrl);",
     "        addEventListener(\"message\", (event) => {\n          const target = currentFrameWindow();",
     "          if (event.origin !== config.baseUrl || !target || event.source !== target || typeof event.data !== \"string\") return;",
+    "            if (message.event === \"fixture.frame-loaded\") {\n              if (announcedFrameWindow !== target) {\n                calls.push({ method: \"frame.loaded\" });\n                announcedFrameWindow = target;\n              }\n            }",
+    "            if (message.event === \"loaded\") {\n              if (announcedFrameWindow !== target) {\n                calls.push({ method: \"frame.loaded\" });\n                announcedFrameWindow = target;\n              }",
     "              readyFrameWindow = target;\n              if (inFlightIdentity?.frameWindow !== target) inFlightIdentity = null;\n              deliverIdentity();",
     "              && message.data?.deliveryId === inFlightIdentity.deliveryId) {\n              inFlightIdentity = null;\n              calls.push({ method: \"identity.confirmed\" });",
     "        document.body.appendChild(frame);",
     "        const api = {",
+    "          hasLoaded: true,",
     "          setUser(identifier, attributes) {",
     "            pendingIdentity = { deliveryId: ++nextDeliveryId, identifier };",
     "          reset() {\n            calls.push({ method: \"reset\" });\n            pendingIdentity = null;\n            inFlightIdentity = null;\n            api.resetTriggered = true;",
+    "        window.$chatwoot = api;\n        queueMicrotask(() => window.dispatchEvent(new CustomEvent(\"chatwoot:ready\")));",
   ]);
 
   return {
     chatwootIdentityDelivery: {
       aboutBlankLoadDeliveryBlocked: true,
       confirmation: "matching-current-frame-delivery",
-      readinessSignal: "trusted-widget-loaded-message",
+      identityDeliverySignal: "trusted-widget-loaded-message",
+      readinessSignal: "sdk-ready-before-iframe",
       source: "current-configured-iframe-content-window",
       targetOrigin: "https://chatwoot.browser.clean-pay.dev",
     },
