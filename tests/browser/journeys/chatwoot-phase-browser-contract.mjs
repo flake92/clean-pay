@@ -314,6 +314,7 @@ function finalizeDirectCabinetBrowserContract(records, loadGraph) {
       "documentKey",
       "redirectEdge",
       "responseContentType",
+      "responseFailureSha256",
       "responseStatus",
       "staticResponseBytes",
       "staticResponseSha256",
@@ -375,6 +376,7 @@ function finalizeDirectCabinetBrowserContract(records, loadGraph) {
         key: classification.key,
         redirectEdge: record.redirectEdge,
         responseContentType: record.responseContentType,
+        responseFailureSha256: record.responseFailureSha256,
         responseStatus: record.responseStatus,
       });
       requestOccurrences.semantic += 1;
@@ -384,12 +386,14 @@ function finalizeDirectCabinetBrowserContract(records, loadGraph) {
     if (classification.disposition === "abort") {
       equal(record.responseStatus, null, `Chatwoot blocked response ${index}`);
       equal(record.responseContentType, null, `Chatwoot blocked content type ${index}`);
+      equal(record.responseFailureSha256, null, `Chatwoot blocked response failure ${index}`);
     } else if (!classification.expectedStatuses.includes(record.responseStatus)) {
       fail(`Chatwoot response ${index} status is outside its exact contract.`);
     } else if (!expectedContentTypes(classification.key, record.responseStatus)
       .includes(record.responseContentType)) {
       fail(`Chatwoot response ${index} content type is outside its exact contract.`);
     }
+    equal(record.responseFailureSha256, null, `Chatwoot response failure ${index}`);
     if (record.redirectEdge !== null) redirects.push(record.redirectEdge);
   }
   for (const key of directNavigationFlow) equal(counts[key], 1, `Chatwoot navigation count ${key}`);

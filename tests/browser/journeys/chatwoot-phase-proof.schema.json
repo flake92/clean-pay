@@ -1098,7 +1098,8 @@
         "type": "object",
         "additionalProperties": false,
         "required": [
-          "disposition", "key", "redirectEdge", "responseContentType", "responseStatus"
+          "disposition", "key", "redirectEdge", "responseContentType",
+          "responseFailureSha256", "responseStatus"
         ],
         "properties": {
           "disposition": { "enum": ["abort", "continue"] },
@@ -1115,6 +1116,12 @@
           },
           "redirectEdge": { "type": ["string", "null"], "maxLength": 160 },
           "responseContentType": { "type": ["string", "null"], "maxLength": 128 },
+          "responseFailureSha256": {
+            "anyOf": [
+              { "$ref": "#/$defs/sha256" },
+              { "type": "null" }
+            ]
+          },
           "responseStatus": {
             "anyOf": [
               { "type": "integer", "minimum": 100, "maximum": 599 },

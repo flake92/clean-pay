@@ -467,6 +467,7 @@
         "key",
         "redirectEdge",
         "responseContentType",
+        "responseFailureSha256",
         "responseStatus"
       ],
       "properties": {
@@ -498,6 +499,12 @@
         },
         "redirectEdge": { "type": ["string", "null"] },
         "responseContentType": { "type": ["string", "null"] },
+        "responseFailureSha256": {
+          "anyOf": [
+            { "$ref": "#/$defs/sha256" },
+            { "type": "null" }
+          ]
+        },
         "responseStatus": { "type": ["integer", "null"] }
       }
     },
