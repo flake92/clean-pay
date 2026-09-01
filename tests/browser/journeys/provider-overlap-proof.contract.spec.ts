@@ -35,6 +35,7 @@ import {
   captureProviderOverlapResponseEvidence,
   classifyProviderOverlapBrowserRequest,
   createJourneyBrowserRequestEnvelope,
+  createProviderOverlapCdpResponseBodyCapture,
   createProviderOverlapEventSeal,
   createProviderOverlapPendingRequestEvidence,
   createProviderOverlapPendingRequestEvidenceDocument,
@@ -48,7 +49,9 @@ import {
   finalizeProviderOverlapEventLifecycle,
   finalizeProviderOverlapHistoryContract,
   installProviderOverlapHistoryInstrumentation,
+  isProviderOverlapPlaywrightBodyCdpResponse,
   normalizeProviderOverlapObservedResponseContentType,
+  PROVIDER_OVERLAP_MAXIMUM_STATIC_RESPONSE_BYTES,
   PROVIDER_OVERLAP_REJECTION_PROVENANCE_MAX_PER_ROLE,
   readProviderOverlapStaticResponseEvidence,
   resolveProviderOverlapResponseRequestEntry,
@@ -2108,6 +2111,33 @@ test("prearms profile load and keeps the exact cabinet URL at DOM content", asyn
   expect(runnerSource).not.toContain("Network.loadNetworkResource");
   expect(runnerSource).not.toContain("Network.streamResourceContent");
   expect(runnerSource).toContain("enableDurableMessages: true");
+  expect(runnerSource).toContain('cdp.on("Network.responseReceived", handleCdpResponseReceived);');
+  expect(runnerSource).toContain('cdp.on("Network.loadingFinished", handleCdpLoadingFinished);');
+  expect(runnerSource).toContain('cdp.on("Network.loadingFailed", handleCdpLoadingFailed);');
+  expect(runnerSource).toContain("readBody: ({ maximumBodyBytes, readPlaywrightBody }) =>");
+  expect(runnerSource).toContain("providerPlaywrightBodyKeys.includes(entry.classification.key)");
+  expect(runnerSource).toContain("cdpResponseBodyCapture.skipResponseBody(responseClaim)");
+  expect(runnerSource).toContain("isProviderOverlapPlaywrightBodyCdpResponse(event)");
+  expect(runnerSource).toContain('"chatwoot-widget-conversation-frame",\n'
+    + '  "chatwoot-widget-frame",');
+  expect(PROVIDER_OVERLAP_MAXIMUM_STATIC_RESPONSE_BYTES).toBe(256 * 1024 * 1024);
+  expect(runnerSource).toContain(
+    "staticResponseBytes > PROVIDER_OVERLAP_MAXIMUM_STATIC_RESPONSE_BYTES",
+  );
+  expect(runnerSource).toContain(
+    "providerResponseDurableNetworkBufferBytes = 1024 * 1024 * 1024",
+  );
+  const revalidationIndex = runnerSource.indexOf("finalize-source-revalidation");
+  const revalidationEnd = runnerSource.indexOf("mutableSourceContractSha256()", revalidationIndex);
+  const revalidationSource = runnerSource.slice(revalidationIndex, revalidationEnd);
+  expect(revalidationSource).toContain(
+    "if (browserResponseCaptureFailure) throw browserResponseCaptureFailure;",
+  );
+  expect(revalidationSource).toContain("cdpResponseBodyCapture.assertClean();");
+  expect(revalidationSource.indexOf("cdpResponseBodyCapture.assertClean();"))
+    .toBeLessThan(revalidationSource.indexOf("pendingRequestSeal.assertClean();"));
+  expect(createProviderOverlapCdpResponseBodyCapture.toString())
+    .toContain('"Network.getResponseBody"');
   expect(runnerSource).toContain("await waitForProviderCabinetNavigation(page);");
   expect(runnerSource).toContain("Provider profile navigation barrier failed.");
   expect(runnerSource).toContain("Provider cabinet navigation barrier failed.");
@@ -3058,6 +3088,362 @@ test("waits for Playwright-deferred response body capture before navigation", as
   expect(seal.assertClean()).toMatchObject({ status: "sealed-clean" });
 });
 
+test("excludes only the two exact Chatwoot widget OOPIF response shapes from CDP", () => {
+  const websiteToken = "a".repeat(64);
+  const event = (url: string) => ({ response: { url } });
+  expect(isProviderOverlapPlaywrightBodyCdpResponse(event(
+    `https://chatwoot.browser.clean-pay.dev/widget?website_token=${websiteToken}`,
+  ))).toBe(true);
+  expect(isProviderOverlapPlaywrightBodyCdpResponse(event(
+    `https://chatwoot.browser.clean-pay.dev/widget?website_token=${websiteToken}`
+      + "&cw_conversation=synthetic-conversation",
+  ))).toBe(true);
+  for (const url of [
+    `https://chatwoot.browser.clean-pay.dev/widget-extra?website_token=${websiteToken}`,
+    `https://other.clean-pay.dev/widget?website_token=${websiteToken}`,
+    `http://chatwoot.browser.clean-pay.dev/widget?website_token=${websiteToken}`,
+    `https://chatwoot.browser.clean-pay.dev/widget?website_token=${websiteToken}&extra=1`,
+    "https://chatwoot.browser.clean-pay.dev/widget?website_token=invalid",
+  ]) {
+    expect(isProviderOverlapPlaywrightBodyCdpResponse(event(url)), url).toBe(false);
+  }
+  expect(isProviderOverlapPlaywrightBodyCdpResponse({ response: null })).toBe(false);
+});
+
+test("binds same-CDP response bodies in either event order and fails closed", async () => {
+  type BodyResult = { base64Encoded: boolean; body: string };
+  const results = new Map<string, BodyResult>([
+    ["durable.1", { base64Encoded: false, body: "<h1>Login</h1>" }],
+    ["durable.2", { base64Encoded: true, body: Buffer.from([0, 1, 2]).toString("base64") }],
+  ]);
+  const calls: Array<{ method: string; requestId: string }> = [];
+  const capture = createProviderOverlapCdpResponseBodyCapture({
+    send: async (method: string, parameters: { requestId: string }) => {
+      calls.push({ method, requestId: parameters.requestId });
+      const result = results.get(parameters.requestId);
+      if (!result) throw new Error("synthetic-dynamic-cdp-body-failure");
+      return result;
+    },
+  });
+  capture.observeResponseReceived({
+    requestId: "durable.1",
+    response: { status: 200, url: "https://pay.ci.clean-pay.dev/login" },
+    type: "Document",
+  });
+  capture.observeLoadingFinished({ encodedDataLength: 16, requestId: "durable.1" });
+  const eventFirstBody = capture.readBody({
+    maximumBodyBytes: 128,
+    resourceType: "document",
+    status: 200,
+    url: "https://pay.ci.clean-pay.dev/login",
+  });
+
+  const claimFirstBody = capture.readBody({
+    maximumBodyBytes: 3,
+    resourceType: "fetch",
+    status: 200,
+    url: "https://pay.ci.clean-pay.dev/profile?_rsc=opaque-state_1",
+  });
+  capture.observeResponseReceived({
+    requestId: "durable.2",
+    response: {
+      status: 200,
+      url: "https://pay.ci.clean-pay.dev/profile?_rsc=opaque-state_1",
+    },
+    type: "Fetch",
+  });
+  capture.observeLoadingFinished({ encodedDataLength: 3, requestId: "durable.2" });
+
+  const skipFirstBodyless = capture.skipResponseBody({
+    resourceType: "manifest",
+    status: 200,
+    url: "https://pay.ci.clean-pay.dev/manifest.webmanifest",
+  });
+  capture.observeResponseReceived({
+    requestId: "durable.3",
+    response: { status: 200, url: "https://pay.ci.clean-pay.dev/manifest.webmanifest" },
+    type: "Manifest",
+  });
+  capture.observeLoadingFinished({ encodedDataLength: 16, requestId: "durable.3" });
+
+  capture.observeResponseReceived({
+    requestId: "durable.4",
+    response: { status: 204, url: "https://pay.ci.clean-pay.dev/probe.png" },
+    type: "Image",
+  });
+  capture.observeLoadingFinished({ encodedDataLength: 0, requestId: "durable.4" });
+  const eventFirstBodyless = capture.skipResponseBody({
+    resourceType: "image",
+    status: 204,
+    url: "https://pay.ci.clean-pay.dev/probe.png",
+  });
+
+  await expect(eventFirstBody).resolves.toEqual(Buffer.from("<h1>Login</h1>"));
+  await expect(claimFirstBody).resolves.toEqual(Buffer.from([0, 1, 2]));
+  await expect(skipFirstBodyless).resolves.toBeNull();
+  await expect(eventFirstBodyless).resolves.toBeNull();
+  expect(calls).toEqual([
+    { method: "Network.getResponseBody", requestId: "durable.1" },
+    { method: "Network.getResponseBody", requestId: "durable.2" },
+  ]);
+  expect(capture.assertClean()).toEqual({
+    bodyClaimCount: 2,
+    bodySettledCount: 2,
+    bodylessClaimCount: 2,
+    observedResponseCount: 4,
+    responseClaimCount: 4,
+    responseSettledCount: 4,
+    status: "cdp-response-bodies-clean",
+  });
+
+  const createRejectedCapture = (result: unknown) => (
+    createProviderOverlapCdpResponseBodyCapture({
+      send: async () => result,
+    })
+  );
+  const rejectedBody = async (result: unknown, maximumBodyBytes: number) => {
+    const rejected = createRejectedCapture(result);
+    const body = rejected.readBody({
+      maximumBodyBytes,
+      resourceType: "document",
+      status: 200,
+      url: "https://pay.ci.clean-pay.dev/login",
+    });
+    rejected.observeResponseReceived({
+      requestId: "rejected.1",
+      response: { status: 200, url: "https://pay.ci.clean-pay.dev/login" },
+      type: "Document",
+    });
+    rejected.observeLoadingFinished({ encodedDataLength: 1, requestId: "rejected.1" });
+    return body;
+  };
+  await expect(rejectedBody({ base64Encoded: true, body: "***=" }, 3))
+    .rejects.toThrow(/base64 encoding is invalid/);
+  await expect(rejectedBody({ base64Encoded: false, body: "four" }, 3))
+    .rejects.toThrow(/oversized/);
+  await expect(rejectedBody({ base64Encoded: false, body: "ok", extra: true }, 3))
+    .rejects.toThrow(/field set/);
+
+  const failed = createProviderOverlapCdpResponseBodyCapture({
+    send: async () => {
+      throw new Error("body read must not follow loadingFailed");
+    },
+  });
+  const failedBody = failed.readBody({
+    maximumBodyBytes: 64,
+    resourceType: "document",
+    status: 200,
+    url: "https://pay.ci.clean-pay.dev/login",
+  });
+  failed.observeResponseReceived({
+    requestId: "failed.1",
+    response: { status: 200, url: "https://pay.ci.clean-pay.dev/login" },
+    type: "Document",
+  });
+  const failureText = "net::ERR_ABORTED synthetic-sensitive-diagnostic";
+  failed.observeLoadingFailed({ errorText: failureText, requestId: "failed.1" });
+  const failedMessage = await failedBody.then(
+    () => "unexpected-success",
+    (error: unknown) => error instanceof Error ? error.message : String(error),
+  );
+  expect(failedMessage).toContain(sha256(failureText));
+  expect(failedMessage).not.toContain("synthetic-sensitive-diagnostic");
+
+  const ambiguous = createRejectedCapture({ base64Encoded: false, body: "ok" });
+  ambiguous.observeResponseReceived({
+    requestId: "ambiguous.1",
+    response: { status: 200, url: "https://pay.ci.clean-pay.dev/login" },
+    type: "Document",
+  });
+  expect(() => ambiguous.observeResponseReceived({
+    requestId: "ambiguous.2",
+    response: { status: 200, url: "https://pay.ci.clean-pay.dev/login" },
+    type: "Document",
+  })).toThrow(/ambiguous/);
+
+  const terminalUnclaimed = createRejectedCapture({ base64Encoded: false, body: "unused" });
+  terminalUnclaimed.observeResponseReceived({
+    requestId: "bodyless.1",
+    response: { status: 200, url: "https://pay.ci.clean-pay.dev/manifest.webmanifest" },
+    type: "Manifest",
+  });
+  terminalUnclaimed.observeLoadingFinished({ encodedDataLength: 16, requestId: "bodyless.1" });
+  expect(() => terminalUnclaimed.observeResponseReceived({
+    requestId: "bodyless.2",
+    response: { status: 200, url: "https://pay.ci.clean-pay.dev/manifest.webmanifest" },
+    type: "Manifest",
+  })).toThrow(/ambiguous/);
+  expect(terminalUnclaimed.snapshot()).toMatchObject({
+    fatal: true,
+    unclaimedResponseCount: 0,
+  });
+  expect(() => terminalUnclaimed.skipResponseBody({
+    resourceType: "manifest",
+    status: 200,
+    url: "https://pay.ci.clean-pay.dev/manifest.webmanifest",
+  })).toThrow(/ambiguous/);
+
+  const duplicateTerminal = createRejectedCapture({ base64Encoded: false, body: "ok" });
+  const duplicateTerminalBody = duplicateTerminal.readBody({
+    maximumBodyBytes: 2,
+    resourceType: "document",
+    status: 200,
+    url: "https://pay.ci.clean-pay.dev/login",
+  });
+  duplicateTerminal.observeResponseReceived({
+    requestId: "duplicate.1",
+    response: { status: 200, url: "https://pay.ci.clean-pay.dev/login" },
+    type: "Document",
+  });
+  duplicateTerminal.observeLoadingFinished({ encodedDataLength: 2, requestId: "duplicate.1" });
+  expect(() => duplicateTerminal.observeLoadingFinished({
+    encodedDataLength: 2,
+    requestId: "duplicate.1",
+  })).toThrow(/terminal event more than once/);
+  await expect(duplicateTerminalBody).rejects.toThrow(/terminal event more than once/);
+
+  const unresolved = createRejectedCapture({ base64Encoded: false, body: "ok" });
+  const unresolvedBody = unresolved.readBody({
+    maximumBodyBytes: 2,
+    resourceType: "document",
+    status: 200,
+    url: "https://pay.ci.clean-pay.dev/login",
+  });
+  expect(() => unresolved.assertClean()).toThrow(/did not settle cleanly/);
+  await expect(unresolvedBody).rejects.toThrow(/did not settle cleanly/);
+
+  const ambiguousClaim = createRejectedCapture({ base64Encoded: false, body: "ok" });
+  const firstAmbiguousClaim = ambiguousClaim.readBody({
+    maximumBodyBytes: 2,
+    resourceType: "document",
+    status: 200,
+    url: "https://pay.ci.clean-pay.dev/login",
+  });
+  expect(() => ambiguousClaim.readBody({
+    maximumBodyBytes: 2,
+    resourceType: "document",
+    status: 200,
+    url: "https://pay.ci.clean-pay.dev/login",
+  })).toThrow(/claim is ambiguous/);
+  await expect(firstAmbiguousClaim).rejects.toThrow(/claim is ambiguous/);
+
+  const malformed = createRejectedCapture({ base64Encoded: false, body: "ok" });
+  expect(() => malformed.observeResponseReceived({
+    requestId: "malformed.1",
+    response: null,
+    type: "Document",
+  })).toThrow(/response event is invalid/);
+});
+
+test("bounds all response claims and atomically drains fatal CDP capture state", async () => {
+  let sendCalls = 0;
+  const bounded = createProviderOverlapCdpResponseBodyCapture({
+    send: async () => {
+      sendCalls += 1;
+      return { base64Encoded: false, body: "unused" };
+    },
+  });
+  const waitingClaims: Array<Promise<unknown>> = [];
+  for (let index = 0; index < 256; index += 1) {
+    const responseIdentity = {
+      resourceType: index % 2 === 0 ? "fetch" : "image",
+      status: 200,
+      url: `https://pay.ci.clean-pay.dev/bounded/${index}`,
+    };
+    waitingClaims.push(index % 2 === 0
+      ? bounded.readBody({ maximumBodyBytes: 1, ...responseIdentity })
+      : bounded.skipResponseBody(responseIdentity));
+  }
+  expect(() => bounded.skipResponseBody({
+    resourceType: "other",
+    status: 204,
+    url: "https://pay.ci.clean-pay.dev/bounded/overflow",
+  })).toThrow(/response claim bound/);
+  const claimFailures = await Promise.all(waitingClaims.map((claim) => claim.then(
+    () => "unexpected-success",
+    (error: unknown) => error instanceof Error ? error.message : String(error),
+  )));
+  expect(new Set(claimFailures)).toEqual(new Set([
+    "CDP response body capture exceeded its response claim bound.",
+  ]));
+  expect(sendCalls).toBe(0);
+  expect(bounded.snapshot()).toEqual({
+    bodyClaimCount: 128,
+    bodySettledCount: 128,
+    bodylessClaimCount: 128,
+    fatal: true,
+    observedResponseCount: 0,
+    pendingResponseCount: 0,
+    responseClaimCount: 257,
+    responseFailureCount: 256,
+    responseSettledCount: 256,
+    unclaimedResponseCount: 0,
+  });
+  expect(() => bounded.observeResponseReceived({
+    requestId: "bounded.late",
+    response: { status: 200, url: "https://pay.ci.clean-pay.dev/bounded/late" },
+    type: "Fetch",
+  })).toThrow(/response claim bound/);
+
+  let releaseSend: (result: { base64Encoded: boolean; body: string }) => void = () => undefined;
+  let sendStarted = false;
+  const delayedSend = new Promise<{ base64Encoded: boolean; body: string }>((resolve) => {
+    releaseSend = resolve;
+  });
+  const fatal = createProviderOverlapCdpResponseBodyCapture({
+    send: async () => {
+      sendStarted = true;
+      return delayedSend;
+    },
+  });
+  const boundBody = fatal.readBody({
+    maximumBodyBytes: 2,
+    resourceType: "document",
+    status: 200,
+    url: "https://pay.ci.clean-pay.dev/login",
+  });
+  fatal.observeResponseReceived({
+    requestId: "fatal.1",
+    response: { status: 200, url: "https://pay.ci.clean-pay.dev/login" },
+    type: "Document",
+  });
+  fatal.observeLoadingFinished({ encodedDataLength: 2, requestId: "fatal.1" });
+  await expect.poll(() => sendStarted).toBe(true);
+  const waitingBodyless = fatal.skipResponseBody({
+    resourceType: "manifest",
+    status: 200,
+    url: "https://pay.ci.clean-pay.dev/manifest.webmanifest",
+  });
+  expect(() => fatal.observeResponseReceived({
+    requestId: "fatal.invalid",
+    response: null,
+    type: "Document",
+  })).toThrow(/response event is invalid/);
+  await expect(boundBody).rejects.toThrow(/response event is invalid/);
+  await expect(waitingBodyless).rejects.toThrow(/response event is invalid/);
+  const fatalSnapshot = fatal.snapshot();
+  expect(fatalSnapshot).toEqual({
+    bodyClaimCount: 1,
+    bodySettledCount: 1,
+    bodylessClaimCount: 1,
+    fatal: true,
+    observedResponseCount: 1,
+    pendingResponseCount: 0,
+    responseClaimCount: 2,
+    responseFailureCount: 2,
+    responseSettledCount: 2,
+    unclaimedResponseCount: 0,
+  });
+  expect(() => fatal.skipResponseBody({
+    resourceType: "image",
+    status: 204,
+    url: "https://pay.ci.clean-pay.dev/late.png",
+  })).toThrow(/response event is invalid/);
+  releaseSend({ base64Encoded: false, body: "ok" });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  expect(fatal.snapshot()).toEqual(fatalSnapshot);
+});
+
 test("durably captures a prior document across immediate real Chromium navigation", async () => {
   const loginBody = "<!doctype html><html><head><link rel=\"icon\" href=\"data:,\"></head>"
     + "<body><h1>Login</h1>"
@@ -3097,6 +3483,21 @@ test("durably captures a prior document across immediate real Chromium navigatio
       maxResourceBufferSize: 128 * 1024 * 1024,
       maxTotalBufferSize: 1024 * 1024 * 1024,
     });
+    const cdpBodyCapture = createProviderOverlapCdpResponseBodyCapture({
+      send: (
+        method: "Network.getResponseBody",
+        parameters: { requestId: string },
+      ) => cdp.send(method, parameters),
+    });
+    cdp.on("Network.responseReceived", (event) => {
+      cdpBodyCapture.observeResponseReceived(event);
+    });
+    cdp.on("Network.loadingFinished", (event) => {
+      cdpBodyCapture.observeLoadingFinished(event);
+    });
+    cdp.on("Network.loadingFailed", (event) => {
+      cdpBodyCapture.observeLoadingFailed(event);
+    });
     const captures = new Map<string, Promise<{ body: Uint8Array | null }>>();
     context.on("response", (response) => {
       const request = response.request();
@@ -3110,6 +3511,14 @@ test("durably captures a prior document across immediate real Chromium navigatio
           staticAssetSha256: null,
           staticPath: null,
         }),
+        readBody: ({ maximumBodyBytes }: { maximumBodyBytes: number }) => (
+          cdpBodyCapture.readBody({
+            maximumBodyBytes,
+            resourceType: request.resourceType(),
+            status: response.status(),
+            url: request.url(),
+          })
+        ),
         request,
         response,
       });
@@ -3130,6 +3539,15 @@ test("durably captures a prior document across immediate real Chromium navigatio
       expect(Buffer.from(loginCapture?.body ?? []).toString("utf8")).toBe(loginBody);
       expect(Buffer.from(profileCapture?.body ?? []).toString("utf8")).toBe(profileBody);
       expect(upstreamPaths).toEqual(["/login", "/profile"]);
+      expect(cdpBodyCapture.assertClean()).toEqual({
+        bodyClaimCount: 2,
+        bodySettledCount: 2,
+        bodylessClaimCount: 0,
+        observedResponseCount: 2,
+        responseClaimCount: 2,
+        responseSettledCount: 2,
+        status: "cdp-response-bodies-clean",
+      });
     } finally {
       await context.close();
     }
@@ -3183,8 +3601,13 @@ test("never reads redirect bodies and rejects failed or oversized declaration ca
     "https://pay.ci.clean-pay.dev/?_rsc=opaque-state_1",
   );
   let redirectBodyCalls = 0;
+  let redirectReaderCalls = 0;
   await expect(captureProviderOverlapResponseEvidence({
     classification: redirectClassification,
+    readBody: async () => {
+      redirectReaderCalls += 1;
+      return null;
+    },
     request,
     response: {
       body: async () => {
@@ -3198,6 +3621,33 @@ test("never reads redirect bodies and rejects failed or oversized declaration ca
     },
   })).resolves.toMatchObject({ body: null, responseStatus: 307 });
   expect(redirectBodyCalls).toBe(0);
+  expect(redirectReaderCalls).toBe(0);
+
+  const bodylessClassification = browserClassification(
+    "https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit",
+    { resourceType: "script" },
+  );
+  let bodylessReaderCalls = 0;
+  await expect(captureProviderOverlapResponseEvidence({
+    classification: bodylessClassification,
+    readBody: async ({ maximumBodyBytes }: { maximumBodyBytes: number | null }) => {
+      bodylessReaderCalls += 1;
+      expect(maximumBodyBytes).toBeNull();
+      return null;
+    },
+    request,
+    response: {
+      body: async () => {
+        throw new Error("bodyless response must use its exact skip claim");
+      },
+      finished: async () => null,
+      headers: () => ({ "content-type": "application/javascript" }),
+      request: () => request,
+      status: () => 200,
+    },
+    terminal: Promise.resolve({ failureSha256: null, finished: true }),
+  })).resolves.toMatchObject({ body: null, responseStatus: 200 });
+  expect(bodylessReaderCalls).toBe(1);
 
   const declarationClassification = browserClassification(
     "https://pay.ci.clean-pay.dev/profile",
@@ -3816,6 +4266,56 @@ test("seals browser events only after a bounded quiet drain and rejects late eve
     isIdle: () => true,
     snapshot: () => ({ status: "stable" }),
   })).rejects.toThrow(/changed after|close barrier/);
+
+  const revalidatedCapture = createProviderOverlapCdpResponseBodyCapture({
+    send: async () => ({ base64Encoded: false, body: "unused" }),
+  });
+  const revalidatedBodyless = revalidatedCapture.skipResponseBody({
+    resourceType: "manifest",
+    status: 200,
+    url: "https://pay.ci.clean-pay.dev/manifest.webmanifest",
+  });
+  revalidatedCapture.observeResponseReceived({
+    requestId: "revalidation.1",
+    response: { status: 200, url: "https://pay.ci.clean-pay.dev/manifest.webmanifest" },
+    type: "Manifest",
+  });
+  revalidatedCapture.observeLoadingFinished({
+    encodedDataLength: 16,
+    requestId: "revalidation.1",
+  });
+  await expect(revalidatedBodyless).resolves.toBeNull();
+  expect(revalidatedCapture.assertClean()).toMatchObject({
+    status: "cdp-response-bodies-clean",
+  });
+  const revalidationSeal = createProviderOverlapEventSeal(32);
+  let closeCaptureFailure: unknown = null;
+  let detachedAfterCaptureFailure = false;
+  await expect(finalizeProviderOverlapEventLifecycle({
+    assertUnchanged: () => {
+      if (closeCaptureFailure) throw closeCaptureFailure;
+      revalidatedCapture.assertClean();
+    },
+    close: async () => {
+      try {
+        revalidatedCapture.observeResponseReceived({
+          requestId: "revalidation.invalid",
+          response: null,
+          type: "Document",
+        });
+      } catch (error) {
+        closeCaptureFailure = error;
+      }
+    },
+    detach: async () => {
+      detachedAfterCaptureFailure = true;
+    },
+    eventSeal: revalidationSeal,
+    finish: async () => "finished",
+    isIdle: () => true,
+    snapshot: () => revalidatedCapture.snapshot(),
+  })).rejects.toThrow(/response event is invalid/);
+  expect(detachedAfterCaptureFailure).toBe(false);
 
   const allowedSeal = createProviderOverlapEventSeal(32);
   const allowedRawLedger: string[] = [];

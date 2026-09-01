@@ -33,6 +33,7 @@ import {
   assertProviderOverlapRedirect,
   captureProviderOverlapResponseEvidence,
   classifyProviderOverlapBrowserRequest,
+  createProviderOverlapCdpResponseBodyCapture,
   createJourneyBrowserRequestEnvelope,
   createProviderOverlapEventSeal,
   createProviderOverlapPendingRequestEvidence,
@@ -47,7 +48,9 @@ import {
   finalizeProviderOverlapEventLifecycle,
   finalizeProviderOverlapHistoryContract,
   installProviderOverlapHistoryInstrumentation,
+  isProviderOverlapPlaywrightBodyCdpResponse,
   normalizeProviderOverlapObservedResponseContentType,
+  PROVIDER_OVERLAP_MAXIMUM_STATIC_RESPONSE_BYTES,
   PROVIDER_OVERLAP_REJECTION_PROVENANCE_MAX_PER_ROLE,
   resolveProviderOverlapResponseRequestEntry,
 } from "./provider-overlap-browser-contract.mjs";
@@ -76,6 +79,10 @@ const providerStaticDocumentKeys = Object.freeze([
   "app-login-document",
   "app-profile-document",
   "app-cabinet-document",
+]);
+const providerPlaywrightBodyKeys = Object.freeze([
+  "chatwoot-widget-conversation-frame",
+  "chatwoot-widget-frame",
 ]);
 const providerOverlapConnectAuthorityLedger = Object.freeze([
   "challenges.cloudflare.com:443",
@@ -609,6 +616,34 @@ async function exerciseCabinet(
     const browserResponseTerminalByIdentity = new WeakMap();
     const browserTerminalRequestIdentities = new Set();
     let browserResponseCaptureFailure = null;
+    const cdpResponseBodyCapture = createProviderOverlapCdpResponseBodyCapture({
+      send: (method, parameters) => cdp.send(method, parameters),
+    });
+    const observeCdpResponseBodyEvent = (observe, event) => {
+      try {
+        observe(event);
+      } catch (error) {
+        browserResponseCaptureFailure ??= error;
+      }
+    };
+    const handleCdpResponseReceived = (event) => {
+      // Chatwoot widget documents may live in an OOPIF whose body cannot be
+      // read from the page CDP session. Their two exact classifications retain
+      // the bounded Playwright fallback; the same-origin SDK stays in CDP.
+      if (isProviderOverlapPlaywrightBodyCdpResponse(event)) return;
+      observeCdpResponseBodyEvent(cdpResponseBodyCapture.observeResponseReceived, event);
+    };
+    const handleCdpLoadingFinished = (event) => observeCdpResponseBodyEvent(
+      cdpResponseBodyCapture.observeLoadingFinished,
+      event,
+    );
+    const handleCdpLoadingFailed = (event) => observeCdpResponseBodyEvent(
+      cdpResponseBodyCapture.observeLoadingFailed,
+      event,
+    );
+    cdp.on("Network.responseReceived", handleCdpResponseReceived);
+    cdp.on("Network.loadingFinished", handleCdpLoadingFinished);
+    cdp.on("Network.loadingFailed", handleCdpLoadingFailed);
     let currentStaticDocumentKey = null;
     let cabinetDocumentAllowed = false;
     let cabinetDocumentConsumed = false;
@@ -803,6 +838,22 @@ async function exerciseCabinet(
         // must settle this promise before a later navigation can evict it.
         evidence = captureProviderOverlapResponseEvidence({
           classification: entry.classification,
+          readBody: ({ maximumBodyBytes, readPlaywrightBody }) => {
+            if (providerPlaywrightBodyKeys.includes(entry.classification.key)) {
+              return maximumBodyBytes === null ? null : readPlaywrightBody();
+            }
+            const responseClaim = {
+              resourceType: request.resourceType(),
+              status: response.status(),
+              url: request.url(),
+            };
+            return maximumBodyBytes === null
+              ? cdpResponseBodyCapture.skipResponseBody(responseClaim)
+              : cdpResponseBodyCapture.readBody({
+                  maximumBodyBytes,
+                  ...responseClaim,
+                });
+          },
           request,
           response,
           terminal,
@@ -1046,6 +1097,7 @@ async function exerciseCabinet(
       browserRequestIdentityCount: browserRequestByIdentity.size,
       browserRequestPreparationIdentityCount: browserRequestPreparationByIdentity.size,
       browserResponseEvidenceIdentityCount: browserResponseEvidenceByIdentity.size,
+      cdpResponseBodyCapture: cdpResponseBodyCapture.snapshot(),
       browserTerminalRequestIdentityCount: browserTerminalRequestIdentities.size,
       cabinetDocumentAllowed,
       cabinetDocumentConsumed,
@@ -1067,6 +1119,7 @@ async function exerciseCabinet(
     const pendingRequestDrain = await pendingRequestSeal.drainAndSeal({ timeoutMs: 15_000 });
     markProviderFailurePhase(role, "verify-final-response-captures");
     if (browserResponseCaptureFailure) throw browserResponseCaptureFailure;
+    cdpResponseBodyCapture.assertClean();
     markProviderFailurePhase(role, "finalize-event-lifecycle");
     const finalizerEventSeal = Object.freeze({
       assertClean: () => {
@@ -1081,6 +1134,8 @@ async function exerciseCabinet(
     const finalized = await finalizeProviderOverlapEventLifecycle({
       assertUnchanged: (snapshot) => {
         markProviderFailurePhase(role, "finalize-source-revalidation");
+        if (browserResponseCaptureFailure) throw browserResponseCaptureFailure;
+        cdpResponseBodyCapture.assertClean();
         pendingRequestSeal.assertClean();
         if (mutableSourceContractSha256() !== snapshot.mutableSourceContractSha256) {
           throw new Error("Synthetic browser source ledger changed across close.");
@@ -1093,6 +1148,9 @@ async function exerciseCabinet(
       },
       detach: async () => {
         markProviderFailurePhase(role, "finalize-listener-detach");
+        cdp.removeListener("Network.responseReceived", handleCdpResponseReceived);
+        cdp.removeListener("Network.loadingFinished", handleCdpLoadingFinished);
+        cdp.removeListener("Network.loadingFailed", handleCdpLoadingFailed);
         cdp.removeListener("Page.frameNavigated", handleFrameNavigated);
         cdp.removeListener("Page.navigatedWithinDocument", handleNavigatedWithinDocument);
         await page.removeAllListeners();
@@ -1957,7 +2015,7 @@ async function finishBrowserRequestContract(
       }
       staticResponseBytes += responseBody.byteLength;
       if (!Number.isSafeInteger(staticResponseBytes)
-        || staticResponseBytes > 1024 * 1024 * 1024) {
+        || staticResponseBytes > PROVIDER_OVERLAP_MAXIMUM_STATIC_RESPONSE_BYTES) {
         throw new Error("Static browser response bytes exceeded their aggregate bound.");
       }
       staticObservation = attestProviderOverlapStaticResponse({
