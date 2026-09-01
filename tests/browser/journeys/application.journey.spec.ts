@@ -76,6 +76,11 @@ test("email-register-verify-and-login", async ({ journey }, testInfo) => {
   const viewportId = testInfo.project.name.replace(/^journey-/, "");
   const email = `new.${viewportId}@clean-pay.dev`;
   const password = "Synthetic-browser-password-42";
+  const captureAuthenticatedChatwoot = authenticatedJourneyLivePairCaptureEnabled(process.env);
+
+  if (captureAuthenticatedChatwoot) {
+    await installFirstChatwootOwnershipCapture(page);
+  }
 
   await gotoHeading(page, "/register?redirect_to=%2Fcabinet", "Регистрация");
   await waitForTurnstile(page, "auth_login");
@@ -95,10 +100,25 @@ test("email-register-verify-and-login", async ({ journey }, testInfo) => {
   await journey.checkpoint("register-email-verified");
   await page.getByRole("button", { name: "Продолжить без него" }).click();
   await page.waitForURL((url) => url.pathname === "/cabinet");
-  if (authenticatedJourneyLivePairCaptureEnabled(process.env)) {
-    await waitForAuthenticatedChatwootFixture(page);
+  let preOwnedChatwootSeed: PreOwnedChatwootSeed | null = null;
+  if (captureAuthenticatedChatwoot) {
+    await test.step("chatwoot fresh A-to-B exact characterization", () => (
+      waitForFreshAuthenticatedChatwootFixture(page)
+    ));
+    preOwnedChatwootSeed = await capturePreOwnedChatwootSeed(page);
   }
   await journey.checkpoint("register-cabinet");
+
+  if (captureAuthenticatedChatwoot) {
+    await test.step("chatwoot pre-owned A exact characterization", async () => {
+      if (preOwnedChatwootSeed === null) {
+        throw new Error("Fresh Chatwoot ownership was not captured before the pre-owned proof.");
+      }
+      await restorePreOwnedChatwootSeed(page, preOwnedChatwootSeed);
+      await gotoHeading(page, "/cabinet", "Личный кабинет");
+      await waitForAuthenticatedChatwootFixture(page);
+    });
+  }
 
   await clearSyntheticLogoutState(page);
   await gotoHeading(page, "/login?redirect_to=%2Fcabinet", "Вход");
@@ -109,8 +129,10 @@ test("email-register-verify-and-login", async ({ journey }, testInfo) => {
   await page.getByLabel("Пароль").fill(password);
   await page.getByRole("button", { name: "Продолжить" }).click();
   await page.waitForURL((url) => url.pathname === "/cabinet");
-  if (authenticatedJourneyLivePairCaptureEnabled(process.env)) {
-    await waitForAuthenticatedChatwootFixture(page);
+  if (captureAuthenticatedChatwoot) {
+    await test.step("chatwoot post-clear fresh A-to-B exact characterization", () => (
+      waitForFreshAuthenticatedChatwootFixture(page)
+    ));
   }
   await journey.checkpoint("email-login-cabinet");
   journey.boundary("turnstile-lifecycle", await readTurnstileBoundary(page));
@@ -466,6 +488,164 @@ async function waitForChatwootBoundary(page: Page) {
   ));
 }
 
+type PersistedChatwootOwnership = {
+  conversation: string;
+  core: string;
+  customAttributes: string;
+};
+
+type PreOwnedChatwootSeed = {
+  cookies: Array<Pick<Cookie,
+    "domain" | "httpOnly" | "name" | "path" | "sameSite" | "secure" | "value">>;
+  ownership: string;
+};
+
+async function installFirstChatwootOwnershipCapture(page: Page) {
+  await page.addInitScript(() => {
+    const storagePrototype = Storage.prototype;
+    const descriptor = Object.getOwnPropertyDescriptor(storagePrototype, "setItem");
+    const original = descriptor?.value;
+    if (typeof original !== "function") {
+      throw new Error("Chatwoot ownership capture requires Storage.setItem.");
+    }
+
+    Object.defineProperty(storagePrototype, "setItem", {
+      ...descriptor,
+      value(this: Storage, key: string, value: string) {
+        original.call(this, key, value);
+        if (key !== "clean-pay:chatwoot-ownership:v1" || this !== window.localStorage) {
+          return;
+        }
+        const target = window as unknown as { __cleanPayFirstChatwootOwnership?: string };
+        if (target.__cleanPayFirstChatwootOwnership === undefined) {
+          Object.defineProperty(target, "__cleanPayFirstChatwootOwnership", {
+            configurable: false,
+            enumerable: false,
+            value,
+            writable: false,
+          });
+        }
+      },
+    });
+  });
+}
+
+async function capturePreOwnedChatwootSeed(page: Page): Promise<PreOwnedChatwootSeed> {
+  const state = await page.evaluate(() => ({
+    capturedOwnership: (
+      window as unknown as { __cleanPayFirstChatwootOwnership?: string }
+    ).__cleanPayFirstChatwootOwnership ?? null,
+    conversation: document.cookie
+      .split(";")
+      .map((entry) => entry.trim())
+      .find((entry) => entry.startsWith("cw_conversation="))
+      ?.slice("cw_conversation=".length) ?? null,
+    currentOwnership: localStorage.getItem("clean-pay:chatwoot-ownership:v1"),
+  }));
+  if (
+    state.capturedOwnership === null
+    || state.currentOwnership === null
+    || state.conversation === null
+  ) {
+    throw new Error("Fresh Chatwoot A-to-B state did not expose both ownership generations.");
+  }
+
+  const captured = parsePersistedChatwootOwnership(state.capturedOwnership);
+  const current = parsePersistedChatwootOwnership(state.currentOwnership);
+  const conversation = decodeURIComponent(state.conversation);
+  if (
+    captured.core !== current.core
+    || captured.customAttributes === current.customAttributes
+    || captured.conversation !== current.conversation
+    || captured.conversation !== chatwootFingerprintForTest(conversation)
+  ) {
+    throw new Error("Fresh Chatwoot ownership generations do not prove the exact A-to-B transition.");
+  }
+
+  const cookies = await readChatwootCookies(page);
+  if (cookies.length !== 2) {
+    throw new Error("Fresh Chatwoot ownership requires exactly two Chatwoot cookies.");
+  }
+  return { cookies, ownership: state.capturedOwnership };
+}
+
+async function restorePreOwnedChatwootSeed(page: Page, seed: PreOwnedChatwootSeed) {
+  parsePersistedChatwootOwnership(seed.ownership);
+  expect(await readChatwootCookies(page)).toEqual(seed.cookies);
+  const storage = await page.evaluate((ownership) => {
+    localStorage.removeItem("clean-pay:chatwoot-identity:v1");
+    localStorage.setItem("clean-pay:chatwoot-ownership:v1", ownership);
+    return {
+      identity: localStorage.getItem("clean-pay:chatwoot-identity:v1"),
+      keys: Object.keys(localStorage)
+        .filter((key) => key.startsWith("clean-pay:chatwoot-"))
+        .sort(),
+      ownership: localStorage.getItem("clean-pay:chatwoot-ownership:v1"),
+    };
+  }, seed.ownership);
+  expect(storage).toEqual({
+    identity: null,
+    keys: ["clean-pay:chatwoot-ownership:v1"],
+    ownership: seed.ownership,
+  });
+  expect(await readChatwootCookies(page)).toEqual(seed.cookies);
+}
+
+function parsePersistedChatwootOwnership(raw: string): PersistedChatwootOwnership {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw new Error("Persisted Chatwoot ownership is not valid JSON.");
+  }
+  if (
+    typeof parsed !== "object"
+    || parsed === null
+    || Array.isArray(parsed)
+    || JSON.stringify(Object.keys(parsed).sort())
+      !== JSON.stringify(["conversation", "core", "customAttributes"])
+  ) {
+    throw new Error("Persisted Chatwoot ownership has an invalid schema.");
+  }
+  const record = parsed as Record<string, unknown>;
+  const fingerprint = /^[1-9][0-9]{0,4}:[a-f0-9]{1,8}$/;
+  if (
+    typeof record.core !== "string"
+    || !fingerprint.test(record.core)
+    || typeof record.customAttributes !== "string"
+    || !fingerprint.test(record.customAttributes)
+    || typeof record.conversation !== "string"
+    || !fingerprint.test(record.conversation)
+  ) {
+    throw new Error("Persisted Chatwoot ownership violates its fingerprint contract.");
+  }
+  return record as PersistedChatwootOwnership;
+}
+
+function chatwootFingerprintForTest(value: string) {
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return `${value.length}:${(hash >>> 0).toString(16)}`;
+}
+
+async function readChatwootCookies(page: Page) {
+  return (await page.context().cookies(page.url()))
+    .filter((cookie) => cookie.name === "cw_conversation" || cookie.name.startsWith("cw_user_"))
+    .map(({ domain, httpOnly, name, path, sameSite, secure, value }) => ({
+      domain,
+      httpOnly,
+      name,
+      path,
+      sameSite,
+      secure,
+      value,
+    }))
+    .sort((left, right) => left.name.localeCompare(right.name));
+}
+
 async function waitForAuthenticatedChatwootFixture(page: Page) {
   await expect.poll(async () => {
     const browserState = await page.evaluate(() => {
@@ -573,6 +753,160 @@ async function waitForAuthenticatedChatwootFixture(page: Page) {
         { method: "toggleBubbleVisibility", value: "show" },
         { method: "removeLabel", label: "subscription_expired" },
         { method: "identity.confirmed" },
+      ],
+      conversation: expect.stringMatching(/^c[a-z0-9]{24}$/),
+      conversationCount: 1,
+      identityCookie: {
+        name: expect.stringMatching(/^cw_user_[a-f0-9]{64}$/),
+        value: "synthetic-chatwoot-user",
+      },
+      identityCookieCount: 1,
+      ownershipValid: true,
+      inMemoryOwnershipValid: true,
+      pathname: "/cabinet",
+    },
+    chatwootCookies: [
+      {
+        domain: "pay.ci.clean-pay.dev",
+        httpOnly: false,
+        name: "cw_conversation",
+        path: "/",
+        sameSite: "Lax",
+        secure: true,
+        value: expect.stringMatching(/^c[a-z0-9]{24}$/),
+      },
+      {
+        domain: "pay.ci.clean-pay.dev",
+        httpOnly: false,
+        name: expect.stringMatching(/^cw_user_[a-f0-9]{64}$/),
+        path: "/",
+        sameSite: "Lax",
+        secure: true,
+        value: "synthetic-chatwoot-user",
+      },
+    ],
+  });
+}
+
+// Run 33480237666 captured this fresh A-to-B order identically for baseline
+// and candidate in all three viewports. The six exact Playwright diffs share
+// SHA-256 6dbe21a612810cfcb6631ce58b95052ed0cdfe45301ad916a10b50c414650fff.
+async function waitForFreshAuthenticatedChatwootFixture(page: Page) {
+  await expect.poll(async () => {
+    const browserState = await page.evaluate(() => {
+      const calls = (
+        window as unknown as {
+          __cleanPayChatwootBoundaryCalls?: unknown[];
+          cleanPayChatwootOwnership?: unknown;
+        }
+      ).__cleanPayChatwootBoundaryCalls;
+      const cookieEntries = document.cookie
+        .split(";")
+        .map((entry) => entry.trim())
+        .filter(Boolean)
+        .map((entry) => {
+          const separator = entry.indexOf("=");
+          return separator === -1
+            ? [entry, ""] as const
+            : [entry.slice(0, separator), decodeURIComponent(entry.slice(separator + 1))] as const;
+        });
+      const conversationEntries = cookieEntries.filter(([name]) => name === "cw_conversation");
+      const identityEntries = cookieEntries.filter(([name]) => /^cw_user_[a-f0-9]{64}$/.test(name));
+      const ownershipRaw = localStorage.getItem("clean-pay:chatwoot-ownership:v1");
+
+      let ownership: unknown = null;
+      try {
+        ownership = ownershipRaw === null ? null : JSON.parse(ownershipRaw);
+      } catch {
+        ownership = null;
+      }
+
+      const fingerprint = (value: string) => {
+        let hash = 0x811c9dc5;
+        for (let index = 0; index < value.length; index += 1) {
+          hash ^= value.charCodeAt(index);
+          hash = Math.imul(hash, 0x01000193);
+        }
+        return `${value.length}:${(hash >>> 0).toString(16)}`;
+      };
+      const exactKeys = (value: unknown, keys: string[]) => (
+        typeof value === "object"
+        && value !== null
+        && !Array.isArray(value)
+        && JSON.stringify(Object.keys(value).sort()) === JSON.stringify([...keys].sort())
+      );
+      const conversation = conversationEntries[0]?.[1] ?? "";
+      const ownershipRecord = ownership as Record<string, unknown> | null;
+      const inMemoryOwnership = (
+        window as unknown as { cleanPayChatwootOwnership?: unknown }
+      ).cleanPayChatwootOwnership;
+      const inMemoryRecord = inMemoryOwnership as Record<string, unknown> | null;
+      const fingerprintPattern = /^[1-9][0-9]{0,4}:[a-f0-9]{1,8}$/;
+
+      return {
+        calls: Array.isArray(calls) ? calls : [],
+        conversation,
+        conversationCount: conversationEntries.length,
+        identityCookie: identityEntries[0]
+          ? { name: identityEntries[0][0], value: identityEntries[0][1] }
+          : null,
+        identityCookieCount: identityEntries.length,
+        ownershipValid: exactKeys(ownership, ["conversation", "core", "customAttributes"])
+          && typeof ownershipRecord?.core === "string"
+          && fingerprintPattern.test(ownershipRecord.core)
+          && typeof ownershipRecord.customAttributes === "string"
+          && fingerprintPattern.test(ownershipRecord.customAttributes)
+          && ownershipRecord.conversation === fingerprint(conversation),
+        inMemoryOwnershipValid: exactKeys(
+          inMemoryOwnership,
+          ["conversation", "core", "customAttributes"],
+        )
+          && inMemoryRecord?.conversation === conversation
+          && inMemoryRecord.core === ownershipRecord?.core
+          && inMemoryRecord.customAttributes === ownershipRecord?.customAttributes,
+        pathname: location.pathname,
+      };
+    });
+    const chatwootCookies = (await page.context().cookies(page.url()))
+      .filter((cookie) => cookie.name === "cw_conversation" || cookie.name.startsWith("cw_user_"))
+      .map(({ domain, httpOnly, name, path, sameSite, secure, value }) => ({
+        domain,
+        httpOnly,
+        name,
+        path,
+        sameSite,
+        secure,
+        value,
+      }));
+    return { browserState, chatwootCookies };
+  }, { timeout: 15_000 }).toEqual({
+    browserState: {
+      calls: [
+        {
+          method: "run",
+          baseUrl: "https://chatwoot.browser.clean-pay.dev",
+          websiteTokenBytes: 64,
+        },
+        { method: "toggleBubbleVisibility", value: "hide" },
+        {
+          method: "setUser",
+          identifierBytes: 25,
+          attributeKeys: ["custom_attributes", "email", "identifier_hash", "name"],
+        },
+        { method: "frame.loaded" },
+        { method: "toggleBubbleVisibility", value: "show" },
+        { method: "toggleBubbleVisibility", value: "show" },
+        {
+          method: "setUser",
+          identifierBytes: 25,
+          attributeKeys: ["custom_attributes", "email", "identifier_hash", "name"],
+        },
+        { method: "frame.loaded" },
+        { method: "toggleBubbleVisibility", value: "show" },
+        { method: "removeLabel", label: "subscription_expired" },
+        { method: "identity.confirmed" },
+        { method: "toggleBubbleVisibility", value: "show" },
+        { method: "removeLabel", label: "subscription_expired" },
       ],
       conversation: expect.stringMatching(/^c[a-z0-9]{24}$/),
       conversationCount: 1,
