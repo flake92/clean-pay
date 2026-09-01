@@ -178,6 +178,20 @@ export function recordNetwork(
     );
     responseHeaders.set(response.request(), headerCapture);
     pending.push(headerCapture);
+    const serverActionTerminal = serverActionTerminals.get(response.request());
+    if (serverActionTerminal) {
+      // Chromium can expose a completed response body through Response.finished()
+      // without emitting page.requestfinished to a listener that was retained
+      // across the Server Action's client navigation. The response promise is
+      // still the exact transport terminal: both fulfillment and rejection mean
+      // that this request can no longer produce bytes. Keep requestfinished and
+      // requestfailed as independent terminal signals, but do not leave a
+      // completed action permanently pending when that page event is omitted.
+      void response.finished().then(
+        serverActionTerminal.resolve,
+        serverActionTerminal.resolve,
+      );
+    }
   };
 
   const handleRequestFinished = (request: Request) => {

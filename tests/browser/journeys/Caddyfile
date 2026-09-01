@@ -158,9 +158,14 @@ https://chatwoot.browser.clean-pay.dev {
             const message = JSON.parse(event.data.slice("chatwoot-widget:".length));
             if (message.event === "loaded") {
               calls.push({ method: "frame.loaded" });
+              const becameReady = readyFrameWindow !== target;
               readyFrameWindow = target;
               if (inFlightIdentity?.frameWindow !== target) inFlightIdentity = null;
               deliverIdentity();
+              api.hasLoaded = true;
+              if (becameReady) {
+                window.dispatchEvent(new CustomEvent("chatwoot:ready"));
+              }
             }
             if (message.event === "setAuthCookie"
               && inFlightIdentity?.frameWindow === target
@@ -174,7 +179,7 @@ https://chatwoot.browser.clean-pay.dev {
         const api = {
           baseUrl: config.baseUrl,
           websiteToken: config.websiteToken,
-          hasLoaded: true,
+          hasLoaded: false,
           resetTriggered: false,
           setUser(identifier, attributes) {
             calls.push({ method: "setUser", identifierBytes: String(identifier || "").length, attributeKeys: Object.keys(attributes || {}).sort() });
@@ -208,7 +213,6 @@ https://chatwoot.browser.clean-pay.dev {
           },
         };
         window.$chatwoot = api;
-        queueMicrotask(() => window.dispatchEvent(new CustomEvent("chatwoot:ready")));
       },
     });
     })();` 200

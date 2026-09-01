@@ -42,8 +42,15 @@ test("binds identity confirmation to the current Chatwoot iframe delivery", asyn
   });
   await page.goto(`${applicationOrigin}/fixture`, { waitUntil: "domcontentloaded" });
   await page.evaluate((expectedOrigin) => {
-    const probe = { deliveries: [] as unknown[], ready: [] as string[] };
+    const probe = {
+      chatwootReadyCount: 0,
+      deliveries: [] as unknown[],
+      ready: [] as string[],
+    };
     Object.defineProperty(window, "__syntheticChatwootSdkProbe", { value: probe });
+    addEventListener("chatwoot:ready", () => {
+      probe.chatwootReadyCount += 1;
+    });
     addEventListener("message", (event) => {
       if (
         event.origin !== expectedOrigin
@@ -62,6 +69,14 @@ test("binds identity confirmation to the current Chatwoot iframe delivery", asyn
   await page.evaluate(({ baseUrl, websiteToken }) => {
     window.chatwootSDK?.run({ baseUrl, websiteToken });
   }, { baseUrl: chatwootOrigin, websiteToken: "a".repeat(64) });
+  await expect.poll(() => page.evaluate(() => ({
+    hasLoaded: window.$chatwoot?.hasLoaded,
+    readyCount: (
+      window as unknown as {
+        __syntheticChatwootSdkProbe: { chatwootReadyCount: number };
+      }
+    ).__syntheticChatwootSdkProbe.chatwootReadyCount,
+  }))).toEqual({ hasLoaded: false, readyCount: 0 });
   await expect.poll(() => page.evaluate(() => (
     window as unknown as { __syntheticChatwootSdkProbe: { ready: string[] } }
   ).__syntheticChatwootSdkProbe.ready)).toEqual(["A"]);
@@ -81,6 +96,14 @@ test("binds identity confirmation to the current Chatwoot iframe delivery", asyn
       custom_attributes: {},
     });
   }, chatwootOrigin);
+  await expect.poll(() => page.evaluate(() => ({
+    hasLoaded: window.$chatwoot?.hasLoaded,
+    readyCount: (
+      window as unknown as {
+        __syntheticChatwootSdkProbe: { chatwootReadyCount: number };
+      }
+    ).__syntheticChatwootSdkProbe.chatwootReadyCount,
+  }))).toEqual({ hasLoaded: true, readyCount: 1 });
   await expect.poll(() => page.evaluate(() => (
     window as unknown as { __syntheticChatwootSdkProbe: { deliveries: unknown[] } }
   ).__syntheticChatwootSdkProbe.deliveries)).toEqual([
