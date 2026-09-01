@@ -2,6 +2,7 @@ import { realpath } from "node:fs/promises";
 import path from "node:path";
 
 import { orchestrateChatwootPhaseProof } from "./chatwoot-phase-proof-orchestrator.mjs";
+import { createJourneySanitizedErrorEvidence } from "./journey-error-evidence.mjs";
 import {
   readExactChatwootExternalPlan,
   sha256,
@@ -40,10 +41,13 @@ try {
     artifactCount: result.evidence.artifactCount,
   })}\n`);
 } catch (error) {
+  const sanitized = createJourneySanitizedErrorEvidence(error);
   process.stderr.write(`${JSON.stringify({
     status: "dual_image_chatwoot_phase_stability_failed",
     errorClass: error?.constructor?.name ?? "Error",
     messageSha256: sha256(String(error?.message ?? "unknown")),
+    causeEvidence: sanitized.causeEvidence,
+    causeEvidenceTruncated: sanitized.causeEvidenceTruncated,
   })}\n`);
   process.exitCode = 1;
 }
