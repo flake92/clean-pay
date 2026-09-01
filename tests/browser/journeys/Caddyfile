@@ -118,7 +118,6 @@ https://chatwoot.browser.clean-pay.dev {
         data: { deliveryId, widgetAuthToken: "synthetic-widget-auth" },
       }), 1200);
     });
-    send({ event: "fixture.frame-loaded" });
     send({ event: "loaded" });
     </script></body></html>` 200
 
@@ -158,20 +157,16 @@ https://chatwoot.browser.clean-pay.dev {
           if (!event.data.startsWith("chatwoot-widget:")) return;
           try {
             const message = JSON.parse(event.data.slice("chatwoot-widget:".length));
-            if (message.event === "fixture.frame-loaded") {
-              if (announcedFrameWindow !== target) {
-                calls.push({ method: "frame.loaded" });
-                announcedFrameWindow = target;
-              }
-            }
             if (message.event === "loaded") {
-              if (announcedFrameWindow !== target) {
-                calls.push({ method: "frame.loaded" });
-                announcedFrameWindow = target;
-              }
               readyFrameWindow = target;
               if (inFlightIdentity?.frameWindow !== target) inFlightIdentity = null;
               deliverIdentity();
+              queueMicrotask(() => {
+                if (announcedFrameWindow !== target && currentFrameWindow() === target) {
+                  calls.push({ method: "frame.loaded" });
+                  announcedFrameWindow = target;
+                }
+              });
             }
             if (message.event === "setAuthCookie"
               && inFlightIdentity?.frameWindow === target

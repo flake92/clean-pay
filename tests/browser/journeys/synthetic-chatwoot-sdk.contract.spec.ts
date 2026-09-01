@@ -43,6 +43,7 @@ test("binds identity confirmation to the current Chatwoot iframe delivery", asyn
   await page.goto(`${applicationOrigin}/fixture`, { waitUntil: "domcontentloaded" });
   await page.evaluate((expectedOrigin) => {
     const probe = {
+      activateReplacementIdentityOnLoaded: false,
       chatwootReadyCount: 0,
       deliveries: [] as unknown[],
       ready: [] as string[],
@@ -52,11 +53,24 @@ test("binds identity confirmation to the current Chatwoot iframe delivery", asyn
       probe.chatwootReadyCount += 1;
     });
     addEventListener("message", (event) => {
-      if (
-        event.origin !== expectedOrigin
-        || typeof event.data !== "object"
-        || event.data === null
-      ) return;
+      if (event.origin !== expectedOrigin) return;
+      if (typeof event.data === "string") {
+        const current = document.getElementById("chatwoot_live_chat_widget") as HTMLIFrameElement | null;
+        if (
+          probe.activateReplacementIdentityOnLoaded
+          && event.data === 'chatwoot-widget:{"event":"loaded"}'
+          && event.source === current?.contentWindow
+        ) {
+          probe.activateReplacementIdentityOnLoaded = false;
+          queueMicrotask(() => window.$chatwoot?.setUser("identity-B", {
+            name: "B",
+            identifier_hash: "hash-B",
+            custom_attributes: {},
+          }));
+        }
+        return;
+      }
+      if (typeof event.data !== "object" || event.data === null) return;
       if (event.data.kind === "probe-ready" && typeof event.data.generation === "string") {
         probe.ready.push(event.data.generation);
       }
@@ -132,6 +146,11 @@ test("binds identity confirmation to the current Chatwoot iframe delivery", asyn
     const stale = (window as unknown as { __staleSyntheticChatwootWindow: WindowProxy })
       .__staleSyntheticChatwootWindow;
     const current = document.getElementById("chatwoot_live_chat_widget") as HTMLIFrameElement;
+    (
+      window as unknown as {
+        __syntheticChatwootSdkProbe: { activateReplacementIdentityOnLoaded: boolean };
+      }
+    ).__syntheticChatwootSdkProbe.activateReplacementIdentityOnLoaded = true;
     dispatchEvent(new MessageEvent("message", {
       data: 'chatwoot-widget:{"event":"loaded"}',
       origin: baseUrl,
@@ -142,11 +161,6 @@ test("binds identity confirmation to the current Chatwoot iframe delivery", asyn
       origin: baseUrl,
       source: current.contentWindow,
     }));
-    window.$chatwoot?.setUser("identity-B", {
-      name: "B",
-      identifier_hash: "hash-B",
-      custom_attributes: {},
-    });
   }, chatwootOrigin);
   await expect.poll(() => page.evaluate(() => (
     window as unknown as { __syntheticChatwootSdkProbe: { deliveries: unknown[] } }
@@ -184,12 +198,12 @@ test("binds identity confirmation to the current Chatwoot iframe delivery", asyn
       attributeKeys: ["custom_attributes", "identifier_hash", "name"],
     },
     { method: "frame.loaded" },
-    { method: "frame.loaded" },
     {
       method: "setUser",
       identifierBytes: 10,
       attributeKeys: ["custom_attributes", "identifier_hash", "name"],
     },
+    { method: "frame.loaded" },
     { method: "identity.confirmed" },
   ]);
 });
