@@ -8,6 +8,7 @@ import {
 } from "@/app/actions/passkeys";
 import { passkeyLoginErrorMessage } from "@/frontend/components/passkey-presentation";
 import { navigateTo } from "@/frontend/lib/browser-navigation";
+import { executePasskeyLogin } from "@/frontend/lib/passkey-login-orchestrator";
 import { safeRedirectPath } from "@/shared/auth/redirect-policy";
 import { useWebAuthnSupport } from "@/frontend/hooks/use-webauthn-support";
 
@@ -20,7 +21,7 @@ type PasskeyLoginDependencies = {
 
 const productionPasskeyLoginDependencies: PasskeyLoginDependencies = {
   beginLogin: beginPasskeyLoginAction,
-  navigate: navigateTo,
+  navigate: (destination) => navigateTo(destination),
   startAuthentication,
   verifyLogin: verifyPasskeyLoginAction,
 };
@@ -63,28 +64,19 @@ export function usePasskeyLoginController({
     setError(null);
 
     try {
-      const optionsResult = await dependencies.beginLogin({
+      const result = await executePasskeyLogin({
+        dependencies: {
+          beginLogin: dependencies.beginLogin,
+          navigate: dependencies.navigate,
+          resetTurnstile,
+          startAuthentication: dependencies.startAuthentication,
+          verifyLogin: dependencies.verifyLogin,
+        },
+        destination,
         email,
-        ...(turnstileToken ? { turnstileToken } : {}),
+        turnstileToken,
       });
-      resetTurnstile?.();
-
-      if (!optionsResult.ok) {
-        setError(optionsResult.message);
-        return;
-      }
-
-      const assertion = await dependencies.startAuthentication({
-        optionsJSON: optionsResult.options,
-      });
-      const verifyResult = await dependencies.verifyLogin(assertion);
-
-      if (!verifyResult.ok) {
-        setError(verifyResult.message);
-        return;
-      }
-
-      dependencies.navigate(destination);
+      if (!result.ok) setError(result.message);
     } catch (caught) {
       resetTurnstile?.();
       setError(passkeyLoginErrorMessage(caught));

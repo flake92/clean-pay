@@ -185,6 +185,91 @@ describe("passkey controller characterization", () => {
     ]);
   });
 
+  it("keeps a missing Turnstile token outside the login fence and actions", async () => {
+    const consumeTurnstileToken = vi.fn(() => null);
+    const resetTurnstile = vi.fn(() => mocks.events.push("reset-turnstile"));
+    render(createElement(PasskeyLoginButton, {
+      consumeTurnstileToken,
+      email: "person@example.test",
+      resetTurnstile,
+      turnstileEnabled: true,
+    }));
+    const button = await screen.findByRole("button", { name: "Войти быстро" });
+
+    fireEvent.click(button);
+
+    expect(consumeTurnstileToken).toHaveBeenCalledOnce();
+    expect(mocks.beginLogin).not.toHaveBeenCalled();
+    expect(mocks.startAuthentication).not.toHaveBeenCalled();
+    expect(mocks.verifyLogin).not.toHaveBeenCalled();
+    expect(resetTurnstile).not.toHaveBeenCalled();
+    expect((button as HTMLButtonElement).disabled).toBe(false);
+    expect(screen.getByText("Пройдите единую проверку безопасности.")).toBeTruthy();
+  });
+
+  it("keeps one catch reset when the begin action throws", async () => {
+    const consumeTurnstileToken = vi.fn(() => {
+      mocks.events.push("consume-turnstile");
+      return "turnstile-token";
+    });
+    const resetTurnstile = vi.fn(() => mocks.events.push("reset-turnstile"));
+    mocks.beginLogin.mockRejectedValue(new TypeError("Failed to fetch"));
+    render(createElement(PasskeyLoginButton, {
+      consumeTurnstileToken,
+      email: "person@example.test",
+      resetTurnstile,
+      turnstileEnabled: true,
+    }));
+    const button = await screen.findByRole("button", { name: "Войти быстро" });
+
+    fireEvent.click(button);
+
+    await waitFor(() => expect(resetTurnstile).toHaveBeenCalledOnce());
+    expect(mocks.startAuthentication).not.toHaveBeenCalled();
+    expect(mocks.verifyLogin).not.toHaveBeenCalled();
+    expect(mocks.navigateTo).not.toHaveBeenCalled();
+    expect(mocks.events).toEqual([
+      "consume-turnstile",
+      "begin-login",
+      "reset-turnstile",
+    ]);
+  });
+
+  it("keeps the second catch reset when WebAuthn throws after begin", async () => {
+    const consumeTurnstileToken = vi.fn(() => {
+      mocks.events.push("consume-turnstile");
+      return "turnstile-token";
+    });
+    const resetTurnstile = vi.fn(() => mocks.events.push("reset-turnstile"));
+    mocks.beginLogin.mockResolvedValue({
+      ok: true,
+      options: { challenge: "login-options" },
+    });
+    mocks.startAuthentication.mockRejectedValue(
+      Object.assign(new Error("cancelled"), { name: "NotAllowedError" }),
+    );
+    render(createElement(PasskeyLoginButton, {
+      consumeTurnstileToken,
+      email: "person@example.test",
+      resetTurnstile,
+      turnstileEnabled: true,
+    }));
+    const button = await screen.findByRole("button", { name: "Войти быстро" });
+
+    fireEvent.click(button);
+
+    await waitFor(() => expect(resetTurnstile).toHaveBeenCalledTimes(2));
+    expect(mocks.verifyLogin).not.toHaveBeenCalled();
+    expect(mocks.navigateTo).not.toHaveBeenCalled();
+    expect(mocks.events).toEqual([
+      "consume-turnstile",
+      "begin-login",
+      "reset-turnstile",
+      "start-authentication",
+      "reset-turnstile",
+    ]);
+  });
+
   it("fences duplicate setup and preserves the trimmed registration name payload", async () => {
     let resolveOptions!: (value: {
       ok: true;
