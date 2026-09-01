@@ -225,6 +225,22 @@ type BrowserRequestLedger = {
   responseByIdentity: Map<Request, Response>;
 };
 
+type InitialCabinetBarrierInput = Readonly<{
+  barrierConsumed: boolean;
+  classificationKey: string;
+  currentDocumentKey: BrowserRequestLedger["currentDocumentKey"];
+  generation: "initial" | "recreated";
+  initialCabinetFreshWidgetCount: number;
+  isNavigationRequest: boolean;
+  ownerIsMainFrame: boolean;
+  ownerUrl: string | null;
+}>;
+
+type InitialCabinetBarrierDecision = Readonly<{
+  action: "abort-unexpected" | "continue" | "hold";
+  initialCabinetFreshWidgetCount: number;
+}>;
+
 type ProviderLedger = {
   database: unknown;
   entries: Array<Record<string, unknown>>;
@@ -473,12 +489,43 @@ async function exerciseChatwootPhases(input: CaptureInput & {
       await route.abort("blockedbyclient");
       return;
     }
+    let isNavigationRequest = false;
+    let ownerIsMainFrame = false;
+    let ownerUrl: string | null = null;
+    if (new Set([
+      "chatwoot-widget-conversation-frame",
+      "chatwoot-widget-frame",
+    ]).has(classification.key)) {
+      try {
+        const ownerFrame = request.frame().parentFrame();
+        isNavigationRequest = request.isNavigationRequest();
+        ownerIsMainFrame = ownerFrame === page.mainFrame();
+        ownerUrl = ownerFrame?.url() ?? null;
+      } catch {
+        diagnostics.recordUnexpectedRequest(request.url());
+        await route.abort("blockedbyclient");
+        return;
+      }
+    }
+    const barrierConsumed = classification.key === "chatwoot-widget-conversation-frame"
+      ? input.barrier.wasConsumed()
+      : false;
+    const barrierDecision = advanceInitialCabinetBarrierForTest({
+      barrierConsumed,
+      classificationKey: classification.key,
+      currentDocumentKey: ledger.currentDocumentKey,
+      generation,
+      initialCabinetFreshWidgetCount,
+      isNavigationRequest,
+      ownerIsMainFrame,
+      ownerUrl,
+    });
     if (
       generation === "initial"
       && ledger.currentDocumentKey === "app-cabinet-document"
       && classification.key === "chatwoot-widget-frame"
     ) {
-      initialCabinetFreshWidgetCount += 1;
+      initialCabinetFreshWidgetCount = barrierDecision.initialCabinetFreshWidgetCount;
     }
     if (classification.disposition === "abort") {
       await route.abort("blockedbyclient");
@@ -488,9 +535,15 @@ async function exerciseChatwootPhases(input: CaptureInput & {
       generation === "initial"
       && ledger.currentDocumentKey === "app-cabinet-document"
       && classification.key === "chatwoot-widget-conversation-frame"
-      && !input.barrier.wasConsumed()
+      && barrierDecision.action !== "continue"
+      && !barrierConsumed
     ) {
       if (initialCabinetFreshWidgetCount < 1) {
+        diagnostics.recordUnexpectedRequest(request.url());
+        await route.abort("blockedbyclient");
+        return;
+      }
+      if (barrierDecision.action !== "hold") {
         diagnostics.recordUnexpectedRequest(request.url());
         await route.abort("blockedbyclient");
         return;
@@ -1439,6 +1492,34 @@ function createBrowserRequestLedger(): BrowserRequestLedger {
     currentDocumentKey: null,
     responseByIdentity: new Map(),
   };
+}
+
+export function advanceInitialCabinetBarrierForTest(
+  input: InitialCabinetBarrierInput,
+): InitialCabinetBarrierDecision {
+  if (!Number.isSafeInteger(input.initialCabinetFreshWidgetCount)
+    || input.initialCabinetFreshWidgetCount < 0) {
+    throw new Error("Chatwoot initial cabinet widget count is invalid.");
+  }
+  const cabinetOwnedFrame = input.generation === "initial"
+    && input.currentDocumentKey === "app-cabinet-document"
+    && input.isNavigationRequest
+    && input.ownerIsMainFrame
+    && input.ownerUrl === `${SYNTHETIC_APPLICATION_ORIGIN}/cabinet`;
+  const initialCabinetFreshWidgetCount = cabinetOwnedFrame
+    && input.classificationKey === "chatwoot-widget-frame"
+    ? input.initialCabinetFreshWidgetCount + 1
+    : input.initialCabinetFreshWidgetCount;
+  let action: InitialCabinetBarrierDecision["action"] = "continue";
+  if (cabinetOwnedFrame
+    && input.classificationKey === "chatwoot-widget-conversation-frame"
+    && !input.barrierConsumed) {
+    action = initialCabinetFreshWidgetCount < 1 ? "abort-unexpected" : "hold";
+  }
+  return Object.freeze({
+    action,
+    initialCabinetFreshWidgetCount,
+  });
 }
 
 function provisionalBrowserRecords(ledger: BrowserRequestLedger) {
