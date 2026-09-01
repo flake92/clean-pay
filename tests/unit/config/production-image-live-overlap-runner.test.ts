@@ -1249,6 +1249,16 @@ describe("ephemeral production-image live overlap runner", () => {
     expect(productionImage.match(
       /run-production-image-live-overlap\.mjs run/g,
     )).toHaveLength(8);
+    expect(productionImage).toContain(
+      "node node_modules/playwright/cli.js install chromium",
+    );
+    expect(productionImage).not.toContain("playwright/cli.js install --with-deps");
+    expect(productionImage).toContain("await chromium.launch({ headless: true })");
+    expect(productionImage).toContain("id: capture_identity");
+    expect(productionImage).toContain("id: preparation_phase");
+    expect(productionImage).toContain(
+      "if: ${{ always() && steps.preparation_phase.outcome != 'skipped' }}",
+    );
     expect(productionImage).not.toContain("continue-on-error:");
     expect(runner).toContain(
       "Live overlap phase replay, overlap, or forward state is forbidden.",
