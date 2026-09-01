@@ -1674,7 +1674,7 @@ describe("clean architecture boundaries", () => {
   });
 
   it("keeps human-verification ordering in application use cases", () => {
-    const useCase = readFileSync("src/application/auth/execute-passkey-command.ts", "utf8");
+    const useCase = readFileSync("src/application/auth/execute-passkey-login.ts", "utf8");
     const gateway = readFileSync("src/backend/integrations/auth/passkey-gateway.ts", "utf8");
     const legacyService = readFileSync("src/backend/integrations/auth/passkey-service.ts", "utf8");
 
@@ -1684,6 +1684,30 @@ describe("clean architecture boundaries", () => {
     expect(gateway).not.toContain("if (!account?.credentials.length)");
     expect(gateway).not.toContain("challenge.userId !== credential.userId");
     expect(legacyService).not.toMatch(/export async function (begin|finish)Passkey/);
+  });
+
+  it("keeps Passkey login behind a narrow command port and the stable facade", () => {
+    const loginUseCase = readFileSync(
+      "src/application/auth/execute-passkey-login.ts",
+      "utf8",
+    );
+    const commandPort = readFileSync(
+      "src/application/auth/ports/passkey-commands.ts",
+      "utf8",
+    );
+    const facade = readFileSync(
+      "src/application/auth/execute-passkey-command.ts",
+      "utf8",
+    );
+
+    expect(loginUseCase).toContain("commands: PasskeyLoginCommands");
+    expect(loginUseCase).not.toMatch(/Registration|loadRegistrationActor/);
+    expect(commandPort).toContain("export type PasskeyLoginCommands = Pick<");
+    expect(facade).toContain(
+      'from "@/application/auth/execute-passkey-login";',
+    );
+    expect(facade).toContain("export async function beginPasskeyRegistration(");
+    expect(facade).toContain("export async function verifyPasskeyRegistration(");
   });
 
   it("keeps e-mail verification and change workflows in the application layer", () => {
