@@ -77,6 +77,7 @@ const providerProofSanitizedFilename = "provider-overlap.json";
 const providerProofFailureSanitizedFilename = "provider-overlap-failure.json";
 const providerDiagnosticDeferralMessage =
   "Provider live overlap was intentionally deferred for the isolated Chatwoot diagnostic.";
+const providerDiagnosticExecutionMode = "defer-chatwoot-diagnostic";
 const providerDiagnosticDeferralStatus = "deferred-chatwoot-diagnostic";
 const maximumProviderProofBytes = 16 * 1024 * 1024;
 const chatwootInputRootName = "chatwoot-live-proof";
@@ -434,7 +435,7 @@ async function runProviderPhase(plan) {
       context.receipts.public.value.result,
       "public",
     );
-    if (resolveLiveOverlapProviderExecutionMode() === providerDiagnosticDeferralStatus) {
+    if (isProviderDiagnosticExecutionMode(resolveLiveOverlapProviderExecutionMode())) {
       await completePhase(plan, "provider", context, createProviderDiagnosticDeferral());
       return;
     }
@@ -465,6 +466,10 @@ export function resolveLiveOverlapProviderExecutionMode(source = process.env) {
   if (value === undefined || value === "prove") return "prove";
   if (value === "defer-chatwoot-diagnostic") return value;
   throw new Error("Live overlap provider execution mode is invalid.");
+}
+
+export function isProviderDiagnosticExecutionMode(value) {
+  return value === providerDiagnosticExecutionMode;
 }
 
 async function runAuthenticatedPhase(plan) {
@@ -578,7 +583,7 @@ async function validatePriorProofPhaseOutcome(plan, phase, receipt, inputs) {
   }
   if (phase === "provider") {
     if (result.status === providerDiagnosticDeferralStatus) {
-      if (resolveLiveOverlapProviderExecutionMode() !== providerDiagnosticDeferralStatus) {
+      if (!isProviderDiagnosticExecutionMode(resolveLiveOverlapProviderExecutionMode())) {
         throw new Error("Provider diagnostic deferral is forbidden outside its explicit mode.");
       }
       validateProviderDiagnosticDeferral(result);

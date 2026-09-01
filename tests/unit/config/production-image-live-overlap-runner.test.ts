@@ -11,6 +11,7 @@ import {
   createLiveOverlapPlan,
   createRunnerChatwootLiveProofPlan,
   exactPersistedRoleProofInput,
+  isProviderDiagnosticExecutionMode,
   parseLiveOverlapArguments,
   proofArguments,
   providerProofArguments,
@@ -939,6 +940,9 @@ describe("ephemeral production-image live overlap runner", () => {
   });
 
   it("records an exact Provider diagnostic deferral without sealing full evidence", () => {
+    expect(isProviderDiagnosticExecutionMode("defer-chatwoot-diagnostic")).toBe(true);
+    expect(isProviderDiagnosticExecutionMode("deferred-chatwoot-diagnostic")).toBe(false);
+    expect(isProviderDiagnosticExecutionMode("prove")).toBe(false);
     const previousReceiptSha256 = "e".repeat(64);
     const startedReceiptSha256 = "1".repeat(64);
     const message =
