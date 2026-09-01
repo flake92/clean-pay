@@ -237,6 +237,54 @@ test("emits one exact digest-only CLI failure record without starting Docker", a
   expect(failure?.stderr?.toLowerCase()).not.toContain(repositoryRoot.toLowerCase());
 });
 
+test("emits bounded Chatwoot child-evidence fields without starting Docker", async () => {
+  const repositoryRoot = path.resolve(__dirname, "../../..");
+  const privateMarker = "synthetic-chatwoot-argument-must-not-escape";
+  let failure: (Error & {
+    code?: number | string;
+    stderr?: string;
+    stdout?: string;
+  }) | undefined;
+  try {
+    await execFileAsync(process.execPath, [
+      path.resolve(__dirname, "prove-chatwoot-phase-stability.mjs"),
+      "--synthetic-private-argument",
+      privateMarker,
+    ], {
+      cwd: repositoryRoot,
+      encoding: "utf8",
+      env: childProcessEnvironment(),
+      maxBuffer: 64 * 1024,
+      timeout: 10_000,
+      windowsHide: true,
+    });
+  } catch (error) {
+    failure = error as typeof failure;
+  }
+
+  expect(failure?.code).toBe(1);
+  expect(failure?.stdout).toBe("");
+  expect(failure?.stderr?.endsWith("\n")).toBe(true);
+  expect(failure?.stderr?.match(/\n/g)).toHaveLength(1);
+  const record = JSON.parse(failure?.stderr ?? "null");
+  expect(Object.keys(record).sort()).toEqual([
+    "causeEvidence",
+    "causeEvidenceTruncated",
+    "errorClass",
+    "messageSha256",
+    "status",
+  ]);
+  expect(record).toEqual({
+    causeEvidence: [],
+    causeEvidenceTruncated: false,
+    errorClass: "Error",
+    messageSha256: sha256("Chatwoot proof requires exact --plan and --output flag/value pairs."),
+    status: "dual_image_chatwoot_phase_stability_failed",
+  });
+  expect(failure?.stderr).not.toContain(privateMarker);
+  expect(failure?.stderr?.toLowerCase()).not.toContain(repositoryRoot.toLowerCase());
+});
+
 test("seals the exact provider child failure before Docker and never overwrites it", async () => {
   const repositoryRoot = path.resolve(__dirname, "../../..");
   const captureId = randomBytes(8).toString("hex");
