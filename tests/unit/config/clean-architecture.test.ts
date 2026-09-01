@@ -1738,8 +1738,30 @@ describe("clean architecture boundaries", () => {
     expect(facade).toContain(
       'from "@/application/auth/execute-passkey-login";',
     );
-    expect(facade).toContain("export async function beginPasskeyRegistration(");
-    expect(facade).toContain("export async function verifyPasskeyRegistration(");
+    expect(facade).toContain(
+      'from "@/application/auth/execute-passkey-registration";',
+    );
+  });
+
+  it("keeps Passkey registration behind its narrow command port", () => {
+    const registrationUseCase = readFileSync(
+      "src/application/auth/execute-passkey-registration.ts",
+      "utf8",
+    );
+    const commandPort = readFileSync(
+      "src/application/auth/ports/passkey-commands.ts",
+      "utf8",
+    );
+
+    expect(registrationUseCase).toContain(
+      "commands: PasskeyRegistrationCommands",
+    );
+    expect(registrationUseCase).not.toMatch(
+      /assertLoginOptionsRateLimit|findLoginAccount|createAuthenticatedSession/,
+    );
+    expect(commandPort).toContain(
+      "export type PasskeyRegistrationCommands = Pick<",
+    );
   });
 
   it("keeps e-mail verification and change workflows in the application layer", () => {
