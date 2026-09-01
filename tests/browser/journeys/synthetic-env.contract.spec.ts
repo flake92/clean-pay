@@ -105,7 +105,7 @@ test("materializes two deterministic self-contained role environments", async ()
     expect(assertSyntheticCaddyRouteOrder(caddySource)).toEqual({
       chatwootIdentityDelivery: {
         aboutBlankLoadDeliveryBlocked: true,
-        boundaryObservation: "post-capture-loaded-microtask",
+        boundaryObservation: "retry-aware-trusted-loaded",
         confirmation: "matching-current-frame-delivery",
         identityDeliverySignal: "trusted-widget-loaded-message",
         readinessSignal: "sdk-ready-before-iframe",
@@ -138,8 +138,8 @@ test("materializes two deterministic self-contained role environments", async ()
         "          if (event.source !== target || typeof event.data !== \"string\") return;",
       ),
       caddySource.replace(
-        "              readyFrameWindow = target;\n              if (inFlightIdentity?.frameWindow !== target) inFlightIdentity = null;\n              deliverIdentity();",
-        "              deliverIdentity();\n              readyFrameWindow = target;\n              if (inFlightIdentity?.frameWindow !== target) inFlightIdentity = null;",
+        "              readyFrameWindow = target;\n              if (inFlightIdentity?.frameWindow !== target) inFlightIdentity = null;\n              const observeAfterIdentityRetry = window.cleanPayChatwootPendingIdentity?.phase === \"waiting_for_frame\";\n              deliverIdentity();",
+        "              const observeAfterIdentityRetry = window.cleanPayChatwootPendingIdentity?.phase === \"waiting_for_frame\";\n              deliverIdentity();\n              readyFrameWindow = target;\n              if (inFlightIdentity?.frameWindow !== target) inFlightIdentity = null;",
       ),
       caddySource
         .replace("        document.body.appendChild(frame);\n        const api = {", "        const api = {")
@@ -172,16 +172,16 @@ test("materializes two deterministic self-contained role environments", async ()
         "              calls.push({ method: \"identity.confirmed\" });\n              inFlightIdentity = null;",
       ),
       caddySource.replace(
-        "              deliverIdentity();\n              queueMicrotask(() => {",
-        "              queueMicrotask(() => {\n              deliverIdentity();",
+        "              const observeAfterIdentityRetry = window.cleanPayChatwootPendingIdentity?.phase === \"waiting_for_frame\";",
+        "              const observeAfterIdentityRetry = true;",
       ),
       caddySource.replace(
         "                if (announcedFrameWindow !== target && currentFrameWindow() === target) {",
         "                if (announcedFrameWindow !== target) {",
       ),
       caddySource.replace(
-        "              queueMicrotask(() => {",
-        "              (() => {",
+        "              if (observeAfterIdentityRetry) queueMicrotask(announceFrameLoaded);\n              else announceFrameLoaded();",
+        "              queueMicrotask(announceFrameLoaded);",
       ),
       caddySource.replace("          hasLoaded: true,", "          hasLoaded: false,"),
       caddySource.replace(
