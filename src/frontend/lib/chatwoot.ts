@@ -398,7 +398,10 @@ export function confirmChatwootIdentity(expectedAttemptId?: string) {
   });
   const conversation = chatwootCookieValue("cw_conversation");
   if (conversation) {
-    rememberChatwootOwnership(pending, conversation, false);
+    rememberChatwootOwnership({
+      core: pending.core,
+      customAttributes: pending.customAttributes,
+    }, conversation, false);
   }
   return true;
 }
