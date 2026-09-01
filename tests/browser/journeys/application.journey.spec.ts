@@ -116,6 +116,11 @@ test("email-register-verify-and-login", async ({ journey }, testInfo) => {
       }
       await restorePreOwnedChatwootSeed(page, preOwnedChatwootSeed);
       await gotoHeading(page, "/cabinet", "Личный кабинет");
+      const seedMarker = await page.evaluate(
+        (marker) => sessionStorage.getItem(marker),
+        preOwnedChatwootSeedMarker,
+      );
+      expect(seedMarker).toBeNull();
       await waitForAuthenticatedChatwootFixture(page);
     });
   }
@@ -500,6 +505,8 @@ type PreOwnedChatwootSeed = {
   ownership: string;
 };
 
+const preOwnedChatwootSeedMarker = "clean-pay:test-chatwoot-pre-owned-seed:v1";
+
 async function installFirstChatwootOwnershipCapture(page: Page) {
   await page.addInitScript(() => {
     const storagePrototype = Storage.prototype;
@@ -572,21 +579,31 @@ async function capturePreOwnedChatwootSeed(page: Page): Promise<PreOwnedChatwoot
 async function restorePreOwnedChatwootSeed(page: Page, seed: PreOwnedChatwootSeed) {
   parsePersistedChatwootOwnership(seed.ownership);
   expect(await readChatwootCookies(page)).toEqual(seed.cookies);
-  const storage = await page.evaluate((ownership) => {
+  await page.addInitScript(({ marker, ownership }) => {
+    if (sessionStorage.getItem(marker) !== "armed") {
+      return;
+    }
+    localStorage.setItem("clean-pay:chatwoot-ownership:v1", ownership);
+    sessionStorage.removeItem(marker);
+  }, { marker: preOwnedChatwootSeedMarker, ownership: seed.ownership });
+  const storage = await page.evaluate(({ marker, ownership }) => {
     localStorage.removeItem("clean-pay:chatwoot-identity:v1");
     localStorage.setItem("clean-pay:chatwoot-ownership:v1", ownership);
+    sessionStorage.setItem(marker, "armed");
     return {
       identity: localStorage.getItem("clean-pay:chatwoot-identity:v1"),
       keys: Object.keys(localStorage)
         .filter((key) => key.startsWith("clean-pay:chatwoot-"))
         .sort(),
       ownership: localStorage.getItem("clean-pay:chatwoot-ownership:v1"),
+      seedMarker: sessionStorage.getItem(marker),
     };
-  }, seed.ownership);
+  }, { marker: preOwnedChatwootSeedMarker, ownership: seed.ownership });
   expect(storage).toEqual({
     identity: null,
     keys: ["clean-pay:chatwoot-ownership:v1"],
     ownership: seed.ownership,
+    seedMarker: "armed",
   });
   expect(await readChatwootCookies(page)).toEqual(seed.cookies);
 }
