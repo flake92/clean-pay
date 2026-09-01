@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useReducer, useRef } from "react";
 
 import { startAuthentication } from "@simplewebauthn/browser";
 
@@ -6,6 +6,11 @@ import {
   beginPasskeyLoginAction,
   verifyPasskeyLoginAction,
 } from "@/app/actions/passkeys";
+import {
+  initialPasskeyLoginState,
+  reducePasskeyLogin,
+  selectPasskeyLoginView,
+} from "@/frontend/components/passkey-login-transitions";
 import { passkeyLoginErrorMessage } from "@/frontend/components/passkey-presentation";
 import { navigateTo } from "@/frontend/lib/browser-navigation";
 import { executePasskeyLogin } from "@/frontend/lib/passkey-login-orchestrator";
@@ -43,8 +48,11 @@ export function usePasskeyLoginController({
 }) {
   const destination = safeRedirectPath(redirectTo) ?? "/cabinet";
   const supported = useWebAuthnSupport();
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [state, dispatch] = useReducer(
+    reducePasskeyLogin,
+    initialPasskeyLoginState,
+  );
+  const { error, loading } = selectPasskeyLoginView(state);
   const loginPendingRef = useRef(false);
 
   async function login() {
@@ -56,12 +64,14 @@ export function usePasskeyLoginController({
       ? consumeTurnstileToken?.() ?? null
       : null;
     if (turnstileEnabled && !turnstileToken) {
-      setError("Пройдите единую проверку безопасности.");
+      dispatch({
+        type: "failed",
+        message: "Пройдите единую проверку безопасности.",
+      });
       return;
     }
     loginPendingRef.current = true;
-    setLoading(true);
-    setError(null);
+    dispatch({ type: "started" });
 
     try {
       const result = await executePasskeyLogin({
@@ -76,13 +86,16 @@ export function usePasskeyLoginController({
         email,
         turnstileToken,
       });
-      if (!result.ok) setError(result.message);
+      if (!result.ok) dispatch({ type: "failed", message: result.message });
     } catch (caught) {
       resetTurnstile?.();
-      setError(passkeyLoginErrorMessage(caught));
+      dispatch({
+        type: "failed",
+        message: passkeyLoginErrorMessage(caught),
+      });
     } finally {
       loginPendingRef.current = false;
-      setLoading(false);
+      dispatch({ type: "settled" });
     }
   }
 
