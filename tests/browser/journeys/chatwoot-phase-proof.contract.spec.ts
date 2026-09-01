@@ -39,6 +39,7 @@ import {
   assertChatwootAtomicPhaseRead,
   assertChatwootFinalSourceReread,
   assertChatwootHistoryLifecycle,
+  advanceInitialCabinetBarrierForTest,
   canonicalChatwootHistorySemantics,
   assertChatwootPhaseBoundaryLedger,
   assertChatwootPhaseProviderLedger,
@@ -73,6 +74,7 @@ import {
 import { buildJourneySyntheticEnvironment } from "./journey-synthetic-environment-contract.mjs";
 import { JOURNEY_FIXTURE_FILENAMES } from "./journey-fixture-manifest.mjs";
 import { withJourneyOwnedStackPair } from "./journey-owned-stack-orchestrator.mjs";
+import { SYNTHETIC_APPLICATION_ORIGIN } from "./synthetic-logout-storage";
 import {
   abortChatwootPhaseEvidence,
   chatwootWindowsPowerShellEnvironmentForTest,
@@ -1580,6 +1582,71 @@ test("binds the causal route barrier and exact logout helper without fixture sub
     source.indexOf("await recreatedCausality.markPostClear(page)"),
   );
   expect(source).not.toMatch(/postMessage\s*\(|route\.fulfill|toHaveScreenshot|threshold|mask:/);
+});
+
+test("binds the replacement barrier to the committed cabinet owner document", () => {
+  const common = {
+    barrierConsumed: false,
+    currentDocumentKey: "app-cabinet-document" as const,
+    generation: "initial" as const,
+    initialCabinetFreshWidgetCount: 0,
+    isNavigationRequest: true,
+    ownerIsMainFrame: true,
+  };
+  expect(advanceInitialCabinetBarrierForTest({
+    ...common,
+    classificationKey: "chatwoot-widget-frame",
+    ownerUrl: `${SYNTHETIC_APPLICATION_ORIGIN}/login`,
+  })).toEqual({
+    action: "continue",
+    initialCabinetFreshWidgetCount: 0,
+  });
+  const lateProfileWidget = advanceInitialCabinetBarrierForTest({
+    ...common,
+    classificationKey: "chatwoot-widget-frame",
+    ownerUrl: `${SYNTHETIC_APPLICATION_ORIGIN}/profile`,
+  });
+  expect(lateProfileWidget).toEqual({
+    action: "continue",
+    initialCabinetFreshWidgetCount: 0,
+  });
+  const lateProfileConversation = advanceInitialCabinetBarrierForTest({
+    ...common,
+    classificationKey: "chatwoot-widget-conversation-frame",
+    initialCabinetFreshWidgetCount: lateProfileWidget.initialCabinetFreshWidgetCount,
+    ownerUrl: `${SYNTHETIC_APPLICATION_ORIGIN}/profile`,
+  });
+  expect(lateProfileConversation).toEqual({
+    action: "continue",
+    initialCabinetFreshWidgetCount: 0,
+  });
+  expect(advanceInitialCabinetBarrierForTest({
+    ...common,
+    classificationKey: "chatwoot-widget-frame",
+    ownerIsMainFrame: false,
+    ownerUrl: `${SYNTHETIC_APPLICATION_ORIGIN}/cabinet`,
+  })).toEqual({
+    action: "continue",
+    initialCabinetFreshWidgetCount: 0,
+  });
+  const cabinetWidget = advanceInitialCabinetBarrierForTest({
+    ...common,
+    classificationKey: "chatwoot-widget-frame",
+    ownerUrl: `${SYNTHETIC_APPLICATION_ORIGIN}/cabinet`,
+  });
+  expect(cabinetWidget).toEqual({
+    action: "continue",
+    initialCabinetFreshWidgetCount: 1,
+  });
+  expect(advanceInitialCabinetBarrierForTest({
+    ...common,
+    classificationKey: "chatwoot-widget-conversation-frame",
+    initialCabinetFreshWidgetCount: cabinetWidget.initialCabinetFreshWidgetCount,
+    ownerUrl: `${SYNTHETIC_APPLICATION_ORIGIN}/cabinet`,
+  })).toEqual({
+    action: "hold",
+    initialCabinetFreshWidgetCount: 1,
+  });
 });
 
 test("keeps Chatwoot capture failures bound to one bounded coarse stage", async () => {
