@@ -251,8 +251,8 @@ its path, realpath, device/inode, change time, size, and live
 FileHandle are checked across two identical positional reads before parsing.
 It contains exactly three pair records using the input schema enforced by
 `assertChatwootPhaseInput`, and it must not contain credentials or PII. The
-command emits only sanitized digests/counts on success and an error class plus
-message digest on failure. The committed contract tests
+command emits only sanitized digests/counts on success and an error class,
+message digest, and bounded digest-only child evidence on failure. The committed contract tests
 exercise the schema, pre-clear and post-clear causal invariants, common
 request pending/late-event lifecycle, every boundary method, automatic history
 validation, endpoint-specific provider decoding, descriptor-only cookie HMAC,
