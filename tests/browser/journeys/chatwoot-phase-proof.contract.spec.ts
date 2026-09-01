@@ -1561,6 +1561,9 @@ test("binds the causal route barrier and exact logout helper without fixture sub
     "utf8",
   );
   expect(source).toContain("classification.key === \"chatwoot-widget-conversation-frame\"");
+  expect(source).toMatch(/generation === "initial"\s+&& ledger\.currentDocumentKey === "app-cabinet-document"\s+&& classification\.key === "chatwoot-widget-frame"/);
+  expect(source).toMatch(/generation === "initial"\s+&& ledger\.currentDocumentKey === "app-cabinet-document"\s+&& classification\.key === "chatwoot-widget-conversation-frame"/);
+  expect(source).toContain("initialCabinetFreshWidgetCount < 1");
   expect(source).toContain("await input.barrier.hold(route)");
   expect(source).toContain("await clearSyntheticLogoutState(page)");
   expect(source).toContain("await recreatedCausality.sealPreClearGeneration(page)");
