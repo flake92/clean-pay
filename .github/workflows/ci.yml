@@ -23,7 +23,9 @@ concurrency:
 
 jobs:
   secret-scan:
-    if: github.event_name != 'workflow_dispatch' || inputs.browser_mode != 'chatwoot-diagnostic'
+    if: >-
+      !((github.event_name == 'workflow_dispatch' && inputs.browser_mode == 'chatwoot-diagnostic') ||
+      (github.event_name == 'push' && contains(github.event.head_commit.message, '[chatwoot-diagnostic]')))
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -37,7 +39,9 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   codeql:
-    if: github.event_name != 'workflow_dispatch' || inputs.browser_mode != 'chatwoot-diagnostic'
+    if: >-
+      !((github.event_name == 'workflow_dispatch' && inputs.browser_mode == 'chatwoot-diagnostic') ||
+      (github.event_name == 'push' && contains(github.event.head_commit.message, '[chatwoot-diagnostic]')))
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
@@ -56,7 +60,9 @@ jobs:
         uses: github/codeql-action/analyze@5595ccaf912efad79be6eef63a5619ff05969be3 # v4.37.6
 
   static-analysis:
-    if: github.event_name != 'workflow_dispatch' || inputs.browser_mode != 'chatwoot-diagnostic'
+    if: >-
+      !((github.event_name == 'workflow_dispatch' && inputs.browser_mode == 'chatwoot-diagnostic') ||
+      (github.event_name == 'push' && contains(github.event.head_commit.message, '[chatwoot-diagnostic]')))
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -107,7 +113,9 @@ jobs:
         uses: actions/dependency-review-action@2031cfc080254a8a887f58cffee85186f0e49e48 # v4.9.0
 
   validate:
-    if: github.event_name != 'workflow_dispatch' || inputs.browser_mode != 'chatwoot-diagnostic'
+    if: >-
+      !((github.event_name == 'workflow_dispatch' && inputs.browser_mode == 'chatwoot-diagnostic') ||
+      (github.event_name == 'push' && contains(github.event.head_commit.message, '[chatwoot-diagnostic]')))
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
@@ -174,7 +182,9 @@ jobs:
         run: npm run build
 
   integration-services:
-    if: github.event_name != 'workflow_dispatch' || inputs.browser_mode != 'chatwoot-diagnostic'
+    if: >-
+      !((github.event_name == 'workflow_dispatch' && inputs.browser_mode == 'chatwoot-diagnostic') ||
+      (github.event_name == 'push' && contains(github.event.head_commit.message, '[chatwoot-diagnostic]')))
     runs-on: ubuntu-latest
     timeout-minutes: 15
     services:
@@ -232,7 +242,9 @@ jobs:
         run: npm run test:services
 
   database-least-privilege:
-    if: github.event_name != 'workflow_dispatch' || inputs.browser_mode != 'chatwoot-diagnostic'
+    if: >-
+      !((github.event_name == 'workflow_dispatch' && inputs.browser_mode == 'chatwoot-diagnostic') ||
+      (github.event_name == 'push' && contains(github.event.head_commit.message, '[chatwoot-diagnostic]')))
     runs-on: ubuntu-latest
     timeout-minutes: 20
     services:
@@ -290,7 +302,9 @@ jobs:
           node scripts/security/verify-database-runtime-privileges.mjs
 
   container-security:
-    if: github.event_name != 'workflow_dispatch' || inputs.browser_mode != 'chatwoot-diagnostic'
+    if: >-
+      !((github.event_name == 'workflow_dispatch' && inputs.browser_mode == 'chatwoot-diagnostic') ||
+      (github.event_name == 'push' && contains(github.event.head_commit.message, '[chatwoot-diagnostic]')))
     runs-on: ubuntu-latest
     timeout-minutes: 60
     env:
@@ -657,7 +671,7 @@ jobs:
       - name: Prove the concurrent provider overlap
         id: provider_phase
         env:
-          CLEAN_PAY_LIVE_OVERLAP_PROVIDER_MODE: ${{ github.event_name == 'workflow_dispatch' && inputs.browser_mode == 'chatwoot-diagnostic' && 'defer-chatwoot-diagnostic' || 'prove' }}
+          CLEAN_PAY_LIVE_OVERLAP_PROVIDER_MODE: ${{ ((github.event_name == 'workflow_dispatch' && inputs.browser_mode == 'chatwoot-diagnostic') || (github.event_name == 'push' && contains(github.event.head_commit.message, '[chatwoot-diagnostic]'))) && 'defer-chatwoot-diagnostic' || 'prove' }}
         run: |
           node tests/browser/journeys/run-production-image-live-overlap.mjs run \
             --capture-id "$CLEAN_PAY_BROWSER_LIVE_PAIR_CAPTURE_ID" \
@@ -733,7 +747,9 @@ jobs:
             --temporary-root "$RUNNER_TEMP"
 
   remnashop-migration-rehearsal:
-    if: github.event_name != 'workflow_dispatch' || inputs.browser_mode != 'chatwoot-diagnostic'
+    if: >-
+      !((github.event_name == 'workflow_dispatch' && inputs.browser_mode == 'chatwoot-diagnostic') ||
+      (github.event_name == 'push' && contains(github.event.head_commit.message, '[chatwoot-diagnostic]')))
     runs-on: ubuntu-latest
     timeout-minutes: 45
     env:
@@ -775,7 +791,9 @@ jobs:
             .migration-rehearsal/*.list
 
   full-stack-e2e:
-    if: github.event_name != 'workflow_dispatch' || inputs.browser_mode != 'chatwoot-diagnostic'
+    if: >-
+      !((github.event_name == 'workflow_dispatch' && inputs.browser_mode == 'chatwoot-diagnostic') ||
+      (github.event_name == 'push' && contains(github.event.head_commit.message, '[chatwoot-diagnostic]')))
     runs-on: ubuntu-latest
     timeout-minutes: 45
     env:

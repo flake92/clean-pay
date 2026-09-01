@@ -906,7 +906,7 @@ describe("ephemeral production-image live overlap runner", () => {
     expect(runner).toContain('if (mode === "run") await run(plan, phase);');
   });
 
-  it("keeps manual Chatwoot diagnostics red while deferring only the live Provider proof", () => {
+  it("keeps isolated Chatwoot diagnostics red while deferring only the live Provider proof", () => {
     expect(resolveLiveOverlapProviderExecutionMode({})).toBe("prove");
     expect(resolveLiveOverlapProviderExecutionMode({
       CLEAN_PAY_LIVE_OVERLAP_PROVIDER_MODE: "prove",
@@ -928,7 +928,12 @@ describe("ephemeral production-image live overlap runner", () => {
     expect(workflow).toContain("browser_mode:");
     expect(workflow).toContain("- chatwoot-diagnostic");
     expect(workflow).toContain(
-      "CLEAN_PAY_LIVE_OVERLAP_PROVIDER_MODE: ${{ github.event_name == 'workflow_dispatch'",
+      "contains(github.event.head_commit.message, '[chatwoot-diagnostic]')",
+    );
+    expect(workflow.match(/contains\(github\.event\.head_commit\.message, '\[chatwoot-diagnostic\]'\)/gu))
+      .toHaveLength(10);
+    expect(workflow).toContain(
+      "CLEAN_PAY_LIVE_OVERLAP_PROVIDER_MODE: ${{ ((github.event_name == 'workflow_dispatch'",
     );
     expect(workflow).not.toContain("continue-on-error:");
   });
