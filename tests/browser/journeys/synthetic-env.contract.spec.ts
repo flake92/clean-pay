@@ -105,8 +105,9 @@ test("materializes two deterministic self-contained role environments", async ()
     expect(assertSyntheticCaddyRouteOrder(caddySource)).toEqual({
       chatwootIdentityDelivery: {
         aboutBlankLoadDeliveryBlocked: true,
+        confirmation: "matching-current-frame-delivery",
         readinessSignal: "trusted-widget-loaded-message",
-        source: "configured-iframe-content-window",
+        source: "current-configured-iframe-content-window",
         targetOrigin: "https://chatwoot.browser.clean-pay.dev",
       },
     });
@@ -123,30 +124,54 @@ test("materializes two deterministic self-contained role environments", async ()
         "    respond 404\n    reverse_proxy @verify browser-provider-mock:3100",
       ),
       caddySource.replace(
-        "          if (!pendingIdentity || !frameLoadedAtBaseUrl || !frame.contentWindow) return;",
-        "          if (!pendingIdentity || !frame.contentWindow) return;",
+        "          if (!pendingIdentity || !target || readyFrameWindow !== target) return;",
+        "          if (!pendingIdentity || !target) return;",
       ),
       caddySource.replace(
         "        addEventListener(\"message\", (event) => {",
         "        frame.addEventListener(\"load\", deliverIdentity);\n        addEventListener(\"message\", (event) => {",
       ),
       caddySource.replace(
-        "          if (event.origin !== config.baseUrl || event.source !== frame.contentWindow || typeof event.data !== \"string\") return;",
-        "          if (event.source !== frame.contentWindow || typeof event.data !== \"string\") return;",
+        "          if (event.origin !== config.baseUrl || !target || event.source !== target || typeof event.data !== \"string\") return;",
+        "          if (event.source !== target || typeof event.data !== \"string\") return;",
       ),
       caddySource.replace(
-        "              frameLoadedAtBaseUrl = true;\n              deliverIdentity();",
-        "              deliverIdentity();\n              frameLoadedAtBaseUrl = true;",
+        "              readyFrameWindow = target;\n              if (inFlightIdentity?.frameWindow !== target) inFlightIdentity = null;\n              deliverIdentity();",
+        "              deliverIdentity();\n              readyFrameWindow = target;\n              if (inFlightIdentity?.frameWindow !== target) inFlightIdentity = null;",
       ),
       caddySource
         .replace("        document.body.appendChild(frame);\n        const api = {", "        const api = {")
         .replace(
           "        addEventListener(\"message\", (event) => {",
           "        document.body.appendChild(frame);\n        addEventListener(\"message\", (event) => {",
-        ),
+      ),
       caddySource.replace(
-        "            pendingIdentity = { identifier };\n            document.cookie = \"cw_conversation=\"",
-        "            deliverIdentity();\n            pendingIdentity = { identifier };\n            document.cookie = \"cw_conversation=\"",
+        "            pendingIdentity = { deliveryId: ++nextDeliveryId, identifier };\n            document.cookie = \"cw_conversation=\"",
+        "            deliverIdentity();\n            pendingIdentity = { deliveryId: ++nextDeliveryId, identifier };\n            document.cookie = \"cw_conversation=\"",
+      ),
+      caddySource.replace(
+        "          const current = document.getElementById(\"chatwoot_live_chat_widget\");",
+        "          const current = frame;",
+      ),
+      caddySource.replace(
+        "          const delivery = pendingIdentity;\n          pendingIdentity = null;\n          inFlightIdentity = { deliveryId: delivery.deliveryId, frameWindow: target };",
+        "          const delivery = pendingIdentity;\n          inFlightIdentity = { deliveryId: delivery.deliveryId, frameWindow: target };\n          pendingIdentity = null;",
+      ),
+      caddySource.replace(
+        "        data: { deliveryId, widgetAuthToken: \"synthetic-widget-auth\" },",
+        "        data: { widgetAuthToken: \"synthetic-widget-auth\" },",
+      ),
+      caddySource.replace(
+        "              && message.data?.deliveryId === inFlightIdentity.deliveryId) {",
+        "              && Number.isSafeInteger(message.data?.deliveryId)) {",
+      ),
+      caddySource.replace(
+        "              inFlightIdentity = null;\n              calls.push({ method: \"identity.confirmed\" });",
+        "              calls.push({ method: \"identity.confirmed\" });\n              inFlightIdentity = null;",
+      ),
+      caddySource.replace(
+        "            pendingIdentity = null;\n            inFlightIdentity = null;\n            api.resetTriggered = true;",
+        "            api.resetTriggered = true;",
       ),
     ]) {
       expect(() => assertSyntheticCaddyRouteOrder(nearMiss)).toThrow();

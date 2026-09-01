@@ -130,6 +130,7 @@ export const JOURNEY_FIXTURE_FILENAMES = Object.freeze([
   "run-production-image-live-overlap.mjs",
   "sanitized-har.contract.spec.ts",
   "sanitized-har.ts",
+  "synthetic-chatwoot-sdk.contract.spec.ts",
   "synthetic-env.contract.spec.ts",
   "synthetic-logout-storage.contract.spec.ts",
   "synthetic-logout-storage.ts",
