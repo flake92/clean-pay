@@ -34,7 +34,7 @@ export function assertSyntheticCaddyRouteOrder(source: string) {
   assertOccurrenceCount(chatwoot, "</script>", 1);
   assertOccurrenceCount(chatwoot, "frame.addEventListener(\"load\"", 0);
   assertOccurrenceCount(chatwoot, "        document.body.appendChild(frame);", 1);
-  assertOccurrenceCount(chatwoot, "    send({ event: \"fixture.frame-loaded\" });", 1);
+  assertOccurrenceCount(chatwoot, "fixture.frame-loaded", 0);
   assertOccurrenceCount(
     chatwoot,
     "        queueMicrotask(() => window.dispatchEvent(new CustomEvent(\"chatwoot:ready\")));",
@@ -46,6 +46,16 @@ export function assertSyntheticCaddyRouteOrder(source: string) {
     1,
   );
   assertOccurrenceCount(chatwoot, "deliverIdentity();", 2);
+  assertOccurrenceCount(
+    chatwoot,
+    "              queueMicrotask(() => {\n"
+      + "                if (announcedFrameWindow !== target && currentFrameWindow() === target) {\n"
+      + "                  calls.push({ method: \"frame.loaded\" });\n"
+      + "                  announcedFrameWindow = target;\n"
+      + "                }\n"
+      + "              });",
+    1,
+  );
   assertOccurrenceCount(chatwoot, "          pendingIdentity = null;", 2);
   assertOccurrenceCount(chatwoot, "          inFlightIdentity = null;", 2);
   assertOccurrenceCount(
@@ -60,7 +70,7 @@ export function assertSyntheticCaddyRouteOrder(source: string) {
     "      const deliveryId = event.data?.deliveryId;",
     "        || !Number.isSafeInteger(deliveryId) || deliveryId < 1) return;",
     "        data: { deliveryId, widgetAuthToken: \"synthetic-widget-auth\" },",
-    "    send({ event: \"fixture.frame-loaded\" });\n    send({ event: \"loaded\" });",
+    "    send({ event: \"loaded\" });",
     "        let readyFrameWindow = null;",
     "        let announcedFrameWindow = null;",
     "        let pendingIdentity = null;",
@@ -74,9 +84,9 @@ export function assertSyntheticCaddyRouteOrder(source: string) {
     "          target.postMessage({ method: \"identify\", deliveryId: delivery.deliveryId }, config.baseUrl);",
     "        addEventListener(\"message\", (event) => {\n          const target = currentFrameWindow();",
     "          if (event.origin !== config.baseUrl || !target || event.source !== target || typeof event.data !== \"string\") return;",
-    "            if (message.event === \"fixture.frame-loaded\") {\n              if (announcedFrameWindow !== target) {\n                calls.push({ method: \"frame.loaded\" });\n                announcedFrameWindow = target;\n              }\n            }",
-    "            if (message.event === \"loaded\") {\n              if (announcedFrameWindow !== target) {\n                calls.push({ method: \"frame.loaded\" });\n                announcedFrameWindow = target;\n              }",
-    "              readyFrameWindow = target;\n              if (inFlightIdentity?.frameWindow !== target) inFlightIdentity = null;\n              deliverIdentity();",
+    "            if (message.event === \"loaded\") {\n              readyFrameWindow = target;",
+    "              readyFrameWindow = target;\n              if (inFlightIdentity?.frameWindow !== target) inFlightIdentity = null;\n              deliverIdentity();\n              queueMicrotask(() => {",
+    "                if (announcedFrameWindow !== target && currentFrameWindow() === target) {\n                  calls.push({ method: \"frame.loaded\" });\n                  announcedFrameWindow = target;",
     "              && message.data?.deliveryId === inFlightIdentity.deliveryId) {\n              inFlightIdentity = null;\n              calls.push({ method: \"identity.confirmed\" });",
     "        document.body.appendChild(frame);",
     "        const api = {",
@@ -90,6 +100,7 @@ export function assertSyntheticCaddyRouteOrder(source: string) {
   return {
     chatwootIdentityDelivery: {
       aboutBlankLoadDeliveryBlocked: true,
+      boundaryObservation: "post-capture-loaded-microtask",
       confirmation: "matching-current-frame-delivery",
       identityDeliverySignal: "trusted-widget-loaded-message",
       readinessSignal: "sdk-ready-before-iframe",

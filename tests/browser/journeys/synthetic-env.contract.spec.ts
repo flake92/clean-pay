@@ -105,6 +105,7 @@ test("materializes two deterministic self-contained role environments", async ()
     expect(assertSyntheticCaddyRouteOrder(caddySource)).toEqual({
       chatwootIdentityDelivery: {
         aboutBlankLoadDeliveryBlocked: true,
+        boundaryObservation: "post-capture-loaded-microtask",
         confirmation: "matching-current-frame-delivery",
         identityDeliverySignal: "trusted-widget-loaded-message",
         readinessSignal: "sdk-ready-before-iframe",
@@ -170,10 +171,17 @@ test("materializes two deterministic self-contained role environments", async ()
         "              inFlightIdentity = null;\n              calls.push({ method: \"identity.confirmed\" });",
         "              calls.push({ method: \"identity.confirmed\" });\n              inFlightIdentity = null;",
       ),
-      caddySource.replace("    send({ event: \"fixture.frame-loaded\" });\n", ""),
       caddySource.replace(
-        "    send({ event: \"fixture.frame-loaded\" });\n    send({ event: \"loaded\" });",
-        "    send({ event: \"loaded\" });\n    send({ event: \"fixture.frame-loaded\" });",
+        "              deliverIdentity();\n              queueMicrotask(() => {",
+        "              queueMicrotask(() => {\n              deliverIdentity();",
+      ),
+      caddySource.replace(
+        "                if (announcedFrameWindow !== target && currentFrameWindow() === target) {",
+        "                if (announcedFrameWindow !== target) {",
+      ),
+      caddySource.replace(
+        "              queueMicrotask(() => {",
+        "              (() => {",
       ),
       caddySource.replace("          hasLoaded: true,", "          hasLoaded: false,"),
       caddySource.replace(
