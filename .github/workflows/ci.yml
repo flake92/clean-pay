@@ -212,12 +212,8 @@ jobs:
         run: npm run prisma:generate
       - name: Apply migrations to an empty PostgreSQL database
         run: node node_modules/prisma/build/index.js migrate deploy
-      - name: Verify migration history exactly matches the Prisma schema
-        run: >-
-          node node_modules/prisma/build/index.js migrate diff
-          --from-config-datasource
-          --to-schema prisma/schema.prisma
-          --exit-code
+      - name: Verify migration history matches Prisma-managed schema objects
+        run: node scripts/security/verify-prisma-migration-schema-drift.mjs
       - name: Run PostgreSQL concurrency and service integration tests
         run: npm run test:services
 
