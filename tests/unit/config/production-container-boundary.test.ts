@@ -61,7 +61,7 @@ const operationalHelperImageSources = [
 ].map((path) => [path, readFileSync(path, "utf8")] as const);
 
 describe("production container boundary", () => {
-  it("fails CI when applied migration history drifts from the Prisma schema", () => {
+  it("fails CI when applied migration history drifts from Prisma-managed schema objects", () => {
     const integrationJob = ci.slice(
       ci.indexOf("  integration-services:"),
       ci.indexOf("  database-least-privilege:"),
@@ -70,16 +70,15 @@ describe("production container boundary", () => {
       "node node_modules/prisma/build/index.js migrate deploy",
     );
     const diff = integrationJob.indexOf(
-      "node node_modules/prisma/build/index.js migrate diff",
+      "node scripts/security/verify-prisma-migration-schema-drift.mjs",
     );
     const services = integrationJob.indexOf("npm run test:services");
 
     expect(deploy).toBeGreaterThan(-1);
     expect(diff).toBeGreaterThan(deploy);
     expect(services).toBeGreaterThan(diff);
-    expect(integrationJob).toContain("--from-config-datasource");
-    expect(integrationJob).toContain("--to-schema prisma/schema.prisma");
-    expect(integrationJob).toContain("--exit-code");
+    expect(integrationJob).not.toContain("--from-config-datasource");
+    expect(integrationJob).not.toContain("--exit-code");
   });
 
   it("pins every externally pulled devcontainer image by digest", () => {
