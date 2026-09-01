@@ -432,6 +432,11 @@ async function runProviderPhase(plan) {
       context.receipts.public.value.result,
       "public",
     );
+    if (resolveLiveOverlapProviderExecutionMode() === "defer-chatwoot-diagnostic") {
+      throw new Error(
+        "Provider live overlap was intentionally deferred for the isolated Chatwoot diagnostic.",
+      );
+    }
     const sanitizedCaptureRoot = await ensureSanitizedCaptureRoot(plan);
     const providerProofEnvironment = sanitizedProcessEnvironment();
     providerProofEnvironment.CLEAN_PAY_PROVIDER_OVERLAP_FAILURE_OUTPUT =
@@ -444,6 +449,20 @@ async function runProviderPhase(plan) {
     const providerOverlap = await publishProviderProof(plan);
     await completePhase(plan, "provider", context, providerOverlap);
   });
+}
+
+/**
+ * @param {Readonly<Record<string, string | undefined>>} [source]
+ * @returns {"prove" | "defer-chatwoot-diagnostic"}
+ */
+export function resolveLiveOverlapProviderExecutionMode(source = process.env) {
+  if (source === null || typeof source !== "object" || Array.isArray(source)) {
+    throw new Error("Live overlap provider execution environment is invalid.");
+  }
+  const value = source.CLEAN_PAY_LIVE_OVERLAP_PROVIDER_MODE;
+  if (value === undefined || value === "prove") return "prove";
+  if (value === "defer-chatwoot-diagnostic") return value;
+  throw new Error("Live overlap provider execution mode is invalid.");
 }
 
 async function runAuthenticatedPhase(plan) {

@@ -14,6 +14,7 @@ import {
   parseLiveOverlapArguments,
   proofArguments,
   providerProofArguments,
+  resolveLiveOverlapProviderExecutionMode,
   validateChatwootArtifactManifest,
   validateChatwootEvidenceCleanupCapability,
   validateLiveOverlapImageInspection,
@@ -903,6 +904,33 @@ describe("ephemeral production-image live overlap runner", () => {
       "const { mode, phase, plan } = parseLiveOverlapArguments(process.argv.slice(2));",
     );
     expect(runner).toContain('if (mode === "run") await run(plan, phase);');
+  });
+
+  it("keeps manual Chatwoot diagnostics red while deferring only the live Provider proof", () => {
+    expect(resolveLiveOverlapProviderExecutionMode({})).toBe("prove");
+    expect(resolveLiveOverlapProviderExecutionMode({
+      CLEAN_PAY_LIVE_OVERLAP_PROVIDER_MODE: "prove",
+    })).toBe("prove");
+    expect(resolveLiveOverlapProviderExecutionMode({
+      CLEAN_PAY_LIVE_OVERLAP_PROVIDER_MODE: "defer-chatwoot-diagnostic",
+    })).toBe("defer-chatwoot-diagnostic");
+    expect(() => resolveLiveOverlapProviderExecutionMode({
+      CLEAN_PAY_LIVE_OVERLAP_PROVIDER_MODE: "skip",
+    })).toThrow(/execution mode is invalid/u);
+
+    const modeGate = runner.indexOf("resolveLiveOverlapProviderExecutionMode()");
+    const providerLaunch = runner.indexOf("[providerProofCli, ...providerProofArguments(plan, inputs)]");
+    expect(modeGate).toBeGreaterThan(-1);
+    expect(providerLaunch).toBeGreaterThan(modeGate);
+    expect(runner).toContain(
+      "Provider live overlap was intentionally deferred for the isolated Chatwoot diagnostic.",
+    );
+    expect(workflow).toContain("browser_mode:");
+    expect(workflow).toContain("- chatwoot-diagnostic");
+    expect(workflow).toContain(
+      "CLEAN_PAY_LIVE_OVERLAP_PROVIDER_MODE: ${{ github.event_name == 'workflow_dispatch'",
+    );
+    expect(workflow).not.toContain("continue-on-error:");
   });
 
   it("validates the exact create-only phase chain and sanitized projections", () => {
