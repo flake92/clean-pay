@@ -125,6 +125,7 @@ type MutableStaticGenerationEvidence = {
     key: string;
     redirectEdge: string | null;
     responseContentType: string | null;
+    responseFailureSha256: string | null;
     responseStatus: number | null;
   }>;
   staticLoadGraph: {
@@ -462,6 +463,7 @@ test("requires 6/6 semantic equality and one exact 2/3 PNG majority per role", (
         key: "app-brand-logo",
         redirectEdge: null,
         responseContentType: "image/png",
+        responseFailureSha256: null,
         responseStatus: 200,
       });
       generation.requestOrderLedger.push({
@@ -2685,6 +2687,7 @@ test("executes the exact direct-cabinet browser classifier with serialized parit
     documentKey: "app-login-document",
     redirectEdge: null,
     responseContentType: null,
+    responseFailureSha256: null,
     responseStatus: null as never,
     staticResponseBytes: null,
     staticResponseSha256: null,
@@ -4907,6 +4910,7 @@ function staticRecordsForDocument(
     documentKey,
     redirectEdge: null,
     responseContentType: staticContentType(staticPath),
+    responseFailureSha256: null,
     responseStatus: 200,
     staticResponseBytes: Buffer.byteLength(bodies[staticPath], "utf8"),
     staticResponseSha256: sha256(bodies[staticPath]),
@@ -4973,6 +4977,7 @@ function browserRecordFixture(
     documentKey,
     redirectEdge: options.edge ?? null,
     responseContentType: contentType,
+    responseFailureSha256: null,
     responseStatus: status,
     staticResponseBytes: null,
     staticResponseSha256: null,

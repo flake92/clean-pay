@@ -1554,6 +1554,7 @@ async function finishBrowserRequestContract(
     documentKey: StrictRequestEntry["documentKey"];
     redirectEdge: string | null;
     responseContentType: string | null;
+    responseFailureSha256: string | null;
     responseStatus: number | null;
     staticResponseBytes: number | null;
     staticResponseSha256: string | null;
@@ -1700,6 +1701,7 @@ async function finishBrowserRequestContract(
       documentKey,
       redirectEdge,
       responseContentType,
+      responseFailureSha256: null,
       responseStatus: response?.status() ?? null,
       ...staticObservation,
     };
