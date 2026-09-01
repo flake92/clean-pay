@@ -632,14 +632,21 @@ jobs:
       - name: Install locked dependencies and pinned Chromium
         run: |
           npm ci
-          node node_modules/playwright/cli.js install --with-deps chromium
+          node node_modules/playwright/cli.js install chromium
+          node --input-type=module <<'NODE'
+          import { chromium } from "playwright";
+          const browser = await chromium.launch({ headless: true });
+          await browser.close();
+          NODE
       - name: Derive the unique live-pair capture identity
+        id: capture_identity
         run: |
           capture_id="$(printf '%s' "$GITHUB_RUN_ID:$GITHUB_RUN_ATTEMPT:$GITHUB_SHA" \
             | sha256sum | cut -c 1-16)"
           printf '%s\n' "$capture_id" | grep -Eq '^[0-9a-f]{16}$'
           printf 'CLEAN_PAY_BROWSER_LIVE_PAIR_CAPTURE_ID=%s\n' "$capture_id" >> "$GITHUB_ENV"
       - name: Prepare immutable live-pair capture ownership
+        id: preparation_phase
         run: |
           node tests/browser/journeys/run-production-image-live-overlap.mjs run \
             --capture-id "$CLEAN_PAY_BROWSER_LIVE_PAIR_CAPTURE_ID" \
@@ -739,7 +746,7 @@ jobs:
             ${{ runner.temp }}/clean-pay-chatwoot-phase-evidence-${{ env.CLEAN_PAY_BROWSER_LIVE_PAIR_CAPTURE_ID }}/proof.json
             ${{ runner.temp }}/clean-pay-chatwoot-phase-evidence-${{ env.CLEAN_PAY_BROWSER_LIVE_PAIR_CAPTURE_ID }}/raw
       - name: Clean up only the owned browser journey project
-        if: always()
+        if: ${{ always() && steps.preparation_phase.outcome != 'skipped' }}
         run: |
           node tests/browser/journeys/run-production-image-live-overlap.mjs cleanup \
             --capture-id "$CLEAN_PAY_BROWSER_LIVE_PAIR_CAPTURE_ID" \
