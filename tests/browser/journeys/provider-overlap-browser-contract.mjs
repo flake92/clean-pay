@@ -1,8 +1,9 @@
 import { createHash } from "node:crypto";
+import { Buffer } from "node:buffer";
 
 const maximumRequests = 256;
 const maximumStaticAssetBytes = 128 * 1024 * 1024;
-const maximumStaticAssetTotalBytes = 1024 * 1024 * 1024;
+export const PROVIDER_OVERLAP_MAXIMUM_STATIC_RESPONSE_BYTES = 256 * 1024 * 1024;
 const maximumStaticDeclarationBodyBytes = 2 * 1024 * 1024;
 export const PROVIDER_OVERLAP_REJECTION_PROVENANCE_MAX_PER_ROLE = 16;
 const sha256Pattern = /^[a-f0-9]{64}$/;
@@ -24,6 +25,30 @@ const staticKeys = new Set([
   "next-static-font",
   "next-static-image",
   "next-static-js",
+]);
+const cdpResourceTypeByPlaywrightResourceType = Object.freeze({
+  document: "Document",
+  eventsource: "EventSource",
+  fetch: "Fetch",
+  font: "Font",
+  image: "Image",
+  manifest: "Manifest",
+  media: "Media",
+  other: "Other",
+  script: "Script",
+  stylesheet: "Stylesheet",
+  texttrack: "TextTrack",
+  websocket: "WebSocket",
+  xhr: "XHR",
+});
+const providerOverlapCdpResourceTypes = new Set([
+  ...Object.values(cdpResourceTypeByPlaywrightResourceType),
+  "CSPViolationReport",
+  "FedCM",
+  "Ping",
+  "Prefetch",
+  "Preflight",
+  "SignedExchange",
 ]);
 const exactNavigationFlow = Object.freeze([
   "app-login-document",
@@ -609,7 +634,7 @@ export function createProviderOverlapStaticAssetContract(attestation) {
     }
     inventoryBytes += asset.size;
     if (!Number.isSafeInteger(inventoryBytes)
-      || inventoryBytes > maximumStaticAssetTotalBytes) {
+      || inventoryBytes > PROVIDER_OVERLAP_MAXIMUM_STATIC_RESPONSE_BYTES) {
       fail("Production image static asset inventory exceeds its byte bound.");
     }
     inventoryByPath[asset.servedPath] = asset.sha256;
@@ -743,14 +768,341 @@ export function attestProviderOverlapStaticResponse(input, staticAssetContract) 
   });
 }
 
+export function createProviderOverlapCdpResponseBodyCapture(input) {
+  exactKeys(input, ["send"], "CDP response body capture");
+  if (typeof input.send !== "function") {
+    fail("CDP response body capture sender is invalid.");
+  }
+  const entryByRequestId = new Map();
+  const unclaimedEntryByKey = new Map();
+  const waitingClaimByKey = new Map();
+  let bodyClaimCount = 0;
+  let bodySettledCount = 0;
+  let bodylessClaimCount = 0;
+  let fatalError = null;
+  let observedResponseCount = 0;
+  let responseClaimCount = 0;
+  let responseFailureCount = 0;
+  let responseSettledCount = 0;
+
+  const rejectClaim = (claim, error) => {
+    if (!claim || claim.settled) return;
+    claim.settled = true;
+    responseFailureCount += 1;
+    responseSettledCount += 1;
+    if (claim.bodyExpected) bodySettledCount += 1;
+    claim.reject(error);
+  };
+  const enterFatalState = (message) => {
+    if (fatalError) return fatalError;
+    fatalError = new Error(message);
+    const claims = new Set(waitingClaimByKey.values());
+    for (const entry of entryByRequestId.values()) {
+      if (entry.claim && !entry.claim.settled) claims.add(entry.claim);
+    }
+    waitingClaimByKey.clear();
+    unclaimedEntryByKey.clear();
+    for (const claim of claims) rejectClaim(claim, fatalError);
+    return fatalError;
+  };
+  const throwFatal = (message) => {
+    throw enterFatalState(message);
+  };
+  const assertActive = () => {
+    if (fatalError) throw fatalError;
+  };
+  const safeContractFailure = (error) => {
+    const message = error instanceof Error ? error.message : String(error);
+    return /^(?:Browser request URL|CDP response)/.test(message)
+      ? message
+      : `CDP response body capture failed: failureSha256=${sha256(message)}.`;
+  };
+  const resolveClaim = (claim, value) => {
+    if (fatalError || claim.settled) return;
+    claim.settled = true;
+    responseSettledCount += 1;
+    if (claim.bodyExpected) bodySettledCount += 1;
+    claim.resolve(value);
+  };
+  const settleFinishedEntry = (entry) => {
+    if (!entry.claim || entry.claim.settled || entry.readStarted || entry.terminal === null) return;
+    entry.readStarted = true;
+    const claim = entry.claim;
+    if (entry.terminal.kind === "failed") {
+      enterFatalState(
+        "Durable browser response did not finish cleanly: "
+          + `failureSha256=${entry.terminal.failureSha256}.`,
+      );
+      return;
+    }
+    if (!claim.bodyExpected) {
+      resolveClaim(claim, null);
+      return;
+    }
+    const operation = Promise.resolve().then(() => input.send(
+      "Network.getResponseBody",
+      { requestId: entry.requestId },
+    ));
+    void boundedLifecycleOperation(operation, 5_000, "durable browser response body").then(
+      (result) => {
+        if (fatalError || claim.settled) return;
+        try {
+          const body = decodeProviderOverlapCdpResponseBody(
+            result,
+            claim.maximumBodyBytes,
+          );
+          resolveClaim(claim, body);
+        } catch (error) {
+          enterFatalState(safeContractFailure(error));
+        }
+      },
+      (error) => {
+        if (fatalError || claim.settled) return;
+        const failureMessage = error instanceof Error ? error.message : String(error);
+        enterFatalState(
+          "Durable browser response body read failed: "
+            + `failureSha256=${sha256(failureMessage)}.`,
+        );
+      },
+    );
+  };
+  const bind = (entry, claim) => {
+    entry.claim = claim;
+    settleFinishedEntry(entry);
+  };
+  const createClaim = (claimInput, maximumBodyBytes) => {
+    responseClaimCount += 1;
+    if (responseClaimCount > maximumRequests) {
+      throwFatal("CDP response body capture exceeded its response claim bound.");
+    }
+    const key = providerOverlapCdpResponseKey(claimInput, "playwright");
+    if (waitingClaimByKey.has(key)) {
+      throwFatal("CDP response body claim is ambiguous.");
+    }
+    let resolve;
+    let reject;
+    const promise = new Promise((resolveResponse, rejectResponse) => {
+      resolve = resolveResponse;
+      reject = rejectResponse;
+    });
+    // A response or fatal event may settle before the outer Playwright capture
+    // attaches its own observer.
+    void promise.catch(() => undefined);
+    const bodyExpected = maximumBodyBytes !== null;
+    const claim = {
+      bodyExpected,
+      maximumBodyBytes,
+      promise,
+      reject,
+      resolve,
+      settled: false,
+    };
+    if (bodyExpected) bodyClaimCount += 1;
+    else bodylessClaimCount += 1;
+    const entry = unclaimedEntryByKey.get(key);
+    if (entry) {
+      unclaimedEntryByKey.delete(key);
+      bind(entry, claim);
+    } else {
+      waitingClaimByKey.set(key, claim);
+    }
+    return promise;
+  };
+  const terminalEntry = (event, terminal) => {
+    let requestId;
+    try {
+      requestId = providerOverlapCdpRequestId(event, "CDP response terminal event");
+    } catch (error) {
+      throw enterFatalState(safeContractFailure(error));
+    }
+    const entry = entryByRequestId.get(requestId);
+    // A request can fail before responseReceived. It has no response identity
+    // to claim and remains governed by the Playwright requestfailed path.
+    if (!entry) return;
+    if (entry.terminal !== null) {
+      throwFatal("CDP response reached a terminal event more than once.");
+    }
+    entry.terminal = terminal;
+    settleFinishedEntry(entry);
+  };
+
+  return Object.freeze({
+    assertClean() {
+      if (fatalError) throw fatalError;
+      const unsettledResponseCount = [...entryByRequestId.values()]
+        .filter((entry) => entry.claim && !entry.claim.settled).length;
+      if (waitingClaimByKey.size !== 0 || unclaimedEntryByKey.size !== 0
+        || unsettledResponseCount !== 0 || responseFailureCount !== 0
+        || responseClaimCount !== observedResponseCount
+        || responseClaimCount !== responseSettledCount
+        || responseClaimCount !== bodyClaimCount + bodylessClaimCount
+        || bodyClaimCount !== bodySettledCount) {
+        throw enterFatalState("CDP response body capture did not settle cleanly.");
+      }
+      return Object.freeze({
+        bodyClaimCount,
+        bodySettledCount,
+        bodylessClaimCount,
+        observedResponseCount,
+        responseClaimCount,
+        responseSettledCount,
+        status: "cdp-response-bodies-clean",
+      });
+    },
+    observeLoadingFailed(event) {
+      assertActive();
+      if (!event || typeof event !== "object" || Array.isArray(event)
+        || typeof event.errorText !== "string" || event.errorText.length < 1
+        || event.errorText.length > 8_192) {
+        throwFatal("CDP failed response terminal event is invalid.");
+      }
+      terminalEntry(event, Object.freeze({
+        failureSha256: sha256(event.errorText),
+        kind: "failed",
+      }));
+    },
+    observeLoadingFinished(event) {
+      assertActive();
+      if (!event || typeof event !== "object" || Array.isArray(event)
+        || typeof event.encodedDataLength !== "number"
+        || !Number.isFinite(event.encodedDataLength) || event.encodedDataLength < 0) {
+        throwFatal("CDP finished response terminal event is invalid.");
+      }
+      terminalEntry(event, Object.freeze({ kind: "finished" }));
+    },
+    observeResponseReceived(event) {
+      assertActive();
+      if (!event || typeof event !== "object" || Array.isArray(event)
+        || !event.response || typeof event.response !== "object"
+        || Array.isArray(event.response)) {
+        throwFatal("CDP response event is invalid.");
+      }
+      let requestId;
+      let key;
+      try {
+        requestId = providerOverlapCdpRequestId(event, "CDP response event");
+        key = providerOverlapCdpResponseKey({
+          resourceType: event.type,
+          status: event.response.status,
+          url: event.response.url,
+        }, "cdp");
+      } catch (error) {
+        throw enterFatalState(safeContractFailure(error));
+      }
+      if (entryByRequestId.has(requestId)) {
+        throwFatal("CDP response request identity was observed more than once.");
+      }
+      if (unclaimedEntryByKey.has(key)) {
+        throwFatal("CDP response body identity is ambiguous.");
+      }
+      observedResponseCount += 1;
+      if (observedResponseCount > maximumRequests) {
+        throwFatal("CDP response body capture exceeded its request bound.");
+      }
+      const entry = {
+        claim: null,
+        key,
+        readStarted: false,
+        requestId,
+        terminal: null,
+      };
+      entryByRequestId.set(requestId, entry);
+      const claim = waitingClaimByKey.get(key);
+      if (claim) {
+        waitingClaimByKey.delete(key);
+        bind(entry, claim);
+      } else {
+        unclaimedEntryByKey.set(key, entry);
+      }
+    },
+    readBody(readInput) {
+      assertActive();
+      try {
+        exactKeys(readInput, [
+          "maximumBodyBytes", "resourceType", "status", "url",
+        ], "CDP response body claim");
+        if (!Number.isSafeInteger(readInput.maximumBodyBytes)
+          || readInput.maximumBodyBytes < 1
+          || readInput.maximumBodyBytes > maximumStaticAssetBytes) {
+          throw new Error("CDP response body claim byte bound is invalid.");
+        }
+        return createClaim(readInput, readInput.maximumBodyBytes);
+      } catch (error) {
+        if (fatalError) throw fatalError;
+        throw enterFatalState(safeContractFailure(error));
+      }
+    },
+    skipResponseBody(skipInput) {
+      assertActive();
+      try {
+        exactKeys(skipInput, [
+          "resourceType", "status", "url",
+        ], "CDP bodyless response claim");
+        return createClaim(skipInput, null);
+      } catch (error) {
+        if (fatalError) throw fatalError;
+        throw enterFatalState(safeContractFailure(error));
+      }
+    },
+    snapshot() {
+      const pendingResponseCount = [...entryByRequestId.values()]
+        .filter((entry) => entry.claim && !entry.claim.settled).length
+        + waitingClaimByKey.size;
+      return Object.freeze({
+        bodyClaimCount,
+        bodySettledCount,
+        bodylessClaimCount,
+        fatal: fatalError !== null,
+        observedResponseCount,
+        pendingResponseCount,
+        responseClaimCount,
+        responseFailureCount,
+        responseSettledCount,
+        unclaimedResponseCount: unclaimedEntryByKey.size,
+      });
+    },
+  });
+}
+
+export function isProviderOverlapPlaywrightBodyCdpResponse(event) {
+  if (!event || typeof event !== "object" || Array.isArray(event)
+    || !event.response || typeof event.response !== "object" || Array.isArray(event.response)
+    || typeof event.response.url !== "string") {
+    return false;
+  }
+  let url;
+  try {
+    url = new URL(event.response.url);
+  } catch {
+    return false;
+  }
+  if (url.origin !== "https://chatwoot.browser.clean-pay.dev"
+    || url.pathname !== "/widget" || url.username !== "" || url.password !== ""
+    || url.hash !== "") {
+    return false;
+  }
+  const hasConversation = url.searchParams.has("cw_conversation");
+  const expectedKeys = hasConversation
+    ? ["cw_conversation", "website_token"]
+    : ["website_token"];
+  if (JSON.stringify([...url.searchParams.keys()].sort()) !== JSON.stringify(expectedKeys)) {
+    return false;
+  }
+  if (!sha256Pattern.test(url.searchParams.get("website_token") ?? "")) return false;
+  return !hasConversation
+    || opaquePattern.test(url.searchParams.get("cw_conversation") ?? "");
+}
+
 export async function captureProviderOverlapResponseEvidence(input) {
+  const hasReadBody = Boolean(input && typeof input === "object" && !Array.isArray(input)
+    && Object.hasOwn(input, "readBody"));
   const hasTerminal = Boolean(input && typeof input === "object" && !Array.isArray(input)
     && Object.hasOwn(input, "terminal"));
-  const inputKeys = hasTerminal
-    ? ["classification", "request", "response", "terminal"]
-    : ["classification", "request", "response"];
+  const inputKeys = ["classification", "request", "response"];
+  if (hasReadBody) inputKeys.push("readBody");
+  if (hasTerminal) inputKeys.push("terminal");
   exactKeys(input, inputKeys, "browser response capture");
-  const { classification, request, response } = input;
+  const { classification, readBody, request, response } = input;
   exactKeys(classification, [
     "disposition", "expectedStatuses", "key", "navigation", "staticAssetSha256", "staticPath",
   ], "browser response capture classification");
@@ -767,6 +1119,9 @@ export async function captureProviderOverlapResponseEvidence(input) {
   if (!terminal || typeof terminal.then !== "function") {
     fail("Browser response capture terminal gate is invalid.");
   }
+  if (hasReadBody && typeof readBody !== "function") {
+    fail("Browser response capture body reader is invalid.");
+  }
   const responseStatus = response.status();
   // Playwright's synchronous headers() view may still contain provisional
   // redirect headers. Pre-arm only the exact raw Content-Type lookup at the
@@ -775,14 +1130,31 @@ export async function captureProviderOverlapResponseEvidence(input) {
     ? Promise.resolve(response.headerValue("content-type"))
     : Promise.resolve(response.headers()["content-type"] ?? null);
   void responseContentTypePromise.catch(() => undefined);
-  const bodyKind = classification.staticPath !== null
+  const isRedirectResponse = responseStatus >= 300 && responseStatus <= 399;
+  const bodyKind = responseStatus === 200 && classification.staticPath !== null
     ? "static"
     : responseStatus === 200 && classification.disposition === "continue"
         && expectedContentTypes(classification.key, responseStatus)
           .some((value) => new Set(["text/html", "text/x-component"]).has(value))
       ? "declaration"
       : null;
-  const bodyPromise = bodyKind === null ? null : Promise.resolve(response.body());
+  const maximumBodyBytes = bodyKind === "declaration"
+    ? maximumStaticDeclarationBodyBytes
+    : bodyKind === "static"
+      ? maximumStaticAssetBytes
+      : null;
+  // Redirect responses are represented by requestWillBeSent in CDP and do
+  // not have a standalone responseReceived event that could satisfy a claim.
+  // Every other Playwright response is pre-claimed at the response event,
+  // including bodyless responses, before another identical response can race.
+  const bodyPromise = hasReadBody && !isRedirectResponse
+    ? Promise.resolve(readBody(Object.freeze({
+        maximumBodyBytes,
+        readPlaywrightBody: () => response.body(),
+      })))
+    : bodyKind === null
+      ? null
+      : Promise.resolve(response.body());
   // The live harness supplies the exact requestfinished/requestfailed result,
   // which is Playwright's underlying terminal event. Keep response.finished()
   // only for import-compatible direct callers that have no terminal gate.
@@ -821,6 +1193,16 @@ export async function captureProviderOverlapResponseEvidence(input) {
     status: responseStatus,
   });
   if (bodyKind === null) {
+    if (bodyPromise !== null) {
+      const skippedBody = await boundedLifecycleOperation(
+        bodyPromise,
+        5_000,
+        "bodyless browser response identity",
+      );
+      if (skippedBody !== null) {
+        fail("Bodyless browser response capture returned an unexpected body.");
+      }
+    }
     return Object.freeze({
       body: null,
       classification,
@@ -853,8 +1235,7 @@ export async function captureProviderOverlapResponseEvidence(input) {
       : "Browser declaration response did not finish cleanly.");
   }
   if (!(body instanceof Uint8Array)
-    || (bodyKind === "declaration"
-      && (body.byteLength < 1 || body.byteLength > maximumStaticDeclarationBodyBytes))) {
+    || body.byteLength < 1 || body.byteLength > maximumBodyBytes) {
     fail("Browser response capture body is outside its bounded contract.");
   }
   return Object.freeze({
@@ -1836,7 +2217,7 @@ function assertStaticAssetContract(value) {
     total + value.inventoryMetadataByPath[servedPath].assetBytes
   ), 0);
   if (!Number.isSafeInteger(inventoryBytes)
-    || inventoryBytes > maximumStaticAssetTotalBytes) {
+    || inventoryBytes > PROVIDER_OVERLAP_MAXIMUM_STATIC_RESPONSE_BYTES) {
     fail("Static asset inventory contract exceeds its aggregate byte bound.");
   }
   if (JSON.stringify([...value.routeDeclaredPaths].sort())
@@ -1933,6 +2314,69 @@ function expectedContentTypes(key, status) {
   }
   if (key.endsWith("-action")) return ["text/x-component"];
   fail("Browser response content-type class is unknown.");
+}
+
+function decodeProviderOverlapCdpResponseBody(value, maximumBodyBytes) {
+  exactKeys(value, ["base64Encoded", "body"], "CDP response body result");
+  if (typeof value.base64Encoded !== "boolean" || typeof value.body !== "string") {
+    fail("CDP response body result is invalid.");
+  }
+  let body;
+  if (value.base64Encoded) {
+    const maximumBase64Length = Math.ceil(maximumBodyBytes / 3) * 4;
+    if (value.body.length < 4 || value.body.length > maximumBase64Length
+      || value.body.length % 4 !== 0
+      || !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(
+        value.body,
+      )) {
+      fail("CDP response body base64 encoding is invalid or oversized.");
+    }
+    body = Buffer.from(value.body, "base64");
+    if (body.toString("base64") !== value.body) {
+      fail("CDP response body base64 encoding is not canonical.");
+    }
+  } else {
+    const byteLength = Buffer.byteLength(value.body, "utf8");
+    if (byteLength < 1 || byteLength > maximumBodyBytes) {
+      fail("CDP response body text is empty or oversized.");
+    }
+    body = Buffer.from(value.body, "utf8");
+  }
+  if (body.byteLength < 1 || body.byteLength > maximumBodyBytes) {
+    fail("CDP response body is outside its byte bound.");
+  }
+  return body;
+}
+
+function providerOverlapCdpRequestId(event, label) {
+  if (!event || typeof event !== "object" || Array.isArray(event)
+    || typeof event.requestId !== "string"
+    || !/^[A-Za-z0-9._:-]{1,128}$/.test(event.requestId)) {
+    fail(`${label} request identity is invalid.`);
+  }
+  return event.requestId;
+}
+
+function providerOverlapCdpResponseKey(input, source) {
+  if (!input || typeof input !== "object" || Array.isArray(input)
+    || typeof input.url !== "string" || input.url.length < 1 || input.url.length > 8_192
+    || !Number.isSafeInteger(input.status) || input.status < 100 || input.status > 599
+    || typeof input.resourceType !== "string") {
+    fail("CDP response body identity is invalid.");
+  }
+  const url = exactUrl(input.url);
+  if (!new Set(["http:", "https:"]).has(url.protocol)) {
+    fail("CDP response body URL protocol is invalid.");
+  }
+  const resourceType = source === "playwright"
+    ? cdpResourceTypeByPlaywrightResourceType[input.resourceType]
+    : source === "cdp" && providerOverlapCdpResourceTypes.has(input.resourceType)
+      ? input.resourceType
+      : undefined;
+  if (!resourceType) {
+    fail("CDP response body resource type is invalid.");
+  }
+  return JSON.stringify([input.url, input.status, resourceType]);
 }
 
 function exactUrl(raw) {
