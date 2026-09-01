@@ -1582,6 +1582,33 @@ test("binds the causal route barrier and exact logout helper without fixture sub
   expect(source).not.toMatch(/postMessage\s*\(|route\.fulfill|toHaveScreenshot|threshold|mask:/);
 });
 
+test("keeps Chatwoot capture failures bound to one bounded coarse stage", async () => {
+  const source = await readFile(
+    path.join(process.cwd(), "tests/browser/journeys/chatwoot-phase-browser-capture.ts"),
+    "utf8",
+  );
+  const stages = [
+    "browser-context",
+    "initial-setup",
+    "initial-profile-login",
+    "initial-cabinet-navigation",
+    "gap-barrier",
+    "gap-snapshot",
+    "stable-transition",
+    "stable-snapshot",
+    "logout-clear",
+    "recreated-login",
+    "recreated-snapshot",
+    "final-reread",
+  ];
+  for (const stage of stages) {
+    expect(source).toContain(`"${stage}"`);
+  }
+  expect(source).toContain("let captureStage: CaptureStage = \"browser-context\"");
+  expect(source).toContain("{ cause: error }");
+  expect(source).toContain("Chatwoot browser capture failed during ${captureStage}.");
+});
+
 test("executes the direct-cabinet causal reducer and fails closed on reordered live events", () => {
   const absent = {
     conversationCookiePresent: false,
