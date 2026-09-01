@@ -17,6 +17,7 @@ import { clearSessionAction } from "@/app/actions/session";
 import { passkeySetupErrorMessage } from "@/frontend/components/passkey-presentation";
 import { useWebAuthnSupport } from "@/frontend/hooks/use-webauthn-support";
 import { navigateTo } from "@/frontend/lib/browser-navigation";
+import { executePasskeyRegistration } from "@/frontend/lib/passkey-registration-orchestrator";
 import { safeRedirectPath } from "@/shared/auth/redirect-policy";
 
 type PasskeySetupDependencies = {
@@ -95,36 +96,21 @@ export function usePasskeySetupController({
     setError(null);
 
     try {
-      if (!dependencies.supportsWebAuthn()) {
-        setError(
-          required
-            ? "Это устройство не поддерживает Passkey. Используйте совместимый браузер или начните вход заново."
-            : "Это устройство не поддерживает быстрый вход. Продолжите в кабинете или используйте другое устройство.",
-        );
-        return;
-      }
-
-      const optionsResult = await dependencies.beginRegistration();
-
-      if (!optionsResult.ok) {
-        setError(optionsResult.message);
-        return;
-      }
-
-      const attestation = await dependencies.startRegistration({
-        optionsJSON: optionsResult.options,
+      const result = await executePasskeyRegistration({
+        dependencies: {
+          beginRegistration: dependencies.beginRegistration,
+          navigateTo: dependencies.navigateTo,
+          startRegistration: dependencies.startRegistration,
+          supportsWebAuthn: dependencies.supportsWebAuthn,
+          verifyRegistration: dependencies.verifyRegistration,
+        },
+        destination,
+        name,
+        unsupportedMessage: required
+          ? "Это устройство не поддерживает Passkey. Используйте совместимый браузер или начните вход заново."
+          : "Это устройство не поддерживает быстрый вход. Продолжите в кабинете или используйте другое устройство.",
       });
-      const verifyResult = await dependencies.verifyRegistration({
-        ...attestation,
-        name: name.trim() || undefined,
-      });
-
-      if (!verifyResult.ok) {
-        setError(verifyResult.message);
-        return;
-      }
-
-      dependencies.navigateTo(destination);
+      if (!result.ok) setError(result.message);
     } catch (caught) {
       setError(passkeySetupErrorMessage(caught, required));
     } finally {

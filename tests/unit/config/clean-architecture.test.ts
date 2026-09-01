@@ -1022,6 +1022,38 @@ describe("clean architecture boundaries", () => {
     expect(loginController).not.toContain("useState(");
   });
 
+  it("keeps Passkey registration sequencing in a framework-free orchestrator", () => {
+    const orchestrator = readFileSync(
+      "src/frontend/lib/passkey-registration-orchestrator.ts",
+      "utf8",
+    );
+    const setupController = readFileSync(
+      "src/frontend/hooks/use-passkey-setup-controller.ts",
+      "utf8",
+    );
+
+    expect(astImportedModules(orchestrator)).toEqual([]);
+    expect(orchestrator).not.toMatch(/\b(?:useRef|useState|window|document)\b/);
+    expect(orchestrator.indexOf("dependencies.supportsWebAuthn()")).toBeLessThan(
+      orchestrator.indexOf("dependencies.beginRegistration()"),
+    );
+    expect(orchestrator.indexOf("dependencies.beginRegistration()")).toBeLessThan(
+      orchestrator.indexOf("dependencies.startRegistration("),
+    );
+    expect(orchestrator.indexOf("dependencies.startRegistration(")).toBeLessThan(
+      orchestrator.indexOf("dependencies.verifyRegistration("),
+    );
+    expect(orchestrator.indexOf("dependencies.verifyRegistration(")).toBeLessThan(
+      orchestrator.indexOf("dependencies.navigateTo(destination)"),
+    );
+    expect(setupController).toContain("beginPasskeyRegistrationAction");
+    expect(setupController).toContain("verifyPasskeyRegistrationAction");
+    expect(setupController).toContain("executePasskeyRegistration({");
+    expect(setupController).toContain("clearSessionAction");
+    expect(setupController).toContain("continueWithoutPasskey");
+    expect(setupController).toContain("restartAuthentication");
+  });
+
   it("keeps purchase and extension views behind thin controller boundaries", () => {
     for (const {
       componentName,
