@@ -1569,6 +1569,9 @@ test("binds the causal route barrier and exact logout helper without fixture sub
   expect(source).toMatch(/generation === "initial"\s+&& ledger\.currentDocumentKey === "app-cabinet-document"\s+&& classification\.key === "chatwoot-widget-conversation-frame"/);
   expect(source).toContain("initialCabinetFreshWidgetCount < 1");
   expect(source).toContain("await input.barrier.hold(route)");
+  expect(source).toContain("await waitForInitialProfileSupportContext(page)");
+  expect(source).toContain("removedLabels.has(\"payment_problem\")");
+  expect(source).toContain("removedLabels.has(\"subscription_expired\")");
   expect(source).toContain("await clearSyntheticLogoutState(page)");
   expect(source).toContain("await recreatedCausality.sealPreClearGeneration(page)");
   expect(source).toContain("createChatwootPhaseCausalContract(MAXIMUM_EVENTS)");
@@ -1579,6 +1582,9 @@ test("binds the causal route barrier and exact logout helper without fixture sub
   expect(source.match(/if \(window !== window\.top\) return;/g)).toHaveLength(2);
   expect(source.indexOf("await recreatedCausality.sealPreClearGeneration(page)")).toBeLessThan(
     source.indexOf("await clearSyntheticLogoutState(page)"),
+  );
+  expect(source.indexOf("await waitForInitialProfileSupportContext(page)")).toBeLessThan(
+    source.indexOf("await history.captureInitialProfile(page)"),
   );
   expect(source.indexOf("await clearSyntheticLogoutState(page)")).toBeLessThan(
     source.indexOf("await recreatedCausality.markPostClear(page)"),
