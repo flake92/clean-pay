@@ -118,15 +118,22 @@ test("materializes two deterministic self-contained role environments", async ()
       /CLEAN_PAY_BROWSER_CHATWOOT_PRE_CABINET_CONTACT_RESPONSE_DELAY_MS",\n  ([0-9_]+),/
         .exec(providerSource)?.[1].replaceAll("_", ""),
     );
+    const cabinetObservationGraceMs = Number(
+      /const chatwootCabinetObservationGraceMs = ([0-9_]+);/
+        .exec(providerSource)?.[1].replaceAll("_", ""),
+    );
     expect({
+      cabinetObservationGraceMs,
       identityConfirmationDelayMs,
       ownershipFallbackDelayMs,
       preCabinetOwnershipFallbackDelayMs,
     }).toEqual({
+      cabinetObservationGraceMs: 250,
       identityConfirmationDelayMs: 1_200,
       ownershipFallbackDelayMs: 75,
       preCabinetOwnershipFallbackDelayMs: 1_800,
     });
+    expect(cabinetObservationGraceMs).toBeLessThan(identityConfirmationDelayMs);
     expect(ownershipFallbackDelayMs).toBeLessThan(identityConfirmationDelayMs);
     expect(preCabinetOwnershipFallbackDelayMs).toBeGreaterThan(identityConfirmationDelayMs);
     expect(ownershipFallbackDelayMs).toBeLessThan(3_000);
