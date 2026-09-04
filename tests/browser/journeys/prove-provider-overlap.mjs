@@ -41,6 +41,7 @@ import {
   createProviderOverlapPendingRequestSeal,
   createProviderOverlapRejectedRequestProvenance,
   createProviderOverlapRejectionProvenanceDocument,
+  createProviderOverlapRepeatableStaticResponseUrls,
   createProviderOverlapStaticAssetContract,
   extractProviderOverlapCssMediaReferences,
   extractProviderOverlapResponseStaticDeclarations,
@@ -825,6 +826,8 @@ async function exerciseCabinet(
     const browserTerminalRequestIdentities = new Set();
     let browserResponseCaptureFailure = null;
     const cdpResponseBodyCapture = createProviderOverlapCdpResponseBodyCapture({
+      repeatableStaticResponseUrls:
+        createProviderOverlapRepeatableStaticResponseUrls(staticAssetContract),
       send: (method, parameters) => cdp.send(method, parameters),
     });
     const observeCdpResponseBodyEvent = (observe, event) => {
