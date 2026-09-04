@@ -312,6 +312,7 @@ function armCabinetReadOverlap() {
     occurrence: ++cabinetReadOverlapOccurrence,
     entered: new Map(),
     duplicates: [],
+    deferredLedgerEntries: [],
     waiters: [],
     maxInFlight: 0,
     settled: false,
@@ -386,6 +387,7 @@ function finishCabinetReadOverlap(probe, outcome, release) {
     outcome,
   });
   activeCabinetReadOverlap = null;
+  for (const entry of probe.deferredLedgerEntries) appendLedgerEntry(entry);
   for (const resolve of probe.waiters) resolve();
 }
 
@@ -428,7 +430,6 @@ function cabinetReadOverlapEvidence() {
 function record(service, request, url, body, effect) {
   const idempotencyKey = request.headers["idempotency-key"];
   const entry = {
-    sequence: ++sequence,
     service,
     method: request.method ?? "GET",
     pathname: sanitizedLedgerPath(service, url.pathname),
@@ -446,8 +447,31 @@ function record(service, request, url, body, effect) {
     credential_contract: credentialContract(request),
     effect,
   };
-  ledger.push(entry);
-  return entry.sequence;
+  const probe = activeCabinetReadOverlap;
+  if (
+    probe
+    && !probe.settled
+    && probe.entered.size > 0
+    && !isCabinetReadOverlapParticipantEntry(entry)
+  ) {
+    probe.deferredLedgerEntries.push(entry);
+    return null;
+  }
+  return appendLedgerEntry(entry);
+}
+
+function appendLedgerEntry(entry) {
+  const committed = { sequence: ++sequence, ...entry };
+  ledger.push(committed);
+  return committed.sequence;
+}
+
+function isCabinetReadOverlapParticipantEntry(entry) {
+  return cabinetReadParticipants.some((participant) => (
+    entry.service === participant.service
+    && entry.method === participant.method
+    && entry.pathname === participant.pathname
+  ));
 }
 
 function credentialContract(request) {
