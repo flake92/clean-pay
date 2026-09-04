@@ -3678,6 +3678,67 @@ test("queues repeated bodyless response identities but rejects ambiguous body re
   })).toThrow(/response body identity is ambiguous/);
 });
 
+test("reconciles only one finished bodyless Fetch shadow after an exact settled claim", async () => {
+  const bodylessUrl = "https://chatwoot.browser.clean-pay.dev/api/v1/widget/contact";
+  const capture = createProviderOverlapCdpResponseBodyCapture({
+    send: async () => ({ base64Encoded: false, body: "unused" }),
+  });
+  for (const requestId of ["bodyless-shadow.1", "bodyless-shadow.2"]) {
+    capture.observeResponseReceived({
+      requestId,
+      response: { status: 200, url: bodylessUrl },
+      type: "Fetch",
+    });
+    capture.observeLoadingFinished({ encodedDataLength: 32, requestId });
+  }
+  await expect(capture.skipResponseBody({
+    resourceType: "fetch",
+    status: 200,
+    url: bodylessUrl,
+  })).resolves.toBeNull();
+  expect(capture.snapshot()).toMatchObject({
+    observedResponseCount: 2,
+    responseClaimCount: 1,
+    responseSettledCount: 1,
+    unclaimedResponseCount: 1,
+  });
+  expect(capture.reconcileFinishedBodylessDuplicates()).toEqual({
+    reconciledResponseCount: 1,
+    status: "finished-bodyless-duplicates-reconciled",
+  });
+  expect(capture.assertClean()).toEqual({
+    bodyClaimCount: 0,
+    bodySettledCount: 0,
+    bodylessClaimCount: 1,
+    observedResponseCount: 1,
+    responseClaimCount: 1,
+    responseSettledCount: 1,
+    status: "cdp-response-bodies-clean",
+  });
+
+  const unfinished = createProviderOverlapCdpResponseBodyCapture({
+    send: async () => ({ base64Encoded: false, body: "unused" }),
+  });
+  for (const requestId of ["unfinished-shadow.1", "unfinished-shadow.2"]) {
+    unfinished.observeResponseReceived({
+      requestId,
+      response: { status: 200, url: bodylessUrl },
+      type: "Fetch",
+    });
+  }
+  unfinished.observeLoadingFinished({ encodedDataLength: 32, requestId: "unfinished-shadow.1" });
+  await expect(unfinished.skipResponseBody({
+    resourceType: "fetch",
+    status: 200,
+    url: bodylessUrl,
+  })).resolves.toBeNull();
+  expect(unfinished.reconcileFinishedBodylessDuplicates()).toEqual({
+    reconciledResponseCount: 0,
+    status: "finished-bodyless-duplicates-reconciled",
+  });
+  expect(() => unfinished.assertClean()).toThrow(/did not settle cleanly/);
+});
+
 test("bounds all response claims and atomically drains fatal CDP capture state", async () => {
   let sendCalls = 0;
   const bounded = createProviderOverlapCdpResponseBodyCapture({
