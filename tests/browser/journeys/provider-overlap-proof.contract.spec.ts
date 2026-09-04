@@ -3326,6 +3326,27 @@ test("excludes only the exact Playwright-owned cabinet action response from CDP"
   }
 });
 
+test("excludes only the exact Playwright-owned profile action response from CDP", () => {
+  const event = (url: string, type: string = "Fetch", status: number = 200) => ({
+    response: { status, url },
+    type,
+  });
+  const profileAction = "https://pay.ci.clean-pay.dev/profile";
+  expect(isProviderOverlapPlaywrightBodyCdpResponse(event(profileAction))).toBe(true);
+
+  for (const [url, type, status] of [
+    ["https://pay.ci.clean-pay.dev/profile?_rsc=opaque-state_1", "Fetch", 200],
+    ["https://pay.ci.clean-pay.dev/profile?extra=1", "Fetch", 200],
+    ["https://pay.ci.clean-pay.dev/profile#fragment", "Fetch", 200],
+    ["https://other.clean-pay.dev/profile", "Fetch", 200],
+    ["https://pay.ci.clean-pay.dev/profile", "Document", 200],
+    ["https://pay.ci.clean-pay.dev/profile", "Fetch", 201],
+  ] as const) {
+    expect(isProviderOverlapPlaywrightBodyCdpResponse(event(url, type, status)), url)
+      .toBe(false);
+  }
+});
+
 test("recognizes only a settled ordered synthetic Chatwoot identity boundary", () => {
   const scope = (calls: unknown, phase: unknown = undefined) => ({
     __cleanPayChatwootBoundaryCalls: calls,
