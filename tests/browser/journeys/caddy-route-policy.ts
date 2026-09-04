@@ -37,6 +37,15 @@ export function assertSyntheticCaddyRouteOrder(source: string) {
   assertOccurrenceCount(chatwoot, "fixture.frame-loaded", 0);
   assertOccurrenceCount(
     chatwoot,
+    "        const restoredOwnershipRequiresFrame = document.cookie\n"
+      + "          .split(\";\")\n"
+      + "          .some((entry) => entry.trim().startsWith(\"cw_conversation=\"))\n"
+      + "          && localStorage.getItem(\"clean-pay:chatwoot-ownership:v1\") !== null\n"
+      + "          && localStorage.getItem(\"clean-pay:chatwoot-identity:v1\") === null;",
+    1,
+  );
+  assertOccurrenceCount(
+    chatwoot,
     "        queueMicrotask(() => window.dispatchEvent(new CustomEvent(\"chatwoot:ready\")));",
     1,
   );
@@ -57,7 +66,11 @@ export function assertSyntheticCaddyRouteOrder(source: string) {
       + "                }\n"
       + "              };\n"
       + "              if (observeAfterIdentityRetry) queueMicrotask(announceFrameLoaded);\n"
-      + "              else announceFrameLoaded();",
+      + "              else announceFrameLoaded();\n"
+      + "              if (restoredOwnershipRequiresFrame && becameReady) {\n"
+      + "                api.hasLoaded = true;\n"
+      + "                window.dispatchEvent(new CustomEvent(\"chatwoot:ready\"));\n"
+      + "              }",
     1,
   );
   assertOccurrenceCount(chatwoot, "          pendingIdentity = null;", 2);
@@ -75,6 +88,9 @@ export function assertSyntheticCaddyRouteOrder(source: string) {
     "        || !Number.isSafeInteger(deliveryId) || deliveryId < 1) return;",
     "        data: { deliveryId, widgetAuthToken: \"synthetic-widget-auth\" },",
     "    send({ event: \"loaded\" });",
+    "        const restoredOwnershipRequiresFrame = document.cookie",
+    "          && localStorage.getItem(\"clean-pay:chatwoot-ownership:v1\") !== null",
+    "          && localStorage.getItem(\"clean-pay:chatwoot-identity:v1\") === null;",
     "        let readyFrameWindow = null;",
     "        let announcedFrameWindow = null;",
     "        let pendingIdentity = null;",
@@ -88,18 +104,19 @@ export function assertSyntheticCaddyRouteOrder(source: string) {
     "          target.postMessage({ method: \"identify\", deliveryId: delivery.deliveryId }, config.baseUrl);",
     "        addEventListener(\"message\", (event) => {\n          const target = currentFrameWindow();",
     "          if (event.origin !== config.baseUrl || !target || event.source !== target || typeof event.data !== \"string\") return;",
-    "            if (message.event === \"loaded\") {\n              readyFrameWindow = target;",
+    "            if (message.event === \"loaded\") {\n              const becameReady = readyFrameWindow !== target;\n              readyFrameWindow = target;",
     "              readyFrameWindow = target;\n              if (inFlightIdentity?.frameWindow !== target) inFlightIdentity = null;\n              const observeAfterIdentityRetry = window.cleanPayChatwootPendingIdentity?.phase === \"waiting_for_frame\";\n              deliverIdentity();",
     "              const announceFrameLoaded = () => {\n                if (announcedFrameWindow !== target && currentFrameWindow() === target) {\n                  calls.push({ method: \"frame.loaded\" });\n                  announcedFrameWindow = target;",
     "              if (observeAfterIdentityRetry) queueMicrotask(announceFrameLoaded);\n              else announceFrameLoaded();",
+    "              if (restoredOwnershipRequiresFrame && becameReady) {\n                api.hasLoaded = true;\n                window.dispatchEvent(new CustomEvent(\"chatwoot:ready\"));",
     "              && message.data?.deliveryId === inFlightIdentity.deliveryId) {\n              inFlightIdentity = null;\n              calls.push({ method: \"identity.confirmed\" });",
     "        document.body.appendChild(frame);",
     "        const api = {",
-    "          hasLoaded: true,",
+    "          hasLoaded: !restoredOwnershipRequiresFrame,",
     "          setUser(identifier, attributes) {",
     "            pendingIdentity = { deliveryId: ++nextDeliveryId, identifier };",
     "          reset() {\n            calls.push({ method: \"reset\" });\n            pendingIdentity = null;\n            inFlightIdentity = null;\n            api.resetTriggered = true;",
-    "        window.$chatwoot = api;\n        queueMicrotask(() => window.dispatchEvent(new CustomEvent(\"chatwoot:ready\")));",
+    "        window.$chatwoot = api;\n        if (!restoredOwnershipRequiresFrame) {\n          queueMicrotask(() => window.dispatchEvent(new CustomEvent(\"chatwoot:ready\")));",
   ]);
 
   return {
@@ -108,7 +125,7 @@ export function assertSyntheticCaddyRouteOrder(source: string) {
       boundaryObservation: "retry-aware-trusted-loaded",
       confirmation: "matching-current-frame-delivery",
       identityDeliverySignal: "trusted-widget-loaded-message",
-      readinessSignal: "sdk-ready-before-iframe",
+      readinessSignal: "restored-ownership-frame-gated",
       source: "current-configured-iframe-content-window",
       targetOrigin: "https://chatwoot.browser.clean-pay.dev",
     },

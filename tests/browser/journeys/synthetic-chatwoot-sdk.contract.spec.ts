@@ -234,3 +234,134 @@ test("binds identity confirmation to the current Chatwoot iframe delivery", asyn
     { method: "identity.confirmed" },
   ]);
 });
+
+test("defers restored ownership without a current identity until the trusted frame loads", async ({ page }) => {
+  const caddy = await readFile(path.resolve(__dirname, "Caddyfile"), "utf8");
+  const sdk = syntheticChatwootSdkSource(caddy);
+  await page.route(`${applicationOrigin}/**`, (route) => route.fulfill({
+    body: "<!doctype html><title>Restored Chatwoot ownership contract</title>",
+    contentType: "text/html",
+    status: 200,
+  }));
+  await page.route(`${chatwootOrigin}/**`, (route) => route.fulfill({
+    body: "<!doctype html><title>Trusted Chatwoot frame</title>",
+    contentType: "text/html",
+    status: 200,
+  }));
+  await page.context().addCookies([{
+    domain: "pay.ci.clean-pay.dev",
+    name: "cw_conversation",
+    path: "/",
+    sameSite: "Lax",
+    secure: true,
+    value: "crestoredbrowserjourney01",
+  }]);
+  await page.goto(`${applicationOrigin}/fixture`, { waitUntil: "domcontentloaded" });
+  await page.evaluate(() => {
+    localStorage.setItem("clean-pay:chatwoot-ownership:v1", JSON.stringify({
+      conversation: "25:1234abcd",
+      core: "25:2345bcde",
+      customAttributes: "25:3456cdef",
+    }));
+    localStorage.removeItem("clean-pay:chatwoot-identity:v1");
+    Object.defineProperty(window, "__syntheticChatwootReadyCount", {
+      configurable: true,
+      value: { count: 0 },
+    });
+    addEventListener("chatwoot:ready", () => {
+      (window as unknown as { __syntheticChatwootReadyCount: { count: number } })
+        .__syntheticChatwootReadyCount.count += 1;
+    });
+  });
+  await page.addScriptTag({ content: sdk });
+  await page.evaluate(({ baseUrl, websiteToken }) => {
+    window.chatwootSDK?.run({ baseUrl, websiteToken });
+  }, { baseUrl: chatwootOrigin, websiteToken: "a".repeat(64) });
+
+  expect(await page.evaluate(() => ({
+    calls: (window as unknown as { __cleanPayChatwootBoundaryCalls: unknown[] })
+      .__cleanPayChatwootBoundaryCalls,
+    hasLoaded: window.$chatwoot?.hasLoaded,
+    readyCount: (window as unknown as { __syntheticChatwootReadyCount: { count: number } })
+      .__syntheticChatwootReadyCount.count,
+  }))).toEqual({
+    calls: [{ method: "run", baseUrl: chatwootOrigin, websiteTokenBytes: 64 }],
+    hasLoaded: false,
+    readyCount: 0,
+  });
+
+  await page.evaluate((baseUrl) => {
+    const frame = document.getElementById("chatwoot_live_chat_widget") as HTMLIFrameElement;
+    dispatchEvent(new MessageEvent("message", {
+      data: 'chatwoot-widget:{"event":"loaded"}',
+      origin: baseUrl,
+      source: frame.contentWindow,
+    }));
+  }, chatwootOrigin);
+  await expect.poll(() => page.evaluate(() => ({
+    calls: (window as unknown as { __cleanPayChatwootBoundaryCalls: unknown[] })
+      .__cleanPayChatwootBoundaryCalls,
+    hasLoaded: window.$chatwoot?.hasLoaded,
+    readyCount: (window as unknown as { __syntheticChatwootReadyCount: { count: number } })
+      .__syntheticChatwootReadyCount.count,
+  }))).toEqual({
+    calls: [
+      { method: "run", baseUrl: chatwootOrigin, websiteTokenBytes: 64 },
+      { method: "frame.loaded" },
+    ],
+    hasLoaded: true,
+    readyCount: 1,
+  });
+});
+
+test("keeps readiness eager when restored ownership still has its current identity", async ({ page }) => {
+  const caddy = await readFile(path.resolve(__dirname, "Caddyfile"), "utf8");
+  const sdk = syntheticChatwootSdkSource(caddy);
+  await page.route(`${applicationOrigin}/**`, (route) => route.fulfill({
+    body: "<!doctype html><title>Active Chatwoot identity contract</title>",
+    contentType: "text/html",
+    status: 200,
+  }));
+  await page.route(`${chatwootOrigin}/**`, (route) => route.fulfill({
+    body: "<!doctype html><title>Trusted Chatwoot frame</title>",
+    contentType: "text/html",
+    status: 200,
+  }));
+  await page.context().addCookies([{
+    domain: "pay.ci.clean-pay.dev",
+    name: "cw_conversation",
+    path: "/",
+    sameSite: "Lax",
+    secure: true,
+    value: "cactivebrowserjourney001",
+  }]);
+  await page.goto(`${applicationOrigin}/fixture`, { waitUntil: "domcontentloaded" });
+  await page.evaluate(() => {
+    localStorage.setItem("clean-pay:chatwoot-ownership:v1", "owned");
+    localStorage.setItem("clean-pay:chatwoot-identity:v1", "current");
+    Object.defineProperty(window, "__syntheticChatwootReadyCount", {
+      configurable: true,
+      value: { count: 0 },
+    });
+    addEventListener("chatwoot:ready", () => {
+      (window as unknown as { __syntheticChatwootReadyCount: { count: number } })
+        .__syntheticChatwootReadyCount.count += 1;
+    });
+  });
+  await page.addScriptTag({ content: sdk });
+  await page.evaluate(({ baseUrl, websiteToken }) => {
+    window.chatwootSDK?.run({ baseUrl, websiteToken });
+  }, { baseUrl: chatwootOrigin, websiteToken: "a".repeat(64) });
+
+  await expect.poll(() => page.evaluate(() => ({
+    calls: (window as unknown as { __cleanPayChatwootBoundaryCalls: unknown[] })
+      .__cleanPayChatwootBoundaryCalls,
+    hasLoaded: window.$chatwoot?.hasLoaded,
+    readyCount: (window as unknown as { __syntheticChatwootReadyCount: { count: number } })
+      .__syntheticChatwootReadyCount.count,
+  }))).toEqual({
+    calls: [{ method: "run", baseUrl: chatwootOrigin, websiteTokenBytes: 64 }],
+    hasLoaded: true,
+    readyCount: 1,
+  });
+});

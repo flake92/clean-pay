@@ -139,7 +139,7 @@ test("materializes two deterministic self-contained role environments", async ()
         boundaryObservation: "retry-aware-trusted-loaded",
         confirmation: "matching-current-frame-delivery",
         identityDeliverySignal: "trusted-widget-loaded-message",
-        readinessSignal: "sdk-ready-before-iframe",
+        readinessSignal: "restored-ownership-frame-gated",
         source: "current-configured-iframe-content-window",
         targetOrigin: "https://chatwoot.browser.clean-pay.dev",
       },
@@ -214,7 +214,10 @@ test("materializes two deterministic self-contained role environments", async ()
         "              if (observeAfterIdentityRetry) queueMicrotask(announceFrameLoaded);\n              else announceFrameLoaded();",
         "              queueMicrotask(announceFrameLoaded);",
       ),
-      caddySource.replace("          hasLoaded: true,", "          hasLoaded: false,"),
+      caddySource.replace(
+        "          hasLoaded: !restoredOwnershipRequiresFrame,",
+        "          hasLoaded: true,",
+      ),
       caddySource.replace(
         "        queueMicrotask(() => window.dispatchEvent(new CustomEvent(\"chatwoot:ready\")));",
         "        queueMicrotask(() => undefined);",
