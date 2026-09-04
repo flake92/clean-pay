@@ -58,7 +58,6 @@ const eventContract = Object.freeze([
 const sha256Pattern = /^[a-f0-9]{64}$/;
 const MAXIMUM_CONTROL_BYTES = 2 * 1024 * 1024;
 const containerdImageSelectionMode = "containerd-root-manifest";
-const chatwootPhaseContactResponseDelayMs = "75";
 
 export async function orchestrateChatwootPhaseProof({
   input,
@@ -890,27 +889,12 @@ function ownedStackInput(stack, repositoryRoot) {
     expectedMigrationAssetImageDigest: stack.migrationImageDigest,
     runDocker: (args, maximumBytes, environment, commandOptions = {}) => {
       assertOwnedDockerCommandOptions(commandOptions);
-      return runJourneyDockerCommand(
-        args,
-        maximumBytes,
-        chatwootPhaseDockerEnvironment(environment),
-        {
-          repositoryRoot,
-          ...commandOptions,
-        },
-      );
+      return runJourneyDockerCommand(args, maximumBytes, environment, {
+        repositoryRoot,
+        ...commandOptions,
+      });
     },
   };
-}
-
-export function chatwootPhaseDockerEnvironment(environment) {
-  if (!environment || typeof environment !== "object" || Array.isArray(environment)) {
-    throw new Error("Chatwoot Docker environment is invalid.");
-  }
-  return Object.assign(Object.create(null), environment, {
-    CLEAN_PAY_BROWSER_CHATWOOT_CONTACT_RESPONSE_DELAY_MS:
-      chatwootPhaseContactResponseDelayMs,
-  });
 }
 
 function assertOwnedDockerCommandOptions(commandOptions) {
