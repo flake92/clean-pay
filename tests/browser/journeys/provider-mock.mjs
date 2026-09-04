@@ -28,7 +28,7 @@ const turnstileSecret = sha256("clean-pay-browser-journey:turnstile");
 const chatwootWebsiteToken = sha256("clean-pay-browser-journey:chatwoot-website");
 const chatwootContactResponseDelayMs = boundedIntegerEnvironment(
   "CLEAN_PAY_BROWSER_CHATWOOT_CONTACT_RESPONSE_DELAY_MS",
-  1_800,
+  75,
   25,
   2_500,
 );
@@ -1129,11 +1129,10 @@ async function handleControl(request, response) {
       sendJson(response, 401, { error: "fixture_credential_rejected" });
       return;
     }
-    // The production controller starts this ownership fallback after 750 ms,
-    // while the synthetic SDK confirms the ordinary setUser delivery after
-    // 1.2 s. Keep the fallback response inside its 3 s production bound but
-    // deterministically behind that correlated confirmation. This exercises
-    // both requests without forcing the frozen late-confirmation edge case.
+    // The production controller starts this ownership fallback after 750 ms.
+    // Resolve it before the synthetic SDK's 1.2 s correlated confirmation so
+    // the capture deterministically exercises the ownership-confirmed iframe
+    // replacement used by the A-to-B and Gap lifecycle contracts.
     await new Promise((resolve) => setTimeout(resolve, chatwootContactResponseDelayMs));
     sendJson(response, 200, { identifier: conversation });
     return;
