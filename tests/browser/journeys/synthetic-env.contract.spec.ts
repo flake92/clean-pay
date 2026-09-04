@@ -186,8 +186,8 @@ test("materializes two deterministic self-contained role environments", async ()
           "        document.body.appendChild(frame);\n        addEventListener(\"message\", (event) => {",
       ),
       caddySource.replace(
-        "            pendingIdentity = { deliveryId: ++nextDeliveryId, identifier };\n            document.cookie = \"cw_conversation=\"",
-        "            deliverIdentity();\n            pendingIdentity = { deliveryId: ++nextDeliveryId, identifier };\n            document.cookie = \"cw_conversation=\"",
+        "          pendingIdentity = { deliveryId: ++nextDeliveryId, identifier };\n          document.cookie = \"cw_conversation=\"",
+        "          deliverIdentity();\n          pendingIdentity = { deliveryId: ++nextDeliveryId, identifier };\n          document.cookie = \"cw_conversation=\"",
       ),
       caddySource.replace(
         "          const current = document.getElementById(\"chatwoot_live_chat_widget\");",
@@ -225,12 +225,22 @@ test("materializes two deterministic self-contained role environments", async ()
         "          hasLoaded: !restoredOwnershipRequiresFrame,",
         "          hasLoaded: true,",
       ),
+      caddySource.replace("        let deferredIdentity = null;", ""),
+      caddySource.replace("                flushDeferredIdentity();", ""),
+      caddySource.replace(
+        "              deferredIdentity = { identifier, attributes };\n              return;",
+        "              return;",
+      ),
+      caddySource.replace(
+        "            deferredIdentity = null;\n            applyIdentity(identifier, attributes);",
+        "            applyIdentity(identifier, attributes);",
+      ),
       caddySource.replace(
         "        queueMicrotask(() => window.dispatchEvent(new CustomEvent(\"chatwoot:ready\")));",
         "        queueMicrotask(() => undefined);",
       ),
       caddySource.replace(
-        "            pendingIdentity = null;\n            inFlightIdentity = null;\n            api.resetTriggered = true;",
+        "            deferredIdentity = null;\n            pendingIdentity = null;\n            inFlightIdentity = null;\n            api.resetTriggered = true;",
         "            api.resetTriggered = true;",
       ),
     ]) {

@@ -144,6 +144,7 @@ https://chatwoot.browser.clean-pay.dev {
             && localStorage.getItem("clean-pay:chatwoot-identity:v1") === null);
         let readyFrameWindow = null;
         let announcedFrameWindow = null;
+        let deferredIdentity = null;
         let pendingIdentity = null;
         let inFlightIdentity = null;
         let nextDeliveryId = 0;
@@ -158,6 +159,21 @@ https://chatwoot.browser.clean-pay.dev {
           pendingIdentity = null;
           inFlightIdentity = { deliveryId: delivery.deliveryId, frameWindow: target };
           target.postMessage({ method: "identify", deliveryId: delivery.deliveryId }, config.baseUrl);
+        };
+        const applyIdentity = (identifier, attributes) => {
+          calls.push({ method: "setUser", identifierBytes: String(identifier || "").length, attributeKeys: Object.keys(attributes || {}).sort() });
+          api.identifier = identifier;
+          api.user = attributes;
+          pendingIdentity = { deliveryId: ++nextDeliveryId, identifier };
+          document.cookie = "cw_conversation=" + encodeURIComponent(String(identifier)) + "; Path=/; SameSite=Lax; Secure";
+          document.cookie = "cw_user_" + encodeURIComponent(config.websiteToken) + "=synthetic-chatwoot-user; Path=/; SameSite=Lax; Secure";
+          deliverIdentity();
+        };
+        const flushDeferredIdentity = () => {
+          if (!deferredIdentity) return;
+          const identity = deferredIdentity;
+          deferredIdentity = null;
+          applyIdentity(identity.identifier, identity.attributes);
         };
         addEventListener("message", (event) => {
           const target = currentFrameWindow();
@@ -182,6 +198,7 @@ https://chatwoot.browser.clean-pay.dev {
               if (restoredOwnershipRequiresFrame && becameReady) {
                 api.hasLoaded = true;
                 window.dispatchEvent(new CustomEvent("chatwoot:ready"));
+                flushDeferredIdentity();
               }
             }
             if (message.event === "setAuthCookie"
@@ -199,13 +216,12 @@ https://chatwoot.browser.clean-pay.dev {
           hasLoaded: !restoredOwnershipRequiresFrame,
           resetTriggered: false,
           setUser(identifier, attributes) {
-            calls.push({ method: "setUser", identifierBytes: String(identifier || "").length, attributeKeys: Object.keys(attributes || {}).sort() });
-            api.identifier = identifier;
-            api.user = attributes;
-            pendingIdentity = { deliveryId: ++nextDeliveryId, identifier };
-            document.cookie = "cw_conversation=" + encodeURIComponent(String(identifier)) + "; Path=/; SameSite=Lax; Secure";
-            document.cookie = "cw_user_" + encodeURIComponent(config.websiteToken) + "=synthetic-chatwoot-user; Path=/; SameSite=Lax; Secure";
-            deliverIdentity();
+            if (restoredOwnershipRequiresFrame && readyFrameWindow !== currentFrameWindow()) {
+              deferredIdentity = { identifier, attributes };
+              return;
+            }
+            deferredIdentity = null;
+            applyIdentity(identifier, attributes);
           },
           setCustomAttributes(attributes) {
             calls.push({ method: "setCustomAttributes", attributeKeys: Object.keys(attributes || {}).sort() });
@@ -224,6 +240,7 @@ https://chatwoot.browser.clean-pay.dev {
           },
           reset() {
             calls.push({ method: "reset" });
+            deferredIdentity = null;
             pendingIdentity = null;
             inFlightIdentity = null;
             api.resetTriggered = true;
