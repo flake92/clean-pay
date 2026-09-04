@@ -90,6 +90,7 @@ import {
   assertChatwootImagePlatformParityForTest,
   assertChatwootPairCleanupReceiptForTest,
   bindChatwootOwnedRuntimeForTest,
+  chatwootPhaseDockerEnvironment,
   createChatwootExecutionEvidenceForTest,
   preflightChatwootOutputDirectoryForTest,
   recheckChatwootOutputDirectoryForTest,
@@ -100,6 +101,20 @@ const baselineRevision = "f5cb6f543d85256e7733a1ade6a4f451d86cf378";
 const candidateRevision = "08a787d016205e6a10d4c3bf7b77437555e885ad";
 const fixtureContractSha256 = "a".repeat(64);
 const publicBuildContractSha256 = "b".repeat(64);
+
+test("uses an early ownership fallback only for the Chatwoot Gap lifecycle", () => {
+  const source = Object.assign(Object.create(null), {
+    PATH: "synthetic-path",
+    CLEAN_PAY_BROWSER_CHATWOOT_CONTACT_RESPONSE_DELAY_MS: "1800",
+  });
+  const environment = chatwootPhaseDockerEnvironment(source);
+
+  expect(environment).toEqual({
+    PATH: "synthetic-path",
+    CLEAN_PAY_BROWSER_CHATWOOT_CONTACT_RESPONSE_DELAY_MS: "75",
+  });
+  expect(source.CLEAN_PAY_BROWSER_CHATWOOT_CONTACT_RESPONSE_DELAY_MS).toBe("1800");
+});
 
 type DeepMutable<T> = T extends (...arguments_: never[]) => unknown
   ? T
