@@ -505,12 +505,14 @@ jobs:
           node scripts/security/enforce-container-vulnerability-policy.mjs \
             --report clean-pay-application.trivy.json \
             --policy security/container-vulnerability-exceptions.json \
+            --policy-supplement security/container-vulnerability-exceptions-2026-09-04.json \
             --target runner \
             --mode inventory \
             --output clean-pay-application.vulnerability-attestation.json
           node scripts/security/enforce-container-vulnerability-policy.mjs \
             --report clean-pay-migration.trivy.json \
             --policy security/container-vulnerability-exceptions.json \
+            --policy-supplement security/container-vulnerability-exceptions-2026-09-04.json \
             --target migration \
             --mode inventory \
             --output clean-pay-migration.vulnerability-attestation.json
