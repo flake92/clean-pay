@@ -1363,6 +1363,7 @@ async function exerciseCabinet(
     const pendingRequestDrain = await pendingRequestSeal.drainAndSeal({ timeoutMs: 15_000 });
     markProviderFailurePhase(role, "verify-final-response-captures");
     if (browserResponseCaptureFailure) throw browserResponseCaptureFailure;
+    cdpResponseBodyCapture.reconcileFinishedBodylessDuplicates();
     cdpResponseBodyCapture.assertClean();
     markProviderFailurePhase(role, "finalize-event-lifecycle");
     const finalizerEventSeal = Object.freeze({
