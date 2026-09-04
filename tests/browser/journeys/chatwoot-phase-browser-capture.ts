@@ -910,8 +910,8 @@ async function captureVisiblePhase(input: {
   await settleExactRender(input.page);
   const beforeNetworkLifecycle = input.requestLifecycle.snapshot();
   const beforeRaw = await readChatwootRawState(input.page);
-  const beforeProvider = assertProviderLedger(
-    await controlJson(input.input.controlUrl, "/__ledger", MAXIMUM_CONTROL_BYTES),
+  const beforeProvider = await waitForExactProviderLedger(
+    input.input.controlUrl,
     input.phase,
   );
   observePhaseSourceDigests(input, beforeRaw, beforeProvider);
@@ -1097,6 +1097,26 @@ async function captureVisiblePhase(input: {
     report,
     screenshot: Buffer.from(screenshot),
   });
+}
+
+async function waitForExactProviderLedger(controlUrl: string, phase: Phase) {
+  const expectedEntryCount = phase === "recreated"
+    ? recreatedProviderEffectSequence.length
+    : initialProviderEffectSequence.length;
+  const deadline = Date.now() + 5_000;
+  while (true) {
+    const value = await controlJson(controlUrl, "/__ledger", MAXIMUM_CONTROL_BYTES);
+    if (!isRecord(value) || !Array.isArray(value.entries)) {
+      return assertProviderLedger(value, phase);
+    }
+    if (value.entries.length >= expectedEntryCount) {
+      return assertProviderLedger(value, phase);
+    }
+    if (Date.now() >= deadline) {
+      return assertProviderLedger(value, phase);
+    }
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
 }
 
 export function assertChatwootFinalSourceReread(value: unknown) {

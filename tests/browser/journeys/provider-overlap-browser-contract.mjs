@@ -13,6 +13,7 @@ const providerOverlapResponseBackedAbortFailureSha256 =
 const providerOverlapResponseBackedAbortKeys = new Set([
   "app-cabinet-action",
   "app-login-root-rsc",
+  "app-profile-action",
 ]);
 const opaquePattern = /^[A-Za-z0-9._~-]{1,256}$/;
 const nextStaticMediaExtensionExpression = "(?:eot|ico|png|svg|ttf|woff2|woff)";

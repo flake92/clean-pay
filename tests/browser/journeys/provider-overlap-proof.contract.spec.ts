@@ -3157,11 +3157,21 @@ test("records only the immutable response-backed cabinet action abort", async ()
   expect(normalizeProviderOverlapSemanticEntry(exactSemanticEntry))
     .toEqual(exactSemanticEntry);
 
+  const exactProfileActionAbort = {
+    ...exactSemanticEntry,
+    key: "app-profile-action",
+  };
+  expect(normalizeProviderOverlapSemanticEntry(exactProfileActionAbort))
+    .toEqual(exactProfileActionAbort);
+
   for (const nearMiss of [
-    { ...exactSemanticEntry, key: "app-profile-action" },
+    { ...exactSemanticEntry, key: "app-login-action" },
     { ...exactSemanticEntry, responseContentType: "text/html" },
     { ...exactSemanticEntry, responseFailureSha256: sha256("net::ERR_FAILED") },
     { ...exactSemanticEntry, responseStatus: 307 },
+    { ...exactProfileActionAbort, responseContentType: "text/html" },
+    { ...exactProfileActionAbort, responseFailureSha256: sha256("net::ERR_FAILED") },
+    { ...exactProfileActionAbort, responseStatus: 307 },
   ]) {
     expect(() => normalizeProviderOverlapSemanticEntry(nearMiss))
       .toThrow();
