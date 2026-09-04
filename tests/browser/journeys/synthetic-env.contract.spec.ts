@@ -118,25 +118,21 @@ test("materializes two deterministic self-contained role environments", async ()
       /CLEAN_PAY_BROWSER_CHATWOOT_PRE_CABINET_CONTACT_RESPONSE_DELAY_MS",\n  ([0-9_]+),/
         .exec(providerSource)?.[1].replaceAll("_", ""),
     );
-    const supportContextDelayMs = Number(
-      /CLEAN_PAY_BROWSER_CHATWOOT_CONTEXT_RESPONSE_DELAY_MS",\n  ([0-9_]+),/
-        .exec(providerSource)?.[1].replaceAll("_", ""),
-    );
     expect({
       identityConfirmationDelayMs,
       ownershipFallbackDelayMs,
       preCabinetOwnershipFallbackDelayMs,
-      supportContextDelayMs,
     }).toEqual({
       identityConfirmationDelayMs: 1_200,
       ownershipFallbackDelayMs: 75,
       preCabinetOwnershipFallbackDelayMs: 1_800,
-      supportContextDelayMs: 500,
     });
     expect(ownershipFallbackDelayMs).toBeLessThan(identityConfirmationDelayMs);
     expect(preCabinetOwnershipFallbackDelayMs).toBeGreaterThan(identityConfirmationDelayMs);
-    expect(supportContextDelayMs).toBeLessThan(identityConfirmationDelayMs);
     expect(ownershipFallbackDelayMs).toBeLessThan(3_000);
+    expect(providerSource).toContain(
+      'const chatwootPhaseScenario = "chatwoot-phase-stability-v1";',
+    );
     expect(assertSyntheticCaddyRouteOrder(caddySource)).toEqual({
       chatwootIdentityDelivery: {
         aboutBlankLoadDeliveryBlocked: true,
@@ -173,8 +169,8 @@ test("materializes two deterministic self-contained role environments", async ()
         "          if (event.source !== target || typeof event.data !== \"string\") return;",
       ),
       caddySource.replace(
-        "              readyFrameWindow = target;\n              if (inFlightIdentity?.frameWindow !== target) inFlightIdentity = null;\n              const observeAfterIdentityRetry = window.cleanPayChatwootPendingIdentity?.phase === \"waiting_for_frame\";\n              deliverIdentity();",
-        "              const observeAfterIdentityRetry = window.cleanPayChatwootPendingIdentity?.phase === \"waiting_for_frame\";\n              deliverIdentity();\n              readyFrameWindow = target;\n              if (inFlightIdentity?.frameWindow !== target) inFlightIdentity = null;",
+        "              const becameReady = readyFrameWindow !== target;\n              readyFrameWindow = target;\n              if (inFlightIdentity?.frameWindow !== target) inFlightIdentity = null;\n              const observeAfterIdentityRetry = window.cleanPayChatwootPendingIdentity?.phase === \"waiting_for_frame\";\n              deliverIdentity();",
+        "              const becameReady = readyFrameWindow !== target;\n              const observeAfterIdentityRetry = window.cleanPayChatwootPendingIdentity?.phase === \"waiting_for_frame\";\n              deliverIdentity();\n              readyFrameWindow = target;\n              if (inFlightIdentity?.frameWindow !== target) inFlightIdentity = null;",
       ),
       caddySource
         .replace("        document.body.appendChild(frame);\n        const api = {", "        const api = {")
@@ -218,7 +214,10 @@ test("materializes two deterministic self-contained role environments", async ()
         "              if (observeAfterIdentityRetry) queueMicrotask(announceFrameLoaded);\n              else announceFrameLoaded();",
         "              queueMicrotask(announceFrameLoaded);",
       ),
-      caddySource.replace("          hasLoaded: true,", "          hasLoaded: false,"),
+      caddySource.replace(
+        "          hasLoaded: !preownedConversation,",
+        "          hasLoaded: true,",
+      ),
       caddySource.replace(
         "        queueMicrotask(() => window.dispatchEvent(new CustomEvent(\"chatwoot:ready\")));",
         "        queueMicrotask(() => undefined);",

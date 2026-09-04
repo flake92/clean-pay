@@ -38,13 +38,7 @@ const chatwootPreCabinetContactResponseDelayMs = boundedIntegerEnvironment(
   25,
   2_500,
 );
-const chatwootContextResponseDelayMs = boundedIntegerEnvironment(
-  "CLEAN_PAY_BROWSER_CHATWOOT_CONTEXT_RESPONSE_DELAY_MS",
-  500,
-  25,
-  2_500,
-);
-const authenticatedChatwootScenarioSuffix = ":email-register-verify-and-login";
+const chatwootPhaseScenario = "chatwoot-phase-stability-v1";
 const cabinetReadOverlapTimeoutMs = boundedIntegerEnvironment(
   "CLEAN_PAY_BROWSER_CABINET_READ_OVERLAP_TIMEOUT_MS",
   5_000,
@@ -907,12 +901,6 @@ async function handleRemnashop(request, response) {
       owner && subscriptionlessOwners.has(owner),
     );
     record("remnashop", request, url, body, "read_subscription");
-    // The authenticated browser characterization reloads an already-owned
-    // conversation. Keep its optional support context behind the real iframe
-    // load so host scheduling cannot reorder the frozen boundary sequence.
-    if (activeScenario.endsWith(authenticatedChatwootScenarioSuffix)) {
-      await new Promise((resolve) => setTimeout(resolve, chatwootContextResponseDelayMs));
-    }
     sendJson(response, 200, newlyRegisteredWithoutSubscription ? null : currentSubscription);
     return;
   }
@@ -1151,12 +1139,14 @@ async function handleControl(request, response) {
       sendJson(response, 401, { error: "fixture_credential_rejected" });
       return;
     }
-    // Profile identity must first settle through the SDK's correlated reply.
-    // Once real cabinet reads have occurred, ownership must win instead so the
-    // same capture deterministically exercises the replacement-frame branch.
-    const responseDelayMs = cabinetSurfaceObserved
-      ? chatwootContactResponseDelayMs
-      : chatwootPreCabinetContactResponseDelayMs;
+    // Only the isolated Chatwoot lifecycle proof needs a slow profile probe
+    // followed by a fast cabinet probe. Application journeys share this mock
+    // across workers, so their timing must never depend on mutable global phase
+    // state from a concurrent scenario.
+    const responseDelayMs = activeScenario === chatwootPhaseScenario
+      && !cabinetSurfaceObserved
+      ? chatwootPreCabinetContactResponseDelayMs
+      : chatwootContactResponseDelayMs;
     await new Promise((resolve) => setTimeout(resolve, responseDelayMs));
     sendJson(response, 200, { identifier: conversation });
     return;
