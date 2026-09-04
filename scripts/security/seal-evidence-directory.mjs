@@ -286,7 +286,43 @@ async function hashStableFile(entry, onReadProgress) {
     ) {
       fail("Evidence file changed while it was read.");
     }
-    result = Object.freeze({ bytes, sha256: hash.digest("hex"), snapshot });
+    const firstSha256 = hash.digest("hex");
+
+    // A same-size replacement can complete inside one filesystem timestamp
+    // quantum (notably on Windows), leaving every stat field unchanged. Read
+    // the already-open identity a second time and require byte-for-byte digest
+    // stability so that metadata granularity cannot make a mutation invisible.
+    const verificationHash = createHash("sha256");
+    let verificationBytes = 0;
+    while (true) {
+      const read = await handle.read(
+        buffer,
+        0,
+        buffer.byteLength,
+        verificationBytes,
+      );
+      if (read.bytesRead === 0) break;
+      verificationBytes += read.bytesRead;
+      if (verificationBytes > entry.snapshot.size || verificationBytes > MAX_FILE_BYTES) {
+        fail("Evidence file changed size while it was read.");
+      }
+      verificationHash.update(buffer.subarray(0, read.bytesRead));
+    }
+    const verified = await handle.stat({ bigint: true });
+    const verifiedSnapshot = statSnapshot(verified);
+    if (
+      verificationBytes !== bytes
+      || verificationHash.digest("hex") !== firstSha256
+      || !verified.isFile()
+      || !sameStableStat(snapshot, verifiedSnapshot)
+    ) {
+      fail("Evidence file changed while it was read.");
+    }
+    result = Object.freeze({
+      bytes,
+      sha256: firstSha256,
+      snapshot: verifiedSnapshot,
+    });
   } finally {
     try {
       await handle.close();
