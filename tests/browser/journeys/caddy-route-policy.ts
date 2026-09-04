@@ -37,11 +37,14 @@ export function assertSyntheticCaddyRouteOrder(source: string) {
   assertOccurrenceCount(chatwoot, "fixture.frame-loaded", 0);
   assertOccurrenceCount(
     chatwoot,
-    "        const restoredOwnershipRequiresFrame = document.cookie\n"
-      + "          .split(\";\")\n"
-      + "          .some((entry) => entry.trim().startsWith(\"cw_conversation=\"))\n"
-      + "          && localStorage.getItem(\"clean-pay:chatwoot-ownership:v1\") !== null\n"
-      + "          && localStorage.getItem(\"clean-pay:chatwoot-identity:v1\") === null;",
+    "        const fixtureReadinessScope = window.__cleanPayChatwootFixtureReadiness;\n"
+      + "        const restoredOwnershipRequiresFrame = fixtureReadinessScope === \"restored\"\n"
+      + "          || (fixtureReadinessScope !== \"eager\"\n"
+      + "            && document.cookie\n"
+      + "              .split(\";\")\n"
+      + "              .some((entry) => entry.trim().startsWith(\"cw_conversation=\"))\n"
+      + "            && localStorage.getItem(\"clean-pay:chatwoot-ownership:v1\") !== null\n"
+      + "            && localStorage.getItem(\"clean-pay:chatwoot-identity:v1\") === null);",
     1,
   );
   assertOccurrenceCount(
@@ -88,9 +91,11 @@ export function assertSyntheticCaddyRouteOrder(source: string) {
     "        || !Number.isSafeInteger(deliveryId) || deliveryId < 1) return;",
     "        data: { deliveryId, widgetAuthToken: \"synthetic-widget-auth\" },",
     "    send({ event: \"loaded\" });",
-    "        const restoredOwnershipRequiresFrame = document.cookie",
-    "          && localStorage.getItem(\"clean-pay:chatwoot-ownership:v1\") !== null",
-    "          && localStorage.getItem(\"clean-pay:chatwoot-identity:v1\") === null;",
+    "        const fixtureReadinessScope = window.__cleanPayChatwootFixtureReadiness;",
+    "        const restoredOwnershipRequiresFrame = fixtureReadinessScope === \"restored\"",
+    "          || (fixtureReadinessScope !== \"eager\"",
+    "            && localStorage.getItem(\"clean-pay:chatwoot-ownership:v1\") !== null",
+    "            && localStorage.getItem(\"clean-pay:chatwoot-identity:v1\") === null);",
     "        let readyFrameWindow = null;",
     "        let announcedFrameWindow = null;",
     "        let pendingIdentity = null;",
