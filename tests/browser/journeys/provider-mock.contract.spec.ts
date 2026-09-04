@@ -820,16 +820,21 @@ test("Chatwoot contact probe validates the synthetic inbox and records only cred
       REMNAWAVE_PORT: String(remnawavePort),
       CONTROL_PORT: String(controlPort),
       OIDC_RESET_URL: `http://127.0.0.1:${oidcPort}/__reset`,
+      CLEAN_PAY_BROWSER_CHATWOOT_CONTACT_RESPONSE_DELAY_MS: "75",
     }));
     const control = `http://127.0.0.1:${controlPort}`;
     await waitForOk(`${control}/__health`);
     const websiteToken = digest("clean-pay-browser-journey:chatwoot-website");
     const conversation = "csyntheticbrowserjourney01";
+    const acceptedStartedAt = performance.now();
     const accepted = await fetch(
       `${control}/api/v1/widget/contact?website_token=${websiteToken}`,
       { headers: { "x-auth-token": conversation } },
     );
+    const acceptedElapsedMs = performance.now() - acceptedStartedAt;
     expect(accepted.status).toBe(200);
+    expect(acceptedElapsedMs).toBeGreaterThanOrEqual(50);
+    expect(acceptedElapsedMs).toBeLessThan(3_000);
     expect(await accepted.json()).toEqual({ identifier: conversation });
     const rejected = await fetch(
       `${control}/api/v1/widget/contact?website_token=wrong`,
