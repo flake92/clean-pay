@@ -1044,6 +1044,10 @@ test("rejects image, command, mount, data, network, volume, alias, and environme
 test("keeps Linux host paths case-sensitive and binds the actual daemon logging default", () => {
   expect(normalizeJourneyHostPath("/Repo/Fixture.mjs", "linux"))
     .not.toBe(normalizeJourneyHostPath("/repo/fixture.mjs", "linux"));
+  expect(normalizeJourneyHostPath("/mnt/C/Users/User/Fixture.mjs", "linux"))
+    .toBe(normalizeJourneyHostPath("/run/desktop/mnt/host/c/users/user/fixture.mjs", "linux"));
+  expect(normalizeJourneyHostPath("/host_mnt/C/Users/User/Fixture.mjs", "linux"))
+    .toBe(normalizeJourneyHostPath("C:\\users\\user\\fixture.mjs", "linux"));
   expect(normalizeJourneyHostPath("C:\\Repo\\Fixture.mjs", "win32"))
     .toBe(normalizeJourneyHostPath("c:/repo/fixture.mjs", "win32"));
   const fixture = runtimeFixture();

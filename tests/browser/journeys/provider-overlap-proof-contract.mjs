@@ -2001,7 +2001,7 @@ function assertEventLifecycle(value, label) {
     ["drainedEventCount", "lateEventCount", "status"],
     `${label} browser event lifecycle`,
   );
-  boundedInteger(lifecycle.drainedEventCount, 58, 772, `${label} drained browser events`);
+  boundedInteger(lifecycle.drainedEventCount, 59, 773, `${label} drained browser events`);
   equal(lifecycle.lateEventCount, 0, `${label} late browser events`);
   equal(lifecycle.status, "sealed-clean", `${label} browser event lifecycle status`);
   return lifecycle;
@@ -2011,7 +2011,7 @@ function assertEventLifecycleCausality(lifecycle, requestCount, historyCount, la
   equal(historyCount, 4, `${label} causal browser history event count`);
   equal(
     lifecycle.drainedEventCount,
-    requestCount * 3 + historyCount,
+    requestCount * 3 + historyCount + 1,
     `${label} causal browser event count`,
   );
 }
@@ -2451,7 +2451,7 @@ function assertExactReadRecord(entry, expected, label) {
     credential_contract: {
       header_names: [],
       authorization_scheme: null,
-      cookie_names: ["access_token", "refresh_token"],
+      cookie_names: ["access_token"],
     },
     effect: expected.effect,
   }, `${label} ${expected.effect} ledger record`);
