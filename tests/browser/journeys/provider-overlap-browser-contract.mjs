@@ -974,8 +974,15 @@ export function createProviderOverlapCdpResponseBodyCapture(input) {
     }
     const key = providerOverlapCdpResponseKey(claimInput, "playwright");
     const repeatableStatic = repeatableStaticResponseUrls.has(claimInput.url);
-    if (waitingClaimByKey.has(key) && !repeatableStatic) {
+    const bodyExpected = maximumBodyBytes !== null;
+    const waitingClaims = waitingClaimByKey.get(key) ?? [];
+    if (waitingClaims.length > 0 && !repeatableStatic
+      && (bodyExpected || waitingClaims.some((claim) => claim.bodyExpected))) {
       throwFatal("CDP response body claim is ambiguous.");
+    }
+    const unclaimedEntries = unclaimedEntryByKey.get(key) ?? [];
+    if (unclaimedEntries.length > 1 && bodyExpected && !repeatableStatic) {
+      throwFatal("CDP response body identity is ambiguous.");
     }
     let resolve;
     let reject;
@@ -986,7 +993,6 @@ export function createProviderOverlapCdpResponseBodyCapture(input) {
     // A response or fatal event may settle before the outer Playwright capture
     // attaches its own observer.
     void promise.catch(() => undefined);
-    const bodyExpected = maximumBodyBytes !== null;
     const claim = {
       bodyExpected,
       maximumBodyBytes,
@@ -1090,7 +1096,13 @@ export function createProviderOverlapCdpResponseBodyCapture(input) {
         throwFatal("CDP response request identity was observed more than once.");
       }
       const repeatableStatic = repeatableStaticResponseUrls.has(event.response.url);
-      if (unclaimedEntryByKey.has(key) && !repeatableStatic) {
+      // Fetch/XHR responses can legitimately be identical and bodyless (for
+      // example concurrent ownership probes). Queue those until the matching
+      // Playwright claims reveal whether a body is requested. Other response
+      // classes remain immediately fail-closed, while a body-bearing Fetch is
+      // rejected by createClaim before any bytes are read.
+      if (unclaimedEntryByKey.has(key) && !repeatableStatic
+        && !new Set(["Fetch", "XHR"]).has(event.type)) {
         throwFatal("CDP response body identity is ambiguous.");
       }
       observedResponseCount += 1;

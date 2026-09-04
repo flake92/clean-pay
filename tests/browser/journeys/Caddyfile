@@ -134,6 +134,9 @@ https://chatwoot.browser.clean-pay.dev {
         frame.src = config.baseUrl.replace(/\/$/, "") + "/widget?website_token=" + encodeURIComponent(config.websiteToken);
         frame.title = "Chatwoot synthetic fixture";
         frame.style.display = "none";
+        const preownedConversation = document.cookie
+          .split(";")
+          .some((entry) => entry.trim().startsWith("cw_conversation="));
         let readyFrameWindow = null;
         let announcedFrameWindow = null;
         let pendingIdentity = null;
@@ -158,6 +161,7 @@ https://chatwoot.browser.clean-pay.dev {
           try {
             const message = JSON.parse(event.data.slice("chatwoot-widget:".length));
             if (message.event === "loaded") {
+              const becameReady = readyFrameWindow !== target;
               readyFrameWindow = target;
               if (inFlightIdentity?.frameWindow !== target) inFlightIdentity = null;
               const observeAfterIdentityRetry = window.cleanPayChatwootPendingIdentity?.phase === "waiting_for_frame";
@@ -170,6 +174,10 @@ https://chatwoot.browser.clean-pay.dev {
               };
               if (observeAfterIdentityRetry) queueMicrotask(announceFrameLoaded);
               else announceFrameLoaded();
+              if (preownedConversation && becameReady) {
+                api.hasLoaded = true;
+                window.dispatchEvent(new CustomEvent("chatwoot:ready"));
+              }
             }
             if (message.event === "setAuthCookie"
               && inFlightIdentity?.frameWindow === target
@@ -183,7 +191,7 @@ https://chatwoot.browser.clean-pay.dev {
         const api = {
           baseUrl: config.baseUrl,
           websiteToken: config.websiteToken,
-          hasLoaded: true,
+          hasLoaded: !preownedConversation,
           resetTriggered: false,
           setUser(identifier, attributes) {
             calls.push({ method: "setUser", identifierBytes: String(identifier || "").length, attributeKeys: Object.keys(attributes || {}).sort() });
@@ -217,7 +225,9 @@ https://chatwoot.browser.clean-pay.dev {
           },
         };
         window.$chatwoot = api;
-        queueMicrotask(() => window.dispatchEvent(new CustomEvent("chatwoot:ready")));
+        if (!preownedConversation) {
+          queueMicrotask(() => window.dispatchEvent(new CustomEvent("chatwoot:ready")));
+        }
       },
     });
     })();` 200

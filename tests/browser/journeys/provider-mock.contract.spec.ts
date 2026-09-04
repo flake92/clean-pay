@@ -908,7 +908,10 @@ test("Chatwoot contact timing switches only after a real cabinet read and resets
       return elapsedMs;
     };
 
+    const sharedJourneyElapsedMs = await probe();
+    await postJson(`${control}/__reset`, { scenario: "chatwoot-phase-stability-v1" });
     const preCabinetElapsedMs = await probe();
+    expect(preCabinetElapsedMs - sharedJourneyElapsedMs).toBeGreaterThanOrEqual(80);
     const login = await postSession(`${shop}/auth/login`, {
       email: "synthetic.browser@clean-pay.dev",
       password: "synthetic-password",
@@ -917,9 +920,15 @@ test("Chatwoot contact timing switches only after a real cabinet read and resets
     const cabinetElapsedMs = await probe();
     expect(preCabinetElapsedMs - cabinetElapsedMs).toBeGreaterThanOrEqual(80);
 
-    await postJson(`${control}/__reset`, { scenario: "contract-chatwoot-timing-reset" });
+    await postJson(`${control}/__reset`, { scenario: "chatwoot-phase-stability-v1" });
     const resetElapsedMs = await probe();
     expect(resetElapsedMs - cabinetElapsedMs).toBeGreaterThanOrEqual(80);
+
+    await postJson(`${control}/__reset`, {
+      scenario: "journey-390x844:email-register-verify-and-login",
+    });
+    const applicationJourneyElapsedMs = await probe();
+    expect(resetElapsedMs - applicationJourneyElapsedMs).toBeGreaterThanOrEqual(80);
   } finally {
     await Promise.all(children.map(stopChild));
   }
