@@ -454,7 +454,7 @@
       "additionalProperties": false,
       "required": ["drainedEventCount", "lateEventCount", "status"],
       "properties": {
-        "drainedEventCount": { "type": "integer", "minimum": 58, "maximum": 772 },
+        "drainedEventCount": { "type": "integer", "minimum": 59, "maximum": 773 },
         "lateEventCount": { "const": 0 },
         "status": { "const": "sealed-clean" }
       }
@@ -1113,7 +1113,7 @@
       "properties": {
         "header_names": { "const": [] },
         "authorization_scheme": { "const": null },
-        "cookie_names": { "const": ["access_token", "refresh_token"] }
+        "cookie_names": { "const": ["access_token"] }
       }
     },
     "readRecord": {

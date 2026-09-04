@@ -827,49 +827,81 @@ function assertServiceRuntime(input) {
   exactJson(
     container.Config.Entrypoint ?? null,
     effectiveEntrypoint(service.entrypoint, image.Config?.Entrypoint),
+    "service-config-entrypoint",
   );
   const expectedCommand = effectiveCommand(service.command, service.entrypoint, image.Config?.Cmd);
   exactJson(
     container.Config.Cmd ?? null,
     expectedCommand,
+    "service-config-command",
   );
-  exactValue(container.Config.User ?? "", service.user ?? image.Config?.User ?? "");
-  exactValue(container.Config.WorkingDir ?? "", service.working_dir ?? image.Config?.WorkingDir ?? "");
+  exactValue(container.Config.User ?? "", service.user ?? image.Config?.User ?? "", "service-config-user");
+  exactValue(
+    container.Config.WorkingDir ?? "",
+    service.working_dir ?? image.Config?.WorkingDir ?? "",
+    "service-config-working-directory",
+  );
   assertHealthcheck(container.Config.Healthcheck, service.healthcheck, image.Config?.Healthcheck);
   if (service.stop_grace_period !== undefined) {
-    exactValue(Number(container.Config.StopTimeout), durationSeconds(service.stop_grace_period));
+    exactValue(
+      Number(container.Config.StopTimeout),
+      durationSeconds(service.stop_grace_period),
+      "service-config-stop-timeout",
+    );
   }
 
   const host = container.HostConfig ?? {};
-  exactValue(Boolean(host.ReadonlyRootfs), Boolean(service.read_only));
-  exactJson(normalizeCaps(host.CapAdd), normalizeCaps(service.cap_add));
-  exactJson(normalizeCaps(host.CapDrop), normalizeCaps(service.cap_drop));
-  exactJson(normalizeSecurity(host.SecurityOpt), normalizeSecurity(service.security_opt));
-  exactValue(Boolean(host.Privileged), false);
-  exactValue(Boolean(host.AutoRemove), false);
-  exactValue(Boolean(host.OomKillDisable), false);
-  exactJson(host.Devices ?? [], []);
-  exactJson(host.DeviceRequests ?? [], []);
-  exactJson(host.GroupAdd ?? [], service.group_add ?? []);
-  exactJson(host.Sysctls ?? {}, service.sysctls ?? {});
-  exactJson(host.ExtraHosts ?? [], service.extra_hosts ?? []);
-  exactJson(host.Links ?? [], []);
-  exactJson(host.Dns ?? [], service.dns ?? []);
-  exactJson(host.DnsOptions ?? [], service.dns_opt ?? []);
-  exactJson(host.DnsSearch ?? [], service.dns_search ?? []);
-  exactValue(host.PidMode ?? "", service.pid ?? "");
-  exactValue(host.UTSMode ?? "", service.uts ?? "");
-  exactValue(host.UsernsMode ?? "", service.userns_mode ?? "");
-  exactValue(Number(host.PidsLimit ?? 0), Number(service.pids_limit ?? 0));
-  exactValue(Number(host.Memory ?? 0), numericBytes(service.mem_limit));
-  exactValue(Number(host.NanoCpus ?? 0), Math.round(Number(service.cpus ?? 0) * 1e9));
-  exactValue(Boolean(host.Init), Boolean(service.init));
-  exactValue(host.NetworkMode, expectedNetworkName);
-  exactValue(host.RestartPolicy?.Name ?? "", normalizeRestart(service.restart));
-  exactValue(Number(host.RestartPolicy?.MaximumRetryCount ?? 0), 0);
+  exactValue(Boolean(host.ReadonlyRootfs), Boolean(service.read_only), "host-readonly-rootfs");
+  exactJson(normalizeCaps(host.CapAdd), normalizeCaps(service.cap_add), "host-cap-add");
+  exactJson(normalizeCaps(host.CapDrop), normalizeCaps(service.cap_drop), "host-cap-drop");
+  exactJson(
+    normalizeSecurity(host.SecurityOpt),
+    normalizeSecurity(service.security_opt),
+    "host-security-options",
+  );
+  exactValue(Boolean(host.Privileged), false, "host-privileged");
+  exactValue(Boolean(host.AutoRemove), false, "host-auto-remove");
+  exactValue(Boolean(host.OomKillDisable), false, "host-oom-kill-disable");
+  exactJson(host.Devices ?? [], [], "host-devices");
+  exactJson(host.DeviceRequests ?? [], [], "host-device-requests");
+  exactJson(host.GroupAdd ?? [], service.group_add ?? [], "host-group-add");
+  exactJson(host.Sysctls ?? {}, service.sysctls ?? {}, "host-sysctls");
+  exactJson(host.ExtraHosts ?? [], service.extra_hosts ?? [], "host-extra-hosts");
+  exactJson(host.Links ?? [], [], "host-links");
+  exactJson(host.Dns ?? [], service.dns ?? [], "host-dns");
+  exactJson(host.DnsOptions ?? [], service.dns_opt ?? [], "host-dns-options");
+  exactJson(host.DnsSearch ?? [], service.dns_search ?? [], "host-dns-search");
+  exactValue(host.PidMode ?? "", service.pid ?? "", "host-pid-mode");
+  exactValue(host.UTSMode ?? "", service.uts ?? "", "host-uts-mode");
+  exactValue(host.UsernsMode ?? "", service.userns_mode ?? "", "host-userns-mode");
+  exactValue(Number(host.PidsLimit ?? 0), Number(service.pids_limit ?? 0), "host-pids-limit");
+  exactValue(Number(host.Memory ?? 0), numericBytes(service.mem_limit), "host-memory");
+  exactValue(
+    Number(host.NanoCpus ?? 0),
+    Math.round(Number(service.cpus ?? 0) * 1e9),
+    "host-nano-cpus",
+  );
+  exactValue(Boolean(host.Init), Boolean(service.init), "host-init");
+  exactValue(host.NetworkMode, expectedNetworkName, "host-network-mode");
+  exactValue(
+    host.RestartPolicy?.Name ?? "",
+    normalizeRestart(service.restart),
+    "host-restart-policy-name",
+  );
+  exactValue(
+    Number(host.RestartPolicy?.MaximumRetryCount ?? 0),
+    0,
+    "host-restart-policy-maximum-retry-count",
+  );
   assertLogging(host.LogConfig, service.logging, daemonLoggingDriver);
   assertTmpfs(host.Tmpfs, service.tmpfs);
-  assertMounts(container.Mounts, service.volumes, bindSources, expectedVolumeNames);
+  assertMounts(
+    container.Mounts,
+    service.volumes,
+    bindSources,
+    expectedVolumeNames,
+    serviceName,
+  );
   assertPublishedPorts(container.NetworkSettings?.Ports, service.ports);
   assertServiceNetwork(container, service, serviceName, contract.project, expectedNetworkName);
   assertServiceState(container, service, serviceName, oneShotLifecycle, lifecycleNotBefore);
@@ -1293,7 +1325,7 @@ function effectiveEnvironment(image, service) {
 function assertExactEnvironment(actual, expected) {
   const left = [...parseEnvironmentList(actual ?? [])].sort(byName);
   const right = [...parseEnvironmentList(expected ?? [])].sort(byName);
-  exactJson(left, right);
+  exactJson(left, right, "service-config-environment");
 }
 
 function parseEnvironmentList(assignments) {
@@ -1308,7 +1340,13 @@ function parseEnvironmentList(assignments) {
   return result;
 }
 
-function assertMounts(actualMounts, expectedMounts, bindSources, expectedVolumeNames) {
+function assertMounts(
+  actualMounts,
+  expectedMounts,
+  bindSources,
+  expectedVolumeNames,
+  serviceName,
+) {
   const actual = (actualMounts ?? []).map((mount) => ({
     destination: mount.Destination,
     name: mount.Name ?? "",
@@ -1328,7 +1366,14 @@ function assertMounts(actualMounts, expectedMounts, bindSources, expectedVolumeN
       type: mount.type,
     };
   }).sort(byDestination);
-  exactJson(actual, expected);
+  const label = `service-mounts:${serviceName}`;
+  exactValue(actual.length, expected.length, `${label}:count`);
+  for (let index = 0; index < expected.length; index += 1) {
+    for (const field of ["destination", "name", "readOnly", "source", "type"]) {
+      exactValue(actual[index]?.[field], expected[index]?.[field], `${label}:${field}`);
+    }
+  }
+  exactJson(actual, expected, label);
 }
 
 function assertTmpfs(actualTmpfs, expectedTmpfs) {
@@ -1340,7 +1385,7 @@ function assertTmpfs(actualTmpfs, expectedTmpfs) {
     const [target, ...options] = String(entry).split(":");
     return { options: normalizeTmpfsOptions(options.join(":")), target };
   }).sort(byTarget);
-  exactJson(actual, expected);
+  exactJson(actual, expected, "host-tmpfs");
 }
 
 function normalizeTmpfsOptions(raw) {
@@ -1364,7 +1409,7 @@ function assertPublishedPorts(actualPorts, expectedPorts) {
     published: String(port.published),
     target: `${port.target}/${port.protocol ?? "tcp"}`,
   })).sort(byPort);
-  exactJson(actual, expected);
+  exactJson(actual, expected, "published-ports");
   if (actual.some(({ hostIp }) => !/^127\.0\.0\.\d+$/.test(hostIp))) {
     fail("Journey service publication is not loopback-only.");
   }
@@ -1379,7 +1424,7 @@ function assertServiceNetwork(container, service, serviceName, project, networkN
     : [];
   const expectedAliases = [`${project}-${serviceName}-1`, serviceName, ...explicitAliases].sort();
   const actualAliases = [...new Set(attachments[networkName]?.Aliases ?? [])].sort();
-  exactJson(actualAliases, [...new Set(expectedAliases)].sort());
+  exactJson(actualAliases, [...new Set(expectedAliases)].sort(), "service-network-aliases");
 }
 
 function assertServiceState(container, service, serviceName, oneShotLifecycle, lifecycleNotBefore) {
@@ -1424,7 +1469,7 @@ function assertNetworkRuntime(network, project, expectedName, containersByServic
     .map(({ Id }) => Id)
     .sort();
   const actualIds = Object.keys(network.Containers ?? {}).sort();
-  exactJson(actualIds, expectedIds);
+  exactJson(actualIds, expectedIds, "project-network-container-identities");
 }
 
 function assertVolumeRuntime(volumes, project, expectedNames) {
@@ -1442,8 +1487,12 @@ function assertVolumeRuntime(volumes, project, expectedNames) {
 }
 
 function assertLogging(actual, expected, daemonLoggingDriver) {
-  exactValue(actual?.Type || daemonLoggingDriver, expected?.driver ?? daemonLoggingDriver);
-  exactJson(actual?.Config ?? {}, expected?.options ?? {});
+  exactValue(
+    actual?.Type || daemonLoggingDriver,
+    expected?.driver ?? daemonLoggingDriver,
+    "host-logging-driver",
+  );
+  exactJson(actual?.Config ?? {}, expected?.options ?? {}, "host-logging-options");
 }
 
 function assertHealthcheck(actual, override, inherited) {
@@ -1463,7 +1512,7 @@ function assertHealthcheck(actual, override, inherited) {
     StartPeriod: Number(value.StartPeriod ?? 0),
     StartInterval: Number(value.StartInterval ?? 0),
   } : null;
-  exactJson(normalize(actual), normalize(expected));
+  exactJson(normalize(actual), normalize(expected), "service-healthcheck");
 }
 
 function composeQueryEnvironment(assignments, project, bindSources) {
@@ -1916,10 +1965,17 @@ function normalizeSecurity(value) {
 }
 
 export function normalizeJourneyHostPath(value, platform = process.platform) {
-  let normalized = String(value);
+  let normalized = String(value).replace(/\\/g, "/");
   if (platform === "win32") {
-    normalized = normalized.replace(/\\/g, "/");
     normalized = normalized.replace(/^\/run\/desktop\/mnt\/host\/([a-z])\//i, "$1:/");
+    return normalized.replace(/\/$/, "").toLowerCase();
+  }
+  normalized = normalized
+    .replace(/^\/run\/desktop\/mnt\/host\/([a-z])\//i, "/mnt/$1/")
+    .replace(/^\/host_mnt\/([a-z])\//i, "/mnt/$1/")
+    .replace(/^([a-z]):\//i, "/mnt/$1/")
+    .replace(/^\/([a-z])\//i, "/mnt/$1/");
+  if (/^\/mnt\/[a-z](?:\/|$)/i.test(normalized)) {
     return normalized.replace(/\/$/, "").toLowerCase();
   }
   return normalized.length > 1 ? normalized.replace(/\/$/, "") : normalized;
@@ -2017,7 +2073,7 @@ function parseJson(value, label) {
 
 function exactObjectKeys(value, keys, label) {
   if (!value || typeof value !== "object" || Array.isArray(value)) fail(`${label} is invalid.`);
-  exactJson(Object.keys(value).sort(), [...keys].sort());
+  exactJson(Object.keys(value).sort(), [...keys].sort(), `object-keys:${label}`);
 }
 
 function exactOptionalObjectKeys(value, required, optional, label) {
@@ -2038,16 +2094,24 @@ function exactImageReference(value, label) {
     || !/^[A-Za-z0-9][A-Za-z0-9._/:@-]{1,240}$/.test(value)) fail(`${label} is invalid.`);
 }
 
-function exactJson(actual, expected) {
+function exactJson(actual, expected, label) {
   if (JSON.stringify(actual) !== JSON.stringify(expected)) {
-    fail("Journey runtime value differs.");
+    fail(`Journey runtime value differs at ${runtimeComparisonLabel(label)}.`);
   }
 }
 
-function exactValue(actual, expected) {
+function exactValue(actual, expected, label) {
   if (actual !== expected) {
-    fail("Journey runtime value differs.");
+    fail(`Journey runtime value differs at ${runtimeComparisonLabel(label)}.`);
   }
+}
+
+function runtimeComparisonLabel(value) {
+  if (typeof value !== "string" || value.length < 1 || value.length > 128
+    || !/^[a-z0-9 .:_-]+$/.test(value)) {
+    fail("Journey runtime comparison label is invalid.");
+  }
+  return value;
 }
 
 function isWithin(parent, child) {

@@ -51,6 +51,7 @@ import {
   installProviderOverlapHistoryInstrumentation,
   isProviderOverlapPlaywrightBodyCdpResponse,
   normalizeProviderOverlapObservedResponseContentType,
+  providerOverlapChatwootIdentityBoundarySettled,
   PROVIDER_OVERLAP_MAXIMUM_STATIC_RESPONSE_BYTES,
   PROVIDER_OVERLAP_REJECTION_PROVENANCE_MAX_PER_ROLE,
   readProviderOverlapStaticResponseEvidence,
@@ -417,8 +418,8 @@ test("rejects concurrency and adjacent-ledger near misses without broadening the
       duplicate.sequence = value.ledger.entries.length + 1;
       value.ledger.entries.push(duplicate);
     }],
-    ["a missing cookie-name contract", (value) => {
-      value.ledger.entries[1].credential_contract.cookie_names = ["access_token"];
+    ["an extra refresh cookie-name contract", (value) => {
+      value.ledger.entries[1].credential_contract.cookie_names = ["access_token", "refresh_token"];
     }],
   ];
 
@@ -1039,11 +1040,30 @@ test("publishes only bounded phase enums for live provider failure diagnosis", a
   );
   expect(runner).toContain("currentProviderFailurePhases()");
   expect(runner).toContain("{ providerFailurePhases }");
+  expect(runner).toContain("currentProviderResponseCaptureFailureEvidence()");
+  expect(runner).toContain("{ responseCaptureFailureEvidence }");
+  expect(runner).toContain("currentProviderBrowserDiagnosticEvidence()");
+  expect(runner).toContain("{ browserDiagnosticEvidence }");
+  expect(runner).toContain('"durable-body-read"');
+  expect(runner).toContain('"request-terminal-evidence"');
+  expect(runner).not.toContain("message: message");
+  expect(runner).toContain("messageSha256: entry.sha256");
+  expect(runner).toContain("messageShape: entry.messageShape");
+  expect(runner).toContain("wordLengths: entry.wordLengths");
+  expect(runner).toContain('kind = "chromium-unused-preload"');
+  expect(runner).toContain('kind = "playwright-service-worker-block"');
+  expect(runner).toContain('text === "Service Worker registration blocked by Playwright"');
+  expect(runner).toContain("expectedPlaywrightConsole.length !== 1");
+  expect(runner).toContain('kind = "chromium-dom-autocomplete"');
+  expect(runner).toContain('kind = "next-auto-scroll-skip"');
+  expect(runner).toContain('source = "non-url"');
+  expect(runner).not.toContain("message: entry");
   expect(runner).toContain('markProviderFailurePhase(role, "navigate-login")');
   expect(runner).toContain('markProviderFailurePhase(role, "navigate-profile")');
   expect(runner).toContain('markProviderFailurePhase(role, "navigate-cabinet")');
   expect(runner).toContain('markProviderFailurePhase(role, "finalize-event-lifecycle")');
   expect(runner).toContain('/^[a-z0-9-]{1,64}$/');
+  expect(runner).toContain("{ terminalEvidence }");
 });
 
 test("publishes bounded provider finalization subphase enums", async () => {
@@ -2388,7 +2408,7 @@ test("registers exact request identities before response capture and routed cont
     .toContain('await route.abort("blockedbyclient")');
   expect(routeHandler.slice(navigationCaptureBarrier, routeHandler.indexOf("await route.continue()")))
     .not.toContain("throw error");
-  expect(proofContractSource).toContain("requestCount * 3 + historyCount");
+  expect(proofContractSource).toContain("requestCount * 3 + historyCount + 1");
   const pendingDrainIndex = runnerSource.indexOf(
     "await pendingRequestSeal.drainAndSeal({ timeoutMs: 15_000 })",
   );
@@ -3166,9 +3186,15 @@ test("waits for Playwright-deferred response body capture before navigation", as
   expect(seal.assertClean()).toMatchObject({ status: "sealed-clean" });
 });
 
-test("excludes only the two exact Chatwoot widget OOPIF response shapes from CDP", () => {
+test("excludes only exact Playwright-owned response shapes from CDP", () => {
   const websiteToken = "a".repeat(64);
-  const event = (url: string) => ({ response: { url } });
+  const event = (url: string, type?: string, status?: number) => ({
+    ...(type === undefined ? {} : { type }),
+    response: {
+      ...(status === undefined ? {} : { status }),
+      url,
+    },
+  });
   expect(isProviderOverlapPlaywrightBodyCdpResponse(event(
     `https://chatwoot.browser.clean-pay.dev/widget?website_token=${websiteToken}`,
   ))).toBe(true);
@@ -3185,7 +3211,58 @@ test("excludes only the two exact Chatwoot widget OOPIF response shapes from CDP
   ]) {
     expect(isProviderOverlapPlaywrightBodyCdpResponse(event(url)), url).toBe(false);
   }
+  const loginRootRsc = "https://pay.ci.clean-pay.dev/login?redirect_to=%2F&_rsc=opaque-state_1";
+  expect(isProviderOverlapPlaywrightBodyCdpResponse(
+    event(loginRootRsc, "Fetch", 200),
+  )).toBe(true);
+  for (const [url, type, status] of [
+    [loginRootRsc, "Document", 200],
+    [loginRootRsc, "Fetch", 307],
+    ["https://pay.ci.clean-pay.dev/login?redirect_to=%2Fprofile&_rsc=opaque-state_1",
+      "Fetch", 200],
+    ["https://pay.ci.clean-pay.dev/login?_rsc=opaque-state_1&redirect_to=%2F",
+      "Fetch", 200],
+    ["https://pay.ci.clean-pay.dev/login?redirect_to=%2F&_rsc=invalid%20state",
+      "Fetch", 200],
+    ["https://pay.ci.clean-pay.dev/login?redirect_to=%2F&_rsc=opaque-state_1&extra=1",
+      "Fetch", 200],
+  ] as const) {
+    expect(isProviderOverlapPlaywrightBodyCdpResponse(event(url, type, status)), url)
+      .toBe(false);
+  }
   expect(isProviderOverlapPlaywrightBodyCdpResponse({ response: null })).toBe(false);
+});
+
+test("recognizes only a settled ordered synthetic Chatwoot identity boundary", () => {
+  const scope = (calls: unknown, phase: unknown = undefined) => ({
+    __cleanPayChatwootBoundaryCalls: calls,
+    cleanPayChatwootPendingIdentity: phase === undefined ? undefined : { phase },
+  });
+  const settled = [
+    { method: "run" },
+    { method: "frame.loaded" },
+    { method: "setUser" },
+    { method: "identity.confirmed" },
+  ];
+  expect(providerOverlapChatwootIdentityBoundarySettled(scope(undefined))).toBe(false);
+  expect(providerOverlapChatwootIdentityBoundarySettled(scope(settled, "sent"))).toBe(true);
+  expect(providerOverlapChatwootIdentityBoundarySettled(scope([
+    { method: "identity.confirmed" },
+    { method: "setUser" },
+  ]))).toBe(false);
+  expect(providerOverlapChatwootIdentityBoundarySettled(scope([
+    ...settled,
+    { method: "identity.confirmed" },
+  ]))).toBe(false);
+  expect(providerOverlapChatwootIdentityBoundarySettled(scope([
+    { method: "setUser" },
+    { unexpected: true },
+    { method: "identity.confirmed" },
+  ]))).toBe(false);
+  expect(providerOverlapChatwootIdentityBoundarySettled(scope(
+    Array.from({ length: 65 }, () => ({ method: "run" })),
+  ))).toBe(false);
+  expect(providerOverlapChatwootIdentityBoundarySettled(scope(settled))).toBe(true);
 });
 
 test("binds same-CDP response bodies in either event order and fails closed", async () => {
@@ -3997,6 +4074,48 @@ test("extracts every exact HTML and RSC static declaration without partial suffi
       label,
     ).toEqual([staticJavascriptPath]);
   }
+  const exactNonModule = Buffer.from(
+    `<script src="${staticJavascriptPath}" noModule=""></script>`,
+    "utf8",
+  );
+  expect(extractProviderOverlapResponseStaticDeclarations(exactNonModule, contract)).toEqual([]);
+  const exactNonModuleWithNonce = Buffer.from(
+    `<script src="${staticJavascriptPath}" noModule="" nonce="${"a".repeat(32)}"></script>`,
+    "utf8",
+  );
+  expect(extractProviderOverlapResponseStaticDeclarations(exactNonModuleWithNonce, contract))
+    .toEqual([]);
+  const escapedNonModuleWithNonce = Buffer.from(
+    `<script src=\\"${staticJavascriptPath}\\" noModule=\\"\\" nonce=\\"${"b".repeat(32)}\\"></script>`,
+    "utf8",
+  );
+  expect(extractProviderOverlapResponseStaticDeclarations(escapedNonModuleWithNonce, contract))
+    .toEqual([]);
+  expect(extractProviderOverlapResponseStaticDeclarations(Buffer.from(
+    `<script src="${staticJavascriptPath}" async=""></script>`,
+    "utf8",
+  ), contract)).toEqual([staticJavascriptPath]);
+  for (const unsafeNonModule of [
+    `<script src="${staticJavascriptPath}" noModule="" nonce="${"a".repeat(31)}"></script>`,
+    `<script src="${staticJavascriptPath}" noModule="" nonce="${"A".repeat(32)}"></script>`,
+    `<script src="${staticJavascriptPath}" nonce="${"a".repeat(32)}" noModule=""></script>`,
+    `<script src="${staticJavascriptPath}" noModule="" nonce="${"a".repeat(32)}" async=""></script>`,
+  ]) {
+    expect(extractProviderOverlapResponseStaticDeclarations(
+      Buffer.from(unsafeNonModule, "utf8"),
+      contract,
+    )).toEqual([staticJavascriptPath]);
+  }
+  expect(() => extractProviderOverlapResponseStaticDeclarations(Buffer.from(
+    `<script src="${staticJavascriptPath}" noModule=""></script>`
+      + `<script src="${staticJavascriptPath}" noModule=""></script>`,
+    "utf8",
+  ), contract)).toThrow(/incoherent exact nomodule/);
+  expect(extractProviderOverlapResponseStaticDeclarations(Buffer.from(
+    `<script src="${staticJavascriptPath}" noModule=""></script>`
+      + `<script src=\\"${staticJavascriptPath}\\" noModule=\\"\\"></script>`,
+    "utf8",
+  ), contract)).toEqual([]);
 
   for (const [label, declaration] of [
     ["woff2 alphanumeric suffix", `${staticFontPath}evil`],
@@ -4598,8 +4717,8 @@ test("keeps the schema write-once sidecar-only and free of comparison projection
   expect(schema.$defs.navigation.additionalProperties).toBe(false);
   expect(schema.$defs.eventLifecycle.properties.drainedEventCount).toEqual({
     type: "integer",
-    minimum: 58,
-    maximum: 772,
+    minimum: 59,
+    maximum: 773,
   });
   expect(schema.$defs.staticRequestEntry.additionalProperties).toBe(false);
   expect(schema.$defs.staticRequestEntry.required).toEqual([
@@ -4800,7 +4919,7 @@ function readRecord(effect: "read_offers" | "read_devices", sequence: number) {
     credential_contract: {
       header_names: [],
       authorization_scheme: null,
-      cookie_names: ["access_token", "refresh_token"],
+      cookie_names: ["access_token"],
     },
     effect,
   };
@@ -5075,7 +5194,7 @@ function stackReport(role: "baseline" | "candidate", providerOverlap: ReturnType
     },
     navigation: {
       eventLifecycle: {
-        drainedEventCount: 67,
+        drainedEventCount: 68,
         lateEventCount: 0,
         status: "sealed-clean",
       },

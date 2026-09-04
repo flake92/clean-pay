@@ -5,6 +5,7 @@ const maximumRequests = 256;
 const maximumStaticAssetBytes = 128 * 1024 * 1024;
 export const PROVIDER_OVERLAP_MAXIMUM_STATIC_RESPONSE_BYTES = 256 * 1024 * 1024;
 const maximumStaticDeclarationBodyBytes = 2 * 1024 * 1024;
+const maximumResponseBodyLifecycleMs = 10_000;
 export const PROVIDER_OVERLAP_REJECTION_PROVENANCE_MAX_PER_ROLE = 16;
 const sha256Pattern = /^[a-f0-9]{64}$/;
 const providerOverlapAbortedLoginRootRscFailureSha256 =
@@ -152,6 +153,33 @@ export function installProviderOverlapHistoryInstrumentation() {
   }
   addEventListener("hashchange", () => emit({ kind: "hashchange", url: location.href }));
   addEventListener("popstate", () => emit({ kind: "popstate", url: location.href }));
+}
+
+// Playwright serializes this predicate into the synthetic application page.
+// Keep it self-contained so the provider proof can wait for the delayed
+// Chatwoot identity lifecycle before replacing the profile document.
+/**
+ * @param {Readonly<{__cleanPayChatwootBoundaryCalls?: unknown}>} [scope]
+ */
+export function providerOverlapChatwootIdentityBoundarySettled(scope = globalThis) {
+  const calls = scope.__cleanPayChatwootBoundaryCalls;
+  if (!Array.isArray(calls) || calls.length < 2 || calls.length > 64) {
+    return false;
+  }
+  let setUserSeen = false;
+  let identityConfirmationCount = 0;
+  for (const entry of calls) {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)
+      || typeof entry.method !== "string") {
+      return false;
+    }
+    if (entry.method === "setUser") setUserSeen = true;
+    if (entry.method === "identity.confirmed") {
+      if (!setUserSeen) return false;
+      identityConfirmationCount += 1;
+    }
+  }
+  return identityConfirmationCount === 1;
 }
 
 export function createProviderOverlapEventSeal(maximumEvents = 1_024) {
@@ -845,7 +873,11 @@ export function createProviderOverlapCdpResponseBodyCapture(input) {
       "Network.getResponseBody",
       { requestId: entry.requestId },
     ));
-    void boundedLifecycleOperation(operation, 5_000, "durable browser response body").then(
+    void boundedLifecycleOperation(
+      operation,
+      maximumResponseBodyLifecycleMs,
+      "durable browser response body",
+    ).then(
       (result) => {
         if (fatalError || claim.settled) return;
         try {
@@ -1078,6 +1110,19 @@ export function isProviderOverlapPlaywrightBodyCdpResponse(event) {
   } catch {
     return false;
   }
+  if (url.origin === "https://pay.ci.clean-pay.dev") {
+    return event.type === "Fetch"
+      && event.response.status === 200
+      && url.pathname === "/login"
+      && url.username === ""
+      && url.password === ""
+      && url.hash === ""
+      && url.port === ""
+      && JSON.stringify([...url.searchParams.keys()])
+        === JSON.stringify(["redirect_to", "_rsc"])
+      && url.searchParams.get("redirect_to") === "/"
+      && opaquePattern.test(url.searchParams.get("_rsc") ?? "");
+  }
   if (url.origin !== "https://chatwoot.browser.clean-pay.dev"
     || url.pathname !== "/widget" || url.username !== "" || url.password !== ""
     || url.hash !== "") {
@@ -1213,7 +1258,7 @@ export async function captureProviderOverlapResponseEvidence(input) {
     if (bodyPromise !== null) {
       const skippedBody = await boundedLifecycleOperation(
         bodyPromise,
-        5_000,
+        maximumResponseBodyLifecycleMs,
         "bodyless browser response identity",
       );
       if (skippedBody !== null) {
@@ -1236,7 +1281,7 @@ export async function captureProviderOverlapResponseEvidence(input) {
   // the caller retains the independent 15-second request-lifecycle bound.
   const boundedBodyPromise = boundedLifecycleOperation(
     bodyPromise,
-    5_000,
+    maximumResponseBodyLifecycleMs,
     bodyKind === "static" ? "attested static response body" : "static declaration response body",
   );
   const boundedFinishedPromise = hasTerminal
@@ -1338,6 +1383,8 @@ export function extractProviderOverlapResponseStaticDeclarations(body, staticAss
     fail("Static response declaration body is not valid UTF-8.");
   }
   const declarations = [];
+  const nonModuleDeclarationEncodings = new Set();
+  let nonModuleDeclarationPath = null;
   let cursor = 0;
   while (cursor < source.length) {
     const prefixIndex = source.indexOf("/_next/static/", cursor);
@@ -1366,10 +1413,36 @@ export function extractProviderOverlapResponseStaticDeclarations(body, staticAss
       || !Object.hasOwn(staticAssetContract.inventoryByPath, servedPath)) {
       fail("Static response declaration escaped its paired canonical attested inventory.");
     }
-    if (declarations.length >= maximumRequests) {
+    const declarationEncoding = rawQuote ? "raw" : "escaped";
+    const quote = rawQuote ? '"' : '\\"';
+    const scriptPrefix = rawQuote ? '<script src="' : '<script src=\\"';
+    const tagSuffix = source.slice(declarationEnd);
+    const nonModulePrefix = `${quote} noModule=${quote}${quote}`;
+    const noNonceSuffix = `${nonModulePrefix}></script>`;
+    const noncePrefix = `${nonModulePrefix} nonce=${quote}`;
+    const nonceStart = noncePrefix.length;
+    const nonce = tagSuffix.slice(nonceStart, nonceStart + 32);
+    const nonceSuffix = `${quote}></script>`;
+    const exactNonceSuffix = tagSuffix.startsWith(noncePrefix)
+      && /^[a-f0-9]{32}$/.test(nonce)
+      && tagSuffix.slice(nonceStart + 32, nonceStart + 32 + nonceSuffix.length)
+        === nonceSuffix;
+    const exactNonModuleScript = source.slice(
+      prefixIndex - scriptPrefix.length,
+      prefixIndex,
+    ) === scriptPrefix && (tagSuffix.startsWith(noNonceSuffix) || exactNonceSuffix);
+    if (exactNonModuleScript) {
+      if (nonModuleDeclarationEncodings.has(declarationEncoding)
+        || (nonModuleDeclarationPath !== null && nonModuleDeclarationPath !== servedPath)) {
+        fail("Static response contains an incoherent exact nomodule declaration.");
+      }
+      nonModuleDeclarationEncodings.add(declarationEncoding);
+      nonModuleDeclarationPath = servedPath;
+    } else if (declarations.length >= maximumRequests) {
       fail("Static response declaration count exceeds its bound.");
+    } else {
+      declarations.push(servedPath);
     }
-    declarations.push(servedPath);
     cursor = declarationEnd + (escapedQuote ? 2 : 1);
   }
   return Object.freeze(declarations);

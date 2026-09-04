@@ -50,6 +50,7 @@ import {
   installProviderOverlapHistoryInstrumentation,
   isProviderOverlapPlaywrightBodyCdpResponse,
   normalizeProviderOverlapObservedResponseContentType,
+  providerOverlapChatwootIdentityBoundarySettled,
   PROVIDER_OVERLAP_MAXIMUM_STATIC_RESPONSE_BYTES,
   PROVIDER_OVERLAP_REJECTION_PROVENANCE_MAX_PER_ROLE,
   resolveProviderOverlapResponseRequestEntry,
@@ -107,6 +108,14 @@ const providerFailurePhaseState = {
 const providerPendingRequestEvidenceState = {
   baseline: { entries: new Map(), overflow: false },
   candidate: { entries: new Map(), overflow: false },
+};
+const providerResponseCaptureFailureState = {
+  baseline: null,
+  candidate: null,
+};
+const providerBrowserDiagnosticState = {
+  baseline: null,
+  candidate: null,
 };
 
 try {
@@ -258,12 +267,17 @@ function providerFailureBytes(error) {
   const pendingRequestEvidence = currentProviderPendingRequestEvidence();
   const rejectedRequestProvenance = currentProviderRejectionProvenance();
   const providerFailurePhases = currentProviderFailurePhases();
+  const responseCaptureFailureEvidence = currentProviderResponseCaptureFailureEvidence();
+  const browserDiagnosticEvidence = currentProviderBrowserDiagnosticEvidence();
   return Buffer.from(`${JSON.stringify({
     status: "dual_image_provider_overlap_failed",
     ...(dockerFailures.length === 0 ? {} : { dockerFailures }),
     ...(pendingRequestEvidence === undefined ? {} : { pendingRequestEvidence }),
     ...(rejectedRequestProvenance === undefined ? {} : { rejectedRequestProvenance }),
     ...(providerFailurePhases === undefined ? {} : { providerFailurePhases }),
+    ...(responseCaptureFailureEvidence === undefined
+      ? {} : { responseCaptureFailureEvidence }),
+    ...(browserDiagnosticEvidence === undefined ? {} : { browserDiagnosticEvidence }),
     ...createJourneySanitizedErrorEvidence(error),
   })}\n`, "utf8");
 }
@@ -282,6 +296,182 @@ function currentProviderFailurePhases() {
     candidate: providerFailurePhaseState.candidate,
   });
   return Object.values(phases).some((phase) => phase !== null) ? phases : undefined;
+}
+
+function retainProviderResponseCaptureFailure(role, source, error, snapshot) {
+  if (!Object.hasOwn(providerResponseCaptureFailureState, role)
+    || !new Set([
+      "cdp-event", "navigation-prior-requests", "request-terminal-evidence", "response-evidence",
+    ]).has(source)) {
+    return error;
+  }
+  if (providerResponseCaptureFailureState[role] === null) {
+    const message = error instanceof Error ? error.message : String(error);
+    let kind = "unclassified";
+    let terminalEvidence;
+    if (/^Durable browser response body read failed: failureSha256=[a-f0-9]{64}\.$/.test(message)) {
+      kind = "durable-body-read";
+    } else if (/^Durable browser response did not finish cleanly: failureSha256=[a-f0-9]{64}\.$/.test(message)) {
+      kind = "durable-terminal";
+    } else if (/^CDP response body capture failed: failureSha256=[a-f0-9]{64}\.$/.test(message)) {
+      kind = "cdp-contract";
+    } else if (/^Browser response did not finish cleanly: key=[a-z0-9-]{1,64}; status=[0-9]{3}; failureSha256=[a-f0-9]{64}\.$/.test(message)) {
+      kind = "playwright-terminal";
+      const match = /^Browser response did not finish cleanly: key=([a-z0-9-]{1,64}); status=([0-9]{3}); failureSha256=([a-f0-9]{64})\.$/.exec(message);
+      if (match === null) throw new Error("Provider response terminal evidence is invalid.");
+      terminalEvidence = Object.freeze({
+        failureSha256: match[3],
+        key: match[1],
+        status: Number(match[2]),
+      });
+    } else if (/^[a-z0-9 -]{1,128} exceeded its bounded lifecycle\.$/i.test(message)) {
+      kind = "bounded-lifecycle";
+    }
+    const safeSnapshot = snapshot && typeof snapshot === "object" && !Array.isArray(snapshot)
+      ? Object.freeze({ ...snapshot })
+      : null;
+    providerResponseCaptureFailureState[role] = Object.freeze({
+      kind,
+      messageSha256: sha256(message),
+      snapshot: safeSnapshot,
+      source,
+      ...(terminalEvidence === undefined ? {} : { terminalEvidence }),
+    });
+  }
+  return error;
+}
+
+function currentProviderResponseCaptureFailureEvidence() {
+  const roles = {};
+  for (const role of ["baseline", "candidate"]) {
+    const evidence = providerResponseCaptureFailureState[role];
+    if (evidence !== null) roles[role] = evidence;
+  }
+  return Object.keys(roles).length === 0
+    ? undefined
+    : Object.freeze({ roles: Object.freeze(roles), schemaVersion: 1 });
+}
+
+function currentProviderBrowserDiagnosticEvidence() {
+  const roles = {};
+  for (const role of ["baseline", "candidate"]) {
+    const state = providerBrowserDiagnosticState[role];
+    if (state === null || (state.unexpectedConsole.length === 0
+      && state.unexpectedPageErrors.length === 0
+      && !state.unexpectedConsoleOverflow
+      && !state.unexpectedPageErrorOverflow)) continue;
+    roles[role] = Object.freeze({
+      consoleEntries: Object.freeze(state.unexpectedConsole.map((entry) => Object.freeze({
+        argumentCount: entry.argumentCount,
+        columnNumber: entry.columnNumber,
+        kind: entry.kind,
+        lineNumber: entry.lineNumber,
+        locationSha256: entry.locationSha256,
+        markers: entry.markers,
+        messageBytes: entry.messageBytes,
+        messageShape: entry.messageShape,
+        messageSha256: entry.sha256,
+        source: entry.source,
+        type: entry.type,
+        wordLengths: entry.wordLengths,
+      }))),
+      consoleOverflow: state.unexpectedConsoleOverflow,
+      pageErrorMessageSha256: Object.freeze([...state.unexpectedPageErrors]),
+      pageErrorOverflow: state.unexpectedPageErrorOverflow,
+    });
+  }
+  return Object.keys(roles).length === 0
+    ? undefined
+    : Object.freeze({ roles: Object.freeze(roles), schemaVersion: 1 });
+}
+
+function createProviderBrowserConsoleDiagnostic(message) {
+  const text = message.text();
+  const type = message.type();
+  const location = message.location();
+  const markerVocabulary = Object.freeze([
+    "aria", "autocomplete", "cookie", "csp", "deprecated", "feature", "font", "form",
+    "height", "iframe", "image", "network", "permissions", "preload", "resource", "sandbox",
+    "scroll", "source map", "unique", "width",
+  ]);
+  const lowerText = text.toLowerCase();
+  const markers = Object.freeze(markerVocabulary.filter((marker) => lowerText.includes(marker)));
+  const messageStructure = providerBrowserConsoleMessageStructure(text);
+  let kind = "unclassified";
+  if (type === "warning"
+    && /^The resource https:\/\/[^\s]+ was preloaded using link preload but not used within a few seconds from the window's load event\. Please make sure it has an appropriate `as` value and it is preloaded intentionally\.$/.test(text)) {
+    kind = "chromium-unused-preload";
+  } else if (type === "warning" && /^\[DOM\] Input elements should have autocomplete attributes /.test(text)) {
+    kind = "chromium-dom-autocomplete";
+  } else if (type === "warning" && /^\[DOM\] Multiple forms should be contained in their own form elements/.test(text)) {
+    kind = "chromium-dom-multiple-forms";
+  } else if (type === "warning" && text.startsWith("Skipping auto-scroll behavior due to")) {
+    kind = "next-auto-scroll-skip";
+  } else if (type === "warning" && text === "Service Worker registration blocked by Playwright") {
+    kind = "playwright-service-worker-block";
+  } else if (type === "warning" && /iframe.*allow-scripts.*allow-same-origin.*sandbox/i.test(text)) {
+    kind = "chromium-iframe-sandbox";
+  } else if (/^Refused to /.test(text)) {
+    kind = "chromium-policy-refusal";
+  } else if (/^Failed to load resource: /.test(text)) {
+    kind = "chromium-resource-load";
+  }
+  let source = "empty";
+  if (location.url) {
+    try {
+      const origin = new URL(location.url).origin;
+      source = ({
+        "https://challenges.cloudflare.com": "turnstile",
+        "https://chatwoot.browser.clean-pay.dev": "chatwoot",
+        "https://oauth.telegram.org": "telegram-oidc",
+        "https://pay.ci.clean-pay.dev": "application",
+      })[origin] ?? "other-url";
+    } catch {
+      source = "non-url";
+    }
+  }
+  return Object.freeze({
+    argumentCount: message.args().length,
+    columnNumber: Number.isSafeInteger(location.columnNumber) ? location.columnNumber : 0,
+    kind,
+    lineNumber: Number.isSafeInteger(location.lineNumber) ? location.lineNumber : 0,
+    locationSha256: sha256(location.url ?? ""),
+    markers,
+    messageBytes: Buffer.byteLength(text, "utf8"),
+    messageShape: messageStructure.shape,
+    sha256: sha256(text),
+    source,
+    type,
+    wordLengths: messageStructure.wordLengths,
+  });
+}
+
+function providerBrowserConsoleMessageStructure(value) {
+  if (Buffer.byteLength(value, "utf8") > 256) {
+    return Object.freeze({ shape: "oversized", wordLengths: Object.freeze([]) });
+  }
+  if (!/^[\x20-\x7e]*$/.test(value)) {
+    return Object.freeze({ shape: "non-ascii", wordLengths: Object.freeze([]) });
+  }
+  return Object.freeze({
+    shape: value.replace(/[A-Za-z]/g, "a").replace(/[0-9]/g, "0"),
+    wordLengths: Object.freeze([...value.matchAll(/[A-Za-z0-9]+/g)].map(([word]) => word.length)),
+  });
+}
+
+function isExpectedPlaywrightServiceWorkerBlockDiagnostic(value) {
+  return value.argumentCount === 1
+    && value.columnNumber === 86
+    && value.kind === "playwright-service-worker-block"
+    && value.lineNumber === 2
+    && value.locationSha256 === sha256("")
+    && value.markers.length === 0
+    && value.messageBytes === 49
+    && value.messageShape === "aaaaaaa aaaaaa aaaaaaaaaaaa aaaaaaa aa aaaaaaaaaa"
+    && value.sha256 === "7c247915a6102bc050349adcfad2bb0e2ba2a7f711b03f33080b19d0c24fa03b"
+    && value.source === "empty"
+    && value.type === "warning"
+    && JSON.stringify(value.wordLengths) === JSON.stringify([7, 6, 12, 7, 2, 10]);
 }
 
 function recordProviderPendingRequest(role, request) {
@@ -507,8 +697,8 @@ async function exerciseCabinet(
       serviceWorkers: "block",
     });
     // A successful 256-request proof records exactly three lifecycle events per
-    // request plus four history events, so 1,024 retains a bounded safety margin
-    // above the maximum valid 772-event ledger.
+    // request, four history events and the one exact Playwright service-worker
+    // warning, so 1,024 retains a bounded margin above the valid 773-event ledger.
     const eventSeal = createProviderOverlapEventSeal(1_024);
     const historyRecords = [];
     let historyOverflow = false;
@@ -578,11 +768,19 @@ async function exerciseCabinet(
     cdp.on("Page.frameNavigated", handleFrameNavigated);
     cdp.on("Page.navigatedWithinDocument", handleNavigatedWithinDocument);
     const unexpectedPages = [];
+    const expectedPlaywrightConsole = [];
     const unexpectedConsole = [];
     const unexpectedPageErrors = [];
     let unexpectedPageOverflow = false;
+    let expectedPlaywrightConsoleOverflow = false;
     let unexpectedConsoleOverflow = false;
     let unexpectedPageErrorOverflow = false;
+    providerBrowserDiagnosticState[role] = {
+      get unexpectedConsoleOverflow() { return unexpectedConsoleOverflow; },
+      get unexpectedPageErrorOverflow() { return unexpectedPageErrorOverflow; },
+      unexpectedConsole,
+      unexpectedPageErrors,
+    };
     context.on("page", (candidate) => {
       eventSeal.record();
       if (candidate === page) return;
@@ -594,8 +792,15 @@ async function exerciseCabinet(
     });
     page.on("console", (message) => {
       eventSeal.record();
-      if (unexpectedConsole.length < maximumUnexpectedEvents) {
-        unexpectedConsole.push({ type: message.type(), sha256: sha256(message.text()) });
+      const diagnostic = createProviderBrowserConsoleDiagnostic(message);
+      if (isExpectedPlaywrightServiceWorkerBlockDiagnostic(diagnostic)) {
+        if (expectedPlaywrightConsole.length < maximumUnexpectedEvents) {
+          expectedPlaywrightConsole.push(diagnostic);
+        } else {
+          expectedPlaywrightConsoleOverflow = true;
+        }
+      } else if (unexpectedConsole.length < maximumUnexpectedEvents) {
+        unexpectedConsole.push(diagnostic);
       } else {
         unexpectedConsoleOverflow = true;
       }
@@ -624,7 +829,12 @@ async function exerciseCabinet(
       try {
         observe(event);
       } catch (error) {
-        browserResponseCaptureFailure ??= error;
+        browserResponseCaptureFailure ??= retainProviderResponseCaptureFailure(
+          role,
+          "cdp-event",
+          error,
+          cdpResponseBodyCapture.snapshot(),
+        );
       }
     };
     const handleCdpResponseReceived = (event) => {
@@ -869,7 +1079,12 @@ async function exerciseCabinet(
       void evidence.then(
         () => undefined,
         (error) => {
-          browserResponseCaptureFailure ??= error;
+          browserResponseCaptureFailure ??= retainProviderResponseCaptureFailure(
+            role,
+            "response-evidence",
+            error,
+            cdpResponseBodyCapture.snapshot(),
+          );
         },
       );
     });
@@ -936,7 +1151,12 @@ async function exerciseCabinet(
           finishRequest();
         },
         (error) => {
-          browserResponseCaptureFailure ??= error;
+          browserResponseCaptureFailure ??= retainProviderResponseCaptureFailure(
+            role,
+            "request-terminal-evidence",
+            error,
+            cdpResponseBodyCapture.snapshot(),
+          );
           pendingRequestSeal.complete(request);
           completeProviderPendingRequest(role, request);
           finishRequest();
@@ -978,7 +1198,12 @@ async function exerciseCabinet(
             );
             if (browserResponseCaptureFailure) throw browserResponseCaptureFailure;
           } catch (error) {
-            browserResponseCaptureFailure ??= error;
+            browserResponseCaptureFailure ??= retainProviderResponseCaptureFailure(
+              role,
+              "navigation-prior-requests",
+              error,
+              cdpResponseBodyCapture.snapshot(),
+            );
             try {
               await route.abort("blockedbyclient");
             } catch {
@@ -1034,6 +1259,16 @@ async function exerciseCabinet(
       .waitFor({ state: "visible", timeout: 15_000 });
     markProviderFailurePhase(role, "settle-profile-dom");
     await page.evaluate(() => new Promise((resolve) => setTimeout(resolve, 50)));
+    markProviderFailurePhase(role, "wait-profile-chatwoot-identity");
+    try {
+      await page.waitForFunction(
+        providerOverlapChatwootIdentityBoundarySettled,
+        undefined,
+        { polling: 25, timeout: 15_000 },
+      );
+    } catch (error) {
+      throw new Error("Provider profile Chatwoot identity barrier failed.", { cause: error });
+    }
     markProviderFailurePhase(role, "drain-profile-history-before-idle");
     await drainProviderOverlapHistoryBindings(page);
     markProviderFailurePhase(role, "wait-profile-network-idle");
@@ -1103,6 +1338,8 @@ async function exerciseCabinet(
       browserTerminalRequestIdentityCount: browserTerminalRequestIdentities.size,
       cabinetDocumentAllowed,
       cabinetDocumentConsumed,
+      expectedPlaywrightConsole,
+      expectedPlaywrightConsoleOverflow,
       historyOverflow,
       historyRecords,
       pendingRequestCount: pendingRequestSeal.pendingCount(),
@@ -1185,6 +1422,9 @@ async function exerciseCabinet(
           throw new Error("Synthetic browser opened an unexpected WebSocket or service worker.");
         }
         if (historyOverflow) throw new Error("Synthetic browser history ledger overflowed.");
+        if (expectedPlaywrightConsole.length !== 1 || expectedPlaywrightConsoleOverflow) {
+          throw new Error("Synthetic browser Playwright instrumentation console contract differs.");
+        }
         if (unexpectedConsole.length > 0
           || unexpectedPageErrors.length > 0
           || unexpectedPages.length > 0
