@@ -863,6 +863,7 @@ export function createProviderOverlapCdpResponseBodyCapture(input) {
   let responseClaimCount = 0;
   let responseFailureCount = 0;
   let responseSettledCount = 0;
+  const settledBodylessClaimCountByKey = new Map();
 
   const rejectClaim = (claim, error) => {
     if (!claim || claim.settled) return;
@@ -901,6 +902,10 @@ export function createProviderOverlapCdpResponseBodyCapture(input) {
     claim.settled = true;
     responseSettledCount += 1;
     if (claim.bodyExpected) bodySettledCount += 1;
+    else settledBodylessClaimCountByKey.set(
+      claim.key,
+      (settledBodylessClaimCountByKey.get(claim.key) ?? 0) + 1,
+    );
     claim.resolve(value);
   };
   const settleFinishedEntry = (entry) => {
@@ -995,6 +1000,7 @@ export function createProviderOverlapCdpResponseBodyCapture(input) {
     void promise.catch(() => undefined);
     const claim = {
       bodyExpected,
+      key,
       maximumBodyBytes,
       promise,
       reject,
@@ -1050,6 +1056,25 @@ export function createProviderOverlapCdpResponseBodyCapture(input) {
         responseClaimCount,
         responseSettledCount,
         status: "cdp-response-bodies-clean",
+      });
+    },
+    reconcileFinishedBodylessDuplicates() {
+      assertActive();
+      let reconciledResponseCount = 0;
+      for (const [key, entries] of unclaimedEntryByKey) {
+        if (entries.length !== 1
+          || (settledBodylessClaimCountByKey.get(key) ?? 0) < 1) continue;
+        const [entry] = entries;
+        if (!entry.bodylessDuplicateEligible || entry.claim !== null
+          || entry.readStarted || entry.terminal?.kind !== "finished") continue;
+        unclaimedEntryByKey.delete(key);
+        entryByRequestId.delete(entry.requestId);
+        observedResponseCount -= 1;
+        reconciledResponseCount += 1;
+      }
+      return Object.freeze({
+        reconciledResponseCount,
+        status: "finished-bodyless-duplicates-reconciled",
       });
     },
     observeLoadingFailed(event) {
@@ -1110,6 +1135,7 @@ export function createProviderOverlapCdpResponseBodyCapture(input) {
         throwFatal("CDP response body capture exceeded its request bound.");
       }
       const entry = {
+        bodylessDuplicateEligible: new Set(["Fetch", "XHR"]).has(event.type),
         claim: null,
         key,
         readStarted: false,
