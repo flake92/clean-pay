@@ -304,7 +304,8 @@ function currentProviderFailurePhases() {
 function retainProviderResponseCaptureFailure(role, source, error, snapshot) {
   if (!Object.hasOwn(providerResponseCaptureFailureState, role)
     || !new Set([
-      "cdp-event", "navigation-prior-requests", "request-terminal-evidence", "response-evidence",
+      "cdp-event", "final-assert", "navigation-prior-requests", "request-terminal-evidence",
+      "response-evidence",
     ]).has(source)) {
     return error;
   }
@@ -830,6 +831,19 @@ async function exerciseCabinet(
         createProviderOverlapRepeatableStaticResponseUrls(staticAssetContract),
       send: (method, parameters) => cdp.send(method, parameters),
     });
+    const assertCdpResponseBodyCaptureClean = () => {
+      try {
+        return cdpResponseBodyCapture.assertClean();
+      } catch (error) {
+        browserResponseCaptureFailure ??= retainProviderResponseCaptureFailure(
+          role,
+          "final-assert",
+          error,
+          cdpResponseBodyCapture.snapshot(),
+        );
+        throw browserResponseCaptureFailure;
+      }
+    };
     const observeCdpResponseBodyEvent = (observe, event) => {
       try {
         observe(event);
@@ -1364,7 +1378,7 @@ async function exerciseCabinet(
     markProviderFailurePhase(role, "verify-final-response-captures");
     if (browserResponseCaptureFailure) throw browserResponseCaptureFailure;
     cdpResponseBodyCapture.reconcileFinishedBodylessDuplicates();
-    cdpResponseBodyCapture.assertClean();
+    assertCdpResponseBodyCaptureClean();
     markProviderFailurePhase(role, "finalize-event-lifecycle");
     const finalizerEventSeal = Object.freeze({
       assertClean: () => {

@@ -1047,7 +1047,10 @@ test("publishes only bounded phase enums for live provider failure diagnosis", a
   expect(runner).toContain("currentProviderBrowserDiagnosticEvidence()");
   expect(runner).toContain("{ browserDiagnosticEvidence }");
   expect(runner).toContain('"durable-body-read"');
+  expect(runner).toContain('"final-assert"');
   expect(runner).toContain('"request-terminal-evidence"');
+  expect(runner).toContain("assertCdpResponseBodyCaptureClean()");
+  expect(runner).toContain("cdpResponseBodyCapture.snapshot()");
   expect(runner).not.toContain("message: message");
   expect(runner).toContain("messageSha256: entry.sha256");
   expect(runner).toContain("messageShape: entry.messageShape");
