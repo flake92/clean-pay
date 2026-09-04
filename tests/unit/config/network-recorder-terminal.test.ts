@@ -66,4 +66,131 @@ describe("network recorder Server Action terminals", () => {
       }),
     ]);
   });
+
+  it("accepts an exact top-level application document as the terminal boundary", async () => {
+    const events = new EventEmitter();
+    const mainFrame = {};
+    const page = {
+      mainFrame: vi.fn(() => mainFrame),
+      off(event: string, listener: (...args: unknown[]) => void) {
+        events.off(event, listener);
+        return page;
+      },
+      on(event: string, listener: (...args: unknown[]) => void) {
+        events.on(event, listener);
+        return page;
+      },
+    } as unknown as Page;
+    const action = requestFixture({
+      frame: mainFrame,
+      headers: { "next-action": "synthetic-action" },
+      method: "POST",
+      postData: Buffer.from("synthetic-payload"),
+      resourceType: "fetch",
+      url: "https://pay.test/cabinet",
+    });
+    const navigation = requestFixture({
+      frame: mainFrame,
+      headers: {},
+      method: "GET",
+      postData: null,
+      resourceType: "document",
+      url: "https://pay.test/link-account",
+      navigation: true,
+    });
+    const recorder = recordNetwork(page, "https://pay.test", {
+      serverActionTerminalTimeoutMs: 500,
+    });
+
+    events.emit("request", action);
+    let terminalObserved = false;
+    const terminal = recorder.awaitStartedServerActions().then(() => {
+      terminalObserved = true;
+    });
+    await Promise.resolve();
+    expect(terminalObserved).toBe(false);
+
+    events.emit("request", navigation);
+    await terminal;
+    await expect(recorder.finish()).resolves.toEqual([
+      expect.objectContaining({
+        failure: null,
+        response: null,
+        serverAction: expect.objectContaining({ present: true }),
+      }),
+      expect.objectContaining({
+        navigation: true,
+        serverAction: expect.objectContaining({ present: false }),
+      }),
+    ]);
+  });
+
+  it("does not release an action for a subframe document navigation", async () => {
+    const events = new EventEmitter();
+    const mainFrame = {};
+    const page = {
+      mainFrame: vi.fn(() => mainFrame),
+      off(event: string, listener: (...args: unknown[]) => void) {
+        events.off(event, listener);
+        return page;
+      },
+      on(event: string, listener: (...args: unknown[]) => void) {
+        events.on(event, listener);
+        return page;
+      },
+    } as unknown as Page;
+    const action = requestFixture({
+      frame: mainFrame,
+      headers: { "next-action": "synthetic-action" },
+      method: "POST",
+      postData: Buffer.from("synthetic-payload"),
+      resourceType: "fetch",
+      url: "https://pay.test/cabinet",
+    });
+    const subframeNavigation = requestFixture({
+      frame: {},
+      headers: {},
+      method: "GET",
+      postData: null,
+      resourceType: "document",
+      url: "https://pay.test/link-account",
+      navigation: true,
+    });
+    const recorder = recordNetwork(page, "https://pay.test", {
+      serverActionTerminalTimeoutMs: 20,
+    });
+
+    events.emit("request", action);
+    events.emit("request", subframeNavigation);
+
+    await expect(recorder.awaitStartedServerActions()).rejects.toThrow(
+      "Network recorder timed out waiting for 1 application Server Action request(s)",
+    );
+    await expect(recorder.finish()).rejects.toThrow(
+      "Network recorder timed out waiting for 1 application Server Action request(s)",
+    );
+  });
 });
+
+function requestFixture(input: {
+  frame: object;
+  headers: Record<string, string>;
+  method: "GET" | "POST";
+  navigation?: boolean;
+  postData: Buffer | null;
+  resourceType: "document" | "fetch";
+  url: string;
+}) {
+  return {
+    allHeaders: vi.fn(async () => input.headers),
+    failure: vi.fn(() => null),
+    frame: vi.fn(() => input.frame),
+    headers: vi.fn(() => input.headers),
+    isNavigationRequest: vi.fn(() => input.navigation ?? false),
+    method: vi.fn(() => input.method),
+    postDataBuffer: vi.fn(() => input.postData),
+    redirectedFrom: vi.fn(() => null),
+    resourceType: vi.fn(() => input.resourceType),
+    url: vi.fn(() => input.url),
+  } as unknown as Request;
+}
