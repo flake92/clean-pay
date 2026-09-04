@@ -82,6 +82,7 @@ const providerStaticDocumentKeys = Object.freeze([
   "app-cabinet-document",
 ]);
 const providerPlaywrightBodyKeys = Object.freeze([
+  "app-cabinet-action",
   "app-login-root-rsc",
   "chatwoot-widget-conversation-frame",
   "chatwoot-widget-frame",
