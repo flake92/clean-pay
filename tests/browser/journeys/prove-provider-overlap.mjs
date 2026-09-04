@@ -116,6 +116,10 @@ const providerResponseCaptureFailureState = {
   baseline: null,
   candidate: null,
 };
+const providerProjectionFailureState = {
+  baseline: null,
+  candidate: null,
+};
 const providerBrowserDiagnosticState = {
   baseline: null,
   candidate: null,
@@ -271,6 +275,7 @@ function providerFailureBytes(error) {
   const rejectedRequestProvenance = currentProviderRejectionProvenance();
   const providerFailurePhases = currentProviderFailurePhases();
   const responseCaptureFailureEvidence = currentProviderResponseCaptureFailureEvidence();
+  const projectionFailureEvidence = currentProviderProjectionFailureEvidence();
   const browserDiagnosticEvidence = currentProviderBrowserDiagnosticEvidence();
   return Buffer.from(`${JSON.stringify({
     status: "dual_image_provider_overlap_failed",
@@ -280,6 +285,7 @@ function providerFailureBytes(error) {
     ...(providerFailurePhases === undefined ? {} : { providerFailurePhases }),
     ...(responseCaptureFailureEvidence === undefined
       ? {} : { responseCaptureFailureEvidence }),
+    ...(projectionFailureEvidence === undefined ? {} : { projectionFailureEvidence }),
     ...(browserDiagnosticEvidence === undefined ? {} : { browserDiagnosticEvidence }),
     ...createJourneySanitizedErrorEvidence(error),
   })}\n`, "utf8");
@@ -349,6 +355,43 @@ function currentProviderResponseCaptureFailureEvidence() {
   const roles = {};
   for (const role of ["baseline", "candidate"]) {
     const evidence = providerResponseCaptureFailureState[role];
+    if (evidence !== null) roles[role] = evidence;
+  }
+  return Object.keys(roles).length === 0
+    ? undefined
+    : Object.freeze({ roles: Object.freeze(roles), schemaVersion: 1 });
+}
+
+function retainProviderProjectionFailure(role, index, record, error) {
+  if (!Object.hasOwn(providerProjectionFailureState, role)
+    || providerProjectionFailureState[role] !== null
+    || !Number.isSafeInteger(index) || index < 0 || index > 255) {
+    return;
+  }
+  const key = record?.classification?.key;
+  const contentType = record?.responseContentType;
+  const status = record?.responseStatus;
+  if (typeof key !== "string" || !/^[a-z0-9-]{1,64}$/.test(key)
+    || (contentType !== null
+      && (typeof contentType !== "string"
+        || !/^[a-z0-9.+-]+\/[a-z0-9.+-]+$/.test(contentType)))
+    || !Number.isSafeInteger(status) || status < 100 || status > 599) {
+    return;
+  }
+  const message = error instanceof Error ? error.message : String(error);
+  providerProjectionFailureState[role] = Object.freeze({
+    contentType,
+    index,
+    key,
+    messageSha256: sha256(message),
+    status,
+  });
+}
+
+function currentProviderProjectionFailureEvidence() {
+  const roles = {};
+  for (const role of ["baseline", "candidate"]) {
+    const evidence = providerProjectionFailureState[role];
     if (evidence !== null) roles[role] = evidence;
   }
   return Object.keys(roles).length === 0
@@ -1427,6 +1470,7 @@ async function exerciseCabinet(
           browserRequestByIdentity,
           browserResponseEvidenceByIdentity,
           staticAssetContract,
+          role,
         );
       },
       isIdle: () => pendingRequestSeal.pendingCount() === 0,
@@ -2227,6 +2271,7 @@ async function finishBrowserRequestContract(
   requestByIdentity,
   responseEvidenceByIdentity,
   staticAssetContract,
+  role,
 ) {
   if (!(responseEvidenceByIdentity instanceof Map)
     || responseEvidenceByIdentity.size !== requests.length) {
@@ -2367,14 +2412,23 @@ async function finishBrowserRequestContract(
     || [...responseEvidenceByIdentity.keys()].some((request) => !requestByIdentity.has(request))) {
     throw new Error("Synthetic browser response evidence escaped its request identity ledger.");
   }
-  return finalizeProviderOverlapBrowserContract(records, {
-    cssMediaReferences: [...cssMediaReferencesBySource.values()].flat(),
-    responseDeclarationsByDocument: providerStaticDocumentKeys.map((documentKey) => ({
-      documentKey,
-      paths: [...responseDeclarationsByDocument.get(documentKey)].sort(),
-    })),
-    staticAssetContract,
-  });
+  try {
+    return finalizeProviderOverlapBrowserContract(records, {
+      cssMediaReferences: [...cssMediaReferencesBySource.values()].flat(),
+      responseDeclarationsByDocument: providerStaticDocumentKeys.map((documentKey) => ({
+        documentKey,
+        paths: [...responseDeclarationsByDocument.get(documentKey)].sort(),
+      })),
+      staticAssetContract,
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    const match = /^browser semantic request ([0-9]{1,3}) /.exec(message);
+    if (match !== null) {
+      retainProviderProjectionFailure(role, Number(match[1]), records[Number(match[1])], error);
+    }
+    throw error;
+  }
 }
 
 async function readBrowserResponseCapture(registry, request, classification) {
