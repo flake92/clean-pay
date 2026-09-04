@@ -519,6 +519,41 @@ describe("referral attribution after Telegram callbacks", () => {
     );
   });
 
+  it("keeps the original callback failure when lease release also fails", async () => {
+    const callbackError = new Error("provider result unavailable");
+    const releaseError = new Error("lease release unavailable");
+    mocks.loadDurableTelegramCallback.mockResolvedValueOnce({
+      status: "resume",
+      ownership: durableOwnership,
+      checkpoint: {
+        phase: "PROVIDER_AUTHENTICATED",
+        verified: { ...verifiedCallback, durable: undefined },
+      },
+    });
+    mocks.resolveVerifiedTelegramIdentity.mockRejectedValueOnce(callbackError);
+    mocks.releaseDurableTelegramCallback.mockRejectedValueOnce(releaseError);
+
+    const response = await GET(oidcRequest());
+
+    expect(response.headers.get("location")).toBe(
+      "https://pay.example.com/login?auth=telegram_failed",
+    );
+    expect(mocks.releaseDurableTelegramCallback).toHaveBeenCalledWith(
+      durableOwnership,
+      "PROVIDER_AUTHENTICATED",
+    );
+    expect(mocks.logTechnicalError).toHaveBeenCalledWith(
+      "telegram_callback_lease_release_failed",
+      releaseError,
+      { phase: "PROVIDER_AUTHENTICATED" },
+    );
+    expect(mocks.logTechnicalError).toHaveBeenCalledWith(
+      "telegram_callback_failed",
+      callbackError,
+      expect.any(Object),
+    );
+  });
+
   it("resumes the exact SESSION_CREATED checkpoint after recovery-response loss", async () => {
     const replay = {
       redirectTo: "/cabinet",
