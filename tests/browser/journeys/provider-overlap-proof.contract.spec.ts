@@ -1044,6 +1044,9 @@ test("publishes only bounded phase enums for live provider failure diagnosis", a
   expect(runner).toContain("{ providerFailurePhases }");
   expect(runner).toContain("currentProviderResponseCaptureFailureEvidence()");
   expect(runner).toContain("{ responseCaptureFailureEvidence }");
+  expect(runner).toContain("currentProviderProjectionFailureEvidence()");
+  expect(runner).toContain("{ projectionFailureEvidence }");
+  expect(runner).toContain("retainProviderProjectionFailure(");
   expect(runner).toContain("currentProviderBrowserDiagnosticEvidence()");
   expect(runner).toContain("{ browserDiagnosticEvidence }");
   expect(runner).toContain('"durable-body-read"');
@@ -1052,6 +1055,8 @@ test("publishes only bounded phase enums for live provider failure diagnosis", a
   expect(runner).toContain("assertCdpResponseBodyCaptureClean()");
   expect(runner).toContain("cdpResponseBodyCapture.snapshot()");
   expect(runner).not.toContain("message: message");
+  expect(runner).not.toContain("record.request.url");
+  expect(runner).not.toContain("record.request.postData");
   expect(runner).toContain("messageSha256: entry.sha256");
   expect(runner).toContain("messageShape: entry.messageShape");
   expect(runner).toContain("wordLengths: entry.wordLengths");
