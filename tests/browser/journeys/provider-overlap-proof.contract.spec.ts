@@ -3630,6 +3630,54 @@ test("queues only explicitly attested repeatable static response identities", as
   })).toThrow(/outside its exact contract/);
 });
 
+test("queues repeated bodyless response identities but rejects ambiguous body reads", async () => {
+  const bodylessUrl = "https://chatwoot.browser.clean-pay.dev/api/v1/widget/contact";
+  const bodyless = createProviderOverlapCdpResponseBodyCapture({
+    send: async () => {
+      throw new Error("Bodyless responses must not be read.");
+    },
+  });
+  for (const requestId of ["bodyless.1", "bodyless.2"]) {
+    bodyless.observeResponseReceived({
+      requestId,
+      response: { status: 200, url: bodylessUrl },
+      type: "Fetch",
+    });
+    bodyless.observeLoadingFinished({ encodedDataLength: 32, requestId });
+  }
+  await Promise.all([1, 2].map(() => bodyless.skipResponseBody({
+    resourceType: "fetch",
+    status: 200,
+    url: bodylessUrl,
+  })));
+  expect(bodyless.assertClean()).toEqual({
+    bodyClaimCount: 0,
+    bodySettledCount: 0,
+    bodylessClaimCount: 2,
+    observedResponseCount: 2,
+    responseClaimCount: 2,
+    responseSettledCount: 2,
+    status: "cdp-response-bodies-clean",
+  });
+
+  const ambiguousBody = createProviderOverlapCdpResponseBodyCapture({
+    send: async () => ({ base64Encoded: false, body: "unused" }),
+  });
+  for (const requestId of ["body.1", "body.2"]) {
+    ambiguousBody.observeResponseReceived({
+      requestId,
+      response: { status: 200, url: "https://pay.ci.clean-pay.dev/profile" },
+      type: "Fetch",
+    });
+  }
+  expect(() => ambiguousBody.readBody({
+    maximumBodyBytes: 1024,
+    resourceType: "fetch",
+    status: 200,
+    url: "https://pay.ci.clean-pay.dev/profile",
+  })).toThrow(/response body identity is ambiguous/);
+});
+
 test("bounds all response claims and atomically drains fatal CDP capture state", async () => {
   let sendCalls = 0;
   const bounded = createProviderOverlapCdpResponseBodyCapture({
