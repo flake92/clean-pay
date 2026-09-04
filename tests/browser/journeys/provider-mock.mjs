@@ -38,6 +38,7 @@ const chatwootPreCabinetContactResponseDelayMs = boundedIntegerEnvironment(
   25,
   2_500,
 );
+const chatwootCabinetObservationGraceMs = 250;
 const chatwootPhaseScenario = "chatwoot-phase-stability-v1";
 const cabinetReadOverlapTimeoutMs = boundedIntegerEnvironment(
   "CLEAN_PAY_BROWSER_CABINET_READ_OVERLAP_TIMEOUT_MS",
@@ -83,6 +84,29 @@ let cabinetReadOverlapOccurrence = 0;
 let activeCabinetReadOverlap = null;
 const cabinetReadOverlapWindows = [];
 let cabinetSurfaceObserved = false;
+const cabinetSurfaceWaiters = new Set();
+
+function markCabinetSurfaceObserved() {
+  cabinetSurfaceObserved = true;
+  for (const resolve of cabinetSurfaceWaiters) resolve(true);
+  cabinetSurfaceWaiters.clear();
+}
+
+function waitForCabinetSurfaceObservation() {
+  if (cabinetSurfaceObserved) return Promise.resolve(true);
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => {
+      cabinetSurfaceWaiters.delete(settle);
+      resolve(false);
+    }, chatwootCabinetObservationGraceMs);
+    const settle = (observed) => {
+      clearTimeout(timer);
+      cabinetSurfaceWaiters.delete(settle);
+      resolve(observed);
+    };
+    cabinetSurfaceWaiters.add(settle);
+  });
+}
 
 function sha256(value) {
   return crypto.createHash("sha256").update(value, "utf8").digest("hex");
@@ -907,7 +931,7 @@ async function handleRemnashop(request, response) {
 
   if (path === "/subscription/offers" && method === "GET") {
     if (!authorized(request, response)) return;
-    cabinetSurfaceObserved = true;
+    markCabinetSurfaceObserved();
     const ledgerSequence = record("remnashop", request, url, body, "read_offers");
     const overlap = enterCabinetReadOverlap("offers", ledgerSequence);
     if (overlap) await overlap;
@@ -917,7 +941,7 @@ async function handleRemnashop(request, response) {
 
   if (path === "/subscription/devices" && method === "GET") {
     if (!authorized(request, response)) return;
-    cabinetSurfaceObserved = true;
+    markCabinetSurfaceObserved();
     const ledgerSequence = record("remnashop", request, url, body, "read_devices");
     const overlap = enterCabinetReadOverlap("devices", ledgerSequence);
     if (overlap) await overlap;
@@ -1142,9 +1166,13 @@ async function handleControl(request, response) {
     // Only the isolated Chatwoot lifecycle proof needs a slow profile probe
     // followed by a fast cabinet probe. Application journeys share this mock
     // across workers, so their timing must never depend on mutable global phase
-    // state from a concurrent scenario.
-    const responseDelayMs = activeScenario === chatwootPhaseScenario
-      && !cabinetSurfaceObserved
+    // state from a concurrent scenario. A short bounded grace closes only the
+    // request-arrival race: the fast branch still requires a real cabinet read.
+    const isChatwootPhase = activeScenario === chatwootPhaseScenario;
+    const observedCabinetSurface = isChatwootPhase
+      ? await waitForCabinetSurfaceObservation()
+      : false;
+    const responseDelayMs = isChatwootPhase && !observedCabinetSurface
       ? chatwootPreCabinetContactResponseDelayMs
       : chatwootContactResponseDelayMs;
     await new Promise((resolve) => setTimeout(resolve, responseDelayMs));
@@ -1223,6 +1251,8 @@ async function handleControl(request, response) {
       return;
     }
     clearCabinetReadOverlapEvidence();
+    for (const resolve of cabinetSurfaceWaiters) resolve(false);
+    cabinetSurfaceWaiters.clear();
     cabinetSurfaceObserved = false;
     activeScenario = scenario;
     const database = dbObserverUrl
