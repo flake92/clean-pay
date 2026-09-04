@@ -8,8 +8,12 @@ const maximumStaticDeclarationBodyBytes = 2 * 1024 * 1024;
 const maximumResponseBodyLifecycleMs = 10_000;
 export const PROVIDER_OVERLAP_REJECTION_PROVENANCE_MAX_PER_ROLE = 16;
 const sha256Pattern = /^[a-f0-9]{64}$/;
-const providerOverlapAbortedLoginRootRscFailureSha256 =
+const providerOverlapResponseBackedAbortFailureSha256 =
   "7ba7a1709a2d7d220e120c927e0a7e90adf45c88b09ba912b237d705090d1d4e";
+const providerOverlapResponseBackedAbortKeys = new Set([
+  "app-cabinet-action",
+  "app-login-root-rsc",
+]);
 const opaquePattern = /^[A-Za-z0-9._~-]{1,256}$/;
 const nextStaticMediaExtensionExpression = "(?:eot|ico|png|svg|ttf|woff2|woff)";
 const nextStaticPathExpression = "\\/_next\\/static\\/(?:chunks"
@@ -1111,13 +1115,12 @@ export function isProviderOverlapPlaywrightBodyCdpResponse(event) {
     return false;
   }
   if (url.origin === "https://pay.ci.clean-pay.dev") {
-    return event.type === "Fetch"
-      && event.response.status === 200
-      && url.pathname === "/login"
-      && url.username === ""
-      && url.password === ""
-      && url.hash === ""
-      && url.port === ""
+    if (event.type !== "Fetch" || event.response.status !== 200
+      || url.username !== "" || url.password !== "" || url.hash !== "" || url.port !== "") {
+      return false;
+    }
+    if (url.pathname === "/cabinet") return url.search === "";
+    return url.pathname === "/login"
       && JSON.stringify([...url.searchParams.keys()])
         === JSON.stringify(["redirect_to", "_rsc"])
       && url.searchParams.get("redirect_to") === "/"
@@ -1233,11 +1236,13 @@ export async function captureProviderOverlapResponseEvidence(input) {
     status: responseStatus,
   });
   if (!terminalResult.finished) {
-    const isExactAbortedLoginRootRsc = classification.key === "app-login-root-rsc"
+    const isExactResponseBackedAbort = providerOverlapResponseBackedAbortKeys.has(
+      classification.key,
+    )
       && responseStatus === 200
       && responseContentType === "text/x-component"
-      && terminalResult.failureSha256 === providerOverlapAbortedLoginRootRscFailureSha256;
-    if (!isExactAbortedLoginRootRsc) {
+      && terminalResult.failureSha256 === providerOverlapResponseBackedAbortFailureSha256;
+    if (!isExactResponseBackedAbort) {
       fail(bodyKind === "static"
         ? "Attested static browser response did not finish cleanly."
         : `Browser response did not finish cleanly: key=${classification.key}; `
@@ -1533,11 +1538,11 @@ export function normalizeProviderOverlapSemanticEntry(entry, label = "semantic b
   if (!contentTypes.includes(entry.responseContentType)) {
     fail(`${label} response content type is not exact.`);
   }
-  const isExactAbortedLoginRootRsc = entry.key === "app-login-root-rsc"
+  const isExactResponseBackedAbort = providerOverlapResponseBackedAbortKeys.has(entry.key)
     && entry.responseStatus === 200
     && entry.responseContentType === "text/x-component"
-    && entry.responseFailureSha256 === providerOverlapAbortedLoginRootRscFailureSha256;
-  if (entry.responseFailureSha256 !== null && !isExactAbortedLoginRootRsc) {
+    && entry.responseFailureSha256 === providerOverlapResponseBackedAbortFailureSha256;
+  if (entry.responseFailureSha256 !== null && !isExactResponseBackedAbort) {
     fail(`${label} response failure is outside the exact contract.`);
   }
   const mandatoryRedirectByTarget = {

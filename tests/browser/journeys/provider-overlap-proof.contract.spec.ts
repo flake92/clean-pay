@@ -50,6 +50,7 @@ import {
   finalizeProviderOverlapHistoryContract,
   installProviderOverlapHistoryInstrumentation,
   isProviderOverlapPlaywrightBodyCdpResponse,
+  normalizeProviderOverlapSemanticEntry,
   normalizeProviderOverlapObservedResponseContentType,
   providerOverlapChatwootIdentityBoundarySettled,
   PROVIDER_OVERLAP_MAXIMUM_STATIC_RESPONSE_BYTES,
@@ -3110,6 +3111,63 @@ test("records only the exact aborted login-root RSC terminal outcome", async () 
   })).rejects.toThrow(/did not finish cleanly/);
 });
 
+test("records only the immutable response-backed cabinet action abort", async () => {
+  const request = {};
+  const classification = browserClassification(
+    "https://pay.ci.clean-pay.dev/cabinet",
+    { method: "POST", resourceType: "fetch" },
+  );
+  const exactFailureSha256 = sha256("net::ERR_ABORTED");
+  let bodyCalls = 0;
+  const response = {
+    body: async () => {
+      bodyCalls += 1;
+      throw new Error("aborted response body is unavailable");
+    },
+    finished: async () => {
+      throw new Error("terminal-gated capture must not duplicate requestfailed");
+    },
+    headerValue: async () => "text/x-component; charset=utf-8",
+    headers: () => ({ "content-type": "text/x-component; charset=utf-8" }),
+    request: () => request,
+    status: () => 200,
+  };
+
+  await expect(captureProviderOverlapResponseEvidence({
+    classification,
+    request,
+    response,
+    terminal: Promise.resolve({ failureSha256: exactFailureSha256, finished: false }),
+  })).resolves.toMatchObject({
+    body: null,
+    responseContentType: "text/x-component",
+    responseFailureSha256: exactFailureSha256,
+    responseStatus: 200,
+  });
+  expect(bodyCalls).toBe(1);
+
+  const exactSemanticEntry = {
+    disposition: "continue",
+    key: "app-cabinet-action",
+    redirectEdge: null,
+    responseContentType: "text/x-component",
+    responseFailureSha256: exactFailureSha256,
+    responseStatus: 200,
+  };
+  expect(normalizeProviderOverlapSemanticEntry(exactSemanticEntry))
+    .toEqual(exactSemanticEntry);
+
+  for (const nearMiss of [
+    { ...exactSemanticEntry, key: "app-profile-action" },
+    { ...exactSemanticEntry, responseContentType: "text/html" },
+    { ...exactSemanticEntry, responseFailureSha256: sha256("net::ERR_FAILED") },
+    { ...exactSemanticEntry, responseStatus: 307 },
+  ]) {
+    expect(() => normalizeProviderOverlapSemanticEntry(nearMiss))
+      .toThrow();
+  }
+});
+
 test("waits for Playwright-deferred response body capture before navigation", async () => {
   const request = {};
   const classification = browserClassification(
@@ -3231,6 +3289,27 @@ test("excludes only exact Playwright-owned response shapes from CDP", () => {
       .toBe(false);
   }
   expect(isProviderOverlapPlaywrightBodyCdpResponse({ response: null })).toBe(false);
+});
+
+test("excludes only the exact Playwright-owned cabinet action response from CDP", () => {
+  const event = (url: string, type: string = "Fetch", status: number = 200) => ({
+    response: { status, url },
+    type,
+  });
+  const cabinetAction = "https://pay.ci.clean-pay.dev/cabinet";
+  expect(isProviderOverlapPlaywrightBodyCdpResponse(event(cabinetAction))).toBe(true);
+
+  for (const [url, type, status] of [
+    ["https://pay.ci.clean-pay.dev/cabinet?_rsc=opaque-state_1", "Fetch", 200],
+    ["https://pay.ci.clean-pay.dev/cabinet?extra=1", "Fetch", 200],
+    ["https://pay.ci.clean-pay.dev/cabinet#fragment", "Fetch", 200],
+    ["https://other.clean-pay.dev/cabinet", "Fetch", 200],
+    ["https://pay.ci.clean-pay.dev/cabinet", "Document", 200],
+    ["https://pay.ci.clean-pay.dev/cabinet", "Fetch", 201],
+  ] as const) {
+    expect(isProviderOverlapPlaywrightBodyCdpResponse(event(url, type, status)), url)
+      .toBe(false);
+  }
 });
 
 test("recognizes only a settled ordered synthetic Chatwoot identity boundary", () => {
