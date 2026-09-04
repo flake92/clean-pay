@@ -1570,6 +1570,7 @@ test("binds the causal route barrier and exact logout helper without fixture sub
   expect(source).toContain("initialCabinetFreshWidgetCount < 1");
   expect(source).toContain("await input.barrier.hold(route)");
   expect(source).toContain("await waitForInitialProfileSupportContext(page)");
+  expect(source).toContain('pending.phase === "ownership_confirmed"');
   expect(source).toContain("removedLabels.has(\"payment_problem\")");
   expect(source).toContain("removedLabels.has(\"subscription_expired\")");
   expect(source).toContain("await clearSyntheticLogoutState(page)");

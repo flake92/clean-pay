@@ -1335,6 +1335,8 @@ async function waitForInitialProfileSupportContext(page: Page) {
     };
     const calls = windowValue.__cleanPayChatwootBoundaryCalls;
     const pending = windowValue.cleanPayChatwootPendingIdentity;
+    const identitySettled = pending === undefined
+      || pending.phase === "ownership_confirmed";
     const removedLabels = new Set(
       Array.isArray(calls)
         ? calls
@@ -1342,7 +1344,7 @@ async function waitForInitialProfileSupportContext(page: Page) {
           .map(({ label }) => label)
         : [],
     );
-    return pending === undefined
+    return identitySettled
       && removedLabels.has("payment_problem")
       && removedLabels.has("subscription_expired");
   }, undefined, { timeout: 30_000 });
