@@ -32,6 +32,19 @@ const chatwootContactResponseDelayMs = boundedIntegerEnvironment(
   25,
   2_500,
 );
+const chatwootPreCabinetContactResponseDelayMs = boundedIntegerEnvironment(
+  "CLEAN_PAY_BROWSER_CHATWOOT_PRE_CABINET_CONTACT_RESPONSE_DELAY_MS",
+  1_800,
+  25,
+  2_500,
+);
+const chatwootContextResponseDelayMs = boundedIntegerEnvironment(
+  "CLEAN_PAY_BROWSER_CHATWOOT_CONTEXT_RESPONSE_DELAY_MS",
+  500,
+  25,
+  2_500,
+);
+const authenticatedChatwootScenarioSuffix = ":email-register-verify-and-login";
 const cabinetReadOverlapTimeoutMs = boundedIntegerEnvironment(
   "CLEAN_PAY_BROWSER_CABINET_READ_OVERLAP_TIMEOUT_MS",
   5_000,
@@ -75,6 +88,7 @@ let rateLimitCommittedPaymentOnce = false;
 let cabinetReadOverlapOccurrence = 0;
 let activeCabinetReadOverlap = null;
 const cabinetReadOverlapWindows = [];
+let cabinetSurfaceObserved = false;
 
 function sha256(value) {
   return crypto.createHash("sha256").update(value, "utf8").digest("hex");
@@ -893,12 +907,19 @@ async function handleRemnashop(request, response) {
       owner && subscriptionlessOwners.has(owner),
     );
     record("remnashop", request, url, body, "read_subscription");
+    // The authenticated browser characterization reloads an already-owned
+    // conversation. Keep its optional support context behind the real iframe
+    // load so host scheduling cannot reorder the frozen boundary sequence.
+    if (activeScenario.endsWith(authenticatedChatwootScenarioSuffix)) {
+      await new Promise((resolve) => setTimeout(resolve, chatwootContextResponseDelayMs));
+    }
     sendJson(response, 200, newlyRegisteredWithoutSubscription ? null : currentSubscription);
     return;
   }
 
   if (path === "/subscription/offers" && method === "GET") {
     if (!authorized(request, response)) return;
+    cabinetSurfaceObserved = true;
     const ledgerSequence = record("remnashop", request, url, body, "read_offers");
     const overlap = enterCabinetReadOverlap("offers", ledgerSequence);
     if (overlap) await overlap;
@@ -908,6 +929,7 @@ async function handleRemnashop(request, response) {
 
   if (path === "/subscription/devices" && method === "GET") {
     if (!authorized(request, response)) return;
+    cabinetSurfaceObserved = true;
     const ledgerSequence = record("remnashop", request, url, body, "read_devices");
     const overlap = enterCabinetReadOverlap("devices", ledgerSequence);
     if (overlap) await overlap;
@@ -1129,11 +1151,13 @@ async function handleControl(request, response) {
       sendJson(response, 401, { error: "fixture_credential_rejected" });
       return;
     }
-    // The production controller starts this ownership fallback after 750 ms.
-    // Resolve it before the synthetic SDK's 1.2 s correlated confirmation so
-    // the capture deterministically exercises the ownership-confirmed iframe
-    // replacement used by the A-to-B and Gap lifecycle contracts.
-    await new Promise((resolve) => setTimeout(resolve, chatwootContactResponseDelayMs));
+    // Profile identity must first settle through the SDK's correlated reply.
+    // Once real cabinet reads have occurred, ownership must win instead so the
+    // same capture deterministically exercises the replacement-frame branch.
+    const responseDelayMs = cabinetSurfaceObserved
+      ? chatwootContactResponseDelayMs
+      : chatwootPreCabinetContactResponseDelayMs;
+    await new Promise((resolve) => setTimeout(resolve, responseDelayMs));
     sendJson(response, 200, { identifier: conversation });
     return;
   }
@@ -1209,6 +1233,7 @@ async function handleControl(request, response) {
       return;
     }
     clearCabinetReadOverlapEvidence();
+    cabinetSurfaceObserved = false;
     activeScenario = scenario;
     const database = dbObserverUrl
       ? await fetchObserverJson("/__reset", {

@@ -821,6 +821,7 @@ test("Chatwoot contact probe validates the synthetic inbox and records only cred
       CONTROL_PORT: String(controlPort),
       OIDC_RESET_URL: `http://127.0.0.1:${oidcPort}/__reset`,
       CLEAN_PAY_BROWSER_CHATWOOT_CONTACT_RESPONSE_DELAY_MS: "75",
+      CLEAN_PAY_BROWSER_CHATWOOT_PRE_CABINET_CONTACT_RESPONSE_DELAY_MS: "75",
     }));
     const control = `http://127.0.0.1:${controlPort}`;
     await waitForOk(`${control}/__health`);
@@ -865,6 +866,60 @@ test("Chatwoot contact probe validates the synthetic inbox and records only cred
     ]);
     expect(JSON.stringify(providerLedger)).not.toContain(conversation);
     expect(JSON.stringify(providerLedger)).not.toContain(websiteToken);
+  } finally {
+    await Promise.all(children.map(stopChild));
+  }
+});
+
+test("Chatwoot contact timing switches only after a real cabinet read and resets exactly", async () => {
+  const [oidcPort, remnashopPort, remnawavePort, controlPort] = await freePorts(4);
+  const children: ChildProcess[] = [];
+  try {
+    children.push(spawnFixture("oidc-mock.mjs", {
+      PORT: String(oidcPort),
+      OIDC_ISSUER: `http://127.0.0.1:${oidcPort}`,
+      OIDC_PUBLIC_ISSUER: `http://127.0.0.1:${oidcPort}`,
+    }));
+    children.push(spawnFixture("provider-mock.mjs", {
+      REMNASHOP_PORT: String(remnashopPort),
+      REMNAWAVE_PORT: String(remnawavePort),
+      CONTROL_PORT: String(controlPort),
+      OIDC_RESET_URL: `http://127.0.0.1:${oidcPort}/__reset`,
+      CLEAN_PAY_BROWSER_CHATWOOT_CONTACT_RESPONSE_DELAY_MS: "40",
+      CLEAN_PAY_BROWSER_CHATWOOT_PRE_CABINET_CONTACT_RESPONSE_DELAY_MS: "180",
+    }));
+    const control = `http://127.0.0.1:${controlPort}`;
+    const shop = `http://127.0.0.1:${remnashopPort}/api/v1/public`;
+    await Promise.all([
+      waitForOk(`${control}/__health`),
+      waitForOk(`http://127.0.0.1:${oidcPort}/.well-known/jwks.json`),
+    ]);
+    const websiteToken = digest("clean-pay-browser-journey:chatwoot-website");
+    const conversation = "csyntheticbrowserjourney01";
+    const probe = async () => {
+      const startedAt = performance.now();
+      const response = await fetch(
+        `${control}/api/v1/widget/contact?website_token=${websiteToken}`,
+        { headers: { "x-auth-token": conversation } },
+      );
+      const elapsedMs = performance.now() - startedAt;
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({ identifier: conversation });
+      return elapsedMs;
+    };
+
+    const preCabinetElapsedMs = await probe();
+    const login = await postSession(`${shop}/auth/login`, {
+      email: "synthetic.browser@clean-pay.dev",
+      password: "synthetic-password",
+    });
+    await subscriptionRead(`${shop}/subscription/offers`, login.cookie);
+    const cabinetElapsedMs = await probe();
+    expect(preCabinetElapsedMs - cabinetElapsedMs).toBeGreaterThanOrEqual(80);
+
+    await postJson(`${control}/__reset`, { scenario: "contract-chatwoot-timing-reset" });
+    const resetElapsedMs = await probe();
+    expect(resetElapsedMs - cabinetElapsedMs).toBeGreaterThanOrEqual(80);
   } finally {
     await Promise.all(children.map(stopChild));
   }
