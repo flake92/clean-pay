@@ -43,8 +43,10 @@ test("binds identity confirmation to the current Chatwoot iframe delivery", asyn
   await page.goto(`${applicationOrigin}/fixture`, { waitUntil: "domcontentloaded" });
   await page.evaluate((expectedOrigin) => {
     const probe = {
+      activateReplacementIdentityOnLoaded: false,
       chatwootReadyCount: 0,
       deliveries: [] as unknown[],
+      synchronousFrameObserved: false,
       ready: [] as string[],
     };
     Object.defineProperty(window, "__syntheticChatwootSdkProbe", { value: probe });
@@ -52,11 +54,40 @@ test("binds identity confirmation to the current Chatwoot iframe delivery", asyn
       probe.chatwootReadyCount += 1;
     });
     addEventListener("message", (event) => {
-      if (
-        event.origin !== expectedOrigin
-        || typeof event.data !== "object"
-        || event.data === null
-      ) return;
+      if (event.origin !== expectedOrigin) return;
+      if (typeof event.data === "string") {
+        const current = document.getElementById("chatwoot_live_chat_widget") as HTMLIFrameElement | null;
+        if (
+          probe.activateReplacementIdentityOnLoaded
+          && event.data === 'chatwoot-widget:{"event":"loaded"}'
+          && event.source === current?.contentWindow
+        ) {
+          probe.activateReplacementIdentityOnLoaded = false;
+          queueMicrotask(() => {
+            (
+              window as unknown as {
+                cleanPayChatwootPendingIdentity?: { phase: string };
+              }
+            ).cleanPayChatwootPendingIdentity = { phase: "sent" };
+            window.$chatwoot?.setUser("identity-B", {
+              name: "B",
+              identifier_hash: "hash-B",
+              custom_attributes: {},
+            });
+          });
+        } else if (
+          event.data === 'chatwoot-widget:{"event":"loaded"}'
+          && event.source === current?.contentWindow
+        ) {
+          queueMicrotask(() => {
+            probe.synchronousFrameObserved = (
+              window as unknown as { __cleanPayChatwootBoundaryCalls?: Array<{ method?: string }> }
+            ).__cleanPayChatwootBoundaryCalls?.some(({ method }) => method === "frame.loaded") === true;
+          });
+        }
+        return;
+      }
+      if (typeof event.data !== "object" || event.data === null) return;
       if (event.data.kind === "probe-ready" && typeof event.data.generation === "string") {
         probe.ready.push(event.data.generation);
       }
@@ -76,10 +107,21 @@ test("binds identity confirmation to the current Chatwoot iframe delivery", asyn
         __syntheticChatwootSdkProbe: { chatwootReadyCount: number };
       }
     ).__syntheticChatwootSdkProbe.chatwootReadyCount,
-  }))).toEqual({ hasLoaded: false, readyCount: 0 });
+  }))).toEqual({ hasLoaded: true, readyCount: 1 });
   await expect.poll(() => page.evaluate(() => (
     window as unknown as { __syntheticChatwootSdkProbe: { ready: string[] } }
   ).__syntheticChatwootSdkProbe.ready)).toEqual(["A"]);
+
+  await page.evaluate(() => {
+    window.$chatwoot?.setUser("identity-A", {
+      name: "A",
+      identifier_hash: "hash-A",
+      custom_attributes: {},
+    });
+  });
+  expect(await page.evaluate(() => (
+    window as unknown as { __syntheticChatwootSdkProbe: { deliveries: unknown[] } }
+  ).__syntheticChatwootSdkProbe.deliveries)).toEqual([]);
 
   await page.evaluate((baseUrl) => {
     const first = document.getElementById("chatwoot_live_chat_widget") as HTMLIFrameElement;
@@ -90,11 +132,6 @@ test("binds identity confirmation to the current Chatwoot iframe delivery", asyn
       origin: baseUrl,
       source: first.contentWindow,
     }));
-    window.$chatwoot?.setUser("identity-A", {
-      name: "A",
-      identifier_hash: "hash-A",
-      custom_attributes: {},
-    });
   }, chatwootOrigin);
   await expect.poll(() => page.evaluate(() => ({
     hasLoaded: window.$chatwoot?.hasLoaded,
@@ -109,6 +146,11 @@ test("binds identity confirmation to the current Chatwoot iframe delivery", asyn
   ).__syntheticChatwootSdkProbe.deliveries)).toEqual([
     { deliveryId: 1, generation: "A", kind: "probe-identify" },
   ]);
+  await expect.poll(() => page.evaluate(() => (
+    window as unknown as {
+      __syntheticChatwootSdkProbe: { synchronousFrameObserved: boolean };
+    }
+  ).__syntheticChatwootSdkProbe.synchronousFrameObserved)).toBe(true);
 
   await page.evaluate(() => {
     const current = document.getElementById("chatwoot_live_chat_widget") as HTMLIFrameElement;
@@ -126,6 +168,16 @@ test("binds identity confirmation to the current Chatwoot iframe delivery", asyn
     const stale = (window as unknown as { __staleSyntheticChatwootWindow: WindowProxy })
       .__staleSyntheticChatwootWindow;
     const current = document.getElementById("chatwoot_live_chat_widget") as HTMLIFrameElement;
+    (
+      window as unknown as {
+        __syntheticChatwootSdkProbe: { activateReplacementIdentityOnLoaded: boolean };
+      }
+    ).__syntheticChatwootSdkProbe.activateReplacementIdentityOnLoaded = true;
+    (
+      window as unknown as {
+        cleanPayChatwootPendingIdentity?: { phase: string };
+      }
+    ).cleanPayChatwootPendingIdentity = { phase: "waiting_for_frame" };
     dispatchEvent(new MessageEvent("message", {
       data: 'chatwoot-widget:{"event":"loaded"}',
       origin: baseUrl,
@@ -136,11 +188,6 @@ test("binds identity confirmation to the current Chatwoot iframe delivery", asyn
       origin: baseUrl,
       source: current.contentWindow,
     }));
-    window.$chatwoot?.setUser("identity-B", {
-      name: "B",
-      identifier_hash: "hash-B",
-      custom_attributes: {},
-    });
   }, chatwootOrigin);
   await expect.poll(() => page.evaluate(() => (
     window as unknown as { __syntheticChatwootSdkProbe: { deliveries: unknown[] } }
@@ -172,7 +219,6 @@ test("binds identity confirmation to the current Chatwoot iframe delivery", asyn
   }, chatwootOrigin);
   expect(calls).toEqual([
     { method: "run", baseUrl: chatwootOrigin, websiteTokenBytes: 64 },
-    { method: "frame.loaded" },
     {
       method: "setUser",
       identifierBytes: 10,
@@ -184,6 +230,7 @@ test("binds identity confirmation to the current Chatwoot iframe delivery", asyn
       identifierBytes: 10,
       attributeKeys: ["custom_attributes", "identifier_hash", "name"],
     },
+    { method: "frame.loaded" },
     { method: "identity.confirmed" },
   ]);
 });
