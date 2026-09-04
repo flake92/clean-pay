@@ -1041,6 +1041,13 @@ async function expectConcurrencyLedgerReferences(
   ]);
   const referencedSequences = referenced.map(({ ledgerSequence }) => ledgerSequence);
   expect(new Set(referencedSequences).size).toBe(referencedSequences.length);
+  for (const window of windows.filter(({ outcome }) => outcome === "proven")) {
+    const participantSequences = window.participants
+      .map(({ ledgerSequence }) => ledgerSequence)
+      .sort((left, right) => Number(left) - Number(right));
+    expect(participantSequences).toHaveLength(2);
+    expect(Number(participantSequences[1]) - Number(participantSequences[0])).toBe(1);
+  }
   for (const participant of referenced) {
     expect(participant.ledgerSequence).toEqual(expect.any(Number));
     const entry = value.entries.find(
