@@ -114,11 +114,28 @@ test("materializes two deterministic self-contained role environments", async ()
       /CLEAN_PAY_BROWSER_CHATWOOT_CONTACT_RESPONSE_DELAY_MS",\n  ([0-9_]+),/
         .exec(providerSource)?.[1].replaceAll("_", ""),
     );
-    expect({ identityConfirmationDelayMs, ownershipFallbackDelayMs }).toEqual({
+    const preCabinetOwnershipFallbackDelayMs = Number(
+      /CLEAN_PAY_BROWSER_CHATWOOT_PRE_CABINET_CONTACT_RESPONSE_DELAY_MS",\n  ([0-9_]+),/
+        .exec(providerSource)?.[1].replaceAll("_", ""),
+    );
+    const supportContextDelayMs = Number(
+      /CLEAN_PAY_BROWSER_CHATWOOT_CONTEXT_RESPONSE_DELAY_MS",\n  ([0-9_]+),/
+        .exec(providerSource)?.[1].replaceAll("_", ""),
+    );
+    expect({
+      identityConfirmationDelayMs,
+      ownershipFallbackDelayMs,
+      preCabinetOwnershipFallbackDelayMs,
+      supportContextDelayMs,
+    }).toEqual({
       identityConfirmationDelayMs: 1_200,
       ownershipFallbackDelayMs: 75,
+      preCabinetOwnershipFallbackDelayMs: 1_800,
+      supportContextDelayMs: 500,
     });
     expect(ownershipFallbackDelayMs).toBeLessThan(identityConfirmationDelayMs);
+    expect(preCabinetOwnershipFallbackDelayMs).toBeGreaterThan(identityConfirmationDelayMs);
+    expect(supportContextDelayMs).toBeLessThan(identityConfirmationDelayMs);
     expect(ownershipFallbackDelayMs).toBeLessThan(3_000);
     expect(assertSyntheticCaddyRouteOrder(caddySource)).toEqual({
       chatwootIdentityDelivery: {
