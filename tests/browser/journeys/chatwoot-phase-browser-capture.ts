@@ -576,6 +576,7 @@ async function exerciseChatwootPhases(input: CaptureInput & {
   const gapRecorder = recordNetwork(page, SYNTHETIC_APPLICATION_ORIGIN);
   const stableRecorder = recordNetwork(page, SYNTHETIC_APPLICATION_ORIGIN);
   await loginToProfile(page);
+  await waitForInitialProfileSupportContext(page);
   await history.captureInitialProfile(page);
   await initialProviderHistory.captureProfile(page);
   cabinetDocumentAllowed = true;
@@ -1321,6 +1322,30 @@ async function navigateToCabinet(page: Page) {
   await page.getByRole("heading", { name: "Личный кабинет", level: 1 })
     .waitFor({ state: "visible", timeout: 15_000 });
   return response;
+}
+
+async function waitForInitialProfileSupportContext(page: Page) {
+  await page.waitForFunction(() => {
+    const windowValue = window as unknown as {
+      __cleanPayChatwootBoundaryCalls?: Array<{
+        label?: unknown;
+        method?: unknown;
+      }>;
+      cleanPayChatwootPendingIdentity?: { phase?: unknown };
+    };
+    const calls = windowValue.__cleanPayChatwootBoundaryCalls;
+    const pending = windowValue.cleanPayChatwootPendingIdentity;
+    const removedLabels = new Set(
+      Array.isArray(calls)
+        ? calls
+          .filter(({ method }) => method === "removeLabel")
+          .map(({ label }) => label)
+        : [],
+    );
+    return pending === undefined
+      && removedLabels.has("payment_problem")
+      && removedLabels.has("subscription_expired");
+  }, undefined, { timeout: 30_000 });
 }
 
 async function waitForPhaseState(page: Page, pendingPhase: string | null) {
