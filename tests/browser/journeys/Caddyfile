@@ -134,11 +134,14 @@ https://chatwoot.browser.clean-pay.dev {
         frame.src = config.baseUrl.replace(/\/$/, "") + "/widget?website_token=" + encodeURIComponent(config.websiteToken);
         frame.title = "Chatwoot synthetic fixture";
         frame.style.display = "none";
-        const restoredOwnershipRequiresFrame = document.cookie
-          .split(";")
-          .some((entry) => entry.trim().startsWith("cw_conversation="))
-          && localStorage.getItem("clean-pay:chatwoot-ownership:v1") !== null
-          && localStorage.getItem("clean-pay:chatwoot-identity:v1") === null;
+        const fixtureReadinessScope = window.__cleanPayChatwootFixtureReadiness;
+        const restoredOwnershipRequiresFrame = fixtureReadinessScope === "restored"
+          || (fixtureReadinessScope !== "eager"
+            && document.cookie
+              .split(";")
+              .some((entry) => entry.trim().startsWith("cw_conversation="))
+            && localStorage.getItem("clean-pay:chatwoot-ownership:v1") !== null
+            && localStorage.getItem("clean-pay:chatwoot-identity:v1") === null);
         let readyFrameWindow = null;
         let announcedFrameWindow = null;
         let pendingIdentity = null;

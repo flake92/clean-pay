@@ -420,6 +420,15 @@ async function exerciseChatwootPhases(input: CaptureInput & {
     eventLedger,
   );
   const recreatedCausality = await installChatwootCausalLedger(input.context, eventLedger);
+  await input.context.addInitScript(() => {
+    if (window.top !== window) return;
+    Object.defineProperty(window, "__cleanPayChatwootFixtureReadiness", {
+      configurable: false,
+      enumerable: false,
+      value: "eager",
+      writable: false,
+    });
+  });
   const page = await input.context.newPage();
   diagnostics.bindPrimaryPage(page);
   history.bindPrimaryPage(page);

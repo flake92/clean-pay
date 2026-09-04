@@ -583,6 +583,12 @@ async function restorePreOwnedChatwootSeed(page: Page, seed: PreOwnedChatwootSee
     if (sessionStorage.getItem(marker) !== "armed") {
       return;
     }
+    Object.defineProperty(window, "__cleanPayChatwootFixtureReadiness", {
+      configurable: false,
+      enumerable: false,
+      value: "restored",
+      writable: false,
+    });
     localStorage.setItem("clean-pay:chatwoot-ownership:v1", ownership);
     sessionStorage.removeItem(marker);
   }, { marker: preOwnedChatwootSeedMarker, ownership: seed.ownership });
