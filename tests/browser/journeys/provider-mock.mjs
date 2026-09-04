@@ -39,6 +39,9 @@ const chatwootPreCabinetContactResponseDelayMs = boundedIntegerEnvironment(
   2_500,
 );
 const chatwootCabinetObservationGraceMs = 250;
+const oidcResetStartupDeadlineMs = 2_000;
+const oidcResetAttemptTimeoutMs = 500;
+const oidcResetRetryDelayMs = 50;
 const chatwootPhaseScenario = "chatwoot-phase-stability-v1";
 const cabinetReadOverlapTimeoutMs = boundedIntegerEnvironment(
   "CLEAN_PAY_BROWSER_CABINET_READ_OVERLAP_TIMEOUT_MS",
@@ -266,6 +269,26 @@ function readBody(request) {
     request.on("end", () => resolve(Buffer.concat(chunks).toString("utf8")));
     request.on("error", reject);
   });
+}
+
+async function resetOidcWhenReady(scenario) {
+  const deadline = Date.now() + oidcResetStartupDeadlineMs;
+  while (true) {
+    const remainingMs = deadline - Date.now();
+    if (remainingMs <= 0) return null;
+    try {
+      return await fetch(oidcResetUrl, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ scenario }),
+        signal: AbortSignal.timeout(Math.min(remainingMs, oidcResetAttemptTimeoutMs)),
+      });
+    } catch {
+      const retryDelayMs = Math.min(oidcResetRetryDelayMs, deadline - Date.now());
+      if (retryDelayMs <= 0) return null;
+      await new Promise((resolve) => setTimeout(resolve, retryDelayMs));
+    }
+  }
 }
 
 function parseJson(body) {
@@ -1282,13 +1305,8 @@ async function handleControl(request, response) {
     consumedTurnstileTokens.clear();
     disconnectCommittedPaymentOnce = false;
     rateLimitCommittedPaymentOnce = false;
-    const oidcReset = await fetch(oidcResetUrl, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ scenario }),
-      signal: AbortSignal.timeout(2_000),
-    });
-    if (!oidcReset.ok) {
+    const oidcReset = await resetOidcWhenReady(scenario);
+    if (!oidcReset?.ok) {
       sendJson(response, 502, { error: "oidc_reset_failed" });
       return;
     }
