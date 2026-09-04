@@ -6,10 +6,15 @@ import {
   resolveVerifiedTelegramIdentity,
 } from "@/application/auth/complete-telegram-callback";
 import {
+  continueDurableTelegramCallback,
+  durableTelegramLinkTargetUserId,
+  type ContinueDurableTelegramCallbackDependencies,
+  type DurableTelegramCallbackCheckpoint,
+  type DurableTelegramCallbackReplay,
+} from "@/application/auth/continue-durable-telegram-callback";
+import {
   TelegramCallbackError,
-  type ConsumedTelegramCallback,
   type TelegramCallbackOutcome,
-  type VerifiedTelegramCallback,
 } from "@/application/auth/ports/telegram-callback";
 import {
   getEnv,
@@ -35,9 +40,6 @@ import {
   markDurableTelegramRecoveryDispatching,
   releaseDurableTelegramCallback,
   runWithDurableTelegramCallbackLease,
-  type DurableTelegramCallbackCheckpoint,
-  type DurableTelegramCallbackOwnership,
-  type DurableTelegramCallbackReplay,
   telegramAccountMergeCookieMaxAgeSeconds,
   telegramAccountMergeCookieName,
   createWebSessionOnResponse,
@@ -206,34 +208,10 @@ function durableCallbackFailureCode(error: unknown) {
   return "INTERNAL_ERROR";
 }
 
-type DurableResume = {
-  ownership: DurableTelegramCallbackOwnership;
-  checkpoint: DurableTelegramCallbackCheckpoint;
-};
-
-function durableLinkTargetUserId(
-  checkpoint: DurableTelegramCallbackCheckpoint,
-) {
-  switch (checkpoint.phase) {
-    case "PROVIDER_READY":
-      return checkpoint.authState.targetUserId;
-    case "IDENTITY_VERIFIED":
-    case "PROVIDER_AUTHENTICATED":
-      return checkpoint.verified.authState.targetUserId;
-    case "IDENTITY_RESOLVED":
-      return checkpoint.consumed.linked
-        ? checkpoint.consumed.user.id
-        : null;
-    case "OUTCOME_READY":
-    case "SESSION_CREATED":
-      return null;
-  }
-}
-
 async function assertDurableTelegramLinkSession(
   checkpoint: DurableTelegramCallbackCheckpoint,
 ) {
-  const targetUserId = durableLinkTargetUserId(checkpoint);
+  const targetUserId = durableTelegramLinkTargetUserId(checkpoint);
   if (!targetUserId) return;
 
   const session = await getCurrentSession();
@@ -246,189 +224,55 @@ async function assertDurableTelegramLinkSession(
   }
 }
 
-async function continueDurableTelegramCallback(
-  state: string,
-  code: string,
-  resume?: DurableResume,
-): Promise<
-  | {
-      status: "completed";
-      replay: DurableTelegramCallbackReplay;
-    }
-  | { status: "failed"; redirectTo: string }
-> {
-  let ownership: DurableTelegramCallbackOwnership | undefined = resume?.ownership;
-  let checkpoint: DurableTelegramCallbackCheckpoint | undefined = resume?.checkpoint;
-
-  try {
-    if (!checkpoint) {
-      const verified = await productionTelegramCallbackGateway.consume({
-        kind: "oidc",
-        code,
-        state,
-      });
-      if (!verified.durable) {
-        throw new Error("OIDC callback did not return durable ownership");
-      }
-      ownership = verified.durable;
-      checkpoint = {
-        phase: "PROVIDER_AUTHENTICATED",
-        verified: { ...verified, durable: undefined },
-      };
-    }
-
-    for (;;) {
-      if (!ownership) {
-        throw new Error("Durable Telegram callback has no ownership token");
-      }
-      await assertDurableTelegramLinkSession(checkpoint);
-      switch (checkpoint.phase) {
-        case "PROVIDER_READY": {
-          const verified = await resumeTelegramOidcCodeExchange(
-            code,
-            state,
-            checkpoint.authState,
-            ownership,
-          );
-          checkpoint = {
-            phase: "PROVIDER_AUTHENTICATED",
-            verified: { ...verified, durable: undefined },
-          };
-          break;
-        }
-        case "IDENTITY_VERIFIED": {
-          const verified = await resumeTelegramProviderAuthentication(
-            checkpoint.verified,
-            ownership,
-          );
-          checkpoint = {
-            phase: "PROVIDER_AUTHENTICATED",
-            verified: { ...verified, durable: undefined },
-          };
-          break;
-        }
-        case "PROVIDER_AUTHENTICATED": {
-          const verified: VerifiedTelegramCallback = checkpoint.verified;
-          const consumed: ConsumedTelegramCallback =
-            await runWithDurableTelegramCallbackLease(
-            ownership,
-            "PROVIDER_AUTHENTICATED",
-            () => resolveVerifiedTelegramIdentity(
-              productionTelegramCallbackGateway,
-              verified,
-              { preserveTemporaryAuth: true },
-            ),
-          );
-          await checkpointDurableTelegramIdentityResolved(
-            ownership,
-            consumed,
-          );
-          checkpoint = { phase: "IDENTITY_RESOLVED", consumed };
-          break;
-        }
-        case "IDENTITY_RESOLVED": {
-          const consumed: ConsumedTelegramCallback = checkpoint.consumed;
-          const outcome: TelegramCallbackOutcome =
-            await runWithDurableTelegramCallbackLease(
-            ownership,
-            "IDENTITY_RESOLVED",
-            () => completeResolvedTelegramCallback(
-              productionTelegramCallbackGateway,
-              consumed,
-            ),
-          );
-          await checkpointDurableTelegramOutcome(ownership, outcome);
-          checkpoint = { phase: "OUTCOME_READY", outcome };
-          break;
-        }
-        case "OUTCOME_READY": {
-          if (checkpoint.outcome.mergeConfirmation) {
-            const replay = await completeDurableTelegramMerge(
-              ownership,
-              checkpoint.outcome,
-            );
-            return { status: "completed", replay };
-          }
-          const created = await createDurableTelegramCallbackSession(
-            ownership,
-            checkpoint.outcome,
-          );
-          checkpoint = { phase: "SESSION_CREATED", replay: created.replay };
-          break;
-        }
-        case "SESSION_CREATED": {
-          if (!checkpoint.replay.session) {
-            throw new Error("SESSION_CREATED checkpoint has no exact session");
-          }
-          let committedReplay = checkpoint.replay;
-          if (checkpoint.replay.session.requiresTelegramRecovery) {
-            const replaySession = checkpoint.replay.session;
-            await markDurableTelegramRecoveryDispatching(
-              ownership,
-              checkpoint.replay,
-            );
-            try {
-              await runWithDurableTelegramCallbackLease(
-                ownership,
-                "RECOVERY_DISPATCHING",
-                () => recoverRemnashopTelegramSession(
-                  replaySession.webSessionId,
-                  replaySession.userId,
-                ),
-              );
-              committedReplay = await checkpointDurableTelegramRecoveryCommitted(
-                ownership,
-                checkpoint.replay,
-              );
-            } catch {
-              const redirectTo = "/login?auth=telegram_recovery_required";
-              await failDurableTelegramCallback(
-                ownership,
-                "RECOVERY_DISPATCHING",
-                "REMNASHOP_RECOVERY_AMBIGUOUS",
-                redirectTo,
-                checkpoint.replay,
-              );
-              return { status: "failed", redirectTo };
-            }
-          }
-          await completeDurableTelegramSession(ownership, committedReplay);
-          return {
-            status: "completed",
-            replay: committedReplay,
-          };
-        }
-      }
-    }
-  } catch (error) {
-    if (ownership && checkpoint) {
-      if (terminalDurableCallbackFailure(error)) {
-        const redirectTo = await telegramFailurePath(error);
-        await failDurableTelegramCallback(
-          ownership,
-          checkpoint.phase,
-          durableCallbackFailureCode(error),
-          redirectTo,
-          checkpoint.phase === "SESSION_CREATED"
-            ? checkpoint.replay
-            : undefined,
-        );
-        return { status: "failed", redirectTo };
-      }
-      await releaseDurableTelegramCallback(
-        ownership,
-        checkpoint.phase,
-      ).catch((releaseError) => {
-        logTechnicalError(
-          "telegram_callback_lease_release_failed",
-          releaseError,
-          { phase: checkpoint?.phase },
-        );
-      });
-    }
-    throw error;
-  }
-}
+const durableCallbackDependencies: ContinueDurableTelegramCallbackDependencies = {
+  consume: (input) => productionTelegramCallbackGateway.consume(input),
+  assertLinkSession: assertDurableTelegramLinkSession,
+  resumeOidcCodeExchange: (code, state, authState, ownership) =>
+    resumeTelegramOidcCodeExchange(code, state, authState, ownership),
+  resumeProviderAuthentication: (verified, ownership) =>
+    resumeTelegramProviderAuthentication(verified, ownership),
+  runWithLease: (ownership, phase, work) =>
+    runWithDurableTelegramCallbackLease(ownership, phase, work),
+  resolveIdentity: (verified) => resolveVerifiedTelegramIdentity(
+    productionTelegramCallbackGateway,
+    verified,
+    { preserveTemporaryAuth: true },
+  ),
+  checkpointIdentityResolved: (ownership, consumed) =>
+    checkpointDurableTelegramIdentityResolved(ownership, consumed),
+  completeResolved: (consumed) => completeResolvedTelegramCallback(
+    productionTelegramCallbackGateway,
+    consumed,
+  ),
+  checkpointOutcome: (ownership, outcome) =>
+    checkpointDurableTelegramOutcome(ownership, outcome),
+  completeMerge: (ownership, outcome) =>
+    completeDurableTelegramMerge(ownership, outcome),
+  createSession: (ownership, outcome) =>
+    createDurableTelegramCallbackSession(ownership, outcome),
+  markRecoveryDispatching: (ownership, replay) =>
+    markDurableTelegramRecoveryDispatching(ownership, replay),
+  recoverSession: (webSessionId, userId) =>
+    recoverRemnashopTelegramSession(webSessionId, userId),
+  checkpointRecoveryCommitted: (ownership, replay) =>
+    checkpointDurableTelegramRecoveryCommitted(ownership, replay),
+  fail: (ownership, phase, code, redirectTo, replay) =>
+    failDurableTelegramCallback(ownership, phase, code, redirectTo, replay),
+  completeSession: (ownership, replay) =>
+    completeDurableTelegramSession(ownership, replay),
+  isTerminalFailure: terminalDurableCallbackFailure,
+  failureCode: durableCallbackFailureCode,
+  failureRedirect: telegramFailurePath,
+  release: (ownership, phase) =>
+    releaseDurableTelegramCallback(ownership, phase),
+  reportReleaseFailure: (error, phase) => {
+    logTechnicalError(
+      "telegram_callback_lease_release_failed",
+      error,
+      { phase },
+    );
+  },
+};
 
 function callbackRequestMetadata(request: Request, url: URL) {
   return {
@@ -508,14 +352,19 @@ export async function GET(request: Request) {
     }
 
     const completed = await continueDurableTelegramCallback(
-      state,
-      code,
-      durable.status === "resume"
-        ? {
-            ownership: durable.ownership,
-            checkpoint: durable.checkpoint,
-          }
-        : undefined,
+      {
+        state,
+        code,
+        ...(durable.status === "resume"
+          ? {
+              resume: {
+                ownership: durable.ownership,
+                checkpoint: durable.checkpoint,
+              },
+            }
+          : {}),
+      },
+      durableCallbackDependencies,
     );
     if (completed.status === "failed") {
       const response = redirectTo(

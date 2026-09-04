@@ -1707,6 +1707,24 @@ describe("clean architecture boundaries", () => {
     expect(globSync("src/backend/integrations/auth/telegram-callback-processor.ts")).toEqual([]);
   });
 
+  it("keeps the durable Telegram callback state machine in the application layer", () => {
+    const controller = readFileSync("src/app/auth/telegram/callback/route.ts", "utf8");
+    const useCase = readFileSync(
+      "src/application/auth/continue-durable-telegram-callback.ts",
+      "utf8",
+    );
+
+    expect(controller).toContain("continueDurableTelegramCallback(");
+    expect(controller).not.toContain('case "PROVIDER_READY"');
+    expect(controller).not.toContain('case "IDENTITY_RESOLVED"');
+    expect(controller).not.toContain('case "SESSION_CREATED"');
+    expect(useCase).toContain('case "PROVIDER_READY"');
+    expect(useCase).toContain('case "IDENTITY_RESOLVED"');
+    expect(useCase).toContain('case "SESSION_CREATED"');
+    expect(useCase).not.toContain("next/server");
+    expect(useCase).not.toMatch(/^import .*@\/backend\//mu);
+  });
+
   it("keeps Telegram WebApp workflow policy in the application layer", () => {
     const useCase = readFileSync("src/application/auth/authenticate-telegram-webapp.ts", "utf8");
     const gateway = readFileSync("src/backend/integrations/auth/telegram-webapp-gateway.ts", "utf8");
