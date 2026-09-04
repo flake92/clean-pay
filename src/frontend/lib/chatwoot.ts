@@ -383,14 +383,13 @@ export function confirmChatwootIdentity(expectedAttemptId?: string) {
 
   if (
     !pending
-    || (pending.phase !== "sent" && pending.phase !== "ownership_confirmed")
+    || pending.phase !== "sent"
     || (expectedAttemptId && pending.attemptId !== expectedAttemptId)
     || !window.cleanPayChatwootAuthorized
   ) {
     return false;
   }
 
-  const preserveConfirmedOwnership = pending.phase === "ownership_confirmed";
   window.cleanPayChatwootPendingIdentity = undefined;
   window.cleanPayChatwootFailedIdentity = undefined;
   rememberChatwootIdentity({
@@ -399,10 +398,7 @@ export function confirmChatwootIdentity(expectedAttemptId?: string) {
   });
   const conversation = chatwootCookieValue("cw_conversation");
   if (conversation) {
-    rememberChatwootOwnership({
-      core: pending.core,
-      customAttributes: pending.customAttributes,
-    }, conversation, preserveConfirmedOwnership);
+    rememberChatwootOwnership(pending, conversation, false);
   }
   return true;
 }
