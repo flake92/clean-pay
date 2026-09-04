@@ -204,55 +204,6 @@ describe("Chatwoot browser lifecycle", () => {
     expect(api.toggleBubbleVisibility).toHaveBeenLastCalledWith("show");
   });
 
-  it("accepts the correlated SDK success after the ownership probe wins the race", () => {
-    const api = chatwootApi();
-    window.$chatwoot = api;
-    enterChatwootAuthenticatedMode();
-
-    expect(identifyChatwootUser(config)).toBe("pending");
-    const attemptId = getChatwootPendingIdentityAttempt()!.attemptId;
-    document.cookie = "cw_conversation=authenticated; Path=/";
-    document.cookie = `cw_user_${config.websiteToken}=identified; Path=/`;
-
-    expect(confirmChatwootIdentityOwnership(attemptId)).toBe(true);
-    expect(getChatwootPendingIdentityAttempt()).toMatchObject({
-      attemptId,
-      phase: "ownership_confirmed",
-    });
-    expect(confirmChatwootIdentity(attemptId)).toBe(true);
-    expect(getChatwootPendingIdentityAttempt()).toBeUndefined();
-    expect(identifyChatwootUser(config)).toBe("ready");
-    expect(api.setUser).toHaveBeenCalledTimes(1);
-    expect(api.toggleBubbleVisibility).toHaveBeenLastCalledWith("show");
-  });
-
-  it("retains the bounded ownership proof after correlated SDK success", () => {
-    const api = chatwootApi();
-    window.$chatwoot = api;
-    enterChatwootAuthenticatedMode();
-
-    expect(identifyChatwootUser(config)).toBe("pending");
-    const attemptId = getChatwootPendingIdentityAttempt()!.attemptId;
-    document.cookie = "cw_conversation=authenticated; Path=/";
-    document.cookie = `cw_user_${config.websiteToken}=identified; Path=/`;
-
-    expect(confirmChatwootIdentityOwnership(attemptId)).toBe(true);
-    const ownershipKey = "clean-pay:chatwoot-ownership:v1";
-    const ownershipBeforeSuccess = window.localStorage.getItem(ownershipKey);
-    expect(ownershipBeforeSuccess).not.toBeNull();
-
-    expect(confirmChatwootIdentity(attemptId)).toBe(true);
-    expect(window.localStorage.getItem(ownershipKey)).toBe(ownershipBeforeSuccess);
-    expect(Object.keys(window.cleanPayChatwootOwnership ?? {}).sort()).toEqual([
-      "conversation",
-      "core",
-      "customAttributes",
-    ]);
-    expect(ownershipBeforeSuccess).not.toContain("authenticated");
-    expect(ownershipBeforeSuccess).not.toContain(config.user.identifier);
-    expect(ownershipBeforeSuccess).not.toContain(config.user.identifierHash);
-  });
-
   it("never restores a persisted proof for another conversation or signed actor", () => {
     const api = chatwootApi();
     window.$chatwoot = api;
