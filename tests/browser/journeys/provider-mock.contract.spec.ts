@@ -375,6 +375,36 @@ test("two reset/seed cycles restore every mutable provider and OIDC state", asyn
   }
 });
 
+test("waits within the reset boundary when provider control binds before OIDC", async () => {
+  const [oidcPort, remnashopPort, remnawavePort, controlPort] = await freePorts(4);
+  const children: ChildProcess[] = [];
+  try {
+    children.push(spawnFixture("provider-mock.mjs", {
+      REMNASHOP_PORT: String(remnashopPort),
+      REMNAWAVE_PORT: String(remnawavePort),
+      CONTROL_PORT: String(controlPort),
+      OIDC_RESET_URL: `http://127.0.0.1:${oidcPort}/__reset`,
+    }));
+    const control = `http://127.0.0.1:${controlPort}`;
+    await waitForOk(`${control}/__health`);
+
+    const reset = postJson(`${control}/__reset`, { scenario: "delayed-oidc-start" });
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    children.push(spawnFixture("oidc-mock.mjs", {
+      PORT: String(oidcPort),
+      OIDC_ISSUER: `http://127.0.0.1:${oidcPort}`,
+      OIDC_PUBLIC_ISSUER: `http://127.0.0.1:${oidcPort}`,
+    }));
+
+    await expect(reset).resolves.toMatchObject({
+      status: "reset",
+      oidc: { status: "reset" },
+    });
+  } finally {
+    await Promise.all(children.map(stopChild));
+  }
+});
+
 test("scopes opaque linked-email auth failures to the exact authorized candidate scenario", async () => {
   const [oidcPort, remnashopPort, remnawavePort, controlPort] = await freePorts(4);
   const children: ChildProcess[] = [];
