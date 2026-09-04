@@ -929,6 +929,17 @@ test("Chatwoot contact timing switches only after a real cabinet read and resets
     });
     const applicationJourneyElapsedMs = await probe();
     expect(resetElapsedMs - applicationJourneyElapsedMs).toBeGreaterThanOrEqual(80);
+
+    await postJson(`${control}/__reset`, { scenario: "chatwoot-phase-stability-v1" });
+    const racingLogin = await postSession(`${shop}/auth/login`, {
+      email: "synthetic.browser@clean-pay.dev",
+      password: "synthetic-password",
+    });
+    const racingProbe = probe();
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    await subscriptionRead(`${shop}/subscription/offers`, racingLogin.cookie);
+    const racingElapsedMs = await racingProbe;
+    expect(preCabinetElapsedMs - racingElapsedMs).toBeGreaterThanOrEqual(80);
   } finally {
     await Promise.all(children.map(stopChild));
   }

@@ -586,7 +586,7 @@ async function restorePreOwnedChatwootSeed(page: Page, seed: PreOwnedChatwootSee
     Object.defineProperty(window, "__cleanPayChatwootFixtureReadiness", {
       configurable: false,
       enumerable: false,
-      value: "restored",
+      value: "eager",
       writable: false,
     });
     localStorage.setItem("clean-pay:chatwoot-ownership:v1", ownership);
