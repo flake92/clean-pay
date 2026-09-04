@@ -116,6 +116,15 @@ test("email-register-verify-and-login", async ({ journey }, testInfo) => {
       }
       await restorePreOwnedChatwootSeed(page, preOwnedChatwootSeed);
       await gotoHeading(page, "/cabinet", "Личный кабинет");
+      await page.evaluate((marker) => {
+        const readiness = (
+          window as unknown as { __cleanPayChatwootFixtureReadiness?: unknown }
+        ).__cleanPayChatwootFixtureReadiness;
+        if (sessionStorage.getItem(marker) !== "armed" || readiness !== "restored") {
+          throw new Error("Pre-owned Chatwoot seed did not bind the final cabinet document.");
+        }
+        sessionStorage.removeItem(marker);
+      }, preOwnedChatwootSeedMarker);
       const seedMarker = await page.evaluate(
         (marker) => sessionStorage.getItem(marker),
         preOwnedChatwootSeedMarker,
@@ -580,17 +589,16 @@ async function restorePreOwnedChatwootSeed(page: Page, seed: PreOwnedChatwootSee
   parsePersistedChatwootOwnership(seed.ownership);
   expect(await readChatwootCookies(page)).toEqual(seed.cookies);
   await page.addInitScript(({ marker, ownership }) => {
-    if (sessionStorage.getItem(marker) !== "armed") {
+    if (window.top !== window || sessionStorage.getItem(marker) !== "armed") {
       return;
     }
     Object.defineProperty(window, "__cleanPayChatwootFixtureReadiness", {
       configurable: false,
       enumerable: false,
-      value: "eager",
+      value: "restored",
       writable: false,
     });
     localStorage.setItem("clean-pay:chatwoot-ownership:v1", ownership);
-    sessionStorage.removeItem(marker);
   }, { marker: preOwnedChatwootSeedMarker, ownership: seed.ownership });
   const storage = await page.evaluate(({ marker, ownership }) => {
     localStorage.removeItem("clean-pay:chatwoot-identity:v1");
