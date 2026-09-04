@@ -1216,7 +1216,7 @@ export function isProviderOverlapPlaywrightBodyCdpResponse(event) {
       || url.username !== "" || url.password !== "" || url.hash !== "" || url.port !== "") {
       return false;
     }
-    if (url.pathname === "/cabinet") return url.search === "";
+    if (["/cabinet", "/profile"].includes(url.pathname)) return url.search === "";
     return url.pathname === "/login"
       && JSON.stringify([...url.searchParams.keys()])
         === JSON.stringify(["redirect_to", "_rsc"])
