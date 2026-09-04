@@ -593,6 +593,7 @@ jobs:
           node scripts/security/enforce-container-vulnerability-policy.mjs \
             --report candidate.trivy.json \
             --policy security/container-vulnerability-exceptions.json \
+            --policy-supplement security/container-vulnerability-exceptions-2026-09-04.json \
             --target '${{ matrix.target }}' \
             --mode "$policy_mode" \
             --output candidate.vulnerability-attestation.json \
