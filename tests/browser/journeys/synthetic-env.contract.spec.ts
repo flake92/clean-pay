@@ -106,6 +106,10 @@ test("materializes two deterministic self-contained role environments", async ()
       path.resolve(__dirname, "provider-mock.mjs"),
       "utf8",
     );
+    const journeyComposeSource = await readFile(
+      path.resolve(__dirname, "docker-compose.journey.yml"),
+      "utf8",
+    );
     const identityConfirmationDelayMs = Number(
       /\}\), ([0-9_]+)\);\n    \}\);\n    send\(\{ event: "loaded" \}\);/
         .exec(caddySource)?.[1].replaceAll("_", ""),
@@ -120,6 +124,10 @@ test("materializes two deterministic self-contained role environments", async ()
     });
     expect(ownershipFallbackDelayMs).toBeGreaterThan(identityConfirmationDelayMs);
     expect(ownershipFallbackDelayMs).toBeLessThan(3_000);
+    expect(journeyComposeSource).toContain(
+      "CLEAN_PAY_BROWSER_CHATWOOT_CONTACT_RESPONSE_DELAY_MS: "
+        + "${CLEAN_PAY_BROWSER_CHATWOOT_CONTACT_RESPONSE_DELAY_MS:-1800}",
+    );
     expect(assertSyntheticCaddyRouteOrder(caddySource)).toEqual({
       chatwootIdentityDelivery: {
         aboutBlankLoadDeliveryBlocked: true,
