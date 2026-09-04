@@ -42,6 +42,7 @@ import {
   createProviderOverlapPendingRequestSeal,
   createProviderOverlapRejectedRequestProvenance,
   createProviderOverlapRejectionProvenanceDocument,
+  createProviderOverlapRepeatableStaticResponseUrls,
   createProviderOverlapStaticAssetContract,
   extractProviderOverlapCssMediaReferences,
   extractProviderOverlapResponseStaticDeclarations,
@@ -3577,6 +3578,56 @@ test("binds same-CDP response bodies in either event order and fails closed", as
     response: null,
     type: "Document",
   })).toThrow(/response event is invalid/);
+});
+
+test("queues only explicitly attested repeatable static response identities", async () => {
+  const staticUrl = `https://pay.ci.clean-pay.dev${staticJavascriptPath}`;
+  const capture = createProviderOverlapCdpResponseBodyCapture({
+    repeatableStaticResponseUrls:
+      createProviderOverlapRepeatableStaticResponseUrls(staticAssetContract),
+    send: async (
+      method: string,
+      parameters: { requestId: string },
+    ) => {
+      expect(method).toBe("Network.getResponseBody");
+      expect(["static.1", "static.2"]).toContain(parameters.requestId);
+      return { base64Encoded: false, body: staticBodyByPath[staticJavascriptPath] };
+    },
+  });
+
+  for (const requestId of ["static.1", "static.2"]) {
+    capture.observeResponseReceived({
+      requestId,
+      response: { status: 200, url: staticUrl },
+      type: "Script",
+    });
+    capture.observeLoadingFinished({ encodedDataLength: 64, requestId });
+  }
+
+  const bodies = await Promise.all([1, 2].map(() => capture.readBody({
+    maximumBodyBytes: 1024,
+    resourceType: "script",
+    status: 200,
+    url: staticUrl,
+  })));
+  expect(bodies.map((body) => Buffer.from(body).toString("utf8"))).toEqual([
+    staticBodyByPath[staticJavascriptPath],
+    staticBodyByPath[staticJavascriptPath],
+  ]);
+  expect(capture.assertClean()).toEqual({
+    bodyClaimCount: 2,
+    bodySettledCount: 2,
+    bodylessClaimCount: 0,
+    observedResponseCount: 2,
+    responseClaimCount: 2,
+    responseSettledCount: 2,
+    status: "cdp-response-bodies-clean",
+  });
+
+  expect(() => createProviderOverlapCdpResponseBodyCapture({
+    repeatableStaticResponseUrls: ["https://pay.ci.clean-pay.dev/login"],
+    send: async () => ({ base64Encoded: false, body: "unused" }),
+  })).toThrow(/outside its exact contract/);
 });
 
 test("bounds all response claims and atomically drains fatal CDP capture state", async () => {

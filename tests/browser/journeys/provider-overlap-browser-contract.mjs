@@ -731,6 +731,23 @@ export function createProviderOverlapStaticAssetContract(attestation) {
   });
 }
 
+export function createProviderOverlapRepeatableStaticResponseUrls(staticAssetContract) {
+  assertStaticAssetContract(staticAssetContract);
+  const urls = Object.keys(staticAssetContract.inventoryByPath)
+    .sort()
+    .map((servedPath) => {
+      if (!nextStaticPattern.test(servedPath)) {
+        fail("Repeatable static response path is outside the attested inventory contract.");
+      }
+      return new URL(servedPath, "https://pay.ci.clean-pay.dev").href;
+    });
+  if (urls.length < 1 || urls.length > maximumRequests
+    || new Set(urls).size !== urls.length) {
+    fail("Repeatable static response URL inventory is invalid.");
+  }
+  return Object.freeze(urls);
+}
+
 export function classifyProviderOverlapBrowserRequest(input, state) {
   exactKeys(input, ["isMainFrame", "isNavigation", "method", "resourceType", "url"], "request");
   exactKeys(state, ["cabinetDocumentAllowed", "staticAssetContract"], "request state");
@@ -804,9 +821,36 @@ export function attestProviderOverlapStaticResponse(input, staticAssetContract) 
 }
 
 export function createProviderOverlapCdpResponseBodyCapture(input) {
-  exactKeys(input, ["send"], "CDP response body capture");
+  const hasRepeatableStaticResponseUrls = Boolean(
+    input && typeof input === "object" && !Array.isArray(input)
+      && Object.hasOwn(input, "repeatableStaticResponseUrls"),
+  );
+  exactKeys(
+    input,
+    hasRepeatableStaticResponseUrls
+      ? ["repeatableStaticResponseUrls", "send"]
+      : ["send"],
+    "CDP response body capture",
+  );
   if (typeof input.send !== "function") {
     fail("CDP response body capture sender is invalid.");
+  }
+  const repeatableStaticResponseUrls = new Set(input.repeatableStaticResponseUrls ?? []);
+  if ((hasRepeatableStaticResponseUrls && !Array.isArray(input.repeatableStaticResponseUrls))
+    || repeatableStaticResponseUrls.size !== (input.repeatableStaticResponseUrls?.length ?? 0)
+    || repeatableStaticResponseUrls.size > maximumRequests) {
+    fail("CDP repeatable static response URL inventory is invalid.");
+  }
+  for (const rawUrl of repeatableStaticResponseUrls) {
+    if (typeof rawUrl !== "string" || rawUrl.length > 8_192) {
+      fail("CDP repeatable static response URL is invalid.");
+    }
+    const url = exactUrl(rawUrl);
+    if (url.href !== rawUrl || url.origin !== "https://pay.ci.clean-pay.dev"
+      || url.search !== "" || url.hash !== "" || url.username !== "" || url.password !== ""
+      || !nextStaticPattern.test(url.pathname)) {
+      fail("CDP repeatable static response URL is outside its exact contract.");
+    }
   }
   const entryByRequestId = new Map();
   const unclaimedEntryByKey = new Map();
@@ -831,7 +875,7 @@ export function createProviderOverlapCdpResponseBodyCapture(input) {
   const enterFatalState = (message) => {
     if (fatalError) return fatalError;
     fatalError = new Error(message);
-    const claims = new Set(waitingClaimByKey.values());
+    const claims = new Set([...waitingClaimByKey.values()].flat());
     for (const entry of entryByRequestId.values()) {
       if (entry.claim && !entry.claim.settled) claims.add(entry.claim);
     }
@@ -909,13 +953,28 @@ export function createProviderOverlapCdpResponseBodyCapture(input) {
     entry.claim = claim;
     settleFinishedEntry(entry);
   };
+  const queueSize = (queueByKey) => [...queueByKey.values()]
+    .reduce((total, queue) => total + queue.length, 0);
+  const enqueue = (queueByKey, key, value) => {
+    const queue = queueByKey.get(key);
+    if (queue) queue.push(value);
+    else queueByKey.set(key, [value]);
+  };
+  const dequeue = (queueByKey, key) => {
+    const queue = queueByKey.get(key);
+    if (!queue) return undefined;
+    const value = queue.shift();
+    if (queue.length === 0) queueByKey.delete(key);
+    return value;
+  };
   const createClaim = (claimInput, maximumBodyBytes) => {
     responseClaimCount += 1;
     if (responseClaimCount > maximumRequests) {
       throwFatal("CDP response body capture exceeded its response claim bound.");
     }
     const key = providerOverlapCdpResponseKey(claimInput, "playwright");
-    if (waitingClaimByKey.has(key)) {
+    const repeatableStatic = repeatableStaticResponseUrls.has(claimInput.url);
+    if (waitingClaimByKey.has(key) && !repeatableStatic) {
       throwFatal("CDP response body claim is ambiguous.");
     }
     let resolve;
@@ -938,12 +997,11 @@ export function createProviderOverlapCdpResponseBodyCapture(input) {
     };
     if (bodyExpected) bodyClaimCount += 1;
     else bodylessClaimCount += 1;
-    const entry = unclaimedEntryByKey.get(key);
+    const entry = dequeue(unclaimedEntryByKey, key);
     if (entry) {
-      unclaimedEntryByKey.delete(key);
       bind(entry, claim);
     } else {
-      waitingClaimByKey.set(key, claim);
+      enqueue(waitingClaimByKey, key, claim);
     }
     return promise;
   };
@@ -970,7 +1028,7 @@ export function createProviderOverlapCdpResponseBodyCapture(input) {
       if (fatalError) throw fatalError;
       const unsettledResponseCount = [...entryByRequestId.values()]
         .filter((entry) => entry.claim && !entry.claim.settled).length;
-      if (waitingClaimByKey.size !== 0 || unclaimedEntryByKey.size !== 0
+      if (queueSize(waitingClaimByKey) !== 0 || queueSize(unclaimedEntryByKey) !== 0
         || unsettledResponseCount !== 0 || responseFailureCount !== 0
         || responseClaimCount !== observedResponseCount
         || responseClaimCount !== responseSettledCount
@@ -1031,7 +1089,8 @@ export function createProviderOverlapCdpResponseBodyCapture(input) {
       if (entryByRequestId.has(requestId)) {
         throwFatal("CDP response request identity was observed more than once.");
       }
-      if (unclaimedEntryByKey.has(key)) {
+      const repeatableStatic = repeatableStaticResponseUrls.has(event.response.url);
+      if (unclaimedEntryByKey.has(key) && !repeatableStatic) {
         throwFatal("CDP response body identity is ambiguous.");
       }
       observedResponseCount += 1;
@@ -1046,12 +1105,11 @@ export function createProviderOverlapCdpResponseBodyCapture(input) {
         terminal: null,
       };
       entryByRequestId.set(requestId, entry);
-      const claim = waitingClaimByKey.get(key);
+      const claim = dequeue(waitingClaimByKey, key);
       if (claim) {
-        waitingClaimByKey.delete(key);
         bind(entry, claim);
       } else {
-        unclaimedEntryByKey.set(key, entry);
+        enqueue(unclaimedEntryByKey, key, entry);
       }
     },
     readBody(readInput) {
@@ -1086,7 +1144,7 @@ export function createProviderOverlapCdpResponseBodyCapture(input) {
     snapshot() {
       const pendingResponseCount = [...entryByRequestId.values()]
         .filter((entry) => entry.claim && !entry.claim.settled).length
-        + waitingClaimByKey.size;
+        + queueSize(waitingClaimByKey);
       return Object.freeze({
         bodyClaimCount,
         bodySettledCount,
@@ -1097,7 +1155,7 @@ export function createProviderOverlapCdpResponseBodyCapture(input) {
         responseClaimCount,
         responseFailureCount,
         responseSettledCount,
-        unclaimedResponseCount: unclaimedEntryByKey.size,
+        unclaimedResponseCount: queueSize(unclaimedEntryByKey),
       });
     },
   });
