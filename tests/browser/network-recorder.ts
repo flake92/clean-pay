@@ -83,6 +83,15 @@ export function recordNetwork(
   let serverActionGeneration = 0;
 
   const handleRequest = (request: Request) => {
+    if (isExactSupersedingApplicationNavigation(request, page, applicationOrigin)) {
+      // A new top-level document makes the preceding client realm unable to
+      // consume any still-pending Server Action bytes. Chromium can retain the
+      // superseded fetch without emitting response/requestfailed until context
+      // close, even though the browser-visible transition is already final.
+      // Keep the null response/failure evidence, but release only this exact
+      // causal boundary instead of converting it into a timing-dependent hang.
+      for (const terminal of serverActionTerminals.values()) terminal.resolve();
+    }
     const previous = request.redirectedFrom();
     const nextAction = request.headers()["next-action"];
     const body = request.postDataBuffer();
@@ -425,6 +434,27 @@ function isExactStartedApplicationServerAction(
     && request.isNavigationRequest() === false
     && request.redirectedFrom() === null
     && typeof request.headers()["next-action"] === "string";
+}
+
+function isExactSupersedingApplicationNavigation(
+  request: Request,
+  page: Page,
+  applicationOrigin: string,
+) {
+  let url: URL;
+  try {
+    url = new URL(request.url());
+  } catch {
+    return false;
+  }
+  return url.origin === applicationOrigin
+    && request.method() === "GET"
+    && request.resourceType() === "document"
+    && request.isNavigationRequest() === true
+    && request.redirectedFrom() === null
+    && request.postDataBuffer() === null
+    && typeof request.headers()["next-action"] !== "string"
+    && request.frame() === page.mainFrame();
 }
 
 function captureBoundedHeaders<T>(
