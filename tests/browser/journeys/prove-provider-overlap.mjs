@@ -829,8 +829,8 @@ async function exerciseCabinet(
       unexpectedPageErrors,
     };
     context.on("page", (candidate) => {
-      eventSeal.record();
       if (candidate === page) return;
+      eventSeal.record();
       if (unexpectedPages.length < maximumUnexpectedEvents) {
         unexpectedPages.push(sha256(candidate.url()));
       } else {

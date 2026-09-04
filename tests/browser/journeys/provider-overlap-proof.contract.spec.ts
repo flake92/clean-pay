@@ -4814,6 +4814,16 @@ test("seals browser events only after a bounded quiet drain and rejects late eve
   });
 });
 
+test("does not classify the already-owned primary page as a popup lifecycle event", async () => {
+  const source = await readFile(
+    path.resolve(__dirname, "prove-provider-overlap.mjs"),
+    "utf8",
+  );
+  expect(source).toMatch(
+    /context\.on\("page", \(candidate\) => \{\s*if \(candidate === page\) return;\s*eventSeal\.record\(\);\s*if \(unexpectedPages\.length/,
+  );
+});
+
 test("rejects a relative evidence output before normalization", () => {
   expect(() => resolveProviderOverlapOutputPath("relative/proof.json")).toThrow(/absolute/);
   expect(resolveProviderOverlapOutputPath(path.resolve("C:/proof/provider-overlap.json")))
