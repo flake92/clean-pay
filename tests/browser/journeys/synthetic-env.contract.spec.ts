@@ -105,10 +105,8 @@ test("materializes two deterministic self-contained role environments", async ()
     expect(assertSyntheticCaddyRouteOrder(caddySource)).toEqual({
       chatwootIdentityDelivery: {
         aboutBlankLoadDeliveryBlocked: true,
-        boundaryObservation: "retry-aware-trusted-loaded",
         confirmation: "matching-current-frame-delivery",
-        identityDeliverySignal: "trusted-widget-loaded-message",
-        readinessSignal: "sdk-ready-before-iframe",
+        readinessSignal: "trusted-widget-loaded-message",
         source: "current-configured-iframe-content-window",
         targetOrigin: "https://chatwoot.browser.clean-pay.dev",
       },
@@ -138,8 +136,8 @@ test("materializes two deterministic self-contained role environments", async ()
         "          if (event.source !== target || typeof event.data !== \"string\") return;",
       ),
       caddySource.replace(
-        "              readyFrameWindow = target;\n              if (inFlightIdentity?.frameWindow !== target) inFlightIdentity = null;\n              const observeAfterIdentityRetry = window.cleanPayChatwootPendingIdentity?.phase === \"waiting_for_frame\";\n              deliverIdentity();",
-        "              const observeAfterIdentityRetry = window.cleanPayChatwootPendingIdentity?.phase === \"waiting_for_frame\";\n              deliverIdentity();\n              readyFrameWindow = target;\n              if (inFlightIdentity?.frameWindow !== target) inFlightIdentity = null;",
+        "              readyFrameWindow = target;\n              if (inFlightIdentity?.frameWindow !== target) inFlightIdentity = null;\n              deliverIdentity();",
+        "              deliverIdentity();\n              readyFrameWindow = target;\n              if (inFlightIdentity?.frameWindow !== target) inFlightIdentity = null;",
       ),
       caddySource
         .replace("        document.body.appendChild(frame);\n        const api = {", "        const api = {")
@@ -170,23 +168,6 @@ test("materializes two deterministic self-contained role environments", async ()
       caddySource.replace(
         "              inFlightIdentity = null;\n              calls.push({ method: \"identity.confirmed\" });",
         "              calls.push({ method: \"identity.confirmed\" });\n              inFlightIdentity = null;",
-      ),
-      caddySource.replace(
-        "              const observeAfterIdentityRetry = window.cleanPayChatwootPendingIdentity?.phase === \"waiting_for_frame\";",
-        "              const observeAfterIdentityRetry = true;",
-      ),
-      caddySource.replace(
-        "                if (announcedFrameWindow !== target && currentFrameWindow() === target) {",
-        "                if (announcedFrameWindow !== target) {",
-      ),
-      caddySource.replace(
-        "              if (observeAfterIdentityRetry) queueMicrotask(announceFrameLoaded);\n              else announceFrameLoaded();",
-        "              queueMicrotask(announceFrameLoaded);",
-      ),
-      caddySource.replace("          hasLoaded: true,", "          hasLoaded: false,"),
-      caddySource.replace(
-        "        queueMicrotask(() => window.dispatchEvent(new CustomEvent(\"chatwoot:ready\")));",
-        "        queueMicrotask(() => undefined);",
       ),
       caddySource.replace(
         "            pendingIdentity = null;\n            inFlightIdentity = null;\n            api.resetTriggered = true;",

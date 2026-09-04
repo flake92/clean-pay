@@ -135,7 +135,6 @@ https://chatwoot.browser.clean-pay.dev {
         frame.title = "Chatwoot synthetic fixture";
         frame.style.display = "none";
         let readyFrameWindow = null;
-        let announcedFrameWindow = null;
         let pendingIdentity = null;
         let inFlightIdentity = null;
         let nextDeliveryId = 0;
@@ -158,18 +157,15 @@ https://chatwoot.browser.clean-pay.dev {
           try {
             const message = JSON.parse(event.data.slice("chatwoot-widget:".length));
             if (message.event === "loaded") {
+              calls.push({ method: "frame.loaded" });
+              const becameReady = readyFrameWindow !== target;
               readyFrameWindow = target;
               if (inFlightIdentity?.frameWindow !== target) inFlightIdentity = null;
-              const observeAfterIdentityRetry = window.cleanPayChatwootPendingIdentity?.phase === "waiting_for_frame";
               deliverIdentity();
-              const announceFrameLoaded = () => {
-                if (announcedFrameWindow !== target && currentFrameWindow() === target) {
-                  calls.push({ method: "frame.loaded" });
-                  announcedFrameWindow = target;
-                }
-              };
-              if (observeAfterIdentityRetry) queueMicrotask(announceFrameLoaded);
-              else announceFrameLoaded();
+              api.hasLoaded = true;
+              if (becameReady) {
+                window.dispatchEvent(new CustomEvent("chatwoot:ready"));
+              }
             }
             if (message.event === "setAuthCookie"
               && inFlightIdentity?.frameWindow === target
@@ -183,7 +179,7 @@ https://chatwoot.browser.clean-pay.dev {
         const api = {
           baseUrl: config.baseUrl,
           websiteToken: config.websiteToken,
-          hasLoaded: true,
+          hasLoaded: false,
           resetTriggered: false,
           setUser(identifier, attributes) {
             calls.push({ method: "setUser", identifierBytes: String(identifier || "").length, attributeKeys: Object.keys(attributes || {}).sort() });
@@ -217,7 +213,6 @@ https://chatwoot.browser.clean-pay.dev {
           },
         };
         window.$chatwoot = api;
-        queueMicrotask(() => window.dispatchEvent(new CustomEvent("chatwoot:ready")));
       },
     });
     })();` 200
