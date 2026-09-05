@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import { createHash } from "node:crypto";
 import { mkdtemp, rmdir, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -79,6 +80,50 @@ test("distinguishes missing and excess endpoint classes from order-only changes"
   expect(diagnostic.actualSequenceSha256).not.toBe(diagnostic.expectedSequenceSha256);
 });
 
+test("retains the full enum sequence when histograms and the first eight mismatches hide a late order difference", () => {
+  const baseline = options("gap", 21);
+  baseline.value.entries = Array.from({ length: 21 }, (_, index) => ({
+    ...endpointContracts.find(({ effect }) => effect === (
+      index === 19 ? "read_subscription" : index === 20 ? "read_offers" : "read_profile"
+    ))!,
+  }));
+  const candidate = structuredClone(baseline);
+  [candidate.value.entries[19], candidate.value.entries[20]] = [candidate.value.entries[20], candidate.value.entries[19]];
+  const left = snapshot(createChatwootProviderLedgerDiagnostic(baseline));
+  const right = snapshot(createChatwootProviderLedgerDiagnostic(candidate));
+  expect(left.classCounts).toEqual(right.classCounts);
+  expect(left.firstMismatches).toEqual(right.firstMismatches);
+  expect(left.firstMismatches).toHaveLength(8);
+  for (const [input, diagnostic] of [[baseline, left], [candidate, right]] as const) {
+    const sequence = input.value.entries.map(({ effect }) => effect);
+    expect(diagnostic.actualSequence).toEqual(sequence);
+    expect(diagnostic.actualSequenceTruncated).toBe(false);
+    expect(diagnostic.actualSequenceSha256).toBe(createHash("sha256").update(JSON.stringify(sequence)).digest("hex"));
+  }
+  expect(left.actualSequence).not.toEqual(right.actualSequence);
+  expect(left.actualSequenceSha256).not.toBe(right.actualSequenceSha256);
+});
+
+test("bounds published enum sequences independently from the unchanged 256-entry scan and aggregate budget", () => {
+  for (const count of [0, 21, 64, 65, 256, 257]) {
+    const input = options("gap", count);
+    const diagnostic = snapshot(createChatwootProviderLedgerDiagnostic(input));
+    expect(diagnostic.actualSequence).toEqual(input.value.entries.slice(0, 64).map(({ effect }) => effect));
+    expect(diagnostic.actualSequenceTruncated).toBe(count > 64);
+    expect(diagnostic.scannedEntryCount).toBe(Math.min(count, 256));
+    expect(diagnostic.actualSequenceSha256).toBe(createHash("sha256")
+      .update(JSON.stringify(input.value.entries.slice(0, 256).map(({ effect }) => effect))).digest("hex"));
+  }
+  const diagnostic = createChatwootProviderLedgerDiagnostic(options("gap", 65));
+  expect(Object.isFrozen(Object.getOwnPropertyDescriptor(diagnostic, "actualSequence")?.value)).toBe(true);
+  const both = collectChatwootProviderLedgerMismatchEvidence(new AggregateError([
+    captured("baseline", 257), captured("candidate", 257),
+  ], "two complete bounded role diagnostics"));
+  expect(both?.entries).toHaveLength(2);
+  expect(both?.truncated).toBe(false);
+  expect(Buffer.byteLength(JSON.stringify(both))).toBeLessThanOrEqual(16 * 1024);
+});
+
 test("keeps exact read checkpoints and bounds scanned entries, samples and aggregate bytes", () => {
   for (const checkpoint of ["before-snapshot-wait", "first-snapshot-read", "second-snapshot-read"]) {
     expect(createChatwootProviderLedgerDiagnostic({ ...options("gap", 16), checkpoint }))
@@ -109,6 +154,7 @@ test("projects only allowlisted classes and never reads body, headers, query or 
   input.value.entries[0].pathname = `https://example.invalid/${privateMarker}`;
   const diagnostic = snapshot(createChatwootProviderLedgerDiagnostic(input));
   expect(diagnostic).toMatchObject({ status: "observed", actualEntryCount: 16, unknownEndpointCount: 1 });
+  expect(diagnostic.actualSequence).toEqual(["unknown-endpoint", ...input.value.entries.slice(1).map(({ effect }) => effect)]);
   expect(JSON.stringify(diagnostic)).not.toContain(privateMarker);
   expect(reads).toBe(0);
   const getter = options();
@@ -179,6 +225,8 @@ test("retains original error identities and both role diagnostics across aggrega
     { role: "candidate", diagnostic: { expectedEntryCount: 15, actualEntryCount: 16 } },
   ], truncated: false });
   expect(createJourneySanitizedErrorEvidence(error)).toEqual(before);
+  expect(evidence?.entries).toMatchObject([options("gap", 14), options("gap", 16)]
+    .map(({ value }) => ({ diagnostic: { actualSequence: value.entries.map(({ effect }) => effect) } })));
 });
 
 test("publishes actual TS-loader oracle annotations through the real MJS failure CLI without Docker", async () => {
@@ -239,6 +287,8 @@ test("publishes actual TS-loader oracle annotations through the real MJS failure
       ], truncated: false },
     });
     expect(record.causeEvidence.filter((entry: { messageSha256: string }) => entry.messageSha256 === primaryHash)).toHaveLength(2);
+    expect(record.providerLedgerMismatchEvidence.entries.map((entry: { diagnostic: { actualSequence: string[] } }) => entry.diagnostic.actualSequence))
+      .toEqual([options("gap", 14), options("gap", 16)].map(({ value }) => value.entries.map(({ effect }) => effect)));
     expect(failure?.stderr).not.toContain(repositoryRoot);
     expect(failure?.stderr).not.toContain("/api/");
   } finally { await unlink(planPath); await rmdir(root); }
