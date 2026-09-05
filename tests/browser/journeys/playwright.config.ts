@@ -1,9 +1,11 @@
 import { defineConfig } from "@playwright/test";
 
 import { projectScopedPlaywrightOutputDirectory } from "../playwright-output-scope";
+import { authenticatedJourneyLivePairCaptureEnabled } from "./authenticated-journey-capture-mode";
 import {
   journeyChromiumLaunchArgs,
   journeyConnectProxy,
+  type JourneyRendererPolicy,
 } from "./journey-browser-policy";
 
 const configuredBaseUrl = process.env.CLEAN_PAY_BROWSER_BASE_URL?.trim();
@@ -11,6 +13,11 @@ const resolverIp = process.env.CLEAN_PAY_BROWSER_HOST_RESOLVER_IP?.trim() || "12
 const connectProxy = journeyConnectProxy(
   process.env.CLEAN_PAY_BROWSER_CONNECT_PROXY?.trim() || "http://127.0.0.1:14444",
 );
+const rendererPolicy: JourneyRendererPolicy = authenticatedJourneyLivePairCaptureEnabled(
+  process.env,
+)
+  ? "live-overlap"
+  : "canonical";
 
 export default defineConfig({
   testDir: ".",
@@ -34,7 +41,7 @@ export default defineConfig({
     baseURL: configuredBaseUrl || "https://pay.ci.clean-pay.dev",
     browserName: "chromium",
     launchOptions: {
-      args: journeyChromiumLaunchArgs(resolverIp),
+      args: journeyChromiumLaunchArgs(resolverIp, rendererPolicy),
     },
     proxy: connectProxy,
     colorScheme: "light",
