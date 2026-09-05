@@ -1436,6 +1436,16 @@ export function normalizeProviderOverlapObservedResponseContentType(input) {
     && new Set(["app-telegram-start", "app-telegram-callback"]).has(input.key)) {
     return "application/octet-stream";
   }
+  // The immutable baseline's bodyless root RSC redirect is exposed by
+  // Playwright as text/plain; the same redirect may omit Content-Type.
+  // Both representations describe the exact 307 edge and no body is consumed;
+  // canonicalize only these two allowlisted root-RSC keys to the existing
+  // null representation. Other RSC redirects retain their observed MIME.
+  if (input.status === 307
+    && new Set(["app-root-rsc", "app-login-root-rsc"]).has(input.key)
+    && (normalized === null || normalized === "text/plain")) {
+    return null;
+  }
   return normalized;
 }
 
