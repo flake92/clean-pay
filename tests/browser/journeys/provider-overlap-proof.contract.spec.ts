@@ -2391,6 +2391,10 @@ test("registers exact request identities before response capture and routed cont
   expect(responseListener).toContain("resolveProviderOverlapResponseRequestEntry({");
   expect(responseListener).toContain("prepare: prepareBrowserRequest,");
   expect(responseListener).not.toMatch(/eventSeal\.(?:begin|record)\(/);
+  const terminalHandler = runnerSource.slice(terminalHandlerIndex, routeHandlerIndex);
+  expect(terminalHandler).toMatch(
+    /const entry = browserRequestByIdentity\.get\(request\);[\s\S]{1,512}if \(!entry\) return;[\s\S]{1,512}const finishRequest = eventSeal\.begin\(\);/,
+  );
   expect(routeHandler).toContain("browserRequestPreparationByIdentity.get(request)");
   expect(routeHandler).not.toContain("prepareBrowserRequest(");
   expect(routeHandler).not.toContain("classifyProviderOverlapBrowserRequest(");

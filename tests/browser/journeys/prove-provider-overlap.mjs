@@ -1151,8 +1151,13 @@ async function exerciseCabinet(
       );
     });
     const completeRequest = (request, finished) => {
-      const finishRequest = eventSeal.begin();
       const entry = browserRequestByIdentity.get(request);
+      // Playwright can deliver a terminal event after these listeners are
+      // installed even when its request event predates the proof ledger. Only
+      // identity-bound proof requests belong to the exact request + route +
+      // terminal causality count.
+      if (!entry) return;
+      const finishRequest = eventSeal.begin();
       let evidence = Promise.resolve(null);
       if (entry) {
         if (browserTerminalRequestIdentities.has(request)) {
