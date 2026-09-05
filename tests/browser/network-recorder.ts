@@ -1,4 +1,5 @@
 import type {
+  Frame,
   Page,
   Request,
   Response,
@@ -229,10 +230,25 @@ export function recordNetwork(
     serverActionTerminals.get(request)?.resolve();
   };
 
+  const handleFrameNavigated = (frame: Frame) => {
+    if (!isExactSupersedingApplicationFrameNavigation(
+      frame,
+      page,
+      applicationOrigin,
+    )) return;
+    // A Next.js Server Action may complete by applying its flight response and
+    // committing a same-document application navigation. Chromium can then
+    // retain the superseded fetch without a requestfinished/requestfailed event.
+    // The main-frame application transition proves that the old client realm
+    // consumed the action result; subframes and external URLs never release it.
+    for (const terminal of serverActionTerminals.values()) terminal.resolve();
+  };
+
   page.on("request", handleRequest);
   page.on("response", handleResponse);
   page.on("requestfinished", handleRequestFinished);
   page.on("requestfailed", handleRequestFailed);
+  page.on("framenavigated", handleFrameNavigated);
 
   const awaitStartedServerActions = async () => {
     const generation = serverActionGeneration;
@@ -284,6 +300,7 @@ export function recordNetwork(
         page.off("response", handleResponse);
         page.off("requestfinished", handleRequestFinished);
         page.off("requestfailed", handleRequestFailed);
+        page.off("framenavigated", handleFrameNavigated);
       }
       await Promise.allSettled(pending);
       if (terminalError) throw terminalError;
@@ -455,6 +472,19 @@ function isExactSupersedingApplicationNavigation(
     && request.postDataBuffer() === null
     && typeof request.headers()["next-action"] !== "string"
     && request.frame() === page.mainFrame();
+}
+
+function isExactSupersedingApplicationFrameNavigation(
+  frame: Frame,
+  page: Page,
+  applicationOrigin: string,
+) {
+  if (frame !== page.mainFrame()) return false;
+  try {
+    return new URL(frame.url()).origin === applicationOrigin;
+  } catch {
+    return false;
+  }
 }
 
 function captureBoundedHeaders<T>(
