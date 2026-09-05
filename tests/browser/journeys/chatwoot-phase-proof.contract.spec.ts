@@ -1578,6 +1578,7 @@ test("binds the causal route barrier and exact logout helper without fixture sub
   expect(source).toContain('paymentContextStatus === "stale"');
   expect(source).toContain("paymentLabelCalls.length === 0");
   expect(source).toContain("await clearSyntheticLogoutState(page)");
+  expect(source).toContain('host: "127.0.0.1"');
   expect(source).toContain("await recreatedCausality.sealPreClearGeneration(page)");
   expect(source).toContain("createChatwootPhaseCausalContract(MAXIMUM_EVENTS)");
   expect(source).toContain("await recreatedCausality.waitForCabinetIdentityConfirmed()");
