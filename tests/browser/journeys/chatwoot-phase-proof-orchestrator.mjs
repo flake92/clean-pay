@@ -8,6 +8,7 @@ import { currentJourneyFixtureContractSha256Async } from "./journey-fixture-mani
 import {
   JOURNEY_COMPOSE_EXPECTED_SERVICE_STATES,
   JOURNEY_COMPOSE_SERVICE_NAMES,
+  prepareJourneyComposeInputs,
 } from "./journey-compose-runtime-attestation.mjs";
 import {
   journeyDockerCliEnvironment,
@@ -58,6 +59,88 @@ const eventContract = Object.freeze([
 const sha256Pattern = /^[a-f0-9]{64}$/;
 const MAXIMUM_CONTROL_BYTES = 2 * 1024 * 1024;
 const containerdImageSelectionMode = "containerd-root-manifest";
+const measurementHealthIntervalMs = 60 * 60 * 1_000;
+const maximumReadinessMeasurementMs = 10 * 60 * 1_000;
+
+export function createChatwootReadinessMeasurement(container, expected, nowMs = Date.now()) {
+  const observation = readinessMeasurementObservation(container, expected, nowMs);
+  // Reserve the entire ten-minute acceptance window before the next hourly
+  // periodic check. The completed measurement must also preserve every health
+  // record and finish inside this budget; elapsed time never implies success.
+  if (nowMs + maximumReadinessMeasurementMs
+    >= observation.lastSuccessfulEndMs + measurementHealthIntervalMs) {
+    throw new Error("Chatwoot readiness has no complete bounded measurement window.");
+  }
+  return observation;
+}
+
+export function assertChatwootReadinessMeasurementUnchanged(
+  before, container, expected, nowMs = Date.now(),
+) {
+  const after = readinessMeasurementObservation(container, expected, nowMs);
+  if (!before || nowMs < before.observedAtMs
+    || nowMs - before.observedAtMs > maximumReadinessMeasurementMs
+    || ["containerIdSha256", "startedAt", "healthcheckSha256", "healthLogSha256"]
+      .some((name) => before[name] !== after[name])) {
+    throw new Error("Chatwoot readiness identity changed or its measurement budget expired.");
+  }
+  return Object.freeze({ status: "fresh-readiness-unchanged", elapsedMs: nowMs - before.observedAtMs });
+}
+
+function readinessMeasurementObservation(container, expected, nowMs) {
+  const state = container?.State;
+  const health = state?.Health;
+  const check = container?.Config?.Healthcheck;
+  const labels = container?.Config?.Labels;
+  const started = dockerTimestampMs(state?.StartedAt);
+  const notBefore = dockerTimestampMs(expected?.lifecycleNotBefore);
+  if (!Number.isSafeInteger(nowMs) || !Number.isFinite(started) || !Number.isFinite(notBefore)
+    || started < notBefore || started > nowMs
+    || typeof container?.Id !== "string" || !sha256Pattern.test(container.Id)
+    || sha256(container.Id) !== expected?.containerIdSha256
+    || labels?.["com.docker.compose.project"] !== expected?.project
+    || labels?.["com.docker.compose.service"] !== "app"
+    || container.RestartCount !== 0 || state?.Status !== "running" || state.Running !== true
+    || health?.Status !== "healthy" || health.FailingStreak !== 0
+    || !Array.isArray(health.Log) || health.Log.length < 1 || health.Log.length > 5
+    || check?.Interval !== measurementHealthIntervalMs * 1_000_000
+    || check.StartInterval !== 1_000_000_000 || check.StartPeriod !== 30_000_000_000
+    || check.Timeout !== 12_000_000_000 || check.Retries !== 20
+    || !Array.isArray(check.Test) || check.Test.length !== 2 || check.Test[0] !== "CMD-SHELL"
+    || typeof check.Test[1] !== "string" || check.Test[1].length < 1
+    || !sha256Pattern.test(expected?.healthcheckTestSha256 ?? "")
+    || sha256(stableJson(check.Test)) !== expected.healthcheckTestSha256) {
+    throw new Error("Chatwoot readiness is not bound to the fresh owned healthy application.");
+  }
+  let priorEnd = started;
+  for (const entry of health.Log) {
+    const start = dockerTimestampMs(entry?.Start);
+    const end = dockerTimestampMs(entry?.End);
+    if (!Number.isFinite(start) || !Number.isFinite(end) || start < priorEnd
+      || end < start || end > nowMs || !Number.isSafeInteger(entry?.ExitCode)
+      || typeof entry?.Output !== "string" || entry.Output.length > 4_096) {
+      throw new Error("Chatwoot readiness history is not an exact fresh completed ledger.");
+    }
+    priorEnd = end;
+  }
+  if (health.Log.at(-1).ExitCode !== 0 || nowMs >= priorEnd + measurementHealthIntervalMs) {
+    throw new Error("Chatwoot readiness has no current successful startup observation.");
+  }
+  return Object.freeze({
+    containerIdSha256: expected.containerIdSha256,
+    startedAt: state.StartedAt,
+    healthcheckSha256: sha256(stableJson(check)),
+    healthLogSha256: sha256(stableJson(health)),
+    lastSuccessfulEndMs: priorEnd,
+    observedAtMs: nowMs,
+  });
+}
+
+function dockerTimestampMs(value) {
+  return typeof value === "string"
+    && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3,9}Z$/.test(value)
+    ? Date.parse(value) : NaN;
+}
 
 export async function orchestrateChatwootPhaseProof({
   input,
@@ -333,6 +416,31 @@ async function executeOwnedPair({
     let proxySummaries;
     let callbackError;
     try {
+      const readinessIdentities = await settleOwnedRoleOperations(async (role) => {
+        const stack = pair[role];
+        const prepared = await prepareJourneyComposeInputs({
+          repositoryRoot, contractPath: stack.contractRealpath, contract: stack.contract,
+          runDocker: ownedStackInput(stack, repositoryRoot).runDocker,
+        });
+        if (prepared.composeSourceSha256 !== bound[role].runtimeBinding.composeSourceSha256) {
+          throw new Error("Chatwoot readiness command escaped its attested Compose sources.");
+        }
+        return createChatwootReadinessIdentity(pair, launch, role,
+          sha256(stableJson(prepared.compose.services.app.healthcheck.test)));
+      }, "Chatwoot attested readiness command");
+      if (readinessIdentities.baseline.healthcheckTestSha256
+        !== readinessIdentities.candidate.healthcheckTestSha256) {
+        throw new Error("Chatwoot readiness command differs between the two image roles.");
+      }
+      const readinessBefore = await settleOwnedRoleOperations(
+        async (role) => {
+          const expected = readinessIdentities[role];
+          return createChatwootReadinessMeasurement(
+            await inspectReadinessApplication(expected, repositoryRoot), expected,
+          );
+        },
+        "Chatwoot fresh startup readiness",
+      );
       resets = await settleOwnedRoleOperations(
         (role) => resetOwnedStack(pair[role]),
         "Chatwoot dual reset",
@@ -350,6 +458,12 @@ async function executeOwnedPair({
         sealer,
         staticAssetContract: pair[role].staticAssetContract,
       }), "Chatwoot dual browser capture");
+      await settleOwnedRoleOperations(async (role) => {
+        const expected = readinessIdentities[role];
+        return assertChatwootReadinessMeasurementUnchanged(
+          readinessBefore[role], await inspectReadinessApplication(expected, repositoryRoot), expected,
+        );
+      }, "Chatwoot unchanged measurement readiness");
     } catch (error) {
       callbackError = error;
     } finally {
@@ -713,6 +827,43 @@ async function resetOwnedStack(stack) {
     stack.contract.project,
     `${stack.role} pair ${stack.pairIndex}`,
   );
+}
+
+export function createChatwootReadinessIdentity(pair, launch, role, healthcheckTestSha256) {
+  const observation = launch.coexistence.observations.find(
+    (entry) => entry.projectSha256 === sha256(pair[role].contract.project),
+  );
+  const application = observation?.services.find((entry) => entry.service === "app");
+  if (!application || !sha256Pattern.test(healthcheckTestSha256 ?? "")) {
+    throw new Error("Chatwoot readiness has no attested application identity or command.");
+  }
+  return Object.freeze({
+    containerIdSha256: application.containerIdSha256,
+    lifecycleNotBefore: launch.lifecycleNotBefore,
+    project: pair[role].contract.project,
+    healthcheckTestSha256,
+  });
+}
+
+async function inspectReadinessApplication(expected, repositoryRoot) {
+  const environment = journeyDockerCliEnvironment();
+  const options = { repositoryRoot, timeoutMs: 15_000 };
+  const ids = await runJourneyDockerCommand([
+    "ps", "-aq", "--no-trunc",
+    "--filter", `label=com.docker.compose.project=${expected.project}`,
+    "--filter", "label=com.docker.compose.service=app",
+  ], 4_096, environment, options);
+  const id = ids.trim();
+  if (!sha256Pattern.test(id) || sha256(id) !== expected.containerIdSha256) {
+    throw new Error("Chatwoot readiness inspection escaped its attested application identity.");
+  }
+  const inspected = parseJson(await runJourneyDockerCommand(
+    ["inspect", "--type", "container", id], 1024 * 1024, environment, options,
+  ), "Chatwoot readiness application inspection");
+  if (!Array.isArray(inspected) || inspected.length !== 1) {
+    throw new Error("Chatwoot readiness application inspection is not singular.");
+  }
+  return inspected[0];
 }
 
 async function loadCompleteLaunchPlan({ exactInput, fixtureContractSha256, repositoryRoot }) {

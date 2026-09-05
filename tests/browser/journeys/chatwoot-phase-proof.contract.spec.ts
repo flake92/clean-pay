@@ -91,6 +91,9 @@ import {
   assertChatwootPairCleanupReceiptForTest,
   bindChatwootOwnedRuntimeForTest,
   createChatwootExecutionEvidenceForTest,
+  createChatwootReadinessIdentity,
+  createChatwootReadinessMeasurement,
+  assertChatwootReadinessMeasurementUnchanged,
   preflightChatwootOutputDirectoryForTest,
   recheckChatwootOutputDirectoryForTest,
   settleChatwootConnectProxyStartsForTest,
@@ -100,6 +103,119 @@ const baselineRevision = "f5cb6f543d85256e7733a1ade6a4f451d86cf378";
 const candidateRevision = "08a787d016205e6a10d4c3bf7b77437555e885ad";
 const fixtureContractSha256 = "a".repeat(64);
 const publicBuildContractSha256 = "b".repeat(64);
+
+test("binds readiness to the attested project and fresh successful application generation", () => {
+  const fixture = readinessMeasurementFixture();
+  const launch = {
+    lifecycleNotBefore: fixture.expected.lifecycleNotBefore,
+    coexistence: { observations: [{
+      projectSha256: sha256(fixture.expected.project),
+      services: [{ service: "app", containerIdSha256: fixture.expected.containerIdSha256 }],
+    }] },
+  };
+  expect(createChatwootReadinessIdentity(
+    { candidate: { contract: { project: fixture.expected.project } } }, launch,
+    "candidate", fixture.expected.healthcheckTestSha256,
+  )).toEqual(fixture.expected);
+  const before = createChatwootReadinessMeasurement(fixture.container, fixture.expected, fixture.now);
+  expect(assertChatwootReadinessMeasurementUnchanged(
+    before, fixture.container, fixture.expected, fixture.now + 600_000,
+  )).toEqual({ status: "fresh-readiness-unchanged", elapsedMs: 600_000 });
+  const mutations: Array<(value: typeof fixture) => void> = [
+    (value) => { value.container.Id = "2".repeat(64); },
+    (value) => { value.container.Config.Labels["com.docker.compose.project"] = "foreign"; },
+    (value) => { value.container.Config.Labels["com.docker.compose.service"] = "worker"; },
+    (value) => { value.container.RestartCount = 1; },
+    (value) => { value.container.State.StartedAt = "2026-09-05T09:59:58.000Z"; },
+    (value) => { value.container.State.Health.Status = "starting"; },
+    (value) => { value.container.State.Health.FailingStreak = 1; },
+    (value) => { value.container.State.Health.Log = []; },
+    (value) => { value.container.State.Health.Log[0].ExitCode = 1; },
+    (value) => { value.container.State.Health.Log[0].Start = "2026-09-05T09:59:59.000Z"; },
+    (value) => { value.container.State.Health.Log[0].End = "2026-09-05T10:00:31.000Z"; },
+    (value) => { value.container.Config.Healthcheck.Interval = 10_000_000_000; },
+    (value) => { value.container.Config.Healthcheck.StartInterval = 0; },
+    (value) => { value.container.Config.Healthcheck.Test = ["CMD-SHELL", "true"]; },
+  ];
+  for (const mutate of mutations) {
+    const changed = structuredClone(fixture);
+    mutate(changed);
+    expect(() => createChatwootReadinessMeasurement(changed.container, changed.expected, changed.now))
+      .toThrow();
+  }
+});
+
+test("rejects readiness changes, ongoing-cadence risk and expired capture budgets without filtering traffic", () => {
+  const fixture = readinessMeasurementFixture();
+  const before = createChatwootReadinessMeasurement(fixture.container, fixture.expected, fixture.now);
+  const changed = structuredClone(fixture.container);
+  changed.State.Health.Log[0].Output = "changed";
+  expect(() => assertChatwootReadinessMeasurementUnchanged(before, changed, fixture.expected, fixture.now + 1))
+    .toThrow(/identity changed/);
+  const repeated = structuredClone(fixture.container);
+  repeated.State.Health.Log.push({
+    Start: "2026-09-05T10:00:31.000Z", End: "2026-09-05T10:00:32.000Z", ExitCode: 0, Output: "",
+  });
+  expect(() => assertChatwootReadinessMeasurementUnchanged(before, repeated, fixture.expected, fixture.now + 3000))
+    .toThrow(/identity changed/);
+  expect(() => assertChatwootReadinessMeasurementUnchanged(
+    before, fixture.container, fixture.expected, fixture.now + 600_001,
+  )).toThrow(/budget expired/);
+  expect(() => assertChatwootReadinessMeasurementUnchanged(
+    before, fixture.container, fixture.expected, fixture.now - 1,
+  )).toThrow();
+  const successfulEnd = Date.parse(fixture.container.State.Health.Log[0].End);
+  expect(() => createChatwootReadinessMeasurement(
+    fixture.container, fixture.expected, successfulEnd + 3_600_000 - 600_000,
+  )).toThrow(/complete bounded measurement window/);
+  expect(() => createChatwootReadinessMeasurement(
+    fixture.container, fixture.expected, successfulEnd + 3_600_000,
+  )).toThrow(/current successful startup/);
+});
+
+test("measures health before reset and after both browser roles with the attested production command", async () => {
+  const source = await readFile(path.join(__dirname, "chatwoot-phase-proof-orchestrator.mjs"), "utf8");
+  const execute = source.slice(source.indexOf("async function executeOwnedPair("), source.indexOf("function bindOwnedRuntime("));
+  expect(execute.indexOf("const readinessBefore =")).toBeLessThan(execute.indexOf("resets = await"));
+  expect(execute.indexOf("assertChatwootReadinessMeasurementUnchanged("))
+    .toBeGreaterThan(execute.indexOf('}), "Chatwoot dual browser capture")'));
+  expect(execute).toContain("prepared.composeSourceSha256 !== bound[role].runtimeBinding.composeSourceSha256");
+  expect(execute).toContain("sha256(stableJson(prepared.compose.services.app.healthcheck.test))");
+  expect(execute).toContain("readinessIdentities.baseline.healthcheckTestSha256");
+});
+
+function readinessMeasurementFixture() {
+  const test = ["CMD-SHELL", "node exact-production-readiness-command"];
+  return {
+    now: Date.parse("2026-09-05T10:00:30.000Z"),
+    expected: {
+      containerIdSha256: sha256("1".repeat(64)),
+      lifecycleNotBefore: "2026-09-05T09:59:59.000Z",
+      project: "clean-pay-browser-journey-chatwoot-candidate-p1-111111111111",
+      healthcheckTestSha256: sha256(JSON.stringify(test)),
+    },
+    container: {
+      Id: "1".repeat(64), RestartCount: 0,
+      Config: {
+        Labels: {
+          "com.docker.compose.project": "clean-pay-browser-journey-chatwoot-candidate-p1-111111111111",
+          "com.docker.compose.service": "app",
+        },
+        Healthcheck: {
+          Test: test, Interval: 3_600_000_000_000, StartInterval: 1_000_000_000,
+          StartPeriod: 30_000_000_000, Timeout: 12_000_000_000, Retries: 20,
+        },
+      },
+      State: {
+        StartedAt: "2026-09-05T10:00:00.000000000Z", Status: "running", Running: true,
+        Health: {
+          Status: "healthy", FailingStreak: 0,
+          Log: [{ Start: "2026-09-05T10:00:01.000000000Z", End: "2026-09-05T10:00:02.000000000Z", ExitCode: 0, Output: "" }],
+        },
+      },
+    },
+  };
+}
 
 type DeepMutable<T> = T extends (...arguments_: never[]) => unknown
   ? T

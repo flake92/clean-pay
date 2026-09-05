@@ -1307,11 +1307,6 @@ async function handleControl(request, response) {
       sendJson(response, 422, { error: "invalid_scenario" });
       return;
     }
-    clearCabinetReadOverlapEvidence();
-    for (const resolve of cabinetSurfaceWaiters) resolve(false);
-    cabinetSurfaceWaiters.clear();
-    cabinetSurfaceObserved = false;
-    activeScenario = scenario;
     const database = dbObserverUrl
       ? await fetchObserverJson("/__reset", {
           method: "POST",
@@ -1319,6 +1314,20 @@ async function handleControl(request, response) {
           body: JSON.stringify({ scope: dbScope }),
         })
       : null;
+    const oidcReset = await resetOidcWhenReady(scenario);
+    if (!oidcReset?.ok) {
+      sendJson(response, 502, { error: "oidc_reset_failed" });
+      return;
+    }
+    const oidcState = await oidcReset.json();
+    // Finish every external reset first. Local state and its response snapshot
+    // form one synchronous boundary, so setup traffic cannot interleave after
+    // the clear and masquerade as a non-empty freshly reset provider ledger.
+    clearCabinetReadOverlapEvidence();
+    for (const resolve of cabinetSurfaceWaiters) resolve(false);
+    cabinetSurfaceWaiters.clear();
+    cabinetSurfaceObserved = false;
+    activeScenario = scenario;
     ledger.length = 0;
     sequence = 0;
     paymentSequence = 0;
@@ -1339,12 +1348,6 @@ async function handleControl(request, response) {
     consumedTurnstileTokens.clear();
     disconnectCommittedPaymentOnce = false;
     rateLimitCommittedPaymentOnce = false;
-    const oidcReset = await resetOidcWhenReady(scenario);
-    if (!oidcReset?.ok) {
-      sendJson(response, 502, { error: "oidc_reset_failed" });
-      return;
-    }
-    const oidcState = await oidcReset.json();
     sendJson(response, 200, {
       status: "reset",
       seed_sha256: sha256(`clean-pay-browser-journey-v1:${scenario}`),
