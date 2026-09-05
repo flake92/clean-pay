@@ -2437,6 +2437,43 @@ test("registers exact request identities before response capture and routed cont
   expect(finalResponseCaptureBarrier).toBeLessThan(finalizerIndex);
 });
 
+test("keeps page-startup requests outside the measured provider event lifecycle", async () => {
+  const source = await readFile(
+    path.resolve(__dirname, "prove-provider-overlap.mjs"),
+    "utf8",
+  );
+  const preLedgerObserver = source.indexOf(
+    'context.addListener("request", observePreLedgerRequest)',
+  );
+  const pageCreation = source.indexOf("const page = await context.newPage()");
+  const proofRequestListener = source.indexOf('context.on("request", (request) =>');
+  const responseListener = source.indexOf('context.on("response", (response) =>');
+  const terminalHandler = source.indexOf("const completeRequest = (request, finished) =>");
+  const preLedgerRelease = source.indexOf(
+    'context.removeListener("request", observePreLedgerRequest)',
+  );
+  const routeHandler = source.indexOf('await context.route("**/*"');
+
+  expect(preLedgerObserver).toBeGreaterThan(-1);
+  expect(preLedgerObserver).toBeLessThan(pageCreation);
+  expect(pageCreation).toBeLessThan(proofRequestListener);
+  expect(proofRequestListener).toBeLessThan(responseListener);
+  expect(preLedgerRelease).toBeGreaterThan(terminalHandler);
+  expect(preLedgerRelease).toBeLessThan(routeHandler);
+
+  const responseSource = source.slice(responseListener, terminalHandler);
+  expect(responseSource).toMatch(
+    /if \(preLedgerRequestIdentities\.has\(request\)\s*&& !browserRequestPreparationByIdentity\.has\(request\)\) \{\s*return;\s*\}[\s\S]{1,256}pendingRequestSeal\.observe\(request\);/,
+  );
+  const terminalSource = source.slice(terminalHandler, preLedgerRelease);
+  expect(source).toContain(
+    'new Error("Synthetic browser terminal event escaped its proof request ledger.")',
+  );
+  expect(terminalSource).toContain("retainUnownedTerminalFailure();");
+  expect(terminalSource.indexOf("!preLedgerRequestIdentities.has(request)"))
+    .toBeLessThan(terminalSource.indexOf("if (!entry) return;"));
+});
+
 test("lazily prepares only a response identity that has no prior preparation", () => {
   const request = {};
   const requestByIdentity = new Map<object, object>();
