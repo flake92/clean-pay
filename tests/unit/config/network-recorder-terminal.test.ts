@@ -125,6 +125,59 @@ describe("network recorder Server Action terminals", () => {
     ]);
   });
 
+  it("accepts only a same-origin main-frame client navigation as a terminal boundary", async () => {
+    const events = new EventEmitter();
+    const mainFrame = {
+      url: vi.fn(() => "https://pay.test/link-account?auth=telegram_email_replace"),
+    };
+    const page = {
+      mainFrame: vi.fn(() => mainFrame),
+      off(event: string, listener: (...args: unknown[]) => void) {
+        events.off(event, listener);
+        return page;
+      },
+      on(event: string, listener: (...args: unknown[]) => void) {
+        events.on(event, listener);
+        return page;
+      },
+    } as unknown as Page;
+    const action = requestFixture({
+      frame: mainFrame,
+      headers: { "next-action": "synthetic-action" },
+      method: "POST",
+      postData: Buffer.from("synthetic-payload"),
+      resourceType: "fetch",
+      url: "https://pay.test/link-account",
+    });
+    const recorder = recordNetwork(page, "https://pay.test", {
+      serverActionTerminalTimeoutMs: 500,
+    });
+
+    events.emit("request", action);
+    let terminalObserved = false;
+    const terminal = recorder.awaitStartedServerActions().then(() => {
+      terminalObserved = true;
+    });
+    await Promise.resolve();
+    expect(terminalObserved).toBe(false);
+
+    events.emit("framenavigated", {
+      url: () => "https://external.test/link-account",
+    });
+    await Promise.resolve();
+    expect(terminalObserved).toBe(false);
+
+    events.emit("framenavigated", mainFrame);
+    await terminal;
+    await expect(recorder.finish()).resolves.toEqual([
+      expect.objectContaining({
+        failure: null,
+        response: null,
+        serverAction: expect.objectContaining({ present: true }),
+      }),
+    ]);
+  });
+
   it("does not release an action for a subframe document navigation", async () => {
     const events = new EventEmitter();
     const mainFrame = {};
