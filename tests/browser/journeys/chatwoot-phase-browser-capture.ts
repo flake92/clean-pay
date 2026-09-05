@@ -1335,6 +1335,11 @@ async function navigateToCabinet(page: Page) {
 async function waitForInitialProfileSupportContext(page: Page) {
   await page.waitForFunction(() => {
     const windowValue = window as unknown as {
+      $chatwoot?: {
+        user?: {
+          custom_attributes?: { payment_context_status?: unknown };
+        };
+      };
       __cleanPayChatwootBoundaryCalls?: Array<{
         label?: unknown;
         method?: unknown;
@@ -1352,8 +1357,22 @@ async function waitForInitialProfileSupportContext(page: Page) {
           .map(({ label }) => label)
         : [],
     );
+    const paymentLabelCalls = Array.isArray(calls)
+      ? calls.filter(({ label, method }) => (
+        label === "payment_problem"
+        && (method === "removeLabel" || method === "setLabel")
+      ))
+      : [];
+    const paymentContextStatus = windowValue.$chatwoot
+      ?.user?.custom_attributes?.payment_context_status;
+    // A reset disposable DB has no PaymentHistorySyncState. In that exact
+    // fail-closed state production intentionally omits payment label writes;
+    // accepting it requires both the signed payload's explicit stale marker
+    // and proof that neither label mutation was attempted.
+    const paymentLabelSettled = removedLabels.has("payment_problem")
+      || (paymentContextStatus === "stale" && paymentLabelCalls.length === 0);
     return identitySettled
-      && removedLabels.has("payment_problem")
+      && paymentLabelSettled
       && removedLabels.has("subscription_expired");
   }, undefined, { timeout: 30_000 });
 }

@@ -63,13 +63,16 @@ export function recordNetwork(
   applicationOrigin: string,
   options: {
     fontTerminalTimeoutMs?: number;
+    serverActionGenerationQuietMs?: number;
     serverActionTerminalTimeoutMs?: number;
     serverActionSupersedingNavigationOrigins?: readonly string[];
   } = {},
 ) {
   const fontTerminalTimeoutMs = options.fontTerminalTimeoutMs ?? 5_000;
+  const serverActionGenerationQuietMs = options.serverActionGenerationQuietMs ?? 0;
   const serverActionTerminalTimeoutMs = options.serverActionTerminalTimeoutMs ?? 5_000;
   assertTerminalTimeout("fontTerminalTimeoutMs", fontTerminalTimeoutMs);
+  assertGenerationQuietWindow(serverActionGenerationQuietMs);
   assertTerminalTimeout(
     "serverActionTerminalTimeoutMs",
     serverActionTerminalTimeoutMs,
@@ -281,6 +284,12 @@ export function recordNetwork(
   ) => {
     for (let attempt = 1; attempt <= 3; attempt += 1) {
       const generation = await awaitStartedServerActions();
+      if (serverActionGenerationQuietMs > 0) {
+        await new Promise<void>((resolve) => {
+          setTimeout(resolve, serverActionGenerationQuietMs);
+        });
+        if (!isServerActionGenerationCurrent(generation)) continue;
+      }
       const captured = await capture();
       if (isServerActionGenerationCurrent(generation)) return captured;
     }
@@ -330,6 +339,16 @@ export function recordNetwork(
       return entries.sort((left, right) => left.index - right.index);
     },
   };
+}
+
+function assertGenerationQuietWindow(quietMs: number) {
+  if (
+    !Number.isSafeInteger(quietMs)
+    || quietMs < 0
+    || quietMs > 5_000
+  ) {
+    throw new Error("serverActionGenerationQuietMs must be an integer from 0 to 5000.");
+  }
 }
 
 function assertTerminalTimeout(name: string, timeoutMs: number) {
