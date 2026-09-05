@@ -5,6 +5,7 @@ const ledgerAnnotation = Symbol.for("clean-pay.chatwoot-provider-ledger-diagnost
 const captureAnnotation = Symbol.for("clean-pay.chatwoot-provider-capture-diagnostic.v1");
 const normalizedAnnotation = Symbol.for("clean-pay.chatwoot-provider-normalized-diagnostic.v1");
 const maximumEntries = 256;
+const maximumSequenceEntries = 64;
 const maximumSamples = 8;
 const maximumBytes = 16 * 1024;
 const classes = new Set([
@@ -124,6 +125,8 @@ function renderDiagnostic(input) {
       status: "observed", phase, checkpoint, expectedEntryCount: expected.length, actualEntryCount, entriesAreArray,
       scannedEntryCount: actual.length,
       scanTruncated: (actualEntryCount ?? 0) > maximumEntries,
+      actualSequence: Object.freeze(actual.slice(0, maximumSequenceEntries)),
+      actualSequenceTruncated: (actualEntryCount ?? 0) > maximumSequenceEntries,
       unknownEndpointCount: actual.filter((entry) => entry === "unknown-endpoint").length,
       classCounts: Object.freeze([...classes].sort().map((name) => {
         const expectedCount = expected.filter((entry) => entry === name).length;
