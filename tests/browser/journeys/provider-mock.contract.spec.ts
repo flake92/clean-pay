@@ -478,6 +478,50 @@ test("scopes opaque linked-email auth failures to the exact authorized candidate
   }
 });
 
+test("keeps candidate setup auth calls on the loopback control publication", async () => {
+  const [oidcPort, remnashopPort, remnawavePort, controlPort] = await freePorts(4);
+  const children: ChildProcess[] = [];
+  try {
+    children.push(spawnFixture("oidc-mock.mjs", {
+      PORT: String(oidcPort),
+      OIDC_ISSUER: `http://127.0.0.1:${oidcPort}`,
+      OIDC_PUBLIC_ISSUER: `http://127.0.0.1:${oidcPort}`,
+    }));
+    children.push(spawnFixture("provider-mock.mjs", {
+      REMNASHOP_PORT: String(remnashopPort),
+      REMNAWAVE_PORT: String(remnawavePort),
+      CONTROL_PORT: String(controlPort),
+      OIDC_RESET_URL: `http://127.0.0.1:${oidcPort}/__reset`,
+    }));
+
+    const control = `http://127.0.0.1:${controlPort}`;
+    const shop = `http://127.0.0.1:${remnashopPort}/api/v1/public`;
+    await waitForOk(`${control}/__health`);
+    const email = "new.control-setup@clean-pay.dev";
+    await postSession(`${shop}/auth/register`, {
+      email,
+      password: "synthetic-password",
+    });
+
+    const login = await postSession(`${control}/api/v1/public/auth/login`, {
+      email,
+      password: "synthetic-password",
+    });
+    await expect(fetchJsonWithCookie(
+      `${control}/api/v1/public/auth/telegram/link`,
+      login.cookie,
+      "POST",
+      {},
+    )).resolves.toMatchObject({
+      email,
+      is_email_verified: false,
+      telegram_id: expect.any(Number),
+    });
+  } finally {
+    await Promise.all(children.map(stopChild));
+  }
+});
+
 test("preserves a verified email identity across login and isolates Telegram auth", async () => {
   const [oidcPort, remnashopPort, remnawavePort, controlPort] = await freePorts(4);
   const children: ChildProcess[] = [];
