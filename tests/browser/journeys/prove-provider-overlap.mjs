@@ -743,6 +743,18 @@ async function exerciseCabinet(
       ignoreHTTPSErrors: true,
       serviceWorkers: "block",
     });
+    // Context creation can leave a startup request whose terminal events are
+    // delivered only after the proof listeners are installed. Record those
+    // identities before creating the page so they cannot be reconstructed by
+    // the response fallback as if their request + route lifecycle belonged to
+    // the measured provider proof.
+    const preLedgerRequestIdentities = new WeakSet();
+    const observePreLedgerRequest = (request) => {
+      if (request && typeof request === "object") {
+        preLedgerRequestIdentities.add(request);
+      }
+    };
+    context.addListener("request", observePreLedgerRequest);
     // A successful 256-request proof records exactly three lifecycle events per
     // request, four history events and the one exact Playwright service-worker
     // warning, so 1,024 retains a bounded margin above the valid 773-event ledger.
@@ -1085,6 +1097,10 @@ async function exerciseCabinet(
         if (!request || typeof request !== "object") {
           throw new Error("Synthetic browser response request identity is invalid.");
         }
+        if (preLedgerRequestIdentities.has(request)
+          && !browserRequestPreparationByIdentity.has(request)) {
+          return;
+        }
         pendingRequestSeal.observe(request);
         recordProviderPendingRequest(role, request);
         const entry = resolveProviderOverlapResponseRequestEntry({
@@ -1150,12 +1166,23 @@ async function exerciseCabinet(
         },
       );
     });
+    const retainUnownedTerminalFailure = () => {
+      browserResponseCaptureFailure ??= retainProviderResponseCaptureFailure(
+        role,
+        "request-terminal-evidence",
+        new Error("Synthetic browser terminal event escaped its proof request ledger."),
+        cdpResponseBodyCapture.snapshot(),
+      );
+    };
     const completeRequest = (request, finished) => {
       const entry = browserRequestByIdentity.get(request);
       // Playwright can deliver a terminal event after these listeners are
       // installed even when its request event predates the proof ledger. Only
       // identity-bound proof requests belong to the exact request + route +
       // terminal causality count.
+      if (!entry && !preLedgerRequestIdentities.has(request)) {
+        retainUnownedTerminalFailure();
+      }
       if (!entry) return;
       const finishRequest = eventSeal.begin();
       let evidence = Promise.resolve(null);
@@ -1232,6 +1259,7 @@ async function exerciseCabinet(
     };
     context.on("requestfinished", (request) => completeRequest(request, true));
     context.on("requestfailed", (request) => completeRequest(request, false));
+    context.removeListener("request", observePreLedgerRequest);
     markProviderFailurePhase(role, "install-request-routing");
     await context.route("**/*", async (route) => {
       const finishRoute = eventSeal.begin();
