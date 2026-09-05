@@ -1,4 +1,7 @@
-import { DETERMINISTIC_CHROMIUM_LAUNCH_ARGS } from "../render-policy.mjs";
+import {
+  DETERMINISTIC_CHROMIUM_LAUNCH_ARGS,
+  LIVE_OVERLAP_CHROMIUM_LAUNCH_ARGS,
+} from "../render-policy.mjs";
 import { JOURNEY_SYNTHETIC_HOSTNAMES } from "./journey-network-policy.mjs";
 
 export { JOURNEY_SYNTHETIC_HOSTNAMES } from "./journey-network-policy.mjs";
@@ -22,26 +25,32 @@ export function journeyConnectProxy(server) {
   return Object.freeze({ server: value, bypass: "<-loopback>" });
 }
 
-export function journeyChromiumLaunchArgs(resolverIp) {
+export function journeyChromiumLaunchArgs(
+  resolverIp,
+  rendererPolicy = "canonical",
+) {
   const target = assertResolverIp(resolverIp);
   return [
-    ...DETERMINISTIC_CHROMIUM_LAUNCH_ARGS,
+    ...journeyRendererLaunchArgs(rendererPolicy),
     "--ignore-certificate-errors",
     hostResolverRule(target),
   ];
 }
 
-export function journeyProvenanceLaunchArgs() {
+export function journeyProvenanceLaunchArgs(rendererPolicy = "canonical") {
   return [
-    ...DETERMINISTIC_CHROMIUM_LAUNCH_ARGS,
+    ...journeyRendererLaunchArgs(rendererPolicy),
     "--ignore-certificate-errors",
     hostResolverRule("<isolated-loopback>"),
   ];
 }
 
-export function assertJourneyBrowserPolicy(value) {
+export function assertJourneyBrowserPolicy(value, rendererPolicy = "canonical") {
   const resolverIp = assertResolverIp(value.resolverIp);
-  if (!exactArray(value.launchArgs, journeyChromiumLaunchArgs(resolverIp))) {
+  if (!exactArray(
+    value.launchArgs,
+    journeyChromiumLaunchArgs(resolverIp, rendererPolicy),
+  )) {
     throw new Error("Journey Chromium launch arguments do not match the exact synthetic TLS policy.");
   }
   if (value.launchArgs?.some((entry) => entry.startsWith("--proxy-bypass-list="))) {
@@ -53,6 +62,16 @@ export function assertJourneyBrowserPolicy(value) {
   if (JSON.stringify(value.tlsPolicy) !== JSON.stringify(JOURNEY_SYNTHETIC_TLS_POLICY)) {
     throw new Error("Journey synthetic TLS policy metadata does not match the exact policy.");
   }
+}
+
+function journeyRendererLaunchArgs(rendererPolicy) {
+  if (rendererPolicy === "canonical") {
+    return DETERMINISTIC_CHROMIUM_LAUNCH_ARGS;
+  }
+  if (rendererPolicy === "live-overlap") {
+    return LIVE_OVERLAP_CHROMIUM_LAUNCH_ARGS;
+  }
+  throw new Error("Journey Chromium renderer policy is invalid.");
 }
 
 export function isJourneyBrowserRequestAllowed(rawUrl) {

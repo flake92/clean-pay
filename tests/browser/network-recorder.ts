@@ -64,6 +64,7 @@ export function recordNetwork(
   options: {
     fontTerminalTimeoutMs?: number;
     serverActionTerminalTimeoutMs?: number;
+    serverActionSupersedingNavigationOrigins?: readonly string[];
   } = {},
 ) {
   const fontTerminalTimeoutMs = options.fontTerminalTimeoutMs ?? 5_000;
@@ -72,6 +73,10 @@ export function recordNetwork(
   assertTerminalTimeout(
     "serverActionTerminalTimeoutMs",
     serverActionTerminalTimeoutMs,
+  );
+  const supersedingNavigationOrigins = exactSupersedingNavigationOrigins(
+    applicationOrigin,
+    options.serverActionSupersedingNavigationOrigins ?? [],
   );
   let requestIndex = 0;
   const requests = new Map<Request, NetworkManifestEntry>();
@@ -84,7 +89,11 @@ export function recordNetwork(
   let serverActionGeneration = 0;
 
   const handleRequest = (request: Request) => {
-    if (isExactSupersedingApplicationNavigation(request, page, applicationOrigin)) {
+    if (isExactSupersedingNavigation(
+      request,
+      page,
+      supersedingNavigationOrigins,
+    )) {
       // A new top-level document makes the preceding client realm unable to
       // consume any still-pending Server Action bytes. Chromium can retain the
       // superseded fetch without emitting response/requestfailed until context
@@ -231,16 +240,17 @@ export function recordNetwork(
   };
 
   const handleFrameNavigated = (frame: Frame) => {
-    if (!isExactSupersedingApplicationFrameNavigation(
+    if (!isExactSupersedingFrameNavigation(
       frame,
       page,
-      applicationOrigin,
+      supersedingNavigationOrigins,
     )) return;
     // A Next.js Server Action may complete by applying its flight response and
     // committing a same-document application navigation. Chromium can then
     // retain the superseded fetch without a requestfinished/requestfailed event.
-    // The main-frame application transition proves that the old client realm
-    // consumed the action result; subframes and external URLs never release it.
+    // The exact main-frame transition proves that the old client realm can no
+    // longer consume action bytes. External origins release it only when the
+    // caller explicitly allowlists the isolated destination.
     for (const terminal of serverActionTerminals.values()) terminal.resolve();
   };
 
@@ -453,10 +463,10 @@ function isExactStartedApplicationServerAction(
     && typeof request.headers()["next-action"] === "string";
 }
 
-function isExactSupersedingApplicationNavigation(
+function isExactSupersedingNavigation(
   request: Request,
   page: Page,
-  applicationOrigin: string,
+  allowedOrigins: ReadonlySet<string>,
 ) {
   let url: URL;
   try {
@@ -464,7 +474,7 @@ function isExactSupersedingApplicationNavigation(
   } catch {
     return false;
   }
-  return url.origin === applicationOrigin
+  return allowedOrigins.has(url.origin)
     && request.method() === "GET"
     && request.resourceType() === "document"
     && request.isNavigationRequest() === true
@@ -474,17 +484,70 @@ function isExactSupersedingApplicationNavigation(
     && request.frame() === page.mainFrame();
 }
 
-function isExactSupersedingApplicationFrameNavigation(
+function isExactSupersedingFrameNavigation(
   frame: Frame,
   page: Page,
-  applicationOrigin: string,
+  allowedOrigins: ReadonlySet<string>,
 ) {
   if (frame !== page.mainFrame()) return false;
   try {
-    return new URL(frame.url()).origin === applicationOrigin;
+    return allowedOrigins.has(new URL(frame.url()).origin);
   } catch {
     return false;
   }
+}
+
+function exactSupersedingNavigationOrigins(
+  applicationOrigin: string,
+  configuredOrigins: readonly string[],
+) {
+  const application = exactHttpOrigin(
+    applicationOrigin,
+    "applicationOrigin",
+  );
+  if (!Array.isArray(configuredOrigins)) {
+    throw new Error(
+      "serverActionSupersedingNavigationOrigins must be an array of exact origins.",
+    );
+  }
+  const origins = new Set([application]);
+  for (const [index, value] of configuredOrigins.entries()) {
+    const origin = exactHttpOrigin(
+      value,
+      `serverActionSupersedingNavigationOrigins[${index}]`,
+    );
+    if (origins.has(origin)) {
+      throw new Error(
+        "serverActionSupersedingNavigationOrigins must not contain duplicate origins.",
+      );
+    }
+    origins.add(origin);
+  }
+  return origins;
+}
+
+function exactHttpOrigin(value: string, name: string) {
+  if (typeof value !== "string" || value !== value.trim()) {
+    throw new Error(`${name} must be a canonical credential-free HTTP(S) origin.`);
+  }
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    throw new Error(`${name} must be a canonical credential-free HTTP(S) origin.`);
+  }
+  if (
+    (url.protocol !== "http:" && url.protocol !== "https:")
+    || url.username !== ""
+    || url.password !== ""
+    || url.pathname !== "/"
+    || url.search !== ""
+    || url.hash !== ""
+    || url.origin !== value
+  ) {
+    throw new Error(`${name} must be a canonical credential-free HTTP(S) origin.`);
+  }
+  return url.origin;
 }
 
 function captureBoundedHeaders<T>(

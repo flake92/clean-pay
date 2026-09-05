@@ -26,6 +26,7 @@ import {
   selectedComputedStyles,
 } from "../page-characterization";
 import { captureByteIdenticalScreenshotMajority } from "../screenshot-majority";
+import { authenticatedJourneyLivePairCaptureEnabled } from "./authenticated-journey-capture-mode";
 import {
   assertJourneyWriteAuthorized,
   journeyProbeRequested,
@@ -39,7 +40,10 @@ import {
   JOURNEY_SYNTHETIC_TLS_POLICY,
   isJourneyBrowserRequestAllowed,
   journeyProvenanceLaunchArgs,
+  type JourneyRendererPolicy,
 } from "./journey-browser-policy";
+
+const SYNTHETIC_CHECKOUT_ORIGIN = "https://checkout.browser.clean-pay.dev";
 
 type CapturedCheckpoint = Awaited<ReturnType<typeof captureCheckpoint>>;
 type JourneyCheckpoint = CapturedCheckpoint["evidence"];
@@ -56,6 +60,10 @@ type JourneyProbe = {
 export const test = guardedTest.extend<{ journey: JourneyProbe }>({
   journey: async ({ guardedPage: page }, provide, testInfo) => {
     const probeOnly = journeyProbeRequested();
+    const livePairCapture = authenticatedJourneyLivePairCaptureEnabled(process.env);
+    const rendererPolicy: JourneyRendererPolicy = livePairCapture
+      ? "live-overlap"
+      : "canonical";
     if (probeOnly) await assertJourneyWriteAuthorized();
     const controlUrl = requiredControlUrl();
     const resolvedJourneyId = journeyId(testInfo.titlePath);
@@ -84,8 +92,12 @@ export const test = guardedTest.extend<{ journey: JourneyProbe }>({
       await route.abort("blockedbyclient");
     };
     await page.route("**/*", enforceSyntheticNetwork);
-    const recorder = recordNetwork(page, baseUrl.origin);
-    const source = await journeySourceProvenance(page);
+    const recorder = recordNetwork(page, baseUrl.origin, {
+      serverActionSupersedingNavigationOrigins: livePairCapture
+        ? [SYNTHETIC_CHECKOUT_ORIGIN]
+        : [],
+    });
+    const source = await journeySourceProvenance(page, rendererPolicy);
     const checkpoints: JourneyCheckpoint[] = [];
     const screenshots: Array<{ label: string; bytes: Buffer }> = [];
     const boundaries: Array<{ label: string; value: unknown }> = [];
@@ -386,7 +398,10 @@ async function captureCheckpointState(
   return { evidence, screenshot };
 }
 
-async function journeySourceProvenance(page: Page) {
+async function journeySourceProvenance(
+  page: Page,
+  rendererPolicy: JourneyRendererPolicy,
+) {
   const revision = requiredEnvironmentValue(
     "CLEAN_PAY_BROWSER_SOURCE_REVISION",
     /^[a-f0-9]{40}$/,
@@ -431,7 +446,7 @@ async function journeySourceProvenance(page: Page) {
       engine: "chromium",
       version: browser.version(),
       playwright: "1.62.1",
-      launchArgs: journeyProvenanceLaunchArgs(),
+      launchArgs: journeyProvenanceLaunchArgs(rendererPolicy),
       syntheticHostnames: [...JOURNEY_SYNTHETIC_HOSTNAMES],
       tlsPolicy: { ...JOURNEY_SYNTHETIC_TLS_POLICY },
     },
