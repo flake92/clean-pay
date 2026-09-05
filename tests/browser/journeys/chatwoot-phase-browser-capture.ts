@@ -307,6 +307,7 @@ export async function captureChatwootPhaseStack(input: CaptureInput) {
   });
   const browserServer = await chromium.launchServer({
     headless: true,
+    host: "127.0.0.1",
     args: launchArgs,
     proxy,
   });

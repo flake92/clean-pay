@@ -1196,8 +1196,18 @@ async function handleRemnawave(request, response) {
 }
 
 async function handleControl(request, response) {
-  const body = await readBody(request);
   const url = new URL(request.url ?? "/", "http://browser-provider-control");
+  if (
+    request.method === "POST"
+    && new Set([
+      "/api/v1/public/auth/login",
+      "/api/v1/public/auth/telegram/link",
+    ]).has(url.pathname)
+  ) {
+    await handleRemnashop(request, response);
+    return;
+  }
+  const body = await readBody(request);
   if (url.pathname === "/api/v1/widget/contact" && request.method === "GET") {
     const conversation = request.headers["x-auth-token"];
     const authorized = url.searchParams.get("website_token") === chatwootWebsiteToken
