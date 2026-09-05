@@ -40,6 +40,10 @@ import {
 } from "./provider-overlap-browser-contract.mjs";
 import { createChatwootPhaseEventLedger } from "./chatwoot-phase-event-ledger.mjs";
 import {
+  withChatwootProviderCaptureDiagnostic,
+  withChatwootProviderLedgerDiagnostic,
+} from "./chatwoot-provider-ledger-diagnostic.mjs";
+import {
   journeyChromiumLaunchArgs,
   journeyConnectProxy,
   journeyProvenanceLaunchArgs,
@@ -378,10 +382,10 @@ export async function captureChatwootPhaseStack(input: CaptureInput) {
       screenshots: captured.screenshots,
     });
   } catch (error) {
-    captureError = new Error(
+    captureError = withChatwootProviderCaptureDiagnostic(new Error(
       `Chatwoot browser capture failed during ${captureStage}.`,
       { cause: error },
-    );
+    ), { cause: error, role: input.role, pairIndex: input.pairIndex, captureStage });
     throw captureError;
   } finally {
     barrier.cancel();
@@ -807,6 +811,7 @@ async function exerciseChatwootPhases(input: CaptureInput & {
   const stoppedProvider = assertProviderLedger(
     await controlJson(input.controlUrl, "/__ledger", MAXIMUM_CONTROL_BYTES),
     "recreated",
+    "final-stopped-reread",
   );
   const stoppedFinalSources = Object.freeze({
     boundary: recreatedCausality.boundarySnapshot(),
@@ -840,6 +845,7 @@ async function exerciseChatwootPhases(input: CaptureInput & {
   const afterSealProvider = assertProviderLedger(
     await controlJson(input.controlUrl, "/__ledger", MAXIMUM_CONTROL_BYTES),
     "recreated",
+    "final-sealed-reread",
   );
   const afterSealSources = Object.freeze({
     boundary: recreatedCausality.boundarySnapshot(),
@@ -953,7 +959,7 @@ async function captureVisiblePhase(input: {
     controlJson(input.input.controlUrl, "/__ledger", MAXIMUM_CONTROL_BYTES),
     input.page.context().cookies(),
   ]);
-  const provider = assertProviderLedger(providerEffects, input.phase);
+  const provider = assertProviderLedger(providerEffects, input.phase, "first-snapshot-read");
   assertChatwootPhaseBoundaryLedger(raw.boundaryCalls, input.phase);
   const [
     secondDom,
@@ -974,7 +980,7 @@ async function captureVisiblePhase(input: {
     controlJson(input.input.controlUrl, "/__ledger", MAXIMUM_CONTROL_BYTES),
     input.page.context().cookies(),
   ]);
-  const secondProvider = assertProviderLedger(secondProviderEffects, input.phase);
+  const secondProvider = assertProviderLedger(secondProviderEffects, input.phase, "second-snapshot-read");
   assertChatwootPhaseBoundaryLedger(secondRaw.boundaryCalls, input.phase);
   assertChatwootAtomicPhaseRead({
     beforeProvider,
@@ -1118,13 +1124,13 @@ async function waitForExactProviderLedger(controlUrl: string, phase: Phase) {
   while (true) {
     const value = await controlJson(controlUrl, "/__ledger", MAXIMUM_CONTROL_BYTES);
     if (!isRecord(value) || !Array.isArray(value.entries)) {
-      return assertProviderLedger(value, phase);
+      return assertProviderLedger(value, phase, "before-snapshot-wait");
     }
     if (value.entries.length >= expectedEntryCount) {
-      return assertProviderLedger(value, phase);
+      return assertProviderLedger(value, phase, "before-snapshot-wait");
     }
     if (Date.now() >= deadline) {
-      return assertProviderLedger(value, phase);
+      return assertProviderLedger(value, phase, "before-snapshot-wait");
     }
     await new Promise((resolve) => setTimeout(resolve, 25));
   }
@@ -3288,7 +3294,11 @@ export function assertChatwootProviderPhaseRelations(value: unknown) {
   });
 }
 
-function assertProviderLedger(value: unknown, phase: Phase): ProviderLedger {
+function assertProviderLedger(
+  value: unknown,
+  phase: Phase,
+  checkpoint = "contract-validation",
+): ProviderLedger {
   exactKeys(value, ["database", "entries"], "Chatwoot provider ledger");
   const ledger = value as Record<string, unknown>;
   const expectedEffects = phase === "recreated"
@@ -3296,7 +3306,10 @@ function assertProviderLedger(value: unknown, phase: Phase): ProviderLedger {
     : initialProviderEffectSequence;
   if (!Array.isArray(ledger.entries)
     || ledger.entries.length !== expectedEffects.length) {
-    throw new Error("Chatwoot provider ledger is incomplete or outside its bound.");
+    throw withChatwootProviderLedgerDiagnostic(
+      new Error("Chatwoot provider ledger is incomplete or outside its bound."),
+      { value, phase, checkpoint, expectedEffects, endpointContracts: providerEndpointContracts },
+    );
   }
   const database = assertProviderDatabase(ledger.database);
   const entries: Array<Record<string, unknown>> = [];
