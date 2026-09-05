@@ -1,11 +1,12 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "$id": "https://clean-pay.dev/schemas/dual-image-chatwoot-phase-stability-proof-v1.json",
+  "$id": "https://clean-pay.dev/schemas/dual-image-chatwoot-phase-stability-proof-v2.json",
   "title": "Clean Pay dual-image Chatwoot phase stability proof",
   "type": "object",
   "additionalProperties": false,
   "required": [
     "schemaVersion",
+    "providerCausalContractVersion",
     "kind",
     "scenario",
     "execution",
@@ -15,7 +16,8 @@
     "lifecycle"
   ],
   "properties": {
-    "schemaVersion": { "const": 1 },
+    "schemaVersion": { "const": 2 },
+    "providerCausalContractVersion": { "const": 2 },
     "kind": { "const": "clean-pay-dual-image-chatwoot-phase-stability-proof" },
     "scenario": { "$ref": "#/$defs/scenario" },
     "execution": { "$ref": "#/$defs/execution" },
@@ -1571,7 +1573,7 @@
         { "$ref": "#/$defs/visiblePhase" },
         {
           "properties": {
-            "contactProbeCount": { "const": 1 },
+            "contactProbeCount": { "const": 2 },
             "replacementRequestHeld": { "const": true },
             "replacementRequestReleased": { "const": false },
             "pendingWaitingForFrame": { "const": true },
@@ -1604,7 +1606,7 @@
         { "$ref": "#/$defs/settledPhase" },
         {
           "properties": {
-            "contactProbeCount": { "const": 1 },
+            "contactProbeCount": { "const": 2 },
             "conversationSameAsPriorPhase": { "const": true },
             "recreationCausality": { "type": "null" },
             "userCookieSameAsPriorSettledPhase": { "const": false }
@@ -1694,6 +1696,7 @@
         "computedStyles",
         "dom",
         "interactive",
+        "providerCausalLedger",
         "providerEffects",
         "providerLedger",
         "requestSequence",
@@ -1706,6 +1709,7 @@
         "computedStyles": { "type": "integer", "minimum": 1, "maximum": 50000 },
         "dom": { "type": "integer", "minimum": 1, "maximum": 50000 },
         "interactive": { "type": "integer", "minimum": 1, "maximum": 5000 },
+        "providerCausalLedger": { "type": "integer", "minimum": 1, "maximum": 5000 },
         "providerEffects": { "type": "integer", "minimum": 1, "maximum": 5000 },
         "providerLedger": { "type": "integer", "minimum": 1, "maximum": 5000 },
         "requestSequence": { "type": "integer", "minimum": 1, "maximum": 10000 },
@@ -1722,6 +1726,7 @@
         "computedStyles",
         "dom",
         "interactive",
+        "providerCausalLedger",
         "providerEffects",
         "providerLedger",
         "requestSequence",
@@ -1734,6 +1739,7 @@
         "computedStyles": { "$ref": "#/$defs/evidenceRange" },
         "dom": { "$ref": "#/$defs/evidenceRange" },
         "interactive": { "$ref": "#/$defs/evidenceRange" },
+        "providerCausalLedger": { "$ref": "#/$defs/evidenceRange" },
         "providerEffects": { "$ref": "#/$defs/evidenceRange" },
         "providerLedger": { "$ref": "#/$defs/evidenceRange" },
         "requestSequence": { "$ref": "#/$defs/evidenceRange" },
@@ -1829,6 +1835,7 @@
         "cookieJarHmacSha256",
         "domHmacSha256",
         "interactiveHmacSha256",
+        "providerCausalLedgerHmacSha256",
         "providerEffectsHmacSha256",
         "providerLedgerHmacSha256",
         "requestSequenceHmacSha256",
@@ -1845,6 +1852,7 @@
         "cookieJarHmacSha256": { "$ref": "#/$defs/sha256" },
         "domHmacSha256": { "$ref": "#/$defs/sha256" },
         "interactiveHmacSha256": { "$ref": "#/$defs/sha256" },
+        "providerCausalLedgerHmacSha256": { "$ref": "#/$defs/sha256" },
         "providerEffectsHmacSha256": { "$ref": "#/$defs/sha256" },
         "providerLedgerHmacSha256": { "$ref": "#/$defs/sha256" },
         "requestSequenceHmacSha256": { "$ref": "#/$defs/sha256" },
@@ -2007,7 +2015,9 @@
         "sameBrowserPolicy",
         "sameProofHmacScope",
         "allPhaseSemanticsExact",
-        "allCanonicalPhaseEvidenceExact",
+        "allComparableCanonicalPhaseEvidenceExact",
+        "providerCausalEvidenceExact",
+        "rawProviderArrivalOrderCompared",
         "allScreenshotsCrossImageByteExact",
         "baselineImageDigest",
         "candidateImageDigest"
@@ -2027,7 +2037,9 @@
         "sameBrowserPolicy": { "const": true },
         "sameProofHmacScope": { "const": true },
         "allPhaseSemanticsExact": { "const": true },
-        "allCanonicalPhaseEvidenceExact": { "const": true },
+        "allComparableCanonicalPhaseEvidenceExact": { "const": true },
+        "providerCausalEvidenceExact": { "const": true },
+        "rawProviderArrivalOrderCompared": { "const": false },
         "allScreenshotsCrossImageByteExact": { "const": true },
         "baselineImageDigest": { "$ref": "#/$defs/imageDigest" },
         "candidateImageDigest": { "$ref": "#/$defs/imageDigest" }

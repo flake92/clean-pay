@@ -15,6 +15,7 @@ import {
 } from "./chatwoot-provider-ledger-diagnostic.mjs";
 import { createJourneySanitizedErrorEvidence } from "./journey-error-evidence.mjs";
 import { JOURNEY_FIXTURE_FILENAMES } from "./journey-fixture-manifest.mjs";
+import { CHATWOOT_INITIAL_PROVIDER_EFFECTS } from "./chatwoot-provider-causal-contract.mjs";
 
 const execute = promisify(execFile);
 const primaryMessage = "Chatwoot provider ledger is incomplete or outside its bound.";
@@ -38,6 +39,7 @@ const endpointContracts = [
   ["remnashop", "GET", "/api/v1/public/subscription/current", "read_subscription"],
   ["remnashop", "GET", "/api/v1/public/subscription/offers", "read_offers"],
   ["remnashop", "GET", "/api/v1/public/subscription/devices", "read_devices"],
+  ["remnashop", "GET", "/api/v1/public/auth/notification-preferences", "read_notification_preferences"],
   ["remnawave", "GET", "/api/users/rw-browser-1", "read_user_by_uuid"],
 ].map(([service, method, pathname, effect]) => ({ service, method, pathname, effect }));
 
@@ -61,6 +63,37 @@ test("retains actual counts around the unchanged 15 and 28 event boundaries", ()
   }
   expect(createChatwootProviderLedgerDiagnostic({ ...options(), value: { entries: null } }))
     .toMatchObject({ status: "observed", entriesAreArray: false, actualEntryCount: null });
+});
+
+test("publishes versioned initial 21 counts and uncharacterized recreation without an invented expected count", () => {
+  const initial = { ...options(), providerCausalContractVersion: 2,
+    expectedEffects: CHATWOOT_INITIAL_PROVIDER_EFFECTS };
+  expect(createChatwootProviderLedgerDiagnostic(initial)).toMatchObject({
+    schemaVersion: 2, providerCausalContractVersion: 2,
+    expectedEntryCount: 21, actualEntryCount: 15, characterization: "initial-causal-v2",
+  });
+  for (const count of [0, 21, 35, 64, 65, 256]) {
+    const input = { ...options("recreated", count), providerCausalContractVersion: 2, expectedEffects: null };
+    const diagnostic = createChatwootProviderLedgerDiagnostic(input);
+    expect(diagnostic).toMatchObject({
+      schemaVersion: 2, providerCausalContractVersion: 2,
+      characterization: "uncharacterized-recreated", expectedEntryCount: null,
+      actualEntryCount: count, expectedSequenceSha256: null, positionalMismatchCount: null,
+      firstMismatches: [], actualSequenceTruncated: count > 64,
+    });
+    if (!("classCounts" in diagnostic)) throw new Error("Observed diagnostic has no endpoint class counts.");
+    expect(diagnostic.classCounts.every((entry) => entry.expected === null
+      && entry.missing === null && entry.excess === null)).toBe(true);
+    const primary = withChatwootProviderLedgerDiagnostic(new Error("uncharacterized"), input);
+    const wrapper = withChatwootProviderCaptureDiagnostic(new Error("wrapped", { cause: primary }), {
+      cause: primary, role: "baseline", pairIndex: 1, captureStage: "recreated-snapshot",
+    });
+    expect(collectChatwootProviderLedgerMismatchEvidence(wrapper)?.entries[0].diagnostic).toEqual(diagnostic);
+  }
+  expect(createChatwootProviderLedgerDiagnostic({ ...initial, providerCausalContractVersion: 3 }))
+    .toMatchObject({ status: "unavailable" });
+  expect(createChatwootProviderLedgerDiagnostic({ ...options("recreated"), providerCausalContractVersion: 2 }))
+    .toMatchObject({ status: "unavailable" });
 });
 
 test("distinguishes missing and excess endpoint classes from order-only changes", () => {
@@ -246,7 +279,7 @@ test("publishes actual TS-loader oracle annotations through the real MJS failure
     const transform=require(path.join(root,'node_modules/playwright/lib/common/index.js')).transform;
     transform.setSingleTSConfig(path.join(root,'tsconfig.json'));
     const capture=await transform.requireOrImport(path.join(root,'tests/browser/journeys/chatwoot-phase-browser-capture.ts'));
-    const values=${JSON.stringify([options('gap', 14).value, options('gap', 16).value])};
+    const values=${JSON.stringify([options('gap', 20).value, options('gap', 22).value])};
     const errors=values.map((value,index)=>{
       let primary; try {capture.assertChatwootPhaseProviderLedger(value,'gap');} catch(error){primary=error;}
       if(!primary || primary.message!==${JSON.stringify(primaryMessage)}) throw new Error('Real cardinality oracle did not reject');
@@ -282,13 +315,13 @@ test("publishes actual TS-loader oracle annotations through the real MJS failure
       messageSha256: "838d7bc290315df9b2f9b2bac376fedcbc9d910cf8f9e9a8f77281d811ee2dda",
       causeEvidenceTruncated: false,
       providerLedgerMismatchEvidence: { entries: [
-        { role: "baseline", diagnostic: { expectedEntryCount: 15, actualEntryCount: 14, checkpoint: "contract-validation" } },
-        { role: "candidate", diagnostic: { expectedEntryCount: 15, actualEntryCount: 16, checkpoint: "contract-validation" } },
+        { role: "baseline", diagnostic: { expectedEntryCount: 21, actualEntryCount: 20, checkpoint: "contract-validation", providerCausalContractVersion: 2 } },
+        { role: "candidate", diagnostic: { expectedEntryCount: 21, actualEntryCount: 22, checkpoint: "contract-validation", providerCausalContractVersion: 2 } },
       ], truncated: false },
     });
     expect(record.causeEvidence.filter((entry: { messageSha256: string }) => entry.messageSha256 === primaryHash)).toHaveLength(2);
     expect(record.providerLedgerMismatchEvidence.entries.map((entry: { diagnostic: { actualSequence: string[] } }) => entry.diagnostic.actualSequence))
-      .toEqual([options("gap", 14), options("gap", 16)].map(({ value }) => value.entries.map(({ effect }) => effect)));
+      .toEqual([options("gap", 20), options("gap", 22)].map(({ value }) => value.entries.map(({ effect }) => effect)));
     expect(failure?.stderr).not.toContain(repositoryRoot);
     expect(failure?.stderr).not.toContain("/api/");
   } finally { await unlink(planPath); await rmdir(root); }
