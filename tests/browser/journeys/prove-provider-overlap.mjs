@@ -29,6 +29,7 @@ import {
 } from "./journey-owned-stack-orchestrator.mjs";
 import { createJourneySanitizedErrorEvidence } from "./journey-error-evidence.mjs";
 import { withProviderOverlapComparisonDiagnostic } from "./provider-overlap-comparison-diagnostic.mjs";
+import { createProviderOverlapProfileActionDiagnostic } from "./provider-overlap-profile-action-diagnostic.mjs";
 import {
   attestProviderOverlapStaticResponse,
   assertProviderOverlapRedirect,
@@ -104,6 +105,10 @@ let failureOutputPath;
 let scenario;
 let outputPath;
 let providerComparisonDiagnostic;
+const providerProfileActionDiagnosticState = {
+  baseline: createProviderOverlapProfileActionDiagnostic(),
+  candidate: createProviderOverlapProfileActionDiagnostic(),
+};
 const providerRejectionProvenanceState = {
   baseline: { entries: [], truncated: false },
   candidate: { entries: [], truncated: false },
@@ -286,6 +291,7 @@ function providerFailureBytes(error) {
   const responseCaptureFailureEvidence = currentProviderResponseCaptureFailureEvidence();
   const projectionFailureEvidence = currentProviderProjectionFailureEvidence();
   const browserDiagnosticEvidence = currentProviderBrowserDiagnosticEvidence();
+  const profileActionLifecycle = currentProviderProfileActionLifecycle();
   return Buffer.from(`${JSON.stringify({
     status: "dual_image_provider_overlap_failed",
     ...(dockerFailures.length === 0 ? {} : { dockerFailures }),
@@ -298,8 +304,19 @@ function providerFailureBytes(error) {
     ...(browserDiagnosticEvidence === undefined ? {} : { browserDiagnosticEvidence }),
     ...(providerComparisonDiagnostic === undefined
       ? {} : { requestContractComparison: providerComparisonDiagnostic }),
+    ...(profileActionLifecycle === undefined ? {} : { profileActionLifecycle }),
     ...createJourneySanitizedErrorEvidence(error),
   })}\n`, "utf8");
+}
+
+function currentProviderProfileActionLifecycle() {
+  const snapshots = {
+    baseline: providerProfileActionDiagnosticState.baseline.snapshot(),
+    candidate: providerProfileActionDiagnosticState.candidate.snapshot(),
+  };
+  return Object.values(snapshots).some(({ entries, checkpoints, status }) => (
+    entries.length > 0 || checkpoints.length > 0 || status !== "recorded"
+  )) ? snapshots : undefined;
 }
 
 function markProviderFailurePhase(role, phase) {
@@ -308,6 +325,7 @@ function markProviderFailurePhase(role, phase) {
     throw new Error("Provider overlap failure phase is invalid.");
   }
   providerFailurePhaseState[role] = phase;
+  providerProfileActionDiagnosticState[role].setPhase(phase);
 }
 
 function currentProviderFailurePhases() {
@@ -1074,6 +1092,9 @@ async function exerciseCabinet(
           entry,
         });
         browserRequestPreparationByIdentity.set(request, preparation);
+        if (classification.key === "app-profile-action") {
+          providerProfileActionDiagnosticState[role].request(request);
+        }
         return preparation;
       } catch (error) {
         // The emitted report never contains the rejected URL. Retain only its
@@ -1127,6 +1148,9 @@ async function exerciseCabinet(
         }
         if (browserResponseEvidenceByIdentity.has(request)) {
           throw new Error("Synthetic browser response evidence was registered more than once.");
+        }
+        if (entry.classification.key === "app-profile-action") {
+          providerProfileActionDiagnosticState[role].response(request);
         }
         let releaseTerminal;
         const terminal = new Promise((resolve) => {
@@ -1209,6 +1233,21 @@ async function exerciseCabinet(
           evidence = browserResponseEvidenceByIdentity.get(request);
         }
         const terminal = browserResponseTerminalByIdentity.get(request);
+        if (!terminal && entry.classification.key === "app-profile-action") {
+          // Headerless requestfailed still has a terminal event. Observe it
+          // without fabricating response evidence or a response terminal gate.
+          let failureText = null;
+          if (!finished) {
+            try {
+              failureText = request.failure()?.errorText ?? "browser-request-failure-unavailable";
+            } catch {
+              failureText = "browser-request-failure-unavailable";
+            }
+          }
+          providerProfileActionDiagnosticState[role].terminal(
+            request, finished, failureText === null ? null : sha256(failureText),
+          );
+        }
         if (evidence && (!terminal || typeof terminal.release !== "function")) {
           evidence = Promise.resolve(evidence).then(
             () => {
@@ -1228,10 +1267,16 @@ async function exerciseCabinet(
               failureText = "browser-request-failure-unavailable";
             }
           }
-          terminal.release(Object.freeze({
+          const terminalResult = Object.freeze({
             failureSha256: failureText === null ? null : sha256(failureText),
             finished,
-          }));
+          });
+          if (entry.classification.key === "app-profile-action") {
+            providerProfileActionDiagnosticState[role].terminal(
+              request, terminalResult.finished, terminalResult.failureSha256,
+            );
+          }
+          terminal.release(terminalResult);
         }
         if (!evidence && !finished) {
           evidence = Promise.resolve(Object.freeze({
@@ -1403,6 +1448,7 @@ async function exerciseCabinet(
     markProviderFailurePhase(role, "drain-profile-requests");
     await waitForResponseCaptureQuiet();
     markProviderFailurePhase(role, "inspect-profile-frame");
+    providerProfileActionDiagnosticState[role].checkpoint("profile-quiet-completed");
     const profileFrameTree = await cdp.send("Page.getFrameTree");
     const profileFrame = profileFrameTree.frameTree.frame;
     const profileHistoryLength = await page.evaluate(() => history.length);
@@ -1422,6 +1468,7 @@ async function exerciseCabinet(
     markProviderFailurePhase(role, "navigate-cabinet");
     let cabinetResponse;
     try {
+      providerProfileActionDiagnosticState[role].checkpoint("cabinet-goto-called");
       cabinetResponse = await page.goto("https://pay.ci.clean-pay.dev/cabinet", {
         waitUntil: "domcontentloaded",
         timeout: 30_000,
