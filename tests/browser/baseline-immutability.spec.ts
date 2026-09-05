@@ -659,6 +659,35 @@ test.describe("immutable browser baseline policy", () => {
     expect(entries.filter((entry) => entry.serverAction.present)).toHaveLength(1);
   });
 
+  test("defers live capture until a Server Action generation stays quiet", async () => {
+    const origin = "https://server-action-quiet-window.test";
+    const pageDouble = networkRecorderPageDouble(origin);
+    const recorder = recordNetwork(pageDouble.page, origin, {
+      serverActionGenerationQuietMs: 25,
+      serverActionTerminalTimeoutMs: 1_000,
+    });
+    let captureCalls = 0;
+    const checkpoint = recorder.captureStableServerActionCheckpoint(async () => {
+      captureCalls += 1;
+      return "stable-generation";
+    });
+    const request = networkRecorderRequestDouble({
+      frame: pageDouble.mainFrame,
+      headers: { "next-action": "quiet-window-action" },
+      method: "POST",
+      postData: Buffer.from("quiet-window-payload"),
+      resourceType: "fetch",
+      url: `${origin}/action`,
+    });
+    pageDouble.emitRequest(request);
+    pageDouble.emitRequestFinished(request);
+
+    await expect(checkpoint).resolves.toBe("stable-generation");
+    expect(captureCalls).toBe(1);
+    const entries = await recorder.finish();
+    expect(entries.filter((entry) => entry.serverAction.present)).toHaveLength(1);
+  });
+
   test("refuses to overwrite an existing baseline artifact", async () => {
     const temporaryDirectory = await mkdtemp(
       path.join(tmpdir(), "clean-pay-browser-baseline-"),
@@ -2483,6 +2512,9 @@ function networkRecorderPageDouble(initialUrl: string) {
     childFrame,
     emitRequest(request: Request) {
       events.emit("request", request);
+    },
+    emitRequestFinished(request: Request) {
+      events.emit("requestfinished", request);
     },
     mainFrame,
     page,

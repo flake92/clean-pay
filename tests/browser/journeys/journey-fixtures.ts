@@ -93,6 +93,7 @@ export const test = guardedTest.extend<{ journey: JourneyProbe }>({
     };
     await page.route("**/*", enforceSyntheticNetwork);
     const recorder = recordNetwork(page, baseUrl.origin, {
+      serverActionGenerationQuietMs: livePairCapture ? 1_000 : 0,
       serverActionSupersedingNavigationOrigins: livePairCapture
         ? [SYNTHETIC_CHECKOUT_ORIGIN]
         : [],
