@@ -63,12 +63,14 @@ function normalizeOptions(options) {
     const expectedEffects = requiredData(options, "expectedEffects");
     const endpointContracts = requiredData(options, "endpointContracts");
     if (!phases.has(phase) || !checkpoints.has(checkpoint)) throw new Error("Invalid diagnostic stage.");
-    const expected = safeArray(expectedEffects, 28).map((entry) => {
+    const providerCausalContractVersion = optionalData(options, "providerCausalContractVersion") ?? 1;
+    const expectedEntryCount = diagnosticExpectedCount(providerCausalContractVersion, phase);
+    const expected = expectedEntryCount === null && expectedEffects === null ? null
+      : safeArray(expectedEffects, 28).map((entry) => {
       if (!classes.has(entry)) throw new Error("Invalid expected class.");
       return entry;
     });
-    const expectedEntryCount = phase === "recreated" ? 28 : 15;
-    if (expected.length !== expectedEntryCount) throw new Error("Invalid expected count.");
+    if ((expected?.length ?? null) !== expectedEntryCount) throw new Error("Invalid expected count.");
     const endpoints = safeArray(endpointContracts, 32).map((endpoint) => {
       const result = Object.fromEntries(["service", "method", "pathname", "effect"]
         .map((field) => [field, requiredData(endpoint, field)]));
@@ -95,7 +97,8 @@ function normalizeOptions(options) {
         .every((field) => allowed[field] === tuple[field]));
       actual.push(endpoint?.effect ?? "unknown-endpoint");
     }
-    return { status: "observed", phase, checkpoint, expected, actual, actualEntryCount, entriesAreArray };
+    return { status: "observed", phase, checkpoint, expected, actual, actualEntryCount,
+      entriesAreArray, providerCausalContractVersion };
 }
 
 function renderDiagnostic(input) {
@@ -107,10 +110,11 @@ function renderDiagnostic(input) {
       status: "unavailable", reason: "input-outside-safe-projection",
     };
   } else {
-    const { expected, actual, phase, checkpoint, actualEntryCount, entriesAreArray } = normalized;
+    const { expected, actual, phase, checkpoint, actualEntryCount, entriesAreArray,
+      providerCausalContractVersion } = normalized;
     const firstMismatches = [];
     let positionalMismatchCount = 0;
-    for (let index = 0; index < Math.max(expected.length, actual.length); index += 1) {
+    for (let index = 0; expected !== null && index < Math.max(expected.length, actual.length); index += 1) {
       const left = expected[index] ?? null;
       const right = actual[index] ?? null;
       if (left === right) continue;
@@ -120,25 +124,32 @@ function renderDiagnostic(input) {
       }
     }
     result = {
-      schemaVersion: 1,
+      schemaVersion: providerCausalContractVersion,
       kind: "chatwoot-provider-ledger-mismatch-diagnostic",
-      status: "observed", phase, checkpoint, expectedEntryCount: expected.length, actualEntryCount, entriesAreArray,
+      status: "observed", phase, checkpoint, expectedEntryCount: expected?.length ?? null,
+      actualEntryCount, entriesAreArray,
+      ...(providerCausalContractVersion === 2 ? {
+        providerCausalContractVersion,
+        characterization: expected === null ? "uncharacterized-recreated" : "initial-causal-v2",
+      } : {}),
       scannedEntryCount: actual.length,
       scanTruncated: (actualEntryCount ?? 0) > maximumEntries,
       actualSequence: Object.freeze(actual.slice(0, maximumSequenceEntries)),
       actualSequenceTruncated: (actualEntryCount ?? 0) > maximumSequenceEntries,
       unknownEndpointCount: actual.filter((entry) => entry === "unknown-endpoint").length,
       classCounts: Object.freeze([...classes].sort().map((name) => {
-        const expectedCount = expected.filter((entry) => entry === name).length;
+        const expectedCount = expected?.filter((entry) => entry === name).length ?? null;
         const actualCount = actual.filter((entry) => entry === name).length;
         return Object.freeze({
           class: name, expected: expectedCount, actual: actualCount,
-          missing: Math.max(expectedCount - actualCount, 0), excess: Math.max(actualCount - expectedCount, 0),
+          missing: expectedCount === null ? null : Math.max(expectedCount - actualCount, 0),
+          excess: expectedCount === null ? null : Math.max(actualCount - expectedCount, 0),
         });
       })),
-      firstMismatches: Object.freeze(firstMismatches), positionalMismatchCount,
+      firstMismatches: Object.freeze(firstMismatches),
+      positionalMismatchCount: expected === null ? null : positionalMismatchCount,
       mismatchesTruncated: positionalMismatchCount > firstMismatches.length,
-      expectedSequenceSha256: digest(expected), actualSequenceSha256: digest(actual),
+      expectedSequenceSha256: expected === null ? null : digest(expected), actualSequenceSha256: digest(actual),
     };
   }
   if (Buffer.byteLength(JSON.stringify(result), "utf8") > maximumBytes) throw new Error("Diagnostic too large.");
@@ -152,7 +163,8 @@ function readNormalized(value) {
     exactDataKeys(value, ["status"]);
     return Object.freeze({ status });
   }
-  exactDataKeys(value, ["status", "phase", "checkpoint", "expected", "actual", "actualEntryCount", "entriesAreArray"]);
+  exactDataKeys(value, ["status", "phase", "checkpoint", "expected", "actual", "actualEntryCount",
+    "entriesAreArray", "providerCausalContractVersion"]);
   const phase = requiredData(value, "phase");
   const checkpoint = requiredData(value, "checkpoint");
   const entriesAreArray = requiredData(value, "entriesAreArray");
@@ -161,16 +173,26 @@ function readNormalized(value) {
     || typeof entriesAreArray !== "boolean"
     || (entriesAreArray ? !Number.isInteger(actualEntryCount) || actualEntryCount < 0 || actualEntryCount > 0xffff_ffff
       : actualEntryCount !== null)) throw new Error("Invalid normalized diagnostic identity.");
-  const expected = safeArray(requiredData(value, "expected"), 28);
+  const providerCausalContractVersion = requiredData(value, "providerCausalContractVersion");
+  const expectedEntryCount = diagnosticExpectedCount(providerCausalContractVersion, phase);
+  const rawExpected = requiredData(value, "expected");
+  const expected = expectedEntryCount === null && rawExpected === null ? null : safeArray(rawExpected, 28);
   const actual = safeArray(requiredData(value, "actual"), maximumEntries);
-  if (expected.length !== (phase === "recreated" ? 28 : 15)
-    || expected.some((entry) => !classes.has(entry))
+  if ((expected?.length ?? null) !== expectedEntryCount
+    || expected?.some((entry) => !classes.has(entry))
     || actual.length !== Math.min(actualEntryCount ?? 0, maximumEntries)
     || actual.some((entry) => !classes.has(entry) && entry !== "unknown-endpoint")) {
     throw new Error("Invalid normalized diagnostic sequence.");
   }
-  return Object.freeze({ status, phase, checkpoint, expected: Object.freeze(expected),
-    actual: Object.freeze(actual), actualEntryCount, entriesAreArray });
+  return Object.freeze({ status, phase, checkpoint,
+    expected: expected === null ? null : Object.freeze(expected),
+    actual: Object.freeze(actual), actualEntryCount, entriesAreArray, providerCausalContractVersion });
+}
+
+function diagnosticExpectedCount(version, phase) {
+  if (version === 1) return phase === "recreated" ? 28 : 15;
+  if (version === 2) return phase === "recreated" ? null : 21;
+  throw new Error("Invalid diagnostic characterization version.");
 }
 
 export function collectChatwootProviderLedgerMismatchEvidence(error) {
