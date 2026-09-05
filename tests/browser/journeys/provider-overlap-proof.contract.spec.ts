@@ -3096,6 +3096,21 @@ test("uses the exact raw content type for bodyless Telegram redirects", async ()
     status: 307,
   })).toBeNull();
   expect(normalizeProviderOverlapObservedResponseContentType({
+    key: "app-root-rsc",
+    rawContentType: "text/plain; charset=utf-8",
+    status: 307,
+  })).toBeNull();
+  expect(normalizeProviderOverlapObservedResponseContentType({
+    key: "app-login-root-rsc",
+    rawContentType: "text/plain",
+    status: 307,
+  })).toBeNull();
+  expect(normalizeProviderOverlapObservedResponseContentType({
+    key: "app-login-rsc",
+    rawContentType: "text/plain",
+    status: 307,
+  })).toBe("text/plain");
+  expect(normalizeProviderOverlapObservedResponseContentType({
     key: "app-telegram-start",
     rawContentType: "text/plain",
     status: 307,
