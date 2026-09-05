@@ -1,9 +1,10 @@
 import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { EventEmitter } from "node:events";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Page, type Request } from "@playwright/test";
 
 import {
   BEHAVIORAL_BASELINE_COMMIT,
@@ -352,6 +353,82 @@ test.describe("immutable browser baseline policy", () => {
       releaseAction();
       await page.waitForTimeout(25);
       await recorder.finish();
+    }
+  });
+
+  test("releases a pending Server Action only for an exact allowlisted main-frame navigation", async () => {
+    const applicationOrigin = "https://server-action-navigation.test";
+    const checkoutOrigin = "https://checkout.server-action-navigation.test";
+    const otherOrigin = "https://other.server-action-navigation.test";
+    const pageDouble = networkRecorderPageDouble(applicationOrigin);
+    const recorder = recordNetwork(pageDouble.page, applicationOrigin, {
+      serverActionSupersedingNavigationOrigins: [checkoutOrigin],
+      serverActionTerminalTimeoutMs: 1_000,
+    });
+    pageDouble.emitRequest(networkRecorderRequestDouble({
+      frame: pageDouble.mainFrame,
+      headers: { "next-action": "synthetic-action" },
+      method: "POST",
+      postData: Buffer.from("synthetic-payload"),
+      resourceType: "fetch",
+      url: `${applicationOrigin}/extend`,
+    }));
+
+    let terminalObserved = false;
+    const waiting = recorder.awaitStartedServerActions().then(() => {
+      terminalObserved = true;
+    });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(terminalObserved).toBe(false);
+
+    pageDouble.emitRequest(networkRecorderRequestDouble({
+      frame: pageDouble.mainFrame,
+      navigation: true,
+      resourceType: "document",
+      url: `${otherOrigin}/checkout`,
+    }));
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(terminalObserved).toBe(false);
+
+    pageDouble.emitRequest(networkRecorderRequestDouble({
+      frame: pageDouble.childFrame,
+      navigation: true,
+      resourceType: "document",
+      url: `${checkoutOrigin}/checkout`,
+    }));
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(terminalObserved).toBe(false);
+
+    pageDouble.emitRequest(networkRecorderRequestDouble({
+      frame: pageDouble.mainFrame,
+      navigation: true,
+      resourceType: "document",
+      url: `${checkoutOrigin}/checkout`,
+    }));
+    await waiting;
+    expect(terminalObserved).toBe(true);
+
+    const entries = await recorder.finish();
+    const action = entries.find((entry) => entry.serverAction.present);
+    expect(action?.response).toBeNull();
+    expect(action?.failure).toBeNull();
+    expect(entries).toHaveLength(4);
+  });
+
+  test("rejects non-canonical Server Action superseding navigation origins", () => {
+    const applicationOrigin = "https://server-action-origin-policy.test";
+    const { page } = networkRecorderPageDouble(applicationOrigin);
+    for (const origin of [
+      applicationOrigin,
+      "https://checkout.server-action-origin-policy.test/",
+      "https://checkout.server-action-origin-policy.test/path",
+      "https://user:secret@checkout.server-action-origin-policy.test",
+      "ftp://checkout.server-action-origin-policy.test",
+      " https://checkout.server-action-origin-policy.test",
+    ]) {
+      expect(() => recordNetwork(page, applicationOrigin, {
+        serverActionSupersedingNavigationOrigins: [origin],
+      })).toThrow(/canonical credential-free HTTP\(S\) origin|duplicate origins/);
     }
   });
 
@@ -2389,4 +2466,49 @@ function projectBytes(value: Uint8Array) {
   return Buffer.from(JSON.stringify(projectCharacterizationManifestForComparison(
     JSON.parse(Buffer.from(value).toString("utf8")),
   )));
+}
+
+type NetworkRecorderFrameDouble = {
+  url(): string;
+};
+
+function networkRecorderPageDouble(initialUrl: string) {
+  const events = new EventEmitter();
+  const mainFrame: NetworkRecorderFrameDouble = { url: () => initialUrl };
+  const childFrame: NetworkRecorderFrameDouble = { url: () => initialUrl };
+  const page = Object.assign(events, {
+    mainFrame: () => mainFrame,
+  }) as unknown as Page;
+  return {
+    childFrame,
+    emitRequest(request: Request) {
+      events.emit("request", request);
+    },
+    mainFrame,
+    page,
+  };
+}
+
+function networkRecorderRequestDouble(input: {
+  frame: NetworkRecorderFrameDouble;
+  headers?: Record<string, string>;
+  method?: string;
+  navigation?: boolean;
+  postData?: Buffer | null;
+  resourceType: string;
+  url: string;
+}) {
+  const headers = input.headers ?? {};
+  const postData = input.postData ?? null;
+  return {
+    allHeaders: async () => headers,
+    frame: () => input.frame,
+    headers: () => headers,
+    isNavigationRequest: () => input.navigation ?? false,
+    method: () => input.method ?? "GET",
+    postDataBuffer: () => postData,
+    redirectedFrom: () => null,
+    resourceType: () => input.resourceType,
+    url: () => input.url,
+  } as unknown as Request;
 }

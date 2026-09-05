@@ -19,6 +19,10 @@ import {
   journeyConnectProxy,
   journeyProvenanceLaunchArgs,
 } from "./journey-browser-policy";
+import {
+  DETERMINISTIC_CHROMIUM_LAUNCH_ARGS,
+  LIVE_OVERLAP_CHROMIUM_LAUNCH_ARGS,
+} from "../render-policy.mjs";
 
 test("projects generated journey values by referential symbol while retaining structure", () => {
   const baseline = journeyManifest("baseline");
@@ -505,6 +509,41 @@ test("does not apply generated-value projection outside the exact journey envelo
     tlsPolicy: { ...JOURNEY_SYNTHETIC_TLS_POLICY },
   };
   expect(() => assertJourneyBrowserPolicy(exactPolicy)).not.toThrow();
+  const liveOverlapLaunchArgs = journeyChromiumLaunchArgs(
+    resolverIp,
+    "live-overlap",
+  );
+  const exactLiveOverlapPolicy = {
+    ...exactPolicy,
+    launchArgs: liveOverlapLaunchArgs,
+  };
+  expect(launchArgs).toEqual([
+    ...DETERMINISTIC_CHROMIUM_LAUNCH_ARGS,
+    "--ignore-certificate-errors",
+    launchArgs.at(-1),
+  ]);
+  expect(liveOverlapLaunchArgs).toEqual([
+    ...LIVE_OVERLAP_CHROMIUM_LAUNCH_ARGS,
+    "--ignore-certificate-errors",
+    launchArgs.at(-1),
+  ]);
+  expect(journeyProvenanceLaunchArgs()).not.toContain("--disable-partial-raster");
+  expect(journeyProvenanceLaunchArgs("live-overlap")).toContain(
+    "--disable-partial-raster",
+  );
+  expect(() => assertJourneyBrowserPolicy(
+    exactLiveOverlapPolicy,
+    "live-overlap",
+  )).not.toThrow();
+  expect(() => assertJourneyBrowserPolicy(exactLiveOverlapPolicy)).toThrow();
+  expect(() => assertJourneyBrowserPolicy(
+    exactPolicy,
+    "live-overlap",
+  )).toThrow();
+  expect(() => journeyChromiumLaunchArgs(
+    resolverIp,
+    "invalid" as "canonical",
+  )).toThrow(/renderer policy is invalid/);
   for (const nearMiss of [
     { ...exactPolicy, resolverIp: undefined },
     { ...exactPolicy, resolverIp: "127.0.0.1" },

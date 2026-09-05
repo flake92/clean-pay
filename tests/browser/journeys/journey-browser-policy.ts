@@ -10,6 +10,8 @@ import {
 
 export { JOURNEY_SYNTHETIC_HOSTNAMES, JOURNEY_SYNTHETIC_TLS_POLICY };
 
+export type JourneyRendererPolicy = "canonical" | "live-overlap";
+
 export function journeyConnectProxy(server: string | undefined) {
   return runtimeJourneyConnectProxy(server) as Readonly<{
     server: string;
@@ -17,12 +19,17 @@ export function journeyConnectProxy(server: string | undefined) {
   }>;
 }
 
-export function journeyChromiumLaunchArgs(resolverIp: string | undefined) {
-  return runtimeJourneyChromiumLaunchArgs(resolverIp) as string[];
+export function journeyChromiumLaunchArgs(
+  resolverIp: string | undefined,
+  rendererPolicy: JourneyRendererPolicy = "canonical",
+) {
+  return runtimeJourneyChromiumLaunchArgs(resolverIp, rendererPolicy) as string[];
 }
 
-export function journeyProvenanceLaunchArgs() {
-  return runtimeJourneyProvenanceLaunchArgs() as string[];
+export function journeyProvenanceLaunchArgs(
+  rendererPolicy: JourneyRendererPolicy = "canonical",
+) {
+  return runtimeJourneyProvenanceLaunchArgs(rendererPolicy) as string[];
 }
 
 export function assertJourneyBrowserPolicy(value: {
@@ -30,8 +37,8 @@ export function assertJourneyBrowserPolicy(value: {
   launchArgs?: readonly string[];
   syntheticHostnames?: readonly string[];
   tlsPolicy?: Readonly<Record<string, string>>;
-}) {
-  assertRuntimeJourneyBrowserPolicy(value);
+}, rendererPolicy: JourneyRendererPolicy = "canonical") {
+  assertRuntimeJourneyBrowserPolicy(value, rendererPolicy);
 }
 
 export function isJourneyBrowserRequestAllowed(rawUrl: string) {
