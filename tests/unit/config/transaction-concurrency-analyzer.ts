@@ -179,19 +179,15 @@ export function transactionConcurrencyViolations(
     return false;
   }
 
-  function collectTransactionAliases(
-    body: ts.ConciseBody,
-    initialSymbols: ReadonlySet<ts.Symbol>,
-    beforePosition = Number.POSITIVE_INFINITY,
-  ) {
-    const aliases = new Set(initialSymbols);
-    const writes: Array<{
-      name: ts.BindingName;
-      position: number;
-      value?: ts.Expression;
-      definite: boolean;
-    }> = [];
+  type TransactionAliasWrite = Readonly<{
+    name: ts.BindingName;
+    position: number;
+    value?: ts.Expression;
+    definite: boolean;
+  }>;
 
+  function collectTransactionAliasWrites(body: ts.ConciseBody) {
+    const writes: TransactionAliasWrite[] = [];
     function writeIsUnconditional(node: ts.Node) {
       if (node === body) return true;
       let current = node.parent;
@@ -229,7 +225,6 @@ export function transactionConcurrencyViolations(
 
     function collectWrites(node: ts.Node) {
       if (node !== body && ts.isFunctionLike(node)) return;
-      if (node.getStart() >= beforePosition) return;
       if (ts.isVariableDeclaration(node)) {
         writes.push({
           name: node.name,
@@ -263,19 +258,59 @@ export function transactionConcurrencyViolations(
 
     collectWrites(body);
     writes.sort((left, right) => left.position - right.position);
-    for (const write of writes) {
-      const writtenSymbols = new Set<ts.Symbol>();
-      addBindingSymbols(write.name, writtenSymbols);
-      const transactionValue = Boolean(
-        write.value && expressionIsTransactionValue(write.value, aliases),
-      );
-      for (const symbol of writtenSymbols) {
-        if (transactionValue) aliases.add(symbol);
-        else if (write.definite) aliases.delete(symbol);
-      }
-    }
+    return writes;
+  }
 
+  function applyTransactionAliasWrite(
+    aliases: Set<ts.Symbol>,
+    write: TransactionAliasWrite,
+  ) {
+    const writtenSymbols = new Set<ts.Symbol>();
+    addBindingSymbols(write.name, writtenSymbols);
+    const transactionValue = Boolean(
+      write.value && expressionIsTransactionValue(write.value, aliases),
+    );
+    for (const symbol of writtenSymbols) {
+      if (transactionValue) aliases.add(symbol);
+      else if (write.definite) aliases.delete(symbol);
+    }
+  }
+
+  function replayTransactionAliases(
+    writes: readonly TransactionAliasWrite[],
+    initialSymbols: ReadonlySet<ts.Symbol>,
+    beforePosition: number,
+  ) {
+    const aliases = new Set(initialSymbols);
+    for (const write of writes) {
+      if (write.position >= beforePosition) break;
+      applyTransactionAliasWrite(aliases, write);
+    }
     return aliases;
+  }
+
+  function createTransactionAliasResolver(
+    body: ts.ConciseBody,
+    initialSymbols: ReadonlySet<ts.Symbol>,
+  ) {
+    // Collect once per function instead of rescanning its AST at every call site.
+    const writes = collectTransactionAliasWrites(body);
+    const aliases = new Set(initialSymbols);
+    let writeIndex = 0;
+    let previousPosition = Number.NEGATIVE_INFINITY;
+
+    return (beforePosition: number) => {
+      if (beforePosition < previousPosition) {
+        // Helper analysis may revisit earlier nodes; preserve source-order semantics.
+        return replayTransactionAliases(writes, initialSymbols, beforePosition);
+      }
+      previousPosition = beforePosition;
+      while (writeIndex < writes.length && writes[writeIndex].position < beforePosition) {
+        applyTransactionAliasWrite(aliases, writes[writeIndex]);
+        writeIndex += 1;
+      }
+      return new Set(aliases);
+    };
   }
 
   function isGlobalReference(
@@ -601,15 +636,15 @@ export function transactionConcurrencyViolations(
     if (activeChecks.has(key)) return false;
     activeChecks.add(key);
     let found = false;
+    const transactionSymbolsAt = createTransactionAliasResolver(
+      declaration.body,
+      initialSymbols,
+    );
 
     function visit(node: ts.Node) {
       if (found || (node !== declaration.body && ts.isFunctionLike(node))) return;
       if (ts.isCallExpression(node)) {
-        const transactionSymbols = collectTransactionAliases(
-          declaration.body,
-          initialSymbols,
-          node.getStart(),
-        );
+        const transactionSymbols = transactionSymbolsAt(node.getStart());
         if (expressionIsTransactionValue(node.expression, transactionSymbols)) {
           found = true;
           return;
@@ -1134,15 +1169,13 @@ export function transactionConcurrencyViolations(
     const key = functionKey(declaration, initialSymbols);
     if (analyzedFunctions.has(key)) return;
     analyzedFunctions.add(key);
-    const symbolsByPosition = new Map<number, Set<ts.Symbol>>();
+    const transactionSymbolsAt = createTransactionAliasResolver(
+      declaration.body,
+      initialSymbols,
+    );
 
     function symbolsAt(node: ts.Node) {
-      const position = node.getStart();
-      const cached = symbolsByPosition.get(position);
-      if (cached) return cached;
-      const symbols = collectTransactionAliases(declaration.body, initialSymbols, position);
-      symbolsByPosition.set(position, symbols);
-      return symbols;
+      return transactionSymbolsAt(node.getStart());
     }
 
     function visit(node: ts.Node) {
