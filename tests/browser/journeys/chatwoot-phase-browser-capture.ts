@@ -1278,7 +1278,7 @@ function browserResponseEvidence(entries: unknown[]) {
 
 async function loginToProfile(page: Page) {
   const telegram = await openLogin(page, "/profile");
-  await completeTelegramLogin(page, telegram, "/profile");
+  await completeTelegramNavigation(page, telegram, "/profile");
 }
 
 async function openLogin(page: Page, redirectPath: "/profile" | "/cabinet") {
@@ -1295,6 +1295,15 @@ async function openLogin(page: Page, redirectPath: "/profile" | "/cabinet") {
 async function completeTelegramLogin(
   page: Page,
   telegram: Locator,
+  redirectPath: "/cabinet",
+) {
+  await completeTelegramNavigation(page, telegram, redirectPath);
+  await waitForPhaseState(page, null);
+}
+
+async function completeTelegramNavigation(
+  page: Page,
+  telegram: Locator,
   redirectPath: "/profile" | "/cabinet",
 ) {
   await telegram.click();
@@ -1307,7 +1316,6 @@ async function completeTelegramLogin(
     level: 1,
   })
     .waitFor({ state: "visible", timeout: 15_000 });
-  await waitForPhaseState(page, null);
 }
 
 async function navigateToCabinet(page: Page) {
