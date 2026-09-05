@@ -123,6 +123,8 @@ export const JOURNEY_FIXTURE_FILENAMES = Object.freeze([
   "provider-mock.contract.spec.ts",
   "provider-mock.mjs",
   "provider-overlap-browser-contract.mjs",
+  "provider-overlap-comparison-diagnostic.contract.spec.ts",
+  "provider-overlap-comparison-diagnostic.mjs",
   "provider-overlap-proof-contract.mjs",
   "provider-overlap-proof.contract.spec.ts",
   "provider-overlap-proof.schema.json",
