@@ -154,9 +154,13 @@ test("email-register-verify-and-login", async ({ journey }, testInfo) => {
 
 test("telegram-oidc-cabinet-profile-link-referral-passkey", async ({ journey }) => {
   const { page } = journey;
+  const captureAuthenticatedChatwoot = authenticatedJourneyLivePairCaptureEnabled(process.env);
   await installWebAuthnBoundary(page);
   const oidcLifecycle = await loginWithTelegramOidc(page, true);
   journey.boundary("telegram-oidc-cookie-lifecycle", oidcLifecycle);
+  const firstAuthenticatedChatwoot = captureAuthenticatedChatwoot
+    ? await waitForChatwootBoundary(page)
+    : null;
   await journey.checkpoint("telegram-oidc-cabinet");
 
   await dispatchInstallPrompt(page);
@@ -231,7 +235,8 @@ test("telegram-oidc-cabinet-profile-link-referral-passkey", async ({ journey }) 
 
   await gotoHeading(page, "/link-account", "Способы входа");
   await journey.checkpoint("link-account-with-passkey");
-  const authenticatedChatwoot = await waitForChatwootBoundary(page);
+  const authenticatedChatwoot = firstAuthenticatedChatwoot
+    ?? await waitForChatwootBoundary(page);
   journey.boundary("chatwoot-authenticated", authenticatedChatwoot);
   const chatwootEffects = await journey.effects() as ProviderLedger;
   expect(chatwootEffects.entries.filter((entry) => entry.effect === "contact_identity_probed"))
