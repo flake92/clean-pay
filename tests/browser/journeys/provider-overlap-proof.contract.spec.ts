@@ -31,6 +31,7 @@ import {
 } from "./provider-overlap-proof-contract.mjs";
 import {
   assertProviderOverlapRedirect,
+  assertProviderOverlapRouteIdentityLedger,
   attestProviderOverlapStaticResponse,
   captureProviderOverlapResponseEvidence,
   classifyProviderOverlapBrowserRequest,
@@ -57,6 +58,7 @@ import {
   PROVIDER_OVERLAP_MAXIMUM_STATIC_RESPONSE_BYTES,
   PROVIDER_OVERLAP_REJECTION_PROVENANCE_MAX_PER_ROLE,
   readProviderOverlapStaticResponseEvidence,
+  recordProviderOverlapRouteIdentity,
   resolveProviderOverlapResponseRequestEntry,
 } from "./provider-overlap-browser-contract.mjs";
 import {
@@ -542,6 +544,22 @@ test("recomputes serialized cross-stack, lifecycle, and runtime invariants", () 
     }],
     ["symmetric impossible drained event count", (value) => {
       for (const stack of [value.stacks.baseline, value.stacks.candidate]) {
+        stack.navigation.eventLifecycle.drainedEventCount += 1;
+      }
+    }],
+    ["symmetric missing drained event", (value) => {
+      for (const stack of [value.stacks.baseline, value.stacks.candidate]) {
+        stack.navigation.eventLifecycle.drainedEventCount -= 1;
+      }
+    }],
+    ["symmetric fabricated redirect route callbacks", (value) => {
+      for (const stack of [value.stacks.baseline, value.stacks.candidate]) {
+        stack.navigation.eventLifecycle.drainedEventCount += 3;
+      }
+    }],
+    ["symmetric removed redirect edge compensating an extra event", (value) => {
+      for (const stack of [value.stacks.baseline, value.stacks.candidate]) {
+        stack.navigation.semanticRequestLedger[5].redirectEdge = null;
         stack.navigation.eventLifecycle.drainedEventCount += 1;
       }
     }],
@@ -1052,6 +1070,7 @@ test("publishes only bounded phase enums for live provider failure diagnosis", a
   expect(runner).toContain('"durable-body-read"');
   expect(runner).toContain('"final-assert"');
   expect(runner).toContain('"request-terminal-evidence"');
+  expect(runner).toContain('"request-route-identity"');
   expect(runner).toContain("assertCdpResponseBodyCaptureClean()");
   expect(runner).toContain("cdpResponseBodyCapture.snapshot()");
   expect(runner).not.toContain("message: message");
@@ -2422,7 +2441,9 @@ test("registers exact request identities before response capture and routed cont
     .toContain('await route.abort("blockedbyclient")');
   expect(routeHandler.slice(navigationCaptureBarrier, routeHandler.indexOf("await route.continue()")))
     .not.toContain("throw error");
-  expect(proofContractSource).toContain("requestCount * 3 + historyCount + 1");
+  expect(proofContractSource).toContain("requestCount * 3 - redirectCount + historyCount + 1");
+  expect(routeHandler).toContain("recordProviderOverlapRouteIdentity({");
+  expect(runnerSource).toContain("assertProviderOverlapRouteIdentityLedger({");
   const pendingDrainIndex = runnerSource.indexOf(
     "await pendingRequestSeal.drainAndSeal({ timeoutMs: 15_000 })",
   );
@@ -2436,6 +2457,97 @@ test("registers exact request identities before response capture and routed cont
   expect(finalResponseCaptureBarrier).toBeGreaterThan(pendingDrainIndex);
   expect(finalResponseCaptureBarrier).toBeLessThan(finalizerIndex);
 });
+
+test("binds actual route callbacks to every initial request and no redirect successor", () => {
+  const fixture = providerRouteIdentityFixture();
+  for (const { request } of fixture.requests) {
+    if (request.redirectedFrom() === null) {
+      recordProviderOverlapRouteIdentity({ ...fixture, request });
+    }
+  }
+  expect(assertProviderOverlapRouteIdentityLedger(fixture)).toEqual({
+    redirectCount: 3,
+    routedRequestCount: 6,
+  });
+  const initial = fixture.requests[0].request;
+  const redirected = fixture.requests[5].request;
+  expect(() => recordProviderOverlapRouteIdentity({ ...fixture, request: initial }))
+    .toThrow(/repeated/);
+  expect(() => recordProviderOverlapRouteIdentity({ ...fixture, request: redirected }))
+    .toThrow(/redirect successor/);
+  expect(() => recordProviderOverlapRouteIdentity({
+    ...fixture, request: { redirectedFrom: () => null },
+  })).toThrow(/owned request identity/);
+});
+
+test("rejects missing, extra, foreign and forged redirect route identities without count compensation", () => {
+  const exact = () => {
+    const fixture = providerRouteIdentityFixture();
+    for (const { request } of fixture.requests) {
+      if (request.redirectedFrom() === null) {
+        recordProviderOverlapRouteIdentity({ ...fixture, request });
+      }
+    }
+    return fixture;
+  };
+  const missing = exact();
+  missing.routedRequestIdentities.delete(missing.requests[0].request);
+  expect(() => assertProviderOverlapRouteIdentityLedger(missing)).toThrow(/no exact route/);
+  // Preserve the aggregate count while replacing an initial route with a
+  // fabricated redirect route: per-identity validation must still reject it.
+  const compensated = exact();
+  compensated.routedRequestIdentities.delete(compensated.requests[8].request);
+  compensated.routedRequestIdentities.add(compensated.requests[5].request);
+  expect(compensated.routedRequestIdentities.size).toBe(6);
+  expect(() => assertProviderOverlapRouteIdentityLedger(compensated)).toThrow(/emitted a route/);
+  const extra = exact();
+  extra.routedRequestIdentities.add({ redirectedFrom: () => null });
+  expect(() => assertProviderOverlapRouteIdentityLedger(extra)).toThrow(/coverage is not exact/);
+  const foreignSource = exact();
+  foreignSource.requests[5].request.redirectedFrom = () => ({ redirectedFrom: () => null });
+  expect(() => assertProviderOverlapRouteIdentityLedger(foreignSource)).toThrow(/prior owned source/);
+  const missingIdentity = exact();
+  missingIdentity.requests[5].request.redirectedFrom = () => null;
+  missingIdentity.routedRequestIdentities.add(missingIdentity.requests[5].request);
+  expect(() => assertProviderOverlapRouteIdentityLedger(missingIdentity)).toThrow(/validated semantic edge/);
+  const wrongOwnedSource = exact();
+  wrongOwnedSource.requests[5].request.redirectedFrom = () => wrongOwnedSource.requests[0].request;
+  expect(() => assertProviderOverlapRouteIdentityLedger(wrongOwnedSource)).toThrow(/validated semantic edge/);
+  const repeatedSource = exact();
+  repeatedSource.requests[6].request.redirectedFrom = () => repeatedSource.requests[4].request;
+  expect(() => assertProviderOverlapRouteIdentityLedger(repeatedSource)).toThrow(/prior owned source/);
+  const forgedEdge = exact();
+  forgedEdge.semanticRequestLedger[5].redirectEdge = null;
+  expect(() => assertProviderOverlapRouteIdentityLedger(forgedEdge)).toThrow(/redirect edge/);
+  const repeated = exact();
+  repeated.requests[1] = repeated.requests[0];
+  expect(() => assertProviderOverlapRouteIdentityLedger(repeated)).toThrow(/repeated request identity/);
+});
+
+function providerRouteIdentityFixture() {
+  type RequestIdentity = { redirectedFrom: () => RequestIdentity | null };
+  const semanticRequestLedger = stackReport("baseline", extractedOverlap("offers-first"))
+    .navigation.semanticRequestLedger;
+  const requests: Array<{
+    classification: { key: string; staticPath: null };
+    request: RequestIdentity;
+  }> = [];
+  for (const semantic of semanticRequestLedger) {
+    const sourceKey = semantic.redirectEdge?.split(":")[0];
+    const source = sourceKey === undefined ? null
+      : requests.find((entry) => entry.classification.key === sourceKey)!.request;
+    requests.push({
+      classification: { key: semantic.key, staticPath: null },
+      request: { redirectedFrom: () => source },
+    });
+  }
+  return {
+    requests,
+    requestByIdentity: new Map(requests.map((entry) => [entry.request, entry])),
+    routedRequestIdentities: new Set<RequestIdentity>(),
+    semanticRequestLedger,
+  };
+}
 
 test("keeps page-startup requests outside the measured provider event lifecycle", async () => {
   const source = await readFile(
@@ -5538,7 +5650,8 @@ function stackReport(role: "baseline" | "candidate", providerOverlap: ReturnType
     },
     navigation: {
       eventLifecycle: {
-        drainedEventCount: 68,
+        // 21 request + 21 terminal + 18 actual route + 4 history + 1 console.
+        drainedEventCount: 65,
         lateEventCount: 0,
         status: "sealed-clean",
       },

@@ -31,6 +31,7 @@ import { createJourneySanitizedErrorEvidence } from "./journey-error-evidence.mj
 import {
   attestProviderOverlapStaticResponse,
   assertProviderOverlapRedirect,
+  assertProviderOverlapRouteIdentityLedger,
   captureProviderOverlapResponseEvidence,
   classifyProviderOverlapBrowserRequest,
   createProviderOverlapCdpResponseBodyCapture,
@@ -52,6 +53,7 @@ import {
   isProviderOverlapPlaywrightBodyCdpResponse,
   normalizeProviderOverlapObservedResponseContentType,
   providerOverlapChatwootIdentityBoundarySettled,
+  recordProviderOverlapRouteIdentity,
   PROVIDER_OVERLAP_MAXIMUM_STATIC_RESPONSE_BYTES,
   PROVIDER_OVERLAP_REJECTION_PROVENANCE_MAX_PER_ROLE,
   resolveProviderOverlapResponseRequestEntry,
@@ -311,7 +313,7 @@ function retainProviderResponseCaptureFailure(role, source, error, snapshot) {
   if (!Object.hasOwn(providerResponseCaptureFailureState, role)
     || !new Set([
       "cdp-event", "final-assert", "navigation-prior-requests", "request-terminal-evidence",
-      "response-evidence",
+      "request-route-identity", "response-evidence",
     ]).has(source)) {
     return error;
   }
@@ -755,9 +757,10 @@ async function exerciseCabinet(
       }
     };
     context.addListener("request", observePreLedgerRequest);
-    // A successful 256-request proof records exactly three lifecycle events per
-    // request, four history events and the one exact Playwright service-worker
-    // warning, so 1,024 retains a bounded margin above the valid 773-event ledger.
+    // Each request emits request + terminal events. Only initial requests emit
+    // route callbacks; Playwright's Chromium adapter continues the successors.
+    // Four history events and one exact Playwright service-worker warning keep
+    // the 256-request proof below the unchanged 773-event upper bound.
     const eventSeal = createProviderOverlapEventSeal(1_024);
     const historyRecords = [];
     let historyOverflow = false;
@@ -955,6 +958,7 @@ async function exerciseCabinet(
       );
     });
     const pendingRequestSeal = createProviderOverlapPendingRequestSeal(256);
+    const routedRequestIdentities = new Set();
     const waitForResponseCaptureQuiet = async () => {
       const checkpoint = await pendingRequestSeal.waitForQuiet({ timeoutMs: 15_000 });
       if (browserResponseCaptureFailure) throw browserResponseCaptureFailure;
@@ -1178,8 +1182,8 @@ async function exerciseCabinet(
       const entry = browserRequestByIdentity.get(request);
       // Playwright can deliver a terminal event after these listeners are
       // installed even when its request event predates the proof ledger. Only
-      // identity-bound proof requests belong to the exact request + route +
-      // terminal causality count.
+      // identity-bound proof requests belong to the exact request + terminal
+      // causality count, with route callbacks tracked separately by identity.
       if (!entry && !preLedgerRequestIdentities.has(request)) {
         retainUnownedTerminalFailure();
       }
@@ -1277,6 +1281,19 @@ async function exerciseCabinet(
           browserRequestPreparationByIdentity.set(
             request,
             rejectedPreparation,
+          );
+          await route.abort("blockedbyclient");
+          return;
+        }
+        try {
+          if (preparation.entry !== null) {
+            recordProviderOverlapRouteIdentity({
+              request, requestByIdentity: browserRequestByIdentity, routedRequestIdentities,
+            });
+          }
+        } catch (error) {
+          browserResponseCaptureFailure ??= retainProviderResponseCaptureFailure(
+            role, "request-route-identity", error, cdpResponseBodyCapture.snapshot(),
           );
           await route.abort("blockedbyclient");
           return;
@@ -1431,6 +1448,7 @@ async function exerciseCabinet(
       browserResponseEvidenceIdentityCount: browserResponseEvidenceByIdentity.size,
       cdpResponseBodyCapture: cdpResponseBodyCapture.snapshot(),
       browserTerminalRequestIdentityCount: browserTerminalRequestIdentities.size,
+      browserRoutedRequestIdentityCount: routedRequestIdentities.size,
       cabinetDocumentAllowed,
       cabinetDocumentConsumed,
       expectedPlaywrightConsole,
@@ -1492,19 +1510,26 @@ async function exerciseCabinet(
         await context.removeAllListeners();
       },
       eventSeal: finalizerEventSeal,
-      finish: () => {
+      finish: async () => {
         if (browserResponseCaptureFailure) {
           markProviderFailurePhase(role, "finalize-response-capture");
           throw browserResponseCaptureFailure;
         }
         markProviderFailurePhase(role, "finalize-browser-projection");
-        return finishBrowserRequestContract(
+        const requestContract = await finishBrowserRequestContract(
           browserRequests,
           browserRequestByIdentity,
           browserResponseEvidenceByIdentity,
           staticAssetContract,
           role,
         );
+        assertProviderOverlapRouteIdentityLedger({
+          requests: browserRequests,
+          requestByIdentity: browserRequestByIdentity,
+          routedRequestIdentities,
+          semanticRequestLedger: requestContract.semanticRequestLedger,
+        });
+        return requestContract;
       },
       isIdle: () => pendingRequestSeal.pendingCount() === 0,
       snapshot: async () => {
