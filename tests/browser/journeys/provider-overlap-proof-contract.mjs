@@ -770,12 +770,6 @@ export function createProviderOverlapStackReport(input) {
   const historyLedger = assertHistoryLedger(navigation.historyLedger, role);
   boundedInteger(navigation.historyCount, 4, 4, `${role} browser history count`);
   equal(navigation.historyCount, historyLedger.length, `${role} browser history ledger count`);
-  assertEventLifecycleCausality(
-    eventLifecycle,
-    navigation.requestCount,
-    navigation.historyCount,
-    role,
-  );
   stringMatch(
     navigation.historyContractSha256,
     /^[a-f0-9]{64}$/,
@@ -831,6 +825,13 @@ export function createProviderOverlapStackReport(input) {
     `${role} static image route graph binding`,
   );
   const semanticLedger = assertSemanticRequestLedger(navigation.semanticRequestLedger, role);
+  assertEventLifecycleCausality(
+    eventLifecycle,
+    navigation.requestCount,
+    navigation.historyCount,
+    semanticLedger,
+    role,
+  );
   assertSerializedRequestAndStaticBinding(navigation, semanticLedger, staticLedger, staticLoadGraph, role);
   equal(navigation.unexpectedRequestCount, 0, `${role} unexpected browser requests`);
   equal(navigation.unexpectedConsoleCount, 0, `${role} unexpected browser console`);
@@ -1539,12 +1540,6 @@ function assertStackReport(value, label) {
   );
   const historyLedger = assertHistoryLedger(navigation.historyLedger, label);
   equal(navigation.historyCount, historyLedger.length, `${label} browser history count`);
-  assertEventLifecycleCausality(
-    eventLifecycle,
-    navigation.requestCount,
-    navigation.historyCount,
-    label,
-  );
   equal(
     navigation.historyContractSha256,
     sha256(JSON.stringify(historyLedger)),
@@ -1584,6 +1579,13 @@ function assertStackReport(value, label) {
     `${label} serialized static route graph binding`,
   );
   const semanticLedger = assertSemanticRequestLedger(navigation.semanticRequestLedger, label);
+  assertEventLifecycleCausality(
+    eventLifecycle,
+    navigation.requestCount,
+    navigation.historyCount,
+    semanticLedger,
+    label,
+  );
   assertSerializedRequestAndStaticBinding(
     navigation,
     semanticLedger,
@@ -2007,11 +2009,14 @@ function assertEventLifecycle(value, label) {
   return lifecycle;
 }
 
-function assertEventLifecycleCausality(lifecycle, requestCount, historyCount, label) {
+function assertEventLifecycleCausality(lifecycle, requestCount, historyCount, semanticLedger, label) {
   equal(historyCount, 4, `${label} causal browser history event count`);
+  // The ledger has already validated each exact redirect edge and its prior
+  // source. Playwright emits request + terminal, but no route, for successors.
+  const redirectCount = semanticLedger.filter((entry) => entry.redirectEdge !== null).length;
   equal(
     lifecycle.drainedEventCount,
-    requestCount * 3 + historyCount + 1,
+    requestCount * 3 - redirectCount + historyCount + 1,
     `${label} causal browser event count`,
   );
 }
