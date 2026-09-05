@@ -1,6 +1,7 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { createHash } from "node:crypto";
 import { once } from "node:events";
+import { createServer as createHttpServer, type ServerResponse } from "node:http";
 import { createServer } from "node:net";
 import path from "node:path";
 
@@ -402,6 +403,54 @@ test("waits within the reset boundary when provider control binds before OIDC", 
     });
   } finally {
     await Promise.all(children.map(stopChild));
+  }
+});
+
+test("commits reset synchronously after held OIDC work and retains all post-reset traffic", async () => {
+  const [oidcPort, remnashopPort, remnawavePort, controlPort] = await freePorts(4);
+  let heldResponse: ServerResponse | undefined;
+  let resolveEntered!: () => void;
+  const entered = new Promise<void>((resolve) => { resolveEntered = resolve; });
+  const oidc = createHttpServer((request, response) => {
+    request.resume();
+    request.on("end", () => { heldResponse = response; resolveEntered(); });
+  });
+  oidc.listen(oidcPort, "127.0.0.1");
+  await once(oidc, "listening");
+  const child = spawnFixture("provider-mock.mjs", {
+    REMNASHOP_PORT: String(remnashopPort), REMNAWAVE_PORT: String(remnawavePort),
+    CONTROL_PORT: String(controlPort), OIDC_RESET_URL: `http://127.0.0.1:${oidcPort}/__reset`,
+  });
+  try {
+    const control = `http://127.0.0.1:${controlPort}`;
+    const readinessPlans = `http://127.0.0.1:${remnashopPort}/api/v1/public/plans/public`;
+    await waitForOk(`${control}/__health`);
+    const reset = postJson(`${control}/__reset`, { scenario: "chatwoot-phase-stability-v1" });
+    await entered;
+    await fetchJson(readinessPlans);
+    const during = await fetchJson(`${control}/__ledger`) as {
+      entries: Array<{ sequence: number; effect: string }>;
+    };
+    expect(during.entries.map(({ sequence, effect }) => ({ sequence, effect }))).toEqual([
+      { sequence: 1, effect: "read_public_plans" },
+    ]);
+    heldResponse!.writeHead(200, { "content-type": "application/json" });
+    heldResponse!.end(JSON.stringify({ status: "reset" }));
+    const completed = await reset as { state: { ledger: number; sequence: number } };
+    expect({ ledger: completed.state.ledger, sequence: completed.state.sequence })
+      .toEqual({ ledger: 0, sequence: 0 });
+    await fetchJson(readinessPlans);
+    const after = await fetchJson(`${control}/__ledger`) as {
+      entries: Array<{ sequence: number; effect: string }>;
+    };
+    expect(after.entries.map(({ sequence, effect }) => ({ sequence, effect }))).toEqual([
+      { sequence: 1, effect: "read_public_plans" },
+    ]);
+  } finally {
+    heldResponse?.destroy();
+    await stopChild(child);
+    oidc.closeAllConnections();
+    await new Promise<void>((resolve) => oidc.close(() => resolve()));
   }
 });
 
