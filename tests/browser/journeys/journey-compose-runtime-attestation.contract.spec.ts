@@ -71,6 +71,44 @@ test("is import-safe and attests the exact full journey Compose runtime", () => 
   expect(() => assertJourneyComposeRuntimeInspection(fixture)).not.toThrow();
 });
 
+test("isolates journey health cadence while preserving and attesting the production readiness command", () => {
+  const root = path.resolve(__dirname, "../../..");
+  const appBlock = (file: string) => readFileSync(path.join(root, file), "utf8")
+    .replace(/\r\n/g, "\n").split("\n  app:\n")[1].split(/\n  [a-z0-9-]+:\n/)[0];
+  const production = appBlock("docker-compose.yml");
+  const deployedProduction = appBlock("deploy/prod/docker-compose.yml");
+  const overlay = appBlock("tests/browser/journeys/docker-compose.journey.yml");
+  for (const app of [production, deployedProduction]) {
+    expect(app).toContain("interval: 10s");
+    expect(app).toContain("start_period: 30s");
+    expect(app).not.toContain("start_interval:");
+  }
+  expect(overlay).toContain("healthcheck:\n      interval: 1h\n      start_interval: 1s");
+  const overlayHealth = overlay.split("    healthcheck:\n")[1].split(/\n    [a-z_]+:/)[0];
+  expect(overlayHealth.trim().split("\n").map((line) => line.trim()))
+    .toEqual(["interval: 1h", "start_interval: 1s"]);
+  const testLine = production.split("\n").find((line) => line.trim().startsWith("test: "))!;
+  const command = JSON.parse(testLine.trim().slice("test: ".length)) as string[];
+  expect(command[1]).toContain("/api/internal/health/readiness");
+  const fixture = runtimeFixture();
+  fixture.compose.services.app.healthcheck = {
+    test: command, interval: "1h", start_interval: "1s", start_period: "30s", timeout: "12s", retries: 20,
+  };
+  fixture.containersByService.app.Config.Healthcheck = {
+    Test: command, Interval: 3_600_000_000_000, StartInterval: 1_000_000_000,
+    StartPeriod: 30_000_000_000, Timeout: 12_000_000_000, Retries: 20,
+  };
+  fixture.containersByService.app.State.Health = { Status: "healthy" };
+  expect(() => assertJourneyComposeRuntimeInspection(fixture)).not.toThrow();
+  for (const mutation of [
+    { Test: ["CMD-SHELL", "true"] }, { Interval: 10_000_000_000 }, { StartInterval: 0 },
+  ]) {
+    const changed = structuredClone(fixture);
+    Object.assign(changed.containersByService.app.Config.Healthcheck as object, mutation);
+    expect(() => assertJourneyComposeRuntimeInspection(changed)).toThrow();
+  }
+});
+
 test("matches multiple tmpfs entries by target and rejects an option near-miss", () => {
   const fixture = runtimeFixture();
   fixture.compose.services["browser-proxy"].tmpfs = [
