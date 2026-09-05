@@ -28,6 +28,7 @@ import {
   writeJourneySanitizedOutput,
 } from "./journey-owned-stack-orchestrator.mjs";
 import { createJourneySanitizedErrorEvidence } from "./journey-error-evidence.mjs";
+import { withProviderOverlapComparisonDiagnostic } from "./provider-overlap-comparison-diagnostic.mjs";
 import {
   attestProviderOverlapStaticResponse,
   assertProviderOverlapRedirect,
@@ -102,6 +103,7 @@ let captureId;
 let failureOutputPath;
 let scenario;
 let outputPath;
+let providerComparisonDiagnostic;
 const providerRejectionProvenanceState = {
   baseline: { entries: [], truncated: false },
   candidate: { entries: [], truncated: false },
@@ -228,12 +230,17 @@ try {
     });
     return Object.freeze({ baseline, candidate });
   });
-  const document = createDualProviderOverlapProof(
-    proofSession.value.baseline,
-    proofSession.value.candidate,
-    proofSession.cleanup,
-    proofSession.launch,
-  );
+  const document = withProviderOverlapComparisonDiagnostic({
+    compare: () => createDualProviderOverlapProof(
+      proofSession.value.baseline,
+      proofSession.value.candidate,
+      proofSession.cleanup,
+      proofSession.launch,
+    ),
+    baselineNavigation: proofSession.value.baseline.navigation,
+    candidateNavigation: proofSession.value.candidate.navigation,
+    retainDiagnostic: (diagnostic) => { providerComparisonDiagnostic = diagnostic; },
+  });
   const bytes = Buffer.from(`${JSON.stringify(document, null, 2)}\n`, "utf8");
   await writeJourneySanitizedOutput(outputPath, bytes);
   process.stdout.write(`${JSON.stringify({
@@ -289,6 +296,8 @@ function providerFailureBytes(error) {
       ? {} : { responseCaptureFailureEvidence }),
     ...(projectionFailureEvidence === undefined ? {} : { projectionFailureEvidence }),
     ...(browserDiagnosticEvidence === undefined ? {} : { browserDiagnosticEvidence }),
+    ...(providerComparisonDiagnostic === undefined
+      ? {} : { requestContractComparison: providerComparisonDiagnostic }),
     ...createJourneySanitizedErrorEvidence(error),
   })}\n`, "utf8");
 }
