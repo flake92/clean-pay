@@ -297,7 +297,8 @@ test("requires three independent A/B pairs and exact cross-image PNG quorums", (
   const proof = createChatwootPhaseProof(pairReports());
 
   expect(proof).toMatchObject({
-    schemaVersion: 1,
+    schemaVersion: 2,
+    providerCausalContractVersion: 2,
     kind: CHATWOOT_PHASE_PROOF_KIND,
     scenario: {
       label: CHATWOOT_PHASE_PROOF_SCENARIO,
@@ -333,7 +334,9 @@ test("requires three independent A/B pairs and exact cross-image PNG quorums", (
       distinctSourceRevisions: true,
       sameProofHmacScope: true,
       allPhaseSemanticsExact: true,
-      allCanonicalPhaseEvidenceExact: true,
+      allComparableCanonicalPhaseEvidenceExact: true,
+      providerCausalEvidenceExact: true,
+      rawProviderArrivalOrderCompared: false,
       allScreenshotsCrossImageByteExact: true,
     },
     lifecycle: {
@@ -533,11 +536,20 @@ test("fails closed on phase, clearing, recreation, and browser near misses", () 
       value[0].stacks.baseline.phases.stable.evidenceRanges.requestSequence.lastHmacSha256 =
         "2".repeat(64);
     }],
-    ["changed provider order", (value) => {
-      value[0].stacks.baseline.phases.recreated.hashes.providerLedgerHmacSha256 = "0".repeat(64);
+    ["changed provider causal values or dependency order", (value) => {
+      value[0].stacks.baseline.phases.recreated.hashes.providerCausalLedgerHmacSha256 = "0".repeat(64);
     }],
-    ["changed provider effects", (value) => {
-      value[0].stacks.baseline.phases.recreated.hashes.providerEffectsHmacSha256 = "1".repeat(64);
+    ["malformed raw provider ledger provenance", (value) => {
+      value[0].stacks.baseline.phases.recreated.hashes.providerLedgerHmacSha256 = "invalid";
+    }],
+    ["malformed raw provider effects provenance", (value) => {
+      value[0].stacks.baseline.phases.recreated.hashes.providerEffectsHmacSha256 = "invalid";
+    }],
+    ["changed causal provider range", (value) => {
+      value[0].stacks.baseline.phases.recreated.evidenceRanges.providerCausalLedger.lastHmacSha256 = "1".repeat(64);
+    }],
+    ["incomplete causal provider partition", (value) => {
+      value[0].stacks.baseline.phases.recreated.evidenceCounts.providerCausalLedger -= 1;
     }],
   ];
 
@@ -546,6 +558,35 @@ test("fails closed on phase, clearing, recreation, and browser near misses", () 
     mutate(nearMiss);
     expect(() => createChatwootPhaseProof(nearMiss), label).toThrow();
   }
+});
+
+test("retains raw role provenance while v2 compares complete causal provider evidence", () => {
+  const reports = pairReports();
+  const role = reports[0].stacks.baseline.phases.gap;
+  role.hashes.providerLedgerHmacSha256 = "7".repeat(64);
+  role.hashes.providerEffectsHmacSha256 = "8".repeat(64);
+  role.evidenceRanges.providerLedger = { firstHmacSha256: "9".repeat(64), lastHmacSha256: "9".repeat(64) };
+  role.evidenceRanges.providerEffects = { firstHmacSha256: "a".repeat(64), lastHmacSha256: "a".repeat(64) };
+  const proof = createChatwootPhaseProof(reports);
+  expect(proof.schemaVersion).toBe(2);
+  expect(proof.providerCausalContractVersion).toBe(2);
+  expect(proof.scenario.label).toBe("chatwoot-phase-stability-v1");
+  expect(proof.pairs[0].stacks.baseline.phases.gap.hashes.providerLedgerHmacSha256)
+    .toBe(role.hashes.providerLedgerHmacSha256);
+  expect(proof.pairs[0].stacks.baseline.phases.gap.evidenceRanges.providerLedger)
+    .toEqual(role.evidenceRanges.providerLedger);
+  for (const mutate of [
+    (value: Record<string, unknown>) => { value.schemaVersion = 1; },
+    (value: Record<string, unknown>) => { value.providerCausalContractVersion = 1; },
+    (value: Record<string, unknown>) => { delete value.providerCausalContractVersion; },
+  ]) {
+    const legacy = structuredClone(proof);
+    mutate(legacy);
+    expect(() => assertChatwootPhaseProof(legacy)).toThrow();
+  }
+  const missing = pairReports();
+  delete (missing[0].stacks.baseline.phases.gap.hashes as Record<string, unknown>).providerCausalLedgerHmacSha256;
+  expect(() => createChatwootPhaseProof(missing)).toThrow();
 });
 
 test("requires 6/6 semantic equality and one exact 2/3 PNG majority per role", () => {
@@ -1411,10 +1452,20 @@ test("uses only the exact journey-v5 referential projection before ordered HMAC 
   expect(JSON.stringify(candidate)).not.toContain(candidateDynamic);
 
   const reorderedInput = canonicalEvidenceInput(candidateDynamic);
-  reorderedInput.providerEffects.entries.reverse();
+  // Offers/devices are independent read nodes. Raw order remains different,
+  // while the new additive category must preserve the same causal values.
+  [reorderedInput.providerEffects.entries[15], reorderedInput.providerEffects.entries[16]] =
+    [reorderedInput.providerEffects.entries[16], reorderedInput.providerEffects.entries[15]];
+  reorderedInput.providerEffects.entries.forEach((entry, index) => { entry.sequence = index + 1; });
   const reordered = canonicalChatwootPhaseEvidence(reorderedInput);
   expect(reordered.providerLedger).not.toEqual(candidate.providerLedger);
   expect(reordered.providerEffects).not.toEqual(candidate.providerEffects);
+  expect(reordered.providerCausalLedger).toEqual(candidate.providerCausalLedger);
+
+  const reversedCausalOrder = canonicalEvidenceInput(candidateDynamic);
+  reversedCausalOrder.providerEffects.entries.reverse();
+  reversedCausalOrder.providerEffects.entries.forEach((entry, index) => { entry.sequence = index + 1; });
+  expect(() => canonicalChatwootPhaseEvidence(reversedCausalOrder)).toThrow();
 
   const changedBrowserSemantics = canonicalEvidenceInput(candidateDynamic);
   (changedBrowserSemantics.browserRequests[0] as Record<string, unknown>)
@@ -2231,11 +2282,12 @@ test("decodes exact phase boundary and provider ledgers with phase-specific fail
   expect(() => assertChatwootPhaseBoundaryLedger(changedOrder, "gap")).toThrow(/out of order/);
 
   const provider = strictProviderFixture("recreated");
-  expect(assertChatwootPhaseProviderLedger(provider, "recreated")).toEqual(provider);
+  const historicalRecreated = provider;
+  expect(() => assertChatwootPhaseProviderLedger(historicalRecreated, "recreated"))
+    .toThrow(/recreated provider causal contract is uncharacterized/);
   for (const [phase, entryCount] of [
-    ["gap", 15],
-    ["stable", 15],
-    ["recreated", 28],
+    ["gap", 21],
+    ["stable", 21],
   ] as const) {
     const exactProvider = strictProviderFixture(phase);
     expect(assertChatwootPhaseProviderLedger(exactProvider, phase)).toEqual(exactProvider);
@@ -2243,7 +2295,7 @@ test("decodes exact phase boundary and provider ledgers with phase-specific fail
   }
   for (const challengeIndex of [0, 15]) {
     for (const action of ["login", "telegram_auth_start", "payment", "anything"]) {
-      const wrongTurnstileAction = structuredClone(provider);
+      const wrongTurnstileAction = structuredClone(historicalRecreated);
       (wrongTurnstileAction.entries[challengeIndex].body_contract as {
         fields: Array<{ value: unknown }>;
       }).fields[0].value =
@@ -2319,11 +2371,11 @@ test("decodes exact phase boundary and provider ledgers with phase-specific fail
     .toThrow(/JSON body.*fields are not exact/);
   const contactOnly = {
     database: structuredClone(provider.database),
-    entries: provider.entries
+    entries: strictProviderFixture("gap").entries
       .filter(({ service }) => service === "chatwoot")
       .map((entry, index) => ({ ...entry, sequence: index + 1 })),
   };
-  expect(() => assertChatwootPhaseProviderLedger(contactOnly, "recreated"))
+  expect(() => assertChatwootPhaseProviderLedger(contactOnly, "gap"))
     .toThrow(/incomplete or outside/);
   for (const service of [
     "chatwoot",
@@ -2332,32 +2384,47 @@ test("decodes exact phase boundary and provider ledgers with phase-specific fail
     "remnashop",
     "remnawave",
   ]) {
-    const missingService = strictProviderFixture("recreated");
+    const missingService = strictProviderFixture("gap");
     missingService.entries = missingService.entries
       .filter((entry) => entry.service !== service)
       .map((entry, index) => ({ ...entry, sequence: index + 1 }));
-    expect(() => assertChatwootPhaseProviderLedger(missingService, "recreated"), service)
+    expect(() => assertChatwootPhaseProviderLedger(missingService, "gap"), service)
       .toThrow(/incomplete or outside/);
   }
-  const missingRecreatedProbe = strictProviderFixture("recreated");
-  missingRecreatedProbe.entries.pop();
-  expect(() => assertChatwootPhaseProviderLedger(missingRecreatedProbe, "recreated"))
+  const missingInitialProbe = strictProviderFixture("gap");
+  missingInitialProbe.entries.pop();
+  expect(() => assertChatwootPhaseProviderLedger(missingInitialProbe, "gap"))
     .toThrow(/incomplete or outside/);
   const phases = {
     gap: strictProviderFixture("gap"),
     stable: strictProviderFixture("stable"),
     recreated: strictProviderFixture("recreated"),
   };
-  expect(assertChatwootProviderPhaseRelations(phases)).toMatchObject({
-    gapEntryCount: 15,
-    recreatedEntryCount: 28,
-    stableEntryCount: 15,
-    status: "exact-provider-phase-prefixes",
-  });
+  expect(() => assertChatwootProviderPhaseRelations(phases))
+    .toThrow(/recreated provider causal contract is uncharacterized/);
   const brokenPrefix = structuredClone(phases);
   brokenPrefix.stable.entries[0].body_sha256 = "f".repeat(64);
   expect(() => assertChatwootProviderPhaseRelations(brokenPrefix))
     .toThrow(/not an exact ordered prefix/);
+});
+
+test("validates every endpoint body and credential before accepting an independent GET permutation", () => {
+  const permuted = strictProviderFixture("gap");
+  [permuted.entries[15], permuted.entries[16]] = [permuted.entries[16], permuted.entries[15]];
+  permuted.entries.forEach((entry, index) => { entry.sequence = index + 1; });
+  expect(assertChatwootPhaseProviderLedger(permuted, "gap")).toEqual(permuted);
+  const wrongCredential = structuredClone(permuted);
+  wrongCredential.entries[15].credential_contract.header_names = ["authorization"];
+  expect(() => assertChatwootPhaseProviderLedger(wrongCredential, "gap")).toThrow(/credential projection/);
+  const wrongBody = structuredClone(permuted);
+  wrongBody.entries[16].body_contract = { unexpected: "not-an-empty-GET" };
+  expect(() => assertChatwootPhaseProviderLedger(wrongBody, "gap")).toThrow(/body/);
+  const nonemptyGet = structuredClone(permuted);
+  nonemptyGet.entries[15].body_bytes = 1;
+  expect(() => assertChatwootPhaseProviderLedger(nonemptyGet, "gap")).toThrow(/exact endpoint contract/);
+  const mutationState = structuredClone(permuted);
+  mutationState.entries[15].idempotency_key_present = true;
+  expect(() => assertChatwootPhaseProviderLedger(mutationState, "gap")).toThrow(/idempotency state/);
 });
 
 test("collects every boundary method and exposes late custom calls to the final reread", () => {
@@ -3298,12 +3365,14 @@ test("keeps the sidecar contract separate from baselines, projection, and fixtur
     $schema: "http://json-schema.org/draft-07/schema#",
     additionalProperties: false,
     properties: {
-      schemaVersion: { const: 1 },
+      schemaVersion: { const: 2 },
+      providerCausalContractVersion: { const: 2 },
       kind: { const: CHATWOOT_PHASE_PROOF_KIND },
     },
   });
   expect(schema.required).toEqual([
     "schemaVersion",
+    "providerCausalContractVersion",
     "kind",
     "scenario",
     "execution",
@@ -3330,6 +3399,16 @@ test("keeps the sidecar contract separate from baselines, projection, and fixtur
   type MutableSchemaProof = DeepMutable<typeof schemaProof>;
   expect(validate(schemaProof), JSON.stringify(validate.errors)).toBe(true);
   expect(validate(containerdSchemaProof), JSON.stringify(validate.errors)).toBe(true);
+  for (const phase of ["gap", "stable"] as const) {
+    const omittedInitialContact = structuredClone(schemaProof) as MutableSchemaProof;
+    for (const pair of omittedInitialContact.pairs) {
+      for (const role of ["baseline", "candidate"] as const) {
+        pair.stacks[role].phases[phase].contactProbeCount = 1;
+      }
+    }
+    expect(validate(omittedInitialContact), `${phase} legacy contact count in all six roles`).toBe(false);
+    expect(() => assertChatwootPhaseProof(omittedInitialContact)).toThrow(/contact-probe count/);
+  }
   const containerdRootNamedConfig = structuredClone(containerdSchemaProof) as unknown as {
     pairs: ContainerdPairReport[];
   };
@@ -4179,7 +4258,7 @@ function phaseEvidence(
       frameLoadedCount: 1,
       identityConfirmedCount: 0,
       boundaryCallCount: 5,
-      contactProbeCount: 1,
+      contactProbeCount: 2,
       ...mutablePhaseSeal(gapSeal),
       recreationCausality: null,
       screenshot: screenshot("gap"),
@@ -4208,7 +4287,7 @@ function phaseEvidence(
       frameLoadedCount: 2,
       identityConfirmedCount: 1,
       boundaryCallCount: 8,
-      contactProbeCount: 1,
+      contactProbeCount: 2,
       ...mutablePhaseSeal(stableSeal),
       recreationCausality: null,
       screenshot: screenshot("stable"),
@@ -4321,6 +4400,7 @@ function orderedEvidence(
     computedStyles: entries("styles", 3),
     dom: entries("dom", 3),
     interactive: entries("interactive", 2),
+    providerCausalLedger: entries("provider-causal-ledger", providerLedgerCount),
     providerEffects: entries("provider-effects", providerEffectCount),
     providerLedger: entries("provider-ledger", providerLedgerCount),
     requestSequence: entries("request", 8),
@@ -4350,33 +4430,13 @@ function canonicalEvidenceInput(dynamicDigest: string) {
     query: [],
     fragment: null,
   };
-  const providerEntry = (sequence: number, effect: string) => ({
-    sequence,
-    service: "remnashop",
-    method: "POST",
-    pathname: "/api/v1/public/auth/telegram",
-    query_keys: [],
-    body_bytes: 80,
-    body_sha256: dynamicDigest,
-    body_contract: {
-      actor: {
-        kind: "dynamic",
-        format: "telegram-id",
-        bytes: 9,
-        sha256: dynamicDigest,
-      },
-    },
-    idempotency_key_present: false,
-    idempotency_key_sha256: null,
-    idempotency_key_contract: null,
-    credential_contract: {
-      authorization_scheme: "Bearer",
-      cookie_names: [],
-      header_names: ["authorization"],
-    },
-    effect,
-  });
+  const provider = strictProviderFixture("gap");
+  // A valid dynamic descriptor exercises the existing referential projection,
+  // alongside the distinct generated action identifier/payload above.
+  (provider.entries[1].body_contract as { fields: Array<{ value: unknown }> })
+    .fields[1].value = { kind: "dynamic", format: "oidc-code-challenge", bytes: 43, sha256: dynamicDigest };
   return {
+    phase: "gap" as const,
     accessibility: "- document\n  - heading \"Личный кабинет\" [level=1]",
     browserRequests: [{
       classification: { key: "app-cabinet-action", disposition: "continue" },
@@ -4416,13 +4476,7 @@ function canonicalEvidenceInput(dynamicDigest: string) {
         status: 200,
       }],
     },
-    providerEffects: {
-      entries: [
-        providerEntry(1, "session_created"),
-        providerEntry(2, "contact_identity_probed"),
-      ],
-      database: { tableCount: 20, rowCount: 3 },
-    },
+    providerEffects: provider,
     storage: { local: [], session: [], cacheNames: [], serviceWorkerScopes: [] },
   };
 }
@@ -4430,6 +4484,32 @@ function canonicalEvidenceInput(dynamicDigest: string) {
 type ProviderFixturePhase = "gap" | "stable" | "recreated";
 
 const initialProviderEffects = [
+  "challenge_verified",
+  "authorization_code_issued",
+  "token_exchanged",
+  "jwks_read",
+  "auth_session_issued",
+  "read_profile",
+  "read_notification_preferences",
+  "read_profile",
+  "read_profile",
+  "read_subscription",
+  "contact_identity_probed",
+  "read_profile",
+  "read_profile",
+  "read_referral_program",
+  "read_subscription",
+  "read_offers",
+  "read_devices",
+  "read_user_by_uuid",
+  "read_profile",
+  "read_subscription",
+  "contact_identity_probed",
+] as const;
+
+const recreatedProviderEffects = [
+  // Historical 28-entry guess is retained only as an explicit negative input.
+  // No recreated count or order is inferred from the new initial 21 graph.
   "challenge_verified",
   "authorization_code_issued",
   "token_exchanged",
@@ -4445,10 +4525,6 @@ const initialProviderEffects = [
   "read_profile",
   "read_subscription",
   "contact_identity_probed",
-] as const;
-
-const recreatedProviderEffects = [
-  ...initialProviderEffects,
   "challenge_verified",
   "authorization_code_issued",
   "token_exchanged",
@@ -4545,6 +4621,13 @@ function providerFixtureEndpoint(effect: string) {
         header_names: ["authorization"],
       },
     },
+    jwks_read: {
+      service: "telegram-oidc",
+      method: "GET",
+      pathname: "/.well-known/jwks.json",
+      queryKeys: [],
+      credentials: none,
+    },
     auth_session_issued: {
       service: "remnashop",
       method: "POST",
@@ -4566,6 +4649,13 @@ function providerFixtureEndpoint(effect: string) {
         cookie_names: ["access_token"],
         header_names: ["x-remnashop-auth-service-key"],
       },
+    },
+    read_notification_preferences: {
+      service: "remnashop",
+      method: "GET",
+      pathname: "/api/v1/public/auth/notification-preferences",
+      queryKeys: [],
+      credentials: { authorization_scheme: null, cookie_names: ["access_token"], header_names: ["x-remnashop-auth-service-key"] },
     },
     read_referral_program: {
       service: "remnashop",

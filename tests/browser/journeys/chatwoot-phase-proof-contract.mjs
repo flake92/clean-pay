@@ -15,7 +15,8 @@ import { normalizeProviderOverlapSemanticEntry } from "./provider-overlap-browse
 
 export const CHATWOOT_PHASE_PROOF_KIND =
   "clean-pay-dual-image-chatwoot-phase-stability-proof";
-export const CHATWOOT_PHASE_PROOF_SCHEMA_VERSION = 1;
+export const CHATWOOT_PHASE_PROOF_SCHEMA_VERSION = 2;
+export const CHATWOOT_PROVIDER_CAUSAL_CONTRACT_VERSION = 2;
 export const CHATWOOT_PHASE_PROOF_SCENARIO = "chatwoot-phase-stability-v1";
 export const CHATWOOT_PHASE_PROOF_PAIR_COUNT = 3;
 export const CHATWOOT_PHASE_SCREENSHOT_QUORUM = 2;
@@ -112,6 +113,7 @@ export function createChatwootPhaseProof(pairReports) {
   const firstCandidate = pairs[0].stacks.candidate;
   const document = {
     schemaVersion: CHATWOOT_PHASE_PROOF_SCHEMA_VERSION,
+    providerCausalContractVersion: CHATWOOT_PROVIDER_CAUSAL_CONTRACT_VERSION,
     kind: CHATWOOT_PHASE_PROOF_KIND,
     scenario: {
       label: CHATWOOT_PHASE_PROOF_SCENARIO,
@@ -150,7 +152,9 @@ export function createChatwootPhaseProof(pairReports) {
       sameBrowserPolicy: true,
       sameProofHmacScope: true,
       allPhaseSemanticsExact: true,
-      allCanonicalPhaseEvidenceExact: true,
+      allComparableCanonicalPhaseEvidenceExact: true,
+      providerCausalEvidenceExact: true,
+      rawProviderArrivalOrderCompared: false,
       allScreenshotsCrossImageByteExact: true,
       baselineImageDigest: firstBaseline.applicationImage.assetImageDigest,
       candidateImageDigest: firstCandidate.applicationImage.assetImageDigest,
@@ -174,11 +178,13 @@ export function assertChatwootPhaseProof(value) {
     "kind",
     "lifecycle",
     "pairs",
+    "providerCausalContractVersion",
     "quorum",
     "scenario",
     "schemaVersion",
   ], "Chatwoot phase proof");
   equal(proof.schemaVersion, CHATWOOT_PHASE_PROOF_SCHEMA_VERSION, "proof schemaVersion");
+  equal(proof.providerCausalContractVersion, CHATWOOT_PROVIDER_CAUSAL_CONTRACT_VERSION, "provider causal contract version");
   equal(proof.kind, CHATWOOT_PHASE_PROOF_KIND, "proof kind");
   const rebuilt = createChatwootPhaseProof(proof.pairs);
   equal(stableJson(proof), stableJson(rebuilt), "serialized Chatwoot proof invariants");
@@ -2193,7 +2199,7 @@ function assertPhases(value, label) {
   equal(gap.userCookieSameAsPriorSettledPhase, false, `${label} gap prior user cookie`);
   equal(gap.newSetUserObserved, true, `${label} gap setUser causality`);
   equal(gap.finalCabinetRoute, true, `${label} gap route`);
-  equal(gap.contactProbeCount, 1, `${label} gap contact-probe count`);
+  equal(gap.contactProbeCount, 2, `${label} gap contact-probe count`);
 
   equal(stable.replacementRequestHeld, false, `${label} stable replacement held`);
   equal(stable.replacementRequestReleased, true, `${label} stable replacement released`);
@@ -2211,7 +2217,7 @@ function assertPhases(value, label) {
     gap.identityConfirmedCount + 1,
     `${label} stable identity-confirmed delta`,
   );
-  equal(stable.contactProbeCount, 1, `${label} stable contact-probe count`);
+  equal(stable.contactProbeCount, 2, `${label} stable contact-probe count`);
 
   equal(cleared.exactApplicationOrigin, true, `${label} clear origin`);
   equal(
@@ -2495,6 +2501,8 @@ function assertEvidenceCounts(value, phase, label) {
       fail(`${label} ${phase} ${category} evidence count is outside its sealer bound.`);
     }
   }
+  equal(counts.providerCausalLedger, counts.providerLedger, `${label} ${phase} complete causal provider count`);
+  equal(counts.providerEffects, counts.providerLedger, `${label} ${phase} complete raw provider effect count`);
   return { ...counts };
 }
 
@@ -2586,6 +2594,7 @@ function assertPhaseHashes(value, phase, label) {
     "cookieJarHmacSha256",
     "domHmacSha256",
     "interactiveHmacSha256",
+    "providerCausalLedgerHmacSha256",
     "providerEffectsHmacSha256",
     "providerLedgerHmacSha256",
     "requestSequenceHmacSha256",
@@ -2602,6 +2611,7 @@ function assertPhaseHashes(value, phase, label) {
     "cookieJarHmacSha256",
     "domHmacSha256",
     "interactiveHmacSha256",
+    "providerCausalLedgerHmacSha256",
     "providerEffectsHmacSha256",
     "providerLedgerHmacSha256",
     "requestSequenceHmacSha256",
@@ -2960,6 +2970,13 @@ function assertGlobalExecutionContract(pairs) {
 function phaseSemantics(phases) {
   const result = structuredClone(phases);
   for (const phase of CHATWOOT_PHASE_SCREENSHOT_NAMES) {
+    // Raw arrival order stays in each role's proof and is checked during its
+    // capture/rereads. Cross-run provider equivalence uses the mandatory
+    // source-derived causal category; every raw count remains comparable.
+    delete result[phase].hashes.providerEffectsHmacSha256;
+    delete result[phase].hashes.providerLedgerHmacSha256;
+    delete result[phase].evidenceRanges.providerEffects;
+    delete result[phase].evidenceRanges.providerLedger;
     delete result[phase].hashes.conversationHmacSha256;
     delete result[phase].hashes.cookieJarHmacSha256;
     delete result[phase].hashes.userCookieHmacSha256;

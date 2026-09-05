@@ -26,6 +26,10 @@ import {
 import { canonicalChatwootPhaseEvidence } from "./chatwoot-phase-canonical-evidence";
 import { createChatwootPhaseCausalContract } from "./chatwoot-phase-causal-contract.mjs";
 import {
+  assertChatwootProviderCausalLedger,
+  CHATWOOT_INITIAL_PROVIDER_EFFECTS,
+} from "./chatwoot-provider-causal-contract.mjs";
+import {
   assertChatwootPhaseRedirect,
   classifyChatwootPhaseBrowserRequest,
   finalizeChatwootPhaseBrowserContract,
@@ -98,39 +102,7 @@ const providerEndpointContracts = Object.freeze([
   providerEndpoint("remnawave", "GET", "/api/users/rw-browser-1", [],
     "read_user_by_uuid", "none", ["authorization"], "Bearer", []),
 ]);
-const initialProviderEffectSequence = Object.freeze([
-  "challenge_verified",
-  "authorization_code_issued",
-  "token_exchanged",
-  "auth_session_issued",
-  "read_profile",
-  "read_profile",
-  "read_profile",
-  "read_referral_program",
-  "read_subscription",
-  "read_offers",
-  "read_devices",
-  "read_user_by_uuid",
-  "read_profile",
-  "read_subscription",
-  "contact_identity_probed",
-]);
-const recreatedProviderEffectSequence = Object.freeze([
-  ...initialProviderEffectSequence,
-  "challenge_verified",
-  "authorization_code_issued",
-  "token_exchanged",
-  "auth_session_issued",
-  "read_profile",
-  "read_profile",
-  "read_profile",
-  "read_referral_program",
-  "read_subscription",
-  "read_offers",
-  "read_devices",
-  "read_user_by_uuid",
-  "contact_identity_probed",
-]);
+const initialProviderEffectSequence = CHATWOOT_INITIAL_PROVIDER_EFFECTS;
 type Phase = "gap" | "stable" | "recreated";
 type Role = "baseline" | "candidate";
 
@@ -1021,6 +993,7 @@ async function captureVisiblePhase(input: {
     throw new Error(`Chatwoot ${input.phase} phase has no user cookie.`);
   }
   const orderedEvidence = canonicalChatwootPhaseEvidence({
+    phase: input.phase,
     accessibility: sanitizeAriaUrls(
       ariaSnapshot,
       SYNTHETIC_APPLICATION_ORIGIN,
@@ -1117,9 +1090,17 @@ async function captureVisiblePhase(input: {
 }
 
 async function waitForExactProviderLedger(controlUrl: string, phase: Phase) {
-  const expectedEntryCount = phase === "recreated"
-    ? recreatedProviderEffectSequence.length
-    : initialProviderEffectSequence.length;
+  // The recreated browser lifecycle has already settled before this call. Its
+  // provider suffix has not yet been characterized: capture the actual bounded
+  // ledger and fail closed, without inventing a cardinality or replaying a proof.
+  if (phase === "recreated") {
+    return assertProviderLedger(
+      await controlJson(controlUrl, "/__ledger", MAXIMUM_CONTROL_BYTES),
+      phase,
+      "before-snapshot-wait",
+    );
+  }
+  const expectedEntryCount = initialProviderEffectSequence.length;
   const deadline = Date.now() + 5_000;
   while (true) {
     const value = await controlJson(controlUrl, "/__ledger", MAXIMUM_CONTROL_BYTES);
@@ -3283,8 +3264,8 @@ export function assertChatwootProviderPhaseRelations(value: unknown) {
   const phases = value as Record<Phase, unknown>;
   const gap = assertProviderLedger(phases.gap, "gap");
   const stable = assertProviderLedger(phases.stable, "stable");
-  const recreated = assertProviderLedger(phases.recreated, "recreated");
   assertProviderPrefix(gap.entries, stable.entries, "Gap to Stable");
+  const recreated = assertProviderLedger(phases.recreated, "recreated");
   assertProviderPrefix(stable.entries, recreated.entries, "Stable to Recreated");
   return Object.freeze({
     gapEntryCount: gap.entries.length,
@@ -3301,14 +3282,14 @@ function assertProviderLedger(
 ): ProviderLedger {
   exactKeys(value, ["database", "entries"], "Chatwoot provider ledger");
   const ledger = value as Record<string, unknown>;
-  const expectedEffects = phase === "recreated"
-    ? recreatedProviderEffectSequence
-    : initialProviderEffectSequence;
+  const expectedEffects = phase === "recreated" ? null : initialProviderEffectSequence;
   if (!Array.isArray(ledger.entries)
-    || ledger.entries.length !== expectedEffects.length) {
+    || ledger.entries.length > MAXIMUM_REQUESTS
+    || (expectedEffects !== null && ledger.entries.length !== expectedEffects.length)) {
     throw withChatwootProviderLedgerDiagnostic(
       new Error("Chatwoot provider ledger is incomplete or outside its bound."),
-      { value, phase, checkpoint, expectedEffects, endpointContracts: providerEndpointContracts },
+      { value, phase, checkpoint, expectedEffects, endpointContracts: providerEndpointContracts,
+        providerCausalContractVersion: 2 },
     );
   }
   const database = assertProviderDatabase(ledger.database);
@@ -3336,7 +3317,7 @@ function assertProviderLedger(
       && contract.pathname === entry.pathname
       && contract.effect === entry.effect
     ));
-    if (entry.sequence !== index + 1 || entry.effect !== expectedEffects[index] || !endpoint
+    if (entry.sequence !== index + 1 || !endpoint
       || !isDenseArray(entry.query_keys)
       || stableJson(entry.query_keys) !== stableJson(endpoint.queryKeys)
       || !Number.isSafeInteger(entry.body_bytes) || Number(entry.body_bytes) < 0
@@ -3376,8 +3357,18 @@ function assertProviderLedger(
       service: endpoint.service,
     }));
   }
+  // Exact endpoints, all body/credential/idempotency fields, and arrival
+  // ordinals have been checked before the additional causal characterization.
+  try {
+    assertChatwootProviderCausalLedger(entries, phase);
+  } catch (error) {
+    throw withChatwootProviderLedgerDiagnostic(error, {
+      value, phase, checkpoint, expectedEffects, endpointContracts: providerEndpointContracts,
+      providerCausalContractVersion: 2,
+    });
+  }
   const contactProbeCount = entries.filter(({ effect }) => effect === "contact_identity_probed").length;
-  const expectedContactProbeCount = phase === "recreated" ? 2 : 1;
+  const expectedContactProbeCount = 2;
   if (contactProbeCount !== expectedContactProbeCount) {
     throw new Error(`Chatwoot ${phase} provider effects do not prove the expected contact lifecycle.`);
   }
