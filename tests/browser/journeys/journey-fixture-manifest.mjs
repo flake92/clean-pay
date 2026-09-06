@@ -64,6 +64,7 @@ export const JOURNEY_FIXTURE_FILENAMES = Object.freeze([
   "chatwoot-phase-proof.contract.spec.ts",
   "chatwoot-phase-proof.schema.json",
   "chatwoot-live-proof-plan.mjs",
+  "chatwoot-provider-ledger-order.mjs",
   "docker-compose.journey.yml",
   "docker-compose.public-characterization.yml",
   "docker-tcp-bridge.mjs",

@@ -709,6 +709,20 @@ jobs:
             --candidate-revision "$GITHUB_SHA" \
             --temporary-root "$RUNNER_TEMP" \
             --phase preparation
+      - name: Verify Chatwoot provider contract before image builds
+        env:
+          PLAYWRIGHT_JSON_OUTPUT_FILE: test-results/chatwoot-ledger-check/results.json
+        run: |
+          node node_modules/playwright/cli.js test chatwoot-phase-proof.contract.spec.ts --config tests/browser/journeys/playwright.config.ts --project journey-contract --grep 'reports bounded provider mismatches|decodes exact phase boundary|Chatwoot causal provider|Chatwoot readiness probe|Chatwoot comparison canonicalization' --workers 1 --retries 0 --max-failures 1 --reporter line,json --output test-results/chatwoot-ledger-check/artifacts
+          node --input-type=module <<'NODE'
+          import assert from 'node:assert/strict';
+          import { readFileSync } from 'node:fs';
+          const report = JSON.parse(readFileSync('test-results/chatwoot-ledger-check/results.json', 'utf8'));
+          assert.equal(report.stats.expected, 20, 'Expected exactly 20 provider contract tests');
+          for (const field of ['unexpected', 'flaky', 'skipped']) assert.equal(report.stats[field], 0);
+          assert.equal(report.errors.length, 0);
+          console.log('CHATWOOT_LEDGER_CONTRACT_PASSED: 20/20. Live lifecycle proof still required.');
+          NODE
       - name: Build four production images for the live pair
         run: |
           node tests/browser/journeys/run-production-image-live-overlap.mjs run \
@@ -786,6 +800,7 @@ jobs:
           path: |
             test-results/browser
             test-results/browser-journeys
+            test-results/chatwoot-ledger-check
             test-results/browser-journey-contract-evidence
             test-results/browser-public-overlap
             test-results/browser-public-overlap-playwright/pair/${{ env.CLEAN_PAY_BROWSER_LIVE_PAIR_CAPTURE_ID }}/**/paired-png-quorum-failure/evidence.json
