@@ -3919,9 +3919,12 @@ test("bounds all response claims and atomically drains fatal CDP capture state",
 });
 
 test("durably captures a prior document across immediate real Chromium navigation", async () => {
+  // The old fixture navigated while its HTML was still being parsed. That can
+  // cancel the very response whose successful completion this test requires.
+  // Complete the first response, then deliberately defer its CDP body read
+  // until the next document has loaded. This tests durability, not cancellation.
   const loginBody = "<!doctype html><html><head><link rel=\"icon\" href=\"data:,\"></head>"
-    + "<body><h1>Login</h1>"
-    + "<script>location.assign('/profile')</script></body></html>";
+    + "<body><h1>Login</h1></body></html>";
   const profileBody = "<!doctype html><html><head><link rel=\"icon\" href=\"data:,\"></head>"
     + "<body><h1>Profile</h1></body></html>";
   const upstreamPaths: string[] = [];
@@ -3957,13 +3960,28 @@ test("durably captures a prior document across immediate real Chromium navigatio
       maxResourceBufferSize: 128 * 1024 * 1024,
       maxTotalBufferSize: 1024 * 1024 * 1024,
     });
+    let loginRequestId: string | null = null;
+    let loginBodyReadArmed = false;
+    let loginBodyReadAfterNavigation = false;
+    let releaseLoginBodyRead: () => void = () => undefined;
+    const loginBodyReadGate = new Promise<void>((resolve) => {
+      releaseLoginBodyRead = resolve;
+    });
     const cdpBodyCapture = createProviderOverlapCdpResponseBodyCapture({
-      send: (
+      send: async (
         method: "Network.getResponseBody",
         parameters: { requestId: string },
-      ) => cdp.send(method, parameters),
+      ) => {
+        if (parameters.requestId === loginRequestId) {
+          loginBodyReadArmed = true;
+          await loginBodyReadGate;
+          loginBodyReadAfterNavigation = page.url() === `${origin}/profile`;
+        }
+        return cdp.send(method, parameters);
+      },
     });
     cdp.on("Network.responseReceived", (event) => {
+      if (event.response.url === `${origin}/login`) loginRequestId = event.requestId;
       cdpBodyCapture.observeResponseReceived(event);
     });
     cdp.on("Network.loadingFinished", (event) => {
@@ -3972,10 +3990,31 @@ test("durably captures a prior document across immediate real Chromium navigatio
     cdp.on("Network.loadingFailed", (event) => {
       cdpBodyCapture.observeLoadingFailed(event);
     });
+    type TerminalResult = { failureSha256: string | null; finished: boolean };
+    const terminals = new Map<object, {
+      promise: Promise<TerminalResult>;
+      settle: (result: TerminalResult) => void;
+    }>();
+    context.on("request", (request) => {
+      let settle: (result: TerminalResult) => void = () => undefined;
+      const promise = new Promise<TerminalResult>((resolve) => { settle = resolve; });
+      terminals.set(request, { promise, settle });
+    });
+    context.on("requestfinished", (request) => {
+      terminals.get(request)?.settle({ failureSha256: null, finished: true });
+    });
+    context.on("requestfailed", (request) => {
+      terminals.get(request)?.settle({
+        failureSha256: sha256(request.failure()?.errorText ?? "unknown request failure"),
+        finished: false,
+      });
+    });
     const captures = new Map<string, Promise<{ body: Uint8Array | null }>>();
     context.on("response", (response) => {
       const request = response.request();
       const pathname = new URL(request.url()).pathname;
+      const terminal = terminals.get(request);
+      if (!terminal) throw new Error("Durable response has no matching request terminal gate.");
       const capture = captureProviderOverlapResponseEvidence({
         classification: Object.freeze({
           disposition: "continue",
@@ -3995,21 +4034,28 @@ test("durably captures a prior document across immediate real Chromium navigatio
         ),
         request,
         response,
+        terminal: terminal.promise,
       });
       void capture.catch(() => undefined);
       captures.set(pathname, capture);
     });
     try {
-      await page.goto(`${origin}/login`, {
+      const loginResponse = await page.goto(`${origin}/login`, {
         timeout: 5_000,
-        waitUntil: "domcontentloaded",
-      }).catch((error) => {
-        if (page.url() !== `${origin}/profile`) throw error;
+        waitUntil: "load",
       });
-      await page.waitForURL(`${origin}/profile`, { timeout: 5_000, waitUntil: "load" });
+      if (!loginResponse) throw new Error("Durable login navigation has no response.");
+      const loginTerminal = terminals.get(loginResponse.request());
+      if (!loginTerminal) throw new Error("Durable login navigation has no terminal gate.");
+      await expect(loginTerminal.promise).resolves.toEqual({ failureSha256: null, finished: true });
+      await expect.poll(() => loginBodyReadArmed, { timeout: 5_000 }).toBe(true);
+      // No body read or arbitrary sleep occurs before this navigation.
+      await page.goto(`${origin}/profile`, { timeout: 5_000, waitUntil: "load" });
+      releaseLoginBodyRead();
       await expect.poll(() => captures.size, { timeout: 5_000 }).toBe(2);
       const loginCapture = await captures.get("/login");
       const profileCapture = await captures.get("/profile");
+      expect(loginBodyReadAfterNavigation).toBe(true);
       expect(Buffer.from(loginCapture?.body ?? []).toString("utf8")).toBe(loginBody);
       expect(Buffer.from(profileCapture?.body ?? []).toString("utf8")).toBe(profileBody);
       expect(upstreamPaths).toEqual(["/login", "/profile"]);
@@ -4023,6 +4069,7 @@ test("durably captures a prior document across immediate real Chromium navigatio
         status: "cdp-response-bodies-clean",
       });
     } finally {
+      releaseLoginBodyRead();
       await context.close();
     }
   } finally {

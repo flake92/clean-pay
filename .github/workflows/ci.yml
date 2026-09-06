@@ -13,6 +13,7 @@ on:
         options:
           - full
           - chatwoot-diagnostic
+          - navigation-contract
 
 permissions:
   contents: read
@@ -22,8 +23,54 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  navigation-response-contract:
+    if: github.event_name == 'workflow_dispatch' && inputs.browser_mode == 'navigation-contract'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version-file: .node-version
+          cache: npm
+      - name: Install locked dependencies and Chromium
+        run: |
+          npm ci
+          node node_modules/playwright/cli.js install --with-deps chromium
+      - name: Prove durable response capture 20 times without retries
+        env:
+          PLAYWRIGHT_JSON_OUTPUT_FILE: test-results/navigation-check/results.json
+        run: |
+          node node_modules/playwright/cli.js test provider-overlap-proof.contract.spec.ts --config tests/browser/journeys/playwright.config.ts --project journey-contract --grep 'durably captures a prior document across immediate real Chromium navigation$' --repeat-each 20 --workers 1 --retries 0 --max-failures 1 --reporter line,json --output test-results/navigation-check/artifacts
+      - name: Require exactly 20 passes with no skips or retries
+        run: |
+          node --input-type=module <<'NODE'
+          import assert from 'node:assert/strict';
+          import { readFileSync } from 'node:fs';
+          const report = JSON.parse(readFileSync('test-results/navigation-check/results.json', 'utf8'));
+          assert.equal(report.stats.expected, 20, 'Expected exactly 20 passing repetitions');
+          for (const field of ['unexpected', 'flaky', 'skipped']) {
+            assert.equal(report.stats[field], 0, `Unexpected ${field} tests`);
+          }
+          assert.equal(report.errors.length, 0, 'Unexpected runner errors');
+          console.log('NAVIGATION_CHECK_PASSED: 20/20. This is not a full CI or Chatwoot result.');
+          NODE
+      - name: Preserve focused test evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: navigation-contract-${{ github.run_id }}-${{ github.run_attempt }}
+          path: test-results/navigation-check/
+          if-no-files-found: warn
+          retention-days: 14
+
   secret-scan:
     if: >-
+      !(github.event_name == 'workflow_dispatch' && inputs.browser_mode == 'navigation-contract') &&
       !((github.event_name == 'workflow_dispatch' && inputs.browser_mode == 'chatwoot-diagnostic') ||
       (github.event_name == 'push' && contains(github.event.head_commit.message, '[chatwoot-diagnostic]')))
     runs-on: ubuntu-latest
@@ -40,6 +87,7 @@ jobs:
 
   codeql:
     if: >-
+      !(github.event_name == 'workflow_dispatch' && inputs.browser_mode == 'navigation-contract') &&
       !((github.event_name == 'workflow_dispatch' && inputs.browser_mode == 'chatwoot-diagnostic') ||
       (github.event_name == 'push' && contains(github.event.head_commit.message, '[chatwoot-diagnostic]')))
     runs-on: ubuntu-latest
@@ -61,6 +109,7 @@ jobs:
 
   static-analysis:
     if: >-
+      !(github.event_name == 'workflow_dispatch' && inputs.browser_mode == 'navigation-contract') &&
       !((github.event_name == 'workflow_dispatch' && inputs.browser_mode == 'chatwoot-diagnostic') ||
       (github.event_name == 'push' && contains(github.event.head_commit.message, '[chatwoot-diagnostic]')))
     runs-on: ubuntu-latest
@@ -114,6 +163,7 @@ jobs:
 
   validate:
     if: >-
+      !(github.event_name == 'workflow_dispatch' && inputs.browser_mode == 'navigation-contract') &&
       !((github.event_name == 'workflow_dispatch' && inputs.browser_mode == 'chatwoot-diagnostic') ||
       (github.event_name == 'push' && contains(github.event.head_commit.message, '[chatwoot-diagnostic]')))
     runs-on: ubuntu-latest
@@ -183,6 +233,7 @@ jobs:
 
   integration-services:
     if: >-
+      !(github.event_name == 'workflow_dispatch' && inputs.browser_mode == 'navigation-contract') &&
       !((github.event_name == 'workflow_dispatch' && inputs.browser_mode == 'chatwoot-diagnostic') ||
       (github.event_name == 'push' && contains(github.event.head_commit.message, '[chatwoot-diagnostic]')))
     runs-on: ubuntu-latest
@@ -243,6 +294,7 @@ jobs:
 
   database-least-privilege:
     if: >-
+      !(github.event_name == 'workflow_dispatch' && inputs.browser_mode == 'navigation-contract') &&
       !((github.event_name == 'workflow_dispatch' && inputs.browser_mode == 'chatwoot-diagnostic') ||
       (github.event_name == 'push' && contains(github.event.head_commit.message, '[chatwoot-diagnostic]')))
     runs-on: ubuntu-latest
@@ -303,6 +355,7 @@ jobs:
 
   container-security:
     if: >-
+      !(github.event_name == 'workflow_dispatch' && inputs.browser_mode == 'navigation-contract') &&
       !((github.event_name == 'workflow_dispatch' && inputs.browser_mode == 'chatwoot-diagnostic') ||
       (github.event_name == 'push' && contains(github.event.head_commit.message, '[chatwoot-diagnostic]')))
     runs-on: ubuntu-latest
@@ -550,6 +603,7 @@ jobs:
             .image-rollback-rehearsal/traffic/result.json
 
   production-image-browser-journey:
+    if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.browser_mode == 'navigation-contract') }}
     runs-on: ubuntu-latest
     timeout-minutes: 120
     env:
@@ -766,6 +820,7 @@ jobs:
 
   remnashop-migration-rehearsal:
     if: >-
+      !(github.event_name == 'workflow_dispatch' && inputs.browser_mode == 'navigation-contract') &&
       !((github.event_name == 'workflow_dispatch' && inputs.browser_mode == 'chatwoot-diagnostic') ||
       (github.event_name == 'push' && contains(github.event.head_commit.message, '[chatwoot-diagnostic]')))
     runs-on: ubuntu-latest
@@ -810,6 +865,7 @@ jobs:
 
   full-stack-e2e:
     if: >-
+      !(github.event_name == 'workflow_dispatch' && inputs.browser_mode == 'navigation-contract') &&
       !((github.event_name == 'workflow_dispatch' && inputs.browser_mode == 'chatwoot-diagnostic') ||
       (github.event_name == 'push' && contains(github.event.head_commit.message, '[chatwoot-diagnostic]')))
     runs-on: ubuntu-latest
