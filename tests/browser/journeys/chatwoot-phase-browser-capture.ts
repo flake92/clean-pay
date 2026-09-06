@@ -1109,6 +1109,55 @@ async function captureVisiblePhase(input: {
   });
 }
 
+// Project only fixed vocabulary and counts. Never log bodies, cookies, headers,
+// account identifiers, arbitrary paths or the original exception message.
+export function summarizeChatwootProviderLedgerForTest(value: unknown, phase: Phase) {
+  const expectedEffects = phase === "recreated"
+    ? recreatedProviderEffectSequence
+    : initialProviderEffectSequence;
+  const entries = isRecord(value) && Array.isArray(value.entries) ? value.entries : null;
+  const knownEffects = new Set<string>([
+    ...providerEndpointContracts.map(({ effect }) => effect),
+    "probe_contract", "read_public_plans", "read_metadata",
+  ]);
+  const knownServices = new Set<string>([
+    "chatwoot", "turnstile", "telegram-oidc", "remnashop", "remnawave",
+  ]);
+  const knownMethods = new Set<string>(["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"]);
+  const knownPaths = new Set<string>(providerEndpointContracts.map(({ pathname }) => pathname));
+  const token = (item: unknown, allowed: Set<string>) => (
+    typeof item === "string" && allowed.has(item) ? item : "unrecognized"
+  );
+  const observed = entries?.slice(0, 64).map((raw: unknown, index: number) => {
+    const entry = isRecord(raw) ? raw : {};
+    return {
+      index,
+      effect: token(entry.effect, knownEffects),
+      method: token(entry.method, knownMethods),
+      pathname: token(entry.pathname, knownPaths),
+      service: token(entry.service, knownServices),
+    };
+  }) ?? [];
+  return {
+    status: "chatwoot_provider_ledger_mismatch",
+    phase: phase === "gap" || phase === "stable" || phase === "recreated" ? phase : "unrecognized",
+    expectedEntryCount: expectedEffects.length,
+    observedEntryCount: entries?.length ?? null,
+    truncated: entries !== null && entries.length > 64,
+    expectedEffects,
+    observed,
+  };
+}
+
+function assertProviderLedgerWithDiagnostic(value: unknown, phase: Phase) {
+  try {
+    return assertProviderLedger(value, phase);
+  } catch (error) {
+    process.stderr.write(`${JSON.stringify(summarizeChatwootProviderLedgerForTest(value, phase))}\n`);
+    throw error;
+  }
+}
+
 async function waitForExactProviderLedger(controlUrl: string, phase: Phase) {
   const expectedEntryCount = phase === "recreated"
     ? recreatedProviderEffectSequence.length
@@ -1117,13 +1166,13 @@ async function waitForExactProviderLedger(controlUrl: string, phase: Phase) {
   while (true) {
     const value = await controlJson(controlUrl, "/__ledger", MAXIMUM_CONTROL_BYTES);
     if (!isRecord(value) || !Array.isArray(value.entries)) {
-      return assertProviderLedger(value, phase);
+      return assertProviderLedgerWithDiagnostic(value, phase);
     }
     if (value.entries.length >= expectedEntryCount) {
-      return assertProviderLedger(value, phase);
+      return assertProviderLedgerWithDiagnostic(value, phase);
     }
     if (Date.now() >= deadline) {
-      return assertProviderLedger(value, phase);
+      return assertProviderLedgerWithDiagnostic(value, phase);
     }
     await new Promise((resolve) => setTimeout(resolve, 25));
   }
