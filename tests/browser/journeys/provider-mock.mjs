@@ -1196,6 +1196,25 @@ async function handleRemnawave(request, response) {
 }
 
 async function handleControl(request, response) {
+  // This exact test-only bridge keeps setup traffic on the existing loopback
+  // control publication without exposing the complete Remnashop API there.
+  // Delegate before reading the body so the real fixture handler consumes it
+  // once and still enforces the service credential and session cookie.
+  const fixtureAuthPaths = {
+    "/__fixture/remnashop/auth/login": "/api/v1/public/auth/login",
+    "/__fixture/remnashop/auth/telegram/link": "/api/v1/public/auth/telegram/link",
+  };
+  if (request.method === "POST"
+    && /^authorized-unverified-email:[a-f0-9]{12}$/.test(activeScenario)
+    && Object.hasOwn(fixtureAuthPaths, request.url ?? "")) {
+    const originalUrl = request.url;
+    request.url = fixtureAuthPaths[originalUrl];
+    try {
+      return await handleRemnashop(request, response);
+    } finally {
+      request.url = originalUrl;
+    }
+  }
   const body = await readBody(request);
   const url = new URL(request.url ?? "/", "http://browser-provider-control");
   if (url.pathname === "/api/v1/widget/contact" && request.method === "GET") {

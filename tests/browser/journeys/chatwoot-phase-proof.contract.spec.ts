@@ -43,6 +43,7 @@ import {
   canonicalChatwootHistorySemantics,
   assertChatwootPhaseBoundaryLedger,
   assertChatwootPhaseProviderLedger,
+  summarizeChatwootProviderLedgerForTest,
   assertChatwootProviderPhaseRelations,
   assertChatwootStrictClassificationForTest,
   createChatwootBoundaryLifecycleCollectorForTest,
@@ -2088,6 +2089,35 @@ test("executes the common request listeners, pending drain, and late-event gate"
   const lateRequest = { ...request, url: () => "https://pay.ci.clean-pay.dev/late" };
   emit("request", lateRequest);
   expect(() => ledger.assertClean()).toThrow(/changed after the final seal/);
+});
+
+test("reports bounded provider mismatches without disclosing fixture credentials or weakening validation", () => {
+  const exact = strictProviderFixture("gap");
+  const value = structuredClone(exact);
+  const sentinel = "private-payload-must-not-be-logged";
+  value.entries.push({ ...value.entries[0], effect: sentinel, pathname: `/${sentinel}` });
+  const diagnostic = summarizeChatwootProviderLedgerForTest(value, "gap");
+  expect(diagnostic).toMatchObject({
+    status: "chatwoot_provider_ledger_mismatch",
+    phase: "gap",
+    expectedEntryCount: 15,
+    observedEntryCount: 16,
+    truncated: false,
+  });
+  expect(diagnostic.observed[15]).toMatchObject({
+    effect: "unrecognized",
+    pathname: "unrecognized",
+  });
+  expect(JSON.stringify(diagnostic)).not.toContain(sentinel);
+  expect(JSON.stringify(diagnostic)).not.toContain("body_contract");
+  expect(JSON.stringify(diagnostic)).not.toContain("credential_contract");
+  expect(() => assertChatwootPhaseProviderLedger(value, "gap"))
+    .toThrow(/incomplete or outside/);
+  expect(assertChatwootPhaseProviderLedger(exact, "gap")).toEqual(exact);
+  const oversized = { entries: Array.from({ length: 1_000 }, () => ({ effect: sentinel })) };
+  expect(summarizeChatwootProviderLedgerForTest(oversized, "gap").observed).toHaveLength(64);
+  expect(summarizeChatwootProviderLedgerForTest(oversized, "gap").truncated).toBe(true);
+  expect(summarizeChatwootProviderLedgerForTest(null, "gap").observedEntryCount).toBeNull();
 });
 
 test("decodes exact phase boundary and provider ledgers with phase-specific failures", () => {

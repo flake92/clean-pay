@@ -199,7 +199,7 @@ async function linkSyntheticTelegram(
   email: string,
   password: string,
 ) {
-  const login = await fetch(new URL("/api/v1/public/auth/login", providerControlUrl), {
+  const login = await fetch(new URL("/__fixture/remnashop/auth/login", providerControlUrl), {
     method: "POST",
     headers: {
       "content-type": "application/json",
@@ -218,7 +218,7 @@ async function linkSyntheticTelegram(
   await login.body?.cancel();
 
   const linked = await fetch(
-    new URL("/api/v1/public/auth/telegram/link", providerControlUrl),
+    new URL("/__fixture/remnashop/auth/telegram/link", providerControlUrl),
     {
       method: "POST",
       headers: {

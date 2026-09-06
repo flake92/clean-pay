@@ -57,6 +57,74 @@ type CabinetReadEvidence = {
   windows: CabinetReadWindow[];
 };
 
+test("scopes unverified-email fixture auth to the control bridge without bypassing credentials", async () => {
+  const [oidcPort, remnashopPort, remnawavePort, controlPort] = await freePorts(4);
+  const children: ChildProcess[] = [];
+  const control = `http://127.0.0.1:${controlPort}`;
+  const shop = `http://127.0.0.1:${remnashopPort}/api/v1/public`;
+  const loginUrl = `${control}/__fixture/remnashop/auth/login`;
+  const linkUrl = `${control}/__fixture/remnashop/auth/telegram/link`;
+  const account = {
+    email: "new.authorized-unverified-linked@clean-pay.dev",
+    password: "Synthetic-browser-password-42",
+  };
+  try {
+    children.push(spawnFixture("oidc-mock.mjs", { PORT: String(oidcPort) }));
+    children.push(spawnFixture("provider-mock.mjs", {
+      REMNASHOP_PORT: String(remnashopPort),
+      REMNAWAVE_PORT: String(remnawavePort),
+      CONTROL_PORT: String(controlPort),
+      OIDC_RESET_URL: `http://127.0.0.1:${oidcPort}/__reset`,
+    }));
+    await waitForOk(`${control}/__health`);
+    const request = async (url: string, options: RequestInit = {}) => {
+      const response = await fetch(url, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-remnashop-auth-service-key": authServiceKey,
+        },
+        body: JSON.stringify(account),
+        ...options,
+        signal: AbortSignal.timeout(5_000),
+      });
+      const status = response.status;
+      await response.body?.cancel();
+      return status;
+    };
+    expect(await request(loginUrl)).toBe(404);
+    await postJson(`${control}/__reset`, {
+      scenario: "authorized-unverified-email:b1a6dcac5ec4",
+    });
+    await postSession(`${shop}/auth/register`, account);
+    expect(await request(loginUrl, { headers: { "content-type": "application/json" } }))
+      .toBe(401);
+    expect(await request(linkUrl)).toBe(401);
+    expect(await request(loginUrl, { method: "GET", body: undefined })).toBe(404);
+    expect(await request(`${loginUrl}?extra=1`)).toBe(404);
+    expect(await request(`${control}/__fixture/remnashop/auth/register`)).toBe(404);
+    expect(await request(`${control}/api/v1/public/auth/login`)).toBe(404);
+    const session = await postSession(loginUrl, account);
+    const linked = await fetchJsonWithCookie(linkUrl, session.cookie, "POST", {});
+    expect(linked.email).toBe(account.email);
+    expect(linked.is_email_verified).toBe(false);
+    expect(Number.isSafeInteger(linked.telegram_id)).toBe(true);
+    const profile = await fetchJsonWithCookie(`${shop}/auth/me`, session.cookie);
+    expect(profile).toEqual(linked);
+    const ledger = await fetchJson(`${control}/__ledger`) as {
+      entries: Array<{ service: string; pathname: string; effect: string }>;
+    };
+    expect(ledger.entries).toEqual(expect.arrayContaining([
+      expect.objectContaining({ service: "remnashop", pathname: "/api/v1/public/auth/login", effect: "auth_session_issued" }),
+      expect.objectContaining({ service: "remnashop", pathname: "/api/v1/public/auth/telegram/link", effect: "telegram_linked" }),
+    ]));
+    await postJson(`${control}/__reset`, { scenario: "contract-default" });
+    expect(await request(loginUrl)).toBe(404);
+  } finally {
+    await Promise.all(children.map(stopChild));
+  }
+});
+
 test("records a bounded one-shot offers/devices overlap proof without changing disabled semantics", async () => {
   const [oidcPort, remnashopPort, remnawavePort, controlPort] = await freePorts(4);
   const children: ChildProcess[] = [];
