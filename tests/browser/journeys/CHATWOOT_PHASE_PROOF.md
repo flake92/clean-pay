@@ -259,3 +259,30 @@ validation, endpoint-specific provider decoding, descriptor-only cookie HMAC,
 byte quorum, pre-start receipt, immutable FileHandle input, input envelope,
 near misses, partial-create cleanup, write-once policy, and cleanup association
 without starting Docker or issuing a reset.
+
+
+## Causal provider-ledger contract (profile-to-cabinet capture)
+
+The provider contract includes the readiness probes from `backend/health/checks.ts`
+and both the initial `/profile` support context and the subsequent `/cabinet`
+context. Gap and Stable require exactly 28 entries. Recreated requires that same
+raw ordered prefix and exactly 15 further entries for the warmed second login
+and direct cabinet visit (43 cumulative). This second-login count is a source-
+derived expectation and must be confirmed by the live six-stack proof; an
+unexpected additional JWKS read or readiness pass fails, rather than being ignored.
+
+Provider events are checked against explicit causal stages. Only independent
+readiness tasks, the two profile reads, and the cabinet read group may vary in
+arrival order. The sequential Remnashop probes, OIDC flow, subscription before
+Remnawave lookup, document boundaries, support reads and contact probes retain
+their required ordering. All endpoint, query, body, credential and idempotency
+checks remain active. Readiness POST bodies must be exactly `{}`.
+
+Raw ledgers remain unmodified for atomic snapshots, final rereads and same-stack
+Gap -> Stable -> Recreated prefix checks. For cross-image HMAC comparison only,
+`chatwoot-provider-ledger-order.mjs` orders entries inside those validated groups
+and gives the comparison view positional sequence numbers. No event, body field,
+credential projection, or database snapshot is removed. This is an explicit
+extension to the provider arrival-order comparison described above, not a change
+to browser request, Server Action, boundary-call, DOM, or screenshot comparison.
+The new module is included in the fixture manifest on both sides.

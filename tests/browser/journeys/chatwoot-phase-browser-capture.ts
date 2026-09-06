@@ -24,6 +24,10 @@ import {
   recordNetwork,
 } from "../network-recorder";
 import { canonicalChatwootPhaseEvidence } from "./chatwoot-phase-canonical-evidence";
+import {
+  assertChatwootProviderCausalOrder,
+  chatwootProviderExpectedEffects,
+} from "./chatwoot-provider-ledger-order.mjs";
 import { createChatwootPhaseCausalContract } from "./chatwoot-phase-causal-contract.mjs";
 import {
   assertChatwootPhaseRedirect,
@@ -58,6 +62,15 @@ const MAXIMUM_STORAGE_KEYS = 128;
 const VIEWPORT = Object.freeze({ width: 1440, height: 900 });
 const EMPTY_BODY_SHA256 = sha256Text("");
 const providerEndpointContracts = Object.freeze([
+  providerEndpoint("remnashop", "GET", "/api/v1/public/plans/public", [],
+    "read_public_plans", "none", [], null, []),
+  providerEndpoint("remnawave", "GET", "/api/system/metadata", [],
+    "read_metadata", "none", ["authorization"], "Bearer", []),
+  ...[
+    "/api/v1/public/auth/email/start", "/api/v1/public/auth/identify",
+    "/api/v1/public/auth/service-session", "/api/v1/public/auth/notification-preferences",
+  ].map((pathname) => providerEndpoint("remnashop", "POST", pathname, [],
+    "probe_contract", ["json", []], ["x-remnashop-auth-service-key"], null, [])),
   providerEndpoint("chatwoot", "GET", "/api/v1/widget/contact", ["website_token"],
     "contact_identity_probed", "none", ["x-auth-token"], null, []),
   providerEndpoint("turnstile", "POST", "/turnstile/v0/siteverify", [],
@@ -94,39 +107,8 @@ const providerEndpointContracts = Object.freeze([
   providerEndpoint("remnawave", "GET", "/api/users/rw-browser-1", [],
     "read_user_by_uuid", "none", ["authorization"], "Bearer", []),
 ]);
-const initialProviderEffectSequence = Object.freeze([
-  "challenge_verified",
-  "authorization_code_issued",
-  "token_exchanged",
-  "auth_session_issued",
-  "read_profile",
-  "read_profile",
-  "read_profile",
-  "read_referral_program",
-  "read_subscription",
-  "read_offers",
-  "read_devices",
-  "read_user_by_uuid",
-  "read_profile",
-  "read_subscription",
-  "contact_identity_probed",
-]);
-const recreatedProviderEffectSequence = Object.freeze([
-  ...initialProviderEffectSequence,
-  "challenge_verified",
-  "authorization_code_issued",
-  "token_exchanged",
-  "auth_session_issued",
-  "read_profile",
-  "read_profile",
-  "read_profile",
-  "read_referral_program",
-  "read_subscription",
-  "read_offers",
-  "read_devices",
-  "read_user_by_uuid",
-  "contact_identity_probed",
-]);
+const initialProviderEffectSequence = chatwootProviderExpectedEffects("gap");
+const recreatedProviderEffectSequence = chatwootProviderExpectedEffects("recreated");
 type Phase = "gap" | "stable" | "recreated";
 type Role = "baseline" | "candidate";
 
@@ -1028,7 +1010,7 @@ async function captureVisiblePhase(input: {
     network: input.network,
     providerEffects: provider,
     storage,
-  });
+  }, input.phase);
   const sealed = input.input.sealer.sealPhase({
     cookies,
     phase: input.phase,
@@ -3371,7 +3353,7 @@ function assertProviderLedger(value: unknown, phase: Phase): ProviderLedger {
       && contract.pathname === entry.pathname
       && contract.effect === entry.effect
     ));
-    if (entry.sequence !== index + 1 || entry.effect !== expectedEffects[index] || !endpoint
+    if (entry.sequence !== index + 1 || !endpoint
       || !isDenseArray(entry.query_keys)
       || stableJson(entry.query_keys) !== stableJson(endpoint.queryKeys)
       || !Number.isSafeInteger(entry.body_bytes) || Number(entry.body_bytes) < 0
@@ -3390,6 +3372,10 @@ function assertProviderLedger(value: unknown, phase: Phase): ProviderLedger {
       endpoint,
       index,
     );
+    if (endpoint.effect === "probe_contract"
+      && (entry.body_bytes !== 2 || entry.body_sha256 !== sha256Text("{}"))) {
+      throw new Error(`Chatwoot provider entry ${index} readiness body is not exactly empty JSON.`);
+    }
     if (entry.idempotency_key_present !== false
       || entry.idempotency_key_sha256 !== null
       || entry.idempotency_key_contract !== null) {
@@ -3411,8 +3397,9 @@ function assertProviderLedger(value: unknown, phase: Phase): ProviderLedger {
       service: endpoint.service,
     }));
   }
+  assertChatwootProviderCausalOrder(entries, phase);
   const contactProbeCount = entries.filter(({ effect }) => effect === "contact_identity_probed").length;
-  const expectedContactProbeCount = phase === "recreated" ? 2 : 1;
+  const expectedContactProbeCount = phase === "recreated" ? 3 : 2;
   if (contactProbeCount !== expectedContactProbeCount) {
     throw new Error(`Chatwoot ${phase} provider effects do not prove the expected contact lifecycle.`);
   }
