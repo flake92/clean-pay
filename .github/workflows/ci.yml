@@ -718,10 +718,10 @@ jobs:
           import assert from 'node:assert/strict';
           import { readFileSync } from 'node:fs';
           const report = JSON.parse(readFileSync('test-results/chatwoot-ledger-check/results.json', 'utf8'));
-          assert.equal(report.stats.expected, 20, 'Expected exactly 20 provider contract tests');
+          assert.equal(report.stats.expected, 29, 'Expected exactly 29 provider contract tests');
           for (const field of ['unexpected', 'flaky', 'skipped']) assert.equal(report.stats[field], 0);
           assert.equal(report.errors.length, 0);
-          console.log('CHATWOOT_LEDGER_CONTRACT_PASSED: 20/20. Live lifecycle proof still required.');
+          console.log('CHATWOOT_LEDGER_CONTRACT_PASSED: 29/29. Live lifecycle proof still required.');
           NODE
       - name: Build four production images for the live pair
         run: |
