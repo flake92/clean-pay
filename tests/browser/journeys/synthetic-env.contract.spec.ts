@@ -10,6 +10,7 @@ import { createInterface } from "node:readline";
 import { expect, test } from "@playwright/test";
 
 import { assertSyntheticCaddyRouteOrder } from "./caddy-route-policy";
+import { observeSyntheticChatwootConfirmationDelays } from "./chatwoot-fixture-timing.mjs";
 import { currentJourneyFixtureContractSha256 } from "./journey-fixture-contract";
 
 const script = path.resolve(__dirname, "prepare-synthetic-env.mjs");
@@ -106,10 +107,10 @@ test("materializes two deterministic self-contained role environments", async ()
       path.resolve(__dirname, "provider-mock.mjs"),
       "utf8",
     );
-    const identityConfirmationDelayMs = Number(
-      /\}\), ([0-9_]+)\);\n    \}\);\n    send\(\{ event: "loaded" \}\);/
-        .exec(caddySource)?.[1].replaceAll("_", ""),
-    );
+    const timing = observeSyntheticChatwootConfirmationDelays(caddySource);
+    const { identityConfirmationDelayMs } = timing;
+    expect(timing.fallbackDelaysMs).toEqual([1_200, 1_200, 1_200, 1_200]);
+    expect(timing.fastIdentityConfirmationDelayMs).toBe(0);
     const ownershipFallbackDelayMs = Number(
       /CLEAN_PAY_BROWSER_CHATWOOT_CONTACT_RESPONSE_DELAY_MS",\n  ([0-9_]+),/
         .exec(providerSource)?.[1].replaceAll("_", ""),
