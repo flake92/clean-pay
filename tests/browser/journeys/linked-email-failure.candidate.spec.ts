@@ -53,10 +53,10 @@ test("authorized linked-email failures expose only the exact actionable feedback
     .toBeVisible();
   await expect(page.getByRole("heading", { name: "Добавьте резервный вход", level: 2 }))
     .toBeVisible();
-  await expect(page.getByLabel("E-mail")).toBeVisible();
+  await expect(page.getByRole("textbox", { name: "E-mail", exact: true })).toBeVisible();
   await expect(page.getByText(/^Telegram ID: /u)).toHaveCount(0);
 
-  const email = page.getByLabel("E-mail");
+  const email = page.getByRole("textbox", { name: "E-mail", exact: true });
   const passwordInput = page.getByLabel("Пароль для входа");
   const confirmation = page.getByLabel("Повторите пароль");
   const submit = page.getByRole("button", { name: "Сохранить e-mail и пароль" });

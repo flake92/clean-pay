@@ -1,7 +1,10 @@
+import { isDeepStrictEqual } from "node:util";
+
 // Phase-specific causal ordering for the production-image Chatwoot journey.
 // Sources: backend/health/checks.ts; application/profile/load-profile.ts;
 // application/cabinet/load-cabinet.ts; the capture's profile -> cabinet navigation.
-// Only independent reads within an explicit stage may change arrival order.
+// Readiness and browser login are independent lanes; only their own causal
+// constraints are ordered. Raw arrival order remains available to phase checks.
 // This module never drops an entry, changes a body, or validates credentials.
 // The caller must retain the endpoint/body/credential decoder and raw-prefix checks.
 
@@ -60,6 +63,95 @@ export function chatwootProviderExpectedEffects(phase) {
   return Object.freeze(planFor(phase).flatMap(({ items }) => items.map(({ effect }) => effect)));
 }
 
+function matchesItem(entry, expected) {
+  return entry.effect === expected.effect
+    && (expected.pathname === null || expected.pathname === entry.pathname);
+}
+
+// Match the browser lane after independent readiness entries have been assigned.
+// No entry is discarded: the returned permutation is checked again below.
+function orderedStagePositions(entries, stages) {
+  const positions = [];
+  let offset = 0;
+  for (const [stageIndex, stage] of stages.entries()) {
+    const stageEntries = entries.slice(offset, offset + stage.items.length);
+    const found = stage.items.map((expected) => {
+      const matches = [];
+      for (let index = 0; index < stageEntries.length; index += 1) {
+        if (matchesItem(stageEntries[index], expected)) matches.push(index);
+      }
+      if (matches.length !== 1) {
+        throw new Error(`Chatwoot provider causal stage ${stageIndex} escaped its exact endpoint contract.`);
+      }
+      return matches[0];
+    });
+    if (new Set(found).size !== stage.items.length
+      || stage.before.some(([left, right]) => found[left] >= found[right])) {
+      throw new Error(`Chatwoot provider causal stage ${stageIndex} escaped its exact endpoint contract.`);
+    }
+    positions.push(...found.map((index) => index + offset));
+    offset += stage.items.length;
+  }
+  if (offset !== entries.length) {
+    throw new Error("Chatwoot provider lane escaped its exact endpoint contract.");
+  }
+  return positions;
+}
+
+function initialPositions(entries) {
+  const readinessItems = readiness.items.slice(1); // Turnstile belongs to login.
+  const candidates = readinessItems.map((expected) => entries.flatMap((entry, index) => (
+    matchesItem(entry, expected) ? [index] : []
+  )));
+  // One readiness JWKS fetch and one token-verification fetch have the same
+  // endpoint. Try both assignments, not a greedy 'first JWKS is readiness'.
+  for (const [index, expected] of readinessItems.entries()) {
+    if (candidates[index].length !== (expected.effect === "jwks_read" ? 2 : 1)) {
+      throw new Error("Chatwoot readiness lane escaped its exact endpoint contract.");
+    }
+  }
+  const jwksIndex = readinessItems.findIndex(({ effect }) => effect === "jwks_read");
+  const valid = [];
+  for (const jwksPosition of candidates[jwksIndex]) {
+    const readinessPositions = candidates.map((matches, index) => (
+      index === jwksIndex ? jwksPosition : matches[0]
+    ));
+    const used = new Set(readinessPositions);
+    const browserPositions = entries.flatMap((_, index) => used.has(index) ? [] : [index]);
+    let browserOrder;
+    try {
+      browserOrder = orderedStagePositions(
+        browserPositions.map((index) => entries[index]),
+        [one("challenge_verified"), ...initial.slice(1)],
+      ).map((index) => browserPositions[index]);
+    } catch {
+      continue;
+    }
+    const firstStage = [browserOrder[0], ...readinessPositions];
+    if (readiness.before.some(([left, right]) => firstStage[left] >= firstStage[right])) {
+      continue;
+    }
+    valid.push([...firstStage, ...browserOrder.slice(1)]);
+  }
+  if (valid.length === 0) {
+    throw new Error("Chatwoot provider independent lanes escaped their exact endpoint contract.");
+  }
+  if (valid.length > 1) {
+    // The trace cannot distinguish identical JWKS reads. Permit that ambiguity
+    // only when the entire compared entry is identical apart from its position.
+    // Different payloads, credentials or digests are never silently reassigned.
+    const content = (positions) => positions.map((index) => {
+      const entry = { ...entries[index] };
+      delete entry.sequence;
+      return entry;
+    });
+    if (!valid.every((positions) => isDeepStrictEqual(content(positions), content(valid[0])))) {
+      throw new Error("Chatwoot JWKS assignment is ambiguous outside its exact endpoint contract.");
+    }
+  }
+  return valid[0];
+}
+
 function stagePositions(entries, phase) {
   const plan = planFor(phase);
   const size = plan.reduce((sum, { items }) => sum + items.length, 0);
@@ -73,30 +165,14 @@ function stagePositions(entries, phase) {
       throw new Error("Chatwoot provider sequence escaped its exact endpoint contract.");
     }
   }
-  const positions = [];
-  let offset = 0;
-  for (const [stageIndex, stage] of plan.entries()) {
-    const stageEntries = entries.slice(offset, offset + stage.items.length);
-    const found = stage.items.map((expected) => {
-      const matches = [];
-      for (let index = 0; index < stageEntries.length; index += 1) {
-        const entry = stageEntries[index];
-        if (entry.effect === expected.effect
-          && (expected.pathname === null || expected.pathname === entry.pathname)) {
-          matches.push(index);
-        }
-      }
-      if (matches.length !== 1) {
-        throw new Error(`Chatwoot provider causal stage ${stageIndex} escaped its exact endpoint contract.`);
-      }
-      return matches[0];
-    });
-    if (new Set(found).size !== stage.items.length
-      || stage.before.some(([left, right]) => found[left] >= found[right])) {
-      throw new Error(`Chatwoot provider causal stage ${stageIndex} escaped its exact endpoint contract.`);
-    }
-    positions.push(...found.map((index) => index + offset));
-    offset += stage.items.length;
+  const initialSize = initial.reduce((sum, { items }) => sum + items.length, 0);
+  const positions = initialPositions(entries.slice(0, initialSize));
+  if (phase === "recreated") {
+    positions.push(...orderedStagePositions(entries.slice(initialSize), recreated.slice(initial.length))
+      .map((index) => index + initialSize));
+  }
+  if (positions.length !== entries.length || new Set(positions).size !== entries.length) {
+    throw new Error("Chatwoot provider assignment escaped its exact endpoint contract.");
   }
   return positions;
 }

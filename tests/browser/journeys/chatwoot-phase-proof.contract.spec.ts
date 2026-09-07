@@ -2372,6 +2372,65 @@ test("Chatwoot causal provider comparison preserves changed bytes rather than bl
   expect(() => assertChatwootPhaseProviderLedger(extra, "gap")).toThrow(/incomplete or outside/);
 });
 
+// Actual interleavings from run 34059555047. Numbers identify entries in
+// strictProviderFixture, not observed sequence numbers. Bodies stay unchanged.
+const observedReadinessInterleavings = [
+  [0, 8, 9, 10, 11, 12, 1, 3, 4, 2, 5, 6, 13, 7, 14, 15, 16, 17,
+    18, 19, 20, 21, 22, 23, 24, 25, 26, 27],
+  [0, 8, 1, 2, 4, 3, 5, 9, 6, 10, 7, 11, 12, 13, 14, 15, 16, 17,
+    18, 19, 20, 21, 22, 23, 24, 25, 26, 27],
+];
+
+for (const [observation, order] of observedReadinessInterleavings.entries()) {
+  for (const phase of ["gap", "stable", "recreated"] as const) {
+    test(`Chatwoot causal provider lanes accept observed interleaving ${observation} in ${phase}`, () => {
+      const original = strictProviderFixture(phase);
+      const changed = structuredClone(original);
+      const indexes = [...order, ...original.entries.slice(28).map((_, index) => index + 28)];
+      changed.entries = indexes.map((index, sequence) => ({
+        ...structuredClone(original.entries[index]), sequence: sequence + 1,
+      }));
+      const before = structuredClone(changed);
+      expect(assertChatwootPhaseProviderLedger(changed, phase)).toEqual(changed);
+      expect(canonicalizeChatwootProviderArrivalOrder(changed.entries, phase))
+        .toEqual(canonicalizeChatwootProviderArrivalOrder(original.entries, phase));
+      const a = canonicalEvidenceInput("1".repeat(64));
+      const b = canonicalEvidenceInput("1".repeat(64));
+      a.providerEffects = original as never;
+      b.providerEffects = changed as never;
+      expect(canonicalChatwootPhaseEvidence(a, phase)).toEqual(canonicalChatwootPhaseEvidence(b, phase));
+      expect(changed).toEqual(before);
+    });
+  }
+}
+
+test("Chatwoot causal provider lanes accept indistinguishable overlapping JWKS reads only", () => {
+  const original = strictProviderFixture("gap");
+  const changed = structuredClone(original);
+  const order = [0, 1, 2, 4, 5, 6, 7, 8, 9, 3, 10, ...Array.from({ length: 17 }, (_, i) => i + 11)];
+  changed.entries = order.map((index, sequence) => ({ ...original.entries[index], sequence: sequence + 1 }));
+  expect(assertChatwootPhaseProviderLedger(changed, "gap")).toEqual(changed);
+  expect(canonicalizeChatwootProviderArrivalOrder(changed.entries, "gap"))
+    .toEqual(canonicalizeChatwootProviderArrivalOrder(original.entries, "gap"));
+  changed.entries[9] = { ...changed.entries[9], body_sha256: "a".repeat(64) };
+  expect(() => canonicalizeChatwootProviderArrivalOrder(changed.entries, "gap"))
+    .toThrow(/ambiguous outside its exact endpoint contract/);
+});
+
+test("Chatwoot causal provider lanes reject both JWKS reads before token exchange", () => {
+  const value = strictProviderFixture("gap");
+  [value.entries[9], value.entries[10]] = [value.entries[10], value.entries[9]];
+  value.entries.forEach((entry, index) => { entry.sequence = index + 1; });
+  expect(() => assertChatwootPhaseProviderLedger(value, "gap")).toThrow(/exact endpoint contract/);
+});
+
+test("Chatwoot causal provider lanes keep readiness before a recreated generation boundary", () => {
+  const value = strictProviderFixture("recreated");
+  [value.entries[7], value.entries[28]] = [value.entries[28], value.entries[7]];
+  value.entries.forEach((entry, index) => { entry.sequence = index + 1; });
+  expect(() => assertChatwootPhaseProviderLedger(value, "recreated")).toThrow(/exact endpoint contract/);
+});
+
 test("collects every boundary method and exposes late custom calls to the final reread", () => {
   const collector = createChatwootBoundaryLifecycleCollectorForTest();
   const firstDocumentToken = "11111111-1111-4111-8111-111111111111";
