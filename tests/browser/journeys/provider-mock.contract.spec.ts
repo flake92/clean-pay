@@ -1,10 +1,15 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { createHash } from "node:crypto";
-import { once } from "node:events";
-import { createServer } from "node:net";
 import path from "node:path";
 
 import { expect, test } from "@playwright/test";
+
+import {
+  allocateDistinctFixturePorts as freePorts,
+  observeFixtureChild,
+  stopFixtureChild as stopChild,
+  waitForFixtureOk,
+} from "./fixture-process-lifecycle.mjs";
 
 const journeyDirectory = path.resolve(__dirname);
 const authServiceKey = digest("clean-pay-browser-journey:remnashop-auth");
@@ -76,7 +81,7 @@ test("scopes unverified-email fixture auth to the control bridge without bypassi
       CONTROL_PORT: String(controlPort),
       OIDC_RESET_URL: `http://127.0.0.1:${oidcPort}/__reset`,
     }));
-    await waitForOk(`${control}/__health`);
+    await waitForOk(`${control}/__health`, children);
     const request = async (url: string, options: RequestInit = {}) => {
       const response = await fetch(url, {
         method: "POST",
@@ -146,8 +151,8 @@ test("records a bounded one-shot offers/devices overlap proof without changing d
     const control = `http://127.0.0.1:${controlPort}`;
     const shop = `http://127.0.0.1:${remnashopPort}/api/v1/public`;
     await Promise.all([
-      waitForOk(`${control}/__health`),
-      waitForOk(`http://127.0.0.1:${oidcPort}/.well-known/jwks.json`),
+      waitForOk(`${control}/__health`, children),
+      waitForOk(`http://127.0.0.1:${oidcPort}/.well-known/jwks.json`, children),
     ]);
     expect(await concurrencyEvidence(control)).toEqual({
       contractVersion: 1,
@@ -384,8 +389,8 @@ test("two reset/seed cycles restore every mutable provider and OIDC state", asyn
     const oidc = `http://127.0.0.1:${oidcPort}`;
     const wave = `http://127.0.0.1:${remnawavePort}`;
     await Promise.all([
-      waitForOk(`${control}/__health`),
-      waitForOk(`${oidc}/.well-known/jwks.json`),
+      waitForOk(`${control}/__health`, children),
+      waitForOk(`${oidc}/.well-known/jwks.json`, children),
     ]);
 
     const first = await mutateAndReset({ control, shop, oidc });
@@ -454,7 +459,7 @@ test("waits within the reset boundary when provider control binds before OIDC", 
       OIDC_RESET_URL: `http://127.0.0.1:${oidcPort}/__reset`,
     }));
     const control = `http://127.0.0.1:${controlPort}`;
-    await waitForOk(`${control}/__health`);
+    await waitForOk(`${control}/__health`, children);
 
     const reset = postJson(`${control}/__reset`, { scenario: "delayed-oidc-start" });
     await new Promise((resolve) => setTimeout(resolve, 150));
@@ -491,7 +496,7 @@ test("scopes opaque linked-email auth failures to the exact authorized candidate
 
     const control = `http://127.0.0.1:${controlPort}`;
     const shop = `http://127.0.0.1:${remnashopPort}/api/v1/public`;
-    await waitForOk(`${control}/__health`);
+    await waitForOk(`${control}/__health`, children);
     await postJson(`${control}/__reset`, {
       scenario: "authorized-linked-email-feedback:contract",
     });
@@ -565,7 +570,7 @@ test("preserves a verified email identity across login and isolates Telegram aut
     const control = `http://127.0.0.1:${controlPort}`;
     const shop = `http://127.0.0.1:${remnashopPort}/api/v1/public`;
     const admin = `http://127.0.0.1:${remnashopPort}/api/v1/admin`;
-    await waitForOk(`${control}/__health`);
+    await waitForOk(`${control}/__health`, children);
     const email = "new.contract@clean-pay.dev";
     const registration = await postSession(`${shop}/auth/register`, {
       email,
@@ -688,7 +693,7 @@ test("enforces synthetic credentials and models merge, password, and Remnawave i
     const shop = `http://127.0.0.1:${remnashopPort}/api/v1/public`;
     const admin = `http://127.0.0.1:${remnashopPort}/api/v1/admin`;
     const wave = `http://127.0.0.1:${remnawavePort}`;
-    await waitForOk(`${control}/__health`);
+    await waitForOk(`${control}/__health`, children);
     await postJson(`${control}/__reset`, {});
 
     const rejected = await fetch(`${shop}/auth/login`, {
@@ -805,7 +810,7 @@ test("accepts only exact single-use Turnstile action tokens and synthetic secret
       OIDC_RESET_URL: `http://127.0.0.1:${oidcPort}/__reset`,
     }));
     const control = `http://127.0.0.1:${controlPort}`;
-    await waitForOk(`${control}/__health`);
+    await waitForOk(`${control}/__health`, children);
     await postJson(`${control}/__reset`, {});
     const token = "synthetic-turnstile-token:auth_login:synthetic-turnstile-1:1";
     const verify = (secret: string) => fetch(`${control}/turnstile/v0/siteverify`, {
@@ -841,7 +846,7 @@ test("payment idempotency survives lost and rate-limited committed responses and
     }));
     const control = `http://127.0.0.1:${controlPort}`;
     const shop = `http://127.0.0.1:${remnashopPort}/api/v1/public`;
-    await waitForOk(`${control}/__health`);
+    await waitForOk(`${control}/__health`, children);
     await postJson(`${control}/__reset`, {});
     const login = await postSession(`${shop}/auth/login`, {
       email: "synthetic.browser@clean-pay.dev",
@@ -922,7 +927,7 @@ test("Chatwoot contact probe validates the synthetic inbox and records only cred
       CLEAN_PAY_BROWSER_CHATWOOT_PRE_CABINET_CONTACT_RESPONSE_DELAY_MS: "75",
     }));
     const control = `http://127.0.0.1:${controlPort}`;
-    await waitForOk(`${control}/__health`);
+    await waitForOk(`${control}/__health`, children);
     const websiteToken = digest("clean-pay-browser-journey:chatwoot-website");
     const conversation = "csyntheticbrowserjourney01";
     const acceptedStartedAt = performance.now();
@@ -989,8 +994,8 @@ test("Chatwoot contact timing switches only after a real cabinet read and resets
     const control = `http://127.0.0.1:${controlPort}`;
     const shop = `http://127.0.0.1:${remnashopPort}/api/v1/public`;
     await Promise.all([
-      waitForOk(`${control}/__health`),
-      waitForOk(`http://127.0.0.1:${oidcPort}/.well-known/jwks.json`),
+      waitForOk(`${control}/__health`, children),
+      waitForOk(`http://127.0.0.1:${oidcPort}/.well-known/jwks.json`, children),
     ]);
     const websiteToken = digest("clean-pay-browser-journey:chatwoot-website");
     const conversation = "csyntheticbrowserjourney01";
@@ -1317,46 +1322,9 @@ function spawnFixture(filename: string, environment: Record<string, string>) {
     stdio: ["ignore", "pipe", "pipe"],
     windowsHide: true,
   });
-  child.stdout?.resume();
-  child.stderr?.resume();
-  return child;
+  return observeFixtureChild(child, filename);
 }
 
-async function stopChild(child: ChildProcess) {
-  if (child.exitCode !== null || child.signalCode !== null) return;
-  child.kill();
-  await Promise.race([
-    once(child, "exit"),
-    new Promise((resolve) => setTimeout(resolve, 2_000)),
-  ]);
-  if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
-}
-
-async function freePorts(count: number) {
-  const ports: number[] = [];
-  for (let index = 0; index < count; index += 1) {
-    const server = createServer();
-    server.listen(0, "127.0.0.1");
-    await once(server, "listening");
-    const address = server.address();
-    if (!address || typeof address === "string") throw new Error("Could not allocate a port.");
-    ports.push(address.port);
-    server.close();
-    await once(server, "close");
-  }
-  return ports;
-}
-
-async function waitForOk(url: string) {
-  const deadline = Date.now() + 10_000;
-  while (Date.now() < deadline) {
-    try {
-      const response = await fetch(url);
-      if (response.ok) return;
-    } catch {
-      // Fixture process may still be binding its socket.
-    }
-    await new Promise((resolve) => setTimeout(resolve, 50));
-  }
-  throw new Error(`Fixture did not become ready: ${url}`);
+async function waitForOk(url: string, children: ChildProcess[]) {
+  await waitForFixtureOk(url, { children });
 }

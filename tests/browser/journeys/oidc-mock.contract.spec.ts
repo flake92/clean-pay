@@ -2,10 +2,16 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { createHash } from "node:crypto";
 import { once } from "node:events";
 import { createServer } from "node:http";
-import { createServer as createNetServer } from "node:net";
 import path from "node:path";
 
 import { expect, test } from "@playwright/test";
+
+import {
+  allocateDistinctFixturePorts as freePorts,
+  observeFixtureChild,
+  stopFixtureChild as stopChild,
+  waitForFixtureOk,
+} from "./fixture-process-lifecycle.mjs";
 
 const directory = path.resolve(__dirname);
 const clientId = "7654321098";
@@ -40,11 +46,10 @@ test("validates OIDC PKCE, Basic auth, redirect, single use, and sanitized ledge
     stdio: ["ignore", "pipe", "pipe"],
     windowsHide: true,
   });
-  child.stdout?.resume();
-  child.stderr?.resume();
+  observeFixtureChild(child, "oidc-mock.mjs");
   try {
     const origin = `http://127.0.0.1:${oidcPort}`;
-    await waitForOk(`${origin}/.well-known/jwks.json`);
+    await waitForFixtureOk(`${origin}/.well-known/jwks.json`, { children: [child] });
     events.length = 0;
     const verifier = "synthetic-browser-pkce-verifier-00000000000000000000000000000000";
     const authorization = authorizationUrl(origin, verifier);
@@ -113,11 +118,10 @@ test("rejects authorize and token contract near misses", async () => {
     stdio: ["ignore", "pipe", "pipe"],
     windowsHide: true,
   });
-  child.stdout?.resume();
-  child.stderr?.resume();
+  observeFixtureChild(child, "oidc-mock.mjs");
   try {
     const origin = `http://127.0.0.1:${oidcPort}`;
-    await waitForOk(`${origin}/.well-known/jwks.json`);
+    await waitForFixtureOk(`${origin}/.well-known/jwks.json`, { children: [child] });
     const wrongScope = authorizationUrl(origin, "v".repeat(64));
     wrongScope.searchParams.set("scope", "openid");
     expect((await fetch(wrongScope, { redirect: "manual" })).status).toBe(400);
@@ -141,41 +145,6 @@ function authorizationUrl(origin: string, verifier: string) {
   value.searchParams.set("code_challenge_method", "S256");
   value.searchParams.set("test_user", "900000001");
   return value;
-}
-
-async function freePorts(count: number) {
-  const ports: number[] = [];
-  for (let index = 0; index < count; index += 1) {
-    const server = createNetServer();
-    server.listen(0, "127.0.0.1");
-    await once(server, "listening");
-    const address = server.address();
-    if (!address || typeof address === "string") throw new Error("Could not allocate port.");
-    ports.push(address.port);
-    server.close();
-    await once(server, "close");
-  }
-  return ports;
-}
-
-async function waitForOk(url: string) {
-  const deadline = Date.now() + 10_000;
-  while (Date.now() < deadline) {
-    try {
-      if ((await fetch(url)).ok) return;
-    } catch {
-      // Child may still be binding its socket.
-    }
-    await new Promise((resolve) => setTimeout(resolve, 50));
-  }
-  throw new Error(`Fixture did not become ready: ${url}`);
-}
-
-async function stopChild(child: ChildProcess) {
-  if (child.exitCode !== null || child.signalCode !== null) return;
-  child.kill();
-  await Promise.race([once(child, "exit"), new Promise((resolve) => setTimeout(resolve, 2_000))]);
-  if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
 }
 
 function digest(value: string) {
