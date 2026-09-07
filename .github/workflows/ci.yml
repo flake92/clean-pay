@@ -723,6 +723,20 @@ jobs:
           assert.equal(report.errors.length, 0);
           console.log('CHATWOOT_LEDGER_CONTRACT_PASSED: 29/29. Live lifecycle proof still required.');
           NODE
+      - name: Verify browser observation boundaries before image builds
+        env:
+          PLAYWRIGHT_JSON_OUTPUT_FILE: test-results/browser-observation-check/results.json
+        run: |
+          node node_modules/playwright/cli.js test browser-observation-boundaries.contract.spec.ts --config tests/browser/journeys/playwright.config.ts --project journey-contract --workers 1 --retries 0 --max-failures 1 --reporter line,json --output test-results/browser-observation-check/artifacts
+          node --input-type=module <<'NODE'
+          import assert from 'node:assert/strict';
+          import { readFileSync } from 'node:fs';
+          const report = JSON.parse(readFileSync('test-results/browser-observation-check/results.json', 'utf8'));
+          assert.equal(report.stats.expected, 14, 'Expected exactly 14 observation boundary tests');
+          for (const field of ['unexpected', 'flaky', 'skipped']) assert.equal(report.stats[field], 0);
+          assert.equal(report.errors.length, 0);
+          console.log('BROWSER_OBSERVATION_CONTRACT_PASSED: 14/14. Live application proof still required.');
+          NODE
       - name: Build four production images for the live pair
         run: |
           node tests/browser/journeys/run-production-image-live-overlap.mjs run \
@@ -800,6 +814,7 @@ jobs:
           path: |
             test-results/browser
             test-results/browser-journeys
+            test-results/browser-observation-check
             test-results/chatwoot-ledger-check
             test-results/browser-journey-contract-evidence
             test-results/browser-public-overlap

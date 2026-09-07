@@ -51,6 +51,8 @@ export const JOURNEY_FIXTURE_FILENAMES = Object.freeze([
   "authenticated-journey-capture-mode.contract.spec.ts",
   "authenticated-journey-capture-mode.ts",
   "application.journey.spec.ts",
+  "browser-observation-boundaries.ts",
+  "browser-observation-boundaries.contract.spec.ts",
   "caddy-route-policy.ts",
   "chatwoot-phase-browser-capture.ts",
   "chatwoot-phase-browser-contract.mjs",
