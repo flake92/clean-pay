@@ -6,6 +6,10 @@ import type { Page, Route } from "@playwright/test";
 
 import { test, expect } from "../fixtures";
 import { recordNetwork } from "../network-recorder";
+import {
+  assertLinkedEmailSubmissionNetwork,
+  isLinkedEmailSubmissionRequest,
+} from "./browser-observation-boundaries";
 import { isJourneyBrowserRequestAllowed } from "./journey-browser-policy";
 import {
   AUTHORIZED_LINKED_EMAIL_FAILURE_SEMANTIC_DIFF,
@@ -17,6 +21,11 @@ const applicationOrigin = "https://pay.ci.clean-pay.dev";
 const finalRoute = "/link-account?reason=email-required";
 const targetEmail = "linked-email-existing@clean-pay.dev";
 const password = "wrong-password";
+const submission = Object.freeze({
+  url: new URL(finalRoute, applicationOrigin).href,
+  email: targetEmail,
+  password,
+});
 const authFailedMessage = "Неверный e-mail или пароль.";
 const rateLimitedMessage = "Слишком много попыток. Попробуйте позже.";
 const genericFallback = "Не удалось связать e-mail с аккаунтом.";
@@ -68,9 +77,10 @@ test("authorized linked-email failures expose only the exact actionable feedback
   const ledgerBefore = await providerLedger(environment.providerControlUrl);
   const databaseBefore = ledgerBefore.database;
   const recorder = recordNetwork(page, applicationOrigin);
+  const submittedActionIds: string[] = [];
 
   for (let attempt = 1; attempt <= 10; attempt += 1) {
-    await submitServerAction(page, submit);
+    submittedActionIds.push(await submitServerAction(page, submit));
     await expect(errorMessage).toHaveText(authFailedMessage);
     await expect(submit).toBeEnabled();
   }
@@ -87,7 +97,7 @@ test("authorized linked-email failures expose only the exact actionable feedback
   expect(providerEffects.filter(({ effect }) => !allowedProviderEffects.has(effect)))
     .toEqual([]);
 
-  await submitServerAction(page, submit);
+  submittedActionIds.push(await submitServerAction(page, submit));
   await expect(errorMessage).toHaveText(rateLimitedMessage);
   await expect(submit).toBeEnabled();
 
@@ -102,7 +112,9 @@ test("authorized linked-email failures expose only the exact actionable feedback
   expect(blockedRequests).toEqual([]);
 
   const network = await recorder.finish();
-  const serverActions = network.filter((entry) => entry.serverAction.present);
+  const serverActions = assertLinkedEmailSubmissionNetwork(
+    network, submittedActionIds, submission,
+  );
   expect(serverActions).toHaveLength(11);
   expect(serverActions.every(({ method }) => method === "POST")).toBe(true);
   expect(serverActions.every(({ response }) => (
@@ -179,14 +191,15 @@ async function submitServerAction(
   page: Page,
   submit: ReturnType<Page["getByRole"]>,
 ) {
-  const response = page.waitForResponse((candidate) => (
-    candidate.request().method() === "POST"
-    && typeof candidate.request().headers()["next-action"] === "string"
-  ));
-  await submit.click();
-  const settled = await response;
+  const [settled] = await Promise.all([
+    page.waitForResponse((candidate) => (
+      isLinkedEmailSubmissionRequest(candidate.request(), submission)
+    )),
+    submit.click(),
+  ]);
   expect(settled.status()).toBeGreaterThanOrEqual(200);
   expect(settled.status()).toBeLessThan(300);
+  return settled.request().headers()["next-action"]!;
 }
 
 async function waitForTurnstile(page: Page, action: "auth_login") {
