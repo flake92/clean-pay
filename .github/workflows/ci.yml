@@ -1,4 +1,5 @@
 name: CI
+run-name: CI (${{ inputs.browser_mode || 'full' }})
 
 on:
   push:
@@ -14,6 +15,7 @@ on:
           - full
           - chatwoot-diagnostic
           - navigation-contract
+          - repair-contract
 
 permissions:
   contents: read
@@ -70,7 +72,7 @@ jobs:
 
   secret-scan:
     if: >-
-      !(github.event_name == 'workflow_dispatch' && inputs.browser_mode == 'navigation-contract') &&
+      !(github.event_name == 'workflow_dispatch' && contains(fromJSON('["navigation-contract","repair-contract"]'), inputs.browser_mode)) &&
       !((github.event_name == 'workflow_dispatch' && inputs.browser_mode == 'chatwoot-diagnostic') ||
       (github.event_name == 'push' && contains(github.event.head_commit.message, '[chatwoot-diagnostic]')))
     runs-on: ubuntu-latest
@@ -87,7 +89,7 @@ jobs:
 
   codeql:
     if: >-
-      !(github.event_name == 'workflow_dispatch' && inputs.browser_mode == 'navigation-contract') &&
+      !(github.event_name == 'workflow_dispatch' && contains(fromJSON('["navigation-contract","repair-contract"]'), inputs.browser_mode)) &&
       !((github.event_name == 'workflow_dispatch' && inputs.browser_mode == 'chatwoot-diagnostic') ||
       (github.event_name == 'push' && contains(github.event.head_commit.message, '[chatwoot-diagnostic]')))
     runs-on: ubuntu-latest
@@ -109,7 +111,7 @@ jobs:
 
   static-analysis:
     if: >-
-      !(github.event_name == 'workflow_dispatch' && inputs.browser_mode == 'navigation-contract') &&
+      !(github.event_name == 'workflow_dispatch' && contains(fromJSON('["navigation-contract","repair-contract"]'), inputs.browser_mode)) &&
       !((github.event_name == 'workflow_dispatch' && inputs.browser_mode == 'chatwoot-diagnostic') ||
       (github.event_name == 'push' && contains(github.event.head_commit.message, '[chatwoot-diagnostic]')))
     runs-on: ubuntu-latest
@@ -163,7 +165,7 @@ jobs:
 
   validate:
     if: >-
-      !(github.event_name == 'workflow_dispatch' && inputs.browser_mode == 'navigation-contract') &&
+      !(github.event_name == 'workflow_dispatch' && contains(fromJSON('["navigation-contract","repair-contract"]'), inputs.browser_mode)) &&
       !((github.event_name == 'workflow_dispatch' && inputs.browser_mode == 'chatwoot-diagnostic') ||
       (github.event_name == 'push' && contains(github.event.head_commit.message, '[chatwoot-diagnostic]')))
     runs-on: ubuntu-latest
@@ -233,7 +235,7 @@ jobs:
 
   integration-services:
     if: >-
-      !(github.event_name == 'workflow_dispatch' && inputs.browser_mode == 'navigation-contract') &&
+      !(github.event_name == 'workflow_dispatch' && contains(fromJSON('["navigation-contract","repair-contract"]'), inputs.browser_mode)) &&
       !((github.event_name == 'workflow_dispatch' && inputs.browser_mode == 'chatwoot-diagnostic') ||
       (github.event_name == 'push' && contains(github.event.head_commit.message, '[chatwoot-diagnostic]')))
     runs-on: ubuntu-latest
@@ -294,7 +296,7 @@ jobs:
 
   database-least-privilege:
     if: >-
-      !(github.event_name == 'workflow_dispatch' && inputs.browser_mode == 'navigation-contract') &&
+      !(github.event_name == 'workflow_dispatch' && contains(fromJSON('["navigation-contract","repair-contract"]'), inputs.browser_mode)) &&
       !((github.event_name == 'workflow_dispatch' && inputs.browser_mode == 'chatwoot-diagnostic') ||
       (github.event_name == 'push' && contains(github.event.head_commit.message, '[chatwoot-diagnostic]')))
     runs-on: ubuntu-latest
@@ -355,7 +357,7 @@ jobs:
 
   container-security:
     if: >-
-      !(github.event_name == 'workflow_dispatch' && inputs.browser_mode == 'navigation-contract') &&
+      !(github.event_name == 'workflow_dispatch' && contains(fromJSON('["navigation-contract","repair-contract"]'), inputs.browser_mode)) &&
       !((github.event_name == 'workflow_dispatch' && inputs.browser_mode == 'chatwoot-diagnostic') ||
       (github.event_name == 'push' && contains(github.event.head_commit.message, '[chatwoot-diagnostic]')))
     runs-on: ubuntu-latest
@@ -622,6 +624,7 @@ jobs:
           node-version-file: .node-version
           cache: npm
       - name: Require the containerd image identity store
+        if: ${{ inputs.browser_mode != 'repair-contract' }}
         shell: bash
         run: |
           daemon_config="$(mktemp)"
@@ -650,6 +653,7 @@ jobs:
           docker info --format '{{json .DriverStatus}}' \
             | grep --fixed-strings '"driver-type","io.containerd.snapshotter.v1"'
       - name: Prove the capless observer fixture reaches its bounded failure mapping
+        if: ${{ inputs.browser_mode != 'repair-contract' }}
         shell: bash
         run: |
           fixture_root="$(mktemp -d)"
@@ -702,6 +706,7 @@ jobs:
           printf '%s\n' "$capture_id" | grep -Eq '^[0-9a-f]{16}$'
           printf 'CLEAN_PAY_BROWSER_LIVE_PAIR_CAPTURE_ID=%s\n' "$capture_id" >> "$GITHUB_ENV"
       - name: Prepare immutable live-pair capture ownership
+        if: ${{ inputs.browser_mode != 'repair-contract' }}
         id: preparation_phase
         run: |
           node tests/browser/journeys/run-production-image-live-overlap.mjs run \
@@ -709,6 +714,21 @@ jobs:
             --candidate-revision "$GITHUB_SHA" \
             --temporary-root "$RUNNER_TEMP" \
             --phase preparation
+      - name: Verify v6 identity and fixture contracts
+        shell: bash
+        run: |
+          mkdir -p test-results/repair-contract
+          printf '%s\n' 'repair-contract is NOT full CI or an application lifecycle result' > test-results/repair-contract/scope.txt
+          node --test --test-reporter=tap tests/browser/journeys/ci-v6-regressions.test.mjs | tee test-results/repair-contract/v6-tests.tap
+          node --input-type=module <<'NODE'
+          import assert from 'node:assert/strict';
+          import { readFileSync } from 'node:fs';
+          const tap = readFileSync('test-results/repair-contract/v6-tests.tap', 'utf8');
+          for (const line of ['# tests 30', '# pass 30', '# fail 0', '# cancelled 0', '# skipped 0', '# todo 0']) {
+            assert.ok(tap.split(/\r?\n/).includes(line), `Missing exact test summary: ${line}`);
+          }
+          console.log('V6_CONTRACT_PASSED: 30/30. This is NOT an application or full CI result.');
+          NODE
       - name: Verify Chatwoot provider contract before image builds
         env:
           PLAYWRIGHT_JSON_OUTPUT_FILE: test-results/chatwoot-ledger-check/results.json
@@ -738,6 +758,7 @@ jobs:
           console.log('BROWSER_OBSERVATION_CONTRACT_PASSED: 14/14. Live application proof still required.');
           NODE
       - name: Build four production images for the live pair
+        if: ${{ inputs.browser_mode != 'repair-contract' }}
         run: |
           node tests/browser/journeys/run-production-image-live-overlap.mjs run \
             --capture-id "$CLEAN_PAY_BROWSER_LIVE_PAIR_CAPTURE_ID" \
@@ -745,6 +766,7 @@ jobs:
             --temporary-root "$RUNNER_TEMP" \
             --phase build
       - name: Attest image identity and public assets
+        if: ${{ inputs.browser_mode != 'repair-contract' }}
         run: |
           node tests/browser/journeys/run-production-image-live-overlap.mjs run \
             --capture-id "$CLEAN_PAY_BROWSER_LIVE_PAIR_CAPTURE_ID" \
@@ -752,6 +774,7 @@ jobs:
             --temporary-root "$RUNNER_TEMP" \
             --phase attestation
       - name: Prove the public exact A/B overlap
+        if: ${{ inputs.browser_mode != 'repair-contract' }}
         id: public_phase
         run: |
           node tests/browser/journeys/run-production-image-live-overlap.mjs run \
@@ -760,6 +783,7 @@ jobs:
             --temporary-root "$RUNNER_TEMP" \
             --phase public
       - name: Prove or explicitly defer the concurrent provider overlap
+        if: ${{ inputs.browser_mode != 'repair-contract' }}
         id: provider_phase
         env:
           CLEAN_PAY_LIVE_OVERLAP_PROVIDER_MODE: ${{ ((github.event_name == 'workflow_dispatch' && inputs.browser_mode == 'chatwoot-diagnostic') || (github.event_name == 'push' && contains(github.event.head_commit.message, '[chatwoot-diagnostic]'))) && 'defer-chatwoot-diagnostic' || 'prove' }}
@@ -815,6 +839,7 @@ jobs:
             test-results/browser
             test-results/browser-journeys
             test-results/browser-observation-check
+            test-results/repair-contract
             test-results/chatwoot-ledger-check
             test-results/browser-journey-contract-evidence
             test-results/browser-public-overlap
@@ -850,7 +875,7 @@ jobs:
 
   remnashop-migration-rehearsal:
     if: >-
-      !(github.event_name == 'workflow_dispatch' && inputs.browser_mode == 'navigation-contract') &&
+      !(github.event_name == 'workflow_dispatch' && contains(fromJSON('["navigation-contract","repair-contract"]'), inputs.browser_mode)) &&
       !((github.event_name == 'workflow_dispatch' && inputs.browser_mode == 'chatwoot-diagnostic') ||
       (github.event_name == 'push' && contains(github.event.head_commit.message, '[chatwoot-diagnostic]')))
     runs-on: ubuntu-latest
@@ -895,7 +920,7 @@ jobs:
 
   full-stack-e2e:
     if: >-
-      !(github.event_name == 'workflow_dispatch' && inputs.browser_mode == 'navigation-contract') &&
+      !(github.event_name == 'workflow_dispatch' && contains(fromJSON('["navigation-contract","repair-contract"]'), inputs.browser_mode)) &&
       !((github.event_name == 'workflow_dispatch' && inputs.browser_mode == 'chatwoot-diagnostic') ||
       (github.event_name == 'push' && contains(github.event.head_commit.message, '[chatwoot-diagnostic]')))
     runs-on: ubuntu-latest

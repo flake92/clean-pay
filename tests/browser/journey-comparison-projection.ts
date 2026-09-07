@@ -136,6 +136,65 @@ export function projectExactAuthenticatedChatwootGeneratedPair(
   }
 }
 
+/** The merge journey retains the same generated local actor/conversation while
+ * its support-context ownership fingerprint changes after the merge. Scope the
+ * exception to exactly this two-checkpoint, completed-merge contract. Raw evidence
+ * is never changed; cookie attributes, sizes, identity cookie bytes, storage keys,
+ * provider effects and the intra-run equality pattern remain strict. */
+export function projectExactMergeChatwootGeneratedPair(
+  expected: Record<string, unknown>, actual: Record<string, unknown>,
+) {
+  if (!isExactJourneyManifest(expected) || !isExactJourneyManifest(actual)
+    || expected.project !== actual.project
+    || expected.journey !== "email-account-links-and-merges-telegram"
+    || actual.journey !== expected.journey) return;
+  const collect = (manifest: Record<string, unknown>) => {
+    if (!Array.isArray(manifest.checkpoints) || manifest.checkpoints.length !== 2
+      || !Array.isArray(manifest.boundaries) || !isRecord(manifest.providerEffects)
+      || !Array.isArray(manifest.providerEffects.entries)) return null;
+    const merge = manifest.boundaries.filter((entry) => isRecord(entry)
+      && entry.label === "telegram-account-merge");
+    if (merge.length !== 1 || !isRecord(merge[0]) || !isRecord(merge[0].value)
+      || !sameJson(merge[0].value, {confirmed: true, dryRunCount: 2,
+        mergeCount: 1, redirectPath: "/cabinet"})) return null;
+    const effects = manifest.providerEffects.entries;
+    if (effects.filter((entry) => isRecord(entry) && entry.effect === "users_merged").length !== 1
+      || effects.filter((entry) => isRecord(entry) && entry.effect === "users_merge_dry_run").length !== 2) return null;
+    const labels = ["link-account-merge-confirmation", "link-account-merged-cabinet"];
+    const values = [];
+    for (const [index, checkpoint] of manifest.checkpoints.entries()) {
+      if (!isRecord(checkpoint) || checkpoint.label !== labels[index]
+        || !Array.isArray(checkpoint.cookies) || !isExactCheckpointStorage(checkpoint.storage)) return null;
+      const cw = checkpoint.cookies.filter((c) => isRecord(c)
+        && typeof c.name === "string" && c.name.startsWith("cw_"));
+      const conversation = cw.filter(isExactChatwootConversationCookie);
+      const identity = cw.filter(isExactChatwootIdentityCookie);
+      const ownership = checkpoint.storage.local.filter(isExactChatwootOwnershipStorage);
+      if (cw.length !== 2 || conversation.length !== 1 || identity.length !== 1
+        || ownership.length !== 1 || checkpoint.storage.local.length !== 1) return null;
+      values.push({conversation: conversation[0].value, ownership: ownership[0].value,
+        identity: identity[0]});
+    }
+    if (!sameJson(values[0].conversation, values[1].conversation)
+      || !sameJson(values[0].identity, values[1].identity)) return null;
+    return values;
+  };
+  const a = collect(expected), b = collect(actual);
+  if (!a || !b || a.some((v, i) => v.conversation.bytes !== b[i].conversation.bytes
+    || v.ownership.bytes !== b[i].ownership.bytes || !sameJson(v.identity, b[i].identity))
+    || (a[0].ownership.sha256 === a[1].ownership.sha256)
+      !== (b[0].ownership.sha256 === b[1].ownership.sha256)) return;
+  for (const side of [a, b]) {
+    const refs = new Map<string, string>();
+    for (const value of side) {
+      value.conversation.sha256 = "<dynamic:merge-chatwoot-conversation:1>";
+      if (!refs.has(value.ownership.sha256)) refs.set(value.ownership.sha256,
+        `<dynamic:merge-chatwoot-ownership:${refs.size + 1}>`);
+      value.ownership.sha256 = refs.get(value.ownership.sha256)!;
+    }
+  }
+}
+
 function exactChatwootIdentityCookiesMatch(
   expected: ChatwootGeneratedState["identityCookies"],
   actual: ChatwootGeneratedState["identityCookies"],
@@ -676,7 +735,9 @@ function isExactDynamicCookie(value: unknown): value is Record<string, unknown> 
     && typeof value.name === "string"
     && DYNAMIC_COOKIE_NAMES.has(value.name)
     && value.domain === "<app-host>"
-    && value.path === "/"
+    && (value.name === "clean_pay_tg_callback_receipt"
+      ? value.path === "/auth/telegram/callback" && value.httpOnly === true && value.sameSite === "Lax"
+      : value.path === "/")
     && value.secure === true
     && typeof value.httpOnly === "boolean"
     && ["Lax", "Strict", "None"].includes(String(value.sameSite))

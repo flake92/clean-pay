@@ -1571,7 +1571,7 @@
         { "$ref": "#/$defs/visiblePhase" },
         {
           "properties": {
-            "contactProbeCount": { "const": 1 },
+            "contactProbeCount": { "const": 2 },
             "replacementRequestHeld": { "const": true },
             "replacementRequestReleased": { "const": false },
             "pendingWaitingForFrame": { "const": true },
@@ -1604,7 +1604,7 @@
         { "$ref": "#/$defs/settledPhase" },
         {
           "properties": {
-            "contactProbeCount": { "const": 1 },
+            "contactProbeCount": { "const": 2 },
             "conversationSameAsPriorPhase": { "const": true },
             "recreationCausality": { "type": "null" },
             "userCookieSameAsPriorSettledPhase": { "const": false }

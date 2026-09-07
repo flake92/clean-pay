@@ -38,7 +38,10 @@ export function assertSyntheticCaddyRouteOrder(source: string) {
   assertOccurrenceCount(
     chatwoot,
     "        const fixtureReadinessScope = window.__cleanPayChatwootFixtureReadiness;\n"
-      + "        const restoredOwnershipRequiresFrame = fixtureReadinessScope === \"restored\"\n"
+      + "        const restoredOwnershipAtRun = localStorage.getItem(\"clean-pay:chatwoot-ownership:v1\") !== null;\n"
+      + "        const restoredOwnershipRequiresFrame = (window.__cleanPayChatwootFixtureConfirmation === \"phase-proof\"\n"
+      + "          && location.pathname === \"/cabinet\" && !restoredOwnershipAtRun)\n"
+      + "          || fixtureReadinessScope === \"restored\"\n"
       + "          || (fixtureReadinessScope !== \"eager\"\n"
       + "            && document.cookie\n"
       + "              .split(\";\")\n"
@@ -54,7 +57,7 @@ export function assertSyntheticCaddyRouteOrder(source: string) {
   );
   assertOccurrenceCount(
     chatwoot,
-    "          target.postMessage({ method: \"identify\", deliveryId: delivery.deliveryId }, config.baseUrl);",
+    "          const confirmation = window.__cleanPayChatwootFixtureConfirmation === \"phase-proof\"\n            && location.pathname === \"/cabinet\"\n            && (new URL(document.getElementById(\"chatwoot_live_chat_widget\").src).searchParams.has(\"cw_conversation\")\n              || !restoredOwnershipAtRun);\n          target.postMessage({ method: \"identify\", deliveryId: delivery.deliveryId,\n            ...(confirmation ? { confirmBeforeProbe: true } : {}) }, config.baseUrl);",
     1,
   );
   assertOccurrenceCount(chatwoot, "deliverIdentity();", 2);
@@ -86,7 +89,9 @@ export function assertSyntheticCaddyRouteOrder(source: string) {
     "        data: { deliveryId, widgetAuthToken: \"synthetic-widget-auth\" },",
     "    send({ event: \"loaded\" });",
     "        const fixtureReadinessScope = window.__cleanPayChatwootFixtureReadiness;",
-    "        const restoredOwnershipRequiresFrame = fixtureReadinessScope === \"restored\"",
+    "        const restoredOwnershipRequiresFrame = (window.__cleanPayChatwootFixtureConfirmation === \"phase-proof\"",
+    "          && location.pathname === \"/cabinet\" && !restoredOwnershipAtRun)",
+    "          || fixtureReadinessScope === \"restored\"",
     "          || (fixtureReadinessScope !== \"eager\"",
     "            && localStorage.getItem(\"clean-pay:chatwoot-ownership:v1\") !== null",
     "            && localStorage.getItem(\"clean-pay:chatwoot-identity:v1\") === null);",
@@ -101,7 +106,7 @@ export function assertSyntheticCaddyRouteOrder(source: string) {
     "          if (!pendingIdentity || !target || readyFrameWindow !== target) return;",
     "          const delivery = pendingIdentity;\n          pendingIdentity = null;",
     "          inFlightIdentity = { deliveryId: delivery.deliveryId, frameWindow: target };",
-    "          target.postMessage({ method: \"identify\", deliveryId: delivery.deliveryId }, config.baseUrl);",
+    "          const confirmation = window.__cleanPayChatwootFixtureConfirmation === \"phase-proof\"\n            && location.pathname === \"/cabinet\"\n            && (new URL(document.getElementById(\"chatwoot_live_chat_widget\").src).searchParams.has(\"cw_conversation\")\n              || !restoredOwnershipAtRun);\n          target.postMessage({ method: \"identify\", deliveryId: delivery.deliveryId,\n            ...(confirmation ? { confirmBeforeProbe: true } : {}) }, config.baseUrl);",
     "        const applyIdentity = (identifier, attributes) => {",
     "          pendingIdentity = { deliveryId: ++nextDeliveryId, identifier };",
     "          deliverIdentity();\n        };",
