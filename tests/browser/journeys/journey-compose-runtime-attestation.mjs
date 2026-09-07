@@ -1782,7 +1782,26 @@ function assertOneShotLifecycleRecord(value, container, expectedLifecycleNotBefo
   const startEventMs = Number(BigInt(value.events[1].timeNano) / 1_000_000n);
   const dieEventMs = Number(BigInt(value.events[2].timeNano) / 1_000_000n);
   if (Math.abs(startEventMs - startedAt) > 10_000 || Math.abs(dieEventMs - finishedAt) > 10_000) {
-    fail("Journey one-shot event history differs from inspected state timestamps.");
+    const error = new Error("Journey one-shot event history differs from inspected state timestamps.");
+    let evidence = emptyOneShotLifecycleFailureEvidence();
+    try {
+      evidence = createOneShotLifecycleFailureEvidence(value, container);
+    } catch {
+      // Keep the original rejection even when a diagnostic input is poisoned.
+    }
+    oneShotLifecycleFailureEvidenceByError.set(error, Object.freeze({
+      ...evidence,
+      timestampComparison: Object.freeze({
+        maximumDeltaMs: 10_000,
+        stateStartedAtUnixMs: startedAt,
+        stateFinishedAtUnixMs: finishedAt,
+        startEventUnixMs: startEventMs,
+        dieEventUnixMs: dieEventMs,
+        startDeltaMs: startEventMs - startedAt,
+        dieDeltaMs: dieEventMs - finishedAt,
+      }),
+    }));
+    throw error;
   }
   return value;
 }
