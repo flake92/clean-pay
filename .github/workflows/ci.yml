@@ -757,6 +757,48 @@ jobs:
           assert.equal(report.errors.length, 0);
           console.log('BROWSER_OBSERVATION_CONTRACT_PASSED: 14/14. Live application proof still required.');
           NODE
+      - name: Verify v7 fixture scheduling and runtime diagnostics
+        shell: bash
+        run: |
+          mkdir -p test-results/repair-contract
+          node --test --test-reporter=tap tests/browser/journeys/ci-v7-regressions.test.mjs | tee test-results/repair-contract/v7-tests.tap
+          node --input-type=module <<'NODE'
+          import assert from 'node:assert/strict';
+          import { readFileSync } from 'node:fs';
+          const lines = readFileSync('test-results/repair-contract/v7-tests.tap', 'utf8').split(/\r?\n/);
+          for (const line of ['# tests 18', '# pass 18', '# fail 0', '# cancelled 0', '# skipped 0', '# todo 0']) {
+            assert.ok(lines.includes(line), `Missing exact summary: ${line}`);
+          }
+          console.log('V7_CONTRACT_PASSED: 18/18. Full journey-contract preflight still required.');
+          NODE
+      - name: Verify all journey contracts before image builds
+        timeout-minutes: 25
+        env:
+          PLAYWRIGHT_JSON_OUTPUT_FILE: test-results/journey-contract-preflight/results.json
+        run: |
+          node node_modules/playwright/cli.js test --config tests/browser/journeys/playwright.config.ts --project journey-contract --workers 1 --retries 0 --max-failures 0 --reporter line,json --output test-results/journey-contract-preflight/artifacts
+          node --input-type=module <<'NODE'
+          import assert from 'node:assert/strict';
+          import { readFileSync } from 'node:fs';
+          const report = JSON.parse(readFileSync('test-results/journey-contract-preflight/results.json', 'utf8'));
+          assert.ok(report.stats.expected > 0, 'No contract tests passed');
+          for (const field of ['unexpected', 'flaky', 'skipped']) assert.equal(report.stats[field], 0);
+          assert.equal(report.errors.length, 0);
+          const tests = [];
+          function visit(suite) {
+            for (const spec of suite.specs ?? []) tests.push(...spec.tests);
+            for (const nested of suite.suites ?? []) visit(nested);
+          }
+          for (const suite of report.suites) visit(suite);
+          assert.equal(tests.length, report.stats.expected);
+          for (const test of tests) {
+            assert.equal(test.projectName, 'journey-contract');
+            assert.equal(test.results.length, 1);
+            assert.equal(test.results[0].retry, 0);
+            assert.equal(test.results[0].status, 'passed');
+          }
+          console.log(`JOURNEY_CONTRACT_PREFLIGHT_PASSED: ${tests.length} tests. Live application proof still required.`);
+          NODE
       - name: Build four production images for the live pair
         if: ${{ inputs.browser_mode != 'repair-contract' }}
         run: |
@@ -839,6 +881,7 @@ jobs:
             test-results/browser
             test-results/browser-journeys
             test-results/browser-observation-check
+            test-results/journey-contract-preflight
             test-results/repair-contract
             test-results/chatwoot-ledger-check
             test-results/browser-journey-contract-evidence

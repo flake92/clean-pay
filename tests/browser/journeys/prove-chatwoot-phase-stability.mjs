@@ -1,6 +1,8 @@
 import { realpath } from "node:fs/promises";
 import path from "node:path";
 
+import { collectJourneyOneShotLifecycleFailureEvidence } from "./journey-compose-runtime-attestation.mjs";
+
 import { orchestrateChatwootPhaseProof } from "./chatwoot-phase-proof-orchestrator.mjs";
 import { createJourneySanitizedErrorEvidence } from "./journey-error-evidence.mjs";
 import {
@@ -41,6 +43,12 @@ try {
     artifactCount: result.evidence.artifactCount,
   })}\n`);
 } catch (error) {
+  const runtimeFailures = collectJourneyOneShotLifecycleFailureEvidence(error);
+  if (runtimeFailures.length > 0) {
+    process.stderr.write(`${JSON.stringify({
+      status: "chatwoot_runtime_attestation_failed", runtimeFailures,
+    })}\n`);
+  }
   const sanitized = createJourneySanitizedErrorEvidence(error);
   process.stderr.write(`${JSON.stringify({
     status: "dual_image_chatwoot_phase_stability_failed",
