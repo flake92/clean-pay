@@ -271,18 +271,28 @@ and direct cabinet visit (43 cumulative). This second-login count is a source-
 derived expectation and must be confirmed by the live six-stack proof; an
 unexpected additional JWKS read or readiness pass fails, rather than being ignored.
 
-Provider events are checked against explicit causal stages. Only independent
-readiness tasks, the two profile reads, and the cabinet read group may vary in
-arrival order. The sequential Remnashop probes, OIDC flow, subscription before
-Remnawave lookup, document boundaries, support reads and contact probes retain
-their required ordering. All endpoint, query, body, credential and idempotency
-checks remain active. Readiness POST bodies must be exactly `{}`.
+Provider readiness and browser login are independent lanes. Readiness queries
+may interleave with login, profile and cabinet activity within the initial
+28-entry phase. The Remnashop readiness probes keep their internal order; the
+browser lane keeps Turnstile -> authorization code -> token -> JWKS verification
+-> session -> profile and cabinet stages. Readiness cannot move across the
+already-captured initial prefix into a recreated generation.
+
+The two initial JWKS reads share an endpoint and lack a caller marker. Both
+possible assignments are checked (a fixed bound of two). If both satisfy the
+causal constraints, their comparison views must be identical, including bodies,
+credentials and digests, except for sequence numbers. Distinct ambiguous
+observations fail rather than being assigned opportunistically.
 
 Raw ledgers remain unmodified for atomic snapshots, final rereads and same-stack
 Gap -> Stable -> Recreated prefix checks. For cross-image HMAC comparison only,
-`chatwoot-provider-ledger-order.mjs` orders entries inside those validated groups
-and gives the comparison view positional sequence numbers. No event, body field,
-credential projection, or database snapshot is removed. This is an explicit
-extension to the provider arrival-order comparison described above, not a change
-to browser request, Server Action, boundary-call, DOM, or screenshot comparison.
-The new module is included in the fixture manifest on both sides.
+`chatwoot-provider-ledger-order.mjs` reconstructs the same deterministic lane/stage
+view after validation. Every event is present exactly once. No endpoint, query,
+body, credential, idempotency or database assertion is removed. These semantics
+extend provider arrival-order comparison only; browser requests, Server Actions,
+boundary calls, DOM and screenshots are not normalized by this module.
+
+Contract regressions include both observed interleavings from run 34059555047 in
+all three phases, indistinguishable and distinguishable JWKS ambiguity, missing
+post-token JWKS verification, and cross-generation readiness traffic. The
+recreated tail remains a source-derived expectation pending the live CI proof.
