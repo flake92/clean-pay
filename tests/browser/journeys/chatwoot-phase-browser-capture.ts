@@ -24,6 +24,7 @@ import {
   recordNetwork,
 } from "../network-recorder";
 import { canonicalChatwootPhaseEvidence } from "./chatwoot-phase-canonical-evidence";
+import { captureAfterScreenshot } from "./browser-observation-boundaries";
 import {
   assertChatwootProviderCausalOrder,
   chatwootProviderExpectedEffects,
@@ -908,8 +909,7 @@ async function captureVisiblePhase(input: {
   );
   observePhaseSourceDigests(input, beforeRaw, beforeProvider);
   const checkpoint = input.eventLedger.checkpoint(`${input.phase}-snapshot`);
-  const [
-    screenshot,
+  const { screenshot, evidence: [
     dom,
     computedStyles,
     interactive,
@@ -918,13 +918,7 @@ async function captureVisiblePhase(input: {
     raw,
     providerEffects,
     cookies,
-  ] = await Promise.all([
-    input.page.screenshot({
-      animations: "disabled",
-      caret: "hide",
-      fullPage: false,
-      type: "png",
-    }),
+  ] } = await captureAfterScreenshot(input.page, () => Promise.all([
     canonicalDom(input.page),
     selectedComputedStyles(input.page),
     interactiveState(input.page),
@@ -933,7 +927,7 @@ async function captureVisiblePhase(input: {
     readChatwootRawState(input.page),
     controlJson(input.input.controlUrl, "/__ledger", MAXIMUM_CONTROL_BYTES),
     input.page.context().cookies(),
-  ]);
+  ]));
   const provider = assertProviderLedger(providerEffects, input.phase);
   assertChatwootPhaseBoundaryLedger(raw.boundaryCalls, input.phase);
   const [
