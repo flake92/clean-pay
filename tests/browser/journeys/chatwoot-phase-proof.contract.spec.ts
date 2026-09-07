@@ -2150,7 +2150,7 @@ test("decodes exact phase boundary and provider ledgers with phase-specific fail
   for (const [phase, entryCount] of [
     ["gap", 28],
     ["stable", 28],
-    ["recreated", 43],
+    ["recreated", 42],
   ] as const) {
     const exactProvider = strictProviderFixture(phase);
     expect(assertChatwootPhaseProviderLedger(exactProvider, phase)).toEqual(exactProvider);
@@ -2265,7 +2265,7 @@ test("decodes exact phase boundary and provider ledgers with phase-specific fail
   };
   expect(assertChatwootProviderPhaseRelations(phases)).toMatchObject({
     gapEntryCount: 28,
-    recreatedEntryCount: 43,
+    recreatedEntryCount: 42,
     stableEntryCount: 28,
     status: "exact-provider-phase-prefixes",
   });
@@ -4250,7 +4250,7 @@ function phaseEvidence(
       frameLoadedCount: 1,
       identityConfirmedCount: 0,
       boundaryCallCount: 5,
-      contactProbeCount: 1,
+      contactProbeCount: 2,
       ...mutablePhaseSeal(gapSeal),
       recreationCausality: null,
       screenshot: screenshot("gap"),
@@ -4279,7 +4279,7 @@ function phaseEvidence(
       frameLoadedCount: 2,
       identityConfirmedCount: 1,
       boundaryCallCount: 8,
-      contactProbeCount: 1,
+      contactProbeCount: 2,
       ...mutablePhaseSeal(stableSeal),
       recreationCausality: null,
       screenshot: screenshot("stable"),
@@ -4515,7 +4515,6 @@ const recreatedProviderEffects = [
   "challenge_verified", "authorization_code_issued", "token_exchanged", "auth_session_issued",
   "read_profile", "read_profile", "read_profile", "read_referral_program", "read_subscription",
   "read_offers", "read_devices", "read_user_by_uuid", "read_profile", "read_subscription",
-  "contact_identity_probed",
 ] as const;
 
 function strictProviderFixture(phase: ProviderFixturePhase) {
