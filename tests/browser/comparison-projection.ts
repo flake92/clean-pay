@@ -1,6 +1,7 @@
 import { projectAllowlistedA11ySemantics } from "./a11y-semantic-projection";
 import {
   projectExactAuthenticatedChatwootGeneratedPair,
+  projectExactMergeChatwootGeneratedPair,
   projectExactJourneyGeneratedValues,
   projectExactJourneyPwaShellCachePair,
 } from "./journey-comparison-projection";
@@ -121,6 +122,7 @@ export function projectCharacterizationManifestPairForComparison(
     && isRecord(actualPrepared)
   ) {
     projectExactAuthenticatedChatwootGeneratedPair(expectedPrepared, actualPrepared);
+    projectExactMergeChatwootGeneratedPair(expectedPrepared, actualPrepared);
     projectExactJourneyPwaShellCachePair(expectedPrepared, actualPrepared);
   }
   const expected = projectCharacterizationManifestForComparison(expectedPrepared);

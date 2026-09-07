@@ -296,3 +296,27 @@ Contract regressions include both observed interleavings from run 34059555047 in
 all three phases, indistinguishable and distinguishable JWKS ambiguity, missing
 post-token JWKS verification, and cross-generation readiness traffic. The
 recreated tail remains a source-derived expectation pending the live CI proof.
+
+
+## Explicit full-acknowledgement fixture scheduling (v6)
+
+The phase capture sets the test-only `__cleanPayChatwootFixtureConfirmation`
+marker to `phase-proof`. The synthetic SDK requests acknowledgement before the
+750 ms ownership probe only for the released replacement cabinet frame and the
+fresh post-logout cabinet. Profile ownership seeding and the initial owned
+cabinet keep the original 1200 ms delayed acknowledgement. Unmarked SDK consumers
+also keep the original timing. The flag never writes first-party authentication
+state; the current, trusted iframe must still emit the correlated setAuthCookie
+message. Stable/recreated evidence still requires no pending identity and a stored
+full-identity fingerprint. Ownership alone is not promoted to full acknowledgement.
+
+This full-ack scenario has two contact probes in the initial prefix and no new
+probe after the fast recreated acknowledgement: exact provider sizes are 28, 28,
+42 (gap, stable, recreated). The three schemas, decoder and regression fixtures
+must agree. This does not prove the complete production lifecycle: CI must still
+run the actual app and browser. The independent ownership-only behaviour remains
+covered by the existing application contracts.
+
+`repair-contract` is a preliminary CI mode, not full CI and not an application
+proof. It runs 30 v6 unit/fixture tests plus the existing 29 provider and 14 browser
+observation checks without building images. Uploaded evidence identifies the mode.

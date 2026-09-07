@@ -54,6 +54,7 @@ export const JOURNEY_FIXTURE_FILENAMES = Object.freeze([
   "browser-observation-boundaries.ts",
   "browser-observation-boundaries.contract.spec.ts",
   "caddy-route-policy.ts",
+  "ci-v6-regressions.test.mjs",
   "chatwoot-phase-browser-capture.ts",
   "chatwoot-phase-browser-contract.mjs",
   "chatwoot-phase-canonical-evidence.ts",

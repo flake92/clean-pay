@@ -360,6 +360,34 @@ export async function captureChatwootPhaseStack(input: CaptureInput) {
       screenshots: captured.screenshots,
     });
   } catch (error) {
+    const page = context?.pages()[0];
+    try {
+      const state = page ? await Promise.race([
+        page.evaluate(() => {
+          const target = window as unknown as Record<string, unknown>;
+          const pending = target.cleanPayChatwootPendingIdentity as { phase?: unknown } | undefined;
+          const calls = target.__cleanPayChatwootBoundaryCalls;
+          const methods = ["setUser", "identity.confirmed", "frame.loaded", "reset"];
+          const frame = document.getElementById("chatwoot_live_chat_widget");
+          return {
+            pendingPhase: ["sent", "waiting_for_frame", "ownership_confirmed"].includes(String(pending?.phase))
+              ? String(pending?.phase) : pending ? "unrecognized" : "absent",
+            authorized: target.cleanPayChatwootAuthorized === true,
+            frameAttached: frame instanceof HTMLIFrameElement && frame.isConnected,
+            cabinetRoute: location.pathname === "/cabinet",
+            conversationPresent: document.cookie.split(";").some((entry) => entry.trim().startsWith("cw_conversation=")),
+            identityStored: localStorage.getItem("clean-pay:chatwoot-identity:v1") !== null,
+            ownershipStored: localStorage.getItem("clean-pay:chatwoot-ownership:v1") !== null,
+            counts: Object.fromEntries(methods.map((method) => [method,
+              Array.isArray(calls) ? calls.slice(0, 512).filter((entry) => entry?.method === method).length : 0])),
+          };
+        }),
+        new Promise((resolve) => { const timer = setTimeout(() => resolve({ unavailable: true }), 2000); timer.unref(); }),
+      ]) : { unavailable: true };
+      process.stderr.write(`${JSON.stringify({ status: "chatwoot_state_failed", stage: captureStage, state })}\n`);
+    } catch {
+      process.stderr.write(`${JSON.stringify({status: "chatwoot_state_failed", stage: captureStage, state: {unavailable: true}})}\n`);
+    }
     captureError = new Error(
       `Chatwoot browser capture failed during ${captureStage}.`,
       { cause: error },
@@ -405,6 +433,11 @@ async function exerciseChatwootPhases(input: CaptureInput & {
   const recreatedCausality = await installChatwootCausalLedger(input.context, eventLedger);
   await input.context.addInitScript(() => {
     if (window.top !== window) return;
+    // Fixture-only scheduling: seed ownership on the initial document, then
+    // exercise trusted full confirmation before the optional 750 ms probe.
+    Object.defineProperty(window, "__cleanPayChatwootFixtureConfirmation", {
+      value: "phase-proof", configurable: false, enumerable: false, writable: false,
+    });
     Object.defineProperty(window, "__cleanPayChatwootFixtureReadiness", {
       configurable: false,
       enumerable: false,
@@ -3393,7 +3426,7 @@ function assertProviderLedger(value: unknown, phase: Phase): ProviderLedger {
   }
   assertChatwootProviderCausalOrder(entries, phase);
   const contactProbeCount = entries.filter(({ effect }) => effect === "contact_identity_probed").length;
-  const expectedContactProbeCount = phase === "recreated" ? 3 : 2;
+  const expectedContactProbeCount = 2;
   if (contactProbeCount !== expectedContactProbeCount) {
     throw new Error(`Chatwoot ${phase} provider effects do not prove the expected contact lifecycle.`);
   }

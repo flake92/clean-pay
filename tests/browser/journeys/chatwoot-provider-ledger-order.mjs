@@ -50,7 +50,7 @@ const recreated = Object.freeze([
   ...initial,
   // The second login uses the already-warmed OIDC key cache, then opens /cabinet.
   one("challenge_verified"), one("authorization_code_issued"), one("token_exchanged"),
-  one("auth_session_issued"), one("read_profile"), ...cabinet,
+  one("auth_session_issued"), one("read_profile"), ...cabinet.slice(0, -1),
 ]);
 
 function planFor(phase) {

@@ -78,6 +78,7 @@ export async function proveJourneyLivePair(options: {
   } as const;
   const cleanup = assertCleanupEvidence(options.cleanup, captures);
   const comparisons = [];
+  const comparisonErrors: Error[] = [];
   const journeyEvidence = new Map<string, { baseline: Buffer; candidate: Buffer }>();
   for (const relativePath of JOURNEY_LIVE_PAIR_ARTIFACT_PATHS) {
     if (relativePath.endsWith("/journey.json")) {
@@ -128,15 +129,22 @@ export async function proveJourneyLivePair(options: {
         actualPng: candidateBytes,
       });
       if (!exact && !allowlisted) {
-        throw new Error(`Journey live-pair PNG differs outside the exact allowlist: ${relativePath}.`);
+        comparisonErrors.push(new Error(`Journey live-pair PNG differs outside the exact allowlist: ${relativePath}.`));
+        process.stderr.write(`${JSON.stringify({status: "journey_comparison_mismatch", path: relativePath, kind: "png"})}\n`);
+        continue;
       }
       comparison = exact ? "byte-exact-png" : "skip-link-allowlisted-png";
     }
     if (!baselineProjected.equals(candidateProjected)) {
-      throw new Error(
-        `Journey live-pair strict projection differs: ${relativePath} `
-        + `at ${firstJsonDifferencePath(baselineProjected, candidateProjected)}.`,
-      );
+      const field = firstJsonDifferencePath(baselineProjected, candidateProjected);
+      comparisonErrors.push(new Error(
+        `Journey live-pair strict projection differs: ${relativePath} at ${field}.`,
+      ));
+      // Emit positions and hashes, never cookie values, request bodies or tokens.
+      process.stderr.write(`${JSON.stringify({status: "journey_comparison_mismatch",
+        path: relativePath, field, expectedSha256: sha256(baselineProjected),
+        actualSha256: sha256(candidateProjected)})}\n`);
+      continue;
     }
     comparisons.push(Object.freeze({
       path: relativePath,
@@ -152,6 +160,12 @@ export async function proveJourneyLivePair(options: {
         projectedSha256: sha256(candidateProjected),
       }),
     }));
+  }
+  if (comparisonErrors.length > 0) {
+    process.stderr.write(`${JSON.stringify({status: "journey_comparison_summary_failed",
+      compared: JOURNEY_LIVE_PAIR_ARTIFACT_PATHS.length,
+      matched: comparisons.length, mismatched: comparisonErrors.length})}\n`);
+    throw comparisonErrors[0];
   }
   if (
     comparisons.length !== 141

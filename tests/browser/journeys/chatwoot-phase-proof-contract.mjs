@@ -2193,7 +2193,7 @@ function assertPhases(value, label) {
   equal(gap.userCookieSameAsPriorSettledPhase, false, `${label} gap prior user cookie`);
   equal(gap.newSetUserObserved, true, `${label} gap setUser causality`);
   equal(gap.finalCabinetRoute, true, `${label} gap route`);
-  equal(gap.contactProbeCount, 1, `${label} gap contact-probe count`);
+  equal(gap.contactProbeCount, 2, `${label} gap contact-probe count`);
 
   equal(stable.replacementRequestHeld, false, `${label} stable replacement held`);
   equal(stable.replacementRequestReleased, true, `${label} stable replacement released`);
@@ -2211,7 +2211,7 @@ function assertPhases(value, label) {
     gap.identityConfirmedCount + 1,
     `${label} stable identity-confirmed delta`,
   );
-  equal(stable.contactProbeCount, 1, `${label} stable contact-probe count`);
+  equal(stable.contactProbeCount, 2, `${label} stable contact-probe count`);
 
   equal(cleared.exactApplicationOrigin, true, `${label} clear origin`);
   equal(
