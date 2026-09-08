@@ -248,22 +248,26 @@ try {
         "Both concurrent dual-image proofs must settle before exact cleanup.",
       );
     }
-    const runs = runSettlements.map(({ value }) => value);
-    const proofInputs = [baselineInput, candidateInput];
-    const [baseline, candidate] = runs.map((run, index) => {
-      const proxyEvidence = assertJourneyConnectProxyGate(proxySummaries[index], {
-        accepted: 4,
-        authorityLedger: providerOverlapConnectAuthorityLedger,
-        listen: proofInputs[index].contract.publications.connectProxy,
-        target: `${proofInputs[index].resolverIp}:443`,
+    try {
+      const runs = runSettlements.map(({ value }) => value);
+      const proofInputs = [baselineInput, candidateInput];
+      const [baseline, candidate] = runs.map((run, index) => {
+        const proxyEvidence = assertJourneyConnectProxyGate(proxySummaries[index], {
+          accepted: 4,
+          authorityLedger: providerOverlapConnectAuthorityLedger,
+          listen: proofInputs[index].contract.publications.connectProxy,
+          target: `${proofInputs[index].resolverIp}:443`,
+        });
+        return createProviderOverlapStackReport({
+          ...run,
+          connectProxyAuthorityLedger: proxyEvidence.authorityLedger,
+          connectProxyCounters: proxyEvidence.counters,
+        });
       });
-      return createProviderOverlapStackReport({
-        ...run,
-        connectProxyAuthorityLedger: proxyEvidence.authorityLedger,
-        connectProxyCounters: proxyEvidence.counters,
-      });
-    });
-    return Object.freeze({ baseline, candidate });
+      return Object.freeze({ baseline, candidate });
+    } catch (error) {
+      throw retainProviderProofAssemblyFailure("stack-report", error);
+    }
   });
   let document;
   try {
@@ -274,7 +278,7 @@ try {
       proofSession.launch,
     );
   } catch (error) {
-    throw retainProviderProofAssemblyFailure(error);
+    throw retainProviderProofAssemblyFailure("dual-proof", error);
   }
   const bytes = Buffer.from(`${JSON.stringify(document, null, 2)}\n`, "utf8");
   await writeJourneySanitizedOutput(outputPath, bytes);
@@ -353,13 +357,17 @@ function currentProviderFailurePhases() {
   return Object.values(phases).some((phase) => phase !== null) ? phases : undefined;
 }
 
-function retainProviderProofAssemblyFailure(error) {
+function retainProviderProofAssemblyFailure(stage, error) {
   if (providerProofAssemblyFailureState === null) {
+    if (!new Set(["dual-proof", "stack-report"]).has(stage)) {
+      throw new Error("Provider proof assembly failure stage is invalid.");
+    }
     const message = error instanceof Error ? error.message : String(error);
     providerProofAssemblyFailureState = Object.freeze({
       ...classifyProviderProofAssemblyFailure(message),
       messageSha256: sha256(message),
       schemaVersion: 1,
+      stage,
     });
   }
   return error;
@@ -367,7 +375,11 @@ function retainProviderProofAssemblyFailure(error) {
 
 function classifyProviderProofAssemblyFailure(message) {
   const exactMismatch = /^(.{1,128}) does not match its exact contract\.$/.exec(message);
-  if (exactMismatch !== null && providerProofAssemblyInvariantLabels.has(exactMismatch[1])) {
+  if (
+    exactMismatch !== null
+    && (providerProofAssemblyInvariantLabels.has(exactMismatch[1])
+      || /^(?:baseline|candidate) [A-Za-z0-9 -]{1,96}$/.test(exactMismatch[1]))
+  ) {
     return Object.freeze({
       invariantLabel: exactMismatch[1],
       kind: "exact-invariant-mismatch",
@@ -395,6 +407,10 @@ function classifyProviderProofAssemblyFailure(message) {
       return Object.freeze({ kind: "source-revision-alias" });
     case "Proof arrival order relationship is invalid.":
       return Object.freeze({ kind: "arrival-order-invalid" });
+    case "Journey CONNECT proxy summary is invalid.":
+      return Object.freeze({ kind: "connect-proxy-summary-invalid" });
+    case "Journey CONNECT proxy counters rejected the fail-closed evidence gate.":
+      return Object.freeze({ kind: "connect-proxy-counters-rejected" });
     default:
       return Object.freeze({ kind: "unclassified" });
   }
