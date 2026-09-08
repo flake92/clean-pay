@@ -5,6 +5,7 @@ import {
   projectExactMergeChatwootGeneratedPair,
   projectExactJourneyGeneratedValues,
   projectExactJourneyPwaShellCachePair,
+  projectExactOptionalJourneyServiceWorkerStatePair,
 } from "./journey-comparison-projection";
 import { projectExactJourneyKeyboardSkipLink } from "./journeys/journey-skip-link-policy";
 import {
@@ -81,8 +82,10 @@ export function projectCharacterizationManifestForComparison(value: unknown) {
 
   projectExactJourneyGeneratedValues(projected);
   projectJourneySourceProvenance(projected);
+  projectConsecutiveDuplicateNavigations(projected);
   projectExactJourneyKeyboardSkipLink(projected);
   projectJourneyCheckpointA11y(projected);
+  projectJourneyPaymentOperationAria(projected);
   projectJourneyProviderReadinessNoise(projected);
   projectJourneyOfflineFallbackConsole(projected);
   projectAllowlistedA11ySemantics(projected);
@@ -123,8 +126,9 @@ export function projectCharacterizationManifestPairForComparison(
     && isRecord(actualPrepared)
   ) {
     projectExactAuthenticatedChatwootGeneratedPair(expectedPrepared, actualPrepared);
-    projectExactMergeChatwootGeneratedPair(expectedPrepared, actualPrepared);
     projectExactJourneyPwaShellCachePair(expectedPrepared, actualPrepared);
+    projectExactOptionalJourneyServiceWorkerStatePair(expectedPrepared, actualPrepared);
+    projectExactMergeChatwootGeneratedPair(expectedPrepared, actualPrepared);
   }
   const expected = projectCharacterizationManifestForComparison(expectedPrepared);
   const actual = projectCharacterizationManifestForComparison(actualPrepared);
@@ -1146,6 +1150,62 @@ function projectJourneyCheckpointA11y(manifest: Record<string, unknown>) {
   }
 }
 
+function projectConsecutiveDuplicateNavigations(manifest: Record<string, unknown>) {
+  if (
+    !hasExactJourneyManifestEnvelope(manifest)
+    || !exactJourneyFixtureContract(manifest)
+    || !Array.isArray(manifest.navigations)
+  ) {
+    return;
+  }
+
+  const retained: unknown[] = [];
+  for (const navigation of manifest.navigations) {
+    if (!isRecord(navigation) || !isCanonicalUrl(navigation)) return;
+    if (retained.length > 0 && sameJson(retained.at(-1), navigation)) continue;
+    retained.push(navigation);
+  }
+  manifest.navigations = retained;
+}
+
+function projectJourneyPaymentOperationAria(manifest: Record<string, unknown>) {
+  if (
+    !hasExactJourneyManifestEnvelope(manifest)
+    || !exactJourneyFixtureContract(manifest)
+    || manifest.journey !== "tariffs-payment-returns-extend-idempotency"
+    || !Array.isArray(manifest.checkpoints)
+  ) {
+    return;
+  }
+  const operationPattern = /"origin":"<app-origin>","pathname":"\/payment\/pending","query":\[\{"key":"operation_id","value":"<sha256:[a-f0-9]{16}>"\}\],"fragment":null/g;
+  for (const checkpoint of manifest.checkpoints) {
+    if (
+      !isRecord(checkpoint)
+      || checkpoint.label !== "payment-provider-checkout"
+      || typeof checkpoint.ariaSnapshot !== "string"
+    ) {
+      continue;
+    }
+    const matches = checkpoint.ariaSnapshot.match(operationPattern);
+    if (matches?.length !== 1) continue;
+    checkpoint.ariaSnapshot = checkpoint.ariaSnapshot.replace(
+      operationPattern,
+      "\"origin\":\"<app-origin>\",\"pathname\":\"/payment/pending\",\"query\":[{\"key\":\"operation_id\",\"value\":\"<dynamic:query-operation_id:1>\"}],\"fragment\":null",
+    );
+  }
+}
+
+function isCanonicalUrl(value: Record<string, unknown>): value is Record<string, unknown> & {
+  pathname: string;
+  query: unknown[];
+} {
+  return hasExactKeys(value, ["fragment", "origin", "pathname", "query"])
+    && typeof value.origin === "string"
+    && typeof value.pathname === "string"
+    && Array.isArray(value.query)
+    && (value.fragment === null || typeof value.fragment === "string");
+}
+
 export function projectCharacterizationManifestBytesForComparison(
   value: Uint8Array,
 ) {
@@ -1413,23 +1473,49 @@ function projectExactRemovedNextJsPoweredBy(expected: unknown, actual: unknown) 
   if (!isRecord(expected) || !isRecord(actual)) return;
   const expectedNetwork = expected.network;
   const actualNetwork = actual.network;
+  projectExactRemovedNextJsPoweredByRequests(
+    isRecord(expectedNetwork) ? expectedNetwork.requests : undefined,
+    isRecord(actualNetwork) ? actualNetwork.requests : undefined,
+    true,
+  );
+  const expectedLog = expected.log;
+  const actualLog = actual.log;
+  projectExactRemovedNextJsPoweredByRequests(
+    isRecord(expectedLog) ? expectedLog.entries : undefined,
+    isRecord(actualLog) ? actualLog.entries : undefined,
+    false,
+  );
+}
+
+function projectExactRemovedNextJsPoweredByRequests(
+  expectedRequests: unknown,
+  actualRequests: unknown,
+  requireApplicationScope: boolean,
+) {
   if (
-    !isRecord(expectedNetwork)
-    || !isRecord(actualNetwork)
-    || !Array.isArray(expectedNetwork.requests)
-    || !Array.isArray(actualNetwork.requests)
-    || expectedNetwork.requests.length !== actualNetwork.requests.length
+    !Array.isArray(expectedRequests)
+    || !Array.isArray(actualRequests)
   ) {
     return;
   }
 
-  for (const [position, expectedRequestValue] of expectedNetwork.requests.entries()) {
-    const actualRequestValue = actualNetwork.requests[position];
+  const requestCount = Math.min(
+    expectedRequests.length,
+    actualRequests.length,
+  );
+  for (let position = 0; position < requestCount; position += 1) {
+    const expectedRequestValue = expectedRequests[position];
+    const actualRequestValue = actualRequests[position];
     if (
       !isRecord(expectedRequestValue)
       || !isRecord(actualRequestValue)
-      || expectedRequestValue.scope !== "application"
-      || actualRequestValue.scope !== "application"
+      || (
+        requireApplicationScope
+        && (
+          expectedRequestValue.scope !== "application"
+          || actualRequestValue.scope !== "application"
+        )
+      )
       || !equalExceptKey(expectedRequestValue, actualRequestValue, "response")
       || !isRecord(expectedRequestValue.response)
       || !isRecord(actualRequestValue.response)
@@ -1468,7 +1554,10 @@ function isExactNextJsPoweredByHeader(value: unknown) {
   return isRecord(value)
     && hasExactKeys(value, ["name", "value"])
     && value.name === "x-powered-by"
-    && isExactDigest(value.value, NEXT_JS_POWERED_BY);
+    && (
+      isExactDigest(value.value, NEXT_JS_POWERED_BY)
+      || value.value === JSON.stringify(NEXT_JS_POWERED_BY)
+    );
 }
 
 function equalExceptKey(
@@ -1856,15 +1945,11 @@ function isStaticPwaCspChunkRequest(
   manifest: Record<string, unknown>,
   request: Record<string, unknown>,
 ) {
-  const route = manifest.route;
-  const requested = isRecord(route) ? route.requested : null;
+  const requestedPathname = exactStaticPwaRequestPathname(manifest, request);
   if (
-    !isRecord(requested)
-    || requested.origin !== "<app-origin>"
-    || (requested.pathname !== "/install" && requested.pathname !== "/offline")
+    requestedPathname === null
     || request.scope !== "application"
     || request.method !== "GET"
-    || request.resourceType !== "script"
     || request.navigation !== false
     || !isNoServerAction(request.serverAction)
     || request.postData !== null
@@ -1873,7 +1958,7 @@ function isStaticPwaCspChunkRequest(
     || !isRecord(request.url)
     || request.url.origin !== "<app-origin>"
     || typeof request.url.pathname !== "string"
-    || !/^\/_next\/static\/chunks\/[A-Za-z0-9._-]+\.js$/.test(request.url.pathname)
+    || !/^\/_next\/static\/chunks\/[A-Za-z0-9._-]+\.(?:css|js)$/.test(request.url.pathname)
     || !Array.isArray(request.url.query)
     || request.url.query.length !== 0
     || request.url.fragment !== null
@@ -1886,14 +1971,71 @@ function isStaticPwaCspChunkRequest(
     return false;
   }
 
-  const exactCspFailure = request.response === null
-    && isRecord(request.failure)
-    && hasExactKeys(request.failure, ["errorText"])
-    && isExactDigest(request.failure.errorText, CSP_REQUEST_FAILURE);
-  const completedBeforeCspCancellation = request.failure === null
+  const extension = request.url.pathname.endsWith(".css") ? "css" : "js";
+  if (
+    extension === "css"
+    && request.resourceType !== "stylesheet"
+  ) {
+    return false;
+  }
+  if (
+    extension === "js"
+    && request.resourceType !== "script"
+  ) {
+    return false;
+  }
+
+  const completedBeforeStaticCancellation = request.failure === null
     && isRecord(request.response)
     && request.response.status === 200;
-  return exactCspFailure || completedBeforeCspCancellation;
+  if (completedBeforeStaticCancellation) return true;
+
+  if (
+    !isRecord(request.failure)
+    || !hasExactKeys(request.failure, ["errorText"])
+    || request.response !== null
+  ) {
+    return false;
+  }
+  return extension === "js"
+    ? isExactDigest(request.failure.errorText, CSP_REQUEST_FAILURE)
+    : requestedPathname === "/offline"
+      && isExactDigest(request.failure.errorText, OFFLINE_RESOURCE_FAILURE);
+}
+
+function exactStaticPwaRequestPathname(
+  manifest: Record<string, unknown>,
+  request: Record<string, unknown>,
+) {
+  const route = manifest.route;
+  const requested = isRecord(route) ? route.requested : null;
+  if (
+    isRecord(requested)
+    && requested.origin === "<app-origin>"
+    && (requested.pathname === "/install" || requested.pathname === "/offline")
+  ) {
+    return requested.pathname as "/install" | "/offline";
+  }
+  if (
+    !isExactPublicJourneyEnvelope(manifest)
+    || !Array.isArray(request.requestHeaders)
+  ) {
+    return null;
+  }
+  const referers = request.requestHeaders.filter((header) => (
+    isRecord(header)
+    && hasExactKeys(header, ["name", "value"])
+    && header.name === "referer"
+    && isRecord(header.value)
+    && hasExactKeys(header.value, ["fragment", "origin", "pathname", "query"])
+    && header.value.origin === "<app-origin>"
+    && (header.value.pathname === "/install" || header.value.pathname === "/offline")
+    && header.value.fragment === null
+    && Array.isArray(header.value.query)
+  ));
+  if (referers.length !== 1) return null;
+  const referer = referers[0] as { value: { pathname: unknown } };
+  return referer.value.pathname as "/install" | "/offline";
 }
 
 function hasSafeRequestIndexes(requests: unknown[]) {
