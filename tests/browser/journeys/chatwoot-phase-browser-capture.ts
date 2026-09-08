@@ -265,6 +265,14 @@ type CaptureStage =
   | "recreated-login"
   | "recreated-snapshot"
   | "final-reread";
+type CaptureCheckpoint =
+  | "stable-release-barrier"
+  | "stable-wait-barrier-completed"
+  | "stable-wait-phase-clear"
+  | "stable-finish-network"
+  | "stable-finish-browser-contract"
+  | "stable-history-snapshot"
+  | null;
 type CookiePresence = Readonly<{
   conversationCookiePresent: boolean;
   userCookiePresent: boolean;
@@ -307,6 +315,7 @@ export async function captureChatwootPhaseStack(input: CaptureInput) {
   let context: BrowserContext | undefined;
   let captureError: unknown;
   let captureStage: CaptureStage = "browser-context";
+  let captureCheckpoint: CaptureCheckpoint = null;
   const barrier = createReplacementBarrier();
   try {
     browser = await chromium.connect(browserServer.wsEndpoint());
@@ -334,7 +343,10 @@ export async function captureChatwootPhaseStack(input: CaptureInput) {
       ...input,
       barrier,
       context,
-    }, (stage) => { captureStage = stage; });
+    }, (stage) => {
+      captureStage = stage;
+      captureCheckpoint = null;
+    }, (checkpoint) => { captureCheckpoint = checkpoint; });
     return Object.freeze({
       runScopeSha256,
       browser: Object.freeze({
@@ -388,9 +400,19 @@ export async function captureChatwootPhaseStack(input: CaptureInput) {
         }),
         new Promise((resolve) => { const timer = setTimeout(() => resolve({ unavailable: true }), 2000); timer.unref(); }),
       ]) : { unavailable: true };
-      process.stderr.write(`${JSON.stringify({ status: "chatwoot_state_failed", stage: captureStage, state })}\n`);
+      process.stderr.write(`${JSON.stringify({
+        status: "chatwoot_state_failed",
+        stage: captureStage,
+        checkpoint: captureCheckpoint,
+        state,
+      })}\n`);
     } catch {
-      process.stderr.write(`${JSON.stringify({status: "chatwoot_state_failed", stage: captureStage, state: {unavailable: true}})}\n`);
+      process.stderr.write(`${JSON.stringify({
+        status: "chatwoot_state_failed",
+        stage: captureStage,
+        checkpoint: captureCheckpoint,
+        state: { unavailable: true },
+      })}\n`);
     }
     captureError = new Error(
       `Chatwoot browser capture failed during ${captureStage}.`,
@@ -426,7 +448,7 @@ export async function captureChatwootPhaseStack(input: CaptureInput) {
 async function exerciseChatwootPhases(input: CaptureInput & {
   barrier: Barrier;
   context: BrowserContext;
-}, onStage: (stage: CaptureStage) => void) {
+}, onStage: (stage: CaptureStage) => void, onCheckpoint: (checkpoint: CaptureCheckpoint) => void) {
   const eventLedger = createChatwootPhaseEventLedger();
   const diagnostics = installDiagnostics(input.context, eventLedger);
   const history = await installHistoryLedger(input.context, eventLedger);
@@ -692,15 +714,21 @@ async function exerciseChatwootPhases(input: CaptureInput & {
   });
 
   onStage("stable-transition");
+  onCheckpoint("stable-release-barrier");
   input.barrier.release();
+  onCheckpoint("stable-wait-barrier-completed");
   await input.barrier.completed();
+  onCheckpoint("stable-wait-phase-clear");
   await waitForPhaseState(page, null);
+  onCheckpoint("stable-finish-network");
   const stableNetwork = networkEvidence(await stableRecorder.finish());
+  onCheckpoint("stable-finish-browser-contract");
   const initialBrowserContract = await finishBrowserRequestContract(
     ledgers.initial,
     input.staticAssetContract,
     "initial",
   );
+  onCheckpoint("stable-history-snapshot");
   const initialHistory = initialProviderHistory.snapshot();
   onStage("stable-snapshot");
   const stable = await captureVisiblePhase({

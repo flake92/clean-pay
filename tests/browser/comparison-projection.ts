@@ -2115,6 +2115,7 @@ function projectNetwork(manifest: Record<string, unknown>) {
     if (
       isAutomaticNextRscPrefetch(request)
       || isAutomaticNextRscPrefetchRedirectTail(request, removedIndexes)
+      || isExactAuthenticatedChatwootTransportNoise(manifest, request)
       || isStaticPwaCspChunkRequest(manifest, request)
     ) {
       removedIndexes.add(request.index as number);
@@ -2167,6 +2168,129 @@ function projectNetwork(manifest: Record<string, unknown>) {
     projectJourneyFailedHashedStaticAsset(manifest, request);
     projectSuccessfulHashedStaticAsset(request);
   }
+}
+
+function isExactAuthenticatedChatwootTransportNoise(
+  manifest: Record<string, unknown>,
+  request: Record<string, unknown>,
+) {
+  if (
+    !hasExactJourneyManifestEnvelope(manifest)
+    || !exactJourneyFixtureContract(manifest)
+    || ![
+      "email-account-links-and-merges-telegram",
+      "email-register-verify-and-login",
+      "tariffs-payment-returns-extend-idempotency",
+      "telegram-oidc-cabinet-profile-link-referral-passkey",
+      "telegram-webapp-browser-boundary",
+    ].includes(String(manifest.journey))
+    || !hasExactKeys(request, [
+      "externalTransport",
+      "failure",
+      "index",
+      "method",
+      "navigation",
+      "postData",
+      "redirectedFrom",
+      "requestHeaders",
+      "resourceType",
+      "response",
+      "scope",
+      "serverAction",
+      "url",
+    ])
+    || request.scope !== "external"
+    || request.method !== "GET"
+    || !isNoServerAction(request.serverAction)
+    || request.postData !== null
+    || request.redirectedFrom !== null
+    || request.failure !== null
+    || request.externalTransport !== "<redacted>"
+    || !isRecord(request.url)
+    || typeof request.url.origin !== "string"
+    || !request.url.origin.startsWith("<external-origin:")
+    || typeof request.url.pathname !== "string"
+    || !Array.isArray(request.url.query)
+    || request.url.fragment !== null
+    || !Array.isArray(request.requestHeaders)
+    || !isExactChatwootTransportHeaders(request.requestHeaders)
+  ) {
+    return false;
+  }
+
+  if (
+    request.resourceType === "script"
+    && request.navigation === false
+    && request.url.pathname === "<external-path:segments=3:extension=js>"
+    && (
+      request.url.query.length === 0
+      || sameJson(request.url.query, [{ key: "render", value: "<redacted>" }])
+    )
+  ) {
+    return request.response === null || isExactChatwootScriptResponse(request.response);
+  }
+
+  if (
+    request.resourceType === "document"
+    && request.navigation === true
+    && request.url.pathname === "<external-path:segments=1:extension=none>"
+    && (
+      sameJson(request.url.query, [{ key: "website_token", value: "<redacted>" }])
+      || sameJson(request.url.query, [
+        { key: "website_token", value: "<redacted>" },
+        { key: "cw_conversation", value: "<redacted>" },
+      ])
+    )
+  ) {
+    return isExactChatwootDocumentResponse(request.response);
+  }
+
+  return false;
+}
+
+function isExactChatwootTransportHeaders(headers: unknown[]) {
+  return headers.length === 2
+    && isRecord(headers[0])
+    && hasExactKeys(headers[0], ["name", "value"])
+    && headers[0].name === "accept"
+    && isRecord(headers[0].value)
+    && (
+      isExactDigest(headers[0].value, {
+        bytes: 3,
+        sha256: "7994750c119d1c03615dde46677ccae5429cdbfc2687b51224f0ae6c5609a63d",
+      })
+      || isExactDigest(headers[0].value, {
+        bytes: 135,
+        sha256: "f2dc86899f6d0ab65c244825bbe60c0d8c267385ccb5204812d5f8b07f79ec6c",
+      })
+    )
+    && isRecord(headers[1])
+    && hasExactKeys(headers[1], ["name", "value"])
+    && headers[1].name === "referer"
+    && sameJson(headers[1].value, {
+      origin: "<app-origin>",
+      pathname: "/",
+      query: [],
+      fragment: null,
+    });
+}
+
+function isExactChatwootScriptResponse(value: unknown) {
+  return isRecord(value)
+    && hasExactKeys(value, ["fromServiceWorker", "headers", "status", "statusText"])
+    && value.status === 200
+    && value.statusText === ""
+    && value.fromServiceWorker === false
+    && sameJson(value.headers, [{ name: "content-type", value: "application/javascript" }]);
+}
+
+function isExactChatwootDocumentResponse(value: unknown) {
+  return isRecord(value)
+    && hasExactKeys(value, ["fromServiceWorker", "headers", "status", "statusText"])
+    && value.status === 200
+    && value.statusText === ""
+    && value.fromServiceWorker === false
+    && sameJson(value.headers, [{ name: "content-type", value: "text/html" }]);
 }
 
 function projectStaticDomAssetReferences(manifest: Record<string, unknown>) {

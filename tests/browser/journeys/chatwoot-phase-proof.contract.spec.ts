@@ -1689,6 +1689,9 @@ test("keeps Chatwoot capture failures bound to one bounded coarse stage", async 
     expect(source).toContain(`"${stage}"`);
   }
   expect(source).toContain("let captureStage: CaptureStage = \"browser-context\"");
+  expect(source).toContain("let captureCheckpoint: CaptureCheckpoint = null");
+  expect(source).toContain("checkpoint: captureCheckpoint");
+  expect(source).toContain("onCheckpoint(\"stable-finish-browser-contract\")");
   expect(source).toContain("{ cause: error }");
   expect(source).toContain("Chatwoot browser capture failed during ${captureStage}.");
 });

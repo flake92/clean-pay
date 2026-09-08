@@ -443,6 +443,25 @@ test("projects fully validated static resource count drift with the app logo", (
   expect(rejected.actual).not.toEqual(rejected.expected);
 });
 
+test("projects only exact authenticated Chatwoot external transport requests", () => {
+  const baseline = journeyManifest("baseline");
+  const candidate = journeyManifest("candidate");
+  baseline.journey = "telegram-webapp-browser-boundary";
+  candidate.journey = "telegram-webapp-browser-boundary";
+  setHashedNextTopology(baseline, "baseline", 1, true);
+  setHashedNextTopology(candidate, "candidate", 1, false);
+  addExactChatwootTransportRequest(candidate, "document");
+
+  const projected = projectPair(baseline, candidate);
+  expect(projected.actual).toEqual(projected.expected);
+
+  const oidcDocument = journeyManifest("candidate");
+  setHashedNextTopology(oidcDocument, "candidate", 1, false);
+  addOidcExternalDocumentRequest(oidcDocument);
+  const rejected = projectPair(baseline, oidcDocument);
+  expect(rejected.actual).not.toEqual(rejected.expected);
+});
+
 test("projects only exact removed Next disclosure headers in HAR entries", () => {
   const disclosure = {
     name: "x-powered-by",
@@ -1179,6 +1198,125 @@ function addExactLogoRequest(
     },
     failure: null,
     externalTransport: null,
+  } as unknown as ReturnType<typeof journeyManifest>["network"]["requests"][number]);
+}
+
+function addExactChatwootTransportRequest(
+  manifest: ReturnType<typeof journeyManifest>,
+  kind: "document" | "script",
+) {
+  const request = kind === "script"
+    ? {
+        method: "GET",
+        url: {
+          origin: "<external-origin:b57b2ced207f8793>",
+          pathname: "<external-path:segments=3:extension=js>",
+          query: [],
+          fragment: null,
+        },
+        scope: "external",
+        resourceType: "script",
+        navigation: false,
+        serverAction: { present: false, identifier: null },
+        requestHeaders: chatwootTransportHeaders("script"),
+        postData: null,
+        redirectedFrom: null,
+        response: {
+          status: 200,
+          statusText: "",
+          fromServiceWorker: false,
+          headers: [{ name: "content-type", value: "application/javascript" }],
+        },
+        failure: null,
+        externalTransport: "<redacted>",
+      }
+    : {
+        method: "GET",
+        url: {
+          origin: "<external-origin:b57b2ced207f8793>",
+          pathname: "<external-path:segments=1:extension=none>",
+          query: [{ key: "website_token", value: "<redacted>" }],
+          fragment: null,
+        },
+        scope: "external",
+        resourceType: "document",
+        navigation: true,
+        serverAction: { present: false, identifier: null },
+        requestHeaders: chatwootTransportHeaders("document"),
+        postData: null,
+        redirectedFrom: null,
+        response: {
+          status: 200,
+          statusText: "",
+          fromServiceWorker: false,
+          headers: [{ name: "content-type", value: "text/html" }],
+        },
+        failure: null,
+        externalTransport: "<redacted>",
+      };
+  pushRequest(manifest, request);
+}
+
+function addOidcExternalDocumentRequest(
+  manifest: ReturnType<typeof journeyManifest>,
+) {
+  pushRequest(manifest, {
+    method: "GET",
+    url: {
+      origin: "<external-origin:bbd8ca2460770262>",
+      pathname: "<external-path:segments=1:extension=none>",
+      query: [
+        { key: "response_type", value: "<redacted>" },
+        { key: "client_id", value: "<redacted>" },
+      ],
+      fragment: null,
+    },
+    scope: "external",
+    resourceType: "document",
+    navigation: true,
+    serverAction: { present: false, identifier: null },
+    requestHeaders: chatwootTransportHeaders("document"),
+    postData: null,
+    redirectedFrom: null,
+    response: {
+      status: 200,
+      statusText: "",
+      fromServiceWorker: true,
+      headers: [{ name: "content-type", value: "text/html; charset=utf-8" }],
+    },
+    failure: null,
+    externalTransport: "<redacted>",
+  });
+}
+
+function chatwootTransportHeaders(kind: "document" | "script") {
+  return [
+    {
+      name: "accept",
+      value: kind === "script"
+        ? {
+            bytes: 3,
+            sha256: "7994750c119d1c03615dde46677ccae5429cdbfc2687b51224f0ae6c5609a63d",
+          }
+        : {
+            bytes: 135,
+            sha256: "f2dc86899f6d0ab65c244825bbe60c0d8c267385ccb5204812d5f8b07f79ec6c",
+          },
+    },
+    {
+      name: "referer",
+      value: canonicalUrl("/"),
+    },
+  ];
+}
+
+function pushRequest(
+  manifest: ReturnType<typeof journeyManifest>,
+  request: Record<string, unknown>,
+) {
+  manifest.network.requests.push({
+    index: manifest.network.requests.length,
+    ...request,
   } as unknown as ReturnType<typeof journeyManifest>["network"]["requests"][number]);
 }
 
