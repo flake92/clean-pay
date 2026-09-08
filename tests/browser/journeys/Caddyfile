@@ -113,6 +113,9 @@ https://chatwoot.browser.clean-pay.dev {
       const deliveryId = event.data?.deliveryId;
       if (event.origin !== parentOrigin || event.source !== parent || event.data?.method !== "identify"
         || !Number.isSafeInteger(deliveryId) || deliveryId < 1) return;
+      // The phase proof intentionally exercises ownership without a full ACK.
+      // This is a fixture protocol flag, never an application-state mutation.
+      if (event.data.ownershipOnly === true) return;
       setTimeout(() => send({
         event: "setAuthCookie",
         data: { deliveryId, widgetAuthToken: "synthetic-widget-auth" },
@@ -166,7 +169,9 @@ https://chatwoot.browser.clean-pay.dev {
             && (new URL(document.getElementById("chatwoot_live_chat_widget").src).searchParams.has("cw_conversation")
               || !restoredOwnershipAtRun);
           target.postMessage({ method: "identify", deliveryId: delivery.deliveryId,
-            ...(confirmation ? { confirmBeforeProbe: true } : {}) }, config.baseUrl);
+            ...(confirmation ? { confirmBeforeProbe: true } :
+              window.__cleanPayChatwootFixtureConfirmation === "phase-proof"
+                ? { ownershipOnly: true } : {}) }, config.baseUrl);
         };
         const applyIdentity = (identifier, attributes) => {
           calls.push({ method: "setUser", identifierBytes: String(identifier || "").length, attributeKeys: Object.keys(attributes || {}).sort() });
