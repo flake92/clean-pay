@@ -790,7 +790,10 @@ async function waitForAuthenticatedChatwootFixture(page: Page) {
             if (call.method === "identity.confirmed") {
               return false;
             }
-            if (call.method === "toggleBubbleVisibility" && call.value === "show") {
+            if (
+              call.method === "toggleBubbleVisibility"
+              && (call.value === "hide" || call.value === "show")
+            ) {
               return false;
             }
             if (call.method === "removeLabel" && call.label === "subscription_expired") {

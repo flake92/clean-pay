@@ -3527,6 +3527,18 @@ function normalizeProviderLedgerEntries(
     );
   }
   while (normalized.length > expectedLength) {
+    const contactRefreshStart = trailingContactProbeReadinessCycleIndex(
+      normalized,
+      expectedLength,
+    );
+    if (contactRefreshStart !== null) {
+      normalized = resequenceProviderEntries(
+        normalized.filter((_, index) => (
+          index < contactRefreshStart || index >= contactRefreshStart + 8
+        )),
+      );
+      continue;
+    }
     const cycleStart = trailingReadinessCycleIndex(normalized, expectedLength);
     if (cycleStart === null) {
       break;
@@ -3551,6 +3563,21 @@ function trailingReadinessCycleIndex(
 ) {
   for (let index = expectedLength; index <= entries.length - 7; index += 1) {
     if (isExactProviderReadinessCycle(entries, index)) return index;
+  }
+  return null;
+}
+
+function trailingContactProbeReadinessCycleIndex(
+  entries: Array<Record<string, unknown>>,
+  expectedLength: number,
+) {
+  for (let index = expectedLength; index <= entries.length - 8; index += 1) {
+    if (
+      entries[index]?.effect === "contact_identity_probed"
+      && isExactProviderReadinessCycle(entries, index + 1)
+    ) {
+      return index;
+    }
   }
   return null;
 }

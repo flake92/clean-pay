@@ -68,6 +68,7 @@ test("captures the authenticated Chatwoot boundary at the first owned cabinet", 
   expect(captureBlock).toContain("await waitForAuthenticatedChatwootFixture(page);");
   expect(captureBlock).toContain("return waitForChatwootBoundary(page);");
   expect(captureBlock).toContain("    : null;");
+  expect(source).toContain('&& (call.value === "hide" || call.value === "show")');
   expect(firstCheckpoint).toBeGreaterThan(capture);
   expect(finalPage).toBeGreaterThan(firstCheckpoint);
   expect(reuse).toBeGreaterThan(finalPage);
