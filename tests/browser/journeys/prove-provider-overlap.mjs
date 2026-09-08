@@ -874,13 +874,31 @@ async function exerciseCabinet(
     // request, four history events and the one exact Playwright service-worker
     // warning, so 1,024 retains a bounded margin above the valid 773-event ledger.
     const eventSeal = createProviderOverlapEventSeal(1_024);
+    const eventSourceCounts = {
+      console: 0,
+      history: 0,
+      page: 0,
+      pageerror: 0,
+      request: 0,
+      responseFallback: 0,
+      route: 0,
+      terminal: 0,
+    };
+    const recordBrowserEvent = (source) => {
+      eventSourceCounts[source] += 1;
+      eventSeal.record();
+    };
+    const beginBrowserEvent = (source) => {
+      eventSourceCounts[source] += 1;
+      return eventSeal.begin();
+    };
     const historyRecords = [];
     let historyOverflow = false;
     let historyCaptureActive = false;
     markProviderFailurePhase(role, "install-history-binding");
     await context.exposeBinding("__cleanPayProviderHistory", ({ frame }, record) => {
       if (!historyCaptureActive) return;
-      eventSeal.record();
+      recordBrowserEvent("history");
       if (frame !== frame.page().mainFrame()) {
         historyOverflow = true;
         return;
@@ -911,7 +929,7 @@ async function exerciseCabinet(
      */
     const handleFrameNavigated = ({ frame, type }) => {
       if (!historyCaptureActive || frame.parentId !== undefined) return;
-      eventSeal.record();
+      recordBrowserEvent("history");
       if (historyRecords.length >= 128) {
         historyOverflow = true;
         return;
@@ -927,7 +945,7 @@ async function exerciseCabinet(
     /** @param {{frameId: string, navigationType: string, url: string}} event */
     const handleNavigatedWithinDocument = ({ frameId, navigationType, url }) => {
       if (!historyCaptureActive) return;
-      eventSeal.record();
+      recordBrowserEvent("history");
       if (historyRecords.length >= 128) {
         historyOverflow = true;
         return;
@@ -957,7 +975,7 @@ async function exerciseCabinet(
     };
     context.on("page", (candidate) => {
       if (candidate === page) return;
-      eventSeal.record();
+      recordBrowserEvent("page");
       if (unexpectedPages.length < maximumUnexpectedEvents) {
         unexpectedPages.push(sha256(candidate.url()));
       } else {
@@ -965,7 +983,7 @@ async function exerciseCabinet(
       }
     });
     page.on("console", (message) => {
-      eventSeal.record();
+      recordBrowserEvent("console");
       const diagnostic = createProviderBrowserConsoleDiagnostic(message);
       if (isExpectedPlaywrightServiceWorkerBlockDiagnostic(diagnostic)) {
         if (expectedPlaywrightConsole.length < maximumUnexpectedEvents) {
@@ -980,7 +998,7 @@ async function exerciseCabinet(
       }
     });
     page.on("pageerror", (error) => {
-      eventSeal.record();
+      recordBrowserEvent("pageerror");
       if (unexpectedPageErrors.length < maximumUnexpectedEvents) {
         unexpectedPageErrors.push(sha256(String(error?.message ?? error)));
       } else {
@@ -1192,7 +1210,7 @@ async function exerciseCabinet(
       }
     };
     context.on("request", (request) => {
-      eventSeal.record();
+      recordBrowserEvent("request");
       pendingRequestSeal.observe(request);
       recordProviderPendingRequest(role, request);
       // Prepare synchronously on the normal request path. The response path
@@ -1218,12 +1236,14 @@ async function exerciseCabinet(
         }
         pendingRequestSeal.observe(request);
         recordProviderPendingRequest(role, request);
+        const requestPreparedBeforeResponse = browserRequestPreparationByIdentity.has(request);
         const entry = resolveProviderOverlapResponseRequestEntry({
           preparationByIdentity: browserRequestPreparationByIdentity,
           prepare: prepareBrowserRequest,
           request,
           requestByIdentity: browserRequestByIdentity,
         });
+        if (!requestPreparedBeforeResponse) recordBrowserEvent("responseFallback");
         if (browserRequestByIdentity.get(request) !== entry) {
           throw new Error("Synthetic browser response escaped its request identity ledger.");
         }
@@ -1299,7 +1319,7 @@ async function exerciseCabinet(
         retainUnownedTerminalFailure();
       }
       if (!entry) return;
-      const finishRequest = eventSeal.begin();
+      const finishRequest = beginBrowserEvent("terminal");
       let evidence = Promise.resolve(null);
       if (entry) {
         if (browserTerminalRequestIdentities.has(request)) {
@@ -1377,7 +1397,7 @@ async function exerciseCabinet(
     context.removeListener("request", observePreLedgerRequest);
     markProviderFailurePhase(role, "install-request-routing");
     await context.route("**/*", async (route) => {
-      const finishRoute = eventSeal.begin();
+      const finishRoute = beginBrowserEvent("route");
       try {
         const request = route.request();
         const preparation = browserRequestPreparationByIdentity.get(request);
@@ -1496,7 +1516,7 @@ async function exerciseCabinet(
     const profileFrame = profileFrameTree.frameTree.frame;
     const profileHistoryLength = await page.evaluate(() => history.length);
     historyRecords.length = 0;
-    eventSeal.record();
+    recordBrowserEvent("history");
     historyRecords.push({
       frameId: profileFrame.id,
       historyLength: profileHistoryLength,
@@ -1696,7 +1716,10 @@ async function exerciseCabinet(
         colorScheme: "light",
       },
       navigation: {
-        eventLifecycle: finalized.eventLifecycle,
+        eventLifecycle: {
+          ...finalized.eventLifecycle,
+          sourceCounts: Object.freeze({ ...eventSourceCounts }),
+        },
         finalUrl: browserSnapshot.finalUrl,
         headingVisible: browserSnapshot.headingVisible,
         unexpectedRequestCount: unexpectedRequests.length,

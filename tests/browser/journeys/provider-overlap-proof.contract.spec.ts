@@ -2147,7 +2147,7 @@ test("prearms profile load and keeps the exact cabinet URL at DOM content", asyn
     'Object.keys(challenge).sort().join(",") === "action,issue,widgetId"',
   );
   expect(runnerSource).not.toContain("waitForProviderProfileBackgroundRequests");
-  expect(runnerSource).toContain("const finishRequest = eventSeal.begin();");
+  expect(runnerSource).toContain('const finishRequest = beginBrowserEvent("terminal");');
   expect(runnerSource).toContain("browserResponseEvidenceByIdentity.set(request, evidence);");
   const responseListenerIndex = runnerSource.indexOf('context.on("response"');
   const captureIndex = runnerSource.indexOf(
@@ -2403,10 +2403,11 @@ test("registers exact request identities before response capture and routed cont
   expect(responseListener).toContain("pendingRequestSeal.observe(request);");
   expect(responseListener).toContain("resolveProviderOverlapResponseRequestEntry({");
   expect(responseListener).toContain("prepare: prepareBrowserRequest,");
+  expect(responseListener).toContain('recordBrowserEvent("responseFallback")');
   expect(responseListener).not.toMatch(/eventSeal\.(?:begin|record)\(/);
   const terminalHandler = runnerSource.slice(terminalHandlerIndex, routeHandlerIndex);
   expect(terminalHandler).toMatch(
-    /const entry = browserRequestByIdentity\.get\(request\);[\s\S]{1,512}if \(!entry\) return;[\s\S]{1,512}const finishRequest = eventSeal\.begin\(\);/,
+    /const entry = browserRequestByIdentity\.get\(request\);[\s\S]{1,512}if \(!entry\) return;[\s\S]{1,512}const finishRequest = beginBrowserEvent\("terminal"\);/,
   );
   expect(routeHandler).toContain("browserRequestPreparationByIdentity.get(request)");
   expect(routeHandler).not.toContain("prepareBrowserRequest(");
@@ -2435,7 +2436,8 @@ test("registers exact request identities before response capture and routed cont
     .toContain('await route.abort("blockedbyclient")');
   expect(routeHandler.slice(navigationCaptureBarrier, routeHandler.indexOf("await route.continue()")))
     .not.toContain("throw error");
-  expect(proofContractSource).toContain("requestCount * 3 + historyCount + 1");
+  expect(proofContractSource).toContain("sourceCounts.request + sourceCounts.responseFallback");
+  expect(proofContractSource).toContain("causal browser request preparation count");
   const pendingDrainIndex = runnerSource.indexOf(
     "await pendingRequestSeal.drainAndSeal({ timeoutMs: 15_000 })",
   );
@@ -4921,7 +4923,7 @@ test("does not classify the already-owned primary page as a popup lifecycle even
     "utf8",
   );
   expect(source).toMatch(
-    /context\.on\("page", \(candidate\) => \{\s*if \(candidate === page\) return;\s*eventSeal\.record\(\);\s*if \(unexpectedPages\.length/,
+    /context\.on\("page", \(candidate\) => \{\s*if \(candidate === page\) return;\s*recordBrowserEvent\("page"\);\s*if \(unexpectedPages\.length/,
   );
 });
 
@@ -5108,6 +5110,22 @@ test("keeps the schema write-once sidecar-only and free of comparison projection
     type: "integer",
     minimum: 59,
     maximum: 773,
+  });
+  expect(schema.$defs.eventLifecycle.required).toEqual([
+    "drainedEventCount", "lateEventCount", "sourceCounts", "status",
+  ]);
+  expect(schema.$defs.eventLifecycle.properties.sourceCounts).toMatchObject({
+    additionalProperties: false,
+    required: [
+      "console",
+      "history",
+      "page",
+      "pageerror",
+      "request",
+      "responseFallback",
+      "route",
+      "terminal",
+    ],
   });
   expect(schema.$defs.staticRequestEntry.additionalProperties).toBe(false);
   expect(schema.$defs.staticRequestEntry.required).toEqual([
@@ -5585,6 +5603,16 @@ function stackReport(role: "baseline" | "candidate", providerOverlap: ReturnType
       eventLifecycle: {
         drainedEventCount: 68,
         lateEventCount: 0,
+        sourceCounts: {
+          console: 1,
+          history: historyLedger.length,
+          page: 0,
+          pageerror: 0,
+          request: semanticRequestLedger.length + staticLedger.length,
+          responseFallback: 0,
+          route: semanticRequestLedger.length + staticLedger.length,
+          terminal: semanticRequestLedger.length + staticLedger.length,
+        },
         status: "sealed-clean",
       },
       finalUrl: "https://pay.ci.clean-pay.dev/cabinet",
