@@ -1629,17 +1629,21 @@ function projectNetwork(manifest: Record<string, unknown>) {
     if (typeof request.redirectedFrom === "number") {
       request.redirectedFrom = oldToNewIndex.get(request.redirectedFrom) as number;
     }
-    if (isKnownResponseBackedAbort(manifest, request)) {
-      request.failure = null;
-    }
-    projectJourneyFailedHashedStaticAsset(manifest, request);
-    projectSuccessfulHashedStaticAsset(request);
   }
   for (const actionValue of serverActions) {
     const action = actionValue as Record<string, unknown>;
     action.requestIndex = oldToNewIndex.get(action.requestIndex as number) as number;
   }
   network.requests = retained;
+
+  for (const requestValue of retained) {
+    const request = requestValue as Record<string, unknown>;
+    if (isKnownResponseBackedAbort(manifest, request)) {
+      request.failure = null;
+    }
+    projectJourneyFailedHashedStaticAsset(manifest, request);
+    projectSuccessfulHashedStaticAsset(request);
+  }
 }
 
 function projectStaticDomAssetReferences(manifest: Record<string, unknown>) {
@@ -2176,7 +2180,11 @@ function isExactResponseBackedJourneyServerAction(
     ) {
       return false;
     }
-    const actionRequest = network.requests[actionValue.requestIndex as number];
+    const matchingActionRequests = network.requests.filter((candidate) => (
+      isRecord(candidate) && candidate.index === actionValue.requestIndex
+    ));
+    if (matchingActionRequests.length !== 1) return false;
+    const actionRequest = matchingActionRequests[0];
     if (
       !isRecord(actionRequest)
       || !hasExactKeys(actionRequest, [
