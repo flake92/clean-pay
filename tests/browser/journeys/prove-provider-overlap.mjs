@@ -124,6 +124,45 @@ const providerBrowserDiagnosticState = {
   baseline: null,
   candidate: null,
 };
+let providerProofAssemblyFailureState = null;
+const providerProofAssemblyInvariantLabels = Object.freeze(new Set([
+  "application image selection mode",
+  "browser history contract binding",
+  "browser history operation sequence",
+  "browser project binding",
+  "browser request contract binding",
+  "exact CONNECT authority classification ledger",
+  "fixture contract binding",
+  "fresh global fixture binding",
+  "global fixture and mounted subset binding",
+  "live fixture mount binding",
+  "normalized CONNECT proxy counters",
+  "owned reset contract binding",
+  "provider overlap semantics",
+  "provider read record set",
+  "public build contract binding",
+  "scenario and seed binding",
+  "shared pair coexistence binding",
+  "shared pair launch barrier binding",
+  "synthetic application environment binding",
+  "synthetic role environment policy binding",
+]));
+const providerProofAssemblyRuntimeBindingNames = Object.freeze(new Set([
+  "applicationImageBindingContractSha256",
+  "composeRuntimeContractSha256",
+  "connectProxyTargetSha256",
+  "fixtureExecutionContractSha256",
+  "generatedEnvironmentDirectorySha256",
+  "migrationImageBindingContractSha256",
+  "networkSha256",
+  "oneShotLifecycleContractSha256",
+  "ownedInputReceiptSha256",
+  "projectSha256",
+  "publicationsSha256",
+  "serviceIdentitySha256",
+  "staticAssetAttestationSha256",
+  "syntheticRoleEnvironmentContractSha256",
+]));
 
 try {
   argumentsByName = parseArguments(process.argv.slice(2));
@@ -226,12 +265,17 @@ try {
     });
     return Object.freeze({ baseline, candidate });
   });
-  const document = createDualProviderOverlapProof(
-    proofSession.value.baseline,
-    proofSession.value.candidate,
-    proofSession.cleanup,
-    proofSession.launch,
-  );
+  let document;
+  try {
+    document = createDualProviderOverlapProof(
+      proofSession.value.baseline,
+      proofSession.value.candidate,
+      proofSession.cleanup,
+      proofSession.launch,
+    );
+  } catch (error) {
+    throw retainProviderProofAssemblyFailure(error);
+  }
   const bytes = Buffer.from(`${JSON.stringify(document, null, 2)}\n`, "utf8");
   await writeJourneySanitizedOutput(outputPath, bytes);
   process.stdout.write(`${JSON.stringify({
@@ -277,6 +321,7 @@ function providerFailureBytes(error) {
   const responseCaptureFailureEvidence = currentProviderResponseCaptureFailureEvidence();
   const projectionFailureEvidence = currentProviderProjectionFailureEvidence();
   const browserDiagnosticEvidence = currentProviderBrowserDiagnosticEvidence();
+  const proofAssemblyFailureEvidence = currentProviderProofAssemblyFailureEvidence();
   return Buffer.from(`${JSON.stringify({
     status: "dual_image_provider_overlap_failed",
     ...(dockerFailures.length === 0 ? {} : { dockerFailures }),
@@ -287,6 +332,7 @@ function providerFailureBytes(error) {
       ? {} : { responseCaptureFailureEvidence }),
     ...(projectionFailureEvidence === undefined ? {} : { projectionFailureEvidence }),
     ...(browserDiagnosticEvidence === undefined ? {} : { browserDiagnosticEvidence }),
+    ...(proofAssemblyFailureEvidence === undefined ? {} : { proofAssemblyFailureEvidence }),
     ...createJourneySanitizedErrorEvidence(error),
   })}\n`, "utf8");
 }
@@ -305,6 +351,59 @@ function currentProviderFailurePhases() {
     candidate: providerFailurePhaseState.candidate,
   });
   return Object.values(phases).some((phase) => phase !== null) ? phases : undefined;
+}
+
+function retainProviderProofAssemblyFailure(error) {
+  if (providerProofAssemblyFailureState === null) {
+    const message = error instanceof Error ? error.message : String(error);
+    providerProofAssemblyFailureState = Object.freeze({
+      ...classifyProviderProofAssemblyFailure(message),
+      messageSha256: sha256(message),
+      schemaVersion: 1,
+    });
+  }
+  return error;
+}
+
+function classifyProviderProofAssemblyFailure(message) {
+  const exactMismatch = /^(.{1,128}) does not match its exact contract\.$/.exec(message);
+  if (exactMismatch !== null && providerProofAssemblyInvariantLabels.has(exactMismatch[1])) {
+    return Object.freeze({
+      invariantLabel: exactMismatch[1],
+      kind: "exact-invariant-mismatch",
+    });
+  }
+  const runtimeAlias = /^Dual-image proof requires distinct ([A-Za-z0-9]+) runtime bindings\.$/
+    .exec(message);
+  if (
+    runtimeAlias !== null
+    && providerProofAssemblyRuntimeBindingNames.has(runtimeAlias[1])
+  ) {
+    return Object.freeze({
+      kind: "runtime-binding-alias",
+      runtimeBindingName: runtimeAlias[1],
+    });
+  }
+  switch (message) {
+    case "Dual-image proof requires distinct isolated Compose projects.":
+      return Object.freeze({ kind: "compose-project-alias" });
+    case "Dual-image proof requires distinct role-bound journey contracts.":
+      return Object.freeze({ kind: "journey-contract-alias" });
+    case "Dual-image proof requires distinct OCI source and config image digests.":
+      return Object.freeze({ kind: "application-image-alias" });
+    case "Dual-image proof requires distinct source revisions.":
+      return Object.freeze({ kind: "source-revision-alias" });
+    case "Proof arrival order relationship is invalid.":
+      return Object.freeze({ kind: "arrival-order-invalid" });
+    default:
+      return Object.freeze({ kind: "unclassified" });
+  }
+}
+
+function currentProviderProofAssemblyFailureEvidence() {
+  return providerProofAssemblyFailureState === null
+    ? undefined
+    : providerProofAssemblyFailureState;
 }
 
 function retainProviderResponseCaptureFailure(role, source, error, snapshot) {
