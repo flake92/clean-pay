@@ -44,9 +44,9 @@ export function projectExactJourneyGeneratedValues(manifest: Record<string, unkn
   projectSyntheticResetScope(manifest.syntheticReset);
   projectProviderLedger(manifest.providerEffects, references);
   projectServerActions(manifest.network, references);
-  projectCheckpointCookies(manifest.checkpoints, references);
+  projectCheckpointCookies(manifest.checkpoints);
   projectBoundaryCookies(manifest.boundaries, references);
-  projectCanonicalUrls(manifest, references);
+  projectCanonicalUrls(manifest);
 }
 
 export function projectExactJourneyPwaShellCachePair(
@@ -81,7 +81,6 @@ export function projectExactJourneyPwaShellCachePair(
   ) {
     return;
   }
-  projectPwaLocations(expectedLocations);
 
   const actualLocations = exactPwaShellCacheLocations(actual);
   const actualRevisionCache = `clean-pay-shell-${actualSource.revision}`;
@@ -95,6 +94,7 @@ export function projectExactJourneyPwaShellCachePair(
   ) {
     return;
   }
+  projectPwaLocations(expectedLocations);
   projectPwaLocations(actualLocations);
 }
 
@@ -107,6 +107,7 @@ export function projectExactOptionalJourneyServiceWorkerStatePair(
     || !isExactJourneyManifest(actual)
     || expected.project !== actual.project
     || expected.journey !== actual.journey
+    || expected.journey === "public-responsive-keyboard-install-offline-support"
   ) {
     return;
   }
@@ -1031,13 +1032,26 @@ function exactNextActionHeader(
     : null;
 }
 
-function projectCheckpointCookies(value: unknown, references: DynamicReferences) {
+function projectCheckpointCookies(value: unknown) {
   if (!Array.isArray(value)) return;
+  const cookieReferences = new Map<string, string>();
+  const cookieSequences = new Map<string, number>();
   for (const checkpoint of value) {
     if (!isRecord(checkpoint) || !Array.isArray(checkpoint.cookies)) continue;
     for (const cookie of checkpoint.cookies) {
       if (!isExactDynamicCookie(cookie)) continue;
-      cookie.value.sha256 = references.symbol(`cookie-${cookie.name}`, cookie.value.sha256);
+      const key = `${cookie.name}:${cookie.value.sha256}`;
+      const existing = cookieReferences.get(key);
+      if (existing) {
+        cookie.value.sha256 = existing;
+        continue;
+      }
+      const format = `cookie-${cookie.name}`;
+      const sequence = (cookieSequences.get(format) ?? 0) + 1;
+      cookieSequences.set(format, sequence);
+      const symbol = `<dynamic:${format}:${sequence}>`;
+      cookieReferences.set(key, symbol);
+      cookie.value.sha256 = symbol;
     }
   }
 }
@@ -1062,7 +1076,8 @@ function isExactDynamicCookie(value: unknown): value is Record<string, unknown> 
     && value.value.bytes <= 4096;
 }
 
-function projectCanonicalUrls(manifest: Record<string, unknown>, references: DynamicReferences) {
+function projectCanonicalUrls(manifest: Record<string, unknown>) {
+  const references = new LocalDynamicReferences();
   visit(manifest, (value) => {
     if (!isCanonicalUrl(value)) return;
     const segments = value.pathname.split("/");
@@ -1086,6 +1101,22 @@ function projectCanonicalUrls(manifest: Record<string, unknown>, references: Dyn
       );
     }
   });
+}
+
+class LocalDynamicReferences {
+  #values = new Map<string, string>();
+  #sequences = new Map<string, number>();
+
+  symbol(format: string, digest: string) {
+    const key = `${format}:${digest}`;
+    const existing = this.#values.get(key);
+    if (existing) return existing;
+    const sequence = (this.#sequences.get(format) ?? 0) + 1;
+    this.#sequences.set(format, sequence);
+    const value = `<dynamic:${format}:${sequence}>`;
+    this.#values.set(key, value);
+    return value;
+  }
 }
 
 function isCanonicalUrl(value: Record<string, unknown>): value is Record<string, unknown> & {

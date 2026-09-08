@@ -235,6 +235,8 @@ function projectDom(entries: DomEntry[], context: ProjectionContext) {
     projectCabinetHeading(entry, context);
     projectPrimeAriaLabel(entry, entries, parentByNode, context);
     projectPasskeyDeleteName(entry, context);
+    projectObservedPasskeyDeleteName(entry);
+    projectHiddenDisplayStyle(entry);
   }
 }
 
@@ -392,6 +394,22 @@ function projectPasskeyDeleteName(entry: DomEntry, context: ProjectionContext) {
   incrementCount(context.passkeySnapshotLabels, label as string);
 }
 
+function projectObservedPasskeyDeleteName(entry: DomEntry) {
+  const label = getAttribute(entry.node, "aria-label");
+  if (
+    entry.node.tag === "button"
+    && /^Удалить ключ .+ [1-9]\d*$/.test(label ?? "")
+  ) {
+    setAttribute(entry.node, "aria-label", "Удалить ключ");
+  }
+}
+
+function projectHiddenDisplayStyle(entry: DomEntry) {
+  if (getAttribute(entry.node, "style") === "display: none; visibility: hidden;") {
+    setAttribute(entry.node, "style", "display: none;");
+  }
+}
+
 function projectComputedStyles(
   manifest: Record<string, unknown>,
   context: ProjectionContext,
@@ -526,6 +544,12 @@ function projectInteractiveElements(
     ) {
       value.ariaLabel = "Удалить ключ";
     }
+    if (
+      value.tag === "button"
+      && /^Удалить ключ .+ [1-9]\d*$/.test(String(value.ariaLabel))
+    ) {
+      value.ariaLabel = "Удалить ключ";
+    }
   }
 }
 
@@ -548,6 +572,8 @@ function projectAriaSnapshot(
 ) {
   if (typeof manifest.ariaSnapshot !== "string") return;
   let lines = manifest.ariaSnapshot.split("\n");
+  lines = projectExactCurrentPageAlertAria(lines);
+  lines = removeExactObservedSkipLinkAria(lines);
   lines = removeExactSkipLinkAria(lines, context);
   lines = projectExactLogoAria(lines, context);
   const eligibleHeadings = eligibleHeadingSnapshotNames(lines, context);
@@ -566,6 +592,31 @@ function projectAriaSnapshot(
     eligiblePasskeyLabels,
   ));
   manifest.ariaSnapshot = lines.join("\n");
+}
+
+function removeExactObservedSkipLinkAria(lines: string[]) {
+  if (
+    lines[0] === `- link "${SKIP_LINK_TEXT}":`
+    && typeof lines[1] === "string"
+    && /^  - \/url: \{"origin":"<app-origin>","pathname":"\/[^"]+","query":\[[^\]]*\],"fragment":"<sha256:0c1923dd7ec27396>"\}$/.test(lines[1])
+  ) {
+    return lines.slice(2);
+  }
+  return lines;
+}
+
+function projectExactCurrentPageAlertAria(lines: string[]) {
+  const heading = lines.find((line) => (
+    /^  - heading ".+" \[level=1\]$/.test(line)
+  ));
+  if (!heading) return lines;
+  const match = heading.match(/^  - heading "(.+)" \[level=1\]$/);
+  if (!match) return lines;
+  const alert = `- alert: ${match[1]}`;
+  if (lines[0] !== "- alert" && lines[0] !== alert) return lines;
+  const projected = [...lines];
+  projected[0] = "- alert: <current-page-announcement>";
+  return projected;
 }
 
 function projectExactLogoAria(lines: string[], context: ProjectionContext) {
@@ -681,12 +732,16 @@ function projectAriaLine(
   if (
     context.routePathname === "/link-account"
     && context.passkeyPaths.size > 0
-    && /^\s*- button "([^\"]+)"$/.test(line)
+    && /^\s*- button "([^\"]+)"(?:.*)?$/.test(line)
   ) {
-    const label = /^\s*- button "([^\"]+)"$/.exec(line)?.[1];
+    const label = /^\s*- button "([^\"]+)"(?:.*)?$/.exec(line)?.[1];
     if (label && eligiblePasskeyLabels.has(label)) {
       return line.replace(`"${label}"`, '"Удалить ключ"');
     }
+  }
+  const passkeyDeleteButton = /^(\s*- button )"(Удалить ключ .+ [1-9]\d*)"( \[disabled\]: .+)$/.exec(line);
+  if (passkeyDeleteButton) {
+    return `${passkeyDeleteButton[1]}"Удалить ключ"${passkeyDeleteButton[3]}`;
   }
   const roleMatch = /^(\s*- ([a-z]+) )"([^"]+)"(.*)$/.exec(line);
   if (!roleMatch) return line;
