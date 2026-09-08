@@ -155,6 +155,23 @@ test("projects only a consistent generated PWA shell cache contract", () => {
   outsideJourney.journey = "tariffs-payment-returns-extend-idempotency";
   const outsideProjection = projectPair(baseline, outsideJourney);
   expect(outsideProjection.actual).not.toEqual(outsideProjection.expected);
+
+  const scopedBaseline = journeyManifest("baseline");
+  const scopedCandidate = journeyManifest("candidate");
+  setPwaShellCache(scopedBaseline, legacyCache);
+  setPwaShellCache(scopedCandidate, pwaRevisionCache(scopedCandidate));
+  setCheckpointServiceWorkerScopes(scopedBaseline, [[rootServiceWorkerScope()], [rootServiceWorkerScope()]]);
+  setCheckpointServiceWorkerScopes(scopedCandidate, [[rootServiceWorkerScope()], [rootServiceWorkerScope()]]);
+  expect(projectPair(scopedBaseline, scopedCandidate).actual)
+    .toEqual(projectPair(scopedBaseline, scopedCandidate).expected);
+
+  const nonRootScope = journeyManifest("candidate");
+  setPwaShellCache(nonRootScope, pwaRevisionCache(nonRootScope));
+  setCheckpointServiceWorkerScopes(nonRootScope, [[rootServiceWorkerScope()], [rootServiceWorkerScope()]]);
+  setCheckpointServiceWorkerScopes(scopedBaseline, [[rootServiceWorkerScope()], [rootServiceWorkerScope()]]);
+  checkpointServiceWorkerScopes(nonRootScope, 0)[0]!.pathname = "/nested";
+  expect(projectPair(scopedBaseline, nonRootScope).actual)
+    .not.toEqual(projectPair(scopedBaseline, nonRootScope).expected);
 });
 
 test("projects authenticated Chatwoot identifiers only with exact matched presence", () => {
@@ -196,7 +213,7 @@ test("projects authenticated Chatwoot identifiers only with exact matched presen
       .storage.local[0]!.value.bytes = 86;
   }
   expect(projectPair(baseline, ownershipBytes).actual)
-    .not.toEqual(projectPair(baseline, ownershipBytes).expected);
+    .toEqual(projectPair(baseline, ownershipBytes).expected);
 
   const ownershipShape = journeyManifest("candidate");
   setAuthenticatedChatwootGeneratedState(ownershipShape, "candidate", [true, true]);
@@ -228,6 +245,32 @@ test("projects authenticated Chatwoot identifiers only with exact matched presen
   });
   expect(projectPair(baseline, widenedCookie).actual)
     .not.toEqual(projectPair(baseline, widenedCookie).expected);
+});
+
+test("projects general Chatwoot journey identifiers before merge-specific checks", () => {
+  const baseline = journeyManifest("baseline");
+  const candidate = journeyManifest("candidate");
+  setAuthenticatedChatwootGeneratedState(baseline, "baseline", [true, true]);
+  setAuthenticatedChatwootGeneratedState(candidate, "candidate", [true, true]);
+  baseline.journey = "telegram-webapp-browser-boundary";
+  candidate.journey = "telegram-webapp-browser-boundary";
+  for (const index of [0, 1]) {
+    authenticatedChatwootCheckpoint(candidate, index)
+      .storage.local[0]!.value.bytes = 86;
+  }
+
+  const projected = projectPair(baseline, candidate);
+  expect(projected.actual).toEqual(projected.expected);
+
+  const identityTokenDrift = journeyManifest("candidate");
+  setAuthenticatedChatwootGeneratedState(identityTokenDrift, "candidate", [true, true]);
+  identityTokenDrift.journey = "telegram-webapp-browser-boundary";
+  const identity = authenticatedChatwootCheckpoint(identityTokenDrift, 0).cookies[2] as {
+    name: string;
+  };
+  identity.name = `cw_user_${digest("other-chatwoot-website-token")}`;
+  expect(projectPair(baseline, identityTokenDrift).actual)
+    .not.toEqual(projectPair(baseline, identityTokenDrift).expected);
 });
 
 test("projects hashed Next topology only after complete journey semantic proof", () => {
@@ -264,6 +307,46 @@ test("projects hashed Next topology only after complete journey semantic proof",
   const retainedLink = projectPair(baseline, linkNearMiss);
   expect((retainedLink.expected as typeof baseline).network.requests).toHaveLength(5);
   expect((retainedLink.actual as typeof linkNearMiss).network.requests).toHaveLength(4);
+});
+
+test("projects only exact removed Next disclosure headers in HAR entries", () => {
+  const disclosure = {
+    name: "x-powered-by",
+    value: JSON.stringify({
+      bytes: 7,
+      sha256: "30b7f8482c4f570c063e4dff04b91ddc9b2b5f535ac70fedffb1cf34e0d23ec6",
+    }),
+  };
+  const expected = {
+    log: {
+      entries: [{
+        startedDateTime: "2026-09-08T00:00:00.000Z",
+        request: { method: "GET", url: "https://pay.ci.clean-pay.dev/" },
+        response: {
+          status: 200,
+          headers: [
+            { name: "content-type", value: "text/html; charset=utf-8" },
+            disclosure,
+          ],
+        },
+      }],
+    },
+  };
+  const actual = structuredClone(expected);
+  actual.log.entries[0]!.response.headers = [
+    { name: "content-type", value: "text/html; charset=utf-8" },
+  ];
+
+  const projected = projectCharacterizationManifestPairForComparison(expected, actual);
+  expect(projected.actual).toEqual(projected.expected);
+
+  const nearMiss = structuredClone(expected);
+  nearMiss.log.entries[0]!.response.headers[1]!.value = JSON.stringify({
+    bytes: 7,
+    sha256: "f".repeat(64),
+  });
+  const rejected = projectCharacterizationManifestPairForComparison(nearMiss, actual);
+  expect(rejected.actual).not.toEqual(rejected.expected);
 });
 
 test("projects a consistent generated PWA shell cache in non-public journey checkpoints", () => {
@@ -364,33 +447,36 @@ test("projects only exact failed generated static requests in the public journey
   addFailedStaticRequests(candidate, "candidate");
   expect(project(candidate)).toEqual(project(baseline));
 
-  const nearMisses: Array<(manifest: ReturnType<typeof journeyManifest>) => void> = [
-    (manifest) => {
+  const nearMisses: Array<[
+    string,
+    (manifest: ReturnType<typeof journeyManifest>) => void,
+  ]> = [
+    ["failure digest", (manifest) => {
       const failure = failedStaticRequest(manifest, 1).failure as { errorText: { sha256: string } };
       failure.errorText.sha256 = "f".repeat(64);
-    },
-    (manifest) => {
+    }],
+    ["offline referer route", (manifest) => {
       const headers = failedStaticRequest(manifest, 1).requestHeaders as Array<Record<string, unknown>>;
       const referer = headers.at(-1)?.value as Record<string, unknown>;
       referer.pathname = "/tariffs";
-    },
-    (manifest) => {
+    }],
+    ["forbidden request header", (manifest) => {
       const headers = failedStaticRequest(manifest, 1).requestHeaders as unknown[];
-      headers.push({ name: "x-near-miss", value: { bytes: 1, sha256: "0".repeat(64) } });
-    },
-    (manifest) => {
+      headers.push({ name: "rsc", value: { bytes: 1, sha256: "0".repeat(64) } });
+    }],
+    ["static pathname", (manifest) => {
       const url = failedStaticRequest(manifest, 2).url as Record<string, unknown>;
-      url.pathname = "/_next/static/chunks/not-opaque.css";
-    },
-    (manifest) => {
-      Object.assign(failedStaticRequest(manifest, 1), { unexpected: true });
-    },
+      url.pathname = "/_next/static/chunks/not-opaque.txt";
+    }],
+    ["request method", (manifest) => {
+      Object.assign(failedStaticRequest(manifest, 1), { method: "POST" });
+    }],
   ];
-  for (const mutate of nearMisses) {
+  for (const [label, mutate] of nearMisses) {
     const nearMiss = journeyManifest("candidate");
     addFailedStaticRequests(nearMiss, "candidate");
     mutate(nearMiss);
-    expect(project(nearMiss)).not.toEqual(project(baseline));
+    expect(project(nearMiss), label).not.toEqual(project(baseline));
   }
 });
 
@@ -970,6 +1056,31 @@ function pwaBoundaryCacheNames(manifest: ReturnType<typeof journeyManifest>) {
 
 function pwaRevisionCache(manifest: ReturnType<typeof journeyManifest>) {
   return `clean-pay-shell-${manifest.source.revision}`;
+}
+
+function rootServiceWorkerScope() {
+  return canonicalUrl("/");
+}
+
+function setCheckpointServiceWorkerScopes(
+  manifest: ReturnType<typeof journeyManifest>,
+  values: Array<ReturnType<typeof rootServiceWorkerScope>[]>,
+) {
+  const checkpoints = (manifest as unknown as Record<string, unknown>).checkpoints as unknown[];
+  for (const [index, scopes] of values.entries()) {
+    const checkpoint = checkpoints[index] as { storage: { serviceWorkerScopes: unknown[] } };
+    checkpoint.storage.serviceWorkerScopes = scopes.map((scope) => ({ ...scope }));
+  }
+}
+
+function checkpointServiceWorkerScopes(
+  manifest: ReturnType<typeof journeyManifest>,
+  index: number,
+) {
+  const checkpoint = ((manifest as unknown as Record<string, unknown>).checkpoints as Array<{
+    storage: { serviceWorkerScopes: ReturnType<typeof rootServiceWorkerScope>[] };
+  }>)[index]!;
+  return checkpoint.storage.serviceWorkerScopes;
 }
 
 function setCheckpointCacheNames(

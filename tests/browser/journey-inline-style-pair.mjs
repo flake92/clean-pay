@@ -7,10 +7,11 @@ export function canonicalSimpleInlineStyle(value) {
   if (declarations.length < 1 || declarations.length > 8) return null;
   const result = [];
   for (const declaration of declarations) {
-    const match = /^\s*(width|height|overflow)\s*:\s*([a-z0-9.%]+)\s*(!important)?\s*$/.exec(declaration);
+    const match = /^\s*(width|height|overflow|display)\s*:\s*([a-z0-9.%]+)\s*(!important)?\s*$/.exec(declaration);
     if (!match) return null;
     const [, property, token, priority = ""] = match;
     const valid = property === "overflow" ? /^(auto|hidden|visible|scroll|clip)$/.test(token)
+      : property === "display" ? token === "flex"
       : /^(?:0|\d+(?:\.\d+)?(?:px|em|rem|%))$/.test(token);
     if (!valid) return null;
     result.push(`${property}:${token}${priority};`);

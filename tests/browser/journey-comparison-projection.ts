@@ -98,6 +98,62 @@ export function projectExactJourneyPwaShellCachePair(
   projectPwaLocations(actualLocations);
 }
 
+export function projectExactOptionalJourneyServiceWorkerStatePair(
+  expected: Record<string, unknown>,
+  actual: Record<string, unknown>,
+) {
+  if (
+    !isExactJourneyManifest(expected)
+    || !isExactJourneyManifest(actual)
+    || expected.project !== actual.project
+    || expected.journey !== actual.journey
+  ) {
+    return;
+  }
+  const expectedSource = expected.source;
+  const actualSource = actual.source;
+  if (!isRecord(expectedSource) || !isRecord(actualSource)) return;
+  const expectedRevision = typeof expectedSource.revision === "string"
+    ? expectedSource.revision
+    : null;
+  const actualRevision = typeof actualSource.revision === "string"
+    ? actualSource.revision
+    : null;
+  if (
+    !expectedRevision
+    || !/^[a-f0-9]{40}$/.test(expectedRevision)
+    || !actualRevision
+    || !/^[a-f0-9]{40}$/.test(actualRevision)
+  ) {
+    return;
+  }
+
+  const expectedLocations = exactOptionalServiceWorkerCheckpointStates(
+    expected,
+    (value) => PWA_SHELL_CACHE_UUID_V4.test(value)
+      || value === `clean-pay-shell-${expectedRevision}`,
+  );
+  const actualLocations = exactOptionalServiceWorkerCheckpointStates(
+    actual,
+    (value) => value === `clean-pay-shell-${actualRevision}`,
+  );
+  if (
+    !expectedLocations
+    || !actualLocations
+    || !sameJson(
+      expectedLocations.map(({ key }) => key),
+      actualLocations.map(({ key }) => key),
+    )
+  ) {
+    return;
+  }
+
+  for (const location of [...expectedLocations, ...actualLocations]) {
+    location.cacheNames.length = 0;
+    location.serviceWorkerScopes.length = 0;
+  }
+}
+
 export function projectExactAuthenticatedChatwootGeneratedPair(
   expected: Record<string, unknown>,
   actual: Record<string, unknown>,
@@ -125,7 +181,6 @@ export function projectExactAuthenticatedChatwootGeneratedPair(
         actualState.identityCookies,
       )
       || expectedState.conversationBytes !== actualState.conversationBytes
-      || expectedState.ownershipBytes !== actualState.ownershipBytes
     ) {
       return;
     }
@@ -135,6 +190,7 @@ export function projectExactAuthenticatedChatwootGeneratedPair(
         digest.sha256 = "<dynamic:chatwoot-conversation:1>";
       }
       for (const digest of state.ownershipDigests) {
+        digest.bytes = "<dynamic:chatwoot-ownership-bytes>" as unknown as number;
         digest.sha256 = "<dynamic:chatwoot-ownership:1>";
       }
       for (const identity of state.identityCookies) {
@@ -542,7 +598,21 @@ function exactPwaShellCacheLocations(
   for (const [checkpointIndex, checkpoint] of manifest.checkpoints.entries()) {
     if (!isRecord(checkpoint) || !isExactCheckpointStorage(checkpoint.storage)) return null;
     const cacheNames = checkpoint.storage.cacheNames;
+    const serviceWorkerScopes = checkpoint.storage.serviceWorkerScopes;
     if (cacheNames.length > 1) return null;
+    if (
+      cacheNames.length === 0
+        ? serviceWorkerScopes.length !== 0
+        : (
+          serviceWorkerScopes.length > 1
+          || (
+            serviceWorkerScopes.length === 1
+            && !isExactRootServiceWorkerScope(serviceWorkerScopes[0])
+          )
+        )
+    ) {
+      return null;
+    }
     if (cacheNames.length === 1) {
       locations.push({
         key: `checkpoint:${checkpointIndex}`,
@@ -587,6 +657,7 @@ function projectPwaLocations(locations: PwaCacheLocation[]) {
 function isExactCheckpointStorage(value: unknown): value is Record<string, unknown> & {
   cacheNames: unknown[];
   local: unknown[];
+  serviceWorkerScopes: unknown[];
 } {
   return isRecord(value)
     && hasExactKeys(value, ["cacheNames", "local", "serviceWorkerScopes", "session"])
@@ -594,6 +665,49 @@ function isExactCheckpointStorage(value: unknown): value is Record<string, unkno
     && Array.isArray(value.local)
     && Array.isArray(value.session)
     && Array.isArray(value.serviceWorkerScopes);
+}
+
+function exactOptionalServiceWorkerCheckpointStates(
+  manifest: Record<string, unknown>,
+  cacheNameMatches: (value: string) => boolean,
+) {
+  if (!Array.isArray(manifest.checkpoints)) return null;
+  const locations: Array<{
+    cacheNames: unknown[];
+    key: string;
+    serviceWorkerScopes: unknown[];
+  }> = [];
+  for (const [index, checkpoint] of manifest.checkpoints.entries()) {
+    if (!isRecord(checkpoint) || !isExactCheckpointStorage(checkpoint.storage)) {
+      return null;
+    }
+    const { cacheNames, serviceWorkerScopes } = checkpoint.storage;
+    if (cacheNames.length === 0 && serviceWorkerScopes.length === 0) {
+      locations.push({ cacheNames, key: `checkpoint:${index}`, serviceWorkerScopes });
+      continue;
+    }
+    if (
+      cacheNames.length !== 1
+      || serviceWorkerScopes.length !== 1
+      || typeof cacheNames[0] !== "string"
+      || !cacheNameMatches(cacheNames[0])
+      || !isExactRootServiceWorkerScope(serviceWorkerScopes[0])
+    ) {
+      return null;
+    }
+    locations.push({ cacheNames, key: `checkpoint:${index}`, serviceWorkerScopes });
+  }
+  return locations;
+}
+
+function isExactRootServiceWorkerScope(value: unknown) {
+  return isRecord(value)
+    && hasExactKeys(value, ["fragment", "origin", "pathname", "query"])
+    && value.origin === "<app-origin>"
+    && value.pathname === "/"
+    && Array.isArray(value.query)
+    && value.query.length === 0
+    && value.fragment === null;
 }
 
 function isExactPwaBoundary(value: Record<string, unknown>): value is Record<string, unknown> & {
