@@ -57,7 +57,7 @@ export function assertSyntheticCaddyRouteOrder(source: string) {
   );
   assertOccurrenceCount(
     chatwoot,
-    "          const confirmation = window.__cleanPayChatwootFixtureConfirmation === \"phase-proof\"\n            && location.pathname === \"/cabinet\"\n            && (new URL(document.getElementById(\"chatwoot_live_chat_widget\").src).searchParams.has(\"cw_conversation\")\n              || !restoredOwnershipAtRun);\n          target.postMessage({ method: \"identify\", deliveryId: delivery.deliveryId,\n            ...(confirmation ? { confirmBeforeProbe: true } : {}) }, config.baseUrl);",
+    "          const confirmation = window.__cleanPayChatwootFixtureConfirmation === \"phase-proof\"\n            && location.pathname === \"/cabinet\"\n            && (new URL(document.getElementById(\"chatwoot_live_chat_widget\").src).searchParams.has(\"cw_conversation\")\n              || !restoredOwnershipAtRun);\n          target.postMessage({ method: \"identify\", deliveryId: delivery.deliveryId,\n            ...(confirmation ? { confirmBeforeProbe: true } :\n              window.__cleanPayChatwootFixtureConfirmation === \"phase-proof\"\n                ? { ownershipOnly: true } : {}) }, config.baseUrl);",
     1,
   );
   assertOccurrenceCount(chatwoot, "deliverIdentity();", 2);
@@ -86,6 +86,7 @@ export function assertSyntheticCaddyRouteOrder(source: string) {
   assertOrderedSingletons(chatwoot, [
     "      const deliveryId = event.data?.deliveryId;",
     "        || !Number.isSafeInteger(deliveryId) || deliveryId < 1) return;",
+    "      if (event.data.ownershipOnly === true) return;",
     "        data: { deliveryId, widgetAuthToken: \"synthetic-widget-auth\" },",
     "    send({ event: \"loaded\" });",
     "        const fixtureReadinessScope = window.__cleanPayChatwootFixtureReadiness;",
@@ -106,7 +107,7 @@ export function assertSyntheticCaddyRouteOrder(source: string) {
     "          if (!pendingIdentity || !target || readyFrameWindow !== target) return;",
     "          const delivery = pendingIdentity;\n          pendingIdentity = null;",
     "          inFlightIdentity = { deliveryId: delivery.deliveryId, frameWindow: target };",
-    "          const confirmation = window.__cleanPayChatwootFixtureConfirmation === \"phase-proof\"\n            && location.pathname === \"/cabinet\"\n            && (new URL(document.getElementById(\"chatwoot_live_chat_widget\").src).searchParams.has(\"cw_conversation\")\n              || !restoredOwnershipAtRun);\n          target.postMessage({ method: \"identify\", deliveryId: delivery.deliveryId,\n            ...(confirmation ? { confirmBeforeProbe: true } : {}) }, config.baseUrl);",
+    "          const confirmation = window.__cleanPayChatwootFixtureConfirmation === \"phase-proof\"\n            && location.pathname === \"/cabinet\"\n            && (new URL(document.getElementById(\"chatwoot_live_chat_widget\").src).searchParams.has(\"cw_conversation\")\n              || !restoredOwnershipAtRun);\n          target.postMessage({ method: \"identify\", deliveryId: delivery.deliveryId,\n            ...(confirmation ? { confirmBeforeProbe: true } :\n              window.__cleanPayChatwootFixtureConfirmation === \"phase-proof\"\n                ? { ownershipOnly: true } : {}) }, config.baseUrl);",
     "        const applyIdentity = (identifier, attributes) => {",
     "          pendingIdentity = { deliveryId: ++nextDeliveryId, identifier };",
     "          deliverIdentity();\n        };",

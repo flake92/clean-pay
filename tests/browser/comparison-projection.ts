@@ -1,3 +1,4 @@
+import { projectPairedJourneyInlineStyles } from "./journey-inline-style-pair.mjs";
 import { projectAllowlistedA11ySemantics } from "./a11y-semantic-projection";
 import {
   projectExactAuthenticatedChatwootGeneratedPair,
@@ -127,6 +128,9 @@ export function projectCharacterizationManifestPairForComparison(
   }
   const expected = projectCharacterizationManifestForComparison(expectedPrepared);
   const actual = projectCharacterizationManifestForComparison(actualPrepared);
+  if (fixtureContractPairIsValid) {
+    projectPairedJourneyInlineStyles(expected, actual);
+  }
   projectExactLocalApplicationHostPair(
     expected,
     actual,
