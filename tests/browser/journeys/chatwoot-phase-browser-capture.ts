@@ -29,6 +29,10 @@ import {
   assertChatwootProviderCausalOrder,
   chatwootProviderExpectedEffects,
 } from "./chatwoot-provider-ledger-order.mjs";
+import {
+  createInitialChatwootBootstrap,
+  isInitialChatwootContextResponse,
+} from "./chatwoot-initial-bootstrap.mjs";
 import { createChatwootPhaseCausalContract } from "./chatwoot-phase-causal-contract.mjs";
 import {
   assertChatwootPhaseRedirect,
@@ -433,8 +437,8 @@ async function exerciseChatwootPhases(input: CaptureInput & {
   const recreatedCausality = await installChatwootCausalLedger(input.context, eventLedger);
   await input.context.addInitScript(() => {
     if (window.top !== window) return;
-    // Fixture-only scheduling: seed ownership on the initial document, then
-    // exercise trusted full confirmation before the optional 750 ms probe.
+    // Fixture-only scheduling: require ownership-only on the initial document,
+    // then a trusted full ACK on the replacement/recreated frame. No timer race.
     Object.defineProperty(window, "__cleanPayChatwootFixtureConfirmation", {
       value: "phase-proof", configurable: false, enumerable: false, writable: false,
     });
@@ -458,6 +462,31 @@ async function exerciseChatwootPhases(input: CaptureInput & {
   let generation: keyof typeof ledgers = "initial";
   let cabinetDocumentAllowed = false;
   let initialCabinetFreshWidgetCount = 0;
+  const bootstrap = createInitialChatwootBootstrap();
+  const profileResponseTasks = new Set<Promise<void>>();
+  page.on("response", (response) => {
+    const entry = ledgers.initial.byIdentity.get(response.request());
+    if (generation !== "initial" || entry?.documentKey !== "app-profile-document"
+      || entry.classification.key !== "app-profile-action") return;
+    const task = (async () => {
+      // Observe the real RSC response. Never forge an action result or identity.
+      if (response.status() !== 200) return;
+      const contentType = response.headers()["content-type"] ?? "";
+      if (!contentType.startsWith("text/x-component")) return;
+      const text = await response.text();
+      if (!isInitialChatwootContextResponse(text)) return;
+      const completionError = await response.finished();
+      if (completionError) throw completionError;
+      // Let the already-delivered action settle before loading the SDK. The
+      // ownership postcondition below still rejects an incorrect bootstrap.
+      await page.evaluate(() => new Promise<void>((resolve) => {
+        requestAnimationFrame(() => resolve());
+      }));
+      bootstrap.profileContextDelivered();
+    })().catch((error) => { bootstrap.fail(error); });
+    profileResponseTasks.add(task);
+    void task.finally(() => { profileResponseTasks.delete(task); });
+  });
   await input.context.routeWebSocket("**/*", async (webSocket) => {
     diagnostics.recordUnexpectedWebSocket();
     await webSocket.close({ code: 1008, reason: "chatwoot-phase-contract" });
@@ -576,6 +605,35 @@ async function exerciseChatwootPhases(input: CaptureInput & {
       await input.barrier.hold(route);
       return;
     }
+    if (generation === "initial") {
+      const owner = page.url();
+      try {
+        if (ledger.currentDocumentKey === "app-profile-document"
+          && classification.key === "chatwoot-sdk-script") {
+          await boundedPromise(bootstrap.profileReady(), 30_000, "profile support-context bootstrap");
+        }
+        if (ledger.currentDocumentKey === "app-cabinet-document"
+          && classification.key === "app-cabinet-action"
+          && owner === `${SYNTHETIC_APPLICATION_ORIGIN}/cabinet`
+          && bootstrap.claimInitialCabinetContext()) {
+          // Hold only the first context action, not its result. The real SDK
+          // first sends the base identity; its verified newer context will then
+          // require a fresh frame after ownership confirmation.
+          await page.waitForFunction(() => {
+            const value = window as unknown as {
+              cleanPayChatwootPendingIdentity?: { phase?: unknown };
+              __cleanPayChatwootBoundaryCalls?: Array<{ method?: unknown }>;
+            };
+            return value.cleanPayChatwootPendingIdentity?.phase === "sent"
+              && value.__cleanPayChatwootBoundaryCalls?.some(({ method }) => method === "setUser") === true;
+          }, undefined, { timeout: 30_000 });
+        }
+      } catch (error) {
+        bootstrap.fail(error);
+        await route.abort("blockedbyclient");
+        return;
+      }
+    }
     await route.continue();
   });
   page.on("response", (response) => {
@@ -593,6 +651,7 @@ async function exerciseChatwootPhases(input: CaptureInput & {
   const stableRecorder = recordNetwork(page, SYNTHETIC_APPLICATION_ORIGIN);
   await loginToProfile(page);
   await waitForInitialProfileSupportContext(page);
+  bootstrap.assertProfileReady();
   await history.captureInitialProfile(page);
   await initialProviderHistory.captureProfile(page);
   cabinetDocumentAllowed = true;
@@ -606,6 +665,7 @@ async function exerciseChatwootPhases(input: CaptureInput & {
   );
   onStage("gap-barrier");
   await input.barrier.ready();
+  bootstrap.assertCabinetContextClaimed();
   await waitForPhaseState(page, "waiting_for_frame");
   const gapNetwork = networkEvidence(await gapRecorder.finish());
   const gapHistory = initialProviderHistory.snapshot();
@@ -1406,8 +1466,10 @@ async function waitForInitialProfileSupportContext(page: Page) {
     };
     const calls = windowValue.__cleanPayChatwootBoundaryCalls;
     const pending = windowValue.cleanPayChatwootPendingIdentity;
-    const identitySettled = pending === undefined
-      || pending.phase === "ownership_confirmed";
+    const identitySettled = pending !== undefined
+      && pending.phase === "ownership_confirmed"
+      && localStorage.getItem("clean-pay:chatwoot-ownership:v1") !== null
+      && localStorage.getItem("clean-pay:chatwoot-identity:v1") === null;
     const removedLabels = new Set(
       Array.isArray(calls)
         ? calls
