@@ -61,9 +61,13 @@ test("captures the authenticated Chatwoot boundary at the first owned cabinet", 
   expect(scenarioStart).toBeGreaterThan(-1);
   expect(login).toBeGreaterThan(scenarioStart);
   expect(capture).toBeGreaterThan(login);
-  expect(source.slice(capture, firstCheckpoint)).toContain(
-    "? await waitForChatwootBoundary(page)\n    : null;",
+  const captureBlock = source.slice(capture, firstCheckpoint);
+  expect(captureBlock).toContain(
+    '? await test.step("chatwoot telegram OIDC A-to-B exact characterization", async () => {',
   );
+  expect(captureBlock).toContain("await waitForAuthenticatedChatwootFixture(page);");
+  expect(captureBlock).toContain("return waitForChatwootBoundary(page);");
+  expect(captureBlock).toContain("    : null;");
   expect(firstCheckpoint).toBeGreaterThan(capture);
   expect(finalPage).toBeGreaterThan(firstCheckpoint);
   expect(reuse).toBeGreaterThan(finalPage);
