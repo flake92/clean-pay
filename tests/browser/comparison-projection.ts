@@ -164,6 +164,7 @@ export function projectCharacterizationManifestPairForComparison(
     options.expectedApplicationOrigin,
     options.actualApplicationOrigin,
   );
+  projectExactOptionalPublicStaticOriginPair(expected, actual);
   projectExactHashedNextStaticTopologyPair(
     expected,
     actual,
@@ -1989,6 +1990,94 @@ function headersMatchAfterValidatedHost(
     header === actualHost ? { name: "host", value: VALIDATED_LOCAL_APPLICATION_HOST } : header
   ));
   return sameJson(expectedComparable, actualComparable);
+}
+
+function projectExactOptionalPublicStaticOriginPair(expected: unknown, actual: unknown) {
+  if (!isExactPublicCharacterizationPair(expected, actual)) return;
+  const expectedNetwork = (expected as Record<string, unknown>).network as Record<string, unknown>;
+  const actualNetwork = (actual as Record<string, unknown>).network as Record<string, unknown>;
+  const expectedRequests = expectedNetwork.requests as unknown[];
+  const actualRequests = actualNetwork.requests as unknown[];
+  const projections: Array<{
+    actual: Record<string, unknown>;
+    actualHeaders: unknown[];
+    expected: Record<string, unknown>;
+    expectedHeaders: unknown[];
+  }> = [];
+
+  for (const [position, expectedRequestValue] of expectedRequests.entries()) {
+    const actualRequestValue = actualRequests[position];
+    if (!isRecord(expectedRequestValue) || !isRecord(actualRequestValue)) return;
+    const projection = exactOptionalPublicStaticOriginProjection(
+      expectedRequestValue,
+      actualRequestValue,
+    );
+    if (projection === null) continue;
+    projections.push(projection);
+  }
+
+  for (const projection of projections) {
+    projection.expected.requestHeaders = projection.expectedHeaders;
+    projection.actual.requestHeaders = projection.actualHeaders;
+  }
+}
+
+function exactOptionalPublicStaticOriginProjection(
+  expectedRequest: Record<string, unknown>,
+  actualRequest: Record<string, unknown>,
+) {
+  if (
+    !isExactProjectedNextStaticResource(expectedRequest)
+    || !isExactProjectedNextStaticResource(actualRequest)
+    || !equalExceptKey(expectedRequest, actualRequest, "requestHeaders")
+  ) {
+    return null;
+  }
+  const expectedHeaders = withoutExactOptionalOriginHeader(
+    expectedRequest.requestHeaders as unknown[],
+  );
+  const actualHeaders = withoutExactOptionalOriginHeader(
+    actualRequest.requestHeaders as unknown[],
+  );
+  if (
+    expectedHeaders === null
+    || actualHeaders === null
+    || expectedHeaders.removed === actualHeaders.removed
+    || !sameJson(expectedHeaders.headers, actualHeaders.headers)
+  ) {
+    return null;
+  }
+  return {
+    actual: actualRequest,
+    actualHeaders: actualHeaders.headers,
+    expected: expectedRequest,
+    expectedHeaders: expectedHeaders.headers,
+  };
+}
+
+function withoutExactOptionalOriginHeader(headers: unknown[]) {
+  let removed = false;
+  const retained: unknown[] = [];
+  for (const header of headers) {
+    if (!isRecord(header) || header.name !== "origin") {
+      retained.push(header);
+      continue;
+    }
+    if (removed || !isExactApplicationOriginHeader(header)) return null;
+    removed = true;
+  }
+  return { headers: retained, removed };
+}
+
+function isExactApplicationOriginHeader(value: Record<string, unknown>) {
+  return hasExactKeys(value, ["name", "value"])
+    && value.name === "origin"
+    && sameJson(value.value, {
+      origin: "<app-origin>",
+      pathname: "/",
+      query: [],
+      fragment: null,
+    });
 }
 
 function projectExactRemovedNextJsPoweredBy(expected: unknown, actual: unknown) {
