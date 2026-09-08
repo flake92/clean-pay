@@ -97,6 +97,34 @@ test("projects response-backed Server Action aborts after network compaction", (
   expect(projected.network.serverActions[0]!.requestIndex).toBe(0);
 });
 
+test("projects exact pending RSC prefetch redirect tails after network compaction", () => {
+  const manifest = responseBackedActionAbortManifest();
+  const prefetch = automaticPrefetchRequest(0);
+  const tail = automaticPrefetchRedirectTailRequest(1, 0);
+  const action = manifest.network.requests[0]!;
+  action.index = 2;
+  manifest.network.requests = [prefetch, tail, action];
+  manifest.network.serverActions[0]!.requestIndex = 2;
+
+  const projected = project(manifest) as typeof manifest;
+  expect(projected.network.requests).toHaveLength(1);
+  expect(projected.network.requests[0]!.index).toBe(0);
+  expect(projected.network.serverActions[0]!.requestIndex).toBe(0);
+
+  const nearMiss = responseBackedActionAbortManifest();
+  const retainedTail = automaticPrefetchRedirectTailRequest(1, 0);
+  retainedTail.url.pathname = "/login";
+  nearMiss.network.requests[0]!.index = 2;
+  nearMiss.network.requests = [
+    automaticPrefetchRequest(0),
+    retainedTail,
+    nearMiss.network.requests[0]!,
+  ];
+  nearMiss.network.serverActions[0]!.requestIndex = 2;
+  expect((project(nearMiss) as typeof nearMiss).network.requests)
+    .toHaveLength(3);
+});
+
 test("projects response-backed Server Action aborts beside unrelated pending actions", () => {
   const manifest = responseBackedActionAbortManifest();
   const pending = structuredClone(manifest.network.requests[0]!);
@@ -1018,6 +1046,30 @@ function automaticPrefetchRequest(index: number) {
     postData: null,
     redirectedFrom: null,
     response: { status: 200, headers: [] },
+    failure: null,
+    externalTransport: null,
+  } as unknown as ReturnType<typeof journeyManifest>["network"]["requests"][number];
+}
+
+function automaticPrefetchRedirectTailRequest(index: number, redirectedFrom: number) {
+  return {
+    index,
+    method: "GET",
+    url: canonicalUrl("/", [{ key: "_rsc", value: "<opaque>" }]),
+    scope: "application",
+    resourceType: "fetch",
+    navigation: false,
+    serverAction: { present: false, identifier: null },
+    requestHeaders: [{
+      name: "<header-read-error>",
+      value: {
+        bytes: 27,
+        sha256: "870509317b49032de4cf9012617dfb66bf0d0122e6a2f5b789ba242a4a81c07d",
+      },
+    }],
+    postData: null,
+    redirectedFrom,
+    response: null,
     failure: null,
     externalTransport: null,
   } as unknown as ReturnType<typeof journeyManifest>["network"]["requests"][number];

@@ -2114,6 +2114,7 @@ function projectNetwork(manifest: Record<string, unknown>) {
     if (!isRecord(request)) return true;
     if (
       isAutomaticNextRscPrefetch(request)
+      || isAutomaticNextRscPrefetchRedirectTail(request, removedIndexes)
       || isStaticPwaCspChunkRequest(manifest, request)
     ) {
       removedIndexes.add(request.index as number);
@@ -2623,6 +2624,35 @@ function isAutomaticNextRscPrefetch(request: Record<string, unknown>) {
     "rsc",
     DIGEST_OF_ONE,
   );
+}
+
+function isAutomaticNextRscPrefetchRedirectTail(
+  request: Record<string, unknown>,
+  removedIndexes: Set<number>,
+) {
+  return request.scope === "application"
+    && request.method === "GET"
+    && request.resourceType === "fetch"
+    && request.navigation === false
+    && isNoServerAction(request.serverAction)
+    && request.postData === null
+    && Number.isSafeInteger(request.redirectedFrom)
+    && removedIndexes.has(request.redirectedFrom as number)
+    && request.response === null
+    && request.failure === null
+    && request.externalTransport === null
+    && isRecord(request.url)
+    && request.url.origin === "<app-origin>"
+    && request.url.pathname === "/"
+    && sameJson(request.url.query, [{ key: "_rsc", value: "<opaque>" }])
+    && request.url.fragment === null
+    && sameJson(request.requestHeaders, [{
+      name: "<header-read-error>",
+      value: {
+        bytes: 27,
+        sha256: "870509317b49032de4cf9012617dfb66bf0d0122e6a2f5b789ba242a4a81c07d",
+      },
+    }]);
 }
 
 function hasExactlyOneHeaderWithDigest(
