@@ -180,7 +180,24 @@ function projectExactHashedNextStaticTopologyPair(
   if (!isRecord(expectedTrial) || !isRecord(actualTrial)) return;
   const expectedCollapsed = collapseExactProjectedNextStaticTopology(expectedTrial);
   const actualCollapsed = collapseExactProjectedNextStaticTopology(actualTrial);
-  if (expectedCollapsed !== true || actualCollapsed !== true) return;
+  const pairCollapsed = collapseExactProjectedNextStaticTopologyPair(
+    expectedTrial,
+    actualTrial,
+  );
+  if (
+    expectedCollapsed !== true
+    && actualCollapsed !== true
+    && pairCollapsed !== true
+  ) {
+    return;
+  }
+  if (
+    expectedCollapsed === null
+    || actualCollapsed === null
+    || pairCollapsed === null
+  ) {
+    return;
+  }
 
   projectExactHashedStaticDocumentLinkPair(expectedTrial, actualTrial);
   projectExactRemovedNextJsPoweredBy(expectedTrial, actualTrial);
@@ -191,9 +208,134 @@ function projectExactHashedNextStaticTopologyPair(
   actual.network = actualTrial.network;
 }
 
-function collapseExactProjectedNextStaticTopology(
-  manifest: Record<string, unknown>,
+function collapseExactProjectedNextStaticTopologyPair(
+  expected: Record<string, unknown>,
+  actual: Record<string, unknown>,
 ) {
+  const expectedNetwork = exactProjectedNetwork(expected);
+  const actualNetwork = exactProjectedNetwork(actual);
+  if (expectedNetwork === null || actualNetwork === null) return null;
+
+  const expectedGroups = splitExactProjectedNextStaticTopologyGroups(
+    expectedNetwork.requests,
+  );
+  const actualGroups = splitExactProjectedNextStaticTopologyGroups(
+    actualNetwork.requests,
+  );
+  if (
+    expectedGroups === null
+    || actualGroups === null
+    || expectedGroups.length !== actualGroups.length
+  ) {
+    return null;
+  }
+
+  let projected = false;
+  const plans: Array<{
+    expected: ExactProjectedNextStaticTopologyGroup;
+    actual: ExactProjectedNextStaticTopologyGroup;
+    resourceTypes: Array<"stylesheet" | "script">;
+  }> = [];
+  for (const [index, expectedGroup] of expectedGroups.entries()) {
+    const actualGroup = actualGroups[index]!;
+    if (expectedGroup.document === null || actualGroup.document === null) {
+      if (expectedGroup.document !== actualGroup.document) return null;
+      plans.push({ expected: expectedGroup, actual: actualGroup, resourceTypes: [] });
+      continue;
+    }
+    if (
+      !sameJson(
+        { ...expectedGroup.document, index: 0, response: null },
+        { ...actualGroup.document, index: 0, response: null },
+      )
+      || !isRecord(expectedGroup.document.response)
+      || !isRecord(actualGroup.document.response)
+      || !equalExceptKey(
+        expectedGroup.document.response,
+        actualGroup.document.response,
+        "headers",
+      )
+    ) {
+      return null;
+    }
+    const expectedResourceTypes = exactProjectedNextStaticResourceTypes(
+      expectedGroup.staticRequests,
+    );
+    const actualResourceTypes = exactProjectedNextStaticResourceTypes(
+      actualGroup.staticRequests,
+    );
+    if (expectedResourceTypes === null || actualResourceTypes === null) return null;
+    if (expectedResourceTypes.length === 0 && actualResourceTypes.length === 0) {
+      plans.push({ expected: expectedGroup, actual: actualGroup, resourceTypes: [] });
+      continue;
+    }
+    if (
+      expectedResourceTypes.length === 0
+      || actualResourceTypes.length === 0
+      || !sameJson(expectedResourceTypes, actualResourceTypes)
+    ) {
+      return null;
+    }
+    for (const resourceType of expectedResourceTypes) {
+      const expectedSignature = exactProjectedNextStaticTypeSignature(
+        expectedGroup.staticRequests,
+        resourceType,
+      );
+      const actualSignature = exactProjectedNextStaticTypeSignature(
+        actualGroup.staticRequests,
+        resourceType,
+      );
+      if (
+        expectedSignature === null
+        || actualSignature === null
+        || expectedSignature !== actualSignature
+      ) {
+        return null;
+      }
+    }
+    const expectedTopology = exactProjectedNextStaticTopologyShape(expectedGroup);
+    const actualTopology = exactProjectedNextStaticTopologyShape(actualGroup);
+    if (!sameJson(expectedTopology, actualTopology)) projected = true;
+    plans.push({
+      expected: expectedGroup,
+      actual: actualGroup,
+      resourceTypes: expectedResourceTypes,
+    });
+  }
+  if (!projected) return false;
+
+  const expectedRetained = collapseExactProjectedNextStaticTopologyGroups(
+    plans.map((plan) => ({
+      group: plan.expected,
+      resourceTypes: plan.resourceTypes,
+    })),
+  );
+  const actualRetained = collapseExactProjectedNextStaticTopologyGroups(
+    plans.map((plan) => ({
+      group: plan.actual,
+      resourceTypes: plan.resourceTypes,
+    })),
+  );
+  return reindexExactProjectedNetwork(expectedNetwork, expectedRetained)
+    && reindexExactProjectedNetwork(actualNetwork, actualRetained)
+    ? true
+    : null;
+}
+
+type ExactProjectedNetwork = Record<string, unknown> & {
+  requests: unknown[];
+  serverActions: unknown[];
+};
+
+type ExactProjectedNextStaticTopologyGroup = {
+  document: Record<string, unknown> | null;
+  items: Record<string, unknown>[];
+  staticRequests: Record<string, unknown>[];
+};
+
+function exactProjectedNetwork(
+  manifest: Record<string, unknown>,
+): ExactProjectedNetwork | null {
   const network = manifest.network;
   if (
     !isRecord(network)
@@ -205,6 +347,100 @@ function collapseExactProjectedNextStaticTopology(
   ) {
     return null;
   }
+  return network as ExactProjectedNetwork;
+}
+
+function splitExactProjectedNextStaticTopologyGroups(
+  requests: unknown[],
+): ExactProjectedNextStaticTopologyGroup[] | null {
+  const groups: ExactProjectedNextStaticTopologyGroup[] = [];
+  let current: ExactProjectedNextStaticTopologyGroup = {
+    document: null,
+    items: [],
+    staticRequests: [],
+  };
+  for (const requestValue of requests) {
+    if (!isRecord(requestValue)) return null;
+    if (isExactProjectedApplicationDocument(requestValue)) {
+      if (current.items.length > 0) groups.push(current);
+      current = {
+        document: requestValue,
+        items: [requestValue],
+        staticRequests: [],
+      };
+      continue;
+    }
+    current.items.push(requestValue);
+    if (current.document !== null && isExactProjectedNextStaticChunk(requestValue)) {
+      current.staticRequests.push(requestValue);
+    }
+  }
+  if (current.items.length > 0) groups.push(current);
+  return groups;
+}
+
+function exactProjectedNextStaticResourceTypes(
+  requests: Record<string, unknown>[],
+): Array<"stylesheet" | "script"> | null {
+  const types = new Set<"stylesheet" | "script">();
+  for (const request of requests) {
+    if (request.resourceType !== "stylesheet" && request.resourceType !== "script") {
+      return null;
+    }
+    types.add(request.resourceType);
+  }
+  return (["stylesheet", "script"] as const).filter((type) => types.has(type));
+}
+
+function exactProjectedNextStaticTypeSignature(
+  requests: Record<string, unknown>[],
+  resourceType: "stylesheet" | "script",
+) {
+  const signatures = new Set(
+    requests
+      .filter((request) => request.resourceType === resourceType)
+      .map((request) => JSON.stringify({ ...request, index: 0 })),
+  );
+  return signatures.size === 1 ? [...signatures][0]! : null;
+}
+
+function exactProjectedNextStaticTopologyShape(
+  group: ExactProjectedNextStaticTopologyGroup,
+) {
+  return group.items.map((request) => (
+    isExactProjectedNextStaticChunk(request) ? request.resourceType : "<semantic>"
+  ));
+}
+
+function collapseExactProjectedNextStaticTopologyGroups(
+  groups: Array<{
+    group: ExactProjectedNextStaticTopologyGroup;
+    resourceTypes: Array<"stylesheet" | "script">;
+  }>,
+) {
+  return groups.flatMap(({ group, resourceTypes }) => {
+    if (group.document === null || resourceTypes.length === 0) return group.items;
+    const staticByType = new Map(
+      resourceTypes.map((resourceType) => [
+        resourceType,
+        group.staticRequests.find((request) => request.resourceType === resourceType)!,
+      ]),
+    );
+    return [
+      group.document,
+      ...resourceTypes.map((resourceType) => staticByType.get(resourceType)!),
+      ...group.items.filter((request) => (
+        request !== group.document && !isExactProjectedNextStaticChunk(request)
+      )),
+    ];
+  });
+}
+
+function collapseExactProjectedNextStaticTopology(
+  manifest: Record<string, unknown>,
+) {
+  const network = exactProjectedNetwork(manifest);
+  if (network === null) return null;
 
   const removedIndexes = new Set<number>();
   const retained: unknown[] = [];
@@ -228,6 +464,22 @@ function collapseExactProjectedNextStaticTopology(
   }
   if (removedIndexes.size === 0) return false;
 
+  return reindexExactProjectedNetwork(network, retained) ? true : null;
+}
+
+function reindexExactProjectedNetwork(
+  network: ExactProjectedNetwork,
+  retained: unknown[],
+) {
+  const retainedIndexes = new Set(
+    retained.map((request) => (request as Record<string, unknown>).index as number),
+  );
+  const removedIndexes = new Set(
+    network.requests.flatMap((request) => {
+      const index = (request as Record<string, unknown>).index as number;
+      return retainedIndexes.has(index) ? [] : [index];
+    }),
+  );
   const oldToNewIndex = new Map<number, number>();
   retained.forEach((request, index) => {
     oldToNewIndex.set((request as Record<string, unknown>).index as number, index);
@@ -244,7 +496,7 @@ function collapseExactProjectedNextStaticTopology(
       oldToNewIndex,
     ))
   ) {
-    return null;
+    return false;
   }
 
   for (const [index, requestValue] of retained.entries()) {
@@ -1181,7 +1433,8 @@ function projectJourneyPaymentOperationAria(manifest: Record<string, unknown>) {
   for (const checkpoint of manifest.checkpoints) {
     if (
       !isRecord(checkpoint)
-      || checkpoint.label !== "payment-provider-checkout"
+      || !["payment-provider-checkout", "extend-provider-checkout"]
+        .includes(String(checkpoint.label))
       || typeof checkpoint.ariaSnapshot !== "string"
     ) {
       continue;
