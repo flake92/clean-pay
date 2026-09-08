@@ -9,6 +9,13 @@ const JOURNEYS = new Set([
   "tariffs-payment-returns-extend-idempotency",
   "telegram-webapp-browser-boundary",
 ]);
+const CHATWOOT_JOURNEYS = new Set([
+  "email-register-verify-and-login",
+  "telegram-oidc-cabinet-profile-link-referral-passkey",
+  "email-account-links-and-merges-telegram",
+  "tariffs-payment-returns-extend-idempotency",
+  "telegram-webapp-browser-boundary",
+]);
 const DYNAMIC_COOKIE_NAMES = new Set([
   "clean_pay_access",
   "clean_pay_refresh",
@@ -99,9 +106,12 @@ export function projectExactAuthenticatedChatwootGeneratedPair(
     !isExactJourneyManifest(expected)
     || !isExactJourneyManifest(actual)
     || expected.project !== actual.project
-    || expected.journey !== "email-register-verify-and-login"
     || actual.journey !== expected.journey
   ) {
+    return;
+  }
+  if (expected.journey !== "email-register-verify-and-login") {
+    projectExactJourneyChatwootGeneratedPair(expected, actual);
     return;
   }
 
@@ -118,6 +128,7 @@ export function projectExactAuthenticatedChatwootGeneratedPair(
     || expectedState.conversationBytes !== actualState.conversationBytes
     || expectedState.ownershipBytes !== actualState.ownershipBytes
   ) {
+    projectExactJourneyChatwootGeneratedPair(expected, actual);
     return;
   }
 
@@ -133,6 +144,44 @@ export function projectExactAuthenticatedChatwootGeneratedPair(
         identity.name = "cw_user_<dynamic:chatwoot-website-token:1>";
       }
     }
+  }
+}
+
+function projectExactJourneyChatwootGeneratedPair(
+  expected: Record<string, unknown>,
+  actual: Record<string, unknown>,
+) {
+  if (
+    !isExactJourneyManifest(expected)
+    || !isExactJourneyManifest(actual)
+    || expected.project !== actual.project
+    || expected.journey !== actual.journey
+    || !CHATWOOT_JOURNEYS.has(String(expected.journey))
+  ) {
+    return;
+  }
+  const expectedState = exactJourneyChatwootGeneratedState(expected);
+  const actualState = exactJourneyChatwootGeneratedState(actual);
+  if (!expectedState || !actualState) {
+    return;
+  }
+  if (
+    sameDigestOccurrenceShape(
+      expectedState.conversations,
+      actualState.conversations,
+      true,
+    )
+  ) {
+    projectDigestOccurrences(expectedState.conversations, "chatwoot-conversation");
+    projectDigestOccurrences(actualState.conversations, "chatwoot-conversation");
+  }
+  if (sameDigestOccurrenceShape(expectedState.ownership, actualState.ownership, false)) {
+    projectDigestOccurrences(expectedState.ownership, "chatwoot-ownership", true);
+    projectDigestOccurrences(actualState.ownership, "chatwoot-ownership", true);
+  }
+  if (sameIdentityOccurrenceShape(expectedState.identities, actualState.identities)) {
+    projectIdentityOccurrences(expectedState.identities);
+    projectIdentityOccurrences(actualState.identities);
   }
 }
 
@@ -207,6 +256,147 @@ function exactChatwootIdentityCookiesMatch(
     return expectedCookie.name === actualCookie.name
       && sameJson(expectedCookie, actualCookie);
   });
+}
+
+type JourneyChatwootGeneratedState = {
+  conversations: Array<{ bytes: number; sha256: string }>;
+  identities: Array<(Record<string, unknown> & {
+    name: string;
+    value: { bytes: number; sha256: string };
+  }) | null>;
+  ownership: Array<{ bytes: number; sha256: string }>;
+};
+
+function exactJourneyChatwootGeneratedState(
+  manifest: Record<string, unknown>,
+): JourneyChatwootGeneratedState | null {
+  if (!Array.isArray(manifest.checkpoints)) return null;
+  const conversations: JourneyChatwootGeneratedState["conversations"] = [];
+  const identities: JourneyChatwootGeneratedState["identities"] = [];
+  const ownership: JourneyChatwootGeneratedState["ownership"] = [];
+  for (const checkpoint of manifest.checkpoints) {
+    if (
+      !isRecord(checkpoint)
+      || !Array.isArray(checkpoint.cookies)
+      || !isExactCheckpointStorage(checkpoint.storage)
+    ) {
+      return null;
+    }
+    const chatwootCookies = checkpoint.cookies.filter((cookie) => (
+      isRecord(cookie)
+      && typeof cookie.name === "string"
+      && cookie.name.startsWith("cw_")
+    ));
+    if (chatwootCookies.length === 0) {
+      identities.push(null);
+      continue;
+    }
+    const conversation = chatwootCookies.filter(isExactChatwootConversationCookie);
+    const identity = chatwootCookies.filter(isExactChatwootIdentityCookie);
+    const unexpected = chatwootCookies.filter((cookie) => (
+      !isExactChatwootConversationCookie(cookie)
+      && !isExactChatwootIdentityCookie(cookie)
+    ));
+    if (conversation.length !== 1 || identity.length > 1 || unexpected.length !== 0) {
+      return null;
+    }
+    const ownershipValues = checkpoint.storage.local.filter(isExactChatwootOwnershipStorage);
+    if (ownershipValues.length > 1) return null;
+    conversations.push(conversation[0]!.value);
+    if (ownershipValues[0]) ownership.push(ownershipValues[0].value);
+    identities.push(identity[0] ?? null);
+  }
+  return conversations.length > 0 ? { conversations, identities, ownership } : null;
+}
+
+function sameDigestOccurrenceShape(
+  expected: Array<{ bytes: number; sha256: string }>,
+  actual: Array<{ bytes: number; sha256: string }>,
+  requireEqualBytes: boolean,
+) {
+  return expected.length === actual.length
+    && expected.every((value, index) => (
+      requireEqualBytes
+        ? value.bytes === actual[index]!.bytes
+        : value.bytes >= 0 && actual[index]!.bytes >= 0
+    ))
+    && sameDigestEqualityShape(expected, actual);
+}
+
+function sameIdentityOccurrenceShape(
+  expected: JourneyChatwootGeneratedState["identities"],
+  actual: JourneyChatwootGeneratedState["identities"],
+) {
+  return expected.length === actual.length
+    && expected.every((value, index) => {
+      const other = actual[index];
+      if (value === null || other === null) return value === other;
+      return value.domain === other.domain
+        && value.path === other.path
+        && value.httpOnly === other.httpOnly
+        && value.secure === other.secure
+        && value.sameSite === other.sameSite
+        && value.value.bytes === other.value.bytes;
+    })
+    && sameDigestEqualityShape(
+      expected.flatMap((value) => value === null ? [] : [value.value]),
+      actual.flatMap((value) => value === null ? [] : [value.value]),
+    );
+}
+
+function sameDigestEqualityShape(
+  expected: Array<{ sha256: string }>,
+  actual: Array<{ sha256: string }>,
+) {
+  for (let left = 0; left < expected.length; left += 1) {
+    for (let right = left + 1; right < expected.length; right += 1) {
+      if ((expected[left]!.sha256 === expected[right]!.sha256)
+        !== (actual[left]!.sha256 === actual[right]!.sha256)) {
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
+function projectDigestOccurrences(
+  values: Array<{ bytes?: number | string; sha256: string }>,
+  label: string,
+  projectBytes = false,
+) {
+  const symbols = new Map<string, string>();
+  for (const value of values) {
+    const existing = symbols.get(value.sha256);
+    if (existing) {
+      value.sha256 = existing;
+      if (projectBytes) value.bytes = `<dynamic:${label}-bytes>`;
+      continue;
+    }
+    const symbol = `<dynamic:${label}:${symbols.size + 1}>`;
+    symbols.set(value.sha256, symbol);
+    value.sha256 = symbol;
+    if (projectBytes) value.bytes = `<dynamic:${label}-bytes>`;
+  }
+}
+
+function projectIdentityOccurrences(
+  values: JourneyChatwootGeneratedState["identities"],
+) {
+  const names = new Map<string, string>();
+  const cookieValues = values.flatMap((value) => value === null ? [] : [value.value]);
+  projectDigestOccurrences(cookieValues, "chatwoot-identity-cookie");
+  for (const value of values) {
+    if (value === null) continue;
+    const digest = value.name.slice("cw_user_".length);
+    const existing = names.get(digest);
+    if (existing) {
+      value.name = existing;
+      continue;
+    }
+    const symbol = `cw_user_<dynamic:chatwoot-website-token:${names.size + 1}>`;
+    names.set(digest, symbol);
+    value.name = symbol;
+  }
 }
 
 type ChatwootGeneratedState = {
@@ -301,7 +491,10 @@ function isExactChatwootConversationCookie(value: unknown): value is {
 
 function isExactChatwootIdentityCookie(
   value: unknown,
-): value is Record<string, unknown> & { name: string } {
+): value is Record<string, unknown> & {
+  name: string;
+  value: { bytes: number; sha256: string };
+} {
   return isRecord(value)
     && hasExactKeys(value, ["domain", "httpOnly", "name", "path", "sameSite", "secure", "value"])
     && typeof value.name === "string"
@@ -758,7 +951,7 @@ function projectCanonicalUrls(manifest: Record<string, unknown>, references: Dyn
     for (const queryValue of value.query) {
       if (!isRecord(queryValue) || typeof queryValue.key !== "string") continue;
       if (
-        !["code", "state", "return_to", "redirect_to"].includes(queryValue.key)
+        !["code", "operation_id", "state", "return_to", "redirect_to"].includes(queryValue.key)
         || typeof queryValue.value !== "string"
         || !SHORT_DIGEST.test(queryValue.value)
       ) {

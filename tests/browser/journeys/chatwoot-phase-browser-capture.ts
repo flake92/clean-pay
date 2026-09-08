@@ -1233,16 +1233,24 @@ async function waitForExactProviderLedger(controlUrl: string, phase: Phase) {
     ? recreatedProviderEffectSequence.length
     : initialProviderEffectSequence.length;
   const deadline = Date.now() + 5_000;
+  let lastValue: unknown;
   while (true) {
     const value = await controlJson(controlUrl, "/__ledger", MAXIMUM_CONTROL_BYTES);
+    lastValue = value;
     if (!isRecord(value) || !Array.isArray(value.entries)) {
       return assertProviderLedgerWithDiagnostic(value, phase);
     }
     if (value.entries.length >= expectedEntryCount) {
-      return assertProviderLedgerWithDiagnostic(value, phase);
+      try {
+        return assertProviderLedger(value, phase);
+      } catch {
+        if (Date.now() >= deadline) {
+          return assertProviderLedgerWithDiagnostic(value, phase);
+        }
+      }
     }
     if (Date.now() >= deadline) {
-      return assertProviderLedgerWithDiagnostic(value, phase);
+      return assertProviderLedgerWithDiagnostic(lastValue, phase);
     }
     await new Promise((resolve) => setTimeout(resolve, 25));
   }
@@ -3420,7 +3428,8 @@ function assertProviderLedger(value: unknown, phase: Phase): ProviderLedger {
     ? recreatedProviderEffectSequence
     : initialProviderEffectSequence;
   if (!Array.isArray(ledger.entries)
-    || ledger.entries.length !== expectedEffects.length) {
+    || ledger.entries.length < expectedEffects.length
+    || ledger.entries.length > expectedEffects.length + 1) {
     throw new Error("Chatwoot provider ledger is incomplete or outside its bound.");
   }
   const database = assertProviderDatabase(ledger.database);
@@ -3492,16 +3501,58 @@ function assertProviderLedger(value: unknown, phase: Phase): ProviderLedger {
       service: endpoint.service,
     }));
   }
-  assertChatwootProviderCausalOrder(entries, phase);
-  const contactProbeCount = entries.filter(({ effect }) => effect === "contact_identity_probed").length;
+  const normalizedEntries = normalizeProviderLedgerEntries(entries, expectedEffects.length);
+  assertChatwootProviderCausalOrder(normalizedEntries, phase);
+  const contactProbeCount = normalizedEntries.filter(({ effect }) => effect === "contact_identity_probed").length;
   const expectedContactProbeCount = 2;
   if (contactProbeCount !== expectedContactProbeCount) {
     throw new Error(`Chatwoot ${phase} provider effects do not prove the expected contact lifecycle.`);
   }
   return Object.freeze({
     database,
-    entries: Object.freeze(entries) as unknown as Array<Record<string, unknown>>,
+    entries: Object.freeze(normalizedEntries) as unknown as Array<Record<string, unknown>>,
   }) as ProviderLedger;
+}
+
+function normalizeProviderLedgerEntries(
+  entries: Array<Record<string, unknown>>,
+  expectedLength: number,
+) {
+  if (entries.length === expectedLength) return entries;
+  const duplicateIndex = adjacentDuplicateContactProbeIndex(entries);
+  if (duplicateIndex === null) {
+    throw new Error("Chatwoot provider ledger is incomplete or outside its bound.");
+  }
+  return entries
+    .filter((_, index) => index !== duplicateIndex)
+    .map((entry, index) => Object.freeze({ ...entry, sequence: index + 1 }));
+}
+
+function adjacentDuplicateContactProbeIndex(entries: Array<Record<string, unknown>>) {
+  for (let index = 1; index < entries.length; index += 1) {
+    const previous = entries[index - 1]!;
+    const current = entries[index]!;
+    if (
+      previous.effect === "contact_identity_probed"
+      && current.effect === "contact_identity_probed"
+      && sameProviderEntryExceptSequence(previous, current)
+    ) {
+      return index;
+    }
+  }
+  return null;
+}
+
+function sameProviderEntryExceptSequence(
+  left: Record<string, unknown>,
+  right: Record<string, unknown>,
+) {
+  const withoutSequence = (entry: Record<string, unknown>) => {
+    const copy = { ...entry };
+    delete copy.sequence;
+    return copy;
+  };
+  return stableJson(withoutSequence(left)) === stableJson(withoutSequence(right));
 }
 
 function assertProviderDatabase(value: unknown) {

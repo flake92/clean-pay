@@ -19,7 +19,10 @@ import {
   configuredExpectedConsoleFingerprints,
 } from "./console-policy";
 import { normalizeStaticRouteCspConsole } from "./csp-console-normalizer";
-import { projectCharacterizationManifestForComparison } from "./comparison-projection";
+import {
+  projectCharacterizationManifestForComparison,
+  projectCharacterizationManifestPairForComparison,
+} from "./comparison-projection";
 import {
   isExactDeterministicTurnstileTransport,
   recordNetwork,
@@ -44,6 +47,10 @@ import {
   JOURNEY_SYNTHETIC_TLS_POLICY,
   journeyProvenanceLaunchArgs,
 } from "./journeys/journey-browser-policy";
+import {
+  PINNED_JOURNEY_V5_FIXTURE_SHA256,
+  currentJourneyFixtureContractSha256,
+} from "./journeys/journey-fixture-contract";
 import {
   browserProvenanceCorrectionEvidence,
   PROVENANCE_CORRECTION_FILE,
@@ -919,6 +926,77 @@ test.describe("immutable browser baseline policy", () => {
     ] } });
   });
 
+  test("projects exact Chatwoot generated values across authenticated journey pairs", () => {
+    const baseline = chatwootGeneratedJourneyManifest({
+      conversationSha256: "1".repeat(64),
+      fixtureContractSha256: PINNED_JOURNEY_V5_FIXTURE_SHA256,
+      ownershipSha256: "2".repeat(64),
+    });
+    const candidate = chatwootGeneratedJourneyManifest({
+      conversationSha256: "3".repeat(64),
+      fixtureContractSha256: currentJourneyFixtureContractSha256(),
+      ownershipSha256: "4".repeat(64),
+    });
+
+    const projected = projectCharacterizationManifestPairForComparison(
+      baseline,
+      candidate,
+    ) as { expected: typeof baseline; actual: typeof candidate };
+    expect(projected.expected.checkpoints[0]!.cookies[0]!.value.sha256)
+      .toBe("<dynamic:chatwoot-conversation:1>");
+    expect(projected.actual.checkpoints[0]!.cookies[0]!.value.sha256)
+      .toBe("<dynamic:chatwoot-conversation:1>");
+    expect(projected.expected.checkpoints[0]!.storage.local[0]!.value.sha256)
+      .toBe("<dynamic:chatwoot-ownership:1>");
+    expect(projected.actual.checkpoints[0]!.storage.local[0]!.value.sha256)
+      .toBe("<dynamic:chatwoot-ownership:1>");
+
+    candidate.checkpoints[0]!.cookies[0]!.value.bytes += 1;
+    const changed = projectCharacterizationManifestPairForComparison(
+      baseline,
+      candidate,
+    ) as { expected: typeof baseline; actual: typeof candidate };
+    expect(changed.expected.checkpoints[0]!.cookies[0]!.value.sha256)
+      .toBe("1".repeat(64));
+    expect(changed.actual.checkpoints[0]!.cookies[0]!.value.sha256)
+      .toBe("3".repeat(64));
+  });
+
+  test("projects exact enriched readiness cycles interleaved with journey traffic", () => {
+    const cycle = enrichedReadinessCycle();
+    const mutation = enrichedReadinessLedgerEntry({
+      effect: "purchase_initialized",
+      method: "POST",
+      pathname: "/api/v1/public/subscription/purchase",
+      sequence: 1,
+    });
+    const offers = cabinetReadLedgerEntry("offers", 6);
+    const devices = cabinetReadLedgerEntry("devices", 9);
+    const entries = [
+      mutation,
+      { ...cycle[0]!, sequence: 2 },
+      { ...cycle[1]!, sequence: 3 },
+      { ...cycle[3]!, sequence: 4 },
+      offers,
+      { ...cycle[4]!, sequence: 6 },
+      { ...cycle[2]!, sequence: 7 },
+      devices,
+      { ...cycle[5]!, sequence: 9 },
+      { ...cycle[6]!, sequence: 10 },
+      { ...mutation, sequence: 11 },
+    ];
+
+    const projected = projectCharacterizationManifestForComparison(
+      journeyProviderLedgerManifest(entries),
+    ) as { providerEffects: { entries: Array<Record<string, unknown>> } };
+    expect(projected.providerEffects.entries).toEqual([
+      mutation,
+      { ...offers, sequence: 2 },
+      { ...devices, sequence: 3 },
+      { ...mutation, sequence: 4 },
+    ]);
+  });
+
   test("canonicalizes only an exact adjacent concurrent cabinet read pair", () => {
     const mutation = enrichedReadinessLedgerEntry({
       effect: "purchase_initialized",
@@ -1406,6 +1484,7 @@ test.describe("immutable browser baseline policy", () => {
           attributes: [
             { name: "href", value: "/_next/static/chunks/3_pz_xyhj63hd.js" },
             { name: "data-source", value: "/_next/static/chunks/3_pz_xyhj63hd.js" },
+            { name: "pr_id_16", value: "" },
           ],
           children: [],
         }],
@@ -1425,7 +1504,32 @@ test.describe("immutable browser baseline policy", () => {
     expect(projected.dom.children[0]?.attributes).toEqual([
       { name: "href", value: "/_next/static/chunks/<compiled-content-hash>.js" },
       { name: "data-source", value: "/_next/static/chunks/3_pz_xyhj63hd.js" },
+      { name: "pr_id_<generated>", value: "" },
     ]);
+  });
+
+  test("projects exact dynamic journey operation identifiers in canonical URLs", () => {
+    const manifest = {
+      ...journeyProviderLedgerManifest([]),
+      route: {
+        requested: {
+          fragment: null,
+          origin: "<app-origin>",
+          pathname: "/payment/pending",
+          query: [{ key: "operation_id", value: "<sha256:1111111111111111>" }],
+        },
+        final: {
+          fragment: null,
+          origin: "<app-origin>",
+          pathname: "/payment/pending",
+          query: [{ key: "operation_id", value: "<sha256:1111111111111111>" }],
+        },
+      },
+    };
+
+    const projected = projectCharacterizationManifestForComparison(manifest) as typeof manifest;
+    expect(projected.route.requested.query[0]?.value).toBe("<dynamic:query-operation_id:1>");
+    expect(projected.route.final.query[0]?.value).toBe("<dynamic:query-operation_id:1>");
   });
 
   test("keeps every hashed-static projection near miss exact", () => {
@@ -2273,6 +2377,50 @@ function journeyProviderLedgerManifest(entries: Array<Record<string, unknown>>) 
       fixtureContract: { version: "journey-v5", sha256: "2".repeat(64) },
     },
     providerEffects: { entries },
+  };
+}
+
+function chatwootGeneratedJourneyManifest(input: {
+  conversationSha256: string;
+  fixtureContractSha256: string;
+  ownershipSha256: string;
+}) {
+  const manifest = journeyProviderLedgerManifest([]);
+  return {
+    ...manifest,
+    journey: "tariffs-payment-returns-extend-idempotency",
+    source: {
+      ...journeySourceProvenance(
+        input.conversationSha256.slice(0, 1),
+        input.ownershipSha256.slice(0, 1),
+        `journey:${input.conversationSha256.slice(0, 8)}`,
+      ),
+      fixtureContract: {
+        version: "journey-v5",
+        sha256: input.fixtureContractSha256,
+      },
+    },
+    checkpoints: [{
+      label: "tariffs-authenticated",
+      cookies: [{
+        domain: "<app-host>",
+        httpOnly: false,
+        name: "cw_conversation",
+        path: "/",
+        sameSite: "Lax",
+        secure: true,
+        value: { bytes: 25, sha256: input.conversationSha256 },
+      }],
+      storage: {
+        cacheNames: [],
+        local: [{
+          key: "clean-pay:chatwoot-ownership:v1",
+          value: { bytes: 88, sha256: input.ownershipSha256 },
+        }],
+        serviceWorkerScopes: [],
+        session: [],
+      },
+    }],
   };
 }
 
