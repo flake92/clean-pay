@@ -2410,6 +2410,31 @@ test("Chatwoot phase ledger accepts one exact trailing readiness cycle", () => {
     .toThrow(/incomplete or outside|exact endpoint contract|credential projection/);
 });
 
+test("Chatwoot phase ledger accepts one exact trailing contact readiness refresh", () => {
+  const original = strictProviderFixture("gap");
+  const withRefreshTail = structuredClone(original);
+  for (const index of [27, 1, 2, 3, 4, 5, 6, 7]) {
+    withRefreshTail.entries.push(structuredClone(original.entries[index]));
+  }
+  withRefreshTail.entries.forEach((entry, index) => { entry.sequence = index + 1; });
+
+  expect(assertChatwootPhaseProviderLedger(withRefreshTail, "gap").entries)
+    .toEqual(original.entries);
+
+  const incompleteRefreshTail = structuredClone(original);
+  for (const index of [27, 1, 2, 3, 4, 5, 6]) {
+    incompleteRefreshTail.entries.push(structuredClone(original.entries[index]));
+  }
+  incompleteRefreshTail.entries.forEach((entry, index) => { entry.sequence = index + 1; });
+  expect(() => assertChatwootPhaseProviderLedger(incompleteRefreshTail, "gap"))
+    .toThrow(/incomplete or outside/);
+
+  const changed = structuredClone(withRefreshTail);
+  changed.entries[33].credential_contract.header_names = [];
+  expect(() => assertChatwootPhaseProviderLedger(changed, "gap"))
+    .toThrow(/incomplete or outside|exact endpoint contract|credential projection/);
+});
+
 // Actual interleavings from run 34059555047. Numbers identify entries in
 // strictProviderFixture, not observed sequence numbers. Bodies stay unchanged.
 const observedReadinessInterleavings = [
