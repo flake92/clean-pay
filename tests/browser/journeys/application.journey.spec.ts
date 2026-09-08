@@ -249,6 +249,7 @@ test("email-account-links-and-merges-telegram", async ({ journey }, testInfo) =>
   const viewportId = testInfo.project.name.replace(/^journey-/, "");
   const email = `new.merge.${viewportId}@clean-pay.dev`;
   const password = "Synthetic-browser-password-42";
+  const captureAuthenticatedChatwoot = authenticatedJourneyLivePairCaptureEnabled(process.env);
 
   await gotoHeading(page, "/register?redirect_to=%2Fcabinet", "Регистрация");
   await waitForTurnstile(page, "auth_login");
@@ -265,6 +266,9 @@ test("email-account-links-and-merges-telegram", async ({ journey }, testInfo) =>
   await page.waitForURL((url) => url.pathname === "/passkey/setup");
   await page.getByRole("button", { name: "Продолжить без него" }).click();
   await page.waitForURL((url) => url.pathname === "/cabinet");
+  if (captureAuthenticatedChatwoot) {
+    await waitForAuthenticatedChatwootFixture(page);
+  }
 
   await gotoHeading(page, "/link-account", "Способы входа");
   await waitForTurnstile(page, "telegram_auth_start");
@@ -297,7 +301,11 @@ test("email-account-links-and-merges-telegram", async ({ journey }, testInfo) =>
 
 test("tariffs-payment-returns-extend-idempotency", async ({ journey }) => {
   const { page } = journey;
+  const captureAuthenticatedChatwoot = authenticatedJourneyLivePairCaptureEnabled(process.env);
   await loginWithTelegramOidc(page);
+  if (captureAuthenticatedChatwoot) {
+    await waitForAuthenticatedChatwootFixture(page);
+  }
   await gotoHeading(page, "/tariffs", "Тарифы");
   await journey.checkpoint("tariffs-authenticated");
   await page.getByRole("link", { name: "Изменить тариф" }).first().click();
@@ -401,6 +409,9 @@ test("telegram-webapp-browser-boundary", async ({ journey }, testInfo) => {
   }, projectTelegramId);
   await page.goto("/auth/telegram/webapp?redirect_to=%2Fcabinet", { waitUntil: "load" });
   await page.waitForURL((url) => url.pathname === "/cabinet");
+  if (authenticatedJourneyLivePairCaptureEnabled(process.env)) {
+    await waitForAuthenticatedChatwootFixture(page);
+  }
   journey.boundary("telegram-webapp", await page.evaluate(() => {
     const storageKey = "clean-pay:browser-journey:telegram-webapp-boundary";
     const calls = (window as unknown as { __cleanPayTelegramBoundaryCalls?: string[] })
