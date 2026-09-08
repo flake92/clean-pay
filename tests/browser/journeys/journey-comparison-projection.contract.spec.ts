@@ -41,6 +41,8 @@ test("projects generated journey values by referential symbol while retaining st
   expect(projected.network.requests[0]!.requestHeaders[0]!.value)
     .toEqual(projected.network.serverActions[0]!.identifier);
   expect(projected.checkpoints[0]!.cookies[0]!.value.bytes).toBe(256);
+  expect(projected.checkpoints[0]!.cookies[0]!.value.sha256)
+    .toBe("<dynamic:cookie-clean_pay_access:1>");
   const oidc = projected.boundaries[0]!.value.preCallback[0]!;
   expect(oidc.expiry.epochSeconds).toBe("<bounded-cookie-expiry>");
   expect(oidc.valueBytes).toBe(64);
@@ -95,6 +97,25 @@ test("projects response-backed Server Action aborts after network compaction", (
   expect(projected.network.serverActions[0]!.requestIndex).toBe(0);
 });
 
+test("projects exact page announcement and hidden display style noise", () => {
+  const baseline = journeyManifest("baseline");
+  const candidate = journeyManifest("candidate");
+  const snapshotBody = [
+    "- main:",
+    "  - heading \"Подтверждение оплаты\" [level=1]",
+    "  - button \"Перейти к оплате\"",
+  ].join("\n");
+  const baselineCheckpoint = baseline.checkpoints[0]! as Record<string, unknown>;
+  const candidateCheckpoint = candidate.checkpoints[0]! as Record<string, unknown>;
+  baselineCheckpoint.ariaSnapshot = `- alert\n${snapshotBody}`;
+  candidateCheckpoint.ariaSnapshot = `- alert: Подтверждение оплаты\n${snapshotBody}`;
+  baselineCheckpoint.dom = hiddenDisplayDom("display: none; visibility: hidden;");
+  candidateCheckpoint.dom = hiddenDisplayDom("display: none;");
+
+  const projected = projectPair(baseline, candidate);
+  expect(projected.actual).toEqual(projected.expected);
+});
+
 test("projects only the pinned baseline and recomputed current fixture contracts", () => {
   const baseline = journeyManifest("baseline");
   const candidate = journeyManifest("candidate");
@@ -144,7 +165,7 @@ test("projects only a consistent generated PWA shell cache contract", () => {
   expect(projected.actual).toEqual(projected.expected);
 
   const candidateUuid = journeyManifest("candidate");
-  setPwaShellCache(candidateUuid, legacyCache);
+  setPwaShellCache(candidateUuid, "clean-pay-shell-24b4a4eb-27e9-432f-b44c-90bd75fb2ba0");
   const uuidNearMiss = projectPair(baseline, candidateUuid);
   expect(uuidNearMiss.actual).not.toEqual(uuidNearMiss.expected);
 
@@ -153,6 +174,8 @@ test("projects only a consistent generated PWA shell cache contract", () => {
   pwaBoundaryCacheNames(inconsistent)[0] = `clean-pay-shell-${"b".repeat(40)}`;
   const inconsistentProjection = projectPair(baseline, inconsistent);
   expect(inconsistentProjection.actual).not.toEqual(inconsistentProjection.expected);
+  expect(pwaBoundaryCacheNames(inconsistentProjection.expected as typeof baseline)[0])
+    .toBe(legacyCache);
 
   const invalidFormat = journeyManifest("candidate");
   setPwaShellCache(invalidFormat, "clean-pay-shell-synthetic-build");
@@ -324,6 +347,28 @@ test("projects hashed Next topology only after complete journey semantic proof",
   expect((retainedLink.actual as typeof linkNearMiss).network.requests).toHaveLength(4);
 });
 
+test("projects hashed Next topology when a valid chunk floats around a server action", () => {
+  const baseline = journeyManifest("baseline");
+  const candidate = journeyManifest("candidate");
+  setHashedNextTopology(baseline, "baseline", 2, true);
+  setHashedNextTopology(candidate, "candidate", 1, false);
+  moveLastChunkAfterServerAction(candidate);
+
+  const projected = projectPair(baseline, candidate);
+  expect(projected.actual).toEqual(projected.expected);
+  const projectedNetwork = (projected.actual as typeof candidate).network;
+  expect(projectedNetwork.requests).toHaveLength(3);
+  expect(projectedNetwork.serverActions[0]!.requestIndex).toBe(2);
+
+  const staticNearMiss = journeyManifest("candidate");
+  setHashedNextTopology(staticNearMiss, "candidate", 1, false);
+  staticNearMiss.network.requests[1]!.response.status = 404;
+  moveLastChunkAfterServerAction(staticNearMiss);
+  const retainedStatic = projectPair(baseline, staticNearMiss);
+  expect((retainedStatic.expected as typeof baseline).network.requests).toHaveLength(4);
+  expect((retainedStatic.actual as typeof staticNearMiss).network.requests).toHaveLength(3);
+});
+
 test("projects only exact removed Next disclosure headers in HAR entries", () => {
   const disclosure = {
     name: "x-powered-by",
@@ -378,7 +423,7 @@ test("projects a consistent generated PWA shell cache in non-public journey chec
   const candidateUuid = journeyManifest("candidate");
   setCheckpointCacheNames(
     candidateUuid,
-    ["clean-pay-shell-ff7922ad-71fe-405d-b05f-363392d82108"],
+    ["clean-pay-shell-24b4a4eb-27e9-432f-b44c-90bd75fb2ba0"],
   );
   const uuidNearMiss = projectPair(baseline, candidateUuid);
   expect(uuidNearMiss.actual).not.toEqual(uuidNearMiss.expected);
@@ -885,6 +930,20 @@ function responseBackedActionAbortManifest() {
   return manifest;
 }
 
+function hiddenDisplayDom(style: string) {
+  return {
+    type: "element",
+    tag: "div",
+    attributes: [],
+    children: [{
+      type: "element",
+      tag: "div",
+      attributes: [{ name: "style", value: style }],
+      children: [],
+    }],
+  };
+}
+
 function automaticPrefetchRequest(index: number) {
   return {
     index,
@@ -983,6 +1042,23 @@ function setHashedNextTopology(
     action,
   ] as unknown as typeof manifest.network.requests;
   manifest.network.serverActions[0]!.requestIndex = action.index;
+}
+
+function moveLastChunkAfterServerAction(
+  manifest: ReturnType<typeof journeyManifest>,
+) {
+  const document = manifest.network.requests[0]!;
+  const staticRequest = manifest.network.requests[1]!;
+  const action = manifest.network.requests[2]!;
+  manifest.network.requests = [
+    document,
+    action,
+    staticRequest,
+  ] as typeof manifest.network.requests;
+  for (const [index, request] of manifest.network.requests.entries()) {
+    request.index = index;
+  }
+  manifest.network.serverActions[0]!.requestIndex = 1;
 }
 
 function setOfflineCssPaths(
