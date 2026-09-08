@@ -97,6 +97,34 @@ test("projects response-backed Server Action aborts after network compaction", (
   expect(projected.network.serverActions[0]!.requestIndex).toBe(0);
 });
 
+test("projects response-backed Server Action aborts beside unrelated pending actions", () => {
+  const manifest = responseBackedActionAbortManifest();
+  const pending = structuredClone(manifest.network.requests[0]!);
+  pending.index = 1;
+  pending.url = canonicalUrl("/cabinet");
+  pending.response = null as unknown as typeof pending.response;
+  pending.failure = null;
+  const pendingIdentifier = { bytes: 42, sha256: "f".repeat(64) };
+  pending.serverAction.identifier = pendingIdentifier;
+  pending.requestHeaders[0]!.value = pendingIdentifier;
+
+  manifest.network.requests.push(pending);
+  manifest.network.serverActions.push({
+    order: 1,
+    requestIndex: 1,
+    method: "POST",
+    url: canonicalUrl("/cabinet"),
+    identifier: pendingIdentifier,
+    payload: pending.postData,
+    status: 200,
+  });
+  manifest.network.serverActionCount = 2;
+
+  const projected = project(manifest) as typeof manifest;
+  expect(projected.network.requests[0]!.failure).toBeNull();
+  expect(projected.network.requests[1]!.response).toBeNull();
+});
+
 test("projects exact page announcement and hidden display style noise", () => {
   const baseline = journeyManifest("baseline");
   const candidate = journeyManifest("candidate");
@@ -367,6 +395,24 @@ test("projects hashed Next topology when a valid chunk floats around a server ac
   const retainedStatic = projectPair(baseline, staticNearMiss);
   expect((retainedStatic.expected as typeof baseline).network.requests).toHaveLength(4);
   expect((retainedStatic.actual as typeof staticNearMiss).network.requests).toHaveLength(3);
+});
+
+test("projects fully validated static resource count drift with the app logo", () => {
+  const baseline = journeyManifest("baseline");
+  const candidate = journeyManifest("candidate");
+  setHashedNextTopology(baseline, "baseline", 2, true);
+  setHashedNextTopology(candidate, "candidate", 1, false);
+  addExactLogoRequest(candidate);
+
+  const projected = projectPair(baseline, candidate);
+  expect(projected.actual).toEqual(projected.expected);
+
+  const nearMiss = journeyManifest("candidate");
+  setHashedNextTopology(nearMiss, "candidate", 1, false);
+  addExactLogoRequest(nearMiss);
+  nearMiss.network.requests.at(-1)!.response.headers = [];
+  const rejected = projectPair(baseline, nearMiss);
+  expect(rejected.actual).not.toEqual(rejected.expected);
 });
 
 test("projects only exact removed Next disclosure headers in HAR entries", () => {
@@ -1059,6 +1105,29 @@ function moveLastChunkAfterServerAction(
     request.index = index;
   }
   manifest.network.serverActions[0]!.requestIndex = 1;
+}
+
+function addExactLogoRequest(
+  manifest: ReturnType<typeof journeyManifest>,
+) {
+  manifest.network.requests.push({
+    index: manifest.network.requests.length,
+    method: "GET",
+    url: canonicalUrl("/clean-pay-logo.png"),
+    scope: "application",
+    resourceType: "image",
+    navigation: false,
+    serverAction: { present: false, identifier: null },
+    requestHeaders: [],
+    postData: null,
+    redirectedFrom: null,
+    response: {
+      status: 200,
+      headers: [{ name: "content-type", value: "image/png" }],
+    },
+    failure: null,
+    externalTransport: null,
+  } as unknown as ReturnType<typeof journeyManifest>["network"]["requests"][number]);
 }
 
 function setOfflineCssPaths(
