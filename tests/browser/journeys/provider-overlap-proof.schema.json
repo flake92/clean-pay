@@ -452,10 +452,34 @@
     "eventLifecycle": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["drainedEventCount", "lateEventCount", "status"],
+      "required": ["drainedEventCount", "lateEventCount", "sourceCounts", "status"],
       "properties": {
         "drainedEventCount": { "type": "integer", "minimum": 59, "maximum": 773 },
         "lateEventCount": { "const": 0 },
+        "sourceCounts": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "console",
+            "history",
+            "page",
+            "pageerror",
+            "request",
+            "responseFallback",
+            "route",
+            "terminal"
+          ],
+          "properties": {
+            "console": { "type": "integer", "minimum": 0, "maximum": 256 },
+            "history": { "type": "integer", "minimum": 0, "maximum": 256 },
+            "page": { "type": "integer", "minimum": 0, "maximum": 256 },
+            "pageerror": { "type": "integer", "minimum": 0, "maximum": 256 },
+            "request": { "type": "integer", "minimum": 0, "maximum": 256 },
+            "responseFallback": { "type": "integer", "minimum": 0, "maximum": 256 },
+            "route": { "type": "integer", "minimum": 0, "maximum": 256 },
+            "terminal": { "type": "integer", "minimum": 0, "maximum": 256 }
+          }
+        },
         "status": { "const": "sealed-clean" }
       }
     },

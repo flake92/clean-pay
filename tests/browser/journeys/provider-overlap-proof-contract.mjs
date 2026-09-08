@@ -1998,7 +1998,7 @@ function assertEventLifecycle(value, label) {
   const lifecycle = record(value, `${label} browser event lifecycle`);
   exactKeys(
     lifecycle,
-    ["drainedEventCount", "lateEventCount", "status"],
+    ["drainedEventCount", "lateEventCount", "sourceCounts", "status"],
     `${label} browser event lifecycle`,
   );
   boundedInteger(lifecycle.drainedEventCount, 59, 773, `${label} drained browser events`);
@@ -2009,9 +2009,36 @@ function assertEventLifecycle(value, label) {
 
 function assertEventLifecycleCausality(lifecycle, requestCount, historyCount, label) {
   equal(historyCount, 4, `${label} causal browser history event count`);
+  const sourceCounts = record(lifecycle.sourceCounts, `${label} browser event source counts`);
+  exactKeys(
+    sourceCounts,
+    ["console", "history", "page", "pageerror", "request", "responseFallback", "route", "terminal"],
+    `${label} browser event source counts`,
+  );
+  for (const [source, count] of Object.entries(sourceCounts)) {
+    boundedInteger(count, 0, 256, `${label} browser ${source} event count`);
+  }
+  const eventSourceTotal = Object.values(sourceCounts)
+    .reduce((sum, count) => sum + count, 0);
+  equal(eventSourceTotal, lifecycle.drainedEventCount, `${label} causal browser event source total`);
+  equal(sourceCounts.history, historyCount, `${label} causal browser history source count`);
+  equal(sourceCounts.console, 1, `${label} causal browser console source count`);
+  equal(sourceCounts.page, 0, `${label} causal browser page source count`);
+  equal(sourceCounts.pageerror, 0, `${label} causal browser pageerror source count`);
+  equal(
+    sourceCounts.request + sourceCounts.responseFallback,
+    requestCount,
+    `${label} causal browser request preparation count`,
+  );
+  equal(sourceCounts.route, requestCount, `${label} causal browser route event count`);
+  equal(sourceCounts.terminal, requestCount, `${label} causal browser terminal event count`);
   equal(
     lifecycle.drainedEventCount,
-    requestCount * 3 + historyCount + 1,
+    sourceCounts.request + sourceCounts.responseFallback
+      + sourceCounts.route
+      + sourceCounts.terminal
+      + historyCount
+      + sourceCounts.console,
     `${label} causal browser event count`,
   );
 }
