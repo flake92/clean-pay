@@ -1576,8 +1576,9 @@ test("binds the causal route barrier and exact logout helper without fixture sub
   expect(source).toContain('await completeTelegramNavigation(page, telegram, "/profile")');
   expect(source).toContain('await completeTelegramNavigation(page, telegram, redirectPath)');
   expect(source).toContain('pending.phase === "ownership_confirmed"');
+  expect(source).toContain("bootstrap.profileContextDelivered()");
   expect(source).toContain("removedLabels.has(\"payment_problem\")");
-  expect(source).toContain("removedLabels.has(\"subscription_expired\")");
+  expect(source).toContain("subscriptionContextStatus");
   expect(source).toContain('paymentContextStatus === "stale"');
   expect(source).toContain("paymentLabelCalls.length === 0");
   expect(source).toContain("await clearSyntheticLogoutState(page)");
