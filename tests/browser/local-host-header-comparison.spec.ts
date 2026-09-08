@@ -307,6 +307,80 @@ test("rejects one invalid Host-bearing request atomically", () => {
   expect(projected.expected).not.toEqual(projected.actual);
 });
 
+test("projects only an exact optional Origin header on public static chunks", () => {
+  const baseline = manifest(BASELINE_ORIGIN);
+  const candidate = manifest(CANDIDATE_ORIGIN);
+  addStaticScript(baseline, "baseline", true);
+  addStaticScript(candidate, "candidate", false);
+
+  const projected = projectCharacterizationManifestPairForComparison(
+    baseline,
+    candidate,
+    {
+      actualApplicationOrigin: CANDIDATE_ORIGIN,
+      expectedApplicationOrigin: BASELINE_ORIGIN,
+    },
+  );
+
+  expect(projected.expected).toEqual(projected.actual);
+  expect(staticRequest(projected.expected).requestHeaders.map((header) => header.name))
+    .toEqual([
+      "accept",
+      "accept-language",
+      "referer",
+      "sec-ch-ua",
+      "sec-ch-ua-mobile",
+      "sec-ch-ua-platform",
+      "user-agent",
+    ]);
+
+  const nearMisses: Array<{
+    label: string;
+    mutateBaseline?: (value: ReturnType<typeof manifest>) => void;
+    mutateCandidate?: (value: ReturnType<typeof manifest>) => void;
+  }> = [
+    {
+      label: "invalid Origin target",
+      mutateBaseline: (value) => {
+        const origin = staticRequest(value).requestHeaders[2]!.value as Record<string, unknown>;
+        origin.pathname = "/login";
+      },
+    },
+    {
+      label: "non-static request",
+      mutateBaseline: (value) => {
+        staticRequest(value).resourceType = "fetch";
+      },
+    },
+    {
+      label: "adjacent header drift",
+      mutateCandidate: (value) => {
+        staticRequest(value).requestHeaders[0]!.value = digestValue("application/json");
+      },
+    },
+  ];
+
+  for (const nearMiss of nearMisses) {
+    const nearMissBaseline = manifest(BASELINE_ORIGIN);
+    const nearMissCandidate = manifest(CANDIDATE_ORIGIN);
+    addStaticScript(nearMissBaseline, "baseline", true);
+    addStaticScript(nearMissCandidate, "candidate", false);
+    nearMiss.mutateBaseline?.(nearMissBaseline);
+    nearMiss.mutateCandidate?.(nearMissCandidate);
+
+    const rejected = projectCharacterizationManifestPairForComparison(
+      nearMissBaseline,
+      nearMissCandidate,
+      {
+        actualApplicationOrigin: CANDIDATE_ORIGIN,
+        expectedApplicationOrigin: BASELINE_ORIGIN,
+      },
+    );
+
+    expect(rejected.expected, nearMiss.label).not.toEqual(rejected.actual);
+  }
+});
+
 function manifest(
   origin: string,
   options: { poweredBy?: boolean } = {},
@@ -377,4 +451,60 @@ function requestHeaders(value: unknown) {
 
 function setHost(value: ReturnType<typeof manifest>, host: string) {
   requestHeaders(value)[1]!.value = digestValue(host);
+}
+
+function addStaticScript(
+  value: ReturnType<typeof manifest>,
+  seed: string,
+  includeOrigin: boolean,
+) {
+  value.network.requests.push({
+    index: value.network.requests.length,
+    method: "GET",
+    url: applicationUrl(`/_next/static/chunks/${seed}12345678.js`),
+    scope: "application",
+    resourceType: "script",
+    navigation: false,
+    serverAction: { present: false, identifier: null },
+    requestHeaders: [
+      { name: "accept", value: digestValue("*/*") },
+      { name: "accept-language", value: digestValue("en-US") },
+      ...(includeOrigin
+        ? [{
+            name: "origin",
+            value: applicationUrl("/"),
+          }]
+        : []),
+      {
+        name: "referer",
+        value: {
+          origin: "<app-origin>",
+          pathname: "/login",
+          query: [{ key: "redirect_to", value: "<sha256:41b9b7d9f873870d>" }],
+          fragment: null,
+        },
+      },
+      { name: "sec-ch-ua", value: digestValue("chromium") },
+      { name: "sec-ch-ua-mobile", value: digestValue("?1") },
+      { name: "sec-ch-ua-platform", value: digestValue("Linux") },
+      { name: "user-agent", value: digestValue("pinned-browser") },
+    ],
+    postData: null,
+    redirectedFrom: null,
+    response: {
+      status: 200,
+      statusText: "OK",
+      fromServiceWorker: false,
+      headers: [
+        { name: "content-type", value: "application/javascript; charset=UTF-8" },
+        { name: "etag", value: digestValue(`${seed}:etag`) },
+      ],
+    },
+    failure: null,
+    externalTransport: null,
+  } as unknown as ReturnType<typeof manifest>["network"]["requests"][number]);
+}
+
+function staticRequest(value: unknown) {
+  return (value as ReturnType<typeof manifest>).network.requests[1]!;
 }
