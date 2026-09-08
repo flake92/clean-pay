@@ -80,6 +80,21 @@ test("projects only an exactly ledger-backed Server Action ERR_ABORTED schedule"
   }
 });
 
+test("projects response-backed Server Action aborts after network compaction", () => {
+  const manifest = responseBackedActionAbortManifest();
+  const prefetch = automaticPrefetchRequest(0);
+  const action = manifest.network.requests[0]!;
+  action.index = 1;
+  manifest.network.requests = [prefetch, action];
+  manifest.network.serverActions[0]!.requestIndex = 1;
+
+  const projected = project(manifest) as typeof manifest;
+  expect(projected.network.requests).toHaveLength(1);
+  expect(projected.network.requests[0]!.index).toBe(0);
+  expect(projected.network.requests[0]!.failure).toBeNull();
+  expect(projected.network.serverActions[0]!.requestIndex).toBe(0);
+});
+
 test("projects only the pinned baseline and recomputed current fixture contracts", () => {
   const baseline = journeyManifest("baseline");
   const candidate = journeyManifest("candidate");
@@ -868,6 +883,39 @@ function responseBackedActionAbortManifest() {
     },
   };
   return manifest;
+}
+
+function automaticPrefetchRequest(index: number) {
+  return {
+    index,
+    method: "GET",
+    url: canonicalUrl("/tariffs", [{ key: "_rsc", value: "prefetch" }]),
+    scope: "application",
+    resourceType: "fetch",
+    navigation: false,
+    serverAction: { present: false, identifier: null },
+    requestHeaders: [
+      {
+        name: "next-router-prefetch",
+        value: {
+          bytes: 1,
+          sha256: "6b86b273ff34fce19d6b804eff5a3f5747ada4eaa22f1d49c01e52ddb7875b4b",
+        },
+      },
+      {
+        name: "rsc",
+        value: {
+          bytes: 1,
+          sha256: "6b86b273ff34fce19d6b804eff5a3f5747ada4eaa22f1d49c01e52ddb7875b4b",
+        },
+      },
+    ],
+    postData: null,
+    redirectedFrom: null,
+    response: { status: 200, headers: [] },
+    failure: null,
+    externalTransport: null,
+  } as unknown as ReturnType<typeof journeyManifest>["network"]["requests"][number];
 }
 
 function setHashedNextTopology(
