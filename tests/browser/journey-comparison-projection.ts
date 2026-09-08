@@ -117,34 +117,42 @@ export function projectExactAuthenticatedChatwootGeneratedPair(
 
   const expectedState = exactAuthenticatedChatwootGeneratedState(expected);
   const actualState = exactAuthenticatedChatwootGeneratedState(actual);
-  if (
-    !expectedState
-    || !actualState
-    || !sameJson(expectedState.presence, actualState.presence)
-    || !exactChatwootIdentityCookiesMatch(
-      expectedState.identityCookies,
-      actualState.identityCookies,
-    )
-    || expectedState.conversationBytes !== actualState.conversationBytes
-    || expectedState.ownershipBytes !== actualState.ownershipBytes
-  ) {
-    projectExactJourneyChatwootGeneratedPair(expected, actual);
+  if (expectedState && actualState) {
+    if (
+      !sameJson(expectedState.presence, actualState.presence)
+      || !exactChatwootIdentityCookiesMatch(
+        expectedState.identityCookies,
+        actualState.identityCookies,
+      )
+      || expectedState.conversationBytes !== actualState.conversationBytes
+      || expectedState.ownershipBytes !== actualState.ownershipBytes
+    ) {
+      return;
+    }
+
+    for (const state of [expectedState, actualState]) {
+      for (const digest of state.conversationDigests) {
+        digest.sha256 = "<dynamic:chatwoot-conversation:1>";
+      }
+      for (const digest of state.ownershipDigests) {
+        digest.sha256 = "<dynamic:chatwoot-ownership:1>";
+      }
+      for (const identity of state.identityCookies) {
+        if (identity) {
+          identity.name = "cw_user_<dynamic:chatwoot-website-token:1>";
+        }
+      }
+    }
     return;
   }
 
-  for (const state of [expectedState, actualState]) {
-    for (const digest of state.conversationDigests) {
-      digest.sha256 = "<dynamic:chatwoot-conversation:1>";
-    }
-    for (const digest of state.ownershipDigests) {
-      digest.sha256 = "<dynamic:chatwoot-ownership:1>";
-    }
-    for (const identity of state.identityCookies) {
-      if (identity) {
-        identity.name = "cw_user_<dynamic:chatwoot-website-token:1>";
-      }
-    }
+  if (
+    expectedState
+    || actualState
+  ) {
+    return;
   }
+  projectExactJourneyChatwootGeneratedPair(expected, actual);
 }
 
 function projectExactJourneyChatwootGeneratedPair(
@@ -332,6 +340,7 @@ function sameIdentityOccurrenceShape(
       const other = actual[index];
       if (value === null || other === null) return value === other;
       return value.domain === other.domain
+        && value.name === other.name
         && value.path === other.path
         && value.httpOnly === other.httpOnly
         && value.secure === other.secure
