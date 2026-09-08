@@ -2030,7 +2030,11 @@ function assertEventLifecycleCausality(lifecycle, requestCount, historyCount, la
     requestCount,
     `${label} causal browser request preparation count`,
   );
-  equal(sourceCounts.route, requestCount, `${label} causal browser route event count`);
+  equal(
+    sourceCounts.route + sourceCounts.responseFallback,
+    requestCount,
+    `${label} causal browser route event count`,
+  );
   equal(sourceCounts.terminal, requestCount, `${label} causal browser terminal event count`);
   equal(
     lifecycle.drainedEventCount,

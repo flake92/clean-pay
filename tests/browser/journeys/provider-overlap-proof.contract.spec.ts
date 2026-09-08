@@ -2437,6 +2437,7 @@ test("registers exact request identities before response capture and routed cont
   expect(routeHandler.slice(navigationCaptureBarrier, routeHandler.indexOf("await route.continue()")))
     .not.toContain("throw error");
   expect(proofContractSource).toContain("sourceCounts.request + sourceCounts.responseFallback");
+  expect(proofContractSource).toContain("sourceCounts.route + sourceCounts.responseFallback");
   expect(proofContractSource).toContain("causal browser request preparation count");
   const pendingDrainIndex = runnerSource.indexOf(
     "await pendingRequestSeal.drainAndSeal({ timeoutMs: 15_000 })",
