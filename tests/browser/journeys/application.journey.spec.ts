@@ -159,7 +159,10 @@ test("telegram-oidc-cabinet-profile-link-referral-passkey", async ({ journey }) 
   const oidcLifecycle = await loginWithTelegramOidc(page, true);
   journey.boundary("telegram-oidc-cookie-lifecycle", oidcLifecycle);
   const firstAuthenticatedChatwoot = captureAuthenticatedChatwoot
-    ? await waitForChatwootBoundary(page)
+    ? await test.step("chatwoot telegram OIDC A-to-B exact characterization", async () => {
+      await waitForAuthenticatedChatwootFixture(page);
+      return waitForChatwootBoundary(page);
+    })
     : null;
   await journey.checkpoint("telegram-oidc-cabinet");
 
