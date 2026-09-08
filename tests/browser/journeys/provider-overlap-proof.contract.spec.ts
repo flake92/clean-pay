@@ -1049,6 +1049,15 @@ test("publishes only bounded phase enums for live provider failure diagnosis", a
   expect(runner).toContain("retainProviderProjectionFailure(");
   expect(runner).toContain("currentProviderBrowserDiagnosticEvidence()");
   expect(runner).toContain("{ browserDiagnosticEvidence }");
+  expect(runner).toContain("currentProviderProofAssemblyFailureEvidence()");
+  expect(runner).toContain("{ proofAssemblyFailureEvidence }");
+  expect(runner).toContain("retainProviderProofAssemblyFailure(error)");
+  expect(runner).toContain('kind: "exact-invariant-mismatch"');
+  expect(runner).toContain('invariantLabel: exactMismatch[1]');
+  expect(runner).toContain('kind: "runtime-binding-alias"');
+  expect(runner).toContain("runtimeBindingName: runtimeAlias[1]");
+  expect(runner).toContain("providerProofAssemblyInvariantLabels");
+  expect(runner).toContain("providerProofAssemblyRuntimeBindingNames");
   expect(runner).toContain('"durable-body-read"');
   expect(runner).toContain('"final-assert"');
   expect(runner).toContain('"request-terminal-evidence"');
