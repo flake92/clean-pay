@@ -18,6 +18,10 @@ describe("cabinet performance regressions", () => {
     expect(page.indexOf("<CabinetAccessBoundary>")).toBeLessThan(
       page.indexOf("<AppShell requireAuth>"),
     );
+    expect(page.indexOf('await requireCabinetEntrySession("/cabinet")'))
+      .toBeLessThan(page.indexOf("await loadRequestCabinetViewModel()"));
+    expect(page.lastIndexOf('await requireCabinetEntrySession("/cabinet")'))
+      .toBeLessThan(page.indexOf("await loadRequestReferralProgram()"));
     expect(page).toContain("await connection()");
     expect(page.indexOf("await connection()"))
       .toBeLessThan(page.indexOf('await requireCabinetEntrySession("/cabinet")'));

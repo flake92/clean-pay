@@ -24,6 +24,7 @@ async function CabinetAccessBoundary({ children }: { children: ReactNode }) {
 }
 
 async function loadAuthenticatedCabinet() {
+  await requireCabinetEntrySession("/cabinet");
   const model = await loadRequestCabinetViewModel();
   if (model.status === "unauthorized") redirect(sessionRefreshPath("/cabinet"));
   if (model.status === "provider-session-recovery-required") {
@@ -42,6 +43,7 @@ async function CabinetContent() {
 }
 
 async function CabinetReferralContent() {
+  await requireCabinetEntrySession("/cabinet");
   const model = await loadRequestReferralProgram();
   if (model.status === "error" && model.action === "recover-session") {
     redirect(providerSessionRecoveryPath("/cabinet"));

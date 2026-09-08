@@ -1210,6 +1210,10 @@ async function exerciseCabinet(
       }
     };
     context.on("request", (request) => {
+      if (preLedgerRequestIdentities.has(request)
+        && !browserRequestPreparationByIdentity.has(request)) {
+        return;
+      }
       recordBrowserEvent("request");
       pendingRequestSeal.observe(request);
       recordProviderPendingRequest(role, request);
@@ -1394,12 +1398,16 @@ async function exerciseCabinet(
     };
     context.on("requestfinished", (request) => completeRequest(request, true));
     context.on("requestfailed", (request) => completeRequest(request, false));
-    context.removeListener("request", observePreLedgerRequest);
     markProviderFailurePhase(role, "install-request-routing");
     await context.route("**/*", async (route) => {
+      const request = route.request();
+      if (preLedgerRequestIdentities.has(request)
+        && !browserRequestPreparationByIdentity.has(request)) {
+        await route.abort("blockedbyclient");
+        return;
+      }
       const finishRoute = beginBrowserEvent("route");
       try {
-        const request = route.request();
         const preparation = browserRequestPreparationByIdentity.get(request);
         if (!preparation
           || (preparation.entry !== null && preparation.entry.request !== request)) {
@@ -1449,6 +1457,7 @@ async function exerciseCabinet(
         finishRoute();
       }
     });
+    context.removeListener("request", observePreLedgerRequest);
     markProviderFailurePhase(role, "navigate-login");
     try {
       await page.goto(

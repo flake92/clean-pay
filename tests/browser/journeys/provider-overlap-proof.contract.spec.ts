@@ -2465,18 +2465,23 @@ test("keeps page-startup requests outside the measured provider event lifecycle"
   const proofRequestListener = source.indexOf('context.on("request", (request) =>');
   const responseListener = source.indexOf('context.on("response", (response) =>');
   const terminalHandler = source.indexOf("const completeRequest = (request, finished) =>");
+  const routeHandler = source.indexOf('await context.route("**/*"');
   const preLedgerRelease = source.indexOf(
     'context.removeListener("request", observePreLedgerRequest)',
   );
-  const routeHandler = source.indexOf('await context.route("**/*"');
 
   expect(preLedgerObserver).toBeGreaterThan(-1);
   expect(preLedgerObserver).toBeLessThan(pageCreation);
   expect(pageCreation).toBeLessThan(proofRequestListener);
   expect(proofRequestListener).toBeLessThan(responseListener);
   expect(preLedgerRelease).toBeGreaterThan(terminalHandler);
-  expect(preLedgerRelease).toBeLessThan(routeHandler);
+  expect(routeHandler).toBeGreaterThan(terminalHandler);
+  expect(preLedgerRelease).toBeGreaterThan(routeHandler);
 
+  const requestSource = source.slice(proofRequestListener, responseListener);
+  expect(requestSource).toMatch(
+    /if \(preLedgerRequestIdentities\.has\(request\)\s*&& !browserRequestPreparationByIdentity\.has\(request\)\) \{\s*return;\s*\}[\s\S]{1,256}recordBrowserEvent\("request"\);/,
+  );
   const responseSource = source.slice(responseListener, terminalHandler);
   expect(responseSource).toMatch(
     /if \(preLedgerRequestIdentities\.has\(request\)\s*&& !browserRequestPreparationByIdentity\.has\(request\)\) \{\s*return;\s*\}[\s\S]{1,256}pendingRequestSeal\.observe\(request\);/,
@@ -2488,6 +2493,10 @@ test("keeps page-startup requests outside the measured provider event lifecycle"
   expect(terminalSource).toContain("retainUnownedTerminalFailure();");
   expect(terminalSource.indexOf("!preLedgerRequestIdentities.has(request)"))
     .toBeLessThan(terminalSource.indexOf("if (!entry) return;"));
+  const routeSource = source.slice(routeHandler, preLedgerRelease);
+  expect(routeSource).toMatch(
+    /const request = route\.request\(\);[\s\S]{1,256}if \(preLedgerRequestIdentities\.has\(request\)\s*&& !browserRequestPreparationByIdentity\.has\(request\)\) \{[\s\S]{1,256}await route\.abort\("blockedbyclient"\);[\s\S]{1,256}return;[\s\S]{1,256}const finishRoute = beginBrowserEvent\("route"\);/,
+  );
 });
 
 test("lazily prepares only a response identity that has no prior preparation", () => {
