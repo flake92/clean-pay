@@ -2115,7 +2115,7 @@ test("reports bounded provider mismatches without disclosing fixture credentials
   expect(JSON.stringify(diagnostic)).not.toContain("body_contract");
   expect(JSON.stringify(diagnostic)).not.toContain("credential_contract");
   expect(() => assertChatwootPhaseProviderLedger(value, "gap"))
-    .toThrow(/incomplete or outside/);
+    .toThrow(/incomplete or outside|exact endpoint contract/);
   expect(assertChatwootPhaseProviderLedger(exact, "gap")).toEqual(exact);
   const oversized = { entries: Array.from({ length: 1_000 }, () => ({ effect: sentinel })) };
   expect(summarizeChatwootProviderLedgerForTest(oversized, "gap").observed).toHaveLength(64);
@@ -2369,8 +2369,23 @@ test("Chatwoot causal provider comparison preserves changed bytes rather than bl
   missing.entries.pop();
   expect(() => assertChatwootPhaseProviderLedger(missing, "gap")).toThrow(/incomplete or outside/);
   const extra = structuredClone(original);
-  extra.entries.push({ ...extra.entries[27], sequence: 29 });
+  extra.entries.push({ ...extra.entries[26], sequence: 29 });
   expect(() => assertChatwootPhaseProviderLedger(extra, "gap")).toThrow(/incomplete or outside/);
+});
+
+test("Chatwoot phase ledger accepts one exact adjacent contact probe retry", () => {
+  const original = strictProviderFixture("gap");
+  const retried = structuredClone(original);
+  retried.entries.splice(18, 0, { ...structuredClone(original.entries[17]), sequence: 19 });
+  retried.entries.forEach((entry, index) => { entry.sequence = index + 1; });
+
+  expect(assertChatwootPhaseProviderLedger(retried, "gap").entries)
+    .toEqual(original.entries);
+
+  const changed = structuredClone(retried);
+  changed.entries[18].credential_contract.header_names = [];
+  expect(() => assertChatwootPhaseProviderLedger(changed, "gap"))
+    .toThrow(/incomplete or outside|exact endpoint contract|credential projection/);
 });
 
 // Actual interleavings from run 34059555047. Numbers identify entries in

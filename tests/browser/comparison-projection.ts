@@ -770,11 +770,81 @@ function projectJourneyProviderReadinessNoise(manifest: Record<string, unknown>)
     }
     retained.push(entry);
   }
-  canonicalizeExactConcurrentCabinetReads(manifest, retained);
-  providerEffects.entries = retained.map((entry, index) => ({
+  const withoutInterleavedReadiness = removeInterleavedExactEnrichedReadinessCycles(retained);
+  canonicalizeExactConcurrentCabinetReads(manifest, withoutInterleavedReadiness);
+  providerEffects.entries = withoutInterleavedReadiness.map((entry, index) => ({
     ...entry,
     sequence: index + 1,
   }));
+}
+
+function removeInterleavedExactEnrichedReadinessCycles(
+  entries: Array<Record<string, unknown>>,
+) {
+  let retained = [...entries];
+  while (true) {
+    const positions = interleavedExactEnrichedReadinessCyclePositions(retained);
+    if (!positions) return retained;
+    const removed = new Set(positions);
+    retained = retained.filter((_, index) => !removed.has(index));
+  }
+}
+
+function interleavedExactEnrichedReadinessCyclePositions(
+  entries: Array<Record<string, unknown>>,
+) {
+  const emailStart = entries.findIndex((entry) => (
+    exactEnrichedReadinessKind(entry) === "/api/v1/public/auth/email/start"
+  ));
+  if (emailStart < 0) return null;
+  const identify = findExactReadinessKindAfter(
+    entries,
+    "/api/v1/public/auth/identify",
+    emailStart,
+  );
+  const serviceSession = findExactReadinessKindAfter(
+    entries,
+    "/api/v1/public/auth/service-session",
+    identify,
+  );
+  const notificationPreferences = findExactReadinessKindAfter(
+    entries,
+    "/api/v1/public/auth/notification-preferences",
+    serviceSession,
+  );
+  if (identify < 0 || serviceSession < 0 || notificationPreferences < 0) return null;
+  const plans = entries.findIndex((entry, index) => (
+    index < emailStart && exactEnrichedReadinessKind(entry) === "plans"
+  ));
+  if (plans < 0) return null;
+  const metadata = entries.findIndex((entry) => (
+    exactEnrichedReadinessKind(entry) === "metadata"
+  ));
+  const jwks = entries.findIndex((entry) => (
+    exactEnrichedReadinessKind(entry) === "jwks"
+  ));
+  if (metadata < 0 || jwks < 0) return null;
+  const positions = [
+    plans,
+    metadata,
+    jwks,
+    emailStart,
+    identify,
+    serviceSession,
+    notificationPreferences,
+  ];
+  return new Set(positions).size === positions.length ? positions : null;
+}
+
+function findExactReadinessKindAfter(
+  entries: Array<Record<string, unknown>>,
+  kind: string,
+  after: number,
+) {
+  if (after < 0) return -1;
+  return entries.findIndex((entry, index) => (
+    index > after && exactEnrichedReadinessKind(entry) === kind
+  ));
 }
 
 function canonicalizeExactConcurrentCabinetReads(
@@ -1496,6 +1566,7 @@ function projectStaticDomAssetReferences(manifest: Record<string, unknown>) {
         attributeValue.value = projectHashedStaticPath(attributeValue.value)
           ?? attributeValue.value;
       }
+      projectPrimeReactGeneratedAttributeNames(node.attributes);
     }
     if (!Array.isArray(node.children)) return;
     for (const child of node.children) {
@@ -1504,6 +1575,20 @@ function projectStaticDomAssetReferences(manifest: Record<string, unknown>) {
   };
 
   visit(dom);
+}
+
+function projectPrimeReactGeneratedAttributeNames(attributes: unknown[]) {
+  for (const attributeValue of attributes) {
+    if (
+      !isRecord(attributeValue)
+      || typeof attributeValue.name !== "string"
+      || !/^pr_id_\d+$/.test(attributeValue.name)
+      || attributeValue.value !== ""
+    ) {
+      continue;
+    }
+    attributeValue.name = "pr_id_<generated>";
+  }
 }
 
 function projectSuccessfulHashedStaticAsset(request: Record<string, unknown>) {
