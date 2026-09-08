@@ -3429,7 +3429,7 @@ function assertProviderLedger(value: unknown, phase: Phase): ProviderLedger {
     : initialProviderEffectSequence;
   if (!Array.isArray(ledger.entries)
     || ledger.entries.length < expectedEffects.length
-    || ledger.entries.length > expectedEffects.length + 1) {
+    || ledger.entries.length > expectedEffects.length + 8) {
     throw new Error("Chatwoot provider ledger is incomplete or outside its bound.");
   }
   const database = assertProviderDatabase(ledger.database);
@@ -3519,13 +3519,102 @@ function normalizeProviderLedgerEntries(
   expectedLength: number,
 ) {
   if (entries.length === expectedLength) return entries;
+  let normalized = entries;
   const duplicateIndex = adjacentDuplicateContactProbeIndex(entries);
-  if (duplicateIndex === null) {
+  if (duplicateIndex !== null) {
+    normalized = resequenceProviderEntries(
+      normalized.filter((_, index) => index !== duplicateIndex),
+    );
+  }
+  while (normalized.length > expectedLength) {
+    const cycleStart = trailingReadinessCycleIndex(normalized, expectedLength);
+    if (cycleStart === null) {
+      break;
+    }
+    normalized = resequenceProviderEntries(
+      normalized.filter((_, index) => index < cycleStart || index >= cycleStart + 7),
+    );
+  }
+  if (normalized.length !== expectedLength) {
     throw new Error("Chatwoot provider ledger is incomplete or outside its bound.");
   }
-  return entries
-    .filter((_, index) => index !== duplicateIndex)
-    .map((entry, index) => Object.freeze({ ...entry, sequence: index + 1 }));
+  return normalized;
+}
+
+function resequenceProviderEntries(entries: Array<Record<string, unknown>>) {
+  return entries.map((entry, index) => Object.freeze({ ...entry, sequence: index + 1 }));
+}
+
+function trailingReadinessCycleIndex(
+  entries: Array<Record<string, unknown>>,
+  expectedLength: number,
+) {
+  for (let index = expectedLength; index <= entries.length - 7; index += 1) {
+    if (isExactProviderReadinessCycle(entries, index)) return index;
+  }
+  return null;
+}
+
+function isExactProviderReadinessCycle(
+  entries: Array<Record<string, unknown>>,
+  startIndex: number,
+) {
+  const cycle = entries.slice(startIndex, startIndex + 7);
+  if (cycle.length !== 7) return false;
+  const firstSequence = cycle[0]?.sequence;
+  if (!Number.isSafeInteger(firstSequence)) return false;
+  if (!cycle.every((entry, index) => entry.sequence === Number(firstSequence) + index)) {
+    return false;
+  }
+  const kinds = cycle.map(exactProviderReadinessKind);
+  return kinds.every((kind): kind is string => kind !== null)
+    && new Set(kinds).size === 7;
+}
+
+function exactProviderReadinessKind(entry: Record<string, unknown>) {
+  if (entry.service === "remnashop"
+    && entry.method === "GET"
+    && entry.pathname === "/api/v1/public/plans/public"
+    && entry.effect === "read_public_plans"
+    && stableJson(entry.credential_contract) === stableJson({
+      authorization_scheme: null,
+      cookie_names: [],
+      header_names: [],
+    })) return "plans";
+  if (entry.service === "remnawave"
+    && entry.method === "GET"
+    && entry.pathname === "/api/system/metadata"
+    && entry.effect === "read_metadata"
+    && stableJson(entry.credential_contract) === stableJson({
+      authorization_scheme: "Bearer",
+      cookie_names: [],
+      header_names: ["authorization"],
+    })) return "metadata";
+  if (entry.service === "telegram-oidc"
+    && entry.method === "GET"
+    && entry.pathname === "/.well-known/jwks.json"
+    && entry.effect === "jwks_read") return "jwks";
+  if (entry.service !== "remnashop"
+    || entry.method !== "POST"
+    || entry.effect !== "probe_contract"
+    || entry.body_bytes !== 2
+    || entry.body_sha256 !== sha256Text("{}")
+    || stableJson(entry.body_contract) !== stableJson({ encoding: "json", value: {} })
+    || stableJson(entry.credential_contract) !== stableJson({
+      authorization_scheme: null,
+      cookie_names: [],
+      header_names: ["x-remnashop-auth-service-key"],
+    })) {
+    return null;
+  }
+  return [
+    "/api/v1/public/auth/email/start",
+    "/api/v1/public/auth/identify",
+    "/api/v1/public/auth/service-session",
+    "/api/v1/public/auth/notification-preferences",
+  ].includes(String(entry.pathname))
+    ? String(entry.pathname)
+    : null;
 }
 
 function adjacentDuplicateContactProbeIndex(entries: Array<Record<string, unknown>>) {
