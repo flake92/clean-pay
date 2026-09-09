@@ -1240,6 +1240,24 @@ export function isProviderOverlapPlaywrightBodyCdpResponse(event) {
     || opaquePattern.test(url.searchParams.get("cw_conversation") ?? "");
 }
 
+function readProviderOverlapResponseContentType(response) {
+  const readFallback = () => {
+    try {
+      return response.headers()["content-type"] ?? null;
+    } catch {
+      return null;
+    }
+  };
+  if (typeof response.headerValue !== "function") {
+    return Promise.resolve(readFallback());
+  }
+  try {
+    return Promise.resolve(response.headerValue("content-type")).catch(readFallback);
+  } catch {
+    return Promise.resolve(readFallback());
+  }
+}
+
 export async function captureProviderOverlapResponseEvidence(input) {
   const hasReadBody = Boolean(input && typeof input === "object" && !Array.isArray(input)
     && Object.hasOwn(input, "readBody"));
@@ -1273,9 +1291,7 @@ export async function captureProviderOverlapResponseEvidence(input) {
   // Playwright's synchronous headers() view may still contain provisional
   // redirect headers. Pre-arm only the exact raw Content-Type lookup at the
   // response event and settle it after the matching request terminal event.
-  const responseContentTypePromise = typeof response.headerValue === "function"
-    ? Promise.resolve(response.headerValue("content-type"))
-    : Promise.resolve(response.headers()["content-type"] ?? null);
+  const responseContentTypePromise = readProviderOverlapResponseContentType(response);
   void responseContentTypePromise.catch(() => undefined);
   const isRedirectResponse = responseStatus >= 300 && responseStatus <= 399;
   const bodyKind = responseStatus === 200 && classification.staticPath !== null
@@ -1690,19 +1706,25 @@ export function validateProviderOverlapSemanticLedger(value, label = "semantic b
         entry.redirectEdge,
       );
       const sourceKey = match ? `${match.groups.source}:${match.groups.status}` : "";
+      const pendingSources = pendingRedirectSources.get(sourceKey) ?? [];
       if (!match || match.groups.target !== entry.key
-        || (pendingRedirectSources.get(sourceKey) ?? 0) < 1) {
+        || pendingSources.length < 1) {
         fail(`${label} redirect successor ${index} has no exact prior source.`);
       }
-      pendingRedirectSources.set(sourceKey, pendingRedirectSources.get(sourceKey) - 1);
+      pendingSources.shift();
+      if (pendingSources.length === 0) pendingRedirectSources.delete(sourceKey);
+      else pendingRedirectSources.set(sourceKey, pendingSources);
     }
     if (Number.isSafeInteger(entry.responseStatus)
       && entry.responseStatus >= 300 && entry.responseStatus <= 399) {
       const sourceKey = `${entry.key}:${entry.responseStatus}`;
-      pendingRedirectSources.set(sourceKey, (pendingRedirectSources.get(sourceKey) ?? 0) + 1);
+      const pendingSources = pendingRedirectSources.get(sourceKey) ?? [];
+      pendingSources.push(entry);
+      pendingRedirectSources.set(sourceKey, pendingSources);
     }
   }
-  if ([...pendingRedirectSources.values()].some((count) => count !== 0)) {
+  const unconsumedRedirectSources = [...pendingRedirectSources.values()].flat();
+  if (unconsumedRedirectSources.some((entry) => !isExactTerminalProviderOverlapRedirect(entry))) {
     fail(`${label} contains a redirect source without one exact successor.`);
   }
   if ((counts["turnstile-widget-script"] ?? 0) < 1
@@ -1713,6 +1735,18 @@ export function validateProviderOverlapSemanticLedger(value, label = "semantic b
     fail(`${label} external request relation is invalid.`);
   }
   return Object.freeze(ledger);
+}
+
+export function isExactTerminalProviderOverlapRedirect(entry) {
+  return entry
+    && typeof entry === "object"
+    && !Array.isArray(entry)
+    && typeof entry.key === "string"
+    && entry.key.endsWith("-rsc")
+    && entry.redirectEdge === null
+    && entry.responseStatus === 307
+    && expectedContentTypes(entry.key, entry.responseStatus).includes(entry.responseContentType)
+    && entry.responseFailureSha256 === null;
 }
 
 export function finalizeProviderOverlapHistoryContract(records, finalFrame) {

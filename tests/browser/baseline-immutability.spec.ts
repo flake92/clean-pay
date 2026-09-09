@@ -4,7 +4,7 @@ import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import { expect, test, type Page, type Request } from "@playwright/test";
+import { expect, test, type Page, type Request, type Response } from "@playwright/test";
 
 import {
   BEHAVIORAL_BASELINE_COMMIT,
@@ -420,6 +420,37 @@ test.describe("immutable browser baseline policy", () => {
     expect(action?.response).toBeNull();
     expect(action?.failure).toBeNull();
     expect(entries).toHaveLength(4);
+  });
+
+  test("records a response header read error when allHeaders throws synchronously", async () => {
+    const applicationOrigin = "https://response-header-read.test";
+    const pageDouble = networkRecorderPageDouble(applicationOrigin);
+    const recorder = recordNetwork(pageDouble.page, applicationOrigin, {
+      serverActionTerminalTimeoutMs: 1_000,
+    });
+    const request = networkRecorderRequestDouble({
+      frame: pageDouble.mainFrame,
+      headers: { "next-action": "synthetic-action" },
+      method: "POST",
+      postData: Buffer.from("synthetic-payload"),
+      resourceType: "fetch",
+      url: `${applicationOrigin}/action`,
+    });
+    pageDouble.emitRequest(request);
+    pageDouble.emitResponse(networkRecorderResponseDouble({
+      headers: () => {
+        throw new Error("synthetic allHeaders failure");
+      },
+      request,
+      url: `${applicationOrigin}/action`,
+    }));
+    pageDouble.emitRequestFinished(request);
+
+    const entries = await recorder.finish();
+    expect(entries).toHaveLength(1);
+    expect(entries[0].response?.status).toBe(200);
+    expect(entries[0].response?.headers).toHaveLength(1);
+    expect(entries[0].response?.headers[0].name).toBe("<header-read-error>");
   });
 
   test("rejects non-canonical Server Action superseding navigation origins", () => {
@@ -2664,6 +2695,9 @@ function networkRecorderPageDouble(initialUrl: string) {
     emitRequestFinished(request: Request) {
       events.emit("requestfinished", request);
     },
+    emitResponse(response: Response) {
+      events.emit("response", response);
+    },
     mainFrame,
     page,
   };
@@ -2691,4 +2725,20 @@ function networkRecorderRequestDouble(input: {
     resourceType: () => input.resourceType,
     url: () => input.url,
   } as unknown as Request;
+}
+
+function networkRecorderResponseDouble(input: {
+  headers?: () => Promise<Record<string, string>>;
+  request: Request;
+  url: string;
+}) {
+  return {
+    allHeaders: input.headers ?? (async () => ({})),
+    finished: async () => null,
+    fromServiceWorker: () => false,
+    request: () => input.request,
+    status: () => 200,
+    statusText: () => "OK",
+    url: () => input.url,
+  } as unknown as Response;
 }
