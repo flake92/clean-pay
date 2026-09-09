@@ -51,6 +51,7 @@ import {
   finalizeProviderOverlapHistoryContract,
   installProviderOverlapHistoryInstrumentation,
   isProviderOverlapPlaywrightBodyCdpResponse,
+  normalizeProviderOverlapRequestContractSemanticLedger,
   normalizeProviderOverlapSemanticEntry,
   normalizeProviderOverlapObservedResponseContentType,
   providerOverlapChatwootIdentityBoundarySettled,
@@ -1597,10 +1598,18 @@ test("rejects arbitrary same-host paths, queries, redirects, methods, and transp
     "https://pay.ci.clean-pay.dev/login?redirect_to=%2Fprofile&_rsc=opaque-state_1",
     { resourceType: "fetch" },
   );
+  const profileAction = browserClassification("https://pay.ci.clean-pay.dev/profile", {
+    method: "POST", resourceType: "fetch",
+  });
+  const cabinetRootRsc = browserClassification("https://pay.ci.clean-pay.dev/?_rsc=opaque-state_2", {
+    resourceType: "fetch",
+  });
   expect(rootRsc.key).toBe("app-root-rsc");
   expect(loginRootRedirect.key).toBe("app-login-root-rsc");
   expect(loginRootRsc.key).toBe("app-login-root-rsc");
   expect(loginProfileRsc.key).toBe("app-login-rsc");
+  expect(profileAction.key).toBe("app-profile-action");
+  expect(cabinetRootRsc.key).toBe("app-root-rsc");
   expect(assertProviderOverlapRedirect({
     from: { classification: rootRsc, url: "https://pay.ci.clean-pay.dev/?_rsc=opaque-state_1" },
     location: "/login?redirect_to=%2F",
@@ -1787,6 +1796,66 @@ test("rejects arbitrary same-host paths, queries, redirects, methods, and transp
     .not.toEqual(lastAbortedRootPrefetchContract.semanticRequestLedger);
   expect(optionalAbortedRootPrefetchContract.requestContractSha256)
     .toBe(lastAbortedRootPrefetchContract.requestContractSha256);
+  const profileActionAbortRecords = structuredClone(rootPrefetchRecords);
+  const cabinetDocumentIndex = profileActionAbortRecords.findIndex((record) => (
+    record.classification.key === "app-cabinet-document"
+  ));
+  profileActionAbortRecords.splice(
+    cabinetDocumentIndex,
+    0,
+    requestRecord(profileAction, "app-profile-document", 200, "text/x-component"),
+    requestRecord(cabinetRootRsc, "app-profile-document", 200, "text/x-component"),
+    requestRecord(chatwootSdk, "app-profile-document", 200, "application/javascript"),
+    requestRecord(chatwootWidget, "app-profile-document", 200, "text/html"),
+    requestRecord(cabinetRootRsc, "app-profile-document", 200, "text/x-component"),
+    requestRecord(
+      profileAction,
+      "app-profile-document",
+      200,
+      "text/x-component",
+      null,
+      sha256("net::ERR_ABORTED"),
+    ),
+  );
+  const firstProfileActionAbortRecords = structuredClone(profileActionAbortRecords);
+  const firstProfileActionIndex = firstProfileActionAbortRecords.findIndex((record) => (
+    record.classification.key === "app-profile-action"
+  ));
+  firstProfileActionAbortRecords[firstProfileActionIndex].responseFailureSha256 =
+    sha256("net::ERR_ABORTED");
+  const lastProfileActionIndex = firstProfileActionAbortRecords.findLastIndex((record) => (
+    record.classification.key === "app-profile-action"
+  ));
+  firstProfileActionAbortRecords[lastProfileActionIndex].responseFailureSha256 = null;
+  const firstProfileActionAbortContract = finalizeProviderOverlapBrowserContract(
+    firstProfileActionAbortRecords,
+    staticLoadGraph,
+  );
+  const lastProfileActionAbortContract = finalizeProviderOverlapBrowserContract(
+    profileActionAbortRecords,
+    staticLoadGraph,
+  );
+  expect(firstProfileActionAbortContract.semanticRequestLedger)
+    .not.toEqual(lastProfileActionAbortContract.semanticRequestLedger);
+  expect(firstProfileActionAbortContract.requestContractSha256)
+    .toBe(lastProfileActionAbortContract.requestContractSha256);
+  const frameBeforeRootLedger = lastProfileActionAbortContract.semanticRequestLedger;
+  const rootBeforeFrameLedger = [...frameBeforeRootLedger];
+  const frameIndex = rootBeforeFrameLedger.findLastIndex((entry) => (
+    (entry as { key?: unknown }).key === "chatwoot-widget-frame"
+  ));
+  const frameEntry = rootBeforeFrameLedger[frameIndex];
+  const nextEntry = rootBeforeFrameLedger[frameIndex + 1];
+  if (frameEntry === undefined || nextEntry === undefined) {
+    throw new Error("Provider overlap frame/root regression pair is incomplete.");
+  }
+  expect((frameEntry as { key?: unknown }).key).toBe("chatwoot-widget-frame");
+  expect((nextEntry as { key?: unknown }).key).toBe("app-root-rsc");
+  rootBeforeFrameLedger[frameIndex] = nextEntry;
+  rootBeforeFrameLedger[frameIndex + 1] = frameEntry;
+  expect(rootBeforeFrameLedger).not.toEqual(frameBeforeRootLedger);
+  expect(normalizeProviderOverlapRequestContractSemanticLedger(rootBeforeFrameLedger))
+    .toEqual(normalizeProviderOverlapRequestContractSemanticLedger(frameBeforeRootLedger));
   const forgedAbortedRootPrefetchRecords = structuredClone(exactAbortedRootPrefetchRecords);
   forgedAbortedRootPrefetchRecords[exactAbortedRootPrefetchIndex].responseFailureSha256 =
     sha256("net::ERR_FAILED");
