@@ -126,6 +126,16 @@ warm_next_routes() {
       --output /dev/null \
       "$base_url$route"
   done
+
+  # The retired transport paths must answer 404, which still compiles the
+  # not-found route on first request. Warm one of them without --fail so the
+  # expected 404 does not abort this script under `set -e`.
+  echo "Warming Next.js not-found route: /api/me"
+  curl --silent --show-error \
+    --connect-timeout 5 \
+    --max-time 45 \
+    --output /dev/null \
+    "$base_url/api/me" || true
 }
 
 container_image_id() {
