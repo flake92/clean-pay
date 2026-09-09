@@ -2495,8 +2495,11 @@ test("keeps page-startup requests outside the measured provider event lifecycle"
     .toBeLessThan(terminalSource.indexOf("if (!entry) return;"));
   const routeSource = source.slice(routeHandler, preLedgerRelease);
   expect(routeSource).toMatch(
-    /const request = route\.request\(\);[\s\S]{1,256}if \(preLedgerRequestIdentities\.has\(request\)\s*&& !browserRequestPreparationByIdentity\.has\(request\)\) \{[\s\S]{1,256}await route\.abort\("blockedbyclient"\);[\s\S]{1,256}return;[\s\S]{1,256}const finishRoute = beginBrowserEvent\("route"\);/,
+    /const request = route\.request\(\);[\s\S]{1,256}if \(preLedgerRequestIdentities\.has\(request\)\s*&& !browserRequestPreparationByIdentity\.has\(request\)\) \{[\s\S]{1,256}await route\.abort\("blockedbyclient"\);[\s\S]{1,256}return;[\s\S]{1,256}let finishRoute = null;/,
   );
+  expect(routeSource.indexOf('"route-preparation-missing"'))
+    .toBeLessThan(routeSource.indexOf('finishRoute = beginBrowserEvent("route")'));
+  expect(routeSource).toContain("finishRoute?.();");
 });
 
 test("lazily prepares only a response identity that has no prior preparation", () => {
