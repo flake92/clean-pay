@@ -109,6 +109,33 @@ describe("checkout and navigation application policy", () => {
     });
   });
 
+  it("never tells a user to retry an outcome that was settled as final", async () => {
+    // A final code discards the idempotency key, so the default message --
+    // "Повторите попытку с тем же запросом" -- would ask for something the
+    // operation can no longer accept. Observed live: a Remnashop 422 settled
+    // the operation FAILED_FINAL while the page invited a retry.
+    for (const code of [
+      "OFFER_CHANGED",
+      "PLAN_UNAVAILABLE",
+      "PAYMENT_GATEWAY_UNAVAILABLE",
+      "IDEMPOTENCY_KEY_INVALID",
+      "IDEMPOTENCY_KEY_REUSED",
+      "VALIDATION_ERROR",
+    ]) {
+      const commands = {
+        purchase: vi.fn(async () => { throw Object.assign(new Error("upstream"), { code }); }),
+        extend: vi.fn(),
+      } as unknown as PaymentCommands;
+      const result = await executePayment(commands, {
+        kind: "purchase", request, idempotencyKey: "key-1",
+      });
+
+      expect(result, code).toMatchObject({ ok: false, code, retainIdempotencyKey: false });
+      expect((result as { message: string }).message, code)
+        .not.toContain("тем же запросом");
+    }
+  });
+
   it("asks for a fresh page after rejecting an invalid idempotency key", async () => {
     const commands = {
       purchase: vi.fn(async () => { throw Object.assign(new Error("invalid key"), { code: "IDEMPOTENCY_KEY_INVALID" }); }),
