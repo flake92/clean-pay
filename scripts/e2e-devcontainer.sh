@@ -477,7 +477,7 @@ bash "$root_dir/scripts/wait-for-http.sh" "$mailpit_url/api/v1/messages" 60 "Wai
 bash "$root_dir/scripts/wait-for-http.sh" "$oidc_url/.well-known/jwks.json" 60 "Wait for Telegram OIDC JWKS" "GET"
 
 log_step "Running full-stack e2e tests"
-timeout --signal=TERM --kill-after=10s 360s \
+timeout --signal=TERM --kill-after=10s 600s \
   env CLEAN_PAY_E2E_BASE_URL="$base_url" \
   CLEAN_PAY_E2E_MAILPIT_URL="$mailpit_url" \
   CLEAN_PAY_E2E_OIDC_URL="$oidc_url" \

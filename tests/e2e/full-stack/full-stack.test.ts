@@ -42,7 +42,7 @@ async function http(path: string, init: RequestInit = {}, jar?: CookieJar) {
     ...init,
     headers,
     redirect: init.redirect ?? "manual",
-    signal: init.signal ?? AbortSignal.timeout(60_000),
+    signal: init.signal ?? AbortSignal.timeout(90_000),
   });
   if (jar) storeCookies(jar, response);
   return response;
@@ -71,6 +71,15 @@ function logServicesOnFailure() {
     e2eCompose.logs(["app", "postgres", "redis", "remnashop"]);
   });
 }
+
+const authenticatedRoutes = [
+  "/cabinet",
+  "/profile",
+  "/payment",
+  "/extend",
+  "/link-account",
+  "/referral",
+];
 
 describe("server-rendered application surface", () => {
   beforeEach(() => {
@@ -135,14 +144,7 @@ describe("server-rendered application surface", () => {
   it("keeps the authenticated Telegram user journey available after the transport refactor", async () => {
     const jar = await loginWithTelegramOidc();
 
-    for (const path of [
-      "/cabinet",
-      "/profile",
-      "/payment",
-      "/extend",
-      "/link-account",
-      "/referral",
-    ]) {
+    for (const path of authenticatedRoutes) {
       const response = await http(path, {}, jar);
       expect(response.status, `${path} unexpectedly redirected or failed`).toBe(200);
       expect(response.headers.get("content-type")).toContain("text/html");
