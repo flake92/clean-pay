@@ -53,8 +53,41 @@ esac
 # This metadata-only guard deliberately runs before the first Docker access.
 # It rejects a missing, symlinked, non-regular, broadly readable or wrongly
 # owned host credential source without ever printing or reading its contents.
-command -v node >/dev/null 2>&1 || fail "node is required for credential metadata preflight"
-node "$script_dir/remnashop-env-preflight.mjs" \
+# README promises the server needs no Node installation, and every other
+# Node step in deploy.sh already falls back to a pinned container when the
+# host has no node. This step used to simply abort instead, which made a
+# documented clean install impossible on a Node-less host. Mirror that
+# fallback: the guard only stats the credential file and its directory, so a
+# read-only bind mount at the identical absolute path reports the same owner
+# and mode, and the contents are still never read.
+node_tooling_image=${NODE_TOOLING_IMAGE:-node:24.18.0-bookworm-slim@sha256:6f7b03f7c2c8e2e784dcf9295400527b9b1270fd37b7e9a7285cf83b6951452d}
+root_dir=$(CDPATH= cd -- "$script_dir/../.." && pwd)
+remnashop_env_dir=$(dirname -- "$remnashop_env_file")
+
+run_credential_preflight() {
+  if command -v node >/dev/null 2>&1; then
+    node "$script_dir/remnashop-env-preflight.mjs" "$@"
+    return
+  fi
+
+  command -v docker >/dev/null 2>&1 \
+    || fail "either node or docker is required for the credential metadata preflight"
+
+  docker run --rm --read-only --network none \
+    --cap-drop ALL \
+    --security-opt no-new-privileges \
+    --pids-limit 32 \
+    --memory 128m \
+    --cpus 0.25 \
+    --user "$(id -u):$(id -g)" \
+    --mount "type=bind,source=$root_dir,target=/workspace,readonly" \
+    --mount "type=bind,source=$remnashop_env_dir,target=$remnashop_env_dir,readonly" \
+    --workdir /workspace \
+    "$node_tooling_image" \
+    node deploy/prod/remnashop-env-preflight.mjs "$@"
+}
+
+run_credential_preflight \
   "$remnashop_env_file" \
   "$remnashop_env_expected_uid" \
   "$remnashop_env_expected_gid" \

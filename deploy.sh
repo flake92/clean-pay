@@ -15,6 +15,9 @@ CREDENTIAL_FILE_GUARD_SCRIPT="$ROOT_DIR/deploy/prod/credential-file-guard.mjs"
 OPERATION_LOCK_SCRIPT="$ROOT_DIR/deploy/prod/production-operation-lock.mjs"
 OPERATION_LOCK_PATH="$ROOT_DIR/deploy/prod/.production-operation.lock"
 NODE_TOOLING_IMAGE="node:24.18.0-bookworm-slim@sha256:6f7b03f7c2c8e2e784dcf9295400527b9b1270fd37b7e9a7285cf83b6951452d"
+# Exported so the Remnashop rollout preflight, which runs as its own sh
+# script, pins the identical tooling image instead of its own copy.
+export NODE_TOOLING_IMAGE
 APP_ENV_FILE="${ENV_FILE}.app"
 HOLD_OPERATOR_ENV_FILE="${ENV_FILE}.hold-operator"
 MIGRATION_ENV_FILE="${ENV_FILE}.migration"
