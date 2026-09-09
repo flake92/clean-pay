@@ -6,7 +6,10 @@ import {
   JOURNEY_COMPOSE_ONE_SHOT_SERVICE_NAMES,
   JOURNEY_COMPOSE_SERVICE_NAMES,
 } from "./journey-compose-runtime-attestation.mjs";
-import { validateProviderOverlapSemanticLedger } from "./provider-overlap-browser-contract.mjs";
+import {
+  normalizeProviderOverlapRequestContractSemanticLedger,
+  validateProviderOverlapSemanticLedger,
+} from "./provider-overlap-browser-contract.mjs";
 
 export const PROVIDER_OVERLAP_PROOF_KIND = "clean-pay-dual-image-provider-overlap-proof";
 export const PROVIDER_OVERLAP_PROOF_SCHEMA_VERSION = 1;
@@ -2129,7 +2132,13 @@ function assertSerializedRequestAndStaticBinding(
   for (const required of ["next-static-css", "next-static-font", "next-static-js"]) {
     if (!staticClasses.includes(required)) fail(`${label} static class closure is incomplete.`);
   }
-  const summary = { version: 1, semanticLedger, staticClasses };
+  const requestContractSemanticLedger =
+    normalizeProviderOverlapRequestContractSemanticLedger(semanticLedger);
+  const summary = {
+    version: 1,
+    semanticLedger: requestContractSemanticLedger,
+    staticClasses,
+  };
   equal(
     navigation.requestContractSha256,
     sha256(JSON.stringify(summary)),

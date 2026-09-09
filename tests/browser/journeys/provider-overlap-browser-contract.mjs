@@ -2110,9 +2110,11 @@ export function finalizeProviderOverlapBrowserContract(records, loadGraph) {
     ),
   });
 
+  const requestContractSemanticLedger =
+    normalizeProviderOverlapRequestContractSemanticLedger(semanticLedger);
   const summary = {
     version: 1,
-    semanticLedger,
+    semanticLedger: requestContractSemanticLedger,
     staticClasses: [...staticKeys].filter((key) => counts[key] > 0).sort(),
   };
   return Object.freeze({
@@ -2127,6 +2129,48 @@ export function finalizeProviderOverlapBrowserContract(records, loadGraph) {
     staticRequestCount: staticLedger.length,
     staticRequestLedger: Object.freeze(staticLedger.map(Object.freeze)),
   });
+}
+
+export function normalizeProviderOverlapRequestContractSemanticLedger(semanticLedger) {
+  const normalized = semanticLedger.map((entry) => ({ ...entry }));
+  for (let index = 0; index < normalized.length;) {
+    const entry = normalized[index];
+    if (entry.key !== "app-login-root-rsc"
+      || entry.responseStatus !== 200
+      || entry.responseContentType !== "text/x-component") {
+      index += 1;
+      continue;
+    }
+    let end = index + 1;
+    while (end < normalized.length
+      && normalized[end].key === "app-login-root-rsc"
+      && normalized[end].responseStatus === 200
+      && normalized[end].responseContentType === "text/x-component") {
+      end += 1;
+    }
+    const group = normalized.slice(index, end);
+    const exactAbortIndexes = group
+      .map((groupEntry, offset) => (
+        groupEntry.responseFailureSha256 === providerOverlapResponseBackedAbortFailureSha256
+          ? offset
+          : -1
+      ))
+      .filter((offset) => offset >= 0);
+    if (group.length > 1
+      && exactAbortIndexes.length === 1
+      && group.every((groupEntry) => (
+        groupEntry.responseFailureSha256 === null
+        || groupEntry.responseFailureSha256 === providerOverlapResponseBackedAbortFailureSha256
+      ))) {
+      for (let offset = 0; offset < group.length; offset += 1) {
+        normalized[index + offset].responseFailureSha256 = null;
+      }
+      normalized[end - 1].responseFailureSha256 =
+        providerOverlapResponseBackedAbortFailureSha256;
+    }
+    index = end;
+  }
+  return Object.freeze(normalized.map((entry) => Object.freeze(entry)));
 }
 
 function classifyApplicationRequest(descriptor, input, url, state) {

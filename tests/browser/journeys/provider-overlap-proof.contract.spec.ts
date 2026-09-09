@@ -1759,6 +1759,26 @@ test("rejects arbitrary same-host paths, queries, redirects, methods, and transp
     key: "app-login-root-rsc",
     responseFailureSha256: sha256("net::ERR_ABORTED"),
   }));
+  const firstAbortedRootPrefetchRecords = structuredClone(rootPrefetchRecords);
+  const exactFirstAbortedRootPrefetchIndex = firstAbortedRootPrefetchRecords.findIndex((
+    record,
+  ) => (
+    record.classification.key === "app-login-root-rsc" && record.responseStatus === 200
+  ));
+  firstAbortedRootPrefetchRecords[exactFirstAbortedRootPrefetchIndex].responseFailureSha256 =
+    sha256("net::ERR_ABORTED");
+  const firstAbortedRootPrefetchContract = finalizeProviderOverlapBrowserContract(
+    firstAbortedRootPrefetchRecords,
+    staticLoadGraph,
+  );
+  const lastAbortedRootPrefetchContract = finalizeProviderOverlapBrowserContract(
+    exactAbortedRootPrefetchRecords,
+    staticLoadGraph,
+  );
+  expect(firstAbortedRootPrefetchContract.semanticRequestLedger)
+    .not.toEqual(lastAbortedRootPrefetchContract.semanticRequestLedger);
+  expect(firstAbortedRootPrefetchContract.requestContractSha256)
+    .toBe(lastAbortedRootPrefetchContract.requestContractSha256);
   const forgedAbortedRootPrefetchRecords = structuredClone(exactAbortedRootPrefetchRecords);
   forgedAbortedRootPrefetchRecords[exactAbortedRootPrefetchIndex].responseFailureSha256 =
     sha256("net::ERR_FAILED");
