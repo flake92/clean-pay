@@ -152,7 +152,7 @@ export function recordNetwork(
       serverActionGeneration += 1;
     }
     pending.push(captureBoundedHeaders(
-      request.allHeaders(),
+      () => request.allHeaders(),
       (headers) => {
           entry.requestHeaders = sanitizeHeaders(
             headers,
@@ -173,7 +173,7 @@ export function recordNetwork(
     const entry = requests.get(response.request());
     if (!entry) return;
     const headerCapture = captureBoundedHeaders(
-      response.allHeaders(),
+      () => response.allHeaders(),
       (headers) => {
           entry.response = {
             status: response.status(),
@@ -570,7 +570,7 @@ function exactHttpOrigin(value: string, name: string) {
 }
 
 function captureBoundedHeaders<T>(
-  operation: Promise<T>,
+  operation: () => Promise<T>,
   success: (value: T) => void,
   failure: (reason: string) => void,
 ) {
@@ -586,7 +586,14 @@ function captureBoundedHeaders<T>(
     const timer = setTimeout(() => {
       finish(() => failure("bounded header read timeout"));
     }, 5_000);
-    operation.then(
+    let pending: Promise<T>;
+    try {
+      pending = operation();
+    } catch (error: unknown) {
+      finish(() => failure(error instanceof Error ? error.message : String(error)));
+      return;
+    }
+    pending.then(
       (value) => finish(() => success(value)),
       (error: unknown) => finish(() => failure(
         error instanceof Error ? error.message : String(error),

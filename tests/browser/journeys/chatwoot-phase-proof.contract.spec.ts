@@ -1691,6 +1691,17 @@ test("keeps Chatwoot capture failures bound to one bounded coarse stage", async 
   expect(source).toContain("let captureStage: CaptureStage = \"browser-context\"");
   expect(source).toContain("let captureCheckpoint: CaptureCheckpoint = null");
   expect(source).toContain("checkpoint: captureCheckpoint");
+  expect(source).toContain("\"stable-wait-full-identity\"");
+  expect(source).toContain("await waitForFullChatwootIdentityState(page);");
+  expect(source).toContain("\"stable-wait-browser-ledger-idle\"");
+  expect(source).toContain("await waitForStrictBrowserRequestLedgerIdle(ledgers.initial);");
+  expect(source).toContain("createProviderOverlapCdpResponseBodyCapture");
+  expect(source).toContain('await responseBodyCdp.send("Network.enable", {');
+  expect(source).toContain("enableDurableMessages: true");
+  expect(source).toContain("readChatwootDurableResponseBody(");
+  expect(source).toContain("cdpResponseBodyCapture,");
+  expect(source).toContain('!classification.key.endsWith("-action")');
+  expect(source).toContain("causeMessage: sanitizeChatwootCaptureCauseMessage(error)");
   expect(source).toContain("onCheckpoint(\"stable-finish-browser-contract\")");
   expect(source).toContain("{ cause: error }");
   expect(source).toContain("Chatwoot browser capture failed during ${captureStage}.");

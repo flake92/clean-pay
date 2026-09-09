@@ -33,6 +33,7 @@ const EXACT_CONCURRENT_CABINET_READ_ORDER = [
   "subscription",
   "offers",
   "devices",
+  "remnawave-user",
 ] as const;
 
 const CSP_REQUEST_FAILURE = {
@@ -79,6 +80,7 @@ const CHROMIUM_TRANSPORT_IDENTITY_HEADER_NAMES = [
 
 const STATIC_CHUNK_PATH = /^\/_next\/static\/chunks\/(?:turbopack-)?(?=[A-Za-z0-9_-]{8,}\.(?:css|js)$)(?=[A-Za-z0-9_-]*[0-9])[A-Za-z0-9_-]+\.(?:css|js)$/;
 const STATIC_MEDIA_PATH = /^\/_next\/static\/media\/[A-Za-z0-9._-]+\.(?=[A-Za-z0-9_-]{8,}\.[A-Za-z0-9]+$)(?=[A-Za-z0-9_-]*[0-9])[A-Za-z0-9_-]+\.(?:avif|gif|ico|jpeg|jpg|png|svg|webp|woff2)$/;
+const EXACT_PWA_SHELL_CACHE_NAME = /^clean-pay-shell-(?:[a-f0-9]{40}|[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12})$/;
 /**
  * Projects only explicitly classified browser noise out of a raw manifest.
  * The raw artifact remains the evidence file; this copy is used exclusively
@@ -137,6 +139,7 @@ export function projectCharacterizationManifestPairForComparison(
     projectExactJourneyPwaShellCachePair(expectedPrepared, actualPrepared);
     projectExactOptionalJourneyServiceWorkerStatePair(expectedPrepared, actualPrepared);
     projectExactMergeChatwootGeneratedPair(expectedPrepared, actualPrepared);
+    projectExactAuthenticatedPassiveNetworkPair(expectedPrepared, actualPrepared);
   }
   const expected = projectCharacterizationManifestForComparison(expectedPrepared);
   const actual = projectCharacterizationManifestForComparison(actualPrepared);
@@ -145,6 +148,9 @@ export function projectCharacterizationManifestPairForComparison(
     && isRecord(expected)
     && isRecord(actual)
   ) {
+    projectExactJourneyPwaShellCachePair(expected, actual);
+    projectExactAuthenticatedCheckpointPwaShellCachePair(expected, actual);
+    projectExactAuthenticatedSyntheticResetLedgerPair(expected, actual);
     projectExactAuthenticatedChatwootGeneratedPair(expected, actual);
     projectExactMergeChatwootGeneratedPair(expected, actual);
   }
@@ -158,6 +164,12 @@ export function projectCharacterizationManifestPairForComparison(
   ) {
     projectExactConcurrentCabinetReadPair(expected, actual);
     projectExactPassiveProviderEffectOrderPair(expected, actual);
+    projectExactTelegramAuthProviderDynamicPair(expected, actual);
+    projectExactPasskeySetupPayloadPair(expected, actual);
+    projectExactTelegramLoginPayloadBytesPair(expected, actual);
+    projectExactActiveServerActionDynamicDigestPair(expected, actual);
+    projectExactPassiveProviderEffectMultiplicityPair(expected, actual);
+    projectExactAuthenticatedBrowserNoisePair(expected, actual);
   }
   projectExactLocalApplicationHostPair(
     expected,
@@ -177,6 +189,7 @@ export function projectCharacterizationManifestPairForComparison(
     && isRecord(actual)
   ) {
     projectExactHashedStaticDocumentLinkPair(expected, actual);
+    projectExactProjectedAuthenticatedPassiveNetworkPair(expected, actual);
   }
   if (
     fixtureContractPairIsValid
@@ -186,6 +199,7 @@ export function projectCharacterizationManifestPairForComparison(
     projectExactAuthenticatedPassiveNetworkPair(expected, actual);
   }
   projectExactRemovedNextJsPoweredBy(expected, actual);
+  projectExactOptionalZeroContentLengthPair(expected, actual);
   if (fixtureContractPairIsValid) {
     projectExactJourneyFixtureContract(expected, actual);
   }
@@ -305,18 +319,259 @@ function projectExactAuthenticatedPassiveNetworkPair(
     return;
   }
 
-  projectExactJourneyGeneratedValues(expectedTrial);
-  projectExactJourneyGeneratedValues(actualTrial);
-  projectExactHashedStaticDocumentLinkPair(expectedTrial, actualTrial);
-  projectExactRemovedNextJsPoweredBy(expectedTrial, actualTrial);
-  projectExactJourneyFixtureContract(expectedTrial, actualTrial);
+  const expectedProjectedTrial = projectCharacterizationManifestForComparison(expectedTrial);
+  const actualProjectedTrial = projectCharacterizationManifestForComparison(actualTrial);
+  if (!isRecord(expectedProjectedTrial) || !isRecord(actualProjectedTrial)) return;
+  projectExactConcurrentCabinetReadPair(expectedProjectedTrial, actualProjectedTrial);
+  projectExactPassiveProviderEffectOrderPair(expectedProjectedTrial, actualProjectedTrial);
+  projectExactTelegramAuthProviderDynamicPair(expectedProjectedTrial, actualProjectedTrial);
+  projectExactPasskeySetupPayloadPair(expectedProjectedTrial, actualProjectedTrial);
+  projectExactTelegramLoginPayloadBytesPair(expectedProjectedTrial, actualProjectedTrial);
+  projectExactActiveServerActionDynamicDigestPair(
+    expectedProjectedTrial,
+    actualProjectedTrial,
+  );
+  projectExactServerActionDynamicDigestPair(expectedProjectedTrial, actualProjectedTrial);
+  projectExactHashedNextStaticTopologyPair(expectedProjectedTrial, actualProjectedTrial, true);
+  projectExactHashedStaticDocumentLinkPair(expectedProjectedTrial, actualProjectedTrial);
+  projectExactRemovedNextJsPoweredBy(expectedProjectedTrial, actualProjectedTrial);
+  projectExactOptionalZeroContentLengthPair(expectedProjectedTrial, actualProjectedTrial);
+  projectExactJourneyFixtureContract(expectedProjectedTrial, actualProjectedTrial);
+  projectPairedJourneyInlineStyles(expectedProjectedTrial, actualProjectedTrial);
 
-  if (!sameJson(expectedTrial, actualTrial)) return;
-  expected.network = expectedTrial.network;
-  actual.network = actualTrial.network;
+  if (!sameJson(expectedProjectedTrial, actualProjectedTrial)) {
+    return;
+  }
+  applyExactAuthenticatedPassiveProjection(expected, expectedProjectedTrial);
+  applyExactAuthenticatedPassiveProjection(actual, actualProjectedTrial);
 }
 
-function removeExactAuthenticatedPassiveNetworkRequests(manifest: Record<string, unknown>) {
+function projectExactProjectedAuthenticatedPassiveNetworkPair(
+  expected: Record<string, unknown>,
+  actual: Record<string, unknown>,
+) {
+  if (
+    !hasExactJourneyManifestEnvelope(expected)
+    || !hasExactJourneyManifestEnvelope(actual)
+    || !exactJourneyFixtureContract(expected)
+    || !exactJourneyFixtureContract(actual)
+    || expected.project !== actual.project
+    || expected.journey !== actual.journey
+    || !isAuthenticatedJourneyWithPassiveBrowserNoise(expected.journey)
+  ) {
+    return;
+  }
+
+  const expectedTrial = cloneJson(expected);
+  const actualTrial = cloneJson(actual);
+  if (!isRecord(expectedTrial) || !isRecord(actualTrial)) return;
+  projectExactActiveServerActionDynamicDigestPair(expectedTrial, actualTrial);
+  const expectedChanged = removeExactProjectedAuthenticatedPassiveNetworkRequests(expectedTrial);
+  const actualChanged = removeExactProjectedAuthenticatedPassiveNetworkRequests(actualTrial);
+  const expectedStaticRemoved = removeExactProjectedNextStaticResources(expectedTrial);
+  const actualStaticRemoved = removeExactProjectedNextStaticResources(actualTrial);
+  if (expectedStaticRemoved === null || actualStaticRemoved === null) return;
+  if (
+    !expectedChanged
+    && !actualChanged
+    && expectedStaticRemoved !== true
+    && actualStaticRemoved !== true
+  ) {
+    return;
+  }
+  removeExactPassiveProviderEffects(expectedTrial);
+  removeExactPassiveProviderEffects(actualTrial);
+
+  projectJourneyProviderReadinessNoise(expectedTrial);
+  projectJourneyProviderReadinessNoise(actualTrial);
+  projectExactJourneyPwaShellCachePair(expectedTrial, actualTrial);
+  projectExactAuthenticatedChatwootGeneratedPair(expectedTrial, actualTrial);
+  projectExactAuthenticatedCheckpointPwaShellCachePair(expectedTrial, actualTrial);
+  projectExactAuthenticatedSyntheticResetLedgerPair(expectedTrial, actualTrial);
+  projectExactConcurrentCabinetReadPair(expectedTrial, actualTrial);
+  projectExactPassiveProviderEffectOrderPair(expectedTrial, actualTrial);
+  projectExactTelegramAuthProviderDynamicPair(expectedTrial, actualTrial);
+  projectExactPasskeySetupPayloadPair(expectedTrial, actualTrial);
+  projectExactTelegramLoginPayloadBytesPair(expectedTrial, actualTrial);
+  projectExactActiveServerActionDynamicDigestPair(expectedTrial, actualTrial);
+  projectExactServerActionDynamicDigestPair(expectedTrial, actualTrial);
+  projectExactHashedStaticDocumentLinkPair(expectedTrial, actualTrial);
+  projectExactRemovedNextJsPoweredBy(expectedTrial, actualTrial);
+  projectExactOptionalZeroContentLengthPair(expectedTrial, actualTrial);
+  projectExactJourneyFixtureContract(expectedTrial, actualTrial);
+  projectPairedJourneyInlineStyles(expectedTrial, actualTrial);
+
+  if (!sameJson(expectedTrial, actualTrial)) return;
+  applyExactAuthenticatedPassiveProjection(expected, expectedTrial);
+  applyExactAuthenticatedPassiveProjection(actual, actualTrial);
+}
+
+function projectExactAuthenticatedCheckpointPwaShellCachePair(
+  expected: Record<string, unknown>,
+  actual: Record<string, unknown>,
+) {
+  if (
+    !hasExactJourneyManifestEnvelope(expected)
+    || !hasExactJourneyManifestEnvelope(actual)
+    || expected.project !== actual.project
+    || expected.journey !== actual.journey
+    || !isAuthenticatedJourneyWithPassiveBrowserNoise(expected.journey)
+    || !Array.isArray(expected.checkpoints)
+    || !Array.isArray(actual.checkpoints)
+    || expected.checkpoints.length !== actual.checkpoints.length
+  ) {
+    return;
+  }
+
+  const expectedLocations = exactCheckpointPwaShellCacheLocations(expected.checkpoints);
+  const actualLocations = exactCheckpointPwaShellCacheLocations(actual.checkpoints);
+  if (
+    expectedLocations === null
+    || actualLocations === null
+    || !sameJson(
+      expectedLocations.map(({ key }) => key),
+      actualLocations.map(({ key }) => key),
+    )
+  ) {
+    return;
+  }
+
+  for (const location of [...expectedLocations, ...actualLocations]) {
+    location.cacheNames[location.index] = "<validated:pwa-shell-cache>";
+  }
+}
+
+function exactCheckpointPwaShellCacheLocations(checkpoints: unknown[]) {
+  const locations: Array<{
+    cacheNames: unknown[];
+    index: number;
+    key: string;
+  }> = [];
+  for (const [checkpointIndex, checkpointValue] of checkpoints.entries()) {
+    if (!isRecord(checkpointValue) || typeof checkpointValue.label !== "string") {
+      return null;
+    }
+    const storage = checkpointValue.storage;
+    if (
+      !isRecord(storage)
+      || !hasExactKeys(storage, ["cacheNames", "local", "serviceWorkerScopes", "session"])
+      || !Array.isArray(storage.cacheNames)
+      || !Array.isArray(storage.local)
+      || !Array.isArray(storage.serviceWorkerScopes)
+      || !Array.isArray(storage.session)
+      || storage.cacheNames.length > 1
+    ) {
+      return null;
+    }
+    if (storage.cacheNames.length === 0) {
+      if (storage.serviceWorkerScopes.length !== 0) return null;
+      continue;
+    }
+    if (
+      typeof storage.cacheNames[0] !== "string"
+      || !EXACT_PWA_SHELL_CACHE_NAME.test(storage.cacheNames[0])
+      || storage.serviceWorkerScopes.length !== 1
+      || !sameJson(storage.serviceWorkerScopes[0], {
+        origin: "<app-origin>",
+        pathname: "/",
+        query: [],
+        fragment: null,
+      })
+    ) {
+      return null;
+    }
+    locations.push({
+      cacheNames: storage.cacheNames,
+      index: 0,
+      key: `${checkpointIndex}:${checkpointValue.label}`,
+    });
+  }
+  return locations.length > 0 ? locations : null;
+}
+
+function projectExactAuthenticatedSyntheticResetLedgerPair(
+  expected: Record<string, unknown>,
+  actual: Record<string, unknown>,
+) {
+  if (
+    !hasExactJourneyManifestEnvelope(expected)
+    || !hasExactJourneyManifestEnvelope(actual)
+    || expected.project !== actual.project
+    || expected.journey !== actual.journey
+    || !isAuthenticatedJourneyWithPassiveBrowserNoise(expected.journey)
+    || !isRecord(expected.syntheticReset)
+    || !isRecord(actual.syntheticReset)
+  ) {
+    return;
+  }
+  const expectedState = expected.syntheticReset.state;
+  const actualState = actual.syntheticReset.state;
+  if (!isRecord(expectedState) || !isRecord(actualState)) return;
+
+  const expectedComparable = {
+    ...expectedState,
+    ledger: 0,
+    sequence: 0,
+  };
+  const actualComparable = {
+    ...actualState,
+    ledger: 0,
+    sequence: 0,
+  };
+  if (
+    !sameJson(expectedComparable, actualComparable)
+    || !isExactSyntheticProviderResetTick(expectedState)
+    || !isExactSyntheticProviderResetTick(actualState)
+  ) {
+    return;
+  }
+  expectedState.ledger = "<dynamic:synthetic-reset-ledger>";
+  actualState.ledger = "<dynamic:synthetic-reset-ledger>";
+  expectedState.sequence = "<dynamic:synthetic-reset-sequence>";
+  actualState.sequence = "<dynamic:synthetic-reset-sequence>";
+}
+
+function isExactSyntheticProviderResetTick(state: Record<string, unknown>) {
+  return (
+    (
+      state.ledger === 0
+      && state.sequence === 0
+    )
+    || (
+      state.ledger === 1
+      && state.sequence === 1
+    )
+  );
+}
+
+function removeExactPassiveProviderEffects(manifest: Record<string, unknown>) {
+  const providerEffects = manifest.providerEffects;
+  if (!isRecord(providerEffects) || !Array.isArray(providerEffects.entries)) return false;
+
+  const retainedEntries: Record<string, unknown>[] = [];
+  for (const [index, entryValue] of providerEffects.entries.entries()) {
+    if (
+      !isRecord(entryValue)
+      || entryValue.sequence !== index + 1
+    ) {
+      return false;
+    }
+    const comparableEntry = { ...entryValue, sequence: 0 };
+    if (isExactPassiveProviderEffect(comparableEntry)) continue;
+    retainedEntries.push(entryValue);
+  }
+  if (retainedEntries.length === providerEffects.entries.length) return false;
+
+  providerEffects.entries = retainedEntries.map((entry, index) => ({
+    ...entry,
+    sequence: index + 1,
+  }));
+  return true;
+}
+
+function removeExactProjectedAuthenticatedPassiveNetworkRequests(
+  manifest: Record<string, unknown>,
+) {
   const network = exactProjectedNetwork(manifest);
   if (network === null) return false;
 
@@ -325,7 +580,8 @@ function removeExactAuthenticatedPassiveNetworkRequests(manifest: Record<string,
   const retainedRequests = network.requests.filter((requestValue) => {
     if (!isRecord(requestValue)) return true;
     const contextualPassive = isExactPwaControlledDocumentRequest(manifest, requestValue)
-      || isExactPassiveRefreshServerActionRequest(manifest, requestValue);
+      || isExactProjectedPassiveRefreshServerActionRequest(manifest, requestValue)
+      || isExactAuthenticatedChatwootTransportNoise(manifest, requestValue);
     if (
       isExactProjectedRemovableStaticResource(requestValue)
       || contextualPassive
@@ -338,6 +594,926 @@ function removeExactAuthenticatedPassiveNetworkRequests(manifest: Record<string,
   });
   if (!removedContextualPassiveRequest) return false;
 
+  return reindexExactProjectedNetworkWithRemovedActions(
+    network,
+    retainedRequests,
+    removedIndexes,
+  );
+}
+
+function isExactProjectedPassiveRefreshServerActionRequest(
+  manifest: Record<string, unknown>,
+  request: Record<string, unknown>,
+) {
+  if (
+    !hasExactJourneyManifestEnvelope(manifest)
+    || !exactJourneyFixtureContract(manifest)
+    || (
+      request.failure !== null
+      && !isExactResponseBackedAbortFailure(request.failure)
+    )
+    || !isRecord(request.postData)
+    || request.postData.bytes !== 29
+    || !isRecord(request.response)
+    || request.response.status !== 200
+    || !responseHasContentType(request.response, "text/x-component")
+    || !isRecord(request.url)
+    || ![
+      "/cabinet",
+      "/extend",
+      "/link-account",
+      "/payment/fail",
+      "/payment/pending",
+      "/payment/success",
+      "/profile",
+      "/referral",
+      "/tariffs",
+      "/verify-email",
+    ].includes(String(request.url.pathname))
+  ) {
+    return false;
+  }
+
+  const network = exactProjectedNetwork(manifest);
+  if (network === null) return false;
+  const actions = network.serverActions.filter((actionValue) => (
+    isRecord(actionValue)
+    && actionValue.requestIndex === request.index
+  ));
+  if (actions.length !== 1) return false;
+  const action = actions[0]!;
+  return isRecord(action)
+    && hasExactKeys(action, [
+      "identifier",
+      "method",
+      "order",
+      "payload",
+      "requestIndex",
+      "status",
+      "url",
+    ])
+    && isExactResponseBackedProjectedServerAction(request, action)
+    && isExactJourneyActionDigest(action.identifier, "server-action-id")
+    && isExactJourneyActionDigest(action.payload, "server-action-payload")
+    && hasExactJourneyNextActionHeader(request.requestHeaders, action.identifier);
+}
+
+function applyExactAuthenticatedPassiveProjection(
+  target: Record<string, unknown>,
+  projected: Record<string, unknown>,
+) {
+  for (const key of Object.keys(projected)) {
+    if (key === "source") continue;
+    target[key] = projected[key];
+  }
+}
+
+function projectExactTelegramAuthProviderDynamicPair(
+  expected: Record<string, unknown>,
+  actual: Record<string, unknown>,
+) {
+  if (
+    !hasExactJourneyManifestEnvelope(expected)
+    || !hasExactJourneyManifestEnvelope(actual)
+    || !exactJourneyFixtureContract(expected)
+    || !exactJourneyFixtureContract(actual)
+    || expected.project !== actual.project
+    || expected.journey !== actual.journey
+    || !isAuthenticatedJourneyWithPassiveBrowserNoise(expected.journey)
+    || !isRecord(expected.providerEffects)
+    || !isRecord(actual.providerEffects)
+    || !Array.isArray(expected.providerEffects.entries)
+    || !Array.isArray(actual.providerEffects.entries)
+    || expected.providerEffects.entries.length !== actual.providerEffects.entries.length
+  ) {
+    return;
+  }
+
+  for (let index = 0; index < expected.providerEffects.entries.length; index += 1) {
+    const expectedEntry = expected.providerEffects.entries[index];
+    const actualEntry = actual.providerEffects.entries[index];
+    if (!isRecord(expectedEntry) || !isRecord(actualEntry)) return;
+    if (!isExactGeneratedProviderEntryPair(expectedEntry, actualEntry)) continue;
+    projectDynamicContractSha256ByLocalShape(expectedEntry);
+    projectDynamicContractSha256ByLocalShape(actualEntry);
+  }
+}
+
+function isExactGeneratedProviderEntryPair(
+  expectedEntry: Record<string, unknown>,
+  actualEntry: Record<string, unknown>,
+) {
+  const expectedComparable = cloneJson(expectedEntry);
+  const actualComparable = cloneJson(actualEntry);
+  if (!isRecord(expectedComparable) || !isRecord(actualComparable)) return false;
+  projectDynamicContractSha256ByLocalShape(expectedComparable);
+  projectDynamicContractSha256ByLocalShape(actualComparable);
+  return sameJson(expectedComparable, actualComparable);
+}
+
+function projectDynamicContractSha256ByLocalShape(value: unknown) {
+  let order = 0;
+  const visit = (candidate: unknown) => {
+    if (Array.isArray(candidate)) {
+      for (const entry of candidate) visit(entry);
+      return;
+    }
+    if (!isRecord(candidate)) return;
+    if (
+      hasExactKeys(candidate, ["bytes", "format", "kind", "sha256"])
+      && candidate.kind === "dynamic"
+      && typeof candidate.format === "string"
+      && Number.isSafeInteger(candidate.bytes)
+      && typeof candidate.sha256 === "string"
+      && (
+        /^[a-f0-9]{64}$/.test(candidate.sha256)
+        || /^<dynamic:[a-z0-9-]+:[1-9][0-9]*>$/.test(candidate.sha256)
+      )
+    ) {
+      order += 1;
+      candidate.sha256 = `<dynamic:provider-entry-${candidate.format}:${order}>`;
+      return;
+    }
+    for (const child of Object.values(candidate)) visit(child);
+  };
+  visit(value);
+}
+
+function projectExactPasskeySetupPayloadPair(
+  expected: Record<string, unknown>,
+  actual: Record<string, unknown>,
+) {
+  if (
+    !hasExactJourneyManifestEnvelope(expected)
+    || !hasExactJourneyManifestEnvelope(actual)
+    || !exactJourneyFixtureContract(expected)
+    || !exactJourneyFixtureContract(actual)
+    || expected.project !== actual.project
+    || expected.journey !== actual.journey
+    || expected.journey !== "telegram-oidc-cabinet-profile-link-referral-passkey"
+    || !isRecord(expected.network)
+    || !isRecord(actual.network)
+    || !Array.isArray(expected.network.requests)
+    || !Array.isArray(actual.network.requests)
+    || !Array.isArray(expected.network.serverActions)
+    || !Array.isArray(actual.network.serverActions)
+    || expected.network.serverActions.length !== actual.network.serverActions.length
+  ) {
+    return;
+  }
+
+  for (let index = 0; index < expected.network.serverActions.length; index += 1) {
+    const expectedAction = expected.network.serverActions[index];
+    const actualAction = actual.network.serverActions[index];
+    if (
+      !isRecord(expectedAction)
+      || !isRecord(actualAction)
+      || !isExactPasskeySetupAction(expectedAction)
+      || !isExactPasskeySetupAction(actualAction)
+    ) {
+      continue;
+    }
+    const expectedRequest = expected.network.requests[expectedAction.requestIndex as number];
+    const actualRequest = actual.network.requests[actualAction.requestIndex as number];
+    if (
+      !isRecord(expectedRequest)
+      || !isRecord(actualRequest)
+      || !isExactPasskeySetupRequest(expectedRequest, expectedAction)
+      || !isExactPasskeySetupRequest(actualRequest, actualAction)
+    ) {
+      continue;
+    }
+
+    const expectedComparable = cloneJson({ action: expectedAction, request: expectedRequest });
+    const actualComparable = cloneJson({ action: actualAction, request: actualRequest });
+    projectPasskeySetupPayloadDigest(expectedComparable);
+    projectPasskeySetupPayloadDigest(actualComparable);
+    if (!sameJson(expectedComparable, actualComparable)) continue;
+    projectPasskeySetupPayloadDigest({ action: expectedAction, request: expectedRequest });
+    projectPasskeySetupPayloadDigest({ action: actualAction, request: actualRequest });
+  }
+}
+
+function projectExactTelegramLoginPayloadBytesPair(
+  expected: Record<string, unknown>,
+  actual: Record<string, unknown>,
+) {
+  if (
+    !hasExactJourneyManifestEnvelope(expected)
+    || !hasExactJourneyManifestEnvelope(actual)
+    || !exactJourneyFixtureContract(expected)
+    || !exactJourneyFixtureContract(actual)
+    || expected.project !== actual.project
+    || expected.journey !== actual.journey
+    || expected.journey !== "telegram-oidc-cabinet-profile-link-referral-passkey"
+    || !isRecord(expected.network)
+    || !isRecord(actual.network)
+    || !Array.isArray(expected.network.requests)
+    || !Array.isArray(actual.network.requests)
+    || !Array.isArray(expected.network.serverActions)
+    || !Array.isArray(actual.network.serverActions)
+    || expected.network.serverActions.length !== actual.network.serverActions.length
+  ) {
+    return;
+  }
+
+  for (let index = 0; index < expected.network.serverActions.length; index += 1) {
+    const expectedAction = expected.network.serverActions[index];
+    const actualAction = actual.network.serverActions[index];
+    if (
+      !isRecord(expectedAction)
+      || !isRecord(actualAction)
+      || !Number.isSafeInteger(expectedAction.requestIndex)
+      || !Number.isSafeInteger(actualAction.requestIndex)
+    ) {
+      continue;
+    }
+
+    const expectedRequest = expected.network.requests[expectedAction.requestIndex as number];
+    const actualRequest = actual.network.requests[actualAction.requestIndex as number];
+    if (
+      !isRecord(expectedRequest)
+      || !isRecord(actualRequest)
+      || !isExactTelegramLoginPayloadByteDriftPair(
+        expected,
+        expectedRequest,
+        expectedAction,
+        actualRequest,
+        actualAction,
+      )
+    ) {
+      continue;
+    }
+
+    const expectedComparable = cloneJson({ action: expectedAction, request: expectedRequest });
+    const actualComparable = cloneJson({ action: actualAction, request: actualRequest });
+    if (
+      !isRecord(expectedComparable)
+      || !isRecord(actualComparable)
+      || !isRecord(expectedComparable.action)
+      || !isRecord(expectedComparable.request)
+      || !isRecord(actualComparable.action)
+      || !isRecord(actualComparable.request)
+    ) {
+      continue;
+    }
+
+    projectTelegramLoginPayloadBytes(expectedComparable.request, expectedComparable.action);
+    projectTelegramLoginPayloadBytes(actualComparable.request, actualComparable.action);
+    if (!sameJson(expectedComparable, actualComparable)) continue;
+    projectTelegramLoginPayloadBytes(expectedRequest, expectedAction);
+    projectTelegramLoginPayloadBytes(actualRequest, actualAction);
+  }
+}
+
+function projectExactServerActionDynamicDigestPair(
+  expected: Record<string, unknown>,
+  actual: Record<string, unknown>,
+) {
+  if (
+    !hasExactJourneyManifestEnvelope(expected)
+    || !hasExactJourneyManifestEnvelope(actual)
+    || !exactJourneyFixtureContract(expected)
+    || !exactJourneyFixtureContract(actual)
+    || expected.project !== actual.project
+    || expected.journey !== actual.journey
+    || !isAuthenticatedJourneyWithPassiveBrowserNoise(expected.journey)
+    || !isRecord(expected.network)
+    || !isRecord(actual.network)
+    || !Array.isArray(expected.network.requests)
+    || !Array.isArray(actual.network.requests)
+    || !Array.isArray(expected.network.serverActions)
+    || !Array.isArray(actual.network.serverActions)
+    || expected.network.serverActions.length !== actual.network.serverActions.length
+  ) {
+    return;
+  }
+
+  const plans: Array<{
+    actualAction: Record<string, unknown>;
+    actualRequest: Record<string, unknown>;
+    expectedAction: Record<string, unknown>;
+    expectedRequest: Record<string, unknown>;
+    order: number;
+    projectTelegramLoginPayloadBytes: boolean;
+  }> = [];
+  for (let order = 0; order < expected.network.serverActions.length; order += 1) {
+    const expectedAction = expected.network.serverActions[order];
+    const actualAction = actual.network.serverActions[order];
+    if (
+      !isRecord(expectedAction)
+      || !isRecord(actualAction)
+      || !Number.isSafeInteger(expectedAction.requestIndex)
+      || !Number.isSafeInteger(actualAction.requestIndex)
+    ) {
+      return;
+    }
+    const expectedRequest = expected.network.requests[expectedAction.requestIndex as number];
+    const actualRequest = actual.network.requests[actualAction.requestIndex as number];
+    if (!isRecord(expectedRequest) || !isRecord(actualRequest)) return;
+
+    const dynamicTelegramLoginPayload = isExactTelegramLoginPayloadByteDriftPair(
+      expected,
+      expectedRequest,
+      expectedAction,
+      actualRequest,
+      actualAction,
+    );
+    const expectedComparable = cloneJson({ action: expectedAction, request: expectedRequest });
+    const actualComparable = cloneJson({ action: actualAction, request: actualRequest });
+    if (!isRecord(expectedComparable) || !isRecord(actualComparable)) return;
+    if (
+      !isRecord(expectedComparable.action)
+      || !isRecord(expectedComparable.request)
+      || !isRecord(actualComparable.action)
+      || !isRecord(actualComparable.request)
+      || !projectServerActionDigestEntry(
+        expectedComparable.request,
+        expectedComparable.action,
+        order,
+      )
+      || !projectServerActionDigestEntry(
+        actualComparable.request,
+        actualComparable.action,
+        order,
+      )
+    ) {
+      return;
+    }
+    if (dynamicTelegramLoginPayload) {
+      projectTelegramLoginPayloadBytes(expectedComparable.request, expectedComparable.action);
+      projectTelegramLoginPayloadBytes(actualComparable.request, actualComparable.action);
+    }
+    if (!sameJson(expectedComparable, actualComparable)) return;
+    plans.push({
+      actualAction,
+      actualRequest,
+      expectedAction,
+      expectedRequest,
+      projectTelegramLoginPayloadBytes: dynamicTelegramLoginPayload,
+      order,
+    });
+  }
+
+  for (const plan of plans) {
+    projectServerActionDigestEntry(plan.expectedRequest, plan.expectedAction, plan.order);
+    projectServerActionDigestEntry(plan.actualRequest, plan.actualAction, plan.order);
+    if (plan.projectTelegramLoginPayloadBytes) {
+      projectTelegramLoginPayloadBytes(plan.expectedRequest, plan.expectedAction);
+      projectTelegramLoginPayloadBytes(plan.actualRequest, plan.actualAction);
+    }
+  }
+}
+
+function projectExactActiveServerActionDynamicDigestPair(
+  expected: Record<string, unknown>,
+  actual: Record<string, unknown>,
+) {
+  if (
+    !hasExactJourneyManifestEnvelope(expected)
+    || !hasExactJourneyManifestEnvelope(actual)
+    || !exactJourneyFixtureContract(expected)
+    || !exactJourneyFixtureContract(actual)
+    || expected.project !== actual.project
+    || expected.journey !== actual.journey
+    || !isAuthenticatedJourneyWithPassiveBrowserNoise(expected.journey)
+  ) {
+    return;
+  }
+
+  const expectedEntries = exactActiveServerActionDigestEntries(expected);
+  const actualEntries = exactActiveServerActionDigestEntries(actual);
+  if (
+    expectedEntries === null
+    || actualEntries === null
+    || expectedEntries.length === 0
+    || expectedEntries.length !== actualEntries.length
+  ) {
+    return;
+  }
+
+  const plans: Array<{
+    actualAction: Record<string, unknown>;
+    actualRequest: Record<string, unknown>;
+    expectedAction: Record<string, unknown>;
+    expectedRequest: Record<string, unknown>;
+    order: number;
+    projectTelegramLoginPayloadBytes: boolean;
+  }> = [];
+  for (let order = 0; order < expectedEntries.length; order += 1) {
+    const expectedEntry = expectedEntries[order]!;
+    const actualEntry = actualEntries[order]!;
+    const dynamicTelegramLoginPayload = isExactTelegramLoginPayloadByteDriftPair(
+      expected,
+      expectedEntry.request,
+      expectedEntry.action,
+      actualEntry.request,
+      actualEntry.action,
+    );
+    const expectedComparable = comparableActiveServerActionDigestEntry(
+      expectedEntry.request,
+      expectedEntry.action,
+      order,
+    );
+    const actualComparable = comparableActiveServerActionDigestEntry(
+      actualEntry.request,
+      actualEntry.action,
+      order,
+    );
+    if (expectedComparable === null || actualComparable === null) return;
+    if (dynamicTelegramLoginPayload) {
+      projectTelegramLoginPayloadBytes(expectedComparable.request, expectedComparable.action);
+      projectTelegramLoginPayloadBytes(actualComparable.request, actualComparable.action);
+    }
+    if (!sameJson(expectedComparable, actualComparable)) return;
+    plans.push({
+      actualAction: actualEntry.action,
+      actualRequest: actualEntry.request,
+      expectedAction: expectedEntry.action,
+      expectedRequest: expectedEntry.request,
+      order,
+      projectTelegramLoginPayloadBytes: dynamicTelegramLoginPayload,
+    });
+  }
+
+  for (const plan of plans) {
+    projectServerActionDigestEntry(plan.expectedRequest, plan.expectedAction, plan.order);
+    projectServerActionDigestEntry(plan.actualRequest, plan.actualAction, plan.order);
+    if (plan.projectTelegramLoginPayloadBytes) {
+      projectTelegramLoginPayloadBytes(plan.expectedRequest, plan.expectedAction);
+      projectTelegramLoginPayloadBytes(plan.actualRequest, plan.actualAction);
+    }
+  }
+}
+
+function exactActiveServerActionDigestEntries(manifest: Record<string, unknown>) {
+  const network = exactProjectedNetwork(manifest);
+  if (network === null) return null;
+
+  const entries: Array<{
+    action: Record<string, unknown>;
+    request: Record<string, unknown>;
+  }> = [];
+  for (const actionValue of network.serverActions) {
+    if (
+      !isRecord(actionValue)
+      || !Number.isSafeInteger(actionValue.requestIndex)
+    ) {
+      return null;
+    }
+    const requestValue = network.requests[actionValue.requestIndex as number];
+    if (!isRecord(requestValue)) return null;
+    if (isExactPassiveRefreshServerActionRequest(manifest, requestValue)) {
+      continue;
+    }
+    if (!isExactResponseBackedProjectedServerAction(requestValue, actionValue)) {
+      return null;
+    }
+    entries.push({ action: actionValue, request: requestValue });
+  }
+  return entries;
+}
+
+function comparableActiveServerActionDigestEntry(
+  request: Record<string, unknown>,
+  action: Record<string, unknown>,
+  order: number,
+) {
+  const comparable = cloneJson({ action, request });
+  if (
+    !isRecord(comparable)
+    || !isRecord(comparable.action)
+    || !isRecord(comparable.request)
+    || !projectServerActionDigestEntry(
+      comparable.request,
+      comparable.action,
+      order,
+    )
+  ) {
+    return null;
+  }
+  comparable.request.index = order;
+  comparable.action.order = order;
+  comparable.action.requestIndex = order;
+  return {
+    action: comparable.action,
+    request: comparable.request,
+  };
+}
+
+function isExactTelegramLoginPayloadByteDriftPair(
+  manifest: Record<string, unknown>,
+  expectedRequest: Record<string, unknown>,
+  expectedAction: Record<string, unknown>,
+  actualRequest: Record<string, unknown>,
+  actualAction: Record<string, unknown>,
+) {
+  if (
+    manifest.journey !== "telegram-oidc-cabinet-profile-link-referral-passkey"
+    || !isExactResponseBackedProjectedServerAction(expectedRequest, expectedAction)
+    || !isExactResponseBackedProjectedServerAction(actualRequest, actualAction)
+    || !isRecord(expectedAction.url)
+    || !isRecord(actualAction.url)
+    || expectedAction.url.origin !== "<app-origin>"
+    || actualAction.url.origin !== "<app-origin>"
+    || expectedAction.url.pathname !== "/login"
+    || actualAction.url.pathname !== "/login"
+    || !Array.isArray(expectedAction.url.query)
+    || !Array.isArray(actualAction.url.query)
+    || expectedAction.url.query.length !== 0
+    || actualAction.url.query.length !== 0
+    || expectedAction.url.fragment !== null
+    || actualAction.url.fragment !== null
+    || !isRecord(expectedAction.payload)
+    || !isRecord(actualAction.payload)
+    || !Number.isSafeInteger(expectedAction.payload.bytes)
+    || !Number.isSafeInteger(actualAction.payload.bytes)
+    || expectedAction.payload.bytes === actualAction.payload.bytes
+  ) {
+    return false;
+  }
+
+  return isBoundedTelegramLoginPayloadBytes(expectedAction.payload.bytes)
+    && isBoundedTelegramLoginPayloadBytes(actualAction.payload.bytes);
+}
+
+function isBoundedTelegramLoginPayloadBytes(value: unknown) {
+  return Number.isSafeInteger(value)
+    && Number(value) >= 512
+    && Number(value) <= 1024;
+}
+
+function projectTelegramLoginPayloadBytes(
+  requestValue: Record<string, unknown>,
+  actionValue: Record<string, unknown>,
+) {
+  if (!isRecord(actionValue.payload) || !isRecord(requestValue.postData)) return;
+  actionValue.payload = {
+    ...actionValue.payload,
+    bytes: "<dynamic:telegram-login-payload-bytes>",
+  };
+  requestValue.postData = {
+    ...requestValue.postData,
+    bytes: "<dynamic:telegram-login-payload-bytes>",
+  };
+}
+
+function projectServerActionDigestEntry(
+  requestValue: Record<string, unknown>,
+  actionValue: Record<string, unknown>,
+  order: number,
+) {
+  if (!isExactResponseBackedProjectedServerAction(requestValue, actionValue)) {
+    return false;
+  }
+  const nextActionHeader = exactJourneyNextActionHeader(
+    requestValue.requestHeaders,
+    actionValue.identifier,
+  );
+  if (!nextActionHeader) return false;
+  const identifier = {
+    ...(actionValue.identifier as Record<string, unknown>),
+    sha256: `<dynamic:server-action-id:${order + 1}>`,
+  };
+  const payload = {
+    ...(actionValue.payload as Record<string, unknown>),
+    sha256: `<dynamic:server-action-payload:${order + 1}>`,
+  };
+  actionValue.identifier = identifier;
+  actionValue.payload = payload;
+  requestValue.serverAction = { present: true, identifier: { ...identifier } };
+  requestValue.postData = { ...payload };
+  nextActionHeader.value = { ...identifier };
+  return true;
+}
+
+function exactJourneyNextActionHeader(
+  headers: unknown,
+  identifier: unknown,
+): (Record<string, unknown> & { value: unknown }) | null {
+  if (!Array.isArray(headers)) return null;
+  const matches = headers.filter((header) => (
+    isRecord(header) && header.name === "next-action"
+  ));
+  if (matches.length !== 1) return null;
+  const header = matches[0];
+  return isRecord(header)
+    && hasExactKeys(header, ["name", "value"])
+    && sameJson(header.value, identifier)
+    ? header as Record<string, unknown> & { value: unknown }
+    : null;
+}
+
+function isExactResponseBackedProjectedServerAction(
+  request: Record<string, unknown>,
+  action: Record<string, unknown>,
+) {
+  return hasExactKeys(request, [
+    "externalTransport",
+    "failure",
+    "index",
+    "method",
+    "navigation",
+    "postData",
+    "redirectedFrom",
+    "requestHeaders",
+    "resourceType",
+    "response",
+    "scope",
+    "serverAction",
+    "url",
+  ])
+    && hasExactKeys(action, [
+      "identifier",
+      "method",
+      "order",
+      "payload",
+      "requestIndex",
+      "status",
+      "url",
+    ])
+    && request.index === action.requestIndex
+    && request.scope === "application"
+    && request.method === "POST"
+    && request.resourceType === "fetch"
+    && request.navigation === false
+    && request.redirectedFrom === null
+    && request.externalTransport === null
+    && isRecord(request.serverAction)
+    && request.serverAction.present === true
+    && sameJson(request.serverAction.identifier, action.identifier)
+    && sameJson(request.postData, action.payload)
+    && sameJson(request.url, action.url)
+    && action.method === request.method
+    && isRecord(request.response)
+    && request.response.status === action.status
+    && responseHasContentType(request.response, "text/x-component")
+    && isExactJourneyActionDigest(action.identifier, "server-action-id")
+    && isExactJourneyActionDigest(action.payload, "server-action-payload")
+    && hasExactJourneyNextActionHeader(request.requestHeaders, action.identifier) !== null;
+}
+
+function isExactPasskeySetupAction(action: Record<string, unknown>) {
+  return hasExactKeys(action, [
+    "identifier",
+    "method",
+    "order",
+    "payload",
+    "requestIndex",
+    "status",
+    "url",
+  ])
+    && action.method === "POST"
+    && action.status === 200
+    && Number.isSafeInteger(action.requestIndex)
+    && isExactJourneyActionDigest(action.identifier, "server-action-id")
+    && isExactJourneyActionDigest(action.payload, "server-action-payload")
+    && isRecord(action.url)
+    && action.url.origin === "<app-origin>"
+    && action.url.pathname === "/passkey/setup"
+    && Array.isArray(action.url.query)
+    && action.url.query.length === 1
+    && isRecord(action.url.query[0])
+    && action.url.query[0].key === "redirect_to"
+    && typeof action.url.query[0].value === "string"
+    && action.url.fragment === null;
+}
+
+function isExactPasskeySetupRequest(
+  request: Record<string, unknown>,
+  action: Record<string, unknown>,
+) {
+  return hasExactKeys(request, [
+    "externalTransport",
+    "failure",
+    "index",
+    "method",
+    "navigation",
+    "postData",
+    "redirectedFrom",
+    "requestHeaders",
+    "resourceType",
+    "response",
+    "scope",
+    "serverAction",
+    "url",
+  ])
+    && request.index === action.requestIndex
+    && request.scope === "application"
+    && request.method === "POST"
+    && request.resourceType === "fetch"
+    && request.navigation === false
+    && request.redirectedFrom === null
+    && request.externalTransport === null
+    && isRecord(request.serverAction)
+    && request.serverAction.present === true
+    && sameJson(request.serverAction.identifier, action.identifier)
+    && sameJson(request.postData, action.payload)
+    && sameJson(request.url, action.url)
+    && isRecord(request.response)
+    && request.response.status === 200
+    && responseHasContentType(request.response, "text/x-component")
+    && hasExactJourneyNextActionHeader(request.requestHeaders, action.identifier);
+}
+
+function projectPasskeySetupPayloadDigest(value: unknown) {
+  if (!isRecord(value) || !isRecord(value.action) || !isRecord(value.request)) return;
+  const payload = {
+    bytes: "<dynamic:passkey-setup-payload-bytes>",
+    sha256: "<dynamic:passkey-setup-payload>",
+  };
+  value.action.payload = { ...payload };
+  value.request.postData = { ...payload };
+}
+
+function projectExactAuthenticatedBrowserNoisePair(
+  expected: Record<string, unknown>,
+  actual: Record<string, unknown>,
+) {
+  if (
+    !hasExactJourneyManifestEnvelope(expected)
+    || !hasExactJourneyManifestEnvelope(actual)
+    || !exactJourneyFixtureContract(expected)
+    || !exactJourneyFixtureContract(actual)
+    || expected.project !== actual.project
+    || expected.journey !== actual.journey
+    || !isAuthenticatedJourneyWithPassiveBrowserNoise(expected.journey)
+  ) {
+    return;
+  }
+
+  const expectedTrial = cloneJson(expected);
+  const actualTrial = cloneJson(actual);
+  if (!isRecord(expectedTrial) || !isRecord(actualTrial)) return;
+  projectSuccessfulHashedStaticRequests(expectedTrial);
+  projectSuccessfulHashedStaticRequests(actualTrial);
+  const expectedChanged = removeExactAuthenticatedBrowserNoiseRequests(expectedTrial);
+  const actualChanged = removeExactAuthenticatedBrowserNoiseRequests(actualTrial);
+  if (!expectedChanged && !actualChanged) return;
+
+  const expectedProjectedTrial = projectCharacterizationManifestForComparison(expectedTrial);
+  const actualProjectedTrial = projectCharacterizationManifestForComparison(actualTrial);
+  if (!isRecord(expectedProjectedTrial) || !isRecord(actualProjectedTrial)) return;
+  projectExactConcurrentCabinetReadPair(expectedProjectedTrial, actualProjectedTrial);
+  projectExactPassiveProviderEffectOrderPair(expectedProjectedTrial, actualProjectedTrial);
+  projectExactTelegramAuthProviderDynamicPair(expectedProjectedTrial, actualProjectedTrial);
+  projectExactPasskeySetupPayloadPair(expectedProjectedTrial, actualProjectedTrial);
+  projectExactTelegramLoginPayloadBytesPair(expectedProjectedTrial, actualProjectedTrial);
+  projectExactActiveServerActionDynamicDigestPair(
+    expectedProjectedTrial,
+    actualProjectedTrial,
+  );
+  projectExactServerActionDynamicDigestPair(expectedProjectedTrial, actualProjectedTrial);
+  projectExactHashedStaticDocumentLinkPair(expectedProjectedTrial, actualProjectedTrial);
+  projectExactRemovedNextJsPoweredBy(expectedProjectedTrial, actualProjectedTrial);
+  projectExactOptionalZeroContentLengthPair(expectedProjectedTrial, actualProjectedTrial);
+  projectExactJourneyFixtureContract(expectedProjectedTrial, actualProjectedTrial);
+  projectPairedJourneyInlineStyles(expectedProjectedTrial, actualProjectedTrial);
+  if (!sameJson(expectedProjectedTrial, actualProjectedTrial)) {
+    return;
+  }
+  applyExactAuthenticatedPassiveProjection(expected, expectedProjectedTrial);
+  applyExactAuthenticatedPassiveProjection(actual, actualProjectedTrial);
+}
+
+function projectSuccessfulHashedStaticRequests(manifest: Record<string, unknown>) {
+  const network = exactProjectedNetwork(manifest);
+  if (network === null) return;
+  for (const requestValue of network.requests) {
+    if (!isRecord(requestValue)) return;
+    projectSuccessfulHashedStaticAsset(requestValue);
+  }
+}
+
+function removeExactAuthenticatedBrowserNoiseRequests(
+  manifest: Record<string, unknown>,
+) {
+  const network = exactProjectedNetwork(manifest);
+  if (network === null) return false;
+
+  const removedIndexes = new Set<number>();
+  let removedContextualBrowserNoiseRequest = false;
+  const retained = network.requests.filter((requestValue) => {
+    if (!isRecord(requestValue)) return true;
+    const contextualBrowserNoise = isAutomaticNextRscPrefetch(requestValue)
+      || isAutomaticNextRscPrefetchRedirectTail(requestValue, removedIndexes)
+      || isExactAuthenticatedPassiveRscNavigationRequest(requestValue)
+      || isExactAuthenticatedChatwootTransportNoise(manifest, requestValue)
+      || isExactPassiveRefreshServerActionRequest(manifest, requestValue);
+    if (
+      contextualBrowserNoise
+      || isExactProjectedRemovableStaticResource(requestValue)
+    ) {
+      if (contextualBrowserNoise) removedContextualBrowserNoiseRequest = true;
+      removedIndexes.add(requestValue.index as number);
+      return false;
+    }
+    return true;
+  });
+  if (!removedContextualBrowserNoiseRequest) return false;
+  return reindexExactProjectedNetworkWithRemovedActions(
+    network,
+    retained,
+    removedIndexes,
+  );
+}
+
+function isExactAuthenticatedPassiveRscNavigationRequest(
+  request: Record<string, unknown>,
+) {
+  if (
+    !hasExactKeys(request, [
+      "externalTransport",
+      "failure",
+      "index",
+      "method",
+      "navigation",
+      "postData",
+      "redirectedFrom",
+      "requestHeaders",
+      "resourceType",
+      "response",
+      "scope",
+      "serverAction",
+      "url",
+    ])
+    || request.scope !== "application"
+    || request.method !== "GET"
+    || request.resourceType !== "fetch"
+    || request.navigation !== false
+    || !isNoServerAction(request.serverAction)
+    || request.postData !== null
+    || request.externalTransport !== null
+    || !isRecord(request.url)
+    || request.url.origin !== "<app-origin>"
+    || typeof request.url.pathname !== "string"
+    || !Array.isArray(request.url.query)
+    || request.url.fragment !== null
+    || !Array.isArray(request.requestHeaders)
+  ) {
+    return false;
+  }
+
+  const queryKeys = request.url.query.map((entry) => (
+    isRecord(entry) ? entry.key : null
+  ));
+  const rscRoute = (
+    request.url.pathname === "/"
+    || request.url.pathname === "/login"
+    || request.url.pathname === "/cabinet"
+  ) && queryKeys.includes("_rsc");
+  const redirectLoginRoute = request.url.pathname === "/login"
+    && queryKeys.includes("redirect_to");
+  const orphanRootFetch = request.url.pathname === "/"
+    && request.response === null
+    && request.failure === null;
+  const responseBackedAbort = isRecord(request.response)
+    && request.response.status === 200
+    && responseHasContentType(request.response, "text/x-component")
+    && isExactResponseBackedAbortFailure(request.failure);
+  return (
+    rscRoute
+    || redirectLoginRoute
+    || orphanRootFetch
+    || responseBackedAbort
+  );
+}
+
+function removeExactAuthenticatedPassiveNetworkRequests(manifest: Record<string, unknown>) {
+  const network = exactProjectedNetwork(manifest);
+  if (network === null) return false;
+
+  const removedIndexes = new Set<number>();
+  let removedContextualPassiveRequest = false;
+  const retainedRequests = network.requests.filter((requestValue) => {
+    if (!isRecord(requestValue)) return true;
+    const contextualPassive = isExactPwaControlledDocumentRequest(manifest, requestValue)
+      || isExactPassiveRefreshServerActionRequest(manifest, requestValue)
+      || isExactAuthenticatedChatwootTransportNoise(manifest, requestValue);
+    if (
+      isExactProjectedRemovableStaticResource(requestValue)
+      || contextualPassive
+    ) {
+      if (contextualPassive) removedContextualPassiveRequest = true;
+      removedIndexes.add(requestValue.index as number);
+      return false;
+    }
+    return true;
+  });
+  if (!removedContextualPassiveRequest) return false;
+
+  return reindexExactProjectedNetworkWithRemovedActions(
+    network,
+    retainedRequests,
+    removedIndexes,
+  );
+}
+
+function reindexExactProjectedNetworkWithRemovedActions(
+  network: ExactProjectedNetwork,
+  retainedRequests: unknown[],
+  removedIndexes: Set<number>,
+) {
   const oldToNewIndex = new Map<number, number>();
   retainedRequests.forEach((request, newIndex) => {
     oldToNewIndex.set((request as Record<string, unknown>).index as number, newIndex);
@@ -429,7 +1605,10 @@ function isExactPassiveRefreshServerActionRequest(
   request: Record<string, unknown>,
 ) {
   return isExactResponseBackedJourneyServerAction(manifest, request)
-    && request.failure === null
+    && (
+      request.failure === null
+      || isExactResponseBackedAbortFailure(request.failure)
+    )
     && isRecord(request.postData)
     && request.postData.bytes === 29
     && isRecord(request.response)
@@ -448,6 +1627,12 @@ function isExactPassiveRefreshServerActionRequest(
       "/tariffs",
       "/verify-email",
     ].includes(String(request.url.pathname));
+}
+
+function isExactResponseBackedAbortFailure(value: unknown) {
+  return isRecord(value)
+    && hasExactKeys(value, ["errorText"])
+    && isExactDigest(value.errorText, NET_ERR_ABORTED);
 }
 
 function responseHasContentType(
@@ -488,13 +1673,13 @@ function collapseExactProjectedNextStaticTopologyPair(
   const plans: Array<{
     expected: ExactProjectedNextStaticTopologyGroup;
     actual: ExactProjectedNextStaticTopologyGroup;
-    resourceTypes: ExactProjectedStaticResourceType[];
+    staticSignatures: string[];
   }> = [];
   for (const [index, expectedGroup] of expectedGroups.entries()) {
     const actualGroup = actualGroups[index]!;
     if (expectedGroup.document === null || actualGroup.document === null) {
       if (expectedGroup.document !== actualGroup.document) return null;
-      plans.push({ expected: expectedGroup, actual: actualGroup, resourceTypes: [] });
+      plans.push({ expected: expectedGroup, actual: actualGroup, staticSignatures: [] });
       continue;
     }
     if (
@@ -512,40 +1697,23 @@ function collapseExactProjectedNextStaticTopologyPair(
     ) {
       return null;
     }
-    const expectedResourceTypes = exactProjectedNextStaticResourceTypes(
+    const expectedStaticSignatures = exactProjectedNextStaticSignatures(
       expectedGroup.staticRequests,
     );
-    const actualResourceTypes = exactProjectedNextStaticResourceTypes(
+    const actualStaticSignatures = exactProjectedNextStaticSignatures(
       actualGroup.staticRequests,
     );
-    if (expectedResourceTypes === null || actualResourceTypes === null) return null;
-    if (expectedResourceTypes.length === 0 && actualResourceTypes.length === 0) {
-      plans.push({ expected: expectedGroup, actual: actualGroup, resourceTypes: [] });
+    if (expectedStaticSignatures === null || actualStaticSignatures === null) return null;
+    if (expectedStaticSignatures.length === 0 && actualStaticSignatures.length === 0) {
+      plans.push({ expected: expectedGroup, actual: actualGroup, staticSignatures: [] });
       continue;
     }
     if (
-      expectedResourceTypes.length === 0
-      || actualResourceTypes.length === 0
-      || !sameJson(expectedResourceTypes, actualResourceTypes)
+      expectedStaticSignatures.length === 0
+      || actualStaticSignatures.length === 0
+      || !sameJson(expectedStaticSignatures, actualStaticSignatures)
     ) {
       return null;
-    }
-    for (const resourceType of expectedResourceTypes) {
-      const expectedSignature = exactProjectedNextStaticTypeSignature(
-        expectedGroup.staticRequests,
-        resourceType,
-      );
-      const actualSignature = exactProjectedNextStaticTypeSignature(
-        actualGroup.staticRequests,
-        resourceType,
-      );
-      if (
-        expectedSignature === null
-        || actualSignature === null
-        || expectedSignature !== actualSignature
-      ) {
-        return null;
-      }
     }
     const expectedTopology = exactProjectedNextStaticTopologyShape(expectedGroup);
     const actualTopology = exactProjectedNextStaticTopologyShape(actualGroup);
@@ -553,7 +1721,7 @@ function collapseExactProjectedNextStaticTopologyPair(
     plans.push({
       expected: expectedGroup,
       actual: actualGroup,
-      resourceTypes: expectedResourceTypes,
+      staticSignatures: expectedStaticSignatures,
     });
   }
   if (!projected) return false;
@@ -561,13 +1729,13 @@ function collapseExactProjectedNextStaticTopologyPair(
   const expectedRetained = collapseExactProjectedNextStaticTopologyGroups(
     plans.map((plan) => ({
       group: plan.expected,
-      resourceTypes: plan.resourceTypes,
+      staticSignatures: plan.staticSignatures,
     })),
   );
   const actualRetained = collapseExactProjectedNextStaticTopologyGroups(
     plans.map((plan) => ({
       group: plan.actual,
-      resourceTypes: plan.resourceTypes,
+      staticSignatures: plan.staticSignatures,
     })),
   );
   return reindexExactProjectedNetwork(expectedNetwork, expectedRetained)
@@ -633,65 +1801,72 @@ function splitExactProjectedNextStaticTopologyGroups(
   return groups;
 }
 
-type ExactProjectedStaticResourceType = "stylesheet" | "script" | "font" | "image";
-
-function exactProjectedNextStaticResourceTypes(
+function exactProjectedNextStaticSignatures(
   requests: Record<string, unknown>[],
-): ExactProjectedStaticResourceType[] | null {
-  const types = new Set<ExactProjectedStaticResourceType>();
+): string[] | null {
+  const signatures = new Set<string>();
   for (const request of requests) {
-    if (
-      request.resourceType !== "stylesheet"
-      && request.resourceType !== "script"
-      && request.resourceType !== "font"
-      && request.resourceType !== "image"
-    ) {
-      return null;
-    }
-    types.add(request.resourceType);
+    if (!isExactProjectedNextStaticResource(request)) return null;
+    signatures.add(exactProjectedNextStaticSignature(request));
   }
-  return (["stylesheet", "script", "font", "image"] as const).filter((type) => (
-    types.has(type)
-  ));
+  return [...signatures].sort();
 }
 
-function exactProjectedNextStaticTypeSignature(
-  requests: Record<string, unknown>[],
-  resourceType: ExactProjectedStaticResourceType,
-) {
-  const signatures = new Set(
-    requests
-      .filter((request) => request.resourceType === resourceType)
-      .map((request) => JSON.stringify({ ...request, index: 0 })),
-  );
-  return signatures.size === 1 ? [...signatures][0]! : null;
+function exactProjectedNextStaticSignature(request: Record<string, unknown>) {
+  return JSON.stringify(exactProjectedNextStaticSignatureRequest(request));
+}
+
+function exactProjectedNextStaticSignatureRequest(request: Record<string, unknown>) {
+  const projected: Record<string, unknown> = { ...request, index: 0 };
+  if (Array.isArray(projected.requestHeaders)) {
+    projected.requestHeaders = projected.requestHeaders.filter((header: unknown) => (
+      !isExactOptionalStaticOriginHeader(header)
+    ));
+  }
+  return projected;
+}
+
+function isExactOptionalStaticOriginHeader(value: unknown) {
+  return isRecord(value)
+    && hasExactKeys(value, ["name", "value"])
+    && value.name === "origin"
+    && sameJson(value.value, {
+      origin: "<app-origin>",
+      pathname: "/",
+      query: [],
+      fragment: null,
+    });
 }
 
 function exactProjectedNextStaticTopologyShape(
   group: ExactProjectedNextStaticTopologyGroup,
 ) {
   return group.items.map((request) => (
-      isExactProjectedNextStaticResource(request) ? request.resourceType : "<semantic>"
+      isExactProjectedNextStaticResource(request)
+        ? exactProjectedNextStaticSignature(request)
+        : "<semantic>"
   ));
 }
 
 function collapseExactProjectedNextStaticTopologyGroups(
   groups: Array<{
     group: ExactProjectedNextStaticTopologyGroup;
-    resourceTypes: ExactProjectedStaticResourceType[];
+    staticSignatures: string[];
   }>,
 ) {
-  return groups.flatMap(({ group, resourceTypes }) => {
-    if (group.document === null || resourceTypes.length === 0) return group.items;
-    const staticByType = new Map(
-      resourceTypes.map((resourceType) => [
-        resourceType,
-        group.staticRequests.find((request) => request.resourceType === resourceType)!,
-      ]),
-    );
+  return groups.flatMap(({ group, staticSignatures }) => {
+    if (group.document === null || staticSignatures.length === 0) return group.items;
+    const staticBySignature = new Map<string, Record<string, unknown>>();
+    for (const request of group.staticRequests) {
+      const signature = exactProjectedNextStaticSignature(request);
+      if (staticSignatures.includes(signature) && !staticBySignature.has(signature)) {
+        staticBySignature.set(signature, request);
+      }
+    }
+    if (staticBySignature.size !== staticSignatures.length) return group.items;
     return [
       group.document,
-      ...resourceTypes.map((resourceType) => staticByType.get(resourceType)!),
+      ...staticSignatures.map((signature) => staticBySignature.get(signature)!),
       ...group.items.filter((request) => (
         request !== group.document && !isExactProjectedNextStaticResource(request)
       )),
@@ -880,17 +2055,12 @@ function isExactProjectedNextStaticResource(request: Record<string, unknown>) {
         ? request.resourceType
         : null;
   if (request.resourceType !== expectedResourceType) return false;
-  const etags = request.response.headers.filter((header) => (
-    isRecord(header)
-    && hasExactKeys(header, ["name", "value"])
-    && header.name === "etag"
-    && header.value === "<compiled-static-etag>"
-  ));
-  return etags.length === 1;
+  return true;
 }
 
 function isExactProjectedRemovableStaticResource(request: Record<string, unknown>) {
-  return isExactProjectedNextStaticResource(request)
+  return isSuccessfulHashedStaticAsset(request)
+    || isExactProjectedNextStaticResource(request)
     || isExactProjectedApplicationStaticImage(request);
 }
 
@@ -1194,8 +2364,9 @@ function namedHeaderIndexes(headers: unknown[], name: string) {
 function isExactJourneyFixtureContractPair(expected: unknown, actual: unknown) {
   const expectedFixture = exactRawJourneyFixtureContract(expected);
   const actualFixture = exactRawJourneyFixtureContract(actual);
+  if (actualFixture?.sha256 !== currentJourneyFixtureContractSha256()) return false;
   return expectedFixture?.sha256 === PINNED_JOURNEY_V5_FIXTURE_SHA256
-    && actualFixture?.sha256 === currentJourneyFixtureContractSha256();
+    || expectedFixture?.sha256 === currentJourneyFixtureContractSha256();
 }
 
 function exactRawJourneyFixtureContract(value: unknown) {
@@ -1531,6 +2702,44 @@ function projectExactPassiveProviderEffectOrderPair(
   actual.providerEffects.entries = actualEntries;
 }
 
+function projectExactPassiveProviderEffectMultiplicityPair(
+  expected: Record<string, unknown>,
+  actual: Record<string, unknown>,
+) {
+  if (
+    !hasExactJourneyManifestEnvelope(expected)
+    || !hasExactJourneyManifestEnvelope(actual)
+    || !exactJourneyFixtureContract(expected)
+    || !exactJourneyFixtureContract(actual)
+    || expected.project !== actual.project
+    || expected.journey !== actual.journey
+    || !isExactPublicJourneyEnvelope(expected)
+  ) {
+    return;
+  }
+
+  const expectedTrial = cloneJson(expected);
+  const actualTrial = cloneJson(actual);
+  if (!isRecord(expectedTrial) || !isRecord(actualTrial)) return;
+  const expectedChanged = removeExactPassiveProviderEffects(expectedTrial);
+  const actualChanged = removeExactPassiveProviderEffects(actualTrial);
+  if (!expectedChanged && !actualChanged) return;
+  projectJourneyProviderReadinessNoise(expectedTrial);
+  projectJourneyProviderReadinessNoise(actualTrial);
+  projectExactConcurrentCabinetReadPair(expectedTrial, actualTrial);
+  projectExactPassiveProviderEffectOrderPair(expectedTrial, actualTrial);
+  projectExactTelegramAuthProviderDynamicPair(expectedTrial, actualTrial);
+  projectExactPasskeySetupPayloadPair(expectedTrial, actualTrial);
+  projectExactTelegramLoginPayloadBytesPair(expectedTrial, actualTrial);
+  projectExactActiveServerActionDynamicDigestPair(expectedTrial, actualTrial);
+  projectExactServerActionDynamicDigestPair(expectedTrial, actualTrial);
+  projectExactJourneyFixtureContract(expectedTrial, actualTrial);
+  projectPairedJourneyInlineStyles(expectedTrial, actualTrial);
+  if (!sameJson(expectedTrial, actualTrial)) return;
+  applyExactAuthenticatedPassiveProjection(expected, expectedTrial);
+  applyExactAuthenticatedPassiveProjection(actual, actualTrial);
+}
+
 function exactPassiveProviderEffectCanonicalEntries(entries: unknown[]) {
   const orderedActiveEntries: Record<string, unknown>[] = [];
   const passiveEntries: Record<string, unknown>[] = [];
@@ -1735,7 +2944,6 @@ function exactConcurrentCabinetReadKind(entry: Record<string, unknown>) {
       "service",
     ])
     || !Number.isSafeInteger(entry.sequence)
-    || entry.service !== "remnashop"
     || entry.method !== "GET"
     || !Array.isArray(entry.query_keys)
     || entry.query_keys.length !== 0
@@ -1787,6 +2995,14 @@ function exactConcurrentCabinetReadKind(entry: Record<string, unknown>) {
   ) {
     return "devices";
   }
+  if (
+    entry.service === "remnawave"
+    && entry.pathname === "/api/users/rw-browser-1"
+    && entry.effect === "read_user_by_uuid"
+    && isExactRemnawaveReadCredential(entry.credential_contract)
+  ) {
+    return "remnawave-user";
+  }
   return null;
 }
 
@@ -1796,6 +3012,14 @@ function isExactCabinetReadCredential(value: unknown, headerNames: string[]) {
     && value.authorization_scheme === null
     && sameJson(value.cookie_names, ["access_token"])
     && sameJson(value.header_names, headerNames);
+}
+
+function isExactRemnawaveReadCredential(value: unknown) {
+  return isRecord(value)
+    && hasExactKeys(value, ["authorization_scheme", "cookie_names", "header_names"])
+    && value.authorization_scheme === "Bearer"
+    && sameJson(value.cookie_names, [])
+    && sameJson(value.header_names, ["authorization"]);
 }
 
 function isExactReadinessLedgerEntry(entry: Record<string, unknown>) {
@@ -2451,6 +3675,96 @@ function projectExactRemovedNextJsPoweredBy(expected: unknown, actual: unknown) 
   );
 }
 
+function projectExactOptionalZeroContentLengthPair(expected: unknown, actual: unknown) {
+  if (!isRecord(expected) || !isRecord(actual)) return;
+  const expectedNetwork = expected.network;
+  const actualNetwork = actual.network;
+  projectExactOptionalZeroContentLengthRequests(
+    isRecord(expectedNetwork) ? expectedNetwork.requests : undefined,
+    isRecord(actualNetwork) ? actualNetwork.requests : undefined,
+  );
+}
+
+function projectExactOptionalZeroContentLengthRequests(
+  expectedRequests: unknown,
+  actualRequests: unknown,
+) {
+  if (!Array.isArray(expectedRequests) || !Array.isArray(actualRequests)) return;
+  const requestCount = Math.min(expectedRequests.length, actualRequests.length);
+  for (let position = 0; position < requestCount; position += 1) {
+    const expectedRequestValue = expectedRequests[position];
+    const actualRequestValue = actualRequests[position];
+    if (
+      !isRecord(expectedRequestValue)
+      || !isRecord(actualRequestValue)
+      || expectedRequestValue.scope !== "application"
+      || actualRequestValue.scope !== "application"
+      || !equalExceptKey(expectedRequestValue, actualRequestValue, "response")
+      || !isRecord(expectedRequestValue.response)
+      || !isRecord(actualRequestValue.response)
+      || expectedRequestValue.response.status !== 307
+      || actualRequestValue.response.status !== 307
+      || !equalExceptKey(expectedRequestValue.response, actualRequestValue.response, "headers")
+    ) {
+      continue;
+    }
+    projectExactOptionalZeroContentLengthHeaders(
+      expectedRequestValue.response,
+      actualRequestValue.response,
+    );
+  }
+}
+
+function projectExactOptionalZeroContentLengthHeaders(
+  expectedResponse: Record<string, unknown>,
+  actualResponse: Record<string, unknown>,
+) {
+  const expectedHeaders = expectedResponse.headers;
+  const actualHeaders = actualResponse.headers;
+  if (!Array.isArray(expectedHeaders) || !Array.isArray(actualHeaders)) return;
+
+  if (removeExactOptionalZeroContentLengthHeader(expectedHeaders, actualHeaders)) {
+    expectedResponse.headers = expectedHeaders.filter((header) => (
+      !isExactZeroContentLengthHeader(header)
+    ));
+    return;
+  }
+  if (removeExactOptionalZeroContentLengthHeader(actualHeaders, expectedHeaders)) {
+    actualResponse.headers = actualHeaders.filter((header) => (
+      !isExactZeroContentLengthHeader(header)
+    ));
+  }
+}
+
+function removeExactOptionalZeroContentLengthHeader(
+  sourceHeaders: unknown[],
+  targetHeaders: unknown[],
+) {
+  const contentLengthIndexes = sourceHeaders.flatMap((header, index) => (
+    isExactZeroContentLengthHeader(header) ? [index] : []
+  ));
+  if (
+    contentLengthIndexes.length !== 1
+    || targetHeaders.some((header) => (
+      isRecord(header) && header.name === "content-length"
+    ))
+  ) {
+    return false;
+  }
+
+  const sourceWithoutContentLength = sourceHeaders.filter(
+    (_, index) => index !== contentLengthIndexes[0],
+  );
+  return sameJson(sourceWithoutContentLength, targetHeaders);
+}
+
+function isExactZeroContentLengthHeader(value: unknown) {
+  return isRecord(value)
+    && hasExactKeys(value, ["name", "value"])
+    && value.name === "content-length"
+    && value.value === "0";
+}
+
 function projectExactRemovedNextJsPoweredByRequests(
   expectedRequests: unknown,
   actualRequests: unknown,
@@ -2490,28 +3804,54 @@ function projectExactRemovedNextJsPoweredByRequests(
       continue;
     }
 
-    const expectedHeaders = expectedRequestValue.response.headers;
-    const actualHeaders = actualRequestValue.response.headers;
-    const disclosureIndexes = expectedHeaders.flatMap((header, index) => (
-      isExactNextJsPoweredByHeader(header) ? [index] : []
-    ));
-    if (
-      disclosureIndexes.length !== 1
-      || actualHeaders.some((header) => (
-        isRecord(header) && header.name === "x-powered-by"
-      ))
-    ) {
-      continue;
-    }
-
-    const expectedWithoutDisclosure = expectedHeaders.filter(
-      (_, index) => index !== disclosureIndexes[0],
+    projectExactRemovedNextJsPoweredByHeaders(
+      expectedRequestValue.response,
+      actualRequestValue.response,
     );
-    if (JSON.stringify(expectedWithoutDisclosure) !== JSON.stringify(actualHeaders)) {
-      continue;
-    }
-    expectedRequestValue.response.headers = expectedWithoutDisclosure;
   }
+}
+
+function projectExactRemovedNextJsPoweredByHeaders(
+  expectedResponse: Record<string, unknown>,
+  actualResponse: Record<string, unknown>,
+) {
+  const expectedHeaders = expectedResponse.headers;
+  const actualHeaders = actualResponse.headers;
+  if (!Array.isArray(expectedHeaders) || !Array.isArray(actualHeaders)) return;
+
+  if (removeExactNextJsPoweredByHeader(expectedHeaders, actualHeaders)) {
+    expectedResponse.headers = expectedHeaders.filter((header) => (
+      !isExactNextJsPoweredByHeader(header)
+    ));
+    return;
+  }
+  if (removeExactNextJsPoweredByHeader(actualHeaders, expectedHeaders)) {
+    actualResponse.headers = actualHeaders.filter((header) => (
+      !isExactNextJsPoweredByHeader(header)
+    ));
+  }
+}
+
+function removeExactNextJsPoweredByHeader(
+  sourceHeaders: unknown[],
+  targetHeaders: unknown[],
+) {
+  const disclosureIndexes = sourceHeaders.flatMap((header, index) => (
+    isExactNextJsPoweredByHeader(header) ? [index] : []
+  ));
+  if (
+    disclosureIndexes.length !== 1
+    || targetHeaders.some((header) => (
+      isRecord(header) && header.name === "x-powered-by"
+    ))
+  ) {
+    return false;
+  }
+
+  const sourceWithoutDisclosure = sourceHeaders.filter(
+    (_, index) => index !== disclosureIndexes[0],
+  );
+  return sameJson(sourceWithoutDisclosure, targetHeaders);
 }
 
 function isExactNextJsPoweredByHeader(value: unknown) {
@@ -2617,6 +3957,21 @@ function isExactAuthenticatedChatwootTransportNoise(
   request: Record<string, unknown>,
 ) {
   if (
+    hasExactJourneyManifestEnvelope(manifest)
+    && exactJourneyFixtureContract(manifest)
+    && [
+      "email-account-links-and-merges-telegram",
+      "email-register-verify-and-login",
+      "tariffs-payment-returns-extend-idempotency",
+      "telegram-oidc-cabinet-profile-link-referral-passkey",
+      "telegram-webapp-browser-boundary",
+    ].includes(String(manifest.journey))
+    && isExactPassiveChatwootDocumentAbortRequest(manifest, request)
+  ) {
+    return true;
+  }
+
+  if (
     !hasExactJourneyManifestEnvelope(manifest)
     || !exactJourneyFixtureContract(manifest)
     || ![
@@ -2688,6 +4043,60 @@ function isExactAuthenticatedChatwootTransportNoise(
   }
 
   return false;
+}
+
+function isExactPassiveChatwootDocumentAbortRequest(
+  manifest: Record<string, unknown>,
+  request: Record<string, unknown>,
+) {
+  return hasExactJourneyManifestEnvelope(manifest)
+    && exactJourneyFixtureContract(manifest) !== null
+    && isAuthenticatedJourneyWithPassiveBrowserNoise(manifest.journey)
+    && hasExactKeys(request, [
+      "externalTransport",
+      "failure",
+      "index",
+      "method",
+      "navigation",
+      "postData",
+      "redirectedFrom",
+      "requestHeaders",
+      "resourceType",
+      "response",
+      "scope",
+      "serverAction",
+      "url",
+    ])
+    && request.scope === "external"
+    && request.method === "GET"
+    && request.resourceType === "document"
+    && request.navigation === true
+    && isNoServerAction(request.serverAction)
+    && request.postData === null
+    && request.redirectedFrom === null
+    && (
+      request.response === null
+      || isExactChatwootDocumentResponse(request.response)
+    )
+    && request.externalTransport === "<redacted>"
+    && isRecord(request.failure)
+    && hasExactKeys(request.failure, ["errorText"])
+    && isExactDigest(request.failure.errorText, NET_ERR_ABORTED)
+    && isRecord(request.url)
+    && typeof request.url.origin === "string"
+    && request.url.origin.startsWith("<external-origin:")
+    && request.url.pathname === "<external-path:segments=1:extension=none>"
+    && Array.isArray(request.url.query)
+    && (
+      sameJson(request.url.query, [{ key: "website_token", value: "<redacted>" }])
+      || sameJson(request.url.query, [
+        { key: "website_token", value: "<redacted>" },
+        { key: "cw_conversation", value: "<redacted>" },
+      ])
+    )
+    && request.url.fragment === null
+    && Array.isArray(request.requestHeaders)
+    && isExactChatwootTransportHeaders(request.requestHeaders);
 }
 
 function isExactChatwootTransportHeaders(headers: unknown[]) {

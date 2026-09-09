@@ -1755,6 +1755,40 @@ test("rejects arbitrary same-host paths, queries, redirects, methods, and transp
     expect.objectContaining({ redirectEdge: "app-login-root-rsc:307->app-login-root-rsc" }),
     expect.objectContaining({ redirectEdge: null }),
   ]);
+  const terminalLoginRscRedirectRecords = structuredClone(validRecords);
+  terminalLoginRscRedirectRecords.splice(
+    telegramStartIndex,
+    0,
+    requestRecord(loginProfileRsc, "app-login-document", 307, "application/octet-stream"),
+  );
+  expect(finalizeProviderOverlapBrowserContract(
+    terminalLoginRscRedirectRecords,
+    staticLoadGraph,
+  ).semanticRequestLedger).toContainEqual(expect.objectContaining({
+    key: "app-login-rsc",
+    redirectEdge: null,
+    responseStatus: 307,
+  }));
+  const terminalRootRscRedirectRecords = structuredClone(validRecords);
+  terminalRootRscRedirectRecords.splice(
+    telegramStartIndex,
+    0,
+    requestRecord(rootRsc, "app-login-document", 307, null),
+  );
+  expect(finalizeProviderOverlapBrowserContract(
+    terminalRootRscRedirectRecords,
+    staticLoadGraph,
+  ).semanticRequestLedger).toContainEqual(expect.objectContaining({
+    key: "app-root-rsc",
+    redirectEdge: null,
+    responseStatus: 307,
+  }));
+  const forgedTerminalLoginRscRedirectRecords = structuredClone(terminalLoginRscRedirectRecords);
+  forgedTerminalLoginRscRedirectRecords[telegramStartIndex].responseContentType = null;
+  expect(() => finalizeProviderOverlapBrowserContract(
+    forgedTerminalLoginRscRedirectRecords,
+    staticLoadGraph,
+  )).toThrow(/response content type is not exact/);
   const exactAbortedRootPrefetchRecords = structuredClone(rootPrefetchRecords);
   const exactAbortedRootPrefetchIndex = exactAbortedRootPrefetchRecords.findLastIndex((record) => (
     record.classification.key === "app-login-root-rsc" && record.responseStatus === 200
@@ -2013,12 +2047,10 @@ test("rejects arbitrary same-host paths, queries, redirects, methods, and transp
   expect(() => finalizeProviderOverlapBrowserContract(wrongContentType, staticLoadGraph)).toThrow();
   const orphanedRedirect = structuredClone(validRecords);
   orphanedRedirect.push({
-    classification: browserClassification("https://pay.ci.clean-pay.dev/?_rsc=opaque-state_1", {
-      resourceType: "fetch",
-    }),
+    classification: telegramStart,
     documentKey: "app-cabinet-document",
     redirectEdge: null,
-    responseContentType: null,
+    responseContentType: "application/octet-stream",
     responseFailureSha256: null,
     responseStatus: 307,
     staticResponseBytes: null,
@@ -3219,6 +3251,35 @@ test("uses terminal-gated raw response content type without delaying body prearm
     responseStatus: 200,
   });
   expect(lifecycle.slice(2)).toEqual(["body-completed-after-terminal"]);
+});
+
+test("falls back to synchronous response headers when raw headerValue fails", async () => {
+  const request = {};
+  const classification = browserClassification(
+    "https://pay.ci.clean-pay.dev/login?redirect_to=%2Fprofile",
+    { resourceType: "document", isNavigation: true, isMainFrame: true },
+  );
+  const body = Buffer.from("<!doctype html><h1>Login</h1>");
+  const response = {
+    headerValue: () => {
+      throw new Error("response.allHeaders: synthetic read failure");
+    },
+    body: async () => body,
+    finished: async () => null,
+    headers: () => ({ "content-type": "text/html; charset=utf-8" }),
+    request: () => request,
+    status: () => 200,
+  };
+
+  await expect(captureProviderOverlapResponseEvidence({
+    classification,
+    request,
+    response,
+  })).resolves.toMatchObject({
+    body,
+    responseContentType: "text/html",
+    responseStatus: 200,
+  });
 });
 
 test("uses the exact raw content type for bodyless Telegram redirects", async () => {

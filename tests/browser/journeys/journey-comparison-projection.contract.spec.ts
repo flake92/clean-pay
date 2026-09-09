@@ -377,13 +377,13 @@ test("projects passive authenticated provider effect order only with exact multi
     passiveProviderEffect(2, "contact_identity_probed"),
     passiveProviderEffect(3, "contact_identity_probed"),
     structuredClone(baseline.providerEffects.entries[0]!),
-  ] as typeof baseline.providerEffects.entries;
+  ] as unknown as typeof baseline.providerEffects.entries;
   baseline.providerEffects.entries[3]!.sequence = 4;
   candidate.providerEffects.entries = [
     passiveProviderEffect(1, "contact_identity_probed"),
     passiveProviderEffect(2, "read_profile"),
     structuredClone(candidate.providerEffects.entries[0]!),
-  ] as typeof candidate.providerEffects.entries;
+  ] as unknown as typeof candidate.providerEffects.entries;
   candidate.providerEffects.entries[2]!.sequence = 3;
 
   expect(projectPair(baseline, candidate).actual)
@@ -398,6 +398,295 @@ test("projects passive authenticated provider effect order only with exact multi
   countNearMiss.providerEffects.entries[1]!.sequence = 2;
   expect(projectPair(baseline, countNearMiss).actual)
     .not.toEqual(projectPair(baseline, countNearMiss).expected);
+});
+
+test("projects concurrent Remnawave cabinet reads in the authenticated passive multiset", () => {
+  const baseline = journeyManifest("baseline");
+  const candidate = journeyManifest("candidate");
+  baseline.journey = "telegram-oidc-cabinet-profile-link-referral-passkey";
+  candidate.journey = "telegram-oidc-cabinet-profile-link-referral-passkey";
+  baseline.providerEffects.entries = [
+    passiveProviderEffect(1, "read_profile"),
+    remnawaveProviderEffect(2),
+    structuredClone(baseline.providerEffects.entries[0]!),
+  ] as unknown as typeof baseline.providerEffects.entries;
+  baseline.providerEffects.entries[2]!.sequence = 3;
+  candidate.providerEffects.entries = [
+    remnawaveProviderEffect(1),
+    passiveProviderEffect(2, "read_profile"),
+    structuredClone(candidate.providerEffects.entries[0]!),
+  ] as unknown as typeof candidate.providerEffects.entries;
+  candidate.providerEffects.entries[2]!.sequence = 3;
+
+  expect(projectPair(baseline, candidate).actual)
+    .toEqual(projectPair(baseline, candidate).expected);
+});
+
+test("projects authenticated Chatwoot document abort transport noise", () => {
+  const baseline = journeyManifest("baseline");
+  const candidate = journeyManifest("candidate");
+  baseline.journey = "email-account-links-and-merges-telegram";
+  candidate.journey = "email-account-links-and-merges-telegram";
+  addExactChatwootTransportRequest(baseline, "document");
+  const aborted = baseline.network.requests.at(-1)!;
+  aborted.response = null as unknown as typeof aborted.response;
+  aborted.failure = {
+    errorText: {
+      bytes: 16,
+      sha256: "7ba7a1709a2d7d220e120c927e0a7e90adf45c88b09ba912b237d705090d1d4e",
+    },
+  };
+
+  expect(projectPair(baseline, candidate).actual)
+    .toEqual(projectPair(baseline, candidate).expected);
+});
+
+test("projects response-backed authenticated Chatwoot document abort transport noise", () => {
+  const baseline = journeyManifest("baseline");
+  const candidate = journeyManifest("candidate");
+  baseline.journey = "email-account-links-and-merges-telegram";
+  candidate.journey = "email-account-links-and-merges-telegram";
+  addExactChatwootTransportRequest(baseline, "document");
+  const aborted = baseline.network.requests.at(-1)!;
+  aborted.url.query = [
+    { key: "website_token", value: "<redacted>" },
+    { key: "cw_conversation", value: "<redacted>" },
+  ];
+  aborted.failure = {
+    errorText: {
+      bytes: 16,
+      sha256: "7ba7a1709a2d7d220e120c927e0a7e90adf45c88b09ba912b237d705090d1d4e",
+    },
+  };
+
+  expect(projectPair(baseline, candidate).actual)
+    .toEqual(projectPair(baseline, candidate).expected);
+});
+
+test("projects authenticated browser noise after removing passive server actions", () => {
+  const baseline = journeyManifest("baseline");
+  const candidate = journeyManifest("candidate");
+  baseline.journey = "email-account-links-and-merges-telegram";
+  candidate.journey = "email-account-links-and-merges-telegram";
+  configureResponseBackedAction(baseline, "/register", 143);
+  configureResponseBackedAction(candidate, "/register", 143);
+  prependPassiveRefreshAction(baseline);
+
+  const projected = projectPair(baseline, candidate);
+  expect(projected.actual).toEqual(projected.expected);
+  expect((projected.actual as typeof candidate).network.serverActions)
+    .toHaveLength(1);
+
+  baseline.source.fixtureContract.sha256 = currentJourneyFixtureContractSha256();
+  const currentPair = projectCharacterizationManifestPairForComparison(baseline, candidate);
+  expect(currentPair.actual).toEqual(currentPair.expected);
+});
+
+test("projects response-backed aborted passive authenticated refresh actions", () => {
+  const baseline = journeyManifest("baseline");
+  const candidate = journeyManifest("candidate");
+  baseline.journey = "email-account-links-and-merges-telegram";
+  candidate.journey = "email-account-links-and-merges-telegram";
+  configureResponseBackedAction(baseline, "/register", 143);
+  configureResponseBackedAction(candidate, "/register", 143);
+  prependPassiveRefreshAction(baseline);
+  baseline.network.requests[0]!.failure = {
+    errorText: {
+      bytes: 16,
+      sha256: "7ba7a1709a2d7d220e120c927e0a7e90adf45c88b09ba912b237d705090d1d4e",
+    },
+  };
+
+  const projected = projectPair(baseline, candidate);
+  expect(projected.actual).toEqual(projected.expected);
+  expect((projected.actual as typeof candidate).network.serverActions)
+    .toHaveLength(1);
+});
+
+test("projects optional zero content-length on exact 307 redirects", () => {
+  const baseline = journeyManifest("baseline");
+  const candidate = journeyManifest("candidate");
+  baseline.journey = "telegram-oidc-cabinet-profile-link-referral-passkey";
+  candidate.journey = "telegram-oidc-cabinet-profile-link-referral-passkey";
+  setTelegramCallbackRedirect(baseline, false);
+  setTelegramCallbackRedirect(candidate, true);
+
+  expect(projectPair(baseline, candidate).actual)
+    .toEqual(projectPair(baseline, candidate).expected);
+});
+
+test("projects bounded Telegram login server action payload byte drift", () => {
+  const baseline = journeyManifest("baseline");
+  const candidate = journeyManifest("candidate");
+  baseline.journey = "telegram-oidc-cabinet-profile-link-referral-passkey";
+  candidate.journey = "telegram-oidc-cabinet-profile-link-referral-passkey";
+  configureResponseBackedAction(baseline, "/login", 700);
+  configureResponseBackedAction(candidate, "/login", 720);
+  baseline.network.requests[0]!.url = canonicalUrl("/login");
+  baseline.network.serverActions[0]!.url = baseline.network.requests[0]!.url;
+  candidate.network.requests[0]!.url = canonicalUrl("/login");
+  candidate.network.serverActions[0]!.url = candidate.network.requests[0]!.url;
+
+  const projected = projectPair(baseline, candidate);
+  expect(projected.actual).toEqual(projected.expected);
+  expect((projected.actual as typeof candidate).network.requests[0]!.postData.bytes)
+    .toBe("<dynamic:telegram-login-payload-bytes>");
+
+  const nearMiss = journeyManifest("candidate");
+  nearMiss.journey = candidate.journey;
+  configureResponseBackedAction(nearMiss, "/login", 1200);
+  nearMiss.network.requests[0]!.url = canonicalUrl("/login");
+  nearMiss.network.serverActions[0]!.url = nearMiss.network.requests[0]!.url;
+  expect(projectPair(baseline, nearMiss).actual)
+    .not.toEqual(projectPair(baseline, nearMiss).expected);
+});
+
+test("projects Telegram login payload drift beside passkey setup payload drift", () => {
+  const baseline = journeyManifest("baseline");
+  const candidate = journeyManifest("candidate");
+  baseline.journey = "telegram-oidc-cabinet-profile-link-referral-passkey";
+  candidate.journey = "telegram-oidc-cabinet-profile-link-referral-passkey";
+  configureResponseBackedAction(baseline, "/login", 638);
+  configureResponseBackedAction(candidate, "/login", 784);
+  baseline.network.requests[0]!.url = canonicalUrl("/login");
+  baseline.network.serverActions[0]!.url = baseline.network.requests[0]!.url;
+  candidate.network.requests[0]!.url = canonicalUrl("/login");
+  candidate.network.serverActions[0]!.url = candidate.network.requests[0]!.url;
+  appendExactServerAction(
+    baseline,
+    "/passkey/setup",
+    [{ key: "redirect_to", value: "<dynamic:query-redirect_to:1>" }],
+    1026,
+    "passkey-setup",
+  );
+  appendExactServerAction(
+    candidate,
+    "/passkey/setup",
+    [{ key: "redirect_to", value: "<dynamic:query-redirect_to:1>" }],
+    1172,
+    "passkey-setup",
+  );
+
+  const projected = projectPair(baseline, candidate);
+  expect(projected.actual).toEqual(projected.expected);
+  const projectedNetwork = (projected.actual as typeof candidate).network;
+  expect(projectedNetwork.requests[0]!.postData.bytes)
+    .toBe("<dynamic:telegram-login-payload-bytes>");
+  expect(projectedNetwork.requests[1]!.postData.bytes)
+    .toBe("<dynamic:passkey-setup-payload-bytes>");
+});
+
+test("projects final authenticated passive network and provider multiplicity drift", () => {
+  const baseline = journeyManifest("baseline");
+  const candidate = journeyManifest("candidate");
+  baseline.journey = "email-account-links-and-merges-telegram";
+  candidate.journey = "email-account-links-and-merges-telegram";
+  configureResponseBackedAction(baseline, "/register", 143);
+  configureResponseBackedAction(candidate, "/register", 143);
+  prependPassiveRefreshAction(candidate);
+  candidate.providerEffects.entries.push(
+    passiveProviderEffect(2, "read_profile") as unknown as typeof candidate.providerEffects.entries[number],
+  );
+
+  const projected = projectPair(baseline, candidate);
+  expect(projected.actual).toEqual(projected.expected);
+  expect((projected.actual as typeof candidate).network.serverActions)
+    .toHaveLength(1);
+  expect((projected.actual as typeof candidate).providerEffects.entries)
+    .toHaveLength(1);
+});
+
+test("projects public install exact provider readiness multiplicity drift", () => {
+  const baseline = journeyManifest("baseline");
+  const candidate = journeyManifest("candidate");
+  baseline.journey = "public-responsive-keyboard-install-offline-support";
+  candidate.journey = "public-responsive-keyboard-install-offline-support";
+  baseline.project = "journey-768x1024";
+  candidate.project = "journey-768x1024";
+  baseline.providerEffects.entries = [
+    enrichedReadinessEffect(1, "metadata"),
+    enrichedReadinessEffect(2, "email-start"),
+    enrichedReadinessEffect(3, "identify"),
+    enrichedReadinessEffect(4, "service-session"),
+    enrichedReadinessEffect(5, "notification-preferences"),
+    enrichedReadinessEffect(6, "plans"),
+    enrichedReadinessEffect(7, "jwks"),
+    enrichedReadinessEffect(8, "metadata"),
+    enrichedReadinessEffect(9, "email-start"),
+    enrichedReadinessEffect(10, "identify"),
+    enrichedReadinessEffect(11, "service-session"),
+    enrichedReadinessEffect(12, "notification-preferences"),
+    enrichedReadinessEffect(13, "plans"),
+    enrichedReadinessEffect(14, "metadata"),
+    enrichedReadinessEffect(15, "jwks"),
+    enrichedReadinessEffect(16, "email-start"),
+    enrichedReadinessEffect(17, "identify"),
+    enrichedReadinessEffect(18, "service-session"),
+    enrichedReadinessEffect(19, "notification-preferences"),
+  ] as unknown as typeof baseline.providerEffects.entries;
+  candidate.providerEffects.entries = [
+    enrichedReadinessEffect(1, "plans"),
+    enrichedReadinessEffect(2, "metadata"),
+    enrichedReadinessEffect(3, "jwks"),
+    enrichedReadinessEffect(4, "email-start"),
+    enrichedReadinessEffect(5, "identify"),
+    enrichedReadinessEffect(6, "service-session"),
+    enrichedReadinessEffect(7, "notification-preferences"),
+    enrichedReadinessEffect(8, "plans"),
+    enrichedReadinessEffect(9, "jwks"),
+    enrichedReadinessEffect(10, "metadata"),
+    enrichedReadinessEffect(11, "email-start"),
+    enrichedReadinessEffect(12, "identify"),
+    enrichedReadinessEffect(13, "service-session"),
+    enrichedReadinessEffect(14, "notification-preferences"),
+    enrichedReadinessEffect(15, "plans"),
+    enrichedReadinessEffect(16, "metadata"),
+    enrichedReadinessEffect(17, "email-start"),
+    enrichedReadinessEffect(18, "jwks"),
+    enrichedReadinessEffect(19, "identify"),
+    enrichedReadinessEffect(20, "service-session"),
+    enrichedReadinessEffect(21, "notification-preferences"),
+  ] as unknown as typeof candidate.providerEffects.entries;
+
+  const projected = projectPair(baseline, candidate);
+  expect(projected.actual).toEqual(projected.expected);
+  expect((projected.actual as typeof candidate).providerEffects.entries)
+    .toHaveLength(0);
+});
+
+test("keeps public install active provider multiplicity drift observable", () => {
+  const baseline = journeyManifest("baseline");
+  const candidate = journeyManifest("candidate");
+  baseline.journey = "public-responsive-keyboard-install-offline-support";
+  candidate.journey = "public-responsive-keyboard-install-offline-support";
+  baseline.project = "journey-768x1024";
+  candidate.project = "journey-768x1024";
+  candidate.providerEffects.entries = [
+    structuredClone(baseline.providerEffects.entries[0]!),
+    structuredClone(baseline.providerEffects.entries[0]!),
+  ] as typeof candidate.providerEffects.entries;
+  candidate.providerEffects.entries[1]!.sequence = 2;
+
+  const projected = projectPair(baseline, candidate);
+  expect((projected.actual as typeof candidate).providerEffects.entries)
+    .toHaveLength(2);
+});
+
+test("projects authenticated static chunk multiplicity beside passive network drift", () => {
+  const baseline = journeyManifest("baseline");
+  const candidate = journeyManifest("candidate");
+  baseline.journey = "email-register-verify-and-login";
+  candidate.journey = "email-register-verify-and-login";
+  configureResponseBackedAction(baseline, "/register", 143);
+  configureResponseBackedAction(candidate, "/register", 143);
+  setHashedNextTopology(baseline, "baseline", 4, true);
+  setHashedNextTopology(candidate, "candidate", 1, false);
+  appendExactServerAction(candidate, "/cabinet", [], 29, "passive-cabinet-refresh");
+
+  const projected = projectPair(baseline, candidate);
+  expect(projected.actual).toEqual(projected.expected);
+  expect((projected.actual as typeof candidate).network.serverActions)
+    .toHaveLength(1);
 });
 
 test("projects passive authenticated payment refresh actions beside active payment actions", () => {
@@ -475,10 +764,10 @@ test("projects hashed Next topology only after complete journey semantic proof",
   const projected = projectPair(baseline, candidate);
   expect(projected.actual).toEqual(projected.expected);
   const projectedNetwork = (projected.actual as typeof candidate).network;
-  expect(projectedNetwork.requests).toHaveLength(3);
+  expect(projectedNetwork.requests).toHaveLength(2);
   expect(projectedNetwork.serverActions).toHaveLength(1);
   expect(projectedNetwork.serverActionCount).toBe(1);
-  expect(projectedNetwork.serverActions[0]!.requestIndex).toBe(2);
+  expect(projectedNetwork.serverActions[0]!.requestIndex).toBe(1);
   expect(projectedNetwork.serverActions[0]!.order).toBe(0);
   expect(projectedNetwork.serverActions[0]!.payload.bytes).toBe(240);
 
@@ -557,8 +846,8 @@ test("projects hashed Next topology when a valid chunk floats around a server ac
   const projected = projectPair(baseline, candidate);
   expect(projected.actual).toEqual(projected.expected);
   const projectedNetwork = (projected.actual as typeof candidate).network;
-  expect(projectedNetwork.requests).toHaveLength(3);
-  expect(projectedNetwork.serverActions[0]!.requestIndex).toBe(2);
+  expect(projectedNetwork.requests).toHaveLength(2);
+  expect(projectedNetwork.serverActions[0]!.requestIndex).toBe(1);
 
   const staticNearMiss = journeyManifest("candidate");
   setHashedNextTopology(staticNearMiss, "candidate", 1, false);
@@ -1211,6 +1500,193 @@ function passiveProviderEffect(
     },
     effect,
   };
+}
+
+function enrichedReadinessEffect(
+  sequence: number,
+  kind: "email-start" | "identify" | "jwks" | "metadata" | "notification-preferences"
+    | "plans" | "service-session",
+) {
+  const base = {
+    sequence,
+    query_keys: [] as string[],
+    idempotency_key_present: false,
+    idempotency_key_sha256: null,
+    idempotency_key_contract: null,
+  };
+  if (kind === "plans") {
+    return {
+      ...base,
+      service: "remnashop",
+      method: "GET",
+      pathname: "/api/v1/public/plans/public",
+      body_bytes: 0,
+      body_sha256: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      body_contract: null,
+      credential_contract: {
+        header_names: [],
+        authorization_scheme: null,
+        cookie_names: [],
+      },
+      effect: "read_public_plans",
+    };
+  }
+  if (kind === "metadata") {
+    return {
+      ...base,
+      service: "remnawave",
+      method: "GET",
+      pathname: "/api/system/metadata",
+      body_bytes: 0,
+      body_sha256: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      body_contract: null,
+      credential_contract: {
+        header_names: ["authorization"],
+        authorization_scheme: "Bearer",
+        cookie_names: [],
+      },
+      effect: "read_metadata",
+    };
+  }
+  if (kind === "jwks") {
+    return {
+      ...base,
+      service: "telegram-oidc",
+      method: "GET",
+      pathname: "/.well-known/jwks.json",
+      body_bytes: 0,
+      body_sha256: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      body_contract: null,
+      credential_contract: {
+        header_names: [],
+        authorization_scheme: null,
+        cookie_names: [],
+      },
+      effect: "jwks_read",
+    };
+  }
+  const pathnameByKind = {
+    "email-start": "/api/v1/public/auth/email/start",
+    identify: "/api/v1/public/auth/identify",
+    "service-session": "/api/v1/public/auth/service-session",
+    "notification-preferences": "/api/v1/public/auth/notification-preferences",
+  };
+  return {
+    ...base,
+    service: "remnashop",
+    method: "POST",
+    pathname: pathnameByKind[kind],
+    body_bytes: 2,
+    body_sha256: "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+    body_contract: {
+      encoding: "json",
+      value: {},
+    },
+    credential_contract: {
+      header_names: ["x-remnashop-auth-service-key"],
+      authorization_scheme: null,
+      cookie_names: [],
+    },
+    effect: "probe_contract",
+  };
+}
+
+function remnawaveProviderEffect(sequence: number) {
+  return {
+    sequence,
+    service: "remnawave",
+    method: "GET",
+    pathname: "/api/users/rw-browser-1",
+    query_keys: [],
+    body_bytes: 0,
+    body_sha256: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    body_contract: null,
+    idempotency_key_present: false,
+    idempotency_key_sha256: null,
+    idempotency_key_contract: null,
+    credential_contract: {
+      header_names: ["authorization"],
+      authorization_scheme: "Bearer",
+      cookie_names: [],
+    },
+    effect: "read_user_by_uuid",
+  };
+}
+
+function configureResponseBackedAction(
+  manifest: ReturnType<typeof journeyManifest>,
+  pathname: string,
+  payloadBytes: number,
+) {
+  const request = manifest.network.requests[0]!;
+  const action = manifest.network.serverActions[0]!;
+  request.url = canonicalUrl(pathname, [{ key: "redirect_to", value: "<dynamic:query-redirect_to:1>" }]);
+  request.postData.bytes = payloadBytes;
+  request.response = {
+    status: 200,
+    headers: [{ name: "content-type", value: "text/x-component" }],
+  } as typeof request.response;
+  action.url = request.url;
+  action.payload = request.postData;
+  action.status = 200;
+}
+
+function prependPassiveRefreshAction(
+  manifest: ReturnType<typeof journeyManifest>,
+) {
+  const activeRequest = manifest.network.requests[0]!;
+  activeRequest.index = 1;
+  const activeAction = manifest.network.serverActions[0]!;
+  activeAction.requestIndex = 1;
+  activeAction.order = 1;
+
+  const passiveIdentifier = { bytes: 42, sha256: digest("passive-refresh:identifier") };
+  const passivePayload = { bytes: 29, sha256: digest("passive-refresh:payload") };
+  const passiveUrl = canonicalUrl("/cabinet");
+  manifest.network.requests = [{
+    ...structuredClone(activeRequest),
+    index: 0,
+    url: passiveUrl,
+    serverAction: { present: true, identifier: { ...passiveIdentifier } },
+    requestHeaders: [{ name: "next-action", value: { ...passiveIdentifier } }],
+    postData: { ...passivePayload },
+  }, activeRequest] as typeof manifest.network.requests;
+  manifest.network.serverActions = [{
+    order: 0,
+    requestIndex: 0,
+    method: "POST",
+    url: passiveUrl,
+    identifier: { ...passiveIdentifier },
+    payload: { ...passivePayload },
+    status: 200,
+  }, activeAction] as typeof manifest.network.serverActions;
+  manifest.network.serverActionCount = manifest.network.serverActions.length;
+}
+
+function setTelegramCallbackRedirect(
+  manifest: ReturnType<typeof journeyManifest>,
+  withContentLength: boolean,
+) {
+  const request = manifest.network.requests[0]!;
+  request.method = "GET";
+  request.url = canonicalUrl("/auth/telegram/callback", [
+    { key: "code", value: "<opaque>" },
+    { key: "state", value: "<opaque>" },
+  ]);
+  request.resourceType = "document";
+  request.navigation = true;
+  request.serverAction = { present: false, identifier: null } as never;
+  request.requestHeaders = [];
+  request.postData = null as never;
+  request.response = {
+    status: 307,
+    headers: [
+      ...(withContentLength ? [{ name: "content-length", value: "0" }] : []),
+      { name: "location", value: canonicalUrl("/cabinet") },
+    ],
+  } as typeof request.response;
+  manifest.network.serverActions = [] as typeof manifest.network.serverActions;
+  manifest.network.serverActionCount = 0;
 }
 
 function hiddenDisplayDom(style: string) {
