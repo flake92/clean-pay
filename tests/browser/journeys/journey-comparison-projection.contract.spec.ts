@@ -367,6 +367,106 @@ test("projects general Chatwoot journey identifiers before merge-specific checks
     .not.toEqual(projectPair(baseline, identityTokenDrift).expected);
 });
 
+test("projects passive authenticated provider effect order only with exact multiset", () => {
+  const baseline = journeyManifest("baseline");
+  const candidate = journeyManifest("candidate");
+  baseline.journey = "telegram-oidc-cabinet-profile-link-referral-passkey";
+  candidate.journey = "telegram-oidc-cabinet-profile-link-referral-passkey";
+  baseline.providerEffects.entries = [
+    passiveProviderEffect(1, "read_profile"),
+    passiveProviderEffect(2, "contact_identity_probed"),
+    passiveProviderEffect(3, "contact_identity_probed"),
+    structuredClone(baseline.providerEffects.entries[0]!),
+  ] as typeof baseline.providerEffects.entries;
+  baseline.providerEffects.entries[3]!.sequence = 4;
+  candidate.providerEffects.entries = [
+    passiveProviderEffect(1, "contact_identity_probed"),
+    passiveProviderEffect(2, "read_profile"),
+    structuredClone(candidate.providerEffects.entries[0]!),
+  ] as typeof candidate.providerEffects.entries;
+  candidate.providerEffects.entries[2]!.sequence = 3;
+
+  expect(projectPair(baseline, candidate).actual)
+    .toEqual(projectPair(baseline, candidate).expected);
+
+  const countNearMiss = journeyManifest("candidate");
+  countNearMiss.journey = candidate.journey;
+  countNearMiss.providerEffects.entries = [
+    passiveProviderEffect(1, "contact_identity_probed"),
+    structuredClone(countNearMiss.providerEffects.entries[0]!),
+  ] as typeof countNearMiss.providerEffects.entries;
+  countNearMiss.providerEffects.entries[1]!.sequence = 2;
+  expect(projectPair(baseline, countNearMiss).actual)
+    .not.toEqual(projectPair(baseline, countNearMiss).expected);
+});
+
+test("projects passive authenticated payment refresh actions beside active payment actions", () => {
+  const baseline = journeyManifest("baseline");
+  const candidate = journeyManifest("candidate");
+  baseline.journey = "tariffs-payment-returns-extend-idempotency";
+  candidate.journey = "tariffs-payment-returns-extend-idempotency";
+  setHashedNextTopology(baseline, "baseline", 2, true);
+  setHashedNextTopology(candidate, "candidate", 1, false);
+
+  appendExactServerAction(
+    baseline,
+    "/payment/pending",
+    [{ key: "operation_id", value: "<dynamic:query-operation_id:1>" }],
+    29,
+    "passive-pending-refresh",
+  );
+  appendExactServerAction(
+    candidate,
+    "/payment/pending",
+    [{ key: "operation_id", value: "<dynamic:query-operation_id:1>" }],
+    29,
+    "passive-pending-refresh",
+  );
+  appendExactServerAction(
+    baseline,
+    "/payment/pending",
+    [{ key: "operation_id", value: "<dynamic:query-operation_id:1>" }],
+    29,
+    "passive-pending-refresh",
+  );
+  appendExactServerAction(
+    baseline,
+    "/payment/pending",
+    [{ key: "operation_id", value: "<dynamic:query-operation_id:1>" }],
+    62,
+    "active-pending-check",
+  );
+  appendExactServerAction(
+    candidate,
+    "/payment/pending",
+    [{ key: "operation_id", value: "<dynamic:query-operation_id:1>" }],
+    62,
+    "active-pending-check",
+  );
+  appendExactServerAction(baseline, "/extend", [], 29, "passive-pending-refresh");
+  appendExactServerAction(baseline, "/extend", [], 334, "active-extend");
+  appendExactServerAction(candidate, "/extend", [], 334, "active-extend");
+
+  const projected = projectPair(baseline, candidate);
+  expect(projected.actual).toEqual(projected.expected);
+  const projectedNetwork = (projected.actual as typeof candidate).network;
+  expect(projectedNetwork.serverActions.map((action) => action.payload.bytes))
+    .toEqual([240, 62, 334]);
+
+  const payloadNearMiss = structuredClone(baseline);
+  const passiveRequest = payloadNearMiss.network.requests.find((request) => (
+    request.url.pathname === "/extend"
+    && request.postData?.bytes === 29
+  ))!;
+  passiveRequest.postData.bytes = 30;
+  const passiveAction = payloadNearMiss.network.serverActions.find((action) => (
+    action.requestIndex === passiveRequest.index
+  ))!;
+  passiveAction.payload.bytes = 30;
+  expect(projectPair(payloadNearMiss, candidate).actual)
+    .not.toEqual(projectPair(payloadNearMiss, candidate).expected);
+});
+
 test("projects hashed Next topology only after complete journey semantic proof", () => {
   const baseline = journeyManifest("baseline");
   const candidate = journeyManifest("candidate");
@@ -415,6 +515,21 @@ test("projects optional Origin headers on exact journey static chunks", () => {
 
   const projected = projectPair(baseline, candidate);
   expect(projected.actual).toEqual(projected.expected);
+
+  const countDriftBaseline = journeyManifest("baseline");
+  const countDriftCandidate = journeyManifest("candidate");
+  setHashedNextTopology(countDriftBaseline, "baseline", 2, true);
+  setHashedNextTopology(countDriftCandidate, "candidate", 1, false);
+  for (const request of countDriftBaseline.network.requests.filter((entry) => (
+    entry.resourceType === "script"
+  ))) {
+    request.requestHeaders = [{
+      name: "origin",
+      value: canonicalUrl("/"),
+    }] as unknown as typeof request.requestHeaders;
+  }
+  const projectedCountDrift = projectPair(countDriftBaseline, countDriftCandidate);
+  expect(projectedCountDrift.actual).toEqual(projectedCountDrift.expected);
 
   const semanticNearMiss = journeyManifest("candidate");
   setHashedNextTopology(semanticNearMiss, "candidate", 1, false);
@@ -1052,6 +1167,52 @@ function responseBackedActionAbortManifest() {
   return manifest;
 }
 
+function passiveProviderEffect(
+  sequence: number,
+  effect: "contact_identity_probed" | "read_profile",
+) {
+  if (effect === "contact_identity_probed") {
+    return {
+      sequence,
+      service: "chatwoot",
+      method: "GET",
+      pathname: "/api/v1/widget/contact",
+      query_keys: ["website_token"],
+      body_bytes: 0,
+      body_sha256: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      body_contract: null,
+      idempotency_key_present: false,
+      idempotency_key_sha256: null,
+      idempotency_key_contract: null,
+      credential_contract: {
+        header_names: ["x-auth-token"],
+        authorization_scheme: null,
+        cookie_names: [],
+      },
+      effect,
+    };
+  }
+  return {
+    sequence,
+    service: "remnashop",
+    method: "GET",
+    pathname: "/api/v1/public/auth/me",
+    query_keys: [],
+    body_bytes: 0,
+    body_sha256: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    body_contract: null,
+    idempotency_key_present: false,
+    idempotency_key_sha256: null,
+    idempotency_key_contract: null,
+    credential_contract: {
+      header_names: ["x-remnashop-auth-service-key"],
+      authorization_scheme: null,
+      cookie_names: ["access_token"],
+    },
+    effect,
+  };
+}
+
 function hiddenDisplayDom(style: string) {
   return {
     type: "element",
@@ -1228,6 +1389,46 @@ function addExactLogoRequest(
     failure: null,
     externalTransport: null,
   } as unknown as ReturnType<typeof journeyManifest>["network"]["requests"][number]);
+}
+
+function appendExactServerAction(
+  manifest: ReturnType<typeof journeyManifest>,
+  pathname: string,
+  query: Array<{ key: string; value: string }>,
+  bytes: number,
+  seed: string,
+) {
+  const template = structuredClone(manifest.network.requests.find((request) => (
+    request.serverAction.present === true
+  ))!);
+  const index = manifest.network.requests.length;
+  const identifier = { bytes: 42, sha256: digest(`${seed}:identifier`) };
+  const payload = { bytes, sha256: digest(`${seed}:payload`) };
+  const url = canonicalUrl(pathname, query);
+  template.index = index;
+  template.url = url;
+  template.serverAction.identifier = identifier;
+  template.requestHeaders = [{
+    name: "next-action",
+    value: identifier,
+  }] as typeof template.requestHeaders;
+  template.postData = payload;
+  template.response = {
+    status: 200,
+    headers: [{ name: "content-type", value: "text/x-component" }],
+  } as typeof template.response;
+  template.failure = null;
+  manifest.network.requests.push(template);
+  manifest.network.serverActions.push({
+    order: manifest.network.serverActions.length,
+    requestIndex: index,
+    method: "POST",
+    url,
+    identifier,
+    payload,
+    status: 200,
+  });
+  manifest.network.serverActionCount = manifest.network.serverActions.length;
 }
 
 function addExactChatwootTransportRequest(

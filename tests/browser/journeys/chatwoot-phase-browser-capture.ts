@@ -41,11 +41,11 @@ import {
   finalizeChatwootPhaseHistoryContract,
 } from "./chatwoot-phase-browser-contract.mjs";
 import {
+  attestProviderOverlapStaticResponse,
   createJourneyBrowserRequestEnvelope,
   extractProviderOverlapCssMediaReferences,
   extractProviderOverlapResponseStaticDeclarations,
   installProviderOverlapHistoryInstrumentation,
-  readProviderOverlapStaticResponseEvidence,
 } from "./provider-overlap-browser-contract.mjs";
 import { createChatwootPhaseEventLedger } from "./chatwoot-phase-event-ledger.mjs";
 import {
@@ -209,6 +209,7 @@ type BrowserRequestLedger = {
   entries: StrictRequestEntry[];
   byIdentity: Map<Request, StrictRequestEntry>;
   currentDocumentKey: StrictRequestEntry["documentKey"] | null;
+  responseBodyByIdentity: Map<Request, Promise<Buffer>>;
   responseByIdentity: Map<Request, Response>;
 };
 
@@ -662,6 +663,9 @@ async function exerciseChatwootPhases(input: CaptureInput & {
     for (const ledger of Object.values(ledgers)) {
       if (ledger.byIdentity.has(response.request())) {
         ledger.responseByIdentity.set(response.request(), response);
+        const body = response.body();
+        body.catch(() => {});
+        ledger.responseBodyByIdentity.set(response.request(), body);
         break;
       }
     }
@@ -1735,6 +1739,7 @@ function createBrowserRequestLedger(): BrowserRequestLedger {
     entries: [],
     byIdentity: new Map(),
     currentDocumentKey: null,
+    responseBodyByIdentity: new Map(),
     responseByIdentity: new Map(),
   };
 }
@@ -1859,14 +1864,16 @@ async function finishBrowserRequestContract(
       staticResponseSha256: null as string | null,
     };
     if (classification.staticPath !== null) {
-      const staticEvidence = await readProviderOverlapStaticResponseEvidence({
+      const staticEvidence = await readChatwootPrearmedStaticResponseEvidence({
         classification,
         response,
+        responseBody: ledger.responseBodyByIdentity.get(request),
         responseContentType,
       }, staticAssetContract.providerContract);
-      const staticEvidenceReread = await readProviderOverlapStaticResponseEvidence({
+      const staticEvidenceReread = await readChatwootPrearmedStaticResponseEvidence({
         classification,
         response,
+        responseBody: ledger.responseBodyByIdentity.get(request),
         responseContentType,
       }, staticAssetContract.providerContract);
       if (staticEvidence.body.byteLength !== staticEvidenceReread.body.byteLength
@@ -1913,14 +1920,14 @@ async function finishBrowserRequestContract(
       && new Set(["text/html", "text/x-component"])
         .has(responseContentType ?? "")
     ) {
-      const body = await boundedChatwootBrowserOperation(
-        response.body(),
-        5_000,
+      const body = await readChatwootPrearmedResponseBody(
+        ledger,
+        request,
         "Chatwoot static declaration body",
       );
-      const bodyReread = await boundedChatwootBrowserOperation(
-        response.body(),
-        5_000,
+      const bodyReread = await readChatwootPrearmedResponseBody(
+        ledger,
+        request,
         "Chatwoot static declaration body reread",
       );
       if (!body.equals(bodyReread)) {
@@ -2022,6 +2029,7 @@ async function finishBrowserRequestContract(
         || ledger.responseByIdentity.size !== records.filter((record) => (
           record.responseStatus !== null
         )).length
+        || ledger.responseBodyByIdentity.size !== ledger.responseByIdentity.size
         || finalized.requestCount !== records.length
         || finalized.staticLoadGraph.assetAttestationSha256
           !== staticAssetContract.providerContract.attestationSha256
@@ -2074,6 +2082,61 @@ function normalizeResponseContentType(value: string | undefined) {
     throw new Error("Chatwoot browser response content type is invalid.");
   }
   return normalized;
+}
+
+async function readChatwootPrearmedStaticResponseEvidence(
+  input: {
+    classification: StrictRequestEntry["classification"];
+    response: Response | null;
+    responseBody: Promise<Buffer> | undefined;
+    responseContentType: string | null;
+  },
+  staticAssetContract: StaticAssetContract["providerContract"],
+) {
+  const response = input.response;
+  if (!response || typeof response.finished !== "function"
+    || typeof response.status !== "function") {
+    throw new Error("Attested Chatwoot static browser request has no readable response.");
+  }
+  const responseFailure = await boundedChatwootBrowserOperation(
+    response.finished(),
+    5_000,
+    "Chatwoot static response completion",
+  );
+  if (responseFailure !== null) {
+    throw new Error("Attested Chatwoot static browser response did not finish cleanly.");
+  }
+  const body = await boundedChatwootBrowserOperation(
+    input.responseBody ?? Promise.reject(
+      new Error("Chatwoot prearmed static response body is missing."),
+    ),
+    5_000,
+    "Chatwoot prearmed static response body",
+  );
+  return Object.freeze({
+    body,
+    observation: attestProviderOverlapStaticResponse({
+      body,
+      classification: input.classification,
+      responseContentType: input.responseContentType,
+      responseStatus: response.status(),
+    }, staticAssetContract),
+  });
+}
+
+async function readChatwootPrearmedResponseBody(
+  ledger: BrowserRequestLedger,
+  request: Request,
+  label: string,
+) {
+  const body = await boundedChatwootBrowserOperation(
+    ledger.responseBodyByIdentity.get(request) ?? Promise.reject(
+      new Error("Chatwoot prearmed response body is missing."),
+    ),
+    5_000,
+    label,
+  );
+  return Buffer.from(body);
 }
 
 export async function boundedChatwootBrowserOperationForTest<T>(
