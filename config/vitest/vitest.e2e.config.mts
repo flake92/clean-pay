@@ -14,9 +14,10 @@ export default defineConfig({
     // first-compile cost inside whichever test reaches it first. The
     // authenticated journey alone compiles six protected pages and needs ~29s
     // against an already warm cache, so a 30s budget failed on every cold or
-    // loaded runner. Keep this well under the 360s bound the runner puts on
-    // the whole vitest process.
-    testTimeout: 120_000,
+    // loaded runner, and a cold compile of the heaviest pages is slower still.
+    // Keep this under the 600s bound the runner puts on the whole vitest
+    // process.
+    testTimeout: 180_000,
     hookTimeout: 180_000,
   },
   resolve: {
