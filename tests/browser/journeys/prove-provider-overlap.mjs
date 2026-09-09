@@ -882,6 +882,7 @@ async function exerciseCabinet(
       request: 0,
       responseFallback: 0,
       route: 0,
+      routeFallback: 0,
       terminal: 0,
     };
     const recordBrowserEvent = (source) => {
@@ -1012,6 +1013,9 @@ async function exerciseCabinet(
     const browserRequestPreparationByIdentity = new Map();
     const browserResponseEvidenceByIdentity = new Map();
     const browserResponseTerminalByIdentity = new WeakMap();
+    const browserResponseFallbackRequestIdentities = new Set();
+    const browserRoutedRequestIdentities = new Set();
+    const browserRouteFallbackRequestIdentities = new Set();
     const browserTerminalRequestIdentities = new Set();
     let browserResponseCaptureFailure = null;
     const cdpResponseBodyCapture = createProviderOverlapCdpResponseBodyCapture({
@@ -1247,7 +1251,10 @@ async function exerciseCabinet(
           request,
           requestByIdentity: browserRequestByIdentity,
         });
-        if (!requestPreparedBeforeResponse) recordBrowserEvent("responseFallback");
+        if (!requestPreparedBeforeResponse) {
+          browserResponseFallbackRequestIdentities.add(request);
+          recordBrowserEvent("responseFallback");
+        }
         if (browserRequestByIdentity.get(request) !== entry) {
           throw new Error("Synthetic browser response escaped its request identity ledger.");
         }
@@ -1323,6 +1330,12 @@ async function exerciseCabinet(
         retainUnownedTerminalFailure();
       }
       if (!entry) return;
+      if (!browserRoutedRequestIdentities.has(request)
+        && !browserResponseFallbackRequestIdentities.has(request)
+        && !browserRouteFallbackRequestIdentities.has(request)) {
+        browserRouteFallbackRequestIdentities.add(request);
+        recordBrowserEvent("routeFallback");
+      }
       const finishRequest = beginBrowserEvent("terminal");
       let evidence = Promise.resolve(null);
       if (entry) {
@@ -1424,6 +1437,7 @@ async function exerciseCabinet(
           await route.abort("blockedbyclient");
           return;
         }
+        browserRoutedRequestIdentities.add(request);
         finishRoute = beginBrowserEvent("route");
         if (preparation.disposition === "abort") {
           await route.abort("blockedbyclient");
@@ -1573,7 +1587,10 @@ async function exerciseCabinet(
       })),
       browserRequestIdentityCount: browserRequestByIdentity.size,
       browserRequestPreparationIdentityCount: browserRequestPreparationByIdentity.size,
+      browserResponseFallbackRequestIdentityCount: browserResponseFallbackRequestIdentities.size,
       browserResponseEvidenceIdentityCount: browserResponseEvidenceByIdentity.size,
+      browserRoutedRequestIdentityCount: browserRoutedRequestIdentities.size,
+      browserRouteFallbackRequestIdentityCount: browserRouteFallbackRequestIdentities.size,
       cdpResponseBodyCapture: cdpResponseBodyCapture.snapshot(),
       browserTerminalRequestIdentityCount: browserTerminalRequestIdentities.size,
       cabinetDocumentAllowed,
@@ -1710,6 +1727,9 @@ async function exerciseCabinet(
       || browserRequestByIdentity.size !== browserRequests.length
       || browserRequestPreparationByIdentity.size !== browserRequests.length
       || browserResponseEvidenceByIdentity.size !== browserRequests.length
+      || browserRoutedRequestIdentities.size
+        + browserRouteFallbackRequestIdentities.size
+        + browserResponseFallbackRequestIdentities.size !== browserRequests.length
       || browserTerminalRequestIdentities.size !== browserRequests.length) {
       throw new Error("Sealed browser projection differs from its final raw request ledger.");
     }

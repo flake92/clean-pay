@@ -2012,7 +2012,17 @@ function assertEventLifecycleCausality(lifecycle, requestCount, historyCount, la
   const sourceCounts = record(lifecycle.sourceCounts, `${label} browser event source counts`);
   exactKeys(
     sourceCounts,
-    ["console", "history", "page", "pageerror", "request", "responseFallback", "route", "terminal"],
+    [
+      "console",
+      "history",
+      "page",
+      "pageerror",
+      "request",
+      "responseFallback",
+      "route",
+      "routeFallback",
+      "terminal",
+    ],
     `${label} browser event source counts`,
   );
   for (const [source, count] of Object.entries(sourceCounts)) {
@@ -2031,7 +2041,7 @@ function assertEventLifecycleCausality(lifecycle, requestCount, historyCount, la
     `${label} causal browser request preparation count`,
   );
   equal(
-    sourceCounts.route + sourceCounts.responseFallback,
+    sourceCounts.route + sourceCounts.routeFallback + sourceCounts.responseFallback,
     requestCount,
     `${label} causal browser route event count`,
   );
@@ -2040,6 +2050,7 @@ function assertEventLifecycleCausality(lifecycle, requestCount, historyCount, la
     lifecycle.drainedEventCount,
     sourceCounts.request + sourceCounts.responseFallback
       + sourceCounts.route
+      + sourceCounts.routeFallback
       + sourceCounts.terminal
       + historyCount
       + sourceCounts.console,

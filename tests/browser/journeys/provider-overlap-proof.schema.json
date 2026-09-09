@@ -467,6 +467,7 @@
             "request",
             "responseFallback",
             "route",
+            "routeFallback",
             "terminal"
           ],
           "properties": {
@@ -477,6 +478,7 @@
             "request": { "type": "integer", "minimum": 0, "maximum": 256 },
             "responseFallback": { "type": "integer", "minimum": 0, "maximum": 256 },
             "route": { "type": "integer", "minimum": 0, "maximum": 256 },
+            "routeFallback": { "type": "integer", "minimum": 0, "maximum": 256 },
             "terminal": { "type": "integer", "minimum": 0, "maximum": 256 }
           }
         },

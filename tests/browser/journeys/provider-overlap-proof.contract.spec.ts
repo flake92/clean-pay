@@ -2403,13 +2403,15 @@ test("registers exact request identities before response capture and routed cont
   expect(responseListener).toContain("pendingRequestSeal.observe(request);");
   expect(responseListener).toContain("resolveProviderOverlapResponseRequestEntry({");
   expect(responseListener).toContain("prepare: prepareBrowserRequest,");
+  expect(responseListener).toContain("browserResponseFallbackRequestIdentities.add(request)");
   expect(responseListener).toContain('recordBrowserEvent("responseFallback")');
   expect(responseListener).not.toMatch(/eventSeal\.(?:begin|record)\(/);
   const terminalHandler = runnerSource.slice(terminalHandlerIndex, routeHandlerIndex);
   expect(terminalHandler).toMatch(
-    /const entry = browserRequestByIdentity\.get\(request\);[\s\S]{1,512}if \(!entry\) return;[\s\S]{1,512}const finishRequest = beginBrowserEvent\("terminal"\);/,
+    /const entry = browserRequestByIdentity\.get\(request\);[\s\S]{1,512}if \(!entry\) return;[\s\S]{1,512}recordBrowserEvent\("routeFallback"\);[\s\S]{1,512}const finishRequest = beginBrowserEvent\("terminal"\);/,
   );
   expect(routeHandler).toContain("browserRequestPreparationByIdentity.get(request)");
+  expect(routeHandler).toContain("browserRoutedRequestIdentities.add(request)");
   expect(routeHandler).not.toContain("prepareBrowserRequest(");
   expect(routeHandler).not.toContain("classifyProviderOverlapBrowserRequest(");
   expect(routeHandler).toMatch(
@@ -2437,7 +2439,9 @@ test("registers exact request identities before response capture and routed cont
   expect(routeHandler.slice(navigationCaptureBarrier, routeHandler.indexOf("await route.continue()")))
     .not.toContain("throw error");
   expect(proofContractSource).toContain("sourceCounts.request + sourceCounts.responseFallback");
-  expect(proofContractSource).toContain("sourceCounts.route + sourceCounts.responseFallback");
+  expect(proofContractSource).toContain(
+    "sourceCounts.route + sourceCounts.routeFallback + sourceCounts.responseFallback",
+  );
   expect(proofContractSource).toContain("causal browser request preparation count");
   const pendingDrainIndex = runnerSource.indexOf(
     "await pendingRequestSeal.drainAndSeal({ timeoutMs: 15_000 })",
@@ -5137,6 +5141,7 @@ test("keeps the schema write-once sidecar-only and free of comparison projection
       "request",
       "responseFallback",
       "route",
+      "routeFallback",
       "terminal",
     ],
   });
@@ -5624,6 +5629,7 @@ function stackReport(role: "baseline" | "candidate", providerOverlap: ReturnType
           request: semanticRequestLedger.length + staticLedger.length,
           responseFallback: 0,
           route: semanticRequestLedger.length + staticLedger.length,
+          routeFallback: 0,
           terminal: semanticRequestLedger.length + staticLedger.length,
         },
         status: "sealed-clean",
