@@ -42,7 +42,7 @@ async function http(path: string, init: RequestInit = {}, jar?: CookieJar) {
     ...init,
     headers,
     redirect: init.redirect ?? "manual",
-    signal: init.signal ?? AbortSignal.timeout(20_000),
+    signal: init.signal ?? AbortSignal.timeout(60_000),
   });
   if (jar) storeCookies(jar, response);
   return response;
