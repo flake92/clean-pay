@@ -31,6 +31,27 @@ describe("application security headers", () => {
     expect(proxy).toContain("request: { headers: context.requestHeaders }");
   });
 
+  it("never allows eval in production and permits it only for the dev server", () => {
+    const production = buildContentSecurityPolicy({ nonce: "request-nonce" });
+
+    expect(production).not.toContain("'unsafe-eval'");
+
+    // Next.js development evaluates its HMR and React Refresh runtime with
+    // eval(). Without this allowance the client cannot hydrate and nothing on
+    // the page responds to input, while every server-rendered assertion still
+    // passes -- which is exactly how it went unnoticed.
+    const development = buildContentSecurityPolicy({
+      nonce: "request-nonce",
+      allowEval: true,
+    });
+
+    expect(development).toContain("'unsafe-eval'");
+    expect(development).toContain("'strict-dynamic'");
+
+    const proxy = readFileSync("src/proxy.ts", "utf8");
+    expect(proxy).toContain('allowEval: process.env.NODE_ENV !== "production"');
+  });
+
   it("allows only the configured Chatwoot origins", () => {
     const policy = buildContentSecurityPolicy({
       nonce: "safe-nonce",

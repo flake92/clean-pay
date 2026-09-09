@@ -30,9 +30,18 @@ function sources(values: Array<string | null>) {
 export function buildContentSecurityPolicy({
   nonce,
   chatwootBaseUrl = null,
+  allowEval = false,
 }: {
   nonce: string;
   chatwootBaseUrl?: string | null;
+  /**
+   * Next.js development builds evaluate their HMR and React Refresh runtime
+   * with eval(), which this policy otherwise blocks -- leaving the client
+   * unable to hydrate, so nothing on the page reacts to a click. Only the
+   * development server may set this; the production policy never carries
+   * 'unsafe-eval', and a production build has no eval to permit.
+   */
+  allowEval?: boolean;
 }) {
   const chatwoot = chatwootSources(chatwootBaseUrl);
 
@@ -46,7 +55,7 @@ export function buildContentSecurityPolicy({
     "font-src 'self' data:",
     "style-src 'self' 'unsafe-inline'",
     sources([
-      `script-src 'self' 'nonce-${nonce}' 'strict-dynamic' https://challenges.cloudflare.com https://telegram.org`,
+      `script-src 'self' 'nonce-${nonce}' 'strict-dynamic'${allowEval ? " 'unsafe-eval'" : ""} https://challenges.cloudflare.com https://telegram.org`,
       chatwoot?.origin ?? null,
     ]),
     sources([

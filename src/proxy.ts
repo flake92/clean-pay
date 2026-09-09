@@ -64,6 +64,9 @@ function requestSecurityContext(request: NextRequest): RequestSecurityContext {
     chatwootBaseUrl: chatwootConfigured
       ? process.env.CHATWOOT_BASE_URL?.trim()
       : null,
+    // The development server needs eval for HMR and React Refresh. Reading the
+    // build mode here keeps the policy module itself free of environment access.
+    allowEval: process.env.NODE_ENV !== "production",
   });
   const requestHeaders = new Headers(request.headers);
   requestHeaders.set('content-security-policy', contentSecurityPolicy);

@@ -40,6 +40,12 @@ export async function executePayment(commands: PaymentCommands, command: Payment
       EMAIL_REQUIRED: "Добавьте e-mail и пароль, чтобы продолжить.",
       EMAIL_NOT_VERIFIED: "Подтвердите e-mail, чтобы продолжить.",
       RATE_LIMITED: "Слишком много попыток. Попробуйте позже.",
+      // Both of these settle the operation as final and discard the
+      // idempotency key, so neither may fall through to the default message
+      // below -- that one asks for a retry "with the same request", which is
+      // exactly what a final outcome cannot accept.
+      VALIDATION_ERROR: "Заказ не принят платёжной системой. Выберите тариф заново.",
+      IDEMPOTENCY_KEY_REUSED: "Эта попытка оплаты уже использована. Начните оплату заново.",
     };
     const finalCodes = new Set(["OFFER_CHANGED", "PLAN_UNAVAILABLE", "PAYMENT_GATEWAY_UNAVAILABLE", "IDEMPOTENCY_KEY_INVALID", "IDEMPOTENCY_KEY_REUSED", "VALIDATION_ERROR"]);
     return { ok: false, code, message: messages[code] ?? "Не удалось подтвердить результат оплаты. Повторите попытку с тем же запросом.", retainIdempotencyKey: !finalCodes.has(code) };
