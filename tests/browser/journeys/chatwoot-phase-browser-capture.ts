@@ -43,9 +43,12 @@ import {
 import {
   attestProviderOverlapStaticResponse,
   createJourneyBrowserRequestEnvelope,
+  createProviderOverlapCdpResponseBodyCapture,
+  createProviderOverlapRepeatableStaticResponseUrls,
   extractProviderOverlapCssMediaReferences,
   extractProviderOverlapResponseStaticDeclarations,
   installProviderOverlapHistoryInstrumentation,
+  isExactTerminalProviderOverlapRedirect,
 } from "./provider-overlap-browser-contract.mjs";
 import { createChatwootPhaseEventLedger } from "./chatwoot-phase-event-ledger.mjs";
 import {
@@ -62,6 +65,8 @@ import {
 const MAXIMUM_EVENTS = 32;
 const MAXIMUM_REQUESTS = 256;
 const MAXIMUM_CONTROL_BYTES = 2 * 1024 * 1024;
+const MAXIMUM_STATIC_ASSET_BYTES = 128 * 1024 * 1024;
+const MAXIMUM_STATIC_DECLARATION_BODY_BYTES = 2 * 1024 * 1024;
 const MAXIMUM_SERVER_ACTIONS = 200;
 const MAXIMUM_STORAGE_KEYS = 128;
 const VIEWPORT = Object.freeze({ width: 1440, height: 900 });
@@ -270,6 +275,9 @@ type CaptureCheckpoint =
   | "stable-release-barrier"
   | "stable-wait-barrier-completed"
   | "stable-wait-phase-clear"
+  | "stable-wait-full-identity"
+  | "stable-wait-lifecycle-idle"
+  | "stable-wait-browser-ledger-idle"
   | "stable-finish-network"
   | "stable-finish-browser-contract"
   | "stable-history-snapshot"
@@ -405,6 +413,7 @@ export async function captureChatwootPhaseStack(input: CaptureInput) {
         status: "chatwoot_state_failed",
         stage: captureStage,
         checkpoint: captureCheckpoint,
+        causeMessage: sanitizeChatwootCaptureCauseMessage(error),
         state,
       })}\n`);
     } catch {
@@ -412,6 +421,7 @@ export async function captureChatwootPhaseStack(input: CaptureInput) {
         status: "chatwoot_state_failed",
         stage: captureStage,
         checkpoint: captureCheckpoint,
+        causeMessage: sanitizeChatwootCaptureCauseMessage(error),
         state: { unavailable: true },
       })}\n`);
     }
@@ -473,6 +483,30 @@ async function exerciseChatwootPhases(input: CaptureInput & {
     });
   });
   const page = await input.context.newPage();
+  const responseBodyCdp = await input.context.newCDPSession(page);
+  await responseBodyCdp.send("Network.enable", {
+    enableDurableMessages: true,
+    maxResourceBufferSize: 128 * 1024 * 1024,
+    maxTotalBufferSize: 1024 * 1024 * 1024,
+  });
+  const cdpResponseBodyCapture = createProviderOverlapCdpResponseBodyCapture({
+    repeatableStaticResponseUrls: createProviderOverlapRepeatableStaticResponseUrls(
+      input.staticAssetContract.providerContract,
+    ),
+    send: (
+      method: "Network.getResponseBody",
+      parameters: { requestId: string },
+    ) => responseBodyCdp.send(method, parameters),
+  });
+  responseBodyCdp.on("Network.responseReceived", (event) => {
+    cdpResponseBodyCapture.observeResponseReceived(event);
+  });
+  responseBodyCdp.on("Network.loadingFinished", (event) => {
+    cdpResponseBodyCapture.observeLoadingFinished(event);
+  });
+  responseBodyCdp.on("Network.loadingFailed", (event) => {
+    cdpResponseBodyCapture.observeLoadingFailed(event);
+  });
   diagnostics.bindPrimaryPage(page);
   history.bindPrimaryPage(page);
   await initialProviderHistory.bindPrimaryPage(page);
@@ -663,7 +697,11 @@ async function exerciseChatwootPhases(input: CaptureInput & {
     for (const ledger of Object.values(ledgers)) {
       if (ledger.byIdentity.has(response.request())) {
         ledger.responseByIdentity.set(response.request(), response);
-        const body = response.body();
+        const body = readChatwootDurableResponseBody(
+          cdpResponseBodyCapture,
+          response,
+          ledger.byIdentity.get(response.request())!.classification,
+        );
         body.catch(() => {});
         ledger.responseBodyByIdentity.set(response.request(), body);
         break;
@@ -724,6 +762,12 @@ async function exerciseChatwootPhases(input: CaptureInput & {
   await input.barrier.completed();
   onCheckpoint("stable-wait-phase-clear");
   await waitForPhaseState(page, null);
+  onCheckpoint("stable-wait-full-identity");
+  await waitForFullChatwootIdentityState(page);
+  onCheckpoint("stable-wait-lifecycle-idle");
+  await waitForRequestLifecycleIdle(requestLifecycle);
+  onCheckpoint("stable-wait-browser-ledger-idle");
+  await waitForStrictBrowserRequestLedgerIdle(ledgers.initial);
   onCheckpoint("stable-finish-network");
   const stableNetwork = networkEvidence(await stableRecorder.finish());
   onCheckpoint("stable-finish-browser-contract");
@@ -814,6 +858,9 @@ async function exerciseChatwootPhases(input: CaptureInput & {
   await recreatedCausality.observeCabinetCookiePair(page);
   await waitForBoundaryMethod(page, "setUser");
   await waitForPhaseState(page, null);
+  await waitForFullChatwootIdentityState(page);
+  await waitForRequestLifecycleIdle(requestLifecycle);
+  await waitForStrictBrowserRequestLedgerIdle(ledgers.recreated);
   recreatedCausality.markCabinetCompleted();
   const cookiePair = await readChatwootRawState(page);
   if (cookiePair.conversation === null || cookiePair.userCookie === null) {
@@ -1567,6 +1614,60 @@ async function waitForBoundaryMethod(page: Page, method: string) {
   }, method, { timeout: 30_000 });
 }
 
+async function waitForFullChatwootIdentityState(page: Page) {
+  await page.waitForFunction(() => {
+    const windowValue = window as unknown as {
+      $chatwoot?: { identifier?: unknown };
+      __cleanPayChatwootBoundaryCalls?: Array<{ method?: unknown }>;
+      cleanPayChatwootOwnership?: unknown;
+      cleanPayChatwootPendingIdentity?: { phase?: unknown };
+    };
+    const cookieValue = (name: string) => {
+      const encoded = `${encodeURIComponent(name)}=`;
+      const match = document.cookie.split(";").find((entry) => (
+        entry.trim().startsWith(encoded)
+      ));
+      if (!match) return null;
+      const value = match.trim().slice(encoded.length);
+      try {
+        return decodeURIComponent(value);
+      } catch {
+        return value;
+      }
+    };
+    const exactKeys = (value: unknown, keys: string[]) => (
+      typeof value === "object"
+      && value !== null
+      && !Array.isArray(value)
+      && JSON.stringify(Object.keys(value).sort()) === JSON.stringify([...keys].sort())
+    );
+    const conversation = cookieValue("cw_conversation");
+    const userCookieNameCount = document.cookie.split(";")
+      .map((entry) => entry.trim().split("=", 1)[0])
+      .filter((name) => name.startsWith("cw_user_"))
+      .length;
+    const calls = windowValue.__cleanPayChatwootBoundaryCalls;
+    const ownership = windowValue.cleanPayChatwootOwnership as Record<string, unknown> | null;
+    const pendingPhase = typeof windowValue.cleanPayChatwootPendingIdentity?.phase === "string"
+      ? windowValue.cleanPayChatwootPendingIdentity.phase
+      : null;
+    return pendingPhase === null
+      && Array.isArray(calls)
+      && calls.some(({ method }) => method === "setUser")
+      && calls.some(({ method }) => method === "identity.confirmed")
+      && conversation !== null
+      && userCookieNameCount === 1
+      && localStorage.getItem("clean-pay:chatwoot-identity:v1") !== null
+      && localStorage.getItem("clean-pay:chatwoot-ownership:v1") === null
+      && String(windowValue.$chatwoot?.identifier ?? "") === conversation
+      && ownership !== null
+      && exactKeys(ownership, ["conversation", "core", "customAttributes"])
+      && ownership.conversation === conversation
+      && typeof ownership.core === "string"
+      && typeof ownership.customAttributes === "string";
+  }, undefined, { timeout: 30_000 });
+}
+
 async function readChatwootRawState(page: Page): Promise<PhaseRawState> {
   const browser = await page.evaluate(() => {
     const windowValue = window as unknown as {
@@ -1917,6 +2018,7 @@ async function finishBrowserRequestContract(
     if (
       response
       && response.status() === 200
+      && !classification.key.endsWith("-action")
       && new Set(["text/html", "text/x-component"])
         .has(responseContentType ?? "")
     ) {
@@ -1972,6 +2074,13 @@ async function finishBrowserRequestContract(
       && response.status() <= 399
       && !redirectedSources.has(request)
       && classification.disposition !== "abort"
+      && !isExactTerminalProviderOverlapRedirect({
+        key: classification.key,
+        redirectEdge: null,
+        responseContentType: normalizeResponseContentType(response.headers()["content-type"]),
+        responseFailureSha256: null,
+        responseStatus: response.status(),
+      })
     ) {
       throw new Error("Chatwoot strict browser redirect has no exact successor.");
     }
@@ -2082,6 +2191,32 @@ function normalizeResponseContentType(value: string | undefined) {
     throw new Error("Chatwoot browser response content type is invalid.");
   }
   return normalized;
+}
+
+async function readChatwootDurableResponseBody(
+  cdpResponseBodyCapture: ReturnType<typeof createProviderOverlapCdpResponseBodyCapture>,
+  response: Response,
+  classification: StrictRequestEntry["classification"],
+) {
+  const request = response.request();
+  const status = response.status();
+  if (status >= 300 && status <= 399) return Buffer.alloc(0);
+  if (classification.staticPath === null && classification.key.endsWith("-action")) {
+    return Buffer.alloc(0);
+  }
+  const responseContentType = normalizeResponseContentType(response.headers()["content-type"]);
+  const maximumBodyBytes = new Set(["text/html", "text/x-component"]).has(
+    responseContentType ?? "",
+  )
+    ? MAXIMUM_STATIC_DECLARATION_BODY_BYTES
+    : MAXIMUM_STATIC_ASSET_BYTES;
+  const body = await cdpResponseBodyCapture.readBody({
+    maximumBodyBytes,
+    resourceType: request.resourceType(),
+    status,
+    url: request.url(),
+  });
+  return Buffer.from(body);
 }
 
 async function readChatwootPrearmedStaticResponseEvidence(
@@ -4143,13 +4278,85 @@ function boundedPromise<T>(promise: Promise<T>, timeoutMs: number, label: string
 async function waitForRequestLifecycleIdle(
   lifecycle: ReturnType<typeof installChatwootCommonRequestLifecycleForTest>,
 ) {
-  const deadline = Date.now() + 5_000;
+  const deadline = Date.now() + 10_000;
+  let idleSince: number | null = null;
+  let idleSignature: string | null = null;
   while (Date.now() <= deadline) {
-    lifecycle.snapshot();
-    if (lifecycle.isIdle()) return;
+    const snapshot = lifecycle.snapshot();
+    const signature = JSON.stringify({
+      pendingRequestIndexes: snapshot.pendingRequestIndexes,
+      recordCount: snapshot.records.length,
+    });
+    if (lifecycle.isIdle()) {
+      if (idleSignature !== signature) {
+        idleSignature = signature;
+        idleSince = Date.now();
+      } else if (idleSince !== null && Date.now() - idleSince >= 250) {
+        return;
+      }
+    } else {
+      idleSince = null;
+      idleSignature = null;
+    }
     await new Promise((resolve) => setTimeout(resolve, 10));
   }
   throw new Error("Chatwoot common request lifecycle did not reach its bounded idle boundary.");
+}
+
+async function waitForStrictBrowserRequestLedgerIdle(ledger: BrowserRequestLedger) {
+  const deadline = Date.now() + 10_000;
+  let idleSince: number | null = null;
+  let idleSignature: string | null = null;
+  while (Date.now() <= deadline) {
+    const continued = ledger.entries.filter(({ classification }) => (
+      classification.disposition !== "abort"
+    ));
+    const responsesComplete = continued.every(({ request }) => (
+      ledger.responseByIdentity.has(request)
+      && ledger.responseBodyByIdentity.has(request)
+    ));
+    const bodyPromises = continued.map(({ request }) => ledger.responseBodyByIdentity.get(request));
+    const bodiesSettled = responsesComplete
+      && await areChatwootResponseBodiesSettled(bodyPromises);
+    const signature = JSON.stringify({
+      bodyCount: ledger.responseBodyByIdentity.size,
+      entries: ledger.entries.map(({ classification, documentKey }) => ({
+        documentKey,
+        key: classification.key,
+      })),
+      responseCount: ledger.responseByIdentity.size,
+    });
+    if (responsesComplete && bodiesSettled) {
+      if (idleSignature !== signature) {
+        idleSignature = signature;
+        idleSince = Date.now();
+      } else if (idleSince !== null && Date.now() - idleSince >= 250) {
+        return;
+      }
+    } else {
+      idleSince = null;
+      idleSignature = null;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error("Chatwoot strict browser request ledger did not reach its bounded idle boundary.");
+}
+
+async function areChatwootResponseBodiesSettled(
+  bodyPromises: Array<Promise<Buffer> | undefined>,
+) {
+  if (bodyPromises.some((body) => body === undefined)) return false;
+  const marker = Symbol("chatwoot-body-pending");
+  const result = await Promise.race([
+    Promise.allSettled(bodyPromises as Promise<Buffer>[]),
+    new Promise<typeof marker>((resolve) => setTimeout(() => resolve(marker), 25)),
+  ]);
+  return result !== marker;
+}
+
+function sanitizeChatwootCaptureCauseMessage(error: unknown) {
+  if (!(error instanceof Error) || typeof error.message !== "string") return null;
+  return error.message.replace(/[^\w .:/()[\]-]/g, "").slice(0, 240);
 }
 
 function pushBounded(target: string[], value: string) {
