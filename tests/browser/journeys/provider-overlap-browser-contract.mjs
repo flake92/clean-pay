@@ -2157,7 +2157,7 @@ export function normalizeProviderOverlapRequestContractSemanticLedger(semanticLe
       ))
       .filter((offset) => offset >= 0);
     if (group.length > 1
-      && exactAbortIndexes.length === 1
+      && exactAbortIndexes.length <= 1
       && group.every((groupEntry) => (
         groupEntry.responseFailureSha256 === null
         || groupEntry.responseFailureSha256 === providerOverlapResponseBackedAbortFailureSha256
@@ -2165,8 +2165,6 @@ export function normalizeProviderOverlapRequestContractSemanticLedger(semanticLe
       for (let offset = 0; offset < group.length; offset += 1) {
         normalized[index + offset].responseFailureSha256 = null;
       }
-      normalized[end - 1].responseFailureSha256 =
-        providerOverlapResponseBackedAbortFailureSha256;
     }
     index = end;
   }

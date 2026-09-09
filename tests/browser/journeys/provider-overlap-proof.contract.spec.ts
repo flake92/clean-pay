@@ -1779,6 +1779,14 @@ test("rejects arbitrary same-host paths, queries, redirects, methods, and transp
     .not.toEqual(lastAbortedRootPrefetchContract.semanticRequestLedger);
   expect(firstAbortedRootPrefetchContract.requestContractSha256)
     .toBe(lastAbortedRootPrefetchContract.requestContractSha256);
+  const optionalAbortedRootPrefetchContract = finalizeProviderOverlapBrowserContract(
+    rootPrefetchRecords,
+    staticLoadGraph,
+  );
+  expect(optionalAbortedRootPrefetchContract.semanticRequestLedger)
+    .not.toEqual(lastAbortedRootPrefetchContract.semanticRequestLedger);
+  expect(optionalAbortedRootPrefetchContract.requestContractSha256)
+    .toBe(lastAbortedRootPrefetchContract.requestContractSha256);
   const forgedAbortedRootPrefetchRecords = structuredClone(exactAbortedRootPrefetchRecords);
   forgedAbortedRootPrefetchRecords[exactAbortedRootPrefetchIndex].responseFailureSha256 =
     sha256("net::ERR_FAILED");
