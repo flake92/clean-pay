@@ -1052,7 +1052,13 @@ test("publishes only bounded phase enums for live provider failure diagnosis", a
   expect(runner).toContain("currentProviderProofAssemblyFailureEvidence()");
   expect(runner).toContain("{ proofAssemblyFailureEvidence }");
   expect(runner).toContain('retainProviderProofAssemblyFailure("stack-report", error)');
-  expect(runner).toContain('retainProviderProofAssemblyFailure("dual-proof", error)');
+  expect(runner).toContain('retainProviderProofAssemblyFailure("dual-proof", error, {');
+  expect(runner).toContain("createProviderProofAssemblyRequestContractDiagnostics(");
+  expect(runner).toContain('kind: "browser-request-contract-diagnostics"');
+  expect(runner).toContain("semanticShapeLedgerSha256");
+  expect(runner).toContain("staticClassesSha256");
+  expect(runner).toContain("staticClassCountsSha256");
+  expect(runner).toContain("boundedDiagnosticString(");
   expect(runner).toContain('new Set(["dual-proof", "stack-report"])');
   expect(runner).toContain("stage,");
   expect(runner).toContain('kind: "exact-invariant-mismatch"');
@@ -1087,6 +1093,8 @@ test("publishes only bounded phase enums for live provider failure diagnosis", a
   expect(runner).toContain('markProviderFailurePhase(role, "finalize-event-lifecycle")');
   expect(runner).toContain('/^[a-z0-9-]{1,64}$/');
   expect(runner).toContain("{ terminalEvidence }");
+  expect(runner).not.toContain("urlSha256");
+  expect(runner).not.toContain("postDataSha256");
 });
 
 test("publishes bounded provider finalization subphase enums", async () => {

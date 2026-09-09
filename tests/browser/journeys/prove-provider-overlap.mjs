@@ -278,7 +278,10 @@ try {
       proofSession.launch,
     );
   } catch (error) {
-    throw retainProviderProofAssemblyFailure("dual-proof", error);
+    throw retainProviderProofAssemblyFailure("dual-proof", error, {
+      baseline: proofSession.value.baseline,
+      candidate: proofSession.value.candidate,
+    });
   }
   const bytes = Buffer.from(`${JSON.stringify(document, null, 2)}\n`, "utf8");
   await writeJourneySanitizedOutput(outputPath, bytes);
@@ -357,20 +360,127 @@ function currentProviderFailurePhases() {
   return Object.values(phases).some((phase) => phase !== null) ? phases : undefined;
 }
 
-function retainProviderProofAssemblyFailure(stage, error) {
+function retainProviderProofAssemblyFailure(stage, error, stackReports) {
   if (providerProofAssemblyFailureState === null) {
     if (!new Set(["dual-proof", "stack-report"]).has(stage)) {
       throw new Error("Provider proof assembly failure stage is invalid.");
     }
     const message = error instanceof Error ? error.message : String(error);
+    const classification = classifyProviderProofAssemblyFailure(message);
+    const requestContractDiagnostics = createProviderProofAssemblyRequestContractDiagnostics(
+      stage,
+      classification,
+      stackReports,
+    );
     providerProofAssemblyFailureState = Object.freeze({
-      ...classifyProviderProofAssemblyFailure(message),
+      ...classification,
+      ...(requestContractDiagnostics === undefined ? {} : { requestContractDiagnostics }),
       messageSha256: sha256(message),
       schemaVersion: 1,
       stage,
     });
   }
   return error;
+}
+
+function createProviderProofAssemblyRequestContractDiagnostics(stage, classification, stackReports) {
+  if (stage !== "dual-proof"
+    || classification.kind !== "exact-invariant-mismatch"
+    || classification.invariantLabel !== "browser request contract binding"
+    || stackReports === undefined) {
+    return undefined;
+  }
+  try {
+    const baseline = summarizeProviderProofRequestContract(stackReports.baseline, "baseline");
+    const candidate = summarizeProviderProofRequestContract(stackReports.candidate, "candidate");
+    return Object.freeze({
+      schemaVersion: 1,
+      kind: "browser-request-contract-diagnostics",
+      baseline,
+      candidate,
+      equality: Object.freeze({
+        requestContractSha256: baseline.requestContractSha256
+          === candidate.requestContractSha256,
+        semanticLedgerSha256: baseline.semanticLedgerSha256
+          === candidate.semanticLedgerSha256,
+        semanticShapeLedgerSha256: baseline.semanticShapeLedgerSha256
+          === candidate.semanticShapeLedgerSha256,
+        staticClassesSha256: baseline.staticClassesSha256 === candidate.staticClassesSha256,
+        staticClassCountsSha256: baseline.staticClassCountsSha256
+          === candidate.staticClassCountsSha256,
+      }),
+    });
+  } catch {
+    return undefined;
+  }
+}
+
+function summarizeProviderProofRequestContract(stackReport, role) {
+  const navigation = stackReport?.navigation;
+  const semanticRequestLedger = Array.isArray(navigation?.semanticRequestLedger)
+    ? navigation.semanticRequestLedger
+    : [];
+  const staticRequestLedger = Array.isArray(navigation?.staticRequestLedger)
+    ? navigation.staticRequestLedger
+    : [];
+  const semanticShapeLedger = semanticRequestLedger.map((entry, index) => Object.freeze({
+    occurrence: index + 1,
+    key: boundedDiagnosticString(entry?.key),
+    disposition: boundedDiagnosticString(entry?.disposition),
+    redirectEdge: boundedDiagnosticString(entry?.redirectEdge),
+    responseContentType: boundedDiagnosticString(entry?.responseContentType),
+    responseFailureSha256: sha256OrNull(entry?.responseFailureSha256),
+    responseStatus: Number.isSafeInteger(entry?.responseStatus) ? entry.responseStatus : null,
+  }));
+  const staticClasses = [...new Set(staticRequestLedger.map((entry) => entry?.class)
+    .filter((value) => typeof value === "string"))].sort();
+  return Object.freeze({
+    role,
+    requestCount: safeCount(navigation?.requestCount),
+    requestContractSha256: sha256OrNull(navigation?.requestContractSha256),
+    requestOrderContractSha256: sha256OrNull(navigation?.requestOrderContractSha256),
+    semanticRequestCount: semanticRequestLedger.length,
+    semanticLedgerSha256: sha256(JSON.stringify(semanticRequestLedger)),
+    semanticShapeLedger: Object.freeze(semanticShapeLedger),
+    semanticShapeLedgerSha256: sha256(JSON.stringify(semanticShapeLedger)),
+    staticRequestCount: safeCount(navigation?.staticRequestCount),
+    staticRequestLedgerLength: staticRequestLedger.length,
+    staticRequestContractSha256: sha256OrNull(navigation?.staticRequestContractSha256),
+    staticLoadGraphContractSha256: sha256OrNull(navigation?.staticLoadGraphContractSha256),
+    staticClasses: Object.freeze(staticClasses),
+    staticClassesSha256: sha256(JSON.stringify(staticClasses)),
+    staticClassCounts: countDiagnosticValues(staticRequestLedger, (entry) => entry?.class),
+    staticClassCountsSha256: sha256(JSON.stringify(countDiagnosticValues(
+      staticRequestLedger,
+      (entry) => entry?.class,
+    ))),
+    staticDocumentCounts: countDiagnosticValues(staticRequestLedger, (entry) => (
+      entry?.documentKey
+    )),
+  });
+}
+
+function countDiagnosticValues(entries, select) {
+  const counts = Object.create(null);
+  for (const entry of entries) {
+    const key = boundedDiagnosticString(select(entry)) ?? "null";
+    counts[key] = (counts[key] ?? 0) + 1;
+  }
+  return Object.freeze(Object.fromEntries(Object.entries(counts).sort(([left], [right]) => (
+    left.localeCompare(right)
+  ))));
+}
+
+function safeCount(value) {
+  return Number.isSafeInteger(value) && value >= 0 ? value : null;
+}
+
+function sha256OrNull(value) {
+  return typeof value === "string" && /^[a-f0-9]{64}$/.test(value) ? value : null;
+}
+
+function boundedDiagnosticString(value) {
+  return typeof value === "string" && value.length <= 128 ? value : null;
 }
 
 function classifyProviderProofAssemblyFailure(message) {
