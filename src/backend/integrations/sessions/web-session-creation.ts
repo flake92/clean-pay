@@ -21,6 +21,67 @@ import {
   setAccessCookie,
 } from "@/backend/integrations/sessions/web-session-token";
 
+// Both session-creation entry points derive the same clock, token and cookie
+// material, and both finish by writing the same pair of cookies. Keeping that
+// in one place stops the two copies of the cookie policy (httpOnly, secure,
+// sameSite, path, expiry) from drifting apart.
+async function beginSessionCreation() {
+  const now = new Date();
+
+  return {
+    env: getEnv(),
+    cookieStore: await cookies(),
+    requestHeaders: await headers(),
+    now,
+    accessTokenExpiresAt: addMinutes(now, securityPolicy.accessSessionTtlMinutes),
+    refreshExpiresAt: addDays(now, securityPolicy.refreshSessionTtlDays),
+    refreshToken: randomToken(48),
+  };
+}
+
+async function establishSessionCookies({
+  client,
+  sessionId,
+  userId,
+  assuranceLevel,
+  accessTokenExpiresAt,
+  refreshToken,
+  refreshExpiresAt,
+  env,
+  cookieStore,
+}: {
+  client: Prisma.TransactionClient | typeof prisma;
+  sessionId: string;
+  userId: string;
+  assuranceLevel: WebSessionAssuranceLevel;
+  accessTokenExpiresAt: Date;
+  refreshToken: string;
+  refreshExpiresAt: Date;
+  env: ReturnType<typeof getEnv>;
+  cookieStore: Awaited<ReturnType<typeof cookies>>;
+}) {
+  const user = await client.webUser.findUnique({
+    where: { id: userId },
+    select: { emailVerified: true, telegramId: true },
+  });
+
+  await setAccessCookie({
+    sessionId,
+    userId,
+    expiresAt: accessTokenExpiresAt,
+    assuranceLevel,
+    emailVerified: user?.emailVerified,
+    telegramId: user?.telegramId,
+  });
+  cookieStore.set(sessionCookieNames.refresh, refreshToken, {
+    httpOnly: true,
+    secure: env.cookieSecure,
+    sameSite: env.cookieSameSite,
+    path: "/",
+    expires: refreshExpiresAt,
+  });
+}
+
 export async function createWebSession(
   userId: string,
   {
@@ -31,16 +92,14 @@ export async function createWebSession(
     assuranceLevel?: WebSessionAssuranceLevel;
   } = {},
 ) {
-  const env = getEnv();
-  const cookieStore = await cookies();
-  const requestHeaders = await headers();
-  const now = new Date();
-  const accessTokenExpiresAt = addMinutes(
-    now,
-    securityPolicy.accessSessionTtlMinutes,
-  );
-  const refreshExpiresAt = addDays(now, securityPolicy.refreshSessionTtlDays);
-  const refreshToken = randomToken(48);
+  const {
+    env,
+    cookieStore,
+    requestHeaders,
+    accessTokenExpiresAt,
+    refreshExpiresAt,
+    refreshToken,
+  } = await beginSessionCreation();
 
   authDebugLog("session_create_started", {
     userId,
@@ -61,25 +120,16 @@ export async function createWebSession(
       refreshExpiresAt,
     },
   });
-  const user = await prisma.webUser.findUnique({
-    where: { id: userId },
-    select: { emailVerified: true, telegramId: true },
-  });
-
-  await setAccessCookie({
+  await establishSessionCookies({
+    client: prisma,
     sessionId: session.id,
     userId,
-    expiresAt: accessTokenExpiresAt,
     assuranceLevel,
-    emailVerified: user?.emailVerified,
-    telegramId: user?.telegramId,
-  });
-  cookieStore.set(sessionCookieNames.refresh, refreshToken, {
-    httpOnly: true,
-    secure: env.cookieSecure,
-    sameSite: env.cookieSameSite,
-    path: "/",
-    expires: refreshExpiresAt,
+    accessTokenExpiresAt,
+    refreshToken,
+    refreshExpiresAt,
+    env,
+    cookieStore,
   });
   authDebugLog("session_create_success", {
     sessionId: session.id,
@@ -117,17 +167,16 @@ export async function createWebSessionForRemnashopUser({
   assuranceLevel?: WebSessionAssuranceLevel;
   replaceExistingSessions?: boolean;
 }) {
-  const env = getEnv();
-  const cookieStore = await cookies();
-  const requestHeaders = await headers();
-  const db = tx ?? prisma;
-  const now = new Date();
-  const accessTokenExpiresAt = addMinutes(
+  const {
+    env,
+    cookieStore,
+    requestHeaders,
     now,
-    securityPolicy.accessSessionTtlMinutes,
-  );
-  const refreshExpiresAt = addDays(now, securityPolicy.refreshSessionTtlDays);
-  const refreshToken = randomToken(48);
+    accessTokenExpiresAt,
+    refreshExpiresAt,
+    refreshToken,
+  } = await beginSessionCreation();
+  const db = tx ?? prisma;
 
   authDebugLog("session_create_started", {
     userId,
@@ -186,24 +235,16 @@ export async function createWebSessionForRemnashopUser({
       refreshExpiresAt,
     },
   });
-  const user = await db.webUser.findUnique({
-    where: { id: userId },
-    select: { emailVerified: true, telegramId: true },
-  });
-  await setAccessCookie({
+  await establishSessionCookies({
+    client: db,
     sessionId: session.id,
     userId,
-    expiresAt: accessTokenExpiresAt,
     assuranceLevel,
-    emailVerified: user?.emailVerified,
-    telegramId: user?.telegramId,
-  });
-  cookieStore.set(sessionCookieNames.refresh, refreshToken, {
-    httpOnly: true,
-    secure: env.cookieSecure,
-    sameSite: env.cookieSameSite,
-    path: "/",
-    expires: refreshExpiresAt,
+    accessTokenExpiresAt,
+    refreshToken,
+    refreshExpiresAt,
+    env,
+    cookieStore,
   });
   authDebugLog("session_create_success", {
     sessionId: session.id,

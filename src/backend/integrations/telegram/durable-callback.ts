@@ -761,6 +761,30 @@ export async function createDurableTelegramCallbackSession(
   }, { maxWait: 5_000, timeout: 15_000 });
 }
 
+// Session completion and merge completion write the identical terminal record;
+// only the transition they guard against differs. Build that payload once so a
+// change to the stored envelope or its TTL cannot land on just one path.
+function completedCallbackData(
+  replay: DurableTelegramCallbackReplay,
+  now: Date,
+) {
+  return {
+    callbackStatus: TelegramCallbackStatus.COMPLETED,
+    callbackClaimTokenHash: null,
+    callbackLeaseExpiresAt: null,
+    callbackResultEncrypted: protectStored({
+      version: 2,
+      phase: TelegramCallbackStatus.COMPLETED,
+      value: replay,
+    }),
+    callbackResultExpiresAt: new Date(
+      now.getTime() + DURABLE_TELEGRAM_CALLBACK_RESULT_TTL_MS,
+    ),
+    callbackCompletedAt: now,
+    callbackWebSessionId: null,
+  };
+}
+
 export async function completeDurableTelegramSession(
   ownership: DurableTelegramCallbackOwnership,
   replay: DurableTelegramCallbackReplay,
@@ -777,21 +801,7 @@ export async function completeDurableTelegramSession(
         TelegramCallbackStatus.SESSION_CREATED,
         now,
       ),
-      data: {
-        callbackStatus: TelegramCallbackStatus.COMPLETED,
-        callbackClaimTokenHash: null,
-        callbackLeaseExpiresAt: null,
-        callbackResultEncrypted: protectStored({
-          version: 2,
-          phase: TelegramCallbackStatus.COMPLETED,
-          value: replay,
-        }),
-        callbackResultExpiresAt: new Date(
-          now.getTime() + DURABLE_TELEGRAM_CALLBACK_RESULT_TTL_MS,
-        ),
-        callbackCompletedAt: now,
-        callbackWebSessionId: null,
-      },
+      data: completedCallbackData(replay, now),
     });
     if (completed.count !== 1) {
       throw new Error("Telegram callback session completion ownership changed");
@@ -855,21 +865,7 @@ export async function completeDurableTelegramMerge(
         TelegramCallbackStatus.OUTCOME_READY,
         now,
       ),
-      data: {
-        callbackStatus: TelegramCallbackStatus.COMPLETED,
-        callbackClaimTokenHash: null,
-        callbackLeaseExpiresAt: null,
-        callbackResultEncrypted: protectStored({
-          version: 2,
-          phase: TelegramCallbackStatus.COMPLETED,
-          value: replay,
-        }),
-        callbackResultExpiresAt: new Date(
-          now.getTime() + DURABLE_TELEGRAM_CALLBACK_RESULT_TTL_MS,
-        ),
-        callbackCompletedAt: now,
-        callbackWebSessionId: null,
-      },
+      data: completedCallbackData(replay, now),
     });
     if (completed.count !== 1) {
       throw new Error("Telegram callback merge completion ownership changed");

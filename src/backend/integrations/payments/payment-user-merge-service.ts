@@ -254,16 +254,12 @@ export async function assertPaymentOwnerChangeFenceHeld(
     },
   });
 
-  if (
-    users.length !== userIds.length ||
-    users.some((user) =>
-      user.paymentOwnerChangeTokenHash !== context.tokenHash ||
-      !user.paymentOwnerChangeLeaseExpiresAt ||
-      user.paymentOwnerChangeLeaseExpiresAt <= now
-    )
-  ) {
-    paymentMergeRequired("Payment owner fence lease was lost");
-  }
+  assertPaymentOwnerFenceHeld(users, {
+    tokenHash: context.tokenHash,
+    now,
+    expectedCount: userIds.length,
+    message: "Payment owner fence lease was lost",
+  });
 }
 
 /** Records the local ownership/payment-transfer commit in the same database
@@ -604,23 +600,14 @@ async function markPaymentOwnerChangeMutation(
     const now = new Date();
     const users = await tx.webUser.findMany({
       where: { id: { in: userIds } },
-      select: {
-        id: true,
-        remnashopUserId: true,
-        paymentOwnerChangeTokenHash: true,
-        paymentOwnerChangeLeaseExpiresAt: true,
-        paymentOwnerChangeMutationStartedAt: true,
-        paymentOwnerChangeLocalFinalizedAt: true,
-        paymentOwnerChangeExpectedOwnerHash: true,
-      },
+      select: paymentOwnerFenceOwnerSelect,
     });
-    if (users.length !== userIds.length || users.some((user) =>
-      user.paymentOwnerChangeTokenHash !== tokenHash ||
-      !user.paymentOwnerChangeLeaseExpiresAt ||
-      user.paymentOwnerChangeLeaseExpiresAt <= now
-    )) {
-      paymentMergeRequired("Payment owner fence lease was lost before upstream mutation");
-    }
+    assertPaymentOwnerFenceHeld(users, {
+      tokenHash,
+      now,
+      expectedCount: userIds.length,
+      message: "Payment owner fence lease was lost before upstream mutation",
+    });
     const marked = await tx.webUser.updateMany({
       where: {
         id: { in: userIds },
@@ -659,26 +646,13 @@ async function renewPaymentOwnerChangeFence(userIds: string[], tokenHash: string
     const now = new Date();
     const currentUsers = await tx.webUser.findMany({
       where: { id: { in: userIds } },
-      select: {
-        id: true,
-        remnashopUserId: true,
-        paymentOwnerChangeTokenHash: true,
-        paymentOwnerChangeLeaseExpiresAt: true,
-        paymentOwnerChangeMutationStartedAt: true,
-        paymentOwnerChangeLocalFinalizedAt: true,
-        paymentOwnerChangeExpectedOwnerHash: true,
-      },
+      select: paymentOwnerFenceOwnerSelect,
     });
-    if (
-      currentUsers.length === 0 ||
-      currentUsers.some((user) =>
-        user.paymentOwnerChangeTokenHash !== tokenHash ||
-        !user.paymentOwnerChangeLeaseExpiresAt ||
-        user.paymentOwnerChangeLeaseExpiresAt <= now
-      )
-    ) {
-      paymentMergeRequired("Payment owner fence lease was lost before renewal");
-    }
+    assertPaymentOwnerFenceHeld(currentUsers, {
+      tokenHash,
+      now,
+      message: "Payment owner fence lease was lost before renewal",
+    });
 
     const renewed = await tx.webUser.updateMany({
       where: {
@@ -704,26 +678,13 @@ async function finalizePaymentOwnerChangeFence(userIds: string[], tokenHash: str
     const now = new Date();
     const currentUsers = await tx.webUser.findMany({
       where: { id: { in: userIds } },
-      select: {
-        id: true,
-        remnashopUserId: true,
-        paymentOwnerChangeTokenHash: true,
-        paymentOwnerChangeLeaseExpiresAt: true,
-        paymentOwnerChangeMutationStartedAt: true,
-        paymentOwnerChangeLocalFinalizedAt: true,
-        paymentOwnerChangeExpectedOwnerHash: true,
-      },
+      select: paymentOwnerFenceOwnerSelect,
     });
-    if (
-      currentUsers.length === 0 ||
-      currentUsers.some((user) =>
-        user.paymentOwnerChangeTokenHash !== tokenHash ||
-        !user.paymentOwnerChangeLeaseExpiresAt ||
-        user.paymentOwnerChangeLeaseExpiresAt <= now
-      )
-    ) {
-      paymentMergeRequired("Payment owner fence was lost before finalization");
-    }
+    assertPaymentOwnerFenceHeld(currentUsers, {
+      tokenHash,
+      now,
+      message: "Payment owner fence was lost before finalization",
+    });
     if (currentUsers.some((user) =>
       user.paymentOwnerChangeMutationStartedAt &&
       (
@@ -768,6 +729,53 @@ function normalizedMergeUserIds(
 
 function paymentMergeRequired(message: string): never {
   throw new ServiceError("ACCOUNT_MERGE_REQUIRED", 409, message);
+}
+
+/** The fence is held only while every selected row still carries this claim's
+ * token and an unexpired lease. Every phase asks the same question, so keep
+ * one copy of the predicate; only the row-count expectation and the reported
+ * phase differ. */
+/** The fields every late fence phase needs to decide whether the upstream
+ * mutation and the local finalize agree. Declared once so the three phases
+ * cannot silently read different projections of the same row. */
+const paymentOwnerFenceOwnerSelect = {
+  id: true,
+  remnashopUserId: true,
+  paymentOwnerChangeTokenHash: true,
+  paymentOwnerChangeLeaseExpiresAt: true,
+  paymentOwnerChangeMutationStartedAt: true,
+  paymentOwnerChangeLocalFinalizedAt: true,
+  paymentOwnerChangeExpectedOwnerHash: true,
+} as const;
+
+function assertPaymentOwnerFenceHeld(
+  users: Array<{
+    paymentOwnerChangeTokenHash: string | null;
+    paymentOwnerChangeLeaseExpiresAt: Date | null;
+  }>,
+  {
+    tokenHash,
+    now,
+    expectedCount,
+    message,
+  }: {
+    tokenHash: string;
+    now: Date;
+    expectedCount?: number;
+    message: string;
+  },
+) {
+  const rowsLost = expectedCount === undefined
+    ? users.length === 0
+    : users.length !== expectedCount;
+
+  if (rowsLost || users.some((user) => (
+    user.paymentOwnerChangeTokenHash !== tokenHash
+    || !user.paymentOwnerChangeLeaseExpiresAt
+    || user.paymentOwnerChangeLeaseExpiresAt <= now
+  ))) {
+    paymentMergeRequired(message);
+  }
 }
 
 /**

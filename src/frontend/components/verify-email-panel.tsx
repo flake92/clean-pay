@@ -154,19 +154,45 @@ export function VerifyEmailPanel({
     setLoading(null);
   }
 
-  async function requestCode(event: React.FormEvent<HTMLFormElement>) {
+  // Both submit handlers share the same guard order (ignore a re-entrant
+  // submit, clear banners, require a Turnstile token, then claim the action)
+  // and the same interpretation of an unlinked e-mail, so keep one copy of
+  // each rather than two that can drift.
+  function beginSubmit(
+    event: React.FormEvent<HTMLFormElement>,
+    action: "request" | "confirm",
+  ) {
     event.preventDefault();
     if (actionLoadingRef.current !== null) {
-      return;
+      return false;
     }
     setMessage(null);
     setError(null);
 
     if (turnstileEnabled && !turnstileToken) {
       setError(missingTurnstileTokenMessage(turnstileSiteKey));
+      return false;
+    }
+    return beginAction(action);
+  }
+
+  function applyFailure(result: { code?: string; message: string }) {
+    if (result.code !== "EMAIL_REQUIRED") {
+      setError(result.message);
       return;
     }
-    if (!beginAction("request")) {
+    if (autoContinue) {
+      setError(
+        "Связь с e-mail нужно восстановить. Возвращаем к вводу e-mail и пароля.",
+      );
+      replaceWith(accountLinkPath(redirectTo, { passwordRequired: true }));
+      return;
+    }
+    setError(null);
+  }
+
+  async function requestCode(event: React.FormEvent<HTMLFormElement>) {
+    if (!beginSubmit(event, "request")) {
       return;
     }
 
@@ -181,20 +207,7 @@ export function VerifyEmailPanel({
       if (!result.ok) {
         resetTurnstile();
         setTargetEmail(null);
-        if (result.code === "EMAIL_REQUIRED") {
-          if (autoContinue) {
-            setError(
-              "Связь с e-mail нужно восстановить. Возвращаем к вводу e-mail и пароля.",
-            );
-            replaceWith(
-              accountLinkPath(redirectTo, { passwordRequired: true }),
-            );
-          } else {
-            setError(null);
-          }
-        } else {
-          setError(result.message);
-        }
+        applyFailure(result);
         return;
       }
 
@@ -213,18 +226,7 @@ export function VerifyEmailPanel({
   }
 
   async function confirmCode(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (actionLoadingRef.current !== null) {
-      return;
-    }
-    setMessage(null);
-    setError(null);
-
-    if (turnstileEnabled && !turnstileToken) {
-      setError(missingTurnstileTokenMessage(turnstileSiteKey));
-      return;
-    }
-    if (!beginAction("confirm")) {
+    if (!beginSubmit(event, "confirm")) {
       return;
     }
 
@@ -238,20 +240,7 @@ export function VerifyEmailPanel({
 
       if (!result.ok) {
         resetTurnstile();
-        if (result.code === "EMAIL_REQUIRED") {
-          if (autoContinue) {
-            setError(
-              "Связь с e-mail нужно восстановить. Возвращаем к вводу e-mail и пароля.",
-            );
-            replaceWith(
-              accountLinkPath(redirectTo, { passwordRequired: true }),
-            );
-          } else {
-            setError(null);
-          }
-        } else {
-          setError(result.message);
-        }
+        applyFailure(result);
         return;
       }
 

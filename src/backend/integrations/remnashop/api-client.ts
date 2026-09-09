@@ -555,7 +555,7 @@ export async function remnashopAuthTelegramIdentity({
   );
 }
 
-type RemnashopMergeUsersResponse = {
+export type RemnashopMergeUsersResponse = {
   dry_run: boolean;
   source_user_id: number;
   target_user_id: number;

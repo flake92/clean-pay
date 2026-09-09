@@ -16,6 +16,7 @@ import {
   remnashopAuthTelegramIdentity,
   remnashopMergeUsers,
 } from "@/backend/integrations/remnashop/client";
+import { normalizeRemnashopMergePreflight } from "@/backend/integrations/remnashop/merge-preflight";
 import { linkCurrentUserToRemnashopAuth } from "@/backend/integrations/remnashop/session";
 import { getCurrentSession, refreshCurrentAccessCookie } from "@/backend/integrations/sessions/web-session-service";
 import {
@@ -274,19 +275,7 @@ export const productionTelegramAccountMergeGateway: TelegramAccountMergeGateway 
       telegramResolution: "KEEP_SOURCE",
       paymentResolution: "REKEY_SOURCE",
     }));
-    return {
-      conflicts: result.conflicts,
-      dryRun: result.dry_run,
-      sourceAccountId: String(result.source_user_id),
-      targetAccountId: String(result.target_user_id),
-      target: {
-        accountId: String(result.target.id),
-        email: result.target.email,
-        emailVerified: result.target.is_email_verified,
-        telegramId: result.target.telegram_id === null ? null : String(result.target.telegram_id),
-      },
-      requiresRelogin: result.requires_relogin,
-    };
+    return normalizeRemnashopMergePreflight(result);
   },
 
   async mergeProviderAccounts(confirmation) {
