@@ -1,4 +1,4 @@
-import { Suspense, type ReactNode } from "react";
+import { cache, Suspense, type ReactNode } from "react";
 
 import { CabinetHeaderActions } from "@/frontend/components/cabinet-header-actions";
 import { CabinetPanel } from "@/frontend/components/cabinet-panel";
@@ -17,14 +17,16 @@ import {
 import { redirect } from "next/navigation";
 import { connection } from "next/server";
 
+const requireRequestCabinetEntrySession = cache(() => requireCabinetEntrySession("/cabinet"));
+
 async function CabinetAccessBoundary({ children }: { children: ReactNode }) {
   await connection();
-  await requireCabinetEntrySession("/cabinet");
+  await requireRequestCabinetEntrySession();
   return <>{children}</>;
 }
 
 async function loadAuthenticatedCabinet() {
-  await requireCabinetEntrySession("/cabinet");
+  await requireRequestCabinetEntrySession();
   const model = await loadRequestCabinetViewModel();
   if (model.status === "unauthorized") redirect(sessionRefreshPath("/cabinet"));
   if (model.status === "provider-session-recovery-required") {
@@ -43,7 +45,7 @@ async function CabinetContent() {
 }
 
 async function CabinetReferralContent() {
-  await requireCabinetEntrySession("/cabinet");
+  await requireRequestCabinetEntrySession();
   const model = await loadRequestReferralProgram();
   if (model.status === "error" && model.action === "recover-session") {
     redirect(providerSessionRecoveryPath("/cabinet"));
