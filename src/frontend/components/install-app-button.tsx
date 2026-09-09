@@ -65,9 +65,9 @@ function InstallInstructionsDialog({
       ref={dialogRef}
       role="dialog"
       tabIndex={-1}
-      style={{ background: "rgba(0, 0, 0, 0.45)", inset: 0, padding: "1rem", position: "fixed", zIndex: 1100 }}
+      style={{ background: "var(--cp-scrim)", inset: 0, padding: "1rem", position: "fixed", zIndex: 1100 }}
     >
-      <div style={{ background: "white", borderRadius: "12px", margin: "20vh auto", maxWidth: "28rem", padding: "1.5rem" }}>
+      <div style={{ background: "var(--cp-surface)", borderRadius: "var(--border-radius)", margin: "20vh auto", maxWidth: "28rem", padding: "1.5rem" }}>
         <h2 className="mt-0" id={titleId}>{title}</h2>
         {children}
         <button type="button" className="p-button p-component" onClick={onClose}>
