@@ -1,4 +1,5 @@
-import { existsSync, readdirSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { existsSync } from "node:fs";
 
 import { describe, expect, it } from "vitest";
 
@@ -31,16 +32,14 @@ const allowedRootFiles = [
 
 describe("repository root layout", () => {
   it("contains only documented root-level entry and environment files", () => {
-    const rootFiles = readdirSync(".", { withFileTypes: true })
-      .filter((entry) => entry.isFile())
-      .map((entry) => entry.name)
-      .filter((file) => (
-        file !== ".git"
-        && file !== "next-env.d.ts"
-        && !file.endsWith(".tsbuildinfo")
-        && (file === ".env.example" || !file.startsWith(".env."))
-        && file !== ".env"
-      ))
+    // Read the tracked root layout from git rather than the filesystem so that
+    // ignored local artefacts (.DS_Store, editor state, build output) cannot
+    // fail the assertion on a developer machine.
+    const rootFiles = execFileSync("git", ["ls-files", "-z", "--", ":(exclude)*/*"], {
+      encoding: "utf8",
+    })
+      .split("\0")
+      .filter((file) => file.length > 0)
       .sort();
 
     expect(rootFiles).toEqual(allowedRootFiles);
