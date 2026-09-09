@@ -2228,6 +2228,39 @@ test("rejects arbitrary same-host paths, queries, redirects, methods, and transp
   );
 });
 
+test("canonicalizes the passive profile action and Chatwoot SDK arrival pair", () => {
+  const exactFailureSha256 = sha256("net::ERR_ABORTED");
+  const profileSdkFirst = [
+    semantic("app-profile-document", 200, "text/html"),
+    semantic("turnstile-widget-script", 200, "application/javascript"),
+    semantic("chatwoot-sdk-script", 200, "application/javascript"),
+    semantic("app-profile-action", 200, "text/x-component"),
+    semantic("app-root-rsc", 200, "text/x-component"),
+  ];
+  const profileActionFirst = [
+    semantic("app-profile-document", 200, "text/html"),
+    semantic("turnstile-widget-script", 200, "application/javascript"),
+    {
+      ...semantic("app-profile-action", 200, "text/x-component"),
+      responseFailureSha256: exactFailureSha256,
+    },
+    semantic("chatwoot-sdk-script", 200, "application/javascript"),
+    semantic("app-root-rsc", 200, "text/x-component"),
+  ];
+  expect(profileActionFirst).not.toEqual(profileSdkFirst);
+  expect(normalizeProviderOverlapRequestContractSemanticLedger(profileActionFirst))
+    .toEqual(normalizeProviderOverlapRequestContractSemanticLedger(profileSdkFirst));
+  expect(normalizeProviderOverlapRequestContractSemanticLedger([
+    ...profileSdkFirst.slice(0, 2),
+    {
+      ...semantic("app-profile-action", 200, "text/x-component"),
+      responseFailureSha256: sha256("net::ERR_FAILED"),
+    },
+    semantic("chatwoot-sdk-script", 200, "application/javascript"),
+    ...profileSdkFirst.slice(4),
+  ])).not.toEqual(normalizeProviderOverlapRequestContractSemanticLedger(profileSdkFirst));
+});
+
 test("prearms profile load and keeps the exact cabinet URL at DOM content", async () => {
   const runnerSource = await readFile(
     path.resolve(__dirname, "prove-provider-overlap.mjs"),

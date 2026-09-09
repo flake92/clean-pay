@@ -2144,6 +2144,12 @@ export function normalizeProviderOverlapRequestContractSemanticLedger(semanticLe
   for (let index = 0; index < normalized.length;) {
     const entry = normalized[index];
     const next = normalized[index + 1];
+    if (isProviderOverlapIndependentProfileSdkPair(entry, next)) {
+      normalized[index] = next;
+      normalized[index + 1] = entry;
+      index += 2;
+      continue;
+    }
     if (isProviderOverlapIndependentCabinetHydrationPair(entry, next)) {
       normalized[index] = next;
       normalized[index + 1] = entry;
@@ -2184,6 +2190,22 @@ export function normalizeProviderOverlapRequestContractSemanticLedger(semanticLe
     index = end;
   }
   return Object.freeze(normalized.map((entry) => Object.freeze(entry)));
+}
+
+function isProviderOverlapIndependentProfileSdkPair(left, right) {
+  if (!left || !right) return false;
+  return left.key === "chatwoot-sdk-script"
+    && right.key === "app-profile-action"
+    && left.disposition === "continue"
+    && right.disposition === "continue"
+    && left.redirectEdge === null
+    && right.redirectEdge === null
+    && left.responseContentType === "application/javascript"
+    && right.responseContentType === "text/x-component"
+    && left.responseFailureSha256 === null
+    && right.responseFailureSha256 === null
+    && left.responseStatus === 200
+    && right.responseStatus === 200;
 }
 
 function isProviderOverlapIndependentCabinetHydrationPair(left, right) {
