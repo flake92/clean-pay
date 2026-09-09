@@ -403,6 +403,35 @@ test("projects hashed Next topology only after complete journey semantic proof",
   expect((retainedLink.actual as typeof linkNearMiss).network.requests).toHaveLength(4);
 });
 
+test("projects optional Origin headers on exact journey static chunks", () => {
+  const baseline = journeyManifest("baseline");
+  const candidate = journeyManifest("candidate");
+  setHashedNextTopology(baseline, "baseline", 1, false);
+  setHashedNextTopology(candidate, "candidate", 1, false);
+  baseline.network.requests[1]!.requestHeaders = [{
+    name: "origin",
+    value: canonicalUrl("/"),
+  }] as unknown as typeof baseline.network.requests[number]["requestHeaders"];
+
+  const projected = projectPair(baseline, candidate);
+  expect(projected.actual).toEqual(projected.expected);
+
+  const semanticNearMiss = journeyManifest("candidate");
+  setHashedNextTopology(semanticNearMiss, "candidate", 1, false);
+  semanticNearMiss.network.requests[0]!.url = canonicalUrl("/profile");
+  const retainedSemantic = projectPair(baseline, semanticNearMiss);
+  expect(retainedSemantic.actual).not.toEqual(retainedSemantic.expected);
+
+  const headerNearMiss = journeyManifest("candidate");
+  setHashedNextTopology(headerNearMiss, "candidate", 1, false);
+  baseline.network.requests[1]!.requestHeaders.push({
+    name: "authorization",
+    value: { bytes: 12, sha256: digest("bearer-token") },
+  } as unknown as typeof baseline.network.requests[number]["requestHeaders"][number]);
+  const retainedHeader = projectPair(baseline, headerNearMiss);
+  expect(retainedHeader.actual).not.toEqual(retainedHeader.expected);
+});
+
 test("projects hashed Next topology when a valid chunk floats around a server action", () => {
   const baseline = journeyManifest("baseline");
   const candidate = journeyManifest("candidate");

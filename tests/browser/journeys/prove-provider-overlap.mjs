@@ -1406,7 +1406,7 @@ async function exerciseCabinet(
         await route.abort("blockedbyclient");
         return;
       }
-      const finishRoute = beginBrowserEvent("route");
+      let finishRoute = null;
       try {
         const preparation = browserRequestPreparationByIdentity.get(request);
         if (!preparation
@@ -1424,6 +1424,7 @@ async function exerciseCabinet(
           await route.abort("blockedbyclient");
           return;
         }
+        finishRoute = beginBrowserEvent("route");
         if (preparation.disposition === "abort") {
           await route.abort("blockedbyclient");
           return;
@@ -1454,7 +1455,7 @@ async function exerciseCabinet(
         }
         await route.continue();
       } finally {
-        finishRoute();
+        finishRoute?.();
       }
     });
     context.removeListener("request", observePreLedgerRequest);

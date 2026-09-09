@@ -1993,7 +1993,12 @@ function headersMatchAfterValidatedHost(
 }
 
 function projectExactOptionalPublicStaticOriginPair(expected: unknown, actual: unknown) {
-  if (!isExactPublicCharacterizationPair(expected, actual)) return;
+  if (
+    !isExactPublicCharacterizationPair(expected, actual)
+    && !isExactJourneyFixtureProjectionPair(expected, actual)
+  ) {
+    return;
+  }
   const expectedNetwork = (expected as Record<string, unknown>).network as Record<string, unknown>;
   const actualNetwork = (actual as Record<string, unknown>).network as Record<string, unknown>;
   const expectedRequests = expectedNetwork.requests as unknown[];
@@ -2020,6 +2025,22 @@ function projectExactOptionalPublicStaticOriginPair(expected: unknown, actual: u
     projection.expected.requestHeaders = projection.expectedHeaders;
     projection.actual.requestHeaders = projection.actualHeaders;
   }
+}
+
+function isExactJourneyFixtureProjectionPair(expected: unknown, actual: unknown) {
+  return isRecord(expected)
+    && isRecord(actual)
+    && hasExactJourneyManifestEnvelope(expected)
+    && hasExactJourneyManifestEnvelope(actual)
+    && exactJourneyFixtureContract(expected) !== null
+    && exactJourneyFixtureContract(actual) !== null
+    && expected.project === actual.project
+    && expected.journey === actual.journey
+    && isRecord(expected.network)
+    && isRecord(actual.network)
+    && Array.isArray(expected.network.requests)
+    && Array.isArray(actual.network.requests)
+    && expected.network.requests.length === actual.network.requests.length;
 }
 
 function exactOptionalPublicStaticOriginProjection(

@@ -15,17 +15,21 @@ describe("cabinet performance regressions", () => {
     expect(page).toContain("loadRequestCabinetViewModel");
     expect(page).not.toContain("export default async function CabinetPage");
     expect(page).toContain("<CabinetAccessBoundary>");
+    expect(page).toContain('import { cache, Suspense, type ReactNode } from "react"');
+    expect(page).toContain(
+      'requireRequestCabinetEntrySession = cache(() => requireCabinetEntrySession("/cabinet"))',
+    );
     expect(page.indexOf("<CabinetAccessBoundary>")).toBeLessThan(
       page.indexOf("<AppShell requireAuth>"),
     );
-    expect(page.indexOf('await requireCabinetEntrySession("/cabinet")'))
+    expect(page.indexOf("await requireRequestCabinetEntrySession()"))
       .toBeLessThan(page.indexOf("await loadRequestCabinetViewModel()"));
-    expect(page.lastIndexOf('await requireCabinetEntrySession("/cabinet")'))
+    expect(page.lastIndexOf("await requireRequestCabinetEntrySession()"))
       .toBeLessThan(page.indexOf("await loadRequestReferralProgram()"));
     expect(page).toContain("await connection()");
     expect(page.indexOf("await connection()"))
-      .toBeLessThan(page.indexOf('await requireCabinetEntrySession("/cabinet")'));
-    expect(page).toContain('await requireCabinetEntrySession("/cabinet")');
+      .toBeLessThan(page.indexOf("await requireRequestCabinetEntrySession()"));
+    expect(page).toContain('requireCabinetEntrySession("/cabinet")');
     expect(shell).toContain("loadNavigationShell");
     expect(shell).toContain("await connection()");
     expect(shell).not.toContain("loadNavigation(");
