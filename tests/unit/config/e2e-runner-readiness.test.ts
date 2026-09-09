@@ -171,7 +171,7 @@ describe("devcontainer e2e runner readiness", () => {
   });
 
   it("bounds the test process and graceful Next.js shutdown", () => {
-    expect(shellRunner).toContain("timeout --signal=TERM --kill-after=10s 360s");
+    expect(shellRunner).toContain("timeout --signal=TERM --kill-after=10s 600s");
     expect(shellRunner).toContain('kill -KILL -- "-$next_pid"');
     expect(shellRunner).toContain("for _ in $(seq 1 10)");
   });
