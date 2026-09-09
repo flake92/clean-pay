@@ -323,15 +323,48 @@ function sendChatwootIdentity(
   }
 }
 
+// Both the ownership hand-off and the bounded retry rebuild the widget frame
+// the same way and reset the same in-memory SDK fields. Sharing the two steps
+// keeps the widget URL contract and the delivery-state reset in one place.
+function chatwootLiveChatFrame() {
+  return document.getElementById(
+    "chatwoot_live_chat_widget",
+  ) as HTMLIFrameElement | null;
+}
+
+function replacementWidgetFrame(
+  config: ChatwootWidgetConfig,
+  frame: HTMLIFrameElement,
+) {
+  const replacement = frame.cloneNode(false) as HTMLIFrameElement;
+  const widgetUrl = new URL(`${config.baseUrl.replace(/\/$/, "")}/widget`);
+  const conversation = cookieValue("cw_conversation");
+  widgetUrl.searchParams.set("website_token", config.websiteToken);
+  if (conversation) {
+    widgetUrl.searchParams.set("cw_conversation", conversation);
+  }
+  replacement.src = widgetUrl.toString();
+  replacement.style.visibility = "hidden";
+  return replacement;
+}
+
+// Reset only the SDK's in-memory delivery state. Calling its public reset()
+// would erase the active conversation; replacing the frame creates a new
+// WindowProxy while preserving that conversation.
+function resetChatwootDeliveryState(chatwoot: ChatwootApi) {
+  chatwoot.identifier = undefined;
+  chatwoot.user = undefined;
+  chatwoot.hasLoaded = false;
+  chatwoot.resetTriggered = false;
+}
+
 function queueChatwootIdentityAfterOwnership(
   config: ChatwootWidgetConfig,
   supportAttributes: Record<string, string>,
 ) {
   const pending = window.cleanPayChatwootPendingIdentity;
   const chatwoot = window.$chatwoot;
-  const frame = document.getElementById(
-    "chatwoot_live_chat_widget",
-  ) as HTMLIFrameElement | null;
+  const frame = chatwootLiveChatFrame();
 
   if (
     !pending
@@ -344,24 +377,13 @@ function queueChatwootIdentityAfterOwnership(
   }
 
   const { identity } = desiredIdentity(config, supportAttributes);
-  const replacement = frame.cloneNode(false) as HTMLIFrameElement;
-  const widgetUrl = new URL(`${config.baseUrl.replace(/\/$/, "")}/widget`);
-  const conversation = cookieValue("cw_conversation");
-  widgetUrl.searchParams.set("website_token", config.websiteToken);
-  if (conversation) {
-    widgetUrl.searchParams.set("cw_conversation", conversation);
-  }
-  replacement.src = widgetUrl.toString();
-  replacement.style.visibility = "hidden";
+  const replacement = replacementWidgetFrame(config, frame);
 
   // Chatwoot 4.16 does not correlate its error event with setUser(). Retire
   // the generation that was ownership-confirmed before sending a newer
   // payload. Our capture listener can then reject every late message from the
   // detached frame before the SDK turns it into an unscoped chatwoot:error.
-  chatwoot.identifier = undefined;
-  chatwoot.user = undefined;
-  chatwoot.hasLoaded = false;
-  chatwoot.resetTriggered = false;
+  resetChatwootDeliveryState(chatwoot);
   chatwoot.toggleBubbleVisibility(
     pending.core === identity.core ? "show" : "hide",
   );
@@ -653,9 +675,7 @@ export function retryChatwootIdentityAttempt(
 ) {
   const pending = window.cleanPayChatwootPendingIdentity;
   const chatwoot = window.$chatwoot;
-  const frame = document.getElementById(
-    "chatwoot_live_chat_widget",
-  ) as HTMLIFrameElement | null;
+  const frame = chatwootLiveChatFrame();
 
   if (
     !pending
@@ -674,23 +694,9 @@ export function retryChatwootIdentityAttempt(
     // A partially loaded launcher must not prevent the bounded retry.
   }
 
-  const replacement = frame.cloneNode(false) as HTMLIFrameElement;
-  const widgetUrl = new URL(`${config.baseUrl.replace(/\/$/, "")}/widget`);
-  const conversation = cookieValue("cw_conversation");
-  widgetUrl.searchParams.set("website_token", config.websiteToken);
-  if (conversation) {
-    widgetUrl.searchParams.set("cw_conversation", conversation);
-  }
-  replacement.src = widgetUrl.toString();
-  replacement.style.visibility = "hidden";
+  const replacement = replacementWidgetFrame(config, frame);
 
-  // Reset only the SDK's in-memory delivery state. Calling its public reset()
-  // would erase the active conversation; replacing the frame creates a new
-  // WindowProxy while preserving that conversation for the retry.
-  chatwoot.identifier = undefined;
-  chatwoot.user = undefined;
-  chatwoot.hasLoaded = false;
-  chatwoot.resetTriggered = false;
+  resetChatwootDeliveryState(chatwoot);
   expireCookie(`cw_user_${config.websiteToken}`);
 
   const waitingAttempt: ChatwootPendingIdentityState = {
