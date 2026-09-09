@@ -23,43 +23,33 @@ export function AuthShell({
       <ChatwootGuestBoundary />
       <main className="surface-ground auth-page flex align-items-center justify-content-center w-full overflow-x-hidden">
         <div className="w-full flex justify-content-center">
-          <div
-            className="w-full auth-card-frame"
-            style={{
-              border: "1px solid var(--surface-border)",
-              borderRadius: "24px",
-              padding: "0.25rem",
-              background: "var(--surface-card)",
-            }}
-          >
-            <div
-              className="w-full surface-card auth-card"
-              style={{ borderRadius: "20px" }}
-            >
-              <div className="auth-card-content">
-                <div className="text-center mb-4">
-                  <Image
-                    alt={branding.name}
-                    className="mb-3 flex-shrink-0 clean-auth-logo"
-                    height={68}
-                    src={branding.logoUrl}
-                    unoptimized
-                    width={68}
-                  />
-                  <h1 className="text-900 text-3xl font-medium mb-2 auth-title">{title}</h1>
-                  <span className="text-600 font-medium line-height-3 auth-description">{description}</span>
-                </div>
-                {children}
-                {footer ? <div className="mt-4 flex flex-column gap-2">{footer}</div> : null}
-                <div className="text-center mt-3">
-                  <Link className="font-medium no-underline" href="/" style={{ color: "var(--primary-color)" }}>
-                    {branding.name}
-                  </Link>
-                  <div aria-label={`Версия приложения ${APP_VERSION}`} className="text-600 text-sm mt-2">
-                    Версия {APP_VERSION}
-                  </div>
-                </div>
+          <div className="w-full auth-card-frame auth-card">
+            <div className="auth-card-content">
+              <div className="text-center mb-4">
+                <Image
+                  alt={branding.name}
+                  className="mb-3 flex-shrink-0 clean-auth-logo"
+                  height={68}
+                  src={branding.logoUrl}
+                  unoptimized
+                  width={68}
+                />
+                <h1 className="text-900 text-3xl font-medium mb-2 auth-title">{title}</h1>
+                <span className="text-600 font-medium line-height-3 auth-description">{description}</span>
               </div>
+              {children}
+              {footer ? (
+                <>
+                  {/* Two full-width solid buttons read as one block. Separate the
+                      alternative sign-in from the primary action explicitly. */}
+                  <p aria-hidden="true" className="auth-alt-divider">или</p>
+                  <div className="flex flex-column gap-2">{footer}</div>
+                </>
+              ) : null}
+              <p className="auth-card-meta">
+                <Link className="auth-card-brand no-underline" href="/">{branding.name}</Link>
+                <span aria-label={`Версия приложения ${APP_VERSION}`}>Версия {APP_VERSION}</span>
+              </p>
             </div>
           </div>
         </div>

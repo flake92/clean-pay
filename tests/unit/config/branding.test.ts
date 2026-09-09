@@ -46,7 +46,10 @@ describe("cabinet branding", () => {
       "src/frontend/layout/AppFooter.tsx",
       "src/frontend/layout/AppMenu.tsx",
       "src/frontend/layout/useCleanPayMenu.ts",
-      "src/frontend/components/page-header.tsx",
+      // page-header.tsx is deliberately absent: it no longer renders the brand.
+      // Its eyebrow defaulted to the brand name, repeating it under the topbar
+      // on every page, so it now renders only an explicit caller-supplied one.
+      // White-labelling still holds through the topbar, footer and auth shell.
       "src/frontend/components/support-panel.tsx",
       "src/app/tariffs/page.tsx",
       "src/app/profile/page.tsx",

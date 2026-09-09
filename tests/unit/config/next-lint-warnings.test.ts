@@ -21,11 +21,14 @@ describe("Next lint warning guardrails", () => {
   it("keeps Prime form controls visible when Tailwind preflight wins the cascade", () => {
     const globals = readFileSync("src/app/globals.css", "utf8");
 
-    expect(globals).toMatch(/\.p-inputtext\s*\{[\s\S]*background:\s*#ffffff;/);
-    expect(globals).toMatch(/\.p-inputtext\s*\{[\s\S]*border:\s*1px solid #d1d5db;/);
+    // What matters here is that the declarations exist at all, so preflight
+    // cannot leave a control with no background or border. The colours moved to
+    // design tokens, so assert the token rather than the literal it resolves to.
+    expect(globals).toMatch(/\.p-inputtext\s*\{[\s\S]*background:\s*var\(--cp-surface\);/);
+    expect(globals).toMatch(/\.p-inputtext\s*\{[\s\S]*border:\s*1px solid var\(--cp-border-strong\);/);
     expect(globals).toMatch(/\.p-inputtext\s*\{[\s\S]*padding:\s*0\.75rem 0\.75rem;/);
-    expect(globals).toMatch(/\.p-button\s*\{[\s\S]*background:\s*#6366f1;/);
-    expect(globals).toMatch(/\.p-button\s*\{[\s\S]*border:\s*1px solid #6366f1;/);
+    expect(globals).toMatch(/\.p-button\s*\{[\s\S]*background:\s*var\(--cp-primary\);/);
+    expect(globals).toMatch(/\.p-button\s*\{[\s\S]*border:\s*1px solid var\(--cp-primary\);/);
     expect(globals).toMatch(/\.p-button\s*\{[\s\S]*min-height:\s*3\.125rem;/);
     expect(globals).toMatch(/\.p-button\s*\{[\s\S]*padding:\s*0\.875rem 1\.25rem;/);
     expect(globals).toMatch(/\.p-button\s*\{[\s\S]*white-space:\s*nowrap;/);

@@ -1,5 +1,3 @@
-import { getBranding } from "@/shared/branding";
-
 export function PageHeader({
   eyebrow,
   title,
@@ -11,13 +9,17 @@ export function PageHeader({
   description?: string;
   actions?: React.ReactNode;
 }) {
-  const branding = getBranding();
-
   return (
     <div className="flex flex-column gap-3 md:flex-row md:align-items-end md:justify-content-between mb-4">
       <div>
-        <span className="text-xs font-semibold uppercase text-cyan-700">{eyebrow ?? branding.name}</span>
-        <h1 className="mt-2 mb-2 text-4xl font-semibold text-900">{title}</h1>
+        {/* No page ever passed an eyebrow, so this fell back to the brand name
+            and repeated it under the topbar on all ten pages -- in a stray cyan
+            that belonged to no other part of the product. Render it only when a
+            caller actually has something to say here. */}
+        {eyebrow ? (
+          <span className="page-header-eyebrow">{eyebrow}</span>
+        ) : null}
+        <h1 className="mt-0 mb-2 text-4xl font-semibold text-900">{title}</h1>
         {description ? (
           <p className="m-0 max-w-40rem line-height-3 text-600">{description}</p>
         ) : null}
