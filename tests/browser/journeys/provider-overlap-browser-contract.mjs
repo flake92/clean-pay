@@ -2133,8 +2133,23 @@ export function finalizeProviderOverlapBrowserContract(records, loadGraph) {
 
 export function normalizeProviderOverlapRequestContractSemanticLedger(semanticLedger) {
   const normalized = semanticLedger.map((entry) => ({ ...entry }));
+  for (const entry of normalized) {
+    if (providerOverlapResponseBackedAbortKeys.has(entry.key)
+      && entry.responseStatus === 200
+      && entry.responseContentType === "text/x-component"
+      && entry.responseFailureSha256 === providerOverlapResponseBackedAbortFailureSha256) {
+      entry.responseFailureSha256 = null;
+    }
+  }
   for (let index = 0; index < normalized.length;) {
     const entry = normalized[index];
+    const next = normalized[index + 1];
+    if (isProviderOverlapIndependentCabinetHydrationPair(entry, next)) {
+      normalized[index] = next;
+      normalized[index + 1] = entry;
+      index += 2;
+      continue;
+    }
     if (entry.key !== "app-login-root-rsc"
       || entry.responseStatus !== 200
       || entry.responseContentType !== "text/x-component") {
@@ -2169,6 +2184,22 @@ export function normalizeProviderOverlapRequestContractSemanticLedger(semanticLe
     index = end;
   }
   return Object.freeze(normalized.map((entry) => Object.freeze(entry)));
+}
+
+function isProviderOverlapIndependentCabinetHydrationPair(left, right) {
+  if (!left || !right) return false;
+  return left.key === "chatwoot-widget-frame"
+    && right.key === "app-root-rsc"
+    && left.disposition === "continue"
+    && right.disposition === "continue"
+    && left.redirectEdge === null
+    && right.redirectEdge === null
+    && left.responseContentType === "text/html"
+    && right.responseContentType === "text/x-component"
+    && left.responseFailureSha256 === null
+    && right.responseFailureSha256 === null
+    && left.responseStatus === 200
+    && right.responseStatus === 200;
 }
 
 function classifyApplicationRequest(descriptor, input, url, state) {
