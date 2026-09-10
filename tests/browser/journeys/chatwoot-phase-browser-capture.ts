@@ -4289,7 +4289,41 @@ function canonicalizeProviderPhaseEntries(
   entries: Array<Record<string, unknown>>,
   phase: Phase,
 ) {
-  return canonicalizeChatwootProviderArrivalOrder(entries, phase) as Array<Record<string, unknown>>;
+  return (canonicalizeChatwootProviderArrivalOrder(entries, phase) as Array<Record<string, unknown>>)
+    .map(projectProviderPhaseRelationEntry);
+}
+
+function projectProviderPhaseRelationEntry(entry: Record<string, unknown>) {
+  const projected = structuredClone(entry) as Record<string, unknown>;
+  if (containsProviderPhaseVariantDigest(projected.body_contract)) {
+    projected.body_bytes = "<phase-variant-body-bytes>";
+    projected.body_sha256 = "<phase-variant-body-sha256>";
+    projected.body_contract = scrubProviderPhaseVariantDigests(projected.body_contract);
+  }
+  return Object.freeze(projected);
+}
+
+function containsProviderPhaseVariantDigest(value: unknown): boolean {
+  if (Array.isArray(value)) return value.some(containsProviderPhaseVariantDigest);
+  if (!isRecord(value)) return false;
+  if (value.kind === "dynamic" || value.kind === "redacted") {
+    return typeof value.sha256 === "string";
+  }
+  return Object.values(value).some(containsProviderPhaseVariantDigest);
+}
+
+function scrubProviderPhaseVariantDigests(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return Object.freeze(value.map(scrubProviderPhaseVariantDigests));
+  }
+  if (!isRecord(value)) return value;
+  const entries = Object.entries(value).map(([key, child]) => [
+    key,
+    (key === "sha256" && (value.kind === "dynamic" || value.kind === "redacted"))
+      ? "<phase-variant-descriptor-sha256>"
+      : scrubProviderPhaseVariantDigests(child),
+  ]);
+  return Object.freeze(Object.fromEntries(entries));
 }
 
 function normalizeProviderLedgerEntries(
