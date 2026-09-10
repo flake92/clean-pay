@@ -22,6 +22,7 @@ import {
   emailVerificationPath,
 } from "@/shared/auth/account-setup-flow";
 import type { AccountReadiness } from "@/application/models/email-verification";
+import { VerificationCodeField } from "@/frontend/components/verification-code-field";
 
 const defaultReadiness: AccountReadiness = { status: "pending", emailVerified: false };
 
@@ -410,18 +411,7 @@ export function VerifyEmailPanel({
           Если код уже отправлен, просто введите 6 цифр из письма. Повторная отправка доступна ниже.
         </p>
         <form className="flex flex-column gap-3" onSubmit={confirmCode}>
-          <label className="flex flex-column gap-2">
-            <span className="text-sm font-medium text-700">Код подтверждения</span>
-            <InputText
-              inputMode="numeric"
-              maxLength={6}
-              minLength={6}
-              name="code"
-              pattern="[0-9]{6}"
-              placeholder="000000"
-              required
-            />
-          </label>
+          <VerificationCodeField />
           <Button
             disabled={loading !== null}
             label="Подтвердить e-mail"

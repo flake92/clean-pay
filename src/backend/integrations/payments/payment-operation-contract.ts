@@ -162,15 +162,30 @@ function normalizeOperation(
     2_048,
   );
 
+  // The priced terms both kinds share. A purchase additionally carries its
+  // plan_code, which is why it prefixes the hashed tuple below. Keeping one
+  // copy means a new term cannot be added to the stored payload while being
+  // forgotten in the fingerprint, which would let two different orders share
+  // an idempotency identity.
+  const sharedTerms = {
+    duration_days: durationDays,
+    gateway_type: gatewayType,
+    confirmed_amount: confirmedAmount,
+    confirmed_currency: confirmedCurrency,
+    offer_version: offerVersion,
+  } satisfies Prisma.InputJsonObject;
+
+  const sharedFingerprintTerms = [
+    sharedTerms.duration_days,
+    sharedTerms.gateway_type,
+    sharedTerms.confirmed_amount,
+    sharedTerms.confirmed_currency,
+    sharedTerms.offer_version,
+  ];
+
   if (operation.kind === "PURCHASE") {
-    const payload: Prisma.InputJsonObject = {
-      plan_code: normalizedString(operation.payload.plan_code, "plan_code", 200),
-      duration_days: durationDays,
-      gateway_type: gatewayType,
-      confirmed_amount: confirmedAmount,
-      confirmed_currency: confirmedCurrency,
-      offer_version: offerVersion,
-    };
+    const planCode = normalizedString(operation.payload.plan_code, "plan_code", 200);
+    const payload: Prisma.InputJsonObject = { plan_code: planCode, ...sharedTerms };
     return {
       kind: operation.kind,
       payload,
@@ -178,23 +193,13 @@ function normalizeOperation(
         "clean-pay.payment-operation",
         PAYMENT_OPERATION_CONTRACT_VERSION,
         operation.kind,
-        payload.plan_code,
-        payload.duration_days,
-        payload.gateway_type,
-        payload.confirmed_amount,
-        payload.confirmed_currency,
-        payload.offer_version,
+        planCode,
+        ...sharedFingerprintTerms,
       ])),
     };
   }
 
-  const payload: Prisma.InputJsonObject = {
-    duration_days: durationDays,
-    gateway_type: gatewayType,
-    confirmed_amount: confirmedAmount,
-    confirmed_currency: confirmedCurrency,
-    offer_version: offerVersion,
-  };
+  const payload: Prisma.InputJsonObject = { ...sharedTerms };
   return {
     kind: operation.kind,
     payload,
@@ -202,11 +207,7 @@ function normalizeOperation(
       "clean-pay.payment-operation",
       PAYMENT_OPERATION_CONTRACT_VERSION,
       operation.kind,
-      payload.duration_days,
-      payload.gateway_type,
-      payload.confirmed_amount,
-      payload.confirmed_currency,
-      payload.offer_version,
+      ...sharedFingerprintTerms,
     ])),
   };
 }

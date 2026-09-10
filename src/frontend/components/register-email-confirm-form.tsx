@@ -3,7 +3,6 @@
 import { useRef, useState } from "react";
 
 import { Button } from "primereact/button";
-import { InputText } from "primereact/inputtext";
 import { Message } from "primereact/message";
 
 import {
@@ -15,6 +14,7 @@ import { navigateTo } from "@/frontend/lib/browser-navigation";
 import { passkeySetupPath } from "@/shared/auth/account-setup-flow";
 import { clearSessionAction } from "@/app/actions/session";
 import { resetChatwootSession } from "@/frontend/lib/chatwoot";
+import { VerificationCodeField } from "@/frontend/components/verification-code-field";
 
 function missingTurnstileTokenMessage(siteKey?: string | null) {
   return hasTurnstileSiteKey(siteKey)
@@ -180,18 +180,7 @@ export function RegisterEmailConfirmForm({
         <TurnstileWidget action="email_verification" onReady={setTurnstile} onToken={setTurnstileToken} siteKey={turnstileSiteKey} />
       ) : null}
       <form className="flex flex-column gap-3" onSubmit={onSubmit}>
-        <label className="flex flex-column gap-2">
-          <span className="text-sm font-medium text-700">Код подтверждения</span>
-          <InputText
-            inputMode="numeric"
-            maxLength={6}
-            minLength={6}
-            name="code"
-            pattern="[0-9]{6}"
-            placeholder="000000"
-            required
-          />
-        </label>
+        <VerificationCodeField />
         {error ? <Message severity="error" text={error} /> : null}
         {message ? <Message severity="success" text={message} /> : null}
         <div className="flex flex-column gap-2 sm:flex-row">

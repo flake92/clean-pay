@@ -764,6 +764,34 @@ export async function createDurableTelegramCallbackSession(
 // Session completion and merge completion write the identical terminal record;
 // only the transition they guard against differs. Build that payload once so a
 // change to the stored envelope or its TTL cannot land on just one path.
+/** The terminal FAILED record, written by both the explicit failure path and
+ * the recovery terminalizer. They differed only in that one truncated the
+ * failure code and the other did not, so the column's length guard depended on
+ * which path happened to run; build it once and always truncate. */
+function failedCallbackData(
+  failureCode: string,
+  redirectTo: string,
+  resultExpiresAt: Date,
+  now: Date,
+) {
+  return {
+    callbackStatus: TelegramCallbackStatus.FAILED,
+    callbackClaimTokenHash: null,
+    callbackLeaseExpiresAt: null,
+    callbackResultEncrypted: resultExpiresAt > now
+      ? protectStored({
+          version: 2,
+          phase: TelegramCallbackStatus.FAILED,
+          value: { redirectTo },
+        })
+      : null,
+    callbackResultExpiresAt: resultExpiresAt,
+    callbackCompletedAt: now,
+    callbackFailureCode: failureCode.slice(0, 128),
+    callbackWebSessionId: null,
+  };
+}
+
 function completedCallbackData(
   replay: DurableTelegramCallbackReplay,
   now: Date,
@@ -925,22 +953,7 @@ export async function failDurableTelegramCallback(
     }
     const failed = await tx.telegramAuthState.updateMany({
       where: ownershipWhere(ownership, status),
-      data: {
-        callbackStatus: TelegramCallbackStatus.FAILED,
-        callbackClaimTokenHash: null,
-        callbackLeaseExpiresAt: null,
-        callbackResultEncrypted: resultExpiresAt > now
-          ? protectStored({
-              version: 2,
-              phase: TelegramCallbackStatus.FAILED,
-              value: { redirectTo },
-            })
-          : null,
-        callbackResultExpiresAt: resultExpiresAt,
-        callbackCompletedAt: now,
-        callbackFailureCode: failureCode.slice(0, 128),
-        callbackWebSessionId: null,
-      },
+      data: failedCallbackData(failureCode, redirectTo, resultExpiresAt, now),
     });
     if (failed.count !== 1) {
       throw new Error("Telegram callback failure ownership changed");
@@ -1006,22 +1019,7 @@ async function terminalizeLoadedCallback(
             }
           : {}),
       },
-      data: {
-        callbackStatus: TelegramCallbackStatus.FAILED,
-        callbackClaimTokenHash: null,
-        callbackLeaseExpiresAt: null,
-        callbackResultEncrypted: resultExpiresAt > now
-          ? protectStored({
-              version: 2,
-              phase: TelegramCallbackStatus.FAILED,
-              value: { redirectTo },
-            })
-          : null,
-        callbackResultExpiresAt: resultExpiresAt,
-        callbackCompletedAt: now,
-        callbackFailureCode: failureCode,
-        callbackWebSessionId: null,
-      },
+      data: failedCallbackData(failureCode, redirectTo, resultExpiresAt, now),
     });
     if (changed.count === 1 && record.callbackWebSessionId) {
       await tx.webSession.updateMany({
