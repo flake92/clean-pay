@@ -2094,6 +2094,17 @@ async function finishBrowserRequestContract(
         location,
       }, generation);
       redirectedSources.add(redirectedFrom);
+    } else {
+      const reconstructed = await reconstructExactChatwootRedirectSource({
+        entries: ledger.entries.slice(0, order),
+        generation,
+        redirectedSources,
+        target: { classification, request },
+      });
+      if (reconstructed) {
+        redirectEdge = reconstructed.edge;
+        redirectedSources.add(reconstructed.request);
+      }
     }
     const responseContentType = evidence?.responseContentType
       ?? (response ? normalizeResponseContentType(response.headers()["content-type"]) : null);
@@ -2294,6 +2305,43 @@ async function finishBrowserRequestContract(
       }
     },
   });
+}
+
+async function reconstructExactChatwootRedirectSource(input: {
+  entries: ReadonlyArray<StrictRequestEntry>;
+  generation: "initial" | "recreated";
+  redirectedSources: ReadonlySet<Request>;
+  target: Pick<StrictRequestEntry, "classification" | "request">;
+}) {
+  for (let index = input.entries.length - 1; index >= 0; index -= 1) {
+    const source = input.entries[index];
+    if (input.redirectedSources.has(source.request)) continue;
+    const sourceResponse = await boundedChatwootBrowserOperation(
+      source.request.response(),
+      5_000,
+      "Chatwoot reconstructed redirect source response",
+    );
+    const location = sourceResponse?.headers().location;
+    if (!sourceResponse || typeof location !== "string") continue;
+    const status = sourceResponse.status();
+    if (status < 300 || status > 399) continue;
+    try {
+      const edge = assertChatwootPhaseRedirect({
+        from: { classification: source.classification, url: source.request.url() },
+        to: {
+          classification: input.target.classification,
+          url: input.target.request.url(),
+        },
+        status,
+        location,
+      }, input.generation);
+      return Object.freeze({ edge, request: source.request });
+    } catch {
+      // Keep looking for an exact redirect source; unrelated 3xx responses are
+      // rejected later unless they have their own exact successor.
+    }
+  }
+  return null;
 }
 
 function historyEvidence(
