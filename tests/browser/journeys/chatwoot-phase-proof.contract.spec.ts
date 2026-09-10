@@ -1588,6 +1588,10 @@ test("binds the causal route barrier and exact logout helper without fixture sub
   expect(source).toContain("input.eventLedger.assertStable(checkpoint)");
   expect(source).toContain("await eventLedger.drainAndSeal(() => requestLifecycle.isIdle()");
   expect(source).toContain("assertChatwootAtomicPhaseRead({");
+  expect(source).toContain("const recordsByRequest = new Map<Request");
+  expect(source).toContain("recordsByRequest.set(request, record)");
+  expect(source).toContain("responseContentType: record.responseContentType");
+  expect(source).not.toContain("Chatwoot redirect completion response");
   expect(source.match(/if \(window !== window\.top\) return;/g)).toHaveLength(2);
   expect(source.indexOf("await recreatedCausality.sealPreClearGeneration(page)")).toBeLessThan(
     source.indexOf("await clearSyntheticLogoutState(page)"),
