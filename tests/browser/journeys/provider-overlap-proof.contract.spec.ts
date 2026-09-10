@@ -50,6 +50,7 @@ import {
   finalizeProviderOverlapEventLifecycle,
   finalizeProviderOverlapHistoryContract,
   installProviderOverlapHistoryInstrumentation,
+  isExactTerminalProviderOverlapRedirect,
   isProviderOverlapPlaywrightBodyCdpResponse,
   normalizeProviderOverlapRequestContractSemanticLedger,
   normalizeProviderOverlapSemanticEntry,
@@ -3326,11 +3327,37 @@ test("uses the exact raw content type for bodyless Telegram redirects", async ()
     rawContentType: null,
     status: 307,
   })).toBeNull();
+  expect(normalizeProviderOverlapSemanticEntry({
+    disposition: "continue",
+    key: "app-root-rsc",
+    redirectEdge: null,
+    responseContentType: "text/plain",
+    responseFailureSha256: null,
+    responseStatus: 307,
+  })).toMatchObject({
+    key: "app-root-rsc",
+    responseContentType: "text/plain",
+    responseStatus: 307,
+  });
   expect(normalizeProviderOverlapObservedResponseContentType({
     key: "app-telegram-start",
     rawContentType: "text/plain",
     status: 307,
   })).toBe("text/plain");
+  expect(isExactTerminalProviderOverlapRedirect({
+    key: "app-telegram-start",
+    redirectEdge: null,
+    responseContentType: "application/octet-stream",
+    responseFailureSha256: null,
+    responseStatus: 307,
+  })).toBe(true);
+  expect(isExactTerminalProviderOverlapRedirect({
+    key: "app-telegram-start",
+    redirectEdge: null,
+    responseContentType: "text/plain",
+    responseFailureSha256: null,
+    responseStatus: 307,
+  })).toBe(false);
   await expect(captureProviderOverlapResponseEvidence({
     classification,
     request,

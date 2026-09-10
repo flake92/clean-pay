@@ -1738,11 +1738,18 @@ export function validateProviderOverlapSemanticLedger(value, label = "semantic b
 }
 
 export function isExactTerminalProviderOverlapRedirect(entry) {
-  return entry
-    && typeof entry === "object"
-    && !Array.isArray(entry)
-    && typeof entry.key === "string"
-    && entry.key.endsWith("-rsc")
+  if (!entry
+    || typeof entry !== "object"
+    || Array.isArray(entry)
+    || typeof entry.key !== "string"
+  ) return false;
+  if (entry.key === "app-telegram-start") {
+    return entry.redirectEdge === null
+      && entry.responseStatus === 307
+      && entry.responseContentType === "application/octet-stream"
+      && entry.responseFailureSha256 === null;
+  }
+  return entry.key.endsWith("-rsc")
     && entry.redirectEdge === null
     && entry.responseStatus === 307
     && expectedContentTypes(entry.key, entry.responseStatus).includes(entry.responseContentType)
@@ -2646,7 +2653,7 @@ function expectedContentTypes(key, status) {
   if (key === "app-web-manifest") return ["application/manifest+json"];
   if (key.startsWith("chatwoot-widget-")) return ["text/html"];
   if (status === 307 && ["app-root-rsc", "app-login-root-rsc"].includes(key)) {
-    return [null];
+    return [null, "text/plain"];
   }
   if (key.endsWith("-rsc")) {
     return status === 307 ? ["application/octet-stream"] : ["text/x-component"];
