@@ -2558,8 +2558,18 @@ export function normalizeChatwootBrowserRecordsForContract(
 ) {
   if (generation === "recreated" && isRecreatedTerminalSpaCabinetFlow(records)) {
     const seenStaticPaths = new Set<string>();
+    let afterTelegramStart = false;
     return records.flatMap((record) => {
+      if (
+        record.classification.key === "app-telegram-start"
+        && record.classification.navigation
+        && record.responseStatus === 307
+      ) {
+        afterTelegramStart = true;
+        return [record];
+      }
       if (record.classification.staticPath === null) return [record];
+      if (afterTelegramStart) return [];
       const key = `${record.documentKey}\0${record.classification.staticPath}`;
       if (seenStaticPaths.has(key)) return [];
       seenStaticPaths.add(key);
