@@ -28,6 +28,7 @@ import { auditLog } from "@/backend/observability/audit";
 import { logger } from "@/backend/observability/logger";
 import { verifyTurnstileToken } from "@/backend/security/turnstile";
 import type { ChangeEmailResponse, ConfirmEmailVerificationResponse } from "@/backend/integrations/remnashop/contracts";
+import { defaultTransaction } from "@/backend/database/transaction-policy";
 
 type Authorized = Awaited<ReturnType<typeof getAuthorizedRemnashopTokens>>;
 type ActorContext = Pick<Authorized, "accessToken" | "refreshToken" | "session">;
@@ -176,7 +177,7 @@ export function createProductionEmailVerificationCommands(
             pendingRemnashopEmail: email,
           },
         });
-      });
+      }, defaultTransaction);
       return {
         existingOwnerId: existingOwner?.id ?? null,
         upstreamAccountId: actor.authorizedUpstreamAccountId,

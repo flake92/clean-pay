@@ -32,6 +32,7 @@ import { assertRateLimit } from "@/backend/limits/rate-limit";
 import { auditLog } from "@/backend/observability/audit";
 import { synchronizeProviderAccountIdentity } from "@/backend/integrations/auth/provider-account-identity-sync";
 import { productionTelegramAccountMergeGateway } from "@/backend/integrations/auth/telegram-account-merge-gateway";
+import { defaultTransaction } from "@/backend/database/transaction-policy";
 
 type CurrentSession = NonNullable<Awaited<ReturnType<typeof getCurrentSession>>>;
 type ProviderAuth = Awaited<ReturnType<typeof remnashopAuth>>;
@@ -265,7 +266,7 @@ export const productionLinkAccountCommands: LinkAccountCommands = {
       if (staged.count !== 1) {
         throw new ServiceError("UNAUTHORIZED", 401, "The local link actor changed before staging.");
       }
-    }));
+    }, defaultTransaction));
     if (stagedLocally) await adapt(() => refreshCurrentAccessCookie());
   },
 

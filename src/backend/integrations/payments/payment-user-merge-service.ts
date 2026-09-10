@@ -6,6 +6,7 @@ import { prisma } from "@/backend/database/prisma";
 import { ServiceError } from "@/backend/errors/service-error";
 import { paymentUpstreamOwnerHash } from "@/backend/payments/hashes";
 import { randomToken, sha256 } from "@/backend/security/crypto";
+import { standardTransaction } from "@/backend/database/transaction-policy";
 
 type LockedPaymentMergeUser = {
   id: string;
@@ -23,7 +24,6 @@ type LockedPaymentMergeOperation = {
 
 const paymentOwnerFenceLeaseMs = 180_000;
 const paymentOwnerFenceRenewIntervalMs = 30_000;
-const paymentOwnerFenceTransactionOptions = { maxWait: 5_000, timeout: 10_000 };
 
 type PaymentOwnerChangeContext = {
   tokenHash: string;
@@ -116,7 +116,7 @@ export async function reconcileCompletedPaymentOwnerChange(
     if (reconciled.count !== pending.length) {
       paymentMergeRequired("Completed owner change fence changed during reconciliation");
     }
-  }, paymentOwnerFenceTransactionOptions);
+  }, standardTransaction);
 }
 
 function normalizedOwnerFenceUserIds(userIds: string[]) {
@@ -546,7 +546,7 @@ export async function withPaymentOwnerChangeFence<T>({
     }
 
     return { userIds: fencedUserIds, resumedAfterMutation };
-  }, paymentOwnerFenceTransactionOptions);
+  }, standardTransaction);
   const claimedUserIds = claim.userIds;
 
   let renewalFailure: unknown = null;
@@ -619,7 +619,7 @@ async function markPaymentOwnerChangeMutation(
     if (marked.count !== users.length) {
       paymentMergeRequired("Payment owner fence changed before upstream mutation");
     }
-  }, paymentOwnerFenceTransactionOptions);
+  }, standardTransaction);
 }
 
 async function releasePaymentOwnerChangeFence(
@@ -637,7 +637,7 @@ async function releasePaymentOwnerChangeFence(
         ...clearedPaymentOwnerChangeFence(),
       },
     });
-  }, paymentOwnerFenceTransactionOptions);
+  }, standardTransaction);
 }
 
 async function renewPaymentOwnerChangeFence(userIds: string[], tokenHash: string) {
@@ -669,7 +669,7 @@ async function renewPaymentOwnerChangeFence(userIds: string[], tokenHash: string
     if (renewed.count !== currentUsers.length) {
       paymentMergeRequired("Payment owner fence changed during renewal");
     }
-  }, paymentOwnerFenceTransactionOptions);
+  }, standardTransaction);
 }
 
 async function finalizePaymentOwnerChangeFence(userIds: string[], tokenHash: string) {
@@ -714,7 +714,7 @@ async function finalizePaymentOwnerChangeFence(userIds: string[], tokenHash: str
     if (finalized.count !== currentUsers.length) {
       paymentMergeRequired("Payment owner fence changed during finalization");
     }
-  }, paymentOwnerFenceTransactionOptions);
+  }, standardTransaction);
 }
 
 function normalizedMergeUserIds(

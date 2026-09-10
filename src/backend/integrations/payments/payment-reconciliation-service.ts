@@ -13,6 +13,7 @@ import { applyRemnashopTransaction } from "@/backend/integrations/payments/payme
 import { lockPaymentUpstreamOwner } from "@/backend/integrations/payments/payment-owner-service";
 import { PAYMENT_MANUAL_REQUIRED_CODE } from "@/backend/payments/manual-review";
 import { randomToken, safeEqual, sha256 } from "@/backend/security/crypto";
+import { defaultTransaction } from "@/backend/database/transaction-policy";
 
 const RECONCILIATION_LEASE_MS = 30_000;
 const MAX_RECONCILIATION_BACKOFF_MS = 60 * 60_000;
@@ -258,7 +259,7 @@ export async function claimUnknownPaymentOperation(input: {
       attemptCount: candidate.reconcileAttemptCount,
       failureCount: candidate.reconcileFailureCount,
     };
-  });
+  }, defaultTransaction);
 }
 
 export async function completeReconciledPayment(
@@ -376,7 +377,7 @@ export async function completeReconciledPayment(
       );
     }
 
-  });
+  }, defaultTransaction);
 }
 
 export async function releaseReconciliationClaim(
@@ -475,7 +476,7 @@ export async function releaseReconciliationClaim(
         },
       });
     }
-  });
+  }, defaultTransaction);
 }
 
 export async function markPaymentReconciliationManual(
@@ -542,7 +543,7 @@ export async function resetMissingUpstreamOperation(
         "Payment reconciliation reset was fenced by another worker",
       );
     }
-  });
+  }, defaultTransaction);
 }
 
 export async function failPaymentReconciliation(

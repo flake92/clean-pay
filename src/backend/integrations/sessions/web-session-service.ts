@@ -80,6 +80,7 @@ function providerSessionData({
 }
 
 import { refreshTokenGraceMs } from "@/backend/integrations/sessions/web-session-policy";
+import { defaultTransaction, extendedTransaction } from "@/backend/database/transaction-policy";
 
 export {
   assertEmailVerificationPolicy,
@@ -215,7 +216,7 @@ export async function rotateRefreshTokenFamily(refreshToken: string, now = new D
       data: revokedWebSessionData(now),
     });
     return { status: "reuse" as const, sessionId: session.id, userId: session.userId };
-  }, { maxWait: 5_000, timeout: 15_000 });
+  }, extendedTransaction);
 
   // At READ COMMITTED a statement that began before another rotation commits
   // can lose the WHERE recheck after waiting for the row lock. A second
@@ -861,7 +862,7 @@ export async function replaceWebSessionAfterPasswordChange({
       user: currentSession.user,
       revokedSessionCount: revokedSessions.count,
     };
-  });
+  }, defaultTransaction);
 
   let replacement: Awaited<ReturnType<typeof replaceSession>>;
 

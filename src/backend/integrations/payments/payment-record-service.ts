@@ -10,6 +10,7 @@ import type {
   PaymentTransactionResponse,
   PlanOffer,
 } from "@/backend/integrations/remnashop/contracts";
+import { defaultTransaction } from "@/backend/database/transaction-policy";
 
 type PaymentRecordStatus =
   | "PENDING"
@@ -445,7 +446,7 @@ export async function syncPaymentRecordsFromRemnashopTransactions({
         for (const transaction of transactions) {
           await applyRemnashopTransaction(tx, { userId, transaction });
         }
-      });
+      }, defaultTransaction);
       return;
     } catch (error) {
       if (!isUniqueConstraintError(error) || attempt === 1) {
@@ -470,7 +471,7 @@ export async function syncExactPaymentRecordFromRemnashop(input: {
         );
 
         return applyRemnashopTransaction(tx, input);
-      });
+      }, defaultTransaction);
     } catch (error) {
       if (!isUniqueConstraintError(error) || attempt === 1) {
         throw error;

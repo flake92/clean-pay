@@ -12,6 +12,7 @@ import { paymentUpstreamOwnerHash } from "@/backend/payments/hashes";
 import { applyRemnashopTransaction } from "@/backend/integrations/payments/payment-record-service";
 import { lockPaymentUpstreamOwner } from "@/backend/integrations/payments/payment-owner-service";
 import { randomToken, safeEqual, sha256 } from "@/backend/security/crypto";
+import { defaultTransaction } from "@/backend/database/transaction-policy";
 
 // A backfill claim can perform two independently bounded 10s upstream calls and
 // atomically apply the maximum 100-row page. Keep a full 100s of DB/application
@@ -249,7 +250,7 @@ export async function claimPaymentHistorySync(input: {
       claimToken,
       leaseExpiresAt,
     };
-  });
+  }, defaultTransaction);
 }
 
 export async function completePaymentHistoryPage(
@@ -332,7 +333,7 @@ export async function completePaymentHistoryPage(
       applied: page.items.length,
       hasMore: page.next_cursor !== null,
     };
-  });
+  }, defaultTransaction);
 }
 
 export async function failPaymentHistorySync(
@@ -381,7 +382,7 @@ export async function failPaymentHistorySync(
     }
 
     return released.count === 1;
-  });
+  }, defaultTransaction);
 }
 
 export async function deferPaymentHistorySync(
@@ -427,7 +428,7 @@ export async function deferPaymentHistorySync(
     }
 
     return released.count === 1;
-  });
+  }, defaultTransaction);
 }
 
 export async function loadCurrentPaymentHistoryCredential(

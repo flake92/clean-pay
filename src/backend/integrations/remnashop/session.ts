@@ -26,6 +26,7 @@ import {
   cleanupFailedSessionReplacement,
   normalizeReplacementIdentityEmail,
 } from "@/backend/integrations/remnashop/session-replacement-cleanup";
+import { defaultTransaction } from "@/backend/database/transaction-policy";
 
 type RemnashopProfileIdentity = {
   remnashopUserId: string;
@@ -289,7 +290,7 @@ export async function createSessionFromRemnashopAuth({
       });
 
       return reconciledUser;
-    });
+    }, defaultTransaction);
   } catch (error) {
     if (replaceExistingSessions) {
       await cleanupFailedSessionReplacement({
@@ -391,7 +392,7 @@ export async function reconcileUserFromRemnashopAuth({
       tx,
       profileIdentity({ remnashopUserId, profile }),
     );
-  });
+  }, defaultTransaction);
 
   await auditLog({
     action: "remnashop_account_linked",
@@ -618,7 +619,7 @@ export async function linkCurrentUserToRemnashopAuth({
     }
 
     return updatedUser;
-  });
+  }, defaultTransaction);
 
   await auditLog({
     action: "remnashop_account_linked",
