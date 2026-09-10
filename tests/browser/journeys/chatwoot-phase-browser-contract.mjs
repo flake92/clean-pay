@@ -27,6 +27,10 @@ const directNavigationFlow = Object.freeze([
   "app-telegram-callback",
   "app-cabinet-document",
 ]);
+const terminalSpaNavigationFlow = Object.freeze([
+  "app-login-document",
+  "app-telegram-start",
+]);
 const directStaticRoutes = Object.freeze(["/cabinet/page", "/login/page"]);
 const initialStaticDocumentKeyFlows = Object.freeze([
   Object.freeze(["app-login-document", "app-profile-document", "app-cabinet-document"]),
@@ -279,11 +283,27 @@ function finalizeDirectCabinetBrowserContract(records, loadGraph) {
     || loadGraph.responseDeclarationsByDocument.length !== 2) {
     fail("Chatwoot direct-cabinet request ledger is outside its exact bound.");
   }
+  const navigationFlow = records
+    .filter(({ classification }) => classification.navigation)
+    .map(({ classification }) => classification.key);
+  const terminalSpaFlow = isTerminalSpaDirectCabinetFlow(records, navigationFlow);
+  const activeNavigationFlow = terminalSpaFlow ? terminalSpaNavigationFlow : directNavigationFlow;
+  const directDocumentKeys = terminalSpaFlow
+    ? ["app-login-document"]
+    : ["app-login-document", "app-cabinet-document"];
+  const inactiveDeclarations = loadGraph.responseDeclarationsByDocument.filter(({ documentKey }) => (
+    !directDocumentKeys.includes(documentKey)
+  ));
+  if (inactiveDeclarations.some((entry) => !isDenseArray(entry.paths) || entry.paths.length !== 0)) {
+    fail("Chatwoot terminal direct-cabinet response declaration is not exact.");
+  }
   const provider = loadGraph.staticAssetContract.providerContract;
   const reference = assertSharedStaticReference(loadGraph.referenceStaticContract, provider);
-  const directDocumentKeys = ["app-login-document", "app-cabinet-document"];
+  const activeResponseDeclarationsByDocument = loadGraph.responseDeclarationsByDocument.filter(
+    ({ documentKey }) => directDocumentKeys.includes(documentKey),
+  );
   const responseDeclarationLedger = sanitizeResponseDeclarationLedger(
-    loadGraph.responseDeclarationsByDocument,
+    activeResponseDeclarationsByDocument,
     directDocumentKeys,
     provider,
     "Chatwoot recreated response declaration",
@@ -306,10 +326,7 @@ function finalizeDirectCabinetBrowserContract(records, loadGraph) {
       `Chatwoot request classification ${index}`,
     );
   }
-  const navigationFlow = records
-    .filter(({ classification }) => classification.navigation)
-    .map(({ classification }) => classification.key);
-  deepEqual(navigationFlow, directNavigationFlow, "Chatwoot direct-cabinet navigation flow");
+  deepEqual(navigationFlow, activeNavigationFlow, "Chatwoot direct-cabinet navigation flow");
   const counts = {};
   const semanticLedger = [];
   const staticLedger = [];
@@ -409,12 +426,23 @@ function finalizeDirectCabinetBrowserContract(records, loadGraph) {
     equal(record.responseFailureSha256, null, `Chatwoot response failure ${index}`);
     if (record.redirectEdge !== null) redirects.push(record.redirectEdge);
   }
-  for (const key of directNavigationFlow) equal(counts[key], 1, `Chatwoot navigation count ${key}`);
-  deepEqual(redirects, [
-    "app-telegram-start:307->telegram-oidc-authorize",
-    "telegram-oidc-authorize:302->app-telegram-callback",
-    "app-telegram-callback:307->app-cabinet-document",
-  ], "Chatwoot direct-cabinet redirects");
+  for (const key of activeNavigationFlow) equal(counts[key], 1, `Chatwoot navigation count ${key}`);
+  if (terminalSpaFlow) {
+    if ((counts["app-cabinet-action"] ?? 0) < 1
+      || (counts["chatwoot-widget-frame"] ?? 0) < 1
+      || (counts["app-cabinet-document"] ?? 0) !== 0
+      || (counts["telegram-oidc-authorize"] ?? 0) !== 0
+      || (counts["app-telegram-callback"] ?? 0) !== 0) {
+      fail("Chatwoot terminal direct-cabinet browser proof is incomplete.");
+    }
+    deepEqual(redirects, [], "Chatwoot terminal direct-cabinet redirects");
+  } else {
+    deepEqual(redirects, [
+      "app-telegram-start:307->telegram-oidc-authorize",
+      "telegram-oidc-authorize:302->app-telegram-callback",
+      "app-telegram-callback:307->app-cabinet-document",
+    ], "Chatwoot direct-cabinet redirects");
+  }
   for (const key of ["next-static-css", "next-static-font", "next-static-js"]) {
     if (!Number.isSafeInteger(counts[key]) || counts[key] < 1) {
       fail(`Chatwoot direct-cabinet contract requires ${key}.`);
@@ -511,6 +539,37 @@ function finalizeDirectCabinetBrowserContract(records, loadGraph) {
     staticRequestCount: staticLedger.length,
     staticRequestLedger: Object.freeze(staticLedger.map(Object.freeze)),
   });
+}
+
+function isTerminalSpaDirectCabinetFlow(records, navigationFlow) {
+  if (JSON.stringify(navigationFlow) !== JSON.stringify(terminalSpaNavigationFlow)) return false;
+  const telegramStartIndex = records.findIndex(({ classification }) => (
+    classification.key === "app-telegram-start"
+    && classification.navigation
+    && classification.expectedStatuses.includes(307)
+  ));
+  if (telegramStartIndex < 1) return false;
+  let cabinetActionIndex = -1;
+  let widgetFrameIndex = -1;
+  for (const [index, record] of records.entries()) {
+    if (record.documentKey !== "app-login-document") return false;
+    if (index <= telegramStartIndex) continue;
+    if (
+      record.classification.key === "app-cabinet-action"
+      && record.responseStatus === 200
+      && record.responseContentType === "text/x-component"
+    ) {
+      cabinetActionIndex = index;
+    }
+    if (
+      record.classification.key === "chatwoot-widget-frame"
+      && record.responseStatus === 200
+      && record.responseContentType === "text/html"
+    ) {
+      widgetFrameIndex = index;
+    }
+  }
+  return cabinetActionIndex > telegramStartIndex && widgetFrameIndex > cabinetActionIndex;
 }
 
 function assertSharedStaticReference(value, provider) {
