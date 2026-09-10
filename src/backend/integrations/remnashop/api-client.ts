@@ -115,6 +115,26 @@ async function readResponseText(response: Response, path: string) {
   }
 }
 
+/** The request shape both Remnashop transports send. The upstream timeout and
+ * the no-store cache policy are reliability defaults, and stating them twice is
+ * how one of them quietly stops matching the other. */
+function remnashopRequestInit(
+  headers: Record<string, string>,
+  options: {
+    method?: string;
+    body?: unknown;
+    timeoutMs?: number;
+  },
+) {
+  return {
+    method: options.method ?? "GET",
+    headers,
+    body: options.body === undefined ? undefined : JSON.stringify(options.body),
+    cache: "no-store" as const,
+    signal: AbortSignal.timeout(options.timeoutMs ?? 15_000),
+  };
+}
+
 async function parseResponse<T>(response: Response, path: string) {
   const text = await readResponseText(response, path);
   let data: unknown = null;
@@ -392,11 +412,7 @@ export async function remnashopRequestResult<T>(
   }
 
   const response = await fetchRemnashop(path, {
-    method: options.method ?? "GET",
-    headers,
-    body: options.body === undefined ? undefined : JSON.stringify(options.body),
-    cache: "no-store",
-    signal: AbortSignal.timeout(options.timeoutMs ?? 15_000),
+    ...remnashopRequestInit(headers, options),
   });
 
   if (options.allowNotFound && response.status === 404) {
@@ -447,11 +463,7 @@ export async function remnashopAdminRequestResult<T>(
   }
 
   const response = await fetchRemnashopAdmin(path, {
-    method: options.method ?? "GET",
-    headers,
-    body: options.body === undefined ? undefined : JSON.stringify(options.body),
-    cache: "no-store",
-    signal: AbortSignal.timeout(options.timeoutMs ?? 15_000),
+    ...remnashopRequestInit(headers, options),
   });
 
   if (options.allowNotFound && response.status === 404) {
