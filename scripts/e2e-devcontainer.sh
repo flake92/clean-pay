@@ -482,6 +482,14 @@ warm_next_routes
 bash "$root_dir/scripts/wait-for-http.sh" "$mailpit_url/api/v1/messages" 60 "Wait for Mailpit API" "GET"
 bash "$root_dir/scripts/wait-for-http.sh" "$oidc_url/.well-known/jwks.json" 60 "Wait for Telegram OIDC JWKS" "GET"
 
+# The health endpoint waited on above reports liveness only. Readiness is the
+# app's own aggregate over Postgres, Redis, Remnashop, Mailpit and Remnawave,
+# and the suite asserts it answers 200 -- so wait for that same condition
+# rather than for a subset of the dependencies it covers. Remnashop in
+# particular is a Python service that accepts connections well before it is
+# ready, which is how this raced and returned 503 to the first test.
+bash "$root_dir/scripts/wait-for-http.sh" "$base_url/api/health/readiness" 180 "Wait for Clean Pay dependency readiness" "GET"
+
 log_step "Running full-stack e2e tests"
 timeout --signal=TERM --kill-after=10s 600s \
   env CLEAN_PAY_E2E_BASE_URL="$base_url" \
