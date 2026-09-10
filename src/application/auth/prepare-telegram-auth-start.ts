@@ -5,7 +5,9 @@ import type {
 export class TelegramAuthStartFailure extends Error {
   constructor(
     public readonly authenticated: boolean,
-    public readonly cause: unknown,
+    // Not a parameter property: Error already owns `cause`, and redeclaring it
+    // shadowed the base field with the same value that super() had just set.
+    cause: unknown,
   ) {
     super("Telegram authentication start failed", { cause });
     this.name = "TelegramAuthStartFailure";
