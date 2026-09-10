@@ -3181,6 +3181,21 @@ test("accepts the exact recreated terminal SPA cabinet browser flow", () => {
     staticAssetContract,
     "app-login-document",
   );
+  const loginStaticPaths = new Set(duplicateLoginStatic.map(({ classification }) => (
+    classification.staticPath
+  )));
+  const extraPostStartStatic = staticRecordsForDocument(
+    staticAssetContract,
+    "app-cabinet-document",
+  ).find(({ classification }) => !loginStaticPaths.has(classification.staticPath));
+  if (!extraPostStartStatic) throw new Error("Expected a distinct cabinet static fixture path.");
+  const postStartStaticBurst = [
+    ...duplicateLoginStatic,
+    {
+      ...extraPostStartStatic,
+      documentKey: "app-login-document" as const,
+    },
+  ];
   const records = [
     record("app-login-document", "app-login-document", 200, "text/html", {
       navigation: true,
@@ -3190,14 +3205,14 @@ test("accepts the exact recreated terminal SPA cabinet browser flow", () => {
     record("app-telegram-start", "app-login-document", 307, "application/octet-stream", {
       navigation: true,
     }),
-    ...duplicateLoginStatic,
+    ...postStartStaticBurst,
     record("chatwoot-sdk-script", "app-login-document", 200, "application/javascript"),
     record("app-cabinet-action", "app-login-document", 200, "text/x-component"),
     record("chatwoot-widget-frame", "app-login-document", 200, "text/html"),
   ] as Parameters<typeof normalizeChatwootBrowserRecordsForContract>[0];
 
   const normalized = normalizeChatwootBrowserRecordsForContract(records, "recreated");
-  expect(normalized).toHaveLength(records.length - duplicateLoginStatic.length);
+  expect(normalized).toHaveLength(records.length - postStartStaticBurst.length);
   const finalized = finalizeChatwootPhaseBrowserContract(normalized, {
     cssMediaReferences: terminalGraph.cssMediaReferences,
     generation: "recreated",
