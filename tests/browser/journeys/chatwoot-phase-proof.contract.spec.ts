@@ -1698,9 +1698,13 @@ test("keeps Chatwoot capture failures bound to one bounded coarse stage", async 
   expect(source).toContain("createProviderOverlapCdpResponseBodyCapture");
   expect(source).toContain('await responseBodyCdp.send("Network.enable", {');
   expect(source).toContain("enableDurableMessages: true");
-  expect(source).toContain("readChatwootDurableResponseBody(");
-  expect(source).toContain("cdpResponseBodyCapture,");
-  expect(source).toContain('!classification.key.endsWith("-action")');
+  expect(source).toContain("captureProviderOverlapResponseEvidence({");
+  expect(source).toContain("terminal: terminal.promise");
+  expect(source).toContain("isProviderOverlapPlaywrightBodyCdpResponse(event)");
+  expect(source).toContain("cdpResponseBodyCapture.skipResponseBody(responseClaim)");
+  expect(source).toContain("cdpResponseBodyCapture.readBody({");
+  expect(source).toContain("CHATWOOT_PLAYWRIGHT_BODY_KEYS");
+  expect(source).toContain("CHATWOOT_PLAYWRIGHT_BODY_KEYS.includes(entry.classification.key)");
   expect(source).toContain("causeMessage: sanitizeChatwootCaptureCauseMessage(error)");
   expect(source).toContain("onCheckpoint(\"stable-finish-browser-contract\")");
   expect(source).toContain("{ cause: error }");

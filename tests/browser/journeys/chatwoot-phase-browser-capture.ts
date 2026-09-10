@@ -42,6 +42,7 @@ import {
 } from "./chatwoot-phase-browser-contract.mjs";
 import {
   attestProviderOverlapStaticResponse,
+  captureProviderOverlapResponseEvidence,
   createJourneyBrowserRequestEnvelope,
   createProviderOverlapCdpResponseBodyCapture,
   createProviderOverlapRepeatableStaticResponseUrls,
@@ -49,6 +50,7 @@ import {
   extractProviderOverlapResponseStaticDeclarations,
   installProviderOverlapHistoryInstrumentation,
   isExactTerminalProviderOverlapRedirect,
+  isProviderOverlapPlaywrightBodyCdpResponse,
 } from "./provider-overlap-browser-contract.mjs";
 import { createChatwootPhaseEventLedger } from "./chatwoot-phase-event-ledger.mjs";
 import {
@@ -65,12 +67,15 @@ import {
 const MAXIMUM_EVENTS = 32;
 const MAXIMUM_REQUESTS = 256;
 const MAXIMUM_CONTROL_BYTES = 2 * 1024 * 1024;
-const MAXIMUM_STATIC_ASSET_BYTES = 128 * 1024 * 1024;
-const MAXIMUM_STATIC_DECLARATION_BODY_BYTES = 2 * 1024 * 1024;
 const MAXIMUM_SERVER_ACTIONS = 200;
 const MAXIMUM_STORAGE_KEYS = 128;
 const VIEWPORT = Object.freeze({ width: 1440, height: 900 });
 const EMPTY_BODY_SHA256 = sha256Text("");
+const CHATWOOT_PLAYWRIGHT_BODY_KEYS = Object.freeze([
+  "app-cabinet-action",
+  "app-login-root-rsc",
+  "app-profile-action",
+]);
 const providerEndpointContracts = Object.freeze([
   providerEndpoint("remnashop", "GET", "/api/v1/public/plans/public", [],
     "read_public_plans", "none", [], null, []),
@@ -216,7 +221,30 @@ type BrowserRequestLedger = {
   currentDocumentKey: StrictRequestEntry["documentKey"] | null;
   responseBodyByIdentity: Map<Request, Promise<Buffer>>;
   responseByIdentity: Map<Request, Response>;
+  responseEvidenceByIdentity: Map<Request, Promise<ChatwootBrowserResponseEvidence>>;
+  responseTerminalByIdentity: Map<Request, ChatwootBrowserResponseTerminal>;
 };
+
+type ChatwootBrowserResponseTerminalResult = Readonly<{
+  failureSha256: string | null;
+  finished: boolean;
+}>;
+
+type ChatwootBrowserResponseTerminal = Readonly<{
+  promise: Promise<ChatwootBrowserResponseTerminalResult>;
+  release: (result: ChatwootBrowserResponseTerminalResult) => void;
+  settled: () => boolean;
+}>;
+
+type ChatwootBrowserResponseEvidence = Readonly<{
+  body: Uint8Array | null;
+  classification: StrictRequestEntry["classification"];
+  request: Request;
+  response: Response | null;
+  responseContentType: string | null;
+  responseFailureSha256: string | null;
+  responseStatus: number | null;
+}>;
 
 type InitialCabinetBarrierInput = Readonly<{
   barrierConsumed: boolean;
@@ -499,6 +527,7 @@ async function exerciseChatwootPhases(input: CaptureInput & {
     ) => responseBodyCdp.send(method, parameters),
   });
   responseBodyCdp.on("Network.responseReceived", (event) => {
+    if (isProviderOverlapPlaywrightBodyCdpResponse(event)) return;
     cdpResponseBodyCapture.observeResponseReceived(event);
   });
   responseBodyCdp.on("Network.loadingFinished", (event) => {
@@ -695,18 +724,51 @@ async function exerciseChatwootPhases(input: CaptureInput & {
   });
   page.on("response", (response) => {
     for (const ledger of Object.values(ledgers)) {
-      if (ledger.byIdentity.has(response.request())) {
-        ledger.responseByIdentity.set(response.request(), response);
-        const body = readChatwootDurableResponseBody(
-          cdpResponseBodyCapture,
+      const request = response.request();
+      const entry = ledger.byIdentity.get(request);
+      if (entry) {
+        ledger.responseByIdentity.set(request, response);
+        const terminal = terminalForChatwootBrowserResponse(ledger, request);
+        const evidence = captureProviderOverlapResponseEvidence({
+          classification: entry.classification,
+          readBody: (bodyInput: {
+            maximumBodyBytes: number | null;
+            readPlaywrightBody: () => Promise<Uint8Array>;
+          }) => {
+            const { maximumBodyBytes, readPlaywrightBody } = bodyInput;
+            if (CHATWOOT_PLAYWRIGHT_BODY_KEYS.includes(entry.classification.key)) {
+              return maximumBodyBytes === null ? null : readPlaywrightBody();
+            }
+            const responseClaim = {
+              resourceType: request.resourceType(),
+              status: response.status(),
+              url: request.url(),
+            };
+            return maximumBodyBytes === null
+              ? cdpResponseBodyCapture.skipResponseBody(responseClaim)
+              : cdpResponseBodyCapture.readBody({
+                  maximumBodyBytes,
+                  ...responseClaim,
+                });
+          },
+          request,
           response,
-          ledger.byIdentity.get(response.request())!.classification,
-        );
+          terminal: terminal.promise,
+        }) as Promise<ChatwootBrowserResponseEvidence>;
+        evidence.catch(() => {});
+        ledger.responseEvidenceByIdentity.set(request, evidence);
+        const body = evidence.then(({ body: value }) => Buffer.from(value ?? Buffer.alloc(0)));
         body.catch(() => {});
-        ledger.responseBodyByIdentity.set(response.request(), body);
+        ledger.responseBodyByIdentity.set(request, body);
         break;
       }
     }
+  });
+  page.on("requestfinished", (request) => {
+    releaseChatwootBrowserResponseTerminal(ledgers, request, true);
+  });
+  page.on("requestfailed", (request) => {
+    releaseChatwootBrowserResponseTerminal(ledgers, request, false);
   });
   const requestLifecycle = installChatwootCommonRequestLifecycleForTest(page, eventLedger);
 
@@ -1512,11 +1574,17 @@ async function completeTelegramNavigation(
   telegram: Locator,
   redirectPath: "/profile" | "/cabinet",
 ) {
-  await telegram.click();
-  await page.waitForURL(
-    (url) => url.href === `${SYNTHETIC_APPLICATION_ORIGIN}${redirectPath}`,
-    { timeout: 30_000 },
-  );
+  const targetUrl = `${SYNTHETIC_APPLICATION_ORIGIN}${redirectPath}`;
+  const navigation = page.waitForURL(
+    (url) => url.href === targetUrl,
+    { waitUntil: "load", timeout: 30_000 },
+  ).catch((error) => {
+    throw new Error("Chatwoot profile navigation barrier failed.", { cause: error });
+  });
+  await Promise.all([
+    navigation,
+    telegram.click(),
+  ]);
   await page.getByRole("heading", {
     name: redirectPath === "/profile" ? "Профиль" : "Личный кабинет",
     level: 1,
@@ -1842,7 +1910,65 @@ function createBrowserRequestLedger(): BrowserRequestLedger {
     currentDocumentKey: null,
     responseBodyByIdentity: new Map(),
     responseByIdentity: new Map(),
+    responseEvidenceByIdentity: new Map(),
+    responseTerminalByIdentity: new Map(),
   };
+}
+
+function createChatwootBrowserResponseTerminal(): ChatwootBrowserResponseTerminal {
+  let release!: (result: ChatwootBrowserResponseTerminalResult) => void;
+  let settled = false;
+  const promise = new Promise<ChatwootBrowserResponseTerminalResult>((resolve) => {
+    release = (result) => {
+      if (settled) return;
+      settled = true;
+      resolve(result);
+    };
+  });
+  return Object.freeze({
+    promise,
+    release,
+    settled: () => settled,
+  });
+}
+
+function terminalForChatwootBrowserResponse(
+  ledger: BrowserRequestLedger,
+  request: Request,
+) {
+  const existing = ledger.responseTerminalByIdentity.get(request);
+  if (existing) return existing;
+  const terminal = createChatwootBrowserResponseTerminal();
+  ledger.responseTerminalByIdentity.set(request, terminal);
+  return terminal;
+}
+
+function releaseChatwootBrowserResponseTerminal(
+  ledgers: Record<string, BrowserRequestLedger>,
+  request: Request,
+  finished: boolean,
+) {
+  for (const ledger of Object.values(ledgers)) {
+    const entry = ledger.byIdentity.get(request);
+    if (!entry) continue;
+    const terminal = terminalForChatwootBrowserResponse(ledger, request);
+    if (terminal.settled()) {
+      throw new Error("Chatwoot browser response terminal was observed more than once.");
+    }
+    let failureText: string | null = null;
+    if (!finished) {
+      try {
+        failureText = request.failure()?.errorText ?? "chatwoot-request-failure-unavailable";
+      } catch {
+        failureText = "chatwoot-request-failure-unavailable";
+      }
+    }
+    terminal.release(Object.freeze({
+      failureSha256: failureText === null ? null : sha256Text(failureText),
+      finished,
+    }));
+    return;
+  }
 }
 
 export function advanceInitialCabinetBarrierForTest(
@@ -1936,6 +2062,15 @@ async function finishBrowserRequestContract(
       || (response !== null && observedResponse !== response)) {
       throw new Error("Chatwoot completed response identity differs from its request ledger.");
     }
+    const evidence = response
+      ? await boundedChatwootBrowserOperation(
+        ledger.responseEvidenceByIdentity.get(request) ?? Promise.reject(
+          new Error("Chatwoot response evidence is missing."),
+        ),
+        5_000,
+        "Chatwoot browser response evidence",
+      )
+      : null;
     const redirectedFrom = request.redirectedFrom();
     let redirectEdge = null;
     if (redirectedFrom) {
@@ -1957,14 +2092,14 @@ async function finishBrowserRequestContract(
       }, generation);
       redirectedSources.add(redirectedFrom);
     }
-    const responseContentType = response
-      ? normalizeResponseContentType(response.headers()["content-type"])
-      : null;
+    const responseContentType = evidence?.responseContentType
+      ?? (response ? normalizeResponseContentType(response.headers()["content-type"]) : null);
+    const responseFailureSha256 = evidence?.responseFailureSha256 ?? null;
     let staticObservation = {
       staticResponseBytes: null as number | null,
       staticResponseSha256: null as string | null,
     };
-    if (classification.staticPath !== null) {
+    if (classification.staticPath !== null && responseFailureSha256 === null) {
       const staticEvidence = await readChatwootPrearmedStaticResponseEvidence({
         classification,
         response,
@@ -2018,6 +2153,7 @@ async function finishBrowserRequestContract(
     if (
       response
       && response.status() === 200
+      && responseFailureSha256 === null
       && !classification.key.endsWith("-action")
       && new Set(["text/html", "text/x-component"])
         .has(responseContentType ?? "")
@@ -2055,7 +2191,7 @@ async function finishBrowserRequestContract(
       documentKey,
       redirectEdge,
       responseContentType,
-      responseFailureSha256: null,
+      responseFailureSha256,
       responseStatus: response?.status() ?? null,
       ...staticObservation,
     };
@@ -2139,6 +2275,7 @@ async function finishBrowserRequestContract(
           record.responseStatus !== null
         )).length
         || ledger.responseBodyByIdentity.size !== ledger.responseByIdentity.size
+        || ledger.responseEvidenceByIdentity.size !== ledger.responseByIdentity.size
         || finalized.requestCount !== records.length
         || finalized.staticLoadGraph.assetAttestationSha256
           !== staticAssetContract.providerContract.attestationSha256
@@ -2191,32 +2328,6 @@ function normalizeResponseContentType(value: string | undefined) {
     throw new Error("Chatwoot browser response content type is invalid.");
   }
   return normalized;
-}
-
-async function readChatwootDurableResponseBody(
-  cdpResponseBodyCapture: ReturnType<typeof createProviderOverlapCdpResponseBodyCapture>,
-  response: Response,
-  classification: StrictRequestEntry["classification"],
-) {
-  const request = response.request();
-  const status = response.status();
-  if (status >= 300 && status <= 399) return Buffer.alloc(0);
-  if (classification.staticPath === null && classification.key.endsWith("-action")) {
-    return Buffer.alloc(0);
-  }
-  const responseContentType = normalizeResponseContentType(response.headers()["content-type"]);
-  const maximumBodyBytes = new Set(["text/html", "text/x-component"]).has(
-    responseContentType ?? "",
-  )
-    ? MAXIMUM_STATIC_DECLARATION_BODY_BYTES
-    : MAXIMUM_STATIC_ASSET_BYTES;
-  const body = await cdpResponseBodyCapture.readBody({
-    maximumBodyBytes,
-    resourceType: request.resourceType(),
-    status,
-    url: request.url(),
-  });
-  return Buffer.from(body);
 }
 
 async function readChatwootPrearmedStaticResponseEvidence(
