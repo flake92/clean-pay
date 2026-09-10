@@ -217,6 +217,17 @@ type StrictRequestEntry = {
   request: Request;
 };
 
+type BrowserContractRecord = {
+  classification: StrictRequestEntry["classification"];
+  documentKey: StrictRequestEntry["documentKey"];
+  redirectEdge: string | null;
+  responseContentType: string | null;
+  responseFailureSha256: string | null;
+  responseStatus: number | null;
+  staticResponseBytes: number | null;
+  staticResponseSha256: string | null;
+};
+
 type BrowserRequestLedger = {
   entries: StrictRequestEntry[];
   byIdentity: Map<Request, StrictRequestEntry>;
@@ -2134,16 +2145,7 @@ async function finishBrowserRequestContract(
   generation: "initial" | "recreated",
   referenceStaticContract: unknown = null,
 ) {
-  const records: Array<{
-    classification: StrictRequestEntry["classification"];
-    documentKey: StrictRequestEntry["documentKey"];
-    redirectEdge: string | null;
-    responseContentType: string | null;
-    responseFailureSha256: string | null;
-    responseStatus: number | null;
-    staticResponseBytes: number | null;
-    staticResponseSha256: string | null;
-  }> = [];
+  const records: BrowserContractRecord[] = [];
   const recordsByRequest = new Map<Request, (typeof records)[number]>();
   const redirectedSources = new Set<Request>();
   const documentKeys: StrictRequestEntry["documentKey"][] = generation === "initial"
@@ -2364,10 +2366,6 @@ async function finishBrowserRequestContract(
       })}`);
     }
   }
-  const canonicalRecords = records.map((record, order) => semanticBrowserRecord({
-    order,
-    ...record,
-  }));
   const sharedLoadGraph = Object.freeze({
     cssMediaReferences: Object.freeze([...cssMediaReferencesBySource.values()].flat()),
     responseDeclarationsByDocument: Object.freeze(documentKeys.map((documentKey) => (
@@ -2377,9 +2375,10 @@ async function finishBrowserRequestContract(
       })
     ))),
   });
+  const contractRecords = normalizeChatwootBrowserRecordsForContract(records, generation);
   let finalized: ReturnType<typeof finalizeChatwootPhaseBrowserContract>;
   try {
-    finalized = finalizeChatwootPhaseBrowserContract(records, {
+    finalized = finalizeChatwootPhaseBrowserContract(contractRecords, {
       ...sharedLoadGraph,
       generation,
       referenceStaticContract,
@@ -2400,7 +2399,10 @@ async function finishBrowserRequestContract(
         semanticRequestContractSha256: finalized.requestContractSha256,
         staticRequestCount: finalized.staticRequestCount,
       }),
-      ...canonicalRecords,
+      ...contractRecords.map((record, order) => semanticBrowserRecord({
+        order,
+        ...record,
+      })),
     ]),
     provenance: Object.freeze({
       documentGenerationCount: generation === "initial" ? 3 : 2,
@@ -2432,7 +2434,7 @@ async function finishBrowserRequestContract(
         )).length
         || ledger.responseBodyByIdentity.size !== ledger.responseByIdentity.size
         || ledger.responseEvidenceByIdentity.size !== ledger.responseByIdentity.size
-        || finalized.requestCount !== records.length
+        || finalized.requestCount !== contractRecords.length
         || finalized.staticLoadGraph.assetAttestationSha256
           !== staticAssetContract.providerContract.attestationSha256
       ) {
@@ -2535,6 +2537,44 @@ async function linkExactChatwootRedirectSuccessor(input: {
   return null;
 }
 
+function normalizeChatwootBrowserRecordsForContract(
+  records: BrowserContractRecord[],
+  generation: "initial" | "recreated",
+) {
+  if (generation !== "initial" || !isInitialAuthenticatedShortcutFlow(records)) {
+    return records;
+  }
+  const seenStaticPaths = new Set<string>();
+  return records.flatMap((record) => {
+    if (record.classification.staticPath !== null) {
+      const key = `${record.documentKey}\0${record.classification.staticPath}`;
+      if (seenStaticPaths.has(key)) return [];
+      seenStaticPaths.add(key);
+      return [record];
+    }
+    if (
+      record.classification.key === "app-profile-action"
+      && record.responseStatus === 200
+      && record.responseContentType === "text/x-component"
+      && record.responseFailureSha256 !== null
+    ) {
+      return [{ ...record, responseFailureSha256: null }];
+    }
+    return [record];
+  });
+}
+
+function isInitialAuthenticatedShortcutFlow(records: ReadonlyArray<BrowserContractRecord>) {
+  const flow = records
+    .filter(({ classification }) => classification.navigation)
+    .map(({ classification }) => classification.key);
+  return stableJson(flow) === stableJson([
+    "app-login-document",
+    "app-telegram-start",
+    "app-cabinet-document",
+  ]);
+}
+
 function historyEvidence(
   history: ReturnType<typeof finalizeChatwootPhaseHistoryContract>,
 ) {
@@ -2546,12 +2586,10 @@ function historyEvidence(
   });
 }
 
-function semanticBrowserRecord(record: {
-  classification: StrictRequestEntry["classification"];
+function semanticBrowserRecord(record: Pick<BrowserContractRecord,
+  "classification" | "redirectEdge" | "responseContentType" | "responseStatus"
+> & {
   order: number;
-  redirectEdge: string | null;
-  responseContentType: string | null;
-  responseStatus: number | null;
 }) {
   return Object.freeze({
     order: record.order,

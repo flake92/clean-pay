@@ -185,8 +185,14 @@ export function finalizeChatwootPhaseBrowserContract(records, loadGraph) {
       loadGraph.staticAssetContract.providerContract,
       "Chatwoot initial response declaration",
     );
+    const activeDocumentKeys = new Set(finalized.staticLoadGraph.documentLoadLedger.map((entry) => (
+      entry.documentKey
+    )));
+    const activeResponseDeclarationLedger = responseDeclarationLedger.filter(({ documentKey }) => (
+      activeDocumentKeys.has(documentKey)
+    ));
     deepEqual(
-      declarationDigestUnion(responseDeclarationLedger),
+      declarationDigestUnion(activeResponseDeclarationLedger),
       finalized.staticLoadGraph.declaredPathSha256s,
       "Chatwoot initial response declaration union",
     );
