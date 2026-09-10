@@ -814,7 +814,9 @@ describe("ephemeral production-image live overlap runner", () => {
     expect(linkedEmailFailureRegression).toContain("for (let attempt = 1; attempt <= 10; attempt += 1)");
     expect(linkedEmailFailureRegression).toContain("const recorder = recordNetwork(page, applicationOrigin)");
     expect(linkedEmailFailureRegression).toContain("expect(serverActions).toHaveLength(11)");
-    expect(linkedEmailFailureRegression).toContain("expect(rateLimitedProviderRequests).toEqual([])");
+    expect(linkedEmailFailureRegression).toContain(
+      "expect(unexpectedRateLimitedProviderRequests).toEqual([])",
+    );
     expect(linkedEmailFailureRegression).toContain("expect(ledgerAfter.database).toEqual(databaseBefore)");
     expect(linkedEmailFailureRegression).toContain('name: "Сохраните доступ к аккаунту"');
     expect(linkedEmailFailureRegression).toContain('name: "Добавьте резервный вход"');
