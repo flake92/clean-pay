@@ -189,6 +189,23 @@ describe("devcontainer e2e runner readiness", () => {
     }
   });
 
+  it("waits for dependency readiness, not just liveness, before testing", () => {
+    // /api/health answers as soon as the process is up. Readiness is the
+    // app's own aggregate over Postgres, Redis, Remnashop, Mailpit and
+    // Remnawave, and the suite asserts it returns 200. Remnashop accepts
+    // connections before it is ready, so without this wait the first
+    // readiness test raced it and saw 503.
+    expect(shellRunner).toContain("/api/health/readiness");
+    expect(shellRunner).toMatch(
+      /wait-for-http\.sh" "\$base_url\/api\/health\/readiness"/,
+    );
+
+    const readinessWait = shellRunner.indexOf("$base_url/api/health/readiness");
+    const testRun = shellRunner.indexOf("Running full-stack e2e tests");
+    expect(readinessWait).toBeGreaterThan(-1);
+    expect(readinessWait).toBeLessThan(testRun);
+  });
+
   it("never lets a slow warm-up abort the run before a test executes", () => {
     // Warming only saves the first test from paying a cold Turbopack compile.
     // Under --fail with no tolerance a single slow /login ended the whole run
