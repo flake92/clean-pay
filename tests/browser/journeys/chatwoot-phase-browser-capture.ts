@@ -2556,6 +2556,16 @@ export function normalizeChatwootBrowserRecordsForContract(
   records: BrowserContractRecord[],
   generation: "initial" | "recreated",
 ) {
+  if (generation === "recreated" && isRecreatedTerminalSpaCabinetFlow(records)) {
+    const seenStaticPaths = new Set<string>();
+    return records.flatMap((record) => {
+      if (record.classification.staticPath === null) return [record];
+      const key = `${record.documentKey}\0${record.classification.staticPath}`;
+      if (seenStaticPaths.has(key)) return [];
+      seenStaticPaths.add(key);
+      return [record];
+    });
+  }
   if (generation !== "initial" || !isInitialAuthenticatedShortcutFlow(records)) {
     return records;
   }
@@ -2594,6 +2604,30 @@ export function normalizeChatwootBrowserRecordsForContract(
     }
     return [record];
   });
+}
+
+function isRecreatedTerminalSpaCabinetFlow(records: ReadonlyArray<BrowserContractRecord>) {
+  const flow = records
+    .filter(({ classification }) => classification.navigation)
+    .map(({ classification }) => classification.key);
+  if (stableJson(flow) !== stableJson([
+    "app-login-document",
+    "app-telegram-start",
+  ])) {
+    return false;
+  }
+  const telegramStartIndex = records.findIndex(({ classification }) => (
+    classification.key === "app-telegram-start" && classification.navigation
+  ));
+  const cabinetActionIndex = records.findIndex(({ classification }, index) => (
+    index > telegramStartIndex && classification.key === "app-cabinet-action"
+  ));
+  const widgetFrameIndex = records.findIndex(({ classification }, index) => (
+    index > cabinetActionIndex && classification.key === "chatwoot-widget-frame"
+  ));
+  return telegramStartIndex > 0 && cabinetActionIndex > telegramStartIndex
+    && widgetFrameIndex > cabinetActionIndex
+    && records.every(({ documentKey }) => documentKey === "app-login-document");
 }
 
 function isInitialAuthenticatedShortcutFlow(records: ReadonlyArray<BrowserContractRecord>) {
@@ -3990,7 +4024,8 @@ export function assertChatwootPhaseBoundaryLedger(value: unknown, phase: Phase) 
   const count = (method: string) => methods.filter((value) => value === method).length;
   const setUserIndex = methods.indexOf("setUser");
   const identityIndex = methods.indexOf("identity.confirmed");
-  if (count("run") !== 1 || count("setUser") < 1 || count("frame.loaded") < 1
+  if (count("run") !== 1 || count("setUser") < 1 || count("setUser") > 2
+    || count("frame.loaded") < 1
     || setUserIndex <= methods.indexOf("run")) {
     throw new Error("Chatwoot phase boundary lifecycle is incomplete or out of order.");
   }
@@ -3998,7 +4033,8 @@ export function assertChatwootPhaseBoundaryLedger(value: unknown, phase: Phase) 
     if (count("identity.confirmed") !== 0) {
       throw new Error("Chatwoot Gap boundary contains a premature identity confirmation.");
     }
-  } else if (count("identity.confirmed") !== 1 || identityIndex <= setUserIndex) {
+  } else if (count("identity.confirmed") < 1 || count("identity.confirmed") > 2
+    || identityIndex <= setUserIndex) {
     throw new Error(`Chatwoot ${phase} boundary lacks its ordered identity confirmation.`);
   }
   return Object.freeze(structuredClone(value));

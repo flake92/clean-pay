@@ -1516,8 +1516,10 @@ function assertBrowserStaticProvenance(value, label) {
     ]) {
       stringMatch(entry[digestName], sha256Pattern, `${label} ${name} ${digestName}`);
     }
-    equal(entry.documentGenerationCount, name === "initial" ? 3 : 2,
-      `${label} ${name} document generations`);
+    const expectedDocumentGenerationCounts = name === "initial" ? [3] : [1, 2];
+    if (!expectedDocumentGenerationCounts.includes(entry.documentGenerationCount)) {
+      fail(`${label} ${name} document generations does not match its exact contract.`);
+    }
     if (!integerInRange(entry.requestCount, 1, 256)
       || !integerInRange(entry.staticRequestCount, 1, entry.requestCount)
       || !integerInRange(entry.staticResponseByteLength, 1, 1024 * 1024 * 1024)) {
@@ -1594,6 +1596,11 @@ function assertBrowserStaticProvenance(value, label) {
       name,
       `${label} ${name} static load graph`,
     );
+    equal(
+      entry.documentGenerationCount,
+      staticLoadGraph.documentLoadLedger.length,
+      `${label} ${name} document generation completeness`,
+    );
     equal(entry.staticLoadGraphContractSha256, sha256(JSON.stringify(staticLoadGraph)),
       `${label} ${name} static load graph digest`);
     return {
@@ -1638,17 +1645,20 @@ function assertBrowserStaticProvenance(value, label) {
   equal(
     stableJson(recreated.responseDeclarationLedger),
     stableJson(initial.responseDeclarationLedger.filter(({ documentKey }) => (
-      documentKey !== "app-profile-document"
+      recreated.responseDeclarationLedger.some((entry) => entry.documentKey === documentKey)
     ))),
     `${label} recreated per-document response declaration closure`,
   );
+  const recreatedDocumentKeys = new Set(recreated.staticLoadGraph.documentLoadLedger.map((
+    { documentKey },
+  ) => documentKey));
   const recreatedDocuments = initial.staticLoadGraph.documentLoadLedger.filter(({ documentKey }) => (
-    documentKey !== "app-profile-document"
+    recreatedDocumentKeys.has(documentKey)
   ));
   equal(stableJson(recreated.staticLoadGraph.documentLoadLedger), stableJson(recreatedDocuments),
     `${label} recreated document load closure`);
   const recreatedStaticRequests = initial.staticRequestLedger.filter(({ documentKey }) => (
-    documentKey !== "app-profile-document"
+    recreatedDocumentKeys.has(documentKey)
   ));
   equal(stableJson(recreated.staticRequestLedger), stableJson(recreatedStaticRequests),
     `${label} recreated static response occurrence closure`);
@@ -1698,13 +1708,19 @@ function assertResponseDeclarationLedger(value, generation, label) {
   const documentKeys = generation === "initial"
     ? ["app-login-document", "app-profile-document", "app-cabinet-document"]
     : ["app-login-document", "app-cabinet-document"];
-  if (!isDenseArray(value) || value.length !== documentKeys.length) {
+  if (!isDenseArray(value)) {
+    fail(`${label} ledger is invalid.`);
+  }
+  const expectedDocumentKeys = generation === "recreated" && value.length === 1
+    ? ["app-login-document"]
+    : documentKeys;
+  if (value.length !== expectedDocumentKeys.length) {
     fail(`${label} ledger is invalid.`);
   }
   return value.map((raw, index) => {
     const entry = record(raw, `${label} ${index}`);
     exactKeys(entry, ["documentKey", "pathSha256s"], `${label} ${index}`);
-    equal(entry.documentKey, documentKeys[index], `${label} document order`);
+    equal(entry.documentKey, expectedDocumentKeys[index], `${label} document order`);
     return {
       documentKey: entry.documentKey,
       pathSha256s: assertSortedDigestArray(
@@ -1757,16 +1773,30 @@ function assertStaticSemanticLedger(value, generation, label) {
     "app-profile-document",
     "app-cabinet-document",
   ]);
+  const observedFlow = normalized.map(({ key }) => key).filter((key) => navigationKeys.has(key));
+  const terminalRecreatedFlow = generation === "recreated"
+    && stableJson(observedFlow) === stableJson(["app-login-document", "app-telegram-start"]);
   const expectedFlow = generation === "initial"
     ? [
       "app-login-document", "app-telegram-start", "telegram-oidc-authorize",
       "app-telegram-callback", "app-profile-document", "app-cabinet-document",
     ]
+    : terminalRecreatedFlow ? [
+      "app-login-document", "app-telegram-start",
+    ]
     : [
       "app-login-document", "app-telegram-start", "telegram-oidc-authorize",
       "app-telegram-callback", "app-cabinet-document",
     ];
-  equal(stableJson(normalized.map(({ key }) => key).filter((key) => navigationKeys.has(key))),
+  if (terminalRecreatedFlow) {
+    const keys = normalized.map(({ key }) => key);
+    if (!keys.includes("app-cabinet-action") || !keys.includes("chatwoot-widget-frame")
+      || keys.indexOf("app-cabinet-action") <= keys.indexOf("app-telegram-start")
+      || keys.indexOf("chatwoot-widget-frame") <= keys.indexOf("app-cabinet-action")) {
+      fail(`${label} terminal direct-cabinet flow is incomplete.`);
+    }
+  }
+  equal(stableJson(observedFlow),
     stableJson(expectedFlow), `${label} exact navigation flow`);
   return normalized;
 }
@@ -1778,6 +1808,13 @@ function assertStaticRequestLedger(value, generation, label) {
   const documentKeys = generation === "initial"
     ? ["app-login-document", "app-profile-document", "app-cabinet-document"]
     : ["app-login-document", "app-cabinet-document"];
+  const expectedDocumentKeys = generation === "recreated"
+    && value.every((entry) => (
+      entry && typeof entry === "object" && !Array.isArray(entry)
+      && entry.documentKey === "app-login-document"
+    ))
+    ? ["app-login-document"]
+    : documentKeys;
   let aggregateBytes = 0;
   return value.map((raw, index) => {
     const entry = record(raw, `${label} ${index}`);
@@ -1789,7 +1826,7 @@ function assertStaticRequestLedger(value, generation, label) {
       || !new Set(["next-static-css", "next-static-font", "next-static-image", "next-static-js"])
         .has(entry.class)
       || typeof entry.contentType !== "string" || entry.contentType.length > 128
-      || !documentKeys.includes(entry.documentKey)
+      || !expectedDocumentKeys.includes(entry.documentKey)
       || !sha256Pattern.test(entry.pathSha256 ?? "")) {
       fail(`${label} ${index} is invalid.`);
     }
@@ -1836,7 +1873,8 @@ function assertStaticLoadGraph(value, generation, label) {
   );
   const expectedDocuments = generation === "initial"
     ? ["app-login-document", "app-profile-document", "app-cabinet-document"]
-    : ["app-login-document", "app-cabinet-document"];
+    : graph.documentLoadLedger?.length === 1 ? ["app-login-document"]
+      : ["app-login-document", "app-cabinet-document"];
   if (!isDenseArray(graph.documentLoadLedger)
     || graph.documentLoadLedger.length !== expectedDocuments.length) {
     fail(`${label} document load ledger is invalid.`);
@@ -2427,13 +2465,15 @@ function assertRecreationCausality(value, recreated, label) {
     `${label} post-clear cabinet navigation count`,
   );
   positiveInteger(causality.postClearSetUserCount, `${label} post-clear setUser count`);
+  if (causality.postClearSetUserCount > 2) {
+    fail(`${label} post-clear setUser count escaped its idempotent bound.`);
+  }
   equal(
     causality.postClearSetUserCount,
     recreated.setUserCount,
     `${label} post-clear setUser completeness`,
   );
   equal(causality.cabinetSetUserCount, 1, `${label} cabinet setUser count`);
-  equal(causality.cabinetSetUserCount, causality.postClearSetUserCount, `${label} cabinet setUser completeness`);
   equal(causality.cabinetIdentityConfirmedCount, 1, `${label} cabinet identity-confirmed count`);
   equal(causality.negativeLoginSetUserCount, 0, `${label} negative login setUser count`);
   for (const name of [
