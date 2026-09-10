@@ -1831,6 +1831,18 @@ test("rejects arbitrary same-host paths, queries, redirects, methods, and transp
     .not.toEqual(lastAbortedRootPrefetchContract.semanticRequestLedger);
   expect(optionalAbortedRootPrefetchContract.requestContractSha256)
     .toBe(lastAbortedRootPrefetchContract.requestContractSha256);
+  const textPlainRootRedirectContract = finalizeProviderOverlapBrowserContract(
+    rootPrefetchRecords.map((record) => (
+      record.classification.key === "app-root-rsc" && record.responseStatus === 307
+        ? { ...record, responseContentType: "text/plain" }
+        : record
+    )),
+    staticLoadGraph,
+  );
+  expect(textPlainRootRedirectContract.semanticRequestLedger)
+    .not.toEqual(optionalAbortedRootPrefetchContract.semanticRequestLedger);
+  expect(textPlainRootRedirectContract.requestContractSha256)
+    .toBe(optionalAbortedRootPrefetchContract.requestContractSha256);
   const profileActionAbortRecords = structuredClone(rootPrefetchRecords);
   const cabinetDocumentIndex = profileActionAbortRecords.findIndex((record) => (
     record.classification.key === "app-cabinet-document"
