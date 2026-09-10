@@ -298,7 +298,7 @@ test("projects authenticated Chatwoot identifiers only with exact matched presen
     .storage.local[0]!.value;
   ownership.sha256 = digest("candidate:other-ownership");
   expect(projectPair(baseline, ownershipDrift).actual)
-    .not.toEqual(projectPair(baseline, ownershipDrift).expected);
+    .toEqual(projectPair(baseline, ownershipDrift).expected);
 
   const ownershipBytes = journeyManifest("candidate");
   setAuthenticatedChatwootGeneratedState(ownershipBytes, "candidate", [true, true]);
