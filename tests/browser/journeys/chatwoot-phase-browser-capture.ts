@@ -2537,7 +2537,7 @@ async function linkExactChatwootRedirectSuccessor(input: {
   return null;
 }
 
-function normalizeChatwootBrowserRecordsForContract(
+export function normalizeChatwootBrowserRecordsForContract(
   records: BrowserContractRecord[],
   generation: "initial" | "recreated",
 ) {
@@ -2545,7 +2545,17 @@ function normalizeChatwootBrowserRecordsForContract(
     return records;
   }
   const seenStaticPaths = new Set<string>();
+  let insideShortcutTransition = false;
   return records.flatMap((record) => {
+    if (
+      record.classification.key === "app-cabinet-document"
+      && record.classification.navigation
+    ) {
+      insideShortcutTransition = false;
+    }
+    if (insideShortcutTransition && record.classification.staticPath !== null) {
+      return [];
+    }
     if (record.classification.staticPath !== null) {
       const key = `${record.documentKey}\0${record.classification.staticPath}`;
       if (seenStaticPaths.has(key)) return [];
@@ -2559,6 +2569,13 @@ function normalizeChatwootBrowserRecordsForContract(
       && record.responseFailureSha256 !== null
     ) {
       return [{ ...record, responseFailureSha256: null }];
+    }
+    if (
+      record.classification.key === "app-telegram-start"
+      && record.classification.navigation
+      && record.responseStatus === 307
+    ) {
+      insideShortcutTransition = true;
     }
     return [record];
   });

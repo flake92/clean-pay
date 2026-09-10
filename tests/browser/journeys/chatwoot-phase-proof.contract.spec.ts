@@ -44,6 +44,7 @@ import {
   canonicalChatwootHistorySemantics,
   assertChatwootPhaseBoundaryLedger,
   assertChatwootPhaseProviderLedger,
+  normalizeChatwootBrowserRecordsForContract,
   summarizeChatwootBrowserRequestContractForTest,
   summarizeChatwootProviderLedgerForTest,
   assertChatwootProviderPhaseRelations,
@@ -3138,6 +3139,61 @@ test("accepts the exact initial authenticated shortcut browser flow", () => {
   const semanticRequestLedger = finalized.semanticRequestLedger as ReadonlyArray<{ key: string }>;
   expect(semanticRequestLedger.map((entry) => entry.key))
     .toContain("app-profile-action");
+});
+
+test("normalizes shortcut transition static chunks before the cabinet document", () => {
+  const staticAssetContract = createChatwootPhaseStaticAssetContract(staticAssetAttestation());
+  const graph = staticLoadGraphFixture(staticAssetContract, [
+    "app-login-document",
+    "app-profile-document",
+    "app-cabinet-document",
+  ]);
+  const record = browserRecordFixture(staticAssetContract);
+  const shortcutTransitionStatic = staticRecordsForDocument(
+    staticAssetContract,
+    "app-profile-document",
+  ).map((entry) => ({ ...entry, documentKey: "app-login-document" as const }));
+  const records = [
+    record("app-login-document", "app-login-document", 200, "text/html", {
+      navigation: true,
+    }),
+    ...staticRecordsForDocument(staticAssetContract, "app-login-document"),
+    record("turnstile-widget-script", "app-login-document", 200, "application/javascript"),
+    record("chatwoot-sdk-script", "app-login-document", 200, "application/javascript"),
+    record("app-telegram-start", "app-login-document", 307, "application/octet-stream", {
+      navigation: true,
+    }),
+    ...shortcutTransitionStatic,
+    record("app-profile-action", "app-login-document", 200, "text/x-component"),
+    record("app-root-rsc", "app-login-document", 200, "text/x-component"),
+    record("chatwoot-widget-frame", "app-login-document", 200, "text/html"),
+    record("chatwoot-widget-conversation-frame", "app-login-document", 200, "text/html"),
+    record("app-cabinet-document", "app-cabinet-document", 200, "text/html", {
+      navigation: true,
+    }),
+    ...staticRecordsForDocument(staticAssetContract, "app-cabinet-document"),
+  ] as Parameters<typeof normalizeChatwootBrowserRecordsForContract>[0];
+
+  expect(() => finalizeChatwootPhaseBrowserContract(records, {
+    cssMediaReferences: graph.cssMediaReferences,
+    generation: "initial",
+    referenceStaticContract: null,
+    responseDeclarationsByDocument: graph.responseDeclarationsByDocument,
+    staticAssetContract,
+  })).toThrow(/static chunk load graph/u);
+
+  const normalized = normalizeChatwootBrowserRecordsForContract(records, "initial");
+  expect(normalized).not.toEqual(expect.arrayContaining(shortcutTransitionStatic));
+  const finalized = finalizeChatwootPhaseBrowserContract(normalized, {
+    cssMediaReferences: graph.cssMediaReferences,
+    generation: "initial",
+    referenceStaticContract: null,
+    responseDeclarationsByDocument: graph.responseDeclarationsByDocument,
+    staticAssetContract,
+  });
+  expect(finalized.staticLoadGraph.documentLoadLedger.map((entry: { documentKey: string }) => (
+    entry.documentKey
+  ))).toEqual(["app-login-document", "app-cabinet-document"]);
 });
 
 test("executes the committed shared static/history adapters under bounded lifecycle", async () => {
