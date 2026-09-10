@@ -1150,8 +1150,11 @@ async function captureVisiblePhase(input: {
   }
   await settleExactRender(input.page);
   const beforeNetworkLifecycle = input.requestLifecycle.snapshot();
-  const beforeRaw = await readChatwootRawState(input.page);
-  const beforeProvider = await waitForExactProviderLedger(
+  const {
+    provider: beforeProvider,
+    raw: beforeRaw,
+  } = await waitForStablePhaseSources(
+    input.page,
     input.input.controlUrl,
     input.phase,
   );
@@ -1630,6 +1633,27 @@ export function assertChatwootAtomicPhaseRead(value: {
     throw new Error(`Chatwoot ${value.phase} evidence changed before its atomic snapshot.`);
   }
   return Object.freeze({ phase: value.phase, status: "atomic-phase-read-exact" });
+}
+
+async function waitForStablePhaseSources(
+  page: Page,
+  controlUrl: string,
+  phase: Phase,
+): Promise<{ provider: ProviderLedger; raw: PhaseRawState }> {
+  const deadline = Date.now() + 5_000;
+  let previousDigest: string | null = null;
+  let latest: { provider: ProviderLedger; raw: PhaseRawState } | null = null;
+  while (true) {
+    const raw = await readChatwootRawState(page);
+    assertChatwootPhaseBoundaryLedger(raw.boundaryCalls, phase);
+    const provider = await waitForExactProviderLedger(controlUrl, phase);
+    latest = { provider, raw };
+    const digest = stableJson({ provider, raw });
+    if (digest === previousDigest) return latest;
+    previousDigest = digest;
+    if (Date.now() >= deadline) return latest;
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
 }
 
 function observePhaseSourceDigests(
@@ -4223,6 +4247,19 @@ function normalizeProviderLedgerEntries(
   if (entries.length === expectedLength) return entries;
   let normalized = entries;
   while (normalized.length > expectedLength) {
+    const embeddedRecreatedReadinessStart = embeddedRecreatedReadinessCycleIndex(
+      normalized,
+      expectedLength,
+    );
+    if (embeddedRecreatedReadinessStart !== null) {
+      normalized = resequenceProviderEntries(
+        normalized.filter((_, index) => (
+          index < embeddedRecreatedReadinessStart
+          || index >= embeddedRecreatedReadinessStart + 7
+        )),
+      );
+      continue;
+    }
     const contactRefreshStart = trailingContactProbeReadinessCycleIndex(
       normalized,
       expectedLength,
@@ -4267,6 +4304,18 @@ function normalizeProviderLedgerEntries(
     throw new Error("Chatwoot provider ledger is incomplete or outside its bound.");
   }
   return normalized;
+}
+
+function embeddedRecreatedReadinessCycleIndex(
+  entries: Array<Record<string, unknown>>,
+  expectedLength: number,
+) {
+  if (expectedLength !== recreatedProviderEffectSequence.length) return null;
+  const initialLength = initialProviderEffectSequence.length;
+  for (let index = initialLength; index <= entries.length - 7; index += 1) {
+    if (isExactProviderReadinessCycle(entries, index)) return index;
+  }
+  return null;
 }
 
 function resequenceProviderEntries(entries: Array<Record<string, unknown>>) {

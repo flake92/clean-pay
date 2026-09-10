@@ -2595,6 +2595,30 @@ test("Chatwoot phase ledger accepts adjacent expected contacts before trailing r
     .toThrow(/incomplete or outside|exact endpoint contract|credential projection/);
 });
 
+test("Chatwoot recreated provider ledger accepts embedded readiness before second login", () => {
+  const original = strictProviderFixture("recreated");
+  const observed = structuredClone(original);
+  observed.entries.splice(18, 0, structuredClone(original.entries[17]));
+  const secondLoginStart = observed.entries.findIndex((entry, index) => (
+    index > 0 && entry.effect === "challenge_verified"
+  ));
+  if (secondLoginStart < 0) throw new Error("Expected a second login boundary.");
+  const readinessCycle = [1, 2, 3, 4, 5, 6, 7].map((index) => (
+    structuredClone(original.entries[index])
+  ));
+  observed.entries.splice(secondLoginStart, 0, ...readinessCycle);
+  observed.entries.forEach((entry, index) => { entry.sequence = index + 1; });
+
+  expect(observed.entries).toHaveLength(original.entries.length + 8);
+  expect(assertChatwootPhaseProviderLedger(observed, "recreated").entries)
+    .toEqual(original.entries);
+
+  const changed = structuredClone(observed);
+  changed.entries[secondLoginStart + 3].credential_contract.header_names = [];
+  expect(() => assertChatwootPhaseProviderLedger(changed, "recreated"))
+    .toThrow(/incomplete or outside|exact endpoint contract|credential projection/);
+});
+
 // Actual interleavings from run 34059555047. Numbers identify entries in
 // strictProviderFixture, not observed sequence numbers. Bodies stay unchanged.
 const observedReadinessInterleavings = [
