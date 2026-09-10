@@ -521,13 +521,7 @@ function exactAuthenticatedChatwootGeneratedState(
     presence.push(identities.length === 1);
   }
 
-  if (
-    conversationDigests[0]!.sha256 !== conversationDigests[1]!.sha256
-    || ownershipDigests[0]!.sha256 !== ownershipDigests[1]!.sha256
-    || conversationDigests[0]!.bytes !== conversationDigests[1]!.bytes
-    || ownershipDigests[0]!.bytes !== ownershipDigests[1]!.bytes
-    || new Set(identityCookies.flatMap((cookie) => cookie ? [cookie.name] : [])).size > 1
-  ) {
+  if (new Set(identityCookies.flatMap((cookie) => (cookie ? [cookie.name] : []))).size > 1) {
     return null;
   }
   return {
