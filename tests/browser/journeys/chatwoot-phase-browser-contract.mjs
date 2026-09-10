@@ -28,6 +28,10 @@ const directNavigationFlow = Object.freeze([
   "app-cabinet-document",
 ]);
 const directStaticRoutes = Object.freeze(["/cabinet/page", "/login/page"]);
+const initialStaticDocumentKeyFlows = Object.freeze([
+  Object.freeze(["app-login-document", "app-profile-document", "app-cabinet-document"]),
+  Object.freeze(["app-login-document", "app-cabinet-document"]),
+]);
 const directSemanticDescriptorContracts = Object.freeze({
   "app-brand-logo": Object.freeze({ disposition: "continue", expectedStatuses: [200], navigation: false }),
   "app-cabinet-action": Object.freeze({ disposition: "continue", expectedStatuses: [200], navigation: false }),
@@ -179,20 +183,23 @@ export function finalizeChatwootPhaseBrowserContract(records, loadGraph) {
       responseDeclarationsByDocument: loadGraph.responseDeclarationsByDocument,
       staticAssetContract: loadGraph.staticAssetContract.providerContract,
     });
+    const activeDocumentKeys = finalized.staticLoadGraph.documentLoadLedger.map((entry) => (
+      entry.documentKey
+    ));
+    if (!isExactInitialStaticDocumentKeyFlow(activeDocumentKeys)) {
+      fail("Chatwoot initial static document flow is invalid.");
+    }
+    const activeResponseDeclarationsByDocument = loadGraph.responseDeclarationsByDocument.filter(
+      ({ documentKey }) => activeDocumentKeys.includes(documentKey),
+    );
     const responseDeclarationLedger = sanitizeResponseDeclarationLedger(
-      loadGraph.responseDeclarationsByDocument,
-      ["app-login-document", "app-profile-document", "app-cabinet-document"],
+      activeResponseDeclarationsByDocument,
+      activeDocumentKeys,
       loadGraph.staticAssetContract.providerContract,
       "Chatwoot initial response declaration",
     );
-    const activeDocumentKeys = new Set(finalized.staticLoadGraph.documentLoadLedger.map((entry) => (
-      entry.documentKey
-    )));
-    const activeResponseDeclarationLedger = responseDeclarationLedger.filter(({ documentKey }) => (
-      activeDocumentKeys.has(documentKey)
-    ));
     deepEqual(
-      declarationDigestUnion(activeResponseDeclarationLedger),
+      declarationDigestUnion(responseDeclarationLedger),
       finalized.staticLoadGraph.declaredPathSha256s,
       "Chatwoot initial response declaration union",
     );
@@ -545,11 +552,6 @@ function assertSharedStaticReference(value, provider) {
     fail("Chatwoot shared static reference is invalid.");
   }
   const graph = value.staticLoadGraph;
-  const responseDeclarationLedger = assertResponseDeclarationLedger(
-    value.responseDeclarationLedger,
-    ["app-login-document", "app-profile-document", "app-cabinet-document"],
-    "Chatwoot shared response declaration",
-  );
   exactKeys(graph, [
     "assetAttestationSha256",
     "assetInventorySha256",
@@ -563,6 +565,18 @@ function assertSharedStaticReference(value, provider) {
     "routeDeclaredPathContractSha256",
     "routeDeclaredPathSha256s",
   ], "Chatwoot shared static load graph");
+  if (!isDenseArray(graph.documentLoadLedger)) {
+    fail("Chatwoot shared static load graph is invalid.");
+  }
+  const documentKeys = graph.documentLoadLedger.map((entry) => entry.documentKey);
+  if (!isExactInitialStaticDocumentKeyFlow(documentKeys)) {
+    fail("Chatwoot shared static document flow is invalid.");
+  }
+  const responseDeclarationLedger = assertResponseDeclarationLedger(
+    value.responseDeclarationLedger,
+    documentKeys,
+    "Chatwoot shared response declaration",
+  );
   if (graph.assetAttestationSha256 !== provider.attestationSha256
     || graph.assetInventorySha256 !== provider.inventorySha256
     || graph.inventoryLedgerContractSha256 !== provider.inventoryLedgerContractSha256
@@ -571,8 +585,6 @@ function assertSharedStaticReference(value, provider) {
     || !isDenseArray(graph.cssMediaReferenceLedger)
     || graph.cssMediaReferenceLedger.length !== 8
     || !isDenseArray(graph.declaredPathSha256s)
-    || !isDenseArray(graph.documentLoadLedger)
-    || graph.documentLoadLedger.length !== 3
     || !isDenseArray(graph.inventoryLedger)
     || !isDenseArray(value.staticRequestLedger)) {
     fail("Chatwoot shared static load graph is invalid.");
@@ -592,9 +604,8 @@ function assertSharedStaticReference(value, provider) {
       "documentKey", "expectedChunkPathSha256s", "expectedMediaPathSha256s",
       "routeDeclaredPathSha256s",
     ], `Chatwoot shared static document ${index}`);
-    if (!["app-login-document", "app-profile-document", "app-cabinet-document"][index]
-      || entry.documentKey
-        !== ["app-login-document", "app-profile-document", "app-cabinet-document"][index]
+    if (!documentKeys[index]
+      || entry.documentKey !== documentKeys[index]
       || !isDenseArray(entry.expectedChunkPathSha256s)
       || !isDenseArray(entry.expectedMediaPathSha256s)
       || !isDenseArray(entry.routeDeclaredPathSha256s)) {
@@ -602,6 +613,12 @@ function assertSharedStaticReference(value, provider) {
     }
   }
   return value;
+}
+
+function isExactInitialStaticDocumentKeyFlow(documentKeys) {
+  return initialStaticDocumentKeyFlows.some((flow) => (
+    JSON.stringify(flow) === JSON.stringify(documentKeys)
+  ));
 }
 
 function sanitizeResponseDeclarationLedger(entries, documentKeys, provider, label) {

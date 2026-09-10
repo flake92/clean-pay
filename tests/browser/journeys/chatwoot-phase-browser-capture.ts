@@ -2405,7 +2405,7 @@ async function finishBrowserRequestContract(
       })),
     ]),
     provenance: Object.freeze({
-      documentGenerationCount: generation === "initial" ? 3 : 2,
+      documentGenerationCount: finalized.staticLoadGraph.documentLoadLedger.length,
       requestCount: finalized.requestCount,
       requestContractSha256: finalized.requestContractSha256,
       requestOrderContractSha256: finalized.requestOrderContractSha256,
@@ -4161,12 +4161,6 @@ function normalizeProviderLedgerEntries(
 ) {
   if (entries.length === expectedLength) return entries;
   let normalized = entries;
-  const duplicateIndex = adjacentDuplicateContactProbeIndex(entries);
-  if (duplicateIndex !== null) {
-    normalized = resequenceProviderEntries(
-      normalized.filter((_, index) => index !== duplicateIndex),
-    );
-  }
   while (normalized.length > expectedLength) {
     const contactRefreshStart = trailingContactProbeReadinessCycleIndex(
       normalized,
@@ -4199,6 +4193,14 @@ function normalizeProviderLedgerEntries(
     normalized = resequenceProviderEntries(
       normalized.filter((_, index) => index < cycleStart || index >= cycleStart + 7),
     );
+  }
+  if (normalized.length > expectedLength) {
+    const duplicateIndex = adjacentDuplicateContactProbeIndex(normalized);
+    if (duplicateIndex !== null) {
+      normalized = resequenceProviderEntries(
+        normalized.filter((_, index) => index !== duplicateIndex),
+      );
+    }
   }
   if (normalized.length !== expectedLength) {
     throw new Error("Chatwoot provider ledger is incomplete or outside its bound.");
