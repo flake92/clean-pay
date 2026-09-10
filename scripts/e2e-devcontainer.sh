@@ -118,22 +118,28 @@ warm_next_routes() {
   # Turbopack compiles routes lazily in development. Warm the public pages so
   # cold CI workers test HTTP behavior rather than contend with first-compile
   # latency inside an individual Vitest timeout.
+  #
+  # Warming is an optimisation, never a precondition: a route that does not
+  # warm in time is simply compiled by the first test that reaches it, which
+  # has its own far larger budget. This used to run under --fail with no
+  # tolerance, so a single slow compile of /login aborted the entire run with
+  # exit 28 before one test had executed.
   for route in /login /register /tariffs /support; do
     echo "Warming Next.js route: $route"
-    curl --fail --silent --show-error \
+    curl --silent --show-error \
       --connect-timeout 5 \
-      --max-time 45 \
+      --max-time 60 \
       --output /dev/null \
-      "$base_url$route"
+      "$base_url$route" || echo "Warming $route did not finish in time; its test will compile it."
   done
 
   # The retired transport paths must answer 404, which still compiles the
-  # not-found route on first request. Warm one of them without --fail so the
-  # expected 404 does not abort this script under `set -e`.
+  # not-found route on first request. The expected 404 is not an error here,
+  # and like every warm request above this one must not end the run.
   echo "Warming Next.js not-found route: /api/me"
   curl --silent --show-error \
     --connect-timeout 5 \
-    --max-time 45 \
+    --max-time 60 \
     --output /dev/null \
     "$base_url/api/me" || true
 }
