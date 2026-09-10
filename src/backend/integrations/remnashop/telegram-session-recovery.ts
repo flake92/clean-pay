@@ -33,8 +33,8 @@ import {
 import { getCurrentSession } from "@/backend/integrations/sessions/web-session-service";
 import { authDebugLog } from "@/backend/observability/auth-debug-log";
 import { logger } from "@/backend/observability/logger";
+import { standardTransaction } from "@/backend/database/transaction-policy";
 
-const recoveryTransactionOptions = { maxWait: 5_000, timeout: 10_000 };
 const ownerSelect = {
   id: true,
   remnashopUserId: true,
@@ -290,7 +290,7 @@ async function captureLocalSnapshot(plan: TelegramRecoveryPlan): Promise<Telegra
       lookupSeparateSourceOwner,
       lookupSeparateEmailOwner,
     } satisfies LocalSnapshotContext;
-  }, recoveryTransactionOptions);
+  }, standardTransaction);
 
   return { context };
 }
@@ -512,7 +512,7 @@ export const productionTelegramSessionRecoveryGateway: TelegramSessionRecoveryGa
         },
       });
       await markPaymentOwnerChangeLocalFinalized(tx, [plan.session.userId]);
-    }, recoveryTransactionOptions);
+    }, standardTransaction);
 
     return {
       accessToken: auth.cookies.accessToken,

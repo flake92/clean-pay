@@ -9,6 +9,7 @@ import {
 import { authDebugLog } from "@/backend/observability/auth-debug-log";
 import { recordOperationalEvent } from "@/backend/observability/metrics";
 import { randomToken, sha256 } from "@/backend/security/crypto";
+import { standardTransaction } from "@/backend/database/transaction-policy";
 
 type RefreshResult = {
   data: {
@@ -75,7 +76,6 @@ const RECOVERY_WRITE_SAFETY_MS = 15_000;
 const RECOVERY_WRITE_INITIAL_RETRY_MS = 50;
 const RECOVERY_WRITE_MAX_RETRY_MS = 2_000;
 const FINALIZATION_ATTEMPTS = 3;
-const shortTransactionOptions = { maxWait: 5_000, timeout: 10_000 } as const;
 
 const clearedTokenBundle = {
   remnashopAccessTokenEncrypted: null,
@@ -755,7 +755,7 @@ async function prepareTokenAcquisition({
         leaseExpiresAt,
       },
     };
-  }, shortTransactionOptions);
+  }, standardTransaction);
 }
 
 type DispatchedRefreshPlan = RefreshPlan & { dispatchedAt: Date };
@@ -781,7 +781,7 @@ async function clearTerminalRefreshClaim(plan: DispatchedRefreshPlan) {
       },
       data: clearedTokenBundle,
     }),
-    shortTransactionOptions,
+    standardTransaction,
   );
 
   if (cleared.count !== 1) {
@@ -815,7 +815,7 @@ async function markRefreshDispatched(
       remnashopRefreshRecoveryEncrypted: null,
     },
     data: { remnashopRefreshDispatchedAt: dispatchedAt },
-  }), shortTransactionOptions);
+  }), standardTransaction);
 
   if (marked.count !== 1) {
     throw new ServiceError(
@@ -899,7 +899,7 @@ async function persistRefreshRecovery({
           401,
           "Remnashop refresh claim changed before recovery was stored",
         );
-      }, shortTransactionOptions);
+      }, standardTransaction);
     } catch (error) {
       if (
         error instanceof ServiceError &&
@@ -1025,7 +1025,7 @@ async function finalizeRefreshClaim({
         }
 
         return finalized;
-      }, shortTransactionOptions);
+      }, standardTransaction);
     } catch (error) {
       if (
         error instanceof ServiceError &&
