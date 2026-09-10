@@ -1674,9 +1674,24 @@ async function openLogin(page: Page, redirectPath: "/profile" | "/cabinet") {
     waitUntil: "domcontentloaded",
     timeout: 30_000,
   });
+  await waitForTurnstile(page, "auth_login");
   const telegram = page.getByRole("button", { name: "Войти через Telegram" });
   await telegram.waitFor({ state: "visible", timeout: 15_000 });
   return telegram;
+}
+
+async function waitForTurnstile(page: Page, action: "auth_login") {
+  await page.waitForFunction((expectedAction) => {
+    const windowWithBoundary = window as unknown as {
+      turnstile?: unknown;
+      __cleanPayTurnstileDocumentChallenges?: Array<{ action?: unknown }>;
+    };
+    return typeof windowWithBoundary.turnstile === "object"
+      && Array.isArray(windowWithBoundary.__cleanPayTurnstileDocumentChallenges)
+      && windowWithBoundary.__cleanPayTurnstileDocumentChallenges.some(
+        (challenge) => challenge.action === expectedAction,
+      );
+  }, action, { timeout: 15_000 });
 }
 
 async function completeTelegramLogin(
