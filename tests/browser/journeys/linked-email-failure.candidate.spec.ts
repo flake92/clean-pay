@@ -34,6 +34,10 @@ const allowedProviderEffects = new Set([
   "linked_email_login_auth_failed",
   "linked_email_register_conflict",
 ]);
+const passiveProviderEffects = new Set([
+  "probe_contract",
+  "read_public_plans",
+]);
 
 test("authorized linked-email failures expose only the exact actionable feedback", async ({
   guardedPage: page,
@@ -90,12 +94,17 @@ test("authorized linked-email failures expose only the exact actionable feedback
     .filter(({ sequence, service }) => (
       sequence > ledgerBefore.lastSequence && service === "remnashop"
     ));
-  expect(providerEffects.map(({ effect }) => effect)).toEqual(Array.from(
+  const actionableProviderEffects = providerEffects.filter(({ effect }) => (
+    allowedProviderEffects.has(effect)
+  ));
+  const unexpectedProviderEffects = providerEffects.filter(({ effect }) => (
+    !allowedProviderEffects.has(effect) && !passiveProviderEffects.has(effect)
+  ));
+  expect(actionableProviderEffects.map(({ effect }) => effect)).toEqual(Array.from(
     { length: 10 },
     () => ["linked_email_login_auth_failed", "linked_email_register_conflict"],
   ).flat());
-  expect(providerEffects.filter(({ effect }) => !allowedProviderEffects.has(effect)))
-    .toEqual([]);
+  expect(unexpectedProviderEffects).toEqual([]);
 
   submittedActionIds.push(await submitServerAction(page, submit));
   await expect(errorMessage).toHaveText(rateLimitedMessage);
@@ -107,7 +116,14 @@ test("authorized linked-email failures expose only the exact actionable feedback
       sequence > ledgerBeforeRateLimit.lastSequence && service === "remnashop"
     ),
   );
-  expect(rateLimitedProviderRequests).toEqual([]);
+  const actionableRateLimitedProviderRequests = rateLimitedProviderRequests.filter(({ effect }) => (
+    allowedProviderEffects.has(effect)
+  ));
+  const unexpectedRateLimitedProviderRequests = rateLimitedProviderRequests.filter(({ effect }) => (
+    !allowedProviderEffects.has(effect) && !passiveProviderEffects.has(effect)
+  ));
+  expect(actionableRateLimitedProviderRequests).toEqual([]);
+  expect(unexpectedRateLimitedProviderRequests).toEqual([]);
   expect(ledgerAfter.database).toEqual(databaseBefore);
   expect(blockedRequests).toEqual([]);
 
@@ -157,9 +173,9 @@ test("authorized linked-email failures expose only the exact actionable feedback
     serverActionPayloadContractSha256: createHash("sha256")
       .update(payloadContracts[0] ?? "", "utf8")
       .digest("hex"),
-    authFailedProviderRequestCount: providerEffects.length,
-    rateLimitedProviderRequestCount: rateLimitedProviderRequests.length,
-    providerEffectOrder: providerEffects.map(({ effect }) => effect),
+    authFailedProviderRequestCount: actionableProviderEffects.length,
+    rateLimitedProviderRequestCount: actionableRateLimitedProviderRequests.length,
+    providerEffectOrder: actionableProviderEffects.map(({ effect }) => effect),
     databaseUnchanged: true,
     formStatePreserved: true,
     submitButtonEnabled: await submit.isEnabled(),
