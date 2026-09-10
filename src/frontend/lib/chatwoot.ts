@@ -436,7 +436,7 @@ function clearKnownCookies(websiteToken?: string) {
 
   try {
     for (const cookie of document.cookie.split(";")) {
-      const name = cookie.trim().split("=", 1)[0];
+      const [name = ""] = cookie.trim().split("=", 1);
 
       if (name.startsWith("cw_user_")) {
         names.add(name);

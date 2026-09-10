@@ -149,7 +149,11 @@ function parseRedisResponse(
     throw new RangeError("Incomplete Redis response");
   }
 
-  const type = String.fromCharCode(buffer[offset]);
+  const marker = buffer[offset];
+  if (marker === undefined) {
+    throw new RangeError("Incomplete Redis response");
+  }
+  const type = String.fromCharCode(marker);
   const start = offset + 1;
   const end = buffer.indexOf("\r\n", start);
 
