@@ -182,7 +182,28 @@ describe("devcontainer e2e runner readiness", () => {
     );
     expect(shellRunner).toContain("Waiting for Next.js health endpoint");
     expect(shellRunner).toContain("Warming Next.js route: $route");
-    expect(shellRunner).toContain("--max-time 45");
-    expect(shellRunner).not.toContain("--max-time 90");
+
+    // Every warm request stays bounded; none may wait indefinitely.
+    for (const budget of shellRunner.matchAll(/--max-time (\d+)/g)) {
+      expect(Number(budget[1]), budget[0]).toBeLessThanOrEqual(60);
+    }
+  });
+
+  it("never lets a slow warm-up abort the run before a test executes", () => {
+    // Warming only saves the first test from paying a cold Turbopack compile.
+    // Under --fail with no tolerance a single slow /login ended the whole run
+    // with exit 28, so each warm request must survive its own failure.
+    const start = shellRunner.indexOf("warm_next_routes() {");
+    const warmUp = shellRunner
+      .slice(start, shellRunner.indexOf("\n}", start))
+      .split("\n")
+      // Prose may name --fail while explaining its absence; judge the commands.
+      .filter((line) => !line.trim().startsWith("#"))
+      .join("\n");
+
+    expect(warmUp).not.toContain("--fail");
+    for (const request of warmUp.split("curl ").slice(1)) {
+      expect(request).toMatch(/\|\| (true|echo)/);
+    }
   });
 });
