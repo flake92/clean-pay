@@ -28,6 +28,7 @@ import { captureAfterScreenshot } from "./browser-observation-boundaries";
 import {
   assertChatwootProviderCausalOrder,
   chatwootProviderExpectedEffects,
+  canonicalizeChatwootProviderArrivalOrder,
 } from "./chatwoot-provider-ledger-order.mjs";
 import {
   createInitialChatwootBootstrap,
@@ -3724,6 +3725,49 @@ async function installChatwootCausalLedger(
       presence: cookiePresence(),
       url: location.href,
     }));
+    const wrappedChatwootApis = new WeakSet<object>();
+    const emitSetUserCausalPrecondition = () => {
+      enqueue(() => documentEvidence.then(() => causalEmit({
+        documentToken,
+        kind: "boundary",
+        method: "setUser",
+        presence: cookiePresence(),
+        url: location.href,
+      })));
+    };
+    const wrapChatwootApi = (value: unknown) => {
+      if (
+        value === null
+        || typeof value !== "object"
+        || wrappedChatwootApis.has(value)
+      ) {
+        return value;
+      }
+      const api = value as { setUser?: unknown };
+      if (typeof api.setUser !== "function") return value;
+      wrappedChatwootApis.add(value);
+      const originalSetUser = api.setUser;
+      Object.defineProperty(api, "setUser", {
+        configurable: true,
+        writable: true,
+        value(...args: unknown[]) {
+          emitSetUserCausalPrecondition();
+          return Reflect.apply(originalSetUser, this, args);
+        },
+      });
+      return value;
+    };
+    let chatwootApi = wrapChatwootApi(
+      (window as unknown as Record<string, unknown>).$chatwoot,
+    );
+    Object.defineProperty(window, "$chatwoot", {
+      configurable: true,
+      enumerable: true,
+      get: () => chatwootApi,
+      set(value: unknown) {
+        chatwootApi = wrapChatwootApi(value);
+      },
+    });
     Object.defineProperty(window, "__cleanPayChatwootCausalDrain", {
       configurable: false,
       enumerable: false,
@@ -3784,9 +3828,7 @@ async function installChatwootCausalLedger(
                 entry !== null
                 && typeof entry === "object"
                 && !Array.isArray(entry)
-                && ["setUser", "identity.confirmed"].includes(String(
-                  (entry as { method?: unknown }).method,
-                ))
+                && String((entry as { method?: unknown }).method) === "identity.confirmed"
               ))
               .map((entry) => ({
                 method: String((entry as { method: unknown }).method),
@@ -4137,8 +4179,11 @@ export function assertChatwootProviderPhaseRelations(value: unknown) {
   const gap = assertProviderLedger(phases.gap, "gap");
   const stable = assertProviderLedger(phases.stable, "stable");
   const recreated = assertProviderLedger(phases.recreated, "recreated");
-  assertProviderPrefix(gap.entries, stable.entries, "Gap to Stable");
-  assertProviderPrefix(stable.entries, recreated.entries, "Stable to Recreated");
+  const canonicalGap = canonicalizeProviderPhaseEntries(gap.entries, "gap");
+  const canonicalStable = canonicalizeProviderPhaseEntries(stable.entries, "stable");
+  const canonicalRecreated = canonicalizeProviderPhaseEntries(recreated.entries, "recreated");
+  assertProviderPrefix(canonicalGap, canonicalStable, "Gap to Stable");
+  assertProviderPrefix(canonicalStable, canonicalRecreated, "Stable to Recreated");
   return Object.freeze({
     gapEntryCount: gap.entries.length,
     recreatedEntryCount: recreated.entries.length,
@@ -4238,6 +4283,13 @@ function assertProviderLedger(value: unknown, phase: Phase): ProviderLedger {
     database,
     entries: Object.freeze(normalizedEntries) as unknown as Array<Record<string, unknown>>,
   }) as ProviderLedger;
+}
+
+function canonicalizeProviderPhaseEntries(
+  entries: Array<Record<string, unknown>>,
+  phase: Phase,
+) {
+  return canonicalizeChatwootProviderArrivalOrder(entries, phase) as Array<Record<string, unknown>>;
 }
 
 function normalizeProviderLedgerEntries(

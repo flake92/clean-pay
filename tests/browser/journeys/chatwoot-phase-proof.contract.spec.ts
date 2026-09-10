@@ -2462,7 +2462,7 @@ for (const index of [4, 5, 6, 7]) {
   });
 }
 
-test("Chatwoot comparison canonicalization does not relax same-stack phase prefixes", () => {
+test("Chatwoot comparison canonicalization accepts same-stack causal-equivalent provider lanes only", () => {
   const phases = {
     gap: strictProviderFixture("gap"), stable: strictProviderFixture("stable"),
     recreated: strictProviderFixture("recreated"),
@@ -2470,7 +2470,16 @@ test("Chatwoot comparison canonicalization does not relax same-stack phase prefi
   [phases.stable.entries[1], phases.stable.entries[2]] = [phases.stable.entries[2], phases.stable.entries[1]];
   phases.stable.entries.forEach((entry, index) => { entry.sequence = index + 1; });
   expect(assertChatwootPhaseProviderLedger(phases.stable, "stable")).toEqual(phases.stable);
-  expect(() => assertChatwootProviderPhaseRelations(phases)).toThrow(/exact ordered prefix/);
+  expect(assertChatwootProviderPhaseRelations(phases)).toMatchObject({
+    gapEntryCount: 28,
+    stableEntryCount: 28,
+    status: "exact-provider-phase-prefixes",
+  });
+
+  const changedBytes = structuredClone(phases);
+  changedBytes.stable.entries[9].body_sha256 = "f".repeat(64);
+  expect(() => assertChatwootProviderPhaseRelations(changedBytes))
+    .toThrow(/exact ordered prefix/);
 });
 
 test("Chatwoot causal provider comparison preserves changed bytes rather than blessing them", () => {
