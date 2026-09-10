@@ -1,6 +1,6 @@
 import { globSync, readFileSync } from "node:fs";
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   transactionConcurrencyViolations,
   type TransactionSourceFile,
@@ -9,6 +9,13 @@ import {
 function inlineSource(sourceText: string): TransactionSourceFile[] {
   return [{ file: "tests/fixtures/transaction-inline.ts", sourceText }];
 }
+
+// These walk the whole production tree with a 1200-line analyser, and v8
+// coverage instrumentation roughly triples that: the file runs 4.6s bare and
+// 13s instrumented. Under the parallel suite one case was measured at 16.3s
+// against the 15s default and failed intermittently, so give this file its own
+// budget rather than loosening the default for every other test.
+vi.setConfig({ testTimeout: 60_000 });
 
 describe("production incident regressions", () => {
   it("uses the CommonJS-compatible Prisma client import in Node entrypoints", () => {
