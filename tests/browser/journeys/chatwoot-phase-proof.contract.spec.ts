@@ -3092,6 +3092,54 @@ test("executes the exact direct-cabinet browser classifier with serialized parit
   }
 });
 
+test("accepts the exact initial authenticated shortcut browser flow", () => {
+  const staticAssetContract = createChatwootPhaseStaticAssetContract(staticAssetAttestation());
+  const graph = staticLoadGraphFixture(staticAssetContract, [
+    "app-login-document",
+    "app-profile-document",
+    "app-cabinet-document",
+  ]);
+  const record = browserRecordFixture(staticAssetContract);
+  const records = [
+    record("app-login-document", "app-login-document", 200, "text/html", {
+      navigation: true,
+    }),
+    ...staticRecordsForDocument(staticAssetContract, "app-login-document"),
+    record("turnstile-widget-script", "app-login-document", 200, "application/javascript"),
+    record("chatwoot-sdk-script", "app-login-document", 200, "application/javascript"),
+    record("app-telegram-start", "app-login-document", 307, "application/octet-stream", {
+      navigation: true,
+    }),
+    record("app-profile-action", "app-login-document", 200, "text/x-component"),
+    record("app-root-rsc", "app-login-document", 200, "text/x-component"),
+    record("chatwoot-widget-frame", "app-login-document", 200, "text/html"),
+    record("app-profile-action", "app-login-document", 200, "text/x-component"),
+    record("chatwoot-widget-conversation-frame", "app-login-document", 200, "text/html"),
+    record("app-cabinet-document", "app-cabinet-document", 200, "text/html", {
+      navigation: true,
+    }),
+    ...staticRecordsForDocument(staticAssetContract, "app-cabinet-document"),
+  ];
+
+  const finalized = finalizeChatwootPhaseBrowserContract(records, {
+    cssMediaReferences: graph.cssMediaReferences,
+    generation: "initial",
+    referenceStaticContract: null,
+    responseDeclarationsByDocument: graph.responseDeclarationsByDocument,
+    staticAssetContract,
+  });
+
+  expect(finalized.staticLoadGraph.documentLoadLedger.map((entry: { documentKey: string }) => (
+    entry.documentKey
+  ))).toEqual(["app-login-document", "app-cabinet-document"]);
+  expect(finalized.responseDeclarationLedger.map((entry: { documentKey: string }) => (
+    entry.documentKey
+  ))).toEqual(["app-login-document", "app-profile-document", "app-cabinet-document"]);
+  const semanticRequestLedger = finalized.semanticRequestLedger as ReadonlyArray<{ key: string }>;
+  expect(semanticRequestLedger.map((entry) => entry.key))
+    .toContain("app-profile-action");
+});
+
 test("executes the committed shared static/history adapters under bounded lifecycle", async () => {
   const mainFrame = {};
   const requestEnvelope = (

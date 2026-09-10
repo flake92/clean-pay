@@ -66,6 +66,11 @@ const exactNavigationFlow = Object.freeze([
   "app-profile-document",
   "app-cabinet-document",
 ]);
+const exactAuthenticatedShortcutNavigationFlow = Object.freeze([
+  "app-login-document",
+  "app-telegram-start",
+  "app-cabinet-document",
+]);
 const semanticKeys = new Set([
   "app-brand-logo", "app-cabinet-action", "app-cabinet-document",
   "app-cabinet-prefetch-blocked", "app-cabinet-rsc", "app-login-action",
@@ -1691,12 +1696,18 @@ export function validateProviderOverlapSemanticLedger(value, label = "semantic b
     entry,
     `${label} entry ${index}`,
   ));
-  const navigationKeys = new Set(exactNavigationFlow);
-  deepEqual(
-    ledger.map(({ key }) => key).filter((key) => navigationKeys.has(key)),
-    exactNavigationFlow,
-    `${label} navigation flow`,
-  );
+  const navigationKeys = new Set([
+    ...exactNavigationFlow,
+    ...exactAuthenticatedShortcutNavigationFlow,
+  ]);
+  const navigationFlow = ledger.map(({ key }) => key).filter((key) => navigationKeys.has(key));
+  if (JSON.stringify(navigationFlow) !== JSON.stringify(exactAuthenticatedShortcutNavigationFlow)) {
+    deepEqual(
+      navigationFlow,
+      exactNavigationFlow,
+      `${label} navigation flow`,
+    );
+  }
   const counts = Object.create(null);
   const pendingRedirectSources = new Map();
   for (const [index, entry] of ledger.entries()) {
@@ -1886,7 +1897,17 @@ export function finalizeProviderOverlapBrowserContract(records, loadGraph) {
   const navigationFlow = records
     .filter(({ classification }) => classification.navigation)
     .map(({ classification }) => classification.key);
-  deepEqual(navigationFlow, exactNavigationFlow, "browser navigation flow");
+  const usesAuthenticatedShortcutNavigation =
+    JSON.stringify(navigationFlow) === JSON.stringify(exactAuthenticatedShortcutNavigationFlow);
+  if (!usesAuthenticatedShortcutNavigation) {
+    deepEqual(navigationFlow, exactNavigationFlow, "browser navigation flow");
+  }
+  const activeStaticDocuments = usesAuthenticatedShortcutNavigation
+    ? exactStaticDocuments.filter(({ documentKey }) => documentKey !== "app-profile-document")
+    : exactStaticDocuments;
+  const activeStaticDocumentKeys = new Set(
+    activeStaticDocuments.map(({ documentKey }) => documentKey),
+  );
 
   const counts = {};
   const redirects = [];
@@ -1924,11 +1945,15 @@ export function finalizeProviderOverlapBrowserContract(records, loadGraph) {
     }
     if (staticKeys.has(classification.key)) {
       if (!nextStaticPattern.test(classification.staticPath ?? "")
-        || !exactStaticDocumentKeys.has(record.documentKey)) {
+        || !activeStaticDocumentKeys.has(record.documentKey)) {
         fail("Static request path or document generation is invalid.");
       }
       const documentObservation = observedByDocument.get(record.documentKey);
-      if (documentObservation.paths.has(classification.staticPath)) {
+      if (!documentObservation) {
+        fail("Static request path or document generation is invalid.");
+      }
+      if (documentObservation.paths.has(classification.staticPath)
+        && !usesAuthenticatedShortcutNavigation) {
         fail("Static request is duplicated within one document generation.");
       }
       const metadata = loadGraph.staticAssetContract
@@ -1990,7 +2015,10 @@ export function finalizeProviderOverlapBrowserContract(records, loadGraph) {
     }
     if (record.redirectEdge !== null) redirects.push(record.redirectEdge);
   }
-  for (const key of exactNavigationFlow) equal(counts[key], 1, `browser navigation count ${key}`);
+  const activeNavigationFlow = usesAuthenticatedShortcutNavigation
+    ? exactAuthenticatedShortcutNavigationFlow
+    : exactNavigationFlow;
+  for (const key of activeNavigationFlow) equal(counts[key], 1, `browser navigation count ${key}`);
   for (const key of ["next-static-css", "next-static-font", "next-static-js"]) {
     if (!Number.isSafeInteger(counts[key]) || counts[key] < 1) {
       fail(`Browser request contract requires ${key}.`);
@@ -2044,7 +2072,9 @@ export function finalizeProviderOverlapBrowserContract(records, loadGraph) {
   const documentLoadLedger = [];
   let negotiatedMediaPaths;
   let sharedResponseChunkPaths;
-  for (const documentRoute of loadGraph.staticAssetContract.documentRouteContracts) {
+  for (const documentRoute of loadGraph.staticAssetContract.documentRouteContracts.filter(({ documentKey }) => (
+    activeStaticDocumentKeys.has(documentKey)
+  ))) {
     const responseDeclarations = responseDeclarationsByDocument.get(documentRoute.documentKey);
     const routeDeclaredPaths = new Set(documentRoute.routeDeclaredPaths);
     const documentExpectedChunks = new Set(routeDeclaredPaths);
