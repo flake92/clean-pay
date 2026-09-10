@@ -134,7 +134,11 @@ function initialPositions(entries) {
     valid.push([...firstStage, ...browserOrder.slice(1)]);
   }
   if (valid.length === 0) {
-    throw new Error("Chatwoot provider independent lanes escaped their exact endpoint contract.");
+    throw new Error(
+      `Chatwoot provider independent lanes escaped their exact endpoint contract: ${
+        compactProviderEffects(entries)
+      }`,
+    );
   }
   if (valid.length > 1) {
     // The trace cannot distinguish identical JWKS reads. Permit that ambiguity
@@ -175,6 +179,14 @@ function stagePositions(entries, phase) {
     throw new Error("Chatwoot provider assignment escaped its exact endpoint contract.");
   }
   return positions;
+}
+
+function compactProviderEffects(entries) {
+  return entries.map((entry) => {
+    const effect = typeof entry.effect === "string" ? entry.effect : "unknown";
+    const pathname = typeof entry.pathname === "string" ? entry.pathname : "";
+    return pathname === "" ? effect : `${effect}@${pathname}`;
+  }).join(",");
 }
 
 export function assertChatwootProviderCausalOrder(entries, phase) {
