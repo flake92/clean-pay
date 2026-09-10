@@ -50,6 +50,13 @@ x-remnashop-env: &remnashop-env
   APP_CRYPT_KEY: MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=
   APP_SWAGGER_ENABLED: "true"
   WEB_ENABLED: "true"
+  # Remnashop requires this to be HTTPS, while this topology serves Clean Pay
+  # over plain http://localhost:4000, so the two origins cannot be made to
+  # match here. Remnashop compares this origin against the payment return_url
+  # and builds web_referral_url from it, so inside the devcontainer both
+  # checkout (422) and the referral program (rejected by the reader) fail for
+  # that reason alone. Production sets APP_URL and WEB_CABINET_URL to the same
+  # host, where both flows work; verify them there rather than here.
   WEB_CABINET_URL: https://clean-pay.example.test/auth/telegram/webapp
   REFERRAL_REWARD_BACKFILL_ENABLED: "false"
   APP_API_KEY: dev-remnashop-api-key-change-me
