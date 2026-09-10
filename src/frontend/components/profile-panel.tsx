@@ -327,7 +327,12 @@ function ProfilePanelContent({
             {!emailReminders.emailEligible ? (
               <Message
                 severity="warn"
-                text="Remnashop сейчас не разрешает включить напоминания. Проверьте подтверждение e-mail или попробуйте позже; уже сохранённую настройку можно отключить."
+                // Remnashop reports eligibility as a single boolean, so the
+                // cause is unknowable here. It is not necessarily the address:
+                // delivery also depends on provider-side mail configuration a
+                // reader cannot influence. Pointing at their e-mail sent people
+                // to re-verify an already verified address.
+                text="Сейчас включить напоминания нельзя: их отправка недоступна на стороне сервиса. Уже сохранённую настройку можно отключить."
               />
             ) : null}
             <p className="m-0 line-height-3 text-sm text-600" id="email-expiration-reminders-help">
