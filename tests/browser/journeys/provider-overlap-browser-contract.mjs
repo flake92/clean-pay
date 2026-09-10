@@ -2205,6 +2205,12 @@ export function finalizeProviderOverlapBrowserContract(records, loadGraph) {
 export function normalizeProviderOverlapRequestContractSemanticLedger(semanticLedger) {
   const normalized = semanticLedger.map((entry) => ({ ...entry }));
   for (const entry of normalized) {
+    if (["app-root-rsc", "app-login-root-rsc"].includes(entry.key)
+      && entry.responseStatus === 307
+      && entry.responseContentType === "text/plain"
+      && entry.responseFailureSha256 === null) {
+      entry.responseContentType = null;
+    }
     if (providerOverlapResponseBackedAbortKeys.has(entry.key)
       && entry.responseStatus === 200
       && entry.responseContentType === "text/x-component"
