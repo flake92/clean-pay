@@ -7,7 +7,6 @@ import { Button } from "primereact/button";
 import { InputText } from "primereact/inputtext";
 import { Message } from "primereact/message";
 import { Password } from "primereact/password";
-import { Tag } from "primereact/tag";
 
 import {
   cancelLinkedTelegramAction,
@@ -25,6 +24,8 @@ import {
   isPaymentDestination,
 } from "@/shared/auth/account-setup-flow";
 import type { LinkAccountViewModel, TelegramMergeViewModel } from "@/application/models/link-account";
+import { AuthMethodTile } from "@/frontend/components/auth-method-tile";
+import { LinkAccountPasskeyTile } from "@/frontend/components/link-account-passkey-tile";
 
 const defaultLinkAccountModel: LinkAccountViewModel = {
   status: "ready",
@@ -54,56 +55,8 @@ function missingTurnstileTokenMessage(siteKey?: string | null) {
     : "Cloudflare Turnstile site key is not configured.";
 }
 
-function statusSeverity(active: boolean, pending = false) {
-  if (active) {
-    return "success" as const;
-  }
 
-  return pending ? ("warning" as const) : ("secondary" as const);
-}
 
-function statusLabel(active: boolean, pending = false) {
-  if (active) {
-    return "Подключено";
-  }
-
-  return pending ? "Нужно подтвердить" : "Не подключено";
-}
-
-function AuthMethodTile({
-  icon,
-  title,
-  description,
-  active,
-  pending,
-  meta,
-  children,
-}: {
-  icon: string;
-  title: string;
-  description: string;
-  active: boolean;
-  pending?: boolean;
-  meta?: React.ReactNode;
-  children?: React.ReactNode;
-}) {
-  return (
-    <section className="account-method-card">
-      <div className="account-method-card__header">
-        <span className="account-method-icon">
-          <i className={icon} />
-        </span>
-        <div className="account-method-heading">
-          <h3 className="account-method-title">{title}</h3>
-          <p className="account-method-description">{description}</p>
-        </div>
-        <Tag className="account-method-status" severity={statusSeverity(active, pending)} value={statusLabel(active, pending)} />
-      </div>
-      {meta ? <div className="account-method-meta">{meta}</div> : null}
-      {children ? <div className="account-method-actions">{children}</div> : null}
-    </section>
-  );
-}
 
 export function LinkAccountPanel({
   guided = false,
@@ -590,65 +543,14 @@ export function LinkAccountPanel({
         ) : null}
 
         {!guided ? (
-          <AuthMethodTile
-            active={hasPasskey}
+          <LinkAccountPasskeyTile
+            actionLoading={actionLoading}
             description={passkeyDescription}
-            icon="pi pi-lock"
-            meta={
-              hasPasskey ? <span>Сохранено ключей: {passkeys.length}</span> : null
-            }
-            title="Быстрый вход"
-          >
-            {webAuthnSupported !== false ? (
-              <div className="account-method-action-row">
-                <Button
-                  disabled={actionLoading !== null}
-                  icon="pi pi-lock"
-                  label="Настроить"
-                  onClick={() => navigateTo("/passkey/setup")}
-                  type="button"
-                />
-                <Button
-                  disabled={actionLoading !== null}
-                  label="Позже"
-                  onClick={() => navigateTo("/cabinet")}
-                  outlined
-                  severity="secondary"
-                  type="button"
-                />
-              </div>
-            ) : webAuthnSupported === false ? (
-              <Message
-                severity="info"
-                text="На этом устройстве нельзя добавить новый ключ. Сохранённые ключи можно удалить ниже."
-              />
-            ) : null}
-
-            {passkeys.length > 0 ? (
-              <div className="passkey-list">
-                {passkeys.map((credential) => (
-                  <div className="passkey-list-item" key={credential.id}>
-                    <div className="passkey-list-item__body">
-                      <span className="passkey-list-item__name">{credential.name ?? "Ключ доступа"}</span>
-                      <span className="passkey-list-item__meta">
-                        {credential.lastUsedAt ? `Последний вход: ${new Date(credential.lastUsedAt).toLocaleDateString("ru-RU")}` : "Ещё не использовался"}
-                      </span>
-                    </div>
-                    <Button
-                      aria-label="Удалить ключ"
-                      disabled={passkeys.length <= 1 || actionLoading !== null}
-                      icon="pi pi-trash"
-                      loading={actionLoading === `passkey-${credential.id}`}
-                      onClick={() => deletePasskey(credential.id)}
-                      outlined
-                      severity="danger"
-                      type="button"
-                    />
-                  </div>
-                ))}
-              </div>
-            ) : null}
-          </AuthMethodTile>
+            navigateTo={navigateTo}
+            onDelete={deletePasskey}
+            passkeys={passkeys}
+            webAuthnSupported={webAuthnSupported}
+          />
         ) : null}
       </div>
     </div>

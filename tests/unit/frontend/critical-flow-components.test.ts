@@ -539,3 +539,86 @@ describe("critical user-flow components", () => {
     expect(mocks.navigateTo).not.toHaveBeenCalledWith(invalidRedirect);
   });
 });
+
+describe("LinkAccountPanel rendered surface", () => {
+  // The panel coordinates three separate account-linking concerns -- e-mail,
+  // Telegram and passkeys -- and its render path had no coverage at all, which
+  // left the largest component in the product free to change shape unnoticed.
+  // These pin what each tile actually offers a reader in a given account state,
+  // so the tiles can be split apart without silently losing one.
+  function renderPanel(overrides: Record<string, unknown> = {}) {
+    return render(createElement(LinkAccountPanel, {
+      model: {
+        status: "ready",
+        profile: { email: null, emailVerified: false, telegramId: null },
+        passkeys: [],
+        callbackError: null,
+        mergeConfirmation: null,
+        ...(overrides.model as Record<string, unknown> ?? {}),
+      },
+      redirectTo: "/cabinet",
+      ...overrides,
+    } as never));
+  }
+
+  it("offers each sign-in method with its own action when none are linked", () => {
+    renderPanel();
+
+    // Three tiles, three distinct concerns -- this is what makes the component
+    // large, and what a split has to preserve.
+    expect(screen.getAllByText("E-mail").length).toBeGreaterThan(0);
+    expect(screen.getByText("Telegram")).toBeTruthy();
+    expect(screen.getByText("Быстрый вход")).toBeTruthy();
+    expect(screen.getAllByText(/Не подключено/)).toHaveLength(3);
+
+    expect(screen.getByRole("button", { name: /Сохранить e-mail и пароль/i })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Привязать Telegram/i })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Настроить/i })).toBeTruthy();
+  });
+
+  it("shows a linked e-mail and Telegram instead of their forms", () => {
+    renderPanel({
+      model: {
+        status: "ready",
+        profile: { email: "user@example.com", emailVerified: true, telegramId: "100200300" },
+        passkeys: [],
+        callbackError: null,
+        mergeConfirmation: null,
+      },
+    });
+
+    expect(screen.getByText("user@example.com")).toBeTruthy();
+    expect(screen.getByText(/Telegram ID: 100200300/)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /Сохранить e-mail и пароль/i })).toBeNull();
+  });
+
+  it("lists stored passkeys and keeps a way to remove one", () => {
+    renderPanel({
+      model: {
+        status: "ready",
+        profile: { email: "user@example.com", emailVerified: true, telegramId: null },
+        passkeys: [{ id: "passkey-1", label: "MacBook", createdAt: "2026-01-01T00:00:00.000Z" }],
+        callbackError: null,
+        mergeConfirmation: null,
+      },
+    });
+
+    expect(screen.getByText(/Сохранено ключей: 1/)).toBeTruthy();
+    expect(screen.getByText("Ключ доступа")).toBeTruthy();
+  });
+
+  it("surfaces a callback error returned with the model", () => {
+    renderPanel({
+      model: {
+        status: "ready",
+        profile: { email: null, emailVerified: false, telegramId: null },
+        passkeys: [],
+        callbackError: "Не удалось связать Telegram.",
+        mergeConfirmation: null,
+      },
+    });
+
+    const alerts = screen.getAllByRole("alert").map((node) => node.textContent ?? "");
+    expect(alerts.some((text) => text.includes("Не удалось связать Telegram."))).toBe(true);
+  });
+});
