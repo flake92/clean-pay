@@ -2221,7 +2221,14 @@ async function finishBrowserRequestContract(
         responseStatus: record.responseStatus,
       })
     ) {
-      throw new Error("Chatwoot strict browser redirect has no exact successor.");
+      throw new Error(`Chatwoot strict browser redirect has no exact successor: ${JSON.stringify({
+        documentKey: record.documentKey,
+        generation,
+        key: classification.key,
+        responseContentType: record.responseContentType,
+        responseFailureSha256: record.responseFailureSha256,
+        responseStatus: record.responseStatus,
+      })}`);
     }
   }
   const sharedLoadGraph = Object.freeze({
