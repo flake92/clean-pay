@@ -2537,6 +2537,25 @@ test("Chatwoot phase ledger accepts one exact trailing readiness contact refresh
     .toThrow(/incomplete or outside|exact endpoint contract|credential projection/);
 });
 
+test("Chatwoot phase ledger accepts adjacent expected contacts before trailing readiness contact refresh", () => {
+  const original = strictProviderFixture("gap");
+  const withRefreshTail = structuredClone(original);
+  const finalContactProbe = withRefreshTail.entries.splice(27, 1)[0]!;
+  withRefreshTail.entries.splice(18, 0, finalContactProbe);
+  for (const index of [1, 2, 3, 4, 5, 6, 7, 27]) {
+    withRefreshTail.entries.push(structuredClone(original.entries[index]));
+  }
+  withRefreshTail.entries.forEach((entry, index) => { entry.sequence = index + 1; });
+
+  expect(assertChatwootPhaseProviderLedger(withRefreshTail, "gap").entries)
+    .toEqual(withRefreshTail.entries.slice(0, 28));
+
+  const changed = structuredClone(withRefreshTail);
+  changed.entries[35].credential_contract.header_names = [];
+  expect(() => assertChatwootPhaseProviderLedger(changed, "gap"))
+    .toThrow(/incomplete or outside|exact endpoint contract|credential projection/);
+});
+
 // Actual interleavings from run 34059555047. Numbers identify entries in
 // strictProviderFixture, not observed sequence numbers. Bodies stay unchanged.
 const observedReadinessInterleavings = [
@@ -3135,10 +3154,55 @@ test("accepts the exact initial authenticated shortcut browser flow", () => {
   ))).toEqual(["app-login-document", "app-cabinet-document"]);
   expect(finalized.responseDeclarationLedger.map((entry: { documentKey: string }) => (
     entry.documentKey
-  ))).toEqual(["app-login-document", "app-profile-document", "app-cabinet-document"]);
+  ))).toEqual(["app-login-document", "app-cabinet-document"]);
   const semanticRequestLedger = finalized.semanticRequestLedger as ReadonlyArray<{ key: string }>;
   expect(semanticRequestLedger.map((entry) => entry.key))
     .toContain("app-profile-action");
+});
+
+test("accepts shortcut browser flow without profile response declarations", () => {
+  const staticAssetContract = createChatwootPhaseStaticAssetContract(staticAssetAttestation());
+  const graph = staticLoadGraphFixture(staticAssetContract, [
+    "app-login-document",
+    "app-profile-document",
+    "app-cabinet-document",
+  ]);
+  graph.responseDeclarationsByDocument[1] = {
+    ...graph.responseDeclarationsByDocument[1],
+    paths: [],
+  };
+  const record = browserRecordFixture(staticAssetContract);
+  const records = [
+    record("app-login-document", "app-login-document", 200, "text/html", {
+      navigation: true,
+    }),
+    ...staticRecordsForDocument(staticAssetContract, "app-login-document"),
+    record("turnstile-widget-script", "app-login-document", 200, "application/javascript"),
+    record("chatwoot-sdk-script", "app-login-document", 200, "application/javascript"),
+    record("app-telegram-start", "app-login-document", 307, "application/octet-stream", {
+      navigation: true,
+    }),
+    record("app-profile-action", "app-login-document", 200, "text/x-component"),
+    record("app-root-rsc", "app-login-document", 200, "text/x-component"),
+    record("chatwoot-widget-frame", "app-login-document", 200, "text/html"),
+    record("chatwoot-widget-conversation-frame", "app-login-document", 200, "text/html"),
+    record("app-cabinet-document", "app-cabinet-document", 200, "text/html", {
+      navigation: true,
+    }),
+    ...staticRecordsForDocument(staticAssetContract, "app-cabinet-document"),
+  ];
+
+  const finalized = finalizeChatwootPhaseBrowserContract(records, {
+    cssMediaReferences: graph.cssMediaReferences,
+    generation: "initial",
+    referenceStaticContract: null,
+    responseDeclarationsByDocument: graph.responseDeclarationsByDocument,
+    staticAssetContract,
+  });
+
+  expect(finalized.responseDeclarationLedger.map((entry: { documentKey: string }) => (
+    entry.documentKey
+  ))).toEqual(["app-login-document", "app-cabinet-document"]);
 });
 
 test("normalizes shortcut transition static chunks before the cabinet document", () => {

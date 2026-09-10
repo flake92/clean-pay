@@ -46,6 +46,15 @@ const initial = Object.freeze([
   one("read_profile"), one("read_subscription"), one("contact_identity_probed"),
   ...cabinet,
 ]);
+const initialBrowserStageVariants = Object.freeze([
+  Object.freeze([one("challenge_verified"), ...initial.slice(1)]),
+  Object.freeze([
+    one("challenge_verified"),
+    ...initial.slice(1, 10),
+    cabinet[cabinet.length - 1],
+    ...cabinet.slice(0, -1),
+  ]),
+]);
 const recreated = Object.freeze([
   ...initial,
   // The second login uses the already-warmed OIDC key cache, then opens /cabinet.
@@ -119,12 +128,18 @@ function initialPositions(entries) {
     const used = new Set(readinessPositions);
     const browserPositions = entries.flatMap((_, index) => used.has(index) ? [] : [index]);
     let browserOrder;
-    try {
-      browserOrder = orderedStagePositions(
-        browserPositions.map((index) => entries[index]),
-        [one("challenge_verified"), ...initial.slice(1)],
-      ).map((index) => browserPositions[index]);
-    } catch {
+    for (const browserStages of initialBrowserStageVariants) {
+      try {
+        browserOrder = orderedStagePositions(
+          browserPositions.map((index) => entries[index]),
+          browserStages,
+        ).map((index) => browserPositions[index]);
+        break;
+      } catch {
+        browserOrder = undefined;
+      }
+    }
+    if (browserOrder === undefined) {
       continue;
     }
     const firstStage = [browserOrder[0], ...readinessPositions];
