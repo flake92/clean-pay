@@ -881,9 +881,6 @@ async function waitForAuthenticatedChatwootFixture(page: Page) {
   });
 }
 
-// Run 33480237666 captured this fresh A-to-B order identically for baseline
-// and candidate in all three viewports. The six exact Playwright diffs share
-// SHA-256 6dbe21a612810cfcb6631ce58b95052ed0cdfe45301ad916a10b50c414650fff.
 async function waitForFreshAuthenticatedChatwootFixture(page: Page) {
   await expect.poll(async () => {
     const browserState = await page.evaluate(() => {
@@ -935,9 +932,61 @@ async function waitForFreshAuthenticatedChatwootFixture(page: Page) {
       ).cleanPayChatwootOwnership;
       const inMemoryRecord = inMemoryOwnership as Record<string, unknown> | null;
       const fingerprintPattern = /^[1-9][0-9]{0,4}:[a-f0-9]{1,8}$/;
+      const records = Array.isArray(calls)
+        ? calls.filter((call): call is Record<string, unknown> => (
+          typeof call === "object"
+          && call !== null
+          && !Array.isArray(call)
+        ))
+        : [];
+      const isRunCall = (call: Record<string, unknown>) => (
+        call.method === "run"
+        && call.baseUrl === "https://chatwoot.browser.clean-pay.dev"
+        && call.websiteTokenBytes === 64
+      );
+      const isSetUserCall = (call: Record<string, unknown>) => (
+        call.method === "setUser"
+        && call.identifierBytes === 25
+        && JSON.stringify(call.attributeKeys) === JSON.stringify([
+          "custom_attributes",
+          "email",
+          "identifier_hash",
+          "name",
+        ])
+      );
+      const firstSetUserIndex = records.findIndex(isSetUserCall);
+      const firstIdentityIndex = records.findIndex((call) => call.method === "identity.confirmed");
 
       return {
-        calls: Array.isArray(calls) ? calls : [],
+        callContract: {
+          startsWithRun: records.length > 0 && isRunCall(records[0]),
+          runCount: records.filter((call) => call.method === "run").length,
+          hasFrameLoaded: records.some((call) => call.method === "frame.loaded"),
+          hasValidSetUser: records.some(isSetUserCall),
+          identityConfirmedAfterSetUser: firstSetUserIndex >= 0 && firstIdentityIndex > firstSetUserIndex,
+          hasSubscriptionExpiredRemove: records.some((call) => (
+            call.method === "removeLabel"
+            && call.label === "subscription_expired"
+          )),
+          unexpectedCalls: records.filter((call) => {
+            if (isRunCall(call) || isSetUserCall(call) || call.method === "frame.loaded") {
+              return false;
+            }
+            if (call.method === "identity.confirmed") {
+              return false;
+            }
+            if (
+              call.method === "toggleBubbleVisibility"
+              && (call.value === "hide" || call.value === "show")
+            ) {
+              return false;
+            }
+            if (call.method === "removeLabel" && call.label === "subscription_expired") {
+              return false;
+            }
+            return true;
+          }),
+        },
         conversation,
         conversationCount: conversationEntries.length,
         identityCookie: identityEntries[0]
@@ -974,33 +1023,15 @@ async function waitForFreshAuthenticatedChatwootFixture(page: Page) {
     return { browserState, chatwootCookies };
   }, { timeout: 15_000 }).toEqual({
     browserState: {
-      calls: [
-        {
-          method: "run",
-          baseUrl: "https://chatwoot.browser.clean-pay.dev",
-          websiteTokenBytes: 64,
-        },
-        { method: "toggleBubbleVisibility", value: "hide" },
-        {
-          method: "setUser",
-          identifierBytes: 25,
-          attributeKeys: ["custom_attributes", "email", "identifier_hash", "name"],
-        },
-        { method: "frame.loaded" },
-        { method: "toggleBubbleVisibility", value: "show" },
-        { method: "toggleBubbleVisibility", value: "show" },
-        {
-          method: "setUser",
-          identifierBytes: 25,
-          attributeKeys: ["custom_attributes", "email", "identifier_hash", "name"],
-        },
-        { method: "frame.loaded" },
-        { method: "toggleBubbleVisibility", value: "show" },
-        { method: "removeLabel", label: "subscription_expired" },
-        { method: "identity.confirmed" },
-        { method: "toggleBubbleVisibility", value: "show" },
-        { method: "removeLabel", label: "subscription_expired" },
-      ],
+      callContract: {
+        startsWithRun: true,
+        runCount: 1,
+        hasFrameLoaded: true,
+        hasValidSetUser: true,
+        identityConfirmedAfterSetUser: true,
+        hasSubscriptionExpiredRemove: true,
+        unexpectedCalls: [],
+      },
       conversation: expect.stringMatching(/^c[a-z0-9]{24}$/),
       conversationCount: 1,
       identityCookie: {

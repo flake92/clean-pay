@@ -1575,6 +1575,7 @@ test("binds the causal route barrier and exact logout helper without fixture sub
   expect(source).toContain("initialCabinetFreshWidgetCount < 1");
   expect(source).toContain("await input.barrier.hold(route)");
   expect(source).toContain("await waitForInitialProfileSupportContext(page)");
+  expect(source).toContain('await waitForTurnstile(page, "auth_login")');
   expect(source).toContain('await completeTelegramNavigation(page, telegram, "/profile")');
   expect(source).toContain('await completeTelegramNavigation(page, telegram, redirectPath)');
   expect(source).toContain('pending.phase === "ownership_confirmed"');
@@ -1609,6 +1610,9 @@ test("binds the causal route barrier and exact logout helper without fixture sub
   );
   expect(source.indexOf("await waitForInitialProfileSupportContext(page)")).toBeLessThan(
     source.indexOf("await history.captureInitialProfile(page)"),
+  );
+  expect(source.indexOf('await waitForTurnstile(page, "auth_login")')).toBeLessThan(
+    source.indexOf("return telegram"),
   );
   expect(source.indexOf("await clearSyntheticLogoutState(page)")).toBeLessThan(
     source.indexOf("await recreatedCausality.markPostClear(page)"),
