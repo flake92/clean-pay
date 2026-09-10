@@ -199,6 +199,10 @@ export function projectCharacterizationManifestPairForComparison(
     projectExactAuthenticatedPassiveNetworkPair(expected, actual);
   }
   projectExactRemovedNextJsPoweredBy(expected, actual);
+  if (isRecord(expected) && isRecord(actual)) {
+    projectExactHashedStaticDocumentLinkPair(expected, actual);
+  }
+  projectExactRemovedNextJsPoweredBy(expected, actual);
   projectExactOptionalZeroContentLengthPair(expected, actual);
   if (fixtureContractPairIsValid) {
     projectExactJourneyFixtureContract(expected, actual);
@@ -1398,6 +1402,7 @@ function removeExactAuthenticatedBrowserNoiseRequests(
     const contextualBrowserNoise = isAutomaticNextRscPrefetch(requestValue)
       || isAutomaticNextRscPrefetchRedirectTail(requestValue, removedIndexes)
       || isExactAuthenticatedPassiveRscNavigationRequest(requestValue)
+      || isExactPwaControlledDocumentRequest(manifest, requestValue)
       || isExactAuthenticatedChatwootTransportNoise(manifest, requestValue)
       || isExactPassiveRefreshServerActionRequest(manifest, requestValue);
     if (
@@ -1577,14 +1582,37 @@ function isExactPwaControlledDocumentRequest(
   manifest: Record<string, unknown>,
   request: Record<string, unknown>,
 ) {
-  return isExactProjectedApplicationDocument(request)
-    && request.redirectedFrom === null
-    && isRecord(request.response)
+  if (
+    !isExactProjectedApplicationDocument(request)
+    || request.redirectedFrom !== null
+  ) {
+    return false;
+  }
+  if (
+    isRecord(request.response)
     && request.response.status === 200
     && request.response.fromServiceWorker === true
     && isRecord(request.url)
     && typeof request.url.pathname === "string"
-    && manifestHasCheckpointPath(manifest, request.url.pathname);
+    && responseHasContentType(request.response, "text/html; charset=utf-8")
+  ) {
+    return manifestHasCheckpointPath(manifest, request.url.pathname)
+      || isExactAuthenticatedPwaDocumentRoute(manifest, request.url.pathname);
+  }
+  return false;
+}
+
+function isExactAuthenticatedPwaDocumentRoute(
+  manifest: Record<string, unknown>,
+  pathname: string,
+) {
+  return hasExactJourneyManifestEnvelope(manifest)
+    && exactJourneyFixtureContract(manifest) !== null
+    && isAuthenticatedJourneyWithPassiveBrowserNoise(manifest.journey)
+    && [
+      "/cabinet",
+      "/link-account",
+    ].includes(pathname);
 }
 
 function manifestHasCheckpointPath(
@@ -4096,7 +4124,10 @@ function isExactPassiveChatwootDocumentAbortRequest(
     )
     && request.url.fragment === null
     && Array.isArray(request.requestHeaders)
-    && isExactChatwootTransportHeaders(request.requestHeaders);
+    && (
+      isExactChatwootTransportHeaders(request.requestHeaders)
+      || isExactChatwootDocumentAbortHeaders(request.requestHeaders)
+    );
 }
 
 function isExactChatwootTransportHeaders(headers: unknown[]) {
@@ -4119,6 +4150,19 @@ function isExactChatwootTransportHeaders(headers: unknown[]) {
     && hasExactKeys(headers[1], ["name", "value"])
     && headers[1].name === "referer"
     && sameJson(headers[1].value, {
+      origin: "<app-origin>",
+      pathname: "/",
+      query: [],
+      fragment: null,
+    });
+}
+
+function isExactChatwootDocumentAbortHeaders(headers: unknown[]) {
+  return headers.length === 1
+    && isRecord(headers[0])
+    && hasExactKeys(headers[0], ["name", "value"])
+    && headers[0].name === "referer"
+    && sameJson(headers[0].value, {
       origin: "<app-origin>",
       pathname: "/",
       query: [],
@@ -4186,6 +4230,7 @@ function projectSuccessfulHashedStaticAsset(request: Record<string, unknown>) {
   if (!isSuccessfulHashedStaticAsset(request)) return;
   const url = request.url as Record<string, unknown>;
   url.pathname = projectHashedStaticPath(url.pathname as string) as string;
+  projectHashedStaticRequestHeaderReferences(request.requestHeaders as unknown[]);
 
   const response = request.response as Record<string, unknown>;
   const headers = response.headers as unknown[];
@@ -4196,6 +4241,27 @@ function projectSuccessfulHashedStaticAsset(request: Record<string, unknown>) {
     } else if (headerValue.name === "etag") {
       headerValue.value = "<compiled-static-etag>";
     }
+  }
+}
+
+function projectHashedStaticRequestHeaderReferences(headers: unknown[]) {
+  for (const header of headers) {
+    if (
+      !isRecord(header)
+      || !hasExactKeys(header, ["name", "value"])
+      || header.name !== "referer"
+      || !isRecord(header.value)
+      || !hasExactKeys(header.value, ["fragment", "origin", "pathname", "query"])
+      || header.value.origin !== "<app-origin>"
+      || typeof header.value.pathname !== "string"
+      || !Array.isArray(header.value.query)
+      || header.value.query.length !== 0
+      || header.value.fragment !== null
+    ) {
+      continue;
+    }
+    const projected = projectHashedStaticPath(header.value.pathname);
+    if (projected !== null) header.value.pathname = projected;
   }
 }
 

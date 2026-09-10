@@ -429,6 +429,14 @@ test("projects authenticated Chatwoot document abort transport noise", () => {
   candidate.journey = "email-account-links-and-merges-telegram";
   addExactChatwootTransportRequest(baseline, "document");
   const aborted = baseline.network.requests.at(-1)!;
+  aborted.url.query = [
+    { key: "website_token", value: "<redacted>" },
+    { key: "cw_conversation", value: "<redacted>" },
+  ];
+  aborted.requestHeaders = [{
+    name: "referer",
+    value: canonicalUrl("/"),
+  }] as unknown as typeof aborted.requestHeaders;
   aborted.response = null as unknown as typeof aborted.response;
   aborted.failure = {
     errorText: {
@@ -689,6 +697,31 @@ test("projects authenticated static chunk multiplicity beside passive network dr
     .toHaveLength(1);
 });
 
+test("projects authenticated PWA document route beside passive network drift", () => {
+  const baseline = journeyManifest("baseline");
+  const candidate = journeyManifest("candidate");
+  baseline.journey = "email-account-links-and-merges-telegram";
+  candidate.journey = "email-account-links-and-merges-telegram";
+  configureResponseBackedAction(baseline, "/register", 143);
+  configureResponseBackedAction(candidate, "/register", 143);
+  setHashedNextTopology(baseline, "baseline", 3, true);
+  setHashedNextTopology(candidate, "candidate", 1, false);
+  appendExactServerAction(candidate, "/link-account", [], 29, "passive-link-refresh");
+  addPwaControlledDocumentRequest(candidate, "/link-account");
+
+  const projected = projectPair(baseline, candidate);
+  expect(projected.actual).toEqual(projected.expected);
+  expect((projected.actual as typeof candidate).network.serverActions)
+    .toHaveLength(1);
+
+  const nearMiss = structuredClone(candidate);
+  (nearMiss.network.requests.at(-1)!.response as Record<string, unknown>).headers = [
+    { name: "content-type", value: "application/json" },
+  ];
+  const rejected = projectPair(baseline, nearMiss);
+  expect(rejected.actual).not.toEqual(rejected.expected);
+});
+
 test("projects passive authenticated payment refresh actions beside active payment actions", () => {
   const baseline = journeyManifest("baseline");
   const candidate = journeyManifest("candidate");
@@ -836,6 +869,34 @@ test("projects optional Origin headers on exact journey static chunks", () => {
   expect(retainedHeader.actual).not.toEqual(retainedHeader.expected);
 });
 
+test("projects hashed static referers on exact journey font assets", () => {
+  const baseline = journeyManifest("baseline");
+  const candidate = journeyManifest("candidate");
+  setHashedNextTopology(baseline, "baseline", 1, false);
+  setHashedNextTopology(candidate, "candidate", 1, false);
+  addExactFontRequestFromGeneratedStylesheet(baseline, "baseline");
+  addExactFontRequestFromGeneratedStylesheet(candidate, "candidate");
+
+  const projected = projectPair(baseline, candidate);
+  expect(projected.actual).toEqual(projected.expected);
+
+  const nearMiss = journeyManifest("candidate");
+  setHashedNextTopology(nearMiss, "candidate", 1, false);
+  addExactFontRequestFromGeneratedStylesheet(nearMiss, "candidate");
+  const fontRequest = nearMiss.network.requests.at(-1)!;
+  const referer = fontRequest.requestHeaders.find((header) => (
+    header.name === "referer"
+  ))!;
+  (referer.value as Record<string, unknown>).pathname = "/profile";
+  fontRequest.requestHeaders.push({
+    name: "rsc",
+    value: { bytes: 1, sha256: "0".repeat(64) },
+  });
+
+  const rejected = projectPair(baseline, nearMiss);
+  expect(rejected.actual).not.toEqual(rejected.expected);
+});
+
 test("projects hashed Next topology when a valid chunk floats around a server action", () => {
   const baseline = journeyManifest("baseline");
   const candidate = journeyManifest("candidate");
@@ -873,6 +934,21 @@ test("projects fully validated static resource count drift with the app logo", (
   addExactLogoRequest(nearMiss);
   nearMiss.network.requests.at(-1)!.response.headers = [];
   const rejected = projectPair(baseline, nearMiss);
+  expect(rejected.actual).not.toEqual(rejected.expected);
+});
+
+test("projects exact document static link digest before removed Next disclosure", () => {
+  const baseline = journeyManifest("baseline");
+  const candidate = journeyManifest("candidate");
+  setHashedNextTopology(baseline, "baseline", 1, true);
+  setHashedNextTopology(candidate, "candidate", 1, false);
+
+  const projected = projectCharacterizationManifestPairForComparison(baseline, candidate);
+  expect(projected.actual).toEqual(projected.expected);
+
+  const nearMiss = journeyManifest("candidate");
+  setHashedNextTopology(nearMiss, "candidate", 1, false, 472);
+  const rejected = projectCharacterizationManifestPairForComparison(baseline, nearMiss);
   expect(rejected.actual).not.toEqual(rejected.expected);
 });
 
@@ -1867,6 +1943,41 @@ function addExactLogoRequest(
   } as unknown as ReturnType<typeof journeyManifest>["network"]["requests"][number]);
 }
 
+function addExactFontRequestFromGeneratedStylesheet(
+  manifest: ReturnType<typeof journeyManifest>,
+  seed: string,
+) {
+  manifest.network.requests.push({
+    index: manifest.network.requests.length,
+    method: "GET",
+    url: canonicalUrl(`/_next/static/media/Inter-roman.var.${seed}12345678.woff2`),
+    scope: "application",
+    resourceType: "font",
+    navigation: false,
+    serverAction: { present: false, identifier: null },
+    requestHeaders: [
+      { name: "accept", value: { bytes: 3, sha256: "7994750c119d1c03615dde46677ccae5429cdbfc2687b51224f0ae6c5609a63d" } },
+      { name: "origin", value: canonicalUrl("/") },
+      {
+        name: "referer",
+        value: canonicalUrl(`/_next/static/chunks/${seed}style12345678.css`),
+      },
+    ],
+    postData: null,
+    redirectedFrom: null,
+    response: {
+      status: 200,
+      headers: [
+        { name: "content-length", value: "1234" },
+        { name: "content-type", value: "font/woff2" },
+        { name: "etag", value: { bytes: 20, sha256: digest(`${seed}:font-etag`) } },
+      ],
+    },
+    failure: null,
+    externalTransport: null,
+  } as unknown as ReturnType<typeof journeyManifest>["network"]["requests"][number]);
+}
+
 function appendExactServerAction(
   manifest: ReturnType<typeof journeyManifest>,
   pathname: string,
@@ -1992,6 +2103,31 @@ function addOidcExternalDocumentRequest(
     },
     failure: null,
     externalTransport: "<redacted>",
+  });
+}
+
+function addPwaControlledDocumentRequest(
+  manifest: ReturnType<typeof journeyManifest>,
+  pathname: "/cabinet" | "/link-account",
+) {
+  pushRequest(manifest, {
+    method: "GET",
+    url: canonicalUrl(pathname),
+    scope: "application",
+    resourceType: "document",
+    navigation: true,
+    serverAction: { present: false, identifier: null },
+    requestHeaders: [],
+    postData: null,
+    redirectedFrom: null,
+    response: {
+      status: 200,
+      statusText: "",
+      fromServiceWorker: true,
+      headers: [{ name: "content-type", value: "text/html; charset=utf-8" }],
+    },
+    failure: null,
+    externalTransport: null,
   });
 }
 
