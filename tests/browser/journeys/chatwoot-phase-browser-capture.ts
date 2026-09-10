@@ -2039,6 +2039,7 @@ async function finishBrowserRequestContract(
     staticResponseSha256: string | null;
   }> = [];
   const canonicalRecords = [];
+  const recordsByRequest = new Map<Request, (typeof records)[number]>();
   const redirectedSources = new Set<Request>();
   const documentKeys: StrictRequestEntry["documentKey"][] = generation === "initial"
     ? ["app-login-document", "app-profile-document", "app-cabinet-document"]
@@ -2198,26 +2199,26 @@ async function finishBrowserRequestContract(
       ...staticObservation,
     };
     records.push(record);
+    recordsByRequest.set(request, record);
     canonicalRecords.push(semanticBrowserRecord({ order, ...record }));
   }
   for (const { classification, request } of ledger.entries) {
-    const response = await boundedChatwootBrowserOperation(
-      request.response(),
-      5_000,
-      "Chatwoot redirect completion response",
-    );
+    const record = recordsByRequest.get(request);
+    if (record === undefined) {
+      throw new Error("Chatwoot redirect completion escaped its response record ledger.");
+    }
     if (
-      response
-      && response.status() >= 300
-      && response.status() <= 399
+      record.responseStatus !== null
+      && record.responseStatus >= 300
+      && record.responseStatus <= 399
       && !redirectedSources.has(request)
       && classification.disposition !== "abort"
       && !isExactTerminalProviderOverlapRedirect({
         key: classification.key,
         redirectEdge: null,
-        responseContentType: normalizeResponseContentType(response.headers()["content-type"]),
-        responseFailureSha256: null,
-        responseStatus: response.status(),
+        responseContentType: record.responseContentType,
+        responseFailureSha256: record.responseFailureSha256,
+        responseStatus: record.responseStatus,
       })
     ) {
       throw new Error("Chatwoot strict browser redirect has no exact successor.");
