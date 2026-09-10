@@ -1705,6 +1705,8 @@ test("keeps Chatwoot capture failures bound to one bounded coarse stage", async 
   expect(source).toContain("cdpResponseBodyCapture.readBody({");
   expect(source).toContain("CHATWOOT_PLAYWRIGHT_BODY_KEYS");
   expect(source).toContain("CHATWOOT_PLAYWRIGHT_BODY_KEYS.includes(entry.classification.key)");
+  expect(source).toContain("\"chatwoot-widget-conversation-frame\"");
+  expect(source).toContain("\"chatwoot-widget-frame\"");
   expect(source).toContain("causeMessage: sanitizeChatwootCaptureCauseMessage(error)");
   expect(source).toContain("onCheckpoint(\"stable-finish-browser-contract\")");
   expect(source).toContain("{ cause: error }");

@@ -75,6 +75,8 @@ const CHATWOOT_PLAYWRIGHT_BODY_KEYS = Object.freeze([
   "app-cabinet-action",
   "app-login-root-rsc",
   "app-profile-action",
+  "chatwoot-widget-conversation-frame",
+  "chatwoot-widget-frame",
 ]);
 const providerEndpointContracts = Object.freeze([
   providerEndpoint("remnashop", "GET", "/api/v1/public/plans/public", [],
