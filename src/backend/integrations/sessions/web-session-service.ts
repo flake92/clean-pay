@@ -154,9 +154,10 @@ export async function rotateRefreshTokenFamily(refreshToken: string, now = new D
       `,
     );
 
-    if (locked.length !== 1) return null;
+    const [lockedSession] = locked;
+    if (locked.length !== 1 || !lockedSession) return null;
     const session = await tx.webSession.findUnique({
-      where: { id: locked[0].id },
+      where: { id: lockedSession.id },
       include: { user: true },
     });
 
