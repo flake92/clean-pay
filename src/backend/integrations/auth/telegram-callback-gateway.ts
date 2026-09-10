@@ -37,6 +37,7 @@ import { assertRateLimit } from "@/backend/limits/rate-limit";
 import { assertUserMergeFinalOwner, mergeLocalUsersIntoTarget } from "@/backend/integrations/auth/local-user-merge-service";
 import { randomToken, sha256 } from "@/backend/security/crypto";
 import { synchronizeProviderAccountIdentity } from "@/backend/integrations/auth/provider-account-identity-sync";
+import { defaultTransaction } from "@/backend/database/transaction-policy";
 
 type ProviderSession = {
   cookies: { accessToken: string; refreshToken: string };
@@ -281,7 +282,7 @@ export function createProductionTelegramCallbackGateway(
           expiresAt: new Date(now.getTime() + 10 * 60 * 1000),
         },
       });
-    });
+    }, defaultTransaction);
     return { token };
   },
 
@@ -346,7 +347,7 @@ export function createProductionTelegramCallbackGateway(
             expected: { telegramId: input.telegramId, ...(updated.remnashopUserId ? { remnashopUserId: updated.remnashopUserId } : {}), ...(updated.email ? { email: updated.email } : {}) },
           });
           return updated;
-        })
+        }, defaultTransaction)
       : await prisma.webUser.upsert({
           where: { telegramId: input.telegramId },
           create: { telegramId: input.telegramId, telegramUsername: input.telegramUsername, fullName: input.fullName, photoUrl: input.photoUrl, displayName: input.fullName ?? input.telegramUsername, lastLoginAt: new Date() },

@@ -28,6 +28,7 @@ import { assertRateLimit } from "@/backend/limits/rate-limit";
 import { auditLog } from "@/backend/observability/audit";
 import { sha256 } from "@/backend/security/crypto";
 import { synchronizeProviderAccountIdentity } from "@/backend/integrations/auth/provider-account-identity-sync";
+import { defaultTransaction } from "@/backend/database/transaction-policy";
 
 const processingLeaseMs = 2 * 60 * 1000;
 const mergeReason = "Clean Pay confirmed account merge: keep target e-mail and selected source Telegram";
@@ -198,7 +199,7 @@ export const productionTelegramAccountMergeGateway: TelegramAccountMergeGateway 
           lastErrorCode: null,
         },
       });
-    });
+    }, defaultTransaction);
     if (claimed.count === 1) {
       context.claimLeaseExpiresAt = claimLeaseExpiresAt;
       return true;
@@ -362,7 +363,7 @@ export const productionTelegramAccountMergeGateway: TelegramAccountMergeGateway 
         where: { id: context.confirmationId, userId: context.sessionUserId, status: AccountMergeConfirmationStatus.PENDING },
         data: { status: AccountMergeConfirmationStatus.FAILED, lastErrorCode: "USER_CANCELLED" },
       });
-    });
+    }, defaultTransaction);
     return result.count === 1;
   },
 

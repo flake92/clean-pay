@@ -34,6 +34,7 @@ import {
   paymentResponseSnapshot,
   secondsUntil,
 } from "@/backend/integrations/payments/payment-operation-snapshot";
+import { defaultTransaction, idempotencyTransaction } from "@/backend/database/transaction-policy";
 
 export type {
   PaymentOperationBeginResult,
@@ -125,7 +126,7 @@ async function createOrFindOperation({
             },
           });
         },
-        { maxWait: 5_000, timeout: 30_000 },
+        idempotencyTransaction,
       );
     } catch (error) {
       if (!isUniqueConstraintError(error)) {
@@ -313,7 +314,7 @@ export async function beginPaymentOperation(input: {
             leaseExpiresAt,
           },
         });
-      });
+      }, defaultTransaction);
 
       if (claimed.count === 1) {
         return {
@@ -571,7 +572,7 @@ export async function completePaymentOperationSuccess(input: {
         client: transaction,
         operationId: operation.id,
       });
-    });
+    }, defaultTransaction);
   } catch (error) {
     if (error instanceof ServiceError) {
       throw error;

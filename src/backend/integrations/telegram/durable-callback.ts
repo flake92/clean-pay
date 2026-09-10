@@ -23,6 +23,7 @@ import {
   safeEqual,
   sha256,
 } from "@/backend/security/crypto";
+import { defaultTransaction, extendedTransaction } from "@/backend/database/transaction-policy";
 
 const CALLBACK_RESULT_PURPOSE = "telegram-oidc-callback-result";
 export const DURABLE_TELEGRAM_CALLBACK_RESULT_TTL_MS = 10 * 60 * 1000;
@@ -758,7 +759,7 @@ export async function createDurableTelegramCallbackSession(
     // the pre-recovery session snapshot would make it too easy for a caller to
     // sign an initial response with stale identity claims.
     return { replay };
-  }, { maxWait: 5_000, timeout: 15_000 });
+  }, extendedTransaction);
 }
 
 // Session completion and merge completion write the identical terminal record;
@@ -851,7 +852,7 @@ export async function completeDurableTelegramSession(
     if (sessionRenewed.count !== 1) {
       throw new Error("Telegram callback exact session is not replayable");
     }
-  }, { maxWait: 5_000, timeout: 15_000 });
+  }, extendedTransaction);
 }
 
 export async function completeDurableTelegramMerge(
@@ -898,7 +899,7 @@ export async function completeDurableTelegramMerge(
     if (completed.count !== 1) {
       throw new Error("Telegram callback merge completion ownership changed");
     }
-  }, { maxWait: 5_000, timeout: 15_000 });
+  }, extendedTransaction);
   return replay;
 }
 
@@ -958,7 +959,7 @@ export async function failDurableTelegramCallback(
     if (failed.count !== 1) {
       throw new Error("Telegram callback failure ownership changed");
     }
-  });
+  }, defaultTransaction);
 }
 
 function callbackWorkDeadline(authStateExpiresAt: Date) {
@@ -1028,7 +1029,7 @@ async function terminalizeLoadedCallback(
       });
     }
     return changed.count === 1;
-  });
+  }, defaultTransaction);
   return { failed, redirectTo };
 }
 
@@ -1086,7 +1087,7 @@ async function scrubExpiredCallbackResult(
       });
     }
     return changed.count;
-  });
+  }, defaultTransaction);
   if (scrubbed === 1) {
     recordOperationalEvent("telegram_callback_expired_result_scrubbed");
   }

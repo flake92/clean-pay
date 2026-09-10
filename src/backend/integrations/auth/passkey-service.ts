@@ -3,6 +3,7 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "@/backend/database/prisma";
 import { ServiceError } from "@/backend/errors/service-error";
 import { auditLog } from "@/backend/observability/audit";
+import { extendedTransaction } from "@/backend/database/transaction-policy";
 
 export async function recordPasskeyUse({
   id, userId, credentialId, oldCounter, newCounter,
@@ -36,5 +37,5 @@ export async function deleteOwnedPasskey(userId: string, credentialId: string) {
     }
     await tx.webAuthnCredential.delete({ where: { id: credential.id } });
     return credential;
-  }, { maxWait: 5_000, timeout: 15_000 });
+  }, extendedTransaction);
 }
