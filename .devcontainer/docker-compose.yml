@@ -57,6 +57,15 @@ x-remnashop-env: &remnashop-env
   # checkout (422) and the referral program (rejected by the reader) fail for
   # that reason alone. Production sets APP_URL and WEB_CABINET_URL to the same
   # host, where both flows work; verify them there rather than here.
+  #
+  # Remnashop only string-compares the two origins (urlsplit) and never fetches
+  # the return URL, so no real certificate is involved: setting APP_URL,
+  # NEXT_PUBLIC_APP_URL and this value all to https://localhost:4000 does let
+  # checkout reach Remnashop locally. Do not commit that. It makes the CSRF
+  # guard, which reads NEXT_PUBLIC_APP_URL, expect an https origin the dev
+  # server never serves, so every server action fired from the browser is
+  # rejected -- the whole devcontainer stops being usable for ordinary work in
+  # exchange for one flow. Reach for it only as a temporary local override.
   WEB_CABINET_URL: https://clean-pay.example.test/auth/telegram/webapp
   REFERRAL_REWARD_BACKFILL_ENABLED: "false"
   APP_API_KEY: dev-remnashop-api-key-change-me
