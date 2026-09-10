@@ -839,6 +839,7 @@ jobs:
       - name: Prove the authenticated browser journey
         id: authenticated_phase
         if: ${{ !cancelled() && steps.public_phase.outcome == 'success' }}
+        timeout-minutes: 45
         env:
           CLEAN_PAY_LIVE_OVERLAP_PROVIDER_MODE: ${{ steps.provider_phase.outputs.execution_mode }}
         run: |
@@ -850,6 +851,7 @@ jobs:
       - name: Prove the Chatwoot lifecycle
         id: chatwoot_phase
         if: ${{ !cancelled() && steps.public_phase.outcome == 'success' }}
+        timeout-minutes: 45
         run: |
           node tests/browser/journeys/run-production-image-live-overlap.mjs run \
             --capture-id "$CLEAN_PAY_BROWSER_LIVE_PAIR_CAPTURE_ID" \
