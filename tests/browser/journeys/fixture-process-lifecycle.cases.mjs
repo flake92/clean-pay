@@ -17,8 +17,8 @@ const codeChild = (code, label = "test-child") => observe(spawn(process.execPath
 }), label);
 const origin = (port) => `http://127.0.0.1:${port}`;
 const hash = (s) => createHash("sha256").update(s).digest("hex");
-async function bind(server) {
-  const listening = once(server, "listening"); server.listen(0, "127.0.0.1");
+async function bind(server, host = "127.0.0.1") {
+  const listening = once(server, "listening"); server.listen(0, host);
   await listening; return server.address().port;
 }
 async function close(server) {
@@ -27,6 +27,30 @@ async function close(server) {
 }
 async function expectFailure(promise, check) {
   await assert.rejects(promise, (error) => { check(error); return true; });
+}
+async function waitForChildClose(child, timeoutMs = 4_000) {
+  if (child.exitCode !== null || child.signalCode !== null) return;
+  let timer;
+  try {
+    await Promise.race([
+      once(child, "close"),
+      new Promise((_, reject) => {
+        timer = setTimeout(() => reject(new Error("Fixture child did not stop after expected bind failure.")), timeoutMs);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+function isRetryableFixtureStartupPortRace(error) {
+  const evidence = error?.evidence;
+  return evidence?.status === "fixture_startup_failed"
+    && evidence.reason === "child-stopped"
+    && Array.isArray(evidence.children)
+    && evidence.children.length === 1
+    && evidence.children[0]?.label === "provider-mock.mjs"
+    && Array.isArray(evidence.children[0]?.errorCodes)
+    && evidence.children[0].errorCodes.includes("EADDRINUSE");
 }
 
 // The shared cases must also load through Playwright's CommonJS transform.
@@ -95,33 +119,40 @@ export function createFixtureLifecycleCases(journeyDirectory) {
       name: "fixture lifecycle starts the actual provider and validates inbox credentials 30 times",
       async run() {
         for (let i = 0; i < 30; i++) {
-          const [shop, wave, control] = await ports(3);
-          const child = fixture("provider-mock.mjs", {
-            REMNASHOP_PORT: String(shop), REMNAWAVE_PORT: String(wave), CONTROL_PORT: String(control),
-            CLEAN_PAY_BROWSER_CHATWOOT_CONTACT_RESPONSE_DELAY_MS: "75",
-            CLEAN_PAY_BROWSER_CHATWOOT_PRE_CABINET_CONTACT_RESPONSE_DELAY_MS: "75",
-          });
-          try {
-            await ready(`${origin(control)}/__health`, { children: [child] });
-            const conversation = "csyntheticbrowserjourney01";
-            const token = hash("clean-pay-browser-journey:chatwoot-website");
-            const before = performance.now();
-            const res = await fetch(`${origin(control)}/api/v1/widget/contact?website_token=${token}`, {
-              headers: { "x-auth-token": conversation }, signal: AbortSignal.timeout(3000),
+          let validated = false;
+          for (let attempt = 0; attempt < 5 && !validated; attempt++) {
+            const [shop, wave, control] = await ports(3);
+            const child = fixture("provider-mock.mjs", {
+              REMNASHOP_PORT: String(shop), REMNAWAVE_PORT: String(wave), CONTROL_PORT: String(control),
+              CLEAN_PAY_BROWSER_CHATWOOT_CONTACT_RESPONSE_DELAY_MS: "75",
+              CLEAN_PAY_BROWSER_CHATWOOT_PRE_CABINET_CONTACT_RESPONSE_DELAY_MS: "75",
             });
-            assert.equal(res.status, 200);
-            assert.deepEqual(await res.json(), { identifier: conversation });
-            assert.ok(performance.now() - before >= 50);
-            const rejected = await fetch(`${origin(control)}/api/v1/widget/contact?website_token=wrong`, {
-              headers: { "x-auth-token": conversation }, signal: AbortSignal.timeout(3000),
-            });
-            assert.equal(rejected.status, 401); await rejected.body?.cancel();
-            const ledgerResponse = await fetch(`${origin(control)}/__ledger`, { signal: AbortSignal.timeout(3000) });
-            const ledger = await ledgerResponse.json();
-            assert.deepEqual(ledger.entries.map((e) => e.effect), ["contact_identity_probed", "contact_identity_probe_rejected"]);
-            assert.ok(!JSON.stringify(ledger).includes(conversation));
-            assert.ok(!JSON.stringify(ledger).includes(token));
-          } finally { await stop(child); }
+            try {
+              await ready(`${origin(control)}/__health`, { children: [child] });
+              const conversation = "csyntheticbrowserjourney01";
+              const token = hash("clean-pay-browser-journey:chatwoot-website");
+              const before = performance.now();
+              const res = await fetch(`${origin(control)}/api/v1/widget/contact?website_token=${token}`, {
+                headers: { "x-auth-token": conversation }, signal: AbortSignal.timeout(3000),
+              });
+              assert.equal(res.status, 200);
+              assert.deepEqual(await res.json(), { identifier: conversation });
+              assert.ok(performance.now() - before >= 50);
+              const rejected = await fetch(`${origin(control)}/api/v1/widget/contact?website_token=wrong`, {
+                headers: { "x-auth-token": conversation }, signal: AbortSignal.timeout(3000),
+              });
+              assert.equal(rejected.status, 401); await rejected.body?.cancel();
+              const ledgerResponse = await fetch(`${origin(control)}/__ledger`, { signal: AbortSignal.timeout(3000) });
+              const ledger = await ledgerResponse.json();
+              assert.deepEqual(ledger.entries.map((e) => e.effect), ["contact_identity_probed", "contact_identity_probe_rejected"]);
+              assert.ok(!JSON.stringify(ledger).includes(conversation));
+              assert.ok(!JSON.stringify(ledger).includes(token));
+              validated = true;
+            } catch (error) {
+              if (!isRetryableFixtureStartupPortRace(error) || attempt === 4) throw error;
+            } finally { await stop(child); }
+          }
+          assert.ok(validated, "Provider mock must validate with a fresh port batch.");
         }
       },
     },
@@ -152,11 +183,11 @@ export function createFixtureLifecycleCases(journeyDirectory) {
     {
       name: "fixture lifecycle detects an externally occupied port without retrying the child",
       async run() {
-        const blocker = netServer(); const occupied = await bind(blocker);
+        const blocker = netServer(); const occupied = await bind(blocker, "0.0.0.0");
         const [wave, control] = await ports(2);
         const child = fixture("provider-mock.mjs", { REMNASHOP_PORT: String(occupied), REMNAWAVE_PORT: String(wave), CONTROL_PORT: String(control) });
         try {
-          await once(child, "close");
+          await waitForChildClose(child);
           await expectFailure(ready(`${origin(control)}/__health`, { children: [child] }), (e) => {
             assert.ok(e.evidence.children[0].errorCodes.includes("EADDRINUSE"));
             assert.equal(e.evidence.attempts, 0);
