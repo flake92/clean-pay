@@ -36,6 +36,49 @@ export {
   createWebSession,
   createWebSessionForRemnashopUser,
 } from "@/backend/integrations/sessions/web-session-creation";
+
+/** The stored shape of a provider-backed web session. Written by both the
+ * standalone creation path and the transactional one; keeping a single copy
+ * stops a new column -- or a changed default such as the assurance level --
+ * from landing on only one of them. */
+function providerSessionData({
+  userId,
+  refreshToken,
+  options,
+  requestHeaders,
+  accessTokenExpiresAt,
+  refreshExpiresAt,
+}: {
+  userId: string;
+  refreshToken: string;
+  options: {
+    authMethod?: WebSessionAuthMethod;
+    remnashopSession?: {
+      accessTokenEncrypted?: string;
+      refreshTokenEncrypted?: string;
+      accessExpiresAt?: Date;
+      refreshExpiresAt?: Date;
+    };
+  };
+  requestHeaders: Headers;
+  accessTokenExpiresAt: Date;
+  refreshExpiresAt: Date;
+}) {
+  return {
+    userId,
+    refreshTokenHash: sha256(refreshToken),
+    remnashopAccessTokenEncrypted: options.remnashopSession?.accessTokenEncrypted,
+    remnashopRefreshTokenEncrypted: options.remnashopSession?.refreshTokenEncrypted,
+    remnashopAccessExpiresAt: options.remnashopSession?.accessExpiresAt,
+    remnashopRefreshExpiresAt: options.remnashopSession?.refreshExpiresAt,
+    authMethod: options.authMethod ?? WebSessionAuthMethod.TELEGRAM,
+    assuranceLevel: WebSessionAssuranceLevel.FULL,
+    userAgent: requestHeaders.get("user-agent"),
+    accessTokenExpiresAt,
+    refreshExpiresAt,
+  };
+}
+
 import { refreshTokenGraceMs } from "@/backend/integrations/sessions/web-session-policy";
 
 export {
@@ -543,19 +586,14 @@ export async function createWebSessionOnResponse(
   });
 
   const session = await prisma.webSession.create({
-    data: {
+    data: providerSessionData({
       userId,
-      refreshTokenHash: sha256(refreshToken),
-      remnashopAccessTokenEncrypted: options.remnashopSession?.accessTokenEncrypted,
-      remnashopRefreshTokenEncrypted: options.remnashopSession?.refreshTokenEncrypted,
-      remnashopAccessExpiresAt: options.remnashopSession?.accessExpiresAt,
-      remnashopRefreshExpiresAt: options.remnashopSession?.refreshExpiresAt,
-      authMethod: options.authMethod ?? WebSessionAuthMethod.TELEGRAM,
-      assuranceLevel: WebSessionAssuranceLevel.FULL,
-      userAgent: requestHeaders.get("user-agent"),
+      refreshToken,
+      options,
+      requestHeaders,
       accessTokenExpiresAt,
       refreshExpiresAt,
-    },
+    }),
   });
   const user = await prisma.webUser.findUnique({
     where: { id: userId },
@@ -621,19 +659,14 @@ export async function createDurableCallbackWebSession(
   const refreshExpiresAt = addDays(now, securityPolicy.refreshSessionTtlDays);
   const refreshToken = randomToken(48);
   const session = await tx.webSession.create({
-    data: {
+    data: providerSessionData({
       userId,
-      refreshTokenHash: sha256(refreshToken),
-      remnashopAccessTokenEncrypted: options.remnashopSession?.accessTokenEncrypted,
-      remnashopRefreshTokenEncrypted: options.remnashopSession?.refreshTokenEncrypted,
-      remnashopAccessExpiresAt: options.remnashopSession?.accessExpiresAt,
-      remnashopRefreshExpiresAt: options.remnashopSession?.refreshExpiresAt,
-      authMethod: options.authMethod ?? WebSessionAuthMethod.TELEGRAM,
-      assuranceLevel: WebSessionAssuranceLevel.FULL,
-      userAgent: requestHeaders.get("user-agent"),
+      refreshToken,
+      options,
+      requestHeaders,
       accessTokenExpiresAt,
       refreshExpiresAt,
-    },
+    }),
     include: { user: true },
   });
   return { session, refreshToken };
