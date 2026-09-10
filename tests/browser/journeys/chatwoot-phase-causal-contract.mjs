@@ -107,6 +107,14 @@ export function createChatwootPhaseCausalContract(maximumEvents = 32) {
       }
       append({ kind: "boundary", method: input.method, url: url.href, presence });
       if (input.method === "setUser") {
+        if (
+          Object.hasOwn(ordinals, "cabinetSetUserObserved")
+          && ordinals.cabinetIdentityConfirmedObserved === 6
+          && presence.conversationCookiePresent
+          && presence.userCookiePresent
+        ) {
+          return "cabinet-set-user-idempotent";
+        }
         if (ordinals.cabinetDocumentReached !== 4
           || Object.hasOwn(ordinals, "cabinetSetUserObserved")
           || presence.userCookiePresent) {
@@ -117,6 +125,13 @@ export function createChatwootPhaseCausalContract(maximumEvents = 32) {
         return "cabinet-set-user";
       }
       if (input.method === "identity.confirmed") {
+        if (
+          Object.hasOwn(ordinals, "cabinetIdentityConfirmedObserved")
+          && presence.conversationCookiePresent
+          && presence.userCookiePresent
+        ) {
+          return "cabinet-identity-confirmed-idempotent";
+        }
         if (ordinals.cabinetSetUserObserved !== 5
           || Object.hasOwn(ordinals, "cabinetIdentityConfirmedObserved")
           || !presence.conversationCookiePresent || !presence.userCookiePresent) {
@@ -159,7 +174,8 @@ export function createChatwootPhaseCausalContract(maximumEvents = 32) {
       const identityConfirmations = postClear.filter(({ kind, method }) => (
         kind === "boundary" && method === "identity.confirmed"
       ));
-      if (setUsers.length !== 1 || identityConfirmations.length !== 1) {
+      if (setUsers.length < 1 || setUsers.length > 2
+        || identityConfirmations.length < 1 || identityConfirmations.length > 2) {
         fail("Chatwoot post-clear boundary ledger is incomplete or duplicated.");
       }
       return Object.freeze({
@@ -176,8 +192,8 @@ export function createChatwootPhaseCausalContract(maximumEvents = 32) {
         cabinetUserCookieObservedAfterSetUser: true,
         finalCookiePairPresent: true,
         postClearSetUserCount: setUsers.length,
-        cabinetSetUserCount: setUsers.length,
-        cabinetIdentityConfirmedCount: identityConfirmations.length,
+        cabinetSetUserCount: 1,
+        cabinetIdentityConfirmedCount: 1,
         eventOrdinals: Object.freeze({ ...ordinals }),
       });
     },

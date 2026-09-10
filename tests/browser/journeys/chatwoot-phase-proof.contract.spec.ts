@@ -1766,12 +1766,23 @@ test("executes the direct-cabinet causal reducer and fails closed on reordered l
     presence: pair,
     url: "https://pay.ci.clean-pay.dev/cabinet",
   })).toBe("cabinet-identity-confirmed");
+  expect(exact.observeBoundary({
+    method: "setUser",
+    presence: pair,
+    url: "https://pay.ci.clean-pay.dev/cabinet",
+  })).toBe("cabinet-set-user-idempotent");
+  expect(exact.observeBoundary({
+    method: "identity.confirmed",
+    presence: pair,
+    url: "https://pay.ci.clean-pay.dev/cabinet",
+  })).toBe("cabinet-identity-confirmed-idempotent");
   exact.observeCookiePair(pair);
   exact.markCabinetCompleted();
   expect(exact.finish(pair)).toMatchObject({
     firstCabinetSetUserBeforeConversationCookiePresent: true,
     firstCabinetSetUserBeforeUserCookieAbsent: true,
     cabinetIdentityConfirmedObservedAfterSetUser: true,
+    postClearSetUserCount: 2,
     cabinetSetUserCount: 1,
     cabinetIdentityConfirmedCount: 1,
   });
@@ -2223,6 +2234,30 @@ test("decodes exact phase boundary and provider ledgers with phase-specific fail
     ...gapBoundary,
     { method: "identity.confirmed" },
   ], "stable")).toHaveLength(4);
+  expect(assertChatwootPhaseBoundaryLedger([
+    ...gapBoundary,
+    {
+      method: "setUser",
+      identifierBytes: 40,
+      attributeKeys: ["custom_attributes", "email", "identifier_hash", "name"],
+    },
+    { method: "identity.confirmed" },
+    { method: "identity.confirmed" },
+  ], "recreated")).toHaveLength(6);
+  expect(() => assertChatwootPhaseBoundaryLedger([
+    ...gapBoundary,
+    {
+      method: "setUser",
+      identifierBytes: 40,
+      attributeKeys: ["custom_attributes", "email", "identifier_hash", "name"],
+    },
+    {
+      method: "setUser",
+      identifierBytes: 40,
+      attributeKeys: ["custom_attributes", "email", "identifier_hash", "name"],
+    },
+    { method: "identity.confirmed" },
+  ], "recreated")).toThrow(/out of order/);
   const changedOrder = structuredClone(gapBoundary);
   [changedOrder[0], changedOrder[2]] = [changedOrder[2], changedOrder[0]];
   expect(() => assertChatwootPhaseBoundaryLedger(changedOrder, "gap")).toThrow(/out of order/);
@@ -3114,6 +3149,88 @@ test("executes the exact direct-cabinet browser classifier with serialized parit
       expectedStatuses: statuses,
     }), label).toThrow(/strict browser classification is invalid/);
   }
+});
+
+test("accepts the exact recreated terminal SPA cabinet browser flow", () => {
+  const staticAssetContract = createChatwootPhaseStaticAssetContract(staticAssetAttestation());
+  const initialGraph = staticLoadGraphFixture(staticAssetContract, [
+    "app-login-document",
+    "app-profile-document",
+    "app-cabinet-document",
+  ]);
+  const initialReference = finalizeChatwootPhaseBrowserContract(
+    initialBrowserRecords(staticAssetContract),
+    {
+      cssMediaReferences: initialGraph.cssMediaReferences,
+      generation: "initial",
+      referenceStaticContract: null,
+      responseDeclarationsByDocument: initialGraph.responseDeclarationsByDocument,
+      staticAssetContract,
+    },
+  );
+  const terminalGraph = staticLoadGraphFixture(staticAssetContract, [
+    "app-login-document",
+    "app-cabinet-document",
+  ]);
+  terminalGraph.responseDeclarationsByDocument[1] = {
+    ...terminalGraph.responseDeclarationsByDocument[1],
+    paths: [],
+  };
+  const record = browserRecordFixture(staticAssetContract);
+  const duplicateLoginStatic = staticRecordsForDocument(
+    staticAssetContract,
+    "app-login-document",
+  );
+  const records = [
+    record("app-login-document", "app-login-document", 200, "text/html", {
+      navigation: true,
+    }),
+    ...staticRecordsForDocument(staticAssetContract, "app-login-document"),
+    record("turnstile-widget-script", "app-login-document", 200, "application/javascript"),
+    record("app-telegram-start", "app-login-document", 307, "application/octet-stream", {
+      navigation: true,
+    }),
+    ...duplicateLoginStatic,
+    record("chatwoot-sdk-script", "app-login-document", 200, "application/javascript"),
+    record("app-cabinet-action", "app-login-document", 200, "text/x-component"),
+    record("chatwoot-widget-frame", "app-login-document", 200, "text/html"),
+  ] as Parameters<typeof normalizeChatwootBrowserRecordsForContract>[0];
+
+  const normalized = normalizeChatwootBrowserRecordsForContract(records, "recreated");
+  expect(normalized).toHaveLength(records.length - duplicateLoginStatic.length);
+  const finalized = finalizeChatwootPhaseBrowserContract(normalized, {
+    cssMediaReferences: terminalGraph.cssMediaReferences,
+    generation: "recreated",
+    referenceStaticContract: initialReference,
+    responseDeclarationsByDocument: terminalGraph.responseDeclarationsByDocument,
+    staticAssetContract,
+  });
+
+  const documentLoadLedger = finalized.staticLoadGraph.documentLoadLedger as ReadonlyArray<{
+    documentKey: string;
+  }>;
+  const responseDeclarationLedger = finalized.responseDeclarationLedger as ReadonlyArray<{
+    documentKey: string;
+  }>;
+  const staticRequestLedger = finalized.staticRequestLedger as ReadonlyArray<{
+    documentKey: string;
+  }>;
+  const referenceStaticRequestLedger = initialReference.staticRequestLedger as ReadonlyArray<{
+    documentKey: string;
+  }>;
+  const semanticRequestLedger = finalized.semanticRequestLedger as ReadonlyArray<{ key: string }>;
+  expect(documentLoadLedger.map((entry) => (
+    entry.documentKey
+  ))).toEqual(["app-login-document"]);
+  expect(responseDeclarationLedger.map((entry) => (
+    entry.documentKey
+  ))).toEqual(["app-login-document"]);
+  expect(staticRequestLedger.map((entry) => entry.documentKey))
+    .toEqual(referenceStaticRequestLedger
+      .filter((entry) => entry.documentKey === "app-login-document")
+      .map((entry) => entry.documentKey));
+  expect(semanticRequestLedger.map((entry) => entry.key))
+    .toEqual(expect.arrayContaining(["app-cabinet-action", "chatwoot-widget-frame"]));
 });
 
 test("accepts the exact initial authenticated shortcut browser flow", () => {
