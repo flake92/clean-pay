@@ -44,6 +44,7 @@ import {
   canonicalChatwootHistorySemantics,
   assertChatwootPhaseBoundaryLedger,
   assertChatwootPhaseProviderLedger,
+  summarizeChatwootBrowserRequestContractForTest,
   summarizeChatwootProviderLedgerForTest,
   assertChatwootProviderPhaseRelations,
   assertChatwootStrictClassificationForTest,
@@ -1598,6 +1599,8 @@ test("binds the causal route barrier and exact logout helper without fixture sub
   expect(source).toContain("responseContentType: record.responseContentType");
   expect(source).toContain("Chatwoot strict browser redirect has no exact successor: ${JSON.stringify({");
   expect(source).toContain("responseFailureSha256: record.responseFailureSha256");
+  expect(source).toContain("summarizeChatwootBrowserRequestContractForTest(");
+  expect(source).toContain("chatwoot_browser_request_contract_mismatch");
   expect(source).not.toContain("Chatwoot redirect completion response");
   expect(source.match(/if \(window !== window\.top\) return;/g)).toHaveLength(2);
   expect(source.indexOf("await recreatedCausality.sealPreClearGeneration(page)")).toBeLessThan(
@@ -2154,6 +2157,48 @@ test("reports bounded provider mismatches without disclosing fixture credentials
   expect(summarizeChatwootProviderLedgerForTest(null, "gap").observedEntryCount).toBeNull();
 });
 
+test("reports browser request mismatches without disclosing URLs or payloads", () => {
+  const sentinel = "private-browser-url-must-not-be-logged";
+  const diagnostic = summarizeChatwootBrowserRequestContractForTest([{
+    classification: {
+      key: "app-login-document",
+      navigation: true,
+    },
+    documentKey: "app-login-document",
+    redirectEdge: null,
+    responseContentType: "text/html",
+    responseFailureSha256: null,
+    responseStatus: 200,
+    url: `https://pay.ci.clean-pay.dev/${sentinel}`,
+  }, {
+    classification: {
+      key: sentinel,
+      navigation: true,
+    },
+    documentKey: sentinel,
+    redirectEdge: sentinel,
+    responseContentType: sentinel,
+    responseFailureSha256: sentinel,
+    responseStatus: 200,
+  }], "initial");
+
+  expect(diagnostic).toMatchObject({
+    status: "chatwoot_browser_request_contract_mismatch",
+    generation: "initial",
+    observedCount: 2,
+    navigationFlow: ["app-login-document", "unrecognized"],
+    truncated: false,
+  });
+  expect(diagnostic.observed[1]).toMatchObject({
+    documentKey: "unrecognized",
+    key: "unrecognized",
+    redirectEdge: null,
+    responseContentType: null,
+    responseFailurePresent: true,
+  });
+  expect(JSON.stringify(diagnostic)).not.toContain(sentinel);
+});
+
 test("decodes exact phase boundary and provider ledgers with phase-specific failures", () => {
   const gapBoundary = [
     { method: "run", baseUrl: "https://chatwoot.browser.clean-pay.dev", websiteTokenBytes: 64 },
@@ -2462,6 +2507,31 @@ test("Chatwoot phase ledger accepts one exact trailing contact readiness refresh
 
   const changed = structuredClone(withRefreshTail);
   changed.entries[33].credential_contract.header_names = [];
+  expect(() => assertChatwootPhaseProviderLedger(changed, "gap"))
+    .toThrow(/incomplete or outside|exact endpoint contract|credential projection/);
+});
+
+test("Chatwoot phase ledger accepts one exact trailing readiness contact refresh", () => {
+  const original = strictProviderFixture("gap");
+  const withRefreshTail = structuredClone(original);
+  for (const index of [1, 2, 3, 4, 5, 6, 7, 27]) {
+    withRefreshTail.entries.push(structuredClone(original.entries[index]));
+  }
+  withRefreshTail.entries.forEach((entry, index) => { entry.sequence = index + 1; });
+
+  expect(assertChatwootPhaseProviderLedger(withRefreshTail, "gap").entries)
+    .toEqual(original.entries);
+
+  const incompleteRefreshTail = structuredClone(original);
+  for (const index of [1, 2, 3, 4, 5, 6, 7]) {
+    incompleteRefreshTail.entries.push(structuredClone(original.entries[index]));
+  }
+  incompleteRefreshTail.entries.forEach((entry, index) => { entry.sequence = index + 1; });
+  expect(assertChatwootPhaseProviderLedger(incompleteRefreshTail, "gap").entries)
+    .toEqual(original.entries);
+
+  const changed = structuredClone(withRefreshTail);
+  changed.entries[35].credential_contract.header_names = [];
   expect(() => assertChatwootPhaseProviderLedger(changed, "gap"))
     .toThrow(/incomplete or outside|exact endpoint contract|credential projection/);
 });

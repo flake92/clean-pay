@@ -1362,6 +1362,112 @@ export function summarizeChatwootProviderLedgerForTest(value: unknown, phase: Ph
   };
 }
 
+export function summarizeChatwootBrowserRequestContractForTest(
+  value: unknown,
+  generation: "initial" | "recreated",
+) {
+  const entries = Array.isArray(value) ? value : null;
+  const observed = entries?.slice(0, 64).map((raw: unknown, index: number) => {
+    const record = isRecord(raw) ? raw : {};
+    const classification = isRecord(record.classification) ? record.classification : {};
+    return {
+      index,
+      documentKey: safeBrowserDocumentKey(record.documentKey),
+      key: safeBrowserClassificationKey(classification.key),
+      navigation: classification.navigation === true,
+      redirectEdge: safeBrowserRedirectEdge(record.redirectEdge),
+      responseContentType: safeBrowserContentType(record.responseContentType),
+      responseFailurePresent: typeof record.responseFailureSha256 === "string",
+      responseStatus: Number.isSafeInteger(record.responseStatus)
+        ? Number(record.responseStatus)
+        : null,
+    };
+  }) ?? [];
+  const navigationFlow = observed
+    .filter(({ navigation }) => navigation)
+    .map(({ key }) => key);
+  return {
+    status: "chatwoot_browser_request_contract_mismatch",
+    generation,
+    observedCount: entries?.length ?? null,
+    navigationFlow,
+    truncated: entries !== null && entries.length > 64,
+    observed,
+  };
+}
+
+function safeBrowserDocumentKey(value: unknown) {
+  return typeof value === "string" && new Set([
+    "app-cabinet-document",
+    "app-login-document",
+    "app-profile-document",
+  ]).has(value)
+    ? value
+    : "unrecognized";
+}
+
+function safeBrowserClassificationKey(value: unknown) {
+  return typeof value === "string" && new Set([
+    "app-brand-logo",
+    "app-cabinet-action",
+    "app-cabinet-document",
+    "app-cabinet-prefetch-blocked",
+    "app-cabinet-rsc",
+    "app-login-action",
+    "app-login-document",
+    "app-login-root-rsc",
+    "app-login-rsc",
+    "app-profile-action",
+    "app-profile-document",
+    "app-profile-rsc",
+    "app-root-rsc",
+    "app-telegram-callback",
+    "app-telegram-start",
+    "app-web-manifest",
+    "chatwoot-sdk-script",
+    "chatwoot-widget-conversation-frame",
+    "chatwoot-widget-frame",
+    "next-static-css",
+    "next-static-font",
+    "next-static-image",
+    "next-static-js",
+    "telegram-oidc-authorize",
+    "turnstile-widget-script",
+  ]).has(value)
+    ? value
+    : "unrecognized";
+}
+
+function safeBrowserRedirectEdge(value: unknown) {
+  return typeof value === "string" && new Set([
+    "app-root-rsc:307->app-login-root-rsc",
+    "app-login-root-rsc:307->app-login-root-rsc",
+    "app-login-rsc:307->app-login-rsc",
+    "app-telegram-start:307->telegram-oidc-authorize",
+    "telegram-oidc-authorize:302->app-telegram-callback",
+    "app-telegram-callback:307->app-profile-document",
+    "app-telegram-callback:307->app-cabinet-document",
+  ]).has(value)
+    ? value
+    : null;
+}
+
+function safeBrowserContentType(value: unknown) {
+  return typeof value === "string" && new Set([
+    "application/javascript",
+    "application/manifest+json",
+    "application/octet-stream",
+    "image/png",
+    "image/svg+xml",
+    "text/css",
+    "text/html",
+    "text/plain",
+    "text/x-component",
+  ]).has(value)
+    ? value
+    : null;
+}
+
 function assertProviderLedgerWithDiagnostic(value: unknown, phase: Phase) {
   try {
     return assertProviderLedger(value, phase);
@@ -2271,12 +2377,21 @@ async function finishBrowserRequestContract(
       })
     ))),
   });
-  const finalized = finalizeChatwootPhaseBrowserContract(records, {
-    ...sharedLoadGraph,
-    generation,
-    referenceStaticContract,
-    staticAssetContract,
-  });
+  let finalized: ReturnType<typeof finalizeChatwootPhaseBrowserContract>;
+  try {
+    finalized = finalizeChatwootPhaseBrowserContract(records, {
+      ...sharedLoadGraph,
+      generation,
+      referenceStaticContract,
+      staticAssetContract,
+    });
+  } catch (error) {
+    process.stderr.write(`${JSON.stringify(summarizeChatwootBrowserRequestContractForTest(
+      records,
+      generation,
+    ))}\n`);
+    throw error;
+  }
   return Object.freeze({
     records: Object.freeze([
       Object.freeze({
@@ -4010,6 +4125,18 @@ function normalizeProviderLedgerEntries(
       );
       continue;
     }
+    const readinessContactRefreshStart = trailingReadinessContactProbeCycleIndex(
+      normalized,
+      expectedLength,
+    );
+    if (readinessContactRefreshStart !== null) {
+      normalized = resequenceProviderEntries(
+        normalized.filter((_, index) => (
+          index < readinessContactRefreshStart || index >= readinessContactRefreshStart + 8
+        )),
+      );
+      continue;
+    }
     const cycleStart = trailingReadinessCycleIndex(normalized, expectedLength);
     if (cycleStart === null) {
       break;
@@ -4046,6 +4173,21 @@ function trailingContactProbeReadinessCycleIndex(
     if (
       entries[index]?.effect === "contact_identity_probed"
       && isExactProviderReadinessCycle(entries, index + 1)
+    ) {
+      return index;
+    }
+  }
+  return null;
+}
+
+function trailingReadinessContactProbeCycleIndex(
+  entries: Array<Record<string, unknown>>,
+  expectedLength: number,
+) {
+  for (let index = expectedLength; index <= entries.length - 8; index += 1) {
+    if (
+      isExactProviderReadinessCycle(entries, index)
+      && entries[index + 7]?.effect === "contact_identity_probed"
     ) {
       return index;
     }
