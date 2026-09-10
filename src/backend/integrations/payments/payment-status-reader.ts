@@ -86,9 +86,6 @@ export function createProductionPaymentStatusReader(
     const record = await prismaPaymentQueryRepository.findLatestRecord(userId);
     return record ? serializePaymentRecord(record) : null;
   },
-  isSubscriptionMissing(error) {
-    return error instanceof PaymentStatusGatewayError && error.code === "SUBSCRIPTION_NOT_FOUND";
-  },
   };
 }
 

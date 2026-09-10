@@ -29,5 +29,4 @@ export interface PaymentStatusReader {
   loadSubscription(authorization: PaymentStatusAuthorization): Promise<PaymentStatusViewModel["subscription"]>;
   findPayment(userId: string, paymentId: string): Promise<PaymentStatusViewModel["payment"]>;
   findLatestPayment(userId: string): Promise<PaymentStatusViewModel["payment"]>;
-  isSubscriptionMissing(error: unknown): boolean;
 }

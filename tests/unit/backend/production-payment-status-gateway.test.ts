@@ -30,7 +30,6 @@ vi.mock("@/backend/integrations/payments/payment-record-service", () => ({
   syncPaymentRecordsFromRemnashopTransactions: mocks.syncPaymentRecordsFromRemnashopTransactions,
 }));
 
-import { PaymentStatusGatewayError } from "@/application/payments/ports/payment-status-reader";
 import { ServiceError } from "@/backend/errors/service-error";
 import { productionPaymentStatusReader as gateway } from "@/backend/integrations/payments/payment-status-reader";
 
@@ -83,8 +82,6 @@ describe("production payment status gateway", () => {
     await expect(gateway.findPayment("user-1", "missing")).resolves.toBeNull();
     await expect(gateway.findLatestPayment("user-1")).resolves.toBeNull();
 
-    expect(gateway.isSubscriptionMissing(new PaymentStatusGatewayError("SUBSCRIPTION_NOT_FOUND"))).toBe(true);
-    expect(gateway.isSubscriptionMissing(new Error("other"))).toBe(false);
     mocks.getCurrentUser.mockResolvedValueOnce(null);
     await expect(gateway.loadActor()).resolves.toBeNull();
     mocks.getAuthorizedRemnashopTokens.mockRejectedValueOnce(new ServiceError("UPSTREAM_UNAVAILABLE", 503));

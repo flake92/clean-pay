@@ -33,7 +33,7 @@ function reader(overrides: Partial<PaymentStatusReader> = {}): PaymentStatusRead
     loadExactTransaction: vi.fn(async () => null), persistExactTransaction: vi.fn(async () => undefined),
     loadLegacyTransactions: vi.fn(async () => []), persistLegacyTransactions: vi.fn(async () => undefined),
     loadSubscription: vi.fn(async () => null), findPayment: vi.fn(async () => null),
-    findLatestPayment: vi.fn(async () => null), isSubscriptionMissing: vi.fn(() => false),
+    findLatestPayment: vi.fn(async () => null),
     ...overrides,
   };
 }
