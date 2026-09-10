@@ -1,10 +1,8 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import type { FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "primereact/button";
-import { InputText } from "primereact/inputtext";
 import { Message } from "primereact/message";
 import { ProgressBar } from "primereact/progressbar";
 import { Tag } from "primereact/tag";
@@ -21,7 +19,6 @@ import type {
 } from "@/shared/domain/subscriptions";
 import type { CabinetViewModel } from "@/application/models/cabinet";
 import {
-  activatePromocodeAction,
   deleteAllDevicesAction,
   deleteDeviceAction,
   reissueSubscriptionAction,
@@ -42,6 +39,7 @@ import {
 } from "@/frontend/components/cabinet-presentation";
 import { DetailLine, Metric } from "@/frontend/components/cabinet-view-parts";
 import { resetChatwootSession } from "@/frontend/lib/chatwoot";
+import { CabinetPromocodeCard } from "@/frontend/components/cabinet-promocode-card";
 
 const PAYMENT_HISTORY_REFRESH_INTERVAL_MS = 10_000;
 const PAYMENT_HISTORY_REFRESH_ATTEMPT_LIMIT = 4;
@@ -71,11 +69,9 @@ export function CabinetPanel({ model }: { model: CabinetViewModel }) {
   const subscriptionError = initial?.subscriptionError ?? null;
   const [copyStatus, setCopyStatus] = useState<string | null>(null);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
-  const [promocodeMessage, setPromocodeMessage] = useState<string | null>(null);
   const [pendingAction, setPendingAction] = useState<string | null>(null);
   const pendingActionRef = useRef<string | null>(null);
   const paymentHistoryRefreshAttempts = useRef(0);
-  const [promocode, setPromocode] = useState("");
 
   useEffect(() => {
     if (paymentHistoryStatus !== "refreshing") {
@@ -227,39 +223,7 @@ export function CabinetPanel({ model }: { model: CabinetViewModel }) {
     }
   }
 
-  async function activatePromocode(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
 
-    if (pendingActionRef.current) {
-      return;
-    }
-
-    const code = promocode.trim();
-
-    if (!code) {
-      setPromocodeMessage("Введите промокод.");
-      return;
-    }
-
-    const action = "promocode";
-    if (!beginPendingAction(action)) {
-      return;
-    }
-    setPromocodeMessage(null);
-
-    try {
-      const result = await activatePromocodeAction(code);
-      setPromocodeMessage(result.message);
-      if (result.status === "success") {
-        setPromocode("");
-        router.refresh();
-      }
-    } catch {
-      setPromocodeMessage("Сеть недоступна. Не удалось активировать промокод.");
-    } finally {
-      finishPendingAction(action);
-    }
-  }
 
   if (error) {
     return (
@@ -433,29 +397,13 @@ export function CabinetPanel({ model }: { model: CabinetViewModel }) {
       </div>
 
       <div className="col-12">
-        <div className="card">
-          <h5>Промокод</h5>
-          {promocodeMessage ? <Message severity="info" text={promocodeMessage} /> : null}
-          <form className="mt-3 flex w-full flex-column gap-2 md:w-30rem" onSubmit={activatePromocode}>
-            <label className="text-sm font-medium text-700" htmlFor="promocode">
-              Введите промокод
-            </label>
-            <div className="p-inputgroup">
-              <InputText
-                id="promocode"
-                onChange={(event) => setPromocode(event.target.value)}
-                placeholder="Введите код"
-                value={promocode}
-              />
-              <Button
-                disabled={pendingAction !== null}
-                label="Активировать"
-                loading={pendingAction === "promocode"}
-                type="submit"
-              />
-            </div>
-          </form>
-        </div>
+        <CabinetPromocodeCard
+          beginPendingAction={beginPendingAction}
+          finishPendingAction={finishPendingAction}
+          isPendingBlocked={() => pendingActionRef.current !== null}
+          onActivated={() => router.refresh()}
+          pendingAction={pendingAction}
+        />
       </div>
 
       {subscription ? (
