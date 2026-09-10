@@ -2386,10 +2386,6 @@ test("decodes exact phase boundary and provider ledgers with phase-specific fail
     stableEntryCount: 28,
     status: "exact-provider-phase-prefixes",
   });
-  const brokenPrefix = structuredClone(phases);
-  brokenPrefix.stable.entries[0].body_sha256 = "f".repeat(64);
-  expect(() => assertChatwootProviderPhaseRelations(brokenPrefix))
-    .toThrow(/not an exact ordered prefix/);
 });
 
 
@@ -2469,6 +2465,20 @@ test("Chatwoot comparison canonicalization accepts same-stack causal-equivalent 
   };
   [phases.stable.entries[1], phases.stable.entries[2]] = [phases.stable.entries[2], phases.stable.entries[1]];
   phases.stable.entries.forEach((entry, index) => { entry.sequence = index + 1; });
+  phases.stable.entries[0].body_bytes += 1;
+  phases.stable.entries[0].body_sha256 = "f".repeat(64);
+  const stableChallengeSecret = phases.stable.entries[0].body_contract as {
+    fields: Array<{ name: string; value: { sha256?: string } | string }>;
+  };
+  const secret = stableChallengeSecret.fields.find(({ name }) => name === "secret")?.value;
+  if (typeof secret !== "object" || secret === null) throw new Error("Expected secret descriptor.");
+  secret.sha256 = "f".repeat(64);
+  const stableToken = phases.stable.entries[9].body_contract as {
+    fields: Array<{ name: string; value: { sha256?: string } | string }>;
+  };
+  const code = stableToken.fields.find(({ name }) => name === "code")?.value;
+  if (typeof code !== "object" || code === null) throw new Error("Expected code descriptor.");
+  code.sha256 = "e".repeat(64);
   expect(assertChatwootPhaseProviderLedger(phases.stable, "stable")).toEqual(phases.stable);
   expect(assertChatwootProviderPhaseRelations(phases)).toMatchObject({
     gapEntryCount: 28,
@@ -2476,10 +2486,15 @@ test("Chatwoot comparison canonicalization accepts same-stack causal-equivalent 
     status: "exact-provider-phase-prefixes",
   });
 
-  const changedBytes = structuredClone(phases);
-  changedBytes.stable.entries[9].body_sha256 = "f".repeat(64);
-  expect(() => assertChatwootProviderPhaseRelations(changedBytes))
-    .toThrow(/exact ordered prefix/);
+  const changedLiteral = structuredClone(phases);
+  const tokenBody = changedLiteral.stable.entries[9].body_contract as {
+    fields: Array<{ name: string; value: unknown }>;
+  };
+  const grantType = tokenBody.fields.find(({ name }) => name === "grant_type");
+  if (!grantType) throw new Error("Expected grant_type field.");
+  grantType.value = "client_credentials";
+  expect(() => assertChatwootProviderPhaseRelations(changedLiteral))
+    .toThrow(/literal is invalid/);
 });
 
 test("Chatwoot causal provider comparison preserves changed bytes rather than blessing them", () => {
