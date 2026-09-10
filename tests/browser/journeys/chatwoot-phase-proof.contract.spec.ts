@@ -1592,7 +1592,8 @@ test("binds the causal route barrier and exact logout helper without fixture sub
   expect(source).toContain("recordsByRequest.set(request, record)");
   expect(source).toContain("reconstructExactChatwootRedirectSource({");
   expect(source).toContain("\"Chatwoot reconstructed redirect source response\"");
-  expect(source).toContain("const successor = request.redirectedTo();");
+  expect(source).toContain("linkExactChatwootRedirectSuccessor({");
+  expect(source).toContain("const directSuccessor = input.source.request.redirectedTo();");
   expect(source).toContain("\"Chatwoot redirect source successor response\"");
   expect(source).toContain("responseContentType: record.responseContentType");
   expect(source).toContain("Chatwoot strict browser redirect has no exact successor: ${JSON.stringify({");

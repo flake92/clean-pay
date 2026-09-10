@@ -2211,36 +2211,23 @@ async function finishBrowserRequestContract(
     records.push(record);
     recordsByRequest.set(request, record);
   }
-  for (const { classification, request } of ledger.entries) {
+  for (const [sourceIndex, { classification, request }] of ledger.entries.entries()) {
     if (
       redirectedSources.has(request)
       || classification.disposition === "abort"
     ) {
       continue;
     }
-    const successor = request.redirectedTo();
-    if (!successor) continue;
-    const sourceRecord = recordsByRequest.get(request);
-    const successorEntry = ledger.byIdentity.get(successor);
-    const successorRecord = recordsByRequest.get(successor);
-    if (!sourceRecord || !successorEntry || !successorRecord || successorRecord.redirectEdge !== null) {
-      continue;
+    const linked = await linkExactChatwootRedirectSuccessor({
+      entries: ledger.entries,
+      generation,
+      recordsByRequest,
+      source: { classification, index: sourceIndex, request },
+    });
+    if (linked) {
+      linked.record.redirectEdge = linked.edge;
+      redirectedSources.add(request);
     }
-    const sourceResponse = await boundedChatwootBrowserOperation(
-      request.response(),
-      5_000,
-      "Chatwoot redirect source successor response",
-    );
-    const location = sourceResponse?.headers().location;
-    if (!sourceResponse || typeof location !== "string") continue;
-    const edge = assertChatwootPhaseRedirect({
-      from: { classification, url: request.url() },
-      to: { classification: successorEntry.classification, url: successor.url() },
-      status: sourceResponse.status(),
-      location,
-    }, generation);
-    successorRecord.redirectEdge = edge;
-    redirectedSources.add(request);
   }
   for (const { classification, request } of ledger.entries) {
     const record = recordsByRequest.get(request);
@@ -2372,6 +2359,62 @@ async function reconstructExactChatwootRedirectSource(input: {
     } catch {
       // Keep looking for an exact redirect source; unrelated 3xx responses are
       // rejected later unless they have their own exact successor.
+    }
+  }
+  return null;
+}
+
+async function linkExactChatwootRedirectSuccessor(input: {
+  entries: ReadonlyArray<StrictRequestEntry>;
+  generation: "initial" | "recreated";
+  recordsByRequest: ReadonlyMap<Request, {
+    redirectEdge: string | null;
+  }>;
+  source: Pick<StrictRequestEntry, "classification" | "request"> & { index: number };
+}) {
+  const sourceRecord = input.recordsByRequest.get(input.source.request);
+  if (!sourceRecord) return null;
+  const sourceResponse = await boundedChatwootBrowserOperation(
+    input.source.request.response(),
+    5_000,
+    "Chatwoot redirect source successor response",
+  );
+  const location = sourceResponse?.headers().location;
+  if (
+    !sourceResponse
+    || typeof location !== "string"
+    || sourceResponse.status() < 300
+    || sourceResponse.status() > 399
+  ) {
+    return null;
+  }
+  const directSuccessor = input.source.request.redirectedTo();
+  const directSuccessorIndex = directSuccessor
+    ? input.entries.findIndex(({ request }) => request === directSuccessor)
+    : -1;
+  const candidateIndexes = [
+    ...(directSuccessorIndex >= 0 ? [directSuccessorIndex] : []),
+    ...input.entries.flatMap((_, index) => (
+      index !== input.source.index && index !== directSuccessorIndex ? [index] : []
+    )),
+  ];
+  for (const index of candidateIndexes) {
+    const target = input.entries[index];
+    const targetRecord = input.recordsByRequest.get(target.request);
+    if (!targetRecord || targetRecord.redirectEdge !== null) continue;
+    try {
+      const edge = assertChatwootPhaseRedirect({
+        from: {
+          classification: input.source.classification,
+          url: input.source.request.url(),
+        },
+        to: { classification: target.classification, url: target.request.url() },
+        status: sourceResponse.status(),
+        location,
+      }, input.generation);
+      return Object.freeze({ edge, record: targetRecord });
+    } catch {
+      // Continue until the exact Location-backed successor is found.
     }
   }
   return null;
