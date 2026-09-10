@@ -7,12 +7,10 @@ import { Button } from "primereact/button";
 import { Card } from "primereact/card";
 import { InputText } from "primereact/inputtext";
 import { Message } from "primereact/message";
-import { Password } from "primereact/password";
 import { Tag } from "primereact/tag";
 
 import {
   changeProfileEmailAction,
-  changeProfilePasswordAction,
   requestProfileEmailVerificationAction,
   updateEmailReminderPreferenceAction,
 } from "@/app/actions/profile";
@@ -23,6 +21,7 @@ import type {
   EmailReminderPreferenceViewModel,
   ProfileViewModel,
 } from "@/application/models/profile";
+import { ProfilePasswordCard } from "@/frontend/components/profile-password-card";
 
 function authTypeLabel(value: string) {
   const labels: Record<string, string> = {
@@ -65,13 +64,9 @@ function ProfilePanelContent({
 }: ProfilePanelProps) {
   const user = model.status === "ready" ? model.user : null;
   const [email, setEmail] = useState(user?.pendingEmail ?? user?.email ?? "");
-  const [currentPassword, setCurrentPassword] = useState("");
-  const [newPassword, setNewPassword] = useState("");
   const [message, setMessage] = useState<string | null>(null);
   const [messageSeverity, setMessageSeverity] = useState<"success" | "info" | "warn" | "error">("info");
   const emailFeedbackRef = useRef<HTMLDivElement>(null);
-  const [passwordMessage, setPasswordMessage] = useState<string | null>(null);
-  const [passwordMessageSeverity, setPasswordMessageSeverity] = useState<"success" | "warn">("success");
   const [pendingAction, setPendingAction] = useState<string | null>(null);
   const pendingActionRef = useRef<string | null>(null);
   const initialEmailReminders = model.status === "ready"
@@ -128,10 +123,7 @@ function ProfilePanelContent({
     setMessageSeverity(severity);
   }
 
-  function showPasswordMessage(text: string, severity: "success" | "warn") {
-    setPasswordMessage(text);
-    setPasswordMessageSeverity(severity);
-  }
+
 
   function resetTurnstile() {
     turnstile?.reset();
@@ -193,35 +185,7 @@ function ProfilePanelContent({
     }
   }
 
-  async function changePassword(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
 
-    if (!beginPendingAction("password")) {
-      return;
-    }
-
-    setMessage(null);
-    setPasswordMessage(null);
-
-    try {
-      const result = await changeProfilePasswordAction({
-        currentPassword,
-        newPassword,
-      });
-      if (!result.ok) {
-        showPasswordMessage(result.message, "warn");
-        return;
-      }
-
-      setCurrentPassword("");
-      setNewPassword("");
-      showPasswordMessage(result.message, "success");
-    } catch {
-      showPasswordMessage("Сеть недоступна. Не удалось изменить пароль.", "warn");
-    } finally {
-      finishPendingAction("password");
-    }
-  }
 
   async function changeEmailReminders(event: ChangeEvent<HTMLInputElement>) {
     const enabled = event.target.checked;
@@ -415,48 +379,12 @@ function ProfilePanelContent({
       ) : null}
 
       {canChangePassword ? (
-        <Card title="Смена пароля">
-          <form className="flex flex-column gap-3" onSubmit={changePassword}>
-            {passwordMessage ? <Message severity={passwordMessageSeverity} text={passwordMessage} /> : null}
-            <label className="flex flex-column gap-2">
-              <span className="text-sm font-medium text-700">Текущий пароль</span>
-              <Password
-                autoComplete="current-password"
-                className="w-full"
-                feedback={false}
-                inputClassName="w-full"
-                maxLength={256}
-                name="currentPassword"
-                onChange={(event) => setCurrentPassword(event.target.value)}
-                required
-                toggleMask
-                value={currentPassword}
-              />
-            </label>
-            <label className="flex flex-column gap-2">
-              <span className="text-sm font-medium text-700">Новый пароль</span>
-              <Password
-                autoComplete="new-password"
-                className="w-full"
-                inputClassName="w-full"
-                maxLength={256}
-                minLength={8}
-                name="newPassword"
-                onChange={(event) => setNewPassword(event.target.value)}
-                required
-                toggleMask
-                value={newPassword}
-              />
-            </label>
-            <Button
-              className="w-fit"
-              disabled={pendingAction !== null}
-              label="Изменить пароль"
-              loading={pendingAction === "password"}
-              type="submit"
-            />
-          </form>
-        </Card>
+        <ProfilePasswordCard
+          beginPendingAction={beginPendingAction}
+          finishPendingAction={finishPendingAction}
+          onStart={() => setMessage(null)}
+          pendingAction={pendingAction}
+        />
       ) : null}
     </div>
   );
