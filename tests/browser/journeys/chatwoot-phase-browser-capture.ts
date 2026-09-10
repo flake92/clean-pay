@@ -2038,7 +2038,6 @@ async function finishBrowserRequestContract(
     staticResponseBytes: number | null;
     staticResponseSha256: string | null;
   }> = [];
-  const canonicalRecords = [];
   const recordsByRequest = new Map<Request, (typeof records)[number]>();
   const redirectedSources = new Set<Request>();
   const documentKeys: StrictRequestEntry["documentKey"][] = generation === "initial"
@@ -2211,7 +2210,37 @@ async function finishBrowserRequestContract(
     };
     records.push(record);
     recordsByRequest.set(request, record);
-    canonicalRecords.push(semanticBrowserRecord({ order, ...record }));
+  }
+  for (const { classification, request } of ledger.entries) {
+    if (
+      redirectedSources.has(request)
+      || classification.disposition === "abort"
+    ) {
+      continue;
+    }
+    const successor = request.redirectedTo();
+    if (!successor) continue;
+    const sourceRecord = recordsByRequest.get(request);
+    const successorEntry = ledger.byIdentity.get(successor);
+    const successorRecord = recordsByRequest.get(successor);
+    if (!sourceRecord || !successorEntry || !successorRecord || successorRecord.redirectEdge !== null) {
+      continue;
+    }
+    const sourceResponse = await boundedChatwootBrowserOperation(
+      request.response(),
+      5_000,
+      "Chatwoot redirect source successor response",
+    );
+    const location = sourceResponse?.headers().location;
+    if (!sourceResponse || typeof location !== "string") continue;
+    const edge = assertChatwootPhaseRedirect({
+      from: { classification, url: request.url() },
+      to: { classification: successorEntry.classification, url: successor.url() },
+      status: sourceResponse.status(),
+      location,
+    }, generation);
+    successorRecord.redirectEdge = edge;
+    redirectedSources.add(request);
   }
   for (const { classification, request } of ledger.entries) {
     const record = recordsByRequest.get(request);
@@ -2242,6 +2271,10 @@ async function finishBrowserRequestContract(
       })}`);
     }
   }
+  const canonicalRecords = records.map((record, order) => semanticBrowserRecord({
+    order,
+    ...record,
+  }));
   const sharedLoadGraph = Object.freeze({
     cssMediaReferences: Object.freeze([...cssMediaReferencesBySource.values()].flat()),
     responseDeclarationsByDocument: Object.freeze(documentKeys.map((documentKey) => (
