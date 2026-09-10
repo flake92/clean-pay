@@ -622,3 +622,61 @@ describe("LinkAccountPanel rendered surface", () => {
     expect(alerts.some((text) => text.includes("Не удалось связать Telegram."))).toBe(true);
   });
 });
+
+describe("VerifyEmailPanel code flow", () => {
+  // The panel had coverage only for a failed readiness re-check. The path a
+  // reader actually walks -- ask for a code, enter it, be told it is wrong --
+  // was untested, leaving the panel at 34% and its dispatch unexercised.
+  beforeEach(() => {
+    mocks.requestEmailVerificationCodeAction.mockReset();
+    mocks.confirmEmailVerificationCodeAction.mockReset();
+    mocks.checkAccountReadinessAction.mockReset();
+    mocks.replaceWith.mockReset();
+  });
+
+  it("reports where a requested code was sent", async () => {
+    mocks.requestEmailVerificationCodeAction.mockResolvedValue({
+      ok: true, kind: "code-sent", targetEmail: "user@example.com",
+    });
+    const user = userEvent.setup();
+    render(createElement(VerifyEmailPanel, { redirectTo: "/cabinet" }));
+
+    await user.click(await screen.findByRole("button", { name: /Отправить код/i }));
+
+    await waitFor(() => expect(mocks.requestEmailVerificationCodeAction).toHaveBeenCalled());
+    await waitFor(() =>
+      expect(screen.getByText(/Код отправлен на user@example.com/)).toBeTruthy());
+  });
+
+  it("confirms a correct code and reports the address as verified", async () => {
+    mocks.confirmEmailVerificationCodeAction.mockResolvedValue({
+      ok: true, kind: "confirmed", readiness: { status: "ready", emailVerified: true },
+    });
+    const user = userEvent.setup();
+    render(createElement(VerifyEmailPanel, { redirectTo: "/cabinet" }));
+
+    await user.type(await screen.findByPlaceholderText("000000"), "123456");
+    await user.click(screen.getByRole("button", { name: /Подтвердить e-mail/i }));
+
+    await waitFor(() => expect(mocks.confirmEmailVerificationCodeAction).toHaveBeenCalled());
+    const [call] = mocks.confirmEmailVerificationCodeAction.mock.calls;
+    expect(call?.[0]).toMatchObject({ code: "123456" });
+  });
+
+  it("keeps the reader on the form when the code is refused", async () => {
+    mocks.confirmEmailVerificationCodeAction.mockResolvedValue({
+      ok: false, code: "INVALID_CODE", message: "Код неверный или истёк.",
+    });
+    const user = userEvent.setup();
+    render(createElement(VerifyEmailPanel, { redirectTo: "/cabinet" }));
+
+    await user.type(await screen.findByPlaceholderText("000000"), "000111");
+    await user.click(screen.getByRole("button", { name: /Подтвердить e-mail/i }));
+
+    await waitFor(() => {
+      const alerts = screen.getAllByRole("alert").map((node) => node.textContent ?? "");
+      expect(alerts.some((text) => text.includes("Код неверный или истёк."))).toBe(true);
+    });
+    expect(mocks.replaceWith).not.toHaveBeenCalled();
+  });
+});

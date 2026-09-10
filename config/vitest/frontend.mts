@@ -16,6 +16,10 @@ export default defineConfig({
       "tests/unit/frontend/layout-mobile-focus.test.ts",
       "tests/unit/frontend/page-shell-accessibility.test.ts",
       "tests/unit/frontend/payment-return-status-component.test.ts",
+      "tests/unit/frontend/extend-confirmation.test.ts",
+      "tests/unit/frontend/cabinet-devices.test.ts",
+      "tests/unit/frontend/cabinet-promocode.test.ts",
+      "tests/unit/frontend/profile-email-change-feedback.test.ts",
     ],
     pool: "forks",
     testTimeout: 15_000,
@@ -33,6 +37,17 @@ export default defineConfig({
         "src/frontend/components/payment-confirmation.tsx",
         "src/frontend/components/payment-return-status.tsx",
         "src/frontend/components/register-email-confirm-form.tsx",
+        // The four largest panels were outside this gate entirely, so their
+        // coverage could fall without anything failing -- which is how
+        // link-account-panel reached 38% unnoticed.
+        "src/frontend/components/cabinet-panel.tsx",
+        "src/frontend/components/cabinet-promocode-card.tsx",
+        "src/frontend/components/profile-panel.tsx",
+        "src/frontend/components/profile-password-card.tsx",
+        "src/frontend/components/verify-email-panel.tsx",
+        "src/frontend/components/extend-confirmation.tsx",
+        "src/frontend/components/auth-method-tile.tsx",
+        "src/frontend/components/link-account-passkey-tile.tsx",
         "src/frontend/lib/chatwoot.ts",
       ],
       thresholds: {
