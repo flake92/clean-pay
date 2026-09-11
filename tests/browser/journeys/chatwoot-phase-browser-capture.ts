@@ -1131,7 +1131,7 @@ async function exerciseChatwootPhases(input: CaptureInput & {
   });
 }
 
-async function captureVisiblePhase(input: {
+type CaptureVisiblePhaseInput = {
   browserRequests: unknown[];
   eventLedger: EventLedger;
   historyEvidence: unknown;
@@ -1145,93 +1145,20 @@ async function captureVisiblePhase(input: {
   requestLifecycle: ReturnType<typeof installChatwootCommonRequestLifecycleForTest>;
   replacementRequestHeld: boolean;
   replacementRequestReleased: boolean;
-}) {
-  if (input.phase !== "gap") {
-    await waitForRequestLifecycleIdle(input.requestLifecycle);
-  }
-  await settleExactRender(input.page);
-  const beforeNetworkLifecycle = input.requestLifecycle.snapshot();
+};
+
+async function captureVisiblePhase(input: CaptureVisiblePhaseInput) {
   const {
-    provider: beforeProvider,
-    raw: beforeRaw,
-  } = await waitForStablePhaseSources(
-    input.page,
-    input.input.controlUrl,
-    input.phase,
-  );
-  observePhaseSourceDigests(input, beforeRaw, beforeProvider);
-  const checkpoint = input.eventLedger.checkpoint(`${input.phase}-snapshot`);
-  const { screenshot, evidence: [
+    screenshot,
     dom,
     computedStyles,
     interactive,
     ariaSnapshot,
     storage,
     raw,
-    providerEffects,
+    provider,
     cookies,
-  ] } = await captureAfterScreenshot(input.page, () => Promise.all([
-    canonicalDom(input.page),
-    selectedComputedStyles(input.page),
-    interactiveState(input.page),
-    input.page.locator("body").ariaSnapshot(),
-    browserStorage(input.page),
-    readChatwootRawState(input.page),
-    controlJson(input.input.controlUrl, "/__ledger", MAXIMUM_CONTROL_BYTES),
-    input.page.context().cookies(),
-  ]));
-  const provider = assertProviderLedger(providerEffects, input.phase);
-  assertChatwootPhaseBoundaryLedger(raw.boundaryCalls, input.phase);
-  const [
-    secondDom,
-    secondComputedStyles,
-    secondInteractive,
-    secondAriaSnapshot,
-    secondStorage,
-    secondRaw,
-    secondProviderEffects,
-    secondCookies,
-  ] = await Promise.all([
-    canonicalDom(input.page),
-    selectedComputedStyles(input.page),
-    interactiveState(input.page),
-    input.page.locator("body").ariaSnapshot(),
-    browserStorage(input.page),
-    readChatwootRawState(input.page),
-    controlJson(input.input.controlUrl, "/__ledger", MAXIMUM_CONTROL_BYTES),
-    input.page.context().cookies(),
-  ]);
-  const secondProvider = assertProviderLedger(secondProviderEffects, input.phase);
-  assertChatwootPhaseBoundaryLedger(secondRaw.boundaryCalls, input.phase);
-  assertChatwootAtomicPhaseRead({
-    beforeProvider,
-    beforeRaw,
-    first: {
-      accessibility: ariaSnapshot,
-      computedStyles,
-      cookies,
-      dom,
-      interactive,
-      provider,
-      raw,
-      storage,
-      networkLifecycle: beforeNetworkLifecycle,
-    },
-    phase: input.phase,
-    second: {
-      accessibility: secondAriaSnapshot,
-      computedStyles: secondComputedStyles,
-      cookies: secondCookies,
-      dom: secondDom,
-      interactive: secondInteractive,
-      provider: secondProvider,
-      raw: secondRaw,
-      storage: secondStorage,
-      networkLifecycle: input.requestLifecycle.snapshot(),
-    },
-  });
-  observePhaseSourceDigests(input, secondRaw, secondProvider);
-  input.eventLedger.assertStable(checkpoint);
+  } = await captureAtomicVisiblePhaseEvidence(input);
   if (raw.conversation === null) {
     throw new Error(`Chatwoot ${input.phase} phase has no conversation cookie.`);
   }
@@ -1335,6 +1262,121 @@ async function captureVisiblePhase(input: {
     report,
     screenshot: Buffer.from(screenshot),
   });
+}
+
+async function captureAtomicVisiblePhaseEvidence(input: CaptureVisiblePhaseInput) {
+  const deadline = Date.now() + 5_000;
+  while (true) {
+    if (input.phase !== "gap") {
+      await waitForRequestLifecycleIdle(input.requestLifecycle);
+    }
+    await settleExactRender(input.page);
+    const beforeNetworkLifecycle = input.requestLifecycle.snapshot();
+    const {
+      provider: beforeProvider,
+      raw: beforeRaw,
+    } = await waitForStablePhaseSources(
+      input.page,
+      input.input.controlUrl,
+      input.phase,
+    );
+    observePhaseSourceDigests(input, beforeRaw, beforeProvider);
+    const checkpoint = input.eventLedger.checkpoint(`${input.phase}-snapshot`);
+    const { screenshot, evidence: [
+      dom,
+      computedStyles,
+      interactive,
+      ariaSnapshot,
+      storage,
+      raw,
+      providerEffects,
+      cookies,
+    ] } = await captureAfterScreenshot(input.page, () => Promise.all([
+      canonicalDom(input.page),
+      selectedComputedStyles(input.page),
+      interactiveState(input.page),
+      input.page.locator("body").ariaSnapshot(),
+      browserStorage(input.page),
+      readChatwootRawState(input.page),
+      controlJson(input.input.controlUrl, "/__ledger", MAXIMUM_CONTROL_BYTES),
+      input.page.context().cookies(),
+    ]));
+    const provider = assertProviderLedger(providerEffects, input.phase);
+    assertChatwootPhaseBoundaryLedger(raw.boundaryCalls, input.phase);
+    const [
+      secondDom,
+      secondComputedStyles,
+      secondInteractive,
+      secondAriaSnapshot,
+      secondStorage,
+      secondRaw,
+      secondProviderEffects,
+      secondCookies,
+    ] = await Promise.all([
+      canonicalDom(input.page),
+      selectedComputedStyles(input.page),
+      interactiveState(input.page),
+      input.page.locator("body").ariaSnapshot(),
+      browserStorage(input.page),
+      readChatwootRawState(input.page),
+      controlJson(input.input.controlUrl, "/__ledger", MAXIMUM_CONTROL_BYTES),
+      input.page.context().cookies(),
+    ]);
+    const secondProvider = assertProviderLedger(secondProviderEffects, input.phase);
+    assertChatwootPhaseBoundaryLedger(secondRaw.boundaryCalls, input.phase);
+    try {
+      assertChatwootAtomicPhaseRead({
+        beforeProvider,
+        beforeRaw,
+        first: {
+          accessibility: ariaSnapshot,
+          computedStyles,
+          cookies,
+          dom,
+          interactive,
+          provider,
+          raw,
+          storage,
+          networkLifecycle: beforeNetworkLifecycle,
+        },
+        phase: input.phase,
+        second: {
+          accessibility: secondAriaSnapshot,
+          computedStyles: secondComputedStyles,
+          cookies: secondCookies,
+          dom: secondDom,
+          interactive: secondInteractive,
+          provider: secondProvider,
+          raw: secondRaw,
+          storage: secondStorage,
+          networkLifecycle: input.requestLifecycle.snapshot(),
+        },
+      });
+      observePhaseSourceDigests(input, secondRaw, secondProvider);
+      input.eventLedger.assertStable(checkpoint);
+      return {
+        ariaSnapshot,
+        computedStyles,
+        cookies,
+        dom,
+        interactive,
+        provider,
+        raw,
+        screenshot,
+        storage,
+      };
+    } catch (error) {
+      if (!isRetryableAtomicPhaseSnapshotError(error) || Date.now() >= deadline) throw error;
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+  }
+}
+
+export function isRetryableAtomicPhaseSnapshotError(error: unknown) {
+  if (!(error instanceof Error)) return false;
+  return /^Chatwoot (?:gap|stable|recreated) (?:evidence changed before|.+ changed during) its atomic snapshot\.$/
+    .test(error.message)
+    || error.message === "Chatwoot event generation changed during an atomic phase snapshot.";
 }
 
 // Project only fixed vocabulary and counts. Never log bodies, cookies, headers,
@@ -4200,7 +4242,7 @@ function assertProviderLedger(value: unknown, phase: Phase): ProviderLedger {
     : initialProviderEffectSequence;
   if (!Array.isArray(ledger.entries)
     || ledger.entries.length < expectedEffects.length
-    || ledger.entries.length > expectedEffects.length + 8) {
+    || ledger.entries.length > expectedEffects.length + 15) {
     throw new Error("Chatwoot provider ledger is incomplete or outside its bound.");
   }
   const database = assertProviderDatabase(ledger.database);

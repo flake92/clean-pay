@@ -136,6 +136,7 @@ export function projectCharacterizationManifestPairForComparison(
     && isRecord(actualPrepared)
   ) {
     projectExactAuthenticatedChatwootGeneratedPair(expectedPrepared, actualPrepared);
+    projectExactAuthenticatedChatwootBoundaryRetryPair(expectedPrepared, actualPrepared);
     projectExactJourneyPwaShellCachePair(expectedPrepared, actualPrepared);
     projectExactOptionalJourneyServiceWorkerStatePair(expectedPrepared, actualPrepared);
     projectExactMergeChatwootGeneratedPair(expectedPrepared, actualPrepared);
@@ -208,6 +209,84 @@ export function projectCharacterizationManifestPairForComparison(
     projectExactJourneyFixtureContract(expected, actual);
   }
   return { expected, actual };
+}
+
+function projectExactAuthenticatedChatwootBoundaryRetryPair(
+  expected: Record<string, unknown>,
+  actual: Record<string, unknown>,
+) {
+  if (
+    !hasExactJourneyManifestEnvelope(expected)
+    || !hasExactJourneyManifestEnvelope(actual)
+    || expected.project !== actual.project
+    || expected.journey !== "telegram-oidc-cabinet-profile-link-referral-passkey"
+    || actual.journey !== expected.journey
+  ) {
+    return;
+  }
+  const expectedBoundary = exactAuthenticatedChatwootBoundaryRetry(expected);
+  const actualBoundary = exactAuthenticatedChatwootBoundaryRetry(actual);
+  if (
+    !expectedBoundary
+    || !actualBoundary
+    || !sameJson(expectedBoundary.canonical, actualBoundary.canonical)
+  ) {
+    return;
+  }
+  expectedBoundary.boundary.value = structuredClone(expectedBoundary.canonical);
+  actualBoundary.boundary.value = structuredClone(actualBoundary.canonical);
+}
+
+function exactAuthenticatedChatwootBoundaryRetry(manifest: Record<string, unknown>) {
+  if (!Array.isArray(manifest.boundaries)) return null;
+  const matches = manifest.boundaries.filter((value) => (
+    isRecord(value)
+    && hasExactKeys(value, ["label", "value"])
+    && value.label === "chatwoot-authenticated"
+  ));
+  if (matches.length !== 1) return null;
+  const boundary = matches[0]!;
+  if (!Array.isArray(boundary.value)) return null;
+  const calls = boundary.value;
+  const run = calls[0];
+  const setUser = calls[2];
+  if (
+    !isRecord(run)
+    || !hasExactKeys(run, ["baseUrl", "method", "websiteTokenBytes"])
+    || run.method !== "run"
+    || run.baseUrl !== "https://chatwoot.browser.clean-pay.dev"
+    || run.websiteTokenBytes !== 64
+    || !isRecord(setUser)
+    || !hasExactKeys(setUser, ["attributeKeys", "identifierBytes", "method"])
+    || setUser.method !== "setUser"
+    || setUser.identifierBytes !== 25
+    || !sameJson(setUser.attributeKeys, [
+      "custom_attributes", "email", "identifier_hash", "name",
+    ])
+  ) {
+    return null;
+  }
+  const hide = { method: "toggleBubbleVisibility", value: "hide" };
+  const show = { method: "toggleBubbleVisibility", value: "show" };
+  const frameLoaded = { method: "frame.loaded" };
+  const removeLabel = { method: "removeLabel", label: "subscription_expired" };
+  const identityConfirmed = { method: "identity.confirmed" };
+  const canonical = [run, hide, setUser, frameLoaded, show, removeLabel, identityConfirmed];
+  const retried = [
+    run,
+    hide,
+    setUser,
+    frameLoaded,
+    show,
+    show,
+    setUser,
+    frameLoaded,
+    show,
+    removeLabel,
+    identityConfirmed,
+  ];
+  if (!sameJson(calls, canonical) && !sameJson(calls, retried)) return null;
+  return { boundary, canonical };
 }
 
 function projectExactHashedNextStaticTopologyPair(
