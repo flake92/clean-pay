@@ -2498,6 +2498,41 @@ test("Chatwoot comparison canonicalization accepts same-stack causal-equivalent 
     .toThrow(/literal is invalid/);
 });
 
+test("Chatwoot provider phase relations retain an exact append-only ledger across bounded refreshes", () => {
+  const gap = strictProviderFixture("gap");
+  const recreatedFixture = strictProviderFixture("recreated");
+  const readinessRefresh = [1, 2, 3, 4, 5, 6, 7].map((index) => (
+    structuredClone(gap.entries[index])
+  ));
+  const stable = structuredClone(gap);
+  stable.entries.push(...readinessRefresh);
+  stable.entries.forEach((entry, index) => { entry.sequence = index + 1; });
+  const recreated = structuredClone(stable);
+  recreated.entries.push(...structuredClone(recreatedFixture.entries.slice(gap.entries.length)));
+  recreated.entries.forEach((entry, index) => { entry.sequence = index + 1; });
+
+  const phases = { gap, stable, recreated };
+  expect(assertChatwootProviderPhaseRelations(phases)).toMatchObject({
+    gapEntryCount: 28,
+    recreatedEntryCount: 42,
+    stableEntryCount: 28,
+    status: "exact-provider-phase-prefixes",
+  });
+
+  const changed = structuredClone(phases);
+  for (const phase of [changed.stable, changed.recreated]) {
+    const challenge = phase.entries[0].body_contract as {
+      fields: Array<{ name: string; value: unknown }>;
+    };
+    const response = challenge.fields.find(({ name }) => name === "response");
+    if (!response) throw new Error("Expected a Turnstile response field.");
+    response.value = "synthetic-turnstile-token:auth_login:synthetic-turnstile-2:2";
+    phase.entries[0].body_sha256 = "b".repeat(64);
+  }
+  expect(() => assertChatwootProviderPhaseRelations(changed))
+    .toThrow(/not an exact ordered prefix/);
+});
+
 test("Chatwoot causal provider comparison preserves changed bytes rather than blessing them", () => {
   const original = strictProviderFixture("gap");
   const changed = structuredClone(original);
@@ -3307,8 +3342,17 @@ test("accepts the exact recreated terminal SPA cabinet browser flow", () => {
     record("chatwoot-widget-frame", "app-login-document", 200, "text/html"),
   ] as Parameters<typeof normalizeChatwootBrowserRecordsForContract>[0];
 
+  const cabinetAction = records.find(({ classification }) => (
+    classification.key === "app-cabinet-action"
+  ));
+  if (!cabinetAction) throw new Error("Expected a cabinet action record.");
+  cabinetAction.responseFailureSha256 = "a".repeat(64);
+
   const normalized = normalizeChatwootBrowserRecordsForContract(records, "recreated");
   expect(normalized).toHaveLength(records.length - postStartStaticBurst.length);
+  expect(normalized.find(({ classification }) => (
+    classification.key === "app-cabinet-action"
+  ))?.responseFailureSha256).toBeNull();
   const finalized = finalizeChatwootPhaseBrowserContract(normalized, {
     cssMediaReferences: terminalGraph.cssMediaReferences,
     generation: "recreated",
@@ -3342,6 +3386,23 @@ test("accepts the exact recreated terminal SPA cabinet browser flow", () => {
       .map((entry) => entry.documentKey));
   expect(semanticRequestLedger.map((entry) => entry.key))
     .toEqual(expect.arrayContaining(["app-cabinet-action", "chatwoot-widget-frame"]));
+
+  const unrelatedFailure = structuredClone(records);
+  const widgetFrame = unrelatedFailure.find(({ classification }) => (
+    classification.key === "chatwoot-widget-frame"
+  ));
+  if (!widgetFrame) throw new Error("Expected a widget frame record.");
+  widgetFrame.responseFailureSha256 = "b".repeat(64);
+  expect(() => finalizeChatwootPhaseBrowserContract(
+    normalizeChatwootBrowserRecordsForContract(unrelatedFailure, "recreated"),
+    {
+      cssMediaReferences: terminalGraph.cssMediaReferences,
+      generation: "recreated",
+      referenceStaticContract: initialReference,
+      responseDeclarationsByDocument: terminalGraph.responseDeclarationsByDocument,
+      staticAssetContract,
+    },
+  )).toThrow(/response failure/);
 });
 
 test("accepts the exact initial authenticated shortcut browser flow", () => {
