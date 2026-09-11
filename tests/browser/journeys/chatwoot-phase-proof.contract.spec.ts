@@ -54,6 +54,7 @@ import {
   createChatwootHistoryClearGateForTest,
   installChatwootCommonRequestLifecycleForTest,
   isRetryableAtomicPhaseSnapshotError,
+  isRecoverableChatwootLoginGotoAbort,
   boundedChatwootBrowserOperationForTest,
 } from "./chatwoot-phase-browser-capture";
 import { createChatwootPhaseCausalContract } from "./chatwoot-phase-causal-contract.mjs";
@@ -2926,6 +2927,15 @@ test("executes the atomic phase reader and rejects every changed captured surfac
     "Chatwoot provider ledger is incomplete or outside its bound.",
   ))).toBe(false);
   expect(isRetryableAtomicPhaseSnapshotError("not-an-error")).toBe(false);
+  expect(isRecoverableChatwootLoginGotoAbort(new Error(
+    "page.goto: net::ERR_ABORTED at https://pay.ci.clean-pay.dev/login?redirect_to=%2Fcabinet\nCall log:",
+  ))).toBe(true);
+  expect(isRecoverableChatwootLoginGotoAbort(new Error(
+    "page.goto: net::ERR_ABORTED at https://pay.ci.clean-pay.dev/cabinet",
+  ))).toBe(false);
+  expect(isRecoverableChatwootLoginGotoAbort(new Error(
+    "page.goto: Timeout 30000ms exceeded at https://pay.ci.clean-pay.dev/login?redirect_to=%2Fcabinet",
+  ))).toBe(false);
 });
 
 test("executes final source rereads and rejects every late source mutation", () => {
