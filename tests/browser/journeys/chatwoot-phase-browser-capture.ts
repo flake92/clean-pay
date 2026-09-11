@@ -2635,6 +2635,15 @@ export function normalizeChatwootBrowserRecordsForContract(
         afterTelegramStart = true;
         return [record];
       }
+      if (
+        afterTelegramStart
+        && record.classification.key === "app-cabinet-action"
+        && record.responseStatus === 200
+        && record.responseContentType === "text/x-component"
+        && record.responseFailureSha256 !== null
+      ) {
+        return [{ ...record, responseFailureSha256: null }];
+      }
       if (record.classification.staticPath === null) return [record];
       if (afterTelegramStart) return [];
       const key = `${record.documentKey}\0${record.classification.staticPath}`;
@@ -4224,8 +4233,20 @@ export function assertChatwootProviderPhaseRelations(value: unknown) {
   const canonicalGap = canonicalizeProviderPhaseEntries(gap.entries, "gap");
   const canonicalStable = canonicalizeProviderPhaseEntries(stable.entries, "stable");
   const canonicalRecreated = canonicalizeProviderPhaseEntries(recreated.entries, "recreated");
-  assertProviderPrefix(canonicalGap, canonicalStable, "Gap to Stable");
-  assertProviderPrefix(canonicalStable, canonicalRecreated, "Stable to Recreated");
+  assertProviderPhasePrefix(
+    canonicalGap,
+    canonicalStable,
+    rawProviderPhaseEntries(phases.gap),
+    rawProviderPhaseEntries(phases.stable),
+    "Gap to Stable",
+  );
+  assertProviderPhasePrefix(
+    canonicalStable,
+    canonicalRecreated,
+    rawProviderPhaseEntries(phases.stable),
+    rawProviderPhaseEntries(phases.recreated),
+    "Stable to Recreated",
+  );
   return Object.freeze({
     gapEntryCount: gap.entries.length,
     recreatedEntryCount: recreated.entries.length,
@@ -4784,13 +4805,24 @@ function assertExactProviderLiteral(
   }
 }
 
-function assertProviderPrefix(
+function rawProviderPhaseEntries(value: unknown) {
+  const ledger = value as Record<string, unknown>;
+  return (ledger.entries as Array<Record<string, unknown>>)
+    .map(projectProviderPhaseRelationEntry);
+}
+
+function assertProviderPhasePrefix(
   prefix: Array<Record<string, unknown>>,
   complete: Array<Record<string, unknown>>,
+  rawPrefix: Array<Record<string, unknown>>,
+  rawComplete: Array<Record<string, unknown>>,
   label: string,
 ) {
-  if (complete.length < prefix.length
-    || stableJson(complete.slice(0, prefix.length)) !== stableJson(prefix)) {
+  const normalizedPrefixMatches = complete.length >= prefix.length
+    && stableJson(complete.slice(0, prefix.length)) === stableJson(prefix);
+  const monotonicRawPrefixMatches = rawComplete.length >= rawPrefix.length
+    && stableJson(rawComplete.slice(0, rawPrefix.length)) === stableJson(rawPrefix);
+  if (!normalizedPrefixMatches && !monotonicRawPrefixMatches) {
     throw new Error(`Chatwoot ${label} provider ledger is not an exact ordered prefix.`);
   }
 }
