@@ -1737,14 +1737,26 @@ async function loginToProfile(page: Page) {
 
 async function openLogin(page: Page, redirectPath: "/profile" | "/cabinet") {
   const redirectQuery = redirectPath === "/profile" ? "%2Fprofile" : "%2Fcabinet";
-  await page.goto(`${SYNTHETIC_APPLICATION_ORIGIN}/login?redirect_to=${redirectQuery}`, {
-    waitUntil: "domcontentloaded",
-    timeout: 30_000,
-  });
+  const expectedUrl = `${SYNTHETIC_APPLICATION_ORIGIN}/login?redirect_to=${redirectQuery}`;
+  try {
+    await page.goto(expectedUrl, {
+      waitUntil: "domcontentloaded",
+      timeout: 30_000,
+    });
+  } catch (error) {
+    if (!isRecoverableChatwootLoginGotoAbort(error)) throw error;
+    await page.waitForURL((url) => url.href === expectedUrl, { timeout: 5_000 });
+  }
   await waitForTurnstile(page, "auth_login");
   const telegram = page.getByRole("button", { name: "Войти через Telegram" });
   await telegram.waitFor({ state: "visible", timeout: 15_000 });
   return telegram;
+}
+
+export function isRecoverableChatwootLoginGotoAbort(error: unknown) {
+  return error instanceof Error
+    && /^page\.goto: net::ERR_ABORTED at https:\/\/pay\.ci\.clean-pay\.dev\/login\?/u
+      .test(error.message);
 }
 
 async function waitForTurnstile(page: Page, action: "auth_login") {

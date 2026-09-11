@@ -566,17 +566,27 @@ async function installFirstChatwootOwnershipCapture(page: Page) {
 }
 
 async function capturePreOwnedChatwootSeed(page: Page): Promise<PreOwnedChatwootSeed> {
-  const state = await page.evaluate(() => ({
-    capturedOwnership: (
-      window as unknown as { __cleanPayFirstChatwootOwnership?: string }
-    ).__cleanPayFirstChatwootOwnership ?? null,
-    conversation: document.cookie
-      .split(";")
-      .map((entry) => entry.trim())
-      .find((entry) => entry.startsWith("cw_conversation="))
-      ?.slice("cw_conversation=".length) ?? null,
-    currentOwnership: localStorage.getItem("clean-pay:chatwoot-ownership:v1"),
-  }));
+  await expect.poll(async () => {
+    const candidate = await readFreshChatwootOwnershipState(page);
+    if (
+      candidate.capturedOwnership === null
+      || candidate.currentOwnership === null
+      || candidate.conversation === null
+    ) return false;
+    try {
+      const captured = parsePersistedChatwootOwnership(candidate.capturedOwnership);
+      const current = parsePersistedChatwootOwnership(candidate.currentOwnership);
+      const conversation = decodeURIComponent(candidate.conversation);
+      return captured.core === current.core
+        && captured.customAttributes !== current.customAttributes
+        && captured.conversation === current.conversation
+        && captured.conversation === chatwootFingerprintForTest(conversation);
+    } catch {
+      return false;
+    }
+  }, { timeout: 15_000 }).toBe(true);
+
+  const state = await readFreshChatwootOwnershipState(page);
   if (
     state.capturedOwnership === null
     || state.currentOwnership === null
@@ -602,6 +612,20 @@ async function capturePreOwnedChatwootSeed(page: Page): Promise<PreOwnedChatwoot
     throw new Error("Fresh Chatwoot ownership requires exactly two Chatwoot cookies.");
   }
   return { cookies, ownership: state.capturedOwnership };
+}
+
+async function readFreshChatwootOwnershipState(page: Page) {
+  return page.evaluate(() => ({
+    capturedOwnership: (
+      window as unknown as { __cleanPayFirstChatwootOwnership?: string }
+    ).__cleanPayFirstChatwootOwnership ?? null,
+    conversation: document.cookie
+      .split(";")
+      .map((entry) => entry.trim())
+      .find((entry) => entry.startsWith("cw_conversation="))
+      ?.slice("cw_conversation=".length) ?? null,
+    currentOwnership: localStorage.getItem("clean-pay:chatwoot-ownership:v1"),
+  }));
 }
 
 async function restorePreOwnedChatwootSeed(page: Page, seed: PreOwnedChatwootSeed) {
