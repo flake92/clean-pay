@@ -341,6 +341,49 @@ test("projects authenticated Chatwoot identifiers only with exact matched presen
     .not.toEqual(projectPair(baseline, widenedCookie).expected);
 });
 
+test("projects only the exact idempotent authenticated Chatwoot boundary retry", () => {
+  const baseline = journeyManifest("baseline");
+  const candidate = journeyManifest("candidate");
+  baseline.journey = "telegram-oidc-cabinet-profile-link-referral-passkey";
+  candidate.journey = baseline.journey;
+  const run = {
+    method: "run",
+    baseUrl: "https://chatwoot.browser.clean-pay.dev",
+    websiteTokenBytes: 64,
+  };
+  const setUser = {
+    method: "setUser",
+    identifierBytes: 25,
+    attributeKeys: ["custom_attributes", "email", "identifier_hash", "name"],
+  };
+  const hide = { method: "toggleBubbleVisibility", value: "hide" };
+  const show = { method: "toggleBubbleVisibility", value: "show" };
+  const frameLoaded = { method: "frame.loaded" };
+  const removeLabel = { method: "removeLabel", label: "subscription_expired" };
+  const identityConfirmed = { method: "identity.confirmed" };
+  const canonical = [run, hide, setUser, frameLoaded, show, removeLabel, identityConfirmed];
+  const retried = [
+    run, hide, setUser, frameLoaded, show,
+    show, setUser, frameLoaded, show,
+    removeLabel, identityConfirmed,
+  ];
+  baseline.boundaries = [{ label: "chatwoot-authenticated", value: retried }] as never;
+  candidate.boundaries = [{ label: "chatwoot-authenticated", value: canonical }] as never;
+  expect(projectPair(baseline, candidate).actual)
+    .toEqual(projectPair(baseline, candidate).expected);
+
+  const changedRetry = structuredClone(baseline);
+  const changedCalls = changedRetry.boundaries[0]!.value as unknown as Array<Record<string, unknown>>;
+  changedCalls[6] = { ...changedCalls[6], identifierBytes: 26 };
+  expect(projectPair(changedRetry, candidate).actual)
+    .not.toEqual(projectPair(changedRetry, candidate).expected);
+
+  const extraShow = structuredClone(baseline);
+  (extraShow.boundaries[0]!.value as unknown as unknown[]).splice(9, 0, show);
+  expect(projectPair(extraShow, candidate).actual)
+    .not.toEqual(projectPair(extraShow, candidate).expected);
+});
+
 test("projects general Chatwoot journey identifiers before merge-specific checks", () => {
   const baseline = journeyManifest("baseline");
   const candidate = journeyManifest("candidate");

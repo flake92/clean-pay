@@ -53,6 +53,7 @@ import {
   createChatwootCausalClearGateForTest,
   createChatwootHistoryClearGateForTest,
   installChatwootCommonRequestLifecycleForTest,
+  isRetryableAtomicPhaseSnapshotError,
   boundedChatwootBrowserOperationForTest,
 } from "./chatwoot-phase-browser-capture";
 import { createChatwootPhaseCausalContract } from "./chatwoot-phase-causal-contract.mjs";
@@ -2643,6 +2644,39 @@ test("Chatwoot recreated provider ledger accepts embedded readiness before secon
     .toThrow(/incomplete or outside|exact endpoint contract|credential projection/);
 });
 
+test("Chatwoot recreated provider ledger accepts the observed duplicate contact and two readiness refreshes", () => {
+  const original = strictProviderFixture("recreated");
+  const observed = structuredClone(original);
+  observed.entries.splice(18, 0, structuredClone(original.entries[17]));
+  const secondLoginStart = observed.entries.findIndex((entry, index) => (
+    index > 0 && entry.effect === "challenge_verified"
+  ));
+  if (secondLoginStart < 0) throw new Error("Expected a second login boundary.");
+  const embeddedReadiness = [1, 2, 4, 3, 5, 6, 7].map((index) => (
+    structuredClone(original.entries[index])
+  ));
+  observed.entries.splice(secondLoginStart, 0, ...embeddedReadiness);
+  for (const index of [1, 2, 3, 4, 5, 6, 7]) {
+    observed.entries.push(structuredClone(original.entries[index]));
+  }
+  observed.entries.forEach((entry, index) => { entry.sequence = index + 1; });
+
+  expect(observed.entries).toHaveLength(57);
+  expect(assertChatwootPhaseProviderLedger(observed, "recreated").entries)
+    .toEqual(original.entries);
+
+  const outsideBound = structuredClone(observed);
+  outsideBound.entries.push(structuredClone(original.entries[1]));
+  outsideBound.entries.forEach((entry, index) => { entry.sequence = index + 1; });
+  expect(() => assertChatwootPhaseProviderLedger(outsideBound, "recreated"))
+    .toThrow(/incomplete or outside/);
+
+  const changed = structuredClone(observed);
+  changed.entries[secondLoginStart + 2].credential_contract.header_names = [];
+  expect(() => assertChatwootPhaseProviderLedger(changed, "recreated"))
+    .toThrow(/incomplete or outside|exact endpoint contract|credential projection/);
+});
+
 // Actual interleavings from run 34059555047. Numbers identify entries in
 // strictProviderFixture, not observed sequence numbers. Bodies stay unchanged.
 const observedReadinessInterleavings = [
@@ -2813,6 +2847,20 @@ test("executes the atomic phase reader and rejects every changed captured surfac
   const changedBefore = structuredClone(input);
   changedBefore.beforeRaw = { boundaryCalls: [], conversationPresent: false };
   expect(() => assertChatwootAtomicPhaseRead(changedBefore)).toThrow(/before.*atomic snapshot/);
+
+  expect(isRetryableAtomicPhaseSnapshotError(new Error(
+    "Chatwoot gap evidence changed before its atomic snapshot.",
+  ))).toBe(true);
+  expect(isRetryableAtomicPhaseSnapshotError(new Error(
+    "Chatwoot stable provider changed during its atomic snapshot.",
+  ))).toBe(true);
+  expect(isRetryableAtomicPhaseSnapshotError(new Error(
+    "Chatwoot event generation changed during an atomic phase snapshot.",
+  ))).toBe(true);
+  expect(isRetryableAtomicPhaseSnapshotError(new Error(
+    "Chatwoot provider ledger is incomplete or outside its bound.",
+  ))).toBe(false);
+  expect(isRetryableAtomicPhaseSnapshotError("not-an-error")).toBe(false);
 });
 
 test("executes final source rereads and rejects every late source mutation", () => {
