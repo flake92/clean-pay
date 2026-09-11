@@ -4363,6 +4363,18 @@ function projectProviderPhaseRelationEntry(entry: Record<string, unknown>) {
     projected.body_sha256 = "<phase-variant-body-sha256>";
     projected.body_contract = scrubProviderPhaseVariantDigests(projected.body_contract);
   }
+  if (projected.effect === "challenge_verified"
+    && isRecord(projected.body_contract)
+    && Array.isArray(projected.body_contract.fields)) {
+    projected.body_contract = {
+      ...projected.body_contract,
+      fields: projected.body_contract.fields.map((field) => (
+        isRecord(field) && field.name === "response"
+          ? Object.freeze({ ...field, value: "<phase-variant-turnstile-response>" })
+          : field
+      )),
+    };
+  }
   return Object.freeze(projected);
 }
 
@@ -4409,6 +4421,13 @@ function normalizeProviderLedgerEntries(
       );
       continue;
     }
+    const cycleStart = trailingReadinessCycleIndex(normalized, expectedLength);
+    if (cycleStart !== null) {
+      normalized = resequenceProviderEntries(
+        normalized.filter((_, index) => index < cycleStart || index >= cycleStart + 7),
+      );
+      continue;
+    }
     const contactRefreshStart = trailingContactProbeReadinessCycleIndex(
       normalized,
       expectedLength,
@@ -4433,13 +4452,7 @@ function normalizeProviderLedgerEntries(
       );
       continue;
     }
-    const cycleStart = trailingReadinessCycleIndex(normalized, expectedLength);
-    if (cycleStart === null) {
-      break;
-    }
-    normalized = resequenceProviderEntries(
-      normalized.filter((_, index) => index < cycleStart || index >= cycleStart + 7),
-    );
+    break;
   }
   if (normalized.length > expectedLength) {
     const duplicateIndex = adjacentDuplicateContactProbeIndex(normalized);
@@ -4823,8 +4836,32 @@ function assertProviderPhasePrefix(
   const monotonicRawPrefixMatches = rawComplete.length >= rawPrefix.length
     && stableJson(rawComplete.slice(0, rawPrefix.length)) === stableJson(rawPrefix);
   if (!normalizedPrefixMatches && !monotonicRawPrefixMatches) {
-    throw new Error(`Chatwoot ${label} provider ledger is not an exact ordered prefix.`);
+    throw new Error(
+      `Chatwoot ${label} provider ledger is not an exact ordered prefix (${
+        providerPrefixMismatchSummary(prefix, complete, "normalized")
+      }; ${providerPrefixMismatchSummary(rawPrefix, rawComplete, "raw")}).`,
+    );
   }
+}
+
+function providerPrefixMismatchSummary(
+  prefix: Array<Record<string, unknown>>,
+  complete: Array<Record<string, unknown>>,
+  projection: string,
+) {
+  const sharedLength = Math.min(prefix.length, complete.length);
+  let index = 0;
+  while (index < sharedLength && stableJson(prefix[index]) === stableJson(complete[index])) {
+    index += 1;
+  }
+  if (index === sharedLength) {
+    return `${projection}:length:${prefix.length}->${complete.length}`;
+  }
+  const keys = [...new Set([
+    ...Object.keys(prefix[index]),
+    ...Object.keys(complete[index]),
+  ])].filter((key) => stableJson(prefix[index][key]) !== stableJson(complete[index][key]));
+  return `${projection}:index:${index}:keys:${keys.sort().join(",")}`;
 }
 
 function providerEndpoint(

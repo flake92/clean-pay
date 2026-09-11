@@ -2529,8 +2529,9 @@ test("Chatwoot provider phase relations retain an exact append-only ledger acros
     response.value = "synthetic-turnstile-token:auth_login:synthetic-turnstile-2:2";
     phase.entries[0].body_sha256 = "b".repeat(64);
   }
-  expect(() => assertChatwootProviderPhaseRelations(changed))
-    .toThrow(/not an exact ordered prefix/);
+  expect(assertChatwootProviderPhaseRelations(changed)).toMatchObject({
+    status: "exact-provider-phase-prefixes",
+  });
 });
 
 test("Chatwoot causal provider comparison preserves changed bytes rather than blessing them", () => {
@@ -2647,7 +2648,7 @@ test("Chatwoot phase ledger accepts adjacent expected contacts before trailing r
   withRefreshTail.entries.forEach((entry, index) => { entry.sequence = index + 1; });
 
   expect(assertChatwootPhaseProviderLedger(withRefreshTail, "gap").entries)
-    .toEqual(withRefreshTail.entries.slice(0, 28));
+    .toEqual(original.entries);
 
   const changed = structuredClone(withRefreshTail);
   changed.entries[35].credential_contract.header_names = [];
@@ -2710,6 +2711,35 @@ test("Chatwoot recreated provider ledger accepts the observed duplicate contact 
   changed.entries[secondLoginStart + 2].credential_contract.header_names = [];
   expect(() => assertChatwootPhaseProviderLedger(changed, "recreated"))
     .toThrow(/incomplete or outside|exact endpoint contract|credential projection/);
+});
+
+test("Chatwoot gap ledger accepts early OIDC authorization with duplicate contact and trailing readiness", () => {
+  const original = strictProviderFixture("gap");
+  const observed = structuredClone(original);
+  const authorizationIndex = observed.entries.findIndex(({ effect }) => (
+    effect === "authorization_code_issued"
+  ));
+  const [authorization] = observed.entries.splice(authorizationIndex, 1);
+  observed.entries.splice(1, 0, authorization);
+  const firstContact = observed.entries.findIndex(({ effect }) => (
+    effect === "contact_identity_probed"
+  ));
+  observed.entries.splice(firstContact + 1, 0, structuredClone(observed.entries[firstContact]));
+  observed.entries.push(...[1, 2, 4, 3, 5, 6, 7].map((index) => (
+    structuredClone(original.entries[index])
+  )));
+  observed.entries.forEach((entry, index) => { entry.sequence = index + 1; });
+
+  expect(observed.entries).toHaveLength(36);
+  const validated = assertChatwootPhaseProviderLedger(observed, "gap");
+  expect(validated.entries).toHaveLength(28);
+  expect(canonicalizeChatwootProviderArrivalOrder(validated.entries, "gap"))
+    .toEqual(original.entries);
+
+  const changed = structuredClone(observed);
+  changed.entries.at(-1)!.credential_contract.header_names = [];
+  expect(() => assertChatwootPhaseProviderLedger(changed, "gap"))
+    .toThrow(/credential projection/);
 });
 
 // Actual interleavings from run 34059555047. Numbers identify entries in
