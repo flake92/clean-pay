@@ -51,6 +51,7 @@ import {
   assertChatwootStrictClassificationForTest,
   createChatwootBoundaryLifecycleCollectorForTest,
   createChatwootCausalClearGateForTest,
+  createChatwootClassificationFailureReason,
   createChatwootHistoryClearGateForTest,
   installChatwootCommonRequestLifecycleForTest,
   isExpectedChatwootPlaywrightServiceWorkerBlockDiagnostic,
@@ -3089,6 +3090,23 @@ test("accepts only a bounded number of exact Playwright service-worker warnings"
       [field]: ["a".repeat(64)],
     }), field).toThrow(/diagnostics differ/);
   }
+});
+
+test("projects classification failures without disclosing request URLs or error text", () => {
+  const url = "https://pay.ci.clean-pay.dev/private-path?secret=value&mode=test";
+  const message = "exact classifier rejected private input";
+  const reason = createChatwootClassificationFailureReason({
+    error: new Error(message),
+    method: "GET",
+    resourceType: "fetch",
+    url,
+  });
+  expect(reason).toMatch(
+    /^classification-[a-f0-9]{16}-GET-fetch-[a-f0-9]{12}-[a-f0-9]{16}-[a-f0-9]{12}$/,
+  );
+  expect(reason).not.toContain("private-path");
+  expect(reason).not.toContain("secret");
+  expect(reason).not.toContain(message);
 });
 
 test("validates the executable full history lifecycle and fails closed on near misses", () => {
