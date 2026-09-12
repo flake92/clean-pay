@@ -602,7 +602,7 @@ async function exerciseChatwootPhases(input: CaptureInput & {
       requestPage = undefined;
     }
     if (requestPage !== page) {
-      diagnostics.recordUnexpectedRequest(request.url());
+      diagnostics.recordUnexpectedRequest(request.url(), "foreign-page");
       await route.abort("blockedbyclient");
       return;
     }
@@ -615,7 +615,7 @@ async function exerciseChatwootPhases(input: CaptureInput & {
         staticAssetContract: input.staticAssetContract,
       }));
     } catch {
-      diagnostics.recordUnexpectedRequest(request.url());
+      diagnostics.recordUnexpectedRequest(request.url(), "classification");
       await route.abort("blockedbyclient");
       return;
     }
@@ -628,7 +628,7 @@ async function exerciseChatwootPhases(input: CaptureInput & {
       ledger.currentDocumentKey = classification.key as StrictRequestEntry["documentKey"];
     }
     if (ledger.currentDocumentKey === null) {
-      diagnostics.recordUnexpectedRequest(request.url());
+      diagnostics.recordUnexpectedRequest(request.url(), "no-document");
       await route.abort("blockedbyclient");
       return;
     }
@@ -640,7 +640,7 @@ async function exerciseChatwootPhases(input: CaptureInput & {
     ledger.entries.push(entry);
     ledger.byIdentity.set(request, entry);
     if (ledger.entries.length > MAXIMUM_REQUESTS) {
-      diagnostics.recordUnexpectedRequest(request.url());
+      diagnostics.recordUnexpectedRequest(request.url(), "request-overflow");
       await route.abort("blockedbyclient");
       return;
     }
@@ -657,7 +657,7 @@ async function exerciseChatwootPhases(input: CaptureInput & {
         ownerIsMainFrame = ownerFrame === page.mainFrame();
         ownerUrl = ownerFrame?.url() ?? null;
       } catch {
-        diagnostics.recordUnexpectedRequest(request.url());
+        diagnostics.recordUnexpectedRequest(request.url(), "widget-owner");
         await route.abort("blockedbyclient");
         return;
       }
@@ -694,12 +694,12 @@ async function exerciseChatwootPhases(input: CaptureInput & {
       && !barrierConsumed
     ) {
       if (initialCabinetFreshWidgetCount < 1) {
-        diagnostics.recordUnexpectedRequest(request.url());
+        diagnostics.recordUnexpectedRequest(request.url(), "barrier-count");
         await route.abort("blockedbyclient");
         return;
       }
       if (barrierDecision.action !== "hold") {
-        diagnostics.recordUnexpectedRequest(request.url());
+        diagnostics.recordUnexpectedRequest(request.url(), "barrier-decision");
         await route.abort("blockedbyclient");
         return;
       }
@@ -3024,6 +3024,7 @@ function installDiagnostics(context: BrowserContext, eventLedger: EventLedger) {
   const unexpectedPageErrors: string[] = [];
   const unexpectedRequests: string[] = [];
   let expectedPlaywrightConsoleCount = 0;
+  let firstUnexpectedRequestReason: string | null = null;
   let unexpectedWebSocketCount = 0;
   let unexpectedServiceWorkerCount = 0;
   const record = (callback: () => void) => {
@@ -3040,6 +3041,7 @@ function installDiagnostics(context: BrowserContext, eventLedger: EventLedger) {
   }));
   const snapshot = () => Object.freeze({
     expectedPlaywrightConsoleCount,
+    firstUnexpectedRequestReason,
     unexpectedConsole: Object.freeze([...unexpectedConsole]),
     unexpectedPageErrors: Object.freeze([...unexpectedPageErrors]),
     unexpectedPages: Object.freeze([...unexpectedPages]),
@@ -3071,8 +3073,11 @@ function installDiagnostics(context: BrowserContext, eventLedger: EventLedger) {
         sha256Text(String(error?.message ?? error)),
       )));
     },
-    recordUnexpectedRequest(url: string) {
-      record(() => pushBounded(unexpectedRequests, sha256Text(url)));
+    recordUnexpectedRequest(url: string, reason: string) {
+      record(() => {
+        firstUnexpectedRequestReason ??= reason;
+        pushBounded(unexpectedRequests, sha256Text(url));
+      });
     },
     recordUnexpectedWebSocket() {
       record(() => {
@@ -3096,6 +3101,7 @@ function installDiagnostics(context: BrowserContext, eventLedger: EventLedger) {
 
 export function assertChatwootDiagnosticsForTest(observed: Readonly<{
   expectedPlaywrightConsoleCount: number;
+  firstUnexpectedRequestReason: string | null;
   unexpectedConsole: readonly string[];
   unexpectedPageErrors: readonly string[];
   unexpectedPages: readonly string[];
@@ -3121,7 +3127,10 @@ export function assertChatwootDiagnosticsForTest(observed: Readonly<{
       + `pages=${observed.unexpectedPages.length},`
       + `requests=${observed.unexpectedRequests.length},`
       + `serviceWorkers=${observed.unexpectedServiceWorkerCount},`
-      + `webSockets=${observed.unexpectedWebSocketCount}.`,
+      + `webSockets=${observed.unexpectedWebSocketCount},`
+      + `consoleHash:${observed.unexpectedConsole[0] ?? "none"},`
+      + `requestHash:${observed.unexpectedRequests[0] ?? "none"},`
+      + `requestReason:${observed.firstUnexpectedRequestReason ?? "none"}.`,
     );
   }
 }

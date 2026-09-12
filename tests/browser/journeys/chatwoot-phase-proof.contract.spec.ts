@@ -2765,6 +2765,22 @@ test("Chatwoot provider causal order accepts an independent referral between pro
     .toThrow(/credential projection/);
 });
 
+test("Chatwoot recreated causal order accepts an independent referral between profile reads", () => {
+  const original = strictProviderFixture("recreated");
+  const observed = structuredClone(original);
+  [observed.entries[34], observed.entries[35]] = [observed.entries[35], observed.entries[34]];
+  observed.entries.forEach((entry, index) => { entry.sequence = index + 1; });
+
+  const validated = assertChatwootPhaseProviderLedger(observed, "recreated");
+  expect(canonicalizeChatwootProviderArrivalOrder(validated.entries, "recreated"))
+    .toEqual(original.entries);
+
+  const changed = structuredClone(observed);
+  changed.entries[34].credential_contract.header_names = ["authorization"];
+  expect(() => assertChatwootPhaseProviderLedger(changed, "recreated"))
+    .toThrow(/credential projection/);
+});
+
 test("Chatwoot gap ledger accepts early OIDC authorization with duplicate contact and trailing readiness", () => {
   const original = strictProviderFixture("gap");
   const observed = structuredClone(original);
@@ -3039,6 +3055,7 @@ test("accepts only Playwright's exact service-worker block diagnostic", () => {
 test("accepts only a bounded number of exact Playwright service-worker warnings", () => {
   const exact = {
     expectedPlaywrightConsoleCount: 0,
+    firstUnexpectedRequestReason: null,
     unexpectedConsole: [],
     unexpectedPageErrors: [],
     unexpectedPages: [],
