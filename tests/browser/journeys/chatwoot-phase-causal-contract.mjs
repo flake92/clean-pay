@@ -12,6 +12,7 @@ export function createChatwootPhaseCausalContract(maximumEvents = 32) {
   let postClearOffset;
   let preClearSealed = false;
   let firstSetUserConversationCookiePresent;
+  let preConfirmationRetryObserved = false;
 
   const append = (record) => {
     records.push(Object.freeze(record));
@@ -107,6 +108,16 @@ export function createChatwootPhaseCausalContract(maximumEvents = 32) {
       }
       append({ kind: "boundary", method: input.method, url: url.href, presence });
       if (input.method === "setUser") {
+        if (
+          Object.hasOwn(ordinals, "cabinetSetUserObserved")
+          && !Object.hasOwn(ordinals, "cabinetIdentityConfirmedObserved")
+          && !preConfirmationRetryObserved
+          && presence.conversationCookiePresent
+          && !presence.userCookiePresent
+        ) {
+          preConfirmationRetryObserved = true;
+          return "cabinet-set-user-retry";
+        }
         if (
           Object.hasOwn(ordinals, "cabinetSetUserObserved")
           && ordinals.cabinetIdentityConfirmedObserved === 6
