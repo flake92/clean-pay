@@ -3275,6 +3275,36 @@ test("executes the exact direct-cabinet browser classifier with serialized parit
     key: "app-root-rsc",
     navigation: false,
   });
+  const loginRootRsc = request(
+    "https://pay.ci.clean-pay.dev/login?redirect_to=%2F&_rsc=opaque-state_1",
+    {
+      isMainFrame: false,
+      isNavigation: false,
+      resourceType: "fetch",
+    },
+  );
+  expect(classifyChatwootPhaseBrowserRequest(loginRootRsc, state)).toMatchObject({
+    disposition: "continue",
+    expectedStatuses: [200, 307],
+    key: "app-login-root-rsc",
+    navigation: false,
+  });
+  for (const redirectTo of ["/profile", "/referral"]) {
+    expect(() => classifyChatwootPhaseBrowserRequest(request(
+      `https://pay.ci.clean-pay.dev/login?redirect_to=${encodeURIComponent(redirectTo)}&_rsc=opaque-state_1`,
+      {
+        isMainFrame: false,
+        isNavigation: false,
+        resourceType: "fetch",
+      },
+    ), state), redirectTo).toThrow(/login RSC redirect/);
+  }
+  expect(assertChatwootPhaseRedirect({
+    from: { classification: { key: "app-root-rsc" }, url: rootRsc.url },
+    location: "/login?redirect_to=%2F&_rsc=opaque-state_1",
+    status: 307,
+    to: { classification: { key: "app-login-root-rsc" }, url: loginRootRsc.url },
+  }, "recreated")).toBe("app-root-rsc:307->app-login-root-rsc");
   for (const url of [
     "https://pay.ci.clean-pay.dev/",
     "https://pay.ci.clean-pay.dev/?_rsc=invalid%20state",
@@ -3546,6 +3576,14 @@ test("accepts the exact recreated terminal SPA cabinet browser flow", () => {
     ...staticRecordsForDocument(staticAssetContract, "app-login-document"),
     record("turnstile-widget-script", "app-login-document", 200, "application/javascript"),
     record("app-root-rsc", "app-login-document", 307, null, {
+      expectedStatuses: [200, 307],
+    }),
+    record("app-login-root-rsc", "app-login-document", 307, null, {
+      edge: "app-root-rsc:307->app-login-root-rsc",
+      expectedStatuses: [200, 307],
+    }),
+    record("app-login-root-rsc", "app-login-document", 200, "text/x-component", {
+      edge: "app-login-root-rsc:307->app-login-root-rsc",
       expectedStatuses: [200, 307],
     }),
     record("app-telegram-start", "app-login-document", 307, "application/octet-stream", {
