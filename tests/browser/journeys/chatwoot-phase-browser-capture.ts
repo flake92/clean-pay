@@ -614,8 +614,16 @@ async function exerciseChatwootPhases(input: CaptureInput & {
         generation,
         staticAssetContract: input.staticAssetContract,
       }));
-    } catch {
-      diagnostics.recordUnexpectedRequest(request.url(), "classification");
+    } catch (error) {
+      diagnostics.recordUnexpectedRequest(
+        request.url(),
+        createChatwootClassificationFailureReason({
+          error,
+          method: request.method(),
+          resourceType: request.resourceType(),
+          url: request.url(),
+        }),
+      );
       await route.abort("blockedbyclient");
       return;
     }
@@ -5199,6 +5207,25 @@ async function areChatwootResponseBodiesSettled(
 function sanitizeChatwootCaptureCauseMessage(error: unknown) {
   if (!(error instanceof Error) || typeof error.message !== "string") return null;
   return error.message.replace(/[^\w .:/()[\]-]/g, "").slice(0, 240);
+}
+
+export function createChatwootClassificationFailureReason(input: Readonly<{
+  error: unknown;
+  method: string;
+  resourceType: string;
+  url: string;
+}>) {
+  const message = input.error instanceof Error ? input.error.message : String(input.error);
+  const projection = safeUrlProjection(input.url);
+  return [
+    "classification",
+    sha256Text(message).slice(0, 16),
+    input.method,
+    input.resourceType,
+    String(projection.originSha256).slice(0, 12),
+    String(projection.pathnameSha256).slice(0, 16),
+    sha256Json(projection.queryKeys).slice(0, 12),
+  ].join("-");
 }
 
 function pushBounded(target: string[], value: string) {
