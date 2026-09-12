@@ -2256,16 +2256,7 @@ async function finishBrowserRequestContract(
   let declarationBytes = 0;
   let staticResponseBytes = 0;
   for (const [order, { classification, documentKey, request }] of ledger.entries.entries()) {
-    const response = await boundedChatwootBrowserOperation(
-      request.response(),
-      5_000,
-      "Chatwoot request response",
-    );
-    const observedResponse = ledger.responseByIdentity.get(request);
-    if ((response === null) !== (observedResponse === undefined)
-      || (response !== null && observedResponse !== response)) {
-      throw new Error("Chatwoot completed response identity differs from its request ledger.");
-    }
+    const response = ledger.responseByIdentity.get(request) ?? null;
     const evidence = response
       ? await boundedChatwootBrowserOperation(
         ledger.responseEvidenceByIdentity.get(request) ?? Promise.reject(
@@ -2279,11 +2270,7 @@ async function finishBrowserRequestContract(
     let redirectEdge = null;
     if (redirectedFrom) {
       const source = ledger.byIdentity.get(redirectedFrom);
-      const sourceResponse = await boundedChatwootBrowserOperation(
-        redirectedFrom.response(),
-        5_000,
-        "Chatwoot redirect source response",
-      );
+      const sourceResponse = ledger.responseByIdentity.get(redirectedFrom) ?? null;
       const location = sourceResponse?.headers().location;
       if (!source || !sourceResponse || typeof location !== "string") {
         throw new Error("Chatwoot strict browser redirect chain is incomplete.");
@@ -2300,6 +2287,7 @@ async function finishBrowserRequestContract(
         entries: ledger.entries.slice(0, order),
         generation,
         redirectedSources,
+        responses: ledger.responseByIdentity,
         target: { classification, request },
       });
       if (reconstructed) {
@@ -2310,6 +2298,7 @@ async function finishBrowserRequestContract(
     const responseContentType = evidence?.responseContentType
       ?? (response ? normalizeResponseContentType(response.headers()["content-type"]) : null);
     const responseFailureSha256 = evidence?.responseFailureSha256 ?? null;
+    const responseStatus = response?.status() ?? null;
     let staticObservation = {
       staticResponseBytes: null as number | null,
       staticResponseSha256: null as string | null,
@@ -2367,7 +2356,7 @@ async function finishBrowserRequestContract(
     }
     if (
       response
-      && response.status() === 200
+      && responseStatus === 200
       && responseFailureSha256 === null
       && !classification.key.endsWith("-action")
       && new Set(["text/html", "text/x-component"])
@@ -2407,7 +2396,7 @@ async function finishBrowserRequestContract(
       redirectEdge,
       responseContentType,
       responseFailureSha256,
-      responseStatus: response?.status() ?? null,
+      responseStatus,
       ...staticObservation,
     };
     records.push(record);
@@ -2424,6 +2413,7 @@ async function finishBrowserRequestContract(
       entries: ledger.entries,
       generation,
       recordsByRequest,
+      responses: ledger.responseByIdentity,
       source: { classification, index: sourceIndex, request },
     });
     if (linked) {
@@ -2542,16 +2532,13 @@ async function reconstructExactChatwootRedirectSource(input: {
   entries: ReadonlyArray<StrictRequestEntry>;
   generation: "initial" | "recreated";
   redirectedSources: ReadonlySet<Request>;
+  responses: ReadonlyMap<Request, Response>;
   target: Pick<StrictRequestEntry, "classification" | "request">;
 }) {
   for (let index = input.entries.length - 1; index >= 0; index -= 1) {
     const source = input.entries[index];
     if (input.redirectedSources.has(source.request)) continue;
-    const sourceResponse = await boundedChatwootBrowserOperation(
-      source.request.response(),
-      5_000,
-      "Chatwoot reconstructed redirect source response",
-    );
+    const sourceResponse = input.responses.get(source.request) ?? null;
     const location = sourceResponse?.headers().location;
     if (!sourceResponse || typeof location !== "string") continue;
     const status = sourceResponse.status();
@@ -2581,15 +2568,12 @@ async function linkExactChatwootRedirectSuccessor(input: {
   recordsByRequest: ReadonlyMap<Request, {
     redirectEdge: string | null;
   }>;
+  responses: ReadonlyMap<Request, Response>;
   source: Pick<StrictRequestEntry, "classification" | "request"> & { index: number };
 }) {
   const sourceRecord = input.recordsByRequest.get(input.source.request);
   if (!sourceRecord) return null;
-  const sourceResponse = await boundedChatwootBrowserOperation(
-    input.source.request.response(),
-    5_000,
-    "Chatwoot redirect source successor response",
-  );
+  const sourceResponse = input.responses.get(input.source.request) ?? null;
   const location = sourceResponse?.headers().location;
   if (
     !sourceResponse

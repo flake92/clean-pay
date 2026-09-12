@@ -1596,16 +1596,23 @@ test("binds the causal route barrier and exact logout helper without fixture sub
   expect(source).toContain("const recordsByRequest = new Map<Request");
   expect(source).toContain("recordsByRequest.set(request, record)");
   expect(source).toContain("reconstructExactChatwootRedirectSource({");
-  expect(source).toContain("\"Chatwoot reconstructed redirect source response\"");
+  expect(source).toContain("responses: ledger.responseByIdentity");
+  expect(source).toContain("input.responses.get(source.request) ?? null");
   expect(source).toContain("linkExactChatwootRedirectSuccessor({");
   expect(source).toContain("const directSuccessor = input.source.request.redirectedTo();");
-  expect(source).toContain("\"Chatwoot redirect source successor response\"");
   expect(source).toContain("responseContentType: record.responseContentType");
   expect(source).toContain("Chatwoot strict browser redirect has no exact successor: ${JSON.stringify({");
   expect(source).toContain("responseFailureSha256: record.responseFailureSha256");
   expect(source).toContain("summarizeChatwootBrowserRequestContractForTest(");
   expect(source).toContain("chatwoot_browser_request_contract_mismatch");
   expect(source).not.toContain("Chatwoot redirect completion response");
+  const browserContractStart = source.indexOf("async function finishBrowserRequestContract(");
+  const browserContractEnd = source.indexOf(
+    "export function normalizeChatwootBrowserRecordsForContract(",
+  );
+  expect(browserContractStart).toBeGreaterThan(-1);
+  expect(browserContractEnd).toBeGreaterThan(browserContractStart);
+  expect(source.slice(browserContractStart, browserContractEnd)).not.toContain(".response()");
   expect(source.match(/if \(window !== window\.top\) return;/g)).toHaveLength(2);
   expect(source.indexOf("await recreatedCausality.sealPreClearGeneration(page)")).toBeLessThan(
     source.indexOf("await clearSyntheticLogoutState(page)"),
