@@ -44,6 +44,7 @@ const directSemanticDescriptorContracts = Object.freeze({
   "app-cabinet-rsc": Object.freeze({ disposition: "continue", expectedStatuses: [200, 307], navigation: false }),
   "app-login-action": Object.freeze({ disposition: "continue", expectedStatuses: [200], navigation: false }),
   "app-login-document": Object.freeze({ disposition: "continue", expectedStatuses: [200], navigation: true }),
+  "app-login-root-rsc": Object.freeze({ disposition: "continue", expectedStatuses: [200, 307], navigation: false }),
   "app-login-rsc": Object.freeze({ disposition: "continue", expectedStatuses: [200, 307], navigation: false }),
   "app-root-rsc": Object.freeze({ disposition: "continue", expectedStatuses: [200, 307], navigation: false }),
   "app-telegram-callback": Object.freeze({ disposition: "continue", expectedStatuses: [307], navigation: true }),
@@ -111,6 +112,8 @@ export function assertChatwootPhaseRedirect(input, generation) {
   }
   const edge = `${input.from.classification.key}:${input.status}->${input.to.classification.key}`;
   if (!new Set([
+    "app-root-rsc:307->app-login-root-rsc",
+    "app-login-root-rsc:307->app-login-root-rsc",
     "app-telegram-start:307->telegram-oidc-authorize",
     "telegram-oidc-authorize:302->app-telegram-callback",
     "app-telegram-callback:307->app-cabinet-document",
@@ -261,9 +264,12 @@ function classifyDirectCabinetRequest(input, state) {
     exactQueryKeys(url, url.searchParams.has("_rsc")
       ? ["redirect_to", "_rsc"]
       : ["redirect_to"]);
-    equal(url.searchParams.get("redirect_to"), "/cabinet", "login RSC redirect");
+    const redirectTo = url.searchParams.get("redirect_to");
+    if (!["/", "/cabinet"].includes(redirectTo)) {
+      fail("login RSC redirect does not match its exact contract.");
+    }
     if (url.searchParams.has("_rsc")) assertOpaque(url.searchParams.get("_rsc"), "login RSC");
-    descriptor.key = "app-login-rsc";
+    descriptor.key = redirectTo === "/" ? "app-login-root-rsc" : "app-login-rsc";
     descriptor.expectedStatuses = [200, 307];
     return freezeDescriptor(descriptor);
   }
@@ -436,7 +442,17 @@ function finalizeDirectCabinetBrowserContract(records, loadGraph) {
       || (counts["app-telegram-callback"] ?? 0) !== 0) {
       fail("Chatwoot terminal direct-cabinet browser proof is incomplete.");
     }
-    deepEqual(redirects, [], "Chatwoot terminal direct-cabinet redirects");
+    const exactTerminalRedirectLedgers = [
+      [],
+      ["app-root-rsc:307->app-login-root-rsc"],
+      [
+        "app-root-rsc:307->app-login-root-rsc",
+        "app-login-root-rsc:307->app-login-root-rsc",
+      ],
+    ];
+    if (!exactTerminalRedirectLedgers.some((expected) => (
+      JSON.stringify(redirects) === JSON.stringify(expected)
+    ))) fail("Chatwoot terminal direct-cabinet redirects is not exact.");
   } else {
     deepEqual(redirects, [
       "app-telegram-start:307->telegram-oidc-authorize",
@@ -833,7 +849,9 @@ function expectedContentTypes(key, status) {
   }
   if (key === "app-web-manifest") return ["application/manifest+json"];
   if (key.startsWith("chatwoot-widget-")) return ["text/html"];
-  if (status === 307 && key === "app-root-rsc") return [null, "text/plain"];
+  if (status === 307 && ["app-root-rsc", "app-login-root-rsc"].includes(key)) {
+    return [null, "text/plain"];
+  }
   if (key.endsWith("-rsc")) {
     return status === 307 ? ["application/octet-stream"] : ["text/x-component"];
   }
