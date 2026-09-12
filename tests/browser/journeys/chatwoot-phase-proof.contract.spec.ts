@@ -54,6 +54,7 @@ import {
   createChatwootHistoryClearGateForTest,
   installChatwootCommonRequestLifecycleForTest,
   isExpectedChatwootPlaywrightServiceWorkerBlockDiagnostic,
+  assertChatwootDiagnosticsForTest,
   isRetryableAtomicPhaseSnapshotError,
   isRecoverableChatwootLoginGotoAbort,
   boundedChatwootBrowserOperationForTest,
@@ -2722,6 +2723,31 @@ test("Chatwoot recreated provider ledger accepts the observed duplicate contact 
     .toThrow(/incomplete or outside|exact endpoint contract|credential projection/);
 });
 
+test("Chatwoot recreated provider ledger accepts readiness interleaved with the second login", () => {
+  const original = strictProviderFixture("recreated");
+  const observed = structuredClone(original);
+  observed.entries.splice(18, 0, structuredClone(original.entries[17]));
+  const secondLoginStart = observed.entries.findIndex((entry, index) => (
+    index > 0 && entry.effect === "challenge_verified"
+  ));
+  if (secondLoginStart < 0) throw new Error("Expected a second login boundary.");
+  const readiness = [1, 3, 4, 2, 5, 6, 7].map((index) => (
+    structuredClone(original.entries[index])
+  ));
+  observed.entries.splice(secondLoginStart + 3, 0, ...readiness.slice(0, 4));
+  observed.entries.splice(secondLoginStart + 8, 0, ...readiness.slice(4));
+  observed.entries.forEach((entry, index) => { entry.sequence = index + 1; });
+
+  expect(observed.entries).toHaveLength(50);
+  expect(assertChatwootPhaseProviderLedger(observed, "recreated").entries)
+    .toEqual(original.entries);
+
+  const changed = structuredClone(observed);
+  changed.entries[secondLoginStart + 5].credential_contract.header_names = [];
+  expect(() => assertChatwootPhaseProviderLedger(changed, "recreated"))
+    .toThrow(/exact endpoint contract|credential projection/);
+});
+
 test("Chatwoot gap ledger accepts early OIDC authorization with duplicate contact and trailing readiness", () => {
   const original = strictProviderFixture("gap");
   const observed = structuredClone(original);
@@ -2990,6 +3016,39 @@ test("accepts only Playwright's exact service-worker block diagnostic", () => {
       ...exact,
       [field]: value,
     }), field).toBe(false);
+  }
+});
+
+test("accepts the exact Playwright warning at most once per Chatwoot login document", () => {
+  const exact = {
+    expectedPlaywrightConsoleCount: 0,
+    unexpectedConsole: [],
+    unexpectedPageErrors: [],
+    unexpectedPages: [],
+    unexpectedRequests: [],
+    unexpectedServiceWorkerCount: 0,
+    unexpectedWebSocketCount: 0,
+  };
+  for (const expectedPlaywrightConsoleCount of [0, 1, 2]) {
+    expect(() => assertChatwootDiagnosticsForTest({
+      ...exact,
+      expectedPlaywrightConsoleCount,
+    })).not.toThrow();
+  }
+  expect(() => assertChatwootDiagnosticsForTest({
+    ...exact,
+    expectedPlaywrightConsoleCount: 3,
+  })).toThrow(/unexpected bounded diagnostic/);
+  for (const field of [
+    "unexpectedConsole",
+    "unexpectedPageErrors",
+    "unexpectedPages",
+    "unexpectedRequests",
+  ] as const) {
+    expect(() => assertChatwootDiagnosticsForTest({
+      ...exact,
+      [field]: ["a".repeat(64)],
+    }), field).toThrow(/unexpected bounded diagnostic/);
   }
 });
 
