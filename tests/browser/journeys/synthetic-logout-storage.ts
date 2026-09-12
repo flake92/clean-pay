@@ -30,58 +30,62 @@ export async function clearSyntheticLogoutState(page: Page) {
     throw new Error("Synthetic logout requires the exact application origin.");
   }
 
-  const before = await readStorageSnapshot(page);
-  const preservedValue = assertSyntheticLogoutStorageSnapshot(before, "before-clear");
+  let after: StorageSnapshot | null = null;
+  let preservedValue = "";
+  for (let attempt = 0; attempt < 8 && after === null; attempt += 1) {
+    const before = await readStorageSnapshot(page);
+    preservedValue = assertSyntheticLogoutStorageSnapshot(before, "before-clear");
+    after = await page.evaluate((contract) => {
+      if (location.origin !== contract.origin) {
+        throw new Error("Synthetic logout origin changed before storage clear.");
+      }
 
-  const after = await page.evaluate((contract) => {
-    if (location.origin !== contract.origin) {
-      throw new Error("Synthetic logout origin changed before storage clear.");
-    }
-
-    const fixtureEntries: Array<{ area: StorageArea; key: string; value: string }> = [];
-    for (const [area, storage] of [
-      ["localStorage", localStorage],
-      ["sessionStorage", sessionStorage],
-    ] as const) {
-      for (let index = 0; index < storage.length; index += 1) {
-        const key = storage.key(index);
-        if (key?.startsWith(contract.fixturePrefix)) {
-          fixtureEntries.push({ area, key, value: storage.getItem(key) ?? "" });
+      const fixtureEntries: Array<{ area: StorageArea; key: string; value: string }> = [];
+      for (const [area, storage] of [
+        ["localStorage", localStorage],
+        ["sessionStorage", sessionStorage],
+      ] as const) {
+        for (let index = 0; index < storage.length; index += 1) {
+          const key = storage.key(index);
+          if (key?.startsWith(contract.fixturePrefix)) {
+            fixtureEntries.push({ area, key, value: storage.getItem(key) ?? "" });
+          }
         }
       }
-    }
-    fixtureEntries.sort((left, right) => (
-      `${left.area}:${left.key}`.localeCompare(`${right.area}:${right.key}`)
-    ));
-    if (
-      fixtureEntries.length !== 1
-      || fixtureEntries[0]?.area !== "sessionStorage"
-      || fixtureEntries[0]?.key !== contract.preservedKey
-      || fixtureEntries[0]?.value !== contract.preservedValue
-    ) {
-      throw new Error("Synthetic logout storage changed after fixture validation.");
-    }
+      fixtureEntries.sort((left, right) => (
+        `${left.area}:${left.key}`.localeCompare(`${right.area}:${right.key}`)
+      ));
+      if (
+        fixtureEntries.length !== 1
+        || fixtureEntries[0]?.area !== "sessionStorage"
+        || fixtureEntries[0]?.key !== contract.preservedKey
+        || fixtureEntries[0]?.value !== contract.preservedValue
+      ) return null;
 
-    localStorage.clear();
-    sessionStorage.clear();
-    sessionStorage.setItem(contract.preservedKey, contract.preservedValue);
+      localStorage.clear();
+      sessionStorage.clear();
+      sessionStorage.setItem(contract.preservedKey, contract.preservedValue);
 
-    return {
-      fixtureEntries: [{
-        area: "sessionStorage" as const,
-        key: contract.preservedKey,
-        value: sessionStorage.getItem(contract.preservedKey) ?? "",
-      }],
-      localStorageKeyCount: localStorage.length,
-      origin: location.origin,
-      sessionStorageKeyCount: sessionStorage.length,
-    };
-  }, {
-    fixturePrefix: SYNTHETIC_FIXTURE_STORAGE_PREFIX,
-    origin: SYNTHETIC_APPLICATION_ORIGIN,
-    preservedKey: SYNTHETIC_TURNSTILE_STORAGE_KEY,
-    preservedValue,
-  });
+      return {
+        fixtureEntries: [{
+          area: "sessionStorage" as const,
+          key: contract.preservedKey,
+          value: sessionStorage.getItem(contract.preservedKey) ?? "",
+        }],
+        localStorageKeyCount: localStorage.length,
+        origin: location.origin,
+        sessionStorageKeyCount: sessionStorage.length,
+      };
+    }, {
+      fixturePrefix: SYNTHETIC_FIXTURE_STORAGE_PREFIX,
+      origin: SYNTHETIC_APPLICATION_ORIGIN,
+      preservedKey: SYNTHETIC_TURNSTILE_STORAGE_KEY,
+      preservedValue,
+    });
+  }
+  if (after === null) {
+    throw new Error("Synthetic logout storage did not stabilize before its bounded clear.");
+  }
 
   const restoredValue = assertSyntheticLogoutStorageSnapshot(after, "after-clear");
   if (restoredValue !== preservedValue) {

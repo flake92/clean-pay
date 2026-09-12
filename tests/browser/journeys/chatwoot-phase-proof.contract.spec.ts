@@ -3598,13 +3598,21 @@ test("accepts the exact recreated terminal SPA cabinet browser flow", () => {
   const cabinetAction = records.find(({ classification }) => (
     classification.key === "app-cabinet-action"
   ));
+  const loginRootRsc = records.find(({ classification, responseStatus }) => (
+    classification.key === "app-login-root-rsc" && responseStatus === 200
+  ));
   if (!cabinetAction) throw new Error("Expected a cabinet action record.");
+  if (!loginRootRsc) throw new Error("Expected a login-root RSC record.");
   cabinetAction.responseFailureSha256 = "a".repeat(64);
+  loginRootRsc.responseFailureSha256 = sha256("net::ERR_ABORTED");
 
   const normalized = normalizeChatwootBrowserRecordsForContract(records, "recreated");
   expect(normalized).toHaveLength(records.length - postStartStaticBurst.length);
   expect(normalized.find(({ classification }) => (
     classification.key === "app-cabinet-action"
+  ))?.responseFailureSha256).toBeNull();
+  expect(normalized.find(({ classification, responseStatus }) => (
+    classification.key === "app-login-root-rsc" && responseStatus === 200
   ))?.responseFailureSha256).toBeNull();
   const finalized = finalizeChatwootPhaseBrowserContract(normalized, {
     cssMediaReferences: terminalGraph.cssMediaReferences,
@@ -3648,6 +3656,23 @@ test("accepts the exact recreated terminal SPA cabinet browser flow", () => {
   widgetFrame.responseFailureSha256 = "b".repeat(64);
   expect(() => finalizeChatwootPhaseBrowserContract(
     normalizeChatwootBrowserRecordsForContract(unrelatedFailure, "recreated"),
+    {
+      cssMediaReferences: terminalGraph.cssMediaReferences,
+      generation: "recreated",
+      referenceStaticContract: initialReference,
+      responseDeclarationsByDocument: terminalGraph.responseDeclarationsByDocument,
+      staticAssetContract,
+    },
+  )).toThrow(/response failure/);
+
+  const unrelatedLoginRootFailure = structuredClone(records);
+  const failedLoginRootRsc = unrelatedLoginRootFailure.find(({ classification, responseStatus }) => (
+    classification.key === "app-login-root-rsc" && responseStatus === 200
+  ));
+  if (!failedLoginRootRsc) throw new Error("Expected a login-root RSC record.");
+  failedLoginRootRsc.responseFailureSha256 = "c".repeat(64);
+  expect(() => finalizeChatwootPhaseBrowserContract(
+    normalizeChatwootBrowserRecordsForContract(unrelatedLoginRootFailure, "recreated"),
     {
       cssMediaReferences: terminalGraph.cssMediaReferences,
       generation: "recreated",
