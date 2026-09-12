@@ -3264,6 +3264,29 @@ test("executes the exact direct-cabinet browser classifier with serialized parit
     staticAssetContract: wrongStaticPathType,
   })).toThrow(/direct-cabinet static route contract is invalid/);
   expect(live).toMatchObject({ key: "app-login-document", navigation: true });
+  const rootRsc = request("https://pay.ci.clean-pay.dev/?_rsc=opaque-state_1", {
+    isMainFrame: false,
+    isNavigation: false,
+    resourceType: "fetch",
+  });
+  expect(classifyChatwootPhaseBrowserRequest(rootRsc, state)).toMatchObject({
+    disposition: "continue",
+    expectedStatuses: [200, 307],
+    key: "app-root-rsc",
+    navigation: false,
+  });
+  for (const url of [
+    "https://pay.ci.clean-pay.dev/",
+    "https://pay.ci.clean-pay.dev/?_rsc=invalid%20state",
+    "https://pay.ci.clean-pay.dev/?_rsc=opaque-state_1&extra=1",
+    "https://pay.ci.clean-pay.dev/profile?_rsc=opaque-state_1",
+  ]) {
+    expect(() => classifyChatwootPhaseBrowserRequest(request(url, {
+      isMainFrame: false,
+      isNavigation: false,
+      resourceType: "fetch",
+    }), state), url).toThrow();
+  }
 
   for (const [label, url] of [
     ["profile target", "https://pay.ci.clean-pay.dev/login?redirect_to=%2Fprofile"],

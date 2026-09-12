@@ -45,6 +45,7 @@ const directSemanticDescriptorContracts = Object.freeze({
   "app-login-action": Object.freeze({ disposition: "continue", expectedStatuses: [200], navigation: false }),
   "app-login-document": Object.freeze({ disposition: "continue", expectedStatuses: [200], navigation: true }),
   "app-login-rsc": Object.freeze({ disposition: "continue", expectedStatuses: [200, 307], navigation: false }),
+  "app-root-rsc": Object.freeze({ disposition: "continue", expectedStatuses: [200, 307], navigation: false }),
   "app-telegram-callback": Object.freeze({ disposition: "continue", expectedStatuses: [307], navigation: true }),
   "app-telegram-start": Object.freeze({ disposition: "continue", expectedStatuses: [307], navigation: true }),
   "app-web-manifest": Object.freeze({ disposition: "continue", expectedStatuses: [200], navigation: false }),
@@ -266,7 +267,7 @@ function classifyDirectCabinetRequest(input, state) {
     descriptor.expectedStatuses = [200, 307];
     return freezeDescriptor(descriptor);
   }
-  if (["/", "/profile"].includes(url.pathname)) {
+  if (url.pathname === "/profile") {
     fail("Chatwoot direct-cabinet resource attempted the provider-profile path.");
   }
   return classifyProviderOverlapBrowserRequest(input, {
