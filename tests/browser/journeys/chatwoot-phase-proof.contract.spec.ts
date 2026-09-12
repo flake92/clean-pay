@@ -3072,7 +3072,12 @@ test("accepts only a bounded number of exact Playwright service-worker warnings"
   expect(() => assertChatwootDiagnosticsForTest({
     ...exact,
     expectedPlaywrightConsoleCount: 33,
-  })).toThrow(/expectedConsole=33,console=0,pageErrors=0,pages=0,requests=0,serviceWorkers=0,webSockets=0/);
+  })).toThrow(/requestReason:none,expectedConsole=33,console=0,pageErrors=0,pages=0,requests=0,serviceWorkers=0,webSockets=0/);
+  expect(() => assertChatwootDiagnosticsForTest({
+    ...exact,
+    firstUnexpectedRequestReason: "classification",
+    unexpectedRequests: ["a".repeat(64)],
+  })).toThrow(/diagnostics differ: requestReason:classification,expectedConsole=0/);
   for (const field of [
     "unexpectedConsole",
     "unexpectedPageErrors",
