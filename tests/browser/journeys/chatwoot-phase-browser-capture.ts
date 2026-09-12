@@ -3089,20 +3089,32 @@ function installDiagnostics(context: BrowserContext, eventLedger: EventLedger) {
     },
     snapshot,
     assertClean() {
-      const observed = snapshot();
-      if (
-        observed.expectedPlaywrightConsoleCount !== 1
-        || observed.unexpectedPages.length > 0
-        || observed.unexpectedConsole.length > 0
-        || observed.unexpectedPageErrors.length > 0
-        || observed.unexpectedRequests.length > 0
-        || observed.unexpectedWebSocketCount > 0
-        || observed.unexpectedServiceWorkerCount > 0
-      ) {
-        throw new Error("Chatwoot browser emitted an unexpected bounded diagnostic.");
-      }
+      assertChatwootDiagnosticsForTest(snapshot());
     },
   });
+}
+
+export function assertChatwootDiagnosticsForTest(observed: Readonly<{
+  expectedPlaywrightConsoleCount: number;
+  unexpectedConsole: readonly string[];
+  unexpectedPageErrors: readonly string[];
+  unexpectedPages: readonly string[];
+  unexpectedRequests: readonly string[];
+  unexpectedServiceWorkerCount: number;
+  unexpectedWebSocketCount: number;
+}>) {
+  // The lifecycle loads two login documents (initial and recreated). Chromium
+  // can emit the exact Playwright service-worker warning for either document,
+  // both documents, or neither when registration state is already warm.
+  if (observed.expectedPlaywrightConsoleCount > 2
+    || observed.unexpectedPages.length > 0
+    || observed.unexpectedConsole.length > 0
+    || observed.unexpectedPageErrors.length > 0
+    || observed.unexpectedRequests.length > 0
+    || observed.unexpectedWebSocketCount > 0
+    || observed.unexpectedServiceWorkerCount > 0) {
+    throw new Error("Chatwoot browser emitted an unexpected bounded diagnostic.");
+  }
 }
 
 type ChatwootConsoleDiagnostic = Readonly<{
@@ -4451,16 +4463,14 @@ function normalizeProviderLedgerEntries(
   if (entries.length === expectedLength) return entries;
   let normalized = entries;
   while (normalized.length > expectedLength) {
-    const embeddedRecreatedReadinessStart = embeddedRecreatedReadinessCycleIndex(
+    const embeddedRecreatedReadinessIndexes = embeddedRecreatedReadinessCycleIndexes(
       normalized,
       expectedLength,
     );
-    if (embeddedRecreatedReadinessStart !== null) {
+    if (embeddedRecreatedReadinessIndexes !== null) {
+      const readinessIndexes = new Set(embeddedRecreatedReadinessIndexes);
       normalized = resequenceProviderEntries(
-        normalized.filter((_, index) => (
-          index < embeddedRecreatedReadinessStart
-          || index >= embeddedRecreatedReadinessStart + 7
-        )),
+        normalized.filter((_, index) => !readinessIndexes.has(index)),
       );
       continue;
     }
@@ -4511,16 +4521,34 @@ function normalizeProviderLedgerEntries(
   return normalized;
 }
 
-function embeddedRecreatedReadinessCycleIndex(
+function embeddedRecreatedReadinessCycleIndexes(
   entries: Array<Record<string, unknown>>,
   expectedLength: number,
 ) {
   if (expectedLength !== recreatedProviderEffectSequence.length) return null;
   const initialLength = initialProviderEffectSequence.length;
-  for (let index = initialLength; index <= entries.length - 7; index += 1) {
-    if (isExactProviderReadinessCycle(entries, index)) return index;
+  const expectedKinds = [
+    "plans",
+    "metadata",
+    "jwks",
+    "/api/v1/public/auth/email/start",
+    "/api/v1/public/auth/identify",
+    "/api/v1/public/auth/service-session",
+    "/api/v1/public/auth/notification-preferences",
+  ];
+  const firstIndexByKind = new Map<string, number>();
+  for (let index = initialLength; index < entries.length; index += 1) {
+    const kind = exactProviderReadinessKind(entries[index]!);
+    if (kind !== null && !firstIndexByKind.has(kind)) firstIndexByKind.set(kind, index);
   }
-  return null;
+  if (!expectedKinds.every((kind) => firstIndexByKind.has(kind))) return null;
+  const indexes = expectedKinds.map((kind) => firstIndexByKind.get(kind)!);
+  const [plans, , , emailStart, identify, serviceSession, preferences] = indexes;
+  if (!(plans < emailStart
+    && emailStart < identify
+    && identify < serviceSession
+    && serviceSession < preferences)) return null;
+  return indexes;
 }
 
 function resequenceProviderEntries(entries: Array<Record<string, unknown>>) {
