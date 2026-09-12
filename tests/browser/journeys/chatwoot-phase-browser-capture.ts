@@ -73,6 +73,7 @@ const MAXIMUM_SERVER_ACTIONS = 200;
 const MAXIMUM_STORAGE_KEYS = 128;
 const VIEWPORT = Object.freeze({ width: 1440, height: 900 });
 const EMPTY_BODY_SHA256 = sha256Text("");
+const PLAYWRIGHT_RESPONSE_ABORT_SHA256 = sha256Text("net::ERR_ABORTED");
 const CHATWOOT_PLAYWRIGHT_BODY_KEYS = Object.freeze([
   "app-cabinet-action",
   "app-login-root-rsc",
@@ -2632,6 +2633,14 @@ export function normalizeChatwootBrowserRecordsForContract(
     const seenStaticPaths = new Set<string>();
     let afterTelegramStart = false;
     return records.flatMap((record) => {
+      if (
+        record.classification.key === "app-login-root-rsc"
+        && record.responseStatus === 200
+        && record.responseContentType === "text/x-component"
+        && record.responseFailureSha256 === PLAYWRIGHT_RESPONSE_ABORT_SHA256
+      ) {
+        return [{ ...record, responseFailureSha256: null }];
+      }
       if (
         record.classification.key === "app-telegram-start"
         && record.classification.navigation
