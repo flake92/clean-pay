@@ -1754,36 +1754,40 @@ test("executes the direct-cabinet causal reducer and fails closed on reordered l
     conversationCookiePresent: true,
     userCookiePresent: true,
   };
-  const exact = createChatwootPhaseCausalContract();
-  primeAndSealCausalContract(exact);
-  exact.markClear(absent);
-  expect(exact.observeDocument({
-    presence: absent,
-    url: "https://pay.ci.clean-pay.dev/login?redirect_to=%2Fcabinet",
-  })).toBe("login-document");
-  exact.markNegativeLoginCheckpoint({
-    presence: absent,
-    url: "https://pay.ci.clean-pay.dev/login?redirect_to=%2Fcabinet",
-  });
-  expect(exact.observeDocument({
-    presence: absent,
-    url: "https://pay.ci.clean-pay.dev/cabinet",
-  })).toBe("cabinet-document");
+  const prepareRecreatedCabinet = () => {
+    const causal = createChatwootPhaseCausalContract();
+    primeAndSealCausalContract(causal);
+    causal.markClear(absent);
+    expect(causal.observeDocument({
+      presence: absent,
+      url: "https://pay.ci.clean-pay.dev/login?redirect_to=%2Fcabinet",
+    })).toBe("login-document");
+    causal.markNegativeLoginCheckpoint({
+      presence: absent,
+      url: "https://pay.ci.clean-pay.dev/login?redirect_to=%2Fcabinet",
+    });
+    expect(causal.observeDocument({
+      presence: absent,
+      url: "https://pay.ci.clean-pay.dev/cabinet",
+    })).toBe("cabinet-document");
+    return causal;
+  };
+  const exact = prepareRecreatedCabinet();
   expect(exact.observeBoundary({
     method: "setUser",
     presence: { conversationCookiePresent: true, userCookiePresent: false },
     url: "https://pay.ci.clean-pay.dev/cabinet",
   })).toBe("cabinet-set-user");
   expect(exact.observeBoundary({
+    method: "setUser",
+    presence: { conversationCookiePresent: true, userCookiePresent: false },
+    url: "https://pay.ci.clean-pay.dev/cabinet",
+  })).toBe("cabinet-set-user-retry");
+  expect(exact.observeBoundary({
     method: "identity.confirmed",
     presence: pair,
     url: "https://pay.ci.clean-pay.dev/cabinet",
   })).toBe("cabinet-identity-confirmed");
-  expect(exact.observeBoundary({
-    method: "setUser",
-    presence: pair,
-    url: "https://pay.ci.clean-pay.dev/cabinet",
-  })).toBe("cabinet-set-user-idempotent");
   expect(exact.observeBoundary({
     method: "identity.confirmed",
     presence: pair,
@@ -1799,6 +1803,45 @@ test("executes the direct-cabinet causal reducer and fails closed on reordered l
     cabinetSetUserCount: 1,
     cabinetIdentityConfirmedCount: 1,
   });
+
+  const postConfirmationDuplicate = prepareRecreatedCabinet();
+  postConfirmationDuplicate.observeBoundary({
+    method: "setUser",
+    presence: { conversationCookiePresent: true, userCookiePresent: false },
+    url: "https://pay.ci.clean-pay.dev/cabinet",
+  });
+  postConfirmationDuplicate.observeBoundary({
+    method: "identity.confirmed",
+    presence: pair,
+    url: "https://pay.ci.clean-pay.dev/cabinet",
+  });
+  expect(postConfirmationDuplicate.observeBoundary({
+    method: "setUser",
+    presence: pair,
+    url: "https://pay.ci.clean-pay.dev/cabinet",
+  })).toBe("cabinet-set-user-idempotent");
+  expect(postConfirmationDuplicate.observeBoundary({
+    method: "identity.confirmed",
+    presence: pair,
+    url: "https://pay.ci.clean-pay.dev/cabinet",
+  })).toBe("cabinet-identity-confirmed-idempotent");
+
+  for (const invalidRetryPresence of [
+    absent,
+    pair,
+  ]) {
+    const invalidRetry = prepareRecreatedCabinet();
+    invalidRetry.observeBoundary({
+      method: "setUser",
+      presence: { conversationCookiePresent: true, userCookiePresent: false },
+      url: "https://pay.ci.clean-pay.dev/cabinet",
+    });
+    expect(() => invalidRetry.observeBoundary({
+      method: "setUser",
+      presence: invalidRetryPresence,
+      url: "https://pay.ci.clean-pay.dev/cabinet",
+    })).toThrow(/user-cookie-negative/);
+  }
 
   const prematureUserCookie = createChatwootPhaseCausalContract();
   primeAndSealCausalContract(prematureUserCookie);
