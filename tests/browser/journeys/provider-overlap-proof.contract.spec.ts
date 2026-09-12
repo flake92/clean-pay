@@ -2306,6 +2306,34 @@ test("canonicalizes the passive profile action and Chatwoot SDK arrival pair", (
   ])).not.toEqual(normalizeProviderOverlapRequestContractSemanticLedger(profileSdkFirst));
 });
 
+test("canonicalizes the passive cabinet action and Chatwoot SDK arrival pair", () => {
+  const cabinetSdkFirst = [
+    semantic("app-cabinet-document", 200, "text/html"),
+    semantic("app-brand-logo", 200, "image/png"),
+    semantic("chatwoot-sdk-script", 200, "application/javascript"),
+    semantic("app-cabinet-action", 200, "text/x-component"),
+    semantic("app-root-rsc", 200, "text/x-component"),
+  ];
+  const cabinetActionFirst = [
+    ...cabinetSdkFirst.slice(0, 2),
+    semantic("app-cabinet-action", 200, "text/x-component"),
+    semantic("chatwoot-sdk-script", 200, "application/javascript"),
+    ...cabinetSdkFirst.slice(4),
+  ];
+  expect(cabinetActionFirst).not.toEqual(cabinetSdkFirst);
+  expect(normalizeProviderOverlapRequestContractSemanticLedger(cabinetActionFirst))
+    .toEqual(normalizeProviderOverlapRequestContractSemanticLedger(cabinetSdkFirst));
+  expect(normalizeProviderOverlapRequestContractSemanticLedger([
+    ...cabinetSdkFirst.slice(0, 2),
+    {
+      ...semantic("chatwoot-sdk-script", 200, "application/javascript"),
+      responseFailureSha256: sha256("net::ERR_FAILED"),
+    },
+    semantic("app-cabinet-action", 200, "text/x-component"),
+    ...cabinetSdkFirst.slice(4),
+  ])).not.toEqual(normalizeProviderOverlapRequestContractSemanticLedger(cabinetActionFirst));
+});
+
 test("prearms profile load and keeps the exact cabinet URL at DOM content", async () => {
   const runnerSource = await readFile(
     path.resolve(__dirname, "prove-provider-overlap.mjs"),
