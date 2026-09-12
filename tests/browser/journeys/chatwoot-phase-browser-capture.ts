@@ -5,6 +5,7 @@ import {
   type Browser,
   type BrowserContext,
   type CDPSession,
+  type ConsoleMessage,
   type Locator,
   type Page,
   type Request,
@@ -3022,6 +3023,7 @@ function installDiagnostics(context: BrowserContext, eventLedger: EventLedger) {
   const unexpectedConsole: string[] = [];
   const unexpectedPageErrors: string[] = [];
   const unexpectedRequests: string[] = [];
+  let expectedPlaywrightConsoleCount = 0;
   let unexpectedWebSocketCount = 0;
   let unexpectedServiceWorkerCount = 0;
   const record = (callback: () => void) => {
@@ -3037,6 +3039,7 @@ function installDiagnostics(context: BrowserContext, eventLedger: EventLedger) {
     pushBounded(unexpectedPages, sha256Text(page.url()));
   }));
   const snapshot = () => Object.freeze({
+    expectedPlaywrightConsoleCount,
     unexpectedConsole: Object.freeze([...unexpectedConsole]),
     unexpectedPageErrors: Object.freeze([...unexpectedPageErrors]),
     unexpectedPages: Object.freeze([...unexpectedPages]),
@@ -3048,10 +3051,21 @@ function installDiagnostics(context: BrowserContext, eventLedger: EventLedger) {
     bindPrimaryPage(page: Page) {
       if (primaryPage) throw new Error("Chatwoot diagnostics primary page is already bound.");
       primaryPage = page;
-      page.on("console", (message) => record(() => pushBounded(
-        unexpectedConsole,
-        sha256Json({ type: message.type(), text: message.text() }),
-      )));
+      page.on("console", (message) => record(() => {
+        if (isExpectedChatwootPlaywrightServiceWorkerBlockDiagnostic(
+          chatwootConsoleDiagnostic(message),
+        )) {
+          expectedPlaywrightConsoleCount = Math.min(
+            expectedPlaywrightConsoleCount + 1,
+            MAXIMUM_EVENTS + 1,
+          );
+          return;
+        }
+        pushBounded(
+          unexpectedConsole,
+          sha256Json({ type: message.type(), text: message.text() }),
+        );
+      }));
       page.on("pageerror", (error) => record(() => pushBounded(
         unexpectedPageErrors,
         sha256Text(String(error?.message ?? error)),
@@ -3077,7 +3091,8 @@ function installDiagnostics(context: BrowserContext, eventLedger: EventLedger) {
     assertClean() {
       const observed = snapshot();
       if (
-        observed.unexpectedPages.length > 0
+        observed.expectedPlaywrightConsoleCount !== 1
+        || observed.unexpectedPages.length > 0
         || observed.unexpectedConsole.length > 0
         || observed.unexpectedPageErrors.length > 0
         || observed.unexpectedRequests.length > 0
@@ -3088,6 +3103,38 @@ function installDiagnostics(context: BrowserContext, eventLedger: EventLedger) {
       }
     },
   });
+}
+
+type ChatwootConsoleDiagnostic = Readonly<{
+  argumentCount: number;
+  columnNumber: number;
+  lineNumber: number;
+  text: string;
+  type: string;
+  url: string;
+}>;
+
+function chatwootConsoleDiagnostic(message: ConsoleMessage): ChatwootConsoleDiagnostic {
+  const location = message.location();
+  return Object.freeze({
+    argumentCount: message.args().length,
+    columnNumber: Number.isSafeInteger(location.columnNumber) ? location.columnNumber : 0,
+    lineNumber: Number.isSafeInteger(location.lineNumber) ? location.lineNumber : 0,
+    text: message.text(),
+    type: message.type(),
+    url: location.url ?? "",
+  });
+}
+
+export function isExpectedChatwootPlaywrightServiceWorkerBlockDiagnostic(
+  value: ChatwootConsoleDiagnostic,
+) {
+  return value.argumentCount === 1
+    && value.columnNumber === 86
+    && value.lineNumber === 2
+    && value.text === "Service Worker registration blocked by Playwright"
+    && value.type === "warning"
+    && value.url === "";
 }
 
 export function createChatwootHistoryClearGateForTest(input: Readonly<{

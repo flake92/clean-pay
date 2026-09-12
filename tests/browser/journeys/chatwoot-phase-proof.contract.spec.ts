@@ -53,6 +53,7 @@ import {
   createChatwootCausalClearGateForTest,
   createChatwootHistoryClearGateForTest,
   installChatwootCommonRequestLifecycleForTest,
+  isExpectedChatwootPlaywrightServiceWorkerBlockDiagnostic,
   isRetryableAtomicPhaseSnapshotError,
   isRecoverableChatwootLoginGotoAbort,
   boundedChatwootBrowserOperationForTest,
@@ -2964,6 +2965,31 @@ test("executes final source rereads and rejects every late source mutation", () 
       after,
       before: structuredClone(exact),
     }), source).toThrow(new RegExp(`final ${source} source changed`));
+  }
+});
+
+test("accepts only Playwright's exact service-worker block diagnostic", () => {
+  const exact = {
+    argumentCount: 1,
+    columnNumber: 86,
+    lineNumber: 2,
+    text: "Service Worker registration blocked by Playwright",
+    type: "warning",
+    url: "",
+  };
+  expect(isExpectedChatwootPlaywrightServiceWorkerBlockDiagnostic(exact)).toBe(true);
+  for (const [field, value] of [
+    ["argumentCount", 2],
+    ["columnNumber", 85],
+    ["lineNumber", 3],
+    ["text", "Service Worker registration failed"],
+    ["type", "error"],
+    ["url", "https://pay.ci.clean-pay.dev/sw.js"],
+  ] as const) {
+    expect(isExpectedChatwootPlaywrightServiceWorkerBlockDiagnostic({
+      ...exact,
+      [field]: value,
+    }), field).toBe(false);
   }
 });
 
