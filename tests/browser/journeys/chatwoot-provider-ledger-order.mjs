@@ -128,19 +128,16 @@ function initialPositions(entries) {
     const used = new Set(readinessPositions);
     const browserPositions = entries.flatMap((_, index) => used.has(index) ? [] : [index]);
     let browserOrder;
-    for (const orderedBrowserPositions of cabinetArrivalPositionVariants(entries, browserPositions)) {
-      for (const browserStages of initialBrowserStageVariants) {
-        try {
-          browserOrder = orderedStagePositions(
-            orderedBrowserPositions.map((index) => entries[index]),
-            browserStages,
-          ).map((index) => orderedBrowserPositions[index]);
-          break;
-        } catch {
-          browserOrder = undefined;
-        }
+    for (const browserStages of initialBrowserStageVariants) {
+      try {
+        browserOrder = orderedStagePositionsWithCabinetArrivalVariants(
+          browserPositions.map((index) => entries[index]),
+          browserStages,
+        ).map((index) => browserPositions[index]);
+        break;
+      } catch {
+        browserOrder = undefined;
       }
-      if (browserOrder !== undefined) break;
     }
     if (browserOrder === undefined) {
       continue;
@@ -180,15 +177,32 @@ function cabinetArrivalPositionVariants(entries, browserPositions) {
   // Preserve raw arrival order, but also try the one observed interleaving in
   // canonical causal order: profile, referral, profile -> profile, profile,
   // referral. The complete stage matcher below still validates every entry.
-  if (browserPositions.length >= 14
-    && entries[browserPositions[11]]?.effect === "read_profile"
-    && entries[browserPositions[12]]?.effect === "read_referral_program"
-    && entries[browserPositions[13]]?.effect === "read_profile") {
-    const canonical = [...browserPositions];
-    [canonical[12], canonical[13]] = [canonical[13], canonical[12]];
-    variants.unshift(canonical);
+  for (let index = 0; index <= browserPositions.length - 3; index += 1) {
+    if (entries[browserPositions[index]]?.effect === "read_profile"
+      && entries[browserPositions[index + 1]]?.effect === "read_referral_program"
+      && entries[browserPositions[index + 2]]?.effect === "read_profile") {
+      const canonical = [...browserPositions];
+      [canonical[index + 1], canonical[index + 2]] = [
+        canonical[index + 2], canonical[index + 1],
+      ];
+      variants.unshift(canonical);
+    }
   }
   return variants;
+}
+
+function orderedStagePositionsWithCabinetArrivalVariants(entries, stages) {
+  let lastError;
+  const positions = entries.map((_, index) => index);
+  for (const candidate of cabinetArrivalPositionVariants(entries, positions)) {
+    try {
+      return orderedStagePositions(candidate.map((index) => entries[index]), stages)
+        .map((index) => candidate[index]);
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  throw lastError;
 }
 
 function stagePositions(entries, phase) {
@@ -207,7 +221,10 @@ function stagePositions(entries, phase) {
   const initialSize = initial.reduce((sum, { items }) => sum + items.length, 0);
   const positions = initialPositions(entries.slice(0, initialSize));
   if (phase === "recreated") {
-    positions.push(...orderedStagePositions(entries.slice(initialSize), recreated.slice(initial.length))
+    positions.push(...orderedStagePositionsWithCabinetArrivalVariants(
+      entries.slice(initialSize),
+      recreated.slice(initial.length),
+    )
       .map((index) => index + initialSize));
   }
   if (positions.length !== entries.length || new Set(positions).size !== entries.length) {
