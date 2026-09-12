@@ -1592,6 +1592,7 @@ test("binds the causal route barrier and exact logout helper without fixture sub
   expect(source).toContain("await recreatedCausality.sealPreClearGeneration(page)");
   expect(source).toContain("createChatwootPhaseCausalContract(MAXIMUM_EVENTS)");
   expect(source).toContain("await recreatedCausality.waitForCabinetIdentityConfirmed()");
+  expect(source).toMatch(/const emitSetUserCausalPrecondition = \(\) => \{\s+const presence = cookiePresence\(\);\s+const url = location\.href;\s+enqueue\(\(\) => documentEvidence\.then\(\(\) => causalEmit\(\{[\s\S]*?presence,\s+url,/);
   expect(source).toContain("input.eventLedger.assertStable(checkpoint)");
   expect(source).toContain("await eventLedger.drainAndSeal(() => requestLifecycle.isIdle()");
   expect(source).toContain("assertChatwootAtomicPhaseRead({");
@@ -3054,7 +3055,7 @@ test("accepts only a bounded number of exact Playwright service-worker warnings"
   expect(() => assertChatwootDiagnosticsForTest({
     ...exact,
     expectedPlaywrightConsoleCount: 33,
-  })).toThrow(/unexpected bounded diagnostic/);
+  })).toThrow(/expectedConsole=33,console=0,pageErrors=0,pages=0,requests=0,serviceWorkers=0,webSockets=0/);
   for (const field of [
     "unexpectedConsole",
     "unexpectedPageErrors",
@@ -3064,7 +3065,7 @@ test("accepts only a bounded number of exact Playwright service-worker warnings"
     expect(() => assertChatwootDiagnosticsForTest({
       ...exact,
       [field]: ["a".repeat(64)],
-    }), field).toThrow(/unexpected bounded diagnostic/);
+    }), field).toThrow(/diagnostics differ/);
   }
 });
 
