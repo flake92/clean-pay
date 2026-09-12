@@ -3113,7 +3113,16 @@ export function assertChatwootDiagnosticsForTest(observed: Readonly<{
     || observed.unexpectedRequests.length > 0
     || observed.unexpectedWebSocketCount > 0
     || observed.unexpectedServiceWorkerCount > 0) {
-    throw new Error("Chatwoot browser emitted an unexpected bounded diagnostic.");
+    throw new Error(
+      "Chatwoot browser diagnostics differ: "
+      + `expectedConsole=${observed.expectedPlaywrightConsoleCount},`
+      + `console=${observed.unexpectedConsole.length},`
+      + `pageErrors=${observed.unexpectedPageErrors.length},`
+      + `pages=${observed.unexpectedPages.length},`
+      + `requests=${observed.unexpectedRequests.length},`
+      + `serviceWorkers=${observed.unexpectedServiceWorkerCount},`
+      + `webSockets=${observed.unexpectedWebSocketCount}.`,
+    );
   }
 }
 
@@ -3833,12 +3842,14 @@ async function installChatwootCausalLedger(
     }));
     const wrappedChatwootApis = new WeakSet<object>();
     const emitSetUserCausalPrecondition = () => {
+      const presence = cookiePresence();
+      const url = location.href;
       enqueue(() => documentEvidence.then(() => causalEmit({
         documentToken,
         kind: "boundary",
         method: "setUser",
-        presence: cookiePresence(),
-        url: location.href,
+        presence,
+        url,
       })));
     };
     const wrapChatwootApi = (value: unknown) => {
