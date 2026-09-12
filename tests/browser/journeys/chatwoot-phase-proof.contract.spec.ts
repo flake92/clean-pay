@@ -2748,6 +2748,22 @@ test("Chatwoot recreated provider ledger accepts readiness interleaved with the 
     .toThrow(/exact endpoint contract|credential projection/);
 });
 
+test("Chatwoot provider causal order accepts an independent referral between profile reads", () => {
+  const original = strictProviderFixture("gap");
+  const observed = structuredClone(original);
+  [observed.entries[19], observed.entries[20]] = [observed.entries[20], observed.entries[19]];
+  observed.entries.forEach((entry, index) => { entry.sequence = index + 1; });
+
+  const validated = assertChatwootPhaseProviderLedger(observed, "gap");
+  expect(canonicalizeChatwootProviderArrivalOrder(validated.entries, "gap"))
+    .toEqual(original.entries);
+
+  const changed = structuredClone(observed);
+  changed.entries[19].credential_contract.header_names = ["authorization"];
+  expect(() => assertChatwootPhaseProviderLedger(changed, "gap"))
+    .toThrow(/credential projection/);
+});
+
 test("Chatwoot gap ledger accepts early OIDC authorization with duplicate contact and trailing readiness", () => {
   const original = strictProviderFixture("gap");
   const observed = structuredClone(original);
@@ -3019,7 +3035,7 @@ test("accepts only Playwright's exact service-worker block diagnostic", () => {
   }
 });
 
-test("accepts the exact Playwright warning at most once per Chatwoot login document", () => {
+test("accepts only a bounded number of exact Playwright service-worker warnings", () => {
   const exact = {
     expectedPlaywrightConsoleCount: 0,
     unexpectedConsole: [],
@@ -3029,7 +3045,7 @@ test("accepts the exact Playwright warning at most once per Chatwoot login docum
     unexpectedServiceWorkerCount: 0,
     unexpectedWebSocketCount: 0,
   };
-  for (const expectedPlaywrightConsoleCount of [0, 1, 2]) {
+  for (const expectedPlaywrightConsoleCount of [0, 1, 2, 32]) {
     expect(() => assertChatwootDiagnosticsForTest({
       ...exact,
       expectedPlaywrightConsoleCount,
@@ -3037,7 +3053,7 @@ test("accepts the exact Playwright warning at most once per Chatwoot login docum
   }
   expect(() => assertChatwootDiagnosticsForTest({
     ...exact,
-    expectedPlaywrightConsoleCount: 3,
+    expectedPlaywrightConsoleCount: 33,
   })).toThrow(/unexpected bounded diagnostic/);
   for (const field of [
     "unexpectedConsole",
