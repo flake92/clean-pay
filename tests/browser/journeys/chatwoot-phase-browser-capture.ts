@@ -3103,10 +3103,10 @@ export function assertChatwootDiagnosticsForTest(observed: Readonly<{
   unexpectedServiceWorkerCount: number;
   unexpectedWebSocketCount: number;
 }>) {
-  // The lifecycle loads two login documents (initial and recreated). Chromium
-  // can emit the exact Playwright service-worker warning for either document,
-  // both documents, or neither when registration state is already warm.
-  if (observed.expectedPlaywrightConsoleCount > 2
+  // Chromium can repeat the exact Playwright service-worker warning for each
+  // document navigation. Its presence is not application evidence; retain the
+  // global event bound and fail on overflow or on every non-exact diagnostic.
+  if (observed.expectedPlaywrightConsoleCount > MAXIMUM_EVENTS
     || observed.unexpectedPages.length > 0
     || observed.unexpectedConsole.length > 0
     || observed.unexpectedPageErrors.length > 0

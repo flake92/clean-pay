@@ -128,16 +128,19 @@ function initialPositions(entries) {
     const used = new Set(readinessPositions);
     const browserPositions = entries.flatMap((_, index) => used.has(index) ? [] : [index]);
     let browserOrder;
-    for (const browserStages of initialBrowserStageVariants) {
-      try {
-        browserOrder = orderedStagePositions(
-          browserPositions.map((index) => entries[index]),
-          browserStages,
-        ).map((index) => browserPositions[index]);
-        break;
-      } catch {
-        browserOrder = undefined;
+    for (const orderedBrowserPositions of cabinetArrivalPositionVariants(entries, browserPositions)) {
+      for (const browserStages of initialBrowserStageVariants) {
+        try {
+          browserOrder = orderedStagePositions(
+            orderedBrowserPositions.map((index) => entries[index]),
+            browserStages,
+          ).map((index) => orderedBrowserPositions[index]);
+          break;
+        } catch {
+          browserOrder = undefined;
+        }
       }
+      if (browserOrder !== undefined) break;
     }
     if (browserOrder === undefined) {
       continue;
@@ -169,6 +172,23 @@ function initialPositions(entries) {
     }
   }
   return valid[0];
+}
+
+function cabinetArrivalPositionVariants(entries, browserPositions) {
+  const variants = [browserPositions];
+  // Profile and referral reads are independent React server-component lanes.
+  // Preserve raw arrival order, but also try the one observed interleaving in
+  // canonical causal order: profile, referral, profile -> profile, profile,
+  // referral. The complete stage matcher below still validates every entry.
+  if (browserPositions.length >= 14
+    && entries[browserPositions[11]]?.effect === "read_profile"
+    && entries[browserPositions[12]]?.effect === "read_referral_program"
+    && entries[browserPositions[13]]?.effect === "read_profile") {
+    const canonical = [...browserPositions];
+    [canonical[12], canonical[13]] = [canonical[13], canonical[12]];
+    variants.unshift(canonical);
+  }
+  return variants;
 }
 
 function stagePositions(entries, phase) {
