@@ -9,7 +9,7 @@ ENV NEXT_TELEMETRY_DISABLED=1
 # those fixes from being selected on a rebuild.
 # hadolint ignore=DL3008
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates openssl \
+    && apt-get install -y --no-install-recommends ca-certificates libpcre2-8-0 openssl \
     && rm -rf /var/lib/apt/lists/*
 
 COPY package.json package-lock.json .npmrc ./
@@ -50,7 +50,7 @@ ENV NEXT_TELEMETRY_DISABLED=1
 # those fixes from being selected on a rebuild.
 # hadolint ignore=DL3008
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates openssl \
+    && apt-get install -y --no-install-recommends ca-certificates libpcre2-8-0 openssl \
     && rm -rf /var/lib/apt/lists/* \
     && groupadd --system --gid 1001 nodejs \
     && useradd --system --uid 1001 --gid nodejs cleanpay \
