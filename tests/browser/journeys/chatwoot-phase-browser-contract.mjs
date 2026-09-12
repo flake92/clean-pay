@@ -833,6 +833,7 @@ function expectedContentTypes(key, status) {
   }
   if (key === "app-web-manifest") return ["application/manifest+json"];
   if (key.startsWith("chatwoot-widget-")) return ["text/html"];
+  if (status === 307 && key === "app-root-rsc") return [null, "text/plain"];
   if (key.endsWith("-rsc")) {
     return status === 307 ? ["application/octet-stream"] : ["text/x-component"];
   }

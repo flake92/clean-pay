@@ -2227,6 +2227,12 @@ export function normalizeProviderOverlapRequestContractSemanticLedger(semanticLe
       index += 2;
       continue;
     }
+    if (isProviderOverlapIndependentCabinetSdkPair(entry, next)) {
+      normalized[index] = next;
+      normalized[index + 1] = entry;
+      index += 2;
+      continue;
+    }
     if (isProviderOverlapIndependentCabinetHydrationPair(entry, next)) {
       normalized[index] = next;
       normalized[index + 1] = entry;
@@ -2273,6 +2279,22 @@ function isProviderOverlapIndependentProfileSdkPair(left, right) {
   if (!left || !right) return false;
   return left.key === "chatwoot-sdk-script"
     && right.key === "app-profile-action"
+    && left.disposition === "continue"
+    && right.disposition === "continue"
+    && left.redirectEdge === null
+    && right.redirectEdge === null
+    && left.responseContentType === "application/javascript"
+    && right.responseContentType === "text/x-component"
+    && left.responseFailureSha256 === null
+    && right.responseFailureSha256 === null
+    && left.responseStatus === 200
+    && right.responseStatus === 200;
+}
+
+function isProviderOverlapIndependentCabinetSdkPair(left, right) {
+  if (!left || !right) return false;
+  return left.key === "chatwoot-sdk-script"
+    && right.key === "app-cabinet-action"
     && left.disposition === "continue"
     && right.disposition === "continue"
     && left.redirectEdge === null
