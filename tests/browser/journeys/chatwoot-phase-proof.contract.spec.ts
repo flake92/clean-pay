@@ -3545,6 +3545,9 @@ test("accepts the exact recreated terminal SPA cabinet browser flow", () => {
     }),
     ...staticRecordsForDocument(staticAssetContract, "app-login-document"),
     record("turnstile-widget-script", "app-login-document", 200, "application/javascript"),
+    record("app-root-rsc", "app-login-document", 307, null, {
+      expectedStatuses: [200, 307],
+    }),
     record("app-telegram-start", "app-login-document", 307, "application/octet-stream", {
       navigation: true,
     }),
@@ -6005,11 +6008,16 @@ function browserRecordFixture(
     documentKey: "app-login-document" | "app-profile-document" | "app-cabinet-document",
     status: number,
     contentType: string | null,
-    options: { edge?: string; navigation?: boolean; staticPath?: string } = {},
+    options: {
+      edge?: string;
+      expectedStatuses?: number[];
+      navigation?: boolean;
+      staticPath?: string;
+    } = {},
   ) => ({
     classification: {
       disposition: "continue",
-      expectedStatuses: [status],
+      expectedStatuses: options.expectedStatuses ?? [status],
       key,
       navigation: options.navigation ?? false,
       staticAssetSha256: options.staticPath
