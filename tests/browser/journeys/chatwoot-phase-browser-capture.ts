@@ -3121,6 +3121,7 @@ export function assertChatwootDiagnosticsForTest(observed: Readonly<{
     || observed.unexpectedServiceWorkerCount > 0) {
     throw new Error(
       "Chatwoot browser diagnostics differ: "
+      + `requestReason:${observed.firstUnexpectedRequestReason ?? "none"},`
       + `expectedConsole=${observed.expectedPlaywrightConsoleCount},`
       + `console=${observed.unexpectedConsole.length},`
       + `pageErrors=${observed.unexpectedPageErrors.length},`
@@ -3129,8 +3130,7 @@ export function assertChatwootDiagnosticsForTest(observed: Readonly<{
       + `serviceWorkers=${observed.unexpectedServiceWorkerCount},`
       + `webSockets=${observed.unexpectedWebSocketCount},`
       + `consoleHash:${observed.unexpectedConsole[0] ?? "none"},`
-      + `requestHash:${observed.unexpectedRequests[0] ?? "none"},`
-      + `requestReason:${observed.firstUnexpectedRequestReason ?? "none"}.`,
+      + `requestHash:${observed.unexpectedRequests[0] ?? "none"}.`,
     );
   }
 }
