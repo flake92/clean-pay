@@ -1,7 +1,8 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 
 import {
   assertSyntheticLogoutStorageSnapshot,
+  clearSyntheticLogoutState,
   SYNTHETIC_APPLICATION_ORIGIN,
   SYNTHETIC_TURNSTILE_STORAGE_KEY,
 } from "./synthetic-logout-storage";
@@ -41,6 +42,44 @@ test("preserves only the exact fixture-owned Turnstile state byte-for-byte", () 
     localStorageKeyCount: 0,
     sessionStorageKeyCount: 1,
   }), "after-clear")).toBe(turnstileValue);
+});
+
+test("revalidates one concurrent Turnstile update before the atomic clear", async () => {
+  const updatedTurnstileValue = `${turnstileValue} `;
+  const evaluationResults: unknown[] = [
+    snapshot(),
+    null,
+    snapshot({
+      fixtureEntries: [{
+        area: "sessionStorage",
+        key: SYNTHETIC_TURNSTILE_STORAGE_KEY,
+        value: updatedTurnstileValue,
+      }],
+    }),
+    snapshot({
+      fixtureEntries: [{
+        area: "sessionStorage",
+        key: SYNTHETIC_TURNSTILE_STORAGE_KEY,
+        value: updatedTurnstileValue,
+      }],
+      localStorageKeyCount: 0,
+      sessionStorageKeyCount: 1,
+    }),
+  ];
+  let clearCookiesCalls = 0;
+  const page = {
+    context: () => ({
+      clearCookies: async () => { clearCookiesCalls += 1; },
+      cookies: async () => [],
+    }),
+    evaluate: async () => evaluationResults.shift(),
+    url: () => `${SYNTHETIC_APPLICATION_ORIGIN}/register/verify-email`,
+  } as unknown as Page;
+
+  await clearSyntheticLogoutState(page);
+
+  expect(evaluationResults).toEqual([]);
+  expect(clearCookiesCalls).toBe(1);
 });
 
 test("rejects wrong origins and extra or unsafe fixture storage keys", () => {
