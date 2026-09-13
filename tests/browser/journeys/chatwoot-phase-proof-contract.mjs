@@ -2487,6 +2487,7 @@ function assertRecreationCausality(value, recreated, label) {
     "negativeLoginSetUserCount",
     "negativeLoginUserCookieAbsent",
     "postClearCabinetNavigationCount",
+    "postClearIdentityConfirmedCount",
     "postClearLoginCount",
     "postClearSetUserCount",
   ], `${label} recreated causality`);
@@ -2505,6 +2506,18 @@ function assertRecreationCausality(value, recreated, label) {
     recreated.setUserCount,
     `${label} post-clear setUser completeness`,
   );
+  positiveInteger(
+    causality.postClearIdentityConfirmedCount,
+    `${label} post-clear identity-confirmed count`,
+  );
+  if (causality.postClearIdentityConfirmedCount > 2) {
+    fail(`${label} post-clear identity-confirmed count escaped its idempotent bound.`);
+  }
+  equal(
+    causality.postClearIdentityConfirmedCount,
+    recreated.identityConfirmedCount,
+    `${label} post-clear identity-confirmed completeness`,
+  );
   equal(causality.cabinetSetUserCount, 1, `${label} cabinet setUser count`);
   equal(causality.cabinetIdentityConfirmedCount, 1, `${label} cabinet identity-confirmed count`);
   equal(causality.negativeLoginSetUserCount, 0, `${label} negative login setUser count`);
@@ -2515,7 +2528,6 @@ function assertRecreationCausality(value, recreated, label) {
     "cabinetIdentityConfirmedUserCookiePresent",
     "cabinetUserCookieObservedAfterSetUser",
     "finalCookiePairPresent",
-    "firstCabinetSetUserBeforeUserCookieAbsent",
     "negativeLoginConversationCookieAbsent",
     "negativeLoginUserCookieAbsent",
   ]) equal(causality[name], true, `${label} recreated ${name}`);
@@ -2523,6 +2535,23 @@ function assertRecreationCausality(value, recreated, label) {
     causality.firstCabinetSetUserBeforeConversationCookiePresent,
     `${label} first cabinet conversation-cookie relation`,
   );
+  boolean(
+    causality.firstCabinetSetUserBeforeUserCookieAbsent,
+    `${label} first cabinet user-cookie relation`,
+  );
+  if (!causality.firstCabinetSetUserBeforeUserCookieAbsent) {
+    equal(
+      causality.firstCabinetSetUserBeforeConversationCookiePresent,
+      true,
+      `${label} settled-pair replay conversation-cookie relation`,
+    );
+    equal(causality.postClearSetUserCount, 2, `${label} settled-pair replay setUser count`);
+    equal(
+      causality.postClearIdentityConfirmedCount,
+      2,
+      `${label} settled-pair replay identity-confirmed count`,
+    );
+  }
   const ordinals = record(causality.eventOrdinals, `${label} recreated event ordinals`);
   exactKeys(ordinals, [
     "cabinetCompleted",
