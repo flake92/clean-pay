@@ -60,6 +60,17 @@ describe("Chatwoot support context request cache", () => {
     expect(loader).toHaveBeenCalledTimes(2);
   });
 
+  it("invalidates cached support context when cleared", async () => {
+    const cache = createChatwootSupportContextRequestCache();
+    const loader = vi.fn().mockResolvedValue(context);
+
+    await cache.load("user-1", loader);
+    cache.clear();
+    await cache.load("user-1", loader);
+
+    expect(loader).toHaveBeenCalledTimes(2);
+  });
+
   it("bounds distinct concurrent provider loads without blocking coalesced work", async () => {
     let release!: () => void;
     const pending = new Promise<ChatwootSupportContext>((resolve) => {
