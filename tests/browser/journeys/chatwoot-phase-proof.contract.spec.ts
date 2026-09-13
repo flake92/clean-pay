@@ -2664,6 +2664,26 @@ test("Chatwoot phase ledger accepts one exact trailing readiness cycle", () => {
     .toThrow(/incomplete or outside|exact endpoint contract|credential projection/);
 });
 
+test("Chatwoot phase ledger accepts repeated exact bounded readiness cycles only", () => {
+  const original = strictProviderFixture("gap");
+  const repeated = structuredClone(original);
+  for (let cycle = 0; cycle < 3; cycle += 1) {
+    for (const index of [1, 2, 3, 4, 5, 6, 7]) {
+      repeated.entries.push(structuredClone(original.entries[index]));
+    }
+  }
+  repeated.entries.forEach((entry, index) => { entry.sequence = index + 1; });
+
+  expect(repeated.entries).toHaveLength(original.entries.length + 21);
+  expect(assertChatwootPhaseProviderLedger(repeated, "gap").entries)
+    .toEqual(original.entries);
+
+  const nearMiss = structuredClone(repeated);
+  nearMiss.entries[nearMiss.entries.length - 1].credential_contract.header_names = [];
+  expect(() => assertChatwootPhaseProviderLedger(nearMiss, "gap"))
+    .toThrow(/incomplete or outside|credential projection/);
+});
+
 test("Chatwoot phase ledger accepts one exact trailing contact readiness refresh", () => {
   const original = strictProviderFixture("gap");
   const withRefreshTail = structuredClone(original);
