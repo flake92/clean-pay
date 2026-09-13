@@ -30,7 +30,7 @@ function waitForTurnstileApi(signal?: AbortSignal) {
     };
     const onAbort = () => {
       cleanup();
-      reject(new Error("Turnstile script loading was interrupted"));
+      reject(new Error("Security check loading was interrupted"));
     };
     const interval = window.setInterval(() => {
       if (window.turnstile?.render) {
@@ -41,7 +41,7 @@ function waitForTurnstileApi(signal?: AbortSignal) {
 
       if (Date.now() - startedAt > 5000) {
         cleanup();
-        reject(new Error("Turnstile API is unavailable"));
+        reject(new Error("Security check is unavailable"));
       }
     }, 50);
     signal?.addEventListener("abort", onAbort, { once: true });
@@ -77,7 +77,7 @@ export function loadTurnstileScript() {
       const controller = new AbortController();
       const onError = () => {
         controller.abort();
-        reject(new Error("Turnstile script failed to load"));
+        reject(new Error("Security check failed to load"));
       };
       existing.addEventListener("error", onError, { once: true });
       void waitForTurnstileApi(controller.signal)
@@ -91,7 +91,7 @@ export function loadTurnstileScript() {
       const controller = new AbortController();
       const onError = () => {
         controller.abort();
-        reject(new Error("Turnstile script failed to load"));
+        reject(new Error("Security check failed to load"));
       };
 
       script.id = scriptId;

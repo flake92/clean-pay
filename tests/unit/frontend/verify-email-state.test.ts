@@ -168,8 +168,8 @@ describe("verification presentation transitions", () => {
 
   it("preserves Turnstile prerequisite copy", () => {
     expect(missingTurnstileTokenMessage(true))
-      .toBe("Пройдите проверку Cloudflare Turnstile.");
+      .toBe("Пройдите проверку безопасности.");
     expect(missingTurnstileTokenMessage(false))
-      .toBe("Ключ сайта Cloudflare Turnstile не настроен.");
+      .toBe("Проверка безопасности временно недоступна. Попробуйте позже.");
   });
 });

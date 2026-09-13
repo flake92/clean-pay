@@ -447,7 +447,7 @@ describe("Chatwoot browser lifecycle", () => {
     const failedScript = document.getElementById("clean-pay-chatwoot-sdk") as HTMLScriptElement;
     expect(failedScript.src).toBe("https://chat.example.com/packs/js/sdk.js");
     failedScript.dispatchEvent(new Event("error"));
-    await expect(failedLoad).rejects.toThrow("Chatwoot SDK failed to load");
+    await expect(failedLoad).rejects.toThrow("Support chat failed to load");
     expect(document.getElementById("clean-pay-chatwoot-sdk")).toBeNull();
 
     const successfulLoad = loadChatwootSdk(config.baseUrl);

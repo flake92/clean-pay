@@ -26,9 +26,9 @@ describe("Chatwoot integration boundaries", () => {
     const authShell = source("src/frontend/components/auth-shell.tsx");
 
     expect(appShell).toContain("createChatwootWidgetConfig(shell.supportIdentity)");
-    expect(appShell).toContain("<ChatwootWidget config={chatwoot} />");
-    expect(appShell).toContain("<ChatwootGuestBoundary />");
-    expect(authShell).toContain("<ChatwootGuestBoundary />");
+    expect(appShell).toContain("<SupportChatRuntime config={chatwoot} />");
+    expect(appShell).toContain("<SupportChatGuestBoundary />");
+    expect(authShell).toContain("<SupportChatGuestBoundary />");
     expect(authShell).not.toContain('"use client"');
   });
 

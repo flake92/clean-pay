@@ -1,6 +1,6 @@
 import { Card } from "primereact/card";
 
-import { ChatwootOpenButton } from "@/frontend/components/chatwoot-open-button";
+import { SupportChatOpenButton } from "@/frontend/components/chatwoot-open-button";
 import { LinkButton } from "@/frontend/components/prime/link-button";
 import { getBranding } from "@/shared/branding";
 import type { SupportViewModel } from "@/application/models/support";
@@ -15,7 +15,7 @@ export function SupportPanel({ support }: { support: SupportViewModel }) {
       <Card title={`Контакты ${branding.name}`}>
         {(support.enabled && hasContacts) || support.liveChatEnabled ? (
           <div className="flex flex-wrap gap-3">
-            {support.liveChatEnabled ? <ChatwootOpenButton /> : null}
+            {support.liveChatEnabled ? <SupportChatOpenButton /> : null}
             {support.email ? (
               <LinkButton href={`mailto:${support.email}`} icon="pi pi-envelope" label="Написать на почту" outlined />
             ) : null}

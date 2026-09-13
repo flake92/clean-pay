@@ -132,10 +132,10 @@ describe("register e-mail confirmation transitions", () => {
     expect(hasRegisterEmailTurnstileToken(true, "challenge")).toBe(true);
     expect(hasRegisterEmailTurnstileToken(true, null)).toBe(false);
     expect(missingRegisterEmailTurnstileTokenMessage("site-key")).toBe(
-      "Пройдите проверку Cloudflare Turnstile.",
+      "Пройдите проверку безопасности.",
     );
     expect(missingRegisterEmailTurnstileTokenMessage(null)).toBe(
-      "Ключ сайта Cloudflare Turnstile не настроен.",
+      "Проверка безопасности временно недоступна. Попробуйте позже.",
     );
     expect(registerEmailResendSuccessMessage({
       kind: "code-sent",

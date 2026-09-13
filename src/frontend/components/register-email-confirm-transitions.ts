@@ -1,3 +1,8 @@
+import {
+  hasTurnstileSiteKey,
+  missingSecurityCheckTokenMessage,
+} from "@/frontend/lib/turnstile-transitions";
+
 export type RegisterEmailConfirmAction = "confirm" | "resend" | "back";
 
 export type RegisterEmailConfirmTurnstileHandle = {
@@ -86,9 +91,7 @@ export function hasRegisterEmailTurnstileToken(
 export function missingRegisterEmailTurnstileTokenMessage(
   siteKey?: string | null,
 ) {
-  return siteKey
-    ? "Пройдите проверку Cloudflare Turnstile."
-    : "Ключ сайта Cloudflare Turnstile не настроен.";
+  return missingSecurityCheckTokenMessage(hasTurnstileSiteKey(siteKey));
 }
 
 function optionalTurnstileToken(token: string | null) {

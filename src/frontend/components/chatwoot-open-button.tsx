@@ -2,14 +2,19 @@
 
 import { useEffect, useState } from "react";
 
+import { useSupportChatSessionAuthenticated } from "@/frontend/components/chatwoot-session-context";
+import { CHATWOOT_STATE_CHANGED_EVENT } from "@/frontend/lib/chatwoot-state-events";
+
 type ChatwootActionState = "signed-out" | "connecting" | "failed" | "ready";
 
-function chatwootActionState(): ChatwootActionState {
-  if (typeof window === "undefined" || !window.cleanPayChatwootAuthorized) {
+function chatwootActionState(authenticated: boolean): ChatwootActionState {
+  if (!authenticated || typeof window === "undefined") {
     return "signed-out";
   }
 
   if (window.cleanPayChatwootFailedIdentity) return "failed";
+
+  if (!window.cleanPayChatwootAuthorized) return "connecting";
 
   const hasConfirmedIdentity = Boolean(
     window.cleanPayChatwootIdentity
@@ -24,23 +29,27 @@ function chatwootActionState(): ChatwootActionState {
   ) ? "ready" : "connecting";
 }
 
-export function ChatwootOpenButton() {
-  const [state, setState] = useState<ChatwootActionState>("signed-out");
+export function SupportChatOpenButton() {
+  const authenticated = useSupportChatSessionAuthenticated();
+  const [state, setState] = useState<ChatwootActionState>(
+    authenticated ? "connecting" : "signed-out",
+  );
 
   useEffect(() => {
-    const refresh = () => setState(chatwootActionState());
+    const refresh = () => setState(chatwootActionState(authenticated));
+    const refreshAfterCurrentEvent = () => queueMicrotask(refresh);
     refresh();
 
-    const timer = window.setInterval(refresh, 500);
-    window.addEventListener("chatwoot:ready", refresh);
-    window.addEventListener("chatwoot:error", refresh);
+    window.addEventListener(CHATWOOT_STATE_CHANGED_EVENT, refresh);
+    window.addEventListener("chatwoot:ready", refreshAfterCurrentEvent);
+    window.addEventListener("chatwoot:error", refreshAfterCurrentEvent);
 
     return () => {
-      window.clearInterval(timer);
-      window.removeEventListener("chatwoot:ready", refresh);
-      window.removeEventListener("chatwoot:error", refresh);
+      window.removeEventListener(CHATWOOT_STATE_CHANGED_EVENT, refresh);
+      window.removeEventListener("chatwoot:ready", refreshAfterCurrentEvent);
+      window.removeEventListener("chatwoot:error", refreshAfterCurrentEvent);
     };
-  }, []);
+  }, [authenticated]);
 
   if (state === "signed-out") {
     return <span className="line-height-3 text-600">Чат доступен после входа в аккаунт.</span>;
@@ -62,7 +71,9 @@ export function ChatwootOpenButton() {
     <button
       className="p-button p-component p-button-outlined"
       onClick={() => {
-        if (chatwootActionState() === "ready") window.$chatwoot?.toggle?.("open");
+        if (chatwootActionState(authenticated) === "ready") {
+          window.$chatwoot?.toggle?.("open");
+        }
       }}
       type="button"
     >

@@ -2,6 +2,7 @@ import type {
   AccountReadiness,
   EmailVerificationResult,
 } from "@/application/models/email-verification";
+import { missingSecurityCheckTokenMessage } from "@/frontend/lib/turnstile-transitions";
 
 export type VerificationMessageSeverity = "success" | "warn";
 export type VerificationSyncProblem =
@@ -290,7 +291,5 @@ export function accountReadinessTransition(
 }
 
 export function missingTurnstileTokenMessage(siteKeyConfigured: boolean) {
-  return siteKeyConfigured
-    ? "Пройдите проверку Cloudflare Turnstile."
-    : "Ключ сайта Cloudflare Turnstile не настроен.";
+  return missingSecurityCheckTokenMessage(siteKeyConfigured);
 }
