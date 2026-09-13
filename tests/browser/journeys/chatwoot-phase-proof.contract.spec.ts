@@ -1614,7 +1614,8 @@ test("binds the causal route barrier and exact logout helper without fixture sub
   expect(source).toContain("await recreatedCausality.sealPreClearGeneration(page)");
   expect(source).toContain("createChatwootPhaseCausalContract(MAXIMUM_EVENTS)");
   expect(source).toContain("await recreatedCausality.waitForCabinetIdentityConfirmed()");
-  expect(source).toMatch(/const emitSetUserCausalPrecondition = \(\) => \{\s+const presence = cookiePresence\(\);\s+const url = location\.href;\s+enqueue\(\(\) => documentEvidence\.then\(\(\) => causalEmit\(\{[\s\S]*?presence,\s+url,/);
+  expect(source).toMatch(/let causalBoundarySequence = documentEvidence;[\s\S]*?const emitSetUserCausalPrecondition = \(\) => \{\s+const presence = cookiePresence\(\);\s+const url = location\.href;\s+const previousCausalBoundary = causalBoundarySequence;\s+causalBoundarySequence = enqueue\(\(\) => previousCausalBoundary\.then\(\(\) => causalEmit\(\{[\s\S]*?presence,\s+url,/);
+  expect(source).toMatch(/if \(snapshot\) \{\s+const previousCausalBoundary = causalBoundarySequence;\s+const currentBoundary = boundarySequence;\s+causalBoundarySequence = enqueue\(\(\) => Promise\.all\(\[\s+previousCausalBoundary,\s+currentBoundary,\s+\]\)\.then\(\(\) => causalEmit\(\{/);
   expect(source).toContain("input.eventLedger.assertStable(checkpoint)");
   expect(source).toContain("await eventLedger.drainAndSeal(() => requestLifecycle.isIdle()");
   expect(source).toContain("assertChatwootAtomicPhaseRead({");

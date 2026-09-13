@@ -3866,11 +3866,13 @@ async function installChatwootCausalLedger(
       presence: cookiePresence(),
       url: location.href,
     }));
+    let causalBoundarySequence = documentEvidence;
     const wrappedChatwootApis = new WeakSet<object>();
     const emitSetUserCausalPrecondition = () => {
       const presence = cookiePresence();
       const url = location.href;
-      enqueue(() => documentEvidence.then(() => causalEmit({
+      const previousCausalBoundary = causalBoundarySequence;
+      causalBoundarySequence = enqueue(() => previousCausalBoundary.then(() => causalEmit({
         documentToken,
         kind: "boundary",
         method: "setUser",
@@ -3989,9 +3991,11 @@ async function installChatwootCausalLedger(
                 candidate.method === String((entry as { method?: unknown })?.method)
               ));
               if (snapshot) {
-                boundarySequence = enqueue(() => Promise.all([
-                  documentEvidence,
-                  boundarySequence,
+                const previousCausalBoundary = causalBoundarySequence;
+                const currentBoundary = boundarySequence;
+                causalBoundarySequence = enqueue(() => Promise.all([
+                  previousCausalBoundary,
+                  currentBoundary,
                 ]).then(() => causalEmit({
                   documentToken,
                   kind: "boundary",
