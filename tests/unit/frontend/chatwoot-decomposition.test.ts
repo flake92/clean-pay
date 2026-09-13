@@ -19,6 +19,7 @@ import {
   failedChatwootIdentityAttempt,
   ownershipConfirmedChatwootIdentityAttempt,
   projectChatwootIdentity,
+  serializeChatwootAttributes,
   sentChatwootIdentityAttempt,
   waitingChatwootIdentityAttempt,
 } from "@/frontend/lib/chatwoot-transitions";
@@ -106,6 +107,10 @@ describe("Chatwoot decomposition contracts", () => {
         customAttributes: '[["source","telegram"],["subscription_status","ACTIVE"]]',
       },
     });
+    expect(serializeChatwootAttributes({
+      zeta: "last",
+      alpha: "first",
+    })).toBe('[["alpha","first"],["zeta","last"]]');
   });
 
   it("uses standard collision-resistant SHA-256 for persisted browser proofs", () => {
