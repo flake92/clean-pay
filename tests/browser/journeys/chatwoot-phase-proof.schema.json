@@ -1817,6 +1817,7 @@
         "cabinetUserCookieObservedAfterSetUser",
         "finalCookiePairPresent",
         "postClearSetUserCount",
+        "postClearIdentityConfirmedCount",
         "cabinetSetUserCount",
         "cabinetIdentityConfirmedCount",
         "eventOrdinals"
@@ -1828,7 +1829,7 @@
         "negativeLoginConversationCookieAbsent": { "const": true },
         "negativeLoginUserCookieAbsent": { "const": true },
         "firstCabinetSetUserBeforeConversationCookiePresent": { "type": "boolean" },
-        "firstCabinetSetUserBeforeUserCookieAbsent": { "const": true },
+        "firstCabinetSetUserBeforeUserCookieAbsent": { "type": "boolean" },
         "cabinetIdentityConfirmedObservedAfterSetUser": { "const": true },
         "cabinetIdentityConfirmedConversationCookiePresent": { "const": true },
         "cabinetIdentityConfirmedUserCookiePresent": { "const": true },
@@ -1836,6 +1837,7 @@
         "cabinetUserCookieObservedAfterSetUser": { "const": true },
         "finalCookiePairPresent": { "const": true },
         "postClearSetUserCount": { "$ref": "#/$defs/positiveInteger" },
+        "postClearIdentityConfirmedCount": { "$ref": "#/$defs/positiveInteger" },
         "cabinetSetUserCount": { "const": 1 },
         "cabinetIdentityConfirmedCount": { "const": 1 },
         "eventOrdinals": {
