@@ -1767,6 +1767,12 @@ export function isExactTerminalProviderOverlapRedirect(entry) {
     && entry.responseFailureSha256 === null;
 }
 
+export function isRecoverableProviderOverlapLoginGotoAbort(error) {
+  return error instanceof Error
+    && /^page\.goto: net::ERR_ABORTED at https:\/\/pay\.ci\.clean-pay\.dev\/login\?redirect_to=%2Fprofile(?:\r?\n|$)/u
+      .test(error.message);
+}
+
 export function finalizeProviderOverlapHistoryContract(records, finalFrame) {
   if (!Array.isArray(records) || records.length !== 4) {
     fail("Browser history ledger is outside its bounded contract.");

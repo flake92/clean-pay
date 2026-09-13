@@ -52,6 +52,7 @@ import {
   installProviderOverlapHistoryInstrumentation,
   isExactTerminalProviderOverlapRedirect,
   isProviderOverlapPlaywrightBodyCdpResponse,
+  isRecoverableProviderOverlapLoginGotoAbort,
   normalizeProviderOverlapRequestContractSemanticLedger,
   normalizeProviderOverlapSemanticEntry,
   normalizeProviderOverlapObservedResponseContentType,
@@ -200,6 +201,18 @@ const staticLoadGraph = Object.freeze({
     ].sort()),
   }))),
   staticAssetContract,
+});
+
+test("recovers only the exact provider login navigation abort", () => {
+  expect(isRecoverableProviderOverlapLoginGotoAbort(new Error(
+    "page.goto: net::ERR_ABORTED at https://pay.ci.clean-pay.dev/login?redirect_to=%2Fprofile\nCall log:",
+  ))).toBe(true);
+  for (const error of [
+    new Error("page.goto: net::ERR_ABORTED at https://pay.ci.clean-pay.dev/login?redirect_to=%2Fcabinet"),
+    new Error("page.goto: net::ERR_ABORTED at https://pay.ci.clean-pay.dev/login?redirect_to=%2Fprofile&next=1"),
+    new Error("page.goto: Timeout 30000ms exceeded at https://pay.ci.clean-pay.dev/login?redirect_to=%2Fprofile"),
+    "page.goto: net::ERR_ABORTED at https://pay.ci.clean-pay.dev/login?redirect_to=%2Fprofile",
+  ]) expect(isRecoverableProviderOverlapLoginGotoAbort(error)).toBe(false);
 });
 
 test("compares two exact one-shot overlap reports while retaining observed arrival order", () => {
@@ -2339,7 +2352,11 @@ test("prearms profile load and keeps the exact cabinet URL at DOM content", asyn
     path.resolve(__dirname, "prove-provider-overlap.mjs"),
     "utf8",
   );
-  expect(runnerSource.match(/page\.waitForURL\(/g)).toHaveLength(2);
+  expect(runnerSource.match(/page\.waitForURL\(/g)).toHaveLength(3);
+  expect(runnerSource).toContain(
+    '(url) => url.href === "https://pay.ci.clean-pay.dev/login?redirect_to=%2Fprofile",\n'
+      + '        { timeout: 5_000 },',
+  );
   expect(runnerSource).toContain(
     '(url) => url.href === "https://pay.ci.clean-pay.dev/profile",\n'
       + '      { waitUntil: "load", timeout: 30_000 },',
