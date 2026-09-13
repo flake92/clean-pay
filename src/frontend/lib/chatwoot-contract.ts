@@ -15,6 +15,7 @@ export type ChatwootApi = {
   setUser(identifier: string, user: ChatwootUserInput): void;
   setLabel?(label: string): void;
   removeLabel?(label: string): void;
+  toggle?(state: "open" | "close"): void;
   toggleBubbleVisibility(visibility: "hide" | "show"): void;
   reset(): void;
 };
