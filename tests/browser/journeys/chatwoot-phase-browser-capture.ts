@@ -4359,7 +4359,7 @@ function assertProviderLedger(value: unknown, phase: Phase): ProviderLedger {
     : initialProviderEffectSequence;
   if (!Array.isArray(ledger.entries)
     || ledger.entries.length < expectedEffects.length
-    || ledger.entries.length > expectedEffects.length + 15) {
+    || ledger.entries.length > MAXIMUM_REQUESTS) {
     throw new Error("Chatwoot provider ledger is incomplete or outside its bound.");
   }
   const database = assertProviderDatabase(ledger.database);
