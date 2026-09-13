@@ -1,13 +1,15 @@
 name: CI
-run-name: CI (${{ inputs.browser_mode || 'full' }})
+run-name: CI (${{ inputs.browser_mode || github.event_name }})
 
 on:
   push:
   pull_request:
+  schedule:
+    - cron: "17 1 * * *"
   workflow_dispatch:
     inputs:
       browser_mode:
-        description: Browser proof mode; diagnostic mode explicitly defers Provider without claiming full evidence
+        description: Heavy browser diagnostic mode; push and pull requests use required user-behavior gates
         required: true
         default: full
         type: choice
@@ -605,7 +607,14 @@ jobs:
             .image-rollback-rehearsal/traffic/result.json
 
   production-image-browser-journey:
-    if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.browser_mode == 'navigation-contract') }}
+    # Four images, two full stacks and exact browser/network A/B comparison are
+    # diagnostic evidence, not a per-change user contract. Normal push and pull
+    # request runs remain blocked by validate, full-stack-e2e, migrations and
+    # container-security; this expensive proof runs nightly or by explicit opt-in.
+    if: >-
+      github.event_name == 'schedule' ||
+      (github.event_name == 'workflow_dispatch' && inputs.browser_mode != 'navigation-contract') ||
+      (github.event_name == 'push' && contains(github.event.head_commit.message, '[chatwoot-diagnostic]'))
     runs-on: ubuntu-latest
     timeout-minutes: 120
     env:
