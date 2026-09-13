@@ -312,7 +312,7 @@ describe("link-account deferred edge semantics", () => {
     );
 
     expect(
-      screen.getByText("Пройдите проверку Cloudflare Turnstile."),
+      screen.getByText("Пройдите проверку безопасности."),
     ).toBeTruthy();
     expect(mocks.linkAccountEmailAction).not.toHaveBeenCalled();
     expect(mocks.confirmLinkedTelegramAction).not.toHaveBeenCalled();

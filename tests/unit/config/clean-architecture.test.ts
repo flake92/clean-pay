@@ -767,7 +767,7 @@ describe("clean architecture boundaries", () => {
       {
         path: "src/frontend/components/chatwoot-widget.tsx",
         boundaryImports: ["@/frontend/components/chatwoot-widget-controller"],
-        runtimeExports: ["ChatwootWidget", "ChatwootGuestBoundary"],
+        runtimeExports: ["SupportChatRuntime", "SupportChatGuestBoundary"],
       },
       {
         path: "src/frontend/components/telegram-webapp-login.tsx",

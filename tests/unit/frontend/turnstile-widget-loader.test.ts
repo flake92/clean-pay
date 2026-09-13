@@ -30,7 +30,9 @@ describe("Turnstile script loader", () => {
     expect(firstScript).not.toBeNull();
 
     firstScript?.dispatchEvent(new Event("error"));
-    await firstView.findByText("Не удалось загрузить Cloudflare Turnstile.");
+    await firstView.findByText(
+      "Не удалось загрузить проверку безопасности. Обновите страницу или попробуйте позже.",
+    );
     expect(firstScript?.isConnected).toBe(false);
     firstView.unmount();
 
@@ -88,7 +90,9 @@ describe("Turnstile script loader", () => {
     }));
     existing.dispatchEvent(new Event("error"));
 
-    await view.findByText("Не удалось загрузить Cloudflare Turnstile.");
+    await view.findByText(
+      "Не удалось загрузить проверку безопасности. Обновите страницу или попробуйте позже.",
+    );
     expect(existing.isConnected).toBe(false);
   });
 });

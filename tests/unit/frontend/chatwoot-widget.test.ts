@@ -19,7 +19,7 @@ vi.mock("@/frontend/lib/browser-navigation", () => ({
 }));
 
 import type { ChatwootWidgetConfig } from "@/application/models/chatwoot";
-import { ChatwootWidget } from "@/frontend/components/chatwoot-widget";
+import { SupportChatRuntime as ChatwootWidget } from "@/frontend/components/chatwoot-widget";
 import {
   CHATWOOT_IDENTITY_ATTEMPT_TIMEOUT_MS,
   clearChatwootSupportContextCache,
@@ -633,6 +633,29 @@ describe("Chatwoot widget context lifecycle", () => {
     });
     expect(api.setUser).toHaveBeenCalledTimes(1);
     expect(api.toggleBubbleVisibility).toHaveBeenLastCalledWith("show");
+  });
+
+  it("publishes a failed state when the support SDK cannot load", async () => {
+    delete window.chatwootSDK;
+    delete window.$chatwoot;
+
+    render(createElement(ChatwootWidget, { config }));
+
+    const script = await waitFor(() => {
+      const candidate = document.getElementById("clean-pay-chatwoot-sdk");
+      expect(candidate).toBeInstanceOf(HTMLScriptElement);
+      return candidate as HTMLScriptElement;
+    });
+
+    act(() => script.dispatchEvent(new Event("error")));
+
+    await waitFor(() => {
+      expect(window.cleanPayChatwootFailedIdentity).toEqual({
+        core: expect.any(String),
+        customAttributes: expect.any(String),
+      });
+    });
+    expect(document.getElementById("clean-pay-chatwoot-sdk")).toBeNull();
   });
 
   it("cancels the component timer on unmount without launching a background retry", async () => {

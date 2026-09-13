@@ -7,6 +7,7 @@ import {
   useTurnstileWidgetController,
   type TurnstileHandle,
 } from "@/frontend/hooks/use-turnstile-widget-controller";
+import { securityCheckUnavailableMessage } from "@/frontend/lib/turnstile-transitions";
 
 export type { TurnstileHandle };
 export { hasTurnstileSiteKey } from "@/frontend/lib/turnstile-transitions";
@@ -30,7 +31,12 @@ export function TurnstileWidget({
   });
 
   if (!siteKey) {
-    return <Message severity="error" text="Cloudflare Turnstile site key is not configured." />;
+    return (
+      <Message
+        severity="error"
+        text={securityCheckUnavailableMessage}
+      />
+    );
   }
 
   return (

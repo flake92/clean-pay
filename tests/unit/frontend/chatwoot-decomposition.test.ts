@@ -5,7 +5,7 @@ import { render } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { ChatwootWidgetConfig } from "@/application/models/chatwoot";
-import { ChatwootGuestBoundary } from "@/frontend/components/chatwoot-widget";
+import { SupportChatGuestBoundary } from "@/frontend/components/chatwoot-widget";
 import {
   boundedChatwootIdentityProbeDelayMs,
   chatwootIdentityAttemptRemainingMs,
@@ -84,7 +84,7 @@ describe("Chatwoot decomposition contracts", () => {
   it("keeps the guest boundary renderless while entering guest mode", () => {
     window.cleanPayChatwootAuthorized = true;
 
-    const view = render(createElement(ChatwootGuestBoundary));
+    const view = render(createElement(SupportChatGuestBoundary));
 
     expect(view.container.innerHTML).toBe("");
     expect(window.cleanPayChatwootAuthorized).toBe(false);
@@ -150,7 +150,7 @@ describe("Chatwoot decomposition contracts", () => {
     const uninitialized = chatwoot.loadChatwootSdk(config.baseUrl);
     document.getElementById("clean-pay-chatwoot-sdk")
       ?.dispatchEvent(new Event("load"));
-    await expect(uninitialized).rejects.toThrow("Chatwoot SDK did not initialize");
+    await expect(uninitialized).rejects.toThrow("Support chat did not initialize");
 
     const loaded = chatwoot.loadChatwootSdk(config.baseUrl);
     const script = document.getElementById("clean-pay-chatwoot-sdk");
