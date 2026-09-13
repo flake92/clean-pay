@@ -145,7 +145,9 @@ the cross-image semantic request HMAC: baseline and candidate image
 attestations must be distinct, while their projected request/order semantics
 must be equal. Removing or changing either provenance relation fails closed.
 The full sanitized static ledger is retained for offline recomputation. The
-initial generation is exactly `[login, profile, cabinet]`; the recreated
+initial generation is exactly `[login, profile, cabinet]` for the complete
+OIDC redirect or `[login, cabinet]` for the already-authenticated shortcut;
+the shortcut still requires its successful `app-profile-action`. The recreated
 generation is exactly `[login, cabinet]`. Every static response must complete
 through `finished()`, then its bounded body is read twice byte-for-byte and
 bound by length, digest, content type, resource class, active document, and OCI
@@ -156,10 +158,10 @@ external/local prefixes, URI suffixes, entities, or mixed quote forms fail.
 CSS is decoded as fatal UTF-8 and must expose the exact
 eight-reference EOT/SVG/TTF/WOFF/WOFF2 fallback closure reconciled with the
 route graph. A sanitized per-document response-declaration ledger preserves
-the exact `[login, profile, cabinet]` initial partition. The recreated ledger
-must equal that initial ledger with only `profile` removed; its login and
-cabinet path-digest sets cannot be replaced by the initial three-document
-union. Each generation's sorted declaration union is recomputed against its
+the matching exact initial partition. The recreated ledger must equal that
+initial ledger with only `profile` removed when it exists; its login and cabinet
+path-digest sets cannot be replaced by the full initial three-document union.
+Each generation's sorted declaration union is recomputed against its
 own static load graph. The offline reader also resolves every declared digest
 through the role's inventory, requires each document's route plus
 response-declared CSS/JS partition to equal that document's expected chunk

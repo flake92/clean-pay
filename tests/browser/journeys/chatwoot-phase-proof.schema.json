@@ -1066,13 +1066,48 @@
       "allOf": [
         { "$ref": "#/$defs/staticGenerationProvenance" },
         {
-          "properties": {
-            "documentGenerationCount": { "const": 3 },
-            "responseDeclarationLedger": {
-              "$ref": "#/$defs/staticInitialResponseDeclarationLedger"
+          "oneOf": [
+            {
+              "properties": {
+                "documentGenerationCount": { "const": 2 },
+                "responseDeclarationLedger": {
+                  "$ref": "#/$defs/staticRecreatedResponseDeclarationLedger"
+                },
+                "staticLoadGraph": {
+                  "allOf": [
+                    { "$ref": "#/$defs/staticInitialLoadGraph" },
+                    {
+                      "properties": {
+                        "documentLoadLedger": {
+                          "$ref": "#/$defs/staticInitialShortcutDocumentLoadLedger"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
             },
-            "staticLoadGraph": { "$ref": "#/$defs/staticInitialLoadGraph" }
-          }
+            {
+              "properties": {
+                "documentGenerationCount": { "const": 3 },
+                "responseDeclarationLedger": {
+                  "$ref": "#/$defs/staticInitialResponseDeclarationLedger"
+                },
+                "staticLoadGraph": {
+                  "allOf": [
+                    { "$ref": "#/$defs/staticInitialLoadGraph" },
+                    {
+                      "properties": {
+                        "documentLoadLedger": {
+                          "$ref": "#/$defs/staticInitialFullDocumentLoadLedger"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ]
         }
       ]
     },
@@ -1305,6 +1340,23 @@
     "staticCabinetDocumentLoad": {
       "allOf": [{ "$ref": "#/$defs/staticDocumentLoad" }, { "properties": { "documentKey": { "const": "app-cabinet-document" } } }]
     },
+    "staticInitialShortcutDocumentLoadLedger": {
+      "type": "array", "minItems": 2, "maxItems": 2,
+      "items": [
+        { "$ref": "#/$defs/staticLoginDocumentLoad" },
+        { "$ref": "#/$defs/staticCabinetDocumentLoad" }
+      ],
+      "additionalItems": false
+    },
+    "staticInitialFullDocumentLoadLedger": {
+      "type": "array", "minItems": 3, "maxItems": 3,
+      "items": [
+        { "$ref": "#/$defs/staticLoginDocumentLoad" },
+        { "$ref": "#/$defs/staticProfileDocumentLoad" },
+        { "$ref": "#/$defs/staticCabinetDocumentLoad" }
+      ],
+      "additionalItems": false
+    },
     "staticInitialLoadGraph": {
       "type": "object",
       "additionalProperties": false,
@@ -1331,13 +1383,10 @@
         },
         "declaredPathSha256s": { "$ref": "#/$defs/staticDigestArray" },
         "documentLoadLedger": {
-          "type": "array", "minItems": 3, "maxItems": 3,
-          "items": [
-            { "$ref": "#/$defs/staticLoginDocumentLoad" },
-            { "$ref": "#/$defs/staticProfileDocumentLoad" },
-            { "$ref": "#/$defs/staticCabinetDocumentLoad" }
-          ],
-          "additionalItems": false
+          "oneOf": [
+            { "$ref": "#/$defs/staticInitialShortcutDocumentLoadLedger" },
+            { "$ref": "#/$defs/staticInitialFullDocumentLoadLedger" }
+          ]
         },
         "expectedChunkPathSha256s": { "$ref": "#/$defs/staticDigestArray" },
         "inventoryLedger": {
