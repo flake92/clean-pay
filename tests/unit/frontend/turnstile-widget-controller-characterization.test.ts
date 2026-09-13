@@ -81,7 +81,9 @@ describe("Turnstile widget controller characterization", () => {
 
     act(() => options?.["error-callback"]());
     expect(onToken).toHaveBeenLastCalledWith(null);
-    expect(screen.getByText("Не удалось пройти проверку безопасности. Попробуйте ещё раз."))
+    expect(screen.getByText(
+      "Cloudflare Turnstile не подтвердил проверку. Выполните её ещё раз и повторите действие.",
+    ))
       .toBeTruthy();
 
     act(() => handle?.reset());

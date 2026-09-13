@@ -30,7 +30,10 @@ export async function AppShell({
   const chatwoot = createChatwootWidgetConfig(shell.supportIdentity);
 
   return (
-    <SupportChatSessionBoundary authenticated={shell.navigation.authenticated}>
+    <SupportChatSessionBoundary
+      authenticated={shell.navigation.authenticated}
+      chatwootConfig={chatwoot}
+    >
       <Layout navigation={shell.navigation}>{children}</Layout>
       {chatwoot ? <SupportChatRuntime config={chatwoot} /> : <SupportChatGuestBoundary />}
     </SupportChatSessionBoundary>

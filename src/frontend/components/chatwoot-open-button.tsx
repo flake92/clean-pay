@@ -2,41 +2,83 @@
 
 import { useEffect, useState } from "react";
 
-import { useSupportChatSessionAuthenticated } from "@/frontend/components/chatwoot-session-context";
+import {
+  useSupportChatExpectedIdentity,
+  useSupportChatSessionAuthenticated,
+} from "@/frontend/components/chatwoot-session-context";
 import { CHATWOOT_STATE_CHANGED_EVENT } from "@/frontend/lib/chatwoot-state-events";
+import {
+  chatwootCookieValue,
+  hasChatwootCookie,
+} from "@/frontend/lib/chatwoot-storage";
 
 type ChatwootActionState = "signed-out" | "connecting" | "failed" | "ready";
 
-function chatwootActionState(authenticated: boolean): ChatwootActionState {
+function chatwootActionState(
+  authenticated: boolean,
+  expectedIdentity: {
+    baseUrl: string;
+    core: string;
+    websiteToken: string;
+  } | null,
+): ChatwootActionState {
   if (!authenticated || typeof window === "undefined") {
     return "signed-out";
   }
 
-  if (window.cleanPayChatwootFailedIdentity) return "failed";
+  if (
+    expectedIdentity
+    && window.cleanPayChatwootFailedIdentity?.core === expectedIdentity.core
+  ) {
+    return "failed";
+  }
 
-  if (!window.cleanPayChatwootAuthorized) return "connecting";
+  if (!expectedIdentity || !window.cleanPayChatwootAuthorized) {
+    return "connecting";
+  }
 
-  const hasConfirmedIdentity = Boolean(
-    window.cleanPayChatwootIdentity
-    || window.cleanPayChatwootOwnership
-    || window.cleanPayChatwootPendingIdentity?.phase === "ownership_confirmed",
+  const chatwoot = window.$chatwoot;
+  if (
+    chatwoot?.baseUrl !== expectedIdentity.baseUrl
+    || chatwoot.websiteToken !== expectedIdentity.websiteToken
+  ) {
+    return "connecting";
+  }
+  const pending = window.cleanPayChatwootPendingIdentity;
+  if (pending && pending.core !== expectedIdentity.core) {
+    return "connecting";
+  }
+  const conversation = chatwootCookieValue("cw_conversation");
+  const identityConfirmed = Boolean(
+    window.cleanPayChatwootIdentity?.core === expectedIdentity.core
+    && hasChatwootCookie(`cw_user_${expectedIdentity.websiteToken}`)
+    && conversation,
+  );
+  const ownershipConfirmed = Boolean(
+    conversation
+    && window.cleanPayChatwootOwnership?.core === expectedIdentity.core
+    && window.cleanPayChatwootOwnership.conversation === conversation,
   );
 
   return (
-    window.$chatwoot?.hasLoaded
-    && window.$chatwoot.toggle
-    && hasConfirmedIdentity
+    chatwoot?.hasLoaded
+    && chatwoot.toggle
+    && (identityConfirmed || ownershipConfirmed)
   ) ? "ready" : "connecting";
 }
 
 export function SupportChatOpenButton() {
   const authenticated = useSupportChatSessionAuthenticated();
+  const expectedIdentity = useSupportChatExpectedIdentity();
   const [state, setState] = useState<ChatwootActionState>(
     authenticated ? "connecting" : "signed-out",
   );
 
   useEffect(() => {
-    const refresh = () => setState(chatwootActionState(authenticated));
+    const refresh = () => setState(chatwootActionState(
+      authenticated,
+      expectedIdentity,
+    ));
     const refreshAfterCurrentEvent = () => queueMicrotask(refresh);
     refresh();
 
@@ -49,7 +91,7 @@ export function SupportChatOpenButton() {
       window.removeEventListener("chatwoot:ready", refreshAfterCurrentEvent);
       window.removeEventListener("chatwoot:error", refreshAfterCurrentEvent);
     };
-  }, [authenticated]);
+  }, [authenticated, expectedIdentity]);
 
   if (state === "signed-out") {
     return <span className="line-height-3 text-600">Чат доступен после входа в аккаунт.</span>;
@@ -71,7 +113,9 @@ export function SupportChatOpenButton() {
     <button
       className="p-button p-component p-button-outlined"
       onClick={() => {
-        if (chatwootActionState(authenticated) === "ready") {
+        if (
+          chatwootActionState(authenticated, expectedIdentity) === "ready"
+        ) {
           window.$chatwoot?.toggle?.("open");
         }
       }}

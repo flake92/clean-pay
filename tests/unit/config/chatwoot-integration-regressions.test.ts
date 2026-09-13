@@ -1,5 +1,4 @@
-import { existsSync, readFileSync } from "node:fs";
-
+import { existsSync, globSync, readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 function source(path: string) {
@@ -66,6 +65,8 @@ describe("Chatwoot integration boundaries", () => {
       "loadChatwootSupportContextAction(config.user.identifier)",
     );
     expect(component).not.toMatch(/\bfetch\s*\(/);
+    expect(action).toContain("productionChatwootContextGateway.loadActor()");
+    expect(action).toContain("productionChatwootSupportContextRequestCache.load(");
     expect(action).toContain("loadChatwootSupportContext(");
     expect(action).toContain("productionChatwootContextGateway,");
     expect(action).toContain("expectedUserId,");
@@ -146,14 +147,25 @@ describe("Chatwoot integration boundaries", () => {
     expect(storage).toContain("window.localStorage");
   });
 
-  it("uses only the official Chatwoot launcher", () => {
+  it("keeps the third-party launcher hidden behind the first-party support action", () => {
     const component = source("src/frontend/components/chatwoot-widget.tsx");
+    const client = source("src/frontend/lib/chatwoot.ts");
+    const supportButton = source("src/frontend/components/chatwoot-open-button.tsx");
     const layout = source("src/frontend/styles/layout/layout.scss");
 
     expect(component).not.toContain("clean-pay-chatwoot-launcher");
     expect(component).not.toContain("clean-pay:chatwoot-open");
     expect(component).toContain("return null;");
+    expect(client).not.toContain('toggleBubbleVisibility("show")');
+    expect(supportButton).toContain('window.$chatwoot?.toggle?.("open")');
+    expect(supportButton).toContain("Открыть чат поддержки");
     expect(layout).not.toContain('@use "./chatwoot"');
     expect(existsSync("src/frontend/styles/layout/_chatwoot.scss")).toBe(false);
+  });
+
+  it("keeps internal subscription-provider names out of customer frontend modules", () => {
+    for (const path of globSync("src/frontend/**/*.{ts,tsx}")) {
+      expect(source(path).toLowerCase(), path).not.toMatch(/remnashop|remnawave/);
+    }
   });
 });

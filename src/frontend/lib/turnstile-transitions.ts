@@ -1,14 +1,20 @@
+import {
+  securityCheckFailedMessage,
+  securityCheckLoadFailedMessage,
+  securityCheckRequiredMessage,
+  securityCheckUnavailableMessage,
+} from "@/application/models/security-check-messages";
+
+export {
+  securityCheckFailedMessage,
+  securityCheckLoadFailedMessage,
+  securityCheckRequiredMessage,
+  securityCheckUnavailableMessage,
+} from "@/application/models/security-check-messages";
+
 export function hasTurnstileSiteKey(siteKey?: string | null) {
   return Boolean(siteKey);
 }
-
-export const securityCheckRequiredMessage = "Пройдите проверку безопасности.";
-export const securityCheckUnavailableMessage =
-  "Проверка безопасности временно недоступна. Попробуйте позже.";
-export const securityCheckFailedMessage =
-  "Не удалось пройти проверку безопасности. Попробуйте ещё раз.";
-export const securityCheckLoadFailedMessage =
-  "Не удалось загрузить проверку безопасности. Обновите страницу или попробуйте позже.";
 
 export function missingSecurityCheckTokenMessage(siteKeyConfigured: boolean) {
   return siteKeyConfigured

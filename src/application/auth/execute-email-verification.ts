@@ -8,6 +8,7 @@ import type { AccountReadiness, EmailVerificationResult } from "@/application/mo
 import type { AuthProfileGateway } from "@/application/auth/ports/auth-profile";
 import { AuthProfileError } from "@/application/auth/ports/auth-profile";
 import { resolveAuthProfile } from "@/application/auth/resolve-auth-profile";
+import { securityCheckFailedMessage } from "@/application/models/security-check-messages";
 import { paymentOwnerTransitionKey } from "@/shared/domain/payment-owner-transition";
 
 function failure(error: unknown, fallback: string): EmailVerificationResult {
@@ -18,7 +19,8 @@ function failure(error: unknown, fallback: string): EmailVerificationResult {
     ? Math.ceil(error.retryAfterSeconds)
     : null;
   const messages: Record<string, string> = {
-    FORBIDDEN: "Проверка безопасности не пройдена. Выполните её ещё раз и повторите попытку.",
+    FORBIDDEN: "Действие недоступно.",
+    SECURITY_CHECK_FAILED: securityCheckFailedMessage,
     EMAIL_REQUIRED: "Сначала добавьте e-mail и пароль к аккаунту.",
     EMAIL_CODE_INVALID: "Код не подошёл. Проверьте его и попробуйте снова.",
     EMAIL_CODE_EXPIRED: "Код истёк. Запросите новый.",

@@ -15,7 +15,9 @@ const technicalOnlyFiles = new Set([
   "src/application/health/readiness.ts",
 ]);
 
-const providerBrand = /Remnashop|Remnawave|Cloudflare|Turnstile|Chatwoot/u;
+// Cloudflare Turnstile is intentionally named in actionable challenge errors;
+// its own widget branding remains unchanged by product policy.
+const providerBrand = /Remnashop|Remnawave|Chatwoot/u;
 
 function sourceFiles(directory: string): string[] {
   return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {

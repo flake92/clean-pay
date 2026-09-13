@@ -72,7 +72,11 @@ export async function verifyTurnstileToken(
   }
 
   if (!token) {
-    throw new ServiceError("FORBIDDEN", 403, "Turnstile token is required");
+    throw new ServiceError(
+      "SECURITY_CHECK_FAILED",
+      403,
+      "Turnstile token is required",
+    );
   }
 
   const body = new URLSearchParams({
@@ -147,7 +151,7 @@ export async function verifyTurnstileToken(
 
     if (!challengeAccepted) {
       outcome = "rejected";
-      throw new ServiceError("FORBIDDEN", 403, "Turnstile verification failed", {
+      throw new ServiceError("SECURITY_CHECK_FAILED", 403, "Turnstile verification failed", {
         upstreamStatus: response.status,
         upstreamPath: env.turnstile.verifyUrl,
         upstreamDetail: {

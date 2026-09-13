@@ -5,6 +5,7 @@ export const SERVICE_ERROR_PUBLIC_MESSAGES = {
   CURRENT_PASSWORD_INVALID: "Текущий пароль неверный.",
   PASSWORD_UNCHANGED: "Новый пароль должен отличаться от текущего.",
   FORBIDDEN: "Действие недоступно.",
+  SECURITY_CHECK_FAILED: "Проверка Cloudflare Turnstile не пройдена.",
   NOT_FOUND: "Данные не найдены.",
   VALIDATION_ERROR: "Проверьте введённые данные.",
   EMAIL_REQUIRED: "Привяжите e-mail к Telegram-аккаунту, чтобы продолжить.",

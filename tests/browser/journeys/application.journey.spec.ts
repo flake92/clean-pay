@@ -580,7 +580,7 @@ async function capturePreOwnedChatwootSeed(page: Page): Promise<PreOwnedChatwoot
       return captured.core === current.core
         && captured.customAttributes !== current.customAttributes
         && captured.conversation === current.conversation
-        && captured.conversation === chatwootFingerprintForTest(conversation);
+        && captured.conversation === chatwootDigestForTest(conversation);
     } catch {
       return false;
     }
@@ -602,7 +602,7 @@ async function capturePreOwnedChatwootSeed(page: Page): Promise<PreOwnedChatwoot
     captured.core !== current.core
     || captured.customAttributes === current.customAttributes
     || captured.conversation !== current.conversation
-    || captured.conversation !== chatwootFingerprintForTest(conversation)
+    || captured.conversation !== chatwootDigestForTest(conversation)
   ) {
     throw new Error("Fresh Chatwoot ownership generations do not prove the exact A-to-B transition.");
   }
@@ -682,7 +682,7 @@ function parsePersistedChatwootOwnership(raw: string): PersistedChatwootOwnershi
     throw new Error("Persisted Chatwoot ownership has an invalid schema.");
   }
   const record = parsed as Record<string, unknown>;
-  const fingerprint = /^[1-9][0-9]{0,4}:[a-f0-9]{1,8}$/;
+  const fingerprint = /^[a-f0-9]{64}$/;
   if (
     typeof record.core !== "string"
     || !fingerprint.test(record.core)
@@ -696,13 +696,8 @@ function parsePersistedChatwootOwnership(raw: string): PersistedChatwootOwnershi
   return record as PersistedChatwootOwnership;
 }
 
-function chatwootFingerprintForTest(value: string) {
-  let hash = 0x811c9dc5;
-  for (let index = 0; index < value.length; index += 1) {
-    hash ^= value.charCodeAt(index);
-    hash = Math.imul(hash, 0x01000193);
-  }
-  return `${value.length}:${(hash >>> 0).toString(16)}`;
+function chatwootDigestForTest(value: string) {
+  return createHash("sha256").update(value, "utf8").digest("hex");
 }
 
 async function readChatwootCookies(page: Page) {
@@ -722,7 +717,7 @@ async function readChatwootCookies(page: Page) {
 
 async function waitForAuthenticatedChatwootFixture(page: Page) {
   await expect.poll(async () => {
-    const browserState = await page.evaluate(() => {
+    const browserState = await page.evaluate(async () => {
       const calls = (
         window as unknown as {
           __cleanPayChatwootBoundaryCalls?: unknown[];
@@ -750,14 +745,9 @@ async function waitForAuthenticatedChatwootFixture(page: Page) {
         ownership = null;
       }
 
-      const fingerprint = (value: string) => {
-        let hash = 0x811c9dc5;
-        for (let index = 0; index < value.length; index += 1) {
-          hash ^= value.charCodeAt(index);
-          hash = Math.imul(hash, 0x01000193);
-        }
-        return `${value.length}:${(hash >>> 0).toString(16)}`;
-      };
+      const digest = async (value: string) => Array.from(new Uint8Array(
+        await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value)),
+      ), (byte) => byte.toString(16).padStart(2, "0")).join("");
       const exactKeys = (value: unknown, keys: string[]) => (
         typeof value === "object"
         && value !== null
@@ -770,7 +760,7 @@ async function waitForAuthenticatedChatwootFixture(page: Page) {
         window as unknown as { cleanPayChatwootOwnership?: unknown }
       ).cleanPayChatwootOwnership;
       const inMemoryRecord = inMemoryOwnership as Record<string, unknown> | null;
-      const fingerprintPattern = /^[1-9][0-9]{0,4}:[a-f0-9]{1,8}$/;
+      const fingerprintPattern = /^[a-f0-9]{64}$/;
       const records = Array.isArray(calls)
         ? calls.filter((call): call is Record<string, unknown> => (
           typeof call === "object"
@@ -807,6 +797,13 @@ async function waitForAuthenticatedChatwootFixture(page: Page) {
             call.method === "removeLabel"
             && call.label === "subscription_expired"
           )),
+          officialLauncherAlwaysHidden: records.some((call) => (
+            call.method === "toggleBubbleVisibility"
+            && call.value === "hide"
+          )) && records.every((call) => (
+            call.method !== "toggleBubbleVisibility"
+            || call.value === "hide"
+          )),
           unexpectedCalls: records.filter((call) => {
             if (isRunCall(call) || isSetUserCall(call) || call.method === "frame.loaded") {
               return false;
@@ -816,7 +813,7 @@ async function waitForAuthenticatedChatwootFixture(page: Page) {
             }
             if (
               call.method === "toggleBubbleVisibility"
-              && (call.value === "hide" || call.value === "show")
+              && call.value === "hide"
             ) {
               return false;
             }
@@ -837,14 +834,16 @@ async function waitForAuthenticatedChatwootFixture(page: Page) {
           && fingerprintPattern.test(ownershipRecord.core)
           && typeof ownershipRecord.customAttributes === "string"
           && fingerprintPattern.test(ownershipRecord.customAttributes)
-          && ownershipRecord.conversation === fingerprint(conversation),
+          && ownershipRecord.conversation === await digest(conversation),
         inMemoryOwnershipValid: exactKeys(
           inMemoryOwnership,
           ["conversation", "core", "customAttributes"],
         )
           && inMemoryRecord?.conversation === conversation
           && inMemoryRecord.core === ownershipRecord?.core
-          && inMemoryRecord.customAttributes === ownershipRecord?.customAttributes,
+          && typeof inMemoryRecord.customAttributes === "string"
+          && await digest(inMemoryRecord.customAttributes)
+            === ownershipRecord?.customAttributes,
         pathname: location.pathname,
       };
     });
@@ -869,6 +868,7 @@ async function waitForAuthenticatedChatwootFixture(page: Page) {
         hasValidSetUser: true,
         identityConfirmedAfterSetUser: true,
         hasSubscriptionExpiredRemove: true,
+        officialLauncherAlwaysHidden: true,
         unexpectedCalls: [],
       },
       conversation: expect.stringMatching(/^c[a-z0-9]{24}$/),
@@ -907,7 +907,7 @@ async function waitForAuthenticatedChatwootFixture(page: Page) {
 
 async function waitForFreshAuthenticatedChatwootFixture(page: Page) {
   await expect.poll(async () => {
-    const browserState = await page.evaluate(() => {
+    const browserState = await page.evaluate(async () => {
       const calls = (
         window as unknown as {
           __cleanPayChatwootBoundaryCalls?: unknown[];
@@ -935,14 +935,9 @@ async function waitForFreshAuthenticatedChatwootFixture(page: Page) {
         ownership = null;
       }
 
-      const fingerprint = (value: string) => {
-        let hash = 0x811c9dc5;
-        for (let index = 0; index < value.length; index += 1) {
-          hash ^= value.charCodeAt(index);
-          hash = Math.imul(hash, 0x01000193);
-        }
-        return `${value.length}:${(hash >>> 0).toString(16)}`;
-      };
+      const digest = async (value: string) => Array.from(new Uint8Array(
+        await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value)),
+      ), (byte) => byte.toString(16).padStart(2, "0")).join("");
       const exactKeys = (value: unknown, keys: string[]) => (
         typeof value === "object"
         && value !== null
@@ -955,7 +950,7 @@ async function waitForFreshAuthenticatedChatwootFixture(page: Page) {
         window as unknown as { cleanPayChatwootOwnership?: unknown }
       ).cleanPayChatwootOwnership;
       const inMemoryRecord = inMemoryOwnership as Record<string, unknown> | null;
-      const fingerprintPattern = /^[1-9][0-9]{0,4}:[a-f0-9]{1,8}$/;
+      const fingerprintPattern = /^[a-f0-9]{64}$/;
       const records = Array.isArray(calls)
         ? calls.filter((call): call is Record<string, unknown> => (
           typeof call === "object"
@@ -992,6 +987,13 @@ async function waitForFreshAuthenticatedChatwootFixture(page: Page) {
             call.method === "removeLabel"
             && call.label === "subscription_expired"
           )),
+          officialLauncherAlwaysHidden: records.some((call) => (
+            call.method === "toggleBubbleVisibility"
+            && call.value === "hide"
+          )) && records.every((call) => (
+            call.method !== "toggleBubbleVisibility"
+            || call.value === "hide"
+          )),
           unexpectedCalls: records.filter((call) => {
             if (isRunCall(call) || isSetUserCall(call) || call.method === "frame.loaded") {
               return false;
@@ -1001,7 +1003,7 @@ async function waitForFreshAuthenticatedChatwootFixture(page: Page) {
             }
             if (
               call.method === "toggleBubbleVisibility"
-              && (call.value === "hide" || call.value === "show")
+              && call.value === "hide"
             ) {
               return false;
             }
@@ -1022,14 +1024,16 @@ async function waitForFreshAuthenticatedChatwootFixture(page: Page) {
           && fingerprintPattern.test(ownershipRecord.core)
           && typeof ownershipRecord.customAttributes === "string"
           && fingerprintPattern.test(ownershipRecord.customAttributes)
-          && ownershipRecord.conversation === fingerprint(conversation),
+          && ownershipRecord.conversation === await digest(conversation),
         inMemoryOwnershipValid: exactKeys(
           inMemoryOwnership,
           ["conversation", "core", "customAttributes"],
         )
           && inMemoryRecord?.conversation === conversation
           && inMemoryRecord.core === ownershipRecord?.core
-          && inMemoryRecord.customAttributes === ownershipRecord?.customAttributes,
+          && typeof inMemoryRecord.customAttributes === "string"
+          && await digest(inMemoryRecord.customAttributes)
+            === ownershipRecord?.customAttributes,
         pathname: location.pathname,
       };
     });
@@ -1054,6 +1058,7 @@ async function waitForFreshAuthenticatedChatwootFixture(page: Page) {
         hasValidSetUser: true,
         identityConfirmedAfterSetUser: true,
         hasSubscriptionExpiredRemove: true,
+        officialLauncherAlwaysHidden: true,
         unexpectedCalls: [],
       },
       conversation: expect.stringMatching(/^c[a-z0-9]{24}$/),

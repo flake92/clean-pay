@@ -89,11 +89,11 @@ export function createCiV10Cases(fixtureDirectory) {
     }
     const fingerprint=value=>{let hash=0x811c9dc5;for(let index=0;index<value.length;index+=1){hash^=value.charCodeAt(index);hash=Math.imul(hash,0x01000193)}return `${value.length}:${(hash>>>0).toString(16)}`};
     const conversation="csyntheticbrowserjourney01";const identityName="cw_user_"+"a".repeat(64);const ownership={conversation:fingerprint(conversation),core:"1:a",customAttributes:"1:b"};
-    const equivalentCalls=[{method:"run",baseUrl:"https://chatwoot.browser.clean-pay.dev",websiteTokenBytes:64},{method:"frame.loaded"},{method:"toggleBubbleVisibility",value:"show"},{method:"setUser",identifierBytes:25,attributeKeys:["custom_attributes","email","identifier_hash","name"]},{method:"toggleBubbleVisibility",value:"show"},{method:"removeLabel",label:"subscription_expired"},{method:"identity.confirmed"},{method:"toggleBubbleVisibility",value:"show"},{method:"removeLabel",label:"subscription_expired"}];
+    const equivalentCalls=[{method:"run",baseUrl:"https://chatwoot.browser.clean-pay.dev",websiteTokenBytes:64},{method:"frame.loaded"},{method:"toggleBubbleVisibility",value:"hide"},{method:"setUser",identifierBytes:25,attributeKeys:["custom_attributes","email","identifier_hash","name"]},{method:"toggleBubbleVisibility",value:"hide"},{method:"removeLabel",label:"subscription_expired"},{method:"identity.confirmed"},{method:"toggleBubbleVisibility",value:"hide"},{method:"removeLabel",label:"subscription_expired"}];
     const badCalls=[{method:"run",baseUrl:"https://chatwoot.browser.clean-pay.dev",websiteTokenBytes:64},{method:"reset"}];
     for(const functionName of ["waitForAuthenticatedChatwootFixture","waitForFreshAuthenticatedChatwootFixture"]){
       const equivalent=evaluatedState(functionName,equivalentCalls);
-      assert.deepEqual(JSON.parse(JSON.stringify(equivalent.callContract)),{startsWithRun:true,runCount:1,hasFrameLoaded:true,hasValidSetUser:true,identityConfirmedAfterSetUser:true,hasSubscriptionExpiredRemove:true,unexpectedCalls:[]});
+      assert.deepEqual(JSON.parse(JSON.stringify(equivalent.callContract)),{startsWithRun:true,runCount:1,hasFrameLoaded:true,hasValidSetUser:true,identityConfirmedAfterSetUser:true,hasSubscriptionExpiredRemove:true,officialLauncherAlwaysHidden:true,unexpectedCalls:[]});
       assert.equal(evaluatedState(functionName,badCalls).callContract.unexpectedCalls.length,1);
     }
   });

@@ -217,7 +217,9 @@ describe("application authentication policy", () => {
 
   it("returns an actionable security-check error without calling the provider", async () => {
     const commands = emailCommands({
-      verifyHuman: vi.fn(async () => { throw new EmailVerificationError("FORBIDDEN"); }),
+      verifyHuman: vi.fn(async () => {
+        throw new EmailVerificationError("SECURITY_CHECK_FAILED");
+      }),
     });
 
     await expect(changeVerifiedEmail(commands, {
@@ -225,10 +227,27 @@ describe("application authentication policy", () => {
       turnstileToken: "wrong-action-token",
     })).resolves.toEqual({
       ok: false,
-      code: "FORBIDDEN",
-      message: "Проверка безопасности не пройдена. Выполните её ещё раз и повторите попытку.",
+      code: "SECURITY_CHECK_FAILED",
+      message: "Cloudflare Turnstile не подтвердил проверку. Выполните её ещё раз и повторите действие.",
     });
     expect(commands.changeProviderEmail).not.toHaveBeenCalled();
+  });
+
+  it("does not describe a provider-level forbidden response as a Turnstile error", async () => {
+    const commands = emailCommands({
+      changeProviderEmail: vi.fn(async () => {
+        throw new EmailVerificationError("FORBIDDEN");
+      }),
+    });
+
+    await expect(changeVerifiedEmail(commands, {
+      email: "new@example.com",
+      turnstileToken: "valid-token",
+    })).resolves.toEqual({
+      ok: false,
+      code: "FORBIDDEN",
+      message: "Действие недоступно.",
+    });
   });
 
   it("falls back from login to registration but does not mutate ownership before verification", async () => {
