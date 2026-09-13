@@ -2,24 +2,33 @@
 
 import { useEffect, useState } from "react";
 
-function canOpenChatwoot() {
-  if (typeof window === "undefined") return false;
+type ChatwootActionState = "signed-out" | "connecting" | "failed" | "ready";
 
-  return Boolean(
-    window.cleanPayChatwootAuthorized
-    && window.$chatwoot?.hasLoaded
-    && window.$chatwoot.toggle
-    && !window.cleanPayChatwootPendingIdentity
-    && !window.cleanPayChatwootFailedIdentity
-    && (window.cleanPayChatwootIdentity || window.cleanPayChatwootOwnership),
+function chatwootActionState(): ChatwootActionState {
+  if (typeof window === "undefined" || !window.cleanPayChatwootAuthorized) {
+    return "signed-out";
+  }
+
+  if (window.cleanPayChatwootFailedIdentity) return "failed";
+
+  const hasConfirmedIdentity = Boolean(
+    window.cleanPayChatwootIdentity
+    || window.cleanPayChatwootOwnership
+    || window.cleanPayChatwootPendingIdentity?.phase === "ownership_confirmed",
   );
+
+  return (
+    window.$chatwoot?.hasLoaded
+    && window.$chatwoot.toggle
+    && hasConfirmedIdentity
+  ) ? "ready" : "connecting";
 }
 
 export function ChatwootOpenButton() {
-  const [available, setAvailable] = useState(false);
+  const [state, setState] = useState<ChatwootActionState>("signed-out");
 
   useEffect(() => {
-    const refresh = () => setAvailable(canOpenChatwoot());
+    const refresh = () => setState(chatwootActionState());
     refresh();
 
     const timer = window.setInterval(refresh, 500);
@@ -33,13 +42,27 @@ export function ChatwootOpenButton() {
     };
   }, []);
 
-  if (!available) return null;
+  if (state === "signed-out") {
+    return <span className="line-height-3 text-600">Чат доступен после входа в аккаунт.</span>;
+  }
+
+  if (state === "failed") {
+    return (
+      <span className="line-height-3 text-600">
+        Чат временно недоступен. Обновите страницу или попробуйте позже.
+      </span>
+    );
+  }
+
+  if (state === "connecting") {
+    return <span className="line-height-3 text-600">Подключаем чат поддержки…</span>;
+  }
 
   return (
     <button
       className="p-button p-component p-button-outlined"
       onClick={() => {
-        if (canOpenChatwoot()) window.$chatwoot?.toggle?.("open");
+        if (chatwootActionState() === "ready") window.$chatwoot?.toggle?.("open");
       }}
       type="button"
     >
