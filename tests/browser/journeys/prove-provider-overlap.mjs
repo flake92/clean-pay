@@ -50,6 +50,7 @@ import {
   finalizeProviderOverlapHistoryContract,
   installProviderOverlapHistoryInstrumentation,
   isProviderOverlapPlaywrightBodyCdpResponse,
+  isRecoverableProviderOverlapLoginGotoAbort,
   normalizeProviderOverlapObservedResponseContentType,
   providerOverlapChatwootIdentityBoundarySettled,
   PROVIDER_OVERLAP_MAXIMUM_STATIC_RESPONSE_BYTES,
@@ -1591,7 +1592,11 @@ async function exerciseCabinet(
       );
     } catch (error) {
       if (browserResponseCaptureFailure) throw browserResponseCaptureFailure;
-      throw error;
+      if (!isRecoverableProviderOverlapLoginGotoAbort(error)) throw error;
+      await page.waitForURL(
+        (url) => url.href === "https://pay.ci.clean-pay.dev/login?redirect_to=%2Fprofile",
+        { timeout: 5_000 },
+      );
     }
     const telegram = page.getByRole("button", { name: "Войти через Telegram" });
     markProviderFailurePhase(role, "wait-telegram-visible");
