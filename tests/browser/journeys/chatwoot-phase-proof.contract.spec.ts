@@ -1826,6 +1826,7 @@ test("executes the direct-cabinet causal reducer and fails closed on reordered l
     firstCabinetSetUserBeforeUserCookieAbsent: true,
     cabinetIdentityConfirmedObservedAfterSetUser: true,
     postClearSetUserCount: 2,
+    postClearIdentityConfirmedCount: 2,
     cabinetSetUserCount: 1,
     cabinetIdentityConfirmedCount: 1,
   });
@@ -1889,6 +1890,51 @@ test("executes the direct-cabinet causal reducer and fails closed on reordered l
     presence: { conversationCookiePresent: false, userCookiePresent: true },
     url: "https://pay.ci.clean-pay.dev/cabinet",
   })).toThrow(/user-cookie-negative/);
+
+  const settledPairReplay = prepareRecreatedCabinet();
+  expect(settledPairReplay.observeBoundary({
+    method: "setUser",
+    presence: pair,
+    url: "https://pay.ci.clean-pay.dev/cabinet",
+  })).toBe("cabinet-set-user");
+  settledPairReplay.observeBoundary({
+    method: "identity.confirmed",
+    presence: pair,
+    url: "https://pay.ci.clean-pay.dev/cabinet",
+  });
+  settledPairReplay.observeBoundary({
+    method: "setUser",
+    presence: pair,
+    url: "https://pay.ci.clean-pay.dev/cabinet",
+  });
+  settledPairReplay.observeBoundary({
+    method: "identity.confirmed",
+    presence: pair,
+    url: "https://pay.ci.clean-pay.dev/cabinet",
+  });
+  settledPairReplay.observeCookiePair(pair);
+  settledPairReplay.markCabinetCompleted();
+  expect(settledPairReplay.finish(pair)).toMatchObject({
+    firstCabinetSetUserBeforeConversationCookiePresent: true,
+    firstCabinetSetUserBeforeUserCookieAbsent: false,
+    postClearSetUserCount: 2,
+    postClearIdentityConfirmedCount: 2,
+  });
+
+  const incompleteSettledPairReplay = prepareRecreatedCabinet();
+  incompleteSettledPairReplay.observeBoundary({
+    method: "setUser",
+    presence: pair,
+    url: "https://pay.ci.clean-pay.dev/cabinet",
+  });
+  incompleteSettledPairReplay.observeBoundary({
+    method: "identity.confirmed",
+    presence: pair,
+    url: "https://pay.ci.clean-pay.dev/cabinet",
+  });
+  incompleteSettledPairReplay.observeCookiePair(pair);
+  incompleteSettledPairReplay.markCabinetCompleted();
+  expect(() => incompleteSettledPairReplay.finish(pair)).toThrow(/exact replay confirmation/);
 
   const wrongDocument = createChatwootPhaseCausalContract();
   primeAndSealCausalContract(wrongDocument);
@@ -5332,6 +5378,7 @@ function phaseEvidence(
         cabinetUserCookieObservedAfterSetUser: true,
         finalCookiePairPresent: true,
         postClearSetUserCount: 1,
+        postClearIdentityConfirmedCount: 1,
         cabinetSetUserCount: 1,
         cabinetIdentityConfirmedCount: 1,
         eventOrdinals: {

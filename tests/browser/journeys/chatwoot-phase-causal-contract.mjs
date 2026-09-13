@@ -12,6 +12,7 @@ export function createChatwootPhaseCausalContract(maximumEvents = 32) {
   let postClearOffset;
   let preClearSealed = false;
   let firstSetUserConversationCookiePresent;
+  let firstSetUserUserCookiePresent;
   let preConfirmationRetryObserved = false;
 
   const append = (record) => {
@@ -128,10 +129,11 @@ export function createChatwootPhaseCausalContract(maximumEvents = 32) {
         }
         if (ordinals.cabinetDocumentReached !== 4
           || Object.hasOwn(ordinals, "cabinetSetUserObserved")
-          || presence.userCookiePresent) {
+          || (presence.userCookiePresent && !presence.conversationCookiePresent)) {
           fail("First cabinet setUser lacks its mandatory user-cookie-negative precondition.");
         }
         firstSetUserConversationCookiePresent = presence.conversationCookiePresent;
+        firstSetUserUserCookiePresent = presence.userCookiePresent;
         ordinals.cabinetSetUserObserved = 5;
         return "cabinet-set-user";
       }
@@ -174,7 +176,8 @@ export function createChatwootPhaseCausalContract(maximumEvents = 32) {
       if (postClearOffset === undefined || ordinals.cabinetCompleted !== 8
         || Object.hasOwn(ordinals, "finalCookiePairObserved")
         || !presence.conversationCookiePresent || !presence.userCookiePresent
-        || typeof firstSetUserConversationCookiePresent !== "boolean") {
+        || typeof firstSetUserConversationCookiePresent !== "boolean"
+        || typeof firstSetUserUserCookiePresent !== "boolean") {
         fail("Chatwoot post-clear causal evidence is incomplete.");
       }
       ordinals.finalCookiePairObserved = 9;
@@ -189,13 +192,17 @@ export function createChatwootPhaseCausalContract(maximumEvents = 32) {
         || identityConfirmations.length < 1 || identityConfirmations.length > 2) {
         fail("Chatwoot post-clear boundary ledger is incomplete or duplicated.");
       }
+      if (firstSetUserUserCookiePresent
+        && (setUsers.length !== 2 || identityConfirmations.length !== 2)) {
+        fail("Chatwoot settled-pair first setUser lacks its exact replay confirmation.");
+      }
       return Object.freeze({
         negativeLoginSetUserCount: 0,
         negativeLoginConversationCookieAbsent: true,
         negativeLoginUserCookieAbsent: true,
         firstCabinetSetUserBeforeConversationCookiePresent:
           firstSetUserConversationCookiePresent,
-        firstCabinetSetUserBeforeUserCookieAbsent: true,
+        firstCabinetSetUserBeforeUserCookieAbsent: !firstSetUserUserCookiePresent,
         cabinetIdentityConfirmedObservedAfterSetUser: true,
         cabinetIdentityConfirmedConversationCookiePresent: true,
         cabinetIdentityConfirmedUserCookiePresent: true,
@@ -203,6 +210,7 @@ export function createChatwootPhaseCausalContract(maximumEvents = 32) {
         cabinetUserCookieObservedAfterSetUser: true,
         finalCookiePairPresent: true,
         postClearSetUserCount: setUsers.length,
+        postClearIdentityConfirmedCount: identityConfirmations.length,
         cabinetSetUserCount: 1,
         cabinetIdentityConfirmedCount: 1,
         eventOrdinals: Object.freeze({ ...ordinals }),
