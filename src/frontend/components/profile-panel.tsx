@@ -143,7 +143,7 @@ function ProfilePanelContent({
             {!emailReminders.emailEligible ? (
               <Message
                 severity="warn"
-                text="Remnashop сейчас не разрешает включить напоминания. Проверьте подтверждение e-mail или попробуйте позже; уже сохранённую настройку можно отключить."
+                text="Сейчас нельзя включить напоминания. Убедитесь, что e-mail подтверждён, или попробуйте позже; уже сохранённую настройку можно отключить."
               />
             ) : null}
             <p className="m-0 line-height-3 text-sm text-600" id="email-expiration-reminders-help">
