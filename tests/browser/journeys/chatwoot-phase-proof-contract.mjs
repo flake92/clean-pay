@@ -3108,9 +3108,9 @@ async function readExactExternalPlanFile(
   if (isFilesystemDescendant(repository, requested)) {
     fail("Chatwoot launch plan must remain outside the repository.");
   }
-  const beforeMetadata = await lstat(requested);
+  const beforeMetadata = await lstat(requested, { bigint: true });
   if (!beforeMetadata.isFile() || beforeMetadata.isSymbolicLink()
-    || beforeMetadata.size < 1 || beforeMetadata.size > maximumBytes) {
+    || beforeMetadata.size < 1n || beforeMetadata.size > BigInt(maximumBytes)) {
     fail("Chatwoot launch plan must be a bounded regular non-link file.");
   }
   const resolved = await realpath(requested);
@@ -3125,7 +3125,7 @@ async function readExactExternalPlanFile(
   let handleBefore;
   let handleAfter;
   try {
-    handleBefore = planFileIdentity(await handle.stat(), resolved);
+    handleBefore = planFileIdentity(await handle.stat({ bigint: true }), resolved);
     if (!samePlanFileIdentity(before, handleBefore)) {
       fail("Chatwoot launch plan path and FileHandle identities differ.");
     }
@@ -3135,16 +3135,16 @@ async function readExactExternalPlanFile(
     if (!bytes.equals(repeated)) {
       fail("Chatwoot launch plan content changed between exact FileHandle reads.");
     }
-    handleAfter = planFileIdentity(await handle.stat(), resolved);
+    handleAfter = planFileIdentity(await handle.stat({ bigint: true }), resolved);
   } finally {
     await handle.close();
   }
-  const afterMetadata = await lstat(requested);
+  const afterMetadata = await lstat(requested, { bigint: true });
   const afterResolved = await realpath(requested);
   const after = planFileIdentity(afterMetadata, afterResolved);
   if (!samePlanFileIdentity(before, handleAfter)
     || !samePlanFileIdentity(before, after)
-    || bytes.byteLength !== before.size) {
+    || BigInt(bytes.byteLength) !== before.size) {
     fail("Chatwoot launch plan changed during its exact FileHandle read.");
   }
   return Buffer.from(bytes);
@@ -3162,25 +3162,26 @@ async function readFileHandleAtPosition(handle, size) {
 }
 
 function planFileIdentity(metadata, resolved) {
-  if (!metadata.isFile() || !Number.isFinite(metadata.ctimeMs)
-    || !Number.isFinite(metadata.mtimeMs) || !Number.isFinite(metadata.size)) {
+  if (!metadata.isFile() || typeof metadata.ctimeNs !== "bigint"
+    || typeof metadata.mtimeNs !== "bigint" || typeof metadata.size !== "bigint"
+    || typeof metadata.dev !== "bigint" || typeof metadata.ino !== "bigint") {
     fail("Chatwoot launch plan filesystem identity is invalid.");
   }
   return Object.freeze({
-    ctimeMs: metadata.ctimeMs,
-    dev: String(metadata.dev),
-    ino: String(metadata.ino),
-    mtimeMs: metadata.mtimeMs,
+    ctimeNs: metadata.ctimeNs,
+    dev: metadata.dev,
+    ino: metadata.ino,
+    mtimeNs: metadata.mtimeNs,
     realpath: path.resolve(resolved),
     size: metadata.size,
   });
 }
 
 function samePlanFileIdentity(left, right) {
-  return left.ctimeMs === right.ctimeMs
+  return left.ctimeNs === right.ctimeNs
     && left.dev === right.dev
     && left.ino === right.ino
-    && left.mtimeMs === right.mtimeMs
+    && left.mtimeNs === right.mtimeNs
     && normalizeFilesystemPath(left.realpath) === normalizeFilesystemPath(right.realpath)
     && left.size === right.size;
 }
