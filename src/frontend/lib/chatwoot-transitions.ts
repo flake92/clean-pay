@@ -8,7 +8,7 @@ export function serializeChatwootAttributes(
   attributes: Record<string, string>,
 ) {
   return JSON.stringify(Object.entries(attributes).sort(([left], [right]) => (
-    left < right ? -1 : left > right ? 1 : 0
+    left < right ? -1 : Number(left !== right)
   )));
 }
 
