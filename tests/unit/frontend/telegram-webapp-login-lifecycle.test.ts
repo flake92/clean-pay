@@ -139,6 +139,28 @@ describe("Telegram WebApp login lifecycle", () => {
     ]);
   });
 
+  it("lets the successful Server Action response commit before navigation", async () => {
+    vi.useFakeTimers();
+    const fixture = controllerDependencies();
+    renderHook(() => useTelegramWebAppLoginController({
+      dependencies: fixture.dependencies,
+      redirectTo: "/cabinet",
+    }));
+
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(fixture.authenticate).toHaveBeenCalledOnce();
+    expect(fixture.replaceLocation).not.toHaveBeenCalled();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(fixture.replaceLocation).toHaveBeenCalledOnce();
+    expect(fixture.replaceLocation).toHaveBeenCalledWith("/cabinet");
+  });
+
   it("starts fallback only after script readiness and uses the exact encoded URL", async () => {
     const events: string[] = [];
     const fixture = controllerDependencies({
@@ -218,7 +240,7 @@ describe("Telegram WebApp login lifecycle", () => {
     await act(async () => resolveLoad());
 
     expect(fixture.authenticate).toHaveBeenCalledOnce();
-    expect(fixture.replaceLocation).toHaveBeenCalledWith("/cabinet");
+    await waitFor(() => expect(fixture.replaceLocation).toHaveBeenCalledWith("/cabinet"));
   });
 
   it("preserves stale redirect effects and exact duplicate action payloads", async () => {
