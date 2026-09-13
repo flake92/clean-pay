@@ -35,11 +35,6 @@ export function SupportPanel({ support }: { support: SupportViewModel }) {
         ) : (
           <p className="m-0 line-height-3 text-600">Контакты поддержки пока не опубликованы.</p>
         )}
-        {support.liveChatEnabled ? (
-          <p className="mt-3 mb-0 line-height-3 text-600">
-            Чат доступен после входа в аккаунт.
-          </p>
-        ) : null}
       </Card>
 
       <Card title="Как подключиться">
