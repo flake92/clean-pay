@@ -281,7 +281,7 @@ export function useChatwootWidgetController(
         } catch {
           cancelIdentityAttemptTimer();
           cancelIdentityProbeTimer();
-          clearChatwootIdentityState(true);
+          failChatwootIdentity(config, supportContext?.customAttributes);
           hideLauncher();
         }
       }
@@ -451,6 +451,7 @@ export function useChatwootWidgetController(
         // A running SDK cannot switch inboxes safely without reloading the
         // document. Hide a stale deployment instead of mixing conversations.
         enterChatwootGuestMode();
+        failChatwootIdentity(config, supportContext?.customAttributes);
         return;
       }
 
@@ -459,7 +460,7 @@ export function useChatwootWidgetController(
       }
     }).catch(() => {
       if (active) {
-        clearChatwootIdentityState(true);
+        failChatwootIdentity(config, supportContext?.customAttributes);
       }
     });
 

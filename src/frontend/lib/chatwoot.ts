@@ -22,6 +22,7 @@ import {
   sentChatwootIdentityAttempt,
   waitingChatwootIdentityAttempt,
 } from "@/frontend/lib/chatwoot-transitions";
+import { notifyChatwootStateChanged } from "@/frontend/lib/chatwoot-state-events";
 
 export type { ChatwootIdentificationStatus };
 export {
@@ -70,6 +71,7 @@ function sendChatwootIdentity(
 
   expireChatwootCookie(`cw_user_${config.websiteToken}`);
   window.cleanPayChatwootPendingIdentity = pending;
+  notifyChatwootStateChanged();
 
   try {
     chatwoot.setUser(config.user.identifier, {
@@ -137,6 +139,7 @@ function queueChatwootIdentityAfterOwnership(
     Date.now(),
     0,
   );
+  notifyChatwootStateChanged();
   frame.replaceWith(replacement);
   return true;
 }
@@ -144,6 +147,7 @@ function queueChatwootIdentityAfterOwnership(
 export function enterChatwootAuthenticatedMode() {
   if (typeof window !== "undefined") {
     window.cleanPayChatwootAuthorized = true;
+    notifyChatwootStateChanged();
   }
 }
 
@@ -170,6 +174,7 @@ export function identifyChatwootUser(
     // A prior server-confirmed proof for this exact signed actor and
     // conversation wins over an uncorrelated, late metadata error.
     window.cleanPayChatwootFailedIdentity = undefined;
+    notifyChatwootStateChanged();
   }
 
   if (
@@ -183,6 +188,7 @@ export function identifyChatwootUser(
   if (failed) {
     // A changed signed identity or support context gets its own bounded cycle.
     window.cleanPayChatwootFailedIdentity = undefined;
+    notifyChatwootStateChanged();
   }
 
   const pending = window.cleanPayChatwootPendingIdentity;
@@ -287,6 +293,7 @@ export function failChatwootPendingIdentityAttempt(
 
   window.cleanPayChatwootFailedIdentity = failedChatwootIdentityAttempt(pending);
   window.cleanPayChatwootPendingIdentity = undefined;
+  notifyChatwootStateChanged();
   if (websiteToken) {
     expireChatwootCookie(`cw_user_${websiteToken}`);
   }
@@ -361,6 +368,7 @@ export function retryChatwootIdentityAttempt(
     Date.now(),
     pending.retryCount + 1,
   );
+  notifyChatwootStateChanged();
   frame.replaceWith(replacement);
   return true;
 }
@@ -432,6 +440,7 @@ export function confirmChatwootIdentityOwnership(expectedAttemptId: string) {
     customAttributes: pending.customAttributes,
   }, conversation, true);
   window.cleanPayChatwootFailedIdentity = undefined;
+  notifyChatwootStateChanged();
   return true;
 }
 
@@ -481,6 +490,7 @@ export function retainChatwootVerifiedOwnership(
       ownershipConfirmedChatwootIdentityAttempt(pending);
   }
   window.cleanPayChatwootFailedIdentity = undefined;
+  notifyChatwootStateChanged();
 
   try {
     chatwoot.toggleBubbleVisibility("show");

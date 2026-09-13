@@ -1,10 +1,12 @@
 // @vitest-environment jsdom
 
 import { createElement } from "react";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { SupportChatSessionBoundary } from "@/frontend/components/chatwoot-session-context";
 import { SupportPanel } from "@/frontend/components/support-panel";
+import { notifyChatwootStateChanged } from "@/frontend/lib/chatwoot-state-events";
 
 const unavailable = {
   enabled: false,
@@ -13,6 +15,16 @@ const unavailable = {
   faqUrl: null,
   liveChatEnabled: false,
 };
+
+function renderSupport(authenticated: boolean) {
+  return render(createElement(
+    SupportChatSessionBoundary,
+    { authenticated },
+    createElement(SupportPanel, {
+      support: { ...unavailable, liveChatEnabled: true },
+    }),
+  ));
+}
 
 describe("SupportPanel", () => {
   afterEach(() => {
@@ -25,9 +37,7 @@ describe("SupportPanel", () => {
   });
 
   it("points to the configured live chat instead of claiming support is unpublished", () => {
-    render(createElement(SupportPanel, {
-      support: { ...unavailable, liveChatEnabled: true },
-    }));
+    renderSupport(false);
 
     expect(screen.getByText(/Чат доступен после входа в аккаунт/i)).toBeTruthy();
     expect(screen.queryByText(/Контакты поддержки пока не опубликованы/i)).toBeNull();
@@ -47,9 +57,7 @@ describe("SupportPanel", () => {
       reset: vi.fn(),
     };
 
-    render(createElement(SupportPanel, {
-      support: { ...unavailable, liveChatEnabled: true },
-    }));
+    renderSupport(true);
 
     const button = await screen.findByRole("button", { name: /Открыть чат поддержки/i });
     fireEvent.click(button);
@@ -77,9 +85,7 @@ describe("SupportPanel", () => {
       reset: vi.fn(),
     };
 
-    render(createElement(SupportPanel, {
-      support: { ...unavailable, liveChatEnabled: true },
-    }));
+    renderSupport(true);
 
     const button = await screen.findByRole("button", { name: /Открыть чат поддержки/i });
     expect(screen.queryByText(/Чат доступен после входа/i)).toBeNull();
@@ -88,13 +94,46 @@ describe("SupportPanel", () => {
   });
 
   it("does not tell an authorized user to sign in while Chatwoot is connecting", async () => {
-    window.cleanPayChatwootAuthorized = true;
+    renderSupport(true);
 
-    render(createElement(SupportPanel, {
-      support: { ...unavailable, liveChatEnabled: true },
-    }));
+    expect(screen.getByText(/Подключаем чат поддержки/i)).toBeTruthy();
+    expect(screen.queryByText(/Чат доступен после входа/i)).toBeNull();
+  });
 
-    expect(await screen.findByText(/Подключаем чат поддержки/i)).toBeTruthy();
+  it("publishes the support button from lifecycle events without polling", async () => {
+    const toggle = vi.fn();
+    renderSupport(true);
+
+    act(() => {
+      window.cleanPayChatwootAuthorized = true;
+      window.cleanPayChatwootIdentity = { core: "actor", customAttributes: "context" };
+      window.$chatwoot = {
+        baseUrl: "https://chat.example.com",
+        websiteToken: "token",
+        hasLoaded: true,
+        setUser: vi.fn(),
+        toggle,
+        toggleBubbleVisibility: vi.fn(),
+        reset: vi.fn(),
+      };
+      notifyChatwootStateChanged();
+    });
+
+    const button = await screen.findByRole("button", { name: /Открыть чат поддержки/i });
+    fireEvent.click(button);
+    expect(toggle).toHaveBeenCalledWith("open");
+  });
+
+  it("shows a stable neutral error when the support service cannot connect", () => {
+    window.cleanPayChatwootFailedIdentity = {
+      core: "actor",
+      customAttributes: "context",
+    };
+
+    renderSupport(true);
+
+    expect(screen.getByText(/Чат временно недоступен/i)).toBeTruthy();
+    expect(screen.queryByText(/Подключаем чат поддержки/i)).toBeNull();
     expect(screen.queryByText(/Чат доступен после входа/i)).toBeNull();
   });
 

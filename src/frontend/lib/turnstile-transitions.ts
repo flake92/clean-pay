@@ -2,6 +2,20 @@ export function hasTurnstileSiteKey(siteKey?: string | null) {
   return Boolean(siteKey);
 }
 
+export const securityCheckRequiredMessage = "Пройдите проверку безопасности.";
+export const securityCheckUnavailableMessage =
+  "Проверка безопасности временно недоступна. Попробуйте позже.";
+export const securityCheckFailedMessage =
+  "Не удалось пройти проверку безопасности. Попробуйте ещё раз.";
+export const securityCheckLoadFailedMessage =
+  "Не удалось загрузить проверку безопасности. Обновите страницу или попробуйте позже.";
+
+export function missingSecurityCheckTokenMessage(siteKeyConfigured: boolean) {
+  return siteKeyConfigured
+    ? securityCheckRequiredMessage
+    : securityCheckUnavailableMessage;
+}
+
 export type TurnstileWidgetState = {
   error: string | null;
   loading: boolean;
@@ -32,13 +46,13 @@ export function turnstileWidgetReducer(
     case "challenge-failed":
       return {
         ...state,
-        error: "Не удалось пройти проверку Cloudflare Turnstile.",
+        error: securityCheckFailedMessage,
       };
     case "script-loaded":
       return { ...state, loading: false };
     case "script-load-failed":
       return {
-        error: "Не удалось загрузить Cloudflare Turnstile.",
+        error: securityCheckLoadFailedMessage,
         loading: false,
       };
   }

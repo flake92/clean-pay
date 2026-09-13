@@ -3,6 +3,7 @@ import type {
   ChatwootOwnershipState,
   StoredChatwootOwnershipState,
 } from "@/frontend/lib/chatwoot-contract";
+import { notifyChatwootStateChanged } from "@/frontend/lib/chatwoot-state-events";
 import { chatwootFingerprint } from "@/frontend/lib/chatwoot-transitions";
 
 const identityStorageKey = "clean-pay:chatwoot-identity:v1";
@@ -34,6 +35,7 @@ export function rememberChatwootIdentity(identity: ChatwootIdentityState) {
   } catch {
     // Identification still works when persistent storage is unavailable.
   }
+  notifyChatwootStateChanged();
 }
 
 function storedChatwootOwnership() {
@@ -64,6 +66,7 @@ export function rememberChatwootOwnership(
     ...identity,
     conversation,
   };
+  notifyChatwootStateChanged();
 
   if (!persist) {
     return;
@@ -106,6 +109,7 @@ export function restoreChatwootOwnership(
     conversation,
   };
   window.cleanPayChatwootOwnership = restored;
+  notifyChatwootStateChanged();
   return restored;
 }
 
@@ -162,6 +166,7 @@ export function clearChatwootIdentityState(preserveFailedIdentity = false) {
   } catch {
     // Session cleanup must never block Clean Pay navigation.
   }
+  notifyChatwootStateChanged();
 }
 
 export function expireChatwootCookie(name: string) {

@@ -234,7 +234,7 @@ describe("register e-mail confirmation controller characterization", () => {
 
     act(() => void invokeButton("Отправить код повторно"));
     expect(mocks.requestCode).toHaveBeenCalledOnce();
-    expect(screen.getByText("Пройдите проверку Cloudflare Turnstile.")).toBeTruthy();
+    expect(screen.getByText("Пройдите проверку безопасности.")).toBeTruthy();
   });
 
   it("resets Turnstile after resend provider and network failures", async () => {
@@ -290,7 +290,7 @@ describe("register e-mail confirmation controller characterization", () => {
 
     expect(mocks.confirm).not.toHaveBeenCalled();
     expect(mocks.requestCode).not.toHaveBeenCalled();
-    expect(screen.getByText("Пройдите проверку Cloudflare Turnstile.")).toBeTruthy();
+    expect(screen.getByText("Пройдите проверку безопасности.")).toBeTruthy();
   });
 
   it("fences duplicate back and preserves Chatwoot-clear-navigation order", async () => {

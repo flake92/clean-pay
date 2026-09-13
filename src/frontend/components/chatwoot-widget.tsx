@@ -6,13 +6,13 @@ import {
   useChatwootWidgetController,
 } from "@/frontend/components/chatwoot-widget-controller";
 
-export function ChatwootWidget({ config }: { config: ChatwootWidgetConfig }) {
+export function SupportChatRuntime({ config }: { config: ChatwootWidgetConfig }) {
   useChatwootWidgetController(config);
 
   return null;
 }
 
-export function ChatwootGuestBoundary() {
+export function SupportChatGuestBoundary() {
   useChatwootGuestBoundaryController();
 
   return null;
