@@ -553,6 +553,33 @@ describe("ephemeral production-image live overlap runner", () => {
     expect(liveProof).toBeGreaterThan(containerdStore);
   });
 
+  it("keeps user behavior blocking while exact A/B overlap is scheduled or explicitly requested", () => {
+    const workflowTriggers = workflow.slice(0, workflow.indexOf("permissions:"));
+    const validate = workflow.slice(
+      workflow.indexOf("  validate:"),
+      workflow.indexOf("  integration-services:"),
+    );
+    const productionImage = workflow.slice(
+      workflow.indexOf("  production-image-browser-journey:"),
+      workflow.indexOf("  remnashop-migration-rehearsal:"),
+    );
+
+    expect(workflowTriggers).toContain("schedule:");
+    expect(workflowTriggers).toContain('cron: "17 1 * * *"');
+    expect(validate).toContain("npm run test:coverage");
+    expect(validate).toContain("npm run test:coverage:frontend");
+    expect(validate).toContain("npm run build");
+    expect(productionImage).toContain("github.event_name == 'schedule'");
+    expect(productionImage).toContain(
+      "github.event_name == 'workflow_dispatch' && inputs.browser_mode != 'navigation-contract'",
+    );
+    expect(productionImage).toContain(
+      "github.event_name == 'push' && contains(github.event.head_commit.message, '[chatwoot-diagnostic]')",
+    );
+    expect(productionImage).not.toContain("github.event_name == 'pull_request'");
+    expect(productionImage).not.toContain("continue-on-error:");
+  });
+
   it("prepares three exact Chatwoot A/B pairs after authenticated overlap", () => {
     const value = plan();
     const inputs = proofInputs();
@@ -934,7 +961,7 @@ describe("ephemeral production-image live overlap runner", () => {
       "contains(github.event.head_commit.message, '[chatwoot-diagnostic]')",
     );
     expect(workflow.match(/contains\(github\.event\.head_commit\.message, '\[chatwoot-diagnostic\]'\)/gu))
-      .toHaveLength(10);
+      .toHaveLength(11);
     expect(workflow).toContain(
       "CLEAN_PAY_LIVE_OVERLAP_PROVIDER_MODE: ${{ ((github.event_name == 'workflow_dispatch'",
     );
